@@ -8,7 +8,7 @@
   //   glyph: Yap's own when `icon` is null — 'pc' | 'recent' | 'server' |
   //          'chip' | 'none' | 'spark'
   //   size:  px; tile: on a small card (the picker's header)
-  import { PROVIDER_ICONS, MONOCHROME_PROVIDERS, ICON_TINTS } from './providerIcons.js';
+  import { PROVIDER_ICONS, MONOCHROME_PROVIDERS, ICON_TINTS } from './core/providerIcons.js';
 
   let { icon = null, glyph = 'spark', size = 18, tile = false } = $props();
 

@@ -11,8 +11,8 @@
   import Select from '../ui/Select.svelte';
   import PillTabs from '../ui/PillTabs.svelte';
   import LocalContext from '../LocalContext.svelte';
-  import { upTo } from '../localContext.js';
-  import { createExternalLinkHandler } from '../externalLinks.js';
+  import { upTo } from '../core/localContext.js';
+  import { createExternalLinkHandler } from '../core/externalLinks.js';
   import { openContextMenu, menuKey, menuOpenFor, askConfirm } from '../ui/contextMenu.svelte.js';
   import {
     localLlm,

@@ -19,7 +19,7 @@
 // "Restarting…", and "Updated to X" after an update restart.
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
-import { openExternalLink } from './externalLinks.js';
+import { openExternalLink } from './core/externalLinks.js';
 import { toast, updateToast, dismiss, isToastLive } from './ui/toast.svelte.js';
 
 const RELEASES = 'https://github.com/nayballs/Yap/releases';

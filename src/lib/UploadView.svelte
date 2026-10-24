@@ -11,7 +11,7 @@
   import { invoke } from '@tauri-apps/api/core';
   import { getCurrentWebview } from '@tauri-apps/api/webview';
   import { onMount } from 'svelte';
-  import { MODELS } from './models.js';
+  import { MODELS } from './core/speechModels.js';
   import { upload, chooseFile, failed, transcribe, cancel, reset } from './upload.svelte.js';
 
   // Matches media.rs (Symphonia features): no opus/webm yet.

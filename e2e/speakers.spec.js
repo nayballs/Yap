@@ -28,7 +28,7 @@ import {
   transcriptItems,
   transcriptText,
   noteMarkdown,
-} from '../src/lib/notepadText.js';
+} from '../src/lib/core/notepadText.js';
 
 // A meeting note from before voices and line times existed.
 const OLD_NOTE = {

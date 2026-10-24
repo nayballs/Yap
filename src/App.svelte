@@ -1,7 +1,7 @@
 <script>
   import { getCurrentWindow } from '@tauri-apps/api/window';
   import ContextMenuHost from './lib/ui/ContextMenuHost.svelte';
-  import { initAppearance } from './lib/appearance.js';
+  import { initAppearance } from './lib/core/appearance.js';
   import { prefetchHome } from './lib/homeData.js';
 
   // The settings, onboarding, notepad and overlay windows (and the notepad's

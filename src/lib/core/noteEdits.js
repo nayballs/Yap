@@ -12,8 +12,8 @@
 // `newSinceSummary`) live in notepadText.js, unit-tested in
 // e2e/notes-edit.spec.js.
 import { invoke } from '@tauri-apps/api/core';
-import { askConfirm } from './ui/contextMenu.svelte.js';
-import { askWordSuggestion } from './wordSuggestions.js';
+import { askConfirm } from '../ui/contextMenu.svelte.js';
+import { askWordSuggestion } from '../wordSuggestions.js';
 import { taskLines } from './markdown.js';
 import { lineRef, taskText } from './notepadText.js';
 

@@ -16,7 +16,7 @@ import { test as base, expect, closeToasts } from './support/fixtures.js';
 import { startFakeLlm } from './support/fake-llm.js';
 import { newMeetingNote, meetingNote } from './support/meetings.js';
 import { startCalendarFeed, calendarFile, vevent } from './support/calendar-feed.js';
-import { hasLine, withLineSplice } from '../src/lib/notepadText.js';
+import { hasLine, withLineSplice } from '../src/lib/core/notepadText.js';
 
 const test = base.extend({
   fakeLlm: [

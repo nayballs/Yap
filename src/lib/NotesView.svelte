@@ -17,7 +17,7 @@
   import { invoke } from '@tauri-apps/api/core';
   import { listen } from '@tauri-apps/api/event';
   import { onMount, tick } from 'svelte';
-  import { renderMarkdown, markdownToText } from './markdown.js';
+  import { renderMarkdown, markdownToText } from './core/markdown.js';
   import { toast } from './ui/toast.svelte.js';
   import { showSaveError } from './saveErrors.js';
   import ActionManager from './ActionManager.svelte';
@@ -35,18 +35,18 @@
     withTaskMark,
     newSinceSummary,
     newSinceLine,
-  } from './notepadText.js';
-  import { editLine, taskToggled, setTask, saveSummary, askReplaceSummary, SUMMARY_KEPT } from './noteEdits.js';
+  } from './core/notepadText.js';
+  import { editLine, taskToggled, setTask, saveSummary, askReplaceSummary, SUMMARY_KEPT } from './core/noteEdits.js';
   import SpeakerMenu from './SpeakerMenu.svelte';
   import SpeakerCard from './SpeakerCard.svelte';
   // The refine after a meeting, Try again on a stretch that failed (meeting_refine.rs).
   import MeetingJob from './MeetingJob.svelte';
   import FailedChunk from './FailedChunk.svelte';
   import { jobState } from './meetingAudio.svelte.js';
-  import { nextModel, modelLine, whereItRuns } from './aiModel.js';
+  import { nextModel, modelLine, whereItRuns } from './core/aiModel.js';
   import { speech, initSpeech, readAloud, stopReading } from './speech.svelte.js';
   import { openContextMenu, menuKey, menuOpenFor, askConfirm, devInspect } from './ui/contextMenu.svelte.js';
-  import { copyText, messageItems } from './itemMenus.js';
+  import { copyText, messageItems } from './core/itemMenus.js';
   import {
     meetingAudio,
     initMeetingAudio,

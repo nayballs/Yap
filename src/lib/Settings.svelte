@@ -3,9 +3,9 @@
   import { listen } from '@tauri-apps/api/event';
   import { onMount, onDestroy, tick } from 'svelte';
   import { initSpeech } from './speech.svelte.js';
-  import { applyAppearance } from './appearance.js';
+  import { applyAppearance } from './core/appearance.js';
   import { startKokoro } from './kokoro.svelte.js';
-  import { creditCleanupKey } from './providers.js';
+  import { creditCleanupKey } from './core/providers.js';
   import { loadCatalog } from './modelCatalog.svelte.js';
   import { attention, attentionCount, followAttention } from './attention.svelte.js';
   import { refreshLocalLlm, listenLocalProgress, followLocalLlm } from './settings/localLlm.svelte.js';
@@ -44,7 +44,7 @@
     refreshUsage,
     listenUsage,
   } from './settings/languageModels.svelte.js';
-  import { noteAccountPicture } from './connections.js';
+  import { noteAccountPicture } from './core/connections.js';
 
   // Embedded mode: rendered inside the ControlPanel's Settings modal
   // (OpenWhispr SettingsModal-style) instead of filling the window. The parent

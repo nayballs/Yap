@@ -24,7 +24,7 @@
   import ElevenLabsSettings from './ElevenLabsSettings.svelte';
   import { speech } from './speech.svelte.js';
   import { toast } from './ui/toast.svelte.js';
-  import { openExternalLink } from './externalLinks.js';
+  import { openExternalLink } from './core/externalLinks.js';
   import { kokoro, startKokoro, downloadKokoro, deleteKokoro, formatMb, kokoroOptions } from './kokoro.svelte.js';
 
   let { cfg } = $props();

@@ -47,18 +47,18 @@
   import FailedChunk from './FailedChunk.svelte';
   import { jobState, summaryFollows } from './meetingAudio.svelte.js';
   import BriefView from './BriefView.svelte';
-  import { briefTeaser } from './brief.js';
+  import { briefTeaser } from './core/brief.js';
   import { toast } from './ui/toast.svelte.js';
   import { showSaveError } from './saveErrors.js';
-  import { renderMarkdown } from './markdown.js';
-  import { nextModel, modelLine, whereItRuns } from './aiModel.js';
+  import { renderMarkdown } from './core/markdown.js';
+  import { nextModel, modelLine, whereItRuns } from './core/aiModel.js';
   import { speech, initSpeech, readAloud, readPageSelection } from './speech.svelte.js';
-  import { hotkeyMatchesKeydown, hotkeyMatchesKeyup } from './hotkeys.js';
-  import { openExternalLink } from './externalLinks.js';
+  import { hotkeyMatchesKeydown, hotkeyMatchesKeyup } from './core/hotkeys.js';
+  import { openExternalLink } from './core/externalLinks.js';
   import { initMeetingCheckIns } from './meetingCheckIn.js';
   import { openContextMenu, menuKey, menuOpenFor, menuOrDialogOpen } from './ui/contextMenu.svelte.js';
-  import { messageItems } from './itemMenus.js';
-  import { streamCall, liveAnswer, applyEvent, closePartial, settle, streamingHeight, STOPPED } from './streaming.js';
+  import { messageItems } from './core/itemMenus.js';
+  import { streamCall, liveAnswer, applyEvent, closePartial, settle, streamingHeight, STOPPED } from './core/streaming.js';
   import {
     summaries,
     initMeetingSummary,
@@ -88,8 +88,8 @@
     withTaskMark,
     newSinceSummary,
     newSinceLine,
-  } from './notepadText.js';
-  import { editLine, taskToggled, setTask, saveSummary, askReplaceSummary } from './noteEdits.js';
+  } from './core/notepadText.js';
+  import { editLine, taskToggled, setTask, saveSummary, askReplaceSummary } from './core/noteEdits.js';
   import {
     meetingAudio,
     initMeetingAudio,

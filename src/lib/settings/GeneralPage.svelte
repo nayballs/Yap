@@ -17,7 +17,7 @@
   import Button from '../ui/Button.svelte';
   import AboutYouSettings from '../AboutYouSettings.svelte';
   import AppearanceSettings from '../AppearanceSettings.svelte';
-  import { BAR_THEME_OPTIONS } from '../appearance.js';
+  import { BAR_THEME_OPTIONS } from '../core/appearance.js';
 
   let { cfg, barHiddenUntil = null, goto = null } = $props();
 

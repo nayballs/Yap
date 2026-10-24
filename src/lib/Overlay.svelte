@@ -37,8 +37,8 @@
   import { cubicOut } from 'svelte/easing';
   // Motion: Reduced (Settings → General → Appearance) — the transitions
   // below take 0 ms; app.css stops the CSS ones.
-  import { motionMs, setBarChoice } from './appearance.js';
-  import { formatHotkeySpec } from './hotkeys.js';
+  import { motionMs, setBarChoice } from './core/appearance.js';
+  import { formatHotkeySpec } from './core/hotkeys.js';
   import { dictation, initDictation } from './bar/dictation.svelte.js';
   import DictationCapsule from './bar/DictationCapsule.svelte';
   import BarCard from './bar/BarCard.svelte';

@@ -20,7 +20,7 @@
 // first (no app).
 import { test as base, expect, openView, expectStore } from './support/fixtures.js';
 import { startFakeLlm } from './support/fake-llm.js';
-import { closePartial, liveAnswer, applyEvent } from '../src/lib/streaming.js';
+import { closePartial, liveAnswer, applyEvent } from '../src/lib/core/streaming.js';
 
 const test = base.extend({
   fakeLlm: [

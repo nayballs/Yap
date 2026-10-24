@@ -14,7 +14,7 @@
   import Row from './ui/Row.svelte';
   import Select from './ui/Select.svelte';
   import Segmented from './ui/Segmented.svelte';
-  import { READING_FONTS, READING_FONT_DESC, READING_SIZES, MOTION_OPTIONS, THEME_OPTIONS } from './appearance.js';
+  import { READING_FONTS, READING_FONT_DESC, READING_SIZES, MOTION_OPTIONS, THEME_OPTIONS } from './core/appearance.js';
 
   let { cfg } = $props();
 

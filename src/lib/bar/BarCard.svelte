@@ -21,8 +21,8 @@
   // aloud while a meeting records"), Open in Chat. It goes when its voice
   // ends (Rust), or on ✕ / Esc, which stop the voice.
   import { fadeTimer, countdownClock } from './cardTimers.svelte.js';
-  import { fillHotkey } from '../hotkeys.js';
-  import { renderMarkdown } from '../markdown.js';
+  import { fillHotkey } from '../core/hotkeys.js';
+  import { renderMarkdown } from '../core/markdown.js';
 
   /** @type {{ card: any, paused?: boolean, onaction: (action: string) => void }} */
   let { card, paused = false, onaction } = $props();

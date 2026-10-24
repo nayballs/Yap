@@ -3,7 +3,7 @@
 // (home-ai-edits.spec.js shows it in the app). Capitals and punctuation
 // aren't changes; words taken out or put in are, a run of them one change.
 import { test, expect } from '@playwright/test';
-import { wordDiff, wordKey } from '../src/lib/wordDiff.js';
+import { wordDiff, wordKey } from '../src/lib/core/wordDiff.js';
 
 /** The parts as one line: [-out-] and {+in+}. */
 const show = ({ parts }) =>

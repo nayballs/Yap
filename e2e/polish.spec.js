@@ -17,9 +17,9 @@ import {
   mainOnScreen,
   pressHotkey,
 } from './support/fixtures.js';
-import { COPILOT_KEY, isCopilotKey, hotkeyParts, formatHotkeySpec, fillHotkey } from '../src/lib/hotkeys.js';
-import { appLabel } from '../src/lib/appNames.js';
-import { aiError } from '../src/lib/aiErrors.js';
+import { COPILOT_KEY, isCopilotKey, hotkeyParts, formatHotkeySpec, fillHotkey } from '../src/lib/core/hotkeys.js';
+import { appLabel } from '../src/lib/core/appNames.js';
+import { aiError } from '../src/lib/core/aiErrors.js';
 
 /** A local port nothing listens on: the "AI server that isn't running". */
 function closedPort() {

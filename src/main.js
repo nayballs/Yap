@@ -14,7 +14,7 @@ import '@fontsource-variable/geist';
 import '@fontsource-variable/literata/wght.css';
 import '@fontsource-variable/literata/wght-italic.css';
 import App from './App.svelte';
-import { openExternalLink } from './lib/externalLinks.js';
+import { openExternalLink } from './lib/core/externalLinks.js';
 import './app.css';
 
 // Links in rendered markdown (chat answers, notes: `a.md-link`, made by

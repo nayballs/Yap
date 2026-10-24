@@ -4,7 +4,7 @@
 // typed in Smart routing) — as it did when it was all Settings.svelte's.
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
-import { CLOUD_PROVIDER_IDS, modeOf } from '../providers.js';
+import { CLOUD_PROVIDER_IDS, modeOf } from '../core/providers.js';
 import { config } from './configSync.svelte.js';
 
 export const lm = $state({

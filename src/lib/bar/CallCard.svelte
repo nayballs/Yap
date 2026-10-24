@@ -29,7 +29,7 @@
   import { callAppIcon } from './callApps.js';
   import CallAppIcon from '../CallAppIcon.svelte';
   import BriefView from '../BriefView.svelte';
-  import { briefTeaser } from '../brief.js';
+  import { briefTeaser } from '../core/brief.js';
   import { fadeTimer, countdownClock } from './cardTimers.svelte.js';
 
   /** @type {{ card: any, paused?: boolean, hovered?: boolean, preview?: boolean, onaction?: (action: string) => void }} */

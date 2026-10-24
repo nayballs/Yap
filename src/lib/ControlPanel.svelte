@@ -15,7 +15,7 @@
   import yapIcon from '../assets/yap-logo.svg';
   import ToastHost from './ui/ToastHost.svelte';
   import { toast } from './ui/toast.svelte.js';
-  import { fillHotkey } from './hotkeys.js';
+  import { fillHotkey } from './core/hotkeys.js';
   import Settings from './Settings.svelte';
   import { attention } from './attention.svelte.js';
   import { account, displayName, initAccount, initials } from './account.svelte.js';
@@ -46,7 +46,7 @@
   import { chatRequest } from './chatRequest.svelte.js';
   import IntegrationsView from './IntegrationsView.svelte';
   import { menuOrDialogOpen } from './ui/contextMenu.svelte.js';
-  import { noteAccountPicture } from './connections.js';
+  import { noteAccountPicture } from './core/connections.js';
   import { prefetchHome } from './homeData.js';
 
   // Home's data first, before the ~60 calls the rest of the window makes as

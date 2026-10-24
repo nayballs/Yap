@@ -19,7 +19,7 @@
   import WebSearchSettings from '../WebSearchSettings.svelte';
   import KokoroOffer from '../KokoroOffer.svelte';
   import { kokoro } from '../kokoro.svelte.js';
-  import { formatHotkeySpec, fillHotkey } from '../hotkeys.js';
+  import { formatHotkeySpec, fillHotkey } from '../core/hotkeys.js';
   import SettingsHotkey from './SettingsHotkey.svelte';
   import PageExplain from './PageExplain.svelte';
   import { scopeModelLabel } from './scopes.js';

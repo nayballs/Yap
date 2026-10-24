@@ -9,7 +9,7 @@
   //   look:   'paper' (the notepad's palette) or 'app' (the Notes view's).
   //   why:    why Try again can't run now (it records, a job runs, no
   //           audio), or null.
-  import { failedText } from './notepadText.js';
+  import { failedText } from './core/notepadText.js';
   import { retryChunk, runningJob } from './meetingAudio.svelte.js';
 
   let { noteId, seg, look = 'app', why = null } = $props();

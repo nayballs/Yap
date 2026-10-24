@@ -15,11 +15,11 @@
 // Pure helpers plus three small stores; the Tauri calls are the picker's.
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
-import { PP_CLOUD_MODELS } from './ppModels.js';
+import { PP_CLOUD_MODELS } from './core/ppModels.js';
 import { catalog, modelsFor } from './modelCatalog.svelte.js';
-import { ago } from './modelCatalog.js';
-import { familyIcon, providerIcon, modelName } from './aiModel.js';
-import { contextInfo, fmtTokens } from './localContext.js';
+import { ago } from './core/modelCatalog.js';
+import { familyIcon, providerIcon, modelName } from './core/aiModel.js';
+import { contextInfo, fmtTokens } from './core/localContext.js';
 
 /** The rail's cloud providers, in its order. `short` names the rail entry. */
 export const CLOUD_PROVIDERS = [

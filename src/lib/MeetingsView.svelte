@@ -23,11 +23,11 @@
   import { noteRequest } from './meetingDetect.svelte.js';
   import { summarise } from './meetingSummary.svelte.js';
   import { chatRequest } from './chatRequest.svelte.js';
-  import { formatHotkeySpec } from './hotkeys.js';
+  import { formatHotkeySpec } from './core/hotkeys.js';
   import { toast } from './ui/toast.svelte.js';
   import { openContextMenu, menuKey, menuOpenFor, askConfirm } from './ui/contextMenu.svelte.js';
-  import { copyText } from './itemMenus.js';
-  import { noteMarkdown } from './notepadText.js';
+  import { copyText } from './core/itemMenus.js';
+  import { noteMarkdown } from './core/notepadText.js';
 
   // `onnavigate(view)` switches the main window's view; `onopensettings(section)`.
   let { onnavigate = () => {}, onopensettings = () => {} } = $props();

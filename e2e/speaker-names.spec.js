@@ -15,7 +15,7 @@
 // answers the "who is this voice?" question when a spec scripts it.
 import { test as base, expect, closeToasts } from './support/fixtures.js';
 import { startFakeLlm } from './support/fake-llm.js';
-import { pendingSuggestions, suggestionQuestion, suggestionWhy } from '../src/lib/notepadText.js';
+import { pendingSuggestions, suggestionQuestion, suggestionWhy } from '../src/lib/core/notepadText.js';
 
 const test = base.extend({
   fakeLlm: [

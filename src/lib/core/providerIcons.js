@@ -9,19 +9,19 @@
 // openrouter.svg is OpenRouter's mark as Simple Icons publishes it (CC0 1.0,
 // https://simpleicons.org; the trademark stays OpenRouter's), the same glyph
 // the onboarding's brands/openrouter.svg uses.
-import openai from '../assets/providers/openai.svg';
-import openaiOss from '../assets/providers/openai-oss.svg';
-import nvidia from '../assets/providers/nvidia.svg';
-import anthropic from '../assets/providers/anthropic.svg';
-import claude from '../assets/providers/claude.svg';
-import gemini from '../assets/providers/gemini.svg';
-import gemma from '../assets/providers/gemma.svg';
-import groq from '../assets/providers/groq.svg';
-import llama from '../assets/providers/llama.svg';
-import mistral from '../assets/providers/mistral.svg';
-import openrouter from '../assets/providers/openrouter.svg';
-import qwen from '../assets/providers/qwen.svg';
-import xai from '../assets/providers/xai.svg';
+import openai from '../../assets/providers/openai.svg';
+import openaiOss from '../../assets/providers/openai-oss.svg';
+import nvidia from '../../assets/providers/nvidia.svg';
+import anthropic from '../../assets/providers/anthropic.svg';
+import claude from '../../assets/providers/claude.svg';
+import gemini from '../../assets/providers/gemini.svg';
+import gemma from '../../assets/providers/gemma.svg';
+import groq from '../../assets/providers/groq.svg';
+import llama from '../../assets/providers/llama.svg';
+import mistral from '../../assets/providers/mistral.svg';
+import openrouter from '../../assets/providers/openrouter.svg';
+import qwen from '../../assets/providers/qwen.svg';
+import xai from '../../assets/providers/xai.svg';
 
 export const PROVIDER_ICONS = {
   openai,

@@ -15,8 +15,8 @@
   import Button from '../ui/Button.svelte';
   import ReportProblem from './ReportProblem.svelte';
   import { updates, installUpdate, checkForUpdates, openRelease, formatAgo } from '../updates.svelte.js';
-  import { renderMarkdown } from '../markdown.js';
-  import { createExternalLinkHandler } from '../externalLinks.js';
+  import { renderMarkdown } from '../core/markdown.js';
+  import { createExternalLinkHandler } from '../core/externalLinks.js';
 
   let { cfg, version = '', goto = null } = $props();
 </script>

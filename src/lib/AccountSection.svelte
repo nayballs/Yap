@@ -17,9 +17,9 @@
   import Group from './ui/Group.svelte';
   import Row from './ui/Row.svelte';
   import { account, displayName, initAccount, initials, PROVIDER_LABELS } from './account.svelte.js';
-  import { openExternalLink } from './externalLinks.js';
+  import { openExternalLink } from './core/externalLinks.js';
   import { openContextMenu, menuKey } from './ui/contextMenu.svelte.js';
-  import { noteAccountPicture } from './connections.js';
+  import { noteAccountPicture } from './core/connections.js';
 
   const RESEND_SECONDS = 30;
 

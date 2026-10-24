@@ -7,7 +7,7 @@
 // `cfg.llmScopes[scope]`. The scope keys never change (config.json holds
 // them): `voiceAgent` is Commands (the agent's name in a dictation + the
 // rewrite shortcut), `chat` is Chat and the Voice Assistant.
-import { BASE_URLS, PROVIDER_LABELS, liftScopeKeys } from '../providers.js';
+import { BASE_URLS, PROVIDER_LABELS, liftScopeKeys } from '../core/providers.js';
 
 export const LLM_SCOPE_KEYS = ['voiceAgent', 'noteFormatting', 'chat'];
 

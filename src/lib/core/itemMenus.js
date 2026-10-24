@@ -3,7 +3,7 @@
 // (the menus themselves: ui/contextMenu.svelte.js). One order everywhere: the
 // main action first, Copy-type ones next, anything destructive last.
 import { markdownToText } from './markdown.js';
-import { toast } from './ui/toast.svelte.js';
+import { toast } from '../ui/toast.svelte.js';
 
 /** Copy `text`; a toast says it (the menu has no ✓ of its own to show). */
 export async function copyText(text, title = 'Copied') {

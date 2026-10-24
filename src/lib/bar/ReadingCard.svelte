@@ -13,7 +13,7 @@
   // take clicks only over it); no backdrop-filter, a 1–2 px shadow, as every
   // card on the transparent bar window.
   import { reading, readAction } from './reading.svelte.js';
-  import { fillHotkey } from '../hotkeys.js';
+  import { fillHotkey } from '../core/hotkeys.js';
 
   let textEl = $state(null);
 

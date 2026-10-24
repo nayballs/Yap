@@ -12,7 +12,7 @@
     eventModifierFamily,
     hotkeyParts,
     parseHotkeySpec,
-  } from '../hotkeys.js';
+  } from '../core/hotkeys.js';
 
   let {
     value = $bindable(''),

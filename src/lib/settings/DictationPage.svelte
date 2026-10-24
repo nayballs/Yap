@@ -16,8 +16,8 @@
   import Segmented from '../ui/Segmented.svelte';
   import LinkRow from '../ui/LinkRow.svelte';
   import SettingsHotkey from './SettingsHotkey.svelte';
-  import { fillHotkey, isCopilotKey } from '../hotkeys.js';
-  import { PROVIDER_DESTINATIONS } from '../providers.js';
+  import { fillHotkey, isCopilotKey } from '../core/hotkeys.js';
+  import { PROVIDER_DESTINATIONS } from '../core/providers.js';
 
   let { cfg, devices = [], outputs = [], onshowview = null } = $props();
 

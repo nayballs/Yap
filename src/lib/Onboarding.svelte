@@ -1,7 +1,7 @@
 <script>
   import { invoke } from '@tauri-apps/api/core';
   import { onMount } from 'svelte';
-  import { formatHotkeySpec, hotkeyMatchesKeydown, hotkeyMatchesKeyup } from './hotkeys.js';
+  import { formatHotkeySpec, hotkeyMatchesKeydown, hotkeyMatchesKeyup } from './core/hotkeys.js';
   import HotkeyInput from './ui/HotkeyInput.svelte';
   import { validateHotkey } from './settings/hotkeys.svelte.js';
 
@@ -9,7 +9,7 @@
   // invisible in normal runs; this made the event-delivery bug debuggable).
   const flog = (m) => invoke('frontend_log', { msg: '[onboarding] ' + m }).catch(() => {});
   import yapIcon from '../assets/yap-logo.svg';
-  import { MODELS } from './models.js';
+  import { MODELS } from './core/speechModels.js';
   import ModelCard from './ModelCard.svelte';
   import brandAnthropic from '../assets/brands/anthropic.svg';
   import brandOpenai from '../assets/brands/openai.svg';

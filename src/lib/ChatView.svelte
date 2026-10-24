@@ -84,21 +84,21 @@
   import { invoke } from '@tauri-apps/api/core';
   import { listen } from '@tauri-apps/api/event';
   import { onMount, onDestroy, tick, untrack } from 'svelte';
-  import { renderMarkdown } from './markdown.js';
+  import { renderMarkdown } from './core/markdown.js';
   import { toast } from './ui/toast.svelte.js';
   import { showSaveError } from './saveErrors.js';
   import { chatRequest } from './chatRequest.svelte.js';
   import ModelChip from './ModelChip.svelte';
-  import { modelLine, modelName, providerName, whereItRuns } from './aiModel.js';
+  import { modelLine, modelName, providerName, whereItRuns } from './core/aiModel.js';
   import { chatImageUrl, SNIP_PROMPTS, DEFAULT_PROMPT, MAX_SHOTS, removedLine, sizeLine, visionRefused } from './chatImages.js';
   import { waitingShots } from './chatShots.svelte.js';
   import { speech, initSpeech, readAloud as speakText, speakReply, stopReading as stopSpeech } from './speech.svelte.js';
-  import { formatHotkeySpec } from './hotkeys.js';
-  import { aiError } from './aiErrors.js';
+  import { formatHotkeySpec } from './core/hotkeys.js';
+  import { aiError } from './core/aiErrors.js';
   import { openContextMenu, menuKey, menuOpenFor, askConfirm, devInspect } from './ui/contextMenu.svelte.js';
-  import { copyText, messageItems, conversationMarkdown } from './itemMenus.js';
-  import { openExternalLink } from './externalLinks.js';
-  import { streamCall, liveAnswer, applyEvent, closePartial, settle, streamingHeight, STOPPED, SUPERSEDED } from './streaming.js';
+  import { copyText, messageItems, conversationMarkdown } from './core/itemMenus.js';
+  import { openExternalLink } from './core/externalLinks.js';
+  import { streamCall, liveAnswer, applyEvent, closePartial, settle, streamingHeight, STOPPED, SUPERSEDED } from './core/streaming.js';
 
   // A chip about the web (web.rs) or the safety rule (tools.rs).
   const WEB_CHIP = /^(Searched the web|Couldn't search the web|Didn't search for|Read [^"]|Couldn't read [^"]|Didn't read |Answered from )/;

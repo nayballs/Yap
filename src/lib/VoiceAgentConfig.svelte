@@ -20,7 +20,7 @@
   import LinkRow from './ui/LinkRow.svelte';
   import { invoke } from '@tauri-apps/api/core';
   import { onMount } from 'svelte';
-  import { SCOPE_PROVIDER_LABELS } from './providers.js';
+  import { SCOPE_PROVIDER_LABELS } from './core/providers.js';
 
   let { cfg, scope, defaultPrompt = '' } = $props();
 

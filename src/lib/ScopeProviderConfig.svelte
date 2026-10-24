@@ -11,7 +11,7 @@
   import Input from './ui/Input.svelte';
   import Toggle from './ui/Toggle.svelte';
   import Row from './ui/Row.svelte';
-  import { PP_CLOUD_MODELS, modelThinks } from './ppModels.js';
+  import { PP_CLOUD_MODELS, modelThinks } from './core/ppModels.js';
   import { modelsFor, defaultModel, providerOffers } from './modelCatalog.svelte.js';
   import {
     PROVIDER_MODES as MODES,
@@ -23,8 +23,8 @@
     modeOf,
     maskKey,
     sharedKey as storeKey,
-  } from './providers.js';
-  import { createExternalLinkHandler } from './externalLinks.js';
+  } from './core/providers.js';
+  import { createExternalLinkHandler } from './core/externalLinks.js';
   import { untrack } from 'svelte';
 
   // `cfg` is the global Settings config: standard cloud providers share ONE

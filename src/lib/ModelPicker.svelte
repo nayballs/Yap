@@ -8,10 +8,10 @@
   // now", or why it couldn't be checked (then Yap's own list shows).
   import { onMount } from 'svelte';
   import SelectList from './ui/SelectList.svelte';
-  import { PROVIDER_ICONS, MONOCHROME_PROVIDERS } from './providerIcons.js';
-  import { PROVIDER_LABELS } from './providers.js';
+  import { PROVIDER_ICONS, MONOCHROME_PROVIDERS } from './core/providerIcons.js';
+  import { PROVIDER_LABELS } from './core/providers.js';
   import { catalog, loadCatalog, checkCatalog, modelsFor } from './modelCatalog.svelte.js';
-  import { ago } from './modelCatalog.js';
+  import { ago } from './core/modelCatalog.js';
 
   let { provider, value = $bindable(''), disabled = false } = $props();
 

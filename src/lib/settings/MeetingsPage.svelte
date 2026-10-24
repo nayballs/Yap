@@ -20,7 +20,7 @@
   import SettingsHotkey from './SettingsHotkey.svelte';
   import { meetingDetect } from '../meetingDetect.svelte.js';
   import { calendar } from '../calendar.svelte.js';
-  import { formatHotkeySpec } from '../hotkeys.js';
+  import { formatHotkeySpec } from '../core/hotkeys.js';
   import { invoke } from '@tauri-apps/api/core';
   import { listen } from '@tauri-apps/api/event';
   import { onMount } from 'svelte';

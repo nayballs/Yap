@@ -40,9 +40,9 @@
   import LocalModels from './LocalModels.svelte';
   import SmartRouting from './SmartRouting.svelte';
   import UsageToday from './UsageToday.svelte';
-  import { PP_CLOUD_MODELS, modelThinks } from '../ppModels.js';
+  import { PP_CLOUD_MODELS, modelThinks } from '../core/ppModels.js';
   import { modelsFor, defaultModel, providerOffers } from '../modelCatalog.svelte.js';
-  import { createExternalLinkHandler } from '../externalLinks.js';
+  import { createExternalLinkHandler } from '../core/externalLinks.js';
   import {
     PP_PROVIDERS,
     PROVIDER_MODES,
@@ -52,7 +52,7 @@
     maskKey,
     stashCleanupKey,
     cleanupNeedsKey,
-  } from '../providers.js';
+  } from '../core/providers.js';
   import { SCOPE_TABS, SCOPE_SUBTITLE, SCOPE_DEFAULTS } from './scopes.js';
   import { PP_PRESETS, PP_DEFAULT_BODY } from './cleanupPresets.js';
   import { lm, refreshUsage } from './languageModels.svelte.js';

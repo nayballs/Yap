@@ -12,7 +12,7 @@
   // toggle that unfolds release notes in the card. Mounted once in
   // ControlPanel.
   import { toastStore, dismiss, pauseToast, resumeToast } from './toast.svelte.js';
-  import { renderMarkdown } from '../markdown.js';
+  import { renderMarkdown } from '../core/markdown.js';
   import BriefView from '../BriefView.svelte';
 
   let copiedId = $state(null);

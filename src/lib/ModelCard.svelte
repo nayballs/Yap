@@ -1,6 +1,6 @@
 <script>
-  import { formatSize } from './models.js';
-  import { ENGINE_PROVIDER, PROVIDER_ICONS, MONOCHROME_PROVIDERS } from './providerIcons.js';
+  import { formatSize } from './core/speechModels.js';
+  import { ENGINE_PROVIDER, PROVIDER_ICONS, MONOCHROME_PROVIDERS } from './core/providerIcons.js';
 
   // status: downloadable | downloading | available | active | switching
   let {

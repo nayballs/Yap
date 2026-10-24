@@ -8,7 +8,7 @@
 // (The Chat model picker keeps its own, chatModels.svelte.js `local`.)
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
-import { PROVIDER_ICONS } from '../providerIcons.js';
+import { PROVIDER_ICONS } from '../core/providerIcons.js';
 import { config, persist } from './configSync.svelte.js';
 
 export const localLlm = $state({

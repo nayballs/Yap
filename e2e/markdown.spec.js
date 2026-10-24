@@ -9,7 +9,7 @@
 // file's tests only.
 import { test, expect } from '@playwright/test';
 import { JSDOM } from 'jsdom';
-import { renderMarkdown, markdownToText, taskLines } from '../src/lib/markdown.js';
+import { renderMarkdown, markdownToText, taskLines } from '../src/lib/core/markdown.js';
 
 let dom;
 test.beforeAll(() => {

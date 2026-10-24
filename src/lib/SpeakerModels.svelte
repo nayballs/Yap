@@ -7,7 +7,7 @@
   import ModelRow from './ModelRow.svelte';
   import SpeakersToggle from './SpeakersToggle.svelte';
   import ConfirmDialog from './ui/ConfirmDialog.svelte';
-  import { openExternalLink } from './externalLinks.js';
+  import { openExternalLink } from './core/externalLinks.js';
   import { diarization, startDiarization, downloadDiarization, deleteDiarization, isInstalled } from './diarization.svelte.js';
 
   let { enabled = $bindable(false), model = $bindable('') } = $props();

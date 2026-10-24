@@ -29,7 +29,7 @@ import {
   newSinceSummary,
   newSinceLine,
   transcriptItems,
-} from '../src/lib/notepadText.js';
+} from '../src/lib/core/notepadText.js';
 
 const visible = (yap, label) => yap.invoke('plugin:window|is_visible', { label });
 const recording = (yap) => yap.invoke('meeting_state').then((s) => s.recording);

@@ -11,7 +11,7 @@
   // as Settings saves) and restarts the model once no dictation is going
   // on; Settings' copy adopts it from `yap-local-context-changed`.
   import { invoke } from '@tauri-apps/api/core';
-  import { fmtTokens, optionLabel, memoryLine, measured, overLine, pendingLine } from './localContext.js';
+  import { fmtTokens, optionLabel, memoryLine, measured, overLine, pendingLine } from './core/localContext.js';
 
   let { status = null, compact = false, disabled = false, onchange = null } = $props();
 

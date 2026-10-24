@@ -19,11 +19,11 @@
   import { onMount, tick } from 'svelte';
   import ProviderMark from './ProviderMark.svelte';
   import ChatModelPicker from './ChatModelPicker.svelte';
-  import { modelName, providerName, modelIcon, whereItRuns, noLongerOffered } from './aiModel.js';
+  import { modelName, providerName, modelIcon, whereItRuns, noLongerOffered } from './core/aiModel.js';
   import { loadCatalog } from './modelCatalog.svelte.js';
   import { refreshLocal, local, pushRecent } from './chatModels.svelte.js';
-  import { chipContextLine } from './localContext.js';
-  import { isKeyed } from './providers.js';
+  import { chipContextLine } from './core/localContext.js';
+  import { isKeyed } from './core/providers.js';
 
   // `quiet`: no pill, just the words (under the Chat composer, as Claude
   // Code shows its model).

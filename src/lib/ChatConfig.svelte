@@ -16,7 +16,7 @@
   import Row from './ui/Row.svelte';
   import Group from './ui/Group.svelte';
   import LinkRow from './ui/LinkRow.svelte';
-  import { SCOPE_PROVIDER_LABELS } from './providers.js';
+  import { SCOPE_PROVIDER_LABELS } from './core/providers.js';
 
   let { scope, cfg = null, defaultPrompt = '' } = $props();
 

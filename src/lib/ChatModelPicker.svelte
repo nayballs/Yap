@@ -20,10 +20,10 @@
   import { onMount, tick } from 'svelte';
   import ProviderMark from './ProviderMark.svelte';
   import LocalContext from './LocalContext.svelte';
-  import { providerIcon } from './aiModel.js';
-  import { PROVIDER_LABELS } from './providers.js';
+  import { providerIcon } from './core/aiModel.js';
+  import { PROVIDER_LABELS } from './core/providers.js';
   import { loadCatalog } from './modelCatalog.svelte.js';
-  import { openExternalLink } from './externalLinks.js';
+  import { openExternalLink } from './core/externalLinks.js';
   import { toast } from './ui/toast.svelte.js';
   import {
     CLOUD_PROVIDERS,

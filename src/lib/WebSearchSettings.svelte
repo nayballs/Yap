@@ -25,8 +25,8 @@
   import Toggle from './ui/Toggle.svelte';
   import Segmented from './ui/Segmented.svelte';
   import Input from './ui/Input.svelte';
-  import { createExternalLinkHandler } from './externalLinks.js';
-  import { maskKey } from './providers.js';
+  import { createExternalLinkHandler } from './core/externalLinks.js';
+  import { maskKey } from './core/providers.js';
 
   let { cfg, goto = null } = $props();
 

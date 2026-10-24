@@ -24,7 +24,7 @@
   import { toast } from '../ui/toast.svelte.js';
   import { showSaveError } from '../saveErrors.js';
   import { account } from '../account.svelte.js';
-  import { PROVIDER_DESTINATIONS } from '../providers.js';
+  import { PROVIDER_DESTINATIONS } from '../core/providers.js';
 
   let { cfg, goto = null, connections = $bindable(false) } = $props();
 

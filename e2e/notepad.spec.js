@@ -47,7 +47,7 @@ import {
   consentToSave,
   DEFAULT_CONSENT_MESSAGE,
   meetingHelpers,
-} from '../src/lib/notepadText.js';
+} from '../src/lib/core/notepadText.js';
 
 const test = base.extend({
   fakeLlm: [

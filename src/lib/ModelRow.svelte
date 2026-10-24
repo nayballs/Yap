@@ -2,8 +2,8 @@
   // A compact one-line model row, ported from OpenWhispr's LocalModelCard /
   // ModelCardList: status dot → brand icon → name → size → language → badges,
   // with Download / Active / progress on the right and a hover-reveal delete.
-  import { formatSize } from './models.js';
-  import { ENGINE_PROVIDER, PROVIDER_ICONS, MONOCHROME_PROVIDERS } from './providerIcons.js';
+  import { formatSize } from './core/speechModels.js';
+  import { ENGINE_PROVIDER, PROVIDER_ICONS, MONOCHROME_PROVIDERS } from './core/providerIcons.js';
   import { openContextMenu, menuKey, menuOpenFor } from './ui/contextMenu.svelte.js';
 
   // status: downloadable | downloading | available | active | switching |

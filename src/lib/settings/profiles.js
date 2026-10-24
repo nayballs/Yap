@@ -1,7 +1,7 @@
 // Dictation cleanup's profiles and app rules (Smart routing,
 // SmartRouting.svelte): ids, an app's default label, and the one-off
 // migration of rules from before profiles.
-import { appLabel } from '../appNames.js';
+import { appLabel } from '../core/appNames.js';
 
 let idSeq = 1;
 export function newId() {

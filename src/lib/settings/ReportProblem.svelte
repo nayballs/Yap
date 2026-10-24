@@ -11,7 +11,7 @@
   import Button from '../ui/Button.svelte';
   import Segmented from '../ui/Segmented.svelte';
   import { toast } from '../ui/toast.svelte.js';
-  import { openExternalLink } from '../externalLinks.js';
+  import { openExternalLink } from '../core/externalLinks.js';
 
   // idle | making | preview | saving | saved
   let stage = $state('idle');

@@ -5,7 +5,7 @@
 // are dictionarySync.svelte.js's.)
 import { listen } from '@tauri-apps/api/event';
 import { onMount } from 'svelte';
-import { adoptProviderKey } from '../providers.js';
+import { adoptProviderKey } from '../core/providers.js';
 import { SCOPE_DEFAULTS } from './scopes.js';
 import { lm } from './languageModels.svelte.js';
 import { refreshLocalLlm } from './localLlm.svelte.js';

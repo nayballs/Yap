@@ -7,7 +7,7 @@
 // saved transforms' shortcuts (Commands → Transforms) are checked against
 // them, and they against the transforms'.
 import { invoke } from '@tauri-apps/api/core';
-import { formatHotkeySpec, hotkeysClash } from '../hotkeys.js';
+import { formatHotkeySpec, hotkeysClash } from '../core/hotkeys.js';
 import { transformName } from './transforms.js';
 
 export const HOTKEY_CMD = {
