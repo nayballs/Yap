@@ -445,7 +445,7 @@ fn windows_busy() -> bool {
             return false;
         }
         // 5 = QUNS_ACCEPTS_NOTIFICATIONS; 0 = the query failed.
-        !matches!(crate::overlay::win::notification_state(), 0 | 5)
+        !matches!(crate::bar::overlay::win::notification_state(), 0 | 5)
     }
     #[cfg(not(windows))]
     false

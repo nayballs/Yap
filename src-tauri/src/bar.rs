@@ -56,6 +56,8 @@
 //! region (exercising the same hit-test and click-through code) and fakes a
 //! fullscreen app, and [`bar_debug`] reports the window's real ex-styles.
 
+pub mod overlay;
+
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, RecvTimeoutError};
@@ -65,7 +67,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Listener, Manager};
 
-use crate::overlay::{self, Edge, Fullscreen, Rect, Region, Screen};
+use overlay::{Edge, Fullscreen, Rect, Region, Screen};
 
 /// Snapshot for the bar page and Settings (`bar_status` + this event).
 const EVENT: &str = "yap-bar";

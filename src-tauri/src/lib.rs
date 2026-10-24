@@ -62,7 +62,6 @@ mod mic_privacy;
 mod mic_watch;
 mod model_catalog;
 mod mute;
-mod overlay;
 mod partials;
 mod pause;
 mod pipeline;
@@ -1140,7 +1139,7 @@ pub fn run() {
                 }
                 if let Some(w) = topmost_handle.get_webview_window("overlay") {
                     if w.is_visible().unwrap_or(false) {
-                        overlay::force_topmost(&w);
+                        bar::overlay::force_topmost(&w);
                     }
                 }
             });
