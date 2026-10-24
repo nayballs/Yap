@@ -469,7 +469,7 @@ impl Espeak {
             cmd.creation_flags(CREATE_NO_WINDOW);
         }
         let mut child = cmd.spawn().map_err(|e| format!("eSpeak NG didn't start: {e}"))?;
-        crate::procs::end_with_yap(&child);
+        crate::shell::procs::end_with_yap(&child);
         let mut input = String::new();
         for l in lines {
             // One phrase per line: no line breaks inside one.

@@ -106,10 +106,10 @@ fn load_from_disk() -> GroqUsage {
 
 /// groq_usage.json's saves (`saving.rs`): a failed one keeps the counts in
 /// memory, is tried again with the next AI call's save, and is said once.
-pub static SAVER: crate::saving::Saver = crate::saving::Saver::new("usage", "your AI usage counts", save_now);
+pub static SAVER: crate::shell::saving::Saver = crate::shell::saving::Saver::new("usage", "your AI usage counts", save_now);
 
 /// Write the counts again (Try again).
-fn save_now() -> Result<(), crate::saving::SaveError> {
+fn save_now() -> Result<(), crate::shell::saving::SaveError> {
     if let Some(usage) = STATE.lock().unwrap_or_else(|p| p.into_inner()).as_ref() {
         save_to_disk(usage);
     }

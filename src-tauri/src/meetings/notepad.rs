@@ -234,7 +234,7 @@ pub fn on_meeting_started(app: &AppHandle, note_id: u64) {
     // Off the recorder's thread: this queries and moves windows.
     std::thread::spawn(move || {
         let Some(w) = window(&app) else { return };
-        let call = if crate::e2e::active() { None } else { platform::call_window() };
+        let call = if crate::shell::e2e::active() { None } else { platform::call_window() };
         if on_screen(&w) && !(split && call.is_some()) {
             return; // already up where the person put it
         }
@@ -271,7 +271,7 @@ fn show(w: &tauri::WebviewWindow, focus: bool) {
     }
     let _ = w.show();
     let _ = w.emit(EVENT_VISIBLE, true);
-    if focus && !crate::e2e::active() {
+    if focus && !crate::shell::e2e::active() {
         let _ = w.set_focus();
     }
 }
@@ -300,7 +300,7 @@ static PREVIEW_GEN: AtomicU64 = AtomicU64::new(0);
 /// starts. Not in test runs, which never move other apps' windows.
 pub fn split_now(app: &AppHandle) -> Result<(), String> {
     hide_preview(app);
-    if crate::e2e::active() {
+    if crate::shell::e2e::active() {
         return Err("Test runs never move other apps' windows.".to_string());
     }
     let w = window(app).ok_or("The notepad isn't there")?;
@@ -321,7 +321,7 @@ pub fn split_now(app: &AppHandle) -> Result<(), String> {
 /// first use. Returns whether it shows (there's a call to split with).
 pub async fn show_preview(app: &AppHandle) -> Result<bool, String> {
     let gen = PREVIEW_GEN.fetch_add(1, Ordering::SeqCst) + 1;
-    if crate::e2e::active() {
+    if crate::shell::e2e::active() {
         return Ok(false);
     }
     let Some((slot, scale)) = platform::call_slot() else {

@@ -634,7 +634,7 @@ impl Target {
     /// and never in a test run (robot mode: only a window the test opened).
     pub fn of_window(hwnd: Option<isize>, process: Option<&str>, kind: AppKind) -> Target {
         #[cfg(debug_assertions)]
-        if crate::e2e::active() && !crate::realtest::on() {
+        if crate::shell::e2e::active() && !crate::shell::realtest::on() {
             return match test_app() {
                 Some((exe, title)) => {
                     let kind = app_kind::classify(Some(&exe), "", &title);
@@ -645,7 +645,7 @@ impl Target {
         }
         let exe = app_kind::exe_stem(process.unwrap_or(""));
         let title = match hwnd {
-            Some(h) if reads_title(&exe) && crate::realtest::permits(Some(h)) => app_kind::window_title(h),
+            Some(h) if reads_title(&exe) && crate::shell::realtest::permits(Some(h)) => app_kind::window_title(h),
             _ => String::new(),
         };
         Target::new(process, &title, kind)
@@ -904,7 +904,7 @@ pub async fn cleanup_offer_status(app: tauri::AppHandle) -> Value {
     let m = crate::notices::notice::moment();
     // A test run offers it only when the spec asks (the rest of the suite
     // never meets a tip it didn't expect).
-    let test_ok = !crate::e2e::active() || std::env::var_os("YAP_E2E_CLEANUP_OFFER").is_some();
+    let test_ok = !crate::shell::e2e::active() || std::env::var_os("YAP_E2E_CLEANUP_OFFER").is_some();
     json!({
         "offer": test_ok && offer(&cfg, capable || installed, dictations) && focused && !m.dictating && !m.meeting,
         "gpu": gpu.filter(|_| capable).map(|g| g.name),
@@ -960,7 +960,7 @@ fn test_app() -> Option<(String, String)> {
 #[cfg(debug_assertions)]
 #[tauri::command]
 pub fn e2e_style_app(exe: Option<String>, title: Option<String>) -> Result<(), String> {
-    if !crate::e2e::active() || crate::realtest::on() {
+    if !crate::shell::e2e::active() || crate::shell::realtest::on() {
         return Err("e2e_style_app is for test runs (not robot mode)".into());
     }
     if let Ok(mut g) = TEST_APP.lock() {

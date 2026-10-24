@@ -47,7 +47,7 @@ use std::sync::Mutex;
 use serde::{Deserialize, Serialize};
 
 use crate::dictation::media_pause::{self, Paused};
-use crate::realtest::OtherApps;
+use crate::shell::realtest::OtherApps;
 
 /// What Yap does to other apps while you dictate (from Settings).
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -231,7 +231,7 @@ pub fn after_start_chime(token: u64) {
         }
         (s.plan, s.quieted.iter().map(|q| q.id.clone()).collect::<Vec<_>>())
     };
-    let who = crate::realtest::other_apps();
+    let who = crate::shell::realtest::other_apps();
     if !plan.any() {
         return;
     }
@@ -248,7 +248,7 @@ pub fn after_start_chime(token: u64) {
             browsers: calls.meeting || !calls.live_browsers.is_empty(),
         };
         let robot: Option<&dyn Fn(&str) -> bool> = match who {
-            OtherApps::TestsOwn => Some(&crate::realtest::media_permits),
+            OtherApps::TestsOwn => Some(&crate::shell::realtest::media_permits),
             _ => None,
         };
         media_pause::pause(&keep, robot)
@@ -390,10 +390,10 @@ fn write_down(s: &State) {
 
 /// quieted_apps.json's saves (`saving.rs`): a failed one is tried again with
 /// the next; only logged (it matters only if Yap crashes mid-dictation).
-pub static SAVER: crate::saving::Saver = crate::saving::Saver::quiet("quietedApps", "the apps Yap quieted", save_now);
+pub static SAVER: crate::shell::saving::Saver = crate::shell::saving::Saver::quiet("quietedApps", "the apps Yap quieted", save_now);
 
 /// Write it again (Try again).
-fn save_now() -> Result<(), crate::saving::SaveError> {
+fn save_now() -> Result<(), crate::shell::saving::SaveError> {
     write_down(&state());
     SAVER.check()
 }
@@ -416,7 +416,7 @@ fn retry_leftovers(leftovers: Vec<Quieted>) {
 
 /// At start: what a crash left quiet comes back (off the main thread).
 pub fn recover() {
-    if crate::realtest::other_apps() == OtherApps::Nobody {
+    if crate::shell::realtest::other_apps() == OtherApps::Nobody {
         return;
     }
     let leftovers = load_leftovers();
@@ -436,7 +436,7 @@ pub fn recover() {
 pub fn robot_view() -> serde_json::Value {
     let s = state();
     serde_json::json!({
-        "sessions": platform::list(&crate::realtest::audio_permits),
+        "sessions": platform::list(&crate::shell::realtest::audio_permits),
         "media": media_list(),
         "quieted": s.quieted.iter().map(|q| serde_json::json!({ "id": q.id, "exe": q.exe, "before": q.before, "setTo": q.set_to })).collect::<Vec<_>>(),
         "paused": s.paused.iter().map(|p| p.app.clone()).collect::<Vec<_>>(),
@@ -446,7 +446,7 @@ pub fn robot_view() -> serde_json::Value {
 
 #[cfg(all(debug_assertions, windows))]
 fn media_list() -> Vec<serde_json::Value> {
-    media_pause::list(&crate::realtest::media_permits)
+    media_pause::list(&crate::shell::realtest::media_permits)
 }
 
 #[cfg(all(debug_assertions, not(windows)))]
@@ -487,7 +487,7 @@ mod platform {
         if !com() {
             return out;
         }
-        let exes = crate::procs::exe_names();
+        let exes = crate::shell::procs::exe_names();
         unsafe {
             let Ok(enumerator) = CoCreateInstance::<_, IMMDeviceEnumerator>(&MMDeviceEnumerator, None, CLSCTX_ALL)
             else {
@@ -540,7 +540,7 @@ mod platform {
                 }
                 continue;
             }
-            if !crate::realtest::audio_permits(s.facts.pid) {
+            if !crate::shell::realtest::audio_permits(s.facts.pid) {
                 continue;
             }
             match unsafe { s.volume.SetMasterVolume(QUIET_LEVEL, std::ptr::null()) } {
@@ -586,7 +586,7 @@ mod platform {
                 continue;
             }
             for s in of_app {
-                if crate::realtest::audio_permits(s.facts.pid) {
+                if crate::shell::realtest::audio_permits(s.facts.pid) {
                     back(s, &q);
                 }
             }

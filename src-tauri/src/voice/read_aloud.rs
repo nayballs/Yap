@@ -373,7 +373,7 @@ fn publish(app: &AppHandle) {
     crate::bar::set_reading(app, v.active);
     let _ = app.emit(EVENT, &v);
     if SHOWN.swap(v.active, Ordering::SeqCst) != v.active {
-        crate::tray::refresh(app);
+        crate::shell::tray::refresh(app);
     }
 }
 
@@ -790,7 +790,7 @@ pub fn read_selection_now(app: &AppHandle, origin: Origin) -> Picked {
         }
         return picked;
     };
-    if crate::e2e::active() && !crate::realtest::permits(Some(hwnd)) {
+    if crate::shell::e2e::active() && !crate::shell::realtest::permits(Some(hwnd)) {
         tracing::info!("e2e: not reading another app's selection");
         nothing_selected(app);
         picked.outcome = "refused";
@@ -806,7 +806,7 @@ pub fn read_selection_now(app: &AppHandle, origin: Origin) -> Picked {
     picked.chars = got.text.as_deref().map_or(0, |t| t.chars().count());
     tracing::info!(via = got.via, chars = picked.chars, terminal = picked.terminal, ?origin, "Read aloud: the selection");
     let text = got.text.filter(|t| !t.trim().is_empty());
-    if crate::realtest::on() {
+    if crate::shell::realtest::on() {
         picked.text = text.clone();
     }
     let Some(text) = text else {

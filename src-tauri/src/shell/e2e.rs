@@ -489,7 +489,7 @@ pub fn e2e_fail_saves(store: String, count: u32) -> Result<(), String> {
         return Err("Only in e2e test mode".to_string());
     }
     tracing::info!(store = %store, count, "e2e: saves of this store fail on purpose");
-    crate::saving::stage_failures(&store, count);
+    crate::shell::saving::stage_failures(&store, count);
     Ok(())
 }
 
@@ -705,7 +705,7 @@ pub fn fake_frame(m: &FakeMonitor) -> crate::snip::capture::Frame {
 #[cfg(debug_assertions)]
 #[tauri::command]
 pub fn e2e_snip(app: AppHandle, monitors: Vec<FakeMonitor>, origin: Option<String>, start: Option<bool>) -> Result<(), String> {
-    if !active() || crate::realtest::on() {
+    if !active() || crate::shell::realtest::on() {
         return Err("e2e_snip is for test runs (not robot mode)".into());
     }
     crate::snip::set_fake_frames(monitors.iter().map(fake_frame).collect());
@@ -784,7 +784,7 @@ pub fn start(app: &AppHandle) {
     tracing::info!("e2e: test mode on");
     // The real-app tests' robot mode (YAP_REALTEST=1): real pastes, keys and
     // reads, only into the test's own windows (realtest.rs).
-    crate::realtest::start(app);
+    crate::shell::realtest::start(app);
     let app = app.clone();
     std::thread::spawn(move || {
         let _ = std::io::copy(&mut std::io::stdin().lock(), &mut std::io::sink());

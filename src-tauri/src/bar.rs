@@ -707,7 +707,7 @@ fn place(app: &AppHandle, screen: Screen, edge: Edge, moved_monitor: bool) {
 
 /// The cursor: the real one, or test mode's pretend one.
 fn cursor() -> Option<(i32, i32)> {
-    if crate::e2e::active() && !crate::e2e::real_cursor() {
+    if crate::shell::e2e::active() && !crate::shell::e2e::real_cursor() {
         return lock().sim_cursor;
     }
     #[cfg(windows)]
@@ -789,7 +789,7 @@ fn follow_cursor(app: &AppHandle, cursor: Option<(i32, i32)>, now: u64) {
     // Test mode without a pretend cursor: the primary monitor.
     let point = match cursor {
         Some(p) => p,
-        None if crate::e2e::active() => (0, 0),
+        None if crate::shell::e2e::active() => (0, 0),
         None => return,
     };
     // The cursor's monitor (its auto-hidden taskbars are read only if the bar
@@ -829,7 +829,7 @@ fn follow_cursor(app: &AppHandle, cursor: Option<(i32, i32)>, now: u64) {
 /// `bar_simulate` stands in.)
 #[cfg(windows)]
 fn check_fullscreen(app: &AppHandle) {
-    if crate::e2e::active() {
+    if crate::shell::e2e::active() {
         return;
     }
     let (wanted, screen, before) = {
@@ -926,7 +926,7 @@ fn hover(app: &AppHandle, cursor: Option<(i32, i32)>) {
     if became_interactive {
         // Where the focus goes back to, should a click activate the bar.
         #[cfg(windows)]
-        if !crate::e2e::active() {
+        if !crate::shell::e2e::active() {
             let fg = overlay::win::foreign_foreground();
             if fg != 0 {
                 lock().prev_front = fg;
@@ -946,7 +946,7 @@ fn hover(app: &AppHandle, cursor: Option<(i32, i32)>) {
 fn give_focus_back() {
     #[cfg(windows)]
     {
-        if crate::e2e::active() || !overlay::win::bar_in_front() {
+        if crate::shell::e2e::active() || !overlay::win::bar_in_front() {
             return;
         }
         let prev = lock().prev_front;
@@ -1324,7 +1324,7 @@ fn sync_escape() {
         s.shown && (s.reading || cards_seen() && s.front_card().is_some_and(|c| c.escape_action.is_some()))
     };
     #[cfg(windows)]
-    if wanted && !crate::e2e::active() {
+    if wanted && !crate::shell::e2e::active() {
         escape_watch::start(on_escape_key);
     } else {
         escape_watch::stop();
@@ -1543,7 +1543,7 @@ pub async fn bar_simulate(
     escape: Option<bool>,
     card: Option<String>,
 ) -> Result<(), String> {
-    if !cfg!(debug_assertions) || !crate::e2e::active() {
+    if !cfg!(debug_assertions) || !crate::shell::e2e::active() {
         return Err("Only in e2e test mode".to_string());
     }
     if let Some(target) = pointer {

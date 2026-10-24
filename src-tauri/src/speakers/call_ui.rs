@@ -533,7 +533,7 @@ pub fn begin(note_id: u64, session: Option<u64>, base: usize) {
     let stop = Arc::new(AtomicBool::new(false));
     watches().push(Watch { note_id, session, base, spans: Vec::new(), self_name: None, stop: Arc::clone(&stop) });
     #[cfg(debug_assertions)]
-    if crate::e2e::active() {
+    if crate::shell::e2e::active() {
         return; // The suite hands readings in (`e2e_call_readings`).
     }
     if !crate::config::load().meeting_call_names {
@@ -597,7 +597,7 @@ fn poll(note_id: u64, stop: Arc<AtomicBool>) {
 #[cfg(debug_assertions)]
 #[tauri::command]
 pub fn e2e_call_readings(spans: Vec<Span>, self_name: Option<String>) -> Result<usize, String> {
-    if !crate::e2e::active() {
+    if !crate::shell::e2e::active() {
         return Err("Only in e2e test mode".to_string());
     }
     let note_id = crate::meetings::meeting::recording_note().ok_or("No meeting is being recorded")?;

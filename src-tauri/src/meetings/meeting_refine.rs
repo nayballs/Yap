@@ -341,7 +341,7 @@ impl Drop for LowPriority {
 /// the middle of it.
 #[cfg(debug_assertions)]
 pub fn e2e_slow_chunk() {
-    if !crate::e2e::active() {
+    if !crate::shell::e2e::active() {
         return;
     }
     if let Some(ms) = std::env::var("YAP_E2E_REFINE_CHUNK_MS").ok().and_then(|v| v.trim().parse::<u64>().ok()) {

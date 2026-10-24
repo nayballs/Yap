@@ -11,16 +11,13 @@ mod ai;
 mod apps;
 mod auth;
 mod bar;
-mod bench;
 mod calendar;
 mod calls;
 mod chat;
 mod commands;
 mod config;
-mod context_menu;
 mod dictation;
 mod dictionary;
-mod e2e;
 mod integrations;
 mod meetings;
 mod memory;
@@ -28,18 +25,12 @@ mod notes;
 mod notices;
 mod pasting;
 mod privacy;
-mod portable;
-mod procs;
-mod realtest;
-mod saving;
+mod shell;
 mod snip;
 mod speakers;
-mod tray;
 mod updates;
-mod theme;
 mod voice;
 mod web;
-mod webview_memory;
 
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Mutex;
@@ -138,7 +129,7 @@ pub(crate) fn shutdown_cleanup() {
     // The week of network receipts, as it stands (net.rs).
     privacy::net::flush();
     // A store whose last save failed (saving.rs): one more try.
-    saving::flush();
+    shell::saving::flush();
 }
 
 /// `yap.exe mcp` (main.rs): serve MCP to an AI app over stdin/stdout until it
@@ -166,7 +157,7 @@ pub fn run_eval() -> i32 {
 /// `yap.exe bench …` (main.rs): speech-to-text, AI cleanup and a cold
 /// start timed on this PC, a table and a JSON report written (`bench.rs`).
 pub fn run_bench() -> i32 {
-    bench::main(std::env::args().skip(2).collect())
+    shell::bench::main(std::env::args().skip(2).collect())
 }
 
 /// `yap.exe bench`'s throwaway copy for the cold start (`bench/cold.rs`):
@@ -175,7 +166,7 @@ pub fn run_bench() -> i32 {
 /// instance), hooks the keyboard, changes launch-at-sign-in or the saved
 /// window place, or touches another process.
 fn bench_child() -> bool {
-    portable::is_portable() && std::env::var_os("YAP_BENCH_CHILD").is_some_and(|v| v == "1")
+    shell::portable::is_portable() && std::env::var_os("YAP_BENCH_CHILD").is_some_and(|v| v == "1")
 }
 
 /// `yap.exe call-dump …` (main.rs): a call window's UI Automation tree,
@@ -232,7 +223,7 @@ pub(crate) fn set_debug_logging(enabled: bool) {
 /// data dir. Installed builds are windowed with no console, so stdout logs are
 /// invisible — the file log is the only way to diagnose a shipped build (e.g.
 /// the "stuck on transcribing" report was a CPU-only whisper build with no
-/// visible logs). Must run AFTER `portable::init()` so the data dir resolves.
+/// visible logs). Must run AFTER `shell::portable::init()` so the data dir resolves.
 /// The filter sits behind a reload layer so "Debug mode" can raise it live.
 fn init_logging() {
     use tracing_subscriber::prelude::*;
@@ -349,7 +340,7 @@ fn init_hidden_webview(window: &tauri::WebviewWindow) {
 pub fn run() {
     // Decide portable-vs-installed once, before anything reads the data dir
     // (the file log lives under it).
-    portable::init();
+    shell::portable::init();
     init_logging();
     tracing::info!(
         engines = cfg!(feature = "engines"),
@@ -406,7 +397,7 @@ pub fn run() {
     // window never un-hides itself on a start-hidden launch. Not in e2e test
     // runs: the state file sits outside the portable data dir, shared with the
     // installed app.
-    let builder = if e2e::active() || bench_child() {
+    let builder = if shell::e2e::active() || bench_child() {
         builder
     } else {
         builder.plugin(
@@ -430,7 +421,7 @@ pub fn run() {
             commands::get_config,
             ai::about_you::about_you_status,
             commands::save_config,
-            saving::saves_retry,
+            shell::saving::saves_retry,
             commands::download_model_size,
             commands::installed_models,
             commands::open_settings,
@@ -677,51 +668,51 @@ pub fn run() {
             #[cfg(debug_assertions)]
             memory::e2e_memory_learn,
             #[cfg(debug_assertions)]
-            e2e::e2e_meeting_feed,
+            shell::e2e::e2e_meeting_feed,
             #[cfg(debug_assertions)]
-            e2e::e2e_meeting_dictation,
+            shell::e2e::e2e_meeting_dictation,
             #[cfg(debug_assertions)]
-            e2e::e2e_meeting_output_change,
+            shell::e2e::e2e_meeting_output_change,
             #[cfg(debug_assertions)]
-            e2e::e2e_meeting_quiet,
+            shell::e2e::e2e_meeting_quiet,
             #[cfg(debug_assertions)]
-            e2e::e2e_meeting_fail,
+            shell::e2e::e2e_meeting_fail,
             #[cfg(debug_assertions)]
-            e2e::e2e_meeting_start_twice,
+            shell::e2e::e2e_meeting_start_twice,
             #[cfg(debug_assertions)]
             meetings::meeting_audio::e2e_meeting_recovery_offer,
             #[cfg(debug_assertions)]
-            e2e::e2e_main_on_screen,
+            shell::e2e::e2e_main_on_screen,
             #[cfg(debug_assertions)]
-            e2e::e2e_dictation_mic,
+            shell::e2e::e2e_dictation_mic,
             #[cfg(debug_assertions)]
-            e2e::e2e_mic_status,
+            shell::e2e::e2e_mic_status,
             #[cfg(debug_assertions)]
-            e2e::e2e_dictate_audio,
+            shell::e2e::e2e_dictate_audio,
             #[cfg(debug_assertions)]
-            e2e::e2e_crash_next_dictation,
+            shell::e2e::e2e_crash_next_dictation,
             #[cfg(debug_assertions)]
-            e2e::e2e_fail_saves,
+            shell::e2e::e2e_fail_saves,
             #[cfg(debug_assertions)]
-            e2e::e2e_upload_pace,
+            shell::e2e::e2e_upload_pace,
             #[cfg(debug_assertions)]
-            e2e::e2e_assistant_audio,
+            shell::e2e::e2e_assistant_audio,
             #[cfg(debug_assertions)]
-            e2e::e2e_snip,
+            shell::e2e::e2e_snip,
             #[cfg(debug_assertions)]
-            e2e::e2e_snip_input,
+            shell::e2e::e2e_snip_input,
             #[cfg(debug_assertions)]
-            e2e::e2e_snip_last,
+            shell::e2e::e2e_snip_last,
             #[cfg(debug_assertions)]
             dictation::mic_privacy::e2e_mic_privacy,
             #[cfg(debug_assertions)]
             pasting::elevated::e2e_paste_elevated,
             #[cfg(debug_assertions)]
-            context_menu::e2e_context_menus,
+            shell::context_menu::e2e_context_menus,
             #[cfg(debug_assertions)]
-            webview_memory::e2e_webview_memory,
+            shell::webview_memory::e2e_webview_memory,
             #[cfg(debug_assertions)]
-            theme::e2e_webview_background,
+            shell::theme::e2e_webview_background,
             #[cfg(debug_assertions)]
             dictation::coaching::e2e_coaching_reset,
             #[cfg(debug_assertions)]
@@ -758,13 +749,13 @@ pub fn run() {
             apps::e2e_opened_apps,
             // Robot mode only (realtest.rs): the real-app tests.
             #[cfg(debug_assertions)]
-            realtest::commands::realtest_window,
+            shell::realtest::commands::realtest_window,
             #[cfg(debug_assertions)]
-            realtest::commands::realtest_refusals,
+            shell::realtest::commands::realtest_refusals,
             #[cfg(debug_assertions)]
-            realtest::commands::realtest_dictate_text,
+            shell::realtest::commands::realtest_dictate_text,
             #[cfg(debug_assertions)]
-            realtest::commands::realtest_rewrite_text,
+            shell::realtest::commands::realtest_rewrite_text,
             #[cfg(debug_assertions)]
             commands::e2e_rewrite,
             #[cfg(debug_assertions)]
@@ -772,21 +763,21 @@ pub fn run() {
             #[cfg(debug_assertions)]
             dictation::transforms::e2e_transform_slots,
             #[cfg(debug_assertions)]
-            realtest::commands::realtest_transform,
+            shell::realtest::commands::realtest_transform,
             #[cfg(debug_assertions)]
             commands::e2e_target_window,
             #[cfg(debug_assertions)]
             ai::cleanup_styles::e2e_style_app,
             #[cfg(debug_assertions)]
-            realtest::commands::realtest_dictate_wav,
+            shell::realtest::commands::realtest_dictate_wav,
             #[cfg(debug_assertions)]
-            realtest::commands::realtest_clipboard,
+            shell::realtest::commands::realtest_clipboard,
             #[cfg(debug_assertions)]
-            realtest::commands::realtest_other_apps,
+            shell::realtest::commands::realtest_other_apps,
             #[cfg(debug_assertions)]
-            realtest::commands::realtest_delivered,
+            shell::realtest::commands::realtest_delivered,
             #[cfg(debug_assertions)]
-            realtest::commands::realtest_read_selection,
+            shell::realtest::commands::realtest_read_selection,
         ])
         .on_page_load(|webview, payload| {
             // No browser context menu (Back, Refresh, Print, Inspect…) in any
@@ -794,7 +785,7 @@ pub fn run() {
             // per webview, whichever window it is (the split preview is made
             // on demand).
             if payload.event() == tauri::webview::PageLoadEvent::Started {
-                context_menu::install(webview);
+                shell::context_menu::install(webview);
             }
             // A meeting window (the notepad, the overlay) that loads while a
             // meeting records leaves screen captures too (capture.rs).
@@ -815,7 +806,7 @@ pub fn run() {
             // week in connections.json.
             privacy::net::init(&handle);
             // A store's save that fails is said from now on (saving.rs).
-            saving::init(&handle);
+            shell::saving::init(&handle);
             // Temp files a crash mid-write left behind (config.rs): Yap's
             // own names only, off the startup thread.
             let _ = std::thread::Builder::new().name("temp-sweep".into()).spawn(config::sweep_temp_files);
@@ -828,7 +819,7 @@ pub fn run() {
 
             // Global input hook + dictation hotkey. (Not in e2e test runs: a
             // test instance must never see, or swallow, the developer's keys.)
-            if !e2e::active() && !bench_child() {
+            if !shell::e2e::active() && !bench_child() {
                 dictation::input_hook::start_input_hook(handle.clone());
             }
             if let Err(e) = dictation::input_hook::configure_dictation(&cfg.hotkey) {
@@ -888,7 +879,7 @@ pub fn run() {
             // selected + installed — warm up a fresh one off-thread so the
             // first dictation cleanup skips the cold load. (An e2e test run
             // leaves other processes alone.)
-            if !e2e::active() && !bench_child() {
+            if !shell::e2e::active() && !bench_child() {
                 ai::local_llm::kill_orphans();
             }
             {
@@ -1059,7 +1050,7 @@ pub fn run() {
                 bar::on_pipeline_state(&overlay_handle, state);
                 OVERLAY_ACTIVE.store(show, Ordering::Relaxed);
                 // Keep the tray icon + menu in sync with the recording state.
-                tray::update_tray(&overlay_handle, state);
+                shell::tray::update_tray(&overlay_handle, state);
                 // A dictation just ended → a restart-to-update requested
                 // mid-dictation (or a held-back update notice) can go ahead.
                 updates::on_pipeline_state(&overlay_handle, state);
@@ -1097,7 +1088,7 @@ pub fn run() {
             // System tray (Handy-style: state-aware icon + model submenu).
             // Always built — it's the only persistent surface now that the
             // pill is retired; without it Settings would be unreachable.
-            tray::ensure_tray(app.handle(), &cfg);
+            shell::tray::ensure_tray(app.handle(), &cfg);
 
             // Reconcile OS autostart state with the saved config.
             // Only touch OS autostart when the desired state differs from the
@@ -1162,7 +1153,7 @@ pub fn run() {
             // The theme (Settings → General → Appearance): the opaque windows'
             // webviews get their page's background before anything shows, so
             // a dark Yap never flashes WebView2's white (theme.rs).
-            theme::init(&handle);
+            shell::theme::init(&handle);
 
             // WebView2 subsystems initialized against a HIDDEN window can come
             // up permanently broken — most relevantly the Rust→JS event/eval
@@ -1222,7 +1213,7 @@ pub fn run() {
             // Windows off screen (the main window in the tray, onboarding,
             // the notepad between meetings) ask WebView2 to keep less in
             // memory (webview_memory.rs).
-            webview_memory::init(&handle);
+            shell::webview_memory::init(&handle);
 
             // Calendar: the connected calendars' meetings, reminders before
             // them, and their titles and attendees for meeting notes (talks
@@ -1230,7 +1221,7 @@ pub fn run() {
             calendar::init(&handle);
 
             // e2e test runs: announce test mode, quit when stdin closes.
-            e2e::start(&handle);
+            shell::e2e::start(&handle);
 
             Ok(())
         })

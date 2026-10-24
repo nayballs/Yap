@@ -601,7 +601,7 @@ pub(crate) fn page_name(seg: &str) -> &str {
 /// lower case, no ".exe"). Robot mode adds the test's stand-ins
 /// (`realtest::stand_in_editors`).
 fn is_editor(stem: &str) -> bool {
-    EDITOR_EXES.contains(&stem) || crate::realtest::stand_in_editors().iter().any(|e| e == stem)
+    EDITOR_EXES.contains(&stem) || crate::shell::realtest::stand_in_editors().iter().any(|e| e == stem)
 }
 
 /// What kind of app the window `hwnd` is (`None`: one of Yap's own, or none
@@ -616,7 +616,7 @@ pub fn of_window(hwnd: Option<isize>) -> AppKind {
     let Some(hwnd) = hwnd else {
         return AppKind::Other;
     };
-    if !crate::realtest::permits(Some(hwnd)) {
+    if !crate::shell::realtest::permits(Some(hwnd)) {
         return AppKind::Other;
     }
     #[cfg(windows)]

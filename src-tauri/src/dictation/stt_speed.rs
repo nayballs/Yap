@@ -130,7 +130,7 @@ pub const CPU_BUSY_PCT: u32 = 50;
 const IDLE_POLL: Duration = Duration::from_secs(5);
 /// [`IDLE_POLL`], or a quarter of a second in a test run.
 fn idle_poll() -> Duration {
-    if crate::e2e::active() {
+    if crate::shell::e2e::active() {
         Duration::from_millis(250)
     } else {
         IDLE_POLL
@@ -473,10 +473,10 @@ fn save_store(store: &Store) {
 
 /// stt_speed.json's saves (`saving.rs`): a cache (measured again if lost),
 /// so a failed save is only logged, and tried again with the next one.
-pub static SAVER: crate::saving::Saver = crate::saving::Saver::quiet("sttSpeed", "the speech engine's timings", save_now);
+pub static SAVER: crate::shell::saving::Saver = crate::shell::saving::Saver::quiet("sttSpeed", "the speech engine's timings", save_now);
 
 /// Write the timings again (Try again).
-fn save_now() -> Result<(), crate::saving::SaveError> {
+fn save_now() -> Result<(), crate::shell::saving::SaveError> {
     if let Some(store) = lock().store.as_ref() {
         save_store(store);
     }
@@ -530,7 +530,7 @@ pub fn pc_print() -> String {
     static PRINT: std::sync::OnceLock<String> = std::sync::OnceLock::new();
     PRINT
         .get_or_init(|| {
-            if crate::e2e::active() {
+            if crate::shell::e2e::active() {
                 return "e2e".into();
             }
             adapters_print()
@@ -584,7 +584,7 @@ fn adapters_print() -> String {
 /// test run has one unless its stand-in card says none (`YAP_E2E_GPU`).
 fn has_gpu() -> bool {
     #[cfg(debug_assertions)]
-    if crate::e2e::active() && std::env::var_os("YAP_E2E_GPU").is_none() {
+    if crate::shell::e2e::active() && std::env::var_os("YAP_E2E_GPU").is_none() {
         return true;
     }
     crate::ai::gpu::this_pc().is_some()
@@ -593,7 +593,7 @@ fn has_gpu() -> bool {
 /// How busy the processor is (percent of all cores) over `over`, from
 /// Windows' idle and busy times. `None` in a test run or if unreadable.
 pub fn cpu_load(over: Duration) -> Option<u32> {
-    if crate::e2e::active() {
+    if crate::shell::e2e::active() {
         return None;
     }
     let (idle0, total0) = system_times()?;
@@ -651,7 +651,7 @@ pub enum Stopped {
 /// device's run costs on the stub engine.
 fn fake_cost(device: Device) -> Option<u64> {
     #[cfg(debug_assertions)]
-    if crate::e2e::active() {
+    if crate::shell::e2e::active() {
         let spec = std::env::var("YAP_E2E_STT_SPEED").ok()?;
         return spec.split(',').find_map(|part| {
             let (k, v) = part.split_once('=')?;
@@ -845,7 +845,7 @@ fn busy(app: &AppHandle) -> Option<&'static str> {
     let guard = state.pipeline.lock().ok()?;
     let p = guard.as_ref()?;
     // (A test run doesn't wait for the quiet after its start.)
-    let quiet_ms = if crate::e2e::active() { 0 } else { QUIET_MS };
+    let quiet_ms = if crate::shell::e2e::active() { 0 } else { QUIET_MS };
     if p.is_busy() {
         Some("a dictation is running")
     } else if p.idle_ms() < quiet_ms {
@@ -870,7 +870,7 @@ fn dictation_call(app: &AppHandle) -> Call {
 /// Measure the active model in a while (`after`), if it has no measurement
 /// that fits. Test runs: only on demand (or with `YAP_E2E_STT_SPEED`).
 pub fn schedule(app: &AppHandle, after: Duration) {
-    if crate::e2e::active() && fake_cost(Device::Cpu).is_none() {
+    if crate::shell::e2e::active() && fake_cost(Device::Cpu).is_none() {
         return;
     }
     {

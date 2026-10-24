@@ -324,7 +324,7 @@ pub fn host_of(url: &reqwest::Url) -> String {
 /// the suite can show a cloud call without going on the internet.
 fn logical_host(url: &reqwest::Url) -> String {
     #[cfg(debug_assertions)]
-    if crate::e2e::active() {
+    if crate::shell::e2e::active() {
         static ALIASES: OnceLock<Vec<(String, String)>> = OnceLock::new();
         let aliases = ALIASES.get_or_init(|| {
             std::env::var("YAP_E2E_NET_ALIASES")

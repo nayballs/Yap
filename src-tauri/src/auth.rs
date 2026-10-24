@@ -435,7 +435,7 @@ fn scheme_registered(app: &AppHandle) -> bool {
     #[cfg(windows)]
     {
         use tauri_plugin_deep_link::DeepLinkExt;
-        !crate::portable::is_portable() && app.deep_link().is_registered(SCHEME).unwrap_or(false)
+        !crate::shell::portable::is_portable() && app.deep_link().is_registered(SCHEME).unwrap_or(false)
     }
     #[cfg(not(windows))]
     {

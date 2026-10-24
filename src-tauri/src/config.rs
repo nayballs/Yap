@@ -1163,10 +1163,10 @@ impl Default for YapConfig {
 /// Yap's data directory.
 ///
 /// In **portable mode** this is `<exe_dir>/Data/` (set up by the installer and
-/// detected by [`crate::portable`]). Otherwise it's `%APPDATA%/yap/` (or the
+/// detected by [`crate::shell::portable`]). Otherwise it's `%APPDATA%/yap/` (or the
 /// platform equivalent) — left unchanged so existing installs are unaffected.
 pub fn data_dir() -> PathBuf {
-    if let Some(dir) = crate::portable::data_dir() {
+    if let Some(dir) = crate::shell::portable::data_dir() {
         return dir.clone();
     }
     dirs::data_dir()
@@ -1896,7 +1896,7 @@ pub(crate) fn show_old_file(app: &AppHandle) {
     let Some(path) = OLD_FILE.lock().unwrap_or_else(|p| p.into_inner()).clone() else {
         return;
     };
-    if crate::e2e::active() {
+    if crate::shell::e2e::active() {
         tracing::info!("e2e: not showing the old settings file");
         return;
     }

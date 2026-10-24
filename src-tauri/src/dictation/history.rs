@@ -113,15 +113,15 @@ fn load_from_disk() -> Vec<HistoryEntry> {
 /// memory, is tried again with the next save (the next dictation), and is
 /// said once — by the command that hit it ([`saved`]) or, after a
 /// dictation, the notice.
-pub static SAVER: crate::saving::Saver = crate::saving::Saver::new("history", "your dictation history", save_now);
+pub static SAVER: crate::shell::saving::Saver = crate::shell::saving::Saver::new("history", "your dictation history", save_now);
 
 /// `Ok` when the whole history is on disk; else why not (the caller says it).
-pub fn saved() -> Result<(), crate::saving::SaveError> {
+pub fn saved() -> Result<(), crate::shell::saving::SaveError> {
     SAVER.check()
 }
 
 /// Write the whole history again (Try again).
-fn save_now() -> Result<(), crate::saving::SaveError> {
+fn save_now() -> Result<(), crate::shell::saving::SaveError> {
     {
         let mut guard = STATE.lock().unwrap_or_else(|p| p.into_inner());
         let entries = guard.get_or_insert_with(load_from_disk);

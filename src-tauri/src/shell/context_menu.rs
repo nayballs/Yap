@@ -152,7 +152,7 @@ fn keep_inspect() -> bool {
 /// Whether native menus stay off the screen entirely (plain test mode: a
 /// test never leaves a menu on the desktop; robot mode shows them).
 fn suppress_all() -> bool {
-    crate::e2e::active() && !crate::realtest::on()
+    crate::shell::e2e::active() && !crate::shell::realtest::on()
 }
 
 // ---- what the debug command reports ----------------------------------------------------------

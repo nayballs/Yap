@@ -354,7 +354,7 @@ fn accepts(rec: &Recording, tl: &Timeline) -> bool {
 /// a recording with no engine.
 #[cfg(debug_assertions)]
 fn scripted(tl: &Timeline) -> bool {
-    crate::e2e::active() && tl.session == crate::speakers::diarize::E2E_SESSION
+    crate::shell::e2e::active() && tl.session == crate::speakers::diarize::E2E_SESSION
 }
 
 #[cfg(not(debug_assertions))]

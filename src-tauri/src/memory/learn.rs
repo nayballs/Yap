@@ -596,7 +596,7 @@ fn activity<R>(f: impl FnOnce(&mut HashMap<u64, Instant>) -> R) -> R {
 /// The scheduler runs in the app only (not a test run, not an evaluation:
 /// those call the passes themselves).
 fn scheduled() -> bool {
-    !crate::e2e::active() && !crate::ai::eval::active() && super::app().is_some()
+    !crate::shell::e2e::active() && !crate::ai::eval::active() && super::app().is_some()
 }
 
 /// A chat turn was answered in `conversation`: it's read once it's been

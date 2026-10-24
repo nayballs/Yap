@@ -164,15 +164,15 @@ fn load_from_disk() -> Store {
 
 /// chats.json's saves (`saving.rs`): a failed one keeps the chats in
 /// memory, is tried again with the next save, and is said once.
-pub static SAVER: crate::saving::Saver = crate::saving::Saver::new("chats", "your chat", save_now);
+pub static SAVER: crate::shell::saving::Saver = crate::shell::saving::Saver::new("chats", "your chat", save_now);
 
 /// `Ok` when every chat is on disk; else why not (the caller says it).
-pub fn saved() -> Result<(), crate::saving::SaveError> {
+pub fn saved() -> Result<(), crate::shell::saving::SaveError> {
     SAVER.check()
 }
 
 /// Write the whole store again (Try again).
-fn save_now() -> Result<(), crate::saving::SaveError> {
+fn save_now() -> Result<(), crate::shell::saving::SaveError> {
     with_store(|s| save_to_disk(s));
     saved()
 }

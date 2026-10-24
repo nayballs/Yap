@@ -262,11 +262,11 @@ fn with_store<R>(f: impl FnOnce(&mut Catalog) -> R) -> Option<R> {
 /// so a failed save is only logged, and tried again with the next one.
 /// (Unit tests keep the store in memory: nothing saves through it there.)
 #[cfg_attr(test, allow(dead_code))]
-pub static SAVER: crate::saving::Saver = crate::saving::Saver::quiet("modelCatalog", "the model lists", save_now);
+pub static SAVER: crate::shell::saving::Saver = crate::shell::saving::Saver::quiet("modelCatalog", "the model lists", save_now);
 
 /// Write the lists again (Try again).
 #[cfg_attr(test, allow(dead_code))]
-fn save_now() -> Result<(), crate::saving::SaveError> {
+fn save_now() -> Result<(), crate::shell::saving::SaveError> {
     with_store(|c| save(c));
     SAVER.check()
 }
@@ -425,7 +425,7 @@ impl Endpoints {
     /// `YAP_MODELS_STANDIN`; `None` (nothing is fetched) in a test run
     /// without one.
     fn current() -> Option<Endpoints> {
-        if !crate::e2e::active() {
+        if !crate::shell::e2e::active() {
             return Some(Endpoints { standin: None });
         }
         #[cfg(debug_assertions)]
@@ -1255,7 +1255,7 @@ pub fn refresh_due(app: &AppHandle, cfg: &YapConfig) {
 /// is due (each list at most once a day). Not in a test run, where the
 /// pickers and key saves ask instead (deterministic).
 pub fn init(app: &AppHandle) {
-    if crate::e2e::active() {
+    if crate::shell::e2e::active() {
         return;
     }
     let app = app.clone();
@@ -1304,7 +1304,7 @@ async fn local_models(
     }
     // A test run asks only its own servers (127.0.0.1 on a test's port),
     // never the internet or a real Ollama on `localhost:11434`.
-    if crate::e2e::active() && url.host_str() != Some("127.0.0.1") {
+    if crate::shell::e2e::active() && url.host_str() != Some("127.0.0.1") {
         return Err("test runs only ask the test's own servers".to_string());
     }
     let now = now_secs();

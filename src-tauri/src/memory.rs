@@ -113,15 +113,15 @@ fn load_from_disk() -> Store {
 
 /// memory.json's saves (`saving.rs`): a failed one keeps what Yap
 /// remembers in memory, is tried again with the next save, and is said once.
-pub static SAVER: crate::saving::Saver = crate::saving::Saver::new("memory", "what Yap remembers about you", save_now);
+pub static SAVER: crate::shell::saving::Saver = crate::shell::saving::Saver::new("memory", "what Yap remembers about you", save_now);
 
 /// `Ok` when all of it is on disk; else why not (the caller says it).
-pub fn saved() -> Result<(), crate::saving::SaveError> {
+pub fn saved() -> Result<(), crate::shell::saving::SaveError> {
     SAVER.check()
 }
 
 /// Write the whole store again (Try again).
-fn save_now() -> Result<(), crate::saving::SaveError> {
+fn save_now() -> Result<(), crate::shell::saving::SaveError> {
     with_store(|s| save_to_disk(s));
     saved()
 }

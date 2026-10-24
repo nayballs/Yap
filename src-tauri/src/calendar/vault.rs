@@ -47,7 +47,7 @@ pub fn delete(slot: &str) {
 /// The credential's user name for `slot`.
 #[cfg_attr(not(windows), allow(dead_code))]
 fn user(slot: &str) -> String {
-    match crate::portable::is_portable() {
+    match crate::shell::portable::is_portable() {
         true => {
             use sha2::{Digest, Sha256};
             let dir = crate::config::data_dir().to_string_lossy().to_lowercase();
@@ -135,7 +135,7 @@ mod test_store {
     use std::path::PathBuf;
 
     pub fn active() -> bool {
-        crate::e2e::active()
+        crate::shell::e2e::active()
     }
 
     fn path() -> PathBuf {

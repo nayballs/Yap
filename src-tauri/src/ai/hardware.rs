@@ -37,7 +37,7 @@ pub struct Machine {
 
 impl Machine {
     /// From what `yap.exe bench` read.
-    pub fn from_hardware(hw: &crate::bench::Hardware) -> Machine {
+    pub fn from_hardware(hw: &crate::shell::bench::Hardware) -> Machine {
         let gpu = crate::ai::gpu::best(&hw.gpus().map(|a| a.gpu.clone()).collect::<Vec<_>>()).cloned();
         Machine { gpu, threads: hw.threads, ram_mib: u64::from(hw.ram_gb) * 1024 }
     }
@@ -54,7 +54,7 @@ impl Machine {
         #[cfg_attr(not(debug_assertions), allow(unused_mut))]
         let mut m = Machine { gpu: crate::ai::gpu::this_pc(), threads, ram_mib };
         #[cfg(debug_assertions)]
-        if crate::e2e::active() {
+        if crate::shell::e2e::active() {
             let var = |k: &str| std::env::var(k).ok().and_then(|v| v.trim().parse::<u64>().ok());
             if let Some(t) = var("YAP_E2E_CPU_THREADS") {
                 m.threads = t as u32;
@@ -125,7 +125,7 @@ pub fn speech_device_before_measuring(gpu: Option<&Gpu>) -> Device {
 /// machine it runs on has.)
 pub fn speech_device_here() -> Device {
     #[cfg(debug_assertions)]
-    if crate::e2e::active() && std::env::var_os("YAP_E2E_GPU").is_none() {
+    if crate::shell::e2e::active() && std::env::var_os("YAP_E2E_GPU").is_none() {
         return Device::Gpu;
     }
     speech_device_before_measuring(crate::ai::gpu::this_pc().as_ref())

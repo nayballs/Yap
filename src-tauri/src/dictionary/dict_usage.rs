@@ -119,10 +119,10 @@ pub fn record(dict: &[DictionaryEntry], text: &str) {
 
 /// dictionary_usage.json's saves (`saving.rs`): a failed one keeps the
 /// counts in memory, is tried again with the next save, and is said once.
-pub static SAVER: crate::saving::Saver = crate::saving::Saver::new("dictionaryUsage", "your dictionary's word counts", save_now);
+pub static SAVER: crate::shell::saving::Saver = crate::shell::saving::Saver::new("dictionaryUsage", "your dictionary's word counts", save_now);
 
 /// Write the counts again (Try again).
-fn save_now() -> Result<(), crate::saving::SaveError> {
+fn save_now() -> Result<(), crate::shell::saving::SaveError> {
     if let Ok(guard) = STORE.lock() {
         if let Some(usage) = guard.as_ref() {
             let _ = SAVER.write_json(&path(), usage, true);

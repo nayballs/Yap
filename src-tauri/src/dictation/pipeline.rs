@@ -522,7 +522,7 @@ pub(crate) fn set_test_target(on: bool) {
 #[cfg(debug_assertions)]
 pub(crate) fn test_target() -> Option<isize> {
     let h = TEST_TARGET.load(Ordering::SeqCst);
-    (h != 0 && crate::e2e::active() && !crate::realtest::on()).then_some(h)
+    (h != 0 && crate::shell::e2e::active() && !crate::shell::realtest::on()).then_some(h)
 }
 
 /// Robot mode only (`realtest.rs`): a WAV is playing into the dictation in
@@ -2209,7 +2209,7 @@ impl Shared {
             // A test run's pace (`e2e_upload_pace`): the job still going
             // when a spec comes back to the view.
             #[cfg(debug_assertions)]
-            if let Some(pace) = crate::e2e::upload_pace() {
+            if let Some(pace) = crate::shell::e2e::upload_pace() {
                 tokio::time::sleep(pace).await;
             }
         }
@@ -2254,7 +2254,7 @@ impl Shared {
     async fn deliver(self: &Arc<Self>, text: String) -> Delivered {
         // Test mode's crash on purpose (`e2e_crash_next_dictation`).
         #[cfg(debug_assertions)]
-        if crate::e2e::active() && CRASH_NEXT.swap(false, Ordering::SeqCst) {
+        if crate::shell::e2e::active() && CRASH_NEXT.swap(false, Ordering::SeqCst) {
             panic!("e2e: a dictation crashing in its paste, on purpose");
         }
         // "Snip" (or "take a screenshot") as the whole dictation: Snip to
@@ -3269,7 +3269,7 @@ impl Pipeline {
             let spawned = std::thread::Builder::new().name("stt-load".into()).spawn(move || {
                 // Test mode: a slow load, to see a dictation wait for it.
                 #[cfg(debug_assertions)]
-                if crate::e2e::active() {
+                if crate::shell::e2e::active() {
                     if let Some(ms) = std::env::var("YAP_E2E_MODEL_LOAD_MS").ok().and_then(|v| v.trim().parse::<u64>().ok()) {
                         tracing::info!(ms, "e2e: the speech model loads slowly");
                         std::thread::sleep(Duration::from_millis(ms));

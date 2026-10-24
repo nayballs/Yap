@@ -77,7 +77,7 @@ pub(crate) fn fit_rect(window: (i32, i32, u32, u32), area: (i32, i32, u32, u32))
 /// process the foreground, tao falls back to pressing Alt in whichever app has
 /// focus — the developer's, while the suite runs beside them.
 fn focus(w: &tauri::WebviewWindow) {
-    if !crate::e2e::active() {
+    if !crate::shell::e2e::active() {
         let _ = w.set_focus();
     }
 }
@@ -266,7 +266,7 @@ pub fn configure_snip_hotkey(spec: String) {
 #[cfg(debug_assertions)]
 #[tauri::command]
 pub async fn e2e_dictation(state: State<'_, AppState>, text: String) -> Result<crate::dictation::pipeline::Delivered, String> {
-    if !crate::e2e::active() {
+    if !crate::shell::e2e::active() {
         return Err("e2e_dictation is for test runs".into());
     }
     let robot = {
@@ -285,7 +285,7 @@ pub async fn e2e_dictation(state: State<'_, AppState>, text: String) -> Result<c
 #[cfg(debug_assertions)]
 #[tauri::command]
 pub async fn e2e_rewrite(state: State<'_, AppState>, text: String) -> Result<crate::dictation::pipeline::Rewritten, String> {
-    if !crate::e2e::active() {
+    if !crate::shell::e2e::active() {
         return Err("e2e_rewrite is for test runs".into());
     }
     let robot = {
@@ -301,7 +301,7 @@ pub async fn e2e_rewrite(state: State<'_, AppState>, text: String) -> Result<cra
 #[cfg(debug_assertions)]
 #[tauri::command]
 pub fn e2e_target_window(on: bool) -> Result<(), String> {
-    if !crate::e2e::active() || crate::realtest::on() {
+    if !crate::shell::e2e::active() || crate::shell::realtest::on() {
         return Err("e2e_target_window is for test runs (not robot mode)".into());
     }
     crate::dictation::pipeline::set_test_target(on);
@@ -358,7 +358,7 @@ pub fn chat_input_focus(focused: bool) {
 #[cfg(debug_assertions)]
 #[tauri::command]
 pub async fn e2e_chat_dictation(state: State<'_, AppState>, text: String) -> Result<crate::dictation::pipeline::Delivered, String> {
-    if !crate::e2e::active() {
+    if !crate::shell::e2e::active() {
         return Err("e2e_chat_dictation is for test runs".into());
     }
     let robot = {
@@ -2035,7 +2035,7 @@ fn apply_config(app: &AppHandle, state: State<'_, AppState>, prev: &YapConfig, c
     crate::dictation::input_hook::configure_transforms_from(&cfg);
     // The tray's Transforms menu follows the list.
     if cfg.transforms != prev.transforms {
-        crate::tray::refresh(&app);
+        crate::shell::tray::refresh(&app);
     }
     // "Keep chat screenshots" shortened: the older ones go now.
     if cfg.chat_image_days != prev.chat_image_days {
@@ -2051,7 +2051,7 @@ fn apply_config(app: &AppHandle, state: State<'_, AppState>, prev: &YapConfig, c
     crate::voice::tts::set_volume(cfg.tts_volume);
     // The tray is reconciled on every save (always-on since the pill retired) —
     // reconcile it live instead of waiting for the next app restart.
-    crate::tray::ensure_tray(&app, &cfg);
+    crate::shell::tray::ensure_tray(&app, &cfg);
     // This save may have newly selected on-device cleanup (globally or via a
     // per-profile override) — start the sidecar now rather than on next launch.
     let cfg_for_sidecar = cfg.clone();
@@ -2073,7 +2073,7 @@ fn apply_config(app: &AppHandle, state: State<'_, AppState>, prev: &YapConfig, c
     crate::notices::notice::sync(&cfg);
     // …and the theme: the opaque windows' webview backgrounds (theme.rs; the
     // pages follow `yap-config-saved`).
-    crate::theme::apply(&app, &cfg);
+    crate::shell::theme::apply(&app, &cfg);
     if let Ok(guard) = state.pipeline.lock() {
         if let Some(p) = guard.as_ref() {
             p.update_config(cfg);
@@ -2183,7 +2183,7 @@ pub fn open_external(app: AppHandle, url: String) -> Result<(), String> {
         return Err("Yap only opens web and email links.".to_string());
     }
     let url = url.trim();
-    if crate::e2e::active() {
+    if crate::shell::e2e::active() {
         tracing::info!("e2e: would open a link in the browser");
         if let Ok(mut opened) = E2E_OPENED_URLS.lock() {
             opened.push(url.to_string());
@@ -2200,7 +2200,7 @@ pub fn open_external(app: AppHandle, url: String) -> Result<(), String> {
 #[cfg(debug_assertions)]
 #[tauri::command]
 pub fn e2e_opened_urls() -> Result<Vec<String>, String> {
-    if !crate::e2e::active() {
+    if !crate::shell::e2e::active() {
         return Err("Only in e2e test mode".to_string());
     }
     Ok(E2E_OPENED_URLS.lock().map(|o| o.clone()).unwrap_or_default())
@@ -2559,7 +2559,7 @@ pub fn frontend_log(msg: String) {
 /// the in-place updater can't safely replace a portable folder.
 #[tauri::command]
 pub fn is_portable() -> bool {
-    crate::portable::is_portable()
+    crate::shell::portable::is_portable()
 }
 
 /// Model ids whose download is currently in flight, so two concurrent downloads

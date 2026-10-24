@@ -438,7 +438,7 @@ mod platform {
                 mem::size_of::<INPUT>() as i32,
             )
         };
-        crate::realtest::check_after(target, "paste");
+        crate::shell::realtest::check_after(target, "paste");
 
         tracing::debug!(
             sent,
@@ -1003,7 +1003,7 @@ pub enum Delivery {
 /// Simulate the auto-submit keystroke in the focused window. `key` is one of
 /// "enter", "ctrlEnter", or "shiftEnter".
 pub async fn press_submit(key: &str) -> Result<(), String> {
-    if crate::e2e::active() && !crate::realtest::on() {
+    if crate::shell::e2e::active() && !crate::shell::realtest::on() {
         info!("e2e: not pressing {} in another app", key);
         return Ok(());
     }
@@ -1011,7 +1011,7 @@ pub async fn press_submit(key: &str) -> Result<(), String> {
     tokio::task::spawn_blocking(move || {
         // Robot mode: only in a window the test opened, checked right
         // before the key goes out (always fine in a normal run).
-        crate::realtest::recheck_foreground(None, &format!("press {key}"))?;
+        crate::shell::realtest::recheck_foreground(None, &format!("press {key}"))?;
         // An app running as administrator would drop the key anyway.
         if current_foreground().is_some_and(crate::pasting::elevated::target_blocked) {
             info!(key, "Not pressing the key: the app runs as administrator");
@@ -1019,7 +1019,7 @@ pub async fn press_submit(key: &str) -> Result<(), String> {
         }
         #[cfg(target_os = "windows")]
         platform::press_submit(&key);
-        crate::realtest::check_after(None, &format!("{key} key"));
+        crate::shell::realtest::check_after(None, &format!("{key} key"));
         #[cfg(not(target_os = "windows"))]
         {
             let _ = &key;
@@ -1114,7 +1114,7 @@ pub fn window_process(hwnd: isize) -> Option<u32> {
 /// restores the original clipboard. Returns `None` if nothing was selected
 /// (clipboard stayed empty) or off Windows.
 pub fn selection_via_copy(target_hwnd: Option<isize>) -> Option<String> {
-    if crate::e2e::active() {
+    if crate::shell::e2e::active() {
         info!("e2e: not sending Ctrl+C to another app");
         return None;
     }
@@ -1361,16 +1361,16 @@ fn paste_last_blocking(app: &tauri::AppHandle, as_said: bool) -> Result<String, 
         }
         Ok(out)
     };
-    if crate::e2e::active() && !crate::realtest::on() {
+    if crate::shell::e2e::active() && !crate::shell::realtest::on() {
         return test_mode();
     }
     #[cfg(target_os = "windows")]
     {
         let target = platform::paste_target();
-        match crate::realtest::gate(target, "paste the last transcript") {
-            crate::realtest::Gate::Go => {}
-            crate::realtest::Gate::TestMode => return test_mode(),
-            crate::realtest::Gate::Refused(why) => return Err(why),
+        match crate::shell::realtest::gate(target, "paste the last transcript") {
+            crate::shell::realtest::Gate::Go => {}
+            crate::shell::realtest::Gate::TestMode => return test_mode(),
+            crate::shell::realtest::Gate::Refused(why) => return Err(why),
         }
         // An app running as administrator: on the clipboard, as it is.
         if target.is_some_and(crate::pasting::elevated::target_blocked) {
@@ -1454,7 +1454,7 @@ pub async fn inject_text(
 ) -> Result<Delivery, String> {
     // An Undo whose window has closed since: never into another one.
     if strict && target_hwnd.is_some_and(|h| !window_exists(h)) {
-        if crate::e2e::active() && !crate::realtest::on() {
+        if crate::shell::e2e::active() && !crate::shell::realtest::on() {
             info!("e2e: the dictation's window is gone; not pasting the text");
             return Ok(Delivery::WindowGone);
         }
@@ -1468,9 +1468,9 @@ pub async fn inject_text(
     }
     // An e2e test run never pastes into another app (or touches the
     // clipboard); robot mode only into a window the test opened.
-    match crate::realtest::gate(target_hwnd, "paste") {
-        crate::realtest::Gate::Go => {}
-        crate::realtest::Gate::TestMode => {
+    match crate::shell::realtest::gate(target_hwnd, "paste") {
+        crate::shell::realtest::Gate::Go => {}
+        crate::shell::realtest::Gate::TestMode => {
             if crate::pasting::elevated::test_override() {
                 info!(len = text.len(), "e2e: the target counts as an admin app; not pasting the text");
                 return Ok(Delivery::LeftOnClipboard);
@@ -1478,7 +1478,7 @@ pub async fn inject_text(
             info!(len = text.len(), "e2e: not pasting the text");
             return Ok(Delivery::Pasted);
         }
-        crate::realtest::Gate::Refused(why) => return Err(why),
+        crate::shell::realtest::Gate::Refused(why) => return Err(why),
     }
     let text = text.to_string();
 
@@ -1579,10 +1579,10 @@ fn inject_text_sync(
             warn!("Couldn't put the text on the clipboard; typing it instead");
             // Robot mode: still the test's window in front (always fine in a
             // normal run).
-            let checked = crate::realtest::recheck_foreground(target_hwnd, "type the text");
+            let checked = crate::shell::realtest::recheck_foreground(target_hwnd, "type the text");
             if checked.is_ok() {
                 platform::type_unicode(text);
-                crate::realtest::check_after(target_hwnd, "typing");
+                crate::shell::realtest::check_after(target_hwnd, "typing");
             }
             if let Some(prev) = previous {
                 clip::restore(prev, private);
@@ -1605,7 +1605,7 @@ fn inject_text_sync(
 
         // Robot mode: the window in front must still be the test's, and the
         // one this paste is for — checked right before the keys go out.
-        if let Err(why) = crate::realtest::recheck_foreground(target_hwnd, "paste") {
+        if let Err(why) = crate::shell::realtest::recheck_foreground(target_hwnd, "paste") {
             if let Some(prev) = previous {
                 clip::restore(prev, private);
             }
@@ -1627,7 +1627,7 @@ fn inject_text_sync(
                 crate::pasting::selection::Landed::Unknown => debug!("Couldn't tell whether the paste reached the field"),
                 crate::pasting::selection::Landed::No => {
                     let checked = if check.still_focused() {
-                        crate::realtest::recheck_foreground(target_hwnd, "type the text")
+                        crate::shell::realtest::recheck_foreground(target_hwnd, "type the text")
                     } else {
                         Err("the field lost the focus".to_string())
                     };
@@ -1639,7 +1639,7 @@ fn inject_text_sync(
                                 PASTE_LANDS_MS
                             );
                             platform::type_unicode(text);
-                            crate::realtest::check_after(target_hwnd, "typing");
+                            crate::shell::realtest::check_after(target_hwnd, "typing");
                             delivery = Delivery::Typed;
                         }
                         Err(why) => warn!("The paste didn't reach the field, and it can't be typed there: {why}"),

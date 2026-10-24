@@ -264,7 +264,7 @@ fn respond_no_content(request: tiny_http::Request) {
 /// answer), or a 500 `save_failed` with the person's words when the save
 /// failed (`saving.rs`: the change is kept in memory and saved with the
 /// next one), so an AI app never says it saved what didn't reach the disk.
-fn respond_saved(request: tiny_http::Request, saved: Result<(), crate::saving::SaveError>, ok: impl FnOnce(tiny_http::Request)) {
+fn respond_saved(request: tiny_http::Request, saved: Result<(), crate::shell::saving::SaveError>, ok: impl FnOnce(tiny_http::Request)) {
     match saved {
         Ok(()) => ok(request),
         Err(e) => respond_error(request, 500, "save_failed", &e.to_string()),

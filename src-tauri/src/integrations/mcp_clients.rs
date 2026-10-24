@@ -166,7 +166,7 @@ fn bases() -> Result<Bases, String> {
     }
     // A test instance that wasn't given a stand-in still never writes to the
     // developer's own AI apps.
-    if crate::e2e::active() {
+    if crate::shell::e2e::active() {
         return Ok(Bases::under(crate::config::data_dir().join("mcp-clients")));
     }
     let missing = || "Couldn't find your user folders".to_string();
@@ -657,7 +657,7 @@ fn edit_file(path: &Path, format: Format, exe: &str, add: bool) -> Result<bool, 
 /// the local API — so the installed copy serves the dev build's notes too.
 fn exe() -> Result<String, String> {
     #[cfg(debug_assertions)]
-    if !crate::e2e::active() {
+    if !crate::shell::e2e::active() {
         if let Some(installed) = installed_exe() {
             return Ok(installed);
         }

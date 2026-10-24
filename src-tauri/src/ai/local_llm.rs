@@ -868,7 +868,7 @@ static E2E_BUSY: AtomicBool = AtomicBool::new(false);
 
 #[cfg(debug_assertions)]
 fn e2e_serving() -> Option<E2eServing> {
-    if !crate::e2e::active() {
+    if !crate::shell::e2e::active() {
         return None;
     }
     E2E_SERVING.lock().ok()?.clone()
@@ -889,7 +889,7 @@ pub fn e2e_local_llm_serving(
     ctx: Option<u32>,
     used_mib: Option<u64>,
 ) -> Result<(), String> {
-    if !crate::e2e::active() {
+    if !crate::shell::e2e::active() {
         return Err("Only in e2e test mode".to_string());
     }
     let ctx = ctx.unwrap_or_else(|| context_for(&crate::config::load()));
@@ -915,7 +915,7 @@ pub fn e2e_local_llm_restarts() -> u32 {
 #[cfg(debug_assertions)]
 #[tauri::command]
 pub fn e2e_local_llm_busy(busy: bool) -> Result<(), String> {
-    if !crate::e2e::active() {
+    if !crate::shell::e2e::active() {
         return Err("Only in e2e test mode".to_string());
     }
     E2E_BUSY.store(busy, Ordering::SeqCst);
@@ -1416,7 +1416,7 @@ async fn spawn_and_wait(attempt: Attempt, gen: u64) -> Result<Started, Failed> {
         .spawn()
         .map_err(|e| fail(Failure::Launch(format!("failed to launch llamafile: {}", e))))?;
     // The model never keeps running after Yap: a crash or End task ends it too.
-    crate::procs::end_with_yap(&child);
+    crate::shell::procs::end_with_yap(&child);
     *CHILD.lock().unwrap_or_else(|p| p.into_inner()) = Some(child);
     PORT.store(port, Ordering::SeqCst);
     READY.store(false, Ordering::SeqCst);
@@ -1578,8 +1578,8 @@ pub async fn ensure_started() -> Result<String, String> {
 /// Yap is gone count: a dev build must not kill the installed app's live one.
 #[cfg(windows)]
 pub fn kill_orphans() {
-    for pid in crate::procs::orphaned(RUNTIME_FILENAME) {
-        if crate::procs::kill(pid) {
+    for pid in crate::shell::procs::orphaned(RUNTIME_FILENAME) {
+        if crate::shell::procs::kill(pid) {
             tracing::info!("Killed orphaned cleanup sidecar (pid {})", pid);
         }
     }
@@ -1724,7 +1724,7 @@ pub fn restart_pending() -> bool {
 fn pipeline_busy(app: &AppHandle) -> bool {
     use tauri::Manager;
     #[cfg(debug_assertions)]
-    if crate::e2e::active() && E2E_BUSY.load(Ordering::SeqCst) {
+    if crate::shell::e2e::active() && E2E_BUSY.load(Ordering::SeqCst) {
         return true;
     }
     if crate::dictation::pipeline::dictation_state().1 {
@@ -1781,7 +1781,7 @@ pub fn restart_when_idle(app: AppHandle) {
 /// Stop and start the sidecar when it serves another context than `wanted`.
 async fn restart_on(wanted: u32) -> Result<(), String> {
     #[cfg(debug_assertions)]
-    if crate::e2e::active() {
+    if crate::shell::e2e::active() {
         // The stand-in "restarts"; a test run never starts a real model.
         if let Ok(mut g) = E2E_SERVING.lock() {
             if let Some(s) = g.as_mut().filter(|s| s.ctx != wanted) {
@@ -1880,7 +1880,7 @@ pub fn spawn_runtime_upgrade(app: AppHandle) {
 /// When the upgrade first looks; `None` = never (a test run that didn't
 /// ask for it with `YAP_E2E_RUNTIME_UPGRADE_MS`, debug builds).
 fn first_look() -> Option<Duration> {
-    if crate::e2e::active() {
+    if crate::shell::e2e::active() {
         #[cfg(debug_assertions)]
         if let Some(ms) = std::env::var("YAP_E2E_RUNTIME_UPGRADE_MS").ok().and_then(|v| v.trim().parse().ok()) {
             return Some(Duration::from_millis(ms));
@@ -1954,7 +1954,7 @@ impl Drop for UpgradeLock {
 
 #[cfg(windows)]
 fn running_yap(pid: u32) -> bool {
-    crate::procs::is_running_yap(pid)
+    crate::shell::procs::is_running_yap(pid)
 }
 #[cfg(not(windows))]
 fn running_yap(_pid: u32) -> bool {
@@ -1965,7 +1965,7 @@ fn running_yap(_pid: u32) -> bool {
 /// running the runtime in this `llm/`: a swap waits for it to stop.
 #[cfg(windows)]
 fn other_yaps_sidecar() -> bool {
-    crate::procs::sidecars_of_other_yaps(&llm_dir(), RUNTIME_FILENAME) > 0
+    crate::shell::procs::sidecars_of_other_yaps(&llm_dir(), RUNTIME_FILENAME) > 0
 }
 #[cfg(not(windows))]
 fn other_yaps_sidecar() -> bool {
@@ -2080,7 +2080,7 @@ pub async fn upgrade_runtime(app: &AppHandle) -> UpgradeStep {
     if !upgrade_due(dir.join(RUNTIME_FILENAME).is_file(), marker.as_ref(), &sha) {
         return UpgradeStep::Done;
     }
-    let test_run = crate::e2e::active();
+    let test_run = crate::shell::e2e::active();
     if test_run && !allowed_in_test_run(&url) {
         return UpgradeStep::Done; // a test run without a stand-in runtime
     }
@@ -2197,7 +2197,7 @@ pub async fn probe_version(exe: &Path) -> Option<Version> {
             cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
         }
         let child = cmd.spawn().ok()?;
-        crate::procs::end_with_yap(&child);
+        crate::shell::procs::end_with_yap(&child);
         let out = child.wait_with_output().ok()?;
         let text = format!("{}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
         Version::parse(&text)
@@ -2724,7 +2724,7 @@ async fn download_for(
     model: &str,
     app: Option<&AppHandle>,
 ) -> Result<(), String> {
-    if crate::e2e::active() && !allowed_in_test_run(url) {
+    if crate::shell::e2e::active() && !allowed_in_test_run(url) {
         return Err("Test runs never download models from the internet".to_string());
     }
     let partial = dest.with_extension("partial");

@@ -339,7 +339,7 @@ pub fn window_view(app: &AppHandle) -> (bool, bool) {
     app.get_webview_window("settings")
         .map(|w| {
             let visible = w.is_visible().unwrap_or(false) && !w.is_minimized().unwrap_or(false);
-            let focused = if crate::e2e::active() {
+            let focused = if crate::shell::e2e::active() {
                 TEST_FOCUS.load(Ordering::SeqCst) == 0
             } else {
                 w.is_focused().unwrap_or(false)
@@ -441,7 +441,7 @@ pub fn admit(kind: &str, title: &str, body: &str) -> bool {
 fn windows_busy() -> bool {
     #[cfg(windows)]
     {
-        if crate::e2e::active() {
+        if crate::shell::e2e::active() {
             return false;
         }
         // 5 = QUNS_ACCEPTS_NOTIFICATIONS; 0 = the query failed.
@@ -596,10 +596,10 @@ pub fn with_call_fatigue<T>(f: impl FnOnce(Fatigue) -> (Fatigue, T)) -> T {
 
 /// notices.json's saves (`saving.rs`): a failed one keeps the counts in
 /// memory, is tried again with the next save, and is said once.
-pub static SAVER: crate::saving::Saver = crate::saving::Saver::new("notices", "how you answered call prompts", save_now);
+pub static SAVER: crate::shell::saving::Saver = crate::shell::saving::Saver::new("notices", "how you answered call prompts", save_now);
 
 /// Write the counts again (Try again).
-fn save_now() -> Result<(), crate::saving::SaveError> {
+fn save_now() -> Result<(), crate::shell::saving::SaveError> {
     if let Some(store) = STORE.lock().unwrap_or_else(|p| p.into_inner()).as_ref() {
         let _ = SAVER.write_json(&store_path(), store, true);
     }
@@ -614,7 +614,7 @@ fn save_now() -> Result<(), crate::saving::SaveError> {
 #[cfg(debug_assertions)]
 #[tauri::command]
 pub fn e2e_notice_reset() -> Result<(), String> {
-    if !crate::e2e::active() {
+    if !crate::shell::e2e::active() {
         return Err("Only in e2e test mode".to_string());
     }
     *LEDGER.lock().unwrap_or_else(|p| p.into_inner()) = None;
@@ -629,7 +629,7 @@ pub fn e2e_notice_reset() -> Result<(), String> {
 #[cfg(debug_assertions)]
 #[tauri::command]
 pub fn e2e_focus(app: AppHandle, focused: bool) -> Result<(), String> {
-    if !crate::e2e::active() {
+    if !crate::shell::e2e::active() {
         return Err("Only in e2e test mode".to_string());
     }
     TEST_FOCUS.store(if focused { 0 } else { 1 }, Ordering::SeqCst);
@@ -662,7 +662,7 @@ pub fn e2e_notice(
     dictating: Option<bool>,
 ) -> Result<bool, String> {
     use tauri::Emitter;
-    if !crate::e2e::active() {
+    if !crate::shell::e2e::active() {
         return Err("Only in e2e test mode".to_string());
     }
     if let Some(on) = dictating {

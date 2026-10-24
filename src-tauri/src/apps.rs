@@ -198,7 +198,7 @@ pub fn apps(refresh: bool) -> Arc<Vec<App>> {
     }
     #[cfg(not(test))]
     {
-        if crate::e2e::active() {
+        if crate::shell::e2e::active() {
             return Arc::new(tidy(stand_ins()));
         }
         let cached = || {
@@ -1613,7 +1613,7 @@ static OPENED: Mutex<Vec<(String, String)>> = Mutex::new(Vec::new());
 /// Open `app` — an entry of the index, never anything a model wrote. A test
 /// run never launches anything: it records the open (`e2e_opened_apps`).
 pub fn open(app: &App) -> Result<(), String> {
-    if cfg!(test) || crate::e2e::active() {
+    if cfg!(test) || crate::shell::e2e::active() {
         tracing::info!(app = %app.name, "Opening an app (test run: recorded, not launched)");
         OPENED.lock().unwrap_or_else(|p| p.into_inner()).push((app.id.clone(), app.name.clone()));
         return Ok(());
@@ -1621,7 +1621,7 @@ pub fn open(app: &App) -> Result<(), String> {
     #[cfg(windows)]
     {
         let entry = app.clone();
-        let since = crate::procs::now_filetime();
+        let since = crate::shell::procs::now_filetime();
         let launched = win::on_sta(move || win::launch(&entry)).unwrap_or_else(|| Err("its thread failed".to_string()));
         match launched {
             Ok((pid, how)) => {
@@ -1672,7 +1672,7 @@ static ICONS: Mutex<Option<HashMap<String, Option<String>>>> = Mutex::new(None);
 /// the apps Settings shows. Made once per run; test mode has none.
 #[tauri::command]
 pub async fn apps_icons(ids: Vec<String>) -> Result<HashMap<String, String>, String> {
-    if crate::e2e::active() {
+    if crate::shell::e2e::active() {
         return Ok(HashMap::new());
     }
     tauri::async_runtime::spawn_blocking(move || icons(&ids)).await.map_err(|e| e.to_string())
@@ -1713,7 +1713,7 @@ fn icons(ids: &[String]) -> HashMap<String, String> {
 #[cfg(debug_assertions)]
 #[tauri::command]
 pub fn e2e_opened_apps(clear: Option<bool>) -> Result<Vec<Value>, String> {
-    if !crate::e2e::active() {
+    if !crate::shell::e2e::active() {
         return Err("Only in e2e test mode".to_string());
     }
     let mut opened = OPENED.lock().unwrap_or_else(|p| p.into_inner());
@@ -2114,7 +2114,7 @@ mod win {
     pub fn bring_forward(pid: u32, since: u64) {
         let started = std::time::Instant::now();
         while started.elapsed() < std::time::Duration::from_secs(8) {
-            if let Some(hwnd) = crate::procs::family(pid, since).into_iter().find_map(main_window) {
+            if let Some(hwnd) = crate::shell::procs::family(pid, since).into_iter().find_map(main_window) {
                 // SAFETY: input attached to the foreground window's thread
                 // for the switch, and detached again.
                 unsafe {
@@ -3049,7 +3049,7 @@ pub(crate) mod tests {
         use windows::Win32::Foundation::{LPARAM, WPARAM};
         use windows::Win32::UI::WindowsAndMessaging::{PostMessageW, WM_CLOSE};
         let running = |name: &str| -> Vec<u32> {
-            crate::procs::exe_names().into_iter().filter(|(_, exe)| exe == name).map(|(pid, _)| pid).collect()
+            crate::shell::procs::exe_names().into_iter().filter(|(_, exe)| exe == name).map(|(pid, _)| pid).collect()
         };
         if !running("notepad.exe").is_empty() {
             println!("SKIPPED: a Notepad is already running; this test only closes a Notepad it started");
@@ -3088,7 +3088,7 @@ pub(crate) mod tests {
         while running("notepad.exe").contains(&pid) {
             if closing.elapsed() > Duration::from_secs(5) {
                 println!("Notepad (pid {pid}) didn't close by itself; ending that process");
-                assert!(crate::procs::kill(pid));
+                assert!(crate::shell::procs::kill(pid));
                 break;
             }
             std::thread::sleep(Duration::from_millis(100));
@@ -3160,7 +3160,7 @@ pub(crate) mod tests {
         use windows::Win32::Foundation::{HWND, LPARAM, WPARAM};
         use windows::Win32::UI::WindowsAndMessaging::{PostMessageW, WM_CLOSE};
         let running = |name: &str| -> Vec<u32> {
-            crate::procs::exe_names().into_iter().filter(|(_, exe)| exe == name).map(|(pid, _)| pid).collect()
+            crate::shell::procs::exe_names().into_iter().filter(|(_, exe)| exe == name).map(|(pid, _)| pid).collect()
         };
         let base = std::env::var_os("YAP_SHORTCUT_TEST_DIR").map(std::path::PathBuf::from).unwrap_or_else(std::env::temp_dir);
         let dir = base.join(format!("yap-shortcut-test-{}", std::process::id()));
@@ -3260,7 +3260,7 @@ pub(crate) mod tests {
             let closing = Instant::now();
             while running("notepad.exe").contains(&pid) {
                 if closing.elapsed() > Duration::from_secs(5) {
-                    assert!(crate::procs::kill(pid));
+                    assert!(crate::shell::procs::kill(pid));
                     break;
                 }
                 std::thread::sleep(Duration::from_millis(100));

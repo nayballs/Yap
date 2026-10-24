@@ -185,17 +185,17 @@ fn load_store() -> Store {
 /// memory, is tried again with the next save (the next sync), and is said
 /// once — by the command that hit it ([`saved`]) or the notice. File I/O
 /// only, so it's fine under the runtime's lock.
-pub static SAVER: crate::saving::Saver = crate::saving::Saver::new("calendar", "your calendar", save_now);
+pub static SAVER: crate::shell::saving::Saver = crate::shell::saving::Saver::new("calendar", "your calendar", save_now);
 
 /// `Ok` when the calendar is on disk; else why not (the caller says it).
 /// Never under the runtime's lock.
-pub fn saved() -> Result<(), crate::saving::SaveError> {
+pub fn saved() -> Result<(), crate::shell::saving::SaveError> {
     SAVER.check()
 }
 
 /// Write the store again (Try again). Only once `init` loaded it: never an
 /// empty one over calendar.json.
-fn save_now() -> Result<(), crate::saving::SaveError> {
+fn save_now() -> Result<(), crate::shell::saving::SaveError> {
     if let Some(s) = lock_started() {
         save_store(&s.store);
     }
@@ -829,7 +829,7 @@ fn upcoming_count(events: &[Event], id: &str, now: i64) -> usize {
 /// Open `link` in the browser. Test runs never do: they keep it, for the
 /// suite to check (`calendar_e2e_opened`).
 fn open_link(app: &AppHandle, link: &str) -> Result<(), String> {
-    if crate::e2e::active() {
+    if crate::shell::e2e::active() {
         tracing::info!("e2e: would open a calendar link");
         lock().opened.push(link.to_string());
         return Ok(());
@@ -2194,7 +2194,7 @@ pub fn meetings_context(query: &str) -> String {
 #[cfg(debug_assertions)]
 #[tauri::command]
 pub fn calendar_e2e_opened() -> Result<Vec<String>, String> {
-    if !crate::e2e::active() {
+    if !crate::shell::e2e::active() {
         return Err("Only in e2e test mode".to_string());
     }
     Ok(lock().opened.clone())

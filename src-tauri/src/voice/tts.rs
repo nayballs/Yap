@@ -169,7 +169,7 @@ pub fn engine(id: &str) -> Arc<dyn Engine> {
     if id != WINDOWS && kokoro::available() {
         return Arc::new(kokoro::Kokoro);
     }
-    if crate::e2e::active() {
+    if crate::shell::e2e::active() {
         return Arc::new(StandIn);
     }
     Arc::new(WindowsVoices)
@@ -1676,7 +1676,7 @@ pub fn speak_streamed(message_id: Option<String>) -> Result<Arc<Feed>, String> {
     let Voicing { engine, voice, cloud } = voicing(&cfg);
     let feed = Arc::new(Feed::default());
     #[cfg(debug_assertions)]
-    if crate::e2e::active() {
+    if crate::shell::e2e::active() {
         feed.state.lock().unwrap_or_else(|p| p.into_inner()).record = Some(Spoken {
             message_id: message_id.clone(),
             text: String::new(),
@@ -1690,7 +1690,7 @@ pub fn speak_streamed(message_id: Option<String>) -> Result<Arc<Feed>, String> {
         });
     }
     let fallback = cloud.map(|plan| fallback_for(plan, message_id.clone(), rate));
-    let opener = if crate::e2e::active() { sim_opener() } else { rodio_opener(cfg.output_device) };
+    let opener = if crate::shell::e2e::active() { sim_opener() } else { rodio_opener(cfg.output_device) };
     let job = Job { message_id, sentences: Vec::new(), engine, voice, rate, fallback, track: None, first: 0, feed: Some(Arc::clone(&feed)) };
     let generation = speaker.start(job, opener)?;
     feed.attach(speaker, generation);
@@ -1739,7 +1739,7 @@ fn say(sentences: Vec<String>, message_id: Option<String>, voicing: Voicing, rat
     let Voicing { engine, voice, cloud } = voicing;
     let sentences = engine.prepare(sentences);
     #[cfg(debug_assertions)]
-    if crate::e2e::active() && !sentences.is_empty() {
+    if crate::shell::e2e::active() && !sentences.is_empty() {
         spoken().push(Spoken {
             message_id: message_id.clone(),
             text: sentences.join(" "),
@@ -1753,7 +1753,7 @@ fn say(sentences: Vec<String>, message_id: Option<String>, voicing: Voicing, rat
         });
     }
     let fallback = cloud.map(|plan| fallback_for(plan, message_id.clone(), rate));
-    let opener = if crate::e2e::active() { sim_opener() } else { rodio_opener(device) };
+    let opener = if crate::shell::e2e::active() { sim_opener() } else { rodio_opener(device) };
     let job = Job { message_id, sentences, engine, voice, rate, fallback, track: None, first: 0, feed: None };
     speaker.speak(job, opener)
 }
@@ -1781,7 +1781,7 @@ pub fn read(track: Arc<Track>, from: usize, message_id: String, rate: f32) -> Re
     let sentences: Vec<String> = track.all().get(from..).map(<[String]>::to_vec).unwrap_or_default();
     let Voicing { engine, voice, cloud } = voicing_for(&cfg, true);
     #[cfg(debug_assertions)]
-    if crate::e2e::active() && !sentences.is_empty() {
+    if crate::shell::e2e::active() && !sentences.is_empty() {
         let said: Vec<String> = sentences.iter().map(|s| said_text(s)).collect();
         spoken().push(Spoken {
             message_id: Some(message_id.clone()),
@@ -1796,7 +1796,7 @@ pub fn read(track: Arc<Track>, from: usize, message_id: String, rate: f32) -> Re
         });
     }
     let fallback = cloud.map(|plan| fallback_for(plan, Some(message_id.clone()), rate));
-    let opener = if crate::e2e::active() { sim_opener() } else { rodio_opener(cfg.output_device) };
+    let opener = if crate::shell::e2e::active() { sim_opener() } else { rodio_opener(cfg.output_device) };
     let job = Job { message_id: Some(message_id), sentences, engine, voice, rate, fallback, track: Some(track), first: from, feed: None };
     speaker.speak(job, opener)
 }
@@ -1829,7 +1829,7 @@ fn fallback_for(plan: CloudPlan, message_id: Option<String>, rate: f32) -> Fallb
         local,
         notify: Box::new(move |error: &str, left: &[String], took_over: bool| {
             #[cfg(debug_assertions)]
-            if let (true, Some((engine, voice))) = (crate::e2e::active(), record) {
+            if let (true, Some((engine, voice))) = (crate::shell::e2e::active(), record) {
                 spoken().push(Spoken {
                     message_id,
                     text: left.join(" "),
@@ -1918,7 +1918,7 @@ pub struct VoiceList {
 }
 
 fn windows_voices() -> EngineVoices {
-    let e: Arc<dyn Engine> = if crate::e2e::active() { Arc::new(StandIn) } else { Arc::new(WindowsVoices) };
+    let e: Arc<dyn Engine> = if crate::shell::e2e::active() { Arc::new(StandIn) } else { Arc::new(WindowsVoices) };
     let (voices, error) = match e.voices() {
         Ok(v) if v.is_empty() => (v, Some("Windows has no voices installed (Settings → Time & language → Speech)".to_string())),
         Ok(v) => (v, None),
@@ -2206,7 +2206,7 @@ fn spoken() -> std::sync::MutexGuard<'static, Vec<Spoken>> {
 #[cfg(debug_assertions)]
 #[tauri::command]
 pub fn tts_e2e_spoken(clear: Option<bool>) -> Result<Vec<Spoken>, String> {
-    if !crate::e2e::active() {
+    if !crate::shell::e2e::active() {
         return Err("tts_e2e_spoken is for test runs".into());
     }
     let mut s = spoken();

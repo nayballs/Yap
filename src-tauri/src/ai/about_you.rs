@@ -357,7 +357,7 @@ pub struct Detected {
 
 /// What Windows says (never read in a test run: [`stand_in`]).
 pub fn detected() -> Detected {
-    if crate::e2e::active() {
+    if crate::shell::e2e::active() {
         return stand_in();
     }
     windows_detected()

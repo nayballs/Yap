@@ -331,7 +331,7 @@ pub fn main(argv: Vec<String>) -> i32 {
         .ok()
         .and_then(|p| p.to_str().map(|s| PathBuf::from(s.strip_prefix(r"\\?\").unwrap_or(s))))
         .unwrap_or(run_dir);
-    if !crate::portable::use_data_dir(run_dir.join("data")) {
+    if !crate::shell::portable::use_data_dir(run_dir.join("data")) {
         eprintln!("The data dir was already decided; refusing to run against it.");
         return 2;
     }
@@ -343,7 +343,7 @@ pub fn main(argv: Vec<String>) -> i32 {
     if let Some(l) = &args.locale {
         std::env::set_var("YAP_E2E_LOCALE", l);
     }
-    if !crate::e2e::active() {
+    if !crate::shell::e2e::active() {
         eprintln!("Test mode didn't switch on; refusing to run (an app could really open).");
         return 2;
     }

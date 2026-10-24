@@ -106,7 +106,7 @@ fn launch(app: &Path, webview2: &Path) -> Launch {
         Ok(c) => c,
         Err(e) => return Launch { error: Some(format!("couldn't start the copy: {e}")), ..Default::default() },
     };
-    crate::procs::end_with_yap(&child);
+    crate::shell::procs::end_with_yap(&child);
     let pid = child.id();
     let logs = app.join("Data").join("logs");
     // (The second launch's log already has the first one's line.)

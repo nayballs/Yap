@@ -320,7 +320,7 @@ fn scheduling_allowed() -> bool {
 }
 
 fn portable() -> bool {
-    test_flag("YAP_UPDATE_TEST_PORTABLE").unwrap_or_else(crate::portable::is_portable)
+    test_flag("YAP_UPDATE_TEST_PORTABLE").unwrap_or_else(crate::shell::portable::is_portable)
 }
 
 pub(crate) fn metered() -> bool {
@@ -378,10 +378,10 @@ fn update_record(f: impl FnOnce(&mut Record)) {
 /// updates.json's saves (`saving.rs`): a failed one keeps the record in
 /// memory and is tried again with the next save; only logged (an update
 /// announced twice is all it costs).
-pub static SAVER: crate::saving::Saver = crate::saving::Saver::quiet("updates", "the update record", save_now);
+pub static SAVER: crate::shell::saving::Saver = crate::shell::saving::Saver::quiet("updates", "the update record", save_now);
 
 /// Write the record again (Try again).
-fn save_now() -> Result<(), crate::saving::SaveError> {
+fn save_now() -> Result<(), crate::shell::saving::SaveError> {
     let rec = RECORD.lock().unwrap_or_else(|p| p.into_inner()).clone();
     if let Some(rec) = rec {
         let _ = SAVER.write_json(&record_path(), &rec, true);
@@ -446,7 +446,7 @@ fn snapshot() -> Status {
 fn changed(app: &AppHandle) {
     REV.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
     let _ = app.emit(EVENT, snapshot());
-    crate::tray::refresh(app);
+    crate::shell::tray::refresh(app);
     #[cfg(windows)]
     notify::sync_progress(app);
 }
@@ -456,7 +456,7 @@ fn changed(app: &AppHandle) {
 /// (the in-app toast covers it); an e2e test run posts nothing to the
 /// developer's notification center.
 fn native_notifications() -> bool {
-    !portable() && !crate::e2e::active()
+    !portable() && !crate::shell::e2e::active()
 }
 
 fn mark_announced(a: &Announce) {

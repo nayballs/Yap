@@ -85,7 +85,7 @@ pub fn this_pc() -> Option<Gpu> {
 /// stands in for the card (the e2e suite's "Recommended for this PC").
 #[cfg(debug_assertions)]
 fn e2e_gpu() -> Option<Option<Gpu>> {
-    if !crate::e2e::active() {
+    if !crate::shell::e2e::active() {
         return None;
     }
     let spec = std::env::var("YAP_E2E_GPU").ok()?;
@@ -178,7 +178,7 @@ pub fn speech_adapter_of(all: &[Adapter]) -> Option<u32> {
 /// [`speech_adapter_of`] this PC (never in a test run: its card is a
 /// stand-in).
 pub fn speech_adapter() -> Option<u32> {
-    if crate::e2e::active() {
+    if crate::shell::e2e::active() {
         return None;
     }
     speech_adapter_of(&all_adapters())

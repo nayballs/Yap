@@ -170,7 +170,7 @@ pub fn act(app: &AppHandle, action: &str) {
             }
         }
         SHOW_OLD_SETTINGS => crate::config::show_old_file(app),
-        crate::saving::RETRY => crate::saving::retry_soon(app),
+        crate::shell::saving::RETRY => crate::shell::saving::retry_soon(app),
         "" => {}
         other => tracing::debug!("alert: no such action {other}"),
     }
@@ -178,7 +178,7 @@ pub fn act(app: &AppHandle, action: &str) {
 
 /// Open a Windows Settings page. A test run only says so in the log.
 fn open_uri(app: &AppHandle, uri: &str) {
-    if crate::e2e::active() {
+    if crate::shell::e2e::active() {
         tracing::info!("e2e: not opening {uri}");
         return;
     }

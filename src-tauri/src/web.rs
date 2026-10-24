@@ -250,7 +250,7 @@ impl Endpoints {
         };
         // A model evaluation's live web scenario (eval.rs) runs in test mode
         // but asks the real services and wikis.
-        if !crate::e2e::active() || crate::ai::eval::web_live() {
+        if !crate::shell::e2e::active() || crate::ai::eval::web_live() {
             return real;
         }
         #[cfg(debug_assertions)]

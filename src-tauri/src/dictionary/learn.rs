@@ -1082,7 +1082,7 @@ static WATCHES: AtomicU64 = AtomicU64::new(0);
 /// test run — in robot mode only a window the test opened
 /// (`realtest::permits`), the real-app tests' correction flow.
 pub fn after_paste(app: &AppHandle, pasted: &str, target: Option<isize>, enabled: bool) {
-    if !enabled || !crate::realtest::permits(target) {
+    if !enabled || !crate::shell::realtest::permits(target) {
         return;
     }
     let Some(hwnd) = target else {
@@ -1293,10 +1293,10 @@ fn update_record(f: impl FnOnce(Record) -> Record) {
 
 /// word_suggestions.json's saves (`saving.rs`): a failed one keeps the
 /// record in memory, is tried again with the next save, and is said once.
-pub static SAVER: crate::saving::Saver = crate::saving::Saver::new("wordSuggestions", "your word suggestion choices", save_now);
+pub static SAVER: crate::shell::saving::Saver = crate::shell::saving::Saver::new("wordSuggestions", "your word suggestion choices", save_now);
 
 /// Write the record again (Try again).
-fn save_now() -> Result<(), crate::saving::SaveError> {
+fn save_now() -> Result<(), crate::shell::saving::SaveError> {
     if let Some(rec) = RECORD.lock().unwrap_or_else(|p| p.into_inner()).as_ref() {
         let _ = SAVER.write_json(&record_path(), rec, true);
     }
@@ -1608,7 +1608,7 @@ pub async fn e2e_learn_correction(
     reads: Option<Vec<Option<String>>>,
     fresh: Option<bool>,
 ) -> Result<Vec<Suggestion>, String> {
-    if !crate::e2e::active() {
+    if !crate::shell::e2e::active() {
         return Err("Only in e2e test mode".to_string());
     }
     tauri::async_runtime::spawn_blocking(move || {

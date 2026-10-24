@@ -812,7 +812,7 @@ fn sync_tray(app: &AppHandle) {
     if *last != item {
         *last = item;
         drop(last);
-        crate::tray::refresh(app);
+        crate::shell::tray::refresh(app);
     }
 }
 
@@ -1253,7 +1253,7 @@ pub fn init(app: &AppHandle) {
         return;
     }
     #[cfg(windows)]
-    if !crate::e2e::active() {
+    if !crate::shell::e2e::active() {
         let _ = std::thread::Builder::new()
             .name("meeting-detect-watch".into())
             .spawn(move || registry::watch(tx));
@@ -1267,7 +1267,7 @@ fn detector(app: AppHandle, rx: mpsc::Receiver<()>) {
     loop {
         // Test mode reads no registry, so there's nothing to poll for.
         let polling =
-            !WATCHING.load(std::sync::atomic::Ordering::Relaxed) && !crate::e2e::active();
+            !WATCHING.load(std::sync::atomic::Ordering::Relaxed) && !crate::shell::e2e::active();
         let timeout = {
             let s = lock();
             if s.enabled && (s.tracker.busy() || s.due.is_some() || s.prompt.is_some()) {
@@ -1294,7 +1294,7 @@ fn detector(app: AppHandle, rx: mpsc::Receiver<()>) {
 /// Read who's on the mic, name the calls, and feed the debounce.
 fn scan(app: &AppHandle) {
     #[cfg(windows)]
-    let users = if crate::e2e::active() { Vec::new() } else { registry::mic_users() };
+    let users = if crate::shell::e2e::active() { Vec::new() } else { registry::mic_users() };
     #[cfg(not(windows))]
     let users: Vec<Source> = Vec::new();
 

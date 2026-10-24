@@ -106,7 +106,7 @@ fn spawn(files: &EngineFiles, every_ms: u64) -> Result<Child, String> {
     }
     let child = cmd.spawn().map_err(|e| format!("couldn't start the speaker engine: {e}"))?;
     // Ends with Yap, however Yap ends.
-    crate::procs::end_with_yap(&child);
+    crate::shell::procs::end_with_yap(&child);
     Ok(child)
 }
 
@@ -711,7 +711,7 @@ pub fn e2e_diarize_timeline(
     done: bool,
     error: Option<String>,
 ) -> Result<(), String> {
-    if !crate::e2e::active() {
+    if !crate::shell::e2e::active() {
         return Err("Only in e2e test mode".to_string());
     }
     let note_id = crate::meetings::meeting::recording_note().ok_or("No meeting is being recorded")?;

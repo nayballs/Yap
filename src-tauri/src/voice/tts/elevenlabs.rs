@@ -88,7 +88,7 @@ const MAX_PREVIEW_BYTES: usize = 4 * 1024 * 1024;
 /// The API's base: ElevenLabs — or, in a test run, the debug-only stand-in
 /// (`YAP_ELEVENLABS_URL`), never the internet.
 pub fn base() -> Result<String, String> {
-    if !crate::e2e::active() {
+    if !crate::shell::e2e::active() {
         return Ok(API.to_string());
     }
     #[cfg(debug_assertions)]
@@ -912,7 +912,7 @@ pub fn preview_url(voice: &str) -> Option<String> {
 /// Whether Yap may fetch a sample from `url`: https, no user name — or, in a
 /// test run, the stand-in's own address.
 pub fn sample_allowed(url: &str) -> bool {
-    if crate::e2e::active() {
+    if crate::shell::e2e::active() {
         return base().is_ok_and(|b| url.starts_with(&format!("{b}/")));
     }
     reqwest::Url::parse(url)

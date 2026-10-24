@@ -604,7 +604,7 @@ async fn time_local_cleanup(runtime: &Path, gguf: &Path, sc: &Scenario, work: &P
             return run;
         }
     };
-    crate::procs::end_with_yap(&child);
+    crate::shell::procs::end_with_yap(&child);
     let base = format!("http://127.0.0.1:{port}/v1");
     let client = reqwest::Client::builder().timeout(Duration::from_secs(3)).build().expect("an HTTP client");
     let mut up = false;
@@ -856,10 +856,10 @@ pub fn main(args: Vec<String>) -> i32 {
     }
     // Yap's data folder is read only; the run's own folder takes anything
     // incidental (a usage count, a settings default) and goes at the end.
-    let data = o.data.clone().unwrap_or_else(crate::portable::would_use);
+    let data = o.data.clone().unwrap_or_else(crate::shell::portable::would_use);
     let work = std::env::temp_dir().join(format!("yap-bench-{}", std::process::id()));
     let _ = std::fs::create_dir_all(&work);
-    crate::portable::use_data_dir(work.join("data"));
+    crate::shell::portable::use_data_dir(work.join("data"));
     let peeked = crate::config::peek(&data);
     let code = match tokio::runtime::Runtime::new() {
         Ok(rt) => rt.block_on(run(&o, &data, &work, peeked.as_ref())),

@@ -448,15 +448,15 @@ fn load_from_disk() -> Store {
 /// notes.json's saves (`saving.rs`): a failed one keeps the notes in
 /// memory, is tried again with the next save, and is said once — by the
 /// command that hit it ([`saved`]) or the notice.
-pub static SAVER: crate::saving::Saver = crate::saving::Saver::new("notes", "your note", save_now);
+pub static SAVER: crate::shell::saving::Saver = crate::shell::saving::Saver::new("notes", "your note", save_now);
 
 /// `Ok` when every note is on disk; else why not (the caller says it).
-pub fn saved() -> Result<(), crate::saving::SaveError> {
+pub fn saved() -> Result<(), crate::shell::saving::SaveError> {
     SAVER.check()
 }
 
 /// Write the whole store again (Try again).
-pub fn save_now() -> Result<(), crate::saving::SaveError> {
+pub fn save_now() -> Result<(), crate::shell::saving::SaveError> {
     with_store(|s| save_to_disk(s));
     saved()
 }

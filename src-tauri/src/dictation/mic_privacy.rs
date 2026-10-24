@@ -133,7 +133,7 @@ pub fn alert(b: Blocked) -> crate::notices::alert::Alert {
 /// Is the microphone blocked for Yap right now? Two or three registry reads
 /// (never a write). A test run reads none: [`e2e_mic_privacy`]'s answer.
 pub fn blocked() -> Option<Blocked> {
-    if crate::e2e::active() {
+    if crate::shell::e2e::active() {
         return test_override();
     }
     #[cfg(windows)]
@@ -162,7 +162,7 @@ fn test_override() -> Option<Blocked> {
 #[cfg(debug_assertions)]
 #[tauri::command]
 pub fn e2e_mic_privacy(blocked: Option<Blocked>) -> Result<(), String> {
-    if !crate::e2e::active() {
+    if !crate::shell::e2e::active() {
         return Err("Only in e2e test mode".to_string());
     }
     tracing::info!(?blocked, "e2e: microphone privacy");

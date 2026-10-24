@@ -624,7 +624,7 @@ pub fn system_info(app: &AppHandle) -> String {
         "stable"
     };
     let engines = if cfg!(feature = "engines") { "speech engines included" } else { "no speech engines (stub build)" };
-    let install = if crate::portable::is_portable() { "portable" } else { "installed" };
+    let install = if crate::shell::portable::is_portable() { "portable" } else { "installed" };
     let mut lines = vec![format!("Yap: {version} ({channel}, {install}, {engines})")];
     #[cfg(windows)]
     {
@@ -858,7 +858,7 @@ pub async fn diagnostics_save(app: AppHandle, window: tauri::WebviewWindow) -> R
 
 async fn pick_path(app: &AppHandle, window: tauri::WebviewWindow, name: &str) -> Result<Option<PathBuf>, String> {
     #[cfg(debug_assertions)]
-    if crate::e2e::active() {
+    if crate::shell::e2e::active() {
         // A test run never opens Windows' dialog: it names the path first.
         return E2E_SAVE
             .lock()
@@ -883,7 +883,7 @@ async fn pick_path(app: &AppHandle, window: tauri::WebviewWindow, name: &str) ->
 #[tauri::command]
 pub fn diagnostics_reveal(app: AppHandle) -> Result<(), String> {
     let Some(path) = SAVED.lock().unwrap_or_else(|p| p.into_inner()).clone() else { return Ok(()) };
-    if crate::e2e::active() {
+    if crate::shell::e2e::active() {
         return Ok(());
     }
     use tauri_plugin_opener::OpenerExt;
@@ -922,7 +922,7 @@ pub fn issue_url(system: &str) -> String {
 #[cfg(debug_assertions)]
 #[tauri::command]
 pub fn e2e_save_path(path: String) -> Result<(), String> {
-    if !crate::e2e::active() {
+    if !crate::shell::e2e::active() {
         return Err("test mode only".into());
     }
     *E2E_SAVE.lock().unwrap_or_else(|p| p.into_inner()) = Some(PathBuf::from(path));

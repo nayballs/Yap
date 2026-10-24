@@ -147,7 +147,7 @@ pub fn set_fake_frames(frames: Vec<Frame>) {
 /// Whether this run snips fake monitors (test mode, not the robot tests,
 /// which capture the real screen).
 fn faking() -> bool {
-    crate::e2e::active() && !crate::realtest::on()
+    crate::shell::e2e::active() && !crate::shell::realtest::on()
 }
 
 // ---- saying "snip" ------------------------------------------------------------------------
@@ -495,7 +495,7 @@ pub fn serve(request: &tauri::http::Request<Vec<u8>>) -> tauri::http::Response<V
 /// then skips ~120 ms), and old screenshots swept now and once a day.
 pub fn init(app: &AppHandle) {
     let cfg = crate::config::load();
-    if !crate::e2e::active() && !cfg.snip_hotkey.trim().is_empty() {
+    if !crate::shell::e2e::active() && !cfg.snip_hotkey.trim().is_empty() {
         std::thread::Builder::new()
             .name("snip-warm".into())
             .spawn(|| {

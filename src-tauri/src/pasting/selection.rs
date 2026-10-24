@@ -196,7 +196,7 @@ fn class_says_empty(class: &str) -> bool {
 pub fn capture_selection(target_hwnd: Option<isize>, copy_fallback: bool) -> Option<String> {
     // A test run reads no other app's selection; robot mode only its own
     // windows' (as every other read here).
-    if crate::e2e::active() && !crate::realtest::permits(target_hwnd) {
+    if crate::shell::e2e::active() && !crate::shell::realtest::permits(target_hwnd) {
         tracing::debug!("e2e: not reading another app's selection (edit mode → no selection)");
         return None;
     }
@@ -245,7 +245,7 @@ pub struct Selected {
 pub fn read_selected(target_hwnd: Option<isize>, copy_fallback: bool) -> Selected {
     let nothing = Selected { text: None, via: "" };
     let Some(hwnd) = target_hwnd else { return nothing };
-    if crate::e2e::active() && !crate::realtest::permits(Some(hwnd)) {
+    if crate::shell::e2e::active() && !crate::shell::realtest::permits(Some(hwnd)) {
         return nothing;
     }
     let Some(pid) = crate::pasting::text_injector::window_process(hwnd) else { return nothing };
@@ -299,7 +299,7 @@ pub enum FieldSelection {
 /// text is never logged.
 pub fn editable_selection(target_hwnd: Option<isize>, copy_fallback: bool) -> FieldSelection {
     let Some(hwnd) = target_hwnd else { return FieldSelection::Nothing };
-    if crate::e2e::active() && !crate::realtest::permits(Some(hwnd)) {
+    if crate::shell::e2e::active() && !crate::shell::realtest::permits(Some(hwnd)) {
         tracing::debug!("e2e: not reading another app's selection (a transform)");
         return FieldSelection::Nothing;
     }
@@ -361,7 +361,7 @@ fn session() -> std::sync::MutexGuard<'static, Session> {
 /// only a window the test opened (`realtest::permits`).
 pub fn begin_dictation(target_hwnd: Option<isize>, read: bool) {
     let id = NEXT_SESSION.fetch_add(1, Ordering::SeqCst);
-    let hwnd = target_hwnd.filter(|&h| read && crate::realtest::permits(Some(h)));
+    let hwnd = target_hwnd.filter(|&h| read && crate::shell::realtest::permits(Some(h)));
     {
         let mut s = session();
         s.id = id;
@@ -469,7 +469,7 @@ impl WatchedField {
     /// a test run — in robot mode only in a window the test opened
     /// (`realtest::permits`).
     pub fn open(target_hwnd: isize) -> Option<WatchedField> {
-        if !crate::realtest::permits(Some(target_hwnd)) {
+        if !crate::shell::realtest::permits(Some(target_hwnd)) {
             return None;
         }
         #[cfg(windows)]
@@ -574,7 +574,7 @@ impl PasteCheck {
     /// window the test opened).
     pub fn before(target_hwnd: Option<isize>) -> Option<PasteCheck> {
         let target = target_hwnd?;
-        if !crate::realtest::permits(Some(target)) {
+        if !crate::shell::realtest::permits(Some(target)) {
             return None;
         }
         #[cfg(windows)]

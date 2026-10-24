@@ -366,7 +366,7 @@ pub struct Progress {
 
 /// A test run fetches only from this PC (the e2e suite's local server).
 fn allowed(url: &str) -> bool {
-    !crate::e2e::active() || ["http://127.0.0.1:", "http://localhost:", "http://[::1]:"].iter().any(|p| url.starts_with(p))
+    !crate::shell::e2e::active() || ["http://127.0.0.1:", "http://localhost:", "http://[::1]:"].iter().any(|p| url.starts_with(p))
 }
 
 /// Install Kokoro and eSpeak NG (whichever is missing) under `root`.

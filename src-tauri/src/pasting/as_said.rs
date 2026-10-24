@@ -276,14 +276,14 @@ pub fn swap(app: &AppHandle) -> Result<Outcome, String> {
 /// refusal (`Err`), or go (`None`).
 fn gate_swap(p: &Pasted) -> Result<Option<Outcome>, String> {
     let said = p.said.clone().unwrap_or_default();
-    match crate::realtest::gate(p.hwnd, "swap the paste for the words as said") {
-        crate::realtest::Gate::Go => Ok(None),
-        crate::realtest::Gate::TestMode => {
+    match crate::shell::realtest::gate(p.hwnd, "swap the paste for the words as said") {
+        crate::shell::realtest::Gate::Go => Ok(None),
+        crate::shell::realtest::Gate::TestMode => {
             *last() = None;
             tracing::info!(chars = said.chars().count(), "e2e: not swapping the paste for the words as said");
             Ok(Some(Outcome::TestMode { said }))
         }
-        crate::realtest::Gate::Refused(why) => Err(why),
+        crate::shell::realtest::Gate::Refused(why) => Err(why),
     }
 }
 
@@ -339,7 +339,7 @@ pub fn paste_entry(app: &AppHandle, ts: u64, text: &str) -> Result<Outcome, Stri
 /// so (Home's toast). A test run never touches the clipboard.
 fn copy_said(said: &str, why: &str) -> Result<Outcome, String> {
     let out = || Outcome::Copied { why: why.to_string(), said: said.to_string(), told: false };
-    if crate::e2e::active() && !crate::realtest::on() {
+    if crate::shell::e2e::active() && !crate::shell::realtest::on() {
         tracing::info!(chars = said.chars().count(), "e2e: not copying the words as said");
         return Ok(out());
     }
@@ -395,7 +395,7 @@ pub(crate) fn rewrite_target(on: bool, target: Option<isize>) -> Option<Pasted> 
 
 /// A normal run, robot mode's own windows, or a test run's stand-in.
 fn may_rewrite_in(hwnd: Option<isize>) -> bool {
-    if crate::realtest::permits(hwnd) {
+    if crate::shell::realtest::permits(hwnd) {
         return true;
     }
     #[cfg(debug_assertions)]
@@ -411,13 +411,13 @@ fn may_rewrite_in(hwnd: Option<isize>) -> bool {
 /// app). `Err(why)`. Read only; blocking (UI Automation). A test run reads
 /// nothing (its stand-in window: taken to be there).
 pub(crate) fn rewrite_check(p: &Pasted) -> Result<(), String> {
-    match crate::realtest::gate(p.hwnd, "read the field for the last dictation") {
-        crate::realtest::Gate::Go => {}
-        crate::realtest::Gate::TestMode => {
+    match crate::shell::realtest::gate(p.hwnd, "read the field for the last dictation") {
+        crate::shell::realtest::Gate::Go => {}
+        crate::shell::realtest::Gate::TestMode => {
             tracing::info!("e2e: not reading the field for the last dictation");
             return Ok(());
         }
-        crate::realtest::Gate::Refused(why) => return Err(why),
+        crate::shell::realtest::Gate::Refused(why) => return Err(why),
     }
     #[cfg(windows)]
     {
@@ -474,13 +474,13 @@ pub enum Rewrote {
 /// paste. Where that can't be done safely the field is left alone and the
 /// rewrite goes on the clipboard instead, said. Blocking.
 pub(crate) fn replace_last(app: &AppHandle, p: &Pasted, rewrite: &str) -> Result<Rewrote, String> {
-    match crate::realtest::gate(p.hwnd, "rewrite the last dictation") {
-        crate::realtest::Gate::Go => {}
-        crate::realtest::Gate::TestMode => {
+    match crate::shell::realtest::gate(p.hwnd, "rewrite the last dictation") {
+        crate::shell::realtest::Gate::Go => {}
+        crate::shell::realtest::Gate::TestMode => {
             tracing::info!(chars = rewrite.chars().count(), "e2e: not rewriting the last dictation");
             return Ok(Rewrote::TestMode { text: rewrite.to_string() });
         }
-        crate::realtest::Gate::Refused(why) => return Err(why),
+        crate::shell::realtest::Gate::Refused(why) => return Err(why),
     }
     let outcome = match replace_in_field(p, &|selected| keep_spaces(selected, rewrite), false) {
         Ok(Put::Replaced { checked, how, text }) => {
@@ -568,14 +568,14 @@ pub fn undo_transform(app: &AppHandle) -> Result<Undid, String> {
         *last() = None;
         return Err(NONE.into());
     }
-    match crate::realtest::gate(p.hwnd, "undo the transform") {
-        crate::realtest::Gate::Go => {}
-        crate::realtest::Gate::TestMode => {
+    match crate::shell::realtest::gate(p.hwnd, "undo the transform") {
+        crate::shell::realtest::Gate::Go => {}
+        crate::shell::realtest::Gate::TestMode => {
             *last() = None;
             tracing::info!("e2e: not undoing the transform");
             return Ok(Undid::TestMode);
         }
-        crate::realtest::Gate::Refused(why) => return Err(why),
+        crate::shell::realtest::Gate::Refused(why) => return Err(why),
     }
     // One Undo, whatever comes of it.
     *last() = None;

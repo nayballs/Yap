@@ -775,7 +775,7 @@ pub async fn e2e_transform(
     selection: Option<String>,
     terminal: Option<bool>,
 ) -> Result<Transformed, String> {
-    if !crate::e2e::active() || crate::realtest::on() {
+    if !crate::shell::e2e::active() || crate::shell::realtest::on() {
         return Err("e2e_transform is for test runs (not robot mode)".into());
     }
     if crate::dictation::pipeline::test_target().is_none() {

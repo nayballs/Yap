@@ -250,7 +250,7 @@ pub fn files() -> Option<Files> {
 /// Whether this build can run Kokoro at all (an `engines` build, or test
 /// mode's stand-in).
 pub fn in_build() -> bool {
-    cfg!(feature = "engines") || crate::e2e::active()
+    cfg!(feature = "engines") || crate::shell::e2e::active()
 }
 
 /// Kokoro can speak now: in this build and installed.
@@ -282,7 +282,7 @@ impl Engine for Kokoro {
     }
     fn open(&self, voice: &str, rate: f32) -> Result<Box<dyn Synth>, String> {
         let voice = if is_voice(voice) { voice } else { DEFAULT_VOICE };
-        if crate::e2e::active() {
+        if crate::shell::e2e::active() {
             files().ok_or("Kokoro isn't installed")?;
             return Ok(Box::new(super::Silence { rate: rate.clamp(0.5, 3.0) }));
         }

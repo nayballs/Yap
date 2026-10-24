@@ -1514,7 +1514,7 @@ pub fn meeting_job_cancel(note_id: u64) -> bool {
 #[cfg(debug_assertions)]
 #[tauri::command]
 pub fn e2e_meeting_recovery_offer(app: AppHandle) -> Result<usize, String> {
-    if !crate::e2e::active() {
+    if !crate::shell::e2e::active() {
         return Err("Only in e2e test mode".to_string());
     }
     offer(&app);

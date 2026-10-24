@@ -105,8 +105,8 @@ pub async fn meeting_app_icons() -> Result<BTreeMap<String, String>, String> {
 static LOOKING: Mutex<()> = Mutex::new(());
 
 fn icons() -> BTreeMap<String, String> {
-    if crate::e2e::active() {
-        return crate::e2e::app_icons_dir().map(|dir| stand_ins(&dir)).unwrap_or_default();
+    if crate::shell::e2e::active() {
+        return crate::shell::e2e::app_icons_dir().map(|dir| stand_ins(&dir)).unwrap_or_default();
     }
     let _one = LOOKING.lock().unwrap_or_else(|p| p.into_inner());
     let records = if crate::config::load().meeting_detection {

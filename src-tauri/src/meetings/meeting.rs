@@ -1742,8 +1742,8 @@ pub(crate) fn ingest(
 /// The drain cadence (an e2e run can play its test audio faster).
 fn drain_interval() -> Duration {
     #[cfg(debug_assertions)]
-    if crate::e2e::active() {
-        return Duration::from_secs_f32(DRAIN_INTERVAL_SECS as f32 / crate::e2e::meeting_speed());
+    if crate::shell::e2e::active() {
+        return Duration::from_secs_f32(DRAIN_INTERVAL_SECS as f32 / crate::shell::e2e::meeting_speed());
     }
     Duration::from_secs(DRAIN_INTERVAL_SECS)
 }
@@ -1780,8 +1780,8 @@ pub fn start(app: AppHandle, engine_slot: EngineSlot, note_id: u64) -> Result<()
     let bufs = (Arc::clone(&mic_buf), Arc::clone(&sys_buf));
     let flags = (Arc::clone(&stop), Arc::clone(&overflow));
     #[cfg(debug_assertions)]
-    let capture = if crate::e2e::active() {
-        crate::e2e::spawn_meeting_audio(bufs.0, bufs.1, flags.0, flags.1)
+    let capture = if crate::shell::e2e::active() {
+        crate::shell::e2e::spawn_meeting_audio(bufs.0, bufs.1, flags.0, flags.1)
     } else {
         spawn_device_capture(bufs.0, bufs.1, flags.0, flags.1)
     };

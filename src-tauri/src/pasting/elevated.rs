@@ -63,7 +63,7 @@ pub fn alert() -> crate::notices::alert::Alert {
 /// it would be dropped)? A test run reads no other process: only the
 /// override counts ([`e2e_paste_elevated`]).
 pub fn target_blocked(hwnd: isize) -> bool {
-    if crate::e2e::active() {
+    if crate::shell::e2e::active() {
         return test_override();
     }
     #[cfg(windows)]
@@ -96,7 +96,7 @@ static TEST_ELEVATED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicB
 pub fn test_override() -> bool {
     #[cfg(debug_assertions)]
     {
-        crate::e2e::active() && TEST_ELEVATED.load(std::sync::atomic::Ordering::SeqCst)
+        crate::shell::e2e::active() && TEST_ELEVATED.load(std::sync::atomic::Ordering::SeqCst)
     }
     #[cfg(not(debug_assertions))]
     false
@@ -109,7 +109,7 @@ pub fn test_override() -> bool {
 #[cfg(debug_assertions)]
 #[tauri::command]
 pub fn e2e_paste_elevated(on: bool) -> Result<(), String> {
-    if !crate::e2e::active() {
+    if !crate::shell::e2e::active() {
         return Err("Only in e2e test mode".to_string());
     }
     tracing::info!(on, "e2e: paste targets count as admin apps");

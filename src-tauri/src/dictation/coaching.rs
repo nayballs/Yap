@@ -144,10 +144,10 @@ fn update_record(f: impl FnOnce(Record) -> Record) {
 /// hints.json's saves (`saving.rs`): a failed one keeps the record in
 /// memory and is tried again with the next save; only logged (a hint shown
 /// once more is all it costs).
-pub static SAVER: crate::saving::Saver = crate::saving::Saver::quiet("hints", "your tips' progress", save_now);
+pub static SAVER: crate::shell::saving::Saver = crate::shell::saving::Saver::quiet("hints", "your tips' progress", save_now);
 
 /// Write the record again (Try again).
-fn save_now() -> Result<(), crate::saving::SaveError> {
+fn save_now() -> Result<(), crate::shell::saving::SaveError> {
     if let Some(rec) = RECORD.lock().unwrap_or_else(|p| p.into_inner()).as_ref() {
         let _ = SAVER.write_json(&record_path(), rec, true);
     }
@@ -218,7 +218,7 @@ pub fn hands_free_used() {
 #[cfg(debug_assertions)]
 #[tauri::command]
 pub fn e2e_coaching_reset() -> Result<(), String> {
-    if !crate::e2e::active() {
+    if !crate::shell::e2e::active() {
         return Err("Only in e2e test mode".to_string());
     }
     update_record(|_| Record::default());

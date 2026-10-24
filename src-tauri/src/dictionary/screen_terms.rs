@@ -298,7 +298,7 @@ pub enum WhisperNames {
 /// measure again.
 fn whisper_names() -> WhisperNames {
     #[cfg(debug_assertions)]
-    if crate::realtest::on() {
+    if crate::shell::realtest::on() {
         match std::env::var("YAP_REALTEST_SCREEN_WHISPER").as_deref() {
             Ok("list") => return WhisperNames::List,
             Ok("sentence") => return WhisperNames::Sentence,
@@ -398,7 +398,7 @@ fn session() -> std::sync::MutexGuard<'static, Session> {
 /// test run — in robot mode only a window the test opened.
 pub fn begin_dictation(target_hwnd: Option<isize>, read: bool) {
     let id = NEXT_SESSION.fetch_add(1, Ordering::SeqCst);
-    let hwnd = target_hwnd.filter(|&h| read && crate::realtest::permits(Some(h)));
+    let hwnd = target_hwnd.filter(|&h| read && crate::shell::realtest::permits(Some(h)));
     {
         let mut s = session();
         s.id = id;
@@ -473,7 +473,7 @@ fn read_terms(hwnd: isize) -> Option<ScreenTerms> {
     // Robot mode: a read that takes its time (`YAP_REALTEST_SCREEN_DELAY_MS`),
     // to show a dictation never waits for one.
     #[cfg(debug_assertions)]
-    if crate::realtest::on() {
+    if crate::shell::realtest::on() {
         if let Some(ms) = std::env::var("YAP_REALTEST_SCREEN_DELAY_MS").ok().and_then(|v| v.trim().parse::<u64>().ok()) {
             std::thread::sleep(Duration::from_millis(ms));
         }

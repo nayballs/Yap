@@ -1309,7 +1309,7 @@ pub fn e2e_meeting_checkins(
     fade_ms: Option<u64>,
     margin_ms: Option<u64>,
 ) -> Result<(), String> {
-    if !crate::e2e::active() {
+    if !crate::shell::e2e::active() {
         return Err("Only in e2e test mode".to_string());
     }
     let any = [quiet_ms, countdown_ms, recent_ms, after_end_ms, hour_ms, fade_ms, margin_ms]
@@ -1327,7 +1327,7 @@ pub fn e2e_meeting_checkins(
     });
     tracing::info!(?timings, "e2e: quiet-meeting timings");
     *TEST_QUIET.lock().unwrap_or_else(|p| p.into_inner()) = timings;
-    crate::e2e::set_live_mic(any);
+    crate::shell::e2e::set_live_mic(any);
     Ok(())
 }
 
@@ -1341,7 +1341,7 @@ pub fn e2e_meeting_limit(
     warn_ms: Option<u64>,
     keep_going_ms: Option<u64>,
 ) -> Result<(), String> {
-    if !crate::e2e::active() {
+    if !crate::shell::e2e::active() {
         return Err("Only in e2e test mode".to_string());
     }
     let timings = (limit_ms.is_some() || warn_ms.is_some() || keep_going_ms.is_some()).then(|| Timings {

@@ -155,7 +155,7 @@ pub fn init(app: &AppHandle) {
 #[cfg(debug_assertions)]
 #[tauri::command]
 pub async fn e2e_webview_background(app: AppHandle, label: String) -> Result<String, String> {
-    if !crate::e2e::active() {
+    if !crate::shell::e2e::active() {
         return Err("Only in e2e test mode".to_string());
     }
     let webview = app.get_webview_window(&label).ok_or_else(|| format!("no window {label}"))?;
@@ -219,7 +219,7 @@ mod tests {
         // The page paints these same colours (app.css's --yap-bg and
         // --yap-paper, light and dark): a mismatch would show as a band
         // of another colour while the page catches up.
-        let css = include_str!("../../src/app.css");
+        let css = include_str!("../../../src/app.css");
         let hex = |c: [u8; 3]| format!("#{:02x}{:02x}{:02x}", c[0], c[1], c[2]);
         for (label, light, dark) in OPAQUE {
             assert!(css.contains(&hex(*light)), "{label}: light {} not in app.css", hex(*light));

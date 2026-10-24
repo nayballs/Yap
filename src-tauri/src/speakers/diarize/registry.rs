@@ -442,7 +442,7 @@ pub struct Progress {
 
 /// A test run fetches only from this PC (the e2e suite's local server).
 fn allowed(url: &str) -> bool {
-    if !crate::e2e::active() {
+    if !crate::shell::e2e::active() {
         return true;
     }
     ["http://127.0.0.1:", "http://localhost:", "http://[::1]:"]

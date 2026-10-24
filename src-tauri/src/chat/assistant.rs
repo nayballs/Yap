@@ -988,7 +988,7 @@ pub async fn e2e_assistant_ask(
     text: String,
     listen_ms: Option<u64>,
 ) -> Result<(), String> {
-    if !crate::e2e::active() {
+    if !crate::shell::e2e::active() {
         return Err("e2e_assistant_ask is for test runs".into());
     }
     let robot = {

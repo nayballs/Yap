@@ -51,7 +51,7 @@ pub fn on() -> bool {
     {
         static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
         *ON.get_or_init(|| {
-            crate::e2e::active() && std::env::var("YAP_REALTEST").is_ok_and(|v| v.trim() == "1")
+            crate::shell::e2e::active() && std::env::var("YAP_REALTEST").is_ok_and(|v| v.trim() == "1")
         })
     }
     #[cfg(not(debug_assertions))]
@@ -61,7 +61,7 @@ pub fn on() -> bool {
 /// May Yap paste into, press a key in, or read the field of `hwnd` (`what`:
 /// "paste", "press Enter"… for the log)? A refusal is logged and shown.
 pub fn gate(hwnd: Option<isize>, what: &str) -> Gate {
-    if !crate::e2e::active() {
+    if !crate::shell::e2e::active() {
         return Gate::Go;
     }
     if !on() {
@@ -111,7 +111,7 @@ pub fn stand_in_editors() -> &'static [String] {
 /// [`gate`], quietly, for reads (the text around the cursor, the window's
 /// title): a normal run, or robot mode and a window the test opened.
 pub fn permits(hwnd: Option<isize>) -> bool {
-    if !crate::e2e::active() {
+    if !crate::shell::e2e::active() {
         return true;
     }
     #[cfg(debug_assertions)]
@@ -130,7 +130,7 @@ pub fn permits(hwnd: Option<isize>) -> bool {
 /// — the developer may have clicked elsewhere since. Always `Ok` in a
 /// normal run.
 pub fn recheck_foreground(expected: Option<isize>, what: &str) -> Result<(), String> {
-    if !crate::e2e::active() {
+    if !crate::shell::e2e::active() {
         return Ok(());
     }
     if !on() {
@@ -161,7 +161,7 @@ pub enum OtherApps {
 }
 
 pub fn other_apps() -> OtherApps {
-    if !crate::e2e::active() {
+    if !crate::shell::e2e::active() {
         OtherApps::All
     } else if on() {
         OtherApps::TestsOwn
@@ -353,7 +353,7 @@ mod robot {
             #[cfg(windows)]
             let pids = pids
                 .into_iter()
-                .filter_map(|pid| crate::procs::created(pid).map(|s| (pid, s)))
+                .filter_map(|pid| crate::shell::procs::created(pid).map(|s| (pid, s)))
                 .collect();
             #[cfg(not(windows))]
             let pids = {
@@ -400,7 +400,7 @@ mod robot {
     /// The guard's answer for the sound of process `pid`.
     pub fn audio_verdict(pid: u32) -> Result<&'static str, String> {
         #[cfg(windows)]
-        let lineage = crate::procs::lineage(pid);
+        let lineage = crate::shell::procs::lineage(pid);
         #[cfg(not(windows))]
         let lineage = vec![(pid, 0)];
         let owners = allowed().nonce.as_deref().map(win::nonce_owners).unwrap_or_default();
@@ -540,7 +540,7 @@ mod robot {
             Some(WindowFacts {
                 pid,
                 title,
-                lineage: crate::procs::lineage(pid),
+                lineage: crate::shell::procs::lineage(pid),
             })
         }
     }
@@ -834,7 +834,7 @@ mod tests {
     #[test]
     fn outside_robot_mode_a_normal_run_goes_ahead() {
         // `cargo test` isn't a test run of the app (no YAP_E2E): Go.
-        if !crate::e2e::active() {
+        if !crate::shell::e2e::active() {
             assert_eq!(gate(Some(1), "paste"), Gate::Go);
             assert!(permits(None));
             assert!(recheck_foreground(None, "paste").is_ok());

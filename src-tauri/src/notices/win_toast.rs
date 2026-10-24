@@ -32,7 +32,7 @@ const GROUP: &str = "yap";
 /// them silently; an e2e test run posts nothing to the developer's
 /// notification center.
 pub fn allowed() -> bool {
-    !crate::portable::is_portable() && !crate::e2e::active()
+    !crate::shell::portable::is_portable() && !crate::shell::e2e::active()
 }
 
 /// Release builds post as Yap: the installer's Start-menu shortcut carries
