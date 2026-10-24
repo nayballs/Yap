@@ -197,7 +197,7 @@ pub fn list_meetings(notes: &[Note], folder: Option<&str>, limit: usize) -> Vec<
 /// (unticked), "done" (ticked) or "all". Read only.
 pub fn list_tasks(notes: &[Note], status: &str, limit: usize) -> Vec<Value> {
     let mut out = Vec::new();
-    for n in crate::tasks::list(notes) {
+    for n in crate::notes::tasks::list(notes) {
         let mut tasks: Vec<_> = n
             .tasks
             .into_iter()

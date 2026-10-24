@@ -405,7 +405,7 @@ pub fn note_task_set(
         Ok((md, changed))
     })?;
     tracing::info!(note_id, line, done, "Task ticked");
-    crate::note_edits::summary_changed(&app, note_id, origin.as_deref().unwrap_or(""));
+    crate::notes::note_edits::summary_changed(&app, note_id, origin.as_deref().unwrap_or(""));
     Ok(md)
 }
 

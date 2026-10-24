@@ -176,7 +176,7 @@ pub fn apply_summary_edit(note: &mut Note, text: &str, now: u64) -> bool {
         return true;
     }
     let was_empty = note.enhanced_content.trim().is_empty();
-    let ticks_only = !was_empty && crate::tasks::same_but_ticks(&note.enhanced_content, text);
+    let ticks_only = !was_empty && crate::notes::tasks::same_but_ticks(&note.enhanced_content, text);
     note.enhanced_content = text.to_string();
     if !ticks_only {
         note.summary_edited_ms = now.max(1);
@@ -272,7 +272,7 @@ pub fn write_summary(id: u64, text: &str, at_hash: &str, read_ms: u64, heard_to:
         if !may_replace(note.summary_edited_ms, read_ms, replace) {
             return Err(SUMMARY_KEPT.to_string());
         }
-        note.enhanced_content = crate::tasks::carry_ticks(&note.enhanced_content, text);
+        note.enhanced_content = crate::notes::tasks::carry_ticks(&note.enhanced_content, text);
         note.enhanced_at_hash = at_hash.to_string();
         note.summary_edited_ms = 0;
         note.summary_ts = (read_ms / 1000).max(heard_to);
@@ -442,7 +442,7 @@ mod tests {
         assert_eq!(crate::notes::get(id).unwrap().summary_ts, 64);
         // A tick, then Yap writes it again: still ticked.
         crate::notes::modify(id, |n| {
-            n.enhanced_content = crate::tasks::set_done(&n.enhanced_content, 2, "send the quote", true)?;
+            n.enhanced_content = crate::notes::tasks::set_done(&n.enhanced_content, 2, "send the quote", true)?;
             Ok(((), true))
         })
         .unwrap();

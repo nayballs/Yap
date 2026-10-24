@@ -827,7 +827,7 @@ pub fn apply_edit(note: &mut Note, field: Field, old: &str, new: &str) -> Result
                 } else {
                     // Changed on the person's say-so (they asked Chat): theirs
                     // now, so Yap never writes over it unasked (note_edits.rs).
-                    crate::note_edits::apply_summary_edit(note, &r.text, now_ms());
+                    crate::notes::note_edits::apply_summary_edit(note, &r.text, now_ms());
                 }
             }
             Field::Transcript => {} // refused above

@@ -356,7 +356,7 @@ fn start_summary_with(app: &AppHandle, note_id: u64, replace: bool) -> bool {
         let (state, error) = match result {
             Ok(()) => ("done", None),
             Err(e) if e == NOTHING => ("nothing", Some(e)),
-            Err(e) if e == crate::note_edits::SUMMARY_KEPT => ("kept", Some(e)),
+            Err(e) if e == crate::notes::note_edits::SUMMARY_KEPT => ("kept", Some(e)),
             Err(e) if needs_ai(&e) => ("needsAi", Some(e)),
             Err(e) => ("error", Some(e)),
         };
@@ -386,7 +386,7 @@ async fn write_action_plan(app: &AppHandle, note_id: u64, replace: bool, step: i
         return Err(NOTHING.to_string());
     }
     // The person's edited summary stays, unless they said it may go.
-    crate::note_edits::keeps_summary(&note, replace)?;
+    crate::notes::note_edits::keeps_summary(&note, replace)?;
     // Found by kind (renaming it is fine); older stores fall back to Meeting
     // Notes, as the Notes view does.
     // Who each voice is, before the plan names owners: the AI's answers

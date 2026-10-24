@@ -10,6 +10,9 @@
 //! Deliberately skipped for v1 (documented in ROADMAP): folders, FTS, sync
 //! columns, meeting transcript/participants (arrive with the Phase-6 recorder).
 
+pub mod note_edits;
+pub mod tasks;
+
 #[cfg(not(test))]
 use std::path::PathBuf;
 #[cfg(not(test))]
