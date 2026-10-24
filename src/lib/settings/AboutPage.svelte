@@ -1,6 +1,7 @@
 <script>
   // Settings → About: the version and its updates (updates.svelte.js, Rust's
-  // updates.rs), the project's links and the setup guide. Whether Yap checks
+  // updates.rs), Report a problem (ReportProblem.svelte, diagnostics.rs),
+  // the project's links and the setup guide. Whether Yap checks
   // by itself is in General → Startup and updates; logs and the data folder
   // are in Privacy & data.
   //
@@ -12,6 +13,7 @@
   import Group from '../ui/Group.svelte';
   import Row from '../ui/Row.svelte';
   import Button from '../ui/Button.svelte';
+  import ReportProblem from './ReportProblem.svelte';
   import { updates, installUpdate, checkForUpdates, openRelease, formatAgo } from '../updates.svelte.js';
   import { renderMarkdown } from '../markdown.js';
   import { createExternalLinkHandler } from '../externalLinks.js';
@@ -116,6 +118,10 @@
       {#if goto}<button type="button" class="set-link" onclick={() => goto('general#update-checks')}>Change in General</button>{/if}
     </p>
   </Row>
+</Group>
+
+<Group title="Report a problem" id="settings-report">
+  <ReportProblem />
 </Group>
 
 <Group title="Learn more" id="settings-links">

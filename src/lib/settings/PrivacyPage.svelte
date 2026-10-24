@@ -8,6 +8,8 @@
   //
   //   cfg:  Settings' config $state (auto-save does the saving).
   //   goto: opens another Settings page.
+  //   connections: Network connections (net.rs) open, one level down
+  //         (bindable: Settings' `privacy#connections-list` opens it).
   import { invoke } from '@tauri-apps/api/core';
   import { listen } from '@tauri-apps/api/event';
   import { onMount } from 'svelte';
@@ -16,11 +18,31 @@
   import Toggle from '../ui/Toggle.svelte';
   import Button from '../ui/Button.svelte';
   import Select from '../ui/Select.svelte';
+  import LinkRow from '../ui/LinkRow.svelte';
+  import ConnectionsView from './ConnectionsView.svelte';
   import { askConfirm } from '../ui/contextMenu.svelte.js';
   import { toast } from '../ui/toast.svelte.js';
   import { account } from '../account.svelte.js';
 
-  let { cfg, goto = null } = $props();
+  let { cfg, goto = null, connections = $bindable(false) } = $props();
+
+  // The network receipts' count for today (net.rs), for the link row.
+  let net = $state(null);
+  async function loadNet() {
+    try {
+      net = await invoke('connections_summary');
+    } catch {
+      net = null;
+    }
+  }
+  const netValue = $derived(net ? `${net.today.count.toLocaleString()} today` : '');
+  const netDesc = $derived(
+    !net
+      ? 'Every connection Yap made in the last 7 days, and why'
+      : net.today.count
+        ? `${net.today.leaving.toLocaleString()} left this PC today, ${net.today.local.toLocaleString()} stayed on it`
+        : 'None today. Every connection Yap makes is listed here, and why'
+  );
 
   let portable = $state(false);
   let logInfo = $state(null); // { dir, file } from log_info
@@ -63,9 +85,14 @@
       .catch(() => {});
     loadCount();
     loadShots();
+    loadNet();
+    const unNet = listen('yap-connections', loadNet);
     // A dictation saved, an entry deleted from Home, all cleared (history.rs).
     const un = listen('yap-history-changed', loadCount);
-    return () => un.then((f) => f());
+    return () => {
+      un.then((f) => f());
+      unNet.then((f) => f());
+    };
   });
   async function loadAudio() {
     try {
@@ -256,6 +283,9 @@
   const logName = $derived((logInfo?.file || '').split(/[/\\]/).pop() || '');
 </script>
 
+{#if connections}
+  <ConnectionsView onback={() => ((connections = false), loadNet())} />
+{:else}
 <div class="page-h">
   <h1>Privacy & data</h1>
   <p>What leaves this PC, what Yap keeps on it, and how to clear it.</p>
@@ -277,6 +307,10 @@
       </div>
     {/each}
   </div>
+</Group>
+
+<Group title="Network connections" id="settings-connections">
+  <LinkRow label="Network connections" desc={netDesc} value={netValue} setting="connections" onclick={() => (connections = true)} />
 </Group>
 
 <Group title="History" id="settings-history">
@@ -354,6 +388,7 @@
     {/snippet}
   </Row>
 </Group>
+{/if}
 
 <style>
   .leaves {
