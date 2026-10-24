@@ -892,7 +892,7 @@ pub async fn note_ask(
     // clock in the system prompt too, as `chat_turn` does.
     let profile = crate::about_you::profile(&cfg);
     let now = chrono::Utc::now();
-    let in_message = crate::tools::supports_tools(&provider, &model);
+    let in_message = crate::chat::tools::supports_tools(&provider, &model);
     let mut system = format!(
         "{}\n\nThe user is asking about the following note. Ground your answers in it; if the answer isn't in the note, say so briefly.\n\n<note>\n{}\n</note>",
         persona.trim(),
@@ -900,13 +900,13 @@ pub async fn note_ask(
     );
     let asked = if in_message {
         system.push_str("\n\n");
-        system.push_str(crate::chats::CONTEXT_NOTE);
+        system.push_str(crate::chat::chats::CONTEXT_NOTE);
         let profile_block = crate::about_you::profile_block(&profile);
         if !profile_block.is_empty() {
             system.push_str("\n\n");
             system.push_str(&profile_block);
         }
-        crate::chats::with_context(&[crate::about_you::clock_line(&profile, now)], &question)
+        crate::chat::chats::with_context(&[crate::about_you::clock_line(&profile, now)], &question)
     } else {
         system.push_str("\n\n");
         system.push_str(&crate::about_you::prompt_block(&profile, now));
@@ -1002,9 +1002,9 @@ fn rag_context(query: &str, strict: bool) -> String {
     const RAG_NOTE_SNIPPET_LENGTH: usize = 500;
 
     let notes = if strict {
-        crate::tools::rag_notes(query, RAG_NOTE_LIMIT)
+        crate::chat::tools::rag_notes(query, RAG_NOTE_LIMIT)
     } else {
-        crate::tools::search_notes(query, RAG_NOTE_LIMIT)
+        crate::chat::tools::search_notes(query, RAG_NOTE_LIMIT)
     };
     notes
         .into_iter()
@@ -1037,34 +1037,34 @@ fn rag_context(query: &str, strict: bool) -> String {
 /// Conversation summaries for the chat sidebar.
 #[tauri::command]
 pub fn chats_list() -> serde_json::Value {
-    crate::chats::list()
+    crate::chat::chats::list()
 }
 
 /// One conversation with its messages.
 #[tauri::command]
-pub fn chat_get(id: u64) -> Result<crate::chats::Conversation, String> {
-    crate::chats::get(id).map(crate::chats::for_page).ok_or_else(|| "Conversation not found".to_string())
+pub fn chat_get(id: u64) -> Result<crate::chat::chats::Conversation, String> {
+    crate::chat::chats::get(id).map(crate::chat::chats::for_page).ok_or_else(|| "Conversation not found".to_string())
 }
 
 /// Delete a conversation. A save that failed is the error (saving.rs):
 /// until chats.json is saved, it would come back.
 #[tauri::command]
 pub fn chat_delete(id: u64) -> Result<(), String> {
-    crate::chats::delete(id);
+    crate::chat::chats::delete(id);
     // A later conversation may get its id: nothing of this one carries over.
     crate::apps::moved_on(Some(id));
-    Ok(crate::chats::saved()?)
+    Ok(crate::chat::chats::saved()?)
 }
 
 /// Several conversations at once (the Chat list's selection, "Delete all
 /// chats…"): one write. Returns how many were deleted.
 #[tauri::command]
 pub fn chat_delete_many(ids: Vec<u64>) -> Result<usize, String> {
-    let gone = crate::chats::delete_many(&ids);
+    let gone = crate::chat::chats::delete_many(&ids);
     for id in ids {
         crate::apps::moved_on(Some(id));
     }
-    crate::chats::saved()?;
+    crate::chat::chats::saved()?;
     Ok(gone)
 }
 
@@ -1072,8 +1072,8 @@ pub fn chat_delete_many(ids: Vec<u64>) -> Result<usize, String> {
 /// stored (one line, trimmed, ≤ 80 characters). Its place in the list stays.
 #[tauri::command]
 pub fn chat_rename(id: u64, title: String) -> Result<String, String> {
-    let title = crate::chats::rename(id, &title)?;
-    crate::chats::saved()?;
+    let title = crate::chat::chats::rename(id, &title)?;
+    crate::chat::chats::saved()?;
     Ok(title)
 }
 
@@ -1086,10 +1086,10 @@ pub(crate) struct ChatTurn {
     pub reply: String,
     pub tools_used: Vec<String>,
     /// Who answered; `None` when Yap did itself (an app opened, `apps.rs`).
-    pub model: Option<crate::chats::ChatModel>,
+    pub model: Option<crate::chat::chats::ChatModel>,
     /// The web pages the answer was written from (`web.rs`), numbered as
     /// it cites them.
-    pub sources: Vec<crate::chats::Source>,
+    pub sources: Vec<crate::chat::chats::Source>,
     /// Stopped while it was being written (the page's ■): what came so far.
     pub stopped: bool,
 }
@@ -1128,12 +1128,12 @@ impl ChatTurn {
 /// **checked** one (below), which the page puts in place of what streamed.
 /// `stop`: the page's ■ — the stream closes, and what was shown so far is
 /// the answer, checked and saved as stopped (nothing shown: an error,
-/// [`crate::stream::STOPPED`]).
+/// [`crate::chat::stream::STOPPED`]).
 ///
 /// **A newer question replaces an older one** still being answered in the
 /// same conversation: once this turn's question is saved, a turn still
 /// answering there ends with nothing saved (`stream::Stoppable::answers`,
-/// the error [`crate::stream::SUPERSEDED`]) — its question stays, and the
+/// the error [`crate::chat::stream::SUPERSEDED`]) — its question stays, and the
 /// model reads it with the newer one. A tester's voice chat (2026-10-23):
 /// the Voice Assistant's first question, set aside for the barge-in that
 /// asked the second, was asked again after the second's answer, and both
@@ -1146,8 +1146,8 @@ pub(crate) async fn chat_turn(
     scope: Option<&str>,
     by_voice: bool,
     asked: impl FnOnce(u64, usize) + Send,
-    watcher: Option<&dyn crate::stream::Sink>,
-    stop: Option<&crate::stream::Stoppable>,
+    watcher: Option<&dyn crate::chat::stream::Sink>,
+    stop: Option<&crate::chat::stream::Stoppable>,
 ) -> Result<ChatTurn, String> {
     let text = text.trim().to_string();
     if text.is_empty() {
@@ -1159,7 +1159,7 @@ pub(crate) async fn chat_turn(
     let stop = match stop {
         Some(s) => s,
         None => {
-            own_stop = crate::stream::Stoppable::new(None);
+            own_stop = crate::chat::stream::Stoppable::new(None);
             &own_stop
         }
     };
@@ -1192,11 +1192,11 @@ pub(crate) async fn chat_turn(
     // start moves a few turns at a time (`chats::history_start`: 14–19,
     // 5–8), so a long chat's prompt keeps its start from turn to turn.
     let (keep, step) = if scope == Some("assistant") { (8, 4) } else { (19, 6) };
-    let earlier = &conv.messages[crate::chats::history_start(conv.messages.len(), keep, step)..];
+    let earlier = &conv.messages[crate::chat::chats::history_start(conv.messages.len(), keep, step)..];
     let history: Vec<(String, String)> = earlier.iter().map(|m| (m.role.clone(), m.text.clone())).collect();
     // The question, with the screenshots it carries (Snip to Chat, the
     // turn's `snip::turn`): kept with it in chats.json as ids.
-    let user_index = crate::chats::append_question(conv.id, &text, by_voice, &crate::snip::turn::images())?;
+    let user_index = crate::chat::chats::append_question(conv.id, &text, by_voice, &crate::snip::turn::images())?;
     // This turn answers the conversation now: one still answering there
     // ends, with nothing saved.
     stop.answers(conv.id);
@@ -1218,7 +1218,7 @@ pub(crate) async fn chat_turn(
     // answers (4 of 10 turns, `notes-follow-ups`, 2026-10-22). OpenWhispr
     // runs BOTH eager RAG and the notes tools: the model gets relevant notes
     // up front AND can search for more.
-    let tools_supported = crate::tools::supports_tools(&provider, &model);
+    let tools_supported = crate::chat::tools::supports_tools(&provider, &model);
     let in_message = tools_supported;
     // "Remember that…" / "Forget that…" to a model without tools: Yap's
     // own memory pass makes the change (memory/learn.rs), and says so. A
@@ -1226,7 +1226,7 @@ pub(crate) async fn chat_turn(
     if !tools_supported {
         if let Some(done) = crate::memory::learn::spoken(&text).await {
             let (reply, chips) = done?;
-            let index = crate::chats::append(conv.id, "assistant", &reply, &chips, Some(answered_by.clone()), false)?;
+            let index = crate::chat::chats::append(conv.id, "assistant", &reply, &chips, Some(answered_by.clone()), false)?;
             return Ok(ChatTurn {
                 conversation_id: conv.id,
                 user_index,
@@ -1246,8 +1246,8 @@ pub(crate) async fn chat_turn(
     // "Search and reference past chats": a tool for a model with tools; for
     // one without, the chats a question points back to ("what did we say
     // about Lisbon?"), a couple of lines each.
-    let past_chats = (cfg.memory_search_chats && !tools_supported && crate::chats::refers_to_past(&text))
-        .then(|| crate::chats::past_chats_block(&text, conv.id))
+    let past_chats = (cfg.memory_search_chats && !tools_supported && crate::chat::chats::refers_to_past(&text))
+        .then(|| crate::chat::chats::past_chats_block(&text, conv.id))
         .flatten();
     // "Look things up on the web" (web.rs). Not for the Meetings view's Ask
     // bar: that's about the meetings.
@@ -1272,14 +1272,14 @@ pub(crate) async fn chat_turn(
     }
     if tools_supported {
         system.push_str("\n\nYou have access to tools. ");
-        system.push_str(&crate::tools::TOOL_INSTRUCTIONS.join(" "));
+        system.push_str(&crate::chat::tools::TOOL_INSTRUCTIONS.join(" "));
         if cfg.open_apps {
             system.push(' ');
-            system.push_str(&crate::tools::APP_TOOL_INSTRUCTIONS.join(" "));
+            system.push_str(&crate::chat::tools::APP_TOOL_INSTRUCTIONS.join(" "));
         }
         if web_on {
             system.push(' ');
-            system.push_str(&crate::tools::WEB_TOOL_INSTRUCTIONS.join(" "));
+            system.push_str(&crate::chat::tools::WEB_TOOL_INSTRUCTIONS.join(" "));
             system.push(' ');
             system.push_str(&crate::web::time_note(zone.as_deref()));
             // Outside the US: prices from where they are, or one plain line
@@ -1290,10 +1290,10 @@ pub(crate) async fn chat_turn(
             }
         }
         system.push(' ');
-        system.push_str(&crate::tools::MEMORY_TOOL_INSTRUCTIONS.join(" "));
+        system.push_str(&crate::chat::tools::MEMORY_TOOL_INSTRUCTIONS.join(" "));
         if cfg.memory_search_chats {
             system.push(' ');
-            system.push_str(&crate::tools::CHATS_TOOL_INSTRUCTIONS.join(" "));
+            system.push_str(&crate::chat::tools::CHATS_TOOL_INSTRUCTIONS.join(" "));
         }
     } else {
         // No tools: it can't do anything on the PC, so it mustn't say so.
@@ -1305,7 +1305,7 @@ pub(crate) async fn chat_turn(
         }
     }
     if history_note && !replay {
-        if let Some(note) = crate::chats::web_history_note(earlier) {
+        if let Some(note) = crate::chat::chats::web_history_note(earlier) {
             if in_message {
                 context.push(note);
             } else {
@@ -1321,7 +1321,7 @@ pub(crate) async fn chat_turn(
     let first = if tools_supported && web_on && crate::ai_model::runs_here(&provider, &base_url) && crate::web::needs_web(&text) {
         first_search(&text)
     } else {
-        crate::tools::FirstStep::Model
+        crate::chat::tools::FirstStep::Model
     };
     // Asked from the Meetings view: grounded in the latest meetings and the
     // meeting notes that match (calendar.rs).
@@ -1369,7 +1369,7 @@ pub(crate) async fn chat_turn(
     // staying in the system prompt, the whole block with it.
     if in_message {
         system.push_str("\n\n");
-        system.push_str(crate::chats::CONTEXT_NOTE);
+        system.push_str(crate::chat::chats::CONTEXT_NOTE);
         let profile_block = crate::about_you::profile_block(&profile);
         if !profile_block.is_empty() {
             system.push_str("\n\n");
@@ -1394,22 +1394,22 @@ pub(crate) async fn chat_turn(
     let spoken = by_voice && (scope == Some("assistant") || cfg.speak_replies);
     if spoken && !(tools_supported && web_on) {
         if in_message {
-            context.push(crate::assistant::SPOKEN_ANSWER_NOTE.to_string());
+            context.push(crate::chat::assistant::SPOKEN_ANSWER_NOTE.to_string());
         } else {
             system.push_str("\n\n");
-            system.push_str(crate::assistant::SPOKEN_ANSWER_NOTE);
+            system.push_str(crate::chat::assistant::SPOKEN_ANSWER_NOTE);
         }
     }
 
     // Streamed to whoever watches: what was shown is kept (a Stop keeps
     // it), and a model on this PC steps aside for a new dictation.
-    let watch = watcher.map(crate::stream::Watch::new);
+    let watch = watcher.map(crate::chat::stream::Watch::new);
     let beside = app
         .filter(|_| crate::ai_model::runs_here(&provider, &base_url))
-        .map(|a| crate::stream::NewDictations(a.clone()));
-    let live = watch.as_ref().map(|w| crate::stream::Live {
+        .map(|a| crate::chat::stream::NewDictations(a.clone()));
+    let live = watch.as_ref().map(|w| crate::chat::stream::Live {
         sink: w,
-        beside: beside.as_ref().map(|b| b as &dyn crate::stream::Dictations),
+        beside: beside.as_ref().map(|b| b as &dyn crate::chat::stream::Dictations),
     });
 
     let (reply, tools_used, sources, looked, pages, stopped) = if tools_supported {
@@ -1429,7 +1429,7 @@ pub(crate) async fn chat_turn(
                 .with_earlier_sources(conv.messages.iter().flat_map(|m| m.sources.iter().map(|s| s.url.as_str())))
         });
         let mut messages: Vec<serde_json::Value> = if replay {
-            crate::chats::history_messages(earlier)
+            crate::chat::chats::history_messages(earlier)
         } else {
             history
                 .iter()
@@ -1439,8 +1439,8 @@ pub(crate) async fn chat_turn(
         // Earlier screenshots: the newest few sent again, the rest a line
         // (snip/turn.rs).
         crate::snip::turn::with_history_images(&mut messages, earlier, &provider, &base_url).await;
-        let extra = crate::tools::Extra { memory: true, search_chats: cfg.memory_search_chats, conversation: Some(conv.id) };
-        let looped = crate::tools::run_tool_loop_with(
+        let extra = crate::chat::tools::Extra { memory: true, search_chats: cfg.memory_search_chats, conversation: Some(conv.id) };
+        let looped = crate::chat::tools::run_tool_loop_with(
             &system,
             &messages,
             &text,
@@ -1459,13 +1459,13 @@ pub(crate) async fn chat_turn(
         );
         // Stopped: what was shown so far is the answer (a step's text that
         // came before a tool call was never shown). Superseded: no answer.
-        let (reply, tools_used, stopped) = match crate::stream::unless_stopped(looped, Some(stop)).await {
+        let (reply, tools_used, stopped) = match crate::chat::stream::unless_stopped(looped, Some(stop)).await {
             Ok(done) => {
                 let (reply, tools_used) = done?;
                 (reply, tools_used, false)
             }
-            Err(crate::stream::Halt::Superseded) => return Err(superseded()),
-            Err(crate::stream::Halt::Stopped) => {
+            Err(crate::chat::stream::Halt::Superseded) => return Err(superseded()),
+            Err(crate::chat::stream::Halt::Stopped) => {
                 let seen = watch.as_ref().map(|w| w.seen()).unwrap_or_default();
                 tracing::info!(shown = seen.text.len(), "Chat: the answer was stopped");
                 (seen.text, seen.chips, true)
@@ -1516,12 +1516,12 @@ pub(crate) async fn chat_turn(
     };
     // Stopped before any of the answer showed: nothing to save.
     if stopped && reply.trim().is_empty() {
-        return Err(crate::stream::STOPPED.to_string());
+        return Err(crate::chat::stream::STOPPED.to_string());
     }
     // Every model's answer, checked before it's shown: no sources list or
     // "Yap searched…" note of its own, no search claimed that didn't
     // happen, no "[1]" with nothing (or another question's pages) behind it.
-    let (mut reply, fixed) = crate::chats::checked_answer(&reply, &text, looked, &conv.messages, &sources);
+    let (mut reply, fixed) = crate::chat::chats::checked_answer(&reply, &text, looked, &conv.messages, &sources);
     for f in fixed {
         tracing::info!(fix = f, "Chat: Yap fixed the model's answer");
         crate::eval::post_fix(f);
@@ -1558,7 +1558,7 @@ pub(crate) async fn chat_turn(
     } else if let Some(note) = restored_note {
         reply = format!("{}\n\n{note}", reply.trim_end());
     }
-    let index = crate::chats::append_message(
+    let index = crate::chat::chats::append_message(
         conv.id,
         "assistant",
         &reply,
@@ -1602,9 +1602,9 @@ async fn small_model_answer(
     (base_url, api_key, model, provider, disable_thinking): (&str, &str, &str, &str, bool),
     web_on: bool,
     by_voice: bool,
-    live: Option<crate::stream::Live<'_>>,
-    stop: Option<&crate::stream::Stoppable>,
-    watch: Option<&crate::stream::Watch<'_>>,
+    live: Option<crate::chat::stream::Live<'_>>,
+    stop: Option<&crate::chat::stream::Stoppable>,
+    watch: Option<&crate::chat::stream::Watch<'_>>,
 ) -> Result<SmallAnswer, String> {
     let mut chips = Vec::new();
     let mut sources = Vec::new();
@@ -1619,7 +1619,7 @@ async fn small_model_answer(
         let query = crate::web::local_query(&query, text, settings.local.as_ref()).unwrap_or(query);
         let endpoints = crate::web::Endpoints::current();
         if let Some(live) = live {
-            live.sink.send(crate::stream::Event::Tool { name: "web_search".into(), doing: crate::stream::doing("web_search").into() });
+            live.sink.send(crate::chat::stream::Event::Tool { name: "web_search".into(), doing: crate::chat::stream::doing("web_search").into() });
         }
         match crate::web::search(&settings, &endpoints, &query, text).await {
             Ok(mut found) if found.hits.iter().any(|h| !h.text.trim().is_empty()) => {
@@ -1678,25 +1678,25 @@ async fn small_model_answer(
         system.push_str(&format!("\n\n{}", crate::web::no_search_line(None)));
     }
     if let Some(live) = live {
-        live.sink.send(crate::stream::Event::Chips { chips: chips.clone(), sources: sources.clone(), web: looked });
+        live.sink.send(crate::chat::stream::Event::Chips { chips: chips.clone(), sources: sources.clone(), web: looked });
     }
     let answered = crate::privacy::net::within(
         crate::privacy::net::Feature::Chat,
         crate::llm::note_chat(&system, &history, text, base_url, api_key, model, provider, disable_thinking, live),
     );
-    let (reply, stopped) = match crate::stream::unless_stopped(answered, stop).await {
+    let (reply, stopped) = match crate::chat::stream::unless_stopped(answered, stop).await {
         Ok(reply) => (reply?, false),
-        Err(crate::stream::Halt::Superseded) => return Err(superseded()),
-        Err(crate::stream::Halt::Stopped) => (watch.map(|w| w.seen().text).unwrap_or_default(), true),
+        Err(crate::chat::stream::Halt::Superseded) => return Err(superseded()),
+        Err(crate::chat::stream::Halt::Stopped) => (watch.map(|w| w.seen().text).unwrap_or_default(), true),
     };
     Ok(SmallAnswer { reply, chips, sources, looked, pages, stopped })
 }
 
 /// A turn a newer question in its conversation replaced (`chat_turn`): no
-/// answer saved, the question kept; [`crate::stream::SUPERSEDED`].
+/// answer saved, the question kept; [`crate::chat::stream::SUPERSEDED`].
 fn superseded() -> String {
     tracing::info!("Chat: a newer question in the conversation replaced this turn; no answer saved");
-    crate::stream::SUPERSEDED.to_string()
+    crate::chat::stream::SUPERSEDED.to_string()
 }
 
 /// A small model's answer ([`small_model_answer`]): the text, its chips and
@@ -1704,7 +1704,7 @@ fn superseded() -> String {
 struct SmallAnswer {
     reply: String,
     chips: Vec<String>,
-    sources: Vec<crate::chats::Source>,
+    sources: Vec<crate::chat::chats::Source>,
     looked: bool,
     pages: Vec<String>,
     /// Stopped while it was written (`reply` = what showed).
@@ -1779,21 +1779,21 @@ fn web_history_mode(tool_model_with_web: bool) -> (bool, bool) {
 /// where the question as a query found nothing useful; Yap searches for it
 /// when the server won't make it). A model evaluation may compare
 /// (`YAP_EVAL_FIRST` = must | yap | model).
-fn first_search(question: &str) -> crate::tools::FirstStep {
+fn first_search(question: &str) -> crate::chat::tools::FirstStep {
     if crate::eval::active() {
         match std::env::var("YAP_EVAL_FIRST").as_deref() {
-            Ok("yap") => return crate::tools::FirstStep::YapSearches(crate::web::search_query(question)),
-            Ok("model") => return crate::tools::FirstStep::Model,
+            Ok("yap") => return crate::chat::tools::FirstStep::YapSearches(crate::web::search_query(question)),
+            Ok("model") => return crate::chat::tools::FirstStep::Model,
             _ => {}
         }
     }
-    crate::tools::FirstStep::MustSearch
+    crate::chat::tools::FirstStep::MustSearch
 }
 
 /// The conversation a turn goes to: `conversation_id`'s, or a new one named
 /// after the first message (first 50 chars, OpenWhispr's rule).
-fn turn_conversation(conversation_id: Option<u64>, text: &str) -> crate::chats::Conversation {
-    match conversation_id.and_then(crate::chats::get) {
+fn turn_conversation(conversation_id: Option<u64>, text: &str) -> crate::chat::chats::Conversation {
+    match conversation_id.and_then(crate::chat::chats::get) {
         Some(c) => c,
         None => {
             let title: String = if text.chars().count() > 50 {
@@ -1801,7 +1801,7 @@ fn turn_conversation(conversation_id: Option<u64>, text: &str) -> crate::chats::
             } else {
                 text.to_string()
             };
-            crate::chats::create(&title)
+            crate::chat::chats::create(&title)
         }
     }
 }
@@ -1816,10 +1816,10 @@ async fn app_turn(
     by_voice: bool,
     asked: impl FnOnce(u64, usize) + Send,
     plan: crate::apps::Plan,
-    stop: &crate::stream::Stoppable,
+    stop: &crate::chat::stream::Stoppable,
 ) -> Result<ChatTurn, String> {
     let conv = turn_conversation(conversation_id, text);
-    let user_index = crate::chats::append(conv.id, "user", text, &[], None, by_voice)?;
+    let user_index = crate::chat::chats::append(conv.id, "user", text, &[], None, by_voice)?;
     stop.answers(conv.id);
     asked(conv.id, user_index);
     // What its answer leaves open: "Did you mean …?", "Which one?", the app
@@ -1829,7 +1829,7 @@ async fn app_turn(
         .await
         .map_err(|e| e.to_string())?;
     let tools_used: Vec<String> = Some(answer.chip).filter(|c| !c.is_empty()).into_iter().collect();
-    let index = crate::chats::append(conv.id, "assistant", &answer.reply, &tools_used, None, false)?;
+    let index = crate::chat::chats::append(conv.id, "assistant", &answer.reply, &tools_used, None, false)?;
     Ok(ChatTurn {
         conversation_id: conv.id,
         user_index,
@@ -1850,12 +1850,12 @@ async fn app_turn(
 /// `voice`: the question was dictated, kept with it).
 ///
 /// `onStream`: the page's channel — the answer as it's written (`stream.rs`
-/// [`crate::stream::Event`]: `{kind: "text", text}`, `{kind: "tool", name,
+/// [`crate::chat::stream::Event`]: `{kind: "text", text}`, `{kind: "tool", name,
 /// doing}`, `{kind: "chips", chips, sources, web}`, `{kind: "waiting",
 /// waiting}`, plus `{kind: "turn", conversationId}` once the question is
 /// saved); `reply` is then the checked answer to put in its place.
 /// `turnId`: what `stream_stop` stops it by (the ■, or `superseded`: the page
-/// sends a newer question next). The error [`crate::stream::SUPERSEDED`]: a
+/// sends a newer question next). The error [`crate::chat::stream::SUPERSEDED`]: a
 /// newer question in the conversation replaced it — no answer saved, the
 /// question kept.
 ///
@@ -1873,12 +1873,12 @@ pub async fn chat_send(
     text: String,
     scope: Option<String>,
     voice: Option<bool>,
-    on_stream: crate::stream::PageChannel,
+    on_stream: crate::chat::stream::PageChannel,
     turn_id: Option<String>,
     images: Option<Vec<String>>,
 ) -> Result<serde_json::Value, String> {
     let by_voice = voice.unwrap_or(false);
-    let stop = crate::stream::Stoppable::new(turn_id.as_deref());
+    let stop = crate::chat::stream::Stoppable::new(turn_id.as_deref());
     let watched = on_stream.0.is_some();
     // Screenshots: the model must be able to read them, and their copies
     // for it are made (usually already, while the question was typed).
@@ -1911,7 +1911,7 @@ pub async fn chat_send(
                     "userMessageId": format!("chat:{conv}:{index}"),
                 }));
             },
-            watched.then_some(&on_stream as &dyn crate::stream::Sink),
+            watched.then_some(&on_stream as &dyn crate::chat::stream::Sink),
             Some(&stop),
         ),
     )
@@ -2306,7 +2306,7 @@ pub fn local_llm_status() -> serde_json::Value {
                 "recommended": m.id == recommended,
                 "isDefault": m.default,
                 "needsGpu": m.needs_gpu,
-                "tools": crate::tools::supports_tools(
+                "tools": crate::chat::tools::supports_tools(
                     crate::local_llm::PROVIDER_ONDEVICE,
                     &crate::local_llm::model_id(std::path::Path::new(m.filename)),
                 ),
@@ -2339,7 +2339,7 @@ pub fn local_llm_status() -> serde_json::Value {
                 "file": f,
                 "name": id,
                 "sizeMb": mb,
-                "tools": crate::tools::supports_tools(crate::local_llm::PROVIDER_ONDEVICE, &id),
+                "tools": crate::chat::tools::supports_tools(crate::local_llm::PROVIDER_ONDEVICE, &id),
                 "maxContext": crate::local_llm::trained_context(&crate::local_llm::llm_dir().join(f)),
             })
         })

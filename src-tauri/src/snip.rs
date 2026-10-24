@@ -120,7 +120,7 @@ pub struct Last {
     /// From the release to the image saved.
     pub save_ms: f64,
     pub focused: bool,
-    pub image: Option<crate::chats::ChatImage>,
+    pub image: Option<crate::chat::chats::ChatImage>,
     pub conversation_id: Option<u64>,
 }
 
@@ -217,8 +217,8 @@ fn give_focus_back(_hwnd: isize) {}
 /// never under a lock.
 fn chat_target(app: &AppHandle) -> Option<u64> {
     let (visible, _) = crate::notices::notice::window_view(app);
-    match crate::assistant::chat_viewing() {
-        crate::assistant::Viewing::Conversation(id) if visible => Some(id),
+    match crate::chat::assistant::chat_viewing() {
+        crate::chat::assistant::Viewing::Conversation(id) if visible => Some(id),
         _ => None,
     }
 }
@@ -419,7 +419,7 @@ fn finish(app: &AppHandle, generation: u64, outcome: overlay::Outcome) {
 }
 
 /// The box cut out of its monitor's frame and saved as a PNG.
-fn save(snip: &Snip, screen: usize, rect: &Rect) -> Result<crate::chats::ChatImage, String> {
+fn save(snip: &Snip, screen: usize, rect: &Rect) -> Result<crate::chat::chats::ChatImage, String> {
     let frame = snip.frames.get(screen).ok_or("that monitor's picture is gone")?;
     let r = geom::to_frame(rect, (frame.monitor.width, frame.monitor.height), (frame.width, frame.height));
     if !geom::big_enough(&r) {
@@ -428,12 +428,12 @@ fn save(snip: &Snip, screen: usize, rect: &Rect) -> Result<crate::chats::ChatIma
     let rgba = geom::crop_rgba(&frame.bgra, frame.width, &r);
     let png = images::encode_png(&rgba, r.w as u32, r.h as u32, true)?;
     let saved = images::save(&png, r.w as u32, r.h as u32)?;
-    Ok(crate::chats::ChatImage { id: saved.id, w: saved.w, h: saved.h, bytes: saved.bytes, source: "snip".into(), gone: false })
+    Ok(crate::chat::chats::ChatImage { id: saved.id, w: saved.w, h: saved.h, bytes: saved.bytes, source: "snip".into(), gone: false })
 }
 
 /// The main window up on Chat with the image in its message box, and the
 /// copy for the selected model made meanwhile.
-fn hand_to_chat(app: &AppHandle, image: crate::chats::ChatImage, conversation: Option<u64>, origin: Origin) {
+fn hand_to_chat(app: &AppHandle, image: crate::chat::chats::ChatImage, conversation: Option<u64>, origin: Origin) {
     let cfg = crate::config::load();
     if let Ok((base_url, _key, _model, provider, _p, _t)) = crate::commands::resolve_chat_endpoint(&cfg) {
         let here = crate::ai_model::runs_here(&provider, &base_url);

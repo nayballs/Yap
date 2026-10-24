@@ -535,16 +535,16 @@ impl Streamed {
     }
 }
 
-impl crate::stream::Sink for Streamed {
-    fn send(&self, ev: crate::stream::Event) {
+impl crate::chat::stream::Sink for Streamed {
+    fn send(&self, ev: crate::chat::stream::Event) {
         let (conversation, question) = {
             let st = self.lock();
             (st.conversation, st.question_id.clone())
         };
-        if let crate::stream::Event::Chips { web, .. } = &ev {
+        if let crate::chat::stream::Event::Chips { web, .. } = &ev {
             self.lock().web = *web;
         }
-        if let crate::stream::Event::Text { text } = &ev {
+        if let crate::chat::stream::Event::Text { text } = &ev {
             if !text.trim().is_empty() {
                 self.speak_ready(text);
             }
@@ -559,8 +559,8 @@ impl crate::stream::Sink for Streamed {
 async fn answer(app: AppHandle, generation: u64, since: u64, question: String) {
     let cfg = crate::config::load();
     let viewing = view();
-    let open_exists = matches!(viewing, Viewing::Conversation(id) if crate::chats::get(id).is_some());
-    let choice = choose_conversation(viewing, open_exists, crate::chats::latest(), now_secs());
+    let open_exists = matches!(viewing, Viewing::Conversation(id) if crate::chat::chats::get(id).is_some());
+    let choice = choose_conversation(viewing, open_exists, crate::chat::chats::latest(), now_secs());
     let conversation_id = match choice {
         Choice::Continue(id) => Some(id),
         Choice::New => None,
@@ -618,7 +618,7 @@ async fn answer(app: AppHandle, generation: u64, since: u64, question: String) {
         Some("assistant"),
         true,
         asked,
-        Some(&streamed as &dyn crate::stream::Sink),
+        Some(&streamed as &dyn crate::chat::stream::Sink),
         None,
     );
     // Its AI calls and searches are the Voice Assistant's in the network
@@ -634,7 +634,7 @@ async fn answer(app: AppHandle, generation: u64, since: u64, question: String) {
         // follow-up, Chat): nothing saved, nothing more said, no alert —
         // the newer question is the one being answered. The Chat view
         // takes its bubble away.
-        Err(e) if e == crate::stream::SUPERSEDED => {
+        Err(e) if e == crate::chat::stream::SUPERSEDED => {
             if let Some(feed) = &feed {
                 feed.close();
                 // Still saying what it had of this answer: not any more

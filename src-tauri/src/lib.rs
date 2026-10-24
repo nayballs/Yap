@@ -13,13 +13,12 @@ mod ai_model;
 mod as_said;
 mod app_kind;
 mod apps;
-mod assistant;
 mod auth;
 mod bar;
 mod bench;
 mod calendar;
 mod calls;
-mod chats;
+mod chat;
 mod cleanup_styles;
 mod coaching;
 mod commands;
@@ -44,12 +43,10 @@ mod meeting_end;
 mod meeting_refine;
 mod meeting_summary;
 mod memory;
-mod note_text;
 mod notepad;
 mod notes;
 mod notices;
 mod privacy;
-mod tools;
 mod history;
 mod input_hook;
 mod learn;
@@ -75,7 +72,6 @@ mod snip;
 mod sound;
 mod speakers;
 mod stt;
-mod stream;
 mod stt_speed;
 mod text_injector;
 mod transforms;
@@ -574,7 +570,7 @@ pub fn run() {
             commands::chat_delete_many,
             commands::chat_rename,
             commands::chat_send,
-            stream::stream_stop,
+            chat::stream::stream_stop,
             ai_model::ai_model_status,
             ai_model::chat_set_model,
             ai_model::chat_provider_key,
@@ -590,8 +586,8 @@ pub fn run() {
             voice::read_aloud::read_aloud_selection,
             voice::read_aloud::read_aloud_action,
             voice::read_aloud::read_aloud_state,
-            assistant::chat_view_state,
-            assistant::assistant_stop,
+            chat::assistant::chat_view_state,
+            chat::assistant::assistant_stop,
             voice::tts::tts_voices,
             voice::tts::tts_speak,
             voice::tts::tts_preview,
@@ -799,7 +795,7 @@ pub fn run() {
             #[cfg(debug_assertions)]
             commands::e2e_dictation,
             #[cfg(debug_assertions)]
-            assistant::e2e_assistant_ask,
+            chat::assistant::e2e_assistant_ask,
             #[cfg(debug_assertions)]
             apps::e2e_opened_apps,
             // Robot mode only (realtest.rs): the real-app tests.

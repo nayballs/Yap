@@ -29,7 +29,7 @@ use std::collections::BTreeMap;
 use serde::Serialize;
 use tauri::{AppHandle, Emitter};
 
-use crate::chats::ChatModel;
+use crate::chat::chats::ChatModel;
 use crate::config::YapConfig;
 use crate::local_llm::PROVIDER_ONDEVICE;
 
@@ -160,7 +160,7 @@ fn host_of(base_url: &str) -> String {
 /// endpoint configured underneath (`local_llm::effective_endpoint_for`), so
 /// it's named by that endpoint, not "On this PC".
 pub fn describe(provider: &str, model: &str, base_url: &str, on_device_name: &str) -> Target {
-    let tools = crate::tools::supports_tools(provider, model);
+    let tools = crate::chat::tools::supports_tools(provider, model);
     let mut provider = provider.to_string();
     if provider == PROVIDER_ONDEVICE && !base_url.is_empty() && !is_loopback(base_url) {
         provider = KEYED_PROVIDERS
@@ -463,7 +463,7 @@ pub fn status(cfg: &YapConfig, scope: Scope, on_device: &OnDevice) -> Status {
         servers: servers(cfg),
         on_device: on_device.installed.then(|| OnDeviceChoice {
             name: on_device.name.clone(),
-            tools: crate::tools::supports_tools(PROVIDER_ONDEVICE, &on_device.id),
+            tools: crate::chat::tools::supports_tools(PROVIDER_ONDEVICE, &on_device.id),
         }),
         context,
         images,

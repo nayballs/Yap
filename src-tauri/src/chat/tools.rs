@@ -72,7 +72,7 @@
 
 use serde_json::{json, Value};
 
-use crate::note_text::{self, Field};
+use crate::chat::note_text::{self, Field};
 
 const MAX_TOOL_STEPS: usize = 20;
 const MAX_CONTENT_LENGTH: usize = 500;
@@ -205,7 +205,7 @@ pub fn asked_to_remember(question: &str) -> bool {
 /// `search_chats`: the earlier conversations matching the query (`chats::search`).
 fn search_chats(args: &Value, conversation: Option<u64>) -> Value {
     let query = args["query"].as_str().unwrap_or("").trim();
-    let found = crate::chats::search(query, conversation, 5);
+    let found = crate::chat::chats::search(query, conversation, 5);
     let results: Vec<Value> = found
         .iter()
         .map(|f| {
@@ -1317,12 +1317,12 @@ async fn search_for_the_model(turn: &mut crate::web::Turn, query: &str, messages
 /// (`stream::call`: a step's opening text held until it's an answer, a
 /// tool call shown as its chip; a model on this PC steps aside for a
 /// dictation), else as a whole answer.
-async fn ask(live: Option<crate::stream::Live<'_>>, req: &crate::llm::ChatRequest, tools_offered: bool, disable_thinking: bool) -> Result<Value, String> {
+async fn ask(live: Option<crate::chat::stream::Live<'_>>, req: &crate::llm::ChatRequest, tools_offered: bool, disable_thinking: bool) -> Result<Value, String> {
     // Recorded as Chat's in the network receipts (net.rs), unless the turn
     // is already someone else's (the Voice Assistant's).
     let step = async move {
         match live {
-            Some(live) => crate::stream::call(live, req, tools_offered, disable_thinking).await,
+            Some(live) => crate::chat::stream::call(live, req, tools_offered, disable_thinking).await,
             None => crate::llm::post_whole(req).await,
         }
     };
@@ -1330,17 +1330,17 @@ async fn ask(live: Option<crate::stream::Live<'_>>, req: &crate::llm::ChatReques
 }
 
 /// Yap's own web search is under way (the page shows it as a chip).
-fn searching(live: Option<crate::stream::Live<'_>>) {
+fn searching(live: Option<crate::chat::stream::Live<'_>>) {
     if let Some(live) = live {
-        live.sink.send(crate::stream::Event::Tool { name: "web_search".into(), doing: crate::stream::doing("web_search").into() });
+        live.sink.send(crate::chat::stream::Event::Tool { name: "web_search".into(), doing: crate::chat::stream::doing("web_search").into() });
     }
 }
 
 /// The chips so far, and the web sources found so far (a "[1]" in the
 /// answer draws as a pill while it's written).
-fn report(live: Option<crate::stream::Live<'_>>, tools_used: &[String], web: Option<&crate::web::Turn>) {
+fn report(live: Option<crate::chat::stream::Live<'_>>, tools_used: &[String], web: Option<&crate::web::Turn>) {
     if let Some(live) = live {
-        live.sink.send(crate::stream::Event::Chips {
+        live.sink.send(crate::chat::stream::Event::Chips {
             chips: tools_used.to_vec(),
             sources: web.map(|w| w.sources.clone()).unwrap_or_default(),
             web: web.is_some_and(crate::web::Turn::looked),
@@ -1393,7 +1393,7 @@ pub async fn run_tool_loop_with(
     web: Option<&mut crate::web::Turn>,
     first: FirstStep,
     extra: Extra,
-    live: Option<crate::stream::Live<'_>>,
+    live: Option<crate::chat::stream::Live<'_>>,
 ) -> Result<(String, Vec<String>), String> {
     tool_loop(system, history, question, context, base_url, api_key, model, provider, disable_thinking, open_apps, on_change, web, first, extra, live).await
 }
@@ -1435,7 +1435,7 @@ async fn tool_loop(
     mut web: Option<&mut crate::web::Turn>,
     first: FirstStep,
     extra: Extra,
-    live: Option<crate::stream::Live<'_>>,
+    live: Option<crate::chat::stream::Live<'_>>,
 ) -> Result<(String, Vec<String>), String> {
     let must_search_first = first == FirstStep::MustSearch && web.is_some();
     // A model on this PC gets Yap's second search for local prices; a cloud
@@ -1449,7 +1449,7 @@ async fn tool_loop(
     }
     let mut messages: Vec<Value> = vec![json!({ "role": "system", "content": system })];
     messages.extend(history.iter().cloned());
-    messages.extend(crate::chats::question_messages(&context, question));
+    messages.extend(crate::chat::chats::question_messages(&context, question));
     // The turn's screenshots go with the question (Snip to Chat; nothing
     // without any).
     crate::snip::turn::attach(&mut messages);
@@ -1525,9 +1525,9 @@ async fn tool_loop(
         // The step made to search is a call, never the answer: its words
         // aren't shown or said, and it's cut short if it writes on
         // ([`MUST_SEARCH_TOKENS`]).
-        let chips_only = live.map(|l| crate::stream::ChipsOnly(l.sink));
+        let chips_only = live.map(|l| crate::chat::stream::ChipsOnly(l.sink));
         let step_live = match (live, &chips_only) {
-            (Some(l), Some(quiet)) if forced => Some(crate::stream::Live { sink: quiet, beside: l.beside }),
+            (Some(l), Some(quiet)) if forced => Some(crate::chat::stream::Live { sink: quiet, beside: l.beside }),
             _ => live,
         };
         if forced {
@@ -1566,7 +1566,7 @@ async fn tool_loop(
                 // A step refused mid-stream may have shown some text: it
                 // wasn't the answer.
                 if let Some(live) = live {
-                    live.sink.send(crate::stream::Event::Text { text: String::new() });
+                    live.sink.send(crate::chat::stream::Event::Text { text: String::new() });
                 }
                 if rejected < REJECTED_CALL_RETRIES {
                     rejected += 1;
@@ -2824,23 +2824,23 @@ mod tests {
 
     /// Every event a streamed turn sent.
     #[derive(Default)]
-    struct Seen(std::sync::Mutex<Vec<crate::stream::Event>>);
+    struct Seen(std::sync::Mutex<Vec<crate::chat::stream::Event>>);
 
-    impl crate::stream::Sink for Seen {
-        fn send(&self, ev: crate::stream::Event) {
+    impl crate::chat::stream::Sink for Seen {
+        fn send(&self, ev: crate::chat::stream::Event) {
             self.0.lock().unwrap().push(ev);
         }
     }
 
     impl Seen {
-        fn events(&self) -> Vec<crate::stream::Event> {
+        fn events(&self) -> Vec<crate::chat::stream::Event> {
             self.0.lock().unwrap().clone()
         }
         fn texts(&self) -> Vec<String> {
             self.events()
                 .into_iter()
                 .filter_map(|e| match e {
-                    crate::stream::Event::Text { text } => Some(text),
+                    crate::chat::stream::Event::Text { text } => Some(text),
                     _ => None,
                 })
                 .collect()
@@ -2863,7 +2863,7 @@ mod tests {
             None,
             FirstStep::Model,
             Extra::default(),
-            Some(crate::stream::Live { sink: seen, beside: None }),
+            Some(crate::chat::stream::Live { sink: seen, beside: None }),
         )
         .await
     }
@@ -2892,9 +2892,9 @@ mod tests {
         let events = seen.events();
         // The line before the call never showed; the call did, as a chip.
         assert!(!seen.texts().iter().any(|t| t.contains("look in")), "{events:?}");
-        let tool_at = events.iter().position(|e| matches!(e, crate::stream::Event::Tool { name, .. } if name == "search_notes")).expect("the call's chip");
-        let chips_at = events.iter().position(|e| matches!(e, crate::stream::Event::Chips { .. })).expect("the chips");
-        let first_text = events.iter().position(|e| matches!(e, crate::stream::Event::Text { text } if !text.is_empty())).expect("text");
+        let tool_at = events.iter().position(|e| matches!(e, crate::chat::stream::Event::Tool { name, .. } if name == "search_notes")).expect("the call's chip");
+        let chips_at = events.iter().position(|e| matches!(e, crate::chat::stream::Event::Chips { .. })).expect("the chips");
+        let first_text = events.iter().position(|e| matches!(e, crate::chat::stream::Event::Text { text } if !text.is_empty())).expect("text");
         assert!(tool_at < chips_at && chips_at < first_text, "{events:?}");
         // The answer grew, and ended whole.
         let texts = seen.texts();
@@ -2940,7 +2940,7 @@ mod tests {
             Some(&mut turn),
             FirstStep::MustSearch,
             Extra::default(),
-            Some(crate::stream::Live { sink: seen, beside: None }),
+            Some(crate::chat::stream::Live { sink: seen, beside: None }),
         )
         .await
     }
@@ -2982,8 +2982,8 @@ mod tests {
         let events = seen.events();
         assert!(!seen.texts().iter().any(|t| t.contains("can't provide") || t.contains("weather website")), "{events:?}");
         // Nothing written before the search's chips; then the answer.
-        let chips_at = events.iter().position(|e| matches!(e, crate::stream::Event::Chips { .. })).expect("the chips");
-        let first_text = events.iter().position(|e| matches!(e, crate::stream::Event::Text { text } if !text.is_empty())).expect("text");
+        let chips_at = events.iter().position(|e| matches!(e, crate::chat::stream::Event::Chips { .. })).expect("the chips");
+        let first_text = events.iter().position(|e| matches!(e, crate::chat::stream::Event::Text { text } if !text.is_empty())).expect("text");
         assert!(chips_at < first_text, "{events:?}");
         assert_eq!(seen.texts().last().unwrap(), &reply);
         // Its call went back as the model made it, without the words nobody

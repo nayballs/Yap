@@ -368,7 +368,7 @@ struct State {
     hidden_until: u64,
     dictation: Dictation,
     /// Where a question to the Voice Assistant is (`yap-assistant`).
-    assistant: crate::assistant::Phase,
+    assistant: crate::chat::assistant::Phase,
     /// The reading card is up (`read_aloud.rs`).
     reading: bool,
     meeting: bool,
@@ -421,7 +421,7 @@ impl Default for State {
             snip_hotkey: None,
             hidden_until: 0,
             dictation: Dictation::Idle,
-            assistant: crate::assistant::Phase::Idle,
+            assistant: crate::chat::assistant::Phase::Idle,
             reading: false,
             meeting: false,
             fullscreen: Fullscreen::None,
@@ -457,7 +457,7 @@ impl State {
 
     /// A dictation or a question to the assistant has the capsule.
     fn busy(&self) -> bool {
-        self.dictation != Dictation::Idle || self.assistant != crate::assistant::Phase::Idle
+        self.dictation != Dictation::Idle || self.assistant != crate::chat::assistant::Phase::Idle
     }
 
     /// Something to watch the cursor for: the bar is on, or something shows
@@ -470,7 +470,7 @@ impl State {
         Visibility {
             enabled: self.enabled,
             dictation: self.dictation,
-            assistant: self.assistant != crate::assistant::Phase::Idle,
+            assistant: self.assistant != crate::chat::assistant::Phase::Idle,
             reading: self.reading,
             meeting: self.meeting,
             hidden: self.hidden_until > now,
@@ -586,7 +586,7 @@ pub struct Status {
     call: Option<String>,
     /// Where a question to the Voice Assistant is: "idle" | "listening" |
     /// "thinking" | "speaking" (the capsule's assistant variant).
-    assistant: crate::assistant::Phase,
+    assistant: crate::chat::assistant::Phase,
     /// The reading card is up (its content: `yap-read`, `read_aloud.rs`).
     reading: bool,
     /// The card on screen (none or one: `notice.rs` shows them one at a
@@ -779,7 +779,7 @@ fn follow_cursor(app: &AppHandle, cursor: Option<(i32, i32)>, now: u64) {
             // has been said: the bar stays where it started.
             s.dictation == Dictation::Recording
                 || s.dictation == Dictation::Processing
-                || s.assistant != crate::assistant::Phase::Idle,
+                || s.assistant != crate::chat::assistant::Phase::Idle,
             s.edge,
             s.replace,
             now.saturating_sub(s.autohide_at) >= AUTOHIDE_EVERY_MS,
@@ -1030,7 +1030,7 @@ pub fn init(app: &AppHandle) {
     app.listen("yap-assistant", move |event| {
         let phase = serde_json::from_str::<serde_json::Value>(event.payload())
             .ok()
-            .and_then(|v| serde_json::from_value::<crate::assistant::Phase>(v["phase"].clone()).ok())
+            .and_then(|v| serde_json::from_value::<crate::chat::assistant::Phase>(v["phase"].clone()).ok())
             .unwrap_or_default();
         lock().assistant = phase;
         repick(&h);
@@ -1421,7 +1421,7 @@ fn act(app: &AppHandle, action: &str) -> Result<(), String> {
         }
         // ■ on the assistant's capsule: stop the answer (its voice, or one
         // still coming; it's in Chat either way).
-        "assistant-stop" => crate::assistant::stop(app),
+        "assistant-stop" => crate::chat::assistant::stop(app),
         // 🔊: read the selection in the app you're in aloud (the bar never
         // takes the focus, so it's still selected there); while reading, ■.
         "read-aloud" => {
@@ -2037,8 +2037,8 @@ mod tests {
             assert!(shows(Visibility { assistant: true, ..v }));
         }
         // Its phases from the page's event.
-        let phase: crate::assistant::Phase = serde_json::from_value(serde_json::json!("speaking")).unwrap();
-        assert_eq!(phase, crate::assistant::Phase::Speaking);
+        let phase: crate::chat::assistant::Phase = serde_json::from_value(serde_json::json!("speaking")).unwrap();
+        assert_eq!(phase, crate::chat::assistant::Phase::Speaking);
     }
 
     #[test]

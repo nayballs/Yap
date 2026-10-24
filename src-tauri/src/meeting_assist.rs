@@ -160,19 +160,19 @@ async fn streamed_answer(
     ep: &summary::Endpoint,
     messages: serde_json::Value,
     opts: &crate::llm::ChatOptions,
-    on_stream: &crate::stream::PageChannel,
+    on_stream: &crate::chat::stream::PageChannel,
     turn_id: Option<&str>,
 ) -> Result<(String, bool), String> {
-    let stop = crate::stream::Stoppable::new(turn_id);
-    let watch = crate::stream::Watch::new(on_stream);
-    let sink = on_stream.0.is_some().then_some(&watch as &dyn crate::stream::Sink);
+    let stop = crate::chat::stream::Stoppable::new(turn_id);
+    let watch = crate::chat::stream::Watch::new(on_stream);
+    let sink = on_stream.0.is_some().then_some(&watch as &dyn crate::chat::stream::Sink);
     let asked = summary::chat_beside_dictation_live(app, ep, messages, opts, sink);
-    match crate::stream::unless_stopped(asked, Some(&stop)).await {
+    match crate::chat::stream::unless_stopped(asked, Some(&stop)).await {
         Ok(answer) => Ok((answer?, false)),
         Err(_) => {
             let shown = watch.seen().text;
             if shown.trim().is_empty() {
-                return Err(crate::stream::STOPPED.to_string());
+                return Err(crate::chat::stream::STOPPED.to_string());
             }
             Ok((shown, true))
         }
@@ -190,7 +190,7 @@ pub async fn meeting_catch_up(
     note_id: u64,
     since: usize,
     question: Option<String>,
-    on_stream: crate::stream::PageChannel,
+    on_stream: crate::chat::stream::PageChannel,
     turn_id: Option<String>,
 ) -> Result<CatchUp, String> {
     let note = crate::notes::get(note_id).ok_or("Note not found")?;
@@ -291,7 +291,7 @@ pub async fn meeting_assist(
     app: AppHandle,
     note_id: u64,
     kind: Helper,
-    on_stream: crate::stream::PageChannel,
+    on_stream: crate::chat::stream::PageChannel,
     turn_id: Option<String>,
 ) -> Result<Assist, String> {
     let note = crate::notes::get(note_id).ok_or("Note not found")?;

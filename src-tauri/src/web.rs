@@ -65,7 +65,7 @@ use reqwest::Url;
 use serde::Serialize;
 use serde_json::{json, Value};
 
-use crate::chats::Source;
+use crate::chat::chats::Source;
 
 pub mod native;
 

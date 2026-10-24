@@ -598,7 +598,7 @@ async fn prepare(spec: &str, args: &Args, keys: &HashMap<String, String>, run_di
         other => return Err(format!("unknown provider \"{other}\" (groq, openai, anthropic, openrouter, gemini, custom, local)")),
     }
     record::set_tools_forced(None);
-    m.tools_rule = crate::tools::supports_tools(&m.provider, &m.model);
+    m.tools_rule = crate::chat::tools::supports_tools(&m.provider, &m.model);
     if !m.key.is_empty() {
         record::add_secret(&m.key);
     }
@@ -744,7 +744,7 @@ fn resolve_apps(apps: &Apps, scenarios: &Path, run_dir: &Path, this_pc: &mut Opt
 fn seed(s: &Scenario) -> Result<(), String> {
     crate::notes::eval_reset();
     crate::memory::eval_reset();
-    crate::chats::eval_reset();
+    crate::chat::chats::eval_reset();
     for m in &s.seed.memory {
         use crate::memory::ops::{Action, Change, Origin, Rules, Section};
         let section = Section::parse(&m.section).ok_or_else(|| format!("memory section \"{}\"", m.section))?;
@@ -764,9 +764,9 @@ fn seed(s: &Scenario) -> Result<(), String> {
         }
     }
     for c in &s.seed.chats {
-        let conv = crate::chats::create(&c.title);
+        let conv = crate::chat::chats::create(&c.title);
         for m in &c.messages {
-            crate::chats::append(conv.id, &m.role, &m.text, &[], None, false)?;
+            crate::chat::chats::append(conv.id, &m.role, &m.text, &[], None, false)?;
         }
     }
     for f in &s.seed.folders {
@@ -897,7 +897,7 @@ async fn run_scenario(
             // A memory action alone (learn, tell, import): no chat turn.
             Ok(None)
         } else {
-            let watcher = streamed.then_some(&watch as &dyn crate::stream::Sink);
+            let watcher = streamed.then_some(&watch as &dyn crate::chat::stream::Sink);
             crate::commands::chat_turn(None, conversation, &turn.user, scope, voice, |_, _| {}, watcher, None).await.map(Some)
         };
         let first_words = watch.at();
@@ -1119,9 +1119,9 @@ impl FirstWords {
     }
 }
 
-impl crate::stream::Sink for FirstWords {
-    fn send(&self, ev: crate::stream::Event) {
-        if let crate::stream::Event::Text { text } = &ev {
+impl crate::chat::stream::Sink for FirstWords {
+    fn send(&self, ev: crate::chat::stream::Event) {
+        if let crate::chat::stream::Event::Text { text } = &ev {
             let mut at = self.at.lock().unwrap_or_else(|p| p.into_inner());
             if at.is_none() && !text.trim().is_empty() {
                 let ms = self.start.elapsed().as_millis() as u64;

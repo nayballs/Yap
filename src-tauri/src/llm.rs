@@ -627,7 +627,7 @@ pub async fn note_chat(
     model: &str,
     provider: &str,
     disable_thinking: bool,
-    live: Option<crate::stream::Live<'_>>,
+    live: Option<crate::chat::stream::Live<'_>>,
 ) -> Result<String, String> {
     let question = question.trim();
     if question.is_empty() {
@@ -644,7 +644,7 @@ pub async fn note_chat(
     // A model on this PC may take a while on a processor (`chat_timeout`).
     let req = ChatRequest::chat(base_url, api_key, model, provider, 0.5, Value::Array(messages), None, None);
     let message = match live {
-        Some(live) => crate::stream::call(live, &req, false, disable_thinking).await?,
+        Some(live) => crate::chat::stream::call(live, &req, false, disable_thinking).await?,
         None => post(&req, None).await?,
     };
     let out = strip_wrapping(
@@ -1021,16 +1021,16 @@ enum ReadFail {
 }
 
 /// Read a streamed answer to its end, `on` hearing it as it comes.
-async fn read_stream(mut resp: reqwest::Response, on: OnDelta<'_>) -> Result<crate::stream::Assembler, ReadFail> {
-    let mut sse = crate::stream::SseParser::default();
-    let mut asm = crate::stream::Assembler::default();
-    let mut handle = |data: String, asm: &mut crate::stream::Assembler| -> Result<(), ReadFail> {
+async fn read_stream(mut resp: reqwest::Response, on: OnDelta<'_>) -> Result<crate::chat::stream::Assembler, ReadFail> {
+    let mut sse = crate::chat::stream::SseParser::default();
+    let mut asm = crate::chat::stream::Assembler::default();
+    let mut handle = |data: String, asm: &mut crate::chat::stream::Assembler| -> Result<(), ReadFail> {
         match asm.push(&data) {
             Ok(pieces) => {
                 for p in pieces {
                     match p {
-                        crate::stream::Piece::Content(s) => on(Delta::Content(&s)),
-                        crate::stream::Piece::Call(name) => on(Delta::ToolCall(&name)),
+                        crate::chat::stream::Piece::Content(s) => on(Delta::Content(&s)),
+                        crate::chat::stream::Piece::Call(name) => on(Delta::ToolCall(&name)),
                     }
                 }
                 Ok(())
@@ -1363,7 +1363,7 @@ async fn post_chat_request(
                 Ok(asm) => {
                     let message = match asm.message() {
                         Ok(m) => m,
-                        Err(crate::stream::Unusable::BadArguments(name)) => {
+                        Err(crate::chat::stream::Unusable::BadArguments(name)) => {
                             tracing::info!(tool = %name, "A streamed tool call's arguments weren't JSON");
                             return Err(call.failed(format!(
                                 "{TOOL_CALL_REJECTED}its arguments weren't complete JSON. Call the tool again with short, valid JSON arguments"

@@ -93,7 +93,7 @@ async fn ask(ep: &Endpoint, system: &str, user: &str, max_changes: usize, backgr
     let mut schema = serde_json::Map::new();
     if local {
         let mode = match json_mode() {
-            "auto" if crate::tools::supports_tools(&ep.provider, &ep.model) => "off",
+            "auto" if crate::chat::tools::supports_tools(&ep.provider, &ep.model) => "off",
             "auto" => "schema",
             m => m,
         };
@@ -293,7 +293,7 @@ pub fn path(ep: &Endpoint) -> Path {
             _ => {}
         }
     }
-    if crate::tools::supports_tools(&ep.provider, &ep.model) {
+    if crate::chat::tools::supports_tools(&ep.provider, &ep.model) {
         Path::Full
     } else {
         Path::Small
@@ -378,7 +378,7 @@ fn on_device_stopped(ep: &Endpoint) -> bool {
 /// themselves (`prompt::worth_a_pass`). `announce`: the main window's toast.
 pub async fn learn_from_chat(conversation: u64, announce: bool) -> Result<Applied, String> {
     let cfg = crate::config::load();
-    let conv = crate::chats::get(conversation).ok_or("Conversation not found")?;
+    let conv = crate::chat::chats::get(conversation).ok_or("Conversation not found")?;
     let len = conv.messages.len();
     let start = super::read_upto(conversation).min(len);
     let new = &conv.messages[start..];
@@ -396,7 +396,7 @@ pub async fn learn_from_chat(conversation: u64, announce: bool) -> Result<Applie
     if on_device_stopped(&ep) && !crate::eval::active() {
         return Err(DEFERRED.to_string());
     }
-    let pair = |m: &crate::chats::ChatMessage| (m.role.clone(), m.text.clone());
+    let pair = |m: &crate::chat::chats::ChatMessage| (m.role.clone(), m.text.clone());
     let before: Vec<(String, String)> = conv.messages[start.saturating_sub(2)..start].iter().map(pair).collect();
     let fresh: Vec<(String, String)> = new.iter().map(pair).collect();
     let budget = if ep.local() { 1_800 } else { 2_400 };
@@ -520,7 +520,7 @@ pub async fn learn_from_meeting(note_id: u64) -> Result<Applied, String> {
     if on_device_stopped(&ep) && !crate::eval::active() {
         return Err(DEFERRED.to_string());
     }
-    let (plan, _) = crate::note_text::fit(&note.enhanced_content, 1_500);
+    let (plan, _) = crate::chat::note_text::fit(&note.enhanced_content, 1_500);
     let mut body = format!("Title: {}\n", note.title);
     if !note.participants.is_empty() {
         body.push_str(&format!("Attendees: {}\n", note.participants.join(", ")));

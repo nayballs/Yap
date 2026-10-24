@@ -1548,7 +1548,7 @@ pub async fn llm_models(
             // under 4B: no), for the Chat picker's "no note tools".
             for m in &mut models {
                 if m.tools.is_none() {
-                    m.tools = Some(crate::tools::supports_tools(&provider, &m.id));
+                    m.tools = Some(crate::chat::tools::supports_tools(&provider, &m.id));
                 }
             }
             ListView {
@@ -2030,13 +2030,13 @@ mod tests {
         assert_eq!(tools_for("groq", "acme/tiny"), None);
         // Yap's note tools follow it: a cloud model keeps them unless its
         // provider said no.
-        assert!(!crate::tools::supports_tools("openrouter", "acme/tiny"));
-        assert!(crate::tools::supports_tools("openrouter", "openai/gpt-5-mini"));
-        assert!(crate::tools::supports_tools("openrouter", "x/y"));
-        assert!(crate::tools::supports_tools("groq", "acme/tiny"));
+        assert!(!crate::chat::tools::supports_tools("openrouter", "acme/tiny"));
+        assert!(crate::chat::tools::supports_tools("openrouter", "openai/gpt-5-mini"));
+        assert!(crate::chat::tools::supports_tools("openrouter", "x/y"));
+        assert!(crate::chat::tools::supports_tools("groq", "acme/tiny"));
         // A failed last check says nothing.
         record("openrouter", Err("offline".into()), 200);
-        assert!(crate::tools::supports_tools("openrouter", "acme/tiny"));
+        assert!(crate::chat::tools::supports_tools("openrouter", "acme/tiny"));
     }
 
     #[test]

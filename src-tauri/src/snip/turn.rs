@@ -25,7 +25,7 @@
 
 use serde_json::{json, Value};
 
-use crate::chats::{ChatImage, ChatMessage};
+use crate::chat::chats::{ChatImage, ChatMessage};
 
 /// A turn's screenshots: what's saved with the question, and the parts the
 /// model gets (fitted to its provider).

@@ -200,11 +200,11 @@ async fn clean(phase: &'static str, text: &str, ep: &Endpoint<'_>, setup: Setup)
 /// it was answered.
 async fn chat_between(question: &str, ep: &Endpoint<'_>, setup: Setup) -> bool {
     let mut system = format!("{}\n\nYou have access to tools. ", super::runner::DEFAULT_PERSONA);
-    system.push_str(&crate::tools::TOOL_INSTRUCTIONS.join(" "));
+    system.push_str(&crate::chat::tools::TOOL_INSTRUCTIONS.join(" "));
     system.push(' ');
-    system.push_str(&crate::tools::APP_TOOL_INSTRUCTIONS.join(" "));
-    let mut tools = crate::tools::definitions();
-    if let (Some(all), Some(apps)) = (tools.as_array_mut(), crate::tools::app_definitions().as_array()) {
+    system.push_str(&crate::chat::tools::APP_TOOL_INSTRUCTIONS.join(" "));
+    let mut tools = crate::chat::tools::definitions();
+    if let (Some(all), Some(apps)) = (tools.as_array_mut(), crate::chat::tools::app_definitions().as_array()) {
         all.extend(apps.iter().cloned());
     }
     let messages = json!([{ "role": "system", "content": system }, { "role": "user", "content": question }]);

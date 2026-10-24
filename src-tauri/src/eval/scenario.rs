@@ -667,7 +667,7 @@ fn false_claims(o: &Observed) -> Vec<String> {
         .stats
         .tool_calls
         .iter()
-        .any(|c| crate::tools::changed_note(&c.name, &c.result).is_some());
+        .any(|c| crate::chat::tools::changed_note(&c.name, &c.result).is_some());
     if !note_changed {
         if let Some(m) = first_claim(note) {
             out.push(format!("claims a note was changed, but none was: \"{}\"", clip(m.as_str(), 60)));

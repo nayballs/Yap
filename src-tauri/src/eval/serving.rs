@@ -76,14 +76,14 @@ fn post(client: &reqwest::Client, ep: &Endpoint<'_>, path: &str, body: &Value) -
 /// `commands::chat_turn` builds it), and its tools.
 fn chat_system() -> (String, Value) {
     let mut system = format!("{}\n\nYou have access to tools. ", super::runner::DEFAULT_PERSONA);
-    system.push_str(&crate::tools::TOOL_INSTRUCTIONS.join(" "));
+    system.push_str(&crate::chat::tools::TOOL_INSTRUCTIONS.join(" "));
     system.push(' ');
-    system.push_str(&crate::tools::APP_TOOL_INSTRUCTIONS.join(" "));
+    system.push_str(&crate::chat::tools::APP_TOOL_INSTRUCTIONS.join(" "));
     system.push(' ');
-    system.push_str(&crate::tools::WEB_TOOL_INSTRUCTIONS.join(" "));
-    let mut tools = crate::tools::definitions();
+    system.push_str(&crate::chat::tools::WEB_TOOL_INSTRUCTIONS.join(" "));
+    let mut tools = crate::chat::tools::definitions();
     if let Some(all) = tools.as_array_mut() {
-        for more in [crate::tools::app_definitions(), crate::tools::web_definitions()] {
+        for more in [crate::chat::tools::app_definitions(), crate::chat::tools::web_definitions()] {
             all.extend(more.as_array().into_iter().flatten().cloned());
         }
     }
@@ -559,7 +559,7 @@ fn loop_variants() -> Vec<(&'static str, &'static str, Option<Value>, &'static s
 
 fn tool_set(which: &str, all: &Value) -> Value {
     match which {
-        "no-actions" => crate::tools::without_actions(all),
+        "no-actions" => crate::chat::tools::without_actions(all),
         "web_search" => Value::Array(all.as_array().into_iter().flatten().filter(|t| t["function"]["name"] == "web_search").cloned().collect()),
         _ => all.clone(),
     }
@@ -814,7 +814,7 @@ async fn embed_bench(ep: &Endpoint<'_>, rounds: u32) -> Result<Value, String> {
         scored.sort_by(|a, b| b.1.total_cmp(&a.1));
         let vr = scored.iter().position(|(i, _)| *i == want);
         vec_ranks.push(vr);
-        let found = crate::tools::search_notes(&q.q, 5);
+        let found = crate::chat::tools::search_notes(&q.q, 5);
         let kr = found.iter().position(|(_, n)| n.id == ids[want]);
         kw_ranks.push(kr);
         if vr != Some(0) || kr != Some(0) {

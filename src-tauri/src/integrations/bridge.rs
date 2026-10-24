@@ -444,7 +444,7 @@ fn route(
                 respond_error(request, 400, "validation_error", "Search query is required");
                 return;
             }
-            let results: Vec<Value> = crate::tools::search_notes(q, limit(20))
+            let results: Vec<Value> = crate::chat::tools::search_notes(q, limit(20))
                 .into_iter()
                 .map(|(score, n)| {
                     let preview: String = n.content.chars().take(200).collect();

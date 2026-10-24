@@ -176,14 +176,14 @@ pub fn png_size(bytes: &[u8]) -> Option<(u32, u32)> {
 
 /// A stored image's facts, read from its file (a question's screenshots
 /// are saved with what's really there, whatever a page says).
-pub fn stored(id: &str) -> Option<crate::chats::ChatImage> {
+pub fn stored(id: &str) -> Option<crate::chat::chats::ChatImage> {
     let p = path(id)?;
     let bytes = std::fs::metadata(&p).ok()?.len();
     let mut head = [0u8; 24];
     use std::io::Read;
     std::fs::File::open(&p).ok()?.read_exact(&mut head).ok()?;
     let (w, h) = png_size(&head)?;
-    Some(crate::chats::ChatImage { id: id.to_string(), w, h, bytes, source: "snip".into(), gone: false })
+    Some(crate::chat::chats::ChatImage { id: id.to_string(), w, h, bytes, source: "snip".into(), gone: false })
 }
 
 /// Delete images by id (a deleted conversation's). Returns how many went.
@@ -256,7 +256,7 @@ pub fn keep_days(setting: u32) -> u32 {
 /// [`sweep_in`] the images folder, against every conversation's images.
 pub fn sweep(keep_days: u32) -> usize {
     let keep_days = self::keep_days(keep_days);
-    let referenced = crate::chats::image_ids();
+    let referenced = crate::chat::chats::image_ids();
     let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
     let gone = sweep_in(&dir(), &referenced, keep_days, now);
     if gone > 0 {

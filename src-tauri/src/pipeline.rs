@@ -1013,7 +1013,7 @@ impl Shared {
         self.edit_mode.store(false, Ordering::SeqCst);
         crate::screen_terms::forget();
         if self.assistant.swap(false, Ordering::SeqCst) {
-            crate::assistant::nothing(&self.app);
+            crate::chat::assistant::nothing(&self.app);
         }
         // Windows' privacy switches, if they're why: that's what to fix
         // (unless the recording's start already said so).
@@ -1182,7 +1182,7 @@ impl Shared {
     fn assistant_key(self: &Arc<Self>, pressed: bool, at: Option<u64>) {
         // Off during meetings and calls: a press doesn't start listening (a
         // press while something records still stops it, below).
-        if pressed && !self.recording.load(Ordering::SeqCst) && crate::assistant::off_for_meeting(&self.app) {
+        if pressed && !self.recording.load(Ordering::SeqCst) && crate::chat::assistant::off_for_meeting(&self.app) {
             return;
         }
         ASSISTANT_ARMED.store(pressed, Ordering::SeqCst);
@@ -1492,7 +1492,7 @@ impl Shared {
             Goes::ChatBox => tracing::info!("Dictation: a question for the Chat view"),
             // Said before the "recording" state, so the capsule's first
             // frame is the assistant's.
-            Goes::Assistant => crate::assistant::listening(&self.app),
+            Goes::Assistant => crate::chat::assistant::listening(&self.app),
             Goes::Paste => {}
         }
         // And what kind of app it is (a terminal, a chat app…): its process,
@@ -1729,7 +1729,7 @@ impl Shared {
         // Undo (Undo pastes; the assistant never does).
         let assistant = self.assistant.swap(false, Ordering::SeqCst);
         if assistant {
-            crate::assistant::nothing(&self.app);
+            crate::chat::assistant::nothing(&self.app);
         }
         if assistant || !(undo && audio.len() >= UNDO_MIN_SAMPLES && self.mic_tally.heard()) {
             let _ = self.app.emit("yap-state", "idle");
@@ -1853,7 +1853,7 @@ impl Shared {
             }
             self.edit_mode.store(false, Ordering::SeqCst);
             if self.assistant.swap(false, Ordering::SeqCst) {
-                crate::assistant::nothing(&self.app);
+                crate::chat::assistant::nothing(&self.app);
             }
             tracing::info!("Recording stopped: the mic gave nothing but silence, not transcribed");
             let _ = self.app.emit("yap-mic-silent", Some(self.mic_silent()));
@@ -2687,24 +2687,24 @@ impl Shared {
         let question = question.trim().to_string();
         if question.is_empty() {
             tracing::info!("Voice Assistant: nothing heard");
-            crate::assistant::nothing(&self.app);
+            crate::chat::assistant::nothing(&self.app);
             return false;
         }
         // "Snip" said as the whole question: a screenshot, not a question.
         if self.snip_said(&question) {
-            crate::assistant::nothing(&self.app);
+            crate::chat::assistant::nothing(&self.app);
             crate::snip::start(&self.app, crate::snip::Origin::Voice);
             return true;
         }
         tracing::info!(len = question.len(), "Voice Assistant: a question");
-        crate::assistant::heard(&self.app, question);
+        crate::chat::assistant::heard(&self.app, question);
         true
     }
 
     async fn run_stt(self: Arc<Self>, audio: Vec<f32>) {
         if audio.is_empty() {
             if self.assistant.swap(false, Ordering::SeqCst) {
-                crate::assistant::nothing(&self.app);
+                crate::chat::assistant::nothing(&self.app);
             }
             let _ = self.app.emit("yap-state", "idle");
             return;
@@ -2766,7 +2766,7 @@ impl Shared {
                         tracing::warn!("No STT engine (model missing) — cannot transcribe: {}", e);
                         drop(lease);
                         if self.assistant.swap(false, Ordering::SeqCst) {
-                            crate::assistant::nothing(&self.app);
+                            crate::chat::assistant::nothing(&self.app);
                         }
                         // Listed with its audio: run it again once a model is in.
                         self.list_failed("No speech model was ready");
@@ -2885,7 +2885,7 @@ impl Shared {
         self.drop_kept_audio();
         // A question for the assistant that never got transcribed.
         if self.assistant.swap(false, Ordering::SeqCst) {
-            crate::assistant::nothing(&self.app);
+            crate::chat::assistant::nothing(&self.app);
         }
         // Never fail silently: surface a brief error to the UI, otherwise drop
         // back to idle.
@@ -3154,7 +3154,7 @@ impl Holder for Shared {
             Job::Dictation => {
                 // A question for the Voice Assistant that will never come.
                 if self.assistant.swap(false, Ordering::SeqCst) {
-                    crate::assistant::nothing(&self.app);
+                    crate::chat::assistant::nothing(&self.app);
                 }
                 // Listed with its audio, to run again (if it wasn't yet).
                 self.list_failed("The dictation crashed");
@@ -3689,7 +3689,7 @@ impl Robot {
     pub(crate) async fn ask_assistant(&self, text: String, listen_ms: u64) -> Result<(), String> {
         let shared = &self.0;
         // As the shortcut: off during meetings and calls.
-        if !shared.recording.load(Ordering::SeqCst) && crate::assistant::off_for_meeting(&shared.app) {
+        if !shared.recording.load(Ordering::SeqCst) && crate::chat::assistant::off_for_meeting(&shared.app) {
             return Err("The Voice Assistant is off during meetings".into());
         }
         let Some(busy) = self.take_busy() else {
@@ -3711,7 +3711,7 @@ impl Robot {
         if asked {
             Ok(())
         } else {
-            crate::assistant::nothing(&shared.app);
+            crate::chat::assistant::nothing(&shared.app);
             Err("Nothing to ask".into())
         }
     }
@@ -3728,7 +3728,7 @@ impl Robot {
         if shared.recording.load(Ordering::SeqCst) || shared.processing.load(Ordering::SeqCst) {
             return Err(Self::BUSY.into());
         }
-        if crate::assistant::off_for_meeting(&shared.app) {
+        if crate::chat::assistant::off_for_meeting(&shared.app) {
             return Err("The Voice Assistant is off during meetings".into());
         }
         let _feed = FeedOn::start();

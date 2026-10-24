@@ -1994,7 +1994,7 @@ pub(crate) async fn chat_beside_dictation_live(
     ep: &Endpoint,
     messages: Value,
     opts: &ChatOptions,
-    sink: Option<&dyn crate::stream::Sink>,
+    sink: Option<&dyn crate::chat::stream::Sink>,
 ) -> Result<String, String> {
     let Some(sink) = sink else {
         return chat_beside_dictation(app, ep, messages, opts).await;
@@ -2008,9 +2008,9 @@ pub(crate) async fn chat_beside_dictation_live(
         opts,
         serde_json::Map::new(),
     );
-    let beside = crate::stream::AnyDictation(app.clone());
-    let live = crate::stream::Live { sink, beside: ep.is_local().then_some(&beside as &dyn crate::stream::Dictations) };
-    let message = crate::privacy::net::within(crate::privacy::net::Feature::Meetings, crate::stream::call(live, &req, false, opts.disable_thinking)).await?;
+    let beside = crate::chat::stream::AnyDictation(app.clone());
+    let live = crate::chat::stream::Live { sink, beside: ep.is_local().then_some(&beside as &dyn crate::chat::stream::Dictations) };
+    let message = crate::privacy::net::within(crate::privacy::net::Feature::Meetings, crate::chat::stream::call(live, &req, false, opts.disable_thinking)).await?;
     crate::llm::answer_text(&message, opts.disable_thinking)
 }
 

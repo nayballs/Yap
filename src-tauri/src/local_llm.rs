@@ -3370,8 +3370,8 @@ mod tests {
         assert_eq!(model_id(Path::new("C:/x/llm/Qwen_Qwen3.5-4B-Q4_K_M.gguf")), "Qwen_Qwen3.5-4B-Q4_K_M");
         assert_eq!(model_id(&model_path()), "qwen2.5-1.5b-instruct-q4_k_m");
         // The default's id gets no tools; the 4B's does.
-        assert!(!crate::tools::supports_tools(PROVIDER_ONDEVICE, &model_id(&model_path())));
-        assert!(crate::tools::supports_tools(PROVIDER_ONDEVICE, "Qwen_Qwen3.5-4B-Q4_K_M"));
+        assert!(!crate::chat::tools::supports_tools(PROVIDER_ONDEVICE, &model_id(&model_path())));
+        assert!(crate::chat::tools::supports_tools(PROVIDER_ONDEVICE, "Qwen_Qwen3.5-4B-Q4_K_M"));
     }
 
     #[test]

@@ -1858,7 +1858,7 @@ pub async fn ask_model(app: &tauri::AppHandle, note_id: u64) -> usize {
     // PC): measured, Qwen2.5-1.5B on a processor answered 45 questions in
     // ~11 s each and Rust had to throw out every answer it gave
     // (docs/architecture/speakers.md, "Evaluations").
-    if !crate::tools::supports_tools(&ep.provider, &ep.model) {
+    if !crate::chat::tools::supports_tools(&ep.provider, &ep.model) {
         return 0;
     }
     let questions = {

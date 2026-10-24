@@ -43,8 +43,8 @@ pub async fn run(file: &std::path::Path, keys: &std::collections::HashMap<String
             let system = format!(
                 "{}\n\nYou have access to tools. {} {}",
                 super::runner::DEFAULT_PERSONA,
-                crate::tools::TOOL_INSTRUCTIONS.join(" "),
-                crate::tools::APP_TOOL_INSTRUCTIONS.join(" ")
+                crate::chat::tools::TOOL_INSTRUCTIONS.join(" "),
+                crate::chat::tools::APP_TOOL_INSTRUCTIONS.join(" ")
             );
             let mut messages = vec![json!({ "role": "system", "content": system })];
             messages.extend(body["messages"].as_array().cloned().unwrap_or_default());
@@ -52,8 +52,8 @@ pub async fn run(file: &std::path::Path, keys: &std::collections::HashMap<String
         }
         if r["yap_tools"] == json!(true) {
             let mut tools = body["tools"].as_array().cloned().unwrap_or_default();
-            tools.extend(crate::tools::definitions().as_array().cloned().unwrap_or_default());
-            tools.extend(crate::tools::app_definitions().as_array().cloned().unwrap_or_default());
+            tools.extend(crate::chat::tools::definitions().as_array().cloned().unwrap_or_default());
+            tools.extend(crate::chat::tools::app_definitions().as_array().cloned().unwrap_or_default());
             body["tools"] = Value::Array(tools);
         }
         super::record::set_context(json!({ "spike": name, "request": i + 1 }));

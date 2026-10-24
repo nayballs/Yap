@@ -1601,7 +1601,7 @@ pub fn init(app: &tauri::AppHandle) {
             use tauri::Emitter;
             let _ = app.emit("yap-tts-state", s);
             // The Voice Assistant's answer ended (or was stopped).
-            crate::assistant::on_tts_state(&app, s.speaking, s.message_id.as_deref());
+            crate::chat::assistant::on_tts_state(&app, s.speaking, s.message_id.as_deref());
             // So did a read-aloud (its card goes).
             crate::voice::read_aloud::on_tts_state(&app, s);
         }),

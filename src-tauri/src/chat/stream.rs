@@ -43,7 +43,7 @@ use std::time::{Duration, Instant};
 use serde::Serialize;
 use serde_json::{json, Value};
 
-use crate::chats::Source;
+use crate::chat::chats::Source;
 use crate::llm::Delta;
 
 /// The shortest gap between two text updates a step sends (the page renders

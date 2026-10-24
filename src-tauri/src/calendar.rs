@@ -2138,7 +2138,7 @@ pub fn meetings_context(query: &str) -> String {
         .collect();
     meetings.sort_by_key(|n| std::cmp::Reverse(meeting_time(n)));
     let mut picked: Vec<&crate::notes::Note> = meetings.iter().take(3).copied().collect();
-    for (_, hit) in crate::tools::search_notes(query, 20) {
+    for (_, hit) in crate::chat::tools::search_notes(query, 20) {
         if picked.len() >= 6 {
             break;
         }
