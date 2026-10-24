@@ -32,7 +32,7 @@
   import Textarea from './ui/Textarea.svelte';
   import LinkRow from './ui/LinkRow.svelte';
   import { toast } from './ui/toast.svelte.js';
-  import { showSaveError } from './saveErrors.js';
+  import { showSaveError } from './notices/saveErrors.js';
   import { askConfirm } from './ui/contextMenu.svelte.js';
   import { memory, loadMemory, changedToast } from './stores/memory.svelte.js';
 

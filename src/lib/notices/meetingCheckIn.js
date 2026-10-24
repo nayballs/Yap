@@ -18,7 +18,7 @@
 //   notices meetingGuard.js shows): "Stopped: the meeting went quiet".
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
-import { toast, dismiss, isToastLive, updateToast } from './ui/toast.svelte.js';
+import { toast, dismiss, isToastLive, updateToast } from '../ui/toast.svelte.js';
 
 /** "28 s", "1 min 5 s" — rounded up, as Rust writes it. */
 export function secondsLeft(ms) {

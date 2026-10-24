@@ -9,7 +9,7 @@
 // A save that failed by itself (history after a dictation, memory learning)
 // is said by Rust, once, through the notice policy (an alert, alerts.js).
 import { invoke } from '@tauri-apps/api/core';
-import { toast } from './ui/toast.svelte.js';
+import { toast } from '../ui/toast.svelte.js';
 
 const START = "Couldn't save ";
 

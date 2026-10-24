@@ -22,13 +22,13 @@
   import { initUpdates } from './stores/updates.svelte.js';
   import { initMeetingDetect, noteRequest } from './stores/meetingDetect.svelte.js';
   import { initMeetingSummary, askStartedByMistake } from './stores/meetingSummary.svelte.js';
-  import { initMeetingGuard } from './meetingGuard.js';
+  import { initMeetingGuard } from './notices/meetingGuard.js';
   import { initCalendar, closeConnectDialog } from './stores/calendar.svelte.js';
-  import { initWordSuggestions } from './wordSuggestions.js';
-  import { initAlerts } from './alerts.js';
+  import { initWordSuggestions } from './notices/wordSuggestions.js';
+  import { initAlerts } from './notices/alerts.js';
   import { initUpload } from './stores/upload.svelte.js';
   import { initMemory } from './stores/memory.svelte.js';
-  import { initCleanupOffer } from './cleanupOffer.js';
+  import { initCleanupOffer } from './notices/cleanupOffer.js';
   import ConnectCalendarDialog from './ConnectCalendarDialog.svelte';
   // Every view is in this window's one chunk (~590 KB): loading the views
   // other than Home on demand was measured on 2026-10-22 and changed nothing

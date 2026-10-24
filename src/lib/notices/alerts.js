@@ -15,7 +15,7 @@
 // "alert" (ui/noticePolicy.js): never held behind a dictation.
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
-import { toast } from './ui/toast.svelte.js';
+import { toast } from '../ui/toast.svelte.js';
 
 // "assistant": the Voice Assistant has no AI model, or couldn't answer
 // (assistant.rs), with Open settings → Language Models.

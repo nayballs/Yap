@@ -6,7 +6,7 @@
   // edited but not deleted. A row's right-click menu (ui/contextMenu.svelte.js,
   // as in Notes): Edit, Delete… (asked first, as the trash button does).
   import { invoke } from '@tauri-apps/api/core';
-  import { showSaveError } from './saveErrors.js';
+  import { showSaveError } from './notices/saveErrors.js';
   import { openContextMenu, menuKey, menuOpenFor, askConfirm, devInspect } from './ui/contextMenu.svelte.js';
 
   let { open = $bindable(false), onchanged = null } = $props();

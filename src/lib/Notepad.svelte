@@ -49,13 +49,13 @@
   import BriefView from './BriefView.svelte';
   import { briefTeaser } from './core/brief.js';
   import { toast } from './ui/toast.svelte.js';
-  import { showSaveError } from './saveErrors.js';
+  import { showSaveError } from './notices/saveErrors.js';
   import { renderMarkdown } from './core/markdown.js';
   import { nextModel, modelLine, whereItRuns } from './core/aiModel.js';
   import { speech, initSpeech, readAloud, readPageSelection } from './stores/speech.svelte.js';
   import { hotkeyMatchesKeydown, hotkeyMatchesKeyup } from './core/hotkeys.js';
   import { openExternalLink } from './core/externalLinks.js';
-  import { initMeetingCheckIns } from './meetingCheckIn.js';
+  import { initMeetingCheckIns } from './notices/meetingCheckIn.js';
   import { openContextMenu, menuKey, menuOpenFor, menuOrDialogOpen } from './ui/contextMenu.svelte.js';
   import { messageItems } from './core/itemMenus.js';
   import { streamCall, liveAnswer, applyEvent, closePartial, settle, streamingHeight, STOPPED } from './core/streaming.js';

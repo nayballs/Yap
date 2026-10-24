@@ -7,7 +7,7 @@
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { toast } from '../ui/toast.svelte.js';
-import { showSaveError } from '../saveErrors.js';
+import { showSaveError } from '../notices/saveErrors.js';
 
 export const memory = $state({ items: [], ai: { ready: true }, loaded: false });
 

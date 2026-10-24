@@ -15,7 +15,7 @@
 // meeting notepad included; Open Dictionary only where there's a sidebar.
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
-import { toast } from './ui/toast.svelte.js';
+import { toast } from '../ui/toast.svelte.js';
 
 let started = false;
 let showView = null;

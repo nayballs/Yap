@@ -24,7 +24,7 @@
 // come through meetingCheckIn.js, when Rust picks this window for them.
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
-import { toast, dismiss, isToastLive, updateToast } from './ui/toast.svelte.js';
+import { toast, dismiss, isToastLive, updateToast } from '../ui/toast.svelte.js';
 import { initMeetingCheckIns } from './meetingCheckIn.js';
 
 let started = false;

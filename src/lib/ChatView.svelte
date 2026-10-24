@@ -86,7 +86,7 @@
   import { onMount, onDestroy, tick, untrack } from 'svelte';
   import { renderMarkdown } from './core/markdown.js';
   import { toast } from './ui/toast.svelte.js';
-  import { showSaveError } from './saveErrors.js';
+  import { showSaveError } from './notices/saveErrors.js';
   import { chatRequest } from './stores/chatRequest.svelte.js';
   import ModelChip from './ModelChip.svelte';
   import { modelLine, modelName, providerName, whereItRuns } from './core/aiModel.js';

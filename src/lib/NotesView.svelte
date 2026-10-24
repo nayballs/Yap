@@ -19,7 +19,7 @@
   import { onMount, tick } from 'svelte';
   import { renderMarkdown, markdownToText } from './core/markdown.js';
   import { toast } from './ui/toast.svelte.js';
-  import { showSaveError } from './saveErrors.js';
+  import { showSaveError } from './notices/saveErrors.js';
   import ActionManager from './ActionManager.svelte';
   import { noteRequest } from './stores/meetingDetect.svelte.js';
   import { summaries, loadSummary, summarise } from './stores/meetingSummary.svelte.js';

@@ -22,7 +22,7 @@
   import ConnectionsView from './ConnectionsView.svelte';
   import { askConfirm } from '../ui/contextMenu.svelte.js';
   import { toast } from '../ui/toast.svelte.js';
-  import { showSaveError } from '../saveErrors.js';
+  import { showSaveError } from '../notices/saveErrors.js';
   import { account } from '../stores/account.svelte.js';
   import { PROVIDER_DESTINATIONS } from '../core/providers.js';
 
