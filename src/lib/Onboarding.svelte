@@ -165,6 +165,12 @@
     invoke('set_mic_test', { on: step === 1 && pageVisible }).catch(() => {});
   });
 
+  // What suits this PC (hardware.rs `hardware_advice`, from yap.exe bench's
+  // numbers): where speech runs before it's timed here, and whether the
+  // private cleanup or a cloud provider is the quicker one — with both
+  // times said.
+  let advice = $state(null);
+
   // ---- Step 2: AI cleanup (Yap's differentiator, offered up front) ----
   let llm = $state({ installed: false, running: false, model: 'Qwen2.5 1.5B Instruct', curated: [] });
   let llmInstalling = $state(false);
@@ -489,6 +495,14 @@
     window.addEventListener('keydown', onFallbackKeyDown, true);
     window.addEventListener('keyup', onFallbackKeyUp, true);
     refresh().then(refreshLlm);
+    invoke('hardware_advice')
+      .then((a) => {
+        advice = a;
+        // A small PC: the cloud is offered first (the private model adds
+        // seconds to each dictation there).
+        if (a?.cleanup === 'cloud' && !cleanupEnabled) cleanupMode = 'cloud';
+      })
+      .catch(() => {});
     invoke('list_audio_devices')
       .then((d) => (devices = d || []))
       .catch(() => {});
@@ -542,8 +556,9 @@
       <h1>Welcome to Yap</h1>
       <p class="sub">
         Pick the speech model that turns your voice into text. It runs
-        <strong>on this PC</strong> (on its graphics card when it has one) — your
-        voice never leaves this machine.
+        <strong>on this PC</strong>
+        {#if advice?.speechDevice === 'cpu'}(on its processor: no graphics card needed){:else}(on its graphics card){/if}
+        — your voice never leaves this machine.
         <strong>{recommended.name}</strong> is the fast, accurate default.
       </p>
     </header>
@@ -633,7 +648,7 @@
           >
             <span class="mode-title">🔒 Private</span>
             <span class="mode-sub">runs on your PC · no account</span>
-            <span class="mode-badge">Recommended</span>
+            {#if advice?.cleanup !== 'cloud'}<span class="mode-badge">Recommended</span>{/if}
           </button>
           <button
             class="mode-card"
@@ -642,8 +657,17 @@
           >
             <span class="mode-title">☁ Cloud</span>
             <span class="mode-sub">bring your own key</span>
+            {#if advice?.cleanup === 'cloud'}<span class="mode-badge">Quicker on this PC</span>{/if}
           </button>
         </div>
+        {#if advice}
+          <!-- What each adds to a dictation here (hardware.rs, measured with yap.exe bench). -->
+          <p class="fine cleanup-times" data-testid="cleanup-times" data-pick={advice.cleanup}>
+            On this PC, private cleanup adds about {(advice.localMs / 1000).toFixed(1)} s to each dictation;
+            a cloud provider about {(advice.cloudMs / 1000).toFixed(1)} s.
+            {#if advice.cleanup === 'cloud'}Or skip it: dictation works without.{/if}
+          </p>
+        {/if}
 
         {#if cleanupMode === 'local'}
           <div class="llm-list">
