@@ -4,15 +4,15 @@
   // passed-in scope object (`cfg.llmScopes[key]`). Shared by LlmScopeConfig
   // (Note Formatting / Chat) and VoiceAgentConfig so every bubble configures its
   // endpoint the same way. The enable toggle + prompt live in the parent.
-  import ModeSelector from './ui/ModeSelector.svelte';
-  import PillTabs from './ui/PillTabs.svelte';
+  import ModeSelector from '../ui/ModeSelector.svelte';
+  import PillTabs from '../ui/PillTabs.svelte';
   import ModelPicker from './ModelPicker.svelte';
   import EndpointModels from './EndpointModels.svelte';
-  import Input from './ui/Input.svelte';
-  import Toggle from './ui/Toggle.svelte';
-  import Row from './ui/Row.svelte';
-  import { PP_CLOUD_MODELS, modelThinks } from './core/ppModels.js';
-  import { modelsFor, defaultModel, providerOffers } from './stores/modelCatalog.svelte.js';
+  import Input from '../ui/Input.svelte';
+  import Toggle from '../ui/Toggle.svelte';
+  import Row from '../ui/Row.svelte';
+  import { PP_CLOUD_MODELS, modelThinks } from '../core/ppModels.js';
+  import { modelsFor, defaultModel, providerOffers } from '../stores/modelCatalog.svelte.js';
   import {
     PROVIDER_MODES as MODES,
     CLOUD_TABS,
@@ -23,8 +23,8 @@
     modeOf,
     maskKey,
     sharedKey as storeKey,
-  } from './core/providers.js';
-  import { createExternalLinkHandler } from './core/externalLinks.js';
+  } from '../core/providers.js';
+  import { createExternalLinkHandler } from '../core/externalLinks.js';
   import { untrack } from 'svelte';
 
   // `cfg` is the global Settings config: standard cloud providers share ONE

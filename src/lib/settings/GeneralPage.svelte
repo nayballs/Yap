@@ -15,8 +15,8 @@
   import Select from '../ui/Select.svelte';
   import Segmented from '../ui/Segmented.svelte';
   import Button from '../ui/Button.svelte';
-  import AboutYouSettings from '../AboutYouSettings.svelte';
-  import AppearanceSettings from '../AppearanceSettings.svelte';
+  import AboutYouSettings from './AboutYouSettings.svelte';
+  import AppearanceSettings from './AppearanceSettings.svelte';
   import { BAR_THEME_OPTIONS } from '../core/appearance.js';
 
   let { cfg, barHiddenUntil = null, goto = null } = $props();

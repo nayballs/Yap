@@ -13,13 +13,13 @@
   import { invoke } from '@tauri-apps/api/core';
   import { getCurrentWindow } from '@tauri-apps/api/window';
   import { onMount, tick, untrack } from 'svelte';
-  import Button from './ui/Button.svelte';
-  import Group from './ui/Group.svelte';
-  import Row from './ui/Row.svelte';
-  import { account, displayName, initAccount, initials, PROVIDER_LABELS } from './stores/account.svelte.js';
-  import { openExternalLink } from './core/externalLinks.js';
-  import { openContextMenu, menuKey } from './ui/contextMenu.svelte.js';
-  import { noteAccountPicture } from './core/connections.js';
+  import Button from '../ui/Button.svelte';
+  import Group from '../ui/Group.svelte';
+  import Row from '../ui/Row.svelte';
+  import { account, displayName, initAccount, initials, PROVIDER_LABELS } from '../stores/account.svelte.js';
+  import { openExternalLink } from '../core/externalLinks.js';
+  import { openContextMenu, menuKey } from '../ui/contextMenu.svelte.js';
+  import { noteAccountPicture } from '../core/connections.js';
 
   const RESEND_SECONDS = 30;
 

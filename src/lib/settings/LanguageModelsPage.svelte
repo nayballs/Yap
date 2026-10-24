@@ -22,14 +22,14 @@
   import Input from '../ui/Input.svelte';
   import ModeSelector from '../ui/ModeSelector.svelte';
   import PillTabs from '../ui/PillTabs.svelte';
-  import PromptStudio from '../PromptStudio.svelte';
-  import VoiceAgentConfig from '../VoiceAgentConfig.svelte';
-  import RegionSpelling from '../RegionSpelling.svelte';
+  import PromptStudio from './PromptStudio.svelte';
+  import VoiceAgentConfig from './VoiceAgentConfig.svelte';
+  import RegionSpelling from './RegionSpelling.svelte';
   import CleanupStyles from './CleanupStyles.svelte';
-  import NoteFormattingConfig from '../NoteFormattingConfig.svelte';
-  import ChatConfig from '../ChatConfig.svelte';
-  import ModelPicker from '../ModelPicker.svelte';
-  import EndpointModels from '../EndpointModels.svelte';
+  import NoteFormattingConfig from './NoteFormattingConfig.svelte';
+  import ChatConfig from './ChatConfig.svelte';
+  import ModelPicker from './ModelPicker.svelte';
+  import EndpointModels from './EndpointModels.svelte';
   // CSS order (Vite bundles it in import order): the components above come
   // before Settings' shared styles, as when Settings imported them itself —
   // the scope tabs' own `.offnote` / `.tools` margins lose to `.set-note`'s

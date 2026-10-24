@@ -12,7 +12,7 @@
   import Select from '../ui/Select.svelte';
   import Button from '../ui/Button.svelte';
   import Textarea from '../ui/Textarea.svelte';
-  import EndpointModels from '../EndpointModels.svelte';
+  import EndpointModels from './EndpointModels.svelte';
   import { PP_CLOUD_MODELS } from '../core/ppModels.js';
   import { modelsFor } from '../stores/modelCatalog.svelte.js';
   import { PP_PROVIDERS } from '../core/providers.js';

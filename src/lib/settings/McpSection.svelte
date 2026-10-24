@@ -9,12 +9,12 @@
   // so, with a switch, when that's off.
   import { invoke } from '@tauri-apps/api/core';
   import { onMount } from 'svelte';
-  import { toast } from './ui/toast.svelte.js';
-  import Toggle from './ui/Toggle.svelte';
-  import claudeIcon from '../assets/providers/claude.svg';
-  import openaiIcon from '../assets/providers/openai.svg';
-  import geminiIcon from '../assets/providers/gemini.svg';
-  import cursorIcon from '../assets/providers/cursor.svg';
+  import { toast } from '../ui/toast.svelte.js';
+  import Toggle from '../ui/Toggle.svelte';
+  import claudeIcon from '../../assets/providers/claude.svg';
+  import openaiIcon from '../../assets/providers/openai.svg';
+  import geminiIcon from '../../assets/providers/gemini.svg';
+  import cursorIcon from '../../assets/providers/cursor.svg';
 
   // Settings' own config copy, which Settings auto-saves: the "save notes"
   // switch and "Turn on the Local API" edit it (saving starts the API).

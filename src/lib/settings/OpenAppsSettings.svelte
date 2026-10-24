@@ -12,10 +12,10 @@
   //   cfg: Settings' config $state. Auto-save does the saving.
   import { invoke } from '@tauri-apps/api/core';
   import { onMount } from 'svelte';
-  import Group from './ui/Group.svelte';
-  import Row from './ui/Row.svelte';
-  import Toggle from './ui/Toggle.svelte';
-  import Button from './ui/Button.svelte';
+  import Group from '../ui/Group.svelte';
+  import Row from '../ui/Row.svelte';
+  import Toggle from '../ui/Toggle.svelte';
+  import Button from '../ui/Button.svelte';
 
   let { cfg } = $props();
 

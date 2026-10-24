@@ -20,13 +20,13 @@
   //
   // What each provider charges sits behind a disclosure (review #10:
   // details on demand).
-  import Group from './ui/Group.svelte';
-  import Row from './ui/Row.svelte';
-  import Toggle from './ui/Toggle.svelte';
-  import Segmented from './ui/Segmented.svelte';
-  import Input from './ui/Input.svelte';
-  import { createExternalLinkHandler } from './core/externalLinks.js';
-  import { maskKey } from './core/providers.js';
+  import Group from '../ui/Group.svelte';
+  import Row from '../ui/Row.svelte';
+  import Toggle from '../ui/Toggle.svelte';
+  import Segmented from '../ui/Segmented.svelte';
+  import Input from '../ui/Input.svelte';
+  import { createExternalLinkHandler } from '../core/externalLinks.js';
+  import { maskKey } from '../core/providers.js';
 
   let { cfg, goto = null } = $props();
 

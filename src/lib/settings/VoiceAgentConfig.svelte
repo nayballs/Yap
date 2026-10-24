@@ -14,13 +14,13 @@
   //   cfg:   the Settings config $state — used for cfg.agentName + cfg.dictionary.
   import ScopeProviderConfig from './ScopeProviderConfig.svelte';
   import PromptStudio from './PromptStudio.svelte';
-  import Toggle from './ui/Toggle.svelte';
-  import Group from './ui/Group.svelte';
-  import Row from './ui/Row.svelte';
-  import LinkRow from './ui/LinkRow.svelte';
+  import Toggle from '../ui/Toggle.svelte';
+  import Group from '../ui/Group.svelte';
+  import Row from '../ui/Row.svelte';
+  import LinkRow from '../ui/LinkRow.svelte';
   import { invoke } from '@tauri-apps/api/core';
   import { onMount } from 'svelte';
-  import { SCOPE_PROVIDER_LABELS } from './core/providers.js';
+  import { SCOPE_PROVIDER_LABELS } from '../core/providers.js';
 
   let { cfg, scope, defaultPrompt = '' } = $props();
 

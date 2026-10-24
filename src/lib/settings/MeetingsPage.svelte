@@ -16,7 +16,7 @@
   import Segmented from '../ui/Segmented.svelte';
   import LinkRow from '../ui/LinkRow.svelte';
   import CallAppIcon from '../components/CallAppIcon.svelte';
-  import SpeakersToggle from '../SpeakersToggle.svelte';
+  import SpeakersToggle from './SpeakersToggle.svelte';
   import SettingsHotkey from './SettingsHotkey.svelte';
   import { meetingDetect } from '../stores/meetingDetect.svelte.js';
   import { calendar } from '../stores/calendar.svelte.js';

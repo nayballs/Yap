@@ -7,14 +7,14 @@
   // at all, the red badge's reason sits at the top of the page.
   import { invoke } from '@tauri-apps/api/core';
   import { onMount } from 'svelte';
-  import { MODELS, formatSize } from './core/speechModels.js';
-  import { modelStore, refreshModels, setActiveModel, downloadModel } from './stores/modelStore.svelte.js';
+  import { MODELS, formatSize } from '../core/speechModels.js';
+  import { modelStore, refreshModels, setActiveModel, downloadModel } from '../stores/modelStore.svelte.js';
   import ModelRow from './ModelRow.svelte';
-  import Group from './ui/Group.svelte';
-  import Button from './ui/Button.svelte';
-  import PillTabs from './ui/PillTabs.svelte';
-  import ConfirmDialog from './ui/ConfirmDialog.svelte';
-  import { ENGINE_PROVIDER, PROVIDER_ICONS, MONOCHROME_PROVIDERS } from './core/providerIcons.js';
+  import Group from '../ui/Group.svelte';
+  import Button from '../ui/Button.svelte';
+  import PillTabs from '../ui/PillTabs.svelte';
+  import ConfirmDialog from '../ui/ConfirmDialog.svelte';
+  import { ENGINE_PROVIDER, PROVIDER_ICONS, MONOCHROME_PROVIDERS } from '../core/providerIcons.js';
 
   // A download outlives this page (modelStore.svelte.js): leaving it
   // mid-download and coming back shows its bar, and a failure that came

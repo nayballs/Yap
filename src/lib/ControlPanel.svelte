@@ -16,7 +16,7 @@
   import ToastHost from './ui/ToastHost.svelte';
   import { toast } from './ui/toast.svelte.js';
   import { fillHotkey } from './core/hotkeys.js';
-  import Settings from './Settings.svelte';
+  import Settings from './settings/Settings.svelte';
   import { attention } from './stores/attention.svelte.js';
   import { account, displayName, initAccount, initials } from './stores/account.svelte.js';
   import { initUpdates } from './stores/updates.svelte.js';

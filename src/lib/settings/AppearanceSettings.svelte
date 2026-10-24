@@ -10,11 +10,11 @@
   //   cfg: Settings' config $state (`theme`, `readingFont`, `readingSize`,
   //        `motion`). Auto-save does the saving.
   import { onMount } from 'svelte';
-  import Group from './ui/Group.svelte';
-  import Row from './ui/Row.svelte';
-  import Select from './ui/Select.svelte';
-  import Segmented from './ui/Segmented.svelte';
-  import { READING_FONTS, READING_FONT_DESC, READING_SIZES, MOTION_OPTIONS, THEME_OPTIONS } from './core/appearance.js';
+  import Group from '../ui/Group.svelte';
+  import Row from '../ui/Row.svelte';
+  import Select from '../ui/Select.svelte';
+  import Segmented from '../ui/Segmented.svelte';
+  import { READING_FONTS, READING_FONT_DESC, READING_SIZES, MOTION_OPTIONS, THEME_OPTIONS } from '../core/appearance.js';
 
   let { cfg } = $props();
 

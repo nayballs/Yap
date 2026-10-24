@@ -18,11 +18,11 @@
   //   cfg:  Settings' config $state. Auto-save does the saving.
   //   goto: opens another Settings page ("privacy").
   import { invoke } from '@tauri-apps/api/core';
-  import Group from './ui/Group.svelte';
-  import Row from './ui/Row.svelte';
-  import Select from './ui/Select.svelte';
-  import Input from './ui/Input.svelte';
-  import Textarea from './ui/Textarea.svelte';
+  import Group from '../ui/Group.svelte';
+  import Row from '../ui/Row.svelte';
+  import Select from '../ui/Select.svelte';
+  import Input from '../ui/Input.svelte';
+  import Textarea from '../ui/Textarea.svelte';
 
   let { cfg, goto = null } = $props();
   let status = $state(null);

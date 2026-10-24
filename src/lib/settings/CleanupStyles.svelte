@@ -21,7 +21,7 @@
   import Textarea from '../ui/Textarea.svelte';
   import Button from '../ui/Button.svelte';
   import { appLabel } from '../core/appNames.js';
-  import { EXAMPLES, TONE_LINES, appsOf, appsSummary, addApp, removeApp, newStyleProfile, norm } from '../cleanupStyles.js';
+  import { EXAMPLES, TONE_LINES, appsOf, appsSummary, addApp, removeApp, newStyleProfile, norm } from './cleanupStyles.js';
 
   let { cfg } = $props();
 

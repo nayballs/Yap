@@ -15,16 +15,16 @@
   import { invoke } from '@tauri-apps/api/core';
   import { listen } from '@tauri-apps/api/event';
   import { onMount } from 'svelte';
-  import Row from './ui/Row.svelte';
-  import Select from './ui/Select.svelte';
-  import Slider from './ui/Slider.svelte';
-  import Segmented from './ui/Segmented.svelte';
+  import Row from '../ui/Row.svelte';
+  import Select from '../ui/Select.svelte';
+  import Slider from '../ui/Slider.svelte';
+  import Segmented from '../ui/Segmented.svelte';
   import ModelRow from './ModelRow.svelte';
-  import ConfirmDialog from './ui/ConfirmDialog.svelte';
+  import ConfirmDialog from '../ui/ConfirmDialog.svelte';
   import ElevenLabsSettings from './ElevenLabsSettings.svelte';
-  import { speech } from './stores/speech.svelte.js';
-  import { toast } from './ui/toast.svelte.js';
-  import { openExternalLink } from './core/externalLinks.js';
+  import { speech } from '../stores/speech.svelte.js';
+  import { toast } from '../ui/toast.svelte.js';
+  import { openExternalLink } from '../core/externalLinks.js';
   import { kokoro, startKokoro, downloadKokoro, deleteKokoro, formatMb, kokoroOptions } from './kokoro.svelte.js';
 
   let { cfg } = $props();

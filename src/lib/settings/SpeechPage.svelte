@@ -11,8 +11,8 @@
   import Row from '../ui/Row.svelte';
   import Toggle from '../ui/Toggle.svelte';
   import Select from '../ui/Select.svelte';
-  import ModelManager from '../ModelManager.svelte';
-  import SpeakerModels from '../SpeakerModels.svelte';
+  import ModelManager from './ModelManager.svelte';
+  import SpeakerModels from './SpeakerModels.svelte';
   import RunsOn from './RunsOn.svelte';
 
   let { cfg, langInfo } = $props();

@@ -12,7 +12,7 @@
   import Row from '../ui/Row.svelte';
   import Toggle from '../ui/Toggle.svelte';
   import LinkRow from '../ui/LinkRow.svelte';
-  import AgentNameField from '../AgentNameField.svelte';
+  import AgentNameField from './AgentNameField.svelte';
   import SettingsHotkey from './SettingsHotkey.svelte';
   import TransformsSettings from './TransformsSettings.svelte';
   import PageExplain from './PageExplain.svelte';

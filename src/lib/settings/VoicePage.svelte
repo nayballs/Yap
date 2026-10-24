@@ -14,11 +14,11 @@
   import Toggle from '../ui/Toggle.svelte';
   import Segmented from '../ui/Segmented.svelte';
   import LinkRow from '../ui/LinkRow.svelte';
-  import VoiceSettings from '../VoiceSettings.svelte';
-  import OpenAppsSettings from '../OpenAppsSettings.svelte';
-  import WebSearchSettings from '../WebSearchSettings.svelte';
-  import KokoroOffer from '../KokoroOffer.svelte';
-  import { kokoro } from '../kokoro.svelte.js';
+  import VoiceSettings from './VoiceSettings.svelte';
+  import OpenAppsSettings from './OpenAppsSettings.svelte';
+  import WebSearchSettings from './WebSearchSettings.svelte';
+  import KokoroOffer from './KokoroOffer.svelte';
+  import { kokoro } from './kokoro.svelte.js';
   import { formatHotkeySpec, fillHotkey } from '../core/hotkeys.js';
   import SettingsHotkey from './SettingsHotkey.svelte';
   import PageExplain from './PageExplain.svelte';

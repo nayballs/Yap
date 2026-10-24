@@ -19,13 +19,13 @@
   //     Windows voices chosen).
   import { invoke } from '@tauri-apps/api/core';
   import { onMount, untrack } from 'svelte';
-  import Row from './ui/Row.svelte';
-  import Select from './ui/Select.svelte';
-  import Input from './ui/Input.svelte';
-  import { speech } from './stores/speech.svelte.js';
-  import { toast } from './ui/toast.svelte.js';
-  import { createExternalLinkHandler } from './core/externalLinks.js';
-  import { maskKey } from './core/providers.js';
+  import Row from '../ui/Row.svelte';
+  import Select from '../ui/Select.svelte';
+  import Input from '../ui/Input.svelte';
+  import { speech } from '../stores/speech.svelte.js';
+  import { toast } from '../ui/toast.svelte.js';
+  import { createExternalLinkHandler } from '../core/externalLinks.js';
+  import { maskKey } from '../core/providers.js';
 
   let { cfg, keysPage = 'https://elevenlabs.io/app/settings/api-keys', localFallback = false } = $props();
 

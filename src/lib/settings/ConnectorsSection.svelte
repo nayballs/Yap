@@ -15,14 +15,14 @@
   //
   //   goto: opens another Settings page (Settings.svelte).
   import { invoke } from '@tauri-apps/api/core';
-  import LinkRow from './ui/LinkRow.svelte';
-  import { calendar } from './stores/calendar.svelte.js';
-  import { toast } from './ui/toast.svelte.js';
-  import CalendarMark from './components/CalendarMark.svelte';
-  import { openContextMenu, menuKey, menuOpenFor, askConfirm } from './ui/contextMenu.svelte.js';
-  import claudeLogo from '../assets/providers/claude.svg';
-  import openaiLogo from '../assets/providers/openai.svg';
-  import geminiLogo from '../assets/providers/gemini.svg';
+  import LinkRow from '../ui/LinkRow.svelte';
+  import { calendar } from '../stores/calendar.svelte.js';
+  import { toast } from '../ui/toast.svelte.js';
+  import CalendarMark from '../components/CalendarMark.svelte';
+  import { openContextMenu, menuKey, menuOpenFor, askConfirm } from '../ui/contextMenu.svelte.js';
+  import claudeLogo from '../../assets/providers/claude.svg';
+  import openaiLogo from '../../assets/providers/openai.svg';
+  import geminiLogo from '../../assets/providers/gemini.svg';
 
   let { goto = null } = $props();
 

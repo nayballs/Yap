@@ -6,7 +6,7 @@
   // stray Save button): a moment after you stop typing, or as you leave it.
   //
   //   cfg: the Settings config $state (cfg.agentName + cfg.dictionary).
-  import Input from './ui/Input.svelte';
+  import Input from '../ui/Input.svelte';
   import { untrack } from 'svelte';
 
   let { cfg } = $props();

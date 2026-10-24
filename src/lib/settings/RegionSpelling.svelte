@@ -8,7 +8,7 @@
   //
   //   cfg: Settings' config $state. Auto-save does the saving.
   import { invoke } from '@tauri-apps/api/core';
-  import Toggle from './ui/Toggle.svelte';
+  import Toggle from '../ui/Toggle.svelte';
 
   let { cfg, disabled = false } = $props();
   let status = $state(null);

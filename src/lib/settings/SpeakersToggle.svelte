@@ -5,8 +5,8 @@
   // diarizationModel). It stays off until a speaker model is installed:
   // switching it on without one offers the download instead.
   import { onMount } from 'svelte';
-  import Toggle from './ui/Toggle.svelte';
-  import Button from './ui/Button.svelte';
+  import Toggle from '../ui/Toggle.svelte';
+  import Button from '../ui/Button.svelte';
   import {
     diarization,
     startDiarization,

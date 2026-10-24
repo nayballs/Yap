@@ -6,8 +6,8 @@
   // View shows the full effective prompt while Customize edits only the body.
   import { invoke } from '@tauri-apps/api/core';
   import { onMount, untrack } from 'svelte';
-  import Textarea from './ui/Textarea.svelte';
-  import Select from './ui/Select.svelte';
+  import Textarea from '../ui/Textarea.svelte';
+  import Select from '../ui/Select.svelte';
 
   // Generalized so every Language-Models scope reuses one Prompt Studio. The
   // parent binds the editable body (`prompt`) and passes the scope's immutable

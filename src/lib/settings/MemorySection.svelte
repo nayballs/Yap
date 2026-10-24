@@ -24,17 +24,17 @@
   //   goto: Settings' link to another page ("general#about-name").
   import { invoke } from '@tauri-apps/api/core';
   import { onMount } from 'svelte';
-  import Group from './ui/Group.svelte';
-  import Row from './ui/Row.svelte';
-  import Toggle from './ui/Toggle.svelte';
-  import Button from './ui/Button.svelte';
-  import Input from './ui/Input.svelte';
-  import Textarea from './ui/Textarea.svelte';
-  import LinkRow from './ui/LinkRow.svelte';
-  import { toast } from './ui/toast.svelte.js';
-  import { showSaveError } from './notices/saveErrors.js';
-  import { askConfirm } from './ui/contextMenu.svelte.js';
-  import { memory, loadMemory, changedToast } from './stores/memory.svelte.js';
+  import Group from '../ui/Group.svelte';
+  import Row from '../ui/Row.svelte';
+  import Toggle from '../ui/Toggle.svelte';
+  import Button from '../ui/Button.svelte';
+  import Input from '../ui/Input.svelte';
+  import Textarea from '../ui/Textarea.svelte';
+  import LinkRow from '../ui/LinkRow.svelte';
+  import { toast } from '../ui/toast.svelte.js';
+  import { showSaveError } from '../notices/saveErrors.js';
+  import { askConfirm } from '../ui/contextMenu.svelte.js';
+  import { memory, loadMemory, changedToast } from '../stores/memory.svelte.js';
 
   let { cfg, goto = (where) => window.dispatchEvent(new CustomEvent('yap-settings-goto', { detail: where })) } = $props();
 

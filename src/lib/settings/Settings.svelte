@@ -2,40 +2,40 @@
   import { invoke } from '@tauri-apps/api/core';
   import { listen } from '@tauri-apps/api/event';
   import { onMount, onDestroy, tick } from 'svelte';
-  import { initSpeech } from './stores/speech.svelte.js';
-  import { applyAppearance } from './core/appearance.js';
+  import { initSpeech } from '../stores/speech.svelte.js';
+  import { applyAppearance } from '../core/appearance.js';
   import { startKokoro } from './kokoro.svelte.js';
-  import { creditCleanupKey } from './core/providers.js';
-  import { loadCatalog } from './stores/modelCatalog.svelte.js';
-  import { attention, attentionCount, followAttention } from './stores/attention.svelte.js';
-  import { refreshLocalLlm, listenLocalProgress, followLocalLlm } from './settings/localLlm.svelte.js';
+  import { creditCleanupKey } from '../core/providers.js';
+  import { loadCatalog } from '../stores/modelCatalog.svelte.js';
+  import { attention, attentionCount, followAttention } from '../stores/attention.svelte.js';
+  import { refreshLocalLlm, listenLocalProgress, followLocalLlm } from './localLlm.svelte.js';
   import AccountSection from './AccountSection.svelte';
   import ConnectorsSection from './ConnectorsSection.svelte';
   import McpSection from './McpSection.svelte';
   import MemorySection from './MemorySection.svelte';
-  import { account, displayName, initAccount, initials } from './stores/account.svelte.js';
+  import { account, displayName, initAccount, initials } from '../stores/account.svelte.js';
   // Last before settings.css: the CSS order (LanguageModelsPage.svelte says why).
-  import LanguageModelsPage from './settings/LanguageModelsPage.svelte';
-  import './settings/settings.css';
-  import { NAV_GROUPS, resolveTarget } from './settings/nav.js';
-  import { searchSettings, groupResults, countByPage } from './settings/settingsIndex.js';
-  import { hotkeyCapture } from './settings/hotkeys.svelte.js';
-  import { followHotkeyFallback } from './settings/hotkeyFallback.svelte.js';
-  import { followDictionary } from './settings/dictionarySync.svelte.js';
-  import { followOutsideChanges } from './settings/adoptions.svelte.js';
-  import { config, syncConfig, readConfig, setPristine, persist } from './settings/configSync.svelte.js';
-  import SearchResults from './settings/SearchResults.svelte';
-  import GeneralPage from './settings/GeneralPage.svelte';
-  import DictationPage from './settings/DictationPage.svelte';
-  import ShortcutsPage from './settings/ShortcutsPage.svelte';
-  import MeetingsPage from './settings/MeetingsPage.svelte';
-  import PrivacyPage from './settings/PrivacyPage.svelte';
-  import AboutPage from './settings/AboutPage.svelte';
-  import CommandsPage from './settings/CommandsPage.svelte';
-  import VoicePage from './settings/VoicePage.svelte';
-  import SpeechPage from './settings/SpeechPage.svelte';
-  import { SCOPE_TABS, ensureScopes } from './settings/scopes.js';
-  import { migrateRoutesToProfiles } from './settings/profiles.js';
+  import LanguageModelsPage from './LanguageModelsPage.svelte';
+  import './settings.css';
+  import { NAV_GROUPS, resolveTarget } from './nav.js';
+  import { searchSettings, groupResults, countByPage } from './settingsIndex.js';
+  import { hotkeyCapture } from './hotkeys.svelte.js';
+  import { followHotkeyFallback } from './hotkeyFallback.svelte.js';
+  import { followDictionary } from './dictionarySync.svelte.js';
+  import { followOutsideChanges } from './adoptions.svelte.js';
+  import { config, syncConfig, readConfig, setPristine, persist } from './configSync.svelte.js';
+  import SearchResults from './SearchResults.svelte';
+  import GeneralPage from './GeneralPage.svelte';
+  import DictationPage from './DictationPage.svelte';
+  import ShortcutsPage from './ShortcutsPage.svelte';
+  import MeetingsPage from './MeetingsPage.svelte';
+  import PrivacyPage from './PrivacyPage.svelte';
+  import AboutPage from './AboutPage.svelte';
+  import CommandsPage from './CommandsPage.svelte';
+  import VoicePage from './VoicePage.svelte';
+  import SpeechPage from './SpeechPage.svelte';
+  import { SCOPE_TABS, ensureScopes } from './scopes.js';
+  import { migrateRoutesToProfiles } from './profiles.js';
   import {
     lm,
     providerUi,
@@ -43,8 +43,8 @@
     loadRecentApps,
     refreshUsage,
     listenUsage,
-  } from './settings/languageModels.svelte.js';
-  import { noteAccountPicture } from './core/connections.js';
+  } from './languageModels.svelte.js';
+  import { noteAccountPicture } from '../core/connections.js';
 
   // Embedded mode: rendered inside the ControlPanel's Settings modal
   // (OpenWhispr SettingsModal-style) instead of filling the window. The parent
