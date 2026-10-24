@@ -331,7 +331,7 @@ pub fn heard(app: &AppHandle, question: String) {
     };
     emit(app, ev);
     // A dictation starting from now on means you've moved on.
-    let since = crate::pipeline::dictation_state().0;
+    let since = crate::dictation::pipeline::dictation_state().0;
     let app = app.clone();
     tauri::async_runtime::spawn(async move { answer(app, generation, since, question).await });
 }
@@ -455,7 +455,7 @@ impl Streamed {
         self.voice_on
             && current(self.generation)
             && crate::voice::tts::meeting_quiet().is_none()
-            && crate::pipeline::dictation_state().0 == self.since
+            && crate::dictation::pipeline::dictation_state().0 == self.since
     }
 
     /// Hand the voice the sentences of `text` that are ready, starting it
@@ -691,7 +691,7 @@ async fn answer(app: AppHandle, generation: u64, since: u64, question: String) {
     // A meeting or a call that started while the answer was coming: shown,
     // not read aloud.
     let meeting = crate::voice::tts::meeting_quiet().is_some();
-    let interrupted = crate::pipeline::dictation_state().0 != since;
+    let interrupted = crate::dictation::pipeline::dictation_state().0 != since;
     // Read now: the switch may have moved while the answer was coming.
     let voice_on = crate::config::load().speak_replies;
     let mut how = reply(voice_on, meeting, interrupted);
@@ -786,7 +786,7 @@ fn finish_streamed(
     cfg: &crate::config::YapConfig,
 ) {
     let meeting = crate::voice::tts::meeting_quiet().is_some();
-    let interrupted = crate::pipeline::dictation_state().0 != since;
+    let interrupted = crate::dictation::pipeline::dictation_state().0 != since;
     let how = reply(crate::config::load().speak_replies, meeting, interrupted);
     let (said_text, shown) = spoken_answer(&turn.reply, turn.sources.len());
     let still = current(generation);

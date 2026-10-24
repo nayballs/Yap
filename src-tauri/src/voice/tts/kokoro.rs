@@ -640,8 +640,8 @@ mod real {
             use crate::voice::tts::marks;
             let files = files().expect("Kokoro installed under YAP_TTS_MODELS");
             let data = PathBuf::from(std::env::var_os("YAP_STT_DATA").expect("YAP_STT_DATA"));
-            crate::stt::apply_accelerator_settings(true);
-            let stt = crate::stt::create_stt_engine(&data, "parakeet-tdt-0.6b-v3", true).expect("Parakeet");
+            crate::dictation::stt::apply_accelerator_settings(true);
+            let stt = crate::dictation::stt::create_stt_engine(&data, "parakeet-tdt-0.6b-v3", true).expect("Parakeet");
             let model = Arc::new(load(&files.model, threads()).unwrap());
             const TEXTS: &[&str] = &[
                 "Reading aloud helps anyone who finds long pages hard going, and it never gets tired.",
@@ -659,7 +659,7 @@ mod real {
                     let (from_audio, how) = marks::from_audio(&said, &spans, &pcm.samples, SAMPLE_RATE, 1);
                     assert_eq!(how, marks::Timing::Audio);
                     let plain = marks::estimate(&said, &spans, Duration::ZERO, pcm.duration());
-                    let audio16 = crate::pipeline::resample_linear(&pcm.samples, SAMPLE_RATE, 16_000);
+                    let audio16 = crate::dictation::pipeline::resample_linear(&pcm.samples, SAMPLE_RATE, 16_000);
                     let heard = stt.transcribe_timed(&audio16, Some("en"), false, None).unwrap();
                     // Parakeet's words, matched to the said ones (exact words only).
                     let ptext = heard.words.iter().map(|w| w.text.trim()).collect::<Vec<_>>().join(" ");
@@ -707,8 +707,8 @@ mod real {
         fn windows_cues_against_parakeet() {
             use crate::voice::tts::{marks, Engine, WindowsVoices};
             let data = PathBuf::from(std::env::var_os("YAP_STT_DATA").expect("YAP_STT_DATA"));
-            crate::stt::apply_accelerator_settings(true);
-            let stt = crate::stt::create_stt_engine(&data, "parakeet-tdt-0.6b-v3", true).expect("Parakeet");
+            crate::dictation::stt::apply_accelerator_settings(true);
+            let stt = crate::dictation::stt::create_stt_engine(&data, "parakeet-tdt-0.6b-v3", true).expect("Parakeet");
             const TEXTS: &[&str] = &[
                 "Reading aloud helps anyone who finds long pages hard going, and it never gets tired.",
                 "Your meeting with the design team is on Thursday at 2:30 pm, for about 45 minutes.",
@@ -725,7 +725,7 @@ mod real {
                 let real = marks::from_chars(&spans, &cues).unwrap();
                 let (est, _) = marks::from_audio(&said, &spans, &pcm.samples, pcm.sample_rate, pcm.channels);
                 let mono: Vec<f32> = if pcm.channels == 2 { pcm.samples.chunks(2).map(|c| (c[0] + c[1]) / 2.0).collect() } else { pcm.samples.clone() };
-                let audio16 = crate::pipeline::resample_linear(&mono, pcm.sample_rate, 16_000);
+                let audio16 = crate::dictation::pipeline::resample_linear(&mono, pcm.sample_rate, 16_000);
                 let heard = stt.transcribe_timed(&audio16, Some("en"), false, None).unwrap();
                 let ptext = heard.words.iter().map(|w| w.text.trim()).collect::<Vec<_>>().join(" ");
                 let pspans = marks::words(&ptext);

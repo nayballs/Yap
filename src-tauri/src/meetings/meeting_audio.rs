@@ -1048,7 +1048,7 @@ pub fn summary_redone(app: &AppHandle, note_id: u64) {
 }
 
 /// The speech engine in use (the pipeline's warm slot).
-fn warm_slot(app: &AppHandle) -> Option<crate::pipeline::EngineSlot> {
+fn warm_slot(app: &AppHandle) -> Option<crate::dictation::pipeline::EngineSlot> {
     let state = app.state::<crate::AppState>();
     let guard = state.pipeline.lock().ok()?;
     guard.as_ref().map(|p| p.engine_slot())
@@ -1077,7 +1077,7 @@ pub fn start_job(app: &AppHandle, note_id: u64, kind: Kind) -> Result<(), String
             _ => "This meeting's audio isn't kept any more".to_string(),
         });
     }
-    let model = crate::stt::model_name(&crate::config::load().model_size);
+    let model = crate::dictation::stt::model_name(&crate::config::load().model_size);
     let ctl = begin(app, Redo::running(note_id, kind, &model), false)?;
     let Some(engine_slot) = warm_slot(app) else {
         let result = Err("The speech engine isn't running".to_string());
@@ -1120,7 +1120,7 @@ pub fn start_refine(
     if todo.is_empty() {
         return Err("This meeting's audio isn't kept".to_string());
     }
-    let model = crate::stt::model_name(model_id);
+    let model = crate::dictation::stt::model_name(model_id);
     let first = Redo { then_summary, ..Redo::running(note_id, Kind::Refine, &model) };
     let ctl = begin(app, first.clone(), true)?;
     let mut ends = JobEnd::new(app, note_id, Kind::Refine, &model);
@@ -1161,8 +1161,8 @@ async fn refine(app: &AppHandle, note_id: u64, todo: Vec<Meta>, model_id: &str, 
     let slot = if model_id == crate::config::load().model_size {
         warm_slot(app).ok_or("The speech engine isn't running")?
     } else {
-        let slot = crate::pipeline::EngineCell::for_model(model_id, None);
-        drop(crate::pipeline::lease_engine(&slot, Duration::from_secs(1)).await?);
+        let slot = crate::dictation::pipeline::EngineCell::for_model(model_id, None);
+        drop(crate::dictation::pipeline::lease_engine(&slot, Duration::from_secs(1)).await?);
         slot
     };
     tracing::info!(note_id, model = %model_id, recordings = todo.len(), "Meeting refine: transcribing again");
@@ -1187,7 +1187,7 @@ fn reporter(app: &AppHandle, note_id: u64, kind: Kind, model: &str, before: u64,
 
 /// The part a crash left of each recording in `todo`, into the note where
 /// it belongs (by time), then the recording closed.
-async fn recover(app: &AppHandle, engine: &crate::pipeline::EngineSlot, note_id: u64, todo: Vec<Meta>, model: &str, ctl: &crate::meetings::meeting::Ctl) -> Result<(), String> {
+async fn recover(app: &AppHandle, engine: &crate::dictation::pipeline::EngineSlot, note_id: u64, todo: Vec<Meta>, model: &str, ctl: &crate::meetings::meeting::Ctl) -> Result<(), String> {
     let total: u64 = todo.iter().map(|m| m.you_len.saturating_sub(m.you_done) + m.them_len.saturating_sub(m.them_done)).sum();
     let mut before = 0;
     let mut lines = 0;
@@ -1224,7 +1224,7 @@ async fn recover(app: &AppHandle, engine: &crate::pipeline::EngineSlot, note_id:
 /// nothing). Never while the note's summary is being written (it reads
 /// the lines and their digests): the new lines wait for it.
 #[allow(clippy::too_many_arguments)]
-async fn transcribe_again(app: &AppHandle, engine: &crate::pipeline::EngineSlot, note_id: u64, todo: Vec<Meta>, model: &str, kind: Kind, ctl: &crate::meetings::meeting::Ctl, check: bool) -> Result<(), String> {
+async fn transcribe_again(app: &AppHandle, engine: &crate::dictation::pipeline::EngineSlot, note_id: u64, todo: Vec<Meta>, model: &str, kind: Kind, ctl: &crate::meetings::meeting::Ctl, check: bool) -> Result<(), String> {
     let total: u64 = todo.iter().map(|m| m.you_len + m.them_len).sum();
     let then_summary = jobs().get(&note_id).is_some_and(|j| j.then_summary);
     let mut before = 0;
@@ -1309,7 +1309,7 @@ pub fn start_retry(app: &AppHandle, note_id: u64, source: &str, ts: u64, start_m
         .ok_or("That part is transcribed already")?;
     let end_ms = marker.end_ms.unwrap_or(start_ms).max(start_ms);
     let meta = recording_at(note_id, ts).ok_or("This meeting's audio isn't kept any more")?;
-    let model = crate::stt::model_name(&crate::config::load().model_size);
+    let model = crate::dictation::stt::model_name(&crate::config::load().model_size);
     let ctl = begin(app, Redo::running(note_id, Kind::Retry, &model), false)?;
     let Some(engine_slot) = warm_slot(app) else {
         let result = Err("The speech engine isn't running".to_string());
@@ -1327,7 +1327,7 @@ pub fn start_retry(app: &AppHandle, note_id: u64, source: &str, ts: u64, start_m
     Ok(())
 }
 
-async fn retry(app: &AppHandle, engine: &crate::pipeline::EngineSlot, meta: &Meta, source: &str, (start_ms, end_ms): (u64, u64), model: &str, ctl: &crate::meetings::meeting::Ctl) -> Result<(), String> {
+async fn retry(app: &AppHandle, engine: &crate::dictation::pipeline::EngineSlot, meta: &Meta, source: &str, (start_ms, end_ms): (u64, u64), model: &str, ctl: &crate::meetings::meeting::Ctl) -> Result<(), String> {
     let note_id = meta.note_id;
     let (from, to) = (start_ms * RATE / 1000, end_ms * RATE / 1000);
     let mut reader = flac::Reader::open(&audio_path(note_id, meta.recording, source))?;
@@ -1396,7 +1396,7 @@ pub fn clip(note_id: u64, ts: u64, start_ms: u64, end_ms: u64) -> Result<Vec<u8>
     let len = you.len().max(them.len());
     let at = |s: &[f32], i: usize| s.get(i).copied().unwrap_or(0.0);
     let mixed: Vec<f32> = (0..len).map(|i| (at(&you, i) + at(&them, i)).clamp(-1.0, 1.0)).collect();
-    Ok(crate::recent_audio::wav(&mixed))
+    Ok(crate::dictation::recent_audio::wav(&mixed))
 }
 
 // ---- What Settings and the notes show ----
@@ -1449,7 +1449,7 @@ pub fn note_audio(note_id: u64) -> NoteAudio {
         recoverable_secs: waiting,
         until,
         job: jobs().get(&note_id).cloned(),
-        model: crate::stt::model_name(&cfg.model_size),
+        model: crate::dictation::stt::model_name(&cfg.model_size),
     }
 }
 
@@ -1625,7 +1625,7 @@ mod tests {
         use std::time::Instant;
         let var = |k: &str| std::env::var(k).ok().filter(|v| !v.trim().is_empty());
         let minutes: u64 = var("YAP_REFINE_MINUTES").and_then(|v| v.parse().ok()).unwrap_or(30);
-        let clip = |k: &str| var(k).map(|p| crate::media::decode_to_16k_mono(Path::new(&p)).unwrap()).unwrap_or_else(|| tone(8.0));
+        let clip = |k: &str| var(k).map(|p| crate::dictation::media::decode_to_16k_mono(Path::new(&p)).unwrap()).unwrap_or_else(|| tone(8.0));
         let (you_clip, them_clip) = (clip("YAP_REFINE_YOU"), clip("YAP_REFINE_THEM"));
         let n = (minutes * 60 * RATE) as usize;
         let gap = vec![0.0f32; RATE as usize];
@@ -1661,11 +1661,11 @@ mod tests {
 
         let data = var("YAP_REFINE_DATA").map(std::path::PathBuf::from).unwrap_or_else(|| dirs::data_dir().unwrap().join("yap"));
         let model = var("YAP_REFINE_MODEL").unwrap_or_else(|| "parakeet-tdt-0.6b-v3".into());
-        let device = if var("YAP_REFINE_DEVICE").as_deref() == Some("cpu") { crate::stt::Device::Cpu } else { crate::stt::Device::Gpu };
+        let device = if var("YAP_REFINE_DEVICE").as_deref() == Some("cpu") { crate::dictation::stt::Device::Cpu } else { crate::dictation::stt::Device::Gpu };
         let t = Instant::now();
-        let engine = crate::stt::create_stt_engine_on(&data, &model, device).unwrap();
+        let engine = crate::dictation::stt::create_stt_engine_on(&data, &model, device).unwrap();
         let load_ms = t.elapsed().as_millis();
-        let slot = crate::pipeline::EngineCell::for_model(&model, Some(engine));
+        let slot = crate::dictation::pipeline::EngineCell::for_model(&model, Some(engine));
 
         let rt = tokio::runtime::Builder::new_multi_thread().enable_all().build().unwrap();
         let (mut y, mut th) = open_sides(&meta, (0, 0)).unwrap();

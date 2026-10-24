@@ -107,8 +107,8 @@ pub fn body(b: Blocked) -> &'static str {
 
 /// The overlay's line (`yap-mic-silent`): the dead-mic watchdog's payload
 /// shape, so the capsule shows it in the waveform's place.
-pub fn mic_silent() -> crate::mic_watch::MicSilent {
-    crate::mic_watch::MicSilent {
+pub fn mic_silent() -> crate::dictation::mic_watch::MicSilent {
+    crate::dictation::mic_watch::MicSilent {
         message: TITLE.to_string(),
         short: SHORT.to_string(),
     }

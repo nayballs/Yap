@@ -1288,7 +1288,7 @@ pub fn create_stt_engine(
     model_id: &str,
     use_gpu: bool,
 ) -> Result<SttAdapter, SttError> {
-    create_stt_engine_on(data_dir, model_id, crate::stt_speed::device_for(model_id, use_gpu))
+    create_stt_engine_on(data_dir, model_id, crate::dictation::stt_speed::device_for(model_id, use_gpu))
 }
 
 /// [`create_stt_engine`] on a given device (the benchmark measures each).

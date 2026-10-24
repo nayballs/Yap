@@ -962,8 +962,8 @@ mod tests {
         let s = screen(SCREEN);
         let cfg = crate::config::YapConfig::default();
         let heard = "The Zentrics pilot starts Monday";
-        assert_eq!(crate::pipeline::as_said_text(heard, &cfg, None), heard);
-        let said = crate::pipeline::as_said_text(heard, &cfg, Some(&s));
+        assert_eq!(crate::dictation::pipeline::as_said_text(heard, &cfg, None), heard);
+        let said = crate::dictation::pipeline::as_said_text(heard, &cfg, Some(&s));
         // (Names are near-miss targets only with a spell checker to tell
         // them from words, as on every Windows PC.)
         if crate::dictionary::learn::Ordinary::new().has_spell_checker() {
@@ -973,7 +973,7 @@ mod tests {
         }
         // The setting off: as heard.
         let off = crate::config::YapConfig { screen_names: false, ..cfg };
-        assert_eq!(crate::pipeline::as_said_text(heard, &off, Some(&s)), heard);
+        assert_eq!(crate::dictation::pipeline::as_said_text(heard, &off, Some(&s)), heard);
     }
 
     #[test]

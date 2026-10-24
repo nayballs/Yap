@@ -176,7 +176,7 @@ pub fn has(id: &str) -> bool {
 pub fn load(id: &str) -> Option<Vec<f32>> {
     let bytes = wav_bytes(id)?;
     let pcm = crate::voice::tts::parse_wav(&bytes).ok()?;
-    Some(crate::pipeline::resample_linear(&pcm.samples, pcm.sample_rate, SAMPLE_RATE))
+    Some(crate::dictation::pipeline::resample_linear(&pcm.samples, pcm.sample_rate, SAMPLE_RATE))
 }
 
 /// A dictation's audio file as it is (Home's Play).
@@ -327,7 +327,7 @@ fn recover(app: &AppHandle) {
             continue;
         };
         if has(&id) && cfg.history_enabled {
-            crate::history::record_failed(
+            crate::dictation::history::record_failed(
                 recorded_at(&id),
                 &cfg.model_size,
                 "",
@@ -381,7 +381,7 @@ pub fn recent_audio_wav(id: String) -> Result<tauri::ipc::Response, String> {
 #[tauri::command]
 pub async fn history_rerun(app: AppHandle, ts: u64, audio: String, model: Option<String>) -> Result<serde_json::Value, String> {
     use tauri::Manager;
-    let entry = crate::history::find_audio(ts, &audio).ok_or("This dictation isn't in your history any more")?;
+    let entry = crate::dictation::history::find_audio(ts, &audio).ok_or("This dictation isn't in your history any more")?;
     let id = audio.clone();
     let samples = tauri::async_runtime::spawn_blocking(move || load(&id))
         .await
@@ -392,11 +392,11 @@ pub async fn history_rerun(app: AppHandle, ts: u64, audio: String, model: Option
         let guard = state.pipeline.lock().map_err(|_| "The dictation pipeline isn't available")?;
         guard.as_ref().ok_or("The dictation pipeline isn't running")?.rerunner()
     };
-    let crate::pipeline::Reran { raw, text, said, model } = rerun.run(samples, model, &entry.app).await?;
-    crate::history::rerun_result(&audio, &raw, &text, said.as_deref(), &model);
+    let crate::dictation::pipeline::Reran { raw, text, said, model } = rerun.run(samples, model, &entry.app).await?;
+    crate::dictation::history::rerun_result(&audio, &raw, &text, said.as_deref(), &model);
     tracing::info!(chars = text.chars().count(), model = %model, "Ran a dictation again");
     let _ = app.emit("yap-history-changed", ());
-    Ok(serde_json::json!({ "text": text, "model": model, "modelName": crate::stt::model_name(&model) }))
+    Ok(serde_json::json!({ "text": text, "model": model, "modelName": crate::dictation::stt::model_name(&model) }))
 }
 
 #[cfg(test)]

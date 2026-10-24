@@ -221,8 +221,8 @@ pub struct YapConfig {
     /// `transforms.rs`): one-key rewrites of the selection or the last
     /// dictation, each with an optional shortcut, in the person's order. A
     /// config without the key starts with Yap's five built-ins.
-    #[serde(default = "crate::transforms::defaults")]
-    pub transforms: Vec<crate::transforms::Transform>,
+    #[serde(default = "crate::dictation::transforms::defaults")]
+    pub transforms: Vec<crate::dictation::transforms::Transform>,
     /// The **Voice Assistant** shortcut (Settings → Voice Assistant,
     /// `assistant.rs`): from any app, ask Yap's Chat something out loud and
     /// hear the answer; it never types into the app you're in. Empty =
@@ -1032,7 +1032,7 @@ impl Default for YapConfig {
             hotkey: default_hotkey(),
             edit_hotkey: String::new(),
             rewrite_last_dictation: true,
-            transforms: crate::transforms::defaults(),
+            transforms: crate::dictation::transforms::defaults(),
             assistant_hotkey: String::new(),
             read_hotkey: String::new(),
             as_said_hotkey: String::new(),

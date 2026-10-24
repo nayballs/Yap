@@ -310,7 +310,7 @@ fn swap_now(app: &AppHandle, p: &Pasted) -> Outcome {
 /// then every check of [`swap`] —; any other, or where that refuses, has
 /// its words as said copied (privately). Blocking.
 pub fn paste_entry(app: &AppHandle, ts: u64, text: &str) -> Result<Outcome, String> {
-    let entry = crate::history::find(ts, text).ok_or("This dictation isn't in your history any more")?;
+    let entry = crate::dictation::history::find(ts, text).ok_or("This dictation isn't in your history any more")?;
     let said = entry
         .said
         .filter(|s| !s.trim().is_empty())
@@ -400,7 +400,7 @@ fn may_rewrite_in(hwnd: Option<isize>) -> bool {
     }
     #[cfg(debug_assertions)]
     {
-        hwnd.is_some() && hwnd == crate::pipeline::test_target()
+        hwnd.is_some() && hwnd == crate::dictation::pipeline::test_target()
     }
     #[cfg(not(debug_assertions))]
     false

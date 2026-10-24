@@ -572,10 +572,10 @@ fn route(
 
         // ---- transcriptions (dictation history; id = unix-seconds ts) ----
         (Method::Get, ["v1", "transcriptions", "list"]) => {
-            respond_json(request, 200, &list_envelope(crate::history::list(limit(50))));
+            respond_json(request, 200, &list_envelope(crate::dictation::history::list(limit(50))));
         }
         (Method::Get, ["v1", "transcriptions", id]) => {
-            match parse_id(id).and_then(crate::history::get_by_ts) {
+            match parse_id(id).and_then(crate::dictation::history::get_by_ts) {
                 Some(e) => respond_json(request, 200, &json!({ "data": e })),
                 None => respond_error(
                     request,
@@ -586,10 +586,10 @@ fn route(
             }
         }
         (Method::Delete, ["v1", "transcriptions", id]) => {
-            match parse_id(id).map(crate::history::delete_by_ts) {
+            match parse_id(id).map(crate::dictation::history::delete_by_ts) {
                 Some(true) => {
                     let _ = app.emit("yap-history-changed", ());
-                    respond_saved(request, crate::history::SAVER.status(), respond_no_content)
+                    respond_saved(request, crate::dictation::history::SAVER.status(), respond_no_content)
                 }
                 _ => respond_error(
                     request,

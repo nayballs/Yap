@@ -117,7 +117,7 @@ pub fn decode_to_16k_mono(path: &Path) -> Result<Vec<f32>, String> {
         return Err("Unknown sample rate".to_string());
     }
 
-    Ok(crate::pipeline::resample_linear(&mono, src_rate, TARGET_RATE))
+    Ok(crate::dictation::pipeline::resample_linear(&mono, src_rate, TARGET_RATE))
 }
 
 /// Split long audio into ~`chunk_secs` windows for per-chunk progress, cutting

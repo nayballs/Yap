@@ -24,7 +24,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter};
 
-use crate::gesture::Hint;
+use crate::dictation::gesture::Hint;
 
 /// Each hint shows this many times at most.
 pub const MAX_SHOWS: u32 = 3;

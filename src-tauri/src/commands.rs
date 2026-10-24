@@ -3,7 +3,7 @@
 use tauri::{AppHandle, Manager, State};
 
 use crate::config::{self, YapConfig};
-use crate::stt;
+use crate::dictation::stt;
 use crate::AppState;
 
 /// Show the settings window (defined hidden in tauri.conf.json). Shared by the
@@ -214,49 +214,49 @@ pub fn model_language_info(model_size: String) -> ModelLanguageInfo {
 /// Used by the settings key-recorder (pass "" to pause while choosing).
 #[tauri::command]
 pub fn configure_hotkey(spec: String) {
-    let _ = crate::input_hook::configure_dictation(&spec);
+    let _ = crate::dictation::input_hook::configure_dictation(&spec);
 }
 
 /// Live-apply the edit/rewrite-mode hotkey (used by the Settings recorder to
 /// pause the binding while choosing a key, then re-apply it).
 #[tauri::command]
 pub fn configure_edit_hotkey(spec: String) {
-    let _ = crate::input_hook::configure_edit(&spec);
+    let _ = crate::dictation::input_hook::configure_edit(&spec);
 }
 
 /// Live-apply the meeting shortcut (the Settings recorder pauses it while
 /// choosing a key, as for the other two).
 #[tauri::command]
 pub fn configure_meeting_hotkey(spec: String) {
-    let _ = crate::input_hook::configure_meeting(&spec);
+    let _ = crate::dictation::input_hook::configure_meeting(&spec);
 }
 
 /// Live-apply the Voice Assistant shortcut (the Settings recorder pauses it
 /// while choosing a key, as for the others).
 #[tauri::command]
 pub fn configure_assistant_hotkey(spec: String) {
-    let _ = crate::input_hook::configure_assistant(&spec);
+    let _ = crate::dictation::input_hook::configure_assistant(&spec);
 }
 
 /// Live-apply the Read aloud shortcut (the Settings recorder pauses it while
 /// choosing a key, as for the others).
 #[tauri::command]
 pub fn configure_read_hotkey(spec: String) {
-    let _ = crate::input_hook::configure_read(&spec);
+    let _ = crate::dictation::input_hook::configure_read(&spec);
 }
 
 /// Live-apply the "Use what I said" shortcut (`as_said.rs`; paused while
 /// Settings picks a key, as for the others).
 #[tauri::command]
 pub fn configure_as_said_hotkey(spec: String) {
-    let _ = crate::input_hook::configure_as_said(&spec);
+    let _ = crate::dictation::input_hook::configure_as_said(&spec);
 }
 
 /// Live-apply the Snip to Chat shortcut (`snip.rs`; paused while Settings
 /// picks a key, as for the others).
 #[tauri::command]
 pub fn configure_snip_hotkey(spec: String) {
-    let _ = crate::input_hook::configure_snip(&spec);
+    let _ = crate::dictation::input_hook::configure_snip(&spec);
 }
 
 /// Debug-only, test mode: `text` as if a dictation had just heard it —
@@ -265,7 +265,7 @@ pub fn configure_snip_hotkey(spec: String) {
 /// microphone.
 #[cfg(debug_assertions)]
 #[tauri::command]
-pub async fn e2e_dictation(state: State<'_, AppState>, text: String) -> Result<crate::pipeline::Delivered, String> {
+pub async fn e2e_dictation(state: State<'_, AppState>, text: String) -> Result<crate::dictation::pipeline::Delivered, String> {
     if !crate::e2e::active() {
         return Err("e2e_dictation is for test runs".into());
     }
@@ -284,7 +284,7 @@ pub async fn e2e_dictation(state: State<'_, AppState>, text: String) -> Result<c
 /// pasted. Returns what it did.
 #[cfg(debug_assertions)]
 #[tauri::command]
-pub async fn e2e_rewrite(state: State<'_, AppState>, text: String) -> Result<crate::pipeline::Rewritten, String> {
+pub async fn e2e_rewrite(state: State<'_, AppState>, text: String) -> Result<crate::dictation::pipeline::Rewritten, String> {
     if !crate::e2e::active() {
         return Err("e2e_rewrite is for test runs".into());
     }
@@ -304,7 +304,7 @@ pub fn e2e_target_window(on: bool) -> Result<(), String> {
     if !crate::e2e::active() || crate::realtest::on() {
         return Err("e2e_target_window is for test runs (not robot mode)".into());
     }
-    crate::pipeline::set_test_target(on);
+    crate::dictation::pipeline::set_test_target(on);
     tracing::info!(on, "e2e: dictations go to a stand-in window");
     Ok(())
 }
@@ -349,7 +349,7 @@ pub fn chat_dictate(state: State<'_, AppState>) {
 /// question for the chat.
 #[tauri::command]
 pub fn chat_input_focus(focused: bool) {
-    crate::pipeline::set_chat_focus(focused);
+    crate::dictation::pipeline::set_chat_focus(focused);
 }
 
 /// Debug-only, test mode: `text` as if the chat's mic had just heard it —
@@ -357,7 +357,7 @@ pub fn chat_input_focus(focused: bool) {
 /// (`yap-chat-dictation`). Stands in for a microphone.
 #[cfg(debug_assertions)]
 #[tauri::command]
-pub async fn e2e_chat_dictation(state: State<'_, AppState>, text: String) -> Result<crate::pipeline::Delivered, String> {
+pub async fn e2e_chat_dictation(state: State<'_, AppState>, text: String) -> Result<crate::dictation::pipeline::Delivered, String> {
     if !crate::e2e::active() {
         return Err("e2e_chat_dictation is for test runs".into());
     }
@@ -1934,7 +1934,7 @@ pub async fn chat_send(
         now.speak_replies,
         &now.speak_when,
         by_voice,
-        crate::pipeline::dictation_state().1,
+        crate::dictation::pipeline::dictation_state().1,
         // A meeting recording or a call: quiet (`tts::meeting_quiet`).
         crate::voice::tts::meeting_quiet().is_some(),
     );
@@ -2019,20 +2019,20 @@ fn apply_config(app: &AppHandle, state: State<'_, AppState>, prev: &YapConfig, c
     if cfg.debug_logging != prev_debug {
         crate::set_debug_logging(cfg.debug_logging);
     }
-    if let Err(e) = crate::input_hook::configure_dictation(&cfg.hotkey) {
+    if let Err(e) = crate::dictation::input_hook::configure_dictation(&cfg.hotkey) {
         tracing::warn!("Failed to apply hotkey: {}", e);
     }
-    if let Err(e) = crate::input_hook::configure_edit(&cfg.edit_hotkey) {
+    if let Err(e) = crate::dictation::input_hook::configure_edit(&cfg.edit_hotkey) {
         tracing::warn!("Failed to apply edit hotkey: {}", e);
     }
-    if let Err(e) = crate::input_hook::configure_meeting(&cfg.meeting_hotkey) {
+    if let Err(e) = crate::dictation::input_hook::configure_meeting(&cfg.meeting_hotkey) {
         tracing::warn!("Failed to apply meeting hotkey: {}", e);
     }
-    crate::input_hook::configure_assistant_from(&cfg);
-    crate::input_hook::configure_read_from(&cfg);
-    crate::input_hook::configure_as_said_from(&cfg);
-    crate::input_hook::configure_snip_from(&cfg);
-    crate::input_hook::configure_transforms_from(&cfg);
+    crate::dictation::input_hook::configure_assistant_from(&cfg);
+    crate::dictation::input_hook::configure_read_from(&cfg);
+    crate::dictation::input_hook::configure_as_said_from(&cfg);
+    crate::dictation::input_hook::configure_snip_from(&cfg);
+    crate::dictation::input_hook::configure_transforms_from(&cfg);
     // The tray's Transforms menu follows the list.
     if cfg.transforms != prev.transforms {
         crate::tray::refresh(&app);
@@ -2044,9 +2044,9 @@ fn apply_config(app: &AppHandle, state: State<'_, AppState>, prev: &YapConfig, c
     }
     // Settings → Speech-to-Text → Runs on (stt_speed.rs): the warm engine
     // moves to the device chosen now, at a quiet moment.
-    crate::stt_speed::sync(&cfg);
+    crate::dictation::stt_speed::sync(&cfg);
     if cfg.stt_device != prev.stt_device {
-        crate::stt_speed::reload_if_needed(&app);
+        crate::dictation::stt_speed::reload_if_needed(&app);
     }
     crate::voice::tts::set_volume(cfg.tts_volume);
     // The tray is reconciled on every save (always-on since the pill retired) —
@@ -2135,7 +2135,7 @@ pub async fn set_active_model(state: State<'_, AppState>, model_size: String) ->
         .lock()
         .ok()
         .and_then(|g| g.as_ref().and_then(|p| p.engine_info()))
-        .is_some_and(|(model, device)| model == model_size && device == crate::stt_speed::device_for(&model_size, use_gpu));
+        .is_some_and(|(model, device)| model == model_size && device == crate::dictation::stt_speed::device_for(&model_size, use_gpu));
     let engine = if warm {
         None
     } else {
@@ -2477,7 +2477,7 @@ pub fn local_llm_delete(filename: String) -> Result<(), String> {
 /// Each item: `{ ts, raw, text, model, app, words }`.
 #[tauri::command]
 pub fn get_history(limit: Option<usize>) -> serde_json::Value {
-    crate::history::list(limit.unwrap_or(100))
+    crate::dictation::history::list(limit.unwrap_or(100))
 }
 
 /// Delete all local transcription history. A save that failed is the error
@@ -2485,9 +2485,9 @@ pub fn get_history(limit: Option<usize>) -> serde_json::Value {
 #[tauri::command]
 pub fn clear_history(app: AppHandle) -> Result<(), String> {
     use tauri::Emitter;
-    crate::history::clear();
+    crate::dictation::history::clear();
     let _ = app.emit("yap-history-changed", ());
-    Ok(crate::history::saved()?)
+    Ok(crate::dictation::history::saved()?)
 }
 
 /// Delete one history entry (matched by timestamp + final text) — the per-item
@@ -2495,16 +2495,16 @@ pub fn clear_history(app: AppHandle) -> Result<(), String> {
 #[tauri::command]
 pub fn delete_history_entry(app: AppHandle, ts: u64, text: String) -> Result<(), String> {
     use tauri::Emitter;
-    crate::history::delete(ts, &text);
+    crate::dictation::history::delete(ts, &text);
     let _ = app.emit("yap-history-changed", ());
-    Ok(crate::history::saved()?)
+    Ok(crate::dictation::history::saved()?)
 }
 
 /// Derived stats for the dashboard: totals, today, time saved, streak, and a
 /// 30-day activity series. See `history::stats`.
 #[tauri::command]
 pub fn get_stats() -> serde_json::Value {
-    crate::history::stats()
+    crate::dictation::history::stats()
 }
 
 /// Everything Home needs to draw itself, in one round trip and off the
@@ -2518,8 +2518,8 @@ pub async fn home_snapshot(limit: Option<usize>) -> Result<serde_json::Value, St
     tauri::async_runtime::spawn_blocking(move || {
         let cfg = config::load();
         serde_json::json!({
-            "history": crate::history::list(limit.unwrap_or(200)),
-            "stats": crate::history::stats(),
+            "history": crate::dictation::history::list(limit.unwrap_or(200)),
+            "stats": crate::dictation::history::stats(),
             "config": {
                 "historyEnabled": cfg.history_enabled,
                 "postProcessEnabled": cfg.post_process_enabled,

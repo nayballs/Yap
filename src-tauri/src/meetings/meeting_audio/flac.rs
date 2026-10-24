@@ -676,7 +676,7 @@ mod tests {
         report("room noise at -60 dBFS", &noise);
         report("tones over noise", &audio(60.0, 1));
         if let Ok(p) = std::env::var("YAP_FLAC_SAMPLE") {
-            let speech = crate::media::decode_to_16k_mono(Path::new(&p)).unwrap();
+            let speech = crate::dictation::media::decode_to_16k_mono(Path::new(&p)).unwrap();
             report("speech", &speech);
             let noisy: Vec<f32> = speech.iter().zip(noise.iter().cycle()).map(|(s, n)| s + n).collect();
             report("speech over room noise", &noisy);

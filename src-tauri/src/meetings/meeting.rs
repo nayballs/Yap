@@ -80,7 +80,7 @@ use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use tauri::{AppHandle, Emitter};
 
 use crate::notes::TranscriptSegment;
-use crate::pipeline::{resample_linear, EngineSlot, TARGET_SAMPLE_RATE};
+use crate::dictation::pipeline::{resample_linear, EngineSlot, TARGET_SAMPLE_RATE};
 
 const RATE: usize = TARGET_SAMPLE_RATE as usize;
 /// How often the worker looks for finished chunks.
@@ -127,7 +127,7 @@ pub(crate) const MAX_BUFFER_SAMPLES: usize = 20 * 60 * RATE;
 
 /// Blanked before a dictation: its pre-roll, plus 40 ms for the two
 /// streams' callbacks not lining up.
-const DICTATION_LOOKBACK: usize = crate::pipeline::PREROLL_SAMPLES + RATE * 40 / 1000;
+const DICTATION_LOOKBACK: usize = crate::dictation::pipeline::PREROLL_SAMPLES + RATE * 40 / 1000;
 
 /// Where hotkey dictations go silent in the mic's audio (one per mic source;
 /// see "Dictation" above).
@@ -260,7 +260,7 @@ impl Captured {
 
     /// The mic ("You"), whose dictations go silent.
     fn mic() -> AudioBuf {
-        let gate = DictationGate::new(crate::pipeline::dictation_state());
+        let gate = DictationGate::new(crate::dictation::pipeline::dictation_state());
         Arc::new(Mutex::new(Captured::new(Some(gate))))
     }
 
@@ -750,7 +750,7 @@ pub fn state() -> serde_json::Value {
 /// load) and blanks dictations (see "Dictation" above).
 pub(crate) fn push_audio(buf: &AudioBuf, samples: &[f32], overflow: &AtomicBool) {
     if let Ok(mut b) = buf.lock() {
-        let dictation = b.gate.is_some().then(crate::pipeline::dictation_state);
+        let dictation = b.gate.is_some().then(crate::dictation::pipeline::dictation_state);
         if !b.push(samples, dictation) {
             overflow.store(true, Ordering::Relaxed);
         }
@@ -1154,7 +1154,7 @@ fn next_cut(samples: &[f32], final_drain: bool) -> Option<usize> {
     if lo >= hi {
         return Some(hi);
     }
-    Some(crate::media::quietest_frame(samples, lo, hi, RATE).0)
+    Some(crate::dictation::media::quietest_frame(samples, lo, hi, RATE).0)
 }
 
 fn buffered(buf: &AudioBuf) -> usize {
@@ -1228,7 +1228,7 @@ async fn transcribe_chunk(engine_slot: &EngineSlot, samples: Vec<f32>, note_id: 
     }
     // A meeting started right after Yap did waits for the model still
     // loading in the background (`lease_engine`): never a second copy.
-    let lease = match crate::pipeline::lease_engine(engine_slot, CHUNK_ENGINE_WAIT).await {
+    let lease = match crate::dictation::pipeline::lease_engine(engine_slot, CHUNK_ENGINE_WAIT).await {
         Ok(lease) => lease,
         Err(e) => {
             tracing::warn!(note_id, "Meeting: no STT engine available: {}", e);
@@ -1255,7 +1255,7 @@ async fn transcribe_chunk(engine_slot: &EngineSlot, samples: Vec<f32>, note_id: 
         }
         let result = match lease.engine() {
             Some(engine) => engine.transcribe_timed(&samples, language.as_deref(), translate, dict_prompt.as_deref()),
-            None => Err(crate::stt::SttError::NotReady),
+            None => Err(crate::dictation::stt::SttError::NotReady),
         };
         (lease, result)
     })
@@ -1264,7 +1264,7 @@ async fn transcribe_chunk(engine_slot: &EngineSlot, samples: Vec<f32>, note_id: 
     match outcome {
         Ok((lease, Ok(timed))) => {
             drop(lease);
-            let t = crate::pipeline::apply_corrections(timed.text.trim(), &cfg);
+            let t = crate::dictation::pipeline::apply_corrections(timed.text.trim(), &cfg);
             let t = t.trim().to_string();
             if t.is_empty() {
                 Transcribed::Nothing
@@ -2031,7 +2031,7 @@ async fn give_way(last: &mut u64, ctl: &Ctl) -> bool {
         if ctl.cancelled() {
             return false;
         }
-        let (count, recording) = crate::pipeline::dictation_state();
+        let (count, recording) = crate::dictation::pipeline::dictation_state();
         if recording || is_recording() {
             tokio::time::sleep(Duration::from_millis(200)).await;
         } else if count != *last {
@@ -2090,7 +2090,7 @@ pub(crate) async fn replay(
     let mut out = Vec::new();
     let mut done = from;
     let mut failed = 0;
-    let mut dictations = crate::pipeline::dictation_state().0;
+    let mut dictations = crate::dictation::pipeline::dictation_state().0;
     loop {
         if !give_way(&mut dictations, ctl).await {
             return Replayed { segments: out, you_done: done.0, them_done: done.1, cancelled: true };

@@ -295,7 +295,7 @@ pub fn list(limit: usize) -> Value {
                 item["said"] = json!(said);
             }
             // Its audio, while it's kept (Run again, Play).
-            if let Some(id) = e.audio.as_deref().filter(|id| crate::recent_audio::has(id)) {
+            if let Some(id) = e.audio.as_deref().filter(|id| crate::dictation::recent_audio::has(id)) {
                 item["audio"] = json!(id);
             }
             if let Some(status) = &e.status {
@@ -399,7 +399,7 @@ pub fn delete_by_ts(ts: u64) -> bool {
         save_to_disk(entries);
         // Its audio goes with it.
         if let Some(id) = gone.audio {
-            crate::recent_audio::discard(&id);
+            crate::dictation::recent_audio::discard(&id);
         }
         true
     } else {
@@ -421,7 +421,7 @@ pub fn delete(ts: u64, text: &str) {
         save_to_disk(entries);
         // Its audio goes with it.
         if let Some(id) = gone.audio {
-            crate::recent_audio::discard(&id);
+            crate::dictation::recent_audio::discard(&id);
         }
     }
 }
@@ -444,7 +444,7 @@ pub fn clear() {
         }
     }
     drop(guard);
-    crate::recent_audio::clear();
+    crate::dictation::recent_audio::clear();
 }
 
 /// Derived dashboard stats (camelCase JSON for the Settings panel).

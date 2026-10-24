@@ -324,10 +324,10 @@ pub struct NewDictations(pub tauri::AppHandle);
 
 impl Dictations for NewDictations {
     fn mark(&self) -> u64 {
-        crate::pipeline::dictation_state().0
+        crate::dictation::pipeline::dictation_state().0
     }
     fn must_yield(&self, mark: u64) -> bool {
-        crate::pipeline::dictation_state().0 != mark
+        crate::dictation::pipeline::dictation_state().0 != mark
     }
     fn busy(&self) -> bool {
         crate::meetings::meeting_summary::dictation_busy(&self.0)

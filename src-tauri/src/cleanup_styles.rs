@@ -899,7 +899,7 @@ pub async fn cleanup_offer_status(app: tauri::AppHandle) -> Value {
     let gpu = crate::gpu::this_pc();
     let capable = crate::gpu::can_run_big_model(gpu.as_ref());
     let installed = crate::local_llm::is_installed(&cfg);
-    let dictations = crate::history::recent_dictation_secs(OFFER_AFTER).len();
+    let dictations = crate::dictation::history::recent_dictation_secs(OFFER_AFTER).len();
     let (_, focused) = crate::notices::notice::window_view(&app);
     let m = crate::notices::notice::moment();
     // A test run offers it only when the spec asks (the rest of the suite

@@ -8,7 +8,6 @@
 //! from Voice Mirror; everything else here is the slim glue.
 
 mod about_you;
-mod agent_detect;
 mod ai_model;
 mod apps;
 mod auth;
@@ -18,49 +17,32 @@ mod calendar;
 mod calls;
 mod chat;
 mod cleanup_styles;
-mod coaching;
 mod commands;
 mod config;
 mod context_menu;
+mod dictation;
 mod dictionary;
 mod e2e;
 mod eval;
-mod gesture;
 mod gguf;
 mod gpu;
 mod hardware;
 mod integrations;
-mod media;
-mod media_pause;
 mod meetings;
 mod memory;
 mod notes;
 mod notices;
 mod pasting;
 mod privacy;
-mod history;
-mod input_hook;
 mod llm;
 mod local_llm;
-mod mic;
-mod mic_privacy;
-mod mic_watch;
 mod model_catalog;
-mod mute;
-mod partials;
-mod pause;
-mod pipeline;
 mod portable;
 mod procs;
 mod realtest;
-mod recent_audio;
 mod saving;
 mod snip;
-mod sound;
 mod speakers;
-mod stt;
-mod stt_speed;
-mod transforms;
 mod tray;
 mod updates;
 mod theme;
@@ -86,7 +68,7 @@ static STATE_GEN: AtomicU64 = AtomicU64::new(0);
 
 /// Shared app state: the running dictation pipeline.
 pub struct AppState {
-    pub pipeline: Mutex<Option<pipeline::Pipeline>>,
+    pub pipeline: Mutex<Option<dictation::pipeline::Pipeline>>,
 }
 
 /// Enable or disable OS autostart via `tauri-plugin-autostart`.
@@ -162,7 +144,7 @@ pub(crate) fn shutdown_cleanup() {
     voice::tts::stop();
     local_llm::shutdown();
     integrations::bridge::stop();
-    mute::restore_all();
+    dictation::mute::restore_all();
     // The week of network receipts, as it stands (net.rs).
     privacy::net::flush();
     // A store whose last save failed (saving.rs): one more try.
@@ -502,17 +484,17 @@ pub fn run() {
             pasting::as_said::as_said_paste_entry,
             commands::configure_as_said_hotkey,
             commands::configure_snip_hotkey,
-            transforms::configure_transform_hotkey,
+            dictation::transforms::configure_transform_hotkey,
             snip::snip_start,
             snip::chat_images_usage,
             snip::chat_images_prepare,
-            stt_speed::stt_speed_status,
-            stt_speed::stt_speed_measure,
+            dictation::stt_speed::stt_speed_status,
+            dictation::stt_speed::stt_speed_measure,
             hardware::hardware_advice,
-            recent_audio::recent_audio_status,
-            recent_audio::recent_audio_clear,
-            recent_audio::recent_audio_wav,
-            recent_audio::history_rerun,
+            dictation::recent_audio::recent_audio_status,
+            dictation::recent_audio::recent_audio_clear,
+            dictation::recent_audio::recent_audio_wav,
+            dictation::recent_audio::history_rerun,
             commands::transcribe_file,
             commands::cancel_file_transcription,
             commands::audio_file_info,
@@ -741,7 +723,7 @@ pub fn run() {
             #[cfg(debug_assertions)]
             e2e::e2e_snip_last,
             #[cfg(debug_assertions)]
-            mic_privacy::e2e_mic_privacy,
+            dictation::mic_privacy::e2e_mic_privacy,
             #[cfg(debug_assertions)]
             pasting::elevated::e2e_paste_elevated,
             #[cfg(debug_assertions)]
@@ -751,7 +733,7 @@ pub fn run() {
             #[cfg(debug_assertions)]
             theme::e2e_webview_background,
             #[cfg(debug_assertions)]
-            coaching::e2e_coaching_reset,
+            dictation::coaching::e2e_coaching_reset,
             #[cfg(debug_assertions)]
             local_llm::e2e_local_llm_serving,
             #[cfg(debug_assertions)]
@@ -796,9 +778,9 @@ pub fn run() {
             #[cfg(debug_assertions)]
             commands::e2e_rewrite,
             #[cfg(debug_assertions)]
-            transforms::e2e_transform,
+            dictation::transforms::e2e_transform,
             #[cfg(debug_assertions)]
-            transforms::e2e_transform_slots,
+            dictation::transforms::e2e_transform_slots,
             #[cfg(debug_assertions)]
             realtest::commands::realtest_transform,
             #[cfg(debug_assertions)]
@@ -857,55 +839,55 @@ pub fn run() {
             // Global input hook + dictation hotkey. (Not in e2e test runs: a
             // test instance must never see, or swallow, the developer's keys.)
             if !e2e::active() && !bench_child() {
-                input_hook::start_input_hook(handle.clone());
+                dictation::input_hook::start_input_hook(handle.clone());
             }
-            if let Err(e) = input_hook::configure_dictation(&cfg.hotkey) {
+            if let Err(e) = dictation::input_hook::configure_dictation(&cfg.hotkey) {
                 tracing::warn!("Failed to configure hotkey: {}", e);
             }
             // Optional edit/rewrite-mode hotkey (empty = unbound / opt-in).
-            if let Err(e) = input_hook::configure_edit(&cfg.edit_hotkey) {
+            if let Err(e) = dictation::input_hook::configure_edit(&cfg.edit_hotkey) {
                 tracing::warn!("Failed to configure edit hotkey: {}", e);
             }
             // The meeting shortcut (Win+Alt+M; meeting_guard.rs).
-            if let Err(e) = input_hook::configure_meeting(&cfg.meeting_hotkey) {
+            if let Err(e) = dictation::input_hook::configure_meeting(&cfg.meeting_hotkey) {
                 tracing::warn!("Failed to configure meeting hotkey: {}", e);
             }
             // The Voice Assistant's shortcut (assistant.rs; unbound by
             // default, and never one that clashes with the other three).
-            input_hook::configure_assistant_from(&cfg);
+            dictation::input_hook::configure_assistant_from(&cfg);
             // Read aloud's (read_aloud.rs; unbound by default, never a clash).
-            input_hook::configure_read_from(&cfg);
+            dictation::input_hook::configure_read_from(&cfg);
             // "Use what I said" (as_said.rs; unbound by default).
-            input_hook::configure_as_said_from(&cfg);
+            dictation::input_hook::configure_as_said_from(&cfg);
             // Snip to Chat (snip.rs; Win+Alt+S by default, never a clash).
-            input_hook::configure_snip_from(&cfg);
+            dictation::input_hook::configure_snip_from(&cfg);
             // Saved transforms' shortcuts (transforms.rs; none by default).
-            input_hook::configure_transforms_from(&cfg);
+            dictation::input_hook::configure_transforms_from(&cfg);
 
             // Clear ort's 0-byte DirectML.dll stub so ONNX uses the real system
             // DirectML, then fix the transcribe-rs accelerator policy before any
             // model loads: whisper → CUDA (Auto), ONNX → DirectML. No-ops in stub.
-            stt::fix_directml_stub();
-            stt::apply_accelerator_settings(cfg.use_gpu);
+            dictation::stt::fix_directml_stub();
+            dictation::stt::apply_accelerator_settings(cfg.use_gpu);
             // DirectML on the graphics card, not an integrated GPU DXGI
             // happens to list first (hybrid laptops; gpu.rs).
-            stt::set_gpu_adapter(gpu::speech_adapter());
+            dictation::stt::set_gpu_adapter(gpu::speech_adapter());
             // Each model loads on the device that runs it fastest here
             // (Settings → Speech-to-Text → Runs on; stt_speed.rs).
-            stt_speed::sync(&cfg);
+            dictation::stt_speed::sync(&cfg);
 
             // Start the dictation pipeline (audio capture + STT engine). It
             // runs without a microphone too (see `Pipeline::start`).
-            let pipeline = pipeline::Pipeline::start(handle.clone(), cfg.clone());
+            let pipeline = dictation::pipeline::Pipeline::start(handle.clone(), cfg.clone());
             if let Ok(mut guard) = app.state::<AppState>().pipeline.lock() {
                 *guard = Some(pipeline);
             }
             // A model this PC hasn't timed yet (or a new graphics driver):
             // measured once things have settled.
-            stt_speed::schedule(&handle, stt_speed::AFTER_START);
+            dictation::stt_speed::schedule(&handle, dictation::stt_speed::AFTER_START);
             // Recent dictations' audio past its time goes (recent_audio.rs),
             // and one Yap stopped transcribing (a crash) is listed as failed.
-            recent_audio::init(&handle);
+            dictation::recent_audio::init(&handle);
             // Meeting audio past its days goes, and what a crash left of a
             // meeting is offered to transcribe (meeting_audio.rs).
             meetings::meeting_audio::init(&handle);
@@ -971,7 +953,7 @@ pub fn run() {
             // core loop doesn't depend on any webview being ready. The
             // pipeline picks toggle vs push-to-talk live from its config, so
             // both events go through `on_key`. Each carries the moment the
-            // key moved (`gesture::now_ms`, stamped in the hook): events are
+            // key moved (`dictation::gesture::now_ms`, stamped in the hook): events are
             // handled one after another, and push-to-talk's tap / double-tap
             // timing mustn't stretch while the last one is still starting.
             let press_handle = handle.clone();
@@ -1069,7 +1051,7 @@ pub fn run() {
             let transform_handle = handle.clone();
             handle.listen("transform-key-pressed", move |event| {
                 if let Ok(slot) = event.payload().trim().parse::<usize>() {
-                    transforms::on_key(&transform_handle, slot);
+                    dictation::transforms::on_key(&transform_handle, slot);
                 }
             });
 
@@ -1245,7 +1227,7 @@ pub fn run() {
             calls::capture::init(&handle);
 
             // Other apps' sound a crash left silenced mid-dictation comes back.
-            mute::recover();
+            dictation::mute::recover();
 
             // Windows off screen (the main window in the tray, onboarding,
             // the notepad between meetings) ask WebView2 to keep less in

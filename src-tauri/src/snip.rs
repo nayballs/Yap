@@ -258,7 +258,7 @@ fn run(app: &AppHandle, origin: Origin) -> Result<(), String> {
     let started = Instant::now();
     // Not over a dictation: one thing at a time. (A spoken "snip" ends its
     // own dictation first.)
-    if origin != Origin::Voice && crate::pipeline::dictation_state().1 {
+    if origin != Origin::Voice && crate::dictation::pipeline::dictation_state().1 {
         tracing::info!("snip: not during a dictation");
         set_last(Last { outcome: "refused".into(), reason: "dictating".into(), ..Default::default() });
         crate::notices::alert::snip_dictating(app);
@@ -329,7 +329,7 @@ fn run(app: &AppHandle, origin: Origin) -> Result<(), String> {
     };
     // Esc cancels through Yap's keyboard hook too (if Windows kept the
     // focus from the overlay).
-    crate::input_hook::snip_escape(overlay::is_open());
+    crate::dictation::input_hook::snip_escape(overlay::is_open());
     let overlay_ms = started.elapsed().as_secs_f64() * 1000.0;
     tracing::info!(
         monitors,
@@ -364,7 +364,7 @@ fn run(app: &AppHandle, origin: Origin) -> Result<(), String> {
 /// The overlay closed: save the box and hand it to Chat, or give the focus
 /// back.
 fn finish(app: &AppHandle, generation: u64, outcome: overlay::Outcome) {
-    crate::input_hook::snip_escape(false);
+    crate::dictation::input_hook::snip_escape(false);
     let snip = {
         let mut current = CURRENT.lock().unwrap_or_else(|p| p.into_inner());
         match current.take() {

@@ -762,7 +762,7 @@ pub fn finish_scripted(note_id: u64) {
 fn run_wav(path: &std::path::Path, speakers: Option<u8>) -> Result<WavResult, String> {
     let cfg = crate::config::load();
     let files = registry::engine_files(&cfg.diarization_model).ok_or("No speaker model is installed")?;
-    let audio = crate::media::decode_to_16k_mono(path)?;
+    let audio = crate::dictation::media::decode_to_16k_mono(path)?;
     let started = std::time::Instant::now();
     let mut child = spawn(&files, 0)?;
     forward_stderr(&mut child);

@@ -13,7 +13,7 @@
 //! - Per-tick transcription cost is bounded by `WINDOW_HARD_MAX_SECS` no
 //!   matter how long the recording grows.
 
-use crate::media::quietest_index;
+use crate::dictation::media::quietest_index;
 
 /// Window length beyond which we try to advance (freeze the oldest audio).
 const WINDOW_ADVANCE_SECS: usize = 12;

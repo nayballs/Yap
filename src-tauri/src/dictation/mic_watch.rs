@@ -23,7 +23,7 @@
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 /// Audio rate of the tallied chunks (the pipeline's 16 kHz mono).
-const RATE: u64 = crate::pipeline::TARGET_SAMPLE_RATE as u64;
+const RATE: u64 = crate::dictation::pipeline::TARGET_SAMPLE_RATE as u64;
 /// No audio at all for this long: the stream has stalled (or never started).
 pub const NO_AUDIO_MS: u64 = 2_000;
 /// This much audio, all of it zeros: digital silence.

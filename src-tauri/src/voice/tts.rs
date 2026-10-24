@@ -976,7 +976,7 @@ impl Playback for RodioPlayback {
 fn rodio_opener(device: Option<String>) -> Opener {
     Box::new(move || {
         let (stream, handle) =
-            crate::sound::open_output(device.as_deref()).ok_or("No sound output device to speak on")?;
+            crate::dictation::sound::open_output(device.as_deref()).ok_or("No sound output device to speak on")?;
         let sink = Arc::new(rodio::Sink::try_new(&handle).map_err(|e| format!("Couldn't play the voice: {e}"))?);
         sink.set_volume(gain(volume()));
         *LIVE_SINK.lock().unwrap_or_else(|p| p.into_inner()) = Some(Arc::downgrade(&sink));
@@ -1605,7 +1605,7 @@ pub fn init(app: &tauri::AppHandle) {
             // So did a read-aloud (its card goes).
             crate::voice::read_aloud::on_tts_state(&app, s);
         }),
-        Box::new(|| crate::pipeline::dictation_state().1),
+        Box::new(|| crate::dictation::pipeline::dictation_state().1),
     ));
     let _ = std::thread::Builder::new().name("tts-idle".into()).spawn(|| loop {
         std::thread::sleep(Duration::from_secs(20));

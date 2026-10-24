@@ -581,7 +581,7 @@ pub mod commands {
     use tauri::State;
 
     use super::{on, robot};
-    use crate::pipeline::Delivered;
+    use crate::dictation::pipeline::Delivered;
     use crate::AppState;
 
     fn only_robot() -> Result<(), String> {
@@ -605,7 +605,7 @@ pub mod commands {
         Ok(())
     }
 
-    fn robot_of(state: &State<'_, AppState>) -> Result<crate::pipeline::Robot, String> {
+    fn robot_of(state: &State<'_, AppState>) -> Result<crate::dictation::pipeline::Robot, String> {
         let guard = state.pipeline.lock().map_err(|_| "the pipeline lock is poisoned")?;
         Ok(guard.as_ref().ok_or("no pipeline")?.robot())
     }
@@ -655,7 +655,7 @@ pub mod commands {
         state: State<'_, AppState>,
         text: String,
         hwnd: Option<i64>,
-    ) -> Result<crate::pipeline::Rewritten, String> {
+    ) -> Result<crate::dictation::pipeline::Rewritten, String> {
         only_robot()?;
         in_front(hwnd)?;
         let robot = robot_of(&state)?;
@@ -668,11 +668,11 @@ pub mod commands {
     /// a dictation there, and that dictation is transformed in place — then
     /// the AI and the paste (`transforms.rs`). Returns what it did.
     #[tauri::command]
-    pub async fn realtest_transform(app: tauri::AppHandle, id: String, hwnd: Option<i64>) -> Result<crate::transforms::Transformed, String> {
+    pub async fn realtest_transform(app: tauri::AppHandle, id: String, hwnd: Option<i64>) -> Result<crate::dictation::transforms::Transformed, String> {
         only_robot()?;
         in_front(hwnd)?;
         tauri::async_runtime::spawn_blocking(move || {
-            crate::transforms::run_by_id(&app, &id, crate::transforms::Origin::Shortcut, None)
+            crate::dictation::transforms::run_by_id(&app, &id, crate::dictation::transforms::Origin::Shortcut, None)
         })
         .await
         .map_err(|e| format!("the transform task failed: {e}"))?
@@ -694,7 +694,7 @@ pub mod commands {
         only_robot()?;
         in_front(hwnd)?;
         let samples = tauri::async_runtime::spawn_blocking(move || {
-            crate::media::decode_to_16k_mono(std::path::Path::new(&path))
+            crate::dictation::media::decode_to_16k_mono(std::path::Path::new(&path))
         })
         .await
         .map_err(|e| format!("decode task failed: {e}"))??;
@@ -737,7 +737,7 @@ pub mod commands {
     #[tauri::command]
     pub async fn realtest_other_apps() -> Result<serde_json::Value, String> {
         only_robot()?;
-        tauri::async_runtime::spawn_blocking(crate::mute::robot_view).await.map_err(|e| e.to_string())
+        tauri::async_runtime::spawn_blocking(crate::dictation::mute::robot_view).await.map_err(|e| e.to_string())
     }
 
     #[tauri::command]

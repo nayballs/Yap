@@ -175,7 +175,7 @@ pub fn decide(choice: &str, live: &str, best: Option<&str>, failed: usize, audio
 /// The models installed on this PC.
 fn installed() -> Vec<&'static str> {
     let data = crate::config::data_dir();
-    crate::stt::all_model_ids().into_iter().filter(|id| crate::stt::is_model_installed(&data, id)).collect()
+    crate::dictation::stt::all_model_ids().into_iter().filter(|id| crate::dictation::stt::is_model_installed(&data, id)).collect()
 }
 
 /// The meeting's language as Yap knows it: the one picked for speech, else

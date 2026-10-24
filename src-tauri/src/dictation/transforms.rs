@@ -15,7 +15,7 @@
 //! **Shortcuts**: `input_hook.rs` keeps [`MAX`] transform slots beside its
 //! seven fixed bindings. [`assign`] (pure) gives each transform with a
 //! shortcut a slot, in list order, unless its key would fire with one of the
-//! seven or an earlier transform's ([`crate::input_hook::clashes`]): it's
+//! seven or an earlier transform's ([`crate::dictation::input_hook::clashes`]): it's
 //! left unbound and the log says why (Settings refuses such a key in the
 //! first place, `hotkeysClash`). Only the press is used. No in-page fallback:
 //! a transform works on another app's text.
@@ -243,12 +243,12 @@ pub fn assign(fixed: &[(&str, &str)], transforms: &[Transform]) -> Vec<Slot> {
         let spec = t.hotkey.trim();
         let clash = fixed
             .iter()
-            .find(|(_, other)| crate::input_hook::clashes(spec, other))
+            .find(|(_, other)| crate::dictation::input_hook::clashes(spec, other))
             .map(|(name, _)| format!("the {name}"))
             .or_else(|| {
                 taken
                     .iter()
-                    .find(|(_, other)| crate::input_hook::clashes(spec, other))
+                    .find(|(_, other)| crate::dictation::input_hook::clashes(spec, other))
                     .map(|(name, _)| format!("the {name} transform"))
             });
         if clash.is_none() {
@@ -391,7 +391,7 @@ pub struct StandIn {
 /// The transform in input-hook slot `slot` was pressed: run it, on its own
 /// thread.
 pub fn on_key(app: &AppHandle, slot: usize) {
-    let Some(id) = crate::input_hook::transform_at(slot) else {
+    let Some(id) = crate::dictation::input_hook::transform_at(slot) else {
         tracing::warn!(slot, "A transform shortcut with no transform");
         return;
     };
@@ -437,7 +437,7 @@ fn kind_of(t: &Transform) -> String {
 fn target_window(origin: Origin, stand_in: bool) -> Option<isize> {
     #[cfg(debug_assertions)]
     if stand_in {
-        return crate::pipeline::test_target();
+        return crate::dictation::pipeline::test_target();
     }
     let _ = stand_in;
     match origin {
@@ -529,7 +529,7 @@ pub fn run(app: &AppHandle, cfg: &YapConfig, t: &Transform, origin: Origin, stan
     tracing::debug!(chars = r.input.chars().count(), "Transform: the text");
 
     // The model: the Commands scope's, else the cleanup model.
-    let m = crate::pipeline::commands_model(cfg);
+    let m = crate::dictation::pipeline::commands_model(cfg);
     if m.base_url.is_empty() {
         let restarting = m.provider == crate::local_llm::PROVIDER_ONDEVICE && crate::local_llm::restart_under_way();
         failed(
@@ -758,7 +758,7 @@ fn back_to_idle_after(app: &AppHandle, ms: u64, seq: Option<u64>) {
 /// new key is picked, then puts the picked one); a save applies them all.
 #[tauri::command]
 pub fn configure_transform_hotkey(id: String, spec: String) {
-    crate::input_hook::configure_transform(&id, &spec);
+    crate::dictation::input_hook::configure_transform(&id, &spec);
 }
 
 /// Debug-only, test mode: transform `id` as its shortcut would run it, in
@@ -778,7 +778,7 @@ pub async fn e2e_transform(
     if !crate::e2e::active() || crate::realtest::on() {
         return Err("e2e_transform is for test runs (not robot mode)".into());
     }
-    if crate::pipeline::test_target().is_none() {
+    if crate::dictation::pipeline::test_target().is_none() {
         return Err("e2e_transform needs e2e_target_window on".into());
     }
     let stand_in = StandIn { selection, terminal: terminal.unwrap_or(false) };
@@ -792,7 +792,7 @@ pub async fn e2e_transform(
 #[cfg(debug_assertions)]
 #[tauri::command]
 pub fn e2e_transform_slots() -> Vec<serde_json::Value> {
-    crate::input_hook::transform_slots()
+    crate::dictation::input_hook::transform_slots()
         .into_iter()
         .map(|(id, key)| serde_json::json!({ "id": id, "key": key }))
         .collect()

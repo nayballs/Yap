@@ -1229,8 +1229,8 @@ pub fn last_said_transcript() -> Option<String> {
     let remembered = dictated.as_ref().and(said).or(dictated);
     remembered
         .or_else(|| {
-            let raw = crate::history::latest_dictation_raw()?;
-            Some(crate::pipeline::as_said_text(&raw, &crate::config::load(), None))
+            let raw = crate::dictation::history::latest_dictation_raw()?;
+            Some(crate::dictation::pipeline::as_said_text(&raw, &crate::config::load(), None))
         })
         .filter(|t| !t.trim().is_empty())
 }
@@ -1317,7 +1317,7 @@ pub fn forget_last_transcript() {
 pub fn last_transcript() -> Option<String> {
     let remembered = last_dictation().clone();
     remembered
-        .or_else(crate::history::latest_dictation)
+        .or_else(crate::dictation::history::latest_dictation)
         .filter(|t| !t.trim().is_empty())
 }
 

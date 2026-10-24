@@ -1727,7 +1727,7 @@ fn pipeline_busy(app: &AppHandle) -> bool {
     if crate::e2e::active() && E2E_BUSY.load(Ordering::SeqCst) {
         return true;
     }
-    if crate::pipeline::dictation_state().1 {
+    if crate::dictation::pipeline::dictation_state().1 {
         return true;
     }
     app.try_state::<crate::AppState>()

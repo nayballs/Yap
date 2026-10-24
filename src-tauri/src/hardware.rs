@@ -22,7 +22,7 @@
 use serde::Serialize;
 
 use crate::gpu::Gpu;
-use crate::stt::Device;
+use crate::dictation::stt::Device;
 
 /// The PC as the picks see it.
 #[derive(Debug, Clone, PartialEq, Eq)]

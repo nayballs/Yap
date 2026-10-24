@@ -45,7 +45,7 @@ use std::time::{Duration, Instant};
 
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 
-use crate::pipeline::{resample_linear, TARGET_SAMPLE_RATE};
+use crate::dictation::pipeline::{resample_linear, TARGET_SAMPLE_RATE};
 
 /// How long the mic stays open after a dictation (or a mic test) unless
 /// something needs it: a follow-up within it starts instantly, with the
@@ -636,7 +636,7 @@ impl Owner {
                     }
                     if !live {
                         delivered += samples.len() as u64;
-                        if live_now(crate::mic_watch::has_sound(&samples), delivered) {
+                        if live_now(crate::dictation::mic_watch::has_sound(&samples), delivered) {
                             live = true;
                             state.live.store(true, Ordering::SeqCst);
                             let ms = asked.elapsed().as_millis() as u64;
@@ -962,7 +962,7 @@ mod tests {
                                 *f = Some((ms, ms.saturating_sub(carried as u64)));
                             }
                             let mut s = s2.lock().unwrap();
-                            if s.is_none() && crate::mic_watch::has_sound(data) {
+                            if s.is_none() && crate::dictation::mic_watch::has_sound(data) {
                                 *s = Some(ms);
                             }
                         },

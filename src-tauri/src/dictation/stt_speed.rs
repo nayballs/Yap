@@ -74,12 +74,12 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, Manager};
 
-use crate::stt::{self, Device, SttAdapter};
+use crate::dictation::stt::{self, Device, SttAdapter};
 
 /// The clip every model is timed on: 16 kHz mono 16-bit PCM, ~36 s of
 /// Kokoro's af_bella (Apache-2.0) reading [`PASSAGE`], a pause between
 /// sentences (made by the `--ignored` `make_clip` test below).
-const CLIP: &[u8] = include_bytes!("../assets/stt-speed-clip.wav");
+const CLIP: &[u8] = include_bytes!("../../assets/stt-speed-clip.wav");
 /// What the clip says, sentence by sentence (fictional people). The first
 /// is the short length, the first three the typical one.
 /// (`yap.exe bench` scores each transcript's words against it.)
@@ -345,7 +345,7 @@ pub fn short_share_of(secs: &[f32], boundary: f32) -> f64 {
 /// [`short_share_of`] this person's latest 200 dictations (history; none in
 /// a test run's first moments).
 fn short_share(boundary: f32) -> f64 {
-    short_share_of(&crate::history::recent_dictation_secs(200), boundary)
+    short_share_of(&crate::dictation::history::recent_dictation_secs(200), boundary)
 }
 
 /// The device to run on: the graphics card, unless the processor is
@@ -384,7 +384,7 @@ fn fits(m: &Measured, model_print: &str, pc_print: &str) -> bool {
 /// Where each of [`LENGTHS`] ends in `audio` (16 kHz): at the quietest
 /// 20 ms near its length, the whole clip for the last.
 pub fn cuts(audio: &[f32]) -> Vec<usize> {
-    let per_ms = (crate::pipeline::TARGET_SAMPLE_RATE / 1000) as usize;
+    let per_ms = (crate::dictation::pipeline::TARGET_SAMPLE_RATE / 1000) as usize;
     LENGTHS
         .iter()
         .map(|&(_, ms)| {
@@ -395,7 +395,7 @@ pub fn cuts(audio: &[f32]) -> Vec<usize> {
             let slack = CUT_SLACK_MS as usize * per_ms;
             let from = at.saturating_sub(slack).min(audio.len());
             let to = (at + slack).min(audio.len());
-            crate::media::quietest_frame(audio, from, to, crate::pipeline::TARGET_SAMPLE_RATE as usize).0.clamp(1, audio.len())
+            crate::dictation::media::quietest_frame(audio, from, to, crate::dictation::pipeline::TARGET_SAMPLE_RATE as usize).0.clamp(1, audio.len())
         })
         .collect()
 }
@@ -404,12 +404,12 @@ pub fn cuts(audio: &[f32]) -> Vec<usize> {
 /// words).
 pub(crate) fn padded(piece: &[f32], pad_ms: u64) -> Vec<f32> {
     let mut out = piece.to_vec();
-    out.resize(piece.len() + pad_ms as usize * (crate::pipeline::TARGET_SAMPLE_RATE / 1000) as usize, 0.0);
+    out.resize(piece.len() + pad_ms as usize * (crate::dictation::pipeline::TARGET_SAMPLE_RATE / 1000) as usize, 0.0);
     out
 }
 
 fn ms_of(samples: usize) -> u64 {
-    samples as u64 * 1000 / u64::from(crate::pipeline::TARGET_SAMPLE_RATE)
+    samples as u64 * 1000 / u64::from(crate::dictation::pipeline::TARGET_SAMPLE_RATE)
 }
 
 // ---- state ------------------------------------------------------------------------
@@ -635,7 +635,7 @@ pub fn clip() -> Vec<f32> {
     } else {
         pcm.samples
     };
-    crate::pipeline::resample_linear(&mono, pcm.sample_rate, crate::pipeline::TARGET_SAMPLE_RATE)
+    crate::dictation::pipeline::resample_linear(&mono, pcm.sample_rate, crate::dictation::pipeline::TARGET_SAMPLE_RATE)
 }
 
 /// Why a measurement stopped short.
@@ -1402,7 +1402,7 @@ mod tests {
         let mut audio = edge.clone();
         for (i, sentence) in PASSAGE.iter().enumerate() {
             let pcm = voice.synthesize(sentence).unwrap();
-            audio.extend(crate::pipeline::resample_linear(&pcm.samples, pcm.sample_rate, 16_000));
+            audio.extend(crate::dictation::pipeline::resample_linear(&pcm.samples, pcm.sample_rate, 16_000));
             audio.extend(if i + 1 < PASSAGE.len() { &pause } else { &edge });
             println!("after sentence {}: {:.2} s", i + 1, audio.len() as f32 / 16_000.0);
         }

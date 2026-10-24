@@ -1093,7 +1093,7 @@ pub fn after_paste(app: &AppHandle, pasted: &str, target: Option<isize>, enabled
         return;
     }
     let gen = WATCHES.fetch_add(1, Ordering::SeqCst) + 1;
-    let dictations = crate::pipeline::dictation_state().0;
+    let dictations = crate::dictation::pipeline::dictation_state().0;
     let app = app.clone();
     let spawned = std::thread::Builder::new()
         .name("learn-watch".into())
@@ -1104,7 +1104,7 @@ pub fn after_paste(app: &AppHandle, pasted: &str, target: Option<isize>, enabled
 }
 
 fn watch(app: &AppHandle, pasted: &str, hwnd: isize, gen: u64, dictations: u64) {
-    let superseded = || WATCHES.load(Ordering::SeqCst) != gen || crate::pipeline::dictation_state().0 != dictations;
+    let superseded = || WATCHES.load(Ordering::SeqCst) != gen || crate::dictation::pipeline::dictation_state().0 != dictations;
     // Let the paste land.
     std::thread::sleep(Duration::from_millis(350));
     let Some(field) = crate::pasting::selection::WatchedField::open(hwnd) else {

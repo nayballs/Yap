@@ -30,7 +30,7 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 
 use super::record;
-use crate::transforms::{self, Transform};
+use crate::dictation::transforms::{self, Transform};
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]

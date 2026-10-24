@@ -16,9 +16,9 @@ use tauri::{AppHandle, Emitter};
 
 use crate::pasting::app_kind::AppKind;
 use crate::config::{self, YapConfig};
-use crate::gesture::{Action, Gesture};
-use crate::mic_watch::{DeadMicWatch, MicSilent, MicStep, MicTally};
-use crate::stt::{self, SttAdapter, SttError};
+use crate::dictation::gesture::{Action, Gesture};
+use crate::dictation::mic_watch::{DeadMicWatch, MicSilent, MicStep, MicTally};
+use crate::dictation::stt::{self, SttAdapter, SttError};
 
 pub(crate) const TARGET_SAMPLE_RATE: u32 = 16_000;
 
@@ -457,7 +457,7 @@ const PAUSE_POLL_MS: u64 = 50;
 struct PauseSlot {
     /// The recording it's for (`rec_session`).
     session: u64,
-    pause: crate::pause::Pause,
+    pause: crate::dictation::pause::Pause,
 }
 
 /// The speech model loading in the background at startup (`Pipeline::start`,
@@ -731,7 +731,7 @@ struct PendingStart {
     session: u64,
     /// `mute::begin`'s token and plan.
     token: u64,
-    plan: crate::mute::Plan,
+    plan: crate::dictation::mute::Plan,
 }
 
 /// The push-to-talk gesture (`gesture.rs`) and which hotkey its recording
@@ -760,7 +760,7 @@ struct Shared {
     /// mic it's the first audio the new stream delivers.
     gather: AtomicBool,
     /// The dictation's microphone, opened on demand (`mic.rs`).
-    mic: crate::mic::Mic,
+    mic: crate::dictation::mic::Mic,
     /// The recording's hold on the mic (`Mic::hold`), released after its
     /// stop chime.
     mic_lease: AtomicU64,
@@ -891,10 +891,10 @@ impl Shared {
     }
 
     /// What happens to other apps' sound while dictating (`mute.rs`).
-    fn other_apps(&self) -> crate::mute::Plan {
+    fn other_apps(&self) -> crate::dictation::mute::Plan {
         self.config
             .read()
-            .map(|c| crate::mute::Plan { quiet: c.quiet_other_apps, pause: c.pause_media })
+            .map(|c| crate::dictation::mute::Plan { quiet: c.quiet_other_apps, pause: c.pause_media })
             .unwrap_or_default()
     }
 
@@ -905,12 +905,12 @@ impl Shared {
     fn stop_chime_then_restore(self: &Arc<Self>, token: u64) {
         let shared = Arc::clone(self);
         let lease = self.mic_lease.load(Ordering::SeqCst);
-        let restore: crate::sound::Played = Box::new(move || {
+        let restore: crate::dictation::sound::Played = Box::new(move || {
             let closed_bluetooth = shared.mic.release(lease);
-            crate::mute::after_stop_chime_mic(token, closed_bluetooth);
+            crate::dictation::mute::after_stop_chime_mic(token, closed_bluetooth);
         });
         if self.sound_enabled() {
-            crate::sound::play_stop(self.audio_feedback_volume(), self.output_device().as_deref(), Some(restore));
+            crate::dictation::sound::play_stop(self.audio_feedback_volume(), self.output_device().as_deref(), Some(restore));
         } else {
             std::thread::spawn(restore);
         }
@@ -923,7 +923,7 @@ impl Shared {
         let lease = self.mic_lease.load(Ordering::SeqCst);
         std::thread::spawn(move || {
             let closed_bluetooth = shared.mic.release(lease);
-            crate::mute::after_stop_chime_mic(token, closed_bluetooth);
+            crate::dictation::mute::after_stop_chime_mic(token, closed_bluetooth);
         });
     }
 
@@ -955,10 +955,10 @@ impl Shared {
             }
         }
         let token = start.token;
-        let quiet: Option<crate::sound::Played> =
-            start.plan.any().then(|| Box::new(move || crate::mute::after_start_chime(token)) as crate::sound::Played);
+        let quiet: Option<crate::dictation::sound::Played> =
+            start.plan.any().then(|| Box::new(move || crate::dictation::mute::after_start_chime(token)) as crate::dictation::sound::Played);
         if self.sound_enabled() {
-            crate::sound::play_start(self.audio_feedback_volume(), self.output_device().as_deref(), quiet);
+            crate::dictation::sound::play_start(self.audio_feedback_volume(), self.output_device().as_deref(), quiet);
         } else if let Some(quiet) = quiet {
             std::thread::spawn(quiet);
         }
@@ -999,7 +999,7 @@ impl Shared {
         }
         dictation_ended();
         self.drop_pending_start();
-        let token = crate::mute::end();
+        let token = crate::dictation::mute::end();
         self.release_now(token);
         if let Ok(mut buf) = self.buffer.lock() {
             buf.clear();
@@ -1017,7 +1017,7 @@ impl Shared {
         }
         // Windows' privacy switches, if they're why: that's what to fix
         // (unless the recording's start already said so).
-        if let Some(blocked) = crate::mic_privacy::blocked() {
+        if let Some(blocked) = crate::dictation::mic_privacy::blocked() {
             tracing::warn!(?blocked, "Can't record — Windows' privacy settings block the microphone");
             if !self.mic_dead.swap(true, Ordering::SeqCst) {
                 self.say_mic_blocked(blocked);
@@ -1168,7 +1168,7 @@ impl Shared {
             }
             return;
         }
-        let now = at.unwrap_or_else(crate::gesture::now_ms);
+        let now = at.unwrap_or_else(crate::dictation::gesture::now_ms);
         let recording = self.recording.load(Ordering::SeqCst);
         let step = if pressed {
             g.machine.press(now, recording)
@@ -1194,7 +1194,7 @@ impl Shared {
     /// The tap timer: a tap whose second press didn't come is thrown away.
     fn gesture_tick(self: &Arc<Self>) {
         let mut g = self.gesture.lock().unwrap_or_else(|p| p.into_inner());
-        let step = g.machine.tick(crate::gesture::now_ms(), self.recording.load(Ordering::SeqCst));
+        let step = g.machine.tick(crate::dictation::gesture::now_ms(), self.recording.load(Ordering::SeqCst));
         let edit = g.edit;
         self.apply_gesture(&mut g, step, edit);
     }
@@ -1202,7 +1202,7 @@ impl Shared {
     /// Do what a gesture step says (with the gesture lock held, so a key
     /// event and the tap timer never act at once). `edit`: the hotkey that
     /// starts a recording here.
-    fn apply_gesture(self: &Arc<Self>, g: &mut GestureSlot, step: crate::gesture::Step, edit: bool) {
+    fn apply_gesture(self: &Arc<Self>, g: &mut GestureSlot, step: crate::dictation::gesture::Step, edit: bool) {
         match step.action {
             Action::Start => {
                 g.edit = edit;
@@ -1228,7 +1228,7 @@ impl Shared {
             Action::Lock => {
                 tracing::info!("Push-to-talk: double-tap, recording hands-free");
                 let _ = self.app.emit("yap-dictation-locked", true);
-                std::thread::spawn(crate::coaching::hands_free_used);
+                std::thread::spawn(crate::dictation::coaching::hands_free_used);
             }
             Action::None => {}
         }
@@ -1244,7 +1244,7 @@ impl Shared {
         if let (Some(hint), false, false) = (step.hint, g.edit, g.assistant) {
             let hotkey = self.config.read().map(|c| c.hotkey.clone()).unwrap_or_default();
             let app = self.app.clone();
-            std::thread::spawn(move || crate::coaching::offer(&app, hint, &hotkey));
+            std::thread::spawn(move || crate::dictation::coaching::offer(&app, hint, &hotkey));
         }
     }
 
@@ -1317,7 +1317,7 @@ impl Shared {
         // real audio (`fire_pending_start`), so the chime says "speak now"
         // only when Yap hears you.
         let plan = self.other_apps();
-        let token = crate::mute::begin(plan);
+        let token = crate::dictation::mute::begin(plan);
         if let Ok(mut p) = self.pending_start.lock() {
             *p = Some(PendingStart { session, token, plan });
         }
@@ -1342,7 +1342,7 @@ impl Shared {
         // transcribed, as for a dead mic.
         // (Said once: a mic that then fails to open says no more.)
         if !test_feed_on() {
-            if let Some(blocked) = crate::mic_privacy::blocked() {
+            if let Some(blocked) = crate::dictation::mic_privacy::blocked() {
                 tracing::warn!(?blocked, "Recording, but Windows' privacy settings block the microphone");
                 if self.recording.load(Ordering::SeqCst) && !self.mic_dead.swap(true, Ordering::SeqCst) {
                     self.say_mic_blocked(blocked);
@@ -1369,7 +1369,7 @@ impl Shared {
             && self.config.read().map(|c| c.assistant_stop_on_pause).unwrap_or(false);
         let at = if on { self.buffer.lock().map(|b| b.len() as u64).unwrap_or(0) } else { 0 };
         if let Ok(mut p) = self.pause.lock() {
-            *p = on.then(|| PauseSlot { session, pause: crate::pause::Pause::new(at) });
+            *p = on.then(|| PauseSlot { session, pause: crate::dictation::pause::Pause::new(at) });
         }
         on
     }
@@ -1388,7 +1388,7 @@ impl Shared {
     fn spawn_pause_watch(self: &Arc<Self>, session: u64) {
         let shared = Arc::clone(self);
         let spawned = std::thread::Builder::new().name("assistant-pause".into()).spawn(move || {
-            use crate::pause::Verdict;
+            use crate::dictation::pause::Verdict;
             let live = || shared.recording.load(Ordering::SeqCst) && shared.rec_session.load(Ordering::SeqCst) == session;
             let mut cue = false;
             loop {
@@ -1453,9 +1453,9 @@ impl Shared {
     /// "Windows is blocking microphone access for desktop apps": in the
     /// overlay's line (the dead-mic watchdog's place), and as an alert with
     /// **Open settings** (a toast, a bar card or a Windows notification).
-    fn say_mic_blocked(&self, blocked: crate::mic_privacy::Blocked) {
-        let _ = self.app.emit("yap-mic-silent", Some(crate::mic_privacy::mic_silent()));
-        crate::notices::alert::show_soon(&self.app, crate::mic_privacy::alert(blocked));
+    fn say_mic_blocked(&self, blocked: crate::dictation::mic_privacy::Blocked) {
+        let _ = self.app.emit("yap-mic-silent", Some(crate::dictation::mic_privacy::mic_silent()));
+        crate::notices::alert::show_soon(&self.app, crate::dictation::mic_privacy::alert(blocked));
     }
 
     /// Where the dictation starting now goes: the window in front (captured
@@ -1565,7 +1565,7 @@ impl Shared {
                 let mut started = Instant::now();
                 let mut watch = DeadMicWatch::default();
                 loop {
-                    std::thread::sleep(Duration::from_millis(crate::mic_watch::POLL_MS));
+                    std::thread::sleep(Duration::from_millis(crate::dictation::mic_watch::POLL_MS));
                     let live = shared.recording.load(Ordering::SeqCst)
                         && shared.rec_session.load(Ordering::SeqCst) == session;
                     if !live {
@@ -1601,7 +1601,7 @@ impl Shared {
                             if shared.mic_dead.swap(true, Ordering::SeqCst) {
                                 continue;
                             }
-                            match crate::mic_privacy::blocked() {
+                            match crate::dictation::mic_privacy::blocked() {
                                 // Not the mic's fault: Windows' privacy switches.
                                 Some(blocked) => {
                                     tracing::warn!(?blocked, "Dictation mic: silent, and Windows' privacy settings block it");
@@ -1635,8 +1635,8 @@ impl Shared {
     /// the overlay's short form — or, when Windows' privacy switches block
     /// the mic, "Windows is blocking microphone access for desktop apps".
     fn mic_silent(&self) -> MicSilent {
-        if crate::mic_privacy::blocked().is_some() {
-            return crate::mic_privacy::mic_silent();
+        if crate::dictation::mic_privacy::blocked().is_some() {
+            return crate::dictation::mic_privacy::mic_silent();
         }
         let name = self.mic_name.lock().map(|n| n.clone()).unwrap_or_default();
         MicSilent::for_mic(&name)
@@ -1714,7 +1714,7 @@ impl Shared {
         self.drop_pending_start();
         // No stop chime for a cancel: the mic and the other apps' sound go
         // back now.
-        let token = crate::mute::end();
+        let token = crate::dictation::mute::end();
         self.release_now(token);
         let audio = self.buffer.lock().map(|mut b| std::mem::take(&mut *b)).unwrap_or_default();
         // The edit-mode selection/state goes with it (into the kept
@@ -1837,7 +1837,7 @@ impl Shared {
         // Stopped before the mic was on: no start chime after the stop's.
         self.drop_pending_start();
         // The other apps' sound comes back once the stop chime has played.
-        let quiet_token = crate::mute::end();
+        let quiet_token = crate::dictation::mute::end();
         // The dead-mic watchdog reported this recording and it never heard a
         // thing: it's all digital silence, nothing to transcribe (and Whisper
         // can make words up from silence). End on the reason instead.
@@ -1907,7 +1907,7 @@ impl Shared {
             "" => "Yap",
             n => n,
         };
-        crate::agent_detect::detect_agent_name(transcript, name)
+        crate::dictation::agent_detect::detect_agent_name(transcript, name)
     }
 
     /// Edit/rewrite-mode finish: apply the spoken `instruction` to the selection
@@ -2141,7 +2141,7 @@ impl Shared {
         // 1. Decode off the async runtime (long files take seconds).
         let decode_path = std::path::PathBuf::from(&path);
         let decoded =
-            tokio::task::spawn_blocking(move || crate::media::decode_to_16k_mono(&decode_path))
+            tokio::task::spawn_blocking(move || crate::dictation::media::decode_to_16k_mono(&decode_path))
                 .await;
         let samples = match decoded {
             Ok(Ok(s)) => s,
@@ -2157,7 +2157,7 @@ impl Shared {
 
         // 3. ~60 s chunks, each cut at the quietest point of its last 5 s so a
         //    boundary doesn't slice through a word (media::chunk_ranges).
-        let ranges = crate::media::chunk_ranges(samples.len(), 16_000, 60, 5, &samples);
+        let ranges = crate::dictation::media::chunk_ranges(samples.len(), 16_000, 60, 5, &samples);
         let total = ranges.len();
         let mut pieces: Vec<String> = Vec::with_capacity(total);
 
@@ -2235,7 +2235,7 @@ impl Shared {
             .map(|c| (c.history_enabled, c.model_size.clone()))
             .unwrap_or((false, String::new()));
         if history_enabled {
-            crate::history::record(&raw, &text, &model, &file_name);
+            crate::dictation::history::record(&raw, &text, &model, &file_name);
             let _ = self.app.emit("yap-history-changed", ());
         }
         let _ = self.app.emit("yap-transcript", text.clone());
@@ -2577,14 +2577,14 @@ impl Shared {
                     crate::pasting::text_injector::app_name_for(target).unwrap_or_default();
                 // With its words as said when cleanup changed them (Home's
                 // "AI edited · N changes" and "Paste what I said").
-                let ts = crate::history::record_dictation(crate::history::Dictation {
+                let ts = crate::dictation::history::record_dictation(crate::dictation::history::Dictation {
                     raw: &raw,
                     text: corrected.trim(),
                     said: said.as_deref(),
                     model: &model,
                     app: &app_name,
                     audio: audio.as_deref(),
-                    status: not_pasted.map(|_| crate::history::NOT_PASTED),
+                    status: not_pasted.map(|_| crate::dictation::history::NOT_PASTED),
                     error: not_pasted,
                 });
                 // The last paste is this entry (Home can swap it there).
@@ -2593,14 +2593,14 @@ impl Shared {
                 }
                 // Its audio written (Home lists it with Run again).
                 if let Some(id) = &audio {
-                    crate::recent_audio::finished(id);
+                    crate::dictation::recent_audio::finished(id);
                 }
                 // After the save: `yap-transcript` went out
                 // before the paste, so a view that re-pulled
                 // history on it could miss this dictation.
                 let _ = self.app.emit("yap-history-changed", ());
             } else if let Some(id) = audio {
-                crate::recent_audio::discard(&id);
+                crate::dictation::recent_audio::discard(&id);
             }
         } else if voice_enter {
             // Only "press enter" was said: nothing to paste
@@ -2653,9 +2653,9 @@ impl Shared {
                 .unwrap_or((false, String::new()));
             if history_enabled {
                 let audio = self.audio_id.lock().ok().and_then(|mut a| a.take());
-                crate::history::record_with(&raw, &text, &model, "yap.exe", audio.as_deref(), None, None);
+                crate::dictation::history::record_with(&raw, &text, &model, "yap.exe", audio.as_deref(), None, None);
                 if let Some(id) = audio {
-                    crate::recent_audio::finished(&id);
+                    crate::dictation::recent_audio::finished(&id);
                 }
                 let _ = self.app.emit("yap-history-changed", ());
             }
@@ -2718,7 +2718,7 @@ impl Shared {
         // not a rewrite's instruction or a question for the assistant.
         // Written off this thread; its history entry takes it.
         if !self.edit_mode.load(Ordering::SeqCst) && !self.assistant.load(Ordering::SeqCst) {
-            let id = self.config.read().ok().and_then(|c| crate::recent_audio::keep(&audio, &c));
+            let id = self.config.read().ok().and_then(|c| crate::dictation::recent_audio::keep(&audio, &c));
             if let Ok(mut a) = self.audio_id.lock() {
                 *a = id;
             }
@@ -2931,7 +2931,7 @@ impl Shared {
             .map(|c| (c.history_enabled, c.model_size.clone()))
             .unwrap_or((false, String::new()));
         if !history {
-            crate::recent_audio::discard(&id);
+            crate::dictation::recent_audio::discard(&id);
             return;
         }
         let target = match self.target_hwnd.load(Ordering::Relaxed) {
@@ -2939,8 +2939,8 @@ impl Shared {
             h => Some(h),
         };
         let app_name = crate::pasting::text_injector::app_name_for(target).unwrap_or_default();
-        crate::history::record_failed(None, &model, &app_name, &id, why);
-        crate::recent_audio::finished(&id);
+        crate::dictation::history::record_failed(None, &model, &app_name, &id, why);
+        crate::dictation::recent_audio::finished(&id);
         tracing::info!(id = %id, "A dictation that failed is in history with its audio (Run again)");
         let _ = self.app.emit("yap-history-changed", ());
     }
@@ -3004,13 +3004,13 @@ impl Shared {
     /// heard): deleted now.
     fn drop_kept_audio(&self) {
         if let Some(id) = self.audio_id.lock().ok().and_then(|mut a| a.take()) {
-            crate::recent_audio::discard(&id);
+            crate::dictation::recent_audio::discard(&id);
         }
     }
 }
 
 /// The mic's audio and news (`mic.rs`) into the pipeline.
-impl crate::mic::Sink for Shared {
+impl crate::dictation::mic::Sink for Shared {
     fn audio(&self, samples: &[f32]) {
         // The e2e suite's "muted mic", and the robot's WAV playing in the
         // mic's place (debug builds only).
@@ -3212,7 +3212,7 @@ impl Pipeline {
             buffer: Mutex::new(Vec::new()),
             preroll: Mutex::new(VecDeque::with_capacity(PREROLL_SAMPLES + 1)),
             gather: AtomicBool::new(false),
-            mic: crate::mic::Mic::start(me.clone() as Weak<dyn crate::mic::Sink>),
+            mic: crate::dictation::mic::Mic::start(me.clone() as Weak<dyn crate::dictation::mic::Sink>),
             mic_lease: AtomicU64::new(0),
             mic_failed_lease: AtomicU64::new(0),
             amp: Mutex::new(AmpMeter::default()),
@@ -3252,7 +3252,7 @@ impl Pipeline {
         shared.mic.settings(cfg.keep_mic_ready, cfg.input_device.clone());
         // If Windows' privacy switches keep desktop apps off the mic, the log
         // says so now (a recording says it to the person).
-        if let Some(blocked) = crate::mic_privacy::blocked() {
+        if let Some(blocked) = crate::dictation::mic_privacy::blocked() {
             tracing::warn!(?blocked, "Windows' privacy settings block the microphone for desktop apps");
         }
 
@@ -3393,7 +3393,7 @@ impl Pipeline {
             *g = Some(engine);
         }
         let _ = self.shared.app.emit("yap-state", "idle");
-        crate::stt_speed::schedule(&self.shared.app, crate::stt_speed::AFTER_CHANGE);
+        crate::dictation::stt_speed::schedule(&self.shared.app, crate::dictation::stt_speed::AFTER_CHANGE);
     }
 
     /// The same model on another device (`stt_speed`: a new pick, or "Runs
@@ -3482,7 +3482,7 @@ impl Pipeline {
     /// The mic's state (`mic.rs`): open, live, Bluetooth, how the last open
     /// went — robot mode's `realtest_mic`.
     #[cfg(debug_assertions)]
-    pub(crate) fn mic_status(&self) -> crate::mic::Status {
+    pub(crate) fn mic_status(&self) -> crate::dictation::mic::Status {
         self.shared.mic.status()
     }
 
@@ -3899,7 +3899,7 @@ fn stream_partials(shared: Arc<Shared>, language: Option<String>, translate: boo
         Advance { commit: String, tail: String, cut: usize },
     }
 
-    let mut session = crate::partials::PartialSession::default();
+    let mut session = crate::dictation::partials::PartialSession::default();
     let mut last_emitted = String::new();
     let mut interval = BASE_INTERVAL;
     loop {
@@ -3920,10 +3920,10 @@ fn stream_partials(shared: Arc<Shared>, language: Option<String>, translate: boo
                 continue;
             }
             match session.plan(len, &buf) {
-                crate::partials::TickPlan::Normal => {
+                crate::dictation::partials::TickPlan::Normal => {
                     (buf[session.window_start..len].to_vec(), None, 0usize, len)
                 }
-                crate::partials::TickPlan::Advance { cut } => (
+                crate::dictation::partials::TickPlan::Advance { cut } => (
                     buf[session.window_start..len].to_vec(),
                     Some(cut - session.window_start),
                     cut,

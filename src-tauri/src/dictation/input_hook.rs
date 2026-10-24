@@ -122,13 +122,13 @@ static SNIP_BINDING: KeyBinding = KeyBinding::new();
 /// Saved transforms' shortcuts (`transforms.rs`): a slot each, in the
 /// list's order (`transforms::assign`); only the press is used. Beside the
 /// seven fixed bindings, always giving way to them.
-static TRANSFORM_BINDINGS: [KeyBinding; crate::transforms::MAX] = [const { KeyBinding::new() }; crate::transforms::MAX];
+static TRANSFORM_BINDINGS: [KeyBinding; crate::dictation::transforms::MAX] = [const { KeyBinding::new() }; crate::dictation::transforms::MAX];
 /// Which transform each slot runs (its id). Read by the forwarder thread,
 /// never the hook callback.
 static TRANSFORM_IDS: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
 /// The slots' events (pressed, released). The forwarder turns a press into
 /// `transform-key-pressed` with its slot; releases go nowhere.
-const TRANSFORM_EVENTS: [(&str, &str); crate::transforms::MAX] = [
+const TRANSFORM_EVENTS: [(&str, &str); crate::dictation::transforms::MAX] = [
     ("transform-key-0", "transform-key-0-up"),
     ("transform-key-1", "transform-key-1-up"),
     ("transform-key-2", "transform-key-2-up"),
@@ -355,10 +355,10 @@ fn transform_ids() -> std::sync::MutexGuard<'static, Vec<String>> {
 /// fire with one of the seven fixed shortcuts, or an earlier transform's,
 /// is left unbound and the log says why (Settings never saves one).
 pub fn configure_transforms_from(cfg: &crate::config::YapConfig) {
-    let list = crate::transforms::list(cfg);
-    let fixed = crate::transforms::fixed_shortcuts(cfg);
+    let list = crate::dictation::transforms::list(cfg);
+    let fixed = crate::dictation::transforms::fixed_shortcuts(cfg);
     let fixed: Vec<(&str, &str)> = fixed.iter().map(|(name, spec)| (*name, spec.as_str())).collect();
-    let slots = crate::transforms::assign(&fixed, &list);
+    let slots = crate::dictation::transforms::assign(&fixed, &list);
     let mut ids = transform_ids();
     ids.clear();
     let mut bound = 0usize;
@@ -812,14 +812,14 @@ fn handle_binding_event(
             // Only emit on first press (not repeats)
             if !binding.active.swap(true, Ordering::Relaxed) {
                 info!("Input hook: queueing {}", event_pressed);
-                let _ = tx.send((event_pressed, crate::gesture::now_ms()));
+                let _ = tx.send((event_pressed, crate::dictation::gesture::now_ms()));
             }
         }
         true
     } else if binding.active.swap(false, Ordering::Relaxed) {
         if let Some(tx) = EVENT_TX.get() {
             info!("Input hook: queueing {}", event_released);
-            let _ = tx.send((event_released, crate::gesture::now_ms()));
+            let _ = tx.send((event_released, crate::dictation::gesture::now_ms()));
         }
         true
     } else {
@@ -1355,7 +1355,7 @@ mod tests {
     /// (The one test that sets the transform slots: tests run at once.)
     #[test]
     fn transform_shortcuts_get_slots_in_list_order_giving_way_to_the_fixed_seven() {
-        use crate::transforms::Transform;
+        use crate::dictation::transforms::Transform;
         let mut cfg = crate::config::YapConfig::default();
         let key = |id: &str, hotkey: &str| {
             let mut t = cfg.transforms.iter().find(|t| t.id == id).cloned().unwrap();
@@ -1391,7 +1391,7 @@ mod tests {
         assert_eq!(transform_slot("transform-key-2"), Some(2));
         assert_eq!(transform_slot("transform-key-2-up"), None);
         assert_eq!(transform_slot("edit-key-pressed"), None);
-        assert_eq!(TRANSFORM_EVENTS.len(), crate::transforms::MAX);
+        assert_eq!(TRANSFORM_EVENTS.len(), crate::dictation::transforms::MAX);
         // Nothing listed: every slot unbound.
         cfg.transforms.clear();
         configure_transforms_from(&cfg);

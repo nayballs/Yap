@@ -46,7 +46,7 @@ use std::sync::Mutex;
 
 use serde::{Deserialize, Serialize};
 
-use crate::media_pause::{self, Paused};
+use crate::dictation::media_pause::{self, Paused};
 use crate::realtest::OtherApps;
 
 /// What Yap does to other apps while you dictate (from Settings).

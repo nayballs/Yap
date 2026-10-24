@@ -51,7 +51,7 @@ use serde_json::{json, Value};
 use tauri::AppHandle;
 
 use crate::notes::{Note, TranscriptSegment};
-use crate::stt::TimedText;
+use crate::dictation::stt::TimedText;
 
 /// The voice of the person using Yap (the mic).
 pub const YOU: &str = "you";

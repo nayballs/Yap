@@ -155,7 +155,7 @@ pub fn snip_failed(app: &AppHandle, why: &str) {
 /// An alert's button (the toast's, the bar card's, the notification's).
 pub fn act(app: &AppHandle, action: &str) {
     match action {
-        OPEN_MIC_SETTINGS => open_uri(app, crate::mic_privacy::SETTINGS_URI),
+        OPEN_MIC_SETTINGS => open_uri(app, crate::dictation::mic_privacy::SETTINGS_URI),
         STOP_ASKING_CALLS => crate::calls::meeting_detect::set_detection(app, false),
         crate::meetings::meeting_audio::RECOVER_ACTION => crate::meetings::meeting_audio::recover_all(app),
         ASK_ABOUT_CALLS => crate::calls::meeting_detect::set_detection(app, true),
@@ -250,7 +250,7 @@ mod tests {
     #[cfg(windows)]
     #[test]
     fn the_notification_carries_the_button() {
-        let a = crate::mic_privacy::alert(crate::mic_privacy::Blocked::DesktopApps);
+        let a = crate::dictation::mic_privacy::alert(crate::dictation::mic_privacy::Blocked::DesktopApps);
         let xml = native::xml(&a, "");
         assert!(xml.contains("arguments=\"openMicSettings\""), "{xml}");
         assert!(xml.contains("content=\"Open settings\""), "{xml}");

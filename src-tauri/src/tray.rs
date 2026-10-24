@@ -25,7 +25,7 @@
 use std::sync::Mutex;
 
 use crate::config;
-use crate::stt;
+use crate::dictation::stt;
 use crate::AppState;
 use tauri::image::Image;
 use tauri::menu::{CheckMenuItem, IsMenuItem, Menu, MenuItem, PredefinedMenuItem, Submenu};
@@ -255,7 +255,7 @@ fn build_menu(app: &AppHandle, state: &str) -> tauri::Result<Menu<Wry>> {
     // Saved transforms (transforms.rs): the selection in the app you were
     // in — or your last dictation there — polished, translated…
     let transforms = Submenu::with_id(app, "transforms_submenu", "Transforms", true)?;
-    for t in crate::transforms::list(&config::load()) {
+    for t in crate::dictation::transforms::list(&config::load()) {
         transforms.append(&MenuItem::with_id(app, format!("transform:{}", t.id), t.name(), true, None::<&str>)?)?;
     }
     let (sep_update, sep_models, sep_quit) = (sep()?, sep()?, sep()?);
@@ -352,7 +352,7 @@ fn on_menu_event(app: &AppHandle, id: &str) {
         // you were in is brought back first.
         other if other.starts_with("transform:") => {
             if let Some(id) = other.strip_prefix("transform:") {
-                crate::transforms::run_soon(app, id, crate::transforms::Origin::Tray);
+                crate::dictation::transforms::run_soon(app, id, crate::dictation::transforms::Origin::Tray);
             }
         }
         other if other.starts_with("meeting_record:") => {
@@ -399,7 +399,7 @@ fn idle_menu_key() -> String {
         .map(|(id, label)| format!("{id}:{label}"))
         .unwrap_or_default();
     let cfg = config::load();
-    let transforms: Vec<String> = crate::transforms::list(&cfg).iter().map(|t| format!("{}={}", t.id, t.name())).collect();
+    let transforms: Vec<String> = crate::dictation::transforms::list(&cfg).iter().map(|t| format!("{}={}", t.id, t.name())).collect();
     format!(
         "{}|{}|{}|{}|{}|{}|{}",
         cfg.model_size,

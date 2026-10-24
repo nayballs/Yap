@@ -39,8 +39,8 @@ use std::time::{Duration, Instant};
 use serde::Serialize;
 
 use crate::privacy::net::Recorded as _;
-use crate::stt::{self, Device};
-use crate::stt_speed;
+use crate::dictation::stt::{self, Device};
+use crate::dictation::stt_speed;
 
 pub use machine::Hardware;
 
@@ -362,7 +362,7 @@ pub fn cut_points(audio: &[f32], lengths_ms: &[u64]) -> Vec<usize> {
             let slack = 1_500 * per_ms;
             let from = at.saturating_sub(slack);
             let to = (at + slack).min(audio.len());
-            crate::media::quietest_frame(audio, from, to, 16_000).0.clamp(1, audio.len())
+            crate::dictation::media::quietest_frame(audio, from, to, 16_000).0.clamp(1, audio.len())
         })
         .collect()
 }

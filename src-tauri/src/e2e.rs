@@ -177,7 +177,7 @@ pub fn spawn_meeting_audio(
         .map(std::path::PathBuf::from);
     let load = |name: &str| -> Result<Vec<f32>, String> {
         match &dir {
-            Some(d) => crate::media::decode_to_16k_mono(&d.join(name))
+            Some(d) => crate::dictation::media::decode_to_16k_mono(&d.join(name))
                 .map_err(|e| format!("e2e meeting audio {name}: {e}")),
             None => Ok(Vec::new()),
         }
@@ -209,12 +209,12 @@ pub fn spawn_meeting_audio(
                     if let Some((from, to)) = s.dictation {
                         if !dictating && secs >= from && secs < to {
                             tracing::info!(secs, "e2e: a dictation starts");
-                            crate::pipeline::dictation_began();
+                            crate::dictation::pipeline::dictation_began();
                             dictating = true;
                         } else if secs >= to {
                             if dictating {
                                 tracing::info!(secs, "e2e: the dictation ends");
-                                crate::pipeline::dictation_ended();
+                                crate::dictation::pipeline::dictation_ended();
                                 dictating = false;
                             }
                             s.dictation = None;
@@ -256,7 +256,7 @@ pub fn spawn_meeting_audio(
             }
             // Never leave a dictation "recording" behind for the next test.
             if dictating {
-                crate::pipeline::dictation_ended();
+                crate::dictation::pipeline::dictation_ended();
             }
             *script() = Script::default();
         })
@@ -398,7 +398,7 @@ pub fn e2e_dictation_mic(silent: bool) -> Result<(), String> {
         return Err("Only in e2e test mode".to_string());
     }
     tracing::info!(silent, "e2e: dictation mic");
-    crate::pipeline::set_test_silent_mic(silent);
+    crate::dictation::pipeline::set_test_silent_mic(silent);
     Ok(())
 }
 
@@ -408,7 +408,7 @@ pub fn e2e_dictation_mic(silent: bool) -> Result<(), String> {
 /// audio), and the warm window.
 #[cfg(debug_assertions)]
 #[tauri::command]
-pub fn e2e_mic_status(state: tauri::State<'_, crate::AppState>) -> Result<crate::mic::Status, String> {
+pub fn e2e_mic_status(state: tauri::State<'_, crate::AppState>) -> Result<crate::dictation::mic::Status, String> {
     if !active() {
         return Err("Only in e2e test mode".to_string());
     }
@@ -426,7 +426,7 @@ pub fn e2e_mic_status(state: tauri::State<'_, crate::AppState>) -> Result<crate:
 pub async fn e2e_dictate_audio(
     state: tauri::State<'_, crate::AppState>,
     seconds: f32,
-) -> Result<Option<crate::pipeline::Delivered>, String> {
+) -> Result<Option<crate::dictation::pipeline::Delivered>, String> {
     if !active() {
         return Err("Only in e2e test mode".to_string());
     }
@@ -449,7 +449,7 @@ pub fn e2e_crash_next_dictation() -> Result<(), String> {
         return Err("Only in e2e test mode".to_string());
     }
     tracing::info!("e2e: the next dictation crashes on purpose");
-    crate::pipeline::crash_next_dictation();
+    crate::dictation::pipeline::crash_next_dictation();
     Ok(())
 }
 
@@ -521,7 +521,7 @@ fn render(parts: &[Part], noise_db: f32) -> Result<Vec<f32>, String> {
                 out.extend((0..n).map(|i| amp * (i as f32 * TAU * 440.0 / 16_000.0).sin()));
             }
             Part::Quiet { secs } => out.resize(out.len() + (secs.clamp(0.0, 60.0) * 16_000.0) as usize, 0.0),
-            Part::Wav { path } => out.extend(crate::media::decode_to_16k_mono(std::path::Path::new(path)).map_err(|e| format!("{path}: {e}"))?),
+            Part::Wav { path } => out.extend(crate::dictation::media::decode_to_16k_mono(std::path::Path::new(path)).map_err(|e| format!("{path}: {e}"))?),
         }
     }
     // Uniform noise on [-a, a] has an RMS of a/√3.
@@ -550,9 +550,9 @@ fn render(parts: &[Part], noise_db: f32) -> Result<Vec<f32>, String> {
 pub async fn e2e_assistant_audio(
     state: tauri::State<'_, crate::AppState>,
     parts: Vec<Part>,
-    press: Option<crate::pipeline::Press>,
+    press: Option<crate::dictation::pipeline::Press>,
     noise_db: Option<f32>,
-) -> Result<crate::pipeline::AskedAloud, String> {
+) -> Result<crate::dictation::pipeline::AskedAloud, String> {
     if !active() {
         return Err("Only in e2e test mode".to_string());
     }
@@ -564,7 +564,7 @@ pub async fn e2e_assistant_audio(
         let guard = state.pipeline.lock().map_err(|_| "pipeline unavailable")?;
         guard.as_ref().ok_or("pipeline not started")?.robot()
     };
-    robot.ask_assistant_audio(samples, press.unwrap_or(crate::pipeline::Press::Toggle)).await
+    robot.ask_assistant_audio(samples, press.unwrap_or(crate::dictation::pipeline::Press::Toggle)).await
 }
 
 /// Test mode only: hand the meeting being recorded transcript segments, as
@@ -588,7 +588,7 @@ pub fn e2e_meeting_feed(
         .into_iter()
         .map(|mut seg| {
             if !seg.dictated {
-                seg.text = crate::pipeline::apply_corrections(&seg.text, &cfg);
+                seg.text = crate::dictation::pipeline::apply_corrections(&seg.text, &cfg);
             }
             seg
         })
