@@ -23,6 +23,7 @@
   import { loadCatalog } from './modelCatalog.svelte.js';
   import { refreshLocal, local, pushRecent } from './chatModels.svelte.js';
   import { chipContextLine } from './localContext.js';
+  import { isKeyed } from './providers.js';
 
   // `quiet`: no pill, just the words (under the Chat composer, as Claude
   // Code shows its model).
@@ -42,7 +43,7 @@
   const NO_TOOLS_SAID = "Its provider says it can't use Yap's note tools: answers come from a plain search of your notes.";
   // A cloud model without note tools is one its provider said can't call them.
   const noToolsLine = $derived(
-    model && ['groq', 'anthropic', 'openai', 'gemini', 'openrouter'].includes(model.provider) ? NO_TOOLS_SAID : NO_TOOLS
+    model && isKeyed(model.provider) ? NO_TOOLS_SAID : NO_TOOLS
   );
   // The on-device model's context ("Context: 8K tokens"), in the tooltip.
   const ctxLine = $derived(model?.provider === 'ondevice' ? chipContextLine(status?.context) : '');

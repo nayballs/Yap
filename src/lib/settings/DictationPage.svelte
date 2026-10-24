@@ -17,6 +17,7 @@
   import LinkRow from '../ui/LinkRow.svelte';
   import SettingsHotkey from './SettingsHotkey.svelte';
   import { fillHotkey, isCopilotKey } from '../hotkeys.js';
+  import { PROVIDER_DESTINATIONS } from '../providers.js';
 
   let { cfg, devices = [], outputs = [], onshowview = null } = $props();
 
@@ -46,20 +47,11 @@
 
   // "Spell names the way they're written on screen" (screen_terms.rs): what
   // goes where, as cleanup is set up now.
-  const CLEANUP_PROVIDERS = {
-    groq: 'Groq',
-    anthropic: 'Anthropic',
-    openai: 'OpenAI',
-    gemini: 'Google Gemini',
-    openrouter: 'OpenRouter',
-    custom: 'your custom endpoint',
-    local: 'your own server',
-  };
   const screenDesc = $derived.by(() => {
     if (!cfg.postProcessEnabled || !cfg.ppProvider || cfg.ppProvider === 'ondevice') {
       return "Names and terms in the window you're dictating into come out spelled as shown";
     }
-    const to = CLEANUP_PROVIDERS[cfg.ppProvider] || cfg.ppProvider;
+    const to = PROVIDER_DESTINATIONS[cfg.ppProvider] || cfg.ppProvider;
     return `Names in the window come out spelled as shown. The ones a dictation seems to contain go to ${to} with it, for cleanup`;
   });
 

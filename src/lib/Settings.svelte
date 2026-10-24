@@ -32,6 +32,22 @@
   import ChatConfig from './ChatConfig.svelte';
   import { PP_CLOUD_MODELS, modelThinks } from './ppModels.js';
   import { PROVIDER_ICONS } from './providerIcons.js';
+  import {
+    PP_PROVIDERS,
+    PROVIDER_MODES,
+    CLOUD_PROVIDER_IDS,
+    CLOUD_TABS,
+    MODEL_HINTS,
+    PROVIDER_LABELS,
+    CLEANUP_PROVIDER_LABELS,
+    modeOf,
+    maskKey,
+    stashCleanupKey,
+    creditCleanupKey,
+    liftScopeKeys,
+    adoptProviderKey,
+    cleanupNeedsKey,
+  } from './providers.js';
   import ModelPicker from './ModelPicker.svelte';
   import EndpointModels from './EndpointModels.svelte';
   import LocalContext from './LocalContext.svelte';
@@ -106,44 +122,12 @@
   // Update state lives in updates.svelte.js (Rust's updates.rs drives it);
   // ControlPanel starts it, About + the attention badge render it.
 
-  // AI cleanup provider presets. Selecting one fills in the base URL; "custom"
-  // leaves it editable. The backend only ever uses ppBaseUrl.
-  // NOTE: `value` ids are persisted in config.json and matched by the backend
-  // ("ondevice" = local_llm::PROVIDER_ONDEVICE) — never change them. Labels are
-  // display-only and safe to reword.
-  const PP_PROVIDERS = [
-    { value: 'ondevice', label: 'Local (on this PC)', baseUrl: null },
-    { value: 'groq', label: 'Groq', baseUrl: 'https://api.groq.com/openai/v1' },
-    // Anthropic's OpenAI-compatible /v1/chat/completions layer.
-    { value: 'anthropic', label: 'Anthropic (Claude)', baseUrl: 'https://api.anthropic.com/v1' },
-    { value: 'openai', label: 'OpenAI', baseUrl: 'https://api.openai.com/v1' },
-    { value: 'gemini', label: 'Google Gemini', baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai/' },
-    { value: 'openrouter', label: 'OpenRouter', baseUrl: 'https://openrouter.ai/api/v1' },
-    { value: 'local', label: 'My own server (Ollama · LM Studio)', baseUrl: 'http://localhost:11434/v1' },
-    { value: 'custom', label: 'Custom', baseUrl: null },
-  ];
-
   // OpenWhispr-style split: a MODE selector (how cleanup runs) + provider pill
   // tabs under "Cloud Providers". Persisted state is still just cfg.ppProvider
-  // (the PP_PROVIDERS ids — the backend contract): ondevice ↔ Local mode,
-  // 'local' (Ollama/LM Studio) ↔ Self-Hosted mode, everything else ↔ a cloud
-  // provider tab. `ppMode`/`cloudProvider` are UI-only derived state.
-  const PP_MODES = [
-    // One set of names on every tab (ScopeProviderConfig.svelte has the same).
-    { value: 'cloud', label: 'Cloud providers', desc: 'Groq, OpenAI, Anthropic, Gemini or OpenRouter, on your own API key', kind: 'cloud' },
-    { value: 'ondevice', label: 'Local', desc: 'A model on this PC. Nothing leaves it', kind: 'local' },
-    { value: 'selfhosted', label: 'Self-hosted', desc: 'Your own server, like Ollama or LM Studio', kind: 'server' },
-  ];
-  const PP_ICON_KIND = Object.fromEntries(PP_MODES.map((o) => [o.value, o.kind]));
-  const CLOUD_PROVIDER_IDS = ['groq', 'anthropic', 'openai', 'gemini', 'openrouter', 'custom'];
-  const CLOUD_TABS = [
-    { value: 'groq', label: 'Groq', icon: PROVIDER_ICONS.groq },
-    { value: 'anthropic', label: 'Anthropic', icon: PROVIDER_ICONS.anthropic, mono: true },
-    { value: 'openai', label: 'OpenAI', icon: PROVIDER_ICONS.openai, mono: true },
-    { value: 'gemini', label: 'Gemini', icon: PROVIDER_ICONS.gemini },
-    { value: 'openrouter', label: 'OpenRouter' },
-    { value: 'custom', label: 'Custom' },
-  ];
+  // (the PP_PROVIDERS ids — the backend contract, providers.js): ondevice ↔
+  // Local mode, 'local' (Ollama/LM Studio) ↔ Self-Hosted mode, everything
+  // else ↔ a cloud provider tab. `ppMode`/`cloudProvider` are UI-only.
+  const PP_ICON_KIND = Object.fromEntries(PROVIDER_MODES.map((o) => [o.value, o.kind]));
   let ppMode = $state('cloud');
   let cloudProvider = $state('groq');
 
@@ -209,8 +193,7 @@
   // Standard-provider API keys are GLOBAL per provider (OpenWhispr keeps one
   // openai_api_key etc. shared by every scope), so this also migrates any key a
   // scope stashed locally up into cfg.ppApiKeys and seeds empty scope keys from
-  // it — a scope pointed at a provider you've already keyed just works.
-  const SHARED_KEY_IDS = new Set(['groq', 'anthropic', 'openai', 'gemini', 'openrouter']);
+  // it (providers.js `liftScopeKeys`).
   function ensureScopes() {
     if (!cfg.llmScopes || typeof cfg.llmScopes !== 'object') cfg.llmScopes = {};
     for (const key of LLM_SCOPE_KEYS) {
@@ -246,23 +229,13 @@
         s.prompt = SCOPE_DEFAULTS.noteFormatting.prompt;
       }
       // migrate non-empty per-scope keys up (never clobber an existing global)
-      for (const [p, k] of Object.entries(s.apiKeys || {})) {
-        if (k && SHARED_KEY_IDS.has(p) && !cfg.ppApiKeys[p]) cfg.ppApiKeys[p] = k;
-      }
-      if (SHARED_KEY_IDS.has(s.provider)) {
-        if (s.apiKey && !cfg.ppApiKeys[s.provider]) cfg.ppApiKeys[s.provider] = s.apiKey;
-        else if (!s.apiKey) s.apiKey = cfg.ppApiKeys[s.provider] || '';
-      }
+      liftScopeKeys(cfg, s);
     }
   }
   // Cleanup on, a cloud provider, no key: the red badge's reason, said on
   // the page with the way to fix it (review #9).
   let keyBox = $state(null);
-  const cleanupNeedsKey = $derived(
-    !!cfg?.postProcessEnabled &&
-      ['groq', 'anthropic', 'openai', 'gemini', 'openrouter'].includes(cfg.ppProvider) &&
-      !(cfg.ppApiKey || '').trim()
-  );
+  const needsKey = $derived(cleanupNeedsKey(cfg));
   function focusKey() {
     keyEditing = true;
     tick().then(() => {
@@ -324,17 +297,6 @@
     },
     { value: 'custom', label: 'Custom', body: null },
   ];
-
-  // Example model ids per provider, shown as the Model field hint.
-  const PP_MODEL_HINTS = {
-    groq: 'e.g. openai/gpt-oss-20b',
-    anthropic: 'e.g. claude-haiku-4-5',
-    openai: 'e.g. gpt-5-mini',
-    gemini: 'e.g. gemini-3.5-flash',
-    openrouter: 'e.g. meta-llama/llama-3.1-8b-instruct',
-    local: 'your Ollama / LM Studio model name (e.g. llama3.1)',
-    custom: 'the model id your endpoint expects',
-  };
 
   // Populate the per-app routing picker (from history) when AI Cleanup opens,
   // …and the providers' live model lists (a day-old one is checked behind),
@@ -550,19 +512,8 @@
     base = copy(stored);
     cfg = { ...FIELD_DEFAULTS, ...stored };
     providerUi();
-    // Per-provider key store: the active key is authoritative for the active
-    // provider (covers keys edited right before the window closed, and migrates
-    // configs from before the store existed). If the store is empty but a key
-    // exists while on a keyless provider (ondevice), credit it to the derived
-    // cloud provider — pre-migration configs had ONE key and it belonged to the
-    // last cloud provider used. Never leave a lone key un-stashed: a later
-    // provider switch would restore '' over it and the debounced save would
-    // persist the wipe.
-    if (!cfg.ppApiKeys || typeof cfg.ppApiKeys !== 'object') cfg.ppApiKeys = {};
-    if (cfg.ppApiKey) {
-      if (cfg.ppProvider !== 'ondevice') cfg.ppApiKeys[cfg.ppProvider] = cfg.ppApiKey;
-      else if (Object.keys(cfg.ppApiKeys).length === 0) cfg.ppApiKeys[cloudProvider] = cfg.ppApiKey;
-    }
+    // Per-provider key store (providers.js): the active key credited to its provider.
+    creditCleanupKey(cfg, cloudProvider);
     if (!Array.isArray(cfg.dictionary)) cfg.dictionary = [];
     if (!Array.isArray(cfg.appRoutes)) cfg.appRoutes = [];
     if (!Array.isArray(cfg.cleanupProfiles)) cfg.cleanupProfiles = [];
@@ -882,14 +833,7 @@
   function onProviderKeySaved(e) {
     const { provider: p, key } = e.detail || {};
     if (!cfg || !p || !key) return;
-    cfg.ppApiKeys = { ...(cfg.ppApiKeys || {}), [p]: key };
-    if (cfg.ppProvider === p) cfg.ppApiKey = key;
-    const chat = cfg.llmScopes?.chat;
-    if (chat && (chat.provider === p || (chat.apiKeys && p in chat.apiKeys))) {
-      if (chat.provider === p) chat.apiKey = key;
-      if (chat.apiKeys && p in chat.apiKeys) chat.apiKeys = { ...chat.apiKeys, [p]: key };
-      chatScopeRev += 1;
-    }
+    if (adoptProviderKey(cfg, p, key)) chatScopeRev += 1;
   }
   $effect(() => {
     window.addEventListener('yap-settings-goto', onSettingsGoto);
@@ -1029,20 +973,10 @@
   const wakeName = $derived((cfg?.agentName || '').trim() || 'Yap');
   // A link row's value: which model a Language Models tab runs on now
   // ("Groq · openai/gpt-oss-20b", "On this PC · Qwen3.5 4B").
-  const PROVIDER_SHORT = {
-    groq: 'Groq',
-    anthropic: 'Anthropic',
-    openai: 'OpenAI',
-    gemini: 'Gemini',
-    openrouter: 'OpenRouter',
-    custom: 'Custom',
-    local: 'Self-hosted',
-    ondevice: 'On this PC',
-  };
   function scopeModelLabel(scope) {
     const sc = cfg?.llmScopes?.[scope];
     if (!sc) return '';
-    const who = PROVIDER_SHORT[sc.provider] || sc.provider || '';
+    const who = PROVIDER_LABELS[sc.provider] || sc.provider || '';
     const model = sc.provider === 'ondevice' ? localLlm.model : sc.model;
     return [who, model].filter(Boolean).join(' · ');
   }
@@ -1103,9 +1037,7 @@
   // provider keeps its own API key in cfg.ppApiKeys — stashed on the way out,
   // restored on the way in (the backend only reads the active cfg.ppApiKey).
   function stashApiKey() {
-    if (cfg.ppProvider !== 'ondevice') {
-      cfg.ppApiKeys = { ...cfg.ppApiKeys, [cfg.ppProvider]: cfg.ppApiKey };
-    }
+    stashCleanupKey(cfg);
   }
   function onModeChange(mode) {
     stashApiKey();
@@ -1137,13 +1069,7 @@
   // with its live list, all carrying the provider's brand icon (OpenWhispr
   // does the same); an unknown saved id stays visible instead of being
   // silently deselected.
-  const maskedKey = $derived(
-    !cfg?.ppApiKey
-      ? ''
-      : cfg.ppApiKey.length > 8
-        ? `${cfg.ppApiKey.slice(0, 3)}…${cfg.ppApiKey.slice(-4)}`
-        : '••••••••'
-  );
+  const maskedKey = $derived(maskKey(cfg?.ppApiKey));
   // Show the "Disable thinking output" toggle only when the chosen cleanup model
   // reasons (or the endpoint is custom/self-hosted, where the model is unknown) —
   // matches OpenWhispr's supportsThinking gating. Local (on-device) curated models
@@ -1372,18 +1298,6 @@
     return () => clearInterval(id);
   });
 
-  // Provider display names for the Prompt Studio Test tab.
-  const PP_PROVIDER_LABELS = {
-    groq: 'Groq',
-    anthropic: 'Anthropic',
-    openai: 'OpenAI',
-    gemini: 'Google Gemini',
-    openrouter: 'OpenRouter',
-    custom: 'Custom endpoint',
-    local: 'Self-hosted',
-    ondevice: 'Local',
-  };
-
   // ---- Smart routing (reusable profiles + per-app rules) ----
   // Apps the user has actually dictated into, pulled from local history so the
   // "Add rule" picker suggests real targets instead of asking them to type
@@ -1583,7 +1497,7 @@
 
   // The Language Models tab's UI state, from the saved provider id.
   function providerUi() {
-    ppMode = cfg.ppProvider === 'ondevice' ? 'ondevice' : cfg.ppProvider === 'local' ? 'selfhosted' : 'cloud';
+    ppMode = modeOf(cfg.ppProvider);
     if (CLOUD_PROVIDER_IDS.includes(cfg.ppProvider)) cloudProvider = cfg.ppProvider;
   }
 
@@ -1656,7 +1570,6 @@
   // Real conditions only: an update waiting, no STT model installed, or AI
   // cleanup pointed at a cloud provider with no key. Settings is always
   // mounted, so this stays live for the ControlPanel's bell too.
-  const KEYED_PROVIDERS = ['groq', 'anthropic', 'openai', 'gemini', 'openrouter'];
   $effect(() => {
     if (!loaded || !cfg) return;
     const items = [];
@@ -1668,11 +1581,7 @@
     if (modelStore.loaded && modelStore.installed.length === 0) {
       items.push({ section: 'models', label: 'No speech-to-text model installed' });
     }
-    if (
-      cfg.postProcessEnabled &&
-      KEYED_PROVIDERS.includes(cfg.ppProvider) &&
-      !(cfg.ppApiKey || '').trim()
-    ) {
+    if (cleanupNeedsKey(cfg)) {
       items.push({ section: 'cleanup', label: 'AI cleanup needs an API key' });
     }
     attention.items = items;
@@ -2172,7 +2081,7 @@
               />
             </Row>
             {#if cfg.postProcessEnabled}
-              <ModeSelector bind:value={ppMode} options={PP_MODES} icon={provIcon} onchange={onModeChange} />
+              <ModeSelector bind:value={ppMode} options={PROVIDER_MODES} icon={provIcon} onchange={onModeChange} />
             {/if}
           </Group>
 
@@ -2180,12 +2089,12 @@
             <!-- Off: one line instead of a screen of greyed-out choices. -->
             <p class="set-note offnote">Turn on cleanup to pick a model. Until then, Yap types exactly what you said.</p>
           {:else}
-          {#if cleanupNeedsKey}
+          {#if needsKey}
             <!-- The red badge's reason, said where it's fixed. -->
             <div class="set-banner" role="status" data-testid="cleanup-key-banner">
               <span class="dot" aria-hidden="true"></span>
               <span class="text">
-                Add your {PP_PROVIDER_LABELS[cfg.ppProvider] || cfg.ppProvider} API key
+                Add your {CLEANUP_PROVIDER_LABELS[cfg.ppProvider] || cfg.ppProvider} API key
                 <span>Cleanup is on, but without a key Yap types your words as they are.</span>
               </span>
               <Button size="sm" onclick={focusKey}>Add key</Button>
@@ -2211,7 +2120,7 @@
                       </div>
                     {/snippet}
                   </Row>
-                  <Row label="Model" desc={PP_MODEL_HINTS.custom}>
+                  <Row label="Model" desc={MODEL_HINTS.custom}>
                     {#snippet children()}
                       <div class="pp-field">
                         <Input bind:value={cfg.ppModel} disabled={!cfg.postProcessEnabled} placeholder="model-id" list="pp-custom-models" />
@@ -2267,7 +2176,7 @@
                     </div>
                   {/snippet}
                 </Row>
-                <Row label="Model" desc={PP_MODEL_HINTS.local}>
+                <Row label="Model" desc={MODEL_HINTS.local}>
                   {#snippet children()}
                     <div class="pp-field">
                       <Input bind:value={cfg.ppModel} disabled={!cfg.postProcessEnabled} placeholder="llama3.1" list="pp-local-models" />
@@ -2439,7 +2348,7 @@
               defaultBody={PP_DEFAULT_BODY}
               enabled={cfg.postProcessEnabled}
               testCommand="test_post_process"
-              providerLabel={PP_PROVIDER_LABELS[cfg.ppProvider] || cfg.ppProvider}
+              providerLabel={CLEANUP_PROVIDER_LABELS[cfg.ppProvider] || cfg.ppProvider}
               modelLabel={cfg.ppProvider === 'ondevice' ? localLlm.model : cfg.ppModel}
               onpersist={persist}
               ontested={refreshUsage}
@@ -2672,7 +2581,7 @@
             {:else if cfg.ppProvider === 'local'}
               Cleanup goes to your own server.
             {:else}
-              Cleanup sends the text of each dictation to {PP_PROVIDER_LABELS[cfg.ppProvider] || 'the provider'}. Pick Local to keep it on this PC.
+              Cleanup sends the text of each dictation to {CLEANUP_PROVIDER_LABELS[cfg.ppProvider] || 'the provider'}. Pick Local to keep it on this PC.
             {/if}
             <button class="set-link" onclick={() => goto('privacy#leaves')}>Privacy & data</button>
           </p>

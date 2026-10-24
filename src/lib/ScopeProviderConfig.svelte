@@ -13,7 +13,17 @@
   import Row from './ui/Row.svelte';
   import { PP_CLOUD_MODELS, modelThinks } from './ppModels.js';
   import { modelsFor, defaultModel, providerOffers } from './modelCatalog.svelte.js';
-  import { PROVIDER_ICONS } from './providerIcons.js';
+  import {
+    PROVIDER_MODES as MODES,
+    CLOUD_TABS,
+    CLOUD_PROVIDER_IDS as CLOUD_IDS,
+    BASE_URLS,
+    MODEL_HINTS,
+    isKeyed,
+    modeOf,
+    maskKey,
+    sharedKey as storeKey,
+  } from './providers.js';
   import { createExternalLinkHandler } from './externalLinks.js';
   import { untrack } from 'svelte';
 
@@ -26,62 +36,31 @@
   // asked with.
   let { scope, cfg = null, disabled = false, scopeKey = '' } = $props();
 
-  // Mode labels/descriptions ported from OpenWhispr's per-scope mode copy
-  // (locales/en `dictationAgent.modes` etc.). Yap supports three of OpenWhispr's
-  // five modes — it has no OpenWhispr-hosted "managed cloud" and no enterprise
-  // cloud brokerage (Bedrock/Azure/Vertex), which are OpenWhispr's own services.
-  // One set of names on every tab (Dictation cleanup's are the same).
-  const MODES = [
-    { value: 'cloud', label: 'Cloud providers', desc: 'Groq, OpenAI, Anthropic, Gemini or OpenRouter, on your own API key', kind: 'cloud' },
-    { value: 'ondevice', label: 'Local', desc: 'A model on this PC. Nothing leaves it', kind: 'local' },
-    { value: 'selfhosted', label: 'Self-hosted', desc: 'Your own server, like Ollama or LM Studio', kind: 'server' },
-  ];
-  const CLOUD_TABS = [
-    { value: 'groq', label: 'Groq', icon: PROVIDER_ICONS.groq },
-    { value: 'anthropic', label: 'Anthropic', icon: PROVIDER_ICONS.anthropic, mono: true },
-    { value: 'openai', label: 'OpenAI', icon: PROVIDER_ICONS.openai, mono: true },
-    { value: 'gemini', label: 'Gemini', icon: PROVIDER_ICONS.gemini },
-    { value: 'openrouter', label: 'OpenRouter' },
-    { value: 'custom', label: 'Custom' },
-  ];
-  const CLOUD_IDS = ['groq', 'anthropic', 'openai', 'gemini', 'openrouter', 'custom'];
-  const BASE_URLS = {
-    groq: 'https://api.groq.com/openai/v1',
-    anthropic: 'https://api.anthropic.com/v1',
-    openai: 'https://api.openai.com/v1',
-    gemini: 'https://generativelanguage.googleapis.com/v1beta/openai/',
-    openrouter: 'https://openrouter.ai/api/v1',
-    local: 'http://localhost:11434/v1',
-  };
-  const MODEL_HINTS = {
-    local: 'your Ollama / LM Studio model name (e.g. llama3.1)',
-    custom: 'the model id your endpoint expects',
-  };
+  // The modes, the cloud tabs, the base URLs and the key store are
+  // providers.js's: one set of names on every tab (Dictation cleanup's too).
+  // Yap supports three of OpenWhispr's five modes — it has no
+  // OpenWhispr-hosted "managed cloud" and no enterprise cloud brokerage
+  // (Bedrock/Azure/Vertex), which are OpenWhispr's own services.
 
   // UI state seeded ONCE from the scope (untracked on purpose): Settings mounts
   // one instance per scope tab inside {#key llmScope}, so `scope` is fixed for
   // this component's lifetime and the handlers below keep the two in sync.
-  let mode = $state(
-    untrack(() =>
-      scope.provider === 'ondevice' ? 'ondevice' : scope.provider === 'local' ? 'selfhosted' : 'cloud'
-    )
-  );
+  let mode = $state(untrack(() => modeOf(scope.provider)));
   let cloudProvider = $state(untrack(() => (CLOUD_IDS.includes(scope.provider) ? scope.provider : 'groq')));
   let keyEditing = $state(false);
 
   // Standard cloud providers (everything but custom/local) share the global
   // per-provider key store; custom + self-hosted keys stay per-scope.
-  const SHARED_KEY_IDS = new Set(['groq', 'anthropic', 'openai', 'gemini', 'openrouter']);
   function sharedKey(p) {
     if (!cfg) return scope.apiKeys?.[p] || '';
-    return cfg.ppApiKeys?.[p] || (cfg.ppProvider === p ? cfg.ppApiKey : '') || '';
+    return storeKey(cfg, p);
   }
   // Key edits write through to the shared store (and the active cleanup key
   // when it's the same provider) so every scope sees the change immediately.
   function stashApiKey() {
     const p = scope.provider;
     if (!p || p === 'ondevice') return;
-    if (cfg && SHARED_KEY_IDS.has(p)) {
+    if (cfg && isKeyed(p)) {
       cfg.ppApiKeys = { ...cfg.ppApiKeys, [p]: scope.apiKey };
       if (cfg.ppProvider === p) cfg.ppApiKey = scope.apiKey;
     } else {
@@ -92,7 +71,7 @@
   // user already keyed elsewhere shouldn't sit on an empty key (the bug where
   // Commands hit Anthropic/Groq with no key while Cleanup had one).
   untrack(() => {
-    if (cfg && SHARED_KEY_IDS.has(scope.provider)) {
+    if (cfg && isKeyed(scope.provider)) {
       if (!scope.apiKey) scope.apiKey = sharedKey(scope.provider);
       else if (!cfg.ppApiKeys?.[scope.provider]) stashApiKey();
     }
@@ -114,7 +93,7 @@
     cloudProvider = p;
     scope.provider = p;
     if (BASE_URLS[p]) scope.baseUrl = BASE_URLS[p];
-    scope.apiKey = SHARED_KEY_IDS.has(p) ? sharedKey(p) : scope.apiKeys?.[p] || '';
+    scope.apiKey = isKeyed(p) ? sharedKey(p) : scope.apiKeys?.[p] || '';
     keyEditing = false;
     // The provider's first model it still offers (modelCatalog.js) when the
     // saved one isn't its.
@@ -123,13 +102,7 @@
     }
   }
 
-  const maskedKey = $derived(
-    !scope.apiKey
-      ? ''
-      : scope.apiKey.length > 8
-        ? `${scope.apiKey.slice(0, 3)}…${scope.apiKey.slice(-4)}`
-        : '••••••••'
-  );
+  const maskedKey = $derived(maskKey(scope.apiKey));
   // Show the "Disable thinking output" toggle only for reasoning models (or a
   // custom/self-hosted endpoint where the model is unknown).
   const showThinking = $derived(

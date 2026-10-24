@@ -6,6 +6,7 @@
 import { invoke } from '@tauri-apps/api/core';
 import { PROVIDER_ICONS } from './providerIcons.js';
 import { modelsFor, modelLabel } from './modelCatalog.svelte.js';
+import { PROVIDER_LABELS, KEYED_PROVIDERS as CLOUD_ORDER } from './providers.js';
 
 /**
  * The model a scope's next call goes to ("chat": the Chat scope, as
@@ -18,19 +19,8 @@ export function nextModel(scope) {
     .catch(() => null);
 }
 
-export const PROVIDER_LABELS = {
-  groq: 'Groq',
-  anthropic: 'Anthropic',
-  openai: 'OpenAI',
-  gemini: 'Gemini',
-  openrouter: 'OpenRouter',
-  ondevice: 'On this PC',
-  local: 'Self-hosted',
-  custom: 'Custom',
-};
-
-/** Cloud providers, in Settings' order. */
-const CLOUD_ORDER = ['groq', 'anthropic', 'openai', 'gemini', 'openrouter'];
+// The providers' short names (PROVIDER_LABELS) and the cloud ones, in
+// Settings' order (CLOUD_ORDER), are providers.js's.
 
 /**
  * The model's short name: the on-device model's own, the registry's label

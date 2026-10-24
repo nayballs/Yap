@@ -25,6 +25,7 @@
   import { speech } from './speech.svelte.js';
   import { toast } from './ui/toast.svelte.js';
   import { createExternalLinkHandler } from './externalLinks.js';
+  import { maskKey } from './providers.js';
 
   let { cfg, keysPage = 'https://elevenlabs.io/app/settings/api-keys', localFallback = false } = $props();
 
@@ -36,7 +37,7 @@
   const choice = $derived((cfg.ttsCloud ?? {})[ID] ?? {});
   const voiceId = $derived(choice.voice || DEFAULT_VOICE);
   const model = $derived(choice.model || DEFAULT_MODEL);
-  const masked = $derived(!key ? '' : key.length > 8 ? `${key.slice(0, 3)}…${key.slice(-4)}` : '••••••••');
+  const masked = $derived(maskKey(key));
   let editing = $state(false);
 
   function setKey(v) {

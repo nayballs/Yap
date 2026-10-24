@@ -24,6 +24,7 @@
   import { toast } from '../ui/toast.svelte.js';
   import { showSaveError } from '../saveErrors.js';
   import { account } from '../account.svelte.js';
+  import { PROVIDER_DESTINATIONS } from '../providers.js';
 
   let { cfg, goto = null, connections = $bindable(false) } = $props();
 
@@ -112,20 +113,12 @@
     }
   }
 
-  // Where the words go, by provider id (config: ppProvider, llmScopes.*).
-  const PROVIDER_NAMES = {
-    groq: 'Groq',
-    anthropic: 'Anthropic',
-    openai: 'OpenAI',
-    gemini: 'Google Gemini',
-    openrouter: 'OpenRouter',
-    custom: 'your custom endpoint',
-    local: 'your own server',
-  };
+  // Where the words go, by provider id (config: ppProvider, llmScopes.*):
+  // providers.js's PROVIDER_DESTINATIONS.
   function goes(provider, what) {
     if (provider === 'ondevice') return 'Stays on this PC (the on-device model)';
     if (provider === 'local') return `${what} go to your own server`;
-    return `${what} go to ${PROVIDER_NAMES[provider] || provider}`;
+    return `${what} go to ${PROVIDER_DESTINATIONS[provider] || provider}`;
   }
   // Chat's own model when its tab is on, else the cleanup model's endpoint.
   const chat = $derived(cfg.llmScopes?.chat?.enabled ? cfg.llmScopes.chat : { provider: cfg.ppProvider });
