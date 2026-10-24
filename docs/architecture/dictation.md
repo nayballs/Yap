@@ -567,6 +567,12 @@ to **Run again** from Home.
   audio's start): Parakeet's words (`TimestampGranularity::Word`), Whisper's
   segments (a phrase each), SenseVoice's tokens joined at "▁"; none for
   Moonshine/GigaAM/Canary/Cohere or the stub. Only meetings call it.
+  `set_gpu_adapter` (2026-10-24): the DXGI adapter the ONNX models load on
+  (lib.rs: `gpu::speech_adapter`, the card rather than a hybrid laptop's
+  integrated GPU listed first); `set_cpu_threads`: a processor-thread cap
+  for every model loaded (ONNX intra-op) or run (Whisper's `n_threads`)
+  afterwards — `yap.exe bench`'s emulated small PCs only (both through the
+  vendored transcribe-rs's new globals, its `YAP.md`).
 - **`stt_speed.rs`** — **the speech engine's device on this PC** (2026-10-22):
   a one-time background benchmark per installed model and PC, **the
   graphics card unless the processor is clearly faster**. The clip
@@ -620,7 +626,18 @@ to **Run again** from Home.
   numbers logged at `info` (ms per device and length, whether the words
   matched — never the text). `device_for` / `device_choice`: Settings'
   "Runs on" (`config.stt_device`: auto | gpu | cpu; the old `use_gpu` off =
-  the processor) else the measured pick, else the graphics card;
+  the processor) else the measured pick, else — not measured yet —
+  `hardware::speech_device_before_measuring` (2026-10-24): the graphics card
+  when there's one that isn't small (`gpu::is_small`), else the processor.
+  Before, it was always the graphics card, and `yap.exe bench` showed what
+  that cost a PC without one: Parakeet on DirectML took ~4 s a dictation on
+  an integrated GPU (the encoder's fixed 30-s plan, below, on a 2-CU Radeon)
+  and ~1–2 s on Windows' software renderer (no graphics driver), against
+  ~0.4 s for 11 s of speech on 4 processor threads
+  ([docs/benchmarks.md](../benchmarks.md)). Moonshine Base starts on the
+  processor whatever the card (`stt::wrong_on_directml`: on DirectML it got
+  every word wrong, on an RTX and on a Radeon);
+  `has_gpu` follows a test run's stand-in card (`YAP_E2E_GPU`);
   `reload_if_needed` moves the warm engine to the device it should be on at
   the next quiet moment (`Pipeline::replace_engine`). Settings → Speech-to-
   Text → Speed (`stt_speed_status`, `yap-stt-speed`). Test runs: only on

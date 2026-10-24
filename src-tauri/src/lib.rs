@@ -18,6 +18,7 @@ mod apps;
 mod assistant;
 mod auth;
 mod bar;
+mod bench;
 mod bridge;
 mod calendar;
 mod capture;
@@ -37,6 +38,7 @@ mod fuzzy;
 mod gesture;
 mod gguf;
 mod gpu;
+mod hardware;
 mod media;
 mod media_pause;
 mod meeting;
@@ -221,6 +223,21 @@ pub fn run_diarize_child() -> i32 {
 /// exits. Returns the exit code (0 = every scenario passed).
 pub fn run_eval() -> i32 {
     eval::run(std::env::args().skip(2).collect())
+}
+
+/// `yap.exe bench …` (main.rs): speech-to-text, AI cleanup and a cold
+/// start timed on this PC, a table and a JSON report written (`bench.rs`).
+pub fn run_bench() -> i32 {
+    bench::main(std::env::args().skip(2).collect())
+}
+
+/// `yap.exe bench`'s throwaway copy for the cold start (`bench/cold.rs`):
+/// `YAP_BENCH_CHILD=1`, honoured only in portable mode (its own data
+/// folder). It never hands over to a Yap already running (single
+/// instance), hooks the keyboard, changes launch-at-sign-in or the saved
+/// window place, or touches another process.
+fn bench_child() -> bool {
+    portable::is_portable() && std::env::var_os("YAP_BENCH_CHILD").is_some_and(|v| v == "1")
 }
 
 /// `yap.exe call-dump …` (main.rs): a call window's UI Automation tree,
@@ -409,15 +426,20 @@ pub fn run() {
     // running installed app and silently exits within seconds, which broke
     // every "run the dev build" workflow (incl. Voice Mirror's App Preview).
     // On a duplicate release launch, surface the app instead of doing nothing.
+    // (Nor `yap.exe bench`'s throwaway copy: it must start, not wake yours.)
     #[cfg(not(debug_assertions))]
-    let builder = builder.plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
-        use tauri::Manager;
-        if let Some(settings) = app.get_webview_window("settings") {
-            let _ = settings.show();
-            let _ = settings.unminimize();
-            let _ = settings.set_focus();
-        }
-    }));
+    let builder = if bench_child() {
+        builder
+    } else {
+        builder.plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
+            use tauri::Manager;
+            if let Some(settings) = app.get_webview_window("settings") {
+                let _ = settings.show();
+                let _ = settings.unminimize();
+                let _ = settings.set_focus();
+            }
+        }))
+    };
 
     let builder = builder
         // Yap accounts: com.contextmirror.yap:// sign-in links (auth.rs). Must
@@ -446,7 +468,7 @@ pub fn run() {
     // window never un-hides itself on a start-hidden launch. Not in e2e test
     // runs: the state file sits outside the portable data dir, shared with the
     // installed app.
-    let builder = if e2e::active() {
+    let builder = if e2e::active() || bench_child() {
         builder
     } else {
         builder.plugin(
@@ -508,6 +530,7 @@ pub fn run() {
             commands::clear_history,
             commands::delete_history_entry,
             commands::get_stats,
+            commands::home_snapshot,
             text_injector::paste_last_transcript,
             as_said::as_said_swap,
             as_said::as_said_paste_entry,
@@ -519,6 +542,7 @@ pub fn run() {
             snip::chat_images_prepare,
             stt_speed::stt_speed_status,
             stt_speed::stt_speed_measure,
+            hardware::hardware_advice,
             recent_audio::recent_audio_status,
             recent_audio::recent_audio_clear,
             recent_audio::recent_audio_wav,
@@ -866,7 +890,7 @@ pub fn run() {
 
             // Global input hook + dictation hotkey. (Not in e2e test runs: a
             // test instance must never see, or swallow, the developer's keys.)
-            if !e2e::active() {
+            if !e2e::active() && !bench_child() {
                 input_hook::start_input_hook(handle.clone());
             }
             if let Err(e) = input_hook::configure_dictation(&cfg.hotkey) {
@@ -897,6 +921,9 @@ pub fn run() {
             // model loads: whisper → CUDA (Auto), ONNX → DirectML. No-ops in stub.
             stt::fix_directml_stub();
             stt::apply_accelerator_settings(cfg.use_gpu);
+            // DirectML on the graphics card, not an integrated GPU DXGI
+            // happens to list first (hybrid laptops; gpu.rs).
+            stt::set_gpu_adapter(gpu::speech_adapter());
             // Each model loads on the device that runs it fastest here
             // (Settings → Speech-to-Text → Runs on; stt_speed.rs).
             stt_speed::sync(&cfg);
@@ -923,7 +950,7 @@ pub fn run() {
             // selected + installed — warm up a fresh one off-thread so the
             // first dictation cleanup skips the cold load. (An e2e test run
             // leaves other processes alone.)
-            if !e2e::active() {
+            if !e2e::active() && !bench_child() {
                 local_llm::kill_orphans();
             }
             {
@@ -1138,8 +1165,11 @@ pub fn run() {
             // Only touch OS autostart when the desired state differs from the
             // current one. Avoids a spurious "disable" call that errors in dev
             // (the dev exe was never registered) and spams the log on launch.
+            // (`yap.exe bench`'s throwaway copy leaves your Yap's entry be.)
             let autostart_now = app.autolaunch().is_enabled().unwrap_or(false);
-            if autostart_now != cfg.autostart {
+            if bench_child() {
+                tracing::info!("bench child: autostart left alone");
+            } else if autostart_now != cfg.autostart {
                 if let Err(e) = set_autostart_enabled(&handle, cfg.autostart) {
                     tracing::debug!("autostart reconcile skipped: {}", e);
                 }

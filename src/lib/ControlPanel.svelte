@@ -47,6 +47,12 @@
   import IntegrationsView from './IntegrationsView.svelte';
   import { menuOrDialogOpen } from './ui/contextMenu.svelte.js';
   import { noteAccountPicture } from './connections.js';
+  import { prefetchHome } from './homeData.js';
+
+  // Home's data first, before the ~60 calls the rest of the window makes as
+  // it starts (homeData.js; App.svelte has usually asked already, while
+  // this view's code loaded: then this does nothing).
+  prefetchHome().catch(() => {});
 
   let activeView = $state('home');
 

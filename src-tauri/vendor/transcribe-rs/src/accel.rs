@@ -6,7 +6,7 @@
 
 use std::fmt;
 use std::str::FromStr;
-use std::sync::atomic::{AtomicI32, AtomicU8, Ordering};
+use std::sync::atomic::{AtomicI32, AtomicU8, AtomicUsize, Ordering};
 
 use serde::{Deserialize, Serialize};
 
@@ -287,6 +287,37 @@ pub fn set_whisper_gpu_device(device: i32) {
 /// non-negative backend-specific device index.
 pub fn get_whisper_gpu_device() -> i32 {
     WHISPER_GPU_DEVICE.load(Ordering::Relaxed)
+}
+
+// ---------------------------------------------------------------------------
+// ORT threads and DirectML adapter (Yap: `yap.exe bench`)
+// ---------------------------------------------------------------------------
+
+static ORT_INTRA_THREADS: AtomicUsize = AtomicUsize::new(0);
+
+/// Intra-op threads for every ORT session built from now on that doesn't
+/// set its own (`0`, the default: ONNX Runtime's own choice, one per
+/// physical core). Yap's benchmark caps it to emulate a smaller processor.
+pub fn set_ort_intra_threads(threads: usize) {
+    ORT_INTRA_THREADS.store(threads, Ordering::Relaxed);
+}
+
+/// The intra-op thread cap ([`set_ort_intra_threads`]; `0` = none).
+pub fn get_ort_intra_threads() -> usize {
+    ORT_INTRA_THREADS.load(Ordering::Relaxed)
+}
+
+static ORT_DIRECTML_DEVICE: AtomicI32 = AtomicI32::new(-1);
+
+/// The DXGI adapter index DirectML sessions run on (`-1`, the default: the
+/// default adapter). Yap's benchmark points it at an integrated GPU.
+pub fn set_ort_directml_device(device: i32) {
+    ORT_DIRECTML_DEVICE.store(device, Ordering::Relaxed);
+}
+
+/// The DirectML adapter index ([`set_ort_directml_device`]; `-1` = default).
+pub fn get_ort_directml_device() -> i32 {
+    ORT_DIRECTML_DEVICE.load(Ordering::Relaxed)
 }
 
 // ---------------------------------------------------------------------------

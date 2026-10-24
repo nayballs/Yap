@@ -463,7 +463,37 @@ The language-model side: the OpenAI-compatible client and its prompts, the on-de
   (~1–1.6 GB) and Windows (~0.5–1 GB); integrated graphics report little of
   their own (this PC's Ryzen Radeon: 2 GiB). Debug-only `YAP_E2E_GPU`
   ("none" | "<name>,<MiB>") stands in for the card in test mode. `#[ignore]`d
-  `this_machine` prints this PC's cards.
+  `this_machine` prints this PC's cards. **Every adapter** (2026-10-24,
+  `all_adapters`: DXGI's index — DirectML's device id —, software ones
+  flagged) for `yap.exe bench`; **`is_small`** (< `SMALL_GPU_MIB`, 3 GiB of
+  its own: integrated graphics and entry cards; a "4 GB" card isn't); and
+  **`speech_adapter`** (`speech_adapter_of`, pure): the card with the most
+  memory of its own when DXGI doesn't list it first — a hybrid laptop lists
+  its integrated GPU first and DirectML's default device is DXGI's first, so
+  Parakeet ran on the integrated GPU, not the card. lib.rs sets it at start
+  (`stt::set_gpu_adapter`; never in a test run).
+- **`hardware.rs`** — **picks by hardware** (2026-10-24), calibrated by
+  `yap.exe bench` ([`docs/benchmarks.md`](../benchmarks.md)): `Machine`
+  (the best card, logical processors, memory; test mode: `YAP_E2E_GPU`,
+  `YAP_E2E_CPU_THREADS`, `YAP_E2E_RAM_MIB` stand in), `tier` (pure): **card**
+  (a card that isn't small), **processor** (no such card, ≥ 8 threads and ≥
+  7.5 GiB), **small** (the rest). `speech_device_before_measuring` (pure):
+  the graphics card only when it isn't small, else the processor —
+  `stt_speed::device_choice`'s default until this PC's own timing exists
+  (before 2026-10-24 always the graphics card: DirectML on a weak integrated
+  GPU or on Windows' software renderer, several times slower than int8
+  Parakeet on the processor, for the first minute or more). `advise` (pure)
+  → `Advice {tier, speechModel (Parakeet V3 everywhere), speechDevice,
+  cleanup: local | cloud, localModel (recommended_id), localMs, cloudMs,
+  summary}`: on the card the on-device model (the 4B where it fits), on the
+  processor tier the 1.5B, on a small PC **a cloud provider first** (the 1.5B
+  adds seconds a dictation there) with both times said; the times are
+  `LOCAL_MS_*` / `CLOUD_MS`, measured. `hardware_advice` (command) feeds
+  onboarding: step 1 says where speech runs ("on its processor: no graphics
+  card needed"), the AI cleanup step moves "Recommended" to the cloud card
+  ("Quicker on this PC") on a small PC, picks it, and says what each adds to
+  a dictation (`cleanup-times`). Unit-tested; e2e
+  `onboarding-weak-pc.spec.js`.
 - **`ai_model.rs`** — which model a scope's next call goes to, resolved the
   calls' way (`Scope::Chat` → `commands::resolve_chat_endpoint`;
   `Scope::Notes` → `meeting_summary::resolve_endpoint`): `ai_model_status

@@ -82,7 +82,7 @@ use crate::stt::{self, Device, SttAdapter};
 const CLIP: &[u8] = include_bytes!("../assets/stt-speed-clip.wav");
 /// What the clip says, sentence by sentence (fictional people). The first
 /// is the short length, the first three the typical one.
-#[allow(dead_code)] // (only the tests read it: `make_clip` says it)
+/// (`yap.exe bench` scores each transcript's words against it.)
 pub const PASSAGE: [&str; 6] = [
     "Remind me to call Priya about the budget tomorrow.",
     "Hi Imogen, could you send Sam the updated launch plan before Friday?",
@@ -102,9 +102,9 @@ const CUT_SLACK_MS: u64 = 1_500;
 /// Warm runs per length and device (the median is kept).
 pub const WARM_RUNS: usize = 3;
 /// Silence after each piece, as a dictation has before its stop key…
-const TAIL_MS: u64 = 300;
+pub(crate) const TAIL_MS: u64 = 300;
 /// …and this much more each round, so every run is a new length.
-const PAD_STEP_MS: u64 = 160;
+pub(crate) const PAD_STEP_MS: u64 = 160;
 /// Which of [`LENGTHS`] decide: everyday dictations (short and typical).
 pub const EVERYDAY: [usize; 2] = [0, TYPICAL];
 /// The processor is picked only if it takes at most `1 − CPU_MARGIN` of the
@@ -252,7 +252,7 @@ pub struct Call {
 // ---- the pure parts ---------------------------------------------------------------
 
 /// A transcript's words, as compared: lower case, letters and digits.
-fn words(text: &str) -> Vec<String> {
+pub(crate) fn words(text: &str) -> Vec<String> {
     text.replace('\u{2019}', "'")
         .split(|c: char| !c.is_alphanumeric() && c != '\'')
         .map(|w| w.trim_matches('\'').to_lowercase())
@@ -261,7 +261,7 @@ fn words(text: &str) -> Vec<String> {
 }
 
 /// Words added, dropped or changed to turn `a` into `b`.
-fn word_edits(a: &[String], b: &[String]) -> usize {
+pub(crate) fn word_edits(a: &[String], b: &[String]) -> usize {
     let mut prev: Vec<usize> = (0..=b.len()).collect();
     for (i, wa) in a.iter().enumerate() {
         let mut cur = vec![i + 1; b.len() + 1];
@@ -363,14 +363,15 @@ pub fn pick(runs: &[Run]) -> Option<Device> {
 }
 
 /// Where a model runs, from Settings' "Runs on" (`setting`: "auto" | "gpu" |
-/// "cpu"), the old GPU switch and the measured pick (graphics card until
-/// measured, as before).
-pub fn device_choice(setting: &str, use_gpu: bool, measured: Option<Device>) -> Device {
+/// "cpu"), the old GPU switch and the measured pick; until it's measured,
+/// `unmeasured` (`hardware::speech_device_before_measuring`: the graphics
+/// card when there's one that isn't small, else the processor).
+pub fn device_choice(setting: &str, use_gpu: bool, measured: Option<Device>, unmeasured: Device) -> Device {
     match setting {
         "cpu" => Device::Cpu,
         "gpu" => Device::Gpu,
         _ if !use_gpu => Device::Cpu,
-        _ => measured.unwrap_or(Device::Gpu),
+        _ => measured.unwrap_or(unmeasured),
     }
 }
 
@@ -401,7 +402,7 @@ pub fn cuts(audio: &[f32]) -> Vec<usize> {
 
 /// A piece with `pad_ms` of silence after it (a new length, the same
 /// words).
-fn padded(piece: &[f32], pad_ms: u64) -> Vec<f32> {
+pub(crate) fn padded(piece: &[f32], pad_ms: u64) -> Vec<f32> {
     let mut out = piece.to_vec();
     out.resize(piece.len() + pad_ms as usize * (crate::pipeline::TARGET_SAMPLE_RATE / 1000) as usize, 0.0);
     out
@@ -514,7 +515,10 @@ pub fn device_for(model_id: &str, use_gpu: bool) -> Device {
     } else {
         None
     };
-    device_choice(&setting, use_gpu && synced_gpu, measured)
+    // (Moonshine's words come out wrong on DirectML: the processor until
+    // its own timing here says otherwise.)
+    let unmeasured = if stt::wrong_on_directml(model_id) { Device::Cpu } else { crate::hardware::speech_device_here() };
+    device_choice(&setting, use_gpu && synced_gpu, measured, unmeasured)
 }
 
 // ---- this PC ----------------------------------------------------------------------
@@ -576,9 +580,14 @@ fn adapters_print() -> String {
     String::new()
 }
 
-/// Whether there's a graphics card to try (an integrated one counts).
+/// Whether there's a graphics card to try (an integrated one counts). A
+/// test run has one unless its stand-in card says none (`YAP_E2E_GPU`).
 fn has_gpu() -> bool {
-    crate::e2e::active() || crate::gpu::this_pc().is_some()
+    #[cfg(debug_assertions)]
+    if crate::e2e::active() && std::env::var_os("YAP_E2E_GPU").is_none() {
+        return true;
+    }
+    crate::gpu::this_pc().is_some()
 }
 
 /// How busy the processor is (percent of all cores) over `over`, from
@@ -1266,14 +1275,17 @@ mod tests {
 
     #[test]
     fn runs_on_follows_the_setting_then_the_measurement() {
-        assert_eq!(device_choice("cpu", true, Some(Device::Gpu)), Device::Cpu);
-        assert_eq!(device_choice("gpu", true, Some(Device::Cpu)), Device::Gpu);
-        assert_eq!(device_choice("auto", true, Some(Device::Cpu)), Device::Cpu);
-        // Not measured yet: the graphics card, as before.
-        assert_eq!(device_choice("auto", true, None), Device::Gpu);
-        assert_eq!(device_choice("", true, None), Device::Gpu);
+        assert_eq!(device_choice("cpu", true, Some(Device::Gpu), Device::Gpu), Device::Cpu);
+        assert_eq!(device_choice("gpu", true, Some(Device::Cpu), Device::Cpu), Device::Gpu);
+        assert_eq!(device_choice("auto", true, Some(Device::Cpu), Device::Gpu), Device::Cpu);
+        // Not measured yet: the graphics card where there's a real one…
+        assert_eq!(device_choice("auto", true, None, Device::Gpu), Device::Gpu);
+        assert_eq!(device_choice("", true, None, Device::Gpu), Device::Gpu);
+        // …else the processor (no driver, or integrated graphics:
+        // `hardware::speech_device_before_measuring`).
+        assert_eq!(device_choice("auto", true, None, Device::Cpu), Device::Cpu);
         // The old GPU switch off: the processor.
-        assert_eq!(device_choice("auto", false, Some(Device::Gpu)), Device::Cpu);
+        assert_eq!(device_choice("auto", false, Some(Device::Gpu), Device::Gpu), Device::Cpu);
     }
 
     #[test]

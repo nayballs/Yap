@@ -2116,27 +2116,48 @@ pub async fn download_model_size(
 /// Switch to an already-installed model: build the engine, install it into the
 /// pipeline, persist the choice, and push the updated config. Does NOT download
 /// — the frontend downloads first via `download_model_size`.
+///
+/// The model already warm on the device it belongs on isn't loaded again
+/// (2026-10-24): onboarding's download (`download_model_size`) loads it, then
+/// calls this, which loaded it a second time — on the window's thread, so the
+/// first-run window froze for the load (~1–3 s) right after the download.
+/// The load now runs off it.
 #[tauri::command]
-pub fn set_active_model(state: State<'_, AppState>, model_size: String) -> Result<(), String> {
+pub async fn set_active_model(state: State<'_, AppState>, model_size: String) -> Result<(), String> {
     let data_dir = config::data_dir();
     if !stt::is_model_installed(&data_dir, &model_size) {
         return Err(format!("Model '{}' is not installed", model_size));
     }
 
     let use_gpu = config::load().use_gpu;
-    let engine = stt::create_stt_engine(&data_dir, &model_size, use_gpu)
-        .map_err(|e| e.to_string())?;
+    let warm = state
+        .pipeline
+        .lock()
+        .ok()
+        .and_then(|g| g.as_ref().and_then(|p| p.engine_info()))
+        .is_some_and(|(model, device)| model == model_size && device == crate::stt_speed::device_for(&model_size, use_gpu));
+    let engine = if warm {
+        None
+    } else {
+        let (dir, id) = (data_dir.clone(), model_size.clone());
+        let loaded = tauri::async_runtime::spawn_blocking(move || stt::create_stt_engine(&dir, &id, use_gpu))
+            .await
+            .map_err(|e| e.to_string())?;
+        Some(loaded.map_err(|e| e.to_string())?)
+    };
 
     // Persist the choice.
     let cfg = config::update(|c| c.model_size = model_size.clone())?;
 
     if let Ok(guard) = state.pipeline.lock() {
         if let Some(p) = guard.as_ref() {
-            p.set_engine(engine);
+            if let Some(engine) = engine {
+                p.set_engine(engine);
+            }
             p.update_config(cfg);
         }
     }
-    tracing::info!(model = %model_size, "Active model switched");
+    tracing::info!(model = %model_size, reloaded = !warm, "Active model switched");
     Ok(())
 }
 
@@ -2484,6 +2505,34 @@ pub fn delete_history_entry(app: AppHandle, ts: u64, text: String) -> Result<(),
 #[tauri::command]
 pub fn get_stats() -> serde_json::Value {
     crate::history::stats()
+}
+
+/// Everything Home needs to draw itself, in one round trip and off the
+/// window's thread (2026-10-24): its history page and stats, the settings
+/// it shows (history on, cleanup on, the model, the three shortcuts) and
+/// the installed speech models. Before, Home asked for these in four calls,
+/// sync ones each holding the main thread, behind the ~60 calls the rest of
+/// the window makes as it starts (frontend.md, "Home's first paint").
+#[tauri::command]
+pub async fn home_snapshot(limit: Option<usize>) -> Result<serde_json::Value, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let cfg = config::load();
+        serde_json::json!({
+            "history": crate::history::list(limit.unwrap_or(200)),
+            "stats": crate::history::stats(),
+            "config": {
+                "historyEnabled": cfg.history_enabled,
+                "postProcessEnabled": cfg.post_process_enabled,
+                "modelSize": cfg.model_size,
+                "hotkey": cfg.hotkey,
+                "editHotkey": cfg.edit_hotkey,
+                "assistantHotkey": cfg.assistant_hotkey,
+            },
+            "installedModels": installed_models(),
+        })
+    })
+    .await
+    .map_err(|e| e.to_string())
 }
 
 /// Today's Groq AI-cleanup usage snapshot for the Settings meter.

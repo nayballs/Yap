@@ -6,6 +6,7 @@
 // and a late error was lost (code review 2026-10-23).
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
+import { getConfig, installedModels } from './ipcShared.js';
 
 export const modelStore = $state({
   installed: [], // model ids on disk
@@ -19,8 +20,9 @@ export const modelStore = $state({
 
 export async function refreshModels() {
   try {
-    modelStore.installed = await invoke('installed_models');
-    const cfg = await invoke('get_config');
+    // Both asked at once (shared with the rest of the window's start-up).
+    const [installed, cfg] = await Promise.all([installedModels(), getConfig()]);
+    modelStore.installed = installed;
     if (cfg) modelStore.active = cfg.modelSize ?? null;
     modelStore.loaded = true;
   } catch {

@@ -21,6 +21,12 @@ fn main() {
     if std::env::args_os().nth(1).is_some_and(|arg| arg == "eval") {
         std::process::exit(yap_lib::run_eval());
     }
+    // `yap.exe bench …`: time speech-to-text, AI cleanup and a cold start on
+    // this PC and write a shareable report (bench.rs, docs/benchmarks.md).
+    // Reads Yap's models, writes nothing of Yap's. No window, tray or hook.
+    if std::env::args_os().nth(1).is_some_and(|arg| arg == "bench") {
+        std::process::exit(yap_lib::run_bench());
+    }
     // `yap.exe call-dump …`: record a call window's UI Automation tree to
     // a file, read only, for teaching Yap how a call app shows who's
     // talking (speakers/call_ui.rs). No window, tray or hook.

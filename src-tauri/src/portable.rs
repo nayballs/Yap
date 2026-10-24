@@ -43,13 +43,26 @@ pub fn init() {
     });
 }
 
-/// The model evaluation (`yap.exe eval`, `eval.rs`; debug builds): use
-/// `dir` as the data dir, as portable mode would, so a run never reads or
-/// writes the installed app's. Must come before anything reads the data dir
-/// (`false`: too late, the dir is already decided).
-#[cfg(debug_assertions)]
+/// The model evaluation (`yap.exe eval`, `eval.rs`; debug builds) and the
+/// benchmark (`yap.exe bench`, `bench.rs`): use `dir` as the data dir, as
+/// portable mode would, so a run never writes the installed app's. Must
+/// come before anything reads the data dir (`false`: too late, the dir is
+/// already decided).
 pub fn use_data_dir(dir: PathBuf) -> bool {
     PORTABLE_DATA_DIR.set(Some(dir)).is_ok()
+}
+
+/// The data dir this exe would use, decided as [`init`] decides it but
+/// without creating anything or deciding it for this run: `<exe>/Data`
+/// beside a valid marker, else `%APPDATA%\yap`. (`yap.exe bench` reads the
+/// models from it, then runs on a folder of its own.)
+pub fn would_use() -> PathBuf {
+    let portable = std::env::current_exe()
+        .ok()
+        .and_then(|exe| exe.parent().map(|d| d.to_path_buf()))
+        .filter(|dir| is_valid_portable_marker(&dir.join("portable")))
+        .map(|dir| dir.join("Data"));
+    portable.unwrap_or_else(|| dirs::data_dir().unwrap_or_else(|| PathBuf::from(".")).join("yap"))
 }
 
 /// `true` when running in portable mode.

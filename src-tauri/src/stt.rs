@@ -988,6 +988,7 @@ mod engine_real {
                         language: lang,
                         translate,
                         initial_prompt: initial_prompt.map(str::to_string),
+                        n_threads: CPU_THREADS.load(std::sync::atomic::Ordering::Relaxed) as i32,
                         ..Default::default()
                     };
                     e.transcribe_with(audio, &params).map_err(tx_err)?
@@ -1333,6 +1334,15 @@ pub fn model_fingerprint(data_dir: &Path, model_id: &str) -> Option<String> {
     }
 }
 
+/// A model whose words come out wrong on DirectML (a real GPU): Moonshine
+/// Base got every word wrong on an RTX 5070 Ti and on a Ryzen's Radeon, and
+/// every one right on the processor (`yap.exe bench`, docs/benchmarks.md).
+/// It starts on the processor until this PC's own timing (which compares
+/// each device's words) says otherwise.
+pub fn wrong_on_directml(model_id: &str) -> bool {
+    resolve_model(model_id).engine_type == EngineType::Moonshine
+}
+
 /// Whether `model_id` resolves to a whisper.cpp model. Drives the dictionary
 /// split (Handy's): Whisper models get the vocabulary as `initial_prompt`;
 /// ONNX models get the fuzzy post-correction pass instead.
@@ -1368,6 +1378,27 @@ pub fn apply_accelerator_settings(use_gpu: bool) {
 
 #[cfg(not(feature = "engines"))]
 pub fn apply_accelerator_settings(_use_gpu: bool) {}
+
+/// Processor threads for the models loaded from now on (`yap.exe bench`'s
+/// emulated small processors; 0 = each runtime's own choice: ONNX Runtime
+/// one per physical core, whisper.cpp four).
+static CPU_THREADS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+/// Cap the processor threads of every model loaded (ONNX) or run (Whisper)
+/// from now on: `yap.exe bench` only.
+pub fn set_cpu_threads(threads: usize) {
+    CPU_THREADS.store(threads, std::sync::atomic::Ordering::Relaxed);
+    #[cfg(feature = "engines")]
+    transcribe_rs::accel::set_ort_intra_threads(threads);
+}
+
+/// The graphics adapter (DXGI index) the ONNX models load on from now on
+/// (`None`: the default one): `yap.exe bench`'s integrated GPU.
+pub fn set_gpu_adapter(adapter: Option<u32>) {
+    #[cfg(feature = "engines")]
+    transcribe_rs::accel::set_ort_directml_device(adapter.map_or(-1, |a| a as i32));
+    let _ = adapter;
+}
 
 /// `ort` drops a 0-byte `DirectML.dll` next to our binary on every build. On
 /// Windows the executable's own directory is searched before System32, so that
@@ -1502,6 +1533,14 @@ mod tests {
             r.url.unwrap(),
             "https://blob.handy.computer/parakeet-v3-int8.tar.gz"
         );
+    }
+
+    #[test]
+    fn moonshine_alone_starts_off_directml() {
+        assert!(wrong_on_directml("moonshine-base"));
+        for id in ["parakeet-tdt-0.6b-v3", "parakeet-tdt-0.6b-v2", "large", "sense-voice-int8", "my-custom-model"] {
+            assert!(!wrong_on_directml(id), "{id}");
+        }
     }
 
     #[test]

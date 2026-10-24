@@ -165,6 +165,12 @@
     invoke('set_mic_test', { on: step === 1 && pageVisible }).catch(() => {});
   });
 
+  // What suits this PC (hardware.rs `hardware_advice`, from yap.exe bench's
+  // numbers): where speech runs before it's timed here, and whether the
+  // private cleanup or a cloud provider is the quicker one — with both
+  // times said.
+  let advice = $state(null);
+
   // ---- Step 2: AI cleanup (Yap's differentiator, offered up front) ----
   let llm = $state({ installed: false, running: false, model: 'Qwen2.5 1.5B Instruct', curated: [] });
   let llmInstalling = $state(false);
@@ -177,7 +183,11 @@
   // (2026-10-24, cleanup_styles.rs): on this PC when its graphics card runs
   // the recommended model (gpu.rs) or a model is already here; else a cloud
   // provider (Groq's free plan); the person picks either, or "Maybe later"
-  // leaves cleanup off.
+  // leaves cleanup off. Without a card the cloud is recommended even where
+  // hardware.rs finds the 1.5B quick enough: it follows the styles by app
+  // less well (73 % against the 4B's and the cloud's 100 % on the style
+  // evals); both times are said under the cards (`advice`), and a small PC's
+  // cloud card says "Quicker on this PC".
   let cleanupMode = $state('local'); // 'local' | 'cloud'
   let modePicked = false;
   const recommendLocal = $derived(!!llm.gpuCapable || (llm.curated || []).some((m) => m.installed));
@@ -496,6 +506,14 @@
     window.addEventListener('keydown', onFallbackKeyDown, true);
     window.addEventListener('keyup', onFallbackKeyUp, true);
     refresh().then(refreshLlm);
+    invoke('hardware_advice')
+      .then((a) => {
+        advice = a;
+        // A small PC: the cloud is offered first (the private model adds
+        // seconds to each dictation there).
+        if (a?.cleanup === 'cloud' && !cleanupEnabled) cleanupMode = 'cloud';
+      })
+      .catch(() => {});
     invoke('list_audio_devices')
       .then((d) => (devices = d || []))
       .catch(() => {});
@@ -549,8 +567,9 @@
       <h1>Welcome to Yap</h1>
       <p class="sub">
         Pick the speech model that turns your voice into text. It runs
-        <strong>on this PC</strong> (on its graphics card when it has one) — your
-        voice never leaves this machine.
+        <strong>on this PC</strong>
+        {#if advice?.speechDevice === 'cpu'}(on its processor: no graphics card needed){:else}(on its graphics card){/if}
+        — your voice never leaves this machine.
         <strong>{recommended.name}</strong> is the fast, accurate default.
       </p>
     </header>
@@ -658,9 +677,17 @@
           >
             <span class="mode-title">☁ Cloud</span>
             <span class="mode-sub">bring your own key · Groq's is free</span>
-            {#if !recommendLocal}<span class="mode-badge">Recommended for this PC</span>{/if}
+            {#if !recommendLocal}<span class="mode-badge">{advice?.cleanup === 'cloud' ? 'Quicker on this PC' : 'Recommended for this PC'}</span>{/if}
           </button>
         </div>
+        {#if advice}
+          <!-- What each adds to a dictation here (hardware.rs, measured with yap.exe bench). -->
+          <p class="fine cleanup-times" data-testid="cleanup-times" data-pick={advice.cleanup}>
+            On this PC, private cleanup adds about {(advice.localMs / 1000).toFixed(1)} s to each dictation;
+            a cloud provider about {(advice.cloudMs / 1000).toFixed(1)} s.
+            {#if advice.cleanup === 'cloud'}Or skip it: dictation works without.{/if}
+          </p>
+        {/if}
 
         {#if cleanupMode === 'local'}
           <div class="llm-list">
@@ -828,7 +855,10 @@
 
     {#if step === 0}
       <button class="start" onclick={quickStart} disabled={!!busyId || !cfg}>
-        {#if busyId === recommended.id}
+        {#if busyId === recommended.id && percent >= 100}
+          <!-- Downloaded: checked, unpacked and loaded (~5–8 s), not "100%". -->
+          Setting up {recommended.name}…
+        {:else if busyId === recommended.id}
           Downloading {recommended.name}… {percent}%
         {:else if busyId}
           Setting up… {percent}%
