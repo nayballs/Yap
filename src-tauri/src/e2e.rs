@@ -403,6 +403,20 @@ pub fn e2e_crash_next_dictation() -> Result<(), String> {
     Ok(())
 }
 
+/// Test mode only: the next `count` saves of a store (`store`: its id,
+/// "notes", "history", "chats"…) fail as if the disk were full, so a spec
+/// sees what the person would (`saving.rs`). `count` 0: none.
+#[cfg(debug_assertions)]
+#[tauri::command]
+pub fn e2e_fail_saves(store: String, count: u32) -> Result<(), String> {
+    if !active() {
+        return Err("Only in e2e test mode".to_string());
+    }
+    tracing::info!(store = %store, count, "e2e: saves of this store fail on purpose");
+    crate::saving::stage_failures(&store, count);
+    Ok(())
+}
+
 /// One stretch of [`e2e_assistant_audio`]'s audio.
 #[cfg(debug_assertions)]
 #[derive(Debug, serde::Deserialize)]

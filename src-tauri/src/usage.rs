@@ -104,16 +104,20 @@ fn load_from_disk() -> GroqUsage {
     }
 }
 
-fn save_to_disk(u: &GroqUsage) {
-    match serde_json::to_string_pretty(u) {
-        Ok(json) => {
-            let _ = std::fs::create_dir_all(crate::config::data_dir());
-            if let Err(e) = crate::config::atomic_write(&usage_path(), &json) {
-                tracing::warn!("Failed to persist Groq usage: {}", e);
-            }
-        }
-        Err(e) => tracing::warn!("Failed to serialize Groq usage: {}", e),
+/// groq_usage.json's saves (`saving.rs`): a failed one keeps the counts in
+/// memory, is tried again with the next AI call's save, and is said once.
+pub static SAVER: crate::saving::Saver = crate::saving::Saver::new("usage", "your AI usage counts", save_now);
+
+/// Write the counts again (Try again).
+fn save_now() -> Result<(), crate::saving::SaveError> {
+    if let Some(usage) = STATE.lock().unwrap_or_else(|p| p.into_inner()).as_ref() {
+        save_to_disk(usage);
     }
+    SAVER.check()
+}
+
+fn save_to_disk(u: &GroqUsage) {
+    let _ = SAVER.write_json(&usage_path(), u, true);
 }
 
 /// Reset the counters in place if the stored day isn't today.

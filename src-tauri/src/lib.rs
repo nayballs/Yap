@@ -73,6 +73,7 @@ mod procs;
 mod read_aloud;
 mod realtest;
 mod recent_audio;
+mod saving;
 mod screen_terms;
 mod selection;
 mod smart_insert;
@@ -187,6 +188,8 @@ pub(crate) fn shutdown_cleanup() {
     local_llm::shutdown();
     bridge::stop();
     mute::restore_all();
+    // A store whose last save failed (saving.rs): one more try.
+    saving::flush();
 }
 
 /// `yap.exe mcp` (main.rs): serve MCP to an AI app over stdin/stdout until it
@@ -458,6 +461,7 @@ pub fn run() {
             commands::get_config,
             about_you::about_you_status,
             commands::save_config,
+            saving::saves_retry,
             commands::download_model_size,
             commands::installed_models,
             commands::open_settings,
@@ -703,6 +707,8 @@ pub fn run() {
             #[cfg(debug_assertions)]
             e2e::e2e_crash_next_dictation,
             #[cfg(debug_assertions)]
+            e2e::e2e_fail_saves,
+            #[cfg(debug_assertions)]
             e2e::e2e_assistant_audio,
             #[cfg(debug_assertions)]
             e2e::e2e_snip,
@@ -801,6 +807,8 @@ pub fn run() {
             // adopts it); one Yap couldn't read at start is said once the
             // windows are up (config.rs).
             config::init(&handle);
+            // A store's save that fails is said from now on (saving.rs).
+            saving::init(&handle);
 
             // Register the app handle so the usage tracker can emit live
             // `groq-usage` updates after each AI-cleanup call.

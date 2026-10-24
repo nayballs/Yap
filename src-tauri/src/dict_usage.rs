@@ -111,23 +111,24 @@ pub fn record(dict: &[DictionaryEntry], text: &str) {
     if words.is_empty() {
         return;
     }
-    let json = with_store(|usage| {
+    with_store(|usage| {
         bump(usage, &words, now_secs());
-        serde_json::to_string_pretty(usage)
+        let _ = SAVER.write_json(&path(), usage, true);
     });
-    match json {
-        Some(Ok(json)) => {
-            let p = path();
-            if let Some(dir) = p.parent() {
-                let _ = std::fs::create_dir_all(dir);
-            }
-            if let Err(e) = crate::config::atomic_write(&p, &json) {
-                tracing::warn!("Couldn't save dictionary_usage.json: {}", e);
-            }
+}
+
+/// dictionary_usage.json's saves (`saving.rs`): a failed one keeps the
+/// counts in memory, is tried again with the next save, and is said once.
+pub static SAVER: crate::saving::Saver = crate::saving::Saver::new("dictionaryUsage", "your dictionary's word counts", save_now);
+
+/// Write the counts again (Try again).
+fn save_now() -> Result<(), crate::saving::SaveError> {
+    if let Ok(guard) = STORE.lock() {
+        if let Some(usage) = guard.as_ref() {
+            let _ = SAVER.write_json(&path(), usage, true);
         }
-        Some(Err(e)) => tracing::warn!("Couldn't serialise dictionary usage: {}", e),
-        None => {}
     }
+    SAVER.check()
 }
 
 /// The dictionary in vocabulary order: words used in the last day first,

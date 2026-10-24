@@ -32,6 +32,7 @@
   import Textarea from './ui/Textarea.svelte';
   import LinkRow from './ui/LinkRow.svelte';
   import { toast } from './ui/toast.svelte.js';
+  import { showSaveError } from './saveErrors.js';
   import { askConfirm } from './ui/contextMenu.svelte.js';
   import { memory, loadMemory, changedToast } from './memory.svelte.js';
 
@@ -154,7 +155,13 @@
       open = null;
       await loadMemory();
     } catch (err) {
-      toast({ title: "Couldn't save that", description: String(err), variant: 'destructive' });
+      // Changed, but not saved to disk yet (saveErrors.js): Yap says so.
+      if (showSaveError(err)) {
+        open = null;
+        await loadMemory();
+      } else {
+        toast({ title: "Couldn't save that", description: String(err), variant: 'destructive' });
+      }
     } finally {
       saving = false;
     }
@@ -167,7 +174,12 @@
       await loadMemory();
       changedToast(`Deleted “${item.title}”`, batch);
     } catch (err) {
-      toast({ title: "Couldn't delete that", description: String(err), variant: 'destructive' });
+      if (showSaveError(err)) {
+        open = null;
+        await loadMemory();
+      } else {
+        toast({ title: "Couldn't delete that", description: String(err), variant: 'destructive' });
+      }
     }
   }
 
@@ -176,7 +188,8 @@
       await invoke('memory_set_dictation', { id: item.id, on });
       await loadMemory();
     } catch (err) {
-      toast({ title: "Couldn't change that", description: String(err), variant: 'destructive' });
+      if (showSaveError(err)) await loadMemory();
+      else toast({ title: "Couldn't change that", description: String(err), variant: 'destructive' });
     }
   }
 
@@ -216,7 +229,12 @@
       const n = r?.done?.length ?? 0;
       changedToast(n === 1 ? 'Memory updated' : `Memory updated: ${n} changes`, r?.batch, (r?.done ?? []).map((d) => d.say).filter(Boolean).join(' · '));
     } catch (err) {
-      toast({ title: "Couldn't change memory", description: String(err), variant: 'destructive' });
+      if (showSaveError(err)) {
+        done();
+        await loadMemory();
+      } else {
+        toast({ title: "Couldn't change memory", description: String(err), variant: 'destructive' });
+      }
     } finally {
       applying = false;
     }
@@ -282,7 +300,15 @@
       busyLabel: 'Clearing…',
       returnFocus: e?.currentTarget ?? null,
       run: async () => {
-        const batch = await invoke('memory_clear');
+        let batch;
+        try {
+          batch = await invoke('memory_clear');
+        } catch (err) {
+          // Cleared here, not on disk yet: said, with Try again.
+          if (!showSaveError(err)) throw err;
+          await loadMemory();
+          return;
+        }
         await loadMemory();
         changedToast('Memory cleared', batch);
       },

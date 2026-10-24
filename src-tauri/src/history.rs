@@ -109,19 +109,32 @@ fn load_from_disk() -> Vec<HistoryEntry> {
     }
 }
 
+/// history.json's saves (`saving.rs`): a failed one keeps the history in
+/// memory, is tried again with the next save (the next dictation), and is
+/// said once — by the command that hit it ([`saved`]) or, after a
+/// dictation, the notice.
+pub static SAVER: crate::saving::Saver = crate::saving::Saver::new("history", "your dictation history", save_now);
+
+/// `Ok` when the whole history is on disk; else why not (the caller says it).
+pub fn saved() -> Result<(), crate::saving::SaveError> {
+    SAVER.check()
+}
+
+/// Write the whole history again (Try again).
+fn save_now() -> Result<(), crate::saving::SaveError> {
+    {
+        let mut guard = STATE.lock().unwrap_or_else(|p| p.into_inner());
+        let entries = guard.get_or_insert_with(load_from_disk);
+        save_to_disk(entries);
+    }
+    saved()
+}
+
 fn save_to_disk(entries: &[HistoryEntry]) {
     if cfg!(test) {
         return;
     }
-    match serde_json::to_string(entries) {
-        Ok(json) => {
-            let _ = std::fs::create_dir_all(crate::config::data_dir());
-            if let Err(e) = crate::config::atomic_write(&history_path(), &json) {
-                tracing::warn!("Failed to persist history: {}", e);
-            }
-        }
-        Err(e) => tracing::warn!("Failed to serialize history: {}", e),
-    }
+    let _ = SAVER.write_json(&history_path(), entries, false);
 }
 
 fn word_count(text: &str) -> usize {
@@ -421,7 +434,15 @@ pub fn clear() {
         Err(poisoned) => poisoned.into_inner(),
     };
     *guard = Some(Vec::new());
-    let _ = std::fs::remove_file(history_path());
+    if !cfg!(test) {
+        match std::fs::remove_file(history_path()) {
+            Ok(()) => SAVER.nothing_to_save(),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => SAVER.nothing_to_save(),
+            // Held by another program: an empty history over it, else the
+            // failure is said ([`saved`]) and the next save tries again.
+            Err(_) => save_to_disk(&[]),
+        }
+    }
     drop(guard);
     crate::recent_audio::clear();
 }

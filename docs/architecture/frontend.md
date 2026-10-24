@@ -150,7 +150,17 @@ The Svelte side's look (theme, window chrome) and the main window: the ControlPa
   is copied: press Ctrl+V" with chip Paste, `icon: 'clipboard'`; "Windows is
   blocking microphone access for desktop apps" + Open settings, chip
   Microphone, `icon: 'mic'`; "Stop asking about calls?" + Stop asking, chip
-  Calls), and the **update toast**
+  Calls; "Couldn't save your dictation history" + Try again, chip Saving,
+  `icon: 'save'`, saving.rs), **failed saves** (`saveErrors.js`, 2026-10-24:
+  a command whose store couldn't be saved rejects with "Couldn't save your
+  note: the disk is full." — the change itself happened, kept in memory —
+  so the caller carries on as if it worked and `showSaveError(e)` shows one
+  toast, kind `error`, key `save-failed`: "Couldn't save your note" / "The
+  disk is full. Yap is keeping your changes and will try again with the
+  next one." + **Try again** (`saves_retry`: "Saved", or "Still couldn't
+  save…"); false for any other error, the caller's own. Used by the Notes
+  view and the notepad (note edits, folders, delete), Actions, Chat (delete,
+  rename), Home (a dictation's delete), Clear history and Memory), and the **update toast**
   (`updates.svelte.js` — the shared update store started by ControlPanel:
   sticky "Yap X is ready" + Restart to update / Later / What's new, then
   Downloading… / Restarting Yap… in place; "Updated to X" after the

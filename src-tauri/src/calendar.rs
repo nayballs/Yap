@@ -180,16 +180,29 @@ fn load_store() -> Store {
     }
 }
 
-fn save_store(store: &Store) {
-    match serde_json::to_string(store) {
-        Ok(json) => {
-            let _ = std::fs::create_dir_all(crate::config::data_dir());
-            if let Err(e) = crate::config::atomic_write(&store_path(), &json) {
-                tracing::warn!("calendar: couldn't save calendar.json: {e}");
-            }
-        }
-        Err(e) => tracing::warn!("calendar: couldn't serialize the store: {e}"),
+/// calendar.json's saves (`saving.rs`): a failed one keeps the calendar in
+/// memory, is tried again with the next save (the next sync), and is said
+/// once — by the command that hit it ([`saved`]) or the notice. File I/O
+/// only, so it's fine under the runtime's lock.
+pub static SAVER: crate::saving::Saver = crate::saving::Saver::new("calendar", "your calendar", save_now);
+
+/// `Ok` when the calendar is on disk; else why not (the caller says it).
+/// Never under the runtime's lock.
+pub fn saved() -> Result<(), crate::saving::SaveError> {
+    SAVER.check()
+}
+
+/// Write the store again (Try again). Only once `init` loaded it: never an
+/// empty one over calendar.json.
+fn save_now() -> Result<(), crate::saving::SaveError> {
+    if let Some(s) = lock_started() {
+        save_store(&s.store);
     }
+    saved()
+}
+
+fn save_store(store: &Store) {
+    let _ = SAVER.write_json(&store_path(), store, false);
 }
 
 // ---- runtime state -----------------------------------------------------------------------

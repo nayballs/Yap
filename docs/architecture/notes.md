@@ -40,8 +40,15 @@ The AI Notepad: the notes store, folders, the Actions engine, and the Notes view
   lines transcribed after the fact (a crash's, `meeting_audio.rs`) where they
   belong by time, digests and stop marks moving along (a stop mark after
   them when a later recording follows). `delete` takes the note's meeting
-  audio with it (`meeting_audio::forget`). Unit tests get an in-memory store per test
-  thread (`cfg(test)`), never `notes.json`. `event` (optional) = the calendar meeting the note
+  audio with it (`meeting_audio::forget`). **Saves** go through `SAVER`
+  (`saving.rs`, [config-and-data.md](./config-and-data.md)): a failed one
+  keeps the notes in memory and is written with the next change; the
+  commands that change notes return it as their error (`saved()`: "Couldn't
+  save your note: the disk is full."), which the Notes view and the notepad
+  show with Try again (`saveErrors.js`), and a meeting's lines that couldn't
+  be saved are said once by the notice. Unit tests get an in-memory store per test
+  thread (`cfg(test)`), never `notes.json` (saved only to a scratch file a
+  test names, `TEST_PATH`). `event` (optional) = the calendar meeting the note
   belongs to (`NoteEvent`: key, title, start/end, the invite's description,
   service), set by `link_event` (also the meeting's title as a real title,
   attendees merged, `note_type` meeting) and found by `find_by_event`.

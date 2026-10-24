@@ -6,6 +6,7 @@
   // edited but not deleted. A row's right-click menu (ui/contextMenu.svelte.js,
   // as in Notes): Edit, Delete… (asked first, as the trash button does).
   import { invoke } from '@tauri-apps/api/core';
+  import { showSaveError } from './saveErrors.js';
   import { openContextMenu, menuKey, menuOpenFor, askConfirm, devInspect } from './ui/contextMenu.svelte.js';
 
   let { open = $bindable(false), onchanged = null } = $props();
@@ -94,7 +95,13 @@
       }
       onchanged?.();
     } catch (e) {
-      error = String(e);
+      // Changed, but not saved to disk yet: said with Try again (a toast).
+      if (showSaveError(e)) {
+        await refresh();
+        onchanged?.();
+      } else {
+        error = String(e);
+      }
     } finally {
       saving = false;
     }
@@ -110,7 +117,12 @@
       }
       onchanged?.();
     } catch (e) {
-      error = String(e);
+      if (showSaveError(e)) {
+        await refresh();
+        onchanged?.();
+      } else {
+        error = String(e);
+      }
     }
   }
 

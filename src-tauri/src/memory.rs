@@ -111,21 +111,28 @@ fn load_from_disk() -> Store {
     }
 }
 
+/// memory.json's saves (`saving.rs`): a failed one keeps what Yap
+/// remembers in memory, is tried again with the next save, and is said once.
+pub static SAVER: crate::saving::Saver = crate::saving::Saver::new("memory", "what Yap remembers about you", save_now);
+
+/// `Ok` when all of it is on disk; else why not (the caller says it).
+pub fn saved() -> Result<(), crate::saving::SaveError> {
+    SAVER.check()
+}
+
+/// Write the whole store again (Try again).
+fn save_now() -> Result<(), crate::saving::SaveError> {
+    with_store(|s| save_to_disk(s));
+    saved()
+}
+
 #[cfg(not(test))]
 fn save_to_disk(store: &Store) {
     // A model evaluation keeps its memory in memory only.
     if crate::eval::active() {
         return;
     }
-    match serde_json::to_string(store) {
-        Ok(json) => {
-            let _ = std::fs::create_dir_all(crate::config::data_dir());
-            if let Err(e) = crate::config::atomic_write(&memory_path(), &json) {
-                tracing::warn!("Failed to persist memory: {}", e);
-            }
-        }
-        Err(e) => tracing::warn!("Failed to serialize memory: {}", e),
-    }
+    let _ = SAVER.write_json(&memory_path(), store, false);
 }
 
 #[cfg(not(test))]
@@ -678,30 +685,41 @@ pub async fn memory_list() -> Value {
     json!({ "items": list, "ai": ai })
 }
 
+// Each change below returns a save that failed as its error ("Couldn't save
+// what Yap remembers about you: …", saving.rs); the change is kept in
+// memory and saved with the next one, or Try again.
+
 #[tauri::command]
 pub fn memory_save_item(item: ItemInput) -> Result<Value, String> {
     let (item, batch) = save_item(item)?;
+    saved()?;
     Ok(json!({ "item": item, "batch": batch }))
 }
 
 #[tauri::command]
 pub fn memory_delete_item(id: u64) -> Result<u64, String> {
-    delete_item(id)
+    let batch = delete_item(id)?;
+    saved()?;
+    Ok(batch)
 }
 
 #[tauri::command]
 pub fn memory_set_dictation(id: u64, on: bool) -> Result<(), String> {
-    set_dictation(id, on)
+    set_dictation(id, on)?;
+    Ok(saved()?)
 }
 
 #[tauri::command]
-pub fn memory_clear() -> u64 {
-    clear()
+pub fn memory_clear() -> Result<u64, String> {
+    let gone = clear();
+    saved()?;
+    Ok(gone)
 }
 
 #[tauri::command]
 pub fn memory_undo(batch: u64) -> Result<(), String> {
-    undo(batch)
+    undo(batch)?;
+    Ok(saved()?)
 }
 
 /// The prompt to paste into ChatGPT, Claude or Gemini (Import).
@@ -725,7 +743,9 @@ pub async fn memory_import(text: String) -> Result<learn::Proposal, String> {
 /// Apply a proposal (all of it, or the changes `include` lists).
 #[tauri::command]
 pub fn memory_apply(proposal: u64, include: Option<Vec<usize>>) -> Result<Applied, String> {
-    learn::apply_proposal(proposal, include.as_deref())
+    let applied = learn::apply_proposal(proposal, include.as_deref())?;
+    saved()?;
+    Ok(applied)
 }
 
 /// Write the export (.zip of Markdown) to `path`.

@@ -45,6 +45,7 @@
   import BriefView from './BriefView.svelte';
   import { briefTeaser } from './brief.js';
   import { toast } from './ui/toast.svelte.js';
+  import { showSaveError } from './saveErrors.js';
   import { renderMarkdown } from './markdown.js';
   import { nextModel, modelLine, whereItRuns } from './aiModel.js';
   import { speech, initSpeech, readAloud, readPageSelection } from './speech.svelte.js';
@@ -277,7 +278,8 @@
     if (dirty.title) args.title = note.title;
     if (dirty.content) args.content = note.content;
     dirty = { title: false, content: false };
-    invoke('note_update', args).catch(() => {});
+    // A failed save keeps the edit in memory and says so, with Try again.
+    invoke('note_update', args).catch((e) => showSaveError(e));
   }
 
   // Another window (or the AI title) changed the note.

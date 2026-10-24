@@ -93,7 +93,10 @@ The full stack list, the app's entry and plumbing (`lib.rs`, the tray, context m
   instead of crashing (`config::atomic_write`/`quarantine_corrupt`, used by all
   eleven stores; each write its own temp file). config.json too: set aside
   as it was, the settings that still read kept, the person told once, saves
-  one at a time ([config-and-data.md](./config-and-data.md)).
+  one at a time ([config-and-data.md](./config-and-data.md)). A store's
+  write that fails keeps its data in memory, is retried with the next save
+  and is said once, with Try again (`saving.rs`; `saving::init` in setup,
+  `saving::flush` in `shutdown_cleanup`).
 
 ## Modules
 

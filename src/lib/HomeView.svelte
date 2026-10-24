@@ -18,6 +18,7 @@
   import { openContextMenu, menuKey, menuOpenFor, askConfirm } from './ui/contextMenu.svelte.js';
   import { copyText } from './itemMenus.js';
   import { toast, dismiss } from './ui/toast.svelte.js';
+  import { showSaveError } from './saveErrors.js';
   import { MODELS } from './models.js';
   import { attention } from './attention.svelte.js';
   import { wordDiff } from './wordDiff.js';
@@ -268,8 +269,9 @@
   async function remove(e) {
     try {
       await invoke('delete_history_entry', { ts: e.ts, text: e.text });
-    } catch {
-      /* ignore */
+    } catch (err) {
+      // Deleted but not saved yet: Yap says so, with Try again.
+      if (!showSaveError(err)) toast({ title: "Couldn't delete the dictation", description: String(err), variant: 'destructive' });
     }
     await refresh();
     return true;

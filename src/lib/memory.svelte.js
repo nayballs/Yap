@@ -7,6 +7,7 @@
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { toast } from './ui/toast.svelte.js';
+import { showSaveError } from './saveErrors.js';
 
 export const memory = $state({ items: [], ai: { ready: true }, loaded: false });
 
@@ -41,7 +42,8 @@ export async function undoMemory(batch) {
     await invoke('memory_undo', { batch });
     toast({ title: 'Undone', variant: 'success', chip: 'Memory', icon: 'memory', duration: 3_000 });
   } catch (err) {
-    toast({ title: "Couldn't undo that", description: String(err), variant: 'destructive' });
+    // Undone, but not saved yet (saveErrors.js says so, with Try again).
+    if (!showSaveError(err)) toast({ title: "Couldn't undo that", description: String(err), variant: 'destructive' });
   }
 }
 

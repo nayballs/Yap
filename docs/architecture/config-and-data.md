@@ -268,6 +268,32 @@
   while another program holds it): until 2026-10-23 every write of a file
   shared `<name>.tmp`, so two at once could rename a half-written file into
   place. The app icons' cache writes the same way.
+- **A write that fails is said, and nothing is lost** (`saving.rs`,
+  2026-10-24; until then it was a warning in the log while the page said
+  it saved). Every store writes through its `Saver` (`notes::SAVER`,
+  `history::SAVER`…): a failed write — the disk full, another program
+  holding the file during the rename, a read-only file — leaves the store's
+  data in memory, marked unsaved, and its next save writes all of it (each
+  store writes its whole state every time); quitting tries once more
+  (`saving::flush`). The person is told once, in plain words: "Couldn't save
+  your note: the disk is full." (`SaveError`; `Reason` tells a full disk, a
+  file another program holds — Windows reports that as access denied on a
+  file that isn't read-only —, a read-only file and a folder Yap can't write
+  apart). A command that changed the store (a note's edit, a folder, an
+  action, a chat's rename or delete, memory's edits, Clear history, a
+  history entry's delete) returns it as its error (each store's `saved()`),
+  and the page shows it with **Try again** (`saves_retry` → every unsaved
+  store written again; `src/lib/saveErrors.js`, frontend.md); a save that
+  failed by itself (history after a dictation, memory learning, calendar
+  sync, usage and dictionary counts, call-prompt counts, word suggestions)
+  is said by one alert through the notice policy (kind `saveFailed`,
+  [notices.md](./notices.md)), 1.5 s later unless a command said it, naming
+  the first store and whether others failed too, with Try again — and not
+  again for that store until a save of it worked. The local API and the
+  chat's note tools answer an AI app or model with the failure too, so
+  neither says it saved. Caches (`model_catalog.json`, `stt_speed.json`,
+  `updates.json`, `hints.json`, `quieted_apps.json`) are only logged. The
+  log names the store and the error's kind, never what it holds.
 - App icons: `%APPDATA%/yap/icons/` — `<app>.png` per installed call app and
   `sources.json` (what each was made from); a cache, rebuilt whenever it's
   missing, stale or unreadable (`app_icons.rs`).

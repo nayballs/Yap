@@ -415,20 +415,24 @@ pub fn note_get(id: u64) -> Result<crate::notes::Note, String> {
     crate::notes::get(id).ok_or_else(|| "Note not found".to_string())
 }
 
-/// Create a note; returns it (the UI selects it immediately).
+/// Create a note; returns it (the UI selects it immediately). A save that
+/// failed is the error ("Couldn't save your note: …", saving.rs): the note
+/// is kept in memory and saved with the next change, or Try again.
 #[tauri::command]
 pub fn note_create(
     title: Option<String>,
     content: Option<String>,
     source: Option<String>,
     folder: Option<String>,
-) -> crate::notes::Note {
-    crate::notes::create(
+) -> Result<crate::notes::Note, String> {
+    let note = crate::notes::create(
         title.as_deref().unwrap_or(""),
         content.as_deref().unwrap_or(""),
         source.as_deref().unwrap_or("manual"),
         folder.as_deref().unwrap_or(""),
-    )
+    );
+    crate::notes::saved()?;
+    Ok(note)
 }
 
 /// Update a note's title / raw content / folder / attendees (enhancement
@@ -436,6 +440,8 @@ pub fn note_create(
 /// windows showing the note follow it: `yap-note-changed` carries the note's
 /// editable fields and `origin`, the label of the window that saved (the
 /// Notes view and the meeting notepad keep each other in sync both ways).
+/// A save that failed is the error, after the windows are told (the edit
+/// is kept in memory: saving.rs).
 #[tauri::command]
 pub fn note_update(
     app: AppHandle,
@@ -448,7 +454,7 @@ pub fn note_update(
 ) -> Result<(), String> {
     crate::notes::update(id, title, content, folder, participants)?;
     note_changed(&app, id, origin.as_deref().unwrap_or(""));
-    Ok(())
+    Ok(crate::notes::saved()?)
 }
 
 /// Tell every window that note `id`'s editable fields changed (`origin`:
@@ -544,7 +550,9 @@ pub fn action_create(
     description: Option<String>,
     prompt: String,
 ) -> Result<crate::notes::Action, String> {
-    crate::notes::action_create(&name, description.as_deref().unwrap_or(""), &prompt)
+    let action = crate::notes::action_create(&name, description.as_deref().unwrap_or(""), &prompt)?;
+    crate::notes::saved()?;
+    Ok(action)
 }
 
 #[tauri::command]
@@ -554,18 +562,22 @@ pub fn action_update(
     description: Option<String>,
     prompt: String,
 ) -> Result<(), String> {
-    crate::notes::action_update(id, &name, description.as_deref().unwrap_or(""), &prompt)
+    crate::notes::action_update(id, &name, description.as_deref().unwrap_or(""), &prompt)?;
+    Ok(crate::notes::saved()?)
 }
 
 #[tauri::command]
 pub fn action_delete(id: u64) -> Result<(), String> {
-    crate::notes::action_delete(id)
+    crate::notes::action_delete(id)?;
+    Ok(crate::notes::saved()?)
 }
 
 /// Create a folder; returns the updated folder list.
 #[tauri::command]
-pub fn notes_folder_create(name: String) -> Vec<String> {
-    crate::notes::folder_create(&name)
+pub fn notes_folder_create(name: String) -> Result<Vec<String>, String> {
+    let folders = crate::notes::folder_create(&name);
+    crate::notes::saved()?;
+    Ok(folders)
 }
 
 /// Rename a folder (the Notes view's folder menu): its notes go along.
@@ -576,6 +588,7 @@ pub fn notes_folder_create(name: String) -> Vec<String> {
 pub fn notes_folder_rename(app: AppHandle, from: String, to: String) -> Result<Vec<String>, String> {
     let change = crate::notes::folder_rename(&from, &to)?;
     folders_changed(&app, &change);
+    crate::notes::saved()?;
     Ok(change.folders)
 }
 
@@ -585,6 +598,7 @@ pub fn notes_folder_rename(app: AppHandle, from: String, to: String) -> Result<V
 pub fn notes_folder_delete(app: AppHandle, name: String) -> Result<Vec<String>, String> {
     let change = crate::notes::folder_delete(&name)?;
     folders_changed(&app, &change);
+    crate::notes::saved()?;
     Ok(change.folders)
 }
 
@@ -609,7 +623,8 @@ pub fn note_delete(app: AppHandle, id: u64) -> Result<(), String> {
     let _ = app.emit("yap-notes-changed", ());
     let _ = app.emit(crate::meeting_end::EVENT_DELETED, serde_json::json!({ "id": id }));
     crate::notepad::on_note_deleted(&app, id);
-    Ok(())
+    // Gone from memory; until notes.json is saved it would come back.
+    Ok(crate::notes::saved()?)
 }
 
 /// Run the note-formatting "action" on a note (OpenWhispr's Actions engine,
@@ -1013,29 +1028,35 @@ pub fn chat_get(id: u64) -> Result<crate::chats::Conversation, String> {
     crate::chats::get(id).map(crate::chats::for_page).ok_or_else(|| "Conversation not found".to_string())
 }
 
+/// Delete a conversation. A save that failed is the error (saving.rs):
+/// until chats.json is saved, it would come back.
 #[tauri::command]
-pub fn chat_delete(id: u64) {
+pub fn chat_delete(id: u64) -> Result<(), String> {
     crate::chats::delete(id);
     // A later conversation may get its id: nothing of this one carries over.
     crate::apps::moved_on(Some(id));
+    Ok(crate::chats::saved()?)
 }
 
 /// Several conversations at once (the Chat list's selection, "Delete all
 /// chats…"): one write. Returns how many were deleted.
 #[tauri::command]
-pub fn chat_delete_many(ids: Vec<u64>) -> usize {
+pub fn chat_delete_many(ids: Vec<u64>) -> Result<usize, String> {
     let gone = crate::chats::delete_many(&ids);
     for id in ids {
         crate::apps::moved_on(Some(id));
     }
-    gone
+    crate::chats::saved()?;
+    Ok(gone)
 }
 
 /// Rename a conversation (the Chat sidebar's Rename, in place): the title as
 /// stored (one line, trimmed, ≤ 80 characters). Its place in the list stays.
 #[tauri::command]
 pub fn chat_rename(id: u64, title: String) -> Result<String, String> {
-    crate::chats::rename(id, &title)
+    let title = crate::chats::rename(id, &title)?;
+    crate::chats::saved()?;
+    Ok(title)
 }
 
 /// One chat turn, answered: what [`chat_turn`] returns.
@@ -2385,21 +2406,24 @@ pub fn get_history(limit: Option<usize>) -> serde_json::Value {
     crate::history::list(limit.unwrap_or(100))
 }
 
-/// Delete all local transcription history.
+/// Delete all local transcription history. A save that failed is the error
+/// (saving.rs): until history.json is saved, the history would come back.
 #[tauri::command]
-pub fn clear_history(app: AppHandle) {
+pub fn clear_history(app: AppHandle) -> Result<(), String> {
     use tauri::Emitter;
     crate::history::clear();
     let _ = app.emit("yap-history-changed", ());
+    Ok(crate::history::saved()?)
 }
 
 /// Delete one history entry (matched by timestamp + final text) — the per-item
-/// trash button in the Home feed.
+/// trash button in the Home feed. A save that failed is the error.
 #[tauri::command]
-pub fn delete_history_entry(app: AppHandle, ts: u64, text: String) {
+pub fn delete_history_entry(app: AppHandle, ts: u64, text: String) -> Result<(), String> {
     use tauri::Emitter;
     crate::history::delete(ts, &text);
     let _ = app.emit("yap-history-changed", ());
+    Ok(crate::history::saved()?)
 }
 
 /// Derived stats for the dashboard: totals, today, time saved, streak, and a

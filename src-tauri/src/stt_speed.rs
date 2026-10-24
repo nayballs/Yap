@@ -467,15 +467,19 @@ fn save_store(store: &Store) {
     if cfg!(test) {
         return;
     }
-    match serde_json::to_string_pretty(store) {
-        Ok(json) => {
-            let _ = std::fs::create_dir_all(crate::config::data_dir());
-            if let Err(e) = crate::config::atomic_write(&store_path(), &json) {
-                tracing::warn!("Couldn't save the speech engine timings: {e}");
-            }
-        }
-        Err(e) => tracing::warn!("Couldn't write the speech engine timings: {e}"),
+    let _ = SAVER.write_json(&store_path(), store, true);
+}
+
+/// stt_speed.json's saves (`saving.rs`): a cache (measured again if lost),
+/// so a failed save is only logged, and tried again with the next one.
+pub static SAVER: crate::saving::Saver = crate::saving::Saver::quiet("sttSpeed", "the speech engine's timings", save_now);
+
+/// Write the timings again (Try again).
+fn save_now() -> Result<(), crate::saving::SaveError> {
+    if let Some(store) = lock().store.as_ref() {
+        save_store(store);
     }
+    SAVER.check()
 }
 
 fn now_secs() -> u64 {

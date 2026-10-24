@@ -19,6 +19,7 @@
   import { onMount } from 'svelte';
   import { renderMarkdown, markdownToText } from './markdown.js';
   import { toast } from './ui/toast.svelte.js';
+  import { showSaveError } from './saveErrors.js';
   import ActionManager from './ActionManager.svelte';
   import { noteRequest } from './meetingDetect.svelte.js';
   import { summaries, loadSummary, summarise } from './meetingSummary.svelte.js';
@@ -500,8 +501,12 @@
     try {
       folders = await invoke('notes_folder_create', { name });
       activeFolder = name;
-    } catch {
-      /* ignore */
+    } catch (e) {
+      // Made, but not saved yet (Yap keeps it and says so).
+      if (showSaveError(e)) {
+        activeFolder = name;
+        refreshList();
+      }
     }
   }
 
@@ -531,7 +536,14 @@
       tab = 'raw';
       error = null;
     } catch (e) {
-      error = String(e);
+      if (!showSaveError(e)) {
+        error = String(e);
+        return;
+      }
+      // Made but not saved yet (Yap keeps it): open it, the newest note.
+      await refreshList();
+      const newest = notes.reduce((a, n) => (!a || n.id > a.id ? n : a), null);
+      if (newest) await select(newest.id);
     }
   }
 
@@ -547,9 +559,12 @@
     try {
       await invoke(meetingNote ? 'meeting_delete' : 'note_delete', meetingNote ? { noteId: id } : { id });
     } catch (e) {
-      toast({ title: "Couldn't delete the note", description: String(e), variant: 'destructive' });
-      refreshList();
-      return false;
+      // Deleted but not saved yet: gone here, and Yap says so.
+      if (!showSaveError(e)) {
+        toast({ title: "Couldn't delete the note", description: String(e), variant: 'destructive' });
+        refreshList();
+        return false;
+      }
     }
     if (selected?.id === id) selected = null;
     refreshList();
@@ -606,13 +621,16 @@
     }
     try {
       folders = await invoke('notes_folder_rename', { from, to });
-      if (activeFolder === from) activeFolder = to;
-      if (selected?.folder === from) selected.folder = to;
-      await refreshList();
-      setTimeout(() => folderEls[to]?.focus({ preventScroll: true }), 0);
     } catch (e) {
-      toast({ title: "Couldn't rename the folder", description: String(e), variant: 'destructive' });
+      if (!showSaveError(e)) {
+        toast({ title: "Couldn't rename the folder", description: String(e), variant: 'destructive' });
+        return;
+      }
     }
+    if (activeFolder === from) activeFolder = to;
+    if (selected?.folder === from) selected.folder = to;
+    await refreshList();
+    setTimeout(() => folderEls[to]?.focus({ preventScroll: true }), 0);
   }
   function focusOnMount(el) {
     el.focus();
@@ -635,15 +653,17 @@
   async function deleteFolder(f) {
     try {
       folders = await invoke('notes_folder_delete', { name: f });
-      if (activeFolder === f) activeFolder = 'Personal';
-      if (selected?.folder === f) selected.folder = 'Personal';
-      await refreshList();
-      setTimeout(() => folderEls.Personal?.focus({ preventScroll: true }), 0);
-      return true;
     } catch (e) {
-      toast({ title: "Couldn't delete the folder", description: String(e), variant: 'destructive' });
-      return false;
+      if (!showSaveError(e)) {
+        toast({ title: "Couldn't delete the folder", description: String(e), variant: 'destructive' });
+        return false;
+      }
     }
+    if (activeFolder === f) activeFolder = 'Personal';
+    if (selected?.folder === f) selected.folder = 'Personal';
+    await refreshList();
+    setTimeout(() => folderEls.Personal?.focus({ preventScroll: true }), 0);
+    return true;
   }
   // Notes: Rename (the title), Move to ▸, Copy as Markdown, Export…, Delete….
   let itemEls = $state({});
@@ -793,9 +813,10 @@
     if (dirty.title) args.title = selected.title;
     if (dirty.content) args.content = selected.content;
     dirty = { title: false, content: false };
+    // A failed save keeps the edit in memory and says so, with Try again.
     invoke('note_update', args)
       .then(refreshList)
-      .catch(() => {});
+      .catch((e) => showSaveError(e));
   }
 
   const isStale = $derived.by(() => {
@@ -885,16 +906,19 @@
     if (!name) return;
     try {
       folders = await invoke('notes_folder_create', { name });
-      await moveToFolder(name);
     } catch (e) {
-      toast({ title: "Couldn't create folder", description: String(e), variant: 'destructive' });
+      if (!showSaveError(e)) {
+        toast({ title: "Couldn't create folder", description: String(e), variant: 'destructive' });
+        return;
+      }
     }
+    await moveToFolder(name);
   }
 
   function persistParticipants() {
     if (!selected) return;
     invoke('note_update', { id: selected.id, participants: selected.participants || [] }).catch(
-      () => {}
+      (e) => showSaveError(e)
     );
   }
   function addAttendee() {
@@ -926,7 +950,8 @@
       refreshList();
       toast({ title: `Moved to ${f}`, variant: "success" });
     } catch (e) {
-      toast({ title: "Couldn't move note", description: String(e), variant: 'destructive' });
+      if (showSaveError(e)) refreshList();
+      else toast({ title: "Couldn't move note", description: String(e), variant: 'destructive' });
     }
   }
   // Recording from a note makes it a meeting note, filed in Meetings like

@@ -257,15 +257,22 @@ fn with_store<R>(f: impl FnOnce(&mut Catalog) -> R) -> Option<R> {
     TEST_STORE.with(|s| Some(f(&mut s.borrow_mut())))
 }
 
+/// model_catalog.json's saves (`saving.rs`): a cache (asked again if lost),
+/// so a failed save is only logged, and tried again with the next one.
+/// (Unit tests keep the store in memory: nothing saves through it there.)
+#[cfg_attr(test, allow(dead_code))]
+pub static SAVER: crate::saving::Saver = crate::saving::Saver::quiet("modelCatalog", "the model lists", save_now);
+
+/// Write the lists again (Try again).
+#[cfg_attr(test, allow(dead_code))]
+fn save_now() -> Result<(), crate::saving::SaveError> {
+    with_store(|c| save(c));
+    SAVER.check()
+}
+
 #[cfg(not(test))]
 fn save(c: &Catalog) {
-    let result = std::fs::create_dir_all(crate::config::data_dir())
-        .map_err(|e| e.to_string())
-        .and_then(|_| serde_json::to_string_pretty(c).map_err(|e| e.to_string()))
-        .and_then(|json| crate::config::atomic_write(&path(), &json).map_err(|e| e.to_string()));
-    if let Err(e) = result {
-        tracing::warn!("Couldn't save model_catalog.json: {}", e);
-    }
+    let _ = SAVER.write_json(&path(), c, true);
 }
 
 #[cfg(test)]

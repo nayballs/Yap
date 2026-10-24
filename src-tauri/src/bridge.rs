@@ -250,6 +250,17 @@ fn respond_no_content(request: tiny_http::Request) {
     let _ = request.respond(Response::empty(204));
 }
 
+/// A change's answer once its store has been saved: `ok` (the success
+/// answer), or a 500 `save_failed` with the person's words when the save
+/// failed (`saving.rs`: the change is kept in memory and saved with the
+/// next one), so an AI app never says it saved what didn't reach the disk.
+fn respond_saved(request: tiny_http::Request, saved: Result<(), crate::saving::SaveError>, ok: impl FnOnce(tiny_http::Request)) {
+    match saved {
+        Ok(()) => ok(request),
+        Err(e) => respond_error(request, 500, "save_failed", &e.to_string()),
+    }
+}
+
 /// Compare secrets without leaking length/prefix timing: hash both sides.
 fn token_matches(supplied: &str, expected: &str) -> bool {
     Sha256::digest(supplied.as_bytes()) == Sha256::digest(expected.as_bytes())
@@ -458,7 +469,7 @@ fn route(
                 str_field(body, "folder").unwrap_or(""),
             );
             let _ = app.emit("yap-notes-changed", ());
-            respond_json(request, 201, &json!({ "data": note }));
+            respond_saved(request, crate::notes::SAVER.status(), |r| respond_json(r, 201, &json!({ "data": note })));
         }
         (Method::Patch, ["v1", "notes", id]) => {
             let Some(id) = parse_id(id) else {
@@ -480,7 +491,7 @@ fn route(
                 Ok(()) => {
                     let _ = app.emit("yap-notes-changed", ());
                     let note = crate::notes::get(id);
-                    respond_json(request, 200, &json!({ "data": note }));
+                    respond_saved(request, crate::notes::SAVER.status(), |r| respond_json(r, 200, &json!({ "data": note })));
                 }
                 Err(e) => respond_error(request, 404, "not_found", &e),
             }
@@ -490,7 +501,7 @@ fn route(
                 Some(note) => {
                     crate::notes::delete(note.id);
                     let _ = app.emit("yap-notes-changed", ());
-                    respond_no_content(request);
+                    respond_saved(request, crate::notes::SAVER.status(), respond_no_content);
                 }
                 None => {
                     respond_error(request, 404, "not_found", &format!("Note {} not found", id))
@@ -510,7 +521,8 @@ fn route(
             }
             let folders = crate::notes::folder_create(&name);
             let _ = app.emit("yap-notes-changed", ());
-            respond_json(request, 201, &json!({ "data": { "name": name, "folders": folders } }));
+            let body = json!({ "data": { "name": name, "folders": folders } });
+            respond_saved(request, crate::notes::SAVER.status(), |r| respond_json(r, 201, &body));
         }
 
         // ---- meetings (what `yap.exe mcp` reads; views in mcp.rs) ----
@@ -558,7 +570,7 @@ fn route(
             match parse_id(id).map(crate::history::delete_by_ts) {
                 Some(true) => {
                     let _ = app.emit("yap-history-changed", ());
-                    respond_no_content(request)
+                    respond_saved(request, crate::history::SAVER.status(), respond_no_content)
                 }
                 _ => respond_error(
                     request,

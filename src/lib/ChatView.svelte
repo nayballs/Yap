@@ -86,6 +86,7 @@
   import { onMount, onDestroy, tick, untrack } from 'svelte';
   import { renderMarkdown } from './markdown.js';
   import { toast } from './ui/toast.svelte.js';
+  import { showSaveError } from './saveErrors.js';
   import { chatRequest } from './chatRequest.svelte.js';
   import ModelChip from './ModelChip.svelte';
   import { modelLine, modelName, providerName, whereItRuns } from './aiModel.js';
@@ -529,13 +530,16 @@
   async function removeConversation(id) {
     try {
       await invoke('chat_delete', { id });
-      if (activeId === id) newChat();
-      await refreshList();
-      return true;
     } catch (e) {
-      toast({ title: "Couldn't delete the conversation", description: String(e), variant: 'destructive' });
-      return false;
+      // Deleted but not saved yet: gone here, and Yap says so.
+      if (!showSaveError(e)) {
+        toast({ title: "Couldn't delete the conversation", description: String(e), variant: 'destructive' });
+        return false;
+      }
     }
+    if (activeId === id) newChat();
+    await refreshList();
+    return true;
   }
 
   // ---- Several at once (the maintainer, 2026-10-19: "shift click some chats and
@@ -595,17 +599,21 @@
   }
 
   async function removeConversations(ids) {
+    let gone = null;
     try {
-      const gone = await invoke('chat_delete_many', { ids });
-      if (ids.includes(activeId)) newChat();
-      clearPicked();
-      await refreshList();
-      toast({ title: gone === 1 ? 'Chat deleted' : `${gone} chats deleted`, variant: 'success' });
-      return true;
+      gone = await invoke('chat_delete_many', { ids });
     } catch (e) {
-      toast({ title: "Couldn't delete the chats", description: String(e), variant: 'destructive' });
-      return false;
+      // Deleted but not saved yet: gone here, and Yap says so (no "deleted").
+      if (!showSaveError(e)) {
+        toast({ title: "Couldn't delete the chats", description: String(e), variant: 'destructive' });
+        return false;
+      }
     }
+    if (ids.includes(activeId)) newChat();
+    clearPicked();
+    await refreshList();
+    if (gone != null) toast({ title: gone === 1 ? 'Chat deleted' : `${gone} chats deleted`, variant: 'success' });
+    return true;
   }
 
   // The list's own keys: Delete, Esc and Ctrl+A (Enter and the menu keys
@@ -693,7 +701,8 @@
         const stored = await invoke('chat_rename', { id: r.id, title });
         conversations = conversations.map((c) => (c.id === r.id ? { ...c, title: stored } : c));
       } catch (e) {
-        toast({ title: "Couldn't rename the conversation", description: String(e), variant: 'destructive' });
+        if (showSaveError(e)) await refreshList();
+        else toast({ title: "Couldn't rename the conversation", description: String(e), variant: 'destructive' });
       }
     }
     setTimeout(() => convEls[r.id]?.focus({ preventScroll: true }), 0);

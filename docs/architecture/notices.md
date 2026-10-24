@@ -15,7 +15,9 @@ How loud Yap may be: the notice policy (one place, one at a time, held while dic
   kind** (`rule`: a bar card's id / a notification's tag): priority (Prompt —
   call, calendar, meeting-limit, meeting-checkin — > Alert — micBlocked,
   pasteBlocked, calls-fatigue, configReset (held over a dictation, never
-  dropped), assistantNoModel, meetingRecovery ("Yap
+  dropped), saveFailed ("Couldn't save your dictation history", `saving.rs`:
+  held over a dictation, never dropped, the same words not twice in 10 min),
+  assistantNoModel, meetingRecovery ("Yap
   closed during a meeting", held while dictating or recording, waiting as
   long as it takes; `meeting_audio.rs`), and the Voice Assistant's
   answer `assistant` (never held, never stale) — > Info > Tip — hint, word-suggestion), held
@@ -46,7 +48,12 @@ How loud Yap may be: the notice policy (one place, one at a time, held while dic
   — `recoverMeetings`), a settings
   file Yap couldn't read ("Your settings were reset" / "Some of your
   settings were reset", kind `configReset`, once, with **Show file** →
-  `config::show_old_file`: Explorer on the copy set aside; `config.rs`): in one place (`notice::place`) — a
+  `config::show_old_file`: Explorer on the copy set aside; `config.rs`), a
+  save that failed by itself ("Couldn't save your dictation history" — "The
+  disk is full. Yap is keeping it in memory and will try again with the next
+  change.", kind `saveFailed`, once until a save of that store works, with
+  **Try again** → `saving::retry_soon`: "Saved", or "Still couldn't save…";
+  `saving.rs`): in one place (`notice::place`) — a
   toast in the main window while it's focused (`yap-alert` →
   `lib/alerts.js`, kind `alert`), else a Yap bar card, else a Windows
   notification, else the window on screen; the same alert again within its

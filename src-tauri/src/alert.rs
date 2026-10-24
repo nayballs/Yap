@@ -2,7 +2,9 @@
 //! let through (`elevated.rs`: an app running as administrator), the
 //! microphone switched off in Windows' privacy settings (`mic_privacy.rs`),
 //! call prompts' fatigue ("Stop asking about calls?", `meeting_detect.rs`),
-//! a settings file Yap couldn't read and set aside (`config.rs`)
+//! a settings file Yap couldn't read and set aside (`config.rs`), a save
+//! that failed by itself ("Couldn't save your dictation history", with Try
+//! again: `saving.rs`)
 //! — put in **one place** (`notice::place`): a toast in the main window
 //! while the person is looking at it, else a card on the Yap bar, else a
 //! Windows notification, else the window if it's on screen. Yap's notice
@@ -40,7 +42,7 @@ pub const SHOW_OLD_SETTINGS: &str = "showOldSettings";
 pub struct Action {
     /// What [`act`] does: [`OPEN_MIC_SETTINGS`], [`STOP_ASKING_CALLS`],
     /// [`ASK_ABOUT_CALLS`], [`OPEN_AI_SETTINGS`], [`OPEN_VOICE_SETTINGS`],
-    /// [`SHOW_OLD_SETTINGS`].
+    /// [`SHOW_OLD_SETTINGS`], `saving::RETRY` (Try again).
     pub id: &'static str,
     pub label: &'static str,
 }
@@ -50,12 +52,14 @@ pub struct Action {
 pub struct Alert {
     /// "pasteBlocked" | "micBlocked" | "calls-fatigue" | "assistantNoModel" |
     /// "assistantFailed" | "voiceFallback" (`tts.rs`: a cloud voice failed) |
-    /// "configReset" (`config.rs`: config.json couldn't be read, set aside):
+    /// "configReset" (`config.rs`: config.json couldn't be read, set aside) |
+    /// "saveFailed" (`saving.rs`: a store couldn't be saved; "Saved" after
+    /// Try again):
     /// the bar card's id, the Windows notification's tag (a newer one
     /// replaces it) and its rule in `notice.rs`.
     pub kind: &'static str,
     /// The chip's glyph: "clipboard" | "mic" | "call" | "assistant" |
-    /// "settings".
+    /// "settings" | "save".
     pub icon: &'static str,
     pub title: String,
     pub body: String,
@@ -166,6 +170,7 @@ pub fn act(app: &AppHandle, action: &str) {
             }
         }
         SHOW_OLD_SETTINGS => crate::config::show_old_file(app),
+        crate::saving::RETRY => crate::saving::retry_soon(app),
         "" => {}
         other => tracing::debug!("alert: no such action {other}"),
     }
