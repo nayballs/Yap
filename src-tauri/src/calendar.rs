@@ -461,7 +461,7 @@ fn snapshot_of(s: &Runtime, notes: &HashMap<String, u64>, now: i64, briefs: bool
             after_meeting: !connected
                 && !s.store.nudge.dismissed
                 && !s.store.nudge.shown_after_meeting
-                && !crate::notice::tips_off(),
+                && !crate::notices::notice::tips_off(),
         },
         max_connections: vault::SLOTS,
         briefs,
@@ -1387,7 +1387,7 @@ pub fn on_call_started(app_id: &str) {
 /// run says for itself whether the person is looking at it). Never with a
 /// lock held.
 fn window_view(app: &AppHandle) -> (bool, bool) {
-    crate::notice::window_view(app)
+    crate::notices::notice::window_view(app)
 }
 
 /// What a card is waiting for, after a turn of [`tick_card`].
@@ -1543,7 +1543,7 @@ fn present_card(app: &AppHandle, card: &Card, focused: bool) {
 fn native_possible() -> bool {
     #[cfg(windows)]
     {
-        crate::win_toast::allowed()
+        crate::notices::win_toast::allowed()
     }
     #[cfg(not(windows))]
     {
@@ -2212,7 +2212,7 @@ mod native {
     use windows::UI::Notifications::ToastNotification;
 
     use super::{Card, CardKind};
-    use crate::win_toast::{esc, logo_xml};
+    use crate::notices::win_toast::{esc, logo_xml};
 
     const TAG: &str = "calendar";
 
@@ -2268,17 +2268,17 @@ mod native {
     }
 
     pub fn post(app: &AppHandle, card: &Card) -> Result<(), String> {
-        if !crate::win_toast::allowed() {
+        if !crate::notices::win_toast::allowed() {
             return Err("off in portable mode and test runs".to_string());
         }
-        let toast = crate::win_toast::post(app, TAG, &xml(card, &logo_xml()), None, activated)?;
+        let toast = crate::notices::win_toast::post(app, TAG, &xml(card, &logo_xml()), None, activated)?;
         *CURRENT.lock().unwrap_or_else(|p| p.into_inner()) = Some(toast);
         Ok(())
     }
 
     pub fn remove(app: &AppHandle) {
         if CURRENT.lock().unwrap_or_else(|p| p.into_inner()).take().is_some() {
-            crate::win_toast::remove(app, TAG);
+            crate::notices::win_toast::remove(app, TAG);
         }
     }
 
@@ -2352,7 +2352,7 @@ mod tests {
         assert!(xml.contains("content=\"Start notes\" arguments=\"calendar:start:7\""));
         assert!(xml.contains("arguments=\"calendar:snooze:7\""));
         // WinRT takes it as a toast (built, never shown).
-        crate::win_toast::build("calendar", &xml, false).unwrap();
+        crate::notices::win_toast::build("calendar", &xml, false).unwrap();
         // Without a link, and as a switch: no join, and the question.
         let mut plain = card.clone();
         plain.kind = CardKind::Switch;
@@ -2361,7 +2361,7 @@ mod tests {
         assert_eq!(xml.matches("<action ").count(), 2);
         assert!(xml.contains("content=\"Switch notes\" arguments=\"calendar:start:7\""));
         assert!(xml.contains("Switch your notes to this meeting?"));
-        crate::win_toast::build("calendar", &xml, false).unwrap();
+        crate::notices::win_toast::build("calendar", &xml, false).unwrap();
     }
 
     #[test]

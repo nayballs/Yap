@@ -441,9 +441,9 @@ pub(crate) fn rewrite_check(p: &Pasted) -> Result<(), String> {
 /// as Yap pasted it (`why`): said plainly, nothing pasted.
 pub(crate) fn cant_rewrite(app: &AppHandle, why: &str) {
     tracing::info!(why = %why, "Rewrite the last dictation: refused, nothing pasted");
-    crate::alert::show_soon(
+    crate::notices::alert::show_soon(
         app,
-        crate::alert::Alert {
+        crate::notices::alert::Alert {
             kind: "pasteBlocked",
             icon: "clipboard",
             title: "Couldn't rewrite your last dictation".into(),
@@ -503,9 +503,9 @@ pub(crate) fn replace_last(app: &AppHandle, p: &Pasted, rewrite: &str) -> Result
 fn rewrite_copied(app: &AppHandle, why: String, rewrite: &str, copy: bool) -> Rewrote {
     let text = rewrite.trim().to_string();
     let copied = !copy || crate::text_injector::copy_privately(&text);
-    crate::alert::show_soon(
+    crate::notices::alert::show_soon(
         app,
-        crate::alert::Alert {
+        crate::notices::alert::Alert {
             kind: "pasteBlocked",
             icon: "clipboard",
             title: if copied {
@@ -600,9 +600,9 @@ pub fn undo_transform(app: &AppHandle) -> Result<Undid, String> {
 /// (privately; `copy`: not there yet), and the person told.
 fn undo_copied(app: &AppHandle, why: String, before: &str, copy: bool) -> Undid {
     let copied = !copy || crate::text_injector::copy_privately(before.trim());
-    crate::alert::show_soon(
+    crate::notices::alert::show_soon(
         app,
-        crate::alert::Alert {
+        crate::notices::alert::Alert {
             kind: "pasteBlocked",
             icon: "clipboard",
             title: if copied {
@@ -767,9 +767,9 @@ fn usable(hwnd: isize, kind: AppKind) -> Result<(), String> {
 fn copy_instead(app: &AppHandle, p: &Pasted, why: String) -> Outcome {
     let said = p.said.as_deref().unwrap_or_default().trim().to_string();
     let copied = crate::text_injector::copy_privately(&said);
-    crate::alert::show_soon(
+    crate::notices::alert::show_soon(
         app,
-        crate::alert::Alert {
+        crate::notices::alert::Alert {
             kind: "pasteBlocked",
             icon: "clipboard",
             title: if copied {

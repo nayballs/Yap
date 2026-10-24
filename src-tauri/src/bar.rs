@@ -1014,7 +1014,7 @@ pub fn init(app: &AppHandle) {
             .and_then(|v| v["recording"].as_bool())
             .unwrap_or(false);
         lock().meeting = recording;
-        crate::notice::on_meeting(recording);
+        crate::notices::notice::on_meeting(recording);
         if !repick(&h) {
             emit(&h);
         }
@@ -1190,7 +1190,7 @@ pub fn show_card(app: &AppHandle, card: Card, on_action: OnAction) -> bool {
     if !cards_available() {
         return false;
     }
-    if !crate::notice::admit(&card.id, &card.title, &card.body) {
+    if !crate::notices::notice::admit(&card.id, &card.title, &card.body) {
         return true;
     }
     tracing::info!(card = %card.id, seen = cards_seen(), "bar: card");
@@ -1223,10 +1223,10 @@ pub fn show_card(app: &AppHandle, card: Card, on_action: OnAction) -> bool {
 /// has been told then). Cards that waited too long unseen are dropped, their
 /// handlers told as if they had faded (`expire_action`).
 fn repick(app: &AppHandle) -> bool {
-    let moment = crate::notice::moment();
+    let moment = crate::notices::notice::moment();
     let (changed, stale) = {
         let mut s = lock();
-        let m = crate::notice::Moment {
+        let m = crate::notices::notice::Moment {
             meeting: s.meeting || moment.meeting,
             dictating: moment.dictating
                 || matches!(s.dictation, Dictation::Recording | Dictation::Processing),
@@ -1235,14 +1235,14 @@ fn repick(app: &AppHandle) -> bool {
         let ids: Vec<String> = s.cards.iter().map(|c| c.id.clone()).collect();
         let current = s.front.as_ref().and_then(|f| ids.iter().position(|id| id == f));
         let pinned = current.is_some_and(|i| s.pointer.as_deref() == Some(format!("card:{}", ids[i]).as_str()));
-        let list: Vec<crate::notice::Waiting> = ids
+        let list: Vec<crate::notices::notice::Waiting> = ids
             .iter()
             .map(|id| {
                 let (since, seen) = s.queued.get(id).copied().unwrap_or((m.now, false));
-                crate::notice::Waiting { kind: id, since, seen }
+                crate::notices::notice::Waiting { kind: id, since, seen }
             })
             .collect();
-        let pick = crate::notice::pick(&list, current, pinned, &m);
+        let pick = crate::notices::notice::pick(&list, current, pinned, &m);
         let front = pick.front.map(|i| ids[i].clone());
         let mut stale = Vec::new();
         for i in pick.stale {

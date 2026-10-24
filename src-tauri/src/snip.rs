@@ -216,7 +216,7 @@ fn give_focus_back(_hwnd: isize) {}
 /// window is on screen on one; else a new chat (`None`). Window getters:
 /// never under a lock.
 fn chat_target(app: &AppHandle) -> Option<u64> {
-    let (visible, _) = crate::notice::window_view(app);
+    let (visible, _) = crate::notices::notice::window_view(app);
     match crate::assistant::chat_viewing() {
         crate::assistant::Viewing::Conversation(id) if visible => Some(id),
         _ => None,
@@ -238,7 +238,7 @@ pub fn start(app: &AppHandle, origin: Origin) {
         if let Err(e) = run(&app, origin) {
             tracing::warn!("snip: couldn't take it ({e})");
             set_last(Last { outcome: "failed".into(), reason: e.clone(), ..Default::default() });
-            crate::alert::snip_failed(&app, &e);
+            crate::notices::alert::snip_failed(&app, &e);
             BUSY.store(false, Ordering::SeqCst);
         }
     });
@@ -261,7 +261,7 @@ fn run(app: &AppHandle, origin: Origin) -> Result<(), String> {
     if origin != Origin::Voice && crate::pipeline::dictation_state().1 {
         tracing::info!("snip: not during a dictation");
         set_last(Last { outcome: "refused".into(), reason: "dictating".into(), ..Default::default() });
-        crate::alert::snip_dictating(app);
+        crate::notices::alert::snip_dictating(app);
         BUSY.store(false, Ordering::SeqCst);
         return Ok(());
     }
@@ -410,7 +410,7 @@ fn finish(app: &AppHandle, generation: u64, outcome: overlay::Outcome) {
                     last.outcome = "failed".into();
                     last.reason = e.clone();
                     set_last(last);
-                    crate::alert::snip_failed(app, &e);
+                    crate::notices::alert::snip_failed(app, &e);
                     give_focus_back(snip.foreground);
                 }
             }

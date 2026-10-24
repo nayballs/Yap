@@ -630,8 +630,8 @@ const UNDO_MIN_SAMPLES: usize = 8_000;
 /// Undo couldn't get back to the window the dictation was for (it closed,
 /// or Windows wouldn't bring it to the front): the text is on the clipboard
 /// instead of in whatever has the focus now.
-fn undo_window_gone() -> crate::alert::Alert {
-    crate::alert::Alert {
+fn undo_window_gone() -> crate::notices::alert::Alert {
+    crate::notices::alert::Alert {
         kind: "pasteBlocked",
         icon: "clipboard",
         title: "Your text is copied: press Ctrl+V".to_string(),
@@ -1455,7 +1455,7 @@ impl Shared {
     /// **Open settings** (a toast, a bar card or a Windows notification).
     fn say_mic_blocked(&self, blocked: crate::mic_privacy::Blocked) {
         let _ = self.app.emit("yap-mic-silent", Some(crate::mic_privacy::mic_silent()));
-        crate::alert::show_soon(&self.app, crate::mic_privacy::alert(blocked));
+        crate::notices::alert::show_soon(&self.app, crate::mic_privacy::alert(blocked));
     }
 
     /// Where the dictation starting now goes: the window in front (captured
@@ -2089,12 +2089,12 @@ impl Shared {
                     // An app running as administrator: on the clipboard.
                     Ok(crate::text_injector::Delivery::LeftOnClipboard) => {
                         crate::as_said::forget();
-                        crate::alert::show_soon(&self.app, crate::elevated::alert());
+                        crate::notices::alert::show_soon(&self.app, crate::elevated::alert());
                     }
                     // An Undo whose window is gone: on the clipboard.
                     Ok(crate::text_injector::Delivery::WindowGone) => {
                         crate::as_said::forget();
-                        crate::alert::show_soon(&self.app, undo_window_gone());
+                        crate::notices::alert::show_soon(&self.app, undo_window_gone());
                     }
                     Err(e) => {
                         crate::as_said::forget();
@@ -2510,7 +2510,7 @@ impl Shared {
                     if submit.is_some() {
                         tracing::info!("Not pressing the submit key: the app runs as administrator");
                     }
-                    crate::alert::show_soon(&self.app, crate::elevated::alert());
+                    crate::notices::alert::show_soon(&self.app, crate::elevated::alert());
                 }
                 // An Undo whose window is gone (or won't come to the
                 // front): never into another one; on the clipboard.
@@ -2519,7 +2519,7 @@ impl Shared {
                     report.left_on_clipboard = true;
                     report.error = Some("the dictation's window is gone".into());
                     not_pasted = Some("Left on the clipboard: its window was gone");
-                    crate::alert::show_soon(&self.app, undo_window_gone());
+                    crate::notices::alert::show_soon(&self.app, undo_window_gone());
                 }
                 Ok(delivery @ (crate::text_injector::Delivery::Pasted | crate::text_injector::Delivery::Typed)) => {
                     // The paste didn't land and the text was typed instead.

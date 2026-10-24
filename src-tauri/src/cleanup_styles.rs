@@ -900,8 +900,8 @@ pub async fn cleanup_offer_status(app: tauri::AppHandle) -> Value {
     let capable = crate::gpu::can_run_big_model(gpu.as_ref());
     let installed = crate::local_llm::is_installed(&cfg);
     let dictations = crate::history::recent_dictation_secs(OFFER_AFTER).len();
-    let (_, focused) = crate::notice::window_view(&app);
-    let m = crate::notice::moment();
+    let (_, focused) = crate::notices::notice::window_view(&app);
+    let m = crate::notices::notice::moment();
     // A test run offers it only when the spec asks (the rest of the suite
     // never meets a tip it didn't expect).
     let test_ok = !crate::e2e::active() || std::env::var_os("YAP_E2E_CLEANUP_OFFER").is_some();

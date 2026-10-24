@@ -1385,12 +1385,12 @@ fn offer(app: &AppHandle, words: Vec<Suggestion>, ignore_gap: bool) -> bool {
     let (title, body, never) = prompt_text(&words);
     // One place (`notice.rs`): the main window while the person is looking
     // at it, else the Yap bar (else the window, on screen after all).
-    let place = crate::notice::place(app, false);
-    if place == crate::notice::Place::Nowhere {
+    let place = crate::notices::notice::place(app, false);
+    if place == crate::notices::notice::Place::Nowhere {
         tracing::debug!("learn: nowhere to show the suggestion");
         return false;
     }
-    let in_window = place == crate::notice::Place::Window;
+    let in_window = place == crate::notices::notice::Place::Window;
     *pending() = Some(Pending {
         id,
         words: words.clone(),

@@ -905,7 +905,7 @@ fn run(app: &AppHandle, todo: Todo) {
     }
     if todo.prompted {
         let ever = ever_recorded();
-        if crate::notice::with_call_fatigue(|f| f.prompted(ever)) == crate::notice::Verdict::SwitchOff {
+        if crate::notices::notice::with_call_fatigue(|f| f.prompted(ever)) == crate::notices::notice::Verdict::SwitchOff {
             stopped_asking(app);
         }
     }
@@ -979,7 +979,7 @@ fn drop_unasked(s: &mut State, todo: &mut Todo) {
 /// run says for itself whether the person is looking at it). Never call
 /// with the lock held.
 fn window_view(app: &AppHandle) -> (bool, bool) {
-    crate::notice::window_view(app)
+    crate::notices::notice::window_view(app)
 }
 
 /// A dictation is recording or transcribing. Locks the pipeline, so never
@@ -1015,13 +1015,13 @@ fn show_prompt(
     let quiet = s.quiet;
     let fade_ms = (kind == PromptKind::Start)
         .then(|| s.calls.iter().find(|c| c.id == call_id).and_then(|c| c.fade_ms).unwrap_or(FADE_MS));
-    let place = crate::notice::place_for(
+    let place = crate::notices::notice::place_for(
         focused,
         visible,
         crate::bar::cards_available(),
-        crate::notice::notifications_allowed(),
+        crate::notices::notice::notifications_allowed(),
     );
-    let in_app = !quiet && place == crate::notice::Place::Window;
+    let in_app = !quiet && place == crate::notices::notice::Place::Window;
     // `meeting_auto_start`: a countdown, only where it's sure to be seen
     // (the toast in a focused main window, or the Yap bar's card) and not
     // for a call it just asked about (a rejoin or a reload).
@@ -1462,15 +1462,15 @@ pub fn respond(app: &AppHandle, prompt_id: u64, action: &str) -> Result<Option<u
     // to fade in a row → offer once to stop asking.
     if let Some(p) = prompt.as_ref().filter(|p| p.kind == PromptKind::Start) {
         let answer = match action {
-            "dismiss" => Some(crate::notice::Answer::Closed),
-            "ignore" => Some(crate::notice::Answer::Ignored),
-            "record" | "never" => Some(crate::notice::Answer::Engaged),
+            "dismiss" => Some(crate::notices::notice::Answer::Closed),
+            "ignore" => Some(crate::notices::notice::Answer::Ignored),
+            "record" | "never" => Some(crate::notices::notice::Answer::Engaged),
             _ => None,
         };
         if let Some(answer) = answer {
             let ever = ever_recorded();
-            if let crate::notice::Verdict::OfferToStop { ignored } =
-                crate::notice::with_call_fatigue(|f| f.answered(answer, ever))
+            if let crate::notices::notice::Verdict::OfferToStop { ignored } =
+                crate::notices::notice::with_call_fatigue(|f| f.answered(answer, ever))
             {
                 offer_to_stop(app, p.app, ignored);
             }
@@ -1519,14 +1519,14 @@ fn offer_to_stop(app: &AppHandle, call_app: &'static App, ignored: bool) {
         "You've said Not now to the last few calls. Yap can stop asking; you can turn it back on in Settings → Meetings."
     };
     tracing::info!(app = call_app.id, ignored, "meeting detect: offering to stop asking about calls");
-    crate::alert::show_soon(
+    crate::notices::alert::show_soon(
         app,
-        crate::alert::Alert {
+        crate::notices::alert::Alert {
             kind: "calls-fatigue",
             icon: "call",
             title: "Stop asking about calls?".into(),
             body: body.into(),
-            action: Some(crate::alert::Action { id: crate::alert::STOP_ASKING_CALLS, label: "Stop asking" }),
+            action: Some(crate::notices::alert::Action { id: crate::notices::alert::STOP_ASKING_CALLS, label: "Stop asking" }),
             timeout_ms: 30_000,
         },
     );
@@ -1537,14 +1537,14 @@ fn offer_to_stop(app: &AppHandle, call_app: &'static App, ignored: bool) {
 fn stopped_asking(app: &AppHandle) {
     tracing::info!("meeting detect: many call prompts, no meeting recorded; switching call detection off");
     set_detection(app, false);
-    crate::alert::show_soon(
+    crate::notices::alert::show_soon(
         app,
-        crate::alert::Alert {
+        crate::notices::alert::Alert {
             kind: "calls-fatigue",
             icon: "call",
             title: "Yap stopped asking about calls".into(),
             body: "It asked about many calls and you didn't take notes on any. Turn it back on any time in Settings → Meetings.".into(),
-            action: Some(crate::alert::Action { id: crate::alert::ASK_ABOUT_CALLS, label: "Turn back on" }),
+            action: Some(crate::notices::alert::Action { id: crate::notices::alert::ASK_ABOUT_CALLS, label: "Turn back on" }),
             timeout_ms: 30_000,
         },
     );
@@ -2009,7 +2009,7 @@ mod windows_titles {
 }
 
 /// The prompts as Windows notifications (silent, with Yap's logo; see
-/// `crate::win_toast`), for when the main window isn't in front, or for every
+/// `crate::notices::win_toast`), for when the main window isn't in front, or for every
 /// prompt in the quiet style (no banner: notification center only).
 #[cfg(windows)]
 mod native {
@@ -2019,7 +2019,7 @@ mod native {
     use windows::UI::Notifications::ToastNotification;
 
     use super::{wording, App, Prompt, PromptKind, EVENT_OPEN};
-    use crate::win_toast::{esc, logo_xml};
+    use crate::notices::win_toast::{esc, logo_xml};
 
     const TAG: &str = "call";
 
@@ -2029,13 +2029,13 @@ mod native {
 
     /// Post `xml` as the call notification; `quiet`: without a banner.
     fn post(app: &AppHandle, xml: &str, quiet: bool) -> Result<(), String> {
-        if !crate::win_toast::allowed() {
+        if !crate::notices::win_toast::allowed() {
             return Err("off in portable mode and test runs".to_string());
         }
         let toast = if quiet {
-            crate::win_toast::post_quietly(app, TAG, xml, activated)?
+            crate::notices::win_toast::post_quietly(app, TAG, xml, activated)?
         } else {
-            crate::win_toast::post(app, TAG, xml, None, activated)?
+            crate::notices::win_toast::post(app, TAG, xml, None, activated)?
         };
         *CURRENT.lock().unwrap_or_else(|p| p.into_inner()) = Some(toast);
         Ok(())
@@ -2183,7 +2183,7 @@ mod native {
     pub fn remove(app: &AppHandle) {
         crate::bar::dismiss_card(app, super::BAR_CARD);
         if CURRENT.lock().unwrap_or_else(|p| p.into_inner()).take().is_some() {
-            crate::win_toast::remove(app, TAG);
+            crate::notices::win_toast::remove(app, TAG);
         }
     }
 
@@ -2699,13 +2699,13 @@ mod tests {
         assert!(xml.contains("<audio silent=\"true\"/>"));
         // WinRT takes it as a toast (built, never shown): quietly, without a
         // banner; the pop-up style keeps it.
-        assert!(crate::win_toast::build("call", &xml, true).unwrap().SuppressPopup().unwrap());
-        assert!(!crate::win_toast::build("call", &xml, false).unwrap().SuppressPopup().unwrap());
+        assert!(crate::notices::win_toast::build("call", &xml, true).unwrap().SuppressPopup().unwrap());
+        assert!(!crate::notices::win_toast::build("call", &xml, false).unwrap().SuppressPopup().unwrap());
         let end = Prompt { kind: PromptKind::End, note_id: Some(1), fade_ms: None, ..p };
         let xml = native::prompt_xml(&end, "");
         assert_eq!(xml.matches("<action ").count(), 2);
         assert!(xml.contains("arguments=\"meeting:stop:7\"") && xml.contains("arguments=\"meeting:keep:7\""));
-        crate::win_toast::build("call", &xml, false).unwrap();
+        crate::notices::win_toast::build("call", &xml, false).unwrap();
     }
 
     /// Read-only look at this machine's microphone record:

@@ -1848,11 +1848,11 @@ fn tell_reset(app: &AppHandle) {
         reset_settings = reset.dropped.len(),
         "Settings: config.json couldn't be read; telling the person"
     );
-    crate::alert::show_soon(app, reset_alert(&reset));
+    crate::notices::alert::show_soon(app, reset_alert(&reset));
 }
 
 /// What the person is told about a config.json Yap couldn't read.
-pub(crate) fn reset_alert(reset: &Reset) -> crate::alert::Alert {
+pub(crate) fn reset_alert(reset: &Reset) -> crate::notices::alert::Alert {
     let (title, body) = match (&reset.moved_to, reset.kept) {
         (Some(to), true) => {
             let n = reset.dropped.len();
@@ -1877,13 +1877,13 @@ pub(crate) fn reset_alert(reset: &Reset) -> crate::alert::Alert {
             "It's using the default settings for now and won't save over your settings file. Close any program that has config.json open, then restart Yap.".to_string(),
         ),
     };
-    crate::alert::Alert {
+    crate::notices::alert::Alert {
         kind: "configReset",
         icon: "settings",
         title: title.into(),
         body,
-        action: reset.moved_to.is_some().then_some(crate::alert::Action {
-            id: crate::alert::SHOW_OLD_SETTINGS,
+        action: reset.moved_to.is_some().then_some(crate::notices::alert::Action {
+            id: crate::notices::alert::SHOW_OLD_SETTINGS,
             label: "Show file",
         }),
         timeout_ms: 60_000,

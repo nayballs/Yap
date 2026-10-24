@@ -1205,7 +1205,7 @@ pub fn update_ack_updated() {
 /// a download they asked for runs. Clicking the body opens Settings → About.
 /// Windows applies Do Not Disturb / Focus Assist and the per-app notification
 /// switch on its own. The WinRT plumbing is shared with the call prompts
-/// (`crate::win_toast`).
+/// (`crate::notices::win_toast`).
 #[cfg(windows)]
 mod notify {
     use std::sync::atomic::{AtomicU32, Ordering};
@@ -1217,7 +1217,7 @@ mod notify {
     use windows::UI::Notifications::{NotificationData, ToastNotification};
 
     use super::{lock, Announce, Phase};
-    use crate::win_toast::{esc, logo_xml};
+    use crate::notices::win_toast::{esc, logo_xml};
 
     const TAG: &str = "update";
 
@@ -1231,7 +1231,7 @@ mod notify {
 
     /// Post `xml` as Yap's one update toast (it replaces the previous one).
     fn post(app: &AppHandle, xml: &str, data: Option<&NotificationData>) -> Result<(), String> {
-        let toast = crate::win_toast::post(app, TAG, xml, data, activated)?;
+        let toast = crate::notices::win_toast::post(app, TAG, xml, data, activated)?;
         *CURRENT.lock().unwrap_or_else(|p| p.into_inner()) = Some(toast);
         Ok(())
     }
@@ -1317,7 +1317,7 @@ mod notify {
 
     fn update_bar(app: &AppHandle, pct: u8, status: &str) {
         let Ok(data) = progress_data(pct, status) else { return };
-        crate::win_toast::update(app, TAG, &data);
+        crate::notices::win_toast::update(app, TAG, &data);
     }
 
     /// Move the download toast's bar — at most twice a second, and only while
@@ -1363,7 +1363,7 @@ mod notify {
         let Some(_toast) = CURRENT.lock().unwrap_or_else(|p| p.into_inner()).take() else {
             return;
         };
-        crate::win_toast::remove(app, TAG);
+        crate::notices::win_toast::remove(app, TAG);
     }
 
     fn activated(app: &AppHandle, arg: &str) {

@@ -97,7 +97,7 @@ fn now_ms() -> u64 {
 /// The main window: (on screen, focused) — `notice::window_view`. Never
 /// call with a lock held: window getters wait on the main thread.
 fn window_view(app: &AppHandle) -> (bool, bool) {
-    crate::notice::window_view(app)
+    crate::notices::notice::window_view(app)
 }
 
 /// The meeting notepad is on screen. Never with a lock held.
@@ -238,14 +238,14 @@ pub fn notice(app: &AppHandle, n: &Notice) {
         let _ = app.emit(EVENT_NOTICE, n);
         return;
     }
-    match crate::notice::place(app, true) {
-        crate::notice::Place::Window => {
-            if crate::notice::admit("meeting-notice", &n.title, &n.body) {
+    match crate::notices::notice::place(app, true) {
+        crate::notices::notice::Place::Window => {
+            if crate::notices::notice::admit("meeting-notice", &n.title, &n.body) {
                 let _ = app.emit(EVENT_NOTICE, n);
             }
         }
-        crate::notice::Place::Bar | crate::notice::Place::Notification => notice_native(app, n),
-        crate::notice::Place::Nowhere => tracing::info!(kind = n.kind, "meeting guard: nowhere to say {}", n.title),
+        crate::notices::notice::Place::Bar | crate::notices::notice::Place::Notification => notice_native(app, n),
+        crate::notices::notice::Place::Nowhere => tracing::info!(kind = n.kind, "meeting guard: nowhere to say {}", n.title),
     }
 }
 
@@ -497,9 +497,9 @@ fn warn(app: &AppHandle, gen: u64, note_id: u64, stop_at: u64, now: u64, t: &Tim
     }
     // One place (`notice.rs`): the main window while the person is looking
     // at it, else the Yap bar, else a Windows notification.
-    let place = crate::notice::place(app, true);
+    let place = crate::notices::notice::place(app, true);
     let mut warning = LimitWarning::new(note_id, stop_at, now, t);
-    warning.in_app = matches!(place, crate::notice::Place::Window | crate::notice::Place::Nowhere);
+    warning.in_app = matches!(place, crate::notices::notice::Place::Window | crate::notices::notice::Place::Nowhere);
     tracing::info!(note_id, title = %warning.title, ?place, "meeting guard: length warning");
     emit_limit(app, Some(&warning));
     // The recording stopped, or Keep going landed, in between: take it back
@@ -1357,7 +1357,7 @@ pub fn e2e_meeting_limit(
 // ---- Windows notifications -------------------------------------------------------------------
 
 /// The guard rails' Windows notifications (silent, Yap's logo; see
-/// `crate::win_toast`): the length warning with **Keep going**, and notices
+/// `crate::notices::win_toast`): the length warning with **Keep going**, and notices
 /// (the screen-share tip with **Update settings**, "Taking notes" with
 /// **Open note**).
 #[cfg(windows)]
@@ -1369,7 +1369,7 @@ mod native {
     use windows::UI::Notifications::ToastNotification;
 
     use super::{CheckIn, LimitWarning, Notice, EVENT_OPEN};
-    use crate::win_toast::{esc, logo_xml};
+    use crate::notices::win_toast::{esc, logo_xml};
 
     pub const LIMIT: &str = "meeting-limit";
     const NOTICE: &str = "meeting-notice";
@@ -1381,10 +1381,10 @@ mod native {
         LazyLock::new(|| Mutex::new(HashMap::new()));
 
     fn post(app: &AppHandle, tag: &'static str, xml: &str) -> Result<(), String> {
-        if !crate::win_toast::allowed() {
+        if !crate::notices::win_toast::allowed() {
             return Err("off in portable mode and test runs".to_string());
         }
-        let toast = crate::win_toast::post(app, tag, xml, None, activated)?;
+        let toast = crate::notices::win_toast::post(app, tag, xml, None, activated)?;
         LIVE.lock().unwrap_or_else(|p| p.into_inner()).insert(tag, toast);
         Ok(())
     }
@@ -1398,7 +1398,7 @@ mod native {
     pub fn remove(app: &AppHandle, tag: &'static str) {
         crate::bar::dismiss_card(app, tag);
         if LIVE.lock().unwrap_or_else(|p| p.into_inner()).remove(tag).is_some() {
-            crate::win_toast::remove(app, tag);
+            crate::notices::win_toast::remove(app, tag);
         }
     }
 
@@ -1969,24 +1969,24 @@ mod tests {
         assert!(xml.contains("<text>Notes stop in 5 minutes</text>"));
         assert!(xml.contains("content=\"Keep going\" arguments=\"guard:keep\""));
         assert!(xml.contains("launch=\"guard:open:7\""));
-        crate::win_toast::build("meeting-limit", &xml, false).unwrap();
+        crate::notices::win_toast::build("meeting-limit", &xml, false).unwrap();
         let xml = native::notice_xml(&Notice::screen_share(), "");
         assert!(xml.contains("content=\"Update settings\" arguments=\"guard:settings:meetings#screen-sharing\""));
-        crate::win_toast::build("meeting-notice", &xml, false).unwrap();
+        crate::notices::win_toast::build("meeting-notice", &xml, false).unwrap();
         let xml = native::notice_xml(&Notice::taking_notes(None, None, 4), "");
         assert!(xml.contains("content=\"Open note\" arguments=\"guard:open:4\""));
-        crate::win_toast::build("meeting-notice", &xml, false).unwrap();
+        crate::notices::win_toast::build("meeting-notice", &xml, false).unwrap();
         let p = CheckIn::countdown(9, 4, START + 30 * SEC, START, 10 * MIN, Surface::Windows);
         let xml = native::check_in_xml(&p, START, "");
         assert!(xml.contains("<text>Ending notes in 30 seconds</text>"), "{xml}");
         assert!(xml.contains("<text>Nobody has spoken for 10 minutes. Keep going to carry on recording.</text>"));
         assert!(xml.contains("content=\"Keep going\" arguments=\"guard:checkin:keep:9\""));
         assert!(xml.contains("content=\"Stop now\" arguments=\"guard:checkin:stop:9\""));
-        crate::win_toast::build("meeting-checkin", &xml, false).unwrap();
+        crate::notices::win_toast::build("meeting-checkin", &xml, false).unwrap();
         let p = CheckIn::still_there(10, 4, CheckInKind::Hour, &look(HOUR, 0), 3 * MIN, None, Surface::Windows);
         let xml = native::check_in_xml(&p, START, "");
         assert!(xml.contains("<text>Still in your meeting?</text>"));
         assert!(xml.contains("content=\"Stop and summarise\" arguments=\"guard:checkin:stop:10\""));
-        crate::win_toast::build("meeting-checkin", &xml, false).unwrap();
+        crate::notices::win_toast::build("meeting-checkin", &xml, false).unwrap();
     }
 }

@@ -39,7 +39,7 @@ use tauri::AppHandle;
 
 /// The alert's kind (its rule in `notice.rs`, the bar card's id).
 pub const KIND: &str = "saveFailed";
-/// The alert's **Try again** ([`crate::alert::act`]).
+/// The alert's **Try again** ([`crate::notices::alert::act`]).
 pub const RETRY: &str = "retrySaves";
 /// How long a failed save waits for a command to say it before the notice
 /// does.
@@ -348,7 +348,7 @@ fn tell_later() {
         std::thread::sleep(TELL_AFTER);
         TELLING.store(false, Ordering::SeqCst);
         if let Some(alert) = untold_alert() {
-            crate::alert::show(&app, alert);
+            crate::notices::alert::show(&app, alert);
         }
     });
     if let Err(e) = spawned {
@@ -358,7 +358,7 @@ fn tell_later() {
 }
 
 /// The notice for the failed saves nobody said yet (marked said), if any.
-fn untold_alert() -> Option<crate::alert::Alert> {
+fn untold_alert() -> Option<crate::notices::alert::Alert> {
     let untold: Vec<Failure> = with_failed(|list| {
         list.iter_mut()
             .filter(|f| f.saver.tells && !f.told)
@@ -374,18 +374,18 @@ fn untold_alert() -> Option<crate::alert::Alert> {
 
 /// What the person is told about a failed save (`others`: how many more
 /// stores failed with it; `again`: after Try again).
-pub fn failed_alert(e: SaveError, others: usize, again: bool) -> crate::alert::Alert {
+pub fn failed_alert(e: SaveError, others: usize, again: bool) -> crate::notices::alert::Alert {
     let title = if again { format!("Still couldn't save {}", e.what) } else { format!("Couldn't save {}", e.what) };
     let mut body = format!("{}. Yap is keeping it in memory and will try again with the next change.", capitalised(e.reason.words()));
     if others > 0 {
         body.push_str(" Some of Yap's other files couldn't be saved either.");
     }
-    crate::alert::Alert {
+    crate::notices::alert::Alert {
         kind: KIND,
         icon: "save",
         title,
         body,
-        action: Some(crate::alert::Action { id: RETRY, label: "Try again" }),
+        action: Some(crate::notices::alert::Action { id: RETRY, label: "Try again" }),
         timeout_ms: 30_000,
     }
 }
@@ -402,7 +402,7 @@ pub fn retry_soon(app: &AppHandle) {
     let app = app.clone();
     let spawned = std::thread::Builder::new().name("save-retry".into()).spawn(move || {
         let alert = match retry_all() {
-            Ok(()) => crate::alert::Alert {
+            Ok(()) => crate::notices::alert::Alert {
                 kind: KIND,
                 icon: "save",
                 title: "Saved".into(),
@@ -412,7 +412,7 @@ pub fn retry_soon(app: &AppHandle) {
             },
             Err(e) => failed_alert(e, 0, true),
         };
-        crate::alert::show(&app, alert);
+        crate::notices::alert::show(&app, alert);
     });
     if let Err(e) = spawned {
         tracing::warn!("saves: couldn't try again ({e})");

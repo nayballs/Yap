@@ -69,7 +69,7 @@ pub struct Alert {
 }
 
 /// Where an alert went (`notice::Place`).
-pub use crate::notice::Place as Surface;
+pub use crate::notices::notice::Place as Surface;
 
 /// Show `alert` where it'll be seen; returns where. Blocking (window
 /// queries): call it off the pipeline's locks — [`show_soon`] does.
@@ -83,11 +83,11 @@ pub fn show(app: &AppHandle, alert: Alert) -> Surface {
         timeout_ms: Some(alert.timeout_ms),
         ..Default::default()
     };
-    let mut place = crate::notice::place(app, true);
+    let mut place = crate::notices::notice::place(app, true);
     // The same alert again within its cooldown (`notice.rs`: the mic
     // privacy one is said once per ten minutes; the overlay's line says it
     // on every press). The bar and Windows check for themselves.
-    if place == Surface::Window && !crate::notice::admit(alert.kind, &alert.title, &alert.body) {
+    if place == Surface::Window && !crate::notices::notice::admit(alert.kind, &alert.title, &alert.body) {
         tracing::info!(kind = alert.kind, "alert: said a moment ago; not again");
         return Surface::Nowhere;
     }
@@ -95,7 +95,7 @@ pub fn show(app: &AppHandle, alert: Alert) -> Surface {
         place = Surface::Bar;
     }
     if place == Surface::Bar && !crate::bar::show_card(app, card(), Box::new(act)) {
-        place = if crate::notice::notifications_allowed() { Surface::Notification } else { Surface::Nowhere };
+        place = if crate::notices::notice::notifications_allowed() { Surface::Notification } else { Surface::Nowhere };
     }
     if place == Surface::Notification {
         #[cfg(windows)]
@@ -205,7 +205,7 @@ mod native {
     use windows::UI::Notifications::ToastNotification;
 
     use super::Alert;
-    use crate::win_toast::{esc, logo_xml};
+    use crate::notices::win_toast::{esc, logo_xml};
 
     static LIVE: LazyLock<Mutex<HashMap<&'static str, ToastNotification>>> =
         LazyLock::new(|| Mutex::new(HashMap::new()));
@@ -237,7 +237,7 @@ mod native {
     }
 
     pub fn post(app: &AppHandle, a: &Alert) -> Result<(), String> {
-        let toast = crate::win_toast::post(app, a.kind, &xml(a, &logo_xml()), None, activated)?;
+        let toast = crate::notices::win_toast::post(app, a.kind, &xml(a, &logo_xml()), None, activated)?;
         LIVE.lock().unwrap_or_else(|p| p.into_inner()).insert(a.kind, toast);
         Ok(())
     }

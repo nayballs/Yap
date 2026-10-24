@@ -354,7 +354,7 @@ pub fn window_view(app: &AppHandle) -> (bool, bool) {
 pub fn notifications_allowed() -> bool {
     #[cfg(windows)]
     {
-        crate::win_toast::allowed()
+        crate::notices::win_toast::allowed()
     }
     #[cfg(not(windows))]
     false

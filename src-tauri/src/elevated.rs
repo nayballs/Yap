@@ -47,8 +47,8 @@ pub fn blocks_input(own: Option<u32>, target: Level) -> bool {
 }
 
 /// The notice: the text is on the clipboard, paste it yourself.
-pub fn alert() -> crate::alert::Alert {
-    crate::alert::Alert {
+pub fn alert() -> crate::notices::alert::Alert {
+    crate::notices::alert::Alert {
         kind: "pasteBlocked",
         icon: "clipboard",
         title: "Your text is copied: press Ctrl+V".to_string(),

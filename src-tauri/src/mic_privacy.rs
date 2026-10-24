@@ -114,16 +114,16 @@ pub fn mic_silent() -> crate::mic_watch::MicSilent {
     }
 }
 
-/// The notice for [`crate::alert`]: a toast, a bar card or a Windows
+/// The notice for [`crate::notices::alert`]: a toast, a bar card or a Windows
 /// notification, with **Open settings**.
-pub fn alert(b: Blocked) -> crate::alert::Alert {
-    crate::alert::Alert {
+pub fn alert(b: Blocked) -> crate::notices::alert::Alert {
+    crate::notices::alert::Alert {
         kind: "micBlocked",
         icon: "mic",
         title: TITLE.to_string(),
         body: body(b).to_string(),
-        action: Some(crate::alert::Action {
-            id: crate::alert::OPEN_MIC_SETTINGS,
+        action: Some(crate::notices::alert::Action {
+            id: crate::notices::alert::OPEN_MIC_SETTINGS,
             label: "Open settings",
         }),
         timeout_ms: 15_000,

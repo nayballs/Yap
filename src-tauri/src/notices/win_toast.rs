@@ -59,7 +59,7 @@ pub fn esc(s: &str) -> String {
 /// loads local files, so the PNG baked into the binary is written next to
 /// Yap's data once ("" — no logo — if that fails).
 pub fn logo_xml() -> String {
-    static LOGO: &[u8] = include_bytes!("../icons/128x128@2x.png");
+    static LOGO: &[u8] = include_bytes!("../../icons/128x128@2x.png");
     let dir = crate::config::data_dir();
     let path = dir.join("notification-logo.png");
     let current = std::fs::metadata(&path).is_ok_and(|m| m.len() == LOGO.len() as u64);
@@ -106,10 +106,10 @@ pub fn post(
     data: Option<&NotificationData>,
     on_activated: fn(&AppHandle, &str),
 ) -> Result<ToastNotification, String> {
-    if !crate::notice::admit(&format!("native:{tag}"), tag, xml) {
+    if !crate::notices::notice::admit(&format!("native:{tag}"), tag, xml) {
         return Err("the same notification was posted a moment ago".into());
     }
-    let toast = build(tag, xml, crate::notice::native_quietly(tag))?;
+    let toast = build(tag, xml, crate::notices::notice::native_quietly(tag))?;
     if let Some(data) = data {
         toast.SetData(data).map_err(err)?;
     }

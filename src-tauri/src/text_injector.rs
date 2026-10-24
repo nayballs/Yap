@@ -1355,7 +1355,7 @@ fn paste_last_blocking(app: &tauri::AppHandle, as_said: bool) -> Result<String, 
         let out = fit_for_paste(&text, None, cfg.append_trailing_space, &cfg.dictionary, AppKind::Other);
         if crate::elevated::test_override() {
             info!(len = out.len(), "e2e: the app counts as an admin app; not pasting the last transcript");
-            crate::alert::show(app, crate::elevated::alert());
+            crate::notices::alert::show(app, crate::elevated::alert());
         } else {
             info!(len = out.len(), "e2e: not pasting the last transcript");
         }
@@ -1377,7 +1377,7 @@ fn paste_last_blocking(app: &tauri::AppHandle, as_said: bool) -> Result<String, 
             let out = fit_for_paste(&text, None, cfg.append_trailing_space, &cfg.dictionary, AppKind::Other);
             warn!("The app runs as administrator: Windows won't let Yap type into it");
             leave_on_clipboard(&out, target)?;
-            crate::alert::show(app, crate::elevated::alert());
+            crate::notices::alert::show(app, crate::elevated::alert());
             return Ok(out);
         }
         if let Some(hwnd) = target {
@@ -1398,7 +1398,7 @@ fn paste_last_blocking(app: &tauri::AppHandle, as_said: bool) -> Result<String, 
         let out = fit_for_paste(&text, ctx.as_ref(), cfg.append_trailing_space, &cfg.dictionary, kind);
         info!(len = out.len(), found_window = target.is_some(), fitted = ctx.is_some(), "Pasting the last transcript");
         if inject_text_sync(&out, cfg.restore_clipboard, target, false, raw)? == Delivery::LeftOnClipboard {
-            crate::alert::show(app, crate::elevated::alert());
+            crate::notices::alert::show(app, crate::elevated::alert());
         }
         Ok(out)
     }

@@ -358,7 +358,7 @@ pub fn announce(applied: &Applied) {
     let Some(app) = app() else {
         return;
     };
-    let (visible, _) = crate::notice::window_view(app);
+    let (visible, _) = crate::notices::notice::window_view(app);
     if !visible {
         return;
     }

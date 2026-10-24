@@ -351,9 +351,9 @@ pub fn off_for_meeting(app: &AppHandle) -> bool {
         return false;
     }
     tracing::info!("Voice Assistant: off during a meeting or a call");
-    crate::alert::show_soon(
+    crate::notices::alert::show_soon(
         app,
-        crate::alert::Alert {
+        crate::notices::alert::Alert {
             kind: MEETING_OFF,
             icon: "assistant",
             title: "The Voice Assistant is off during meetings".into(),
@@ -373,28 +373,28 @@ fn give_up(app: &AppHandle, generation: u64) {
 }
 
 /// "Pick an AI model for the Voice Assistant", with Open settings.
-fn no_model_alert(why: &str) -> crate::alert::Alert {
+fn no_model_alert(why: &str) -> crate::notices::alert::Alert {
     tracing::info!("Voice Assistant: no AI model to answer ({why})");
-    crate::alert::Alert {
+    crate::notices::alert::Alert {
         kind: NO_MODEL,
         icon: "assistant",
         title: "Pick an AI model for the Voice Assistant".into(),
         body: "It answers with Chat's model. Set one up in Settings → Language Models → Chat & Voice Assistant.".into(),
-        action: Some(crate::alert::Action { id: crate::alert::OPEN_AI_SETTINGS, label: "Open settings" }),
+        action: Some(crate::notices::alert::Action { id: crate::notices::alert::OPEN_AI_SETTINGS, label: "Open settings" }),
         timeout_ms: 15_000,
     }
 }
 
 /// "The Voice Assistant couldn't answer" and why (the model's error: a key,
 /// a limit, the network), with Open settings. The question is in Chat.
-fn failed_alert(why: &str) -> crate::alert::Alert {
+fn failed_alert(why: &str) -> crate::notices::alert::Alert {
     let why: String = why.chars().take(240).collect();
-    crate::alert::Alert {
+    crate::notices::alert::Alert {
         kind: FAILED,
         icon: "assistant",
         title: "The Voice Assistant couldn't answer".into(),
         body: format!("{why} Your question is in Chat."),
-        action: Some(crate::alert::Action { id: crate::alert::OPEN_AI_SETTINGS, label: "Open settings" }),
+        action: Some(crate::notices::alert::Action { id: crate::notices::alert::OPEN_AI_SETTINGS, label: "Open settings" }),
         timeout_ms: 15_000,
     }
 }
@@ -526,7 +526,7 @@ impl Streamed {
             snapshot(&s)
         };
         emit(&self.app, ev);
-        let on_bar = crate::notice::place(&self.app, false) == crate::notice::Place::Bar;
+        let on_bar = crate::notices::notice::place(&self.app, false) == crate::notices::notice::Place::Bar;
         if on_bar && card_on_bar(self.show_card, true) {
             let shown = crate::tts::brief(text, STREAM_SAY);
             let carded = show_card(&self.app, &self.question, &shown, true, None);
@@ -570,7 +570,7 @@ async fn answer(app: AppHandle, generation: u64, since: u64, question: String) {
     let opens_an_app = crate::apps::plan_for(&question, &cfg, conversation_id).await.is_some();
     if !opens_an_app {
         if let Err(why) = crate::commands::resolve_chat_endpoint(&cfg) {
-            crate::alert::show_soon(&app, no_model_alert(&why));
+            crate::notices::alert::show_soon(&app, no_model_alert(&why));
             give_up(&app, generation);
             return;
         }
@@ -578,7 +578,7 @@ async fn answer(app: AppHandle, generation: u64, since: u64, question: String) {
     tracing::info!(?viewing, ?choice, "Voice Assistant: asking Chat");
     // The person is looking at Yap's main window: Chat comes up there with
     // the question (and no card on the bar).
-    let (_, focused) = crate::notice::window_view(&app);
+    let (_, focused) = crate::notices::notice::window_view(&app);
     let asked_app = app.clone();
     let asked_text = question.clone();
     // The answer as it's written: the Chat view follows it, the voice
@@ -665,7 +665,7 @@ async fn answer(app: AppHandle, generation: u64, since: u64, question: String) {
                 serde_json::json!({ "phase": "failed", "conversationId": conv, "userMessageId": question_id, "error": e }),
             );
             if current(generation) {
-                crate::alert::show_soon(&app, failed_alert(&e));
+                crate::notices::alert::show_soon(&app, failed_alert(&e));
             }
             give_up(&app, generation);
             return;
@@ -731,7 +731,7 @@ async fn answer(app: AppHandle, generation: u64, since: u64, question: String) {
     let note = note.or(sources_note.as_deref());
     // The card first (the voice may be short), then the voice. With "Show
     // the answer on the Yap bar" off, a spoken answer has no card.
-    let on_bar = crate::notice::place(&app, false) == crate::notice::Place::Bar;
+    let on_bar = crate::notices::notice::place(&app, false) == crate::notices::notice::Place::Bar;
     let mut carded = on_bar
         && card_on_bar(cfg.assistant_answer_card, how == Reply::Speak)
         && show_card(&app, &question, &shown, how == Reply::Speak, note);
@@ -852,7 +852,7 @@ fn finish_streamed(
             }
         });
     } else {
-        let on_bar = crate::notice::place(app, false) == crate::notice::Place::Bar;
+        let on_bar = crate::notices::notice::place(app, false) == crate::notices::notice::Place::Bar;
         if on_bar && card_on_bar(cfg.assistant_answer_card, how == Reply::Speak) {
             show_card(app, question, &shown, how == Reply::Speak, note);
         }

@@ -791,14 +791,14 @@ pub fn offer(app: &AppHandle) {
             "The end of each wasn't transcribed. The audio is kept: transcribe it into their notes now?".to_string(),
         )
     };
-    crate::alert::show(
+    crate::notices::alert::show(
         app,
-        crate::alert::Alert {
+        crate::notices::alert::Alert {
             kind: "meetingRecovery",
             icon: "notes",
             title,
             body,
-            action: Some(crate::alert::Action { id: RECOVER_ACTION, label: "Transcribe it" }),
+            action: Some(crate::notices::alert::Action { id: RECOVER_ACTION, label: "Transcribe it" }),
             timeout_ms: 60_000,
         },
     );

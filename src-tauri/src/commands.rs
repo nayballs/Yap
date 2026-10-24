@@ -103,7 +103,7 @@ pub fn show_onboarding(app: &AppHandle) -> Result<(), String> {
     let _ = w.show();
     focus(&w);
     // Tips and notices wait while the first-run setup is on screen.
-    crate::notice::on_onboarding(true);
+    crate::notices::notice::on_onboarding(true);
     let _ = w.eval("window.location.reload()");
     // Compositor nudge: a 1px resize round-trip forces DWM to recomposite the
     // webview surface, un-sticking any stale frame.
@@ -126,7 +126,7 @@ pub fn close_onboarding(app: AppHandle) {
     if let Some(w) = app.get_webview_window("onboarding") {
         let _ = w.hide();
     }
-    crate::notice::on_onboarding(false);
+    crate::notices::notice::on_onboarding(false);
 }
 
 /// Which registry models are already downloaded on disk (by model id).
@@ -2070,7 +2070,7 @@ fn apply_config(app: &AppHandle, state: State<'_, AppState>, prev: &YapConfig, c
     // …and the Yap bar (on/off, fullscreen, position, the tooltips' hotkeys).
     crate::bar::sync(&app, &cfg);
     // …and "Show tips" (the notice policy).
-    crate::notice::sync(&cfg);
+    crate::notices::notice::sync(&cfg);
     // …and the theme: the opaque windows' webview backgrounds (theme.rs; the
     // pages follow `yap-config-saved`).
     crate::theme::apply(&app, &cfg);

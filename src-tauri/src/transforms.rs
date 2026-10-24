@@ -600,7 +600,7 @@ pub fn run(app: &AppHandle, cfg: &YapConfig, t: &Transform, origin: Origin, stan
                 }
                 Ok(crate::text_injector::Delivery::LeftOnClipboard) => {
                     crate::as_said::forget();
-                    crate::alert::show_soon(app, crate::elevated::alert());
+                    crate::notices::alert::show_soon(app, crate::elevated::alert());
                     idle(app);
                     return r.ended("copied", Some("the app runs as administrator".into()));
                 }
@@ -681,9 +681,9 @@ fn lower_first(name: &str) -> String {
 /// Said plainly, nothing changed (a toast, a bar card or a Windows
 /// notification: `alert.rs`).
 fn say(app: &AppHandle, title: &str, body: &str) {
-    crate::alert::show_soon(
+    crate::notices::alert::show_soon(
         app,
-        crate::alert::Alert {
+        crate::notices::alert::Alert {
             kind: "pasteBlocked",
             icon: "clipboard",
             title: title.to_string(),

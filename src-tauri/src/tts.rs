@@ -1871,14 +1871,14 @@ fn cloud_failed(provider: &'static str, key: u64, choice: u64, error: &str, took
     };
     let (title, body) = cloud::notice_text(provider, &failure, took_over);
     match APP.get() {
-        Some(app) => crate::alert::show_soon(
+        Some(app) => crate::notices::alert::show_soon(
             app,
-            crate::alert::Alert {
+            crate::notices::alert::Alert {
                 kind: CLOUD_FAILED,
                 icon: "assistant",
                 title,
                 body,
-                action: Some(crate::alert::Action { id: crate::alert::OPEN_VOICE_SETTINGS, label: "Open settings" }),
+                action: Some(crate::notices::alert::Action { id: crate::notices::alert::OPEN_VOICE_SETTINGS, label: "Open settings" }),
                 timeout_ms: 12_000,
             },
         ),

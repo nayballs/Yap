@@ -10,7 +10,6 @@
 mod about_you;
 mod agent_detect;
 mod ai_model;
-mod alert;
 mod as_said;
 mod app_icons;
 mod app_kind;
@@ -53,7 +52,7 @@ mod note_edits;
 mod note_text;
 mod notepad;
 mod notes;
-mod notice;
+mod notices;
 mod privacy;
 mod tools;
 mod history;
@@ -97,8 +96,6 @@ mod theme;
 mod usage;
 mod web;
 mod webview_memory;
-#[cfg(windows)]
-mod win_toast;
 
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Mutex;
@@ -705,7 +702,7 @@ pub fn run() {
             bar::bar_action,
             bar::bar_card_action,
             learn::word_suggestion_respond,
-            alert::alert_action,
+            notices::alert::alert_action,
             #[cfg(debug_assertions)]
             bar::bar_simulate,
             #[cfg(debug_assertions)]
@@ -790,11 +787,11 @@ pub fn run() {
             #[cfg(debug_assertions)]
             local_llm::e2e_local_llm_busy,
             #[cfg(debug_assertions)]
-            notice::e2e_notice_reset,
+            notices::notice::e2e_notice_reset,
             #[cfg(debug_assertions)]
-            notice::e2e_notice,
+            notices::notice::e2e_notice,
             #[cfg(debug_assertions)]
-            notice::e2e_focus,
+            notices::notice::e2e_focus,
             #[cfg(debug_assertions)]
             learn::e2e_learn_correction,
             #[cfg(debug_assertions)]
@@ -973,7 +970,7 @@ pub fn run() {
             // top, never focused, following the cursor's monitor (bar.rs).
             bar::init(&handle);
             // Yap's notice policy reads "Show tips" from Settings.
-            notice::sync(&config::load());
+            notices::notice::sync(&config::load());
 
             // Dev builds: show Settings on launch. Every Yap window is hidden
             // at startup by design (tray-first UX), which leaves dev runs — and
@@ -1114,7 +1111,7 @@ pub fn run() {
                 let state = event.payload().trim_matches('"'); // payload is a JSON string
                 let generation = STATE_GEN.fetch_add(1, Ordering::Relaxed) + 1;
                 let show = matches!(state, "recording" | "processing" | "processing-slow" | "error");
-                notice::on_pipeline_state(state);
+                notices::notice::on_pipeline_state(state);
                 bar::on_pipeline_state(&overlay_handle, state);
                 OVERLAY_ACTIVE.store(show, Ordering::Relaxed);
                 // Keep the tray icon + menu in sync with the recording state.
@@ -1192,7 +1189,7 @@ pub fn run() {
                             api.prevent_close();
                             let _ = w.hide();
                             if !main {
-                                notice::on_onboarding(false);
+                                notices::notice::on_onboarding(false);
                                 // Its mic check's level meter holds the mic
                                 // open (mic.rs); the page can't tell it's
                                 // hidden (WebView2 says it's still visible).

@@ -161,7 +161,7 @@ fn save_now() -> Result<(), crate::saving::SaveError> {
 /// on a thread of its own.
 pub fn offer(app: &AppHandle, hint: Hint, hotkey: &str) {
     let now = now_ms();
-    if crate::notice::tips_off() {
+    if crate::notices::notice::tips_off() {
         tracing::debug!(?hint, "coaching: tips are switched off");
         return;
     }
@@ -172,15 +172,15 @@ pub fn offer(app: &AppHandle, hint: Hint, hotkey: &str) {
     let (title, body) = text(hint);
     // One place (`notice.rs`): the main window while the person is looking
     // at it, else the Yap bar; never a Windows notification for a tip.
-    let place = crate::notice::place(app, false);
-    let in_window = place == crate::notice::Place::Window;
+    let place = crate::notices::notice::place(app, false);
+    let in_window = place == crate::notices::notice::Place::Window;
     let shown_now = if in_window {
         let kind = match hint {
             Hint::Tap => "tap",
             Hint::LongHold => "longHold",
         };
         app.emit(EVENT, HintToast { kind, title, body, hotkey: hotkey.to_string() }).is_ok()
-    } else if place == crate::notice::Place::Bar {
+    } else if place == crate::notices::notice::Place::Bar {
         let card = crate::bar::Card {
             id: CARD.into(),
             icon: "tip",
