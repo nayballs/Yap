@@ -200,7 +200,7 @@ fn read_bridge_file() -> Option<(u16, String)> {
 fn bridge_answers(port: u16, token: &str) -> bool {
     let addr = std::net::SocketAddr::from(([127, 0, 0, 1], port));
     // The network receipts (net.rs): Yap asking a Local API on this PC.
-    let receipt = crate::net::begin(crate::net::Purpose::LocalApi, &format!("http://127.0.0.1:{port}/"));
+    let receipt = crate::privacy::net::begin(crate::privacy::net::Purpose::LocalApi, &format!("http://127.0.0.1:{port}/"));
     let Ok(mut stream) = std::net::TcpStream::connect_timeout(&addr, Duration::from_millis(300)) else {
         receipt.failed(0, 0);
         return false;
@@ -234,7 +234,7 @@ fn remove_bridge_file() {
 fn respond_json(request: tiny_http::Request, status: u16, body: &Value) {
     let body = body.to_string();
     // The network receipts (net.rs): an app on this PC asked, Yap answered.
-    crate::net::local_api(status, request.body_length().unwrap_or(0) as u64, body.len() as u64);
+    crate::privacy::net::local_api(status, request.body_length().unwrap_or(0) as u64, body.len() as u64);
     let response = Response::from_string(body)
         .with_status_code(status)
         .with_header(
@@ -256,7 +256,7 @@ fn respond_error(request: tiny_http::Request, status: u16, code: &str, message: 
 }
 
 fn respond_no_content(request: tiny_http::Request) {
-    crate::net::local_api(204, request.body_length().unwrap_or(0) as u64, 0);
+    crate::privacy::net::local_api(204, request.body_length().unwrap_or(0) as u64, 0);
     let _ = request.respond(Response::empty(204));
 }
 

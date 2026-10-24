@@ -11,7 +11,7 @@
 //! never logged.
 
 use std::time::Duration;
-use crate::net::Recorded as _;
+use crate::privacy::net::Recorded as _;
 
 use serde_json::{json, Value};
 
@@ -1247,7 +1247,7 @@ async fn post_chat_request(
                 req = req.bearer_auth(api_key);
             }
             let resp = req
-                .send_for(crate::net::Purpose::Ai(provider.to_string()))
+                .send_for(crate::privacy::net::Purpose::Ai(provider.to_string()))
                 .await
                 .map_err(|e| call.failed(format!("request failed: {}", e)))?;
             let status = resp.status();

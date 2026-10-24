@@ -65,7 +65,7 @@
 //! chip (`web::search`).
 
 use std::collections::HashMap;
-use crate::net::Recorded as _;
+use crate::privacy::net::Recorded as _;
 use std::sync::{LazyLock, Mutex};
 use std::time::{Duration, Instant};
 
@@ -1051,7 +1051,7 @@ pub async fn search(ns: &NativeSearch, query: &str, question: &str) -> Result<Na
         Provider::Anthropic => req.header("x-api-key", &ns.key).header("anthropic-version", "2023-06-01"),
         Provider::Groq | Provider::OpenAi | Provider::OpenRouter => req.bearer_auth(&ns.key),
     };
-    let resp = req.send_for(crate::net::Purpose::ProviderSearch(p.name())).await.map_err(|e| {
+    let resp = req.send_for(crate::privacy::net::Purpose::ProviderSearch(p.name())).await.map_err(|e| {
         call.failed(if e.is_timeout() {
             format!("{} took too long to answer.", p.search_name())
         } else {

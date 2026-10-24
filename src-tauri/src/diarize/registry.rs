@@ -14,7 +14,7 @@
 //! a folder is either whole or not there.
 
 use std::io::Read;
-use crate::net::Recorded as _;
+use crate::privacy::net::Recorded as _;
 use std::path::{Path, PathBuf};
 
 use serde::Serialize;
@@ -485,7 +485,7 @@ pub async fn install(root: &Path, id: &str, on_progress: &(dyn Fn(Progress) + Se
                     total_bytes: total,
                 });
             };
-            download(&src, &partial, &report, crate::net::Download::SpeakerModel).await?;
+            download(&src, &partial, &report, crate::privacy::net::Download::SpeakerModel).await?;
             verify(&partial, &src).await?;
             match src.unpack {
                 Unpack::File(name) => {
@@ -527,7 +527,7 @@ pub async fn install(root: &Path, id: &str, on_progress: &(dyn Fn(Progress) + Se
 
 /// Stream `src` to `partial`, resuming what an earlier try left.
 /// `what`: the download as the network receipts name it (`net.rs`).
-pub(crate) async fn download(src: &Source, partial: &Path, report: &(dyn Fn(u64) + Sync), what: crate::net::Download) -> Result<(), String> {
+pub(crate) async fn download(src: &Source, partial: &Path, report: &(dyn Fn(u64) + Sync), what: crate::privacy::net::Download) -> Result<(), String> {
     use futures_util::StreamExt;
     use tokio::io::AsyncWriteExt;
 
@@ -545,7 +545,7 @@ pub(crate) async fn download(src: &Source, partial: &Path, report: &(dyn Fn(u64)
     if have > 0 {
         req = req.header(reqwest::header::RANGE, format!("bytes={have}-"));
     }
-    let resp = req.send_for(crate::net::Purpose::Download(what)).await.map_err(|e| format!("Download failed: {e}"))?;
+    let resp = req.send_for(crate::privacy::net::Purpose::Download(what)).await.map_err(|e| format!("Download failed: {e}"))?;
     let resumed = have > 0 && resp.status() == reqwest::StatusCode::PARTIAL_CONTENT;
     if !resp.status().is_success() {
         return Err(format!("Download failed: HTTP {} from {}", resp.status(), host(&src.url)));

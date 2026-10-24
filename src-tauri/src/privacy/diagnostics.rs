@@ -190,10 +190,10 @@ fn endpoint(v: &Value) -> Value {
     if standard {
         return json!("the provider's own");
     }
-    json!(match crate::net::place_of(u.host_str().unwrap_or("")) {
-        crate::net::Place::Pc => "a server on this PC",
-        crate::net::Place::Network => "a server on your network",
-        crate::net::Place::Internet => "a server on the internet",
+    json!(match crate::privacy::net::place_of(u.host_str().unwrap_or("")) {
+        crate::privacy::net::Place::Pc => "a server on this PC",
+        crate::privacy::net::Place::Network => "a server on your network",
+        crate::privacy::net::Place::Internet => "a server on the internet",
     })
 }
 
@@ -518,8 +518,8 @@ fn size(bytes: u64) -> String {
 
 /// The last week's connections by purpose: counts, failures, sizes, and the
 /// hosts of Yap's known services (others: only where they are). Pure.
-pub fn connections_text(entries: &[crate::net::Entry], now: u64) -> String {
-    let sum = crate::net::summarize(entries, now, now.saturating_sub(86_400));
+pub fn connections_text(entries: &[crate::privacy::net::Entry], now: u64) -> String {
+    let sum = crate::privacy::net::summarize(entries, now, now.saturating_sub(86_400));
     let mut out = String::from(
         "Network connections Yap made in the last 7 days, by purpose (from connections.json on this PC).\n\
          Hosts are named only for Yap's own services and AI providers; web pages, wikis, calendar\n\
@@ -552,13 +552,13 @@ pub fn connections_text(entries: &[crate::net::Entry], now: u64) -> String {
             .hosts
             .iter()
             .map(|h| {
-                if known_host(&h.host) && h.place == crate::net::Place::Internet {
+                if known_host(&h.host) && h.place == crate::privacy::net::Place::Internet {
                     h.host.clone()
                 } else {
                     match h.place {
-                        crate::net::Place::Pc => "this PC".to_string(),
-                        crate::net::Place::Network => "your network".to_string(),
-                        crate::net::Place::Internet => "a host left out".to_string(),
+                        crate::privacy::net::Place::Pc => "this PC".to_string(),
+                        crate::privacy::net::Place::Network => "your network".to_string(),
+                        crate::privacy::net::Place::Internet => "a host left out".to_string(),
                     }
                 }
             })
@@ -666,7 +666,7 @@ pub struct Inputs {
     pub config: Value,
     /// The days of log, newest first: (file name, its text).
     pub logs: Vec<(String, String)>,
-    pub entries: Vec<crate::net::Entry>,
+    pub entries: Vec<crate::privacy::net::Entry>,
     pub now: u64,
     pub made: String,
 }
@@ -808,7 +808,7 @@ fn make(app: &AppHandle) -> Bundle {
         system: system_info(app),
         config: cfg,
         logs: read_logs(&crate::config::data_dir().join("logs"), ERROR_DAYS),
-        entries: crate::net::entries(),
+        entries: crate::privacy::net::entries(),
         now: std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs()),
         made: chrono::Local::now().format("%Y-%m-%d %H:%M").to_string(),
     };
@@ -1019,15 +1019,15 @@ mod tests {
         .join("\n")
     }
 
-    fn seeded_entries() -> Vec<crate::net::Entry> {
-        let mk = |label: &str, host: &str, kind: &str| crate::net::Entry {
+    fn seeded_entries() -> Vec<crate::privacy::net::Entry> {
+        let mk = |label: &str, host: &str, kind: &str| crate::privacy::net::Entry {
             at: 1_800_000_000,
             last: 1_800_000_000,
             kind: kind.into(),
             label: label.into(),
             feature: "Chat".into(),
             host: host.into(),
-            place: crate::net::place_of(host),
+            place: crate::privacy::net::place_of(host),
             count: 2,
             failed: 0,
             status: 200,

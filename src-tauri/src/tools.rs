@@ -1326,7 +1326,7 @@ async fn ask(live: Option<crate::stream::Live<'_>>, req: &crate::llm::ChatReques
             None => crate::llm::post_whole(req).await,
         }
     };
-    crate::net::within(crate::net::Feature::Chat, step).await
+    crate::privacy::net::within(crate::privacy::net::Feature::Chat, step).await
 }
 
 /// Yap's own web search is under way (the page shows it as a chip).

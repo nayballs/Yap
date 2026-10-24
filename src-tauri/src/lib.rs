@@ -29,7 +29,6 @@ mod commands;
 mod config;
 mod context_menu;
 mod diarize;
-mod diagnostics;
 mod dict_usage;
 mod e2e;
 mod elevated;
@@ -55,13 +54,12 @@ mod note_text;
 mod notepad;
 mod notes;
 mod notice;
+mod privacy;
 mod tools;
 mod history;
 mod input_hook;
 mod learn;
 mod llm;
-#[cfg(test)]
-mod log_privacy;
 mod local_llm;
 mod mcp;
 mod mcp_clients;
@@ -70,7 +68,6 @@ mod mic_privacy;
 mod mic_watch;
 mod model_catalog;
 mod mute;
-mod net;
 mod overlay;
 mod partials;
 mod pause;
@@ -198,7 +195,7 @@ pub(crate) fn shutdown_cleanup() {
     bridge::stop();
     mute::restore_all();
     // The week of network receipts, as it stands (net.rs).
-    net::flush();
+    privacy::net::flush();
     // A store whose last save failed (saving.rs): one more try.
     saving::flush();
 }
@@ -571,15 +568,15 @@ pub fn run() {
             commands::action_delete,
             commands::log_info,
             commands::open_logs_folder,
-            net::connections_summary,
-            net::connections_clear,
-            net::connections_note,
-            diagnostics::diagnostics_preview,
-            diagnostics::diagnostics_save,
-            diagnostics::diagnostics_reveal,
-            diagnostics::diagnostics_issue_url,
+            privacy::net::connections_summary,
+            privacy::net::connections_clear,
+            privacy::net::connections_note,
+            privacy::diagnostics::diagnostics_preview,
+            privacy::diagnostics::diagnostics_save,
+            privacy::diagnostics::diagnostics_reveal,
+            privacy::diagnostics::diagnostics_issue_url,
             #[cfg(debug_assertions)]
-            diagnostics::e2e_save_path,
+            privacy::diagnostics::e2e_save_path,
             commands::meeting_start,
             commands::meeting_state,
             commands::note_export,
@@ -875,7 +872,7 @@ pub fn run() {
             config::init(&handle);
             // Network receipts (net.rs): every connection Yap makes, kept a
             // week in connections.json.
-            net::init(&handle);
+            privacy::net::init(&handle);
             // A store's save that fails is said from now on (saving.rs).
             saving::init(&handle);
             // Temp files a crash mid-write left behind (config.rs): Yap's

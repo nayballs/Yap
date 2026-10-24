@@ -723,7 +723,7 @@ pub(crate) async fn run_enhance(
         crate::llm::NOTE_BASE_PROMPT
     };
     step(2);
-    let mut enhanced = crate::net::within(crate::net::Feature::Notes, crate::llm::enhance_note(
+    let mut enhanced = crate::privacy::net::within(crate::privacy::net::Feature::Notes, crate::llm::enhance_note(
         &content,
         base,
         &fragment,
@@ -931,7 +931,7 @@ pub async fn note_ask(
         disable_thinking,
         None,
     );
-    crate::net::within(crate::net::Feature::Notes, answer).await
+    crate::privacy::net::within(crate::privacy::net::Feature::Notes, answer).await
 }
 
 // ---- Debug logging (Settings → Privacy & data, OpenWhispr Developer section) ----
@@ -1680,8 +1680,8 @@ async fn small_model_answer(
     if let Some(live) = live {
         live.sink.send(crate::stream::Event::Chips { chips: chips.clone(), sources: sources.clone(), web: looked });
     }
-    let answered = crate::net::within(
-        crate::net::Feature::Chat,
+    let answered = crate::privacy::net::within(
+        crate::privacy::net::Feature::Chat,
         crate::llm::note_chat(&system, &history, text, base_url, api_key, model, provider, disable_thinking, live),
     );
     let (reply, stopped) = match crate::stream::unless_stopped(answered, stop).await {
@@ -2277,7 +2277,7 @@ pub async fn test_post_process(text: String) -> Result<String, String> {
     let (base_url, api_key, model, provider) = crate::local_llm::effective_endpoint(&cfg);
     let spelling = crate::about_you::cleanup_spelling(&cfg);
     let cleanup = crate::llm::cleanup(&text, &base_url, &api_key, &model, &provider, &cfg.pp_prompt, spelling.as_deref(), &cfg.dictionary, cfg.pp_disable_thinking);
-    crate::net::within(crate::net::Feature::Dictation, cleanup).await
+    crate::privacy::net::within(crate::privacy::net::Feature::Dictation, cleanup).await
 }
 
 /// Status of the on-device cleanup sidecar: whether the runtime + model are

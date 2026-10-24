@@ -54,7 +54,7 @@
 //! endpoint in a test run must be the test's own (127.0.0.1).
 
 use serde::{Deserialize, Serialize};
-use crate::net::Recorded as _;
+use crate::privacy::net::Recorded as _;
 use serde_json::Value;
 use std::collections::{BTreeMap, HashMap, HashSet};
 
@@ -494,7 +494,7 @@ async fn get_json(
     if let Some(key) = bearer.filter(|k| !k.is_empty()) {
         req = req.bearer_auth(key);
     }
-    let resp = req.send_for(crate::net::Purpose::ModelList(who.to_string())).await.map_err(|e| {
+    let resp = req.send_for(crate::privacy::net::Purpose::ModelList(who.to_string())).await.map_err(|e| {
         if e.is_timeout() {
             format!("{who} didn't answer in time")
         } else {
@@ -1430,7 +1430,7 @@ async fn server_contexts(base: &str, key: &str, models: &[CatalogModel]) -> Vec<
     let asks = ids.iter().map(|id| {
         let (client, show) = (client.clone(), show.clone());
         async move {
-            let resp = client.post(&show).json(&serde_json::json!({ "model": id })).send_for(crate::net::Purpose::ModelList("your server".into())).await.ok()?;
+            let resp = client.post(&show).json(&serde_json::json!({ "model": id })).send_for(crate::privacy::net::Purpose::ModelList("your server".into())).await.ok()?;
             if !resp.status().is_success() {
                 return None;
             }

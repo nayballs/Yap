@@ -23,7 +23,7 @@
 //! person's choice in Settings → Speech-to-Text → Runs on).
 
 use std::path::{Path, PathBuf};
-use crate::net::Recorded as _;
+use crate::privacy::net::Recorded as _;
 
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter};
@@ -485,7 +485,7 @@ pub async fn ensure_model_exists(
             req = req.header(reqwest::header::RANGE, format!("bytes={}-", resume_from));
             tracing::info!(resume_from, model = %model_id, "Resuming interrupted download");
         }
-        req.send_for(crate::net::Purpose::Download(crate::net::Download::SpeechModel))
+        req.send_for(crate::privacy::net::Purpose::Download(crate::privacy::net::Download::SpeechModel))
             .await
             .map_err(|e| SttError::DownloadError(format!("HTTP request failed: {}", e)))?
     };
@@ -498,7 +498,7 @@ pub async fn ensure_model_exists(
         resume_from = 0;
         resp = client
             .get(&url)
-            .send_for(crate::net::Purpose::Download(crate::net::Download::SpeechModel))
+            .send_for(crate::privacy::net::Purpose::Download(crate::privacy::net::Download::SpeechModel))
             .await
             .map_err(|e| SttError::DownloadError(format!("HTTP request failed: {}", e)))?;
     }

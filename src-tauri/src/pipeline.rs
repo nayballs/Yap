@@ -2022,7 +2022,7 @@ impl Shared {
         };
 
         // Recorded as Commands' in the network receipts (net.rs).
-        match crate::net::within(crate::net::Feature::Commands, crate::llm::rewrite(
+        match crate::privacy::net::within(crate::privacy::net::Feature::Commands, crate::llm::rewrite(
             &instruction,
             &selection,
             &base_url,
@@ -2389,7 +2389,7 @@ impl Shared {
                 if let Some(s) = plan.style {
                     tracing::debug!(style = %s.describe(), "AI cleanup's style");
                 }
-                match crate::net::within(crate::net::Feature::Dictation, crate::cleanup_styles::clean(
+                match crate::privacy::net::within(crate::privacy::net::Feature::Dictation, crate::cleanup_styles::clean(
                     raw,
                     &pp_base_url,
                     &pp_api_key,

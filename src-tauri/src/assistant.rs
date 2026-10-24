@@ -623,7 +623,7 @@ async fn answer(app: AppHandle, generation: u64, since: u64, question: String) {
     );
     // Its AI calls and searches are the Voice Assistant's in the network
     // receipts (net.rs), though they run Chat's code.
-    let turn = crate::net::within(crate::net::Feature::Assistant, turn).await;
+    let turn = crate::privacy::net::within(crate::privacy::net::Feature::Assistant, turn).await;
     let (feed, said, carded_early, question_id, answer_id) = {
         let st = streamed.lock();
         (st.feed.clone(), st.said, st.carded, st.question_id.clone(), st.message_id.clone())

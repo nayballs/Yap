@@ -641,7 +641,7 @@ async fn run_check(app: &AppHandle, manual: bool) -> (Outcome, String) {
         Ok(updater) => {
             // The updater has its own HTTP client: its check is recorded
             // by hand in the network receipts (net.rs).
-            let receipt = crate::net::begin(crate::net::Purpose::UpdateCheck, &receipt_endpoint(app));
+            let receipt = crate::privacy::net::begin(crate::privacy::net::Purpose::UpdateCheck, &receipt_endpoint(app));
             let checked = updater.check().await.map_err(|e| e.to_string());
             match &checked {
                 Ok(found) => receipt.answered(0, 0, found.as_ref().map_or(0, |u| u.raw_json.to_string().len() as u64)),
@@ -746,7 +746,7 @@ async fn download_update(app: AppHandle) {
 
     let mut received: u64 = 0;
     let mut last_emit = Instant::now();
-    let receipt = crate::net::begin(crate::net::Purpose::UpdateDownload, update.download_url.as_str());
+    let receipt = crate::privacy::net::begin(crate::privacy::net::Purpose::UpdateDownload, update.download_url.as_str());
     let result = update
         .download(
             |chunk, total| {

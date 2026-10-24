@@ -38,7 +38,7 @@ use std::time::{Duration, Instant};
 
 use serde::Serialize;
 
-use crate::net::Recorded as _;
+use crate::privacy::net::Recorded as _;
 use crate::stt::{self, Device};
 use crate::stt_speed;
 
@@ -613,7 +613,7 @@ async fn time_local_cleanup(runtime: &Path, gguf: &Path, sc: &Scenario, work: &P
             run.error = Some(format!("llamafile exited during startup ({status})"));
             break;
         }
-        if client.get(format!("http://127.0.0.1:{port}/health")).send_for(crate::net::Purpose::OnDeviceCheck).await.is_ok_and(|r| r.status().is_success()) {
+        if client.get(format!("http://127.0.0.1:{port}/health")).send_for(crate::privacy::net::Purpose::OnDeviceCheck).await.is_ok_and(|r| r.status().is_success()) {
             up = true;
             break;
         }

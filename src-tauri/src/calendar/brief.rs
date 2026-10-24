@@ -1333,7 +1333,7 @@ pub async fn write(
             None => crate::llm::chat(&ep.base_url, &ep.api_key, &ep.model, &ep.provider, messages, &opts).await,
         }
     };
-    let reply = crate::net::within(crate::net::Feature::Brief, ask).await?;
+    let reply = crate::privacy::net::within(crate::privacy::net::Feature::Brief, ask).await?;
     Ok((check_summary(&reply, facts), reply))
 }
 

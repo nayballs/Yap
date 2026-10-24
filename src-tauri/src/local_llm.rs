@@ -12,7 +12,7 @@
 //! expose the base URL, and kill on stop/exit.
 
 use std::path::{Path, PathBuf};
-use crate::net::Recorded as _;
+use crate::privacy::net::Recorded as _;
 use std::process::Child;
 use std::sync::atomic::{AtomicBool, AtomicU16, AtomicU32, AtomicU64, Ordering};
 use std::sync::Mutex;
@@ -1444,7 +1444,7 @@ async fn spawn_and_wait(attempt: Attempt, gen: u64) -> Result<Started, Failed> {
             stop_inner();
             return Err(fail(Failure::Exited));
         }
-        if let Ok(resp) = client.get(&health).send_for(crate::net::Purpose::OnDeviceCheck).await {
+        if let Ok(resp) = client.get(&health).send_for(crate::privacy::net::Purpose::OnDeviceCheck).await {
             if resp.status().is_success() {
                 // Where its layers went: a big model on the processor is slow,
                 // and Settings says so. The log may lag a moment behind.
@@ -1540,7 +1540,7 @@ pub async fn warm_up(url: &str, model: &str) -> WarmUp {
         Ok(c) => c,
         Err(e) => return WarmUp { error: Some(e.to_string()), ..Default::default() },
     };
-    let send = client.post(format!("{}/chat/completions", url.trim_end_matches('/'))).json(&body).send_for(crate::net::Purpose::OnDeviceWarmUp);
+    let send = client.post(format!("{}/chat/completions", url.trim_end_matches('/'))).json(&body).send_for(crate::privacy::net::Purpose::OnDeviceWarmUp);
     let gave_way = async {
         while STARTED.load(Ordering::SeqCst) == started {
             tokio::time::sleep(Duration::from_millis(20)).await;
@@ -2753,7 +2753,7 @@ async fn fetch_to(
         .connect_timeout(Duration::from_secs(30))
         .build()
         .map_err(|e| format!("request failed: {}", e))?;
-    let resp = tokio::time::timeout(DOWNLOAD_STALL, client.get(url).send_for(crate::net::Purpose::Download(crate::net::Download::OnDeviceAi)))
+    let resp = tokio::time::timeout(DOWNLOAD_STALL, client.get(url).send_for(crate::privacy::net::Purpose::Download(crate::privacy::net::Download::OnDeviceAi)))
         .await
         .map_err(|_| "the server didn't answer".to_string())?
         .map_err(|e| format!("request failed: {}", e))?;

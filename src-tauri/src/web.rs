@@ -55,7 +55,7 @@
 //! a test run's search or page read fails with a clear error.
 
 use std::collections::HashMap;
-use crate::net::Recorded as _;
+use crate::privacy::net::Recorded as _;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::sync::{LazyLock, Mutex};
 use std::time::{Duration, Instant};
@@ -571,7 +571,7 @@ async fn service_search(ep: &Endpoints, service: Service, key: &str, query: &str
         }
     };
     let host = site_of(&url);
-    let resp = req.send_for(crate::net::Purpose::WebSearch(service.name())).await.map_err(|e| network_error(&host, &e))?;
+    let resp = req.send_for(crate::privacy::net::Purpose::WebSearch(service.name())).await.map_err(|e| network_error(&host, &e))?;
     let status = resp.status().as_u16();
     let body = resp.text().await.map_err(|e| network_error(&host, &e))?;
     if !(200..300).contains(&status) {
@@ -960,7 +960,7 @@ async fn wiki_get(ep: &Endpoints, url: &Url) -> Result<Value, String> {
     let host = url.host_str().unwrap_or("").to_string();
     let target = ep.route(url)?;
     polite(&host).await;
-    let resp = API.get(target).send_for(crate::net::Purpose::WikiSearch).await.map_err(|e| network_error(&host, &e))?;
+    let resp = API.get(target).send_for(crate::privacy::net::Purpose::WikiSearch).await.map_err(|e| network_error(&host, &e))?;
     let status = resp.status().as_u16();
     if !(200..300).contains(&status) {
         return Err(format!("{host} answered HTTP {status}."));
@@ -1310,7 +1310,7 @@ async fn fetch(ep: &Endpoints, start: Url) -> Result<Fetched, String> {
         let resp = client
             .get(target)
             .header(reqwest::header::ACCEPT, "text/html,application/xhtml+xml,text/plain;q=0.9")
-            .send_for(crate::net::Purpose::WebPage)
+            .send_for(crate::privacy::net::Purpose::WebPage)
             .await
             .map_err(|e| network_error(&host, &e))?;
         let status = resp.status();
