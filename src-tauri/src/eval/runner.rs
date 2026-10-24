@@ -80,6 +80,10 @@ Pre-meeting briefs:
   --brief                  instead of the scenarios: write the brief of each meeting in
                            evals/briefs/*.json (--only picks them) through calendar/brief.rs, and
                            score the model's reply as written and the brief as shown; brief.md
+Saved transforms (transforms.rs; instead of the scenarios; transforms.md):
+  --transforms             each case in evals/transforms/cases.json (--only picks them by name or
+                           transform) through llm::transform: names and numbers kept, no answer,
+                           Shorter shorter, Fix grammar only changing nothing correct
 Serving benches (local servers; instead of the scenarios; serving.md):
   --bench stream           time to the first token, streamed vs not, on Chat-shaped requests
                            (a short answer, a long one, a web answer, a tool call)
@@ -132,6 +136,7 @@ struct Args {
     cleanup_quick: bool,
     cleanup_limit: Option<usize>,
     brief: bool,
+    transforms: bool,
     bench: Option<String>,
     bench_rounds: u32,
     bench_history: usize,
@@ -208,6 +213,7 @@ fn parse(argv: Vec<String>) -> Result<Args, String> {
             "--cleanup-quick" => a.cleanup_quick = true,
             "--cleanup-limit" => a.cleanup_limit = Some(num(value()?, &flag)?.max(1) as usize),
             "--brief" => a.brief = true,
+            "--transforms" => a.transforms = true,
             "--bench" => {
                 let b = value()?;
                 if !super::serving::BENCHES.contains(&b.as_str()) {
@@ -250,7 +256,7 @@ pub fn main(argv: Vec<String>) -> i32 {
         return dump_apps(p);
     }
     // Raw requests alone need no scenarios (and --only then names requests).
-    let scenarios = if (args.models.is_empty() || args.cleanup || args.speakers || args.brief || args.bench.is_some()) && !args.list {
+    let scenarios = if (args.models.is_empty() || args.cleanup || args.speakers || args.brief || args.transforms || args.bench.is_some()) && !args.list {
         Vec::new()
     } else {
         match load_scenarios(&args) {
@@ -1217,6 +1223,19 @@ async fn run_all(args: &Args, run_dir: &Path, keys: &HashMap<String, String>, sc
         Vec::new()
     };
     let mut brief_results: Vec<(String, Value)> = Vec::new();
+    let transform_cases = if args.transforms {
+        let path = scenarios_dir(args).join("..").join("transforms").join("cases.json");
+        match super::transforms::load(&path, &args.only) {
+            Ok(c) => c,
+            Err(e) => {
+                eprintln!("{e}");
+                return 2;
+            }
+        }
+    } else {
+        Vec::new()
+    };
+    let mut transform_results: Vec<(String, Value)> = Vec::new();
     let mut cleanups: Vec<(String, Value)> = Vec::new();
     let mut benches: Vec<(String, Value)> = Vec::new();
     let mut rows: Vec<Value> = Vec::new();
@@ -1295,6 +1314,18 @@ async fn run_all(args: &Args, run_dir: &Path, keys: &HashMap<String, String>, sc
             }
             brief_results.push((m.label.clone(), brief_result.clone()));
         }
+        let mut transforms_result = Value::Null;
+        if !transform_cases.is_empty() {
+            record::set_config(Some(crate::config::YapConfig::default()));
+            record::set_tools_forced(None);
+            let ep = super::transforms::Endpoint { base_url: &m.base_url, key: &m.key, model: &m.model, provider: &m.provider };
+            println!("  saved transforms, {} cases …", transform_cases.len());
+            transforms_result = super::transforms::run(&transform_cases, &ep, args.repeat).await;
+            if transforms_result["passed"] != transforms_result["cases"] {
+                failed = true;
+            }
+            transform_results.push((m.label.clone(), transforms_result.clone()));
+        }
         let mut bench_result = Value::Null;
         if let Some(kind) = &args.bench {
             record::set_context(json!({ "model": m.label, "scenario": format!("bench-{kind}") }));
@@ -1320,6 +1351,7 @@ async fn run_all(args: &Args, run_dir: &Path, keys: &HashMap<String, String>, sc
             "speakers": speakers_result,
             "bench": bench_result,
             "brief": brief_result,
+            "transforms": transforms_result,
         });
         let (drafted, kept) = (sum("draft_tokens"), sum("draft_accepted"));
         if drafted > 0.0 {
@@ -1377,6 +1409,21 @@ async fn run_all(args: &Args, run_dir: &Path, keys: &HashMap<String, String>, sc
             println!(
                 "\n{label}: {}/{} briefs pass; the model wrote {} lines: {} uncited, {} not in their sources, {} with the wrong owner, {} saying an open task was done or a question settled, {} never-say words; {} kept",
                 r["passed"], r["scenarios"], r["claims"], r["uncited"], r["ungrounded"], r["swapped"], r["done"], r["planted"], r["kept"]
+            );
+        }
+    }
+    if !transform_results.is_empty() {
+        let md = record::redact(&super::transforms::markdown(&transform_results));
+        let _ = std::fs::write(run_dir.join("transforms.md"), &md);
+        for (label, r) in &transform_results {
+            println!(
+                "\n{label}: {}/{} transform cases pass ({}); {} preambles stripped; median {:.1} s; {} tokens",
+                r["passed"],
+                r["cases"],
+                r["by_transform"].as_object().map(|o| o.iter().map(|(k, v)| format!("{k} {}", v.as_str().unwrap_or(""))).collect::<Vec<_>>().join(", ")).unwrap_or_default(),
+                r["stripped"],
+                r["median_ms"].as_f64().unwrap_or(0.0) / 1000.0,
+                r["tokens"]
             );
         }
     }
