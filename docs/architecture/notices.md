@@ -10,7 +10,9 @@ How loud Yap may be: the notice policy (one place, one at a time, held while dic
   (`place_for`/`place`): the main window's toast while it's focused, else
   the Yap bar, else a Windows notification, else the window if it's on
   screen — used by alerts, coaching, learn, call prompts, calendar cards,
-  the length warning and meeting notices (`window_view`: test runs say for
+  the length warning and meeting notices — among them, since 2026-10-24,
+  "Yap couldn't transcribe part of this meeting" (`meeting.rs`, once per
+  meeting, with Open note) — (`window_view`: test runs say for
   themselves whether the window counts as focused, `e2e_focus`). **Rules per
   kind** (`rule`: a bar card's id / a notification's tag): priority (Prompt —
   call, calendar, meeting-limit, meeting-checkin — > Alert — micBlocked,

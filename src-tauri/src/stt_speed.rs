@@ -826,6 +826,9 @@ fn busy(app: &AppHandle) -> Option<&'static str> {
     if crate::meeting::is_recording() {
         return Some("a meeting is recording");
     }
+    if crate::meeting_audio::any_job_running() {
+        return Some("a meeting is being transcribed again");
+    }
     if crate::commands::model_download_in_flight() {
         return Some("a model is downloading");
     }

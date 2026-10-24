@@ -23,10 +23,177 @@ use crate::stt::{self, SttAdapter, SttError};
 pub(crate) const TARGET_SAMPLE_RATE: u32 = 16_000;
 
 /// The shared warm-engine slot. The pipeline owns it; the meeting recorder
-/// (`meeting.rs`) clones the Arc and takes/returns the engine per chunk, so
-/// dictation and meeting transcription interleave instead of double-loading
-/// the model.
-pub(crate) type EngineSlot = std::sync::Arc<Mutex<Option<SttAdapter>>>;
+/// (`meeting.rs`), Upload, Run again and a meeting transcribed again take
+/// the engine out for one transcription at a time ([`EngineCell::take`])
+/// and give it back, so they and dictation take turns on one copy of the
+/// model instead of loading a second.
+pub(crate) type EngineSlot = std::sync::Arc<EngineCell>;
+
+/// The warm engine, and who has it out.
+///
+/// Until 2026-10-24 each taker took the engine out of a bare
+/// `Mutex<Option<…>>`; whoever found it empty meanwhile (a dictation that
+/// ended during a meeting's chunk) loaded a second copy of the model —
+/// seconds, and its memory again. Now a taker that finds it out **waits**
+/// for it ([`EngineCell::take`]), and one that finds nobody has it (never
+/// loaded, unloaded when idle, dropped after an error) loads it *for*
+/// everyone: the others wait for that load too. The lease ([`Lease`]) gives
+/// it back when dropped, even when its transcription panicked (then
+/// without the engine: a fresh one is loaded next).
+#[derive(Default)]
+pub(crate) struct EngineCell {
+    engine: Mutex<Option<SttAdapter>>,
+    /// Leases out now (each holding the engine, or loading one).
+    out: Mutex<usize>,
+    back: Condvar,
+    /// The model a taker loads into an empty slot: `None` = Settings' (the
+    /// warm engine's); a refine's own slot names its model.
+    model: Option<String>,
+}
+
+impl EngineCell {
+    /// A slot of its own for `model` (a meeting refined on a model other
+    /// than the one in use), with that model's engine in it if loaded.
+    pub(crate) fn for_model(model: &str, engine: Option<SttAdapter>) -> EngineSlot {
+        std::sync::Arc::new(EngineCell { engine: Mutex::new(engine), model: Some(model.to_string()), ..Default::default() })
+    }
+
+    /// The slot itself (put an engine in, look at it, unload it). Never held
+    /// across a transcription, but by the live preview (`try_lock`).
+    pub(crate) fn lock(&self) -> std::sync::LockResult<std::sync::MutexGuard<'_, Option<SttAdapter>>> {
+        self.engine.lock()
+    }
+
+    pub(crate) fn try_lock(&self) -> std::sync::TryLockResult<std::sync::MutexGuard<'_, Option<SttAdapter>>> {
+        self.engine.try_lock()
+    }
+
+    /// The model a taker loads when the slot is empty (`None`: Settings').
+    pub(crate) fn model(&self) -> Option<&str> {
+        self.model.as_deref()
+    }
+
+    /// Take the engine out to transcribe with (blocking): while another
+    /// taker has it out — or is loading it — wait up to `wait` for it to
+    /// come back. The lease holds the engine, or none when nobody had one
+    /// (or the wait ran out): load one into it ([`Lease::put`]) and it
+    /// becomes the warm engine when the lease gives it back.
+    pub(crate) fn take(self: &std::sync::Arc<Self>, wait: Duration) -> Lease {
+        let deadline = Instant::now() + wait;
+        let mut out = self.out.lock().unwrap_or_else(|p| p.into_inner());
+        let mut waited: Option<Instant> = None;
+        loop {
+            let engine = self.engine.lock().unwrap_or_else(|p| p.into_inner()).take();
+            let left = deadline.saturating_duration_since(Instant::now());
+            if engine.is_some() || *out == 0 || left.is_zero() {
+                *out += 1;
+                if let Some(since) = waited {
+                    tracing::info!(ms = since.elapsed().as_millis() as u64, got = engine.is_some(), "Speech engine: waited for it to come back");
+                }
+                return Lease { slot: std::sync::Arc::clone(self), engine };
+            }
+            if waited.is_none() {
+                waited = Some(Instant::now());
+                tracing::info!("Speech engine: in use; waiting for it to come back");
+            }
+            out = self.back.wait_timeout(out, left).unwrap_or_else(|p| p.into_inner()).0;
+        }
+    }
+
+    /// A lease ends: its engine back in the slot (unless a model switch put
+    /// a newer one there meanwhile: then it's dropped), and the next taker
+    /// woken.
+    fn give_back(&self, engine: Option<SttAdapter>) {
+        let mut out = self.out.lock().unwrap_or_else(|p| p.into_inner());
+        if let Some(engine) = engine {
+            let mut slot = self.engine.lock().unwrap_or_else(|p| p.into_inner());
+            if slot.is_none() {
+                *slot = Some(engine);
+            }
+        }
+        *out = out.saturating_sub(1);
+        drop(out);
+        self.back.notify_all();
+    }
+
+    /// Leases out now (tests).
+    #[cfg(test)]
+    fn out(&self) -> usize {
+        *self.out.lock().unwrap()
+    }
+}
+
+/// The engine taken out of its slot ([`EngineCell::take`]); back when dropped.
+pub(crate) struct Lease {
+    slot: EngineSlot,
+    engine: Option<SttAdapter>,
+}
+
+impl Lease {
+    /// The engine, if the slot had one (or one was put in).
+    pub(crate) fn engine(&self) -> Option<&SttAdapter> {
+        self.engine.as_ref()
+    }
+
+    /// A freshly loaded engine: the warm one once given back.
+    pub(crate) fn put(&mut self, engine: SttAdapter) {
+        self.engine = Some(engine);
+    }
+
+    /// The engine failed: it isn't given back, so the next taker loads a
+    /// fresh one (a graphics card lost after sleep, a driver reset).
+    pub(crate) fn discard(&mut self) {
+        self.engine = None;
+    }
+}
+
+impl Drop for Lease {
+    fn drop(&mut self) {
+        // Dropped by a panic in its transcription: not that engine again.
+        let engine = if std::thread::panicking() { None } else { self.engine.take() };
+        self.slot.give_back(engine);
+    }
+}
+
+/// How long an Upload's chunk waits for the warm engine (see
+/// [`DICTATION_ENGINE_WAIT`]).
+const UPLOAD_ENGINE_WAIT: Duration = Duration::from_secs(60);
+
+/// The engine of `slot` for one transcription, waiting up to `wait` while
+/// another taker has it ([`EngineCell::take`]); with nobody holding one, the
+/// slot's model (`EngineCell::model`, else Settings') is loaded into the
+/// lease — the warm engine once it's given back. Never while the startup
+/// load is still going: that one is waited for.
+pub(crate) async fn lease_engine(slot: &EngineSlot, wait: Duration) -> Result<Lease, String> {
+    if slot.model().is_none() && model_loading() && slot.lock().map(|g| g.is_none()).unwrap_or(false) {
+        let _ = tokio::task::spawn_blocking(|| wait_for_model(Duration::from_secs(180))).await;
+    }
+    let taking = Arc::clone(slot);
+    let mut lease = tokio::task::spawn_blocking(move || taking.take(wait))
+        .await
+        .map_err(|e| format!("The speech engine couldn't be taken: {e}"))?;
+    if lease.engine().is_none() {
+        let cfg = config::load();
+        let model = slot.model().map_or_else(|| cfg.model_size.clone(), str::to_string);
+        let use_gpu = cfg.use_gpu;
+        let (loaded, back) = tokio::task::spawn_blocking(move || {
+            let loaded = stt::create_stt_engine(&config::data_dir(), &model, use_gpu);
+            (loaded, lease)
+        })
+        .await
+        .map_err(|e| format!("The speech model's load crashed: {e}"))?;
+        lease = back;
+        let engine = loaded.map_err(|e| e.to_string())?;
+        tracing::info!(model = %engine.model(), "Speech model loaded (none was warm)");
+        lease.put(engine);
+    }
+    Ok(lease)
+}
+
+/// How long a dictation waits for the warm engine while another taker has
+/// it out (a meeting's chunk: a second or so on a graphics card) before it
+/// loads a copy of its own after all.
+const DICTATION_ENGINE_WAIT: Duration = Duration::from_secs(20);
 
 /// How much audio (16 kHz mono samples) to keep in the rolling pre-roll ring so
 /// the first word isn't clipped: speech that started a moment *before* the user
@@ -1983,30 +2150,9 @@ impl Shared {
         };
         let duration_secs = samples.len() as f32 / 16_000.0;
 
-        // 2. Warm engine (the startup load waited for), or lazy-reload
-        // (same pattern as run_stt).
-        if model_loading() {
-            let _ = tokio::task::spawn_blocking(|| wait_for_model(Duration::from_secs(180))).await;
-        }
-        let engine = self.engine.lock().ok().and_then(|mut g| g.take());
-        let mut engine = match engine {
-            Some(e) => e,
-            None => {
-                let (model_size, use_gpu) = self
-                    .config
-                    .read()
-                    .map(|c| (c.model_size.clone(), c.use_gpu))
-                    .unwrap_or_else(|_| (String::new(), true));
-                match stt::create_stt_engine(&config::data_dir(), &model_size, use_gpu) {
-                    Ok(e) => {
-                        tracing::info!(model = %model_size, "Reloading model for file transcription");
-                        e
-                    }
-                    Err(e) => return emit_err(format!("No STT model available: {e}")),
-                }
-            }
-        };
-
+        // 2. The warm engine, taken out for one chunk at a time (a
+        // dictation or a meeting's chunk takes its turn in between), or
+        // lazily reloaded (`lease_engine`).
         let (language, translate) = self.language_settings();
 
         // 3. ~60 s chunks, each cut at the quietest point of its last 5 s so a
@@ -2017,37 +2163,35 @@ impl Shared {
 
         for (i, (a, b)) in ranges.into_iter().enumerate() {
             if self.upload_cancel.load(Ordering::SeqCst) {
-                if let Ok(mut g) = self.engine.lock() {
-                    if g.is_none() {
-                        *g = Some(engine);
-                    }
-                }
                 tracing::info!("Upload transcription cancelled");
                 let _ = self.app.emit("yap-upload-cancelled", ());
                 return;
             }
+            let lease = match lease_engine(&self.engine, UPLOAD_ENGINE_WAIT).await {
+                Ok(lease) => lease,
+                Err(e) => return emit_err(format!("No STT model available: {e}")),
+            };
             let chunk: Vec<f32> = samples[a..b].to_vec();
             let lang = language.clone();
             let prompt = self.dictionary_prompt();
             let outcome = tokio::task::spawn_blocking(move || {
-                let result = engine.transcribe(&chunk, lang.as_deref(), translate, prompt.as_deref());
-                (engine, result)
+                let result = match lease.engine() {
+                    Some(engine) => engine.transcribe(&chunk, lang.as_deref(), translate, prompt.as_deref()),
+                    None => Err(SttError::NotReady),
+                };
+                (lease, result)
             })
             .await;
             match outcome {
-                Ok((e, Ok(text))) => {
-                    engine = e;
+                Ok((lease, Ok(text))) => {
+                    drop(lease);
                     let t = text.trim().to_string();
                     if !t.is_empty() {
                         pieces.push(t);
                     }
                 }
-                Ok((e, Err(err))) => {
-                    if let Ok(mut g) = self.engine.lock() {
-                        if g.is_none() {
-                            *g = Some(e);
-                        }
-                    }
+                Ok((lease, Err(err))) => {
+                    drop(lease);
                     return emit_err(format!("Transcription failed: {err}"));
                 }
                 Err(e) => return emit_err(format!("Transcription task failed: {e}")),
@@ -2067,13 +2211,6 @@ impl Shared {
             #[cfg(debug_assertions)]
             if let Some(pace) = crate::e2e::upload_pace() {
                 tokio::time::sleep(pace).await;
-            }
-        }
-
-        // Put the warm engine back (unless a model switch installed a newer one).
-        if let Ok(mut g) = self.engine.lock() {
-            if g.is_none() {
-                *g = Some(engine);
             }
         }
 
@@ -2587,20 +2724,30 @@ impl Shared {
             }
         }
 
-        // Take the engine out so the mutex isn't held across the await.
-        let mut engine = self.engine.lock().ok().and_then(|mut g| g.take());
         // Started before the model finished loading (`Pipeline::start` loads
         // it in the background): wait for it — the bar says "Loading the
         // speech model…" — instead of failing or loading a second copy.
-        if engine.is_none() && model_loading() {
+        if model_loading() && self.engine.lock().map(|g| g.is_none()).unwrap_or(false) {
             tracing::info!("Dictation: waiting for the speech model to finish loading");
             let _ = self.app.emit("yap-model-loading", true);
             let _ = tokio::task::spawn_blocking(|| wait_for_model(Duration::from_secs(180))).await;
             let _ = self.app.emit("yap-model-loading", false);
-            engine = self.engine.lock().ok().and_then(|mut g| g.take());
         }
-        let engine = match engine {
-            Some(e) => e,
+        // Take the engine out (the slot isn't held across the await). A
+        // meeting's chunk that has it gives it back first — a second or so
+        // — rather than this loading a second copy of the model.
+        let slot = Arc::clone(&self.engine);
+        let mut lease = match tokio::task::spawn_blocking(move || slot.take(DICTATION_ENGINE_WAIT)).await {
+            Ok(lease) => lease,
+            Err(e) => {
+                tracing::warn!("Dictation: the speech engine couldn't be taken: {}", e);
+                self.list_failed("The speech engine wasn't available");
+                let _ = self.app.emit("yap-state", "idle");
+                return;
+            }
+        };
+        match lease.engine() {
+            Some(_) => {}
             None => {
                 // No warm engine — either the idle watcher unloaded it (B1) or
                 // a model was never loaded. Try a lazy (re)build before giving up.
@@ -2613,10 +2760,11 @@ impl Shared {
                 match stt::create_stt_engine(&data_dir, &model_size, use_gpu) {
                     Ok(e) => {
                         tracing::info!(model = %model_size, "Reloading model (was unloaded/idle)");
-                        e
+                        lease.put(e);
                     }
                     Err(e) => {
                         tracing::warn!("No STT engine (model missing) — cannot transcribe: {}", e);
+                        drop(lease);
                         if self.assistant.swap(false, Ordering::SeqCst) {
                             crate::assistant::nothing(&self.app);
                         }
@@ -2627,7 +2775,7 @@ impl Shared {
                     }
                 }
             }
-        };
+        }
 
         // Snapshot the language/translate settings for this transcription.
         let (language, translate) = self.language_settings();
@@ -2661,9 +2809,11 @@ impl Shared {
 
         let dict_prompt = self.dictation_prompt();
         let outcome = tokio::task::spawn_blocking(move || {
-            let result =
-                engine.transcribe(&audio, language.as_deref(), translate, dict_prompt.as_deref());
-            (engine, result)
+            let result = match lease.engine() {
+                Some(engine) => engine.transcribe(&audio, language.as_deref(), translate, dict_prompt.as_deref()),
+                None => Err(SttError::NotReady),
+            };
+            (lease, result)
         })
         .await;
 
@@ -2677,16 +2827,12 @@ impl Shared {
         // words AI cleanup changed (`as_said.rs`).
         let mut offer: Option<u64> = None;
         match outcome {
-            Ok((engine, transcription)) => {
-                // Put the (warm) engine back for next time — but only if the
-                // slot is still empty. If a model switch (`set_engine`) installed
-                // a *newer* engine while we were transcribing, keep theirs and
-                // drop ours, so the switch isn't silently reverted.
-                if let Ok(mut g) = self.engine.lock() {
-                    if g.is_none() {
-                        *g = Some(engine);
-                    }
-                }
+            Ok((lease, transcription)) => {
+                // The (warm) engine back for next time, now — not after the
+                // cleanup below — unless a model switch (`set_engine`)
+                // installed a newer one meanwhile: then that stays
+                // (`EngineCell::give_back`).
+                drop(lease);
                 match transcription {
                     // A question for the Voice Assistant: corrected, then
                     // to Chat and read aloud (assistant.rs). Nothing pasted.
@@ -2817,28 +2963,25 @@ impl Shared {
             // The startup load is this model: wait for it, not a second copy.
             let _ = tokio::task::spawn_blocking(|| wait_for_model(Duration::from_secs(180))).await;
         }
-        let engine = if warm { self.engine.lock().ok().and_then(|mut g| g.take()) } else { None };
-        let engine = match engine {
-            Some(e) => e,
-            None => stt::create_stt_engine(&data_dir, &model_id, cfg.use_gpu)
-                .map_err(|e| format!("Couldn't load {}: {e}", stt::model_name(&model_id)))?,
-        };
+        // The warm engine (taken out, given back), or the other model in a
+        // slot of its own, dropped after.
+        let slot = if warm { Arc::clone(&self.engine) } else { EngineCell::for_model(&model_id, None) };
+        let lease = lease_engine(&slot, DICTATION_ENGINE_WAIT)
+            .await
+            .map_err(|e| format!("Couldn't load {}: {e}", stt::model_name(&model_id)))?;
         let (language, translate) = self.language_settings();
         let prompt = if stt::is_whisper_model(&model_id) { self.dictionary_prompt() } else { None };
         tracing::info!(samples = audio.len(), model = %model_id, warm, "Running a dictation again");
-        let (engine, result) = tokio::task::spawn_blocking(move || {
-            let r = engine.transcribe(&audio, language.as_deref(), translate, prompt.as_deref());
-            (engine, r)
+        let (lease, result) = tokio::task::spawn_blocking(move || {
+            let r = match lease.engine() {
+                Some(engine) => engine.transcribe(&audio, language.as_deref(), translate, prompt.as_deref()),
+                None => Err(SttError::NotReady),
+            };
+            (lease, r)
         })
         .await
         .map_err(|e| format!("The transcription crashed: {e}"))?;
-        if warm {
-            if let Ok(mut g) = self.engine.lock() {
-                if g.is_none() {
-                    *g = Some(engine);
-                }
-            }
-        }
+        drop(lease);
         self.touch_activity();
         let raw = result.map_err(|e| format!("The transcription failed: {e}"))?.trim().to_string();
         if raw.is_empty() {
@@ -3076,7 +3219,7 @@ impl Pipeline {
             pending_session: AtomicU64::new(0),
             pending_start: Mutex::new(None),
             me: me.clone(),
-            engine: std::sync::Arc::new(Mutex::new(None)),
+            engine: EngineSlot::default(),
             app: app.clone(),
             config: RwLock::new(cfg.clone()),
             last_activity: AtomicU64::new(now_ms()),
@@ -3943,6 +4086,113 @@ pub(crate) fn resample_linear(input: &[f32], from_rate: u32, to_rate: u32) -> Ve
 mod tests {
     use super::*;
     use crate::config::DictionaryEntry;
+
+    // ---- the shared engine (EngineCell) ----
+
+    /// A stub engine (the default build loads nothing from disk).
+    #[cfg(not(feature = "engines"))]
+    fn engine() -> SttAdapter {
+        stt::create_stt_engine_on(std::path::Path::new("."), "parakeet-tdt-0.6b-v3", stt::Device::Cpu).unwrap()
+    }
+
+    /// A meeting's chunk has the engine out while a dictation ends: the
+    /// dictation waits for it instead of loading a second copy of the
+    /// model (until 2026-10-24 it found the slot empty and loaded one).
+    #[cfg(not(feature = "engines"))]
+    #[test]
+    fn a_dictation_waits_for_the_engine_a_meeting_chunk_has_out() {
+        let slot = EngineSlot::default();
+        *slot.lock().unwrap() = Some(engine());
+        let chunk = slot.take(Duration::ZERO);
+        assert!(chunk.engine().is_some());
+        assert!(slot.lock().unwrap().is_none(), "out of the slot while it transcribes");
+        let (tx, rx) = std::sync::mpsc::channel();
+        let dictation = {
+            let slot = Arc::clone(&slot);
+            std::thread::spawn(move || {
+                let started = Instant::now();
+                let lease = slot.take(Duration::from_secs(5));
+                tx.send(()).unwrap();
+                (lease.engine().is_some(), started.elapsed())
+            })
+        };
+        // The chunk transcribes for a while; the dictation hasn't got it.
+        assert!(rx.recv_timeout(Duration::from_millis(150)).is_err(), "the dictation waits");
+        drop(chunk);
+        let (got, waited) = dictation.join().unwrap();
+        assert!(got, "the dictation got the warm engine, no second copy");
+        assert!(waited >= Duration::from_millis(150));
+        assert!(slot.lock().unwrap().is_some(), "back in the slot");
+        assert_eq!(slot.out(), 0);
+    }
+
+    /// Nobody has it (unloaded when idle): the first taker loads it for
+    /// everyone — the others wait for that load, then share it.
+    #[cfg(not(feature = "engines"))]
+    #[test]
+    fn one_taker_loads_the_model_and_the_others_wait_for_it() {
+        let slot = EngineSlot::default();
+        let mut loading = slot.take(Duration::ZERO);
+        assert!(loading.engine().is_none(), "nobody had one: this taker loads it");
+        let waiter = {
+            let slot = Arc::clone(&slot);
+            std::thread::spawn(move || slot.take(Duration::from_secs(5)).engine().is_some())
+        };
+        std::thread::sleep(Duration::from_millis(100));
+        loading.put(engine());
+        drop(loading);
+        assert!(waiter.join().unwrap(), "the waiter got the one that was loaded");
+        // A load that fails lets the waiters go at once: each tries its own.
+        let mut gone = slot.take(Duration::ZERO);
+        gone.discard();
+        drop(gone);
+        let failed = slot.take(Duration::ZERO);
+        assert!(failed.engine().is_none());
+        let waiter = {
+            let slot = Arc::clone(&slot);
+            std::thread::spawn(move || {
+                let started = Instant::now();
+                (slot.take(Duration::from_secs(5)).engine().is_some(), started.elapsed())
+            })
+        };
+        std::thread::sleep(Duration::from_millis(50));
+        drop(failed);
+        let (got, waited) = waiter.join().unwrap();
+        assert!(!got, "nothing to share: it loads its own");
+        assert!(waited < Duration::from_secs(2), "woken by the failed load, not the timeout");
+        assert_eq!(slot.out(), 0);
+    }
+
+    /// An engine that failed (or whose transcription panicked) isn't given
+    /// back: the next taker loads a fresh one. A model switch meanwhile wins.
+    #[cfg(not(feature = "engines"))]
+    #[test]
+    fn a_failed_engine_is_dropped_and_a_newer_one_wins() {
+        let slot = EngineSlot::default();
+        *slot.lock().unwrap() = Some(engine());
+        let mut lease = slot.take(Duration::ZERO);
+        lease.discard();
+        drop(lease);
+        assert!(slot.lock().unwrap().is_none());
+        assert_eq!(slot.out(), 0);
+        // A panic while it has the engine.
+        *slot.lock().unwrap() = Some(engine());
+        let crashing = Arc::clone(&slot);
+        let crashed = std::thread::spawn(move || {
+            let _lease = crashing.take(Duration::ZERO);
+            panic!("a crash in the engine");
+        })
+        .join();
+        assert!(crashed.is_err());
+        assert!(slot.lock().unwrap().is_none(), "not that engine again");
+        assert_eq!(slot.out(), 0, "and nobody waits for it");
+        // A model switch while one was out: the newer engine stays.
+        *slot.lock().unwrap() = Some(engine());
+        let old = slot.take(Duration::ZERO);
+        *slot.lock().unwrap() = Some(stt::create_stt_engine_on(std::path::Path::new("."), "turbo", stt::Device::Cpu).unwrap());
+        drop(old);
+        assert_eq!(slot.lock().unwrap().as_ref().map(|e| e.model().to_string()).as_deref(), Some("turbo"));
+    }
 
     fn entry(from: &str, to: &str, fuzzy: bool) -> DictionaryEntry {
         DictionaryEntry {

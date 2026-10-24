@@ -261,6 +261,92 @@ summary is written from the new lines.
 its right-click menu) plays both sides of its stretch, a quarter second
 either side, mixed — while the meeting still records, too.
 
+### A part that couldn't be transcribed
+
+Since 2026-10-24 (`meeting.rs`, "Failed chunks"; code review #6). A chunk
+the speech model can't transcribe — no model, the graphics card lost after
+the PC slept, a driver reset, a crash in the engine — used to be recorded
+as silence: a meeting could end with an empty transcript and only "Nothing
+to summarise yet" to say so. Now:
+
+- its stretch gets a **marker** in the transcript, on its side: "⚠ Couldn't
+  transcribe 0:42–1:12 · **Try again**" in the notepad and the Notes view
+  (its tooltip says whether it was the call or your mic). Summaries, the AI
+  title and the word count skip it, and a meeting with one never asks
+  "Started by mistake?" (the meeting may be in there);
+- the person is **told once per meeting**, in one place (a toast while the
+  main window is looked at, else the Yap bar, else a Windows notification,
+  with Open note): "Yap couldn't transcribe part of this meeting · Its audio
+  is kept: Yap transcribes that part again when the meeting ends" (or, with
+  the refine set to Never, "…use Try again on the transcript once the
+  meeting ends");
+- the engine that failed is dropped, so the next chunk loads a fresh one
+  (the case of a lost graphics card);
+- **Try again** (after the meeting) reads that side's stretch from the
+  audio on disk, transcribes it on the speech model in use now, and puts
+  its lines in the marker's place — the ⏸ marks and digests after it move
+  along. Still failing, the marker stays and a toast says to check the
+  speech model.
+
+The audio of a meeting with a failed stretch is held even with "Keep
+meeting audio" off, until it's transcribed (a day at most).
+
+### The refined transcript, after the meeting
+
+Since 2026-10-24 (`meeting_refine.rs`), after Wispr Flow's "refined
+transcript": when a meeting ends, Yap transcribes it again in the background
+from its audio — **when it helps**. Settings → Meetings → Meeting audio →
+**Improve the transcript after the meeting**:
+
+- **Automatically when it helps** (the default): part of the live
+  transcript couldn't be transcribed, or a **more accurate speech model is
+  installed** than the one that made it live — for the meeting's language
+  (the one picked in Speech-to-Text, else Windows'; Parakeet V2, English
+  only, never refines a German meeting; with the language unknown, only a
+  model that speaks every language the live one does);
+- **Always**: every meeting, on the most accurate model there is (the one
+  in use when it's the best);
+- **Never**: Try again and Transcribe again stay.
+
+"More accurate" is the same leaderboard figure as Settings' bars (Cohere
+0.93 > Parakeet V2 0.90 > Parakeet V3 0.88 > Canary 1B 0.84 > Whisper Large
+0.81…), by a margin. The new lines go in through **the same replacement as
+Transcribe again** (My thoughts, names on lines that still match, the ⏸
+marks and "You dictated here" kept), after a check that they say what the
+live ones did: at least half the live words found again, else the live
+transcript stays ("The transcript wasn't improved: … (another language?)").
+
+**Which comes first, the summary or the refine.**
+
+- *The live transcript is whole* (a better model, or Always): **the summary
+  first**, from the live transcript, at once — its digests were made while
+  the meeting recorded, so even a two-hour meeting's action plan takes
+  seconds, and a short meeting still feels instant. Then the refine runs
+  ("Improving the transcript · 40%", with Cancel), and when it's done the
+  transcript says **"✓ Transcript improved · Update summary"**. Update
+  summary writes it again from the new lines, the way Generate summary does
+  (on-device or cloud, it sends what a summary sends today, nothing more).
+  Not automatic: the refined words rarely change what was decided, a
+  summary the person has read or edited shouldn't change under them, and
+  for a long meeting every digest would be written again (more tokens on a
+  cloud model).
+- *It has holes* (chunks failed): **the refine first** ("Improving the
+  transcript, then the summary · 40%"), then the summary — or "Started by
+  mistake?" — from the whole transcript. A summary written around holes
+  misses what was decided there: that's wrong, not just rough, so a little
+  later and complete wins. Generate summary meanwhile does nothing (it
+  follows by itself), and the notepad hides its pill.
+
+**Never in the way.** It waits for the summary being written, never runs
+beside a meeting that records ("…after the meeting that's recording"), and
+between chunks waits for any hotkey dictation and 3 s after it, so a
+dictation's transcription always finds the engine free; on the model in
+use it shares the warm engine a chunk at a time (a dictation that ends
+mid-chunk waits for that chunk, never loads a second copy), on another
+model it loads a copy of its own and drops it after. Its transcription
+calls run on a lowest-priority thread. Cancel stops it between two chunks;
+the live transcript stays.
+
 ## Who said what
 
 Every transcript line has a side (`source`: the mic "you", the call "them")
@@ -1188,8 +1274,37 @@ KeyTips) and Win the Start menu.
   clipped, `redo::rebuild` (voices and locks kept on matching lines, a line
   over two voices split, a line that barely touches keeping its side,
   markers and lines without audio staying, each recording's stop mark),
-  lines recovered into a resumed meeting.
+  lines recovered into a resumed meeting. Since 2026-10-24
+  (`cargo test --lib -- meeting:: meeting_refine redo bridge:: pipeline::tests::a_
+  pipeline::tests::one_`): two starts at once give one recorder, the note
+  being recorded or started never deleted (here and by the local API) —
+  each fails on the code before the fix —; a failed chunk leaving a marker
+  over its stretch (not silence, not talk, read back from disk), a refine
+  replacing a marker, Try again's `fill` moving stop marks and digests;
+  the refine's decision (auto / always / never, failed chunks first),
+  the model choice (language, margin, the live model's languages when it's
+  unknown) and the agreement check; the shared engine lent in turns (a
+  dictation waiting for a meeting chunk's engine instead of loading a
+  copy — failing on the old take-or-load —, one load for every taker, a
+  failed or panicked engine dropped, a model switch meanwhile winning);
+  audio only held going after a day.
 - **e2e** (`npm run test:app`), with no audio device and no real AI:
+  - `e2e/meeting-refine.spec.js` (test WAVs at 4×, the fake AI, each refine
+    chunk 1.5 s): both sides' first chunk failing (`e2e_meeting_fail`) →
+    one notice, a marker per side in notes.json and both views ("Couldn't
+    transcribe 0:00–0:… · Try again"), Try again filling each in place;
+    the refine setting's three choices — Never (nothing, Cohere installed or
+    not), Automatically with nothing better (nothing), with a "Cohere"
+    model folder (the summary first, "Improving the transcript" with
+    Cancel, every line now Cohere's, "Transcript improved · Update summary",
+    the new summary reading Cohere's lines), Always (Parakeet V3 again), and
+    Automatically with a failed chunk (the refine first, no summary job
+    until it's done, then the summary over the whole transcript); a
+    dictation in the middle of a refine never waiting for the engine (the
+    log's "Speech engine: in use" — it did before the replay waited between
+    the two sides' chunks — and its time against a quiet one); two meeting
+    starts on two threads at once (`e2e_meeting_start_twice`) giving one
+    recorder, one test player and one note's audio.
   - `e2e/meeting-audio-kept.spec.js`: a recording's two FLAC files and its
     notes on disk (ended, ~24 s each), a line's clip as a WAV of the right
     length, ▶ → Stop playing; the notepad's ⋯ → Transcribe again (the
@@ -1306,6 +1421,15 @@ KeyTips) and Win the Start menu.
     `e2e_meeting_checkins { quietMs?, countdownMs?, recentMs?, afterEndMs?,
     hourMs?, fadeMs?, marginMs? }` (`meeting_guard.rs`). The player logs "the
     test audio has played to the end", so a test can stop after all of it.
+    Since 2026-10-24: `e2e_meeting_fail { side?, from?, to? }` (the live
+    chunks over a stretch fail), `e2e_meeting_start_twice { first, second }`
+    and `YAP_E2E_REFINE_CHUNK_MS` (each refine chunk that long).
+  - Robot, written and not run yet (`e2e-real/meeting-refine.real.js`, an
+    `engines` build with Parakeet V3, and Whisper Large for the second
+    test): a Windows-TTS supplier call whose call side's first chunk fails
+    live — the refine comes first and the first sentence must be there, in
+    its place —; and a meeting recorded on Whisper Large refined on Parakeet
+    V3, both sides still saying what was said.
 - **Real speech, once** (2026-10-05): a 74 s scripted two-voice meeting
   rendered to WAV with Windows TTS (George as You, Zira as Them; to files,
   never played), through a debug `engines` build with Parakeet V3 on
@@ -1319,8 +1443,17 @@ KeyTips) and Win the Start menu.
 
 ## Limits and follow-ups
 
-- **Meeting audio.** It's transcribed again on request, not by itself when
-  a meeting ends (Wispr's "refined transcript"); the speaker engine isn't run
+- **Meeting audio.** The refine after a meeting (since 2026-10-24) runs
+  only with a more accurate model installed, failed chunks, or Always; a
+  model's accuracy is the leaderboard's English figure (the specialists'
+  on their language), not measured on the person's own meetings, and the
+  meeting's language is Settings' or Windows', not detected. A refine on
+  another model holds a second model in memory while it runs. Only the
+  calling thread runs at low priority (ONNX Runtime's and whisper.cpp's
+  worker threads keep theirs): what keeps it out of a dictation's way is
+  when it runs. A dictation shorter than one refine chunk's transcription
+  can still wait for that chunk (a fraction of a second on a graphics
+  card). The speaker engine isn't run
   again over it (the step toward speakers out of beta); it can't be
   exported; a transcription after the fact doesn't diarize. A line recovered
   into a meeting that was resumed and digested since isn't in the digest

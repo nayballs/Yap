@@ -56,7 +56,7 @@ const who = speakerLabel;
 export function noteVoices(note) {
   const out = [];
   const add = (id) => !out.includes(id) && out.push(id);
-  for (const s of note?.transcript || []) if (!s.echo && !s.dictated) add(speakerId(note.speakers, s));
+  for (const s of note?.transcript || []) if (!s.echo && !s.dictated && !s.failed) add(speakerId(note.speakers, s));
   const toldApart = !out.includes('them') && out.some((id) => id.startsWith('them-'));
   for (const id of Object.keys(note?.speakers || {})) {
     const v = speakerId(note.speakers, { speaker: id });
@@ -172,7 +172,7 @@ export function suggestionWhy(note, card) {
 }
 
 /** Spoken lines worth sharing: no echo (the call through the speakers), no markers. */
-const spoken = (transcript) => (transcript || []).filter((s) => !s.echo && !s.dictated);
+const spoken = (transcript) => (transcript || []).filter((s) => !s.echo && !s.dictated && !s.failed);
 
 /**
  * The note as Markdown, laid out as "Save as .md" writes it (commands.rs
@@ -232,14 +232,15 @@ export function mailtoUrl(note) {
  * bubble each; a group per run of one voice, named from the note's
  * `speakers` map), a paused divider wherever a recording stopped (`breaks`:
  * the transcript's length at each stop), and a marker where the person
- * dictated mid-meeting (a `dictated` segment). Echo lines only with
- * `showEcho`. With a search `query`, only the lines that match it, in their
- * groups, without dividers.
+ * dictated mid-meeting (a `dictated` segment), and a "Couldn't transcribe
+ * 0:42–1:12" line where a chunk failed (a `failed` segment, meeting.rs; line
+ * `i` of the transcript). Echo lines only with `showEcho`. With a search
+ * `query`, only the lines that match it, in their groups, without dividers.
  *   { kind: 'group', key, source ('you' | 'them': the user or someone else),
  *     speaker (the voice), label, guess, echo, lines: [{ text, i, edited,
  *     original }] } — `edited`: the person fixed its words (`original`: what
  *     Yap heard)
- *   { kind: 'pause', key } | { kind: 'dictated', key }
+ *   { kind: 'pause', key } | { kind: 'dictated', key } | { kind: 'failed', key, i }
  */
 export function transcriptItems(transcript, breaks = [], { showEcho = false, query = '', speakers = {} } = {}) {
   const q = query.trim().toLowerCase();
@@ -249,6 +250,9 @@ export function transcriptItems(transcript, breaks = [], { showEcho = false, que
   (transcript || []).forEach((s, i) => {
     if (s.dictated) {
       if (!q) items.push({ kind: 'dictated', key: `d${i}` });
+      group = null;
+    } else if (s.failed) {
+      if (!q) items.push({ kind: 'failed', key: `f${i}`, i });
       group = null;
     } else if ((!s.echo || showEcho) && (!q || (s.text || '').toLowerCase().includes(q))) {
       const echo = !!s.echo;
@@ -405,6 +409,14 @@ export function newSinceLine(n) {
 }
 
 /** "m:ss", or "h:mm:ss" past the hour. */
+/**
+ * A failed chunk's marker as its line says it: "Couldn't transcribe
+ * 0:42–1:12" (its stretch on its recording's clock).
+ */
+export function failedText(seg) {
+  return `Couldn't transcribe ${clock((seg?.startMs || 0) / 1000)}–${clock((seg?.endMs || 0) / 1000)}`;
+}
+
 export function clock(secs) {
   const s = Math.max(0, Math.round(secs || 0));
   const h = Math.floor(s / 3600);

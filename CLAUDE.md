@@ -98,7 +98,7 @@ blocks. The full order and its rules: [dictation.md](./docs/architecture/dictati
 ## Module index (`src-tauri/src/`)
 
 **Dictation** — [dictation.md](./docs/architecture/dictation.md)
-- `pipeline.rs` — the heart: buffer and pre-roll, modes, the start chime on the mic's first audio, the model loaded off the startup thread, `run_stt` → `deliver`, Undo, chat/assistant routing; the `processing` guard (`Busy`) let go however a task ends, a crash said.
+- `pipeline.rs` — the heart: buffer and pre-roll, modes, the start chime on the mic's first audio, the model loaded off the startup thread, `run_stt` → `deliver`, Undo, chat/assistant routing; the `processing` guard (`Busy`) let go however a task ends, a crash said; the warm engine lent in turns (`EngineCell`: a taker waits for it, never loads a second copy).
 - `gesture.rs` — push-to-talk's pure state machine: hold, double-tap hands-free, lone tap.
 - `coaching.rs` — push-to-talk coaching hints (≤ 3 each; counts in `hints.json`).
 - `input_hook.rs` — low-level keyboard/mouse hooks: seven bindings (Read aloud's the fifth, Use what I said's the sixth, Snip to Chat's the seventh) + up to 12 saved transforms' slots, combo rules, `clashes`, menu-mask key; Esc while a snip is up.
@@ -171,10 +171,11 @@ blocks. The full order and its rules: [dictation.md](./docs/architecture/dictati
 - `tasks.rs` — the summary's checkboxes: ticked in place (`- [x]`), carried into a new summary, listed across notes for the Tasks view ("Said at" the line), read only over the local API / MCP.
 
 **Meetings** — [meetings.md](./docs/architecture/meetings.md) (guide: [`docs/meetings.md`](./docs/meetings.md))
-- `meeting.rs` — the recorder: mic + loopback, chunking, echo, dictations kept out, one clock; `replay` from disk.
-- `meeting_audio.rs` (+ `meeting_audio/`) — the meeting's audio kept on disk as it records (own FLAC encoder, 14 days): crash recovery, Transcribe again (`redo.rs`: notes, summary, names on matching lines kept), ▶ a line.
+- `meeting.rs` — the recorder: mic + loopback, chunking, echo, dictations kept out, one clock; failed chunks marked (told once); one recorder per start (the slot claimed first); `delete_note` never the recording's; `replay` from disk.
+- `meeting_audio.rs` (+ `meeting_audio/`) — the meeting's audio kept on disk as it records (own FLAC encoder, 14 days): crash recovery, Transcribe again (`redo.rs`: notes, summary, names on matching lines kept), Try again on a failed stretch, ▶ a line; jobs with Cancel.
 - `meeting_summary.rs` — rolling digests, bounded inputs, action-plan checks, helper inputs.
-- `meeting_end.rs` — a recording's end: "Started by mistake?", AI title, the action-plan job.
+- `meeting_end.rs` — a recording's end: "Started by mistake?", AI title, the action-plan job; the refine before or after it.
+- `meeting_refine.rs` — the refined transcript when a meeting ends: when it helps (failed chunks, a more accurate model for its language), always or never; summary first unless the transcript has holes; low priority, cancellable.
 - `meeting_assist.rs` — the notepad's AI: What did I miss?, one-tap helpers, the AI title.
 - `notepad.rs` — the meeting notepad window: docking, split screen and its preview.
 
@@ -245,7 +246,7 @@ blocks. The full order and its rules: [dictation.md](./docs/architecture/dictati
 - `NotesView.svelte` — the AI Notepad ([notes.md](./docs/architecture/notes.md)); `lib/noteEdits.js` — fixing a line, the summary, ticking tasks (shared with the notepad); `TasksView.svelte` — sidebar Tasks across meetings.
 - `lib/markdown.js` — every rendered answer/note: markdown-it + DOMPurify, citation pills ([notes.md](./docs/architecture/notes.md#the-markdown-renderer)).
 - `ChatView.svelte` + `ChatModelPicker.svelte` — Chat and its model picker, a snip in the box (`chatImages.js`, `chatShots.svelte.js`; [snip.md](./docs/architecture/snip.md)) ([chat-and-assistant.md](./docs/architecture/chat-and-assistant.md)); `lib/streaming.js` — streamed answers in Chat and the notepad's Ask sheet (the channel, ■, half-written markdown closed off, the checked answer's smooth swap).
-- `MeetingsView` / `Notepad` / `SplitPreview` — meetings and the notepad ([meetings.md](./docs/architecture/meetings.md)); `meetingAudio.svelte.js` — a meeting's kept audio in both: Transcribe again, ▶ a line, the crash banner; `BriefView.svelte` + `brief.js` — a meeting's pre-meeting brief everywhere it shows ([calendar.md](./docs/architecture/calendar.md#pre-meeting-briefs)); `SpeakerMenu` / `SpeakerCard` — a speaker's menu and the name cards ([speakers.md](./docs/architecture/speakers.md)).
+- `MeetingsView` / `Notepad` / `SplitPreview` — meetings and the notepad ([meetings.md](./docs/architecture/meetings.md)); `meetingAudio.svelte.js` — a meeting's kept audio in both: Transcribe again, ▶ a line, the crash banner, the refine's line and Update summary (`MeetingJob.svelte`), a failed stretch's Try again (`FailedChunk.svelte`); `BriefView.svelte` + `brief.js` — a meeting's pre-meeting brief everywhere it shows ([calendar.md](./docs/architecture/calendar.md#pre-meeting-briefs)); `SpeakerMenu` / `SpeakerCard` — a speaker's menu and the name cards ([speakers.md](./docs/architecture/speakers.md)).
 - `ConnectCalendarDialog.svelte` — "Connect your calendar" ([calendar.md](./docs/architecture/calendar.md)).
 - `IntegrationsView.svelte` — local API and MCP cards ([integrations.md](./docs/architecture/integrations.md)).
 - `Overlay.svelte` + `bar/` — the Yap bar's page (🎤 ◉ 🔊 ✂ ^), the reading card `bar/ReadingCard.svelte` ([yap-bar.md](./docs/architecture/yap-bar.md)).

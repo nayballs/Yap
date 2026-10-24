@@ -16,7 +16,8 @@
 //   `settings`), a stop Yap made itself (the length limit, a call ending),
 //   "Taking notes" from the meeting shortcut, or something about the
 //   recording itself (kind "warning", meeting.rs: transcription falling
-//   behind; "Yap can't hear the call" when one side went quiet).
+//   behind; "Yap can't hear the call" when one side went quiet; "Yap
+//   couldn't transcribe part of this meeting", once per meeting).
 //   A notice addressed to another window (`surface`: "notepad") isn't
 //   shown here.
 // The quiet-meeting countdown and the "Still in your meeting?" check-ins

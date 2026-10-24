@@ -45,6 +45,7 @@ mod meeting_audio;
 mod meeting_detect;
 mod meeting_end;
 mod meeting_guard;
+mod meeting_refine;
 mod meeting_summary;
 mod memory;
 mod note_edits;
@@ -640,6 +641,8 @@ pub fn run() {
             meeting_audio::meeting_audio_clip,
             meeting_audio::meeting_transcribe_again,
             meeting_audio::meeting_recover,
+            meeting_audio::meeting_retry_chunk,
+            meeting_audio::meeting_job_cancel,
             meeting_assist::meeting_catch_up,
             meeting_assist::meeting_assist,
             speakers::speaker_rename,
@@ -719,6 +722,10 @@ pub fn run() {
             e2e::e2e_meeting_output_change,
             #[cfg(debug_assertions)]
             e2e::e2e_meeting_quiet,
+            #[cfg(debug_assertions)]
+            e2e::e2e_meeting_fail,
+            #[cfg(debug_assertions)]
+            e2e::e2e_meeting_start_twice,
             #[cfg(debug_assertions)]
             meeting_audio::e2e_meeting_recovery_offer,
             #[cfg(debug_assertions)]

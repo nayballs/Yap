@@ -83,6 +83,19 @@
     meetingDetect.apps.length ? `${asking.length} of ${meetingDetect.apps.length} apps` : ''
   );
 
+  // The refined transcript (meeting_refine.rs): when a meeting ends, it's
+  // transcribed again in the background from its audio.
+  const REFINE = [
+    { value: 'auto', label: 'Automatically when it helps' },
+    { value: 'always', label: 'Always' },
+    { value: 'never', label: 'Never' },
+  ];
+  const REFINE_DESC = {
+    auto: 'When part of it couldn’t be transcribed, or a more accurate speech model is installed',
+    always: 'Every meeting, in the background, on the most accurate speech model you have',
+    never: 'You can still transcribe a meeting again from its menu',
+  };
+
   // Meeting audio kept on disk (meeting_audio.rs): { meetings, recordings, bytes }.
   const AUDIO_DAYS = [
     { value: 1, label: '1 day' },
@@ -286,6 +299,10 @@
     </Row>
     <Row label="Keep it for" desc="Then it's deleted. The notes and transcripts stay" setting="meeting-audio-days">
       <Select bind:value={cfg.meetingAudioDays} options={daysOptions} ariaLabel="Keep meeting audio for" disabled={!cfg.meetingKeepAudio} />
+    </Row>
+    <!-- The refined transcript when a meeting ends (meeting_refine.rs). -->
+    <Row label="Improve the transcript after the meeting" desc={REFINE_DESC[cfg.meetingRefine] ?? REFINE_DESC.auto} setting="meeting-refine">
+      <Select bind:value={cfg.meetingRefine} options={REFINE} ariaLabel="Improve the transcript after the meeting" />
     </Row>
     <Row label="Delete all meeting audio" desc={audioDesc} setting="clear-meeting-audio">
       <Button variant="secondary" size="sm" disabled={!audio?.recordings} onclick={clearAudio}>Delete all…</Button>

@@ -749,6 +749,11 @@ pub struct YapConfig {
     /// For how many days (14, like Wispr Flow's playback).
     #[serde(default = "default_meeting_audio_days")]
     pub meeting_audio_days: u32,
+    /// "Improve the transcript after the meeting" (Settings → Meetings):
+    /// "auto" (when it helps: chunks failed, or a more accurate speech
+    /// model is installed), "always" or "never" (`meeting_refine.rs`).
+    #[serde(default = "default_meeting_refine")]
+    pub meeting_refine: String,
     /// "Tell speakers apart in meetings" (beta; Settings → Speech-to-Text,
     /// and Meetings): label the voices on the call side while a
     /// meeting records, on this PC (`diarize.rs`). Off by default, and it
@@ -976,6 +981,9 @@ fn default_meeting_max_minutes() -> u32 {
 fn default_meeting_audio_days() -> u32 {
     crate::meeting_audio::DEFAULT_DAYS
 }
+fn default_meeting_refine() -> String {
+    crate::meeting_refine::AUTO.into()
+}
 fn default_meeting_call_end() -> String {
     "ask".into()
 }
@@ -1123,6 +1131,7 @@ impl Default for YapConfig {
             meeting_consent_message: String::new(),
             meeting_keep_audio: true,
             meeting_audio_days: default_meeting_audio_days(),
+            meeting_refine: default_meeting_refine(),
             meeting_diarization: false,
             diarization_model: default_diarization_model(),
             meeting_speaker_names: true,

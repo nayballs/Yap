@@ -443,6 +443,8 @@
     // Meeting audio kept on disk (meeting_audio.rs): to transcribe again, play a line.
     meetingKeepAudio: true,
     meetingAudioDays: 14,
+    // The refined transcript after a meeting (meeting_refine.rs): auto | always | never.
+    meetingRefine: 'auto',
     meetingDiarization: false,
     diarizationModel: 'nemotron-3-diarization',
     meetingReminder: '15s',

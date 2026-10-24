@@ -26,6 +26,9 @@
 //!   [`e2e_meeting_output_change`] stage a hotkey dictation and a switch of
 //!   Windows' default output at a point of that audio, and
 //!   [`e2e_meeting_quiet`] shortens the quiet-side warning's timings;
+//!   [`e2e_meeting_fail`] makes the live recorder's chunks over a stretch
+//!   fail, and `YAP_E2E_REFINE_CHUNK_MS` slows the refine's chunks
+//!   (`meeting_refine::e2e_slow_chunk`);
 //! - it reads no installed apps' icons (Settings' call apps, the bar's call
 //!   card): [`app_icons_dir`] (`YAP_E2E_APP_ICONS`) names stand-ins instead.
 //!
@@ -310,6 +313,53 @@ pub fn e2e_meeting_quiet(quiet_secs: Option<f32>, talk_secs: Option<f32>) -> Res
     tracing::info!(?timings, "e2e: quiet-side timings");
     crate::meeting::set_test_quiet_timings(timings);
     Ok(())
+}
+
+/// Test mode only: the live recorder's chunks of `side` ("you", "them" or
+/// "both") overlapping `[from, to)` seconds of the recording fail, as if
+/// the speech engine had (`meeting.rs`, "Failed chunks"); the meeting's
+/// audio transcribed again later (Try again, the refine) is unaffected. No
+/// `side`: none fail.
+#[cfg(debug_assertions)]
+#[tauri::command]
+pub fn e2e_meeting_fail(side: Option<String>, from: Option<f32>, to: Option<f32>) -> Result<(), String> {
+    if !active() {
+        return Err("Only in e2e test mode".to_string());
+    }
+    let fails = side.map(|s| (s, from.unwrap_or(0.0), to.unwrap_or(f32::MAX)));
+    tracing::info!(?fails, "e2e: meeting chunks fail");
+    crate::meeting::set_test_failures(fails);
+    Ok(())
+}
+
+/// Test mode only: two meeting starts at the same moment on two threads,
+/// as the meeting shortcut and the call prompt (or the tray and the
+/// calendar) can: what each returned. One recorder must come of it
+/// (`meeting::start` claims the recorder's slot before opening devices).
+#[cfg(debug_assertions)]
+#[tauri::command]
+pub async fn e2e_meeting_start_twice(app: AppHandle, first: u64, second: u64) -> Result<Vec<Result<(), String>>, String> {
+    use tauri::Manager;
+    if !active() {
+        return Err("Only in e2e test mode".to_string());
+    }
+    let together = std::sync::Arc::new(std::sync::Barrier::new(2));
+    let starts: Vec<_> = [first, second]
+        .into_iter()
+        .map(|note_id| {
+            let (app, together) = (app.clone(), std::sync::Arc::clone(&together));
+            tauri::async_runtime::spawn_blocking(move || {
+                together.wait();
+                crate::commands::meeting_start(app.clone(), app.state::<crate::AppState>(), note_id)
+            })
+        })
+        .collect();
+    let mut out = Vec::new();
+    for start in starts {
+        out.push(start.await.unwrap_or_else(|e| Err(format!("The start crashed: {e}"))));
+    }
+    tracing::info!(ok = out.iter().filter(|r| r.is_ok()).count(), "e2e: two meeting starts at once");
+    Ok(out)
 }
 
 /// Test mode only: the main window back on screen (shown, not minimized) if

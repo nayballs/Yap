@@ -42,6 +42,10 @@
   import ToastHost from './ui/ToastHost.svelte';
   import SpeakerMenu from './SpeakerMenu.svelte';
   import SpeakerCard from './SpeakerCard.svelte';
+  // The refine after a meeting, Try again on a stretch that failed (meeting_refine.rs).
+  import MeetingJob from './MeetingJob.svelte';
+  import FailedChunk from './FailedChunk.svelte';
+  import { jobState, summaryFollows } from './meetingAudio.svelte.js';
   import BriefView from './BriefView.svelte';
   import { briefTeaser } from './brief.js';
   import { toast } from './ui/toast.svelte.js';
@@ -90,8 +94,6 @@
     meetingAudio,
     initMeetingAudio,
     refreshAudio,
-    runningJob,
-    jobLine,
     lastPart,
     cantTranscribeAgain,
     askTranscribeAgain,
@@ -125,7 +127,6 @@
   // The meeting's audio kept on disk (meeting_audio.rs): ⋯ → Transcribe
   // again, ▶ on its lines, what a crash left of it.
   const audio = $derived(note ? meetingAudio.byNote[note.id] : null);
-  const redo = $derived(note ? runningJob(note.id) : null);
   let audioFor = null;
   $effect(() => {
     const id = note?.id ?? null;
@@ -1559,9 +1560,9 @@
             {/if}
           </div>
           {/if}
-          {#if redo}
-            <!-- Its audio being transcribed (meeting_audio.rs). -->
-            <p class="redoline" role="status"><span class="spin" aria-hidden="true"></span>{jobLine(redo)}</p>
+          {#if note && jobState(note.id)}
+            <!-- Its audio being transcribed (meeting_audio.rs), with Cancel; a refine's "Update summary". -->
+            <MeetingJob noteId={note.id} look="paper" />
           {:else if audio?.recoverableSecs && !recordingThis}
             <!-- What a crash left of it: the audio is kept. -->
             <div class="recoverbar" role="status">
@@ -1716,6 +1717,13 @@
                   <div class="divider" role="separator" aria-label="Recording paused here">
                     <span class="rule"></span>{@render icon('pause')}<span class="rule"></span>
                   </div>
+                {:else if item.kind === 'failed'}
+                  <FailedChunk
+                    noteId={note.id}
+                    seg={note.transcript[item.i]}
+                    look="paper"
+                    why={recordingThis ? 'After the meeting' : audio && !audio.recordings ? "This meeting's audio isn't kept" : null}
+                  />
                 {:else}
                   <div
                     class="divider dictated"
@@ -1840,7 +1848,7 @@
           </span>
           <button class="snagretry" aria-label="Retry" title="Try again" onclick={(e) => generate(e.currentTarget)}>{@render icon('retry')}</button>
         </div>
-      {:else if !recordingThis && !writing && !hasSummary && !askOpen && (note.transcript?.length || note.content?.trim())}
+      {:else if !recordingThis && !writing && !hasSummary && !askOpen && !summaryFollows(note.id) && (note.transcript?.length || note.content?.trim())}
         <button class="gen" onclick={() => generate()}>{@render icon('plus')}Generate summary</button>
       {/if}
       {#if recordingThis && !askOpen}
@@ -2909,28 +2917,7 @@
     background: var(--yap-paper-s2);
     color: var(--yap-paper-ink);
   }
-  /* A meeting's audio being transcribed, or what a crash left of it. */
-  .redoline {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    margin: 12px 40px 0 32px;
-    font-size: 13px;
-    color: var(--yap-paper-text-2);
-  }
-  .redoline .spin {
-    width: 11px;
-    height: 11px;
-    border-radius: 50%;
-    border: 1.5px solid var(--yap-paper-s2);
-    border-top-color: var(--yap-live);
-    animation: redo-spin 0.9s linear infinite;
-  }
-  @keyframes redo-spin {
-    to {
-      transform: rotate(360deg);
-    }
-  }
+  /* What a crash left of its audio (a job's line is MeetingJob.svelte). */
   .recoverbar {
     display: flex;
     align-items: center;

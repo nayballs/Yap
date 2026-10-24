@@ -314,6 +314,20 @@ only over the local API and MCP; unit-tested and e2e-tested in
 `notes-edit.spec.js` against the stub engine and a fake model — not yet by
 hand in a real meeting, nor with a real model's plans in their many
 layouts),
+and since
+2026-10-24 a **transcript you can trust**: a chunk that fails to transcribe
+is a marker with Try again, never silence, the person told once
+(`meeting.rs`); one recorder however many starts at once, the note being
+recorded never deleted (the local API included); the warm engine lent in
+turns, so a dictation during a meeting's chunk waits for it instead of
+loading a second copy (`pipeline::EngineCell`); and the **refined
+transcript** when a meeting ends (`meeting_refine.rs`: when chunks failed
+or a more accurate model is installed for its language, or always; the
+summary first unless the transcript has holes, then "Update summary"; low
+priority, cancellable) — unit-tested (the races and the engine lease fail
+on the old code), e2e-tested with a forced chunk failure, the three
+settings, a dictation mid-refine and two starts at once; the real-speech
+robot test is written, not yet run; not yet tried in a real meeting,
 and an **AI Chat** surface (`chats.rs` + eager
 keyword-RAG over notes, plus a **tool-calling agent loop** in `tools.rs` — nine tools,
 including safe partial note edits (search → exact-once replace, `note_text.rs`),
@@ -519,12 +533,14 @@ from attendees, the speaker map and names said)
 and remove speaker echo only from chunks that are entirely the call (see
 [`docs/meetings.md`](../meetings.md) "Limits"), and a real call (live
 WASAPI loopback + a real LLM's action plan, a headset plugged in mid-call, a
-hotkey dictation mid-call) still wants one hands-on pass; meeting audio
-isn't yet transcribed again by itself when a meeting ends (on demand only),
-the speaker engine isn't run again over it, and it can't be exported; a
-fixed line can't be split or deleted, an edited summary has no "back to
-Yap's" (only Replace), and a task's "Said at" is the line sharing most of
-its words (a guess: none when no line shares enough);
+hotkey dictation mid-call) still wants one hands-on pass; the refine after
+a meeting judges models by the leaderboard's figures and the meeting's
+language by Settings or Windows (not measured, not detected), and lowers
+only its calling thread's priority; the speaker engine isn't run again
+over meeting audio, and it can't be exported; a fixed line can't be split
+or deleted, an edited summary has no "back to Yap's" (only Replace), and a
+task's "Said at" is the line sharing most of its words (a guess: none when
+no line shares enough);
 the calendar has no one-click Outlook (Microsoft Graph); the pre-meeting
 brief (2026-10-22: unit-, e2e- and model-evaluated, not yet seen before a
 real meeting) checks the AI's lines word by word, so a mix-up of two things

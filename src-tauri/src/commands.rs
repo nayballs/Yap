@@ -525,6 +525,11 @@ pub fn note_export(id: u64, path: String) -> Result<(), String> {
                 out.push_str("_You dictated here (left out of the notes)._\n\n");
                 continue;
             }
+            if seg.failed {
+                let at = |ms: Option<u64>| crate::meeting_summary::clock(ms.unwrap_or(0) / 1000);
+                out.push_str(&format!("_Couldn't transcribe {}–{}._\n\n", at(seg.start_ms), at(seg.end_ms)));
+                continue;
+            }
             let who = crate::speakers::display_line(&note.speakers, seg);
             out.push_str(&format!("**{who}:** {}\n\n", seg.text));
         }
@@ -616,10 +621,7 @@ fn folders_changed(app: &AppHandle, change: &crate::notes::FolderChange) {
 #[tauri::command]
 pub fn note_delete(app: AppHandle, id: u64) -> Result<(), String> {
     use tauri::Emitter;
-    if crate::meeting::recording_note() == Some(id) {
-        return Err("This meeting is still recording".to_string());
-    }
-    crate::notes::delete(id);
+    crate::meeting::delete_note(id)?;
     let _ = app.emit("yap-notes-changed", ());
     let _ = app.emit(crate::meeting_end::EVENT_DELETED, serde_json::json!({ "id": id }));
     crate::notepad::on_note_deleted(&app, id);
