@@ -52,7 +52,7 @@ Same envelope contract as OpenWhispr's v1 API:
 | GET | `/v1/health` | `{data:{ok,version,app:"yap"}}` |
 | GET | `/v1/notes/list` | query: `folder` (name, case-insensitive), `note_type` (`personal`\|`meeting`), `limit` (default 100). Summaries, newest-updated first. |
 | GET | `/v1/notes/search?q=&limit=` | keyword scorer (same as the Chat RAG / `search_notes` tool); `limit` default 20. Items: `{id, title, folder, noteType, score, preview, createdTs, updatedTs}` |
-| GET | `/v1/notes/{id}` | the full note: raw `content`, `enhancedContent`, `transcript` (each line's `source` "you"/"them", `speaker` when relabelled — else its source is its voice —, `startMs`/`endMs` and `words` when recorded with them), `speakers` (the speaker map: `{voice → {name, email, source, locked, mergedInto, not}}`), `participants`, … |
+| GET | `/v1/notes/{id}` | the full note: raw `content`, `enhancedContent` (with `summaryEditedMs` once the person edited it), `transcript` (each line's `edited` + `original` when the person fixed its words, `source` "you"/"them", `speaker` when relabelled — else its source is its voice —, `startMs`/`endMs` and `words` when recorded with them), `speakers` (the speaker map: `{voice → {name, email, source, locked, mergedInto, not}}`), `participants`, … |
 | POST | `/v1/notes/create` | body `{title?, content?, folder?, source?}`; source is recorded as `"api"` (or `"mcp"` when the MCP server saves it) |
 | PATCH | `/v1/notes/{id}` | body `{title?, content?, folder?, participants?}`; returns the updated note |
 | DELETE | `/v1/notes/{id}` | 204 |
@@ -60,6 +60,7 @@ Same envelope contract as OpenWhispr's v1 API:
 | POST | `/v1/folders/create` | body `{name}`; idempotent per name (case-insensitive) |
 | GET | `/v1/meetings/list?folder=&limit=` | meetings (recorded notes), newest first: `{id, title, folder, participants, createdTs, updatedTs, startTs, endTs, durationSecs, lines, pages, hasSummary, hasNotes, digests}`; `limit` default 50 |
 | GET | `/v1/meetings/search?q=&limit=` | meetings whose title, attendees, typed notes, AI summary or transcript mention the words (3+ letters), best first, each with up to 3 `matches: [{at, speaker, text, page}]` and a `summaryMatch` line; `limit` default 10 |
+| GET | `/v1/tasks/list?status=&limit=` | the tasks in notes' summaries (the action plans' checkboxes; `tasks.rs`), read only: `status` `open` (default), `done` (ticked) or `all`; newest note first, "You" first within each: `{noteId, title, createdTs, owner, task, due, done, saidAtSecs}`; `limit` default 200. A tick is the summary's own `- [x]`, so `/v1/notes/{id}`'s `enhancedContent` carries it too |
 | GET | `/v1/mcp/config` | `{data:{allowWrites}}`: whether AI apps may save notes (see below) |
 | GET | `/v1/transcriptions/list?limit=` | dictation history, newest first (`limit` default 50) |
 | GET | `/v1/transcriptions/{ts}` | one entry: `{ts, raw, text, model, app}`, and `said` (the words as said, corrected but not cleaned up) when AI cleanup changed them |
@@ -144,6 +145,7 @@ off, the page says that too, with a "Turn on the Local API" button.
 | `get_meeting` | `id`, `transcript_page` (default 1) | header (when, length, attendees, folder), the AI summary or action plan, notes typed during the meeting, the rolling AI notes when there's no summary yet, and one page of transcript |
 | `search_notes` | `query`, `limit` (1–30, default 10) | all notes (personal and meetings): id, title, type, folder, date, preview |
 | `get_note` | `id` | the note's AI-enhanced version and text; for a meeting, a pointer to `get_meeting` |
+| `list_tasks` | `status` (open, done, all), `limit` | the action plans' tasks by meeting: who, what, by when, ticked or not, when it was said; read only |
 | `list_folders` | — | folders and how many notes each holds |
 | `create_note` | `title`, `content`, `folder` | only with writes allowed: saves a note (source `"mcp"`; a new folder is created) |
 

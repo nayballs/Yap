@@ -36,6 +36,7 @@ takes its meeting's name, attendees and invite ([The calendar](#the-calendar),
 | Prompts (`MEETING_DIGEST_PROMPT`, `ACTION_PLAN_BASE_PROMPT`, `ACTION_PLAN_DEFAULT_FRAGMENT`, `CATCH_UP_PROMPT`, `MEETING_ASK_PROMPT`, `MEETING_QUESTIONS_PROMPT`, `MEETING_FOLLOW_UP_PROMPT`, `MEETING_BLIND_SPOTS_PROMPT`, `MEETING_TITLE_PROMPT`) | `src-tauri/src/llm.rs` |
 | Storage (`Note::digests`, `Note::speakers`, `TranscriptSegment::echo` / `::dictated` / `::speaker` / `::start_ms` / `::words`, `Action::kind`, `Note::title_auto`) | `src-tauri/src/notes.rs` |
 | The action run (`note_enhance` / `run_enhance`) | `src-tauri/src/commands.rs` |
+| Fixing the notes: a line's words, the summary's, never written over unasked; tasks ticked and listed | `src-tauri/src/note_edits.rs`, `src-tauri/src/tasks.rs`, `src/lib/noteEdits.js`, `src/lib/TasksView.svelte` |
 | UI | `src/lib/NotesView.svelte`, `src/lib/Notepad.svelte`, `src/lib/meetingSummary.svelte.js` |
 
 ## Recording
@@ -542,10 +543,11 @@ built-in **Action Plan** action (`meeting_end.rs`, following the recorder's
 longer depends on a window: until 2026-10 the Notes view wrote the plan, and
 only for the note it was showing. Every window follows the job through
 `yap-meeting-summary` (`running` with its step — 1 reading the meeting, 2
-writing, 3 checking owners and deadlines — then `done`, `error`, `needsAi` or
-`nothing`). On a finished meeting note, **Action plan** in the transcript box
-(or the notepad's **Generate summary** / **Retry**) runs it again
-(`meeting_summarise`).
+writing, 3 checking owners and deadlines — then `done`, `error`, `needsAi`,
+`nothing`, or `kept` when the person edited the summary: [Fixing the
+notes](#fixing-the-notes)). On a finished meeting note, **Action plan** in the
+transcript box (or the notepad's **Generate summary** / **Retry**) runs it
+again (`meeting_summarise`, asking first over an edited summary).
 
 **Started by mistake?** A meeting that ends with fewer than 20 words of speech
 (about ten seconds of talk) and nothing typed gets no summary. Instead the
@@ -595,6 +597,84 @@ an AI model…" with **Open Language Models** (in the Notes view and the
 notepad). A recording where nothing was transcribed and no notes were typed
 asks "Started by mistake?" when it ends; asking for its summary anyway says
 "Nothing to summarise yet" instead of calling a model.
+
+## Fixing the notes
+
+A meeting's notes aren't Yap's alone to write: a line it misheard, a
+summary that missed the point and the tasks in the action plan are the
+person's to fix (Wispr Flow's Notetaker does the same). Whatever model wrote
+the summary — on this PC or a cloud one — the person's changes are local data,
+and Yap never writes over them without asking. Code: `src-tauri/src/note_edits.rs`
+(lines, the summary, the rule), `src-tauri/src/tasks.rs` (tasks),
+`src/lib/noteEdits.js` and `src/lib/TasksView.svelte`.
+
+### A line's words
+
+**Double-click** a line (the notepad or the Notes view), or **Edit line** in
+its right-click menu (in the Notes view also **Enter** or **F2** on a focused
+line): its words become a box; **Enter** saves, **Escape** puts it back,
+clicking away saves. Only the words change: the line keeps its side, voice,
+time and place on the recording, so **▶ still plays what was said**. It shows
+a quiet **edited**, whose tooltip says what Yap heard (`TranscriptSegment::
+edited` and `original` in `notes.json`; an edit back to what Yap heard makes it
+Yap's line again). Every window follows (`yap-note-changed` with `lineEdit`).
+
+**It teaches the dictionary.** When the fix replaced a misheard word or name
+("We deploy on cube and eighties" → "…on Kubernetes"), "Suggest words from
+your corrections" offers it, right there: "Add “Kubernetes” to your
+dictionary? Yap heard “cube and eighties”." with Add / Not now / Don't suggest
+this — the same rules and answers as for a dictation you fixed
+(`learn::offer_for_line`, [dictionary.md](./architecture/dictionary.md)): only
+a term's spelling, never an everyday word, nothing turned down or removed
+before; off with the setting.
+
+**Transcribe again keeps it.** The new lines go in around a line the person
+fixed, never over it: a new line of the same side over it keeps only its words
+outside it (by its word times; without them, by its share of the line, and
+none when it's mostly the fixed line) (`meeting_audio/redo.rs` `rebuild`, so
+anything that replaces a meeting's lines that way keeps fixes too). The voice
+separation never splits a fixed line either.
+
+### The summary
+
+**Edit** (the notepad's Summary tab) or **Edit summary** (the Notes view)
+turns the summary into its Markdown in a box, saved as you type; **Done** or
+**Escape** shows it again. Changing its words makes it **yours**
+(`summary_edited_ms`, an **Edited** mark): from then on
+- **regenerating asks first** — the Notes view's Action plan or an action, the
+  notepad's Update or Retry: "Replace your edited summary? Yap writes the
+  summary again from the meeting and your notes, and the changes you made to
+  it go. Tasks you ticked stay ticked." (**Cancel** keeps it, no model call);
+- **the end of a resumed meeting writes nothing over it**: its action-plan
+  job ends `kept` without calling a model;
+- an edit made while a replacing run was writing wins over the run.
+A Chat edit of the summary (its `edit_note` tool) counts as yours too.
+Emptying it leaves no summary (Generate summary comes back).
+
+**New since this summary.** When lines were said after the summary read the
+meeting (a recording resumed later), a quiet "2 new lines since this summary ·
+**Update**" sits over it (`summary_ts`; not while it records, and not on notes
+from before it was kept). Update writes it again — asking first if it's yours.
+
+### Tasks
+
+The summary's checkboxes (the action plan's `- [ ] task (due: …)` lines under
+`### Owner`, `- [ ] Dave: task` lines, any `- [ ]`) **tick in place** in the
+notepad and the Notes view. The tick is the summary's own `- [x]`, so it's
+the same tick everywhere, Copy as Markdown and the local API carry it, and the
+pre-meeting brief's open items leave a done task out. A tick isn't an edit of
+the summary, and a new summary keeps it: its tasks with the same words (or
+most of them) and owner come ticked (`tasks::carry_ticks`).
+
+**Tasks** in the sidebar lists every task across meetings — open ones, or
+**Show done** — **By meeting** (newest first, yours first in each) or **By
+person** (You, then names, then Everyone, Unassigned, No owner), with the
+deadline, the meeting, and **Said at 12:40**: the line it was most likely said
+(the talk line sharing most of its words), opening the meeting in Notes there.
+Ticking there ticks in the note (and the other way round); a task just ticked
+stays in the list, struck through, until you leave, so a slip is one click to
+undo. AI apps read them, read only: `GET /v1/tasks/list?status=open|done|all`
+and MCP's `list_tasks` ([integrations.md](./architecture/integrations.md)).
 
 ## The meeting notepad
 
@@ -1037,6 +1117,24 @@ KeyTips) and Win the Start menu.
 
 ## How it's tested
 
+- **Fixing the notes** (`cargo test --lib -- note_edits tasks redo split_line`;
+  e2e `notes-edit.spec.js`): a line's edit (what Yap heard kept, its place
+  and voice untouched, back to Yap's on a revert, markers refused), the
+  window's line found again after a split, older notes loading unchanged
+  (nothing new written until set), a tick not being an edit, an edited
+  summary replaced only when asked and never by a run that read it before
+  the edit, ticks carried into a new summary, tasks parsed in each layout
+  (owners by heading or inline, Unassigned, deadlines, code fences, "•"),
+  ticking by line or by words, "Said at" finding the line, Transcribe again
+  around a fixed line (with and without word times, the other side never
+  giving way), a fixed line never split by voice. End to end: a line fixed in
+  the notepad (saved, marked, the Notes view following, the dictionary offer
+  and its Add), one fixed from the Notes view's menu still playing the same
+  audio and kept through Transcribe again, a task ticked in the notepad seen
+  and unticked in the Tasks view (by meeting, by person, Show done, Said at →
+  the line in Notes), and an edited summary: Action plan asks (Cancel = no
+  model call), a resumed meeting's end leaves it ("kept"), "2 new lines since
+  this summary · Update" asks and replaces it, the tick carried over.
 - **Unit tests** (`cargo test --lib -- meeting media notes`): chunk cuts land in
   pauses (and `quietest_frame` finds the pause `quietest_index` misses),
   backlogs split into bounded chunks, the buffer cap, speech onsets, the echo

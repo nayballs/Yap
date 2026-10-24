@@ -165,6 +165,8 @@ blocks. The full order and its rules: [dictation.md](./docs/architecture/dictati
 
 **Notes** — [notes.md](./docs/architecture/notes.md)
 - `notes.rs` — the notes store (`notes.json`), folders, the Actions engine, transcript fields.
+- `note_edits.rs` — notes you can fix: a transcript line's words (marked edited, kept through Transcribe again, offered to the dictionary), the summary's words; a summary run never writes over the person's unasked ("kept").
+- `tasks.rs` — the summary's checkboxes: ticked in place (`- [x]`), carried into a new summary, listed across notes for the Tasks view ("Said at" the line), read only over the local API / MCP.
 
 **Meetings** — [meetings.md](./docs/architecture/meetings.md) (guide: [`docs/meetings.md`](./docs/meetings.md))
 - `meeting.rs` — the recorder: mic + loopback, chunking, echo, dictations kept out, one clock; `replay` from disk.
@@ -233,7 +235,7 @@ blocks. The full order and its rules: [dictation.md](./docs/architecture/dictati
 - `HomeView` / `InsightsView` / `UploadView` — dictation feed (a dictation's "AI edited · N changes" word diff, `lib/wordDiff.js`, and Paste what I said), stats, audio-file transcription; `lib/appNames.js` (apps by their names), `lib/aiErrors.js` (AI failures in plain words).
 - `App.svelte` — one chunk per window: each loads only its own view (the Yap bar ~150 KB, not the whole app).
 - `DictionaryView.svelte` — corrections and snippets ([dictionary.md](./docs/architecture/dictionary.md)).
-- `NotesView.svelte` — the AI Notepad ([notes.md](./docs/architecture/notes.md)).
+- `NotesView.svelte` — the AI Notepad ([notes.md](./docs/architecture/notes.md)); `lib/noteEdits.js` — fixing a line, the summary, ticking tasks (shared with the notepad); `TasksView.svelte` — sidebar Tasks across meetings.
 - `lib/markdown.js` — every rendered answer/note: markdown-it + DOMPurify, citation pills ([notes.md](./docs/architecture/notes.md#the-markdown-renderer)).
 - `ChatView.svelte` + `ChatModelPicker.svelte` — Chat and its model picker, a snip in the box (`chatImages.js`, `chatShots.svelte.js`; [snip.md](./docs/architecture/snip.md)) ([chat-and-assistant.md](./docs/architecture/chat-and-assistant.md)); `lib/streaming.js` — streamed answers in Chat and the notepad's Ask sheet (the channel, ■, half-written markdown closed off, the checked answer's smooth swap).
 - `MeetingsView` / `Notepad` / `SplitPreview` — meetings and the notepad ([meetings.md](./docs/architecture/meetings.md)); `meetingAudio.svelte.js` — a meeting's kept audio in both: Transcribe again, ▶ a line, the crash banner; `BriefView.svelte` + `brief.js` — a meeting's pre-meeting brief everywhere it shows ([calendar.md](./docs/architecture/calendar.md#pre-meeting-briefs)); `SpeakerMenu` / `SpeakerCard` — a speaker's menu and the name cards ([speakers.md](./docs/architecture/speakers.md)).

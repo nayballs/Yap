@@ -242,7 +242,19 @@ lines, then summarises; "Transcribe again" on the current model keeps the
 notes, the summary and names on matching lines; ▶ plays a line; Settings →
 Meetings keeps, ages and deletes it; unit-tested, e2e-tested with a killed
 and restarted test instance, the sizes measured on Windows TTS speech
-— not yet with a real call, a power cut, or hours of audio),
+— not yet with a real call, a power cut, or hours of audio), **meeting notes
+you can fix** (`note_edits.rs`, `tasks.rs`, 2026-10-24: a transcript line's
+words fixed in the notepad or the Notes view — marked edited, what Yap heard
+kept, ▶ still plays it, kept through Transcribe again, offered to the
+dictionary by "Suggest words from your corrections"; the summary edited in
+place and never written over unasked — regenerating asks, a resumed
+meeting's end keeps it, "New since this summary · Update"; the action plan's
+tasks ticked in place, kept through a new summary, and a **Tasks** view
+across meetings by meeting or person with "Said at" back to the line; read
+only over the local API and MCP; unit-tested and e2e-tested in
+`notes-edit.spec.js` against the stub engine and a fake model — not yet by
+hand in a real meeting, nor with a real model's plans in their many
+layouts),
 and an **AI Chat** surface (`chats.rs` + eager
 keyword-RAG over notes, plus a **tool-calling agent loop** in `tools.rs` — nine tools,
 including safe partial note edits (search → exact-once replace, `note_text.rs`),
@@ -439,7 +451,10 @@ and remove speaker echo only from chunks that are entirely the call (see
 WASAPI loopback + a real LLM's action plan, a headset plugged in mid-call, a
 hotkey dictation mid-call) still wants one hands-on pass; meeting audio
 isn't yet transcribed again by itself when a meeting ends (on demand only),
-the speaker engine isn't run again over it, and it can't be exported;
+the speaker engine isn't run again over it, and it can't be exported; a
+fixed line can't be split or deleted, an edited summary has no "back to
+Yap's" (only Replace), and a task's "Said at" is the line sharing most of
+its words (a guess: none when no line shares enough);
 the calendar has no one-click Outlook (Microsoft Graph); the pre-meeting
 brief (2026-10-22: unit-, e2e- and model-evaluated, not yet seen before a
 real meeting) checks the AI's lines word by word, so a mix-up of two things

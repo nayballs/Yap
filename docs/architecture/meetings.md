@@ -149,7 +149,11 @@ The meeting recorder and its audio kept on disk, rolling digests and the action 
   stop); **again** = every recording replayed from 0 on the speech model in
   use now, then `redo::rebuild` under `notes::modify`: each recording's
   lines (dated within it) replaced, lines with no audio and every
-  dictation marker kept, a new line taking the voice and lock of the old
+  dictation marker kept, **every line the person edited kept as written**
+  (a new line of its side over one keeps only its words outside it — by its
+  word times, else by its share of its place and none when that's under
+  half —; `note_edits.rs`; whatever calls `rebuild` inherits it; the
+  rebuilt lines sorted by date, then place), a new line taking the voice and lock of the old
   line of its side it overlaps by at least half the shorter (split by
   `speakers::split_line` where two old voices meet), the stop marks moved
   to the same places, the digests dropped (written again from the new
@@ -233,9 +237,11 @@ The meeting recorder and its audio kept on disk, rolling digests and the action 
   notepad's ⋯ → Delete — pauses a recording note first, then the same);
   otherwise the AI title (if due) and
   the **action plan job** (`start_summary`: one per note, `yap-meeting-summary
-  {noteId, run, state: running|done|error|needsAi|nothing, step, steps, error}`,
-  "Step 2 of 3"; `meeting_summary_status`; `meeting_summarise` runs it again —
-  Generate summary, Retry, the Notes view's Action plan). Commands
+  {noteId, run, state: running|done|error|needsAi|nothing|kept, step, steps, error}`,
+  "Step 2 of 3"; `meeting_summary_status`; `meeting_summarise(noteId,
+  replace)` runs it again — Generate summary, Retry, Update, the Notes view's
+  Action plan; `kept`: the person edited the summary and nobody said
+  `replace`, so no model call and nothing written: `note_edits.rs`). Commands
   `meeting_end(origin)`, `meeting_pause`, `meeting_summarise`,
   `meeting_summary_status`, `meeting_discard`, `meeting_delete`; Rust callers
   use `end()` / `pause()`. The job first asks the meeting's AI who each
@@ -361,7 +367,13 @@ The meeting recorder and its audio kept on disk, rolling digests and the action 
   **Summary** (the Rust job: "• Turning 12
   minutes of talk into an action plan… · Step 2 of 3", "Catching up on the
   meeting: part 3 of 12…", the rendered plan, the AI-setup card, the digests
-  so far while recording). **Bottom** (over the content, a 150 px fade):
+  so far while recording; over the plan **Edit** / Done — its Markdown in a
+  box, saved as typed —, "Edited", and "2 new lines since this summary ·
+  **Update**"; its tasks tick in place; Update and Retry ask before writing
+  over an edited summary). **A line's words** are fixed by double-clicking
+  it or **Edit line** in its menu (Enter saves, Escape cancels, leaving
+  saves; "edited" after it; the dictionary offer as this window's toast) —
+  [notes.md](./notes.md#notes-you-can-fix-note_editsrs-tasksrs). **Bottom** (over the content, a 150 px fade):
   recording → the consent line "Let people know you're taking notes. **Learn
   more**" — a popover with why ("Yap transcribes on this PC; nothing is
   uploaded") and an **editable message for the meeting chat** (default in

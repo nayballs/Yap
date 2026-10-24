@@ -1,6 +1,6 @@
 # Notes
 
-The AI Notepad: the notes store, folders, the Actions engine, and the Notes view. Meeting notes' recording and summaries are [meetings.md](./meetings.md).
+The AI Notepad: the notes store, folders, the Actions engine, notes you can fix (a line's words, the summary, tasks), and the Notes and Tasks views. Meeting notes' recording and summaries are [meetings.md](./meetings.md).
 
 [Architecture index](./README.md) · [CLAUDE.md](../../CLAUDE.md)
 
@@ -8,8 +8,12 @@ The AI Notepad: the notes store, folders, the Actions engine, and the Notes view
 
 - **`notes.rs`** — the AI Notepad's data layer (`notes.json`, camelCase). Stores:
   `content` (raw markdown, never overwritten by AI: the **My thoughts** tab),
-  `enhanced_content` (the **Summary** tab), `enhanced_at_hash` (OpenWhispr's
-  `len+first-50` staleness marker), `folder` (string, seeded with Personal +
+  `enhanced_content` (the **Summary** tab; its tasks' ticks are its own
+  `- [x]`, `tasks.rs`), `enhanced_at_hash` (OpenWhispr's
+  `len+first-50` staleness marker), `summary_edited_ms` (the person changed
+  the summary's words: Yap never writes over it unasked) and `summary_ts`
+  (when the summary's input was read: "New since this summary"; both 0 and
+  unwritten on older notes, `note_edits.rs`), `folder` (string, seeded with Personal +
   Meetings), `folder_chosen` (the person moved the note there: `apply_update`
   sets it on any folder change — the Notes view, the local API, Chat),
   `participants`
@@ -20,7 +24,8 @@ The AI Notepad: the notes store, folders, the Actions engine, and the Notes view
   You/Them), `speaker_locked` (the user said who this line is), `start_ms`/
   `end_ms` (place on that recording's clock, ms; none on old lines and
   markers), `words` (`[start, end]` ms from `start_ms` per word of `text`,
-  when the model gave times); `echo` marks
+  when the model gave times), `edited` + `original` (the person fixed its
+  words; what Yap heard: `note_edits.rs`, below); `echo` marks
   speaker bleed, `dictated` a "You dictated here" marker — no text, `ts` where
   a mid-meeting dictation began; `is_talk()` = neither, what every summary
   input reads), `speakers` (the speaker map, see `speakers.rs`), `digests` (rolling meeting digests, see `meeting_summary.rs`),
@@ -83,7 +88,71 @@ The AI Notepad: the notes store, folders, the Actions engine, and the Notes view
   `meeting_summary` (the raw transcript when short, else digests + the latest
   stretch, after digesting any backlog); the Action Plan runs in Rust when a
   recording ends (`meeting_end.rs`: anything but Pause), through
-  `commands::run_enhance` (the body of `note_enhance`, with step reporting).
+  `commands::run_enhance` (the body of `note_enhance`, with step reporting),
+  which stores the result through `note_edits::write_summary` (never over the
+  person's edited summary unless `replace`; ticks carried over).
+  `set_enhanced` is the evaluations' and the tests' only (debug builds).
+
+## Notes you can fix (`note_edits.rs`, `tasks.rs`)
+
+Guide: [`docs/meetings.md`](../meetings.md#fixing-the-notes) (Wispr Flow's
+Notetaker lets you fix lines, edit the summary and tick tasks; Yap's private
+roadmap, "Meeting notes you can fix" and "Tasks").
+
+- **`note_edits.rs`** — **a transcript line's words**
+  (`transcript_line_edit(noteId, line: LineRef {index, source, ts, startMs,
+  text}, text, origin)` → `{index, line, changed, offer}`): the line found
+  where the window showed it, else wherever the same line went (a split by
+  the voice separation; `find_line`), refused when its words changed
+  meanwhile; `apply_line_edit` (pure) — one line of words, never a marker,
+  ≤ 4,000 chars, the first edit keeps what Yap heard in `original`, an edit
+  back to it clears `edited`; side, voice, `ts`, `start_ms`/`end_ms` and
+  `words` untouched (▶ plays the same stretch). `yap-note-changed` carries
+  `lineEdit {index, line}` (`notepadText.js` `withLineEdit`). **The
+  dictionary**: `learn::offer_for_line(old, new)` — the same `suggestions`
+  rules and answers as a dictation's (the setting, words turned down or
+  removed left out), returned for the window to ask in its own toast
+  (`wordSuggestions.js` `askWordSuggestion`, answered by
+  `word_suggestion_respond`); no three-minute gap before it, but it counts
+  as the last prompt. **The summary's words** (`note_summary_update(id,
+  text, origin)` → `{enhancedContent, summaryEditedMs, summaryTs}`;
+  `apply_summary_edit`, pure): a change of words stamps `summary_edited_ms`, a
+  change of ticks alone doesn't (`tasks::same_but_ticks`), emptied = no
+  summary, written from nothing = made from the notes as they are; Chat's
+  `edit_note` on the summary goes through it too (`note_text.rs`). **The
+  rule** (`write_summary`, `keeps_summary`, `may_replace`): a summary run
+  goes over the person's summary only with `replace` (the window asked:
+  `noteEdits.js` `askReplaceSummary`) and when their last edit came before
+  the run read the note; else `SUMMARY_KEPT` — `run_enhance` checks before
+  spending a model call, `meeting_end`'s job ends `kept`
+  (`meeting_summarise(noteId, replace)`, `note_enhance(id, actionId,
+  replace)`). A written summary clears the mark, sets `summary_ts` = the read
+  time (seconds) and keeps the old summary's ticks.
+- **`tasks.rs`** — **the checkboxes in a summary**: `parse` (pure; line by
+  line, fenced code skipped; `- * + •` bullets; owner from `### Name` — not a
+  heading like "Action items" —, inline "Dave: …", or "Unassigned" under
+  `## Unassigned`; "You"/"Everyone" normalised; `(due: …)` split off; `**`
+  dropped), `set_done(md, line, text, done)` (the task on that line with
+  those words, else the first with those words, else refused; only its mark
+  changes, CRLF kept), `same_but_ticks`, `carry_ticks(old, new)` (a new
+  task with the same words — or six in ten of the longer's content words —
+  and a compatible owner comes ticked), `moment(note, task)` (the talk line
+  sharing most of its content words: ≥ 2 and half), `list` (every note with
+  tasks, newest first, each task with its `at {index, ts, secs}`). Commands
+  `tasks_list`, `note_task_set(noteId, line, text, done, origin)` (→ the
+  summary; `yap-note-changed` with `enhancedContent`, `summaryEditedMs`,
+  `summaryTs`). Read only outside the app: `bridge.rs` `GET /v1/tasks/list`,
+  `mcp.rs` `list_tasks` ([integrations.md](./integrations.md)). The
+  pre-meeting brief's open items (`calendar/brief.rs` `plan_tasks`) read only
+  `- [ ]`, so a ticked task drops out of the next brief.
+- **Frontend** — `lib/noteEdits.js` (`editLine`, `taskToggled` + `setTask`,
+  `saveSummary`, `askReplaceSummary`, `SUMMARY_KEPT`) and the pure helpers in
+  `notepadText.js` (`lineRef`, `withLineEdit`, `taskText`, `withTaskMark`,
+  `newSinceSummary`, `newSinceLine`; `transcriptItems` lines carry `edited`
+  and `original`). A summary renders with `renderMarkdown(md, { tickable:
+  true })` and its `change` maps the nth checkbox to `taskLines(md)[n]`
+  (markdown.js); the tick shows at once (`withTaskMark`) and is put back if
+  Rust refuses. `TasksView.svelte` — below.
 
 ## The Notes view
 
@@ -124,7 +193,12 @@ The AI Notepad: the notes store, folders, the Actions engine, and the Notes view
   next keystroke here save it); **My thoughts ↔ Summary** tabs (the meeting notepad's
   names for the same two fields since 2026-10-22, also the list's "summary"
   tag and "## My thoughts" in an export; until then Raw / Enhanced) **+
-  staleness dot** (the safe
+  staleness dot**; on Summary, **Edit summary** / Done (its Markdown in a
+  box, saved as typed; Escape ends it), "Edited" once it's the person's,
+  "2 new lines since this summary · **Update**", tasks ticked in place, and
+  every rewrite of an edited summary (Action plan, an action, Update) asked
+  first (`askReplaceSummary`); a run the person outpaced says "Your summary
+  was kept" (the safe
   renderer in `lib/markdown.js`, shared with chat answers, the notepad, the
   Voice Assistant's card and update notes — see "The markdown renderer"
   below) with **Copy as Markdown / Copy as text** (`markdownToText`:
@@ -138,6 +212,11 @@ The AI Notepad: the notes store, folders, the Actions engine, and the Notes view
   one voice (`transcriptItems`; the name opens the speaker menu, below; follow
   the newest line; ▶ beside a bubble on hover, and Play this line in its
   menu, plays its stretch of the meeting's kept audio — `meeting_audio.rs`;
+  a line's words fixed by double-click, Enter or F2 on it, or **Edit line**
+  in its menu (Enter saves, Escape cancels, leaving saves; "edited" after
+  it, what Yap heard in its tooltip; `note_edits.rs`); opened from the
+  Tasks view at a line, that line scrolled to, focused and lit a moment
+  (`noteRequest {id, line}`);
   over them "Transcribing again…" or, after a crash, "Yap closed while this
   meeting was recording…" with Transcribe it; echo lines
   hidden behind a "Show N lines…" toggle; a `dictated` marker is a quiet dashed
@@ -148,6 +227,23 @@ The AI Notepad: the notes store, folders, the Actions engine, and the Notes view
   — part 3 of 12" line, and, without an AI model, a "Your meeting is saved…"
   card linking to Settings → Language Models); the Home feed has **Ctrl+K
   search**.
+
+## The Tasks view
+
+- **`TasksView.svelte`** (sidebar **Tasks**, after Meetings: its own entry
+  rather than a part of Meetings, as tasks outlive the meeting and are
+  looked for on their own) = every task in notes' summaries (`tasks_list`):
+  **By meeting** (newest first; the person's own first in each; the title
+  opens the note) or **By person** (You, names A–Z, Everyone, Unassigned,
+  No owner; each with its meeting) — the choice kept in this webview's
+  `localStorage` (`yapTasksGroup`); "N open"; **Show done**. A row: its
+  checkbox (labelled by the task), the task, the owner chip (yours
+  highlighted), "Due Friday", and **Said at 12:40** (`tasks::moment`) →
+  the note in Notes at that line. A tick is `note_task_set` (origin
+  `tasks`), shown at once and put back on a refusal; a task ticked here
+  stays listed, struck through, until the view closes (an easy undo); the
+  list follows `yap-note-changed` / `yap-notes-changed` / a summary written.
+  Empty: "No tasks yet" (what fills it), or "Nothing open".
 
 ## The markdown renderer
 
@@ -180,7 +276,12 @@ The AI Notepad: the notes store, folders, the Actions engine, and the Notes view
   markdown-it's normalising, a trailing slash or `#part` aside) — any other
   address shows as text; headings shift down a level (`#` → h2 … `####` and
   below → h5: the notes' and notepad's CSS styles them so); `- [ ]` / `- [x]`
-  in a bullet list → `li.task` with a disabled checkbox; tables in
+  in a bullet list → `li.task` with a checkbox named by the task's words
+  (`aria-label`, the one attribute an `input` may carry besides type,
+  checked and disabled), disabled except with `options.tickable` (a note's
+  Summary in the Notes view and the notepad: the checkbox is enabled, and
+  `taskLines(md)` gives each checkbox's source line in render order, from
+  the same parse — `tasks.rs` ticks that line); tables in
   `div.md-table` (scrolls sideways) with the rule line's `:--:` / `--:` as
   classes `c` / `r`, ending at a line without a pipe (GitHub's spec would
   make the next sentence a row); fenced and indented code → `pre.md-code >
