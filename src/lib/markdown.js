@@ -118,7 +118,9 @@ md.core.ruler.push('yap_tight_items', (state) => {
   }
 });
 
-// Tasks: a bullet item starting "[ ] " or "[x] " gets a disabled checkbox.
+// Tasks: a bullet item starting "[ ] " or "[x] " gets a checkbox (disabled
+// unless the view ticks tasks: `options.tickable`), named by its words.
+// `env.tasks` collects each task's source line, in the order they render.
 md.core.ruler.push('yap_tasks', (state) => {
   const tokens = state.tokens;
   const lists = [];
@@ -133,9 +135,10 @@ md.core.ruler.push('yap_tasks', (state) => {
       if (!m) continue;
       first.content = first.content.slice(m[0].length);
       const box = new state.Token('yap_task', '', 0);
-      box.meta = { checked: m[1] !== ' ' };
+      box.meta = { checked: m[1] !== ' ', label: inline.content.replace(/^\[[ xX]\][ \t]+/, '').trim() };
       inline.children.unshift(box);
       t.attrJoin('class', 'task');
+      state.env?.tasks?.push(t.map?.[0] ?? -1);
     }
   }
 });
@@ -220,7 +223,10 @@ rules.yap_cite = (tokens, idx) => {
   return `<span class="md-cites">${pills.join('')}</span>`;
 };
 
-rules.yap_task = (tokens, idx) => `<input type="checkbox" disabled${tokens[idx].meta.checked ? ' checked' : ''}> `;
+rules.yap_task = (tokens, idx) => {
+  const { checked, label } = tokens[idx].meta;
+  return `<input type="checkbox" disabled${checked ? ' checked' : ''} aria-label="${escapeHtml(label || 'Task')}"> `;
+};
 
 // Code: monospace, kept verbatim (escaped), no highlighting.
 rules.fence = rules.code_block = (tokens, idx) =>
@@ -258,10 +264,12 @@ const PURIFY = {
   ALLOW_ARIA_ATTR: false,
 };
 const CLASSES = new Set(['md-link', 'md-cite', 'md-cites', 'md-code', 'md-table', 'md-quote', 'md-rule', 'md-loose', 'task', 'c', 'r']);
-// Which element may carry which of the narrower attributes.
-const ONLY_ON = { href: 'A', 'aria-label': 'A', start: 'OL', type: 'INPUT', checked: 'INPUT', disabled: 'INPUT' };
+// Which elements may carry which of the narrower attributes.
+const ONLY_ON = { href: ['A'], 'aria-label': ['A', 'INPUT'], start: ['OL'], type: ['INPUT'], checked: ['INPUT'], disabled: ['INPUT'] };
 
 let purifier = null;
+// While a tickable render is sanitised (synchronously): its checkboxes stay enabled.
+let tickable = false;
 function purify() {
   if (purifier) return purifier;
   const p = DOMPurify(globalThis.window);
@@ -270,7 +278,7 @@ function purify() {
   if (!p.isSupported) throw new Error('renderMarkdown needs a DOM to sanitise its HTML');
   p.addHook('afterSanitizeAttributes', (node) => {
     for (const name of node.getAttributeNames()) {
-      if (ONLY_ON[name] && ONLY_ON[name] !== node.nodeName) node.removeAttribute(name);
+      if (ONLY_ON[name] && !ONLY_ON[name].includes(node.nodeName)) node.removeAttribute(name);
     }
     if (node.hasAttribute('href') && !SAFE_URL.test(node.getAttribute('href'))) node.removeAttribute('href');
     if (node.hasAttribute('class')) {
@@ -278,10 +286,12 @@ function purify() {
       if (kept.length) node.setAttribute('class', kept.join(' '));
       else node.removeAttribute('class');
     }
-    // The only input is a task's checkbox, never one you can tick.
+    // The only input is a task's checkbox, ticked only where the view
+    // ticks tasks (a note's summary), never in an answer.
     if (node.nodeName === 'INPUT') {
       node.setAttribute('type', 'checkbox');
-      node.setAttribute('disabled', '');
+      if (tickable) node.removeAttribute('disabled');
+      else node.setAttribute('disabled', '');
     }
   });
   purifier = p;
@@ -292,11 +302,29 @@ function purify() {
  * Markdown → safe HTML.
  * `options.sources`: an answer's web sources ([{ n, title, url, site }]):
  * citations become pills, and only the sources' links stay links.
+ * `options.tickable`: task checkboxes you can tick (a note's summary; the
+ * view maps each one to its line with `taskLines`).
  */
 export function renderMarkdown(text, options = {}) {
   const env = { web: webContext(options.sources) };
   const html = md.render(bulletsToDashes(text || ''), env);
-  return purify().sanitize(html, PURIFY).trim();
+  tickable = !!options.tickable;
+  try {
+    return purify().sanitize(html, PURIFY).trim();
+  } finally {
+    tickable = false;
+  }
+}
+
+/**
+ * The source line (0-based) of each task checkbox `renderMarkdown(text)`
+ * makes, in the order they render: the nth checkbox in the page is the
+ * task on `taskLines(text)[n]` (src-tauri/src/tasks.rs ticks it there).
+ */
+export function taskLines(text) {
+  const env = { tasks: [] };
+  md.parse(bulletsToDashes(text || ''), env);
+  return env.tasks;
 }
 
 // "• item" lines (small models write them) as markdown bullets, outside code

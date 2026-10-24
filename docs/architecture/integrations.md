@@ -18,7 +18,9 @@ The token-authenticated local API, Yap's MCP server (`yap.exe mcp`) and adding i
   leaves a live bridge's file alone, and `stop()` only deletes the file while
   it's still ours. Also serves the MCP server's meeting views
   (`/v1/meetings/list`, `/v1/meetings/search`, `/v1/mcp/config`; built in
-  `mcp.rs`). Debug builds take `YAP_BRIDGE_FILE` to move the discovery file
+  `mcp.rs`) and the tasks in notes' summaries, read only (`/v1/tasks/list?
+  status=open|done|all`: note, owner, task, due, done, when it was said;
+  `tasks.rs`). Debug builds take `YAP_BRIDGE_FILE` to move the discovery file
   (the e2e suite). See `docs/local-api.md`.
 - **`mcp.rs`** — **Yap's MCP server** (Wispr Flow's Notetaker MCP, local): AI apps
   launch **`yap.exe mcp`** (main.rs sends that argument here before any of the app
@@ -32,7 +34,9 @@ The token-authenticated local API, Yap's MCP server (`yap.exe mcp`) and adding i
   **never dictation history**: `list_meetings`, `search_meetings` (matching
   transcript lines + page), `get_meeting` (AI summary/action plan, typed notes,
   digests when there's no summary, transcript in ~6k-token pages via
-  `transcript_page`), `search_notes`, `get_note`, `list_folders`, and `create_note`
+  `transcript_page`), `search_notes`, `get_note`, `list_tasks` (the action plans'
+  tasks by meeting, open by default, whether ticked done, "said at 0:15"; read
+  only), `list_folders`, and `create_note`
   only when `config.mcp_allow_writes` (Settings → AI apps (MCP); source `"mcp"`). Markdown
   for the model, local-time dates (chrono). Transcript lines carry the
   speaker map's names (`speakers::display_line`: "You", "Them", "Priya",

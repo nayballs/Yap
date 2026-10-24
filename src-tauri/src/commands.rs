@@ -626,27 +626,41 @@ pub fn note_delete(app: AppHandle, id: u64) -> Result<(), String> {
 /// it's short, else the rolling digests plus the latest stretch (finishing
 /// any digest the meeting still owes first), so a long meeting fits the
 /// model and comes back in seconds.
+///
+/// A summary the person edited is written over only with `replace` (the
+/// window asked them first); else the run stops before the model with
+/// `note_edits::SUMMARY_KEPT`. Ticked tasks stay ticked either way.
 #[tauri::command]
 pub async fn note_enhance(
     app: AppHandle,
     id: u64,
     action_id: Option<u64>,
+    replace: Option<bool>,
 ) -> Result<String, String> {
-    run_enhance(&app, id, action_id, |_| {}).await
+    run_enhance(&app, id, action_id, replace.unwrap_or(false), |_| {}).await
 }
 
 /// The body of [`note_enhance`], with `step` told where it is, for the
 /// notepad's "Step 2 of 3" (`meeting_end.rs` runs the action plan this way):
 /// 1 reading the meeting (catching up on its digests), 2 writing, 3 checking
-/// owners and deadlines and saving.
+/// owners and deadlines and saving. `replace`: the person said a summary
+/// they edited may go (`note_edits::write_summary`).
 pub(crate) async fn run_enhance(
     app: &AppHandle,
     id: u64,
     action_id: Option<u64>,
+    replace: bool,
     step: impl Fn(u8),
 ) -> Result<String, String> {
     step(1);
     let note = crate::notes::get(id).ok_or("Note not found")?;
+    crate::note_edits::keeps_summary(&note, replace)?;
+    // When this run read the note: an edit to the summary after it wins.
+    let read_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0);
+    let heard_to = crate::note_edits::newest_talk(&note);
     let hash = crate::notes::content_hash(&note.content);
     let cfg = config::load();
     let ep = crate::meeting_summary::resolve_endpoint(&cfg)?;
@@ -712,8 +726,9 @@ pub(crate) async fn run_enhance(
             &digest_actions,
         );
     }
-    crate::notes::set_enhanced(id, &enhanced, &hash)?;
-    Ok(enhanced)
+    crate::note_edits::write_summary(id, &enhanced, &hash, read_ms, heard_to, replace)?;
+    // What's stored: the tasks ticked in the summary before stay ticked.
+    Ok(crate::notes::get(id).map(|n| n.enhanced_content).unwrap_or(enhanced))
 }
 
 // ---- Meeting recorder ----

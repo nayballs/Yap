@@ -14,8 +14,10 @@
 //!
 //! **Tools.** Meetings and notes only, never the dictation history (Wispr's
 //! promise too): `list_meetings`, `search_meetings`, `get_meeting`,
-//! `search_notes`, `get_note`, `list_folders`, plus `create_note` when the
-//! person allows it (Settings → MCP, `config.mcp_allow_writes`).
+//! `search_notes`, `get_note`, `list_tasks` (the action plans' tasks and
+//! whether the person ticked them; read only), `list_folders`, plus
+//! `create_note` when the person allows it (Settings → MCP,
+//! `config.mcp_allow_writes`).
 //! Results are markdown for the model to read; a long transcript comes in
 //! pages of about [`PAGE_TOKENS`] so it fits any client's context.
 //!
@@ -188,6 +190,39 @@ pub fn list_meetings(notes: &[Note], folder: Option<&str>, limit: usize) -> Vec<
         .take(limit)
         .map(meeting_summary)
         .collect()
+}
+
+/// `GET /v1/tasks/list`: the tasks in notes' summaries (`tasks.rs`), newest
+/// note first, the person's own ("You") first within each; `status` "open"
+/// (unticked), "done" (ticked) or "all". Read only.
+pub fn list_tasks(notes: &[Note], status: &str, limit: usize) -> Vec<Value> {
+    let mut out = Vec::new();
+    for n in crate::tasks::list(notes) {
+        let mut tasks: Vec<_> = n
+            .tasks
+            .into_iter()
+            .filter(|t| match status {
+                "done" => t.task.done,
+                "all" => true,
+                _ => !t.task.done,
+            })
+            .collect();
+        tasks.sort_by_key(|t| t.task.owner != "You");
+        for t in tasks {
+            out.push(json!({
+                "noteId": n.note_id,
+                "title": n.title,
+                "createdTs": n.created_ts,
+                "owner": t.task.owner,
+                "task": t.task.task,
+                "due": t.task.due,
+                "done": t.task.done,
+                "saidAtSecs": t.at.map(|a| a.secs),
+            }));
+        }
+    }
+    out.truncate(limit);
+    out
 }
 
 /// The words a search looks for: lowercased, edge punctuation trimmed, three
@@ -492,6 +527,18 @@ impl<B: Bridge> YapMcp<B> {
                 let id = arg_u64(args, "id").ok_or("Give the note's id (from search_notes or list_meetings).")?;
                 Ok(render_note(&self.note(id).await?))
             }
+            "list_tasks" => {
+                let status = match arg_str(args, "status").unwrap_or("open") {
+                    s @ ("open" | "done" | "all") => s,
+                    _ => return Err("status is \"open\", \"done\" or \"all\".".to_string()),
+                };
+                let limit = arg_u64(args, "limit").unwrap_or(50).clamp(1, 200);
+                let v = self
+                    .get(format!("/v1/tasks/list?status={status}&limit={limit}"))
+                    .await
+                    .map_err(fail)?;
+                Ok(render_tasks(status, &v["data"]))
+            }
             "list_folders" => {
                 let folders = self.get("/v1/folders/list".to_string()).await.map_err(fail)?;
                 let notes = self
@@ -657,6 +704,19 @@ pub fn tools(writes: bool) -> Vec<Tool> {
             })),
         )
         .annotate(read_only("Read a note")),
+        Tool::new(
+            "list_tasks",
+            "List the tasks in the user's Yap meeting notes (the action plans' checkboxes): who does what, by when, which meeting, and whether the user ticked it done. 'You' is the user. Open tasks by default.",
+            schema(json!({
+                "type": "object",
+                "properties": {
+                    "status": { "type": "string", "enum": ["open", "done", "all"], "description": "Open (not ticked, the default), done (ticked), or all." },
+                    "limit": { "type": "integer", "minimum": 1, "maximum": 200, "description": "How many tasks to list (default 50)." }
+                },
+                "additionalProperties": false
+            })),
+        )
+        .annotate(read_only("List tasks")),
         Tool::new(
             "list_folders",
             "List the user's Yap note folders and how many notes each holds.",
@@ -833,6 +893,51 @@ fn render_meeting_list(data: &Value) -> String {
         out.push('\n');
     }
     out.push_str("\nRead one with get_meeting and its id.");
+    out
+}
+
+/// Tasks from the bridge, grouped by meeting: "- [ ] Priya: send the budget (due: Friday)".
+fn render_tasks(status: &str, data: &Value) -> String {
+    let items = data.as_array().cloned().unwrap_or_default();
+    let kind = match status {
+        "done" => "done ",
+        "all" => "",
+        _ => "open ",
+    };
+    if items.is_empty() {
+        return format!("No {kind}tasks in Yap's meeting notes.");
+    }
+    let mut out = format!(
+        "{} {kind}task{} from Yap's meeting notes, newest meeting first ([x] = ticked done by the user):\n",
+        items.len(),
+        if items.len() == 1 { "" } else { "s" }
+    );
+    let mut note = None;
+    for t in &items {
+        if note != Some(t["noteId"].as_u64()) {
+            note = Some(t["noteId"].as_u64());
+            out.push_str(&format!(
+                "\n**{}** · {} · id {}\n",
+                title_of(t["title"].as_str().unwrap_or(""), "Untitled note"),
+                when(t["createdTs"].as_u64().unwrap_or(0)),
+                t["noteId"]
+            ));
+        }
+        let owner = t["owner"].as_str().unwrap_or("").trim();
+        let due = t["due"].as_str().unwrap_or("").trim();
+        out.push_str(&format!(
+            "- [{}] {}{}{}",
+            if t["done"] == json!(true) { "x" } else { " " },
+            if owner.is_empty() { String::new() } else { format!("{owner}: ") },
+            t["task"].as_str().unwrap_or(""),
+            if due.is_empty() { String::new() } else { format!(" (due: {due})") }
+        ));
+        if let Some(secs) = t["saidAtSecs"].as_u64() {
+            out.push_str(&format!(" · said at {}", clock(secs)));
+        }
+        out.push('\n');
+    }
+    out.push_str("\nRead a meeting with get_meeting and its id.");
     out
 }
 
@@ -1364,6 +1469,9 @@ mod tests {
                 ("GET", "/v1/meetings/list") => Ok(json!({ "data": list_meetings(&self.notes, None, limit) })),
                 ("GET", "/v1/meetings/search") => Ok(json!({ "data": search_meetings(&self.notes, &param("q").unwrap_or_default(), limit) })),
                 ("GET", "/v1/folders/list") => Ok(json!({ "data": ["Personal", "Meetings"] })),
+                ("GET", "/v1/tasks/list") => {
+                    Ok(json!({ "data": list_tasks(&self.notes, &param("status").unwrap_or_default(), limit) }))
+                }
                 ("GET", "/v1/notes/list") => Ok(json!({ "data": self.notes.iter().map(|n| json!({ "id": n.id, "folder": n.folder })).collect::<Vec<_>>() })),
                 ("POST", "/v1/folders/create") => Ok(json!({ "data": {} })),
                 ("POST", "/v1/notes/create") => {
@@ -1474,7 +1582,7 @@ mod tests {
             .iter()
             .map(|t| t["name"].as_str().unwrap())
             .collect();
-        assert_eq!(names, ["list_meetings", "search_meetings", "get_meeting", "search_notes", "get_note", "list_folders"]);
+        assert_eq!(names, ["list_meetings", "search_meetings", "get_meeting", "search_notes", "get_note", "list_tasks", "list_folders"]);
         assert!(list["result"].get("resultType").is_none(), "legacy peers get the legacy shape");
         assert!(list["result"]["tools"][0]["annotations"]["readOnlyHint"] == json!(true));
 
@@ -1503,6 +1611,16 @@ mod tests {
         assert!(err && text.contains("no note with id 404"));
         let (_, text) = s.tool("list_folders", json!({})).await;
         assert!(text.contains("- Meetings: 2 notes"));
+        // The action plan's tasks, open ones by default; ticked ones on asking.
+        let (err, text) = s.tool("list_tasks", json!({})).await;
+        assert!(!err, "{text}");
+        assert!(text.starts_with("1 open task from Yap's meeting notes"), "{text}");
+        assert!(text.contains("**Q3 planning sync**"));
+        assert!(text.contains("- [ ] Priya: send the revised budget (due: Friday) · said at 0:15"), "{text}");
+        let (_, text) = s.tool("list_tasks", json!({ "status": "done" })).await;
+        assert_eq!(text, "No done tasks in Yap's meeting notes.");
+        let (err, _) = s.tool("list_tasks", json!({ "status": "later" })).await;
+        assert!(err);
 
         // Writes are off: create_note isn't offered, and refuses if called.
         let (err, text) = s.tool("create_note", json!({ "title": "x", "content": "y" })).await;
@@ -1534,7 +1652,7 @@ mod tests {
         s.initialize("2025-06-18").await;
         // Listing still works (read-only tools), so the app shows the server.
         let list = s.request("tools/list", json!({})).await;
-        assert_eq!(list["result"]["tools"].as_array().unwrap().len(), 6);
+        assert_eq!(list["result"]["tools"].as_array().unwrap().len(), 7);
         let (err, text) = s.tool("list_meetings", json!({})).await;
         assert!(err);
         assert!(text.contains("Open Yap to let your AI read your notes"));

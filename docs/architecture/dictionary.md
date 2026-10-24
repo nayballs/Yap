@@ -173,7 +173,15 @@ The correction dictionary: near-miss (fuzzy) matching, the Whisper vocabulary's 
   (every surface's save) hands the old and new dictionaries to
   `on_dictionary_saved`, and a correction whose trigger and spelling are
   both gone (an edit of one isn't a removal; snippets don't count) goes
-  into the store's `removed` terms. Answers in
+  into the store's `removed` terms. **A meeting line the person fixed**
+  (`offer_for_line`, from `note_edits.rs`; the notepad and the Notes view):
+  the same `suggestions` over the line's words before and after the edit
+  (its start a sentence's), the same answers left out, no watch and no
+  three-minute gap before it (they just fixed it; it still counts as the
+  last prompt), and the prompt handed back to the window that made the edit,
+  which asks in its own toast (`wordSuggestions.js` `askWordSuggestion`;
+  Open Dictionary only where there's a sidebar) — answered with
+  `word_suggestion_respond` like any other. Answers in
   `<data>/word_suggestions.json` (not config.json: Settings' wholesale
   saves). Debug-only `e2e_learn_correction {pasted, edited?, before?,
   reads?, fresh?}` stages an edit for the e2e suite (skips the 3-min gap):

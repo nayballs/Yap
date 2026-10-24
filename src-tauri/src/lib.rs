@@ -46,6 +46,7 @@ mod meeting_end;
 mod meeting_guard;
 mod meeting_summary;
 mod memory;
+mod note_edits;
 mod note_text;
 mod notepad;
 mod notes;
@@ -84,6 +85,7 @@ mod speakers;
 mod stt;
 mod stream;
 mod stt_speed;
+mod tasks;
 mod text_injector;
 mod transforms;
 mod tray;
@@ -521,6 +523,10 @@ pub fn run() {
             commands::note_update,
             commands::note_delete,
             commands::note_enhance,
+            note_edits::transcript_line_edit,
+            note_edits::note_summary_update,
+            tasks::tasks_list,
+            tasks::note_task_set,
             commands::get_note_base_prompt,
             commands::notes_folders,
             commands::notes_folder_create,

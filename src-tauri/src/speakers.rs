@@ -706,8 +706,9 @@ const NEAR_MS: u64 = 1_500;
 /// smoothed away, and each run of one speaker becomes a line of its own,
 /// with its words and its place. Words come from the line's word times;
 /// without them, the line's text is spread over its place in proportion.
-/// Returned unchanged: a line the user assigned (`speaker_locked`), a
-/// marker or echo, a line with no place, or no turns. One run = the line
+/// Returned unchanged: a line the user assigned (`speaker_locked`) or
+/// edited (`edited`), a marker or echo, a line with no place, or no
+/// turns. One run = the line
 /// relabelled. The voice separation calls it as lines get labels
 /// ([`labels`]).
 pub fn split_line(seg: &TranscriptSegment, turns: &[Turn]) -> Vec<TranscriptSegment> {
@@ -715,7 +716,8 @@ pub fn split_line(seg: &TranscriptSegment, turns: &[Turn]) -> Vec<TranscriptSegm
         return vec![seg.clone()];
     };
     let words: Vec<&str> = seg.text.split_whitespace().collect();
-    if seg.speaker_locked || !seg.is_talk() || turns.is_empty() || words.is_empty() {
+    // (A line the person edited is theirs as written: never split.)
+    if seg.speaker_locked || seg.edited || !seg.is_talk() || turns.is_empty() || words.is_empty() {
         return vec![seg.clone()];
     }
     let times: Vec<(u64, u64)> = if seg.words.len() == words.len() {
@@ -1243,6 +1245,12 @@ mod tests {
         mine.speaker_locked = true;
         mine.speaker = "p-1".into();
         assert_eq!(split_line(&mine, &[turn(0, 9_000, "them-1")])[0].speaker, "p-1");
+        // A line the person edited: theirs as written, never split.
+        let mut fixed = line.clone();
+        fixed.edited = true;
+        let turns = [turn(0, 590, "them-1"), turn(600, 2_000, "them-2")];
+        assert_eq!(split_line(&line, &turns).len(), 2);
+        assert_eq!(split_line(&fixed, &turns).len(), 1);
         let marker = TranscriptSegment::dictation_marker(1);
         assert_eq!(split_line(&marker, &[turn(0, 9_000, "them-1")]).len(), 1);
         let mut unplaced = line.clone();

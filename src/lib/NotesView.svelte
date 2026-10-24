@@ -16,7 +16,7 @@
   // notepad (Notepad.svelte) shows the same note: edits sync both ways.
   import { invoke } from '@tauri-apps/api/core';
   import { listen } from '@tauri-apps/api/event';
-  import { onMount } from 'svelte';
+  import { onMount, tick } from 'svelte';
   import { renderMarkdown, markdownToText } from './markdown.js';
   import { toast } from './ui/toast.svelte.js';
   import ActionManager from './ActionManager.svelte';
@@ -30,7 +30,12 @@
     withLineSpeakers,
     withLineSplice,
     hasLine,
+    withLineEdit,
+    withTaskMark,
+    newSinceSummary,
+    newSinceLine,
   } from './notepadText.js';
+  import { editLine, taskToggled, setTask, saveSummary, askReplaceSummary, SUMMARY_KEPT } from './noteEdits.js';
   import SpeakerMenu from './SpeakerMenu.svelte';
   import SpeakerCard from './SpeakerCard.svelte';
   import { nextModel, modelLine, whereItRuns } from './aiModel.js';
@@ -153,14 +158,80 @@
   function toggleSpeakerMenu(key, voice, lines, start = 'menu') {
     speakerMenu = speakerMenu?.key === key ? null : { key, voice, lines, start };
   }
+  // Fixing a line's words (note_edits.rs), as in the meeting notepad:
+  // double-click it, Enter or F2 on it, or Edit line in its menu; Enter
+  // saves, Escape puts it back, leaving it saves.
+  let editingLine = $state(null); // { i, text }
+  let lineEditEl = $state(null);
+  let lineSaving = false;
+  async function startEditLine(line) {
+    if (!selected) return;
+    speakerMenu = null;
+    editingLine = { i: line.i, text: selected.transcript?.[line.i]?.text ?? line.text };
+    await tick();
+    lineEditEl?.focus();
+    lineEditEl?.select();
+    fitLineEdit();
+  }
+  function fitLineEdit() {
+    if (!lineEditEl) return;
+    lineEditEl.style.height = 'auto';
+    lineEditEl.style.height = `${lineEditEl.scrollHeight}px`;
+  }
+  async function finishEditLine(save) {
+    const edit = editingLine;
+    if (!edit || lineSaving) return;
+    editingLine = null;
+    const before = selected?.transcript?.[edit.i];
+    if (!save || !selected || !before || edit.text.trim() === before.text) {
+      setTimeout(() => lineEls[edit.i]?.focus({ preventScroll: true }), 0);
+      return;
+    }
+    lineSaving = true;
+    const id = selected.id;
+    try {
+      const r = await editLine(id, selected.transcript, edit.i, edit.text, LABEL);
+      if (selected?.id === id && r?.changed) {
+        changing('transcript');
+        const t = withLineEdit(selected.transcript, { index: r.index, line: r.line });
+        if (t) selected.transcript = t;
+        else reloadSelected();
+      }
+    } catch (e) {
+      toast({ title: "Couldn't change the line", description: String(e), variant: 'destructive' });
+    } finally {
+      lineSaving = false;
+      setTimeout(() => lineEls[edit.i]?.focus({ preventScroll: true }), 0);
+    }
+  }
+  function onLineEditKeydown(e) {
+    if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
+      e.preventDefault();
+      finishEditLine(true);
+    } else if (e.key === 'Escape') {
+      e.preventDefault();
+      e.stopPropagation();
+      finishEditLine(false);
+    }
+  }
+  // A focused line: Enter or F2 edits it; its menu key opens its menu.
+  function onBubbleKeydown(e, run, line) {
+    if (e.target !== e.currentTarget) return;
+    if ((e.key === 'Enter' || e.key === 'F2') && !run.echo) {
+      e.preventDefault();
+      startEditLine(line);
+    } else menuKey(e, (k) => lineMenu(k, run, line));
+  }
+
   // A transcript line's right-click menu (ui/contextMenu.svelte.js), as the
-  // meeting notepad's: Copy line, Who said this? (the speaker menu at the
-  // line) — not for a line from the speakers.
+  // meeting notepad's: Edit line, Copy line, Who said this? (the speaker
+  // menu at the line) — not for a line from the speakers.
   let lineEls = $state({});
   function lineMenu(e, run, line) {
     openContextMenu(
       e,
       [
+        { label: 'Edit line', icon: 'pencil', onselect: () => startEditLine(line) },
         {
           label: 'Copy line',
           icon: 'copy',
@@ -273,10 +344,11 @@
     }
   }
 
-  // Write the action plan (again): the "Action plan" button, and the Action
-  // Plan action on a meeting note. Rust runs it (meeting_end.rs), so the
-  // meeting notepad shows its progress too.
-  async function summariseMeeting() {
+  // Write the action plan (again): the "Action plan" button, the Action
+  // Plan action on a meeting note, and "New since this summary · Update".
+  // Rust runs it (meeting_end.rs), so the meeting notepad shows its
+  // progress too. A summary the person edited goes only when they say so.
+  async function summariseMeeting(returnFocus = null) {
     if (!selected) return;
     // A silent recording (muted mic, nobody talking) with no typed notes
     // has nothing for the model to work with.
@@ -292,12 +364,22 @@
       return;
     }
     flushSave();
+    finishSummaryEdit();
+    if (selected.summaryEditedMs && selected.enhancedContent?.trim()) {
+      askReplaceSummary({ run: () => startMeetingSummary(true), returnFocus });
+      return;
+    }
+    await startMeetingSummary(false);
+  }
+  async function startMeetingSummary(replace) {
+    if (!selected) return false;
     error = null;
     if (aiMissing?.noteId === selected.id) aiMissing = null;
     try {
-      await summarise(selected.id);
+      await summarise(selected.id, { replace });
     } catch (e) {
       toast({ title: "Couldn't write the action plan", description: String(e), variant: 'destructive' });
+      return false;
     }
   }
 
@@ -344,6 +426,7 @@
       // Keep what's being typed (its save is on the way).
       if (dirty.title) n.title = selected.title;
       if (dirty.content) n.content = selected.content;
+      if (summaryDirty) n.enhancedContent = selected.enhancedContent;
       for (const f of Object.keys(changed)) if (changed[f] !== before[f]) n[f] = selected[f];
       selected = n;
     } catch {
@@ -396,9 +479,19 @@
       changing('speakers');
       selected.speakers = p.speakers;
     }
-    if (typeof p.enhancedContent === 'string') {
-      changing('enhancedContent');
+    if (typeof p.enhancedContent === 'string' && !summaryDirty) {
+      changing('enhancedContent', 'summaryEditedMs', 'summaryTs');
       selected.enhancedContent = p.enhancedContent;
+      if (typeof p.summaryEditedMs === 'number') selected.summaryEditedMs = p.summaryEditedMs;
+      if (typeof p.summaryTs === 'number') selected.summaryTs = p.summaryTs;
+    }
+    // A line's words fixed in the meeting notepad.
+    if (p.lineEdit) {
+      const t = withLineEdit(selected.transcript, p.lineEdit);
+      if (t) {
+        changing('transcript');
+        selected.transcript = t;
+      } else reloadSelected();
     }
     // The voice separation labelled lines (`lineSplice`, some split where
     // the speaker changed), or a speaker was renamed or merged in the
@@ -507,6 +600,8 @@
 
   async function select(id) {
     flushSave();
+    finishSummaryEdit();
+    editingLine = null;
     try {
       selected = await invoke('note_get', { id });
       loadSummary(id);
@@ -804,7 +899,86 @@
     return !!s?.stale;
   });
 
-  async function runAction(action) {
+  // ---- the summary, edited in place (note_edits.rs), its tasks ticked (tasks.rs) ----
+  let summaryEditing = $state(false);
+  let summaryDraft = $state('');
+  let summaryEl = $state(null);
+  let summaryTimer = null;
+  // Typed and not yet saved: an event or a read never puts older words back.
+  let summaryDirty = false;
+  // "3 new lines since this summary · Update" (not while it records: the
+  // summary is written when it stops).
+  const newLines = $derived(recordingThisNote ? 0 : newSinceSummary(selected));
+  async function startSummaryEdit() {
+    if (!selected) return;
+    summaryDraft = selected.enhancedContent || '';
+    summaryEditing = true;
+    await tick();
+    summaryEl?.focus();
+    fitSummary();
+  }
+  function fitSummary() {
+    if (!summaryEl) return;
+    summaryEl.style.height = 'auto';
+    summaryEl.style.height = `${summaryEl.scrollHeight + 2}px`;
+  }
+  function queueSummarySave() {
+    summaryDirty = true;
+    fitSummary();
+    clearTimeout(summaryTimer);
+    summaryTimer = setTimeout(flushSummary, 600);
+  }
+  async function flushSummary() {
+    clearTimeout(summaryTimer);
+    summaryTimer = null;
+    if (!summaryDirty || !selected) return;
+    summaryDirty = false;
+    const id = selected.id;
+    const text = summaryDraft;
+    try {
+      const s = await saveSummary(id, text, LABEL);
+      if (selected?.id !== id) return;
+      changing('enhancedContent', 'summaryEditedMs', 'summaryTs');
+      if (!summaryDirty) selected.enhancedContent = s.enhancedContent;
+      selected.summaryEditedMs = s.summaryEditedMs;
+      selected.summaryTs = s.summaryTs;
+      refreshList();
+    } catch (e) {
+      toast({ title: "Couldn't save the summary", description: String(e), variant: 'destructive' });
+    }
+  }
+  function finishSummaryEdit() {
+    if (!summaryEditing) return;
+    if (summaryDirty && selected) selected.enhancedContent = summaryDraft;
+    flushSummary();
+    summaryEditing = false;
+  }
+  function onSummaryKeydown(e) {
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      e.stopPropagation();
+      finishSummaryEdit();
+    }
+  }
+  // A task's checkbox, ticked in the rendered summary.
+  async function onTaskChange(e) {
+    if (!selected) return;
+    const task = taskToggled(e, selected.enhancedContent);
+    if (!task) return;
+    const id = selected.id;
+    const before = selected.enhancedContent;
+    changing('enhancedContent');
+    selected.enhancedContent = withTaskMark(before, task.line, task.done);
+    try {
+      const md = await setTask(id, task, LABEL);
+      if (selected?.id === id) selected.enhancedContent = md;
+    } catch (err) {
+      if (selected?.id === id) selected.enhancedContent = before;
+      toast({ title: "Couldn't tick the task", description: String(err), variant: 'destructive' });
+    }
+  }
+
+  async function runAction(action, returnFocus = null) {
     if (!selected || enhancing.has(selected.id) || jobRunning || !action) return;
     pickerOpen = false;
     lastUsedActionId = action.id;
@@ -812,23 +986,36 @@
     // A meeting's action plan is Rust's job (progress shows in the notepad
     // too); any other action runs here.
     if (action.kind === 'actionPlan' && selected.transcript?.length) {
-      summariseMeeting();
+      summariseMeeting(returnFocus);
       return;
     }
     flushSave();
+    finishSummaryEdit();
+    // A summary the person edited goes only when they say so (note_edits.rs).
+    if (selected.summaryEditedMs && selected.enhancedContent?.trim()) {
+      askReplaceSummary({ run: () => runActionNow(action, true), returnFocus });
+      return;
+    }
+    await runActionNow(action, false);
+  }
+  async function runActionNow(action, replace) {
+    if (!selected) return false;
     const id = selected.id;
     enhancing = new Set([...enhancing, id]);
     runningAction = { noteId: id, name: action.name };
     error = null;
     if (aiMissing?.noteId === id) aiMissing = null;
     try {
-      const enhanced = await invoke('note_enhance', { id, actionId: action.id });
+      const enhanced = await invoke('note_enhance', { id, actionId: action.id, replace });
       // Only mutate the open note if the user is still on it.
       if (selected?.id === id) {
         selected.enhancedContent = enhanced;
         tab = 'enhanced'; // OpenWhispr auto-switches to the Enhanced tab
         try {
-          selected.digests = (await invoke('note_get', { id })).digests;
+          const n = await invoke('note_get', { id });
+          selected.digests = n.digests;
+          selected.summaryEditedMs = n.summaryEditedMs;
+          selected.summaryTs = n.summaryTs;
         } catch {
           /* keep current */
         }
@@ -837,7 +1024,10 @@
       refreshList();
     } catch (e) {
       const msg = String(e);
-      if (needsAiSetup(msg)) {
+      if (msg === SUMMARY_KEPT) {
+        // Edited again while it ran: the person's words stay.
+        toast({ kind: 'done', title: 'Your summary was kept', description: 'You changed it while Yap was writing a new one.' });
+      } else if (needsAiSetup(msg)) {
         // Not a failure: the note is saved, it just needs a model. The card
         // in the editor says so (and links to Settings).
         aiMissing = { noteId: id, message: msg };
@@ -1182,11 +1372,28 @@
     openRequested(req);
   });
 
-  async function openRequested({ id, stop }) {
+  // The transcript line a note was opened at (the Tasks view's "said at
+  // 12:40"): scrolled to, focused and lit for a moment.
+  let hilite = $state(null);
+  async function showLine(i) {
+    transcriptView = 'live';
+    showEcho = showEcho || !!selected?.transcript?.[i]?.echo;
+    await tick();
+    const el = lineEls[i];
+    if (!el) return;
+    followLog = false;
+    el.scrollIntoView({ block: 'center' });
+    el.focus({ preventScroll: true });
+    hilite = i;
+    setTimeout(() => hilite === i && (hilite = null), 2400);
+  }
+
+  async function openRequested({ id, stop, line }) {
     await select(id);
     if (selected?.id !== id) return;
     activeFolder = selected.folder || activeFolder;
     refreshList();
+    if (line != null) await showLine(line);
     if (!stop) return;
     meeting = (await invoke('meeting_state').catch(() => null)) || { recording: false };
     if (meeting.recording && meeting.noteId === id) await endMeeting();
@@ -1537,15 +1744,32 @@
         </button>
       </div>
 
-      {#if selected.enhancedContent}
+      {#if selected.enhancedContent || summaryEditing}
         <div class="tabs">
           <!-- The meeting notepad's names for the same two things. -->
-          <button class="tab" class:active={tab === 'raw'} onclick={() => (tab = 'raw')}>My thoughts</button>
+          <button
+            class="tab"
+            class:active={tab === 'raw'}
+            onclick={() => {
+              finishSummaryEdit();
+              tab = 'raw';
+            }}>My thoughts</button
+          >
           <button class="tab" class:active={tab === 'enhanced'} onclick={() => (tab = 'enhanced')}>
             Summary
             {#if isStale}<span class="staledot" title="Your notes changed since this summary: run the action again to update it"></span>{/if}
           </button>
           <span class="tabspacer"></span>
+          {#if tab === 'enhanced'}
+            <!-- Fix the summary's words in place (note_edits.rs). -->
+            <button
+              class="copy"
+              aria-pressed={summaryEditing}
+              onclick={() => (summaryEditing ? finishSummaryEdit() : startSummaryEdit())}
+            >
+              {summaryEditing ? 'Done' : 'Edit summary'}
+            </button>
+          {/if}
           <button class="copy" onclick={() => copyEnhanced(false)}>
             {copied === 'markdown' ? 'Copied!' : 'Copy as Markdown'}
           </button>
@@ -1586,10 +1810,37 @@
         <p class="errline">{job.error}</p>
       {/if}
 
-      {#if tab === 'enhanced' && selected.enhancedContent}
-        <!-- eslint-disable-next-line svelte/no-at-html-tags — renderMarkdown
-             passes no raw HTML and sanitises its output (lib/markdown.js) -->
-        <div class="rendered">{@html renderMarkdown(selected.enhancedContent)}</div>
+      {#if tab === 'enhanced' && (selected.enhancedContent || summaryEditing)}
+        {#if (newLines || selected.summaryEditedMs) && !summaryEditing}
+          <!-- What's new since the summary (Update), and whether it's the person's. -->
+          <div class="sumbar">
+            {#if newLines}
+              <p class="sumnew" aria-live="polite">
+                {newSinceLine(newLines)} ·
+                <button class="sumupdate" onclick={(e) => summariseMeeting(e.currentTarget)}>Update</button>
+              </p>
+            {/if}
+            <span class="tabspacer"></span>
+            {#if selected.summaryEditedMs}
+              <span class="sumedited" title="You changed this summary: Yap asks before writing it again">Edited</span>
+            {/if}
+          </div>
+        {/if}
+        {#if summaryEditing}
+          <textarea
+            class="sumedit"
+            aria-label="Edit the summary (Markdown)"
+            bind:this={summaryEl}
+            bind:value={summaryDraft}
+            oninput={queueSummarySave}
+            onkeydown={onSummaryKeydown}
+          ></textarea>
+        {:else}
+          <!-- eslint-disable-next-line svelte/no-at-html-tags — renderMarkdown
+               passes no raw HTML and sanitises its output (lib/markdown.js);
+               its tasks tick in place (tasks.rs) -->
+          <div class="rendered" onchange={onTaskChange}>{@html renderMarkdown(selected.enhancedContent, { tickable: true })}</div>
+        {/if}
       {:else}
         <textarea
           class="raw"
@@ -1634,7 +1885,7 @@
             {#if !recordingThisNote && selected.transcript?.length}
               <button
                 class="planbtn"
-                onclick={summariseMeeting}
+                onclick={(e) => summariseMeeting(e.currentTarget)}
                 disabled={enhancing.has(selected.id) || jobRunning || meeting.recording && meeting.noteId === selected.id}
                 title="Who does what by when, with decisions and open questions"
               >
@@ -1706,11 +1957,15 @@
                       class:cont={j > 0}
                       class:menuopen={menuOpenFor(lineEls[line.i]) || speakerMenu?.key === `l${line.i}`}
                       bind:this={lineEls[line.i]}
+                      class:editing={editingLine?.i === line.i}
+                      class:hilite={hilite === line.i}
                       role="article"
                       tabindex="0"
-                      aria-label={`${run.label}: ${line.text}`}
+                      aria-label={`${run.label}: ${line.text}${line.edited ? ' (edited)' : ''}`}
+                      aria-keyshortcuts="Enter F2"
                       oncontextmenu={(e) => lineMenu(e, run, line)}
-                      onkeydown={(e) => e.target === e.currentTarget && menuKey(e, (k) => lineMenu(k, run, line))}
+                      ondblclick={(e) => !e.target.closest('button, textarea') && editingLine?.i !== line.i && startEditLine(line)}
+                      onkeydown={(e) => onBubbleKeydown(e, run, line)}
                     >
                       {#if j === 0}
                         {#if run.echo}
@@ -1739,7 +1994,24 @@
                           </span>
                         {/if}
                       {/if}
-                      <p>{line.text}</p>
+                      {#if editingLine?.i === line.i}
+                        <textarea
+                          class="lineedit"
+                          rows="1"
+                          aria-label="Edit line: Enter saves, Escape cancels"
+                          bind:this={lineEditEl}
+                          bind:value={editingLine.text}
+                          oninput={fitLineEdit}
+                          onkeydown={onLineEditKeydown}
+                          onblur={() => finishEditLine(true)}
+                        ></textarea>
+                      {:else}
+                        <p>
+                          {line.text}{#if line.edited}<span class="lineedited" title={`You edited this line. Yap heard: “${line.original}”`}
+                              >edited</span
+                            >{/if}
+                        </p>
+                      {/if}
                       {#if canPlay(selected.id, selected.transcript[line.i])}
                         <!-- ▶ this line's stretch of the meeting, both sides (meeting_audio.rs). -->
                         <button
@@ -1887,7 +2159,7 @@
         <div class="picker">
           <button
             class="enhance runhalf"
-            onclick={() => runAction(activeAction)}
+            onclick={(e) => runAction(activeAction, e.currentTarget)}
             disabled={!activeAction ||
               enhancing.has(selected.id) ||
               jobRunning ||
@@ -2532,6 +2804,40 @@
   }
   .bubble.menuopen {
     box-shadow: 0 0 0 2px var(--yap-border-hover);
+  }
+  /* A line being fixed (note_edits.rs), and one opened from the Tasks view. */
+  .bubble.editing {
+    width: 82%;
+    box-shadow: 0 0 0 2px var(--yap-focus-ring);
+  }
+  .bubble.hilite {
+    box-shadow: 0 0 0 2px var(--yap-primary-line);
+    transition: box-shadow 0.4s ease;
+  }
+  .lineedit {
+    display: block;
+    box-sizing: border-box;
+    width: 100%;
+    margin: 2px 0 0;
+    padding: 0;
+    border: none;
+    background: none;
+    color: inherit;
+    font-family: var(--yap-font-reading);
+    font-size: inherit;
+    line-height: inherit;
+    resize: none;
+    overflow: hidden;
+  }
+  .lineedit:focus {
+    outline: none;
+  }
+  .lineedited {
+    margin-left: 6px;
+    font-size: 10.5px;
+    font-weight: 600;
+    color: var(--yap-muted-70);
+    cursor: help;
   }
   /* The line itself is reading text (Settings → General → Appearance); its
      speaker label and menu keep Yap's font. */
@@ -3308,6 +3614,75 @@
   .rendered :global(li.task) {
     list-style: none;
     margin-left: -18px;
+  }
+  /* A task ticks in place (tasks.rs); a done one is struck through. */
+  .rendered :global(li.task > input) {
+    margin: 0 4px 0 0;
+    accent-color: var(--yap-primary);
+    vertical-align: -1px;
+  }
+  .rendered :global(li.task > input:not([disabled])) {
+    cursor: pointer;
+  }
+  .rendered :global(li.task:has(> input:checked)) {
+    color: var(--yap-muted);
+    text-decoration: line-through;
+  }
+  .rendered :global(li.task > input:focus-visible) {
+    outline: 2px solid var(--yap-focus-ring);
+    outline-offset: 2px;
+  }
+  /* Over the summary: what's new since it (Update), and "Edited". */
+  .sumbar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin: 0 0 6px;
+  }
+  .sumnew {
+    margin: 0;
+    font-size: 11.5px;
+    color: var(--yap-muted);
+  }
+  .sumupdate {
+    padding: 0;
+    border: none;
+    background: none;
+    color: var(--yap-primary);
+    font: inherit;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  .sumupdate:hover {
+    text-decoration: underline;
+  }
+  .sumupdate:focus-visible,
+  .copy:focus-visible {
+    outline: 2px solid var(--yap-focus-ring);
+    outline-offset: 2px;
+    border-radius: 4px;
+  }
+  .sumedited {
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--yap-muted-70);
+  }
+  .sumedit {
+    flex: 1 1 auto;
+    min-height: 200px;
+    padding: 8px 10px;
+    border: 1px solid var(--yap-border);
+    border-radius: var(--yap-r);
+    background: var(--yap-s2);
+    color: var(--yap-fg);
+    font-family: ui-monospace, 'Cascadia Mono', Consolas, monospace;
+    font-size: 12.5px;
+    line-height: 1.55;
+    resize: vertical;
+  }
+  .sumedit:focus {
+    outline: 2px solid var(--yap-focus-ring);
+    outline-offset: 0;
   }
   /* A list under a task: indented under its text, past the checkbox. */
   .rendered :global(li.task > :is(ul, ol)) {

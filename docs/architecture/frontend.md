@@ -1,6 +1,6 @@
 # Frontend: the main window
 
-The Svelte side's look (theme, window chrome) and the main window: the ControlPanel with its toast system, Home, Insights, Upload, the speech model browser, onboarding and the UI primitives. Other views live with their feature: Notes ([notes.md](./notes.md)), Chat ([chat-and-assistant.md](./chat-and-assistant.md)), Meetings and the notepad ([meetings.md](./meetings.md)), Dictionary ([dictionary.md](./dictionary.md)), Integrations ([integrations.md](./integrations.md)), the Yap bar ([yap-bar.md](./yap-bar.md)); Settings is [frontend-settings.md](./frontend-settings.md).
+The Svelte side's look (theme, window chrome) and the main window: the ControlPanel with its toast system, Home, Insights, Upload, the speech model browser, onboarding and the UI primitives. Other views live with their feature: Notes and Tasks ([notes.md](./notes.md)), Chat ([chat-and-assistant.md](./chat-and-assistant.md)), Meetings and the notepad ([meetings.md](./meetings.md)), Dictionary ([dictionary.md](./dictionary.md)), Integrations ([integrations.md](./integrations.md)), the Yap bar ([yap-bar.md](./yap-bar.md)); Settings is [frontend-settings.md](./frontend-settings.md).
 
 [Architecture index](./README.md) · [CLAUDE.md](../../CLAUDE.md)
 
@@ -103,7 +103,7 @@ The Svelte side's look (theme, window chrome) and the main window: the ControlPa
   on hover-over-maximize is gone (Win+arrows still snap).
 - **`lib/ControlPanel.svelte`** — the **main window** (window label is still
   `settings`, historic): an OpenWhispr-style control panel — slim sidebar
-  (**Home / Insights / Chat / Notes / Meetings / Upload / Dictionary / Integrations**) + **Settings as a modal
+  (**Home / Insights / Chat / Notes / Meetings / Tasks / Upload / Dictionary / Integrations**) + **Settings as a modal
   overlay** (cogwheel). `Settings.svelte` renders `embedded` inside the modal
   and stays **always mounted** so its in-window hotkey fallback + auto-save run
   for the window's lifetime. App-wide **toast notification system**
@@ -318,7 +318,7 @@ Flow's dark mode of 19 Oct 2026), for every Yap window.
   Symphonia decode → chunked transcription on the warm engine with progress +
   cancel — see `media.rs`); its line names the model ("transcribes with
   Parakeet V3", `models.js`), not its id.
-- **Page titles** — Insights, Upload, Dictionary, Integrations and Meetings
+- **Page titles** — Insights, Upload, Dictionary, Integrations, Meetings and Tasks
   use the serif display title Settings' pages have (`--yap-font-display`,
   28–30 px; `polish.spec.js` checks the face).
 - **One chunk per window** (`App.svelte`, 2026-10-22): each window imports

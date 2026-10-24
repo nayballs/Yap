@@ -14,7 +14,7 @@
 // Delete…), a past meeting (Open, Generate summary, Copy as Markdown,
 // Delete…) and one from the calendar (Open note, Join, Start…), a calendar
 // connection (Sync now, Disconnect…), a speech model (Download / Use /
-// Delete…), a transcript line in the meeting notepad (Copy line, Who said
+// Delete…), a transcript line in the meeting notepad (Edit line, Copy line, Who said
 // this?). Copies land in the page's stubbed clipboard, never the real one;
 // Read aloud is test mode's stand-in voice (nothing plays); Join is never
 // clicked (no browser opens).
@@ -486,7 +486,7 @@ test('the meeting notepad: a transcript line copies, and says who said it — in
 
   await row.locator('.bubble').click({ button: 'right' });
   await expect(menu(pad)).toHaveAccessibleName('Transcript line');
-  await expect(allItems(pad)).toHaveText(['Copy line', 'Who said this?']);
+  await expect(allItems(pad)).toHaveText(['Edit line', 'Copy line', 'Who said this?']);
   await shot(pad, '12-notepad-line-menu');
   await menu(pad).getByRole('menuitem', { name: 'Copy line' }).click();
   await expect.poll(copied).toBe('Yes, the one by the river.');
@@ -519,7 +519,7 @@ test('the meeting notepad: a transcript line copies, and says who said it — in
   const mainCopied = await stubClipboard(main);
   await line.click({ button: 'right' });
   await expect(menu(main)).toHaveAccessibleName('Transcript line');
-  await expect(allItems(main)).toHaveText(['Copy line', 'Who said this?']);
+  await expect(allItems(main)).toHaveText(['Edit line', 'Copy line', 'Who said this?']);
   await menu(main).getByRole('menuitem', { name: 'Copy line' }).click();
   await expect.poll(mainCopied).toBe('Yes, the one by the river.');
   await line.click({ button: 'right' });

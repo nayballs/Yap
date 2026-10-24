@@ -71,6 +71,14 @@ pub struct TranscriptSegment {
     /// it, like echo.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub dictated: bool,
+    /// The person corrected this line's text (`note_edits.rs`): it keeps its
+    /// time, voice and audio, Transcribe again never replaces it, and the
+    /// voice separation never splits it.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub edited: bool,
+    /// What Yap heard, before the person's first edit (empty unless `edited`).
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub original: String,
 }
 
 impl TranscriptSegment {
@@ -180,6 +188,15 @@ pub struct Note {
     /// `content_hash` of `content` at the moment of the last enhancement.
     #[serde(default)]
     pub enhanced_at_hash: String,
+    /// When the person last changed the summary's words (unix ms; 0 = as
+    /// Yap wrote it). An edited summary is never written over unless the
+    /// person says so (`note_edits.rs`); ticking a task isn't an edit.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub summary_edited_ms: u64,
+    /// When the summary's input was read (unix seconds; 0 = not known, as on
+    /// older notes): lines dated after it are "new since this summary".
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub summary_ts: u64,
     #[serde(default = "default_note_type")]
     pub note_type: String,
     /// Folder name (OpenWhispr seeds Personal + Meetings; user-creatable).
@@ -221,6 +238,10 @@ pub struct Note {
     /// whether the user locked it, merges and refused names.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub speakers: Speakers,
+}
+
+fn is_zero(n: &u64) -> bool {
+    *n == 0
 }
 
 fn default_note_type() -> String {
@@ -830,6 +851,8 @@ pub fn create(title: &str, content: &str, source: &str, folder: &str) -> Note {
             content: content.to_string(),
             enhanced_content: String::new(),
             enhanced_at_hash: String::new(),
+            summary_edited_ms: 0,
+            summary_ts: 0,
             note_type: default_note_type(),
             folder,
             folder_chosen: false,
@@ -1195,7 +1218,10 @@ fn push_digest(note: &mut Note, mut digest: MeetingDigest, last: Option<(&str, u
 
 /// Store an enhancement result + the staleness hash of the content it was
 /// computed from (pass the hash captured BEFORE the LLM call, so edits made
-/// while the model ran correctly show as stale).
+/// while the model ran correctly show as stale). The app's own runs go
+/// through `note_edits::write_summary` (never over the person's edits);
+/// this is the evaluations' and the tests'.
+#[cfg(any(test, debug_assertions))]
 pub fn set_enhanced(id: u64, enhanced: &str, at_hash: &str) -> Result<(), String> {
     with_store(|store| {
         let note = store

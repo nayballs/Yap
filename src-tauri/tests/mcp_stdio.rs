@@ -174,7 +174,7 @@ fn a_2025_client_lists_and_reads_meetings_over_stdio() {
         .iter()
         .map(|t| t["name"].as_str().unwrap())
         .collect();
-    assert_eq!(names, ["list_meetings", "search_meetings", "get_meeting", "search_notes", "get_note", "list_folders"]);
+    assert_eq!(names, ["list_meetings", "search_meetings", "get_meeting", "search_notes", "get_note", "list_tasks", "list_folders"]);
 
     let (err, text) = mcp.tool("list_meetings", json!({}));
     assert!(!err, "{text}");

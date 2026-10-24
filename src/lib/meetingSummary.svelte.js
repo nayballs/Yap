@@ -3,7 +3,8 @@
 //
 // - `summaries.byNote[noteId]`: the latest action-plan job for a note,
 //   `{ noteId, run, state: 'running' | 'done' | 'error' | 'needsAi' |
-//   'nothing', step, steps, error }` (`meeting_summary_status` + the
+//   'nothing' | 'kept' (the person's edited summary stays), step, steps,
+//   error }` (`meeting_summary_status` + the
 //   `yap-meeting-summary` event). Rust writes the plan when a meeting ends,
 //   whichever window is open; `summarise(noteId)` runs it again ("Generate
 //   summary", Retry, the Notes view's "Action plan").
@@ -56,9 +57,13 @@ export async function loadSummary(noteId) {
   }
 }
 
-/** Write a meeting's action plan (again). Throws when it can't start. */
-export function summarise(noteId) {
-  return invoke('meeting_summarise', { noteId });
+/**
+ * Write a meeting's action plan (again). Throws when it can't start.
+ * `replace`: the person said their edited summary may go (noteEdits.js
+ * `askReplaceSummary`); without it an edited summary stays (state "kept").
+ */
+export function summarise(noteId, { replace = false } = {}) {
+  return invoke('meeting_summarise', { noteId, replace });
 }
 
 /** "Writing your action plan" — the job's step as a friendly line. */

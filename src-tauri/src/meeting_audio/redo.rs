@@ -7,6 +7,12 @@
 //!   or whose audio has gone (each recording's lines are those dated within
 //!   it), and every "You dictated here" marker (the audio has silence there;
 //!   the marker stays where it was);
+//! - **lines the person edited** (`TranscriptSegment::edited`,
+//!   `note_edits.rs`), as they wrote them: a new line of the same side over
+//!   one keeps only its words outside it (by its word times; without them
+//!   by its share of the line's place, and none when that's under half of
+//!   it) — whoever calls this (Transcribe again, a refined transcript)
+//!   never writes over a fix;
 //! - **who said what, where the lines still match by time**: a new line
 //!   takes the voice (and the "I said who this is" lock) of the old line of
 //!   its side it overlaps most — at least half of the shorter of the two;
@@ -113,15 +119,99 @@ fn with_voices(line: TranscriptSegment, olds: &[&TranscriptSegment]) -> Vec<Tran
         .collect()
 }
 
+/// Each word of `line` with its place on the recording's clock: its word
+/// times when it has them, else the line's place shared out by length.
+fn word_places(line: &TranscriptSegment, (start, end): (u64, u64)) -> Vec<(u64, u64)> {
+    let words: Vec<&str> = line.text.split_whitespace().collect();
+    if line.words.len() == words.len() {
+        return line.words.iter().map(|[s, e]| (start + *s as u64, start + *e as u64)).collect();
+    }
+    let total: u64 = words.iter().map(|w| w.chars().count() as u64 + 1).sum::<u64>().max(1);
+    let span = end.saturating_sub(start);
+    let mut at = 0;
+    words
+        .iter()
+        .map(|w| {
+            let from = start + span * at / total;
+            at += w.chars().count() as u64 + 1;
+            (from, start + span * at / total)
+        })
+        .collect()
+}
+
+/// `line` without what a line the person edited already says: the runs of
+/// its words whose middles fall outside `fixed` (the edited lines of its
+/// side and recording), each a line of its own. Without word times (the
+/// words' places only guessed), none when what's left is under half of it:
+/// it was mostly the edited line.
+fn outside_edited(line: TranscriptSegment, fixed: &[(u64, u64)]) -> Vec<TranscriptSegment> {
+    let Some(at) = place(&line).filter(|_| line.is_talk()) else {
+        return vec![line];
+    };
+    if !fixed.iter().any(|&f| overlap(f, at) > 0) {
+        return vec![line];
+    }
+    let words: Vec<&str> = line.text.split_whitespace().collect();
+    let times = word_places(&line, at);
+    let free: Vec<bool> = times
+        .iter()
+        .map(|&(s, e)| {
+            let mid = (s + e) / 2;
+            !fixed.iter().any(|&(fs, fe)| mid >= fs && mid < fe)
+        })
+        .collect();
+    let aligned = line.words.len() == words.len();
+    let kept = free.iter().filter(|f| **f).count();
+    if !aligned && kept * 2 < words.len() {
+        return Vec::new();
+    }
+    let mut parts = Vec::new();
+    let mut k = 0;
+    while k < words.len() {
+        if !free[k] {
+            k += 1;
+            continue;
+        }
+        let from = k;
+        while k < words.len() && free[k] {
+            k += 1;
+        }
+        if from == 0 && k == words.len() {
+            return vec![line];
+        }
+        let (s, e) = (times[from].0, times[k - 1].1.max(times[from].0));
+        let mut part = line.clone();
+        part.text = words[from..k].join(" ");
+        part.start_ms = Some(s);
+        part.end_ms = Some(e);
+        part.words = if aligned {
+            times[from..k].iter().map(|&(ws, we)| [(ws - s) as u32, (we - s) as u32]).collect()
+        } else {
+            Vec::new()
+        };
+        part.ts = line.ts + s.saturating_sub(at.0) / 1000;
+        parts.push(part);
+    }
+    parts
+}
+
 /// The note's transcript with each of `redone`'s recordings' lines put in
 /// place of the old ones (see the module notes). `old_breaks` are the old
 /// transcript's stop marks.
 pub fn rebuild(old: &[TranscriptSegment], old_breaks: &[usize], redone: &[Redone]) -> Rebuilt {
     let mut kept: Vec<TranscriptSegment> = Vec::new();
     let mut by_recording: Vec<Vec<&TranscriptSegment>> = vec![Vec::new(); redone.len()];
+    // Per recording: the places of its lines the person edited, by side.
+    let mut fixed: Vec<Vec<(&str, (u64, u64))>> = vec![Vec::new(); redone.len()];
     let mut replaced = 0;
     for seg in old {
         match recording_of(redone, seg.ts).filter(|_| !seg.dictated) {
+            Some(i) if seg.edited => {
+                if let Some(p) = place(seg) {
+                    fixed[i].push((seg.source.as_str(), p));
+                }
+                kept.push(seg.clone());
+            }
             Some(i) => {
                 by_recording[i].push(seg);
                 replaced += 1;
@@ -137,9 +227,12 @@ pub fn rebuild(old: &[TranscriptSegment], old_breaks: &[usize], redone: &[Redone
             if line.dictated && kept.iter().any(|k| k.dictated && k.ts == line.ts) {
                 continue;
             }
-            let parts = with_voices(line.clone(), &by_recording[i]);
-            added += parts.len();
-            fresh.extend(parts);
+            let mine: Vec<(u64, u64)> = fixed[i].iter().filter(|(side, _)| *side == line.source).map(|(_, p)| *p).collect();
+            for piece in outside_edited(line.clone(), &mine) {
+                let parts = with_voices(piece, &by_recording[i]);
+                added += parts.len();
+                fresh.extend(parts);
+            }
         }
     }
     let voiced = fresh
@@ -148,8 +241,9 @@ pub fn rebuild(old: &[TranscriptSegment], old_breaks: &[usize], redone: &[Redone
         .count();
     let mut transcript = kept;
     transcript.extend(fresh);
-    // In time order (stable: lines from one second keep their order).
-    transcript.sort_by_key(|s| s.ts);
+    // In time order (stable: lines from one second keep their order, and a
+    // line the person edited sits among the new ones by its place).
+    transcript.sort_by_key(|s| (s.ts, s.start_ms.unwrap_or(0)));
 
     // Each stop where it was: after the recording it ended (a line of a
     // recording done again), else after the line it followed.
@@ -274,6 +368,54 @@ mod tests {
         let again = vec![line("you", "Before.", 1_000, 5_000), marker, line("you", "After.", 9_000, 12_000)];
         let r = rebuild(&old, &[1, 4], &[redone(again, 13)]);
         assert_eq!(r.transcript.iter().filter(|s| s.dictated).count(), 1);
+    }
+
+    fn edited(mut seg: TranscriptSegment, text: &str) -> TranscriptSegment {
+        seg.original = std::mem::replace(&mut seg.text, text.into());
+        seg.edited = true;
+        seg
+    }
+
+    #[test]
+    fn a_line_the_person_edited_is_never_written_over() {
+        let fixed = voiced(edited(line("them", "we deploy on cube and eighties", 5_000, 9_000), "We deploy on Kubernetes."), "p-1", true);
+        let old = vec![line("you", "hello", 1_000, 3_000), fixed.clone(), line("you", "great", 10_000, 11_000)];
+        // The same audio heard again: the edited line's own new line goes.
+        let new = vec![
+            line("you", "Hello.", 1_000, 3_000),
+            line("them", "We deploy on cube and eighties.", 5_100, 8_900),
+            line("you", "Great.", 10_000, 11_000),
+        ];
+        let r = rebuild(&old, &[3], &[redone(new, 12)]);
+        let texts: Vec<&str> = r.transcript.iter().map(|s| s.text.as_str()).collect();
+        assert_eq!(texts, ["Hello.", "We deploy on Kubernetes.", "Great."]);
+        let kept = &r.transcript[1];
+        assert!(kept.edited && kept.speaker_locked);
+        assert_eq!(kept.original, "we deploy on cube and eighties");
+        assert_eq!((kept.start_ms, kept.end_ms), (Some(5_000), Some(9_000)), "▶ still plays what was said");
+        assert_eq!((r.replaced, r.added), (2, 2));
+        assert_eq!(r.transcript.iter().filter(|s| s.edited).count(), 1);
+        assert_eq!(r.breaks, vec![3]);
+
+        // A longer new line over it, with word times: only its words outside
+        // the edited line stay, as lines of their own.
+        let mut long = line("them", "right so we deploy on cube and eighties after lunch today", 3_000, 12_000);
+        long.words = vec![
+            [0, 400], [500, 900], [2_100, 2_400], [2_500, 3_000], [3_100, 3_400], [3_500, 4_000], [4_100, 4_500],
+            [4_600, 5_500], [6_100, 6_600], [6_700, 7_200], [7_300, 9_000],
+        ];
+        let r = rebuild(&old, &[], &[redone(vec![long], 12)]);
+        let them: Vec<(&str, Option<u64>)> =
+            r.transcript.iter().filter(|s| s.source == "them").map(|s| (s.text.as_str(), s.start_ms)).collect();
+        assert_eq!(them, [("right so", Some(3_000)), ("We deploy on Kubernetes.", Some(5_000)), ("after lunch today", Some(9_100))]);
+        // The other side's lines never give way to it.
+        let r = rebuild(&old, &[], &[redone(vec![line("you", "Mm-hm, sounds good.", 5_000, 9_000)], 12)]);
+        assert!(r.transcript.iter().any(|s| s.text == "Mm-hm, sounds good."));
+
+        // No word times: shared out by length; mostly the edited line → gone.
+        let r = rebuild(&old, &[], &[redone(vec![line("them", "we deploy on cube and eighties ok", 4_800, 9_400)], 12)]);
+        assert_eq!(r.transcript.iter().filter(|s| s.source == "them").count(), 1);
+        assert!(r.transcript.iter().all(|s| s.source != "them" || s.edited));
     }
 
     #[test]
