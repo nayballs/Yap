@@ -72,7 +72,11 @@
 //!   ([`replace_last`]: selected exactly, pasted over with the spaces
 //!   around it kept, read back; refused → the field left alone and the
 //!   rewrite copied instead). The rewrite is then the last paste, so "now
-//!   shorter" works on it.
+//!   shorter" works on it. **Saved transforms** (`transforms.rs`) take the
+//!   last dictation by the same rules, and their result is the last paste
+//!   too, with the text it replaced ([`undoable`]): the bar's **Undo**
+//!   ([`undo_transform`]) selects the result exactly, still ending at the
+//!   caret, and pastes that text back — else copies it, said.
 
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, MutexGuard};
@@ -124,12 +128,20 @@ pub(crate) struct Pasted {
     entry: Option<u64>,
     at: Instant,
     restore_clipboard: bool,
+    /// A saved transform's result: the text it replaced, which its Undo
+    /// puts back ([`undo_transform`]).
+    before: Option<String>,
 }
 
 impl Pasted {
     /// What was pasted, as the AI is to rewrite it.
     pub(crate) fn text(&self) -> &str {
         self.pasted.trim()
+    }
+
+    /// What was pasted, exactly (Yap's spaces included).
+    pub(crate) fn pasted_text(&self) -> &str {
+        &self.pasted
     }
 
     /// How long ago it was pasted.
@@ -181,8 +193,29 @@ pub fn remember(hwnd: Option<isize>, kind: AppKind, pasted: &str, said: Option<&
         entry: None,
         at: Instant::now(),
         restore_clipboard,
+        before: None,
     });
     said.is_some().then_some(seq)
+}
+
+/// The last paste is a saved transform's result `pasted` (`transforms.rs`),
+/// which replaced `before`: its Undo can put that back. Returns its number
+/// (the bar's Undo runs out when it's no longer the last paste).
+pub(crate) fn undoable(before: &str, pasted: &str) -> Option<u64> {
+    let mut l = last();
+    let p = l.as_mut().filter(|p| p.pasted == pasted && p.hwnd.is_some() && !before.trim().is_empty())?;
+    p.before = Some(before.to_string());
+    Some(p.seq)
+}
+
+/// The last paste's number (`None`: none): another paste since changes it.
+pub(crate) fn last_seq() -> Option<u64> {
+    last().as_ref().map(|p| p.seq)
+}
+
+/// Transform result `seq` is still the last paste, its Undo still offered.
+pub(crate) fn undo_offered(seq: u64) -> bool {
+    last().as_ref().is_some_and(|p| p.seq == seq && p.before.is_some())
 }
 
 /// Nothing Yap pasted is left in a field to swap or rewrite (a paste that
@@ -507,6 +540,101 @@ pub fn keep_spaces(selected: &str, rewrite: &str) -> String {
     format!("{lead}{body}{trail}")
 }
 
+// ---- Undoing a saved transform -----------------------------------------------------
+
+/// What the bar's Undo after a transform did.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase", tag = "outcome")]
+pub enum Undid {
+    /// The text the transform replaced is back (`checked`: read back).
+    Restored { checked: bool, how: &'static str },
+    /// Not here (`why`): the field was left alone, the text it replaced is
+    /// on the clipboard (the person told).
+    Copied { why: String },
+    /// A test run: nothing was touched.
+    TestMode,
+}
+
+/// The bar's **Undo** after a saved transform (`transforms.rs`): its result
+/// — the last paste, within [`SWAP_WITHIN`], still ending at the caret in
+/// the window in front — selected exactly and the text it replaced pasted
+/// back, with the spaces around it kept; read back. Where that can't be
+/// done safely the field is left alone and that text is copied instead,
+/// said. Once. Blocking.
+pub fn undo_transform(app: &AppHandle) -> Result<Undid, String> {
+    const NONE: &str = "Nothing to undo: Undo works right after a transform";
+    let p = last().clone().filter(|p| p.before.is_some()).ok_or(NONE)?;
+    if p.at.elapsed() > SWAP_WITHIN {
+        *last() = None;
+        return Err(NONE.into());
+    }
+    match crate::realtest::gate(p.hwnd, "undo the transform") {
+        crate::realtest::Gate::Go => {}
+        crate::realtest::Gate::TestMode => {
+            *last() = None;
+            tracing::info!("e2e: not undoing the transform");
+            return Ok(Undid::TestMode);
+        }
+        crate::realtest::Gate::Refused(why) => return Err(why),
+    }
+    // One Undo, whatever comes of it.
+    *last() = None;
+    let before = p.before.clone().unwrap_or_default();
+    let outcome = match replace_in_field(&p, &|selected| keep_spaces(selected, &before), false) {
+        Ok(Put::Replaced { checked, how, text }) => {
+            remember(p.hwnd, p.kind, &text, None, p.restore_clipboard);
+            Undid::Restored { checked, how }
+        }
+        Ok(Put::OnClipboard) => undo_copied(app, "the window couldn't be reached".into(), &before, false),
+        Err(why) => undo_copied(app, why, &before, true),
+    };
+    match &outcome {
+        Undid::Restored { checked, how } => tracing::info!(checked, how, "Transform undone"),
+        Undid::Copied { why } => tracing::info!(why = %why, "Transform: the Undo copied the text instead"),
+        Undid::TestMode => {}
+    }
+    Ok(outcome)
+}
+
+/// The Undo couldn't put the text back in place: on the clipboard
+/// (privately; `copy`: not there yet), and the person told.
+fn undo_copied(app: &AppHandle, why: String, before: &str, copy: bool) -> Undid {
+    let copied = !copy || crate::text_injector::copy_privately(before.trim());
+    crate::alert::show_soon(
+        app,
+        crate::alert::Alert {
+            kind: "pasteBlocked",
+            icon: "clipboard",
+            title: if copied {
+                "Couldn't undo it here — copied your text instead".into()
+            } else {
+                "Couldn't undo it here".into()
+            },
+            body: if copied {
+                format!("Yap left the field as it is ({why}). The text from before is on the clipboard: press Ctrl+V.")
+            } else {
+                format!("Yap left the field as it is ({why}), and the clipboard couldn't take the text from before.")
+            },
+            action: None,
+            timeout_ms: 12_000,
+        },
+    );
+    Undid::Copied { why }
+}
+
+/// [`undo_transform`] off the caller's thread (the bar's Undo), the offer
+/// ended either way.
+pub fn undo_transform_soon(app: &AppHandle) {
+    let app = app.clone();
+    let _ = std::thread::Builder::new().name("transform-undo".into()).spawn(move || {
+        if let Err(e) = undo_transform(&app) {
+            tracing::info!("Transform Undo: {e}");
+            let _ = app.emit("yap-error", e);
+        }
+        end_offer(&app);
+    });
+}
+
 /// [`swap`] off the caller's thread (the shortcut, the bar), the bar's
 /// offer ended either way.
 pub fn swap_soon(app: &AppHandle) {
@@ -523,8 +651,9 @@ pub fn swap_soon(app: &AppHandle) {
     });
 }
 
-/// Wait (≤ 1.5 s) until Ctrl, Shift, Alt and Win are all up.
-fn wait_for_modifiers_up() {
+/// Wait (≤ 1.5 s) until Ctrl, Shift, Alt and Win are all up (also before
+/// a saved transform reads or pastes, `transforms.rs`).
+pub(crate) fn wait_for_modifiers_up() {
     #[cfg(windows)]
     {
         #[link(name = "user32")]
@@ -1294,6 +1423,15 @@ mod tests {
         // copies them there), never for a rewrite.
         assert!(remember(None, AppKind::Other, "B. ", Some("b um "), true).is_some());
         assert!(rewrite_target(true, None).is_none());
+        // A saved transform's result, with the text it replaced: its Undo is
+        // offered while it's the last paste — only for the paste it is.
+        remember(Some(42), AppKind::Other, "Please send it. ", None, true);
+        assert!(undoable("send it ", "Something else. ").is_none());
+        let undo = undoable("send it ", "Please send it. ").unwrap();
+        assert!(undo_offered(undo));
+        assert_eq!(rewrite_target(true, Some(42)).map(|p| p.pasted_text().to_string()).as_deref(), Some("Please send it. "));
+        remember(Some(42), AppKind::Other, "Next. ", None, true);
+        assert!(!undo_offered(undo), "a newer paste: the Undo is gone");
         forget();
         assert!(last().is_none());
     }

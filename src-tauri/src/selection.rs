@@ -273,6 +273,61 @@ pub fn read_selected(target_hwnd: Option<isize>, copy_fallback: bool) -> Selecte
     nothing
 }
 
+/// What a **saved transform** (`transforms.rs`) finds selected in the app
+/// in front.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum FieldSelection {
+    /// Text selected in a field that takes typing — a paste replaces it —
+    /// as the field has it (spaces at its ends kept).
+    Text(String),
+    /// A selection Yap mustn't change: read-only text (a web page, a
+    /// viewer) or a password box.
+    ReadOnly,
+    /// Nothing selected (or the focus is in another app).
+    Nothing,
+    /// The field couldn't be read over UI Automation (then Ctrl+C may tell).
+    Unreadable,
+}
+
+/// The selection in `target_hwnd`'s focused field, for a transform: UI
+/// Automation's TextPattern selection of the field the focus is in (one
+/// range; not when the field or the selection is read-only), else a Win32
+/// edit control's own selection (`EM_GETSEL` in its ValuePattern text);
+/// only where neither can read the field, and `copy_fallback`, Ctrl+C —
+/// never in a terminal. Never another process's element, never a password
+/// box; robot mode only in the test's own windows, test mode never. The
+/// text is never logged.
+pub fn editable_selection(target_hwnd: Option<isize>, copy_fallback: bool) -> FieldSelection {
+    let Some(hwnd) = target_hwnd else { return FieldSelection::Nothing };
+    if crate::e2e::active() && !crate::realtest::permits(Some(hwnd)) {
+        tracing::debug!("e2e: not reading another app's selection (a transform)");
+        return FieldSelection::Nothing;
+    }
+    let Some(pid) = crate::text_injector::window_process(hwnd) else { return FieldSelection::Nothing };
+    #[cfg(windows)]
+    let read = uia::editable_selection_in(pid);
+    #[cfg(not(windows))]
+    let read = {
+        let _ = pid;
+        FieldSelection::Unreadable
+    };
+    match read {
+        FieldSelection::Unreadable if copy_fallback => match crate::text_injector::selection_via_copy(Some(hwnd)) {
+            Some(t) if !t.trim().is_empty() => {
+                tracing::debug!(len = t.len(), "Transform: the selection, by Ctrl+C");
+                FieldSelection::Text(t)
+            }
+            _ => FieldSelection::Nothing,
+        },
+        other => {
+            if let FieldSelection::Text(t) = &other {
+                tracing::debug!(len = t.len(), "Transform: the selection, over UI Automation");
+            }
+            other
+        }
+    }
+}
+
 /// Where the current dictation's context read stands.
 enum Reading {
     /// Nothing asked for (smart spacing off, edit mode, no target window).
@@ -788,6 +843,60 @@ pub(crate) mod uia {
             let (start, end) = at?;
             let text = value.get(start..end)?.trim();
             (!text.is_empty()).then(|| text.to_string())
+        }
+    }
+
+    /// A transform's selection in process `pid` ([`super::editable_selection`]):
+    /// the field the focus is in, not read-only, not a password box; its
+    /// TextPattern selection (one range, itself not read-only), else a Win32
+    /// edit control's own (`EM_GETSEL`); `Unreadable` when neither answers.
+    pub fn editable_selection_in(pid: u32) -> super::FieldSelection {
+        use super::FieldSelection as F;
+        let Some(_com) = Com::init() else { return F::Unreadable };
+        unsafe {
+            let Some(automation) = automation(super::SELECTION_TIMEOUT_MS) else { return F::Unreadable };
+            let Ok(focused) = automation.GetFocusedElement() else { return F::Unreadable };
+            if focused.CurrentProcessId().map(|p| p as u32).ok() != Some(pid) {
+                return F::Nothing;
+            }
+            if focused.CurrentIsPassword().map(|b| b.as_bool()).unwrap_or(false) {
+                return F::ReadOnly;
+            }
+            let Some(field) = field_for(&automation, &focused, false) else { return F::Unreadable };
+            if offers(&field, true).read_only {
+                return F::ReadOnly;
+            }
+            let pattern = field
+                .GetCurrentPattern(UIA_TextPatternId)
+                .ok()
+                .and_then(|u| u.cast::<IUIAutomationTextPattern>().ok());
+            if let Some(pattern) = pattern {
+                let Ok(ranges) = pattern.GetSelection() else { return F::Unreadable };
+                match ranges.Length().unwrap_or(0) {
+                    0 => return F::Nothing,
+                    1 => {}
+                    // Several selections (Word): one paste can't replace them.
+                    _ => return F::Nothing,
+                }
+                let Ok(range) = ranges.GetElement(0) else { return F::Unreadable };
+                if let Ok(v) = range.GetAttributeValue(UIA_IsReadOnlyAttributeId) {
+                    if bool::try_from(&v).unwrap_or(false) {
+                        return F::ReadOnly;
+                    }
+                }
+                let text = range.GetText(-1).map(|b| b.to_string()).unwrap_or_default();
+                return if text.trim().is_empty() { F::Nothing } else { F::Text(text) };
+            }
+            if let Some(p) = text_value_pattern(&field) {
+                let Ok(value) = p.CurrentValue() else { return F::Unreadable };
+                let (value, at) = value_selection(&field, value.to_string(), super::SELECTION_TIMEOUT_MS);
+                return match at.and_then(|(s, e)| value.get(s..e)) {
+                    Some(t) if !t.trim().is_empty() => F::Text(t.to_string()),
+                    Some(_) => F::Nothing,
+                    None => F::Unreadable,
+                };
+            }
+            F::Unreadable
         }
     }
 

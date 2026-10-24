@@ -213,7 +213,8 @@ enum Dictation {
     /// Just cancelled: "Dictation cancelled · Undo" while its audio is kept.
     Cancelled,
     /// Just pasted, cleaned up by AI: "Cleaned up · Use what I said" for a
-    /// few seconds (`as_said.rs`).
+    /// few seconds (`as_said.rs`) — or a saved transform's "Polish ✓ ·
+    /// Undo" (`transforms.rs`).
     Cleaned,
 }
 
@@ -1410,6 +1411,12 @@ fn act(app: &AppHandle, action: &str) -> Result<(), String> {
             give_focus_back();
             crate::as_said::swap_soon(app);
         }
+        // "Polish ✓ · Undo" after a saved transform (transforms.rs): the
+        // text it replaced put back, in the window it went into.
+        "transform-undo" => {
+            give_focus_back();
+            crate::as_said::undo_transform_soon(app);
+        }
         // ■ on the assistant's capsule: stop the answer (its voice, or one
         // still coming; it's in Chat either way).
         "assistant-stop" => crate::assistant::stop(app),
@@ -1499,7 +1506,7 @@ pub fn bar_pointer_left(app: AppHandle) {
 }
 
 /// A bar button or menu item: "dictate" | "dictation-stop" |
-/// "dictation-cancel" | "dictation-undo" | "as-said" | "meeting" |
+/// "dictation-cancel" | "dictation-undo" | "as-said" | "transform-undo" | "meeting" |
 /// "stop-meeting" | "read-aloud" | "read-stop" | "open-note" | "new-note" |
 /// "open" | "settings" | "hide" | "show" | "off".
 #[tauri::command]

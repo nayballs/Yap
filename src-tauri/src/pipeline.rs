@@ -406,6 +406,50 @@ pub(crate) struct Delivered {
     pub offer: Option<u64>,
 }
 
+/// Where the **Commands** scope's calls go: its own provider, model and
+/// prompt when it's on and set up, else the global AI-cleanup endpoint with
+/// no prompt body (the original edit-mode behaviour); "ondevice" goes to
+/// the sidecar either way (`local_llm::effective_endpoint_for`). Commands
+/// (`run_agent`) and saved transforms (`transforms.rs`, which bring their
+/// own instructions and leave `body` out) share it.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct CommandsModel {
+    pub base_url: String,
+    pub api_key: String,
+    pub model: String,
+    pub provider: String,
+    /// The Commands prompt, `{{agentName}}` filled in ("" on the cleanup
+    /// endpoint).
+    pub body: String,
+    pub disable_thinking: bool,
+}
+
+/// See [`CommandsModel`].
+pub(crate) fn commands_model(c: &YapConfig) -> CommandsModel {
+    match c.llm_scopes.get("voiceAgent") {
+        Some(s) if s.enabled && !s.provider.is_empty() => {
+            // Standard-provider keys are global (shared with the Cleanup
+            // tab); an empty scope key falls back to them.
+            let key = c.provider_api_key(&s.provider, &s.api_key);
+            let (base_url, api_key, model, provider) =
+                crate::local_llm::effective_endpoint_for(&s.provider, &s.base_url, &key, &s.model);
+            // The agent prompt is templated on the wake word (OpenWhispr's
+            // `{{agentName}}`); "Yap" is the unnamed default, matching the
+            // tab's copy.
+            let name = match c.agent_name.trim() {
+                "" => "Yap",
+                n => n,
+            };
+            let body = s.prompt.replace("{{agentName}}", name);
+            CommandsModel { base_url, api_key, model, provider, body, disable_thinking: s.disable_thinking }
+        }
+        _ => {
+            let (base_url, api_key, model, provider) = crate::local_llm::effective_endpoint(c);
+            CommandsModel { base_url, api_key, model, provider, body: String::new(), disable_thinking: c.pp_disable_thinking }
+        }
+    }
+}
+
 /// How long a cancelled dictation's audio is kept for **Undo** ("Dictation
 /// cancelled · Undo" on the bar).
 pub(crate) const UNDO_MS: u64 = 10_000;
@@ -1740,45 +1784,12 @@ impl Shared {
             return;
         }
 
-        let (base_url, api_key, model, provider, body, disable_thinking, restore_clipboard) = self
+        let (m, restore_clipboard) = self
             .config
             .read()
-            .map(|c| {
-                // Commands scope (OpenWhispr "Language Models" bubble, step 3):
-                // when it's enabled and configured, run edit/rewrite on THAT scope's own
-                // provider/model/prompt. Otherwise fall back to the global AI-cleanup
-                // endpoint (the original edit-mode behaviour). "ondevice" routes
-                // through the sidecar in both paths via effective_endpoint_for.
-                let (base_url, api_key, model, provider, body, disable_thinking) =
-                    match c.llm_scopes.get("voiceAgent") {
-                        Some(s) if s.enabled && !s.provider.is_empty() => {
-                            // Standard-provider keys are global (shared with the
-                            // Cleanup tab); an empty scope key falls back to them.
-                            let key = c.provider_api_key(&s.provider, &s.api_key);
-                            let (b, k, m, p) = crate::local_llm::effective_endpoint_for(
-                                &s.provider,
-                                &s.base_url,
-                                &key,
-                                &s.model,
-                            );
-                            // The agent prompt is templated on the wake word
-                            // (OpenWhispr's `{{agentName}}`); "Yap" is the
-                            // unnamed default, matching the tab's copy.
-                            let name = match c.agent_name.trim() {
-                                "" => "Yap",
-                                n => n,
-                            };
-                            let body = s.prompt.replace("{{agentName}}", name);
-                            (b, k, m, p, body, s.disable_thinking)
-                        }
-                        _ => {
-                            let (b, k, m, p) = crate::local_llm::effective_endpoint(&c);
-                            (b, k, m, p, String::new(), c.pp_disable_thinking)
-                        }
-                    };
-                (base_url, api_key, model, provider, body, disable_thinking, c.restore_clipboard)
-            })
+            .map(|c| (commands_model(&c), c.restore_clipboard))
             .unwrap_or_default();
+        let CommandsModel { base_url, api_key, model, provider, body, disable_thinking } = m;
 
         if base_url.is_empty() {
             // The on-device model, down for a moment while Yap restarts it.
@@ -2887,6 +2898,8 @@ pub(crate) enum Job {
     Upload,
     /// Home's Run again.
     Rerun,
+    /// A saved transform (`transforms.rs`).
+    Transform,
 }
 
 /// Who holds the `processing` flag: the pipeline, or a unit test's stand-in.
@@ -2981,6 +2994,10 @@ impl Holder for Shared {
             }
             Job::Rerun => {
                 let _ = self.app.emit("yap-error", "Run again failed — Yap hit an error. Try again");
+            }
+            Job::Transform => {
+                let _ = self.app.emit(DICTATION_ERROR, "The transform failed — Yap hit an error. Try again");
+                let _ = self.app.emit("yap-state", "error");
             }
         }
     }
@@ -3306,6 +3323,38 @@ impl Pipeline {
     /// Home's Run again (`recent_audio::history_rerun`).
     pub(crate) fn rerunner(&self) -> Rerun {
         Rerun(Arc::clone(&self.shared))
+    }
+
+    /// Saved transforms (`transforms.rs`).
+    pub(crate) fn transformer(&self) -> Transformer {
+        Transformer(Arc::clone(&self.shared))
+    }
+}
+
+/// Runs a saved transform (`transforms.rs`) never beside a dictation: it
+/// holds the `processing` guard meanwhile, so no dictation starts (or
+/// pastes) while a transform reads, asks and pastes, and the updater waits.
+pub(crate) struct Transformer(Arc<Shared>);
+
+impl Transformer {
+    /// The live settings.
+    pub(crate) fn config(&self) -> YapConfig {
+        self.0.config.read().map(|c| c.clone()).unwrap_or_default()
+    }
+
+    /// `work` with the `processing` guard held (let go however it ends; a
+    /// panic in it says so on the bar). `Err`: a dictation records or
+    /// transcribes.
+    pub(crate) fn hold<T>(&self, work: impl FnOnce(&YapConfig) -> T) -> Result<T, &'static str> {
+        let shared = &self.0;
+        let busy = (!shared.recording.load(Ordering::SeqCst)).then(|| Busy::take(shared, Job::Transform)).flatten();
+        let Some(busy) = busy else {
+            return Err("Yap is busy with a dictation — try again in a moment");
+        };
+        let cfg = self.config();
+        let out = work(&cfg);
+        busy.done();
+        Ok(out)
     }
 }
 

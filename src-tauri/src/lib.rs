@@ -83,6 +83,7 @@ mod stt;
 mod stream;
 mod stt_speed;
 mod text_injector;
+mod transforms;
 mod tray;
 mod tts;
 mod updates;
@@ -497,6 +498,7 @@ pub fn run() {
             as_said::as_said_paste_entry,
             commands::configure_as_said_hotkey,
             commands::configure_snip_hotkey,
+            transforms::configure_transform_hotkey,
             snip::snip_start,
             snip::chat_images_usage,
             snip::chat_images_prepare,
@@ -766,6 +768,12 @@ pub fn run() {
             #[cfg(debug_assertions)]
             commands::e2e_rewrite,
             #[cfg(debug_assertions)]
+            transforms::e2e_transform,
+            #[cfg(debug_assertions)]
+            transforms::e2e_transform_slots,
+            #[cfg(debug_assertions)]
+            realtest::commands::realtest_transform,
+            #[cfg(debug_assertions)]
             commands::e2e_target_window,
             #[cfg(debug_assertions)]
             realtest::commands::realtest_dictate_wav,
@@ -833,6 +841,8 @@ pub fn run() {
             input_hook::configure_as_said_from(&cfg);
             // Snip to Chat (snip.rs; Win+Alt+S by default, never a clash).
             input_hook::configure_snip_from(&cfg);
+            // Saved transforms' shortcuts (transforms.rs; none by default).
+            input_hook::configure_transforms_from(&cfg);
 
             // Clear ort's 0-byte DirectML.dll stub so ONNX uses the real system
             // DirectML, then fix the transcribe-rs accelerator policy before any
@@ -1012,6 +1022,15 @@ pub fn run() {
             let snip_handle = handle.clone();
             handle.listen("snip-key-pressed", move |_| snip::start(&snip_handle, snip::Origin::Shortcut));
             snip::init(&handle);
+
+            // A saved transform's shortcut (transforms.rs): its slot, run on
+            // its own thread.
+            let transform_handle = handle.clone();
+            handle.listen("transform-key-pressed", move |event| {
+                if let Ok(slot) = event.payload().trim().parse::<usize>() {
+                    transforms::on_key(&transform_handle, slot);
+                }
+            });
 
             // Drive the overlay (the Yap bar) from the pipeline's `yap-state`
             // event (decoupled from the pipeline itself). It always shows
