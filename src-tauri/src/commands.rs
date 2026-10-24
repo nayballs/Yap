@@ -682,7 +682,7 @@ pub(crate) async fn run_enhance(
     let cfg = config::load();
     let ep = crate::meetings::meeting_summary::resolve_endpoint(&cfg)?;
     // The on-device model is busy from the digests to the final call.
-    let _sidecar = crate::local_llm::hold(&ep.base_url);
+    let _sidecar = crate::ai::local_llm::hold(&ep.base_url);
 
     // The fragment: the picked Action's prompt (OpenWhispr's Actions engine);
     // without one (older callers), the Note Formatting scope's editable
@@ -716,14 +716,14 @@ pub(crate) async fn run_enhance(
     };
 
     let base = if action_plan {
-        crate::llm::ACTION_PLAN_BASE_PROMPT
+        crate::ai::llm::ACTION_PLAN_BASE_PROMPT
     } else if is_meeting {
-        crate::llm::MEETING_NOTE_BASE_PROMPT
+        crate::ai::llm::MEETING_NOTE_BASE_PROMPT
     } else {
-        crate::llm::NOTE_BASE_PROMPT
+        crate::ai::llm::NOTE_BASE_PROMPT
     };
     step(2);
-    let mut enhanced = crate::privacy::net::within(crate::privacy::net::Feature::Notes, crate::llm::enhance_note(
+    let mut enhanced = crate::privacy::net::within(crate::privacy::net::Feature::Notes, crate::ai::llm::enhance_note(
         &content,
         base,
         &fragment,
@@ -797,7 +797,7 @@ pub fn meeting_state() -> serde_json::Value {
 /// Studio's View tab (same pattern as `get_base_prompt`/`get_edit_base_prompt`).
 #[tauri::command]
 pub fn get_note_base_prompt() -> String {
-    crate::llm::NOTE_BASE_PROMPT.to_string()
+    crate::ai::llm::NOTE_BASE_PROMPT.to_string()
 }
 
 /// Resolve the **Chat** scope's endpoint + persona (falling back to the global
@@ -818,11 +818,11 @@ pub(crate) fn resolve_chat_endpoint(
         Some(s) if s.enabled && !s.provider.is_empty() => {
             let key = cfg.provider_api_key(&s.provider, &s.api_key);
             let (b, k, m, p) =
-                crate::local_llm::effective_endpoint_for(&s.provider, &s.base_url, &key, &s.model);
+                crate::ai::local_llm::effective_endpoint_for(&s.provider, &s.base_url, &key, &s.model);
             (b, k, m, p, persona, s.disable_thinking)
         }
         _ => {
-            let (b, k, m, p) = crate::local_llm::effective_endpoint(cfg);
+            let (b, k, m, p) = crate::ai::local_llm::effective_endpoint(cfg);
             (b, k, m, p, persona, cfg.pp_disable_thinking)
         }
     };
@@ -853,10 +853,10 @@ pub async fn note_ask(
 ) -> Result<String, String> {
     let note = crate::notes::get(id).ok_or("Note not found")?;
     let cfg = config::load();
-    crate::ai_model::wake_on_device(&cfg).await?;
+    crate::ai::ai_model::wake_on_device(&cfg).await?;
     let (base_url, api_key, model, provider, persona, disable_thinking) =
         resolve_chat_endpoint(&cfg)?;
-    let _sidecar = crate::local_llm::hold(&base_url);
+    let _sidecar = crate::ai::local_llm::hold(&base_url);
 
     // Inject the note as grounding context (content + transcript + attendees).
     // A long meeting's transcript comes as its digests + the latest stretch,
@@ -878,7 +878,7 @@ pub async fn note_ask(
     if !note.transcript.is_empty() {
         const ASK_TRANSCRIPT_TOKENS: usize = 3_000;
         // A bigger on-device context reads more of it raw (×1–4).
-        let budget = ASK_TRANSCRIPT_TOKENS * crate::local_llm::budget_factor_for(&provider, &base_url);
+        let budget = ASK_TRANSCRIPT_TOKENS * crate::ai::local_llm::budget_factor_for(&provider, &base_url);
         context.push('\n');
         context.push_str(&crate::meetings::meeting_summary::ask_context(&note, budget));
     }
@@ -890,7 +890,7 @@ pub async fn note_ask(
     // a hybrid local model re-uses the note's prompt from one question to
     // the next instead of reading it again. A model without tools keeps the
     // clock in the system prompt too, as `chat_turn` does.
-    let profile = crate::about_you::profile(&cfg);
+    let profile = crate::ai::about_you::profile(&cfg);
     let now = chrono::Utc::now();
     let in_message = crate::chat::tools::supports_tools(&provider, &model);
     let mut system = format!(
@@ -901,15 +901,15 @@ pub async fn note_ask(
     let asked = if in_message {
         system.push_str("\n\n");
         system.push_str(crate::chat::chats::CONTEXT_NOTE);
-        let profile_block = crate::about_you::profile_block(&profile);
+        let profile_block = crate::ai::about_you::profile_block(&profile);
         if !profile_block.is_empty() {
             system.push_str("\n\n");
             system.push_str(&profile_block);
         }
-        crate::chat::chats::with_context(&[crate::about_you::clock_line(&profile, now)], &question)
+        crate::chat::chats::with_context(&[crate::ai::about_you::clock_line(&profile, now)], &question)
     } else {
         system.push_str("\n\n");
-        system.push_str(&crate::about_you::prompt_block(&profile, now));
+        system.push_str(&crate::ai::about_you::prompt_block(&profile, now));
         question.clone()
     };
     // Memory's "You" part, as every Chat answer gets it (memory.rs).
@@ -920,7 +920,7 @@ pub async fn note_ask(
     }
 
     let history = history.unwrap_or_default();
-    let answer = crate::llm::note_chat(
+    let answer = crate::ai::llm::note_chat(
         &system,
         &history,
         &asked,
@@ -1167,19 +1167,19 @@ pub(crate) async fn chat_turn(
     if let Some(plan) = crate::apps::plan_for(&text, &cfg, conversation_id).await {
         return app_turn(conversation_id, &text, by_voice, asked, plan, stop).await;
     }
-    crate::ai_model::wake_on_device(&cfg).await?;
+    crate::ai::ai_model::wake_on_device(&cfg).await?;
     let (base_url, api_key, model, provider, persona, disable_thinking) =
         resolve_chat_endpoint(&cfg)?;
     // The on-device model is busy for the whole turn — between its tool
     // steps too, while a web search or a page read runs — so a context
     // restart or a runtime swap never cuts the answer off.
-    let _sidecar = crate::local_llm::hold(&base_url);
+    let _sidecar = crate::ai::local_llm::hold(&base_url);
     // Who answers, as the chip named it, kept with the answer.
-    let answered_by = crate::ai_model::describe(
+    let answered_by = crate::ai::ai_model::describe(
         &provider,
         &model,
         &base_url,
-        &crate::local_llm::active_model_display(&cfg),
+        &crate::ai::local_llm::active_model_display(&cfg),
     )
     .chat_model();
 
@@ -1261,14 +1261,14 @@ pub(crate) async fn chat_turn(
     // About you (about_you.rs): where the person is, their money and units,
     // name and note — last in the system prompt, below; their clock in the
     // question's context (it changes every minute).
-    let profile = crate::about_you::profile(&cfg);
-    let now = crate::eval::now();
-    let about = crate::about_you::prompt_block(&profile, now);
+    let profile = crate::ai::about_you::profile(&cfg);
+    let now = crate::ai::eval::now();
+    let about = crate::ai::about_you::prompt_block(&profile, now);
     let zone = profile.region.time_zone_label.clone();
     let mut system = persona.trim().to_string();
     let mut context: Vec<String> = Vec::new();
     if in_message {
-        context.push(crate::about_you::clock_line(&profile, now));
+        context.push(crate::ai::about_you::clock_line(&profile, now));
     }
     if tools_supported {
         system.push_str("\n\nYou have access to tools. ");
@@ -1284,7 +1284,7 @@ pub(crate) async fn chat_turn(
             system.push_str(&crate::web::time_note(zone.as_deref()));
             // Outside the US: prices from where they are, or one plain line
             // saying there are none.
-            if let Some(local) = crate::about_you::LocalPrices::for_region(&profile.region) {
+            if let Some(local) = crate::ai::about_you::LocalPrices::for_region(&profile.region) {
                 system.push(' ');
                 system.push_str(&crate::web::price_note(&local));
             }
@@ -1318,7 +1318,7 @@ pub(crate) async fn chat_turn(
     // must be a search (left to decide, Qwen3.5-4B answered "the best RPG
     // games coming out in 2026" from memory, a tester's chat, 2026-10-21).
     // Cloud models decide for themselves.
-    let first = if tools_supported && web_on && crate::ai_model::runs_here(&provider, &base_url) && crate::web::needs_web(&text) {
+    let first = if tools_supported && web_on && crate::ai::ai_model::runs_here(&provider, &base_url) && crate::web::needs_web(&text) {
         first_search(&text)
     } else {
         crate::chat::tools::FirstStep::Model
@@ -1370,7 +1370,7 @@ pub(crate) async fn chat_turn(
     if in_message {
         system.push_str("\n\n");
         system.push_str(crate::chat::chats::CONTEXT_NOTE);
-        let profile_block = crate::about_you::profile_block(&profile);
+        let profile_block = crate::ai::about_you::profile_block(&profile);
         if !profile_block.is_empty() {
             system.push_str("\n\n");
             system.push_str(&profile_block);
@@ -1405,7 +1405,7 @@ pub(crate) async fn chat_turn(
     // it), and a model on this PC steps aside for a new dictation.
     let watch = watcher.map(crate::chat::stream::Watch::new);
     let beside = app
-        .filter(|_| crate::ai_model::runs_here(&provider, &base_url))
+        .filter(|_| crate::ai::ai_model::runs_here(&provider, &base_url))
         .map(|a| crate::chat::stream::NewDictations(a.clone()));
     let live = watch.as_ref().map(|w| crate::chat::stream::Live {
         sink: w,
@@ -1524,36 +1524,36 @@ pub(crate) async fn chat_turn(
     let (mut reply, fixed) = crate::chat::chats::checked_answer(&reply, &text, looked, &conv.messages, &sources);
     for f in fixed {
         tracing::info!(fix = f, "Chat: Yap fixed the model's answer");
-        crate::eval::post_fix(f);
+        crate::ai::eval::post_fix(f);
     }
     // A price question that searched: no offer to look for prices where the
     // person is — Yap looked (and, finding only another country's, looked
     // again).
     if looked && crate::web::asks_about_prices(&text) {
-        if let Some(stripped) = crate::about_you::LocalPrices::for_region(&profile.region)
-            .and_then(|local| crate::about_you::strip_price_offer(&reply, &local))
+        if let Some(stripped) = crate::ai::about_you::LocalPrices::for_region(&profile.region)
+            .and_then(|local| crate::ai::about_you::strip_price_offer(&reply, &local))
         {
             tracing::info!("Chat: Yap took out the answer's offer to look for local prices");
-            crate::eval::post_fix("price_offer");
+            crate::ai::eval::post_fix("price_offer");
             reply = stripped;
         }
     }
     // A price the web gave only in another money ("$8"), written in theirs
     // ("£8"): its page's sign back, and a note saying so.
     let mut restored_note = None;
-    if let Some(local) = crate::about_you::LocalPrices::for_region(&profile.region).filter(|_| !pages.is_empty()) {
-        if let Some((fixed, restored)) = crate::about_you::restore_price_signs(&reply, &pages, &local) {
+    if let Some(local) = crate::ai::about_you::LocalPrices::for_region(&profile.region).filter(|_| !pages.is_empty()) {
+        if let Some((fixed, restored)) = crate::ai::about_you::restore_price_signs(&reply, &pages, &local) {
             tracing::info!(prices = restored.len(), "Chat: Yap gave prices back the currency their pages gave them");
-            crate::eval::post_fix("price_sign");
+            crate::ai::eval::post_fix("price_sign");
             reply = fixed;
-            restored_note = Some(crate::about_you::restored_price_note(&restored, &local));
+            restored_note = Some(crate::ai::about_you::restored_price_note(&restored, &local));
         }
     }
     // Prices in $ without saying whose, for someone who pays in £ (About
     // you): Yap says so under the answer (one note at most).
-    if let Some(note) = crate::about_you::foreign_price_note(&reply, &profile.region) {
+    if let Some(note) = crate::ai::about_you::foreign_price_note(&reply, &profile.region) {
         tracing::info!("Chat: Yap noted the answer's prices are in dollars");
-        crate::eval::post_fix("foreign_price_note");
+        crate::ai::eval::post_fix("foreign_price_note");
         reply = format!("{}\n\n{note}", reply.trim_end());
     } else if let Some(note) = restored_note {
         reply = format!("{}\n\n{note}", reply.trim_end());
@@ -1634,13 +1634,13 @@ async fn small_model_answer(
                 let (found_sources, block) = crate::web::grounded_sources(&found.hits, SMALL_WEB_TOKENS);
                 // Temperatures in the person's scale first, with a line
                 // saying so (about_you.rs).
-                let units = crate::about_you::temperature_units(settings.units, text);
-                let temperature_line = crate::about_you::temperature_note(units, &block);
-                let block = crate::about_you::convert_temperatures(units, &block).unwrap_or(block);
+                let units = crate::ai::about_you::temperature_units(settings.units, text);
+                let temperature_line = crate::ai::about_you::temperature_note(units, &block);
+                let block = crate::ai::about_you::convert_temperatures(units, &block).unwrap_or(block);
                 system = crate::web::grounded_prompt(persona, &block, &crate::web::today(), by_voice);
                 pages.push(block);
                 system.push(' ');
-                let zone = crate::about_you::profile(cfg).region.time_zone_label;
+                let zone = crate::ai::about_you::profile(cfg).region.time_zone_label;
                 system.push_str(&crate::web::time_note(zone.as_deref()));
                 if let Some(line) = price_line {
                     system.push(' ');
@@ -1682,7 +1682,7 @@ async fn small_model_answer(
     }
     let answered = crate::privacy::net::within(
         crate::privacy::net::Feature::Chat,
-        crate::llm::note_chat(&system, &history, text, base_url, api_key, model, provider, disable_thinking, live),
+        crate::ai::llm::note_chat(&system, &history, text, base_url, api_key, model, provider, disable_thinking, live),
     );
     let (reply, stopped) = match crate::chat::stream::unless_stopped(answered, stop).await {
         Ok(reply) => (reply?, false),
@@ -1719,7 +1719,7 @@ struct SmallAnswer {
 async fn local_prices_again(
     settings: &crate::web::Settings,
     endpoints: &crate::web::Endpoints,
-    local: &crate::about_you::LocalPrices,
+    local: &crate::ai::about_you::LocalPrices,
     query: &str,
     question: &str,
     found: &mut crate::web::Found,
@@ -1735,7 +1735,7 @@ async fn local_prices_again(
         "The sources have no {p} prices (in {s}): start your answer with one short line saying you couldn't find {p} prices, then give the sources' prices as they are, saying which country they're for. Don't offer to look further."
     );
     let retry = crate::web::local_retry_query(query, local);
-    crate::eval::post_fix("yap_search");
+    crate::ai::eval::post_fix("yap_search");
     let more = match crate::web::search(settings, endpoints, &retry, question).await {
         Ok(more) => more,
         Err(e) => {
@@ -1762,7 +1762,7 @@ async fn local_prices_again(
 /// else the system prompt's line. A model evaluation may pick another way
 /// (`YAP_EVAL_WEB_HISTORY` = replay | note | none) to compare them.
 fn web_history_mode(tool_model_with_web: bool) -> (bool, bool) {
-    if crate::eval::active() {
+    if crate::ai::eval::active() {
         match std::env::var("YAP_EVAL_WEB_HISTORY").as_deref() {
             Ok("note") => return (false, true),
             Ok("none") => return (false, false),
@@ -1780,7 +1780,7 @@ fn web_history_mode(tool_model_with_web: bool) -> (bool, bool) {
 /// when the server won't make it). A model evaluation may compare
 /// (`YAP_EVAL_FIRST` = must | yap | model).
 fn first_search(question: &str) -> crate::chat::tools::FirstStep {
-    if crate::eval::active() {
+    if crate::ai::eval::active() {
         match std::env::var("YAP_EVAL_FIRST").as_deref() {
             Ok("yap") => return crate::chat::tools::FirstStep::YapSearches(crate::web::search_query(question)),
             Ok("model") => return crate::chat::tools::FirstStep::Model,
@@ -2015,7 +2015,7 @@ fn apply_config(app: &AppHandle, state: State<'_, AppState>, prev: &YapConfig, c
     // suggested again (learn.rs; its own store, not config.json).
     crate::dictionary::learn::on_dictionary_saved(&prev.dictionary, &cfg.dictionary);
     // A provider key set or changed: check that provider's model list now.
-    crate::model_catalog::on_config_saved(&app, prev, &cfg);
+    crate::ai::model_catalog::on_config_saved(&app, prev, &cfg);
     if cfg.debug_logging != prev_debug {
         crate::set_debug_logging(cfg.debug_logging);
     }
@@ -2056,7 +2056,7 @@ fn apply_config(app: &AppHandle, state: State<'_, AppState>, prev: &YapConfig, c
     // per-profile override) — start the sidecar now rather than on next launch.
     let cfg_for_sidecar = cfg.clone();
     tauri::async_runtime::spawn(async move {
-        crate::local_llm::autostart_if_configured(&cfg_for_sidecar).await;
+        crate::ai::local_llm::autostart_if_configured(&cfg_for_sidecar).await;
     });
     // The Integrations toggle may have flipped — start/stop the local API
     // bridge to match (idempotent when unchanged).
@@ -2255,7 +2255,7 @@ pub fn set_autostart(app: AppHandle, enabled: bool) -> Result<(), String> {
 /// editable body) in its View tab.
 #[tauri::command]
 pub fn get_base_prompt() -> String {
-    crate::llm::BASE_PROMPT.to_string()
+    crate::ai::llm::BASE_PROMPT.to_string()
 }
 
 /// The immutable **edit/rewrite (Commands)** guardrail prompt, exposed so the
@@ -2263,7 +2263,7 @@ pub fn get_base_prompt() -> String {
 /// + the editable agent body) in its View tab. See `llm::EDIT_BASE_PROMPT`.
 #[tauri::command]
 pub fn get_edit_base_prompt() -> String {
-    crate::llm::EDIT_BASE_PROMPT.to_string()
+    crate::ai::llm::EDIT_BASE_PROMPT.to_string()
 }
 
 /// Test the AI cleanup settings: run a sample sentence through the saved
@@ -2274,9 +2274,9 @@ pub fn get_edit_base_prompt() -> String {
 pub async fn test_post_process(text: String) -> Result<String, String> {
     let cfg = config::load();
     // Route through the on-device sidecar when it's the selected provider + up.
-    let (base_url, api_key, model, provider) = crate::local_llm::effective_endpoint(&cfg);
-    let spelling = crate::about_you::cleanup_spelling(&cfg);
-    let cleanup = crate::llm::cleanup(&text, &base_url, &api_key, &model, &provider, &cfg.pp_prompt, spelling.as_deref(), &cfg.dictionary, cfg.pp_disable_thinking);
+    let (base_url, api_key, model, provider) = crate::ai::local_llm::effective_endpoint(&cfg);
+    let spelling = crate::ai::about_you::cleanup_spelling(&cfg);
+    let cleanup = crate::ai::llm::cleanup(&text, &base_url, &api_key, &model, &provider, &cfg.pp_prompt, spelling.as_deref(), &cfg.dictionary, cfg.pp_disable_thinking);
     crate::privacy::net::within(crate::privacy::net::Feature::Dictation, cleanup).await
 }
 
@@ -2285,13 +2285,13 @@ pub async fn test_post_process(text: String) -> Result<String, String> {
 #[tauri::command]
 pub fn local_llm_status() -> serde_json::Value {
     let cfg = config::load();
-    let on_disk = crate::local_llm::list_models();
+    let on_disk = crate::ai::local_llm::list_models();
     // The graphics card picks the model recommended for this PC (gpu.rs).
-    let gpu = crate::gpu::this_pc();
-    let capable = crate::gpu::can_run_big_model(gpu.as_ref());
-    let recommended = crate::local_llm::recommended_id(capable);
+    let gpu = crate::ai::gpu::this_pc();
+    let capable = crate::ai::gpu::can_run_big_model(gpu.as_ref());
+    let recommended = crate::ai::local_llm::recommended_id(capable);
     // The curated one-click download set, with per-model installed state.
-    let curated: Vec<serde_json::Value> = crate::local_llm::CURATED_MODELS
+    let curated: Vec<serde_json::Value> = crate::ai::local_llm::CURATED_MODELS
         .iter()
         .map(|m| {
             serde_json::json!({
@@ -2307,23 +2307,23 @@ pub fn local_llm_status() -> serde_json::Value {
                 "isDefault": m.default,
                 "needsGpu": m.needs_gpu,
                 "tools": crate::chat::tools::supports_tools(
-                    crate::local_llm::PROVIDER_ONDEVICE,
-                    &crate::local_llm::model_id(std::path::Path::new(m.filename)),
+                    crate::ai::local_llm::PROVIDER_ONDEVICE,
+                    &crate::ai::local_llm::model_id(std::path::Path::new(m.filename)),
                 ),
                 "family": m.family,
                 "installed": on_disk.iter().any(|f| f == m.filename),
                 // What it was trained for ("up to 256K"): the file's own
                 // header once it's here, else the curated figure.
-                "maxContext": crate::local_llm::trained_context(&crate::local_llm::llm_dir().join(m.filename)),
+                "maxContext": crate::ai::local_llm::trained_context(&crate::ai::local_llm::llm_dir().join(m.filename)),
             })
         })
         .collect();
     // Where the running model went, and whether that makes it slow.
-    let running = crate::local_llm::shown_running();
-    let placement = running.then(crate::local_llm::placement).flatten();
-    let serving = crate::local_llm::shown_model_file(&cfg);
-    let serving_mb = std::fs::metadata(crate::local_llm::llm_dir().join(&serving)).map(|m| m.len() / 1_048_576).unwrap_or(0);
-    let active_file = crate::local_llm::active_model_path(&cfg)
+    let running = crate::ai::local_llm::shown_running();
+    let placement = running.then(crate::ai::local_llm::placement).flatten();
+    let serving = crate::ai::local_llm::shown_model_file(&cfg);
+    let serving_mb = std::fs::metadata(crate::ai::local_llm::llm_dir().join(&serving)).map(|m| m.len() / 1_048_576).unwrap_or(0);
+    let active_file = crate::ai::local_llm::active_model_path(&cfg)
         .file_name()
         .map(|s| s.to_string_lossy().into_owned())
         .unwrap_or_default();
@@ -2331,30 +2331,30 @@ pub fn local_llm_status() -> serde_json::Value {
     // the Chat picker's "On this PC".
     let own: Vec<serde_json::Value> = on_disk
         .iter()
-        .filter(|f| !crate::local_llm::CURATED_MODELS.iter().any(|m| m.filename == f.as_str()))
+        .filter(|f| !crate::ai::local_llm::CURATED_MODELS.iter().any(|m| m.filename == f.as_str()))
         .map(|f| {
-            let id = crate::local_llm::model_id(std::path::Path::new(f));
-            let mb = std::fs::metadata(crate::local_llm::llm_dir().join(f)).map(|m| m.len() / 1_048_576).unwrap_or(0);
+            let id = crate::ai::local_llm::model_id(std::path::Path::new(f));
+            let mb = std::fs::metadata(crate::ai::local_llm::llm_dir().join(f)).map(|m| m.len() / 1_048_576).unwrap_or(0);
             serde_json::json!({
                 "file": f,
                 "name": id,
                 "sizeMb": mb,
-                "tools": crate::chat::tools::supports_tools(crate::local_llm::PROVIDER_ONDEVICE, &id),
-                "maxContext": crate::local_llm::trained_context(&crate::local_llm::llm_dir().join(f)),
+                "tools": crate::chat::tools::supports_tools(crate::ai::local_llm::PROVIDER_ONDEVICE, &id),
+                "maxContext": crate::ai::local_llm::trained_context(&crate::ai::local_llm::llm_dir().join(f)),
             })
         })
         .collect();
     // Another feature than Chat on the on-device model (cleanup, a profile,
     // a scope): it shares the one sidecar, so switching it switches theirs.
-    let shared_on_device = (cfg.post_process_enabled && cfg.pp_provider == crate::local_llm::PROVIDER_ONDEVICE)
-        || cfg.cleanup_profiles.iter().any(|p| p.provider == crate::local_llm::PROVIDER_ONDEVICE)
+    let shared_on_device = (cfg.post_process_enabled && cfg.pp_provider == crate::ai::local_llm::PROVIDER_ONDEVICE)
+        || cfg.cleanup_profiles.iter().any(|p| p.provider == crate::ai::local_llm::PROVIDER_ONDEVICE)
         || cfg
             .llm_scopes
             .iter()
-            .any(|(k, s)| k != "chat" && s.enabled && s.provider == crate::local_llm::PROVIDER_ONDEVICE);
-    let upgrade = crate::local_llm::upgrade_offer(
+            .any(|(k, s)| k != "chat" && s.enabled && s.provider == crate::ai::local_llm::PROVIDER_ONDEVICE);
+    let upgrade = crate::ai::local_llm::upgrade_offer(
         capable,
-        crate::local_llm::in_use(&cfg),
+        crate::ai::local_llm::in_use(&cfg),
         &active_file,
         cfg.local_llm_upgrade_dismissed,
     )
@@ -2367,18 +2367,18 @@ pub fn local_llm_status() -> serde_json::Value {
         })
     });
     serde_json::json!({
-        "installed": crate::local_llm::is_installed(&cfg),
+        "installed": crate::ai::local_llm::is_installed(&cfg),
         "running": running,
-        "modelFile": crate::local_llm::MODEL_FILENAME,
-        "model": crate::local_llm::active_model_display(&cfg),
-        "engine": crate::local_llm::ENGINE_DISPLAY,
+        "modelFile": crate::ai::local_llm::MODEL_FILENAME,
+        "model": crate::ai::local_llm::active_model_display(&cfg),
+        "engine": crate::ai::local_llm::ENGINE_DISPLAY,
         // The llamafile on disk, the one Yap pins, the background upgrade
         // ("downloading" | "waiting" | ""), and the running server's MTP.
         "runtime": {
-            "version": crate::local_llm::runtime_version().map(|v| v.to_string()),
-            "pinned": crate::local_llm::RUNTIME_VERSION,
-            "upgrade": crate::local_llm::upgrade_phase(),
-            "mtp": crate::local_llm::serving_plan().map(|p| p.server().mtp),
+            "version": crate::ai::local_llm::runtime_version().map(|v| v.to_string()),
+            "pinned": crate::ai::local_llm::RUNTIME_VERSION,
+            "upgrade": crate::ai::local_llm::upgrade_phase(),
+            "mtp": crate::ai::local_llm::serving_plan().map(|p| p.server().mtp),
         },
         "activeModel": cfg.pp_local_model,
         "activeFile": active_file,
@@ -2394,11 +2394,11 @@ pub fn local_llm_status() -> serde_json::Value {
             "gpuLayers": p.gpu_layers,
             "layers": p.layers,
         })),
-        "slowOnThisPc": running && crate::local_llm::slow_on_this_pc(&serving, serving_mb, placement),
+        "slowOnThisPc": running && crate::ai::local_llm::slow_on_this_pc(&serving, serving_mb, placement),
         "upgrade": upgrade,
         // The active model's context: the setting, its maximum, the
         // choices with what each takes (local_llm::context_view).
-        "context": crate::local_llm::context_view(&cfg),
+        "context": crate::ai::local_llm::context_view(&cfg),
     })
 }
 
@@ -2406,7 +2406,7 @@ pub fn local_llm_status() -> serde_json::Value {
 /// user can drop in their own GGUF models.
 #[tauri::command]
 pub fn open_llm_folder() -> Result<(), String> {
-    let dir = crate::local_llm::llm_dir();
+    let dir = crate::ai::local_llm::llm_dir();
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     #[cfg(windows)]
     let opener = "explorer";
@@ -2425,13 +2425,13 @@ pub fn open_llm_folder() -> Result<(), String> {
 /// Resolves once the server's /health endpoint is ready.
 #[tauri::command]
 pub async fn local_llm_start() -> Result<(), String> {
-    crate::local_llm::start().await.map(|_| ())
+    crate::ai::local_llm::start().await.map(|_| ())
 }
 
 /// Stop the on-device cleanup sidecar.
 #[tauri::command]
 pub fn local_llm_stop() {
-    crate::local_llm::stop();
+    crate::ai::local_llm::stop();
 }
 
 /// Download the on-device cleanup runtime + a model (each SHA-verified) on
@@ -2442,12 +2442,12 @@ pub fn local_llm_stop() {
 #[tauri::command]
 pub async fn local_llm_install(app: AppHandle, model: Option<String>) -> Result<String, String> {
     match model {
-        Some(id) => crate::local_llm::install_curated(&id, Some(&app))
+        Some(id) => crate::ai::local_llm::install_curated(&id, Some(&app))
             .await
             .map(|m| m.filename.to_string()),
-        None => crate::local_llm::install(Some(&app))
+        None => crate::ai::local_llm::install(Some(&app))
             .await
-            .map(|_| crate::local_llm::MODEL_FILENAME.to_string()),
+            .map(|_| crate::ai::local_llm::MODEL_FILENAME.to_string()),
     }
 }
 
@@ -2464,12 +2464,12 @@ pub fn local_llm_delete(filename: String) -> Result<(), String> {
     if !name.to_ascii_lowercase().ends_with(".gguf") {
         return Err("not a .gguf model".into());
     }
-    let path = crate::local_llm::llm_dir().join(name);
+    let path = crate::ai::local_llm::llm_dir().join(name);
     if !path.is_file() {
         return Ok(());
     }
-    if crate::local_llm::active_model_path(&config::load()) == path {
-        crate::local_llm::stop();
+    if crate::ai::local_llm::active_model_path(&config::load()) == path {
+        crate::ai::local_llm::stop();
     }
     std::fs::remove_file(&path).map_err(|e| e.to_string())
 }
@@ -2542,7 +2542,7 @@ pub async fn home_snapshot(limit: Option<usize>) -> Result<serde_json::Value, St
 /// midnight UTC.
 #[tauri::command]
 pub fn get_groq_usage() -> serde_json::Value {
-    crate::usage::snapshot()
+    crate::ai::usage::snapshot()
 }
 
 /// Frontend → log-file bridge: webviews call this to land diagnostics in the

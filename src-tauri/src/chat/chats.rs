@@ -675,7 +675,7 @@ pub fn question_messages(context: &[String], question: &str) -> Vec<Value> {
 /// after it, or in a message of its own before it (a model evaluation may
 /// compare, `YAP_EVAL_CONTEXT_AT` = before | after | message).
 pub fn context_at() -> &'static str {
-    if crate::eval::active() {
+    if crate::ai::eval::active() {
         match std::env::var("YAP_EVAL_CONTEXT_AT").as_deref() {
             Ok("after") => return "after",
             Ok("message") => return "message",

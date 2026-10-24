@@ -256,7 +256,7 @@ pub fn line(style: Option<Style>) -> Option<String> {
 /// "wins": "…"}`, "" for none), to compare wordings without a rebuild.
 /// Never outside a run.
 fn eval_wording(key: &str) -> Option<String> {
-    if !crate::eval::active() {
+    if !crate::ai::eval::active() {
         return None;
     }
     let path = std::env::var_os("YAP_EVAL_STYLE_LINES")?;
@@ -826,7 +826,7 @@ pub async fn clean(
     }
     let style_line = line(plan.style);
     let before = before_transcript(style_line.as_deref(), names);
-    let out = crate::llm::cleanup_with_names(
+    let out = crate::ai::llm::cleanup_with_names(
         text,
         base_url,
         api_key,
@@ -896,9 +896,9 @@ pub fn offer(cfg: &YapConfig, fits: bool, dictations: usize) -> bool {
 #[tauri::command]
 pub async fn cleanup_offer_status(app: tauri::AppHandle) -> Value {
     let cfg = crate::config::load();
-    let gpu = crate::gpu::this_pc();
-    let capable = crate::gpu::can_run_big_model(gpu.as_ref());
-    let installed = crate::local_llm::is_installed(&cfg);
+    let gpu = crate::ai::gpu::this_pc();
+    let capable = crate::ai::gpu::can_run_big_model(gpu.as_ref());
+    let installed = crate::ai::local_llm::is_installed(&cfg);
     let dictations = crate::dictation::history::recent_dictation_secs(OFFER_AFTER).len();
     let (_, focused) = crate::notices::notice::window_view(&app);
     let m = crate::notices::notice::moment();

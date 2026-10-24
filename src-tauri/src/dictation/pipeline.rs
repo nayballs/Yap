@@ -602,7 +602,7 @@ pub(crate) fn commands_model(c: &YapConfig) -> CommandsModel {
             // tab); an empty scope key falls back to them.
             let key = c.provider_api_key(&s.provider, &s.api_key);
             let (base_url, api_key, model, provider) =
-                crate::local_llm::effective_endpoint_for(&s.provider, &s.base_url, &key, &s.model);
+                crate::ai::local_llm::effective_endpoint_for(&s.provider, &s.base_url, &key, &s.model);
             // The agent prompt is templated on the wake word (OpenWhispr's
             // `{{agentName}}`); "Yap" is the unnamed default, matching the
             // tab's copy.
@@ -614,7 +614,7 @@ pub(crate) fn commands_model(c: &YapConfig) -> CommandsModel {
             CommandsModel { base_url, api_key, model, provider, body, disable_thinking: s.disable_thinking }
         }
         _ => {
-            let (base_url, api_key, model, provider) = crate::local_llm::effective_endpoint(c);
+            let (base_url, api_key, model, provider) = crate::ai::local_llm::effective_endpoint(c);
             CommandsModel { base_url, api_key, model, provider, body: String::new(), disable_thinking: c.pp_disable_thinking }
         }
     }
@@ -1963,7 +1963,7 @@ impl Shared {
 
         if base_url.is_empty() {
             // The on-device model, down for a moment while Yap restarts it.
-            let restarting = provider == crate::local_llm::PROVIDER_ONDEVICE && crate::local_llm::restart_under_way();
+            let restarting = provider == crate::ai::local_llm::PROVIDER_ONDEVICE && crate::ai::local_llm::restart_under_way();
             tracing::warn!(restarting, "Edit mode needs an AI cleanup endpoint (none configured)");
             report_rewrite(last.is_some(), "", "failed", Some("no AI model".into()));
             let _ = self.app.emit(
@@ -2022,7 +2022,7 @@ impl Shared {
         };
 
         // Recorded as Commands' in the network receipts (net.rs).
-        match crate::privacy::net::within(crate::privacy::net::Feature::Commands, crate::llm::rewrite(
+        match crate::privacy::net::within(crate::privacy::net::Feature::Commands, crate::ai::llm::rewrite(
             &instruction,
             &selection,
             &base_url,
@@ -2275,7 +2275,7 @@ impl Shared {
         };
         let target_app = crate::pasting::text_injector::app_name_for(target_hwnd);
         // …and what kind of app it is, for the style (`cleanup_styles`).
-        let style_target = crate::cleanup_styles::Target::of_window(target_hwnd, target_app.as_deref(), self.read_kind());
+        let style_target = crate::ai::cleanup_styles::Target::of_window(target_hwnd, target_app.as_deref(), self.read_kind());
 
         let (dict, append_space, auto_submit, auto_submit_key, restore_clipboard) = self
             .config
@@ -2320,7 +2320,7 @@ impl Shared {
         let mut delivered = self
             .deliver_text(raw, corrected, voice_enter, said, dict, append_space, auto_submit, auto_submit_key, restore_clipboard)
             .await;
-        delivered.style = style.map(crate::cleanup_styles::Style::describe);
+        delivered.style = style.map(crate::ai::cleanup_styles::Style::describe);
         delivered
     }
 
@@ -2334,9 +2334,9 @@ impl Shared {
     async fn clean_up(
         &self,
         raw: &str,
-        target: &crate::cleanup_styles::Target,
+        target: &crate::ai::cleanup_styles::Target,
         screen: Option<&crate::dictionary::screen_terms::ScreenTerms>,
-    ) -> (String, Option<crate::cleanup_styles::Style>) {
+    ) -> (String, Option<crate::ai::cleanup_styles::Style>) {
         // Snapshot the cleanup-related config under one read lock.
         // `plan` is the routed cleanup (`cleanup_styles::resolve`): the body
         // and style to clean with, or `None` to skip cleanup (selected-apps-
@@ -2349,18 +2349,18 @@ impl Shared {
             .config
             .read()
             .map(|c| {
-                let plan = crate::cleanup_styles::resolve(&c, target);
+                let plan = crate::ai::cleanup_styles::resolve(&c, target);
                 let (pp_base_url, pp_api_key, pp_model, pp_provider) =
                     match plan.as_ref().and_then(|p| p.endpoint.as_ref()) {
                         Some((provider, base_url, api_key, model)) => {
                             // Profile keys fall back to the global
                             // per-provider store, like scopes do.
                             let key = c.provider_api_key(provider, api_key);
-                            crate::local_llm::effective_endpoint_for(
+                            crate::ai::local_llm::effective_endpoint_for(
                                 provider, base_url, &key, model,
                             )
                         }
-                        None => crate::local_llm::effective_endpoint(&c),
+                        None => crate::ai::local_llm::effective_endpoint(&c),
                     };
                 (
                     c.dictionary.clone(),
@@ -2382,14 +2382,14 @@ impl Shared {
             (Some(plan), true) => {
                 // "Write in my region's spelling" (Dictation cleanup): British "colour"
                 // for en-GB, American "color" for en-US.
-                let spelling = self.config.read().ok().and_then(|c| crate::about_you::cleanup_spelling(&c));
+                let spelling = self.config.read().ok().and_then(|c| crate::ai::about_you::cleanup_spelling(&c));
                 // The names on screen the transcript seems to hold (after
                 // the style's line, just before the transcript).
                 let names = crate::dictionary::screen_terms::cleanup_line(screen, raw, &dict);
                 if let Some(s) = plan.style {
                     tracing::debug!(style = %s.describe(), "AI cleanup's style");
                 }
-                match crate::privacy::net::within(crate::privacy::net::Feature::Dictation, crate::cleanup_styles::clean(
+                match crate::privacy::net::within(crate::privacy::net::Feature::Dictation, crate::ai::cleanup_styles::clean(
                     raw,
                     &pp_base_url,
                     &pp_api_key,
@@ -2987,7 +2987,7 @@ impl Shared {
         if raw.is_empty() {
             return Err("Nothing was heard in it".into());
         }
-        let (cleaned, _) = self.clean_up(&raw, &crate::cleanup_styles::Target::of_app(app_name), None).await;
+        let (cleaned, _) = self.clean_up(&raw, &crate::ai::cleanup_styles::Target::of_app(app_name), None).await;
         let mut c = cfg;
         c.model_size = model_id.clone();
         let (text, _) = finish_dictation(cleaned.trim(), &raw, &c);

@@ -162,7 +162,7 @@ async fn clean(phase: &'static str, text: &str, ep: &Endpoint<'_>, setup: Setup)
     let cfg = crate::config::YapConfig::default();
     // "Write in my region's spelling" (on by default) for the run's locale
     // (`--locale`; none = no spelling line, as before 2026-10-21).
-    let spelling = crate::about_you::cleanup_spelling(&cfg);
+    let spelling = crate::ai::about_you::cleanup_spelling(&cfg);
     pin(setup.cleanup);
     record::set_phase_rewrite(match setup.layout {
         Some("combined") => Some(combined_layout as fn(&mut Value)),
@@ -171,7 +171,7 @@ async fn clean(phase: &'static str, text: &str, ep: &Endpoint<'_>, setup: Setup)
     });
     record::begin_turn();
     let t0 = Instant::now();
-    let out = crate::llm::cleanup(text, ep.base_url, ep.key, ep.model, ep.provider, &cfg.pp_prompt, spelling.as_deref(), &[], false).await;
+    let out = crate::ai::llm::cleanup(text, ep.base_url, ep.key, ep.model, ep.provider, &cfg.pp_prompt, spelling.as_deref(), &[], false).await;
     let ms = t0.elapsed().as_millis() as u64;
     record::set_phase_rewrite(None);
     let st = record::end_turn();
@@ -210,7 +210,7 @@ async fn chat_between(question: &str, ep: &Endpoint<'_>, setup: Setup) -> bool {
     let messages = json!([{ "role": "system", "content": system }, { "role": "user", "content": question }]);
     pin(setup.chat);
     record::begin_turn();
-    let ok = crate::llm::post_chat_message(ep.base_url, ep.key, ep.model, ep.provider, 0.5, messages, Some(&tools), None).await.is_ok();
+    let ok = crate::ai::llm::post_chat_message(ep.base_url, ep.key, ep.model, ep.provider, 0.5, messages, Some(&tools), None).await.is_ok();
     let _ = record::end_turn();
     pin(None);
     ok
@@ -295,7 +295,7 @@ pub async fn run(bench: &Bench, ep: &Endpoint<'_>, rounds: u32, setup: Setup) ->
         }
     }
     let spelling = json!({
-        "line": crate::about_you::cleanup_spelling(&crate::config::YapConfig::default()),
+        "line": crate::ai::about_you::cleanup_spelling(&crate::config::YapConfig::default()),
         "british": british,
         "american": american,
         "words": words,
@@ -484,7 +484,7 @@ mod tests {
         assert_eq!(m[1]["content"], "Transcript:\n\"\"\"\num hi\n\"\"\"");
         assert_eq!(m[3]["content"], "Transcript:\n\"\"\"\nso yeah\n\"\"\"");
         // The real cleanup's messages, combined: the old single message.
-        let real = crate::llm::cleanup_messages("so yeah", "", None, &[], true);
+        let real = crate::ai::llm::cleanup_messages("so yeah", "", None, &[], true);
         let mut b = serde_json::json!({ "messages": real.clone() });
         super::combined_layout(&mut b);
         let m = b["messages"].as_array().unwrap();

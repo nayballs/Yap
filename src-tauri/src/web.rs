@@ -149,16 +149,16 @@ pub struct Settings {
     /// Prices where the person is (outside the US): a price question's
     /// search names the country ([`local_query`]), and results with only
     /// another country's prices lead to one more search ([`Turn`]).
-    pub local: Option<crate::about_you::LocalPrices>,
+    pub local: Option<crate::ai::about_you::LocalPrices>,
     /// How the person measures: results with temperatures in the other
     /// scale get a line to convert them (`about_you::temperature_note`).
-    pub units: Option<crate::about_you::Units>,
+    pub units: Option<crate::ai::about_you::Units>,
 }
 
 impl Settings {
     /// Yap's own search only (Exa / Tavily / the keyless lookup), aimed at
     /// the person's region (About you).
-    fn in_region(cfg: &crate::config::YapConfig, region: &crate::about_you::Region) -> Settings {
+    fn in_region(cfg: &crate::config::YapConfig, region: &crate::ai::about_you::Region) -> Settings {
         let service = Service::parse(&cfg.web_search_service);
         let key = cfg.web_search_keys.get(service.id()).map(|k| k.trim().to_string()).unwrap_or_default();
         // Wikipedia's edition: the speech language, else the region's
@@ -170,7 +170,7 @@ impl Settings {
             lang: wiki_language(&cfg.selected_language, system.as_deref()),
             native: None,
             country: region.country.clone(),
-            local: crate::about_you::LocalPrices::for_region(region),
+            local: crate::ai::about_you::LocalPrices::for_region(region),
             units: region.units,
         }
     }
@@ -180,7 +180,7 @@ impl Settings {
     /// search when "The AI's own search" is chosen and Yap has one for it,
     /// else Yap's own.
     pub fn for_chat(cfg: &crate::config::YapConfig, provider: &str, model: &str, base_url: &str, api_key: &str) -> Settings {
-        let region = crate::about_you::profile(cfg).region;
+        let region = crate::ai::about_you::profile(cfg).region;
         let mut s = Settings::in_region(cfg, &region);
         if cfg.web_search_native {
             s.native = native::NativeSearch::for_chat(provider, model, base_url, api_key)
@@ -250,7 +250,7 @@ impl Endpoints {
         };
         // A model evaluation's live web scenario (eval.rs) runs in test mode
         // but asks the real services and wikis.
-        if !crate::e2e::active() || crate::eval::web_live() {
+        if !crate::e2e::active() || crate::ai::eval::web_live() {
             return real;
         }
         #[cfg(debug_assertions)]
@@ -408,7 +408,7 @@ pub fn exa_body(query: &str, country: Option<&str>) -> Value {
         "numResults": MAX_RESULTS,
         "contents": { "highlights": true },
     });
-    if let Some(c) = country.and_then(crate::about_you::country) {
+    if let Some(c) = country.and_then(crate::ai::about_you::country) {
         body["userLocation"] = json!(c.code);
     }
     body
@@ -440,7 +440,7 @@ pub fn parse_exa(v: &Value) -> Vec<Hit> {
 /// general topic only — the default) when it has one for the person's. Pure.
 pub fn tavily_body(query: &str, country: Option<&str>) -> Value {
     let mut body = json!({ "query": query, "max_results": MAX_RESULTS });
-    if let Some(name) = country.and_then(crate::about_you::tavily_country) {
+    if let Some(name) = country.and_then(crate::ai::about_you::tavily_country) {
         body["country"] = json!(name);
     }
     body
@@ -1525,8 +1525,8 @@ impl Turn {
 
     /// The scale this turn's temperatures go in: the person's, unless the
     /// question asks for the other (`about_you::temperature_units`).
-    fn temperature_units(&self) -> Option<crate::about_you::Units> {
-        crate::about_you::temperature_units(self.settings.units, &self.question)
+    fn temperature_units(&self) -> Option<crate::ai::about_you::Units> {
+        crate::ai::about_you::temperature_units(self.settings.units, &self.question)
     }
 
     /// Yap runs the search for local prices itself (a model on this PC),
@@ -1656,8 +1656,8 @@ impl Turn {
                 let units = self.temperature_units();
                 let original: Vec<&str> =
                     found.hits.iter().flat_map(|h| [h.title.as_str(), h.text.as_str()]).chain(found.summary.as_deref()).collect();
-                let temperatures = crate::about_you::temperature_note(units, &original.join("\n"));
-                let theirs = |s: &str| crate::about_you::convert_temperatures(units, s).unwrap_or_else(|| s.to_string());
+                let temperatures = crate::ai::about_you::temperature_note(units, &original.join("\n"));
+                let theirs = |s: &str| crate::ai::about_you::convert_temperatures(units, s).unwrap_or_else(|| s.to_string());
                 let mut found = found;
                 for h in &mut found.hits {
                     h.title = theirs(&h.title);
@@ -1743,8 +1743,8 @@ impl Turn {
                 let (part, next) = page_part(&page.text, offset, PAGE_TOKENS);
                 // Temperatures in the person's scale first (about_you.rs).
                 let units = self.temperature_units();
-                let temperatures = crate::about_you::temperature_note(units, &part);
-                let part = crate::about_you::convert_temperatures(units, &part).unwrap_or(part);
+                let temperatures = crate::ai::about_you::temperature_note(units, &part);
+                let part = crate::ai::about_you::convert_temperatures(units, &part).unwrap_or(part);
                 self.texts.push(part.clone());
                 let mut data = json!({
                     "n": n,
@@ -1991,7 +1991,7 @@ pub fn search_query(question: &str) -> String {
 /// ([`asks_about_prices`]), the person is in the US or Yap doesn't know
 /// where, or the query already says where or in what money ("… US price",
 /// "… in GBP"). Every search of the turn, the model's and Yap's. Pure.
-pub fn local_query(query: &str, question: &str, local: Option<&crate::about_you::LocalPrices>) -> Option<String> {
+pub fn local_query(query: &str, question: &str, local: Option<&crate::ai::about_you::LocalPrices>) -> Option<String> {
     let local = local?;
     let q = query.trim();
     if q.is_empty() || !asks_about_prices(question) || local.query_names_a_place(q) {
@@ -2003,7 +2003,7 @@ pub fn local_query(query: &str, question: &str, local: Option<&crate::about_you:
 /// The second search for a price where the person is, when the first found
 /// only other countries' prices: the query with their money's sign ("…
 /// UK £"; the code for a sign that's a word: "… Sweden SEK"). Pure.
-pub fn local_retry_query(query: &str, local: &crate::about_you::LocalPrices) -> String {
+pub fn local_retry_query(query: &str, local: &crate::ai::about_you::LocalPrices) -> String {
     let mentions = |q: &str, w: &str| {
         let (q, w) = (q.to_lowercase(), w.to_lowercase());
         if w.contains(' ') || !w.chars().all(char::is_alphanumeric) {
@@ -2026,7 +2026,7 @@ pub fn local_retry_query(query: &str, local: &crate::about_you::LocalPrices) -> 
 /// someone outside the US: search for their country's price, once more when
 /// the results only have another country's, then say plainly that there
 /// are none — never an offer to look further. Pure.
-pub fn price_note(local: &crate::about_you::LocalPrices) -> String {
+pub fn price_note(local: &crate::ai::about_you::LocalPrices) -> String {
     let p = &local.place;
     format!(
         "For a price, a subscription or something to buy, search for the {p} price (\"{p}\" in the query). If the results only give another country's prices, search once more for the {p} price; if there's still none, start your answer with one short line saying you couldn't find {p} prices, then give the others as they are, saying which country they're for. Never offer to look further: search instead."
@@ -2739,9 +2739,9 @@ mod tests {
         assert_eq!(search_query("Please?"), "Please?");
     }
 
-    fn uk_prices() -> crate::about_you::LocalPrices {
-        let d = crate::about_you::parse_stand_in("en-GB");
-        crate::about_you::LocalPrices::for_region(&crate::about_you::resolve(&d, "")).unwrap()
+    fn uk_prices() -> crate::ai::about_you::LocalPrices {
+        let d = crate::ai::about_you::parse_stand_in("en-GB");
+        crate::ai::about_you::LocalPrices::for_region(&crate::ai::about_you::resolve(&d, "")).unwrap()
     }
 
     #[test]
@@ -2812,7 +2812,7 @@ mod tests {
 
     #[tokio::test]
     async fn results_in_the_other_temperature_scale_say_to_convert() {
-        use crate::about_you::Units;
+        use crate::ai::about_you::Units;
         let f = fake((500, Value::Null), json!({ "results": [{ "title": "Glenbrackie Weather Today | 35°F, Overcast", "url": "https://weather.example/glenbrackie", "highlights": ["Overcast, 35°F, feels like 30°F. Wind 2–4 mph."] }] }));
         let search = json!({ "query": "Glenbrackie weather today" });
         let with = |units| Settings { units, ..settings("exa-key") };

@@ -26,29 +26,29 @@ pub async fn runtime(explicit: Option<&Path>, models_dir: &Path) -> Result<PathB
     if let Some(p) = explicit {
         return if p.is_file() { Ok(p.to_path_buf()) } else { Err(format!("no llamafile at {}", p.display())) };
     }
-    let pinned = crate::local_llm::Version::parse(crate::local_llm::RUNTIME_VERSION);
-    let current = |dir: &Path| crate::local_llm::runtime_version_in(dir).filter(|v| Some(*v) == pinned).is_some();
+    let pinned = crate::ai::local_llm::Version::parse(crate::ai::local_llm::RUNTIME_VERSION);
+    let current = |dir: &Path| crate::ai::local_llm::runtime_version_in(dir).filter(|v| Some(*v) == pinned).is_some();
     if let Some(dir) = installed_llm_dir().filter(|d| current(d)) {
-        return Ok(dir.join(crate::local_llm::RUNTIME_FILENAME));
+        return Ok(dir.join(crate::ai::local_llm::RUNTIME_FILENAME));
     }
-    let dest = models_dir.join(crate::local_llm::RUNTIME_FILENAME);
+    let dest = models_dir.join(crate::ai::local_llm::RUNTIME_FILENAME);
     if !current(models_dir) {
         std::fs::create_dir_all(models_dir).map_err(|e| e.to_string())?;
-        println!("Downloading the llamafile runtime {} into {} …", crate::local_llm::RUNTIME_VERSION, models_dir.display());
+        println!("Downloading the llamafile runtime {} into {} …", crate::ai::local_llm::RUNTIME_VERSION, models_dir.display());
         let _ = std::fs::remove_file(&dest);
-        crate::local_llm::download_verified(
-            crate::local_llm::RUNTIME_URL,
+        crate::ai::local_llm::download_verified(
+            crate::ai::local_llm::RUNTIME_URL,
             &dest,
-            crate::local_llm::RUNTIME_SHA256,
+            crate::ai::local_llm::RUNTIME_SHA256,
             "runtime",
             None,
         )
         .await?;
-        crate::local_llm::write_marker(
+        crate::ai::local_llm::write_marker(
             models_dir,
-            &crate::local_llm::Marker {
-                version: crate::local_llm::RUNTIME_VERSION.to_string(),
-                sha256: crate::local_llm::RUNTIME_SHA256.to_string(),
+            &crate::ai::local_llm::Marker {
+                version: crate::ai::local_llm::RUNTIME_VERSION.to_string(),
+                sha256: crate::ai::local_llm::RUNTIME_SHA256.to_string(),
                 ..Default::default()
             },
         )
@@ -70,18 +70,18 @@ pub async fn model(spec: &str, models_dir: &Path) -> Result<PathBuf, String> {
         if !dest.is_file() {
             std::fs::create_dir_all(models_dir).map_err(|e| e.to_string())?;
             println!("Downloading {file} into {} …", models_dir.display());
-            crate::local_llm::download_verified(&url, &dest, &sha, "model", None).await?;
+            crate::ai::local_llm::download_verified(&url, &dest, &sha, "model", None).await?;
         }
         Ok::<PathBuf, String>(dest)
     };
     if spec.is_empty() || spec == "installed" || spec == "default" {
-        let file = crate::local_llm::MODEL_FILENAME;
+        let file = crate::ai::local_llm::MODEL_FILENAME;
         if let Some(p) = installed(file) {
             return Ok(p);
         }
-        return fetch(crate::local_llm::MODEL_URL.into(), file.into(), crate::local_llm::MODEL_SHA256.into()).await;
+        return fetch(crate::ai::local_llm::MODEL_URL.into(), file.into(), crate::ai::local_llm::MODEL_SHA256.into()).await;
     }
-    if let Some(m) = crate::local_llm::curated_by_id(spec) {
+    if let Some(m) = crate::ai::local_llm::curated_by_id(spec) {
         if let Some(p) = installed(m.filename) {
             return Ok(p);
         }
@@ -101,7 +101,7 @@ pub async fn model(spec: &str, models_dir: &Path) -> Result<PathBuf, String> {
     }
     Err(format!(
         "no GGUF \"{spec}\": give a path, \"installed\", a curated id ({}), or an https URL#sha256=…",
-        crate::local_llm::CURATED_MODELS.iter().map(|m| m.id).collect::<Vec<_>>().join(", ")
+        crate::ai::local_llm::CURATED_MODELS.iter().map(|m| m.id).collect::<Vec<_>>().join(", ")
     ))
 }
 
@@ -113,24 +113,24 @@ pub struct Server {
     pub log: PathBuf,
     pub load_ms: u64,
     pub args: Vec<String>,
-    pub plan: crate::local_llm::Plan,
+    pub plan: crate::ai::local_llm::Plan,
     /// The warm-up Yap's sidecar sends once loaded (`local_llm::warm_up`),
     /// unless the run said `--no-warm-up`.
-    pub warm_up: Option<crate::local_llm::WarmUp>,
+    pub warm_up: Option<crate::ai::local_llm::WarmUp>,
 }
 
 /// How a run's server runs the model (`local_llm::Plan`): the runtime's
 /// version (`--version`, else the one Yap pins), and MTP as Yap's sidecar
 /// would decide on this PC — `mtp` overrides; never on the processor
 /// (`ngl` 0).
-pub async fn plan(runtime: &Path, model: &Path, ngl: u32, ctx: u32, mtp: Option<bool>) -> crate::local_llm::Plan {
-    let version = crate::local_llm::probe_version(runtime)
+pub async fn plan(runtime: &Path, model: &Path, ngl: u32, ctx: u32, mtp: Option<bool>) -> crate::ai::local_llm::Plan {
+    let version = crate::ai::local_llm::probe_version(runtime)
         .await
-        .or_else(|| crate::local_llm::Version::parse(crate::local_llm::RUNTIME_VERSION))
+        .or_else(|| crate::ai::local_llm::Version::parse(crate::ai::local_llm::RUNTIME_VERSION))
         .expect("a version");
-    let yap = crate::local_llm::plan_for(&crate::config::load(), model, ctx, version);
+    let yap = crate::ai::local_llm::plan_for(&crate::config::load(), model, ctx, version);
     let on = ngl > 0 && mtp.unwrap_or(yap.mtp);
-    crate::local_llm::Plan { runtime: version, mtp: on }
+    crate::ai::local_llm::Plan { runtime: version, mtp: on }
 }
 
 /// Start `runtime` serving `model` with `local_llm::server_args` — as Yap's
@@ -145,7 +145,7 @@ pub async fn start(
     model: &Path,
     ngl: u32,
     ctx: u32,
-    plan: crate::local_llm::Plan,
+    plan: crate::ai::local_llm::Plan,
     extra: &[String],
     workdir: &Path,
     warm: bool,
@@ -157,7 +157,7 @@ pub async fn start(
     let stem = model.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
     let log = workdir.join(format!("llamafile-{stem}.log"));
     let file = std::fs::File::create(&log).map_err(|e| e.to_string())?;
-    let mut args = crate::local_llm::server_args(model, port, ngl, ctx, plan);
+    let mut args = crate::ai::local_llm::server_args(model, port, ngl, ctx, plan);
     args.extend(extra.iter().cloned());
     let mut cmd = std::process::Command::new(runtime);
     cmd.args(&args)
@@ -184,7 +184,7 @@ pub async fn start(
         }
         if client.get(&health).send().await.is_ok_and(|r| r.status().is_success()) {
             let load_ms = started.elapsed().as_millis() as u64;
-            let warm_up = if warm { Some(crate::local_llm::warm_up(&base_url, &stem).await) } else { None };
+            let warm_up = if warm { Some(crate::ai::local_llm::warm_up(&base_url, &stem).await) } else { None };
             return Ok(Server { child: Some(child), pid, base_url, log, load_ms, args, plan, warm_up });
         }
         tokio::time::sleep(Duration::from_millis(500)).await;
@@ -248,7 +248,7 @@ impl Server {
                 }
             }
         }
-        let placement = crate::local_llm::placement_in_log(&text);
+        let placement = crate::ai::local_llm::placement_in_log(&text);
         json!({
             "projected_host_mib": projected,
             "prompt_cache_peak_mib": cache.round(),

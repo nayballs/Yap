@@ -159,7 +159,7 @@ async fn streamed_answer(
     app: &AppHandle,
     ep: &summary::Endpoint,
     messages: serde_json::Value,
-    opts: &crate::llm::ChatOptions,
+    opts: &crate::ai::llm::ChatOptions,
     on_stream: &crate::chat::stream::PageChannel,
     turn_id: Option<&str>,
 ) -> Result<(String, bool), String> {
@@ -234,9 +234,9 @@ impl Helper {
     /// Its immutable prompt (`llm.rs`).
     pub fn prompt(self) -> &'static str {
         match self {
-            Helper::Questions => crate::llm::MEETING_QUESTIONS_PROMPT,
-            Helper::FollowUpEmail => crate::llm::MEETING_FOLLOW_UP_PROMPT,
-            Helper::BlindSpots => crate::llm::MEETING_BLIND_SPOTS_PROMPT,
+            Helper::Questions => crate::ai::llm::MEETING_QUESTIONS_PROMPT,
+            Helper::FollowUpEmail => crate::ai::llm::MEETING_FOLLOW_UP_PROMPT,
+            Helper::BlindSpots => crate::ai::llm::MEETING_BLIND_SPOTS_PROMPT,
         }
     }
 

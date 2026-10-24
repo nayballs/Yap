@@ -334,10 +334,10 @@ pub async fn run_model(scenarios: &[Scenario], ep: &Endpoint<'_>) -> Value {
         let mut votes = Vec::new();
         let mut answers = Vec::new();
         for ask in &questions {
-            let opts = crate::llm::ChatOptions {
+            let opts = crate::ai::llm::ChatOptions {
                 temperature: 0.0,
                 max_tokens: local.then_some(REPLY_TOKENS),
-                timeout: crate::eval::timeout(std::time::Duration::from_secs(if local { 240 } else { 60 })),
+                timeout: crate::ai::eval::timeout(std::time::Duration::from_secs(if local { 240 } else { 60 })),
                 disable_thinking: false,
             };
             let mut extra = serde_json::Map::new();
@@ -349,7 +349,7 @@ pub async fn run_model(scenarios: &[Scenario], ep: &Endpoint<'_>) -> Value {
             }
             record::begin_turn();
             let t0 = Instant::now();
-            let out = crate::llm::chat_with(ep.base_url, ep.key, ep.model, ep.provider, naming::ask_messages(ask), &opts, extra).await;
+            let out = crate::ai::llm::chat_with(ep.base_url, ep.key, ep.model, ep.provider, naming::ask_messages(ask), &opts, extra).await;
             let ms = t0.elapsed().as_millis() as u64;
             let st = record::end_turn();
             calls += 1;

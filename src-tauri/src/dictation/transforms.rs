@@ -531,7 +531,7 @@ pub fn run(app: &AppHandle, cfg: &YapConfig, t: &Transform, origin: Origin, stan
     // The model: the Commands scope's, else the cleanup model.
     let m = crate::dictation::pipeline::commands_model(cfg);
     if m.base_url.is_empty() {
-        let restarting = m.provider == crate::local_llm::PROVIDER_ONDEVICE && crate::local_llm::restart_under_way();
+        let restarting = m.provider == crate::ai::local_llm::PROVIDER_ONDEVICE && crate::ai::local_llm::restart_under_way();
         failed(
             app,
             if restarting {
@@ -542,14 +542,14 @@ pub fn run(app: &AppHandle, cfg: &YapConfig, t: &Transform, origin: Origin, stan
         );
         return r.ended("failed", Some("no AI model".into()));
     }
-    if m.api_key.is_empty() && crate::ai_model::KEYED_PROVIDERS.contains(&m.provider.as_str()) {
+    if m.api_key.is_empty() && crate::ai::ai_model::KEYED_PROVIDERS.contains(&m.provider.as_str()) {
         failed(app, format!("Transforms: no {} API key — add one in Language Models", m.provider));
         return r.ended("failed", Some("no API key".into()));
     }
 
     let _ = app.emit(EVENT, serde_json::json!({ "name": name, "phase": "running" }));
     let _ = app.emit("yap-state", "processing");
-    let asked = tauri::async_runtime::block_on(crate::llm::transform(
+    let asked = tauri::async_runtime::block_on(crate::ai::llm::transform(
         &t.instruction(),
         &r.input,
         &m.base_url,

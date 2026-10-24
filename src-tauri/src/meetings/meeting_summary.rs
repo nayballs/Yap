@@ -53,7 +53,7 @@ use serde_json::{json, Value};
 use tauri::{AppHandle, Emitter, Manager};
 
 use crate::config::YapConfig;
-use crate::llm::ChatOptions;
+use crate::ai::llm::ChatOptions;
 use crate::notes::{DigestAction, MeetingDigest, Note, TranscriptSegment};
 use crate::speakers::Speakers;
 
@@ -237,13 +237,13 @@ impl FinalBudget {
 
     /// The 8K budgets × `factor` (1–4). Pure.
     pub fn scaled(factor: usize) -> Self {
-        let f = factor.clamp(1, crate::local_llm::MAX_BUDGET_FACTOR);
+        let f = factor.clamp(1, crate::ai::local_llm::MAX_BUDGET_FACTOR);
         FinalBudget { single_pass: SINGLE_PASS_TOKENS * f, input: FINAL_INPUT_TOKENS * f }
     }
 
     /// For a call to `ep`: grown only on the running on-device model.
     pub fn for_endpoint(ep: &Endpoint) -> Self {
-        Self::scaled(crate::local_llm::budget_factor_for(&ep.provider, &ep.base_url))
+        Self::scaled(crate::ai::local_llm::budget_factor_for(&ep.provider, &ep.base_url))
     }
 }
 
@@ -344,7 +344,7 @@ pub fn context_so_far(digests: &[MeetingDigest], t0: u64) -> String {
 pub fn digest_messages(people: &str, context: &str, part: usize, range: &str, lines: &str) -> Value {
     let user = format!("{people}\nThe meeting so far:\n{context}\n\nTranscript, part {part} ({range}):\n{lines}");
     json!([
-        { "role": "system", "content": crate::llm::MEETING_DIGEST_PROMPT },
+        { "role": "system", "content": crate::ai::llm::MEETING_DIGEST_PROMPT },
         { "role": "user", "content": DIGEST_EXAMPLE_IN },
         { "role": "assistant", "content": DIGEST_EXAMPLE_OUT },
         { "role": "user", "content": user },
@@ -1162,9 +1162,9 @@ pub fn resolve_endpoint(cfg: &YapConfig) -> Result<Endpoint, String> {
         Some(s) if s.enabled && !s.provider.is_empty() => {
             let key = cfg.provider_api_key(&s.provider, &s.api_key);
             let (base_url, api_key, model, provider) =
-                crate::local_llm::effective_endpoint_for(&s.provider, &s.base_url, &key, &s.model);
+                crate::ai::local_llm::effective_endpoint_for(&s.provider, &s.base_url, &key, &s.model);
             let fragment = if s.prompt.trim().is_empty() {
-                crate::llm::NOTE_DEFAULT_FRAGMENT.to_string()
+                crate::ai::llm::NOTE_DEFAULT_FRAGMENT.to_string()
             } else {
                 s.prompt.clone()
             };
@@ -1178,11 +1178,11 @@ pub fn resolve_endpoint(cfg: &YapConfig) -> Result<Endpoint, String> {
             }
         }
         scope => {
-            let (base_url, api_key, model, provider) = crate::local_llm::effective_endpoint(cfg);
+            let (base_url, api_key, model, provider) = crate::ai::local_llm::effective_endpoint(cfg);
             let fragment = scope
                 .map(|s| s.prompt.clone())
                 .filter(|p| !p.trim().is_empty())
-                .unwrap_or_else(|| crate::llm::NOTE_DEFAULT_FRAGMENT.to_string());
+                .unwrap_or_else(|| crate::ai::llm::NOTE_DEFAULT_FRAGMENT.to_string());
             Endpoint {
                 base_url,
                 api_key,
@@ -1214,7 +1214,7 @@ impl Endpoint {
     /// These serve one request at a time, so meeting calls cap their replies
     /// and get out of a dictation's way.
     pub fn is_local(&self) -> bool {
-        if self.provider == crate::local_llm::PROVIDER_ONDEVICE || self.provider == "local" {
+        if self.provider == crate::ai::local_llm::PROVIDER_ONDEVICE || self.provider == "local" {
             return true;
         }
         url::Url::parse(&self.base_url)
@@ -1326,7 +1326,7 @@ async fn digest_window(
     let context = context_so_far(&note.digests, t0);
     let messages = digest_messages(&people_lines(note), &context, note.digests.len() + 1, &range, &lines);
     let opts = ep.options(DIGEST_REPLY_TOKENS, 0.2);
-    let call = crate::llm::chat(
+    let call = crate::ai::llm::chat(
         &ep.base_url,
         &ep.api_key,
         &ep.model,
@@ -1451,7 +1451,7 @@ async fn live_digests(app: &AppHandle, note_id: u64) {
             return;
         }
         let _turn = DIGEST_TURN.lock().await;
-        let _sidecar = crate::local_llm::hold(&ep.base_url);
+        let _sidecar = crate::ai::local_llm::hold(&ep.base_url);
         // Re-plan under the turn: the end-of-meeting step may have run.
         let Some(note) = crate::notes::get(note_id) else {
             return;
@@ -1497,7 +1497,7 @@ pub async fn prepare_final(
 ) -> Result<Note, String> {
     let _turn = DIGEST_TURN.lock().await;
     // The on-device model is busy between the digests too.
-    let _sidecar = crate::local_llm::hold(&ep.base_url);
+    let _sidecar = crate::ai::local_llm::hold(&ep.base_url);
     let mut done = 0;
     loop {
         let note = crate::notes::get(note_id).ok_or("Note not found")?;
@@ -1628,7 +1628,7 @@ pub fn catch_up_input(note: &Note, since: usize) -> Option<String> {
 /// The chat messages for "What did I miss?" over [`catch_up_input`].
 pub fn catch_up_messages(input: &str) -> Value {
     json!([
-        { "role": "system", "content": crate::llm::CATCH_UP_PROMPT },
+        { "role": "system", "content": crate::ai::llm::CATCH_UP_PROMPT },
         { "role": "user", "content": input },
     ])
 }
@@ -1649,7 +1649,7 @@ pub fn meeting_ask_messages(note: &Note, question: &str) -> Value {
         input.push_str(&ask_context(note, MEETING_ASK_TOKENS));
     }
     json!([
-        { "role": "system", "content": crate::llm::MEETING_ASK_PROMPT },
+        { "role": "system", "content": crate::ai::llm::MEETING_ASK_PROMPT },
         { "role": "user", "content": format!("{}\n\nQuestion: {}", input.trim_end(), question.trim()) },
     ])
 }
@@ -1677,7 +1677,7 @@ pub fn title_messages(note: &Note) -> Value {
     };
     let user = format!("{}\n{points}Transcript (start):\n{lines}", people_lines(note));
     json!([
-        { "role": "system", "content": crate::llm::MEETING_TITLE_PROMPT },
+        { "role": "system", "content": crate::ai::llm::MEETING_TITLE_PROMPT },
         { "role": "user", "content": TITLE_EXAMPLE_IN },
         { "role": "assistant", "content": TITLE_EXAMPLE_OUT },
         { "role": "user", "content": user },
@@ -1999,7 +1999,7 @@ pub(crate) async fn chat_beside_dictation_live(
     let Some(sink) = sink else {
         return chat_beside_dictation(app, ep, messages, opts).await;
     };
-    let req = crate::llm::ChatRequest::with_options(
+    let req = crate::ai::llm::ChatRequest::with_options(
         &ep.base_url,
         &ep.api_key,
         &ep.model,
@@ -2011,7 +2011,7 @@ pub(crate) async fn chat_beside_dictation_live(
     let beside = crate::chat::stream::AnyDictation(app.clone());
     let live = crate::chat::stream::Live { sink, beside: ep.is_local().then_some(&beside as &dyn crate::chat::stream::Dictations) };
     let message = crate::privacy::net::within(crate::privacy::net::Feature::Meetings, crate::chat::stream::call(live, &req, false, opts.disable_thinking)).await?;
-    crate::llm::answer_text(&message, opts.disable_thinking)
+    crate::ai::llm::answer_text(&message, opts.disable_thinking)
 }
 
 /// [`chat_beside_dictation`] with fields of the caller's own in the request
@@ -2025,7 +2025,7 @@ pub(crate) async fn chat_beside_dictation_with(
     extra: serde_json::Map<String, Value>,
 ) -> Result<String, String> {
     let call = move |messages: Value| {
-        let ask = crate::llm::chat_with(&ep.base_url, &ep.api_key, &ep.model, &ep.provider, messages, opts, extra.clone());
+        let ask = crate::ai::llm::chat_with(&ep.base_url, &ep.api_key, &ep.model, &ep.provider, messages, opts, extra.clone());
         crate::privacy::net::within(crate::privacy::net::Feature::Meetings, ask)
     };
     if !ep.is_local() {
@@ -2033,7 +2033,7 @@ pub(crate) async fn chat_beside_dictation_with(
     }
     // The on-device model is busy while the call waits out a dictation and
     // asks again, not only while a request is under way.
-    let _sidecar = crate::local_llm::hold(&ep.base_url);
+    let _sidecar = crate::ai::local_llm::hold(&ep.base_url);
     for _ in 0..YIELD_RETRIES {
         wait_idle(|| dictation_busy(app), || true).await;
         match unless_busy(call(messages.clone()), || dictation_busy(app)).await {
@@ -2618,7 +2618,7 @@ mod tests {
         assert!(user.ends_with("Question: Who owns the budget?"));
         assert!(user.contains("Notes they typed"));
         assert!(estimate_tokens(&user) <= 3_500, "{}", estimate_tokens(&user));
-        assert_eq!(m[0]["content"], crate::llm::MEETING_ASK_PROMPT);
+        assert_eq!(m[0]["content"], crate::ai::llm::MEETING_ASK_PROMPT);
     }
 
     #[test]
@@ -2699,7 +2699,7 @@ mod tests {
         assert!(latest_tokens <= QUESTIONS_RECENT_TOKENS + 50, "{latest_tokens}");
         // Lean: well inside an 8k local model and a free cloud tier's minute.
         let total = call_tokens(
-            crate::llm::MEETING_QUESTIONS_PROMPT,
+            crate::ai::llm::MEETING_QUESTIONS_PROMPT,
             &input,
             QUESTIONS_REPLY_TOKENS,
         );
@@ -2745,7 +2745,7 @@ mod tests {
         note = with_invite(note, &"Agenda: budget, venue. ".repeat(100));
         let input = recap_input(&note, EMAIL_BESIDE_SUMMARY_TOKENS).unwrap();
         assert!(input.contains("Notes the user typed") && input.contains("From the calendar invite"));
-        for prompt in [crate::llm::MEETING_FOLLOW_UP_PROMPT, crate::llm::MEETING_BLIND_SPOTS_PROMPT] {
+        for prompt in [crate::ai::llm::MEETING_FOLLOW_UP_PROMPT, crate::ai::llm::MEETING_BLIND_SPOTS_PROMPT] {
             let total = call_tokens(prompt, &input, FOLLOW_UP_REPLY_TOKENS);
             assert!(total <= 3_400, "{total}");
         }
@@ -2760,9 +2760,9 @@ mod tests {
             assert!(input.contains("s599 ")); // how it ended
         }
         assert!(estimate_tokens(&email) < estimate_tokens(&gaps));
-        let total = call_tokens(crate::llm::MEETING_BLIND_SPOTS_PROMPT, &gaps, BLIND_SPOTS_REPLY_TOKENS);
+        let total = call_tokens(crate::ai::llm::MEETING_BLIND_SPOTS_PROMPT, &gaps, BLIND_SPOTS_REPLY_TOKENS);
         assert!(total <= 3_400, "{total}");
-        let total = call_tokens(crate::llm::MEETING_FOLLOW_UP_PROMPT, &email, FOLLOW_UP_REPLY_TOKENS);
+        let total = call_tokens(crate::ai::llm::MEETING_FOLLOW_UP_PROMPT, &email, FOLLOW_UP_REPLY_TOKENS);
         assert!(total <= 3_400, "{total}");
     }
 

@@ -311,7 +311,7 @@ const BUILTIN_ACTIONS: [(&str, &str, &str, &str); 4] = [
     (
         "Generate Notes",
         "Clean up, structure, and enhance your notes",
-        crate::llm::NOTE_DEFAULT_FRAGMENT,
+        crate::ai::llm::NOTE_DEFAULT_FRAGMENT,
         "",
     ),
     (
@@ -329,7 +329,7 @@ const BUILTIN_ACTIONS: [(&str, &str, &str, &str); 4] = [
     (
         "Action Plan",
         "Who does what by when, then decisions and open questions",
-        crate::llm::ACTION_PLAN_DEFAULT_FRAGMENT,
+        crate::ai::llm::ACTION_PLAN_DEFAULT_FRAGMENT,
         ACTION_PLAN,
     ),
 ];
@@ -465,7 +465,7 @@ pub fn save_now() -> Result<(), crate::saving::SaveError> {
 #[cfg(not(test))]
 fn save_to_disk(store: &Store) {
     // A model evaluation (`eval.rs`) keeps its notes in memory only.
-    if crate::eval::active() {
+    if crate::ai::eval::active() {
         return;
     }
     let _ = SAVER.write_json(&notes_path(), store, false);

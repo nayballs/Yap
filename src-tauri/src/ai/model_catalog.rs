@@ -66,7 +66,7 @@ use url::Url;
 use crate::config::YapConfig;
 
 /// The cloud providers with a list to ask for (every keyed provider).
-pub const PROVIDERS: [&str; 5] = crate::ai_model::KEYED_PROVIDERS;
+pub const PROVIDERS: [&str; 5] = crate::ai::ai_model::KEYED_PROVIDERS;
 
 /// A good list is used and not asked for again for a day.
 pub const FRESH_FOR: u64 = 24 * 60 * 60;

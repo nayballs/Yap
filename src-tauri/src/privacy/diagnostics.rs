@@ -185,7 +185,7 @@ fn endpoint(v: &Value) -> Value {
     let Ok(u) = reqwest::Url::parse(url) else { return json!("set") };
     let standard = ["groq", "openai", "anthropic", "gemini", "openrouter"]
         .iter()
-        .filter_map(|p| crate::ai_model::standard_base_url(p))
+        .filter_map(|p| crate::ai::ai_model::standard_base_url(p))
         .any(|std| std.trim_end_matches('/') == url.trim_end_matches('/'));
     if standard {
         return json!("the provider's own");
@@ -647,7 +647,7 @@ pub fn system_info(app: &AppHandle) -> String {
             lines.push(format!("Memory: {:.0} GB", m as f64 / 1_073_741_824.0));
         }
     }
-    match crate::gpu::this_pc() {
+    match crate::ai::gpu::this_pc() {
         Some(g) => lines.push(format!("Graphics card: {} · {:.1} GB of its own", g.name, g.vram_mib as f64 / 1024.0)),
         None => lines.push("Graphics card: none Yap can use (or only the processor's)".into()),
     }

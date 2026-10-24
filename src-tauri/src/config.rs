@@ -1186,7 +1186,7 @@ fn config_path() -> PathBuf {
 pub fn load() -> YapConfig {
     // A model evaluation (`eval.rs`) runs on its own settings, in memory (its
     // API key never goes to disk).
-    if let Some(cfg) = crate::eval::config() {
+    if let Some(cfg) = crate::ai::eval::config() {
         return cfg;
     }
     // A unit test reads the real config.json at most: never sets it aside
@@ -1211,7 +1211,7 @@ pub fn load() -> YapConfig {
     }
     // Styles by app: decided once for a config without the switch, and the
     // built-in styles' profiles there to edit.
-    crate::cleanup_styles::on_load(&mut cfg);
+    crate::ai::cleanup_styles::on_load(&mut cfg);
     migrate_retired_groq_models(&mut cfg);
     // The GPU switch from before "Runs on" (2026-10-22): off meant the
     // processor. (`save` keeps the two in step, so this never undoes a
@@ -1701,7 +1701,7 @@ fn salvage(bytes: &[u8]) -> Option<(YapConfig, Vec<String>)> {
 pub fn save(cfg: &YapConfig) -> Result<(), String> {
     // A model evaluation's settings stay in memory; a unit test never writes
     // the real config.json.
-    if crate::eval::active() || cfg!(test) {
+    if crate::ai::eval::active() || cfg!(test) {
         return Ok(());
     }
     save_at(&config_path(), cfg)?;
@@ -2355,10 +2355,10 @@ mod tests {
     #[test]
     fn settings_changed_outside_settings_change_in_one_step() {
         let files = [
-            ("ai_model.rs", include_str!("ai_model.rs")),
+            ("ai/ai_model.rs", include_str!("ai/ai_model.rs")),
             ("voice/tts.rs", include_str!("voice/tts.rs")),
             ("voice/read_aloud.rs", include_str!("voice/read_aloud.rs")),
-            ("local_llm.rs", include_str!("local_llm.rs")),
+            ("ai/local_llm.rs", include_str!("ai/local_llm.rs")),
             ("calls/meeting_detect.rs", include_str!("calls/meeting_detect.rs")),
         ];
         for (file, src) in files {

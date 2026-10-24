@@ -558,7 +558,7 @@ async fn prepare(spec: &str, args: &Args, keys: &HashMap<String, String>, run_di
     };
     match kind.as_str() {
         "groq" | "openai" | "anthropic" | "openrouter" | "gemini" => {
-            m.base_url = crate::ai_model::standard_base_url(&kind).unwrap_or_default().trim_end_matches('/').to_string();
+            m.base_url = crate::ai::ai_model::standard_base_url(&kind).unwrap_or_default().trim_end_matches('/').to_string();
             if m.key.is_empty() {
                 return Err(format!("no {kind} key: set {}_API_KEY or pass --keys-from-yap", kind.to_uppercase()));
             }
@@ -881,7 +881,7 @@ async fn run_scenario(
         let voice = turn.voice.unwrap_or(s.voice);
         record::write("turn_start", json!({ "user": turn.user, "voice": voice }));
         if i > 0 && args.clock_step > 0 {
-            crate::eval::clock_forward(args.clock_step as i64 * 60);
+            crate::ai::eval::clock_forward(args.clock_step as i64 * 60);
         }
         record::begin_turn();
         let t0 = Instant::now();
@@ -1292,7 +1292,7 @@ async fn run_all(args: &Args, run_dir: &Path, keys: &HashMap<String, String>, sc
         };
         let tpm = args.tokens_per_minute.or(if m.provider == "groq" { Some(8_000) } else { None });
         record::set_tokens_per_minute(tpm);
-        crate::eval::set_local_on_gpu(m.server.as_ref().map(|_| args.ngl > 0));
+        crate::ai::eval::set_local_on_gpu(m.server.as_ref().map(|_| args.ngl > 0));
         let paced_before = record::paced_ms();
         let model_started = Instant::now();
         let mut used: u64 = 0;

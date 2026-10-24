@@ -350,12 +350,12 @@ pub fn local_model_uses_tools(model: &str) -> bool {
 /// `supported_parameters`, `model_catalog.rs`); local (self-hosted) and
 /// on-device models by [`local_model_uses_tools`].
 pub fn supports_tools(provider: &str, model: &str) -> bool {
-    if let Some(forced) = crate::eval::tools_forced() {
+    if let Some(forced) = crate::ai::eval::tools_forced() {
         return forced; // a model evaluation's --tools on|off
     }
     match provider {
         "groq" | "anthropic" | "openai" | "gemini" | "openrouter" => {
-            crate::model_catalog::tools_for(provider, model) != Some(false)
+            crate::ai::model_catalog::tools_for(provider, model) != Some(false)
         }
         "custom" => true,
         _ => local_model_uses_tools(model),
@@ -1271,7 +1271,7 @@ pub enum EmptyNotes {
 /// this PC (a model evaluation may compare: `YAP_EVAL_EMPTY_NOTES` = hint |
 /// search | none).
 fn empty_notes_rule(local: bool) -> EmptyNotes {
-    if crate::eval::active() {
+    if crate::ai::eval::active() {
         match std::env::var("YAP_EVAL_EMPTY_NOTES").as_deref() {
             Ok("hint") => return EmptyNotes::Hint,
             Ok("search") => return if local { EmptyNotes::HintAndSearch } else { EmptyNotes::Hint },
@@ -1296,8 +1296,8 @@ async fn search_for_the_model(turn: &mut crate::web::Turn, query: &str, messages
     let args = json!({ "query": query });
     let result = turn.execute("web_search", &args).await;
     tracing::info!(success = %result["success"], "Chat: Yap searched the web for the model");
-    crate::eval::post_fix("yap_search");
-    crate::eval::tool_called("web_search", &args, &result);
+    crate::ai::eval::post_fix("yap_search");
+    crate::ai::eval::tool_called("web_search", &args, &result);
     if let Some(d) = result["displayText"].as_str() {
         tools_used.push(d.to_string());
     }
@@ -1317,13 +1317,13 @@ async fn search_for_the_model(turn: &mut crate::web::Turn, query: &str, messages
 /// (`stream::call`: a step's opening text held until it's an answer, a
 /// tool call shown as its chip; a model on this PC steps aside for a
 /// dictation), else as a whole answer.
-async fn ask(live: Option<crate::chat::stream::Live<'_>>, req: &crate::llm::ChatRequest, tools_offered: bool, disable_thinking: bool) -> Result<Value, String> {
+async fn ask(live: Option<crate::chat::stream::Live<'_>>, req: &crate::ai::llm::ChatRequest, tools_offered: bool, disable_thinking: bool) -> Result<Value, String> {
     // Recorded as Chat's in the network receipts (net.rs), unless the turn
     // is already someone else's (the Voice Assistant's).
     let step = async move {
         match live {
             Some(live) => crate::chat::stream::call(live, req, tools_offered, disable_thinking).await,
-            None => crate::llm::post_whole(req).await,
+            None => crate::ai::llm::post_whole(req).await,
         }
     };
     crate::privacy::net::within(crate::privacy::net::Feature::Chat, step).await
@@ -1441,7 +1441,7 @@ async fn tool_loop(
     // A model on this PC gets Yap's second search for local prices; a cloud
     // model is told to make it.
     if let Some(turn) = web.as_deref_mut() {
-        turn.set_yap_retries(crate::ai_model::runs_here(provider, base_url));
+        turn.set_yap_retries(crate::ai::ai_model::runs_here(provider, base_url));
     }
     let mut context = context.to_vec();
     if must_search_first {
@@ -1486,7 +1486,7 @@ async fn tool_loop(
     // A notes search that finds nothing, for a question that isn't about the
     // person's notes, leads to the web (once a turn).
     let empty_notes = if web.is_some() && !crate::web::about_own_stuff(question) {
-        empty_notes_rule(crate::ai_model::runs_here(provider, base_url))
+        empty_notes_rule(crate::ai::ai_model::runs_here(provider, base_url))
     } else {
         EmptyNotes::Nothing
     };
@@ -1512,7 +1512,7 @@ async fn tool_loop(
     let mut rejected = 0u32;
     for _step in 0..MAX_TOOL_STEPS {
         let forced = must_search;
-        let mut req = crate::llm::ChatRequest::chat(
+        let mut req = crate::ai::llm::ChatRequest::chat(
             base_url,
             api_key,
             model,
@@ -1560,7 +1560,7 @@ async fn tool_loop(
             // tell it once and ask again, then answer without tools — never
             // an error for the person.
             Err(e) => {
-                let Some(why) = crate::llm::rejected_tool_call(&e) else {
+                let Some(why) = crate::ai::llm::rejected_tool_call(&e) else {
                     return Err(e);
                 };
                 // A step refused mid-stream may have shown some text: it
@@ -1583,7 +1583,7 @@ async fn tool_loop(
         if tool_calls.is_empty() {
             let content = msg["content"].as_str().unwrap_or("").trim().to_string();
             let content = if disable_thinking {
-                crate::llm::strip_thinking(&content)
+                crate::ai::llm::strip_thinking(&content)
             } else {
                 content
             };
@@ -1617,7 +1617,7 @@ async fn tool_loop(
                     let fresh = crate::web::fresh_query(&q, question, &earlier, &own);
                     if fresh != q {
                         tracing::info!(words_before = q.split_whitespace().count(), words_after = fresh.split_whitespace().count(), "Chat: earlier words left out of the forced search");
-                        crate::eval::post_fix("fresh_query");
+                        crate::ai::eval::post_fix("fresh_query");
                         q = fresh;
                     }
                 }
@@ -1625,7 +1625,7 @@ async fn tool_loop(
                 // ("… UK"), every search of the turn.
                 if let Some(local) = web.as_deref().and_then(|t| t.local_query(&q)) {
                     tracing::info!("Chat: the search names the user's country (a price question)");
-                    crate::eval::post_fix("local_query");
+                    crate::ai::eval::post_fix("local_query");
                     q = local;
                 }
                 if q != asked {
@@ -1644,7 +1644,7 @@ async fn tool_loop(
             let web_seen = web.as_deref().is_some_and(crate::web::Turn::seen);
             let mut result = if let Some(refusal) = refused_after_web(name, web_seen) {
                 refusal
-            } else if let Some(r) = crate::eval::intercept_tool(name, &args) {
+            } else if let Some(r) = crate::ai::eval::intercept_tool(name, &args) {
                 r // a model evaluation records what would leave Yap (the clipboard)
             } else if let (Some(turn), true) = (web.as_deref_mut(), crate::web::TOOL_NAMES.contains(&name)) {
                 turn.execute(name, &args).await
@@ -1678,7 +1678,7 @@ async fn tool_loop(
                 result["hint"] = json!(NOTHING_IN_NOTES_HINT);
             }
             tracing::info!(tool = %name, success = %result["success"], "Chat tool call");
-            crate::eval::tool_called(name, &ran_with, &result);
+            crate::ai::eval::tool_called(name, &ran_with, &result);
             if let Some(id) = changed_note(name, &result) {
                 on_change(id);
             }
@@ -1720,10 +1720,10 @@ async fn tool_loop(
     // Out of steps, or the tool calls kept being rejected: one final call
     // WITHOUT tools to force a plain answer.
     messages.push(json!({ "role": "user", "content": ANSWER_NOW_NOTE }));
-    let req = crate::llm::ChatRequest::chat(base_url, api_key, model, provider, 0.5, Value::Array(messages), None, None);
+    let req = crate::ai::llm::ChatRequest::chat(base_url, api_key, model, provider, 0.5, Value::Array(messages), None, None);
     let msg = ask(live, &req, false, disable_thinking).await?;
     let content = msg["content"].as_str().unwrap_or("").trim().to_string();
-    let content = if disable_thinking { crate::llm::strip_thinking(&content) } else { content };
+    let content = if disable_thinking { crate::ai::llm::strip_thinking(&content) } else { content };
     if content.is_empty() {
         return Err("The model didn't manage an answer this time. Try asking again.".to_string());
     }
@@ -3073,11 +3073,11 @@ mod tests {
         assert!(requests[0].1.get("stream_options").is_some());
         assert!(requests[1].1.get("stream_options").is_none() && requests[1].1["stream"] == true);
         assert_eq!(requests[2].1["stream"], false);
-        assert!(!crate::llm::streams_to(&format!("{}/v1", fake.base)));
+        assert!(!crate::ai::llm::streams_to(&format!("{}/v1", fake.base)));
         // An "upstream" error isn't about streaming.
         let other = fake_streamer(vec![Reply::Json(400, json!({ "error": { "message": "upstream provider rejected the request" } }))]);
         assert!(ask_streamed(&other, "hello", &Seen::default()).await.unwrap_err().starts_with("HTTP 400"));
-        assert!(crate::llm::streams_to(&format!("{}/v1", other.base)));
+        assert!(crate::ai::llm::streams_to(&format!("{}/v1", other.base)));
     }
 
     #[tokio::test]

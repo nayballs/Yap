@@ -100,7 +100,7 @@ pub fn reads_images(provider: &str, model: &str) -> Option<bool> {
     if provider == "ondevice" {
         return Some(false);
     }
-    crate::model_catalog::vision_for(provider, model).or_else(|| family_rule(provider, model))
+    crate::ai::model_catalog::vision_for(provider, model).or_else(|| family_rule(provider, model))
 }
 
 /// Yap's picks of a model that reads images, per provider, best first
@@ -128,7 +128,7 @@ pub struct Switch {
 /// with no list yet, its first pick), else the first model its list says
 /// reads images. Pure but for the catalogue.
 fn pick_for(provider: &str) -> Option<Switch> {
-    let listed = crate::model_catalog::models_of(provider);
+    let listed = crate::ai::model_catalog::models_of(provider);
     let picks = PICKS.iter().find(|(p, _)| *p == provider).map(|(_, ids)| *ids).unwrap_or(&[]);
     match &listed {
         Some(models) => {
@@ -191,7 +191,7 @@ pub const CANT_READ: &str = "This model can't read images";
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model_catalog::{set_models_for_test, CatalogModel};
+    use crate::ai::model_catalog::{set_models_for_test, CatalogModel};
 
     fn m(id: &str, vision: Option<bool>) -> CatalogModel {
         CatalogModel { id: id.into(), name: id.into(), vision, ..Default::default() }

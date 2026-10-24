@@ -27,7 +27,7 @@ use serde_json::{json, Value};
 
 use super::cleanup::Endpoint;
 use super::record;
-use crate::cleanup_styles::{self, Category, Tone};
+use crate::ai::cleanup_styles::{self, Category, Tone};
 
 #[derive(Debug, serde::Deserialize)]
 pub struct Bench {
@@ -205,7 +205,7 @@ fn settings(case: &Case, after: bool) -> crate::config::YapConfig {
 async fn clean(phase: &'static str, case: &Case, ep: &Endpoint<'_>) -> Shot {
     let cfg = settings(case, phase == "after");
     let category = Category::from_id(&case.category).unwrap_or(Category::Other);
-    let spelling = crate::about_you::cleanup_spelling(&cfg);
+    let spelling = crate::ai::about_you::cleanup_spelling(&cfg);
     record::begin_turn();
     // Time held back to keep under a cloud plan's tokens a minute (Groq's
     // 8,000) isn't the cleanup's.
@@ -215,7 +215,7 @@ async fn clean(phase: &'static str, case: &Case, ep: &Endpoint<'_>) -> Shot {
     let out = if phase == "before" {
         // The call every dictation made until styles: the main body, the
         // model asked whatever the text.
-        crate::llm::cleanup_with_names(&case.text, ep.base_url, ep.key, ep.model, ep.provider, &cfg.pp_prompt, spelling.as_deref(), None, &[], false)
+        crate::ai::llm::cleanup_with_names(&case.text, ep.base_url, ep.key, ep.model, ep.provider, &cfg.pp_prompt, spelling.as_deref(), None, &[], false)
             .await
     } else {
         match cleanup_styles::resolve(&cfg, &cleanup_styles::sample_target(category)) {

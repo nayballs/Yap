@@ -18,17 +18,17 @@ pub struct Hardware {
     pub threads: u32,
     /// Memory, rounded to whole GB.
     pub ram_gb: u32,
-    pub adapters: Vec<crate::gpu::Adapter>,
+    pub adapters: Vec<crate::ai::gpu::Adapter>,
 }
 
 impl Hardware {
     pub fn this_pc() -> Hardware {
         let (cores, threads) = core_count();
-        Hardware { cpu: cpu_name(), cores, threads, ram_gb: ram_gb(), adapters: crate::gpu::all_adapters() }
+        Hardware { cpu: cpu_name(), cores, threads, ram_gb: ram_gb(), adapters: crate::ai::gpu::all_adapters() }
     }
 
     /// The hardware adapters (no software one).
-    pub fn gpus(&self) -> impl Iterator<Item = &crate::gpu::Adapter> {
+    pub fn gpus(&self) -> impl Iterator<Item = &crate::ai::gpu::Adapter> {
         self.adapters.iter().filter(|a| !a.software)
     }
 }

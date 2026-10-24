@@ -213,7 +213,7 @@ pub fn scenarios(hw: &Hardware, wanted: Option<&[String]>) -> Vec<Scenario> {
         }
     }
     // A small GPU (integrated graphics) that isn't the default one.
-    if let Some(i) = hw.gpus().find(|a| Some(a.index) != first.map(|f| f.index) && crate::gpu::is_small(&a.gpu)) {
+    if let Some(i) = hw.gpus().find(|a| Some(a.index) != first.map(|f| f.index) && crate::ai::gpu::is_small(&a.gpu)) {
         all.push(Scenario {
             id: "igpu-4t".into(),
             label: format!("integrated GPU ({}) + 4 threads (emulated)", i.gpu.name),
@@ -542,9 +542,9 @@ const CLEANUP_BUDGET_MS: u64 = 20_000;
 
 async fn cleanup_once(text: &str, base_url: &str, key: &str, model: &str, provider: &str) -> Result<u64, String> {
     let cfg = crate::config::YapConfig::default();
-    let spelling = crate::about_you::cleanup_spelling(&cfg);
+    let spelling = crate::ai::about_you::cleanup_spelling(&cfg);
     let t0 = Instant::now();
-    crate::llm::cleanup(text, base_url, key, model, provider, &cfg.pp_prompt, spelling.as_deref(), &[], false).await?;
+    crate::ai::llm::cleanup(text, base_url, key, model, provider, &cfg.pp_prompt, spelling.as_deref(), &[], false).await?;
     Ok(t0.elapsed().as_millis() as u64)
 }
 
@@ -552,7 +552,7 @@ async fn cleanup_once(text: &str, base_url: &str, key: &str, model: &str, provid
 /// Yap's sidecar runs it (`local_llm::server_args`; on the processor `-ngl
 /// 0`, and `-t`/`-tb` the scenario's threads).
 async fn time_local_cleanup(runtime: &Path, gguf: &Path, sc: &Scenario, work: &Path) -> CleanupRun {
-    let id = crate::local_llm::model_id(gguf);
+    let id = crate::ai::local_llm::model_id(gguf);
     let mut run = CleanupRun::new(&id, "local", &sc.id);
     let port = match std::net::TcpListener::bind("127.0.0.1:0").and_then(|l| l.local_addr()) {
         Ok(a) => a.port(),
@@ -561,17 +561,17 @@ async fn time_local_cleanup(runtime: &Path, gguf: &Path, sc: &Scenario, work: &P
             return run;
         }
     };
-    let version = crate::local_llm::runtime_version_in(runtime.parent().unwrap_or(Path::new(".")))
-        .or_else(|| crate::local_llm::Version::parse(crate::local_llm::RUNTIME_VERSION))
-        .unwrap_or(crate::local_llm::Version(0, 10, 6));
-    let ctx = crate::local_llm::DEFAULT_CONTEXT;
+    let version = crate::ai::local_llm::runtime_version_in(runtime.parent().unwrap_or(Path::new(".")))
+        .or_else(|| crate::ai::local_llm::Version::parse(crate::ai::local_llm::RUNTIME_VERSION))
+        .unwrap_or(crate::ai::local_llm::Version(0, 10, 6));
+    let ctx = crate::ai::local_llm::DEFAULT_CONTEXT;
     let on_gpu = sc.device == Device::Gpu;
     let plan = if on_gpu {
-        crate::local_llm::plan_for(&crate::config::YapConfig::default(), gguf, ctx, version)
+        crate::ai::local_llm::plan_for(&crate::config::YapConfig::default(), gguf, ctx, version)
     } else {
-        crate::local_llm::Plan { runtime: version, mtp: false }
+        crate::ai::local_llm::Plan { runtime: version, mtp: false }
     };
-    let mut args = crate::local_llm::server_args(gguf, port, if on_gpu { 999 } else { 0 }, ctx, plan);
+    let mut args = crate::ai::local_llm::server_args(gguf, port, if on_gpu { 999 } else { 0 }, ctx, plan);
     if let Some(n) = sc.threads {
         args.extend(["-t".into(), n.to_string(), "-tb".into(), n.to_string()]);
     }
@@ -621,11 +621,11 @@ async fn time_local_cleanup(runtime: &Path, gguf: &Path, sc: &Scenario, work: &P
     }
     if up {
         run.load_ms = Some(started.elapsed().as_millis() as u64);
-        let _ = crate::local_llm::warm_up(&base, &id).await;
+        let _ = crate::ai::local_llm::warm_up(&base, &id).await;
         let mut times = Vec::new();
         'rounds: for _ in 0..2 {
             for text in DICTATIONS {
-                match cleanup_once(text, &base, "", &id, crate::local_llm::PROVIDER_ONDEVICE).await {
+                match cleanup_once(text, &base, "", &id, crate::ai::local_llm::PROVIDER_ONDEVICE).await {
                     Ok(ms) => {
                         times.push(ms);
                         if ms > CLEANUP_BUDGET_MS {
@@ -652,7 +652,7 @@ async fn time_local_cleanup(runtime: &Path, gguf: &Path, sc: &Scenario, work: &P
 /// A cloud endpoint from Yap's settings: the cleanup's own when it's a
 /// cloud one with a key, else Groq when a Groq key is saved. Pure.
 pub fn cloud_endpoint(cfg: &crate::config::YapConfig) -> Option<(String, String, String, String)> {
-    let local = |p: &str| p == crate::local_llm::PROVIDER_ONDEVICE || p == "local" || p == "custom";
+    let local = |p: &str| p == crate::ai::local_llm::PROVIDER_ONDEVICE || p == "local" || p == "custom";
     if !local(&cfg.pp_provider) && !cfg.pp_api_key.trim().is_empty() && !cfg.pp_model.trim().is_empty() {
         return Some((cfg.pp_base_url.clone(), cfg.pp_api_key.clone(), cfg.pp_model.clone(), cfg.pp_provider.clone()));
     }
@@ -701,7 +701,7 @@ pub struct Report {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cold_start: Option<cold::ColdStart>,
     /// What Yap picks for this PC (`hardware.rs`).
-    pub picks: crate::hardware::Advice,
+    pub picks: crate::ai::hardware::Advice,
 }
 
 fn ms(v: Option<u64>) -> String {
@@ -832,9 +832,9 @@ fn local_models(data: &Path, o: &Options) -> Vec<PathBuf> {
         return l.clone();
     }
     let llm = data.join("llm");
-    [crate::local_llm::DEFAULT_MODEL_ID, crate::local_llm::GPU_MODEL_ID]
+    [crate::ai::local_llm::DEFAULT_MODEL_ID, crate::ai::local_llm::GPU_MODEL_ID]
         .iter()
-        .filter_map(|id| crate::local_llm::curated_by_id(id))
+        .filter_map(|id| crate::ai::local_llm::curated_by_id(id))
         .map(|m| llm.join(m.filename))
         .filter(|p| p.is_file())
         .collect()
@@ -911,7 +911,7 @@ async fn run(o: &Options, data: &Path, work: &Path, cfg: Option<&crate::config::
 
     let mut cleanup = Vec::new();
     if o.cleanup {
-        let runtime = data.join("llm").join(crate::local_llm::RUNTIME_FILENAME);
+        let runtime = data.join("llm").join(crate::ai::local_llm::RUNTIME_FILENAME);
         let ggufs = local_models(data, o);
         if o.llms.is_none() && (!runtime.is_file() || ggufs.is_empty()) {
             println!("No on-device AI model installed: local cleanup is skipped.");
@@ -920,7 +920,7 @@ async fn run(o: &Options, data: &Path, work: &Path, cfg: Option<&crate::config::
             // (The integrated GPU and software rendering are speech-only:
             // llamafile picks its own GPU.)
             for sc in scenarios.iter().filter(|s| s.adapter.is_none()) {
-                let name = crate::local_llm::model_id(gguf);
+                let name = crate::ai::local_llm::model_id(gguf);
                 print!("  cleanup · {name} · {} … ", sc.label);
                 use std::io::Write;
                 let _ = std::io::stdout().flush();
@@ -949,7 +949,7 @@ async fn run(o: &Options, data: &Path, work: &Path, cfg: Option<&crate::config::
         None
     };
 
-    let picks = crate::hardware::advise(&crate::hardware::Machine::from_hardware(&hw));
+    let picks = crate::ai::hardware::advise(&crate::ai::hardware::Machine::from_hardware(&hw));
     let report = Report {
         schema: SCHEMA,
         yap: env!("CARGO_PKG_VERSION").to_string(),
@@ -991,7 +991,7 @@ async fn run(o: &Options, data: &Path, work: &Path, cfg: Option<&crate::config::
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::gpu::{Adapter, Gpu};
+    use crate::ai::gpu::{Adapter, Gpu};
 
     fn hw(threads: u32, adapters: Vec<Adapter>) -> Hardware {
         Hardware { cpu: "Test CPU".into(), cores: threads / 2, threads, ram_gb: 16, adapters }
@@ -1105,7 +1105,7 @@ mod tests {
             }],
             cleanup: vec![CleanupRun::new("qwen2.5-1.5b-instruct-q4_k_m", "local", "cpu")],
             cold_start: Some(cold::ColdStart::default()),
-            picks: crate::hardware::advise(&crate::hardware::Machine { gpu: None, threads: 8, ram_mib: 16_384 }),
+            picks: crate::ai::hardware::advise(&crate::ai::hardware::Machine { gpu: None, threads: 8, ram_mib: 16_384 }),
         };
         let v = serde_json::to_value(&report).unwrap();
         for key in ["schema", "yap", "engines", "at", "hardware", "cpuLoadBefore", "scenarios", "speech", "cleanup", "coldStart", "picks"] {

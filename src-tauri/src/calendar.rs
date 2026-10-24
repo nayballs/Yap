@@ -1796,7 +1796,7 @@ impl BriefAi {
     fn of(cfg: &crate::config::YapConfig) -> BriefAi {
         match crate::meetings::meeting_summary::resolve_endpoint(cfg) {
             // A brief never starts a stopped on-device model.
-            Ok(ep) if ep.provider == crate::local_llm::PROVIDER_ONDEVICE && !crate::local_llm::is_running() => {
+            Ok(ep) if ep.provider == crate::ai::local_llm::PROVIDER_ONDEVICE && !crate::ai::local_llm::is_running() => {
                 BriefAi::Plain("The on-device model isn't running, so this is the plain brief.")
             }
             // A small model on this PC got too much wrong (model-evals.md).

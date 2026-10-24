@@ -7,7 +7,7 @@
 //! (emulated small laptops).
 //!
 //! Three tiers ([`tier`]):
-//! - **card**: a graphics card with memory of its own ([`crate::gpu::is_small`]
+//! - **card**: a graphics card with memory of its own ([`crate::ai::gpu::is_small`]
 //!   says it isn't integrated graphics or an entry card): speech on the card,
 //!   the on-device cleanup on the card (Qwen3.5 4B where it fits, else the
 //!   1.5B);
@@ -21,7 +21,7 @@
 
 use serde::Serialize;
 
-use crate::gpu::Gpu;
+use crate::ai::gpu::Gpu;
 use crate::dictation::stt::Device;
 
 /// The PC as the picks see it.
@@ -38,7 +38,7 @@ pub struct Machine {
 impl Machine {
     /// From what `yap.exe bench` read.
     pub fn from_hardware(hw: &crate::bench::Hardware) -> Machine {
-        let gpu = crate::gpu::best(&hw.gpus().map(|a| a.gpu.clone()).collect::<Vec<_>>()).cloned();
+        let gpu = crate::ai::gpu::best(&hw.gpus().map(|a| a.gpu.clone()).collect::<Vec<_>>()).cloned();
         Machine { gpu, threads: hw.threads, ram_mib: u64::from(hw.ram_gb) * 1024 }
     }
 
@@ -52,7 +52,7 @@ impl Machine {
             (threads, ram_mib())
         });
         #[cfg_attr(not(debug_assertions), allow(unused_mut))]
-        let mut m = Machine { gpu: crate::gpu::this_pc(), threads, ram_mib };
+        let mut m = Machine { gpu: crate::ai::gpu::this_pc(), threads, ram_mib };
         #[cfg(debug_assertions)]
         if crate::e2e::active() {
             let var = |k: &str| std::env::var(k).ok().and_then(|v| v.trim().parse::<u64>().ok());
@@ -97,7 +97,7 @@ pub const PROCESSOR_RAM_MIB: u64 = 7_680;
 
 /// The tier ([`Tier`]). Pure.
 pub fn tier(m: &Machine) -> Tier {
-    if m.gpu.as_ref().is_some_and(|g| !crate::gpu::is_small(g)) {
+    if m.gpu.as_ref().is_some_and(|g| !crate::ai::gpu::is_small(g)) {
         Tier::Card
     } else if m.threads >= PROCESSOR_THREADS && m.ram_mib >= PROCESSOR_RAM_MIB {
         Tier::Processor
@@ -115,7 +115,7 @@ pub fn tier(m: &Machine) -> Tier {
 /// Pure.
 pub fn speech_device_before_measuring(gpu: Option<&Gpu>) -> Device {
     match gpu {
-        Some(g) if !crate::gpu::is_small(g) => Device::Gpu,
+        Some(g) if !crate::ai::gpu::is_small(g) => Device::Gpu,
         _ => Device::Cpu,
     }
 }
@@ -128,7 +128,7 @@ pub fn speech_device_here() -> Device {
     if crate::e2e::active() && std::env::var_os("YAP_E2E_GPU").is_none() {
         return Device::Gpu;
     }
-    speech_device_before_measuring(crate::gpu::this_pc().as_ref())
+    speech_device_before_measuring(crate::ai::gpu::this_pc().as_ref())
 }
 
 /// The speech model recommended everywhere: Parakeet V3 (int8). It's the
@@ -180,8 +180,8 @@ pub const CLOUD_MS: u64 = 800;
 /// The picks for `m`. Pure.
 pub fn advise(m: &Machine) -> Advice {
     let tier = tier(m);
-    let big = crate::gpu::can_run_big_model(m.gpu.as_ref());
-    let local_model = crate::local_llm::recommended_id(big);
+    let big = crate::ai::gpu::can_run_big_model(m.gpu.as_ref());
+    let local_model = crate::ai::local_llm::recommended_id(big);
     let (cleanup, local_ms) = match tier {
         Tier::Card => (CleanupPick::Local, if big { LOCAL_MS_CARD_4B } else { LOCAL_MS_CARD_1_5B }),
         Tier::Processor => (CleanupPick::Local, LOCAL_MS_PROCESSOR),
@@ -189,7 +189,7 @@ pub fn advise(m: &Machine) -> Advice {
     };
     let speech_device = speech_device_before_measuring(m.gpu.as_ref());
     let where_ = |d: Device| if d == Device::Gpu { "the graphics card" } else { "the processor" };
-    let model_name = crate::local_llm::curated_by_id(local_model).map(|c| c.display).unwrap_or(local_model);
+    let model_name = crate::ai::local_llm::curated_by_id(local_model).map(|c| c.display).unwrap_or(local_model);
     let summary = match cleanup {
         CleanupPick::Local => format!(
             "Parakeet V3 on {}; AI cleanup on this PC with {model_name} (adds about {:.1} s a dictation)",

@@ -7,8 +7,7 @@
 //! The dictation engine (input hook, STT, text injection) is ported verbatim
 //! from Voice Mirror; everything else here is the slim glue.
 
-mod about_you;
-mod ai_model;
+mod ai;
 mod apps;
 mod auth;
 mod bar;
@@ -16,17 +15,12 @@ mod bench;
 mod calendar;
 mod calls;
 mod chat;
-mod cleanup_styles;
 mod commands;
 mod config;
 mod context_menu;
 mod dictation;
 mod dictionary;
 mod e2e;
-mod eval;
-mod gguf;
-mod gpu;
-mod hardware;
 mod integrations;
 mod meetings;
 mod memory;
@@ -34,9 +28,6 @@ mod notes;
 mod notices;
 mod pasting;
 mod privacy;
-mod llm;
-mod local_llm;
-mod model_catalog;
 mod portable;
 mod procs;
 mod realtest;
@@ -46,7 +37,6 @@ mod speakers;
 mod tray;
 mod updates;
 mod theme;
-mod usage;
 mod voice;
 mod web;
 mod webview_memory;
@@ -142,7 +132,7 @@ pub(crate) fn window_state_flags() -> tauri_plugin_window_state::StateFlags {
 /// ever reaching the Exit handler (see `updates::build_updater`).
 pub(crate) fn shutdown_cleanup() {
     voice::tts::stop();
-    local_llm::shutdown();
+    ai::local_llm::shutdown();
     integrations::bridge::stop();
     dictation::mute::restore_all();
     // The week of network receipts, as it stands (net.rs).
@@ -170,7 +160,7 @@ pub fn run_diarize_child() -> i32 {
 /// docs/model-evals.md). Debug builds only; a release build says so and
 /// exits. Returns the exit code (0 = every scenario passed).
 pub fn run_eval() -> i32 {
-    eval::run(std::env::args().skip(2).collect())
+    ai::eval::run(std::env::args().skip(2).collect())
 }
 
 /// `yap.exe bench …` (main.rs): speech-to-text, AI cleanup and a cold
@@ -438,7 +428,7 @@ pub fn run() {
             commands::toggle_recording,
             commands::dictation_key,
             commands::get_config,
-            about_you::about_you_status,
+            ai::about_you::about_you_status,
             commands::save_config,
             saving::saves_retry,
             commands::download_model_size,
@@ -464,14 +454,14 @@ pub fn run() {
             commands::get_base_prompt,
             commands::get_edit_base_prompt,
             commands::local_llm_status,
-            cleanup_styles::cleanup_styles_catalog,
-            cleanup_styles::cleanup_offer_status,
-            cleanup_styles::cleanup_offer_seen,
+            ai::cleanup_styles::cleanup_styles_catalog,
+            ai::cleanup_styles::cleanup_offer_status,
+            ai::cleanup_styles::cleanup_offer_seen,
             commands::local_llm_start,
             commands::local_llm_stop,
             commands::local_llm_install,
             commands::local_llm_delete,
-            local_llm::local_llm_set_context,
+            ai::local_llm::local_llm_set_context,
             commands::open_llm_folder,
             commands::get_groq_usage,
             commands::get_history,
@@ -490,7 +480,7 @@ pub fn run() {
             snip::chat_images_prepare,
             dictation::stt_speed::stt_speed_status,
             dictation::stt_speed::stt_speed_measure,
-            hardware::hardware_advice,
+            ai::hardware::hardware_advice,
             dictation::recent_audio::recent_audio_status,
             dictation::recent_audio::recent_audio_clear,
             dictation::recent_audio::recent_audio_wav,
@@ -539,12 +529,12 @@ pub fn run() {
             commands::chat_rename,
             commands::chat_send,
             chat::stream::stream_stop,
-            ai_model::ai_model_status,
-            ai_model::chat_set_model,
-            ai_model::chat_provider_key,
-            model_catalog::model_catalog,
-            model_catalog::model_catalog_refresh,
-            model_catalog::llm_models,
+            ai::ai_model::ai_model_status,
+            ai::ai_model::chat_set_model,
+            ai::ai_model::chat_provider_key,
+            ai::model_catalog::model_catalog,
+            ai::model_catalog::model_catalog_refresh,
+            ai::model_catalog::llm_models,
             commands::chat_dictate,
             commands::chat_input_focus,
             commands::configure_assistant_hotkey,
@@ -735,11 +725,11 @@ pub fn run() {
             #[cfg(debug_assertions)]
             dictation::coaching::e2e_coaching_reset,
             #[cfg(debug_assertions)]
-            local_llm::e2e_local_llm_serving,
+            ai::local_llm::e2e_local_llm_serving,
             #[cfg(debug_assertions)]
-            local_llm::e2e_local_llm_restarts,
+            ai::local_llm::e2e_local_llm_restarts,
             #[cfg(debug_assertions)]
-            local_llm::e2e_local_llm_busy,
+            ai::local_llm::e2e_local_llm_busy,
             #[cfg(debug_assertions)]
             notices::notice::e2e_notice_reset,
             #[cfg(debug_assertions)]
@@ -786,7 +776,7 @@ pub fn run() {
             #[cfg(debug_assertions)]
             commands::e2e_target_window,
             #[cfg(debug_assertions)]
-            cleanup_styles::e2e_style_app,
+            ai::cleanup_styles::e2e_style_app,
             #[cfg(debug_assertions)]
             realtest::commands::realtest_dictate_wav,
             #[cfg(debug_assertions)]
@@ -832,7 +822,7 @@ pub fn run() {
 
             // Register the app handle so the usage tracker can emit live
             // `groq-usage` updates after each AI-cleanup call.
-            usage::set_app_handle(handle.clone());
+            ai::usage::set_app_handle(handle.clone());
             // Spoken replies (tts.rs): its state goes to every window.
             voice::tts::init(&handle);
 
@@ -871,7 +861,7 @@ pub fn run() {
             dictation::stt::apply_accelerator_settings(cfg.use_gpu);
             // DirectML on the graphics card, not an integrated GPU DXGI
             // happens to list first (hybrid laptops; gpu.rs).
-            dictation::stt::set_gpu_adapter(gpu::speech_adapter());
+            dictation::stt::set_gpu_adapter(ai::gpu::speech_adapter());
             // Each model loads on the device that runs it fastest here
             // (Settings → Speech-to-Text → Runs on; stt_speed.rs).
             dictation::stt_speed::sync(&cfg);
@@ -899,20 +889,20 @@ pub fn run() {
             // first dictation cleanup skips the cold load. (An e2e test run
             // leaves other processes alone.)
             if !e2e::active() && !bench_child() {
-                local_llm::kill_orphans();
+                ai::local_llm::kill_orphans();
             }
             {
                 let cfg2 = cfg.clone();
                 tauri::async_runtime::spawn(async move {
                     // A runtime cut off mid-swap (or taken by an antivirus)
                     // comes back first; leftovers go.
-                    local_llm::tidy_runtime().await;
-                    local_llm::autostart_if_configured(&cfg2).await;
+                    ai::local_llm::tidy_runtime().await;
+                    ai::local_llm::autostart_if_configured(&cfg2).await;
                 });
             }
             // An older llamafile runtime (installs before 22 Oct 2026) is
             // replaced in the background, never under a dictation.
-            local_llm::spawn_runtime_upgrade(handle.clone());
+            ai::local_llm::spawn_runtime_upgrade(handle.clone());
 
             // Local API bridge (Integrations): loopback server for CLIs/agents.
             integrations::bridge::sync(&handle, cfg.bridge_enabled);
@@ -1215,7 +1205,7 @@ pub fn run() {
 
             // The AI providers' live model lists (only providers with a
             // saved key; each at most once a day).
-            model_catalog::init(&handle);
+            ai::model_catalog::init(&handle);
 
             // Call detection: offer to take notes when a call starts (reads
             // Windows' per-app microphone record; local only).

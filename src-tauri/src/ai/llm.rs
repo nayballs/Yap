@@ -201,7 +201,7 @@ pub enum SpellingAt {
 /// evaluation may compare (`YAP_EVAL_SPELLING_AT` = system | message |
 /// both).
 fn spelling_at() -> SpellingAt {
-    if crate::eval::active() {
+    if crate::ai::eval::active() {
         match std::env::var("YAP_EVAL_SPELLING_AT").as_deref() {
             Ok("system") => return SpellingAt::System,
             Ok("message") => return SpellingAt::Message,
@@ -393,7 +393,7 @@ pub fn split_dictation(message: &str) -> (String, String) {
 /// (7 of 24 greedy outputs changed on the processor); Groq's gpt-oss-20b
 /// changed 2 of 6. Pure but for the sidecar's state.
 pub fn splits_dictation(base_url: &str, model: &str) -> bool {
-    crate::local_llm::serving_hybrid_at(base_url).unwrap_or_else(|| self_hosted(base_url) && hybrid_by_name(model))
+    crate::ai::local_llm::serving_hybrid_at(base_url).unwrap_or_else(|| self_hosted(base_url) && hybrid_by_name(model))
 }
 
 /// A server on this PC or the local network, by its URL: a loopback or
@@ -1214,24 +1214,24 @@ async fn post_chat_request(
     }
     // A model evaluation's request overrides (`--temperature`, `--set`, a
     // bench's `id_slot`); otherwise a no-op.
-    crate::eval::adjust_body(&mut body);
+    crate::ai::eval::adjust_body(&mut body);
     // A request to the on-device sidecar is counted while it runs: its
     // runtime isn't swapped nor its context changed under it, and the
     // warm-up gives way (`local_llm::request_starting`). A streamed answer
     // runs until its last chunk.
-    let _busy = crate::local_llm::request_starting(base_url);
+    let _busy = crate::ai::local_llm::request_starting(base_url);
 
     // A request carrying screenshots uploads them too: more time (Snip to
     // Chat; a cloud Chat call's 20 s covered the upload as well).
     let timeout = if crate::snip::turn::has_images(&body) { timeout.max(IMAGE_TIMEOUT) } else { timeout };
     let client = reqwest::Client::builder()
-        .timeout(crate::eval::timeout(timeout))
+        .timeout(crate::ai::eval::timeout(timeout))
         .build()
         .map_err(|e| format!("failed to build HTTP client: {}", e))?;
 
     // A model evaluation (`eval.rs`, debug builds) paces its calls and logs
     // every request and response; otherwise a no-op.
-    let call = crate::eval::Call::start(provider, &endpoint, &body).await;
+    let call = crate::ai::eval::Call::start(provider, &endpoint, &body).await;
 
     // A rate limit (429) is waited out when the caller is happy to wait
     // (`rate_limit_patience` in all, as long as the provider says — else 2 s,
@@ -1261,7 +1261,7 @@ async fn post_chat_request(
                     .map(str::to_string)
             };
             let (retry_ms, retry_s) = (header("retry-after-ms"), header("retry-after"));
-            let limits = crate::eval::limit_headers(resp.headers());
+            let limits = crate::ai::eval::limit_headers(resp.headers());
             // Surface a little of the body to help the user debug (no key in it).
             let detail = resp.text().await.unwrap_or_default();
             call.refused(status.as_u16(), &limits, &detail);
@@ -1337,7 +1337,7 @@ async fn post_chat_request(
             let detail: String = detail.chars().take(300).collect();
             return Err(call.failed(format!("HTTP {}: {}", status.as_u16(), detail)));
         };
-        let limits = crate::eval::limit_headers(resp.headers());
+        let limits = crate::ai::eval::limit_headers(resp.headers());
 
         // Capture Groq's daily request headers BEFORE consuming the body. These are
         // absent on non-Groq endpoints (local servers, OpenAI), which is fine — the
@@ -1373,7 +1373,7 @@ async fn post_chat_request(
                     let whole = asm.response(&message);
                     call.answered(&limits, &whole);
                     let total_tokens = whole["usage"]["total_tokens"].as_u64().unwrap_or(0);
-                    crate::usage::record(provider, total_tokens, remaining_req, limit_req);
+                    crate::ai::usage::record(provider, total_tokens, remaining_req, limit_req);
                     return Ok(message);
                 }
                 Err(ReadFail::Rejected(why)) => return Err(call.failed(format!("{TOOL_CALL_REJECTED}{why}"))),
@@ -1402,7 +1402,7 @@ async fn post_chat_request(
 
         // Best-effort daily-usage accounting (never fails the call).
         let total_tokens = value["usage"]["total_tokens"].as_u64().unwrap_or(0);
-        crate::usage::record(provider, total_tokens, remaining_req, limit_req);
+        crate::ai::usage::record(provider, total_tokens, remaining_req, limit_req);
 
         let message = value["choices"][0]["message"].clone();
         if message.is_null() {

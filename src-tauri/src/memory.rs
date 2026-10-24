@@ -94,7 +94,7 @@ fn memory_path() -> PathBuf {
 
 #[cfg(not(test))]
 fn load_from_disk() -> Store {
-    if crate::eval::active() {
+    if crate::ai::eval::active() {
         return Store::default();
     }
     let path = memory_path();
@@ -129,7 +129,7 @@ fn save_now() -> Result<(), crate::saving::SaveError> {
 #[cfg(not(test))]
 fn save_to_disk(store: &Store) {
     // A model evaluation keeps its memory in memory only.
-    if crate::eval::active() {
+    if crate::ai::eval::active() {
         return;
     }
     let _ = SAVER.write_json(&memory_path(), store, false);
@@ -412,7 +412,7 @@ pub fn relevant_block(question: &str) -> Option<String> {
 /// The block a notepad helper ends with: About you's name and note, then
 /// what Yap remembers about the person. "" when there's nothing.
 pub fn helper_block(cfg: &crate::config::YapConfig) -> String {
-    let profile = crate::about_you::profile(cfg);
+    let profile = crate::ai::about_you::profile(cfg);
     let mut parts = Vec::new();
     if !profile.name.is_empty() {
         parts.push(format!("The user's name is {}.", profile.name));
@@ -752,7 +752,7 @@ pub fn memory_apply(proposal: u64, include: Option<Vec<usize>>) -> Result<Applie
 #[tauri::command]
 pub fn memory_export(path: String) -> Result<(), String> {
     // About you's region, name and note head You.md: they're "You" too.
-    let p = crate::about_you::profile(&crate::config::load());
+    let p = crate::ai::about_you::profile(&crate::config::load());
     let about = [
         ("Name", p.name),
         ("Region", p.region.country_name.unwrap_or_default()),

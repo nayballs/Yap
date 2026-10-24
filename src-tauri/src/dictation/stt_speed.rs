@@ -517,7 +517,7 @@ pub fn device_for(model_id: &str, use_gpu: bool) -> Device {
     };
     // (Moonshine's words come out wrong on DirectML: the processor until
     // its own timing here says otherwise.)
-    let unmeasured = if stt::wrong_on_directml(model_id) { Device::Cpu } else { crate::hardware::speech_device_here() };
+    let unmeasured = if stt::wrong_on_directml(model_id) { Device::Cpu } else { crate::ai::hardware::speech_device_here() };
     device_choice(&setting, use_gpu && synced_gpu, measured, unmeasured)
 }
 
@@ -587,7 +587,7 @@ fn has_gpu() -> bool {
     if crate::e2e::active() && std::env::var_os("YAP_E2E_GPU").is_none() {
         return true;
     }
-    crate::gpu::this_pc().is_some()
+    crate::ai::gpu::this_pc().is_some()
 }
 
 /// How busy the processor is (percent of all cores) over `over`, from

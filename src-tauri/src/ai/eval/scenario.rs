@@ -1315,7 +1315,7 @@ pub fn observed_json(o: &Observed) -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::eval::record::ToolCall;
+    use crate::ai::eval::record::ToolCall;
 
     fn obs(reply: &str) -> Observed {
         Observed { reply: reply.to_string(), ..Default::default() }

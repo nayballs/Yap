@@ -221,7 +221,7 @@ pub async fn with_history_images(messages: &mut [Value], earlier: &[ChatMessage]
     if !earlier.iter().any(|m| !m.images.is_empty()) {
         return;
     }
-    let here = crate::ai_model::runs_here(provider, base_url);
+    let here = crate::ai::ai_model::runs_here(provider, base_url);
     let budget = history_budget(provider, here, images().len());
     let edge = super::images::long_edge(provider, here);
     let exists = |id: &str| super::images::exists(id);
@@ -241,7 +241,7 @@ pub async fn with_history_images(messages: &mut [Value], earlier: &[ChatMessage]
 /// stored images (ids checked, at most the provider's per-request cap) and
 /// their copies fitted for `provider`.
 pub async fn prepare(ids: &[String], provider: &str, base_url: &str) -> Result<TurnImages, String> {
-    let here = crate::ai_model::runs_here(provider, base_url);
+    let here = crate::ai::ai_model::runs_here(provider, base_url);
     let edge = super::images::long_edge(provider, here);
     let per = super::images::per_request(provider);
     let ids: Vec<String> = ids.iter().filter(|id| super::images::is_id(id)).take(per).cloned().collect();

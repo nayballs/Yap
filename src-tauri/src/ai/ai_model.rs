@@ -31,7 +31,7 @@ use tauri::{AppHandle, Emitter};
 
 use crate::chat::chats::ChatModel;
 use crate::config::YapConfig;
-use crate::local_llm::PROVIDER_ONDEVICE;
+use crate::ai::local_llm::PROVIDER_ONDEVICE;
 
 /// Cloud providers that need a key (and share one key across every scope).
 pub const KEYED_PROVIDERS: [&str; 5] = ["groq", "anthropic", "openai", "gemini", "openrouter"];
@@ -92,10 +92,10 @@ pub struct OnDevice {
 impl OnDevice {
     pub fn here(cfg: &YapConfig) -> Self {
         OnDevice {
-            installed: crate::local_llm::is_installed(cfg),
-            name: crate::local_llm::active_model_display(cfg),
-            id: crate::local_llm::active_model_id(cfg),
-            context: crate::local_llm::context_now(cfg),
+            installed: crate::ai::local_llm::is_installed(cfg),
+            name: crate::ai::local_llm::active_model_display(cfg),
+            id: crate::ai::local_llm::active_model_id(cfg),
+            context: crate::ai::local_llm::context_now(cfg),
         }
     }
 }
@@ -208,7 +208,7 @@ pub fn target(cfg: &YapConfig, scope: Scope, on_device: &OnDevice) -> Result<Tar
                 if !on_device.installed {
                     return Err(NOT_INSTALLED.to_string());
                 }
-                let url = crate::local_llm::base_url().unwrap_or_default();
+                let url = crate::ai::local_llm::base_url().unwrap_or_default();
                 (PROVIDER_ONDEVICE.to_string(), on_device.id.clone(), url)
             } else {
                 let (b, _key, m, p, _persona, _thinking) =
@@ -230,10 +230,10 @@ pub async fn wake_on_device(cfg: &YapConfig) -> Result<(), String> {
     if configured_provider(cfg, Scope::Chat) != PROVIDER_ONDEVICE {
         return Ok(());
     }
-    if !crate::local_llm::is_installed(cfg) {
+    if !crate::ai::local_llm::is_installed(cfg) {
         return Err(NOT_INSTALLED.to_string());
     }
-    crate::local_llm::ensure_started()
+    crate::ai::local_llm::ensure_started()
         .await
         .map(|_| ())
         .map_err(|e| format!("Yap's on-device model didn't start: {e}"))
@@ -379,7 +379,7 @@ pub fn set_local_model(cfg: &mut YapConfig, file: &str, on_disk: &[String]) -> R
     if name.is_empty() || name.contains(['/', '\\']) || name.contains("..") || !on_disk.iter().any(|f| f == name) {
         return Err(format!("{name} isn't downloaded on this PC"));
     }
-    cfg.pp_local_model = if name == crate::local_llm::MODEL_FILENAME {
+    cfg.pp_local_model = if name == crate::ai::local_llm::MODEL_FILENAME {
         String::new()
     } else {
         name.to_string()
@@ -510,7 +510,7 @@ pub fn set_chat_model(
     }
     let server_key = server
         .as_ref()
-        .map(|s| crate::model_catalog::endpoint_key(cfg, Some(&s.scope), provider));
+        .map(|s| crate::ai::model_catalog::endpoint_key(cfg, Some(&s.scope), provider));
     let cleanup_url = (cfg.pp_provider == provider && !cfg.pp_base_url.is_empty())
         .then(|| cfg.pp_base_url.clone());
     let scope_keys = cfg
@@ -575,7 +575,7 @@ pub fn chat_set_model(
     file: Option<String>,
 ) -> Result<Status, String> {
     let local_file = if provider == PROVIDER_ONDEVICE { file } else { None };
-    let on_disk = local_file.as_ref().map(|_| crate::local_llm::list_models());
+    let on_disk = local_file.as_ref().map(|_| crate::ai::local_llm::list_models());
     // In one step (never over a change saved meanwhile); refused: nothing saved.
     let cfg = crate::commands::change_config(&app, |cfg| {
         if let (Some(f), Some(on_disk)) = (&local_file, &on_disk) {
@@ -589,17 +589,17 @@ pub fn chat_set_model(
     if local_file.is_some() {
         changed["ppLocalModel"] = serde_json::json!(cfg.pp_local_model);
         // The sidecar serving another GGUF: off, so it starts on this one.
-        let wanted = crate::local_llm::model_id(&crate::local_llm::active_model_path(&cfg));
-        if crate::local_llm::serving_model_id().is_some_and(|id| id != wanted) {
-            crate::local_llm::stop();
+        let wanted = crate::ai::local_llm::model_id(&crate::ai::local_llm::active_model_path(&cfg));
+        if crate::ai::local_llm::serving_model_id().is_some_and(|id| id != wanted) {
+            crate::ai::local_llm::stop();
         }
     }
     let _ = app.emit("yap-chat-model-changed", changed);
     let on_device = OnDevice::here(&cfg);
-    if provider == PROVIDER_ONDEVICE && !crate::local_llm::is_running() {
+    if provider == PROVIDER_ONDEVICE && !crate::ai::local_llm::is_running() {
         let app = app.clone();
         tauri::async_runtime::spawn(async move {
-            if let Err(e) = crate::local_llm::ensure_started().await {
+            if let Err(e) = crate::ai::local_llm::ensure_started().await {
                 tracing::warn!("On-device model for chat didn't start: {}", e);
             }
             // Chips re-read; no scope, so Settings has nothing to adopt.
@@ -937,14 +937,14 @@ mod tests {
     #[test]
     fn the_on_device_model_is_picked_by_its_file() {
         let on_disk = vec![
-            crate::local_llm::MODEL_FILENAME.to_string(),
+            crate::ai::local_llm::MODEL_FILENAME.to_string(),
             "Qwen_Qwen3.5-4B-Q4_K_M.gguf".to_string(),
         ];
         let mut c = cfg();
         set_local_model(&mut c, "Qwen_Qwen3.5-4B-Q4_K_M.gguf", &on_disk).unwrap();
         assert_eq!(c.pp_local_model, "Qwen_Qwen3.5-4B-Q4_K_M.gguf");
         // The bundled default is "" (what an empty pick means).
-        set_local_model(&mut c, crate::local_llm::MODEL_FILENAME, &on_disk).unwrap();
+        set_local_model(&mut c, crate::ai::local_llm::MODEL_FILENAME, &on_disk).unwrap();
         assert_eq!(c.pp_local_model, "");
         // Only a file that's there, by its bare name.
         assert!(set_local_model(&mut c, "missing.gguf", &on_disk).is_err());

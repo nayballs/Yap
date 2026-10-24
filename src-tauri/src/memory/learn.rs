@@ -49,7 +49,7 @@ pub struct Endpoint {
 
 impl Endpoint {
     fn local(&self) -> bool {
-        crate::ai_model::runs_here(&self.provider, &self.base_url)
+        crate::ai::ai_model::runs_here(&self.provider, &self.base_url)
     }
 }
 
@@ -74,7 +74,7 @@ fn dictation_busy(app: &AppHandle) -> bool {
 /// (`background`: give up after one dictation got in the way).
 async fn ask(ep: &Endpoint, system: &str, user: &str, max_changes: usize, background: bool) -> Result<String, String> {
     let local = ep.local();
-    let opts = crate::llm::ChatOptions {
+    let opts = crate::ai::llm::ChatOptions {
         temperature: 0.2,
         max_tokens: local.then_some(if max_changes > 8 { 2_000 } else { 800 }),
         // A 4B model on a processor writes ~10 tokens a second.
@@ -114,20 +114,20 @@ async fn ask(ep: &Endpoint, system: &str, user: &str, max_changes: usize, backgr
         return call(ep, &messages, &opts, serde_json::Map::new()).await;
     }
     // The on-device model is busy for the whole pass, waits included.
-    let _sidecar = crate::local_llm::hold(&ep.base_url);
+    let _sidecar = crate::ai::local_llm::hold(&ep.base_url);
     beside_dictation(background, || call(ep, &messages, &opts, schema.clone())).await
 }
 
 /// One call to the Chat model with `extra` laid over the body (a
 /// `response_format`); a server that won't take the schema is asked once
 /// more without it.
-async fn call(ep: &Endpoint, messages: &Value, opts: &crate::llm::ChatOptions, extra: serde_json::Map<String, Value>) -> Result<String, String> {
-    let ask = crate::llm::chat_with(&ep.base_url, &ep.api_key, &ep.model, &ep.provider, messages.clone(), opts, extra.clone());
+async fn call(ep: &Endpoint, messages: &Value, opts: &crate::ai::llm::ChatOptions, extra: serde_json::Map<String, Value>) -> Result<String, String> {
+    let ask = crate::ai::llm::chat_with(&ep.base_url, &ep.api_key, &ep.model, &ep.provider, messages.clone(), opts, extra.clone());
     let out = crate::privacy::net::within(crate::privacy::net::Feature::Memory, ask).await;
     match out {
         Err(e) if !extra.is_empty() && (e.contains("response_format") || e.contains("400") || e.contains("schema")) => {
             tracing::info!("Memory: the model's server refused the JSON schema; asking without it");
-            let ask = crate::llm::chat_with(&ep.base_url, &ep.api_key, &ep.model, &ep.provider, messages.clone(), opts, serde_json::Map::new());
+            let ask = crate::ai::llm::chat_with(&ep.base_url, &ep.api_key, &ep.model, &ep.provider, messages.clone(), opts, serde_json::Map::new());
             crate::privacy::net::within(crate::privacy::net::Feature::Memory, ask).await
         }
         other => other,
@@ -164,7 +164,7 @@ where
 /// nothing is applied, and the chat is read again later).
 async fn extract(ep: &Endpoint, candidates: &[small::Candidate], background: bool) -> Result<Vec<small::Extracted>, String> {
     let local = ep.local();
-    let opts = crate::llm::ChatOptions {
+    let opts = crate::ai::llm::ChatOptions {
         temperature: 0.0,
         max_tokens: Some(80),
         timeout: Duration::from_secs(if local { 60 } else { 30 }),
@@ -172,7 +172,7 @@ async fn extract(ep: &Endpoint, candidates: &[small::Candidate], background: boo
     };
     let mut schema = serde_json::Map::new();
     schema.insert("response_format".into(), json!({ "type": "json_schema", "json_schema": { "name": "memory_item", "schema": small::schema() } }));
-    let _sidecar = (local && candidates.iter().any(small::needs_model)).then(|| crate::local_llm::hold(&ep.base_url));
+    let _sidecar = (local && candidates.iter().any(small::needs_model)).then(|| crate::ai::local_llm::hold(&ep.base_url));
     let mut out = Vec::new();
     for c in candidates {
         // A preference is the person's own words: no call.
@@ -251,7 +251,7 @@ fn small_changes(candidates: &[small::Candidate], answers: &[small::Extracted], 
 /// them), or — a model evaluation comparing, `YAP_EVAL_MEMORY_JSON` —
 /// "schema", "object" (`json_object`) or "off" for every model.
 fn json_mode() -> &'static str {
-    if crate::eval::active() {
+    if crate::ai::eval::active() {
         match std::env::var("YAP_EVAL_MEMORY_JSON").as_deref() {
             Ok("schema") => return "schema",
             Ok("object") => return "object",
@@ -286,7 +286,7 @@ pub enum Path {
 /// else [`Path::Small`]. A model evaluation may choose
 /// (`YAP_EVAL_MEMORY_PATH=full|small`).
 pub fn path(ep: &Endpoint) -> Path {
-    if crate::eval::active() {
+    if crate::ai::eval::active() {
         match std::env::var("YAP_EVAL_MEMORY_PATH").as_deref() {
             Ok("full") => return Path::Full,
             Ok("small") => return Path::Small,
@@ -309,8 +309,8 @@ pub fn path(ep: &Endpoint) -> Path {
 /// measured), and so do meetings, Tell and imports. A model evaluation may
 /// choose (`YAP_EVAL_MEMORY_PATH`).
 pub fn chat_path(ep: &Endpoint) -> Path {
-    let forced = crate::eval::active() && matches!(std::env::var("YAP_EVAL_MEMORY_PATH").as_deref(), Ok("full" | "small"));
-    if !forced && matches!(ep.provider.as_str(), crate::local_llm::PROVIDER_ONDEVICE | "local") {
+    let forced = crate::ai::eval::active() && matches!(std::env::var("YAP_EVAL_MEMORY_PATH").as_deref(), Ok("full" | "small"));
+    if !forced && matches!(ep.provider.as_str(), crate::ai::local_llm::PROVIDER_ONDEVICE | "local") {
         return Path::Small;
     }
     path(ep)
@@ -324,10 +324,10 @@ fn on_processor(ep: &Endpoint) -> bool {
     if !ep.local() {
         return false;
     }
-    if let Some(gpu) = crate::eval::local_on_gpu() {
+    if let Some(gpu) = crate::ai::eval::local_on_gpu() {
         return !gpu;
     }
-    !(ep.provider == crate::local_llm::PROVIDER_ONDEVICE && crate::local_llm::placement().is_some_and(|p| p.kind() == "gpu"))
+    !(ep.provider == crate::ai::local_llm::PROVIDER_ONDEVICE && crate::ai::local_llm::placement().is_some_and(|p| p.kind() == "gpu"))
 }
 
 /// The small path's sentences a pass: on the processor 3 (each ~1–3 s of it
@@ -351,7 +351,7 @@ static PROCESSOR_TODAY: Mutex<(u64, u32)> = Mutex::new((0, 0));
 /// Take one of today's processor passes (`false`: none left). Not counted
 /// in a model evaluation.
 fn take_processor_pass() -> bool {
-    if crate::eval::active() {
+    if crate::ai::eval::active() {
         return true;
     }
     let day = super::now_secs() / 86_400;
@@ -369,7 +369,7 @@ fn take_processor_pass() -> bool {
 /// Is the on-device model the Chat model, and stopped? A background pass
 /// doesn't start it.
 fn on_device_stopped(ep: &Endpoint) -> bool {
-    ep.provider == crate::local_llm::PROVIDER_ONDEVICE && !crate::local_llm::is_running()
+    ep.provider == crate::ai::local_llm::PROVIDER_ONDEVICE && !crate::ai::local_llm::is_running()
 }
 
 /// **Read a conversation's new messages for lasting facts** and change
@@ -393,7 +393,7 @@ pub async fn learn_from_chat(conversation: u64, announce: bool) -> Result<Applie
     if small {
         return learn_small(conversation, &conv.title, &user_texts, len, announce, &cfg, &ep).await;
     }
-    if on_device_stopped(&ep) && !crate::eval::active() {
+    if on_device_stopped(&ep) && !crate::ai::eval::active() {
         return Err(DEFERRED.to_string());
     }
     let pair = |m: &crate::chat::chats::ChatMessage| (m.role.clone(), m.text.clone());
@@ -405,9 +405,9 @@ pub async fn learn_from_chat(conversation: u64, announce: bool) -> Result<Applie
         "The chat (only what the user says about themselves counts)",
         &prompt::chat_excerpt(&before, &fresh, budget),
     );
-    let reply = ask(&ep, &prompt::learn_chat_system(cfg.memory_sensitive), &user, 5, !crate::eval::active()).await?;
+    let reply = ask(&ep, &prompt::learn_chat_system(cfg.memory_sensitive), &user, 5, !crate::ai::eval::active()).await?;
     let changes = ops::route_preferences(ops::parse_changes(&reply), &super::items());
-    let about_you = crate::about_you::profile(&cfg);
+    let about_you = crate::ai::about_you::profile(&cfg);
     let changes = ops::drop_about_you(changes, &super::items(), &about_you.name, &about_you.about);
     // Grounded in what the person said (theirs, not the AI's answers).
     let said: Vec<&str> = conv.messages[start.saturating_sub(2)..].iter().filter(|m| m.role == "user").map(|m| m.text.as_str()).collect();
@@ -457,7 +457,7 @@ async fn learn_small(
         candidates.drain(..candidates.len() - cap);
     }
     if !candidates.is_empty() {
-        if on_device_stopped(ep) && !crate::eval::active() {
+        if on_device_stopped(ep) && !crate::ai::eval::active() {
             return Err(DEFERRED.to_string());
         }
         if processor && !take_processor_pass() {
@@ -465,11 +465,11 @@ async fn learn_small(
         }
     }
     let t0 = Instant::now();
-    let answers = extract(ep, &candidates, !crate::eval::active()).await?;
+    let answers = extract(ep, &candidates, !crate::ai::eval::active()).await?;
     let items = super::items();
     let (changes, dropped) = small_changes(&candidates, &answers, &found.left, &items);
     let changes = ops::route_preferences(changes, &items);
-    let about_you = crate::about_you::profile(cfg);
+    let about_you = crate::ai::about_you::profile(cfg);
     let changes = ops::drop_about_you(changes, &items, &about_you.name, &about_you.about);
     let mut grounding: Vec<String> = candidates.iter().map(|c| c.text.clone()).collect();
     grounding.extend(found.left.iter().cloned());
@@ -517,7 +517,7 @@ pub async fn learn_from_meeting(note_id: u64) -> Result<Applied, String> {
         super::meeting_read(note_id, true);
         return Ok(nothing());
     }
-    if on_device_stopped(&ep) && !crate::eval::active() {
+    if on_device_stopped(&ep) && !crate::ai::eval::active() {
         return Err(DEFERRED.to_string());
     }
     let (plan, _) = crate::chat::note_text::fit(&note.enhanced_content, 1_500);
@@ -527,7 +527,7 @@ pub async fn learn_from_meeting(note_id: u64) -> Result<Applied, String> {
     }
     body.push_str(&format!("\nYap's notes after the meeting:\n{}", plan.trim()));
     let user = prompt::pass_input(&prompt::listing(&super::items(), 900), "The meeting", &body);
-    let reply = ask(&ep, &prompt::learn_meeting_system(cfg.memory_sensitive), &user, 5, !crate::eval::active()).await?;
+    let reply = ask(&ep, &prompt::learn_meeting_system(cfg.memory_sensitive), &user, 5, !crate::ai::eval::active()).await?;
     let changes: Vec<Change> = ops::parse_changes(&reply)
         .into_iter()
         // People and projects only (and updates of them).
@@ -552,7 +552,7 @@ pub async fn learn_from_meeting(note_id: u64) -> Result<Applied, String> {
 /// once, when "Learn from meetings" is on.
 pub fn meeting_ended(note_id: u64) {
     let cfg = crate::config::load();
-    if !cfg.memory_learn_meetings || super::meeting_read(note_id, false) || crate::eval::active() {
+    if !cfg.memory_learn_meetings || super::meeting_read(note_id, false) || crate::ai::eval::active() {
         return;
     }
     tauri::async_runtime::spawn(async move {
@@ -596,7 +596,7 @@ fn activity<R>(f: impl FnOnce(&mut HashMap<u64, Instant>) -> R) -> R {
 /// The scheduler runs in the app only (not a test run, not an evaluation:
 /// those call the passes themselves).
 fn scheduled() -> bool {
-    !crate::e2e::active() && !crate::eval::active() && super::app().is_some()
+    !crate::e2e::active() && !crate::ai::eval::active() && super::app().is_some()
 }
 
 /// A chat turn was answered in `conversation`: it's read once it's been
@@ -769,7 +769,7 @@ pub async fn propose(text: &str, kind: Kind) -> Result<Proposal, String> {
         });
     }
     let cfg = crate::config::load();
-    crate::ai_model::wake_on_device(&cfg).await?;
+    crate::ai::ai_model::wake_on_device(&cfg).await?;
     let ep = endpoint(&cfg)?;
     // Told by the person themselves: theirs to keep. An import, reviewed,
     // follows the setting.
@@ -811,7 +811,7 @@ pub async fn propose(text: &str, kind: Kind) -> Result<Proposal, String> {
     // An import doesn't copy what About you says; a Tell is the person's
     // own ask.
     if kind == Kind::Import {
-        let about_you = crate::about_you::profile(&cfg);
+        let about_you = crate::ai::about_you::profile(&cfg);
         changes = ops::drop_about_you(changes, &super::items(), &about_you.name, &about_you.about);
     }
     Ok(keep_proposal(changes, kind, sensitive_ok, text))
@@ -834,7 +834,7 @@ async fn propose_small(text: &str, kind: Kind, sensitive_ok: bool, cfg: &crate::
     let (changes, dropped) = small_changes(&candidates, &answers, &found.left, &items);
     let mut changes = ops::route_preferences(changes, &items);
     if kind == Kind::Import {
-        let about_you = crate::about_you::profile(cfg);
+        let about_you = crate::ai::about_you::profile(cfg);
         changes = ops::drop_about_you(changes, &items, &about_you.name, &about_you.about);
     }
     tracing::info!(kind = ?kind, asked = candidates.len(), left_out = dropped, changes = changes.len(), ms = t0.elapsed().as_millis() as u64, "Memory (small model): proposed changes");

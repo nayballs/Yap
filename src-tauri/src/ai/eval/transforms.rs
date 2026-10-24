@@ -186,7 +186,7 @@ pub async fn run(cases: &[Case], ep: &Endpoint<'_>, repeat: u32) -> Value {
             record::set_context(json!({ "model": ep.model, "scenario": name }));
             record::begin_turn();
             let t0 = Instant::now();
-            let asked = crate::llm::transform(&t.instruction(), &c.text, ep.base_url, ep.key, ep.model, ep.provider, false).await;
+            let asked = crate::ai::llm::transform(&t.instruction(), &c.text, ep.base_url, ep.key, ep.model, ep.provider, false).await;
             let ms = t0.elapsed().as_millis() as u64;
             let stats = record::end_turn();
             tokens += stats.total_tokens;

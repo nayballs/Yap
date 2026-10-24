@@ -183,10 +183,10 @@ fn installed() -> Vec<&'static str> {
 fn language(cfg: &crate::config::YapConfig) -> Option<String> {
     let picked = cfg.selected_language.trim();
     if !picked.is_empty() && picked != "auto" {
-        return Some(crate::about_you::split_tag(picked).0);
+        return Some(crate::ai::about_you::split_tag(picked).0);
     }
-    let region = crate::about_you::profile(cfg).region;
-    region.language.map(|tag| crate::about_you::split_tag(&tag).0).filter(|l| !l.is_empty())
+    let region = crate::ai::about_you::profile(cfg).region;
+    region.language.map(|tag| crate::ai::about_you::split_tag(&tag).0).filter(|l| !l.is_empty())
 }
 
 /// Whether a meeting ending now might be refined (its audio is held for

@@ -706,7 +706,7 @@ const EXAMPLE_OUT: &str = "- Last time you kept the spring opening date, and the
 pub fn messages(facts: &Facts) -> Option<Value> {
     facts.worth_a_call().then(|| {
         json!([
-            { "role": "system", "content": crate::llm::MEETING_BRIEF_PROMPT },
+            { "role": "system", "content": crate::ai::llm::MEETING_BRIEF_PROMPT },
             { "role": "user", "content": EXAMPLE_IN },
             { "role": "assistant", "content": EXAMPLE_OUT },
             { "role": "user", "content": facts.model_input() },
@@ -1330,7 +1330,7 @@ pub async fn write(
     let ask = async {
         match app {
             Some(app) => crate::meetings::meeting_summary::chat_beside_dictation(app, ep, messages, &opts).await,
-            None => crate::llm::chat(&ep.base_url, &ep.api_key, &ep.model, &ep.provider, messages, &opts).await,
+            None => crate::ai::llm::chat(&ep.base_url, &ep.api_key, &ep.model, &ep.provider, messages, &opts).await,
         }
     };
     let reply = crate::privacy::net::within(crate::privacy::net::Feature::Brief, ask).await?;
@@ -1805,7 +1805,7 @@ mod tests {
 
     #[test]
     fn the_prompt_keeps_the_guardrails() {
-        let p = crate::llm::MEETING_BRIEF_PROMPT;
+        let p = crate::ai::llm::MEETING_BRIEF_PROMPT;
         assert!(p.contains("never invent"));
         assert!(p.contains("too little"));
         assert!(p.contains("[1]"));

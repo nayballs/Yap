@@ -32,7 +32,7 @@ pub async fn run(file: &std::path::Path, keys: &std::collections::HashMap<String
         let base = r["base_url"]
             .as_str()
             .map(str::to_string)
-            .or_else(|| crate::ai_model::standard_base_url(&provider).map(str::to_string))
+            .or_else(|| crate::ai::ai_model::standard_base_url(&provider).map(str::to_string))
             .ok_or_else(|| format!("{name}: no base_url for provider {provider}"))?;
         let endpoint = format!("{}/chat/completions", base.trim_end_matches('/'));
         let key = keys.get(&provider).cloned().unwrap_or_default();
@@ -59,7 +59,7 @@ pub async fn run(file: &std::path::Path, keys: &std::collections::HashMap<String
         super::record::set_context(json!({ "spike": name, "request": i + 1 }));
         super::record::begin_turn();
         println!("  [{}/{}] {name} …", i + 1, requests.len());
-        let call = crate::eval::Call::start(&provider, &endpoint, &body).await;
+        let call = crate::ai::eval::Call::start(&provider, &endpoint, &body).await;
         let started = Instant::now(); // after the pacing
         call.send(&body);
         let client = reqwest::Client::builder().timeout(Duration::from_secs(120)).build().map_err(|e| e.to_string())?;
@@ -74,7 +74,7 @@ pub async fn run(file: &std::path::Path, keys: &std::collections::HashMap<String
             }
             Ok(resp) => {
                 let status = resp.status().as_u16();
-                let limits = crate::eval::limit_headers(resp.headers());
+                let limits = crate::ai::eval::limit_headers(resp.headers());
                 let text = resp.text().await.unwrap_or_default();
                 let value: Value = serde_json::from_str(&text).unwrap_or_else(|_| json!(text));
                 if (200..300).contains(&status) {

@@ -419,7 +419,7 @@ pub fn context_choices(model_max: Option<u64>, current: u32) -> Vec<u32> {
 /// What a model was trained for: its GGUF's header, else the curated
 /// entry's figure (a file not downloaded yet, or one being written).
 pub fn trained_context(path: &Path) -> Option<u64> {
-    crate::gguf::model_file(path)
+    crate::ai::gguf::model_file(path)
         .and_then(|f| f.shape.context_length)
         .or_else(|| {
             let file = path.file_name()?.to_str()?;
@@ -498,9 +498,9 @@ pub struct Plan {
 
 impl Plan {
     /// The memory estimate's view of it (`gguf::estimate`).
-    pub fn server(self) -> crate::gguf::Server {
+    pub fn server(self) -> crate::ai::gguf::Server {
         let current = self.runtime.is_current();
-        crate::gguf::Server { current, mtp: current && self.mtp }
+        crate::ai::gguf::Server { current, mtp: current && self.mtp }
     }
 }
 
@@ -1337,7 +1337,7 @@ pub fn mtp_allowed(runtime: Version, setting: bool, vendor: Option<u32>, failed_
 /// generation ~165 → ~255 tokens/s, greedy outputs unchanged, ~+0.85 GB on
 /// the card.
 pub fn plan_for(cfg: &crate::config::YapConfig, model: &Path, ctx: u32, runtime: Version) -> Plan {
-    let gpu = crate::gpu::this_pc();
+    let gpu = crate::ai::gpu::this_pc();
     let failed = mtp_failed_here(&llm_dir(), &mtp_key(runtime, model));
     let mtp = mtp_allowed(runtime, cfg.local_mtp, gpu.as_ref().map(|g| g.vendor), failed)
         && mtp_fits(model, ctx, gpu.map(|g| g.vram_mib));
@@ -1349,13 +1349,13 @@ pub fn plan_for(cfg: &crate::config::YapConfig, model: &Path, ctx: u32, runtime:
 /// the apps on screen and Yap's speech model keep there)? `false` without a
 /// card of its own.
 pub fn mtp_fits(model: &Path, ctx: u32, vram_mib: Option<u64>) -> bool {
-    let Some(f) = crate::gguf::model_file(model) else { return false };
+    let Some(f) = crate::ai::gguf::model_file(model) else { return false };
     if !f.shape.has_mtp() || !runs_on_card(None, vram_mib) {
         return false;
     }
     let Some(room) = card_room(vram_mib) else { return false };
-    let server = crate::gguf::Server { current: true, mtp: true };
-    crate::gguf::estimate(&f.shape, f.bytes, ctx as u64, true, server).total_mib <= room
+    let server = crate::ai::gguf::Server { current: true, mtp: true };
+    crate::ai::gguf::estimate(&f.shape, f.bytes, ctx as u64, true, server).total_mib <= room
 }
 
 /// Launch the runtime on the configured model and wait for `/health`; then
@@ -1463,7 +1463,7 @@ async fn spawn_and_wait(attempt: Attempt, gen: u64) -> Result<Started, Failed> {
                     return Err(fail(Failure::Stopped));
                 }
                 if let Ok(mut s) = SERVING.lock() {
-                    let hybrid = crate::gguf::model_file(&model).is_some_and(|f| f.shape.is_hybrid());
+                    let hybrid = crate::ai::gguf::model_file(&model).is_some_and(|f| f.shape.is_hybrid());
                     *s = Some(Serving { model_id: model_id(&model), placement, ctx, plan, hybrid, facts });
                 }
                 READY.store(true, Ordering::SeqCst);
@@ -1524,9 +1524,9 @@ pub struct WarmUp {
 /// request anyone waits for, and it isn't counted as one.
 pub async fn warm_up(url: &str, model: &str) -> WarmUp {
     let cfg = crate::config::load();
-    let spelling = crate::about_you::cleanup_spelling(&cfg);
-    let split = crate::llm::splits_dictation(url, model);
-    let messages = crate::llm::cleanup_messages(WARM_UP_TEXT, &cfg.pp_prompt, spelling.as_deref(), &cfg.dictionary, split);
+    let spelling = crate::ai::about_you::cleanup_spelling(&cfg);
+    let split = crate::ai::llm::splits_dictation(url, model);
+    let messages = crate::ai::llm::cleanup_messages(WARM_UP_TEXT, &cfg.pp_prompt, spelling.as_deref(), &cfg.dictionary, split);
     let body = serde_json::json!({
         "model": model,
         "stream": false,
@@ -2210,7 +2210,7 @@ pub async fn probe_version(exe: &Path) -> Option<Version> {
 #[serde(rename_all = "camelCase")]
 pub struct ContextOption {
     pub tokens: u32,
-    /// ≈ MiB the model takes at it ([`crate::gguf::estimate`]); `None`
+    /// ≈ MiB the model takes at it ([`crate::ai::gguf::estimate`]); `None`
     /// when its file can't be read.
     pub estimate_mib: Option<u64>,
     /// More than the graphics card has room for: layers would go to the
@@ -2268,13 +2268,13 @@ pub fn runs_on_card(placement: Option<Placement>, vram_mib: Option<u64>) -> bool
 /// The context view for the active model ([`ContextView`]).
 pub fn context_view(cfg: &crate::config::YapConfig) -> ContextView {
     let path = active_model_path(cfg);
-    let file = crate::gguf::model_file(&path);
+    let file = crate::ai::gguf::model_file(&path);
     let max = trained_context(&path);
     let tokens = effective_context(cfg.local_context, max);
     let running = shown_running();
     let placement = running.then(placement).flatten();
     let facts = running.then(serving_facts).flatten();
-    let gpu = crate::gpu::this_pc();
+    let gpu = crate::ai::gpu::this_pc();
     let vram = gpu.as_ref().map(|g| g.vram_mib);
     let on_card = runs_on_card(placement, vram);
     let room = on_card.then(|| card_room(vram)).flatten();
@@ -2286,7 +2286,7 @@ pub fn context_view(cfg: &crate::config::YapConfig) -> ContextView {
             let server = plan_for(cfg, &path, c, runtime).server();
             let estimate_mib = file
                 .as_ref()
-                .map(|f| crate::gguf::estimate(&f.shape, f.bytes, c as u64, on_card, server).total_mib);
+                .map(|f| crate::ai::gguf::estimate(&f.shape, f.bytes, c as u64, on_card, server).total_mib);
             ContextOption {
                 tokens: c,
                 estimate_mib,
@@ -3329,9 +3329,9 @@ mod tests {
     fn mtp_only_for_a_model_that_can_draft_on_a_card_with_room() {
         let dir = scratch("mtp");
         let qwen35 = dir.join("Qwen_Qwen3.5-4B-Q4_K_M.gguf");
-        std::fs::write(&qwen35, crate::gguf::tests::qwen35_4b(1_000).bytes()).unwrap();
+        std::fs::write(&qwen35, crate::ai::gguf::tests::qwen35_4b(1_000).bytes()).unwrap();
         let qwen25 = dir.join(MODEL_FILENAME);
-        std::fs::write(&qwen25, crate::gguf::tests::qwen25_1_5b(1_000).bytes()).unwrap();
+        std::fs::write(&qwen25, crate::ai::gguf::tests::qwen25_1_5b(1_000).bytes()).unwrap();
         // A 16 GB card: room for it (the stand-in file is small; the KV,
         // recurrent state and compute aren't).
         assert!(mtp_fits(&qwen35, 8_192, Some(16_303)));
@@ -3423,7 +3423,7 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("yap-ctx-test-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let p = dir.join("gemma-2-2b-it-Q4_K_M.gguf");
-        std::fs::write(&p, crate::gguf::tests::qwen25_1_5b(10).bytes()).unwrap();
+        std::fs::write(&p, crate::ai::gguf::tests::qwen25_1_5b(10).bytes()).unwrap();
         assert_eq!(trained_context(&p), Some(32_768));
         let _ = std::fs::remove_dir_all(&dir);
     }

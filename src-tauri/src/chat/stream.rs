@@ -44,7 +44,7 @@ use serde::Serialize;
 use serde_json::{json, Value};
 
 use crate::chat::chats::Source;
-use crate::llm::Delta;
+use crate::ai::llm::Delta;
 
 /// The shortest gap between two text updates a step sends (the page renders
 /// markdown on each).
@@ -206,7 +206,7 @@ pub fn releases(text: &str, tools_offered: bool) -> bool {
 /// — and, while it's still being written, without a tag that's only half
 /// there ("<thi" at the end). Pure.
 pub fn without_thinking(raw: &str) -> String {
-    let mut t = crate::llm::strip_thinking(raw);
+    let mut t = crate::ai::llm::strip_thinking(raw);
     for tag in ["<think>", "<thinking>", "</think>", "</thinking>"] {
         for n in (1..tag.len()).rev() {
             if t.to_ascii_lowercase().ends_with(&tag[..n]) {
@@ -374,19 +374,19 @@ pub struct Live<'a> {
 /// again, a question dictated into Chat and sent): saving it supersedes this
 /// turn ([`Stoppable::answers`]), and `chat_turn` drops this call, waiting
 /// or asking again, as ■ would.
-pub async fn call(live: Live<'_>, req: &crate::llm::ChatRequest, tools_offered: bool, disable_thinking: bool) -> Result<Value, String> {
+pub async fn call(live: Live<'_>, req: &crate::ai::llm::ChatRequest, tools_offered: bool, disable_thinking: bool) -> Result<Value, String> {
     let mut step = Step::new(live.sink, tools_offered, disable_thinking);
     let Some(beside) = live.beside else {
         let out = {
             let mut on = |d: Delta<'_>| step.on(d);
-            crate::llm::post_chat_streamed(req, &mut on).await
+            crate::ai::llm::post_chat_streamed(req, &mut on).await
         };
         step.end(out.as_ref().is_ok_and(answers));
         return out;
     };
     // Held busy while it waits out a dictation, not only while a request
     // runs (`local_llm::hold`).
-    let _sidecar = crate::local_llm::hold(&req.base_url);
+    let _sidecar = crate::ai::local_llm::hold(&req.base_url);
     // Stepped aside for a dictation (the page shows it's waiting).
     let mut yielded = false;
     for attempt in 0..YIELD_RETRIES {
@@ -403,7 +403,7 @@ pub async fn call(live: Live<'_>, req: &crate::llm::ChatRequest, tools_offered: 
         let mark = beside.mark();
         let out = {
             let mut on = |d: Delta<'_>| step.on(d);
-            let request = crate::llm::post_chat_streamed(req, &mut on);
+            let request = crate::ai::llm::post_chat_streamed(req, &mut on);
             crate::meetings::meeting_summary::unless_busy(request, || beside.must_yield(mark)).await
         };
         match out {
