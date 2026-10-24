@@ -169,6 +169,66 @@ grabbing the focus mid-run makes Yap refuse (the harness retries a refused paste
 twice). A gap it finds becomes a "known gap: …" test pinning today's result
 until it's fixed (none open now). Guide: [`docs/e2e-tests.md`](../e2e-tests.md) "Real-app robot tests".
 
+## The benchmark (`yap.exe bench`)
+
+**`bench.rs`** (+ `bench/machine.rs`, `bench/cold.rs`; 2026-10-24): how fast
+Yap is on a PC, in numbers anyone can reproduce and share
+([`docs/benchmarks.md`](../benchmarks.md) has the published ones and how to
+send yours). `yap.exe bench` runs before the app starts (main.rs, like `mcp`),
+**in release builds too**; no window, tray or hook. A release build is a
+windowed exe: it attaches to the console it was started from
+(`AttachConsole`), and `yap.exe bench | Out-Host` (PowerShell) keeps the
+shell waiting for it.
+
+- **Scenarios** (`scenarios`, pure, unit-tested): the graphics card Yap
+  uses (`gpu::speech_adapter`: the one with the most memory of its own), the
+  processor with all its threads, the processor **held to 4 and 2 threads**
+  (an emulated small laptop: `machine::Limit` sets the process's affinity to N
+  logical processors, one per physical core first — `mask_for`, pure — and
+  every runtime is told N: ONNX Runtime's intra-op threads and whisper.cpp's
+  `n_threads` through `stt::set_cpu_threads`, llamafile's `-t`/`-tb`; the
+  llamafile child inherits the affinity), an integrated GPU beside the card
+  with 4 threads (`igpu-4t`, DirectML on that adapter:
+  `stt::set_gpu_adapter`), and on request (`--scenarios …,warp-4t`) DirectML
+  on Windows' software renderer — what a PC without a graphics driver gets.
+- **Speech**: every installed model (`--models`) per scenario: load, the
+  first dictation after it, then `--rounds` (3) warm runs of the ~3, ~11 and
+  ~30 s pieces of `stt_speed.rs`'s bundled clip (`cut_points`: at the
+  quietest 20 ms within 1.5 s; every run a new length, as `stt_speed`
+  measures), each length's median, and its **word error rate** against the
+  script the clip reads (`wer`: the fewest edits over `PASSAGE`'s sentence
+  prefixes). A large Whisper on the processor is skipped (minutes a
+  dictation; `--whisper-cpu`), a first dictation over 20 s ends the model's
+  run.
+- **Cleanup**: the installed Qwen2.5 1.5B and Qwen3.5 4B (`--llm`) on Yap's
+  llamafile with `local_llm::server_args` (on the card `-ngl 999` and the
+  sidecar's MTP plan; on the processor `-ngl 0`), the warm-up the sidecar
+  sends, then the four `DICTATIONS` twice through `llm::cleanup`; and, when
+  Yap's settings hold a cloud key (`cloud_endpoint`: the cleanup's own cloud
+  provider, else Groq), three cloud cleanups.
+- **Cold start** (`cold.rs`): a throwaway copy of the exe (+ its DLLs) in the
+  bench's temp folder, portable, an empty data folder, a WebView2 profile of
+  its own, started as a **bench child** (`YAP_BENCH_CHILD=1`, honoured only
+  in portable mode, lib.rs `bench_child`: no single-instance hand-off to a
+  running Yap, no keyboard hook, no autostart reconcile — which would delete
+  or repoint your Yap's sign-in entry —, no window-state plugin, no orphan
+  sweep) twice: the first-run window visible and uncloaked (`EnumWindows`),
+  its page mounted (its log's `[onboarding] mounted`).
+- **Fair numbers**: before each run it waits (`--patience`, 10 min) for other
+  apps to leave the processor under `QUIET_PCT` (30 %: a desktop with a
+  browser, a chat app and a dev server open idles at 10–25 %) busy, and records the
+  load just before and after (`loadBefore` / `loadAfter`); a run that went
+  ahead busy is marked `*` in the table.
+- **Read only**: models, the runtime and `config.json` (`config::peek`: no
+  migration, no save) come from `--data` or this exe's data folder
+  (`portable::would_use`); the run's own temp folder is its data folder
+  (`portable::use_data_dir`) for anything incidental (a usage count) and
+  goes at the end. Out: the table (stdout and `.txt`) and the JSON
+  (`Report`, `schema` 1: the hardware's class — processor name, cores,
+  threads, GB of memory, graphics adapters — and nothing else of the PC).
+  Unit tests: options, scenarios per hardware, the clip's cuts, WER, the
+  cloud key's lookup, the report's shape, `mask_for`.
+
 ## Test mode and robot mode
 
 - **`e2e.rs`** — **test mode** for the end-to-end UI suite (debug builds started

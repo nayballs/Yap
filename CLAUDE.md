@@ -133,7 +133,8 @@ blocks. The full order and its rules: [dictation.md](./docs/architecture/dictati
 - `llm.rs` — OpenAI-compatible client, immutable base prompts, chat/tool calls, rate-limit waits.
 - `local_llm.rs` — on-device llamafile sidecar: models, recommendation, server args (MTP), context, restarts, warm-up, the runtime's background upgrade (retry without MTP, the way back, launch repair, cross-Yap lock).
 - `gguf.rs` — read-only GGUF headers and memory estimates per context length.
-- `gpu.rs` — the graphics card (DXGI), for the recommended on-device model.
+- `gpu.rs` — the graphics card (DXGI), for the recommended on-device model; every adapter, small ones, the card DirectML runs speech on.
+- `hardware.rs` — picks by hardware (card / processor / small): where speech runs before it's timed, private or cloud cleanup with both times said (onboarding).
 - `ai_model.rs` — which model a scope's next call goes to; the Chat picker's switch.
 - `model_catalog.rs` — providers' live model lists (and self-hosted servers'), cached a day; which read images, where they say.
 - `usage.rs` — daily Groq token/request usage.
@@ -210,7 +211,8 @@ blocks. The full order and its rules: [dictation.md](./docs/architecture/dictati
 - `updates.rs` — background update checks and downloads, announcements, safe install.
 
 **App shell, config, tests** — [app-shell.md](./docs/architecture/app-shell.md), [config-and-data.md](./docs/architecture/config-and-data.md), [build-and-test.md](./docs/architecture/build-and-test.md)
-- `main.rs` — entry; `yap.exe mcp` / `diarize` / `eval` / `call-dump` / `snip-dump` run before the app starts.
+- `main.rs` — entry; `yap.exe mcp` / `diarize` / `eval` / `bench` / `call-dump` / `snip-dump` run before the app starts.
+- `bench.rs` (+ `bench/`) — `yap.exe bench` (release builds too): speech, AI cleanup and a cold start timed on this PC and on it held to 4 / 2 threads (emulated), a table + shareable JSON; read only ([`docs/benchmarks.md`](./docs/benchmarks.md), build-and-test.md).
 - `lib.rs` — Tauri setup: plugins, hook + pipeline, tray, shutdown cleanup, DWM-cloak init.
 - `tray.rs` — tray icon and menu (models, Paste last transcript, Read selection aloud, Snip to Chat, Record this call, updates).
 - `context_menu.rs` — WebView2's context menu cut to editing commands (Inspect: debug + Shift).
@@ -230,7 +232,7 @@ blocks. The full order and its rules: [dictation.md](./docs/architecture/dictati
 - `lib/appearance.js` — General → Appearance in every window: Theme (System / Light / Dark → `data-yap-theme`, System follows Windows live; the bar's Match app → `data-bar-theme`; `index.html`'s head script puts it on before the first paint), reading font/size tokens (`--yap-font-reading`, `--yap-reading-scale`) for chats/notes/notepad only, and reduced Motion.
 - `lib/ControlPanel.svelte` — the main window (label `settings`): sidebar, Settings modal, title bar.
 - `ui/toast.svelte.js` + `ui/noticePolicy.js` — app-wide toasts running the page's notice policy.
-- `HomeView` / `InsightsView` / `UploadView` — dictation feed (a dictation's "AI edited · N changes" word diff, `lib/wordDiff.js`, and Paste what I said), stats, audio-file transcription; `lib/appNames.js` (apps by their names), `lib/aiErrors.js` (AI failures in plain words).
+- `HomeView` / `InsightsView` / `UploadView` — dictation feed (a dictation's "AI edited · N changes" word diff, `lib/wordDiff.js`, and Paste what I said), stats, audio-file transcription; `lib/homeData.js` (Home's data in one call, asked first), `lib/ipcShared.js` (one call for reads asked at once), `lib/appNames.js` (apps by their names), `lib/aiErrors.js` (AI failures in plain words).
 - `App.svelte` — one chunk per window: each loads only its own view (the Yap bar ~150 KB, not the whole app).
 - `DictionaryView.svelte` — corrections and snippets ([dictionary.md](./docs/architecture/dictionary.md)).
 - `NotesView.svelte` — the AI Notepad ([notes.md](./docs/architecture/notes.md)).

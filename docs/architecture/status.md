@@ -30,6 +30,29 @@ Ryzen 7 9800X3D, RTX 5070 Ti, Windows 11, Parakeet V3; memory = private working 
 - For comparison, Wispr Flow's Windows app is reported at ~800 MB and ~8 % CPU idle
   (user reports, no official figure); its own package is 221–316 MB.
 
+## Measured on smaller PCs (2026-10-24, `yap.exe bench`, emulated)
+
+The same PC held to 4 and 2 threads, its 2-unit integrated Radeon, and
+DirectML on Windows' software renderer (no graphics driver) — **an emulation,
+not a laptop** (faster cores, a weaker integrated GPU than a laptop's). Full
+tables, method and how anyone can run it and send theirs:
+[`docs/benchmarks.md`](../benchmarks.md).
+- **Speech (Parakeet V3, 11 s of speech): 0.13 s on the card, 0.34 s on 16
+  threads, 0.38 s on 4, 0.60 s on 2**; 3 s of speech 0.10–0.18 s everywhere.
+  On the integrated GPU ~4 s (the encoder's 30-s plan), on the software
+  renderer ~1 s: speech now starts on the processor without a real card
+  (`hardware.rs`). Moonshine Base on DirectML (any real GPU) gets every word
+  wrong; fine on the processor.
+- **Cleanup (Qwen2.5 1.5B): 0.08 s on the card, 0.9 / 1.1 / 1.6 s on 16 / 4 / 2
+  threads**; Qwen3.5 4B 0.16 s on the card, 2.5–3.9 s on the processor;
+  Groq's gpt-oss-20b 0.5–0.8 s. A small PC (< 8 threads or < 8 GB) is offered
+  the cloud first in onboarding, with both times.
+- **Cold start to the first-run window: 0.7–1.2 s** (a throwaway portable copy,
+  fresh WebView2 profile). **First run**: the 478 MB speech model step ~15–18 s
+  on a fast line (the model loaded once now, not twice), the first dictation
+  0.43 s from its end to its text with the 4B's cleanup. **Home** has its data
+  73 ms after its page starts (132 ms before `home_snapshot`).
+
 ## What works
 
 **Trusting a dictation** (2026-10-22): **the speech engine's device on each
@@ -451,5 +474,7 @@ multi-phrase dictionary entries; verify-after-paste beyond Win32 edit
 controls (a web or code editor's hidden input can't say whether a paste
 landed); a JetBrains IDE's or Visual Studio's terminal, and a browser's
 (vscode.dev, Codespaces), still count as the editor;
-Authenticode signing (blocked on SignPath approval); audio-history export; and
+Authenticode signing (blocked on SignPath approval); audio-history export;
+numbers from a real laptop (the smaller-PC numbers are an emulation on the
+test desktop; a hybrid laptop's DirectML on its card is untried), and
 non-Windows (Linux/macOS) polish. See `ROADMAP.md`.

@@ -337,6 +337,25 @@ Flow's dark mode of 19 Oct 2026), for every Yap window.
   ControlPanel's code and most of the rest in IPC: 77 calls per load, 64
   before Home shows (50 `plugin:event|listen`, `get_config` ×4,
   `installed_models` ×2). Fewer round trips there is the start-up win.
+- **Home's first paint** (2026-10-24): Home's data comes in **one call
+  asked first** — `home_snapshot` (commands.rs, async: off the window's
+  thread; the history page, the stats, the settings Home shows, the
+  installed models), started by `App.svelte` for the main window while
+  ControlPanel's code is still loading (`lib/homeData.js`: `prefetchHome`,
+  then `homeSnapshot` hands Home that answer once and asks afresh after);
+  `.home[data-ready]` once it's in. Before, Home asked in four calls (two
+  sync, holding the window's thread) issued after ~60 others and answered
+  behind 66 of them. And **reads asked at once go once**
+  (`lib/ipcShared.js` `shared`: a call made while the same one is on its
+  way gets its answer, a copy; Appearance and the model list use it):
+  `get_config` 4 → 3, `installed_models` 2 → 1. Measured from a reload of
+  the main window (stub debug build, the PC busy with other builds,
+  medians of 10): Home ready **132 → 73 ms**, behind **66 → 3** answered
+  calls; 79 → 76 calls in all. The 52 listeners (47 events; Tauri has one
+  call per listener, `listen_js` is crate-private, so they can't be
+  batched) run beside it and were never what Home waited for: each takes
+  ~20–30 ms, all in flight at once. e2e `home-first-paint.spec.js` guards
+  the order and the count (not the milliseconds).
 - **AI errors in plain words** (`lib/aiErrors.js` `aiError`): Chat's
   "Couldn't send" says "Couldn't reach the AI model on this PC
   (127.0.0.1:11434). Check that it's running (Ollama, LM Studio…)…", "…check
@@ -375,7 +394,16 @@ Flow's dark mode of 19 Oct 2026), for every Yap window.
   chords, mouse buttons, the Copilot key; the old recorder kept only the
   bare key; in push-to-talk it says "Hold …, then let go"). With no microphone the mic step says so. **Finish** opens
   Yap's main window on Home (`open_settings`), so setup doesn't end on an
-  empty screen.
+  empty screen. **By hardware** (2026-10-24, `hardware_advice`,
+  ai-models.md `hardware.rs`): the model step says where speech runs ("on
+  its processor: no graphics card needed" without a real card); the AI
+  cleanup step says what the private model and a cloud provider each add
+  to a dictation on this PC (`[data-testid=cleanup-times]`), and on a small
+  PC the Cloud card is picked and badged "Quicker on this PC" (the
+  Private card loses "Recommended"). The download button says "Setting up
+  Parakeet V3…" once the download is done (its check, unpacking and load,
+  ~5–8 s), not "Downloading… 100%". Timed walk: docs/benchmarks.md "The
+  first run, step by step".
 - **`lib/ui/`** — primitives: Toggle, Select, Slider, Group, Row, Button, Input, Textarea,
   **ContextMenu** (at the pointer or under a ⋯ (`alignEnd`), clamped to the
   window; ↑/↓/Home/End/Enter, → into a submenu, ← / Esc back; Esc, Tab, a

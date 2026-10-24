@@ -124,6 +124,14 @@ The full stack list, the app's entry and plumbing (`lib.rs`, the tray, context m
   brings the window back if it was open) — `launch_shows_window`, pure,
   unit-tested. An autostart entry without the argument is written again on
   the next launch that lacks it. Dev builds show Settings on every launch.
+  **`yap.exe bench`'s cold-start copy** (`bench_child`, 2026-10-24:
+  `YAP_BENCH_CHILD=1`, honoured only in portable mode — `bench/cold.rs`
+  starts it on an empty data folder): no single-instance plugin (it must
+  start, not wake a Yap already running), no window-state plugin, no
+  keyboard hook, no orphan-sidecar sweep and no autostart reconcile (which
+  would delete or repoint the real Yap's sign-in entry). At setup the ONNX
+  models' DirectML adapter is set to the graphics card (`gpu::speech_adapter`,
+  ai-models.md).
   `shutdown_cleanup()` (sidecar, bridge, other apps' sound back — `mute::restore_all`) runs on `RunEvent::Exit`
   AND from the updater's pre-install hook. Clears ort's 0-byte `DirectML.dll` stub (`stt::fix_directml_stub`).
   Gives the hidden settings/onboarding webviews a one-shot **DWM-cloaked** show+hide
@@ -205,7 +213,12 @@ The full stack list, the app's entry and plumbing (`lib.rs`, the tray, context m
   stream swap, `set_mic_test` — idle level meter), windows (`open_settings`,
   `open_onboarding`, `close_onboarding`),
   `configure_hotkey`, `set_autostart`, `is_portable`, `test_post_process`,
-  `get_groq_usage`, history (`get_history`, `clear_history`, `get_stats`),
+  `get_groq_usage`, history (`get_history`, `clear_history`, `get_stats`;
+  `home_snapshot` — Home's history page, stats, the settings it shows and
+  the installed models in one async call: frontend.md "Home's first
+  paint"), `set_active_model` is async and loads off the window's thread,
+  and not at all when the model is already warm on its device (onboarding
+  loaded it twice, the second time freezing the window),
   plus the notes/actions/folders CRUD (`notes_folder_rename`/`_delete`;
   `note_delete` refuses the note a meeting is recording into — that's
   `meeting_delete` — and tells every window, `yap-note-deleted`) +
