@@ -12,8 +12,11 @@ The meeting recorder and its audio kept on disk, rolling digests and the action 
   cuts each source into ~15 s chunks **at the quietest 20 ms frame of the last
   4 s** (`media::quietest_frame`, not mid-word; every mid-meeting cut leaves
   the newest 400 ms buffered), transcribes them on the shared
-  warm engine (`pipeline::EngineSlot`, taken per chunk so dictation still
-  works; silence-gated), runs the **correction dictionary** over each chunk's
+  warm engine (`pipeline::EngineSlot` = `EngineCell`: taken out for one
+  chunk and given back — a dictation that ends meanwhile waits for it
+  instead of loading a second copy, and an engine that errs is dropped so
+  the next chunk loads a fresh one; silence-gated), runs the **correction
+  dictionary** over each chunk's
   text (`pipeline::apply_corrections`, both sides, so the echo check compares
   corrected with corrected), works off a backlog in ≤30 s chunks back to back,
   caps each source's buffer at 20 min (then drops audio + a "Transcription
@@ -54,7 +57,25 @@ The meeting recorder and its audio kept on disk, rolling digests and the action 
   clock in ms — captured audio, standing still while none arrives — and a
   talk counter: both sides' talk samples plus talk segments ingested) is
   what `meeting_guard`'s quiet-meeting watch reads each second; the
-  `Session` keeps both sources for it. Commands: `meeting_start`/
+  `Session` keeps both sources for it. **Failed chunks** (2026-10-24, code
+  review #6): a chunk that can't be transcribed (no speech model, an engine
+  error, a crash) was recorded as silence; now its stretch is a marker
+  (`TranscriptSegment::failed`, `start_ms`..`end_ms` on the recording's
+  clock, no text, not talk: summaries, the AI title and "Started by
+  mistake?" skip it), logged at `warn` (side, seconds), and the person is
+  told once per meeting (`tell_failed`: "Yap couldn't transcribe part of
+  this meeting" through `meeting_guard::notice`, with Open note; its body
+  says whether the refine will try again); `replay` marks one that fails
+  again the same way. Test mode: `e2e_meeting_fail {side, from, to}` fails
+  the live chunks over a stretch (never a replay's). **One recorder**
+  (#10): `start` claims the recorder's slot (`Slot::Starting`, `Claim`)
+  under its lock before it opens the devices and lets go if they fail —
+  until 2026-10-24 two starts at once (the meeting shortcut and the call
+  prompt) both passed the "already recording?" check and recorded twice;
+  `is_recording` counts a start under way. **Deleting a note**
+  (`delete_note`, every delete that can meet a recording: the Notes view,
+  the local API — `409` —, Discard) refuses the note being recorded or
+  started, under the same lock. Commands: `meeting_start`/
   `meeting_state`; a recording ends through `meeting_end`/`meeting_pause`
   (meeting_end.rs). Test mode opens no audio device (WAVs
   from `YAP_E2E_MEETING_AUDIO`, or silence; `e2e::e2e_meeting_feed`; the
@@ -101,7 +122,11 @@ The meeting recorder and its audio kept on disk, rolling digests and the action 
   `transcribe_chunk` takes the note) and echo check (`Source::replayed_from`
   numbers its loudness frames as live), markers for dictations from where
   they began; it waits for a hotkey dictation (and 3 s after one) between
-  chunks so the dictation's own transcription gets the warm engine.
+  chunks so the dictation's own transcription gets the warm engine; its
+  `Ctl` carries a job's Cancel (checked between chunks, and while it waits)
+  and `background` (the refine's: each call on a lowest-priority thread,
+  `meeting_refine::LowPriority`). `NoFeed`: a side with nothing to read
+  (Try again on the other side's stretch).
 - **`meeting_audio.rs`** (+ `meeting_audio/flac.rs`, `meeting_audio/redo.rs`)
   — **meeting audio kept on disk** (2026-10-23; Wispr Flow keeps 14 days to
   play, Meetily transcribes again): `<data>/meeting-audio/<note
@@ -141,7 +166,9 @@ The meeting recorder and its audio kept on disk, rolling digests and the action 
   **Transcribe it** (`RECOVER_ACTION` → `recover_all`); the note says it
   too (`meeting_audio_note`'s `recoverableSecs`). **Jobs** (`start_job`, one
   per note, refused while a meeting records — `replay` also waits for one that starts, and for a dictation —; `yap-meeting-redo {noteId, kind:
-  recover|again, state, percent, model, error, summary}`): **recover** =
+  recover|again|refine|retry, state: running|done|error|cancelled,
+  percent, model, error, summary, waiting, thenSummary}`; every job has a
+  **Cancel**, `meeting_job_cancel`, between chunks): **recover** =
   `meeting::replay` from `done` to the end, `notes::insert_transcript` (by
   time: the end normally, before a later recording's lines with a stop mark
   after them), the recording ended, then `meeting_end::recovered` (the stop
@@ -159,14 +186,67 @@ The meeting recorder and its audio kept on disk, rolling digests and the action 
   recording's clock (the recording the line's `ts` falls in), mixed, as a
   WAV (`recent_audio::wav`), ≤ 60 s. Commands `meeting_audio_status` /
   `meeting_audio_clear` (Settings), `meeting_audio_note`,
-  `meeting_audio_clip`, `meeting_transcribe_again`, `meeting_recover`;
+  `meeting_audio_clip`, `meeting_transcribe_again`, `meeting_recover`,
+  `meeting_retry_chunk {noteId, source, ts, startMs}` (**Try again** on a
+  failed chunk's marker: that side's stretch read back — `RangeFeed` — and
+  replayed on the model in use, its lines in the marker's place,
+  `redo::fill`: digests and stop marks after it move along), and
+  `meeting_job_cancel`; **refine** (`start_refine`, from
+  `meeting_refine.rs`): published at once, it waits its turn (the note's
+  summary job first unless it comes first, `waiting: "summary"`; never
+  beside a recording, `"meeting"`), then **the same `transcribe_again`**
+  on the chosen model — the warm slot when it's the model in use, else an
+  `EngineCell` of its own loaded once —, `meeting_refine::agrees` checking
+  the new words against the live ones before anything is replaced, and
+  the replacement waiting while the note's summary is written. Done with
+  a summary on the note: `summary: true`, the windows' "Update summary",
+  answered when the summary is written again (`summary_redone`, from
+  `meeting_end::start_summary`). Audio not kept ("Keep meeting audio" off)
+  is **held** after a meeting with failed chunks or a refine due
+  (`Recorder::finish(hold)`) and goes once it's done (`release`, when no
+  failed stretch is left), a day at most (`to_drop`'s `held`, `HELD_MS`);
+  each recording's `.json` names its live model (`Meta::model`);
   debug-only `e2e_meeting_recovery_offer`; events `yap-meeting-audio
   {noteId}` and `yap-meeting-redo`. Logs: ids, counts, lengths only.
   Unit-tested (the encoder against Symphonia: every block kind, cut-off
   files, seeking; retention, metas, a crash's recording found and clipped;
-  `rebuild`; the disk queue against the buffer with a dictation; inserting
+  `rebuild`, a failed chunk's marker replaced by a refine, `fill`; audio
+  only held, a day; the disk queue against the buffer with a dictation; inserting
   recovered lines); e2e `meeting-audio-kept.spec.js` and
   `meeting-crash.spec.js` (a killed test instance, restarted).
+- **`meeting_refine.rs`** — **the refined transcript, by itself** when a
+  meeting ends (2026-10-24, Wispr Flow's "refined transcript"): the meeting
+  transcribed again in the background from its audio on disk, through the
+  same replacement as Transcribe again. **When** (`decide`, pure; Settings →
+  Meetings → "Improve the transcript after the meeting", `meeting_refine`):
+  *Automatically when it helps* (default) — chunks of the live transcript
+  failed, or a more accurate model is installed for the meeting's language
+  —, *Always* (the best model there is, the live one when it's the best),
+  *Never*; never without its audio, on a pause, or for "Started by
+  mistake?". **Which model** (`best_model`, pure): the most accurate
+  installed model (`MODELS`: `src/lib/models.js`'s leaderboard figures and
+  each model's languages) that speaks the meeting's language — Settings'
+  speech language, else Windows' (`about_you`); unknown: one that speaks
+  every language the live one does — and beats the live one (`Meta::model`,
+  the least accurate recording's) by `MARGIN` (0.015). `agrees`: at least
+  half the live words found again, else the live transcript is kept ("didn't
+  match the meeting (another language?)"). **Which comes first**
+  (`Plan::first`): holes in the live transcript (chunks failed) → the
+  refine first, then the end steps (`meeting_end::end_steps`: the summary,
+  or "Started by mistake?") from the whole transcript; a whole transcript →
+  the summary first (instant: its digests were made during the meeting),
+  then the refine, then **"Transcript improved · Update summary"**
+  (`meeting_summarise`: what the summary sends today, cloud or on-device;
+  not automatic — a summary read or edited doesn't change under the person,
+  and a long meeting's digests would all be written again). **Low priority**:
+  after the summary, never beside a recording, a dictation always first
+  (`replay`'s `give_way`: 3 s after one), sharing the warm engine a chunk at
+  a time (`EngineCell`) or on its own copy of another model, each call on a
+  lowest-priority thread (`LowPriority`; the runtimes' worker threads keep
+  theirs); Cancel. `may_refine`: whether a meeting ending now may be refined
+  (its audio held). Test mode: `YAP_E2E_REFINE_CHUNK_MS` slows each refine
+  chunk (`e2e_slow_chunk`). Logs: ids, the plan, counts, the agreement share
+  — never a line. Unit-tested (`decide`, `best_model`, `agrees`).
 - **`meeting_summary.rs`** — meeting summaries that keep up with long meetings
   (map-reduce, the map done while recording). A bigger on-device context
   lets the final call read more (`FinalBudget::for_endpoint`: the single
@@ -241,7 +321,13 @@ The meeting recorder and its audio kept on disk, rolling digests and the action 
   use `end()` / `pause()`. The job first asks the meeting's AI who each
   voice still unnamed is (`speakers::naming::ask_model`, "Suggest who's
   speaking" on, a model that can call tools; best-effort), so the plan
-  reads the names.
+  reads the names. **The end and the refine** (`finished` → `end_steps`):
+  the refine due (`meeting_refine::plan`) comes first when the live
+  transcript has holes — then `end_steps` follows it however it ends —
+  else `end_steps` now and the refine after the summary; a meeting with a
+  failed stretch never asks "Started by mistake?". `meeting_summarise`
+  while the refine comes first does nothing (the summary follows by
+  itself); `summary_running_for` is what a refine waits on.
 - **`meeting_assist.rs`** — the notepad's AI helpers, on the meeting's model
   (Note Formatting scope, else cleanup), bounded for an 8k local model, via
   `chat_beside_dictation`: **"What did I miss?"** (`meeting_catch_up(noteId,
@@ -414,7 +500,22 @@ The meeting recorder and its audio kept on disk, rolling digests and the action 
   transcribed; the audio is kept." · **Transcribe it**). The **Notes view**:
   the note's menu **Transcribe again…** on meeting notes (off with the
   reason), ▶ beside a bubble on hover and in its menu, the same banner and
-  line in the transcript box.
+  line in the transcript box. Since 2026-10-24 `jobState` (the running
+  job, a refine's "improved" offer, or why it changed nothing), `jobLine`
+  for `refine` ("Improving the transcript · 40%", "…, then the summary",
+  "…once the summary is written", "…after the meeting that's recording")
+  and `retry`, `cancelJob`, `updateSummary`, `summaryFollows` (the
+  notepad's Generate summary pill hides while the refine comes first) and
+  `retryChunk`; `canPlay` skips failed markers.
+- **`lib/MeetingJob.svelte`** — a note's job line over the transcript, in
+  the notepad (`look="paper"`) and the Notes view (`look="app"`): spinner +
+  `jobLine` + **Cancel**; "✓ Transcript improved · **Update summary**"; a
+  refine that changed nothing, with ✕.
+- **`lib/FailedChunk.svelte`** — a failed chunk's marker in both views (a
+  `transcriptItems` item of kind `failed`, `notepadText.js` `failedText`):
+  a dashed divider "⚠ Couldn't transcribe 0:42–1:12 · **Try again**"
+  (`retryChunk`; off while it records — "After the meeting" —, while a job
+  runs, or with no audio), its tooltip naming the side.
 - **`lib/SplitPreview.svelte`** — the split preview window's page (label
   `split-preview`, App.svelte routes it, transparent body): one glass
   rectangle inset 24 px (`rgba(255,255,255,.10)`, a 2 px

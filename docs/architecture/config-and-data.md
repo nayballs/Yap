@@ -51,7 +51,11 @@
   audio (`meeting_audio.rs`, Settings → Meetings): meeting_keep_audio ("Keep
   meeting audio", on: to transcribe a meeting again and play its lines; off,
   it's still written while a meeting records and deleted once it's
-  transcribed) + meeting_audio_days (14; 1 / 7 / 14 / 30 / 90), speaker
+  transcribed) + meeting_audio_days (14; 1 / 7 / 14 / 30 / 90) +
+  meeting_refine ("Improve the transcript after the meeting",
+  `meeting_refine.rs`: "auto" — when chunks failed or a more accurate
+  speech model is installed for the meeting's language —, "always",
+  "never"; default "auto"), speaker
   diarization: meeting_diarization ("Tell speakers apart in meetings", beta,
   off) + diarization_model (a `diarize/registry.rs` id, default
   `nemotron-3-diarization`), speaker names: meeting_speaker_names ("Suggest
@@ -215,7 +219,10 @@
   transcribe) (`meeting_audio.rs`). Never leaves the PC; kept
   `meeting_audio_days` (14) from the recording's start, ≤ 10 GB in all (the
   oldest first), deleted with its note, by Settings → Meetings → Delete all
-  meeting audio, or once transcribed with "Keep meeting audio" off.
+  meeting audio, or once transcribed with "Keep meeting audio" off — held
+  until the refine after the meeting or a Try again is done when one is
+  due, a day at most (`release`, `HELD_MS`). Its `.json` also names the
+  speech model of the live pass (`model`), for the refine.
 - Chat screenshots: `%APPDATA%/yap/chat-images/` — `img_<16 hex>.png` for each
   screenshot a question carries (Snip to Chat, `snip/images.rs`); `chats.json`
   keeps only its id, size, bytes and source. Deleted with its conversation, after
@@ -329,7 +336,9 @@
   `meeting_reminder`) and a **brief** of what to know going in
   (`meeting_brief`, on), meeting audio **kept 14 days** on this PC to
   transcribe a meeting again and play its lines (`meeting_keep_audio`,
-  `meeting_audio_days`); spoken replies **off** (`speak_replies`; once on, only
+  `meeting_audio_days`), and a meeting **improved after it ends when it
+  helps** (`meeting_refine` "auto": chunks failed, or a more accurate model
+  is installed); spoken replies **off** (`speak_replies`; once on, only
   for questions asked by voice, `speak_when`, and a dictated question is sent
   by itself, `talk_back_hands_free`) in **Kokoro's af_bella** at 1× once
   Kokoro is downloaded (`tts_engine` "kokoro"), Windows' default voice

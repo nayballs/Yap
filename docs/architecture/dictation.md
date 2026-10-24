@@ -137,7 +137,22 @@ to **Run again** from Home.
   speech model…" on the bar, `yap-model-loading`), an Upload, a Run again
   or a meeting chunk that needs the engine meanwhile waits for it instead of
   failing or loading a second copy; the live partials skip until it's in.
-  Debug-only `YAP_E2E_MODEL_LOAD_MS` slows the load in a test run.
+  Debug-only `YAP_E2E_MODEL_LOAD_MS` slows the load in a test run. **The
+  warm engine is lent in turns** (`EngineSlot` = `EngineCell`, 2026-10-24,
+  code review #9): a dictation (`run_stt`), a meeting's chunk, an Upload's
+  chunk, Run again and a meeting transcribed again each take it out for one
+  transcription (`take` / `lease_engine`) and give it back as soon as it's
+  done (a `Lease`, dropped — before a dictation's AI cleanup). A taker that
+  finds it out **waits** for it (a dictation up to 20 s, then loads a copy
+  after all; "Speech engine: in use; waiting" in the log) — until then a
+  dictation that ended during a meeting's chunk loaded a second copy of the
+  model. A taker that finds nobody has it loads it for everyone (the others
+  wait for that load); an engine whose transcription erred or panicked
+  isn't given back (the next taker loads a fresh one); a model switch
+  meanwhile wins (`give_back` keeps the newer). The slot itself
+  (`lock`/`try_lock`) is unchanged for its other users (the live preview,
+  the idle unload, `set_engine`). Unit-tested (`a_dictation_waits_for_the_
+  engine_a_meeting_chunk_has_out` fails on the old take-or-load).
   `recording_mode` selects toggle vs push-to-talk; in push-to-talk `on_key` reads
   **gestures** (`gesture.rs`, Wispr Flow's by behaviour): hold to talk, a quick tap
   (< 300 ms) + a second press within 500 ms locks it **hands-free** until the next

@@ -22,8 +22,10 @@ The AI Notepad: the notes store, folders, the Actions engine, and the Notes view
   markers), `words` (`[start, end]` ms from `start_ms` per word of `text`,
   when the model gave times); `echo` marks
   speaker bleed, `dictated` a "You dictated here" marker — no text, `ts` where
-  a mid-meeting dictation began; `is_talk()` = neither, what every summary
-  input reads), `speakers` (the speaker map, see `speakers.rs`), `digests` (rolling meeting digests, see `meeting_summary.rs`),
+  a mid-meeting dictation began; `failed` a stretch the speech model couldn't
+  transcribe — no text, `start_ms`..`end_ms` the stretch, "Couldn't
+  transcribe 0:42–1:12 · Try again" (`meeting.rs`, "Failed chunks");
+  `is_talk()` = none of them, what every summary input reads), `speakers` (the speaker map, see `speakers.rs`), `digests` (rolling meeting digests, see `meeting_summary.rs`),
   `breaks` (the transcript's length at each stop — the notepad's paused
   dividers; `add_break`, never twice at one place or at 0),
   `note_type` ("personal" | "meeting"), `source` ("manual" | "upload" |
