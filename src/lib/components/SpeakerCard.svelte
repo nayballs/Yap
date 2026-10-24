@@ -12,8 +12,8 @@
   // makes its lines yours (Undo in the toast).
   import { invoke } from '@tauri-apps/api/core';
   import SpeakerMenu from './SpeakerMenu.svelte';
-  import { toast } from './ui/toast.svelte.js';
-  import { pendingSuggestions, suggestionQuestion, suggestionWhy, speakerInfo } from './core/notepadText.js';
+  import { toast } from '../ui/toast.svelte.js';
+  import { pendingSuggestions, suggestionQuestion, suggestionWhy, speakerInfo } from '../core/notepadText.js';
 
   let {
     note,

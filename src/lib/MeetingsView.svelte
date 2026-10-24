@@ -19,7 +19,7 @@
   import { listen } from '@tauri-apps/api/event';
   import { onMount } from 'svelte';
   import { calendar, clockTime, whenText, syncCalendar, eventAction, openConnectDialog, briefs, loadBrief } from './stores/calendar.svelte.js';
-  import BriefView from './BriefView.svelte';
+  import BriefView from './components/BriefView.svelte';
   import { noteRequest } from './stores/meetingDetect.svelte.js';
   import { summarise } from './stores/meetingSummary.svelte.js';
   import { chatRequest } from './stores/chatRequest.svelte.js';

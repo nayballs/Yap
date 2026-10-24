@@ -19,7 +19,7 @@
   import { invoke } from '@tauri-apps/api/core';
   import { onMount, tick } from 'svelte';
   import ProviderMark from './ProviderMark.svelte';
-  import LocalContext from './LocalContext.svelte';
+  import LocalContext from './components/LocalContext.svelte';
   import { providerIcon } from './core/aiModel.js';
   import { PROVIDER_LABELS } from './core/providers.js';
   import { loadCatalog } from './stores/modelCatalog.svelte.js';

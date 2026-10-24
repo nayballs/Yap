@@ -29,7 +29,7 @@
   import { initUpload } from './stores/upload.svelte.js';
   import { initMemory } from './stores/memory.svelte.js';
   import { initCleanupOffer } from './notices/cleanupOffer.js';
-  import ConnectCalendarDialog from './ConnectCalendarDialog.svelte';
+  import ConnectCalendarDialog from './components/ConnectCalendarDialog.svelte';
   // Every view is in this window's one chunk (~590 KB): loading the views
   // other than Home on demand was measured on 2026-10-22 and changed nothing
   // you'd see — Home on screen 63 → 57 ms (inside run-to-run noise), 256 →

@@ -13,7 +13,7 @@
   // ControlPanel.
   import { toastStore, dismiss, pauseToast, resumeToast } from './toast.svelte.js';
   import { renderMarkdown } from '../core/markdown.js';
-  import BriefView from '../BriefView.svelte';
+  import BriefView from '../components/BriefView.svelte';
 
   let copiedId = $state(null);
   // Toasts whose `expand` notes are unfolded.

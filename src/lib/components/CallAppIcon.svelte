@@ -6,8 +6,8 @@
   // colour, else a phone. Decorative: the row or the card names the app.
   // `data-icon` says which it drew (installed | mark | letter | phone).
   import { onMount } from 'svelte';
-  import { callAppIcon } from './bar/callApps.js';
-  import { installedIcons, loadInstalledIcons } from './stores/callAppIcons.svelte.js';
+  import { callAppIcon } from '../bar/callApps.js';
+  import { installedIcons, loadInstalledIcons } from '../stores/callAppIcons.svelte.js';
 
   /** @type {{ app?: string | null, size?: number, disabled?: boolean }} */
   let { app = null, size = 20, disabled = false } = $props();

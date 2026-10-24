@@ -26,8 +26,8 @@
   // it's open and goes back where it was.
   import { invoke } from '@tauri-apps/api/core';
   import { tick, untrack } from 'svelte';
-  import { calendar, connectDialog, closeConnectDialog, connectDialogOpener } from './stores/calendar.svelte.js';
-  import CallCard from './bar/CallCard.svelte';
+  import { calendar, connectDialog, closeConnectDialog, connectDialogOpener } from '../stores/calendar.svelte.js';
+  import CallCard from '../bar/CallCard.svelte';
   import CalendarMark from './CalendarMark.svelte';
 
   /** The band's card: the bar's pre-meeting card, on made-up data. */

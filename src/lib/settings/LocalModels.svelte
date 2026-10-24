@@ -10,7 +10,7 @@
   //   cfg: Settings' config $state (auto-save does the saving).
   import Select from '../ui/Select.svelte';
   import PillTabs from '../ui/PillTabs.svelte';
-  import LocalContext from '../LocalContext.svelte';
+  import LocalContext from '../components/LocalContext.svelte';
   import { upTo } from '../core/localContext.js';
   import { createExternalLinkHandler } from '../core/externalLinks.js';
   import { openContextMenu, menuKey, menuOpenFor, askConfirm } from '../ui/contextMenu.svelte.js';

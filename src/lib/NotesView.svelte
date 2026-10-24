@@ -37,11 +37,11 @@
     newSinceLine,
   } from './core/notepadText.js';
   import { editLine, taskToggled, setTask, saveSummary, askReplaceSummary, SUMMARY_KEPT } from './core/noteEdits.js';
-  import SpeakerMenu from './SpeakerMenu.svelte';
-  import SpeakerCard from './SpeakerCard.svelte';
+  import SpeakerMenu from './components/SpeakerMenu.svelte';
+  import SpeakerCard from './components/SpeakerCard.svelte';
   // The refine after a meeting, Try again on a stretch that failed (meeting_refine.rs).
-  import MeetingJob from './MeetingJob.svelte';
-  import FailedChunk from './FailedChunk.svelte';
+  import MeetingJob from './components/MeetingJob.svelte';
+  import FailedChunk from './components/FailedChunk.svelte';
   import { jobState } from './stores/meetingAudio.svelte.js';
   import { nextModel, modelLine, whereItRuns } from './core/aiModel.js';
   import { speech, initSpeech, readAloud, stopReading } from './stores/speech.svelte.js';

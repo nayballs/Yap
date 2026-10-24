@@ -11,8 +11,8 @@
   // outside that wrapper, or Escape, closes it.
   import { invoke } from '@tauri-apps/api/core';
   import { onMount, tick, untrack } from 'svelte';
-  import { toast } from './ui/toast.svelte.js';
-  import { YOU, speakerInfo, noteVoices } from './core/notepadText.js';
+  import { toast } from '../ui/toast.svelte.js';
+  import { YOU, speakerInfo, noteVoices } from '../core/notepadText.js';
 
   let {
     note,

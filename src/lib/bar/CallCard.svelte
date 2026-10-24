@@ -27,8 +27,8 @@
   // in Yap's main window.
   import yapLogo from '../../assets/yap-logo.svg';
   import { callAppIcon } from './callApps.js';
-  import CallAppIcon from '../CallAppIcon.svelte';
-  import BriefView from '../BriefView.svelte';
+  import CallAppIcon from '../components/CallAppIcon.svelte';
+  import BriefView from '../components/BriefView.svelte';
   import { briefTeaser } from '../core/brief.js';
   import { fadeTimer, countdownClock } from './cardTimers.svelte.js';
 

@@ -40,13 +40,13 @@
   import { getCurrentWindow } from '@tauri-apps/api/window';
   import { onMount, tick } from 'svelte';
   import ToastHost from './ui/ToastHost.svelte';
-  import SpeakerMenu from './SpeakerMenu.svelte';
-  import SpeakerCard from './SpeakerCard.svelte';
+  import SpeakerMenu from './components/SpeakerMenu.svelte';
+  import SpeakerCard from './components/SpeakerCard.svelte';
   // The refine after a meeting, Try again on a stretch that failed (meeting_refine.rs).
-  import MeetingJob from './MeetingJob.svelte';
-  import FailedChunk from './FailedChunk.svelte';
+  import MeetingJob from './components/MeetingJob.svelte';
+  import FailedChunk from './components/FailedChunk.svelte';
   import { jobState, summaryFollows } from './stores/meetingAudio.svelte.js';
-  import BriefView from './BriefView.svelte';
+  import BriefView from './components/BriefView.svelte';
   import { briefTeaser } from './core/brief.js';
   import { toast } from './ui/toast.svelte.js';
   import { showSaveError } from './notices/saveErrors.js';
