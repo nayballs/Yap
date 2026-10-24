@@ -51,7 +51,12 @@ fn execution_providers() -> Vec<ort::ep::ExecutionProviderDispatch> {
         }
         OrtAccelerator::DirectMl => {
             #[cfg(feature = "ort-directml")]
-            eps.push(DirectML::default().build());
+            {
+                // Yap: an adapter of its choice (the benchmark's integrated GPU).
+                let device = crate::accel::get_ort_directml_device();
+                let dml = if device >= 0 { DirectML::default().with_device_id(device) } else { DirectML::default() };
+                eps.push(dml.build());
+            }
             #[cfg(not(feature = "ort-directml"))]
             log::warn!("Accelerator set to DirectML but ort-directml feature is not enabled; falling back to CPU");
         }
@@ -168,7 +173,8 @@ fn build_session_on(
         // force a single intra-op thread when XNNPACK is the active EP.
         builder = builder.with_intra_op_spinning(false)?;
         builder = builder.with_intra_threads(1)?;
-    } else if let Some(n) = intra_threads {
+    } else if let Some(n) = intra_threads.or_else(|| Some(crate::accel::get_ort_intra_threads())) {
+        // (Yap: no count of the caller's = the global cap, if one is set.)
         if n > 0 {
             builder = builder.with_intra_threads(n)?;
         }

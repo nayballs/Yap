@@ -1419,6 +1419,15 @@ fn read_at(path: &Path) -> Read {
     }
 }
 
+/// `<dir>/config.json` read and nothing else: no migration, no saving, no
+/// setting aside (`yap.exe bench` reads another Yap's settings this way).
+pub fn peek(dir: &Path) -> Option<YapConfig> {
+    match read_at(&dir.join("config.json")) {
+        Read::Parsed(cfg) => Some(*cfg),
+        _ => None,
+    }
+}
+
 /// `bytes` without the byte-order mark Notepad puts first.
 fn without_bom(bytes: &[u8]) -> &[u8] {
     bytes.strip_prefix(b"\xEF\xBB\xBF").unwrap_or(bytes)

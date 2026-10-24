@@ -37,3 +37,22 @@ except the two DirectML fixes below (2026-10-22), measured with `stt_speed.rs`'s
    for that length at load, not in the first dictation (~0.5 s).
 
 The CPU path (`CpuOnly`) and every other model and accelerator are untouched.
+
+## Threads and the DirectML adapter (2026-10-24)
+
+`src/accel.rs`
+- `set_ort_intra_threads(n)` / `get_ort_intra_threads()`: an intra-op thread
+  count for every ORT session built afterwards that doesn't set its own (`0`,
+  the default: ONNX Runtime's own choice, one thread per physical core).
+- `set_ort_directml_device(i)` / `get_ort_directml_device()`: the DXGI adapter
+  index DirectML sessions use (`-1`, the default: DirectML's default device,
+  DXGI's first adapter).
+
+`src/onnx/session.rs`: `build_session_on` reads both (`with_intra_threads`
+when the caller gave no count; `DirectML::with_device_id` when one is set).
+
+Yap sets the adapter at start to the graphics card with the most memory of
+its own when DXGI doesn't list it first (a hybrid laptop lists its
+integrated GPU first; `gpu::speech_adapter`), and `yap.exe bench` uses both
+to emulate a smaller PC (4 or 2 threads) and to time an integrated GPU or
+Windows' software renderer (`bench.rs`). Defaults leave everything as it was.

@@ -987,6 +987,7 @@ mod engine_real {
                         language: lang,
                         translate,
                         initial_prompt: initial_prompt.map(str::to_string),
+                        n_threads: CPU_THREADS.load(std::sync::atomic::Ordering::Relaxed) as i32,
                         ..Default::default()
                     };
                     e.transcribe_with(audio, &params).map_err(tx_err)?
@@ -1367,6 +1368,27 @@ pub fn apply_accelerator_settings(use_gpu: bool) {
 
 #[cfg(not(feature = "engines"))]
 pub fn apply_accelerator_settings(_use_gpu: bool) {}
+
+/// Processor threads for the models loaded from now on (`yap.exe bench`'s
+/// emulated small processors; 0 = each runtime's own choice: ONNX Runtime
+/// one per physical core, whisper.cpp four).
+static CPU_THREADS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+/// Cap the processor threads of every model loaded (ONNX) or run (Whisper)
+/// from now on: `yap.exe bench` only.
+pub fn set_cpu_threads(threads: usize) {
+    CPU_THREADS.store(threads, std::sync::atomic::Ordering::Relaxed);
+    #[cfg(feature = "engines")]
+    transcribe_rs::accel::set_ort_intra_threads(threads);
+}
+
+/// The graphics adapter (DXGI index) the ONNX models load on from now on
+/// (`None`: the default one): `yap.exe bench`'s integrated GPU.
+pub fn set_gpu_adapter(adapter: Option<u32>) {
+    #[cfg(feature = "engines")]
+    transcribe_rs::accel::set_ort_directml_device(adapter.map_or(-1, |a| a as i32));
+    let _ = adapter;
+}
 
 /// `ort` drops a 0-byte `DirectML.dll` next to our binary on every build. On
 /// Windows the executable's own directory is searched before System32, so that
