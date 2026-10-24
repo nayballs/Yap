@@ -404,6 +404,9 @@ pub(crate) struct Delivered {
     /// The bar offers "Use what I said" for this one (its number).
     #[serde(skip)]
     pub offer: Option<u64>,
+    /// The style AI cleanup wrote it in ("email/formal",
+    /// `cleanup_styles.rs`), when it ran with one.
+    pub style: Option<String>,
 }
 
 /// How long a cancelled dictation's audio is kept for **Undo** ("Dictation
@@ -2116,6 +2119,8 @@ impl Shared {
             h => Some(h),
         };
         let target_app = crate::text_injector::app_name_for(target_hwnd);
+        // …and what kind of app it is, for the style (`cleanup_styles`).
+        let style_target = crate::cleanup_styles::Target::of_window(target_hwnd, target_app.as_deref(), self.read_kind());
 
         let (dict, append_space, auto_submit, auto_submit_key, restore_clipboard) = self
             .config
@@ -2139,7 +2144,7 @@ impl Shared {
         // dictation's only, and only if the read is done. Taken once, for
         // the cleanup, the corrections and the words as said alike.
         let screen = crate::screen_terms::take();
-        let cleaned = self.clean_up(&raw, target_app.as_deref(), screen.as_deref()).await;
+        let (cleaned, style) = self.clean_up(&raw, &style_target, screen.as_deref()).await;
 
         // The correction dictionary (exact, then fuzzy for
         // ONNX models), exactly as meetings and Upload get it,
@@ -2157,27 +2162,39 @@ impl Shared {
             .then(|| self.config.read().ok().map(|c| as_said_text(&raw, &c, screen.as_deref())))
             .flatten()
             .filter(|s| !s.trim().is_empty() && *s != corrected);
-        self.deliver_text(raw, corrected, voice_enter, said, dict, append_space, auto_submit, auto_submit_key, restore_clipboard)
-            .await
+        let mut delivered = self
+            .deliver_text(raw, corrected, voice_enter, said, dict, append_space, auto_submit, auto_submit_key, restore_clipboard)
+            .await;
+        delivered.style = style.map(crate::cleanup_styles::Style::describe);
+        delivered
     }
 
-    /// AI cleanup of a transcript (`raw`) for `target_app`, best-effort:
-    /// any error or timeout gives the transcript back, so dictation is
-    /// never blocked; an empty answer is a deliberate one (filler only).
-    /// `screen`: the names on screen the dictation read (`screen_terms`),
-    /// for the line telling the model how they're spelled.
-    async fn clean_up(&self, raw: &str, target_app: Option<&str>, screen: Option<&crate::screen_terms::ScreenTerms>) -> String {
+    /// AI cleanup of a transcript (`raw`) for the app it goes into
+    /// (`target`), best-effort: any error or timeout gives the transcript
+    /// back, so dictation is never blocked; an empty answer is a deliberate
+    /// one (filler only). `screen`: the names on screen the dictation read
+    /// (`screen_terms`), for the line telling the model how they're
+    /// spelled. Also returns the style it was written in, if any
+    /// (`cleanup_styles`).
+    async fn clean_up(
+        &self,
+        raw: &str,
+        target: &crate::cleanup_styles::Target,
+        screen: Option<&crate::screen_terms::ScreenTerms>,
+    ) -> (String, Option<crate::cleanup_styles::Style>) {
         // Snapshot the cleanup-related config under one read lock.
-        // `pp_body` is the routed cleanup body: `Some(body)` to clean
-        // with, `None` to skip cleanup (selected-apps-only scope + no
-        // matching rule). The endpoint comes from the matched profile's
-        // LLM override when it has one, else the global settings —
-        // either way "ondevice" routes through the sidecar when it's up.
-        let (dict, pp_enabled, pp_base_url, pp_api_key, pp_model, pp_provider, pp_body, pp_disable_thinking) = self
+        // `plan` is the routed cleanup (`cleanup_styles::resolve`): the body
+        // and style to clean with, or `None` to skip cleanup (selected-apps-
+        // only scope + no matching rule, or the kind of app's style is "As
+        // said"). The
+        // endpoint comes from the matched profile's LLM override when it
+        // has one, else the global settings — either way "ondevice" routes
+        // through the sidecar when it's up.
+        let (dict, pp_enabled, pp_base_url, pp_api_key, pp_model, pp_provider, plan, pp_disable_thinking) = self
             .config
             .read()
             .map(|c| {
-                let plan = c.resolve_cleanup(target_app);
+                let plan = crate::cleanup_styles::resolve(&c, target);
                 let (pp_base_url, pp_api_key, pp_model, pp_provider) =
                     match plan.as_ref().and_then(|p| p.endpoint.as_ref()) {
                         Some((provider, base_url, api_key, model)) => {
@@ -2197,28 +2214,33 @@ impl Shared {
                     pp_api_key,
                     pp_model,
                     pp_provider,
-                    plan.map(|p| p.body),
+                    plan,
                     c.pp_disable_thinking,
                 )
             })
             .unwrap_or_else(|_| (Vec::new(), false, String::new(), String::new(), String::new(), String::new(), None, false));
 
-        // `pp_body` is `None` when smart routing says "skip cleanup
-        // for this app" (selected-apps-only scope, unbound app).
-        match (&pp_body, pp_enabled && !pp_base_url.is_empty() && !raw.is_empty()) {
-            (Some(body), true) => {
+        // `plan` is `None` when smart routing says "skip cleanup for this
+        // app" (selected-apps-only scope, unbound app) or its style is
+        // "As said".
+        match (&plan, pp_enabled && !pp_base_url.is_empty() && !raw.is_empty()) {
+            (Some(plan), true) => {
                 // "Write in my region's spelling" (Dictation cleanup): British "colour"
                 // for en-GB, American "color" for en-US.
                 let spelling = self.config.read().ok().and_then(|c| crate::about_you::cleanup_spelling(&c));
-                // The names on screen the transcript seems to hold.
+                // The names on screen the transcript seems to hold (after
+                // the style's line, just before the transcript).
                 let names = crate::screen_terms::cleanup_line(screen, raw, &dict);
-                match crate::llm::cleanup_with_names(
+                if let Some(s) = plan.style {
+                    tracing::debug!(style = %s.describe(), "AI cleanup's style");
+                }
+                match crate::cleanup_styles::clean(
                     raw,
                     &pp_base_url,
                     &pp_api_key,
                     &pp_model,
                     &pp_provider,
-                    body,
+                    plan,
                     spelling.as_deref(),
                     names.as_deref(),
                     &dict,
@@ -2229,14 +2251,14 @@ impl Shared {
                     // Ok(empty) is a DELIBERATE empty result (filler-only
                     // input) — keep it empty so nothing is injected. Only a
                     // real request error falls back to the raw transcript.
-                    Ok(c) => c,
+                    Ok(c) => (c, plan.style),
                     Err(e) => {
                         tracing::warn!("AI cleanup failed, using raw: {}", e);
-                        raw.to_string()
+                        (raw.to_string(), None)
                     }
                 }
             }
-            _ => raw.to_string(),
+            _ => (raw.to_string(), None),
         }
     }
 
@@ -2804,7 +2826,7 @@ impl Shared {
         if raw.is_empty() {
             return Err("Nothing was heard in it".into());
         }
-        let cleaned = self.clean_up(&raw, Some(app_name).filter(|a| !a.is_empty()), None).await;
+        let (cleaned, _) = self.clean_up(&raw, &crate::cleanup_styles::Target::of_app(app_name), None).await;
         let mut c = cfg;
         c.model_size = model_id.clone();
         let (text, _) = finish_dictation(cleaned.trim(), &raw, &c);

@@ -22,6 +22,7 @@ mod bridge;
 mod calendar;
 mod capture;
 mod chats;
+mod cleanup_styles;
 mod coaching;
 mod commands;
 mod config;
@@ -481,6 +482,9 @@ pub fn run() {
             commands::get_base_prompt,
             commands::get_edit_base_prompt,
             commands::local_llm_status,
+            cleanup_styles::cleanup_styles_catalog,
+            cleanup_styles::cleanup_offer_status,
+            cleanup_styles::cleanup_offer_seen,
             commands::local_llm_start,
             commands::local_llm_stop,
             commands::local_llm_install,
@@ -767,6 +771,8 @@ pub fn run() {
             commands::e2e_rewrite,
             #[cfg(debug_assertions)]
             commands::e2e_target_window,
+            #[cfg(debug_assertions)]
+            cleanup_styles::e2e_style_app,
             #[cfg(debug_assertions)]
             realtest::commands::realtest_dictate_wav,
             #[cfg(debug_assertions)]

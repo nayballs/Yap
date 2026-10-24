@@ -40,7 +40,7 @@ pub struct DictionaryEntry {
 /// library entry that per-app routing rules bind to, so one body can serve many
 /// apps and is edited in one place. The immutable `llm::BASE_PROMPT` guardrails
 /// are always prepended, exactly as for the global body.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CleanupProfile {
     /// Stable id referenced by `AppRoute.profile_id`.
@@ -63,6 +63,25 @@ pub struct CleanupProfile {
     pub model: String,
     #[serde(default)]
     pub api_key: String,
+    /// **Styles by app** (`cleanup_styles.rs`): the built-in kind of app
+    /// this profile is the style for ("email", "workChat", "personalChat",
+    /// "documents", "aiPrompts", "terminal", "other"); empty for a profile
+    /// of the person's own. A style's `prompt` is *added* to the main
+    /// cleanup body (empty: the main body alone), where a person's own
+    /// profile's replaces it.
+    #[serde(default)]
+    pub category: String,
+    /// The tone ("natural", "formal", "casual", "veryCasual", "literal",
+    /// "command", "off"): Yap's own line just before the transcript
+    /// (`cleanup_styles::line`). Empty: the body alone decides.
+    #[serde(default)]
+    pub tone: String,
+    /// A style's apps and sites the person added ("Basecamp", "myapp.exe").
+    #[serde(default)]
+    pub apps: Vec<String>,
+    /// A style's built-in apps the person took out (their names: "Discord").
+    #[serde(default)]
+    pub removed_apps: Vec<String>,
 }
 
 /// A per-mode LLM configuration for one of Yap's AI **scopes** — the OpenWhispr-
@@ -534,9 +553,24 @@ pub struct YapConfig {
     /// foreground app captured at record-start. See [`YapConfig::resolve_cleanup`].
     #[serde(default)]
     pub app_routes: Vec<AppRoute>,
-    /// Reusable named cleanup profiles that `app_routes` bind to.
+    /// Reusable named cleanup profiles that `app_routes` bind to — and the
+    /// built-in **styles by app** (a profile with a `category`,
+    /// `cleanup_styles.rs`).
     #[serde(default)]
     pub cleanup_profiles: Vec<CleanupProfile>,
+    /// "Match the style to the app" (Language Models → Dictation cleanup →
+    /// Styles by app, `cleanup_styles.rs`): emails formal, chats casual, AI
+    /// prompts and terminal commands as said. Missing (`None`) = on unless
+    /// the person had their own cleanup body (`pp_preset` not "default"),
+    /// decided once at load (`cleanup_styles::on_load`): a preset or body
+    /// they chose for everywhere stays exactly as it was.
+    #[serde(default)]
+    pub cleanup_styles: Option<bool>,
+    /// The one offer of AI cleanup to someone who has it off on a PC whose
+    /// graphics card runs the on-device model (`cleanup_styles::offer`) was
+    /// shown: it never comes back.
+    #[serde(default)]
+    pub cleanup_offer_seen: bool,
 
     /// Per-mode LLM config for the AI **scopes** beyond cleanup (OpenWhispr's
     /// Language-Model bubbles), keyed `"voiceAgent"|"noteFormatting"|"chat"`.
@@ -1048,6 +1082,8 @@ impl Default for YapConfig {
             routing_scope: default_routing_scope(),
             app_routes: Vec::new(),
             cleanup_profiles: Vec::new(),
+            cleanup_styles: None,
+            cleanup_offer_seen: false,
             llm_scopes: std::collections::HashMap::new(),
             agent_name: String::new(),
             speak_replies: false,
@@ -1157,6 +1193,9 @@ pub fn load() -> YapConfig {
     if cfg.pp_preset == "default" {
         cfg.pp_prompt = default_pp_prompt();
     }
+    // Styles by app: decided once for a config without the switch, and the
+    // built-in styles' profiles there to edit.
+    crate::cleanup_styles::on_load(&mut cfg);
     migrate_retired_groq_models(&mut cfg);
     // The GPU switch from before "Runs on" (2026-10-22): off meant the
     // processor. (`save` keeps the two in step, so this never undoes a
