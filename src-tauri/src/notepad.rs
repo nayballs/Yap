@@ -376,7 +376,7 @@ fn build_preview(app: &AppHandle) -> Result<tauri::WebviewWindow, String> {
     let _ = w.set_ignore_cursor_events(true);
     // A meeting window: left out of screen shares while one records
     // (capture::MEETING_WINDOWS), from its first show on.
-    crate::capture::sync_window(&w);
+    crate::calls::capture::sync_window(&w);
     Ok(w)
 }
 
@@ -591,9 +591,9 @@ mod platform {
     }
 
     pub fn call_window_quiet() -> Option<isize> {
-        let (app_id, exes) = crate::meeting_detect::call_window_exes()?;
+        let (app_id, exes) = crate::calls::meeting_detect::call_window_exes()?;
         pick_call_window(&candidates(&exes), &exes, std::process::id(), |title| {
-            crate::meeting_detect::title_shows(app_id, title)
+            crate::calls::meeting_detect::title_shows(app_id, title)
         })
     }
 
@@ -603,9 +603,9 @@ mod platform {
 
     /// The live call's main window (call detection's latest call), if any.
     pub fn call_window() -> Option<isize> {
-        let (app_id, exes) = crate::meeting_detect::call_window_exes()?;
+        let (app_id, exes) = crate::calls::meeting_detect::call_window_exes()?;
         let hwnd = pick_call_window(&candidates(&exes), &exes, std::process::id(), |title| {
-            crate::meeting_detect::title_shows(app_id, title)
+            crate::calls::meeting_detect::title_shows(app_id, title)
         });
         tracing::info!(app = app_id, found = hwnd.is_some(), "notepad: the call's window");
         hwnd

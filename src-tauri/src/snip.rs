@@ -283,9 +283,9 @@ fn run(app: &AppHandle, origin: Origin) -> Result<(), String> {
         if monitors.is_empty() {
             return Err("No monitors found".into());
         }
-        crate::capture::for_snip(app, true);
+        crate::calls::capture::for_snip(app, true);
         let (results, timings) = capture::capture(&monitors, capture::Force::Auto);
-        crate::capture::for_snip(app, false);
+        crate::calls::capture::for_snip(app, false);
         let frames: Vec<Frame> = results.into_iter().filter_map(Result::ok).collect();
         if frames.is_empty() {
             return Err("Windows didn't let Yap capture the screen".into());

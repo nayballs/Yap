@@ -1693,7 +1693,7 @@ fn icons(ids: &[String]) -> HashMap<String, String> {
         let made: Vec<(String, Option<String>)> = win::on_sta(move || {
             missing
                 .iter()
-                .map(|a| (a.id.clone(), win::icon_png(a, 32).map(|png| crate::app_icons::data_url(&png))))
+                .map(|a| (a.id.clone(), win::icon_png(a, 32).map(|png| crate::calls::app_icons::data_url(&png))))
                 .collect()
         })
         .unwrap_or_default();
@@ -2151,7 +2151,7 @@ mod win {
             let rgba = bitmap_rgba(bitmap);
             let _ = DeleteObject(bitmap.into());
             let (w, h, rgba) = rgba?;
-            crate::app_icons::encode_png(w, h, &rgba)
+            crate::calls::app_icons::encode_png(w, h, &rgba)
         }
     }
 

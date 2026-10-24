@@ -2062,9 +2062,9 @@ fn apply_config(app: &AppHandle, state: State<'_, AppState>, prev: &YapConfig, c
     // bridge to match (idempotent when unchanged).
     crate::integrations::bridge::sync(&app, cfg.bridge_enabled);
     // …and the "Detect calls and offer to take notes" toggle.
-    crate::meeting_detect::sync(&app, cfg.meeting_detection);
+    crate::calls::meeting_detect::sync(&app, cfg.meeting_detection);
     // Hiding meeting windows from screen shares may have flipped mid-meeting.
-    crate::capture::sync(&app);
+    crate::calls::capture::sync(&app);
     // …and "Notify before scheduled meetings start" applies at once.
     crate::calendar::on_config_saved();
     // …and the Yap bar (on/off, fullscreen, position, the tooltips' hotkeys).

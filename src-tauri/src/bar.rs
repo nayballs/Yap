@@ -597,7 +597,7 @@ pub struct Status {
 pub fn status() -> Status {
     // Other modules' state first: never with this module's lock held.
     let meeting = crate::meeting::state();
-    let call = crate::meeting_detect::tray_item().map(|(_, label)| label);
+    let call = crate::calls::meeting_detect::tray_item().map(|(_, label)| label);
     let now = now_ms();
     let s = lock();
     Status {
@@ -1354,7 +1354,7 @@ fn card_action(app: &AppHandle, id: &str, action: &str) {
 /// yet, opened in the main window's Notes view.
 fn new_meeting_note(app: &AppHandle) -> Result<(), String> {
     crate::notes::folder_create("Meetings");
-    let title = crate::meeting_detect::meeting_note_title();
+    let title = crate::calls::meeting_detect::meeting_note_title();
     let note = crate::notes::create(&title, "", "meeting", "Meetings");
     crate::notes::mark_meeting(note.id)?;
     let _ = app.emit("yap-notes-changed", ());
@@ -1379,7 +1379,7 @@ fn act(app: &AppHandle, action: &str) -> Result<(), String> {
         // and write the action plan.
         "meeting" => {
             give_focus_back();
-            crate::meeting_guard::start_or_stop(app);
+            crate::calls::meeting_guard::start_or_stop(app);
         }
         // The dictation capsule's ✓: stop and paste, as the hotkey's second
         // press does — into the app the dictation started in (the paste

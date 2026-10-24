@@ -1143,7 +1143,7 @@ fn show_note(app: &AppHandle, note_id: u64, title: &str) {
     if window_view(app).0 {
         let _ = app.emit(EVENT_OPEN, json!({ "noteId": note_id, "stop": false }));
     } else {
-        let n = crate::meeting_guard::Notice {
+        let n = crate::calls::meeting_guard::Notice {
             kind: "recording",
             title: format!("Taking notes on {title}"),
             body: "Yap is recording. Let people know you're taking notes.".to_string(),
@@ -1153,7 +1153,7 @@ fn show_note(app: &AppHandle, note_id: u64, title: &str) {
             note_id: Some(note_id),
             surface: None,
         };
-        crate::meeting_guard::notice_native(app, &n);
+        crate::calls::meeting_guard::notice_native(app, &n);
     }
 }
 
@@ -1287,7 +1287,7 @@ pub fn on_meeting_started(app: &AppHandle, note_id: u64) {
         return;
     }
     // A call in progress says which meeting it is (its service).
-    let calls: Vec<String> = serde_json::to_value(crate::meeting_detect::status())
+    let calls: Vec<String> = serde_json::to_value(crate::calls::meeting_detect::status())
         .ok()
         .and_then(|v| v.get("calls").cloned())
         .and_then(|c| serde_json::from_value::<Vec<Value>>(c).ok())

@@ -220,7 +220,7 @@ fn build_menu(app: &AppHandle, state: &str) -> tauri::Result<Menu<Wry>> {
     // A call to record ("Record this Teams call") and an update the user can
     // act on ("Restart to update to 0.1.2") go right under the version line;
     // "Check for updates…" steps aside then.
-    let call = crate::meeting_detect::tray_item()
+    let call = crate::calls::meeting_detect::tray_item()
         .map(|(id, label)| MenuItem::with_id(app, id, label, true, None::<&str>))
         .transpose()?;
     let update = crate::updates::tray_item()
@@ -360,7 +360,7 @@ fn on_menu_event(app: &AppHandle, id: &str) {
             // and looks at the main window.
             if let Some(call_id) = other.strip_prefix("meeting_record:").and_then(|n| n.parse().ok()) {
                 let app = app.clone();
-                std::thread::spawn(move || crate::meeting_detect::on_tray_record(&app, call_id));
+                std::thread::spawn(move || crate::calls::meeting_detect::on_tray_record(&app, call_id));
             }
         }
         "quit" => app.exit(0),
@@ -395,7 +395,7 @@ fn idle_menu_key() -> String {
     let update = crate::updates::tray_item()
         .map(|(id, label, _)| format!("{id}:{label}"))
         .unwrap_or_default();
-    let call = crate::meeting_detect::tray_item()
+    let call = crate::calls::meeting_detect::tray_item()
         .map(|(id, label)| format!("{id}:{label}"))
         .unwrap_or_default();
     let cfg = config::load();

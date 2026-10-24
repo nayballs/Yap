@@ -1442,9 +1442,9 @@ fn tell_failed(app: &AppHandle, note_id: u64) {
     };
     let app = app.clone();
     std::thread::spawn(move || {
-        crate::meeting_guard::notice(
+        crate::calls::meeting_guard::notice(
             &app,
-            &crate::meeting_guard::Notice {
+            &crate::calls::meeting_guard::Notice {
                 kind: "warning",
                 title: "Yap couldn't transcribe part of this meeting".to_string(),
                 body: body.to_string(),
@@ -1682,7 +1682,7 @@ fn watch_quiet(app: &AppHandle, note_id: u64, watch: &mut QuietWatch, you: &Audi
     let Some(side) = watch.check(levels(you), levels(them), t) else {
         return;
     };
-    let call = crate::meeting_detect::latest_call().map(|(_, name)| name);
+    let call = crate::calls::meeting_detect::latest_call().map(|(_, name)| name);
     let message = quiet_message(side, t.quiet, call.as_deref());
     tracing::info!(note_id, ?side, "Meeting: one side was quiet while the other talked; telling the person");
     let (title, settings) = match side {
@@ -1700,9 +1700,9 @@ fn watch_quiet(app: &AppHandle, note_id: u64, watch: &mut QuietWatch, you: &Audi
 fn warn(app: &AppHandle, title: &'static str, message: String, settings: Option<&'static str>) {
     let app = app.clone();
     std::thread::spawn(move || {
-        crate::meeting_guard::notice(
+        crate::calls::meeting_guard::notice(
             &app,
-            &crate::meeting_guard::Notice {
+            &crate::calls::meeting_guard::Notice {
                 kind: "warning",
                 title: title.to_string(),
                 body: message,

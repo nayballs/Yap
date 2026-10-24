@@ -216,7 +216,7 @@ fn on_meeting_state(app: &AppHandle, payload: &str) {
     tracing::info!(note, "capture: meeting windows show in screen shares (setting off); warning");
     // In the window, plus a Windows notification while it isn't focused
     // (the meeting may have started from the tray or the shortcut).
-    crate::meeting_guard::notice(app, &crate::meeting_guard::Notice::screen_share());
+    crate::calls::meeting_guard::notice(app, &crate::calls::meeting_guard::Notice::screen_share());
 }
 
 /// Follow the meeting recorder (app setup).

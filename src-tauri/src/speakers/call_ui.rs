@@ -556,7 +556,7 @@ fn poll(note_id: u64, stop: Arc<AtomicBool>) {
     while !stop.load(Ordering::SeqCst) && crate::meeting::recording_note() == Some(note_id) {
         if window.is_none() && looked.elapsed() >= Duration::from_secs(10) {
             looked = Instant::now();
-            window = crate::meeting_detect::call_window_exes().and_then(|(app, _)| {
+            window = crate::calls::meeting_detect::call_window_exes().and_then(|(app, _)| {
                 let hwnd = crate::notepad::call_window_quiet()?;
                 tracing::info!(note_id, app, "Call names: found the call's window");
                 Some((hwnd, app, Rules::new(profile(app))))
@@ -910,14 +910,14 @@ pub fn dump_main(args: Vec<String>) -> i32 {
 /// The call window for the dump: titled with `wanted`, else a call app's
 /// or a browser showing a meeting. (hwnd, title, app id).
 fn find_window(wanted: Option<&str>) -> Option<(isize, String, String)> {
-    let (call_exes, _) = crate::meeting_detect::call_audio();
+    let (call_exes, _) = crate::calls::meeting_detect::call_audio();
     let mut exes: Vec<String> = call_exes.into_iter().filter(|n| n.ends_with(".exe")).collect();
-    exes.extend(crate::meeting_detect::browser_exes().iter().map(|b| b.to_string()));
+    exes.extend(crate::calls::meeting_detect::browser_exes().iter().map(|b| b.to_string()));
     let windows = crate::notepad::windows_of(&exes);
     const APPS: [&str; 8] = ["teams", "zoom", "meet", "webex", "slack", "goto", "whereby", "jitsi"];
     let app_of = |exe: &str, title: &str| -> Option<String> {
         APPS.iter()
-            .find(|a| crate::meeting_detect::title_shows(a, title) || crate::meeting_detect::exe_is(a, exe))
+            .find(|a| crate::calls::meeting_detect::title_shows(a, title) || crate::calls::meeting_detect::exe_is(a, exe))
             .map(|a| a.to_string())
     };
     let pick = windows

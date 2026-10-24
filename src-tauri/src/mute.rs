@@ -119,7 +119,7 @@ pub(crate) fn quiet_verdict(s: &SessionFacts, calls: &Calls, own_pid: u32) -> Re
     if calls.live_browsers.contains(&s.exe) {
         return Err("the browser a meeting is in");
     }
-    if calls.meeting && crate::meeting_detect::browser_exes().contains(&s.exe.as_str()) {
+    if calls.meeting && crate::calls::meeting_detect::browser_exes().contains(&s.exe.as_str()) {
         return Err("a browser, while a meeting records");
     }
     if s.level <= QUIET_LEVEL + SAME_LEVEL {
@@ -349,7 +349,7 @@ fn bring_back(quieted: Vec<Quieted>, paused: Vec<Paused>) {
 
 /// What Yap must never touch right now.
 fn calls_now() -> Calls {
-    let (names, live_browsers) = crate::meeting_detect::call_audio();
+    let (names, live_browsers) = crate::calls::meeting_detect::call_audio();
     Calls { names, live_browsers, meeting: crate::meeting::is_recording() }
 }
 

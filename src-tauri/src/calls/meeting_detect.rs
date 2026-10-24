@@ -901,7 +901,7 @@ fn run(app: &AppHandle, todo: Todo) {
         emit(app);
     }
     if let Some((note_id, call)) = todo.auto_stop {
-        crate::meeting_guard::stop_after_call(app, note_id, &format!("{} {}", call.label, call.noun));
+        crate::calls::meeting_guard::stop_after_call(app, note_id, &format!("{} {}", call.label, call.noun));
     }
     if todo.prompted {
         let ever = ever_recorded();

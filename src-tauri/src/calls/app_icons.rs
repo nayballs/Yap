@@ -42,7 +42,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use base64::Engine;
 use serde::{Deserialize, Serialize};
 
-use crate::meeting_detect::{App, MicRecord, APPS};
+use crate::calls::meeting_detect::{App, MicRecord, APPS};
 
 /// The size icons are made at. The page shows them at 20 px, so they stay
 /// sharp past 200 % display scaling.
@@ -110,7 +110,7 @@ fn icons() -> BTreeMap<String, String> {
     }
     let _one = LOOKING.lock().unwrap_or_else(|p| p.into_inner());
     let records = if crate::config::load().meeting_detection {
-        crate::meeting_detect::mic_records()
+        crate::calls::meeting_detect::mic_records()
     } else {
         Vec::new()
     };
@@ -1203,11 +1203,11 @@ mod tests {
     #[test]
     fn the_tables_name_call_apps() {
         for (id, family) in FAMILIES {
-            assert_eq!(crate::meeting_detect::app_of_family(family), Some(*id), "{family}");
+            assert_eq!(crate::calls::meeting_detect::app_of_family(family), Some(*id), "{family}");
         }
         for (id, pattern) in KNOWN_PATHS {
             let exe = pattern.rsplit('\\').next().unwrap();
-            assert_eq!(crate::meeting_detect::app_of_exe(exe), Some(*id), "{pattern}");
+            assert_eq!(crate::calls::meeting_detect::app_of_exe(exe), Some(*id), "{pattern}");
         }
     }
 
@@ -1374,7 +1374,7 @@ mod tests {
         let out = std::env::var_os("YAP_ICONS_OUT")
             .map(PathBuf::from)
             .unwrap_or_else(|| std::env::temp_dir().join("yap-app-icons"));
-        let records = crate::meeting_detect::mic_records();
+        let records = crate::calls::meeting_detect::mic_records();
         println!("in the microphone record: {:?}", records.iter().map(|r| (r.app, r.packaged)).collect::<Vec<_>>());
         for app in APPS {
             let found = sources(app, &records);

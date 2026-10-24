@@ -637,7 +637,7 @@ pub fn e2e_focus(app: AppHandle, focused: bool) -> Result<(), String> {
     // and the calendar looks again at once (its card follows you either
     // way).
     if focused {
-        crate::meeting_detect::on_main_window_focused(&app);
+        crate::calls::meeting_detect::on_main_window_focused(&app);
     }
     crate::calendar::on_main_window_focused();
     Ok(())

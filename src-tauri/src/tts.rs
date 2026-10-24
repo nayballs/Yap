@@ -1723,7 +1723,7 @@ pub fn ready_sentences(md: &str, n: usize, done: bool) -> Vec<String> {
 pub fn meeting_quiet() -> Option<&'static str> {
     if crate::meeting::is_recording() {
         Some("Yap doesn't talk while it records a meeting")
-    } else if crate::meeting_detect::call_live() {
+    } else if crate::calls::meeting_detect::call_live() {
         Some("Yap doesn't talk during a call")
     } else {
         None

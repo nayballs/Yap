@@ -1193,9 +1193,9 @@ fn start_or_stop_from(app: &AppHandle, origin: Option<&str>) {
         return;
     }
     let shortcut = shortcut_label(&crate::config::load().meeting_hotkey);
-    if let Some((call_id, call)) = crate::meeting_detect::latest_call() {
+    if let Some((call_id, call)) = crate::calls::meeting_detect::latest_call() {
         tracing::info!(call_id, "meeting shortcut: record the call");
-        crate::meeting_detect::on_tray_record(app, call_id);
+        crate::calls::meeting_detect::on_tray_record(app, call_id);
         if let Some(note_id) = crate::meeting::recording_note() {
             if window_view(app).0 {
                 notice(app, &Notice::taking_notes(Some(&call), shortcut.as_deref(), note_id));
@@ -1228,7 +1228,7 @@ fn start_or_stop_from(app: &AppHandle, origin: Option<&str>) {
 /// failure the note is gone again.
 fn new_meeting_note(app: &AppHandle) -> Result<u64, String> {
     crate::notes::folder_create("Meetings");
-    let title = crate::meeting_detect::meeting_note_title();
+    let title = crate::calls::meeting_detect::meeting_note_title();
     let note = crate::notes::create(&title, "", "meeting", "Meetings");
     crate::notes::mark_meeting(note.id)?;
     let started = crate::commands::meeting_start(app.clone(), app.state::<crate::AppState>(), note.id);

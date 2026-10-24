@@ -11,7 +11,6 @@ mod about_you;
 mod agent_detect;
 mod ai_model;
 mod as_said;
-mod app_icons;
 mod app_kind;
 mod apps;
 mod assistant;
@@ -19,7 +18,7 @@ mod auth;
 mod bar;
 mod bench;
 mod calendar;
-mod capture;
+mod calls;
 mod chats;
 mod cleanup_styles;
 mod coaching;
@@ -42,9 +41,7 @@ mod media_pause;
 mod meeting;
 mod meeting_assist;
 mod meeting_audio;
-mod meeting_detect;
 mod meeting_end;
-mod meeting_guard;
 mod meeting_refine;
 mod meeting_summary;
 mod memory;
@@ -637,12 +634,12 @@ pub fn run() {
             updates::update_install,
             updates::update_ack,
             updates::update_ack_updated,
-            meeting_detect::meeting_detect_status,
-            meeting_detect::meeting_detect_respond,
+            calls::meeting_detect::meeting_detect_status,
+            calls::meeting_detect::meeting_detect_respond,
             // Debug builds only (the e2e suite): not in a release build at all.
             #[cfg(debug_assertions)]
-            meeting_detect::meeting_detect_simulate,
-            app_icons::meeting_app_icons,
+            calls::meeting_detect::meeting_detect_simulate,
+            calls::app_icons::meeting_app_icons,
             apps::apps_list,
             apps::apps_icons,
             meeting_end::meeting_end,
@@ -673,14 +670,14 @@ pub fn run() {
             notepad::notepad_split,
             notepad::notepad_split_preview,
             notepad::notepad_consent_message,
-            meeting_guard::meeting_shortcut,
-            meeting_guard::meeting_keep_going,
-            meeting_guard::meeting_limit_status,
-            meeting_guard::meeting_checkin_respond,
-            meeting_guard::meeting_checkin_status,
+            calls::meeting_guard::meeting_shortcut,
+            calls::meeting_guard::meeting_keep_going,
+            calls::meeting_guard::meeting_limit_status,
+            calls::meeting_guard::meeting_checkin_respond,
+            calls::meeting_guard::meeting_checkin_status,
             commands::configure_meeting_hotkey,
             #[cfg(debug_assertions)]
-            capture::capture_affinity,
+            calls::capture::capture_affinity,
             calendar::calendar_status,
             calendar::calendar_sync,
             calendar::calendar_connect_google,
@@ -793,9 +790,9 @@ pub fn run() {
             #[cfg(debug_assertions)]
             learn::e2e_learn_correction,
             #[cfg(debug_assertions)]
-            meeting_guard::e2e_meeting_limit,
+            calls::meeting_guard::e2e_meeting_limit,
             #[cfg(debug_assertions)]
-            meeting_guard::e2e_meeting_checkins,
+            calls::meeting_guard::e2e_meeting_checkins,
             #[cfg(debug_assertions)]
             calendar::calendar_e2e_opened,
             #[cfg(debug_assertions)]
@@ -854,7 +851,7 @@ pub fn run() {
             // meeting records leaves screen captures too (capture.rs).
             if payload.event() == tauri::webview::PageLoadEvent::Finished {
                 if let Some(window) = webview.app_handle().get_webview_window(webview.label()) {
-                    capture::sync_window(&window);
+                    calls::capture::sync_window(&window);
                 }
             }
         })
@@ -1205,7 +1202,7 @@ pub fn run() {
                             updates::on_main_window_focused(&focus_handle);
                             // …and a pending call prompt or calendar card
                             // moves into the window (one place: notice.rs).
-                            meeting_detect::on_main_window_focused(&focus_handle);
+                            calls::meeting_detect::on_main_window_focused(&focus_handle);
                             calendar::on_main_window_focused();
                         }
                         _ => {}
@@ -1263,12 +1260,12 @@ pub fn run() {
 
             // Call detection: offer to take notes when a call starts (reads
             // Windows' per-app microphone record; local only).
-            meeting_detect::init(&handle);
+            calls::meeting_detect::init(&handle);
 
             // Meeting guard rails: the maximum length, the meeting shortcut,
             // and keeping meeting windows out of screen shares.
-            meeting_guard::init(&handle);
-            capture::init(&handle);
+            calls::meeting_guard::init(&handle);
+            calls::capture::init(&handle);
 
             // Other apps' sound a crash left silenced mid-dictation comes back.
             mute::recover();

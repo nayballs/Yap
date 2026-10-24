@@ -2359,7 +2359,7 @@ mod tests {
             ("tts.rs", include_str!("tts.rs")),
             ("read_aloud.rs", include_str!("read_aloud.rs")),
             ("local_llm.rs", include_str!("local_llm.rs")),
-            ("meeting_detect.rs", include_str!("meeting_detect.rs")),
+            ("calls/meeting_detect.rs", include_str!("calls/meeting_detect.rs")),
         ];
         for (file, src) in files {
             let code: Vec<&str> = src.lines().filter(|l| !l.trim_start().starts_with("//")).collect();
