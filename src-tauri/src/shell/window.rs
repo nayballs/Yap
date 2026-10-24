@@ -1,6 +1,7 @@
 //! Yap's own windows: the main window and onboarding shown (fitted to
 //! the screen, focused except in test runs) by the tray, the pages and
-//! the first-run check.
+//! the first-run check; what the window-state plugin remembers; and the
+//! hidden webviews' DWM-cloaked first show at start.
 
 use tauri::{AppHandle, Manager};
 
@@ -125,6 +126,72 @@ pub fn close_onboarding(app: AppHandle) {
         let _ = w.hide();
     }
     crate::notices::notice::on_onboarding(false);
+}
+
+/// What the window-state plugin remembers for the main window (see `run`).
+/// Excludes VISIBLE so a start-hidden launch never un-hides itself.
+pub(crate) fn window_state_flags() -> tauri_plugin_window_state::StateFlags {
+    use tauri_plugin_window_state::StateFlags;
+    StateFlags::SIZE | StateFlags::POSITION | StateFlags::MAXIMIZED
+}
+
+#[cfg(target_os = "windows")]
+mod dwm {
+    use std::ffi::c_void;
+    pub const DWMWA_TRANSITIONS_FORCEDISABLED: u32 = 3;
+    pub const DWMWA_CLOAK: u32 = 13;
+    #[link(name = "dwmapi")]
+    extern "system" {
+        fn DwmSetWindowAttribute(
+            hwnd: *mut c_void,
+            attribute: u32,
+            value: *const c_void,
+            size: u32,
+        ) -> i32;
+        pub fn DwmFlush() -> i32;
+    }
+
+    /// Set a BOOL-valued DWM window attribute (best-effort).
+    pub fn set_flag(hwnd: *mut c_void, attribute: u32, on: bool) {
+        let value: i32 = on.into();
+        unsafe {
+            DwmSetWindowAttribute(
+                hwnd,
+                attribute,
+                &value as *const i32 as *const c_void,
+                std::mem::size_of::<i32>() as u32,
+            );
+        }
+    }
+}
+
+/// One-shot show+hide of a still-hidden webview window so WebView2 finishes
+/// initializing while VISIBLE (see the call site in `setup`), without anything
+/// reaching the screen: the window is DWM-cloaked (composed, never drawn) with
+/// its open/close animations disabled for the round-trip.
+///
+/// The previous version parked the window at (-32000,-32000) and moved it back
+/// straight after, which flashed a blank "Welcome to Yap" window on every
+/// launch — `hide()` starts DWM's ~200 ms close animation, and that animation
+/// followed the window back to its real on-screen position. (Parking also
+/// leaked -32000 into the window-state plugin's saved position.)
+#[cfg(target_os = "windows")]
+pub(crate) fn init_hidden_webview(window: &tauri::WebviewWindow) {
+    // Already on screen (dev builds show Settings at launch): it initialized
+    // visible anyway, and a show+hide here would just hide it again.
+    if window.is_visible().unwrap_or(false) {
+        return;
+    }
+    let Ok(hwnd) = window.hwnd() else { return };
+    dwm::set_flag(hwnd.0, dwm::DWMWA_CLOAK, true);
+    dwm::set_flag(hwnd.0, dwm::DWMWA_TRANSITIONS_FORCEDISABLED, true);
+    let _ = window.show();
+    let _ = window.hide();
+    // Let DWM process the hide (one composition pass) while the window is
+    // still cloaked, then restore normal behaviour for real opens.
+    unsafe { dwm::DwmFlush() };
+    dwm::set_flag(hwnd.0, dwm::DWMWA_TRANSITIONS_FORCEDISABLED, false);
+    dwm::set_flag(hwnd.0, dwm::DWMWA_CLOAK, false);
 }
 
 #[cfg(test)]

@@ -33,7 +33,7 @@ mod web;
 
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Mutex;
-use tauri::{AppHandle, Emitter, Listener, Manager};
+use tauri::{Emitter, Listener, Manager};
 use tauri_plugin_autostart::ManagerExt;
 
 /// Whether a recording/processing overlay is meant to be on screen. A background
@@ -49,69 +49,6 @@ static STATE_GEN: AtomicU64 = AtomicU64::new(0);
 /// Shared app state: the running dictation pipeline.
 pub struct AppState {
     pub pipeline: Mutex<Option<dictation::pipeline::Pipeline>>,
-}
-
-/// Enable or disable OS autostart via `tauri-plugin-autostart`.
-/// Kept as a free function so `shell::autostart::set_autostart` can delegate here.
-pub fn set_autostart_enabled(app: &AppHandle, enabled: bool) -> Result<(), String> {
-    // A dev build shares the installed Yap's "Yap" Run entry: disabling would
-    // delete the installed app's launch-at-login, enabling would point it at
-    // the dev exe. Leave the OS setting to the installed app.
-    if cfg!(debug_assertions) {
-        tracing::info!(enabled, "autostart: dev build, OS setting left alone");
-        return Ok(());
-    }
-    let manager = app.autolaunch();
-    let res = if enabled {
-        manager.enable()
-    } else {
-        manager.disable()
-    };
-    res.map_err(|e| format!("Failed to set autostart: {}", e))
-}
-
-/// The argument the sign-in launch carries (the autostart Run entry).
-const AUTOSTART_ARG: &str = "--autostart";
-
-/// Does this launch bring Yap's main window up? A launch by the person (the
-/// Start menu, a shortcut, the installer's "Run Yap") does — before
-/// 2026-10-22 a release build started to the tray with nothing on screen
-/// but the Yap bar, so opening Yap seemed to do nothing. Not: a launch at
-/// sign-in, "Start hidden", the first run (onboarding comes up instead) or
-/// the updater's relaunch (`updates::init` brings the window back if it was
-/// open). Pure.
-#[cfg_attr(debug_assertions, allow(dead_code))] // dev builds always show Settings
-fn launch_shows_window(at_sign_in: bool, start_hidden: bool, has_model: bool, after_update: bool) -> bool {
-    !at_sign_in && !start_hidden && has_model && !after_update
-}
-
-/// Was Yap started by the sign-in entry? Its `--autostart`, or — for an
-/// entry written before the argument existed, until the launch below writes
-/// it again — autostart on and Windows up for under ten minutes (with
-/// autostart on, a launch by hand later finds Yap running already and just
-/// brings its window up through single-instance).
-#[cfg_attr(debug_assertions, allow(dead_code))]
-fn launched_at_sign_in(autostart: bool) -> bool {
-    if std::env::args().any(|a| a == AUTOSTART_ARG) {
-        return true;
-    }
-    #[cfg(windows)]
-    {
-        let up_ms = unsafe { windows::Win32::System::SystemInformation::GetTickCount64() };
-        autostart && up_ms < 10 * 60 * 1000
-    }
-    #[cfg(not(windows))]
-    {
-        let _ = autostart;
-        false
-    }
-}
-
-/// What the window-state plugin remembers for the main window (see `run`).
-/// Excludes VISIBLE so a start-hidden launch never un-hides itself.
-pub(crate) fn window_state_flags() -> tauri_plugin_window_state::StateFlags {
-    use tauri_plugin_window_state::StateFlags;
-    StateFlags::SIZE | StateFlags::POSITION | StateFlags::MAXIMIZED
 }
 
 /// Clean-up every way out of Yap needs: stop the on-device AI sidecar, take
@@ -181,166 +118,11 @@ pub fn run_snip_dump() -> i32 {
     snip::dump::main(std::env::args().skip(2).collect())
 }
 
-/// Reload handle for the global log filter — lets the Settings "Debug mode"
-/// toggle (OpenWhispr's Debug Logging section) bump verbosity at runtime
-/// without a restart. See `set_debug_logging`.
-static LOG_RELOAD: std::sync::OnceLock<
-    tracing_subscriber::reload::Handle<
-        tracing_subscriber::EnvFilter,
-        tracing_subscriber::Registry,
-    >,
-> = std::sync::OnceLock::new();
-
-/// The filter directives for normal vs debug mode. Debug raises YAP's own
-/// crate to `debug` while keeping dependencies at `info` (whisper/ort/reqwest
-/// at debug would drown the file). ONNX Runtime's own log (`ort`) stays at
-/// `warn` either way: at `info` every model load wrote ~1,000 lines of graph
-/// optimisation notes, 96% of a release build's log at startup.
-fn log_directives(debug: bool) -> &'static str {
-    if debug {
-        "info,ort=warn,yap_lib=debug"
-    } else {
-        "info,ort=warn"
-    }
-}
-
-/// Live-switch the log verbosity (the Settings → Privacy & data → Debug logging
-/// toggle; persisted as `config.debug_logging` and re-applied on save/startup).
-/// An explicit RUST_LOG env var always wins (it was applied at init and this
-/// is only called from config paths when the value CHANGES).
-pub(crate) fn set_debug_logging(enabled: bool) {
-    if let Some(handle) = LOG_RELOAD.get() {
-        let _ = handle.reload(tracing_subscriber::EnvFilter::new(log_directives(enabled)));
-        // NB: the identifier `debug` must not appear inside tracing macros —
-        // it resolves to the macro's own level shorthand and breaks the build.
-        let state = if enabled { "enabled" } else { "disabled" };
-        tracing::info!(debug_mode = enabled, "Debug logging {state}");
-    }
-}
-
-/// Initialise tracing to BOTH stdout (for `tauri dev`) and a rolling file in the
-/// data dir. Installed builds are windowed with no console, so stdout logs are
-/// invisible — the file log is the only way to diagnose a shipped build (e.g.
-/// the "stuck on transcribing" report was a CPU-only whisper build with no
-/// visible logs). Must run AFTER `shell::portable::init()` so the data dir resolves.
-/// The filter sits behind a reload layer so "Debug mode" can raise it live.
-fn init_logging() {
-    use tracing_subscriber::prelude::*;
-
-    // Startup level: RUST_LOG wins, else the persisted Debug-mode setting.
-    let filter = tracing_subscriber::EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| {
-            tracing_subscriber::EnvFilter::new(log_directives(config::load().debug_logging))
-        });
-    let (filter, reload_handle) = tracing_subscriber::reload::Layer::new(filter);
-    let _ = LOG_RELOAD.set(reload_handle);
-
-    let log_dir = config::data_dir().join("logs");
-    let file_layer = match std::fs::create_dir_all(&log_dir) {
-        Ok(_) => {
-            let appender = tracing_appender::rolling::daily(&log_dir, "yap.log");
-            let (nb, guard) = tracing_appender::non_blocking(appender);
-            // The writer's flush guard must outlive the app; the process owns it
-            // for its whole lifetime, so leaking it is intentional.
-            std::mem::forget(guard);
-            Some(
-                tracing_subscriber::fmt::layer()
-                    .with_ansi(false)
-                    .with_writer(nb),
-            )
-        }
-        Err(_) => None, // no data dir writable — fall back to stdout only
-    };
-
-    let _ = tracing_subscriber::registry()
-        .with(filter)
-        .with(tracing_subscriber::fmt::layer()) // stdout (dev)
-        .with(file_layer)
-        .try_init();
-
-    // Route panics into the log file too — a panicking thread otherwise dies
-    // silently in a windowed build (and even in dev the console scrolls away).
-    // A native access violation can't be caught here, but every Rust-level
-    // panic now leaves a trace with its location.
-    std::panic::set_hook(Box::new(|info| {
-        let msg = info
-            .payload()
-            .downcast_ref::<&str>()
-            .map(|s| s.to_string())
-            .or_else(|| info.payload().downcast_ref::<String>().cloned())
-            .unwrap_or_else(|| "<non-string panic payload>".into());
-        let loc = info
-            .location()
-            .map(|l| format!("{}:{}:{}", l.file(), l.line(), l.column()))
-            .unwrap_or_else(|| "<unknown>".into());
-        tracing::error!(location = %loc, "PANIC: {}", msg);
-    }));
-}
-
-#[cfg(target_os = "windows")]
-mod dwm {
-    use std::ffi::c_void;
-    pub const DWMWA_TRANSITIONS_FORCEDISABLED: u32 = 3;
-    pub const DWMWA_CLOAK: u32 = 13;
-    #[link(name = "dwmapi")]
-    extern "system" {
-        fn DwmSetWindowAttribute(
-            hwnd: *mut c_void,
-            attribute: u32,
-            value: *const c_void,
-            size: u32,
-        ) -> i32;
-        pub fn DwmFlush() -> i32;
-    }
-
-    /// Set a BOOL-valued DWM window attribute (best-effort).
-    pub fn set_flag(hwnd: *mut c_void, attribute: u32, on: bool) {
-        let value: i32 = on.into();
-        unsafe {
-            DwmSetWindowAttribute(
-                hwnd,
-                attribute,
-                &value as *const i32 as *const c_void,
-                std::mem::size_of::<i32>() as u32,
-            );
-        }
-    }
-}
-
-/// One-shot show+hide of a still-hidden webview window so WebView2 finishes
-/// initializing while VISIBLE (see the call site in `setup`), without anything
-/// reaching the screen: the window is DWM-cloaked (composed, never drawn) with
-/// its open/close animations disabled for the round-trip.
-///
-/// The previous version parked the window at (-32000,-32000) and moved it back
-/// straight after, which flashed a blank "Welcome to Yap" window on every
-/// launch — `hide()` starts DWM's ~200 ms close animation, and that animation
-/// followed the window back to its real on-screen position. (Parking also
-/// leaked -32000 into the window-state plugin's saved position.)
-#[cfg(target_os = "windows")]
-fn init_hidden_webview(window: &tauri::WebviewWindow) {
-    // Already on screen (dev builds show Settings at launch): it initialized
-    // visible anyway, and a show+hide here would just hide it again.
-    if window.is_visible().unwrap_or(false) {
-        return;
-    }
-    let Ok(hwnd) = window.hwnd() else { return };
-    dwm::set_flag(hwnd.0, dwm::DWMWA_CLOAK, true);
-    dwm::set_flag(hwnd.0, dwm::DWMWA_TRANSITIONS_FORCEDISABLED, true);
-    let _ = window.show();
-    let _ = window.hide();
-    // Let DWM process the hide (one composition pass) while the window is
-    // still cloaked, then restore normal behaviour for real opens.
-    unsafe { dwm::DwmFlush() };
-    dwm::set_flag(hwnd.0, dwm::DWMWA_TRANSITIONS_FORCEDISABLED, false);
-    dwm::set_flag(hwnd.0, dwm::DWMWA_CLOAK, false);
-}
-
 pub fn run() {
     // Decide portable-vs-installed once, before anything reads the data dir
     // (the file log lives under it).
     shell::portable::init();
-    init_logging();
+    shell::logging::init_logging();
     tracing::info!(
         engines = cfg!(feature = "engines"),
         version = env!("CARGO_PKG_VERSION"),
@@ -377,7 +159,7 @@ pub fn run() {
         // while a launch by the person brings the window up (`launch_shows_window`).
         .plugin(tauri_plugin_autostart::init(
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
-            Some(vec![AUTOSTART_ARG]),
+            Some(vec![shell::autostart::AUTOSTART_ARG]),
         ))
         // Auto-update from GitHub Releases. Driven Rust-side by updates.rs
         // (background checks, download, install-on-request); the plugin's JS
@@ -401,7 +183,7 @@ pub fn run() {
     } else {
         builder.plugin(
             tauri_plugin_window_state::Builder::default()
-                .with_state_flags(window_state_flags())
+                .with_state_flags(shell::window::window_state_flags())
                 .with_denylist(&["overlay", "onboarding", "notepad", "split-preview"])
                 .build(),
         )
@@ -918,8 +700,8 @@ pub fn run() {
             // up (`launch_shows_window`); sign-in and "Start hidden" stay in
             // the tray.
             #[cfg(not(debug_assertions))]
-            if launch_shows_window(
-                launched_at_sign_in(cfg.autostart),
+            if shell::autostart::launch_shows_window(
+                shell::autostart::launched_at_sign_in(cfg.autostart),
                 cfg.start_hidden,
                 !dictation::commands::installed_models().is_empty(),
                 updates::relaunch_after_update(),
@@ -1098,15 +880,15 @@ pub fn run() {
             if bench_child() {
                 tracing::info!("bench child: autostart left alone");
             } else if autostart_now != cfg.autostart {
-                if let Err(e) = set_autostart_enabled(&handle, cfg.autostart) {
+                if let Err(e) = shell::autostart::set_autostart_enabled(&handle, cfg.autostart) {
                     tracing::debug!("autostart reconcile skipped: {}", e);
                 }
-            } else if cfg.autostart && !std::env::args().any(|a| a == AUTOSTART_ARG) {
+            } else if cfg.autostart && !std::env::args().any(|a| a == shell::autostart::AUTOSTART_ARG) {
                 // An entry written before `--autostart` existed starts Yap
                 // without it, which would now open the window at every
                 // sign-in: written again, with it. (A launch that carries
                 // the argument proves the entry already has it.)
-                if let Err(e) = set_autostart_enabled(&handle, true) {
+                if let Err(e) = shell::autostart::set_autostart_enabled(&handle, true) {
                     tracing::debug!("autostart entry not rewritten: {}", e);
                 }
             }
@@ -1164,7 +946,7 @@ pub fn run() {
             #[cfg(target_os = "windows")]
             for label in ["onboarding", "settings", "notepad"] {
                 if let Some(w) = app.get_webview_window(label) {
-                    init_hidden_webview(&w);
+                    shell::window::init_hidden_webview(&w);
                 }
             }
 
@@ -1233,35 +1015,4 @@ pub fn run() {
                 shutdown_cleanup();
             }
         });
-}
-
-#[cfg(test)]
-mod tests {
-    use super::{launch_shows_window, log_directives};
-
-    #[test]
-    fn a_launch_by_the_person_brings_the_window_up() {
-        // (at sign-in, start hidden, a model installed, the updater's relaunch)
-        assert!(launch_shows_window(false, false, true, false));
-        // Sign-in and "Start hidden" stay in the tray.
-        assert!(!launch_shows_window(true, false, true, false));
-        assert!(!launch_shows_window(false, true, true, false));
-        // The first run shows onboarding instead.
-        assert!(!launch_shows_window(false, false, false, false));
-        // After "Restart to update", updates.rs decides.
-        assert!(!launch_shows_window(false, false, true, true));
-    }
-
-    #[test]
-    fn onnx_runtime_logs_warnings_only() {
-        // Its graph-optimisation notes at `info` were ~1,000 lines per model
-        // load; Yap's own debug mode doesn't bring them back.
-        for debug in [false, true] {
-            let d = log_directives(debug);
-            assert!(d.contains("ort=warn"), "{d}");
-            tracing_subscriber::EnvFilter::try_new(d).expect("valid directives");
-        }
-        assert!(log_directives(true).contains("yap_lib=debug"));
-        assert!(!log_directives(false).contains("yap_lib=debug"));
-    }
 }

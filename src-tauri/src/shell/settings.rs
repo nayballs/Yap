@@ -62,7 +62,7 @@ fn apply_config(app: &AppHandle, state: State<'_, AppState>, prev: &YapConfig, c
     // A provider key set or changed: check that provider's model list now.
     crate::ai::model_catalog::on_config_saved(&app, prev, &cfg);
     if cfg.debug_logging != prev_debug {
-        crate::set_debug_logging(cfg.debug_logging);
+        crate::shell::logging::set_debug_logging(cfg.debug_logging);
     }
     if let Err(e) = crate::dictation::input_hook::configure_dictation(&cfg.hotkey) {
         tracing::warn!("Failed to apply hotkey: {}", e);

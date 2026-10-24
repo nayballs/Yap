@@ -569,7 +569,7 @@ fn build_updater(app: &AppHandle) -> Result<tauri_plugin_updater::Updater, Strin
         .on_before_exit(move || {
             tracing::info!("updates: launching the installer — cleaning up first");
             crate::shutdown_cleanup();
-            let _ = handle.save_window_state(crate::window_state_flags());
+            let _ = handle.save_window_state(crate::shell::window::window_state_flags());
             handle.cleanup_before_exit();
         });
     #[cfg(debug_assertions)]
