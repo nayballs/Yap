@@ -528,16 +528,16 @@ pub struct YapConfig {
     #[serde(default)]
     pub pp_local_model: String,
     /// The bigger on-device model offered once in Settings (Qwen3.5-4B on a
-    /// PC whose graphics card can run it, `local_llm::upgrade_offer`) was
+    /// PC whose graphics card can run it, `local_llm::models::upgrade_offer`) was
     /// turned down ("No thanks"), or taken: it isn't offered again.
     #[serde(default)]
     pub local_llm_upgrade_dismissed: bool,
     /// The on-device model's **context**, in tokens: how much text the
     /// sidecar reads at once (`-c`), shared by Chat, the cleanup and the
     /// meeting notes. 0 (or missing) = the default, 8,192
-    /// (`local_llm::DEFAULT_CONTEXT`); clamped to what the model was trained
-    /// for and a floor (`local_llm::effective_context`). Changing it restarts
-    /// the sidecar, never mid-dictation (`local_llm::restart_when_idle`).
+    /// (`local_llm::context::DEFAULT_CONTEXT`); clamped to what the model was trained
+    /// for and a floor (`local_llm::context::effective_context`). Changing it restarts
+    /// the sidecar, never mid-dictation (`local_llm::context::restart_when_idle`).
     #[serde(default)]
     pub local_context: u32,
     /// **MTP drafting** for the on-device model (`--spec-type draft-mtp`:
@@ -2359,6 +2359,9 @@ mod tests {
             ("voice/tts.rs", include_str!("voice/tts.rs")),
             ("voice/read_aloud.rs", include_str!("voice/read_aloud.rs")),
             ("ai/local_llm.rs", include_str!("ai/local_llm.rs")),
+            ("ai/local_llm/context.rs", include_str!("ai/local_llm/context.rs")),
+            ("ai/local_llm/models.rs", include_str!("ai/local_llm/models.rs")),
+            ("ai/local_llm/runtime.rs", include_str!("ai/local_llm/runtime.rs")),
             ("calls/meeting_detect.rs", include_str!("calls/meeting_detect.rs")),
         ];
         for (file, src) in files {

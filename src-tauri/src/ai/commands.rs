@@ -45,9 +45,9 @@ pub fn local_llm_status() -> serde_json::Value {
     // The graphics card picks the model recommended for this PC (gpu.rs).
     let gpu = crate::ai::gpu::this_pc();
     let capable = crate::ai::gpu::can_run_big_model(gpu.as_ref());
-    let recommended = crate::ai::local_llm::recommended_id(capable);
+    let recommended = crate::ai::local_llm::models::recommended_id(capable);
     // The curated one-click download set, with per-model installed state.
-    let curated: Vec<serde_json::Value> = crate::ai::local_llm::CURATED_MODELS
+    let curated: Vec<serde_json::Value> = crate::ai::local_llm::models::CURATED_MODELS
         .iter()
         .map(|m| {
             serde_json::json!({
@@ -70,7 +70,7 @@ pub fn local_llm_status() -> serde_json::Value {
                 "installed": on_disk.iter().any(|f| f == m.filename),
                 // What it was trained for ("up to 256K"): the file's own
                 // header once it's here, else the curated figure.
-                "maxContext": crate::ai::local_llm::trained_context(&crate::ai::local_llm::llm_dir().join(m.filename)),
+                "maxContext": crate::ai::local_llm::context::trained_context(&crate::ai::local_llm::llm_dir().join(m.filename)),
             })
         })
         .collect();
@@ -87,7 +87,7 @@ pub fn local_llm_status() -> serde_json::Value {
     // the Chat picker's "On this PC".
     let own: Vec<serde_json::Value> = on_disk
         .iter()
-        .filter(|f| !crate::ai::local_llm::CURATED_MODELS.iter().any(|m| m.filename == f.as_str()))
+        .filter(|f| !crate::ai::local_llm::models::CURATED_MODELS.iter().any(|m| m.filename == f.as_str()))
         .map(|f| {
             let id = crate::ai::local_llm::model_id(std::path::Path::new(f));
             let mb = std::fs::metadata(crate::ai::local_llm::llm_dir().join(f)).map(|m| m.len() / 1_048_576).unwrap_or(0);
@@ -96,7 +96,7 @@ pub fn local_llm_status() -> serde_json::Value {
                 "name": id,
                 "sizeMb": mb,
                 "tools": crate::chat::tools::supports_tools(crate::ai::local_llm::PROVIDER_ONDEVICE, &id),
-                "maxContext": crate::ai::local_llm::trained_context(&crate::ai::local_llm::llm_dir().join(f)),
+                "maxContext": crate::ai::local_llm::context::trained_context(&crate::ai::local_llm::llm_dir().join(f)),
             })
         })
         .collect();
@@ -108,9 +108,9 @@ pub fn local_llm_status() -> serde_json::Value {
             .llm_scopes
             .iter()
             .any(|(k, s)| k != "chat" && s.enabled && s.provider == crate::ai::local_llm::PROVIDER_ONDEVICE);
-    let upgrade = crate::ai::local_llm::upgrade_offer(
+    let upgrade = crate::ai::local_llm::models::upgrade_offer(
         capable,
-        crate::ai::local_llm::in_use(&cfg),
+        crate::ai::local_llm::models::in_use(&cfg),
         &active_file,
         cfg.local_llm_upgrade_dismissed,
     )
@@ -131,9 +131,9 @@ pub fn local_llm_status() -> serde_json::Value {
         // The llamafile on disk, the one Yap pins, the background upgrade
         // ("downloading" | "waiting" | ""), and the running server's MTP.
         "runtime": {
-            "version": crate::ai::local_llm::runtime_version().map(|v| v.to_string()),
+            "version": crate::ai::local_llm::runtime::runtime_version().map(|v| v.to_string()),
             "pinned": crate::ai::local_llm::RUNTIME_VERSION,
-            "upgrade": crate::ai::local_llm::upgrade_phase(),
+            "upgrade": crate::ai::local_llm::runtime::upgrade_phase(),
             "mtp": crate::ai::local_llm::serving_plan().map(|p| p.server().mtp),
         },
         "activeModel": cfg.pp_local_model,
@@ -153,8 +153,8 @@ pub fn local_llm_status() -> serde_json::Value {
         "slowOnThisPc": running && crate::ai::local_llm::slow_on_this_pc(&serving, serving_mb, placement),
         "upgrade": upgrade,
         // The active model's context: the setting, its maximum, the
-        // choices with what each takes (local_llm::context_view).
-        "context": crate::ai::local_llm::context_view(&cfg),
+        // choices with what each takes (local_llm::context::context_view).
+        "context": crate::ai::local_llm::context::context_view(&cfg),
     })
 }
 
@@ -198,10 +198,10 @@ pub fn local_llm_stop() {
 #[tauri::command]
 pub async fn local_llm_install(app: AppHandle, model: Option<String>) -> Result<String, String> {
     match model {
-        Some(id) => crate::ai::local_llm::install_curated(&id, Some(&app))
+        Some(id) => crate::ai::local_llm::models::install_curated(&id, Some(&app))
             .await
             .map(|m| m.filename.to_string()),
-        None => crate::ai::local_llm::install(Some(&app))
+        None => crate::ai::local_llm::models::install(Some(&app))
             .await
             .map(|_| crate::ai::local_llm::MODEL_FILENAME.to_string()),
     }

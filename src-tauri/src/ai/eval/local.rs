@@ -26,8 +26,8 @@ pub async fn runtime(explicit: Option<&Path>, models_dir: &Path) -> Result<PathB
     if let Some(p) = explicit {
         return if p.is_file() { Ok(p.to_path_buf()) } else { Err(format!("no llamafile at {}", p.display())) };
     }
-    let pinned = crate::ai::local_llm::Version::parse(crate::ai::local_llm::RUNTIME_VERSION);
-    let current = |dir: &Path| crate::ai::local_llm::runtime_version_in(dir).filter(|v| Some(*v) == pinned).is_some();
+    let pinned = crate::ai::local_llm::runtime::Version::parse(crate::ai::local_llm::RUNTIME_VERSION);
+    let current = |dir: &Path| crate::ai::local_llm::runtime::runtime_version_in(dir).filter(|v| Some(*v) == pinned).is_some();
     if let Some(dir) = installed_llm_dir().filter(|d| current(d)) {
         return Ok(dir.join(crate::ai::local_llm::RUNTIME_FILENAME));
     }
@@ -36,7 +36,7 @@ pub async fn runtime(explicit: Option<&Path>, models_dir: &Path) -> Result<PathB
         std::fs::create_dir_all(models_dir).map_err(|e| e.to_string())?;
         println!("Downloading the llamafile runtime {} into {} …", crate::ai::local_llm::RUNTIME_VERSION, models_dir.display());
         let _ = std::fs::remove_file(&dest);
-        crate::ai::local_llm::download_verified(
+        crate::ai::local_llm::models::download_verified(
             crate::ai::local_llm::RUNTIME_URL,
             &dest,
             crate::ai::local_llm::RUNTIME_SHA256,
@@ -44,9 +44,9 @@ pub async fn runtime(explicit: Option<&Path>, models_dir: &Path) -> Result<PathB
             None,
         )
         .await?;
-        crate::ai::local_llm::write_marker(
+        crate::ai::local_llm::runtime::write_marker(
             models_dir,
-            &crate::ai::local_llm::Marker {
+            &crate::ai::local_llm::runtime::Marker {
                 version: crate::ai::local_llm::RUNTIME_VERSION.to_string(),
                 sha256: crate::ai::local_llm::RUNTIME_SHA256.to_string(),
                 ..Default::default()
@@ -58,7 +58,7 @@ pub async fn runtime(explicit: Option<&Path>, models_dir: &Path) -> Result<PathB
 }
 
 /// The GGUF a `local:<spec>` names: "installed" (the on-device default,
-/// Qwen2.5-1.5B), a curated id from `local_llm::CURATED_MODELS`
+/// Qwen2.5-1.5B), a curated id from `local_llm::models::CURATED_MODELS`
 /// ("qwen2.5-3b"), a path, or an https URL with `#sha256=<hex>`. Installed
 /// files are used where they are; anything else is downloaded (verified)
 /// into `models_dir`.
@@ -70,7 +70,7 @@ pub async fn model(spec: &str, models_dir: &Path) -> Result<PathBuf, String> {
         if !dest.is_file() {
             std::fs::create_dir_all(models_dir).map_err(|e| e.to_string())?;
             println!("Downloading {file} into {} …", models_dir.display());
-            crate::ai::local_llm::download_verified(&url, &dest, &sha, "model", None).await?;
+            crate::ai::local_llm::models::download_verified(&url, &dest, &sha, "model", None).await?;
         }
         Ok::<PathBuf, String>(dest)
     };
@@ -81,7 +81,7 @@ pub async fn model(spec: &str, models_dir: &Path) -> Result<PathBuf, String> {
         }
         return fetch(crate::ai::local_llm::MODEL_URL.into(), file.into(), crate::ai::local_llm::MODEL_SHA256.into()).await;
     }
-    if let Some(m) = crate::ai::local_llm::curated_by_id(spec) {
+    if let Some(m) = crate::ai::local_llm::models::curated_by_id(spec) {
         if let Some(p) = installed(m.filename) {
             return Ok(p);
         }
@@ -101,7 +101,7 @@ pub async fn model(spec: &str, models_dir: &Path) -> Result<PathBuf, String> {
     }
     Err(format!(
         "no GGUF \"{spec}\": give a path, \"installed\", a curated id ({}), or an https URL#sha256=…",
-        crate::ai::local_llm::CURATED_MODELS.iter().map(|m| m.id).collect::<Vec<_>>().join(", ")
+        crate::ai::local_llm::models::CURATED_MODELS.iter().map(|m| m.id).collect::<Vec<_>>().join(", ")
     ))
 }
 
@@ -124,9 +124,9 @@ pub struct Server {
 /// would decide on this PC — `mtp` overrides; never on the processor
 /// (`ngl` 0).
 pub async fn plan(runtime: &Path, model: &Path, ngl: u32, ctx: u32, mtp: Option<bool>) -> crate::ai::local_llm::Plan {
-    let version = crate::ai::local_llm::probe_version(runtime)
+    let version = crate::ai::local_llm::runtime::probe_version(runtime)
         .await
-        .or_else(|| crate::ai::local_llm::Version::parse(crate::ai::local_llm::RUNTIME_VERSION))
+        .or_else(|| crate::ai::local_llm::runtime::Version::parse(crate::ai::local_llm::RUNTIME_VERSION))
         .expect("a version");
     let yap = crate::ai::local_llm::plan_for(&crate::config::load(), model, ctx, version);
     let on = ngl > 0 && mtp.unwrap_or(yap.mtp);

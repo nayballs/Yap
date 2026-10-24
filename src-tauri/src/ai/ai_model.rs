@@ -85,7 +85,7 @@ pub struct OnDevice {
     pub installed: bool,
     pub name: String,
     pub id: String,
-    /// The context it works with (tokens; `local_llm::context_now`).
+    /// The context it works with (tokens; `local_llm::context::context_now`).
     pub context: u32,
 }
 
@@ -95,7 +95,7 @@ impl OnDevice {
             installed: crate::ai::local_llm::is_installed(cfg),
             name: crate::ai::local_llm::active_model_display(cfg),
             id: crate::ai::local_llm::active_model_id(cfg),
-            context: crate::ai::local_llm::context_now(cfg),
+            context: crate::ai::local_llm::context::context_now(cfg),
         }
     }
 }

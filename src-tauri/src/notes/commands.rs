@@ -397,7 +397,7 @@ pub async fn note_ask(
     if !note.transcript.is_empty() {
         const ASK_TRANSCRIPT_TOKENS: usize = 3_000;
         // A bigger on-device context reads more of it raw (×1–4).
-        let budget = ASK_TRANSCRIPT_TOKENS * crate::ai::local_llm::budget_factor_for(&provider, &base_url);
+        let budget = ASK_TRANSCRIPT_TOKENS * crate::ai::local_llm::context::budget_factor_for(&provider, &base_url);
         context.push('\n');
         context.push_str(&crate::meetings::meeting_summary::ask_context(&note, budget));
     }

@@ -1,6 +1,6 @@
 //! **A GGUF model's header**, read-only: what the on-device model picker
 //! needs to say how much text a model can read at once and what a longer
-//! context costs (`local_llm::context_view`).
+//! context costs (`local_llm::context::context_view`).
 //!
 //! A GGUF file starts with `GGUF`, a version (2 or 3), the tensor count and
 //! the metadata count (u64 each), then the metadata — key (u64 length +
@@ -62,7 +62,7 @@
 //! Sliding-window layers (Gemma) are counted at the full context: the
 //! estimate errs high there, never low. Not counted: the CUDA context
 //! itself (~230–250 MiB more in `nvidia-smi` than the log's buffers), which
-//! the pickers' room for the model leaves aside (`local_llm::card_room`).
+//! the pickers' room for the model leaves aside (`local_llm::context::card_room`).
 
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Seek, SeekFrom};

@@ -668,13 +668,13 @@ pub fn run() {
                 tauri::async_runtime::spawn(async move {
                     // A runtime cut off mid-swap (or taken by an antivirus)
                     // comes back first; leftovers go.
-                    ai::local_llm::tidy_runtime().await;
+                    ai::local_llm::runtime::tidy_runtime().await;
                     ai::local_llm::autostart_if_configured(&cfg2).await;
                 });
             }
             // An older llamafile runtime (installs before 22 Oct 2026) is
             // replaced in the background, never under a dictation.
-            ai::local_llm::spawn_runtime_upgrade(handle.clone());
+            ai::local_llm::runtime::spawn_runtime_upgrade(handle.clone());
 
             // Local API bridge (Integrations): loopback server for CLIs/agents.
             integrations::bridge::sync(&handle, cfg.bridge_enabled);

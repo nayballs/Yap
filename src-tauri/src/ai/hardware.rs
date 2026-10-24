@@ -181,7 +181,7 @@ pub const CLOUD_MS: u64 = 800;
 pub fn advise(m: &Machine) -> Advice {
     let tier = tier(m);
     let big = crate::ai::gpu::can_run_big_model(m.gpu.as_ref());
-    let local_model = crate::ai::local_llm::recommended_id(big);
+    let local_model = crate::ai::local_llm::models::recommended_id(big);
     let (cleanup, local_ms) = match tier {
         Tier::Card => (CleanupPick::Local, if big { LOCAL_MS_CARD_4B } else { LOCAL_MS_CARD_1_5B }),
         Tier::Processor => (CleanupPick::Local, LOCAL_MS_PROCESSOR),
@@ -189,7 +189,7 @@ pub fn advise(m: &Machine) -> Advice {
     };
     let speech_device = speech_device_before_measuring(m.gpu.as_ref());
     let where_ = |d: Device| if d == Device::Gpu { "the graphics card" } else { "the processor" };
-    let model_name = crate::ai::local_llm::curated_by_id(local_model).map(|c| c.display).unwrap_or(local_model);
+    let model_name = crate::ai::local_llm::models::curated_by_id(local_model).map(|c| c.display).unwrap_or(local_model);
     let summary = match cleanup {
         CleanupPick::Local => format!(
             "Parakeet V3 on {}; AI cleanup on this PC with {model_name} (adds about {:.1} s a dictation)",

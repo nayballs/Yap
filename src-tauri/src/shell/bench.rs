@@ -561,10 +561,10 @@ async fn time_local_cleanup(runtime: &Path, gguf: &Path, sc: &Scenario, work: &P
             return run;
         }
     };
-    let version = crate::ai::local_llm::runtime_version_in(runtime.parent().unwrap_or(Path::new(".")))
-        .or_else(|| crate::ai::local_llm::Version::parse(crate::ai::local_llm::RUNTIME_VERSION))
-        .unwrap_or(crate::ai::local_llm::Version(0, 10, 6));
-    let ctx = crate::ai::local_llm::DEFAULT_CONTEXT;
+    let version = crate::ai::local_llm::runtime::runtime_version_in(runtime.parent().unwrap_or(Path::new(".")))
+        .or_else(|| crate::ai::local_llm::runtime::Version::parse(crate::ai::local_llm::RUNTIME_VERSION))
+        .unwrap_or(crate::ai::local_llm::runtime::Version(0, 10, 6));
+    let ctx = crate::ai::local_llm::context::DEFAULT_CONTEXT;
     let on_gpu = sc.device == Device::Gpu;
     let plan = if on_gpu {
         crate::ai::local_llm::plan_for(&crate::config::YapConfig::default(), gguf, ctx, version)
@@ -832,9 +832,9 @@ fn local_models(data: &Path, o: &Options) -> Vec<PathBuf> {
         return l.clone();
     }
     let llm = data.join("llm");
-    [crate::ai::local_llm::DEFAULT_MODEL_ID, crate::ai::local_llm::GPU_MODEL_ID]
+    [crate::ai::local_llm::models::DEFAULT_MODEL_ID, crate::ai::local_llm::models::GPU_MODEL_ID]
         .iter()
-        .filter_map(|id| crate::ai::local_llm::curated_by_id(id))
+        .filter_map(|id| crate::ai::local_llm::models::curated_by_id(id))
         .map(|m| llm.join(m.filename))
         .filter(|p| p.is_file())
         .collect()

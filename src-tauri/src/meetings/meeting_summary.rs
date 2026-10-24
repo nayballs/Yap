@@ -25,7 +25,7 @@
 //!
 //! A bigger on-device context (Settings' "Context", `local_context`) lets
 //! the final call read more ([`FinalBudget`]): the single pass and the
-//! final input grow by whole multiples of 8K (`local_llm::budget_factor`,
+//! final input grow by whole multiples of 8K (`local_llm::context::budget_factor`,
 //! ≤ 4×: 14,000 / 18,000 at 32K), the reply's room staying as at 8K. Only
 //! when the call really goes to the running sidecar; the live digests,
 //! the helpers and every other endpoint keep the 8K budgets.
@@ -237,13 +237,13 @@ impl FinalBudget {
 
     /// The 8K budgets × `factor` (1–4). Pure.
     pub fn scaled(factor: usize) -> Self {
-        let f = factor.clamp(1, crate::ai::local_llm::MAX_BUDGET_FACTOR);
+        let f = factor.clamp(1, crate::ai::local_llm::context::MAX_BUDGET_FACTOR);
         FinalBudget { single_pass: SINGLE_PASS_TOKENS * f, input: FINAL_INPUT_TOKENS * f }
     }
 
     /// For a call to `ep`: grown only on the running on-device model.
     pub fn for_endpoint(ep: &Endpoint) -> Self {
-        Self::scaled(crate::ai::local_llm::budget_factor_for(&ep.provider, &ep.base_url))
+        Self::scaled(crate::ai::local_llm::context::budget_factor_for(&ep.provider, &ep.base_url))
     }
 }
 
