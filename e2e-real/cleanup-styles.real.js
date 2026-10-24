@@ -110,5 +110,12 @@ test('Claude Code in a terminal: an AI prompt, word for word', async ({ robot })
   const r = await robot.dictate(cli, 'Explain why the build fails on Windows.');
   expect(r.style).toBe('aiPrompts/literal');
   expect(lastCleanup().user).toContain('This dictation is a prompt for an AI. Tone: literal');
-  await expect.poll(() => cli.received()).toBe('Explain why the build fails on Windows.');
+  // Claude Code turns bracketed paste on: the words arrive inside its
+  // markers (\e[200~ … \e[201~), as terminal.real.js reads them.
+  await expect.poll(() => cli.received()).toContain('\x1b[201~');
+  const got = cli.received();
+  const paste = /\x1b\[200~([\s\S]*?)\x1b\[201~/.exec(got)?.[1];
+  expect(paste).toBe('Explain why the build fails on Windows.');
+  // …and nothing else: no Enter (nothing sent), no second paste.
+  expect(got.replace(/\x1b\[200~[\s\S]*?\x1b\[201~/, '')).toBe('');
 });
