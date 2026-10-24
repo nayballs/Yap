@@ -1,0 +1,172 @@
+<script>
+  // Chat's thread: the conversation's messages (ChatMessage), "Thinking…"
+  // while an answer hasn't started (still working after a few seconds: a
+  // model on this PC can take a minute), or — no messages yet — what Chat
+  // is for, what it needs if no AI model is set up, and the Voice
+  // Assistant's shortcut (or how to set one).
+  import { formatHotkeySpec } from '../../core/hotkeys.js';
+  import { messageItems } from '../../core/itemMenus.js';
+  import { openContextMenu } from '../../ui/contextMenu.svelte.js';
+  import { STILL_WORKING_S } from './chatState.svelte.js';
+  import ChatMessage from './ChatMessage.svelte';
+
+  /** `chat`: the view's state; `onopensettings(section)`: ControlPanel's Settings. */
+  let { chat, onopensettings = null } = $props();
+
+  function messageMenu(e, m) {
+    const reading = !!m.id && chat.speakingId === m.id;
+    openContextMenu(
+      e,
+      messageItems(m, { read: m.role === 'assistant' && m.id ? () => chat.readAloud(m) : null, reading }),
+      { label: m.role === 'assistant' ? 'Answer' : 'Question', row: e.currentTarget }
+    );
+  }
+</script>
+
+{#if chat.messages.length === 0}
+  <div class="empty">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" /><path d="M8 9h8M8 13h5" /></svg>
+    <p>Ask about your notes, transcripts, or anything else</p>
+    {#if !chat.chatReady}
+      <!-- Before a first question fails: what Chat needs. -->
+      <p class="asknote needsai">
+        Chat needs an AI model: a free key from a cloud provider, or one that runs on this PC.
+        <button class="setkey" onclick={() => onopensettings?.('cleanup#chat')}>Set up an AI model</button>
+      </p>
+    {/if}
+    <!-- The Voice Assistant: the same chat, asked out loud from any app. -->
+    <p class="asknote">
+      {#if chat.assistantHotkey}
+        Or press <kbd>{formatHotkeySpec(chat.assistantHotkey)}</kbd> in any app to ask out loud and hear the answer.
+      {:else}
+        <button class="setkey" onclick={() => onopensettings?.('voice#assistant-shortcut')}>Set an assistant shortcut</button>
+        to ask out loud from any app and hear the answer.
+      {/if}
+    </p>
+  </div>
+{:else}
+  <div class="msgs" bind:this={chat.threadEl}>
+    {#each chat.messages as m, i (i)}
+      <ChatMessage
+        {m}
+        last={i === chat.messages.length - 1}
+        sources={chat.citedSources(i)}
+        reading={m.role === 'assistant' && !!m.id && chat.speakingId === m.id}
+        keepDays={chat.keepDays}
+        onview={(id) => (chat.viewing = id)}
+        onmenu={(e) => messageMenu(e, m)}
+        onread={() => chat.readAloud(m)}
+      />
+    {/each}
+    {#if (chat.sending || (chat.assistantPending != null && chat.assistantPending === chat.activeId)) && !chat.streaming}
+      <div class="cbubble assistant">
+        <p class="cbody thinking">Thinking…</p>
+        {#if chat.waitedS >= STILL_WORKING_S}
+          <p class="cwait" data-testid="chat-still-working" aria-live="polite">
+            {#if chat.modelHere}
+              Still working ({chat.waitedS} s): the model runs on this PC, so this can take a minute.
+            {:else}
+              Still working ({chat.waitedS} s)…
+            {/if}
+          </p>
+        {/if}
+      </div>
+    {/if}
+  </div>
+{/if}
+
+<style>
+  .empty {
+    flex: 1 1 auto;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    text-align: center;
+    color: var(--yap-muted-55);
+  }
+  .empty svg {
+    width: 36px;
+    height: 36px;
+    opacity: 0.7;
+  }
+  .empty p {
+    margin: 0;
+    max-width: 220px;
+    font-size: 12px;
+    line-height: 1.6;
+  }
+  /* The Voice Assistant's line: a gentle way to its shortcut. */
+  .empty .asknote {
+    max-width: 280px;
+    margin-top: 6px;
+    color: var(--yap-muted);
+  }
+  .empty .asknote.needsai {
+    max-width: 320px;
+    color: var(--yap-fg-80);
+  }
+  .asknote kbd {
+    padding: 1px 6px;
+    border: 1px solid var(--yap-key-border);
+    border-radius: var(--yap-r-sm);
+    background: var(--yap-key-bg);
+    color: var(--yap-key-fg);
+    font: inherit;
+    font-size: 11px;
+    font-weight: 650;
+  }
+  .setkey {
+    padding: 0;
+    border: none;
+    background: none;
+    color: var(--yap-primary);
+    font: inherit;
+    font-weight: 650;
+    cursor: pointer;
+  }
+  .setkey:hover {
+    text-decoration: underline;
+  }
+  .msgs {
+    flex: 1 1 auto;
+    overflow-y: auto;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 2px;
+  }
+  /* "Thinking…" (ChatMessage.svelte draws the messages themselves). */
+  .cbubble {
+    max-width: 78%;
+    border-radius: 12px;
+    padding: 8px 12px;
+    font-family: var(--yap-font-reading);
+    font-size: calc(12.5px * var(--yap-reading-scale));
+    line-height: calc(1.6 * var(--yap-reading-leading));
+  }
+  .cbubble.assistant {
+    align-self: flex-start;
+    background: var(--yap-s2);
+    border: 1px solid var(--yap-border-subtle);
+  }
+  .cbody {
+    margin: 0;
+    overflow-wrap: anywhere;
+  }
+  .cbody.thinking {
+    color: var(--yap-muted-55);
+    font-style: italic;
+  }
+  .cwait {
+    margin: 4px 0 0;
+    font-size: 12px;
+    color: var(--yap-muted);
+  }
+  /* (As an answer's paragraphs: its lines keep their spacing.) */
+  .cbubble.assistant :global(p) {
+    margin: 4px 0;
+  }
+</style>
