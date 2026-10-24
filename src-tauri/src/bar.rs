@@ -1360,7 +1360,7 @@ fn new_meeting_note(app: &AppHandle) -> Result<(), String> {
     let note = crate::notes::create(&title, "", "meeting", "Meetings");
     crate::notes::mark_meeting(note.id)?;
     let _ = app.emit("yap-notes-changed", ());
-    crate::commands::show_settings(app)?;
+    crate::shell::window::show_settings(app)?;
     let _ = app.emit("yap-meeting-open-note", serde_json::json!({ "noteId": note.id, "stop": false }));
     Ok(())
 }
@@ -1438,12 +1438,12 @@ fn act(app: &AppHandle, action: &str) -> Result<(), String> {
         // The recording pill: its notes, in the meeting notepad.
         "open-note" => match crate::meetings::meeting::recording_note() {
             Some(note_id) => crate::meetings::notepad::open(app, note_id),
-            None => crate::commands::show_settings(app)?,
+            None => crate::shell::window::show_settings(app)?,
         },
         "new-note" => new_meeting_note(app)?,
-        "open" => crate::commands::show_settings(app)?,
+        "open" => crate::shell::window::show_settings(app)?,
         "settings" => {
-            crate::commands::show_settings(app)?;
+            crate::shell::window::show_settings(app)?;
             let _ = app.emit("yap-open-settings", "general#bar");
         }
         "hide" => {

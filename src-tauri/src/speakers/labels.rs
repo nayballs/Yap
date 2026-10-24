@@ -517,7 +517,7 @@ fn apply(app: &AppHandle, tl: &Timeline, last: bool) {
 /// (`lineSplice`: lines were split, so indices after it moved; the stop
 /// marks with them).
 fn emit(app: &AppHandle, note: &Note, out: &Labelled) {
-    let mut payload = crate::commands::note_changed_payload(note, ORIGIN);
+    let mut payload = crate::notes::commands::note_changed_payload(note, ORIGIN);
     payload["lineSpeakers"] = json!(super::line_speakers(note));
     if let Some((at, removed)) = out.span {
         let lines = &note.transcript[at..(at + removed + out.added).min(note.transcript.len())];

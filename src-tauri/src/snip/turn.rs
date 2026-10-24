@@ -11,7 +11,7 @@
 //! **The question's images** go with every model call of the turn — each
 //! step of the tool loop re-sends the messages, a small model's plain
 //! answer, the last no-tools call — through a task-local set around the
-//! turn (`commands::chat_send` → [`with`]): the two places that put the
+//! turn (`chat::commands::chat_send` → [`with`]): the two places that put the
 //! question in a request (`tools::tool_loop`, `llm::note_chat`) call
 //! [`attach`], which turns the question's message into a content array.
 //! Outside a turn with images, [`attach`] does nothing.
@@ -237,7 +237,7 @@ pub async fn with_history_images(messages: &mut [Value], earlier: &[ChatMessage]
     history_images(messages, earlier, provider, budget, &exists, &|id| fitted.get(id).cloned());
 }
 
-/// What `commands::chat_send` needs before a turn with screenshots: the
+/// What `chat::commands::chat_send` needs before a turn with screenshots: the
 /// stored images (ids checked, at most the provider's per-request cap) and
 /// their copies fitted for `provider`.
 pub async fn prepare(ids: &[String], provider: &str, base_url: &str) -> Result<TurnImages, String> {

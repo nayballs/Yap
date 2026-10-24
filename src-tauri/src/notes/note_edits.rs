@@ -17,7 +17,7 @@
 //!   place. A change of words marks it the person's (`summary_edited_ms`);
 //!   ticking a task doesn't (`tasks::same_but_ticks`).
 //! - **Writing a summary** ([`write_summary`], every run of the Actions
-//!   engine: `commands::run_enhance`). Over a summary the person edited only
+//!   engine: `notes::commands::run_enhance`). Over a summary the person edited only
 //!   when the run was told to replace it (the window asked first) and the
 //!   edit came before the run read the note; else it's kept
 //!   ([`SUMMARY_KEPT`]). The end of a meeting writes no summary over an
@@ -149,7 +149,7 @@ pub async fn transcript_line_edit(
         }
         tracing::info!(note_id, index, edited = seg.edited, "Transcript line edited");
         if let Some(n) = crate::notes::get(note_id) {
-            let mut payload = crate::commands::note_changed_payload(&n, origin.as_deref().unwrap_or(""));
+            let mut payload = crate::notes::commands::note_changed_payload(&n, origin.as_deref().unwrap_or(""));
             payload["lineEdit"] = serde_json::json!({ "index": index, "line": seg });
             let _ = app.emit("yap-note-changed", payload);
         }
@@ -212,7 +212,7 @@ impl SummaryState {
 /// the summary's fields; `origin` = the window that changed it).
 pub(crate) fn summary_changed(app: &AppHandle, id: u64, origin: &str) {
     if let Some(n) = crate::notes::get(id) {
-        let mut payload = crate::commands::note_changed_payload(&n, origin);
+        let mut payload = crate::notes::commands::note_changed_payload(&n, origin);
         payload["enhancedContent"] = serde_json::json!(n.enhanced_content);
         payload["summaryEditedMs"] = serde_json::json!(n.summary_edited_ms);
         payload["summaryTs"] = serde_json::json!(n.summary_ts);

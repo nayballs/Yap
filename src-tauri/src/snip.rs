@@ -435,7 +435,7 @@ fn save(snip: &Snip, screen: usize, rect: &Rect) -> Result<crate::chat::chats::C
 /// copy for the selected model made meanwhile.
 fn hand_to_chat(app: &AppHandle, image: crate::chat::chats::ChatImage, conversation: Option<u64>, origin: Origin) {
     let cfg = crate::config::load();
-    if let Ok((base_url, _key, _model, provider, _p, _t)) = crate::commands::resolve_chat_endpoint(&cfg) {
+    if let Ok((base_url, _key, _model, provider, _p, _t)) = crate::chat::turn::resolve_chat_endpoint(&cfg) {
         let here = crate::ai::ai_model::runs_here(&provider, &base_url);
         images::prepare(vec![image.id.clone()], images::long_edge(&provider, here));
     }
@@ -443,7 +443,7 @@ fn hand_to_chat(app: &AppHandle, image: crate::chat::chats::ChatImage, conversat
     if let Some(main) = app.get_webview_window("settings") {
         let _ = main.emit(EVENT, payload);
     }
-    if let Err(e) = crate::commands::show_settings(app) {
+    if let Err(e) = crate::shell::window::show_settings(app) {
         tracing::warn!("snip: couldn't bring the main window up ({e})");
     }
 }
@@ -462,7 +462,7 @@ pub fn snip_start(app: AppHandle, origin: Option<String>) {
 #[tauri::command]
 pub fn chat_images_prepare(ids: Vec<String>) {
     let cfg = crate::config::load();
-    if let Ok((base_url, _key, _model, provider, _p, _t)) = crate::commands::resolve_chat_endpoint(&cfg) {
+    if let Ok((base_url, _key, _model, provider, _p, _t)) = crate::chat::turn::resolve_chat_endpoint(&cfg) {
         let here = crate::ai::ai_model::runs_here(&provider, &base_url);
         images::prepare(ids.into_iter().filter(|i| images::is_id(i)).collect(), images::long_edge(&provider, here));
     }

@@ -6,6 +6,7 @@
 
 pub mod agent_detect;
 pub mod coaching;
+pub mod commands;
 pub mod gesture;
 pub mod history;
 pub mod input_hook;

@@ -162,7 +162,7 @@ pub fn act(app: &AppHandle, action: &str) {
         OPEN_AI_SETTINGS | OPEN_VOICE_SETTINGS => {
             use tauri::Emitter;
             let at = if action == OPEN_AI_SETTINGS { "cleanup#chat" } else { "voice#voice-provider" };
-            match crate::commands::show_settings(app) {
+            match crate::shell::window::show_settings(app) {
                 Ok(()) => {
                     let _ = app.emit("yap-open-settings", at);
                 }

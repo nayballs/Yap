@@ -543,7 +543,7 @@ fn busy_reason(app: &AppHandle) -> Option<Busy> {
     if crate::meetings::meeting::is_recording() || crate::meetings::meeting_audio::any_job_running() {
         return Some(Busy::Meeting);
     }
-    if crate::commands::model_download_in_flight() {
+    if crate::dictation::commands::model_download_in_flight() {
         return Some(Busy::ModelDownload);
     }
     let state = app.try_state::<crate::AppState>()?;
@@ -996,7 +996,7 @@ pub fn init(app: &AppHandle) {
             // notification with the window hidden: no toast nobody would see.)
             if rec.restart_show_window {
                 lock().updated_from = Some(rec.restart_from.clone());
-                let _ = crate::commands::show_settings(app);
+                let _ = crate::shell::window::show_settings(app);
             }
         }
         update_record(|r| {
@@ -1116,7 +1116,7 @@ pub fn on_tray_menu(app: &AppHandle, id: &str) {
     match id {
         "update_install" => {
             if let Err(msg) = request_install(app) {
-                let _ = crate::commands::show_settings(app);
+                let _ = crate::shell::window::show_settings(app);
                 let _ = app.emit(EVENT_BLOCKED, msg);
             }
         }
@@ -1128,7 +1128,7 @@ pub fn on_tray_menu(app: &AppHandle, id: &str) {
 /// The tray's "Check for updates…": open Settings → About and let the page
 /// run a manual check there, so the result shows where the user is looking.
 pub fn on_tray_check(app: &AppHandle) {
-    let _ = crate::commands::show_settings(app);
+    let _ = crate::shell::window::show_settings(app);
     let _ = app.emit("yap-open-settings", "about");
     let _ = app.emit("check-for-updates", ());
 }
@@ -1372,7 +1372,7 @@ mod notify {
             "update:install" => super::on_tray_menu(app, "update_install"),
             // The toast body.
             _ => {
-                let _ = crate::commands::show_settings(app);
+                let _ = crate::shell::window::show_settings(app);
                 let _ = app.emit("yap-open-settings", "about");
             }
         }

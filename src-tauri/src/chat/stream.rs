@@ -32,7 +32,7 @@
 //!   cancels on a closed connection), waited out and asked again
 //!   ([`call`]).
 //! - **Stop** ([`Stoppable`]): the page's ■ closes the stream; what was shown
-//!   so far is kept (checked like any answer, `commands::chat_turn`). **A
+//!   so far is kept (checked like any answer, `turn::chat_turn`). **A
 //!   newer question** to the same conversation ends a turn still answering
 //!   there the same way, with nothing saved ([`Halt::Superseded`]).
 
@@ -437,7 +437,7 @@ pub enum Halt {
     /// **A newer question to the same conversation** replaced it — the Voice
     /// Assistant asked again (a barge-in, a follow-up), a question typed in
     /// Chat, one dictated into Chat and sent while this was being answered:
-    /// nothing is saved for it (`commands::chat_turn`); its question stays,
+    /// nothing is saved for it (`turn::chat_turn`); its question stays,
     /// and the model reads it with the newer one. Before, it was asked
     /// again once the dictation it had stepped aside for — the newer
     /// question — was done, and answered after the newer one: both answers

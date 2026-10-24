@@ -135,7 +135,7 @@ async fn name_meeting(app: &AppHandle, note_id: u64) -> Result<bool, String> {
         return Ok(false);
     }
     tracing::info!(note_id, "Meeting named by the AI");
-    crate::commands::note_changed(app, note_id, "ai");
+    crate::notes::commands::note_changed(app, note_id, "ai");
     let _ = app.emit("yap-notes-changed", ());
     Ok(true)
 }

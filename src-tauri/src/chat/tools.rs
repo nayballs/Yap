@@ -120,7 +120,7 @@ pub const MEMORY_TOOL_INSTRUCTIONS: &[&str] = &[
 /// Added with "Search and reference past chats" on.
 pub const CHATS_TOOL_INSTRUCTIONS: &[&str] = &["Use search_chats when the user refers to an earlier chat with you."];
 
-/// What a turn offers besides the note tools (`commands::chat_turn`).
+/// What a turn offers besides the note tools (`turn::chat_turn`).
 #[derive(Debug, Clone, Copy, Default)]
 pub struct Extra {
     /// `remember` / `forget` (memory.rs).
@@ -607,7 +607,7 @@ const RAG_STOP_WORDS: &[&str] = &[
     "today", "my", "me", "mine",
 ];
 
-/// **The eager RAG's notes** (`commands::rag_context`): the keyword search,
+/// **The eager RAG's notes** (`turn::rag_context`): the keyword search,
 /// stricter — without words like "what" or "and", and only notes that match
 /// two of the question's words or one in their title (or the one word a
 /// short question has). In a question's context, right before a follow-up

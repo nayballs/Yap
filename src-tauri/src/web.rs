@@ -176,7 +176,7 @@ impl Settings {
     }
 
     /// For a chat with this model (its provider, endpoint and key, as
-    /// `commands::resolve_chat_endpoint` gives them): its provider's own
+    /// `turn::resolve_chat_endpoint` gives them): its provider's own
     /// search when "The AI's own search" is chosen and Yap has one for it,
     /// else Yap's own.
     pub fn for_chat(cfg: &crate::config::YapConfig, provider: &str, model: &str, base_url: &str, api_key: &str) -> Settings {

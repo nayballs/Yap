@@ -4,7 +4,7 @@
 //! which changes the **Chat** scope only (never dictation cleanup).
 //!
 //! Resolution is the calls' own: the Chat scope through
-//! `commands::resolve_chat_endpoint` (the scope when it's on, else the
+//! `turn::resolve_chat_endpoint` (the scope when it's on, else the
 //! global cleanup endpoint), meeting notes through
 //! `meeting_summary::resolve_endpoint`. One addition for chat: a Chat scope
 //! on Yap's on-device model starts the sidecar before the call
@@ -212,7 +212,7 @@ pub fn target(cfg: &YapConfig, scope: Scope, on_device: &OnDevice) -> Result<Tar
                 (PROVIDER_ONDEVICE.to_string(), on_device.id.clone(), url)
             } else {
                 let (b, _key, m, p, _persona, _thinking) =
-                    crate::commands::resolve_chat_endpoint(cfg)?;
+                    crate::chat::turn::resolve_chat_endpoint(cfg)?;
                 (p, m, b)
             }
         }
@@ -577,7 +577,7 @@ pub fn chat_set_model(
     let local_file = if provider == PROVIDER_ONDEVICE { file } else { None };
     let on_disk = local_file.as_ref().map(|_| crate::ai::local_llm::list_models());
     // In one step (never over a change saved meanwhile); refused: nothing saved.
-    let cfg = crate::commands::change_config(&app, |cfg| {
+    let cfg = crate::shell::settings::change_config(&app, |cfg| {
         if let (Some(f), Some(on_disk)) = (&local_file, &on_disk) {
             set_local_model(cfg, f, on_disk)?;
         }
@@ -620,7 +620,7 @@ pub fn chat_set_model(
 /// broadcast to every window; the status that comes back has it masked.
 #[tauri::command]
 pub fn chat_provider_key(app: AppHandle, provider: String, key: String) -> Result<Status, String> {
-    let cfg = crate::commands::change_config(&app, |cfg| set_provider_key(cfg, &provider, &key))?;
+    let cfg = crate::shell::settings::change_config(&app, |cfg| set_provider_key(cfg, &provider, &key))?;
     Ok(status(&cfg, Scope::Chat, &OnDevice::here(&cfg)))
 }
 

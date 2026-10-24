@@ -2334,7 +2334,7 @@ pub fn local_llm_set_context(app: AppHandle, tokens: u32) -> Result<ContextView,
     let setting = context_setting(tokens)?;
     // In one step: never over a change saved meanwhile.
     let mut before = 0;
-    let cfg = crate::commands::change_config(&app, |cfg| {
+    let cfg = crate::shell::settings::change_config(&app, |cfg| {
         before = context_for(cfg);
         cfg.local_context = setting;
         Ok(())

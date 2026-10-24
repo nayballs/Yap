@@ -1,5 +1,5 @@
 //! The harness: arguments, keys, models (a local one's llamafile started and
-//! stopped), scenarios run through `commands::chat_turn`, scoring, and the
+//! stopped), scenarios run through `turn::chat_turn`, scoring, and the
 //! run folder (`transcript.jsonl`, `summary.md`, `summary.json`, `yap.log`,
 //! llamafile logs, `spike.md`).
 
@@ -898,7 +898,7 @@ async fn run_scenario(
             Ok(None)
         } else {
             let watcher = streamed.then_some(&watch as &dyn crate::chat::stream::Sink);
-            crate::commands::chat_turn(None, conversation, &turn.user, scope, voice, |_, _| {}, watcher, None).await.map(Some)
+            crate::chat::turn::chat_turn(None, conversation, &turn.user, scope, voice, |_, _| {}, watcher, None).await.map(Some)
         };
         let first_words = watch.at();
         // Memory's passes after the turn: what a quiet chat, "Tell Yap what

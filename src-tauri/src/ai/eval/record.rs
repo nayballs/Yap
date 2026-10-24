@@ -59,7 +59,7 @@ pub struct TurnStats {
     pub clipboard: Option<String>,
     /// What Yap had to fix in the model's answer before showing it (a
     /// citation with no source, a sources list it made up, a search it
-    /// claimed: `commands::chat_turn`'s post-checks), and searches Yap ran
+    /// claimed: `turn::chat_turn`'s post-checks), and searches Yap ran
     /// for the model ("yap_search"). Empty: the model's answer stood as it was.
     pub post_fixes: Vec<String>,
 }

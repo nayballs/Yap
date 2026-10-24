@@ -1834,7 +1834,7 @@ pub fn announce(app: &tauri::AppHandle, note_id: u64) {
     let Some(note) = crate::notes::get(note_id) else { return };
     let pending = pending(&note).len();
     tracing::debug!(note_id, pending, "Speakers: suggestions updated");
-    let payload = crate::commands::note_changed_payload(&note, "speakers");
+    let payload = crate::notes::commands::note_changed_payload(&note, "speakers");
     let _ = app.emit("yap-note-changed", payload);
 }
 

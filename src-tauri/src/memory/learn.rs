@@ -1,5 +1,5 @@
 //! The passes that change memory, all through the person's **Chat model**
-//! (`commands::resolve_chat_endpoint`):
+//! (`turn::resolve_chat_endpoint`):
 //! - **learning from a chat** that went quiet ([`learn_from_chat`]; the
 //!   scheduler: 5 minutes without a new message, another chat starting, or a
 //!   minute after the next start when Yap quit first);
@@ -55,7 +55,7 @@ impl Endpoint {
 
 /// The Chat model, or why there's none ("No AI model configured — …").
 pub fn endpoint(cfg: &crate::config::YapConfig) -> Result<Endpoint, String> {
-    let (base_url, api_key, model, provider, _persona, disable_thinking) = crate::commands::resolve_chat_endpoint(cfg)?;
+    let (base_url, api_key, model, provider, _persona, disable_thinking) = crate::chat::turn::resolve_chat_endpoint(cfg)?;
     Ok(Endpoint { base_url, api_key, model, provider, disable_thinking })
 }
 

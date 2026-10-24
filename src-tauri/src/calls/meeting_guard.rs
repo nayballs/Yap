@@ -1218,7 +1218,7 @@ fn start_or_stop_from(app: &AppHandle, origin: Option<&str>) {
             if !window_view(app).0 && native::failed(app, &e).is_ok() {
                 return;
             }
-            let _ = crate::commands::show_settings(app);
+            let _ = crate::shell::window::show_settings(app);
             let _ = app.emit("yap-error", format!("Couldn't start meeting notes. {e}"));
         }
     }
@@ -1231,7 +1231,7 @@ fn new_meeting_note(app: &AppHandle) -> Result<u64, String> {
     let title = crate::calls::meeting_detect::meeting_note_title();
     let note = crate::notes::create(&title, "", "meeting", "Meetings");
     crate::notes::mark_meeting(note.id)?;
-    let started = crate::commands::meeting_start(app.clone(), app.state::<crate::AppState>(), note.id);
+    let started = crate::meetings::commands::meeting_start(app.clone(), app.state::<crate::AppState>(), note.id);
     if let Err(e) = started {
         crate::notes::delete(note.id);
         let _ = app.emit("yap-notes-changed", ());
@@ -1590,7 +1590,7 @@ mod native {
                 }
                 return;
             }
-            let _ = crate::commands::show_settings(&app);
+            let _ = crate::shell::window::show_settings(&app);
             if let Some(section) = arg.strip_prefix("guard:settings:") {
                 let _ = app.emit("yap-open-settings", section);
             } else if let Some(id) = arg.strip_prefix("guard:open:").and_then(|n| n.parse::<u64>().ok()) {

@@ -838,7 +838,7 @@ fn busy(app: &AppHandle) -> Option<&'static str> {
     if crate::meetings::meeting_audio::any_job_running() {
         return Some("a meeting is being transcribed again");
     }
-    if crate::commands::model_download_in_flight() {
+    if crate::dictation::commands::model_download_in_flight() {
         return Some("a model is downloading");
     }
     let state = app.try_state::<crate::AppState>()?;

@@ -449,7 +449,7 @@ fn handle_deep_link(app: &AppHandle, url: &url::Url) {
     // auth.contextmirror.com/security, linked from the new-sign-in email):
     // show Settings → Account, where the device list is.
     if url.scheme() == SCHEME && url.host_str() == Some("account") {
-        let _ = crate::commands::show_settings(app);
+        let _ = crate::shell::window::show_settings(app);
         let _ = app.emit("yap-open-settings", "account");
         return;
     }
@@ -457,7 +457,7 @@ fn handle_deep_link(app: &AppHandle, url: &url::Url) {
         tracing::warn!("auth: ignoring unrecognised deep link");
         return;
     }
-    let _ = crate::commands::show_settings(app);
+    let _ = crate::shell::window::show_settings(app);
     let Some(code) = url.fragment().and_then(|f| f.strip_prefix("token=")) else {
         emit_error(app, EXPIRED);
         return;
@@ -600,7 +600,7 @@ fn handle_loopback(app: &AppHandle, request: tiny_http::Request) -> bool {
 
     match result {
         Ok(()) => {
-            let _ = crate::commands::show_settings(app);
+            let _ = crate::shell::window::show_settings(app);
             true
         }
         Err(e) => {

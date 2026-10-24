@@ -7,6 +7,7 @@
 pub mod about_you;
 pub mod ai_model;
 pub mod cleanup_styles;
+pub mod commands;
 pub mod eval;
 pub mod gguf;
 pub mod gpu;

@@ -73,7 +73,7 @@ fn post(client: &reqwest::Client, ep: &Endpoint<'_>, path: &str, body: &Value) -
 }
 
 /// Chat's system prompt for a tool model with apps and the web on (as
-/// `commands::chat_turn` builds it), and its tools.
+/// `turn::chat_turn` builds it), and its tools.
 fn chat_system() -> (String, Value) {
     let mut system = format!("{}\n\nYou have access to tools. ", super::runner::DEFAULT_PERSONA);
     system.push_str(&crate::chat::tools::TOOL_INSTRUCTIONS.join(" "));
@@ -386,7 +386,7 @@ async fn stream_bench(ep: &Endpoint<'_>, rounds: u32) -> Result<Value, String> {
 // ── layout ────────────────────────────────────────────────────────────────
 
 /// Notes the "search" finds for each turn (each a `<note>` like
-/// `commands::rag_context`'s, ~500 characters).
+/// `turn::rag_context`'s, ~500 characters).
 const NOTES: &[(&str, &str)] = &[
     ("Launch plan", "The beta ships on Friday 14 November if the installer bug is fixed by Wednesday. Dave owns the installer fix; Priya checks the signing certificate on Tuesday. Marketing wants screenshots of the new Yap bar and the meeting notepad by Monday, and the release notes should lead with offline transcription. Support needs a FAQ about GPU drivers and the first-run model download, which is 600 MB. We agreed to hold the Mac build until December."),
     ("Kitchen renovation", "Quote from Harlow Kitchens: £14,200 including fitting, worktops in quartz, eight weeks lead time. The second quote from a local joiner was £11,800 but with laminate worktops and no fitting of appliances. Electrician needs two days to move the sockets for the island. Ask about the extractor duct running through the ceiling and whether the boiler cupboard can stay where it is. Deposit of 25% due on signing."),

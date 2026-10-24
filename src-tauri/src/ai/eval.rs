@@ -1,7 +1,7 @@
 //! **Model evaluations** (`yap.exe eval …`, debug builds only; see
 //! `docs/model-evals.md`): put real models — Groq, OpenAI, Anthropic, a GGUF
 //! on Yap's own llamafile, any OpenAI-compatible server — through Chat's own
-//! code path (`commands::chat_turn`: the open-apps fast path, the tool loop,
+//! code path (`turn::chat_turn`: the open-apps fast path, the tool loop,
 //! the plain chat + RAG fallback for models without tools) over the scenarios
 //! in `evals/scenarios/*.json`, and get everything back: every request (tool
 //! schemas included, keys redacted), every response, each tool call and its
@@ -80,7 +80,7 @@ pub fn run(args: Vec<String>) -> i32 {
 
 /// How far a run's clock is ahead of the real one, seconds (`--clock-step`:
 /// each turn of a scenario a few minutes after the one before, as in a real
-/// chat — what Chat tells the model the time is, `commands::chat_turn`).
+/// chat — what Chat tells the model the time is, `turn::chat_turn`).
 #[cfg(debug_assertions)]
 static CLOCK_AHEAD: std::sync::atomic::AtomicI64 = std::sync::atomic::AtomicI64::new(0);
 
@@ -224,7 +224,7 @@ pub fn tool_called(name: &str, args: &Value, result: &Value) {
 }
 
 /// Yap changed the model's answer before showing it, or searched for it
-/// (`commands::chat_turn`'s post-checks: "stripped_citations",
+/// (`turn::chat_turn`'s post-checks: "stripped_citations",
 /// "stripped_sources_note", "not_searched_note", "yap_search"): logged, and a
 /// scenario's `no_post_fixes` warns about it.
 pub fn post_fix(what: &str) {

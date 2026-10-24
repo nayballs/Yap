@@ -3,6 +3,7 @@
 //! refined transcript and the meeting notepad window.
 //! How it works: docs/architecture/meetings.md.
 
+pub mod commands;
 pub mod meeting;
 pub mod meeting_assist;
 pub mod meeting_audio;

@@ -44,7 +44,7 @@ pub const EVENT_DELETED: &str = "yap-note-deleted";
 /// `{ noteId, breaks }` (`Note::breaks`, the notepad's paused dividers).
 pub const EVENT_BREAKS: &str = "yap-meeting-breaks";
 
-/// The action plan is written in this many steps (see `commands::run_enhance`).
+/// The action plan is written in this many steps (see `notes::commands::run_enhance`).
 const STEPS: u8 = 3;
 
 /// The next stop is a pause, not the end of the meeting.
@@ -379,7 +379,7 @@ fn start_summary_with(app: &AppHandle, note_id: u64, replace: bool) -> bool {
 }
 
 /// The action plan for `note_id`, through the same path as the Notes view's
-/// actions (`commands::run_enhance`).
+/// actions (`notes::commands::run_enhance`).
 async fn write_action_plan(app: &AppHandle, note_id: u64, replace: bool, step: impl Fn(u8)) -> Result<(), String> {
     let note = crate::notes::get(note_id).ok_or("Note not found")?;
     if note.content.trim().is_empty() && crate::notes::speech_words(&note.transcript) == 0 {
@@ -400,7 +400,7 @@ async fn write_action_plan(app: &AppHandle, note_id: u64, replace: bool, step: i
         .find(|a| a.kind == crate::notes::ACTION_PLAN)
         .or_else(|| actions.iter().find(|a| a.name == "Meeting Notes"))
         .map(|a| a.id);
-    crate::commands::run_enhance(app, note_id, action, replace, step).await?;
+    crate::notes::commands::run_enhance(app, note_id, action, replace, step).await?;
     Ok(())
 }
 

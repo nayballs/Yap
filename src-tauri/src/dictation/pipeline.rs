@@ -234,11 +234,11 @@ pub(crate) fn dictation_ended() {
     DICTATION.fetch_and(!1, Ordering::SeqCst);
 }
 
-/// The Chat view's mic asked for the next dictation (`commands::chat_dictate`;
+/// The Chat view's mic asked for the next dictation (`dictation::commands::chat_dictate`;
 /// taken by the recording it starts, cleared right after).
 static CHAT_ARMED: AtomicBool = AtomicBool::new(false);
 /// The Chat view's box has the focus, in a focused window
-/// (`commands::chat_input_focus`).
+/// (`dictation::commands::chat_input_focus`).
 static CHAT_FOCUSED: AtomicBool = AtomicBool::new(false);
 
 /// The next dictation goes to the chat box (its mic button), or not any more.
@@ -3673,7 +3673,7 @@ impl Robot {
 
     /// [`Robot::dictate_text`] as the Chat view's mic would start it: into
     /// the chat box (`yap-chat-dictation`), never pasted. (Test mode's
-    /// `commands::e2e_chat_dictation`.)
+    /// `dictation::commands::e2e_chat_dictation`.)
     pub(crate) async fn dictate_to_chat(&self, text: String) -> Result<Delivered, String> {
         arm_chat_dictation(true);
         let out = self.dictate_text(text).await;

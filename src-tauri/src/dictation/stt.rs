@@ -253,7 +253,7 @@ const MODELS: &[ModelDescriptor] = &[
 ];
 
 /// Every registry model id, recommended-first-ish (matches the frontend order
-/// loosely). Used by `commands::installed_models` to know what to probe.
+/// loosely). Used by `dictation::commands::installed_models` to know what to probe.
 pub fn all_model_ids() -> Vec<&'static str> {
     MODELS.iter().map(|m| m.id).collect()
 }

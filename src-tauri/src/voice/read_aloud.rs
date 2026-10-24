@@ -722,7 +722,7 @@ pub fn act(app: &AppHandle, action: &str) -> Result<(), String> {
 /// auto-save keeps it.
 fn save_speed(app: &AppHandle, rate: f32) {
     // In one step: never over a change saved meanwhile.
-    let saved = crate::commands::change_config(app, |cfg| {
+    let saved = crate::shell::settings::change_config(app, |cfg| {
         cfg.tts_rate = rate;
         Ok(())
     });

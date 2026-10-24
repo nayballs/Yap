@@ -2,7 +2,7 @@
 //! `agent_conversations` SQLite tables, JSON-file edition like `notes.rs`).
 //!
 //! Conversations carry their messages inline; `chats.json` in the data dir.
-//! The chat engine itself lives in `commands::chat_send` (eager keyword-RAG
+//! The chat engine itself lives in `chat::commands::chat_send` (eager keyword-RAG
 //! over the notes store + the Chat scope's endpoint).
 
 #[cfg(not(test))]
@@ -643,7 +643,7 @@ pub fn history_messages(messages: &[ChatMessage]) -> Vec<Value> {
 /// (the model evaluations, docs/model-evals.md "Local AI, phase 1"). Only
 /// the latest question carries it: the history keeps what was typed
 /// ([`history_messages`]). (A model without tools keeps it in the system
-/// prompt, `commands::chat_turn`.)
+/// prompt, `turn::chat_turn`.)
 pub fn with_context(context: &[String], question: &str) -> String {
     let Some(block) = context_block(context) else {
         return question.to_string();

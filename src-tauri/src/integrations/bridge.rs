@@ -81,6 +81,13 @@ pub fn status() -> Value {
     })
 }
 
+/// Local API bridge status for the Integrations view:
+/// `{ running, port, bridgeFile }`.
+#[tauri::command]
+pub fn bridge_status() -> serde_json::Value {
+    crate::integrations::bridge::status()
+}
+
 fn lock_state() -> std::sync::MutexGuard<'static, Option<Running>> {
     match STATE.lock() {
         Ok(g) => g,

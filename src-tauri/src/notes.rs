@@ -10,6 +10,7 @@
 //! Deliberately skipped for v1 (documented in ROADMAP): folders, FTS, sync
 //! columns, meeting transcript/participants (arrive with the Phase-6 recorder).
 
+pub mod commands;
 pub mod note_edits;
 pub mod tasks;
 
@@ -639,7 +640,7 @@ fn folder_named(folders: &[String], name: &str) -> Option<usize> {
 }
 
 /// A folder renamed or deleted: the folder list now, and the notes that
-/// moved (their windows are told: `commands::note_changed`).
+/// moved (their windows are told: `notes::commands::note_changed`).
 #[derive(Debug, Clone, PartialEq)]
 pub struct FolderChange {
     pub folders: Vec<String>,

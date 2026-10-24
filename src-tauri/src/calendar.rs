@@ -1174,7 +1174,7 @@ fn start_event(app: &AppHandle, key: &str, join: bool) -> Result<u64, String> {
         join_link(app, &event)?;
     }
     let (note_id, made) = note_for(&event, false)?;
-    let started = crate::commands::meeting_start(app.clone(), app.state::<crate::AppState>(), note_id);
+    let started = crate::meetings::commands::meeting_start(app.clone(), app.state::<crate::AppState>(), note_id);
     if let Err(e) = started {
         if made {
             crate::notes::delete(note_id);
@@ -1269,7 +1269,7 @@ pub async fn calendar_event(app: AppHandle, key: String, action: String) -> Resu
     }
 }
 
-/// A recording started into `note_id`, whichever way (`commands::meeting_start`).
+/// A recording started into `note_id`, whichever way (`meetings::commands::meeting_start`).
 /// During a meeting, the note becomes that meeting's: its title (over a
 /// placeholder), attendees and invite. A note already made from the
 /// calendar just marks its meeting's reminder answered.
@@ -1322,7 +1322,7 @@ pub fn on_meeting_started(app: &AppHandle, note_id: u64) {
     answer(&event);
     tracing::info!(note_id, "calendar: a recording started during a meeting; note tied to it");
     // Every window showing the note (the notepad, Notes) follows.
-    crate::commands::note_changed(app, note_id, "calendar");
+    crate::notes::commands::note_changed(app, note_id, "calendar");
     let _ = app.emit("yap-notes-changed", ());
     emit(app);
 }
@@ -1677,12 +1677,12 @@ fn answer_from(app: &AppHandle, arg: &str) {
         match (parts.next(), parts.next(), parts.next().and_then(|n| n.parse::<u64>().ok())) {
             (Some("calendar"), Some(answer), Some(id)) => {
                 if let Err(e) = respond(&app, id, answer).await {
-                    let _ = crate::commands::show_settings(&app);
+                    let _ = crate::shell::window::show_settings(&app);
                     let _ = app.emit("yap-error", format!("Couldn't start meeting notes. {e}"));
                 }
             }
             _ => {
-                let _ = crate::commands::show_settings(&app);
+                let _ = crate::shell::window::show_settings(&app);
             }
         }
     });
@@ -2045,7 +2045,7 @@ pub async fn calendar_brief_open(app: AppHandle, key: String, n: usize) -> Resul
         }
         _ => None,
     };
-    crate::commands::show_settings(&app)?;
+    crate::shell::window::show_settings(&app)?;
     match note_id {
         Some(id) => {
             let _ = app.emit(EVENT_OPEN, json!({ "noteId": id, "stop": false }));
@@ -2107,7 +2107,7 @@ pub fn calendar_meeting_notes(query: Option<String>) -> Vec<Value> {
 }
 
 /// The invite's description, as context for a meeting's action plan and its
-/// Ask bar (`meeting_summary`, `commands::note_ask`): `None` without one.
+/// Ask bar (`meeting_summary`, `notes::commands::note_ask`): `None` without one.
 pub fn invite_context(note: &crate::notes::Note) -> Option<String> {
     let event = note.event.as_ref().filter(|e| !e.description.trim().is_empty())?;
     Some(format!("From the calendar invite \"{}\":\n{}\n", event.title, event.description.trim()))
@@ -2123,7 +2123,7 @@ fn meeting_time(n: &crate::notes::Note) -> u64 {
 }
 
 /// Context for a question asked from the Meetings view's Ask bar
-/// (`commands::chat_send` with scope "meetings"): the three latest meetings
+/// (`chat::commands::chat_send` with scope "meetings"): the three latest meetings
 /// and up to three more that match the question, newest first, each as a
 /// `<note>` block with its date and attendees, the action plan or else the
 /// typed notes and the transcript (a long one as its digests), bounded so a

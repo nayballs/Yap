@@ -19,7 +19,7 @@
 //! - **Use** (`memory/prompt.rs`): the "You" part goes with every Chat,
 //!   Voice Assistant and notepad helper prompt (stable, so a model's cache
 //!   keeps it); people, projects and topics only with a question about them
-//!   (`commands::chat_turn`'s per-turn context). Tool-using models also get
+//!   (`turn::chat_turn`'s per-turn context). Tool-using models also get
 //!   `remember` / `forget` and, with "Search and reference past chats",
 //!   `search_chats` (`tools.rs`).
 //! - **Dictation** (`memory/vocab.rs`): the names of people and projects

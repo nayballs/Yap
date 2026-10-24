@@ -98,7 +98,7 @@ pub struct CleanupProfile {
 /// off / unconfigured; an empty `provider` inherits the global cleanup endpoint;
 /// Note Formatting falls back to the Cleanup scope (OpenWhispr `fallbackScope`).
 /// Commands run in `pipeline::run_agent` (the wake word and edit mode), Note
-/// Formatting in the notes' Actions engine, Chat in `commands::chat_turn`
+/// Formatting in the notes' Actions engine, Chat in `turn::chat_turn`
 /// (the Chat view and the Voice Assistant). The keys never change: they are
 /// what config.json holds.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -2363,9 +2363,9 @@ mod tests {
         ];
         for (file, src) in files {
             let code: Vec<&str> = src.lines().filter(|l| !l.trim_start().starts_with("//")).collect();
-            for call in ["config::save(", "commands::save_config("] {
+            for call in ["config::save(", "settings::save_config("] {
                 let found: Vec<&&str> = code.iter().filter(|l| l.contains(call)).collect();
-                assert!(found.is_empty(), "{file} loads, changes and saves the config ({found:?}): use config::update or commands::change_config");
+                assert!(found.is_empty(), "{file} loads, changes and saves the config ({found:?}): use config::update or settings::change_config");
             }
         }
     }

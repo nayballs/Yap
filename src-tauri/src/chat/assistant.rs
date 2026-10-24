@@ -21,7 +21,7 @@
 //!    and the correction dictionary runs (`pipeline.rs`); the question goes
 //!    to Chat — the conversation open in the Chat view, else the last one if
 //!    it was updated in the last [`RECENT_SECS`], else a new one
-//!    ([`choose_conversation`]) — through `commands::chat_turn`, as a typed
+//!    ([`choose_conversation`]) — through `turn::chat_turn`, as a typed
 //!    question would. The Chat view follows live (`yap-assistant-turn`), the
 //!    question marked as asked by voice; with the main window in front, Chat
 //!    comes up with it.
@@ -59,7 +59,7 @@
 //! still waiting out that very question's recording, as a model on this PC
 //! does) ends the older turn once the newer question is saved — no answer
 //! is saved for it, nothing more of it is said (`stream::Halt::Superseded`,
-//! `commands::chat_turn`). Before, it was asked again after the newer one's
+//! `turn::chat_turn`). Before, it was asked again after the newer one's
 //! answer, and both answers showed under both questions (a tester's voice
 //! chat, 2026-10-23).
 //!
@@ -219,7 +219,7 @@ pub const REST_IN_CHAT: &str = "The rest is in Chat.";
 pub const SPOKEN_MAX_WORDS: usize = 60;
 
 /// The end of Chat's system prompt for a question asked out loud whose
-/// answer is read aloud whole (`commands::chat_turn`): without it, "how long
+/// answer is read aloud whole (`turn::chat_turn`): without it, "how long
 /// do I boil an egg" got 55–98 words with lists from every local model and
 /// gpt-oss (the model evaluations' voice scenarios).
 pub const SPOKEN_ANSWER_NOTE: &str = "This question was asked out loud and your answer will be read aloud: answer in one or two short sentences (under 40 words) of plain speech, with no lists, headings or markdown, and no offer of more help.";
@@ -569,7 +569,7 @@ async fn answer(app: AppHandle, generation: u64, since: u64, question: String) {
     // Yap opens it and says so (apps.rs).
     let opens_an_app = crate::apps::plan_for(&question, &cfg, conversation_id).await.is_some();
     if !opens_an_app {
-        if let Err(why) = crate::commands::resolve_chat_endpoint(&cfg) {
+        if let Err(why) = crate::chat::turn::resolve_chat_endpoint(&cfg) {
             crate::notices::alert::show_soon(&app, no_model_alert(&why));
             give_up(&app, generation);
             return;
@@ -611,7 +611,7 @@ async fn answer(app: AppHandle, generation: u64, since: u64, question: String) {
             }),
         );
     };
-    let turn = crate::commands::chat_turn(
+    let turn = crate::chat::turn::chat_turn(
         Some(&app),
         conversation_id,
         &question,
@@ -779,7 +779,7 @@ fn finish_streamed(
     generation: u64,
     since: u64,
     question: &str,
-    turn: &crate::commands::ChatTurn,
+    turn: &crate::chat::turn::ChatTurn,
     feed: &crate::voice::tts::Feed,
     said: usize,
     carded: bool,
@@ -903,7 +903,7 @@ fn card_action(app: &AppHandle, action: &str) {
 /// "Open in Chat": the main window, on the question's conversation.
 fn open_chat(app: &AppHandle) {
     let conv = lock().conversation;
-    if let Err(e) = crate::commands::show_settings(app) {
+    if let Err(e) = crate::shell::window::show_settings(app) {
         tracing::warn!("Voice Assistant: couldn't open the main window ({e})");
         return;
     }

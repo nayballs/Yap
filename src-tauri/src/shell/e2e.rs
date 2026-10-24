@@ -350,7 +350,7 @@ pub async fn e2e_meeting_start_twice(app: AppHandle, first: u64, second: u64) ->
             let (app, together) = (app.clone(), std::sync::Arc::clone(&together));
             tauri::async_runtime::spawn_blocking(move || {
                 together.wait();
-                crate::commands::meeting_start(app.clone(), app.state::<crate::AppState>(), note_id)
+                crate::meetings::commands::meeting_start(app.clone(), app.state::<crate::AppState>(), note_id)
             })
         })
         .collect();

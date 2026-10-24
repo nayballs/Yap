@@ -1249,7 +1249,7 @@ pub fn forget_removed(mut rec: Record, words: &[Suggestion]) -> Record {
     answered(rec, words, "never")
 }
 
-/// The config was saved (`commands::save_config`: the Dictionary view,
+/// The config was saved (`shell::settings::save_config`: the Dictionary view,
 /// Settings, every surface): words it took out of the dictionary are never
 /// suggested again. Writes `word_suggestions.json` only, never config.json.
 pub fn on_dictionary_saved(old: &[DictionaryEntry], new: &[DictionaryEntry]) {

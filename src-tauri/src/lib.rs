@@ -14,7 +14,6 @@ mod bar;
 mod calendar;
 mod calls;
 mod chat;
-mod commands;
 mod config;
 mod dictation;
 mod dictionary;
@@ -53,7 +52,7 @@ pub struct AppState {
 }
 
 /// Enable or disable OS autostart via `tauri-plugin-autostart`.
-/// Kept as a free function so `commands::set_autostart` can delegate here.
+/// Kept as a free function so `shell::autostart::set_autostart` can delegate here.
 pub fn set_autostart_enabled(app: &AppHandle, enabled: bool) -> Result<(), String> {
     // A dev build shares the installed Yap's "Yap" Run entry: disabling would
     // delete the installed app's launch-at-login, enabling would point it at
@@ -416,55 +415,55 @@ pub fn run() {
         // yapsnip://localhost/img/<id> (http://yapsnip.localhost/… in WebView2).
         .register_uri_scheme_protocol("yapsnip", |_ctx, request| snip::serve(&request))
         .invoke_handler(tauri::generate_handler![
-            commands::toggle_recording,
-            commands::dictation_key,
-            commands::get_config,
+            dictation::commands::toggle_recording,
+            dictation::commands::dictation_key,
+            shell::settings::get_config,
             ai::about_you::about_you_status,
-            commands::save_config,
+            shell::settings::save_config,
             shell::saving::saves_retry,
-            commands::download_model_size,
-            commands::installed_models,
-            commands::open_settings,
-            commands::open_onboarding,
-            commands::close_onboarding,
-            commands::list_audio_devices,
-            commands::list_output_devices,
-            commands::set_mic_test,
-            commands::set_input_device,
-            commands::frontend_log,
-            commands::model_language_info,
-            commands::configure_hotkey,
-            commands::configure_edit_hotkey,
-            commands::set_active_model,
-            commands::delete_model,
-            commands::open_external,
-            commands::cancel_recording,
-            commands::set_autostart,
-            commands::is_portable,
-            commands::test_post_process,
-            commands::get_base_prompt,
-            commands::get_edit_base_prompt,
-            commands::local_llm_status,
+            dictation::commands::download_model_size,
+            dictation::commands::installed_models,
+            shell::window::open_settings,
+            shell::window::open_onboarding,
+            shell::window::close_onboarding,
+            dictation::commands::list_audio_devices,
+            dictation::commands::list_output_devices,
+            dictation::commands::set_mic_test,
+            dictation::commands::set_input_device,
+            shell::logging::frontend_log,
+            dictation::commands::model_language_info,
+            dictation::commands::configure_hotkey,
+            dictation::commands::configure_edit_hotkey,
+            dictation::commands::set_active_model,
+            dictation::commands::delete_model,
+            shell::commands::open_external,
+            dictation::commands::cancel_recording,
+            shell::autostart::set_autostart,
+            shell::commands::is_portable,
+            ai::commands::test_post_process,
+            ai::commands::get_base_prompt,
+            ai::commands::get_edit_base_prompt,
+            ai::commands::local_llm_status,
             ai::cleanup_styles::cleanup_styles_catalog,
             ai::cleanup_styles::cleanup_offer_status,
             ai::cleanup_styles::cleanup_offer_seen,
-            commands::local_llm_start,
-            commands::local_llm_stop,
-            commands::local_llm_install,
-            commands::local_llm_delete,
+            ai::commands::local_llm_start,
+            ai::commands::local_llm_stop,
+            ai::commands::local_llm_install,
+            ai::commands::local_llm_delete,
             ai::local_llm::local_llm_set_context,
-            commands::open_llm_folder,
-            commands::get_groq_usage,
-            commands::get_history,
-            commands::clear_history,
-            commands::delete_history_entry,
-            commands::get_stats,
-            commands::home_snapshot,
+            ai::commands::open_llm_folder,
+            ai::commands::get_groq_usage,
+            dictation::commands::get_history,
+            dictation::commands::clear_history,
+            dictation::commands::delete_history_entry,
+            dictation::commands::get_stats,
+            dictation::commands::home_snapshot,
             pasting::text_injector::paste_last_transcript,
             pasting::as_said::as_said_swap,
             pasting::as_said::as_said_paste_entry,
-            commands::configure_as_said_hotkey,
-            commands::configure_snip_hotkey,
+            dictation::commands::configure_as_said_hotkey,
+            dictation::commands::configure_snip_hotkey,
             dictation::transforms::configure_transform_hotkey,
             snip::snip_start,
             snip::chat_images_usage,
@@ -476,30 +475,30 @@ pub fn run() {
             dictation::recent_audio::recent_audio_clear,
             dictation::recent_audio::recent_audio_wav,
             dictation::recent_audio::history_rerun,
-            commands::transcribe_file,
-            commands::cancel_file_transcription,
-            commands::audio_file_info,
-            commands::notes_list,
-            commands::note_get,
-            commands::note_create,
-            commands::note_update,
-            commands::note_delete,
-            commands::note_enhance,
+            dictation::commands::transcribe_file,
+            dictation::commands::cancel_file_transcription,
+            dictation::commands::audio_file_info,
+            notes::commands::notes_list,
+            notes::commands::note_get,
+            notes::commands::note_create,
+            notes::commands::note_update,
+            notes::commands::note_delete,
+            notes::commands::note_enhance,
             notes::note_edits::transcript_line_edit,
             notes::note_edits::note_summary_update,
             notes::tasks::tasks_list,
             notes::tasks::note_task_set,
-            commands::get_note_base_prompt,
-            commands::notes_folders,
-            commands::notes_folder_create,
-            commands::notes_folder_rename,
-            commands::notes_folder_delete,
-            commands::notes_actions,
-            commands::action_create,
-            commands::action_update,
-            commands::action_delete,
-            commands::log_info,
-            commands::open_logs_folder,
+            notes::commands::get_note_base_prompt,
+            notes::commands::notes_folders,
+            notes::commands::notes_folder_create,
+            notes::commands::notes_folder_rename,
+            notes::commands::notes_folder_delete,
+            notes::commands::notes_actions,
+            notes::commands::action_create,
+            notes::commands::action_update,
+            notes::commands::action_delete,
+            shell::logging::log_info,
+            shell::logging::open_logs_folder,
             privacy::net::connections_summary,
             privacy::net::connections_clear,
             privacy::net::connections_note,
@@ -509,16 +508,16 @@ pub fn run() {
             privacy::diagnostics::diagnostics_issue_url,
             #[cfg(debug_assertions)]
             privacy::diagnostics::e2e_save_path,
-            commands::meeting_start,
-            commands::meeting_state,
-            commands::note_export,
-            commands::note_ask,
-            commands::chats_list,
-            commands::chat_get,
-            commands::chat_delete,
-            commands::chat_delete_many,
-            commands::chat_rename,
-            commands::chat_send,
+            meetings::commands::meeting_start,
+            meetings::commands::meeting_state,
+            notes::commands::note_export,
+            notes::commands::note_ask,
+            chat::commands::chats_list,
+            chat::commands::chat_get,
+            chat::commands::chat_delete,
+            chat::commands::chat_delete_many,
+            chat::commands::chat_rename,
+            chat::commands::chat_send,
             chat::stream::stream_stop,
             ai::ai_model::ai_model_status,
             ai::ai_model::chat_set_model,
@@ -526,11 +525,11 @@ pub fn run() {
             ai::model_catalog::model_catalog,
             ai::model_catalog::model_catalog_refresh,
             ai::model_catalog::llm_models,
-            commands::chat_dictate,
-            commands::chat_input_focus,
-            commands::configure_assistant_hotkey,
-            commands::configure_read_hotkey,
-            commands::assistant_key,
+            dictation::commands::chat_dictate,
+            dictation::commands::chat_input_focus,
+            dictation::commands::configure_assistant_hotkey,
+            dictation::commands::configure_read_hotkey,
+            dictation::commands::assistant_key,
             voice::read_aloud::read_aloud_text,
             voice::read_aloud::read_aloud_selection,
             voice::read_aloud::read_aloud_action,
@@ -551,7 +550,7 @@ pub fn run() {
             voice::tts::tts_cloud_models,
             voice::tts::tts_cloud_usage,
             voice::tts::tts_cloud_preview,
-            commands::bridge_status,
+            integrations::bridge::bridge_status,
             integrations::mcp_clients::mcp_clients_status,
             integrations::mcp_clients::mcp_client_add,
             integrations::mcp_clients::mcp_client_remove,
@@ -615,7 +614,7 @@ pub fn run() {
             calls::meeting_guard::meeting_limit_status,
             calls::meeting_guard::meeting_checkin_respond,
             calls::meeting_guard::meeting_checkin_status,
-            commands::configure_meeting_hotkey,
+            dictation::commands::configure_meeting_hotkey,
             #[cfg(debug_assertions)]
             calls::capture::capture_affinity,
             calendar::calendar_status,
@@ -736,13 +735,13 @@ pub fn run() {
             #[cfg(debug_assertions)]
             calendar::calendar_e2e_opened,
             #[cfg(debug_assertions)]
-            commands::e2e_opened_urls,
+            shell::commands::e2e_opened_urls,
             #[cfg(debug_assertions)]
             voice::tts::tts_e2e_spoken,
             #[cfg(debug_assertions)]
-            commands::e2e_chat_dictation,
+            dictation::commands::e2e_chat_dictation,
             #[cfg(debug_assertions)]
-            commands::e2e_dictation,
+            dictation::commands::e2e_dictation,
             #[cfg(debug_assertions)]
             chat::assistant::e2e_assistant_ask,
             #[cfg(debug_assertions)]
@@ -757,7 +756,7 @@ pub fn run() {
             #[cfg(debug_assertions)]
             shell::realtest::commands::realtest_rewrite_text,
             #[cfg(debug_assertions)]
-            commands::e2e_rewrite,
+            dictation::commands::e2e_rewrite,
             #[cfg(debug_assertions)]
             dictation::transforms::e2e_transform,
             #[cfg(debug_assertions)]
@@ -765,7 +764,7 @@ pub fn run() {
             #[cfg(debug_assertions)]
             shell::realtest::commands::realtest_transform,
             #[cfg(debug_assertions)]
-            commands::e2e_target_window,
+            dictation::commands::e2e_target_window,
             #[cfg(debug_assertions)]
             ai::cleanup_styles::e2e_style_app,
             #[cfg(debug_assertions)]
@@ -922,10 +921,10 @@ pub fn run() {
             if launch_shows_window(
                 launched_at_sign_in(cfg.autostart),
                 cfg.start_hidden,
-                !commands::installed_models().is_empty(),
+                !dictation::commands::installed_models().is_empty(),
                 updates::relaunch_after_update(),
             ) {
-                if let Err(e) = commands::show_settings(&handle) {
+                if let Err(e) = shell::window::show_settings(&handle) {
                     tracing::warn!("Could not show the main window: {}", e);
                 }
             }
@@ -1183,8 +1182,8 @@ pub fn run() {
             // First run: if no model is downloaded yet, greet the user with the
             // onboarding model picker instead of a silent "needs-model" pill.
             // Suppressed when launched hidden (e.g. autostart at login).
-            if !cfg.start_hidden && commands::installed_models().is_empty() {
-                if let Err(e) = commands::show_onboarding(&handle) {
+            if !cfg.start_hidden && dictation::commands::installed_models().is_empty() {
+                if let Err(e) = shell::window::show_onboarding(&handle) {
                     tracing::warn!("Could not show onboarding: {}", e);
                 }
             }

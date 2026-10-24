@@ -919,7 +919,7 @@ pub fn volume() -> f32 {
 }
 
 /// Set the voice's volume (0.0–1.0): the sentence playing now included.
-/// From every config save (`commands::save_config`), startup, and the
+/// From every config save (`shell::settings::save_config`), startup, and the
 /// Chat view's slider while it moves (`tts_volume_set`).
 pub fn set_volume(volume: f32) {
     let v = if volume.is_finite() { volume.clamp(0.0, 1.0) } else { 0.5 };
@@ -2145,7 +2145,7 @@ pub fn tts_volume_set(app: tauri::AppHandle, volume: f32, save: Option<bool>) ->
     let v = self::volume();
     if save.unwrap_or(false) {
         // In one step: never over a change saved meanwhile.
-        crate::commands::change_config(&app, |cfg| {
+        crate::shell::settings::change_config(&app, |cfg| {
             cfg.tts_volume = v;
             Ok(())
         })?;
@@ -2160,7 +2160,7 @@ pub fn tts_volume_set(app: tauri::AppHandle, volume: f32, save: Option<bool>) ->
 #[tauri::command]
 pub fn voice_replies_set(app: tauri::AppHandle, on: bool) -> Result<bool, String> {
     use tauri::Emitter;
-    crate::commands::change_config(&app, |cfg| {
+    crate::shell::settings::change_config(&app, |cfg| {
         cfg.speak_replies = on;
         Ok(())
     })?;

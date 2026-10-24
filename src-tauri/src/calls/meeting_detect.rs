@@ -841,7 +841,7 @@ pub fn on_tray_record(app: &AppHandle, call_id: u64) {
         if !window_view(app).0 && native::failed(app, &e).is_ok() {
             return;
         }
-        let _ = crate::commands::show_settings(app);
+        let _ = crate::shell::window::show_settings(app);
         let _ = app.emit("yap-error", format!("Couldn't record the call. {e}"));
     }
 }
@@ -942,7 +942,7 @@ fn auto_start_later(app: &AppHandle, prompt_id: u64, at: u64) {
             if !window_view(&app).0 && native::failed(&app, &e).is_ok() {
                 return;
             }
-            let _ = crate::commands::show_settings(&app);
+            let _ = crate::shell::window::show_settings(&app);
             let _ = app.emit("yap-error", format!("Couldn't record the call. {e}"));
         }
     });
@@ -1608,7 +1608,7 @@ fn record(app: &AppHandle, call_id: u64) -> Result<u64, String> {
     crate::notes::mark_meeting(note.id)?;
     // A made-up title: the AI meeting title may replace it (meeting_assist.rs).
     crate::notes::set_title_auto(note.id)?;
-    let started = crate::commands::meeting_start(app.clone(), app.state::<crate::AppState>(), note.id);
+    let started = crate::meetings::commands::meeting_start(app.clone(), app.state::<crate::AppState>(), note.id);
     if let Err(e) = started {
         crate::notes::delete(note.id);
         let _ = app.emit("yap-notes-changed", ());
@@ -1654,7 +1654,7 @@ pub(crate) fn stop_and_summarise(app: &AppHandle, note_id: Option<u64>) {
         return;
     }
     if !main {
-        let _ = crate::commands::show_settings(app);
+        let _ = crate::shell::window::show_settings(app);
     }
     if let Some(id) = note_id {
         let _ = app.emit(EVENT_OPEN, serde_json::json!({ "noteId": id, "stop": false }));
@@ -2198,7 +2198,7 @@ mod native {
             let (scheme, verb, id) = (parts.next(), parts.next(), parts.next().and_then(|n| n.parse::<u64>().ok()));
             match (scheme, verb, id) {
                 (Some("meeting"), Some("open"), Some(note_id)) => {
-                    let _ = crate::commands::show_settings(&app);
+                    let _ = crate::shell::window::show_settings(&app);
                     let _ = app.emit(EVENT_OPEN, serde_json::json!({ "noteId": note_id, "stop": false }));
                 }
                 (Some("meeting"), Some(answer), Some(prompt_id)) => {
@@ -2209,7 +2209,7 @@ mod native {
                 // The body: open Yap, and a pending prompt moves into the
                 // window (even a quiet one: this click asked for it).
                 _ => {
-                    let _ = crate::commands::show_settings(&app);
+                    let _ = crate::shell::window::show_settings(&app);
                     super::move_into_window(&app, true);
                 }
             }

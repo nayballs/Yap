@@ -856,7 +856,7 @@ fn edit(
     let note = crate::notes::get(note_id).ok_or("Note not found")?;
     if changed {
         use tauri::Emitter;
-        let mut payload = crate::commands::note_changed_payload(&note, origin.as_deref().unwrap_or(""));
+        let mut payload = crate::notes::commands::note_changed_payload(&note, origin.as_deref().unwrap_or(""));
         payload["lineSpeakers"] = json!(line_speakers(&note));
         payload["enhancedContent"] = json!(note.enhanced_content);
         let _ = app.emit("yap-note-changed", payload);

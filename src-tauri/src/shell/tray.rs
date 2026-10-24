@@ -327,7 +327,7 @@ fn activate_model(app: &AppHandle, model_id: &str) {
 fn on_menu_event(app: &AppHandle, id: &str) {
     match id {
         "settings" => {
-            let _ = crate::commands::show_settings(app);
+            let _ = crate::shell::window::show_settings(app);
         }
         "check_updates" => crate::updates::on_tray_check(app),
         "update_install" | "update_get" => {
@@ -338,7 +338,7 @@ fn on_menu_event(app: &AppHandle, id: &str) {
             std::thread::spawn(move || crate::updates::on_tray_menu(&app, &id));
         }
         "open_models" => {
-            let _ = crate::commands::show_onboarding(app);
+            let _ = crate::shell::window::show_onboarding(app);
         }
         // Off the main thread: it focuses the app and waits on the paste.
         "paste_last" => crate::pasting::text_injector::paste_last_from_tray(app, false),
@@ -431,7 +431,7 @@ pub fn build_tray(app: &AppHandle) -> tauri::Result<()> {
                 ..
             } = event
             {
-                let _ = crate::commands::show_settings(tray.app_handle());
+                let _ = crate::shell::window::show_settings(tray.app_handle());
             }
         })
         .build(app)?;
