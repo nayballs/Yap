@@ -34,6 +34,8 @@ test('the guard: Yap pastes only into the windows the robot opened', async ({ ro
     await expect(yap.invoke('paste_last_transcript')).rejects.toThrow(/Robot mode refused to paste the last transcript/);
     expect(await stranger.text('box')).toBe('untouched');
     // Said in Yap's window, and listed for the harness.
+    // (Shown at once: the harness closed any toast an earlier spec left up,
+    // support/robot.js `clearToasts`.)
     await expect(yap.main.getByText(/Robot mode refused to paste/).first()).toBeVisible();
     expect((await yap.invoke('realtest_refusals')).length).toBeGreaterThanOrEqual(2);
   } finally {
