@@ -57,14 +57,28 @@
   import { toast } from './ui/toast.svelte.js';
   import { hotkeyMatchesKeydown, hotkeyMatchesKeyup, formatHotkeySpec, fillHotkey } from './hotkeys.js';
   import { appLabel } from './appNames.js';
-  import { modelStore, refreshModels } from './modelStore.svelte.js';
-  import { attention, attentionCount } from './attention.svelte.js';
+  import { attention, attentionCount, followAttention } from './attention.svelte.js';
+  import {
+    localLlm,
+    LLM_FAMILIES,
+    localFamilies,
+    activeLocalFile,
+    refreshLocalLlm,
+    listenLocalProgress,
+    followLocalLlm,
+    onLocalModelChange,
+    openLlmFolder,
+    downloadCurated,
+    activateCurated,
+    takeUpgrade,
+    dismissUpgrade,
+    deleteCurated,
+  } from './settings/localLlm.svelte.js';
   import AccountSection from './AccountSection.svelte';
   import ConnectorsSection from './ConnectorsSection.svelte';
   import McpSection from './McpSection.svelte';
   import MemorySection from './MemorySection.svelte';
   import { account, displayName, initAccount, initials } from './account.svelte.js';
-  import { updates } from './updates.svelte.js';
   import { openContextMenu, menuKey, menuOpenFor, askConfirm } from './ui/contextMenu.svelte.js';
   import './settings/settings.css';
   import { NAV_GROUPS, PAGE_LABELS, resolveTarget } from './settings/nav.js';
@@ -133,6 +147,13 @@
 
   // Update state lives in updates.svelte.js (Rust's updates.rs drives it);
   // ControlPanel starts it, About + the attention badge render it.
+
+  // The red attention count (attention.svelte.js), kept live here: Settings
+  // is always mounted, so the ControlPanel's bell is current while it's closed.
+  followAttention(() => (config.loaded ? cfg : null));
+  // The on-device model's status while on-device is picked but warming up,
+  // and the model browser's family tab (settings/localLlm.svelte.js).
+  followLocalLlm(() => cfg);
 
   // OpenWhispr-style split: a MODE selector (how cleanup runs) + provider pill
   // tabs under "Cloud Providers". Persisted state is still just cfg.ppProvider
@@ -400,9 +421,7 @@
     ensureScopes();
     // On-device cleanup status + live download progress.
     refreshLocalLlm();
-    listen('local-llm-download-progress', (e) => {
-      if (e.payload) localProgress = e.payload;
-    });
+    listenLocalProgress();
     // This copy as set up, before any change worth saving (the migration
     // below is one): what `fill` puts in base's holes.
     setPristine();
@@ -732,20 +751,6 @@
   function setCallAppAsks(id, asks) {
     cfg.meetingDetectApps = { ...(cfg.meetingDetectApps || {}), [id]: asks };
   }
-  // The speech models on disk, for the "no model" attention item (and
-  // Home's first-step card): read at once, not only when the Speech-to-Text
-  // page first opens — a new install never showed the badge until then —
-  // and again when the pipeline says it needs one or has one (onboarding's
-  // download happens in its own window).
-  onMount(() => {
-    refreshModels();
-    const un = listen('yap-state', (e) => {
-      if (e.payload === 'needs-model' || (e.payload === 'idle' && modelStore.installed.length === 0)) {
-        refreshModels();
-      }
-    });
-    return () => un.then((f) => f());
-  });
   // "Don't ask for Teams" on a call prompt saves that in Rust: adopt it into
   // this config copy, or the next auto-save would switch Teams back on.
   onMount(() => {
@@ -857,7 +862,7 @@
     const sc = cfg?.llmScopes?.[scope];
     if (!sc) return '';
     const who = PROVIDER_LABELS[sc.provider] || sc.provider || '';
-    const model = sc.provider === 'ondevice' ? localLlm.model : sc.model;
+    const model = sc.provider === 'ondevice' ? localLlm.status.model : sc.model;
     return [who, model].filter(Boolean).join(' · ');
   }
   // Commands' model and prompt: Language Models → Commands. The Voice
@@ -962,94 +967,28 @@
           modelsFor(cloudProvider, cfg?.ppModel).items.some((i) => i.value === cfg?.ppModel && i.thinks)))
   );
 
-  // ---- On-device cleanup sidecar (llamafile) ----
-  // model/engine display names come from the backend (single source of truth);
-  // the literals here are just a fallback until local_llm_status resolves.
-  let localLlm = $state({
-    installed: false,
-    running: false,
-    model: 'Qwen2.5 1.5B Instruct',
-    engine: 'Mozilla llamafile (llama.cpp)',
-  });
-  let localInstalling = $state(false);
-  let localProgress = $state({ stage: '', percent: 0, downloaded_mb: 0, total_mb: 0 });
-  let localError = $state('');
-
+  // ---- On-device cleanup sidecar (llamafile): settings/localLlm.svelte.js ----
+  const llm = $derived(localLlm.status);
   // What each install stage actually downloads, so the progress bar names it.
   const LOCAL_STAGE_LABELS = {
     runtime: 'llamafile engine (local AI server)',
     model: 'model',
   };
 
-  // Switching models restarts the sidecar with the newly selected GGUF. The
-  // sidecar reads the selection from config.json, so save first.
-  let localSwitching = $state(false);
-  async function onLocalModelChange() {
-    localError = '';
-    localSwitching = true;
-    try {
-      await persist();
-      if (localLlm.running) {
-        await invoke('local_llm_stop');
-        await invoke('local_llm_start');
-      }
-    } catch (e) {
-      localError = `${e}`;
-    } finally {
-      localSwitching = false;
-      refreshLocalLlm();
-    }
-  }
-
-  function openLlmFolder() {
-    invoke('open_llm_folder').catch(() => {});
-  }
-
-  async function refreshLocalLlm() {
-    try {
-      localLlm = await invoke('local_llm_status');
-    } catch {
-      /* not in Tauri */
-    }
-  }
-
   // ---- Local-model browser (curated downloadable cleanup models) ----
-  // The active local model's filename ('' = the bundled default → its filename).
-  const activeLocalFile = $derived(cfg.ppLocalModel || localLlm.modelFile || '');
-  // Which curated model is downloading right now (drives its per-card progress).
-  let downloadingId = $state('');
+  const activeFile = $derived(activeLocalFile(cfg));
   // User-supplied GGUFs in the folder that aren't part of the curated set.
   const byoModelOptions = $derived(
-    (localLlm.models || [])
-      .filter((f) => !(localLlm.curated || []).some((c) => c.filename === f))
+    (llm.models || [])
+      .filter((f) => !(llm.curated || []).some((c) => c.filename === f))
       .map((f) => ({ value: f, label: f.replace(/\.gguf$/i, '') }))
   );
-
-  // Local model families → provider tab label + brand icon (OpenWhispr-style).
-  const LLM_FAMILY_META = [
-    { value: 'qwen', label: 'Qwen', icon: PROVIDER_ICONS.qwen },
-    { value: 'llama', label: 'Meta Llama', icon: PROVIDER_ICONS.llama },
-    { value: 'gemma', label: 'Gemma', icon: PROVIDER_ICONS.gemini },
-    { value: 'mistral', label: 'Mistral', icon: PROVIDER_ICONS.mistral },
-    { value: 'phi', label: 'Phi', icon: '' },
-  ];
   function familyIcon(fam) {
-    return (LLM_FAMILY_META.find((f) => f.value === fam) || {}).icon || '';
+    return (LLM_FAMILIES.find((f) => f.value === fam) || {}).icon || '';
   }
-  // Families actually present in the curated set, kept in the fixed order above.
-  const localFamilies = $derived(
-    LLM_FAMILY_META.filter((f) => (localLlm.curated || []).some((m) => m.family === f.value))
-  );
-  let localFamily = $state('');
-  const familyModels = $derived((localLlm.curated || []).filter((m) => m.family === localFamily));
-  // Default the family tab to the active model's family (or the first present).
-  $effect(() => {
-    const fams = localFamilies;
-    if (fams.length && !fams.some((f) => f.value === localFamily)) {
-      const active = (localLlm.curated || []).find((m) => activeLocalFile === m.filename);
-      localFamily = active?.family || fams[0].value;
-    }
-  });
+  // Families actually present in the curated set, kept in the fixed order.
+  const families = $derived(localFamilies());
+  const familyModels = $derived((llm.curated || []).filter((m) => m.family === localLlm.family));
 
   function fmtLlmSize(mb) {
     const n = Number(mb) || 0;
@@ -1060,58 +999,6 @@
     if (!url) return '';
     const i = url.indexOf('/resolve/');
     return i > 0 ? url.slice(0, i) : url;
-  }
-
-  // Download a curated model (pulls the llamafile runtime too if missing), then
-  // make it the active model and (re)start the sidecar.
-  async function downloadCurated(m) {
-    if (downloadingId || localInstalling) return;
-    localError = '';
-    downloadingId = m.id;
-    localInstalling = true;
-    localProgress = { stage: '', percent: 0 };
-    try {
-      const filename = await invoke('local_llm_install', { model: m.id });
-      cfg.ppLocalModel = m.isDefault ? '' : filename; // '' keeps default semantics
-      await persist();
-      if (localLlm.running) await invoke('local_llm_stop');
-      await invoke('local_llm_start');
-      await refreshLocalLlm();
-    } catch (e) {
-      localError = `${e}`;
-    } finally {
-      localInstalling = false;
-      downloadingId = '';
-    }
-  }
-
-  // Switch the active local model to an already-downloaded curated one.
-  async function activateCurated(m) {
-    if (localSwitching) return;
-    cfg.ppLocalModel = m.isDefault ? '' : m.filename;
-    await onLocalModelChange();
-  }
-
-  // The bigger model offered once (local_llm::upgrade_offer: a graphics
-  // card that can run it, the 1.5B in use): taken or turned down, it isn't
-  // offered again. Never downloaded without this click.
-  async function takeUpgrade(m) {
-    if (m.installed) {
-      cfg.localLlmUpgradeDismissed = true;
-      await activateCurated(m);
-      return;
-    }
-    await downloadCurated(m);
-    if (!localError) {
-      cfg.localLlmUpgradeDismissed = true;
-      await persist();
-      await refreshLocalLlm();
-    }
-  }
-  async function dismissUpgrade() {
-    cfg.localLlmUpgradeDismissed = true;
-    await persist();
-    await refreshLocalLlm();
   }
 
   // The trash button and the card's right-click Delete… ask first, as the
@@ -1130,17 +1017,17 @@
   // its buttons do — Download, or Use — and Delete…. Nothing while it
   // downloads, or with cleanup off (its buttons are off then too).
   function curatedMenu(e, m) {
-    const isActive = m.installed && activeLocalFile === m.filename;
-    if (downloadingId === m.id) return;
+    const isActive = m.installed && activeFile === m.filename;
+    if (localLlm.downloadingId === m.id) return;
     const off = !cfg.postProcessEnabled;
     openContextMenu(
       e,
       [
         !m.installed
-          ? { label: 'Download', icon: 'download', disabled: off || !!downloadingId, onselect: () => downloadCurated(m) }
+          ? { label: 'Download', icon: 'download', disabled: off || !!localLlm.downloadingId, onselect: () => downloadCurated(m) }
           : null,
         m.installed && !isActive
-          ? { label: 'Use', icon: 'use', disabled: off || localSwitching, onselect: () => activateCurated(m) }
+          ? { label: 'Use', icon: 'use', disabled: off || localLlm.switching, onselect: () => activateCurated(m) }
           : null,
         m.installed && !isActive ? { separator: true } : null,
         m.installed && !isActive
@@ -1150,33 +1037,6 @@
       { label: m.display, row: e.type === 'keydown' ? e.target : curatedEls[m.id] }
     );
   }
-
-  // Delete a downloaded curated model; if it was active, fall back to default.
-  async function deleteCurated(m) {
-    localError = '';
-    try {
-      await invoke('local_llm_delete', { filename: m.filename });
-      if (activeLocalFile === m.filename) {
-        cfg.ppLocalModel = '';
-        await persist();
-        if (localLlm.running) {
-          await invoke('local_llm_stop');
-          await invoke('local_llm_start');
-        }
-      }
-      await refreshLocalLlm();
-    } catch (e) {
-      localError = `${e}`;
-    }
-  }
-
-  // While on-device is selected but not yet running (e.g. the sidecar is warming
-  // up after launch), poll status so the panel flips to "Ready" on its own.
-  $effect(() => {
-    if (cfg?.ppProvider !== 'ondevice' || localLlm.running) return;
-    const id = setInterval(refreshLocalLlm, 3000);
-    return () => clearInterval(id);
-  });
 
   // ---- Smart routing (reusable profiles + per-app rules) ----
   // Apps the user has actually dictated into, pulled from local history so the
@@ -1311,26 +1171,6 @@
     if (CLOUD_PROVIDER_IDS.includes(cfg.ppProvider)) cloudProvider = cfg.ppProvider;
   }
 
-  // ---- Settings attention badge (Wispr-style red count) ----
-  // Real conditions only: an update waiting, no STT model installed, or AI
-  // cleanup pointed at a cloud provider with no key. Settings is always
-  // mounted, so this stays live for the ControlPanel's bell too.
-  $effect(() => {
-    if (!config.loaded || !cfg) return;
-    const items = [];
-    if (updates.status === 'ready') {
-      items.push({ section: 'about', label: `Update ${updates.version} ready to install` });
-    } else if (updates.status === 'available' && (updates.portable || updates.metered)) {
-      items.push({ section: 'about', label: `Yap ${updates.version} is available` });
-    }
-    if (modelStore.loaded && modelStore.installed.length === 0) {
-      items.push({ section: 'models', label: 'No speech-to-text model installed' });
-    }
-    if (cleanupNeedsKey(cfg)) {
-      items.push({ section: 'cleanup', label: 'AI cleanup needs an API key' });
-    }
-    attention.items = items;
-  });
 </script>
 
 {#snippet navIcon(id)}
@@ -1945,55 +1785,55 @@
                   <span class="lb-title">On-device models</span>
                   <span class="lb-sub">Downloaded once, then they run on this PC (Mozilla llamafile): no key, nothing sent.</span>
                 </div>
-                {#if localLlm.slowOnThisPc}
-                  {@const small = (localLlm.curated || []).find((c) => c.isDefault)}
+                {#if llm.slowOnThisPc}
+                  {@const small = (llm.curated || []).find((c) => c.isDefault)}
                   <div class="lb-note slow" role="status" data-testid="local-slow">
                     <span>
-                      {#if localLlm.placement?.kind === 'partial'}
-                        Runs partly on the processor on this PC ({localLlm.placement.gpuLayers} of {localLlm.placement.layers} layers on the graphics card): answers will be slow — {small?.display || 'Qwen2.5 1.5B'} is quicker.
+                      {#if llm.placement?.kind === 'partial'}
+                        Runs partly on the processor on this PC ({llm.placement.gpuLayers} of {llm.placement.layers} layers on the graphics card): answers will be slow — {small?.display || 'Qwen2.5 1.5B'} is quicker.
                       {:else}
                         Runs on the processor on this PC: answers will be slow — {small?.display || 'Qwen2.5 1.5B'} is quicker.
                       {/if}
                     </span>
                     {#if small}
                       {#if small.installed}
-                        <button class="lb-use" onclick={() => activateCurated(small)} disabled={!cfg.postProcessEnabled || localSwitching}>Use {small.display}</button>
+                        <button class="lb-use" onclick={() => activateCurated(small)} disabled={!cfg.postProcessEnabled || localLlm.switching}>Use {small.display}</button>
                       {:else}
-                        <button class="lb-use" onclick={() => downloadCurated(small)} disabled={!cfg.postProcessEnabled || !!downloadingId}>Download {small.display}</button>
+                        <button class="lb-use" onclick={() => downloadCurated(small)} disabled={!cfg.postProcessEnabled || !!localLlm.downloadingId}>Download {small.display}</button>
                       {/if}
                     {/if}
                   </div>
-                {:else if localLlm.upgrade}
-                  {@const up = (localLlm.curated || []).find((c) => c.id === localLlm.upgrade.id)}
+                {:else if llm.upgrade}
+                  {@const up = (llm.curated || []).find((c) => c.id === llm.upgrade.id)}
                   <div class="lb-note" data-testid="local-upgrade">
                     <span>
-                      {#if localLlm.gpu?.name}Your {localLlm.gpu.name} can run{:else}This PC can run{/if}
-                      {localLlm.upgrade.display}: better answers in Chat, and it can use Chat's tools on your notes, apps and the web. {localLlm.upgrade.installed ? 'Already downloaded.' : `A ${fmtLlmSize(localLlm.upgrade.sizeMb)} download.`}
+                      {#if llm.gpu?.name}Your {llm.gpu.name} can run{:else}This PC can run{/if}
+                      {llm.upgrade.display}: better answers in Chat, and it can use Chat's tools on your notes, apps and the web. {llm.upgrade.installed ? 'Already downloaded.' : `A ${fmtLlmSize(llm.upgrade.sizeMb)} download.`}
                     </span>
                     {#if up}
-                      <button class="lb-use" onclick={() => takeUpgrade(up)} disabled={!cfg.postProcessEnabled || !!downloadingId || localSwitching}>
+                      <button class="lb-use" onclick={() => takeUpgrade(up)} disabled={!cfg.postProcessEnabled || !!localLlm.downloadingId || localLlm.switching}>
                         {up.installed ? `Use ${up.display}` : `Download ${up.display}`}
                       </button>
                     {/if}
                     <button class="lb-later" onclick={dismissUpgrade}>No thanks</button>
                   </div>
                 {/if}
-                {#if localLlm.installed}
+                {#if llm.installed}
                   <!-- How much the on-device model reads at once: one setting
                        for Chat, cleanup and meeting notes (one sidecar). -->
                   <div class="lb-context">
-                    <LocalContext status={localLlm} disabled={!cfg.postProcessEnabled} onchange={(v) => (localLlm = { ...localLlm, context: v })} />
+                    <LocalContext status={llm} disabled={!cfg.postProcessEnabled} onchange={(v) => (localLlm.status = { ...localLlm.status, context: v })} />
                   </div>
                 {/if}
-                {#if localFamilies.length > 1}
+                {#if families.length > 1}
                   <div class="lb-families">
-                    <PillTabs value={localFamily} options={localFamilies} onchange={(v) => (localFamily = v)} renderIcon={familyTabIcon} />
+                    <PillTabs value={localLlm.family} options={families} onchange={(v) => (localLlm.family = v)} renderIcon={familyTabIcon} />
                   </div>
                 {/if}
                 <div class="lb-list">
                   {#each familyModels as m (m.id)}
-                    {@const isActive = m.installed && activeLocalFile === m.filename}
-                    {@const isDownloading = downloadingId === m.id}
+                    {@const isActive = m.installed && activeFile === m.filename}
+                    {@const isDownloading = localLlm.downloadingId === m.id}
                     <!-- svelte-ignore a11y_no_static_element_interactions -->
                     <div
                       class="lb-card"
@@ -2022,8 +1862,8 @@
                         <span class="lb-blurb">{m.blurb}</span>
                         {#if isDownloading}
                           <div class="lb-progress">
-                            <span class="lb-plabel">{LOCAL_STAGE_LABELS[localProgress.stage] || 'Downloading'}… {localProgress.percent}%{#if localProgress.total_mb} · {Math.round(localProgress.downloaded_mb)} / {Math.round(localProgress.total_mb)} MB{/if}</span>
-                            <div class="lb-bar"><span style="width:{localProgress.percent}%"></span></div>
+                            <span class="lb-plabel">{LOCAL_STAGE_LABELS[localLlm.progress.stage] || 'Downloading'}… {localLlm.progress.percent}%{#if localLlm.progress.total_mb} · {Math.round(localLlm.progress.downloaded_mb)} / {Math.round(localLlm.progress.total_mb)} MB{/if}</span>
+                            <div class="lb-bar"><span style="width:{localLlm.progress.percent}%"></span></div>
                           </div>
                         {/if}
                       </div>
@@ -2033,12 +1873,12 @@
                         {:else if isActive}
                           <span class="lb-activetag">✓ Active</span>
                         {:else if m.installed}
-                          <button class="lb-use" onclick={() => activateCurated(m)} disabled={!cfg.postProcessEnabled || localSwitching}>Use</button>
+                          <button class="lb-use" onclick={() => activateCurated(m)} disabled={!cfg.postProcessEnabled || localLlm.switching}>Use</button>
                           <button class="lb-del" title="Delete download" aria-label="Delete download" onclick={() => askDeleteCurated(m)}>
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M6 6v14a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V6M10 11v6M14 11v6" /></svg>
                           </button>
                         {:else}
-                          <button class="lb-dl" onclick={() => downloadCurated(m)} disabled={!cfg.postProcessEnabled || !!downloadingId}>
+                          <button class="lb-dl" onclick={() => downloadCurated(m)} disabled={!cfg.postProcessEnabled || !!localLlm.downloadingId}>
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12M7 10l5 5 5-5M5 21h14" /></svg>
                             Download
                           </button>
@@ -2053,10 +1893,10 @@
                 </p>
                 {#if byoModelOptions.length}
                   <div class="ondevice-models">
-                    <Select bind:value={cfg.ppLocalModel} options={byoModelOptions} onchange={onLocalModelChange} disabled={!cfg.postProcessEnabled || localSwitching} />
+                    <Select bind:value={cfg.ppLocalModel} options={byoModelOptions} onchange={onLocalModelChange} disabled={!cfg.postProcessEnabled || localLlm.switching} />
                   </div>
                 {/if}
-                {#if localError}<span class="ondevice-err">{localError}</span>{/if}
+                {#if localLlm.error}<span class="ondevice-err">{localLlm.error}</span>{/if}
               </div>
             </div>
           {/if}
@@ -2094,7 +1934,7 @@
               enabled={cfg.postProcessEnabled}
               testCommand="test_post_process"
               providerLabel={CLEANUP_PROVIDER_LABELS[cfg.ppProvider] || cfg.ppProvider}
-              modelLabel={cfg.ppProvider === 'ondevice' ? localLlm.model : cfg.ppModel}
+              modelLabel={cfg.ppProvider === 'ondevice' ? llm.model : cfg.ppModel}
               onpersist={persist}
               ontested={refreshUsage}
             />

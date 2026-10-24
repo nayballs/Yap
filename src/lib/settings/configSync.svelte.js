@@ -38,7 +38,7 @@ let base = null;
 // copy's (`fill`).
 let pristine = null;
 let syncing = Promise.resolve();
-// Settings' reaction to values taken in from outside (`syncConfig`).
+/** Settings' reaction to values taken in from outside (`syncConfig`). @type {(taken: string[]) => void} */
 let adopted = () => {};
 
 /** Run `fn` after every merge before it (a read-merge-write never interleaves). */
