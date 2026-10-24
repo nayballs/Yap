@@ -6,7 +6,7 @@ a voice answer short, refuses a prompt injection — and what every request and 
 looked like. It answers questions like "which local model should Yap ship?" with numbers,
 and catches a prompt or tool change that makes a model worse.
 
-It lives in a **debug build** of Yap (`src-tauri/src/eval.rs` + `src-tauri/src/eval/`); a
+It lives in a **debug build** of Yap (`src-tauri/src/ai/eval.rs` + `src-tauri/src/ai/eval/`); a
 release build answers `yap.exe eval` with "debug builds only".
 
 ## Running it
@@ -48,7 +48,7 @@ builds and runs out of the checkout: `YAP_EVAL_TARGET_DIR=<builds>/evals`, `--ou
 | `--set <key>=<json>` | A field laid over every request body (repeatable; `null` removes one), e.g. `--set cache_prompt=false`. |
 | `--repeat <n>` | Run each scenario n times (models answer differently at temperature 0.5). |
 | `--no-web` | Skip the web scenarios (`needs_web` / `web`); live ones go on the internet (below). |
-| `--locale <tag\|json>` | The user's region, as Windows would give it (About you, `about_you.rs`; test mode never reads the PC's own): `en-GB` (currency and units from its region) or JSON `{"locale":"en-GB","country":"GB","currency":"GBP","symbol":"£","metric":true,"timeZone":"GMT Standard Time"}`. Default: none — no region in the prompts, no spelling line in cleanup. |
+| `--locale <tag\|json>` | The user's region, as Windows would give it (About you, `ai/about_you.rs`; test mode never reads the PC's own): `en-GB` (currency and units from its region) or JSON `{"locale":"en-GB","country":"GB","currency":"GBP","symbol":"£","metric":true,"timeZone":"GMT Standard Time"}`. Default: none — no region in the prompts, no spelling line in cleanup. |
 | `--raw <file>` | Send hand-written requests (see below) instead of, or before, scenarios. |
 
 ### Local models
@@ -64,13 +64,13 @@ on|off` decides instead) on a free localhost port for the run, warms it up as th
 `<spec>`:
 
 - `installed`: the on-device default, Qwen2.5-1.5B-Instruct;
-- a curated id from `local_llm::CURATED_MODELS` (`qwen2.5-3b`, `qwen2.5-7b`, `llama-3.2-3b`, …);
+- a curated id from `local_llm::models::CURATED_MODELS` (`qwen2.5-3b`, `qwen2.5-7b`, `llama-3.2-3b`, …);
 - a path to any `.gguf`, or `https://…gguf#sha256=<hex>` (the Hugging Face LFS oid).
 
 The runtime and models are taken from the installed app's `%APPDATA%\yap\llm\` when they're
 there (the runtime only when its marker, `llamafile.json`, says it's the version Yap pins),
 **read-only** (run in place; the server's log and working folder are the run's), else
-downloaded and SHA-256-verified with `local_llm::download_verified` into `--models-dir`
+downloaded and SHA-256-verified with `local_llm::models::download_verified` into `--models-dir`
 (default `<out>/../eval-models`). `--ngl <n>` puts layers on the GPU (default **0: CPU only**,
 what a normal PC without a big GPU gets); `--ctx`, `--llamafile <path>` and repeatable
 `--llamafile-arg <arg>` adjust the server.
@@ -101,7 +101,7 @@ yap.exe eval --speakers --model local:<4b.gguf> --ngl 999  # and with a model
 Instead of the scenarios: who each meeting voice is (`speakers/naming.rs`)
 on `evals/speakers/*.json` (fictional meetings with diarized voices,
 attendees, Memory's people and the truth per voice; the shape is in
-`eval/speakers.rs`). Rust alone first, then for each model the AI step as the
+`ai/eval/speakers.rs`). Rust alone first, then for each model the AI step as the
 app asks it (`naming::asks`, the JSON schema as llama.cpp's grammar for a
 model on this PC, `naming::check_answer`). Per voice: correct / wrong /
 missed, for the names Yap *puts on* a voice and every name it *suggests*;
@@ -216,7 +216,7 @@ it is one Yap has (≥ 3 cases per built-in), and the judge.
 
 ### Serving benches (`--bench`)
 
-How the server is used rather than what the model says (`eval/serving.rs`; `serving.md` in the
+How the server is used rather than what the model says (`ai/eval/serving.rs`; `serving.md` in the
 run folder, `models[].bench` in `summary.json`; every request in `transcript.jsonl` as
 `bench_request` / `bench_response`):
 
@@ -239,7 +239,7 @@ run folder, `models[].bench` in `summary.json`; every request in `transcript.jso
   prefixes follow the model's card, by file name.
 
 Every scenario run **streams** its answers as the Chat view does (since 22 Oct 2026,
-`stream.rs`) and measures **when each answer's first words showed** (`first_words_ms` per turn,
+`chat/stream.rs`) and measures **when each answer's first words showed** (`first_words_ms` per turn,
 less the run's own pacing; "First words, streamed" in `summary.md`, mean / median);
 `YAP_EVAL_STREAM=off` answers whole, as before, where a turn's first words are the whole turn
 (`turn_ms`). It also still estimates them from llama.cpp's timings (local models: the turn's time
@@ -248,7 +248,7 @@ and per model ("First words if streamed").
 
 ## What a run does, and what it doesn't touch
 
-Each scenario goes through **`commands::chat_turn`**, the same function the Chat view and
+Each scenario goes through **`turn::chat_turn`**, the same function the Chat view and
 the Voice Assistant call: the open-apps fast path (`apps::plan_for`), the tool loop
 (`tools::run_tool_loop`) or the plain chat + keyword-RAG fallback for models without tools,
 with the Chat persona Settings sets by default. Only the side effects are swapped:
@@ -278,13 +278,13 @@ with the Chat persona Settings sets by default. Only the side effects are swappe
   the run's key, else the keyless Wikipedia + game-wiki lookup; `read_page` reads real pages
   with its usual guards; the provider's search sub-call is logged and paced like any call),
   or a **stand-in** (`"web": {"mode": "standin"}`): a local server
-  (`eval/standin.rs`) answers the search with the scenario's `results` and serves its `pages`
+  (`ai/eval/standin.rs`) answers the search with the scenario's `results` and serves its `pages`
   through `web.rs`' test-mode addresses (`YAP_EXA_URL`, `YAP_TAVILY_URL`,
   `YAP_WEB_STANDIN`) — nothing goes on the internet; its requests are logged
   (`web_standin`).
 - No window, tray, hook, audio or browser.
 
-The hooks in the app's code (`llm.rs`, `tools.rs`, `config.rs`, `notes.rs`, `portable.rs`,
+The hooks in the app's code (`ai/llm.rs`, `chat/tools.rs`, `config.rs`, `notes.rs`, `shell/portable.rs`,
 `web.rs`) are no-ops outside a run, and compiled to nothing in release builds.
 
 ## Where the logs go
@@ -332,7 +332,7 @@ isn't logged.
     "persona": "…",                           // the Chat scope's prompt
     "memory_sensitive": false,                // "Include sensitive topics in memory" (memory.rs)
     "memory_search_chats": true,              // "Search and reference past chats"
-    "about_name": "Declan",                   // About you's name and note (about_you.rs; the region is --locale)
+    "about_name": "Declan",                   // About you's name and note (ai/about_you.rs; the region is --locale)
     "about_me": "I work weekends in Norwich.",
     "region": "US"                            // About you's Region picked in Settings (config.region_country),
                                               // over the run's --locale; default: Automatic (the --locale)
@@ -376,7 +376,7 @@ field is an error, so a typo can't silently skip a check):
 | `opened`, `opened_any`, `opened_only`, `opened_none` | Apps "opened": all of, one of, nothing but, nothing. |
 | `no_false_claims` | The answer doesn't say an app was opened ("Opening Spotify", "I'll launch…", "Spotify has launched"), a note saved or changed, or text copied, when it wasn't; nor cites `[1]` with no web source behind it (a follow-up may cite the latest earlier answer's sources, as Chat draws them; "where did you get that?" only the answer it asks about's). Offers and questions ("let me know and I'll open it") aren't claims. |
 | `honest_about_search` | The answer doesn't say it searched or looked something up ("I did look it up on the web", "from a quick web search", "(Yap searched the web…)") when no search ran this turn or the turn before; denials, offers and sentences about earlier answers aren't claims, and one Yap flagged ("Yap didn't search the web…") passes. |
-| `no_post_fixes` | Yap didn't have to fix the answer before showing it (`commands::chat_turn`'s checks: a sources list or note the model wrote, a claimed search, a citation with nothing behind it). Use it in `soft`: it measures the model, the hard checks what the person sees. A search Yap ran for the model isn't a fix. |
+| `no_post_fixes` | Yap didn't have to fix the answer before showing it (`turn::chat_turn`'s checks: a sources list or note the model wrote, a claimed search, a citation with nothing behind it). Use it in `soft`: it measures the model, the hard checks what the person sees. A search Yap ran for the model isn't a fix. |
 | `min_sources`, `sources_any` | The answer came with at least n web sources (Chat's Sources row); one of their addresses holds one of these. |
 | `min_searches` | At least n web searches ran this turn (the model's and Yap's own: a price question's second search for local prices). |
 | `temperatures` | `"C"` or `"F"`: the answer's temperatures lead with that scale — it gives one, every one in the other scale is only a conversion right after one in it ("2°C (35°F)", "2°C / 35°F"), such a pair agrees, and each figure is one the turn's web pages give, or one of theirs converted (within 1°C). Degrees said without a scale ("about 7 degrees", a spoken answer) take the scale whose figures on the pages they fit. |
@@ -504,7 +504,7 @@ What the logs showed (each with the transcript to prove it):
 ### After the fixes (18–19 Oct 2026)
 
 Decision (the maintainer): **Qwen3.5-4B, thinking off, on the graphics card** is the on-device model
-where the card can run it (`gpu.rs`: ≥ 5.5 GiB of its own memory), Qwen2.5-1.5B elsewhere
+where the card can run it (`ai/gpu.rs`: ≥ 5.5 GiB of its own memory), Qwen2.5-1.5B elsewhere
 (and the default an empty pick means). Same PC, same 24 scenarios × 2, the sidecar's own
 arguments (`server_args`), Chat's own timeouts; "before" = the build at `1384802` with
 `--reasoning off` passed by hand:
@@ -582,8 +582,8 @@ the hits from `executed_tools`), not mixed into Chat's own request — built 202
 ## Context length (20 Oct 2026)
 
 The on-device model's context is a setting now (`config.local_context`, the Chat model
-picker's On this PC pane and Settings → Language Models → Local; `local_llm.rs`), and the
-pickers show what each choice takes from the GGUF's own header (`gguf.rs` `estimate`). The
+picker's On this PC pane and Settings → Language Models → Local; `ai/local_llm.rs`), and the
+pickers show what each choice takes from the GGUF's own header (`ai/gguf.rs` `estimate`). The
 estimate was calibrated against llamafile's log with `--cleanup --ctx <n> --ngl 999` on the
 RTX 5070 Ti (llamafile 0.10.3, 4 slots, unified KV, flash attention on), using the installed
 models read-only:
@@ -626,7 +626,7 @@ first after loading):
 
 A longer context costs memory, not speed, until it's used: a long prompt still takes its
 prompt-processing time. What uses it: the meeting notes' final call and the Notes view's Ask
-read 2× / 4× more of the meeting raw at 16K / 32K (`local_llm::budget_factor`,
+read 2× / 4× more of the meeting raw at 16K / 32K (`local_llm::context::budget_factor`,
 `meeting_summary::FinalBudget`); the live digests and the notepad's helpers keep the 8K
 budgets.
 
@@ -702,7 +702,7 @@ A tester's chat on Qwen3.5-4B (on the card, web search on, Exa): "Can you check 
 subscriptions please, for me?" got two notes searches and "I don't see any notes"; "Can you look
 up Groc subscriptions for me, please?" searched "Grok subscriptions check billing" and explained
 how to check a bill; "…how much it costs" gave the plans in US $ with nothing saying they're in the
-UK. Settings → General → **About you** (`about_you.rs`) now tells every model where the user is
+UK. Settings → General → **About you** (`ai/about_you.rs`) now tells every model where the user is
 (Windows' region: en-GB, United Kingdom, £ GBP, metric, UK time), and the routing changed:
 price words make a question need the web, an empty notes search leads to the web, a forced
 search's query keeps to the current question (`web::fresh_query`), Exa gets `userLocation`.
@@ -1017,7 +1017,7 @@ what was measured again (run folders `<builds>/eval-runs/20261022-04*-lap1-fix-*
 
 ## Streaming answers (22 Oct 2026)
 
-Chat's answers are streamed (`stream.rs`; chat-and-assistant.md): every model call of a turn,
+Chat's answers are streamed (`chat/stream.rs`; chat-and-assistant.md): every model call of a turn,
 the notepad's Ask sheet, the Voice Assistant from its first sentence. A scenario run streams as
 the Chat view does and measures when the answer's **first words** showed (`first_words_ms` per
 turn, less the run's own pacing; "First words, streamed" in `summary.md`); `YAP_EVAL_STREAM=off`
@@ -1521,7 +1521,7 @@ rejected call, so Yap searches.
 
 ## Saved transforms (24 Oct 2026)
 
-**The question**: do Yap's five built-in transforms (`transforms.rs`: Polish, Shorter, Fix
+**The question**: do Yap's five built-in transforms (`dictation/transforms.rs`: Polish, Shorter, Fix
 grammar only, Translate to <language>, Make it a prompt) do what they say on both kinds of
 model a transform runs on — Yap's on-device 4B and a cloud model — and only that: keep names
 and numbers, never answer the text, Shorter shorter, Fix grammar only leaving correct text
@@ -1564,7 +1564,7 @@ one.
 
 ## Styles by app (24 Oct 2026)
 
-`cleanup_styles.rs` (ai-models.md): a tone per kind of app, as one line just before the
+`ai/cleanup_styles.rs` (ai-models.md): a tone per kind of app, as one line just before the
 transcript. `--styles` over `evals/cleanup/styles.json`: 22 cases — emails turned formal (and
 one kept casual), chats kept casual or made very casual, documents formal, AI prompts kept
 literal (no "please", nothing rephrased, a question not answered), terminal commands

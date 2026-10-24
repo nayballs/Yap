@@ -175,11 +175,11 @@ What we fixed on the way:
 ## What these numbers changed
 
 - **Speech starts on the processor without a real graphics card**
-  (`hardware.rs`). Before Yap had timed a PC, it put the speech model on
+  (`ai/hardware.rs`). Before Yap had timed a PC, it put the speech model on
   the graphics card, and DirectML on a PC with no driver or only integrated
   graphics took 1–4 s a dictation for the first minute or more. A graphics
   card with at least 3 GB of its own still starts on the card.
-- **Hybrid laptops use their graphics card** (`gpu.rs`). DirectML's default
+- **Hybrid laptops use their graphics card** (`ai/gpu.rs`). DirectML's default
   device is the first adapter Windows lists, which on a laptop with both is
   usually the integrated GPU. Yap now points DirectML at the adapter with
   the most memory of its own. We couldn't measure this one: there's no
@@ -189,7 +189,7 @@ What we fixed on the way:
   0.16 s), the 1.5B on a processor with 8 or more threads (about 1.1 s),
   and a cloud provider first on a smaller PC (about 0.8 s, against 1.6 s
   or more for the 1.5B).
-- **Moonshine Base starts on the processor** (`stt.rs`): on DirectML it got
+- **Moonshine Base starts on the processor** (`dictation/stt.rs`): on DirectML it got
   every word wrong. Yap's own device check would have moved it there a
   minute in; now its first dictations are right too.
 - **Home's data in one call**, asked for first: Home shows 132 → 73 ms
@@ -283,7 +283,7 @@ sentences.
   each scenario. *Load* is the model loading. *First* is the first
   dictation after loading, about 11 s long, when DirectML and Vulkan build
   their graphs. Then 3 warm rounds of dictations of about 3, 11 and 30 s
-  (the clip Yap uses to choose a model's device, `stt_speed.rs`, cut at
+  (the clip Yap uses to choose a model's device, `dictation/stt_speed.rs`, cut at
   pauses). Every run is a slightly different length, as real dictations
   are. The table shows each length's **median**, the time from the end of
   your dictation to its text. **WER** is the share of words wrong against

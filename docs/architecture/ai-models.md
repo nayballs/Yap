@@ -6,7 +6,7 @@ The language-model side: the OpenAI-compatible client and its prompts, the on-de
 
 ## Modules
 
-- **`about_you.rs`** — **what every model is told about the person**
+- **`ai/about_you.rs`** — **what every model is told about the person**
   (2026-10-21, Settings → General → About you; a tester: "It keeps finding
   things in dollars… a better way to give the model better context on the
   user"). **One Region** (2026-10-22, the maintainer: "all of that should be
@@ -36,7 +36,7 @@ The language-model side: the OpenAI-compatible client and its prompts, the on-de
   config fields still load and go on the next save. **The block**
   (`prompt_block(profile, now)`, pure, unit-tested), last in the system
   prompt of Chat, the Voice Assistant, the Meetings view's and the Notes
-  view's Ask bars (`commands::chat_turn`, `small_model_answer`'s web
+  view's Ask bars (`turn::chat_turn`, `small_model_answer`'s web
   pipeline, `note_ask`), local and cloud: "About the user: they're in the
   United Kingdom (British English); it's Wednesday 21 October 2026, 21:40 UK
   time (UTC+01:00). Give times in UK time and metric units, but miles for
@@ -84,7 +84,7 @@ The language-model side: the OpenAI-compatible client and its prompts, the on-de
   in, unset = nothing (the eval's `--locale`). Kept in config.json, sent
   only to the model the person uses; accounts don't sync it (they could,
   later: accounts.md).
-- **`llm.rs`** — the AI cleanup client (OpenAI-compatible). Frames the transcript as
+- **`ai/llm.rs`** — the AI cleanup client (OpenAI-compatible). Frames the transcript as
   data (delimiters + one-shot) so small models *clean* it instead of *answering* it.
   **The dictation's two messages for a hybrid model** (`cleanup_messages`,
   `split_dictation`, `splits_dictation`; 2026-10-22): the restated
@@ -119,7 +119,7 @@ The language-model side: the OpenAI-compatible client and its prompts, the on-de
   custom dictionary. Records token/request usage (best-effort). Also carries
   `EDIT_BASE_PROMPT` (edit/rewrite mode's guardrails),
   `TRANSFORM_BASE_PROMPT` + `transform_messages` / `transform` (**saved
-  transforms**, `transforms.rs`, 2026-10-24: the text between `<text>`
+  transforms**, `dictation/transforms.rs`, 2026-10-24: the text between `<text>`
   tags is something to transform, never a message to answer or carry out;
   keep names, numbers, dates, amounts, emails, links and code as written,
   the language and point of view, the layout; output only the result — the
@@ -168,7 +168,7 @@ The language-model side: the OpenAI-compatible client and its prompts, the on-de
   again without one; a 400 about reasoning on a call with tools (OpenAI's
   GPT-6 take tools on Chat Completions only with reasoning off) again with
   `reasoning_effort: "none"`, once each.
-- **`cleanup_styles.rs`** — **styles by app** (2026-10-24; Wispr Flow's
+- **`ai/cleanup_styles.rs`** — **styles by app** (2026-10-24; Wispr Flow's
   styles per kind of app and OpenWhispr's Tone & Style of 21 Oct, by
   behaviour; the market analysis' #5): cleanup that sounds right where you
   are with no set-up. **Kinds** (`Category`): Email, Work chat, Personal
@@ -177,7 +177,7 @@ The language-model side: the OpenAI-compatible client and its prompts, the on-de
   Slack, Teams, WhatsApp, Discord, Word, Notion, Obsidian, ChatGPT, Cursor,
   VS Code… — and the site a browser tab's title ends with: Gmail, Outlook,
   Google Docs, Claude, Gemini…; Edge's profile segment allowed for; a chat
-  page `app_kind` found anywhere in the title), plus what `app_kind.rs`
+  page `app_kind` found anywhere in the title), plus what `pasting/app_kind.rs`
   reads of a terminal (a shell → Terminal, a coding CLI → AI prompts).
   **Tones** (`Tone`; the kind's first): Email Formal / Casual / Natural,
   chats Formal / Casual / Very casual (Casual), Documents Formal / Casual /
@@ -232,14 +232,14 @@ The language-model side: the OpenAI-compatible client and its prompts, the on-de
   again. A test run offers it only with `YAP_E2E_CLEANUP_OFFER`.
   `cleanup_styles_catalog` gives Settings the kinds, tones and built-in apps
   (with the names they go by). Unit-tested.
-- **`local_llm.rs`** — the on-device AI cleanup sidecar: runs **Mozilla llamafile**
+- **`ai/local_llm.rs`** — the on-device AI cleanup sidecar: runs **Mozilla llamafile**
   (llama.cpp, single-file OpenAI-compatible server) as a hidden child process on a
   free localhost port, serving **Qwen2.5-1.5B-Instruct** (Q4_K_M GGUF) when no
   other is picked (`pp_local_model` empty = `MODEL_FILENAME`) — or a curated
   one (`CURATED_MODELS`, incl. **Qwen3.5-4B**, bartowski's Q4_K_M, SHA-pinned)
   or **any user GGUF** dropped into `<data>/llm/` and picked via `pp_local_model`
   (Settings shows a model picker + "Open models folder"; switching restarts the
-  sidecar). **Recommended for this PC** (`recommended_id`, from `gpu.rs`):
+  sidecar). **Recommended for this PC** (`recommended_id`, from `ai/gpu.rs`):
   Qwen3.5-4B where the graphics card can run it (2026-10-18, the model
   evaluations: 94–98% of the scenarios at ~1.2 s a turn on an RTX 5070 Ti, with
   Chat's tools; the 1.5B 79–81% without them), else the 1.5B; existing installs
@@ -335,7 +335,7 @@ The language-model side: the OpenAI-compatible client and its prompts, the on-de
   "waiting" | "", mtp}`.
   **The warm-up** (`warm_up`): right after the sidecar is healthy, one
   cleanup-sized request — the cleanup's own messages as Settings has them,
-  a made-up dictation, ≤ 8 tokens — in the background, not through `llm.rs`
+  a made-up dictation, ≤ 8 tokens — in the background, not through `ai/llm.rs`
   and not counted; the first real request (`request_starting`) cancels it.
   It leaves the cleanup's prompt in a slot: the first dictation after
   loading 599 → ~275 ms on the 4B. **Requests in flight**
@@ -343,7 +343,7 @@ The language-model side: the OpenAI-compatible client and its prompts, the on-de
   sidecar's URL): counted while they run — the context restart now waits
   for a Chat answer or digest too (`sidecar_busy`), not only a dictation.
   **Runs of requests** (`hold`, a guard for the whole run when the endpoint
-  is the sidecar): a Chat turn (`commands::chat_turn` — the Voice
+  is the sidecar): a Chat turn (`turn::chat_turn` — the Voice
   Assistant's too — between its tool steps, web searches and page reads),
   the Notes Ask bar, an action plan (`run_enhance`: digests to the final
   call), `meeting_summary::prepare_final` and each live digest, and a
@@ -367,7 +367,7 @@ The language-model side: the OpenAI-compatible client and its prompts, the on-de
   dictation cleanup and the meeting notes share it. `effective_context`
   clamps it to `MIN_CONTEXT` 2,048..`MAX_CONTEXT` 1M and to what the model
   was trained for (`trained_context`: its GGUF header's `context_length`,
-  `gguf.rs`, else `CuratedLlm::max_context`; a stale file falls back);
+  `ai/gguf.rs`, else `CuratedLlm::max_context`; a stale file falls back);
   `context_for(cfg)` is what `start()` passes as `-c`. `context_choices`:
   4K/8K/16K/32K/64K/128K/256K up to the model's maximum (and that maximum
   when it falls between; an unknown one stops at 32K). `context_view(cfg)`
@@ -379,7 +379,7 @@ The language-model side: the OpenAI-compatible client and its prompts, the on-de
   which on WDDM ignores every other process), `usedMib` what the running
   server's log says (`log_facts`: the non-host `… buffer size` lines,
   `n_ctx`). **`local_llm_set_context {tokens}`** (the pickers): saved
-  through `commands::change_config` (in one step, applied as a Settings save; 0 for the default), `yap-local-context-changed
+  through `settings::change_config` (in one step, applied as a Settings save; 0 for the default), `yap-local-context-changed
   {localContext}` (Settings' copy adopts it, or its wholesale auto-save
   would put the old one back), and a running sidecar on another context
   is restarted by **`restart_when_idle`**: never while a dictation records
@@ -392,8 +392,8 @@ The language-model side: the OpenAI-compatible client and its prompts, the on-de
   it up instead of spawning another llamafile). `budget_factor(context)` /
   `budget_factor_for(provider, base_url)`: whole 8K multiples, 1–4, only
   when the call really goes to the running sidecar — what the meeting
-  notes' final call and the Notes view's Ask grow by (`meeting_summary.rs`
-  `FinalBudget`, `commands::note_ask`). Debug-only
+  notes' final call and the Notes view's Ask grow by (`meetings/meeting_summary.rs`
+  `FinalBudget`, `notes::commands::note_ask`). Debug-only
   `e2e_local_llm_serving {…, ctx, usedMib}` (the stand-in "restarts" on a
   change, `e2e_local_llm_restarts`) and `e2e_local_llm_busy {busy}` (a
   dictation as the guard sees one, no mic). **Model id** = the
@@ -411,15 +411,15 @@ The language-model side: the OpenAI-compatible client and its prompts, the on-de
   draws in that model's row; a test run downloads only from 127.0.0.1 — the
   debug-only `YAP_LLM_SOURCES` stand-ins, `{"runtime"|"<curated id>": {url,
   sha256}}` — and refuses anything else), process lifecycle (spawn/health-wait/kill + orphan cleanup at
-  startup — only sidecars whose parent Yap is gone, via `procs.rs`, so a dev build
+  startup — only sidecars whose parent Yap is gone, via `shell/procs.rs`, so a dev build
   never kills the installed app's; and **the model never outlives Yap**:
   `procs::end_with_yap` puts the sidecar — like the speaker engine
   (`yap.exe diarize`) and eSpeak — in a kill-on-close job object only Yap
   holds, so Windows ends it however Yap ends: Quit, a crash, End task, the
   updater's exit; never used for apps Yap opens, a link's browser or an
-  installer), and `effective_endpoint()` which routes `llm.rs` to the sidecar when
+  installer), and `effective_endpoint()` which routes `ai/llm.rs` to the sidecar when
   provider = "ondevice" (falls back to the configured endpoint if it's down).
-- **`gguf.rs`** — a GGUF model's header, **read-only** (2026-10-20): magic,
+- **`ai/gguf.rs`** — a GGUF model's header, **read-only** (2026-10-20): magic,
   version 2/3, the metadata (a few scalars kept, everything else skipped by
   seeking — the tokenizer's ~250 k strings too: ~20 ms for the 4B's 10 MB
   header in a debug build) and the tensor list (where the data starts, the
@@ -452,7 +452,7 @@ The language-model side: the OpenAI-compatible client and its prompts, the on-de
   aside. Unit-tested on synthetic headers (`tests::Writer`, the models' real
   shapes); `#[ignore]`d `this_pcs_models` reads `%APPDATA%\yap\llm`
   read-only (`YAP_GGUF_DIR` for another folder).
-- **`gpu.rs`** — the graphics card, for the on-device model recommended for
+- **`ai/gpu.rs`** — the graphics card, for the on-device model recommended for
   this PC: DXGI (`CreateDXGIFactory1` → `EnumAdapters1` → `GetDesc1`, software
   adapters and Microsoft's Basic Render Driver left out), the card with the most
   memory of its own, cached; **`can_run_big_model`** = ≥ `BIG_MODEL_VRAM_MIB`
@@ -472,7 +472,7 @@ The language-model side: the OpenAI-compatible client and its prompts, the on-de
   its integrated GPU first and DirectML's default device is DXGI's first, so
   Parakeet ran on the integrated GPU, not the card. lib.rs sets it at start
   (`stt::set_gpu_adapter`; never in a test run).
-- **`hardware.rs`** — **picks by hardware** (2026-10-24), calibrated by
+- **`ai/hardware.rs`** — **picks by hardware** (2026-10-24), calibrated by
   `yap.exe bench` ([`docs/benchmarks.md`](../benchmarks.md)): `Machine`
   (the best card, logical processors, memory; test mode: `YAP_E2E_GPU`,
   `YAP_E2E_CPU_THREADS`, `YAP_E2E_RAM_MIB` stand in), `tier` (pure): **card**
@@ -494,8 +494,8 @@ The language-model side: the OpenAI-compatible client and its prompts, the on-de
   ("Quicker on this PC") on a small PC, picks it, and says what each adds to
   a dictation (`cleanup-times`). Unit-tested; e2e
   `onboarding-weak-pc.spec.js`.
-- **`ai_model.rs`** — which model a scope's next call goes to, resolved the
-  calls' way (`Scope::Chat` → `commands::resolve_chat_endpoint`;
+- **`ai/ai_model.rs`** — which model a scope's next call goes to, resolved the
+  calls' way (`Scope::Chat` → `turn::resolve_chat_endpoint`;
   `Scope::Notes` → `meeting_summary::resolve_endpoint`): `ai_model_status
   {scope}` → `{ready, error, model, host, tools (supports_tools), fromScope,
   provider (the one the scope is set to, ready or not), keyed, maskedKeys
@@ -512,12 +512,12 @@ The language-model side: the OpenAI-compatible client and its prompts, the on-de
   one gets its standard URL + the shared key; `file` picks one of the
   on-device GGUFs → `pp_local_model` (`set_local_model`, "" = the bundled
   1.5B) — the one sidecar serves it for every feature, so one serving
-  another GGUF stops and starts again on it), saved through `commands::change_config` (in one step, applied as a Settings save),
+  another GGUF stops and starts again on it), saved through `settings::change_config` (in one step, applied as a Settings save),
   then `yap-chat-model-changed {scope, ppLocalModel?}` (Settings adopts
   both). `chat_provider_key {provider, key}` = the picker's "Connect
   Claude": `set_provider_key` saves it where Settings does (`pp_api_keys`,
   cleanup's `pp_api_key` when cleanup is on it, the Chat scope's key when
-  Chat is), through `commands::change_config`, whose `model_catalog::on_config_saved`
+  Chat is), through `settings::change_config`, whose `model_catalog::on_config_saved`
   checks that provider's list at once; the page tells Settings' copy with
   the window event `yap-provider-key-saved` (not broadcast to every
   window). `wake_on_device` (in `chat_send` and
@@ -525,7 +525,7 @@ The language-model side: the OpenAI-compatible client and its prompts, the on-de
   (`local_llm::ensure_started`) or says it isn't installed, never a silent
   fallback to the endpoint underneath. A config save emits
   `yap-config-saved`, which the chip re-reads on. Unit-tested.
-- **`model_catalog.rs`** — **the AI providers' live model lists**
+- **`ai/model_catalog.rs`** — **the AI providers' live model lists**
   (2026-10-18), so a model Google or Groq releases tomorrow shows up in
   Yap's pickers without a Yap update and a retired one stops being offered.
   Asks **the provider itself, with the key already saved** (`key_for`: the
@@ -590,14 +590,14 @@ The language-model side: the OpenAI-compatible client and its prompts, the on-de
   server only on 127.0.0.1. `#[ignore]`d `real_saved_lists`
   (`YAP_MODEL_LISTS=<dir>`) runs the parsers over saved real lists, never
   fetching.
-- **`usage.rs`** — daily Groq usage tracker (tokens summed locally + requests from
+- **`ai/usage.rs`** — daily Groq usage tracker (tokens summed locally + requests from
   `x-ratelimit-*` headers), persisted to `groq_usage.json`, auto-resets at midnight
   UTC; powers the `get_groq_usage` command + `groq-usage` event.
-- **`eval.rs`** (+ `eval/`) — **model evaluations**, `yap.exe eval …` (main.rs;
+- **`ai/eval.rs`** (+ `ai/eval/`) — **model evaluations**, `yap.exe eval …` (main.rs;
   debug builds only): real models (Groq/OpenAI/Anthropic/OpenRouter/Gemini/
   custom, or a GGUF on Yap's own llamafile started for the run — the installed
-  runtime and model read-only, else downloaded via `local_llm::download_verified`)
-  through **`commands::chat_turn`** itself (fast path, tool loop, plain chat +
+  runtime and model read-only, else downloaded via `local_llm::models::download_verified`)
+  through **`turn::chat_turn`** itself (fast path, tool loop, plain chat +
   RAG) over `evals/scenarios/*.json` (seed notes/folders, stand-in apps from
   `evals/apps/` or this PC's Start menu read-only, multi-turn user messages,
   checks on tool calls + arguments, apps "opened", notes afterwards, answer
@@ -609,7 +609,7 @@ The language-model side: the OpenAI-compatible client and its prompts, the on-de
   (`eval::intercept_tool`); web scenarios (`needs_web` / `web`) search live
   (`eval::web_live` lets `web::Endpoints::current` use the real services in
   test mode: the run's Exa/Tavily key, else the keyless wikis) or against a
-  stand-in server (`eval/standin.rs`, through `YAP_EXA_URL` /
+  stand-in server (`ai/eval/standin.rs`, through `YAP_EXA_URL` /
   `YAP_TAVILY_URL` / `YAP_WEB_STANDIN`). Logs per run in `<out>/<stamp>-<label>/`:
   `transcript.jsonl` (every request body incl. tool schemas, every response,
   429s/waits, tool calls + results, keys redacted), `summary.md`/`.json`.
@@ -618,7 +618,7 @@ The language-model side: the OpenAI-compatible client and its prompts, the on-de
   llamafile runs with the sidecar's own `local_llm::server_args` (thinking off,
   caches capped; `--llamafile-arg` after them overrides) and sends its GGUF's
   name as the model id, as the sidecar does; a voice turn is the Voice
-  Assistant's (scope "assistant"). **`--cleanup`** (`eval/cleanup.rs`)
+  Assistant's (scope "assistant"). **`--cleanup`** (`ai/eval/cleanup.rs`)
   times `llm::cleanup` itself over `evals/cleanup/dictations.json` — back to
   back, after a Chat turn, after a long one — with llama.cpp's prompt tokens
   processed, and keeps every output (`cleanup.md`), then the `spelling`
@@ -641,7 +641,7 @@ The language-model side: the OpenAI-compatible client and its prompts, the on-de
   its marker. `--clock-step <min>` moves the clock Chat tells the model on
   by that much each turn (`eval::now`: a real chat's turns are minutes
   apart, so the time in the prompt changes). **`--bench`**
-  (`eval/serving.rs`): `stream` (time to the first token, streamed vs
+  (`ai/eval/serving.rs`): `stream` (time to the first token, streamed vs
   not, and streamed tool calls; scenario runs stream as Chat does and
   measure the first words, `YAP_EVAL_STREAM=off` whole), `layout` (a Chat turn's prompt re-read
   with the time + notes in the system prompt vs the last user message),
@@ -649,7 +649,7 @@ The language-model side: the OpenAI-compatible client and its prompts, the on-de
   embedding model's speed and recall vs Chat's keyword search);
   `--temperature` / `--set` lay fields over every request
   (`eval::adjust_body`, in `llm::post_chat_request`). The hooks in
-  `llm.rs` (`eval::Call`, `eval::adjust_body`), `tools.rs`, `config.rs`,
+  `ai/llm.rs` (`eval::Call`, `eval::adjust_body`), `chat/tools.rs`, `config.rs`,
   `notes.rs` are no-ops outside a run. See
   [`docs/model-evals.md`](../model-evals.md).
 

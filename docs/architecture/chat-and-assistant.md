@@ -6,12 +6,12 @@ The AI Chat surface (conversations, the tool-calling loop and its note tools) an
 
 ## Modules
 
-- **`chats.rs`** — the AI Chat surface's conversation store (`chats.json`): a
+- **`chat/chats.rs`** — the AI Chat surface's conversation store (`chats.json`): a
   `Conversation` (title, messages, timestamps) with `list`/`get`/`create`/
   `append`/`delete`/`rename` (`chat_rename`: one trimmed line ≤ 80 chars,
   `updated_ts` untouched so the list order stays; unit tests use an
-  in-memory store per thread, never `chats.json`); `chat_send` (commands.rs)
-  creates a conversation on the first message using a first-50-chars title
+  in-memory store per thread, never `chats.json`); `chat_send` (`chat/commands.rs`; the turn itself is
+  `chat/turn.rs`'s `chat_turn`) creates a conversation on the first message using a first-50-chars title
   rule. An answer keeps its tool
   chips (`ChatMessage.tools`, only written when there are some), so a
   conversation opened later still shows what the AI looked up and changed,
@@ -123,13 +123,13 @@ The AI Chat surface (conversations, the tool-calling loop and its note tools) an
   **The history window** moves three turns at a time
   (`chats::history_start`: 14–19 messages, the Voice Assistant's 5–8), not
   every turn, so a long chat keeps its prompt's start.
-- **`tools.rs`** — the AI Chat tool-calling agent loop: six tools ported
+- **`chat/tools.rs`** — the AI Chat tool-calling agent loop: six tools ported
   near-verbatim from OpenWhispr's `services/tools/*` (`search_notes`,
   `get_note`, `create_note`, `update_note`, `list_folders`,
   `copy_to_clipboard` — executed locally over `notes.rs`/`arboard`) and
   three of Yap's own for **changing part of a note safely** (after the note
   tools of Wispr Flow's live Ask — behaviour only; the pure part is
-  **`note_text.rs`**): `search_in_note(note_id, query, field?)` (the lines a
+  **`chat/note_text.rs`**): `search_in_note(note_id, query, field?)` (the lines a
   phrase is on, numbered `12| …`, the note's own text, the lines around the
   first 5 hits; forgiving — case, whitespace runs, curly quotes, dashes; in
   content, the `enhanced` summary and the transcript (talk only, `[m:ss]
@@ -239,7 +239,7 @@ The AI Chat surface (conversations, the tool-calling loop and its note tools) an
   model read it all again); the person's next message is a clean turn.
   Unit-tested through the real loop against a local fake model + Exa
   (`a_web_page_can_never_make_the_chat_act`).
-- **`stream.rs`** — **streaming answers** (2026-10-22): every model call
+- **`chat/stream.rs`** — **streaming answers** (2026-10-22): every model call
   of a Chat turn — each step of the tool loop, a small model's plain
   answer, the loop's last no-tools call — the notepad's Ask sheet and the
   Voice Assistant show the answer as it's written. On the on-device
@@ -286,7 +286,7 @@ The AI Chat surface (conversations, the tool-calling loop and its note tools) an
   words are never the answer, and a long one — "I can't provide weather
   information for Kellbrook, as I don't have access to real-time weather
   data…" — passed `releases` and the Voice Assistant said it before any
-  search (`tools.rs` above). Reasoning blocks
+  search (`chat/tools.rs` above). Reasoning blocks
   never show (`without_thinking`, even a half-written `<thi`, when the
   scope hides thinking); gpt-oss's `【1】` shows as `[1]`; the text goes out
   at most every 50 ms (`MIN_GAP`), whole each time. **The events** (the
@@ -337,13 +337,13 @@ The AI Chat surface (conversations, the tool-calling loop and its note tools) an
   (`local_llm::request_starting` for each request, `hold` for the run)
   covers a stream to its last chunk. Unit-tested (the wire, every split
   point; a step's release, retraction and restart; the stop) and through
-  the real tool loop against a local SSE stand-in (`tools.rs` tests: a
+  the real tool loop against a local SSE stand-in (`chat/tools.rs` tests: a
   preamble never shown, fragments reassembled, a broken stream asked again
   whole then not streamed again, a refused `stream`/`stream_options`, cut
   arguments and Groq's mid-stream refusal asked again). Model evaluations
   stream like the Chat view (`YAP_EVAL_STREAM=off`: whole) and measure the
   first words (`first_words_ms`).
-- **`assistant.rs`** — the **Voice Assistant** (2026-10-18; Settings →
+- **`chat/assistant.rs`** — the **Voice Assistant** (2026-10-18; Settings →
   Voice Assistant): ask Yap's Chat out loud from any app with its own
   shortcut (`assistant_hotkey`, unbound by default) and hear the answer;
   it never takes the focus or types. Not **Commands** (the agent's name in a
@@ -367,7 +367,7 @@ The AI Chat surface (conversations, the tool-calling loop and its note tools) an
   you mean …?" — needs no model (`apps::plan_for`, below: opened,
   "Opening Microsoft Teams." said); the turn goes through `chat_turn` with
   scope "assistant" (8 history messages, not 19); otherwise no Chat model
-  (`commands::resolve_chat_endpoint` errs) → the `assistantNoModel` alert
+  (`turn::resolve_chat_endpoint` errs) → the `assistantNoModel` alert
   with **Open settings** (`alert::OPEN_AI_SETTINGS` → Language Models →
   Chat & Voice Assistant; a model that fails → `assistantFailed`, the
   reason + "Your question is in Chat."); else **`choose_conversation(viewing,
@@ -375,7 +375,7 @@ The AI Chat surface (conversations, the tool-calling loop and its note tools) an
   view (`chat_view_state {open, conversationId, newChat}`: ChatView
   reports it), a new one if "New chat" was clicked there, else the last
   updated if under `RECENT_SECS` (30 min) — so pressing again asks a
-  follow-up — else a new one; then `commands::chat_turn` (the Chat view's
+  follow-up — else a new one; then `turn::chat_turn` (the Chat view's
   own turn: RAG, tools, `voice: true`), `yap-assistant-turn {phase:
   asked|answered|failed|superseded|open, conversationId, userMessageId,
   show}` for the main window (`show` = the window was in front:
@@ -430,8 +430,8 @@ The AI Chat surface (conversations, the tool-calling loop and its note tools) an
   Debug-only `e2e_assistant_ask {text, listenMs}` (`Robot::ask_assistant`:
   the press's own steps — barge-in, the target, "recording" for
   `listenMs` — with `text` as the transcript). **A pause ends the
-  question** (`pause.rs`, below; 2026-10-23): no second press needed.
-- **`pause.rs`** — **"Stop listening when I pause"** (Settings → Voice
+  question** (`dictation/pause.rs`, below; 2026-10-23): no second press needed.
+- **`dictation/pause.rs`** — **"Stop listening when I pause"** (Settings → Voice
   Assistant, `assistant_stop_on_pause`, on; 2026-10-23, after a log where
   the maintainer asked a question in 2.5 s, waited 6 s in silence, and his
   grumble became part of the question). Once you've said something to the
@@ -440,7 +440,7 @@ The AI Chat surface (conversations, the tool-calling loop and its note tools) an
   **Never before you've spoken**, never under a held push-to-talk key
   (letting go ends it): toggle mode and the double-tap lock only
   (`gesture::hands_free`). Dictation never ends by itself. Pure, timed in
-  audio (samples), never on the clock, unit-tested like `gesture.rs`:
+  audio (samples), never on the clock, unit-tested like `dictation/gesture.rs`:
   `Pause::new(at)` (the buffer's length: the pre-roll), `speak_now` (the
   start chime: `fire_pending_start`), `audio(samples)` (`take_audio`),
   `words(covered, text)` (each live-preview tick, `stream_partials`), and
@@ -454,7 +454,7 @@ The AI Chat surface (conversations, the tool-calling loop and its note tools) an
   nothing; a sound counts from `ONSET_MS` (60: clicks and keys don't);
   nothing counts for `SETTLE_MS` (400) after "speak now" (the chime); a
   pause can end it once `HEARD_MS` (300) of speech was heard. **Checked by
-  the live preview's words** while it runs (`partials.rs`, on by default):
+  the live preview's words** while it runs (`dictation/partials.rs`, on by default):
   no words yet ("", `[BLANK_AUDIO]`, `(music)` — `word_count`) → a pause
   ends nothing (a cough, a door); more words than ever in a stretch the
   level called quiet = a voice it missed, the pause counts from there; and
@@ -485,7 +485,7 @@ The AI Chat surface (conversations, the tool-calling loop and its note tools) an
   **The bar**: an amber hairline at the capsule's foot runs down over the
   last second (`.pauseline`, `dictation.pauseMs`; it moves with Motion
   reduced: it says how long is left). Debug-only `e2e_assistant_audio
-  {parts, press, noiseDb}` (`e2e.rs` → `Robot::ask_assistant_audio`):
+  {parts, press, noiseDb}` (`shell/e2e.rs` → `Robot::ask_assistant_audio`):
   tones, quiet and WAVs over a room's hiss played in the mic's place, the
   shortcut pressed through the real key path (`toggle | hold |
   handsFree`) → `{endedByItself, listenedMs}`.
@@ -500,9 +500,9 @@ The AI Chat surface (conversations, the tool-calling loop and its note tools) an
   ⋯ menu has Select all and "Delete all chats…", every delete asked first;
   `chat_delete_many` = one write, `chats::delete_many`) +
   thread; `chat_send` answers via the Chat scope with **eager keyword-RAG**
-  over the notes library (top-5 `<note>` snippets; `chats.rs` persists
+  over the notes library (top-5 `<note>` snippets; `chat/chats.rs` persists
   conversations to `chats.json`) **plus the tool-calling agent loop**
-  (`tools.rs`: search_notes/get_note/create_note/update_note/list_folders/
+  (`chat/tools.rs`: search_notes/get_note/create_note/update_note/list_folders/
   copy_to_clipboard, plus search_in_note/read_note/edit_note for changing
   part of a note, executed locally, ≤20-step loop over the OpenAI tool
   protocol, gated to cloud or ≥4B local models — smaller models fall back to
@@ -554,7 +554,7 @@ The AI Chat surface (conversations, the tool-calling loop and its note tools) an
   "Add key" until then (a click on one goes to the key field); once saved
   its live list is fetched at once and its models are pickable. **On this
   PC** ("Private: nothing leaves this PC" + where it runs: "Runs on your
-  graphics card (NVIDIA …)" from `gpu.rs` / the sidecar's placement, or
+  graphics card (NVIDIA …)" from `ai/gpu.rs` / the sidecar's placement, or
   the processor), then the on-device model's **context**
   (`LocalContext.svelte` `compact`, shared with Settings; words in
   `localContext.js`): "Context [8K tokens · ≈ 3.7 GB ▾]" — every choice up
@@ -592,7 +592,7 @@ The AI Chat surface (conversations, the tool-calling loop and its note tools) an
   Language Models keeps its own pickers. Each answer
   shows its model quietly under it, as do the Notes view's Ask bar and the
   notepad's Ask sheet (`nextModel(scope)` fetched beside the call; none for
-  Yap's own "Nothing new" / "too little"). **Spoken replies** (`tts.rs`):
+  Yap's own "Nothing new" / "too little"). **Spoken replies** (`voice/tts.rs`):
   **Voice replies** (🔊 / 🔇 pill beside the model chip, `aria-pressed`) is
   Settings' "Speak replies" (`voice_replies_set`; Settings adopts
   `yap-voice-replies`, the toggle re-reads on `yap-config-saved`); every
@@ -604,7 +604,7 @@ The AI Chat surface (conversations, the tool-calling loop and its note tools) an
   `notepad:`). ▶ is **Read aloud** (`read_aloud_text`, since 2026-10-22): the
   answer read with the reading card on the Yap bar, its words lit up, ⏸ ⏭
   and the speed there, as any selection is ([spoken-replies.md](./spoken-replies.md),
-  `read_aloud.rs`); an answer read out by itself (Voice replies) is the
+  `voice/read_aloud.rs`); an answer read out by itself (Voice replies) is the
   voice alone (`speakReply` → `tts_speak`), no card. With replies on, chat_send's `speak` reads an answer out by
   itself. The **mic** is `chat_dictate`, and the box reports its focus
   (`chat_input_focus`), so a question dictated into it arrives as
@@ -612,7 +612,7 @@ The AI Chat surface (conversations, the tool-calling loop and its note tools) an
   once when `send` says so; such questions are sent with `voice: true` (a
   small mic on the bubble). Esc, leaving Chat, another conversation, the
   next question and any dictation starting stop the voice. **The Voice
-  Assistant** (`assistant.rs`): the view reports what it shows
+  Assistant** (`chat/assistant.rs`): the view reports what it shows
   (`chat_view_state`: the conversation, or "New chat" clicked) and follows
   `yap-assistant-turn` live — it switches to the question's conversation,
   the question with its mic, "Thinking…" (`assistantPending`), the answer
@@ -620,7 +620,7 @@ The AI Chat surface (conversations, the tool-calling loop and its note tools) an
   window is in front (`show`) or "Open in Chat" (`chatRequest {assistant}`).
   An empty chat says "Or press F8 in any app to ask out loud…", or offers
   **Set an assistant shortcut** (→ Settings `voice#assistant-shortcut`).
-  **Streamed answers** (`stream.rs`, `streaming.js`; 2026-10-22): `send`
+  **Streamed answers** (`chat/stream.rs`, `streaming.js`; 2026-10-22): `send`
   calls `chat_send` through `streamCall` (a Tauri `Channel` as `onStream`,
   a `turnId`); the answer's bubble appears with its first text or tool
   call ("Thinking…" until then) and **grows in place** — markdown rendered

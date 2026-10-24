@@ -39,7 +39,7 @@ Connecting Google Calendar or an iCal link, sync, parsing, the reminder card, pr
   until 5 min after the start, one at a time; while another meeting records,
   a **switch** card (ends it via `meeting_end::end`, then starts the next).
   It goes on screen through **`present_card`/`withdraw_card` only**, in
-  **one place** (`notice.rs`): the in-app toast while the main window is
+  **one place** (`notices/notice.rs`): the in-app toast while the main window is
   focused (the snapshot's `card` with `inApp`), else the **Yap bar**
   (`bar::show_card`, id "calendar": a call-style card
   — the call app's mark or a calendar, the meeting over "● In 1 min · with
@@ -49,7 +49,7 @@ Connecting Google Calendar or an iCal link, sync, parsing, the reminder card, pr
   the "calendar" tag; a card follows you onto the bar when the window loses
   focus, back into the window when it gets it (`MoveIn`,
   `on_main_window_focused`), and off a bar that goes away. **Into notes**:
-  `on_meeting_started` (from `commands::meeting_start`, every route) ties the
+  `on_meeting_started` (from `meetings::commands::meeting_start`, every route) ties the
   note to the meeting on now (service of the live call first, nearest start;
   from 10 min before) — title over a placeholder (`is_placeholder_title` /
   `title_open_to_ai`; then a real title), attendees, the cleaned invite

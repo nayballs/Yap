@@ -23,8 +23,8 @@ The full stack list, the app's entry and plumbing (`lib.rs`, the tray, context m
   onnx-community's fp32 ONNX on Yap's own `ort`, CPU, `engines` builds;
   misaki's lexicons + the eSpeak NG CLI, a separate program, for text →
   phonemes) or WinRT `Windows.Media.SpeechSynthesis` (Windows' own voices,
-  `windows` crate) → PCM → rodio, sentence by sentence (`tts.rs`,
-  `tts/`).
+  `windows` crate) → PCM → rodio, sentence by sentence (`voice/tts.rs`,
+  `voice/tts/`).
 - **STT:** [`transcribe-rs`](https://crates.io/crates/transcribe-rs) — one crate that
   wraps **whisper.cpp** (Vulkan) *and* a family of **ONNX** models (Parakeet, Moonshine,
   SenseVoice, GigaAM, Canary, Cohere) via `ort`/ONNX Runtime (DirectML). Behind the
@@ -33,7 +33,7 @@ The full stack list, the app's entry and plumbing (`lib.rs`, the tray, context m
   OpenRouter, or local Ollama/LM Studio). `src/llm.rs`.
 - **Text injection:** the Win32 clipboard (`windows` crate: private formats + a
   verified write) + Win32 `SendInput` (paste / Enter); UI Automation reads the text
-  around the cursor (`selection.rs`). `arboard` remains for the chat's copy tool.
+  around the cursor (`pasting/selection.rs`). `arboard` remains for the chat's copy tool.
 - **Model download:** `reqwest` streaming + `sha2` verify + `flate2`/`tar` extract.
 - **Updates/install:** `tauri-plugin-updater` (GitHub Releases), driven Rust-side by
   `updates.rs` (background checks every ~4 h + background download, install on
@@ -43,14 +43,14 @@ The full stack list, the app's entry and plumbing (`lib.rs`, the tray, context m
   maximized state across launches (overlay, onboarding denylisted; VISIBLE flag excluded
   so the window never un-hides on start-hidden launches).
 - **External links:** `tauri-plugin-opener` (opens URLs in the default browser). Every
-  link in Yap's pages goes through `commands::open_external` (`lib/externalLinks.js`):
+  link in Yap's pages goes through `shell::commands::open_external` (`lib/externalLinks.js`):
   web and mail links only, and a test run records the link (`e2e_opened_urls`) instead
   of opening a browser on the PC running it. Links inside rendered markdown (chat
   answers, notes: `a.md-link` from `lib/markdown.js`) open the same way, through one
   click handler in `main.js`, never navigating Yap's own window.
 - **No browser context menu:** `webview2-com` (the copy wry already builds on)
   hooks each webview's `ContextMenuRequested`, cutting WebView2's menu down to
-  the editing commands (`context_menu.rs`; debug builds: Shift+right-click
+  the editing commands (`shell/context_menu.rs`; debug builds: Shift+right-click
   for Inspect). Items with actions get Yap's own menu, the same everywhere
   (`ui/contextMenu.svelte.js`).
 - **Dialogs:** `tauri-plugin-dialog` (file open/save dialogs for note export and upload).
@@ -64,13 +64,13 @@ The full stack list, the app's entry and plumbing (`lib.rs`, the tray, context m
   (2.5+ needs tauri 2.12).
 - **MCP (AI apps):** [`rmcp`](https://crates.io/crates/rmcp), the official Rust MCP SDK
   (server + stdio, no macros): `yap.exe mcp` lets Claude, ChatGPT desktop, Gemini CLI,
-  Cursor… read meetings and notes through the local API (`mcp.rs`); `toml_edit` adds Yap to
-  Codex/ChatGPT's `config.toml` (`mcp_clients.rs`).
+  Cursor… read meetings and notes through the local API (`integrations/mcp.rs`); `toml_edit` adds Yap to
+  Codex/ChatGPT's `config.toml` (`integrations/mcp_clients.rs`).
 - **Speaker diarization (beta):** NVIDIA's Nemotron-3-Diarization (q8_0 GGUF,
   OpenMDW-1.1) on NeMo-Speech.cpp 0.2.0 (Apache-2.0, ggml), run by `yap.exe
   diarize`, a child process that loads the runtime's C API DLLs from the data
   folder with `libloading` (`LoadLibraryExW`, DLL_LOAD_DIR | DEFAULT_DIRS);
-  `zip` unpacks NVIDIA's runtime release (`diarize.rs` + `diarize/`); its
+  `zip` unpacks NVIDIA's runtime release (`speakers/diarize.rs` + `speakers/diarize/`); its
   voices go on the "Them" lines as "Speaker 1, 2…" (`speakers/labels.rs`).
 - **Calendar:** Google Calendar (installed-app OAuth in the system browser, PKCE, a
   loopback listener, two read-only scopes) or any private iCal link, read straight from
@@ -84,28 +84,41 @@ The full stack list, the app's entry and plumbing (`lib.rs`, the tray, context m
   conversations, `updates.json` — update announcements + the restart marker,
   `calendar.json` — connected calendars + the next week of meetings,
   `dictionary_usage.json` — how often/lately each dictionary word was used,
-  `dict_usage.rs`, `icons/` — a cache of the installed call apps' own icons,
-  `app_icons.rs`, `hints.json` — push-to-talk coaching counts, `coaching.rs`,
+  `dictionary/dict_usage.rs`, `icons/` — a cache of the installed call apps' own icons,
+  `calls/app_icons.rs`, `hints.json` — push-to-talk coaching counts, `dictation/coaching.rs`,
   `word_suggestions.json` — your answers to "Add this word to your
-  dictionary?", `learn.rs`, `notices.json` — call-prompt fatigue counts,
-  `notice.rs`).
+  dictionary?", `dictionary/learn.rs`, `notices.json` — call-prompt fatigue counts,
+  `notices/notice.rs`).
   Every JSON store writes atomically and quarantines a corrupt file on load
   instead of crashing (`config::atomic_write`/`quarantine_corrupt`, used by all
   eleven stores; each write its own temp file). config.json too: set aside
   as it was, the settings that still read kept, the person told once, saves
   one at a time ([config-and-data.md](./config-and-data.md)). A store's
   write that fails keeps its data in memory, is retried with the next save
-  and is said once, with Try again (`saving.rs`; `saving::init` in setup,
+  and is said once, with Try again (`shell/saving.rs`; `saving::init` in setup,
   `saving::flush` in `shutdown_cleanup`); setup sweeps the temp files a
   crash mid-write left (`config::sweep_temp_files`, its own thread).
 
 ## Modules
 
+**The source tree** (2026-10-24): `src-tauri/src/` is grouped by area, as
+CLAUDE.md's module index is — `dictation/`, `pasting/`, `dictionary/`, `ai/`,
+`chat/`, `voice/`, `meetings/`, `calls/`, `notices/`, `integrations/`,
+`privacy/`, `shell/`, and the areas that are one module with parts
+(`memory`, `calendar`, `snip`, `speakers`, `notes`, `bar`, `web`, `apps`);
+`config.rs`, `auth.rs` and `updates.rs` stand alone; `main.rs` and `lib.rs`
+are at the root. An area is `<area>.rs` (its `//!` summary and module list)
+beside `<area>/`. A big module's parts are its children (`dictation/pipeline/`,
+`ai/local_llm/`, `web/`, `apps/`, `voice/tts/`, `chat/tools/`,
+`meetings/meeting_summary/`): private, with what other modules use
+re-exported by the module, except `local_llm`'s, which callers name
+(`local_llm::models::install`, `local_llm::context::context_view`).
+
 - **`lib.rs`** — app entry / Tauri `setup`. Runs `portable::init()`, registers the
   updater/autostart/single-instance plugins, starts the input hook + pipeline
   (which no longer loads the speech model or opens the mic on this thread:
   the model loads in the background and the mic opens when a dictation needs
-  it — `pipeline.rs`, `mic.rs`, [dictation.md](./dictation.md); 2026-10-22,
+  it — `dictation/pipeline.rs`, `dictation/mic.rs`, [dictation.md](./dictation.md); 2026-10-22,
   cold start → tray 3.35 s → 0.99 s, the Yap bar 3.40 s → 1.03 s, the main
   window 3.34 s → 0.98 s, the model ready at ~3.3 s either way: medians of
   five launches of a release-optimised build with debug assertions on — so no
@@ -125,11 +138,12 @@ The full stack list, the app's entry and plumbing (`lib.rs`, the tray, context m
   entry written before it existed — autostart on and Windows up < 10 min),
   "Start hidden" is on, there's no speech model (onboarding instead) or it's
   the updater's relaunch (`updates::relaunch_after_update`: `updates::init`
-  brings the window back if it was open) — `launch_shows_window`, pure,
+  brings the window back if it was open) — `launch_shows_window`
+  (`shell/autostart.rs`, with the sign-in helpers), pure,
   unit-tested. An autostart entry without the argument is written again on
   the next launch that lacks it. Dev builds show Settings on every launch.
   **`yap.exe bench`'s cold-start copy** (`bench_child`, 2026-10-24:
-  `YAP_BENCH_CHILD=1`, honoured only in portable mode — `bench/cold.rs`
+  `YAP_BENCH_CHILD=1`, honoured only in portable mode — `shell/bench/cold.rs`
   starts it on an empty data folder): no single-instance plugin (it must
   start, not wake a Yap already running), no window-state plugin, no
   keyboard hook, no orphan-sidecar sweep and no autostart reconcile (which
@@ -139,11 +153,11 @@ The full stack list, the app's entry and plumbing (`lib.rs`, the tray, context m
   `shutdown_cleanup()` (sidecar, bridge, other apps' sound back — `mute::restore_all`) runs on `RunEvent::Exit`
   AND from the updater's pre-install hook. Clears ort's 0-byte `DirectML.dll` stub (`stt::fix_directml_stub`).
   Gives the hidden settings/onboarding webviews a one-shot **DWM-cloaked** show+hide
-  at startup (`init_hidden_webview` — WebView2 created-hidden workaround). ⚠ Never
+  at startup (`init_hidden_webview`, `shell/window.rs` — WebView2 created-hidden workaround). ⚠ Never
   swap the cloak for "park off-screen, show+hide, move back": DWM's close animation
   follows the window back on-screen — that flashed the "Welcome to Yap" window on
   every launch until 2026-09-25.
-- **`tray.rs`** — state-aware tray icon (runtime-generated coloured dot) + right-click
+- **`shell/tray.rs`** — state-aware tray icon (runtime-generated coloured dot) + right-click
   menu (model submenu w/ checkmark, Cancel while recording — kept for Undo —, Settings/Quit, Check for
   updates → Settings → About + a manual check); left-click opens Settings. A ready
   update adds **"Restart to update to X"** under the version line (replacing
@@ -160,14 +174,14 @@ The full stack list, the app's entry and plumbing (`lib.rs`, the tray, context m
   idle menu's cache key (`idle_menu_key`), so the menu rebuilds when they
   change (the reading card coming or going refreshes it); all tray work runs
   on the main thread.
-- **`context_menu.rs`** — no browser context menu in Yap's windows: each
+- **`shell/context_menu.rs`** — no browser context menu in Yap's windows: each
   webview's `ContextMenuRequested` (WebView2, via `webview2-com`) keeps only
   the editing commands, or shows nothing (pure `keep`, unit-tested on the
   menus WebView2 really offered). Inspect: debug builds only, and only for a
   Shift+right-click (`offers_inspect(debug, shift)`; Shift read with
   `GetKeyState`/`GetAsyncKeyState`, compiled out of release). See "Window
   config" below.
-- **`webview_memory.rs`** — hidden webviews keep less in memory (2026-10-22):
+- **`shell/webview_memory.rs`** — hidden webviews keep less in memory (2026-10-22):
   a watcher thread reads each window's visibility every 3 s (`target`, pure:
   hidden or minimised → low) and gives an off-screen window's webview
   WebView2's **low memory target** (`ICoreWebView2_19::
@@ -177,7 +191,7 @@ The full stack list, the app's entry and plumbing (`lib.rs`, the tray, context m
   are left alone. Debug-only `e2e_webview_memory` reports each window's
   target (`polish.spec.js`). The main window, onboarding and the notepad
   are hidden most of the day, each a renderer process of its own.
-- **`theme.rs`** — the theme (Settings → General → Appearance → Theme,
+- **`shell/theme.rs`** — the theme (Settings → General → Appearance → Theme,
   2026-10-22) on the Rust side: `resolve` (pure: "dark" / "light" as
   written, else Windows' app mode, `AppsUseLightTheme`), and `apply` gives
   the opaque windows' webviews their page's background
@@ -189,9 +203,9 @@ The full stack list, the app's entry and plumbing (`lib.rs`, the tray, context m
   window's `WindowEvent::ThemeChanged`. Debug-only `e2e_webview_background`
   reads a webview's DefaultBackgroundColor back (`theme.spec.js`). The pages
   themselves: [frontend.md](./frontend.md#the-dark-theme-2026-10-22).
-- **`portable.rs`** — portable-mode detection (a `portable` marker next to the exe
+- **`shell/portable.rs`** — portable-mode detection (a `portable` marker next to the exe
   redirects data to `<exe>/Data`).
-- **Logging** (`lib.rs init_logging`) — tracing → stdout + a daily-rolling
+- **Logging** (`shell/logging.rs`: `init_logging`, first thing in `run`) — tracing → stdout + a daily-rolling
   `<data>/logs/yap.log.*` file at `info`; panics are hooked into the log.
   ONNX Runtime's own log (`ort`) is held at `warn` in both modes
   (`log_directives`): at `info` each model load wrote ~1,000 lines of graph
@@ -206,49 +220,62 @@ The full stack list, the app's entry and plumbing (`lib.rs`, the tray, context m
   search queries or clipboard contents — only lengths, counts, ids and
   outcomes (`Transcript chars=42`). The text may go to `debug!` (Debug
   logging, whose hint says so), never an API key or a token at any level.
-  `log_privacy.rs` is a lint-style test that fails on an `info!`/`warn!`/
+  `privacy/log_privacy.rs` is a lint-style test that fails on an `info!`/`warn!`/
   `error!` formatting a content-named variable (`text = %…`, `{answer}`); the
   webviews' `frontend_log` lines follow the same rule.
-- **`net.rs`** / **`diagnostics.rs`** — the network receipts (every request
+- **`privacy/net.rs`** / **`privacy/diagnostics.rs`** — the network receipts (every request
   goes out through `net::Recorded::send_for`; `net::init` in setup names
   `connections.json`, `net::flush` in `shutdown_cleanup`) and Report a
   problem's diagnostic file (its logs are this section's `info` and above,
   scrubbed again): [privacy-receipts.md](./privacy-receipts.md).
-- **`commands.rs`** — Tauri commands: recording (`toggle_recording`, `cancel_recording`,
-  `dictation_key` — the in-page fallbacks' hotkey down/up),
-  config (`get_config`/`save_config`), models (`installed_models`,
-  `download_model_size`, `set_active_model`, `delete_model`, `model_language_info`),
-  devices (`list_audio_devices`, `list_output_devices`, `set_input_device` — live
-  stream swap, `set_mic_test` — idle level meter), windows (`open_settings`,
-  `open_onboarding`, `close_onboarding`),
-  `configure_hotkey`, `set_autostart`, `is_portable`, `test_post_process`,
-  `get_groq_usage`, history (`get_history`, `clear_history`, `get_stats`;
-  `home_snapshot` — Home's history page, stats, the settings it shows and
-  the installed models in one async call: frontend.md "Home's first
-  paint"), `set_active_model` is async and loads off the window's thread,
-  and not at all when the model is already warm on its device (onboarding
-  loaded it twice, the second time freezing the window),
-  plus the notes/actions/folders CRUD (`notes_folder_rename`/`_delete`;
-  `note_delete` refuses the note a meeting is recording into — that's
-  `meeting_delete` — and tells every window, `yap-note-deleted`) +
-  `note_enhance`/`note_ask`/`note_export`,
-  chats CRUD (incl. `chat_rename`) + `chat_send` (RAG + tool loop; `scope: "meetings"` = the
-  Meetings view's Ask bar, grounded in `calendar::meetings_context`; `voice`
-  = the question was dictated; returns the two messages' ids and `speak`,
-  `tts::auto_speak`), `chat_dictate` / `chat_input_focus` (the Chat view's
-  mic and box, pipeline.rs `to_chat`), debug-only `e2e_chat_dictation
-  {text}` (a dictated chat question without a mic), `chat_send`'s turn
-  itself is `chat_turn` (shared with the Voice Assistant),
-  `configure_assistant_hotkey` / `assistant_key` (the assistant shortcut,
-  live-applied / in-page), `configure_read_hotkey` (Read aloud's,
-  live-applied; its press is `read-key-pressed` → `read_aloud::read_selection`
-  in lib.rs), `read_aloud_text` / `_selection` / `_action` / `_state`
-  (read_aloud.rs), `chat_view_state` + `assistant_stop`
-  (assistant.rs),
-  `meeting_start` (then `calendar::on_meeting_started`)/
-  `meeting_state` (a recording ends through meeting_end.rs's `meeting_end`), `transcribe_file`/`cancel_file_transcription`/
-  `audio_file_info`, `log_info`/`open_logs_folder`, `delete_history_entry`.
-  (`paste_last_transcript` lives in `text_injector.rs`.)
+- **The Tauri commands** — each with its area (until 2026-10-24 most were in
+  one `commands.rs`); `lib.rs`'s `generate_handler!` lists them all, and the
+  pages call them by name. Most live in the module they serve
+  (`voice/tts.rs`'s, `calendar.rs`'s…); the older ones are in an area's
+  `commands.rs`:
+  - `dictation/commands.rs` — recording (`toggle_recording`, `cancel_recording`,
+    `dictation_key` — the in-page fallbacks' hotkey down/up), models
+    (`installed_models`, `download_model_size`, `set_active_model`,
+    `delete_model`, `model_language_info`; `set_active_model` is async and
+    loads off the window's thread, and not at all when the model is already
+    warm on its device — onboarding loaded it twice, the second time freezing
+    the window), devices (`list_audio_devices`, `list_output_devices`,
+    `set_input_device` — live stream swap, `set_mic_test` — idle level meter),
+    the shortcuts re-bound live (`configure_hotkey`, `configure_assistant_hotkey`
+    / `assistant_key` — the assistant shortcut, live-applied / in-page,
+    `configure_read_hotkey` — Read aloud's; its press is `read-key-pressed` →
+    `read_aloud::read_selection` in lib.rs), `chat_dictate` / `chat_input_focus`
+    (the Chat view's mic and box, dictation/pipeline.rs `to_chat`), debug-only
+    `e2e_chat_dictation {text}` (a dictated chat question without a mic),
+    Upload (`transcribe_file`/`cancel_file_transcription`/`audio_file_info`),
+    history (`get_history`, `clear_history`, `delete_history_entry`,
+    `get_stats`; `home_snapshot` — Home's history page, stats, the settings it
+    shows and the installed models in one async call: frontend.md "Home's
+    first paint").
+  - `shell/settings.rs` — config (`get_config`/`save_config`; `change_config`
+    changes one setting from elsewhere in one step and applies it as a save
+    does, `apply_config`); `shell/window.rs` — windows (`open_settings`,
+    `open_onboarding`, `close_onboarding`; `show_settings`/`show_onboarding`
+    for the tray and setup); `shell/autostart.rs` — `set_autostart`;
+    `shell/logging.rs` — `log_info`/`open_logs_folder`/`frontend_log`;
+    `shell/commands.rs` — `open_external`, `is_portable`.
+  - `ai/commands.rs` — `test_post_process`, `get_groq_usage`, the base
+    prompts, the on-device model's status, install, folder, start and stop.
+  - `notes/commands.rs` — the notes/actions/folders CRUD
+    (`notes_folder_rename`/`_delete`; `note_delete` refuses the note a meeting
+    is recording into — that's `meeting_delete` — and tells every window,
+    `yap-note-deleted`) + `note_enhance` (`run_enhance`)/`note_ask`/`note_export`.
+  - `chat/commands.rs` — chats CRUD (incl. `chat_rename`) + `chat_send` (RAG +
+    tool loop; `scope: "meetings"` = the Meetings view's Ask bar, grounded in
+    `calendar::meetings_context`; `voice` = the question was dictated; returns
+    the two messages' ids and `speak`, `tts::auto_speak`); its turn is
+    `chat/turn.rs`'s `chat_turn` (shared with the Voice Assistant).
+  - `meetings/commands.rs` — `meeting_start` (then `calendar::on_meeting_started`)/
+    `meeting_state` (a recording ends through meetings/meeting_end.rs's
+    `meeting_end`); `integrations/bridge.rs` — `bridge_status`.
+  Elsewhere: `read_aloud_text` / `_selection` / `_action` / `_state`
+  (voice/read_aloud.rs), `chat_view_state` + `assistant_stop`
+  (chat/assistant.rs), `paste_last_transcript` (pasting/text_injector.rs).
 
 ## Window config (`src-tauri/tauri.conf.json`)
 - **settings**: 1200×800 (min 860×600), titled "Yap" (it hosts the ControlPanel — see above),
@@ -257,7 +284,7 @@ The full stack list, the app's entry and plumbing (`lib.rs`, the tray, context m
   persisted by `tauri-plugin-window-state`
   across launches; overlay, onboarding, notepad, split-preview are excluded from persistence; the VISIBLE flag
   is excluded so the window never un-hides on start-hidden launches (see lib.rs window-state
-  plugin setup). **Fitted to the screen** on every show (`commands::fit_to_screen`,
+  plugin setup; its flags: `shell/window.rs`). **Fitted to the screen** on every show (`window::fit_to_screen`,
   pure `fit_rect`, unit-tested): a window bigger than its monitor's work area,
   or partly off it, is shrunk and moved inside — 800 px is taller than a
   1080p laptop at 150 % (672 px above the taskbar) or a 1366 × 768 screen,
@@ -272,21 +299,21 @@ The full stack list, the app's entry and plumbing (`lib.rs`, the tray, context m
   `notepad::show_preview` the first time the notepad's split button is
   hovered — transparent, borderless, click-through, unfocusable, always on top,
   skip-taskbar; shown over the call's slot, hidden on pointer leave.
-  Placed by `notepad.rs` (docked right, full height), never by the
+  Placed by `meetings/notepad.rs` (docked right, full height), never by the
   window-state plugin.
 - settings + onboarding + notepad are **created unfocused** (`focus: false`): otherwise wry
   `MoveFocus`es each new webview and the hidden windows grab the foreground at launch,
   so typing (and a dictation's paste, which never targets Yap's own windows) can land
   in an invisible window. A
   side effect is that their first `show()` doesn't activate, so every open path must
-  `show()` + `set_focus()` (`commands::show_settings`/`show_onboarding` do).
+  `show()` + `set_focus()` (`window::show_settings`/`show_onboarding` do).
 - **overlay** (the Yap bar, `bar.rs`): 520×560 logical, never resized,
   transparent, always-on-top, `skipTaskbar`, `focus: false` + **`focusable:
   false`** (WS_EX_NOACTIVATE); `overlay::win::install` subclasses it at setup
   (tool window, MA_NOACTIVATE, style enforcement) and it's click-through
   except over the pill/cards. Shown while the bar is on (hidden for an hour,
   over fullscreen apps, or off: only while dictating).
-- **No browser context menu, in any window** (`context_menu.rs`): WebView2's
+- **No browser context menu, in any window** (`shell/context_menu.rs`): WebView2's
   own right-click menu (Back, Refresh, Save as, Print, More tools, Inspect) is
   cut down to the editing commands. `on_page_load` (Started) hooks every
   webview once — settings, onboarding, notepad, overlay, and split-preview

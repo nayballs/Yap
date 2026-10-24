@@ -96,7 +96,7 @@ is [ai-models.md](./ai-models.md); the dictionary passes it feeds are
   birthday?" finds Rochelle — at most 3). `IMPORT_ASK`: the prompt to copy
   into ChatGPT / Claude / Gemini.
 - **`memory/learn.rs`** — the passes, through the person's **Chat model**
-  (`commands::resolve_chat_endpoint`), on one of **two paths** (`path`):
+  (`turn::resolve_chat_endpoint`), on one of **two paths** (`path`):
   a model that can call tools (a cloud model, Qwen3.5-4B and up) takes
   **the full path** — it reads the chat with memory's listing and writes the
   changes itself, temperature 0.2, freely (the 4B did worse under any
@@ -140,7 +140,7 @@ is [ai-models.md](./ai-models.md); the dictionary passes it feeds are
   memory.json (`pending`) so a quit doesn't lose it — read a minute after the
   next start (no model call on quit). Not in test mode or an evaluation (the
   e2e suite and the runner call the passes). **Learning from a meeting**
-  (`meeting_ended`, from `meeting_end.rs` when an action plan is written;
+  (`meeting_ended`, from `meetings/meeting_end.rs` when an action plan is written;
   "Learn from meetings", off): its title, attendees and action plan (≤ 1,500
   tokens), people and projects only, once a note — the full path only (a
   meeting is other people's words in the third person: the small path has
@@ -266,14 +266,14 @@ is [ai-models.md](./ai-models.md); the dictionary passes it feeds are
 
 ## What a question gets
 
-`commands::chat_turn` (Chat, the Voice Assistant, the Meetings view's Ask bar):
+`turn::chat_turn` (Chat, the Voice Assistant, the Meetings view's Ask bar):
 
 - **The system prompt** (stable from turn to turn, so a model's cache keeps
   it): after About you (`profile_block`, or `prompt_block` for a model without
   tools), memory's **"You" block** — "What Yap remembers about the user from
   earlier chats… About them: …; How they want answers (follow it): …". The
   Notes view's Ask bar (`note_ask`) ends the same way; the notepad's helpers
-  ("What did I miss?", questions, the follow-up email, gaps — `meeting_assist.rs`)
+  ("What did I miss?", questions, the follow-up email, gaps — `meetings/meeting_assist.rs`)
   get `helper_block`: About you's name and note, then the You block, after their
   immutable prompt.
 - **The question's `<context>`** (a tool model) or the system prompt (one

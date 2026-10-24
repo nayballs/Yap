@@ -1,9 +1,9 @@
 # Network receipts and Report a problem
 
 Two trust features (2026-10-24): **Network connections**, a list of every
-connection Yap made and why (`net.rs`, Settings → Privacy & data), and
+connection Yap made and why (`privacy/net.rs`, Settings → Privacy & data), and
 **Report a problem**, a diagnostic file the person checks before saving it
-(`diagnostics.rs`, Settings → About). Logging's own rules (no user content at
+(`privacy/diagnostics.rs`, Settings → About). Logging's own rules (no user content at
 `info` and above) are in [app-shell.md](./app-shell.md) (Logging).
 
 [Architecture index](./README.md) · [CLAUDE.md](../../CLAUDE.md)
@@ -17,7 +17,7 @@ model downloads, GitHub's updates, the optional account service and the
 calendars. The list shows **every** connection, cloud ones included, so the
 person sees what their choices send where. It never says "nothing leaves".
 
-## `net.rs` — the recorder
+## `privacy/net.rs` — the recorder
 
 - **One place.** Every reqwest request goes out through
   `net::Recorded::send_for(Purpose)` (an extension trait, in place of
@@ -29,7 +29,7 @@ person sees what their choices send where. It never says "nothing leaves".
   to count the bytes as they're read. **It only observes**: nothing about a
   request changes, and a request that can't be built (never went out) isn't
   recorded. A unit test (`every_request_goes_through_the_recorder`) fails on
-  any `.send()` / `client.execute(` outside `net.rs`, except `eval/`.
+  any `.send()` / `client.execute(` outside `privacy/net.rs`, except `ai/eval/`.
 - **What's kept** (`Receipt` → `Entry`): when (unix seconds), the **host**
   (`host_of`: the name or address, lower case; a port only off this PC — the
   on-device server takes a new one each start; **never** the path, the query,
@@ -45,36 +45,36 @@ person sees what their choices send where. It never says "nothing leaves".
   words and service names (`provider_name` names only Yap's own provider ids,
   else "AI provider"). An AI call (`Purpose::Ai(provider)`) is labelled by
   the **feature** it ran under, a task-local (`net::within(Feature, fut)`;
-  the outermost wins): "AI cleanup · Groq" (pipeline.rs and Prompt Studio's
-  test), "Commands · …", "Chat · …" (tools.rs `ask`, the small-model
-  pipeline), "Voice Assistant · …" (assistant.rs, around Chat's turn),
+  the outermost wins): "AI cleanup · Groq" (dictation/pipeline.rs and Prompt Studio's
+  test), "Commands · …", "Chat · …" (chat/tools.rs `ask`, the small-model
+  pipeline), "Voice Assistant · …" (chat/assistant.rs, around Chat's turn),
   "Notes · …" (Enhance, a note's Ask), "Meeting notes · …"
-  (meeting_summary.rs), "Meeting brief · …" (calendar/brief.rs, around the
+  (meetings/meeting_summary.rs), "Meeting brief · …" (calendar/brief.rs, around the
   meeting helpers), "Memory · …" (memory/learn.rs); unscoped: "AI model · …".
-- **Every call site** (2026-10-24): `llm.rs` (the one chat call), `web.rs`
+- **Every call site** (2026-10-24): `ai/llm.rs` (the one chat call), `web.rs`
   (Exa/Tavily: "Web search · Exa"; the keyless lookup: "Web search ·
   Wikipedia and wikis"; `read_page`: "Reading a web page"), `web/native.rs`
-  ("Web search · Groq" / "· Google" …), `model_catalog.rs` ("Model list ·
+  ("Web search · Groq" / "· Google" …), `ai/model_catalog.rs` ("Model list ·
   OpenRouter", a server's own "Model list · your server"), `auth.rs`
   ("Account", every call — a signed-out Yap still makes none on its own),
   `calendar.rs` ("Calendar sync · iCal link"), `calendar/google.rs` ("Calendar
-  sync · Google": tokens, events, revoke), `tts/elevenlabs.rs` ("Voice ·
+  sync · Google": tokens, events, revoke), `voice/tts/elevenlabs.rs` ("Voice ·
   ElevenLabs", "Voice list · ElevenLabs", "Voice sample · ElevenLabs"),
-  `stt.rs` ("Speech model download"), `local_llm.rs` ("On-device AI ·
+  `dictation/stt.rs` ("Speech model download"), `ai/local_llm.rs` ("On-device AI ·
   starting up" — the `/health` polls —, "· warming up", "On-device AI
-  download"), `diarize/registry.rs` (its `download` now takes what it is:
+  download"), `speakers/diarize/registry.rs` (its `download` now takes what it is:
   "Speaker model download", or Kokoro's "Voice download (Kokoro)" from
-  `tts/registry.rs`). By hand (`net::begin` → `Manual::answered`/`failed`;
+  `voice/tts/registry.rs`). By hand (`net::begin` → `Manual::answered`/`failed`;
   dropped unfinished = stopped): `updates.rs` ("Update check" — the updater
   has its own HTTP client, reqwest 0.13, so the host is its endpoint's and
   the size latest.json's —, "Update download" with the bytes the updater
-  counted), `bridge.rs` ("Local API · apps on this PC": each answer to an app
+  counted), `integrations/bridge.rs` ("Local API · apps on this PC": each answer to an app
   on this PC, `net::local_api`, and the startup probe of a stale bridge file)
   and the page's one connection, the **account picture** (`<img>` from the
   sign-in provider in AccountSection, ControlPanel and Settings: `onload` →
   `connections_note {purpose: "account-picture", url}`, once per picture per
   window, `src/lib/connections.js`; Rust takes only purposes on its list and
-  only the host). **Not routed:** the model evaluations (`eval/`, debug
+  only the host). **Not routed:** the model evaluations (`ai/eval/`, debug
   builds, the maintainer's own tool, which logs its requests itself), and the
   `cloud/` server (it's the account service, not Yap; Yap's side of it is
   `auth.rs`). `yap.exe mcp` reaches the Local API, which records it.
@@ -123,7 +123,7 @@ last, "for Chat, Voice Assistant", and the latest moments with their
 status. Live: `yap-connections` reloads it. Colours are `--yap-*` tokens,
 light and dark.
 
-## `diagnostics.rs` — Report a problem
+## `privacy/diagnostics.rs` — Report a problem
 
 - **The file** (a .zip, built in memory, `Bundle::zip`): `README.txt` (what's
   in it, what's left out, that nothing was sent), `system.txt` (`system_info`:
@@ -175,7 +175,7 @@ light and dark.
   Windows lines (`issue_url`, pure) — the page opens it through
   `open_external`. **Nothing is ever uploaded.**
 - **Tests:** `a_bundle_holds_no_keys_or_personal_details` (in the spirit of
-  `log_privacy.rs`): a config, a log and connections seeded with fake keys,
+  `privacy/log_privacy.rs`): a config, a log and connections seeded with fake keys,
   a fictional name and note, dictionary words, device names, a custom
   prompt, a LAN endpoint with a key in its query, a user folder and an
   email → no file of the bundle, nor the zip, holds any of them; plus the

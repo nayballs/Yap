@@ -135,7 +135,7 @@ extracted `app.asar`, Handy clone):
 **Shipped in Yap (2026-07-10):** options 1+2 were already in; this pass added
 **3 and 4** — the full Handy split, ported from source:
 
-- `src-tauri/src/fuzzy.rs` — Handy's `apply_custom_words` (Levenshtein +
+- `src-tauri/src/dictionary/fuzzy.rs` — Handy's `apply_custom_words` (Levenshtein +
   `natural`-crate Soundex replicated exactly — it's a NONSTANDARD variant: raw
   first char, strip h/w → dedup → strip vowels — verified against the real
   crates in a scratch build). Adapted to Yap's `{from → to}` entries (n-grams
@@ -227,7 +227,7 @@ only while the dictation's window still has the focus. Before snippets, so
 "my address, press enter" still gives exactly the address. Test mode presses
 nothing (`text_injector::press_submit`).
 
-**Ranked Whisper vocabulary** (`dict_usage.rs`). The prompt is capped at ~600
+**Ranked Whisper vocabulary** (`dictionary/dict_usage.rs`). The prompt is capped at ~600
 chars, so with a long dictionary the order decides which words Whisper hears
 about. `<data>/dictionary_usage.json` keeps `{uses, lastUsed}` per word
 (lowercased `to`), outside config.json (Settings auto-saves its whole config
@@ -245,7 +245,7 @@ Meetings keep their attendees ahead of the ranked dictionary.
 
 ## 2026-10-17 — words suggested from your corrections
 
-"Suggest words from your corrections" (`learn.rs`, `config.learn_words`,
+"Suggest words from your corrections" (`dictionary/learn.rs`, `config.learn_words`,
 default on, a switch in the Dictionary view): Yap pastes a dictation, you fix
 a word it got wrong in place, and it asks — "Add “Kubernetes” to your
 dictionary? Yap heard “cube and eighties”." Behaviour after Wispr Flow's
@@ -285,7 +285,7 @@ numbers only, none of its code or wording).
 
 ### What Yap does
 
-| | Yap (`learn.rs`) | vs Wispr |
+| | Yap (`dictionary/learn.rs`) | vs Wispr |
 |---|---|---|
 | Watch | 60 s; the whole field (≤ 15,000 chars) read every 700 ms (≥ 400 ms apart) over UIA, focused or not; never a password or read-only field, never a terminal, never after a submit key, never in a test run | same window and reads; polling only (no TextChanged handler — a poll is enough at this cadence) |
 | Ends (`End`, named in the debug log) | `time_up`, `next_dictation`, `field_emptied`, `region_emptied`, `region_gone`, `anchor_mismatch`, `enter_pressed`, `unreadable` (3 failed reads in a row), `too_long` | same set; Yap tolerates two failed reads (a slow app) |

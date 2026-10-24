@@ -3,7 +3,7 @@
 Yap runs a tiny **loopback HTTP server** while the app is open so terminals,
 scripts, and coding agents on the same machine can read and write Yap data.
 It's the local-first port of OpenWhispr's CLI bridge (`cliBridge.js` →
-`src-tauri/src/bridge.rs`): loopback-only, bearer-token authenticated, no
+`src-tauri/src/integrations/bridge.rs`): loopback-only, bearer-token authenticated, no
 cloud, no account.
 
 Toggled in **Integrations → Local API** (`config.bridge_enabled`, on by
@@ -60,7 +60,7 @@ Same envelope contract as OpenWhispr's v1 API:
 | POST | `/v1/folders/create` | body `{name}`; idempotent per name (case-insensitive) |
 | GET | `/v1/meetings/list?folder=&limit=` | meetings (recorded notes), newest first: `{id, title, folder, participants, createdTs, updatedTs, startTs, endTs, durationSecs, lines, pages, hasSummary, hasNotes, digests}`; `limit` default 50 |
 | GET | `/v1/meetings/search?q=&limit=` | meetings whose title, attendees, typed notes, AI summary or transcript mention the words (3+ letters), best first, each with up to 3 `matches: [{at, speaker, text, page}]` and a `summaryMatch` line; `limit` default 10 |
-| GET | `/v1/tasks/list?status=&limit=` | the tasks in notes' summaries (the action plans' checkboxes; `tasks.rs`), read only: `status` `open` (default), `done` (ticked) or `all`; newest note first, "You" first within each: `{noteId, title, createdTs, owner, task, due, done, saidAtSecs}`; `limit` default 200. A tick is the summary's own `- [x]`, so `/v1/notes/{id}`'s `enhancedContent` carries it too |
+| GET | `/v1/tasks/list?status=&limit=` | the tasks in notes' summaries (the action plans' checkboxes; `notes/tasks.rs`), read only: `status` `open` (default), `done` (ticked) or `all`; newest note first, "You" first within each: `{noteId, title, createdTs, owner, task, due, done, saidAtSecs}`; `limit` default 200. A tick is the summary's own `- [x]`, so `/v1/notes/{id}`'s `enhancedContent` carries it too |
 | GET | `/v1/mcp/config` | `{data:{allowWrites}}`: whether AI apps may save notes (see below) |
 | GET | `/v1/transcriptions/list?limit=` | dictation history, newest first (`limit` default 50) |
 | GET | `/v1/transcriptions/{ts}` | one entry: `{ts, raw, text, model, app}`, and `said` (the words as said, corrected but not cleaned up) when AI cleanup changed them |
@@ -97,7 +97,7 @@ and that process reads the meetings from the running Yap through this local
 API. No server in between, no account. **Settings → AI apps (MCP)** (the Connections
 group, laid out like Wispr's page; Integrations has a "Go to MCP" card) adds
 it to an app in one click (`src/lib/McpSection.svelte` →
-`src-tauri/src/mcp_clients.rs`); the server is `src-tauri/src/mcp.rs`.
+`src-tauri/src/integrations/mcp_clients.rs`); the server is `src-tauri/src/integrations/mcp.rs`.
 
 What an AI app can do, and what it can't:
 

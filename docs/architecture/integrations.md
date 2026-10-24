@@ -6,7 +6,7 @@ The token-authenticated local API, Yap's MCP server (`yap.exe mcp`) and adding i
 
 ## Modules
 
-- **`bridge.rs`** — the **local API bridge** (OpenWhispr `cliBridge.js` port,
+- **`integrations/bridge.rs`** — the **local API bridge** (OpenWhispr `cliBridge.js` port,
   backs the Integrations view): a token-authenticated loopback HTTP server
   (`tiny_http`, `127.0.0.1`, OS-assigned port) exposing `/v1` REST routes over
   notes/folders/history so terminals + coding agents can drive Yap data.
@@ -18,11 +18,11 @@ The token-authenticated local API, Yap's MCP server (`yap.exe mcp`) and adding i
   leaves a live bridge's file alone, and `stop()` only deletes the file while
   it's still ours. Also serves the MCP server's meeting views
   (`/v1/meetings/list`, `/v1/meetings/search`, `/v1/mcp/config`; built in
-  `mcp.rs`) and the tasks in notes' summaries, read only (`/v1/tasks/list?
+  `integrations/mcp.rs`) and the tasks in notes' summaries, read only (`/v1/tasks/list?
   status=open|done|all`: note, owner, task, due, done, when it was said;
-  `tasks.rs`). Debug builds take `YAP_BRIDGE_FILE` to move the discovery file
+  `notes/tasks.rs`). Debug builds take `YAP_BRIDGE_FILE` to move the discovery file
   (the e2e suite). See `docs/local-api.md`.
-- **`mcp.rs`** — **Yap's MCP server** (Wispr Flow's Notetaker MCP, local): AI apps
+- **`integrations/mcp.rs`** — **Yap's MCP server** (Wispr Flow's Notetaker MCP, local): AI apps
   launch **`yap.exe mcp`** (main.rs sends that argument here before any of the app
   starts: no window, tray, hook or single-instance check; release builds are
   GUI-subsystem and inherit the client's stdio pipes fine) and speak MCP over
@@ -43,7 +43,7 @@ The token-authenticated local API, Yap's MCP server (`yap.exe mcp`) and adding i
   "Priya?" for a guess, "Speaker 2"), and the instructions/page explain the
   labels whether or not voices are told apart (`who_is_who`); the local API's
   `/v1/notes/<id>` hands out `speakers` and each line's `speaker` as stored.
-- **`mcp_clients.rs`** — "Add to Claude / ChatGPT / Gemini / Cursor…" (Settings →
+- **`integrations/mcp_clients.rs`** — "Add to Claude / ChatGPT / Gemini / Cursor…" (Settings →
   MCP): edits each AI app's own config to launch `yap.exe mcp`. Claude desktop
   (`%APPDATA%\Claude\claude_desktop_config.json` **and** the MSIX build's
   `%LOCALAPPDATA%\Packages\Claude_*\LocalCache\Roaming\Claude\…`), ChatGPT desktop +

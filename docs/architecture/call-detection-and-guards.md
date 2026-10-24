@@ -4,7 +4,7 @@ Noticing a call and offering to take notes, the call apps' own icons, the guard 
 
 [Architecture index](./README.md) · [CLAUDE.md](../../CLAUDE.md)
 
-- **`meeting_detect.rs`** — **call detection** (OpenWhispr
+- **`calls/meeting_detect.rs`** — **call detection** (OpenWhispr
   `meetingDetectionEngine.js` port): notices a call starting (Teams, Zoom,
   Google Meet, Slack huddles, Discord, Webex, GoTo, WhatsApp/Signal/Telegram…),
   offers to take notes, and offers to stop and summarise when it ends. Signal =
@@ -15,7 +15,7 @@ Noticing a call and offering to take notes, the call apps' own icons, the guard 
   of its windows shows a meeting (Meet/Teams/Zoom… in the title; the call
   sticks while you switch tabs). Yap's own mic use never counts (`yap.exe`
   isn't a call app — it holds the mic while it dictates and a minute after,
-  `mic.rs`, or the whole time with "Keep the microphone ready"). Event-driven:
+  `dictation/mic.rs`, or the whole time with "Keep the microphone ready"). Event-driven:
   a thread blocks in `RegNotifyChangeKeyValue`; the detector rescans every
   2 s only while a call is starting/live/ending (60 s safety net; 5 s polling
   if the watch fails). Debounce: starts after 5 s on the mic (20 s for chat
@@ -31,10 +31,10 @@ Noticing a call and offering to take notes, the call apps' own icons, the guard 
   (`notice::place_for`): a sticky in-app toast while the main window is
   focused, else a card on the **Yap bar** (`native::bar_card`: Wispr's
   "Meeting detected" card — the app's icon (its own as installed,
-  `app_icons.rs`, else its mark), "Teams call" over "● Now", split button
+  `calls/app_icons.rs`, else its mark), "Teams call" over "● Now", split button
   Record notes | ^ Not now / Don't ask for Teams, corner ✕; the call ending
   asks in a notice card), else — the bar off or hidden — a silent Windows
-  notification via `win_toast.rs`, else the in-app toast if the window is on
+  notification via `notices/win_toast.rs`, else the in-app toast if the window is on
   screen (also when Windows refuses the notification); focusing the window
   moves a pending prompt in-app (`on_main_window_focused`, off the bar), and
   a start prompt left alone **fades after 30 s as "Not now"** (OpenWhispr's
@@ -100,12 +100,12 @@ Noticing a call and offering to take notes, the call apps' own icons, the guard 
   active, fadeMs?)` (no debounce; `fadeMs` shortens that call's fade) for the
   e2e suite. Gated by `config.meeting_detection` (default **on**, as
   OpenWhispr's `notifyMeetingDetection`; `sync()` on every config save re-reads
-  the style and per-app choices too). `mic_records()` hands `app_icons.rs` the
+  the style and per-app choices too). `mic_records()` hands `calls/app_icons.rs` the
   call apps' consent-store keys (exe paths, package families) and their
   `LastUsedTimeStart`, nothing else. Lock rule: never touch windows/WinRT
   while holding its state lock (window getters wait on the main thread). See
   [`docs/meetings.md`](../meetings.md).
-- **`app_icons.rs`** — the call apps' **own icons as installed on this PC**
+- **`calls/app_icons.rs`** — the call apps' **own icons as installed on this PC**
   (`meeting_app_icons` → `{appId: data URL}`, off the main thread) for
   Settings' "Ask about calls in" list and the bar's call card
   (`CallAppIcon.svelte`). Read-only and local (nothing launched, no network;
@@ -129,7 +129,7 @@ Noticing a call and offering to take notes, the call apps' own icons, the guard 
   installed apps: debug-only `YAP_E2E_APP_ICONS` names a folder of stand-in
   `<app>.png`s. An `#[ignore]`d unit test (`this_machine`, `YAP_ICONS_OUT`)
   runs the real thing read-only and writes the cache somewhere to look at.
-- **`meeting_guard.rs`** — guard rails around a meeting recording (Phase 8,
+- **`calls/meeting_guard.rs`** — guard rails around a meeting recording (Phase 8,
   Wispr Flow's Notetaker settings) + their notices. **Maximum recording
   length** (`config.meeting_max_minutes`: 60/120/180/240, 0 = no limit,
   default **120**, as Wispr): a watcher thread per recording (follows
@@ -184,14 +184,14 @@ Noticing a call and offering to take notes, the call apps' own icons, the guard 
   the main window while it's focused, else the Yap bar via `notice_native`,
   else a Windows notification, else the window on screen); one addressed to
   a window (`surface`) shows there; the same one again within 10 min isn't
-  shown (`notice.rs`). **Every stop goes through
+  shown (`notices/notice.rs`). **Every stop goes through
   `stop_and_summarise`** = `meeting_end::end` (Rust writes the action plan;
   no window comes up — the notepad shows it when open). Debug-only `e2e_meeting_limit
   {limitMs, warnMs, keepGoingMs}` and `e2e_meeting_checkins {quietMs,
   countdownMs, recentMs, afterEndMs, hourMs, fadeMs, marginMs}` (which also
   turns on the test player's live mic, `e2e::set_live_mic`) shorten the
   timings for the e2e suite.
-- **`capture.rs`** — (also `for_snip`: every Yap window on screen out of a
+- **`calls/capture.rs`** — (also `for_snip`: every Yap window on screen out of a
   Snip to Chat capture for its moment, then back as the meeting setting
   wants; [snip.md](./snip.md)) — hides Yap's meeting windows from screen capture and
   sharing: while a meeting records and `config.meeting_hide_from_capture` is

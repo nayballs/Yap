@@ -53,7 +53,7 @@ Full list with versions and details: [app-shell.md](./docs/architecture/app-shel
 - **Windows:** `settings` (the main window), `onboarding`, `notepad` (meeting notes), `overlay` (the Yap bar).
 - **Audio:** `cpal` capture, `rodio` playback (chimes, spoken replies).
 - **STT:** `transcribe-rs` — whisper.cpp on Vulkan + ONNX models (Parakeet…) on DirectML; `engines` feature. Vendored (`src-tauri/vendor/transcribe-rs`, `[patch.crates-io]`) with two DirectML fixes for Parakeet — see its `YAP.md`.
-- **AI:** `reqwest` → any OpenAI-compatible endpoint, or the on-device llamafile sidecar (`local_llm.rs`).
+- **AI:** `reqwest` → any OpenAI-compatible endpoint, or the on-device llamafile sidecar (`ai/local_llm.rs`).
 - **Spoken replies:** Kokoro-82M (ONNX on `ort`, CPU; eSpeak NG run separately) or Windows' voices; or ElevenLabs (cloud, the user's own key, streamed PCM).
 - **Speaker diarization (beta):** Nemotron-3-Diarization on NeMo-Speech.cpp, in a `yap.exe diarize` child.
 - **Text injection:** Win32 clipboard (private formats, verified) + `SendInput`; UI Automation reads the field.
@@ -78,7 +78,7 @@ global hotkey ─▶ input_hook ─▶ "dictation-key-pressed" / "-released"
                     │                                        │
         cpal mic stream → 16kHz mono f32      take audio ─▶ STT engine (blocking task)
         buffer (downmix + resample in              │  (transcribe-rs, warm engine)
-        the audio callback); emits           AI cleanup pass (llm.rs, if enabled)
+        the audio callback); emits           AI cleanup pass (ai/llm.rs, if enabled)
         "yap-amp" peak for the                    │
         scrolling waveform                   apply_dictionary()
                     │                              │
@@ -87,7 +87,7 @@ global hotkey ─▶ input_hook ─▶ "dictation-key-pressed" / "-released"
                                             emits "yap-transcript"
 ```
 
-After transcription: **AI cleanup (in the style of the kind of app: `cleanup_styles.rs`) → dictionary (exact, then fuzzy near-misses) →
+After transcription: **AI cleanup (in the style of the kind of app: `ai/cleanup_styles.rs`) → dictionary (exact, then fuzzy near-misses) →
 the "press enter" voice command → snippets → fit to the kind of app and the text
 around the cursor → inject → submit key, or the correction watch**. Cleanup is
 best-effort — any error/timeout falls back to the raw transcript, so dictation never
@@ -97,57 +97,61 @@ blocks. The full order and its rules: [dictation.md](./docs/architecture/dictati
 
 ## Module index (`src-tauri/src/`)
 
+One folder per area (an area's `<area>.rs` lists its modules); a big module's parts are its children
+(`dictation/pipeline/`…). The tree and its rules: [app-shell.md](./docs/architecture/app-shell.md#modules).
+
 **Dictation** — [dictation.md](./docs/architecture/dictation.md)
-- `pipeline.rs` — the heart: buffer and pre-roll, modes, the start chime on the mic's first audio, the model loaded off the startup thread, `run_stt` → `deliver`, Undo, chat/assistant routing; the `processing` guard (`Busy`) let go however a task ends, a crash said; the warm engine lent in turns (`EngineCell`: a taker waits for it, never loads a second copy).
-- `gesture.rs` — push-to-talk's pure state machine: hold, double-tap hands-free, lone tap.
-- `coaching.rs` — push-to-talk coaching hints (≤ 3 each; counts in `hints.json`).
-- `input_hook.rs` — low-level keyboard/mouse hooks: seven bindings (Read aloud's the fifth, Use what I said's the sixth, Snip to Chat's the seventh) + up to 12 saved transforms' slots, combo rules, `clashes`, menu-mask key; Esc while a snip is up.
-- `transforms.rs` — saved transforms: one-key rewrites (Polish, Shorter, Fix grammar only, Translate, Make it a prompt, your own) of the selection or the last dictation, no speaking; their shortcuts, the tray's Transforms menu, the bar's Undo.
-- `partials.rs` / `agent_detect.rs` — live partials' sliding window; Commands by name (see `pipeline.rs`).
-- `mic.rs` — the dictation mic, opened on demand: held by a dictation / the mic check / "Keep the microphone ready", warm a minute after, closed at once on Bluetooth (HFP); its own thread.
-- `mic_watch.rs` — dead-mic watchdog: reopen the stream, then "No sound from <mic>".
-- `mic_privacy.rs` — reads Windows' microphone privacy switches; names the one blocking Yap.
-- `stt.rs` — `SttEngine` over transcribe-rs, the 14-model registry, download + verify, word times; each engine loads on a `Device` (graphics card or processor).
-- `stt_speed.rs` — the speech engine's device on this PC: a one-time background benchmark per model and PC at three dictation lengths (new driver, new download → again); everyday lengths (3 and 11 s) decide: the graphics card unless the processor takes ≥ 20 % less time at both; Settings' "Runs on" says what it chose and why.
-- `recent_audio.rs` — a day of dictation audio (`recent-audio/`): failed dictations listed, Home's Run again and Play.
-- `media.rs` — Upload's audio-file decoding (Symphonia) and chunking.
-- `sound.rs` — start/stop chimes; the output device shared with spoken replies.
-- `mute.rs` / `media_pause.rs` — silence other apps / pause media while dictating; exact restore.
-- `history.rs` — local dictation history (with its audio's id and the words as said when cleanup changed them; failed / not pasted) and the stats dashboard.
+- `dictation/pipeline.rs` (+ `pipeline/`: recording, transcribe, delivery, rewrite, finish, preview, engine, busy, robot) — the heart: buffer and pre-roll, modes, the start chime on the mic's first audio, the model loaded off the startup thread, `run_stt` → `deliver`, Undo, chat/assistant routing; the `processing` guard (`Busy`) let go however a task ends, a crash said; the warm engine lent in turns (`EngineCell`: a taker waits for it, never loads a second copy).
+- `dictation/gesture.rs` — push-to-talk's pure state machine: hold, double-tap hands-free, lone tap.
+- `dictation/coaching.rs` — push-to-talk coaching hints (≤ 3 each; counts in `hints.json`).
+- `dictation/input_hook.rs` — low-level keyboard/mouse hooks: seven bindings (Read aloud's the fifth, Use what I said's the sixth, Snip to Chat's the seventh) + up to 12 saved transforms' slots, combo rules, `clashes`, menu-mask key; Esc while a snip is up.
+- `dictation/transforms.rs` — saved transforms: one-key rewrites (Polish, Shorter, Fix grammar only, Translate, Make it a prompt, your own) of the selection or the last dictation, no speaking; their shortcuts, the tray's Transforms menu, the bar's Undo.
+- `dictation/partials.rs` / `dictation/agent_detect.rs` — live partials' sliding window; Commands by name (see `dictation/pipeline.rs`).
+- `dictation/mic.rs` — the dictation mic, opened on demand: held by a dictation / the mic check / "Keep the microphone ready", warm a minute after, closed at once on Bluetooth (HFP); its own thread.
+- `dictation/mic_watch.rs` — dead-mic watchdog: reopen the stream, then "No sound from <mic>".
+- `dictation/mic_privacy.rs` — reads Windows' microphone privacy switches; names the one blocking Yap.
+- `dictation/stt.rs` — `SttEngine` over transcribe-rs, the 14-model registry, download + verify, word times; each engine loads on a `Device` (graphics card or processor).
+- `dictation/stt_speed.rs` — the speech engine's device on this PC: a one-time background benchmark per model and PC at three dictation lengths (new driver, new download → again); everyday lengths (3 and 11 s) decide: the graphics card unless the processor takes ≥ 20 % less time at both; Settings' "Runs on" says what it chose and why.
+- `dictation/recent_audio.rs` — a day of dictation audio (`recent-audio/`): failed dictations listed, Home's Run again and Play.
+- `dictation/media.rs` — Upload's audio-file decoding (Symphonia) and chunking.
+- `dictation/sound.rs` — start/stop chimes; the output device shared with spoken replies.
+- `dictation/mute.rs` / `dictation/media_pause.rs` — silence other apps / pause media while dictating; exact restore.
+- `dictation/history.rs` — local dictation history (with its audio's id and the words as said when cleanup changed them; failed / not pasted) and the stats dashboard.
 
 **Pasting** — [pasting.md](./docs/architecture/pasting.md)
-- `text_injector.rs` — private, verified clipboard paste with each app's paste keys, a lost paste typed, submit key, re-focus, Paste last transcript (and as said).
-- `as_said.rs` — the last paste: "Use what I said" swaps a cleaned paste for the words as said (shortcut, bar, tray, Home's Paste what I said), and the rewrite shortcut with nothing selected rewrites the last dictation (≤ 1 min, still ending at the cursor; Settings → Commands can turn it off) — only where it can select exactly what it pasted; else copied or refused.
-- `elevated.rs` — apps running as administrator: the text is left on the clipboard.
-- `selection.rs` — UI Automation reads: text around the cursor, edit-mode selection, read aloud's selection (read-only text too), post-paste watch; did a paste land.
-- `smart_insert.rs` — fits a dictation to the text around the cursor (case, spaces, full stop).
-- `app_kind.rs` — terminal (which one, its paste keys; an editor's terminal) / coding CLI / chat app / other, and what each changes.
+- `pasting/text_injector.rs` — private, verified clipboard paste with each app's paste keys, a lost paste typed, submit key, re-focus, Paste last transcript (and as said).
+- `pasting/as_said.rs` — the last paste: "Use what I said" swaps a cleaned paste for the words as said (shortcut, bar, tray, Home's Paste what I said), and the rewrite shortcut with nothing selected rewrites the last dictation (≤ 1 min, still ending at the cursor; Settings → Commands can turn it off) — only where it can select exactly what it pasted; else copied or refused.
+- `pasting/elevated.rs` — apps running as administrator: the text is left on the clipboard.
+- `pasting/selection.rs` — UI Automation reads: text around the cursor, edit-mode selection, read aloud's selection (read-only text too), post-paste watch; did a paste land.
+- `pasting/smart_insert.rs` — fits a dictation to the text around the cursor (case, spaces, full stop).
+- `pasting/app_kind.rs` — terminal (which one, its paste keys; an editor's terminal) / coding CLI / chat app / other, and what each changes.
 
 **Dictionary** — [dictionary.md](./docs/architecture/dictionary.md)
-- `fuzzy.rs` — near-miss correction (Levenshtein + Soundex), prompt-echo guard, sound distances.
-- `dict_usage.rs` — how often each dictionary word is used; orders the Whisper prompt.
-- `learn.rs` — "Suggest words from your corrections": the 60 s field watch and the offer.
-- `screen_terms.rs` (+ `screen_terms/`) — "Spell names the way they're written on screen": the target window's visible text read at record start (UIA, bounded) → its names and terms, for that dictation only: a strict near-miss pass (every model), cleanup's "Spell these names as written" line.
+- `dictionary/fuzzy.rs` — near-miss correction (Levenshtein + Soundex), prompt-echo guard, sound distances.
+- `dictionary/dict_usage.rs` — how often each dictionary word is used; orders the Whisper prompt.
+- `dictionary/learn.rs` — "Suggest words from your corrections": the 60 s field watch and the offer.
+- `dictionary/screen_terms.rs` (+ `dictionary/screen_terms/`) — "Spell names the way they're written on screen": the target window's visible text read at record start (UIA, bounded) → its names and terms, for that dictation only: a strict near-miss pass (every model), cleanup's "Spell these names as written" line.
 
 **AI models** — [ai-models.md](./docs/architecture/ai-models.md)
-- `about_you.rs` — About you: one Region (Windows' country, or one picked; money, units, language and spelling follow it, the clock is the PC's), name and note → the block every model's prompt ends with, searches and prices aimed at the country, the web's temperatures in their scale first, cleanup spelling.
-- `llm.rs` — OpenAI-compatible client, immutable base prompts, chat/tool calls, rate-limit waits.
-- `cleanup_styles.rs` — styles by app: cleanup's tone per kind of app (email formal, chats casual, AI prompts literal, terminal commands as said; built-in app lists, editable), as cleanup profiles; app rules first; the one offer of cleanup.
-- `local_llm.rs` — on-device llamafile sidecar: models, recommendation, server args (MTP), context, restarts, warm-up, the runtime's background upgrade (retry without MTP, the way back, launch repair, cross-Yap lock).
-- `gguf.rs` — read-only GGUF headers and memory estimates per context length.
-- `gpu.rs` — the graphics card (DXGI), for the recommended on-device model; every adapter, small ones, the card DirectML runs speech on.
-- `hardware.rs` — picks by hardware (card / processor / small): where speech runs before it's timed, private or cloud cleanup with both times said (onboarding).
-- `ai_model.rs` — which model a scope's next call goes to; the Chat picker's switch.
-- `model_catalog.rs` — providers' live model lists (and self-hosted servers'), cached a day; which read images, where they say.
-- `usage.rs` — daily Groq token/request usage.
-- `eval.rs` (+ `eval/`) — model evaluations (`yap.exe eval`) through the real Chat code.
+- `ai/about_you.rs` — About you: one Region (Windows' country, or one picked; money, units, language and spelling follow it, the clock is the PC's), name and note → the block every model's prompt ends with, searches and prices aimed at the country, the web's temperatures in their scale first, cleanup spelling.
+- `ai/llm.rs` — OpenAI-compatible client, immutable base prompts, chat/tool calls, rate-limit waits.
+- `ai/cleanup_styles.rs` — styles by app: cleanup's tone per kind of app (email formal, chats casual, AI prompts literal, terminal commands as said; built-in app lists, editable), as cleanup profiles; app rules first; the one offer of cleanup.
+- `ai/local_llm.rs` (+ `local_llm/`: runtime, context, models) — on-device llamafile sidecar: models, recommendation, server args (MTP), context, restarts, warm-up, the runtime's background upgrade (retry without MTP, the way back, launch repair, cross-Yap lock).
+- `ai/gguf.rs` — read-only GGUF headers and memory estimates per context length.
+- `ai/gpu.rs` — the graphics card (DXGI), for the recommended on-device model; every adapter, small ones, the card DirectML runs speech on.
+- `ai/hardware.rs` — picks by hardware (card / processor / small): where speech runs before it's timed, private or cloud cleanup with both times said (onboarding).
+- `ai/ai_model.rs` — which model a scope's next call goes to; the Chat picker's switch.
+- `ai/model_catalog.rs` — providers' live model lists (and self-hosted servers'), cached a day; which read images, where they say.
+- `ai/usage.rs` — daily Groq token/request usage.
+- `ai/eval.rs` (+ `ai/eval/`) — model evaluations (`yap.exe eval`) through the real Chat code.
 
 **Chat and the Voice Assistant** — [chat-and-assistant.md](./docs/architecture/chat-and-assistant.md)
-- `chats.rs` — conversations (`chats.json`), tool chips, sources; a question's screenshots (ids; deleted with it); the history a model gets (earlier searches replayed) and the checks on every answer (made-up sources, claimed searches, unsourced citations).
-- `tools.rs` / `note_text.rs` — the tool loop: note tools (safe partial edits), apps, web (a local model must search first), safety rule.
-- `stream.rs` — streaming answers: SSE from every provider (tool calls reassembled and checked, a whole answer when streaming fails), a step's text held until it's an answer (a forced search's never shown), ■ Stop, a newer question in the conversation replacing the turn still answering, a local stream stepping aside for a dictation; the checked answer replaces what streamed.
-- `assistant.rs` — the Voice Assistant: ask Chat out loud from any app, spoken from the answer's first sentence; off during meetings.
-- `pause.rs` — "Stop listening when I pause": a 1.5 s pause ends a Voice Assistant question (the mic's level against a learned noise floor, checked by the live preview's words; never before speech, never under a held key); pure.
+- `chat/chats.rs` — conversations (`chats.json`), tool chips, sources; a question's screenshots (ids; deleted with it); the history a model gets (earlier searches replayed) and the checks on every answer (made-up sources, claimed searches, unsourced citations).
+- `chat/tools.rs` (+ `tools/`: notes, memory, agent) / `chat/note_text.rs` — the tool loop: note tools (safe partial edits), apps, web (a local model must search first), safety rule.
+- `chat/stream.rs` — streaming answers: SSE from every provider (tool calls reassembled and checked, a whole answer when streaming fails), a step's text held until it's an answer (a forced search's never shown), ■ Stop, a newer question in the conversation replacing the turn still answering, a local stream stepping aside for a dictation; the checked answer replaces what streamed.
+- `chat/commands.rs` / `chat/turn.rs` — the Chat view's commands; one chat turn (`chat_turn`: the prompt, the eager RAG, the tool loop or a small model's web pipeline, the checks).
+- `chat/assistant.rs` — the Voice Assistant: ask Chat out loud from any app, spoken from the answer's first sentence; off during meetings.
+- `dictation/pause.rs` — "Stop listening when I pause": a 1.5 s pause ends a Voice Assistant question (the mic's level against a learned noise floor, checked by the live preview's words; never before speech, never under a held key); pure.
 
 **Snip to Chat** — [snip.md](./docs/architecture/snip.md)
 - `snip.rs` — drag a box over any screen, into Chat: Win+Alt+S / ✂ on the bar / tray / Chat's + / saying "snip"; the conversation Chat shows, else a new one; never sent by itself; the `yapsnip` scheme.
@@ -159,81 +163,82 @@ blocks. The full order and its rules: [dictation.md](./docs/architecture/dictati
 - `memory.rs` (+ `memory/`) — what Yap remembers about you (`memory.json`): learned from quiet chats and meetings (a model without tools by the careful small path, `memory/small.rs`), sent with questions, remember/forget/search_chats tools, names for dictation, export, Undo.
 
 **Web search and apps** — [web-and-apps.md](./docs/architecture/web-and-apps.md)
-- `web.rs` (+ `web/native.rs`) — web search (Exa/Tavily/wikis, or the provider's own), guarded page reads.
-- `apps.rs` — opens Start-menu apps on request: index, matching, fast path, consent.
+- `web.rs` (+ `web/`: native, wiki, page, turn, grounding) — web search (Exa/Tavily/wikis, or the provider's own), guarded page reads.
+- `apps.rs` (+ `apps/`: index, matching, plan, tools, win) — opens Start-menu apps on request: index, matching, fast path, consent.
 
 **Spoken replies** — [spoken-replies.md](./docs/architecture/spoken-replies.md)
-- `tts.rs` (+ `tts/`) — Kokoro / Windows voices / ElevenLabs (cloud, own key, local voice as fallback), text normalisation, the speaker queue (a read-aloud paced a sentence ahead, its position, pause), Kokoro's download; `tts/marks.rs` word timing (Windows' word cues, ElevenLabs' timestamps, else from Kokoro's audio).
-- `read_aloud.rs` — Read aloud, anywhere: the selection in any app (shortcut, 🔊 on the bar, tray), notes and Chat answers read with a karaoke reading card on the Yap bar; ⏮ ⏯ ⏭, speed, Stop, Esc.
+- `voice/tts.rs` (+ `voice/tts/`: the engines, text, speaker, playback) — Kokoro / Windows voices / ElevenLabs (cloud, own key, local voice as fallback), text normalisation, the speaker queue (a read-aloud paced a sentence ahead, its position, pause), Kokoro's download; `voice/tts/marks.rs` word timing (Windows' word cues, ElevenLabs' timestamps, else from Kokoro's audio).
+- `voice/read_aloud.rs` — Read aloud, anywhere: the selection in any app (shortcut, 🔊 on the bar, tray), notes and Chat answers read with a karaoke reading card on the Yap bar; ⏮ ⏯ ⏭, speed, Stop, Esc.
 
 **Notes** — [notes.md](./docs/architecture/notes.md)
 - `notes.rs` — the notes store (`notes.json`), folders, the Actions engine, transcript fields.
-- `note_edits.rs` — notes you can fix: a transcript line's words (marked edited, kept through Transcribe again, offered to the dictionary), the summary's words; a summary run never writes over the person's unasked ("kept").
-- `tasks.rs` — the summary's checkboxes: ticked in place (`- [x]`), carried into a new summary, listed across notes for the Tasks view ("Said at" the line), read only over the local API / MCP.
+- `notes/note_edits.rs` — notes you can fix: a transcript line's words (marked edited, kept through Transcribe again, offered to the dictionary), the summary's words; a summary run never writes over the person's unasked ("kept").
+- `notes/tasks.rs` — the summary's checkboxes: ticked in place (`- [x]`), carried into a new summary, listed across notes for the Tasks view ("Said at" the line), read only over the local API / MCP.
 
 **Meetings** — [meetings.md](./docs/architecture/meetings.md) (guide: [`docs/meetings.md`](./docs/meetings.md))
-- `meeting.rs` — the recorder: mic + loopback, chunking, echo, dictations kept out, one clock; failed chunks marked (told once); one recorder per start (the slot claimed first); `delete_note` never the recording's; `replay` from disk.
-- `meeting_audio.rs` (+ `meeting_audio/`) — the meeting's audio kept on disk as it records (own FLAC encoder, 14 days): crash recovery, Transcribe again (`redo.rs`: notes, summary, names on matching lines kept), Try again on a failed stretch, ▶ a line; jobs with Cancel.
-- `meeting_summary.rs` — rolling digests, bounded inputs, action-plan checks, helper inputs.
-- `meeting_end.rs` — a recording's end: "Started by mistake?", AI title, the action-plan job; the refine before or after it.
-- `meeting_refine.rs` — the refined transcript when a meeting ends: when it helps (failed chunks, a more accurate model for its language), always or never; summary first unless the transcript has holes; low priority, cancellable.
-- `meeting_assist.rs` — the notepad's AI: What did I miss?, one-tap helpers, the AI title.
-- `notepad.rs` — the meeting notepad window: docking, split screen and its preview.
+- `meetings/meeting.rs` — the recorder: mic + loopback, chunking, echo, dictations kept out, one clock; failed chunks marked (told once); one recorder per start (the slot claimed first); `delete_note` never the recording's; `replay` from disk.
+- `meetings/meeting_audio.rs` (+ `meetings/meeting_audio/`) — the meeting's audio kept on disk as it records (own FLAC encoder, 14 days): crash recovery, Transcribe again (`redo.rs`: notes, summary, names on matching lines kept), Try again on a failed stretch, ▶ a line; jobs with Cancel.
+- `meetings/meeting_summary.rs` (+ `meeting_summary/`: digest, action_plan, helpers) — rolling digests, bounded inputs, action-plan checks, helper inputs.
+- `meetings/meeting_end.rs` — a recording's end: "Started by mistake?", AI title, the action-plan job; the refine before or after it.
+- `meetings/meeting_refine.rs` — the refined transcript when a meeting ends: when it helps (failed chunks, a more accurate model for its language), always or never; summary first unless the transcript has holes; low priority, cancellable.
+- `meetings/meeting_assist.rs` — the notepad's AI: What did I miss?, one-tap helpers, the AI title.
+- `meetings/notepad.rs` — the meeting notepad window: docking, split screen and its preview.
 
 **Speakers** — [speakers.md](./docs/architecture/speakers.md)
-- `diarize.rs` (+ `diarize/`) — the beta speaker engine: the `yap.exe diarize` child, its wire, models.
+- `speakers/diarize.rs` (+ `speakers/diarize/`) — the beta speaker engine: the `yap.exe diarize` child, its wire, models.
 - `speakers.rs` (+ `speakers/labels.rs`) — the speaker map, names on lines, lines split by voice.
 - `speakers/naming.rs` — who each voice is: names suggested from what's said and the invite (+ the AI's checked answers), "Speaker 2 is Priya?" cards, "It was me".
 - `speakers/call_ui.rs` — who the call app shows talking (experimental, off): UI Automation reads on the meeting's clock; `yap.exe call-dump`.
 
 **Call detection and guard rails** — [call-detection-and-guards.md](./docs/architecture/call-detection-and-guards.md)
-- `meeting_detect.rs` — notices calls (mic consent store), prompts, per-app choice, fatigue, tray item.
-- `app_icons.rs` — the call apps' own installed icons, cached.
-- `meeting_guard.rs` — length limit, quiet meetings, check-ins, the meeting shortcut, notices.
-- `capture.rs` — hides meeting windows from screen capture while recording; every Yap window out of a snip's capture.
+- `calls/meeting_detect.rs` — notices calls (mic consent store), prompts, per-app choice, fatigue, tray item.
+- `calls/app_icons.rs` — the call apps' own installed icons, cached.
+- `calls/meeting_guard.rs` — length limit, quiet meetings, check-ins, the meeting shortcut, notices.
+- `calls/capture.rs` — hides meeting windows from screen capture while recording; every Yap window out of a snip's capture.
 
 **Calendar** — [calendar.md](./docs/architecture/calendar.md) (guide: [`docs/calendar.md`](./docs/calendar.md))
 - `calendar.rs` (+ `calendar/`) — Google/iCal connections, sync, parsing, reminder cards, notes tie-in, pre-meeting briefs (`calendar/brief.rs`: last time, open items, memory, the agenda, every line cited; the AI's lines checked).
 
 **Yap bar** — [yap-bar.md](./docs/architecture/yap-bar.md)
 - `bar.rs` — the bar: regions, click-through, never focused, placement, one card at a time.
-- `overlay.rs` — the bar window's Win32 side and its pure placement / hit-test maths.
+- `bar/overlay.rs` — the bar window's Win32 side and its pure placement / hit-test maths.
 
 **Notices** — [notices.md](./docs/architecture/notices.md)
-- `notice.rs` — the notice policy: one place, priorities, holds, cooldowns, call-prompt fatigue.
-- `alert.rs` — one-off notices to act on (paste blocked, mic blocked…), one button.
-- `win_toast.rs` — Windows notification plumbing (WinRT), banners and quiet posts.
+- `notices/notice.rs` — the notice policy: one place, priorities, holds, cooldowns, call-prompt fatigue.
+- `notices/alert.rs` — one-off notices to act on (paste blocked, mic blocked…), one button.
+- `notices/win_toast.rs` — Windows notification plumbing (WinRT), banners and quiet posts.
 
 **Integrations** — [integrations.md](./docs/architecture/integrations.md)
-- `bridge.rs` — the token-authenticated local API (`~/.yap/cli-bridge.json`).
-- `mcp.rs` — `yap.exe mcp`: Yap's MCP server over the local API (meetings + notes only).
-- `mcp_clients.rs` — "Add to Claude / ChatGPT / …": edits AI apps' configs safely.
+- `integrations/bridge.rs` — the token-authenticated local API (`~/.yap/cli-bridge.json`).
+- `integrations/mcp.rs` — `yap.exe mcp`: Yap's MCP server over the local API (meetings + notes only).
+- `integrations/mcp_clients.rs` — "Add to Claude / ChatGPT / …": edits AI apps' configs safely.
 
 **Accounts** — [accounts.md](./docs/architecture/accounts.md)
 - `auth.rs` — optional accounts: browser/email/phone sign-in, the session, where you're signed in.
 
 **Network receipts, Report a problem** — [privacy-receipts.md](./docs/architecture/privacy-receipts.md)
-- `net.rs` — every request through one place (`.send_for(Purpose)`, the feature from `net::within`): host, purpose, status, bytes, never content; on this PC / your network / internet; `connections.json` (7 days, folded per 10 min); the updater, the Local API and the account picture by hand.
-- `diagnostics.rs` — Report a problem: a .zip shown before it's saved (system, an allow-listed settings summary, connections, errors, 3 days of `info`+ logs scrubbed); Save dialog, never uploaded; GitHub's new-issue page.
+- `privacy/net.rs` — every request through one place (`.send_for(Purpose)`, the feature from `net::within`): host, purpose, status, bytes, never content; on this PC / your network / internet; `connections.json` (7 days, folded per 10 min); the updater, the Local API and the account picture by hand.
+- `privacy/diagnostics.rs` — Report a problem: a .zip shown before it's saved (system, an allow-listed settings summary, connections, errors, 3 days of `info`+ logs scrubbed); Save dialog, never uploaded; GitHub's new-issue page.
 
 **Updates** — [updates-and-release.md](./docs/architecture/updates-and-release.md)
 - `updates.rs` — background update checks and downloads, announcements, safe install.
 
 **App shell, config, tests** — [app-shell.md](./docs/architecture/app-shell.md), [config-and-data.md](./docs/architecture/config-and-data.md), [build-and-test.md](./docs/architecture/build-and-test.md)
 - `main.rs` — entry; `yap.exe mcp` / `diarize` / `eval` / `bench` / `call-dump` / `snip-dump` run before the app starts.
-- `bench.rs` (+ `bench/`) — `yap.exe bench` (release builds too): speech, AI cleanup and a cold start timed on this PC and on it held to 4 / 2 threads (emulated), a table + shareable JSON; read only ([`docs/benchmarks.md`](./docs/benchmarks.md), build-and-test.md).
-- `lib.rs` — Tauri setup: plugins, hook + pipeline, tray, shutdown cleanup, DWM-cloak init.
-- `tray.rs` — tray icon and menu (models, Paste last transcript, Read selection aloud, Snip to Chat, Record this call, updates).
-- `context_menu.rs` — WebView2's context menu cut to editing commands (Inspect: debug + Shift).
-- `procs.rs` — process lineage; the kill-on-close job so helpers never outlive Yap.
-- `webview_memory.rs` — hidden windows' webviews get WebView2's low memory target; back to normal on screen.
-- `theme.rs` — the theme on the Rust side: the opaque windows' webview backgrounds (no white flash), onboarding's title bar, Windows' app mode (frontend.md).
-- `portable.rs` — portable mode (a `portable` marker → `<exe>/Data`).
-- `commands.rs` — the Tauri commands; logging is `lib.rs init_logging` (app-shell.md).
+- `shell/bench.rs` (+ `shell/bench/`) — `yap.exe bench` (release builds too): speech, AI cleanup and a cold start timed on this PC and on it held to 4 / 2 threads (emulated), a table + shareable JSON; read only ([`docs/benchmarks.md`](./docs/benchmarks.md), build-and-test.md).
+- `lib.rs` — setup and wiring: the module list, plugins, every command (`generate_handler!`), hotkeys → pipeline, shutdown cleanup.
+- `shell/tray.rs` — tray icon and menu (models, Paste last transcript, Read selection aloud, Snip to Chat, Record this call, updates).
+- `shell/context_menu.rs` — WebView2's context menu cut to editing commands (Inspect: debug + Shift).
+- `shell/procs.rs` — process lineage; the kill-on-close job so helpers never outlive Yap.
+- `shell/webview_memory.rs` — hidden windows' webviews get WebView2's low memory target; back to normal on screen.
+- `shell/theme.rs` — the theme on the Rust side: the opaque windows' webview backgrounds (no white flash), onboarding's title bar, Windows' app mode (frontend.md).
+- `shell/portable.rs` — portable mode (a `portable` marker → `<exe>/Data`).
+- Commands: each module's own, else its area's `commands.rs` (dictation, notes, chat, ai, meetings) (app-shell.md).
+- `shell/window.rs` / `settings.rs` / `autostart.rs` / `logging.rs` / `commands.rs` — the main window and onboarding (DWM-cloaked first show); config saved and applied; launch at sign-in; the log; links, portable.
 - `config.rs` — `YapConfig`, load/save (one at a time; `update` in one step; an unreadable file set aside, the person told), migrations, dictionary helpers (config-and-data.md).
-- `saving.rs` — every JSON store's writes: a failed one keeps the data in memory, retried with the next save, said once ("Couldn't save your note: the disk is full." as a command's error with Try again, else one notice) (config-and-data.md).
-- `e2e.rs` / `realtest.rs` — test mode, and robot mode's real pastes into the test's own windows.
-- `log_privacy.rs` — a test: no user content in the log at `info` and above (app-shell.md, Logging).
+- `shell/saving.rs` — every JSON store's writes: a failed one keeps the data in memory, retried with the next save, said once ("Couldn't save your note: the disk is full." as a command's error with Try again, else one notice) (config-and-data.md).
+- `shell/e2e.rs` / `shell/realtest.rs` — test mode, and robot mode's real pastes into the test's own windows.
+- `privacy/log_privacy.rs` — a test: no user content in the log at `info` and above (app-shell.md, Logging).
 
 ## Frontend index (`src/`)
 
@@ -261,14 +266,14 @@ blocks. The full order and its rules: [dictation.md](./docs/architecture/dictati
 
 ## Gotchas that bite (details in the linked docs)
 
-- When one of Yap's own WebView2 windows has focus the global hook never fires: every window with focusable UI needs the **in-page hotkey fallback** (`input_hook.rs`).
+- When one of Yap's own WebView2 windows has focus the global hook never fires: every window with focusable UI needs the **in-page hotkey fallback** (`dictation/input_hook.rs`).
 - WebView2 keeps `document.visibilityState === 'visible'` while a window is hidden: window visibility comes from Rust (`updates.rs`).
-- Never swap the hidden windows' **DWM cloak** for "park off-screen, show+hide" (`lib.rs`).
+- Never swap the hidden windows' **DWM cloak** for "park off-screen, show+hide" (`shell/window.rs`).
 - Never `window.confirm/alert/prompt` in a Yap window — use `ui/ConfirmDialog.svelte` (`frontend.md`).
 - The bar window is transparent: no `backdrop-filter`, no big shadows (`yap-bar.md`).
 - A **signed-out Yap never contacts the account service** on its own (`auth.rs`).
-- No user content in logs at `info`/`warn`/`error` — lengths, counts and ids only; the text at `debug` at most, never keys (`log_privacy.rs` checks; `app-shell.md`, Logging).
-- Lock rules in `meeting_detect.rs` and `calendar.rs`: never touch windows/WinRT/the network under their state locks.
+- No user content in logs at `info`/`warn`/`error` — lengths, counts and ids only; the text at `debug` at most, never keys (`privacy/log_privacy.rs` checks; `app-shell.md`, Logging).
+- Lock rules in `calls/meeting_detect.rs` and `calendar.rs`: never touch windows/WinRT/the network under their state locks.
 - New settings that must change saved values once go in `config::migrate_once` (`config-and-data.md`).
 
 ---
@@ -392,7 +397,7 @@ store writes atomically and quarantines a corrupt file instead of crashing —
 config.json too: set aside, never saved over, the person told; its saves one at a time
 (`config::update`; [config-and-data.md](./docs/architecture/config-and-data.md)). A write
 that fails (a full disk, a file another program holds) keeps the data in memory, is
-retried with the next save and is said once, with Try again (`saving.rs`); temp files a
+retried with the next save and is said once, with Try again (`shell/saving.rs`); temp files a
 crash mid-write left are swept at start-up (Yap's own names only). Secrets
 never go in files: the account session and calendar tokens live in Windows Credential
 Manager. The local API's discovery file is `~/.yap/cli-bridge.json`.

@@ -9,11 +9,11 @@ The AI Notepad: the notes store, folders, the Actions engine, notes you can fix 
 - **`notes.rs`** — the AI Notepad's data layer (`notes.json`, camelCase). Stores:
   `content` (raw markdown, never overwritten by AI: the **My thoughts** tab),
   `enhanced_content` (the **Summary** tab; its tasks' ticks are its own
-  `- [x]`, `tasks.rs`), `enhanced_at_hash` (OpenWhispr's
+  `- [x]`, `notes/tasks.rs`), `enhanced_at_hash` (OpenWhispr's
   `len+first-50` staleness marker), `summary_edited_ms` (the person changed
   the summary's words: Yap never writes over it unasked) and `summary_ts`
   (when the summary's input was read: "New since this summary"; both 0 and
-  unwritten on older notes, `note_edits.rs`), `folder` (string, seeded with Personal +
+  unwritten on older notes, `notes/note_edits.rs`), `folder` (string, seeded with Personal +
   Meetings), `folder_chosen` (the person moved the note there: `apply_update`
   sets it on any folder change — the Notes view, the local API, Chat),
   `participants`
@@ -25,12 +25,12 @@ The AI Notepad: the notes store, folders, the Actions engine, notes you can fix 
   `end_ms` (place on that recording's clock, ms; none on old lines and
   markers), `words` (`[start, end]` ms from `start_ms` per word of `text`,
   when the model gave times), `edited` + `original` (the person fixed its
-  words; what Yap heard: `note_edits.rs`, below); `echo` marks
+  words; what Yap heard: `notes/note_edits.rs`, below); `echo` marks
   speaker bleed, `dictated` a "You dictated here" marker — no text, `ts` where
   a mid-meeting dictation began; `failed` a stretch the speech model couldn't
   transcribe — no text, `start_ms`..`end_ms` the stretch, "Couldn't
-  transcribe 0:42–1:12 · Try again" (`meeting.rs`, "Failed chunks");
-  `is_talk()` = none of them, what every summary input reads), `speakers` (the speaker map, see `speakers.rs`), `digests` (rolling meeting digests, see `meeting_summary.rs`),
+  transcribe 0:42–1:12 · Try again" (`meetings/meeting.rs`, "Failed chunks");
+  `is_talk()` = none of them, what every summary input reads), `speakers` (the speaker map, see `speakers.rs`), `digests` (rolling meeting digests, see `meetings/meeting_summary.rs`),
   `breaks` (the transcript's length at each stop — the notepad's paused
   dividers; `add_break`, never twice at one place or at 0),
   `note_type` ("personal" | "meeting"), `source` ("manual" | "upload" |
@@ -44,11 +44,11 @@ The AI Notepad: the notes store, folders, the Actions engine, notes you can fix 
   only the fields it edited). `modify(id, f)` changes one note under the store lock
   (read and write in one step — the chat's `edit_note`, "Transcribe again";
   only a change bumps `updated_ts` and saves). `insert_transcript` puts
-  lines transcribed after the fact (a crash's, `meeting_audio.rs`) where they
+  lines transcribed after the fact (a crash's, `meetings/meeting_audio.rs`) where they
   belong by time, digests and stop marks moving along (a stop mark after
   them when a later recording follows). `delete` takes the note's meeting
   audio with it (`meeting_audio::forget`). **Saves** go through `SAVER`
-  (`saving.rs`, [config-and-data.md](./config-and-data.md)): a failed one
+  (`shell/saving.rs`, [config-and-data.md](./config-and-data.md)): a failed one
   keeps the notes in memory and is written with the next change; the
   commands that change notes return it as their error (`saved()`: "Couldn't
   save your note: the disk is full."), which the Notes view and the notepad
@@ -60,7 +60,7 @@ The AI Notepad: the notes store, folders, the Actions engine, notes you can fix 
   service), set by `link_event` (also the meeting's title as a real title,
   attendees merged, `note_type` meeting) and found by `find_by_event`.
   **A recording files its note** (`file_as_meeting`, from
-  `commands::meeting_start`, every way a recording starts): it becomes a
+  `meetings::commands::meeting_start`, every way a recording starts): it becomes a
   meeting note and, if it sits in Personal by default (not `folder_chosen`),
   moves to Meetings — where "Take notes", call detection, the bar and the
   calendar put theirs — and `yap-note-filed {noteId, from, to}` (+
@@ -85,7 +85,7 @@ The AI Notepad: the notes store, folders, the Actions engine, notes you can fix 
   moved note + `yap-notes-changed`. **Actions** (named
   prompt fragments) are built-in protected set (seeded "Generate Notes",
   "Meeting Notes", "Action Items", "Action Plan") + user-created; `note_enhance`
-  (commands.rs) invokes the **Actions engine**: picks an action by id, runs the
+  (`notes/commands.rs`) invokes the **Actions engine**: picks an action by id, runs the
   Note Formatting scope's endpoint + the action's editable prompt (fallback →
   global cleanup endpoint), at temp 0.3 under an immutable base prompt:
   `llm::NOTE_BASE_PROMPT` (OpenWhispr's BASE_SYSTEM_PROMPT verbatim),
@@ -96,19 +96,19 @@ The AI Notepad: the notes store, folders, the Actions engine, notes you can fix 
   prompts are never clobbered. For **meeting notes** the input comes from
   `meeting_summary` (the raw transcript when short, else digests + the latest
   stretch, after digesting any backlog); the Action Plan runs in Rust when a
-  recording ends (`meeting_end.rs`: anything but Pause), through
-  `commands::run_enhance` (the body of `note_enhance`, with step reporting),
+  recording ends (`meetings/meeting_end.rs`: anything but Pause), through
+  `notes::commands::run_enhance` (the body of `note_enhance`, with step reporting),
   which stores the result through `note_edits::write_summary` (never over the
   person's edited summary unless `replace`; ticks carried over).
   `set_enhanced` is the evaluations' and the tests' only (debug builds).
 
-## Notes you can fix (`note_edits.rs`, `tasks.rs`)
+## Notes you can fix (`notes/note_edits.rs`, `notes/tasks.rs`)
 
 Guide: [`docs/meetings.md`](../meetings.md#fixing-the-notes) (Wispr Flow's
 Notetaker lets you fix lines, edit the summary and tick tasks; Yap's private
 roadmap, "Meeting notes you can fix" and "Tasks").
 
-- **`note_edits.rs`** — **a transcript line's words**
+- **`notes/note_edits.rs`** — **a transcript line's words**
   (`transcript_line_edit(noteId, line: LineRef {index, source, ts, startMs,
   text}, text, origin)` → `{index, line, changed, offer}`): the line found
   where the window showed it, else wherever the same line went (a split by
@@ -128,7 +128,7 @@ roadmap, "Meeting notes you can fix" and "Tasks").
   `apply_summary_edit`, pure): a change of words stamps `summary_edited_ms`, a
   change of ticks alone doesn't (`tasks::same_but_ticks`), emptied = no
   summary, written from nothing = made from the notes as they are; Chat's
-  `edit_note` on the summary goes through it too (`note_text.rs`). **The
+  `edit_note` on the summary goes through it too (`chat/note_text.rs`). **The
   rule** (`write_summary`, `keeps_summary`, `may_replace`): a summary run
   goes over the person's summary only with `replace` (the window asked:
   `noteEdits.js` `askReplaceSummary`) and when their last edit came before
@@ -137,7 +137,7 @@ roadmap, "Meeting notes you can fix" and "Tasks").
   (`meeting_summarise(noteId, replace)`, `note_enhance(id, actionId,
   replace)`). A written summary clears the mark, sets `summary_ts` = the read
   time (seconds) and keeps the old summary's ticks.
-- **`tasks.rs`** — **the checkboxes in a summary**: `parse` (pure; line by
+- **`notes/tasks.rs`** — **the checkboxes in a summary**: `parse` (pure; line by
   line, fenced code skipped; `- * + •` bullets; owner from `### Name` — not a
   heading like "Action items" —, inline "Dave: …", or "Unassigned" under
   `## Unassigned`; "You"/"Everyone" normalised; `(due: …)` split off; `**`
@@ -150,8 +150,8 @@ roadmap, "Meeting notes you can fix" and "Tasks").
   tasks, newest first, each task with its `at {index, ts, secs}`). Commands
   `tasks_list`, `note_task_set(noteId, line, text, done, origin)` (→ the
   summary; `yap-note-changed` with `enhancedContent`, `summaryEditedMs`,
-  `summaryTs`). Read only outside the app: `bridge.rs` `GET /v1/tasks/list`,
-  `mcp.rs` `list_tasks` ([integrations.md](./integrations.md)). The
+  `summaryTs`). Read only outside the app: `integrations/bridge.rs` `GET /v1/tasks/list`,
+  `integrations/mcp.rs` `list_tasks` ([integrations.md](./integrations.md)). The
   pre-meeting brief's open items (`calendar/brief.rs` `plan_tasks`) read only
   `- [ ]`, so a ticked task drops out of the next brief.
 - **Frontend** — `lib/noteEdits.js` (`editLine`, `taskToggled` + `setTask`,
@@ -186,7 +186,7 @@ roadmap, "Meeting notes you can fix" and "Tasks").
   on meeting notes, a **Notepad** chip (`notepad_open`), **🔊 Read aloud**
   (■ while it reads: the note as shown — its title, then the summary on
   the Summary tab, else the note — read with the reading card on the Yap
-  bar, `read_aloud.rs`; id `note:<id>`; it reads on if you leave Notes),
+  bar, `voice/read_aloud.rs`; id `note:<id>`; it reads on if you leave Notes),
   export-to-markdown;
   ActionPicker split button + ActionManager dialog for custom actions +
   protected built-ins — while recording it becomes **End meeting &
@@ -220,10 +220,10 @@ roadmap, "Meeting notes you can fix" and "Tasks").
   **meeting transcript bubbles** under their speaker's name, once per run of
   one voice (`transcriptItems`; the name opens the speaker menu, below; follow
   the newest line; ▶ beside a bubble on hover, and Play this line in its
-  menu, plays its stretch of the meeting's kept audio — `meeting_audio.rs`;
+  menu, plays its stretch of the meeting's kept audio — `meetings/meeting_audio.rs`;
   a line's words fixed by double-click, Enter or F2 on it, or **Edit line**
   in its menu (Enter saves, Escape cancels, leaving saves; "edited" after
-  it, what Yap heard in its tooltip; `note_edits.rs`); opened from the
+  it, what Yap heard in its tooltip; `notes/note_edits.rs`); opened from the
   Tasks view at a line, that line scrolled to, focused and lit a moment
   (`noteRequest {id, line}`);
   over them "Transcribing again…" or, after a crash, "Yap closed while this
@@ -278,7 +278,7 @@ roadmap, "Meeting notes you can fix" and "Tasks").
   rather than return unsanitised HTML. **Yap's own rules** (markdown-it
   rules in the file): links are `a.md-link` with the address as their
   `title`, opened in the browser by main.js's click handler
-  (`open_external`); **a web answer** (`options.sources`, chats.rs): "[1]" /
+  (`open_external`); **a web answer** (`options.sources`, chat/chats.rs): "[1]" /
   "[2, 3]" become `span.md-cites > a.md-link.md-cite` pills titled with the
   source (not a link's own text or inline code; an unknown number stays
   text), and only the sources' own links stay links (compared after
@@ -290,7 +290,7 @@ roadmap, "Meeting notes you can fix" and "Tasks").
   checked and disabled), disabled except with `options.tickable` (a note's
   Summary in the Notes view and the notepad: the checkbox is enabled, and
   `taskLines(md)` gives each checkbox's source line in render order, from
-  the same parse — `tasks.rs` ticks that line); tables in
+  the same parse — `notes/tasks.rs` ticks that line); tables in
   `div.md-table` (scrolls sideways) with the rule line's `:--:` / `--:` as
   classes `c` / `r`, ending at a line without a pipe (GitHub's spec would
   make the next sentence a row); fenced and indented code → `pre.md-code >

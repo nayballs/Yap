@@ -8,21 +8,21 @@ How a dictation runs: the hotkey and push-to-talk gestures, the mic, speech-to-t
 
 Pipeline order after transcription: **AI cleanup (in the style of the kind
 of app it goes into — email formal, chats casual, AI prompts literal,
-terminal commands as said: `cleanup_styles.rs`, [ai-models.md](./ai-models.md);
+terminal commands as said: `ai/cleanup_styles.rs`, [ai-models.md](./ai-models.md);
 the person's own app rules first, as ever) → dictionary (exact, then a
-fuzzy near-miss pass) → names on screen (`screen_terms.rs`: a name heard a
+fuzzy near-miss pass) → names on screen (`dictionary/screen_terms.rs`: a name heard a
 little wrong spelled as the window shows it) → the "press enter" voice
 command → snippets → fit to the
-kind of app (`app_kind.rs`: a terminal gets one line and no trailing space; a
+kind of app (`pasting/app_kind.rs`: a terminal gets one line and no trailing space; a
 chat app's short message loses its full stop) and to the text around the
 cursor (smart spacing; where the field couldn't be read, append-space as
 before) → inject (Ctrl+V, or the terminal's own paste keys — Shift+Insert in
 Git Bash, Ctrl+Shift+V in Alacritty…; a paste a Win32 text box never got is
 typed instead, once; an app running as administrator takes no keys from Yap:
-the text is left on the clipboard and the person told, `elevated.rs`) →
+the text is left on the clipboard and the person told, `pasting/elevated.rs`) →
 submit key (auto-submit or the voice command, once; in a
 terminal Enter, only for the voice command or a coding CLI's auto-submit) —
-or, with no submit key, the correction watch (`learn.rs`: fix a word Yap
+or, with no submit key, the correction watch (`dictionary/learn.rs`: fix a word Yap
 typed and it offers to add it to the dictionary)**
 (`pipeline::finish_dictation_with` does the dictionary, the names on screen,
 the command and snippets;
@@ -42,7 +42,7 @@ the model (the 4B mostly; the 1.5B hardly — docs/model-evals.md). The dictiona
 (ASR biasing, threaded through `SttEngine::transcribe` at every call site —
 dictation/partials/upload/meeting — the words used most lately first,
 `dict_usage::ranked`; plus an OpenWhispr-ported prompt-echo guard
-in `stt.rs`), **ONNX models** get **`fuzzy.rs`** — Levenshtein + Soundex 1–3-word
+in `dictation/stt.rs`), **ONNX models** get **`dictionary/fuzzy.rs`** — Levenshtein + Soundex 1–3-word
 n-gram correction ("jaison"→"JSON", "Chat G P T"→"ChatGPT"; threshold 0.18,
 ≥3-char terms), gated by `config.dictionary_fuzzy` (default on, "Catch
 near-misses" toggle in the Dictionary view) with a **per-entry ≈ opt-out**
@@ -71,7 +71,7 @@ question — that is only "snip", "snip it", "take a snip", "screenshot" or
 "take a screenshot" starts Snip to Chat ([snip.md](./snip.md)) instead of a
 paste or a question; inside a sentence ("snip the ends off") it's dictated.
 **Names on screen** ("Spell names the way they're written on screen",
-`screen_names`, on; [dictionary.md](./dictionary.md), `screen_terms.rs`):
+`screen_names`, on; [dictionary.md](./dictionary.md), `dictionary/screen_terms.rs`):
 `capture_target` starts a background read of the target window's visible
 text beside the cursor read (a pasted dictation only: not a rewrite, the
 assistant or the Chat box); `deliver` takes them once
@@ -90,7 +90,7 @@ again), the names on screen (the same `screen_terms::take()` the cleanup
 and `finish_dictation_with` got: taken once per dictation in `deliver`),
 the voice command and snippets — and fits them to the same place
 (`text_injector::prepare_dictation_as_said`), so **"Use what I said"**
-(`as_said.rs`, [pasting.md](./pasting.md)) can swap the paste for them; the
+(`pasting/as_said.rs`, [pasting.md](./pasting.md)) can swap the paste for them; the
 bar offers it for a few seconds when the words differ (`yap-state`
 "cleaned", `Shared::end_state`). History keeps them beside the text
 (`said`, fitted the same way; `history::record_dictation`), so Home shows
@@ -101,18 +101,18 @@ what I said** later ([frontend.md](./frontend.md)); the paste is then the
 rewrite shortcut with nothing selected, within `as_said::REWRITE_WITHIN`
 (a minute) of a paste into the window in front (not a terminal), applies
 the instruction to that paste instead of writing new text — see
-`pipeline.rs` below. Settings → Commands → "Rewrite your last dictation
+`dictation/pipeline.rs` below. Settings → Commands → "Rewrite your last dictation
 when nothing is selected" (`rewrite_last_dictation`, on) turns it off:
 nothing selected then always writes new text, as before. **Every dictation's audio** is kept a day
-(`recent_audio.rs`, below) from `run_stt`'s start, and its history entry
+(`dictation/recent_audio.rs`, below) from `run_stt`'s start, and its history entry
 carries it; a dictation that never got transcribed (no model, the model
 failed, Yap closed mid-way) or whose paste didn't land is listed as such,
 to **Run again** from Home.
 
 ## Modules
 
-- **`pipeline.rs`** — the heart. Owns the shared state (`recording`, audio
-  `buffer`, idle `preroll` ring, the mic — `mic.rs`, opened on demand —, warm
+- **`dictation/pipeline.rs`** — the heart. Owns the shared state (`recording`, audio
+  `buffer`, idle `preroll` ring, the mic — `dictation/mic.rs`, opened on demand —, warm
   STT `engine`, live `config`, `last_activity`, `target_hwnd`). The mic's
   audio (`mic::Sink` for `Shared`: downmixed→mono, resampled→16 kHz on the
   audio thread) is buffered while recording — and from the moment
@@ -157,15 +157,15 @@ to **Run again** from Home.
   the idle unload, `set_engine`). Unit-tested (`a_dictation_waits_for_the_
   engine_a_meeting_chunk_has_out` fails on the old take-or-load).
   `recording_mode` selects toggle vs push-to-talk; in push-to-talk `on_key` reads
-  **gestures** (`gesture.rs`, Wispr Flow's by behaviour): hold to talk, a quick tap
+  **gestures** (`dictation/gesture.rs`, Wispr Flow's by behaviour): hold to talk, a quick tap
   (< 300 ms) + a second press within 500 ms locks it **hands-free** until the next
   press (`yap-dictation-locked` → a lock on the overlay), a lone tap is thrown away
-  (never a junk dictation) and earns a coaching hint (`coaching.rs`), as does a
+  (never a junk dictation) and earns a coaching hint (`dictation/coaching.rs`), as does a
   hold of a minute or more. Key events and the tap timer act under one lock
   (`gesture`), timed by the input hook's own timestamps; a recording started or
   stopped elsewhere (the bar's Dictate, the tray's Cancel) is followed, and one
   started by Dictate stops on the next press. `run_stt` (async) transcribes, then
-  `deliver` (also robot mode's way in, `realtest.rs`; the target is captured by
+  `deliver` (also robot mode's way in, `shell/realtest.rs`; the target is captured by
   `capture_target`, mic audio arrives through `take_audio`) does cleanup →
   `finish_dictation` (dictionary via `apply_corrections`, shared with meetings
   and Upload; then the "press enter" command, then snippets) →
@@ -183,11 +183,11 @@ to **Run again** from Home.
   recording: `start_recording` (plain dictation, the edit hotkey, Commands by
   name, the assistant shortcut) calls `dictation_began()` and the stop/cancel `dictation_ended()`, one
   atomic (`DICTATION`: dictations started << 1 | recording) that
-  `meeting.rs` reads lock-free in its mic callback (`dictation_state()`) to
+  `meetings/meeting.rs` reads lock-free in its mic callback (`dictation_state()`) to
   keep dictations out of a meeting's "You" side. `PREROLL_SAMPLES` is shared
   with it (the meeting blanks a dictation's pre-roll too). **Commands** (two
   different things share no name any more, 2026-10-18: *Commands* type for
-  you, the *Voice Assistant* answers out loud): by name (`agent_detect.rs`,
+  you, the *Voice Assistant* answers out loud): by name (`dictation/agent_detect.rs`,
   OpenWhispr `detectAgentName` port) a dictation addressing the
   agent (`agent_name`, default "Yap"; fuzzy-matched) routes the whole
   transcript through the Commands scope (`llm_scopes["voiceAgent"]`, its key kept) in write mode (`run_agent`, shared with
@@ -232,7 +232,7 @@ to **Run again** from Home.
   kept for Undo; every early end calls `assistant::nothing`. **A pause ends
   the assistant's question** ("Stop listening when I pause",
   `assistant_stop_on_pause`, on; [chat-and-assistant.md](./chat-and-assistant.md),
-  `pause.rs`): `start_recording` arms a `PauseSlot` for the session
+  `dictation/pause.rs`): `start_recording` arms a `PauseSlot` for the session
   (`arm_pause`, an assistant recording only), `take_audio` feeds it the
   mic's audio, `fire_pending_start` says "speak now", `stream_partials`
   hands it each tick's words (`pause_words`, with the buffer length the
@@ -272,7 +272,7 @@ to **Run again** from Home.
   e2e `dictation-alerts.spec.js` (debug-only `e2e_crash_next_dictation`
   panics the next dictation's paste step on purpose). With `streaming_partials` on, `stream_partials` (a per-session worker)
   transcribes a bounded **sliding window** of the buffer every ~500 ms
-  (`partials.rs`: text older than the window freezes as committed text, the
+  (`dictation/partials.rs`: text older than the window freezes as committed text, the
   window advances at quiet points via `media::quietest_index`, 20 s hard cap —
   per-tick cost independent of recording length; de-flickered by `smart_diff`,
   adaptive backoff on slow machines, warm-loads the engine if it was
@@ -280,11 +280,11 @@ to **Run again** from Home.
   `model_unload_timeout`; the next dictation lazily reloads it. **No microphone** (none
   plugged in, a headset that connects after login, a CI runner) doesn't take the
   pipeline down: no stream is open until a recording needs one, every recording
-  tries to open it (`mic.rs`), picking a mic (`set_input_device`) switches a
+  tries to open it (`dictation/mic.rs`), picking a mic (`set_input_device`) switches a
   running stream live or checks the device is there, and a recording
   attempt without one says "No microphone found" (on the overlay) — or, when
   Windows' privacy switches are why, "Windows is blocking microphone access for
-  desktop apps" (`mic_privacy.rs`) — Upload, models and Settings work regardless. **Dead-mic watchdog** (`mic_watch.rs`): the audio
+  desktop apps" (`dictation/mic_privacy.rs`) — Upload, models and Settings work regardless. **Dead-mic watchdog** (`dictation/mic_watch.rs`): the audio
   callback tallies each recording's live audio (`mic_tally`: how much, any sample
   not exactly 0.0); a per-recording watcher (`spawn_mic_watch`) reopens the stream
   once (`reopen_mic` → `Mic::reopen`) after 2 s without audio or 3 s of
@@ -299,11 +299,11 @@ to **Run again** from Home.
   switches** (`mic_privacy::blocked`) are checked when a recording starts — if
   they block desktop apps it's said at once (`say_mic_blocked`: the overlay's
   "Windows is blocking the microphone" + an alert with **Open settings**,
-  `alert.rs`; `mic_dead` set, so a stop with no sound isn't transcribed; the
+  `notices/alert.rs`; `mic_dead` set, so a stop with no sound isn't transcribed; the
   recording goes on, and sound arriving takes it back) — and again before the
   watchdog's report, which then blames the switch instead of the mic.
   Opening, closing, the device switch and the reopen all happen on the mic's
-  own thread (`mic.rs`; the reopen stops the dead stream first).
+  own thread (`dictation/mic.rs`; the reopen stops the dead stream first).
   **Cancel and Undo**: `cancel(undo)` — the bar's ✕, the tray's Cancel and
   `cancel_recording` keep a recording of ≥ 0.5 s that heard a sound in `kept`
   (`Kept`: its audio, `target_hwnd`, `target_kind`, edit mode and selection)
@@ -320,7 +320,7 @@ to **Run again** from Home.
   closed window's never: `read_context` refuses a target whose process is
   gone). `Pipeline::stop` is the bar's ✓ (the hotkey's second
   press). `holds_undo` keeps the updater from restarting under a pending Undo.
-  **Kept audio and failures** (`recent_audio.rs`): `run_stt` keeps the
+  **Kept audio and failures** (`dictation/recent_audio.rs`): `run_stt` keeps the
   audio first (`audio_id`), `deliver_text` hands its id to the history entry
   (with `notPasted` when the paste didn't land: the app runs as
   administrator, its window was gone, an inject error), `list_failed` lists a
@@ -331,7 +331,7 @@ to **Run again** from Home.
   paste AI cleanup changed the words of (`Delivered.offer`), then "idle"
   unless something came after. `deliver` is cleanup (`clean_up`, also Run
   again's) then `deliver_text`.
-- **`gesture.rs`** — push-to-talk's pure gesture state machine: key down/up and
+- **`dictation/gesture.rs`** — push-to-talk's pure gesture state machine: key down/up and
   the clock in (`now_ms`, monotonic, also what the input hook stamps events
   with), Start / Stop / Discard / Lock + an optional hint + "tick me in N ms"
   out. States Idle → Held → (TapPending → LockHeld → Locked). `TAP_MAX_MS` 300,
@@ -339,7 +339,7 @@ to **Run again** from Home.
   dictation records right now and follows that first. `hands_free()`:
   locked (LockHeld / Locked), what the Voice Assistant's pause asks before
   it ends a question. Unit-tested.
-- **`coaching.rs`** — push-to-talk coaching hints: a lone tap → "Hold {key} while
+- **`dictation/coaching.rs`** — push-to-talk coaching hints: a lone tap → "Hold {key} while
   you talk" (or double-tap for hands-free), a minute-long hold → "Double-tap
   {key} for hands-free". Each ≤ 3 times, never within 10 min of another, none
   once double-tap has been used; counts in `<data>/hints.json` (not config.json:
@@ -351,7 +351,7 @@ to **Run again** from Home.
   Windows notification). "Show tips" off (`show_tips`) → none. Texts say
   `{key}`; the page names the hotkey (`fillHotkey` in `lib/hotkeys.js`; the
   card's `hotkey` field). Not for the edit hotkey.
-- **`input_hook.rs`** — low-level Windows keyboard + mouse hooks; specs `kb:VKEY`,
+- **`dictation/input_hook.rs`** — low-level Windows keyboard + mouse hooks; specs `kb:VKEY`,
   `kb:ctrl+shift+VKEY` (modifier combo; `win` is a modifier too, e.g. the
   meeting shortcut `kb:alt+win+77` = Win+Alt+M), `kb:165` (single right-side modifier, e.g.
   RightAlt — never suppressed, it's AltGr), `mods:ctrl+alt` (modifier-only chord) /
@@ -378,7 +378,7 @@ to **Run again** from Home.
   Settings' pause while a key is picked); a slot's press goes to the
   forwarder as `transform-key-N` and out as one `transform-key-pressed`
   event carrying the slot (releases dropped), which `lib.rs` hands to
-  `transforms::on_key` — see `transforms.rs` below. **`clashes(a, b)`** (pure, unit-tested;
+  `transforms::on_key` — see `dictation/transforms.rs` below. **`clashes(a, b)`** (pure, unit-tested;
   `hotkeysClash` in `lib/hotkeys.js` is the same rule, Settings refuses with
   it): the same key however written, combos on one key nesting (Ctrl+Space
   inside Ctrl+Shift+Space), a chord completing inside a combo or bigger
@@ -414,7 +414,7 @@ to **Run again** from Home.
   Copilot app). Many laptops send the key's press and release together, so
   holding it can't keep push-to-talk going: Settings → Dictation says so
   (double-tap for hands-free, or Toggle).
-- **`transforms.rs`** — **saved transforms** (2026-10-24; Wispr Flow's
+- **`dictation/transforms.rs`** — **saved transforms** (2026-10-24; Wispr Flow's
   Transforms, OpenWhispr's translation hotkey, Murmure's numbered rewrites,
   by behaviour): one-key rewrites applied **without speaking**. The list
   (`config.transforms`, Settings → Commands → Transforms,
@@ -441,7 +441,7 @@ to **Run again** from Home.
   nothing is selected" on, the same window, within a minute; then
   `rewrite_check`, the paste still ending at the cursor — else "Couldn't
   polish your last dictation", the AI not asked), else **"Nothing to
-  transform"**, said plainly (alerts, `alert.rs`). The model is the
+  transform"**, said plainly (alerts, `notices/alert.rs`). The model is the
   **Commands scope's** (`pipeline::commands_model`, shared with
   `run_agent`: its own provider when set up, else the cleanup model; the
   on-device sidecar or a cloud key) with **`llm::transform`**
@@ -463,7 +463,7 @@ to **Run again** from Home.
   the caret, and the text it replaced pasted back; refused → that text
   copied, said). The same text back from the AI: nothing pasted,
   "Polish: no changes needed". The AI failing or no model: on the bar as a
-  rewrite's failure is. Also the tray's **Transforms** submenu (`tray.rs`,
+  rewrite's failure is. Also the tray's **Transforms** submenu (`shell/tray.rs`,
   rebuilt when the list changes); not the bar's ^ menu, which manages the
   bar and Yap — the bar shows a transform running and its Undo instead. No
   in-page fallback in Yap's windows: a transform works on another app's
@@ -474,7 +474,7 @@ to **Run again** from Home.
   Unit tests (`transforms::tests`, `input_hook`'s slot test, `as_said`'s
   undoable), e2e `transforms.spec.js`, robot `e2e-real/transforms.real.js`
   (written, not yet run).
-- **`mic.rs`** — **the dictation's microphone, opened on demand**
+- **`dictation/mic.rs`** — **the dictation's microphone, opened on demand**
   (2026-10-22). Until then Yap held Windows' default mic open the whole time
   it ran, for the pre-roll: Windows showed the mic in use all day, a
   **Bluetooth headset dropped to its call profile (HFP) system-wide** (music
@@ -517,14 +517,14 @@ to **Run again** from Home.
   same wait covers. Against the old always-open ring, a cold start on a
   wired mic loses what was said in the 300 ms before the press and the
   ~30 ms after it.
-- **`mic_watch.rs`** — the dictation's dead-mic watchdog, pure: `MicTally`
+- **`dictation/mic_watch.rs`** — the dictation's dead-mic watchdog, pure: `MicTally`
   (lock-free, fed by the audio callback), `DeadMicWatch::poll(elapsed, samples,
   heard)` → Wait / Reopen / Report / Recovered / Fine, the messages (the full one
   and the overlay's short "No sound from <device> — is it muted?"). Only exact
   zeros count (a quiet room is never all zeros). Unit-tested over simulated
   callback chunks. Before it blames the mic, the pipeline asks Windows' privacy
-  switches (`mic_privacy.rs`). Meetings have their own quiet-side watch (`meeting.rs`).
-- **`mic_privacy.rs`** — Windows' microphone privacy switches, read only (never
+  switches (`dictation/mic_privacy.rs`). Meetings have their own quiet-side watch (`meetings/meeting.rs`).
+- **`dictation/mic_privacy.rs`** — Windows' microphone privacy switches, read only (never
   written): HKLM `…\CapabilityAccessManager\ConsentStore\microphone` `Value`
   ("Microphone access", the device), HKCU's ("Let apps access your
   microphone"), HKCU's — else HKLM's — `…\microphone\NonPackaged` ("Let desktop
@@ -533,13 +533,13 @@ to **Run again** from Home.
   missing value is no answer. Pure `decide` names the widest switch that's off
   (policy, device, apps, desktop apps), unit-tested. Asked at a recording's
   start, in the no-mic path and before the dead-mic watchdog's report (see
-  `pipeline.rs`): "Windows is blocking microphone access for desktop apps" +
+  `dictation/pipeline.rs`): "Windows is blocking microphone access for desktop apps" +
   which switch to turn on + **Open settings** (`ms-settings:privacy-microphone`)
-  as an alert (`alert.rs`), "Windows is blocking the microphone" in the
+  as an alert (`notices/alert.rs`), "Windows is blocking the microphone" in the
   overlay's line; logged when capture starts. Test mode reads no registry:
   debug-only `e2e_mic_privacy { blocked }` stands in; an `#[ignore]`d
   `mic_privacy_this_machine` prints this PC's switches.
-- **`stt.rs`** — `SttEngine` trait + a real `transcribe-rs` engine (`#[cfg(feature =
+- **`dictation/stt.rs`** — `SttEngine` trait + a real `transcribe-rs` engine (`#[cfg(feature =
   "engines")]`) and a stub (default build). Holds the **14-model registry**
   (`ModelDescriptor`: id/filename/url/sha256/is_directory/engine_type), resolves
   legacy/custom ids, and does download → SHA-256 verify → (tar.gz) extract.
@@ -573,7 +573,7 @@ to **Run again** from Home.
   for every model loaded (ONNX intra-op) or run (Whisper's `n_threads`)
   afterwards — `yap.exe bench`'s emulated small PCs only (both through the
   vendored transcribe-rs's new globals, its `YAP.md`).
-- **`stt_speed.rs`** — **the speech engine's device on this PC** (2026-10-22):
+- **`dictation/stt_speed.rs`** — **the speech engine's device on this PC** (2026-10-22):
   a one-time background benchmark per installed model and PC, **the
   graphics card unless the processor is clearly faster**. The clip
   (`assets/stt-speed-clip.wav`, ~36 s of Kokoro's af_bella — Apache-2.0 —
@@ -651,7 +651,7 @@ to **Run again** from Home.
   and with `YAP_PROFILE_SHAPES` / `_BUCKETS` / `_SAME` shows how DirectML's
   encoder takes lengths, fixed lengths, and the old path's words against the
   new one's.
-- **`recent_audio.rs`** — **never lose a dictation** (2026-10-22, Wispr
+- **`dictation/recent_audio.rs`** — **never lose a dictation** (2026-10-22, Wispr
   Flow's of Aug 2026): each dictation's audio (16 kHz mono 16-bit WAV) in
   `<data>/recent-audio/<id>.wav`, the id its time in unix ms, written on its
   own thread as `run_stt` starts (`keep`; not for edit mode or the Voice
@@ -670,7 +670,7 @@ to **Run again** from Home.
   gives the entry its new text and clears its failure; **Play**
   (`recent_audio_wav`: the WAV's bytes). Logs say ids and counts, never the
   folder's path beside text. Nothing here leaves the PC.
-- **`media.rs`** — audio-file decode front-end for Upload: pure-Rust **Symphonia**
+- **`dictation/media.rs`** — audio-file decode front-end for Upload: pure-Rust **Symphonia**
   (mp3/wav/m4a/aac/flac/ogg-vorbis; no opus yet) → downmix mono → 16 kHz
   (`pipeline::resample_linear`), plus `chunk_ranges` (~60 s windows cut at the
   quietest sample of each window's last 5 s). Consumed by
@@ -679,17 +679,17 @@ to **Run again** from Home.
   `pipeline::apply_corrections` — so a mis-hearing split across two chunks is
   still caught — and a history record with the raw and corrected text) via the
   `transcribe_file` command.
-- **`sound.rs`** — start/stop chimes (volume + output-device aware); each
+- **`dictation/sound.rs`** — start/stop chimes (volume + output-device aware); each
   takes an optional `Played` callback, run on the chime's thread once it has
-  played (or at once when it can't): how `mute.rs` goes after the start
+  played (or at once when it can't): how `dictation/mute.rs` goes after the start
   chime and comes back after the stop chime. `open_output` (the configured
-  output device, else the default) is shared with `tts.rs`.
-- **`mute.rs`** — **other apps' sound while you dictate** (2026-10-17; it
+  output device, else the default) is shared with `voice/tts.rs`.
+- **`dictation/mute.rs`** — **other apps' sound while you dictate** (2026-10-17; it
   replaced the old endpoint mute, which silenced Yap's own start chime and
   any call): **"Silence other apps while you dictate"**
   (`config.quiet_other_apps`, off; old configs' `muteWhileRecording` is its
   serde alias) and **"Pause music and videos while you dictate"**
-  (`config.pause_media`, off, as Wispr's; `media_pause.rs`). The pipeline
+  (`config.pause_media`, off, as Wispr's; `dictation/media_pause.rs`). The pipeline
   calls `begin(plan)` in `start_recording` and `after_start_chime(token)`
   from the start chime's `Played` (no chime: a thread), `end()` at stop /
   cancel and `after_stop_chime(token)` after the stop chime (`Pipeline::
@@ -722,7 +722,7 @@ to **Run again** from Home.
   nonce) and media whose title has the nonce (`media_permits`), never the
   developer's own music. Debug-only `robot_view` (the robot's
   `realtest_other_apps`).
-- **`media_pause.rs`** — "Pause music and videos while you dictate":
+- **`dictation/media_pause.rs`** — "Pause music and videos while you dictate":
   WinRT `GlobalSystemMediaTransportControlsSessionManager` (windows crate
   feature `Media_Control`), sessions **Playing** → explicit `TryPauseAsync`
   (never the play/pause toggle), kept; afterwards explicit `TryPlayAsync`
@@ -730,13 +730,13 @@ to **Run again** from Home.
   against the call apps' exes and package names), no browser's while a
   meeting records or is live in one (`pause_verdict`, pure). Debug-only
   `list` for the robot.
-- **`history.rs`** — local-only transcription history (`history.json`): each
+- **`dictation/history.rs`** — local-only transcription history (`history.json`): each
   dictation's timestamp, raw + final text, its words as said when AI
   cleanup changed them (`said`: corrections, voice command and snippets,
   no cleanup, fitted as the text was — `record_dictation`, which returns
   the entry's `ts`; Run again sets it afresh; `find(ts, text)` is Home's
   lookup), model, and focused app — and its
-  audio's id (`audio`, `recent_audio.rs`; listed only while the file's kept)
+  audio's id (`audio`, `dictation/recent_audio.rs`; listed only while the file's kept)
   and, for one that went wrong, `status` (`failed`: never transcribed, empty
   text, kept in time order — `record_failed`; `notPasted`: its paste didn't
   land — `record_with`) and `error`; `rerun_result` (Run again) fixes it up.
@@ -744,7 +744,7 @@ to **Run again** from Home.
   unit tests keep it in memory. Best-effort,
   gated by `history_enabled`. Derives the stats dashboard (words, time-saved vs
   typing, day streak, 30-day activity) without a date crate (UTC day-numbers like
-  `usage.rs`). Powers `get_history`/`clear_history`/`get_stats`. Every change
+  `ai/usage.rs`). Powers `get_history`/`clear_history`/`get_stats`. Every change
   (a dictation or upload saved, an entry deleted from Home or the local API,
   all cleared) emits **`yap-history-changed`** after the write, which Home and
   Insights re-pull on. Not `yap-transcript`: a dictation emits that before it

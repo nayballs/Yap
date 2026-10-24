@@ -21,22 +21,22 @@ takes its meeting's name, attendees and invite ([The calendar](#the-calendar),
 
 | Piece | Code |
 |---|---|
-| Recorder: capture, chunking, echo check, dictations kept out, following the output device, quiet sides | `src-tauri/src/meeting.rs` |
-| The dictation signal; the correction dictionary (`apply_corrections`) | `src-tauri/src/pipeline.rs` |
-| Guard rails: maximum length, quiet meetings and check-ins, the meeting shortcut, notices | `src-tauri/src/meeting_guard.rs` |
-| Hiding meeting windows from screen capture | `src-tauri/src/capture.rs` |
-| Rolling digests, the final input, the checks; the notepad's catch-up, helper and title inputs | `src-tauri/src/meeting_summary.rs` |
-| The end of a meeting: pause or end, "Started by mistake?", the action plan job | `src-tauri/src/meeting_end.rs` |
-| "What did I miss?", the one-tap helpers (Questions to ask, Follow-up email, Gaps and risks), the AI meeting title | `src-tauri/src/meeting_assist.rs` |
-| The notepad window: docking, split screen | `src-tauri/src/notepad.rs` |
+| Recorder: capture, chunking, echo check, dictations kept out, following the output device, quiet sides | `src-tauri/src/meetings/meeting.rs` |
+| The dictation signal; the correction dictionary (`apply_corrections`) | `src-tauri/src/dictation/pipeline.rs` |
+| Guard rails: maximum length, quiet meetings and check-ins, the meeting shortcut, notices | `src-tauri/src/calls/meeting_guard.rs` |
+| Hiding meeting windows from screen capture | `src-tauri/src/calls/capture.rs` |
+| Rolling digests, the final input, the checks; the notepad's catch-up, helper and title inputs | `src-tauri/src/meetings/meeting_summary.rs` |
+| The end of a meeting: pause or end, "Started by mistake?", the action plan job | `src-tauri/src/meetings/meeting_end.rs` |
+| "What did I miss?", the one-tap helpers (Questions to ask, Follow-up email, Gaps and risks), the AI meeting title | `src-tauri/src/meetings/meeting_assist.rs` |
+| The notepad window: docking, split screen | `src-tauri/src/meetings/notepad.rs` |
 | Who said what: the speaker map, names on lines, 1:1 calendar guesses, line times and splitting | `src-tauri/src/speakers.rs`, `src/lib/SpeakerMenu.svelte` |
 | Names for the voices: suggestions from what's said and the invite, the AI's checked answers, "It was me"; the cards | `src-tauri/src/speakers/naming.rs`, `src/lib/SpeakerCard.svelte` |
 | Who the call app shows talking (experimental); `yap.exe call-dump` | `src-tauri/src/speakers/call_ui.rs` (+ `call_ui/profiles.json`) |
 | The calendar: meetings, the reminder card, a note's meeting | `src-tauri/src/calendar.rs` (+ `calendar/`; [`calendar.md`](./calendar.md)) |
-| Prompts (`MEETING_DIGEST_PROMPT`, `ACTION_PLAN_BASE_PROMPT`, `ACTION_PLAN_DEFAULT_FRAGMENT`, `CATCH_UP_PROMPT`, `MEETING_ASK_PROMPT`, `MEETING_QUESTIONS_PROMPT`, `MEETING_FOLLOW_UP_PROMPT`, `MEETING_BLIND_SPOTS_PROMPT`, `MEETING_TITLE_PROMPT`) | `src-tauri/src/llm.rs` |
+| Prompts (`MEETING_DIGEST_PROMPT`, `ACTION_PLAN_BASE_PROMPT`, `ACTION_PLAN_DEFAULT_FRAGMENT`, `CATCH_UP_PROMPT`, `MEETING_ASK_PROMPT`, `MEETING_QUESTIONS_PROMPT`, `MEETING_FOLLOW_UP_PROMPT`, `MEETING_BLIND_SPOTS_PROMPT`, `MEETING_TITLE_PROMPT`) | `src-tauri/src/ai/llm.rs` |
 | Storage (`Note::digests`, `Note::speakers`, `TranscriptSegment::echo` / `::dictated` / `::speaker` / `::start_ms` / `::words`, `Action::kind`, `Note::title_auto`) | `src-tauri/src/notes.rs` |
-| The action run (`note_enhance` / `run_enhance`) | `src-tauri/src/commands.rs` |
-| Fixing the notes: a line's words, the summary's, never written over unasked; tasks ticked and listed | `src-tauri/src/note_edits.rs`, `src-tauri/src/tasks.rs`, `src/lib/noteEdits.js`, `src/lib/TasksView.svelte` |
+| The action run (`note_enhance` / `run_enhance`) | `src-tauri/src/notes/commands.rs` |
+| Fixing the notes: a line's words, the summary's, never written over unasked; tasks ticked and listed | `src-tauri/src/notes/note_edits.rs`, `src-tauri/src/notes/tasks.rs`, `src/lib/noteEdits.js`, `src/lib/TasksView.svelte` |
 | UI | `src/lib/NotesView.svelte`, `src/lib/Notepad.svelte`, `src/lib/meetingSummary.svelte.js` |
 
 ## Recording
@@ -180,7 +180,7 @@ call) gets the "Them" warning once too; its wording says "If".
 
 ## The meeting's audio, kept on disk
 
-Since 2026-10-23 (`meeting_audio.rs`) the recorder keeps the meeting's
+Since 2026-10-23 (`meetings/meeting_audio.rs`) the recorder keeps the meeting's
 audio as well as its lines, on this PC only, so that a crash loses nothing,
 a meeting can be **transcribed again** later, and a line can be **played**.
 Wispr Flow keeps 14 days of meeting audio to play back; Meetily transcribes
@@ -230,7 +230,7 @@ leaves a recording that never ended. At the next start Yap finds it (not
 one another Yap is writing: the files are opened so nobody else may write
 them, which a second Yap on the same data can tell), counts what never
 became lines, and — at least a second of it — says so in one place
-(`notice.rs`: a toast while the main window is looked at, else the Yap bar,
+(`notices/notice.rs`: a toast while the main window is looked at, else the Yap bar,
 else a Windows notification): "Yap closed during a meeting · The last
 3 minutes of “Supplier call” weren't transcribed. The audio is kept:
 transcribe it into the note now?" with **Transcribe it**. The note says it
@@ -239,7 +239,7 @@ the recorder's own steps over the audio from where the note stops — the
 same cuts in pauses, engine, correction dictionary, echo check and
 dictation markers — puts the lines where they belong by time, and then does
 what a stop would have: the ⏸ mark, then "Started by mistake?" or the AI
-title and the action plan (`meeting_end.rs`).
+title and the action plan (`meetings/meeting_end.rs`).
 
 **Transcribe again.** On a past meeting with its audio kept — the Notes
 view's note menu (**Transcribe again…**) or the notepad's ⋯ — Yap asks first
@@ -263,7 +263,7 @@ either side, mixed — while the meeting still records, too.
 
 ### A part that couldn't be transcribed
 
-Since 2026-10-24 (`meeting.rs`, "Failed chunks"; code review #6). A chunk
+Since 2026-10-24 (`meetings/meeting.rs`, "Failed chunks"; code review #6). A chunk
 the speech model can't transcribe — no model, the graphics card lost after
 the PC slept, a driver reset, a crash in the engine — used to be recorded
 as silence: a meeting could end with an empty transcript and only "Nothing
@@ -293,7 +293,7 @@ meeting audio" off, until it's transcribed (a day at most).
 
 ### The refined transcript, after the meeting
 
-Since 2026-10-24 (`meeting_refine.rs`), after Wispr Flow's "refined
+Since 2026-10-24 (`meetings/meeting_refine.rs`), after Wispr Flow's "refined
 transcript": when a meeting ends, Yap transcribes it again in the background
 from its audio — **when it helps**. Settings → Meetings → Meeting audio →
 **Improve the transcript after the meeting**:
@@ -351,7 +351,7 @@ the live transcript stays.
 
 Every transcript line has a side (`source`: the mic "you", the call "them")
 and a voice (`speaker`). Until voices are told apart, the call is one voice,
-"them"; with "Tell speakers apart in meetings" on (beta, `diarize.rs`), the
+"them"; with "Tell speakers apart in meetings" on (beta, `speakers/diarize.rs`), the
 speaker engine's voices go on the "Them" lines as "them-1", "them-2"…
 ("Speaker 1", "Speaker 2"; see **The speaker engine's labels** below).
 A line nobody relabelled stores no `speaker` (its side is its voice), so
@@ -624,7 +624,7 @@ digest); every task still reaches the action plan (see the checks below).
 **End meeting & summarise**, the notepad's **Stop**, or a stop from anywhere
 else (call detection's **Stop and summarise**, the Yap bar, an automatic stop)
 stops the recorder, which transcribes the last few seconds; then Rust runs the
-built-in **Action Plan** action (`meeting_end.rs`, following the recorder's
+built-in **Action Plan** action (`meetings/meeting_end.rs`, following the recorder's
 `yap-meeting-state`). **Pause** (`meeting_pause`) stops without it. It no
 longer depends on a window: until 2026-10 the Notes view wrote the plan, and
 only for the note it was showing. Every window follows the job through
@@ -690,8 +690,8 @@ A meeting's notes aren't Yap's alone to write: a line it misheard, a
 summary that missed the point and the tasks in the action plan are the
 person's to fix (Wispr Flow's Notetaker does the same). Whatever model wrote
 the summary — on this PC or a cloud one — the person's changes are local data,
-and Yap never writes over them without asking. Code: `src-tauri/src/note_edits.rs`
-(lines, the summary, the rule), `src-tauri/src/tasks.rs` (tasks),
+and Yap never writes over them without asking. Code: `src-tauri/src/notes/note_edits.rs`
+(lines, the summary, the rule), `src-tauri/src/notes/tasks.rs` (tasks),
 `src/lib/noteEdits.js` and `src/lib/TasksView.svelte`.
 
 ### A line's words
@@ -717,7 +717,7 @@ before; off with the setting.
 **Transcribe again keeps it.** The new lines go in around a line the person
 fixed, never over it: a new line of the same side over it keeps only its words
 outside it (by its word times; without them, by its share of the line, and
-none when it's mostly the fixed line) (`meeting_audio/redo.rs` `rebuild`, so
+none when it's mostly the fixed line) (`meetings/meeting_audio/redo.rs` `rebuild`, so
 anything that replaces a meeting's lines that way keeps fixes too). The voice
 separation never splits a fixed line either.
 
@@ -766,7 +766,7 @@ and MCP's `list_tasks` ([integrations.md](./architecture/integrations.md)).
 
 While a meeting records, its notes live in a slim window docked to the right
 edge of the screen, beside the call (Wispr Flow's Notetaker notepad, ported to
-Yap: `src-tauri/src/notepad.rs`, `src/lib/Notepad.svelte`). Its look and
+Yap: `src-tauri/src/meetings/notepad.rs`, `src/lib/Notepad.svelte`). Its look and
 behaviour follow Wispr's notepad as measured from its DOM
 (`references/wispr-flow/notepad-spec.md`, beside this repo: sizes, type, colours,
 motion), in Yap's own code, wording and icons; the palette is the
@@ -1068,8 +1068,8 @@ made-up title shows muted in the notepad and the Notes view.
 ## Guard rails
 
 Wispr Flow's Notetaker settings, ported (Settings → Meetings, one
-block under "Ask about calls in"). Code: `src-tauri/src/meeting_guard.rs`,
-`src-tauri/src/capture.rs`, `src/lib/meetingGuard.js`,
+block under "Ask about calls in"). Code: `src-tauri/src/calls/meeting_guard.rs`,
+`src-tauri/src/calls/capture.rs`, `src/lib/meetingGuard.js`,
 `src/lib/meetingCheckIn.js`.
 
 | Setting | Config | Default | Wispr's |
@@ -1411,7 +1411,7 @@ KeyTips) and Win the Start menu.
     clean up), and can
     fail (`failNext`) or slow down (`delay`) a kind of call, for the summary's
     progress and error states.
-    Test-mode hooks, all compiled out of release builds (`e2e.rs`):
+    Test-mode hooks, all compiled out of release builds (`shell/e2e.rs`):
     `YAP_E2E_MEETING_AUDIO` (a folder with `you.wav` and `them.wav`),
     `YAP_E2E_MEETING_SPEED`, the `e2e_meeting_feed { segments }` command
     (corrected with the dictionary like real lines), and for the recorder's
@@ -1419,7 +1419,7 @@ KeyTips) and Win the Start menu.
     { at? }` (seconds of the test audio) and `e2e_meeting_quiet { quietSecs?,
     talkSecs? }`; for the guard rails `e2e_meeting_limit` and
     `e2e_meeting_checkins { quietMs?, countdownMs?, recentMs?, afterEndMs?,
-    hourMs?, fadeMs?, marginMs? }` (`meeting_guard.rs`). The player logs "the
+    hourMs?, fadeMs?, marginMs? }` (`calls/meeting_guard.rs`). The player logs "the
     test audio has played to the end", so a test can stop after all of it.
     Since 2026-10-24: `e2e_meeting_fail { side?, from?, to? }` (the live
     chunks over a stretch fail), `e2e_meeting_start_twice { first, second }`
@@ -1530,9 +1530,9 @@ recording it, Yap asks "Stop and summarise?". Personal chat apps (Discord,
 WhatsApp, Signal, Telegram) aren't asked about unless switched on, any app can
 be switched off from its prompt ("Don't ask for Teams"), and the prompts can
 come as a pop-up or quietly. While a call is live, the tray menu offers
-"Record this Teams call" either way. Code: `src-tauri/src/meeting_detect.rs`
+"Record this Teams call" either way. Code: `src-tauri/src/calls/meeting_detect.rs`
 (+ `src/lib/meetingDetect.svelte.js` for the in-app prompts,
-`src-tauri/src/win_toast.rs` for the Windows notifications, `src-tauri/src/tray.rs`
+`src-tauri/src/notices/win_toast.rs` for the Windows notifications, `src-tauri/src/shell/tray.rs`
 for the tray item).
 
 ### How a call is detected
@@ -1547,7 +1547,7 @@ HKCU\Software\Microsoft\Windows\CurrentVersion\CapabilityAccessManager\ConsentSt
     LastUsedTimeStart, LastUsedTimeStop      FILETIMEs; Stop == 0 → on the mic right now
 ```
 
-- **Only known call apps count** (`APPS` in `meeting_detect.rs`): Teams (new
+- **Only known call apps count** (`APPS` in `calls/meeting_detect.rs`): Teams (new
   and classic), Zoom, Webex, Slack, Discord, GoTo Meeting, WhatsApp, Signal,
   Telegram. Only their subkeys' values are read.
 - **Browsers** (Chrome, Edge, Firefox, Brave, Opera, Vivaldi, Arc, …) count when
@@ -1700,7 +1700,7 @@ the chosen style. It doesn't fade: it's about a recording that's still
 running. "That
 call" means the recording its prompt started, or one started during the call.
 **Stop and summarise** ends the meeting, so the action plan is written exactly
-as after **End meeting & summarise** (in Rust, `meeting_end.rs`), and shows
+as after **End meeting & summarise** (in Rust, `meetings/meeting_end.rs`), and shows
 it where the person looks: the meeting notepad when it's on screen, the note
 in the main window's Notes view when that's on screen, and with neither, the
 main window comes up on the note. A call that starts while
@@ -1757,7 +1757,7 @@ switches in Settings and on the bar's call card, the way Wispr's "Meeting
 detected" card shows Discord's. One component draws them
 (`src/lib/CallAppIcon.svelte`), in this order:
 
-1. **The app's own icon as installed here** (`app_icons.rs`, the
+1. **The app's own icon as installed here** (`calls/app_icons.rs`, the
    `meeting_app_icons` command);
 2. its bundled mark (`src/lib/bar/callApps.js`: Simple Icons, CC0);
 3. a letter badge in its colour: Teams, Slack, Webex and Whereby, which
@@ -1853,7 +1853,7 @@ Store) resolve to their own icons.
 - Apps not in `APPS`/browser titles aren't detected (record manually from a note).
 - Exe names for Webex and GoTo installs vary by version. Only Teams, Discord
   and a browser have been seen in the consent store on the development PC.
-  The same goes for their icons: the install folders `app_icons.rs` knows
+  The same goes for their icons: the install folders `calls/app_icons.rs` knows
   for Zoom, Slack, Webex, GoTo, Signal and Telegram are those apps' usual
   ones, not yet checked against a real install (the microphone record finds
   any that took the mic). A Store app outside the known families is found

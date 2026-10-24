@@ -63,7 +63,7 @@ Optional Yap accounts: sign-in routes (email codes, Google/GitHub/Discord, your 
   to `http://localhost:8787` (`cloud/`'s `wrangler dev`); `YAP_AUTH_URL`
   overrides any build.
 - **Nothing about the person syncs (yet).** Settings → General → About you
-  (`about_you.rs`: the region, a name, a note for the AI) stays in
+  (`ai/about_you.rs`: the region, a name, a note for the AI) stays in
   config.json on this PC; signing in doesn't send it anywhere. Syncing it
   between a person's PCs could come with accounts later — behind the
   sign-in, never from a signed-out Yap.
