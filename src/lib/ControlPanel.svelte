@@ -26,6 +26,7 @@
   import { initCalendar, closeConnectDialog } from './calendar.svelte.js';
   import { initWordSuggestions } from './wordSuggestions.js';
   import { initAlerts } from './alerts.js';
+  import { initUpload } from './upload.svelte.js';
   import { initMemory } from './memory.svelte.js';
   import ConnectCalendarDialog from './ConnectCalendarDialog.svelte';
   // Every view is in this window's one chunk (~590 KB): loading the views
@@ -93,6 +94,10 @@
   // administrator left on the clipboard, Windows' microphone privacy
   // switch — with Open settings.
   initAlerts();
+  // Upload's job (upload.svelte.js): its progress, Cancel and result, and
+  // the "Transcription complete" toast, whichever view is up — the view
+  // unmounts when you leave it (or Chat opens by itself).
+  initUpload();
   // Memory (memory.rs via memory.svelte.js): "Yap remembered: your sister
   // is Rochelle" with Undo and Manage (→ Settings → Memory).
   initMemory({ openSettings: (section) => openSettings(section) });

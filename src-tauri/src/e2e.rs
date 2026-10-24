@@ -403,6 +403,32 @@ pub fn e2e_crash_next_dictation() -> Result<(), String> {
     Ok(())
 }
 
+/// How long each chunk of an Upload waits once transcribed, in ms
+/// ([`e2e_upload_pace`]; 0 = not at all).
+#[cfg(debug_assertions)]
+static UPLOAD_PACE_MS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// An Upload's chunk waits this long once transcribed (`pipeline.rs`), in
+/// a test run that asked ([`e2e_upload_pace`]). Never in release builds.
+#[cfg(debug_assertions)]
+pub fn upload_pace() -> Option<std::time::Duration> {
+    let ms = UPLOAD_PACE_MS.load(std::sync::atomic::Ordering::SeqCst);
+    (active() && ms > 0).then(|| std::time::Duration::from_millis(ms))
+}
+
+/// Test mode only: each chunk of an Upload (file transcription) waits `ms`
+/// once transcribed — the stub engine does one at once — so a spec can leave
+/// the view while the job is still going (`upload.spec.js`). 0: no wait.
+#[cfg(debug_assertions)]
+#[tauri::command]
+pub fn e2e_upload_pace(ms: u64) -> Result<(), String> {
+    if !active() {
+        return Err("Only in e2e test mode".to_string());
+    }
+    UPLOAD_PACE_MS.store(ms.min(10_000), std::sync::atomic::Ordering::SeqCst);
+    Ok(())
+}
+
 /// Test mode only: the next `count` saves of a store (`store`: its id,
 /// "notes", "history", "chats"…) fail as if the disk were full, so a spec
 /// sees what the person would (`saving.rs`). `count` 0: none.

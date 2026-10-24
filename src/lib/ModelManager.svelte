@@ -6,10 +6,9 @@
   // Download each (ink only for the one recommended action). With no model
   // at all, the red badge's reason sits at the top of the page.
   import { invoke } from '@tauri-apps/api/core';
-  import { listen } from '@tauri-apps/api/event';
   import { onMount } from 'svelte';
   import { MODELS, formatSize } from './models.js';
-  import { modelStore, refreshModels, setActiveModel } from './modelStore.svelte.js';
+  import { modelStore, refreshModels, setActiveModel, downloadModel } from './modelStore.svelte.js';
   import ModelRow from './ModelRow.svelte';
   import Group from './ui/Group.svelte';
   import Button from './ui/Button.svelte';
@@ -17,9 +16,20 @@
   import ConfirmDialog from './ui/ConfirmDialog.svelte';
   import { ENGINE_PROVIDER, PROVIDER_ICONS, MONOCHROME_PROVIDERS } from './providerIcons.js';
 
-  let busyId = $state(null); // model id being downloaded / switched to
-  let percent = $state(0); // download progress for busyId
+  // A download outlives this page (modelStore.svelte.js): leaving it
+  // mid-download and coming back shows its bar, and a failure that came
+  // meanwhile. A switch is this page's own (a moment).
+  let switching = $state(null); // model id being switched to
+  const busyId = $derived(modelStore.downloading?.id ?? switching); // downloaded / switched to
+  const percent = $derived(modelStore.downloading?.percent ?? 0); // download progress for busyId
   let error = $state('');
+  const failedDownload = $derived(modelStore.downloadError);
+  const shownError = $derived(
+    error ||
+      (failedDownload
+        ? `Couldn't download ${MODELS.find((m) => m.id === failedDownload.id)?.name ?? failedDownload.id}: ${failedDownload.message}`
+        : '')
+  );
 
   // Installed/active live in the shared store so the tray and Settings'
   // badge stay in sync with this manager.
@@ -53,48 +63,36 @@
 
   onMount(() => {
     refreshModels();
-    const un = listen('stt-download-progress', (e) => {
-      if (e.payload && e.payload.modelSize === busyId) percent = e.payload.percent;
-    });
-    return () => un.then((u) => u && u());
   });
+
+  /** A new action: the last errors go. */
+  function clearErrors() {
+    error = '';
+    modelStore.downloadError = null;
+  }
 
   // Row click / Download / Use: download if not installed, otherwise switch to it.
   async function onCard(model) {
     if (busyId) return;
-    error = '';
+    clearErrors();
     if (modelStore.installed.includes(model.id)) {
       await switchTo(model);
     } else {
-      await download(model);
+      // Downloaded, then the one in use (it's ready to use): the store's
+      // job, whichever page is up when it ends.
+      await downloadModel(model.id);
     }
   }
 
-  async function download(model) {
-    busyId = model.id;
-    percent = 0;
-    try {
-      await invoke('download_model_size', { modelSize: model.id });
-      await refreshModels();
-      // Newly downloaded model becomes active (it's now ready to use).
-      await switchTo(model, true);
-    } catch (e) {
-      error = `Couldn't download ${model.name}: ${e}`;
-    } finally {
-      busyId = null;
-      percent = 0;
-    }
-  }
-
-  async function switchTo(model, quiet = false) {
+  async function switchTo(model) {
     if (modelStore.active === model.id) return;
-    busyId = model.id;
+    switching = model.id;
     try {
       await setActiveModel(model.id);
     } catch (e) {
-      if (!quiet) error = `Couldn't switch to ${model.name}: ${e}`;
+      error = `Couldn't switch to ${model.name}: ${e}`;
     } finally {
-      busyId = null;
+      switching = null;
     }
   }
 
@@ -109,7 +107,7 @@
       error = `${model.name} is the active model — switch to another model first.`;
       return;
     }
-    error = '';
+    clearErrors();
     ask = { open: true, model, busy: false };
   }
 
@@ -201,8 +199,8 @@
           <p class="empty">No other models in this group.</p>
         {/each}
       </div>
-      {#if error}
-        <p class="error" role="alert">{error}</p>
+      {#if shownError}
+        <p class="error" role="alert">{shownError}</p>
       {/if}
     </div>
   </Group>

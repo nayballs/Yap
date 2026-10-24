@@ -327,7 +327,22 @@ Flow's dark mode of 19 Oct 2026), for every Yap window.
 - **`UploadView.svelte`** = local audio-**file** transcription (drop/browse →
   Symphonia decode → chunked transcription on the warm engine with progress +
   cancel — see `media.rs`); its line names the model ("transcribes with
-  Parakeet V3", `models.js`), not its id.
+  Parakeet V3", `models.js`), not its id. **The job lives in
+  `upload.svelte.js`** (2026-10-24), which ControlPanel starts
+  (`initUpload`, like the update store): the file, its progress, Cancel,
+  the result and the `yap-upload-*` listeners outlive the view, so leaving
+  Upload mid-job (another view, Chat opening by itself) and coming back
+  finds it as it is, and "Transcription complete" comes wherever you are
+  (until then the view held it all and unmounted with it, code review
+  2026-10-23 #8). The view keeps only the drop target (its listener's
+  promise kept, so leaving early still lets go) and the model's name.
+  `e2e/upload.spec.js` (debug-only `e2e_upload_pace` holds each chunk).
+- **Speech-to-Text's downloads** live in `modelStore.svelte.js`
+  (`downloadModel`: `downloading {id, percent}` from
+  `stt-download-progress`, a failure in `downloadError` until the next),
+  not in `ModelManager.svelte`, which unmounts with its Settings page:
+  coming back mid-download shows its bar, never Download again, and a
+  failure that came meanwhile is still said.
 - **Page titles** — Insights, Upload, Dictionary, Integrations and Meetings
   use the serif display title Settings' pages have (`--yap-font-display`,
   28–30 px; `polish.spec.js` checks the face).

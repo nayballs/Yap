@@ -190,7 +190,9 @@ still want a hands-on pass.
 On top of that, the main window is now a full **ControlPanel** (Home dictation feed
 w/ Ctrl+K search, Chat, Notes, Upload, Dictionary, Settings as an always-mounted
 modal, app-wide toasts): local audio-**file** transcription (Upload — `media.rs`
-Symphonia decode + chunking), an **AI Notepad** (`notes.rs` — folders/actions/
+Symphonia decode + chunking; since 2026-10-24 the job, like a speech model's
+download, outlives its view: leave mid-job and come back to its progress,
+Cancel and result — e2e `upload.spec.js`), an **AI Notepad** (`notes.rs` — folders/actions/
 participants/transcripts, an Actions engine, ActionPicker/ActionManager, attendee +
 folder management, markdown export, an embedded per-note chat), a **meeting
 recorder** (`meeting.rs` — mic + WASAPI loopback → You/Them transcript, cut in

@@ -2047,6 +2047,12 @@ impl Shared {
                     "chunksCompleted": i + 1,
                 }),
             );
+            // A test run's pace (`e2e_upload_pace`): the job still going
+            // when a spec comes back to the view.
+            #[cfg(debug_assertions)]
+            if let Some(pace) = crate::e2e::upload_pace() {
+                tokio::time::sleep(pace).await;
+            }
         }
 
         // Put the warm engine back (unless a model switch installed a newer one).

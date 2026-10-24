@@ -5,47 +5,32 @@
   // flow. Yap differences: transcription is ALWAYS local (the same warm engine
   // dictation uses — no cloud path, no file-size limits), decode is Symphonia
   // in Rust (media.rs), and the result lands in the Home feed via history.
+  // The job itself — its file, progress, Cancel and result — lives in
+  // upload.svelte.js, which ControlPanel starts: leaving this view mid-job
+  // and coming back finds it as it is (code review 2026-10-23 #8).
   import { invoke } from '@tauri-apps/api/core';
-  import { listen } from '@tauri-apps/api/event';
   import { getCurrentWebview } from '@tauri-apps/api/webview';
   import { onMount } from 'svelte';
-  import { toast } from './ui/toast.svelte.js';
   import { MODELS } from './models.js';
+  import { upload, chooseFile, failed, transcribe, cancel, reset } from './upload.svelte.js';
 
   // Matches media.rs (Symphonia features): no opus/webm yet.
   const SUPPORTED_EXTENSIONS = ['mp3', 'wav', 'm4a', 'aac', 'flac', 'ogg', 'oga'];
 
-  let state = $state('idle'); // idle | selected | transcribing | complete | error
-  let file = $state(null); // { name, path, size }
-  let result = $state(null);
-  let error = $state(null);
+  // The job's, shown here (upload.svelte.js).
+  const state = $derived(upload.state); // idle | selected | transcribing | complete | error
+  const file = $derived(upload.file);
+  const result = $derived(upload.result);
+  const error = $derived(upload.error);
+  const progress = $derived(upload.progress);
+  const chunkProgress = $derived(upload.chunkProgress);
+  // This view's own.
   let isDragOver = $state(false);
-  let progress = $state(0);
-  let chunkProgress = $state(null); // { chunksTotal, chunksCompleted }
   let modelLabel = $state('');
   let copied = $state(false);
 
-  function formatFileSize(bytes) {
-    if (bytes < 1024) return `${bytes} B`;
-    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-  }
-
   function extOf(name) {
     return (name.split('.').pop() || '').toLowerCase();
-  }
-
-  async function setFileFromPath(path) {
-    try {
-      const info = await invoke('audio_file_info', { path });
-      file = { name: info.name, path, size: formatFileSize(info.size) };
-      state = 'selected';
-      error = null;
-      result = null;
-    } catch (e) {
-      error = String(e);
-      state = 'error';
-    }
   }
 
   async function handleBrowse() {
@@ -55,39 +40,10 @@
         multiple: false,
         filters: [{ name: 'Audio', extensions: SUPPORTED_EXTENSIONS }],
       });
-      if (typeof path === 'string' && path) await setFileFromPath(path);
+      if (typeof path === 'string' && path) await chooseFile(path);
     } catch (e) {
-      error = `Couldn't open the file picker: ${e}`;
-      state = 'error';
+      failed(`Couldn't open the file picker: ${e}`);
     }
-  }
-
-  async function handleTranscribe() {
-    if (!file) return;
-    state = 'transcribing';
-    error = null;
-    progress = 0;
-    chunkProgress = null;
-    try {
-      await invoke('transcribe_file', { path: file.path });
-      // progress + result arrive via the yap-upload-* events below
-    } catch (e) {
-      error = String(e);
-      state = 'error';
-    }
-  }
-
-  function cancel() {
-    invoke('cancel_file_transcription').catch(() => {});
-  }
-
-  function reset() {
-    state = 'idle';
-    file = null;
-    result = null;
-    error = null;
-    progress = 0;
-    chunkProgress = null;
   }
 
   async function copyResult() {
@@ -102,56 +58,28 @@
   }
 
   onMount(() => {
-    const unlisteners = [];
-
-    listen('yap-upload-progress', (e) => {
-      const p = e.payload || {};
-      progress = p.percent ?? 0;
-      chunkProgress =
-        p.chunksTotal > 0
-          ? { chunksTotal: p.chunksTotal, chunksCompleted: p.chunksCompleted }
-          : null;
-    }).then((u) => unlisteners.push(u));
-    listen('yap-upload-done', (e) => {
-      progress = 100;
-      result = e.payload?.text || '';
-      state = 'complete';
-      toast({ title: 'Transcription complete', description: e.payload?.file || '', variant: 'success' });
-    }).then((u) => unlisteners.push(u));
-    listen('yap-upload-error', (e) => {
-      error = String(e.payload || 'Transcription failed');
-      progress = 0;
-      state = file ? 'error' : 'idle';
-      toast({ title: 'Transcription failed', description: error, variant: 'destructive' });
-    }).then((u) => unlisteners.push(u));
-    listen('yap-upload-cancelled', () => {
-      progress = 0;
-      state = file ? 'selected' : 'idle';
-    }).then((u) => unlisteners.push(u));
-
-    // Native drag-drop: the Tauri webview reports real file paths.
-    getCurrentWebview()
-      .onDragDropEvent((event) => {
-        const t = event.payload.type;
-        if (t === 'over' || t === 'enter') {
-          isDragOver = true;
-        } else if (t === 'leave') {
-          isDragOver = false;
-        } else if (t === 'drop') {
-          isDragOver = false;
-          if (state === 'transcribing') return;
-          const path = (event.payload.paths || [])[0];
-          if (!path) return;
-          const name = path.split(/[/\\]/).pop() || '';
-          if (!SUPPORTED_EXTENSIONS.includes(extOf(name))) {
-            error = `Unsupported file type ".${extOf(name)}" — supported: ${SUPPORTED_EXTENSIONS.join(', ')}`;
-            state = 'error';
-            return;
-          }
-          setFileFromPath(path);
+    // Native drag-drop (only while the view is up): the Tauri webview
+    // reports real file paths. Its promise kept, so a view left before it
+    // resolves still lets go of it.
+    const dragDrop = getCurrentWebview().onDragDropEvent((event) => {
+      const t = event.payload.type;
+      if (t === 'over' || t === 'enter') {
+        isDragOver = true;
+      } else if (t === 'leave') {
+        isDragOver = false;
+      } else if (t === 'drop') {
+        isDragOver = false;
+        if (upload.state === 'transcribing') return;
+        const path = (event.payload.paths || [])[0];
+        if (!path) return;
+        const name = path.split(/[/\\]/).pop() || '';
+        if (!SUPPORTED_EXTENSIONS.includes(extOf(name))) {
+          failed(`Unsupported file type ".${extOf(name)}" — supported: ${SUPPORTED_EXTENSIONS.join(', ')}`);
+          return;
         }
-      })
-      .then((u) => unlisteners.push(u));
+        chooseFile(path);
+      }
+    });
 
     // The active STT model, for the "transcribes with" label.
     // By its name ("Parakeet V3"), not its id ("parakeet-tdt-0.6b-v3").
@@ -162,7 +90,7 @@
       })
       .catch(() => {});
 
-    return () => unlisteners.forEach((u) => u && u());
+    return () => dragDrop.then((u) => u && u()).catch(() => {});
   });
 </script>
 
@@ -213,7 +141,7 @@
           <p class="errline">{error}</p>
         {/if}
         <div class="actions">
-          <button class="primary" onclick={handleTranscribe}>
+          <button class="primary" onclick={transcribe}>
             {state === 'error' ? 'Try again' : 'Transcribe'}
           </button>
         </div>
