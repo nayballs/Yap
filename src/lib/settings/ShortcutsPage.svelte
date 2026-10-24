@@ -1,6 +1,6 @@
 <script>
   // Settings → Shortcuts (2026-10-22 review; OpenWhispr's Hotkeys page): the
-  // seven global shortcuts together (input_hook.rs), each in Yap's keycaps,
+  // seven global shortcuts together (dictation/input_hook.rs), each in Yap's keycaps,
   // with a clash said where it happens. Their own pages show them too
   // (Dictation, Commands, Voice Assistant, Meetings): the same setting. The
   // saved transforms' shortcuts are a link to Commands → Transforms.

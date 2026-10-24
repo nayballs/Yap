@@ -4,6 +4,55 @@ The Svelte side's look (theme, window chrome) and the main window: the ControlPa
 
 [Architecture index](./README.md) · [CLAUDE.md](../../CLAUDE.md)
 
+## The folder layout (2026-10-24)
+
+`src/` keeps `main.js` (fonts, the markdown links, mounting), `App.svelte`
+(one chunk per window, below) and `app.css` (every token). `src/lib/` is by
+kind, a folder each:
+
+| Folder | What's in it |
+|---|---|
+| `views/` | The main window: `ControlPanel.svelte` (sidebar, title bar, the Settings modal, toasts) and its views. A view with parts of its own has a folder: `home/` (`HomeView`, `homeData.js`), `chat/`, `notes/`, `integrations/` (`IntegrationsView`, `CalendarLinkCard`, `McpLinkCard`); the rest are one file (`InsightsView`, `UploadView`, `MeetingsView`, `TasksView`, `DictionaryView`) |
+| `settings/` | The Settings modal: `Settings.svelte`, its pages and every part only Settings uses (the module map: [frontend-settings.md](./frontend-settings.md#the-module-map-split-2026-10-24)) |
+| `notepad/` | The meeting notepad window, and its split-screen preview (`SplitPreview.svelte`) |
+| `onboarding/` | The first-run window |
+| `bar/` | The Yap bar window: `Overlay.svelte` (its page) and its cards |
+| `components/` | What more than one window or view draws: `BriefView`, `SpeakerMenu`, `SpeakerCard`, `MeetingJob`, `FailedChunk`, `CallAppIcon`, `CalendarMark`, `LocalContext`, `ConnectCalendarDialog` |
+| `stores/` | App-wide reactive stores (`*.svelte.js`): `account`, `attention`, `calendar`, `callAppIcons`, `chatRequest`, `meetingAudio`, `meetingDetect`, `meetingSummary`, `memory`, `modelCatalog`, `modelStore`, `speech`, `updates`, `upload` |
+| `notices/` | Rust's events turned into toasts: `alerts`, `cleanupOffer`, `meetingCheckIn`, `meetingGuard`, `saveErrors`, `wordSuggestions` |
+| `core/` | Helpers and catalogues with no Svelte state of their own: `markdown`, `streaming`, `hotkeys`, `providers`, `providerIcons`, `ppModels`, `speechModels` (the speech-to-text catalogue; `models.js` until 2026-10-24), `modelCatalog`, `localContext`, `aiModel`, `aiErrors`, `notepadText`, `noteEdits`, `itemMenus`, `wordDiff`, `appNames`, `appearance`, `brief`, `connections`, `externalLinks`, `ipcShared` |
+| `ui/` | The primitives: rows, switches, selects, buttons, the right-click menu and confirm dialog, toasts |
+
+A store, helper or component one area alone uses lives in that area's
+folder (`views/chat/chatModels.svelte.js`, `settings/kokoro.svelte.js`,
+`onboarding/ModelCard.svelte`); one more areas share goes to
+`components/`, `stores/`, `notices/` or `core/`.
+
+**The big views are a folder of parts.** The top component is the window
+or the view: it makes the state, follows Rust's events while it's up and
+lays out its parts. What the parts share lives in a `*.svelte.js` beside
+them, made by the top component each time it's made (views come and go as
+the sidebar switches) and handed to the parts: a function returning an
+object of getters, setters and actions (`createNotesState`,
+`createChatState`, `createSetupState`), or small classes where only a
+slice is shared (the notepad's). Each part carries its own styles; what
+several draw is in each of them, or — the notepad's tooltips and ink
+button — in one shared sheet under the page's class (`notepad/notepad.css`
+under `.pad`, as `settings/settings.css` under `.settings-shell`), every
+selector weighing what its scoped original did, so the same rule wins.
+
+| Folder | Parts |
+|---|---|
+| `notepad/` | `Notepad.svelte` — the window: the note shown and the meeting, kept in step with Rust's events and the other windows; the in-page hotkeys; the layout. `NotepadHeader` (back, ⋯, split screen, Share, window buttons), `NotepadTitle`, `NotepadTabs`, `ThoughtsTab`, `TranscriptTab` + `TranscriptLog` (the timer box, search and copy; the lines), `SummaryTab`, `GenerateSummary` (or the summary's error with Retry), `ConsentLine`, `AskTray` (Stop / Resume, the Ask sheet), `DeleteMeetingDialog`, `NotepadIcon`. What outlasts a tab switch (each tab's body is made again on every switch): `transcriptView.svelte.js`, `summaryEditor.svelte.js`, `consentMessage.svelte.js`; `actions.js` the window's label, copying, Yap's main window; `notepad.css` |
+| `views/notes/` | `NotesView.svelte` (the view, its events, the note a call or Tasks asks to open) with `notesState.svelte.js` (the notes and folders, the open note saved as it's typed and kept in step, the recorder, actions, the summary edited in place, the transcript's view, the note's chat); `NoteList` (folders, notes, their menus), `NoteEditor` (title, tabs, what's being written, the raw note) with `NoteMeta` (the chip row), `NoteSummary`, `NoteTranscript`, `NoteChat` and `ActionPicker`; `ActionManager`; `noteFormat.js` |
+| `views/chat/` | `ChatView.svelte` (the view, its events and keys, the screenshot viewer) with `chatState.svelte.js` (conversations, sending and the streamed answer, the Voice Assistant's questions, Snip to Chat, spoken replies, picking several); `ConversationList`, `ChatThread` + `ChatMessage` (tool chips, the bubble, sources, ▶ and the model), `Composer` (screenshots, +, the box, ■ Stop, the model chip); `ModelChip`, `ChatModelPicker`, `ProviderMark`, `chatModels.svelte.js`, `chatImages.js`, `chatShots.svelte.js` |
+| `onboarding/` | `Onboarding.svelte` (the dots, the step shown, the footer, the in-page hotkey) with `setupState.svelte.js` (every step's state, the config this window changed, its raw event subscriptions); `StepHeader`, `ModelStep` (+ `ModelCard`), `MicStep`, `CleanupStep`, `TrayStep`, `TryStep`; `cleanupProviders.js` |
+
+One look kept on purpose: a tool's own chip in Chat ("Found "beta" on 2
+lines…") is a full-width row 30 px tall — ChatView's New chat row rule
+(`.tool`) used to reach it too — and `ChatMessage.svelte` now says so
+itself (`.toolchip.tool`).
+
 ## Look and the main window
 
 - **Theme (2026-07-09)** — the main window is **warm-light, Wispr-Flow-inspired**:
@@ -23,7 +72,7 @@ The Svelte side's look (theme, window chrome) and the main window: the ControlPa
   roles (2026-10-05), set to **Yap's own palette** since 2026-10-06 (warm
   paper and ink, an amber focus ring, burnt-orange "live", recording-red
   Stop/Resume); the Meetings view's grey card, Take notes pill and the
-  "Connect your calendar" dialog use them too. **What needs doing** (`lib/attention.svelte.js`):
+  "Connect your calendar" dialog use them too. **What needs doing** (`lib/stores/attention.svelte.js`):
   Settings keeps real needs-action items live (`followAttention`) (update available / no STT model /
   cleanup on a cloud provider with no key) into a shared runes store; they're
   counted in **one place**, the title bar's **bell** (its count, its name
@@ -44,7 +93,7 @@ The Svelte side's look (theme, window chrome) and the main window: the ControlPa
   [The dark theme](#the-dark-theme-2026-10-22) below.
 - **Reading text and Motion (2026-10-22, Settings → General → Appearance;
   after Claude desktop's own Appearance settings, in free fonts)** —
-  `lib/appearance.js` marks `<html>` in **every** window (App.svelte calls
+  `lib/core/appearance.js` marks `<html>` in **every** window (App.svelte calls
   `initAppearance()`: `get_config` now, again on every `yap-config-saved`,
   and when `prefers-reduced-motion` changes; Settings also applies its own
   copy at once, before the 400 ms auto-save) with `data-reading-font`,
@@ -101,7 +150,7 @@ The Svelte side's look (theme, window chrome) and the main window: the ControlPa
   close still routes through hide-on-close; double-click on the drag region
   toggles maximize (Tauri built-in). Trade-off: the native snap-layout flyout
   on hover-over-maximize is gone (Win+arrows still snap).
-- **`lib/ControlPanel.svelte`** — the **main window** (window label is still
+- **`lib/views/ControlPanel.svelte`** — the **main window** (window label is still
   `settings`, historic): an OpenWhispr-style control panel — slim sidebar
   (**Home / Insights / Chat / Notes / Meetings / Tasks / Upload / Dictionary / Integrations**) + **Settings as a modal
   overlay** (cogwheel). `Settings.svelte` renders `embedded` inside the modal
@@ -232,7 +281,7 @@ Flow's dark mode of 19 Oct 2026), for every Yap window.
   paper dialogs), `--yap-feature*` (Home's tip card: ink on light, a raised
   warm card with a hairline and a cream button on dark), `--yap-mark-tile`
   (a light tile under black or coloured brand marks), `--yap-danger-fill*`.
-- **How it's applied** — `lib/appearance.js` (every window's App.svelte
+- **How it's applied** — `lib/core/appearance.js` (every window's App.svelte
   calls `initAppearance()`) resolves the choice (System via
   `matchMedia('(prefers-color-scheme: dark)')`, followed as Windows switches)
   and marks `<html data-yap-theme="light|dark">`; Settings applies its copy
@@ -289,7 +338,7 @@ Flow's dark mode of 19 Oct 2026), for every Yap window.
   `models`), the empty feed says "One step left: a speech model" with
   **Download a speech model** (→ Settings → Speech-to-Text) instead of
   "Ready when you are" — the hotkey does nothing until there's one.
-  App names are the ones people know (`lib/appNames.js` `appLabel`:
+  App names are the ones people know (`lib/core/appNames.js` `appLabel`:
   "ms-teams.exe" → "Teams", "WINWORD.EXE" → "Word"; history keeps the
   process name) — Home's rows, Insights and Settings' per-app rules.
   A dictation whose audio is still kept
@@ -312,7 +361,7 @@ Flow's dark mode of 19 Oct 2026), for every Yap window.
   what I said** (`as_said_paste_entry`: the latest dictation swapped in its
   app, its window brought back — "Swapped for what you said" —, any other
   copied: "Copied what you said" + why, unless Yap's own alert said it) and
-  **Copy what I said**. `lib/wordDiff.js` (no dependency): a word LCS over
+  **Copy what I said**. `lib/core/wordDiff.js` (no dependency): a word LCS over
   normalised words (`wordKey`: lower case, letters, digits, apostrophes —
   capitals and punctuation aren't changes, cleanup adds them to almost
   every dictation, so a punctuation-only cleanup shows nothing), the same
@@ -328,7 +377,7 @@ Flow's dark mode of 19 Oct 2026), for every Yap window.
 - **`UploadView.svelte`** = local audio-**file** transcription (drop/browse →
   Symphonia decode → chunked transcription on the warm engine with progress +
   cancel — see `dictation/media.rs`); its line names the model ("transcribes with
-  Parakeet V3", `models.js`), not its id. **The job lives in
+  Parakeet V3", `core/speechModels.js`), not its id. **The job lives in
   `upload.svelte.js`** (2026-10-24), which ControlPanel starts
   (`initUpload`, like the update store): the file, its progress, Cancel,
   the result and the `yap-upload-*` listeners outlive the view, so leaving
@@ -367,12 +416,12 @@ Flow's dark mode of 19 Oct 2026), for every Yap window.
   asked first** — `home_snapshot` (`dictation/commands.rs`, async: off the window's
   thread; the history page, the stats, the settings Home shows, the
   installed models), started by `App.svelte` for the main window while
-  ControlPanel's code is still loading (`lib/homeData.js`: `prefetchHome`,
+  ControlPanel's code is still loading (`lib/views/home/homeData.js`: `prefetchHome`,
   then `homeSnapshot` hands Home that answer once and asks afresh after);
   `.home[data-ready]` once it's in. Before, Home asked in four calls (two
   sync, holding the window's thread) issued after ~60 others and answered
   behind 66 of them. And **reads asked at once go once**
-  (`lib/ipcShared.js` `shared`: a call made while the same one is on its
+  (`lib/core/ipcShared.js` `shared`: a call made while the same one is on its
   way gets its answer, a copy; Appearance and the model list use it):
   `get_config` 4 → 3, `installed_models` 2 → 1. Measured from a reload of
   the main window (stub debug build, the PC busy with other builds,
@@ -382,7 +431,7 @@ Flow's dark mode of 19 Oct 2026), for every Yap window.
   batched) run beside it and were never what Home waited for: each takes
   ~20–30 ms, all in flight at once. e2e `home-first-paint.spec.js` guards
   the order and the count (not the milliseconds).
-- **AI errors in plain words** (`lib/aiErrors.js` `aiError`): Chat's
+- **AI errors in plain words** (`lib/core/aiErrors.js` `aiError`): Chat's
   "Couldn't send" says "Couldn't reach the AI model on this PC
   (127.0.0.1:11434). Check that it's running (Ollama, LM Studio…)…", "…check
   your internet connection…", a refused API key, a model the provider
@@ -391,7 +440,7 @@ Flow's dark mode of 19 Oct 2026), for every Yap window.
 
 ## Shared components
 
-- **`lib/ModelManager.svelte` / `ModelRow.svelte` / `models.js`** — the 14-model
+- **`lib/settings/ModelManager.svelte` / `ModelRow.svelte` / `core/speechModels.js`** — the 14-model
   browser, OpenWhispr-style: vendor pill tabs (All/NVIDIA/OpenAI/Community via
   `ui/PillTabs.svelte`) + compact one-line rows (status dot, brand icon from
   `providerIcons.js` + `assets/providers/*.svg` (MIT, from OpenWhispr), name,
@@ -399,9 +448,14 @@ Flow's dark mode of 19 Oct 2026), for every Yap window.
   ⚠ never `window.confirm/alert/prompt` in a Yap window: Tauri routes them to the
   dialog plugin, which these windows aren't allowed, so they throw).
   `ModelCard.svelte` (big cards) remains only in
-  Onboarding. `ModelRow` also draws the speaker models (`SpeakerModels.svelte`:
+  Onboarding (`onboarding/ModelCard.svelte`). `ModelRow` also draws the speaker models (`SpeakerModels.svelte`:
   `unavailable` = a listed model's note instead of Download, `deleteActive`).
-- **`lib/Onboarding.svelte`** — first-run **guided setup** (5 steps): model picker
+- **`lib/onboarding/Onboarding.svelte`** — first-run **guided setup** (its
+  parts, 2026-10-24: `setupState.svelte.js` holds every step's state across
+  the steps, the config fields this window changed and its raw event
+  subscriptions; `StepHeader`, `ModelStep`, `MicStep`, `CleanupStep`,
+  `TrayStep`, `TryStep`; `cleanupProviders.js` the brands and cloud
+  providers) (5 steps): model picker
   (**two of the 14 shown**: Parakeet V3, recommended, and the best other pick
   for the PC's language — Parakeet V2 where `navigator.language` is English,
   else Whisper Large v3 Turbo; the rest behind "More models (12)", as the AI

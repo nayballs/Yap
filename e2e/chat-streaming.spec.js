@@ -1,4 +1,4 @@
-// Streamed answers (src-tauri/src/chat/stream.rs, src/lib/streaming.js): Chat and
+// Streamed answers (src-tauri/src/chat/stream.rs, src/lib/core/streaming.js): Chat and
 // the notepad's Ask sheet show an answer as it's written.
 // - The answer grows in place, markdown rendered as it comes (a half-written
 //   **bold** or list closed off), the request asked for the stream and its
@@ -20,7 +20,7 @@
 // first (no app).
 import { test as base, expect, openView, expectStore } from './support/fixtures.js';
 import { startFakeLlm } from './support/fake-llm.js';
-import { closePartial, liveAnswer, applyEvent } from '../src/lib/streaming.js';
+import { closePartial, liveAnswer, applyEvent } from '../src/lib/core/streaming.js';
 
 const test = base.extend({
   fakeLlm: [

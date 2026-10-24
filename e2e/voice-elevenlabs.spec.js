@@ -1,5 +1,5 @@
 // ElevenLabs as the voice of spoken replies (src-tauri/src/voice/tts/elevenlabs.rs,
-// voice/tts/cloud.rs, voice/tts.rs, src/lib/ElevenLabsSettings.svelte, VoiceSettings
+// voice/tts/cloud.rs, voice/tts.rs, src/lib/settings/ElevenLabsSettings.svelte, VoiceSettings
 // .svelte), against a local stand-in (support/fake-elevenlabs.js, the
 // debug-only YAP_ELEVENLABS_URL) — never the internet, never a real key:
 // - Settings → Voice Assistant → Voice: "Speaks with" On this PC /

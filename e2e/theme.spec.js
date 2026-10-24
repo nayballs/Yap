@@ -1,5 +1,5 @@
 // Settings → General → Appearance → Theme (System / Light / Dark;
-// lib/appearance.js, app.css's dark block, index.html's head script,
+// lib/core/appearance.js, app.css's dark block, index.html's head script,
 // shell/theme.rs) and the Yap bar's "Bar colours" (Match app / Light / Dark).
 //
 // - Switching applies live to the main window, the meeting notepad and the

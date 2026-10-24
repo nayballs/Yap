@@ -29,15 +29,15 @@ takes its meeting's name, attendees and invite ([The calendar](#the-calendar),
 | The end of a meeting: pause or end, "Started by mistake?", the action plan job | `src-tauri/src/meetings/meeting_end.rs` |
 | "What did I miss?", the one-tap helpers (Questions to ask, Follow-up email, Gaps and risks), the AI meeting title | `src-tauri/src/meetings/meeting_assist.rs` |
 | The notepad window: docking, split screen | `src-tauri/src/meetings/notepad.rs` |
-| Who said what: the speaker map, names on lines, 1:1 calendar guesses, line times and splitting | `src-tauri/src/speakers.rs`, `src/lib/SpeakerMenu.svelte` |
-| Names for the voices: suggestions from what's said and the invite, the AI's checked answers, "It was me"; the cards | `src-tauri/src/speakers/naming.rs`, `src/lib/SpeakerCard.svelte` |
+| Who said what: the speaker map, names on lines, 1:1 calendar guesses, line times and splitting | `src-tauri/src/speakers.rs`, `src/lib/components/SpeakerMenu.svelte` |
+| Names for the voices: suggestions from what's said and the invite, the AI's checked answers, "It was me"; the cards | `src-tauri/src/speakers/naming.rs`, `src/lib/components/SpeakerCard.svelte` |
 | Who the call app shows talking (experimental); `yap.exe call-dump` | `src-tauri/src/speakers/call_ui.rs` (+ `call_ui/profiles.json`) |
 | The calendar: meetings, the reminder card, a note's meeting | `src-tauri/src/calendar.rs` (+ `calendar/`; [`calendar.md`](./calendar.md)) |
 | Prompts (`MEETING_DIGEST_PROMPT`, `ACTION_PLAN_BASE_PROMPT`, `ACTION_PLAN_DEFAULT_FRAGMENT`, `CATCH_UP_PROMPT`, `MEETING_ASK_PROMPT`, `MEETING_QUESTIONS_PROMPT`, `MEETING_FOLLOW_UP_PROMPT`, `MEETING_BLIND_SPOTS_PROMPT`, `MEETING_TITLE_PROMPT`) | `src-tauri/src/ai/llm.rs` |
 | Storage (`Note::digests`, `Note::speakers`, `TranscriptSegment::echo` / `::dictated` / `::speaker` / `::start_ms` / `::words`, `Action::kind`, `Note::title_auto`) | `src-tauri/src/notes.rs` |
 | The action run (`note_enhance` / `run_enhance`) | `src-tauri/src/notes/commands.rs` |
-| Fixing the notes: a line's words, the summary's, never written over unasked; tasks ticked and listed | `src-tauri/src/notes/note_edits.rs`, `src-tauri/src/notes/tasks.rs`, `src/lib/noteEdits.js`, `src/lib/TasksView.svelte` |
-| UI | `src/lib/NotesView.svelte`, `src/lib/Notepad.svelte`, `src/lib/meetingSummary.svelte.js` |
+| Fixing the notes: a line's words, the summary's, never written over unasked; tasks ticked and listed | `src-tauri/src/notes/note_edits.rs`, `src-tauri/src/notes/tasks.rs`, `src/lib/core/noteEdits.js`, `src/lib/views/TasksView.svelte` |
+| UI | `src/lib/NotesView.svelte`, `src/lib/Notepad.svelte`, `src/lib/stores/meetingSummary.svelte.js` |
 
 ## Recording
 
@@ -692,7 +692,7 @@ person's to fix (Wispr Flow's Notetaker does the same). Whatever model wrote
 the summary — on this PC or a cloud one — the person's changes are local data,
 and Yap never writes over them without asking. Code: `src-tauri/src/notes/note_edits.rs`
 (lines, the summary, the rule), `src-tauri/src/notes/tasks.rs` (tasks),
-`src/lib/noteEdits.js` and `src/lib/TasksView.svelte`.
+`src/lib/core/noteEdits.js` and `src/lib/views/TasksView.svelte`.
 
 ### A line's words
 
@@ -1069,8 +1069,8 @@ made-up title shows muted in the notepad and the Notes view.
 
 Wispr Flow's Notetaker settings, ported (Settings → Meetings, one
 block under "Ask about calls in"). Code: `src-tauri/src/calls/meeting_guard.rs`,
-`src-tauri/src/calls/capture.rs`, `src/lib/meetingGuard.js`,
-`src/lib/meetingCheckIn.js`.
+`src-tauri/src/calls/capture.rs`, `src/lib/notices/meetingGuard.js`,
+`src/lib/notices/meetingCheckIn.js`.
 
 | Setting | Config | Default | Wispr's |
 |---|---|---|---|
@@ -1531,7 +1531,7 @@ WhatsApp, Signal, Telegram) aren't asked about unless switched on, any app can
 be switched off from its prompt ("Don't ask for Teams"), and the prompts can
 come as a pop-up or quietly. While a call is live, the tray menu offers
 "Record this Teams call" either way. Code: `src-tauri/src/calls/meeting_detect.rs`
-(+ `src/lib/meetingDetect.svelte.js` for the in-app prompts,
+(+ `src/lib/stores/meetingDetect.svelte.js` for the in-app prompts,
 `src-tauri/src/notices/win_toast.rs` for the Windows notifications, `src-tauri/src/shell/tray.rs`
 for the tray item).
 
@@ -1755,7 +1755,7 @@ on) and stops all detection work.
 The call apps show their real icons, as installed on this PC, beside the
 switches in Settings and on the bar's call card, the way Wispr's "Meeting
 detected" card shows Discord's. One component draws them
-(`src/lib/CallAppIcon.svelte`), in this order:
+(`src/lib/components/CallAppIcon.svelte`), in this order:
 
 1. **The app's own icon as installed here** (`calls/app_icons.rs`, the
    `meeting_app_icons` command);

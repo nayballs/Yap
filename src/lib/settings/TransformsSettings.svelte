@@ -1,5 +1,5 @@
 <script>
-  // Settings → Commands → Transforms (transforms.rs; Wispr Flow's
+  // Settings → Commands → Transforms (dictation/transforms.rs; Wispr Flow's
   // Transforms): one-key rewrites of the selected text — or, nothing
   // selected, the last dictation — without saying anything. Yap's five
   // first (their instructions are Yap's: a name, a line, a shortcut, and

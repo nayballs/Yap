@@ -1,4 +1,4 @@
-// The Chat model picker, a provider rail (src/lib/ChatModelPicker.svelte,
+// The Chat model picker, a provider rail (src/lib/views/chat/ChatModelPicker.svelte,
 // chatModels.svelte.js, ModelChip.svelte; src-tauri/src/ai/ai_model.rs):
 // - the chip names the model (the provider's mark, "· Groq"); the picker
 //   opens on its provider, the rail lists Recent, every cloud provider with

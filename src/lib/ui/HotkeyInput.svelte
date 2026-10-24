@@ -4,7 +4,7 @@
   // a combo, or hold 2+ modifiers (or a single right-side modifier) ~200 ms and
   // release to bind a modifier-only hotkey. Inline validation warning (4 s),
   // Esc cancels, Backspace clears when `clearable`, mouse extra buttons bind
-  // as before. Emits Yap's spec format (see lib/hotkeys.js).
+  // as before. Emits Yap's spec format (see lib/core/hotkeys.js).
   import {
     COPILOT_KEY,
     MOD_LABELS,
@@ -12,7 +12,7 @@
     eventModifierFamily,
     hotkeyParts,
     parseHotkeySpec,
-  } from '../hotkeys.js';
+  } from '../core/hotkeys.js';
 
   let {
     value = $bindable(''),

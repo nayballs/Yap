@@ -1,4 +1,4 @@
-// Who said what in a meeting (src-tauri/src/speakers.rs, src/lib/SpeakerMenu.svelte):
+// Who said what in a meeting (src-tauri/src/speakers.rs, src/lib/components/SpeakerMenu.svelte):
 // the note's speaker map names the transcript's voices — "You", "Them", or,
 // once told apart, "Speaker 1", "Speaker 2"… — and the menu on a name (or on
 // a line's person button) renames a voice everywhere or just that line,
@@ -28,7 +28,7 @@ import {
   transcriptItems,
   transcriptText,
   noteMarkdown,
-} from '../src/lib/notepadText.js';
+} from '../src/lib/core/notepadText.js';
 
 // A meeting note from before voices and line times existed.
 const OLD_NOTE = {

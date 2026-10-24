@@ -1,8 +1,8 @@
 <script>
-  // Settings → Speech-to-Text (`models`; stt.rs): your model and the
+  // Settings → Speech-to-Text (`models`; dictation/stt.rs): your model and the
   // catalogue (ModelManager.svelte), speakers in meetings (SpeakerModels,
-  // diarize.rs), the language, and where the model runs (RunsOn.svelte,
-  // stt_speed.rs) with Unload model when idle.
+  // speakers/diarize.rs), the language, and where the model runs (RunsOn.svelte,
+  // dictation/stt_speed.rs) with Unload model when idle.
   //
   //   cfg:      Settings' config $state (auto-save does the saving).
   //   langInfo: what the active model can do with languages
@@ -11,8 +11,8 @@
   import Row from '../ui/Row.svelte';
   import Toggle from '../ui/Toggle.svelte';
   import Select from '../ui/Select.svelte';
-  import ModelManager from '../ModelManager.svelte';
-  import SpeakerModels from '../SpeakerModels.svelte';
+  import ModelManager from './ModelManager.svelte';
+  import SpeakerModels from './SpeakerModels.svelte';
   import RunsOn from './RunsOn.svelte';
 
   let { cfg, langInfo } = $props();
@@ -47,7 +47,7 @@
 <!-- Your model first (with the red badge's reason, when there's
      none), then the catalogue: ModelManager.svelte. -->
 <ModelManager />
-<!-- Speaker diarization's models + its switch (diarize.rs); the
+<!-- Speaker diarization's models + its switch (speakers/diarize.rs); the
      Meetings page has the switch too and links here. -->
 <Group title="Speakers in meetings" id="settings-speakers">
   <Row setting="speakers">
@@ -73,7 +73,7 @@
 </Group>
 <Group title="Performance" id="settings-performance">
   <!-- The graphics card or the processor, measured per model on
-       this PC (stt_speed.rs). -->
+       this PC (dictation/stt_speed.rs). -->
   <RunsOn {cfg} />
   <Row label="Unload model when idle" desc="Frees memory between dictations. It loads again for the next one" setting="unload">
     <Select bind:value={cfg.modelUnloadTimeout} options={UNLOAD_TIMEOUTS} ariaLabel="Unload model when idle" />

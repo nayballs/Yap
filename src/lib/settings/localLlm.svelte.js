@@ -1,4 +1,4 @@
-// Settings' on-device model (local_llm.rs, the llamafile sidecar): its
+// Settings' on-device model (ai/local_llm.rs, the llamafile sidecar): its
 // status as Language Models and the scope link rows show it, the curated
 // model downloading and its progress, and what Settings does with it
 // (download, use, delete, the bigger model offered once). A store, not the
@@ -8,7 +8,7 @@
 // (The Chat model picker keeps its own, chatModels.svelte.js `local`.)
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
-import { PROVIDER_ICONS } from '../providerIcons.js';
+import { PROVIDER_ICONS } from '../core/providerIcons.js';
 import { config, persist } from './configSync.svelte.js';
 
 export const localLlm = $state({

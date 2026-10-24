@@ -1,0 +1,784 @@
+<script>
+  // The main window "control panel" — ported from OpenWhispr's ControlPanel.tsx
+  // + ControlPanelSidebar.tsx. Yap's main window is no longer a settings dialog:
+  // a slim sidebar routes between surfaces (Home = the dictation feed, Chat,
+  // Notes, Meetings, Upload, Dictionary…), and Settings opens as a modal
+  // overlay via the cogwheel — exactly OpenWhispr's structure.
+  //
+  // <Settings> stays ALWAYS MOUNTED (hidden when the modal is closed): its
+  // window-level listeners (in-window hotkey fallback — the WebView2-focus
+  // gotcha), auto-save effect, and attention badge must run for the lifetime
+  // of the window, not only while the modal is open.
+  import { listen } from '@tauri-apps/api/event';
+  import { getCurrentWindow } from '@tauri-apps/api/window';
+  import { onMount } from 'svelte';
+  import yapIcon from '../../assets/yap-logo.svg';
+  import ToastHost from '../ui/ToastHost.svelte';
+  import { toast } from '../ui/toast.svelte.js';
+  import { fillHotkey } from '../core/hotkeys.js';
+  import Settings from '../settings/Settings.svelte';
+  import { attention } from '../stores/attention.svelte.js';
+  import { account, displayName, initAccount, initials } from '../stores/account.svelte.js';
+  import { initUpdates } from '../stores/updates.svelte.js';
+  import { initMeetingDetect, noteRequest } from '../stores/meetingDetect.svelte.js';
+  import { initMeetingSummary, askStartedByMistake } from '../stores/meetingSummary.svelte.js';
+  import { initMeetingGuard } from '../notices/meetingGuard.js';
+  import { initCalendar, closeConnectDialog } from '../stores/calendar.svelte.js';
+  import { initWordSuggestions } from '../notices/wordSuggestions.js';
+  import { initAlerts } from '../notices/alerts.js';
+  import { initUpload } from '../stores/upload.svelte.js';
+  import { initMemory } from '../stores/memory.svelte.js';
+  import { initCleanupOffer } from '../notices/cleanupOffer.js';
+  import ConnectCalendarDialog from '../components/ConnectCalendarDialog.svelte';
+  // Every view is in this window's one chunk (~590 KB): loading the views
+  // other than Home on demand was measured on 2026-10-22 and changed nothing
+  // you'd see — Home on screen 63 → 57 ms (inside run-to-run noise), 256 →
+  // 253 ms with the CPU 4× slower — since V8 compiles code only when it
+  // runs; the load's time goes to its ~77 IPC calls (frontend.md).
+  import MeetingsView from './MeetingsView.svelte';
+  import HomeView from './home/HomeView.svelte';
+  import InsightsView from './InsightsView.svelte';
+  import DictionaryView from './DictionaryView.svelte';
+  import UploadView from './UploadView.svelte';
+  import NotesView from './notes/NotesView.svelte';
+  import TasksView from './TasksView.svelte';
+  import ChatView from './chat/ChatView.svelte';
+  import { chatRequest } from '../stores/chatRequest.svelte.js';
+  import IntegrationsView from './integrations/IntegrationsView.svelte';
+  import { menuOrDialogOpen } from '../ui/contextMenu.svelte.js';
+  import { noteAccountPicture } from '../core/connections.js';
+  import { prefetchHome } from './home/homeData.js';
+
+  // Home's data first, before the ~60 calls the rest of the window makes as
+  // it starts (homeData.js; App.svelte has usually asked already, while
+  // this view's code loaded: then this does nothing).
+  prefetchHome().catch(() => {});
+
+  let activeView = $state('home');
+
+  // Sidebar account button: who's signed in (auth.rs via account.svelte.js).
+  initAccount();
+  // Update state + the "Yap X is ready" toast (updates.rs via
+  // updates.svelte.js). This window owns the ToastHost, so it starts it.
+  initUpdates();
+  let acctUser = $derived(account.status?.signedIn ? account.status.user : null);
+  let acctImgFailed = $state(false);
+  let settingsOpen = $state(false);
+  // Call detection (calls/meeting_detect.rs via meetingDetect.svelte.js): "call
+  // detected — Record notes?" toasts, opening the meeting note in Notes, and
+  // "Won't ask about Teams calls" → Settings → Meetings.
+  initMeetingDetect({
+    showNotes: () => {
+      settingsOpen = false;
+      activeView = 'notes';
+    },
+    openSettings: (section) => openSettings(section),
+  });
+  // The action plan Rust writes when a meeting ends (meetings/meeting_end.rs), for
+  // the Notes view; started here so no job's progress is missed.
+  initMeetingSummary();
+  // Meeting guard rails (calls/meeting_guard.rs, calls/capture.rs via meetingGuard.js):
+  // "Notes stop in 5 minutes · Keep going", the screen-share tip → Settings
+  // → Meetings, and the stops Yap makes itself.
+  initMeetingGuard({ openSettings: (section) => openSettings(section) });
+  // The calendar (calendar.rs via calendar.svelte.js): the reminder card
+  // before a meeting, the "Connect your calendar" nudge and dialog, and the
+  // Meetings view.
+  initCalendar({
+    showView: (view) => {
+      settingsOpen = false;
+      activeView = view;
+    },
+    openSettings: (section) => openSettings(section),
+  });
+  // "Add “Kubernetes” to your dictionary?" after you fix a word Yap typed
+  // (dictionary/learn.rs via wordSuggestions.js), with Open Dictionary once added.
+  initWordSuggestions({
+    showView: (view) => {
+      settingsOpen = false;
+      activeView = view;
+    },
+  });
+  // A dictation's alerts (notices/alert.rs): a paste into an app running as
+  // administrator left on the clipboard, Windows' microphone privacy
+  // switch — with Open settings.
+  initAlerts();
+  // Upload's job (upload.svelte.js): its progress, Cancel and result, and
+  // the "Transcription complete" toast, whichever view is up — the view
+  // unmounts when you leave it (or Chat opens by itself).
+  initUpload();
+  // Memory (memory.rs via memory.svelte.js): "Yap remembered: your sister
+  // is Rochelle" with Undo and Manage (→ Settings → Memory).
+  initMemory({ openSettings: (section) => openSettings(section) });
+  // The one offer of AI cleanup, to someone with it off on a PC the
+  // on-device model fits (ai/cleanup_styles.rs via cleanupOffer.js).
+  initCleanupOffer({ openSettings: (section) => openSettings(section) });
+  let bellOpen = $state(false);
+
+  // Sidebar nav (Wispr order: Home, Insights, then the work surfaces).
+  const NAV = [
+    { id: 'home', label: 'Home' },
+    { id: 'insights', label: 'Insights' },
+    { id: 'chat', label: 'Chat' },
+    { id: 'notes', label: 'Notes' },
+    { id: 'meetings', label: 'Meetings' },
+    // The meetings' action plans' tasks, ticked here or in the note (notes/tasks.rs).
+    { id: 'tasks', label: 'Tasks' },
+    { id: 'upload', label: 'Upload' },
+    { id: 'dictionary', label: 'Dictionary' },
+    { id: 'integrations', label: 'Integrations' },
+  ];
+
+  // Custom window chrome (the settings window is undecorated — Wispr-style
+  // warm frame all the way to the top). Buttons mirror the native caption
+  // controls; double-click on the drag region toggles maximize (Tauri
+  // built-in). Close goes through close() so hide-on-close keeps working.
+  const appWindow = getCurrentWindow();
+  let maximized = $state(false);
+  async function refreshMaximized() {
+    try {
+      maximized = await appWindow.isMaximized();
+    } catch {
+      /* ignore */
+    }
+  }
+
+  function openSettings(section = null) {
+    closeConnectDialog();
+    settingsOpen = true;
+    if (section) {
+      window.dispatchEvent(new CustomEvent('yap-settings-goto', { detail: section }));
+    }
+  }
+
+  function onOverlayKeydown(e) {
+    // Esc closes a right-click menu or the confirm dialog first (ui/contextMenu.svelte.js).
+    if (e.key === 'Escape' && (e.defaultPrevented || menuOrDialogOpen())) return;
+    if (e.key === 'Escape' && bellOpen) {
+      bellOpen = false;
+      e.stopPropagation();
+      return;
+    }
+    if (e.key === 'Escape' && settingsOpen) {
+      settingsOpen = false;
+      e.stopPropagation();
+    }
+  }
+
+  // Close the notifications dropdown on any click outside its wrapper.
+  function onWindowClick(e) {
+    if (bellOpen && !e.target.closest?.('.bellwrap')) bellOpen = false;
+  }
+
+  // Backend errors that aren't a dictation's (a call that couldn't be
+  // recorded, meeting notes that didn't start…) surface as alert toasts in
+  // the main window. A dictation's own errors are the dictation overlay's
+  // (`yap-dictation-error`): one place.
+  onMount(() => {
+    const uns = [];
+    listen('yap-error', (e) => {
+      const msg = String(e.payload || 'Something went wrong');
+      toast({ kind: 'alert', title: 'Yap ran into a problem', description: msg, variant: 'destructive' });
+    }).then((u) => uns.push(u));
+    // Push-to-talk coaching (dictation/coaching.rs): a lone tap of the dictation
+    // hotkey, or a very long hold, while this window is on screen. The texts
+    // say `{key}`; the hotkey's name is written here.
+    listen('yap-hint', (e) => {
+      const h = e.payload;
+      if (!h?.title) return;
+      toast({
+        kind: 'tip',
+        title: fillHotkey(h.title, h.hotkey),
+        description: fillHotkey(h.body, h.hotkey),
+        chip: 'Tip',
+        duration: 10_000,
+      });
+    }).then((u) => uns.push(u));
+    // A deep link asked for a Settings section (auth.rs: "Open Yap" on the
+    // account service's /security page → "account").
+    listen('yap-open-settings', (e) => openSettings(String(e.payload || '') || null)).then((u) => uns.push(u));
+    // A question dictated for the Chat view (dictation/pipeline.rs `deliver_to_chat`)
+    // that arrives after you left Chat: back to Chat with it (ChatView takes
+    // it from there; while it's open it gets the event itself).
+    listen('yap-chat-dictation', (e) => {
+      const p = e.payload;
+      if (activeView === 'chat' || !p?.text?.trim()) return;
+      chatRequest.pending = { text: p.text, send: !!p.send, dictated: true };
+      settingsOpen = false;
+      activeView = 'chat';
+    }).then((u) => uns.push(u));
+    // A question asked with the Voice Assistant's shortcut (chat/assistant.rs)
+    // while this window is the one in front, or its card's "Open in Chat":
+    // Chat comes up on it (ChatView follows it from there; while it's open it
+    // gets the events itself).
+    listen('yap-assistant-turn', (e) => {
+      const p = e.payload;
+      if (!p?.show || p.conversationId == null) return;
+      settingsOpen = false;
+      if (activeView === 'chat') return;
+      chatRequest.pending = { assistant: p };
+      activeView = 'chat';
+    }).then((u) => uns.push(u));
+    // A snip landed (Snip to Chat, snip.rs): Chat comes up with it in the
+    // message box (ChatView takes it from there; while it's open it gets
+    // the event itself). Rust has brought the window up.
+    listen('yap-snip', (e) => {
+      const p = e.payload;
+      if (!p?.image?.id) return;
+      settingsOpen = false;
+      if (activeView === 'chat') return;
+      chatRequest.pending = { snip: p };
+      activeView = 'chat';
+    }).then((u) => uns.push(u));
+    // A meeting with only a few words ended: "Started by mistake?", when Rust
+    // picked this window to ask (the meeting notepad asks when it's open).
+    listen('yap-meeting-ended', (e) => {
+      if (e.payload?.mistake && e.payload.surface === 'settings') askStartedByMistake(e.payload.noteId);
+    }).then((u) => uns.push(u));
+    refreshMaximized();
+    appWindow.onResized(() => refreshMaximized()).then((u) => uns.push(u));
+    return () => uns.forEach((u) => u && u());
+  });
+</script>
+
+{#snippet navIcon(id)}
+  {#if id === 'home'}
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 10.5 12 3l9 7.5" /><path d="M5 9.5V21h14V9.5" /><path d="M10 21v-6h4v6" /></svg>
+  {:else if id === 'insights'}
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 20V10" /><path d="M10 20V4" /><path d="M16 20v-7" /><path d="M22 20H2" /></svg>
+  {:else if id === 'chat'}
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" /></svg>
+  {:else if id === 'notes'}
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M13.4 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-7.4" /><path d="M18.4 2.6a2 2 0 0 1 2.8 2.8L13 13.6 9 14.6l1-4z" /></svg>
+  {:else if id === 'meetings'}
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4.5" width="18" height="16" rx="2.5" /><path d="M3 9.5h18M8 2.5v4M16 2.5v4" /><path d="M8 14h3" /></svg>
+  {:else if id === 'tasks'}
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3.5" width="7" height="7" rx="1.5" /><path d="M4.8 7l1.5 1.5 2.4-3" /><rect x="3" y="13.5" width="7" height="7" rx="1.5" /><path d="M13.5 7h7.5M13.5 17h7.5" /></svg>
+  {:else if id === 'upload'}
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><path d="M17 8l-5-5-5 5" /><path d="M12 3v12" /></svg>
+  {:else if id === 'dictionary'}
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 4h6a4 4 0 0 1 4 4v12a3 3 0 0 0-3-3H2z" /><path d="M22 4h-6a4 4 0 0 0-4 4v12a3 3 0 0 1 3-3h7z" /></svg>
+  {:else if id === 'integrations'}
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 2v5" /><path d="M15 2v5" /><path d="M6 7h12l-.8 6.4A4 4 0 0 1 13.23 17h-2.46a4 4 0 0 1-3.97-3.6z" /><path d="M12 17v5" /></svg>
+  {/if}
+{/snippet}
+
+<svelte:window onkeydown={onOverlayKeydown} onclick={onWindowClick} />
+
+<div class="panel">
+  <div class="titlebar" data-tauri-drag-region>
+    <div class="brand" data-tauri-drag-region>
+      <img class="brandlogo" data-tauri-drag-region src={yapIcon} alt="" aria-hidden="true" />
+      <span class="brandname" data-tauri-drag-region>Yap</span>
+    </div>
+    <div class="winbtns">
+      <div class="bellwrap">
+        <button
+          class="winbtn bell"
+          class:open={bellOpen}
+          aria-label={attention.items.length ? `Notifications (${attention.items.length})` : 'Notifications'}
+          aria-expanded={bellOpen}
+          data-tip="Notifications"
+          onclick={() => (bellOpen = !bellOpen)}
+        >
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6.26 9a5.74 5.74 0 0 1 11.48 0c0 3.5.9 5.2 1.62 6.1a1 1 0 0 1-.78 1.63H5.42a1 1 0 0 1-.78-1.63c.72-.9 1.62-2.6 1.62-6.1" /><path d="M10 20.3a2.1 2.1 0 0 0 4 0" /></svg>
+          {#if attention.items.length > 0}
+            <span class="belldot">{attention.items.length}</span>
+          {/if}
+        </button>
+        {#if bellOpen}
+          <div class="bellmenu">
+            <div class="bellhead">Notifications</div>
+            {#if attention.items.length === 0}
+              <div class="bellempty">You're all caught up.</div>
+            {:else}
+              {#each attention.items as item (item.section + item.label)}
+                <button
+                  class="bellitem"
+                  onclick={() => {
+                    bellOpen = false;
+                    openSettings(item.section);
+                  }}
+                >
+                  <span>{item.label}</span>
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 6l6 6-6 6" /></svg>
+                </button>
+              {/each}
+            {/if}
+          </div>
+        {/if}
+      </div>
+      <button class="winbtn" title="Minimize" aria-label="Minimize" onclick={() => appWindow.minimize()}>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" aria-hidden="true"><path d="M4 12h16" /></svg>
+      </button>
+      <button class="winbtn" title={maximized ? 'Restore' : 'Maximize'} aria-label={maximized ? 'Restore' : 'Maximize'} onclick={() => appWindow.toggleMaximize()}>
+        {#if maximized}
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 8V5a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1h-3" /><rect x="4" y="8" width="12" height="12" rx="1" /></svg>
+        {:else}
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linejoin="round" aria-hidden="true"><rect x="4.5" y="4.5" width="15" height="15" rx="1.5" /></svg>
+        {/if}
+      </button>
+      <button class="winbtn close" title="Close" aria-label="Close" onclick={() => appWindow.close()}>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" /></svg>
+      </button>
+    </div>
+  </div>
+
+  <div class="cols">
+  <nav class="side" aria-label="Main">
+    <div class="nav">
+      {#each NAV as item (item.id)}
+        <button
+          class="navitem"
+          class:active={activeView === item.id}
+          aria-current={activeView === item.id ? 'page' : undefined}
+          onclick={() => (activeView = item.id)}
+        >
+          <span class="navicon">{@render navIcon(item.id)}</span>
+          <span class="navlabel">{item.label}</span>
+        </button>
+      {/each}
+    </div>
+
+    <div class="spacer"></div>
+
+    <div class="bottom">
+      <button class="navitem" onclick={() => openSettings()}>
+        <span class="navicon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h.01a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51h.01a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v.01a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" /></svg>
+        </span>
+        <!-- What needs doing is counted in one place, the title bar's bell
+             (it names each item); inside Settings its pages show where. -->
+        <span class="navlabel">Settings</span>
+      </button>
+
+      <div class="rule"></div>
+
+      <button class="acct" class:signed={!!acctUser} onclick={() => openSettings('account')}>
+        <span class="acct-avatar">
+          {#if acctUser?.image && !acctImgFailed}
+            <img src={acctUser.image} alt="" referrerpolicy="no-referrer" onload={() => noteAccountPicture(acctUser.image)} onerror={() => (acctImgFailed = true)} />
+          {:else if acctUser}
+            <span class="acct-ini">{initials(acctUser)}</span>
+          {:else}
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="8" r="3.2" /><path d="M5 20a7 7 0 0 1 14 0" /></svg>
+          {/if}
+        </span>
+        <span class="acct-who">
+          {#if acctUser}
+            <span class="l1">{displayName(acctUser)}</span>
+            <span class="l2">{acctUser.name?.trim() ? acctUser.email : 'Yap account'}</span>
+          {:else}
+            <span class="l1">Sign in</span>
+            <span class="l2">Optional · works offline</span>
+          {/if}
+        </span>
+      </button>
+    </div>
+  </nav>
+
+  <main class="view">
+    {#if activeView === 'home'}
+      <HomeView onopensettings={openSettings} onnavigate={(v) => (activeView = v)} />
+    {:else if activeView === 'insights'}
+      <InsightsView />
+    {:else if activeView === 'dictionary'}
+      <DictionaryView />
+    {:else if activeView === 'chat'}
+      <ChatView onopensettings={openSettings} />
+    {:else if activeView === 'notes'}
+      <NotesView onopensettings={openSettings} />
+    {:else if activeView === 'meetings'}
+      <MeetingsView onopensettings={openSettings} onnavigate={(v) => (activeView = v)} />
+    {:else if activeView === 'tasks'}
+      <TasksView
+        onopennote={(id, line) => {
+          noteRequest.pending = { id, stop: false, line };
+          activeView = 'notes';
+        }}
+      />
+    {:else if activeView === 'upload'}
+      <UploadView />
+    {:else if activeView === 'integrations'}
+      <IntegrationsView onopensettings={openSettings} />
+    {/if}
+  </main>
+  </div>
+</div>
+
+<ToastHost />
+
+<!-- "Connect your calendar" (calendar.svelte.js `openConnectDialog`): every
+     Connect calendar button outside Settings opens it. -->
+<ConnectCalendarDialog />
+
+<!-- Settings modal overlay. <Settings> is always mounted (see header comment);
+     the backdrop just hides it. -->
+<div
+  class="backdrop"
+  class:open={settingsOpen}
+  onclick={(e) => e.target === e.currentTarget && (settingsOpen = false)}
+  role="presentation"
+>
+  <div class="card" role="dialog" aria-modal="true" aria-label="Settings">
+    <Settings
+      embedded
+      open={settingsOpen}
+      onclose={() => (settingsOpen = false)}
+      onshowview={(v) => {
+        settingsOpen = false;
+        activeView = v;
+      }}
+    />
+  </div>
+</div>
+
+<style>
+  .panel {
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+    background: var(--yap-bg);
+    color: var(--yap-fg);
+    font-size: 13.5px;
+    overflow: hidden;
+  }
+
+  /* ---- custom window chrome (undecorated window) ---- */
+  .titlebar {
+    flex: 0 0 40px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    user-select: none;
+    -webkit-user-select: none;
+  }
+  .brand {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    padding: 0 0 0 18px;
+  }
+  .brandlogo {
+    width: 22px;
+    height: 22px;
+    border-radius: 6px;
+    pointer-events: none;
+  }
+  .brandname {
+    font-size: 14px;
+    font-weight: 700;
+    letter-spacing: 0.01em;
+  }
+  .winbtns {
+    display: flex;
+    align-self: stretch;
+  }
+  /* Wispr-weight caption buttons: near-ink glyphs, thicker strokes. */
+  .winbtn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 44px;
+    height: 100%;
+    border: none;
+    background: none;
+    color: var(--yap-fg);
+    cursor: default;
+    transition:
+      background var(--yap-dur) ease,
+      color var(--yap-dur) ease;
+  }
+  .winbtn svg {
+    width: 18px;
+    height: 18px;
+  }
+  .winbtn:hover {
+    background: var(--yap-raised);
+    color: var(--yap-fg);
+  }
+  .winbtn.close:hover {
+    background: #c42b1c;
+    color: #fff;
+  }
+
+  /* Notification bell (Wispr's title-bar bell + dark tooltip). */
+  .bellwrap {
+    position: relative;
+    display: flex;
+    align-self: stretch;
+  }
+  .winbtn.bell {
+    position: relative;
+    cursor: pointer;
+  }
+  .winbtn.bell.open {
+    background: var(--yap-raised);
+    color: var(--yap-fg);
+  }
+  .winbtn.bell::after {
+    content: attr(data-tip);
+    position: absolute;
+    top: calc(100% + 2px);
+    right: 4px;
+    padding: 4px 9px;
+    border-radius: 7px;
+    background: var(--yap-ink);
+    color: var(--yap-ink-fg);
+    font-size: 11.5px;
+    font-weight: 600;
+    white-space: nowrap;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 120ms ease;
+    z-index: 60;
+  }
+  .winbtn.bell:hover:not(.open)::after {
+    opacity: 1;
+  }
+  .belldot {
+    position: absolute;
+    top: 6px;
+    right: 8px;
+    min-width: 14px;
+    height: 14px;
+    padding: 0 3px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: var(--yap-r-full);
+    background: #e5484d;
+    color: #fff;
+    font-size: 9px;
+    font-weight: 700;
+    line-height: 1;
+  }
+  .bellmenu {
+    position: absolute;
+    top: calc(100% + 4px);
+    right: 0;
+    width: 264px;
+    padding: 6px;
+    border: 1px solid var(--yap-border-subtle);
+    border-radius: 12px;
+    background: var(--yap-s2);
+    box-shadow: var(--yap-shadow-menu);
+    z-index: 90;
+  }
+  .bellhead {
+    padding: 6px 8px;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--yap-muted);
+  }
+  .bellempty {
+    padding: 4px 8px 10px;
+    font-size: 12.5px;
+    color: var(--yap-muted);
+  }
+  .bellitem {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    width: 100%;
+    padding: 8px 10px;
+    border: none;
+    border-radius: 8px;
+    background: none;
+    color: var(--yap-fg);
+    font: inherit;
+    font-size: 13px;
+    font-weight: 550;
+    text-align: left;
+    cursor: pointer;
+    transition: background var(--yap-dur) ease;
+  }
+  .bellitem:hover {
+    background: var(--yap-raised-soft);
+  }
+  .bellitem svg {
+    flex: 0 0 auto;
+    width: 12px;
+    height: 12px;
+    color: var(--yap-muted);
+  }
+
+  .cols {
+    flex: 1 1 auto;
+    min-height: 0;
+    display: flex;
+  }
+
+  .side {
+    flex: 0 0 200px;
+    display: flex;
+    flex-direction: column;
+    padding: 4px 10px 12px;
+    background: var(--yap-bg);
+  }
+
+  .nav,
+  .bottom {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+  /* Wispr-weight nav: full-ink semibold labels even when inactive. */
+  .navitem {
+    display: flex;
+    align-items: center;
+    gap: 11px;
+    width: 100%;
+    height: 38px;
+    padding: 0 11px;
+    border: none;
+    border-radius: var(--yap-r);
+    background: none;
+    color: var(--yap-fg);
+    font: inherit;
+    font-size: 14px;
+    font-weight: 600;
+    text-align: left;
+    cursor: pointer;
+    transition:
+      background var(--yap-dur) ease,
+      color var(--yap-dur) ease;
+  }
+  .navitem:hover {
+    background: var(--yap-raised-soft);
+    color: var(--yap-fg);
+  }
+  /* Active nav = a white pill lifted off the warm-gray sidebar (Wispr). */
+  .navitem.active {
+    background: var(--yap-s2);
+    box-shadow: var(--yap-shadow-sm);
+    color: var(--yap-fg);
+  }
+  .navicon {
+    display: inline-flex;
+    width: 18px;
+    height: 18px;
+    flex: 0 0 auto;
+  }
+  .navicon :global(svg) {
+    width: 100%;
+    height: 100%;
+  }
+  .spacer {
+    flex: 1;
+  }
+  .rule {
+    height: 1px;
+    margin: 6px 4px;
+    background: var(--yap-border-subtle);
+  }
+
+  .acct {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    width: 100%;
+    padding: 7px 10px;
+    border: none;
+    border-radius: var(--yap-r);
+    background: none;
+    color: var(--yap-fg);
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+    transition: background var(--yap-dur) ease;
+  }
+  .acct:hover {
+    background: var(--yap-s2);
+  }
+  .acct-avatar {
+    display: inline-flex;
+    width: 24px;
+    height: 24px;
+    align-items: center;
+    justify-content: center;
+    border-radius: 50%;
+    border: 1px solid var(--yap-border);
+    color: var(--yap-muted);
+    flex: 0 0 auto;
+  }
+  .acct-avatar svg {
+    width: 14px;
+    height: 14px;
+  }
+  .acct.signed .acct-avatar {
+    border: none;
+    background: var(--yap-primary-tint);
+    overflow: hidden;
+  }
+  .acct-avatar img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
+  .acct-ini {
+    font-size: 10.5px;
+    font-weight: 700;
+    color: var(--yap-primary-hover);
+  }
+  .acct-who .l1,
+  .acct-who .l2 {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .acct-who {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+  }
+  .acct-who .l1 {
+    font-size: 13.5px;
+    font-weight: 600;
+  }
+  .acct-who .l2 {
+    font-size: 11px;
+    color: var(--yap-muted-55);
+  }
+
+  /* The content pane is an inset rounded sheet on the warm-gray frame —
+     the Wispr hallmark. Children keep managing their own scroll. */
+  .view {
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    margin: 0 10px 10px 2px;
+    background: var(--yap-s1);
+    border: 1px solid var(--yap-border-subtle);
+    border-radius: var(--yap-r-xl);
+    box-shadow: var(--yap-shadow-sm);
+  }
+
+  /* Settings modal */
+  .backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 50;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    background: var(--yap-scrim);
+  }
+  .backdrop.open {
+    display: flex;
+  }
+  .card {
+    width: min(1100px, calc(100vw - 48px));
+    height: calc(100vh - 48px);
+    border: 1px solid var(--yap-border);
+    border-radius: var(--yap-r-xl);
+    overflow: hidden;
+    background: var(--yap-s1);
+    box-shadow: var(--yap-shadow-modal);
+  }
+</style>

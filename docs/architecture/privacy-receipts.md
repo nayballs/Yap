@@ -73,7 +73,7 @@ person sees what their choices send where. It never says "nothing leaves".
   and the page's one connection, the **account picture** (`<img>` from the
   sign-in provider in AccountSection, ControlPanel and Settings: `onload` →
   `connections_note {purpose: "account-picture", url}`, once per picture per
-  window, `src/lib/connections.js`; Rust takes only purposes on its list and
+  window, `src/lib/core/connections.js`; Rust takes only purposes on its list and
   only the host). **Not routed:** the model evaluations (`ai/eval/`, debug
   builds, the maintainer's own tool, which logs its requests itself), and the
   `cloud/` server (it's the account service, not Yap; Yap's side of it is

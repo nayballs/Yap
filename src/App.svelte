@@ -1,8 +1,8 @@
 <script>
   import { getCurrentWindow } from '@tauri-apps/api/window';
   import ContextMenuHost from './lib/ui/ContextMenuHost.svelte';
-  import { initAppearance } from './lib/appearance.js';
-  import { prefetchHome } from './lib/homeData.js';
+  import { initAppearance } from './lib/core/appearance.js';
+  import { prefetchHome } from './lib/views/home/homeData.js';
 
   // The settings, onboarding, notepad and overlay windows (and the notepad's
   // on-demand split preview) all load the same SPA; pick the rendered view
@@ -17,17 +17,17 @@
   // its own preload list (the view's CSS chunk included), and a ternary of
   // them got one list — the last one's — so the main window lost its CSS.
   const VIEWS = {
-    settings: () => import('./lib/ControlPanel.svelte'),
-    onboarding: () => import('./lib/Onboarding.svelte'),
-    notepad: () => import('./lib/Notepad.svelte'),
-    'split-preview': () => import('./lib/SplitPreview.svelte'),
-    overlay: () => import('./lib/Overlay.svelte'),
+    settings: () => import('./lib/views/ControlPanel.svelte'),
+    onboarding: () => import('./lib/onboarding/Onboarding.svelte'),
+    notepad: () => import('./lib/notepad/Notepad.svelte'),
+    'split-preview': () => import('./lib/notepad/SplitPreview.svelte'),
+    overlay: () => import('./lib/bar/Overlay.svelte'),
   };
   const view = (VIEWS[label] ?? VIEWS.overlay)();
 
   // Settings → General → Appearance (the theme, the reading font and size,
   // Motion) and the bar's colours in every window, following each save live
-  // (lib/appearance.js).
+  // (lib/core/appearance.js).
   initAppearance();
   const isSettings = label === 'settings';
   const isOnboarding = label === 'onboarding';
@@ -44,7 +44,7 @@
 
 <!-- settings → the main control panel (Home feed + surfaces, Settings as a
      modal; the label is historic), onboarding, notepad → the meeting notepad
-     docked beside a call (notepad.rs), split-preview, else the Yap bar. -->
+     docked beside a call (meetings/notepad.rs), split-preview, else the Yap bar. -->
 {#await view then { default: View }}
   <View />
 {/await}

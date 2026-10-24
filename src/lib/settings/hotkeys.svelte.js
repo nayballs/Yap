@@ -1,4 +1,4 @@
-// Settings' seven global shortcuts (input_hook.rs): which command applies
+// Settings' seven global shortcuts (dictation/input_hook.rs): which command applies
 // each, their names for clash messages, and whether one is being picked
 // right now (Settings' in-page hotkey fallback stands down meanwhile, so
 // pressing the current hotkey to replace it doesn't start a dictation).
@@ -7,7 +7,7 @@
 // saved transforms' shortcuts (Commands → Transforms) are checked against
 // them, and they against the transforms'.
 import { invoke } from '@tauri-apps/api/core';
-import { formatHotkeySpec, hotkeysClash } from '../hotkeys.js';
+import { formatHotkeySpec, hotkeysClash } from '../core/hotkeys.js';
 import { transformName } from './transforms.js';
 
 export const HOTKEY_CMD = {
@@ -47,7 +47,7 @@ export function onHotkeyCapturing(cfg, target, on) {
 /**
  * Every shortcut but `except` (a fixed one's config key, or `transform:<id>`),
  * as [name, spec]: the seven fixed ones, then the saved transforms'
- * (transforms.rs; "the Polish transform").
+ * (dictation/transforms.rs; "the Polish transform").
  */
 function otherShortcuts(cfg, except) {
   const fixed = Object.keys(HOTKEY_NAMES)
@@ -68,7 +68,7 @@ function clashMessage([name, other], spec) {
 
 /**
  * The seven, and the saved transforms', never fire on one press
- * (`hotkeysClash`, input_hook.rs `clashes`): the message for a refused
+ * (`hotkeysClash`, dictation/input_hook.rs `clashes`): the message for a refused
  * spec, else null.
  */
 export function validateHotkey(cfg, target, spec) {

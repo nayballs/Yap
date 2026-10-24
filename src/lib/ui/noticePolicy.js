@@ -1,4 +1,4 @@
-// Yap's notice policy on the page (the Rust side is src-tauri/src/notice.rs;
+// Yap's notice policy on the page (the Rust side is src-tauri/src/notices/notice.rs;
 // same rules, same words). Pure: the toast store (toast.svelte.js) asks it
 // what to show; nothing here touches the DOM or Tauri.
 //

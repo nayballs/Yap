@@ -15,14 +15,14 @@
   // notes in 28 s…" in large type above the title, the seconds in a bigger
   // ring. Every answer goes back to Rust (`bar_card_action`).
   //
-  // The Voice Assistant's answer (style "answer", assistant.rs) is the same
+  // The Voice Assistant's answer (style "answer", chat/assistant.rs) is the same
   // card: the question as a quiet quoted line, the answer's markdown in a
   // body that scrolls past ~10 lines, a `status` note under it ("Not read
   // aloud while a meeting records"), Open in Chat. It goes when its voice
   // ends (Rust), or on ✕ / Esc, which stop the voice.
   import { fadeTimer, countdownClock } from './cardTimers.svelte.js';
-  import { fillHotkey } from '../hotkeys.js';
-  import { renderMarkdown } from '../markdown.js';
+  import { fillHotkey } from '../core/hotkeys.js';
+  import { renderMarkdown } from '../core/markdown.js';
 
   /** @type {{ card: any, paused?: boolean, onaction: (action: string) => void }} */
   let { card, paused = false, onaction } = $props();
@@ -57,7 +57,7 @@
     assistant: 'Voice Assistant',
     settings: 'Settings',
     snip: 'Snip to Chat',
-    // A save that failed (saving.rs), or "Saved" after Try again.
+    // A save that failed (shell/saving.rs), or "Saved" after Try again.
     save: 'Saving',
   };
   const answer = $derived(card.style === 'answer');

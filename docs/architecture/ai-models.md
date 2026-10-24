@@ -223,7 +223,7 @@ The language-model side: the OpenAI-compatible client and its prompts, the on-de
   it — on, unless `pp_preset` isn't "default" (a body or preset they picked
   for everywhere stays exactly as it was); cleanup itself is never turned
   on. **The one offer** (`offer`, `cleanup_offer_status` / `_seen`;
-  `lib/cleanupOffer.js`): cleanup off, never shown, tips on, a PC the
+  `lib/notices/cleanupOffer.js`): cleanup off, never shown, tips on, a PC the
   on-device model fits (`gpu::can_run_big_model`, or a model already here)
   and five dictations: one tip in the main window after a dictation or
   when it comes to the front, only while the notice policy has the person

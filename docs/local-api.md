@@ -96,7 +96,7 @@ Wispr's cloud. Yap's is local: the AI app runs **`yap.exe mcp`** on this PC,
 and that process reads the meetings from the running Yap through this local
 API. No server in between, no account. **Settings → AI apps (MCP)** (the Connections
 group, laid out like Wispr's page; Integrations has a "Go to MCP" card) adds
-it to an app in one click (`src/lib/McpSection.svelte` →
+it to an app in one click (`src/lib/settings/McpSection.svelte` →
 `src-tauri/src/integrations/mcp_clients.rs`); the server is `src-tauri/src/integrations/mcp.rs`.
 
 What an AI app can do, and what it can't:

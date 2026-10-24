@@ -4,8 +4,8 @@
 //! without a Yap update, and one they retire stops being offered.
 //!
 //! The page merges these lists with Yap's own curated registry
-//! (`src/lib/ppModels.js`, the recommended order and wording) in one helper
-//! (`src/lib/modelCatalog.js`); this side only fetches, filters and caches.
+//! (`src/lib/core/ppModels.js`, the recommended order and wording) in one helper
+//! (`src/lib/core/modelCatalog.js`); this side only fetches, filters and caches.
 //!
 //! **Where it asks** (a GET, read-only, short timeouts, off the main thread):
 //! Groq `GET /openai/v1/models`, OpenAI `GET /v1/models` (both Bearer),

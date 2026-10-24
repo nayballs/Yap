@@ -10,12 +10,12 @@
 // ContextMenu key, Shift+F10: `menuKey`). The menu holds the item's own
 // actions, in one order: the main action first, Copy-type ones next, the
 // destructive one last, in red, behind `askConfirm`. The event is cancelled,
-// so WebView2's own menu never comes up there (context_menu.rs cuts that one
+// so WebView2's own menu never comes up there (shell/context_menu.rs cuts that one
 // down to the edit commands anyway: nothing on plain UI).
 //
 // Left alone, so the native menu shows: a right-click in a text field (its
 // edit menu), on selected text (Copy), and — in a dev build only — a
-// Shift+right-click (context_menu.rs then offers Inspect). `import.meta.env.DEV`
+// Shift+right-click (shell/context_menu.rs then offers Inspect). `import.meta.env.DEV`
 // is false in `vite build`, so release builds never let it through.
 
 /** The window's menu: `ui/ContextMenu.svelte`'s props. */
@@ -43,7 +43,7 @@ export const confirmDialog = $state({
   run: null,
 });
 
-/** A dev build's Shift+right-click: the developer's way to Inspect (context_menu.rs). */
+/** A dev build's Shift+right-click: the developer's way to Inspect (shell/context_menu.rs). */
 export function devInspect(e) {
   return import.meta.env.DEV && e?.type === 'contextmenu' && !!e.shiftKey;
 }

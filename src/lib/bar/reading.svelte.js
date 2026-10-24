@@ -1,4 +1,4 @@
-// Read aloud on the Yap bar (read_aloud.rs): the reading card's state — the
+// Read aloud on the Yap bar (voice/read_aloud.rs): the reading card's state — the
 // sentence being read (its words and what's between them), the word being
 // said, paused or not, the speed — or a short note ("Nothing selected").
 // `yap-read` brings the whole card on every new sentence or state;

@@ -20,7 +20,7 @@
 //!
 //! **Which model** ([`best_model`], pure): the most accurate model
 //! installed that speaks the meeting's language — `accuracy` from the same
-//! leaderboard figures as Settings' bars (`src/lib/models.js`: keep the two
+//! leaderboard figures as Settings' bars (`src/lib/core/speechModels.js`: keep the two
 //! in step) — and only when it beats the live one by a margin
 //! ([`MARGIN`]). The meeting's language is the one picked in Settings →
 //! Speech-to-Text, else Windows' (About you's region); unknown, a model
@@ -87,7 +87,7 @@ const EUROPEAN: &[&str] = &[
     "sk", "sl", "es", "sv", "ru", "uk",
 ];
 
-/// Each speech model's accuracy (0–1, `src/lib/models.js`'s bars: the Open
+/// Each speech model's accuracy (0–1, `src/lib/core/speechModels.js`'s bars: the Open
 /// ASR Leaderboard's English WER, the specialists' on their language) and
 /// the languages it speaks.
 const MODELS: &[(&str, f32, &[&str])] = &[

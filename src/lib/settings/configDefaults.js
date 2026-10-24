@@ -25,11 +25,11 @@ export const FIELD_DEFAULTS = {
   audioFeedbackVolume: 1.0,
   soundEnabled: true,
   useGpu: true,
-  // Settings → Speech-to-Text → Runs on (stt_speed.rs): auto | gpu | cpu.
+  // Settings → Speech-to-Text → Runs on (dictation/stt_speed.rs): auto | gpu | cpu.
   sttDevice: 'auto',
-  // A day of dictation audio, to run one again (recent_audio.rs).
+  // A day of dictation audio, to run one again (dictation/recent_audio.rs).
   keepRecentAudio: true,
-  // "Use what I said" (as_said.rs): its shortcut and the bar's offer.
+  // "Use what I said" (pasting/as_said.rs): its shortcut and the bar's offer.
   asSaidHotkey: '',
   asSaidOffer: true,
   // Snip to Chat (snip.rs): its shortcut, saying "snip", keeping screenshots.
@@ -50,10 +50,10 @@ export const FIELD_DEFAULTS = {
   meetingOpenNotepad: true,
   meetingSplitScreen: false,
   meetingLiveTranscript: true,
-  // Meeting audio kept on disk (meeting_audio.rs): to transcribe again, play a line.
+  // Meeting audio kept on disk (meetings/meeting_audio.rs): to transcribe again, play a line.
   meetingKeepAudio: true,
   meetingAudioDays: 14,
-  // The refined transcript after a meeting (meeting_refine.rs): auto | always | never.
+  // The refined transcript after a meeting (meetings/meeting_refine.rs): auto | always | never.
   meetingRefine: 'auto',
   meetingDiarization: false,
   diarizationModel: 'nemotron-3-diarization',
@@ -68,7 +68,7 @@ export const FIELD_DEFAULTS = {
   barHideFullscreen: true,
   barTheme: 'app',
   barDictationButtons: 'off',
-  // General → Appearance (AppearanceSettings.svelte, lib/appearance.js).
+  // General → Appearance (AppearanceSettings.svelte, lib/core/appearance.js).
   theme: 'system',
   readingFont: 'default',
   readingSize: 'default',
@@ -96,13 +96,13 @@ export const FIELD_DEFAULTS = {
   routingScope: 'all_apps',
   appRoutes: [],
   cleanupProfiles: [],
-  // Styles by app (settings/CleanupStyles.svelte, cleanup_styles.rs).
+  // Styles by app (settings/CleanupStyles.svelte, ai/cleanup_styles.rs).
   cleanupStyles: true,
   llmScopes: {},
   agentName: '',
   editHotkey: '',
   // The rewrite shortcut with nothing selected rewrites the last
-  // dictation (as_said.rs).
+  // dictation (pasting/as_said.rs).
   rewriteLastDictation: true,
   assistantHotkey: '',
   readHotkey: '',
@@ -125,7 +125,7 @@ export const FIELD_DEFAULTS = {
   ttsProvider: 'local',
   ttsCloudKeys: {},
   ttsCloud: {},
-  // About you (AboutYouSettings.svelte, about_you.rs): the region's country,
+  // About you (AboutYouSettings.svelte, ai/about_you.rs): the region's country,
   // '' = Automatic (Windows'); its spelling's switch is in Dictation
   // cleanup (RegionSpelling.svelte).
   aboutName: '',
@@ -165,7 +165,7 @@ export function cleanConfig(cfg) {
       .filter((r) => r.app),
     cleanupProfiles: (cfg.cleanupProfiles || [])
       .map((p) => ({
-        // A style's kind, tone and apps (cleanup_styles.rs) ride along.
+        // A style's kind, tone and apps (ai/cleanup_styles.rs) ride along.
         ...p,
         id: p.id,
         name: (p.name || '').trim() || 'Untitled',

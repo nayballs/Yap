@@ -1,6 +1,6 @@
 <script>
   // Settings → About: the version and its updates (updates.svelte.js, Rust's
-  // updates.rs), Report a problem (ReportProblem.svelte, diagnostics.rs),
+  // updates.rs), Report a problem (ReportProblem.svelte, privacy/diagnostics.rs),
   // the project's links and the setup guide. Whether Yap checks
   // by itself is in General → Startup and updates; logs and the data folder
   // are in Privacy & data.
@@ -14,9 +14,9 @@
   import Row from '../ui/Row.svelte';
   import Button from '../ui/Button.svelte';
   import ReportProblem from './ReportProblem.svelte';
-  import { updates, installUpdate, checkForUpdates, openRelease, formatAgo } from '../updates.svelte.js';
-  import { renderMarkdown } from '../markdown.js';
-  import { createExternalLinkHandler } from '../externalLinks.js';
+  import { updates, installUpdate, checkForUpdates, openRelease, formatAgo } from '../stores/updates.svelte.js';
+  import { renderMarkdown } from '../core/markdown.js';
+  import { createExternalLinkHandler } from '../core/externalLinks.js';
 
   let { cfg, version = '', goto = null } = $props();
 </script>
@@ -103,7 +103,7 @@
       {#if updates.notes && ['ready', 'available', 'downloading'].includes(updates.status)}
         <div class="upd-notes">
           <div class="upd-notes-h">What’s new in {updates.version}</div>
-          <!-- renderMarkdown passes no raw HTML and sanitises its output (lib/markdown.js). -->
+          <!-- renderMarkdown passes no raw HTML and sanitises its output (lib/core/markdown.js). -->
           <div class="upd-notes-b">{@html renderMarkdown(updates.notes)}</div>
         </div>
       {/if}

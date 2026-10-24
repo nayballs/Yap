@@ -12,7 +12,7 @@
 //! back to whatever endpoint is configured underneath, so "On this PC" means
 //! on this PC.
 //!
-//! The page names models (`src/lib/aiModel.js`, from `ppModels.js`'s
+//! The page names models (`src/lib/core/aiModel.js`, from `ppModels.js`'s
 //! registry); this side only says which provider and id.
 //!
 //! The chip's picker (ChatModelPicker.svelte, a provider rail) also

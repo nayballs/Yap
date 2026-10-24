@@ -1,6 +1,6 @@
 <script>
   // Language Models → Dictation cleanup → **Styles by app**
-  // (src-tauri/src/cleanup_styles.rs): "Match the style to the app"
+  // (src-tauri/src/ai/cleanup_styles.rs): "Match the style to the app"
   // (cfg.cleanupStyles), then a row per kind of app — Email, Work chat,
   // Personal chat, Documents, AI prompts, Terminal, Everything else — with
   // its tone (a Segmented), an example of what you say and what Yap types in
@@ -20,8 +20,8 @@
   import Segmented from '../ui/Segmented.svelte';
   import Textarea from '../ui/Textarea.svelte';
   import Button from '../ui/Button.svelte';
-  import { appLabel } from '../appNames.js';
-  import { EXAMPLES, TONE_LINES, appsOf, appsSummary, addApp, removeApp, newStyleProfile, norm } from '../cleanupStyles.js';
+  import { appLabel } from '../core/appNames.js';
+  import { EXAMPLES, TONE_LINES, appsOf, appsSummary, addApp, removeApp, newStyleProfile, norm } from './cleanupStyles.js';
 
   let { cfg } = $props();
 

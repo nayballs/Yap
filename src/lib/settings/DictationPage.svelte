@@ -16,8 +16,8 @@
   import Segmented from '../ui/Segmented.svelte';
   import LinkRow from '../ui/LinkRow.svelte';
   import SettingsHotkey from './SettingsHotkey.svelte';
-  import { fillHotkey, isCopilotKey } from '../hotkeys.js';
-  import { PROVIDER_DESTINATIONS } from '../providers.js';
+  import { fillHotkey, isCopilotKey } from '../core/hotkeys.js';
+  import { PROVIDER_DESTINATIONS } from '../core/providers.js';
 
   let { cfg, devices = [], outputs = [], onshowview = null } = $props();
 
@@ -45,7 +45,7 @@
     { value: 'shiftEnter', label: 'Shift + Enter' },
   ];
 
-  // "Spell names the way they're written on screen" (screen_terms.rs): what
+  // "Spell names the way they're written on screen" (dictionary/screen_terms.rs): what
   // goes where, as cleanup is set up now.
   const screenDesc = $derived.by(() => {
     if (!cfg.postProcessEnabled || !cfg.ppProvider || cfg.ppProvider === 'ondevice') {
@@ -98,7 +98,7 @@
       onchange={() => invoke('set_input_device', { device: cfg.inputDevice || null }).catch(() => {})}
     />
   </Row>
-  <!-- The mic opens when you dictate and closes after (mic.rs); this keeps
+  <!-- The mic opens when you dictate and closes after (dictation/mic.rs); this keeps
        it open the whole time, as Yap used to. -->
   <Row setting="keep-mic-ready">
     <Toggle
@@ -124,7 +124,7 @@
   <Row label="Chime plays on" desc="The speakers or headset for the chime" setting="chime-output">
     <Select bind:value={cfg.outputDevice} options={outputOptions} ariaLabel="Chime plays on" wide disabled={!cfg.soundEnabled} />
   </Row>
-  <!-- Other apps' sound while you dictate (mute.rs, media_pause.rs): after
+  <!-- Other apps' sound while you dictate (dictation/mute.rs, dictation/media_pause.rs): after
        the start chime, back after the stop chime. -->
   <Row setting="quiet-other-apps">
     <Toggle

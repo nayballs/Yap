@@ -1,5 +1,5 @@
 // Meeting notes you can fix (src-tauri/src/notes/note_edits.rs, notes/tasks.rs;
-// src/lib/noteEdits.js, TasksView.svelte), end to end:
+// src/lib/core/noteEdits.js, TasksView.svelte), end to end:
 // - a transcript line's words fixed in the notepad (double-click, Enter):
 //   saved and marked edited with what Yap heard kept, shown in the Notes
 //   view too, and the misheard word offered for the dictionary right there
@@ -29,7 +29,7 @@ import {
   newSinceSummary,
   newSinceLine,
   transcriptItems,
-} from '../src/lib/notepadText.js';
+} from '../src/lib/core/notepadText.js';
 
 const visible = (yap, label) => yap.invoke('plugin:window|is_visible', { label });
 const recording = (yap) => yap.invoke('meeting_state').then((s) => s.recording);

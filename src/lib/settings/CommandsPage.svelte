@@ -1,9 +1,9 @@
 <script>
-  // Settings → Commands (pipeline.rs run_agent; Wispr Flow's Command Mode
+  // Settings → Commands (dictation/pipeline.rs run_agent; Wispr Flow's Command Mode
   // and its old "Hey Flow"): the AI does what you say and types the result
   // where you are. Not the Voice Assistant, which answers out loud. Say its
   // name (AgentNameField.svelte), Rewrite selected text (the rewrite
-  // shortcut; as_said.rs), Transforms (TransformsSettings.svelte) and a link
+  // shortcut; pasting/as_said.rs), Transforms (TransformsSettings.svelte) and a link
   // to its model and prompt in Language Models.
   //
   //   cfg:  Settings' config $state (auto-save does the saving).
@@ -12,7 +12,7 @@
   import Row from '../ui/Row.svelte';
   import Toggle from '../ui/Toggle.svelte';
   import LinkRow from '../ui/LinkRow.svelte';
-  import AgentNameField from '../AgentNameField.svelte';
+  import AgentNameField from './AgentNameField.svelte';
   import SettingsHotkey from './SettingsHotkey.svelte';
   import TransformsSettings from './TransformsSettings.svelte';
   import PageExplain from './PageExplain.svelte';
@@ -54,7 +54,7 @@
   >
     <SettingsHotkey {cfg} target="editHotkey" clearable />
   </Row>
-  <!-- as_said.rs: nothing selected, right after a dictation into
+  <!-- pasting/as_said.rs: nothing selected, right after a dictation into
        the same field (still ending at the cursor) → that dictation
        rewritten. Off: write mode, as before. -->
   <Row setting="rewrite-last">
@@ -66,7 +66,7 @@
     />
   </Row>
 </Group>
-<!-- Saved transforms (transforms.rs): one-key rewrites, no speaking. -->
+<!-- Saved transforms (dictation/transforms.rs): one-key rewrites, no speaking. -->
 <Group
   title="Transforms"
   desc="Rewrite the selected text in one press, without saying anything. With nothing selected, your last dictation, by the rules above."

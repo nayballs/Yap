@@ -1,7 +1,7 @@
 <script>
   // Settings → Privacy & data → Network connections (one level down): every
   // connection Yap made in the last 7 days, by purpose, then host — the
-  // network receipts (src-tauri/src/net.rs). Hosts and purposes only, never
+  // network receipts (src-tauri/src/privacy/net.rs). Hosts and purposes only, never
   // what was sent. Cloud and on-device alike: the list shows what each
   // choice sends where, and never claims that nothing leaves.
   //

@@ -1,0 +1,89 @@
+/* The meeting notepad's shared styles: what more than one of its parts
+ * (src/lib/notepad/) draws — the tooltips and the ink button. Everything is
+ * under .pad, the notepad's page, so nothing here reaches another window or
+ * the components it shows (SpeakerMenu, the toasts…; none of them uses
+ * these names). Each selector weighs what its scoped original did — one
+ * class here for the one Svelte adds — and the rules that override each
+ * other are kept together, in their order, so the same rule wins as before
+ * the notepad was split (2026-10-24). */
+
+/* Tooltips (Wispr's: ink, 12px semibold, 15px under the button, from
+   scale .98 and 4px up; a beat before they show). */
+.pad [data-tip]::after,
+.pad [data-tip]::before {
+  position: absolute;
+  left: 50%;
+  z-index: 60;
+  opacity: 0;
+  pointer-events: none;
+  transition:
+    opacity 0.15s var(--yap-ease-spring),
+    transform 0.15s var(--yap-ease-spring);
+}
+.pad [data-tip]::after {
+  content: attr(data-tip);
+  top: calc(100% + 15px);
+  padding: 6px 12px;
+  border-radius: 8px;
+  background: var(--yap-paper-ink);
+  color: var(--yap-paper-s2);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 20px;
+  white-space: nowrap;
+  transform: translateX(-50%) translateY(-4px) scale(0.98);
+}
+.pad [data-tip]::before {
+  content: '';
+  top: calc(100% + 9px);
+  border: 6px solid transparent;
+  border-top: none;
+  border-bottom-color: var(--yap-paper-ink);
+  transform: translateX(-50%) translateY(-4px);
+}
+.pad [data-tip]:hover::after,
+.pad [data-tip]:hover::before,
+.pad [data-tip]:focus-visible::after,
+.pad [data-tip]:focus-visible::before {
+  opacity: 1;
+  transform: translateX(-50%);
+  transition-delay: 0.35s;
+}
+/* The header's back button: its tooltip starts at its left edge. */
+.pad .tipstart::after {
+  left: 0;
+  transform: translateY(-4px) scale(0.98);
+}
+.pad .tipstart:hover::after,
+.pad .tipstart:focus-visible::after {
+  transform: none;
+}
+.pad .tipstart::before {
+  left: 16px;
+}
+/* The Ask sheet's buttons, at its right edge: their tooltips end there. */
+.pad .sbtn[data-tip]::after {
+  left: auto;
+  right: 0;
+  transform: translateY(-4px) scale(0.98);
+}
+.pad .sbtn[data-tip]:hover::after {
+  transform: none;
+}
+
+/* The ink button: the summary's Open Language Models, the consent
+   message's Copy, the Ask sheet's set-up card. */
+.pad .ink {
+  height: 32px;
+  padding: 0 14px;
+  border: none;
+  border-radius: 9999px;
+  background: var(--yap-paper-ink);
+  color: var(--yap-paper);
+  font-size: 13px;
+  font-weight: 600;
+}
+.pad .ink.small {
+  height: 28px;
+  font-size: 12.5px;
+}

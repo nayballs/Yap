@@ -15,7 +15,7 @@ fn is_web_or_mail_link(url: &str) -> bool {
 }
 
 /// Open a web or mail link in the default browser. Every external link in
-/// Yap's pages comes through here (`lib/externalLinks.js`: settings links,
+/// Yap's pages comes through here (`lib/core/externalLinks.js`: settings links,
 /// links in chat answers and notes, release notes, Share by email). A test
 /// run never opens one: it keeps it for the suite (`e2e_opened_urls`), so a
 /// test can't pop a browser up on the PC running it.

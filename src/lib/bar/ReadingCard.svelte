@@ -1,5 +1,5 @@
 <script>
-  // The reading card above the Yap bar (read_aloud.rs): the sentence being
+  // The reading card above the Yap bar (voice/read_aloud.rs): the sentence being
   // read aloud, its current word lit up as it's said (karaoke), and the
   // controls — ⏮ back a sentence (or to this one's start), ⏸ / ▶, ⏭ on a
   // sentence, the speed (− 1.25× +), Stop. Esc stops too (bar.rs watches it
@@ -13,7 +13,7 @@
   // take clicks only over it); no backdrop-filter, a 1–2 px shadow, as every
   // card on the transparent bar window.
   import { reading, readAction } from './reading.svelte.js';
-  import { fillHotkey } from '../hotkeys.js';
+  import { fillHotkey } from '../core/hotkeys.js';
 
   let textEl = $state(null);
 

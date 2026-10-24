@@ -431,7 +431,7 @@ fn vk_family(vk: u32) -> u8 {
 
 /// Whether two key specs would fire on **one press**: the hook checks every
 /// binding against every key event, so both would start. Pure (the same
-/// rule as `hotkeysClash` in `lib/hotkeys.js`, which Settings checks with).
+/// rule as `hotkeysClash` in `lib/core/hotkeys.js`, which Settings checks with).
 ///
 /// - The same key, button or chord, however it's written.
 /// - A bare key fires only while no modifier is held (`process_keyboard_event`),

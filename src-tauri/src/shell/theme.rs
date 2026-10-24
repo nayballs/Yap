@@ -1,7 +1,7 @@
 //! The theme of Yap's windows (Settings → General → Appearance → Theme:
 //! System / Light / Dark, `config.theme`), on the Rust side.
 //!
-//! The pages draw the theme themselves (`src/lib/appearance.js` marks
+//! The pages draw the theme themselves (`src/lib/core/appearance.js` marks
 //! `<html data-yap-theme>`, app.css has both palettes, and index.html's head
 //! script puts the last theme on before the first paint). What a page can't
 //! reach is the **webview's own background**: what WebView2 shows before the

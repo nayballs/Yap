@@ -13,26 +13,26 @@ export const dictation = $state({
   // idle | recording | processing | processing-slow | needs-model | error |
   // cancelled ("Dictation cancelled · Undo" while the audio is kept) |
   // cleaned ("Cleaned up · Use what I said" a few seconds after a dictation
-  // AI cleanup changed: as_said.rs; or a transform's "Polish ✓ · Undo")
+  // AI cleanup changed: pasting/as_said.rs; or a transform's "Polish ✓ · Undo")
   state: 'idle',
   errorMsg: 'Transcription failed',
   history: [],
   // Revealed partial words (rendered as keyed spans).
   words: [],
   // Push-to-talk's double-tap locked this recording hands-free
-  // (`yap-dictation-locked`, gesture.rs): the capsule shows a lock.
+  // (`yap-dictation-locked`, dictation/gesture.rs): the capsule shows a lock.
   locked: false,
   // The push-to-talk key started this recording (`yap-dictation-held`):
   // held until it locks hands-free, the capsule shows no ✕ / ✓ (as Wispr's
   // bar draws them only hands-free).
   held: false,
-  // The dead-mic watchdog (mic_watch.rs) found nothing but digital silence:
+  // The dead-mic watchdog (dictation/mic_watch.rs) found nothing but digital silence:
   // "No sound from <device> — is it muted?", shown in the waveform's place
   // while the recording carries on (the whole message as its tooltip);
   // '' once sound arrives (or the recording ends).
   micSilent: '',
   micSilentFull: '',
-  // The mic opens on demand (mic.rs): a recording that started while it was
+  // The mic opens on demand (dictation/mic.rs): a recording that started while it was
   // still opening waits for its first real audio (`yap-mic-ready` false →
   // true; a Bluetooth headset takes a second or two). Meanwhile the capsule
   // says "Starting the mic…" instead of the waveform, so nobody talks early.
@@ -42,19 +42,19 @@ export const dictation = $state({
   modelLoading: false,
   // How long a cancelled dictation can be undone (`yap-dictation-cancelled`).
   undoMs: 10_000,
-  // How long "Use what I said" is offered (as_said.rs `OFFER_MS`).
+  // How long "Use what I said" is offered (pasting/as_said.rs `OFFER_MS`).
   offerMs: 6_000,
-  // A question to the Voice Assistant (assistant.rs, `yap-assistant`):
+  // A question to the Voice Assistant (chat/assistant.rs, `yap-assistant`):
   // 'idle' | 'listening' | 'thinking' | 'speaking'. Not idle, the capsule is
   // the assistant's ("Ask Yap…", "Thinking…", "Speaking…" with ■).
   assistant: 'idle',
   // A Voice Assistant question about to end on a pause ("Stop listening
-  // when I pause", pause.rs: `yap-assistant-pause`): how long is left (ms)
+  // when I pause", dictation/pause.rs: `yap-assistant-pause`): how long is left (ms)
   // as it starts running out, 0 while it isn't; `pauseKey` restarts the
   // capsule's run-down line each time.
   pauseMs: 0,
   pauseKey: 0,
-  // A saved transform (transforms.rs, `yap-transform`): its name, and
+  // A saved transform (dictation/transforms.rs, `yap-transform`): its name, and
   // 'running' ("Polish…" while the AI works), 'done' ("Polish ✓ · Undo" for
   // `offerMs`) or 'unchanged' ("No changes needed"); '' for a dictation.
   transform: '',
@@ -143,7 +143,7 @@ export function initDictation() {
       clearPartial();
     }
   });
-  // Said before the assistant's recording starts (pipeline.rs), so its
+  // Said before the assistant's recording starts (dictation/pipeline.rs), so its
   // first frame is already the assistant's.
   listen('yap-assistant', (e) => {
     dictation.assistant = e.payload?.phase || 'idle';
@@ -176,7 +176,7 @@ export function initDictation() {
   listen('yap-dictation-locked', (e) => {
     dictation.locked = !!e.payload;
   });
-  // Said just before the recording starts (pipeline.rs), so it's never
+  // Said just before the recording starts (dictation/pipeline.rs), so it's never
   // reset by that recording's own "recording" state.
   listen('yap-dictation-held', (e) => {
     dictation.held = !!e.payload;
@@ -188,7 +188,7 @@ export function initDictation() {
     if (dictation.micSilent) dictation.errorMsg = dictation.micSilent;
   });
   // Said just after "recording" when the mic was still opening, then true
-  // at its first real audio (pipeline.rs `fire_pending_start`).
+  // at its first real audio (dictation/pipeline.rs `fire_pending_start`).
   listen('yap-mic-ready', (e) => {
     dictation.micWaiting = e.payload === false;
   });

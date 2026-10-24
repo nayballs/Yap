@@ -15,9 +15,9 @@
   import Select from '../ui/Select.svelte';
   import Segmented from '../ui/Segmented.svelte';
   import Button from '../ui/Button.svelte';
-  import AboutYouSettings from '../AboutYouSettings.svelte';
-  import AppearanceSettings from '../AppearanceSettings.svelte';
-  import { BAR_THEME_OPTIONS } from '../appearance.js';
+  import AboutYouSettings from './AboutYouSettings.svelte';
+  import AppearanceSettings from './AppearanceSettings.svelte';
+  import { BAR_THEME_OPTIONS } from '../core/appearance.js';
 
   let { cfg, barHiddenUntil = null, goto = null } = $props();
 
@@ -49,7 +49,7 @@
   <p>Your region, startup and updates, the Yap bar and how Yap looks.</p>
 </div>
 
-<!-- What the AI models are told about you (about_you.rs). -->
+<!-- What the AI models are told about you (ai/about_you.rs). -->
 <AboutYouSettings {cfg} {goto} />
 
 <Group title="Startup and updates" id="settings-startup">
@@ -66,7 +66,7 @@
 </Group>
 
 <!-- The theme, the reading font and size, and Motion, for every window
-     (AppearanceSettings.svelte, lib/appearance.js). -->
+     (AppearanceSettings.svelte, lib/core/appearance.js). -->
 <AppearanceSettings {cfg} />
 
 <Group title="Yap bar" id="settings-bar">
@@ -99,7 +99,7 @@
   </Row>
 </Group>
 
-<!-- Yap's notice policy (notice.rs): one notice at a time, held while you
+<!-- Yap's notice policy (notices/notice.rs): one notice at a time, held while you
      dictate. Tips are the one kind you can switch off. -->
 <Group title="Notifications" id="settings-notifications">
   <Row setting="tips">

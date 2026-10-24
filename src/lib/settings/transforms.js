@@ -1,13 +1,13 @@
-// Saved transforms (transforms.rs): the list in config (`transforms`), Yap's
+// Saved transforms (dictation/transforms.rs): the list in config (`transforms`), Yap's
 // five built-ins as Settings shows them, the languages Translate offers, and
 // the shortcut rules a transform's key is checked against. The built-ins'
 // instructions are Rust's (`builtin_instruction`): here only their names
 // and one line each.
 
-/** The most transforms the list keeps (transforms.rs `MAX`). */
+/** The most transforms the list keeps (dictation/transforms.rs `MAX`). */
 export const MAX_TRANSFORMS = 12;
 
-/** Translate's language until one is picked (transforms.rs `DEFAULT_LANGUAGE`). */
+/** Translate's language until one is picked (dictation/transforms.rs `DEFAULT_LANGUAGE`). */
 export const DEFAULT_LANGUAGE = 'Spanish';
 
 /** Yap's own, in their first order: name and the line under it. */

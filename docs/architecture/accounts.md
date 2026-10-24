@@ -70,7 +70,7 @@ Optional Yap accounts: sign-in routes (email codes, Google/GitHub/Discord, your 
 
 ## Settings → Account
 
-- **`lib/AccountSection.svelte` / `account.svelte.js`** — Settings → Account:
+- **`lib/settings/AccountSection.svelte` / `account.svelte.js`** — Settings → Account:
   Continue with Google/GitHub/Discord, "Email me a code" → 6-digit entry
   (auto-submits), a waiting state with paste-the-code fallback, then the
   profile (avatar or initials, linked providers), sign-out, a **"Where you're

@@ -5,7 +5,7 @@
 // are dictionarySync.svelte.js's.)
 import { listen } from '@tauri-apps/api/event';
 import { onMount } from 'svelte';
-import { adoptProviderKey } from '../providers.js';
+import { adoptProviderKey } from '../core/providers.js';
 import { SCOPE_DEFAULTS } from './scopes.js';
 import { lm } from './languageModels.svelte.js';
 import { refreshLocalLlm } from './localLlm.svelte.js';
@@ -22,7 +22,7 @@ export function followOutsideChanges(getCfg) {
       if (e.detail.llmScopes) lm.chatScopeRev += 1;
     }
   }
-  // The Chat model picker connected a provider (ai_model.rs
+  // The Chat model picker connected a provider (ai/ai_model.rs
   // `set_provider_key` saved it): the key where this copy keeps it too —
   // the shared store, cleanup's own when cleanup is on that provider, the
   // Chat scope's (providers.js `adoptProviderKey`).
@@ -43,7 +43,7 @@ export function followOutsideChanges(getCfg) {
 
   onMount(() => {
     const uns = [
-      // "Don't ask for Teams" on a call prompt (meeting_detect.rs): the
+      // "Don't ask for Teams" on a call prompt (calls/meeting_detect.rs): the
       // app's choice in `meetingDetectApps`, as Meetings → "Ask about calls
       // in" saves it; "Stop asking about calls?" → Stop asking, or "Turn
       // back on".
@@ -64,7 +64,7 @@ export function followOutsideChanges(getCfg) {
       }),
       listen('yap-local-llm-changed', () => refreshLocalLlm()),
       // The Chat view's model chip switched the Chat scope's model
-      // (ai_model.rs chat_set_model saved it): its endpoint adopted, the
+      // (ai/ai_model.rs chat_set_model saved it): its endpoint adopted, the
       // prompt kept this copy's. The Chat tab remounts (`lm.chatScopeRev`):
       // its provider pills read the scope once.
       listen('yap-chat-model-changed', (e) => {
@@ -90,9 +90,9 @@ export function followOutsideChanges(getCfg) {
         };
         lm.chatScopeRev += 1;
       }),
-      // Voice Assistant → Spoken replies (tts.rs): the Chat view's 🔊 saves
+      // Voice Assistant → Spoken replies (voice/tts.rs): the Chat view's 🔊 saves
       // "Speak replies", its volume slider the volume (tts_volume_set), the
-      // reading card's − / + the speed (read_aloud.rs).
+      // reading card's − / + the speed (voice/read_aloud.rs).
       listen('yap-voice-replies', (e) => {
         const cfg = getCfg();
         if (cfg && typeof e.payload?.on === 'boolean') cfg.speakReplies = e.payload.on;
@@ -105,7 +105,7 @@ export function followOutsideChanges(getCfg) {
         const cfg = getCfg();
         if (cfg && Number.isFinite(e.payload?.rate)) cfg.ttsRate = e.payload.rate;
       }),
-      // The notepad's consent message, edited there (notepad.rs).
+      // The notepad's consent message, edited there (meetings/notepad.rs).
       listen('yap-consent-message-changed', (e) => {
         const cfg = getCfg();
         if (cfg && typeof e.payload?.message === 'string') cfg.meetingConsentMessage = e.payload.message;

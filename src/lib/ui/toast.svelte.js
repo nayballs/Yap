@@ -1,6 +1,6 @@
 // Toast store — port of OpenWhispr's ui/useToast + ToastProvider timer logic,
 // rendered Wispr-Flow-style (ToastHost.svelte), and run by Yap's notice
-// policy (noticePolicy.js, the page's half of src-tauri/src/notice.rs):
+// policy (noticePolicy.js, the page's half of src-tauri/src/notices/notice.rs):
 // one notice and one piece of feedback on screen at a time, the rest
 // queued by priority; tips and notices held while a dictation runs; stale
 // waits dropped; the same toast again refreshing the one up instead of

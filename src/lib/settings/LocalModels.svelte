@@ -1,6 +1,6 @@
 <script>
   // Settings → Language Models → Dictation cleanup → Local: the on-device
-  // model browser (local_llm.rs, Mozilla llamafile): Recommended for this
+  // model browser (ai/local_llm.rs, Mozilla llamafile): Recommended for this
   // PC, the bigger model offered once, the slow-on-this-PC line, the Context
   // control (LocalContext.svelte), the curated models by family with
   // Download / Use / Delete…, and your own GGUFs. The status and the actions
@@ -10,9 +10,9 @@
   //   cfg: Settings' config $state (auto-save does the saving).
   import Select from '../ui/Select.svelte';
   import PillTabs from '../ui/PillTabs.svelte';
-  import LocalContext from '../LocalContext.svelte';
-  import { upTo } from '../localContext.js';
-  import { createExternalLinkHandler } from '../externalLinks.js';
+  import LocalContext from '../components/LocalContext.svelte';
+  import { upTo } from '../core/localContext.js';
+  import { createExternalLinkHandler } from '../core/externalLinks.js';
   import { openContextMenu, menuKey, menuOpenFor, askConfirm } from '../ui/contextMenu.svelte.js';
   import {
     localLlm,

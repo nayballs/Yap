@@ -128,7 +128,7 @@ said), checked by the robot in the test pad, Notepad, an Edge box, a chat
 app and its contenteditable (swapped) and in a terminal, after an edit and
 with another window in front (refused, copied). **What the AI changed, and
 undo it later** (2026-10-23): Home's "AI edited · N changes" on a dictation
-whose words cleanup changed opens into a word diff (`lib/wordDiff.js`,
+whose words cleanup changed opens into a word diff (`lib/core/wordDiff.js`,
 history's `said`), with **Paste what I said** (the latest dictation swapped
 in its app within 2 minutes, its window brought back; any other copied) —
 the diff unit-tested (`word-diff.spec.js`), the Home UI e2e-tested

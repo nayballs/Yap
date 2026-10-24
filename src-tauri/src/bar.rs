@@ -151,7 +151,7 @@ pub struct Card {
     /// A live countdown on the card ("Starting notes in 7…").
     pub countdown: Option<Countdown>,
     /// A hotkey spec ("kb:120") whose name the page writes in place of
-    /// `{key}` in the title and body (`lib/hotkeys.js`, as the tooltips'):
+    /// `{key}` in the title and body (`lib/core/hotkeys.js`, as the tooltips'):
     /// the push-to-talk coaching hints.
     pub hotkey: Option<String>,
     /// A calendar reminder's pre-meeting brief (`calendar/brief.rs`), which
@@ -556,7 +556,7 @@ pub struct Status {
     hide_fullscreen: bool,
     /// "app" | "light" | "dark": the page sets `data-bar-theme` from it
     /// ("app" = the theme of Yap's windows, `config.theme`, as the page
-    /// resolves it: src/lib/appearance.js).
+    /// resolves it: src/lib/core/appearance.js).
     theme: &'static str,
     /// The dictation capsule's ✕ / ✓ while it records: "off" (the default) |
     /// "hover" (only while the pointer is on it) | "always". None while the

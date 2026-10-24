@@ -12,7 +12,7 @@
 //! - **returns the error** ([`SaveError`]: "Couldn't save your note: the disk
 //!   is full."), and the store's commands pass it on ([`Saver::check`], each
 //!   store's `saved()`): the page shows it with **Try again**
-//!   (`saves_retry` → [`retry_all`]; `src/lib/saveErrors.js`);
+//!   (`saves_retry` → [`retry_all`]; `src/lib/notices/saveErrors.js`);
 //! - **never loses what the store holds**: it stays in memory, marked
 //!   unsaved, and the next save of that store writes all of it — the retry
 //!   (each store writes its whole state every time). Quitting tries once

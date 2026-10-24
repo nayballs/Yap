@@ -22,14 +22,14 @@
   import Input from '../ui/Input.svelte';
   import ModeSelector from '../ui/ModeSelector.svelte';
   import PillTabs from '../ui/PillTabs.svelte';
-  import PromptStudio from '../PromptStudio.svelte';
-  import VoiceAgentConfig from '../VoiceAgentConfig.svelte';
-  import RegionSpelling from '../RegionSpelling.svelte';
+  import PromptStudio from './PromptStudio.svelte';
+  import VoiceAgentConfig from './VoiceAgentConfig.svelte';
+  import RegionSpelling from './RegionSpelling.svelte';
   import CleanupStyles from './CleanupStyles.svelte';
-  import NoteFormattingConfig from '../NoteFormattingConfig.svelte';
-  import ChatConfig from '../ChatConfig.svelte';
-  import ModelPicker from '../ModelPicker.svelte';
-  import EndpointModels from '../EndpointModels.svelte';
+  import NoteFormattingConfig from './NoteFormattingConfig.svelte';
+  import ChatConfig from './ChatConfig.svelte';
+  import ModelPicker from './ModelPicker.svelte';
+  import EndpointModels from './EndpointModels.svelte';
   // CSS order (Vite bundles it in import order): the components above come
   // before Settings' shared styles, as when Settings imported them itself —
   // the scope tabs' own `.offnote` / `.tools` margins lose to `.set-note`'s
@@ -40,9 +40,9 @@
   import LocalModels from './LocalModels.svelte';
   import SmartRouting from './SmartRouting.svelte';
   import UsageToday from './UsageToday.svelte';
-  import { PP_CLOUD_MODELS, modelThinks } from '../ppModels.js';
-  import { modelsFor, defaultModel, providerOffers } from '../modelCatalog.svelte.js';
-  import { createExternalLinkHandler } from '../externalLinks.js';
+  import { PP_CLOUD_MODELS, modelThinks } from '../core/ppModels.js';
+  import { modelsFor, defaultModel, providerOffers } from '../stores/modelCatalog.svelte.js';
+  import { createExternalLinkHandler } from '../core/externalLinks.js';
   import {
     PP_PROVIDERS,
     PROVIDER_MODES,
@@ -52,7 +52,7 @@
     maskKey,
     stashCleanupKey,
     cleanupNeedsKey,
-  } from '../providers.js';
+  } from '../core/providers.js';
   import { SCOPE_TABS, SCOPE_SUBTITLE, SCOPE_DEFAULTS } from './scopes.js';
   import { PP_PRESETS, PP_DEFAULT_BODY } from './cleanupPresets.js';
   import { lm, refreshUsage } from './languageModels.svelte.js';

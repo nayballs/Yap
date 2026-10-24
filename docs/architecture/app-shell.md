@@ -16,7 +16,7 @@ The full stack list, the app's entry and plumbing (`lib.rs`, the tray, context m
 - **Markdown:** [`markdown-it`](https://github.com/markdown-it/markdown-it) 15.0.3
   (MIT) parses answers and notes, [`DOMPurify`](https://github.com/cure53/DOMPurify)
   3.4.17 (MPL-2.0 or Apache-2.0) sanitises the HTML; both pinned exact, used only by
-  `lib/markdown.js` ([notes.md](./notes.md#the-markdown-renderer)).
+  `lib/core/markdown.js` ([notes.md](./notes.md#the-markdown-renderer)).
 - **Backend:** Rust (`src-tauri/src/`).
 - **Audio:** `cpal` (capture) + `rodio` (start/stop chime, spoken replies).
 - **Spoken replies:** **Kokoro-82M v1.0** (the default once downloaded:
@@ -43,10 +43,10 @@ The full stack list, the app's entry and plumbing (`lib.rs`, the tray, context m
   maximized state across launches (overlay, onboarding denylisted; VISIBLE flag excluded
   so the window never un-hides on start-hidden launches).
 - **External links:** `tauri-plugin-opener` (opens URLs in the default browser). Every
-  link in Yap's pages goes through `shell::commands::open_external` (`lib/externalLinks.js`):
+  link in Yap's pages goes through `shell::commands::open_external` (`lib/core/externalLinks.js`):
   web and mail links only, and a test run records the link (`e2e_opened_urls`) instead
   of opening a browser on the PC running it. Links inside rendered markdown (chat
-  answers, notes: `a.md-link` from `lib/markdown.js`) open the same way, through one
+  answers, notes: `a.md-link` from `lib/core/markdown.js`) open the same way, through one
   click handler in `main.js`, never navigating Yap's own window.
 - **No browser context menu:** `webview2-com` (the copy wry already builds on)
   hooks each webview's `ContextMenuRequested`, cutting WebView2's menu down to

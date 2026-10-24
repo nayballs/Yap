@@ -1,6 +1,6 @@
 <script>
   // The call prompt on the Yap bar (bar.rs `Card` with style "call",
-  // meeting_detect.rs `native::bar_card`), after Wispr's "Meeting detected"
+  // calls/meeting_detect.rs `native::bar_card`), after Wispr's "Meeting detected"
   // card (screenshot 25) on the measured card tokens: one black row — the
   // call app's icon (CallAppIcon: its own as installed here, else its
   // mark), "Teams call" over "● Now", and a cream split button,
@@ -27,9 +27,9 @@
   // in Yap's main window.
   import yapLogo from '../../assets/yap-logo.svg';
   import { callAppIcon } from './callApps.js';
-  import CallAppIcon from '../CallAppIcon.svelte';
-  import BriefView from '../BriefView.svelte';
-  import { briefTeaser } from '../brief.js';
+  import CallAppIcon from '../components/CallAppIcon.svelte';
+  import BriefView from '../components/BriefView.svelte';
+  import { briefTeaser } from '../core/brief.js';
   import { fadeTimer, countdownClock } from './cardTimers.svelte.js';
 
   /** @type {{ card: any, paused?: boolean, hovered?: boolean, preview?: boolean, onaction?: (action: string) => void }} */

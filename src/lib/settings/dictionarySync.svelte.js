@@ -5,7 +5,7 @@
 // - `yap-dictionary-changed` (window event, the Dictionary view): its list
 //   (and its own switches, which ride along in this copy) adopted, marked
 //   as received so it isn't echoed back;
-// - `yap-dictionary-learned` (Rust, learn.rs: "Add “Kubernetes” to your
+// - `yap-dictionary-learned` (Rust, dictionary/learn.rs: "Add “Kubernetes” to your
 //   dictionary?"): saved there, adopted here, and — not marked as
 //   received — passed on to the Dictionary view;
 // - a change made in Settings (the Commands page's agent name keeps the

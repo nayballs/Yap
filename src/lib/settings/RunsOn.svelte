@@ -1,5 +1,5 @@
 <script>
-  // Settings → Speech-to-Text → Runs on (stt_speed.rs): where the speech
+  // Settings → Speech-to-Text → Runs on (dictation/stt_speed.rs): where the speech
   // model runs — the graphics card (Parakeet and the other ONNX models
   // through DirectML, Whisper through Vulkan) or the processor. Automatic:
   // the graphics card, unless Yap measured the processor clearly faster for

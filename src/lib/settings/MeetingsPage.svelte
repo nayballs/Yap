@@ -1,8 +1,8 @@
 <script>
   // Settings → Meetings (2026-10-22 review, out of General; Wispr Flow's
-  // Notetaker page and its order): Call detection (meeting_detect.rs), While
-  // a meeting records (meeting_guard.rs, capture.rs, diarize.rs), Meeting
-  // audio (meeting_audio.rs), Notepad (notepad.rs) and Calendar
+  // Notetaker page and its order): Call detection (calls/meeting_detect.rs), While
+  // a meeting records (calls/meeting_guard.rs, calls/capture.rs, speakers/diarize.rs), Meeting
+  // audio (meetings/meeting_audio.rs), Notepad (meetings/notepad.rs) and Calendar
   // (calendar.rs). The 12 call apps' switches live one level down, behind
   // "Ask about calls in · 8 of 12 apps ›".
   //
@@ -15,12 +15,12 @@
   import Select from '../ui/Select.svelte';
   import Segmented from '../ui/Segmented.svelte';
   import LinkRow from '../ui/LinkRow.svelte';
-  import CallAppIcon from '../CallAppIcon.svelte';
-  import SpeakersToggle from '../SpeakersToggle.svelte';
+  import CallAppIcon from '../components/CallAppIcon.svelte';
+  import SpeakersToggle from './SpeakersToggle.svelte';
   import SettingsHotkey from './SettingsHotkey.svelte';
-  import { meetingDetect } from '../meetingDetect.svelte.js';
-  import { calendar } from '../calendar.svelte.js';
-  import { formatHotkeySpec } from '../hotkeys.js';
+  import { meetingDetect } from '../stores/meetingDetect.svelte.js';
+  import { calendar } from '../stores/calendar.svelte.js';
+  import { formatHotkeySpec } from '../core/hotkeys.js';
   import { invoke } from '@tauri-apps/api/core';
   import { listen } from '@tauri-apps/api/event';
   import { onMount } from 'svelte';
@@ -70,7 +70,7 @@
   );
 
   // Each app's effective choice: the saved one (`meetingDetectApps`), else
-  // the app's default from meeting_detect.rs (work apps on, personal chat
+  // the app's default from calls/meeting_detect.rs (work apps on, personal chat
   // apps off). Flipping one saves it as the person's choice.
   function asks(app) {
     return cfg.meetingDetectApps?.[app.id] ?? app.asksByDefault;
@@ -83,7 +83,7 @@
     meetingDetect.apps.length ? `${asking.length} of ${meetingDetect.apps.length} apps` : ''
   );
 
-  // The refined transcript (meeting_refine.rs): when a meeting ends, it's
+  // The refined transcript (meetings/meeting_refine.rs): when a meeting ends, it's
   // transcribed again in the background from its audio.
   const REFINE = [
     { value: 'auto', label: 'Automatically when it helps' },
@@ -96,7 +96,7 @@
     never: 'You can still transcribe a meeting again from its menu',
   };
 
-  // Meeting audio kept on disk (meeting_audio.rs): { meetings, recordings, bytes }.
+  // Meeting audio kept on disk (meetings/meeting_audio.rs): { meetings, recordings, bytes }.
   const AUDIO_DAYS = [
     { value: 1, label: '1 day' },
     { value: 7, label: '7 days' },
@@ -119,7 +119,7 @@
   }
   onMount(() => {
     loadAudio();
-    // A recording kept, a note deleted, old audio gone (meeting_audio.rs).
+    // A recording kept, a note deleted, old audio gone (meetings/meeting_audio.rs).
     const un = listen('yap-meeting-audio', loadAudio);
     return () => un.then((f) => f());
   });
@@ -264,7 +264,7 @@
         />
       </Row>
     </div>
-    <!-- Speaker diarization (diarize.rs): the same switch as in
+    <!-- Speaker diarization (speakers/diarize.rs): the same switch as in
          Speech-to-Text, where the models are. -->
     <Row setting="speakers">
       <SpeakersToggle
@@ -285,7 +285,7 @@
     </Row>
   </Group>
 
-  <!-- Meeting audio kept on disk (meeting_audio.rs): written as a meeting
+  <!-- Meeting audio kept on disk (meetings/meeting_audio.rs): written as a meeting
        records, so a crash loses nothing; kept to transcribe again and play. -->
   <Group title="Meeting audio" id="settings-meeting-audio">
     <Row setting="meeting-audio">
@@ -300,7 +300,7 @@
     <Row label="Keep it for" desc="Then it's deleted. The notes and transcripts stay" setting="meeting-audio-days">
       <Select bind:value={cfg.meetingAudioDays} options={daysOptions} ariaLabel="Keep meeting audio for" disabled={!cfg.meetingKeepAudio} />
     </Row>
-    <!-- The refined transcript when a meeting ends (meeting_refine.rs). -->
+    <!-- The refined transcript when a meeting ends (meetings/meeting_refine.rs). -->
     <Row label="Improve the transcript after the meeting" desc={REFINE_DESC[cfg.meetingRefine] ?? REFINE_DESC.auto} setting="meeting-refine">
       <Select bind:value={cfg.meetingRefine} options={REFINE} ariaLabel="Improve the transcript after the meeting" />
     </Row>

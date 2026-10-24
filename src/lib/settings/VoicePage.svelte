@@ -1,7 +1,7 @@
 <script>
-  // Settings → Voice Assistant (assistant.rs + tts.rs): ask Yap's Chat out
+  // Settings → Voice Assistant (chat/assistant.rs + voice/tts.rs): ask Yap's Chat out
   // loud and hear the answer. Not Commands, which type. The assistant
-  // shortcut, Read aloud (read_aloud.rs), opening apps (OpenAppsSettings),
+  // shortcut, Read aloud (voice/read_aloud.rs), opening apps (OpenAppsSettings),
   // web search (WebSearchSettings), spoken replies in Chat, the voice
   // (VoiceSettings) and a link to its model in Language Models.
   //
@@ -14,12 +14,12 @@
   import Toggle from '../ui/Toggle.svelte';
   import Segmented from '../ui/Segmented.svelte';
   import LinkRow from '../ui/LinkRow.svelte';
-  import VoiceSettings from '../VoiceSettings.svelte';
-  import OpenAppsSettings from '../OpenAppsSettings.svelte';
-  import WebSearchSettings from '../WebSearchSettings.svelte';
-  import KokoroOffer from '../KokoroOffer.svelte';
-  import { kokoro } from '../kokoro.svelte.js';
-  import { formatHotkeySpec, fillHotkey } from '../hotkeys.js';
+  import VoiceSettings from './VoiceSettings.svelte';
+  import OpenAppsSettings from './OpenAppsSettings.svelte';
+  import WebSearchSettings from './WebSearchSettings.svelte';
+  import KokoroOffer from './KokoroOffer.svelte';
+  import { kokoro } from './kokoro.svelte.js';
+  import { formatHotkeySpec, fillHotkey } from '../core/hotkeys.js';
   import SettingsHotkey from './SettingsHotkey.svelte';
   import PageExplain from './PageExplain.svelte';
   import { scopeModelLabel } from './scopes.js';
@@ -75,7 +75,7 @@
       <p class="set-note">Set an assistant shortcut to ask Yap from any app, even while its window is closed.</p>
     </Row>
   {/if}
-  <!-- "Stop listening when I pause" (pause.rs): a pause after the
+  <!-- "Stop listening when I pause" (dictation/pause.rs): a pause after the
        question ends it, as a second press would. -->
   <Row setting="stop-on-pause">
     <Toggle
@@ -96,7 +96,7 @@
     />
   </Row>
 </Group>
-<!-- Read aloud, anywhere (read_aloud.rs): any selected text, in
+<!-- Read aloud, anywhere (voice/read_aloud.rs): any selected text, in
      the voice below, with the reading card on the Yap bar. -->
 <Group title="Read aloud" id="settings-read-aloud">
   <Row

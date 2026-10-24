@@ -104,7 +104,7 @@ pub fn reads_images(provider: &str, model: &str) -> Option<bool> {
 }
 
 /// Yap's picks of a model that reads images, per provider, best first
-/// (Settings' curated lists, `src/lib/ppModels.js`).
+/// (Settings' curated lists, `src/lib/core/ppModels.js`).
 pub const PICKS: &[(&str, &[&str])] = &[
     ("groq", &["qwen/qwen3.8-27b", "meta-models/muse-spark-open"]),
     ("anthropic", &["claude-haiku-5-5", "claude-sonnet-5-5", "claude-haiku-4-5"]),

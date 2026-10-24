@@ -61,7 +61,7 @@ export const PAGE_LABELS = Object.fromEntries([
 
 // Old links, kept working (OpenWhispr's SECTION_ALIASES): Windows
 // notifications already in the notification centre carry the string they
-// were posted with (meeting_guard.rs: "general#screen-sharing"), and every
+// were posted with (calls/meeting_guard.rs: "general#screen-sharing"), and every
 // `yap-settings-goto` / `yap-open-settings` / openSettings() caller from
 // before the split. A page alias maps every anchor on it; a full
 // "page#anchor" alias wins over its page's.

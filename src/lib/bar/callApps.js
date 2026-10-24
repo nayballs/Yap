@@ -1,6 +1,6 @@
 // The call apps' bundled marks, by `meeting_detect::APPS` id: what
 // CallAppIcon (Settings' call apps, the Yap bar's call card) draws for an app
-// whose own icon isn't installed on this PC (app_icons.rs).
+// whose own icon isn't installed on this PC (calls/app_icons.rs).
 // Glyphs from Simple Icons v16.34.0 (https://simpleicons.org, CC0-1.0;
 // each mark belongs to its owner, shown only to name the app on the call),
 // drawn in the brand's colour. Simple Icons no longer carries Teams or Slack

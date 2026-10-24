@@ -212,7 +212,7 @@ body {
 }
 
 /* ------------------------------------------------------------------ *
- * Reading text (Settings → General → Appearance; lib/appearance.js marks
+ * Reading text (Settings → General → Appearance; lib/core/appearance.js marks
  * <html> in every window from the config). Only what you READ uses these:
  * Chat's messages, notes and their Enhanced view, the meeting notepad's My
  * thoughts / Transcript / Summary and its Ask answers. Buttons, menus and the
@@ -352,7 +352,7 @@ body {
 
 /* ------------------------------------------------------------------ *
  * DARK (Settings → General → Appearance → Theme: System / Light / Dark;
- * lib/appearance.js marks <html data-yap-theme="dark"> in every window, and
+ * lib/core/appearance.js marks <html data-yap-theme="dark"> in every window, and
  * the head script in index.html does it before the first paint). Yap's own
  * warm dark, started from the Yap bar's dark scheme: a warm near-black
  * (#1c1a16, the toasts' card) instead of a cold grey, cream text and cream
@@ -486,7 +486,7 @@ body {
   color-scheme: dark;
 }
 
-/* Rendered markdown (lib/markdown.js), wherever it shows — chat answers,
+/* Rendered markdown (lib/core/markdown.js), wherever it shows — chat answers,
    the Enhanced notes, the notepad's Ask sheet: fenced code, links, tables,
    quotes and rules (each view sets its own paragraph, list and heading
    spacing). Links open in the browser (main.js), never in Yap's own window.

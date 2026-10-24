@@ -7,7 +7,7 @@
   // to-talk's double-tap made it hands-free. "No sound from <mic>…" in the
   // waveform's place: the dead-mic watchdog heard nothing but digital
   // silence (the recording carries on). "Starting the mic…" in its place
-  // while a cold mic opens (mic.rs: the start chime waits for its first
+  // while a cold mic opens (dictation/mic.rs: the start chime waits for its first
   // real audio too), and "Loading the speech model…" instead of
   // "Transcribing…" while the model still loads after Yap started.
   //
@@ -21,19 +21,19 @@
   // they may show, their places are kept (the capsule's ends) and they only
   // fade in and out there, so the capsule's width and the words never move.
   // Cancelled: "Dictation cancelled" with Undo while Rust keeps the audio
-  // (pipeline.rs, `UNDO_MS`; a hairline runs down meanwhile) — Undo
+  // (dictation/pipeline.rs, `UNDO_MS`; a hairline runs down meanwhile) — Undo
   // transcribes it and pastes it into the app the dictation started in. The
   // capsule is a `data-region` whenever it has a button to offer, so the
   // click-through bar takes clicks on it (bar.rs); it's never focused, so
   // the app you were in keeps the keyboard.
   // Cleaned: "Cleaned up" with **Use what I said** for a few seconds after a
-  // dictation whose words AI cleanup changed (as_said.rs) — it swaps the
+  // dictation whose words AI cleanup changed (pasting/as_said.rs) — it swaps the
   // paste for your words before cleanup, in the app you dictated into.
-  // A saved transform (transforms.rs): its name while it runs ("Polish…",
+  // A saved transform (dictation/transforms.rs): its name while it runs ("Polish…",
   // the amber dot), then "Polish ✓" with **Undo** (the text from before put
   // back) for as long, or "Polish: no changes needed".
   //
-  // A question to the **Voice Assistant** (assistant.rs; `dictation.assistant`
+  // A question to the **Voice Assistant** (chat/assistant.rs; `dictation.assistant`
   // isn't 'idle') has its own variant, never mistaken for a dictation: an
   // amber edge and a ✦ where the red dot was; "Ask Yap…" beside the
   // waveform (or your words) while it listens, "Thinking…" while it's
@@ -41,7 +41,7 @@
   // answer is read aloud. ■ stops the answer (`assistant-stop`) while it
   // thinks or speaks; ✕ / ✓ work as for a dictation while it listens. While
   // the pause after your question runs out ("Stop listening when I pause",
-  // pause.rs: `dictation.pauseMs`) an amber hairline runs down at its foot.
+  // dictation/pause.rs: `dictation.pauseMs`) an amber hairline runs down at its foot.
   import { invoke } from '@tauri-apps/api/core';
   import { dictation } from './dictation.svelte.js';
 
@@ -64,7 +64,7 @@
   const recording = $derived(dictation.state === 'recording');
   const cancelled = $derived(dictation.state === 'cancelled');
   const cleaned = $derived(dictation.state === 'cleaned');
-  // A saved transform's (transforms.rs): running, then done with Undo, or
+  // A saved transform's (dictation/transforms.rs): running, then done with Undo, or
   // nothing to change.
   const transforming = $derived(processing && !!dictation.transform && dictation.transformPhase === 'running');
   const transformed = $derived(cleaned && !!dictation.transform && dictation.transformPhase === 'done');
@@ -143,7 +143,7 @@
       <span class="txt" role="status">Speaking…</span>
     {/if}
     {#if askListening && dictation.pauseMs > 0}
-      <!-- "Stop listening when I pause" (pause.rs): the pause after your
+      <!-- "Stop listening when I pause" (dictation/pause.rs): the pause after your
            question running out; speaking again takes it away. -->
       {#key dictation.pauseKey}
         <span class="pauseline" role="status" aria-label="Sending your question when the pause runs out">

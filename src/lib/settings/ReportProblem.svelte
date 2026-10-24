@@ -1,5 +1,5 @@
 <script>
-  // Settings → About → Report a problem (src-tauri/src/diagnostics.rs): a
+  // Settings → About → Report a problem (src-tauri/src/privacy/diagnostics.rs): a
   // diagnostic file the person looks through before it's saved — the file
   // list and a preview of what's in it — then saves where they choose
   // (Windows' Save dialog). Nothing is uploaded: once it's saved, Yap offers
@@ -11,7 +11,7 @@
   import Button from '../ui/Button.svelte';
   import Segmented from '../ui/Segmented.svelte';
   import { toast } from '../ui/toast.svelte.js';
-  import { openExternalLink } from '../externalLinks.js';
+  import { openExternalLink } from '../core/externalLinks.js';
 
   // idle | making | preview | saving | saved
   let stage = $state('idle');

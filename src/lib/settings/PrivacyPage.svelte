@@ -1,14 +1,14 @@
 <script>
   // Settings → Privacy & data (2026-10-22 review; OpenWhispr's Privacy &
   // Data page, Claude's Privacy): what leaves this PC, feature by feature, as
-  // it's set up right now; the dictation history (history.rs; was its own
+  // it's set up right now; the dictation history (dictation/history.rs; was its own
   // History page — the list itself is Home's feed); the Local API
-  // (bridge.rs); logs (Debug logging, was Advanced) and where Yap keeps its
+  // (integrations/bridge.rs); logs (Debug logging, was Advanced) and where Yap keeps its
   // data. The feature pages keep one short line and a link here.
   //
   //   cfg:  Settings' config $state (auto-save does the saving).
   //   goto: opens another Settings page.
-  //   connections: Network connections (net.rs) open, one level down
+  //   connections: Network connections (privacy/net.rs) open, one level down
   //         (bindable: Settings' `privacy#connections-list` opens it).
   import { invoke } from '@tauri-apps/api/core';
   import { listen } from '@tauri-apps/api/event';
@@ -22,13 +22,13 @@
   import ConnectionsView from './ConnectionsView.svelte';
   import { askConfirm } from '../ui/contextMenu.svelte.js';
   import { toast } from '../ui/toast.svelte.js';
-  import { showSaveError } from '../saveErrors.js';
-  import { account } from '../account.svelte.js';
-  import { PROVIDER_DESTINATIONS } from '../providers.js';
+  import { showSaveError } from '../notices/saveErrors.js';
+  import { account } from '../stores/account.svelte.js';
+  import { PROVIDER_DESTINATIONS } from '../core/providers.js';
 
   let { cfg, goto = null, connections = $bindable(false) } = $props();
 
-  // The network receipts' count for today (net.rs), for the link row.
+  // The network receipts' count for today (privacy/net.rs), for the link row.
   let net = $state(null);
   async function loadNet() {
     try {
@@ -49,7 +49,7 @@
   let portable = $state(false);
   let logInfo = $state(null); // { dir, file } from log_info
   let historyCount = $state(null);
-  // Recent dictation audio (recent_audio.rs): { count, bytes }.
+  // Recent dictation audio (dictation/recent_audio.rs): { count, bytes }.
   let audio = $state(null);
   // Chat's screenshots (Snip to Chat, snip/images.rs): { count, bytes }.
   let shots = $state(null);
@@ -89,7 +89,7 @@
     loadShots();
     loadNet();
     const unNet = listen('yap-connections', loadNet);
-    // A dictation saved, an entry deleted from Home, all cleared (history.rs).
+    // A dictation saved, an entry deleted from Home, all cleared (dictation/history.rs).
     const un = listen('yap-history-changed', loadCount);
     return () => {
       un.then((f) => f());
@@ -125,7 +125,7 @@
   const leaves = $derived([
     { what: 'Your voice', where: 'Never leaves this PC: speech-to-text runs here', page: 'models' },
     {
-      // recent_audio.rs: a day of dictation audio, on this PC only.
+      // dictation/recent_audio.rs: a day of dictation audio, on this PC only.
       what: 'Recent dictation audio',
       where:
         cfg.keepRecentAudio !== false && cfg.historyEnabled !== false
@@ -134,7 +134,7 @@
       page: 'privacy#recent-audio',
     },
     {
-      // meeting_audio.rs: each meeting's audio, on this PC only.
+      // meetings/meeting_audio.rs: each meeting's audio, on this PC only.
       what: 'Meeting audio',
       where:
         cfg.meetingKeepAudio !== false
@@ -148,7 +148,7 @@
       page: 'cleanup',
     },
     {
-      // screen_terms.rs: the window's text is read for each dictation and
+      // dictionary/screen_terms.rs: the window's text is read for each dictation and
       // never kept; only names a dictation seems to contain go with it to
       // a cleanup model.
       what: 'Names on screen',

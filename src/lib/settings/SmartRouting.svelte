@@ -12,10 +12,10 @@
   import Select from '../ui/Select.svelte';
   import Button from '../ui/Button.svelte';
   import Textarea from '../ui/Textarea.svelte';
-  import EndpointModels from '../EndpointModels.svelte';
-  import { PP_CLOUD_MODELS } from '../ppModels.js';
-  import { modelsFor } from '../modelCatalog.svelte.js';
-  import { PP_PROVIDERS } from '../providers.js';
+  import EndpointModels from './EndpointModels.svelte';
+  import { PP_CLOUD_MODELS } from '../core/ppModels.js';
+  import { modelsFor } from '../stores/modelCatalog.svelte.js';
+  import { PP_PROVIDERS } from '../core/providers.js';
   import { PP_PRESETS, PRESET_PICKS } from './cleanupPresets.js';
   import { newId, prettyAppLabel } from './profiles.js';
   import { lm, loadRecentApps } from './languageModels.svelte.js';

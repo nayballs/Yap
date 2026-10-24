@@ -11,7 +11,7 @@
 //! notification for a tip. "Show tips" off (Settings → General →
 //! Notifications): none at all. On the bar a hint waits out a dictation or
 //! a meeting, and is dropped if it can't show within 10 s (`notice.rs`). The hotkey's name is
-//! written by the page, with `lib/hotkeys.js` (`formatHotkeySpec`): the
+//! written by the page, with `lib/core/hotkeys.js` (`formatHotkeySpec`): the
 //! texts say `{key}` and carry the spec.
 //!
 //! The counts live in `<data>/hints.json`, not config.json: Settings keeps

@@ -1,7 +1,7 @@
 // The in-page hotkey fallback: when one of Yap's own windows has the focus,
 // the global low-level hook never sees the hotkey (WebView2 front-runs the
 // hook chain; log-proven 2026-07-05). The page gets the keydown normally,
-// so drive the pipeline directly — combo-aware via lib/hotkeys.js, matching
+// so drive the pipeline directly — combo-aware via lib/core/hotkeys.js, matching
 // the Rust hook's semantics. Settings runs it for the main window's whole
 // life (it's always mounted); it stands down while a shortcut is being
 // picked (settings/hotkeys.svelte.js).
@@ -12,8 +12,8 @@
 // hook's own paths: the recording mode (and push-to-talk's tap /
 // double-tap) is Rust's to decide.
 import { invoke } from '@tauri-apps/api/core';
-import { hotkeyMatchesKeydown, hotkeyMatchesKeyup } from '../hotkeys.js';
-import { readPageSelection } from '../speech.svelte.js';
+import { hotkeyMatchesKeydown, hotkeyMatchesKeyup } from '../core/hotkeys.js';
+import { readPageSelection } from '../stores/speech.svelte.js';
 import { hotkeyCapture } from './hotkeys.svelte.js';
 
 /** Call while the component initialises; `getCfg()` = Settings' config copy (or null). */
@@ -34,7 +34,7 @@ export function followHotkeyFallback(getCfg) {
       invoke('assistant_key', { pressed: true }).catch(() => {});
       return;
     }
-    // Read aloud: what's selected on this page (read_aloud.rs).
+    // Read aloud: what's selected on this page (voice/read_aloud.rs).
     if (hotkeyMatchesKeydown(e, cfg?.readHotkey)) {
       e.preventDefault();
       e.stopPropagation();

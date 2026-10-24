@@ -431,7 +431,7 @@ pub struct YapConfig {
     /// The bar's colours: "app" (the default: the same as Yap's windows,
     /// `theme`), "light" (Yap's white cards and ink buttons) or "dark" (the
     /// in-app toasts' warm near-black). The `--bar-*` tokens in app.css; the
-    /// page sets `data-bar-theme` (src/lib/appearance.js resolves "app").
+    /// page sets `data-bar-theme` (src/lib/core/appearance.js resolves "app").
     #[serde(default = "default_bar_theme")]
     pub bar_theme: String,
     /// The dictation capsule's ✕ (cancel) and ✓ (stop and paste) while it
@@ -443,7 +443,7 @@ pub struct YapConfig {
     /// Settings → General → Appearance → Theme, for every Yap window:
     /// "system" (the default: Windows' app mode, Settings → Personalisation →
     /// Colours, followed live), "light" or "dark". Every page sets
-    /// `data-yap-theme` from it (`src/lib/appearance.js`, the `--yap-*`
+    /// `data-yap-theme` from it (`src/lib/core/appearance.js`, the `--yap-*`
     /// tokens in app.css), and `theme.rs` gives the opaque windows' webviews
     /// the same background before their page paints.
     #[serde(default = "default_theme")]
@@ -454,7 +454,7 @@ pub struct YapConfig {
     /// app's buttons and menus. "default" (Figtree, the UI's own), "sans"
     /// (Geist), "serif" (Literata), "system" (Segoe UI) or "dyslexic"
     /// (OpenDyslexic). Every window sets `data-reading-font` from it
-    /// (`src/lib/appearance.js`, the `--yap-font-reading` token in app.css).
+    /// (`src/lib/core/appearance.js`, the `--yap-font-reading` token in app.css).
     #[serde(default = "default_reading_font")]
     pub reading_font: String,
     /// The reading text's size: "small", "default", "large" or "larger" (a
