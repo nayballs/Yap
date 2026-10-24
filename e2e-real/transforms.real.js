@@ -10,7 +10,7 @@
 // `realtest_transform` stands in for the shortcut: the window in front,
 // its selection read as at the key press (no Ctrl+C in robot mode). A
 // stand-in AI model answers (e2e/support/fake-llm.js: the cleanup, and the
-// transform by its instruction). Written 2026-10-24, not run yet.
+// transform by its instruction). Written 2026-10-24.
 import { test, expect } from './support/robot.js';
 import { edgeExe, hasWindowsTerminal } from './support/targets.js';
 import { startFakeLlm, cleanupTranscript, transformText, transformInstruction } from '../e2e/support/fake-llm.js';
@@ -39,6 +39,10 @@ test.beforeAll(async ({ robot }) => {
     ppBaseUrl: llm.base,
     ppModel: 'fake-cleanup',
     ppApiKey: '',
+    // Styles by app off: the model's text as it is everywhere. A terminal's
+    // Command style would type "hey, can you…" at the prompt; this spec is
+    // about transforms, and cleanup-styles.real.js has the styles.
+    cleanupStyles: false,
     transforms: cfg.transforms.map((t) => (t.id === 'translate' ? { ...t, language: 'French' } : t)),
   });
 });
@@ -129,11 +133,13 @@ test('a terminal: refused — nothing typed at its prompt, the AI not asked', as
   await sleep(500);
   await robot.dictate(sh, SAID);
   await expect.poll(() => lines().at(-1)).toBe(`PS> ${CLEANED}`);
+  const before = lines();
   const asked = transforms();
   const out = await transform(robot, sh, 'polish');
   expect(out.outcome).toBe('terminal');
   expect(transforms()).toBe(asked);
-  await sleep(500);
-  expect(lines().at(-1)).toBe(`PS> ${CLEANED}`);
+  // Nothing typed or sent: the window's lines exactly as they were.
+  await sleep(1_000);
+  expect(lines()).toEqual(before);
   await expect(robot.yap.main.getByRole('status').filter({ hasText: "Transforms don't work in a terminal" })).toBeVisible();
 });
