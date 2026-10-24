@@ -33,7 +33,7 @@ use std::path::{Path, PathBuf};
 
 use serde::Serialize;
 
-use crate::diarize::registry as dl;
+use crate::speakers::diarize::registry as dl;
 
 pub const MODEL_FILE: &str = "model.onnx";
 pub const KOKORO_FOLDER: &str = "kokoro-v1.0";

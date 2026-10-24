@@ -1023,7 +1023,7 @@ fn default_tts_provider() -> String {
     crate::tts::cloud::LOCAL.into()
 }
 fn default_diarization_model() -> String {
-    crate::diarize::DEFAULT_MODEL.into()
+    crate::speakers::diarize::DEFAULT_MODEL.into()
 }
 
 impl Default for YapConfig {

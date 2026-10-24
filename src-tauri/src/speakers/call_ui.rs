@@ -477,7 +477,7 @@ pub fn watching(note_id: u64) -> bool {
 
 /// The call app's names for timeline `tl`'s voices (`voices`: the engine's
 /// voices → the note's ids), for `naming.rs`.
-pub fn votes_for(tl: &crate::diarize::Timeline, voices: &super::labels::VoiceIds) -> Vec<PlatformVote> {
+pub fn votes_for(tl: &crate::speakers::diarize::Timeline, voices: &super::labels::VoiceIds) -> Vec<PlatformVote> {
     let all = watches();
     let Some(w) = all.iter().find(|w| w.note_id == tl.note_id && w.session.is_none_or(|s| s == tl.session) && !w.spans.is_empty()) else {
         return Vec::new();

@@ -40,6 +40,7 @@
 //! when the recording stops, before the summary is written.
 
 pub mod call_ui;
+pub mod diarize;
 pub mod labels;
 pub mod naming;
 

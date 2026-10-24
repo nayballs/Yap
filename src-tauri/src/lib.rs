@@ -25,7 +25,6 @@ mod coaching;
 mod commands;
 mod config;
 mod context_menu;
-mod diarize;
 mod dict_usage;
 mod e2e;
 mod elevated;
@@ -203,7 +202,7 @@ pub fn run_mcp_server() -> i32 {
 /// JSON lines on stdout (see `diarize.rs`). Returns the exit code. Nothing of
 /// the app itself starts.
 pub fn run_diarize_child() -> i32 {
-    diarize::run_child()
+    speakers::diarize::run_child()
 }
 
 /// `yap.exe eval …` (main.rs): the model evaluation harness (`eval.rs`,
@@ -701,15 +700,15 @@ pub fn run() {
             bar::bar_simulate,
             #[cfg(debug_assertions)]
             bar::bar_debug,
-            diarize::diarization_status,
-            diarize::diarization_download,
-            diarize::diarization_delete,
+            speakers::diarize::diarization_status,
+            speakers::diarize::diarization_download,
+            speakers::diarize::diarization_delete,
             #[cfg(debug_assertions)]
-            diarize::diarize_wav,
+            speakers::diarize::diarize_wav,
             #[cfg(debug_assertions)]
-            diarize::diarization_timeline,
+            speakers::diarize::diarization_timeline,
             #[cfg(debug_assertions)]
-            diarize::e2e_diarize_timeline,
+            speakers::diarize::e2e_diarize_timeline,
             #[cfg(debug_assertions)]
             speakers::call_ui::e2e_call_readings,
             // Test mode only (e2e.rs); not in release builds at all.

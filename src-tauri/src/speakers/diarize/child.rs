@@ -586,7 +586,7 @@ mod nemo {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::diarize::protocol::{write_audio, write_silence, RawSegment};
+    use crate::speakers::diarize::protocol::{write_audio, write_silence, RawSegment};
 
     fn os(args: &[&str]) -> Vec<OsString> {
         args.iter().map(OsString::from).collect()

@@ -220,7 +220,7 @@ pub(crate) struct Captured {
     /// "Them" with speaker diarization on: every sample appended here (the
     /// device's audio and the silence filled in) also goes to the engine,
     /// so its clock is this one (`diarize.rs`).
-    tee: Option<crate::diarize::Tee>,
+    tee: Option<crate::speakers::diarize::Tee>,
     /// The audio on its way to disk (`meeting_audio.rs`): everything
     /// appended here — dictations blanked, gaps filled — that its writer
     /// hasn't taken yet, so the file is this side's session clock exactly.
@@ -1766,7 +1766,7 @@ pub fn start(app: AppHandle, engine_slot: EngineSlot, note_id: u64) -> Result<()
     // Speaker labels for "Them", when they're on (diarize.rs): the engine
     // gets every sample from the first one. Dropped unfinished if the
     // capture fails to start.
-    let diarizer = crate::diarize::Session::for_meeting(note_id);
+    let diarizer = crate::speakers::diarize::Session::for_meeting(note_id);
     if let (Some(d), Ok(mut buf)) = (diarizer.as_ref(), sys_buf.lock()) {
         buf.tee = d.tee();
     }
@@ -1942,7 +1942,7 @@ pub fn start(app: AppHandle, engine_slot: EngineSlot, note_id: u64) -> Result<()
                 let _ = tauri::async_runtime::spawn_blocking(move || d.finish()).await;
             }
             #[cfg(debug_assertions)]
-            None => crate::diarize::finish_scripted(note_id),
+            None => crate::speakers::diarize::finish_scripted(note_id),
             #[cfg(not(debug_assertions))]
             None => {}
         }
