@@ -70,7 +70,7 @@
   import { NAV_GROUPS, PAGE_LABELS, resolveTarget } from './settings/nav.js';
   import { searchSettings, groupResults, countByPage } from './settings/settingsIndex.js';
   import { hotkeyCapture } from './settings/hotkeys.svelte.js';
-  import { merge3, same, copy, fill } from './settings/configMerge.js';
+  import { config, syncConfig, readConfig, setPristine, persist } from './settings/configSync.svelte.js';
   import SettingsHotkey from './settings/SettingsHotkey.svelte';
   import TransformsSettings from './settings/TransformsSettings.svelte';
   import SearchResults from './settings/SearchResults.svelte';
@@ -92,7 +92,21 @@
   // for a main-window view (Dictation's Dictionary row).
   let { embedded = false, open = true, onclose = null, onshowview = null } = $props();
 
-  let cfg = $state(null);
+  // Settings' copy of the config, in step with config.json
+  // (settings/configSync.svelte.js): read at mount, auto-saved after any
+  // change, what other surfaces save taken in. A provider adopted sets the
+  // Language Models tab's mode; scopes adopted remount their tabs (they read
+  // their scope once, ScopeProviderConfig).
+  syncConfig({
+    onAdopted(taken) {
+      if (taken.includes('ppProvider')) providerUi();
+      if (taken.includes('llmScopes')) {
+        ensureScopes();
+        chatScopeRev += 1;
+      }
+    },
+  });
+  const cfg = $derived(config.cfg);
   // General → Appearance (the theme, the reading text, Motion) shows in this
   // window as you pick (the other windows follow after the auto-save:
   // lib/appearance.js). So do the bar's colours: the main window draws the
@@ -107,10 +121,8 @@
         motion: cfg.motion,
       });
   });
-  let loaded = $state(false); // gates auto-save until the initial config loads
   let devices = $state([]);
   let outputs = $state([]); // audio output device names (for the chime)
-  let saved = $state(false);
   let section = $state('general'); // a page id (settings/nav.js)
   // Sidebar account button (account state lives in account.svelte.js).
   initAccount();
@@ -303,7 +315,7 @@
   // and read the on-device model's state afresh (where its layers went, the
   // bigger model on offer).
   $effect(() => {
-    if (section === 'cleanup' && loaded) {
+    if (section === 'cleanup' && config.loaded) {
       loadRecentApps();
       loadCatalog();
       refreshLocalLlm();
@@ -357,135 +369,6 @@
     tr: 'Turkish', yue: 'Cantonese',
   };
 
-  // Defaults for fields a stale config.json (or an in-flight backend) might
-  // not yet include, so the bindings always have something to bind to.
-  const FIELD_DEFAULTS = {
-    recordingMode: 'toggle',
-    quietOtherApps: false,
-    pauseMedia: false,
-    keepMicReady: false,
-    appendTrailingSpace: false,
-    smartSpacing: true,
-    screenNames: true,
-    chatNoFullStop: true,
-    autoSubmit: false,
-    voiceEnter: true,
-    terminalMode: true,
-    restoreClipboard: true,
-    startHidden: false,
-    autostart: false,
-    audioFeedbackVolume: 1.0,
-    soundEnabled: true,
-    useGpu: true,
-    // Settings → Speech-to-Text → Runs on (stt_speed.rs): auto | gpu | cpu.
-    sttDevice: 'auto',
-    // A day of dictation audio, to run one again (recent_audio.rs).
-    keepRecentAudio: true,
-    // "Use what I said" (as_said.rs): its shortcut and the bar's offer.
-    asSaidHotkey: '',
-    asSaidOffer: true,
-    // Snip to Chat (snip.rs): its shortcut, saying "snip", keeping screenshots.
-    snipHotkey: 'kb:alt+win+83',
-    snipVoice: true,
-    chatImageDays: 30,
-    streamingPartials: true,
-    historyEnabled: true,
-    meetingDetection: true,
-    meetingAutoStart: false,
-    meetingDetectApps: {},
-    meetingDetectStyle: 'popup',
-    meetingHideFromCapture: true,
-    meetingMaxMinutes: 120,
-    meetingCallEnd: 'ask',
-    meetingEndWhenQuiet: true,
-    meetingHotkey: 'kb:alt+win+77',
-    meetingOpenNotepad: true,
-    meetingSplitScreen: false,
-    meetingLiveTranscript: true,
-    // Meeting audio kept on disk (meeting_audio.rs): to transcribe again, play a line.
-    meetingKeepAudio: true,
-    meetingAudioDays: 14,
-    // The refined transcript after a meeting (meeting_refine.rs): auto | always | never.
-    meetingRefine: 'auto',
-    meetingDiarization: false,
-    diarizationModel: 'nemotron-3-diarization',
-    meetingReminder: '15s',
-    meetingBrief: true,
-    // Memory (MemorySection.svelte, memory.rs): the switches only.
-    memorySearchChats: true,
-    memoryLearnChats: true,
-    memoryLearnMeetings: false,
-    memorySensitive: false,
-    barEnabled: true,
-    barHideFullscreen: true,
-    barTheme: 'app',
-    barDictationButtons: 'off',
-    // General → Appearance (AppearanceSettings.svelte, lib/appearance.js).
-    theme: 'system',
-    readingFont: 'default',
-    readingSize: 'default',
-    motion: 'system',
-    inputDevice: null,
-    dictionary: [],
-    selectedLanguage: 'auto',
-    translateToEnglish: false,
-    modelUnloadTimeout: 'never',
-    outputDevice: null,
-    overlayPosition: 'bottom',
-    autoSubmitKey: 'enter',
-    updateChecksEnabled: true,
-    debugLogging: false,
-    postProcessEnabled: false,
-    ppProvider: 'groq',
-    ppBaseUrl: 'https://api.groq.com/openai/v1',
-    ppApiKey: '',
-    ppApiKeys: {},
-    ppModel: 'openai/gpt-oss-20b',
-    ppPreset: 'default',
-    ppDisableThinking: false,
-    // Byte-identical to config.rs default_pp_prompt() / PP_PRESETS.default.body.
-    ppPrompt: `Clean up the transcript using these rules.\n\nRULES:\n- Remove filler words (um, uh, er, like, you know, basically) unless meaningful.\n- Fix grammar, spelling, punctuation, and capitalization; break up run-on sentences.\n- Remove false starts, stutters, and accidental repetitions.\n- Correct obvious speech-to-text transcription errors from context.\n- Preserve the speaker's voice, tone, vocabulary, and intent.\n- Preserve technical terms, proper nouns, names, and jargon exactly as spoken — never "correct" them.\n\nSelf-corrections ("wait no", "I meant", "scratch that"): keep only the corrected version. "Actually" used for emphasis is NOT a correction.\nSpoken punctuation ("period", "comma", "new line"): convert to symbols. Use context to distinguish commands from literal mentions.\nNumbers & dates: standard written forms (January 15, 2026 / $300 / 5:30 PM). Small conversational numbers can stay as words.\nBroken phrases: reconstruct the speaker's likely intent from context. Never output a polished sentence that says nothing coherent.\nFormatting: bullets, numbered lists, or paragraph breaks only when they genuinely improve readability. Don't over-format.\n\nOUTPUT:\n- Output ONLY the cleaned text. Nothing else.\n- No commentary, labels, explanations, or preamble.\n- No questions. No suggestions. No added content.\n- Empty or filler-only input = empty output.`,
-    routingScope: 'all_apps',
-    appRoutes: [],
-    cleanupProfiles: [],
-    // Styles by app (settings/CleanupStyles.svelte, cleanup_styles.rs).
-    cleanupStyles: true,
-    llmScopes: {},
-    agentName: '',
-    editHotkey: '',
-    // The rewrite shortcut with nothing selected rewrites the last
-    // dictation (as_said.rs).
-    rewriteLastDictation: true,
-    assistantHotkey: '',
-    readHotkey: '',
-    assistantAnswerCard: true,
-    openApps: true,
-    appsBlocked: [],
-    appNicknames: [],
-    webSearch: false,
-    webSearchNative: true,
-    webSearchService: 'exa',
-    webSearchKeys: {},
-    speakReplies: false,
-    speakWhen: 'voice',
-    talkBackHandsFree: true,
-    ttsEngine: 'kokoro',
-    ttsVoice: 'af_bella',
-    ttsWindowsVoice: '',
-    ttsRate: 1.0,
-    ttsVolume: 0.5,
-    ttsProvider: 'local',
-    ttsCloudKeys: {},
-    ttsCloud: {},
-    // About you (AboutYouSettings.svelte, about_you.rs): the region's country,
-    // '' = Automatic (Windows'); its spelling's switch is in Dictation
-    // cleanup (RegionSpelling.svelte).
-    aboutName: '',
-    aboutMe: '',
-    regionCountry: '',
-    regionSpelling: true,
-  };
-
   // Real running version — read from Tauri, not hardcoded (was stuck at '0.1.0').
   let APP_VERSION = $state('');
   // The cleanup guardrails (llm::BASE_PROMPT), fetched once for the Prompt Studio
@@ -507,10 +390,7 @@
     } catch {
       /* not in Tauri — leave blank */
     }
-    const stored = await invoke('get_config');
-    // config.json as this copy agrees with it (see "Staying in step" below).
-    base = copy(stored);
-    cfg = { ...FIELD_DEFAULTS, ...stored };
+    await readConfig();
     providerUi();
     // Per-provider key store (providers.js): the active key credited to its provider.
     creditCleanupKey(cfg, cloudProvider);
@@ -525,9 +405,9 @@
     });
     // This copy as set up, before any change worth saving (the migration
     // below is one): what `fill` puts in base's holes.
-    pristine = buildClean();
+    setPristine();
     const migrated = migrateRoutesToProfiles();
-    loaded = true;
+    config.loaded = true;
     // Persist the migration immediately so it isn't redone (and duplicated) on
     // the next load. The auto-save effect skips its first (priming) run.
     if (migrated) persist();
@@ -1016,7 +896,7 @@
   // to DictionaryView — skipping echoes of updates we just received from it.
   $effect(() => {
     const json = JSON.stringify(cfg?.dictionary ?? null);
-    if (!loaded || json === null || json === lastReceivedDictJson) return;
+    if (!config.loaded || json === null || json === lastReceivedDictJson) return;
     window.dispatchEvent(
       new CustomEvent('yap-dictionary-external', { detail: JSON.parse(json) })
     );
@@ -1425,153 +1305,18 @@
     loadRecentApps();
   }
 
-  // Build the cleaned config payload the backend expects (trimmed dictionary,
-  // numeric fields, null device sentinels). Does NOT mutate `cfg` — so calling
-  // it from the auto-save effect can't re-trigger the effect.
-  function buildClean() {
-    return {
-      ...cfg,
-      inputDevice: cfg.inputDevice || null,
-      outputDevice: cfg.outputDevice || null,
-      audioFeedbackVolume: Number(cfg.audioFeedbackVolume),
-      ttsRate: Number(cfg.ttsRate) || 1,
-      ttsVolume: Number.isFinite(Number(cfg.ttsVolume)) ? Number(cfg.ttsVolume) : 0.5,
-      dictionary: cfg.dictionary
-        .map((e) => ({
-          from: (e.from || '').trim(),
-          to: (e.to || '').trim(),
-          fuzzy: e.fuzzy ?? true,
-          // Snippets (DictionaryView) ride along in this copy: keep the flag,
-          // or this auto-save would turn them into corrections.
-          snippet: !!e.snippet,
-        }))
-        .filter((e) => e.from),
-      appRoutes: (cfg.appRoutes || [])
-        .map((r) => ({
-          app: (r.app || '').trim(),
-          label: (r.label || '').trim() || (r.app || '').trim(),
-          profileId: r.profileId || '',
-          prompt: r.prompt || '',
-        }))
-        .filter((r) => r.app),
-      cleanupProfiles: (cfg.cleanupProfiles || [])
-        .map((p) => ({
-          // A style's kind, tone and apps (cleanup_styles.rs) ride along.
-          ...p,
-          id: p.id,
-          name: (p.name || '').trim() || 'Untitled',
-          prompt: p.prompt || '',
-          provider: p.provider || '',
-          baseUrl: (p.baseUrl || '').trim(),
-          model: (p.model || '').trim(),
-          apiKey: p.apiKey || '',
-        }))
-        .filter((p) => p.id),
-    };
-  }
-
-  // ---- Staying in step with config.json (2026-10-23) ----
-  // This copy is read once, at mount; other surfaces save config.json too —
-  // the Speech-to-Text page's model switch (modelStore), the tray's model
-  // menu, onboarding, a notice's button — and Rust sends `yap-config-saved`
-  // after every save. This copy's auto-save used to write the whole copy
-  // back, so the next switch flipped here put the old speech model (and
-  // onboarding's choices) back. `base` is config.json as this copy last
-  // agreed with it (read, or saved). A save from anywhere: what changed on
-  // disk since, and not here, is adopted (`adoptSaved`). The auto-save: this
-  // copy's changes put onto config.json as it is now (`merge3`), so a
-  // setting saved elsewhere since stays — and nothing is written when this
-  // copy has nothing to add. An edit being made is never undone: a setting
-  // changed both here and there keeps this copy's. One at a time (`inTurn`).
-  let base = null;
-  // This copy as first set up (defaults and fill-ins included): a setting
-  // config.json doesn't have yet, unchanged here since, is no change of
-  // this copy's (`fill`).
-  let pristine = null;
-  let syncing = Promise.resolve();
-  function inTurn(fn) {
-    const run = syncing.then(fn, fn);
-    syncing = run.catch(() => {});
-    return run;
-  }
-
   // The Language Models tab's UI state, from the saved provider id.
   function providerUi() {
     ppMode = modeOf(cfg.ppProvider);
     if (CLOUD_PROVIDER_IDS.includes(cfg.ppProvider)) cloudProvider = cfg.ppProvider;
   }
 
-  // `next` (the merge) into this copy where it differs from `mine` (this
-  // copy as it was merged) — unless the person changed that setting since.
-  function adopt(mine, next) {
-    const now = buildClean();
-    const taken = [];
-    for (const k of Object.keys(next)) {
-      if (same(next[k], mine[k]) || !same(now[k], mine[k])) continue;
-      cfg[k] = copy(next[k]);
-      taken.push(k);
-    }
-    if (taken.includes('ppProvider')) providerUi();
-    // The scope tabs read their scope once (ScopeProviderConfig).
-    if (taken.includes('llmScopes')) {
-      ensureScopes();
-      chatScopeRev += 1;
-    }
-  }
-
-  async function adoptSaved() {
-    if (!loaded || !cfg || !base) return;
-    const disk = await invoke('get_config');
-    const mine = buildClean();
-    adopt(mine, merge3(fill(base, pristine), mine, disk));
-    base = disk;
-  }
-
-  onMount(() => {
-    const un = listen('yap-config-saved', () => {
-      inTurn(adoptSaved).catch(() => {});
-    });
-    return () => un.then((f) => f());
-  });
-
-  function persist() {
-    return inTurn(async () => {
-      const mine = buildClean();
-      const disk = await invoke('get_config');
-      const next = merge3(fill(base, pristine), mine, disk);
-      adopt(mine, next);
-      if (same(next, disk)) {
-        base = disk;
-        return;
-      }
-      await invoke('save_config', { cfg: next });
-      base = copy(next);
-      saved = true;
-      setTimeout(() => (saved = false), 1200);
-    });
-  }
-
-  // ---- Auto-save: debounce any cfg change, then persist ----
-  let saveTimer = null;
-  let primed = false; // skip the first run (initial load) so we don't save on open
-  $effect(() => {
-    if (!loaded || !cfg) return;
-    // Deep-read every field so the effect re-runs on any change (incl. dictionary).
-    JSON.stringify(cfg);
-    if (!primed) {
-      primed = true;
-      return;
-    }
-    clearTimeout(saveTimer);
-    saveTimer = setTimeout(persist, 400);
-  });
-
   // ---- Settings attention badge (Wispr-style red count) ----
   // Real conditions only: an update waiting, no STT model installed, or AI
   // cleanup pointed at a cloud provider with no key. Settings is always
   // mounted, so this stays live for the ControlPanel's bell too.
   $effect(() => {
-    if (!loaded || !cfg) return;
+    if (!config.loaded || !cfg) return;
     const items = [];
     if (updates.status === 'ready') {
       items.push({ section: 'about', label: `Update ${updates.version} ready to install` });
@@ -1782,10 +1527,10 @@
     {#if !rail}
       <div class="navfoot">
         <span class="ver">Yap {APP_VERSION}</span>
-        <span class="saved" class:show={saved} aria-live="polite">{saved ? 'Saved ✓' : ''}</span>
+        <span class="saved" class:show={config.saved} aria-live="polite">{config.saved ? 'Saved ✓' : ''}</span>
       </div>
     {:else}
-      <span class="railsaved" class:show={saved} aria-hidden="true">✓</span>
+      <span class="railsaved" class:show={config.saved} aria-hidden="true">✓</span>
     {/if}
   </nav>
 
@@ -2613,7 +2358,7 @@
             <h1>AI apps (MCP)</h1>
             <p>Let your AI apps read your meeting transcripts and notes, through Yap on this PC. Never your dictations.</p>
           </div>
-          <McpSection bind:cfg {goto} />
+          <McpSection {cfg} {goto} />
 
         {:else if section === 'account'}
           <div class="page-h">
