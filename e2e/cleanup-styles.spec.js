@@ -115,7 +115,7 @@ test('Settings: a row per kind of app with its tone and an example; a tone, an a
   await setConfig(yap, main, { theme: 'dark' });
   await email.scrollIntoViewIfNeeded();
   await shot(main, '03-styles-by-app-dark');
-  await setConfig(yap, main, { theme: 'system' });
+  await setConfig(yap, main, { theme: 'light' });
 
   // The person's own profiles stay theirs: the styles aren't in that list,
   // and an app rule can name one.

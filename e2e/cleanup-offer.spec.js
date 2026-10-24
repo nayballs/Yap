@@ -65,7 +65,7 @@ test('cleanup off on a PC the on-device model fits: one tip after a dictation, n
   await expect(offerToast(main)).toHaveCount(0);
 });
 
-test('no tip with tips off, with cleanup on, or with too few dictations', async ({ yap, main }) => {
+test('no tip with tips off or with cleanup on', async ({ yap, main }) => {
   await setConfig(yap, main, { cleanupOfferSeen: false, showTips: false });
   expect((await yap.invoke('cleanup_offer_status')).offer).toBe(false);
   await setConfig(yap, main, { showTips: true, postProcessEnabled: true });
