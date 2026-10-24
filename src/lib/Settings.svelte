@@ -2,27 +2,14 @@
   import { invoke } from '@tauri-apps/api/core';
   import { listen } from '@tauri-apps/api/event';
   import { onMount, onDestroy, tick } from 'svelte';
-  import Group from './ui/Group.svelte';
-  import Row from './ui/Row.svelte';
-  import Toggle from './ui/Toggle.svelte';
-  import Select from './ui/Select.svelte';
-  import LinkRow from './ui/LinkRow.svelte';
-  import Segmented from './ui/Segmented.svelte';
-  import ModelManager from './ModelManager.svelte';
-  import SpeakerModels from './SpeakerModels.svelte';
-  import AgentNameField from './AgentNameField.svelte';
   import { initSpeech, readPageSelection } from './speech.svelte.js';
-  import VoiceSettings from './VoiceSettings.svelte';
-  import OpenAppsSettings from './OpenAppsSettings.svelte';
-  import WebSearchSettings from './WebSearchSettings.svelte';
   import { applyAppearance } from './appearance.js';
-  import KokoroOffer from './KokoroOffer.svelte';
-  import { kokoro, startKokoro } from './kokoro.svelte.js';
+  import { startKokoro } from './kokoro.svelte.js';
   import { creditCleanupKey, adoptProviderKey } from './providers.js';
   import { loadCatalog } from './modelCatalog.svelte.js';
-  import { hotkeyMatchesKeydown, hotkeyMatchesKeyup, formatHotkeySpec, fillHotkey } from './hotkeys.js';
+  import { hotkeyMatchesKeydown, hotkeyMatchesKeyup } from './hotkeys.js';
   import { attention, attentionCount, followAttention } from './attention.svelte.js';
-  import { localLlm, refreshLocalLlm, listenLocalProgress, followLocalLlm } from './settings/localLlm.svelte.js';
+  import { refreshLocalLlm, listenLocalProgress, followLocalLlm } from './settings/localLlm.svelte.js';
   import AccountSection from './AccountSection.svelte';
   import ConnectorsSection from './ConnectorsSection.svelte';
   import McpSection from './McpSection.svelte';
@@ -35,17 +22,17 @@
   import { searchSettings, groupResults, countByPage } from './settings/settingsIndex.js';
   import { hotkeyCapture } from './settings/hotkeys.svelte.js';
   import { config, syncConfig, readConfig, setPristine, persist } from './settings/configSync.svelte.js';
-  import SettingsHotkey from './settings/SettingsHotkey.svelte';
-  import TransformsSettings from './settings/TransformsSettings.svelte';
   import SearchResults from './settings/SearchResults.svelte';
   import GeneralPage from './settings/GeneralPage.svelte';
   import DictationPage from './settings/DictationPage.svelte';
   import ShortcutsPage from './settings/ShortcutsPage.svelte';
   import MeetingsPage from './settings/MeetingsPage.svelte';
   import PrivacyPage from './settings/PrivacyPage.svelte';
-  import RunsOn from './settings/RunsOn.svelte';
   import AboutPage from './settings/AboutPage.svelte';
-  import { SCOPE_TABS, SCOPE_DEFAULTS, ensureScopes, scopeModelLabel as scopeLabel } from './settings/scopes.js';
+  import CommandsPage from './settings/CommandsPage.svelte';
+  import VoicePage from './settings/VoicePage.svelte';
+  import SpeechPage from './settings/SpeechPage.svelte';
+  import { SCOPE_TABS, SCOPE_DEFAULTS, ensureScopes } from './settings/scopes.js';
   import { migrateRoutesToProfiles } from './settings/profiles.js';
   import {
     lm,
@@ -130,22 +117,6 @@
   // The day's Groq usage, live (Language Models → Usage today).
   let unlistenUsage = null;
 
-  const UNLOAD_TIMEOUTS = [
-    { value: 'never', label: 'Never' },
-    { value: '1min', label: 'After 1 minute' },
-    { value: '5min', label: 'After 5 minutes' },
-    { value: '15min', label: 'After 15 minutes' },
-    { value: '30min', label: 'After 30 minutes' },
-  ];
-
-  // Display names for the language codes the backend returns.
-  const LANG_NAMES = {
-    en: 'English', es: 'Spanish', fr: 'French', de: 'German', it: 'Italian',
-    pt: 'Portuguese', nl: 'Dutch', pl: 'Polish', ru: 'Russian', uk: 'Ukrainian',
-    zh: 'Chinese', ja: 'Japanese', ko: 'Korean', ar: 'Arabic', hi: 'Hindi',
-    tr: 'Turkish', yue: 'Cantonese',
-  };
-
   // Real running version — read from Tauri, not hardcoded (was stuck at '0.1.0').
   let APP_VERSION = $state('');
 
@@ -202,12 +173,6 @@
   onDestroy(() => {
     if (unlistenUsage) unlistenUsage();
   });
-
-  // Language dropdown: Auto + whatever the active model supports.
-  const langOptions = $derived([
-    { value: 'auto', label: 'Auto-detect' },
-    ...(langInfo.languages || []).map((c) => ({ value: c, label: LANG_NAMES[c] || c })),
-  ]);
 
   // Refresh language capability whenever the active model changes.
   $effect(() => {
@@ -569,12 +534,8 @@
   // (KokoroOffer), Windows voices speaking meanwhile.
   initSpeech(['preview']);
   startKokoro();
+  // The "Download Kokoro" offer, open across page switches (VoicePage).
   let offerKokoro = $state(false);
-  function setSpeakReplies(on) {
-    cfg.speakReplies = on;
-    // Not while a cloud voice (ElevenLabs) speaks: Kokoro is only its stand-in.
-    offerKokoro = on && cfg.ttsProvider !== 'elevenlabs' && cfg.ttsEngine !== 'windows' && kokoro.inBuild && !kokoro.installed;
-  }
   onMount(() => {
     const un = listen('yap-voice-replies', (e) => {
       if (cfg && typeof e.payload?.on === 'boolean') cfg.speakReplies = e.payload.on;
@@ -593,26 +554,6 @@
       unRate.then((f) => f());
     };
   });
-  const SPEAK_WHEN = [
-    { value: 'voice', label: 'When I asked by voice' },
-    { value: 'always', label: 'Always' },
-  ];
-  const SPEAK_WHEN_DESC = {
-    voice: 'In Chat, answers to questions you dictate are read aloud; typed ones stay quiet',
-    always: 'Every answer in Chat is read aloud',
-  };
-  const wakeName = $derived((cfg?.agentName || '').trim() || 'Yap');
-  // A link row's value: which model a Language Models tab runs on now
-  // ("Groq · openai/gpt-oss-20b", "On this PC · Qwen3.5 4B"; settings/scopes.js).
-  function scopeModelLabel(scope) {
-    return scopeLabel(cfg, scope, localLlm.status.model);
-  }
-  // Commands' model and prompt: Language Models → Commands. The Voice
-  // Assistant's: Language Models → Chat & Voice Assistant.
-  function openScope(scope) {
-    goto({ page: 'cleanup', scope });
-  }
-
   // The notepad's consent message, edited there (notepad.rs): the same.
   onMount(() => {
     const un = listen('yap-consent-message-changed', (e) => {
@@ -848,229 +789,13 @@
         {:else if section === 'meetings'}
           <MeetingsPage {cfg} {goto} bind:apps={meetingApps} />
         {:else if section === 'commands'}
-          <!-- Commands (pipeline.rs run_agent; Wispr Flow's Command Mode and
-               its old "Hey Flow"): the AI does what you say and types the
-               result where you are. Not the Voice Assistant, which answers
-               out loud. -->
-          <div class="page-h">
-            <h1>Commands</h1>
-            <p>Tell Yap's AI what to write, and it types the result where you are.</p>
-          </div>
-          <div class="explain" role="note">
-            <p class="example">
-              Say <q>Hey {wakeName}, reply that I'll be late</q> in any app; Yap writes it and types it there.
-            </p>
-            <p class="crossref">
-              Want an answer you can hear instead?
-              <button class="set-link" onclick={() => goto('voice')}>Voice Assistant</button>
-            </p>
-          </div>
-          <Group title="Say its name" id="settings-wake-word">
-            <Row setting="wake-word">
-              <Toggle
-                bind:checked={cfg.llmScopes.voiceAgent.enabled}
-                label="Answer to its name in any dictation"
-                desc={`Say "${wakeName}, …" while you dictate and the AI does what you ask, instead of typing your words`}
-              />
-            </Row>
-            <Row label="Agent name" desc="Short and easy to say. Until you pick one, it's “Yap”" setting="agent-name">
-              <AgentNameField {cfg} />
-            </Row>
-          </Group>
-          <Group title="Rewrite selected text" id="settings-rewrite">
-            <Row
-              label="Rewrite shortcut"
-              desc={cfg.rewriteLastDictation
-                ? 'Select text in any app, press it and say how to change it. With nothing selected within a minute of a dictation, it rewrites that dictation where it is; otherwise it writes where your cursor is'
-                : 'Select text in any app, press it and say how to change it. With nothing selected, it writes where your cursor is'}
-              hint="For example “make this a bulleted list”, “more formal” or “in French”."
-              setting="rewrite-shortcut"
-            >
-              <SettingsHotkey {cfg} target="editHotkey" clearable />
-            </Row>
-            <!-- as_said.rs: nothing selected, right after a dictation into
-                 the same field (still ending at the cursor) → that dictation
-                 rewritten. Off: write mode, as before. -->
-            <Row setting="rewrite-last">
-              <Toggle
-                bind:checked={cfg.rewriteLastDictation}
-                label="Rewrite your last dictation when nothing is selected"
-                desc="Within a minute, in the same field"
-                hint="Only while it's exactly as Yap typed it, with the cursor right after it; otherwise Yap says so and changes nothing."
-              />
-            </Row>
-          </Group>
-          <!-- Saved transforms (transforms.rs): one-key rewrites, no speaking. -->
-          <Group
-            title="Transforms"
-            desc="Rewrite the selected text in one press, without saying anything. With nothing selected, your last dictation, by the rules above."
-            id="settings-transforms"
-          >
-            <TransformsSettings {cfg} />
-          </Group>
-          <Group title="Model and prompt" id="settings-commands-model">
-            <LinkRow
-              label="Model and prompt"
-              desc="In Language Models. With “Answer to its name” off, the rewrite shortcut and transforms use the cleanup model"
-              value={scopeModelLabel('voiceAgent')}
-              setting="commands-model"
-              onclick={() => openScope('voiceAgent')}
-            />
-          </Group>
+          <CommandsPage {cfg} {goto} />
 
         {:else if section === 'voice'}
-          <!-- The Voice Assistant (assistant.rs + tts.rs): ask Yap's Chat
-               out loud and hear the answer. Not Commands, which type. -->
-          <div class="page-h">
-            <h1>Voice Assistant</h1>
-            <p>Ask Yap something by voice and hear the answer, like a voice assistant.</p>
-          </div>
-          <div class="explain" role="note">
-            <p class="example">
-              {#if cfg.assistantHotkey}
-                Press {formatHotkeySpec(cfg.assistantHotkey)} in any app and ask <q>What's on my notes for the launch?</q>: Yap answers out loud, and the conversation is in Chat.
-              {:else}
-                Set a shortcut below, press it in any app and ask <q>What's on my notes for the launch?</q>: Yap answers out loud, and the conversation is in Chat.
-              {/if}
-              {#if cfg.openApps}Or say <q>Open Spotify</q>, and Yap opens it.{/if}
-              {#if cfg.webSearch}Or ask <q>Where do I find Gale in Baldur's Gate 3?</q>, and Yap looks it up on the web.{/if}
-            </p>
-            <p class="crossref">
-              Want Yap to write something into the app you're in?
-              <button class="set-link" onclick={() => goto('commands')}>Commands</button>
-            </p>
-          </div>
-          <Group title="Assistant shortcut" id="settings-assistant-shortcut">
-            <Row
-              label="Assistant shortcut"
-              desc={cfg.recordingMode === 'pushToTalk'
-                ? 'Hold it while you ask, or double-tap it to ask hands-free. It never types into your app'
-                : cfg.assistantStopOnPause
-                  ? 'Press it and ask: Yap stops listening when you pause. It never types into your app'
-                  : 'Press it, ask, press it again. It never types into your app'}
-              hint="Press it while Yap speaks to cut in. Answers are read aloud with Speak replies on, and shown on the Yap bar otherwise. Paused during meetings and calls."
-              setting="assistant-shortcut"
-            >
-              <SettingsHotkey {cfg} target="assistantHotkey" clearable />
-            </Row>
-            {#if !cfg.assistantHotkey}
-              <Row>
-                <p class="set-note">Set an assistant shortcut to ask Yap from any app, even while its window is closed.</p>
-              </Row>
-            {/if}
-            <!-- "Stop listening when I pause" (pause.rs): a pause after the
-                 question ends it, as a second press would. -->
-            <Row setting="stop-on-pause">
-              <Toggle
-                bind:checked={cfg.assistantStopOnPause}
-                label="Stop listening when I pause"
-                desc={cfg.recordingMode === 'pushToTalk'
-                  ? 'Asking hands-free (a double-tap), a pause after your question sends it'
-                  : "A pause after your question sends it, so you needn't press the shortcut again"}
-                hint="A second and a half of quiet once you've said something; the Yap bar shows it running out. Before you start talking, Yap waits as long as you need. The shortcut still ends it at once, and while you hold it down, letting go does."
-              />
-            </Row>
-            <Row setting="answer-card">
-              <Toggle
-                bind:checked={cfg.assistantAnswerCard}
-                label="Show the answer on the Yap bar"
-                desc="Your question and its answer, above the bar while Yap reads it out"
-                hint="Off: just the voice, with ■ on the bar to stop it. An answer Yap couldn't read aloud still shows."
-              />
-            </Row>
-          </Group>
-          <!-- Read aloud, anywhere (read_aloud.rs): any selected text, in
-               the voice below, with the reading card on the Yap bar. -->
-          <Group title="Read aloud" id="settings-read-aloud">
-            <Row
-              label="Read aloud shortcut"
-              desc="Select text in any app and press it: Yap reads it in the voice below, each word lit up on the Yap bar as it's said"
-              hint="Press it again, or Esc, to stop. 🔊 on the Yap bar and the tray's Read selection aloud do the same, and notes and Chat answers have Read aloud too. The text is in your reading font (General → Appearance)."
-              setting="read-shortcut"
-            >
-              <SettingsHotkey {cfg} target="readHotkey" clearable />
-            </Row>
-          </Group>
-          <!-- "Open Teams": apps installed on this PC (apps.rs). -->
-          <OpenAppsSettings {cfg} />
-          <!-- Looking things up on the web (web.rs), for Chat too. -->
-          <WebSearchSettings {cfg} {goto} />
-          <Group title="Spoken replies in Chat" id="settings-spoken-replies">
-            <Row setting="speak-replies">
-              <Toggle
-                bind:checked={() => cfg.speakReplies, setSpeakReplies}
-                label="Speak replies"
-                desc="Yap reads its answers aloud, in Chat and from the assistant shortcut. Off, Yap never speaks"
-                hint="The same switch as Voice replies in Chat."
-              />
-              <KokoroOffer bind:open={offerKokoro} {cfg} />
-            </Row>
-            <Row label="When to speak" desc={SPEAK_WHEN_DESC[cfg.speakWhen] ?? SPEAK_WHEN_DESC.voice} setting="speak-when">
-              <Segmented bind:value={cfg.speakWhen} options={SPEAK_WHEN} label="When to speak" disabled={!cfg.speakReplies} />
-            </Row>
-            <Row setting="talk-back">
-              <Toggle
-                bind:checked={cfg.talkBackHandsFree}
-                label="Talk back hands-free"
-                desc="A question you dictate into Chat is sent when you stop, and the answer read out"
-                hint={fillHotkey('Press the mic or {key} to ask the next one: it cuts Yap off mid-answer.', cfg.hotkey)}
-                disabled={!cfg.speakReplies}
-              />
-            </Row>
-          </Group>
-          <Group title="Voice" id="settings-voice">
-            <VoiceSettings {cfg} />
-          </Group>
-          <Group title="Model" id="settings-assistant-model">
-            <LinkRow
-              label="Model"
-              desc="The same as Chat's, in Language Models"
-              value={scopeModelLabel('chat')}
-              setting="assistant-model"
-              onclick={() => openScope('chat')}
-            />
-          </Group>
+          <VoicePage {cfg} {goto} bind:offerKokoro />
 
         {:else if section === 'models'}
-          <div class="page-h">
-            <h1>Speech-to-Text</h1>
-            <p>The model on this PC that turns your voice into text.</p>
-          </div>
-          <!-- Your model first (with the red badge's reason, when there's
-               none), then the catalogue: ModelManager.svelte. -->
-          <ModelManager />
-          <!-- Speaker diarization's models + its switch (diarize.rs); the
-               Meetings page has the switch too and links here. -->
-          <Group title="Speakers in meetings" id="settings-speakers">
-            <Row setting="speakers">
-              <SpeakerModels bind:enabled={cfg.meetingDiarization} bind:model={cfg.diarizationModel} />
-            </Row>
-          </Group>
-          <Group title="Language" id="settings-stt-language">
-            <Row
-              label="Language"
-              desc={langInfo.supportsLanguage ? 'The language you speak. Auto-detect works for most models' : 'This model uses a fixed language'}
-              setting="language"
-            >
-              <Select bind:value={cfg.selectedLanguage} options={langOptions} ariaLabel="Language" disabled={!langInfo.supportsLanguage} />
-            </Row>
-            <Row setting="translate">
-              <Toggle
-                bind:checked={cfg.translateToEnglish}
-                label="Translate to English"
-                desc={langInfo.supportsTranslate ? 'Output English whatever language you speak' : 'This model can’t translate'}
-                disabled={!langInfo.supportsTranslate}
-              />
-            </Row>
-          </Group>
-          <Group title="Performance" id="settings-performance">
-            <!-- The graphics card or the processor, measured per model on
-                 this PC (stt_speed.rs). -->
-            <RunsOn {cfg} />
-            <Row label="Unload model when idle" desc="Frees memory between dictations. It loads again for the next one" setting="unload">
-              <Select bind:value={cfg.modelUnloadTimeout} options={UNLOAD_TIMEOUTS} ariaLabel="Unload model when idle" />
-            </Row>
-          </Group>
+          <SpeechPage {cfg} {langInfo} />
 
         {:else if section === 'cleanup'}
           <LanguageModelsPage {cfg} {goto} />
@@ -1581,36 +1306,6 @@
   }
   .shell.rail .content {
     padding: 26px 30px 36px 34px;
-  }
-  /* Commands / Voice Assistant: what the page does, in one example, and the
-     way to the other one (they're easy to mix up). */
-  .explain {
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-    margin: -8px 0 28px;
-    padding: 12px 14px;
-    border: 1px solid var(--yap-border-subtle);
-    border-radius: var(--yap-r-lg);
-    background: var(--yap-raised-soft);
-  }
-  .explain p {
-    margin: 0;
-    font-size: 13px;
-    line-height: 1.55;
-  }
-  .explain .example {
-    color: var(--yap-fg);
-  }
-  .explain q {
-    font-style: italic;
-  }
-  .explain .crossref {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: 4px 8px;
-    color: var(--yap-muted);
   }
   .loading {
     color: var(--yap-muted);
