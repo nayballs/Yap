@@ -29,6 +29,9 @@
   // Cleaned: "Cleaned up" with **Use what I said** for a few seconds after a
   // dictation whose words AI cleanup changed (as_said.rs) — it swaps the
   // paste for your words before cleanup, in the app you dictated into.
+  // A saved transform (transforms.rs): its name while it runs ("Polish…",
+  // the amber dot), then "Polish ✓" with **Undo** (the text from before put
+  // back) for as long, or "Polish: no changes needed".
   //
   // A question to the **Voice Assistant** (assistant.rs; `dictation.assistant`
   // isn't 'idle') has its own variant, never mistaken for a dictation: an
@@ -61,6 +64,11 @@
   const recording = $derived(dictation.state === 'recording');
   const cancelled = $derived(dictation.state === 'cancelled');
   const cleaned = $derived(dictation.state === 'cleaned');
+  // A saved transform's (transforms.rs): running, then done with Undo, or
+  // nothing to change.
+  const transforming = $derived(processing && !!dictation.transform && dictation.transformPhase === 'running');
+  const transformed = $derived(cleaned && !!dictation.transform && dictation.transformPhase === 'done');
+  const unchanged = $derived(cleaned && !!dictation.transform && dictation.transformPhase === 'unchanged');
   // The push-to-talk key is down (not locked hands-free): no buttons.
   const keyHeld = $derived(dictation.held && !dictation.locked);
   // ✕ / ✓ have their places (and the capsule takes the pointer)…
@@ -89,10 +97,10 @@
   class:rec={recording}
   class:offer
   class:show={showButtons}
-  class:cancelled={cancelled || cleaned}
+  class:cancelled={cancelled || (cleaned && !unchanged)}
   class:ask
   class:askstop={askThinking || askSpeaking}
-  data-region={offer || cancelled || cleaned ? 'dictation' : askThinking || askSpeaking ? 'assistant' : undefined}
+  data-region={offer || cancelled || (cleaned && !unchanged) ? 'dictation' : askThinking || askSpeaking ? 'assistant' : undefined}
   data-ask={ask ? dictation.assistant : undefined}
 >
   {#if ask}
@@ -157,6 +165,13 @@
     <span class="txt">Dictation cancelled</span>
     <button class="undo" onclick={() => act('dictation-undo')}>Undo</button>
     <span class="undoline" aria-hidden="true"><span style={`animation-duration:${dictation.undoMs}ms`}></span></span>
+  {:else if transformed}
+    <span class="txt">{dictation.transform}</span>
+    <svg class="tick" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round" aria-label="done"><path d="M5.5 12.5l4 4 9-9" /></svg>
+    <button class="undo" title="Put back the text from before" onclick={() => act('transform-undo')}>Undo</button>
+    <span class="undoline" aria-hidden="true"><span style={`animation-duration:${dictation.offerMs}ms`}></span></span>
+  {:else if unchanged}
+    <span class="txt" role="status">{dictation.transform}: no changes needed</span>
   {:else if cleaned}
     <span class="txt">Cleaned up</span>
     <button class="undo" title="Swap it for your words before AI cleanup" onclick={() => act('as-said')}>Use what I said</button>
@@ -186,6 +201,8 @@
           {#each dictation.words as w, i (i)}<span class="pw">{w}&nbsp;</span>{/each}
         </span>
       </div>
+    {:else if transforming}
+      <span class="txt" role="status">{dictation.transform}…</span>
     {:else if processing}
       <span class="txt" role="status"
         >{dictation.modelLoading
@@ -429,6 +446,14 @@
   }
   .undo:hover {
     background: var(--bar-button-hover);
+  }
+  /* A transform's ✓, in the bar's amber. */
+  .tick {
+    flex: 0 0 auto;
+    width: 13px;
+    height: 13px;
+    margin-left: -6px;
+    color: var(--bar-wave);
   }
   .undoline {
     position: absolute;

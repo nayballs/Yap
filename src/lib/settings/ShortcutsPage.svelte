@@ -2,15 +2,28 @@
   // Settings → Shortcuts (2026-10-22 review; OpenWhispr's Hotkeys page): the
   // seven global shortcuts together (input_hook.rs), each in Yap's keycaps,
   // with a clash said where it happens. Their own pages show them too
-  // (Dictation, Commands, Voice Assistant, Meetings): the same setting.
+  // (Dictation, Commands, Voice Assistant, Meetings): the same setting. The
+  // saved transforms' shortcuts are a link to Commands → Transforms.
   //
   //   cfg:  Settings' config $state (auto-save does the saving).
   //   goto: opens another Settings page.
   import Group from '../ui/Group.svelte';
   import Row from '../ui/Row.svelte';
+  import LinkRow from '../ui/LinkRow.svelte';
   import SettingsHotkey from './SettingsHotkey.svelte';
+  import { transformName } from './transforms.js';
 
   let { cfg, goto = null } = $props();
+
+  // Saved transforms' shortcuts live with the transforms (Commands): a link.
+  const withKeys = $derived((cfg?.transforms || []).filter((t) => t.hotkey));
+  const transformsValue = $derived(
+    withKeys.length === 0
+      ? 'None set'
+      : withKeys.length === 1
+        ? transformName(withKeys[0])
+        : `${withKeys.length} shortcuts`
+  );
 </script>
 
 <div class="page-h">
@@ -50,6 +63,13 @@
   >
     <SettingsHotkey {cfg} target="snipHotkey" clearable />
   </Row>
+  <LinkRow
+    label="Transforms"
+    desc="Polish, Shorter, Translate and your own, each on a key of its own"
+    value={transformsValue}
+    setting="shortcut-transforms"
+    onclick={() => goto?.('commands#transforms')}
+  />
 </Group>
 
 <p class="set-note">
