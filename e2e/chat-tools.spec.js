@@ -1,5 +1,5 @@
 // The AI Chat changing part of a note through its tools
-// (src-tauri/src/tools.rs + note_text.rs). The model is a local fake
+// (src-tauri/src/chat/tools.rs + chat/note_text.rs). The model is a local fake
 // (support/fake-llm.js) scripted call by call, so this checks Yap's side of
 // the tool protocol, not a model's judgement: it searches the note, tries an
 // edit whose text is in two places (refused, and told which lines), edits
@@ -129,7 +129,7 @@ test('the chat edits one place in a note, and is told when its text is in two', 
   await expect.poll(() => visible(yap, 'notepad')).toBe(false);
 });
 
-// Yap's folder rule (tools.rs `note_folder`): the chat never makes up a
+// Yap's folder rule (chat/tools.rs `note_folder`): the chat never makes up a
 // folder. A name that isn't a folder is refused, with the folders there are
 // and "leave folder empty"; without one the note goes to Personal; a new
 // folder needs `new_folder: true` (the user asked for it).

@@ -98,7 +98,7 @@ pub struct CleanupProfile {
 /// off / unconfigured; an empty `provider` inherits the global cleanup endpoint;
 /// Note Formatting falls back to the Cleanup scope (OpenWhispr `fallbackScope`).
 /// Commands run in `pipeline::run_agent` (the wake word and edit mode), Note
-/// Formatting in the notes' Actions engine, Chat in `commands::chat_turn`
+/// Formatting in the notes' Actions engine, Chat in `turn::chat_turn`
 /// (the Chat view and the Voice Assistant). The keys never change: they are
 /// what config.json holds.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -221,8 +221,8 @@ pub struct YapConfig {
     /// `transforms.rs`): one-key rewrites of the selection or the last
     /// dictation, each with an optional shortcut, in the person's order. A
     /// config without the key starts with Yap's five built-ins.
-    #[serde(default = "crate::transforms::defaults")]
-    pub transforms: Vec<crate::transforms::Transform>,
+    #[serde(default = "crate::dictation::transforms::defaults")]
+    pub transforms: Vec<crate::dictation::transforms::Transform>,
     /// The **Voice Assistant** shortcut (Settings → Voice Assistant,
     /// `assistant.rs`): from any app, ask Yap's Chat something out loud and
     /// hear the answer; it never types into the app you're in. Empty =
@@ -528,16 +528,16 @@ pub struct YapConfig {
     #[serde(default)]
     pub pp_local_model: String,
     /// The bigger on-device model offered once in Settings (Qwen3.5-4B on a
-    /// PC whose graphics card can run it, `local_llm::upgrade_offer`) was
+    /// PC whose graphics card can run it, `local_llm::models::upgrade_offer`) was
     /// turned down ("No thanks"), or taken: it isn't offered again.
     #[serde(default)]
     pub local_llm_upgrade_dismissed: bool,
     /// The on-device model's **context**, in tokens: how much text the
     /// sidecar reads at once (`-c`), shared by Chat, the cleanup and the
     /// meeting notes. 0 (or missing) = the default, 8,192
-    /// (`local_llm::DEFAULT_CONTEXT`); clamped to what the model was trained
-    /// for and a floor (`local_llm::effective_context`). Changing it restarts
-    /// the sidecar, never mid-dictation (`local_llm::restart_when_idle`).
+    /// (`local_llm::context::DEFAULT_CONTEXT`); clamped to what the model was trained
+    /// for and a floor (`local_llm::context::effective_context`). Changing it restarts
+    /// the sidecar, never mid-dictation (`local_llm::context::restart_when_idle`).
     #[serde(default)]
     pub local_context: u32,
     /// **MTP drafting** for the on-device model (`--spec-type draft-mtp`:
@@ -979,10 +979,10 @@ fn default_meeting_max_minutes() -> u32 {
     120
 }
 fn default_meeting_audio_days() -> u32 {
-    crate::meeting_audio::DEFAULT_DAYS
+    crate::meetings::meeting_audio::DEFAULT_DAYS
 }
 fn default_meeting_refine() -> String {
-    crate::meeting_refine::AUTO.into()
+    crate::meetings::meeting_refine::AUTO.into()
 }
 fn default_meeting_call_end() -> String {
     "ask".into()
@@ -1008,10 +1008,10 @@ fn default_speak_when() -> String {
     "voice".into()
 }
 fn default_tts_engine() -> String {
-    crate::tts::DEFAULT_ENGINE.into()
+    crate::voice::tts::DEFAULT_ENGINE.into()
 }
 fn default_tts_voice() -> String {
-    crate::tts::kokoro::DEFAULT_VOICE.into()
+    crate::voice::tts::kokoro::DEFAULT_VOICE.into()
 }
 fn default_tts_rate() -> f32 {
     1.0
@@ -1020,10 +1020,10 @@ fn default_tts_volume() -> f32 {
     0.5
 }
 fn default_tts_provider() -> String {
-    crate::tts::cloud::LOCAL.into()
+    crate::voice::tts::cloud::LOCAL.into()
 }
 fn default_diarization_model() -> String {
-    crate::diarize::DEFAULT_MODEL.into()
+    crate::speakers::diarize::DEFAULT_MODEL.into()
 }
 
 impl Default for YapConfig {
@@ -1032,7 +1032,7 @@ impl Default for YapConfig {
             hotkey: default_hotkey(),
             edit_hotkey: String::new(),
             rewrite_last_dictation: true,
-            transforms: crate::transforms::defaults(),
+            transforms: crate::dictation::transforms::defaults(),
             assistant_hotkey: String::new(),
             read_hotkey: String::new(),
             as_said_hotkey: String::new(),
@@ -1163,10 +1163,10 @@ impl Default for YapConfig {
 /// Yap's data directory.
 ///
 /// In **portable mode** this is `<exe_dir>/Data/` (set up by the installer and
-/// detected by [`crate::portable`]). Otherwise it's `%APPDATA%/yap/` (or the
+/// detected by [`crate::shell::portable`]). Otherwise it's `%APPDATA%/yap/` (or the
 /// platform equivalent) — left unchanged so existing installs are unaffected.
 pub fn data_dir() -> PathBuf {
-    if let Some(dir) = crate::portable::data_dir() {
+    if let Some(dir) = crate::shell::portable::data_dir() {
         return dir.clone();
     }
     dirs::data_dir()
@@ -1186,7 +1186,7 @@ fn config_path() -> PathBuf {
 pub fn load() -> YapConfig {
     // A model evaluation (`eval.rs`) runs on its own settings, in memory (its
     // API key never goes to disk).
-    if let Some(cfg) = crate::eval::config() {
+    if let Some(cfg) = crate::ai::eval::config() {
         return cfg;
     }
     // A unit test reads the real config.json at most: never sets it aside
@@ -1211,7 +1211,7 @@ pub fn load() -> YapConfig {
     }
     // Styles by app: decided once for a config without the switch, and the
     // built-in styles' profiles there to edit.
-    crate::cleanup_styles::on_load(&mut cfg);
+    crate::ai::cleanup_styles::on_load(&mut cfg);
     migrate_retired_groq_models(&mut cfg);
     // The GPU switch from before "Runs on" (2026-10-22): off meant the
     // processor. (`save` keeps the two in step, so this never undoes a
@@ -1293,10 +1293,10 @@ fn migrate_once(cfg: &mut YapConfig) -> bool {
         // were the only engine (so "windows" was never a choice) and
         // `tts_voice` held a Windows voice's id: it moves to
         // `tts_windows_voice`, and Kokoro speaks in af_bella once installed.
-        if cfg.tts_engine == crate::tts::WINDOWS {
-            cfg.tts_engine = crate::tts::DEFAULT_ENGINE.into();
+        if cfg.tts_engine == crate::voice::tts::WINDOWS {
+            cfg.tts_engine = crate::voice::tts::DEFAULT_ENGINE.into();
         }
-        if !crate::tts::kokoro::is_voice(&cfg.tts_voice) {
+        if !crate::voice::tts::kokoro::is_voice(&cfg.tts_voice) {
             if cfg.tts_windows_voice.is_empty() {
                 cfg.tts_windows_voice = std::mem::take(&mut cfg.tts_voice);
             }
@@ -1701,7 +1701,7 @@ fn salvage(bytes: &[u8]) -> Option<(YapConfig, Vec<String>)> {
 pub fn save(cfg: &YapConfig) -> Result<(), String> {
     // A model evaluation's settings stay in memory; a unit test never writes
     // the real config.json.
-    if crate::eval::active() || cfg!(test) {
+    if crate::ai::eval::active() || cfg!(test) {
         return Ok(());
     }
     save_at(&config_path(), cfg)?;
@@ -1848,11 +1848,11 @@ fn tell_reset(app: &AppHandle) {
         reset_settings = reset.dropped.len(),
         "Settings: config.json couldn't be read; telling the person"
     );
-    crate::alert::show_soon(app, reset_alert(&reset));
+    crate::notices::alert::show_soon(app, reset_alert(&reset));
 }
 
 /// What the person is told about a config.json Yap couldn't read.
-pub(crate) fn reset_alert(reset: &Reset) -> crate::alert::Alert {
+pub(crate) fn reset_alert(reset: &Reset) -> crate::notices::alert::Alert {
     let (title, body) = match (&reset.moved_to, reset.kept) {
         (Some(to), true) => {
             let n = reset.dropped.len();
@@ -1877,13 +1877,13 @@ pub(crate) fn reset_alert(reset: &Reset) -> crate::alert::Alert {
             "It's using the default settings for now and won't save over your settings file. Close any program that has config.json open, then restart Yap.".to_string(),
         ),
     };
-    crate::alert::Alert {
+    crate::notices::alert::Alert {
         kind: "configReset",
         icon: "settings",
         title: title.into(),
         body,
-        action: reset.moved_to.is_some().then_some(crate::alert::Action {
-            id: crate::alert::SHOW_OLD_SETTINGS,
+        action: reset.moved_to.is_some().then_some(crate::notices::alert::Action {
+            id: crate::notices::alert::SHOW_OLD_SETTINGS,
             label: "Show file",
         }),
         timeout_ms: 60_000,
@@ -1896,7 +1896,7 @@ pub(crate) fn show_old_file(app: &AppHandle) {
     let Some(path) = OLD_FILE.lock().unwrap_or_else(|p| p.into_inner()).clone() else {
         return;
     };
-    if crate::e2e::active() {
+    if crate::shell::e2e::active() {
         tracing::info!("e2e: not showing the old settings file");
         return;
     }
@@ -2355,17 +2355,23 @@ mod tests {
     #[test]
     fn settings_changed_outside_settings_change_in_one_step() {
         let files = [
-            ("ai_model.rs", include_str!("ai_model.rs")),
-            ("tts.rs", include_str!("tts.rs")),
-            ("read_aloud.rs", include_str!("read_aloud.rs")),
-            ("local_llm.rs", include_str!("local_llm.rs")),
-            ("meeting_detect.rs", include_str!("meeting_detect.rs")),
+            ("ai/ai_model.rs", include_str!("ai/ai_model.rs")),
+            ("voice/tts.rs", include_str!("voice/tts.rs")),
+            ("voice/tts/playback.rs", include_str!("voice/tts/playback.rs")),
+            ("voice/tts/speaker.rs", include_str!("voice/tts/speaker.rs")),
+            ("voice/tts/text.rs", include_str!("voice/tts/text.rs")),
+            ("voice/read_aloud.rs", include_str!("voice/read_aloud.rs")),
+            ("ai/local_llm.rs", include_str!("ai/local_llm.rs")),
+            ("ai/local_llm/context.rs", include_str!("ai/local_llm/context.rs")),
+            ("ai/local_llm/models.rs", include_str!("ai/local_llm/models.rs")),
+            ("ai/local_llm/runtime.rs", include_str!("ai/local_llm/runtime.rs")),
+            ("calls/meeting_detect.rs", include_str!("calls/meeting_detect.rs")),
         ];
         for (file, src) in files {
             let code: Vec<&str> = src.lines().filter(|l| !l.trim_start().starts_with("//")).collect();
-            for call in ["config::save(", "commands::save_config("] {
+            for call in ["config::save(", "settings::save_config("] {
                 let found: Vec<&&str> = code.iter().filter(|l| l.contains(call)).collect();
-                assert!(found.is_empty(), "{file} loads, changes and saves the config ({found:?}): use config::update or commands::change_config");
+                assert!(found.is_empty(), "{file} loads, changes and saves the config ({found:?}): use config::update or settings::change_config");
             }
         }
     }

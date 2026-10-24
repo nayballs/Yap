@@ -19,7 +19,7 @@
 //! - **Use** (`memory/prompt.rs`): the "You" part goes with every Chat,
 //!   Voice Assistant and notepad helper prompt (stable, so a model's cache
 //!   keeps it); people, projects and topics only with a question about them
-//!   (`commands::chat_turn`'s per-turn context). Tool-using models also get
+//!   (`turn::chat_turn`'s per-turn context). Tool-using models also get
 //!   `remember` / `forget` and, with "Search and reference past chats",
 //!   `search_chats` (`tools.rs`).
 //! - **Dictation** (`memory/vocab.rs`): the names of people and projects
@@ -94,7 +94,7 @@ fn memory_path() -> PathBuf {
 
 #[cfg(not(test))]
 fn load_from_disk() -> Store {
-    if crate::eval::active() {
+    if crate::ai::eval::active() {
         return Store::default();
     }
     let path = memory_path();
@@ -113,15 +113,15 @@ fn load_from_disk() -> Store {
 
 /// memory.json's saves (`saving.rs`): a failed one keeps what Yap
 /// remembers in memory, is tried again with the next save, and is said once.
-pub static SAVER: crate::saving::Saver = crate::saving::Saver::new("memory", "what Yap remembers about you", save_now);
+pub static SAVER: crate::shell::saving::Saver = crate::shell::saving::Saver::new("memory", "what Yap remembers about you", save_now);
 
 /// `Ok` when all of it is on disk; else why not (the caller says it).
-pub fn saved() -> Result<(), crate::saving::SaveError> {
+pub fn saved() -> Result<(), crate::shell::saving::SaveError> {
     SAVER.check()
 }
 
 /// Write the whole store again (Try again).
-fn save_now() -> Result<(), crate::saving::SaveError> {
+fn save_now() -> Result<(), crate::shell::saving::SaveError> {
     with_store(|s| save_to_disk(s));
     saved()
 }
@@ -129,7 +129,7 @@ fn save_now() -> Result<(), crate::saving::SaveError> {
 #[cfg(not(test))]
 fn save_to_disk(store: &Store) {
     // A model evaluation keeps its memory in memory only.
-    if crate::eval::active() {
+    if crate::ai::eval::active() {
         return;
     }
     let _ = SAVER.write_json(&memory_path(), store, false);
@@ -212,7 +212,7 @@ fn clear_caches() {
 /// tell "olive" from a name then, so memory's names are never near-miss
 /// targets (only the Whisper prompt and a case fix).
 pub struct Words {
-    ordinary: std::cell::OnceCell<crate::learn::Ordinary>,
+    ordinary: std::cell::OnceCell<crate::dictionary::learn::Ordinary>,
 }
 
 impl Default for Words {
@@ -227,10 +227,10 @@ impl Words {
     }
 
     pub fn is(&self, w: &str) -> bool {
-        if crate::learn::is_frequent(w) {
+        if crate::dictionary::learn::is_frequent(w) {
             return true;
         }
-        let o = self.ordinary.get_or_init(crate::learn::Ordinary::new);
+        let o = self.ordinary.get_or_init(crate::dictionary::learn::Ordinary::new);
         !o.has_spell_checker() || o.is(w)
     }
 }
@@ -358,7 +358,7 @@ pub fn announce(applied: &Applied) {
     let Some(app) = app() else {
         return;
     };
-    let (visible, _) = crate::notice::window_view(app);
+    let (visible, _) = crate::notices::notice::window_view(app);
     if !visible {
         return;
     }
@@ -412,7 +412,7 @@ pub fn relevant_block(question: &str) -> Option<String> {
 /// The block a notepad helper ends with: About you's name and note, then
 /// what Yap remembers about the person. "" when there's nothing.
 pub fn helper_block(cfg: &crate::config::YapConfig) -> String {
-    let profile = crate::about_you::profile(cfg);
+    let profile = crate::ai::about_you::profile(cfg);
     let mut parts = Vec::new();
     if !profile.name.is_empty() {
         parts.push(format!("The user's name is {}.", profile.name));
@@ -752,7 +752,7 @@ pub fn memory_apply(proposal: u64, include: Option<Vec<usize>>) -> Result<Applie
 #[tauri::command]
 pub fn memory_export(path: String) -> Result<(), String> {
     // About you's region, name and note head You.md: they're "You" too.
-    let p = crate::about_you::profile(&crate::config::load());
+    let p = crate::ai::about_you::profile(&crate::config::load());
     let about = [
         ("Name", p.name),
         ("Region", p.region.country_name.unwrap_or_default()),

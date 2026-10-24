@@ -1,6 +1,6 @@
 // Stand-in GGUF model files for the e2e suite: a real GGUF header (version
 // 3, the metadata a model's context and memory are read from, a tensor
-// list) and no weights, so src-tauri/src/gguf.rs reads them exactly as it
+// list) and no weights, so src-tauri/src/ai/gguf.rs reads them exactly as it
 // reads a real model — its trained context ("up to 256K"), its shape (the
 // memory estimate per context) — while the file stays a few MB. Nothing
 // ever loads them: the llamafile engine is an empty placeholder.

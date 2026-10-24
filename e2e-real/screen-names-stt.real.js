@@ -1,4 +1,4 @@
-// "Spell names the way they're written on screen" (screen_terms.rs) with
+// "Spell names the way they're written on screen" (dictionary/screen_terms.rs) with
 // real speech: an `engines` build (`npm run test:real:build -- --engines`)
 // and Parakeet V3 — and Whisper large-v3 when it's installed —, copied
 // read-only from your installed Yap's models folder (support/engines.js).
@@ -26,7 +26,7 @@ test.use({
       if (hasWhisper()) linkWhisper(dir);
     },
     config: { modelSize: MODEL_ID, streamingPartials: false },
-    // How Whisper's prompt takes the names (screen_terms.rs): list (Yap's
+    // How Whisper's prompt takes the names (dictionary/screen_terms.rs): list (Yap's
     // default), sentence or off — to compare.
     env: process.env.YAP_REALTEST_SCREEN_WHISPER ? { YAP_REALTEST_SCREEN_WHISPER: process.env.YAP_REALTEST_SCREEN_WHISPER } : {},
   },

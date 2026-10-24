@@ -331,7 +331,7 @@ test('an AI app reads meetings through yap.exe mcp, and never dictations', async
     expect(text).toContain('**Groceries**');
     text = await call('get_note', { id: 3 });
     expect(text).toContain('Oat milk, coffee and bread');
-    // The action plan's tasks, read only (tasks.rs).
+    // The action plan's tasks, read only (notes/tasks.rs).
     text = await call('list_tasks');
     expect(text).toContain('**Q3 planning sync**');
     expect(text).toContain('send the revised budget (due: Friday)');

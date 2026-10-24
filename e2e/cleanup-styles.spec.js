@@ -1,4 +1,4 @@
-// Styles by app (cleanup_styles.rs, 2026-10-24): AI cleanup in the right
+// Styles by app (ai/cleanup_styles.rs, 2026-10-24): AI cleanup in the right
 // tone for where you are — Settings → Language Models → Dictation cleanup →
 // "Styles by app" (settings/CleanupStyles.svelte): a row per kind of app
 // with its tone, an example, its apps and extra instructions — and what a

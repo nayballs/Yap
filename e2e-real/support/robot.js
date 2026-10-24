@@ -4,7 +4,7 @@
 //
 // - `robot` (one per worker): the test pad, then an isolated Yap in robot
 //   mode (`launchYap` from the UI suite plus YAP_REALTEST=1, the run's nonce
-//   and the test pad's process id — src-tauri/src/realtest.rs), its
+//   and the test pad's process id — src-tauri/src/shell/realtest.rs), its
 //   clipboard snapshot taken so the developer's clipboard comes back at the
 //   end. Other target windows (`robot.terminal()`, `robot.chat()`…) open on
 //   first use and close with it.

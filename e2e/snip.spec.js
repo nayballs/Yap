@@ -1,7 +1,7 @@
 // Snip to Chat (src-tauri/src/snip.rs, docs/architecture/snip.md): drag a
 // box over any screen and the picture goes into Chat for the selected model.
 //
-// Test mode never reads the real screen: `e2e_snip` (e2e.rs) hands the snip
+// Test mode never reads the real screen: `e2e_snip` (shell/e2e.rs) hands the snip
 // fake monitors — a 1280×720 HDR one at 240 nits (its picture composed in
 // FP16 as Windows would and converted back by the real snip/hdr.rs path) and
 // a 960×540 one at 150 % beside it — each light grey (#F5F5F5) with four

@@ -38,7 +38,7 @@ use serde_json::json;
 use tauri::{AppHandle, Emitter};
 
 use super::{resolve, split_line, suggest, Speaker, Turn, NEAR_MS, SEPARATED_PREFIX, THEM, YOU};
-use crate::diarize::Timeline;
+use crate::speakers::diarize::Timeline;
 use crate::notes::{Note, TranscriptSegment};
 
 /// A recording's speaker labels stopped early: `{ noteId, message }` (the
@@ -354,7 +354,7 @@ fn accepts(rec: &Recording, tl: &Timeline) -> bool {
 /// a recording with no engine.
 #[cfg(debug_assertions)]
 fn scripted(tl: &Timeline) -> bool {
-    crate::e2e::active() && tl.session == crate::diarize::E2E_SESSION
+    crate::shell::e2e::active() && tl.session == crate::speakers::diarize::E2E_SESSION
 }
 
 #[cfg(not(debug_assertions))]
@@ -365,7 +365,7 @@ fn scripted(_: &Timeline) -> bool {
 /// Follow the speaker engine (app setup).
 pub fn init(app: &AppHandle) {
     let app = app.clone();
-    crate::diarize::on_segments(move |tl| apply(&app, tl, tl.done));
+    crate::speakers::diarize::on_segments(move |tl| apply(&app, tl, tl.done));
 }
 
 /// A recording into `note_id` started (`meeting::start`, before its first
@@ -397,7 +397,7 @@ pub fn after_ingest(app: &AppHandle, note_id: u64) {
     let Some(session) = recordings().iter().find(|r| r.note_id == note_id).map(|r| r.session) else {
         return;
     };
-    if let Some(tl) = crate::diarize::timeline(note_id).filter(|t| !t.done) {
+    if let Some(tl) = crate::speakers::diarize::timeline(note_id).filter(|t| !t.done) {
         apply(app, &tl, false);
     } else if session.is_none() && naming_due(note_id) {
         // No voices told apart: the call's names (a 1:1 invite's guess to
@@ -437,7 +437,7 @@ pub fn end(app: &AppHandle, note_id: u64) {
         Some(rec) => rec.session,
         None => return,
     };
-    let latest = crate::diarize::timeline(note_id)
+    let latest = crate::speakers::diarize::timeline(note_id)
         .filter(|tl| !tl.done && (session == Some(tl.session) || (session.is_none() && scripted(tl))));
     match latest {
         Some(mut tl) => {
@@ -517,7 +517,7 @@ fn apply(app: &AppHandle, tl: &Timeline, last: bool) {
 /// (`lineSplice`: lines were split, so indices after it moved; the stop
 /// marks with them).
 fn emit(app: &AppHandle, note: &Note, out: &Labelled) {
-    let mut payload = crate::commands::note_changed_payload(note, ORIGIN);
+    let mut payload = crate::notes::commands::note_changed_payload(note, ORIGIN);
     payload["lineSpeakers"] = json!(super::line_speakers(note));
     if let Some((at, removed)) = out.span {
         let lines = &note.transcript[at..(at + removed + out.added).min(note.transcript.len())];
@@ -554,7 +554,7 @@ fn finished(app: &AppHandle, tl: &Timeline, voices: usize) {
 mod tests {
     use super::super::{calendar_guess, display_line, not, rename, rename_lines, speakers_line, NameSource};
     use super::*;
-    use crate::diarize::Segment;
+    use crate::speakers::diarize::Segment;
 
     fn note(lines: Vec<TranscriptSegment>) -> Note {
         let mut n: Note = serde_json::from_value(json!({ "id": 1, "createdTs": 1, "updatedTs": 1 })).unwrap();

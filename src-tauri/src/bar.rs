@@ -56,6 +56,8 @@
 //! region (exercising the same hit-test and click-through code) and fakes a
 //! fullscreen app, and [`bar_debug`] reports the window's real ex-styles.
 
+pub mod overlay;
+
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, RecvTimeoutError};
@@ -65,7 +67,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Listener, Manager};
 
-use crate::overlay::{self, Edge, Fullscreen, Rect, Region, Screen};
+use overlay::{Edge, Fullscreen, Rect, Region, Screen};
 
 /// Snapshot for the bar page and Settings (`bar_status` + this event).
 const EVENT: &str = "yap-bar";
@@ -366,7 +368,7 @@ struct State {
     hidden_until: u64,
     dictation: Dictation,
     /// Where a question to the Voice Assistant is (`yap-assistant`).
-    assistant: crate::assistant::Phase,
+    assistant: crate::chat::assistant::Phase,
     /// The reading card is up (`read_aloud.rs`).
     reading: bool,
     meeting: bool,
@@ -419,7 +421,7 @@ impl Default for State {
             snip_hotkey: None,
             hidden_until: 0,
             dictation: Dictation::Idle,
-            assistant: crate::assistant::Phase::Idle,
+            assistant: crate::chat::assistant::Phase::Idle,
             reading: false,
             meeting: false,
             fullscreen: Fullscreen::None,
@@ -455,7 +457,7 @@ impl State {
 
     /// A dictation or a question to the assistant has the capsule.
     fn busy(&self) -> bool {
-        self.dictation != Dictation::Idle || self.assistant != crate::assistant::Phase::Idle
+        self.dictation != Dictation::Idle || self.assistant != crate::chat::assistant::Phase::Idle
     }
 
     /// Something to watch the cursor for: the bar is on, or something shows
@@ -468,7 +470,7 @@ impl State {
         Visibility {
             enabled: self.enabled,
             dictation: self.dictation,
-            assistant: self.assistant != crate::assistant::Phase::Idle,
+            assistant: self.assistant != crate::chat::assistant::Phase::Idle,
             reading: self.reading,
             meeting: self.meeting,
             hidden: self.hidden_until > now,
@@ -584,7 +586,7 @@ pub struct Status {
     call: Option<String>,
     /// Where a question to the Voice Assistant is: "idle" | "listening" |
     /// "thinking" | "speaking" (the capsule's assistant variant).
-    assistant: crate::assistant::Phase,
+    assistant: crate::chat::assistant::Phase,
     /// The reading card is up (its content: `yap-read`, `read_aloud.rs`).
     reading: bool,
     /// The card on screen (none or one: `notice.rs` shows them one at a
@@ -596,8 +598,8 @@ pub struct Status {
 
 pub fn status() -> Status {
     // Other modules' state first: never with this module's lock held.
-    let meeting = crate::meeting::state();
-    let call = crate::meeting_detect::tray_item().map(|(_, label)| label);
+    let meeting = crate::meetings::meeting::state();
+    let call = crate::calls::meeting_detect::tray_item().map(|(_, label)| label);
     let now = now_ms();
     let s = lock();
     Status {
@@ -705,7 +707,7 @@ fn place(app: &AppHandle, screen: Screen, edge: Edge, moved_monitor: bool) {
 
 /// The cursor: the real one, or test mode's pretend one.
 fn cursor() -> Option<(i32, i32)> {
-    if crate::e2e::active() && !crate::e2e::real_cursor() {
+    if crate::shell::e2e::active() && !crate::shell::e2e::real_cursor() {
         return lock().sim_cursor;
     }
     #[cfg(windows)]
@@ -777,7 +779,7 @@ fn follow_cursor(app: &AppHandle, cursor: Option<(i32, i32)>, now: u64) {
             // has been said: the bar stays where it started.
             s.dictation == Dictation::Recording
                 || s.dictation == Dictation::Processing
-                || s.assistant != crate::assistant::Phase::Idle,
+                || s.assistant != crate::chat::assistant::Phase::Idle,
             s.edge,
             s.replace,
             now.saturating_sub(s.autohide_at) >= AUTOHIDE_EVERY_MS,
@@ -787,7 +789,7 @@ fn follow_cursor(app: &AppHandle, cursor: Option<(i32, i32)>, now: u64) {
     // Test mode without a pretend cursor: the primary monitor.
     let point = match cursor {
         Some(p) => p,
-        None if crate::e2e::active() => (0, 0),
+        None if crate::shell::e2e::active() => (0, 0),
         None => return,
     };
     // The cursor's monitor (its auto-hidden taskbars are read only if the bar
@@ -827,7 +829,7 @@ fn follow_cursor(app: &AppHandle, cursor: Option<(i32, i32)>, now: u64) {
 /// `bar_simulate` stands in.)
 #[cfg(windows)]
 fn check_fullscreen(app: &AppHandle) {
-    if crate::e2e::active() {
+    if crate::shell::e2e::active() {
         return;
     }
     let (wanted, screen, before) = {
@@ -924,7 +926,7 @@ fn hover(app: &AppHandle, cursor: Option<(i32, i32)>) {
     if became_interactive {
         // Where the focus goes back to, should a click activate the bar.
         #[cfg(windows)]
-        if !crate::e2e::active() {
+        if !crate::shell::e2e::active() {
             let fg = overlay::win::foreign_foreground();
             if fg != 0 {
                 lock().prev_front = fg;
@@ -944,7 +946,7 @@ fn hover(app: &AppHandle, cursor: Option<(i32, i32)>) {
 fn give_focus_back() {
     #[cfg(windows)]
     {
-        if crate::e2e::active() || !overlay::win::bar_in_front() {
+        if crate::shell::e2e::active() || !overlay::win::bar_in_front() {
             return;
         }
         let prev = lock().prev_front;
@@ -962,7 +964,7 @@ fn escape(app: &AppHandle) {
     };
     if reading {
         tracing::info!("bar: Esc stops reading aloud");
-        crate::read_aloud::stop(app);
+        crate::voice::read_aloud::stop(app);
         return;
     }
     if let Some((id, action)) = target {
@@ -981,7 +983,7 @@ pub fn init(app: &AppHandle) {
     {
         let mut s = lock();
         read_config(&mut s, &cfg);
-        s.meeting = crate::meeting::is_recording();
+        s.meeting = crate::meetings::meeting::is_recording();
     }
     if let Some(w) = window(app) {
         #[cfg(windows)]
@@ -1014,7 +1016,7 @@ pub fn init(app: &AppHandle) {
             .and_then(|v| v["recording"].as_bool())
             .unwrap_or(false);
         lock().meeting = recording;
-        crate::notice::on_meeting(recording);
+        crate::notices::notice::on_meeting(recording);
         if !repick(&h) {
             emit(&h);
         }
@@ -1028,7 +1030,7 @@ pub fn init(app: &AppHandle) {
     app.listen("yap-assistant", move |event| {
         let phase = serde_json::from_str::<serde_json::Value>(event.payload())
             .ok()
-            .and_then(|v| serde_json::from_value::<crate::assistant::Phase>(v["phase"].clone()).ok())
+            .and_then(|v| serde_json::from_value::<crate::chat::assistant::Phase>(v["phase"].clone()).ok())
             .unwrap_or_default();
         lock().assistant = phase;
         repick(&h);
@@ -1190,7 +1192,7 @@ pub fn show_card(app: &AppHandle, card: Card, on_action: OnAction) -> bool {
     if !cards_available() {
         return false;
     }
-    if !crate::notice::admit(&card.id, &card.title, &card.body) {
+    if !crate::notices::notice::admit(&card.id, &card.title, &card.body) {
         return true;
     }
     tracing::info!(card = %card.id, seen = cards_seen(), "bar: card");
@@ -1223,10 +1225,10 @@ pub fn show_card(app: &AppHandle, card: Card, on_action: OnAction) -> bool {
 /// has been told then). Cards that waited too long unseen are dropped, their
 /// handlers told as if they had faded (`expire_action`).
 fn repick(app: &AppHandle) -> bool {
-    let moment = crate::notice::moment();
+    let moment = crate::notices::notice::moment();
     let (changed, stale) = {
         let mut s = lock();
-        let m = crate::notice::Moment {
+        let m = crate::notices::notice::Moment {
             meeting: s.meeting || moment.meeting,
             dictating: moment.dictating
                 || matches!(s.dictation, Dictation::Recording | Dictation::Processing),
@@ -1235,14 +1237,14 @@ fn repick(app: &AppHandle) -> bool {
         let ids: Vec<String> = s.cards.iter().map(|c| c.id.clone()).collect();
         let current = s.front.as_ref().and_then(|f| ids.iter().position(|id| id == f));
         let pinned = current.is_some_and(|i| s.pointer.as_deref() == Some(format!("card:{}", ids[i]).as_str()));
-        let list: Vec<crate::notice::Waiting> = ids
+        let list: Vec<crate::notices::notice::Waiting> = ids
             .iter()
             .map(|id| {
                 let (since, seen) = s.queued.get(id).copied().unwrap_or((m.now, false));
-                crate::notice::Waiting { kind: id, since, seen }
+                crate::notices::notice::Waiting { kind: id, since, seen }
             })
             .collect();
-        let pick = crate::notice::pick(&list, current, pinned, &m);
+        let pick = crate::notices::notice::pick(&list, current, pinned, &m);
         let front = pick.front.map(|i| ids[i].clone());
         let mut stale = Vec::new();
         for i in pick.stale {
@@ -1322,7 +1324,7 @@ fn sync_escape() {
         s.shown && (s.reading || cards_seen() && s.front_card().is_some_and(|c| c.escape_action.is_some()))
     };
     #[cfg(windows)]
-    if wanted && !crate::e2e::active() {
+    if wanted && !crate::shell::e2e::active() {
         escape_watch::start(on_escape_key);
     } else {
         escape_watch::stop();
@@ -1354,11 +1356,11 @@ fn card_action(app: &AppHandle, id: &str, action: &str) {
 /// yet, opened in the main window's Notes view.
 fn new_meeting_note(app: &AppHandle) -> Result<(), String> {
     crate::notes::folder_create("Meetings");
-    let title = crate::meeting_detect::meeting_note_title();
+    let title = crate::calls::meeting_detect::meeting_note_title();
     let note = crate::notes::create(&title, "", "meeting", "Meetings");
     crate::notes::mark_meeting(note.id)?;
     let _ = app.emit("yap-notes-changed", ());
-    crate::commands::show_settings(app)?;
+    crate::shell::window::show_settings(app)?;
     let _ = app.emit("yap-meeting-open-note", serde_json::json!({ "noteId": note.id, "stop": false }));
     Ok(())
 }
@@ -1379,7 +1381,7 @@ fn act(app: &AppHandle, action: &str) -> Result<(), String> {
         // and write the action plan.
         "meeting" => {
             give_focus_back();
-            crate::meeting_guard::start_or_stop(app);
+            crate::calls::meeting_guard::start_or_stop(app);
         }
         // The dictation capsule's ✓: stop and paste, as the hotkey's second
         // press does — into the app the dictation started in (the paste
@@ -1409,39 +1411,39 @@ fn act(app: &AppHandle, action: &str) -> Result<(), String> {
         // said (as_said.rs), in the window the dictation went into.
         "as-said" => {
             give_focus_back();
-            crate::as_said::swap_soon(app);
+            crate::pasting::as_said::swap_soon(app);
         }
         // "Polish ✓ · Undo" after a saved transform (transforms.rs): the
         // text it replaced put back, in the window it went into.
         "transform-undo" => {
             give_focus_back();
-            crate::as_said::undo_transform_soon(app);
+            crate::pasting::as_said::undo_transform_soon(app);
         }
         // ■ on the assistant's capsule: stop the answer (its voice, or one
         // still coming; it's in Chat either way).
-        "assistant-stop" => crate::assistant::stop(app),
+        "assistant-stop" => crate::chat::assistant::stop(app),
         // 🔊: read the selection in the app you're in aloud (the bar never
         // takes the focus, so it's still selected there); while reading, ■.
         "read-aloud" => {
             give_focus_back();
-            crate::read_aloud::read_selection(app, crate::read_aloud::Origin::Bar);
+            crate::voice::read_aloud::read_selection(app, crate::voice::read_aloud::Origin::Bar);
         }
-        "read-stop" => crate::read_aloud::stop(app),
+        "read-stop" => crate::voice::read_aloud::stop(app),
         // ✂: Snip to Chat (snip.rs). The bar never took the focus, so the
         // app you're in is the one a cancel goes back to.
         "snip" => crate::snip::start(app, crate::snip::Origin::Bar),
         // ■ on the recording pill: end the meeting, which writes the action
         // plan in Rust (or asks "Started by mistake?").
-        "stop-meeting" => crate::meeting_end::end(app, Some(overlay::LABEL))?,
+        "stop-meeting" => crate::meetings::meeting_end::end(app, Some(overlay::LABEL))?,
         // The recording pill: its notes, in the meeting notepad.
-        "open-note" => match crate::meeting::recording_note() {
-            Some(note_id) => crate::notepad::open(app, note_id),
-            None => crate::commands::show_settings(app)?,
+        "open-note" => match crate::meetings::meeting::recording_note() {
+            Some(note_id) => crate::meetings::notepad::open(app, note_id),
+            None => crate::shell::window::show_settings(app)?,
         },
         "new-note" => new_meeting_note(app)?,
-        "open" => crate::commands::show_settings(app)?,
+        "open" => crate::shell::window::show_settings(app)?,
         "settings" => {
-            crate::commands::show_settings(app)?;
+            crate::shell::window::show_settings(app)?;
             let _ = app.emit("yap-open-settings", "general#bar");
         }
         "hide" => {
@@ -1541,7 +1543,7 @@ pub async fn bar_simulate(
     escape: Option<bool>,
     card: Option<String>,
 ) -> Result<(), String> {
-    if !cfg!(debug_assertions) || !crate::e2e::active() {
+    if !cfg!(debug_assertions) || !crate::shell::e2e::active() {
         return Err("Only in e2e test mode".to_string());
     }
     if let Some(target) = pointer {
@@ -2035,8 +2037,8 @@ mod tests {
             assert!(shows(Visibility { assistant: true, ..v }));
         }
         // Its phases from the page's event.
-        let phase: crate::assistant::Phase = serde_json::from_value(serde_json::json!("speaking")).unwrap();
-        assert_eq!(phase, crate::assistant::Phase::Speaking);
+        let phase: crate::chat::assistant::Phase = serde_json::from_value(serde_json::json!("speaking")).unwrap();
+        assert_eq!(phase, crate::chat::assistant::Phase::Speaking);
     }
 
     #[test]

@@ -95,7 +95,7 @@ test('the Copilot key, aiErrors and app names on their own', () => {
 });
 
 test("the hidden windows' webviews keep less in memory", async ({ yap }) => {
-  // webview_memory.rs: off screen → WebView2's low memory target; the Yap
+  // shell/webview_memory.rs: off screen → WebView2's low memory target; the Yap
   // bar is left alone.
   await expect
     .poll(() => yap.invoke('e2e_webview_memory'), { timeout: 20_000 })

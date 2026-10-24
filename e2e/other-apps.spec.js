@@ -1,5 +1,5 @@
-// Other apps' sound while you dictate, in Settings → Dictation (mute.rs,
-// media_pause.rs): "Silence other apps while you dictate" where "Mute while
+// Other apps' sound while you dictate, in Settings → Dictation (dictation/mute.rs,
+// dictation/media_pause.rs): "Silence other apps while you dictate" where "Mute while
 // recording" was — a config from before carries its choice over (this
 // instance starts with the old `muteWhileRecording: true`) — and "Pause
 // music and videos while you dictate", off by default. A test run never

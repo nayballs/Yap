@@ -121,7 +121,7 @@ The Svelte side's look (theme, window chrome) and the main window: the ControlPa
   new" toggle that unfolds markdown in the card; `updateToast(id, patch)`
   changes a toast in place (on screen or waiting); `isToastLive` = not
   closed. It runs **Yap's notice policy** (`ui/noticePolicy.js`, the page's
-  half of `notice.rs`): every toast has a `kind` (prompt | offer | alert |
+  half of `notices/notice.rs`): every toast has a `kind` (prompt | offer | alert |
   update | info | warning | tip — what Yap says by itself — or error | done —
   the answer to a click; by default from the variant) and two lanes, **one
   notice + one answer on screen**, the rest queued (higher priority first,
@@ -142,17 +142,17 @@ The Svelte side's look (theme, window chrome) and the main window: the ControlPa
   events (kind `alert`; a dictation's own errors are the overlay's only,
   `yap-dictation-error`), push-to-talk coaching (`yap-hint` → a 10 s Tip
   toast, kind `tip`, `{key}` named by `fillHotkey`), **word suggestions**
-  (`wordSuggestions.js` — learn.rs's `yap-word-suggestion`: "Add
+  (`wordSuggestions.js` — dictionary/learn.rs's `yap-word-suggestion`: "Add
   “Kubernetes” to your dictionary? Yap heard “cube and eighties”." with Add /
   Not now / a "Don't suggest this" link, chip Dictionary, `icon:
   'dictionary'`, 30 s; ✕ = Not now; after Add "“Kubernetes” is in your
-  dictionary" + Open Dictionary), **alerts** (`alerts.js` — alert.rs's
+  dictionary" + Open Dictionary), **alerts** (`alerts.js` — notices/alert.rs's
   `yap-alert`, kind `alert` (a test's `level` may name another): "Your text
   is copied: press Ctrl+V" with chip Paste, `icon: 'clipboard'`; "Windows is
   blocking microphone access for desktop apps" + Open settings, chip
   Microphone, `icon: 'mic'`; "Stop asking about calls?" + Stop asking, chip
   Calls; "Couldn't save your dictation history" + Try again, chip Saving,
-  `icon: 'save'`, saving.rs), **failed saves** (`saveErrors.js`, 2026-10-24:
+  `icon: 'save'`, shell/saving.rs), **failed saves** (`saveErrors.js`, 2026-10-24:
   a command whose store couldn't be saved rejects with "Couldn't save your
   note: the disk is full." — the change itself happened, kept in memory —
   so the caller carries on as if it worked and `showSaveError(e)` shows one
@@ -166,7 +166,7 @@ The Svelte side's look (theme, window chrome) and the main window: the ControlPa
   sticky "Yap X is ready" + Restart to update / Later / What's new, then
   Downloading… / Restarting Yap… in place; "Updated to X" after the
   restart), and the **call prompts** (`meetingDetect.svelte.js` — mirrors
-  meeting_detect.rs's snapshot: "Teams call detected — Record notes / Not now"
+  calls/meeting_detect.rs's snapshot: "Teams call detected — Record notes / Not now"
   with a small **"Don't ask for Teams"** link on its own line under the
   buttons (the toast's `tertiary`), fading after the prompt's `fadeMs` (30 s)
   as "Not now" (the toast's `onExpire`), and a sticky "…call ended — Stop and
@@ -176,13 +176,13 @@ The Svelte side's look (theme, window chrome) and the main window: the ControlPa
   Teams calls" + Open Settings (→ `meetings#call-apps-list`);
   `yap-meeting-open-note` switches to Notes and hands NotesView a
   `noteRequest` to open, and stop if asked), the **meeting guard rails**
-  (`meetingGuard.js` — meeting_guard.rs / capture.rs: the sticky "Notes stop
+  (`meetingGuard.js` — calls/meeting_guard.rs / calls/capture.rs: the sticky "Notes stop
   in 5 minutes" + **Keep going** toast (`icon: 'timer'`, counting down,
   only when `inApp`, withdrawn when Rust sends `{warning: null}`), and one-off
   `yap-meeting-notice` toasts: the screen-share tip (`icon: 'screen'`,
   **Update settings** → `meetings#screen-sharing`), "Stopped at 2 hours", "Teams
   call ended · Yap stopped recording…", "Taking notes" (a notice addressed
-  to the notepad, `surface`, isn't shown here), and meeting.rs's warnings
+  to the notepad, `surface`, isn't shown here), and meetings/meeting.rs's warnings
   (kind `warning`, 12 s: "Yap can't hear the call", "Transcription is
   falling behind") in whichever view is open; and, through `meetingCheckIn.js`
   (shared with the notepad, `initMeetingCheckIns(label)`), the quiet
@@ -243,7 +243,7 @@ Flow's dark mode of 19 Oct 2026), for every Yap window.
   `__TAURI_INTERNALS__`); app.css gives the opaque windows — main,
   onboarding, notepad — their background and `color-scheme` from
   `[data-window]` (never the bar or the split preview: a transparent window
-  with a `color-scheme` paints the grey box). Rust (`theme.rs`) gives the
+  with a `color-scheme` paints the grey box). Rust (`shell/theme.rs`) gives the
   same three windows' **webviews** the theme's background
   (`set_background_color`: what WebView2 shows before a page paints — a
   window shown after a while hidden under the low memory target, a resize),
@@ -263,7 +263,7 @@ Flow's dark mode of 19 Oct 2026), for every Yap window.
   and the onboarding's mock taskbar are dark in both; the split preview's
   glass and the bar's recording dots are the same in both. Onboarding, the
   one window with Windows' own title bar, gets it dark or light to match
-  (`theme.rs`, DWM's immersive dark mode).
+  (`shell/theme.rs`, DWM's immersive dark mode).
 - **Contrast** (AA, `e2e/theme.spec.js` measures the lowest on each page):
   body text 15:1, Settings descriptions 6.8:1, nav labels 11:1 (main window
   14:1), nav group labels 7.2:1, links 9.1:1 (Chat's 6.7:1), keycaps 7.6:1,
@@ -293,7 +293,7 @@ Flow's dark mode of 19 Oct 2026), for every Yap window.
   "ms-teams.exe" → "Teams", "WINWORD.EXE" → "Word"; history keeps the
   process name) — Home's rows, Insights and Settings' per-app rules.
   A dictation whose audio is still kept
-  (`recent_audio.rs`, a day) has **Play** (▶/■: `recent_audio_wav` as a blob)
+  (`dictation/recent_audio.rs`, a day) has **Play** (▶/■: `recent_audio_wav` as a blob)
   and **Run again** (↻: `history_rerun` on the model in use, or — with others
   installed — a menu of them; also in the row's right-click menu, with "Run
   again with ›"), answered by a "Transcribed again" toast with Copy. A failed
@@ -327,7 +327,7 @@ Flow's dark mode of 19 Oct 2026), for every Yap window.
   enable toggle + clear (the list itself is Home's feed).
 - **`UploadView.svelte`** = local audio-**file** transcription (drop/browse →
   Symphonia decode → chunked transcription on the warm engine with progress +
-  cancel — see `media.rs`); its line names the model ("transcribes with
+  cancel — see `dictation/media.rs`); its line names the model ("transcribes with
   Parakeet V3", `models.js`), not its id. **The job lives in
   `upload.svelte.js`** (2026-10-24), which ControlPanel starts
   (`initUpload`, like the update store): the file, its progress, Cancel,
@@ -364,7 +364,7 @@ Flow's dark mode of 19 Oct 2026), for every Yap window.
   before Home shows (50 `plugin:event|listen`, `get_config` ×4,
   `installed_models` ×2). Fewer round trips there is the start-up win.
 - **Home's first paint** (2026-10-24): Home's data comes in **one call
-  asked first** — `home_snapshot` (commands.rs, async: off the window's
+  asked first** — `home_snapshot` (`dictation/commands.rs`, async: off the window's
   thread; the history page, the stats, the settings Home shows, the
   installed models), started by `App.svelte` for the main window while
   ControlPanel's code is still loading (`lib/homeData.js`: `prefetchHome`,
@@ -421,7 +421,7 @@ Flow's dark mode of 19 Oct 2026), for every Yap window.
   goes to the provider you pick" (`data-privacy="cloud"`); nothing is on
   until the person enables one — "Maybe later" leaves cleanup off. Once on,
   the step says what it does where (Styles by app: Email · formal, chats ·
-  casual, AI prompts · word for word…; `cleanup_styles.rs`) → the tray (the Yap bar, click the icon to open Yap,
+  casual, AI prompts · word for word…; `ai/cleanup_styles.rs`) → the tray (the Yap bar, click the icon to open Yap,
   right-click to paste the last dictation; the footer pinned at the bottom
   of every step) → "try it here" live dictation test with **Settings' own
   shortcut picker** (`ui/HotkeyInput.svelte` + `validateHotkey`: combos,
@@ -429,7 +429,7 @@ Flow's dark mode of 19 Oct 2026), for every Yap window.
   bare key; in push-to-talk it says "Hold …, then let go"). With no microphone the mic step says so. **Finish** opens
   Yap's main window on Home (`open_settings`), so setup doesn't end on an
   empty screen. **By hardware** (2026-10-24, `hardware_advice`,
-  ai-models.md `hardware.rs`): the model step says where speech runs ("on
+  ai-models.md `ai/hardware.rs`): the model step says where speech runs ("on
   its processor: no graphics card needed" without a real card); the AI
   cleanup step says what the private model and a cloud provider each add
   to a dictation on this PC (`[data-testid=cleanup-times]`), and on a small

@@ -1,11 +1,11 @@
-// Call detection (src-tauri/src/meeting_detect.rs): a call starting offers to
+// Call detection (src-tauri/src/calls/meeting_detect.rs): a call starting offers to
 // take notes, "Record notes" creates a meeting note and records it, the call
 // ending offers to stop and summarise, and Settings → Meetings
 // decides whether, how and about which apps Yap asks.
 // Test mode reads no registry: the debug-only `meeting_detect_simulate` hook
 // stands in for an app taking or letting go of the mic (no debounce; its
 // `fadeMs` shortens a prompt's 30 s fade), and a recording opens no audio
-// device (it's silent here; e2e.rs), so it runs the same with or without a
+// device (it's silent here; shell/e2e.rs), so it runs the same with or without a
 // microphone. Each test uses its own call app — "Not now" quiets an app for
 // 5 minutes, and the tests share one instance. Nor does test mode read the
 // apps installed here for their icons: Teams and Discord get stand-ins
@@ -127,7 +127,7 @@ test('"Record notes" records the call into a meeting note; the call ending offer
   await expect(main.getByRole('navigation', { name: 'Main' }).getByRole('button', { name: 'Notes', exact: true }))
     .toHaveAttribute('aria-current', 'page');
   await expect(main.getByRole('button', { name: 'End meeting & summarise' })).toBeVisible();
-  // The open note says it's recording: no success toast on top (notice.rs).
+  // The open note says it's recording: no success toast on top (notices/notice.rs).
   await expect(toast(main, 'Recording notes')).toHaveCount(0);
   const notes = meetingNotes(yap);
   expect(notes).toHaveLength(1);
@@ -147,7 +147,7 @@ test('"Record notes" records the call into a meeting note; the call ending offer
   await shot(main, '04-prompt-call-ended');
 
   // Stopping ends the meeting as "End meeting & summarise" does (Rust writes
-  // the action plan; meeting_end.rs) and keeps the note open here. The test
+  // the action plan; meetings/meeting_end.rs) and keeps the note open here. The test
   // recording being silent, it asks — in this window, where it was answered —
   // whether it was started by mistake instead of writing a summary.
   await ended.getByRole('button', { name: 'Stop and summarise' }).click();

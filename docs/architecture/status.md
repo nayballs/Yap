@@ -21,7 +21,7 @@ Ryzen 7 9800X3D, RTX 5070 Ti, Windows 11, Parakeet V3; memory = private working 
   background: tray, bar and window at ~1.0 s instead of ~3.4 s (a release-optimised
   build with debug assertions, test mode), the model ready at ~3.3 s; a dictation
   started sooner waits for it ("Loading the speech model…").
-- **The microphone is closed while Yap idles** (2026-10-22, `mic.rs`): it opens when a
+- **The microphone is closed while Yap idles** (2026-10-22, `dictation/mic.rs`): it opens when a
   dictation starts and stays warm a minute (never on Bluetooth: a headset keeps its
   music profile). Idle `yap.exe` 0.54 % → 0.21 % of one core; Windows no longer shows
   the mic in use. USB mics deliver ~30 ms after the press; a wireless headset's dongle
@@ -41,7 +41,7 @@ tables, method and how anyone can run it and send theirs:
   threads, 0.38 s on 4, 0.60 s on 2**; 3 s of speech 0.10–0.18 s everywhere.
   On the integrated GPU ~4 s (the encoder's 30-s plan), on the software
   renderer ~1 s: speech now starts on the processor without a real card
-  (`hardware.rs`). Moonshine Base on DirectML (any real GPU) gets every word
+  (`ai/hardware.rs`). Moonshine Base on DirectML (any real GPU) gets every word
   wrong; fine on the processor.
 - **Cleanup (Qwen2.5 1.5B): 0.08 s on the card, 0.9 / 1.1 / 1.6 s on 16 / 4 / 2
   threads**; Qwen3.5 4B 0.16 s on the card, 2.5–3.9 s on the processor;
@@ -57,7 +57,7 @@ tables, method and how anyone can run it and send theirs:
 
 **Trust: network receipts and Report a problem** (2026-10-24,
 [privacy-receipts.md](./privacy-receipts.md)): every request Yap makes goes
-through `net.rs` (a unit test fails on any that doesn't), recorded by host,
+through `privacy/net.rs` (a unit test fails on any that doesn't), recorded by host,
 purpose, feature, status and bytes — never content — in `connections.json`
 for a week; Settings → Privacy & data → Network connections lists them by
 purpose and host, cloud and on this PC alike, with a filter and Clear.
@@ -75,12 +75,12 @@ updater's real check against GitHub, a model download), the real Save
 dialog and Show in folder.
 
 **AI cleanup that sounds right with no set-up** (2026-10-24,
-`cleanup_styles.rs`, ai-models.md): **styles by app** — Email formal, Work
+`ai/cleanup_styles.rs`, ai-models.md): **styles by app** — Email formal, Work
 and Personal chat casual, Documents formal, AI prompts literal (no
 "please", nothing rephrased, never answered), Terminal commands as said,
 everything else in the speaker's own words — each kind a cleanup profile
 with built-in apps (programs, and web apps by their tab's title; coding
-CLIs and shells as `app_kind.rs` reads them), editable in Settings →
+CLIs and shells as `pasting/app_kind.rs` reads them), editable in Settings →
 Language Models → Dictation cleanup → Styles by app with You say / Yap
 types examples; the person's own app rules win as before; filler alone
 asks no model. **Offered in first setup** (on this PC when the graphics
@@ -99,7 +99,7 @@ stand-in). Not yet tried with a real voice in real Outlook, Slack or
 WhatsApp, nor the 1.5B on a PC without a graphics card day to day.
 
 **Trusting a dictation** (2026-10-22): **the speech engine's device on each
-PC** (`stt_speed.rs`: a one-time background benchmark per model at three
+PC** (`dictation/stt_speed.rs`: a one-time background benchmark per model at three
 dictation lengths, Settings → Speech-to-Text → Speed "Runs on: graphics card
 — fastest for your dictations on this PC (150 ms vs 280 ms)" with Automatic
 / Graphics card / Processor; everyday lengths decide: the graphics card
@@ -123,7 +123,7 @@ processor one 11-second dictation took 16 minutes, so it isn't tried beside
 a graphics card that's quick warm). Processor load slows the processor path
 only: the benchmark waits for a processor under 50 % busy, and a narrow win
 never moves a model off the graphics card. **"Use what
-I said"** (`as_said.rs`: the shortcut, the bar's offer, the tray's paste as
+I said"** (`pasting/as_said.rs`: the shortcut, the bar's offer, the tray's paste as
 said), checked by the robot in the test pad, Notepad, an Edge box, a chat
 app and its contenteditable (swapped) and in a terminal, after an edit and
 with another window in front (refused, copied). **What the AI changed, and
@@ -143,7 +143,7 @@ rewritable`, `keep_spaces`), robot tests written (`rewrite-last.real.js`:
 the test pad, an Edge box, a contenteditable, typed since and the cursor
 moved refused, a selection or another window as before, a terminal never),
 not yet run; not yet tried with a real voice and AI model. **Saved
-transforms** (2026-10-24, `transforms.rs`): one-key rewrites without
+transforms** (2026-10-24, `dictation/transforms.rs`): one-key rewrites without
 speaking — Polish, Shorter, Fix grammar only, Translate to a language you
 pick, Make it a prompt, and your own — on the selection or (nothing
 selected, the rewrite shortcut's rules) the last dictation, never in a
@@ -159,7 +159,7 @@ terminal refused, the bar's Undo), not yet run; not yet tried by a person
 (a real shortcut press, the tray's menu bringing the app back). The spoken
 "undo that" / "revert" was left out: "revert" alone is a real message, and
 "undo that" reads as "delete it" in Windows' own voice commands. **A day of dictation audio**
-(`recent_audio.rs`): failed dictations listed, Run again (any installed
+(`dictation/recent_audio.rs`): failed dictations listed, Run again (any installed
 model) and Play in Home, a crash mid-dictation recovered at the next start —
 e2e-tested on the stub engine (`dictation-trust.spec.js`), Run again on real
 speech not yet tried by a person.
@@ -175,12 +175,12 @@ evaluations; cleanup ~0.34 s a dictation on the 4B, ~0.13 s on the 1.5B, on an R
 5070 Ti) with per-app routing +
 named profiles + per-profile model choice, **Commands** (the rewrite shortcut +
 the agent's name in a dictation; "Voice Agent" until 2026-10-18), the **Voice
-Assistant** (`assistant.rs`, 2026-10-18: its own shortcut, ask Chat out loud
+Assistant** (`chat/assistant.rs`, 2026-10-18: its own shortcut, ask Chat out loud
 from any app and hear the answer, a bar capsule and card, follow-ups,
 barge-in, off (and Yap silent) during a meeting recording or a call; the rules unit-tested and the whole
 flow e2e-tested from a staged transcript with the main window hidden and
 in front — not yet asked with a real mic and heard on speakers; since
-2026-10-23 a pause ends a question, `pause.rs`: unit-tested, e2e-tested
+2026-10-23 a pause ends a question, `dictation/pause.rs`: unit-tested, e2e-tested
 with tones over a room's hiss through the real key path, and a robot test
 written with Windows TTS speech and Parakeet's live preview — not yet
 tried with a real voice in a real room), **opening
@@ -195,7 +195,7 @@ gate three"), "play X", "open it again", Yap answering "yes" / "the second
 one" to its own questions, a yes to the model's offer as consent, lighter
 tool steps for Groq's rate limit, no "Opening…" from a model that can't —
 checked with real shortcut launches in a temp folder, not yet with a real
-game), **spoken replies** (`tts.rs`, 2026-10-18: Chat's answers read
+game), **spoken replies** (`voice/tts.rs`, 2026-10-18: Chat's answers read
 aloud in Windows' voices — the Voice replies toggle, ▶ on every answer,
 "only when I asked by voice", hands-free talk-back, barge-in; text prep, the
 queue and the decisions unit-tested, synthesis checked silently on this PC's
@@ -211,7 +211,7 @@ bm_george (before it, "£12,400" lost its "pounds"); the download, the
 Settings rows and the fallback e2e-tested against a local server, the real
 download and msiexec unpack checked once; not yet heard on speakers by a
 person) and **ElevenLabs** as an optional cloud voice on the person's own
-key (2026-10-22, `tts/elevenlabs.rs` + `tts/cloud.rs`: streamed PCM per
+key (2026-10-22, `voice/tts/elevenlabs.rs` + `voice/tts/cloud.rs`: streamed PCM per
 sentence, the account's voices with ▶ samples, Flash v2.5 by default,
 usage; any failure hands the answer to the local voice with one notice, or
 a notice and silence without one; request building, PCM, errors and the
@@ -220,7 +220,7 @@ the reply/fallback flows e2e-tested against `fake-elevenlabs.js`; first
 audio measured on this PC with `first_audio_latency`: Kokoro af_bella
 1.4 s cold / ~0.43 s warm for the preview sentence, ElevenLabs' path
 < 1 ms of Yap's own on top of the service's answer; not yet tried with a
-real key), **Read aloud, anywhere** (`read_aloud.rs` + `tts/marks.rs`,
+real key), **Read aloud, anywhere** (`voice/read_aloud.rs` + `voice/tts/marks.rs`,
 2026-10-22: the selection in any app, a note or a Chat answer read in that
 voice with a karaoke reading card on the Yap bar; word timing from Windows'
 own word cues, ElevenLabs' `with-timestamps` alignment, else from Kokoro's
@@ -234,7 +234,7 @@ heard on speakers by a person, nor with a real ElevenLabs key or a PDF
 viewer), combo hotkeys, the audio pre-roll (anti first-word clipping), **live
 streaming partials** (sliding-window, on by default, word-paced overlay reveal —
 validated live 2026-07-10), transcription history + stats, cleanup presets,
-**other apps silenced or paused while you dictate** (`mute.rs` + `media_pause.rs`,
+**other apps silenced or paused while you dictate** (`dictation/mute.rs` + `dictation/media_pause.rs`,
 2026-10-17: per app after the start chime, never calls, back to exactly
 their level after the stop chime; the rules unit-tested, the volume drop and
 restore and the pause and resume checked by the robot on an Edge page it
@@ -242,10 +242,10 @@ opened),
 the dictionary's **snippets**, the **"press enter" voice command** and a Whisper
 vocabulary ranked by use (2026-10-17: unit-tested, the Dictionary/Settings UI
 e2e-tested, not yet tried with real speech), **terminal & coding-CLI pasting**
-and **no full stop on short chat messages** (`app_kind.rs`, 2026-10-17:
+and **no full stop on short chat messages** (`pasting/app_kind.rs`, 2026-10-17:
 classification and text rules unit-tested, checked read-only against this PC's
 real windows, the Settings switches e2e-tested; not yet dictated into a real
-terminal or chat app), **word suggestions from your corrections** (`learn.rs`,
+terminal or chat app), **word suggestions from your corrections** (`dictionary/learn.rs`,
 2026-10-17: fix a word Yap typed and it offers to add it to the dictionary;
 the same day aligned with Wispr Flow's measured mechanics — a 60 s watch of
 the whole field that survives switching apps, the drift gate, the last good
@@ -269,30 +269,30 @@ a call card's ^ menu, a click as a card appears) robot-tested in
 still want a hands-on pass.
 On top of that, the main window is now a full **ControlPanel** (Home dictation feed
 w/ Ctrl+K search, Chat, Notes, Upload, Dictionary, Settings as an always-mounted
-modal, app-wide toasts): local audio-**file** transcription (Upload — `media.rs`
+modal, app-wide toasts): local audio-**file** transcription (Upload — `dictation/media.rs`
 Symphonia decode + chunking; since 2026-10-24 the job, like a speech model's
 download, outlives its view: leave mid-job and come back to its progress,
 Cancel and result — e2e `upload.spec.js`), an **AI Notepad** (`notes.rs` — folders/actions/
 participants/transcripts, an Actions engine, ActionPicker/ActionManager, attendee +
 folder management, markdown export, an embedded per-note chat), a **meeting
-recorder** (`meeting.rs` — mic + WASAPI loopback → You/Them transcript, cut in
+recorder** (`meetings/meeting.rs` — mic + WASAPI loopback → You/Them transcript, cut in
 pauses, speaker echo flagged, corrected with the dictionary like a dictation;
 hotkey dictations kept out of "You" with a "You dictated here" marker; "Them"
 follows Windows' default output device, both sides kept on one clock; a side
 quiet for 3 minutes while the other talks gets a warning — all e2e-tested in
 `meeting-audio.spec.js`, the real device switch only through a simulation
-hook so far; `meeting_summary.rs` — rolling ~10-minute digests
+hook so far; `meetings/meeting_summary.rs` — rolling ~10-minute digests
 while it records, then **End meeting & summarise** → an **action plan** with a
 section per person + Decisions / Open questions / Unassigned, every AI call
 within an 8k local context whatever the length; e2e-tested with a two-hour
 meeting against a fake AI, and once with real speech through Parakeet
-2026-10-05) with **call detection** (`meeting_detect.rs`
+2026-10-05) with **call detection** (`calls/meeting_detect.rs`
 — Teams/Zoom/Meet/Slack/Discord/Webex… taking the mic → "Record notes?", the
 call ending → "Stop and summarise?"; per-app choice (work apps on, Discord &
 co. off, "Don't ask for X" on the prompt), a pop-up or quiet style, a 30 s
 fade, and a tray item; e2e-tested via a simulation hook, the
 registry signal checked read-only on the test PC, no real call yet),
-**guard rails** (`meeting_guard.rs` + `capture.rs`, Wispr Flow's Notetaker
+**guard rails** (`calls/meeting_guard.rs` + `calls/capture.rs`, Wispr Flow's Notetaker
 settings: meeting windows hidden from screen capture while recording, a
 2-hour maximum length with a "Keep going" warning, an optional auto-stop
 when a recorded call ends, and the Win+Alt+M meeting shortcut;
@@ -302,7 +302,7 @@ minutes ends after an "Ending notes in 30 s…" countdown, and "Still in
 your meeting?" check-ins after a calendar meeting's end and an hour in —
 rules unit-tested, e2e-tested in seconds through the notepad, the bar and
 a local iCal feed, not yet in a real meeting) and the **meeting notepad**
-(`notepad.rs` + `Notepad.svelte`, Phase 8, 2026-10-05: a window docked to the
+(`meetings/notepad.rs` + `Notepad.svelte`, Phase 8, 2026-10-05: a window docked to the
 right of the screen when a meeting starts, in Wispr Flow's measured layout —
 My thoughts synced with Notes, the live transcript in grouped bubbles with
 paused/dictated dividers, search and copy, the summary written by Rust in
@@ -316,7 +316,7 @@ local Share (copy, .md, email), delete, an editable consent message, split
 screen with the call now or when joining (a glass preview on hover); every
 stop, Yap's own included, writes the action plan in Rust without bringing up
 the main window; e2e-tested in `notepad.spec.js`, split screen and its
-preview unit-tested only), **meeting audio kept on disk** (`meeting_audio.rs`,
+preview unit-tested only), **meeting audio kept on disk** (`meetings/meeting_audio.rs`,
 2026-10-23: both sides as lossless FLAC from Yap's own small encoder,
 written as they're captured, dictations blanked, 14 days by default — a
 crash loses nothing: the next start offers to transcribe what never became
@@ -325,7 +325,7 @@ notes, the summary and names on matching lines; ▶ plays a line; Settings →
 Meetings keeps, ages and deletes it; unit-tested, e2e-tested with a killed
 and restarted test instance, the sizes measured on Windows TTS speech
 — not yet with a real call, a power cut, or hours of audio), **meeting notes
-you can fix** (`note_edits.rs`, `tasks.rs`, 2026-10-24: a transcript line's
+you can fix** (`notes/note_edits.rs`, `notes/tasks.rs`, 2026-10-24: a transcript line's
 words fixed in the notepad or the Notes view — marked edited, what Yap heard
 kept, ▶ still plays it, kept through Transcribe again, offered to the
 dictionary by "Suggest words from your corrections"; the summary edited in
@@ -340,24 +340,24 @@ layouts),
 and since
 2026-10-24 a **transcript you can trust**: a chunk that fails to transcribe
 is a marker with Try again, never silence, the person told once
-(`meeting.rs`); one recorder however many starts at once, the note being
+(`meetings/meeting.rs`); one recorder however many starts at once, the note being
 recorded never deleted (the local API included); the warm engine lent in
 turns, so a dictation during a meeting's chunk waits for it instead of
 loading a second copy (`pipeline::EngineCell`); and the **refined
-transcript** when a meeting ends (`meeting_refine.rs`: when chunks failed
+transcript** when a meeting ends (`meetings/meeting_refine.rs`: when chunks failed
 or a more accurate model is installed for its language, or always; the
 summary first unless the transcript has holes, then "Update summary"; low
 priority, cancellable) — unit-tested (the races and the engine lease fail
 on the old code), e2e-tested with a forced chunk failure, the three
 settings, a dictation mid-refine and two starts at once; the real-speech
 robot test is written, not yet run; not yet tried in a real meeting,
-and an **AI Chat** surface (`chats.rs` + eager
-keyword-RAG over notes, plus a **tool-calling agent loop** in `tools.rs` — nine tools,
-including safe partial note edits (search → exact-once replace, `note_text.rs`),
-≤20-step loop, gated to cloud or ≥4B local models). An **MCP server** (`mcp.rs`,
+and an **AI Chat** surface (`chat/chats.rs` + eager
+keyword-RAG over notes, plus a **tool-calling agent loop** in `chat/tools.rs` — nine tools,
+including safe partial note edits (search → exact-once replace, `chat/note_text.rs`),
+≤20-step loop, gated to cloud or ≥4B local models). An **MCP server** (`integrations/mcp.rs`,
 `yap.exe mcp`) lets Claude, ChatGPT desktop/Codex, Gemini CLI, Cursor, Claude Code,
 VS Code and Windsurf read meetings and notes (never dictations) through the local
-API, added in one click from Settings → AI apps (MCP) (`mcp_clients.rs`); tested in-process,
+API, added in one click from Settings → AI apps (MCP) (`integrations/mcp_clients.rs`); tested in-process,
 against the real binary and end to end (2026-10-05), not yet with a real AI app.
 The **calendar** (`calendar.rs` + `calendar/`, Wispr Flow's, local-first,
 2026-10-05): Google Calendar in one click (read-only, PKCE, loopback) or any
@@ -375,7 +375,7 @@ OAuth client set up in Google Cloud + the two repository secrets
 calendar.
 Every JSON store now writes
 atomically with corrupt-file quarantine, and **a write that fails is said**
-(2026-10-24, `saving.rs`: the data kept in memory and saved with the next
+(2026-10-24, `shell/saving.rs`: the data kept in memory and saved with the next
 change; "Couldn't save your note: the disk is full." with Try again where
 the person made the change, one notice for a save that failed by itself;
 unit-tested on locked and read-only files, e2e-tested with staged
@@ -400,7 +400,7 @@ with your phone** (QR code, device flow) verified end to end in the installed
 nightly `0.1.1-nightly.107` (2026-10-04), along with the "Where you're signed in"
 device list. Known quirk: Better Auth links accounts by exact email, so
 `…@gmail.com` and `…@googlemail.com` (same Gmail inbox) are separate accounts.
-**Real-app robot tests** (`npm run test:real`, `realtest.rs` + `e2e-real/`,
+**Real-app robot tests** (`npm run test:real`, `shell/realtest.rs` + `e2e-real/`,
 2026-10-17): paste, smart spacing, snippets, "press enter", Paste last transcript,
 the clipboard, terminals (PowerShell, a Claude Code stand-in; Git Bash and a
 VS Code terminal stand-in since 2026-10-21), chat apps, the mic
@@ -427,7 +427,7 @@ window test, and robot-tested: Shift+Insert into the real Git Bash
 breaks, now handled), the pad's "nopaste" box typed into once, and no
 other paste in the full run typed twice. VS Code itself isn't installed
 here, and Alacritty, WezTerm, PuTTY & co. are untried.
-**Names as written on screen** (`screen_terms.rs`, 2026-10-22;
+**Names as written on screen** (`dictionary/screen_terms.rs`, 2026-10-22;
 [dictionary.md](./dictionary.md)): the target window's visible text read
 over UI Automation at record start (in the background, never waited for),
 its names and terms used for that dictation only — a strict near-miss pass
@@ -449,20 +449,20 @@ app's tree is bounded, not timed in a real one (Outlook, Teams); WebView2
 apps' content (another process) isn't read, as for the cursor's context.
 **Dictation extras** (2026-10-17): a paste into an app running as
 administrator is spotted (its integrity level) and left on the clipboard
-with "Your text is copied: press Ctrl+V" (`elevated.rs`, `alert.rs`); text
+with "Your text is copied: press Ctrl+V" (`pasting/elevated.rs`, `notices/alert.rs`); text
 boxes read through their labels (LabeledBy), the text field a focused part
-is in, and the legacy read-only bit (`selection.rs`); ✕ / ✓ on the
+is in, and the legacy read-only bit (`pasting/selection.rs`); ✕ / ✓ on the
 dictation capsule (off by default, the same day: Settings → Yap bar turns
 them on when pointed at, or always; never while push-to-talk is held) and
 "Dictation cancelled · Undo" (10 s); Windows'
-microphone privacy switches named with Open settings (`mic_privacy.rs`).
+microphone privacy switches named with Open settings (`dictation/mic_privacy.rs`).
 Unit-tested, e2e-tested (`bar.spec.js`, `dictation-alerts.spec.js`,
 `no-mic.spec.js`) and robot-tested (`dictation-extras.real.js`, the label
 case in `browser.real.js`); a real elevated window and a privacy switch
 really flipped in Windows are still untried (a UAC prompt; the test
 PC's settings).
 **Calmer notices** (2026-10-17, after Wispr Flow's rules by behaviour):
-one notice policy in Rust and on the page (`notice.rs`,
+one notice policy in Rust and on the page (`notices/notice.rs`,
 `ui/noticePolicy.js`): one place per notice (the window while it's focused,
 else the bar), one card on the bar and one notice + one answer in a window
 at a time, by priority; tips and notices held while dictating; stale ones

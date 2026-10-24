@@ -1,5 +1,5 @@
 // Stand-ins for installed call apps' icons. Test mode reads no installed
-// apps (src-tauri/src/app_icons.rs), so a spec that wants an app to look
+// apps (src-tauri/src/calls/app_icons.rs), so a spec that wants an app to look
 // installed points YAP_E2E_APP_ICONS at a folder of `<app id>.png`: here, a
 // rounded square in the app's colour with a white dot, drawn as a PNG.
 import fs from 'node:fs';

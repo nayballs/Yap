@@ -1,5 +1,5 @@
-// The refined transcript after a meeting (src-tauri/src/meeting_refine.rs)
-// and a failed chunk filled again (meeting.rs "Failed chunks"), with real
+// The refined transcript after a meeting (src-tauri/src/meetings/meeting_refine.rs)
+// and a failed chunk filled again (meetings/meeting.rs "Failed chunks"), with real
 // speech-to-text: an `engines` build (`npm run test:real:build --
 // --engines`) and Parakeet V3 — plus Whisper Large for the second test —
 // copied read-only from your installed Yap's models (support/engines.js).

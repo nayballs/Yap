@@ -1,6 +1,6 @@
 // A minimal MCP client, the way AI apps run Yap's server: spawn `yap.exe mcp`
 // with piped stdio and exchange newline-delimited JSON-RPC (see
-// src-tauri/src/mcp.rs). Used by mcp.spec.js.
+// src-tauri/src/integrations/mcp.rs). Used by mcp.spec.js.
 import { spawn } from 'node:child_process';
 import readline from 'node:readline';
 

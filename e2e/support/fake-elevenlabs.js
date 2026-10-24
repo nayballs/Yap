@@ -1,4 +1,4 @@
-// A stand-in for ElevenLabs' API (src-tauri/src/tts/elevenlabs.rs), served
+// A stand-in for ElevenLabs' API (src-tauri/src/voice/tts/elevenlabs.rs), served
 // from 127.0.0.1 so a test run never reaches the internet. Yap is pointed at
 // it with the debug-only YAP_ELEVENLABS_URL (`env`).
 //
@@ -144,7 +144,7 @@ export async function startFakeElevenLabs() {
       }
       res.end();
     } else if (req.method === 'POST' && /^\/v1\/text-to-speech\/[^/]+\/stream\/with-timestamps$/.test(url.pathname)) {
-      // Reading aloud (read_aloud.rs): the same audio as JSON lines, each
+      // Reading aloud (voice/read_aloud.rs): the same audio as JSON lines, each
       // with its characters' start times on the sentence's clock.
       if (state.fail) {
         const { status, type, code, message } = state.fail;

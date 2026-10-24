@@ -1,4 +1,4 @@
-// The one gentle offer of AI cleanup (cleanup_styles.rs `offer`,
+// The one gentle offer of AI cleanup (ai/cleanup_styles.rs `offer`,
 // cleanupOffer.js, 2026-10-24): someone with cleanup off, on a PC whose
 // graphics card runs the on-device model, gets one tip in the main window
 // after a dictation — "Let Yap tidy what you say", with Set it up (Settings →

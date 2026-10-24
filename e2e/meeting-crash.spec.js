@@ -1,18 +1,18 @@
-// A crash mid-meeting (src-tauri/src/meeting_audio.rs): the meeting's audio
+// A crash mid-meeting (src-tauri/src/meetings/meeting_audio.rs): the meeting's audio
 // is on disk as it's recorded, so when the test instance is killed outright
 // mid-meeting — no exit hooks, the last chunks never transcribed — the next
 // start finds it:
 // - the note says so ("Yap closed while this meeting was recording…") with
-//   Transcribe it, and Yap offers it in one place (notice.rs: a toast in the
+//   Transcribe it, and Yap offers it in one place (notices/notice.rs: a toast in the
 //   main window while it's looked at);
 // - Transcribe it puts the part that never became lines into the note, where
 //   it belongs, then the end of the meeting runs as a stop would have
-//   (meeting_end.rs: its stop mark, the action plan — no AI set up here,
+//   (meetings/meeting_end.rs: its stop mark, the action plan — no AI set up here,
 //   so "needsAi");
 // - "Transcribe again" (the Notes view's menu) afterwards keeps the summary
 //   and the name on a line.
 // Two instances on one portable data folder, one after the other; neither
-// is the fixture's. The recorder plays you.wav / them.wav at 4× (e2e.rs).
+// is the fixture's. The recorder plays you.wav / them.wav at 4× (shell/e2e.rs).
 import fs from 'node:fs';
 import path from 'node:path';
 import { test, expect, openView } from './support/fixtures.js';

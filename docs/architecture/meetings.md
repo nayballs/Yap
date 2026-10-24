@@ -6,7 +6,7 @@ The meeting recorder and its audio kept on disk, rolling digests and the action 
 
 ## Modules
 
-- **`meeting.rs`** — the meeting recorder (OpenWhispr `meetingRecordingStore`
+- **`meetings/meeting.rs`** — the meeting recorder (OpenWhispr `meetingRecordingStore`
   port, fully offline): mic ("You") + **WASAPI loopback** ("Them" — cpal input
   stream on the default output device) on a dedicated capture thread; a worker
   cuts each source into ~15 s chunks **at the quietest 20 ms frame of the last
@@ -77,9 +77,9 @@ The meeting recorder and its audio kept on disk, rolling digests and the action 
   the local API — `409` —, Discard) refuses the note being recorded or
   started, under the same lock. Commands: `meeting_start`/
   `meeting_state`; a recording ends through `meeting_end`/`meeting_pause`
-  (meeting_end.rs). Test mode opens no audio device (WAVs
+  (meetings/meeting_end.rs). Test mode opens no audio device (WAVs
   from `YAP_E2E_MEETING_AUDIO`, or silence; `e2e::e2e_meeting_feed`; the
-  player also stages a dictation and an output switch, see `e2e.rs`). A
+  player also stages a dictation and an output switch, see `shell/e2e.rs`). A
   meeting started right after Yap did waits for the speech model, still
   loading in the background (`pipeline::wait_for_model`), never loading a
   second copy. **Memory after a meeting** (measured 2026-10-22, the e2e
@@ -106,7 +106,7 @@ The meeting recorder and its audio kept on disk, rolling digests and the action 
   theirs at once (`after_ingest`), and the worker, after `finish` (or, in a
   test run with no engine, `diarize::finish_scripted`), calls `labels::end`
   (an engine that never sent final labels: labelled as far as it went).
-  **The audio on disk** (`meeting_audio.rs`, below): `start` makes a
+  **The audio on disk** (`meetings/meeting_audio.rs`, below): `start` makes a
   `meeting_audio::Recorder` before the capture, which turns on each side's
   `disk` queue (`keep_on_disk`): the push path copies every sample it
   appends — a dictation already blanked (and its pre-roll blanked in the
@@ -127,7 +127,7 @@ The meeting recorder and its audio kept on disk, rolling digests and the action 
   and `background` (the refine's: each call on a lowest-priority thread,
   `meeting_refine::LowPriority`). `NoFeed`: a side with nothing to read
   (Try again on the other side's stretch).
-- **`meeting_audio.rs`** (+ `meeting_audio/flac.rs`, `meeting_audio/redo.rs`)
+- **`meetings/meeting_audio.rs`** (+ `meetings/meeting_audio/flac.rs`, `meetings/meeting_audio/redo.rs`)
   — **meeting audio kept on disk** (2026-10-23; Wispr Flow keeps 14 days to
   play, Meetily transcribes again): `<data>/meeting-audio/<note
   id>/<recording>-you.flac` / `-them.flac` + `<recording>.json` (`Meta`: its
@@ -179,7 +179,7 @@ The meeting recorder and its audio kept on disk, rolling digests and the action 
   dictation marker kept, **every line the person edited kept as written**
   (a new line of its side over one keeps only its words outside it — by its
   word times, else by its share of its place and none when that's under
-  half —; `note_edits.rs`; whatever calls `rebuild` inherits it; the
+  half —; `notes/note_edits.rs`; whatever calls `rebuild` inherits it; the
   rebuilt lines sorted by date, then place), a new line taking the voice and lock of the old
   line of its side it overlaps by at least half the shorter (split by
   `speakers::split_line` where two old voices meet), the stop marks moved
@@ -196,7 +196,7 @@ The meeting recorder and its audio kept on disk, rolling digests and the action 
   replayed on the model in use, its lines in the marker's place,
   `redo::fill`: digests and stop marks after it move along), and
   `meeting_job_cancel`; **refine** (`start_refine`, from
-  `meeting_refine.rs`): published at once, it waits its turn (the note's
+  `meetings/meeting_refine.rs`): published at once, it waits its turn (the note's
   summary job first unless it comes first, `waiting: "summary"`; never
   beside a recording, `"meeting"`), then **the same `transcribe_again`**
   on the chosen model — the warm slot when it's the model in use, else an
@@ -218,7 +218,7 @@ The meeting recorder and its audio kept on disk, rolling digests and the action 
   only held, a day; the disk queue against the buffer with a dictation; inserting
   recovered lines); e2e `meeting-audio-kept.spec.js` and
   `meeting-crash.spec.js` (a killed test instance, restarted).
-- **`meeting_refine.rs`** — **the refined transcript, by itself** when a
+- **`meetings/meeting_refine.rs`** — **the refined transcript, by itself** when a
   meeting ends (2026-10-24, Wispr Flow's "refined transcript"): the meeting
   transcribed again in the background from its audio on disk, through the
   same replacement as Transcribe again. **When** (`decide`, pure; Settings →
@@ -251,10 +251,10 @@ The meeting recorder and its audio kept on disk, rolling digests and the action 
   (its audio held). Test mode: `YAP_E2E_REFINE_CHUNK_MS` slows each refine
   chunk (`e2e_slow_chunk`). Logs: ids, the plan, counts, the agreement share
   — never a line. Unit-tested (`decide`, `best_model`, `agrees`).
-- **`meeting_summary.rs`** — meeting summaries that keep up with long meetings
+- **`meetings/meeting_summary.rs`** — meeting summaries that keep up with long meetings
   (map-reduce, the map done while recording). A bigger on-device context
   lets the final call read more (`FinalBudget::for_endpoint`: the single
-  pass and the final input × `local_llm::budget_factor_for`, 1–4 — 14,000 /
+  pass and the final input × `local_llm::context::budget_factor_for`, 1–4 — 14,000 /
   18,000 at 32K — only on the running sidecar; `prepare_final` and
   `compose_meeting_input_within` take it; the live digests and the helpers
   keep the 8K budgets). Every ~10 min of new talk
@@ -296,10 +296,10 @@ The meeting recorder and its audio kept on disk, rolling digests and the action 
   missing) — every helper call ≤ ~3.4k with its reply; and `chat_beside_dictation` (on a local endpoint: wait for
   dictation to finish, drop the call when one starts and ask again — never
   slows a dictation). See [`docs/meetings.md`](../meetings.md).
-- **`meeting_end.rs`** — the end of a meeting recording, wherever it was
+- **`meetings/meeting_end.rs`** — the end of a meeting recording, wherever it was
   stopped from (notepad Stop, Notes view "End meeting & summarise", the Yap
   bar, call detection, an automatic stop). It follows the recorder through
-  `yap-meeting-state` (Rust listener; `meeting.rs` is untouched; the final
+  `yap-meeting-state` (Rust listener; `meetings/meeting.rs` is untouched; the final
   one comes after the speaker engine's last labels are on the lines, so the
   title and the action plan read the voices): a start
   opens the notepad (`notepad::on_meeting_started`); every stop (pause or end)
@@ -321,7 +321,7 @@ The meeting recorder and its audio kept on disk, rolling digests and the action 
   "Step 2 of 3"; `meeting_summary_status`; `meeting_summarise(noteId,
   replace)` runs it again — Generate summary, Retry, Update, the Notes view's
   Action plan; `kept`: the person edited the summary and nobody said
-  `replace`, so no model call and nothing written: `note_edits.rs`). Commands
+  `replace`, so no model call and nothing written: `notes/note_edits.rs`). Commands
   `meeting_end(origin)`, `meeting_pause`, `meeting_summarise`,
   `meeting_summary_status`, `meeting_discard`, `meeting_delete`; Rust callers
   use `end()` / `pause()`. The job first asks the meeting's AI who each
@@ -334,7 +334,7 @@ The meeting recorder and its audio kept on disk, rolling digests and the action 
   failed stretch never asks "Started by mistake?". `meeting_summarise`
   while the refine comes first does nothing (the summary follows by
   itself); `summary_running_for` is what a refine waits on.
-- **`meeting_assist.rs`** — the notepad's AI helpers, on the meeting's model
+- **`meetings/meeting_assist.rs`** — the notepad's AI helpers, on the meeting's model
   (Note Formatting scope, else cleanup), bounded for an 8k local model, via
   `chat_beside_dictation`: **"What did I miss?"** (`meeting_catch_up(noteId,
   since, question?)` → `{answer, nothingNew, upto}`; with nothing new since
@@ -353,8 +353,8 @@ The meeting recorder and its audio kept on disk, rolling digests and the action 
   — and its title is open to the AI, `llm::MEETING_TITLE_PROMPT` → `clean_title`
   → `notes::set_ai_title` → `yap-note-changed {origin: "ai"}`; ≤ 3 tries, 2 min
   apart).
-- **`notepad.rs`** — the **meeting notepad** window (label `notepad`, static in
-  tauri.conf.json, created hidden + unfocused so `capture.rs` always finds it
+- **`meetings/notepad.rs`** — the **meeting notepad** window (label `notepad`, static in
+  tauri.conf.json, created hidden + unfocused so `calls/capture.rs` always finds it
   and opening it never takes the foreground — tao keeps the don't-focus marker,
   so every `show()` is `SW_SHOWNOACTIVATE`; close = hide, the recording goes
   on; denylisted from the window-state plugin; gets the DWM-cloak init).
@@ -388,7 +388,7 @@ The meeting recorder and its audio kept on disk, rolling digests and the action 
 ## Frontend
 
 - **`lib/Notepad.svelte`** — the **meeting notepad** (window `notepad`,
-  `notepad.rs`), **Wispr Flow's notepad, measured** (2026-10-05, from its DOM
+  `meetings/notepad.rs`), **Wispr Flow's notepad, measured** (2026-10-05, from its DOM
   over CDP: `references/wispr-flow/notepad-spec.md` (beside this repo); sizes, type,
   motion matched in Yap's own code, wording and icons; the colours are Yap's
   own since 2026-10-06). Palette = the `--yap-paper-*` tokens in app.css

@@ -10,6 +10,10 @@
 //! Deliberately skipped for v1 (documented in ROADMAP): folders, FTS, sync
 //! columns, meeting transcript/participants (arrive with the Phase-6 recorder).
 
+pub mod commands;
+pub mod note_edits;
+pub mod tasks;
+
 #[cfg(not(test))]
 use std::path::PathBuf;
 #[cfg(not(test))]
@@ -308,7 +312,7 @@ const BUILTIN_ACTIONS: [(&str, &str, &str, &str); 4] = [
     (
         "Generate Notes",
         "Clean up, structure, and enhance your notes",
-        crate::llm::NOTE_DEFAULT_FRAGMENT,
+        crate::ai::llm::NOTE_DEFAULT_FRAGMENT,
         "",
     ),
     (
@@ -326,7 +330,7 @@ const BUILTIN_ACTIONS: [(&str, &str, &str, &str); 4] = [
     (
         "Action Plan",
         "Who does what by when, then decisions and open questions",
-        crate::llm::ACTION_PLAN_DEFAULT_FRAGMENT,
+        crate::ai::llm::ACTION_PLAN_DEFAULT_FRAGMENT,
         ACTION_PLAN,
     ),
 ];
@@ -445,15 +449,15 @@ fn load_from_disk() -> Store {
 /// notes.json's saves (`saving.rs`): a failed one keeps the notes in
 /// memory, is tried again with the next save, and is said once — by the
 /// command that hit it ([`saved`]) or the notice.
-pub static SAVER: crate::saving::Saver = crate::saving::Saver::new("notes", "your note", save_now);
+pub static SAVER: crate::shell::saving::Saver = crate::shell::saving::Saver::new("notes", "your note", save_now);
 
 /// `Ok` when every note is on disk; else why not (the caller says it).
-pub fn saved() -> Result<(), crate::saving::SaveError> {
+pub fn saved() -> Result<(), crate::shell::saving::SaveError> {
     SAVER.check()
 }
 
 /// Write the whole store again (Try again).
-pub fn save_now() -> Result<(), crate::saving::SaveError> {
+pub fn save_now() -> Result<(), crate::shell::saving::SaveError> {
     with_store(|s| save_to_disk(s));
     saved()
 }
@@ -462,7 +466,7 @@ pub fn save_now() -> Result<(), crate::saving::SaveError> {
 #[cfg(not(test))]
 fn save_to_disk(store: &Store) {
     // A model evaluation (`eval.rs`) keeps its notes in memory only.
-    if crate::eval::active() {
+    if crate::ai::eval::active() {
         return;
     }
     let _ = SAVER.write_json(&notes_path(), store, false);
@@ -636,7 +640,7 @@ fn folder_named(folders: &[String], name: &str) -> Option<usize> {
 }
 
 /// A folder renamed or deleted: the folder list now, and the notes that
-/// moved (their windows are told: `commands::note_changed`).
+/// moved (their windows are told: `notes::commands::note_changed`).
 #[derive(Debug, Clone, PartialEq)]
 pub struct FolderChange {
     pub folders: Vec<String>,
@@ -1282,7 +1286,7 @@ pub fn delete(id: u64) {
         save_to_disk(store);
     });
     // Its meeting audio goes with it (meeting_audio.rs).
-    crate::meeting_audio::forget(id);
+    crate::meetings::meeting_audio::forget(id);
 }
 
 #[cfg(test)]

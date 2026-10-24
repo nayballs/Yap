@@ -1,4 +1,4 @@
-// Saves Yap couldn't make (saving.rs, code review 2026-10-23 #7): a full
+// Saves Yap couldn't make (shell/saving.rs, code review 2026-10-23 #7): a full
 // disk, or another program holding notes.json, used to be a warning in the
 // log while the page said it saved. `e2e_fail_saves` makes a store's next
 // writes fail as a full disk would.

@@ -1,4 +1,4 @@
-// Opening apps when you ask (src-tauri/src/apps.rs, tools.rs' open_app /
+// Opening apps when you ask (src-tauri/src/apps.rs, chat/tools.rs' open_app /
 // list_apps, Settings → Voice Assistant → Opening apps,
 // src/lib/OpenAppsSettings.svelte):
 // - Chat: "open notepad" is handled by Yap itself, before any model — here
@@ -308,7 +308,7 @@ test('the model path: the AI opens an app with open_app, only when the person as
 });
 
 test('a model without tools (the small local one) never claims it opened something', async ({ yap, main, fakeLlm, shot }) => {
-  // A local model with no size in its id: no tools (tools.rs supports_tools).
+  // A local model with no size in its id: no tools (chat/tools.rs supports_tools).
   await setConfig(yap, main, {
     llmScopes: {
       chat: { enabled: true, provider: 'local', baseUrl: fakeLlm.base, model: 'fake-small', apiKey: '', apiKeys: {}, prompt: '', disableThinking: false },
@@ -452,7 +452,7 @@ test('the Voice Assistant: "Open Teams" asked out loud opens it and says so, wit
   await expect(card).toHaveCount(0);
 
   // The conversation is in Chat like any question asked out loud (the
-  // latest one, continued: assistant.rs `choose_conversation`).
+  // latest one, continued: chat/assistant.rs `choose_conversation`).
   await mainOnScreen(yap);
   await openView(main, 'Chat');
   await main.locator('.conv').first().click();

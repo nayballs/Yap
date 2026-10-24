@@ -9,7 +9,7 @@ use super::ops::{Item, Section};
 
 /// Rough tokens (Yap's usual estimate).
 fn tokens(s: &str) -> usize {
-    crate::meeting_summary::estimate_tokens(s)
+    crate::meetings::meeting_summary::estimate_tokens(s)
 }
 
 /// The facts of an item as one line: "Lives in York; Birthday 3 May".

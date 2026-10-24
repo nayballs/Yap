@@ -1,5 +1,5 @@
-// Push-to-talk's gestures (gesture.rs), its coaching hints (coaching.rs) and
-// the dictation mic's watchdog (mic_watch.rs). The hotkey (F24) reaches the
+// Push-to-talk's gestures (dictation/gesture.rs), its coaching hints (dictation/coaching.rs) and
+// the dictation mic's watchdog (dictation/mic_watch.rs). The hotkey (F24) reaches the
 // app through the main window's in-page fallback (test mode has no global
 // hook), which takes the hook's own path into the pipeline: `dictation_key`.
 // Recording needs a microphone, so those tests are skipped without one (CI);

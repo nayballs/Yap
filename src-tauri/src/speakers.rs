@@ -40,6 +40,7 @@
 //! when the recording stops, before the summary is written.
 
 pub mod call_ui;
+pub mod diarize;
 pub mod labels;
 pub mod naming;
 
@@ -50,7 +51,7 @@ use serde_json::{json, Value};
 use tauri::AppHandle;
 
 use crate::notes::{Note, TranscriptSegment};
-use crate::stt::TimedText;
+use crate::dictation::stt::TimedText;
 
 /// The voice of the person using Yap (the mic).
 pub const YOU: &str = "you";
@@ -855,7 +856,7 @@ fn edit(
     let note = crate::notes::get(note_id).ok_or("Note not found")?;
     if changed {
         use tauri::Emitter;
-        let mut payload = crate::commands::note_changed_payload(&note, origin.as_deref().unwrap_or(""));
+        let mut payload = crate::notes::commands::note_changed_payload(&note, origin.as_deref().unwrap_or(""));
         payload["lineSpeakers"] = json!(line_speakers(&note));
         payload["enhancedContent"] = json!(note.enhanced_content);
         let _ = app.emit("yap-note-changed", payload);

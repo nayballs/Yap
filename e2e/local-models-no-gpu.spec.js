@@ -2,8 +2,8 @@
 // (`YAP_E2E_GPU=none`): the 1.5B is recommended and nothing is offered. Each
 // card is its own Yap instance, so its own file.
 //
-// The on-device model picked for this PC (src-tauri/src/gpu.rs,
-// local_llm.rs): with a graphics card that can run it, Qwen3.5 4B is
+// The on-device model picked for this PC (src-tauri/src/ai/gpu.rs,
+// ai/local_llm.rs): with a graphics card that can run it, Qwen3.5 4B is
 // "Recommended for this PC" in Settings → Language Models and in the
 // onboarding's AI cleanup step (picked there by default), and someone on the
 // 1.5B is offered it once, quietly (never downloaded by itself; "No thanks"

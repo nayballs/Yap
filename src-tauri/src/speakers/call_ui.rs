@@ -477,7 +477,7 @@ pub fn watching(note_id: u64) -> bool {
 
 /// The call app's names for timeline `tl`'s voices (`voices`: the engine's
 /// voices → the note's ids), for `naming.rs`.
-pub fn votes_for(tl: &crate::diarize::Timeline, voices: &super::labels::VoiceIds) -> Vec<PlatformVote> {
+pub fn votes_for(tl: &crate::speakers::diarize::Timeline, voices: &super::labels::VoiceIds) -> Vec<PlatformVote> {
     let all = watches();
     let Some(w) = all.iter().find(|w| w.note_id == tl.note_id && w.session.is_none_or(|s| s == tl.session) && !w.spans.is_empty()) else {
         return Vec::new();
@@ -533,7 +533,7 @@ pub fn begin(note_id: u64, session: Option<u64>, base: usize) {
     let stop = Arc::new(AtomicBool::new(false));
     watches().push(Watch { note_id, session, base, spans: Vec::new(), self_name: None, stop: Arc::clone(&stop) });
     #[cfg(debug_assertions)]
-    if crate::e2e::active() {
+    if crate::shell::e2e::active() {
         return; // The suite hands readings in (`e2e_call_readings`).
     }
     if !crate::config::load().meeting_call_names {
@@ -553,11 +553,11 @@ fn poll(note_id: u64, stop: Arc<AtomicBool>) {
     let mut every = READ_EVERY;
     let (mut reads, mut found) = (0u64, 0u64);
     tracing::info!(note_id, "Call names: reading the call app's window while the meeting records (experimental)");
-    while !stop.load(Ordering::SeqCst) && crate::meeting::recording_note() == Some(note_id) {
+    while !stop.load(Ordering::SeqCst) && crate::meetings::meeting::recording_note() == Some(note_id) {
         if window.is_none() && looked.elapsed() >= Duration::from_secs(10) {
             looked = Instant::now();
-            window = crate::meeting_detect::call_window_exes().and_then(|(app, _)| {
-                let hwnd = crate::notepad::call_window_quiet()?;
+            window = crate::calls::meeting_detect::call_window_exes().and_then(|(app, _)| {
+                let hwnd = crate::meetings::notepad::call_window_quiet()?;
                 tracing::info!(note_id, app, "Call names: found the call's window");
                 Some((hwnd, app, Rules::new(profile(app))))
             });
@@ -567,7 +567,7 @@ fn poll(note_id: u64, stop: Arc<AtomicBool>) {
             match win::snapshot(*hwnd) {
                 Ok(Some(root)) => {
                     let reading = read(&root, rules);
-                    if let Some(clock) = crate::meeting::them_clock_ms(note_id) {
+                    if let Some(clock) = crate::meetings::meeting::them_clock_ms(note_id) {
                         record(note_id, clock, &reading);
                     }
                     reads += 1;
@@ -597,10 +597,10 @@ fn poll(note_id: u64, stop: Arc<AtomicBool>) {
 #[cfg(debug_assertions)]
 #[tauri::command]
 pub fn e2e_call_readings(spans: Vec<Span>, self_name: Option<String>) -> Result<usize, String> {
-    if !crate::e2e::active() {
+    if !crate::shell::e2e::active() {
         return Err("Only in e2e test mode".to_string());
     }
-    let note_id = crate::meeting::recording_note().ok_or("No meeting is being recorded")?;
+    let note_id = crate::meetings::meeting::recording_note().ok_or("No meeting is being recorded")?;
     let mut all = watches();
     let w = all.iter_mut().find(|w| w.note_id == note_id).ok_or("The recording isn't watched")?;
     w.spans = spans;
@@ -910,14 +910,14 @@ pub fn dump_main(args: Vec<String>) -> i32 {
 /// The call window for the dump: titled with `wanted`, else a call app's
 /// or a browser showing a meeting. (hwnd, title, app id).
 fn find_window(wanted: Option<&str>) -> Option<(isize, String, String)> {
-    let (call_exes, _) = crate::meeting_detect::call_audio();
+    let (call_exes, _) = crate::calls::meeting_detect::call_audio();
     let mut exes: Vec<String> = call_exes.into_iter().filter(|n| n.ends_with(".exe")).collect();
-    exes.extend(crate::meeting_detect::browser_exes().iter().map(|b| b.to_string()));
-    let windows = crate::notepad::windows_of(&exes);
+    exes.extend(crate::calls::meeting_detect::browser_exes().iter().map(|b| b.to_string()));
+    let windows = crate::meetings::notepad::windows_of(&exes);
     const APPS: [&str; 8] = ["teams", "zoom", "meet", "webex", "slack", "goto", "whereby", "jitsi"];
     let app_of = |exe: &str, title: &str| -> Option<String> {
         APPS.iter()
-            .find(|a| crate::meeting_detect::title_shows(a, title) || crate::meeting_detect::exe_is(a, exe))
+            .find(|a| crate::calls::meeting_detect::title_shows(a, title) || crate::calls::meeting_detect::exe_is(a, exe))
             .map(|a| a.to_string())
     };
     let pick = windows

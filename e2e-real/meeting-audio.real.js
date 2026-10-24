@@ -1,4 +1,4 @@
-// Meeting audio kept on disk (src-tauri/src/meeting_audio.rs) with real
+// Meeting audio kept on disk (src-tauri/src/meetings/meeting_audio.rs) with real
 // speech-to-text: an `engines` build (`npm run test:real:build --
 // --engines`) and Parakeet V3, copied read-only from your installed Yap's
 // models (support/engines.js). A two-person call made of Windows'

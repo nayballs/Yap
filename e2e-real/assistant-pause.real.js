@@ -1,4 +1,4 @@
-// "Stop listening when I pause" with real speech and real STT (pause.rs):
+// "Stop listening when I pause" with real speech and real STT (dictation/pause.rs):
 // an `engines` build (`npm run test:real:build -- --engines`) with Parakeet
 // V3 copied read-only from your installed Yap (support/engines.js), the live
 // preview ON, so the pause watch has both its signals — the mic's level and
@@ -26,7 +26,7 @@ test.use({
   },
 });
 
-/** The pause that ends a question (pause.rs `PAUSE_MS`). */
+/** The pause that ends a question (dictation/pause.rs `PAUSE_MS`). */
 const PAUSE = 1_500;
 const quiet = (secs) => ({ kind: 'quiet', secs });
 const wav = (text) => ({ kind: 'wav', path: speechWav(text) });

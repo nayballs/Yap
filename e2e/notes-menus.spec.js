@@ -1,6 +1,6 @@
 // Right-click menus in Notes (NotesView.svelte + ui/ContextMenu.svelte) and
 // the folder commands behind them (notes.rs `folder_rename` / `folder_delete`),
-// plus the WebView2 context-menu filter (context_menu.rs) every window has.
+// plus the WebView2 context-menu filter (shell/context_menu.rs) every window has.
 //
 // A folder row: Rename in place (its notes go along), Delete… after a
 // question (its notes move to Personal); Personal and Meetings can't be
@@ -370,7 +370,7 @@ test('WebView2’s own menu: nothing on plain UI, the edit commands in a text fi
 
   // Plain UI: Back, Refresh, Save as, Print, Inspect… all dropped — Inspect
   // too, though this is a debug build: only a Shift+right-click offers it
-  // there (context_menu.rs), never a plain one; no menu on screen.
+  // there (shell/context_menu.rs), never a plain one; no menu on screen.
   await openView(main, 'Home');
   let before = await seen();
   await main.getByRole('navigation', { name: 'Main' }).click({ button: 'right', position: { x: 20, y: 200 } });

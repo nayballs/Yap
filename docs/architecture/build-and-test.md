@@ -1,6 +1,6 @@
 # Build and test
 
-Feature flags, running in dev, CI, the end-to-end UI suite and the real-app robot tests, plus test mode (`e2e.rs`) and robot mode (`realtest.rs`). The guides are [`docs/e2e-tests.md`](../e2e-tests.md) and [`docs/model-evals.md`](../model-evals.md); the speaker engine's tests are in [speakers.md](./speakers.md).
+Feature flags, running in dev, CI, the end-to-end UI suite and the real-app robot tests, plus test mode (`shell/e2e.rs`) and robot mode (`shell/realtest.rs`). The guides are [`docs/e2e-tests.md`](../e2e-tests.md) and [`docs/model-evals.md`](../model-evals.md); the speaker engine's tests are in [speakers.md](./speakers.md).
 
 [Architecture index](./README.md) · [CLAUDE.md](../../CLAUDE.md)
 
@@ -37,7 +37,7 @@ reading on in a rewritten one would go wrong). It skips the update and says why 
 branch, with real local edits, offline, or when it isn't a fast-forward — Yap still starts.
 It then stops any AI app's `yap.exe mcp` helper running from the dev build's own exe
 (`<drive>:\t\debug\yap.exe`), which would otherwise make the build fail with "Access is
-denied" (see `mcp_clients.rs`).
+denied" (see `integrations/mcp_clients.rs`).
 So merged work reaches the maintainer's dev build by pushing to main; never fast-forward
 that checkout by hand while Yap - Dev runs.
 
@@ -64,7 +64,7 @@ also produces the `dist/` that `generate_context!` needs) + `cargo clippy --lock
 `engines`, no Vulkan SDK) — a few minutes on a Windows runner, so a broken commit
 can never reach a nightly. Then `cargo clippy --locked --release -- -D warnings`
 (lib + exe, the release profile, since 2026-10-22): code only debug builds call —
-the e2e hooks, the model evaluations (`eval.rs`, `#[cfg(debug_assertions)]`) — is
+the e2e hooks, the model evaluations (`ai/eval.rs`, `#[cfg(debug_assertions)]`) — is
 dead in release, and gets `#[cfg(debug_assertions)]` (or `any(test,
 debug_assertions)`) itself; until then six such warnings showed only in release
 builds. The real GPU pipeline is only exercised by
@@ -123,7 +123,7 @@ page, `yap.notepad`), and save **named screenshots** to
 Any uncaught JS error in any webview fails the test. ~20 s plus the build
 (`npm run test:app:build`, own target dir `src-tauri/target/e2e` or
 `YAP_E2E_TARGET_DIR`). Safe beside the installed app and a dev build: portable
-data dir, own WebView2 profile + CDP port, F24 hotkey, test mode (`e2e.rs`),
+data dir, own WebView2 profile + CDP port, F24 hotkey, test mode (`shell/e2e.rs`),
 unreachable account service. (Runners are elevated, so WebView2 ignores the suite's
 `WEBVIEW2_*` variables there; e2e.yml sets the DevTools flag as an HKLM WebView2
 policy for `yap.exe` instead.) CI uploads `test-results/app` as the **`e2e-results`**
@@ -133,7 +133,7 @@ and read the PNGs under `screenshots/`. Full guide (incl. adding a test):
 [`docs/e2e-tests.md`](../e2e-tests.md).
 
 ## Real-app robot tests (`npm run test:real`)
-The second layer: a **robot-mode** Yap (`realtest.rs`) pastes into **real windows
+The second layer: a **robot-mode** Yap (`shell/realtest.rs`) pastes into **real windows
 the harness opens** — a WinForms test pad (`e2e-real/support/yaprobot.cs`,
 compiled with the .NET Framework's `csc`), Windows Terminal (a PowerShell prompt,
 and a stand-in for Claude Code: its "✳ …" title + bracketed paste, runs nothing),
@@ -171,7 +171,7 @@ until it's fixed (none open now). Guide: [`docs/e2e-tests.md`](../e2e-tests.md) 
 
 ## The benchmark (`yap.exe bench`)
 
-**`bench.rs`** (+ `bench/machine.rs`, `bench/cold.rs`; 2026-10-24): how fast
+**`shell/bench.rs`** (+ `shell/bench/machine.rs`, `shell/bench/cold.rs`; 2026-10-24): how fast
 Yap is on a PC, in numbers anyone can reproduce and share
 ([`docs/benchmarks.md`](../benchmarks.md) has the published ones and how to
 send yours). `yap.exe bench` runs before the app starts (main.rs, like `mcp`),
@@ -193,7 +193,7 @@ shell waiting for it.
   on Windows' software renderer — what a PC without a graphics driver gets.
 - **Speech**: every installed model (`--models`) per scenario: load, the
   first dictation after it, then `--rounds` (3) warm runs of the ~3, ~11 and
-  ~30 s pieces of `stt_speed.rs`'s bundled clip (`cut_points`: at the
+  ~30 s pieces of `dictation/stt_speed.rs`'s bundled clip (`cut_points`: at the
   quietest 20 ms within 1.5 s; every run a new length, as `stt_speed`
   measures), each length's median, and its **word error rate** against the
   script the clip reads (`wer`: the fewest edits over `PASSAGE`'s sentence
@@ -231,13 +231,13 @@ shell waiting for it.
 
 ## Test mode and robot mode
 
-- **`e2e.rs`** — **test mode** for the end-to-end UI suite (debug builds started
+- **`shell/e2e.rs`** — **test mode** for the end-to-end UI suite (debug builds started
   with `YAP_E2E=1`; compiled out of release builds): no global input hook, no
   paste/Enter/Ctrl+C into other apps (nor "Paste last transcript"), no other
   app's sound silenced or paused (`realtest::other_apps`), no reading the
   text around another app's cursor or its window's title (`app_kind`), no `set_focus` (tao's fallback presses Alt
   in the focused app), no Windows notifications, no native context menu on
-  screen (`context_menu.rs` records what it would hold; robot mode shows it), no orphan-sidecar sweep, no
+  screen (`shell/context_menu.rs` records what it would hold; robot mode shows it), no orphan-sidecar sweep, no
   window-state plugin, no call-detection registry reads (the debug-only
   `meeting_detect_simulate` stands in), no installed apps' icons (the
   debug-only `YAP_E2E_APP_ICONS` folder of stand-ins, `app_icons_dir`), no
@@ -262,19 +262,19 @@ shell waiting for it.
   only go in-app while the window is on screen), `e2e_dictation_mic { silent }`
   (the dictation mic's real audio zeroed, as a muted mic's — the dead-mic
   watchdog's case, its stream really reopened), `e2e_mic_status` (the
-  dictation mic's state, `mic.rs`: open, live, Bluetooth, opens/closes, the
+  dictation mic's state, `dictation/mic.rs`: open, live, Bluetooth, opens/closes, the
   last open's timing), `e2e_dictate_audio { seconds }` (a dictation of a
   tone played in the mic's place — a real start and stop, the mic held as
   for any dictation; no microphone needed), `e2e_crash_next_dictation` (the
   next dictation panics in its paste step: `pipeline::Busy`), `e2e_fail_saves
   { store, count }` (a store's next saves fail as a full disk would:
-  `saving.rs`), `e2e_upload_pace { ms }` (each Upload chunk held that long,
+  `shell/saving.rs`), `e2e_upload_pace { ms }` (each Upload chunk held that long,
   so the job is still going when a spec comes back), `YAP_MIC_WARM_MS` (the mic's
   warm window, short) and `YAP_E2E_MODEL_LOAD_MS` (the startup model load,
   slowed down), `e2e_learn_correction` (an
   edit of a pasted dictation as the correction watch would see it, or the
   field's text read by read for the watch's rules to run over — the watch
-  thread itself never runs in a test run), no spoken reply played (`tts.rs`:
+  thread itself never runs in a test run), no spoken reply played (`voice/tts.rs`:
   stand-in voices, Kokoro as silence once its stand-in files are installed
   from the suite's local server — `YAP_TTS_SOURCES` —, a simulated clock, no
   audio device; what would have been said in `tts_e2e_spoken`), no on-device
@@ -290,17 +290,17 @@ shell waiting for it.
   page read fails; a provider's own search goes to the chat's configured
   endpoint, the fake AI in the suite, which answers Groq's
   `browser_search` and Gemini's `generateContent` shapes), never the PC's
-  own region settings (`about_you.rs`: the debug-only `YAP_E2E_LOCALE` — a
+  own region settings (`ai/about_you.rs`: the debug-only `YAP_E2E_LOCALE` — a
   tag or JSON — stands in for Windows; unset, nothing is detected), no AI
-  provider's model list (`model_catalog.rs`: the debug-only
+  provider's model list (`ai/model_catalog.rs`: the debug-only
   `YAP_MODELS_STANDIN` points at `e2e/support/fake-llm.js`; unset, the
   curated lists), a stand-in recorded as the service it stands in for in
-  the network receipts (`net.rs`: the debug-only `YAP_E2E_NET_ALIASES`,
+  the network receipts (`privacy/net.rs`: the debug-only `YAP_E2E_NET_ALIASES`,
   `127.0.0.1:<port>=api.groq.com;…`), Report a problem's file saved where
   `e2e_save_path` says, never through Windows' Save dialog
-  (`diagnostics.rs`), `e2e_coaching_reset` (every
+  (`privacy/diagnostics.rs`), `e2e_coaching_reset` (every
   push-to-talk hint due again), `e2e_notice_reset` / `e2e_focus` /
-  `e2e_notice` (notice.rs: cooldowns and fatigue forgotten before every
+  `e2e_notice` (notices/notice.rs: cooldowns and fatigue forgotten before every
   test, whether the main window counts as focused — by default while it's on
   screen —, a notice staged through the real policy or a pretend
   dictation's `yap-state`), `e2e_paste_elevated { on }` (every paste
@@ -310,7 +310,7 @@ shell waiting for it.
   Credential Manager and links recorded (`calendar_e2e_opened`) instead of
   opened in a browser, and it quits when its stdin closes. See
   [`docs/e2e-tests.md`](../e2e-tests.md).
-- **`realtest.rs`** — **robot mode** for the real-app robot tests (`e2e-real/`,
+- **`shell/realtest.rs`** — **robot mode** for the real-app robot tests (`e2e-real/`,
   `npm run test:real`): test mode + `YAP_REALTEST=1`, debug builds only. The paste,
   the submit key, "Paste last transcript", the UI Automation reads (the text
   around the cursor, the correction-learning watch) and `app_kind`'s title read
@@ -339,8 +339,8 @@ shell waiting for it.
   dictation — an Undo's — sent to the paste), `realtest_window`, `realtest_refusals`,
   `realtest_clipboard { save | restore | setText | setImage | check }` (never
   hands the clipboard's contents out), `realtest_other_apps` (the test's own
-  audio sessions and media, and what `mute.rs` holds down). **Other apps'
-  sound** (`mute.rs`, `media_pause.rs`) has its own guard: `other_apps()` =
+  audio sessions and media, and what `dictation/mute.rs` holds down). **Other apps'
+  sound** (`dictation/mute.rs`, `dictation/media_pause.rs`) has its own guard: `other_apps()` =
   All in a normal run, Nobody in plain test mode (nothing silenced or
   paused), TestsOwn in robot mode — an audio session only if its process or
   an ancestor is in `YAP_REALTEST_PIDS` (by start time) or a process whose

@@ -35,9 +35,9 @@ The always-there pill above the taskbar: the `overlay` window's Rust side (regio
   setting) while the audio is kept; and after a dictation whose words AI
   cleanup changed, "Cleaned up · Use what I said" (`yap-state` "cleaned",
   `Dictation::Cleaned`, for `as_said::OFFER_MS`; `bar_action "as-said"`:
-  the paste swapped for the words as said, `as_said.rs`) — a region of its
+  the paste swapped for the words as said, `pasting/as_said.rs`) — a region of its
   own like Undo, shown with the bar off too; a **saved transform**
-  (`transforms.rs`, `yap-transform {name, phase, offerMs}`) shows its name
+  (`dictation/transforms.rs`, `yap-transform {name, phase, offerMs}`) shows its name
   while it runs ("Polish…", `yap-state` "processing" after phase
   "running"), then "Polish ✓ · Undo" the same way as "Cleaned up" (phase
   "done" + "cleaned"; `bar_action "transform-undo"`:
@@ -73,7 +73,7 @@ The always-there pill above the taskbar: the `overlay` window's Rust side (regio
   `bar_card_action`): Yap's notices while the main window isn't focused,
   instead of a Windows notification — `false` when the bar is off or hidden
   for an hour, and the caller posts the notification as before. **One card
-  at a time** (`notice.rs`): every card asked for goes into `cards` with
+  at a time** (`notices/notice.rs`): every card asked for goes into `cards` with
   when it came (`queued`); `repick` (on every change, dictation state,
   meeting state and poller tick) puts the one `notice::pick` chooses on
   screen (`front`: a question before an alert before a notice before a tip,
@@ -93,7 +93,7 @@ The always-there pill above the taskbar: the `overlay` window's Rust side (regio
   (`State.assistant`, in `Status.assistant`): the window shows while a
   question is asked, answered or read aloud, bar on or off, and ■ on the
   capsule is `bar_action "assistant-stop"`. **The reading card**
-  (`read_aloud.rs`, `set_reading`, `State.reading` / `Status.reading`):
+  (`voice/read_aloud.rs`, `set_reading`, `State.reading` / `Status.reading`):
   while Yap reads text aloud (or the card has a note: "Nothing selected")
   the window shows, bar on or off, hidden for an hour or over a fullscreen
   app (`shows`), takes clicks on the card (`clickable`), the poller watches
@@ -113,7 +113,7 @@ The always-there pill above the taskbar: the `overlay` window's Rust side (regio
   the live preview). Bar off = the old behaviour: the
   overlay only while dictating, notices as Windows notifications — but a
   showing dictation's ✕ / ✓ and Undo still take clicks (`clickable`).
-- **`overlay.rs`** — the bar window's Win32 side + its pure, unit-tested maths:
+- **`bar/overlay.rs`** — the bar window's Win32 side + its pure, unit-tested maths:
   `place` (work-area placement), `fullscreen_on` (None / Borderless /
   Exclusive), `region_at` (hit-testing with slack), `enforced_ex_style`, and
   `win::` (subclass install, click-through toggle, monitors via
@@ -158,7 +158,7 @@ The always-there pill above the taskbar: the `overlay` window's Rust side (regio
   a ✦ for the dot, "Ask Yap…" + waveform (or the words) while it listens,
   "Thinking…", then three bars + "Speaking…", with a ■ (`assistant-stop`,
   region "assistant") while it thinks or speaks, and while the pause after
-  the question runs out ("Stop listening when I pause", `pause.rs`:
+  the question runs out ("Stop listening when I pause", `dictation/pause.rs`:
   `yap-assistant-pause {leftMs}` → `dictation.pauseMs`) an amber hairline
   running down at its foot (`.pauseline`, kept with Motion reduced); a small amber lock after the dot while push-to-
   talk's double-tap holds it hands-free; the dead-mic watchdog's "No sound
@@ -176,7 +176,7 @@ The always-there pill above the taskbar: the `overlay` window's Rust side (regio
   It's a `data-region` ("dictation") whenever it has a button to offer, so
   the click-through bar takes clicks on it, never focused). **Cards** sit 26 px above the pill whatever it
   shows (positioned from the dock's height, gliding 0.16 s when it grows),
-  one at a time (`notice.rs` picks it; the rest wait in `bar.waiting`); it
+  one at a time (`notices/notice.rs` picks it; the rest wait in `bar.waiting`); it
   fades in and out in 0.12 s and has Wispr's 4 px hit strip on the pill's
   side. **The reading card** (`bar/ReadingCard.svelte` + `bar/reading.svelte.js`,
   `yap-read` / `yap-read-word` / `read_aloud_state`) sits nearest the pill
@@ -209,7 +209,7 @@ The always-there pill above the taskbar: the `overlay` window's Rust side (regio
   `bar/CallCard.svelte` (the call
   prompt as Wispr's "Meeting detected" card, on the same tokens but one row
   with slimmer padding: the app's icon on a light tile, drawn by the shared
-  `lib/CallAppIcon.svelte` — its own as installed here (`app_icons.rs`,
+  `lib/CallAppIcon.svelte` — its own as installed here (`calls/app_icons.rs`,
   loaded per window by `callAppIcons.svelte.js` when first drawn, again after
   10 min), else its mark from `bar/callApps.js` (Simple Icons CC0 glyphs),
   else a letter badge in its colour (Teams/Slack/Webex/Whereby), else a

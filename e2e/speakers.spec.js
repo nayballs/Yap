@@ -111,7 +111,7 @@ async function stubClipboard(page) {
   return () => page.evaluate(() => window.__copied);
 }
 
-/** The local API (bridge.rs), as a coding agent would call it. */
+/** The local API (integrations/bridge.rs), as a coding agent would call it. */
 async function api(yap, route) {
   const { port, token } = JSON.parse(fs.readFileSync(yap.bridgeFile, 'utf8'));
   const r = await fetch(`http://127.0.0.1:${port}${route}`, { headers: { authorization: `Bearer ${token}` } });

@@ -195,7 +195,7 @@ global hook never sees keys while a Yap window has the focus.
 ## Into Chat
 
 - `yap-snip {image, conversationId, origin}` goes to the main window, which
-  comes up (`commands::show_settings`); ControlPanel switches to Chat
+  comes up (`window::show_settings`); ControlPanel switches to Chat
   (`chatRequest.pending = {snip}`), or ChatView takes it itself while it's
   open (`takeSnip`). **Which conversation**: the one Chat shows, when the
   main window was on screen on one at the snip (`assistant::chat_viewing`
@@ -293,7 +293,7 @@ question and its screenshot back in the box.
   (`shrink`), re-encoded, smaller again while over 4 MB; made in the
   background as the snip lands (`prepare`) and kept in memory (the last 12):
   Send is instant.
-- **Privacy**: never logged (sizes, counts and timings only; `log_privacy.rs`
+- **Privacy**: never logged (sizes, counts and timings only; `privacy/log_privacy.rs`
   now also flags `png`, `rgba`, `bgra`, `pixels`, `data_url`), never synced,
   not in the local API or the MCP server; an image leaves the PC only inside
   the Chat request you send (and that conversation's follow-ups).

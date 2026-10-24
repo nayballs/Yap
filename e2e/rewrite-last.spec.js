@@ -1,4 +1,4 @@
-// "Rewrite your last dictation when nothing is selected" (as_said.rs,
+// "Rewrite your last dictation when nothing is selected" (pasting/as_said.rs,
 // 2026-10-23): Settings → Commands' switch (`rewriteLastDictation`, on),
 // the rewrite shortcut's line following it, Settings search finding it —
 // and what the shortcut does with nothing selected right after a dictation:

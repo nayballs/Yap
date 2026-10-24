@@ -1,4 +1,4 @@
-// About you (Settings → General; src-tauri/src/about_you.rs,
+// About you (Settings → General; src-tauri/src/ai/about_you.rs,
 // src/lib/AboutYouSettings.svelte, 2026-10-21; one Region picker since
 // 2026-10-22):
 // - "Region": "Automatic: United Kingdom (from Windows)" — in a test run the

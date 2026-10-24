@@ -1,4 +1,4 @@
-// The dictation's microphone, opened on demand (mic.rs), on this PC's real
+// The dictation's microphone, opened on demand (dictation/mic.rs), on this PC's real
 // microphone: closed while Yap idles, opened by a dictation, kept warm
 // (YAP_MIC_WARM_MS, 3 s here instead of a minute), then closed — the
 // stream's own state (`e2e_mic_status`), and Windows' record of who uses the

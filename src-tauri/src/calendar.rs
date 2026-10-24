@@ -52,7 +52,7 @@ pub(crate) mod tz;
 mod vault;
 
 use std::collections::{BTreeMap, HashMap, HashSet};
-use crate::net::Recorded as _;
+use crate::privacy::net::Recorded as _;
 use std::sync::{LazyLock, Mutex, MutexGuard};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -185,17 +185,17 @@ fn load_store() -> Store {
 /// memory, is tried again with the next save (the next sync), and is said
 /// once — by the command that hit it ([`saved`]) or the notice. File I/O
 /// only, so it's fine under the runtime's lock.
-pub static SAVER: crate::saving::Saver = crate::saving::Saver::new("calendar", "your calendar", save_now);
+pub static SAVER: crate::shell::saving::Saver = crate::shell::saving::Saver::new("calendar", "your calendar", save_now);
 
 /// `Ok` when the calendar is on disk; else why not (the caller says it).
 /// Never under the runtime's lock.
-pub fn saved() -> Result<(), crate::saving::SaveError> {
+pub fn saved() -> Result<(), crate::shell::saving::SaveError> {
     SAVER.check()
 }
 
 /// Write the store again (Try again). Only once `init` loaded it: never an
 /// empty one over calendar.json.
-fn save_now() -> Result<(), crate::saving::SaveError> {
+fn save_now() -> Result<(), crate::shell::saving::SaveError> {
     if let Some(s) = lock_started() {
         save_store(&s.store);
     }
@@ -461,7 +461,7 @@ fn snapshot_of(s: &Runtime, notes: &HashMap<String, u64>, now: i64, briefs: bool
             after_meeting: !connected
                 && !s.store.nudge.dismissed
                 && !s.store.nudge.shown_after_meeting
-                && !crate::notice::tips_off(),
+                && !crate::notices::notice::tips_off(),
         },
         max_connections: vault::SLOTS,
         briefs,
@@ -705,7 +705,7 @@ async fn fetch_feed(link: &str) -> Result<Vec<u8>, String> {
     let resp = HTTP
         .get(link)
         .header(reqwest::header::ACCEPT, "text/calendar, text/plain;q=0.8, */*;q=0.5")
-        .send_for(crate::net::Purpose::Calendar("iCal link"))
+        .send_for(crate::privacy::net::Purpose::Calendar("iCal link"))
         .await
         .map_err(|_| "Couldn't reach the calendar. Yap tries again in a few minutes.".to_string())?;
     match resp.status().as_u16() {
@@ -829,7 +829,7 @@ fn upcoming_count(events: &[Event], id: &str, now: i64) -> usize {
 /// Open `link` in the browser. Test runs never do: they keep it, for the
 /// suite to check (`calendar_e2e_opened`).
 fn open_link(app: &AppHandle, link: &str) -> Result<(), String> {
-    if crate::e2e::active() {
+    if crate::shell::e2e::active() {
         tracing::info!("e2e: would open a calendar link");
         lock().opened.push(link.to_string());
         return Ok(());
@@ -1143,7 +1143,7 @@ fn show_note(app: &AppHandle, note_id: u64, title: &str) {
     if window_view(app).0 {
         let _ = app.emit(EVENT_OPEN, json!({ "noteId": note_id, "stop": false }));
     } else {
-        let n = crate::meeting_guard::Notice {
+        let n = crate::calls::meeting_guard::Notice {
             kind: "recording",
             title: format!("Taking notes on {title}"),
             body: "Yap is recording. Let people know you're taking notes.".to_string(),
@@ -1153,14 +1153,14 @@ fn show_note(app: &AppHandle, note_id: u64, title: &str) {
             note_id: Some(note_id),
             surface: None,
         };
-        crate::meeting_guard::notice_native(app, &n);
+        crate::calls::meeting_guard::notice_native(app, &n);
     }
 }
 
 /// Take notes on `key` (and join it first, `join`): its note, recording.
 fn start_event(app: &AppHandle, key: &str, join: bool) -> Result<u64, String> {
     let event = event_by_key(key)?;
-    if let Some(recording) = crate::meeting::recording_note() {
+    if let Some(recording) = crate::meetings::meeting::recording_note() {
         if crate::notes::find_by_event(key) == Some(recording) {
             if join {
                 join_link(app, &event)?;
@@ -1174,7 +1174,7 @@ fn start_event(app: &AppHandle, key: &str, join: bool) -> Result<u64, String> {
         join_link(app, &event)?;
     }
     let (note_id, made) = note_for(&event, false)?;
-    let started = crate::commands::meeting_start(app.clone(), app.state::<crate::AppState>(), note_id);
+    let started = crate::meetings::commands::meeting_start(app.clone(), app.state::<crate::AppState>(), note_id);
     if let Err(e) = started {
         if made {
             crate::notes::delete(note_id);
@@ -1196,20 +1196,20 @@ async fn switch_to_event(app: &AppHandle, key: &str, join: bool) -> Result<u64, 
     if join {
         join_link(app, &event)?;
     }
-    if let Some(current) = crate::meeting::recording_note() {
+    if let Some(current) = crate::meetings::meeting::recording_note() {
         if crate::notes::find_by_event(key) == Some(current) {
             return Ok(current);
         }
         tracing::info!(note_id = current, "calendar: switching notes to the next meeting");
-        crate::meeting_end::end(app, Some("calendar"))?;
+        crate::meetings::meeting_end::end(app, Some("calendar"))?;
         // The recorder transcribes its last chunk before it lets go.
         for _ in 0..240 {
-            if crate::meeting::recording_note().is_none() {
+            if crate::meetings::meeting::recording_note().is_none() {
                 break;
             }
             tokio::time::sleep(Duration::from_millis(250)).await;
         }
-        if crate::meeting::recording_note().is_some() {
+        if crate::meetings::meeting::recording_note().is_some() {
             return Err("The last meeting's notes are still finishing. Try again in a moment.".into());
         }
     }
@@ -1269,7 +1269,7 @@ pub async fn calendar_event(app: AppHandle, key: String, action: String) -> Resu
     }
 }
 
-/// A recording started into `note_id`, whichever way (`commands::meeting_start`).
+/// A recording started into `note_id`, whichever way (`meetings::commands::meeting_start`).
 /// During a meeting, the note becomes that meeting's: its title (over a
 /// placeholder), attendees and invite. A note already made from the
 /// calendar just marks its meeting's reminder answered.
@@ -1287,7 +1287,7 @@ pub fn on_meeting_started(app: &AppHandle, note_id: u64) {
         return;
     }
     // A call in progress says which meeting it is (its service).
-    let calls: Vec<String> = serde_json::to_value(crate::meeting_detect::status())
+    let calls: Vec<String> = serde_json::to_value(crate::calls::meeting_detect::status())
         .ok()
         .and_then(|v| v.get("calls").cloned())
         .and_then(|c| serde_json::from_value::<Vec<Value>>(c).ok())
@@ -1322,7 +1322,7 @@ pub fn on_meeting_started(app: &AppHandle, note_id: u64) {
     answer(&event);
     tracing::info!(note_id, "calendar: a recording started during a meeting; note tied to it");
     // Every window showing the note (the notepad, Notes) follows.
-    crate::commands::note_changed(app, note_id, "calendar");
+    crate::notes::commands::note_changed(app, note_id, "calendar");
     let _ = app.emit("yap-notes-changed", ());
     emit(app);
 }
@@ -1359,7 +1359,7 @@ pub fn on_call_started(app_id: &str) {
     if lock_started().is_none() {
         return;
     }
-    let Some(recording) = crate::meeting::recording_note() else { return };
+    let Some(recording) = crate::meetings::meeting::recording_note() else { return };
     let recording_key = crate::notes::get(recording).and_then(|n| n.event).map(|e| e.key);
     let mut s = lock();
     let now = now_secs();
@@ -1387,7 +1387,7 @@ pub fn on_call_started(app_id: &str) {
 /// run says for itself whether the person is looking at it). Never with a
 /// lock held.
 fn window_view(app: &AppHandle) -> (bool, bool) {
-    crate::notice::window_view(app)
+    crate::notices::notice::window_view(app)
 }
 
 /// What a card is waiting for, after a turn of [`tick_card`].
@@ -1409,7 +1409,7 @@ enum CardChange {
 fn tick_card(app: &AppHandle) {
     let now = now_secs();
     let lead = reminder_lead(&crate::config::load().meeting_reminder);
-    let recording = crate::meeting::recording_note();
+    let recording = crate::meetings::meeting::recording_note();
     let recording_key = recording.and_then(crate::notes::get).and_then(|n| n.event).map(|e| e.key);
     let focused = window_view(app).1;
     let change = {
@@ -1543,7 +1543,7 @@ fn present_card(app: &AppHandle, card: &Card, focused: bool) {
 fn native_possible() -> bool {
     #[cfg(windows)]
     {
-        crate::win_toast::allowed()
+        crate::notices::win_toast::allowed()
     }
     #[cfg(not(windows))]
     {
@@ -1677,12 +1677,12 @@ fn answer_from(app: &AppHandle, arg: &str) {
         match (parts.next(), parts.next(), parts.next().and_then(|n| n.parse::<u64>().ok())) {
             (Some("calendar"), Some(answer), Some(id)) => {
                 if let Err(e) = respond(&app, id, answer).await {
-                    let _ = crate::commands::show_settings(&app);
+                    let _ = crate::shell::window::show_settings(&app);
                     let _ = app.emit("yap-error", format!("Couldn't start meeting notes. {e}"));
                 }
             }
             _ => {
-                let _ = crate::commands::show_settings(&app);
+                let _ = crate::shell::window::show_settings(&app);
             }
         }
     });
@@ -1788,15 +1788,15 @@ fn brief_meeting(e: &Event) -> brief::Meeting {
 /// Where a brief's "In short" comes from: the meeting's own model (the Note
 /// Formatting scope, else cleanup's), or why there's none.
 enum BriefAi {
-    Model(crate::meeting_summary::Endpoint),
+    Model(crate::meetings::meeting_summary::Endpoint),
     Plain(&'static str),
 }
 
 impl BriefAi {
     fn of(cfg: &crate::config::YapConfig) -> BriefAi {
-        match crate::meeting_summary::resolve_endpoint(cfg) {
+        match crate::meetings::meeting_summary::resolve_endpoint(cfg) {
             // A brief never starts a stopped on-device model.
-            Ok(ep) if ep.provider == crate::local_llm::PROVIDER_ONDEVICE && !crate::local_llm::is_running() => {
+            Ok(ep) if ep.provider == crate::ai::local_llm::PROVIDER_ONDEVICE && !crate::ai::local_llm::is_running() => {
                 BriefAi::Plain("The on-device model isn't running, so this is the plain brief.")
             }
             // A small model on this PC got too much wrong (model-evals.md).
@@ -1907,7 +1907,7 @@ fn prepare_brief(app: &AppHandle, key: &str, force: bool) -> Result<brief::Brief
 
 /// Write `facts`' "In short" on the meeting's model (beside any dictation),
 /// keep the finished brief, then start the next one waiting.
-async fn write_brief(app: AppHandle, facts: brief::Facts, ep: crate::meeting_summary::Endpoint, fingerprint: String) {
+async fn write_brief(app: AppHandle, facts: brief::Facts, ep: crate::meetings::meeting_summary::Endpoint, fingerprint: String) {
     let key = facts.meeting.key.clone();
     let started = std::time::Instant::now();
     let result = brief::write(Some(&app), &facts, &ep).await;
@@ -2045,7 +2045,7 @@ pub async fn calendar_brief_open(app: AppHandle, key: String, n: usize) -> Resul
         }
         _ => None,
     };
-    crate::commands::show_settings(&app)?;
+    crate::shell::window::show_settings(&app)?;
     match note_id {
         Some(id) => {
             let _ = app.emit(EVENT_OPEN, json!({ "noteId": id, "stop": false }));
@@ -2067,7 +2067,7 @@ pub async fn calendar_brief_open(app: AppHandle, key: String, n: usize) -> Resul
 pub fn calendar_meeting_notes(query: Option<String>) -> Vec<Value> {
     let words: Vec<String> = query.unwrap_or_default().to_lowercase().split_whitespace().map(str::to_string).collect();
     let now = now_secs().max(0) as u64;
-    let recording = crate::meeting::recording_note();
+    let recording = crate::meetings::meeting::recording_note();
     let mut out: Vec<(u64, Value)> = crate::notes::all()
         .into_iter()
         .filter(|n| n.note_type == "meeting" || n.event.is_some())
@@ -2107,7 +2107,7 @@ pub fn calendar_meeting_notes(query: Option<String>) -> Vec<Value> {
 }
 
 /// The invite's description, as context for a meeting's action plan and its
-/// Ask bar (`meeting_summary`, `commands::note_ask`): `None` without one.
+/// Ask bar (`meeting_summary`, `notes::commands::note_ask`): `None` without one.
 pub fn invite_context(note: &crate::notes::Note) -> Option<String> {
     let event = note.event.as_ref().filter(|e| !e.description.trim().is_empty())?;
     Some(format!("From the calendar invite \"{}\":\n{}\n", event.title, event.description.trim()))
@@ -2123,7 +2123,7 @@ fn meeting_time(n: &crate::notes::Note) -> u64 {
 }
 
 /// Context for a question asked from the Meetings view's Ask bar
-/// (`commands::chat_send` with scope "meetings"): the three latest meetings
+/// (`chat::commands::chat_send` with scope "meetings"): the three latest meetings
 /// and up to three more that match the question, newest first, each as a
 /// `<note>` block with its date and attendees, the action plan or else the
 /// typed notes and the transcript (a long one as its digests), bounded so a
@@ -2138,7 +2138,7 @@ pub fn meetings_context(query: &str) -> String {
         .collect();
     meetings.sort_by_key(|n| std::cmp::Reverse(meeting_time(n)));
     let mut picked: Vec<&crate::notes::Note> = meetings.iter().take(3).copied().collect();
-    for (_, hit) in crate::tools::search_notes(query, 20) {
+    for (_, hit) in crate::chat::tools::search_notes(query, 20) {
         if picked.len() >= 6 {
             break;
         }
@@ -2164,7 +2164,7 @@ pub fn meetings_context(query: &str) -> String {
                     body.push('\n');
                 }
                 if !n.transcript.is_empty() {
-                    body.push_str(&crate::meeting_summary::ask_context(n, 600));
+                    body.push_str(&crate::meetings::meeting_summary::ask_context(n, 600));
                 }
             }
             let body: String = body.chars().take(ASK_NOTE_CHARS).collect();
@@ -2194,7 +2194,7 @@ pub fn meetings_context(query: &str) -> String {
 #[cfg(debug_assertions)]
 #[tauri::command]
 pub fn calendar_e2e_opened() -> Result<Vec<String>, String> {
-    if !crate::e2e::active() {
+    if !crate::shell::e2e::active() {
         return Err("Only in e2e test mode".to_string());
     }
     Ok(lock().opened.clone())
@@ -2212,7 +2212,7 @@ mod native {
     use windows::UI::Notifications::ToastNotification;
 
     use super::{Card, CardKind};
-    use crate::win_toast::{esc, logo_xml};
+    use crate::notices::win_toast::{esc, logo_xml};
 
     const TAG: &str = "calendar";
 
@@ -2268,17 +2268,17 @@ mod native {
     }
 
     pub fn post(app: &AppHandle, card: &Card) -> Result<(), String> {
-        if !crate::win_toast::allowed() {
+        if !crate::notices::win_toast::allowed() {
             return Err("off in portable mode and test runs".to_string());
         }
-        let toast = crate::win_toast::post(app, TAG, &xml(card, &logo_xml()), None, activated)?;
+        let toast = crate::notices::win_toast::post(app, TAG, &xml(card, &logo_xml()), None, activated)?;
         *CURRENT.lock().unwrap_or_else(|p| p.into_inner()) = Some(toast);
         Ok(())
     }
 
     pub fn remove(app: &AppHandle) {
         if CURRENT.lock().unwrap_or_else(|p| p.into_inner()).take().is_some() {
-            crate::win_toast::remove(app, TAG);
+            crate::notices::win_toast::remove(app, TAG);
         }
     }
 
@@ -2352,7 +2352,7 @@ mod tests {
         assert!(xml.contains("content=\"Start notes\" arguments=\"calendar:start:7\""));
         assert!(xml.contains("arguments=\"calendar:snooze:7\""));
         // WinRT takes it as a toast (built, never shown).
-        crate::win_toast::build("calendar", &xml, false).unwrap();
+        crate::notices::win_toast::build("calendar", &xml, false).unwrap();
         // Without a link, and as a switch: no join, and the question.
         let mut plain = card.clone();
         plain.kind = CardKind::Switch;
@@ -2361,7 +2361,7 @@ mod tests {
         assert_eq!(xml.matches("<action ").count(), 2);
         assert!(xml.contains("content=\"Switch notes\" arguments=\"calendar:start:7\""));
         assert!(xml.contains("Switch your notes to this meeting?"));
-        crate::win_toast::build("calendar", &xml, false).unwrap();
+        crate::notices::win_toast::build("calendar", &xml, false).unwrap();
     }
 
     #[test]

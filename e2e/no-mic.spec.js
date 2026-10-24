@@ -13,7 +13,7 @@ test('starts without a microphone and says so when asked to record', async ({ ya
 
   await pressHotkey(main);
   // A dictation's own error is said where the dictation is — the overlay —
-  // and only there (notice.rs: one place; no toast in the main window).
+  // and only there (notices/notice.rs: one place; no toast in the main window).
   await expect(yap.overlay.getByText('No microphone found')).toBeVisible();
   await shot(yap.overlay, '02-overlay-no-microphone');
   await expect(main.getByRole('status').filter({ hasText: 'No microphone found' })).toHaveCount(0);
@@ -21,7 +21,7 @@ test('starts without a microphone and says so when asked to record', async ({ ya
 
 // No device because Windows' privacy switches block the microphone: Yap
 // says that, with Open settings, instead of "No microphone found"
-// (mic_privacy.rs; a test run reads no registry — `e2e_mic_privacy`).
+// (dictation/mic_privacy.rs; a test run reads no registry — `e2e_mic_privacy`).
 test("when Windows' privacy settings block the mic, it says so instead", async ({ yap, main, shot }) => {
   await yap.invoke('e2e_mic_privacy', { blocked: 'device' });
   try {

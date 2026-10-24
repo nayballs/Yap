@@ -120,7 +120,7 @@ pub struct Last {
     /// From the release to the image saved.
     pub save_ms: f64,
     pub focused: bool,
-    pub image: Option<crate::chats::ChatImage>,
+    pub image: Option<crate::chat::chats::ChatImage>,
     pub conversation_id: Option<u64>,
 }
 
@@ -147,7 +147,7 @@ pub fn set_fake_frames(frames: Vec<Frame>) {
 /// Whether this run snips fake monitors (test mode, not the robot tests,
 /// which capture the real screen).
 fn faking() -> bool {
-    crate::e2e::active() && !crate::realtest::on()
+    crate::shell::e2e::active() && !crate::shell::realtest::on()
 }
 
 // ---- saying "snip" ------------------------------------------------------------------------
@@ -216,9 +216,9 @@ fn give_focus_back(_hwnd: isize) {}
 /// window is on screen on one; else a new chat (`None`). Window getters:
 /// never under a lock.
 fn chat_target(app: &AppHandle) -> Option<u64> {
-    let (visible, _) = crate::notice::window_view(app);
-    match crate::assistant::chat_viewing() {
-        crate::assistant::Viewing::Conversation(id) if visible => Some(id),
+    let (visible, _) = crate::notices::notice::window_view(app);
+    match crate::chat::assistant::chat_viewing() {
+        crate::chat::assistant::Viewing::Conversation(id) if visible => Some(id),
         _ => None,
     }
 }
@@ -238,7 +238,7 @@ pub fn start(app: &AppHandle, origin: Origin) {
         if let Err(e) = run(&app, origin) {
             tracing::warn!("snip: couldn't take it ({e})");
             set_last(Last { outcome: "failed".into(), reason: e.clone(), ..Default::default() });
-            crate::alert::snip_failed(&app, &e);
+            crate::notices::alert::snip_failed(&app, &e);
             BUSY.store(false, Ordering::SeqCst);
         }
     });
@@ -258,10 +258,10 @@ fn run(app: &AppHandle, origin: Origin) -> Result<(), String> {
     let started = Instant::now();
     // Not over a dictation: one thing at a time. (A spoken "snip" ends its
     // own dictation first.)
-    if origin != Origin::Voice && crate::pipeline::dictation_state().1 {
+    if origin != Origin::Voice && crate::dictation::pipeline::dictation_state().1 {
         tracing::info!("snip: not during a dictation");
         set_last(Last { outcome: "refused".into(), reason: "dictating".into(), ..Default::default() });
-        crate::alert::snip_dictating(app);
+        crate::notices::alert::snip_dictating(app);
         BUSY.store(false, Ordering::SeqCst);
         return Ok(());
     }
@@ -283,9 +283,9 @@ fn run(app: &AppHandle, origin: Origin) -> Result<(), String> {
         if monitors.is_empty() {
             return Err("No monitors found".into());
         }
-        crate::capture::for_snip(app, true);
+        crate::calls::capture::for_snip(app, true);
         let (results, timings) = capture::capture(&monitors, capture::Force::Auto);
-        crate::capture::for_snip(app, false);
+        crate::calls::capture::for_snip(app, false);
         let frames: Vec<Frame> = results.into_iter().filter_map(Result::ok).collect();
         if frames.is_empty() {
             return Err("Windows didn't let Yap capture the screen".into());
@@ -329,7 +329,7 @@ fn run(app: &AppHandle, origin: Origin) -> Result<(), String> {
     };
     // Esc cancels through Yap's keyboard hook too (if Windows kept the
     // focus from the overlay).
-    crate::input_hook::snip_escape(overlay::is_open());
+    crate::dictation::input_hook::snip_escape(overlay::is_open());
     let overlay_ms = started.elapsed().as_secs_f64() * 1000.0;
     tracing::info!(
         monitors,
@@ -364,7 +364,7 @@ fn run(app: &AppHandle, origin: Origin) -> Result<(), String> {
 /// The overlay closed: save the box and hand it to Chat, or give the focus
 /// back.
 fn finish(app: &AppHandle, generation: u64, outcome: overlay::Outcome) {
-    crate::input_hook::snip_escape(false);
+    crate::dictation::input_hook::snip_escape(false);
     let snip = {
         let mut current = CURRENT.lock().unwrap_or_else(|p| p.into_inner());
         match current.take() {
@@ -410,7 +410,7 @@ fn finish(app: &AppHandle, generation: u64, outcome: overlay::Outcome) {
                     last.outcome = "failed".into();
                     last.reason = e.clone();
                     set_last(last);
-                    crate::alert::snip_failed(app, &e);
+                    crate::notices::alert::snip_failed(app, &e);
                     give_focus_back(snip.foreground);
                 }
             }
@@ -419,7 +419,7 @@ fn finish(app: &AppHandle, generation: u64, outcome: overlay::Outcome) {
 }
 
 /// The box cut out of its monitor's frame and saved as a PNG.
-fn save(snip: &Snip, screen: usize, rect: &Rect) -> Result<crate::chats::ChatImage, String> {
+fn save(snip: &Snip, screen: usize, rect: &Rect) -> Result<crate::chat::chats::ChatImage, String> {
     let frame = snip.frames.get(screen).ok_or("that monitor's picture is gone")?;
     let r = geom::to_frame(rect, (frame.monitor.width, frame.monitor.height), (frame.width, frame.height));
     if !geom::big_enough(&r) {
@@ -428,22 +428,22 @@ fn save(snip: &Snip, screen: usize, rect: &Rect) -> Result<crate::chats::ChatIma
     let rgba = geom::crop_rgba(&frame.bgra, frame.width, &r);
     let png = images::encode_png(&rgba, r.w as u32, r.h as u32, true)?;
     let saved = images::save(&png, r.w as u32, r.h as u32)?;
-    Ok(crate::chats::ChatImage { id: saved.id, w: saved.w, h: saved.h, bytes: saved.bytes, source: "snip".into(), gone: false })
+    Ok(crate::chat::chats::ChatImage { id: saved.id, w: saved.w, h: saved.h, bytes: saved.bytes, source: "snip".into(), gone: false })
 }
 
 /// The main window up on Chat with the image in its message box, and the
 /// copy for the selected model made meanwhile.
-fn hand_to_chat(app: &AppHandle, image: crate::chats::ChatImage, conversation: Option<u64>, origin: Origin) {
+fn hand_to_chat(app: &AppHandle, image: crate::chat::chats::ChatImage, conversation: Option<u64>, origin: Origin) {
     let cfg = crate::config::load();
-    if let Ok((base_url, _key, _model, provider, _p, _t)) = crate::commands::resolve_chat_endpoint(&cfg) {
-        let here = crate::ai_model::runs_here(&provider, &base_url);
+    if let Ok((base_url, _key, _model, provider, _p, _t)) = crate::chat::turn::resolve_chat_endpoint(&cfg) {
+        let here = crate::ai::ai_model::runs_here(&provider, &base_url);
         images::prepare(vec![image.id.clone()], images::long_edge(&provider, here));
     }
     let payload = serde_json::json!({ "image": image, "conversationId": conversation, "origin": origin });
     if let Some(main) = app.get_webview_window("settings") {
         let _ = main.emit(EVENT, payload);
     }
-    if let Err(e) = crate::commands::show_settings(app) {
+    if let Err(e) = crate::shell::window::show_settings(app) {
         tracing::warn!("snip: couldn't bring the main window up ({e})");
     }
 }
@@ -462,8 +462,8 @@ pub fn snip_start(app: AppHandle, origin: Option<String>) {
 #[tauri::command]
 pub fn chat_images_prepare(ids: Vec<String>) {
     let cfg = crate::config::load();
-    if let Ok((base_url, _key, _model, provider, _p, _t)) = crate::commands::resolve_chat_endpoint(&cfg) {
-        let here = crate::ai_model::runs_here(&provider, &base_url);
+    if let Ok((base_url, _key, _model, provider, _p, _t)) = crate::chat::turn::resolve_chat_endpoint(&cfg) {
+        let here = crate::ai::ai_model::runs_here(&provider, &base_url);
         images::prepare(ids.into_iter().filter(|i| images::is_id(i)).collect(), images::long_edge(&provider, here));
     }
 }
@@ -495,7 +495,7 @@ pub fn serve(request: &tauri::http::Request<Vec<u8>>) -> tauri::http::Response<V
 /// then skips ~120 ms), and old screenshots swept now and once a day.
 pub fn init(app: &AppHandle) {
     let cfg = crate::config::load();
-    if !crate::e2e::active() && !cfg.snip_hotkey.trim().is_empty() {
+    if !crate::shell::e2e::active() && !cfg.snip_hotkey.trim().is_empty() {
         std::thread::Builder::new()
             .name("snip-warm".into())
             .spawn(|| {

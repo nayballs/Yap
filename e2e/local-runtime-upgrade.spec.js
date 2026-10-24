@@ -1,5 +1,5 @@
 // An older llamafile engine on disk is replaced in the background
-// (src-tauri/src/local_llm.rs `spawn_runtime_upgrade`): installs from before
+// (src-tauri/src/ai/local_llm.rs `spawn_runtime_upgrade`): installs from before
 // 22 Oct 2026 have 0.10.3 with no marker beside it, and the install path only
 // ever downloaded a missing engine. While the on-device model is in use, the
 // pinned engine is downloaded next to the old one (verified), put in place

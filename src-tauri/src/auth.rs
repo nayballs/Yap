@@ -28,7 +28,7 @@
 //! Server endpoints and the handoff protocol: `cloud/README.md`.
 
 use std::sync::atomic::{AtomicU64, Ordering};
-use crate::net::Recorded as _;
+use crate::privacy::net::Recorded as _;
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Duration;
 
@@ -270,7 +270,7 @@ async fn refresh_methods(app: &AppHandle) {
         let resp = CLIENT
             .get(format!("{}/api/providers", base_url()))
             .timeout(Duration::from_secs(8))
-            .send_for(crate::net::Purpose::Account)
+            .send_for(crate::privacy::net::Purpose::Account)
             .await
             .ok()?;
         resp.status().is_success().then_some(())?;
@@ -352,7 +352,7 @@ pub async fn auth_start(app: AppHandle, provider: String) -> Result<(), String> 
     let health = CLIENT
         .get(format!("{}/api/health", base_url()))
         .timeout(Duration::from_secs(6))
-        .send_for(crate::net::Purpose::Account)
+        .send_for(crate::privacy::net::Purpose::Account)
         .await;
     if !health.is_ok_and(|r| r.status().is_success()) {
         return Err(UNREACHABLE.into());
@@ -435,7 +435,7 @@ fn scheme_registered(app: &AppHandle) -> bool {
     #[cfg(windows)]
     {
         use tauri_plugin_deep_link::DeepLinkExt;
-        !crate::portable::is_portable() && app.deep_link().is_registered(SCHEME).unwrap_or(false)
+        !crate::shell::portable::is_portable() && app.deep_link().is_registered(SCHEME).unwrap_or(false)
     }
     #[cfg(not(windows))]
     {
@@ -449,7 +449,7 @@ fn handle_deep_link(app: &AppHandle, url: &url::Url) {
     // auth.contextmirror.com/security, linked from the new-sign-in email):
     // show Settings → Account, where the device list is.
     if url.scheme() == SCHEME && url.host_str() == Some("account") {
-        let _ = crate::commands::show_settings(app);
+        let _ = crate::shell::window::show_settings(app);
         let _ = app.emit("yap-open-settings", "account");
         return;
     }
@@ -457,7 +457,7 @@ fn handle_deep_link(app: &AppHandle, url: &url::Url) {
         tracing::warn!("auth: ignoring unrecognised deep link");
         return;
     }
-    let _ = crate::commands::show_settings(app);
+    let _ = crate::shell::window::show_settings(app);
     let Some(code) = url.fragment().and_then(|f| f.strip_prefix("token=")) else {
         emit_error(app, EXPIRED);
         return;
@@ -518,7 +518,7 @@ async fn redeem(app: &AppHandle, code: &str) -> Result<(), String> {
     let resp = CLIENT
         .post(api("/electron/token"))
         .json(&json!({ "token": handoff.identifier, "state": state, "code_verifier": verifier }))
-        .send_for(crate::net::Purpose::Account)
+        .send_for(crate::privacy::net::Purpose::Account)
         .await
         // Never reached the server, so the code is still good: keep waiting.
         .map_err(|_| UNREACHABLE.to_string())?;
@@ -600,7 +600,7 @@ fn handle_loopback(app: &AppHandle, request: tiny_http::Request) -> bool {
 
     match result {
         Ok(()) => {
-            let _ = crate::commands::show_settings(app);
+            let _ = crate::shell::window::show_settings(app);
             true
         }
         Err(e) => {
@@ -620,7 +620,7 @@ pub async fn auth_email_send(email: String) -> Result<(), String> {
     let resp = CLIENT
         .post(api("/email-otp/send-verification-otp"))
         .json(&json!({ "email": email, "type": "sign-in" }))
-        .send_for(crate::net::Purpose::Account)
+        .send_for(crate::privacy::net::Purpose::Account)
         .await
         .map_err(|_| UNREACHABLE.to_string())?;
     read_api(resp).await.map_err(|e| e.friendly())?;
@@ -638,7 +638,7 @@ pub async fn auth_email_verify(app: AppHandle, email: String, code: String) -> R
     let resp = CLIENT
         .post(api("/sign-in/email-otp"))
         .json(&json!({ "email": email, "otp": code }))
-        .send_for(crate::net::Purpose::Account)
+        .send_for(crate::privacy::net::Purpose::Account)
         .await
         .map_err(|_| UNREACHABLE.to_string())?;
     let body = read_api(resp).await.map_err(|e| e.friendly())?;
@@ -940,7 +940,7 @@ async fn poll_once(device_code: &str) -> PollReply {
     let sent = CLIENT
         .post(api("/device/token"))
         .json(&json!({ "grant_type": DEVICE_GRANT, "device_code": device_code, "client_id": CLIENT_ID }))
-        .send_for(crate::net::Purpose::Account)
+        .send_for(crate::privacy::net::Purpose::Account)
         .await;
     let Ok(resp) = sent else {
         return PollReply::Retry;
@@ -970,7 +970,7 @@ pub async fn auth_device_start(app: AppHandle, renew: Option<bool>) -> Result<Op
     let resp = CLIENT
         .post(api("/device/code"))
         .json(&json!({ "client_id": CLIENT_ID }))
-        .send_for(crate::net::Purpose::Account)
+        .send_for(crate::privacy::net::Purpose::Account)
         .await
         .map_err(|_| UNREACHABLE.to_string())?;
     let body = read_api(resp).await.map_err(|e| e.friendly())?;
@@ -1395,7 +1395,7 @@ async fn end_session(token: &str) -> bool {
         .post(api("/sign-out"))
         .bearer_auth(token)
         .json(&json!({}))
-        .send_for(crate::net::Purpose::Account)
+        .send_for(crate::privacy::net::Purpose::Account)
         .await
         .is_ok()
 }
@@ -1432,7 +1432,7 @@ pub async fn auth_delete_account(app: AppHandle) -> Result<(), String> {
         .post(api("/delete-user"))
         .bearer_auth(&token)
         .json(&json!({}))
-        .send_for(crate::net::Purpose::Account)
+        .send_for(crate::privacy::net::Purpose::Account)
         .await
         .map_err(|_| UNREACHABLE.to_string())?;
     match read_api(resp).await {
@@ -1467,7 +1467,7 @@ async fn get_session(token: &str) -> Result<Option<Profile>, ApiError> {
     let resp = CLIENT
         .get(api("/get-session"))
         .bearer_auth(token)
-        .send_for(crate::net::Purpose::Account)
+        .send_for(crate::privacy::net::Purpose::Account)
         .await
         .map_err(|_| ApiError::network())?;
     let body = read_api(resp).await?;
@@ -1478,7 +1478,7 @@ async fn list_providers(token: &str) -> Result<Vec<String>, ApiError> {
     let resp = CLIENT
         .get(api("/list-accounts"))
         .bearer_auth(token)
-        .send_for(crate::net::Purpose::Account)
+        .send_for(crate::privacy::net::Purpose::Account)
         .await
         .map_err(|_| ApiError::network())?;
     let body = read_api(resp).await?;
@@ -1535,7 +1535,7 @@ pub async fn auth_list_sessions(app: AppHandle) -> Result<Vec<DeviceSession>, St
     let resp = CLIENT
         .get(account_api("/sessions"))
         .bearer_auth(&token)
-        .send_for(crate::net::Purpose::Account)
+        .send_for(crate::privacy::net::Purpose::Account)
         .await
         .map_err(|_| UNREACHABLE.to_string())?;
     match read_api(resp).await {
@@ -1553,7 +1553,7 @@ pub async fn auth_revoke_other_sessions(app: AppHandle) -> Result<(), String> {
         .post(api("/revoke-other-sessions"))
         .bearer_auth(&token)
         .json(&json!({}))
-        .send_for(crate::net::Purpose::Account)
+        .send_for(crate::privacy::net::Purpose::Account)
         .await
         .map_err(|_| UNREACHABLE.to_string())?;
     if let Err(e) = read_api(resp).await {
@@ -1572,7 +1572,7 @@ pub async fn auth_revoke_session(app: AppHandle, id: String) -> Result<(), Strin
         .post(account_api("/sessions/revoke"))
         .bearer_auth(&token)
         .json(&json!({ "id": id }))
-        .send_for(crate::net::Purpose::Account)
+        .send_for(crate::privacy::net::Purpose::Account)
         .await
         .map_err(|_| UNREACHABLE.to_string())?;
     if let Err(e) = read_api(resp).await {

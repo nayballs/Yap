@@ -10,16 +10,16 @@
   2026-10-22 it mirrors stt_device: `save` sets it to stt_device != "cpu",
   `load` turns an old `false` into "cpu"), stt_device (Settings →
   Speech-to-Text → Runs on: "auto" — the graphics card unless the processor
-  measured clearly faster on this PC, `stt_speed.rs` — | "gpu" | "cpu"), keep_recent_audio (a day of dictation
-  audio to run one again, on; `recent_audio.rs`), as_said_hotkey ("Use what I
+  measured clearly faster on this PC, `dictation/stt_speed.rs` — | "gpu" | "cpu"), keep_recent_audio (a day of dictation
+  audio to run one again, on; `dictation/recent_audio.rs`), as_said_hotkey ("Use what I
   said", "" = unbound) + as_said_offer (the bar's offer after AI cleanup,
-  on; both `as_said.rs`), snip_hotkey (Snip to Chat, default Win+Alt+S "kb:alt+win+83", "" = unbound; never a clash, `input_hook::configure_snip_from`) + snip_voice ("Say “snip” to take a screenshot", on) + chat_image_days ("Keep chat screenshots": 7 / 30 (default) / 90 / 0 = forever; another value counts as 30; changing it sweeps at once; all `snip.rs`, docs/architecture/snip.md), rewrite_last_dictation (`rewriteLastDictation`,
+  on; both `pasting/as_said.rs`), snip_hotkey (Snip to Chat, default Win+Alt+S "kb:alt+win+83", "" = unbound; never a clash, `input_hook::configure_snip_from`) + snip_voice ("Say “snip” to take a screenshot", on) + chat_image_days ("Keep chat screenshots": 7 / 30 (default) / 90 / 0 = forever; another value counts as 30; changing it sweeps at once; all `snip.rs`, docs/architecture/snip.md), rewrite_last_dictation (`rewriteLastDictation`,
   serde default on: the rewrite shortcut with nothing selected rewrites the
   last dictation — within a minute, in the same field, still ending at the
   cursor —; off, it writes new text as before 2026-10-23; Settings →
   Commands; `as_said::rewritable`; saved transforms follow it too),
   transforms (`transforms`, **saved transforms**, Settings → Commands →
-  Transforms, `transforms.rs`: a list of `{id, builtin, name, instruction,
+  Transforms, `dictation/transforms.rs`: a list of `{id, builtin, name, instruction,
   hotkey, language}` in the person's order — `builtin` one of "polish" |
   "shorter" | "grammar" | "translate" | "prompt" (its name and instruction
   are Yap's, the stored ones ignored), else "" with the person's name and
@@ -30,28 +30,28 @@
   left unbound, `transforms::assign`), input_device, sound +
   volume, output_device, quiet_other_apps ("Silence other apps while you
   dictate", off; reads old configs' `muteWhileRecording`) + pause_media
-  ("Pause music and videos while you dictate", off; both `mute.rs`),
+  ("Pause music and videos while you dictate", off; both `dictation/mute.rs`),
   keep_mic_ready ("Keep the microphone ready", off: the mic opens when you
   dictate, stays warm a minute and closes, at once on Bluetooth; on, it's
-  open the whole time Yap runs, as before 2026-10-22; `mic.rs`), recording_mode,
+  open the whole time Yap runs, as before 2026-10-22; `dictation/mic.rs`), recording_mode,
   overlay_position, dictionary (`DictionaryEntry`: from/to + `fuzzy` (default
   on) + `snippet` (default off)), append_trailing_space, smart_spacing ("Match
   the text around the cursor", default on), screen_names ("Spell names the
-  way they're written on screen", default on; `screen_terms.rs`),
+  way they're written on screen", default on; `dictionary/screen_terms.rs`),
   chat_no_full_stop ("Leave the full
   stop off chat messages", default on), auto_submit(+key),
   voice_enter (the "press enter" voice command, default on), terminal_mode
-  ("Safer pasting into terminals", default on; both `app_kind.rs`),
+  ("Safer pasting into terminals", default on; both `pasting/app_kind.rs`),
   restore_clipboard, autostart, model_unload_timeout, selected_language,
   translate_to_english, the `pp*` AI-cleanup fields incl. `pp_preset` (Default/Email/
   Notes/Slack/Code/Custom), the editable `pp_prompt` body, `pp_api_keys` (per-provider
   key store — the UI swaps the active `pp_api_key` from it on provider switch),
   `pp_local_model` (the on-device GGUF; empty = the 1.5B) + `local_llm_upgrade_dismissed`
-  (the 4B offered once, `local_llm::upgrade_offer`) + `local_context` (the
-  on-device model's context in tokens; 0 = 8,192; `local_llm::effective_context`), `cleanup_profiles` (each
+  (the 4B offered once, `local_llm::models::upgrade_offer`) + `local_context` (the
+  on-device model's context in tokens; 0 = 8,192; `local_llm::context::effective_context`), `cleanup_profiles` (each
   with an optional per-profile LLM override: provider/base_url/model/api_key — empty
   provider = inherit global; since 2026-10-24 also **styles by app**,
-  `cleanup_styles.rs`: a profile with a `category` — "email", "workChat",
+  `ai/cleanup_styles.rs`: a profile with a `category` — "email", "workChat",
   "personalChat", "documents", "aiPrompts", "terminal", "other", ids
   `style-<category>`, one each, added at load — its `tone` ("formal",
   "casual", "veryCasual", "natural", "literal", "command", "off"; defaults
@@ -64,22 +64,22 @@
   stays as it was; no `migrate_once`) + `cleanup_offer_seen` (the one tip
   offering cleanup was shown; `cleanup_styles::offer`), streaming_partials,
   history_enabled, update_checks_enabled, dictionary_fuzzy, learn_words
-  ("Suggest words from your corrections", default on, `learn.rs`),
+  ("Suggest words from your corrections", default on, `dictionary/learn.rs`),
   show_tips ("Show tips", default on: coaching hints and nudges;
-  `notice.rs`), the meeting
+  `notices/notice.rs`), the meeting
   notepad: meeting_open_notepad (default on) + meeting_split_screen (default
   off) + meeting_live_transcript (default on) + meeting_consent_message (the
   notepad's "Copy consent message" text; empty = the default), meeting
-  audio (`meeting_audio.rs`, Settings → Meetings): meeting_keep_audio ("Keep
+  audio (`meetings/meeting_audio.rs`, Settings → Meetings): meeting_keep_audio ("Keep
   meeting audio", on: to transcribe a meeting again and play its lines; off,
   it's still written while a meeting records and deleted once it's
   transcribed) + meeting_audio_days (14; 1 / 7 / 14 / 30 / 90) +
   meeting_refine ("Improve the transcript after the meeting",
-  `meeting_refine.rs`: "auto" — when chunks failed or a more accurate
+  `meetings/meeting_refine.rs`: "auto" — when chunks failed or a more accurate
   speech model is installed for the meeting's language —, "always",
   "never"; default "auto"), speaker
   diarization: meeting_diarization ("Tell speakers apart in meetings", beta,
-  off) + diarization_model (a `diarize/registry.rs` id, default
+  off) + diarization_model (a `speakers/diarize/registry.rs` id, default
   `nemotron-3-diarization`), speaker names: meeting_speaker_names ("Suggest
   who's speaking", on: the name cards, Yap's strong guesses, the AI step at a
   meeting's end; `speakers/naming.rs`) + meeting_call_names (read who's
@@ -101,11 +101,11 @@
   bar_dictation_buttons (the capsule's ✕ / ✓: "off" | "hover" | "always",
   off), General → Appearance (`src/lib/appearance.js`, every window):
   theme ("system" — Windows' app mode, followed live — | "light" | "dark",
-  system; `theme.rs` gives the opaque windows' webviews its background) +
+  system; `shell/theme.rs` gives the opaque windows' webviews its background) +
   reading_font ("default" Figtree | "sans" Geist | "serif" Literata |
   "system" Segoe UI | "dyslexic" OpenDyslexic, default) + reading_size
   ("small" | "default" | "large" | "larger", default) + motion ("system" |
-  "reduced", system), spoken replies (`tts.rs`): speak_replies (off), speak_when ("voice" |
+  "reduced", system), spoken replies (`voice/tts.rs`): speak_replies (off), speak_when ("voice" |
   "always", voice), talk_back_hands_free (true; only while speak_replies is
   on), tts_engine ("kokoro" — Windows voices until it's downloaded — or
   "windows"), tts_voice (Kokoro's, "af_bella"), tts_windows_voice ("" =
@@ -113,7 +113,7 @@
   gain on the voice, squared — `tts::gain`, half = −12 dB, 10 % = −40 dB —
   under the Windows mixer, live mid-sentence via the rodio sink's volume;
   `tts_volume_set {volume, save?}` → `yap-voice-volume`), tts_provider
-  ("local" — the engines above — or "elevenlabs"; `tts/cloud.rs`) +
+  ("local" — the engines above — or "elevenlabs"; `voice/tts/cloud.rs`) +
   tts_cloud_keys (cloud voice service → API key, like web_search_keys:
   never logged, sent only to that service in its header) + tts_cloud
   (service → `CloudVoiceChoice {voice, voiceName, model}`, empty = George
@@ -122,15 +122,15 @@
   choice before) to "kokoro"), the Voice Assistant's assistant_hotkey (""
   = unbound, the default) + assistant_answer_card (true) +
   assistant_stop_on_pause (true: "Stop listening when I pause",
-  `pause.rs` — a pause after the question ends it, never before you've
+  `dictation/pause.rs` — a pause after the question ends it, never before you've
   spoken, never under a held push-to-talk key), Read aloud's read_hotkey ("" = unbound, the
-  default; `read_aloud.rs`: the selection in any app read aloud, its speed
+  default; `voice/read_aloud.rs`: the selection in any app read aloud, its speed
   the card's − / +, saved as tts_rate), opening apps (`apps.rs`): open_apps (true) +
   apps_blocked (app ids, "Don't open this one") + app_nicknames
   (`AppNickname {say, app, name}`), the web (`web.rs`): web_search (false) +
   web_search_native (true: cloud models use their provider's own search) +
   web_search_service ("exa" | "tavily") + web_search_keys (service → key),
-  About you (`about_you.rs`, Settings → General): about_name + about_me (≤
+  About you (`ai/about_you.rs`, Settings → General): about_name + about_me (≤
   300 characters; told to the AI model with each question, never to Yap) +
   region_country (ISO; "" = Automatic, Windows' home location: the
   currency, units, language and spelling follow it, the time zone is the
@@ -170,7 +170,7 @@
   moved; never saved over), the settings that still read on their own are
   **kept** (`salvage`: only the unreadable ones reset) and written back,
   and the person is told **once** (`report_reset` → `init`, 4 s after start
-  as the first load runs before logging and the windows: an `alert.rs`
+  as the first load runs before logging and the windows: an `notices/alert.rs`
   "configReset" — "Your settings were reset" / "Some of your settings were
   reset", where the old file is, **Show file** → Explorer; the log says the
   copy's file name and counts, never the contents). A UTF-8 byte-order mark
@@ -181,14 +181,14 @@
   meanwhile isn't lost — the tray's model switch, the bar's "off",
   `download_model_size`/`set_active_model`, `set_autostart`, learned words,
   the notepad's consent message and call detection's "Stop asking" /
-  "Don't ask for …" (`meeting_detect.rs`, outside its state lock) use it.
+  "Don't ask for …" (`calls/meeting_detect.rs`, outside its state lock) use it.
   `try_update(|c| … -> Result)` is the same for a change that can be
-  refused (nothing saved, not half of it), and `commands::change_config`
+  refused (nothing saved, not half of it), and `settings::change_config`
   runs it and then applies the result as a Settings save does
   (`apply_config`: hotkeys, the pipeline, the bar…): the Chat picker's model
-  and key (`ai_model.rs`), the voice's volume and Speak replies (`tts.rs`),
-  Read aloud's speed (`read_aloud.rs`) and the on-device context
-  (`local_llm.rs`), which until 2026-10-24 loaded, changed and saved on
+  and key (`ai/ai_model.rs`), the voice's volume and Speak replies (`voice/tts.rs`),
+  Read aloud's speed (`voice/read_aloud.rs`) and the on-device context
+  (`ai/local_llm.rs`), which until 2026-10-24 loaded, changed and saved on
   their own (a lint-style test keeps them so).
   Every save then emits **`yap-config-saved`** to every window (`init`
   registers the app; Settings' copy adopts what changed,
@@ -212,7 +212,7 @@
 - Speaker models: `%APPDATA%/yap/models/diarization/` — `nemotron-3-diarization/`
   (the GGUF from Hugging Face `nvidia/`, pinned commit) and
   `nemo-speech-0.2.0-cpu/` (NVIDIA's runtime DLLs + `licenses/`), each with a
-  `NOTICE.txt` naming its source and licence (`diarize/registry.rs`; size +
+  `NOTICE.txt` naming its source and licence (`speakers/diarize/registry.rs`; size +
   SHA-256 verified). Yap has no central third-party notices page: the
   attribution is in Settings → Speech-to-Text → Speakers in meetings and in
   those files.
@@ -223,7 +223,7 @@
   Apache-2.0) and `espeak-ng-1.52.0/` (eSpeak NG's program, DLL and the data
   of the languages Kokoro reads, from its 1.52.0 MSI; **GPL-3.0**, run as a
   separate program, never linked; `COPYING` + the source link in
-  NOTICE.txt), each with a `NOTICE.txt` (`tts/registry.rs`; size + SHA-256
+  NOTICE.txt), each with a `NOTICE.txt` (`voice/tts/registry.rs`; size + SHA-256
   verified). Attribution: Settings → Voice Assistant → Voice. Deleted from the
   Kokoro row; ~352 MB.
 - Groq usage: `%APPDATA%/yap/groq_usage.json`.
@@ -233,10 +233,10 @@
   whether its words matched), the pick, when, the processor's load before,
   how this person's dictations weigh the lengths (`shortShare`), and what it was measured on
   (the method, the model's files, the graphics adapters and drivers): a
-  stale one is measured again (`stt_speed.rs`). Safe to delete (the graphics card until measured again).
+  stale one is measured again (`dictation/stt_speed.rs`). Safe to delete (the graphics card until measured again).
 - Recent dictation audio: `%APPDATA%/yap/recent-audio/` — `<id>.wav` (16 kHz
   mono) for each dictation of the last 24 h (≤ 500, ≤ 200 MB), and
-  `<id>.pending` while one is being transcribed (`recent_audio.rs`). Never
+  `<id>.pending` while one is being transcribed (`dictation/recent_audio.rs`). Never
   leaves the PC; deleted on schedule, with its history entry, by clearing
   history and by Settings → Privacy & data → Clear recent audio.
 - Meeting audio: `%APPDATA%/yap/meeting-audio/<note id>/` — for each
@@ -245,7 +245,7 @@
   for a call side that's often silent) and `<recording>.json` (when it
   started, how far each side is in the note, where dictations began,
   whether it ended — not after a crash, which the next start offers to
-  transcribe) (`meeting_audio.rs`). Never leaves the PC; kept
+  transcribe) (`meetings/meeting_audio.rs`). Never leaves the PC; kept
   `meeting_audio_days` (14) from the recording's start, ≤ 10 GB in all (the
   oldest first), deleted with its note, by Settings → Meetings → Delete all
   meeting audio, or once transcribed with "Keep meeting audio" off — held
@@ -261,17 +261,17 @@
 - History: `%APPDATA%/yap/history.json` (local-only; cleared from Settings → Privacy & data → History).
 - Notes: `%APPDATA%/yap/notes.json` — the AI Notepad store (folders, actions,
   participants, meeting transcripts).
-- Chats: `%APPDATA%/yap/chats.json` — AI Chat conversations (`chats.rs`).
+- Chats: `%APPDATA%/yap/chats.json` — AI Chat conversations (`chat/chats.rs`).
 - Model lists: `%APPDATA%/yap/model_catalog.json` — each keyed AI provider's
   chat models as it last listed them (id, name, created, context, tools,
-  first seen), when, and why the last check failed (`model_catalog.rs`).
+  first seen), when, and why the last check failed (`ai/model_catalog.rs`).
   Never a key. Safe to delete (the curated lists show until the next check).
 - Network receipts: `%APPDATA%/yap/connections.json` — every connection Yap
   made in the last 7 days, folded per purpose, feature and host within 10
   minutes (when, the host — never a path, query, header or body —, the
   purpose label, the feature, this PC / your network / internet, the
   count, failures, the last status, bytes sent and received), ≤ 4,000
-  entries (`net.rs`, [privacy-receipts.md](./privacy-receipts.md)). Never
+  entries (`privacy/net.rs`, [privacy-receipts.md](./privacy-receipts.md)). Never
   content or a key. Cleared from Settings → Privacy & data → Network
   connections; safe to delete.
 - Updates: `%APPDATA%/yap/updates.json` — which update was announced (and when),
@@ -286,17 +286,17 @@
   an installed copy, by the uninstaller's "Delete the application data".
 - Dictionary usage: `%APPDATA%/yap/dictionary_usage.json` — each dictionary
   word's use count and last use, which orders the Whisper vocabulary prompt
-  (`dict_usage.rs`). Safe to delete (the order falls back to the list's).
+  (`dictionary/dict_usage.rs`). Safe to delete (the order falls back to the list's).
 - Hints: `%APPDATA%/yap/hints.json` — how often each push-to-talk coaching hint
-  showed, when the last did, and whether double-tap has been used (`coaching.rs`).
+  showed, when the last did, and whether double-tap has been used (`dictation/coaching.rs`).
 - Quieted apps: `%APPDATA%/yap/quieted_apps.json` — only while a dictation
   has other apps silenced (each session's id, exe and level before), so a
   Yap that crashed mid-dictation brings them back at its next start
-  (`mute.rs`); gone again once they're back.
+  (`dictation/mute.rs`); gone again once they're back.
 - Word suggestions: `%APPDATA%/yap/word_suggestions.json` — when Yap last
   offered a word for the dictionary, per "heard→term" pair your "Not now"
   count and "Don't suggest this", and the words you removed from the
-  dictionary (`removed`, never suggested again) (`learn.rs`). Never the
+  dictionary (`removed`, never suggested again) (`dictionary/learn.rs`). Never the
   field text it read.
 - Memory: `%APPDATA%/yap/memory.json` — what Yap remembers about the person
   (Profile, Preferences, People, Projects, Topics: each a title, a summary,
@@ -319,7 +319,7 @@
   and a store's `<stem>.tmp` of before 2026-10-23 (`OLD_TEMP_STEMS`) — and
   only files over 10 minutes old (a dev build beside the installed one
   writes the same folder); anything else is never touched.
-- **A write that fails is said, and nothing is lost** (`saving.rs`,
+- **A write that fails is said, and nothing is lost** (`shell/saving.rs`,
   2026-10-24; until then it was a warning in the log while the page said
   it saved). Every store writes through its `Saver` (`notes::SAVER`,
   `history::SAVER`…): a failed write — the disk full, another program
@@ -347,13 +347,13 @@
   log names the store and the error's kind, never what it holds.
 - App icons: `%APPDATA%/yap/icons/` — `<app>.png` per installed call app and
   `sources.json` (what each was made from); a cache, rebuilt whenever it's
-  missing, stale or unreadable (`app_icons.rs`).
+  missing, stale or unreadable (`calls/app_icons.rs`).
 - Local API bridge discovery: `~/.yap/cli-bridge.json` (fixed path, NOT the
-  data dir; written while the app runs, deleted on exit — see `bridge.rs` +
+  data dir; written while the app runs, deleted on exit — see `integrations/bridge.rs` +
   `docs/local-api.md`).
 - AI apps' own config files (Settings → AI apps (MCP) → Add to …): Yap only adds or
   removes its `yap` entry, keeps the original as `<file>.bak` the first time,
-  and never edits a file that isn't plain JSON (`mcp_clients.rs`).
+  and never edits a file that isn't plain JSON (`integrations/mcp_clients.rs`).
 - Account session: a Windows Credential Manager generic credential
   (`yap-account.com.yap.dictation`, Local persistence), not a file — see `auth.rs`.
   Uninstalling with "Delete the application data" removes it too (updates never do).
@@ -389,7 +389,7 @@
   their provider's own search — `web_search_native` — and local ones Exa),
   opening apps when asked **on** (`open_apps` — only apps in the Start
   menu, `apps.rs`), tips
-  **on** (`show_tips`; one notice at a time either way, `notice.rs`), call
+  **on** (`show_tips`; one notice at a time either way, `notices/notice.rs`), call
   detection **on**
   (`meeting_detection` — it only asks; nothing records without a click) as
   **pop-ups** (`meeting_detect_style`), for work apps only (Discord, WhatsApp,

@@ -1,4 +1,4 @@
-// Meeting audio kept on disk (src-tauri/src/meeting_audio.rs), end to end:
+// Meeting audio kept on disk (src-tauri/src/meetings/meeting_audio.rs), end to end:
 // - a recording's two sides written to Data/meeting-audio/<note>/ as it
 //   records (FLAC, with a <recording>.json beside them), kept when it ends;
 // - a transcript line's ▶ plays its stretch (`meeting_audio_clip`: both
@@ -10,7 +10,7 @@
 // - deleting the note deletes its audio; Settings → Meetings says what's
 //   kept and "Delete all meeting audio" clears it.
 // No audio device is opened: the recorder plays you.wav / them.wav, 4× real
-// time (e2e.rs). Crash recovery is meeting-crash.spec.js.
+// time (shell/e2e.rs). Crash recovery is meeting-crash.spec.js.
 import fs from 'node:fs';
 import path from 'node:path';
 import { test, expect, openView, openSettings, closeSettings, expectStore } from './support/fixtures.js';

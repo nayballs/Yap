@@ -1,4 +1,4 @@
-// The robot on rewriting the last dictation (as_said.rs, pipeline.rs
+// The robot on rewriting the last dictation (pasting/as_said.rs, dictation/pipeline.rs
 // `run_agent`, 2026-10-23): the rewrite shortcut with nothing selected,
 // within a minute of a dictation into the same window, applies the spoken
 // instruction to that dictation — found exactly as Yap pasted it with the

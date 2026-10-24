@@ -320,7 +320,7 @@ fn scheduling_allowed() -> bool {
 }
 
 fn portable() -> bool {
-    test_flag("YAP_UPDATE_TEST_PORTABLE").unwrap_or_else(crate::portable::is_portable)
+    test_flag("YAP_UPDATE_TEST_PORTABLE").unwrap_or_else(crate::shell::portable::is_portable)
 }
 
 pub(crate) fn metered() -> bool {
@@ -378,10 +378,10 @@ fn update_record(f: impl FnOnce(&mut Record)) {
 /// updates.json's saves (`saving.rs`): a failed one keeps the record in
 /// memory and is tried again with the next save; only logged (an update
 /// announced twice is all it costs).
-pub static SAVER: crate::saving::Saver = crate::saving::Saver::quiet("updates", "the update record", save_now);
+pub static SAVER: crate::shell::saving::Saver = crate::shell::saving::Saver::quiet("updates", "the update record", save_now);
 
 /// Write the record again (Try again).
-fn save_now() -> Result<(), crate::saving::SaveError> {
+fn save_now() -> Result<(), crate::shell::saving::SaveError> {
     let rec = RECORD.lock().unwrap_or_else(|p| p.into_inner()).clone();
     if let Some(rec) = rec {
         let _ = SAVER.write_json(&record_path(), &rec, true);
@@ -446,7 +446,7 @@ fn snapshot() -> Status {
 fn changed(app: &AppHandle) {
     REV.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
     let _ = app.emit(EVENT, snapshot());
-    crate::tray::refresh(app);
+    crate::shell::tray::refresh(app);
     #[cfg(windows)]
     notify::sync_progress(app);
 }
@@ -456,7 +456,7 @@ fn changed(app: &AppHandle) {
 /// (the in-app toast covers it); an e2e test run posts nothing to the
 /// developer's notification center.
 fn native_notifications() -> bool {
-    !portable() && !crate::e2e::active()
+    !portable() && !crate::shell::e2e::active()
 }
 
 fn mark_announced(a: &Announce) {
@@ -540,10 +540,10 @@ enum Busy {
 fn busy_reason(app: &AppHandle) -> Option<Busy> {
     // (A meeting transcribed again, the refine after one: a restart would
     // lose it.)
-    if crate::meeting::is_recording() || crate::meeting_audio::any_job_running() {
+    if crate::meetings::meeting::is_recording() || crate::meetings::meeting_audio::any_job_running() {
         return Some(Busy::Meeting);
     }
-    if crate::commands::model_download_in_flight() {
+    if crate::dictation::commands::model_download_in_flight() {
         return Some(Busy::ModelDownload);
     }
     let state = app.try_state::<crate::AppState>()?;
@@ -569,7 +569,7 @@ fn build_updater(app: &AppHandle) -> Result<tauri_plugin_updater::Updater, Strin
         .on_before_exit(move || {
             tracing::info!("updates: launching the installer — cleaning up first");
             crate::shutdown_cleanup();
-            let _ = handle.save_window_state(crate::window_state_flags());
+            let _ = handle.save_window_state(crate::shell::window::window_state_flags());
             handle.cleanup_before_exit();
         });
     #[cfg(debug_assertions)]
@@ -641,7 +641,7 @@ async fn run_check(app: &AppHandle, manual: bool) -> (Outcome, String) {
         Ok(updater) => {
             // The updater has its own HTTP client: its check is recorded
             // by hand in the network receipts (net.rs).
-            let receipt = crate::net::begin(crate::net::Purpose::UpdateCheck, &receipt_endpoint(app));
+            let receipt = crate::privacy::net::begin(crate::privacy::net::Purpose::UpdateCheck, &receipt_endpoint(app));
             let checked = updater.check().await.map_err(|e| e.to_string());
             match &checked {
                 Ok(found) => receipt.answered(0, 0, found.as_ref().map_or(0, |u| u.raw_json.to_string().len() as u64)),
@@ -746,7 +746,7 @@ async fn download_update(app: AppHandle) {
 
     let mut received: u64 = 0;
     let mut last_emit = Instant::now();
-    let receipt = crate::net::begin(crate::net::Purpose::UpdateDownload, update.download_url.as_str());
+    let receipt = crate::privacy::net::begin(crate::privacy::net::Purpose::UpdateDownload, update.download_url.as_str());
     let result = update
         .download(
             |chunk, total| {
@@ -996,7 +996,7 @@ pub fn init(app: &AppHandle) {
             // notification with the window hidden: no toast nobody would see.)
             if rec.restart_show_window {
                 lock().updated_from = Some(rec.restart_from.clone());
-                let _ = crate::commands::show_settings(app);
+                let _ = crate::shell::window::show_settings(app);
             }
         }
         update_record(|r| {
@@ -1116,7 +1116,7 @@ pub fn on_tray_menu(app: &AppHandle, id: &str) {
     match id {
         "update_install" => {
             if let Err(msg) = request_install(app) {
-                let _ = crate::commands::show_settings(app);
+                let _ = crate::shell::window::show_settings(app);
                 let _ = app.emit(EVENT_BLOCKED, msg);
             }
         }
@@ -1128,7 +1128,7 @@ pub fn on_tray_menu(app: &AppHandle, id: &str) {
 /// The tray's "Check for updates…": open Settings → About and let the page
 /// run a manual check there, so the result shows where the user is looking.
 pub fn on_tray_check(app: &AppHandle) {
-    let _ = crate::commands::show_settings(app);
+    let _ = crate::shell::window::show_settings(app);
     let _ = app.emit("yap-open-settings", "about");
     let _ = app.emit("check-for-updates", ());
 }
@@ -1205,7 +1205,7 @@ pub fn update_ack_updated() {
 /// a download they asked for runs. Clicking the body opens Settings → About.
 /// Windows applies Do Not Disturb / Focus Assist and the per-app notification
 /// switch on its own. The WinRT plumbing is shared with the call prompts
-/// (`crate::win_toast`).
+/// (`crate::notices::win_toast`).
 #[cfg(windows)]
 mod notify {
     use std::sync::atomic::{AtomicU32, Ordering};
@@ -1217,7 +1217,7 @@ mod notify {
     use windows::UI::Notifications::{NotificationData, ToastNotification};
 
     use super::{lock, Announce, Phase};
-    use crate::win_toast::{esc, logo_xml};
+    use crate::notices::win_toast::{esc, logo_xml};
 
     const TAG: &str = "update";
 
@@ -1231,7 +1231,7 @@ mod notify {
 
     /// Post `xml` as Yap's one update toast (it replaces the previous one).
     fn post(app: &AppHandle, xml: &str, data: Option<&NotificationData>) -> Result<(), String> {
-        let toast = crate::win_toast::post(app, TAG, xml, data, activated)?;
+        let toast = crate::notices::win_toast::post(app, TAG, xml, data, activated)?;
         *CURRENT.lock().unwrap_or_else(|p| p.into_inner()) = Some(toast);
         Ok(())
     }
@@ -1317,7 +1317,7 @@ mod notify {
 
     fn update_bar(app: &AppHandle, pct: u8, status: &str) {
         let Ok(data) = progress_data(pct, status) else { return };
-        crate::win_toast::update(app, TAG, &data);
+        crate::notices::win_toast::update(app, TAG, &data);
     }
 
     /// Move the download toast's bar — at most twice a second, and only while
@@ -1363,7 +1363,7 @@ mod notify {
         let Some(_toast) = CURRENT.lock().unwrap_or_else(|p| p.into_inner()).take() else {
             return;
         };
-        crate::win_toast::remove(app, TAG);
+        crate::notices::win_toast::remove(app, TAG);
     }
 
     fn activated(app: &AppHandle, arg: &str) {
@@ -1372,7 +1372,7 @@ mod notify {
             "update:install" => super::on_tray_menu(app, "update_install"),
             // The toast body.
             _ => {
-                let _ = crate::commands::show_settings(app);
+                let _ = crate::shell::window::show_settings(app);
                 let _ = app.emit("yap-open-settings", "about");
             }
         }

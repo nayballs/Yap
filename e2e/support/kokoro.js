@@ -1,4 +1,4 @@
-// Stand-ins for Kokoro's download (src-tauri/src/tts/registry.rs): a fake
+// Stand-ins for Kokoro's download (src-tauri/src/voice/tts/registry.rs): a fake
 // model, 54 fake voices, fake dictionaries, and a zip laid out like eSpeak
 // NG's unpacked installer (a debug build takes a zip where the real thing is
 // an .msi), served from a local server, the model slowly enough to see the
@@ -11,7 +11,7 @@ import http from 'node:http';
 import path from 'node:path';
 import { makeZip } from './diarization.js';
 
-/** Kokoro v1.0's 54 voices (tts/kokoro.rs `VOICES`). */
+/** Kokoro v1.0's 54 voices (voice/tts/kokoro.rs `VOICES`). */
 export const KOKORO_VOICES = [
   'af_heart', 'af_alloy', 'af_aoede', 'af_bella', 'af_jessica', 'af_kore', 'af_nicole', 'af_nova', 'af_river',
   'af_sarah', 'af_sky', 'am_adam', 'am_echo', 'am_eric', 'am_fenrir', 'am_liam', 'am_michael', 'am_onyx',

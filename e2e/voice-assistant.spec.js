@@ -1,5 +1,5 @@
-// The Voice Assistant and spoken replies (src-tauri/src/assistant.rs,
-// tts.rs, src/lib/ChatView.svelte, Settings → Voice Assistant), and how
+// The Voice Assistant and spoken replies (src-tauri/src/chat/assistant.rs,
+// voice/tts.rs, src/lib/ChatView.svelte, Settings → Voice Assistant), and how
 // they differ from Commands (Settings → Commands: the agent's name in a
 // dictation, the rewrite shortcut — the AI types for you):
 // - Settings: two pages that each say what they do, with links between
@@ -28,7 +28,7 @@
 // dictation's own steps from cleanup on, as the chat's mic starts one: no
 // microphone needed). The "Groq" here is a local fake (support/fake-llm.js).
 //
-// Kokoro (tts/kokoro.rs) is the default engine: the engine row, its download
+// Kokoro (voice/tts/kokoro.rs) is the default engine: the engine row, its download
 // row and the "Download Kokoro" offer when replies go on, the 54 voices
 // grouped by accent and gender (af_bella the default), Windows voices
 // speaking until it's installed. Its download comes from a local server
@@ -124,7 +124,7 @@ test.beforeEach(async ({ yap }) => {
   await yap.invoke('tts_e2e_spoken', { clear: true });
 });
 
-// ---- The Voice Assistant (assistant.rs)
+// ---- The Voice Assistant (chat/assistant.rs)
 
 /** A question to the Voice Assistant, as its shortcut asks it (the transcript in the mic's place). */
 const ask = (yap, text, listenMs = 0) => yap.invoke('e2e_assistant_ask', { text, listenMs });
@@ -409,7 +409,7 @@ test('■ stops the answer, and a press while Yap speaks cuts it off to listen (
 // still being answered (by a model on this PC, so set aside for the
 // barge-in's recording) when a newer one was asked; the older was asked
 // again after the newer one's answer, and both answers showed under both
-// questions. The newer question replaces it now (stream.rs
+// questions. The newer question replaces it now (chat/stream.rs
 // `Halt::Superseded`): one answer, to the newer question, said once.
 test('a barge-in question replaces the one still being answered: one answer, to the newer one', async ({
   yap,
@@ -466,7 +466,7 @@ test('a barge-in question replaces the one still being answered: one answer, to 
   await setConfig(yap, main, { speakReplies: false, speakWhen: 'voice' });
 });
 
-// Streamed (stream.rs): the voice starts at the answer's first whole
+// Streamed (chat/stream.rs): the voice starts at the answer's first whole
 // sentence, while the rest is still being written — and says it all once.
 test('a spoken answer starts at its first sentence, while the rest is still being written', async ({
   yap,
@@ -1126,7 +1126,7 @@ test('voice off: the assistant shortcut answers on the bar and says nothing', as
 });
 
 // The maintainer (2026-10-20): "the voice that gets spoken back is so loud, even at
-// 1% on the volume mixer". Yap's own volume for it (tts.rs `gain`, squared):
+// 1% on the volume mixer". Yap's own volume for it (voice/tts.rs `gain`, squared):
 // Settings → Voice Assistant → Volume, and the slider next to Voice replies
 // in Chat; either one moves the other.
 test('the voice has its own volume, in Settings and next to Voice replies', async ({ yap, main, shot }) => {

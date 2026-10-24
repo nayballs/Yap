@@ -5,7 +5,7 @@
 // right-click, its hover ⋯ (where it has one) and the keyboard (Shift+F10,
 // the ContextMenu key); Esc closes it with the focus back on the item. A
 // right-click anywhere else shows nothing at all: WebView2's own menu is cut
-// down to the edit commands (context_menu.rs; Inspect only for a debug
+// down to the edit commands (shell/context_menu.rs; Inspect only for a debug
 // build's Shift+right-click — never a plain one).
 //
 // One of each kind: a Chat conversation (Rename in place, Copy as Markdown,
@@ -142,7 +142,7 @@ test('Chat: a conversation is renamed in place, copied and deleted; messages cop
   await main.keyboard.press('Shift+F10');
   await expect(allItems(main).first()).toBeFocused();
 
-  // Rename, in place: Esc keeps the name, Enter saves it (chats.rs `rename`).
+  // Rename, in place: Esc keeps the name, Enter saves it (chat/chats.rs `rename`).
   await main.keyboard.press('Enter');
   const input = main.getByRole('textbox', { name: 'Rename conversation Trip plans' });
   await expect(input).toBeFocused();

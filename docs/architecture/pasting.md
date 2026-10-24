@@ -4,9 +4,9 @@ Putting a dictation into the app you're in: the clipboard paste and the submit k
 
 [Architecture index](./README.md) · [CLAUDE.md](../../CLAUDE.md)
 
-- **`text_injector.rs`** — clipboard paste (+ optional clipboard restore) and
+- **`pasting/text_injector.rs`** — clipboard paste (+ optional clipboard restore) and
   `press_submit` (Enter / Ctrl+Enter / Shift+Enter) via `SendInput`. **An app
-  running as administrator** (`elevated.rs`, checked first — the paste's target,
+  running as administrator** (`pasting/elevated.rs`, checked first — the paste's target,
   "Paste last transcript"'s, the submit key's window) gets no keys: the text is
   left on the clipboard (`leave_on_clipboard`, as privately as a paste) and
   `inject_text` returns `Delivery::LeftOnClipboard` for the caller to say so.
@@ -29,7 +29,7 @@ Putting a dictation into the app you're in: the clipboard paste and the submit k
   empty; `selection_via_copy` (edit-mode fallback) empties the clipboard, polls for
   the Ctrl+C result instead of a fixed sleep, and restores privately.
   `prepare_dictation(text, append_space, dictionary, kind)` (run_stt's one call)
-  remembers the dictation and fits it to the kind of app (`kind`, `app_kind.rs`,
+  remembers the dictation and fits it to the kind of app (`kind`, `pasting/app_kind.rs`,
   already filtered by the settings: a terminal → `terminal_text`, nothing else; a
   chat app → `drop_chat_full_stop` first) and to the text around the cursor read
   at record start (`selection::take_context` → `smart_insert::fit_to_context`;
@@ -59,7 +59,7 @@ Putting a dictation into the app you're in: the clipboard paste and the submit k
   e2e `dictation-trust.spec.js`, robot `as-said.real.js`). `copy_privately` puts text on the clipboard
   as a paste would and leaves it (Use what I said's refusals).
   `app_window()` / `focus(hwnd)`: the same window-finding and re-focusing
-  for the tray's "Read selection aloud" (`read_aloud.rs`). **The paste
+  for the tray's "Read selection aloud" (`voice/read_aloud.rs`). **The paste
   keys** (`simulate_paste(target, key)`; `inject_text`'s `kind` is the window's
   kind as read, before the settings): Ctrl+V as always (virtual keys only), or a
   terminal's own (`app_kind::Host::paste_key`: Shift+Insert, Ctrl+Shift+V) sent
@@ -82,7 +82,7 @@ Putting a dictation into the app you're in: the clipboard paste and the submit k
   moves the caret). The clipboard restore still waits its 500 ms from the
   keys. `#[ignore]`d `private_clipboard_round_trip` runs
   the real clipboard code on a private window station (never the person's clipboard).
-- **`as_said.rs`** — **"Use what I said"** (2026-10-22; Windows' fluid
+- **`pasting/as_said.rs`** — **"Use what I said"** (2026-10-22; Windows' fluid
   dictation's Revert, TypeWhisper's Restore Raw Transcript): right after a
   dictation AI cleanup changed, swap what Yap pasted for the words as said
   (the transcript with corrections, the voice command and snippets, no
@@ -112,7 +112,7 @@ Putting a dictation into the app you're in: the clipboard paste and the submit k
   tell what that would take back. **Where it refuses** (`Err(why)` from
   `replace`): nothing in the app is touched — the words as said go on the
   clipboard (`copy_privately`) and the person is told "Couldn't replace it
-  here — copied the raw text instead" (an `alert.rs` "pasteBlocked" alert,
+  here — copied the raw text instead" (an `notices/alert.rs` "pasteBlocked" alert,
   with why). Test runs only log ("e2e: not swapping the paste for the words
   as said"); robot mode only in the test's windows (`e2e-real/as-said.real.js`:
   the test pad, Notepad, an Edge box, a chat app and its contenteditable,
@@ -150,7 +150,7 @@ Putting a dictation into the app you're in: the clipboard paste and the submit k
   changed in the field, the rewrite copied privately with "Couldn't replace
   your last dictation — copied the rewrite instead" (`Rewrote::Copied`).
   Robot tests: `e2e-real/rewrite-last.real.js`, and Home's paste in
-  `as-said.real.js`. **Saved transforms** (`transforms.rs`,
+  `as-said.real.js`. **Saved transforms** (`dictation/transforms.rs`,
   [dictation.md](./dictation.md)) take the last dictation by these same
   rules (`rewrite_target`, `rewrite_check`, `replace_last`), and their
   result is the last paste too, with the text it replaced (`undoable(before,
@@ -165,7 +165,7 @@ Putting a dictation into the app you're in: the clipboard paste and the submit k
   ("e2e: not undoing the transform"). `wait_for_modifiers_up` is shared
   with the transforms (a shortcut's Alt still down turns Ctrl+V into
   another key).
-- **`elevated.rs`** — apps running as administrator: Windows (UIPI) drops keys
+- **`pasting/elevated.rs`** — apps running as administrator: Windows (UIPI) drops keys
   sent to a higher integrity level, and `SendInput` doesn't say so. The target's
   level is compared with Yap's (`OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION)`
   → its token → `TokenIntegrityLevel`; a token Windows won't show plus a refused
@@ -173,13 +173,13 @@ Putting a dictation into the app you're in: the clipboard paste and the submit k
   pure `blocks_input`, unit-tested (and against Yap's own token). Above Yap →
   the text stays on the clipboard (`text_injector`) and the dictation, the
   rewrite or "Paste last transcript" shows "Your text is copied: press Ctrl+V"
-  (`alert()`, through `alert.rs`) — no submit key, no correction watch;
+  (`alert()`, through `notices/alert.rs`) — no submit key, no correction watch;
   history keeps it. Test mode reads no other process: debug-only
   `e2e_paste_elevated { on }` makes every target count as one (plain test
   mode just says so; robot mode really leaves the text on the clipboard). ⚠ A
   real elevated window can't be robot-tested: opening one takes a UAC prompt.
-- **`selection.rs`** — UI Automation reads of the field Yap types into. **After
-  the paste** (`WatchedField`, for `learn.rs`): the focused element held on
+- **`pasting/selection.rs`** — UI Automation reads of the field Yap types into. **After
+  the paste** (`WatchedField`, for `dictionary/learn.rs`): the focused element held on
   the watch's thread, read whether it still has the focus or not;
   `read(limit)` → a `FieldWindow` of the **whole field** (TextPattern's
   document range, else the ValuePattern value; line breaks as `\n`, the
@@ -191,7 +191,7 @@ Putting a dictation into the app you're in: the clipboard paste and the submit k
   (TextPattern, else the Ctrl+C trick — never in a terminal with terminal mode
   on, where Ctrl+C would interrupt the program), 2 s UIA timeouts. **Read
   aloud** (`read_selected(target, copy_fallback)` → `Selected {text, via}`,
-  for `read_aloud.rs`): the focus must be in the target's process and not a
+  for `voice/read_aloud.rs`): the focus must be in the target's process and not a
   password box; then UI Automation's TextPattern selection of the focused
   element or the first of up to 12 parents that has a TextPattern (a web
   page's document when the focus is on a link; **read-only text too**: a
@@ -204,7 +204,7 @@ Putting a dictation into the app you're in: the clipboard paste and the submit k
   mode never; robot mode only in the test's own windows. Lengths and `via`
   at `debug`, never the text. **A transform's selection**
   (`editable_selection(target, copy_fallback)` → `FieldSelection` `Text` |
-  `ReadOnly` | `Nothing` | `Unreadable`, for `transforms.rs`): only a
+  `ReadOnly` | `Nothing` | `Unreadable`, for `dictation/transforms.rs`): only a
   field that takes typing — its selection is what a paste replaces — the
   focus in the target's process, never a password box (`ReadOnly`); the
   field the focus is in (`field_for`, up to 3 parents), refused when it's
@@ -265,7 +265,7 @@ Putting a dictation into the app you're in: the clipboard paste and the submit k
   (`SendMessageTimeoutW`, 200 ms, `SMTO_ABORTIFHUNG`), never its text;
   `paste_verdict` (pure, unit-tested) says landed / didn't / unknown.
   Its COM set-up (`uia::Com`, `uia::automation` with timeouts) is shared
-  with `screen_terms.rs`, which reads the target window's visible text for
+  with `dictionary/screen_terms.rs`, which reads the target window's visible text for
   its names at the same moment (same refusals; see
   [dictionary.md](./dictionary.md)).
   `#[ignore]`d `reads_real_text_fields` reads hidden
@@ -273,7 +273,7 @@ Putting a dictation into the app you're in: the clipboard paste and the submit k
   ValuePattern + `EM_GETSEL` path (mid-text, a selection, over a line break),
   the paste check's state before and after an `EM_REPLACESEL`, and from a
   child window inside the field (read through it; not through a read-only one).
-- **`smart_insert.rs`** — `fit_to_context(text, &FieldContext, names)`, pure and
+- **`pasting/smart_insert.rs`** — `fit_to_context(text, &FieldContext, names)`, pure and
   unit-tested (conservative: a wrong fix is worse than the old capital). Mid-sentence
   (before ends in a letter/digit/`,`/`;`/spaced dash — not `.?!`, `:`, a new line or
   a bullet) → lower-case the first letter only for a plainly sentence-case word
@@ -289,7 +289,7 @@ Putting a dictation into the app you're in: the clipboard paste and the submit k
   selection: its first word's case (same safety rules, or the same word again), its
   end punctuation, and any space it began/ended with. Edit mode and Commands
   by name paste the AI's text untouched, as before.
-- **`app_kind.rs`** — **what kind of app a dictation goes into**, and what that
+- **`pasting/app_kind.rs`** — **what kind of app a dictation goes into**, and what that
   changes about the paste (Wispr Flow's app categories + terminal/coding-CLI
   handling + chat full stops, by behaviour). `of_window(hwnd)` (at record start
   beside `target_hwnd`, → `Shared.target_kind`; also "Paste last transcript"):

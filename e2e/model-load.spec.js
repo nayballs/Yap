@@ -1,4 +1,4 @@
-// Yap loads its speech model in the background at startup (pipeline.rs
+// Yap loads its speech model in the background at startup (dictation/pipeline.rs
 // `Pipeline::start`, off the startup thread: the tray, the bar and the
 // window come first). A dictation started before it's ready waits for it —
 // the bar says "Loading the speech model…" — and goes through, never fails.

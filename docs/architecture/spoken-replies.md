@@ -4,22 +4,22 @@ Reading answers aloud: Kokoro and Windows' voices on this PC, or ElevenLabs on t
 
 [Architecture index](./README.md) · [CLAUDE.md](../../CLAUDE.md)
 
-- **`tts.rs`** — **spoken replies** (Settings → Voice Assistant, Chat's Voice
+- **`voice/tts.rs`** — **spoken replies** (Settings → Voice Assistant, Chat's Voice
   replies toggle, ▶ on answers). **Who speaks** (`config.tts_provider`,
   `voicing(cfg)` → `Voicing {engine, voice, cloud}`): "local" (the
   default — the engines below, `chosen(cfg)`) or a **cloud voice**,
-  ElevenLabs (`tts/elevenlabs.rs`, below) — only when it's picked **and**
+  ElevenLabs (`voice/tts/elevenlabs.rs`, below) — only when it's picked **and**
   has a key (`tts_cloud_keys`); without one the local voice speaks. A cloud
   voicing carries a `CloudPlan`: the local voice that can stand in
   (`local_voice`: Kokoro installed, or Windows voices chosen — not Windows
   voices as a stand-in for an undownloaded Kokoro) and the key/choice
   fingerprints. `speak(text, id)` is the way in for spoken replies — an
   answer's markdown or any plain text; `read(track, from, id, rate)` for
-  reading aloud (`read_aloud.rs`, below). **Engines** (`Engine` → `Synth`, text → `Pcm`; `Synth::stream`
+  reading aloud (`voice/read_aloud.rs`, below). **Engines** (`Engine` → `Synth`, text → `Pcm`; `Synth::stream`
   hands audio on as it's made — a cloud voice's first piece plays before
   the sentence is all made; the default makes the whole sentence;
   `prepare` (Kokoro and ElevenLabs join sentences under 3 words to the
-  next), `cancel`): **Kokoro** (`tts/kokoro.rs`, below; the default) and
+  next), `cancel`): **Kokoro** (`voice/tts/kokoro.rs`, below; the default) and
   **Windows voices** (`WindowsVoices`: WinRT `SpeechSynthesizer`,
   `SynthesizeTextToStreamAsync` → WAV → `parse_wav`; rate via
   `SpeakingRate`, minimal appended silence; `IncludeWordBoundaryMetadata`
@@ -40,7 +40,7 @@ Reading answers aloud: Kokoro and Windows' voices on this PC, or ElevenLabs on t
   "(code block)", links → their text, bare URLs → their domain, `[x]`/☑ →
   "Done: …", emphasis, HTML, emoji and arrows out, "→" read "to", a web
   answer's `[1]` / `[2, 3]` / gpt-oss `【…】` markers never read), then
-  **`tts/normalize.rs`** (`for_speech`, every engine, UK style,
+  **`voice/tts/normalize.rs`** (`for_speech`, every engine, UK style,
   conservative — a clear pattern or nothing: £ $ € amounts incl. pence/cents
   and k/m/bn ("twelve thousand four hundred pounds", "three dollars fifty"),
   numbers with separators, decimals ("three point one four"), percentages,
@@ -117,7 +117,7 @@ Reading answers aloud: Kokoro and Windows' voices on this PC, or ElevenLabs on t
   its voices"), `tts_stop`, `tts_state`, `tts_kokoro_status` /
   `tts_kokoro_download` (`tts-download-progress {percent, downloadedBytes,
   totalBytes}`, then `tts-kokoro-changed`) / `tts_kokoro_delete` (stops
-  speaking, unloads), `voice_replies_set {on}` (Chat's toggle: saved in one step, `commands::change_config`, applied like
+  speaking, unloads), `voice_replies_set {on}` (Chat's toggle: saved in one step, `settings::change_config`, applied like
   Settings, then `yap-voice-replies {on}` for Settings' copy). A
   `tts-idle` thread unloads Kokoro after the speech model's unload time (10
   min when that's "never"). ⚠ **No echo cancellation**: Yap's voice from
@@ -135,11 +135,11 @@ Reading answers aloud: Kokoro and Windows' voices on this PC, or ElevenLabs on t
   makes a sentence into memory and prints each word's cue beside the
   estimate from its audio alone (measured 2026-10-22, the default voice:
   cues at 101 / 436 / 761 / 1386 … ms, the comma's pause pinned within
-  4 ms; `tts/marks.rs` for the numbers); `first_audio_latency`
+  4 ms; `voice/tts/marks.rs` for the numbers); `first_audio_latency`
   (`--features engines`) times `speak` → first piece at the output for
   Kokoro and for ElevenLabs' path against a local stand-in
   (`YAP_TTS_STANDIN_MS`).
-  - **`tts/cloud.rs`** — what any cloud voice shares (another service —
+  - **`voice/tts/cloud.rs`** — what any cloud voice shares (another service —
     OpenAI's, Azure's — slots in beside ElevenLabs): `PROVIDERS` ("local"
     "On this PC", "elevenlabs" "ElevenLabs"), `Failure` (BadKey,
     NotAllowed, Quota, RateLimited, ServiceDown, Offline, TimedOut,
@@ -153,7 +153,7 @@ Reading answers aloud: Kokoro and Windows' voices on this PC, or ElevenLabs on t
     rate limit, 60 s offline / timed out / 5xx, 5 min refused, 15 min quota,
     30 min bad key / not allowed / voice or model gone); another key, voice
     or model, or any request that works (Settings' list, ▶), starts afresh.
-  - **`tts/elevenlabs.rs`** — **ElevenLabs**, on the person's own key (API
+  - **`voice/tts/elevenlabs.rs`** — **ElevenLabs**, on the person's own key (API
     as of 22 Oct 2026). Speech: `POST /v1/text-to-speech/{voice}/stream?
     output_format=pcm_24000` with `{text, model_id, voice_settings?:
     {speed}}` (raw 16-bit LE mono PCM at 24 kHz, every plan; `speed` only
@@ -200,7 +200,7 @@ Reading answers aloud: Kokoro and Windows' voices on this PC, or ElevenLabs on t
     never reaches the internet. Unit tests run against an in-process
     stand-in (`standin`: chunked PCM in odd pieces, timed JSON lines on
     either clock, errors, silence).
-  - **`tts/kokoro.rs`** — **Kokoro-82M v1.0** (hexgrad, Apache-2.0), the
+  - **`voice/tts/kokoro.rs`** — **Kokoro-82M v1.0** (hexgrad, Apache-2.0), the
     natural voice: onnx-community's **fp32** export (the fp16 one turns
     longer British sentences into NaN — `checks::nan_probe`; int8 is 3.5–4×
     slower on x86; DirectML can't run it) on Yap's own `ort` (pinned
@@ -222,7 +222,7 @@ Reading answers aloud: Kokoro and Windows' voices on this PC, or ElevenLabs on t
     `YAP_TTS_SAMPLES`): speed at 1/2/4 threads, a cancel, and WAVs of the
     research's answer and a names text with both G2P ways, raw and tidied
     (measured 2026-10-18: §"Current status").
-  - **`tts/g2p.rs`** — text → Kokoro's phonemes, **dictionary first**: the
+  - **`voice/tts/g2p.rs`** — text → Kokoro's phonemes, **dictionary first**: the
     misaki lexicons Kokoro was trained on (US/GB, gold then silver), looked
     up with misaki's `en.Lexicon` rules ported (no spaCy tagger: capitals,
     `'s`/`-s`/`-ed`/`-ing` from the stem, short unknown all-caps words
@@ -240,7 +240,7 @@ Reading answers aloud: Kokoro and Windows' voices on this PC, or ElevenLabs on t
     only if a lexicon won't read, and for the comparison. Why dictionary
     first: it's what Kokoro was trained on, and eSpeak runs only for the
     odd name (both scored alike on Parakeet).
-  - **`tts/marks.rs`** — **word timing** for the reading card's karaoke,
+  - **`voice/tts/marks.rs`** — **word timing** for the reading card's karaoke,
     pure and unit-tested. `words` (a sentence's words as char spans, the
     punctuation at their edges left out). Per engine, best first (`Timing`,
     on the card as `data-timing` and the chip's tooltip): **Engine** —
@@ -272,7 +272,7 @@ Reading answers aloud: Kokoro and Windows' voices on this PC, or ElevenLabs on t
     pairs to the shown words between them; `shown_starts` → each shown
     word's start, forwards in time; `word_at(starts, t)` the word being
     said. `utf16_to_char` for Windows' cues.
-  - **`read_aloud.rs`** — **Read aloud, anywhere** (2026-10-22; the
+  - **`voice/read_aloud.rs`** — **Read aloud, anywhere** (2026-10-22; the
     maintainer asked for reading help, dyslexia in mind; Wispr Flow has
     none). Ways in: the **Read aloud shortcut** (`config.read_hotkey`,
     unbound by default; `input_hook` binding `read-key-pressed`, press
@@ -318,7 +318,7 @@ Reading answers aloud: Kokoro and Windows' voices on this PC, or ElevenLabs on t
     `rate`, `timing`, `engine`, `note`, `cut`, `made` (sentences made so
     far: never far ahead), `hotkey`. `bar::set_reading` keeps the bar up
     while the card is (bar on or off), with Esc watched. Logs: lengths,
-    counts, `via` and the outcome only (`log_privacy.rs`); reading with
+    counts, `via` and the outcome only (`privacy/log_privacy.rs`); reading with
     ElevenLabs sends the text there, as Settings' voice line already says.
     Debug-only `realtest_read_selection {hwnd}` (robot mode) runs the
     shortcut's code and returns `Picked {via, chars, terminal,
@@ -331,7 +331,7 @@ Reading answers aloud: Kokoro and Windows' voices on this PC, or ElevenLabs on t
     Settings) and `e2e-real/read-aloud.real.js` (the test pad's text box
     and rich box, Notepad, an Edge page's own text, a terminal never by
     Ctrl+C).
-  - **`tts/registry.rs`** — Kokoro's download into `<data>/models/tts/`
+  - **`voice/tts/registry.rs`** — Kokoro's download into `<data>/models/tts/`
     (debug: `YAP_TTS_MODELS`): `kokoro-v1.0/` (model.onnx 325.5 MB + 54
     voices from **Hugging Face onnx-community/Kokoro-82M-v1.0-ONNX @
     1939ad2a**, the misaki lexicons + LICENSE from **hexgrad/misaki @

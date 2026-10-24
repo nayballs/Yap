@@ -3,18 +3,18 @@
 // spec can check what Yap sent. Point a test instance's Note Formatting
 // scope at `base` (see meetings.spec.js).
 //
-// It knows Yap's meeting calls by their system prompts (src-tauri/src/llm.rs):
+// It knows Yap's meeting calls by their system prompts (src-tauri/src/ai/llm.rs):
 // a rolling DIGEST of one part of a meeting, the final ACTION PLAN, and the
 // meeting notepad's helpers: the meeting TITLE, "What did I miss?" (CATCH UP),
 // a follow-up question (MEETING ASK), who a voice is (SPEAKER NAME), and the one-tap chips (QUESTIONS to ask,
 // the FOLLOW-UP email — in markdown, with a preamble, for Yap to clean up —
 // and BLIND SPOTS, "Gaps and risks"). Replies are built from the trigger
 // phrases the specs put in their synthetic meetings — and, to prove Yap's
-// checks (meeting_summary.rs), the digests slip in a task for someone nobody
+// checks (meetings/meeting_summary.rs), the digests slip in a task for someone nobody
 // mentioned ("Zed", due "Tuesday"), and the action plan invents an owner
 // ("Mallory") and drops one real task. A spec can make the next calls of a
 // kind fail (`failNext`) or answer slowly (`delay`), to see Yap's progress
-// and error states. For the AI Chat's tool loop (src-tauri/src/tools.rs) a
+// and error states. For the AI Chat's tool loop (src-tauri/src/chat/tools.rs) a
 // spec scripts the model call by call (`scriptChat`): each chat call that
 // offers tools takes the next step, a tool call or an answer, and the
 // request record keeps the messages (the tool results Yap sent back).
@@ -29,7 +29,7 @@
 // Gale in Baldur's Gate 3. `failNext("groqSearch", 1, 429)` answers the
 // next one with an HTTP error, to see Yap fall back to its own search.
 //
-// **Streaming** (src-tauri/src/stream.rs): a request with `stream: true`
+// **Streaming** (src-tauri/src/chat/stream.rs): a request with `stream: true`
 // gets server-sent events, as llama.cpp and the cloud providers send them —
 // the content in pieces of a few words, each tool call as a header (index,
 // id, name) then its arguments in fragments, a finish reason, the usage and
@@ -42,7 +42,7 @@
 // `setStreaming(false)` answers whole even when asked to stream (a server
 // that ignores `stream`).
 //
-// It also lists models (src-tauri/src/model_catalog.rs): `GET <base>/models`
+// It also lists models (src-tauri/src/ai/model_catalog.rs): `GET <base>/models`
 // as a self-hosted OpenAI-compatible server (`serverModels`), and — through
 // `modelsStandin`, the debug-only YAP_MODELS_STANDIN — each cloud provider's
 // own list in that provider's shape (`listModels(provider, models)`: Groq's,
@@ -230,14 +230,14 @@ const MEETING_ASK = 'You answer questions about a meeting';
 const QUESTIONS = 'You suggest questions for someone';
 const FOLLOW_UP = 'You write the follow-up email';
 const BLIND_SPOTS = 'You review a meeting for what it left open';
-// A dictation's AI cleanup (llm.rs BASE_PROMPT).
+// A dictation's AI cleanup (ai/llm.rs BASE_PROMPT).
 const CLEANUP = 'You are a dictation cleanup engine';
-// The rewrite shortcut and Commands (llm.rs EDIT_BASE_PROMPT): the text to
+// The rewrite shortcut and Commands (ai/llm.rs EDIT_BASE_PROMPT): the text to
 // change, if any, in the system prompt, the spoken instruction as the user's
 // turn. "OK" unless a spec scripts it (`reply('rewrite', fn)`; `rewriteText`
 // gives the text it was asked to change).
 const REWRITE = 'You are a writing assistant';
-// A saved transform (llm.rs TRANSFORM_BASE_PROMPT, transforms.rs): the
+// A saved transform (ai/llm.rs TRANSFORM_BASE_PROMPT, dictation/transforms.rs): the
 // instruction and the text (between <text> tags) as the user's turn. "OK"
 // unless a spec scripts it (`reply('transform', fn)`; `transformText` and
 // `transformInstruction` read the request).
@@ -249,7 +249,7 @@ const MEMORY = "You keep Yap's memory of the user";
 // Who a meeting's voice is (speakers/naming.rs ASK_PROMPT), when a meeting
 // ends: "unknown" unless a spec says otherwise (`reply('speakerName', fn)`).
 const SPEAKER_NAME = 'You identify one voice in a meeting transcript';
-// A pre-meeting brief's "In short" (llm.rs MEETING_BRIEF_PROMPT,
+// A pre-meeting brief's "In short" (ai/llm.rs MEETING_BRIEF_PROMPT,
 // calendar/brief.rs). "Nothing to add." unless a spec scripts it
 // (`reply('brief', fn)`; brief.spec.js).
 const BRIEF = 'You write a short brief for someone about to go into a meeting';
@@ -280,7 +280,7 @@ const SPOKEN = /^(?!(?:Attendees|Speakers besides You|Question|Meeting|Subject|N
 const isSpoken = (l) => SPOKEN.test(l);
 const unlabel = (l) => l.replace(SPOKEN, '');
 
-/** The transcript a cleanup call frames between triple quotes (llm.rs). */
+/** The transcript a cleanup call frames between triple quotes (ai/llm.rs). */
 export function cleanupTranscript(user) {
   return /"""\n([\s\S]*?)\n"""/.exec(user)?.[1] ?? user;
 }

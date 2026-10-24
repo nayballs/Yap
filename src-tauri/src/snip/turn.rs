@@ -11,7 +11,7 @@
 //! **The question's images** go with every model call of the turn — each
 //! step of the tool loop re-sends the messages, a small model's plain
 //! answer, the last no-tools call — through a task-local set around the
-//! turn (`commands::chat_send` → [`with`]): the two places that put the
+//! turn (`chat::commands::chat_send` → [`with`]): the two places that put the
 //! question in a request (`tools::tool_loop`, `llm::note_chat`) call
 //! [`attach`], which turns the question's message into a content array.
 //! Outside a turn with images, [`attach`] does nothing.
@@ -25,7 +25,7 @@
 
 use serde_json::{json, Value};
 
-use crate::chats::{ChatImage, ChatMessage};
+use crate::chat::chats::{ChatImage, ChatMessage};
 
 /// A turn's screenshots: what's saved with the question, and the parts the
 /// model gets (fitted to its provider).
@@ -221,7 +221,7 @@ pub async fn with_history_images(messages: &mut [Value], earlier: &[ChatMessage]
     if !earlier.iter().any(|m| !m.images.is_empty()) {
         return;
     }
-    let here = crate::ai_model::runs_here(provider, base_url);
+    let here = crate::ai::ai_model::runs_here(provider, base_url);
     let budget = history_budget(provider, here, images().len());
     let edge = super::images::long_edge(provider, here);
     let exists = |id: &str| super::images::exists(id);
@@ -237,11 +237,11 @@ pub async fn with_history_images(messages: &mut [Value], earlier: &[ChatMessage]
     history_images(messages, earlier, provider, budget, &exists, &|id| fitted.get(id).cloned());
 }
 
-/// What `commands::chat_send` needs before a turn with screenshots: the
+/// What `chat::commands::chat_send` needs before a turn with screenshots: the
 /// stored images (ids checked, at most the provider's per-request cap) and
 /// their copies fitted for `provider`.
 pub async fn prepare(ids: &[String], provider: &str, base_url: &str) -> Result<TurnImages, String> {
-    let here = crate::ai_model::runs_here(provider, base_url);
+    let here = crate::ai::ai_model::runs_here(provider, base_url);
     let edge = super::images::long_edge(provider, here);
     let per = super::images::per_request(provider);
     let ids: Vec<String> = ids.iter().filter(|id| super::images::is_id(id)).take(per).cloned().collect();

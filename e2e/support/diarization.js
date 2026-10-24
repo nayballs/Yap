@@ -1,4 +1,4 @@
-// Stand-ins for the speaker models' downloads (src-tauri/src/diarize/
+// Stand-ins for the speaker models' downloads (src-tauri/src/speakers/diarize/
 // registry.rs): a fake NeMo-Speech.cpp runtime zip laid out like NVIDIA's
 // (bin/*.dll, the CLI, share/licenses/…) and a fake model file, served from
 // a local server, slowly enough to see the progress. Yap is pointed at them

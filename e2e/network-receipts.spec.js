@@ -1,6 +1,6 @@
 // Network receipts and Report a problem:
 // - Settings → Privacy & data → Network connections (src/lib/settings/
-//   ConnectionsView.svelte, src-tauri/src/net.rs): a Chat answer from "Groq"
+//   ConnectionsView.svelte, src-tauri/src/privacy/net.rs): a Chat answer from "Groq"
 //   — the fake AI standing in for api.groq.com through the debug-only
 //   YAP_E2E_NET_ALIASES — shows as "Chat · Groq" to api.groq.com, on the
 //   Internet; one from a server on this PC as "Chat · Custom endpoint" at
@@ -9,7 +9,7 @@
 //   light and dark. connections.json holds hosts and labels only: no key,
 //   no path, nothing asked or answered. Clear (asked first) empties it.
 // - Settings → About → Report a problem (ReportProblem.svelte,
-//   diagnostics.rs): the file list and a preview of the settings summary,
+//   privacy/diagnostics.rs): the file list and a preview of the settings summary,
 //   the system lines and the connections before anything is saved; the
 //   summary says a Groq key is set but never shows it, nor About you.
 //   Save writes the file where the test says (Windows' Save dialog in real

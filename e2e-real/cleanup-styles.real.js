@@ -1,7 +1,7 @@
-// The robot on **styles by app** (cleanup_styles.rs): Yap tells the kind of
+// The robot on **styles by app** (ai/cleanup_styles.rs): Yap tells the kind of
 // app from the real window it pastes into — a web mail page by the site its
 // title ends with, a chat page, a terminal and the coding CLI in it as
-// app_kind.rs reads them, anything else — and the cleanup it asks for says
+// pasting/app_kind.rs reads them, anything else — and the cleanup it asks for says
 // so, just before the transcript (a stand-in model shows what it was told).
 // What it pastes is fitted to the style: an email without a sign-off the
 // model made up, a shell command without the capital and full stop a

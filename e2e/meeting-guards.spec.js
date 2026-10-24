@@ -1,4 +1,4 @@
-// Meeting guard rails (src-tauri/src/meeting_guard.rs, capture.rs): Yap's
+// Meeting guard rails (src-tauri/src/calls/meeting_guard.rs, calls/capture.rs): Yap's
 // meeting windows leave screen captures while a meeting records (and Yap
 // warns when that's switched off), the maximum recording length (its
 // warning, Keep going, the stop), "When a call ends → Stop and summarise
@@ -34,7 +34,7 @@ const meetingNotes = (yap) => (yap.readJson('notes.json')?.notes ?? []).filter((
 const EXCLUDED = 17;
 /**
  * A silent test recording's end: so few words that Yap asks "Started by
- * mistake?" instead of writing a summary (meeting_end.rs).
+ * mistake?" instead of writing a summary (meetings/meeting_end.rs).
  */
 const SUMMARY_STEP = /Nothing to summarise yet|Started by mistake\?/;
 

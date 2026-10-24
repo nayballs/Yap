@@ -6,7 +6,7 @@ Telling the call side's voices apart (the beta speaker engine, a child process) 
 
 ## Modules
 
-- **`diarize.rs`** (+ `diarize/`) — **telling the voices on the call side
+- **`speakers/diarize.rs`** (+ `speakers/diarize/`) — **telling the voices on the call side
   apart** (beta, off by default; the spike: yap-private
   `docs/diarization-spike.md`). Engine: **Nemotron-3-Diarization** (q8_0 GGUF,
   107 MB, OpenMDW-1.1) on **NeMo-Speech.cpp 0.2.0** (CPU build, 5.5 MB zip,
@@ -269,7 +269,7 @@ app's readings naming voices through `e2e_call_readings`).
 
 ## Names for the voices: evaluations
 
-`yap.exe eval --speakers [--model …]` (`eval/speakers.rs`,
+`yap.exe eval --speakers [--model …]` (`ai/eval/speakers.rs`,
 [`docs/model-evals.md`](../model-evals.md)) scores Rust alone, then Rust +
 each model, on `evals/speakers/*.json`: 31 fictional meetings whose call
 lines are already told apart as the engine would (`them-1`…), their

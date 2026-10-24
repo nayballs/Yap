@@ -4,7 +4,7 @@
 // the text Yap pasted; capitals and punctuation aren't changes), with
 // **Paste what I said** and **Copy what I said**.
 //
-// Paste what I said (as_said.rs `paste_entry`): the latest dictation, right
+// Paste what I said (pasting/as_said.rs `paste_entry`): the latest dictation, right
 // after it, is swapped in the app it went into — a test run only logs that
 // it would — and any other has its words as said copied, Yap saying so. The
 // real swap from Home is the robot's (e2e-real/as-said.real.js); the diff

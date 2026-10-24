@@ -6,7 +6,7 @@ The correction dictionary: near-miss (fuzzy) matching, the Whisper vocabulary's 
 
 ## Modules
 
-- **`fuzzy.rs`** — fuzzy dictionary correction (Handy `audio_toolkit/text.rs` port):
+- **`dictionary/fuzzy.rs`** — fuzzy dictionary correction (Handy `audio_toolkit/text.rs` port):
   1–3-word n-grams vs the dictionary's `from`/`to` spellings, normalized Levenshtein
   + Soundex phonetic boost (the `natural` crate's nonstandard variant, replicated
   exactly), threshold 0.18, ≥3-char terms, case/punctuation preserved; a single
@@ -30,13 +30,13 @@ The correction dictionary: near-miss (fuzzy) matching, the Whisper vocabulary's 
   ordinary word ("lucky" with a Lucy in memory, "row shell" for Rochelle); the
   Whisper prompt gets those names after the dictionary's words
   (`memory::with_names`). See [memory.md](./memory.md).
-  Also `is_prompt_echo` (OpenWhispr `dictionaryEchoFilter` port) used by `stt.rs`
+  Also `is_prompt_echo` (OpenWhispr `dictionaryEchoFilter` port) used by `dictation/stt.rs`
   against Whisper hallucinating the dictionary prompt on silence, and, for
-  `learn.rs`, `spelling_distance` (Handy's score on the letters alone, no
+  `dictionary/learn.rs`, `spelling_distance` (Handy's score on the letters alone, no
   length gate) and `sound_distance` over `sound_key` (a Soundex/Metaphone-
   style consonant key: alike sounds merged, silent letters and vowels
   dropped — "cube and eighties" ≈ "Kubernetes", "kpnts"/"kprnts").
-- **`screen_terms.rs`** (+ `screen_terms/extract.rs`) — **"Spell names the way
+- **`dictionary/screen_terms.rs`** (+ `dictionary/screen_terms/extract.rs`) — **"Spell names the way
   they're written on screen"** (`config.screen_names`, default on; Aqua
   Voice's "Deep Context", local and without screenshots; 2026-10-22).
   **The read** (`begin_dictation(target, read)` from
@@ -54,7 +54,7 @@ The correction dictionary: near-miss (fuzzy) matching, the Whisper vocabulary's 
   children a parent, ≤ 250 calls / 2,500 elements: names of labels, links,
   list/tree items, tabs, headers, buttons, cells; other text boxes' and
   documents' text ≤ 2,000 characters each). ≤ 20,000 characters, 400 ms per
-  call, 1.5 s in all. Refusals as `selection.rs`: the target window's
+  call, 1.5 s in all. Refusals as `pasting/selection.rs`: the target window's
   process only, never a password box, never Yap's own windows, never a
   password manager's (`NEVER_READ`), never in a test run (robot mode: the
   test's own windows, `realtest::permits`). **The terms** (`extract`, pure):
@@ -105,7 +105,7 @@ The correction dictionary: near-miss (fuzzy) matching, the Whisper vocabulary's 
   spells. That line is all that can leave the PC (with the transcript, to
   a cloud cleanup provider; Settings and Privacy & data say so); the
   screen's text never does.
-- **`dict_usage.rs`** — how much each dictionary word is used, for the Whisper
+- **`dictionary/dict_usage.rs`** — how much each dictionary word is used, for the Whisper
   prompt's order (Wispr Flow ranks its vocabulary the same way):
   `<data>/dictionary_usage.json`, word (lowercased `to`) → `{uses, lastUsed}`
   (unix secs) — its own store, never config.json (Settings' wholesale saves
@@ -117,7 +117,7 @@ The correction dictionary: near-miss (fuzzy) matching, the Whisper vocabulary's 
   the last day, then 14 days, then the rest; within each most uses first; then
   the order added. The meeting prompt ranks the dictionary but keeps the
   attendees ahead of it. Best-effort everywhere.
-- **`learn.rs`** — **"Suggest words from your corrections"**
+- **`dictionary/learn.rs`** — **"Suggest words from your corrections"**
   (`config.learn_words`, default on; Wispr Flow's dictionary auto-learn as
   measured from its shipped code — `references/wispr-flow/rea-teardown/
   05-dictionary-learning.md` — and OpenWhispr's `correctionLearner.js`
@@ -174,12 +174,12 @@ The correction dictionary: near-miss (fuzzy) matching, the Whisper vocabulary's 
   passes to DictionaryView as `yap-dictionary-external`). Not now twice (✕
   counts) or "Don't suggest this" retires the pair; one prompt per 3 min.
   **A word you remove** from the dictionary is never suggested again,
-  however it's heard (Wispr's implicit blocklist): `commands::save_config`
+  however it's heard (Wispr's implicit blocklist): `settings::save_config`
   (every surface's save) hands the old and new dictionaries to
   `on_dictionary_saved`, and a correction whose trigger and spelling are
   both gone (an edit of one isn't a removal; snippets don't count) goes
   into the store's `removed` terms. **A meeting line the person fixed**
-  (`offer_for_line`, from `note_edits.rs`; the notepad and the Notes view):
+  (`offer_for_line`, from `notes/note_edits.rs`; the notepad and the Notes view):
   the same `suggestions` over the line's words before and after the edit
   (its start a sentence's), the same answers left out, no watch and no
   three-minute gap before it (they just fixed it; it still counts as the
@@ -200,7 +200,7 @@ The correction dictionary: near-miss (fuzzy) matching, the Whisper vocabulary's 
   Settings' cfg copy via `yap-dictionary-changed`/`-external` events) in two
   sections over the one list: **Corrections** (heard → replace with, the ≈
   near-miss button, "Catch near-misses", and "Suggest words from your
-  corrections" — `learnWords`, `learn.rs`; it rides along in the
+  corrections" — `learnWords`, `dictionary/learn.rs`; it rides along in the
   `yap-dictionary-changed` detail with `entries` and `fuzzy` so Settings'
   copy keeps it) and **Snippets** ("You say" pill →
   "Yap types" growing text box, line breaks kept; nothing seeded). Settings'

@@ -11,7 +11,7 @@ Chat's and the Voice Assistant's two ways of reaching outside Yap: looking thing
   Yap's own (`own_search`): **Exa** (`POST https://api.exa.ai/search`, `x-api-key`, its guide's
   recommended `{query, type: "auto", contents: {highlights: true}}` +
   `numResults: 5`, + `userLocation`: the person's country, ISO "GB", from
-  About you — `about_you.rs`, `Settings.country`; 2026-10-21) or **Tavily** (`POST https://api.tavily.com/search`,
+  About you — `ai/about_you.rs`, `Settings.country`; 2026-10-21) or **Tavily** (`POST https://api.tavily.com/search`,
   Bearer, `{query, max_results: 5}`, + `country`: Tavily's lower-case name,
   "united kingdom", when it lists the person's — `about_you::tavily_country`),
   the search cache keyed by the country too; keys in `web_search_keys` (service →
@@ -164,7 +164,7 @@ Chat's and the Voice Assistant's two ways of reaching outside Yap: looking thing
   still in °F." (`about_you::temperature_note`). A question that names the
   other scale ("…in Fahrenheit?" from the UK) leaves the pages as they are
   (`about_you::temperature_units`). **Models
-  that can't call tools** (`commands::small_model_answer`): the fixed
+  that can't call tools** (`turn::small_model_answer`): the fixed
   pipeline — `needs_web`, `search_query` (the ask stripped; a price
   question's aimed at the country, and searched once more for local prices,
   `local_prices_again`, their pages first or the "couldn't find" line in
@@ -310,7 +310,7 @@ Chat's and the Voice Assistant's two ways of reaching outside Yap: looking thing
   "bolders gait" → Baldur's Gate 3) when exactly one app sounds so and no
   other scores ≥ 0.6 or sounds within 0.25; else `Nothing` + close names
   (sound-alikes first). **Fast path** (`plan_with` / `plan_for(text, cfg,
-  conversation)`, before any model, in `commands::chat_turn` →
+  conversation)`, before any model, in `turn::chat_turn` →
   `app_turn` and `assistant::answer`): `open_request(text)` (pure: the
   whole message is "[greeting/please/can you/try to/yes…] open|launch|
   start|play|run|fire up|boot up|load up… <app> [please/for me/now/

@@ -271,7 +271,7 @@ static class Program {
 
     /// What UI Automation says is around the caret in the focused element
     /// of the test's window (in front, titled with the nonce): the way
-    /// selection.rs reads it (TextPattern selection, 500 characters either
+    /// pasting/selection.rs reads it (TextPattern selection, 500 characters either
     /// side), for diagnosing a fit.
     static Dictionary<string, object> Caret(IntPtr h, string nonce) {
         if (!Ours(h, nonce)) return Obj("error", "not the test's window");
@@ -338,7 +338,7 @@ static class Program {
         return Obj("ok", sent == inputs.Count);
     }
 
-    // ---- right-clicking the robot's own Yap (context_menu.rs) ----
+    // ---- right-clicking the robot's own Yap (shell/context_menu.rs) ----
 
     /// The processes of Yap's tree: the robot's Yap and every process it
     /// started, WebView2's browser and renderers included.

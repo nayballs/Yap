@@ -65,14 +65,17 @@
 //! chip (`web::search`).
 
 use std::collections::HashMap;
-use crate::net::Recorded as _;
+use crate::privacy::net::Recorded as _;
 use std::sync::{LazyLock, Mutex};
 use std::time::{Duration, Instant};
 
 use regex::Regex;
 use serde_json::{json, Value};
 
-use super::{best_passages, check_url, keywords, normal_url, site_of, tidy, Hit, HIT_CHARS, MAX_RESULTS};
+use super::page::check_url;
+use super::turn::normal_url;
+use super::wiki::{best_passages, keywords};
+use super::{site_of, tidy, Hit, HIT_CHARS, MAX_RESULTS};
 
 /// How long a sub-call may take (a provider's search loop can open a page
 /// or two before it answers).
@@ -234,7 +237,7 @@ impl NativeSearch {
 
     /// Aimed at the person's country and time zone (About you).
     pub fn in_region(mut self, country: Option<&str>, time_zone: Option<&str>) -> NativeSearch {
-        self.country = country.and_then(crate::about_you::country).map(|c| c.code.to_string());
+        self.country = country.and_then(crate::ai::about_you::country).map(|c| c.code.to_string());
         self.time_zone = time_zone.filter(|z| z.parse::<chrono_tz::Tz>().is_ok()).map(str::to_string);
         self
     }
@@ -283,7 +286,7 @@ impl NativeSearch {
     /// The sub-call's request body. Pure.
     pub fn body(&self, query: &str, question: &str, today: &str) -> Value {
         let mut system = system_prompt(today);
-        if let Some(c) = self.country.as_deref().and_then(crate::about_you::country) {
+        if let Some(c) = self.country.as_deref().and_then(crate::ai::about_you::country) {
             system.push_str(&region_line(c));
         }
         let user = user_text(query, question);
@@ -353,11 +356,11 @@ pub fn system_prompt(today: &str) -> String {
 /// The sub-call's line on where the person is (About you): " The user is in
 /// the United Kingdom: prefer pages and prices for there (in GBP), and say
 /// which country any other price is for." Pure.
-pub fn region_line(c: &crate::about_you::Country) -> String {
+pub fn region_line(c: &crate::ai::about_you::Country) -> String {
     let money = if c.currency.is_empty() { String::new() } else { format!(" (in {})", c.currency) };
     format!(
         " The user is in {}: prefer pages and prices for there{money}, and say which country any other price is for.",
-        crate::about_you::in_sentence(c)
+        crate::ai::about_you::in_sentence(c)
     )
 }
 
@@ -1037,13 +1040,13 @@ pub async fn search(ns: &NativeSearch, query: &str, question: &str) -> Result<Na
     let body = ns.body(query, question, &super::today());
     let p = ns.provider;
     let client = reqwest::Client::builder()
-        .timeout(crate::eval::timeout(TIMEOUT))
+        .timeout(crate::ai::eval::timeout(TIMEOUT))
         .connect_timeout(Duration::from_secs(8))
         .user_agent(super::USER_AGENT)
         .build()
         .map_err(|e| format!("Yap couldn't start the search: {e}"))?;
     // A model evaluation paces the call and logs it; otherwise a no-op.
-    let call = crate::eval::Call::start(p.id(), &url, &body).await;
+    let call = crate::ai::eval::Call::start(p.id(), &url, &body).await;
     call.send(&body);
     let mut req = client.post(&url).json(&body);
     req = match p {
@@ -1051,7 +1054,7 @@ pub async fn search(ns: &NativeSearch, query: &str, question: &str) -> Result<Na
         Provider::Anthropic => req.header("x-api-key", &ns.key).header("anthropic-version", "2023-06-01"),
         Provider::Groq | Provider::OpenAi | Provider::OpenRouter => req.bearer_auth(&ns.key),
     };
-    let resp = req.send_for(crate::net::Purpose::ProviderSearch(p.name())).await.map_err(|e| {
+    let resp = req.send_for(crate::privacy::net::Purpose::ProviderSearch(p.name())).await.map_err(|e| {
         call.failed(if e.is_timeout() {
             format!("{} took too long to answer.", p.search_name())
         } else {
@@ -1059,7 +1062,7 @@ pub async fn search(ns: &NativeSearch, query: &str, question: &str) -> Result<Na
         })
     })?;
     let status = resp.status().as_u16();
-    let limits = crate::eval::limit_headers(resp.headers());
+    let limits = crate::ai::eval::limit_headers(resp.headers());
     let header_u64 = |name: &str| resp.headers().get(name).and_then(|v| v.to_str().ok()).and_then(|s| s.trim().parse::<u64>().ok());
     let (limit_req, remaining_req) = (header_u64("x-ratelimit-limit-requests"), header_u64("x-ratelimit-remaining-requests"));
     let text = resp.text().await.map_err(|_| call.failed(format!("{} didn't finish its answer.", p.search_name())))?;
@@ -1074,7 +1077,7 @@ pub async fn search(ns: &NativeSearch, query: &str, question: &str) -> Result<Na
     }
     let v: Value = serde_json::from_str(&text).map_err(|_| call.failed(format!("{} sent an answer Yap couldn't read.", p.search_name())))?;
     call.answered(&limits, &v);
-    crate::usage::record(p.id(), total_tokens(&v), remaining_req, limit_req);
+    crate::ai::usage::record(p.id(), total_tokens(&v), remaining_req, limit_req);
     let found = parse(p, &v, query).map_err(|e| call.failed(e))?;
     tracing::info!(provider = p.id(), results = found.hits.len(), "Web search: the provider's own search answered");
     Ok(found)

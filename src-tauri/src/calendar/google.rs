@@ -21,7 +21,7 @@
 //! local fake (the e2e suite's `support/fake-google.js`).
 
 use std::collections::HashMap;
-use crate::net::Recorded as _;
+use crate::privacy::net::Recorded as _;
 use std::sync::mpsc;
 use std::sync::Arc;
 use std::time::Duration;
@@ -294,7 +294,7 @@ pub async fn refresh(client: &Client, refresh_token: &str) -> Result<Tokens, Fai
 }
 
 async fn token_call(form: &[(&str, &str)]) -> Result<Tokens, Failure> {
-    let resp = HTTP.post(endpoints().token).form(form).send_for(crate::net::Purpose::Calendar("Google")).await.map_err(|_| Failure::Offline)?;
+    let resp = HTTP.post(endpoints().token).form(form).send_for(crate::privacy::net::Purpose::Calendar("Google")).await.map_err(|_| Failure::Offline)?;
     let status = resp.status().as_u16();
     // Bodies hold tokens: never logged.
     let body: Value = resp.json().await.unwrap_or(Value::Null);
@@ -314,11 +314,11 @@ async fn token_call(form: &[(&str, &str)]) -> Result<Tokens, Failure> {
 
 /// Let go of the access (a disconnect). Best effort.
 pub async fn revoke(token: &str) {
-    let _ = HTTP.post(endpoints().revoke).form(&[("token", token)]).send_for(crate::net::Purpose::Calendar("Google")).await;
+    let _ = HTTP.post(endpoints().revoke).form(&[("token", token)]).send_for(crate::privacy::net::Purpose::Calendar("Google")).await;
 }
 
 async fn get(access: &str, url: url::Url) -> Result<Value, Failure> {
-    let resp = HTTP.get(url).bearer_auth(access).send_for(crate::net::Purpose::Calendar("Google")).await.map_err(|_| Failure::Offline)?;
+    let resp = HTTP.get(url).bearer_auth(access).send_for(crate::privacy::net::Purpose::Calendar("Google")).await.map_err(|_| Failure::Offline)?;
     match resp.status().as_u16() {
         200 => resp.json().await.map_err(|_| Failure::Http(200)),
         401 => Err(Failure::Unauthorized),

@@ -1,4 +1,4 @@
-// Telling speakers apart in meetings (src-tauri/src/diarize.rs): the speaker
+// Telling speakers apart in meetings (src-tauri/src/speakers/diarize.rs): the speaker
 // models in Settings → Speech-to-Text (rows like the speech models', the
 // fallback listed as coming later, where the files come from), the "Tell
 // speakers apart in meetings" switch that stays off until a model is

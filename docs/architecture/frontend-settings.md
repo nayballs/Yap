@@ -111,8 +111,8 @@ there can move margins: compare a page before and after.
   `advanced#dictionary` → `dictation#dictionary`; a page that moved keeps an
   anchor asked for. A page this build doesn't have leaves Settings where it
   is. Callers today: bar.rs `general#bar`,
-  meeting_guard.rs `meetings#screen-sharing`, meeting.rs (quiet mic)
-  `dictation#microphone`, alert.rs `cleanup#chat` / `voice#voice-provider`,
+  calls/meeting_guard.rs `meetings#screen-sharing`, meetings/meeting.rs (quiet mic)
+  `dictation#microphone`, notices/alert.rs `cleanup#chat` / `voice#voice-provider`,
   updates.rs `about`, auth.rs `account`, the notepad's Audio settings
   `dictation#microphone`, call detection's "Open Settings"
   `meetings#call-apps-list`, Home's history link `privacy#history`, Chat's
@@ -199,7 +199,7 @@ there can move margins: compare a page before and after.
 ## The pages
 
 - **General** (`settings/GeneralPage.svelte`): **Language and region**
-  (`#settings-language`, `AboutYouSettings.svelte`, `about_you.rs`): one
+  (`#settings-language`, `AboutYouSettings.svelte`, `ai/about_you.rs`): one
   **Region** Select (`regionCountry`): "Automatic: United Kingdom (from
   Windows)", then every country A–Z; its line is what follows from it
   (`about_you_status`'s summary, test id `region-follows`: "Prices in £ ·
@@ -243,12 +243,12 @@ there can move margins: compare a page before and after.
   and videos while you dictate" (`pauseMedia`). **While you dictate**: "Live
   preview on the Yap bar" (`streamingPartials`), "Offer what you said after AI
   cleanup" (`asSaidOffer`, on: the bar's "Cleaned up · Use what I said",
-  `as_said.rs`), "Cancel and finish buttons"
+  `pasting/as_said.rs`), "Cancel and finish buttons"
   (a Select When you point at it / Always / Off → `barDictationButtons`, Off
   by default, a line per choice). **Typing into apps** (`#settings-typing`,
   Advanced's old Output): "Match the text around the cursor"
   (`smartSpacing`), "Spell names the way they're written on screen"
-  (`screenNames`, `screen_terms.rs`; its line says, with AI cleanup on a
+  (`screenNames`, `dictionary/screen_terms.rs`; its line says, with AI cleanup on a
   cloud provider, that the names a dictation seems to contain go there with
   it — the ⓘ that the screen's text never leaves the PC), "Leave the full stop off chat messages"
   (`chatNoFullStop`), "Append trailing space" (its line "Only where Yap can't
@@ -263,7 +263,7 @@ there can move margins: compare a page before and after.
 - **Shortcuts** (`settings/ShortcutsPage.svelte`, OpenWhispr's Hotkeys page):
   the seven global shortcuts together — Dictate, Rewrite selected text, Ask the
   Voice Assistant, Read aloud, **Use what I said** (`asSaidHotkey`, unbound
-  by default; `as_said.rs`), Meeting notes, **Snip to Chat** (`snipHotkey`,
+  by default; `pasting/as_said.rs`), Meeting notes, **Snip to Chat** (`snipHotkey`,
   Win+Alt+S by default, its hint naming ✂, the tray, Esc and what Windows never
   lets an app capture; `snip.rs`, [snip.md](./snip.md)) — each in keycaps with Change, a
   clash said under the one being set — and a **Transforms** link row
@@ -289,7 +289,7 @@ there can move margins: compare a page before and after.
   apart in meetings" (`SpeakersToggle`, the same switch as Speech-to-Text's,
   with a link to the models), "Suggest who's speaking"
   (`meetingSpeakerNames`). **Meeting audio** (`#settings-meeting-audio`,
-  `meeting_audio.rs`): "Keep meeting audio" (`meetingKeepAudio`, on), "Keep
+  `meetings/meeting_audio.rs`): "Keep meeting audio" (`meetingKeepAudio`, on), "Keep
   it for" (1 / 7 / 14 / 30 / 90 days → `meetingAudioDays`, greyed while
   off), "Delete all meeting audio" ("2 meetings · 180 MB" from
   `meeting_audio_status`, kept current by `yap-meeting-audio`; Delete all… →
@@ -315,9 +315,9 @@ there can move margins: compare a page before and after.
   **"Rewrite your last dictation when nothing is selected"** ·
   "Within a minute, in the same field" (`#rewrite-last`,
   `rewriteLastDictation`, on; in the search index with its switch; the
-  rules in `as_said.rs`, [pasting.md](./pasting.md)). **Transforms**
+  rules in `pasting/as_said.rs`, [pasting.md](./pasting.md)). **Transforms**
   (`#settings-transforms`, `settings/TransformsSettings.svelte` +
-  `settings/transforms.js`, `transforms.rs`; 2026-10-24): "Rewrite the
+  `settings/transforms.js`, `dictation/transforms.rs`; 2026-10-24): "Rewrite the
   selected text in one press, without saying anything. With nothing
   selected, your last dictation, by the rules above." A row per transform
   (`[data-transform=<id>]`): its name ("Translate to French") and one line
@@ -338,7 +338,7 @@ there can move margins: compare a page before and after.
   Commands. **Assistant shortcut** (`#settings-assistant-shortcut`,
   `assistantHotkey`, clearable; a quiet line while none is set; its line
   follows the recording mode and the pause setting), "Stop listening when I
-  pause" (`assistantStopOnPause`, row `stop-on-pause`; `pause.rs`: its line
+  pause" (`assistantStopOnPause`, row `stop-on-pause`; `dictation/pause.rs`: its line
   says "Asking hands-free (a double-tap)…" in push-to-talk), "Show the
   answer on the Yap bar" (`assistantAnswerCard`). **Opening apps** (`OpenAppsSettings.svelte`,
   `#settings-opening-apps`: `openApps`, Nicknames `appNicknames`, Apps Yap
@@ -381,7 +381,7 @@ there can move margins: compare a page before and after.
   (`#settings-speakers`, `SpeakerModels.svelte` + `diarization.svelte.js`: the
   switch, the speaker models' rows, credits behind a disclosure). **Language**
   (Language, Translate to English) and **Performance**: **Speed**, where the
-  model runs (`settings/RunsOn.svelte`, `stt_speed.rs`): the line says what
+  model runs (`settings/RunsOn.svelte`, `dictation/stt_speed.rs`): the line says what
   Automatic chose and why, with each device's time for your dictations
   (`everydayMs`) — "Runs on: graphics card — fastest for your dictations on
   this PC (150 ms vs 280 ms)", "Runs on: processor — fastest for your
@@ -416,7 +416,7 @@ there can move margins: compare a page before and after.
   in my region's spelling" → `regionSpelling`, greyed while cleanup is off).
   With cleanup on: **Styles by app** (`#settings-cleanup-styles`,
   `settings/CleanupStyles.svelte` + `lib/cleanupStyles.js`, 2026-10-24;
-  `cleanup_styles.rs`): "Match the style to the app" (`cleanupStyles`,
+  `ai/cleanup_styles.rs`): "Match the style to the app" (`cleanupStyles`,
   `cleanup-styles`; off: "every app gets the same cleanup"), then a card per
   kind of app from `cleanup_styles_catalog` (an icon, its name, its apps
   — "Outlook, Gmail, Thunderbird and 10 more" —, its tone as a Segmented
@@ -467,7 +467,7 @@ there can move margins: compare a page before and after.
   (`historyEnabled`) and Clear history… (asks first; the count from
   `get_stats`, re-read on `yap-history-changed`; it clears the kept audio
   too); the list itself is Home's feed. "Keep recent dictation audio"
-  (`keepRecentAudio`, `recent_audio.rs`: the last 24 hours, on this PC, to run
+  (`keepRecentAudio`, `dictation/recent_audio.rs`: the last 24 hours, on this PC, to run
   a dictation again; greyed while history is off) and Clear recent audio…
   ("3 dictations · 1.2 MB" from `recent_audio_status`; asks first; history
   stays). **Chat screenshots** (`#settings-chat-images`): "Keep chat

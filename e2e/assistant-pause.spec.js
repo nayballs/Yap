@@ -1,4 +1,4 @@
-// "Stop listening when I pause" (src-tauri/src/pause.rs, pipeline.rs;
+// "Stop listening when I pause" (src-tauri/src/dictation/pause.rs, dictation/pipeline.rs;
 // Settings → Voice Assistant): once you've said something to the Voice
 // Assistant, a pause ends the question as a second press of its shortcut
 // would — never before you've spoken, never under a held push-to-talk key.
@@ -10,7 +10,7 @@
 // It says whether the recording ended before its audio did (the pause ended
 // it) and how much was played. The live preview is off here: the stub's
 // preview line is no words at all ("[STT stub: …]"), which holds a question
-// open (pause.rs' words check, unit-tested there), so the level alone
+// open (dictation/pause.rs' words check, unit-tested there), so the level alone
 // decides, as with the preview off. The stub then transcribes the audio and
 // the question goes to a local fake Chat model (support/fake-llm.js).
 import path from 'node:path';
@@ -59,7 +59,7 @@ const test = base.extend({
 const TALK = -24;
 const tone = (secs, db = TALK) => ({ kind: 'tone', secs, db });
 const quiet = (secs) => ({ kind: 'quiet', secs });
-/** The pause that ends a question (pause.rs `PAUSE_MS`). */
+/** The pause that ends a question (dictation/pause.rs `PAUSE_MS`). */
 const PAUSE = 1_500;
 
 /** A question from audio: `{ endedByItself, listenedMs }`. */

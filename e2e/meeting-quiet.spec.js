@@ -1,4 +1,4 @@
-// Quiet meetings and check-ins (src-tauri/src/meeting_guard.rs): after a
+// Quiet meetings and check-ins (src-tauri/src/calls/meeting_guard.rs): after a
 // stretch with nobody speaking, "Ending notes in 30 s…" counts down (Keep
 // going / Stop now; anyone speaking cancels it), then the recording stops
 // with a notice that says why; "Still in your meeting?" after a calendar
@@ -121,7 +121,7 @@ test('a quiet meeting counts down in the notepad, then stops and says why', asyn
   await expect(countdown).toHaveCount(0);
   expect(await prompt(yap)).toBeNull();
   await shot(yap.notepad, '02-stopped-because-quiet');
-  // One at a time (notice.rs): the question waits until the reason has
+  // One at a time (notices/notice.rs): the question waits until the reason has
   // been on screen, then takes its place.
   await expect(toast(yap.notepad, ENDED)).toBeVisible({ timeout: 20_000 });
   await expect(stopped).toHaveCount(0);

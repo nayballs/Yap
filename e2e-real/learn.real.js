@@ -1,4 +1,4 @@
-// "Suggest words from your corrections" (learn.rs), for real: after the
+// "Suggest words from your corrections" (dictionary/learn.rs), for real: after the
 // robot's paste Yap watches the field over UI Automation; the field is then
 // edited the way a person fixes a word Yap got wrong, and Enter ends the
 // watch. The suggestion shows in Yap's window (a toast: the main window is
@@ -47,7 +47,7 @@ test('the test pad: a word fixed after the paste is offered, and Add puts it in 
 // Found by this robot (2026-10-17): with a learned word (near-misses on, as
 // every new correction is), the fuzzy pass took the short word before the
 // term into its 2-word n-gram — "to Kubernetes" is within the threshold of
-// "Kubernetes" — and swallowed it. fuzzy.rs now never takes a run whose
+// "Kubernetes" — and swallowed it. dictionary/fuzzy.rs now never takes a run whose
 // first word adds nothing to the match.
 test('a learned word never swallows the short word before it', async ({ robot }) => {
   const { pad } = robot;
