@@ -4338,6 +4338,21 @@ mod tests {
     }
 
     #[test]
+    fn an_email_keeps_its_greeting_on_its_own_line() {
+        // The real-app robot (2026-10-24): cleanup's email went into a Gmail
+        // page as "Hi Sam, Thank you for the figures." — the near-miss pass
+        // put the words back together with spaces.
+        let dict = vec![entry("jaison", "JSON", true)];
+        let c = cfg("parakeet-tdt-0.6b-v3", true, dict);
+        let email = "Hi Sam,\n\nThank you for the figures.";
+        assert_eq!(finish_dictation(email, "hi sam thanks for the figures", &c), (email.to_string(), false));
+        assert_eq!(
+            finish_dictation("Hi Sam,\n\nThe jaison is attached.", "x", &c),
+            ("Hi Sam,\n\nThe JSON is attached.".to_string(), false)
+        );
+    }
+
+    #[test]
     fn corrections_leave_snippets_to_the_dictation() {
         // Meetings and Upload run apply_corrections alone: a snippet's phrase
         // stays as said there.

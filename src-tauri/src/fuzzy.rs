@@ -293,15 +293,39 @@ pub fn apply_names(text: &str, names: &[DictionaryEntry], is_word: &dyn Fn(&str)
     })
 }
 
+/// `text`'s words, each with the whitespace before it ("" for the first).
+fn words_and_gaps(text: &str) -> (Vec<&str>, Vec<&str>) {
+    let mut words = Vec::new();
+    let mut gaps = Vec::new();
+    let mut end = 0;
+    let mut start = None;
+    for (i, c) in text.char_indices().chain(std::iter::once((text.len(), ' '))) {
+        match (c.is_whitespace(), start) {
+            (false, None) => start = Some(i),
+            (true, Some(s)) => {
+                gaps.push(if words.is_empty() { "" } else { &text[end..s] });
+                words.push(&text[s..i]);
+                end = i;
+                start = None;
+            }
+            _ => {}
+        }
+    }
+    (words, gaps)
+}
+
 /// [`apply_fuzzy`]'s loop; `accept(run, replacement, dist)` may refuse a
-/// match it found (on top of the everyday-word rule below).
+/// match it found (on top of the everyday-word rule below). The text
+/// between the words stays as it was — an email's greeting keeps its own
+/// line (the robot, 2026-10-24: "Hi Sam, Thank you…") — and a run of words
+/// never reaches over a line break: a term is on one line.
 fn apply_with(text: &str, dict: &[DictionaryEntry], accept: &dyn Fn(&[&str], &str, usize) -> bool) -> String {
     let candidates = build_candidates(dict);
     if candidates.is_empty() {
         return text.to_string();
     }
 
-    let words: Vec<&str> = text.split_whitespace().collect();
+    let (words, gaps) = words_and_gaps(text);
     let mut result: Vec<String> = Vec::with_capacity(words.len());
     let mut i = 0;
 
@@ -316,7 +340,7 @@ fn apply_with(text: &str, dict: &[DictionaryEntry], accept: &dyn Fn(&[&str], &st
         // that protects the word BEFORE a term ("to Kubernetes").
         let mut chosen: Option<(usize, &str, usize)> = None; // (n, replacement, dist)
         for n in 1..=3usize {
-            if i + n > words.len() {
+            if i + n > words.len() || (n > 1 && gaps[i + n - 1].contains(['\n', '\r'])) {
                 break;
             }
             let run = &words[i..i + n];
@@ -339,20 +363,21 @@ fn apply_with(text: &str, dict: &[DictionaryEntry], accept: &dyn Fn(&[&str], &st
             }
         }
 
+        let gap = gaps[i];
         if let Some((n, replacement, _)) = chosen {
             let ngram_words = &words[i..i + n];
             let (prefix, _) = extract_punctuation(ngram_words[0]);
             let (_, suffix) = extract_punctuation(ngram_words[n - 1]);
             let corrected = preserve_case_pattern(ngram_words[0], replacement);
-            result.push(format!("{}{}{}", prefix, corrected, suffix));
+            result.push(format!("{gap}{prefix}{corrected}{suffix}"));
             i += n;
         } else {
-            result.push(words[i].to_string());
+            result.push(format!("{gap}{}", words[i]));
             i += 1;
         }
     }
 
-    result.join(" ")
+    result.concat()
 }
 
 // ── How alike two spellings are (learning words, learn.rs) ──────────
@@ -584,6 +609,30 @@ mod tests {
         // Split terms still join ("Chat G PT" holds no word that IS the term).
         let gpt = vec![entry("", "ChatGPT")];
         assert_eq!(apply_fuzzy("ask Chat G PT now", &gpt), "ask ChatGPT now");
+    }
+
+    #[test]
+    fn line_breaks_are_kept() {
+        // Found by the real-app robot (2026-10-24): an email AI cleanup
+        // wrote went into a Gmail page as "Hi Sam, Thank you for the
+        // figures." —
+        // every pass here put the words back together with a space.
+        let dict = vec![entry("cube and eighties", "Kubernetes")];
+        let email = "Hi Sam,\n\nThank you for the figures.";
+        assert_eq!(apply_fuzzy(email, &dict), email);
+        assert_eq!(
+            apply_fuzzy("Hi Sam,\n\nDeploy it to Kubernetis.\nThanks", &dict),
+            "Hi Sam,\n\nDeploy it to Kubernetes.\nThanks"
+        );
+        // Windows' line breaks, and a list's.
+        assert_eq!(apply_fuzzy("Hi Sam,\r\n\r\nKubernetis is up.", &dict), "Hi Sam,\r\n\r\nKubernetes is up.");
+        assert_eq!(apply_fuzzy("- Kubernetis\n- the logs", &dict), "- Kubernetes\n- the logs");
+        // A run of words never joins two lines into one term.
+        let gpt = vec![entry("", "ChatGPT")];
+        assert_eq!(apply_fuzzy("ask Chat G PT now", &gpt), "ask ChatGPT now");
+        assert_eq!(apply_fuzzy("ask Chat\nG PT now", &gpt), "ask Chat\nG PT now");
+        // The memory's names and the screen's go through the same loop.
+        assert_eq!(apply_names("Hi Pria,\n\nSee you there.", &[entry("", "Priya")], &|_| false), "Hi Priya,\n\nSee you there.");
     }
 
     #[test]
