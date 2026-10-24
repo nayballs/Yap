@@ -1,4 +1,4 @@
-// Call detection when the call can't be recorded (meeting_detect.rs): a
+// Call detection when the call can't be recorded (calls/meeting_detect.rs): a
 // configured microphone that isn't there makes "Record notes" fail on any
 // machine — it must say why and leave no empty meeting note behind. (See
 // meeting-detect.spec.js for the flow that records.)

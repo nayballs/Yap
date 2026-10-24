@@ -1,8 +1,8 @@
 // Trusting a dictation (2026-10-22): where the speech model runs on this
-// PC (stt_speed.rs: Settings → Speech-to-Text → Runs on), "Use what I said"
-// after AI cleanup (as_said.rs: the Yap bar's offer, the shortcut, the
+// PC (dictation/stt_speed.rs: Settings → Speech-to-Text → Runs on), "Use what I said"
+// after AI cleanup (pasting/as_said.rs: the Yap bar's offer, the shortcut, the
 // tray's paste as said) and a day of dictation audio to run a dictation
-// again (recent_audio.rs: Home's Run again and Play, a dictation Yap never
+// again (dictation/recent_audio.rs: Home's Run again and Play, a dictation Yap never
 // finished, Settings → Privacy & data).
 //
 // A test run runs the stub engine and pastes nothing: the benchmark's two
@@ -28,7 +28,7 @@ import { writeWav } from './support/wav.js';
 const MODEL = 'parakeet-tdt-0.6b-v3';
 const MODEL_DIR = 'parakeet-tdt-0.6b-v3-int8';
 // A dictation from before Yap closed mid-way: its audio and the marker
-// saying it was never finished (recent_audio.rs), ten minutes old.
+// saying it was never finished (dictation/recent_audio.rs), ten minutes old.
 const PENDING = String(Date.now() - 10 * 60_000);
 
 const test = base.extend({
@@ -202,7 +202,7 @@ test('the tray\'s "Paste last transcript (as said)" after a dictation cleanup le
   await configure(yap, { postProcessEnabled: false });
   const r = await yap.invoke('e2e_dictation', { text: 'send the plan to sam' });
   expect(r.asSaid ?? null).toBeNull();
-  // It froze Yap (text_injector.rs took the last dictation's lock twice):
+  // It froze Yap (pasting/text_injector.rs took the last dictation's lock twice):
   // the command never answered, nor anything after it.
   const frozen = new Promise((resolve) => setTimeout(() => resolve('Yap froze'), 5_000));
   const said = await Promise.race([yap.invoke('paste_last_transcript', { asSaid: true }), frozen]);
@@ -232,7 +232,7 @@ test('Shortcuts: "Use what I said" is unbound until set, and can\'t take another
 });
 
 test('a dictation Yap never finished is in Home, failed, and Run again transcribes its kept audio', async ({ yap, main, shot }) => {
-  // Listed at start from its marker (recent_audio.rs), dated when it was
+  // Listed at start from its marker (dictation/recent_audio.rs), dated when it was
   // recorded.
   await expectStore(yap, 'history.json', (h) => h.some((e) => e.audio === PENDING && e.status === 'failed'));
   await main.getByRole('button', { name: 'Home', exact: true }).click().catch(() => {});

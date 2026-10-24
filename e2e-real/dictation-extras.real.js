@@ -1,5 +1,5 @@
 // The robot on a dictation's extras: a paste into an app running as
-// administrator (elevated.rs), and "Dictation cancelled · Undo" (pipeline.rs).
+// administrator (pasting/elevated.rs), and "Dictation cancelled · Undo" (dictation/pipeline.rs).
 //
 // A real elevated window needs a UAC prompt, which a robot can't (and
 // mustn't) answer, so the admin app is a stand-in: `e2e_paste_elevated`

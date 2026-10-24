@@ -1,4 +1,4 @@
-// The robot on saved transforms (transforms.rs, 2026-10-24): a transform's
+// The robot on saved transforms (dictation/transforms.rs, 2026-10-24): a transform's
 // shortcut in a real window — Polish on text selected in the test pad (a
 // WinForms box: its own selection, EM_GETSEL), an Edge text box and a chat
 // app's contenteditable (TextPattern), the result pasted over the

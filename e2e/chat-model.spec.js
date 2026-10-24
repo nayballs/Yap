@@ -1,5 +1,5 @@
 // The Chat view's model chip (src/lib/ModelChip.svelte, src-tauri/src/
-// ai_model.rs): it names the model the next message goes to, resolved the
+// ai/ai_model.rs): it names the model the next message goes to, resolved the
 // way chat_send resolves it; says "no note tools" for a local model under
 // 4B (whose answers come from a plain search of the notes); says "No AI
 // model" when nothing is set up, and opens the picker on the provider to

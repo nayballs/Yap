@@ -1,4 +1,4 @@
-// The robot on "Use what I said" (as_said.rs): right after a dictation AI
+// The robot on "Use what I said" (pasting/as_said.rs): right after a dictation AI
 // cleanup changed (a stand-in model here), what Yap pasted is swapped for
 // the words as said — selected exactly over UI Automation, then pasted over
 // — in the test pad (a WinForms text box: EM_SETSEL), Notepad and an Edge
@@ -109,7 +109,7 @@ test('the tray\'s "Paste last transcript (as said)" after a dictation cleanup le
   const { pad, yap } = robot;
   // Cleanup gives the words back unchanged: no words as said, the case of
   // cleanup off (the default). It froze Yap: the last dictation's lock
-  // taken twice (text_injector.rs), the tray's paste hung and everything
+  // taken twice (pasting/text_injector.rs), the tray's paste hung and everything
   // after it.
   llm.reply('cleanup', (user) => cleanupTranscript(user));
   try {

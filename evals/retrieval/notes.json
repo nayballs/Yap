@@ -1,5 +1,5 @@
 {
-  "description": "Notes search: notes like a Yap user's, and questions as they'd ask Chat, each answered by one note. Some share the note's words, most say it differently. Used by `yap.exe eval --bench embed` (src-tauri/src/eval/serving.rs) to compare an embedding model with Chat's keyword search.",
+  "description": "Notes search: notes like a Yap user's, and questions as they'd ask Chat, each answered by one note. Some share the note's words, most say it differently. Used by `yap.exe eval --bench embed` (src-tauri/src/ai/eval/serving.rs) to compare an embedding model with Chat's keyword search.",
   "notes": [
     { "title": "Dentist", "content": "Appointment with Dr Patel at Riverside Dental on Thursday 6 November at 9:40. Check-up and a scale and polish. Bring the NHS exemption form. Reschedule fee is £20 if cancelled with less than 24 hours' notice." },
     { "title": "Launch plan", "content": "The beta ships on Friday 14 November if the installer bug is fixed by Wednesday. Dave owns the installer fix; Priya checks the signing certificate. Marketing wants screenshots by Monday. Hold the Mac build until December." },

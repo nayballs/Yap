@@ -83,7 +83,7 @@ test("a summary's tasks can be ticked, each mapped to its line", () => {
   ]);
   // Everywhere else (an answer): never tickable.
   expect(parse(renderMarkdown(plan)).querySelectorAll('input:not([disabled])')).toHaveLength(0);
-  // The nth checkbox is the task on taskLines(text)[n] (src-tauri/src/tasks.rs ticks it there).
+  // The nth checkbox is the task on taskLines(text)[n] (src-tauri/src/notes/tasks.rs ticks it there).
   expect(taskLines(plan)).toEqual([2, 3, 9, 10]);
   expect(taskLines('No tasks here.')).toEqual([]);
   // "• " bullets keep their lines.

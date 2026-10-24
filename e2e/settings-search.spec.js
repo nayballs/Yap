@@ -221,7 +221,7 @@ test('old links land where their settings went', async ({ yap, main, shot }) => 
   await goto(main, 'memory#memory-tell');
   await expect(dialog.getByRole('textbox', { name: 'Tell Yap what to change' })).toBeInViewport();
 
-  // The way Rust sends one (meeting_guard.rs's Windows notification, still in
+  // The way Rust sends one (calls/meeting_guard.rs's Windows notification, still in
   // the notification centre with the old string): through the app's event.
   await closeSettings(main);
   await yap.invoke('plugin:event|emit', { event: 'yap-open-settings', payload: 'general#screen-sharing' });

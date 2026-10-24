@@ -74,7 +74,7 @@ test('smart spacing: fitted to the text before the cursor', async ({ robot }) =>
 
 // A WinForms text box gives UI Automation a value but no caret (its focused
 // element has no TextPattern), so Yap asks the edit control itself where the
-// caret is (EM_GETSEL, selection.rs) — found by this robot (2026-10-17),
+// caret is (EM_GETSEL, pasting/selection.rs) — found by this robot (2026-10-17),
 // when a dictation into the middle of a line was fitted as if at its end.
 test('mid-text in a WinForms text box: fitted to the text either side of the caret', async ({ robot }) => {
   const { pad } = robot;

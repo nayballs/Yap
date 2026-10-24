@@ -1,7 +1,7 @@
-// Paste privacy & smart insert (text_injector.rs, selection.rs,
-// smart_insert.rs): "Paste last transcript" and Settings → Dictation →
+// Paste privacy & smart insert (pasting/text_injector.rs, pasting/selection.rs,
+// pasting/smart_insert.rs): "Paste last transcript" and Settings → Dictation →
 // Typing into apps' "Match the text around the cursor". A test run never pastes,
-// copies or reads another app's text (e2e.rs), so the paste itself, the
+// copies or reads another app's text (shell/e2e.rs), so the paste itself, the
 // clipboard's privacy formats and the text around the cursor are unit-tested
 // in Rust (`smart_insert`, and the `--ignored` real-window/clipboard tests);
 // here: what Yap would paste, and the setting.
@@ -67,7 +67,7 @@ test('settings: "Match the text around the cursor" is on, and off is saved', asy
   await expectStore(yap, 'config.json', (c) => c.smartSpacing === true);
 });
 
-// What they do to a dictation (app_kind.rs: telling terminals and chat apps
+// What they do to a dictation (pasting/app_kind.rs: telling terminals and chat apps
 // apart, one line at a shell, a chat message's full stop, which key follows
 // the paste) is unit-tested in Rust: a test run reads no other app's window
 // and pastes nothing.

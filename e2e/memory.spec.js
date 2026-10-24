@@ -28,7 +28,7 @@ const test = base.extend({
     async ({ fakeLlm }, use) => {
       await use({
         name: 'memory',
-        // Windows' region as a test run has it (about_you.rs): the UK.
+        // Windows' region as a test run has it (ai/about_you.rs): the UK.
         env: {
           YAP_E2E_LOCALE: JSON.stringify({ locale: 'en-GB', country: 'GB', currency: 'GBP', symbol: '£', metric: true, timeZone: 'GMT Standard Time' }),
         },

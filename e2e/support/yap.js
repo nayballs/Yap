@@ -5,7 +5,7 @@
 // - portable mode: the exe is copied next to a `portable` marker, so config,
 //   notes, history and logs live in <run>/app/Data (never %APPDATA%\yap);
 // - its own WebView2 profile (WEBVIEW2_USER_DATA_FOLDER) and CDP port;
-// - YAP_E2E=1 (debug builds only, src-tauri/src/e2e.rs): no global keyboard
+// - YAP_E2E=1 (debug builds only, src-tauri/src/shell/e2e.rs): no global keyboard
 //   hook, no paste into other apps, no focus stealing, and it quits when we
 //   close its stdin;
 // - YAP_AUTH_URL points at a closed local port: the account service is
@@ -137,7 +137,7 @@ export async function launchYap({ name, config = {}, env = {}, data = {}, runsDi
   const child = spawn(path.join(appDir, 'yap.exe'), [], {
     cwd: appDir,
     env: childEnv,
-    // stdin stays open: closing it is how we ask the app to quit (e2e.rs).
+    // stdin stays open: closing it is how we ask the app to quit (shell/e2e.rs).
     stdio: ['pipe', log, log],
   });
   fs.closeSync(log);

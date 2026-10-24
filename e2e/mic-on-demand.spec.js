@@ -1,4 +1,4 @@
-// The dictation's microphone opens on demand (mic.rs, 2026-10-22): closed
+// The dictation's microphone opens on demand (dictation/mic.rs, 2026-10-22): closed
 // while Yap idles, opened by a dictation, kept warm a moment after (here
 // YAP_MIC_WARM_MS, 2.5 s, instead of a minute), then closed — and kept open
 // by "Keep the microphone ready" or onboarding's mic check. The dictations

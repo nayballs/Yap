@@ -1,4 +1,4 @@
-// Saved transforms (transforms.rs, 2026-10-24): Settings → Commands →
+// Saved transforms (dictation/transforms.rs, 2026-10-24): Settings → Commands →
 // Transforms — Yap's five in order, Translate's language, adding, editing,
 // moving and deleting your own, a shortcut recorded and checked against the
 // other shortcuts (and they against it), the slot it takes in the input

@@ -13,14 +13,14 @@ export const ENGINES_TARGET_DIR =
 
 export const ENGINES_EXE = process.env.YAP_REAL_ENGINES_EXE || path.join(ENGINES_TARGET_DIR, 'debug', 'yap.exe');
 
-/** Yap's default model (stt.rs: id "parakeet-tdt-0.6b-v3", folder below). */
+/** Yap's default model (dictation/stt.rs: id "parakeet-tdt-0.6b-v3", folder below). */
 export const MODEL_ID = 'parakeet-tdt-0.6b-v3';
 export const MODEL_DIR = 'parakeet-tdt-0.6b-v3-int8';
 export const MODEL_SRC =
   process.env.YAP_REAL_MODEL_DIR || path.join(process.env.APPDATA || '', 'yap', 'models', MODEL_DIR);
 
 /**
- * A Whisper model for the specs that compare (screen-names.real.js): stt.rs'
+ * A Whisper model for the specs that compare (screen-names.real.js): dictation/stt.rs'
  * "large" (large-v3, q5_0), from the same folder, if it's there.
  */
 export const WHISPER_ID = 'large';

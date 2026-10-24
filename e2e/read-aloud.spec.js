@@ -1,5 +1,5 @@
-// Read aloud, anywhere (src-tauri/src/read_aloud.rs, tts.rs's tracked
-// read, tts/marks.rs; the reading card src/lib/bar/ReadingCard.svelte):
+// Read aloud, anywhere (src-tauri/src/voice/read_aloud.rs, voice/tts.rs's tracked
+// read, voice/tts/marks.rs; the reading card src/lib/bar/ReadingCard.svelte):
 // text read aloud in the chosen voice with a card on the Yap bar — the
 // sentence being read, its current word lit up as it's said (karaoke),
 // ⏮ ⏯ ⏭, the speed, Stop, Esc.

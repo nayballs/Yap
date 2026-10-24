@@ -1,7 +1,7 @@
-// "Spell names the way they're written on screen" (screen_terms.rs): the
+// "Spell names the way they're written on screen" (dictionary/screen_terms.rs): the
 // setting in Settings → Dictation → Typing into apps, and what it says about
 // what leaves the PC there and in Privacy & data's table. A test run never
-// reads another app's window (e2e.rs), so the read, the terms and their use
+// reads another app's window (shell/e2e.rs), so the read, the terms and their use
 // are unit-tested in Rust and robot-tested for real (e2e-real/
 // screen-names.real.js).
 import { test, expect, openSettings, expectStore } from './support/fixtures.js';

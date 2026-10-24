@@ -3,7 +3,7 @@
 // up AI instead of failing, and the call's audio leaking into the mic
 // (speakers, no headphones) kept out of the "You" side. No audio device is
 // opened: in test mode the recorder plays you.wav / them.wav from a folder
-// (src-tauri/src/e2e.rs), here 4× faster than real time. The long-meeting
+// (src-tauri/src/shell/e2e.rs), here 4× faster than real time. The long-meeting
 // summary is meeting-summary.spec.js.
 import path from 'node:path';
 import fs from 'node:fs';

@@ -1,4 +1,4 @@
-// Deleting several chats at once (ChatView.svelte, chats.rs `delete_many`,
+// Deleting several chats at once (ChatView.svelte, chat/chats.rs `delete_many`,
 // the maintainer, 2026-10-19: "shift click some chats and delete them all together"):
 // Shift+click selects a range, Ctrl+click adds or takes out one, the
 // "N selected" bar deletes them after asking; Delete, Esc and Ctrl+A from

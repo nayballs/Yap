@@ -1,15 +1,15 @@
-// A dictation's alerts (alert.rs): things the person has to act on, shown
+// A dictation's alerts (notices/alert.rs): things the person has to act on, shown
 // as a toast in the main window while it's on screen, else a card on the
 // Yap bar (else a Windows notification, which a test run never posts).
 //
-// - An app running as administrator (elevated.rs): Windows drops Yap's
+// - An app running as administrator (pasting/elevated.rs): Windows drops Yap's
 //   keys, so the text is left on the clipboard and Yap says "Your text is
 //   copied: press Ctrl+V". A test run reads no other process's integrity
 //   level: `e2e_paste_elevated` makes every target count as an admin app
 //   (and, as always in a test run, nothing is pasted or copied). The real
 //   check (`OpenProcess` → the token's integrity level) is unit-tested on
 //   Yap's own process; a real elevated window would need a UAC prompt.
-// - Windows' microphone privacy switches (mic_privacy.rs): "Windows is
+// - Windows' microphone privacy switches (dictation/mic_privacy.rs): "Windows is
 //   blocking microphone access for desktop apps" with Open settings, when a
 //   recording starts and in place of the dead-mic watchdog's "No sound from
 //   …". A test run reads no registry: `e2e_mic_privacy` stands in. (Without
@@ -158,7 +158,7 @@ test('a dead mic with the privacy switch off is blamed on the switch, on the bar
 // A bug that panics in a dictation's task (app_kind::word_before slicing a
 // no-break space in the paste was one) left `processing` set for good:
 // every press after it was ignored until Yap restarted, and nobody was told
-// (pipeline.rs `Busy`). `e2e_crash_next_dictation` makes the next one panic
+// (dictation/pipeline.rs `Busy`). `e2e_crash_next_dictation` makes the next one panic
 // in its paste step.
 test('a dictation that crashes: Yap can dictate again at once, says it failed, and lists it to run again', async ({ yap, shot }) => {
   await needsMic(yap);

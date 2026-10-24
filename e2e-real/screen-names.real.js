@@ -1,5 +1,5 @@
 // "Spell names the way they're written on screen" (src-tauri/src/
-// screen_terms.rs), for real: the window a dictation goes into shows names
+// dictionary/screen_terms.rs), for real: the window a dictation goes into shows names
 // and terms (an Edge page of the test's own, the test pad's rich text box);
 // Yap reads its visible text over UI Automation at the dictation's start and
 // spells what it heard as the screen does — and never touches everyday

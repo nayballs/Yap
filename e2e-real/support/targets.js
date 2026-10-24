@@ -1,5 +1,5 @@
 // The windows the robot dictates into, all opened by the harness and all
-// titled with the run's nonce (src-tauri/src/realtest.rs only lets Yap
+// titled with the run's nonce (src-tauri/src/shell/realtest.rs only lets Yap
 // paste, press keys or read in such windows, or in processes the harness
 // started): the test pad, Windows Terminal (a PowerShell prompt, and a
 // stand-in for Claude Code), an Edge app window showing a "WhatsApp" page,
@@ -467,7 +467,7 @@ ${beside ? `<div class="beside"><span>${beside[0]}</span> ${box} <span>${beside[
  * An Edge app window (a fresh, throwaway profile) playing `wav` on a loop,
  * titled "Yap robot audio - <nonce>", with that title in Windows' media
  * controls too (`navigator.mediaSession`): the only media Yap may pause in
- * robot mode (realtest.rs `media_permits`). `state()` reads the page's
+ * robot mode (shell/realtest.rs `media_permits`). `state()` reads the page's
  * player over the DevTools protocol: `{ paused, time }`.
  */
 export async function startMediaPage({ nonce, dir, wav }) {

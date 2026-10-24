@@ -1,4 +1,4 @@
-// "Spell names the way they're written on screen" (screen_terms.rs): a
+// "Spell names the way they're written on screen" (dictionary/screen_terms.rs): a
 // dictation never waits for the read of the screen. Every read in this
 // spec's Yap waits 8 s before it starts (YAP_REALTEST_SCREEN_DELAY_MS, robot
 // mode only); a spoken dictation still pastes at once, without the names.

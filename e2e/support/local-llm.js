@@ -1,4 +1,4 @@
-// Stand-ins for Yap's on-device model downloads (src-tauri/src/local_llm.rs):
+// Stand-ins for Yap's on-device model downloads (src-tauri/src/ai/local_llm.rs):
 // a fake GGUF per curated id and a fake llamafile engine, served from
 // 127.0.0.1 in pieces, slowly enough to see the progress; `hold()` stops a
 // download half-way until `release()` (a screenshot of the bar). Yap is

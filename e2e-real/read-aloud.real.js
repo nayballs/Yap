@@ -1,4 +1,4 @@
-// Read aloud, in real apps (read_aloud.rs, selection.rs `read_selected`):
+// Read aloud, in real apps (voice/read_aloud.rs, pasting/selection.rs `read_selected`):
 // text selected in a window the robot opened — the test pad's WinForms
 // boxes, Notepad, an Edge page — is read over UI Automation (or the edit
 // control's own selection) and read aloud, exactly as the Read aloud

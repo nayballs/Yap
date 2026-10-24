@@ -1,15 +1,15 @@
-// The meeting notepad (src-tauri/src/notepad.rs, src/lib/Notepad.svelte), in
+// The meeting notepad (src-tauri/src/meetings/notepad.rs, src/lib/Notepad.svelte), in
 // Wispr Flow's notepad layout: a window docked to the right edge of the
 // screen that opens when a meeting starts recording — the header (back to
 // Notes, the ⋯ menu, Share, split screen, delete), My thoughts (synced with
 // the Notes view), the live transcript (grouped bubbles, paused and dictated
 // dividers, search, copy), the summary Rust writes when the meeting ends
-// (meeting_end.rs, with steps and a Retry; also after a stop Yap makes
-// itself, meeting_guard.rs), the Ask sheet with "What did I miss?" and the AI
-// meeting title (meeting_assist.rs; never over a typed title or a calendar
+// (meetings/meeting_end.rs, with steps and a Retry; also after a stop Yap makes
+// itself, calls/meeting_guard.rs), the Ask sheet with "What did I miss?" and the AI
+// meeting title (meetings/meeting_assist.rs; never over a typed title or a calendar
 // meeting's name — a local iCal feed, support/calendar-feed.js), "Started by mistake?" (in the notepad,
 // or on the Yap bar with no Yap window on screen), the consent message,
-// hiding from screen capture (capture.rs), and the dictation key and meeting
+// hiding from screen capture (calls/capture.rs), and the dictation key and meeting
 // shortcut caught in-page.
 //
 // No audio device is opened (test mode records silence); transcript lines
@@ -17,7 +17,7 @@
 // `e2e_meeting_feed`. The AI is a local fake (support/fake-llm.js) that
 // records every request. The clipboard is stubbed in the page. Split screen
 // moves another app's window, which a test run never does (its window
-// picking is unit-tested in notepad.rs); Save as .md and Email open a native
+// picking is unit-tested in meetings/notepad.rs); Save as .md and Email open a native
 // dialog and the mail app, so they're checked through the text they'd use.
 //
 // The screenshots are named after the states in Wispr's own captures
@@ -99,7 +99,7 @@ async function startMeeting(yap, title) {
 let clockTs = Math.floor(Date.now() / 1000);
 /**
  * Hand the recorder transcript lines (`[source, text, echo?]`), as if just
- * transcribed; `'dictated'` is a "You dictated here" marker (meeting.rs).
+ * transcribed; `'dictated'` is a "You dictated here" marker (meetings/meeting.rs).
  */
 async function say(yap, ...lines) {
   const segments = lines.map((line) =>
@@ -236,7 +236,7 @@ test('a meeting starting opens the notepad docked to the right, without taking t
   // It never took the focus (the call stays in front)…
   expect(await yap.invoke('plugin:window|is_focused', { label: 'notepad' })).toBe(false);
   // …and stays out of screen shares and screenshots while the meeting
-  // records (capture.rs: WDA_EXCLUDEFROMCAPTURE).
+  // records (calls/capture.rs: WDA_EXCLUDEFROMCAPTURE).
   await expect.poll(() => affinity(yap)).toBe(EXCLUDED_FROM_CAPTURE);
 
   // Notes first: the serif title, the date, My thoughts; the live waveform on
@@ -392,7 +392,7 @@ test('the transcript: paused and dictated dividers, hover copy, search, copy all
   await expect(log.getByRole('separator', { name: 'Recording paused here' })).toHaveCount(1);
   await pad.getByRole('button', { name: 'Resume' }).click();
   await expect.poll(() => recording(yap)).toBe(true);
-  // A dictation mid-meeting leaves a marker (meeting.rs keeps its words out).
+  // A dictation mid-meeting leaves a marker (meetings/meeting.rs keeps its words out).
   await say(yap, ['you', 'Back again, where were we?'], 'dictated', ['them', 'The second theme, the budget.']);
   const dictated = log.getByRole('separator', { name: 'You dictated here' });
   await expect(dictated).toHaveText('You dictated here · left out of the notes');
@@ -445,7 +445,7 @@ test('the transcript: paused and dictated dividers, hover copy, search, copy all
 
   // Copy all: the spoken lines, no markers.
   await pad.getByRole('button', { name: 'Copy transcript' }).click();
-  // The button's ✓ says it: no toast on top (notice.rs).
+  // The button's ✓ says it: no toast on top (notices/notice.rs).
   await expect(pad.getByRole('button', { name: 'Copy transcript' })).toHaveAttribute('data-copied', '');
   await expect
     .poll(copied)
@@ -773,7 +773,7 @@ test('the header: back to Notes, the ⋯ menu, Share, split screen, delete', asy
   await expect(main.getByPlaceholder('Untitled Note')).toHaveValue('Header check');
 
   // After the meeting the ⋯ menu has no Audio settings, and Transcribe again
-  // (its audio kept: meeting_audio.rs); Delete asks first.
+  // (its audio kept: meetings/meeting_audio.rs); Delete asks first.
   await pauseAll(yap);
   await closeToasts(pad);
   await more.click();
@@ -1118,7 +1118,7 @@ test('a summary with tasks, lists, a quote and a table renders in the notepad an
     for (const plan of views) {
       await expect(plan.getByRole('heading', { name: 'Action plan' })).toBeVisible({ timeout: 15_000 });
       await expect(plan.getByRole('heading', { name: 'Alice', exact: true })).toBeVisible();
-      // A summary's tasks tick in place (tasks.rs; notes-edit.spec.js ticks them).
+      // A summary's tasks tick in place (notes/tasks.rs; notes-edit.spec.js ticks them).
       await expect(plan.locator('li.task input[type="checkbox"]:not([disabled])')).toHaveCount(4);
       await expect(plan.locator('li.task input:checked')).toHaveCount(1);
       await expect(plan.locator('li.task ul > li')).toHaveText(['the headcount for both days', 'dietary needs']);

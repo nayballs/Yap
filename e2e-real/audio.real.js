@@ -36,7 +36,7 @@ test('a dead mic (digital silence): reopened, "No sound from…", nothing pasted
   expect(log).toContain('Recording stopped: the mic gave nothing but silence, not transcribed');
   // Said on the dictation overlay, where the dictation is (its line, the
   // log above) — and only there: no toast in the main window as well
-  // (notice.rs: one place).
+  // (notices/notice.rs: one place).
   await yap.main.waitForTimeout(500);
   await expect(yap.main.getByRole('status').filter({ hasText: 'No sound from' })).toHaveCount(0);
   await shot(yap.main, '01-no-sound-no-toast');

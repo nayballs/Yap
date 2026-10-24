@@ -1,9 +1,9 @@
-// Meeting notes you can fix (src-tauri/src/note_edits.rs, tasks.rs;
+// Meeting notes you can fix (src-tauri/src/notes/note_edits.rs, notes/tasks.rs;
 // src/lib/noteEdits.js, TasksView.svelte), end to end:
 // - a transcript line's words fixed in the notepad (double-click, Enter):
 //   saved and marked edited with what Yap heard kept, shown in the Notes
 //   view too, and the misheard word offered for the dictionary right there
-//   ("Suggest words from your corrections", learn.rs);
+//   ("Suggest words from your corrections", dictionary/learn.rs);
 // - with the meeting's audio kept (a recording played from WAVs, as in
 //   meeting-audio-kept.spec.js): a line fixed in the Notes view (Edit line in
 //   its menu) still plays what was said, and Transcribe again keeps it;

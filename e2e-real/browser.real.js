@@ -30,7 +30,7 @@ test('a web page: fitted to the text either side of the cursor', async ({ robot 
 // Found by this robot (2026-10-17): Chromium's text ranges are positions in
 // the whole page, so reading 500 characters either side of the caret ran on
 // past the box into the page's own text (here, words on the box's line).
-// selection.rs keeps the read inside the focused field.
+// pasting/selection.rs keeps the read inside the focused field.
 test('a web page: only the text box is read, never the page around it', async ({ robot }) => {
   const page = await robot.editor('', ['We talked about it', 'and then left']);
   // Empty: the dictation as it is (not " the plan" after the page's words).
@@ -88,7 +88,7 @@ test('a chat app: a short message without its full stop, three sentences with it
 // Found by this robot (2026-10-17): Chromium reads an empty text box's text
 // as its label ("Type a message", from aria-label), or as U+FFFC when it has
 // none, so Yap took the empty message box for a draft: the chat full stop
-// stayed and a space followed it ("Sounds good. "). selection.rs now reads
+// stayed and a space followed it ("Sounds good. "). pasting/selection.rs now reads
 // such a box as empty (its value is "", its text only stands in).
 test('an empty chat box in Edge reads as empty: no full stop, no space after it', async ({ robot }) => {
   const chat = await robot.chat();

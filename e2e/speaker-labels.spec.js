@@ -1,5 +1,5 @@
 // The voice separation's labels on a meeting's lines (src-tauri/src/speakers/
-// labels.rs): the speaker engine (diarize.rs) says who spoke when on the
+// labels.rs): the speaker engine (speakers/diarize.rs) says who spoke when on the
 // call side, and the "Them" lines become "Speaker 1", "Speaker 2"… as its
 // labels settle (~10 s behind the talk), a line split where the speaker
 // changes, the rest when the recording stops — before the action plan reads

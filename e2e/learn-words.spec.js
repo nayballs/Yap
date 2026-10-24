@@ -1,4 +1,4 @@
-// "Suggest words from your corrections" (learn.rs): after a paste Yap
+// "Suggest words from your corrections" (dictionary/learn.rs): after a paste Yap
 // watches the field, and when you fix a word it typed it offers to add it to
 // the dictionary. A test run never reads another app's text, so the
 // debug-only `e2e_learn_correction` hands Yap what its watch would have

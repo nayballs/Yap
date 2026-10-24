@@ -1,4 +1,4 @@
-// WebView2's own context menu in Yap's windows (src-tauri/src/context_menu.rs),
+// WebView2's own context menu in Yap's windows (src-tauri/src/shell/context_menu.rs),
 // with a real right-click (SendInput, the helper's `rightclick`) on the robot's
 // own Yap, and a look at what windows Yap's process tree — WebView2's
 // browser process included — puts up. Plain UI: none at all, Inspect

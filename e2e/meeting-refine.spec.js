@@ -1,5 +1,5 @@
-// A meeting's transcript you can trust (meeting.rs "Failed chunks",
-// meeting_refine.rs, the recorder's slot), end to end:
+// A meeting's transcript you can trust (meetings/meeting.rs "Failed chunks",
+// meetings/meeting_refine.rs, the recorder's slot), end to end:
 // - a chunk that fails to transcribe is a marker, never silence ("Couldn't
 //   transcribe 0:00–0:15 · Try again"), the person is told once, and Try
 //   again puts that stretch's lines in its place;
@@ -10,7 +10,7 @@
 // - a dictation in the middle of that refine is never kept waiting;
 // - two meeting starts at the same moment give one recorder.
 // No audio device is opened: the recorder plays you.wav / them.wav, 4× real
-// time (e2e.rs); `e2e_meeting_fail` makes the live chunks over a stretch
+// time (shell/e2e.rs); `e2e_meeting_fail` makes the live chunks over a stretch
 // fail; the stub engine's lines say how much audio each chunk had and which
 // model ("engine=parakeet", "engine=cohere"); each refine chunk takes 1.5 s
 // (YAP_E2E_REFINE_CHUNK_MS), long enough for a dictation to land in it.

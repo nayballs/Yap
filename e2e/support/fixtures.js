@@ -41,7 +41,7 @@ export const test = base.extend({
     await mainOnScreen(yap);
     // Yap's notice policy starts fresh: no cooldowns or fatigue counts from
     // the last test, and the person counts as looking at the main window
-    // while it's on screen (notice.rs; a test that wants them in another
+    // while it's on screen (notices/notice.rs; a test that wants them in another
     // app calls `inAnotherApp`).
     await yap.invoke('e2e_notice_reset').catch(() => {});
     await resetUi(yap.main);
@@ -84,7 +84,7 @@ export const test = base.extend({
 
 /**
  * The person is in another app (the call, an editor): Yap's notices go to
- * the Yap bar instead of the main window's toasts (notice.rs: one place).
+ * the Yap bar instead of the main window's toasts (notices/notice.rs: one place).
  * A test run can't move the real focus; this says where it is. Back to
  * "looking at Yap" before every test.
  */
@@ -160,7 +160,7 @@ export async function closeToasts(main) {
  * A busy desktop (Win+D, another app, another test run beside this one) can
  * minimize it behind the suite's back, and Yap decides where some prompts go
  * by whether the main window is on screen (`window_view` in
- * meeting_detect.rs): minimized, a call prompt goes to a Windows
+ * calls/meeting_detect.rs): minimized, a call prompt goes to a Windows
  * notification, which test mode never shows, instead of the in-app toast.
  */
 export async function mainOnScreen(yap) {

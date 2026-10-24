@@ -1,4 +1,4 @@
-// Yap's notice policy (src-tauri/src/notice.rs + src/lib/ui/noticePolicy.js,
+// Yap's notice policy (src-tauri/src/notices/notice.rs + src/lib/ui/noticePolicy.js,
 // after Wispr Flow's rules, by behaviour): one notice in one place, one at a
 // time, the most important first; tips and notices held back while a
 // dictation runs; the same notice again within its cooldown not shown; tips

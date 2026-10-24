@@ -1,5 +1,5 @@
 // What the robot's windows show for the screen-names specs
-// (screen-names*.real.js, src-tauri/src/screen_terms.rs): names a speech
+// (screen-names*.real.js, src-tauri/src/dictionary/screen_terms.rs): names a speech
 // model gets wrong, and look-alikes of everyday words. Made-up and
 // fictional names only.
 export const SCREEN =

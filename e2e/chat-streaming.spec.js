@@ -1,4 +1,4 @@
-// Streamed answers (src-tauri/src/stream.rs, src/lib/streaming.js): Chat and
+// Streamed answers (src-tauri/src/chat/stream.rs, src/lib/streaming.js): Chat and
 // the notepad's Ask sheet show an answer as it's written.
 // - The answer grows in place, markdown rendered as it comes (a half-written
 //   **bold** or list closed off), the request asked for the stream and its
@@ -295,7 +295,7 @@ test('a dictation starting mid-stream: the local stream steps aside, then answer
 });
 
 // A newer question to the same conversation replaces the answer still
-// coming (stream.rs `Halt::Superseded`). A tester's voice chat (2026-10-23):
+// coming (chat/stream.rs `Halt::Superseded`). A tester's voice chat (2026-10-23):
 // the older question, set aside for the barge-in that asked the newer one,
 // was asked again after the newer one's answer, and both answers showed
 // under both questions. Now the older turn ends when the newer question is

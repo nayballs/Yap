@@ -1,4 +1,4 @@
-// The Yap bar (src-tauri/src/bar.rs + overlay.rs, src/lib/Overlay.svelte):
+// The Yap bar (src-tauri/src/bar.rs + bar/overlay.rs, src/lib/Overlay.svelte):
 // the always-there pill above the taskbar. One transparent window that's
 // click-through except over the pill and its cards, never activated, and
 // the surface for call prompts while the main window isn't focused.
@@ -275,7 +275,7 @@ test('Settings → General → Yap bar, and Dictation → While you dictate', as
 test('a call prompt is a "Meeting detected" card, in one place: the bar while you\'re in another app', async ({ yap, main, shot }) => {
   const bar = yap.overlay;
   // You're in another app (the call): the prompt goes on the bar, and only
-  // there — not in the main window's toasts as well (notice.rs).
+  // there — not in the main window's toasts as well (notices/notice.rs).
   await inAnotherApp(yap);
   await callSim(yap, 'discord', true); // not asked about by default…
   await expect.poll(() => yap.invoke('meeting_detect_status').then((s) => s.calls.length)).toBe(1);
@@ -554,7 +554,7 @@ test('dictating: the dictation overlay in the pill\'s place', async ({ yap, main
 });
 
 // ✕ / ✓ on the dictation capsule, and "Dictation cancelled · Undo"
-// (pipeline.rs: a cancelled recording's audio is kept `UNDO_MS`; bar.rs:
+// (dictation/pipeline.rs: a cancelled recording's audio is kept `UNDO_MS`; bar.rs:
 // the capsule is a clickable region of the click-through bar, never
 // activated). ✕ / ✓ are off by default (`barDictationButtons` "off"): the
 // tests of them switch on "When you point at it" ("hover": they show only

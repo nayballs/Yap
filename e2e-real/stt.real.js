@@ -18,7 +18,7 @@ test.use({
     prepare: linkModel,
     // The live preview off: one transcription, so the timing is the model's.
     config: { modelSize: MODEL_ID, streamingPartials: false },
-    // The mic's warm window (mic.rs) short, so a test can start cold.
+    // The mic's warm window (dictation/mic.rs) short, so a test can start cold.
     env: { YAP_MIC_WARM_MS: '2000' },
   },
 });
@@ -43,7 +43,7 @@ test('Parakeet hears a spoken sentence, and it lands in the field', async ({ rob
 test('from a cold microphone, every word lands — the first one too', async ({ robot }) => {
   test.setTimeout(240_000);
   const { pad, yap } = robot;
-  // The mic closed (opened on demand: mic.rs); the dictation opens it.
+  // The mic closed (opened on demand: dictation/mic.rs); the dictation opens it.
   await expect.poll(async () => (await yap.invoke('e2e_mic_status')).open, { timeout: 15_000 }).toBe(false);
   await pad.set('box', '');
   const sentence = 'Kangaroos can jump over a tall wooden fence.';

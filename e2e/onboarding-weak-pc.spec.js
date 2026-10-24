@@ -1,4 +1,4 @@
-// Onboarding on a small PC (hardware.rs, docs/benchmarks.md; 2026-10-24):
+// Onboarding on a small PC (ai/hardware.rs, docs/benchmarks.md; 2026-10-24):
 // no graphics card (`YAP_E2E_GPU=none`), 4 processor threads
 // (`YAP_E2E_CPU_THREADS`) and 8 GB (`YAP_E2E_RAM_MIB`) stand in for a
 // budget laptop. Speech is said to run on the processor (and does, before
