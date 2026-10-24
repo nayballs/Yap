@@ -109,6 +109,8 @@ fn launch(app: &Path, webview2: &Path) -> Launch {
     crate::procs::end_with_yap(&child);
     let pid = child.id();
     let logs = app.join("Data").join("logs");
+    // (The second launch's log already has the first one's line.)
+    let seen = pages_mounted(&logs);
     let mut out = Launch::default();
     while started.elapsed() < PATIENCE && (out.window_ms.is_none() || out.page_ms.is_none()) {
         if let Ok(Some(status)) = child.try_wait() {
@@ -118,7 +120,7 @@ fn launch(app: &Path, webview2: &Path) -> Launch {
         if out.window_ms.is_none() && first_run_window_shown(pid) {
             out.window_ms = Some(started.elapsed().as_millis() as u64);
         }
-        if out.page_ms.is_none() && page_mounted(&logs) {
+        if out.page_ms.is_none() && pages_mounted(&logs) > seen {
             out.page_ms = Some(started.elapsed().as_millis() as u64);
         }
         std::thread::sleep(Duration::from_millis(10));
@@ -131,14 +133,15 @@ fn launch(app: &Path, webview2: &Path) -> Launch {
     out
 }
 
-/// The first-run page's "mounted" line (Onboarding.svelte's `flog`) in the
-/// copy's log.
-fn page_mounted(logs: &Path) -> bool {
-    let Ok(dir) = std::fs::read_dir(logs) else { return false };
+/// How many times the first-run page has said it mounted
+/// (Onboarding.svelte's `flog`) in the copy's log.
+fn pages_mounted(logs: &Path) -> usize {
+    let Ok(dir) = std::fs::read_dir(logs) else { return 0 };
     dir.flatten()
         .map(|e| e.path())
         .filter(|p: &PathBuf| p.file_name().is_some_and(|n| n.to_string_lossy().starts_with("yap.log")))
-        .any(|p| std::fs::read_to_string(p).is_ok_and(|s| s.contains("[onboarding] mounted")))
+        .map(|p| std::fs::read_to_string(p).map(|s| s.matches("[onboarding] mounted").count()).unwrap_or(0))
+        .sum()
 }
 
 /// Is a window of `pid` titled "Welcome to Yap" visible and not cloaked?
@@ -188,4 +191,55 @@ fn first_run_window_shown(pid: u32) -> bool {
 #[cfg(not(windows))]
 fn first_run_window_shown(_pid: u32) -> bool {
     false
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_launch_is_ready_when_its_window_and_its_page_both_are() {
+        let l = Launch { window_ms: Some(900), page_ms: Some(640), error: None };
+        assert_eq!(l.ready_ms(), Some(900));
+        assert_eq!(Launch { window_ms: Some(900), page_ms: None, error: None }.ready_ms(), None);
+        let v = serde_json::to_value(ColdStart { first_launch: l, second_launch: Launch::default() }).unwrap();
+        assert_eq!(v["firstLaunch"]["windowMs"], 900);
+        assert_eq!(v["firstLaunch"]["pageMs"], 640);
+        assert!(v["secondLaunch"].get("error").is_none());
+    }
+
+    #[test]
+    fn each_launch_waits_for_a_mounted_line_of_its_own() {
+        let dir = std::env::temp_dir().join(format!("yap-cold-logs-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        assert_eq!(pages_mounted(&dir), 0);
+        std::fs::write(dir.join("yap.log.2026-10-24"), "x INFO [web] [onboarding] mounted; visibilityState=visible\n").unwrap();
+        assert_eq!(pages_mounted(&dir), 1);
+        std::fs::write(dir.join("yap.log.2026-10-24"), "a [onboarding] mounted\nb\nc [onboarding] mounted\n").unwrap();
+        std::fs::write(dir.join("other.txt"), "[onboarding] mounted").unwrap();
+        assert_eq!(pages_mounted(&dir), 2);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn the_throwaway_copy_is_portable_with_settings_of_its_own() {
+        let dir = std::env::temp_dir().join(format!("yap-cold-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        // A stand-in exe and a DLL beside it.
+        let from = dir.join("build");
+        std::fs::create_dir_all(&from).unwrap();
+        std::fs::write(from.join("yap-test.exe"), b"exe").unwrap();
+        std::fs::write(from.join("helper.dll"), b"dll").unwrap();
+        std::fs::write(from.join("notes.txt"), b"not copied").unwrap();
+        let app = dir.join("app");
+        prepare(&from.join("yap-test.exe"), &app).unwrap();
+        assert_eq!(std::fs::read_to_string(app.join("portable")).unwrap(), "Yap Portable Mode");
+        assert_eq!(std::fs::read(app.join("yap.exe")).unwrap(), b"exe");
+        assert!(app.join("helper.dll").is_file());
+        assert!(!app.join("notes.txt").exists());
+        let cfg: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(app.join("Data").join("config.json")).unwrap()).unwrap();
+        assert_eq!(cfg["autostart"], false);
+        assert_eq!(cfg["updateChecksEnabled"], false);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }

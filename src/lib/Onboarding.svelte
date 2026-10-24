@@ -834,7 +834,10 @@
 
     {#if step === 0}
       <button class="start" onclick={quickStart} disabled={!!busyId || !cfg}>
-        {#if busyId === recommended.id}
+        {#if busyId === recommended.id && percent >= 100}
+          <!-- Downloaded: checked, unpacked and loaded (~5–8 s), not "100%". -->
+          Setting up {recommended.name}…
+        {:else if busyId === recommended.id}
           Downloading {recommended.name}… {percent}%
         {:else if busyId}
           Setting up… {percent}%

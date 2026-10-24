@@ -317,7 +317,9 @@ const FIRST_BUDGET_MS: u64 = 20_000;
 
 /// Busier than this (percent of all processors over a second, the bench
 /// itself idle), other apps would slow a run down: it waits (`--patience`).
-pub const QUIET_PCT: u32 = 20;
+/// (A desktop with a browser, a chat app and a dev server open idles at
+/// 10–25 % on the reference PC.)
+pub const QUIET_PCT: u32 = 30;
 
 /// Was a run's PC busy (other apps, before or after it)? Pure.
 pub fn busy(before: Option<u32>, after: Option<u32>) -> bool {
@@ -910,7 +912,7 @@ async fn run(o: &Options, data: &Path, work: &Path, cfg: Option<&crate::config::
     if o.cleanup {
         let runtime = data.join("llm").join(crate::local_llm::RUNTIME_FILENAME);
         let ggufs = local_models(data, o);
-        if !runtime.is_file() || ggufs.is_empty() {
+        if o.llms.is_none() && (!runtime.is_file() || ggufs.is_empty()) {
             println!("No on-device AI model installed: local cleanup is skipped.");
         }
         for gguf in ggufs.iter().filter(|_| runtime.is_file()) {

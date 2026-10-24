@@ -15,8 +15,9 @@
 //!   processor (int8 Parakeet is quick there), the 1.5B on the processor;
 //! - **small**: fewer threads (or under 8 GB of memory): speech on the
 //!   processor still, and cleanup by a cloud provider is offered first —
-//!   the 1.5B adds seconds to each dictation there, so it's offered with
-//!   its time said.
+//!   the 1.5B adds about 1.6 s to each dictation there on this desktop's
+//!   cores held to 2 threads (more on a budget laptop's) and takes ~1.5 GB
+//!   of a small memory, so it's offered with its time said.
 
 use serde::Serialize;
 
@@ -108,8 +109,10 @@ pub fn tier(m: &Machine) -> Tier {
 /// Where a speech model runs until this PC's own timing says (`stt_speed`):
 /// the graphics card when there's one that isn't small, else the processor
 /// — without a card DirectML would run on Windows' software renderer (no
-/// graphics driver) or a weak integrated GPU, both slower than int8
-/// Parakeet on the processor (docs/benchmarks.md). Pure.
+/// graphics driver: Parakeet V3 ~1 s for 11 s of speech) or a weak
+/// integrated GPU (~4 s: the encoder runs at its 30-s plan), both slower
+/// than int8 Parakeet on 4 processor threads (~0.4 s; docs/benchmarks.md).
+/// Pure.
 pub fn speech_device_before_measuring(gpu: Option<&Gpu>) -> Device {
     match gpu {
         Some(g) if !crate::gpu::is_small(g) => Device::Gpu,
@@ -162,13 +165,17 @@ pub struct Advice {
 }
 
 /// Measured cleanup times (ms per dictation, median; `yap.exe bench` on the
-/// reference PC, docs/benchmarks.md). The card's 4B and 1.5B; the 1.5B on
-/// a processor at 8+ threads and at 4 (the small tier).
-pub const LOCAL_MS_CARD_4B: u64 = 300;
-pub const LOCAL_MS_CARD_1_5B: u64 = 150;
-pub const LOCAL_MS_PROCESSOR: u64 = 900;
-pub const LOCAL_MS_SMALL: u64 = 2_000;
-pub const CLOUD_MS: u64 = 500;
+/// reference PC, 2026-10-24, docs/benchmarks.md): Qwen3.5 4B and Qwen2.5
+/// 1.5B on an RTX 5070 Ti (159 and 80 ms); the 1.5B on the processor held
+/// to 4 threads (1,082 ms) for the processor tier — a laptop's 8 or more
+/// threads are slower than this desktop's 4 — and to 2 threads (1,606 ms)
+/// for a small PC, its cores slower still; Groq's openai/gpt-oss-20b, the
+/// cloud default (474–849 ms).
+pub const LOCAL_MS_CARD_4B: u64 = 160;
+pub const LOCAL_MS_CARD_1_5B: u64 = 80;
+pub const LOCAL_MS_PROCESSOR: u64 = 1_100;
+pub const LOCAL_MS_SMALL: u64 = 1_600;
+pub const CLOUD_MS: u64 = 800;
 
 /// The picks for `m`. Pure.
 pub fn advise(m: &Machine) -> Advice {
@@ -190,7 +197,7 @@ pub fn advise(m: &Machine) -> Advice {
             local_ms as f32 / 1000.0
         ),
         CleanupPick::Cloud => format!(
-            "Parakeet V3 on {}; AI cleanup by a cloud provider (about {:.1} s) — on this PC {model_name} adds about {:.0} s",
+            "Parakeet V3 on {}; AI cleanup by a cloud provider (about {:.1} s) — on this PC {model_name} adds about {:.1} s",
             where_(speech_device),
             CLOUD_MS as f32 / 1000.0,
             local_ms as f32 / 1000.0
