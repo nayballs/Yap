@@ -2,12 +2,11 @@
   import { invoke } from '@tauri-apps/api/core';
   import { listen } from '@tauri-apps/api/event';
   import { onMount, onDestroy, tick } from 'svelte';
-  import { initSpeech, readPageSelection } from './speech.svelte.js';
+  import { initSpeech } from './speech.svelte.js';
   import { applyAppearance } from './appearance.js';
   import { startKokoro } from './kokoro.svelte.js';
-  import { creditCleanupKey, adoptProviderKey } from './providers.js';
+  import { creditCleanupKey } from './providers.js';
   import { loadCatalog } from './modelCatalog.svelte.js';
-  import { hotkeyMatchesKeydown, hotkeyMatchesKeyup } from './hotkeys.js';
   import { attention, attentionCount, followAttention } from './attention.svelte.js';
   import { refreshLocalLlm, listenLocalProgress, followLocalLlm } from './settings/localLlm.svelte.js';
   import AccountSection from './AccountSection.svelte';
@@ -21,6 +20,9 @@
   import { NAV_GROUPS, resolveTarget } from './settings/nav.js';
   import { searchSettings, groupResults, countByPage } from './settings/settingsIndex.js';
   import { hotkeyCapture } from './settings/hotkeys.svelte.js';
+  import { followHotkeyFallback } from './settings/hotkeyFallback.svelte.js';
+  import { followDictionary } from './settings/dictionarySync.svelte.js';
+  import { followOutsideChanges } from './settings/adoptions.svelte.js';
   import { config, syncConfig, readConfig, setPristine, persist } from './settings/configSync.svelte.js';
   import SearchResults from './settings/SearchResults.svelte';
   import GeneralPage from './settings/GeneralPage.svelte';
@@ -32,7 +34,7 @@
   import CommandsPage from './settings/CommandsPage.svelte';
   import VoicePage from './settings/VoicePage.svelte';
   import SpeechPage from './settings/SpeechPage.svelte';
-  import { SCOPE_TABS, SCOPE_DEFAULTS, ensureScopes } from './settings/scopes.js';
+  import { SCOPE_TABS, ensureScopes } from './settings/scopes.js';
   import { migrateRoutesToProfiles } from './settings/profiles.js';
   import {
     lm,
@@ -101,6 +103,14 @@
   // The on-device model's status while on-device is picked but warming up,
   // and the model browser's family tab (settings/localLlm.svelte.js).
   followLocalLlm(() => cfg);
+  // The dictation, assistant, meeting, read-aloud and snip keys while this
+  // window has the focus (settings/hotkeyFallback.svelte.js).
+  followHotkeyFallback(() => cfg);
+  // What other surfaces save, taken into this copy: the Dictionary view's
+  // list both ways (settings/dictionarySync.svelte.js) and the one-off
+  // adoptions (settings/adoptions.svelte.js).
+  followDictionary(() => cfg, () => config.loaded);
+  followOutsideChanges(() => cfg);
 
   // Populate the per-app routing picker (from history) when AI Cleanup opens,
   // …and the providers' live model lists (a day-old one is checked behind),
@@ -185,75 +195,6 @@
       .catch(() => {});
   });
 
-  // In-window hotkey fallback: when OUR OWN window has focus, the global
-  // low-level hook never sees the hotkey (WebView2 front-runs the hook chain;
-  // log-proven 2026-07-05). The page gets the keydown normally, so drive the
-  // pipeline directly — combo-aware via lib/hotkeys.js, matching the Rust
-  // hook's semantics. Guarded while the shortcut recorder is capturing. The
-  // meeting shortcut (Win+Alt+M) goes first: a combo is more specific than a
-  // bare dictation key; then the Voice Assistant's shortcut. Down and up go
-  // to `dictation_key` / `assistant_key`, the hook's own paths: the recording
-  // mode (and push-to-talk's tap / double-tap) is Rust's to decide.
-  function onFallbackKeyDown(e) {
-    // (Not while a shortcut is being picked: settings/hotkeys.svelte.js.)
-    if (hotkeyCapture.on || e.repeat) return;
-    if (hotkeyMatchesKeydown(e, cfg?.meetingHotkey)) {
-      e.preventDefault();
-      e.stopPropagation();
-      invoke('meeting_shortcut', { origin: 'settings' }).catch(() => {});
-      return;
-    }
-    if (hotkeyMatchesKeydown(e, cfg?.assistantHotkey)) {
-      e.preventDefault();
-      e.stopPropagation();
-      invoke('assistant_key', { pressed: true }).catch(() => {});
-      return;
-    }
-    // Read aloud: what's selected on this page (read_aloud.rs).
-    if (hotkeyMatchesKeydown(e, cfg?.readHotkey)) {
-      e.preventDefault();
-      e.stopPropagation();
-      readPageSelection();
-      return;
-    }
-    // Snip to Chat (snip.rs): Yap's own windows leave the shot.
-    if (hotkeyMatchesKeydown(e, cfg?.snipHotkey)) {
-      e.preventDefault();
-      e.stopPropagation();
-      invoke('snip_start', { origin: 'shortcut' }).catch(() => {});
-      return;
-    }
-    if (!hotkeyMatchesKeydown(e, cfg?.hotkey)) return;
-    e.preventDefault();
-    e.stopPropagation();
-    invoke('dictation_key', { pressed: true }).catch(() => {});
-  }
-  function onFallbackKeyUp(e) {
-    if (hotkeyCapture.on) return;
-    if (hotkeyMatchesKeyup(e, cfg?.assistantHotkey)) {
-      e.preventDefault();
-      invoke('assistant_key', { pressed: false }).catch(() => {});
-      return;
-    }
-    if (!hotkeyMatchesKeyup(e, cfg?.hotkey)) return;
-    e.preventDefault();
-    invoke('dictation_key', { pressed: false }).catch(() => {});
-  }
-  $effect(() => {
-    window.addEventListener('keydown', onFallbackKeyDown, true);
-    window.addEventListener('keyup', onFallbackKeyUp, true);
-    return () => {
-      window.removeEventListener('keydown', onFallbackKeyDown, true);
-      window.removeEventListener('keyup', onFallbackKeyUp, true);
-    };
-  });
-
-  // ---- ControlPanel integration ----
-  // Deep-links from the shell (e.g. "Sign in" → account section) and dictionary
-  // sync with the DictionaryView surface: both edit the same config field from
-  // separate components, so events keep the two copies converged instead of the
-  // last-saved-wins clobbering each other.
-  let lastReceivedDictJson = null;
   // ---- Settings search (2026-10-22 review #3): the box at the top of the
   // nav (Ctrl+F or / while Settings is open), over a static index of every
   // setting (settings/settingsIndex.js). While there's a query the content
@@ -416,181 +357,26 @@
   function onSettingsGoto(e) {
     if (typeof e.detail === 'string' || (e.detail && typeof e.detail === 'object')) goto(e.detail);
   }
-  function onDictChanged(e) {
-    const entries = Array.isArray(e.detail) ? e.detail : e.detail?.entries;
-    if (!cfg || !Array.isArray(entries)) return;
-    lastReceivedDictJson = JSON.stringify(entries);
-    cfg.dictionary = entries.map((x) => ({ ...x }));
-    // dictionaryFuzzy and learnWords are owned by DictionaryView but ride
-    // along in this cfg copy — adopt their new values or our next auto-save
-    // would revert the toggles.
-    if (typeof e.detail?.fuzzy === 'boolean') cfg.dictionaryFuzzy = e.detail.fuzzy;
-    if (typeof e.detail?.learnWords === 'boolean') cfg.learnWords = e.detail.learnWords;
-  }
-  // A view outside Settings saved a config field (the Integrations view's
-  // Local API switch): adopt it, or this copy's next auto-save would put the
-  // old value back.
-  function onConfigPatched(e) {
-    if (cfg && e.detail && typeof e.detail === 'object') {
-      Object.assign(cfg, e.detail);
-      // The scope tabs read their scope once (ScopeProviderConfig).
-      if (e.detail.llmScopes) lm.chatScopeRev += 1;
-    }
-  }
-  // The Chat model picker connected a provider (ai_model.rs
-  // `set_provider_key` saved it): the key where this copy keeps it too —
-  // the shared store, cleanup's own when cleanup is on that provider, the
-  // Chat scope's — or this copy's next auto-save would drop it.
-  function onProviderKeySaved(e) {
-    const { provider: p, key } = e.detail || {};
-    if (!cfg || !p || !key) return;
-    if (adoptProviderKey(cfg, p, key)) lm.chatScopeRev += 1;
-  }
   $effect(() => {
     window.addEventListener('yap-settings-goto', onSettingsGoto);
-    window.addEventListener('yap-dictionary-changed', onDictChanged);
-    window.addEventListener('yap-config-patched', onConfigPatched);
-    window.addEventListener('yap-provider-key-saved', onProviderKeySaved);
-    return () => {
-      window.removeEventListener('yap-settings-goto', onSettingsGoto);
-      window.removeEventListener('yap-dictionary-changed', onDictChanged);
-      window.removeEventListener('yap-config-patched', onConfigPatched);
-      window.removeEventListener('yap-provider-key-saved', onProviderKeySaved);
-    };
+    return () => window.removeEventListener('yap-settings-goto', onSettingsGoto);
   });
-  // Meetings → "Ask about calls in" (MeetingsPage.svelte) saves a flipped
-  // app as the person's choice in `meetingDetectApps`.
-  function setCallAppAsks(id, asks) {
-    cfg.meetingDetectApps = { ...(cfg.meetingDetectApps || {}), [id]: asks };
-  }
-  // "Don't ask for Teams" on a call prompt saves that in Rust: adopt it into
-  // this config copy, or the next auto-save would switch Teams back on.
-  onMount(() => {
-    const un = listen('yap-meeting-detect-choice', (e) => {
-      const c = e.payload;
-      if (cfg && c?.app && typeof c.asks === 'boolean') setCallAppAsks(c.app, c.asks);
-      // "Stop asking about calls?" → Stop asking, or "Turn back on".
-      if (cfg && typeof c?.enabled === 'boolean') cfg.meetingDetection = c.enabled;
-    });
-    return () => un.then((f) => f());
-  });
-  // Words added from a suggestion ("Add “Kubernetes” to your dictionary?",
-  // learn.rs) are saved in Rust: adopt the list, or the next auto-save would
-  // drop them. Not marked as received, so the effect below passes the new
-  // list on to the Dictionary view.
-  onMount(() => {
-    const un = listen('yap-dictionary-learned', (e) => {
-      const entries = e.payload?.entries;
-      if (cfg && Array.isArray(entries)) cfg.dictionary = entries.map((x) => ({ ...x }));
-    });
-    return () => un.then((f) => f());
-  });
-  // The on-device model's context was set (here or in the Chat model
-  // picker: local_llm_set_context saved it): adopt it, or the next
-  // auto-save would put the old one back; and read the model's state again
-  // as its restart waits and ends.
-  onMount(() => {
-    const uns = [
-      listen('yap-local-context-changed', (e) => {
-        if (cfg && typeof e.payload?.localContext === 'number') cfg.localContext = e.payload.localContext;
-      }),
-      listen('yap-local-llm-changed', () => refreshLocalLlm()),
-    ];
-    return () => uns.forEach((u) => u.then((f) => f()));
-  });
-  // The Chat view's model chip switched the Chat scope's model (ai_model.rs
-  // chat_set_model saved it): adopt its endpoint, or the next auto-save
-  // would put the old model back. The prompt stays this copy's. The Chat
-  // tab remounts (`lm.chatScopeRev`): its provider pills read the scope once.
-  onMount(() => {
-    const un = listen('yap-chat-model-changed', (e) => {
-      // The picker chose another of the on-device models: the one for
-      // every feature (the sidecar serves one).
-      if (cfg && typeof e.payload?.ppLocalModel === 'string') {
-        cfg.ppLocalModel = e.payload.ppLocalModel;
-        refreshLocalLlm();
-      }
-      const s = e.payload?.scope;
-      if (!cfg || !s || typeof s !== 'object') return;
-      if (!cfg.llmScopes || typeof cfg.llmScopes !== 'object') cfg.llmScopes = {};
-      const cur = cfg.llmScopes.chat || {};
-      // The whole saved scope (every field, so the tab's bindings have
-      // values), with this copy's keys and prompt kept.
-      cfg.llmScopes.chat = {
-        disableThinking: false,
-        ...cur,
-        ...s,
-        apiKeys: { ...(cur.apiKeys || {}), ...(s.apiKeys || {}) },
-        prompt: cur.prompt || s.prompt || SCOPE_DEFAULTS.chat.prompt,
-      };
-      lm.chatScopeRev += 1;
-    });
-    return () => un.then((f) => f());
-  });
-  // Voice Assistant → Spoken replies (tts.rs). The Chat view's 🔊 saves "Speak
-  // replies" in Rust: adopt it, or the next auto-save would undo it. The
-  // engine, Kokoro's download, the voice and ▶ Preview are VoiceSettings;
-  // switching replies on while Kokoro isn't downloaded offers it
-  // (KokoroOffer), Windows voices speaking meanwhile.
+  // Voice Assistant → Spoken replies (tts.rs): ▶ Preview's voice and
+  // Kokoro's state for the window's life (VoiceSettings, KokoroOffer).
   initSpeech(['preview']);
   startKokoro();
   // The "Download Kokoro" offer, open across page switches (VoicePage).
   let offerKokoro = $state(false);
-  onMount(() => {
-    const un = listen('yap-voice-replies', (e) => {
-      if (cfg && typeof e.payload?.on === 'boolean') cfg.speakReplies = e.payload.on;
-    });
-    // The Chat view's volume slider (tts_volume_set).
-    const unVolume = listen('yap-voice-volume', (e) => {
-      if (cfg && Number.isFinite(e.payload?.volume)) cfg.ttsVolume = e.payload.volume;
-    });
-    // The reading card's − / + (read_aloud.rs saved it already).
-    const unRate = listen('yap-voice-rate', (e) => {
-      if (cfg && Number.isFinite(e.payload?.rate)) cfg.ttsRate = e.payload.rate;
-    });
-    return () => {
-      un.then((f) => f());
-      unVolume.then((f) => f());
-      unRate.then((f) => f());
-    };
-  });
-  // The notepad's consent message, edited there (notepad.rs): the same.
-  onMount(() => {
-    const un = listen('yap-consent-message-changed', (e) => {
-      if (cfg && typeof e.payload?.message === 'string') cfg.meetingConsentMessage = e.payload.message;
-    });
-    return () => un.then((f) => f());
-  });
-
-  // General → Yap bar (bar.rs). "Turn off the bar" in the bar's own menu
-  // saves that in Rust: adopt it here, or the next auto-save would turn the
-  // bar back on. "Hide the bar for 1 hour" isn't a setting; the group shows
-  // it with a way to bring the bar back now.
+  // General → Yap bar (bar.rs): "Hide the bar for 1 hour" isn't a setting;
+  // the group shows it with a way to bring the bar back now.
   let barHiddenUntil = $state(null);
   onMount(() => {
     invoke('bar_status')
       .then((s) => (barHiddenUntil = s?.hiddenUntil ?? null))
       .catch(() => {});
-    const uns = [
-      listen('yap-bar', (e) => (barHiddenUntil = e.payload?.hiddenUntil ?? null)),
-      listen('yap-bar-changed', (e) => {
-        if (cfg && typeof e.payload?.enabled === 'boolean') cfg.barEnabled = e.payload.enabled;
-      }),
-    ];
-    return () => uns.forEach((u) => u.then((f) => f()));
+    const un = listen('yap-bar', (e) => (barHiddenUntil = e.payload?.hiddenUntil ?? null));
+    return () => un.then((f) => f());
   });
-
-  // Broadcast Settings-side dictionary edits (e.g. the Commands name save)
-  // to DictionaryView — skipping echoes of updates we just received from it.
-  $effect(() => {
-    const json = JSON.stringify(cfg?.dictionary ?? null);
-    if (!config.loaded || json === null || json === lastReceivedDictJson) return;
-    window.dispatchEvent(
-      new CustomEvent('yap-dictionary-external', { detail: JSON.parse(json) })
-    );
-  });
-
-
 </script>
 
 {#snippet navIcon(id)}
@@ -778,64 +564,57 @@
               <kbd>Esc</kbd>
             </div>
           {/if}
-        {#if searching}
-          <SearchResults {query} groups={resultGroups} bind:selected {cfg} onopen={openResult} />
-        {:else if section === 'general'}
-          <GeneralPage {cfg} {barHiddenUntil} {goto} />
-        {:else if section === 'dictation'}
-          <DictationPage {cfg} {devices} {outputs} {onshowview} />
-        {:else if section === 'shortcuts'}
-          <ShortcutsPage {cfg} {goto} />
-        {:else if section === 'meetings'}
-          <MeetingsPage {cfg} {goto} bind:apps={meetingApps} />
-        {:else if section === 'commands'}
-          <CommandsPage {cfg} {goto} />
-
-        {:else if section === 'voice'}
-          <VoicePage {cfg} {goto} bind:offerKokoro />
-
-        {:else if section === 'models'}
-          <SpeechPage {cfg} {langInfo} />
-
-        {:else if section === 'cleanup'}
-          <LanguageModelsPage {cfg} {goto} />
-
-        {:else if section === 'privacy'}
-          <PrivacyPage {cfg} {goto} bind:connections={privacyConnections} />
-
-        {:else if section === 'about'}
-          <AboutPage {cfg} version={APP_VERSION} {goto} />
-
-        {:else if section === 'memory'}
-          <div class="page-h">
-            <h1>Memory</h1>
-            <p>What Yap remembers about you, so its AI answers you better. See, change or clear any of it.</p>
-          </div>
-          <MemorySection {cfg} {goto} />
-
-        {:else if section === 'connectors'}
-          <div class="page-h">
-            <h1>Connectors</h1>
-            <p>A calendar gives you a reminder before each meeting, and notes with its name and who's in it. Yap reads it straight from this PC.</p>
-          </div>
-          <ConnectorsSection {goto} />
-
-        {:else if section === 'mcp'}
-          <div class="page-h">
-            <h1>AI apps (MCP)</h1>
-            <p>Let your AI apps read your meeting transcripts and notes, through Yap on this PC. Never your dictations.</p>
-          </div>
-          <McpSection {cfg} {goto} />
-
-        {:else if section === 'account'}
-          <div class="page-h">
-            <h1>Account</h1>
-            <p>Optional. Yap works fully offline without one; sign in only for the extras that need it.</p>
-          </div>
-          <div data-setting="account">
-            <AccountSection />
-          </div>
-        {/if}
+          <!-- Which page is shown: each is its own component (settings/*Page.svelte);
+               the few that are a section and a heading are here. -->
+          {#if searching}
+            <SearchResults {query} groups={resultGroups} bind:selected {cfg} onopen={openResult} />
+          {:else if section === 'general'}
+            <GeneralPage {cfg} {barHiddenUntil} {goto} />
+          {:else if section === 'dictation'}
+            <DictationPage {cfg} {devices} {outputs} {onshowview} />
+          {:else if section === 'shortcuts'}
+            <ShortcutsPage {cfg} {goto} />
+          {:else if section === 'meetings'}
+            <MeetingsPage {cfg} {goto} bind:apps={meetingApps} />
+          {:else if section === 'commands'}
+            <CommandsPage {cfg} {goto} />
+          {:else if section === 'voice'}
+            <VoicePage {cfg} {goto} bind:offerKokoro />
+          {:else if section === 'memory'}
+            <div class="page-h">
+              <h1>Memory</h1>
+              <p>What Yap remembers about you, so its AI answers you better. See, change or clear any of it.</p>
+            </div>
+            <MemorySection {cfg} {goto} />
+          {:else if section === 'models'}
+            <SpeechPage {cfg} {langInfo} />
+          {:else if section === 'cleanup'}
+            <LanguageModelsPage {cfg} {goto} />
+          {:else if section === 'connectors'}
+            <div class="page-h">
+              <h1>Connectors</h1>
+              <p>A calendar gives you a reminder before each meeting, and notes with its name and who's in it. Yap reads it straight from this PC.</p>
+            </div>
+            <ConnectorsSection {goto} />
+          {:else if section === 'mcp'}
+            <div class="page-h">
+              <h1>AI apps (MCP)</h1>
+              <p>Let your AI apps read your meeting transcripts and notes, through Yap on this PC. Never your dictations.</p>
+            </div>
+            <McpSection {cfg} {goto} />
+          {:else if section === 'privacy'}
+            <PrivacyPage {cfg} {goto} bind:connections={privacyConnections} />
+          {:else if section === 'about'}
+            <AboutPage {cfg} version={APP_VERSION} {goto} />
+          {:else if section === 'account'}
+            <div class="page-h">
+              <h1>Account</h1>
+              <p>Optional. Yap works fully offline without one; sign in only for the extras that need it.</p>
+            </div>
+            <div data-setting="account">
+              <AccountSection />
+            </div>
+          {/if}
         </div>
       </div>
     {:else}
