@@ -214,6 +214,7 @@ pub(crate) fn wait_for_model(max: Duration) -> bool {
 
 #[cfg(test)]
 mod tests {
+    #[cfg(not(feature = "engines"))]
     use super::*;
 
     // ---- the shared engine (EngineCell) ----

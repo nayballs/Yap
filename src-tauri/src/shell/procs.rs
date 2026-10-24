@@ -400,8 +400,11 @@ mod tests {
     #[test]
     fn a_helper_ends_when_yap_is_ended() {
         use std::io::BufRead;
+        // The stand-in's test name for `--exact`: this module's path, less the
+        // crate's name ("shell::procs::tests::stand_in_yap").
+        let stand_in = format!("{}::stand_in_yap", module_path!().split_once("::").map_or("", |(_, m)| m));
         let mut yap = std::process::Command::new(std::env::current_exe().unwrap())
-            .args(["procs::tests::stand_in_yap", "--exact", "--nocapture", "--test-threads=1"])
+            .args([stand_in.as_str(), "--exact", "--nocapture", "--test-threads=1"])
             .env("YAP_STAND_IN_YAP", "1")
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::null())

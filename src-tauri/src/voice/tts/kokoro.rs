@@ -652,7 +652,7 @@ mod real {
             let (mut audio_err, mut plain_err) = (Vec::new(), Vec::new());
             for voice in ["af_bella", "bf_emma", "bm_george"] {
                 for text in TEXTS {
-                    let said = crate::voice::tts::said_text(text);
+                    let said = crate::voice::tts::speaker::said_text(text);
                     let mut s = synth(&model, &files, voice, english(&files, voice.starts_with('b')));
                     let pcm = s.synthesize(&said).unwrap();
                     let spans = marks::words(&said);
@@ -717,7 +717,7 @@ mod real {
             ];
             let (mut parakeet_vs_cue, mut audio_vs_cue) = (Vec::new(), Vec::new());
             for text in TEXTS {
-                let said = crate::voice::tts::said_text(text);
+                let said = crate::voice::tts::speaker::said_text(text);
                 let mut s = WindowsVoices.open("", 1.0).unwrap();
                 let pcm = s.synthesize(&said).unwrap();
                 let cues = s.marks().expect("cues");
