@@ -119,7 +119,7 @@ pub struct LineEdited {
     pub index: usize,
     pub line: TranscriptSegment,
     pub changed: bool,
-    pub offer: Option<crate::learn::Prompt>,
+    pub offer: Option<crate::dictionary::learn::Prompt>,
 }
 
 /// Edit a transcript line's words (the notepad, the Notes view). Every
@@ -153,7 +153,7 @@ pub async fn transcript_line_edit(
             payload["lineEdit"] = serde_json::json!({ "index": index, "line": seg });
             let _ = app.emit("yap-note-changed", payload);
         }
-        let offer = crate::learn::offer_for_line(&before, &seg.text);
+        let offer = crate::dictionary::learn::offer_for_line(&before, &seg.text);
         Ok(LineEdited { index, line: seg, changed, offer })
     })
     .await

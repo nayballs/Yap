@@ -1481,7 +1481,7 @@ pub(crate) mod uia {
 
     /// Line breaks as `\n`, no-break spaces as spaces.
     fn tidy(s: &str) -> String {
-        crate::learn::normalise(s)
+        crate::dictionary::learn::normalise(s)
     }
 
     /// The whole text of a field (TextPattern, else ValuePattern); a field

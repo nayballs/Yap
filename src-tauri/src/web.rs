@@ -2073,7 +2073,7 @@ pub fn fresh_query(query: &str, question: &str, earlier: &[&str], own: &[&str]) 
         let stem = |w: &str| if w.chars().count() > 3 { w.trim_end_matches('s').to_string() } else { w.to_string() };
         a == b
             || stem(a) == stem(b)
-            || (a.chars().count() >= 4 && b.chars().count() >= 4 && crate::fuzzy::plain_spelling_distance(a, b) <= 0.25)
+            || (a.chars().count() >= 4 && b.chars().count() >= 4 && crate::dictionary::fuzzy::plain_spelling_distance(a, b) <= 0.25)
     }
     static BACK: LazyLock<Regex> = LazyLock::new(|| {
         Regex::new(r"(?i)\b(?:it|its|that|this|they|them|those|these|one|ones|he|she|him|her|his|their|there)\b").expect("static regex")
@@ -2112,7 +2112,7 @@ pub fn fresh_query(query: &str, question: &str, earlier: &[&str], own: &[&str]) 
             .flatten()
             .collect()
     };
-    let misheard = |w: &str| theirs.iter().any(|t| same(w, t)) && left_out.iter().any(|h| crate::fuzzy::sounds_like(h, w));
+    let misheard = |w: &str| theirs.iter().any(|t| same(w, t)) && left_out.iter().any(|h| crate::dictionary::fuzzy::sounds_like(h, w));
     let kept: Vec<&str> = query
         .split_whitespace()
         .filter(|raw| {

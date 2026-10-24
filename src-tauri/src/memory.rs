@@ -212,7 +212,7 @@ fn clear_caches() {
 /// tell "olive" from a name then, so memory's names are never near-miss
 /// targets (only the Whisper prompt and a case fix).
 pub struct Words {
-    ordinary: std::cell::OnceCell<crate::learn::Ordinary>,
+    ordinary: std::cell::OnceCell<crate::dictionary::learn::Ordinary>,
 }
 
 impl Default for Words {
@@ -227,10 +227,10 @@ impl Words {
     }
 
     pub fn is(&self, w: &str) -> bool {
-        if crate::learn::is_frequent(w) {
+        if crate::dictionary::learn::is_frequent(w) {
             return true;
         }
-        let o = self.ordinary.get_or_init(crate::learn::Ordinary::new);
+        let o = self.ordinary.get_or_init(crate::dictionary::learn::Ordinary::new);
         !o.has_spell_checker() || o.is(w)
     }
 }

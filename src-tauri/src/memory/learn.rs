@@ -871,7 +871,7 @@ pub fn narrow_you_removals(changes: Vec<Change>, items: &[Item], asked: &str) ->
     const VAGUE: &[&str] = &["forget", "remember", "everything", "anything", "about", "please", "that", "this", "with", "from", "they", "them", "there", "were", "what", "which", "also"];
     const SMALL: &[&str] = &["the", "and", "for", "you", "your", "have", "has", "had", "not", "now", "all", "any", "can", "its", "out", "too", "was", "are", "but", "who"];
     let asked = ops::norm(asked);
-    let words: Vec<&str> = asked.split(' ').filter(|w| w.len() >= 4 && !VAGUE.contains(w) && !crate::learn::is_frequent(w)).collect();
+    let words: Vec<&str> = asked.split(' ').filter(|w| w.len() >= 4 && !VAGUE.contains(w) && !crate::dictionary::learn::is_frequent(w)).collect();
     let forgetting = asked.split(' ').any(|w| matches!(w, "forget" | "remove" | "delete" | "erase"));
     let fact_words: Vec<&str> = asked.split(' ').filter(|w| w.chars().count() >= 3 && !VAGUE.contains(w) && !SMALL.contains(w)).collect();
     let in_you = |c: &Change| c.id.and_then(|id| items.iter().find(|i| i.id == id)).is_some_and(|i| i.section.is_you());

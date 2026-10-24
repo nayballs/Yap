@@ -55,7 +55,7 @@ pub const NAME_WORDS: &[&str] = &[
 fn unsafe_word(word: &str, is_word: &dyn Fn(&str) -> bool) -> bool {
     let key: String = word.to_lowercase().chars().filter(|c| c.is_alphanumeric() || *c == '\'').collect();
     let letters = key.chars().filter(|c| c.is_alphanumeric()).count();
-    letters < 4 || crate::learn::is_frequent(&key) || NAME_WORDS.contains(&key.as_str()) || is_word(&key)
+    letters < 4 || crate::dictionary::learn::is_frequent(&key) || NAME_WORDS.contains(&key.as_str()) || is_word(&key)
 }
 
 /// May `name` be a near-miss target? Every word of it must be safe ([`unsafe_word`]).
@@ -187,7 +187,7 @@ mod tests {
     /// (2026-10-22): names alone can't keep ordinary words safe.
     #[test]
     fn no_everyday_sentence_changes() {
-        let ordinary = crate::learn::Ordinary::new();
+        let ordinary = crate::dictionary::learn::Ordinary::new();
         if !ordinary.has_spell_checker() {
             eprintln!("No spell checker on this PC: memory's names are never near-miss targets here.");
             return;
@@ -414,7 +414,7 @@ mod tests {
         ];
         let mut changed = Vec::new();
         for s in sentences {
-            let out = crate::fuzzy::apply_names(s, &vocab, &is_word);
+            let out = crate::dictionary::fuzzy::apply_names(s, &vocab, &is_word);
             if out != s {
                 changed.push(format!("{s} → {out}"));
             }
@@ -426,19 +426,19 @@ mod tests {
     fn a_misheard_name_is_fixed() {
         let items = vec![person(1, "Siobhan"), person(2, "Rochelle"), person(3, "Priya")];
         let vocab = entries(&items, &[], &words);
-        let is_word = |w: &str| crate::learn::is_frequent(w) || ["row", "shell", "shiv", "lucky"].contains(&w);
-        assert_eq!(crate::fuzzy::apply_names("I'll ask Shiobhan about it.", &vocab, &is_word), "I'll ask Siobhan about it.");
-        assert_eq!(crate::fuzzy::apply_names("Siobahn is coming.", &vocab, &is_word), "Siobhan is coming.");
+        let is_word = |w: &str| crate::dictionary::learn::is_frequent(w) || ["row", "shell", "shiv", "lucky"].contains(&w);
+        assert_eq!(crate::dictionary::fuzzy::apply_names("I'll ask Shiobhan about it.", &vocab, &is_word), "I'll ask Siobhan about it.");
+        assert_eq!(crate::dictionary::fuzzy::apply_names("Siobahn is coming.", &vocab, &is_word), "Siobhan is coming.");
         // Too far from the name (Handy's threshold): left as heard.
-        assert_eq!(crate::fuzzy::apply_names("I'll ask Shivon.", &vocab, &is_word), "I'll ask Shivon.");
-        assert_eq!(crate::fuzzy::apply_names("Tell rochelle I'm late.", &vocab, &is_word), "Tell Rochelle I'm late.");
-        assert_eq!(crate::fuzzy::apply_names("Pria said yes.", &vocab, &is_word), "Priya said yes.");
+        assert_eq!(crate::dictionary::fuzzy::apply_names("I'll ask Shivon.", &vocab, &is_word), "I'll ask Shivon.");
+        assert_eq!(crate::dictionary::fuzzy::apply_names("Tell rochelle I'm late.", &vocab, &is_word), "Tell Rochelle I'm late.");
+        assert_eq!(crate::dictionary::fuzzy::apply_names("Pria said yes.", &vocab, &is_word), "Priya said yes.");
         // Heard as ordinary words: left alone. ("row shell" sounds and
         // spells near enough that the plain near-miss pass takes it.)
         let rowing = "We took the row shell out on the river.";
-        assert_eq!(crate::fuzzy::apply_fuzzy(rowing, &vocab), "We took the Rochelle out on the river.");
-        assert_eq!(crate::fuzzy::apply_names(rowing, &vocab, &is_word), rowing);
+        assert_eq!(crate::dictionary::fuzzy::apply_fuzzy(rowing, &vocab), "We took the Rochelle out on the river.");
+        assert_eq!(crate::dictionary::fuzzy::apply_names(rowing, &vocab, &is_word), rowing);
         let lucy = entries(&[person(9, "Lucy")], &[], &words);
-        assert_eq!(crate::fuzzy::apply_names("I'm so lucky.", &lucy, &is_word), "I'm so lucky.");
+        assert_eq!(crate::dictionary::fuzzy::apply_names("I'm so lucky.", &lucy, &is_word), "I'm so lucky.");
     }
 }

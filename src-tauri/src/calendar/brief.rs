@@ -898,7 +898,7 @@ pub fn ungrounded(text: &str, cites: &[usize], facts: &Facts) -> Option<String> 
             let everyday = opens
                 && j == 0
                 && (STARTERS.contains(&w.as_str())
-                    || (crate::learn::is_frequent(&w) && !crate::memory::vocab::NAME_WORDS.contains(&w.as_str())));
+                    || (crate::dictionary::learn::is_frequent(&w) && !crate::memory::vocab::NAME_WORDS.contains(&w.as_str())));
             let pronoun = matches!(w.as_str(), "i" | "you" | "your" | "yours" | "yap");
             let checked = digit || time || (capital && !everyday && !pronoun);
             if checked && !known.contains(&w) && !known.contains(&stem(&w)) {

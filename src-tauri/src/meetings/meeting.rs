@@ -1244,7 +1244,7 @@ async fn transcribe_chunk(engine_slot: &EngineSlot, samples: Vec<f32>, note_id: 
     };
     let translate = cfg.translate_to_english;
     let dict_prompt =
-        crate::config::dictionary_prompt(&with_attendees(note_id, &crate::dict_usage::ranked(&crate::memory::with_names(&cfg.dictionary))));
+        crate::config::dictionary_prompt(&with_attendees(note_id, &crate::dictionary::dict_usage::ranked(&crate::memory::with_names(&cfg.dictionary))));
 
     let background = ctl.background;
     let outcome = tokio::task::spawn_blocking(move || {

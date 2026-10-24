@@ -559,7 +559,7 @@ pub fn grounded(text: &str, source: &str) -> bool {
     if words.is_empty() {
         return true;
     }
-    let content: Vec<&String> = words.iter().filter(|w| !crate::learn::is_frequent(w)).collect();
+    let content: Vec<&String> = words.iter().filter(|w| !crate::dictionary::learn::is_frequent(w)).collect();
     if !content.is_empty() {
         return content.iter().any(|w| word_in(w, &src));
     }

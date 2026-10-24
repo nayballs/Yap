@@ -1060,7 +1060,7 @@ mod engine_real {
             if let Some(prompt) = initial_prompt.filter(|p| {
                 self.name == "whisper" && p.split(',').count() >= 3
             }) {
-                if crate::fuzzy::is_prompt_echo(&text, prompt) {
+                if crate::dictionary::fuzzy::is_prompt_echo(&text, prompt) {
                     tracing::info!("Transcript matched the dictionary prompt (echo) — dropping");
                     return Ok(Timed::default());
                 }

@@ -24,11 +24,10 @@ mod coaching;
 mod commands;
 mod config;
 mod context_menu;
-mod dict_usage;
+mod dictionary;
 mod e2e;
 mod elevated;
 mod eval;
-mod fuzzy;
 mod gesture;
 mod gguf;
 mod gpu;
@@ -43,7 +42,6 @@ mod notices;
 mod privacy;
 mod history;
 mod input_hook;
-mod learn;
 mod llm;
 mod local_llm;
 mod mic;
@@ -59,7 +57,6 @@ mod procs;
 mod realtest;
 mod recent_audio;
 mod saving;
-mod screen_terms;
 mod selection;
 mod smart_insert;
 mod snip;
@@ -681,7 +678,7 @@ pub fn run() {
             bar::bar_pointer_left,
             bar::bar_action,
             bar::bar_card_action,
-            learn::word_suggestion_respond,
+            dictionary::learn::word_suggestion_respond,
             notices::alert::alert_action,
             #[cfg(debug_assertions)]
             bar::bar_simulate,
@@ -773,7 +770,7 @@ pub fn run() {
             #[cfg(debug_assertions)]
             notices::notice::e2e_focus,
             #[cfg(debug_assertions)]
-            learn::e2e_learn_correction,
+            dictionary::learn::e2e_learn_correction,
             #[cfg(debug_assertions)]
             calls::meeting_guard::e2e_meeting_limit,
             #[cfg(debug_assertions)]

@@ -306,8 +306,8 @@ fn in_dictionary(dict: &[DictionaryEntry], heard: &str, term: &str) -> bool {
 /// three letters or sounds or fewer, where one is already a third.
 fn sounds_alike(heard: &str, term: &str) -> bool {
     let limit = |len: usize| if len <= 3 { 0.3 } else { 0.5 };
-    let (spelled, spelled_len) = crate::fuzzy::spelling_distance(heard, term);
-    let (sounded, sounded_len) = crate::fuzzy::sound_distance(heard, term);
+    let (spelled, spelled_len) = crate::dictionary::fuzzy::spelling_distance(heard, term);
+    let (sounded, sounded_len) = crate::dictionary::fuzzy::sound_distance(heard, term);
     spelled <= limit(spelled_len) || sounded <= limit(sounded_len)
 }
 

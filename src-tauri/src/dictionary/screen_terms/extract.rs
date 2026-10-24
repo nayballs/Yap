@@ -320,7 +320,7 @@ mod tests {
 
     /// The tests' "spell checker": the everyday list and a few more words.
     fn words(w: &str) -> bool {
-        crate::learn::is_frequent(w)
+        crate::dictionary::learn::is_frequent(w)
             || [
                 "getting", "started", "warning", "projects", "settings", "inbox", "draft", "reply", "forward", "archive",
                 "meeting", "notes", "launch", "plan", "review", "dashboard", "welcome", "new", "sale", "explorer",
@@ -436,7 +436,7 @@ mod tests {
         // acronyms, digits and full names still are.
         let found: Vec<String> = extract(
             "Zentrix and GitHub, NASA, Qwen3, with Rochelle Okonkwo-Bassey",
-            &|w| crate::learn::is_frequent(w),
+            &|w| crate::dictionary::learn::is_frequent(w),
             false,
         )
         .into_iter()

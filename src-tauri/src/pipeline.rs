@@ -302,7 +302,7 @@ pub(crate) fn destination(edit: bool, assistant: bool, chat_armed: bool, chat_fo
 /// count as used, for the Whisper prompt's ranking (`dict_usage`).
 pub(crate) fn apply_corrections(text: &str, cfg: &YapConfig) -> String {
     let corrected = corrections(text, cfg);
-    crate::dict_usage::record(&crate::memory::with_names(&cfg.dictionary), &corrected);
+    crate::dictionary::dict_usage::record(&crate::memory::with_names(&cfg.dictionary), &corrected);
     corrected
 }
 
@@ -311,7 +311,7 @@ pub(crate) fn apply_corrections(text: &str, cfg: &YapConfig) -> String {
 fn corrections(text: &str, cfg: &YapConfig) -> String {
     let corrected = config::apply_dictionary(text, &cfg.dictionary);
     if cfg.dictionary_fuzzy && !stt::is_whisper_model(&cfg.model_size) {
-        let fixed = crate::fuzzy::apply_fuzzy(&corrected, &cfg.dictionary);
+        let fixed = crate::dictionary::fuzzy::apply_fuzzy(&corrected, &cfg.dictionary);
         // The names Yap remembers (memory/vocab.rs), more carefully: only
         // where what was heard isn't an ordinary word itself.
         let names: Vec<_> = crate::memory::dictation_names(&cfg.dictionary).into_iter().filter(|e| e.fuzzy).collect();
@@ -319,7 +319,7 @@ fn corrections(text: &str, cfg: &YapConfig) -> String {
             fixed
         } else {
             let words = crate::memory::Words::new();
-            crate::fuzzy::apply_names(&fixed, &names, &|w| words.is(w))
+            crate::dictionary::fuzzy::apply_names(&fixed, &names, &|w| words.is(w))
         }
     } else {
         corrected
@@ -331,8 +331,8 @@ fn corrections(text: &str, cfg: &YapConfig) -> String {
 /// (`screen`, when the dictation read them), the "press enter" command and
 /// snippets — everything [`finish_dictation_with`] does but the AI cleanup
 /// before it.
-pub(crate) fn as_said_text(raw: &str, cfg: &YapConfig, screen: Option<&crate::screen_terms::ScreenTerms>) -> String {
-    let corrected = crate::screen_terms::correct(&corrections(raw.trim(), cfg), screen, cfg);
+pub(crate) fn as_said_text(raw: &str, cfg: &YapConfig, screen: Option<&crate::dictionary::screen_terms::ScreenTerms>) -> String {
+    let corrected = crate::dictionary::screen_terms::correct(&corrections(raw.trim(), cfg), screen, cfg);
     let text = cfg.voice_enter.then(|| take_voice_enter(&corrected, raw)).flatten().unwrap_or(corrected);
     config::apply_snippets(&text, &cfg.dictionary)
 }
@@ -357,9 +357,9 @@ pub(crate) fn finish_dictation_with(
     cleaned: &str,
     raw: &str,
     cfg: &YapConfig,
-    screen: Option<&crate::screen_terms::ScreenTerms>,
+    screen: Option<&crate::dictionary::screen_terms::ScreenTerms>,
 ) -> (String, bool) {
-    let corrected = crate::screen_terms::correct(&apply_corrections(cleaned, cfg), screen, cfg);
+    let corrected = crate::dictionary::screen_terms::correct(&apply_corrections(cleaned, cfg), screen, cfg);
     let (text, enter) = match cfg.voice_enter.then(|| take_voice_enter(&corrected, raw)).flatten() {
         Some(text) => (text, true),
         None => (corrected, false),
@@ -1011,7 +1011,7 @@ impl Shared {
             *g = None;
         }
         self.edit_mode.store(false, Ordering::SeqCst);
-        crate::screen_terms::forget();
+        crate::dictionary::screen_terms::forget();
         if self.assistant.swap(false, Ordering::SeqCst) {
             crate::chat::assistant::nothing(&self.app);
         }
@@ -1549,7 +1549,7 @@ impl Shared {
         // "Spell names the way they're written on screen": the window's
         // visible text, read in the background for its names
         // (`screen_terms.rs`) — for a dictation that's pasted, not a rewrite.
-        crate::screen_terms::begin_dictation((hwnd != 0).then_some(hwnd), goes == Goes::Paste && !edit && screen_names);
+        crate::dictionary::screen_terms::begin_dictation((hwnd != 0).then_some(hwnd), goes == Goes::Paste && !edit && screen_names);
     }
 
     /// The dead-mic watchdog for recording `session` (`mic_watch.rs`): polls
@@ -1672,7 +1672,7 @@ impl Shared {
     fn dictionary_prompt(&self) -> Option<String> {
         let dict = self.config.read().ok()?.dictionary.clone();
         // The dictionary's words, then the names Yap remembers (memory.rs).
-        config::dictionary_prompt(&crate::dict_usage::ranked(&crate::memory::with_names(&dict)))
+        config::dictionary_prompt(&crate::dictionary::dict_usage::ranked(&crate::memory::with_names(&dict)))
     }
 
     /// A dictation's Whisper prompt: [`Self::dictionary_prompt`]'s words,
@@ -1680,8 +1680,8 @@ impl Shared {
     /// (`screen_terms`; never waited for).
     fn dictation_prompt(&self) -> Option<String> {
         let dict = self.config.read().ok()?.dictionary.clone();
-        let words = crate::dict_usage::ranked(&crate::memory::with_names(&dict));
-        crate::screen_terms::whisper_prompt(words, crate::screen_terms::peek().as_deref())
+        let words = crate::dictionary::dict_usage::ranked(&crate::memory::with_names(&dict));
+        crate::dictionary::screen_terms::whisper_prompt(words, crate::dictionary::screen_terms::peek().as_deref())
     }
 
     /// If streaming partials are enabled, spawn the worker thread for this
@@ -1724,7 +1724,7 @@ impl Shared {
         let edit = self.edit_mode.swap(false, Ordering::SeqCst);
         // The names read off the screen are this dictation's only (an Undo
         // reads them again).
-        crate::screen_terms::forget();
+        crate::dictionary::screen_terms::forget();
         // A question for the assistant that's called off isn't kept for
         // Undo (Undo pastes; the assistant never does).
         let assistant = self.assistant.swap(false, Ordering::SeqCst);
@@ -1813,7 +1813,7 @@ impl Shared {
             .unwrap_or((false, false, false));
         let target = (k.target_hwnd != 0).then_some(k.target_hwnd);
         crate::selection::begin_dictation(target, smart_spacing && !k.edit && !in_terminal);
-        crate::screen_terms::begin_dictation(target, !k.edit && screen_names);
+        crate::dictionary::screen_terms::begin_dictation(target, !k.edit && screen_names);
         let _ = self.app.emit("yap-state", "processing");
         tracing::info!(samples = k.audio.len(), "Undo: transcribing the cancelled dictation for its own window");
         self.undoing.store(true, Ordering::SeqCst);
@@ -2298,7 +2298,7 @@ impl Shared {
         // The names on screen, read at record start (`screen_terms`): this
         // dictation's only, and only if the read is done. Taken once, for
         // the cleanup, the corrections and the words as said alike.
-        let screen = crate::screen_terms::take();
+        let screen = crate::dictionary::screen_terms::take();
         let (cleaned, style) = self.clean_up(&raw, &style_target, screen.as_deref()).await;
 
         // The correction dictionary (exact, then fuzzy for
@@ -2335,7 +2335,7 @@ impl Shared {
         &self,
         raw: &str,
         target: &crate::cleanup_styles::Target,
-        screen: Option<&crate::screen_terms::ScreenTerms>,
+        screen: Option<&crate::dictionary::screen_terms::ScreenTerms>,
     ) -> (String, Option<crate::cleanup_styles::Style>) {
         // Snapshot the cleanup-related config under one read lock.
         // `plan` is the routed cleanup (`cleanup_styles::resolve`): the body
@@ -2385,7 +2385,7 @@ impl Shared {
                 let spelling = self.config.read().ok().and_then(|c| crate::about_you::cleanup_spelling(&c));
                 // The names on screen the transcript seems to hold (after
                 // the style's line, just before the transcript).
-                let names = crate::screen_terms::cleanup_line(screen, raw, &dict);
+                let names = crate::dictionary::screen_terms::cleanup_line(screen, raw, &dict);
                 if let Some(s) = plan.style {
                     tracing::debug!(style = %s.describe(), "AI cleanup's style");
                 }
@@ -2551,7 +2551,7 @@ impl Shared {
                             self.target_kind.lock().map(|k| k.is_terminal()).unwrap_or(true);
                         let learn = !terminal
                             && self.config.read().map(|c| c.learn_words).unwrap_or(false);
-                        crate::learn::after_paste(&self.app, &corrected, target, learn);
+                        crate::dictionary::learn::after_paste(&self.app, &corrected, target, learn);
                     }
                 }
                 Err(e) => {
@@ -3640,7 +3640,7 @@ impl Robot {
         };
         shared.capture_target(false);
         crate::selection::wait_for_context(Duration::from_millis(1_500));
-        crate::screen_terms::wait_for_terms(Duration::from_millis(3_000));
+        crate::dictionary::screen_terms::wait_for_terms(Duration::from_millis(3_000));
         let _ = shared.app.emit("yap-state", "processing");
         tracing::info!(len = text.len(), "e2e: robot dictation from a transcript");
         let report = shared.deliver(text).await;

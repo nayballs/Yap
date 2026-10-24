@@ -349,7 +349,7 @@ fn apply_with(text: &str, dict: &[DictionaryEntry], accept: &dyn Fn(&[&str], &st
                 // exact spelling: "could" isn't "cloud" → "Claude" (the maintainer,
                 // 2026-10-21: "was there anything that Claude be changed"),
                 // "motion" isn't "Notion" (learn.rs' everyday words).
-                if n == 1 && dist > 0 && crate::learn::is_frequent(&build_ngram(run)) {
+                if n == 1 && dist > 0 && crate::dictionary::learn::is_frequent(&build_ngram(run)) {
                     continue;
                 }
                 if !accept(run, replacement, dist) {

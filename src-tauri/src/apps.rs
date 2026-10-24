@@ -766,8 +766,8 @@ fn match_key(q: &[String], k: &Key) -> f64 {
     // A near-miss: "spottify", "teems" (not "spotifire": too many letters
     // apart, however alike it sounds).
     if qc.chars().count() >= 4 && kc.chars().count() >= 4 {
-        let (d, _) = crate::fuzzy::spelling_distance(&qc, &kc);
-        if d <= 0.2 && crate::fuzzy::plain_spelling_distance(&qc, &kc) <= 0.3 {
+        let (d, _) = crate::dictionary::fuzzy::spelling_distance(&qc, &kc);
+        if d <= 0.2 && crate::dictionary::fuzzy::plain_spelling_distance(&qc, &kc) <= 0.3 {
             best = best.max(k.tier * (1.0 - d) * 0.92);
         }
     }
@@ -837,8 +837,8 @@ pub fn find(apps: &[App], query: &str, nicknames: &[AppNickname], blocked: &[Str
             if said.is_empty() {
                 return None;
             }
-            let d = if said == q { 0.0 } else { crate::fuzzy::spelling_distance(&said, &q).0 };
-            let near = said.chars().count() >= 4 && d <= 0.1 && crate::fuzzy::plain_spelling_distance(&said, &q) <= 0.25;
+            let d = if said == q { 0.0 } else { crate::dictionary::fuzzy::spelling_distance(&said, &q).0 };
+            let near = said.chars().count() >= 4 && d <= 0.1 && crate::dictionary::fuzzy::plain_spelling_distance(&said, &q) <= 0.25;
             (said == q || near).then_some((d, n))
         })
         .min_by(|a, b| a.0.total_cmp(&b.0));
@@ -903,11 +903,11 @@ fn sound_of(forms: &[(Vec<String>, f64)], name: &str) -> Option<(f64, f64)> {
             if qc == kc {
                 continue;
             }
-            let (d, len) = crate::fuzzy::sound_distance(&qc, &kc);
+            let (d, len) = crate::dictionary::fuzzy::sound_distance(&qc, &kc);
             if len < 5 {
                 continue;
             }
-            let pair = (d, crate::fuzzy::plain_spelling_distance(&qc, &kc));
+            let pair = (d, crate::dictionary::fuzzy::plain_spelling_distance(&qc, &kc));
             if best.is_none_or(|b| pair.0 < b.0 || (pair.0 == b.0 && pair.1 < b.1)) {
                 best = Some(pair);
             }
@@ -939,7 +939,7 @@ fn close_names(apps: &[App], query: &str, blocked: &[String]) -> Vec<App> {
                 .filter(|k| k.subset)
                 .map(|k| {
                     let kc = k.words.concat();
-                    let d = crate::fuzzy::spelling_distance(&q, &kc).0;
+                    let d = crate::dictionary::fuzzy::spelling_distance(&q, &kc).0;
                     let held = kc.chars().count() >= 3 && (kc.contains(&q) || q.contains(&kc));
                     if held {
                         d.min(0.3)

@@ -101,7 +101,7 @@ fn phrase_safe(name: &str, is_word: &dyn Fn(&str) -> bool) -> bool {
         && words.iter().all(|w| {
             let key: String = w.to_lowercase().chars().filter(|c| c.is_alphanumeric() || *c == '\'').collect();
             let short = key.chars().count() < 3;
-            !crate::memory::vocab::NAME_WORDS.contains(&key.as_str()) && (short || (!crate::learn::is_frequent(&key) && !is_word(&key)))
+            !crate::memory::vocab::NAME_WORDS.contains(&key.as_str()) && (short || (!crate::dictionary::learn::is_frequent(&key) && !is_word(&key)))
         })
 }
 
@@ -147,10 +147,10 @@ impl ScreenTerms {
     /// `is_word`: is this lower-case word an everyday one?
     pub fn correct(&self, text: &str, keep: &dyn Fn(&str) -> bool, is_word: &dyn Fn(&str) -> bool) -> String {
         let targets = |list: &[DictionaryEntry]| -> Vec<DictionaryEntry> {
-            list.iter().filter(|e| !keep(&crate::fuzzy::ngram_key(&e.to))).cloned().collect()
+            list.iter().filter(|e| !keep(&crate::dictionary::fuzzy::ngram_key(&e.to))).cloned().collect()
         };
-        let text = crate::fuzzy::apply_screen(text, &targets(&self.phrases), is_word, keep);
-        crate::fuzzy::apply_screen(&text, &targets(&self.words), is_word, keep)
+        let text = crate::dictionary::fuzzy::apply_screen(text, &targets(&self.phrases), is_word, keep);
+        crate::dictionary::fuzzy::apply_screen(&text, &targets(&self.words), is_word, keep)
     }
 
     /// The terms `transcript` (what the model heard) seems to contain, best
@@ -160,7 +160,7 @@ impl ScreenTerms {
         let words: Vec<&str> = transcript.split_whitespace().collect();
         let mut found: Vec<(f64, usize, &str)> = Vec::new();
         for (i, t) in self.terms.iter().enumerate() {
-            if keep(&crate::fuzzy::ngram_key(&t.text)) {
+            if keep(&crate::dictionary::fuzzy::ngram_key(&t.text)) {
                 continue;
             }
             if let Some(score) = seems_said(&words, t) {
@@ -202,15 +202,15 @@ fn seems_said(words: &[&str], term: &Term) -> Option<f64> {
             for run in words.windows(n) {
                 let heard = letters(&run.join(" "));
                 // A run of everyday words only is no name ("the plan").
-                if heard.is_empty() || run.iter().all(|w| crate::learn::is_frequent(&letters(w))) && heard != key {
+                if heard.is_empty() || run.iter().all(|w| crate::dictionary::learn::is_frequent(&letters(w))) && heard != key {
                     continue;
                 }
                 let score = if heard == key {
                     0.0
                 } else {
-                    let plain = crate::fuzzy::plain_spelling_distance(&heard, &key);
-                    let (sound, len) = crate::fuzzy::sound_distance(&heard, &key);
-                    let (soundex, _) = crate::fuzzy::spelling_distance(&heard, &key);
+                    let plain = crate::dictionary::fuzzy::plain_spelling_distance(&heard, &key);
+                    let (sound, len) = crate::dictionary::fuzzy::sound_distance(&heard, &key);
+                    let (soundex, _) = crate::dictionary::fuzzy::spelling_distance(&heard, &key);
                     let soundex_hit = soundex < plain;
                     if plain <= 0.4 {
                         plain
@@ -248,7 +248,7 @@ fn handle_said(words: &[&str], handle: &str) -> Option<f64> {
         for len in n.saturating_sub(1).max(1)..=n + 1 {
             for run in words.windows(len) {
                 let heard = letters(&run.join(" "));
-                let d = crate::fuzzy::plain_spelling_distance(&heard, &key);
+                let d = crate::dictionary::fuzzy::plain_spelling_distance(&heard, &key);
                 if d <= 0.12 && best.is_none_or(|b| d < b) {
                     best = Some(d);
                 }
@@ -270,7 +270,7 @@ pub fn protected(dictionary: &[DictionaryEntry]) -> HashSet<String> {
     crate::memory::with_names(dictionary)
         .iter()
         .filter(|e| !e.snippet)
-        .flat_map(|e| [crate::fuzzy::ngram_key(&e.to), crate::fuzzy::ngram_key(&e.from)])
+        .flat_map(|e| [crate::dictionary::fuzzy::ngram_key(&e.to), crate::dictionary::fuzzy::ngram_key(&e.from)])
         .filter(|k| !k.is_empty())
         .collect()
 }
@@ -490,7 +490,7 @@ fn read_terms(hwnd: isize) -> Option<ScreenTerms> {
     }
     let read = read_window(hwnd, pid, started + READ_BUDGET)?;
     let read_ms = started.elapsed().as_millis() as u64;
-    let ordinary = crate::learn::Ordinary::new();
+    let ordinary = crate::dictionary::learn::Ordinary::new();
     let spell_checker = ordinary.has_spell_checker();
     let is_word = |w: &str| ordinary.is(w);
     let terms = extract::extract(&read.text, &is_word, spell_checker);
@@ -926,7 +926,7 @@ mod tests {
 
     /// The tests' "spell checker": the everyday list and a few more words.
     fn words(w: &str) -> bool {
-        crate::learn::is_frequent(w)
+        crate::dictionary::learn::is_frequent(w)
             || [
                 "row", "shell", "zen", "tricks", "cooper", "netties", "rachel", "breen", "nee", "tricky", "tricks",
                 "kindle", "gross", "oss", "boss",
@@ -966,7 +966,7 @@ mod tests {
         let said = crate::pipeline::as_said_text(heard, &cfg, Some(&s));
         // (Names are near-miss targets only with a spell checker to tell
         // them from words, as on every Windows PC.)
-        if crate::learn::Ordinary::new().has_spell_checker() {
+        if crate::dictionary::learn::Ordinary::new().has_spell_checker() {
             assert_eq!(said, "The Zentrix pilot starts Monday");
         } else {
             assert_eq!(said, heard);
@@ -1020,7 +1020,7 @@ mod tests {
             fuzzy: true,
             snippet: false,
         }];
-        let keep: HashSet<String> = dict.iter().flat_map(|e| [crate::fuzzy::ngram_key(&e.to), crate::fuzzy::ngram_key(&e.from)]).collect();
+        let keep: HashSet<String> = dict.iter().flat_map(|e| [crate::dictionary::fuzzy::ngram_key(&e.to), crate::dictionary::fuzzy::ngram_key(&e.from)]).collect();
         assert_eq!(s.correct("The ZenTrix pilot.", &|k| keep.contains(k), &words), "The ZenTrix pilot.");
         assert!(!s.in_transcript("the zentrix pilot", &|k| keep.contains(k)).contains(&"Zentrix"));
     }
@@ -1119,7 +1119,7 @@ mod tests {
     /// PC's own spell checker, as a dictation runs it.
     #[test]
     fn no_everyday_sentence_changes_with_a_busy_screen() {
-        let ordinary = crate::learn::Ordinary::new();
+        let ordinary = crate::dictionary::learn::Ordinary::new();
         if !ordinary.has_spell_checker() {
             eprintln!("No spell checker on this PC: the screen's terms are never near-miss targets here.");
             return;
@@ -1232,7 +1232,7 @@ mod tests {
                 println!("run {run}: nothing read in {read_ms} ms");
                 continue;
             };
-            let ordinary = crate::learn::Ordinary::new();
+            let ordinary = crate::dictionary::learn::Ordinary::new();
             let is_word = |w: &str| ordinary.is(w);
             let terms = extract::extract(&read.text, &is_word, ordinary.has_spell_checker());
             let screen = ScreenTerms::new(terms, &is_word, ordinary.has_spell_checker());
