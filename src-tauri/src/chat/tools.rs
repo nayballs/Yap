@@ -75,11 +75,11 @@
 //! parts: `notes` (the note tools and the keyword search), `memory`
 //! (`remember`, `forget`, `search_chats`) and `agent` (the loop).
 
-use serde_json::{json, Value};
-
 mod agent;
 mod memory;
 mod notes;
+
+use serde_json::{json, Value};
 
 pub use agent::{run_tool_loop_with, FirstStep};
 pub use notes::{changed_note, definitions, rag_notes, search_notes};
