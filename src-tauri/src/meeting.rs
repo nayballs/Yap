@@ -1759,7 +1759,7 @@ pub fn start(app: AppHandle, engine_slot: EngineSlot, note_id: u64) -> Result<()
     crate::notes::get(note_id).ok_or("Note not found")?;
     // A spoken reply stops before the call is heard (tts.rs; and nothing
     // is read aloud while this records).
-    crate::tts::stop();
+    crate::voice::tts::stop();
 
     let mic_buf = Captured::mic();
     let sys_buf = Captured::call();

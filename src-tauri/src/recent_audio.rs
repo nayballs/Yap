@@ -175,7 +175,7 @@ pub fn has(id: &str) -> bool {
 /// A dictation's audio, as 16 kHz mono samples.
 pub fn load(id: &str) -> Option<Vec<f32>> {
     let bytes = wav_bytes(id)?;
-    let pcm = crate::tts::parse_wav(&bytes).ok()?;
+    let pcm = crate::voice::tts::parse_wav(&bytes).ok()?;
     Some(crate::pipeline::resample_linear(&pcm.samples, pcm.sample_rate, SAMPLE_RATE))
 }
 
@@ -435,7 +435,7 @@ mod tests {
     #[test]
     fn the_wav_holds_the_audio() {
         let samples: Vec<f32> = (0..1_600).map(|i| (i as f32 / 100.0).sin() * 0.5).collect();
-        let pcm = crate::tts::parse_wav(&wav(&samples)).unwrap();
+        let pcm = crate::voice::tts::parse_wav(&wav(&samples)).unwrap();
         assert_eq!((pcm.sample_rate, pcm.channels, pcm.samples.len()), (16_000, 1, 1_600));
         assert!((pcm.samples[100] - samples[100]).abs() < 0.001);
     }

@@ -1008,10 +1008,10 @@ fn default_speak_when() -> String {
     "voice".into()
 }
 fn default_tts_engine() -> String {
-    crate::tts::DEFAULT_ENGINE.into()
+    crate::voice::tts::DEFAULT_ENGINE.into()
 }
 fn default_tts_voice() -> String {
-    crate::tts::kokoro::DEFAULT_VOICE.into()
+    crate::voice::tts::kokoro::DEFAULT_VOICE.into()
 }
 fn default_tts_rate() -> f32 {
     1.0
@@ -1020,7 +1020,7 @@ fn default_tts_volume() -> f32 {
     0.5
 }
 fn default_tts_provider() -> String {
-    crate::tts::cloud::LOCAL.into()
+    crate::voice::tts::cloud::LOCAL.into()
 }
 fn default_diarization_model() -> String {
     crate::speakers::diarize::DEFAULT_MODEL.into()
@@ -1293,10 +1293,10 @@ fn migrate_once(cfg: &mut YapConfig) -> bool {
         // were the only engine (so "windows" was never a choice) and
         // `tts_voice` held a Windows voice's id: it moves to
         // `tts_windows_voice`, and Kokoro speaks in af_bella once installed.
-        if cfg.tts_engine == crate::tts::WINDOWS {
-            cfg.tts_engine = crate::tts::DEFAULT_ENGINE.into();
+        if cfg.tts_engine == crate::voice::tts::WINDOWS {
+            cfg.tts_engine = crate::voice::tts::DEFAULT_ENGINE.into();
         }
-        if !crate::tts::kokoro::is_voice(&cfg.tts_voice) {
+        if !crate::voice::tts::kokoro::is_voice(&cfg.tts_voice) {
             if cfg.tts_windows_voice.is_empty() {
                 cfg.tts_windows_voice = std::mem::take(&mut cfg.tts_voice);
             }
@@ -2356,8 +2356,8 @@ mod tests {
     fn settings_changed_outside_settings_change_in_one_step() {
         let files = [
             ("ai_model.rs", include_str!("ai_model.rs")),
-            ("tts.rs", include_str!("tts.rs")),
-            ("read_aloud.rs", include_str!("read_aloud.rs")),
+            ("voice/tts.rs", include_str!("voice/tts.rs")),
+            ("voice/read_aloud.rs", include_str!("voice/read_aloud.rs")),
             ("local_llm.rs", include_str!("local_llm.rs")),
             ("calls/meeting_detect.rs", include_str!("calls/meeting_detect.rs")),
         ];

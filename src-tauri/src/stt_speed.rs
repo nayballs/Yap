@@ -626,7 +626,7 @@ fn system_times() -> Option<(u64, u64)> {
 
 /// The bundled clip as 16 kHz mono samples.
 pub fn clip() -> Vec<f32> {
-    let pcm = crate::tts::parse_wav(CLIP).expect("the bundled speech clip is a WAV");
+    let pcm = crate::voice::tts::parse_wav(CLIP).expect("the bundled speech clip is a WAV");
     let mono: Vec<f32> = if pcm.channels > 1 {
         pcm.samples
             .chunks(pcm.channels as usize)
@@ -1396,7 +1396,7 @@ mod tests {
     #[test]
     #[ignore]
     fn make_clip() {
-        let mut voice = crate::tts::kokoro::open_real("af_bella", 1.0).expect("Kokoro installed under YAP_TTS_MODELS");
+        let mut voice = crate::voice::tts::kokoro::open_real("af_bella", 1.0).expect("Kokoro installed under YAP_TTS_MODELS");
         let edge = vec![0f32; 4_800];
         let pause = vec![0f32; 6_400];
         let mut audio = edge.clone();

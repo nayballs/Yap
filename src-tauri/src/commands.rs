@@ -1930,13 +1930,13 @@ pub async fn chat_send(
     // Read out by itself? (Asked at the answer: a dictation may have started
     // meanwhile, and the settings may have changed.)
     let now = config::load();
-    let speak = crate::tts::auto_speak(
+    let speak = crate::voice::tts::auto_speak(
         now.speak_replies,
         &now.speak_when,
         by_voice,
         crate::pipeline::dictation_state().1,
         // A meeting recording or a call: quiet (`tts::meeting_quiet`).
-        crate::tts::meeting_quiet().is_some(),
+        crate::voice::tts::meeting_quiet().is_some(),
     );
     Ok(serde_json::json!({
         "conversationId": turn.conversation_id,
@@ -2048,7 +2048,7 @@ fn apply_config(app: &AppHandle, state: State<'_, AppState>, prev: &YapConfig, c
     if cfg.stt_device != prev.stt_device {
         crate::stt_speed::reload_if_needed(&app);
     }
-    crate::tts::set_volume(cfg.tts_volume);
+    crate::voice::tts::set_volume(cfg.tts_volume);
     // The tray is reconciled on every save (always-on since the pill retired) —
     // reconcile it live instead of waiting for the next app restart.
     crate::tray::ensure_tray(&app, &cfg);

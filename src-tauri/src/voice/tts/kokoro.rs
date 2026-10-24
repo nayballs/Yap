@@ -560,7 +560,7 @@ mod real {
     #[cfg(test)]
     mod checks {
         use super::*;
-        use crate::tts::g2p::Phonemizer;
+        use crate::voice::tts::g2p::Phonemizer;
 
         /// The research's typical answer (`tts-spike/scripts/paragraph.txt`):
         /// a name, a time, money, a date, "Q3" and a spoken list.
@@ -619,9 +619,9 @@ mod real {
         /// sentences, short ones joined), or the same without the writing out.
         fn lines(text: &str, normalised: bool) -> Vec<String> {
             if normalised {
-                merge_short(crate::tts::utterances(text))
+                merge_short(crate::voice::tts::utterances(text))
             } else {
-                merge_short(crate::tts::speakable_blocks(text).iter().flat_map(|b| crate::tts::sentences(b)).collect())
+                merge_short(crate::voice::tts::speakable_blocks(text).iter().flat_map(|b| crate::voice::tts::sentences(b)).collect())
             }
         }
 
@@ -637,7 +637,7 @@ mod real {
         #[test]
         #[ignore]
         fn word_timing_against_parakeet() {
-            use crate::tts::marks;
+            use crate::voice::tts::marks;
             let files = files().expect("Kokoro installed under YAP_TTS_MODELS");
             let data = PathBuf::from(std::env::var_os("YAP_STT_DATA").expect("YAP_STT_DATA"));
             crate::stt::apply_accelerator_settings(true);
@@ -652,7 +652,7 @@ mod real {
             let (mut audio_err, mut plain_err) = (Vec::new(), Vec::new());
             for voice in ["af_bella", "bf_emma", "bm_george"] {
                 for text in TEXTS {
-                    let said = crate::tts::said_text(text);
+                    let said = crate::voice::tts::said_text(text);
                     let mut s = synth(&model, &files, voice, english(&files, voice.starts_with('b')));
                     let pcm = s.synthesize(&said).unwrap();
                     let spans = marks::words(&said);
@@ -705,7 +705,7 @@ mod real {
         #[test]
         #[ignore]
         fn windows_cues_against_parakeet() {
-            use crate::tts::{marks, Engine, WindowsVoices};
+            use crate::voice::tts::{marks, Engine, WindowsVoices};
             let data = PathBuf::from(std::env::var_os("YAP_STT_DATA").expect("YAP_STT_DATA"));
             crate::stt::apply_accelerator_settings(true);
             let stt = crate::stt::create_stt_engine(&data, "parakeet-tdt-0.6b-v3", true).expect("Parakeet");
@@ -717,7 +717,7 @@ mod real {
             ];
             let (mut parakeet_vs_cue, mut audio_vs_cue) = (Vec::new(), Vec::new());
             for text in TEXTS {
-                let said = crate::tts::said_text(text);
+                let said = crate::voice::tts::said_text(text);
                 let mut s = WindowsVoices.open("", 1.0).unwrap();
                 let pcm = s.synthesize(&said).unwrap();
                 let cues = s.marks().expect("cues");

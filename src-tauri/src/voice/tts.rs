@@ -1603,7 +1603,7 @@ pub fn init(app: &tauri::AppHandle) {
             // The Voice Assistant's answer ended (or was stopped).
             crate::assistant::on_tts_state(&app, s.speaking, s.message_id.as_deref());
             // So did a read-aloud (its card goes).
-            crate::read_aloud::on_tts_state(&app, s);
+            crate::voice::read_aloud::on_tts_state(&app, s);
         }),
         Box::new(|| crate::pipeline::dictation_state().1),
     ));

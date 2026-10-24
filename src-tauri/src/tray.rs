@@ -245,7 +245,7 @@ fn build_menu(app: &AppHandle, state: &str) -> tauri::Result<Menu<Wry>> {
     )?;
     // The selection in the app you're in, read aloud (read_aloud.rs); while
     // Yap reads, its Stop.
-    let read = if crate::read_aloud::active() {
+    let read = if crate::voice::read_aloud::active() {
         MenuItem::with_id(app, "read_stop", "Stop reading aloud", true, None::<&str>)?
     } else {
         MenuItem::with_id(app, "read_selection", "Read selection aloud", true, None::<&str>)?
@@ -344,8 +344,8 @@ fn on_menu_event(app: &AppHandle, id: &str) {
         "paste_last" => crate::text_injector::paste_last_from_tray(app, false),
         "paste_last_said" => crate::text_injector::paste_last_from_tray(app, true),
         // Off the main thread (UI Automation can take a moment).
-        "read_selection" => crate::read_aloud::read_selection(app, crate::read_aloud::Origin::Tray),
-        "read_stop" => crate::read_aloud::stop(app),
+        "read_selection" => crate::voice::read_aloud::read_selection(app, crate::voice::read_aloud::Origin::Tray),
+        "read_stop" => crate::voice::read_aloud::stop(app),
         // Its own thread (snip.rs), after the menu has faded out.
         "snip" => crate::snip::start(app, crate::snip::Origin::Tray),
         // A saved transform (transforms.rs), on its own thread: the app
@@ -407,7 +407,7 @@ fn idle_menu_key() -> String {
         update,
         call,
         crate::text_injector::has_last_transcript(),
-        crate::read_aloud::active(),
+        crate::voice::read_aloud::active(),
         transforms.join(",")
     )
 }

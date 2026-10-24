@@ -195,14 +195,14 @@ pub fn spoken_answer(reply: &str, sources: usize) -> (String, String) {
         // Told to answer in a sentence or two (`SPOKEN_ANSWER_NOTE`); one
         // that runs long anyway is said short too, the rest in Chat.
         if reply.split_whitespace().count() > SPOKEN_MAX_WORDS {
-            let brief = crate::tts::brief(reply, 2);
+            let brief = crate::voice::tts::brief(reply, 2);
             if !brief.is_empty() && brief.split_whitespace().count() < reply.split_whitespace().count() {
                 return (format!("{brief} {REST_IN_CHAT}"), brief);
             }
         }
         return (reply.to_string(), reply.to_string());
     }
-    let brief = crate::tts::brief(reply, 2);
+    let brief = crate::voice::tts::brief(reply, 2);
     if brief.is_empty() {
         return ("The answer and its sources are in Chat.".to_string(), reply.to_string());
     }
@@ -347,7 +347,7 @@ fn current(generation: u64) -> bool {
 /// 2026-10-18). A short note on the bar (or in the window) says so. `true`:
 /// off now, nothing started.
 pub fn off_for_meeting(app: &AppHandle) -> bool {
-    if crate::tts::meeting_quiet().is_none() {
+    if crate::voice::tts::meeting_quiet().is_none() {
         return false;
     }
     tracing::info!("Voice Assistant: off during a meeting or a call");
@@ -432,7 +432,7 @@ struct Speaking {
     question_id: Option<String>,
     /// The answer's id, as it will be saved ("chat:<conversation>:<index>").
     message_id: Option<String>,
-    feed: Option<std::sync::Arc<crate::tts::Feed>>,
+    feed: Option<std::sync::Arc<crate::voice::tts::Feed>>,
     /// Sentences handed to the voice.
     said: usize,
     /// The turn has read the web.
@@ -454,7 +454,7 @@ impl Streamed {
     fn may_speak(&self) -> bool {
         self.voice_on
             && current(self.generation)
-            && crate::tts::meeting_quiet().is_none()
+            && crate::voice::tts::meeting_quiet().is_none()
             && crate::pipeline::dictation_state().0 == self.since
     }
 
@@ -470,7 +470,7 @@ impl Streamed {
                 st.quiet = true;
                 return;
             }
-            let ready = crate::tts::ready_sentences(text, STREAM_SAY, false);
+            let ready = crate::voice::tts::ready_sentences(text, STREAM_SAY, false);
             if ready.len() <= st.said {
                 return;
             }
@@ -497,7 +497,7 @@ impl Streamed {
                 }
                 None => {
                     let Some(id) = st.message_id.clone() else { return };
-                    match crate::tts::speak_streamed(Some(id.clone())) {
+                    match crate::voice::tts::speak_streamed(Some(id.clone())) {
                         Ok(feed) => {
                             feed.push(new);
                             st.feed = Some(feed);
@@ -528,7 +528,7 @@ impl Streamed {
         emit(&self.app, ev);
         let on_bar = crate::notices::notice::place(&self.app, false) == crate::notices::notice::Place::Bar;
         if on_bar && card_on_bar(self.show_card, true) {
-            let shown = crate::tts::brief(text, STREAM_SAY);
+            let shown = crate::voice::tts::brief(text, STREAM_SAY);
             let carded = show_card(&self.app, &self.question, &shown, true, None);
             self.lock().carded = carded;
         }
@@ -639,8 +639,8 @@ async fn answer(app: AppHandle, generation: u64, since: u64, question: String) {
                 feed.close();
                 // Still saying what it had of this answer: not any more
                 // (the newer answer's voice is its own).
-                if answer_id.is_some() && crate::tts::speaking_id() == answer_id {
-                    crate::tts::stop();
+                if answer_id.is_some() && crate::voice::tts::speaking_id() == answer_id {
+                    crate::voice::tts::stop();
                 }
             }
             tracing::info!("Voice Assistant: a newer question replaced this one");
@@ -656,7 +656,7 @@ async fn answer(app: AppHandle, generation: u64, since: u64, question: String) {
             // Half an answer said: it stops there.
             if let Some(feed) = &feed {
                 feed.close();
-                crate::tts::stop();
+                crate::voice::tts::stop();
             }
             tracing::warn!("Voice Assistant: no answer ({e})");
             let conv = streamed.lock().conversation.or(lock().conversation);
@@ -690,7 +690,7 @@ async fn answer(app: AppHandle, generation: u64, since: u64, question: String) {
     }
     // A meeting or a call that started while the answer was coming: shown,
     // not read aloud.
-    let meeting = crate::tts::meeting_quiet().is_some();
+    let meeting = crate::voice::tts::meeting_quiet().is_some();
     let interrupted = crate::pipeline::dictation_state().0 != since;
     // Read now: the switch may have moved while the answer was coming.
     let voice_on = crate::config::load().speak_replies;
@@ -736,7 +736,7 @@ async fn answer(app: AppHandle, generation: u64, since: u64, question: String) {
         && card_on_bar(cfg.assistant_answer_card, how == Reply::Speak)
         && show_card(&app, &question, &shown, how == Reply::Speak, note);
     if how == Reply::Speak {
-        if let Err(e) = crate::tts::speak(&said, Some(message_id.clone())) {
+        if let Err(e) = crate::voice::tts::speak(&said, Some(message_id.clone())) {
             tracing::warn!("Voice Assistant: couldn't read the answer aloud ({e})");
             how = Reply::Show;
             let ev = {
@@ -780,18 +780,18 @@ fn finish_streamed(
     since: u64,
     question: &str,
     turn: &crate::commands::ChatTurn,
-    feed: &crate::tts::Feed,
+    feed: &crate::voice::tts::Feed,
     said: usize,
     carded: bool,
     cfg: &crate::config::YapConfig,
 ) {
-    let meeting = crate::tts::meeting_quiet().is_some();
+    let meeting = crate::voice::tts::meeting_quiet().is_some();
     let interrupted = crate::pipeline::dictation_state().0 != since;
     let how = reply(crate::config::load().speak_replies, meeting, interrupted);
     let (said_text, shown) = spoken_answer(&turn.reply, turn.sources.len());
     let still = current(generation);
     if how == Reply::Speak && still {
-        let rest: Vec<String> = crate::tts::utterances(&said_text).into_iter().skip(said).collect();
+        let rest: Vec<String> = crate::voice::tts::utterances(&said_text).into_iter().skip(said).collect();
         if !rest.is_empty() {
             feed.push(rest);
         }
@@ -814,7 +814,7 @@ fn finish_streamed(
             if let Some(ev) = ev {
                 emit(app, ev);
             }
-            crate::tts::stop();
+            crate::voice::tts::stop();
         }
     }
     let note = if meeting {
@@ -930,7 +930,7 @@ pub fn stop(app: &AppHandle) {
         emit(app, ev);
     }
     if was_speaking {
-        crate::tts::stop();
+        crate::voice::tts::stop();
     }
     crate::bar::dismiss_card(app, CARD);
 }
@@ -1061,10 +1061,10 @@ mod tests {
         assert_eq!(reply(false, false, false), Reply::Show);
         assert_eq!(reply(false, true, false), Reply::Show);
         // Chat's own rule keeps quiet with it off too.
-        assert!(!crate::tts::auto_speak(false, "voice", true, false, false));
-        assert!(!crate::tts::auto_speak(false, "always", true, false, false));
+        assert!(!crate::voice::tts::auto_speak(false, "voice", true, false, false));
+        assert!(!crate::voice::tts::auto_speak(false, "always", true, false, false));
         // Both keep quiet over a meeting.
-        assert!(!crate::tts::auto_speak(true, "always", true, false, true));
+        assert!(!crate::voice::tts::auto_speak(true, "always", true, false, true));
     }
 
     #[test]

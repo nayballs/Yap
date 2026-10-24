@@ -1599,7 +1599,7 @@ mod tests {
         assert!(counted.left() >= MIN_LEFT);
         // A clip of it: both sides of the stretch, padded.
         let clip_bytes = clip(note_id, recording / 1000 + 1, 1_000, 2_000).unwrap();
-        let pcm = crate::tts::parse_wav(&clip_bytes).unwrap();
+        let pcm = crate::voice::tts::parse_wav(&clip_bytes).unwrap();
         assert_eq!(pcm.samples.len() as u64, (1_000 + 2 * CLIP_PAD_MS) * RATE / 1000);
         assert!(pcm.samples.iter().any(|s| s.abs() > 0.3), "the two sides add up");
         // Deleting the note's audio takes the folder.

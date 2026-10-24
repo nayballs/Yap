@@ -964,7 +964,7 @@ fn escape(app: &AppHandle) {
     };
     if reading {
         tracing::info!("bar: Esc stops reading aloud");
-        crate::read_aloud::stop(app);
+        crate::voice::read_aloud::stop(app);
         return;
     }
     if let Some((id, action)) = target {
@@ -1426,9 +1426,9 @@ fn act(app: &AppHandle, action: &str) -> Result<(), String> {
         // takes the focus, so it's still selected there); while reading, ■.
         "read-aloud" => {
             give_focus_back();
-            crate::read_aloud::read_selection(app, crate::read_aloud::Origin::Bar);
+            crate::voice::read_aloud::read_selection(app, crate::voice::read_aloud::Origin::Bar);
         }
-        "read-stop" => crate::read_aloud::stop(app),
+        "read-stop" => crate::voice::read_aloud::stop(app),
         // ✂: Snip to Chat (snip.rs). The bar never took the focus, so the
         // app you're in is the one a cancel goes back to.
         "snip" => crate::snip::start(app, crate::snip::Origin::Bar),

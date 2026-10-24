@@ -707,11 +707,11 @@ pub mod commands {
     /// control's own, Ctrl+C never in test mode) and read aloud — into
     /// `tts_e2e_spoken`, nothing played. Returns how it was read and what.
     #[tauri::command]
-    pub async fn realtest_read_selection(app: tauri::AppHandle, hwnd: Option<i64>) -> Result<crate::read_aloud::Picked, String> {
+    pub async fn realtest_read_selection(app: tauri::AppHandle, hwnd: Option<i64>) -> Result<crate::voice::read_aloud::Picked, String> {
         only_robot()?;
         in_front(hwnd)?;
         tauri::async_runtime::spawn_blocking(move || {
-            crate::read_aloud::read_selection_now(&app, crate::read_aloud::Origin::Shortcut)
+            crate::voice::read_aloud::read_selection_now(&app, crate::voice::read_aloud::Origin::Shortcut)
         })
         .await
         .map_err(|e| e.to_string())

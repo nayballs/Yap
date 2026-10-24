@@ -1253,7 +1253,7 @@ impl Shared {
         // bar) silences Yap's spoken reply at once, before anything records
         // — Yap's own voice must never be the next question. If it was
         // audible just now, the pre-roll (which would hold it) is left out.
-        let heard_yap = crate::tts::stop_for_dictation();
+        let heard_yap = crate::voice::tts::stop_for_dictation();
         // A previous transcription is still running — ignore the start so we don't
         // spawn an overlapping `run_stt` (which would rebuild a duplicate model).
         // Processing is normally sub-second on a GPU, so this rarely bites.
@@ -2640,7 +2640,7 @@ impl Shared {
         let send = self
             .config
             .read()
-            .map(|c| crate::tts::sends_by_itself(c.speak_replies, c.talk_back_hands_free, said_enter))
+            .map(|c| crate::voice::tts::sends_by_itself(c.speak_replies, c.talk_back_hands_free, said_enter))
             .unwrap_or(said_enter);
         tracing::info!(len = text.len(), send, "Dictation: into the Chat view's box");
         let _ = self.app.emit("yap-chat-dictation", serde_json::json!({ "text": text, "send": send }));
@@ -3695,7 +3695,7 @@ impl Robot {
         let Some(busy) = self.take_busy() else {
             return Err(Self::BUSY.into());
         };
-        crate::tts::stop_for_dictation();
+        crate::voice::tts::stop_for_dictation();
         ASSISTANT_ARMED.store(true, Ordering::SeqCst);
         shared.capture_target(false);
         ASSISTANT_ARMED.store(false, Ordering::SeqCst);

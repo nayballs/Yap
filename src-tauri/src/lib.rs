@@ -65,7 +65,6 @@ mod pause;
 mod pipeline;
 mod portable;
 mod procs;
-mod read_aloud;
 mod realtest;
 mod recent_audio;
 mod saving;
@@ -81,10 +80,10 @@ mod stt_speed;
 mod text_injector;
 mod transforms;
 mod tray;
-mod tts;
 mod updates;
 mod theme;
 mod usage;
+mod voice;
 mod web;
 mod webview_memory;
 
@@ -178,7 +177,7 @@ pub(crate) fn window_state_flags() -> tauri_plugin_window_state::StateFlags {
 /// Windows the installer step force-exits Yap (`std::process::exit`) without
 /// ever reaching the Exit handler (see `updates::build_updater`).
 pub(crate) fn shutdown_cleanup() {
-    tts::stop();
+    voice::tts::stop();
     local_llm::shutdown();
     integrations::bridge::stop();
     mute::restore_all();
@@ -587,26 +586,26 @@ pub fn run() {
             commands::configure_assistant_hotkey,
             commands::configure_read_hotkey,
             commands::assistant_key,
-            read_aloud::read_aloud_text,
-            read_aloud::read_aloud_selection,
-            read_aloud::read_aloud_action,
-            read_aloud::read_aloud_state,
+            voice::read_aloud::read_aloud_text,
+            voice::read_aloud::read_aloud_selection,
+            voice::read_aloud::read_aloud_action,
+            voice::read_aloud::read_aloud_state,
             assistant::chat_view_state,
             assistant::assistant_stop,
-            tts::tts_voices,
-            tts::tts_speak,
-            tts::tts_preview,
-            tts::tts_stop,
-            tts::tts_state,
-            tts::voice_replies_set,
-            tts::tts_volume_set,
-            tts::tts_kokoro_status,
-            tts::tts_kokoro_download,
-            tts::tts_kokoro_delete,
-            tts::tts_cloud_voices,
-            tts::tts_cloud_models,
-            tts::tts_cloud_usage,
-            tts::tts_cloud_preview,
+            voice::tts::tts_voices,
+            voice::tts::tts_speak,
+            voice::tts::tts_preview,
+            voice::tts::tts_stop,
+            voice::tts::tts_state,
+            voice::tts::voice_replies_set,
+            voice::tts::tts_volume_set,
+            voice::tts::tts_kokoro_status,
+            voice::tts::tts_kokoro_download,
+            voice::tts::tts_kokoro_delete,
+            voice::tts::tts_cloud_voices,
+            voice::tts::tts_cloud_models,
+            voice::tts::tts_cloud_usage,
+            voice::tts::tts_cloud_preview,
             commands::bridge_status,
             integrations::mcp_clients::mcp_clients_status,
             integrations::mcp_clients::mcp_client_add,
@@ -794,7 +793,7 @@ pub fn run() {
             #[cfg(debug_assertions)]
             commands::e2e_opened_urls,
             #[cfg(debug_assertions)]
-            tts::tts_e2e_spoken,
+            voice::tts::tts_e2e_spoken,
             #[cfg(debug_assertions)]
             commands::e2e_chat_dictation,
             #[cfg(debug_assertions)]
@@ -871,7 +870,7 @@ pub fn run() {
             // `groq-usage` updates after each AI-cleanup call.
             usage::set_app_handle(handle.clone());
             // Spoken replies (tts.rs): its state goes to every window.
-            tts::init(&handle);
+            voice::tts::init(&handle);
 
             // Global input hook + dictation hotkey. (Not in e2e test runs: a
             // test instance must never see, or swallow, the developer's keys.)
@@ -1069,7 +1068,7 @@ pub fn run() {
             // aloud (read_aloud.rs). Only its press.
             let read_handle = handle.clone();
             handle.listen("read-key-pressed", move |_| {
-                read_aloud::read_selection(&read_handle, read_aloud::Origin::Shortcut);
+                voice::read_aloud::read_selection(&read_handle, voice::read_aloud::Origin::Shortcut);
             });
 
             // "Use what I said": the last cleaned dictation's paste swapped

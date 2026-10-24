@@ -35,7 +35,7 @@ use std::time::Duration;
 use serde::Serialize;
 use tauri::{AppHandle, Emitter};
 
-use crate::tts::{self, marks};
+use crate::voice::tts::{self, marks};
 
 /// The longest text read in one go (~200,000 characters, a short book): the
 /// rest is left, and the card says so.
