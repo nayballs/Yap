@@ -12,9 +12,9 @@
   import { invoke } from '@tauri-apps/api/core';
   import { listen } from '@tauri-apps/api/event';
   import { onMount } from 'svelte';
-  import { toast } from './ui/toast.svelte.js';
-  import { clock, dateLine } from './core/notepadText.js';
-  import { setTask } from './core/noteEdits.js';
+  import { toast } from '../ui/toast.svelte.js';
+  import { clock, dateLine } from '../core/notepadText.js';
+  import { setTask } from '../core/noteEdits.js';
 
   /** This view's `origin` for its ticks. */
   const LABEL = 'tasks';

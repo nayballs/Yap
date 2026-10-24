@@ -2,7 +2,7 @@
   import { getCurrentWindow } from '@tauri-apps/api/window';
   import ContextMenuHost from './lib/ui/ContextMenuHost.svelte';
   import { initAppearance } from './lib/core/appearance.js';
-  import { prefetchHome } from './lib/homeData.js';
+  import { prefetchHome } from './lib/views/home/homeData.js';
 
   // The settings, onboarding, notepad and overlay windows (and the notepad's
   // on-demand split preview) all load the same SPA; pick the rendered view
@@ -17,7 +17,7 @@
   // its own preload list (the view's CSS chunk included), and a ternary of
   // them got one list — the last one's — so the main window lost its CSS.
   const VIEWS = {
-    settings: () => import('./lib/ControlPanel.svelte'),
+    settings: () => import('./lib/views/ControlPanel.svelte'),
     onboarding: () => import('./lib/Onboarding.svelte'),
     notepad: () => import('./lib/Notepad.svelte'),
     'split-preview': () => import('./lib/SplitPreview.svelte'),

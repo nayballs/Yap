@@ -14,15 +14,15 @@
   import { listen } from '@tauri-apps/api/event';
   import { onMount, tick } from 'svelte';
   import { homeSnapshot } from './homeData.js';
-  import { formatHotkeySpec } from './core/hotkeys.js';
-  import { appLabel } from './core/appNames.js';
-  import { openContextMenu, menuKey, menuOpenFor, askConfirm } from './ui/contextMenu.svelte.js';
-  import { copyText } from './core/itemMenus.js';
-  import { toast, dismiss } from './ui/toast.svelte.js';
-  import { showSaveError } from './notices/saveErrors.js';
-  import { MODELS } from './core/speechModels.js';
-  import { attention } from './stores/attention.svelte.js';
-  import { wordDiff } from './core/wordDiff.js';
+  import { formatHotkeySpec } from '../../core/hotkeys.js';
+  import { appLabel } from '../../core/appNames.js';
+  import { openContextMenu, menuKey, menuOpenFor, askConfirm } from '../../ui/contextMenu.svelte.js';
+  import { copyText } from '../../core/itemMenus.js';
+  import { toast, dismiss } from '../../ui/toast.svelte.js';
+  import { showSaveError } from '../../notices/saveErrors.js';
+  import { MODELS } from '../../core/speechModels.js';
+  import { attention } from '../../stores/attention.svelte.js';
+  import { wordDiff } from '../../core/wordDiff.js';
 
   let { onopensettings = null, onnavigate = null } = $props();
   // Settings' live "needs attention" items: no speech model yet means the

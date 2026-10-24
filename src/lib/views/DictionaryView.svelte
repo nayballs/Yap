@@ -15,8 +15,8 @@
   // passes them on here as `yap-dictionary-external`.
   import { invoke } from '@tauri-apps/api/core';
   import { onMount, tick } from 'svelte';
-  import Toggle from './ui/Toggle.svelte';
-  import { openContextMenu, menuKey, askConfirm } from './ui/contextMenu.svelte.js';
+  import Toggle from '../ui/Toggle.svelte';
+  import { openContextMenu, menuKey, askConfirm } from '../ui/contextMenu.svelte.js';
 
   let dict = $state([]);
   let fuzzy = $state(true);

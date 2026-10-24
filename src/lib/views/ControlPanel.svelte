@@ -12,42 +12,42 @@
   import { listen } from '@tauri-apps/api/event';
   import { getCurrentWindow } from '@tauri-apps/api/window';
   import { onMount } from 'svelte';
-  import yapIcon from '../assets/yap-logo.svg';
-  import ToastHost from './ui/ToastHost.svelte';
-  import { toast } from './ui/toast.svelte.js';
-  import { fillHotkey } from './core/hotkeys.js';
-  import Settings from './settings/Settings.svelte';
-  import { attention } from './stores/attention.svelte.js';
-  import { account, displayName, initAccount, initials } from './stores/account.svelte.js';
-  import { initUpdates } from './stores/updates.svelte.js';
-  import { initMeetingDetect, noteRequest } from './stores/meetingDetect.svelte.js';
-  import { initMeetingSummary, askStartedByMistake } from './stores/meetingSummary.svelte.js';
-  import { initMeetingGuard } from './notices/meetingGuard.js';
-  import { initCalendar, closeConnectDialog } from './stores/calendar.svelte.js';
-  import { initWordSuggestions } from './notices/wordSuggestions.js';
-  import { initAlerts } from './notices/alerts.js';
-  import { initUpload } from './stores/upload.svelte.js';
-  import { initMemory } from './stores/memory.svelte.js';
-  import { initCleanupOffer } from './notices/cleanupOffer.js';
-  import ConnectCalendarDialog from './components/ConnectCalendarDialog.svelte';
+  import yapIcon from '../../assets/yap-logo.svg';
+  import ToastHost from '../ui/ToastHost.svelte';
+  import { toast } from '../ui/toast.svelte.js';
+  import { fillHotkey } from '../core/hotkeys.js';
+  import Settings from '../settings/Settings.svelte';
+  import { attention } from '../stores/attention.svelte.js';
+  import { account, displayName, initAccount, initials } from '../stores/account.svelte.js';
+  import { initUpdates } from '../stores/updates.svelte.js';
+  import { initMeetingDetect, noteRequest } from '../stores/meetingDetect.svelte.js';
+  import { initMeetingSummary, askStartedByMistake } from '../stores/meetingSummary.svelte.js';
+  import { initMeetingGuard } from '../notices/meetingGuard.js';
+  import { initCalendar, closeConnectDialog } from '../stores/calendar.svelte.js';
+  import { initWordSuggestions } from '../notices/wordSuggestions.js';
+  import { initAlerts } from '../notices/alerts.js';
+  import { initUpload } from '../stores/upload.svelte.js';
+  import { initMemory } from '../stores/memory.svelte.js';
+  import { initCleanupOffer } from '../notices/cleanupOffer.js';
+  import ConnectCalendarDialog from '../components/ConnectCalendarDialog.svelte';
   // Every view is in this window's one chunk (~590 KB): loading the views
   // other than Home on demand was measured on 2026-10-22 and changed nothing
   // you'd see — Home on screen 63 → 57 ms (inside run-to-run noise), 256 →
   // 253 ms with the CPU 4× slower — since V8 compiles code only when it
   // runs; the load's time goes to its ~77 IPC calls (frontend.md).
   import MeetingsView from './MeetingsView.svelte';
-  import HomeView from './HomeView.svelte';
+  import HomeView from './home/HomeView.svelte';
   import InsightsView from './InsightsView.svelte';
   import DictionaryView from './DictionaryView.svelte';
   import UploadView from './UploadView.svelte';
-  import NotesView from './NotesView.svelte';
+  import NotesView from './notes/NotesView.svelte';
   import TasksView from './TasksView.svelte';
-  import ChatView from './ChatView.svelte';
-  import { chatRequest } from './stores/chatRequest.svelte.js';
-  import IntegrationsView from './IntegrationsView.svelte';
-  import { menuOrDialogOpen } from './ui/contextMenu.svelte.js';
-  import { noteAccountPicture } from './core/connections.js';
-  import { prefetchHome } from './homeData.js';
+  import ChatView from './chat/ChatView.svelte';
+  import { chatRequest } from '../stores/chatRequest.svelte.js';
+  import IntegrationsView from './integrations/IntegrationsView.svelte';
+  import { menuOrDialogOpen } from '../ui/contextMenu.svelte.js';
+  import { noteAccountPicture } from '../core/connections.js';
+  import { prefetchHome } from './home/homeData.js';
 
   // Home's data first, before the ~60 calls the rest of the window makes as
   // it starts (homeData.js; App.svelte has usually asked already, while

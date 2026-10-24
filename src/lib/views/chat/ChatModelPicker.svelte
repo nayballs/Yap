@@ -19,12 +19,12 @@
   import { invoke } from '@tauri-apps/api/core';
   import { onMount, tick } from 'svelte';
   import ProviderMark from './ProviderMark.svelte';
-  import LocalContext from './components/LocalContext.svelte';
-  import { providerIcon } from './core/aiModel.js';
-  import { PROVIDER_LABELS } from './core/providers.js';
-  import { loadCatalog } from './stores/modelCatalog.svelte.js';
-  import { openExternalLink } from './core/externalLinks.js';
-  import { toast } from './ui/toast.svelte.js';
+  import LocalContext from '../../components/LocalContext.svelte';
+  import { providerIcon } from '../../core/aiModel.js';
+  import { PROVIDER_LABELS } from '../../core/providers.js';
+  import { loadCatalog } from '../../stores/modelCatalog.svelte.js';
+  import { openExternalLink } from '../../core/externalLinks.js';
+  import { toast } from '../../ui/toast.svelte.js';
   import {
     CLOUD_PROVIDERS,
     cloudInfo,

@@ -5,7 +5,7 @@
   import { invoke } from '@tauri-apps/api/core';
   import { listen } from '@tauri-apps/api/event';
   import { onMount } from 'svelte';
-  import { appLabel } from './core/appNames.js';
+  import { appLabel } from '../core/appNames.js';
 
   let stats = $state(null);
   let entries = $state([]);

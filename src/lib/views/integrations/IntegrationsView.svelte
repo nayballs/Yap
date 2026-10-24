@@ -8,7 +8,7 @@
   // coding agents can drive while Yap runs.
   import { invoke } from '@tauri-apps/api/core';
   import { onMount } from 'svelte';
-  import { toast } from './ui/toast.svelte.js';
+  import { toast } from '../../ui/toast.svelte.js';
   import CalendarLinkCard from './CalendarLinkCard.svelte';
   import McpLinkCard from './McpLinkCard.svelte';
 

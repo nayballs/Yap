@@ -1,9 +1,9 @@
 <script>
   // Integrations → the way to Settings → MCP (McpSection.svelte), like the
   // "Give your AI access… Go to MCP" row on Wispr Flow's Connectors page.
-  import claudeIcon from '../assets/providers/claude.svg';
-  import openaiIcon from '../assets/providers/openai.svg';
-  import geminiIcon from '../assets/providers/gemini.svg';
+  import claudeIcon from '../../../assets/providers/claude.svg';
+  import openaiIcon from '../../../assets/providers/openai.svg';
+  import geminiIcon from '../../../assets/providers/gemini.svg';
 
   let { onopen } = $props();
 </script>
