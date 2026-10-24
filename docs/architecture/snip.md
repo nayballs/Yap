@@ -188,7 +188,8 @@ and Z are free; Win+Alt+R, B, G, T, K, D, PrtScn, Win+Shift+S and Win+S are
 taken by Windows and Game Bar (Win+Alt+M is registered by another program
 too; Yap's hook sees it first, for meeting notes). The hook taps the
 menu mask with it, so letting go of Win and Alt opens nothing. The main
-window's in-page fallback (`Settings.svelte`) starts a snip too, since the
+window's in-page fallback (`settings/hotkeyFallback.svelte.js`, run by
+Settings) starts a snip too, since the
 global hook never sees keys while a Yap window has the focus.
 
 ## Into Chat

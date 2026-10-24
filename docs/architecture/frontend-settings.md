@@ -13,6 +13,47 @@ fallback (the dictation, assistant, meeting, read-aloud and snip keys while a Ya
 focus) and its auto-save run for the window's whole life. Esc closes it (a
 search being typed is cleared first); the ✕ is 32 px in `--yap-fg-62`.
 
+### The module map (split 2026-10-24)
+
+`Settings.svelte` (~1,100 lines, from 3,829) is the modal shell: the nav,
+its search and the icon rail, `goto`, which page is shown, its own
+styles, and the wiring — at init it starts the window-lifetime jobs below
+(`syncConfig`, `followAttention`, `followLocalLlm`,
+`followHotkeyFallback`, `followDictionary`, `followOutsideChanges`) and at
+mount reads the config and sets it up in the same order as before
+(guardrails, version, `readConfig`, the provider's mode, the key credited,
+`ensureScopes`, the on-device status, `setPristine`, the profiles
+migration, `loaded`, devices, usage). What a page needs to outlive it
+stays outside the page: in the shell as a bindable prop
+(`meetingApps`, `privacyConnections`, `offerKokoro`, `langInfo`) or in a
+store.
+
+| Module | What it holds |
+|---|---|
+| `settings/configSync.svelte.js` | The config copy (`config.cfg`, `loaded`, the "Saved ✓" pulse), `base` / `pristine`, `inTurn`, `adopt` / `adoptSaved` on `yap-config-saved`, `persist`, the 400 ms auto-save (`syncConfig`, with an `onAdopted(keys)` hook) |
+| `settings/configDefaults.js` | `FIELD_DEFAULTS` (a new setting's default goes here) and `cleanConfig(cfg)`, the saved payload (was `buildClean`) |
+| `settings/configMerge.js` | The pure part: `merge3`, `fill`, `same`, `copy` |
+| `settings/adoptions.svelte.js` | `followOutsideChanges`: the one-off adoptions (`yap-config-patched`, `yap-provider-key-saved`, a call app's choice, the on-device context and state, the Chat chip's scope, spoken replies' switch / volume / speed, the consent message, the bar turned off) |
+| `settings/dictionarySync.svelte.js` | `followDictionary`: the Dictionary view's list both ways, its echo guard, learned words |
+| `settings/hotkeyFallback.svelte.js` | `followHotkeyFallback`: the in-page keys (meeting, assistant, read aloud, snip, dictation, in that order) |
+| `lib/providers.js` | The providers in one place: ids, `BASE_URLS`, `KEYED_PROVIDERS`, `PP_PROVIDERS`, `PROVIDER_MODES`, `CLOUD_TABS`, `MODEL_HINTS`, `maskKey`, the four name sets each surface uses today (`PROVIDER_LABELS` short, `SCOPE_PROVIDER_LABELS` the scope tabs', `CLEANUP_PROVIDER_LABELS` cleanup's, `PROVIDER_DESTINATIONS` where the words go), and the key store's rules (`sharedKey`, `stashCleanupKey`, `creditCleanupKey`, `liftScopeKeys`, `adoptProviderKey`, `cleanupNeedsKey`) |
+| `lib/attention.svelte.js` | The red count's items (`attentionItems`) kept live by `followAttention` |
+| `settings/localLlm.svelte.js` | Settings' on-device model: its status, the download and its progress, switching, the upgrade offer, delete, the family tab, the warm-up poll (`followLocalLlm`) |
+| `settings/languageModels.svelte.js` | Language Models' state that outlives the page (`lm`: the tab, cleanup's mode and cloud tab, the key field open, the Chat tab's remount count, Prompt Studio's guardrails, Smart routing's recent apps, the day's Groq usage), `providerUi`, `loadRecentApps`, `refreshUsage` |
+| `settings/scopes.js` | The four scopes (`SCOPE_TABS`, `SCOPE_DEFAULTS`…), `ensureScopes(cfg)`, `scopeModelLabel` |
+| `settings/cleanupPresets.js` / `settings/profiles.js` | The cleanup presets (`PP_DEFAULT_BODY` = `FIELD_DEFAULTS.ppPrompt`); profile ids and the pre-profiles migration |
+| `settings/LanguageModelsPage.svelte` | The page: tabs, Dictation cleanup (mode, key, model, endpoint fields, thinking), Spelling, Styles by app, Prompt Studio, where the text goes; with `LocalModels.svelte`, `SmartRouting.svelte`, `UsageToday.svelte` |
+| `settings/CommandsPage.svelte` / `VoicePage.svelte` / `SpeechPage.svelte` | The other three pages that were inline; `PageExplain.svelte` is Commands' and the Voice Assistant's example note |
+
+**CSS order is part of the look.** Vite bundles the CSS in import order,
+and a component's scoped rule (`.offnote.svelte-x`) and `settings.css`'s
+(`.settings-shell .set-note`) can tie: the later one wins. The scope tabs'
+own `.offnote` / `.tools` margins have always lost to `.set-note`'s, and
+cleanup's `.set-note.offnote` wins. So `LanguageModelsPage.svelte`
+imports its shared components, then `settings.css`, then its own parts,
+and `Settings.svelte` imports it just before `settings.css`. A change
+there can move margins: compare a page before and after.
+
 - **Its copy of the config, in step with config.json** (2026-10-23).
   Settings reads the config once, at mount, and auto-saves 400 ms after any
   change. Other surfaces save config.json too — the Speech-to-Text page's
@@ -33,7 +74,9 @@ search being typed is cleared first); the ✕ is 32 px in `--yap-fg-62`.
   A setting the person changes while a merge is under way is never
   overwritten (`adopt` skips it). The older one-off adoptions
   (`yap-config-patched`, `yap-chat-model-changed`, `yap-dictionary-learned`,
-  `yap-meeting-detect-choice`, …) still run; they and this agree. e2e:
+  `yap-meeting-detect-choice`, …; `settings/adoptions.svelte.js` and
+  `dictionarySync.svelte.js`) still run; they and this agree. The copy and
+  the merge are `settings/configSync.svelte.js`. e2e:
   `speech-models.spec.js` (a model switched on the Speech-to-Text page, then
   as the tray does, survives a switch flipped in Settings).
 
@@ -386,7 +429,7 @@ search being typed is cleared first); the ✕ is 32 px in `--yap-fg-62`.
   Discord moves from Personal to Work chat —, and "Extra instructions for
   these apps", added to the main prompt). A note when "Only clean up in
   apps with a rule" is on. The kinds' profiles ride in `cleanupProfiles`
-  (`buildClean` keeps their fields); Smart routing's Profiles list shows only
+  (`cleanConfig` keeps their fields); Smart routing's Profiles list shows only
   the person's own (`ownProfiles`), and an app rule can name a style
   ("Style: Email"). **Prompt Studio** (`PromptStudio.svelte`: View shows the
   first four lines and "Show the whole prompt", Customize — preset + body +
