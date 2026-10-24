@@ -273,7 +273,11 @@ the person made the change, one notice for a save that failed by itself;
 unit-tested on locked and read-only files, e2e-tested with staged
 failures in `save-errors.spec.js` — a real full disk not tried); the temp
 files a crash mid-write leaves are swept at start-up, Yap's own stale ones
-only (unit-tested). The default (no-feature) build still ships
+only (unit-tested); and every setting changed outside Settings (the Chat
+picker, the voice's volume, Read aloud's speed, the on-device context,
+call detection's choices) changes in one step (`config::update` /
+`try_update`), never a load → change → save that could lose a change saved
+meanwhile (unit-tested, with a lint-style test). The default (no-feature) build still ships
 the stub for fast `cargo check`. **Optional accounts** (`auth.rs` + `cloud/`): email
 codes and Google/GitHub/Discord sign-in, sign-out, delete-account — tested end
 to end locally (2026-10-01, `wrangler dev` + a mock provider). **Live since

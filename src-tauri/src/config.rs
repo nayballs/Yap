@@ -1660,6 +1660,35 @@ pub fn update(change: impl FnOnce(&mut YapConfig)) -> Result<YapConfig, String> 
     Ok(cfg)
 }
 
+/// [`update`] with a change that can be refused: on `Err` nothing is saved
+/// (not half a change) and the error comes back.
+pub fn try_update(change: impl FnOnce(&mut YapConfig) -> Result<(), String>) -> Result<YapConfig, String> {
+    let _saves = lock_saves();
+    let mut cfg = load();
+    if try_changed(&mut cfg, change)? {
+        save(&cfg)?;
+    }
+    Ok(cfg)
+}
+
+/// Apply `change` to a copy of `cfg`, kept only if it worked: whether
+/// anything changed.
+fn try_changed(cfg: &mut YapConfig, change: impl FnOnce(&mut YapConfig) -> Result<(), String>) -> Result<bool, String> {
+    let mut next = cfg.clone();
+    change(&mut next)?;
+    Ok(changed(cfg, |c| *c = next))
+}
+
+#[cfg(test)]
+fn try_update_at(path: &Path, change: impl FnOnce(&mut YapConfig) -> Result<(), String>) -> Result<YapConfig, String> {
+    let _saves = lock_saves();
+    let mut cfg = load_at(path).cfg;
+    if try_changed(&mut cfg, change)? {
+        save_at(path, &cfg)?;
+    }
+    Ok(cfg)
+}
+
 /// Apply `change` to `cfg`: whether anything changed.
 fn changed(cfg: &mut YapConfig, change: impl FnOnce(&mut YapConfig)) -> bool {
     let before = serde_json::to_value(&*cfg).ok();
@@ -2219,6 +2248,62 @@ mod tests {
         update_at(&path, |c| c.hotkey = c.hotkey.clone()).unwrap();
         assert_eq!(std::fs::metadata(&path).unwrap().modified().unwrap(), before);
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A change that fails saves nothing; changes from many threads at once
+    /// are all kept.
+    #[test]
+    fn a_change_that_fails_saves_nothing_and_none_is_lost() {
+        let dir = scratch("try-update");
+        let path = dir.join("config.json");
+        save_at(&path, &YapConfig::default()).unwrap();
+        let before = std::fs::read(&path).unwrap();
+        let refused = try_update_at(&path, |c| {
+            c.hotkey = "kb:121".into();
+            Err("no such model".into())
+        });
+        assert_eq!(refused.unwrap_err(), "no such model");
+        assert_eq!(std::fs::read(&path).unwrap(), before, "half a change never saved");
+        std::thread::scope(|s| {
+            for t in 0..8usize {
+                let path = &path;
+                s.spawn(move || {
+                    for i in 0..10 {
+                        try_update_at(path, |c| {
+                            c.dictionary.push(entry(&format!("t{t} w{i}"), "x"));
+                            Ok(())
+                        })
+                        .unwrap();
+                    }
+                });
+            }
+        });
+        assert_eq!(load_at(&path).cfg.dictionary.len(), 80);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The places that change a setting by themselves — the Chat picker's
+    /// model and key, the voice's volume and "Speak replies", Read aloud's
+    /// speed, the on-device model's context, call detection's "Stop asking"
+    /// and "Don't ask for…" — change it in one step (`update`): a load →
+    /// change → save of their own could put back what another thread saved
+    /// in between (code review 2026-10-23 #2).
+    #[test]
+    fn settings_changed_outside_settings_change_in_one_step() {
+        let files = [
+            ("ai_model.rs", include_str!("ai_model.rs")),
+            ("tts.rs", include_str!("tts.rs")),
+            ("read_aloud.rs", include_str!("read_aloud.rs")),
+            ("local_llm.rs", include_str!("local_llm.rs")),
+            ("meeting_detect.rs", include_str!("meeting_detect.rs")),
+        ];
+        for (file, src) in files {
+            let code: Vec<&str> = src.lines().filter(|l| !l.trim_start().starts_with("//")).collect();
+            for call in ["config::save(", "commands::save_config("] {
+                let found: Vec<&&str> = code.iter().filter(|l| l.contains(call)).collect();
+                assert!(found.is_empty(), "{file} loads, changes and saves the config ({found:?}): use config::update or commands::change_config");
+            }
+        }
     }
 
     /// A crash mid-write leaves its temp file behind: the start-up sweep

@@ -2139,19 +2139,16 @@ pub fn tts_state() -> TtsState {
 /// keeps it (config.json) and tells Settings' copy (`yap-voice-volume`), so
 /// its auto-save can't put the old one back. Returns the volume set.
 #[tauri::command]
-pub fn tts_volume_set(
-    app: tauri::AppHandle,
-    state: tauri::State<'_, crate::AppState>,
-    volume: f32,
-    save: Option<bool>,
-) -> Result<f32, String> {
+pub fn tts_volume_set(app: tauri::AppHandle, volume: f32, save: Option<bool>) -> Result<f32, String> {
     use tauri::Emitter;
     set_volume(volume);
     let v = self::volume();
     if save.unwrap_or(false) {
-        let mut cfg = crate::config::load();
-        cfg.tts_volume = v;
-        crate::commands::save_config(app.clone(), state, cfg)?;
+        // In one step: never over a change saved meanwhile.
+        crate::commands::change_config(&app, |cfg| {
+            cfg.tts_volume = v;
+            Ok(())
+        })?;
         let _ = app.emit("yap-voice-volume", serde_json::json!({ "volume": v }));
     }
     Ok(v)
@@ -2161,15 +2158,12 @@ pub fn tts_volume_set(
 /// Settings saves, then `yap-voice-replies {on}` so Settings' copy adopts it
 /// (its next auto-save keeps it). Off stops what's being said.
 #[tauri::command]
-pub fn voice_replies_set(
-    app: tauri::AppHandle,
-    state: tauri::State<'_, crate::AppState>,
-    on: bool,
-) -> Result<bool, String> {
+pub fn voice_replies_set(app: tauri::AppHandle, on: bool) -> Result<bool, String> {
     use tauri::Emitter;
-    let mut cfg = crate::config::load();
-    cfg.speak_replies = on;
-    crate::commands::save_config(app.clone(), state, cfg)?;
+    crate::commands::change_config(&app, |cfg| {
+        cfg.speak_replies = on;
+        Ok(())
+    })?;
     if !on {
         stop();
     }

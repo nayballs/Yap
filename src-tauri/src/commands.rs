@@ -1954,19 +1954,47 @@ pub fn save_config(
     state: State<'_, AppState>,
     cfg: YapConfig,
 ) -> Result<(), String> {
-    // Live-apply a Debug-mode change (only on change, so an explicit RUST_LOG
-    // env override isn't clobbered by unrelated saves).
     let prev = config::load();
-    let prev_debug = prev.debug_logging;
     // "Runs on" is what's chosen; the old GPU switch follows it (as saved).
     let mut cfg = cfg;
     cfg.use_gpu = cfg.stt_device != "cpu";
     config::save(&cfg)?;
+    apply_config(&app, state, &prev, cfg);
+    Ok(())
+}
+
+/// Change one setting (or a few) from outside Settings — the Chat picker,
+/// the voice's volume, Read aloud's speed, the on-device context — in one
+/// step (`config::try_update`: never a load → change → save that could put
+/// back what another thread saved meanwhile), then apply it as a Settings
+/// save is. `Err` from `change`: nothing saved. Returns the config as saved.
+pub(crate) fn change_config(
+    app: &AppHandle,
+    change: impl FnOnce(&mut YapConfig) -> Result<(), String>,
+) -> Result<YapConfig, String> {
+    use tauri::Manager;
+    let mut prev = None;
+    let cfg = config::try_update(|c| {
+        prev = Some(c.clone());
+        change(c)
+    })?;
+    let prev = prev.unwrap_or_else(|| cfg.clone());
+    apply_config(app, app.state::<AppState>(), &prev, cfg.clone());
+    Ok(cfg)
+}
+
+/// A config just saved (`cfg`, `prev` before it), applied: hotkeys, the
+/// pipeline, the bar, the tray… (what [`save_config`] does after saving).
+fn apply_config(app: &AppHandle, state: State<'_, AppState>, prev: &YapConfig, cfg: YapConfig) {
+    let app = app.clone();
+    // Live-apply a Debug-mode change (only on change, so an explicit RUST_LOG
+    // env override isn't clobbered by unrelated saves).
+    let prev_debug = prev.debug_logging;
     // Words taken out of the dictionary (from any surface) are never
     // suggested again (learn.rs; its own store, not config.json).
     crate::learn::on_dictionary_saved(&prev.dictionary, &cfg.dictionary);
     // A provider key set or changed: check that provider's model list now.
-    crate::model_catalog::on_config_saved(&app, &prev, &cfg);
+    crate::model_catalog::on_config_saved(&app, prev, &cfg);
     if cfg.debug_logging != prev_debug {
         crate::set_debug_logging(cfg.debug_logging);
     }
@@ -2028,7 +2056,6 @@ pub fn save_config(
     // (Pages that show what the config resolves to — the Chat view's model
     // chip, the theme — read it again on `yap-config-saved`, which
     // `config::save` sends after every save, this one included.)
-    Ok(())
 }
 
 /// Local API bridge status for the Integrations view:

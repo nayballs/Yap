@@ -1554,12 +1554,10 @@ fn stopped_asking(app: &AppHandle) {
 /// saved, applied, and told to Settings (`yap-meeting-detect-choice` with
 /// `enabled`), so its auto-save keeps it.
 pub fn set_detection(app: &AppHandle, enabled: bool) {
-    let mut cfg = crate::config::load();
-    if cfg.meeting_detection != enabled {
-        cfg.meeting_detection = enabled;
-        if let Err(e) = crate::config::save(&cfg) {
-            tracing::warn!("meeting detect: couldn't save call detection ({e})");
-        }
+    // In one step (never over a change saved meanwhile), and outside this
+    // module's state lock: config's save emits to the windows.
+    if let Err(e) = crate::config::update(|c| c.meeting_detection = enabled) {
+        tracing::warn!("meeting detect: couldn't save call detection ({e})");
     }
     sync(app, enabled);
     let _ = app.emit(EVENT_CHOICE, serde_json::json!({ "enabled": enabled }));
@@ -1570,9 +1568,11 @@ pub fn set_detection(app: &AppHandle, enabled: bool) {
 /// it switched off), and no prompt stays up or comes back for its calls.
 /// With the window on screen, a brief confirmation there points to Settings.
 fn stop_asking(app: &AppHandle, call_app: &'static App) {
-    let mut cfg = crate::config::load();
-    cfg.meeting_detect_apps.insert(call_app.id.to_string(), false);
-    if let Err(e) = crate::config::save(&cfg) {
+    // In one step (never over a change saved meanwhile), before this
+    // module's state lock is taken.
+    if let Err(e) = crate::config::update(|c| {
+        c.meeting_detect_apps.insert(call_app.id.to_string(), false);
+    }) {
         tracing::warn!("meeting detect: couldn't save the choice ({e})");
     }
     let mut todo = Todo::default();

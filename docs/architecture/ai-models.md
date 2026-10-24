@@ -305,7 +305,7 @@ The language-model side: the OpenAI-compatible client and its prompts, the on-de
   which on WDDM ignores every other process), `usedMib` what the running
   server's log says (`log_facts`: the non-host `… buffer size` lines,
   `n_ctx`). **`local_llm_set_context {tokens}`** (the pickers): saved
-  through `save_config` (0 for the default), `yap-local-context-changed
+  through `commands::change_config` (in one step, applied as a Settings save; 0 for the default), `yap-local-context-changed
   {localContext}` (Settings' copy adopts it, or its wholesale auto-save
   would put the old one back), and a running sidecar on another context
   is restarted by **`restart_when_idle`**: never while a dictation records
@@ -408,18 +408,18 @@ The language-model side: the OpenAI-compatible client and its prompts, the on-de
   one gets its standard URL + the shared key; `file` picks one of the
   on-device GGUFs → `pp_local_model` (`set_local_model`, "" = the bundled
   1.5B) — the one sidecar serves it for every feature, so one serving
-  another GGUF stops and starts again on it), saved through `save_config`,
+  another GGUF stops and starts again on it), saved through `commands::change_config` (in one step, applied as a Settings save),
   then `yap-chat-model-changed {scope, ppLocalModel?}` (Settings adopts
   both). `chat_provider_key {provider, key}` = the picker's "Connect
   Claude": `set_provider_key` saves it where Settings does (`pp_api_keys`,
   cleanup's `pp_api_key` when cleanup is on it, the Chat scope's key when
-  Chat is), through `save_config`, whose `model_catalog::on_config_saved`
+  Chat is), through `commands::change_config`, whose `model_catalog::on_config_saved`
   checks that provider's list at once; the page tells Settings' copy with
   the window event `yap-provider-key-saved` (not broadcast to every
   window). `wake_on_device` (in `chat_send` and
   `note_ask`): a chat on the on-device model starts the sidecar
   (`local_llm::ensure_started`) or says it isn't installed, never a silent
-  fallback to the endpoint underneath. `save_config` emits
+  fallback to the endpoint underneath. A config save emits
   `yap-config-saved`, which the chip re-reads on. Unit-tested.
 - **`model_catalog.rs`** — **the AI providers' live model lists**
   (2026-10-18), so a model Google or Groq releases tomorrow shows up in

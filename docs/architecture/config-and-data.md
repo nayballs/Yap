@@ -153,10 +153,17 @@
   its thread); `update(|c| …)` loads, changes and saves under it in one
   step (saving only if anything changed), so a change another thread saved
   meanwhile isn't lost — the tray's model switch, the bar's "off",
-  `download_model_size`/`set_active_model`, `set_autostart`, learned words
-  and the notepad's consent message use it (call detection's two saves in
-  `meeting_detect.rs`, and the `save_config` callers in `ai_model.rs`,
-  `tts.rs`, `read_aloud.rs`, `local_llm.rs`, still load → change → save).
+  `download_model_size`/`set_active_model`, `set_autostart`, learned words,
+  the notepad's consent message and call detection's "Stop asking" /
+  "Don't ask for …" (`meeting_detect.rs`, outside its state lock) use it.
+  `try_update(|c| … -> Result)` is the same for a change that can be
+  refused (nothing saved, not half of it), and `commands::change_config`
+  runs it and then applies the result as a Settings save does
+  (`apply_config`: hotkeys, the pipeline, the bar…): the Chat picker's model
+  and key (`ai_model.rs`), the voice's volume and Speak replies (`tts.rs`),
+  Read aloud's speed (`read_aloud.rs`) and the on-device context
+  (`local_llm.rs`), which until 2026-10-24 loaded, changed and saved on
+  their own (a lint-style test keeps them so).
   Every save then emits **`yap-config-saved`** to every window (`init`
   registers the app; Settings' copy adopts what changed,
   [frontend-settings.md](./frontend-settings.md); the theme follows). A unit
