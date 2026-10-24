@@ -5,6 +5,7 @@
 // might not include yet, so the pages' bindings always have something to
 // bind to. A new setting's default goes here (and in config.rs); a setting
 // whose saved value must change once goes in config::migrate_once.
+import { PP_DEFAULT_BODY } from './cleanupPresets.js';
 
 export const FIELD_DEFAULTS = {
   recordingMode: 'toggle',
@@ -90,8 +91,8 @@ export const FIELD_DEFAULTS = {
   ppModel: 'openai/gpt-oss-20b',
   ppPreset: 'default',
   ppDisableThinking: false,
-  // Byte-identical to config.rs default_pp_prompt() / PP_PRESETS.default.body.
-  ppPrompt: `Clean up the transcript using these rules.\n\nRULES:\n- Remove filler words (um, uh, er, like, you know, basically) unless meaningful.\n- Fix grammar, spelling, punctuation, and capitalization; break up run-on sentences.\n- Remove false starts, stutters, and accidental repetitions.\n- Correct obvious speech-to-text transcription errors from context.\n- Preserve the speaker's voice, tone, vocabulary, and intent.\n- Preserve technical terms, proper nouns, names, and jargon exactly as spoken — never "correct" them.\n\nSelf-corrections ("wait no", "I meant", "scratch that"): keep only the corrected version. "Actually" used for emphasis is NOT a correction.\nSpoken punctuation ("period", "comma", "new line"): convert to symbols. Use context to distinguish commands from literal mentions.\nNumbers & dates: standard written forms (January 15, 2026 / $300 / 5:30 PM). Small conversational numbers can stay as words.\nBroken phrases: reconstruct the speaker's likely intent from context. Never output a polished sentence that says nothing coherent.\nFormatting: bullets, numbered lists, or paragraph breaks only when they genuinely improve readability. Don't over-format.\n\nOUTPUT:\n- Output ONLY the cleaned text. Nothing else.\n- No commentary, labels, explanations, or preamble.\n- No questions. No suggestions. No added content.\n- Empty or filler-only input = empty output.`,
+  // config.rs default_pp_prompt(), byte for byte (cleanupPresets.js).
+  ppPrompt: PP_DEFAULT_BODY,
   routingScope: 'all_apps',
   appRoutes: [],
   cleanupProfiles: [],
