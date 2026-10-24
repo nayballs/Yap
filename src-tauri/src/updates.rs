@@ -532,7 +532,9 @@ enum Busy {
 /// must never run inside a `yap-state` listener (those can fire while the
 /// emitter holds that lock) — hence the spawns in [`on_pipeline_state`].
 fn busy_reason(app: &AppHandle) -> Option<Busy> {
-    if crate::meeting::is_recording() {
+    // (A meeting transcribed again, the refine after one: a restart would
+    // lose it.)
+    if crate::meeting::is_recording() || crate::meeting_audio::any_job_running() {
         return Some(Busy::Meeting);
     }
     if crate::commands::model_download_in_flight() {

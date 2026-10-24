@@ -4,8 +4,11 @@
 //!
 //! - **End or pause.** Any stop is the end of the meeting, unless it came
 //!   through [`meeting_pause`] (the Notes view's Pause: Resume carries on in
-//!   the same note). `meeting_start` / `meeting_stop` are unchanged; this
-//!   module follows the recorder through its `yap-meeting-state` events.
+//!   the same note). This module follows the recorder through its
+//!   `yap-meeting-state` events.
+//! - **The refined transcript** (`meeting_refine.rs`): when one is due, it
+//!   runs after the action plan — or before it, then [`end_steps`], when
+//!   the live transcript has holes (chunks that failed).
 //! - **"Started by mistake?"** A meeting with only a handful of words (fewer
 //!   than [`MISTAKE_WORDS`]) and nothing typed gets no automatic summary:
 //!   `yap-meeting-ended` asks the window the person is looking at to offer

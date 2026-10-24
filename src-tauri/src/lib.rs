@@ -696,6 +696,8 @@ pub fn run() {
             #[cfg(debug_assertions)]
             e2e::e2e_meeting_fail,
             #[cfg(debug_assertions)]
+            e2e::e2e_meeting_start_twice,
+            #[cfg(debug_assertions)]
             meeting_audio::e2e_meeting_recovery_offer,
             #[cfg(debug_assertions)]
             e2e::e2e_main_on_screen,

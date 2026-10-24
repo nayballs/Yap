@@ -649,6 +649,9 @@ pub fn forget(note_id: u64) {
     if let Some(cancel) = cancels().get(&note_id) {
         cancel.store(true, Ordering::SeqCst);
     }
+    // Note ids come round again: a new note never inherits its line.
+    jobs().remove(&note_id);
+    crate::meeting::forget_note(note_id);
     let recordings: Vec<u64> = recordings(note_id).iter().map(|m| m.recording).collect();
     let mut left = 0;
     for recording in recordings {
@@ -926,6 +929,12 @@ pub fn running_job(note_id: u64) -> Option<Redo> {
     jobs().get(&note_id).filter(|j| j.state == "running").cloned()
 }
 
+/// A meeting's audio is being transcribed (any note's): the updater doesn't
+/// restart under it, nor does the speech-engine timing run beside it.
+pub fn any_job_running() -> bool {
+    jobs().values().any(|j| j.state == "running")
+}
+
 /// A job for `note_id` starts (one per note): published as running, its
 /// Cancel made. `background`: the refine's low priority.
 fn begin(app: &AppHandle, first: Redo, background: bool) -> Result<crate::meeting::Ctl, String> {
@@ -947,6 +956,11 @@ fn begin(app: &AppHandle, first: Redo, background: bool) -> Result<crate::meetin
 /// update, `error`, or `cancelled`), its Cancel gone, the windows told.
 fn end_job(app: &AppHandle, note_id: u64, kind: Kind, model: &str, result: &Result<(), String>) {
     cancels().remove(&note_id);
+    if crate::notes::get(note_id).is_none() {
+        // Deleted meanwhile (its id may come round again).
+        jobs().remove(&note_id);
+        return;
+    }
     let (state, error) = match result {
         Ok(()) => ("done", None),
         Err(e) if e == CANCELLED => ("cancelled", None),
@@ -960,6 +974,47 @@ fn end_job(app: &AppHandle, note_id: u64, kind: Kind, model: &str, result: &Resu
     changed(app, note_id);
     // The windows bring the note's new lines in.
     let _ = app.emit("yap-notes-changed", ());
+}
+
+/// What runs after a job, with how it went (the steps after a refine).
+type After = Box<dyn FnOnce(&AppHandle, &Result<(), String>) + Send>;
+
+/// A job's end, published however its task ends — a panic in it too, so
+/// no job stays "running" for ever (holding the updater off) and the steps
+/// after a refine still run.
+struct JobEnd {
+    app: AppHandle,
+    note_id: u64,
+    kind: Kind,
+    model: String,
+    after: Option<After>,
+    ended: bool,
+}
+
+impl JobEnd {
+    fn new(app: &AppHandle, note_id: u64, kind: Kind, model: &str) -> Self {
+        JobEnd { app: app.clone(), note_id, kind, model: model.to_string(), after: None, ended: false }
+    }
+
+    fn end(mut self, result: &Result<(), String>) {
+        self.finish(result);
+    }
+
+    fn finish(&mut self, result: &Result<(), String>) {
+        self.ended = true;
+        end_job(&self.app, self.note_id, self.kind, &self.model, result);
+        if let Some(after) = self.after.take() {
+            after(&self.app, result);
+        }
+    }
+}
+
+impl Drop for JobEnd {
+    fn drop(&mut self) {
+        if !self.ended {
+            self.finish(&Err("The transcription stopped unexpectedly".to_string()));
+        }
+    }
 }
 
 /// Stop note `note_id`'s job (the line's Cancel): between two chunks, the
@@ -1029,6 +1084,7 @@ pub fn start_job(app: &AppHandle, note_id: u64, kind: Kind) -> Result<(), String
         end_job(app, note_id, kind, &model, &result);
         return result;
     };
+    let ends = JobEnd::new(app, note_id, kind, &model);
     let app = app.clone();
     tauri::async_runtime::spawn(async move {
         let result = match kind {
@@ -1036,7 +1092,7 @@ pub fn start_job(app: &AppHandle, note_id: u64, kind: Kind) -> Result<(), String
             _ => transcribe_again(&app, &engine_slot, note_id, todo, &model, Kind::Again, &ctl, false).await,
         };
         let recovered = kind == Kind::Recover && result.is_ok();
-        end_job(&app, note_id, kind, &model, &result);
+        ends.end(&result);
         if recovered && crate::meeting::recording_note() != Some(note_id) {
             // The end of the meeting, as a stop would have been.
             crate::meeting_end::recovered(&app, note_id);
@@ -1067,12 +1123,13 @@ pub fn start_refine(
     let model = crate::stt::model_name(model_id);
     let first = Redo { then_summary, ..Redo::running(note_id, Kind::Refine, &model) };
     let ctl = begin(app, first.clone(), true)?;
+    let mut ends = JobEnd::new(app, note_id, Kind::Refine, &model);
+    ends.after = Some(Box::new(after));
     let app = app.clone();
     let model_id = model_id.to_string();
     tauri::async_runtime::spawn(async move {
         let result = refine(&app, note_id, todo, &model_id, &first, &ctl).await;
-        end_job(&app, note_id, Kind::Refine, &first.model, &result);
-        after(&app, &result);
+        ends.end(&result);
     });
     Ok(())
 }
@@ -1259,11 +1316,12 @@ pub fn start_retry(app: &AppHandle, note_id: u64, source: &str, ts: u64, start_m
         end_job(app, note_id, Kind::Retry, &model, &result);
         return result;
     };
+    let ends = JobEnd::new(app, note_id, Kind::Retry, &model);
     let app = app.clone();
     let source = source.to_string();
     tauri::async_runtime::spawn(async move {
         let result = retry(&app, &engine_slot, &meta, &source, (start_ms, end_ms), &model, &ctl).await;
-        end_job(&app, note_id, Kind::Retry, &model, &result);
+        ends.end(&result);
         release(&app, note_id);
     });
     Ok(())
@@ -1548,6 +1606,100 @@ mod tests {
         forget(note_id);
         assert!(!note_dir(note_id).exists());
         assert!(recordings(note_id).is_empty());
+        let _ = std::fs::remove_dir_all(root());
+    }
+
+    /// **How long a refine takes** on a 30-minute meeting (both sides read
+    /// back from FLAC, cut, transcribed at low priority, then the
+    /// replacement and its check): `cargo test --release --features engines
+    /// --lib -- --ignored refine_a_30_minute_meeting --nocapture`, with
+    /// `YAP_REFINE_YOU` / `YAP_REFINE_THEM` (speech WAVs, taking turns until
+    /// each side is `YAP_REFINE_MINUTES` long, 30), `YAP_REFINE_DATA` (a data
+    /// folder with `models/`, only read; Yap's own by default),
+    /// `YAP_REFINE_MODEL` (Parakeet V3) and `YAP_REFINE_DEVICE` (gpu | cpu).
+    /// Without the `engines` feature it times all but the model (the stub
+    /// answers at once).
+    #[test]
+    #[ignore]
+    fn refine_a_30_minute_meeting() {
+        use std::time::Instant;
+        let var = |k: &str| std::env::var(k).ok().filter(|v| !v.trim().is_empty());
+        let minutes: u64 = var("YAP_REFINE_MINUTES").and_then(|v| v.parse().ok()).unwrap_or(30);
+        let clip = |k: &str| var(k).map(|p| crate::media::decode_to_16k_mono(Path::new(&p)).unwrap()).unwrap_or_else(|| tone(8.0));
+        let (you_clip, them_clip) = (clip("YAP_REFINE_YOU"), clip("YAP_REFINE_THEM"));
+        let n = (minutes * 60 * RATE) as usize;
+        let gap = vec![0.0f32; RATE as usize];
+        let (mut you, mut them) = (Vec::with_capacity(n), Vec::with_capacity(n));
+        while you.len() < n {
+            them.extend_from_slice(&them_clip);
+            you.resize(them.len(), 0.0);
+            you.extend_from_slice(&gap);
+            them.extend_from_slice(&gap);
+            you.extend_from_slice(&you_clip);
+            them.resize(you.len(), 0.0);
+            you.extend_from_slice(&gap);
+            them.extend_from_slice(&gap);
+        }
+        you.truncate(n);
+        them.truncate(n);
+
+        let _ = std::fs::remove_dir_all(root());
+        let (note_id, recording) = (7, new_id());
+        std::fs::create_dir_all(note_dir(note_id)).unwrap();
+        let t = Instant::now();
+        let mut lens = (0, 0);
+        for (side, audio, len) in [("you", &you, &mut lens.0), ("them", &them, &mut lens.1)] {
+            let mut w = flac::Writer::create(&audio_path(note_id, recording, side)).unwrap();
+            for piece in audio.chunks(RATE as usize / 2) {
+                w.push(piece).unwrap();
+            }
+            *len = w.finish().unwrap();
+        }
+        let write_ms = t.elapsed().as_millis();
+        let bytes = recording_bytes(note_id, recording);
+        let meta = Meta { note_id, recording, started_ms: recording, you_len: lens.0, them_len: lens.1, ended_ms: Some(recording), ..Default::default() };
+
+        let data = var("YAP_REFINE_DATA").map(std::path::PathBuf::from).unwrap_or_else(|| dirs::data_dir().unwrap().join("yap"));
+        let model = var("YAP_REFINE_MODEL").unwrap_or_else(|| "parakeet-tdt-0.6b-v3".into());
+        let device = if var("YAP_REFINE_DEVICE").as_deref() == Some("cpu") { crate::stt::Device::Cpu } else { crate::stt::Device::Gpu };
+        let t = Instant::now();
+        let engine = crate::stt::create_stt_engine_on(&data, &model, device).unwrap();
+        let load_ms = t.elapsed().as_millis();
+        let slot = crate::pipeline::EngineCell::for_model(&model, Some(engine));
+
+        let rt = tokio::runtime::Builder::new_multi_thread().enable_all().build().unwrap();
+        let (mut y, mut th) = open_sides(&meta, (0, 0)).unwrap();
+        let ctl = crate::meeting::Ctl { background: true, cancel: None };
+        let chunks = AtomicU64::new(0);
+        let progress = |_: u64, _: u64| {
+            chunks.fetch_add(1, Ordering::SeqCst);
+        };
+        let t = Instant::now();
+        let out = rt.block_on(crate::meeting::replay(&slot, note_id, &mut y, &mut th, meta.started_ms, (0, 0), &[], &progress, &ctl));
+        let replay_ms = t.elapsed().as_millis();
+
+        // The replacement over a live transcript of the same length.
+        let redone = vec![redo::Redone { started_ms: meta.started_ms, end_ms: meta.end_ms(), lines: out.segments.clone() }];
+        let t = Instant::now();
+        let agreed = crate::meeting_refine::agrees(&out.segments, &redone).is_ok();
+        let r = redo::rebuild(&out.segments, &[out.segments.len()], &redone);
+        let rebuild_ms = t.elapsed().as_millis();
+
+        let audio_secs = (lens.0 + lens.1) as f64 / RATE as f64;
+        println!(
+            "refine of a {minutes}-minute meeting ({model} on {}): FLAC written in {write_ms} ms ({:.1} MB), model loaded in {load_ms} ms, \
+             {} steps, {} lines ({} failed) in {:.1} s ({:.0}x real time over both sides' {:.0} s), replacement + check in {rebuild_ms} ms (agrees: {agreed}, {} lines)",
+            device.as_str(),
+            bytes as f64 / 1e6,
+            chunks.load(Ordering::SeqCst),
+            out.segments.len(),
+            out.segments.iter().filter(|s| s.failed).count(),
+            replay_ms as f64 / 1000.0,
+            audio_secs * 1000.0 / replay_ms.max(1) as f64,
+            audio_secs,
+            r.transcript.len(),
+        );
+        assert!(!out.cancelled);
         let _ = std::fs::remove_dir_all(root());
     }
 

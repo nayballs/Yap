@@ -54,6 +54,14 @@
 //! it, else the Yap bar, else a Windows notification; see "Quiet sides"
 //! below).
 //!
+//! Failed chunks: a chunk the speech model couldn't transcribe is never
+//! silence — its stretch gets a marker with Try again, and the person is
+//! told once (see "Failed chunks" below).
+//!
+//! One recorder: a start claims the recorder's slot before it opens the
+//! devices (`Slot`), and a note being recorded is never deleted
+//! ([`delete_note`]).
+//!
 //! Whether anyone is talking: [`activity`] hands the guard rails
 //! (`meeting_guard.rs`, the quiet-meeting countdown and the check-ins) the
 //! meeting's audio clock and a counter that moves with every bit of talk.
@@ -1286,7 +1294,9 @@ struct Source {
     note_id: u64,
     /// "you" or "them".
     side: &'static str,
-    /// Read back from disk ([`replay`]), not the live recorder.
+    /// Read back from disk ([`replay`]), not the live recorder (a test
+    /// run's staged failures are the live recorder's only).
+    #[cfg_attr(not(debug_assertions), allow(dead_code))]
     replayed: bool,
 }
 
@@ -1412,12 +1422,19 @@ impl Heard {
 /// The meetings told about a failed chunk since Yap started (once each).
 static TOLD_FAILED: Mutex<std::collections::BTreeSet<u64>> = Mutex::new(std::collections::BTreeSet::new());
 
+/// Note `note_id` was deleted (its id may come round again): a new meeting
+/// in it is told about its own failed chunks.
+pub(crate) fn forget_note(note_id: u64) {
+    TOLD_FAILED.lock().unwrap_or_else(|p| p.into_inner()).remove(&note_id);
+}
+
 /// Tell the person, once per meeting, that part of it couldn't be
 /// transcribed.
 fn tell_failed(app: &AppHandle, note_id: u64) {
     if !TOLD_FAILED.lock().unwrap_or_else(|p| p.into_inner()).insert(note_id) {
         return;
     }
+    tracing::info!(note_id, "Meeting: telling the person part of it couldn't be transcribed");
     let body = if crate::config::load().meeting_refine == crate::meeting_refine::NEVER {
         "Its audio is kept: use Try again on the transcript once the meeting ends."
     } else {
@@ -2094,6 +2111,12 @@ pub(crate) async fn replay(
                     theirs.pop_front();
                 }
             }
+        }
+        // Each chunk waits its turn: a dictation that started during the
+        // call side's goes first.
+        if !give_way(&mut dictations, ctl).await {
+            out.extend(batch.into_iter().map(|(_, seg)| seg));
+            return Replayed { segments: out, you_done: done.0, them_done: done.1, cancelled: true };
         }
         if let Some(h) = mine.next(engine_slot, you_end, ctl).await {
             done.0 = h.to;

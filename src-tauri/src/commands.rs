@@ -519,6 +519,11 @@ pub fn note_export(id: u64, path: String) -> Result<(), String> {
                 out.push_str("_You dictated here (left out of the notes)._\n\n");
                 continue;
             }
+            if seg.failed {
+                let at = |ms: Option<u64>| crate::meeting_summary::clock(ms.unwrap_or(0) / 1000);
+                out.push_str(&format!("_Couldn't transcribe {}–{}._\n\n", at(seg.start_ms), at(seg.end_ms)));
+                continue;
+            }
             let who = crate::speakers::display_line(&note.speakers, seg);
             out.push_str(&format!("**{who}:** {}\n\n", seg.text));
         }

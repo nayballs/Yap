@@ -81,12 +81,20 @@ impl EngineCell {
     pub(crate) fn take(self: &std::sync::Arc<Self>, wait: Duration) -> Lease {
         let deadline = Instant::now() + wait;
         let mut out = self.out.lock().unwrap_or_else(|p| p.into_inner());
+        let mut waited: Option<Instant> = None;
         loop {
             let engine = self.engine.lock().unwrap_or_else(|p| p.into_inner()).take();
             let left = deadline.saturating_duration_since(Instant::now());
             if engine.is_some() || *out == 0 || left.is_zero() {
                 *out += 1;
+                if let Some(since) = waited {
+                    tracing::info!(ms = since.elapsed().as_millis() as u64, got = engine.is_some(), "Speech engine: waited for it to come back");
+                }
                 return Lease { slot: std::sync::Arc::clone(self), engine };
+            }
+            if waited.is_none() {
+                waited = Some(Instant::now());
+                tracing::info!("Speech engine: in use; waiting for it to come back");
             }
             out = self.back.wait_timeout(out, left).unwrap_or_else(|p| p.into_inner()).0;
         }
