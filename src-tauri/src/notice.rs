@@ -145,6 +145,10 @@ pub fn rule(kind: &str) -> Rule {
         // "Your settings were reset" (config.json couldn't be read, set
         // aside): never dropped, but never over a dictation either.
         "configReset" => Rule { hold_dictation: true, max_wait_ms: None, ..alert },
+        // "Couldn't save your dictation history" (saving.rs: a save that
+        // failed by itself, said once): never over a dictation, never
+        // dropped, and the same words not twice in ten minutes.
+        "saveFailed" => Rule { hold_dictation: true, max_wait_ms: None, cooldown_ms: 10 * MIN, ..alert },
         // The Voice Assistant's answer (assistant.rs): the person just asked
         // for it, so it shows at once — over a meeting too (that's when it
         // isn't read aloud) — and steps aside only for a question against
@@ -584,17 +588,22 @@ pub fn with_call_fatigue<T>(f: impl FnOnce(Fatigue) -> (Fatigue, T)) -> T {
     if next != store.calls {
         store.calls = next;
         if !cfg!(test) {
-            match serde_json::to_string_pretty(&*store) {
-                Ok(json) => {
-                    if let Err(e) = crate::config::atomic_write(&store_path(), &json) {
-                        tracing::warn!("notices: couldn't save notices.json: {e}");
-                    }
-                }
-                Err(e) => tracing::warn!("notices: couldn't serialize notices.json: {e}"),
-            }
+            let _ = SAVER.write_json(&store_path(), &*store, true);
         }
     }
     out
+}
+
+/// notices.json's saves (`saving.rs`): a failed one keeps the counts in
+/// memory, is tried again with the next save, and is said once.
+pub static SAVER: crate::saving::Saver = crate::saving::Saver::new("notices", "how you answered call prompts", save_now);
+
+/// Write the counts again (Try again).
+fn save_now() -> Result<(), crate::saving::SaveError> {
+    if let Some(store) = STORE.lock().unwrap_or_else(|p| p.into_inner()).as_ref() {
+        let _ = SAVER.write_json(&store_path(), store, true);
+    }
+    SAVER.check()
 }
 
 // ---- test mode --------------------------------------------------------------------------------

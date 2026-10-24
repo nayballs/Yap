@@ -371,16 +371,22 @@ fn record() -> Record {
 fn update_record(f: impl FnOnce(&mut Record)) {
     let mut rec = record();
     f(&mut rec);
-    match serde_json::to_string_pretty(&rec) {
-        Ok(json) => {
-            let _ = std::fs::create_dir_all(crate::config::data_dir());
-            if let Err(e) = crate::config::atomic_write(&record_path(), &json) {
-                tracing::warn!("updates: couldn't save updates.json: {}", e);
-            }
-        }
-        Err(e) => tracing::warn!("updates: couldn't serialize updates.json: {}", e),
-    }
+    let _ = SAVER.write_json(&record_path(), &rec, true);
     *RECORD.lock().unwrap_or_else(|p| p.into_inner()) = Some(rec);
+}
+
+/// updates.json's saves (`saving.rs`): a failed one keeps the record in
+/// memory and is tried again with the next save; only logged (an update
+/// announced twice is all it costs).
+pub static SAVER: crate::saving::Saver = crate::saving::Saver::quiet("updates", "the update record", save_now);
+
+/// Write the record again (Try again).
+fn save_now() -> Result<(), crate::saving::SaveError> {
+    let rec = RECORD.lock().unwrap_or_else(|p| p.into_inner()).clone();
+    if let Some(rec) = rec {
+        let _ = SAVER.write_json(&record_path(), &rec, true);
+    }
+    SAVER.check()
 }
 
 // ---- snapshot / announcements --------------------------------------------------

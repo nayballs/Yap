@@ -247,7 +247,9 @@ still want a hands-on pass.
 On top of that, the main window is now a full **ControlPanel** (Home dictation feed
 w/ Ctrl+K search, Chat, Notes, Upload, Dictionary, Settings as an always-mounted
 modal, app-wide toasts): local audio-**file** transcription (Upload — `media.rs`
-Symphonia decode + chunking), an **AI Notepad** (`notes.rs` — folders/actions/
+Symphonia decode + chunking; since 2026-10-24 the job, like a speech model's
+download, outlives its view: leave mid-job and come back to its progress,
+Cancel and result — e2e `upload.spec.js`), an **AI Notepad** (`notes.rs` — folders/actions/
 participants/transcripts, an Actions engine, ActionPicker/ActionManager, attendee +
 folder management, markdown export, an embedded per-note chat), a **meeting
 recorder** (`meeting.rs` — mic + WASAPI loopback → You/Them transcript, cut in
@@ -335,7 +337,18 @@ OAuth client set up in Google Cloud + the two repository secrets
 ([`docs/calendar.md`](../calendar.md)); not yet tried against a real
 calendar.
 Every JSON store now writes
-atomically with corrupt-file quarantine. The default (no-feature) build still ships
+atomically with corrupt-file quarantine, and **a write that fails is said**
+(2026-10-24, `saving.rs`: the data kept in memory and saved with the next
+change; "Couldn't save your note: the disk is full." with Try again where
+the person made the change, one notice for a save that failed by itself;
+unit-tested on locked and read-only files, e2e-tested with staged
+failures in `save-errors.spec.js` — a real full disk not tried); the temp
+files a crash mid-write leaves are swept at start-up, Yap's own stale ones
+only (unit-tested); and every setting changed outside Settings (the Chat
+picker, the voice's volume, Read aloud's speed, the on-device context,
+call detection's choices) changes in one step (`config::update` /
+`try_update`), never a load → change → save that could lose a change saved
+meanwhile (unit-tested, with a lint-style test). The default (no-feature) build still ships
 the stub for fast `cargo check`. **Optional accounts** (`auth.rs` + `cloud/`): email
 codes and Google/GitHub/Discord sign-in, sign-out, delete-account — tested end
 to end locally (2026-10-01, `wrangler dev` + a mock provider). **Live since

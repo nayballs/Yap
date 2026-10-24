@@ -713,6 +713,22 @@ pub fn changed_note(name: &str, result: &Value) -> Option<u64> {
 /// failures); the whole thing is fed back to the model, `displayText` is
 /// also surfaced in the chat UI.
 pub fn execute(name: &str, args: &Value) -> Value {
+    let mut result = run(name, args);
+    // A note changed in Yap but not saved to disk (saving.rs): still a
+    // change every window shows, but the model is told, so it never says
+    // it's saved, and the chip says so.
+    if changed_note(name, &result).is_some() {
+        if let Err(e) = crate::notes::SAVER.status() {
+            result["notSaved"] = json!(format!(
+                "{e} The change is in Yap and is saved with the next change, or when the user clicks Try again. Tell the user it isn't saved yet."
+            ));
+            result["displayText"] = json!(e.to_string());
+        }
+    }
+    result
+}
+
+fn run(name: &str, args: &Value) -> Value {
     match name {
         "search_notes" => {
             let query = args["query"].as_str().unwrap_or("");

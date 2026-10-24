@@ -381,13 +381,21 @@ fn write_down(s: &State) {
     let all: Vec<&Quieted> = s.leftovers.iter().chain(s.quieted.iter()).collect();
     if all.is_empty() {
         let _ = std::fs::remove_file(path);
+        // Nothing left to keep: nothing unsaved either.
+        SAVER.nothing_to_save();
         return;
     }
-    if let Ok(json) = serde_json::to_string_pretty(&all) {
-        if let Err(e) = crate::config::atomic_write(&path, &json) {
-            tracing::warn!("other apps: couldn't note what's quieted ({e})");
-        }
-    }
+    let _ = SAVER.write_json(&path, &all, true);
+}
+
+/// quieted_apps.json's saves (`saving.rs`): a failed one is tried again with
+/// the next; only logged (it matters only if Yap crashes mid-dictation).
+pub static SAVER: crate::saving::Saver = crate::saving::Saver::quiet("quietedApps", "the apps Yap quieted", save_now);
+
+/// Write it again (Try again).
+fn save_now() -> Result<(), crate::saving::SaveError> {
+    write_down(&state());
+    SAVER.check()
 }
 
 /// Bring back any session of the leftovers' apps still at Yap's level;

@@ -21,7 +21,9 @@ import { toast } from './ui/toast.svelte.js';
 // (assistant.rs), with Open settings → Language Models.
 // "notes": Yap closed during a meeting, with Transcribe it (meeting_audio.rs).
 // "snip": Snip to Chat couldn't start or save (snip.rs).
-const CHIPS = { clipboard: 'Paste', mic: 'Microphone', call: 'Calls', assistant: 'Voice Assistant', notes: 'Meetings', settings: 'Settings', snip: 'Snip to Chat' };
+// "save": a save that failed by itself, with Try again, and "Saved" after it
+// (saving.rs; a command's failed save is saveErrors.js's toast).
+const CHIPS = { clipboard: 'Paste', mic: 'Microphone', call: 'Calls', assistant: 'Voice Assistant', notes: 'Meetings', settings: 'Settings', snip: 'Snip to Chat', save: 'Saving' };
 
 let started = false;
 

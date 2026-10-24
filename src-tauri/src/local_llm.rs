@@ -2330,16 +2330,15 @@ pub fn context_setting(tokens: u32) -> Result<u32, String> {
 /// copy adopts it, and a running sidecar restarted on it once no dictation
 /// is going on ([`restart_when_idle`]).
 #[tauri::command]
-pub fn local_llm_set_context(
-    app: AppHandle,
-    state: tauri::State<'_, crate::AppState>,
-    tokens: u32,
-) -> Result<ContextView, String> {
+pub fn local_llm_set_context(app: AppHandle, tokens: u32) -> Result<ContextView, String> {
     let setting = context_setting(tokens)?;
-    let mut cfg = crate::config::load();
-    let before = context_for(&cfg);
-    cfg.local_context = setting;
-    crate::commands::save_config(app.clone(), state, cfg.clone())?;
+    // In one step: never over a change saved meanwhile.
+    let mut before = 0;
+    let cfg = crate::commands::change_config(&app, |cfg| {
+        before = context_for(cfg);
+        cfg.local_context = setting;
+        Ok(())
+    })?;
     let _ = app.emit("yap-local-context-changed", serde_json::json!({ "localContext": setting }));
     let after = context_for(&cfg);
     tracing::info!(from = before, to = after, "On-device model context set");

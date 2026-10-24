@@ -117,7 +117,7 @@ Reading answers aloud: Kokoro and Windows' voices on this PC, or ElevenLabs on t
   its voices"), `tts_stop`, `tts_state`, `tts_kokoro_status` /
   `tts_kokoro_download` (`tts-download-progress {percent, downloadedBytes,
   totalBytes}`, then `tts-kokoro-changed`) / `tts_kokoro_delete` (stops
-  speaking, unloads), `voice_replies_set {on}` (Chat's toggle: saves like
+  speaking, unloads), `voice_replies_set {on}` (Chat's toggle: saved in one step, `commands::change_config`, applied like
   Settings, then `yap-voice-replies {on}` for Settings' copy). A
   `tts-idle` thread unloads Kokoro after the speech model's unload time (10
   min when that's "never"). ⚠ **No echo cancellation**: Yap's voice from

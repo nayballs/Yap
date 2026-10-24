@@ -422,21 +422,30 @@ fn load_from_disk() -> Store {
     store
 }
 
+/// notes.json's saves (`saving.rs`): a failed one keeps the notes in
+/// memory, is tried again with the next save, and is said once — by the
+/// command that hit it ([`saved`]) or the notice.
+pub static SAVER: crate::saving::Saver = crate::saving::Saver::new("notes", "your note", save_now);
+
+/// `Ok` when every note is on disk; else why not (the caller says it).
+pub fn saved() -> Result<(), crate::saving::SaveError> {
+    SAVER.check()
+}
+
+/// Write the whole store again (Try again).
+pub fn save_now() -> Result<(), crate::saving::SaveError> {
+    with_store(|s| save_to_disk(s));
+    saved()
+}
+
+/// Save the store: a failure is recorded by [`SAVER`] (see [`saved`]).
 #[cfg(not(test))]
 fn save_to_disk(store: &Store) {
     // A model evaluation (`eval.rs`) keeps its notes in memory only.
     if crate::eval::active() {
         return;
     }
-    match serde_json::to_string(store) {
-        Ok(json) => {
-            let _ = std::fs::create_dir_all(crate::config::data_dir());
-            if let Err(e) = crate::config::atomic_write(&notes_path(), &json) {
-                tracing::warn!("Failed to persist notes: {}", e);
-            }
-        }
-        Err(e) => tracing::warn!("Failed to serialize notes: {}", e),
-    }
+    let _ = SAVER.write_json(&notes_path(), store, false);
 }
 
 #[cfg(not(test))]
@@ -457,8 +466,18 @@ thread_local! {
     static TEST_STORE: std::cell::RefCell<Store> = std::cell::RefCell::new(Store::default());
 }
 
+// …and save it only to a scratch file a test names (`TEST_PATH`).
 #[cfg(test)]
-fn save_to_disk(_store: &Store) {}
+thread_local! {
+    static TEST_PATH: std::cell::RefCell<Option<std::path::PathBuf>> = const { std::cell::RefCell::new(None) };
+}
+
+#[cfg(test)]
+fn save_to_disk(store: &Store) {
+    if let Some(path) = TEST_PATH.with(|p| p.borrow().clone()) {
+        let _ = SAVER.write_json(&path, store, false);
+    }
+}
 
 #[cfg(test)]
 fn with_store<R>(f: impl FnOnce(&mut Store) -> R) -> R {
@@ -1249,6 +1268,39 @@ pub fn delete(id: u64) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// notes.json held by another program (an antivirus, a backup tool)
+    /// when a note is saved: the save says so, the note stays as typed in
+    /// memory, the file keeps its last good copy, and the next save once
+    /// it's free writes everything (code review 2026-10-23 #7).
+    #[cfg(windows)]
+    #[test]
+    fn a_note_that_couldnt_be_saved_is_kept_and_saved_with_the_next_change() {
+        use std::os::windows::fs::OpenOptionsExt;
+        let dir = std::env::temp_dir().join(format!("yap-notes-save-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let path = dir.join("notes.json");
+        TEST_PATH.with(|p| *p.borrow_mut() = Some(path.clone()));
+        let note = create("Shopping", "milk", "manual", "");
+        assert!(saved().is_ok());
+        let held = std::fs::OpenOptions::new().read(true).share_mode(0).open(&path).unwrap();
+        update(note.id, None, Some("milk, eggs".into()), None, None).unwrap();
+        let e = saved().unwrap_err();
+        assert_eq!(e.to_string(), "Couldn't save your note: another program has the file locked.");
+        assert_eq!(get(note.id).unwrap().content, "milk, eggs", "kept in memory");
+        drop(held);
+        let on_disk = std::fs::read_to_string(&path).unwrap();
+        assert!(on_disk.contains("\"milk\"") && !on_disk.contains("milk, eggs"), "the last good copy");
+        // The next change saves everything, the earlier edit too.
+        create("Errands", "post office", "manual", "");
+        assert!(saved().is_ok());
+        let on_disk = std::fs::read_to_string(&path).unwrap();
+        assert!(on_disk.contains("milk, eggs") && on_disk.contains("post office"));
+        // Try again with nothing to redo.
+        assert!(save_now().is_ok());
+        TEST_PATH.with(|p| *p.borrow_mut() = None);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     #[test]
     fn content_hash_tracks_length_and_head() {

@@ -33,7 +33,7 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Duration;
 
 use serde::Serialize;
-use tauri::{AppHandle, Emitter, Manager};
+use tauri::{AppHandle, Emitter};
 
 use crate::tts::{self, marks};
 
@@ -721,10 +721,12 @@ pub fn act(app: &AppHandle, action: &str) -> Result<(), String> {
 /// Assistant's), and tell Settings' copy (`yap-voice-rate`) so its
 /// auto-save keeps it.
 fn save_speed(app: &AppHandle, rate: f32) {
-    let mut cfg = crate::config::load();
-    cfg.tts_rate = rate;
-    let state = app.state::<crate::AppState>();
-    if let Err(e) = crate::commands::save_config(app.clone(), state, cfg) {
+    // In one step: never over a change saved meanwhile.
+    let saved = crate::commands::change_config(app, |cfg| {
+        cfg.tts_rate = rate;
+        Ok(())
+    });
+    if let Err(e) = saved {
         tracing::warn!("Read aloud: couldn't save the speed ({e})");
         return;
     }

@@ -1379,6 +1379,85 @@ fn set_aside(path: &Path) -> std::io::Result<PathBuf> {
     }
 }
 
+/// How old a temp file must be before the start-up sweep takes it: a write
+/// takes milliseconds, so one this old was left by a crash (or a Yap killed
+/// mid-write) — never one another Yap is writing now (a dev build shares the
+/// folder with the installed one).
+const STALE_TEMP: Duration = Duration::from_secs(10 * 60);
+
+/// The stores whose writes went through `<stem>.tmp` before 2026-10-23
+/// (`with_extension("tmp")`), whose leftovers the sweep takes too.
+const OLD_TEMP_STEMS: &[&str] = &[
+    "config",
+    "notes",
+    "chats",
+    "memory",
+    "calendar",
+    "history",
+    "groq_usage",
+    "dictionary_usage",
+    "hints",
+    "word_suggestions",
+    "notices",
+    "quieted_apps",
+    "stt_speed",
+    "model_catalog",
+    "updates",
+];
+
+/// A temp file of Yap's own writes: `<file>.<pid>-<n>.tmp` ([`atomic_write`]),
+/// or a store's `<stem>.tmp` of before 2026-10-23. Nothing else.
+fn is_yap_temp(name: &str) -> bool {
+    let Some(stem) = name.strip_suffix(".tmp") else {
+        return false;
+    };
+    if OLD_TEMP_STEMS.contains(&stem) {
+        return true;
+    }
+    let digits = |s: &str| !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit());
+    match stem.rsplit_once('.').and_then(|(file, tag)| Some((file, tag.split_once('-')?))) {
+        Some((file, (pid, n))) => !file.is_empty() && digits(pid) && digits(n),
+        None => false,
+    }
+}
+
+/// Remove the temp files of Yap's own writes ([`is_yap_temp`]) older than
+/// `older_than` from `dir` (files only, not its subfolders). Returns how many.
+fn sweep_temps_in(dir: &Path, older_than: Duration) -> usize {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return 0;
+    };
+    let now = std::time::SystemTime::now();
+    entries
+        .flatten()
+        .filter(|e| e.file_type().is_ok_and(|t| t.is_file()))
+        .filter(|e| is_yap_temp(&e.file_name().to_string_lossy()))
+        .filter(|e| {
+            e.metadata()
+                .and_then(|m| m.modified())
+                .is_ok_and(|at| now.duration_since(at).is_ok_and(|age| age >= older_than))
+        })
+        .filter(|e| std::fs::remove_file(e.path()).is_ok())
+        .count()
+}
+
+/// At start-up (on a thread of its own): the temp files a crash mid-write
+/// left behind — each write's is unique since 2026-10-23, so nothing
+/// replaced them — in the data folder and the folders Yap writes the same
+/// way (`icons/`, `llm/`, each meeting's in `meeting-audio/`). Only Yap's
+/// own names, only stale ones.
+pub fn sweep_temp_files() {
+    let dir = data_dir();
+    let mut dirs = vec![dir.clone(), dir.join("icons"), dir.join("llm")];
+    if let Ok(meetings) = std::fs::read_dir(dir.join("meeting-audio")) {
+        dirs.extend(meetings.flatten().filter(|e| e.file_type().is_ok_and(|t| t.is_dir())).map(|e| e.path()));
+    }
+    let removed: usize = dirs.iter().map(|d| sweep_temps_in(d, STALE_TEMP)).sum();
+    if removed > 0 {
+        tracing::info!(removed, "Removed temp files an interrupted save left behind");
+    }
+}
+
 /// Move an unparseable store file aside (`<name>.corrupt-<unix-secs>`) so it
 /// is NEVER overwritten by a fresh default — the data stays recoverable.
 pub(crate) fn quarantine_corrupt(path: &Path) {
@@ -1623,6 +1702,35 @@ pub fn update(change: impl FnOnce(&mut YapConfig)) -> Result<YapConfig, String> 
     let mut cfg = load();
     if changed(&mut cfg, change) {
         save(&cfg)?;
+    }
+    Ok(cfg)
+}
+
+/// [`update`] with a change that can be refused: on `Err` nothing is saved
+/// (not half a change) and the error comes back.
+pub fn try_update(change: impl FnOnce(&mut YapConfig) -> Result<(), String>) -> Result<YapConfig, String> {
+    let _saves = lock_saves();
+    let mut cfg = load();
+    if try_changed(&mut cfg, change)? {
+        save(&cfg)?;
+    }
+    Ok(cfg)
+}
+
+/// Apply `change` to a copy of `cfg`, kept only if it worked: whether
+/// anything changed.
+fn try_changed(cfg: &mut YapConfig, change: impl FnOnce(&mut YapConfig) -> Result<(), String>) -> Result<bool, String> {
+    let mut next = cfg.clone();
+    change(&mut next)?;
+    Ok(changed(cfg, |c| *c = next))
+}
+
+#[cfg(test)]
+fn try_update_at(path: &Path, change: impl FnOnce(&mut YapConfig) -> Result<(), String>) -> Result<YapConfig, String> {
+    let _saves = lock_saves();
+    let mut cfg = load_at(path).cfg;
+    if try_changed(&mut cfg, change)? {
+        save_at(path, &cfg)?;
     }
     Ok(cfg)
 }
@@ -2185,6 +2293,109 @@ mod tests {
         std::thread::sleep(std::time::Duration::from_millis(30));
         update_at(&path, |c| c.hotkey = c.hotkey.clone()).unwrap();
         assert_eq!(std::fs::metadata(&path).unwrap().modified().unwrap(), before);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A change that fails saves nothing; changes from many threads at once
+    /// are all kept.
+    #[test]
+    fn a_change_that_fails_saves_nothing_and_none_is_lost() {
+        let dir = scratch("try-update");
+        let path = dir.join("config.json");
+        save_at(&path, &YapConfig::default()).unwrap();
+        let before = std::fs::read(&path).unwrap();
+        let refused = try_update_at(&path, |c| {
+            c.hotkey = "kb:121".into();
+            Err("no such model".into())
+        });
+        assert_eq!(refused.unwrap_err(), "no such model");
+        assert_eq!(std::fs::read(&path).unwrap(), before, "half a change never saved");
+        std::thread::scope(|s| {
+            for t in 0..8usize {
+                let path = &path;
+                s.spawn(move || {
+                    for i in 0..10 {
+                        try_update_at(path, |c| {
+                            c.dictionary.push(entry(&format!("t{t} w{i}"), "x"));
+                            Ok(())
+                        })
+                        .unwrap();
+                    }
+                });
+            }
+        });
+        assert_eq!(load_at(&path).cfg.dictionary.len(), 80);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The places that change a setting by themselves — the Chat picker's
+    /// model and key, the voice's volume and "Speak replies", Read aloud's
+    /// speed, the on-device model's context, call detection's "Stop asking"
+    /// and "Don't ask for…" — change it in one step (`update`): a load →
+    /// change → save of their own could put back what another thread saved
+    /// in between (code review 2026-10-23 #2).
+    #[test]
+    fn settings_changed_outside_settings_change_in_one_step() {
+        let files = [
+            ("ai_model.rs", include_str!("ai_model.rs")),
+            ("tts.rs", include_str!("tts.rs")),
+            ("read_aloud.rs", include_str!("read_aloud.rs")),
+            ("local_llm.rs", include_str!("local_llm.rs")),
+            ("meeting_detect.rs", include_str!("meeting_detect.rs")),
+        ];
+        for (file, src) in files {
+            let code: Vec<&str> = src.lines().filter(|l| !l.trim_start().starts_with("//")).collect();
+            for call in ["config::save(", "commands::save_config("] {
+                let found: Vec<&&str> = code.iter().filter(|l| l.contains(call)).collect();
+                assert!(found.is_empty(), "{file} loads, changes and saves the config ({found:?}): use config::update or commands::change_config");
+            }
+        }
+    }
+
+    /// A crash mid-write leaves its temp file behind: the start-up sweep
+    /// takes Yap's own (`<file>.<pid>-<n>.tmp`, and the `<store>.tmp` of
+    /// before 2026-10-23) once they're stale, and nothing else.
+    #[test]
+    fn the_start_up_sweep_takes_only_yaps_own_stale_temp_files() {
+        let dir = scratch("sweep");
+        let an_hour_ago = std::time::SystemTime::now() - Duration::from_secs(3600);
+        let make = |name: &str, stale: bool| {
+            let p = dir.join(name);
+            std::fs::write(&p, "{").unwrap();
+            if stale {
+                std::fs::File::options().write(true).open(&p).unwrap().set_modified(an_hour_ago).unwrap();
+            }
+        };
+        // A crash's leftovers.
+        for name in ["notes.json.4321-7.tmp", "config.json.12-0.tmp", "notes.tmp", "config.tmp"] {
+            make(name, true);
+        }
+        // Yap's, but being written now (another Yap shares the folder).
+        make("history.json.999-3.tmp", false);
+        // Not Yap's names, or not files.
+        let theirs = [
+            "notes.json",
+            "config.corrupt-1700000000",
+            "report.tmp",
+            "notes.json.tmp",
+            "photo.1-2.png",
+            "notes.json.abc-1.tmp",
+            "x.12-.tmp",
+            "a.b-c.tmp",
+            ".tmp",
+        ];
+        for name in theirs {
+            make(name, true);
+        }
+        std::fs::create_dir(dir.join("cache.1-2.tmp")).unwrap();
+        assert_eq!(sweep_temps_in(&dir, Duration::from_secs(600)), 4);
+        let mut left: Vec<String> = std::fs::read_dir(&dir).unwrap().flatten().map(|e| e.file_name().to_string_lossy().into_owned()).collect();
+        left.sort();
+        let mut want: Vec<String> = theirs.iter().map(|s| s.to_string()).chain(["history.json.999-3.tmp".into(), "cache.1-2.tmp".into()]).collect();
+        want.sort();
+        assert_eq!(left, want);
+        // A folder that isn't there: nothing to do.
+        assert_eq!(sweep_temps_in(&dir.join("missing"), Duration::from_secs(600)), 0);
         let _ = std::fs::remove_dir_all(&dir);
     }
 

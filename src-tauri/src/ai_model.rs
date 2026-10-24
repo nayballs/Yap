@@ -27,12 +27,11 @@
 use std::collections::BTreeMap;
 
 use serde::Serialize;
-use tauri::{AppHandle, Emitter, State};
+use tauri::{AppHandle, Emitter};
 
 use crate::chats::ChatModel;
 use crate::config::YapConfig;
 use crate::local_llm::PROVIDER_ONDEVICE;
-use crate::AppState;
 
 /// Cloud providers that need a key (and share one key across every scope).
 pub const KEYED_PROVIDERS: [&str; 5] = ["groq", "anthropic", "openai", "gemini", "openrouter"];
@@ -570,21 +569,22 @@ pub fn ai_model_status(scope: Option<String>) -> Status {
 #[tauri::command]
 pub fn chat_set_model(
     app: AppHandle,
-    state: State<'_, AppState>,
     provider: String,
     model: String,
     base_url: Option<String>,
     file: Option<String>,
 ) -> Result<Status, String> {
-    let mut cfg = crate::config::load();
     let local_file = if provider == PROVIDER_ONDEVICE { file } else { None };
-    if let Some(f) = &local_file {
-        set_local_model(&mut cfg, f, &crate::local_llm::list_models())?;
-    }
-    let on_device = OnDevice::here(&cfg);
-    set_chat_model(&mut cfg, &provider, &model, base_url.as_deref(), &on_device)?;
+    let on_disk = local_file.as_ref().map(|_| crate::local_llm::list_models());
+    // In one step (never over a change saved meanwhile); refused: nothing saved.
+    let cfg = crate::commands::change_config(&app, |cfg| {
+        if let (Some(f), Some(on_disk)) = (&local_file, &on_disk) {
+            set_local_model(cfg, f, on_disk)?;
+        }
+        let on_device = OnDevice::here(cfg);
+        set_chat_model(cfg, &provider, &model, base_url.as_deref(), &on_device)
+    })?;
     let scope = cfg.llm_scopes.get("chat").cloned();
-    crate::commands::save_config(app.clone(), state, cfg.clone())?;
     let mut changed = serde_json::json!({ "scope": scope });
     if local_file.is_some() {
         changed["ppLocalModel"] = serde_json::json!(cfg.pp_local_model);
@@ -619,15 +619,8 @@ pub fn chat_set_model(
 /// itself (`yap-provider-key-saved`, a window event), so the key isn't
 /// broadcast to every window; the status that comes back has it masked.
 #[tauri::command]
-pub fn chat_provider_key(
-    app: AppHandle,
-    state: State<'_, AppState>,
-    provider: String,
-    key: String,
-) -> Result<Status, String> {
-    let mut cfg = crate::config::load();
-    set_provider_key(&mut cfg, &provider, &key)?;
-    crate::commands::save_config(app, state, cfg.clone())?;
+pub fn chat_provider_key(app: AppHandle, provider: String, key: String) -> Result<Status, String> {
+    let cfg = crate::commands::change_config(&app, |cfg| set_provider_key(cfg, &provider, &key))?;
     Ok(status(&cfg, Scope::Chat, &OnDevice::here(&cfg)))
 }
 

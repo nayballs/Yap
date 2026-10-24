@@ -228,6 +228,7 @@ blocks. The full order and its rules: [dictation.md](./docs/architecture/dictati
 - `portable.rs` — portable mode (a `portable` marker → `<exe>/Data`).
 - `commands.rs` — the Tauri commands; logging is `lib.rs init_logging` (app-shell.md).
 - `config.rs` — `YapConfig`, load/save (one at a time; `update` in one step; an unreadable file set aside, the person told), migrations, dictionary helpers (config-and-data.md).
+- `saving.rs` — every JSON store's writes: a failed one keeps the data in memory, retried with the next save, said once ("Couldn't save your note: the disk is full." as a command's error with Try again, else one notice) (config-and-data.md).
 - `e2e.rs` / `realtest.rs` — test mode, and robot mode's real pastes into the test's own windows.
 - `log_privacy.rs` — a test: no user content in the log at `info` and above (app-shell.md, Logging).
 
@@ -237,8 +238,8 @@ blocks. The full order and its rules: [dictation.md](./docs/architecture/dictati
 - Theme — `--yap-*` / `--yap-paper-*` tokens in `src/app.css`, warm light and a warm dark (`[data-yap-theme='dark']`, from the bar's dark scheme; never hard-code a colour), Figtree + EB Garamond; mark `src/assets/yap-logo.svg` ([frontend.md](./docs/architecture/frontend.md#the-dark-theme-2026-10-22)).
 - `lib/appearance.js` — General → Appearance in every window: Theme (System / Light / Dark → `data-yap-theme`, System follows Windows live; the bar's Match app → `data-bar-theme`; `index.html`'s head script puts it on before the first paint), reading font/size tokens (`--yap-font-reading`, `--yap-reading-scale`) for chats/notes/notepad only, and reduced Motion.
 - `lib/ControlPanel.svelte` — the main window (label `settings`): sidebar, Settings modal, title bar.
-- `ui/toast.svelte.js` + `ui/noticePolicy.js` — app-wide toasts running the page's notice policy.
-- `HomeView` / `InsightsView` / `UploadView` — dictation feed (a dictation's "AI edited · N changes" word diff, `lib/wordDiff.js`, and Paste what I said), stats, audio-file transcription; `lib/appNames.js` (apps by their names), `lib/aiErrors.js` (AI failures in plain words), `lib/cleanupOffer.js` (the one tip offering AI cleanup).
+- `ui/toast.svelte.js` + `ui/noticePolicy.js` — app-wide toasts running the page's notice policy; `lib/saveErrors.js` — a command's failed save shown with Try again.
+- `HomeView` / `InsightsView` / `UploadView` — dictation feed (a dictation's "AI edited · N changes" word diff, `lib/wordDiff.js`, and Paste what I said), stats, audio-file transcription (its job in `lib/upload.svelte.js`, kept when you leave the view); `lib/appNames.js` (apps by their names), `lib/aiErrors.js` (AI failures in plain words), `lib/cleanupOffer.js` (the one tip offering AI cleanup).
 - `App.svelte` — one chunk per window: each loads only its own view (the Yap bar ~150 KB, not the whole app).
 - `DictionaryView.svelte` — corrections and snippets ([dictionary.md](./docs/architecture/dictionary.md)).
 - `NotesView.svelte` — the AI Notepad ([notes.md](./docs/architecture/notes.md)); `lib/noteEdits.js` — fixing a line, the summary, ticking tasks (shared with the notepad); `TasksView.svelte` — sidebar Tasks across meetings.
@@ -252,7 +253,7 @@ blocks. The full order and its rules: [dictation.md](./docs/architecture/dictati
 - `Settings.svelte` + `settings/` — Settings, always mounted in the modal: the nav by scope with search (`settingsIndex.js`; old links land via `nav.js` aliases), General / Dictation / Shortcuts / Meetings / Privacy & data / About as page components, one row style in `lib/ui/` ([frontend-settings.md](./docs/architecture/frontend-settings.md)); `AboutYouSettings.svelte` General → Language and region + About you, `RegionSpelling.svelte` Dictation Cleanup's spelling switch, `settings/CleanupStyles.svelte` + `lib/cleanupStyles.js` its Styles by app (tones, examples, apps), `TransformsSettings.svelte` Commands → Transforms.
 - `MemorySection.svelte` + `memory.svelte.js` — Settings → Assistant → Memory and the "Yap remembered…" toast ([memory.md](./docs/architecture/memory.md)).
 - `AccountSection.svelte` — Settings → Account ([accounts.md](./docs/architecture/accounts.md)).
-- `ModelManager` / `ModelRow`, `Onboarding`, `lib/ui/` — speech models, first run, primitives, right-click menus.
+- `ModelManager` / `ModelRow` (downloads in `modelStore.svelte.js`, kept when you leave the page), `Onboarding`, `lib/ui/` — speech models, first run, primitives, right-click menus.
 - Window config (`tauri.conf.json`) — [app-shell.md](./docs/architecture/app-shell.md#window-config-src-tauritauriconfjson).
 
 ## Gotchas that bite (details in the linked docs)
@@ -386,7 +387,10 @@ Everything lives in `%APPDATA%/yap/` (portable: `<exe>/Data/`): `config.json`,
 FLAC, 14 days), `icons/`, `logs/`. Every JSON
 store writes atomically and quarantines a corrupt file instead of crashing —
 config.json too: set aside, never saved over, the person told; its saves one at a time
-(`config::update`; [config-and-data.md](./docs/architecture/config-and-data.md)). Secrets
+(`config::update`; [config-and-data.md](./docs/architecture/config-and-data.md)). A write
+that fails (a full disk, a file another program holds) keeps the data in memory, is
+retried with the next save and is said once, with Try again (`saving.rs`); temp files a
+crash mid-write left are swept at start-up (Yap's own names only). Secrets
 never go in files: the account session and calendar tokens live in Windows Credential
 Manager. The local API's discovery file is `~/.yap/cli-bridge.json`.
 

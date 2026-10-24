@@ -175,10 +175,17 @@
   its thread); `update(|c| …)` loads, changes and saves under it in one
   step (saving only if anything changed), so a change another thread saved
   meanwhile isn't lost — the tray's model switch, the bar's "off",
-  `download_model_size`/`set_active_model`, `set_autostart`, learned words
-  and the notepad's consent message use it (call detection's two saves in
-  `meeting_detect.rs`, and the `save_config` callers in `ai_model.rs`,
-  `tts.rs`, `read_aloud.rs`, `local_llm.rs`, still load → change → save).
+  `download_model_size`/`set_active_model`, `set_autostart`, learned words,
+  the notepad's consent message and call detection's "Stop asking" /
+  "Don't ask for …" (`meeting_detect.rs`, outside its state lock) use it.
+  `try_update(|c| … -> Result)` is the same for a change that can be
+  refused (nothing saved, not half of it), and `commands::change_config`
+  runs it and then applies the result as a Settings save does
+  (`apply_config`: hotkeys, the pipeline, the bar…): the Chat picker's model
+  and key (`ai_model.rs`), the voice's volume and Speak replies (`tts.rs`),
+  Read aloud's speed (`read_aloud.rs`) and the on-device context
+  (`local_llm.rs`), which until 2026-10-24 loaded, changed and saved on
+  their own (a lint-style test keeps them so).
   Every save then emits **`yap-config-saved`** to every window (`init`
   registers the app; Settings' copy adopts what changed,
   [frontend-settings.md](./frontend-settings.md); the theme follows). A unit
@@ -297,7 +304,40 @@
   (`<name>.<pid>-<n>.tmp`, renamed over the file, tried again for ~100 ms
   while another program holds it): until 2026-10-23 every write of a file
   shared `<name>.tmp`, so two at once could rename a half-written file into
-  place. The app icons' cache writes the same way.
+  place. The app icons' cache writes the same way. A crash mid-write leaves
+  its temp file behind, which nothing replaces any more, so **start-up
+  sweeps them** (`config::sweep_temp_files`, on a thread of its own,
+  2026-10-24): in the data folder, `icons/`, `llm/` and each meeting's
+  `meeting-audio/` folder, only Yap's own names — `<file>.<pid>-<n>.tmp`,
+  and a store's `<stem>.tmp` of before 2026-10-23 (`OLD_TEMP_STEMS`) — and
+  only files over 10 minutes old (a dev build beside the installed one
+  writes the same folder); anything else is never touched.
+- **A write that fails is said, and nothing is lost** (`saving.rs`,
+  2026-10-24; until then it was a warning in the log while the page said
+  it saved). Every store writes through its `Saver` (`notes::SAVER`,
+  `history::SAVER`…): a failed write — the disk full, another program
+  holding the file during the rename, a read-only file — leaves the store's
+  data in memory, marked unsaved, and its next save writes all of it (each
+  store writes its whole state every time); quitting tries once more
+  (`saving::flush`). The person is told once, in plain words: "Couldn't save
+  your note: the disk is full." (`SaveError`; `Reason` tells a full disk, a
+  file another program holds — Windows reports that as access denied on a
+  file that isn't read-only —, a read-only file and a folder Yap can't write
+  apart). A command that changed the store (a note's edit, a folder, an
+  action, a chat's rename or delete, memory's edits, Clear history, a
+  history entry's delete) returns it as its error (each store's `saved()`),
+  and the page shows it with **Try again** (`saves_retry` → every unsaved
+  store written again; `src/lib/saveErrors.js`, frontend.md); a save that
+  failed by itself (history after a dictation, memory learning, calendar
+  sync, usage and dictionary counts, call-prompt counts, word suggestions)
+  is said by one alert through the notice policy (kind `saveFailed`,
+  [notices.md](./notices.md)), 1.5 s later unless a command said it, naming
+  the first store and whether others failed too, with Try again — and not
+  again for that store until a save of it worked. The local API and the
+  chat's note tools answer an AI app or model with the failure too, so
+  neither says it saved. Caches (`model_catalog.json`, `stt_speed.json`,
+  `updates.json`, `hints.json`, `quieted_apps.json`) are only logged. The
+  log names the store and the error's kind, never what it holds.
 - App icons: `%APPDATA%/yap/icons/` — `<app>.png` per installed call app and
   `sources.json` (what each was made from); a cache, rebuilt whenever it's
   missing, stale or unreadable (`app_icons.rs`).

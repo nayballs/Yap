@@ -22,6 +22,7 @@
   import ConnectionsView from './ConnectionsView.svelte';
   import { askConfirm } from '../ui/contextMenu.svelte.js';
   import { toast } from '../ui/toast.svelte.js';
+  import { showSaveError } from '../saveErrors.js';
   import { account } from '../account.svelte.js';
 
   let { cfg, goto = null, connections = $bindable(false) } = $props();
@@ -228,11 +229,15 @@
       run: async () => {
         try {
           await invoke('clear_history');
-          await loadCount();
         } catch (err) {
-          toast({ title: "Couldn't clear the history", description: String(err), variant: 'destructive' });
-          return false;
+          // Cleared here, but history.json still holds it until Yap can
+          // save: said, with Try again.
+          if (!showSaveError(err)) {
+            toast({ title: "Couldn't clear the history", description: String(err), variant: 'destructive' });
+            return false;
+          }
         }
+        await loadCount();
       },
     });
   }

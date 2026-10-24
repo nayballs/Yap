@@ -162,17 +162,24 @@ fn load_from_disk() -> Store {
     }
 }
 
+/// chats.json's saves (`saving.rs`): a failed one keeps the chats in
+/// memory, is tried again with the next save, and is said once.
+pub static SAVER: crate::saving::Saver = crate::saving::Saver::new("chats", "your chat", save_now);
+
+/// `Ok` when every chat is on disk; else why not (the caller says it).
+pub fn saved() -> Result<(), crate::saving::SaveError> {
+    SAVER.check()
+}
+
+/// Write the whole store again (Try again).
+fn save_now() -> Result<(), crate::saving::SaveError> {
+    with_store(|s| save_to_disk(s));
+    saved()
+}
+
 #[cfg(not(test))]
 fn save_to_disk(store: &Store) {
-    match serde_json::to_string(store) {
-        Ok(json) => {
-            let _ = std::fs::create_dir_all(crate::config::data_dir());
-            if let Err(e) = crate::config::atomic_write(&chats_path(), &json) {
-                tracing::warn!("Failed to persist chats: {}", e);
-            }
-        }
-        Err(e) => tracing::warn!("Failed to serialize chats: {}", e),
-    }
+    let _ = SAVER.write_json(&chats_path(), store, false);
 }
 
 #[cfg(not(test))]
