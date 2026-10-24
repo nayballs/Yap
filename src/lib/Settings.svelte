@@ -55,6 +55,7 @@
   import { hotkeyCapture } from './settings/hotkeys.svelte.js';
   import { merge3, same, copy, fill } from './settings/configMerge.js';
   import SettingsHotkey from './settings/SettingsHotkey.svelte';
+  import TransformsSettings from './settings/TransformsSettings.svelte';
   import SearchResults from './settings/SearchResults.svelte';
   import GeneralPage from './settings/GeneralPage.svelte';
   import DictationPage from './settings/DictationPage.svelte';
@@ -1954,10 +1955,18 @@
               />
             </Row>
           </Group>
+          <!-- Saved transforms (transforms.rs): one-key rewrites, no speaking. -->
+          <Group
+            title="Transforms"
+            desc="Rewrite the selected text in one press, without saying anything. With nothing selected, your last dictation, by the rules above."
+            id="settings-transforms"
+          >
+            <TransformsSettings {cfg} />
+          </Group>
           <Group title="Model and prompt" id="settings-commands-model">
             <LinkRow
               label="Model and prompt"
-              desc="In Language Models. With “Answer to its name” off, the rewrite shortcut uses the cleanup model"
+              desc="In Language Models. With “Answer to its name” off, the rewrite shortcut and transforms use the cleanup model"
               value={scopeModelLabel('voiceAgent')}
               setting="commands-model"
               onclick={() => openScope('voiceAgent')}

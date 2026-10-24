@@ -40,6 +40,7 @@ builds and runs out of the checkout: `YAP_EVAL_TARGET_DIR=<builds>/evals`, `--ou
 | `--cleanup-layout combined\|system` | The same cleanup prompt laid out another way (below). |
 | `--cleanup-quick`, `--cleanup-limit <n>` | Only the back-to-back rounds (no first call, Chat turns or spelling), of the first n dictations: a cloud model's tokens. |
 | `--brief` | Write the pre-meeting brief of each meeting in `evals/briefs/*.json` instead of the scenarios (below; `--only` picks them, `--repeat` repeats them). |
+| `--transforms` | Run the saved transforms' cases in `evals/transforms/cases.json` instead of the scenarios ("Saved transforms" below; `--only` picks them by name or transform, `--repeat` repeats them). |
 | `--mtp on\|off`, `--no-warm-up` | A local model's MTP drafting (default: as Yap's sidecar decides on this PC, never with `--ngl 0`) and its warm-up request. |
 | `--clock-step <min>` | Each turn of a scenario, the clock Chat tells the model moves on this much (a real chat's turns are minutes apart). |
 | `--bench stream\|layout\|loop\|embed`, `--bench-rounds <n>` | Serving benches instead of the scenarios (below; `serving.md`). |
@@ -165,6 +166,31 @@ never-say words). `brief.md` in the run folder (a table per model, then each
 brief as shown and the reply as written), the numbers in `summary.json`
 (`models[].brief`). `eval::brief`'s unit test checks every scenario's plain
 brief (no model) already passes.
+
+### Saved transforms (`--transforms`)
+
+```bash
+yap.exe eval --transforms --model local:<4b.gguf> --ngl 999 --model groq:openai/gpt-oss-20b --keys-from-yap
+```
+
+Each case in `evals/transforms/cases.json` is a transform (a built-in's
+kind, its `language` for Translate, or `custom` with an `instruction`) and
+a text as a person would select it, with what the result must be
+(`expect`): `keeps` (names, numbers, dates, links, emails exactly as
+written), `not_contains` (an answer to the question it was to rewrite, a
+reply, a poem or code it was only to ask for, a preamble; whole words,
+case-insensitive), `contains_any` (the target language's words, a
+prompt's "write"), `max_ratio` / `min_ratio` (its words against the
+text's: Shorter at most 0.75–0.8), `same` (Fix grammar only on correct
+text, Translate on text already in the language: unchanged). The run goes
+through the app's own call (`llm::transform`: the guardrails and the
+built-in's instruction as the app sends them) and `transforms::clean_output`;
+a result Yap had to strip a preamble from is counted (`stripped`). About
+650 tokens a case: 21 cases fit in a free Groq day many times over.
+`transforms.md` in the run folder (a table per model, then each case's text
+and result), the numbers in `summary.json` (`models[].transforms`).
+`eval::transforms`' unit tests check the file reads and every transform in
+it is one Yap has (≥ 3 cases per built-in), and the judge.
 
 ### Serving benches (`--bench`)
 
@@ -1470,3 +1496,46 @@ weather in Kellbrook. Kellbrook is a fictional town in Baldur's Gate…") was cu
 tokens, Yap searched, the answer's first words came at 1.3 s. A capped call cut mid-way
 (tested at 20 tokens) ends `finish_reason: "length"` with its arguments half written: a
 rejected call, so Yap searches.
+
+## Saved transforms (24 Oct 2026)
+
+**The question**: do Yap's five built-in transforms (`transforms.rs`: Polish, Shorter, Fix
+grammar only, Translate to <language>, Make it a prompt) do what they say on both kinds of
+model a transform runs on — Yap's on-device 4B and a cloud model — and only that: keep names
+and numbers, never answer the text, Shorter shorter, Fix grammar only leaving correct text
+alone? `--transforms` over the 21 cases in `evals/transforms/cases.json` (4 Polish, 3 Shorter,
+4 Fix grammar only, 5 Translate — French, Spanish, German, Japanese and a text already in the
+language —, 4 Make it a prompt, 1 custom).
+
+**The first prompts** (Qwen3.5-4B Q4_K_M on the graphics card, `--ngl 999`): 18/21. Polish kept
+"So, basically, …" (the instruction said "filler words" without naming any); Translate wrote
+"3 400 €" for "€3,400" (French's own format: the value kept, so the check now takes either);
+and **Translate to Japanese came back in English, unchanged**, every time on a question and
+now and then on a statement. Variants of Translate's instruction, ×4 each on the 4B: the bare
+"Translate the text into Japanese." and three rewordings passed 4/4; the shipped wording failed
+4/4 — its "If it's already in Japanese, return it unchanged" first, and then, with that gone,
+the sentence order still mattered. The wording now: "Translate the text into {language}, all
+of it, keeping its meaning, tone and layout. Names …, numbers, amounts, times, email
+addresses and links stay as they are; days and months are written in {language}. A question
+or a request is translated, never answered. The result is in {language}." (Groq kept "14
+March" in French until the days-and-months clause.) Polish names its fillers (um, uh, like,
+basically, you know, I mean); Make it a prompt fixes the text's spelling and grammar as it
+rewrites (Groq had wrapped "whats the capital of australia…" as it was).
+
+**Now** (the prompts in `transforms::builtin_instruction`, `llm::TRANSFORM_BASE_PROMPT`):
+
+| Model | Passed | Median | Notes |
+|---|---|---|---|
+| Qwen3.5-4B, on this PC (×3) | **62/63** | 0.2–0.3 s | the one miss: Japanese wrote "Maya@example.com" (a capital M); 0 preambles to strip |
+| Groq `openai/gpt-oss-20b` | **21/21** | 0.7–0.9 s | Polish, Shorter, Fix grammar only and four Translate cases on the wording before the days-and-months clause; Translate-French, the prompts and the custom one on today's; ~18.5k tokens in all (the free plan's 8k a minute, shared with other runs that evening, refused some calls: run again) |
+
+What they wrote, on the 4B: Polish "I wanted to say that the meeting with Priya has been moved
+to Thursday at 3pm, and we need the slides done by Wednesday."; Shorter's polite request
+"Hey Maya, could you send me the Q3 Northwind numbers before Friday for the Monday board
+pack? Thanks!"; Fix grammar only left "We need to organise the colour samples before the
+programme review on Friday." alone; Translate kept "Mill Lane", "10:30" and the link;
+Make it a prompt turned "write me a short poem about my cat biscuit…" into "Write a short
+poem about my cat Biscuit who loves sleeping in the laundry basket. Make the poem funny and
+approximately 8 lines long." — no poem, no answer, on either model. A model's preamble
+("Here is the polished text:") would be stripped (`transforms::clean_output`); neither wrote
+one.

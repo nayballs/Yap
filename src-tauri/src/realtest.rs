@@ -662,6 +662,22 @@ pub mod commands {
         robot.rewrite_text(text).await
     }
 
+    /// Saved transform `id` as its shortcut runs it, in the window in front
+    /// (`hwnd`, when given, must be it): its selection read (UI Automation,
+    /// an edit control's own; Ctrl+C never in test mode) — none, right after
+    /// a dictation there, and that dictation is transformed in place — then
+    /// the AI and the paste (`transforms.rs`). Returns what it did.
+    #[tauri::command]
+    pub async fn realtest_transform(app: tauri::AppHandle, id: String, hwnd: Option<i64>) -> Result<crate::transforms::Transformed, String> {
+        only_robot()?;
+        in_front(hwnd)?;
+        tauri::async_runtime::spawn_blocking(move || {
+            crate::transforms::run_by_id(&app, &id, crate::transforms::Origin::Shortcut, None)
+        })
+        .await
+        .map_err(|e| format!("the transform task failed: {e}"))?
+    }
+
     /// A dictation from a WAV file (`path`, any format Upload reads): played
     /// into the dictation mic in real time through the real start/stop path
     /// (the mic's own audio is left out meanwhile), so the STT, the live

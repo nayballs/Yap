@@ -13,7 +13,7 @@ export const dictation = $state({
   // idle | recording | processing | processing-slow | needs-model | error |
   // cancelled ("Dictation cancelled · Undo" while the audio is kept) |
   // cleaned ("Cleaned up · Use what I said" a few seconds after a dictation
-  // AI cleanup changed: as_said.rs)
+  // AI cleanup changed: as_said.rs; or a transform's "Polish ✓ · Undo")
   state: 'idle',
   errorMsg: 'Transcription failed',
   history: [],
@@ -54,6 +54,11 @@ export const dictation = $state({
   // capsule's run-down line each time.
   pauseMs: 0,
   pauseKey: 0,
+  // A saved transform (transforms.rs, `yap-transform`): its name, and
+  // 'running' ("Polish…" while the AI works), 'done' ("Polish ✓ · Undo" for
+  // `offerMs`) or 'unchanged' ("No changes needed"); '' for a dictation.
+  transform: '',
+  transformPhase: '',
 });
 
 // ---- Live partial transcript (streaming preview) ----
@@ -123,6 +128,15 @@ export function initDictation() {
       dictation.pauseMs = 0;
     }
     if (state !== 'processing' && state !== 'processing-slow') dictation.modelLoading = false;
+    // A transform's name goes with its own states only (it says them just
+    // before: "running" → processing, "done"/"unchanged" → cleaned).
+    const transformState =
+      (state === 'processing' && dictation.transformPhase === 'running') ||
+      (state === 'cleaned' && (dictation.transformPhase === 'done' || dictation.transformPhase === 'unchanged'));
+    if (!transformState) {
+      dictation.transform = '';
+      dictation.transformPhase = '';
+    }
     // Keep the partial visible through the brief "processing" state, then
     // drop it once we're idle/needs-model/error so it never lingers.
     if (state === 'idle' || state === 'needs-model' || state === 'error' || state === 'recording' || state === 'cancelled' || state === 'cleaned') {
@@ -143,6 +157,11 @@ export function initDictation() {
     } else {
       dictation.pauseMs = 0;
     }
+  });
+  listen('yap-transform', (e) => {
+    dictation.transform = e.payload?.name || '';
+    dictation.transformPhase = e.payload?.phase || '';
+    if (e.payload?.offerMs > 0) dictation.offerMs = e.payload.offerMs;
   });
   listen('yap-dictation-cancelled', (e) => {
     if (e.payload?.undoMs > 0) dictation.undoMs = e.payload.undoMs;

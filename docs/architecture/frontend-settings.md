@@ -145,7 +145,13 @@ search being typed is cleared first); the ✕ is 32 px in `--yap-fg-62`.
   (`hotkeyCapture.on`) its live binding is paused and the in-page fallback
   stands down. The fallback catches the meeting, assistant, read-aloud and
   dictation keys, in that order (read aloud: the page's own selection,
-  `speech.svelte.js` `readPageSelection`).
+  `speech.svelte.js` `readPageSelection`). **The saved transforms'
+  shortcuts** (Commands → Transforms) are checked against the seven and
+  each other (`validateTransformHotkey`: "Already used by the Polish
+  transform"), and the seven against them (`validateHotkey` reads
+  `cfg.transforms`); one being picked pauses its slot
+  (`onTransformCapturing` → `configure_transform_hotkey`). No in-page
+  fallback for them: a transform works on another app's text.
 
 ## The pages
 
@@ -217,7 +223,9 @@ search being typed is cleared first); the ✕ is 32 px in `--yap-fg-62`.
   by default; `as_said.rs`), Meeting notes, **Snip to Chat** (`snipHotkey`,
   Win+Alt+S by default, its hint naming ✂, the tray, Esc and what Windows never
   lets an app capture; `snip.rs`, [snip.md](./snip.md)) — each in keycaps with Change, a
-  clash said under the one being set. Their own pages show the same control
+  clash said under the one being set — and a **Transforms** link row
+  (`shortcut-transforms`: "None set", the one transform's name, or "N
+  shortcuts") to Commands → Transforms, where their shortcuts are set. Their own pages show the same control
   (Read aloud: Voice Assistant → **Read aloud**, `#settings-read-aloud`). (No
   in-page fallback for Use what I said: its paste is never in a Yap window.)
 - **Meetings** (`settings/MeetingsPage.svelte`, Wispr's Notetaker page and
@@ -264,8 +272,24 @@ search being typed is cleared first); the ✕ is 32 px in `--yap-fg-62`.
   **"Rewrite your last dictation when nothing is selected"** ·
   "Within a minute, in the same field" (`#rewrite-last`,
   `rewriteLastDictation`, on; in the search index with its switch; the
-  rules in `as_said.rs`, [pasting.md](./pasting.md)). **Model and prompt**: a
-  link row with the model in use → Language Models → Commands.
+  rules in `as_said.rs`, [pasting.md](./pasting.md)). **Transforms**
+  (`#settings-transforms`, `settings/TransformsSettings.svelte` +
+  `settings/transforms.js`, `transforms.rs`; 2026-10-24): "Rewrite the
+  selected text in one press, without saying anything. With nothing
+  selected, your last dictation, by the rules above." A row per transform
+  (`[data-transform=<id>]`): its name ("Translate to French") and one line
+  (a built-in's own, or your instruction), Translate's **language** Select
+  under its name (`LANGUAGES`; its English name goes into the
+  instruction), the shortcut in keycaps (clearable), ↑ / ↓ (the order is
+  the tray's menu too), and for your own Edit (the row becomes a form in
+  place: Name, "What it does" ≤ 600 characters, Save; Esc cancels,
+  Ctrl+Enter saves) and Delete (Yap's confirm dialog: "Its shortcut goes
+  with it"); Yap's five keep empty places there so every shortcut lines
+  up. **Add a transform** (`[data-setting=transform-add]`) opens the same
+  form (no name: the instruction's first words); at 12 a line says that's
+  the most. **Model and prompt**: a link row with the model in use →
+  Language Models → Commands (its line: with "Answer to its name" off, the
+  rewrite shortcut and transforms use the cleanup model).
 - **Voice Assistant** (`voice`): "Ask Yap something by voice and hear the
   answer", the example note (names the shortcut once set) linking to
   Commands. **Assistant shortcut** (`#settings-assistant-shortcut`,

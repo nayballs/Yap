@@ -3,9 +3,12 @@
 // right now (Settings' in-page hotkey fallback stands down meanwhile, so
 // pressing the current hotkey to replace it doesn't start a dictation).
 // Shared by every page that shows a shortcut (Dictation, Commands, Voice
-// Assistant, Meetings) and the Shortcuts page, which shows them all.
+// Assistant, Meetings) and the Shortcuts page, which shows them all. The
+// saved transforms' shortcuts (Commands → Transforms) are checked against
+// them, and they against the transforms'.
 import { invoke } from '@tauri-apps/api/core';
 import { formatHotkeySpec, hotkeysClash } from '../hotkeys.js';
+import { transformName } from './transforms.js';
 
 export const HOTKEY_CMD = {
   hotkey: 'configure_hotkey',
@@ -42,14 +45,46 @@ export function onHotkeyCapturing(cfg, target, on) {
 }
 
 /**
- * The seven never fire on one press (`hotkeysClash`, input_hook.rs
- * `clashes`): the message for a refused spec, else null.
+ * Every shortcut but `except` (a fixed one's config key, or `transform:<id>`),
+ * as [name, spec]: the seven fixed ones, then the saved transforms'
+ * (transforms.rs; "the Polish transform").
+ */
+function otherShortcuts(cfg, except) {
+  const fixed = Object.keys(HOTKEY_NAMES)
+    .filter((k) => k !== except)
+    .map((k) => [`the ${HOTKEY_NAMES[k]}`, cfg?.[k]]);
+  const transforms = (Array.isArray(cfg?.transforms) ? cfg.transforms : [])
+    .filter((t) => `transform:${t.id}` !== except && t.hotkey)
+    .map((t) => [`the ${transformName(t)} transform`, t.hotkey]);
+  return [...fixed, ...transforms];
+}
+
+/** The message for `spec` refused because of `[name, spec]`. */
+function clashMessage([name, other], spec) {
+  return other === spec
+    ? `Already used by ${name}`
+    : `Clashes with ${name} (${formatHotkeySpec(other)}): one press would start both`;
+}
+
+/**
+ * The seven, and the saved transforms', never fire on one press
+ * (`hotkeysClash`, input_hook.rs `clashes`): the message for a refused
+ * spec, else null.
  */
 export function validateHotkey(cfg, target, spec) {
   if (!spec) return null;
-  const clash = Object.keys(HOTKEY_NAMES).find((other) => other !== target && hotkeysClash(cfg?.[other], spec));
-  if (!clash) return null;
-  return cfg[clash] === spec
-    ? `Already used by the ${HOTKEY_NAMES[clash]}`
-    : `Clashes with the ${HOTKEY_NAMES[clash]} (${formatHotkeySpec(cfg[clash])}): one press would start both`;
+  const clash = otherShortcuts(cfg, target).find(([, other]) => hotkeysClash(other, spec));
+  return clash ? clashMessage(clash, spec) : null;
+}
+
+/** A saved transform's shortcut (`id`), checked the same way. */
+export function validateTransformHotkey(cfg, id, spec) {
+  return validateHotkey(cfg, `transform:${id}`, spec);
+}
+
+/** A transform's key is being picked: its live binding paused, as for the seven. */
+export function onTransformCapturing(cfg, id, on) {
+  hotkeyCapture.on = on;
+  const t = (cfg?.transforms || []).find((x) => x.id === id);
+  invoke('configure_transform_hotkey', { id, spec: on ? '' : t?.hotkey || '' }).catch(() => {});
 }

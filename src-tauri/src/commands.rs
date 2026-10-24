@@ -1962,6 +1962,11 @@ pub fn save_config(
     crate::input_hook::configure_read_from(&cfg);
     crate::input_hook::configure_as_said_from(&cfg);
     crate::input_hook::configure_snip_from(&cfg);
+    crate::input_hook::configure_transforms_from(&cfg);
+    // The tray's Transforms menu follows the list.
+    if cfg.transforms != prev.transforms {
+        crate::tray::refresh(&app);
+    }
     // "Keep chat screenshots" shortened: the older ones go now.
     if cfg.chat_image_days != prev.chat_image_days {
         let days = cfg.chat_image_days;

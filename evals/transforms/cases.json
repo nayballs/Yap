@@ -1,0 +1,134 @@
+[
+  {
+    "name": "polish-rambling",
+    "transform": "polish",
+    "text": "so um basically i wanted to say that the meeting with priya is moved to thursday at 3pm and uh we need the slides done by wednesday",
+    "expect": { "keeps": ["Priya", "Thursday", "Wednesday", "3"], "not_contains": ["um", "uh", "basically", "here is"], "min_ratio": 0.5, "max_ratio": 1.3 }
+  },
+  {
+    "name": "polish-question-not-answered",
+    "transform": "polish",
+    "text": "can you tell me whats the best way to get from the station to harbour street, i keep getting lost",
+    "expect": { "keeps": ["?"], "not_contains": ["turn left", "turn right", "minutes", "here is"], "min_ratio": 0.6, "max_ratio": 1.4 }
+  },
+  {
+    "name": "polish-numbers-kept",
+    "transform": "polish",
+    "text": "hi sam just checking in on invoice 4471 for £1,250, it was due on the 3rd of march, can you let me know when its been paid. thanks",
+    "expect": { "keeps": ["Sam", "4471", "£1,250"], "not_contains": ["here is"], "min_ratio": 0.7, "max_ratio": 1.3 }
+  },
+  {
+    "name": "polish-request-not-carried-out",
+    "transform": "polish",
+    "text": "write a list of five ideas for the team offsite in october and send it to maya@example.com",
+    "expect": { "keeps": ["maya@example.com"], "not_contains": ["1.", "- ", "here is"], "min_ratio": 0.6, "max_ratio": 1.4 }
+  },
+  {
+    "name": "shorter-polite-request",
+    "transform": "shorter",
+    "text": "Hey Maya, I hope you're having a good week so far. I was wondering, if it's not too much trouble at all, whether you might be able to send me the Q3 numbers for the Northwind account before Friday, because I need them for the board pack that goes out on Monday. Thanks so much in advance, I really appreciate it!",
+    "expect": { "keeps": ["Maya", "Q3", "Northwind", "Friday", "Monday"], "not_contains": ["here is"], "max_ratio": 0.75, "min_ratio": 0.2 }
+  },
+  {
+    "name": "shorter-status-update",
+    "transform": "shorter",
+    "text": "Just a quick update on where things are with the move. The new office on Harbour Street is basically ready, apart from the kitchen, which the builders say will take another week or so. The internet goes live on the 12th, and the furniture arrives in two deliveries, one on the 14th and one on the 16th. We still plan to move everyone in on the 20th.",
+    "expect": { "keeps": ["Harbour Street", "12th", "14th", "16th", "20th"], "not_contains": ["here is"], "max_ratio": 0.75, "min_ratio": 0.2 }
+  },
+  {
+    "name": "shorter-question-not-answered",
+    "transform": "shorter",
+    "text": "I've been going back and forth on this for a while and I still can't decide, so I'd really like to know what you think: should we launch the new pricing in January, or wait until the spring when the redesign is finished?",
+    "expect": { "keeps": ["January", "?"], "not_contains": ["I recommend", "you should launch", "here is"], "max_ratio": 0.8, "min_ratio": 0.2 }
+  },
+  {
+    "name": "grammar-mistakes-fixed",
+    "transform": "grammar",
+    "text": "their going to the office tomorow and they has the keys for the meeting room",
+    "expect": { "keeps": ["tomorrow", "have"], "not_contains": ["here is"], "min_ratio": 0.85, "max_ratio": 1.2 }
+  },
+  {
+    "name": "grammar-correct-left-alone",
+    "transform": "grammar",
+    "text": "Thanks for the update. I'll send the revised draft to Sam on Monday.",
+    "expect": { "same": true }
+  },
+  {
+    "name": "grammar-british-spelling-kept",
+    "transform": "grammar",
+    "text": "We need to organise the colour samples before the programme review on Friday.",
+    "expect": { "same": true }
+  },
+  {
+    "name": "grammar-informal-tone-kept",
+    "transform": "grammar",
+    "text": "i'll be there at 5 i think, see you then",
+    "expect": { "keeps": ["5"], "contains_any": ["see you then"], "not_contains": ["here is", "I will be"], "min_ratio": 0.8, "max_ratio": 1.25 }
+  },
+  {
+    "name": "translate-fr-names-numbers",
+    "transform": "translate",
+    "language": "French",
+    "text": "Please tell Priya Shah that order 58213 for €2,750 ships on 14 March to Harbour Street.",
+    "expect": { "keeps": ["Priya Shah", "58213", "Harbour Street", "14"], "keeps_one_of": [["€2,750", "2 750 €", "2.750 €", "2,750 €"]], "contains_any": ["que", "la", "le", "commande"], "not_contains": ["March", "here is"], "max_ratio": 1.8 }
+  },
+  {
+    "name": "translate-es-question-not-answered",
+    "transform": "translate",
+    "language": "Spanish",
+    "text": "What time does the pharmacy on Mill Lane close on Sundays?",
+    "expect": { "keeps": ["Mill Lane", "?"], "contains_any": ["farmacia", "domingos", "qué"], "not_contains": ["cierra a las", "here is"], "max_ratio": 1.8 }
+  },
+  {
+    "name": "translate-de-link-time",
+    "transform": "translate",
+    "language": "German",
+    "text": "Hi Jonas, the meeting moved to 10:30 tomorrow. The link is https://example.com/meet/42. Thanks!",
+    "expect": { "keeps": ["Jonas", "10:30", "https://example.com/meet/42"], "contains_any": ["morgen", "besprechung", "treffen", "danke", "der", "die", "das"], "not_contains": ["here is"], "max_ratio": 1.8 }
+  },
+  {
+    "name": "translate-ja-email",
+    "transform": "translate",
+    "language": "Japanese",
+    "text": "Can you send the report to maya@example.com by Friday?",
+    "expect": { "keeps": ["maya@example.com"], "contains_any": ["金曜", "レポート", "報告書", "送"], "not_contains": ["here is"] }
+  },
+  {
+    "name": "translate-already-in-the-language",
+    "transform": "translate",
+    "language": "Spanish",
+    "text": "Nos vemos el lunes a las 9 en la oficina.",
+    "expect": { "same": true }
+  },
+  {
+    "name": "prompt-question-not-answered",
+    "transform": "prompt",
+    "text": "whats the capital of australia and why isnt it sydney",
+    "expect": { "contains_any": ["explain", "tell me", "what", "why"], "not_contains": ["Canberra", "whats", "isnt", "here is"], "min_ratio": 0.8 }
+  },
+  {
+    "name": "prompt-poem-not-written",
+    "transform": "prompt",
+    "text": "write me a short poem about my cat biscuit who loves sleeping in the laundry basket, make it funny, like 8 lines",
+    "expect": { "keeps": ["8"], "contains_any": ["poem"], "not_contains": ["purr", "snooze", "whiskers", "here is"], "min_ratio": 0.7 }
+  },
+  {
+    "name": "prompt-email-not-drafted",
+    "transform": "prompt",
+    "text": "need an email to my landlord about the boiler being broken since monday, polite but firm, ask for it to be fixed by friday",
+    "expect": { "contains_any": ["email", "write", "draft"], "not_contains": ["Dear", "Subject:", "Kind regards", "here is"], "min_ratio": 0.7 }
+  },
+  {
+    "name": "prompt-code-not-written",
+    "transform": "prompt",
+    "text": "python script that renames all the jpgs in a folder by the date they were taken",
+    "expect": { "contains_any": ["python", "script"], "not_contains": ["import ", "def ", "os.rename", "here is"], "min_ratio": 0.8 }
+  },
+  {
+    "name": "custom-friendlier",
+    "transform": "custom",
+    "instruction": "Make it warmer and friendlier, as if to a colleague.",
+    "text": "Send me the figures by 5.",
+    "expect": { "keeps": ["5"], "not_contains": ["here is"], "max_ratio": 6 }
+  }
+]

@@ -101,7 +101,8 @@ blocks. The full order and its rules: [dictation.md](./docs/architecture/dictati
 - `pipeline.rs` — the heart: buffer and pre-roll, modes, the start chime on the mic's first audio, the model loaded off the startup thread, `run_stt` → `deliver`, Undo, chat/assistant routing; the `processing` guard (`Busy`) let go however a task ends, a crash said.
 - `gesture.rs` — push-to-talk's pure state machine: hold, double-tap hands-free, lone tap.
 - `coaching.rs` — push-to-talk coaching hints (≤ 3 each; counts in `hints.json`).
-- `input_hook.rs` — low-level keyboard/mouse hooks: seven bindings (Read aloud's the fifth, Use what I said's the sixth, Snip to Chat's the seventh), combo rules, `clashes`, menu-mask key; Esc while a snip is up.
+- `input_hook.rs` — low-level keyboard/mouse hooks: seven bindings (Read aloud's the fifth, Use what I said's the sixth, Snip to Chat's the seventh) + up to 12 saved transforms' slots, combo rules, `clashes`, menu-mask key; Esc while a snip is up.
+- `transforms.rs` — saved transforms: one-key rewrites (Polish, Shorter, Fix grammar only, Translate, Make it a prompt, your own) of the selection or the last dictation, no speaking; their shortcuts, the tray's Transforms menu, the bar's Undo.
 - `partials.rs` / `agent_detect.rs` — live partials' sliding window; Commands by name (see `pipeline.rs`).
 - `mic.rs` — the dictation mic, opened on demand: held by a dictation / the mic check / "Keep the microphone ready", warm a minute after, closed at once on Bluetooth (HFP); its own thread.
 - `mic_watch.rs` — dead-mic watchdog: reopen the stream, then "No sound from <mic>".
@@ -240,7 +241,7 @@ blocks. The full order and its rules: [dictation.md](./docs/architecture/dictati
 - `ConnectCalendarDialog.svelte` — "Connect your calendar" ([calendar.md](./docs/architecture/calendar.md)).
 - `IntegrationsView.svelte` — local API and MCP cards ([integrations.md](./docs/architecture/integrations.md)).
 - `Overlay.svelte` + `bar/` — the Yap bar's page (🎤 ◉ 🔊 ✂ ^), the reading card `bar/ReadingCard.svelte` ([yap-bar.md](./docs/architecture/yap-bar.md)).
-- `Settings.svelte` + `settings/` — Settings, always mounted in the modal: the nav by scope with search (`settingsIndex.js`; old links land via `nav.js` aliases), General / Dictation / Shortcuts / Meetings / Privacy & data / About as page components, one row style in `lib/ui/` ([frontend-settings.md](./docs/architecture/frontend-settings.md)); `AboutYouSettings.svelte` General → Language and region + About you, `RegionSpelling.svelte` Dictation Cleanup's spelling switch.
+- `Settings.svelte` + `settings/` — Settings, always mounted in the modal: the nav by scope with search (`settingsIndex.js`; old links land via `nav.js` aliases), General / Dictation / Shortcuts / Meetings / Privacy & data / About as page components, one row style in `lib/ui/` ([frontend-settings.md](./docs/architecture/frontend-settings.md)); `AboutYouSettings.svelte` General → Language and region + About you, `RegionSpelling.svelte` Dictation Cleanup's spelling switch, `TransformsSettings.svelte` Commands → Transforms.
 - `MemorySection.svelte` + `memory.svelte.js` — Settings → Assistant → Memory and the "Yap remembered…" toast ([memory.md](./docs/architecture/memory.md)).
 - `AccountSection.svelte` — Settings → Account ([accounts.md](./docs/architecture/accounts.md)).
 - `ModelManager` / `ModelRow`, `Onboarding`, `lib/ui/` — speech models, first run, primitives, right-click menus.
@@ -390,7 +391,7 @@ web search and spoken replies off. Every setting, file and default: [config-and-
 
 ## Current status
 
-- **Dictation is complete and real**: local transcription (Whisper/Vulkan + ONNX/DirectML, or the processor where that's faster on the PC), push-to-talk, AI cleanup (cloud or on-device Qwen) with "Use what I said", Commands, smart pasting into terminals and chat apps, dictionary learning, Undo, a day of audio to run a dictation again.
+- **Dictation is complete and real**: local transcription (Whisper/Vulkan + ONNX/DirectML, or the processor where that's faster on the PC), push-to-talk, AI cleanup (cloud or on-device Qwen) with "Use what I said", Commands, saved transforms on one key (Polish, Translate…), smart pasting into terminals and chat apps, dictionary learning, Undo, a day of audio to run a dictation again.
 - **Meetings**: recorder (You/Them), its audio kept on disk (crash recovery, Transcribe again, ▶ a line), rolling digests + action plan, the notepad, call detection, guard rails, the calendar, beta speaker separation.
 - **AI**: Chat with note tools, the Voice Assistant, spoken replies (Kokoro, or ElevenLabs on your key), Read aloud anywhere (karaoke card on the bar), web search, opening apps, memory (learned from chats, kept on this PC, names fed to dictation), Snip to Chat (a screenshot of any screen into Chat, HDR right; the overlay up ~50–60 ms after Win+Alt+S).
 - **Around it**: MCP server + local API, optional accounts (live at `auth.contextmirror.com`), installer + auto-updater on stable and nightly.

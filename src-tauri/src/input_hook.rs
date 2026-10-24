@@ -1,8 +1,10 @@
 //! Unified input hook for the dictation, edit (Commands' rewrite), meeting,
 //! Voice Assistant, Read aloud, "Use what I said" and Snip to Chat key
-//! bindings. The snip shortcut (Win+Alt+S by default) only acts on its
-//! press (`snip.rs`); while a snip's overlay is up, Esc cancels it here too
-//! and goes no further ([`snip_escape`]).
+//! bindings, and up to `transforms::MAX` **saved transforms**' shortcuts
+//! (a slot each, [`configure_transforms_from`]; only their press, as
+//! `transform-key-pressed` with the slot). The snip shortcut (Win+Alt+S by
+//! default) only acts on its press (`snip.rs`); while a snip's overlay is
+//! up, Esc cancels it here too and goes no further ([`snip_escape`]).
 //!
 //! Installs both WH_KEYBOARD_LL and WH_MOUSE_LL hooks to capture:
 //! - Keyboard keys (including those sent by mouse side buttons via driver software)
@@ -117,6 +119,29 @@ static AS_SAID_BINDING: KeyBinding = KeyBinding::new();
 /// Snip to Chat (`snip.rs`): drag a box over any screen. Win+Alt+S by
 /// default; its press only.
 static SNIP_BINDING: KeyBinding = KeyBinding::new();
+/// Saved transforms' shortcuts (`transforms.rs`): a slot each, in the
+/// list's order (`transforms::assign`); only the press is used. Beside the
+/// seven fixed bindings, always giving way to them.
+static TRANSFORM_BINDINGS: [KeyBinding; crate::transforms::MAX] = [const { KeyBinding::new() }; crate::transforms::MAX];
+/// Which transform each slot runs (its id). Read by the forwarder thread,
+/// never the hook callback.
+static TRANSFORM_IDS: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
+/// The slots' events (pressed, released). The forwarder turns a press into
+/// `transform-key-pressed` with its slot; releases go nowhere.
+const TRANSFORM_EVENTS: [(&str, &str); crate::transforms::MAX] = [
+    ("transform-key-0", "transform-key-0-up"),
+    ("transform-key-1", "transform-key-1-up"),
+    ("transform-key-2", "transform-key-2-up"),
+    ("transform-key-3", "transform-key-3-up"),
+    ("transform-key-4", "transform-key-4-up"),
+    ("transform-key-5", "transform-key-5-up"),
+    ("transform-key-6", "transform-key-6-up"),
+    ("transform-key-7", "transform-key-7-up"),
+    ("transform-key-8", "transform-key-8-up"),
+    ("transform-key-9", "transform-key-9-up"),
+    ("transform-key-10", "transform-key-10-up"),
+    ("transform-key-11", "transform-key-11-up"),
+];
 /// A snip's overlay is up: Esc cancels it here too, in case Windows didn't
 /// let the overlay take the focus (`snip::cancel`).
 static SNIP_ESC: AtomicBool = AtomicBool::new(false);
@@ -319,6 +344,77 @@ pub fn configure_snip_from(cfg: &crate::config::YapConfig) {
 /// While a snip's overlay is up, Esc goes to it (`snip.rs`).
 pub fn snip_escape(on: bool) {
     SNIP_ESC.store(on, Ordering::SeqCst);
+}
+
+fn transform_ids() -> std::sync::MutexGuard<'static, Vec<String>> {
+    TRANSFORM_IDS.lock().unwrap_or_else(|p| p.into_inner())
+}
+
+/// The saved transforms' shortcuts from config (`transforms::assign`): a
+/// slot for each transform with a key, in list order; one whose key would
+/// fire with one of the seven fixed shortcuts, or an earlier transform's,
+/// is left unbound and the log says why (Settings never saves one).
+pub fn configure_transforms_from(cfg: &crate::config::YapConfig) {
+    let list = crate::transforms::list(cfg);
+    let fixed = crate::transforms::fixed_shortcuts(cfg);
+    let fixed: Vec<(&str, &str)> = fixed.iter().map(|(name, spec)| (*name, spec.as_str())).collect();
+    let slots = crate::transforms::assign(&fixed, &list);
+    let mut ids = transform_ids();
+    ids.clear();
+    let mut bound = 0usize;
+    for (i, binding) in TRANSFORM_BINDINGS.iter().enumerate() {
+        let Some(slot) = slots.get(i) else {
+            binding.configure(KEY_TYPE_NONE, 0, 0);
+            continue;
+        };
+        if let Some(clash) = &slot.clash {
+            tracing::warn!(transform = %slot.id, "A transform's shortcut clashes with {clash}: left unbound");
+        }
+        let (kind, code, mods) = parse_key_spec(&slot.spec).unwrap_or_else(|e| {
+            tracing::warn!(transform = %slot.id, "A transform's shortcut can't be read: {e}");
+            (KEY_TYPE_NONE, 0, 0)
+        });
+        binding.configure(kind, code, mods);
+        bound += usize::from(kind != KEY_TYPE_NONE);
+        ids.push(slot.id.clone());
+    }
+    info!(bound, "Transform shortcuts configured");
+}
+
+/// Live-apply transform `id`'s shortcut (Settings pauses it with "" while
+/// a new key is picked): its slot, when it has one — a transform's first
+/// shortcut gets its slot at the save.
+pub fn configure_transform(id: &str, spec: &str) {
+    let Some(i) = transform_ids().iter().position(|x| x == id) else { return };
+    match parse_key_spec(spec.trim()) {
+        Ok((kind, code, mods)) => TRANSFORM_BINDINGS[i].configure(kind, code, mods),
+        Err(e) => tracing::warn!(transform = %id, "A transform's shortcut can't be read: {e}"),
+    }
+}
+
+/// The transform input-hook slot `slot` runs.
+pub fn transform_at(slot: usize) -> Option<String> {
+    transform_ids().get(slot).cloned()
+}
+
+/// The transform slots as set now: each one's transform and key, in words
+/// ("keyboard vkey 133", "none") — the e2e specs' check (debug builds).
+#[cfg(debug_assertions)]
+pub fn transform_slots() -> Vec<(String, String)> {
+    transform_ids()
+        .iter()
+        .zip(TRANSFORM_BINDINGS.iter())
+        .map(|(id, b)| {
+            let (kind, code, mods) = b.kind_code_mods();
+            (id.clone(), format_binding(kind, code, mods))
+        })
+        .collect()
+}
+
+/// A transform slot's press event → its slot.
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+fn transform_slot(event: &str) -> Option<usize> {
+    TRANSFORM_EVENTS.iter().position(|(pressed, _)| *pressed == event)
 }
 
 /// The modifier family of a virtual key (any platform; the hook's own
@@ -870,6 +966,10 @@ unsafe extern "system" fn low_level_keyboard_proc(
         ] {
             suppress |= process_keyboard_event(binding, pressed, released, vkey, is_keydown);
         }
+        // Saved transforms' shortcuts (an unbound slot is never matched).
+        for (binding, (pressed, released)) in TRANSFORM_BINDINGS.iter().zip(TRANSFORM_EVENTS) {
+            suppress |= process_keyboard_event(binding, pressed, released, vkey, is_keydown);
+        }
         if suppress {
             return 1;
         }
@@ -967,6 +1067,14 @@ unsafe extern "system" fn low_level_mouse_proc(
                 handle_binding_event(&SNIP_BINDING, "snip-key-pressed", "snip-key-released", is_press);
                 return 1;
             }
+
+            // …and the saved transforms'.
+            for (binding, (pressed, released)) in TRANSFORM_BINDINGS.iter().zip(TRANSFORM_EVENTS) {
+                if binding.matches_mouse(id) {
+                    handle_binding_event(binding, pressed, released, is_press);
+                    return 1;
+                }
+            }
         }
     }
 
@@ -998,6 +1106,17 @@ pub fn start_input_hook(app_handle: AppHandle) {
                 }
                 if event == SNIP_ESCAPE {
                     crate::snip::cancel("escape");
+                    continue;
+                }
+                // A saved transform's press: one event, with its slot.
+                if let Some(slot) = transform_slot(event) {
+                    info!(slot, "Input hook: emitting transform-key-pressed");
+                    if let Err(e) = app_handle.emit("transform-key-pressed", slot) {
+                        warn!("Input hook: failed to emit transform-key-pressed: {}", e);
+                    }
+                    continue;
+                }
+                if event.starts_with("transform-key-") {
                     continue;
                 }
                 info!("Input hook: emitting {}", event);
@@ -1231,6 +1350,53 @@ mod tests {
         assert!(!clashes("kb:alt+win+83", "kb:alt+win+77"));
         // The menu mask runs for it (Win and Alt held, S swallowed).
         assert!(needs_menu_mask(MOD_ALT | MOD_WIN, false));
+    }
+
+    /// (The one test that sets the transform slots: tests run at once.)
+    #[test]
+    fn transform_shortcuts_get_slots_in_list_order_giving_way_to_the_fixed_seven() {
+        use crate::transforms::Transform;
+        let mut cfg = crate::config::YapConfig::default();
+        let key = |id: &str, hotkey: &str| {
+            let mut t = cfg.transforms.iter().find(|t| t.id == id).cloned().unwrap();
+            t.hotkey = hotkey.into();
+            t
+        };
+        let mine = Transform { id: "t-1".into(), name: "Mine".into(), instruction: "Do it.".into(), hotkey: "mouse:5".into(), ..Default::default() };
+        let list = vec![
+            key("polish", "kb:ctrl+alt+80"),
+            key("shorter", ""),
+            // The meeting shortcut's key: left for it.
+            key("translate", "kb:win+alt+77"),
+            mine,
+        ];
+        cfg.transforms = list;
+        configure_transforms_from(&cfg);
+        assert_eq!(transform_at(0).as_deref(), Some("polish"));
+        assert_eq!(transform_at(1).as_deref(), Some("translate"));
+        assert_eq!(transform_at(2).as_deref(), Some("t-1"));
+        assert_eq!(transform_at(3), None);
+        assert_eq!(TRANSFORM_BINDINGS[0].kind_code_mods(), (KEY_TYPE_KEYBOARD, 80, MOD_CTRL | MOD_ALT));
+        assert_eq!(TRANSFORM_BINDINGS[1].kind_code_mods().0, KEY_TYPE_NONE, "clashes: unbound");
+        assert!(TRANSFORM_BINDINGS[2].matches_mouse(5));
+        // Settings pausing one while a key is picked, then putting it back.
+        configure_transform("polish", "");
+        assert_eq!(TRANSFORM_BINDINGS[0].kind_code_mods().0, KEY_TYPE_NONE);
+        configure_transform("polish", "kb:ctrl+alt+80");
+        assert_eq!(TRANSFORM_BINDINGS[0].kind_code_mods().1, 80);
+        // One with no slot yet waits for the save.
+        configure_transform("shorter", "kb:ctrl+alt+83");
+        assert_eq!(TRANSFORM_BINDINGS[3].kind_code_mods().0, KEY_TYPE_NONE);
+        // A slot's events: its press is a transform press, its release isn't.
+        assert_eq!(transform_slot("transform-key-2"), Some(2));
+        assert_eq!(transform_slot("transform-key-2-up"), None);
+        assert_eq!(transform_slot("edit-key-pressed"), None);
+        assert_eq!(TRANSFORM_EVENTS.len(), crate::transforms::MAX);
+        // Nothing listed: every slot unbound.
+        cfg.transforms.clear();
+        configure_transforms_from(&cfg);
+        assert!(TRANSFORM_BINDINGS.iter().all(|b| b.kind_code_mods().0 == KEY_TYPE_NONE));
+        assert_eq!(transform_at(0), None);
     }
 
     #[test]

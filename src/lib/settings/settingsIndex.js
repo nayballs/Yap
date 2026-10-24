@@ -59,6 +59,7 @@ export const SETTINGS_INDEX = [
   // ---- Shortcuts ----
   { page: 'shortcuts', section: 'Global shortcuts', label: 'Dictate', desc: 'Start and stop dictating where you are typing', keywords: 'shortcut shortcuts hotkey keyboard dictation key', anchor: 'shortcut-dictation' },
   { page: 'shortcuts', section: 'Global shortcuts', label: 'Rewrite selected text', desc: 'Select text, press it and say how to change it', keywords: 'shortcut shortcuts hotkey edit rewrite commands', anchor: 'shortcut-rewrite' },
+  { page: 'shortcuts', section: 'Global shortcuts', label: 'Transforms', desc: 'Polish, Shorter, Translate and your own, each on a key', keywords: 'transform transforms shortcut shortcuts hotkey polish translate', anchor: 'shortcut-transforms' },
   { page: 'shortcuts', section: 'Global shortcuts', label: 'Ask the Voice Assistant', desc: 'Ask out loud from any app', keywords: 'shortcut shortcuts hotkey assistant voice', anchor: 'shortcut-assistant' },
   { page: 'shortcuts', section: 'Global shortcuts', label: 'Read aloud', desc: 'Select text in any app and press it to hear it', keywords: 'shortcut shortcuts hotkey read aloud speak selection text to speech tts dyslexia reading', anchor: 'shortcut-read' },
   { page: 'shortcuts', section: 'Global shortcuts', label: 'Use what I said', desc: 'Swap what Yap pasted for your words before AI cleanup', keywords: 'shortcut shortcuts hotkey raw transcript revert undo cleanup as said', anchor: 'shortcut-as-said' },
@@ -92,6 +93,8 @@ export const SETTINGS_INDEX = [
   { page: 'commands', section: 'Say its name', label: 'Agent name', desc: 'The name Commands answer to', keywords: 'name jarvis wake word agent', anchor: 'agent-name' },
   { page: 'commands', section: 'Rewrite selected text', label: 'Rewrite shortcut', desc: 'Select text, press it and say how to change it', keywords: 'edit rewrite shortcut hotkey selection last dictation transform formal shorter translate', anchor: 'rewrite-shortcut' },
   { page: 'commands', section: 'Rewrite selected text', label: 'Rewrite your last dictation when nothing is selected', desc: 'Within a minute, in the same field', keywords: 'rewrite last dictation nothing selected transform formal shorter translate undo edit previous', anchor: 'rewrite-last', toggle: 'rewriteLastDictation' },
+  { page: 'commands', section: 'Transforms', label: 'Transforms', desc: 'Rewrite the selected text in one press: Polish, Shorter, Translate…', keywords: 'transform transforms polish shorter translate translation grammar prompt rewrite one key shortcut hotkey language', anchor: 'transforms' },
+  { page: 'commands', section: 'Transforms', label: 'Add a transform', desc: 'Your own one-key rewrite', keywords: 'transform custom new create rewrite shortcut', anchor: 'transform-add' },
   { page: 'commands', section: 'Model and prompt', label: 'Commands model and prompt', desc: 'Language Models → Commands', keywords: 'model prompt language model ai', anchor: 'commands-model' },
 
   // ---- Voice Assistant ----

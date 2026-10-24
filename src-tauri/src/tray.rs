@@ -15,6 +15,8 @@
 //! - **Read selection aloud** (read_aloud.rs): the text selected in the app
 //!   you were in, read aloud with the reading card; "Stop reading aloud"
 //!   while it reads.
+//! - **Transforms** (transforms.rs): a submenu of the saved transforms, run
+//!   on the selection (or the last dictation) in the app you were in.
 //! - **Left-click** opens Settings.
 //!
 //! The tray is rebuilt on every `yap-state` change via [`update_tray`], and on
@@ -250,6 +252,12 @@ fn build_menu(app: &AppHandle, state: &str) -> tauri::Result<Menu<Wry>> {
     };
     // Snip to Chat (snip.rs): drag a box over any screen, into Chat.
     let snip = MenuItem::with_id(app, "snip", "Snip to Chat", true, None::<&str>)?;
+    // Saved transforms (transforms.rs): the selection in the app you were
+    // in — or your last dictation there — polished, translated…
+    let transforms = Submenu::with_id(app, "transforms_submenu", "Transforms", true)?;
+    for t in crate::transforms::list(&config::load()) {
+        transforms.append(&MenuItem::with_id(app, format!("transform:{}", t.id), t.name(), true, None::<&str>)?)?;
+    }
     let (sep_update, sep_models, sep_quit) = (sep()?, sep()?, sep()?);
     let mut items: Vec<&dyn IsMenuItem<Wry>> = vec![&version, &sep_update];
     if let Some(call) = &call {
@@ -265,6 +273,9 @@ fn build_menu(app: &AppHandle, state: &str) -> tauri::Result<Menu<Wry>> {
     items.push(&paste_last);
     items.push(&paste_said);
     items.push(&read);
+    if !transforms.items()?.is_empty() {
+        items.push(&transforms);
+    }
     items.push(&snip);
     items.push(&sep_paste);
     items.push(models.as_ref());
@@ -337,6 +348,13 @@ fn on_menu_event(app: &AppHandle, id: &str) {
         "read_stop" => crate::read_aloud::stop(app),
         // Its own thread (snip.rs), after the menu has faded out.
         "snip" => crate::snip::start(app, crate::snip::Origin::Tray),
+        // A saved transform (transforms.rs), on its own thread: the app
+        // you were in is brought back first.
+        other if other.starts_with("transform:") => {
+            if let Some(id) = other.strip_prefix("transform:") {
+                crate::transforms::run_soon(app, id, crate::transforms::Origin::Tray);
+            }
+        }
         other if other.starts_with("meeting_record:") => {
             // Off the main thread: starting the recorder blocks for a moment
             // and looks at the main window.
@@ -380,14 +398,17 @@ fn idle_menu_key() -> String {
     let call = crate::meeting_detect::tray_item()
         .map(|(id, label)| format!("{id}:{label}"))
         .unwrap_or_default();
+    let cfg = config::load();
+    let transforms: Vec<String> = crate::transforms::list(&cfg).iter().map(|t| format!("{}={}", t.id, t.name())).collect();
     format!(
-        "{}|{}|{}|{}|{}|{}",
-        config::load().model_size,
+        "{}|{}|{}|{}|{}|{}|{}",
+        cfg.model_size,
         installed.join(","),
         update,
         call,
         crate::text_injector::has_last_transcript(),
-        crate::read_aloud::active()
+        crate::read_aloud::active(),
+        transforms.join(",")
     )
 }
 

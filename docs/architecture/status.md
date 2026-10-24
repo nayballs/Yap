@@ -76,7 +76,21 @@ else nothing pasted and said) — the rules unit-tested (`as_said::
 rewritable`, `keep_spaces`), robot tests written (`rewrite-last.real.js`:
 the test pad, an Edge box, a contenteditable, typed since and the cursor
 moved refused, a selection or another window as before, a terminal never),
-not yet run; not yet tried with a real voice and AI model. The spoken
+not yet run; not yet tried with a real voice and AI model. **Saved
+transforms** (2026-10-24, `transforms.rs`): one-key rewrites without
+speaking — Polish, Shorter, Fix grammar only, Translate to a language you
+pick, Make it a prompt, and your own — on the selection or (nothing
+selected, the rewrite shortcut's rules) the last dictation, never in a
+terminal; their own shortcuts (12 input-hook slots), the tray's
+Transforms menu, the bar's "Polish ✓ · Undo". The rules (slots and
+clashes, what a transform works on, the model's preamble stripped)
+unit-tested, the Settings list and every outcome e2e-tested
+(`transforms.spec.js`, through test hooks), the built-ins' prompts
+measured on the 4B and Groq's gpt-oss-20b (docs/model-evals.md "Saved
+transforms"); robot tests written (`transforms.real.js`: the test pad, an
+Edge box and a contenteditable, Translate on the last dictation, a
+terminal refused, the bar's Undo), not yet run; not yet tried by a person
+(a real shortcut press, the tray's menu bringing the app back). The spoken
 "undo that" / "revert" was left out: "revert" alone is a real message, and
 "undo that" reads as "delete it" in Windows' own voice commands. **A day of dictation audio**
 (`recent_audio.rs`): failed dictations listed, Run again (any installed

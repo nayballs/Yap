@@ -341,7 +341,7 @@ to **Run again** from Home.
   (press = key down w/ required modifiers held, release = key up OR required
   modifier up; chords fire on completion; suppressed keys are excluded from the
   GetAsyncKeyState self-heal — the hook eats them before the key-state table
-  updates). Six bindings: dictation, edit (`edit-key-*`, Commands' rewrite
+  updates). Seven bindings: dictation, edit (`edit-key-*`, Commands' rewrite
   shortcut), the meeting
   shortcut (`meeting-key-*`, `configure_meeting`; only its press is used —
   `meeting_guard`) and the Voice Assistant's (`assistant-key-*`,
@@ -350,7 +350,17 @@ to **Run again** from Home.
   `configure_read`/`_from`, unbound by default; only its press is used —
   `read_aloud::read_selection`) and "Use what I said" (`as-said-key-*`,
   `configure_as_said`/`_from`, unbound by default, giving way to any of the
-  other five; only its press is used — `as_said::swap_soon`). **`clashes(a, b)`** (pure, unit-tested;
+  other five; only its press is used — `as_said::swap_soon`), then Snip to
+  Chat's (`snip-key-*`, [snip.md](./snip.md)). Beside them, **up to 12
+  saved transforms' shortcuts** (`TRANSFORM_BINDINGS`, a slot each;
+  `configure_transforms_from` at setup and every save,
+  `transforms::assign` giving each transform with a key a slot in list
+  order unless it would fire with one of the seven or an earlier
+  transform's — left unbound, logged; `configure_transform(id, spec)` is
+  Settings' pause while a key is picked); a slot's press goes to the
+  forwarder as `transform-key-N` and out as one `transform-key-pressed`
+  event carrying the slot (releases dropped), which `lib.rs` hands to
+  `transforms::on_key` — see `transforms.rs` below. **`clashes(a, b)`** (pure, unit-tested;
   `hotkeysClash` in `lib/hotkeys.js` is the same rule, Settings refuses with
   it): the same key however written, combos on one key nesting (Ctrl+Space
   inside Ctrl+Shift+Space), a chord completing inside a combo or bigger
@@ -386,6 +396,66 @@ to **Run again** from Home.
   Copilot app). Many laptops send the key's press and release together, so
   holding it can't keep push-to-talk going: Settings → Dictation says so
   (double-tap for hands-free, or Toggle).
+- **`transforms.rs`** — **saved transforms** (2026-10-24; Wispr Flow's
+  Transforms, OpenWhispr's translation hotkey, Murmure's numbered rewrites,
+  by behaviour): one-key rewrites applied **without speaking**. The list
+  (`config.transforms`, Settings → Commands → Transforms,
+  [frontend-settings.md](./frontend-settings.md)): Yap's five built-ins —
+  Polish, Shorter, Fix grammar only, Translate to <language> (a picker),
+  Make it a prompt — whose names and instructions are Yap's
+  (`builtin_instruction`, measured in docs/model-evals.md "Saved
+  transforms"; a stored name or instruction on a built-in is ignored), and
+  the person's own (name + instruction, edited, moved, deleted); at most
+  `MAX` (12), each with an optional shortcut. **A press** (`on_key` → its
+  own thread → `run_by_id` → `pipeline::Transformer::hold`: the
+  `processing` guard (`Job::Transform`), refused while a dictation records
+  or transcribes, "Yap is busy with a dictation") runs `run`: the
+  shortcut's modifiers let go first (`as_said::wait_for_modifiers_up`); the
+  window in front (the tray's menu: the top app window brought back, as
+  "Read selection aloud" does); its kind; what's selected
+  (`selection::editable_selection`: a field that takes typing — read-only
+  text or a password box refused —, UI Automation, Ctrl+C only where it
+  can't read the field, never in a terminal); then **`pick`** (pure,
+  unit-tested): a **terminal never** ("Transforms don't work in a
+  terminal", nothing typed), else **the selection**, else — nothing
+  selected — **the last dictation** under the rewrite shortcut's exact
+  rules (`as_said::rewrite_target`: "Rewrite your last dictation when
+  nothing is selected" on, the same window, within a minute; then
+  `rewrite_check`, the paste still ending at the cursor — else "Couldn't
+  polish your last dictation", the AI not asked), else **"Nothing to
+  transform"**, said plainly (alerts, `alert.rs`). The model is the
+  **Commands scope's** (`pipeline::commands_model`, shared with
+  `run_agent`: its own provider when set up, else the cleanup model; the
+  on-device sidecar or a cloud key) with **`llm::transform`**
+  (`TRANSFORM_BASE_PROMPT`'s guardrails + the instruction; never the
+  Commands prompt, which may answer questions; [ai-models.md](./ai-models.md))
+  and `clean_output` (an echoed `<text>` tag or a "Here is…:" line off).
+  The bar says the name meanwhile (`yap-transform` "running" + `yap-state`
+  "processing": "Polish…"). **In place**: over the selection after
+  `verify_selection` (the window still in front, the same text still
+  selected — else the field is left alone and the result copied, said),
+  with the selection's own spaces kept (`as_said::keep_spaces`), back into
+  its window or nowhere (`inject_text` strict); or over the last dictation,
+  selected exactly again (`as_said::replace_last`). One paste either way
+  (the app's own Ctrl+Z takes it back), and the last paste from then on
+  ("Shorter" after "Polish" works on the polished text). **Undo** on the
+  bar for `as_said::OFFER_MS` ("Polish ✓ · Undo", `yap-transform` "done" +
+  `yap-state` "cleaned"; `bar_action "transform-undo"` →
+  `as_said::undo_transform`: the result selected exactly, still ending at
+  the caret, and the text it replaced pasted back; refused → that text
+  copied, said). The same text back from the AI: nothing pasted,
+  "Polish: no changes needed". The AI failing or no model: on the bar as a
+  rewrite's failure is. Also the tray's **Transforms** submenu (`tray.rs`,
+  rebuilt when the list changes); not the bar's ^ menu, which manages the
+  bar and Yap — the bar shows a transform running and its Undo instead. No
+  in-page fallback in Yap's windows: a transform works on another app's
+  text. The log says which transform (a built-in's kind, or "custom"), the source, the outcome and
+  lengths, never the text. Test mode: `e2e_transform { id, selection?,
+  terminal? }` (the stand-in window, `e2e_target_window`; nothing read or
+  pasted), `e2e_transform_slots`; robot mode `realtest_transform`.
+  Unit tests (`transforms::tests`, `input_hook`'s slot test, `as_said`'s
+  undoable), e2e `transforms.spec.js`, robot `e2e-real/transforms.real.js`
+  (written, not yet run).
 - **`mic.rs`** — **the dictation's microphone, opened on demand**
   (2026-10-22). Until then Yap held Windows' default mic open the whole time
   it ran, for the pre-roll: Windows showed the mic in use all day, a
