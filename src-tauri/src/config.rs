@@ -2357,6 +2357,9 @@ mod tests {
         let files = [
             ("ai/ai_model.rs", include_str!("ai/ai_model.rs")),
             ("voice/tts.rs", include_str!("voice/tts.rs")),
+            ("voice/tts/playback.rs", include_str!("voice/tts/playback.rs")),
+            ("voice/tts/speaker.rs", include_str!("voice/tts/speaker.rs")),
+            ("voice/tts/text.rs", include_str!("voice/tts/text.rs")),
             ("voice/read_aloud.rs", include_str!("voice/read_aloud.rs")),
             ("ai/local_llm.rs", include_str!("ai/local_llm.rs")),
             ("ai/local_llm/context.rs", include_str!("ai/local_llm/context.rs")),
