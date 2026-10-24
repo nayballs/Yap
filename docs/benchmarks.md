@@ -133,9 +133,10 @@ it doesn't depend on the PC, only on the connection and the provider.
 ## Starting Yap
 
 - **Cold start to the first-run window on screen** (a copy of Yap with an
-  empty data folder): **0.7–1.2 s** over four launches, its page loaded at
-  0.50–0.60 s. The first launch on a PC builds Yap's WebView2 profile; it
-  measured the same as later ones here.
+  empty data folder): **0.64–1.17 s** over six launches (three runs of the
+  bench, the PC busy with other work in some), its page loaded at 0.50–0.60 s.
+  The first launch on a PC builds Yap's WebView2 profile; it measured the
+  same as later ones here.
 - **Home's first paint** (the main window reloaded, a debug build): Home
   had its data **73 ms** after the page started, down from 132 ms, by
   asking for it in one call before anything else (`home_snapshot`).
