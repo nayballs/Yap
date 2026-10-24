@@ -72,7 +72,10 @@ use std::time::{Duration, Instant};
 use regex::Regex;
 use serde_json::{json, Value};
 
-use super::{best_passages, check_url, keywords, normal_url, site_of, tidy, Hit, HIT_CHARS, MAX_RESULTS};
+use super::page::check_url;
+use super::turn::normal_url;
+use super::wiki::{best_passages, keywords};
+use super::{site_of, tidy, Hit, HIT_CHARS, MAX_RESULTS};
 
 /// How long a sub-call may take (a provider's search loop can open a page
 /// or two before it answers).
