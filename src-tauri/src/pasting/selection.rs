@@ -46,7 +46,7 @@
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
 
-use crate::smart_insert::FieldContext;
+use crate::pasting::smart_insert::FieldContext;
 
 /// How long one UI Automation call may take for the cursor context before
 /// it's given up on (connection and transaction timeouts): an app that's
@@ -211,7 +211,7 @@ pub fn capture_selection(target_hwnd: Option<isize>, copy_fallback: bool) -> Opt
         tracing::debug!("No selection found over UI Automation; no Ctrl+C in a terminal (edit mode → write mode)");
         return None;
     }
-    match crate::text_injector::selection_via_copy(target_hwnd) {
+    match crate::pasting::text_injector::selection_via_copy(target_hwnd) {
         Some(t) => {
             tracing::debug!(len = t.len(), "Selection captured via clipboard Ctrl+C");
             Some(t)
@@ -248,7 +248,7 @@ pub fn read_selected(target_hwnd: Option<isize>, copy_fallback: bool) -> Selecte
     if crate::e2e::active() && !crate::realtest::permits(Some(hwnd)) {
         return nothing;
     }
-    let Some(pid) = crate::text_injector::window_process(hwnd) else { return nothing };
+    let Some(pid) = crate::pasting::text_injector::window_process(hwnd) else { return nothing };
     #[cfg(windows)]
     {
         if let Some(text) = uia::selection_in(pid) {
@@ -263,7 +263,7 @@ pub fn read_selected(target_hwnd: Option<isize>, copy_fallback: bool) -> Selecte
     #[cfg(not(windows))]
     let _ = pid;
     if copy_fallback {
-        if let Some(text) = crate::text_injector::selection_via_copy(Some(hwnd)).map(|t| t.trim().to_string()) {
+        if let Some(text) = crate::pasting::text_injector::selection_via_copy(Some(hwnd)).map(|t| t.trim().to_string()) {
             if !text.is_empty() {
                 tracing::debug!(len = text.len(), "Read aloud: the selection, by Ctrl+C");
                 return Selected { text: Some(text), via: "copy" };
@@ -303,7 +303,7 @@ pub fn editable_selection(target_hwnd: Option<isize>, copy_fallback: bool) -> Fi
         tracing::debug!("e2e: not reading another app's selection (a transform)");
         return FieldSelection::Nothing;
     }
-    let Some(pid) = crate::text_injector::window_process(hwnd) else { return FieldSelection::Nothing };
+    let Some(pid) = crate::pasting::text_injector::window_process(hwnd) else { return FieldSelection::Nothing };
     #[cfg(windows)]
     let read = uia::editable_selection_in(pid);
     #[cfg(not(windows))]
@@ -312,7 +312,7 @@ pub fn editable_selection(target_hwnd: Option<isize>, copy_fallback: bool) -> Fi
         FieldSelection::Unreadable
     };
     match read {
-        FieldSelection::Unreadable if copy_fallback => match crate::text_injector::selection_via_copy(Some(hwnd)) {
+        FieldSelection::Unreadable if copy_fallback => match crate::pasting::text_injector::selection_via_copy(Some(hwnd)) {
             Some(t) if !t.trim().is_empty() => {
                 tracing::debug!(len = t.len(), "Transform: the selection, by Ctrl+C");
                 FieldSelection::Text(t)
@@ -416,7 +416,7 @@ pub fn read_context(target_hwnd: Option<isize>) -> Option<FieldContext> {
     let started = std::time::Instant::now();
     // The window gone (closed since): nothing of its to read, and the
     // focused field now is someone else's.
-    let pid = match target_hwnd.map(crate::text_injector::window_process) {
+    let pid = match target_hwnd.map(crate::pasting::text_injector::window_process) {
         Some(None) => {
             tracing::debug!("The dictation's window is gone; not reading the text around the cursor");
             return None;
@@ -474,7 +474,7 @@ impl WatchedField {
         }
         #[cfg(windows)]
         {
-            let pid = crate::text_injector::window_process(target_hwnd)?;
+            let pid = crate::pasting::text_injector::window_process(target_hwnd)?;
             uia::Watched::open(pid).map(|inner| WatchedField { inner })
         }
         #[cfg(not(windows))]
@@ -704,7 +704,7 @@ pub(crate) mod uia {
     };
 
     use super::{FieldWindow, Offers, SELECTION_CHARS, SELECTION_ENDS};
-    use crate::smart_insert::{head_chars, tail_chars, FieldContext, CONTEXT_CHARS};
+    use crate::pasting::smart_insert::{head_chars, tail_chars, FieldContext, CONTEXT_CHARS};
 
     /// COM on this thread for as long as it lives; undone on drop when this
     /// call did it. Declared first in a function, it drops after every COM
@@ -1794,7 +1794,7 @@ mod tests {
     use std::sync::mpsc;
 
     use super::{paste_verdict, EditState, Landed};
-    use crate::smart_insert::FieldContext;
+    use crate::pasting::smart_insert::FieldContext;
 
     #[repr(C)]
     struct Point {

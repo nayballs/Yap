@@ -1998,7 +1998,7 @@ mod windows_titles {
             if len <= 0 {
                 continue;
             }
-            let Some(exe) = crate::text_injector::app_name_for(Some(hwnd)) else { continue };
+            let Some(exe) = crate::pasting::text_injector::app_name_for(Some(hwnd)) else { continue };
             let exe = exe.to_ascii_lowercase();
             if exes.contains(&exe) {
                 out.push((exe, String::from_utf16_lossy(&buf[..len as usize])));

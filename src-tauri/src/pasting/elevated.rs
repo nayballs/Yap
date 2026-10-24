@@ -68,7 +68,7 @@ pub fn target_blocked(hwnd: isize) -> bool {
     }
     #[cfg(windows)]
     {
-        let Some(pid) = crate::text_injector::window_process(hwnd) else {
+        let Some(pid) = crate::pasting::text_injector::window_process(hwnd) else {
             return false;
         };
         if pid == std::process::id() {

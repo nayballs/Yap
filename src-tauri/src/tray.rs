@@ -232,7 +232,7 @@ fn build_menu(app: &AppHandle, state: &str) -> tauri::Result<Menu<Wry>> {
         app,
         "paste_last",
         "Paste last transcript",
-        crate::text_injector::has_last_transcript(),
+        crate::pasting::text_injector::has_last_transcript(),
         None::<&str>,
     )?;
     // …and as you said it: before AI cleanup (as_said.rs).
@@ -240,7 +240,7 @@ fn build_menu(app: &AppHandle, state: &str) -> tauri::Result<Menu<Wry>> {
         app,
         "paste_last_said",
         "Paste last transcript (as said)",
-        crate::text_injector::has_last_transcript(),
+        crate::pasting::text_injector::has_last_transcript(),
         None::<&str>,
     )?;
     // The selection in the app you're in, read aloud (read_aloud.rs); while
@@ -341,8 +341,8 @@ fn on_menu_event(app: &AppHandle, id: &str) {
             let _ = crate::commands::show_onboarding(app);
         }
         // Off the main thread: it focuses the app and waits on the paste.
-        "paste_last" => crate::text_injector::paste_last_from_tray(app, false),
-        "paste_last_said" => crate::text_injector::paste_last_from_tray(app, true),
+        "paste_last" => crate::pasting::text_injector::paste_last_from_tray(app, false),
+        "paste_last_said" => crate::pasting::text_injector::paste_last_from_tray(app, true),
         // Off the main thread (UI Automation can take a moment).
         "read_selection" => crate::voice::read_aloud::read_selection(app, crate::voice::read_aloud::Origin::Tray),
         "read_stop" => crate::voice::read_aloud::stop(app),
@@ -406,7 +406,7 @@ fn idle_menu_key() -> String {
         installed.join(","),
         update,
         call,
-        crate::text_injector::has_last_transcript(),
+        crate::pasting::text_injector::has_last_transcript(),
         crate::voice::read_aloud::active(),
         transforms.join(",")
     )

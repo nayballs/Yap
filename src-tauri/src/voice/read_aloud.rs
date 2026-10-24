@@ -768,15 +768,15 @@ pub fn read_selection_now(app: &AppHandle, origin: Origin) -> Picked {
     let mut picked = Picked { via: "", chars: 0, terminal: false, copy_allowed: false, outcome: "nothing", text: None };
     let target = match origin {
         Origin::Tray => {
-            let t = crate::text_injector::app_window();
+            let t = crate::pasting::text_injector::app_window();
             if let Some(h) = t {
-                crate::text_injector::focus(h);
+                crate::pasting::text_injector::focus(h);
                 // The app puts its own focus back in its field on activation.
                 std::thread::sleep(Duration::from_millis(80));
             }
             t
         }
-        Origin::Shortcut | Origin::Bar => crate::text_injector::current_foreground(),
+        Origin::Shortcut | Origin::Bar => crate::pasting::text_injector::current_foreground(),
     };
     let reading = lock().session.is_some();
     // One of Yap's own windows in front: its page reads its own selection
@@ -798,10 +798,10 @@ pub fn read_selection_now(app: &AppHandle, origin: Origin) -> Picked {
     }
     // Never Ctrl+C in a terminal (whatever "Safer pasting into terminals"
     // says): with nothing selected it stops the program running there.
-    let kind = crate::app_kind::of_window(Some(hwnd));
+    let kind = crate::pasting::app_kind::of_window(Some(hwnd));
     picked.terminal = kind.is_terminal();
     picked.copy_allowed = !picked.terminal;
-    let got = crate::selection::read_selected(Some(hwnd), picked.copy_allowed);
+    let got = crate::pasting::selection::read_selected(Some(hwnd), picked.copy_allowed);
     picked.via = got.via;
     picked.chars = got.text.as_deref().map_or(0, |t| t.chars().count());
     tracing::info!(via = got.via, chars = picked.chars, terminal = picked.terminal, ?origin, "Read aloud: the selection");

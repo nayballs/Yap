@@ -257,7 +257,7 @@ mod tests {
         assert!(xml.contains("launch=\"openMicSettings\""), "{xml}");
         // Quotes and angle brackets in the text are escaped.
         assert!(xml.contains("“Let desktop apps access your microphone”"), "{xml}");
-        let plain = native::xml(&crate::elevated::alert(), "");
+        let plain = native::xml(&crate::pasting::elevated::alert(), "");
         assert!(!plain.contains("<actions>"), "{plain}");
         assert!(plain.contains("Ctrl+V"), "{plain}");
     }

@@ -478,11 +478,11 @@ fn read_terms(hwnd: isize) -> Option<ScreenTerms> {
             std::thread::sleep(Duration::from_millis(ms));
         }
     }
-    let pid = crate::text_injector::window_process(hwnd)?;
+    let pid = crate::pasting::text_injector::window_process(hwnd)?;
     if pid == std::process::id() {
         return None;
     }
-    let exe = crate::text_injector::app_name_for(Some(hwnd)).unwrap_or_default().to_lowercase();
+    let exe = crate::pasting::text_injector::app_name_for(Some(hwnd)).unwrap_or_default().to_lowercase();
     let exe = exe.trim_end_matches(".exe");
     if NEVER_READ.iter().any(|p| exe.contains(p)) {
         tracing::debug!("A password manager's window: not reading its names");
@@ -572,7 +572,7 @@ mod uia {
     };
 
     use super::WindowText;
-    use crate::selection::uia::{automation, Com};
+    use crate::pasting::selection::uia::{automation, Com};
 
     /// How far up from the focus Yap looks for the document it's in.
     const DOCUMENT_LEVELS: usize = 16;
@@ -1225,7 +1225,7 @@ mod tests {
         }
         for run in 0..runs {
             let started = Instant::now();
-            let pid = crate::text_injector::window_process(hwnd).expect("a window");
+            let pid = crate::pasting::text_injector::window_process(hwnd).expect("a window");
             let read = read_window(hwnd, pid, started + READ_BUDGET);
             let read_ms = started.elapsed().as_millis();
             let Some(read) = read else {

@@ -35,7 +35,7 @@
 //!   doesn't end with a full stop ([`drop_chat_full_stop`]).
 
 use crate::config::DictionaryEntry;
-use crate::smart_insert::FieldContext;
+use crate::pasting::smart_insert::FieldContext;
 
 /// What kind of app the dictation goes into.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -621,10 +621,10 @@ pub fn of_window(hwnd: Option<isize>) -> AppKind {
     }
     #[cfg(windows)]
     {
-        let exe = crate::text_injector::app_name_for(Some(hwnd));
+        let exe = crate::pasting::text_injector::app_name_for(Some(hwnd));
         let mut kind = classify(exe.as_deref(), &win::class(hwnd), &win::title(hwnd));
         if kind == AppKind::Other && is_editor(&exe_stem(exe.as_deref().unwrap_or(""))) {
-            let focused = crate::text_injector::window_process(hwnd).and_then(crate::selection::focused_element);
+            let focused = crate::pasting::text_injector::window_process(hwnd).and_then(crate::pasting::selection::focused_element);
             if let Some(t) = focused.and_then(|(class, name)| editor_terminal(&class, &name)) {
                 kind = AppKind::Terminal(t);
             }
@@ -1287,7 +1287,7 @@ mod tests {
             if title.is_empty() {
                 continue;
             }
-            let exe = crate::text_injector::app_name_for(Some(hwnd));
+            let exe = crate::pasting::text_injector::app_name_for(Some(hwnd));
             let class = win::class(hwnd);
             let kind = classify(exe.as_deref(), &class, &title);
             let shown = if titles { title.as_str() } else { "" };

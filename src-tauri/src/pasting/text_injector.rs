@@ -40,9 +40,9 @@ use std::sync::Mutex;
 
 use tracing::{debug, info, trace, warn};
 
-use crate::app_kind::{self, AppKind};
+use crate::pasting::app_kind::{self, AppKind};
 use crate::config::DictionaryEntry;
-use crate::smart_insert::{self, FieldContext};
+use crate::pasting::smart_insert::{self, FieldContext};
 
 #[cfg(target_os = "windows")]
 #[allow(clippy::upper_case_acronyms)] // Win32 FFI names match the Windows API
@@ -400,8 +400,8 @@ mod platform {
     /// Simulate the paste keys via SendInput (into `target`: robot mode
     /// checks it's still in front right after): Ctrl+V, or what the
     /// terminal there binds (`app_kind::Host::paste_key`).
-    pub fn simulate_paste(target: Option<isize>, key: crate::app_kind::PasteKey) {
-        use crate::app_kind::PasteKey;
+    pub fn simulate_paste(target: Option<isize>, key: crate::pasting::app_kind::PasteKey) {
+        use crate::pasting::app_kind::PasteKey;
         let inputs: Vec<INPUT> = match key {
             // As it always was (no scan codes): every app it's been tried in pastes.
             PasteKey::CtrlV => vec![
@@ -1013,7 +1013,7 @@ pub async fn press_submit(key: &str) -> Result<(), String> {
         // before the key goes out (always fine in a normal run).
         crate::realtest::recheck_foreground(None, &format!("press {key}"))?;
         // An app running as administrator would drop the key anyway.
-        if current_foreground().is_some_and(crate::elevated::target_blocked) {
+        if current_foreground().is_some_and(crate::pasting::elevated::target_blocked) {
             info!(key, "Not pressing the key: the app runs as administrator");
             return Err("Yap can't press keys in an app running as administrator".to_string());
         }
@@ -1193,7 +1193,7 @@ fn last_said() -> std::sync::MutexGuard<'static, Option<String>> {
 pub fn prepare_dictation(text: &str, append_space: bool, dictionary: &[DictionaryEntry], kind: AppKind) -> String {
     *last_dictation() = Some(text.trim().to_string());
     *last_said() = None;
-    let ctx = crate::selection::take_context();
+    let ctx = crate::pasting::selection::take_context();
     fit_for_paste(text, ctx.as_ref(), append_space, dictionary, kind)
 }
 
@@ -1209,7 +1209,7 @@ pub fn prepare_dictation_as_said(
 ) -> (String, String) {
     *last_dictation() = Some(text.trim().to_string());
     *last_said() = Some(said.trim().to_string());
-    let ctx = crate::selection::take_context();
+    let ctx = crate::pasting::selection::take_context();
     (
         fit_for_paste(text, ctx.as_ref(), append_space, dictionary, kind),
         fit_for_paste(said, ctx.as_ref(), append_space, dictionary, kind),
@@ -1353,9 +1353,9 @@ fn paste_last_blocking(app: &tauri::AppHandle, as_said: bool) -> Result<String, 
     let cfg = crate::config::load();
     let test_mode = || {
         let out = fit_for_paste(&text, None, cfg.append_trailing_space, &cfg.dictionary, AppKind::Other);
-        if crate::elevated::test_override() {
+        if crate::pasting::elevated::test_override() {
             info!(len = out.len(), "e2e: the app counts as an admin app; not pasting the last transcript");
-            crate::notices::alert::show(app, crate::elevated::alert());
+            crate::notices::alert::show(app, crate::pasting::elevated::alert());
         } else {
             info!(len = out.len(), "e2e: not pasting the last transcript");
         }
@@ -1373,11 +1373,11 @@ fn paste_last_blocking(app: &tauri::AppHandle, as_said: bool) -> Result<String, 
             crate::realtest::Gate::Refused(why) => return Err(why),
         }
         // An app running as administrator: on the clipboard, as it is.
-        if target.is_some_and(crate::elevated::target_blocked) {
+        if target.is_some_and(crate::pasting::elevated::target_blocked) {
             let out = fit_for_paste(&text, None, cfg.append_trailing_space, &cfg.dictionary, AppKind::Other);
             warn!("The app runs as administrator: Windows won't let Yap type into it");
             leave_on_clipboard(&out, target)?;
-            crate::notices::alert::show(app, crate::elevated::alert());
+            crate::notices::alert::show(app, crate::pasting::elevated::alert());
             return Ok(out);
         }
         if let Some(hwnd) = target {
@@ -1391,14 +1391,14 @@ fn paste_last_blocking(app: &tauri::AppHandle, as_said: bool) -> Result<String, 
         let raw = app_kind::of_window(target);
         let kind = raw.with_settings(cfg.terminal_mode, cfg.chat_no_full_stop);
         let ctx = if cfg.smart_spacing && target.is_some() && !kind.is_terminal() {
-            crate::selection::read_context(target)
+            crate::pasting::selection::read_context(target)
         } else {
             None
         };
         let out = fit_for_paste(&text, ctx.as_ref(), cfg.append_trailing_space, &cfg.dictionary, kind);
         info!(len = out.len(), found_window = target.is_some(), fitted = ctx.is_some(), "Pasting the last transcript");
         if inject_text_sync(&out, cfg.restore_clipboard, target, false, raw)? == Delivery::LeftOnClipboard {
-            crate::notices::alert::show(app, crate::elevated::alert());
+            crate::notices::alert::show(app, crate::pasting::elevated::alert());
         }
         Ok(out)
     }
@@ -1471,7 +1471,7 @@ pub async fn inject_text(
     match crate::realtest::gate(target_hwnd, "paste") {
         crate::realtest::Gate::Go => {}
         crate::realtest::Gate::TestMode => {
-            if crate::elevated::test_override() {
+            if crate::pasting::elevated::test_override() {
                 info!(len = text.len(), "e2e: the target counts as an admin app; not pasting the text");
                 return Ok(Delivery::LeftOnClipboard);
             }
@@ -1499,7 +1499,7 @@ const PASTE_CHECK_EVERY_MS: u64 = 40;
 /// the first read that sees a change says it landed, one that fails says
 /// nothing more, and a control unchanged for [`PASTE_LANDS_MS`] since the
 /// keys went out (`pasted_at`) didn't get it.
-fn wait_for_paste(check: &crate::selection::PasteCheck, pasted_at: std::time::Instant) -> crate::selection::Landed {
+fn wait_for_paste(check: &crate::pasting::selection::PasteCheck, pasted_at: std::time::Instant) -> crate::pasting::selection::Landed {
     let wait = std::time::Duration::from_millis(PASTE_LANDS_MS);
     loop {
         let waited_out = pasted_at.elapsed() >= wait;
@@ -1549,7 +1549,7 @@ fn inject_text_sync(
         // drops them without a word): the text stays on the clipboard for
         // the person to paste (`elevated.rs`).
         let receiver = target_hwnd.or_else(current_foreground);
-        if receiver.is_some_and(crate::elevated::target_blocked) {
+        if receiver.is_some_and(crate::pasting::elevated::target_blocked) {
             warn!("The app runs as administrator: Windows won't let Yap type into it");
             return leave_on_clipboard(text, receiver);
         }
@@ -1600,7 +1600,7 @@ fn inject_text_sync(
         let check = if kind.is_terminal() {
             None
         } else {
-            crate::selection::PasteCheck::before(target_hwnd)
+            crate::pasting::selection::PasteCheck::before(target_hwnd)
         };
 
         // Robot mode: the window in front must still be the test's, and the
@@ -1623,9 +1623,9 @@ fn inject_text_sync(
         let mut delivery = Delivery::Pasted;
         if let Some(check) = &check {
             match wait_for_paste(check, pasted_at) {
-                crate::selection::Landed::Yes => debug!("The paste reached the field"),
-                crate::selection::Landed::Unknown => debug!("Couldn't tell whether the paste reached the field"),
-                crate::selection::Landed::No => {
+                crate::pasting::selection::Landed::Yes => debug!("The paste reached the field"),
+                crate::pasting::selection::Landed::Unknown => debug!("Couldn't tell whether the paste reached the field"),
+                crate::pasting::selection::Landed::No => {
                     let checked = if check.still_focused() {
                         crate::realtest::recheck_foreground(target_hwnd, "type the text")
                     } else {

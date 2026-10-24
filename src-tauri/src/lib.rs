@@ -10,8 +10,6 @@
 mod about_you;
 mod agent_detect;
 mod ai_model;
-mod as_said;
-mod app_kind;
 mod apps;
 mod auth;
 mod bar;
@@ -26,7 +24,6 @@ mod config;
 mod context_menu;
 mod dictionary;
 mod e2e;
-mod elevated;
 mod eval;
 mod gesture;
 mod gguf;
@@ -39,6 +36,7 @@ mod meetings;
 mod memory;
 mod notes;
 mod notices;
+mod pasting;
 mod privacy;
 mod history;
 mod input_hook;
@@ -57,14 +55,11 @@ mod procs;
 mod realtest;
 mod recent_audio;
 mod saving;
-mod selection;
-mod smart_insert;
 mod snip;
 mod sound;
 mod speakers;
 mod stt;
 mod stt_speed;
-mod text_injector;
 mod transforms;
 mod tray;
 mod updates;
@@ -502,9 +497,9 @@ pub fn run() {
             commands::delete_history_entry,
             commands::get_stats,
             commands::home_snapshot,
-            text_injector::paste_last_transcript,
-            as_said::as_said_swap,
-            as_said::as_said_paste_entry,
+            pasting::text_injector::paste_last_transcript,
+            pasting::as_said::as_said_swap,
+            pasting::as_said::as_said_paste_entry,
             commands::configure_as_said_hotkey,
             commands::configure_snip_hotkey,
             transforms::configure_transform_hotkey,
@@ -748,7 +743,7 @@ pub fn run() {
             #[cfg(debug_assertions)]
             mic_privacy::e2e_mic_privacy,
             #[cfg(debug_assertions)]
-            elevated::e2e_paste_elevated,
+            pasting::elevated::e2e_paste_elevated,
             #[cfg(debug_assertions)]
             context_menu::e2e_context_menus,
             #[cfg(debug_assertions)]
@@ -1061,7 +1056,7 @@ pub fn run() {
             // "Use what I said": the last cleaned dictation's paste swapped
             // for the words as said (as_said.rs), on its own thread.
             let as_said_handle = handle.clone();
-            handle.listen("as-said-key-pressed", move |_| as_said::swap_soon(&as_said_handle));
+            handle.listen("as-said-key-pressed", move |_| pasting::as_said::swap_soon(&as_said_handle));
 
             // Snip to Chat: drag a box over any screen, the image into Chat
             // (snip.rs, on its own thread); again while it's up cancels.

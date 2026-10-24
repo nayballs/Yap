@@ -745,7 +745,7 @@ pub mod commands {
         only_robot()?;
         #[cfg(windows)]
         {
-            crate::text_injector::robot_clipboard(&action, text.as_deref())
+            crate::pasting::text_injector::robot_clipboard(&action, text.as_deref())
         }
         #[cfg(not(windows))]
         {

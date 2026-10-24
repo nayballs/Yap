@@ -40,7 +40,7 @@
 
 use serde_json::{json, Value};
 
-use crate::app_kind::{self, AppKind};
+use crate::pasting::app_kind::{self, AppKind};
 use crate::config::{CleanupProfile, YapConfig};
 
 /// The kinds of app a dictation's style follows.
@@ -972,7 +972,7 @@ pub fn e2e_style_app(exe: Option<String>, title: Option<String>) -> Result<(), S
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::app_kind::{CodingCli, Host, Terminal};
+    use crate::pasting::app_kind::{CodingCli, Host, Terminal};
     use crate::config::AppRoute;
 
     fn cfg() -> YapConfig {

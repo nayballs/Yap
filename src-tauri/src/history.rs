@@ -388,7 +388,7 @@ pub fn get_by_ts(ts: u64) -> Option<HistoryEntry> {
 /// Delete one entry by timestamp alone (bridge delete route). Returns whether
 /// anything was removed.
 pub fn delete_by_ts(ts: u64) -> bool {
-    crate::text_injector::forget_last_transcript();
+    crate::pasting::text_injector::forget_last_transcript();
     let mut guard = match STATE.lock() {
         Ok(g) => g,
         Err(poisoned) => poisoned.into_inner(),
@@ -410,7 +410,7 @@ pub fn delete_by_ts(ts: u64) -> bool {
 /// Delete one entry, matched by timestamp + final text (the pair is unique
 /// enough for a per-item delete from the Home feed; first match wins).
 pub fn delete(ts: u64, text: &str) {
-    crate::text_injector::forget_last_transcript();
+    crate::pasting::text_injector::forget_last_transcript();
     let mut guard = match STATE.lock() {
         Ok(g) => g,
         Err(poisoned) => poisoned.into_inner(),
@@ -428,7 +428,7 @@ pub fn delete(ts: u64, text: &str) {
 
 /// Delete all history (and the on-disk file), and the recent audio with it.
 pub fn clear() {
-    crate::text_injector::forget_last_transcript();
+    crate::pasting::text_injector::forget_last_transcript();
     let mut guard = match STATE.lock() {
         Ok(g) => g,
         Err(poisoned) => poisoned.into_inner(),

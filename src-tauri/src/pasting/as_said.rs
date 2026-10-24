@@ -85,7 +85,7 @@ use std::time::{Duration, Instant};
 use serde::Serialize;
 use tauri::{AppHandle, Emitter};
 
-use crate::app_kind::AppKind;
+use crate::pasting::app_kind::AppKind;
 
 /// How long after a dictation its paste can still be swapped.
 pub const SWAP_WITHIN: Duration = Duration::from_secs(120);
@@ -343,7 +343,7 @@ fn copy_said(said: &str, why: &str) -> Result<Outcome, String> {
         tracing::info!(chars = said.chars().count(), "e2e: not copying the words as said");
         return Ok(out());
     }
-    if !crate::text_injector::copy_privately(said) {
+    if !crate::pasting::text_injector::copy_privately(said) {
         return Err("The clipboard couldn't take the text".into());
     }
     tracing::info!(chars = said.chars().count(), "Paste what I said: copied");
@@ -354,16 +354,16 @@ fn copy_said(said: &str, why: &str) -> Result<Outcome, String> {
 /// window has it), and give the app a moment to put the focus back in its
 /// field. `false`: it didn't come.
 fn bring_back(hwnd: isize) -> bool {
-    if crate::text_injector::current_foreground() == Some(hwnd) {
+    if crate::pasting::text_injector::current_foreground() == Some(hwnd) {
         return true;
     }
-    if !crate::text_injector::window_exists(hwnd) {
+    if !crate::pasting::text_injector::window_exists(hwnd) {
         return false;
     }
-    crate::text_injector::focus(hwnd);
+    crate::pasting::text_injector::focus(hwnd);
     let started = Instant::now();
     while started.elapsed() < Duration::from_millis(800) {
-        if crate::text_injector::current_foreground() == Some(hwnd) {
+        if crate::pasting::text_injector::current_foreground() == Some(hwnd) {
             std::thread::sleep(SETTLE);
             return true;
         }
@@ -423,7 +423,7 @@ pub(crate) fn rewrite_check(p: &Pasted) -> Result<(), String> {
     {
         let hwnd = p.hwnd.ok_or("Yap didn't paste it into another app")?;
         usable(hwnd, p.kind)?;
-        let pid = crate::text_injector::window_process(hwnd).ok_or("the window is gone")?;
+        let pid = crate::pasting::text_injector::window_process(hwnd).ok_or("the window is gone")?;
         if uia::ends_at_caret(hwnd, pid, &p.pasted) {
             Ok(())
         } else {
@@ -502,7 +502,7 @@ pub(crate) fn replace_last(app: &AppHandle, p: &Pasted, rewrite: &str) -> Result
 /// (privately; `copy`: not there yet), and the person told.
 fn rewrite_copied(app: &AppHandle, why: String, rewrite: &str, copy: bool) -> Rewrote {
     let text = rewrite.trim().to_string();
-    let copied = !copy || crate::text_injector::copy_privately(&text);
+    let copied = !copy || crate::pasting::text_injector::copy_privately(&text);
     crate::notices::alert::show_soon(
         app,
         crate::notices::alert::Alert {
@@ -599,7 +599,7 @@ pub fn undo_transform(app: &AppHandle) -> Result<Undid, String> {
 /// The Undo couldn't put the text back in place: on the clipboard
 /// (privately; `copy`: not there yet), and the person told.
 fn undo_copied(app: &AppHandle, why: String, before: &str, copy: bool) -> Undid {
-    let copied = !copy || crate::text_injector::copy_privately(before.trim());
+    let copied = !copy || crate::pasting::text_injector::copy_privately(before.trim());
     crate::notices::alert::show_soon(
         app,
         crate::notices::alert::Alert {
@@ -711,13 +711,13 @@ fn replace_in_field(_p: &Pasted, _with: &dyn Fn(&str) -> String, _anywhere: bool
 fn replace_in_field(p: &Pasted, with: &dyn Fn(&str) -> String, anywhere: bool) -> Result<Put, String> {
     let hwnd = p.hwnd.ok_or("Yap didn't paste it into another app")?;
     usable(hwnd, p.kind)?;
-    let pid = crate::text_injector::window_process(hwnd).ok_or("the window is gone")?;
+    let pid = crate::pasting::text_injector::window_process(hwnd).ok_or("the window is gone")?;
     let (how, selected) = uia::select_pasted(hwnd, pid, &p.pasted, anywhere)?;
     let text = with(&selected);
     if text.trim().is_empty() {
         return Err("there was nothing to put in its place".into());
     }
-    let delivery = tauri::async_runtime::block_on(crate::text_injector::inject_text(
+    let delivery = tauri::async_runtime::block_on(crate::pasting::text_injector::inject_text(
         &text,
         p.restore_clipboard,
         Some(hwnd),
@@ -725,8 +725,8 @@ fn replace_in_field(p: &Pasted, with: &dyn Fn(&str) -> String, anywhere: bool) -
         p.kind,
     ))?;
     match delivery {
-        crate::text_injector::Delivery::Pasted | crate::text_injector::Delivery::Typed => {}
-        crate::text_injector::Delivery::LeftOnClipboard | crate::text_injector::Delivery::WindowGone => {
+        crate::pasting::text_injector::Delivery::Pasted | crate::pasting::text_injector::Delivery::Typed => {}
+        crate::pasting::text_injector::Delivery::LeftOnClipboard | crate::pasting::text_injector::Delivery::WindowGone => {
             return Ok(Put::OnClipboard);
         }
     }
@@ -751,12 +751,12 @@ fn usable(hwnd: isize, kind: AppKind) -> Result<(), String> {
     if kind.is_terminal() {
         return Err("a terminal's line can't be selected".into());
     }
-    let front = crate::text_injector::current_foreground();
+    let front = crate::pasting::text_injector::current_foreground();
     if front != Some(hwnd) {
         tracing::debug!(dictation = hwnd, front = ?front, "The last paste: another window is in front");
         return Err("you've moved on to another window".into());
     }
-    if crate::elevated::target_blocked(hwnd) {
+    if crate::pasting::elevated::target_blocked(hwnd) {
         return Err("the app runs as administrator".into());
     }
     Ok(())
@@ -766,7 +766,7 @@ fn usable(hwnd: isize, kind: AppKind) -> Result<(), String> {
 /// told.
 fn copy_instead(app: &AppHandle, p: &Pasted, why: String) -> Outcome {
     let said = p.said.as_deref().unwrap_or_default().trim().to_string();
-    let copied = crate::text_injector::copy_privately(&said);
+    let copied = crate::pasting::text_injector::copy_privately(&said);
     crate::notices::alert::show_soon(
         app,
         crate::notices::alert::Alert {
@@ -1291,7 +1291,7 @@ pub async fn as_said_paste_entry(app: AppHandle, ts: u64, text: String) -> Resul
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::app_kind::{Host, Terminal};
+    use crate::pasting::app_kind::{Host, Terminal};
 
     #[test]
     fn the_rewrite_shortcut_takes_the_last_paste_only_in_its_window_within_a_minute() {

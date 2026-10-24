@@ -81,7 +81,7 @@ use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, Manager};
 
 use crate::config::DictionaryEntry;
-use crate::selection::FieldWindow;
+use crate::pasting::selection::FieldWindow;
 
 /// One word (or short phrase) to offer: Yap typed `heard`, you made it `term`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -1107,7 +1107,7 @@ fn watch(app: &AppHandle, pasted: &str, hwnd: isize, gen: u64, dictations: u64) 
     let superseded = || WATCHES.load(Ordering::SeqCst) != gen || crate::pipeline::dictation_state().0 != dictations;
     // Let the paste land.
     std::thread::sleep(Duration::from_millis(350));
-    let Some(field) = crate::selection::WatchedField::open(hwnd) else {
+    let Some(field) = crate::pasting::selection::WatchedField::open(hwnd) else {
         tracing::debug!("learn: the field can't be read; not watching it");
         return;
     };

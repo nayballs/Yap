@@ -143,7 +143,7 @@ pub fn judge(c: &Case, raw: &str, out: &str) -> Vec<String> {
             why.push(format!("{ratio:.2}× the words (at least {min})"));
         }
     }
-    if e.same && !crate::as_said::same_text(out.trim(), c.text.trim()) {
+    if e.same && !crate::pasting::as_said::same_text(out.trim(), c.text.trim()) {
         why.push("changed text that had no mistakes".into());
     }
     let _ = raw;

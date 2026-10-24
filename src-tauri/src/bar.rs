@@ -1411,13 +1411,13 @@ fn act(app: &AppHandle, action: &str) -> Result<(), String> {
         // said (as_said.rs), in the window the dictation went into.
         "as-said" => {
             give_focus_back();
-            crate::as_said::swap_soon(app);
+            crate::pasting::as_said::swap_soon(app);
         }
         // "Polish ✓ · Undo" after a saved transform (transforms.rs): the
         // text it replaced put back, in the window it went into.
         "transform-undo" => {
             give_focus_back();
-            crate::as_said::undo_transform_soon(app);
+            crate::pasting::as_said::undo_transform_soon(app);
         }
         // ■ on the assistant's capsule: stop the answer (its voice, or one
         // still coming; it's in Chat either way).

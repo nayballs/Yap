@@ -67,9 +67,9 @@
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, Manager};
 
-use crate::app_kind::AppKind;
+use crate::pasting::app_kind::AppKind;
 use crate::config::YapConfig;
-use crate::selection::FieldSelection;
+use crate::pasting::selection::FieldSelection;
 
 /// The most transforms the list keeps (and the input hook's slots).
 pub const MAX: usize = 12;
@@ -441,11 +441,11 @@ fn target_window(origin: Origin, stand_in: bool) -> Option<isize> {
     }
     let _ = stand_in;
     match origin {
-        Origin::Shortcut => crate::text_injector::current_foreground(),
+        Origin::Shortcut => crate::pasting::text_injector::current_foreground(),
         Origin::Tray => {
-            let t = crate::text_injector::app_window();
+            let t = crate::pasting::text_injector::app_window();
             if let Some(h) = t {
-                crate::text_injector::focus(h);
+                crate::pasting::text_injector::focus(h);
                 // The app puts its focus back in its field on activation.
                 std::thread::sleep(std::time::Duration::from_millis(80));
             }
@@ -462,12 +462,12 @@ pub fn run(app: &AppHandle, cfg: &YapConfig, t: &Transform, origin: Origin, stan
     // The shortcut's own modifiers let go first: Ctrl+C or Ctrl+V with Alt
     // still down is another key in most apps.
     if origin == Origin::Shortcut {
-        crate::as_said::wait_for_modifiers_up();
+        crate::pasting::as_said::wait_for_modifiers_up();
     }
     let target = target_window(origin, stand_in.is_some());
     let kind = match &stand_in {
-        Some(s) if s.terminal => AppKind::Terminal(crate::app_kind::Terminal { coding_cli: None, host: crate::app_kind::Host::WindowsTerminal }),
-        _ => crate::app_kind::of_window(target),
+        Some(s) if s.terminal => AppKind::Terminal(crate::pasting::app_kind::Terminal { coding_cli: None, host: crate::pasting::app_kind::Host::WindowsTerminal }),
+        _ => crate::pasting::app_kind::of_window(target),
     };
     let terminal = kind.is_terminal();
 
@@ -477,12 +477,12 @@ pub fn run(app: &AppHandle, cfg: &YapConfig, t: &Transform, origin: Origin, stan
         _ if terminal => FieldSelection::Nothing,
         (Some(s), _) => s.selection.clone().map_or(FieldSelection::Nothing, FieldSelection::Text),
         (None, None) => FieldSelection::Nothing,
-        (None, Some(_)) => crate::selection::editable_selection(target, true),
+        (None, Some(_)) => crate::pasting::selection::editable_selection(target, true),
     };
     let last = match found {
         FieldSelection::Text(_) | FieldSelection::ReadOnly => None,
         _ if terminal => None,
-        _ => crate::as_said::rewrite_target(cfg.rewrite_last_dictation, target),
+        _ => crate::pasting::as_said::rewrite_target(cfg.rewrite_last_dictation, target),
     };
     let input = match pick(terminal, &found, last.is_some()) {
         Pick::Terminal => {
@@ -514,7 +514,7 @@ pub fn run(app: &AppHandle, cfg: &YapConfig, t: &Transform, origin: Origin, stan
             let Some(p) = last.clone() else {
                 return r.ended("nothing", None);
             };
-            if let Err(why) = crate::as_said::rewrite_check(&p) {
+            if let Err(why) = crate::pasting::as_said::rewrite_check(&p) {
                 say(
                     app,
                     &format!("Couldn't {} your last dictation", lower_first(&name)),
@@ -572,7 +572,7 @@ pub fn run(app: &AppHandle, cfg: &YapConfig, t: &Transform, origin: Origin, stan
     }
     r.text = out.clone();
     tracing::debug!(text = %out, "Transform result");
-    if crate::as_said::same_text(out.trim(), r.input.trim()) {
+    if crate::pasting::as_said::same_text(out.trim(), r.input.trim()) {
         let _ = app.emit(EVENT, serde_json::json!({ "name": name, "phase": "unchanged" }));
         let _ = app.emit("yap-state", "cleaned");
         back_to_idle_after(app, UNCHANGED_MS, None);
@@ -588,45 +588,45 @@ pub fn run(app: &AppHandle, cfg: &YapConfig, t: &Transform, origin: Origin, stan
                 idle(app);
                 return r.ended("copied", Some(why));
             }
-            let pasted = crate::as_said::keep_spaces(sel, &out);
+            let pasted = crate::pasting::as_said::keep_spaces(sel, &out);
             // Back into its own window or nowhere (a test run's stand-in is
             // no window).
             let strict = stand_in.is_none();
-            match tauri::async_runtime::block_on(crate::text_injector::inject_text(&pasted, restore, target, strict, kind)) {
-                Ok(crate::text_injector::Delivery::Pasted | crate::text_injector::Delivery::Typed) => {
-                    crate::as_said::remember(target, kind, &pasted, None, restore);
+            match tauri::async_runtime::block_on(crate::pasting::text_injector::inject_text(&pasted, restore, target, strict, kind)) {
+                Ok(crate::pasting::text_injector::Delivery::Pasted | crate::pasting::text_injector::Delivery::Typed) => {
+                    crate::pasting::as_said::remember(target, kind, &pasted, None, restore);
                     r = r.ended(if stand_in.is_some() { "testMode" } else { "pasted" }, None);
-                    crate::as_said::undoable(sel, &pasted)
+                    crate::pasting::as_said::undoable(sel, &pasted)
                 }
-                Ok(crate::text_injector::Delivery::LeftOnClipboard) => {
-                    crate::as_said::forget();
-                    crate::notices::alert::show_soon(app, crate::elevated::alert());
+                Ok(crate::pasting::text_injector::Delivery::LeftOnClipboard) => {
+                    crate::pasting::as_said::forget();
+                    crate::notices::alert::show_soon(app, crate::pasting::elevated::alert());
                     idle(app);
                     return r.ended("copied", Some("the app runs as administrator".into()));
                 }
-                Ok(crate::text_injector::Delivery::WindowGone) => {
-                    crate::as_said::forget();
+                Ok(crate::pasting::text_injector::Delivery::WindowGone) => {
+                    crate::pasting::as_said::forget();
                     copied(app, &name, "you've moved on to another window", &out, false);
                     idle(app);
                     return r.ended("copied", Some("the window couldn't be reached".into()));
                 }
                 Err(e) => {
-                    crate::as_said::forget();
+                    crate::pasting::as_said::forget();
                     failed(app, format!("{name}: Yap couldn't paste the result"));
                     return r.ended("failed", Some(e));
                 }
             }
         }
-        (_, Some(p)) => match crate::as_said::replace_last(app, &p, &out) {
-            Ok(crate::as_said::Rewrote::Replaced { text, .. }) => {
+        (_, Some(p)) => match crate::pasting::as_said::replace_last(app, &p, &out) {
+            Ok(crate::pasting::as_said::Rewrote::Replaced { text, .. }) => {
                 r = r.ended("replaced", None);
-                crate::as_said::undoable(p.pasted_text(), &text)
+                crate::pasting::as_said::undoable(p.pasted_text(), &text)
             }
-            Ok(crate::as_said::Rewrote::Copied { why, .. }) => {
+            Ok(crate::pasting::as_said::Rewrote::Copied { why, .. }) => {
                 idle(app);
                 return r.ended("copied", Some(why));
             }
-            Ok(crate::as_said::Rewrote::TestMode { .. }) => {
+            Ok(crate::pasting::as_said::Rewrote::TestMode { .. }) => {
                 idle(app);
                 return r.ended("testMode", None);
             }
@@ -639,9 +639,9 @@ pub fn run(app: &AppHandle, cfg: &YapConfig, t: &Transform, origin: Origin, stan
     };
     match undo {
         Some(seq) => {
-            let _ = app.emit(EVENT, serde_json::json!({ "name": name, "phase": "done", "offerMs": crate::as_said::OFFER_MS }));
+            let _ = app.emit(EVENT, serde_json::json!({ "name": name, "phase": "done", "offerMs": crate::pasting::as_said::OFFER_MS }));
             let _ = app.emit("yap-state", "cleaned");
-            back_to_idle_after(app, crate::as_said::OFFER_MS, Some(seq));
+            back_to_idle_after(app, crate::pasting::as_said::OFFER_MS, Some(seq));
         }
         None => idle(app),
     }
@@ -657,11 +657,11 @@ fn verify_selection(target: Option<isize>, selected: &str, stand_in: bool) -> Re
         return Ok(());
     }
     let Some(hwnd) = target else { return Err("the window is gone".into()) };
-    if crate::text_injector::current_foreground() != Some(hwnd) {
+    if crate::pasting::text_injector::current_foreground() != Some(hwnd) {
         return Err("you've moved on to another window".into());
     }
-    match crate::selection::editable_selection(Some(hwnd), false) {
-        FieldSelection::Text(now) if crate::as_said::same_text(now.trim(), selected.trim()) => Ok(()),
+    match crate::pasting::selection::editable_selection(Some(hwnd), false) {
+        FieldSelection::Text(now) if crate::pasting::as_said::same_text(now.trim(), selected.trim()) => Ok(()),
         FieldSelection::Nothing => Err("the text isn't selected any more".into()),
         FieldSelection::Text(_) => Err("a different text is selected now".into()),
         FieldSelection::ReadOnly => Err("the selection is in text that can't be changed".into()),
@@ -697,7 +697,7 @@ fn say(app: &AppHandle, title: &str, body: &str) {
 /// The result couldn't go in place: on the clipboard (privately; `copy`:
 /// not there yet), said.
 fn copied(app: &AppHandle, name: &str, why: &str, text: &str, copy: bool) {
-    let on = !copy || crate::text_injector::copy_privately(text.trim());
+    let on = !copy || crate::pasting::text_injector::copy_privately(text.trim());
     let (title, body) = if on {
         (
             format!("Couldn't {} it in place — copied the result instead", lower_first(name)),
@@ -733,12 +733,12 @@ fn back_to_idle_after(app: &AppHandle, ms: u64, seq: Option<u64>) {
     use std::sync::atomic::Ordering;
     let app = app.clone();
     let turn = BAR_TURN.fetch_add(1, Ordering::SeqCst) + 1;
-    let paste = crate::as_said::last_seq();
+    let paste = crate::pasting::as_said::last_seq();
     let _ = std::thread::Builder::new().name("transform-offer".into()).spawn(move || {
         std::thread::sleep(std::time::Duration::from_millis(ms));
         let moved_on = BAR_TURN.load(Ordering::SeqCst) != turn
-            || crate::as_said::last_seq() != paste
-            || seq.is_some_and(|s| !crate::as_said::undo_offered(s));
+            || crate::pasting::as_said::last_seq() != paste
+            || seq.is_some_and(|s| !crate::pasting::as_said::undo_offered(s));
         if moved_on {
             return;
         }

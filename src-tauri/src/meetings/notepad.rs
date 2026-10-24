@@ -556,7 +556,7 @@ mod platform {
                 GetWindowThreadProcessId(hwnd, &mut pid);
                 let exe = names
                     .entry(pid)
-                    .or_insert_with(|| crate::text_injector::app_name_for(Some(id)).unwrap_or_default())
+                    .or_insert_with(|| crate::pasting::text_injector::app_name_for(Some(id)).unwrap_or_default())
                     .clone();
                 if !exes.iter().any(|e| e.eq_ignore_ascii_case(&exe)) {
                     return None;

@@ -704,9 +704,9 @@ pub fn sentences(text: &str) -> Vec<String> {
         if !at_space {
             continue;
         }
-        let word = crate::app_kind::word_before(text, i);
+        let word = crate::pasting::app_kind::word_before(text, i);
         let initial = word.chars().count() == 1 && word.chars().all(char::is_uppercase);
-        if single_dot && (crate::app_kind::is_abbreviation(word) || initial) {
+        if single_dot && (crate::pasting::app_kind::is_abbreviation(word) || initial) {
             continue;
         }
         let s = text[start..end].trim();
