@@ -2060,7 +2060,7 @@ fn apply_config(app: &AppHandle, state: State<'_, AppState>, prev: &YapConfig, c
     });
     // The Integrations toggle may have flipped — start/stop the local API
     // bridge to match (idempotent when unchanged).
-    crate::bridge::sync(&app, cfg.bridge_enabled);
+    crate::integrations::bridge::sync(&app, cfg.bridge_enabled);
     // …and the "Detect calls and offer to take notes" toggle.
     crate::meeting_detect::sync(&app, cfg.meeting_detection);
     // Hiding meeting windows from screen shares may have flipped mid-meeting.
@@ -2088,7 +2088,7 @@ fn apply_config(app: &AppHandle, state: State<'_, AppState>, prev: &YapConfig, c
 /// `{ running, port, bridgeFile }`.
 #[tauri::command]
 pub fn bridge_status() -> serde_json::Value {
-    crate::bridge::status()
+    crate::integrations::bridge::status()
 }
 
 /// Select a model size, download it (with progress events), and make it the

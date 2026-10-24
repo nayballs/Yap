@@ -1189,7 +1189,7 @@ pub fn run_stdio() -> i32 {
         .with_ansi(false)
         .with_env_filter(filter)
         .try_init();
-    let file = crate::bridge::bridge_file_path();
+    let file = crate::integrations::bridge::bridge_file_path();
     tracing::info!(
         version = env!("CARGO_PKG_VERSION"),
         "yap mcp: serving over stdio; Yap's local API is found through {}",

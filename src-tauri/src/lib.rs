@@ -18,7 +18,6 @@ mod assistant;
 mod auth;
 mod bar;
 mod bench;
-mod bridge;
 mod calendar;
 mod capture;
 mod chats;
@@ -37,6 +36,7 @@ mod gesture;
 mod gguf;
 mod gpu;
 mod hardware;
+mod integrations;
 mod media;
 mod media_pause;
 mod meeting;
@@ -60,8 +60,6 @@ mod input_hook;
 mod learn;
 mod llm;
 mod local_llm;
-mod mcp;
-mod mcp_clients;
 mod mic;
 mod mic_privacy;
 mod mic_watch;
@@ -189,7 +187,7 @@ pub(crate) fn window_state_flags() -> tauri_plugin_window_state::StateFlags {
 pub(crate) fn shutdown_cleanup() {
     tts::stop();
     local_llm::shutdown();
-    bridge::stop();
+    integrations::bridge::stop();
     mute::restore_all();
     // The week of network receipts, as it stands (net.rs).
     privacy::net::flush();
@@ -201,7 +199,7 @@ pub(crate) fn shutdown_cleanup() {
 /// hangs up, reading notes from the running Yap (see `mcp.rs`). Returns the
 /// process exit code. Nothing of the app itself starts.
 pub fn run_mcp_server() -> i32 {
-    mcp::run_stdio()
+    integrations::mcp::run_stdio()
 }
 
 /// `yap.exe diarize` (main.rs): the speaker-diarization engine a meeting
@@ -617,9 +615,9 @@ pub fn run() {
             tts::tts_cloud_usage,
             tts::tts_cloud_preview,
             commands::bridge_status,
-            mcp_clients::mcp_clients_status,
-            mcp_clients::mcp_client_add,
-            mcp_clients::mcp_client_remove,
+            integrations::mcp_clients::mcp_clients_status,
+            integrations::mcp_clients::mcp_client_add,
+            integrations::mcp_clients::mcp_client_remove,
             auth::auth_status,
             auth::auth_check_methods,
             auth::auth_start,
@@ -961,7 +959,7 @@ pub fn run() {
             local_llm::spawn_runtime_upgrade(handle.clone());
 
             // Local API bridge (Integrations): loopback server for CLIs/agents.
-            bridge::sync(&handle, cfg.bridge_enabled);
+            integrations::bridge::sync(&handle, cfg.bridge_enabled);
 
             // Yap accounts: sign-in deep links + restore the stored session.
             auth::init(&handle);

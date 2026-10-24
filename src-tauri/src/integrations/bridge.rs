@@ -536,12 +536,12 @@ fn route(
         // ---- meetings (what `yap.exe mcp` reads; views in mcp.rs) ----
         (Method::Get, ["v1", "meetings", "list"]) => {
             let notes = crate::notes::all();
-            let items = crate::mcp::list_meetings(&notes, query_get(params, "folder"), limit(50));
+            let items = crate::integrations::mcp::list_meetings(&notes, query_get(params, "folder"), limit(50));
             respond_json(request, 200, &list_envelope(json!(items)));
         }
         (Method::Get, ["v1", "meetings", "search"]) => {
             let q = query_get(params, "q").unwrap_or("");
-            if crate::mcp::query_words(q).is_empty() {
+            if crate::integrations::mcp::query_words(q).is_empty() {
                 respond_error(
                     request,
                     400,
@@ -551,7 +551,7 @@ fn route(
                 return;
             }
             let notes = crate::notes::all();
-            let items = crate::mcp::search_meetings(&notes, q, limit(10));
+            let items = crate::integrations::mcp::search_meetings(&notes, q, limit(10));
             respond_json(request, 200, &list_envelope(json!(items)));
         }
         // ---- tasks (the checkboxes in notes' summaries, tasks.rs): read only ----
@@ -562,7 +562,7 @@ fn route(
                 return;
             }
             let notes = crate::notes::all();
-            let items = crate::mcp::list_tasks(&notes, status, limit(200));
+            let items = crate::integrations::mcp::list_tasks(&notes, status, limit(200));
             respond_json(request, 200, &list_envelope(json!(items)));
         }
         (Method::Get, ["v1", "mcp", "config"]) => {
