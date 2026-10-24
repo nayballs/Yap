@@ -236,7 +236,9 @@ export function mailtoUrl(note) {
  * `showEcho`. With a search `query`, only the lines that match it, in their
  * groups, without dividers.
  *   { kind: 'group', key, source ('you' | 'them': the user or someone else),
- *     speaker (the voice), label, guess, echo, lines: [{ text, i }] }
+ *     speaker (the voice), label, guess, echo, lines: [{ text, i, edited,
+ *     original }] } — `edited`: the person fixed its words (`original`: what
+ *     Yap heard)
  *   { kind: 'pause', key } | { kind: 'dictated', key }
  */
 export function transcriptItems(transcript, breaks = [], { showEcho = false, query = '', speakers = {} } = {}) {
@@ -251,12 +253,13 @@ export function transcriptItems(transcript, breaks = [], { showEcho = false, que
     } else if ((!s.echo || showEcho) && (!q || (s.text || '').toLowerCase().includes(q))) {
       const echo = !!s.echo;
       const speaker = speakerId(speakers, s);
+      const line = { text: s.text, i, edited: !!s.edited, original: s.original || '' };
       if (group && group.speaker === speaker && group.echo === echo) {
-        group.lines.push({ text: s.text, i });
+        group.lines.push(line);
       } else {
         const { label, guess } = speakerInfo(speakers, speaker);
         const source = speaker === YOU ? 'you' : 'them';
-        group = { kind: 'group', key: `g${i}`, source, speaker, label, guess, echo, lines: [{ text: s.text, i }] };
+        group = { kind: 'group', key: `g${i}`, source, speaker, label, guess, echo, lines: [line] };
         items.push(group);
       }
     }
@@ -343,6 +346,62 @@ export function meetingHelpers(note, recording) {
   if (recording) return ['catchUp', 'questions'];
   const material = spoken(note.transcript).length || note.content?.trim() || note.enhancedContent?.trim();
   return material ? ['followUpEmail', 'blindSpots'] : [];
+}
+
+// ---- fixing notes by hand (noteEdits.js, src-tauri/src/note_edits.rs, tasks.rs) ----
+
+/** Line `i` of a transcript as `transcript_line_edit` finds it again (`LineRef`). */
+export function lineRef(transcript, i) {
+  const s = transcript?.[i] || {};
+  return { index: i, source: s.source, ts: s.ts, startMs: s.startMs ?? null, text: s.text ?? '' };
+}
+
+/**
+ * A transcript with another window's line edit in it (`yap-note-changed`'s
+ * `lineEdit { index, line }`), or `null` when this copy isn't the one it
+ * changed (lines moved meanwhile: fetch the note).
+ */
+export function withLineEdit(transcript, edit) {
+  if (!Array.isArray(transcript) || !edit?.line) return null;
+  const old = transcript[edit.index];
+  const line = edit.line;
+  if (!old || old.source !== line.source || old.ts !== line.ts || (old.startMs ?? null) !== (line.startMs ?? null)) return null;
+  const next = transcript.slice();
+  next[edit.index] = { ...old, text: line.text, edited: !!line.edited, original: line.original || '' };
+  return next;
+}
+
+// A checkbox line: "- [ ] words" (also "*", "+", "•"), any indent.
+const TASK_LINE = /^(\s*[-*+•][ \t]+\[)([ xX])(\][ \t]+)(.*)$/;
+
+/** Line `line`'s task words, as tasks.rs reads them ('' when it's no task). */
+export function taskText(md, line) {
+  const m = TASK_LINE.exec((md || '').split('\n')[line] ?? '');
+  return m ? m[4].trim() : '';
+}
+
+/** `md` with the checkbox on `line` ticked (`done`) or not: the instant change on screen. */
+export function withTaskMark(md, line, done) {
+  const lines = (md || '').split('\n');
+  const m = TASK_LINE.exec(lines[line] ?? '');
+  if (!m) return md;
+  lines[line] = `${m[1]}${done ? 'x' : ' '}${m[3]}${m[4]}`;
+  return lines.join('\n');
+}
+
+/**
+ * Talk lines dated after the summary read the meeting: what "New since
+ * this summary · Update" counts (0 on older notes, whose summary's time
+ * isn't known).
+ */
+export function newSinceSummary(note) {
+  if (!note?.summaryTs || !note.enhancedContent?.trim()) return 0;
+  return (note.transcript || []).filter((s) => !s.echo && !s.dictated && s.text?.trim() && s.ts > note.summaryTs).length;
+}
+
+/** "3 new lines since this summary" / "1 new line since this summary". */
+export function newSinceLine(n) {
+  return `${n} new ${n === 1 ? 'line' : 'lines'} since this summary`;
 }
 
 /** "m:ss", or "h:mm:ss" past the hour. */

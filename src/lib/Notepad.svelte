@@ -79,7 +79,12 @@
     withLineSpeakers,
     withLineSplice,
     hasLine,
+    withLineEdit,
+    withTaskMark,
+    newSinceSummary,
+    newSinceLine,
   } from './notepadText.js';
+  import { editLine, taskToggled, setTask, saveSummary, askReplaceSummary } from './noteEdits.js';
   import {
     meetingAudio,
     initMeetingAudio,
@@ -134,6 +139,8 @@
   let loads = 0;
   async function load(id) {
     flushSave();
+    finishSummaryEdit();
+    editingLine = null;
     const asked = ++loads;
     if (id == null) {
       note = null;
@@ -190,6 +197,8 @@
     'breaks',
     'digests',
     'enhancedContent',
+    'summaryEditedMs',
+    'summaryTs',
   ]);
 
   async function reload() {
@@ -211,7 +220,11 @@
       if (kept('speakers')) note.speakers = n.speakers;
       if (kept('breaks')) note.breaks = n.breaks;
       if (kept('digests')) note.digests = n.digests;
-      if (kept('summary')) note.enhancedContent = n.enhancedContent;
+      if (kept('summary') && !summaryDirty) {
+        note.enhancedContent = n.enhancedContent;
+        note.summaryEditedMs = n.summaryEditedMs;
+        note.summaryTs = n.summaryTs;
+      }
       if (kept('participants')) note.participants = n.participants;
       // The rest as stored: no event brings them (its calendar meeting, tied
       // as the recording started — its brief follows —, the date, the type).
@@ -298,9 +311,19 @@
       changing('speakers');
       note.speakers = p.speakers;
     }
-    if (typeof p.enhancedContent === 'string') {
+    if (typeof p.enhancedContent === 'string' && !summaryDirty) {
       changing('summary');
       note.enhancedContent = p.enhancedContent;
+      if (typeof p.summaryEditedMs === 'number') note.summaryEditedMs = p.summaryEditedMs;
+      if (typeof p.summaryTs === 'number') note.summaryTs = p.summaryTs;
+    }
+    if (p.lineEdit) {
+      // A line's words fixed in the Notes view.
+      const t = withLineEdit(note.transcript, p.lineEdit);
+      if (t) {
+        changing('transcript');
+        note.transcript = t;
+      } else reload();
     }
     if (p.lineSplice) {
       // The voice separation labelled lines, splitting some where the
@@ -420,14 +443,101 @@
     }
   }
 
-  async function generate() {
+  async function generate(returnFocus = null) {
     if (!note || writing) return;
     flushSave();
+    finishSummaryEdit();
+    // A summary the person edited goes only when they say so (note_edits.rs).
+    if (note.summaryEditedMs && hasSummary) {
+      askReplaceSummary({ run: () => startSummary(true), returnFocus });
+      return;
+    }
+    await startSummary(false);
+  }
+  async function startSummary(replace) {
     tab = 'summary';
     try {
-      await summarise(note.id);
+      await summarise(note.id, { replace });
     } catch (e) {
       toast({ title: "Couldn't write the summary", description: String(e), variant: 'destructive' });
+      return false;
+    }
+  }
+
+  // ---- the summary, edited in place (note_edits.rs) and its tasks ticked (tasks.rs) ----
+
+  let summaryEditing = $state(false);
+  let summaryDraft = $state('');
+  let summaryEl = $state(null);
+  let summaryTimer = null;
+  // Typed and not yet saved: an event or a read never puts older words back.
+  let summaryDirty = false;
+  const newLines = $derived(recordingThis ? 0 : newSinceSummary(note));
+  async function startSummaryEdit() {
+    if (!note) return;
+    summaryDraft = note.enhancedContent || '';
+    summaryEditing = true;
+    await tick();
+    summaryEl?.focus();
+    fitSummary();
+  }
+  function fitSummary() {
+    if (!summaryEl) return;
+    summaryEl.style.height = 'auto';
+    summaryEl.style.height = `${summaryEl.scrollHeight + 2}px`;
+  }
+  function queueSummarySave() {
+    summaryDirty = true;
+    fitSummary();
+    clearTimeout(summaryTimer);
+    summaryTimer = setTimeout(flushSummary, 600);
+  }
+  async function flushSummary() {
+    clearTimeout(summaryTimer);
+    summaryTimer = null;
+    if (!summaryDirty || !note) return;
+    summaryDirty = false;
+    const id = note.id;
+    const text = summaryDraft;
+    try {
+      const s = await saveSummary(id, text, LABEL);
+      if (note?.id !== id) return;
+      changing('summary');
+      if (!summaryDirty) note.enhancedContent = s.enhancedContent;
+      note.summaryEditedMs = s.summaryEditedMs;
+      note.summaryTs = s.summaryTs;
+    } catch (e) {
+      toast({ title: "Couldn't save the summary", description: String(e), variant: 'destructive' });
+    }
+  }
+  function finishSummaryEdit() {
+    if (!summaryEditing) return;
+    if (summaryDirty && note) note.enhancedContent = summaryDraft;
+    flushSummary();
+    summaryEditing = false;
+  }
+  function onSummaryKeydown(e) {
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      e.stopPropagation();
+      finishSummaryEdit();
+    }
+  }
+  // A task's checkbox, ticked in the rendered summary.
+  async function onTaskChange(e) {
+    if (!note) return;
+    const task = taskToggled(e, note.enhancedContent);
+    if (!task) return;
+    const id = note.id;
+    const before = note.enhancedContent;
+    changing('summary');
+    note.enhancedContent = withTaskMark(before, task.line, task.done);
+    try {
+      const md = await setTask(id, task, LABEL);
+      if (note?.id === id) note.enhancedContent = md;
+    } catch (err) {
+      if (note?.id === id) note.enhancedContent = before;
+      toast({ title: "Couldn't tick the task", description: String(err), variant: 'destructive' });
     }
   }
 
@@ -529,14 +639,77 @@
       setTimeout(() => copiedLine === line.i && (copiedLine = null), 1200);
     }
   }
+  // Fixing a line's words (note_edits.rs): double-click it, or Edit line in
+  // its menu. Enter saves, Escape puts it back, leaving it saves. It keeps
+  // its time, voice and audio (▶ plays what was said), shows "edited", and
+  // a misheard word it fixed is offered for the dictionary.
+  let editingLine = $state(null); // { i, text }
+  let lineEditEl = $state(null);
+  let lineSaving = false;
+  async function startEditLine(line) {
+    if (!note || searchQuery) return;
+    speakerMenu = null;
+    editingLine = { i: line.i, text: note.transcript?.[line.i]?.text ?? line.text };
+    await tick();
+    lineEditEl?.focus();
+    lineEditEl?.select();
+    fitLineEdit();
+  }
+  function fitLineEdit() {
+    if (!lineEditEl) return;
+    lineEditEl.style.height = 'auto';
+    lineEditEl.style.height = `${lineEditEl.scrollHeight}px`;
+  }
+  async function finishEditLine(save) {
+    const edit = editingLine;
+    if (!edit || lineSaving) return;
+    editingLine = null;
+    const before = note?.transcript?.[edit.i];
+    if (!save || !note || !before || edit.text.trim() === before.text) {
+      refocusLine(edit.i);
+      return;
+    }
+    lineSaving = true;
+    const id = note.id;
+    try {
+      const r = await editLine(id, note.transcript, edit.i, edit.text, LABEL);
+      if (note?.id === id && r?.changed) {
+        changing('transcript');
+        const t = withLineEdit(note.transcript, { index: r.index, line: r.line });
+        if (t) note.transcript = t;
+        else reload();
+      }
+    } catch (e) {
+      toast({ title: "Couldn't change the line", description: String(e), variant: 'destructive' });
+    } finally {
+      lineSaving = false;
+      refocusLine(edit.i);
+    }
+  }
+  function refocusLine(i) {
+    setTimeout(() => lineEls[i]?.focus({ preventScroll: true }), 0);
+  }
+  function onLineEditKeydown(e) {
+    if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
+      e.preventDefault();
+      finishEditLine(true);
+    } else if (e.key === 'Escape') {
+      e.preventDefault();
+      e.stopPropagation();
+      finishEditLine(false);
+    }
+  }
+
   // A line's right-click menu (ui/contextMenu.svelte.js, as everywhere): what
   // its hover buttons do — Copy line, and Who said this? (the speaker menu
-  // at the line, SpeakerMenu.svelte) — not for a line from the speakers.
+  // at the line, SpeakerMenu.svelte) — not for a line from the speakers —
+  // and Edit line.
   let lineEls = $state({});
   function lineMenu(e, item, line) {
     openContextMenu(
       e,
       [
+        { label: 'Edit line', icon: 'pencil', onselect: () => startEditLine(line) },
         { label: 'Copy line', icon: 'copy', onselect: () => copyLine(line) },
         canPlay(note?.id, note?.transcript?.[line.i])
           ? {
@@ -1152,6 +1325,7 @@
     {:else if name === 'note'}<path d="M14 3.5H7a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8.5z" /><path d="M14 3.5v5h5" />
     {:else if name === 'chat'}<path d="M20 11.5a7.5 7.5 0 0 1-10.9 6.7L4.5 19.5l1.3-4.3A7.5 7.5 0 1 1 20 11.5z" />
     {:else if name === 'chevron'}<path d="M6 9l6 6 6-6" />
+    {:else if name === 'pencil'}<path d="M4.5 19.5h4l10-10a2.8 2.8 0 0 0-4-4l-10 10z" /><path d="M13.5 6.5l4 4" />
     {/if}
   </svg>
 {/snippet}
@@ -1472,8 +1646,30 @@
                           oncontextmenu={(e) => lineMenu(e, item, line)}
                           onkeydown={(e) => menuKey(e, (k) => lineMenu(k, item, line))}
                         >
-                          <div class="bubble {bubbleShape(j, item.lines.length)}">
-                            {#each highlightParts(line.text, searchQuery) as part, k (k)}{#if part.hit}<mark>{part.text}</mark>{:else}{part.text}{/if}{/each}
+                          <!-- Double-click to fix its words (Edit line in its menu from the keyboard). -->
+                          <!-- svelte-ignore a11y_no_static_element_interactions -->
+                          <div
+                            class="bubble {bubbleShape(j, item.lines.length)}"
+                            class:editing={editingLine?.i === line.i}
+                            ondblclick={() => editingLine?.i !== line.i && startEditLine(line)}
+                          >
+                            {#if editingLine?.i === line.i}
+                              <textarea
+                                class="lineedit"
+                                rows="1"
+                                aria-label="Edit line: Enter saves, Escape cancels"
+                                bind:this={lineEditEl}
+                                bind:value={editingLine.text}
+                                oninput={fitLineEdit}
+                                onkeydown={onLineEditKeydown}
+                                onblur={() => finishEditLine(true)}
+                              ></textarea>
+                            {:else}
+                              {#each highlightParts(line.text, searchQuery) as part, k (k)}{#if part.hit}<mark>{part.text}</mark>{:else}{part.text}{/if}{/each}{#if line.edited}<span
+                                  class="lineedited"
+                                  title={`You edited this line. Yap heard: “${line.original}”`}
+                                >edited</span>{/if}
+                            {/if}
                           </div>
                           {#if !item.echo}
                             <button
@@ -1574,9 +1770,41 @@
               <p class="sumnote">Nothing to summarise yet: no speech was transcribed and nothing was typed.</p>
             {/if}
 
-            {#if hasSummary && !writing}
-              <!-- renderMarkdown passes no raw HTML and sanitises its output (lib/markdown.js). -->
-              <div class="rendered">{@html renderMarkdown(note.enhancedContent)}</div>
+            {#if (hasSummary || summaryEditing) && !writing}
+              <!-- Edit it in place (note_edits.rs); what's new since it, with Update. -->
+              <div class="sumbar">
+                {#if newLines && !summaryEditing}
+                  <p class="sumnew" aria-live="polite">
+                    {newSinceLine(newLines)} ·
+                    <button class="sumupdate" onclick={(e) => generate(e.currentTarget)}>Update</button>
+                  </p>
+                {/if}
+                <span class="grow"></span>
+                {#if note.summaryEditedMs && !summaryEditing}
+                  <span class="sumedited" title="You changed this summary: Yap asks before writing it again">Edited</span>
+                {/if}
+                <button
+                  class="sumeditbtn"
+                  aria-pressed={summaryEditing}
+                  onclick={() => (summaryEditing ? finishSummaryEdit() : startSummaryEdit())}
+                >
+                  {@render icon(summaryEditing ? 'check' : 'pencil')}{summaryEditing ? 'Done' : 'Edit'}
+                </button>
+              </div>
+              {#if summaryEditing}
+                <textarea
+                  class="sumedit"
+                  aria-label="Edit the summary (Markdown)"
+                  bind:this={summaryEl}
+                  bind:value={summaryDraft}
+                  oninput={queueSummarySave}
+                  onkeydown={onSummaryKeydown}
+                ></textarea>
+              {:else}
+                <!-- renderMarkdown passes no raw HTML and sanitises its output (lib/markdown.js);
+                     its tasks tick in place (tasks.rs). -->
+                <div class="rendered" onchange={onTaskChange}>{@html renderMarkdown(note.enhancedContent, { tickable: true })}</div>
+              {/if}
             {:else if !writing && job?.state !== 'needsAi'}
               <p class="sumempty">
                 {@render icon('note')}
@@ -1608,10 +1836,10 @@
             <strong>The summary didn't come through</strong>
             <span class="snagdetail" title={job.error}>{job.error}</span>
           </span>
-          <button class="snagretry" aria-label="Retry" title="Try again" onclick={generate}>{@render icon('retry')}</button>
+          <button class="snagretry" aria-label="Retry" title="Try again" onclick={(e) => generate(e.currentTarget)}>{@render icon('retry')}</button>
         </div>
       {:else if !recordingThis && !writing && !hasSummary && !askOpen && (note.transcript?.length || note.content?.trim())}
-        <button class="gen" onclick={generate}>{@render icon('plus')}Generate summary</button>
+        <button class="gen" onclick={() => generate()}>{@render icon('plus')}Generate summary</button>
       {/if}
       {#if recordingThis && !askOpen}
         <div class="consent popwrap">
@@ -2545,6 +2773,35 @@
   .bubble.first {
     border-radius: 12px 12px 12px 4px;
   }
+  /* A line being fixed: its words in a box the bubble's size and type. */
+  .bubble.editing {
+    width: 100%;
+    background: var(--yap-paper-card);
+    box-shadow: 0 0 0 3px var(--yap-paper-ring);
+  }
+  .lineedit {
+    display: block;
+    width: 100%;
+    padding: 0;
+    border: none;
+    background: none;
+    color: inherit;
+    font: inherit;
+    line-height: inherit;
+    resize: none;
+    overflow: hidden;
+  }
+  .lineedit:focus {
+    outline: none;
+  }
+  /* "edited": the person fixed this line (its title says what Yap heard). */
+  .lineedited {
+    margin-left: 6px;
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--yap-paper-faint);
+    cursor: help;
+  }
   .bubble.mid {
     border-radius: 4px 12px 12px 4px;
   }
@@ -2935,6 +3192,105 @@
   .rendered :global(li.task) {
     list-style: none;
     margin-left: -18px;
+  }
+  /* A task ticks in place (tasks.rs): the ink's own colour, a done one struck through. */
+  .rendered :global(li.task > input) {
+    margin: 0 4px 0 0;
+    accent-color: var(--yap-paper-ink);
+    vertical-align: -1px;
+  }
+  .rendered :global(li.task > input:not([disabled])) {
+    cursor: pointer;
+  }
+  .rendered :global(li.task:has(> input:checked)) {
+    color: var(--yap-paper-muted);
+    text-decoration: line-through;
+    text-decoration-color: var(--yap-paper-faint);
+  }
+  .rendered :global(li.task > input:focus-visible) {
+    outline: 3px solid var(--yap-paper-ring);
+    outline-offset: 2px;
+  }
+
+  /* Over the summary: what's new since it (Update), "Edited", Edit / Done. */
+  .sumbar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-height: 28px;
+    margin: 0 0 6px;
+    padding: 0 12px;
+  }
+  .sumbar .grow {
+    flex: 1;
+  }
+  .sumnew {
+    margin: 0;
+    font-size: 12.5px;
+    color: var(--yap-paper-muted);
+  }
+  .sumupdate {
+    padding: 0;
+    border: none;
+    background: none;
+    color: var(--yap-paper-ink);
+    font: inherit;
+    font-weight: 600;
+    text-decoration: underline;
+    text-underline-offset: 2px;
+    cursor: pointer;
+  }
+  .sumedited {
+    font-size: 11.5px;
+    font-weight: 600;
+    color: var(--yap-paper-faint);
+  }
+  .sumeditbtn {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    height: 26px;
+    padding: 0 10px;
+    border: 1px solid var(--yap-paper-rule);
+    border-radius: 9999px;
+    background: var(--yap-paper-card);
+    color: var(--yap-paper-text-2);
+    font-size: 12.5px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  .sumeditbtn:hover {
+    color: var(--yap-paper-ink);
+    background: var(--yap-paper-s1);
+  }
+  .sumeditbtn :global(svg) {
+    width: 13px;
+    height: 13px;
+  }
+  .sumupdate:focus-visible,
+  .sumeditbtn:focus-visible {
+    outline: 3px solid var(--yap-paper-ring);
+    outline-offset: 2px;
+  }
+  .sumedit {
+    display: block;
+    box-sizing: border-box;
+    width: calc(100% - 24px);
+    min-height: 240px;
+    margin: 0 12px;
+    padding: 10px 12px;
+    border: 1px solid var(--yap-paper-rule);
+    border-radius: 10px;
+    background: var(--yap-paper-card);
+    color: var(--yap-paper-ink);
+    font-family: ui-monospace, 'Cascadia Mono', Consolas, monospace;
+    font-size: 13px;
+    line-height: 1.55;
+    resize: vertical;
+  }
+  .sumedit:focus {
+    outline: 3px solid var(--yap-paper-ring);
+    outline-offset: 0;
   }
   /* A list under a task: indented under its text, past the checkbox. */
   .rendered :global(li.task > :is(ul, ol)) {

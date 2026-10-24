@@ -20,7 +20,7 @@
   import { attention } from './attention.svelte.js';
   import { account, displayName, initAccount, initials } from './account.svelte.js';
   import { initUpdates } from './updates.svelte.js';
-  import { initMeetingDetect } from './meetingDetect.svelte.js';
+  import { initMeetingDetect, noteRequest } from './meetingDetect.svelte.js';
   import { initMeetingSummary, askStartedByMistake } from './meetingSummary.svelte.js';
   import { initMeetingGuard } from './meetingGuard.js';
   import { initCalendar, closeConnectDialog } from './calendar.svelte.js';
@@ -39,6 +39,7 @@
   import DictionaryView from './DictionaryView.svelte';
   import UploadView from './UploadView.svelte';
   import NotesView from './NotesView.svelte';
+  import TasksView from './TasksView.svelte';
   import ChatView from './ChatView.svelte';
   import { chatRequest } from './chatRequest.svelte.js';
   import IntegrationsView from './IntegrationsView.svelte';
@@ -105,6 +106,8 @@
     { id: 'chat', label: 'Chat' },
     { id: 'notes', label: 'Notes' },
     { id: 'meetings', label: 'Meetings' },
+    // The meetings' action plans' tasks, ticked here or in the note (tasks.rs).
+    { id: 'tasks', label: 'Tasks' },
     { id: 'upload', label: 'Upload' },
     { id: 'dictionary', label: 'Dictionary' },
     { id: 'integrations', label: 'Integrations' },
@@ -233,6 +236,8 @@
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M13.4 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-7.4" /><path d="M18.4 2.6a2 2 0 0 1 2.8 2.8L13 13.6 9 14.6l1-4z" /></svg>
   {:else if id === 'meetings'}
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4.5" width="18" height="16" rx="2.5" /><path d="M3 9.5h18M8 2.5v4M16 2.5v4" /><path d="M8 14h3" /></svg>
+  {:else if id === 'tasks'}
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3.5" width="7" height="7" rx="1.5" /><path d="M4.8 7l1.5 1.5 2.4-3" /><rect x="3" y="13.5" width="7" height="7" rx="1.5" /><path d="M13.5 7h7.5M13.5 17h7.5" /></svg>
   {:else if id === 'upload'}
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><path d="M17 8l-5-5-5 5" /><path d="M12 3v12" /></svg>
   {:else if id === 'dictionary'}
@@ -369,6 +374,13 @@
       <NotesView onopensettings={openSettings} />
     {:else if activeView === 'meetings'}
       <MeetingsView onopensettings={openSettings} onnavigate={(v) => (activeView = v)} />
+    {:else if activeView === 'tasks'}
+      <TasksView
+        onopennote={(id, line) => {
+          noteRequest.pending = { id, stop: false, line };
+          activeView = 'notes';
+        }}
+      />
     {:else if activeView === 'upload'}
       <UploadView />
     {:else if activeView === 'integrations'}

@@ -288,6 +288,7 @@ test('an AI app reads meetings through yap.exe mcp, and never dictations', async
       'get_meeting',
       'search_notes',
       'get_note',
+      'list_tasks',
       'list_folders',
     ]);
 
@@ -330,6 +331,10 @@ test('an AI app reads meetings through yap.exe mcp, and never dictations', async
     expect(text).toContain('**Groceries**');
     text = await call('get_note', { id: 3 });
     expect(text).toContain('Oat milk, coffee and bread');
+    // The action plan's tasks, read only (tasks.rs).
+    text = await call('list_tasks');
+    expect(text).toContain('**Q3 planning sync**');
+    expect(text).toContain('send the revised budget (due: Friday)');
     text = await call('list_folders');
     expect(text).toContain('- Meetings: 2 notes');
     expect(text).toContain('- Personal: 1 note');
@@ -404,7 +409,7 @@ test('with Yap closed, the tools ask for Yap', async ({ yap }) => {
   const mcp = startMcp(exe(yap), { YAP_BRIDGE_FILE: path.join(yap.runDir, 'no-yap-here.json') });
   try {
     await mcp.initialize();
-    expect(await mcp.toolNames()).toHaveLength(6); // still listed, so the app shows Yap
+    expect(await mcp.toolNames()).toHaveLength(7); // still listed, so the app shows Yap
     const r = await mcp.tool('list_meetings');
     expect(r.isError).toBe(true);
     expect(r.text).toContain('Open Yap to let your AI read your notes');

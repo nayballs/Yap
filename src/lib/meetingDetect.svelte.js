@@ -36,7 +36,10 @@ import { toast, dismiss, isToastLive, updateToast } from './ui/toast.svelte.js';
 
 export const meetingDetect = $state({ enabled: true, style: 'popup', apps: [], calls: [], prompt: null });
 
-/** A note for NotesView to open: { id, stop } (it clears `pending`). */
+/**
+ * A note for NotesView to open: { id, stop, line? } (it clears `pending`);
+ * `line`: a transcript line to show (the Tasks view's moment).
+ */
 export const noteRequest = $state({ pending: null });
 
 let started = false;

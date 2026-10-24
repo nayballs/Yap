@@ -1323,10 +1323,11 @@ pub fn prompt_text(words: &[Suggestion]) -> (String, String, &'static str) {
     }
 }
 
-/// What the main window gets (`yap-word-suggestion`).
+/// What the main window gets (`yap-word-suggestion`), and what a meeting
+/// line's edit hands back to its window ([`offer_for_line`]).
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct Prompt {
+pub struct Prompt {
     id: u64,
     title: String,
     body: String,
@@ -1439,6 +1440,49 @@ fn offer(app: &AppHandle, words: Vec<Suggestion>, ignore_gap: bool) -> bool {
         tracing::debug!("learn: nowhere to show the suggestion");
     }
     shown
+}
+
+/// A meeting transcript line the person corrected (`note_edits.rs`), `old`
+/// → `new`: what's worth learning in it, by the same rules as a dictation
+/// they fixed ([`suggestions`]; the start of a line starts a sentence), the
+/// words turned down or removed before left out. Returned for the window
+/// that made the edit to ask right there (the person is looking at the
+/// line), answered with [`word_suggestion_respond`] like any other; no
+/// three-minute gap before it (they just fixed a word), though it counts as
+/// the last prompt for the gap after it. `None`: nothing worth offering, or
+/// "Suggest words from your corrections" is off. Blocking (the spell
+/// checker): off the main thread.
+pub fn offer_for_line(old: &str, new: &str) -> Option<Prompt> {
+    let cfg = crate::config::load();
+    if !cfg.learn_words {
+        return None;
+    }
+    let (old, new) = (normalise(old), normalise(new));
+    let ordinary = Ordinary::new();
+    let rec = record();
+    let words: Vec<Suggestion> = suggestions(old.trim(), new.trim(), true, &cfg.dictionary, &|w| ordinary.is(w))
+        .into_iter()
+        .filter(|s| allowed(&rec, s))
+        .take(MAX_SUGGESTIONS)
+        .collect();
+    tracing::debug!(found = words.len(), "learn: looked at a meeting line's edit");
+    if words.is_empty() {
+        return None;
+    }
+    let id = NEXT_ID.fetch_add(1, Ordering::SeqCst);
+    let (title, body, never) = prompt_text(&words);
+    *pending() = Some(Pending {
+        id,
+        words: words.clone(),
+        on_bar: false,
+    });
+    let now = now_ms();
+    update_record(|mut r| {
+        r.last_offered_at = now;
+        r
+    });
+    tracing::info!(count = words.len(), "learn: offered words from a meeting line's edit");
+    Some(Prompt { id, title, body, never, words })
 }
 
 /// The words added, as their title: "“Kubernetes” is in your dictionary".

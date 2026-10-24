@@ -1118,7 +1118,8 @@ test('a summary with tasks, lists, a quote and a table renders in the notepad an
     for (const plan of views) {
       await expect(plan.getByRole('heading', { name: 'Action plan' })).toBeVisible({ timeout: 15_000 });
       await expect(plan.getByRole('heading', { name: 'Alice', exact: true })).toBeVisible();
-      await expect(plan.locator('li.task input[type="checkbox"][disabled]')).toHaveCount(4);
+      // A summary's tasks tick in place (tasks.rs; notes-edit.spec.js ticks them).
+      await expect(plan.locator('li.task input[type="checkbox"]:not([disabled])')).toHaveCount(4);
       await expect(plan.locator('li.task input:checked')).toHaveCount(1);
       await expect(plan.locator('li.task ul > li')).toHaveText(['the headcount for both days', 'dietary needs']);
       await expect(plan.locator('ol > li')).toHaveText(['Keep the offsite budget as it is.', 'Report the deposit in this quarter.']);

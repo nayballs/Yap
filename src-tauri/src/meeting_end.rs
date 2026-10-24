@@ -66,7 +66,8 @@ pub struct Summary {
     pub note_id: u64,
     /// Which run this is (a window tells two runs' results apart by it).
     pub run: u64,
-    /// "running" | "done" | "error" | "needsAi" | "nothing".
+    /// "running" | "done" | "error" | "needsAi" | "nothing" | "kept" (the
+    /// person's edited summary stays: `note_edits.rs`).
     pub state: &'static str,
     /// 1 reading the meeting, 2 writing, 3 checking (while running).
     pub step: u8,
@@ -274,8 +275,14 @@ fn publish(app: &AppHandle, summary: Summary) {
 
 /// Write note `note_id`'s action plan in the background (the built-in Action
 /// Plan action, as "End meeting & summarise" always did), unless one is being
-/// written already. Returns whether this started one.
+/// written already. Returns whether this started one. A summary the person
+/// edited stays (the job ends "kept"; `note_edits.rs`).
 pub fn start_summary(app: &AppHandle, note_id: u64) -> bool {
+    start_summary_with(app, note_id, false)
+}
+
+/// [`start_summary`]; `replace`: the person said their edited summary may go.
+fn start_summary_with(app: &AppHandle, note_id: u64, replace: bool) -> bool {
     let run = RUN_SEQ.fetch_add(1, Ordering::SeqCst) + 1;
     let first = Summary {
         note_id,
@@ -304,14 +311,16 @@ pub fn start_summary(app: &AppHandle, note_id: u64) -> bool {
                 );
             }
         };
-        let result = write_action_plan(&app, note_id, step).await;
+        let result = write_action_plan(&app, note_id, replace, step).await;
         let (state, error) = match result {
             Ok(()) => ("done", None),
             Err(e) if e == NOTHING => ("nothing", Some(e)),
+            Err(e) if e == crate::note_edits::SUMMARY_KEPT => ("kept", Some(e)),
             Err(e) if needs_ai(&e) => ("needsAi", Some(e)),
             Err(e) => ("error", Some(e)),
         };
         match &error {
+            Some(_) if state == "kept" => tracing::info!(note_id, "Meeting action plan not written: the person's edited summary stays"),
             Some(e) => tracing::warn!(note_id, state, "Meeting action plan not written: {e}"),
             None => {
                 tracing::info!(note_id, "Meeting action plan written");
@@ -330,11 +339,13 @@ pub fn start_summary(app: &AppHandle, note_id: u64) -> bool {
 
 /// The action plan for `note_id`, through the same path as the Notes view's
 /// actions (`commands::run_enhance`).
-async fn write_action_plan(app: &AppHandle, note_id: u64, step: impl Fn(u8)) -> Result<(), String> {
+async fn write_action_plan(app: &AppHandle, note_id: u64, replace: bool, step: impl Fn(u8)) -> Result<(), String> {
     let note = crate::notes::get(note_id).ok_or("Note not found")?;
     if note.content.trim().is_empty() && crate::notes::speech_words(&note.transcript) == 0 {
         return Err(NOTHING.to_string());
     }
+    // The person's edited summary stays, unless they said it may go.
+    crate::note_edits::keeps_summary(&note, replace)?;
     // Found by kind (renaming it is fine); older stores fall back to Meeting
     // Notes, as the Notes view does.
     // Who each voice is, before the plan names owners: the AI's answers
@@ -348,7 +359,7 @@ async fn write_action_plan(app: &AppHandle, note_id: u64, step: impl Fn(u8)) -> 
         .find(|a| a.kind == crate::notes::ACTION_PLAN)
         .or_else(|| actions.iter().find(|a| a.name == "Meeting Notes"))
         .map(|a| a.id);
-    crate::commands::run_enhance(app, note_id, action, step).await?;
+    crate::commands::run_enhance(app, note_id, action, replace, step).await?;
     Ok(())
 }
 
@@ -368,15 +379,17 @@ pub fn meeting_pause() -> Result<(), String> {
 }
 
 /// Write (again) the action plan of a meeting that isn't recording:
-/// "Generate summary", Retry, the Notes view's "Action plan". Progress and
-/// the result arrive as `yap-meeting-summary`.
+/// "Generate summary", Retry, the Notes view's "Action plan", "New since
+/// this summary · Update". Progress and the result arrive as
+/// `yap-meeting-summary`. `replace`: the window asked the person, and their
+/// edited summary may go.
 #[tauri::command]
-pub fn meeting_summarise(app: AppHandle, note_id: u64) -> Result<(), String> {
+pub fn meeting_summarise(app: AppHandle, note_id: u64, replace: Option<bool>) -> Result<(), String> {
     crate::notes::get(note_id).ok_or("Note not found")?;
     if crate::meeting::recording_note() == Some(note_id) {
         return Err("Stop the recording first".to_string());
     }
-    start_summary(&app, note_id);
+    start_summary_with(&app, note_id, replace.unwrap_or(false));
     Ok(())
 }
 

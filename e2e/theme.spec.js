@@ -491,7 +491,7 @@ test('every view, every Settings page, the notepad, onboarding, a toast, the dia
   await expect.poll(() => themeOf(main)).toBe('dark');
 
   // The main window's views.
-  for (const view of ['Home', 'Insights', 'Chat', 'Notes', 'Meetings', 'Upload', 'Dictionary', 'Integrations']) {
+  for (const view of ['Home', 'Insights', 'Chat', 'Notes', 'Meetings', 'Tasks', 'Upload', 'Dictionary', 'Integrations']) {
     await openView(main, view);
     if (view === 'Chat') {
       await main.locator('.conv').filter({ hasText: 'Offsite plan' }).click();

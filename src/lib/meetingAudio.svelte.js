@@ -129,7 +129,7 @@ export function askTranscribeAgain(note, { title = '', returnFocus = null } = {}
     title: title ? `Transcribe “${title}” again?` : 'Transcribe this meeting again?',
     body:
       `Yap runs ${model} over the meeting's audio and replaces its transcript. ` +
-      'Your notes stay as they are, and names stay on the lines that still match. ' +
+      'Your notes stay as they are, lines you edited stay as you wrote them, and names stay on the lines that still match. ' +
       'The summary stays as it is until you generate it again.',
     confirmLabel: 'Transcribe again',
     busyLabel: 'Starting…',

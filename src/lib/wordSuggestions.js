@@ -10,12 +10,15 @@
 //   "expire"): the card's ✕ is "Not now", running out is no answer at all.
 //   After Add, Rust saves the words and sends `yap-dictionary-learned`
 //   (Settings adopts it, so its auto-save keeps them); this confirms it.
+// A meeting transcript line the person fixed (noteEdits.js) gets the same
+// question in the window where they fixed it (`askWordSuggestion`), the
+// meeting notepad included; Open Dictionary only where there's a sidebar.
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { toast } from './ui/toast.svelte.js';
 
 let started = false;
-let showView = () => {};
+let showView = null;
 
 /** "“Kubernetes” is in your dictionary" / "Added 2 words to your dictionary". */
 export function addedTitle(added) {
@@ -30,10 +33,11 @@ export function initWordSuggestions(opts = {}) {
   if (opts.showView) showView = opts.showView;
   if (started) return;
   started = true;
-  listen('yap-word-suggestion', (e) => ask(e.payload));
+  listen('yap-word-suggestion', (e) => askWordSuggestion(e.payload));
 }
 
-function ask(s) {
+/** Ask about a suggestion (`{ id, title, body, never, words }`, learn.rs `Prompt`) as a toast. */
+export function askWordSuggestion(s) {
   if (!s?.id || !s.title) return;
   const answer = (a) => invoke('word_suggestion_respond', { id: s.id, answer: a });
   const quietly = (a) => answer(a).catch(() => {});
@@ -56,7 +60,7 @@ function ask(s) {
             variant: 'success',
             chip: 'Dictionary',
             icon: 'dictionary',
-            action: { label: 'Open Dictionary', onClick: () => showView('dictionary') },
+            ...(showView ? { action: { label: 'Open Dictionary', onClick: () => showView('dictionary') } } : {}),
           });
         } catch (err) {
           toast({ title: "Couldn't add it to your dictionary", description: String(err), variant: 'destructive' });

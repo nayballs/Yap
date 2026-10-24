@@ -9,7 +9,7 @@
 // file's tests only.
 import { test, expect } from '@playwright/test';
 import { JSDOM } from 'jsdom';
-import { renderMarkdown, markdownToText } from '../src/lib/markdown.js';
+import { renderMarkdown, markdownToText, taskLines } from '../src/lib/markdown.js';
 
 let dom;
 test.beforeAll(() => {
@@ -63,11 +63,31 @@ test('lines and lists indented under an item belong to it', () => {
   expect(tags(renderMarkdown('1. one\n- bullet'))).toEqual(['<ol>', '<li>', '</li>', '</ol>', '<ul>', '<li>', '</li>', '</ul>']);
   // Tasks keep their checkboxes; a heading ends the list.
   const tasks = renderMarkdown('- [ ] ship it\n\n- [x] test it\n## Next');
-  expect(tasks).toContain('<li class="task"><input type="checkbox" disabled=""> ship it');
-  expect(tasks).toContain('<li class="task"><input type="checkbox" disabled="" checked=""> test it</li>\n</ul>\n<h3>Next</h3>');
+  expect(tasks).toContain('<li class="task"><input type="checkbox" disabled="" aria-label="ship it"> ship it');
+  expect(tasks).toContain('<li class="task"><input type="checkbox" disabled="" checked="" aria-label="test it"> test it</li>\n</ul>\n<h3>Next</h3>');
   // Only in bullet lists, and only at the start of the item.
   expect(renderMarkdown('1. [ ] not a task')).not.toContain('<input');
   expect(renderMarkdown('- see [x] later')).not.toContain('<input');
+});
+
+test("a summary's tasks can be ticked, each mapped to its line", () => {
+  const plan = '## Action plan\n### You\n- [ ] Draft the **agenda** (due: Monday)\n- [x] Share the slides\n\n```\n- [ ] code, not a task\n```\n1. [ ] numbered, not a task\n- [ ] Book the venue\n  - [ ] nested <b>one</b>';
+  // Tickable: enabled, named by their words (as markup-free text).
+  const html = renderMarkdown(plan, { tickable: true });
+  const boxes = [...parse(html).querySelectorAll('input')];
+  expect(boxes.map((b) => [b.getAttribute('aria-label'), b.checked, b.disabled])).toEqual([
+    ['Draft the **agenda** (due: Monday)', false, false],
+    ['Share the slides', true, false],
+    ['Book the venue', false, false],
+    ['nested <b>one</b>', false, false],
+  ]);
+  // Everywhere else (an answer): never tickable.
+  expect(parse(renderMarkdown(plan)).querySelectorAll('input:not([disabled])')).toHaveLength(0);
+  // The nth checkbox is the task on taskLines(text)[n] (src-tauri/src/tasks.rs ticks it there).
+  expect(taskLines(plan)).toEqual([2, 3, 9, 10]);
+  expect(taskLines('No tasks here.')).toEqual([]);
+  // "• " bullets keep their lines.
+  expect(taskLines('Intro\n• [ ] one\n• [x] two')).toEqual([1, 2]);
 });
 
 test('nested lists, loose and tight, keep their levels', () => {

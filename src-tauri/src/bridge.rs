@@ -534,6 +534,17 @@ fn route(
             let items = crate::mcp::search_meetings(&notes, q, limit(10));
             respond_json(request, 200, &list_envelope(json!(items)));
         }
+        // ---- tasks (the checkboxes in notes' summaries, tasks.rs): read only ----
+        (Method::Get, ["v1", "tasks", "list"]) => {
+            let status = query_get(params, "status").unwrap_or("open");
+            if !matches!(status, "open" | "done" | "all") {
+                respond_error(request, 400, "validation_error", "status is open, done or all");
+                return;
+            }
+            let notes = crate::notes::all();
+            let items = crate::mcp::list_tasks(&notes, status, limit(200));
+            respond_json(request, 200, &list_envelope(json!(items)));
+        }
         (Method::Get, ["v1", "mcp", "config"]) => {
             let allow = crate::config::load().mcp_allow_writes;
             respond_json(request, 200, &json!({ "data": { "allowWrites": allow } }));

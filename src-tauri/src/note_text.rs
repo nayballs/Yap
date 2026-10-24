@@ -26,6 +26,13 @@ use serde::Serialize;
 use crate::meeting_summary::estimate_tokens;
 use crate::notes::Note;
 
+fn now_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0)
+}
+
 /// Lines of context before and after a search hit.
 const CONTEXT_LINES: usize = 2;
 /// The first this many hits get context lines; the rest, their line alone.
@@ -789,9 +796,11 @@ impl EditError {
 /// Replace `old` with `new` in `field` of `note` ([`replace_once`]'s rules),
 /// keeping the note's bookkeeping right: a new title is the person's (the AI
 /// meeting title keeps off it), a content edit leaves the summary to show as
-/// stale, and a summary written into an empty field counts as made from the
-/// notes as they are now (one emptied is no summary at all). Changes nothing
-/// on an error. `updated_ts` is the caller's (`notes::modify`).
+/// stale, a summary written into an empty field counts as made from the
+/// notes as they are now (one emptied is no summary at all), and a summary
+/// edit is the person's (`note_edits::apply_summary_edit`: Yap never writes
+/// over it unasked). Changes nothing on an error. `updated_ts` is the
+/// caller's (`notes::modify`).
 pub fn apply_edit(note: &mut Note, field: Field, old: &str, new: &str) -> Result<Edit, EditError> {
     if field == Field::Transcript {
         return Err(EditError::ReadOnly);
@@ -813,11 +822,12 @@ pub fn apply_edit(note: &mut Note, field: Field, old: &str, new: &str) -> Result
                 if r.text.trim().is_empty() {
                     note.enhanced_content.clear();
                     note.enhanced_at_hash.clear();
+                    note.summary_edited_ms = 0;
+                    note.summary_ts = 0;
                 } else {
-                    if current.trim().is_empty() {
-                        note.enhanced_at_hash = crate::notes::content_hash(&note.content);
-                    }
-                    note.enhanced_content = r.text.clone();
+                    // Changed on the person's say-so (they asked Chat): theirs
+                    // now, so Yap never writes over it unasked (note_edits.rs).
+                    crate::note_edits::apply_summary_edit(note, &r.text, now_ms());
                 }
             }
             Field::Transcript => {} // refused above
@@ -1095,6 +1105,8 @@ mod tests {
         let e = apply_edit(&mut n, Field::Enhanced, "", "- Ship on Monday").unwrap();
         assert!(e.filled);
         assert!(fresh(&n));
+        // An edit asked for in Chat is the person's: Yap never writes over it unasked.
+        assert!(n.summary_edited_ms > 0);
 
         // The transcript is never touched.
         n.transcript = vec![seg("them", "Ship on Friday", 10)];
