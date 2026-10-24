@@ -16,6 +16,7 @@
   import Group from './ui/Group.svelte';
   import { invoke } from '@tauri-apps/api/core';
   import { onMount } from 'svelte';
+  import { SCOPE_PROVIDER_LABELS } from './providers.js';
 
   let { scope, cfg = null, defaultPrompt = '' } = $props();
 
@@ -31,11 +32,7 @@
   });
 
   const enabled = $derived(scope.enabled);
-  const PROVIDER_NAMES = {
-    groq: 'Groq', anthropic: 'Anthropic', openai: 'OpenAI', gemini: 'Gemini', openrouter: 'OpenRouter',
-    ondevice: 'Local', local: 'Self-hosted', custom: 'Custom',
-  };
-  const providerLabel = $derived(PROVIDER_NAMES[scope.provider] || scope.provider);
+  const providerLabel = $derived(SCOPE_PROVIDER_LABELS[scope.provider] || scope.provider);
   const modelLabel = $derived(scope.provider === 'ondevice' ? 'The on-device model' : scope.model);
 </script>
 

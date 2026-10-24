@@ -199,7 +199,8 @@ The correction dictionary: near-miss (fuzzy) matching, the Whisper vocabulary's 
   `yap-dictionary-changed` detail with `entries` and `fuzzy` so Settings'
   copy keeps it) and **Snippets** ("You say" pill →
   "Yap types" growing text box, line breaks kept; nothing seeded). Settings'
-  `buildClean` keeps each entry's `snippet` flag — drop it and an auto-save
+  `cleanConfig` (`settings/configDefaults.js`) keeps each entry's `snippet`
+  flag — drop it and an auto-save
   turns snippets into corrections. Settings → Dictation → Typing into apps has "Say
   “press enter” to send" (`voiceEnter`) under Auto-submit; the key picker
   shows when either is on.

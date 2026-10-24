@@ -20,6 +20,7 @@
   import LinkRow from './ui/LinkRow.svelte';
   import { invoke } from '@tauri-apps/api/core';
   import { onMount } from 'svelte';
+  import { SCOPE_PROVIDER_LABELS } from './providers.js';
 
   let { cfg, scope, defaultPrompt = '' } = $props();
 
@@ -33,11 +34,7 @@
       /* older backend — View shows the body alone */
     }
   });
-  const PROVIDER_NAMES = {
-    groq: 'Groq', anthropic: 'Anthropic', openai: 'OpenAI', gemini: 'Gemini', openrouter: 'OpenRouter',
-    ondevice: 'Local', local: 'Self-hosted', custom: 'Custom',
-  };
-  const providerLabel = $derived(PROVIDER_NAMES[scope.provider] || scope.provider);
+  const providerLabel = $derived(SCOPE_PROVIDER_LABELS[scope.provider] || scope.provider);
   const modelLabel = $derived(scope.provider === 'ondevice' ? 'The on-device model' : scope.model);
 
   // The wake word for all display copy. Falls back to a placeholder ("Yap") when

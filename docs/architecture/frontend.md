@@ -24,7 +24,7 @@ The Svelte side's look (theme, window chrome) and the main window: the ControlPa
   paper and ink, an amber focus ring, burnt-orange "live", recording-red
   Stop/Resume); the Meetings view's grey card, Take notes pill and the
   "Connect your calendar" dialog use them too. **What needs doing** (`lib/attention.svelte.js`):
-  Settings computes real needs-action items (update available / no STT model /
+  Settings keeps real needs-action items live (`followAttention`) (update available / no STT model /
   cleanup on a cloud provider with no key) into a shared runes store; they're
   counted in **one place**, the title bar's **bell** (its count, its name
   "Notifications (1)", and its list naming each item, a click opening the
@@ -106,7 +106,8 @@ The Svelte side's look (theme, window chrome) and the main window: the ControlPa
   (**Home / Insights / Chat / Notes / Meetings / Tasks / Upload / Dictionary / Integrations**) + **Settings as a modal
   overlay** (cogwheel). `Settings.svelte` renders `embedded` inside the modal
   and stays **always mounted** so its in-window hotkey fallback + auto-save run
-  for the window's lifetime. App-wide **toast notification system**
+  for the window's lifetime (the shell and its modules:
+  [frontend-settings.md](./frontend-settings.md#the-module-map-split-2026-10-24)). App-wide **toast notification system**
   (`ui/toast.svelte.js` + `ui/ToastHost.svelte`, OpenWhispr timer logic in
   **Wispr-Flow card styling** since 2026-07-09): dark rounded card with a
   per-variant category chip (Tip/Done/Error, override via `chip`; `icon:

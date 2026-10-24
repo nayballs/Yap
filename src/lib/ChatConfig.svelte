@@ -16,15 +16,12 @@
   import Row from './ui/Row.svelte';
   import Group from './ui/Group.svelte';
   import LinkRow from './ui/LinkRow.svelte';
+  import { SCOPE_PROVIDER_LABELS } from './providers.js';
 
   let { scope, cfg = null, defaultPrompt = '' } = $props();
 
   const enabled = $derived(scope.enabled);
-  const PROVIDER_NAMES = {
-    groq: 'Groq', anthropic: 'Anthropic', openai: 'OpenAI', gemini: 'Gemini', openrouter: 'OpenRouter',
-    ondevice: 'Local', local: 'Self-hosted', custom: 'Custom',
-  };
-  const providerLabel = $derived(PROVIDER_NAMES[scope.provider] || scope.provider);
+  const providerLabel = $derived(SCOPE_PROVIDER_LABELS[scope.provider] || scope.provider);
   const modelLabel = $derived(scope.provider === 'ondevice' ? 'The on-device model' : scope.model);
 
   // Its voice, shortcut and spoken replies are on the Voice Assistant page.

@@ -9,7 +9,7 @@
   import { onMount } from 'svelte';
   import SelectList from './ui/SelectList.svelte';
   import { PROVIDER_ICONS, MONOCHROME_PROVIDERS } from './providerIcons.js';
-  import { PROVIDER_LABELS } from './aiModel.js';
+  import { PROVIDER_LABELS } from './providers.js';
   import { catalog, loadCatalog, checkCatalog, modelsFor } from './modelCatalog.svelte.js';
   import { ago } from './modelCatalog.js';
 

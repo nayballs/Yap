@@ -26,6 +26,7 @@
   import Segmented from './ui/Segmented.svelte';
   import Input from './ui/Input.svelte';
   import { createExternalLinkHandler } from './externalLinks.js';
+  import { maskKey } from './providers.js';
 
   let { cfg, goto = null } = $props();
 
@@ -82,7 +83,7 @@
   const mode = $derived(native ? 'native' : service);
   const info = $derived(INFO[service]);
   const key = $derived((cfg.webSearchKeys ?? {})[service] ?? '');
-  const masked = $derived(!key ? '' : key.length > 8 ? `${key.slice(0, 3)}…${key.slice(-4)}` : '••••••••');
+  const masked = $derived(maskKey(key));
   let editing = $state(false);
 
   function setMode(v) {
