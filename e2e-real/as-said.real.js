@@ -23,7 +23,10 @@ let llm;
 test.beforeAll(async ({ robot }) => {
   llm = await startFakeLlm();
   llm.reply('cleanup', (user) => (cleanupTranscript(user) === EARLIER_SAID ? EARLIER_CLEANED : CLEANED));
-  await robot.configure({ postProcessEnabled: true, ppProvider: 'custom', ppBaseUrl: llm.base, ppModel: 'fake-cleanup', ppApiKey: '' });
+  // Styles by app off: the model's text as it is everywhere (a terminal's
+  // command style would make it "send the report…"; cleanup-styles.real.js
+  // has the styles).
+  await robot.configure({ postProcessEnabled: true, ppProvider: 'custom', ppBaseUrl: llm.base, ppModel: 'fake-cleanup', ppApiKey: '', cleanupStyles: false });
 });
 
 test.afterAll(async ({ robot }) => {

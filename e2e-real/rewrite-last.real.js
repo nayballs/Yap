@@ -38,7 +38,10 @@ test.beforeAll(async ({ robot }) => {
     if (/shorter/i.test(asked)) return SHORTER;
     return WRITTEN;
   });
-  await robot.configure({ postProcessEnabled: true, ppProvider: 'custom', ppBaseUrl: llm.base, ppModel: 'fake-cleanup', ppApiKey: '' });
+  // Styles by app off: the model's text as it is everywhere (a terminal's
+  // command style would make it "hey, can you…"; cleanup-styles.real.js has
+  // the styles).
+  await robot.configure({ postProcessEnabled: true, ppProvider: 'custom', ppBaseUrl: llm.base, ppModel: 'fake-cleanup', ppApiKey: '', cleanupStyles: false });
 });
 
 test.afterAll(async ({ robot }) => {
