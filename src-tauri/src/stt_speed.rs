@@ -511,7 +511,10 @@ pub fn device_for(model_id: &str, use_gpu: bool) -> Device {
     } else {
         None
     };
-    device_choice(&setting, use_gpu && synced_gpu, measured, crate::hardware::speech_device_here())
+    // (Moonshine's words come out wrong on DirectML: the processor until
+    // its own timing here says otherwise.)
+    let unmeasured = if stt::wrong_on_directml(model_id) { Device::Cpu } else { crate::hardware::speech_device_here() };
+    device_choice(&setting, use_gpu && synced_gpu, measured, unmeasured)
 }
 
 // ---- this PC ----------------------------------------------------------------------

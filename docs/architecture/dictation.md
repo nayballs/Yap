@@ -546,7 +546,9 @@ to **Run again** from Home.
   an integrated GPU (the encoder's fixed 30-s plan, below, on a 2-CU Radeon)
   and ~1–2 s on Windows' software renderer (no graphics driver), against
   ~0.4 s for 11 s of speech on 4 processor threads
-  ([docs/benchmarks.md](../benchmarks.md));
+  ([docs/benchmarks.md](../benchmarks.md)). Moonshine Base starts on the
+  processor whatever the card (`stt::wrong_on_directml`: on DirectML it got
+  every word wrong, on an RTX and on a Radeon);
   `has_gpu` follows a test run's stand-in card (`YAP_E2E_GPU`);
   `reload_if_needed` moves the warm engine to the device it should be on at
   the next quiet moment (`Pipeline::replace_engine`). Settings → Speech-to-

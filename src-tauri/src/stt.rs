@@ -1333,6 +1333,15 @@ pub fn model_fingerprint(data_dir: &Path, model_id: &str) -> Option<String> {
     }
 }
 
+/// A model whose words come out wrong on DirectML (a real GPU): Moonshine
+/// Base got every word wrong on an RTX 5070 Ti and on a Ryzen's Radeon, and
+/// every one right on the processor (`yap.exe bench`, docs/benchmarks.md).
+/// It starts on the processor until this PC's own timing (which compares
+/// each device's words) says otherwise.
+pub fn wrong_on_directml(model_id: &str) -> bool {
+    resolve_model(model_id).engine_type == EngineType::Moonshine
+}
+
 /// Whether `model_id` resolves to a whisper.cpp model. Drives the dictionary
 /// split (Handy's): Whisper models get the vocabulary as `initial_prompt`;
 /// ONNX models get the fuzzy post-correction pass instead.
@@ -1523,6 +1532,14 @@ mod tests {
             r.url.unwrap(),
             "https://blob.handy.computer/parakeet-v3-int8.tar.gz"
         );
+    }
+
+    #[test]
+    fn moonshine_alone_starts_off_directml() {
+        assert!(wrong_on_directml("moonshine-base"));
+        for id in ["parakeet-tdt-0.6b-v3", "parakeet-tdt-0.6b-v2", "large", "sense-voice-int8", "my-custom-model"] {
+            assert!(!wrong_on_directml(id), "{id}");
+        }
     }
 
     #[test]

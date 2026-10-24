@@ -89,7 +89,8 @@ What the table says:
 - **Moonshine on a real GPU writes nothing useful** (DirectML on the RTX
   and the Radeon: 100 % of words wrong; on the processor and on Windows'
   software renderer it's fine). Yap's own device check compares each
-  device's words, so it never picks a device that gets them wrong.
+  device's words, so it never picks a device that gets them wrong, and
+  Moonshine now starts on the processor.
 - **Integrated graphics:** Parakeet's encoder runs at one planned length
   on DirectML (30 s, so every dictation costs the same; it's what makes
   the graphics card quick), and on this 2-unit GPU that costs ~4 s. Bigger
@@ -188,6 +189,9 @@ What we fixed on the way:
   0.16 s), the 1.5B on a processor with 8 or more threads (about 1.1 s),
   and a cloud provider first on a smaller PC (about 0.8 s, against 1.6 s
   or more for the 1.5B).
+- **Moonshine Base starts on the processor** (`stt.rs`): on DirectML it got
+  every word wrong. Yap's own device check would have moved it there a
+  minute in; now its first dictations are right too.
 - **Home's data in one call**, asked for first: Home shows 132 → 73 ms
   after its page starts.
 
