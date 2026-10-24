@@ -150,7 +150,21 @@ Putting a dictation into the app you're in: the clipboard paste and the submit k
   changed in the field, the rewrite copied privately with "Couldn't replace
   your last dictation — copied the rewrite instead" (`Rewrote::Copied`).
   Robot tests: `e2e-real/rewrite-last.real.js`, and Home's paste in
-  `as-said.real.js`.
+  `as-said.real.js`. **Saved transforms** (`transforms.rs`,
+  [dictation.md](./dictation.md)) take the last dictation by these same
+  rules (`rewrite_target`, `rewrite_check`, `replace_last`), and their
+  result is the last paste too, with the text it replaced (`undoable(before,
+  pasted)`, `Pasted.before`; `pasted_text` is the paste with Yap's spaces).
+  **The bar's Undo after a transform** (`undo_transform`, once, within
+  `SWAP_WITHIN`; `undo_offered(seq)` while it's still the last paste):
+  that result selected exactly, still ending at the caret
+  (`replace_in_field(…, anywhere: false)`), and the text from before pasted
+  back with the spaces around it kept, read back (`Undid::Restored`); where
+  it can't, that text is copied privately and said ("Couldn't undo it here
+  — copied your text instead", `Undid::Copied`); a test run only logs
+  ("e2e: not undoing the transform"). `wait_for_modifiers_up` is shared
+  with the transforms (a shortcut's Alt still down turns Ctrl+V into
+  another key).
 - **`elevated.rs`** — apps running as administrator: Windows (UIPI) drops keys
   sent to a higher integrity level, and `SendInput` doesn't say so. The target's
   level is compared with Yap's (`OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION)`
@@ -188,7 +202,20 @@ Putting a dictation into the app you're in: the clipboard paste and the submit k
   else, only with `copy_fallback` — which read aloud never gives in a
   terminal, whatever terminal mode says — the Ctrl+C trick ("copy"). Test
   mode never; robot mode only in the test's own windows. Lengths and `via`
-  at `debug`, never the text. **The text around the cursor** (`begin_dictation(target,
+  at `debug`, never the text. **A transform's selection**
+  (`editable_selection(target, copy_fallback)` → `FieldSelection` `Text` |
+  `ReadOnly` | `Nothing` | `Unreadable`, for `transforms.rs`): only a
+  field that takes typing — its selection is what a paste replaces — the
+  focus in the target's process, never a password box (`ReadOnly`); the
+  field the focus is in (`field_for`, up to 3 parents), refused when it's
+  read-only (`offers`' ValuePattern / legacy state); its TextPattern
+  selection — one range (Word's several: nothing), itself not read-only
+  (`UIA_IsReadOnlyAttributeId`), the text as the field has it (spaces at
+  its ends kept, for `keep_spaces`) — else a Win32 edit control's own
+  selection (`value_selection`'s `EM_GETSEL`); `Unreadable` only when
+  neither answers, and only then Ctrl+C (`copy_fallback`; a transform never
+  asks in a terminal). Read again before the result goes over it
+  (`transforms::verify_selection`). **The text around the cursor** (`begin_dictation(target,
   read)` from `start_recording`, `take_context()` at paste): when `smart_spacing` is
   on and it isn't edit mode, a background thread reads ≤ 500 characters before and
   after the caret and the selection (a long selection as its start + end) —

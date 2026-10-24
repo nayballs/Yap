@@ -17,7 +17,17 @@
   serde default on: the rewrite shortcut with nothing selected rewrites the
   last dictation — within a minute, in the same field, still ending at the
   cursor —; off, it writes new text as before 2026-10-23; Settings →
-  Commands; `as_said::rewritable`), input_device, sound +
+  Commands; `as_said::rewritable`; saved transforms follow it too),
+  transforms (`transforms`, **saved transforms**, Settings → Commands →
+  Transforms, `transforms.rs`: a list of `{id, builtin, name, instruction,
+  hotkey, language}` in the person's order — `builtin` one of "polish" |
+  "shorter" | "grammar" | "translate" | "prompt" (its name and instruction
+  are Yap's, the stored ones ignored), else "" with the person's name and
+  instruction; `hotkey` an input-hook spec or ""; `language` Translate's,
+  "Spanish" until picked. Serde default = Yap's five, no shortcuts; at most
+  12 run (`transforms::list`: usable ones, each id once). A key that would
+  fire with one of the seven fixed shortcuts or an earlier transform's is
+  left unbound, `transforms::assign`), input_device, sound +
   volume, output_device, quiet_other_apps ("Silence other apps while you
   dictate", off; reads old configs' `muteWhileRecording`) + pause_media
   ("Pause music and videos while you dictate", off; both `mute.rs`),
@@ -298,7 +308,8 @@
   Win+Alt+S (`snip_hotkey`), saying "snip" taking one (`snip_voice`) and chat
   screenshots kept 30 days (`chat_image_days`), the rewrite
   shortcut taking the last dictation when nothing is selected
-  (`rewrite_last_dictation` on; the shortcut itself unbound),
+  (`rewrite_last_dictation` on; the shortcut itself unbound), Yap's five
+  saved transforms with no shortcuts (`transforms`; Translate to Spanish),
   live transcription preview **on**
   (`streaming_partials`), AI cleanup **off** (turned on locally, the model
   recommended for this PC: Qwen3.5 4B on a graphics card with ≥ 5.5 GiB of its

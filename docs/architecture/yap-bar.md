@@ -36,7 +36,14 @@ The always-there pill above the taskbar: the `overlay` window's Rust side (regio
   cleanup changed, "Cleaned up · Use what I said" (`yap-state` "cleaned",
   `Dictation::Cleaned`, for `as_said::OFFER_MS`; `bar_action "as-said"`:
   the paste swapped for the words as said, `as_said.rs`) — a region of its
-  own like Undo, shown with the bar off too;
+  own like Undo, shown with the bar off too; a **saved transform**
+  (`transforms.rs`, `yap-transform {name, phase, offerMs}`) shows its name
+  while it runs ("Polish…", `yap-state` "processing" after phase
+  "running"), then "Polish ✓ · Undo" the same way as "Cleaned up" (phase
+  "done" + "cleaned"; `bar_action "transform-undo"`:
+  `as_said::undo_transform`) or "Polish: no changes needed" (phase
+  "unchanged", no button, not a region); a transform's name goes with its
+  own states only (`dictation.svelte.js` clears it on any other);
   **meeting** = a 69×30 recording pill at half opacity (5 bars, the stop
   circle; hovered, full opacity and the timer; body → `notepad::open`, ■ →
   `meeting_end::end`). **Click-through except over what
