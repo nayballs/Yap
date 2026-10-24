@@ -37,6 +37,7 @@
 // gives the opaque windows' webviews the same background (theme.rs).
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
+import { getConfig } from './ipcShared.js';
 
 /** Settings → General → Appearance → Theme. */
 export const THEME_OPTIONS = [
@@ -208,7 +209,7 @@ export function initAppearance() {
   osDark?.addEventListener?.('change', applyTheme);
   applyAppearance(null);
   const reload = () =>
-    invoke('get_config')
+    getConfig()
       .then((cfg) => applyAppearance(cfg))
       .catch(() => {});
   reload();

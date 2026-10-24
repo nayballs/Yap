@@ -2,6 +2,7 @@
   import { getCurrentWindow } from '@tauri-apps/api/window';
   import ContextMenuHost from './lib/ui/ContextMenuHost.svelte';
   import { initAppearance } from './lib/appearance.js';
+  import { prefetchHome } from './lib/homeData.js';
 
   // The settings, onboarding, notepad and overlay windows (and the notepad's
   // on-demand split preview) all load the same SPA; pick the rendered view
@@ -9,6 +10,9 @@
   // chunk of its own): the Yap bar no longer parses the whole app — Chat,
   // Notes, Settings — to draw a pill, and neither does the notepad.
   const label = getCurrentWindow().label;
+  // The main window: Home's data asked for now, while its view's code loads
+  // (homeData.js), so Home can draw as soon as it mounts.
+  if (label === 'settings') prefetchHome().catch(() => {});
   // One arrow per view, never a ternary of imports: Vite gives each import()
   // its own preload list (the view's CSS chunk included), and a ternary of
   // them got one list — the last one's — so the main window lost its CSS.

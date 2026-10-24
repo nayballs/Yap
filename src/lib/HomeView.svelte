@@ -13,6 +13,7 @@
   import { invoke } from '@tauri-apps/api/core';
   import { listen } from '@tauri-apps/api/event';
   import { onMount, tick } from 'svelte';
+  import { homeSnapshot } from './homeData.js';
   import { formatHotkeySpec } from './hotkeys.js';
   import { appLabel } from './appNames.js';
   import { openContextMenu, menuKey, menuOpenFor, askConfirm } from './ui/contextMenu.svelte.js';
@@ -98,17 +99,32 @@
     }
   }
 
+  // Home's data has come (`data-ready` on the page: the e2e suite times
+  // Home's first paint by it).
+  let ready = $state(false);
+
+  // Everything Home shows, in one round trip (homeData.js): the history
+  // page, the stats, the settings it reads and the installed models.
   async function refresh() {
+    let snap = null;
     try {
-      entries = (await invoke('get_history', { limit: 200 })) || [];
+      snap = await homeSnapshot();
     } catch {
-      entries = [];
+      /* drawn empty */
     }
-    try {
-      stats = await invoke('get_stats');
-    } catch {
-      stats = null;
+    entries = snap?.history || [];
+    stats = snap?.stats ?? null;
+    const cfg = snap?.config;
+    if (cfg) {
+      historyEnabled = cfg.historyEnabled !== false;
+      cleanupEnabled = cfg.postProcessEnabled === true;
+      activeModel = cfg.modelSize || '';
+      if (cfg.hotkey) hotkeyLabel = formatHotkeySpec(cfg.hotkey);
+      editHotkeyLabel = cfg.editHotkey ? formatHotkeySpec(cfg.editHotkey) : '';
+      assistantHotkeyLabel = cfg.assistantHotkey ? formatHotkeySpec(cfg.assistantHotkey) : '';
     }
+    if (Array.isArray(snap?.installedModels)) installed = snap.installedModels;
+    ready = true;
     // Someone who hasn't dictated yet starts on the basics — AI cleanup —
     // rather than the day's tip (per-app profiles, say), until they browse.
     if (!tipBrowsed && stats && (stats.totalTranscriptions ?? 0) === 0) tipIndex = FIRST_TIP;
@@ -116,19 +132,6 @@
 
   onMount(() => {
     refresh();
-    invoke('get_config')
-      .then((cfg) => {
-        historyEnabled = cfg?.historyEnabled !== false;
-        cleanupEnabled = cfg?.postProcessEnabled === true;
-        activeModel = cfg?.modelSize || '';
-        if (cfg?.hotkey) hotkeyLabel = formatHotkeySpec(cfg.hotkey);
-        if (cfg?.editHotkey) editHotkeyLabel = formatHotkeySpec(cfg.editHotkey);
-        if (cfg?.assistantHotkey) assistantHotkeyLabel = formatHotkeySpec(cfg.assistantHotkey);
-      })
-      .catch(() => {});
-    invoke('installed_models')
-      .then((m) => (installed = Array.isArray(m) ? m : []))
-      .catch(() => {});
     // History changed (a dictation or upload saved, an entry deleted, all
     // cleared) → re-pull. Not `yap-transcript`: a dictation emits that before
     // it pastes and saves, so a re-pull on it could miss the new entry.
@@ -387,7 +390,7 @@
 
 <svelte:window onkeydown={onSearchKey} />
 
-<div class="home">
+<div class="home" data-ready={ready || undefined}>
   <div class="wrap">
     <h1 class="hello">
       {greeting}. Press {@render keycaps(hotkeyLabel)} to start yapping.
