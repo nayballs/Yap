@@ -30,7 +30,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter};
 
-use crate::meeting_summary as summary;
+use crate::meetings::meeting_summary as summary;
 
 /// The answer when nothing was said since the person last looked.
 pub const NOTHING_NEW: &str = "Nothing new since you last looked.";
@@ -40,7 +40,7 @@ pub const NOTHING_NEW: &str = "Nothing new since you last looked.";
 pub const TITLE_WORDS: usize = 150;
 /// …or when it ends, if it has at least this many (fewer: "Started by
 /// mistake?" asks first).
-pub const TITLE_END_WORDS: usize = crate::meeting_end::MISTAKE_WORDS;
+pub const TITLE_END_WORDS: usize = crate::meetings::meeting_end::MISTAKE_WORDS;
 /// A failed title is tried again after this long…
 const TITLE_RETRY_MS: u64 = 2 * 60 * 1000;
 /// …at most this many times per meeting (per run of Yap).

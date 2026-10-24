@@ -1851,7 +1851,7 @@ const ASK_REPLY_TOKENS: u32 = 120;
 /// dictation (`meeting_summary::chat_beside_dictation_with`). Best-effort:
 /// a failure leaves the Rust names. Returns how many answers counted.
 pub async fn ask_model(app: &tauri::AppHandle, note_id: u64) -> usize {
-    let Ok(ep) = crate::meeting_summary::resolve_endpoint(&crate::config::load()) else {
+    let Ok(ep) = crate::meetings::meeting_summary::resolve_endpoint(&crate::config::load()) else {
         return 0;
     };
     // Only a model big enough to call tools (a cloud one, or ≥ 4B on this
@@ -1882,7 +1882,7 @@ pub async fn ask_model(app: &tauri::AppHandle, note_id: u64) -> usize {
                 json!({ "type": "json_schema", "json_schema": { "name": "speaker", "schema": ask_schema(ask) } }),
             );
         }
-        match crate::meeting_summary::chat_beside_dictation_with(app, &ep, ask_messages(ask), &opts, extra).await {
+        match crate::meetings::meeting_summary::chat_beside_dictation_with(app, &ep, ask_messages(ask), &opts, extra).await {
             Ok(reply) => {
                 if let Some(v) = check_answer(ask, &reply) {
                     votes.push(v);

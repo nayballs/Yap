@@ -55,7 +55,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, Manager};
 
-use crate::meeting::AudioBuf;
+use crate::meetings::meeting::AudioBuf;
 
 const DIR: &str = "meeting-audio";
 const RATE: u64 = flac::RATE as u64;
@@ -334,8 +334,8 @@ impl Recorder {
         };
         save_meta(&meta);
         live().insert((note_id, recording));
-        crate::meeting::keep_on_disk(you);
-        crate::meeting::keep_on_disk(them);
+        crate::meetings::meeting::keep_on_disk(you);
+        crate::meetings::meeting::keep_on_disk(them);
         let meta = Arc::new(Mutex::new(meta));
         let stop = Arc::new(AtomicBool::new(false));
         let writer = {
@@ -360,8 +360,8 @@ impl Recorder {
             }
             Err(e) => {
                 tracing::warn!(note_id, "Meeting audio: no writer ({e})");
-                crate::meeting::drop_disk(you);
-                crate::meeting::drop_disk(them);
+                crate::meetings::meeting::drop_disk(you);
+                crate::meetings::meeting::drop_disk(them);
                 live().remove(&(note_id, recording));
                 delete_recording(note_id, recording);
                 None
@@ -394,8 +394,8 @@ impl Recorder {
         if let Some(handle) = self.writer.take() {
             let _ = handle.join();
         }
-        crate::meeting::drop_disk(&self.bufs.0);
-        crate::meeting::drop_disk(&self.bufs.1);
+        crate::meetings::meeting::drop_disk(&self.bufs.0);
+        crate::meetings::meeting::drop_disk(&self.bufs.1);
     }
 
     /// The recording ended and every chunk of it is in the note: kept for
@@ -456,7 +456,7 @@ fn write_loop(
     loop {
         let last = stop.load(Ordering::SeqCst);
         for (buf, writer) in sides.iter_mut() {
-            let Some((samples, spans)) = crate::meeting::take_for_disk(buf, last) else {
+            let Some((samples, spans)) = crate::meetings::meeting::take_for_disk(buf, last) else {
                 continue;
             };
             if !spans.is_empty() {
@@ -468,7 +468,7 @@ fn write_loop(
             if let Err(e) = w.push(&samples) {
                 // A full disk, say: this side isn't kept from here on.
                 tracing::warn!(note_id, "Meeting audio: couldn't write ({e}); not kept from here on");
-                crate::meeting::drop_disk(buf);
+                crate::meetings::meeting::drop_disk(buf);
                 *writer = None;
             }
         }
@@ -651,7 +651,7 @@ pub fn forget(note_id: u64) {
     }
     // Note ids come round again: a new note never inherits its line.
     jobs().remove(&note_id);
-    crate::meeting::forget_note(note_id);
+    crate::meetings::meeting::forget_note(note_id);
     let recordings: Vec<u64> = recordings(note_id).iter().map(|m| m.recording).collect();
     let mut left = 0;
     for recording in recordings {
@@ -832,7 +832,7 @@ pub fn recover_all(app: &AppHandle) {
 /// One side's file read back, for `meeting::replay`.
 struct FileFeed(flac::Reader);
 
-impl crate::meeting::Feed for FileFeed {
+impl crate::meetings::meeting::Feed for FileFeed {
     fn read(&mut self, n: usize) -> Vec<f32> {
         self.0.read(n)
     }
@@ -937,7 +937,7 @@ pub fn any_job_running() -> bool {
 
 /// A job for `note_id` starts (one per note): published as running, its
 /// Cancel made. `background`: the refine's low priority.
-fn begin(app: &AppHandle, first: Redo, background: bool) -> Result<crate::meeting::Ctl, String> {
+fn begin(app: &AppHandle, first: Redo, background: bool) -> Result<crate::meetings::meeting::Ctl, String> {
     let note_id = first.note_id;
     {
         let mut all = jobs();
@@ -949,7 +949,7 @@ fn begin(app: &AppHandle, first: Redo, background: bool) -> Result<crate::meetin
     let cancel = Arc::new(AtomicBool::new(false));
     cancels().insert(note_id, Arc::clone(&cancel));
     let _ = app.emit(EVENT_REDO, first);
-    Ok(crate::meeting::Ctl { background, cancel: Some(cancel) })
+    Ok(crate::meetings::meeting::Ctl { background, cancel: Some(cancel) })
 }
 
 /// A job ended: published (`done` with whether the note has a summary to
@@ -1058,12 +1058,12 @@ fn warm_slot(app: &AppHandle) -> Option<crate::pipeline::EngineSlot> {
 /// crash left ([`Kind::Recover`]) or all of it again ([`Kind::Again`]).
 pub fn start_job(app: &AppHandle, note_id: u64, kind: Kind) -> Result<(), String> {
     crate::notes::get(note_id).ok_or("Note not found")?;
-    if crate::meeting::recording_note() == Some(note_id) {
+    if crate::meetings::meeting::recording_note() == Some(note_id) {
         return Err("Stop the recording first".to_string());
     }
     // One taker of the speech engine at a time (`meeting::replay` also
     // waits for a recording that starts meanwhile).
-    if crate::meeting::is_recording() {
+    if crate::meetings::meeting::is_recording() {
         return Err("Yap is recording a meeting: try again when it ends".to_string());
     }
     let have = recordings(note_id);
@@ -1093,9 +1093,9 @@ pub fn start_job(app: &AppHandle, note_id: u64, kind: Kind) -> Result<(), String
         };
         let recovered = kind == Kind::Recover && result.is_ok();
         ends.end(&result);
-        if recovered && crate::meeting::recording_note() != Some(note_id) {
+        if recovered && crate::meetings::meeting::recording_note() != Some(note_id) {
             // The end of the meeting, as a stop would have been.
-            crate::meeting_end::recovered(&app, note_id);
+            crate::meetings::meeting_end::recovered(&app, note_id);
         }
     });
     Ok(())
@@ -1135,16 +1135,16 @@ pub fn start_refine(
 }
 
 /// The refine's run (see [`start_refine`]).
-async fn refine(app: &AppHandle, note_id: u64, todo: Vec<Meta>, model_id: &str, first: &Redo, ctl: &crate::meeting::Ctl) -> Result<(), String> {
+async fn refine(app: &AppHandle, note_id: u64, todo: Vec<Meta>, model_id: &str, first: &Redo, ctl: &crate::meetings::meeting::Ctl) -> Result<(), String> {
     // Its turn: after the summary being written (unless this comes first),
     // never beside a meeting recording.
     loop {
         if ctl.cancelled() {
             return Err(CANCELLED.to_string());
         }
-        let waiting = if !first.then_summary && crate::meeting_end::summary_running_for(note_id) {
+        let waiting = if !first.then_summary && crate::meetings::meeting_end::summary_running_for(note_id) {
             Some("summary")
-        } else if crate::meeting::is_recording() {
+        } else if crate::meetings::meeting::is_recording() {
             Some("meeting")
         } else {
             None
@@ -1187,7 +1187,7 @@ fn reporter(app: &AppHandle, note_id: u64, kind: Kind, model: &str, before: u64,
 
 /// The part a crash left of each recording in `todo`, into the note where
 /// it belongs (by time), then the recording closed.
-async fn recover(app: &AppHandle, engine: &crate::pipeline::EngineSlot, note_id: u64, todo: Vec<Meta>, model: &str, ctl: &crate::meeting::Ctl) -> Result<(), String> {
+async fn recover(app: &AppHandle, engine: &crate::pipeline::EngineSlot, note_id: u64, todo: Vec<Meta>, model: &str, ctl: &crate::meetings::meeting::Ctl) -> Result<(), String> {
     let total: u64 = todo.iter().map(|m| m.you_len.saturating_sub(m.you_done) + m.them_len.saturating_sub(m.them_done)).sum();
     let mut before = 0;
     let mut lines = 0;
@@ -1195,7 +1195,7 @@ async fn recover(app: &AppHandle, engine: &crate::pipeline::EngineSlot, note_id:
         let from = (meta.you_done, meta.them_done);
         let (mut you, mut them) = open_sides(&meta, from)?;
         let progress = reporter(app, note_id, Kind::Recover, model, before, total, from, false);
-        let out = crate::meeting::replay(engine, note_id, &mut you, &mut them, meta.started_ms, from, &meta.dictated, &progress, ctl).await;
+        let out = crate::meetings::meeting::replay(engine, note_id, &mut you, &mut them, meta.started_ms, from, &meta.dictated, &progress, ctl).await;
         if out.cancelled {
             return Err(CANCELLED.to_string());
         }
@@ -1224,7 +1224,7 @@ async fn recover(app: &AppHandle, engine: &crate::pipeline::EngineSlot, note_id:
 /// nothing). Never while the note's summary is being written (it reads
 /// the lines and their digests): the new lines wait for it.
 #[allow(clippy::too_many_arguments)]
-async fn transcribe_again(app: &AppHandle, engine: &crate::pipeline::EngineSlot, note_id: u64, todo: Vec<Meta>, model: &str, kind: Kind, ctl: &crate::meeting::Ctl, check: bool) -> Result<(), String> {
+async fn transcribe_again(app: &AppHandle, engine: &crate::pipeline::EngineSlot, note_id: u64, todo: Vec<Meta>, model: &str, kind: Kind, ctl: &crate::meetings::meeting::Ctl, check: bool) -> Result<(), String> {
     let total: u64 = todo.iter().map(|m| m.you_len + m.them_len).sum();
     let then_summary = jobs().get(&note_id).is_some_and(|j| j.then_summary);
     let mut before = 0;
@@ -1238,7 +1238,7 @@ async fn transcribe_again(app: &AppHandle, engine: &crate::pipeline::EngineSlot,
         } else {
             Vec::new()
         };
-        let out = crate::meeting::replay(engine, note_id, &mut you, &mut them, meta.started_ms, (0, 0), &extra, &progress, ctl).await;
+        let out = crate::meetings::meeting::replay(engine, note_id, &mut you, &mut them, meta.started_ms, (0, 0), &extra, &progress, ctl).await;
         if out.cancelled {
             return Err(CANCELLED.to_string());
         }
@@ -1248,9 +1248,9 @@ async fn transcribe_again(app: &AppHandle, engine: &crate::pipeline::EngineSlot,
     }
     if check {
         let old = crate::notes::get(note_id).ok_or("Note not found")?;
-        crate::meeting_refine::agrees(&old.transcript, &redone)?;
+        crate::meetings::meeting_refine::agrees(&old.transcript, &redone)?;
     }
-    while crate::meeting_end::summary_running_for(note_id) {
+    while crate::meetings::meeting_end::summary_running_for(note_id) {
         if ctl.cancelled() {
             return Err(CANCELLED.to_string());
         }
@@ -1281,7 +1281,7 @@ struct RangeFeed {
     left: usize,
 }
 
-impl crate::meeting::Feed for RangeFeed {
+impl crate::meetings::meeting::Feed for RangeFeed {
     fn read(&mut self, n: usize) -> Vec<f32> {
         let n = n.min(self.left);
         let out = if n == 0 { Vec::new() } else { self.reader.read(n) };
@@ -1298,7 +1298,7 @@ impl crate::meeting::Feed for RangeFeed {
 /// engine).
 pub fn start_retry(app: &AppHandle, note_id: u64, source: &str, ts: u64, start_ms: u64) -> Result<(), String> {
     let note = crate::notes::get(note_id).ok_or("Note not found")?;
-    if crate::meeting::is_recording() {
+    if crate::meetings::meeting::is_recording() {
         return Err("Yap is recording a meeting: try again when it ends".to_string());
     }
     let marker = note
@@ -1327,18 +1327,18 @@ pub fn start_retry(app: &AppHandle, note_id: u64, source: &str, ts: u64, start_m
     Ok(())
 }
 
-async fn retry(app: &AppHandle, engine: &crate::pipeline::EngineSlot, meta: &Meta, source: &str, (start_ms, end_ms): (u64, u64), model: &str, ctl: &crate::meeting::Ctl) -> Result<(), String> {
+async fn retry(app: &AppHandle, engine: &crate::pipeline::EngineSlot, meta: &Meta, source: &str, (start_ms, end_ms): (u64, u64), model: &str, ctl: &crate::meetings::meeting::Ctl) -> Result<(), String> {
     let note_id = meta.note_id;
     let (from, to) = (start_ms * RATE / 1000, end_ms * RATE / 1000);
     let mut reader = flac::Reader::open(&audio_path(note_id, meta.recording, source))?;
     reader.seek(from);
     let mut feed = RangeFeed { reader, left: (to - from) as usize };
-    let mut none = crate::meeting::NoFeed;
-    let (you, them): (&mut dyn crate::meeting::Feed, &mut dyn crate::meeting::Feed) =
+    let mut none = crate::meetings::meeting::NoFeed;
+    let (you, them): (&mut dyn crate::meetings::meeting::Feed, &mut dyn crate::meetings::meeting::Feed) =
         if source == "you" { (&mut feed, &mut none) } else { (&mut none, &mut feed) };
     let at = if source == "you" { (from, 0) } else { (0, from) };
     let progress = reporter(app, note_id, Kind::Retry, model, 0, to - from, at, false);
-    let out = crate::meeting::replay(engine, note_id, you, them, meta.started_ms, at, &[], &progress, ctl).await;
+    let out = crate::meetings::meeting::replay(engine, note_id, you, them, meta.started_ms, at, &[], &progress, ctl).await;
     if out.cancelled {
         return Err(CANCELLED.to_string());
     }
@@ -1669,19 +1669,19 @@ mod tests {
 
         let rt = tokio::runtime::Builder::new_multi_thread().enable_all().build().unwrap();
         let (mut y, mut th) = open_sides(&meta, (0, 0)).unwrap();
-        let ctl = crate::meeting::Ctl { background: true, cancel: None };
+        let ctl = crate::meetings::meeting::Ctl { background: true, cancel: None };
         let chunks = AtomicU64::new(0);
         let progress = |_: u64, _: u64| {
             chunks.fetch_add(1, Ordering::SeqCst);
         };
         let t = Instant::now();
-        let out = rt.block_on(crate::meeting::replay(&slot, note_id, &mut y, &mut th, meta.started_ms, (0, 0), &[], &progress, &ctl));
+        let out = rt.block_on(crate::meetings::meeting::replay(&slot, note_id, &mut y, &mut th, meta.started_ms, (0, 0), &[], &progress, &ctl));
         let replay_ms = t.elapsed().as_millis();
 
         // The replacement over a live transcript of the same length.
         let redone = vec![redo::Redone { started_ms: meta.started_ms, end_ms: meta.end_ms(), lines: out.segments.clone() }];
         let t = Instant::now();
-        let agreed = crate::meeting_refine::agrees(&out.segments, &redone).is_ok();
+        let agreed = crate::meetings::meeting_refine::agrees(&out.segments, &redone).is_ok();
         let r = redo::rebuild(&out.segments, &[out.segments.len()], &redone);
         let rebuild_ms = t.elapsed().as_millis();
 

@@ -1285,7 +1285,7 @@ pub fn delete(id: u64) {
         save_to_disk(store);
     });
     // Its meeting audio goes with it (meeting_audio.rs).
-    crate::meeting_audio::forget(id);
+    crate::meetings::meeting_audio::forget(id);
 }
 
 #[cfg(test)]

@@ -526,7 +526,7 @@ pub fn note_export(id: u64, path: String) -> Result<(), String> {
                 continue;
             }
             if seg.failed {
-                let at = |ms: Option<u64>| crate::meeting_summary::clock(ms.unwrap_or(0) / 1000);
+                let at = |ms: Option<u64>| crate::meetings::meeting_summary::clock(ms.unwrap_or(0) / 1000);
                 out.push_str(&format!("_Couldn't transcribe {}–{}._\n\n", at(seg.start_ms), at(seg.end_ms)));
                 continue;
             }
@@ -621,10 +621,10 @@ fn folders_changed(app: &AppHandle, change: &crate::notes::FolderChange) {
 #[tauri::command]
 pub fn note_delete(app: AppHandle, id: u64) -> Result<(), String> {
     use tauri::Emitter;
-    crate::meeting::delete_note(id)?;
+    crate::meetings::meeting::delete_note(id)?;
     let _ = app.emit("yap-notes-changed", ());
-    let _ = app.emit(crate::meeting_end::EVENT_DELETED, serde_json::json!({ "id": id }));
-    crate::notepad::on_note_deleted(&app, id);
+    let _ = app.emit(crate::meetings::meeting_end::EVENT_DELETED, serde_json::json!({ "id": id }));
+    crate::meetings::notepad::on_note_deleted(&app, id);
     // Gone from memory; until notes.json is saved it would come back.
     Ok(crate::notes::saved()?)
 }
@@ -680,7 +680,7 @@ pub(crate) async fn run_enhance(
     let heard_to = crate::notes::note_edits::newest_talk(&note);
     let hash = crate::notes::content_hash(&note.content);
     let cfg = config::load();
-    let ep = crate::meeting_summary::resolve_endpoint(&cfg)?;
+    let ep = crate::meetings::meeting_summary::resolve_endpoint(&cfg)?;
     // The on-device model is busy from the digests to the final call.
     let _sidecar = crate::local_llm::hold(&ep.base_url);
 
@@ -700,9 +700,9 @@ pub(crate) async fn run_enhance(
     let is_meeting = note.note_type == "meeting" && !note.transcript.is_empty();
     let (content, attendees, digest_actions) = if is_meeting {
         // A bigger on-device context reads more of the meeting raw.
-        let budget = crate::meeting_summary::FinalBudget::for_endpoint(&ep);
-        let note = crate::meeting_summary::prepare_final(app, id, &ep, budget).await?;
-        let input = crate::meeting_summary::compose_meeting_input_within(&note, budget);
+        let budget = crate::meetings::meeting_summary::FinalBudget::for_endpoint(&ep);
+        let note = crate::meetings::meeting_summary::prepare_final(app, id, &ep, budget).await?;
+        let input = crate::meetings::meeting_summary::compose_meeting_input_within(&note, budget);
         // The owner checks know the speaker map's names too.
         (input.text, crate::speakers::known_people(&note), input.digest_actions)
     } else if note.participants.is_empty() {
@@ -736,7 +736,7 @@ pub(crate) async fn run_enhance(
     .await?;
     step(3);
     if action_plan {
-        enhanced = crate::meeting_summary::postcheck_action_plan(
+        enhanced = crate::meetings::meeting_summary::postcheck_action_plan(
             &enhanced,
             &attendees,
             &content,
@@ -765,7 +765,7 @@ pub fn meeting_start(
         let p = guard.as_ref().ok_or("pipeline not started")?;
         p.engine_slot()
     };
-    crate::meeting::start(app.clone(), engine_slot, note_id)?;
+    crate::meetings::meeting::start(app.clone(), engine_slot, note_id)?;
     // A recording makes it a meeting note, filed in Meetings as "Take
     // notes" files its own, unless the person chose its folder; the Notes
     // view says so (`yap-note-filed`, with a way back).
@@ -790,7 +790,7 @@ pub fn meeting_start(
 /// `{ recording, noteId?, elapsedSecs? }` for the Notes UI.
 #[tauri::command]
 pub fn meeting_state() -> serde_json::Value {
-    crate::meeting::state()
+    crate::meetings::meeting::state()
 }
 
 /// The immutable note-enhancement guardrails, for the Note Formatting Prompt
@@ -880,7 +880,7 @@ pub async fn note_ask(
         // A bigger on-device context reads more of it raw (×1–4).
         let budget = ASK_TRANSCRIPT_TOKENS * crate::local_llm::budget_factor_for(&provider, &base_url);
         context.push('\n');
-        context.push_str(&crate::meeting_summary::ask_context(&note, budget));
+        context.push_str(&crate::meetings::meeting_summary::ask_context(&note, budget));
     }
     if !note.enhanced_content.trim().is_empty() {
         context.push_str(&format!("\nEnhanced notes:\n{}\n", note.enhanced_content.trim()));

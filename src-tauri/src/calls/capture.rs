@@ -57,7 +57,7 @@ mod win {
 
 /// Whether the meeting windows should be left out of captures right now.
 fn wanted() -> bool {
-    crate::meeting::is_recording() && crate::config::load().meeting_hide_from_capture
+    crate::meetings::meeting::is_recording() && crate::config::load().meeting_hide_from_capture
 }
 
 /// A window's display affinity as Windows has it (`None`: no native window).

@@ -157,7 +157,7 @@ pub fn act(app: &AppHandle, action: &str) {
     match action {
         OPEN_MIC_SETTINGS => open_uri(app, crate::mic_privacy::SETTINGS_URI),
         STOP_ASKING_CALLS => crate::calls::meeting_detect::set_detection(app, false),
-        crate::meeting_audio::RECOVER_ACTION => crate::meeting_audio::recover_all(app),
+        crate::meetings::meeting_audio::RECOVER_ACTION => crate::meetings::meeting_audio::recover_all(app),
         ASK_ABOUT_CALLS => crate::calls::meeting_detect::set_detection(app, true),
         OPEN_AI_SETTINGS | OPEN_VOICE_SETTINGS => {
             use tauri::Emitter;

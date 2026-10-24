@@ -44,7 +44,7 @@ use rmcp::service::RequestContext;
 use rmcp::{ErrorData as McpError, RoleServer, ServerHandler, ServiceExt};
 use serde_json::{json, Value};
 
-use crate::meeting_summary::{clock, estimate_tokens, render_digests};
+use crate::meetings::meeting_summary::{clock, estimate_tokens, render_digests};
 use crate::notes::{Note, TranscriptSegment};
 use crate::speakers::Speakers;
 

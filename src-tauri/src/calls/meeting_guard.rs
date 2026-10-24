@@ -102,7 +102,7 @@ fn window_view(app: &AppHandle) -> (bool, bool) {
 
 /// The meeting notepad is on screen. Never with a lock held.
 fn notepad_on_screen(app: &AppHandle) -> bool {
-    app.get_webview_window(crate::notepad::LABEL)
+    app.get_webview_window(crate::meetings::notepad::LABEL)
         .is_some_and(|w| w.is_visible().unwrap_or(false) && !w.is_minimized().unwrap_or(false))
 }
 
@@ -278,10 +278,10 @@ pub fn stop_and_summarise(app: &AppHandle, note_id: Option<u64>) {
 /// shortcut caught by a window's in-page fallback): a question about the
 /// meeting ("Started by mistake?") shows there.
 fn stop_from(app: &AppHandle, note_id: Option<u64>, origin: Option<&str>) {
-    if note_id.is_some() && crate::meeting::recording_note() != note_id {
+    if note_id.is_some() && crate::meetings::meeting::recording_note() != note_id {
         return;
     }
-    if let Err(e) = crate::meeting_end::end(app, origin) {
+    if let Err(e) = crate::meetings::meeting_end::end(app, origin) {
         tracing::info!("meeting guard: nothing to stop ({e})");
     }
 }
@@ -841,7 +841,7 @@ impl Surface {
     /// The name the windows know it by (`CheckIn::surface`, `Notice::surface`).
     fn label(self) -> &'static str {
         match self {
-            Surface::Notepad => crate::notepad::LABEL,
+            Surface::Notepad => crate::meetings::notepad::LABEL,
             Surface::Main => "settings",
             Surface::Bar => "bar",
             Surface::Windows => "windows",
@@ -1038,7 +1038,7 @@ fn withdraw_check_in(app: &AppHandle) -> bool {
 /// A notice on the surface a countdown was on (the reason it stopped).
 fn notice_on(app: &AppHandle, surface: &str, mut n: Notice) {
     match surface {
-        "notepad" => n.surface = Some(crate::notepad::LABEL),
+        "notepad" => n.surface = Some(crate::meetings::notepad::LABEL),
         "settings" => n.surface = Some("settings"),
         _ => {
             // The bar, else a Windows notification.
@@ -1051,7 +1051,7 @@ fn notice_on(app: &AppHandle, surface: &str, mut n: Notice) {
 
 /// The quiet guard's turn (see "Quiet meetings" at the top).
 fn quiet_tick(app: &AppHandle, gen: u64) {
-    let Some(activity) = crate::meeting::activity() else {
+    let Some(activity) = crate::meetings::meeting::activity() else {
         return;
     };
     let t = quiet_timings();
@@ -1187,7 +1187,7 @@ fn start_or_stop_from(app: &AppHandle, origin: Option<&str>) {
         tracing::info!("meeting shortcut: pressed again straight away; ignored");
         return;
     }
-    if let Some(note_id) = crate::meeting::recording_note() {
+    if let Some(note_id) = crate::meetings::meeting::recording_note() {
         tracing::info!(note_id, "meeting shortcut: stop and summarise");
         stop_from(app, Some(note_id), origin);
         return;
@@ -1196,7 +1196,7 @@ fn start_or_stop_from(app: &AppHandle, origin: Option<&str>) {
     if let Some((call_id, call)) = crate::calls::meeting_detect::latest_call() {
         tracing::info!(call_id, "meeting shortcut: record the call");
         crate::calls::meeting_detect::on_tray_record(app, call_id);
-        if let Some(note_id) = crate::meeting::recording_note() {
+        if let Some(note_id) = crate::meetings::meeting::recording_note() {
             if window_view(app).0 {
                 notice(app, &Notice::taking_notes(Some(&call), shortcut.as_deref(), note_id));
             }

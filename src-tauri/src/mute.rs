@@ -350,7 +350,7 @@ fn bring_back(quieted: Vec<Quieted>, paused: Vec<Paused>) {
 /// What Yap must never touch right now.
 fn calls_now() -> Calls {
     let (names, live_browsers) = crate::calls::meeting_detect::call_audio();
-    Calls { names, live_browsers, meeting: crate::meeting::is_recording() }
+    Calls { names, live_browsers, meeting: crate::meetings::meeting::is_recording() }
 }
 
 // ---- a crash's leftovers ------------------------------------------------------------------------

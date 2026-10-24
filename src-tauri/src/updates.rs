@@ -540,7 +540,7 @@ enum Busy {
 fn busy_reason(app: &AppHandle) -> Option<Busy> {
     // (A meeting transcribed again, the refine after one: a restart would
     // lose it.)
-    if crate::meeting::is_recording() || crate::meeting_audio::any_job_running() {
+    if crate::meetings::meeting::is_recording() || crate::meetings::meeting_audio::any_job_running() {
         return Some(Busy::Meeting);
     }
     if crate::commands::model_download_in_flight() {

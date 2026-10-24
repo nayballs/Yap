@@ -979,10 +979,10 @@ fn default_meeting_max_minutes() -> u32 {
     120
 }
 fn default_meeting_audio_days() -> u32 {
-    crate::meeting_audio::DEFAULT_DAYS
+    crate::meetings::meeting_audio::DEFAULT_DAYS
 }
 fn default_meeting_refine() -> String {
-    crate::meeting_refine::AUTO.into()
+    crate::meetings::meeting_refine::AUTO.into()
 }
 fn default_meeting_call_end() -> String {
     "ask".into()

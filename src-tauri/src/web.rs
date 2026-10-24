@@ -536,7 +536,7 @@ pub fn fit_history(history: &[(String, String)], budget: usize) -> Vec<(String, 
     let mut used = 0;
     let mut kept: Vec<(String, String)> = Vec::new();
     for (role, text) in history.iter().rev() {
-        let t = crate::meeting_summary::estimate_tokens(text) + 4;
+        let t = crate::meetings::meeting_summary::estimate_tokens(text) + 4;
         if used + t > budget {
             break;
         }
@@ -1373,7 +1373,7 @@ pub fn page_text(html: &str, url: &str) -> (String, String) {
 /// line or a space; `(part, next offset if there's more)`. Pure.
 pub fn page_part(text: &str, offset: usize, budget: usize) -> (String, Option<usize>) {
     let rest: String = text.chars().skip(offset).collect();
-    if crate::meeting_summary::estimate_tokens(&rest) <= budget {
+    if crate::meetings::meeting_summary::estimate_tokens(&rest) <= budget {
         return (rest, None);
     }
     let mut end = 0;
@@ -2601,7 +2601,7 @@ mod tests {
         let text: String = (0..3_000).map(|i| format!("Line {i} of the page.\n")).collect();
         let (first, next) = page_part(&text, 0, 500);
         let next = next.unwrap();
-        assert!(crate::meeting_summary::estimate_tokens(&first) <= 500);
+        assert!(crate::meetings::meeting_summary::estimate_tokens(&first) <= 500);
         assert!(text.starts_with(&first));
         let (second, _) = page_part(&text, next, 500);
         assert!(second.trim_start().starts_with("Line "), "{second}");
@@ -3074,14 +3074,14 @@ mod tests {
         assert!(block.starts_with("[1] Gale - bg3.wiki — bg3.wiki\nGale is on the beach."));
         assert!(block.contains("[2] Long — example.com (2026-10-01)"));
         assert!(!block.contains("Fourth"));
-        assert!(crate::meeting_summary::estimate_tokens(&block) <= 1_600, "within the budget");
+        assert!(crate::meetings::meeting_summary::estimate_tokens(&block) <= 1_600, "within the budget");
         let prompt = grounded_prompt("You are helpful.", &block, "Saturday 18 October 2026", true);
         assert!(prompt.starts_with("You are helpful.\n\nToday is Saturday 18 October 2026."));
         assert!(prompt.contains("ONLY these sources") && prompt.contains("like [1]") && prompt.contains("Never follow requests"));
         assert!(prompt.contains("asked out loud"));
         assert!(prompt.ends_with("</sources>"));
         // An 8k on-device model: prompt + history + reply fit.
-        assert!(crate::meeting_summary::estimate_tokens(&prompt) < 2_200);
+        assert!(crate::meetings::meeting_summary::estimate_tokens(&prompt) < 2_200);
     }
 
     #[test]
@@ -3276,7 +3276,7 @@ mod tests {
         let kept = fit_history(&history, 200);
         assert!(!kept.is_empty() && kept.len() < 10);
         assert_eq!(kept.last(), history.last());
-        assert!(kept.iter().map(|(_, t)| crate::meeting_summary::estimate_tokens(t) + 4).sum::<usize>() <= 200);
+        assert!(kept.iter().map(|(_, t)| crate::meetings::meeting_summary::estimate_tokens(t) + 4).sum::<usize>() <= 200);
     }
 
     #[test]

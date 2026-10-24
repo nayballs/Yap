@@ -714,7 +714,7 @@ pub fn e2e_diarize_timeline(
     if !crate::e2e::active() {
         return Err("Only in e2e test mode".to_string());
     }
-    let note_id = crate::meeting::recording_note().ok_or("No meeting is being recorded")?;
+    let note_id = crate::meetings::meeting::recording_note().ok_or("No meeting is being recorded")?;
     let mut segments: Vec<Segment> = segments
         .into_iter()
         .filter(|s| s.end_ms > s.start_ms)

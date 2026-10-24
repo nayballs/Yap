@@ -217,7 +217,7 @@ pub fn target(cfg: &YapConfig, scope: Scope, on_device: &OnDevice) -> Result<Tar
             }
         }
         Scope::Notes => {
-            let ep = crate::meeting_summary::resolve_endpoint(cfg)?;
+            let ep = crate::meetings::meeting_summary::resolve_endpoint(cfg)?;
             (ep.provider, ep.model, ep.base_url)
         }
     };

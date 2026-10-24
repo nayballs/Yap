@@ -778,7 +778,7 @@ fn offer(s: &State) -> Option<&Call> {
 /// faded, went quietly to the notification center or got "Not now" still
 /// leaves a way to record.
 pub fn tray_item() -> Option<(String, String)> {
-    if crate::meeting::is_recording() {
+    if crate::meetings::meeting::is_recording() {
         return None;
     }
     let s = lock();
@@ -1055,7 +1055,7 @@ fn show_prompt(
 /// The note Yap is recording `call` into, if any: the one its prompt started,
 /// or a recording started (give or take a minute) after the call did.
 fn recording_of(call: &Call) -> Option<u64> {
-    let st = crate::meeting::state();
+    let st = crate::meetings::meeting::state();
     if st["recording"].as_bool() != Some(true) {
         return None;
     }
@@ -1101,7 +1101,7 @@ fn call_started(s: &mut State, todo: &mut Todo, id: &'static str, since: u64) {
     // Still recording the note an earlier call's "Record notes" started (a
     // rejoin, or "Keep recording"): this call carries it on, and a pending
     // "…ended — Stop and summarise?" for the same app is moot.
-    let recording_note = crate::meeting::state()["noteId"].as_u64();
+    let recording_note = crate::meetings::meeting::state()["noteId"].as_u64();
     let carried = recording_note.filter(|note| s.our_note == Some(*note));
     let rejoin = s.prompt.as_ref().is_some_and(|p| p.kind == PromptKind::End && p.app.id == id);
     if carried.is_some() && rejoin {
@@ -1169,7 +1169,7 @@ fn at_call_end(note: Option<u64>, asked: bool, auto_stop: bool) -> AtCallEnd {
 /// one, retire prompts that became moot.
 fn tick(app: &AppHandle) {
     let busy = dictating(app);
-    let recording = crate::meeting::is_recording();
+    let recording = crate::meetings::meeting::is_recording();
     let (wants_view, in_window) = {
         let s = lock();
         let in_window = s.prompt.as_ref().is_some_and(|p| p.in_app && !p.quiet);
@@ -1501,7 +1501,7 @@ fn ever_recorded() -> bool {
         return true;
     }
     let found = crate::notes::all().iter().any(|n| {
-        n.note_type == "meeting" && crate::notes::speech_words(&n.transcript) >= crate::meeting_end::MISTAKE_WORDS
+        n.note_type == "meeting" && crate::notes::speech_words(&n.transcript) >= crate::meetings::meeting_end::MISTAKE_WORDS
     });
     if found {
         RECORDED.store(true, std::sync::atomic::Ordering::Relaxed);
@@ -1599,7 +1599,7 @@ fn record(app: &AppHandle, call_id: u64) -> Result<u64, String> {
         .find(|c| c.id == call_id)
         .map(|c| c.app)
         .ok_or("That call has ended.")?;
-    if crate::meeting::is_recording() {
+    if crate::meetings::meeting::is_recording() {
         return Err("Yap is already recording a meeting.".to_string());
     }
     crate::notes::folder_create("Meetings");
@@ -1644,13 +1644,13 @@ fn record(app: &AppHandle, call_id: u64) -> Result<u64, String> {
 /// which brings up no window.)
 pub(crate) fn stop_and_summarise(app: &AppHandle, note_id: Option<u64>) {
     let main = window_view(app).0;
-    if note_id.is_none() || crate::meeting::recording_note() == note_id {
+    if note_id.is_none() || crate::meetings::meeting::recording_note() == note_id {
         // "Started by mistake?" asks where they answered, if it's on screen.
-        if let Err(e) = crate::meeting_end::end(app, main.then_some("settings")) {
+        if let Err(e) = crate::meetings::meeting_end::end(app, main.then_some("settings")) {
             tracing::info!("meeting detect: nothing to stop ({e})");
         }
     }
-    if !main && crate::notepad::shown(app) {
+    if !main && crate::meetings::notepad::shown(app) {
         return;
     }
     if !main {

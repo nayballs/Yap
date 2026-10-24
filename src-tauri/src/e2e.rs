@@ -152,12 +152,12 @@ fn live_mic() -> bool {
 /// would.
 #[cfg(debug_assertions)]
 pub fn spawn_meeting_audio(
-    mic: crate::meeting::AudioBuf,
-    sys: crate::meeting::AudioBuf,
+    mic: crate::meetings::meeting::AudioBuf,
+    sys: crate::meetings::meeting::AudioBuf,
     stop: std::sync::Arc<std::sync::atomic::AtomicBool>,
     overflow: std::sync::Arc<std::sync::atomic::AtomicBool>,
 ) -> Result<(), String> {
-    use crate::meeting::{Follow, OutputFollower};
+    use crate::meetings::meeting::{Follow, OutputFollower};
     use cpal::traits::{DeviceTrait, HostTrait};
     use std::sync::atomic::Ordering;
     // Like the real capture, a configured microphone that isn't plugged in
@@ -230,7 +230,7 @@ pub fn spawn_meeting_audio(
                     switching = None;
                     if let Follow::Switch(id) = output.poll(Some("e2e-headset".to_string())) {
                         output.opened(id);
-                        crate::meeting::followed_output("e2e headset");
+                        crate::meetings::meeting::followed_output("e2e headset");
                     }
                 }
                 for (src, buf, side) in [(&you, &mic, "you"), (&them, &sys, "them")] {
@@ -239,13 +239,13 @@ pub fn spawn_meeting_audio(
                     }
                     if pos < src.len() {
                         let end = (pos + step).min(src.len());
-                        crate::meeting::push_audio(buf, &src[pos..end], &overflow);
+                        crate::meetings::meeting::push_audio(buf, &src[pos..end], &overflow);
                     } else if side == "you" && live_mic() {
                         // A real mic never stops delivering: digital silence.
-                        crate::meeting::push_audio(buf, &vec![0.0; step], &overflow);
+                        crate::meetings::meeting::push_audio(buf, &vec![0.0; step], &overflow);
                     }
                 }
-                crate::meeting::keep_in_step(&mic, &sys);
+                crate::meetings::meeting::keep_in_step(&mic, &sys);
                 pos += step;
                 if !played && length > 0 && pos >= length {
                     played = true;
@@ -311,7 +311,7 @@ pub fn e2e_meeting_quiet(quiet_secs: Option<f32>, talk_secs: Option<f32>) -> Res
     }
     let timings = quiet_secs.map(|q| (q, talk_secs.unwrap_or(q / 18.0)));
     tracing::info!(?timings, "e2e: quiet-side timings");
-    crate::meeting::set_test_quiet_timings(timings);
+    crate::meetings::meeting::set_test_quiet_timings(timings);
     Ok(())
 }
 
@@ -328,7 +328,7 @@ pub fn e2e_meeting_fail(side: Option<String>, from: Option<f32>, to: Option<f32>
     }
     let fails = side.map(|s| (s, from.unwrap_or(0.0), to.unwrap_or(f32::MAX)));
     tracing::info!(?fails, "e2e: meeting chunks fail");
-    crate::meeting::set_test_failures(fails);
+    crate::meetings::meeting::set_test_failures(fails);
     Ok(())
 }
 
@@ -581,7 +581,7 @@ pub fn e2e_meeting_feed(
     if !active() {
         return Err("Only in e2e test mode".to_string());
     }
-    let note_id = crate::meeting::recording_note().ok_or("No meeting is being recorded")?;
+    let note_id = crate::meetings::meeting::recording_note().ok_or("No meeting is being recorded")?;
     let n = segments.len();
     let cfg = crate::config::load();
     let segments = segments
@@ -593,7 +593,7 @@ pub fn e2e_meeting_feed(
             seg
         })
         .collect();
-    crate::meeting::ingest(&app, note_id, segments)?;
+    crate::meetings::meeting::ingest(&app, note_id, segments)?;
     Ok(n)
 }
 

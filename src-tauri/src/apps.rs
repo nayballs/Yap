@@ -2994,7 +2994,7 @@ pub(crate) mod tests {
             println!("  \"{q}\" → {what}");
         }
         // What list_apps sends the model (was 840 tokens with no query: 150 names).
-        let est = |v: &Value| crate::meeting_summary::estimate_tokens(&v.to_string());
+        let est = |v: &Value| crate::meetings::meeting_summary::estimate_tokens(&v.to_string());
         let cfg = YapConfig::default();
         println!(
             "list_apps: no query {} tokens, \"python\" {} tokens",

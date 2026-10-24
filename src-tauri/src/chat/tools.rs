@@ -777,7 +777,7 @@ fn run(name: &str, args: &Value) -> Value {
                     let transcript = if n.transcript.is_empty() {
                         String::new()
                     } else {
-                        crate::meeting_summary::ask_context(&n, 3_000)
+                        crate::meetings::meeting_summary::ask_context(&n, 3_000)
                     };
                     let display = format!("Retrieved note: \"{}\"", n.title);
                     let mut data = json!({
@@ -1966,7 +1966,7 @@ mod tests {
         let got = call("get_note", json!({ "id": id }));
         assert_eq!(got["data"]["cut"], json!(["content"]));
         let shown = got["data"]["content"].as_str().unwrap();
-        assert!(crate::meeting_summary::estimate_tokens(shown) <= GET_NOTE_TOKENS);
+        assert!(crate::meetings::meeting_summary::estimate_tokens(shown) <= GET_NOTE_TOKENS);
         assert!(long.starts_with(shown));
 
         let first = call("read_note", json!({ "note_id": id, "field": "content" }));
@@ -2162,7 +2162,7 @@ mod tests {
 
     #[test]
     fn the_memory_tools_stay_light_and_act_only_when_asked() {
-        let est = crate::meeting_summary::estimate_tokens;
+        let est = crate::meetings::meeting_summary::estimate_tokens;
         let all = Extra { memory: true, search_chats: true, conversation: None };
         let (s, t) = (
             est(&format!("{} {}", MEMORY_TOOL_INSTRUCTIONS.join(" "), CHATS_TOOL_INSTRUCTIONS.join(" "))),
@@ -2735,7 +2735,7 @@ mod tests {
     /// weight ([`a_tool_step_stays_light`]): kept small too.
     #[test]
     fn the_web_tools_stay_light() {
-        let est = crate::meeting_summary::estimate_tokens;
+        let est = crate::meetings::meeting_summary::estimate_tokens;
         let (s, t) = (est(&WEB_TOOL_INSTRUCTIONS.join(" ")), est(&web_definitions().to_string()));
         println!("the web adds: instructions {s} + tools {t} = {} tokens", s + t);
         assert!(s + t <= 520, "{} tokens", s + t);
@@ -2748,7 +2748,7 @@ mod tests {
     /// 1,624). `--nocapture` prints it.
     #[test]
     fn a_tool_step_stays_light() {
-        let est = crate::meeting_summary::estimate_tokens;
+        let est = crate::meetings::meeting_summary::estimate_tokens;
         let system = format!(
             "You are a helpful assistant. Answer concisely.\n\nYou have access to tools. {} {}",
             TOOL_INSTRUCTIONS.join(" "),

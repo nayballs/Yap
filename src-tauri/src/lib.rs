@@ -36,14 +36,8 @@ mod hardware;
 mod integrations;
 mod media;
 mod media_pause;
-mod meeting;
-mod meeting_assist;
-mod meeting_audio;
-mod meeting_end;
-mod meeting_refine;
-mod meeting_summary;
+mod meetings;
 mod memory;
-mod notepad;
 mod notes;
 mod notices;
 mod privacy;
@@ -633,22 +627,22 @@ pub fn run() {
             calls::app_icons::meeting_app_icons,
             apps::apps_list,
             apps::apps_icons,
-            meeting_end::meeting_end,
-            meeting_end::meeting_pause,
-            meeting_end::meeting_summarise,
-            meeting_end::meeting_summary_status,
-            meeting_end::meeting_discard,
-            meeting_end::meeting_delete,
-            meeting_audio::meeting_audio_status,
-            meeting_audio::meeting_audio_clear,
-            meeting_audio::meeting_audio_note,
-            meeting_audio::meeting_audio_clip,
-            meeting_audio::meeting_transcribe_again,
-            meeting_audio::meeting_recover,
-            meeting_audio::meeting_retry_chunk,
-            meeting_audio::meeting_job_cancel,
-            meeting_assist::meeting_catch_up,
-            meeting_assist::meeting_assist,
+            meetings::meeting_end::meeting_end,
+            meetings::meeting_end::meeting_pause,
+            meetings::meeting_end::meeting_summarise,
+            meetings::meeting_end::meeting_summary_status,
+            meetings::meeting_end::meeting_discard,
+            meetings::meeting_end::meeting_delete,
+            meetings::meeting_audio::meeting_audio_status,
+            meetings::meeting_audio::meeting_audio_clear,
+            meetings::meeting_audio::meeting_audio_note,
+            meetings::meeting_audio::meeting_audio_clip,
+            meetings::meeting_audio::meeting_transcribe_again,
+            meetings::meeting_audio::meeting_recover,
+            meetings::meeting_audio::meeting_retry_chunk,
+            meetings::meeting_audio::meeting_job_cancel,
+            meetings::meeting_assist::meeting_catch_up,
+            meetings::meeting_assist::meeting_assist,
             speakers::speaker_rename,
             speakers::speaker_rename_lines,
             speakers::speaker_merge,
@@ -656,11 +650,11 @@ pub fn run() {
             speakers::speaker_suggestion,
             speakers::speaker_is_me,
             speakers::speaker_not_me,
-            notepad::notepad_open,
-            notepad::notepad_state,
-            notepad::notepad_split,
-            notepad::notepad_split_preview,
-            notepad::notepad_consent_message,
+            meetings::notepad::notepad_open,
+            meetings::notepad::notepad_state,
+            meetings::notepad::notepad_split,
+            meetings::notepad::notepad_split_preview,
+            meetings::notepad::notepad_consent_message,
             calls::meeting_guard::meeting_shortcut,
             calls::meeting_guard::meeting_keep_going,
             calls::meeting_guard::meeting_limit_status,
@@ -731,7 +725,7 @@ pub fn run() {
             #[cfg(debug_assertions)]
             e2e::e2e_meeting_start_twice,
             #[cfg(debug_assertions)]
-            meeting_audio::e2e_meeting_recovery_offer,
+            meetings::meeting_audio::e2e_meeting_recovery_offer,
             #[cfg(debug_assertions)]
             e2e::e2e_main_on_screen,
             #[cfg(debug_assertions)]
@@ -922,7 +916,7 @@ pub fn run() {
             recent_audio::init(&handle);
             // Meeting audio past its days goes, and what a crash left of a
             // meeting is offered to transcribe (meeting_audio.rs).
-            meeting_audio::init(&handle);
+            meetings::meeting_audio::init(&handle);
 
             // Clear any orphaned cleanup sidecar from a previous session (a
             // crash or task-kill skips every exit path; installers launched by
@@ -1223,8 +1217,8 @@ pub fn run() {
             // The meeting notepad (docked beside a call) and the end of a
             // meeting (pause or end, "Started by mistake?", the action plan
             // written in Rust): both follow the recorder's events.
-            notepad::init(&handle);
-            meeting_end::init(&handle);
+            meetings::notepad::init(&handle);
+            meetings::meeting_end::init(&handle);
             // Memory: its events, and reading quiet chats for what to
             // remember (memory.rs).
             memory::init(&handle);

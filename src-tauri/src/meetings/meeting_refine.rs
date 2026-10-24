@@ -67,7 +67,7 @@
 
 use tauri::AppHandle;
 
-use crate::meeting_audio::redo::Redone;
+use crate::meetings::meeting_audio::redo::Redone;
 use crate::notes::TranscriptSegment;
 
 /// The setting's choices (`YapConfig::meeting_refine`).
@@ -204,7 +204,7 @@ pub fn may_refine(cfg: &crate::config::YapConfig) -> bool {
 pub fn plan(note_id: u64) -> Option<Plan> {
     let cfg = crate::config::load();
     let note = crate::notes::get(note_id)?;
-    let recordings = crate::meeting_audio::recordings(note_id);
+    let recordings = crate::meetings::meeting_audio::recordings(note_id);
     // The live pass's model: its least accurate recording's (a model
     // switched between a pause and a resume), else the one in use.
     let live = recordings
@@ -230,15 +230,15 @@ pub fn plan(note_id: u64) -> Option<Plan> {
 /// however it ends. `false`: it couldn't start (and nothing follows).
 pub fn start(app: &AppHandle, note_id: u64, plan: &Plan, origin: Option<String>) -> bool {
     let (first, reason) = (plan.first, plan.reason);
-    let started = crate::meeting_audio::start_refine(app, note_id, &plan.model, first, move |app, result| {
+    let started = crate::meetings::meeting_audio::start_refine(app, note_id, &plan.model, first, move |app, result| {
         tracing::info!(note_id, ?reason, ok = result.is_ok(), "Meeting refine: ended");
         let app = app.clone();
         // (Window queries wait on the main thread: not from this task.)
         std::thread::spawn(move || {
             if first {
-                crate::meeting_end::end_steps(&app, note_id, origin.as_deref());
+                crate::meetings::meeting_end::end_steps(&app, note_id, origin.as_deref());
             }
-            crate::meeting_audio::release(&app, note_id);
+            crate::meetings::meeting_audio::release(&app, note_id);
         });
     });
     match started {

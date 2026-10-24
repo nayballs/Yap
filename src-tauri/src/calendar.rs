@@ -1160,7 +1160,7 @@ fn show_note(app: &AppHandle, note_id: u64, title: &str) {
 /// Take notes on `key` (and join it first, `join`): its note, recording.
 fn start_event(app: &AppHandle, key: &str, join: bool) -> Result<u64, String> {
     let event = event_by_key(key)?;
-    if let Some(recording) = crate::meeting::recording_note() {
+    if let Some(recording) = crate::meetings::meeting::recording_note() {
         if crate::notes::find_by_event(key) == Some(recording) {
             if join {
                 join_link(app, &event)?;
@@ -1196,20 +1196,20 @@ async fn switch_to_event(app: &AppHandle, key: &str, join: bool) -> Result<u64, 
     if join {
         join_link(app, &event)?;
     }
-    if let Some(current) = crate::meeting::recording_note() {
+    if let Some(current) = crate::meetings::meeting::recording_note() {
         if crate::notes::find_by_event(key) == Some(current) {
             return Ok(current);
         }
         tracing::info!(note_id = current, "calendar: switching notes to the next meeting");
-        crate::meeting_end::end(app, Some("calendar"))?;
+        crate::meetings::meeting_end::end(app, Some("calendar"))?;
         // The recorder transcribes its last chunk before it lets go.
         for _ in 0..240 {
-            if crate::meeting::recording_note().is_none() {
+            if crate::meetings::meeting::recording_note().is_none() {
                 break;
             }
             tokio::time::sleep(Duration::from_millis(250)).await;
         }
-        if crate::meeting::recording_note().is_some() {
+        if crate::meetings::meeting::recording_note().is_some() {
             return Err("The last meeting's notes are still finishing. Try again in a moment.".into());
         }
     }
@@ -1359,7 +1359,7 @@ pub fn on_call_started(app_id: &str) {
     if lock_started().is_none() {
         return;
     }
-    let Some(recording) = crate::meeting::recording_note() else { return };
+    let Some(recording) = crate::meetings::meeting::recording_note() else { return };
     let recording_key = crate::notes::get(recording).and_then(|n| n.event).map(|e| e.key);
     let mut s = lock();
     let now = now_secs();
@@ -1409,7 +1409,7 @@ enum CardChange {
 fn tick_card(app: &AppHandle) {
     let now = now_secs();
     let lead = reminder_lead(&crate::config::load().meeting_reminder);
-    let recording = crate::meeting::recording_note();
+    let recording = crate::meetings::meeting::recording_note();
     let recording_key = recording.and_then(crate::notes::get).and_then(|n| n.event).map(|e| e.key);
     let focused = window_view(app).1;
     let change = {
@@ -1788,13 +1788,13 @@ fn brief_meeting(e: &Event) -> brief::Meeting {
 /// Where a brief's "In short" comes from: the meeting's own model (the Note
 /// Formatting scope, else cleanup's), or why there's none.
 enum BriefAi {
-    Model(crate::meeting_summary::Endpoint),
+    Model(crate::meetings::meeting_summary::Endpoint),
     Plain(&'static str),
 }
 
 impl BriefAi {
     fn of(cfg: &crate::config::YapConfig) -> BriefAi {
-        match crate::meeting_summary::resolve_endpoint(cfg) {
+        match crate::meetings::meeting_summary::resolve_endpoint(cfg) {
             // A brief never starts a stopped on-device model.
             Ok(ep) if ep.provider == crate::local_llm::PROVIDER_ONDEVICE && !crate::local_llm::is_running() => {
                 BriefAi::Plain("The on-device model isn't running, so this is the plain brief.")
@@ -1907,7 +1907,7 @@ fn prepare_brief(app: &AppHandle, key: &str, force: bool) -> Result<brief::Brief
 
 /// Write `facts`' "In short" on the meeting's model (beside any dictation),
 /// keep the finished brief, then start the next one waiting.
-async fn write_brief(app: AppHandle, facts: brief::Facts, ep: crate::meeting_summary::Endpoint, fingerprint: String) {
+async fn write_brief(app: AppHandle, facts: brief::Facts, ep: crate::meetings::meeting_summary::Endpoint, fingerprint: String) {
     let key = facts.meeting.key.clone();
     let started = std::time::Instant::now();
     let result = brief::write(Some(&app), &facts, &ep).await;
@@ -2067,7 +2067,7 @@ pub async fn calendar_brief_open(app: AppHandle, key: String, n: usize) -> Resul
 pub fn calendar_meeting_notes(query: Option<String>) -> Vec<Value> {
     let words: Vec<String> = query.unwrap_or_default().to_lowercase().split_whitespace().map(str::to_string).collect();
     let now = now_secs().max(0) as u64;
-    let recording = crate::meeting::recording_note();
+    let recording = crate::meetings::meeting::recording_note();
     let mut out: Vec<(u64, Value)> = crate::notes::all()
         .into_iter()
         .filter(|n| n.note_type == "meeting" || n.event.is_some())
@@ -2164,7 +2164,7 @@ pub fn meetings_context(query: &str) -> String {
                     body.push('\n');
                 }
                 if !n.transcript.is_empty() {
-                    body.push_str(&crate::meeting_summary::ask_context(n, 600));
+                    body.push_str(&crate::meetings::meeting_summary::ask_context(n, 600));
                 }
             }
             let body: String = body.chars().take(ASK_NOTE_CHARS).collect();

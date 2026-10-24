@@ -598,7 +598,7 @@ pub struct Status {
 
 pub fn status() -> Status {
     // Other modules' state first: never with this module's lock held.
-    let meeting = crate::meeting::state();
+    let meeting = crate::meetings::meeting::state();
     let call = crate::calls::meeting_detect::tray_item().map(|(_, label)| label);
     let now = now_ms();
     let s = lock();
@@ -983,7 +983,7 @@ pub fn init(app: &AppHandle) {
     {
         let mut s = lock();
         read_config(&mut s, &cfg);
-        s.meeting = crate::meeting::is_recording();
+        s.meeting = crate::meetings::meeting::is_recording();
     }
     if let Some(w) = window(app) {
         #[cfg(windows)]
@@ -1434,10 +1434,10 @@ fn act(app: &AppHandle, action: &str) -> Result<(), String> {
         "snip" => crate::snip::start(app, crate::snip::Origin::Bar),
         // ■ on the recording pill: end the meeting, which writes the action
         // plan in Rust (or asks "Started by mistake?").
-        "stop-meeting" => crate::meeting_end::end(app, Some(overlay::LABEL))?,
+        "stop-meeting" => crate::meetings::meeting_end::end(app, Some(overlay::LABEL))?,
         // The recording pill: its notes, in the meeting notepad.
-        "open-note" => match crate::meeting::recording_note() {
-            Some(note_id) => crate::notepad::open(app, note_id),
+        "open-note" => match crate::meetings::meeting::recording_note() {
+            Some(note_id) => crate::meetings::notepad::open(app, note_id),
             None => crate::commands::show_settings(app)?,
         },
         "new-note" => new_meeting_note(app)?,

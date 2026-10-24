@@ -1893,7 +1893,7 @@ fn first_look() -> Option<Duration> {
 /// A meeting recording or being summarised (its digests and action plan
 /// go to the on-device model one call after another).
 fn meeting_busy() -> bool {
-    crate::meeting::is_recording() || crate::meeting_end::summary_running()
+    crate::meetings::meeting::is_recording() || crate::meetings::meeting_end::summary_running()
 }
 
 /// The runtime's size (the pinned download's): what a download and a swap

@@ -23,7 +23,7 @@
 
 use serde::Serialize;
 
-use crate::meeting_summary::estimate_tokens;
+use crate::meetings::meeting_summary::estimate_tokens;
 use crate::notes::Note;
 
 fn now_ms() -> u64 {
@@ -136,7 +136,7 @@ fn transcript_text(note: &Note) -> String {
             let text = s.text.split_whitespace().collect::<Vec<_>>().join(" ");
             format!(
                 "[{}] {who}: {text}",
-                crate::meeting_summary::clock(s.ts.saturating_sub(t0))
+                crate::meetings::meeting_summary::clock(s.ts.saturating_sub(t0))
             )
         })
         .collect::<Vec<_>>()

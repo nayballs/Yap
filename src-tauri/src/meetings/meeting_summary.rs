@@ -1431,7 +1431,7 @@ pub fn kick(app: &AppHandle, note_id: u64) {
 }
 
 async fn live_digests(app: &AppHandle, note_id: u64) {
-    let recording = || crate::meeting::recording_note() == Some(note_id);
+    let recording = || crate::meetings::meeting::recording_note() == Some(note_id);
     loop {
         if !recording() {
             return;
@@ -1740,7 +1740,7 @@ pub fn clean_title(reply: &str) -> Option<String> {
 /// Fewer words of speech than this, with nothing else to go on (no digests,
 /// notes, summary or invite), is too little for a helper: it says so without
 /// calling a model.
-pub const ASSIST_MIN_WORDS: usize = crate::meeting_end::MISTAKE_WORDS;
+pub const ASSIST_MIN_WORDS: usize = crate::meetings::meeting_end::MISTAKE_WORDS;
 /// A helper reads at most this much of the calendar invite…
 const ASSIST_INVITE_TOKENS: usize = 200;
 /// …and of the notes the person typed.

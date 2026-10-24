@@ -1248,10 +1248,10 @@ async fn transcribe_chunk(engine_slot: &EngineSlot, samples: Vec<f32>, note_id: 
 
     let background = ctl.background;
     let outcome = tokio::task::spawn_blocking(move || {
-        let _low = background.then(crate::meeting_refine::LowPriority::now);
+        let _low = background.then(crate::meetings::meeting_refine::LowPriority::now);
         #[cfg(debug_assertions)]
         if background {
-            crate::meeting_refine::e2e_slow_chunk();
+            crate::meetings::meeting_refine::e2e_slow_chunk();
         }
         let result = match lease.engine() {
             Some(engine) => engine.transcribe_timed(&samples, language.as_deref(), translate, dict_prompt.as_deref()),
@@ -1435,7 +1435,7 @@ fn tell_failed(app: &AppHandle, note_id: u64) {
         return;
     }
     tracing::info!(note_id, "Meeting: telling the person part of it couldn't be transcribed");
-    let body = if crate::config::load().meeting_refine == crate::meeting_refine::NEVER {
+    let body = if crate::config::load().meeting_refine == crate::meetings::meeting_refine::NEVER {
         "Its audio is kept: use Try again on the transcript once the meeting ends."
     } else {
         "Its audio is kept: Yap transcribes that part again when the meeting ends."
@@ -1735,7 +1735,7 @@ pub(crate) fn ingest(
     }
     // Lines the speaker labels already cover get their voices now.
     crate::speakers::labels::after_ingest(app, note_id);
-    crate::meeting_summary::kick(app, note_id);
+    crate::meetings::meeting_summary::kick(app, note_id);
     Ok(())
 }
 
@@ -1775,7 +1775,7 @@ pub fn start(app: AppHandle, engine_slot: EngineSlot, note_id: u64) -> Result<()
     // Both sides' audio kept on disk from their first sample
     // (meeting_audio.rs): a crash loses nothing, and the meeting can be
     // transcribed again later. `None`: it couldn't be (logged).
-    let recorder = crate::meeting_audio::Recorder::start(&app, note_id, &mic_buf, &sys_buf);
+    let recorder = crate::meetings::meeting_audio::Recorder::start(&app, note_id, &mic_buf, &sys_buf);
 
     let bufs = (Arc::clone(&mic_buf), Arc::clone(&sys_buf));
     let flags = (Arc::clone(&stop), Arc::clone(&overflow));
@@ -1953,9 +1953,9 @@ pub fn start(app: AppHandle, engine_slot: EngineSlot, note_id: u64) -> Result<()
         // may be transcribed again when it ends (`meeting_refine.rs`): then
         // it goes once that's done.
         if let Some(r) = recorder {
-            let hold = failed > 0 || crate::meeting_refine::may_refine(&crate::config::load());
+            let hold = failed > 0 || crate::meetings::meeting_refine::may_refine(&crate::config::load());
             let _ = tauri::async_runtime::spawn_blocking(move || r.finish(hold)).await;
-            crate::meeting_audio::changed(&app, note_id);
+            crate::meetings::meeting_audio::changed(&app, note_id);
         }
 
         ACTIVE_NOTE.store(0, Ordering::SeqCst);

@@ -510,7 +510,7 @@ fn route(
             match delete_note(id) {
                 Ok(note_id) => {
                     let _ = app.emit("yap-notes-changed", ());
-                    let _ = app.emit(crate::meeting_end::EVENT_DELETED, json!({ "id": note_id }));
+                    let _ = app.emit(crate::meetings::meeting_end::EVENT_DELETED, json!({ "id": note_id }));
                     respond_saved(request, crate::notes::SAVER.status(), respond_no_content);
                 }
                 Err((status, code, message)) => respond_error(request, status, code, &message),
@@ -611,7 +611,7 @@ fn delete_note(id: &str) -> Result<u64, (u16, &'static str, String)> {
     let note = parse_id(id)
         .and_then(crate::notes::get)
         .ok_or_else(|| (404, "not_found", format!("Note {id} not found")))?;
-    crate::meeting::delete_note(note.id).map_err(|e| (409, "conflict", e))?;
+    crate::meetings::meeting::delete_note(note.id).map_err(|e| (409, "conflict", e))?;
     Ok(note.id)
 }
 
@@ -680,9 +680,9 @@ mod tests {
     /// it, and the recorder went on into a note that wasn't there.
     #[test]
     fn the_local_api_never_deletes_the_note_being_recorded() {
-        let _turn = crate::meeting::SLOT_TESTS.lock().unwrap_or_else(|p| p.into_inner());
+        let _turn = crate::meetings::meeting::SLOT_TESTS.lock().unwrap_or_else(|p| p.into_inner());
         let note = crate::notes::create("Client call", "", "meeting", "Meetings");
-        let recording = crate::meeting::claim_for_test(note.id);
+        let recording = crate::meetings::meeting::claim_for_test(note.id);
         let refused = delete_note(&note.id.to_string()).unwrap_err();
         assert_eq!((refused.0, refused.1), (409, "conflict"));
         assert!(crate::notes::get(note.id).is_some(), "the note is kept");

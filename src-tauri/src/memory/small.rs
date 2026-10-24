@@ -1810,7 +1810,7 @@ mod tests {
         // ~4 tokens of chat template a message; Yap's estimate runs ~15 %
         // high, so ≤ 350 of it).
         let m = messages(&cand("I'm a nurse at St James's in Norwich and I work night shifts at the hospital"));
-        let tokens: usize = m.as_array().unwrap().iter().map(|x| crate::meeting_summary::estimate_tokens(x["content"].as_str().unwrap()) + 4).sum();
+        let tokens: usize = m.as_array().unwrap().iter().map(|x| crate::meetings::meeting_summary::estimate_tokens(x["content"].as_str().unwrap()) + 4).sum();
         assert!(tokens <= 350, "{tokens}");
     }
 

@@ -330,7 +330,7 @@ impl Dictations for NewDictations {
         crate::pipeline::dictation_state().0 != mark
     }
     fn busy(&self) -> bool {
-        crate::meeting_summary::dictation_busy(&self.0)
+        crate::meetings::meeting_summary::dictation_busy(&self.0)
     }
     fn waits_first(&self) -> bool {
         false
@@ -346,10 +346,10 @@ impl Dictations for AnyDictation {
         0
     }
     fn must_yield(&self, _: u64) -> bool {
-        crate::meeting_summary::dictation_busy(&self.0)
+        crate::meetings::meeting_summary::dictation_busy(&self.0)
     }
     fn busy(&self) -> bool {
-        crate::meeting_summary::dictation_busy(&self.0)
+        crate::meetings::meeting_summary::dictation_busy(&self.0)
     }
     fn waits_first(&self) -> bool {
         true
@@ -395,7 +395,7 @@ pub async fn call(live: Live<'_>, req: &crate::llm::ChatRequest, tools_offered: 
             if waiting && !yielded {
                 live.sink.send(Event::Waiting { waiting: true });
             }
-            crate::meeting_summary::wait_idle(|| beside.busy(), || true).await;
+            crate::meetings::meeting_summary::wait_idle(|| beside.busy(), || true).await;
             if waiting {
                 live.sink.send(Event::Waiting { waiting: false });
             }
@@ -404,7 +404,7 @@ pub async fn call(live: Live<'_>, req: &crate::llm::ChatRequest, tools_offered: 
         let out = {
             let mut on = |d: Delta<'_>| step.on(d);
             let request = crate::llm::post_chat_streamed(req, &mut on);
-            crate::meeting_summary::unless_busy(request, || beside.must_yield(mark)).await
+            crate::meetings::meeting_summary::unless_busy(request, || beside.must_yield(mark)).await
         };
         match out {
             Some(out) => {

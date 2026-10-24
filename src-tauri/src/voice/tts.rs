@@ -1721,7 +1721,7 @@ pub fn ready_sentences(md: &str, n: usize, done: bool) -> Vec<String> {
 /// a meeting is too much — the maintainer, 2026-10-18). Spoken replies, ▶ and the
 /// Voice Assistant (`assistant::off_for_meeting`) all keep quiet then.
 pub fn meeting_quiet() -> Option<&'static str> {
-    if crate::meeting::is_recording() {
+    if crate::meetings::meeting::is_recording() {
         Some("Yap doesn't talk while it records a meeting")
     } else if crate::calls::meeting_detect::call_live() {
         Some("Yap doesn't talk during a call")

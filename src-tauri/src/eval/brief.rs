@@ -298,7 +298,7 @@ pub struct Endpoint<'a> {
 /// Run every scenario `repeat` times on one model; its results for
 /// summary.json and brief.md.
 pub async fn run(scenarios: &[Scenario], ep: &Endpoint<'_>, repeat: u32) -> Value {
-    let endpoint = crate::meeting_summary::Endpoint {
+    let endpoint = crate::meetings::meeting_summary::Endpoint {
         base_url: ep.base_url.to_string(),
         api_key: ep.key.to_string(),
         model: ep.model.to_string(),
