@@ -21,7 +21,7 @@ on the PC.
 | Join links | `src-tauri/src/calendar/links.rs` |
 | Credential Manager | `src-tauri/src/calendar/vault.rs` |
 | A note's meeting (`Note::event`, `link_event`) | `src-tauri/src/notes.rs` |
-| UI | `src/lib/MeetingsView.svelte`, `src/lib/ConnectCalendarDialog.svelte`, `src/lib/ConnectorsSection.svelte`, `src/lib/calendar.svelte.js`, `src/lib/CalendarLinkCard.svelte`, `src/lib/CalendarMark.svelte`, `src/lib/BriefView.svelte`, `src/lib/brief.js` |
+| UI | `src/lib/views/MeetingsView.svelte`, `src/lib/components/ConnectCalendarDialog.svelte`, `src/lib/settings/ConnectorsSection.svelte`, `src/lib/stores/calendar.svelte.js`, `src/lib/views/integrations/CalendarLinkCard.svelte`, `src/lib/components/CalendarMark.svelte`, `src/lib/components/BriefView.svelte`, `src/lib/core/brief.js` |
 
 ## Connecting a calendar
 

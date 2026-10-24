@@ -492,6 +492,18 @@ The AI Chat surface (conversations, the tool-calling loop and its note tools) an
 
 ## The Chat view
 
+`src/lib/views/chat/` (split 2026-10-24): `ChatView.svelte` is the view —
+it makes `chatState.svelte.js` (the conversations, sending and the streamed
+answer with ■ and a newer question replacing one, the Voice Assistant's
+questions, Snip to Chat and whether the model reads images, spoken replies,
+several picked at once), follows Rust's events while Chat is open, takes
+its keys and shows a screenshot large. Its parts: `ConversationList` (the
+list, its menus, rename in place, the selection bar), `ChatThread` (the
+empty state, "Thinking…") with `ChatMessage` (tool chips, the bubble,
+Stopped, Sources, ▶ and the model under an answer) and `Composer` (the
+screenshots and their prompts, +, the box, the mic, Send / ■, `ModelChip`).
+[frontend.md](./frontend.md#the-folder-layout-2026-10-24).
+
 - **`ChatView.svelte`** = the
   AI Chat surface (OpenWhispr `chat/ChatView.tsx` port): conversation sidebar
   (Today/Yesterday/Previous 7 Days/Older grouping, Ctrl+N, hover-delete;

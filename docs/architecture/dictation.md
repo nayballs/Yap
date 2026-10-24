@@ -349,7 +349,7 @@ to **Run again** from Home.
   a meeting and is dropped if it can't show within 10 s), else the window's
   toast if it's on screen; neither → nothing shown, nothing counted (never a
   Windows notification). "Show tips" off (`show_tips`) → none. Texts say
-  `{key}`; the page names the hotkey (`fillHotkey` in `lib/hotkeys.js`; the
+  `{key}`; the page names the hotkey (`fillHotkey` in `lib/core/hotkeys.js`; the
   card's `hotkey` field). Not for the edit hotkey.
 - **`input_hook.rs`** — low-level Windows keyboard + mouse hooks; specs `kb:VKEY`,
   `kb:ctrl+shift+VKEY` (modifier combo; `win` is a modifier too, e.g. the
@@ -379,7 +379,7 @@ to **Run again** from Home.
   forwarder as `transform-key-N` and out as one `transform-key-pressed`
   event carrying the slot (releases dropped), which `lib.rs` hands to
   `transforms::on_key` — see `transforms.rs` below. **`clashes(a, b)`** (pure, unit-tested;
-  `hotkeysClash` in `lib/hotkeys.js` is the same rule, Settings refuses with
+  `hotkeysClash` in `lib/core/hotkeys.js` is the same rule, Settings refuses with
   it): the same key however written, combos on one key nesting (Ctrl+Space
   inside Ctrl+Shift+Space), a chord completing inside a combo or bigger
   chord; a bare key and its combos don't (a bare key fires only with no
@@ -391,7 +391,7 @@ to **Run again** from Home.
   callback never blocks — plus a 30 s re-hook self-heal), each with the moment the
   key moved as its payload (`gesture::now_ms`): events are handled one after
   another, and push-to-talk's tap timing mustn't stretch while the last one starts. The capture UI is
-  `ui/HotkeyInput.svelte` + shared `lib/hotkeys.js` (parse/format/match — also
+  `ui/HotkeyInput.svelte` + shared `lib/core/hotkeys.js` (parse/format/match — also
   drives the in-window fallbacks; combos read Win first, "Win + Alt + M"). ⚠ **Known Windows
   gotcha:** when one of Yap's OWN WebView2 windows has focus, the LL hook never
   receives the hotkey (WebView2/Chromium front-runs the hook chain on focus) —
@@ -401,7 +401,7 @@ to **Run again** from Home.
   `meeting_shortcut`, and the assistant shortcut → `assistant_key { pressed }`). Any new Yap window with focusable UI needs the
   same fallback. **The Copilot key** (new Windows 11 laptops; the keyboard
   sends Win + Shift + F23) is the combo `kb:shift+win+134` (`COPILOT_KEY` in
-  `lib/hotkeys.js`, shown as one key, "Copilot", "the Copilot key" in
+  `lib/core/hotkeys.js`, shown as one key, "Copilot", "the Copilot key" in
   hints). Nothing tells a PC that has one apart, and Windows may act on it
   before a focused Yap window sees F23, so the shortcut picker offers a
   **Copilot key** button while it captures (Settings, onboarding). Checked

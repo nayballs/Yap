@@ -1,5 +1,5 @@
 // The Voice Assistant and spoken replies (src-tauri/src/assistant.rs,
-// tts.rs, src/lib/ChatView.svelte, Settings → Voice Assistant), and how
+// tts.rs, src/lib/views/chat/ChatView.svelte, Settings → Voice Assistant), and how
 // they differ from Commands (Settings → Commands: the agent's name in a
 // dictation, the rewrite shortcut — the AI types for you):
 // - Settings: two pages that each say what they do, with links between

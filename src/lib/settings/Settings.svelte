@@ -72,7 +72,7 @@
   const cfg = $derived(config.cfg);
   // General → Appearance (the theme, the reading text, Motion) shows in this
   // window as you pick (the other windows follow after the auto-save:
-  // lib/appearance.js). So do the bar's colours: the main window draws the
+  // lib/core/appearance.js). So do the bar's colours: the main window draws the
   // bar's cards too (the Connect calendar dialog's picture).
   $effect(() => {
     if (cfg)

@@ -1,5 +1,5 @@
 // About you (Settings → General; src-tauri/src/about_you.rs,
-// src/lib/AboutYouSettings.svelte, 2026-10-21; one Region picker since
+// src/lib/settings/AboutYouSettings.svelte, 2026-10-21; one Region picker since
 // 2026-10-22):
 // - "Region": "Automatic: United Kingdom (from Windows)" — in a test run the
 //   debug-only YAP_E2E_LOCALE stands in for Windows (never the PC's own

@@ -228,7 +228,7 @@ The meeting recorder and its audio kept on disk, rolling digests and the action 
   —, *Always* (the best model there is, the live one when it's the best),
   *Never*; never without its audio, on a pause, or for "Started by
   mistake?". **Which model** (`best_model`, pure): the most accurate
-  installed model (`MODELS`: `src/lib/models.js`'s leaderboard figures and
+  installed model (`MODELS`: `src/lib/core/speechModels.js`'s leaderboard figures and
   each model's languages) that speaks the meeting's language — Settings'
   speech language, else Windows' (`about_you`); unknown: one that speaks
   every language the live one does — and beats the live one (`Meta::model`,
@@ -387,7 +387,22 @@ The meeting recorder and its audio kept on disk, rolling digests and the action 
 
 ## Frontend
 
-- **`lib/Notepad.svelte`** — the **meeting notepad** (window `notepad`,
+`src/lib/notepad/` (split 2026-10-24): `Notepad.svelte` is the window — the
+note shown and the meeting, kept in step with Rust's events and the other
+windows (`changed`/`changing`, the debounced save), the in-page hotkeys and
+the layout. Its parts: `NotepadHeader`, `NotepadTitle`, `NotepadTabs`,
+`ThoughtsTab`, `TranscriptTab` + `TranscriptLog`, `SummaryTab`,
+`GenerateSummary`, `ConsentLine`, `AskTray` (Stop / Resume and the Ask
+sheet; what you've seen, for "What did I miss?", is kept for the window's
+life) and `DeleteMeetingDialog`; `NotepadIcon` the icons. A tab's body is
+made again on every switch, so what it shows that must last lives in the
+window: `transcriptView.svelte.js` (search, echo lines, follow, the menus,
+the line being fixed), `summaryEditor.svelte.js`, `consentMessage.svelte.js`.
+`actions.js` (the label, copying, Yap's main window); `notepad.css` the
+tooltips and ink button several parts draw.
+[frontend.md](./frontend.md#the-folder-layout-2026-10-24).
+
+- **`lib/notepad/Notepad.svelte`** — the **meeting notepad** (window `notepad`,
   `notepad.rs`), **Wispr Flow's notepad, measured** (2026-10-05, from its DOM
   over CDP: `references/wispr-flow/notepad-spec.md` (beside this repo); sizes, type,
   motion matched in Yap's own code, wording and icons; the colours are Yap's
@@ -493,7 +508,7 @@ The meeting recorder and its audio kept on disk, rolling digests and the action 
   `meetingCheckIn.js`). It has
   the **in-page hotkey fallback** (dictation, and the meeting shortcut when
   one is set), config re-read on focus.
-- **`lib/meetingAudio.svelte.js`** — a meeting note's audio on disk, for the
+- **`lib/stores/meetingAudio.svelte.js`** — a meeting note's audio on disk, for the
   Notes view and the notepad alike: `meeting_audio_note` per open note
   (refreshed on `yap-meeting-audio`), the jobs from `yap-meeting-redo`
   (`jobLine`: "Transcribing again with Parakeet V3 · 40%", "Transcribing the
@@ -519,16 +534,16 @@ The meeting recorder and its audio kept on disk, rolling digests and the action 
   and `retry`, `cancelJob`, `updateSummary`, `summaryFollows` (the
   notepad's Generate summary pill hides while the refine comes first) and
   `retryChunk`; `canPlay` skips failed markers.
-- **`lib/MeetingJob.svelte`** — a note's job line over the transcript, in
+- **`lib/components/MeetingJob.svelte`** — a note's job line over the transcript, in
   the notepad (`look="paper"`) and the Notes view (`look="app"`): spinner +
   `jobLine` + **Cancel**; "✓ Transcript improved · **Update summary**"; a
   refine that changed nothing, with ✕.
-- **`lib/FailedChunk.svelte`** — a failed chunk's marker in both views (a
+- **`lib/components/FailedChunk.svelte`** — a failed chunk's marker in both views (a
   `transcriptItems` item of kind `failed`, `notepadText.js` `failedText`):
   a dashed divider "⚠ Couldn't transcribe 0:42–1:12 · **Try again**"
   (`retryChunk`; off while it records — "After the meeting" —, while a job
   runs, or with no audio), its tooltip naming the side.
-- **`lib/SplitPreview.svelte`** — the split preview window's page (label
+- **`lib/notepad/SplitPreview.svelte`** — the split preview window's page (label
   `split-preview`, App.svelte routes it, transparent body): one glass
   rectangle inset 24 px (`rgba(255,255,255,.10)`, a 2 px
   `rgba(255,255,255,.45)` border, radius 12, a dark hairline + soft shadow),

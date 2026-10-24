@@ -122,14 +122,14 @@ The always-there pill above the taskbar: the `overlay` window's Rust side (regio
 
 ## The bar's page
 
-- **`lib/Overlay.svelte`** — the **Yap bar** page (window `overlay`, `bar.rs`),
+- **`lib/bar/Overlay.svelte`** — the **Yap bar** page (window `overlay`, `bar.rs`),
   laid out to Wispr's measured Flow Bar (`flowbar-spec.md`, checked by
   `bar.spec.js`) but in **Yap's own colours** (2026-10-06, the maintainer): every
   colour is a `--bar-*` token in app.css, in two schemes picked in Settings →
   General → Yap bar → **Colours** (`bar_theme`: **Match app** — the default
   since 2026-10-22, the same as Yap's theme, System / Light / Dark — or Light
   or Dark as an override; carried to the page in `bar::Status.theme` ("app" |
-  "light" | "dark"), which `lib/appearance.js` `setBarChoice` resolves into
+  "light" | "dark"), which `lib/core/appearance.js` `setBarChoice` resolves into
   `data-bar-theme`, following the app's theme live — Windows switching app
   mode included; the main window follows it too, for the Connect calendar
   dialog's card picture). The bar window stays transparent with no
@@ -209,7 +209,7 @@ The always-there pill above the taskbar: the `overlay` window's Rust side (regio
   `bar/CallCard.svelte` (the call
   prompt as Wispr's "Meeting detected" card, on the same tokens but one row
   with slimmer padding: the app's icon on a light tile, drawn by the shared
-  `lib/CallAppIcon.svelte` — its own as installed here (`app_icons.rs`,
+  `lib/components/CallAppIcon.svelte` — its own as installed here (`app_icons.rs`,
   loaded per window by `callAppIcons.svelte.js` when first drawn, again after
   10 min), else its mark from `bar/callApps.js` (Simple Icons CC0 glyphs),
   else a letter badge in its colour (Teams/Slack/Webex/Whereby), else a

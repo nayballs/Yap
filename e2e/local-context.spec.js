@@ -1,4 +1,4 @@
-// The on-device model's context (src/lib/LocalContext.svelte,
+// The on-device model's context (src/lib/components/LocalContext.svelte,
 // localContext.js; src-tauri/src/local_llm.rs, gguf.rs): how much text the
 // one on-device model reads at once, for Chat, dictation cleanup and the
 // meeting notes alike.

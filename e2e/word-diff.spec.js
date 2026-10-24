@@ -1,4 +1,4 @@
-// src/lib/wordDiff.js on its own (no app needed): what AI cleanup changed in
+// src/lib/core/wordDiff.js on its own (no app needed): what AI cleanup changed in
 // a dictation, word by word, as Home's "AI edited · N changes" shows it
 // (home-ai-edits.spec.js shows it in the app). Capitals and punctuation
 // aren't changes; words taken out or put in are, a run of them one change.

@@ -1,6 +1,6 @@
 # Frontend: Settings
 
-`lib/Settings.svelte` and its pages in `lib/settings/`, page by page. Account's
+`lib/settings/Settings.svelte` and its pages in `lib/settings/`, page by page. Account's
 own page is [accounts.md](./accounts.md).
 
 [Architecture index](./README.md) · [CLAUDE.md](../../CLAUDE.md)
@@ -36,14 +36,27 @@ store.
 | `settings/adoptions.svelte.js` | `followOutsideChanges`: the one-off adoptions (`yap-config-patched`, `yap-provider-key-saved`, a call app's choice, the on-device context and state, the Chat chip's scope, spoken replies' switch / volume / speed, the consent message, the bar turned off) |
 | `settings/dictionarySync.svelte.js` | `followDictionary`: the Dictionary view's list both ways, its echo guard, learned words |
 | `settings/hotkeyFallback.svelte.js` | `followHotkeyFallback`: the in-page keys (meeting, assistant, read aloud, snip, dictation, in that order) |
-| `lib/providers.js` | The providers in one place: ids, `BASE_URLS`, `KEYED_PROVIDERS`, `PP_PROVIDERS`, `PROVIDER_MODES`, `CLOUD_TABS`, `MODEL_HINTS`, `maskKey`, the four name sets each surface uses today (`PROVIDER_LABELS` short, `SCOPE_PROVIDER_LABELS` the scope tabs', `CLEANUP_PROVIDER_LABELS` cleanup's, `PROVIDER_DESTINATIONS` where the words go), and the key store's rules (`sharedKey`, `stashCleanupKey`, `creditCleanupKey`, `liftScopeKeys`, `adoptProviderKey`, `cleanupNeedsKey`) |
-| `lib/attention.svelte.js` | The red count's items (`attentionItems`) kept live by `followAttention` |
+| `lib/core/providers.js` | The providers in one place: ids, `BASE_URLS`, `KEYED_PROVIDERS`, `PP_PROVIDERS`, `PROVIDER_MODES`, `CLOUD_TABS`, `MODEL_HINTS`, `maskKey`, the four name sets each surface uses today (`PROVIDER_LABELS` short, `SCOPE_PROVIDER_LABELS` the scope tabs', `CLEANUP_PROVIDER_LABELS` cleanup's, `PROVIDER_DESTINATIONS` where the words go), and the key store's rules (`sharedKey`, `stashCleanupKey`, `creditCleanupKey`, `liftScopeKeys`, `adoptProviderKey`, `cleanupNeedsKey`) |
+| `lib/stores/attention.svelte.js` | The red count's items (`attentionItems`) kept live by `followAttention` |
 | `settings/localLlm.svelte.js` | Settings' on-device model: its status, the download and its progress, switching, the upgrade offer, delete, the family tab, the warm-up poll (`followLocalLlm`) |
 | `settings/languageModels.svelte.js` | Language Models' state that outlives the page (`lm`: the tab, cleanup's mode and cloud tab, the key field open, the Chat tab's remount count, Prompt Studio's guardrails, Smart routing's recent apps, the day's Groq usage), `providerUi`, `loadRecentApps`, `refreshUsage` |
 | `settings/scopes.js` | The four scopes (`SCOPE_TABS`, `SCOPE_DEFAULTS`…), `ensureScopes(cfg)`, `scopeModelLabel` |
 | `settings/cleanupPresets.js` / `settings/profiles.js` | The cleanup presets (`PP_DEFAULT_BODY` = `FIELD_DEFAULTS.ppPrompt`); profile ids and the pre-profiles migration |
 | `settings/LanguageModelsPage.svelte` | The page: tabs, Dictation cleanup (mode, key, model, endpoint fields, thinking), Spelling, Styles by app, Prompt Studio, where the text goes; with `LocalModels.svelte`, `SmartRouting.svelte`, `UsageToday.svelte` |
 | `settings/CommandsPage.svelte` / `VoicePage.svelte` / `SpeechPage.svelte` | The other three pages that were inline; `PageExplain.svelte` is Commands' and the Voice Assistant's example note |
+
+Since 2026-10-24 `Settings.svelte` and every part only Settings uses sit in
+`src/lib/settings/` with the pages: `AboutYouSettings`, `AppearanceSettings`,
+`AccountSection`, `ConnectorsSection`, `McpSection`, `MemorySection`,
+`VoiceSettings`, `ElevenLabsSettings`, `WebSearchSettings`,
+`OpenAppsSettings`, `KokoroOffer` (+ `kokoro.svelte.js`), `AgentNameField`,
+the speech models' `ModelManager`, `ModelRow`, `SpeakerModels`,
+`SpeakersToggle` (+ `diarization.svelte.js`), and the Language Models tabs'
+`ScopeProviderConfig`, `ChatConfig`, `NoteFormattingConfig`,
+`VoiceAgentConfig`, `PromptStudio`, `ModelPicker`, `EndpointModels`,
+`RegionSpelling` and `cleanupStyles.js`. What Settings shares with other
+windows is in `components/`, `stores/` and `core/`
+([frontend.md](./frontend.md#the-folder-layout-2026-10-24)).
 
 **CSS order is part of the look.** Vite bundles the CSS in import order,
 and a component's scoped rule (`.offnote.svelte-x`) and `settings.css`'s
@@ -223,7 +236,7 @@ there can move margins: compare a page before and after.
   the reading text, "Motion" (System / Reduced → `motion`; System's line says
   whether Windows' "Animation effects" is on). Settings applies its copy to
   the main window at once; the other windows follow the save
-  (`lib/appearance.js`, [frontend.md](./frontend.md#the-dark-theme-2026-10-22)).
+  (`lib/core/appearance.js`, [frontend.md](./frontend.md#the-dark-theme-2026-10-22)).
   **Yap bar** (`#settings-bar`, the bar menu's Settings → `general#bar`): Show
   the Yap bar (`barEnabled`; "Turn off the bar" in its menu arrives as
   `yap-bar-changed` and is adopted), a "Hidden until 15:40 · Show it now" row
@@ -415,7 +428,7 @@ there can move margins: compare a page before and after.
   **Spelling** (`#settings-cleanup-spelling`, `RegionSpelling.svelte`: "Write
   in my region's spelling" → `regionSpelling`, greyed while cleanup is off).
   With cleanup on: **Styles by app** (`#settings-cleanup-styles`,
-  `settings/CleanupStyles.svelte` + `lib/cleanupStyles.js`, 2026-10-24;
+  `settings/CleanupStyles.svelte` + `lib/settings/cleanupStyles.js`, 2026-10-24;
   `cleanup_styles.rs`): "Match the style to the app" (`cleanupStyles`,
   `cleanup-styles`; off: "every app gets the same cleanup"), then a card per
   kind of app from `cleanup_styles_catalog` (an icon, its name, its apps

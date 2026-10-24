@@ -27,7 +27,7 @@
 
   // Settings → General → Appearance (the theme, the reading font and size,
   // Motion) and the bar's colours in every window, following each save live
-  // (lib/appearance.js).
+  // (lib/core/appearance.js).
   initAppearance();
   const isSettings = label === 'settings';
   const isOnboarding = label === 'onboarding';

@@ -7,7 +7,7 @@
   // **run again** (on the same model or another) and **played**; one that
   // failed (never transcribed, or its paste didn't land) says so, with Run
   // again at hand. A dictation whose words AI cleanup changed says so —
-  // "AI edited · N changes" (`said` beside `text`, lib/wordDiff.js) — and
+  // "AI edited · N changes" (`said` beside `text`, lib/core/wordDiff.js) — and
   // opens into what changed, with **Paste what I said** (as_said.rs: swapped
   // in its app right after the dictation, else copied).
   import { invoke } from '@tauri-apps/api/core';
@@ -303,7 +303,7 @@
   }
 
   // ---- What AI cleanup changed: the words as said (`said`) against what
-  // was pasted, word by word (lib/wordDiff.js: capitals and punctuation
+  // was pasted, word by word (lib/core/wordDiff.js: capitals and punctuation
   // aside). Only a dictation whose words it changed says "AI edited". ----
   const aiEdits = $derived(
     new Map(
@@ -562,7 +562,7 @@
                     {/if}
                     {#if edits}
                       <!-- What AI cleanup changed: the words as said against
-                           the text pasted (lib/wordDiff.js). -->
+                           the text pasted (lib/core/wordDiff.js). -->
                       <button class="aiedit" class:on={editsOpen} aria-expanded={editsOpen} aria-controls={editsId} onclick={() => toggleDiff(e)}>
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9z" /></svg>
                         AI edited · {edits.changes}

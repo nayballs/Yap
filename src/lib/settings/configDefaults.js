@@ -68,7 +68,7 @@ export const FIELD_DEFAULTS = {
   barHideFullscreen: true,
   barTheme: 'app',
   barDictationButtons: 'off',
-  // General → Appearance (AppearanceSettings.svelte, lib/appearance.js).
+  // General → Appearance (AppearanceSettings.svelte, lib/core/appearance.js).
   theme: 'system',
   readingFont: 'default',
   readingSize: 'default',

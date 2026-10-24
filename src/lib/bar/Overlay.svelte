@@ -73,7 +73,7 @@
     dictationButtons: 'off',
   });
   // The --bar-* colours (app.css): `data-bar-theme`, Match app resolved with
-  // the theme of Yap's windows (lib/appearance.js, which also follows it as
+  // the theme of Yap's windows (lib/core/appearance.js, which also follows it as
   // it changes).
   $effect(() => {
     if (bar.theme) setBarChoice(bar.theme);

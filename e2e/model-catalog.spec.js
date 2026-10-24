@@ -1,5 +1,5 @@
 // The AI providers' live model lists (src-tauri/src/model_catalog.rs,
-// src/lib/modelCatalog.js, ModelPicker.svelte, the Chat view's model chip):
+// src/lib/core/modelCatalog.js, ModelPicker.svelte, the Chat view's model chip):
 // - Yap asks the provider itself, with the key already saved (Groq: Bearer;
 //   Gemini: the key in x-goog-api-key, never the URL), and caches the list
 //   in model_catalog.json without the key.

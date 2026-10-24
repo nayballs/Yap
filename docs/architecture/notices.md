@@ -1,6 +1,6 @@
 # Notices
 
-How loud Yap may be: the notice policy (one place, one at a time, held while dictating, cooldowns, call-prompt fatigue), alerts the person must act on, and Windows notifications. The page's half (the toast system) is in [frontend.md](./frontend.md) (`lib/ControlPanel.svelte`); the bar's cards are [yap-bar.md](./yap-bar.md).
+How loud Yap may be: the notice policy (one place, one at a time, held while dictating, cooldowns, call-prompt fatigue), alerts the person must act on, and Windows notifications. The page's half (the toast system) is in [frontend.md](./frontend.md) (`lib/views/ControlPanel.svelte`); the bar's cards are [yap-bar.md](./yap-bar.md).
 
 [Architecture index](./README.md) · [CLAUDE.md](../../CLAUDE.md)
 
@@ -38,7 +38,7 @@ How loud Yap may be: the notice policy (one place, one at a time, held while dic
   fixture runs it before every test), `e2e_focus {focused}` and `e2e_notice
   {surface: bar|window, kind, title, body, level, timeoutMs, dictating}`
   (a notice through the real policy, or a pretend dictation's `yap-state`).
-- **The offer of AI cleanup** (`cleanup_styles::offer`, `lib/cleanupOffer.js`,
+- **The offer of AI cleanup** (`cleanup_styles::offer`, `lib/notices/cleanupOffer.js`,
   2026-10-24): one tip, ever, in the main window — to someone with cleanup
   off on a PC the on-device model fits, after five dictations — asked of
   Rust after a dictation is saved or when the window comes to the front;
@@ -65,7 +65,7 @@ How loud Yap may be: the notice policy (one place, one at a time, held while dic
   **Try again** → `saving::retry_soon`: "Saved", or "Still couldn't save…";
   `saving.rs`): in one place (`notice::place`) — a
   toast in the main window while it's focused (`yap-alert` →
-  `lib/alerts.js`, kind `alert`), else a Yap bar card, else a Windows
+  `lib/notices/alerts.js`, kind `alert`), else a Yap bar card, else a Windows
   notification, else the window on screen; the same alert again within its
   kind's cooldown isn't shown (the mic one: once per 10 min; the overlay's
   line says it every press). One optional button (`Action`: **Open

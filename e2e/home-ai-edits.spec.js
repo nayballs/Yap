@@ -1,6 +1,6 @@
 // Home's "AI edited · N changes" (2026-10-23): a dictation whose words AI
 // cleanup changed says so in its row and opens into what it changed, word
-// by word (lib/wordDiff.js: history's `said` — the words as said — against
+// by word (lib/core/wordDiff.js: history's `said` — the words as said — against
 // the text Yap pasted; capitals and punctuation aren't changes), with
 // **Paste what I said** and **Copy what I said**.
 //

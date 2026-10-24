@@ -3,7 +3,7 @@
   // in free fonts): the Theme (System / Light / Dark) for every Yap window,
   // the font and size of the reading text — Chat's messages, notes and their
   // Enhanced view, the meeting notepad's My thoughts / Transcript / Summary
-  // and its Ask answers — and Motion for every Yap window. lib/appearance.js
+  // and its Ask answers — and Motion for every Yap window. lib/core/appearance.js
   // applies them (Settings' copy at once, every other window after the
   // auto-save); app.css has the tokens.
   //

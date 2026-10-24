@@ -134,7 +134,7 @@
           </div>
         {/if}
         {#if t.expand?.markdown && expanded.includes(t.id)}
-          <!-- renderMarkdown passes no raw HTML and sanitises its output (lib/markdown.js). -->
+          <!-- renderMarkdown passes no raw HTML and sanitises its output (lib/core/markdown.js). -->
           <div class="notes">{@html renderMarkdown(t.expand.markdown)}</div>
         {:else if t.expand?.brief && expanded.includes(t.id)}
           <!-- A meeting's pre-meeting brief (calendar.svelte.js), its sources linked. -->

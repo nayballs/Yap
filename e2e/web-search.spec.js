@@ -1,7 +1,7 @@
 // Looking things up on the web (src-tauri/src/web.rs, tools.rs' web_search /
-// read_page and the safety rule, chats.rs `sources`, src/lib/markdown.js's
+// read_page and the safety rule, chats.rs `sources`, src/lib/core/markdown.js's
 // citation pills, ChatView's Sources row, Settings → Voice Assistant → Web
-// search, src/lib/WebSearchSettings.svelte):
+// search, src/lib/settings/WebSearchSettings.svelte):
 // - Settings: off by default; Exa (Recommended) or Tavily, each key masked,
 //   "Get a free key" opening the service's dashboard; Wikipedia and game
 //   wikis always included; where the search words go.

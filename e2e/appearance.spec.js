@@ -1,5 +1,5 @@
 // Settings → General → Appearance (AppearanceSettings.svelte,
-// lib/appearance.js, the reading tokens in app.css): the reading font
+// lib/core/appearance.js, the reading tokens in app.css): the reading font
 // (Default = Figtree, Sans = Geist, Serif = Literata, System = Segoe UI,
 // OpenDyslexic — all bundled, each named in itself in the picker), the text
 // size, and Motion.

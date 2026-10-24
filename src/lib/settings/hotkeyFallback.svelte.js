@@ -1,7 +1,7 @@
 // The in-page hotkey fallback: when one of Yap's own windows has the focus,
 // the global low-level hook never sees the hotkey (WebView2 front-runs the
 // hook chain; log-proven 2026-07-05). The page gets the keydown normally,
-// so drive the pipeline directly — combo-aware via lib/hotkeys.js, matching
+// so drive the pipeline directly — combo-aware via lib/core/hotkeys.js, matching
 // the Rust hook's semantics. Settings runs it for the main window's whole
 // life (it's always mounted); it stands down while a shortcut is being
 // picked (settings/hotkeys.svelte.js).

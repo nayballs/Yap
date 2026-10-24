@@ -1,6 +1,6 @@
 // Opening apps when you ask (src-tauri/src/apps.rs, tools.rs' open_app /
 // list_apps, Settings → Voice Assistant → Opening apps,
-// src/lib/OpenAppsSettings.svelte):
+// src/lib/settings/OpenAppsSettings.svelte):
 // - Chat: "open notepad" is handled by Yap itself, before any model — here
 //   with no AI model set up at all — with "Opening Notepad." and its chip;
 //   several apps alike → "Which one?"; a name not on the PC → "I couldn't

@@ -1,4 +1,4 @@
-// The Yap bar (src-tauri/src/bar.rs + overlay.rs, src/lib/Overlay.svelte):
+// The Yap bar (src-tauri/src/bar.rs + overlay.rs, src/lib/bar/Overlay.svelte):
 // the always-there pill above the taskbar. One transparent window that's
 // click-through except over the pill and its cards, never activated, and
 // the surface for call prompts while the main window isn't focused.

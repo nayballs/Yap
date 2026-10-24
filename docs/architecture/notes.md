@@ -154,7 +154,7 @@ roadmap, "Meeting notes you can fix" and "Tasks").
   `mcp.rs` `list_tasks` ([integrations.md](./integrations.md)). The
   pre-meeting brief's open items (`calendar/brief.rs` `plan_tasks`) read only
   `- [ ]`, so a ticked task drops out of the next brief.
-- **Frontend** — `lib/noteEdits.js` (`editLine`, `taskToggled` + `setTask`,
+- **Frontend** — `lib/core/noteEdits.js` (`editLine`, `taskToggled` + `setTask`,
   `saveSummary`, `askReplaceSummary`, `SUMMARY_KEPT`) and the pure helpers in
   `notepadText.js` (`lineRef`, `withLineEdit`, `taskText`, `withTaskMark`,
   `newSinceSummary`, `newSinceLine`; `transcriptItems` lines carry `edited`
@@ -164,6 +164,18 @@ roadmap, "Meeting notes you can fix" and "Tasks").
   Rust refuses. `TasksView.svelte` — below.
 
 ## The Notes view
+
+`src/lib/views/notes/` (split 2026-10-24): `NotesView.svelte` is the view —
+it makes `notesState.svelte.js` (the notes and folders, the open note saved
+as it's typed and kept in step with the notepad, the recorder, the actions,
+the summary edited in place, the transcript's view and the note's chat),
+follows Rust's events while Notes is open, and opens the note a call or the
+Tasks view asks for. Its parts: `NoteList` (tools, folders, notes and their
+menus), `NoteEditor` (title, tabs, the run line, the raw note) with
+`NoteMeta` (the chip row), `NoteSummary` (rendered, ticked, edited),
+`NoteTranscript` (the transcript box) and `NoteChat` (the thread, helpers,
+the Ask bar) with `ActionPicker`; `ActionManager`; `noteFormat.js` (titles,
+dates). [frontend.md](./frontend.md#the-folder-layout-2026-10-24).
 
 - **`NotesView.svelte`** = the AI Notepad (OpenWhispr
   sidebar port: **New note / Search notes / Actions** rows; **FOLDERS with
@@ -208,7 +220,7 @@ roadmap, "Meeting notes you can fix" and "Tasks").
   every rewrite of an edited summary (Action plan, an action, Update) asked
   first (`askReplaceSummary`); a run the person outpaced says "Your summary
   was kept" (the safe
-  renderer in `lib/markdown.js`, shared with chat answers, the notepad, the
+  renderer in `lib/core/markdown.js`, shared with chat answers, the notepad, the
   Voice Assistant's card and update notes — see "The markdown renderer"
   below) with **Copy as Markdown / Copy as text** (`markdownToText`:
   ☐ tasks, plain headings); embedded per-note **"Ask anything…" bar** = Chat
@@ -256,7 +268,7 @@ roadmap, "Meeting notes you can fix" and "Tasks").
 
 ## The markdown renderer
 
-- **`lib/markdown.js`** — `renderMarkdown(md, {sources})` → safe HTML for
+- **`lib/core/markdown.js`** — `renderMarkdown(md, {sources})` → safe HTML for
   notes' Summary tab, chat answers (Chat and a note's Ask bar), the notepad's
   Summary and Ask sheet, the Voice Assistant's bar card, and update notes
   (toast, Settings → About). Since 2026-10-21 the parser is **markdown-it**

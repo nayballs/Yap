@@ -99,7 +99,7 @@
   bar_hide_fullscreen (true) + bar_theme ("app" — Match app, the theme of
   Yap's windows — | "light" | "dark", app) +
   bar_dictation_buttons (the capsule's ✕ / ✓: "off" | "hover" | "always",
-  off), General → Appearance (`src/lib/appearance.js`, every window):
+  off), General → Appearance (`src/lib/core/appearance.js`, every window):
   theme ("system" — Windows' app mode, followed live — | "light" | "dark",
   system; `theme.rs` gives the opaque windows' webviews its background) +
   reading_font ("default" Figtree | "sans" Geist | "serif" Literata |
@@ -334,7 +334,7 @@
   action, a chat's rename or delete, memory's edits, Clear history, a
   history entry's delete) returns it as its error (each store's `saved()`),
   and the page shows it with **Try again** (`saves_retry` → every unsaved
-  store written again; `src/lib/saveErrors.js`, frontend.md); a save that
+  store written again; `src/lib/notices/saveErrors.js`, frontend.md); a save that
   failed by itself (history after a dictation, memory learning, calendar
   sync, usage and dictionary counts, call-prompt counts, word suggestions)
   is said by one alert through the notice policy (kind `saveFailed`,

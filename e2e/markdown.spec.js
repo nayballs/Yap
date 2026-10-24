@@ -1,4 +1,4 @@
-// src/lib/markdown.js on its own (no app needed): markdown-it + DOMPurify
+// src/lib/core/markdown.js on its own (no app needed): markdown-it + DOMPurify
 // with Yap's own rules, as chat answers, notes, the notepad and update notes
 // show it. Models write numbered lists with blank lines between the items
 // ("1. …\n\n2. …"), which showed "1." on every item until 2026-10-21 (each

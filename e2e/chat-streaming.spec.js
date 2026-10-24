@@ -1,4 +1,4 @@
-// Streamed answers (src-tauri/src/stream.rs, src/lib/streaming.js): Chat and
+// Streamed answers (src-tauri/src/stream.rs, src/lib/core/streaming.js): Chat and
 // the notepad's Ask sheet show an answer as it's written.
 // - The answer grows in place, markdown rendered as it comes (a half-written
 //   **bold** or list closed off), the request asked for the stream and its

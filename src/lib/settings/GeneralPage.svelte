@@ -66,7 +66,7 @@
 </Group>
 
 <!-- The theme, the reading font and size, and Motion, for every window
-     (AppearanceSettings.svelte, lib/appearance.js). -->
+     (AppearanceSettings.svelte, lib/core/appearance.js). -->
 <AppearanceSettings {cfg} />
 
 <Group title="Yap bar" id="settings-bar">
