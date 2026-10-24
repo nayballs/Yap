@@ -12,7 +12,7 @@
   import Toggle from './ui/Toggle.svelte';
   import Row from './ui/Row.svelte';
   import { PP_CLOUD_MODELS, modelThinks } from './core/ppModels.js';
-  import { modelsFor, defaultModel, providerOffers } from './modelCatalog.svelte.js';
+  import { modelsFor, defaultModel, providerOffers } from './stores/modelCatalog.svelte.js';
   import {
     PROVIDER_MODES as MODES,
     CLOUD_TABS,

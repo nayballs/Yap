@@ -18,8 +18,8 @@
   import CallAppIcon from '../CallAppIcon.svelte';
   import SpeakersToggle from '../SpeakersToggle.svelte';
   import SettingsHotkey from './SettingsHotkey.svelte';
-  import { meetingDetect } from '../meetingDetect.svelte.js';
-  import { calendar } from '../calendar.svelte.js';
+  import { meetingDetect } from '../stores/meetingDetect.svelte.js';
+  import { calendar } from '../stores/calendar.svelte.js';
   import { formatHotkeySpec } from '../core/hotkeys.js';
   import { invoke } from '@tauri-apps/api/core';
   import { listen } from '@tauri-apps/api/event';

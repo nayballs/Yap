@@ -1,7 +1,7 @@
 <script>
   // Integrations → Calendar: what's connected now (calendar.rs). Connect
   // opens the "Connect your calendar" dialog; Manage, Settings → Connectors.
-  import { calendar, openConnectors, openConnectDialog } from './calendar.svelte.js';
+  import { calendar, openConnectors, openConnectDialog } from './stores/calendar.svelte.js';
 
   const connected = $derived(calendar.connections.map((c) => c.label));
 </script>

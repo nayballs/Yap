@@ -16,7 +16,7 @@
   //   goto: opens another Settings page (Settings.svelte).
   import { invoke } from '@tauri-apps/api/core';
   import LinkRow from './ui/LinkRow.svelte';
-  import { calendar } from './calendar.svelte.js';
+  import { calendar } from './stores/calendar.svelte.js';
   import { toast } from './ui/toast.svelte.js';
   import CalendarMark from './CalendarMark.svelte';
   import { openContextMenu, menuKey, menuOpenFor, askConfirm } from './ui/contextMenu.svelte.js';

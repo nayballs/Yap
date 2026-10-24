@@ -15,7 +15,7 @@
 //   deletes the meeting note (`meeting_discard`).
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
-import { toast, dismiss, isToastLive } from './ui/toast.svelte.js';
+import { toast, dismiss, isToastLive } from '../ui/toast.svelte.js';
 
 export const summaries = $state({ byNote: {}, progress: {} });
 

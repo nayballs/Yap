@@ -28,9 +28,9 @@
 // window by itself (`yap-note-changed`).
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
-import { toast, dismiss, isToastLive, updateToast } from './ui/toast.svelte.js';
+import { toast, dismiss, isToastLive, updateToast } from '../ui/toast.svelte.js';
 import { noteRequest } from './meetingDetect.svelte.js';
-import { briefStamp } from './core/brief.js';
+import { briefStamp } from '../core/brief.js';
 
 export const calendar = $state({
   loaded: false,

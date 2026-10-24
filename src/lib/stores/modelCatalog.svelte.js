@@ -5,7 +5,7 @@
 // the hourly background check). The merging is modelCatalog.js's.
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
-import { mergeModels, defaultFrom, offers, labelFor } from './core/modelCatalog.js';
+import { mergeModels, defaultFrom, offers, labelFor } from '../core/modelCatalog.js';
 
 /** `providers`: provider → `{ ok, models, error, fetchedAt, checkedAt, checking }`, keyed providers only. */
 export const catalog = $state({ providers: {}, now: 0, loaded: false });

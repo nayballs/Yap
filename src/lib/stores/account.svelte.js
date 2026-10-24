@@ -10,7 +10,7 @@
 // and Yap stopped polling it (the Account page offers a new one).
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
-import { toast } from './ui/toast.svelte.js';
+import { toast } from '../ui/toast.svelte.js';
 
 export const account = $state({ status: null });
 

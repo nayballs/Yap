@@ -14,7 +14,7 @@
   import Row from '../ui/Row.svelte';
   import Button from '../ui/Button.svelte';
   import ReportProblem from './ReportProblem.svelte';
-  import { updates, installUpdate, checkForUpdates, openRelease, formatAgo } from '../updates.svelte.js';
+  import { updates, installUpdate, checkForUpdates, openRelease, formatAgo } from '../stores/updates.svelte.js';
   import { renderMarkdown } from '../core/markdown.js';
   import { createExternalLinkHandler } from '../core/externalLinks.js';
 

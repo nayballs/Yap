@@ -13,7 +13,7 @@
 // double-tap) is Rust's to decide.
 import { invoke } from '@tauri-apps/api/core';
 import { hotkeyMatchesKeydown, hotkeyMatchesKeyup } from '../core/hotkeys.js';
-import { readPageSelection } from '../speech.svelte.js';
+import { readPageSelection } from '../stores/speech.svelte.js';
 import { hotkeyCapture } from './hotkeys.svelte.js';
 
 /** Call while the component initialises; `getCfg()` = Settings' config copy (or null). */

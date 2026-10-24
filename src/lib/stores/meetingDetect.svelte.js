@@ -32,7 +32,7 @@
 // so its usual Meeting Notes summary runs.
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
-import { toast, dismiss, isToastLive, updateToast } from './ui/toast.svelte.js';
+import { toast, dismiss, isToastLive, updateToast } from '../ui/toast.svelte.js';
 
 export const meetingDetect = $state({ enabled: true, style: 'popup', apps: [], calls: [], prompt: null });
 

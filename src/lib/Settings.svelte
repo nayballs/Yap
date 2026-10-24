@@ -2,18 +2,18 @@
   import { invoke } from '@tauri-apps/api/core';
   import { listen } from '@tauri-apps/api/event';
   import { onMount, onDestroy, tick } from 'svelte';
-  import { initSpeech } from './speech.svelte.js';
+  import { initSpeech } from './stores/speech.svelte.js';
   import { applyAppearance } from './core/appearance.js';
   import { startKokoro } from './kokoro.svelte.js';
   import { creditCleanupKey } from './core/providers.js';
-  import { loadCatalog } from './modelCatalog.svelte.js';
-  import { attention, attentionCount, followAttention } from './attention.svelte.js';
+  import { loadCatalog } from './stores/modelCatalog.svelte.js';
+  import { attention, attentionCount, followAttention } from './stores/attention.svelte.js';
   import { refreshLocalLlm, listenLocalProgress, followLocalLlm } from './settings/localLlm.svelte.js';
   import AccountSection from './AccountSection.svelte';
   import ConnectorsSection from './ConnectorsSection.svelte';
   import McpSection from './McpSection.svelte';
   import MemorySection from './MemorySection.svelte';
-  import { account, displayName, initAccount, initials } from './account.svelte.js';
+  import { account, displayName, initAccount, initials } from './stores/account.svelte.js';
   // Last before settings.css: the CSS order (LanguageModelsPage.svelte says why).
   import LanguageModelsPage from './settings/LanguageModelsPage.svelte';
   import './settings/settings.css';

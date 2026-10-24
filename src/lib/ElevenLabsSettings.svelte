@@ -22,7 +22,7 @@
   import Row from './ui/Row.svelte';
   import Select from './ui/Select.svelte';
   import Input from './ui/Input.svelte';
-  import { speech } from './speech.svelte.js';
+  import { speech } from './stores/speech.svelte.js';
   import { toast } from './ui/toast.svelte.js';
   import { createExternalLinkHandler } from './core/externalLinks.js';
   import { maskKey } from './core/providers.js';

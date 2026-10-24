@@ -87,12 +87,12 @@
   import { renderMarkdown } from './core/markdown.js';
   import { toast } from './ui/toast.svelte.js';
   import { showSaveError } from './saveErrors.js';
-  import { chatRequest } from './chatRequest.svelte.js';
+  import { chatRequest } from './stores/chatRequest.svelte.js';
   import ModelChip from './ModelChip.svelte';
   import { modelLine, modelName, providerName, whereItRuns } from './core/aiModel.js';
   import { chatImageUrl, SNIP_PROMPTS, DEFAULT_PROMPT, MAX_SHOTS, removedLine, sizeLine, visionRefused } from './chatImages.js';
   import { waitingShots } from './chatShots.svelte.js';
-  import { speech, initSpeech, readAloud as speakText, speakReply, stopReading as stopSpeech } from './speech.svelte.js';
+  import { speech, initSpeech, readAloud as speakText, speakReply, stopReading as stopSpeech } from './stores/speech.svelte.js';
   import { formatHotkeySpec } from './core/hotkeys.js';
   import { aiError } from './core/aiErrors.js';
   import { openContextMenu, menuKey, menuOpenFor, askConfirm, devInspect } from './ui/contextMenu.svelte.js';

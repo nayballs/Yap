@@ -17,17 +17,17 @@
   import { toast } from './ui/toast.svelte.js';
   import { fillHotkey } from './core/hotkeys.js';
   import Settings from './Settings.svelte';
-  import { attention } from './attention.svelte.js';
-  import { account, displayName, initAccount, initials } from './account.svelte.js';
-  import { initUpdates } from './updates.svelte.js';
-  import { initMeetingDetect, noteRequest } from './meetingDetect.svelte.js';
-  import { initMeetingSummary, askStartedByMistake } from './meetingSummary.svelte.js';
+  import { attention } from './stores/attention.svelte.js';
+  import { account, displayName, initAccount, initials } from './stores/account.svelte.js';
+  import { initUpdates } from './stores/updates.svelte.js';
+  import { initMeetingDetect, noteRequest } from './stores/meetingDetect.svelte.js';
+  import { initMeetingSummary, askStartedByMistake } from './stores/meetingSummary.svelte.js';
   import { initMeetingGuard } from './meetingGuard.js';
-  import { initCalendar, closeConnectDialog } from './calendar.svelte.js';
+  import { initCalendar, closeConnectDialog } from './stores/calendar.svelte.js';
   import { initWordSuggestions } from './wordSuggestions.js';
   import { initAlerts } from './alerts.js';
-  import { initUpload } from './upload.svelte.js';
-  import { initMemory } from './memory.svelte.js';
+  import { initUpload } from './stores/upload.svelte.js';
+  import { initMemory } from './stores/memory.svelte.js';
   import { initCleanupOffer } from './cleanupOffer.js';
   import ConnectCalendarDialog from './ConnectCalendarDialog.svelte';
   // Every view is in this window's one chunk (~590 KB): loading the views
@@ -43,7 +43,7 @@
   import NotesView from './NotesView.svelte';
   import TasksView from './TasksView.svelte';
   import ChatView from './ChatView.svelte';
-  import { chatRequest } from './chatRequest.svelte.js';
+  import { chatRequest } from './stores/chatRequest.svelte.js';
   import IntegrationsView from './IntegrationsView.svelte';
   import { menuOrDialogOpen } from './ui/contextMenu.svelte.js';
   import { noteAccountPicture } from './core/connections.js';

@@ -15,8 +15,8 @@
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { SvelteSet } from 'svelte/reactivity';
-import { askConfirm } from './ui/contextMenu.svelte.js';
-import { toast } from './ui/toast.svelte.js';
+import { askConfirm } from '../ui/contextMenu.svelte.js';
+import { toast } from '../ui/toast.svelte.js';
 
 export const meetingAudio = $state({
   /** noteId → `NoteAudio` (meeting_audio.rs). */

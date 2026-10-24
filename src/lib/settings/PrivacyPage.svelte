@@ -23,7 +23,7 @@
   import { askConfirm } from '../ui/contextMenu.svelte.js';
   import { toast } from '../ui/toast.svelte.js';
   import { showSaveError } from '../saveErrors.js';
-  import { account } from '../account.svelte.js';
+  import { account } from '../stores/account.svelte.js';
   import { PROVIDER_DESTINATIONS } from '../core/providers.js';
 
   let { cfg, goto = null, connections = $bindable(false) } = $props();

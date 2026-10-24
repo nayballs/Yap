@@ -21,7 +21,7 @@
   import { toast, dismiss } from './ui/toast.svelte.js';
   import { showSaveError } from './saveErrors.js';
   import { MODELS } from './core/speechModels.js';
-  import { attention } from './attention.svelte.js';
+  import { attention } from './stores/attention.svelte.js';
   import { wordDiff } from './core/wordDiff.js';
 
   let { onopensettings = null, onnavigate = null } = $props();

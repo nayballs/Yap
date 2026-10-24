@@ -6,8 +6,8 @@
 // Rust sends the toast's event only while the main window is on screen.
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
-import { toast } from './ui/toast.svelte.js';
-import { showSaveError } from './saveErrors.js';
+import { toast } from '../ui/toast.svelte.js';
+import { showSaveError } from '../saveErrors.js';
 
 export const memory = $state({ items: [], ai: { ready: true }, loaded: false });
 

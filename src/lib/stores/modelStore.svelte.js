@@ -6,7 +6,7 @@
 // and a late error was lost (code review 2026-10-23).
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
-import { getConfig, installedModels } from './core/ipcShared.js';
+import { getConfig, installedModels } from '../core/ipcShared.js';
 
 export const modelStore = $state({
   installed: [], // model ids on disk

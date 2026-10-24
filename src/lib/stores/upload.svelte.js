@@ -12,7 +12,7 @@
 // `-cancelled`.
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
-import { toast } from './ui/toast.svelte.js';
+import { toast } from '../ui/toast.svelte.js';
 
 export const upload = $state({
   /** idle | selected | transcribing | complete | error */

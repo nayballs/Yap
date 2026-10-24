@@ -12,7 +12,7 @@
   import { getCurrentWebview } from '@tauri-apps/api/webview';
   import { onMount } from 'svelte';
   import { MODELS } from './core/speechModels.js';
-  import { upload, chooseFile, failed, transcribe, cancel, reset } from './upload.svelte.js';
+  import { upload, chooseFile, failed, transcribe, cancel, reset } from './stores/upload.svelte.js';
 
   // Matches media.rs (Symphonia features): no opus/webm yet.
   const SUPPORTED_EXTENSIONS = ['mp3', 'wav', 'm4a', 'aac', 'flac', 'ogg', 'oga'];

@@ -8,7 +8,7 @@ import { listen } from '@tauri-apps/api/event';
 import { onMount } from 'svelte';
 import { updates } from './updates.svelte.js';
 import { modelStore, refreshModels } from './modelStore.svelte.js';
-import { cleanupNeedsKey } from './core/providers.js';
+import { cleanupNeedsKey } from '../core/providers.js';
 
 export const attention = $state({ items: [] });
 

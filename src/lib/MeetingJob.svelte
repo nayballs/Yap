@@ -11,7 +11,7 @@
   //
   //   noteId: the note.
   //   look:   'paper' (the notepad's palette) or 'app' (the Notes view's).
-  import { jobState, jobLine, cancelJob, updateSummary, dismissJob } from './meetingAudio.svelte.js';
+  import { jobState, jobLine, cancelJob, updateSummary, dismissJob } from './stores/meetingAudio.svelte.js';
 
   let { noteId, look = 'app' } = $props();
 

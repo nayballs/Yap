@@ -34,7 +34,7 @@
   import { toast } from './ui/toast.svelte.js';
   import { showSaveError } from './saveErrors.js';
   import { askConfirm } from './ui/contextMenu.svelte.js';
-  import { memory, loadMemory, changedToast } from './memory.svelte.js';
+  import { memory, loadMemory, changedToast } from './stores/memory.svelte.js';
 
   let { cfg, goto = (where) => window.dispatchEvent(new CustomEvent('yap-settings-goto', { detail: where })) } = $props();
 

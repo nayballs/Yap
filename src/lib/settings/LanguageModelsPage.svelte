@@ -41,7 +41,7 @@
   import SmartRouting from './SmartRouting.svelte';
   import UsageToday from './UsageToday.svelte';
   import { PP_CLOUD_MODELS, modelThinks } from '../core/ppModels.js';
-  import { modelsFor, defaultModel, providerOffers } from '../modelCatalog.svelte.js';
+  import { modelsFor, defaultModel, providerOffers } from '../stores/modelCatalog.svelte.js';
   import { createExternalLinkHandler } from '../core/externalLinks.js';
   import {
     PP_PROVIDERS,

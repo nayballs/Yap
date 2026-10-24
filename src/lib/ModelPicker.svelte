@@ -10,7 +10,7 @@
   import SelectList from './ui/SelectList.svelte';
   import { PROVIDER_ICONS, MONOCHROME_PROVIDERS } from './core/providerIcons.js';
   import { PROVIDER_LABELS } from './core/providers.js';
-  import { catalog, loadCatalog, checkCatalog, modelsFor } from './modelCatalog.svelte.js';
+  import { catalog, loadCatalog, checkCatalog, modelsFor } from './stores/modelCatalog.svelte.js';
   import { ago } from './core/modelCatalog.js';
 
   let { provider, value = $bindable(''), disabled = false } = $props();

@@ -18,11 +18,11 @@
   import { invoke } from '@tauri-apps/api/core';
   import { listen } from '@tauri-apps/api/event';
   import { onMount } from 'svelte';
-  import { calendar, clockTime, whenText, syncCalendar, eventAction, openConnectDialog, briefs, loadBrief } from './calendar.svelte.js';
+  import { calendar, clockTime, whenText, syncCalendar, eventAction, openConnectDialog, briefs, loadBrief } from './stores/calendar.svelte.js';
   import BriefView from './BriefView.svelte';
-  import { noteRequest } from './meetingDetect.svelte.js';
-  import { summarise } from './meetingSummary.svelte.js';
-  import { chatRequest } from './chatRequest.svelte.js';
+  import { noteRequest } from './stores/meetingDetect.svelte.js';
+  import { summarise } from './stores/meetingSummary.svelte.js';
+  import { chatRequest } from './stores/chatRequest.svelte.js';
   import { formatHotkeySpec } from './core/hotkeys.js';
   import { toast } from './ui/toast.svelte.js';
   import { openContextMenu, menuKey, menuOpenFor, askConfirm } from './ui/contextMenu.svelte.js';

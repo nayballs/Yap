@@ -8,7 +8,7 @@
   import { invoke } from '@tauri-apps/api/core';
   import { onMount } from 'svelte';
   import { MODELS, formatSize } from './core/speechModels.js';
-  import { modelStore, refreshModels, setActiveModel, downloadModel } from './modelStore.svelte.js';
+  import { modelStore, refreshModels, setActiveModel, downloadModel } from './stores/modelStore.svelte.js';
   import ModelRow from './ModelRow.svelte';
   import Group from './ui/Group.svelte';
   import Button from './ui/Button.svelte';

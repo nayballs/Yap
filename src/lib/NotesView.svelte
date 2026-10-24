@@ -21,8 +21,8 @@
   import { toast } from './ui/toast.svelte.js';
   import { showSaveError } from './saveErrors.js';
   import ActionManager from './ActionManager.svelte';
-  import { noteRequest } from './meetingDetect.svelte.js';
-  import { summaries, loadSummary, summarise } from './meetingSummary.svelte.js';
+  import { noteRequest } from './stores/meetingDetect.svelte.js';
+  import { summaries, loadSummary, summarise } from './stores/meetingSummary.svelte.js';
   import {
     MEETING_HELPERS,
     meetingHelpers,
@@ -42,9 +42,9 @@
   // The refine after a meeting, Try again on a stretch that failed (meeting_refine.rs).
   import MeetingJob from './MeetingJob.svelte';
   import FailedChunk from './FailedChunk.svelte';
-  import { jobState } from './meetingAudio.svelte.js';
+  import { jobState } from './stores/meetingAudio.svelte.js';
   import { nextModel, modelLine, whereItRuns } from './core/aiModel.js';
-  import { speech, initSpeech, readAloud, stopReading } from './speech.svelte.js';
+  import { speech, initSpeech, readAloud, stopReading } from './stores/speech.svelte.js';
   import { openContextMenu, menuKey, menuOpenFor, askConfirm, devInspect } from './ui/contextMenu.svelte.js';
   import { copyText, messageItems } from './core/itemMenus.js';
   import {
@@ -59,7 +59,7 @@
     canPlay,
     playLine,
     stopLine,
-  } from './meetingAudio.svelte.js';
+  } from './stores/meetingAudio.svelte.js';
 
   /** This window's label: the `origin` of its saves and stops. */
   const LABEL = 'settings';

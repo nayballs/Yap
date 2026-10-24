@@ -5,7 +5,7 @@
 // from its live list, modelCatalog.svelte.js), icons from providerIcons.js.
 import { invoke } from '@tauri-apps/api/core';
 import { PROVIDER_ICONS } from './providerIcons.js';
-import { modelsFor, modelLabel } from '../modelCatalog.svelte.js';
+import { modelsFor, modelLabel } from '../stores/modelCatalog.svelte.js';
 import { PROVIDER_LABELS, KEYED_PROVIDERS as CLOUD_ORDER } from './providers.js';
 
 /**

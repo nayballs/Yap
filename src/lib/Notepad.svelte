@@ -45,14 +45,14 @@
   // The refine after a meeting, Try again on a stretch that failed (meeting_refine.rs).
   import MeetingJob from './MeetingJob.svelte';
   import FailedChunk from './FailedChunk.svelte';
-  import { jobState, summaryFollows } from './meetingAudio.svelte.js';
+  import { jobState, summaryFollows } from './stores/meetingAudio.svelte.js';
   import BriefView from './BriefView.svelte';
   import { briefTeaser } from './core/brief.js';
   import { toast } from './ui/toast.svelte.js';
   import { showSaveError } from './saveErrors.js';
   import { renderMarkdown } from './core/markdown.js';
   import { nextModel, modelLine, whereItRuns } from './core/aiModel.js';
-  import { speech, initSpeech, readAloud, readPageSelection } from './speech.svelte.js';
+  import { speech, initSpeech, readAloud, readPageSelection } from './stores/speech.svelte.js';
   import { hotkeyMatchesKeydown, hotkeyMatchesKeyup } from './core/hotkeys.js';
   import { openExternalLink } from './core/externalLinks.js';
   import { initMeetingCheckIns } from './meetingCheckIn.js';
@@ -66,7 +66,7 @@
     summarise,
     stepLine,
     askStartedByMistake,
-  } from './meetingSummary.svelte.js';
+  } from './stores/meetingSummary.svelte.js';
   import {
     noteMarkdown,
     noteText,
@@ -101,7 +101,7 @@
     canPlay,
     playLine,
     stopLine,
-  } from './meetingAudio.svelte.js';
+  } from './stores/meetingAudio.svelte.js';
 
   /** This window's label: the `origin` of its saves and stops. */
   const LABEL = 'notepad';

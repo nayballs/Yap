@@ -20,7 +20,7 @@
   import ProviderMark from './ProviderMark.svelte';
   import ChatModelPicker from './ChatModelPicker.svelte';
   import { modelName, providerName, modelIcon, whereItRuns, noLongerOffered } from './core/aiModel.js';
-  import { loadCatalog } from './modelCatalog.svelte.js';
+  import { loadCatalog } from './stores/modelCatalog.svelte.js';
   import { refreshLocal, local, pushRecent } from './chatModels.svelte.js';
   import { chipContextLine } from './core/localContext.js';
   import { isKeyed } from './core/providers.js';
