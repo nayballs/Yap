@@ -64,7 +64,10 @@ person sees what their choices send where. It never says "nothing leaves".
   starting up" — the `/health` polls —, "· warming up", "On-device AI
   download"), `speakers/diarize/registry.rs` (its `download` now takes what it is:
   "Speaker model download", or Kokoro's "Voice download (Kokoro)" from
-  `voice/tts/registry.rs`). By hand (`net::begin` → `Manual::answered`/`failed`;
+  `voice/tts/registry.rs`, or meeting search's "Meeting search model
+  download"), `search/embedder.rs` ("Meeting search · on-device model",
+  `Purpose::Embeddings`: the embedding server on 127.0.0.1, on this PC;
+  [search.md](./search.md)). By hand (`net::begin` → `Manual::answered`/`failed`;
   dropped unfinished = stopped): `updates.rs` ("Update check" — the updater
   has its own HTTP client, reqwest 0.13, so the host is its endpoint's and
   the size latest.json's —, "Update download" with the bytes the updater

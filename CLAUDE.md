@@ -162,6 +162,9 @@ One folder per area (an area's `<area>.rs` lists its modules); a big module's pa
 **Memory** — [memory.md](./docs/architecture/memory.md)
 - `memory.rs` (+ `memory/`) — what Yap remembers about you (`memory.json`): learned from quiet chats and meetings (a model without tools by the careful small path, `memory/small.rs`), sent with questions, remember/forget/search_chats tools, names for dictation, export, Undo.
 
+**Meeting search** — [search.md](./docs/architecture/search.md)
+- `search.rs` (+ `search/`) — search by meaning over every meeting and note, on this PC: passages with their lines (`chunks.rs`), EmbeddingGemma-300M on Yap's llamafile in `--embedding` mode, downloaded on demand (`embedder.rs`), the vectors in `search-index/` kept up to date in the background, never in a dictation's way (`store.rs`, `index.rs`), the question's dates (`dates.rs`), BM25 + meaning by weighted RRF (`rank.rs`), Ask across meetings' cited passages that open the moment (`ask.rs`).
+
 **Web search and apps** — [web-and-apps.md](./docs/architecture/web-and-apps.md)
 - `web.rs` (+ `web/`: native, wiki, page, turn, grounding) — web search (Exa/Tavily/wikis, or the provider's own), guarded page reads.
 - `apps.rs` (+ `apps/`: index, matching, plan, tools, win) — opens Start-menu apps on request: index, matching, fast path, consent.
@@ -253,12 +256,12 @@ One folder per area (an area's `<area>.rs` lists its modules); a big module's pa
 - `views/notes/` — the AI Notepad ([notes.md](./docs/architecture/notes.md)): `NotesView.svelte` with `notesState.svelte.js`, `NoteList`, `NoteEditor` (+ `NoteMeta`, `NoteSummary`, `NoteTranscript`, `NoteChat`, `ActionPicker`), `ActionManager`; `core/noteEdits.js` — fixing a line, the summary, ticking tasks (shared with the notepad); `views/TasksView.svelte` — sidebar Tasks across meetings.
 - `core/markdown.js` — every rendered answer/note: markdown-it + DOMPurify, citation pills ([notes.md](./docs/architecture/notes.md#the-markdown-renderer)).
 - `views/chat/` — Chat ([chat-and-assistant.md](./docs/architecture/chat-and-assistant.md)): `ChatView.svelte` with `chatState.svelte.js`, `ConversationList`, `ChatThread` + `ChatMessage`, `Composer`; the model chip and picker (`ModelChip`, `ChatModelPicker`, `chatModels.svelte.js`), a snip in the box (`chatImages.js`, `chatShots.svelte.js`; [snip.md](./docs/architecture/snip.md)); `core/streaming.js` — streamed answers in Chat and the notepad's Ask sheet (the channel, ■, half-written markdown closed off, the checked answer's smooth swap).
-- `views/MeetingsView.svelte` and `notepad/` — meetings and the meeting notepad ([meetings.md](./docs/architecture/meetings.md)): `Notepad.svelte` (the window) with its parts (`NotepadHeader`, `TranscriptTab` + `TranscriptLog`, `SummaryTab`, `AskTray`, `ConsentLine`…), what outlasts a tab switch (`transcriptView` / `summaryEditor` / `consentMessage.svelte.js`), `notepad.css`, `SplitPreview.svelte`; `stores/meetingAudio.svelte.js` — a meeting's kept audio in both: Transcribe again, ▶ a line, the crash banner, the refine's line and Update summary (`components/MeetingJob.svelte`), a failed stretch's Try again (`components/FailedChunk.svelte`); `components/BriefView.svelte` + `core/brief.js` — a meeting's pre-meeting brief everywhere it shows ([calendar.md](./docs/architecture/calendar.md#pre-meeting-briefs)); `components/SpeakerMenu` / `SpeakerCard` — a speaker's menu and the name cards ([speakers.md](./docs/architecture/speakers.md)).
+- `views/MeetingsView.svelte` and `notepad/` — meetings (the search's moments that match, [search.md](./docs/architecture/search.md)) and the meeting notepad ([meetings.md](./docs/architecture/meetings.md)): `Notepad.svelte` (the window) with its parts (`NotepadHeader`, `TranscriptTab` + `TranscriptLog`, `SummaryTab`, `AskTray`, `ConsentLine`…), what outlasts a tab switch (`transcriptView` / `summaryEditor` / `consentMessage.svelte.js`), `notepad.css`, `SplitPreview.svelte`; `stores/meetingAudio.svelte.js` — a meeting's kept audio in both: Transcribe again, ▶ a line, the crash banner, the refine's line and Update summary (`components/MeetingJob.svelte`), a failed stretch's Try again (`components/FailedChunk.svelte`); `components/BriefView.svelte` + `core/brief.js` — a meeting's pre-meeting brief everywhere it shows ([calendar.md](./docs/architecture/calendar.md#pre-meeting-briefs)); `components/SpeakerMenu` / `SpeakerCard` — a speaker's menu and the name cards ([speakers.md](./docs/architecture/speakers.md)).
 - `components/ConnectCalendarDialog.svelte` — "Connect your calendar" ([calendar.md](./docs/architecture/calendar.md)).
 - `views/integrations/IntegrationsView.svelte` — local API and MCP cards ([integrations.md](./docs/architecture/integrations.md)).
 - `bar/Overlay.svelte` + `bar/` — the Yap bar's page (🎤 ◉ 🔊 ✂ ^), the reading card `bar/ReadingCard.svelte` ([yap-bar.md](./docs/architecture/yap-bar.md)).
 - `settings/ConnectionsView.svelte` (Privacy & data → Network connections) + `settings/ReportProblem.svelte` (About) — [privacy-receipts.md](./docs/architecture/privacy-receipts.md); `core/connections.js` notes the account picture.
-- `settings/` — Settings, always mounted in the modal: `Settings.svelte` is the shell (the nav by scope with search, `settingsIndex.js`; old links via `nav.js` aliases; which page shows), every page a component (`*Page.svelte`; Language Models with `LocalModels` / `SmartRouting` / `UsageToday`), the config copy and its sync `configSync.svelte.js` (+ `configDefaults.js`, `configMerge.js`, `adoptions.svelte.js`, `dictionarySync.svelte.js`), `localLlm.svelte.js` / `languageModels.svelte.js` / `scopes.js` the state that outlives a page, `hotkeyFallback.svelte.js` the in-page keys, and every part only Settings uses; `core/providers.js` the providers, keys and their names, one row style in `ui/` ([frontend-settings.md](./docs/architecture/frontend-settings.md#the-module-map-split-2026-10-24)); `AboutYouSettings.svelte` General → Language and region + About you, `RegionSpelling.svelte` Dictation Cleanup's spelling switch, `CleanupStyles.svelte` + `cleanupStyles.js` its Styles by app (tones, examples, apps), `TransformsSettings.svelte` Commands → Transforms.
+- `settings/` — Settings, always mounted in the modal: `Settings.svelte` is the shell (the nav by scope with search, `settingsIndex.js`; old links via `nav.js` aliases; which page shows), every page a component (`*Page.svelte`; Language Models with `LocalModels` / `SmartRouting` / `UsageToday`), the config copy and its sync `configSync.svelte.js` (+ `configDefaults.js`, `configMerge.js`, `adoptions.svelte.js`, `dictionarySync.svelte.js`), `localLlm.svelte.js` / `languageModels.svelte.js` / `scopes.js` the state that outlives a page, `hotkeyFallback.svelte.js` the in-page keys, and every part only Settings uses; `core/providers.js` the providers, keys and their names, one row style in `ui/` ([frontend-settings.md](./docs/architecture/frontend-settings.md#the-module-map-split-2026-10-24)); `AboutYouSettings.svelte` General → Language and region + About you, `RegionSpelling.svelte` Dictation Cleanup's spelling switch, `CleanupStyles.svelte` + `cleanupStyles.js` its Styles by app (tones, examples, apps), `TransformsSettings.svelte` Commands → Transforms, `MeetingSearchSettings.svelte` Privacy & data → Search my meetings by meaning ([search.md](./docs/architecture/search.md)).
 - `settings/MemorySection.svelte` + `stores/memory.svelte.js` — Settings → Assistant → Memory and the "Yap remembered…" toast ([memory.md](./docs/architecture/memory.md)).
 - `settings/AccountSection.svelte` — Settings → Account ([accounts.md](./docs/architecture/accounts.md)).
 - `settings/ModelManager` / `ModelRow` (downloads in `stores/modelStore.svelte.js`, kept when you leave the page; the catalogue `core/speechModels.js`), `onboarding/` (`Onboarding.svelte`, its steps, `setupState.svelte.js`), `ui/` — speech models, first run, primitives, right-click menus.
@@ -386,13 +389,13 @@ Installer, channels and notes: [updates-and-release.md](./docs/architecture/upda
 ## Config & data
 
 Everything lives in `%APPDATA%/yap/` (portable: `<exe>/Data/`): `config.json`,
-`models/` (speech; `diarization/`, `tts/`), `llm/` (on-device GGUFs), `history.json`,
+`models/` (speech; `diarization/`, `tts/`, `search/`), `llm/` (on-device GGUFs), `history.json`,
 `notes.json`, `chats.json`, `calendar.json`, `updates.json`, `model_catalog.json`,
 `groq_usage.json`, `dictionary_usage.json`, `hints.json`, `word_suggestions.json`,
 `notices.json`, `memory.json` (what Yap remembers about you), `chat-images/` (Chat's screenshots, Snip to Chat), `connections.json` (a week of network receipts: hosts and purposes, never content), `quieted_apps.json`
 (only mid-dictation), `stt_speed.json` (each model's device timings),
 `recent-audio/` (a day of dictation audio), `meeting-audio/` (each meeting's audio as
-FLAC, 14 days), `icons/`, `logs/`. Every JSON
+FLAC, 14 days), `search-index/` (meeting search's vectors, no text), `icons/`, `logs/`. Every JSON
 store writes atomically and quarantines a corrupt file instead of crashing —
 config.json too: set aside, never saved over, the person told; its saves one at a time
 (`config::update`; [config-and-data.md](./docs/architecture/config-and-data.md)). A write
@@ -405,7 +408,7 @@ Manager. The local API's discovery file is `~/.yap/cli-bridge.json`.
 Notable defaults: F9 in toggle mode, **Parakeet TDT 0.6B v3** on the device measured fastest here, AI cleanup off,
 smart spacing / terminal mode / no full stop in chats on, the Yap bar on, Win+Alt+S snips to Chat (screenshots kept 30 days), call
 detection on (it only asks), a 2-hour meeting limit, Win+Alt+M, meeting audio kept 14 days,
-web search and spoken replies off. Every setting, file and default: [config-and-data.md](./docs/architecture/config-and-data.md).
+web search, spoken replies and search by meaning (its model downloads on demand) off. Every setting, file and default: [config-and-data.md](./docs/architecture/config-and-data.md).
 
 ---
 
@@ -413,10 +416,10 @@ web search and spoken replies off. Every setting, file and default: [config-and-
 
 - **Dictation is complete and real**: local transcription (Whisper/Vulkan + ONNX/DirectML, or the processor where that's faster on the PC), push-to-talk, AI cleanup (cloud or on-device Qwen; a style per kind of app, offered in first setup) with "Use what I said", Commands, saved transforms on one key (Polish, Translate…), smart pasting into terminals and chat apps, dictionary learning, Undo, a day of audio to run a dictation again.
 - **Meetings**: recorder (You/Them), its audio kept on disk (crash recovery, Transcribe again, ▶ a line), rolling digests + action plan, the notepad, call detection, guard rails, the calendar, beta speaker separation.
-- **AI**: Chat with note tools, the Voice Assistant, spoken replies (Kokoro, or ElevenLabs on your key), Read aloud anywhere (karaoke card on the bar), web search, opening apps, memory (learned from chats, kept on this PC, names fed to dictation), Snip to Chat (a screenshot of any screen into Chat, HDR right; the overlay up ~50–60 ms after Win+Alt+S).
+- **AI**: Chat with note tools, Ask across meetings (search by meaning on this PC, answers citing the moment), the Voice Assistant, spoken replies (Kokoro, or ElevenLabs on your key), Read aloud anywhere (karaoke card on the bar), web search, opening apps, memory (learned from chats, kept on this PC, names fed to dictation), Snip to Chat (a screenshot of any screen into Chat, HDR right; the overlay up ~50–60 ms after Win+Alt+S).
 - **Around it**: MCP server + local API, optional accounts (live at `auth.contextmirror.com`), installer + auto-updater on stable and nightly, network receipts (every connection, by purpose) and Report a problem (a diagnostic file you check, never uploaded).
 - Much is unit-, e2e- and robot-tested but not yet tried in real use (a real call, real AI apps, answers heard on speakers…).
-- **Not yet done**: Chat's semantic search, a rich notes editor, the call app's speaker names checked in a real call, one-click Outlook, a streaming STT model, Authenticode signing, non-Windows.
+- **Not yet done**: search by meaning outside Ask across meetings, a rich notes editor, the call app's speaker names checked in a real call, one-click Outlook, a streaming STT model, Authenticode signing, non-Windows.
 
 What was tested how, and every gap: [status.md](./docs/architecture/status.md).
 

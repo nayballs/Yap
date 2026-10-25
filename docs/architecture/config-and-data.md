@@ -142,6 +142,9 @@
   past chats", on) + memory_learn_chats ("Learn from my chats", on) +
   memory_learn_meetings ("Learn from meetings", off) + memory_sensitive
   ("Include sensitive topics in memory", off),
+  search_by_meaning ("Search my meetings by meaning", off; `search/`,
+  Settings → Privacy & data: switched on by the model's download, off by its
+  Delete; the index and model live in the data folder, below),
   Commands' edit_hotkey (the rewrite shortcut)
   + agent_name + the `voiceAgent` scope (field and key names unchanged by
   the 2026-10-18 rename, so no setting resets). JSON
@@ -226,6 +229,18 @@
   NOTICE.txt), each with a `NOTICE.txt` (`voice/tts/registry.rs`; size + SHA-256
   verified). Attribution: Settings → Voice Assistant → Voice. Deleted from the
   Kokoro row; ~352 MB.
+- Meeting search (`search/`, [search.md](./search.md)): the model in
+  `%APPDATA%/yap/models/search/` — `embeddinggemma-300M-Q8_0.gguf` (Hugging
+  Face ggml-org/embeddinggemma-300M-GGUF at a pinned commit, Gemma Terms of
+  Use; size + SHA-256 verified; ~318 MiB) with a `NOTICE.txt`, and the
+  embedding server's `embedder.log`; it runs on the on-device model's
+  engine (`llm/llamafile.exe`, downloaded with it when it isn't there). The
+  index in `%APPDATA%/yap/search-index/vectors.bin` — each passage's vector
+  (int8 + a scale, by a hash of its words; **no text**), appended as notes
+  change, compacted when a note is deleted; `vectors.bin.old` when one for
+  another model was set aside. Settings → Privacy & data → "Search my
+  meetings by meaning": Rebuild deletes the index and reads everything
+  again; Delete… removes the model and the index (the engine stays).
 - Groq usage: `%APPDATA%/yap/groq_usage.json`.
 - Speech engine timings: `%APPDATA%/yap/stt_speed.json` — per model id, the
   benchmark of each device on this PC (load, the first run after loading,
