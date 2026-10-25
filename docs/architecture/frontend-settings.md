@@ -285,16 +285,23 @@ there can move margins: compare a page before and after.
   (dictations never show up in Win+V history), and the **Dictionary** link row
   (its counts; it leaves Settings for the Dictionary view, `onshowview`).
 - **Shortcuts** (`settings/ShortcutsPage.svelte`, OpenWhispr's Hotkeys page):
-  the seven global shortcuts together — Dictate, Rewrite selected text, Ask the
+  the nine global shortcuts together — Dictate, Rewrite selected text, Ask the
   Voice Assistant, Read aloud, **Use what I said** (`asSaidHotkey`, unbound
-  by default; `pasting/as_said.rs`), Meeting notes, **Snip to Chat** (`snipHotkey`,
+  by default; `pasting/as_said.rs`), **Paste last transcript**
+  (`pasteLastHotkey`, `shortcut-paste-last`) and **Copy last transcript**
+  (`copyLastHotkey`, `shortcut-copy-last`, its hint: out of Win+V history,
+  the tray has both) — both unbound by default, `pasting/last.rs` —
+  Meeting notes, **Snip to Chat** (`snipHotkey`,
   Win+Alt+S by default, its hint naming ✂, the tray, Esc and what Windows never
   lets an app capture; `snip.rs`, [snip.md](./snip.md)) — each in keycaps with Change, a
   clash said under the one being set — and a **Transforms** link row
   (`shortcut-transforms`: "None set", the one transform's name, or "N
   shortcuts") to Commands → Transforms, where their shortcuts are set. Their own pages show the same control
   (Read aloud: Voice Assistant → **Read aloud**, `#settings-read-aloud`). (No
-  in-page fallback for Use what I said: its paste is never in a Yap window.)
+  in-page fallback for Use what I said or Paste last: their paste is never
+  in a Yap window; Copy last's has one, `copy_last_transcript`.) The
+  search finds both new rows ("paste" now puts Paste last transcript first,
+  the Dictation rows after it).
 - **Meetings** (`settings/MeetingsPage.svelte`, Wispr's Notetaker page and
   order): **Call detection** (`#settings-meetings`): "Detect calls and offer
   to take notes" (`meetingDetection`), **"Ask about calls in · 8 of 12 apps ›"**

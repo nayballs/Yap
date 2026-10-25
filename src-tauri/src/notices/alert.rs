@@ -45,7 +45,8 @@ pub const OPEN_MIC_ORDER: &str = "openMicOrder";
 pub struct Action {
     /// What [`act`] does: [`OPEN_MIC_SETTINGS`], [`STOP_ASKING_CALLS`],
     /// [`ASK_ABOUT_CALLS`], [`OPEN_AI_SETTINGS`], [`OPEN_VOICE_SETTINGS`],
-    /// [`SHOW_OLD_SETTINGS`], [`OPEN_MIC_ORDER`], `saving::RETRY` (Try again).
+    /// [`SHOW_OLD_SETTINGS`], [`OPEN_MIC_ORDER`], `saving::RETRY` (Try again),
+    /// `cap::RECOVER` (Recover text).
     pub id: &'static str,
     pub label: &'static str,
 }
@@ -59,7 +60,9 @@ pub struct Alert {
     /// "saveFailed" (`saving.rs`: a store couldn't be saved; "Saved" after
     /// Try again) | "micLost" (`unplugged.rs`: the dictation's mic was
     /// disconnected) | "micSwitched" (`mics/offer.rs`: "Using … for
-    /// dictation"):
+    /// dictation") | "dictationCapped" (`cap.rs`: stopped at its length
+    /// limit) | "lastTranscript" (`last.rs`: "Copied your last dictation",
+    /// shown with [`confirm`]):
     /// the bar card's id, the Windows notification's tag (a newer one
     /// replaces it) and its rule in `notice.rs`.
     pub kind: &'static str,
@@ -79,6 +82,18 @@ pub use crate::notices::notice::Place as Surface;
 /// Show `alert` where it'll be seen; returns where. Blocking (window
 /// queries): call it off the pipeline's locks — [`show_soon`] does.
 pub fn show(app: &AppHandle, alert: Alert) -> Surface {
+    show_at(app, alert, true)
+}
+
+/// A quiet note rather than an alert ("Copied your last dictation",
+/// `pasting/last.rs`): the main window's toast or a bar card, never a
+/// Windows notification. Blocking, as [`show`].
+pub fn confirm(app: &AppHandle, alert: Alert) -> Surface {
+    show_at(app, alert, false)
+}
+
+/// [`show`]; `notification`: it may be a Windows notification.
+fn show_at(app: &AppHandle, alert: Alert, notification: bool) -> Surface {
     let card = || crate::bar::Card {
         id: alert.kind.into(),
         icon: alert.icon,
@@ -88,7 +103,7 @@ pub fn show(app: &AppHandle, alert: Alert) -> Surface {
         timeout_ms: Some(alert.timeout_ms),
         ..Default::default()
     };
-    let mut place = crate::notices::notice::place(app, true);
+    let mut place = crate::notices::notice::place(app, notification);
     // The same alert again within its cooldown (`notice.rs`: the mic
     // privacy one is said once per ten minutes; the overlay's line says it
     // on every press). The bar and Windows check for themselves.
@@ -100,7 +115,7 @@ pub fn show(app: &AppHandle, alert: Alert) -> Surface {
         place = Surface::Bar;
     }
     if place == Surface::Bar && !crate::bar::show_card(app, card(), Box::new(act)) {
-        place = if crate::notices::notice::notifications_allowed() { Surface::Notification } else { Surface::Nowhere };
+        place = if notification && crate::notices::notice::notifications_allowed() { Surface::Notification } else { Surface::Nowhere };
     }
     if place == Surface::Notification {
         #[cfg(windows)]
@@ -163,6 +178,7 @@ pub fn act(app: &AppHandle, action: &str) {
         OPEN_MIC_SETTINGS => open_uri(app, crate::dictation::mic_privacy::SETTINGS_URI),
         STOP_ASKING_CALLS => crate::calls::meeting_detect::set_detection(app, false),
         crate::meetings::meeting_audio::RECOVER_ACTION => crate::meetings::meeting_audio::recover_all(app),
+        crate::dictation::cap::RECOVER => crate::dictation::cap::recover(app),
         ASK_ABOUT_CALLS => crate::calls::meeting_detect::set_detection(app, true),
         OPEN_AI_SETTINGS | OPEN_VOICE_SETTINGS | OPEN_MIC_ORDER => {
             use tauri::Emitter;

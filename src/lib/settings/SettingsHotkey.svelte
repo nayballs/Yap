@@ -1,11 +1,12 @@
 <script>
-  // One of the seven global shortcuts, wherever Settings shows it: Yap's
+  // One of the nine global shortcuts, wherever Settings shows it: Yap's
   // keycaps + Change (+ ✕ when it can be unset), checked against the other
-  // six, with the live binding paused while a new one is picked.
+  // eight, with the live binding paused while a new one is picked.
   //
   //   cfg:    Settings' config $state (auto-save does the saving).
   //   target: 'hotkey' | 'editHotkey' | 'meetingHotkey' | 'assistantHotkey' |
-  //           'readHotkey' | 'asSaidHotkey' | 'snipHotkey'.
+  //           'readHotkey' | 'asSaidHotkey' | 'snipHotkey' |
+  //           'pasteLastHotkey' | 'copyLastHotkey'.
   import HotkeyInput from '../ui/HotkeyInput.svelte';
   import { onHotkeyCapturing, validateHotkey } from './hotkeys.svelte.js';
 

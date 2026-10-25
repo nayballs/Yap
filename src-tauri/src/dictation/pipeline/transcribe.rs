@@ -1,7 +1,7 @@
 //! Speech to text: a dictation's transcription and where its text goes
 //! next (`run_stt`), an Upload file in chunks, and Home's Run again.
 
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -13,6 +13,16 @@ use crate::dictation::stt::{self, SttError};
 use super::engine::{lease_engine, model_loading, wait_for_model, EngineCell, DICTATION_ENGINE_WAIT, UPLOAD_ENGINE_WAIT};
 use super::finish::{apply_corrections, as_said_text, finish_dictation};
 use super::{Reran, Shared, DICTATION_ERROR};
+
+/// Clears `capped` when a dictation's transcription is over, however it
+/// ends.
+struct ClearCapped(Arc<Shared>);
+
+impl Drop for ClearCapped {
+    fn drop(&mut self) {
+        self.0.capped.store(false, Ordering::SeqCst);
+    }
+}
 
 impl Shared {
     /// Upload / file transcription: decode → chunk → transcribe on the warm
@@ -143,6 +153,9 @@ impl Shared {
         );
     }
     pub(super) async fn run_stt(self: Arc<Self>, audio: Vec<f32>) {
+        // A dictation stopped at its length limit is this one only, however
+        // it ends (`cap.rs`).
+        let _capped = ClearCapped(Arc::clone(&self));
         if audio.is_empty() {
             if self.assistant.swap(false, Ordering::SeqCst) {
                 crate::chat::assistant::nothing(&self.app);
@@ -221,45 +234,48 @@ impl Shared {
         // Snapshot the language/translate settings for this transcription.
         let (language, translate) = self.language_settings();
 
-        // Slow-transcription watchdog: if no usable GPU is present, whisper (esp.
-        // large-v3) runs on CPU and can take minutes, leaving the UI stuck on
-        // "processing" with no feedback. We can't cancel the blocking call without
-        // losing the result, so instead we surface a distinct "processing-slow"
-        // state + an actionable log line if we cross a threshold. Cancelled the
-        // instant transcription finishes.
-        const SLOW_TRANSCRIBE_SECS: u64 = 8;
-        let done = Arc::new(AtomicBool::new(false));
-        let watch_app = self.app.clone();
-        let watch_done = Arc::clone(&done);
-        let watch_model = self
-            .config
-            .read()
-            .map(|c| c.model_size.clone())
-            .unwrap_or_default();
-        let watchdog = tokio::spawn(async move {
-            tokio::time::sleep(std::time::Duration::from_secs(SLOW_TRANSCRIBE_SECS)).await;
-            if !watch_done.load(Ordering::SeqCst) {
-                tracing::warn!(
-                    model = %watch_model,
-                    "Transcription still running after {}s — whisper is running on CPU (no usable Vulkan GPU found), which is very slow; Parakeet V3 (ONNX/DirectML) is the fast universal default",
-                    SLOW_TRANSCRIBE_SECS
-                );
-                let _ = watch_app.emit("yap-state", "processing-slow");
-            }
-        });
+        // "Taking longer than usual…" (`slow.rs`): past this PC's usual
+        // time for this much audio on this model and device, the bar says
+        // so (the blocking call can't be cancelled without losing the words,
+        // so it's only said). Taken back the moment it's done.
+        let audio_ms = audio.len() as u64 * 1000 / super::TARGET_SAMPLE_RATE as u64;
+        let (model, device) = lease
+            .engine()
+            .map(|e| (e.model().to_string(), e.device()))
+            .unwrap_or_else(|| (String::new(), stt::Device::Gpu));
+        let (after_ms, usual_ms) = crate::dictation::slow::stt_slow_after(&model, device, audio_ms);
+        let watch = super::slow::SlowWatch::start(
+            &self.app,
+            crate::dictation::slow::Notice { stage: crate::dictation::slow::Stage::Transcribing, skip: false },
+            after_ms,
+            usual_ms,
+        );
 
         let dict_prompt = self.dictation_prompt();
         let outcome = tokio::task::spawn_blocking(move || {
+            // A test run's slow transcription (`e2e_dictation_timing`).
+            #[cfg(debug_assertions)]
+            if let Some(wait) = crate::dictation::slow::test_stt_delay() {
+                std::thread::sleep(wait);
+            }
+            let started = std::time::Instant::now();
             let result = match lease.engine() {
                 Some(engine) => engine.transcribe(&audio, language.as_deref(), translate, dict_prompt.as_deref()),
                 None => Err(SttError::NotReady),
             };
-            (lease, result)
+            (lease, result, started.elapsed().as_millis() as u64)
         })
         .await;
 
-        done.store(true, Ordering::SeqCst);
-        watchdog.abort();
+        if watch.finish() {
+            tracing::info!(model = %model, ?device, audio_ms, usual_ms = ?usual_ms, "Transcription took longer than usual");
+        }
+        let outcome = outcome.map(|(lease, result, took_ms)| {
+            if result.is_ok() {
+                crate::dictation::slow::record_stt(&crate::dictation::slow::stt_key(&model, device), audio_ms, took_ms);
+            }
+            (lease, result)
+        });
 
         // Mark activity so the idle watcher counts from end-of-transcription.
         self.touch_activity();
@@ -380,7 +396,7 @@ impl Shared {
         if raw.is_empty() {
             return Err("Nothing was heard in it".into());
         }
-        let (cleaned, _) = self.clean_up(&raw, &crate::ai::cleanup_styles::Target::of_app(app_name), None).await;
+        let (cleaned, _) = self.clean_up(&raw, &crate::ai::cleanup_styles::Target::of_app(app_name), None, false).await;
         let mut c = cfg;
         c.model_size = model_id.clone();
         let (text, _) = finish_dictation(cleaned.trim(), &raw, &c);

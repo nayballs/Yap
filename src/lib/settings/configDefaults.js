@@ -32,6 +32,9 @@ export const FIELD_DEFAULTS = {
   // "Use what I said" (pasting/as_said.rs): its shortcut and the bar's offer.
   asSaidHotkey: '',
   asSaidOffer: true,
+  // Paste last / Copy last transcript (pasting/last.rs): unbound.
+  pasteLastHotkey: '',
+  copyLastHotkey: '',
   // Snip to Chat (snip.rs): its shortcut, saying "snip", keeping screenshots.
   snipHotkey: 'kb:alt+win+83',
   snipVoice: true,

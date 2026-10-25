@@ -42,16 +42,18 @@ test('search: words, their forms, ranking, grouping and highlights', () => {
   expect(stems('pasting')).toEqual(expect.arrayContaining(['pasting', 'past']));
   expect(stems('notes')).toEqual(expect.arrayContaining(['notes', 'note']));
 
-  // "paste": the Dictation rows first, best match (in the label) on top.
+  // "paste": a label starting with it on top (Shortcuts' Paste last
+  // transcript), then the Dictation rows, best match (in the label) first.
   const found = searchSettings('paste');
-  expect(found[0]).toMatchObject({ page: 'dictation', label: 'Restore clipboard after paste' });
+  expect(found[0]).toMatchObject({ page: 'shortcuts', label: 'Paste last transcript' });
+  expect(found[1]).toMatchObject({ page: 'dictation', label: 'Restore clipboard after paste' });
   expect(found.map((r) => r.label)).toEqual(expect.arrayContaining(['Safer pasting into terminals', 'Press Enter after pasting']));
   const groups = groupResults(found);
-  expect(groups[0].page).toBe('dictation');
+  expect(groups[1].page).toBe('dictation');
   // Within a page, a section's rows together (one heading each).
-  const sections = groups[0].results.map((r) => r.section);
+  const sections = groups[1].results.map((r) => r.section);
   expect(sections).toEqual([...sections].sort((a, b) => sections.indexOf(a) - sections.indexOf(b)));
-  expect(countByPage(found).dictation).toBe(groups[0].results.length);
+  expect(countByPage(found).dictation).toBe(groups[1].results.length);
 
   // Every word must be found; keywords count (Teams is in "Ask about calls in").
   expect(searchSettings('teams calls').map((r) => r.label)).toContain('Ask about calls in');
@@ -132,18 +134,25 @@ test('Settings search: Ctrl+F, results by page, ↑/↓, Enter lands on the row,
   await expect(navItem(main, 'about')).toHaveClass(/dim/);
   // The matched words highlighted.
   await expect(results(main).locator('mark').first()).toHaveText(/past/i);
-  const first = results(main).getByRole('option').first();
+  const options = results(main).getByRole('option');
+  const first = options.first();
   await expect(first).toHaveAttribute('aria-selected', 'true');
-  await expect(first).toContainText('Restore clipboard after paste');
+  await expect(first).toContainText('Paste last transcript');
   await shot(main, '01-search-paste');
 
   // ↓ moves the highlight; the box keeps the focus.
   await main.keyboard.press('ArrowDown');
-  const second = results(main).getByRole('option').nth(1);
+  const second = options.nth(1);
   await expect(second).toHaveAttribute('aria-selected', 'true');
   await expect(searchBox(main)).toBeFocused();
   await main.keyboard.press('ArrowUp');
   await expect(first).toHaveAttribute('aria-selected', 'true');
+
+  // ↓ on to the Dictation page's first: Restore clipboard after paste.
+  const at = await options.evaluateAll((els) => els.findIndex((el) => el.textContent.includes('Restore clipboard after paste')));
+  expect(at).toBeGreaterThan(0);
+  for (let i = 0; i < at; i++) await main.keyboard.press('ArrowDown');
+  await expect(options.nth(at)).toHaveAttribute('aria-selected', 'true');
 
   // Enter: its page, scrolled to the row, the row washed, the switch focused.
   await main.keyboard.press('Enter');

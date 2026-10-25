@@ -269,9 +269,15 @@ shell waiting for it.
   (made-up microphones instead of Windows', `dictation/mics.rs`: told as
   Windows' notifications are, a stream on one a quiet tone that stops when
   it's unplugged; the meeting player follows them too; `[]` = none at all —
-  the no-mic specs), `e2e_dictate_audio { seconds }` (a dictation of a
+  the no-mic specs), `e2e_dictate_audio { seconds, amplitude? }` (a dictation of a
   tone played in the mic's place — a real start and stop, the mic held as
-  for any dictation; no microphone needed), `e2e_crash_next_dictation` (the
+  for any dictation; no microphone needed; with `amplitude`, that peak in
+  syllables, for the level meter), `e2e_shortcut { name }` (Paste last /
+  Copy last transcript's press, as the hook sends it: `pasting/last.rs`),
+  `e2e_dictation_timing { floorMs, sttMs, forget }` ("Taking longer than
+  usual…" sooner, the stub's transcription slowed: `dictation/slow.rs`),
+  `e2e_dictation_cap { limitMs, warnMs }` (the 15-minute limit shortened:
+  `dictation/cap.rs`), `e2e_crash_next_dictation` (the
   next dictation panics in its paste step: `pipeline::Busy`), `e2e_fail_saves
   { store, count }` (a store's next saves fail as a full disk would:
   `shell/saving.rs`), `e2e_upload_pace { ms }` (each Upload chunk held that long,

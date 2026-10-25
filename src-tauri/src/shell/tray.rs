@@ -11,7 +11,8 @@
 //! - **Calls** (meeting_detect.rs): while a detected call is live and nothing
 //!   records, "Record this Teams call" sits at the top of the idle menu.
 //! - **Paste last transcript** (text_injector.rs): the latest dictation again,
-//!   into the app you were in — for a paste that went astray.
+//!   into the app you were in — for a paste that went astray; **Copy last
+//!   transcript** (last.rs) puts it on the clipboard instead.
 //! - **Read selection aloud** (read_aloud.rs): the text selected in the app
 //!   you were in, read aloud with the reading card; "Stop reading aloud"
 //!   while it reads.
@@ -243,6 +244,14 @@ fn build_menu(app: &AppHandle, state: &str) -> tauri::Result<Menu<Wry>> {
         crate::pasting::text_injector::has_last_transcript(),
         None::<&str>,
     )?;
+    // …or onto the clipboard, kept out of its history (pasting/last.rs).
+    let copy_last = MenuItem::with_id(
+        app,
+        "copy_last",
+        "Copy last transcript",
+        crate::pasting::text_injector::has_last_transcript(),
+        None::<&str>,
+    )?;
     // The selection in the app you're in, read aloud (read_aloud.rs); while
     // Yap reads, its Stop.
     let read = if crate::voice::read_aloud::active() {
@@ -272,6 +281,7 @@ fn build_menu(app: &AppHandle, state: &str) -> tauri::Result<Menu<Wry>> {
     let sep_paste = sep()?;
     items.push(&paste_last);
     items.push(&paste_said);
+    items.push(&copy_last);
     items.push(&read);
     if !transforms.items()?.is_empty() {
         items.push(&transforms);
@@ -343,6 +353,7 @@ fn on_menu_event(app: &AppHandle, id: &str) {
         // Off the main thread: it focuses the app and waits on the paste.
         "paste_last" => crate::pasting::text_injector::paste_last_from_tray(app, false),
         "paste_last_said" => crate::pasting::text_injector::paste_last_from_tray(app, true),
+        "copy_last" => crate::pasting::last::copy_soon(app),
         // Off the main thread (UI Automation can take a moment).
         "read_selection" => crate::voice::read_aloud::read_selection(app, crate::voice::read_aloud::Origin::Tray),
         "read_stop" => crate::voice::read_aloud::stop(app),

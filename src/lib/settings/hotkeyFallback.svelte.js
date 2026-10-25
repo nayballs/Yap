@@ -48,6 +48,15 @@ export function followHotkeyFallback(getCfg) {
       invoke('snip_start', { origin: 'shortcut' }).catch(() => {});
       return;
     }
+    // Copy last transcript (pasting/last.rs): onto the clipboard here too.
+    // (Paste last has no fallback: it pastes into another app, as "Use
+    // what I said" and the transforms do.)
+    if (hotkeyMatchesKeydown(e, cfg?.copyLastHotkey)) {
+      e.preventDefault();
+      e.stopPropagation();
+      invoke('copy_last_transcript').catch(() => {});
+      return;
+    }
     if (!hotkeyMatchesKeydown(e, cfg?.hotkey)) return;
     e.preventDefault();
     e.stopPropagation();

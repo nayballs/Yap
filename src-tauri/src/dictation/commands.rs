@@ -125,6 +125,20 @@ pub fn configure_snip_hotkey(spec: String) {
     let _ = crate::dictation::input_hook::configure_snip(&spec);
 }
 
+/// Live-apply the Paste last transcript shortcut (`pasting/last.rs`; paused
+/// while Settings picks a key, as for the others).
+#[tauri::command]
+pub fn configure_paste_last_hotkey(spec: String) {
+    let _ = crate::dictation::input_hook::configure_paste_last(&spec);
+}
+
+/// Live-apply the Copy last transcript shortcut (`pasting/last.rs`; paused
+/// while Settings picks a key, as for the others).
+#[tauri::command]
+pub fn configure_copy_last_hotkey(spec: String) {
+    let _ = crate::dictation::input_hook::configure_copy_last(&spec);
+}
+
 /// Debug-only, test mode: `text` as if a dictation had just heard it —
 /// the dictation's own steps from cleanup on (nothing is pasted in a test
 /// run), the bar's "Use what I said" offer included. Stands in for a

@@ -13,7 +13,11 @@
   measured clearly faster on this PC, `dictation/stt_speed.rs` — | "gpu" | "cpu"), keep_recent_audio (a day of dictation
   audio to run one again, on; `dictation/recent_audio.rs`), as_said_hotkey ("Use what I
   said", "" = unbound) + as_said_offer (the bar's offer after AI cleanup,
-  on; both `pasting/as_said.rs`), snip_hotkey (Snip to Chat, default Win+Alt+S "kb:alt+win+83", "" = unbound; never a clash, `input_hook::configure_snip_from`) + snip_voice ("Say “snip” to take a screenshot", on) + chat_image_days ("Keep chat screenshots": 7 / 30 (default) / 90 / 0 = forever; another value counts as 30; changing it sweeps at once; all `snip.rs`, docs/architecture/snip.md), rewrite_last_dictation (`rewriteLastDictation`,
+  on; both `pasting/as_said.rs`), paste_last_hotkey + copy_last_hotkey
+  (`pasteLastHotkey` / `copyLastHotkey`, Paste / Copy last transcript, "" =
+  unbound, the default; never a clash — `input_hook::configure_paste_last_from`
+  / `configure_copy_last_from` leave one another shortcut has unbound;
+  `pasting/last.rs`), snip_hotkey (Snip to Chat, default Win+Alt+S "kb:alt+win+83", "" = unbound; never a clash, `input_hook::configure_snip_from`) + snip_voice ("Say “snip” to take a screenshot", on) + chat_image_days ("Keep chat screenshots": 7 / 30 (default) / 90 / 0 = forever; another value counts as 30; changing it sweeps at once; all `snip.rs`, docs/architecture/snip.md), rewrite_last_dictation (`rewriteLastDictation`,
   serde default on: the rewrite shortcut with nothing selected rewrites the
   last dictation — within a minute, in the same field, still ending at the
   cursor —; off, it writes new text as before 2026-10-23; Settings →
@@ -384,7 +388,9 @@
   speech models on the graphics card unless the processor measured clearly
   faster on this PC (`stt_device` "auto"; the graphics card until measured), a day of dictation audio kept
   (`keep_recent_audio`), "Use what I said" offered on the bar after AI cleanup
-  (`as_said_offer`) with no shortcut (`as_said_hotkey` ""), Snip to Chat on
+  (`as_said_offer`) with no shortcut (`as_said_hotkey` ""), no Paste last /
+  Copy last transcript shortcuts (`paste_last_hotkey`, `copy_last_hotkey`
+  ""), Snip to Chat on
   Win+Alt+S (`snip_hotkey`), saying "snip" taking one (`snip_voice`) and chat
   screenshots kept 30 days (`chat_image_days`), the rewrite
   shortcut taking the last dictation when nothing is selected

@@ -247,6 +247,9 @@ pub fn run() {
             pasting::as_said::as_said_paste_entry,
             dictation::commands::configure_as_said_hotkey,
             dictation::commands::configure_snip_hotkey,
+            dictation::commands::configure_paste_last_hotkey,
+            dictation::commands::configure_copy_last_hotkey,
+            pasting::last::copy_last_transcript,
             dictation::transforms::configure_transform_hotkey,
             snip::snip_start,
             snip::chat_images_usage,
@@ -475,6 +478,12 @@ pub fn run() {
             #[cfg(debug_assertions)]
             shell::e2e::e2e_dictate_audio,
             #[cfg(debug_assertions)]
+            shell::e2e::e2e_shortcut,
+            #[cfg(debug_assertions)]
+            shell::e2e::e2e_dictation_timing,
+            #[cfg(debug_assertions)]
+            shell::e2e::e2e_dictation_cap,
+            #[cfg(debug_assertions)]
             shell::e2e::e2e_crash_next_dictation,
             #[cfg(debug_assertions)]
             shell::e2e::e2e_fail_saves,
@@ -635,6 +644,10 @@ pub fn run() {
             dictation::input_hook::configure_as_said_from(&cfg);
             // Snip to Chat (snip.rs; Win+Alt+S by default, never a clash).
             dictation::input_hook::configure_snip_from(&cfg);
+            // Paste last / Copy last transcript (pasting/last.rs; unbound by
+            // default, never a clash).
+            dictation::input_hook::configure_paste_last_from(&cfg);
+            dictation::input_hook::configure_copy_last_from(&cfg);
             // Saved transforms' shortcuts (transforms.rs; none by default).
             dictation::input_hook::configure_transforms_from(&cfg);
 
@@ -821,6 +834,13 @@ pub fn run() {
             // (snip.rs, on its own thread); again while it's up cancels.
             let snip_handle = handle.clone();
             handle.listen("snip-key-pressed", move |_| snip::start(&snip_handle, snip::Origin::Shortcut));
+
+            // Paste last / Copy last transcript (pasting/last.rs), each on
+            // its own thread once the shortcut's keys are up.
+            let paste_last_handle = handle.clone();
+            handle.listen("paste-last-key-pressed", move |_| pasting::last::paste_soon(&paste_last_handle));
+            let copy_last_handle = handle.clone();
+            handle.listen("copy-last-key-pressed", move |_| pasting::last::copy_soon(&copy_last_handle));
             snip::init(&handle);
 
             // A saved transform's shortcut (transforms.rs): its slot, run on

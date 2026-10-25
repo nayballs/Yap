@@ -1407,6 +1407,14 @@ fn act(app: &AppHandle, action: &str) -> Result<(), String> {
             let guard = state.pipeline.lock().map_err(|_| "pipeline unavailable")?;
             guard.as_ref().ok_or("pipeline not started")?.undo()?;
         }
+        // "Taking longer than usual… · Skip cleanup" (dictation/slow.rs): the
+        // AI cleanup gives way, the words as transcribed are pasted now.
+        "skip-cleanup" => {
+            give_focus_back();
+            let state = app.state::<crate::AppState>();
+            let guard = state.pipeline.lock().map_err(|_| "pipeline unavailable")?;
+            guard.as_ref().ok_or("pipeline not started")?.skip_cleanup();
+        }
         // "Cleaned up · Use what I said": swap the paste for the words as
         // said (as_said.rs), in the window the dictation went into.
         "as-said" => {

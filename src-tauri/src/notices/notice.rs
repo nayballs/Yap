@@ -163,6 +163,14 @@ pub fn rule(kind: &str) -> Rule {
         // Snip to Chat (snip.rs): "Finish the dictation first", "Couldn't
         // take the screenshot" — the answer to the person's own press.
         "snipDictating" | "snipFailed" => Rule { hold_meeting: false, ..alert },
+        // A dictation stopped at its length limit (dictation/cap.rs): what
+        // was said is pasted or on the clipboard, Recover text copies it —
+        // never held back, never dropped.
+        "dictationCapped" => alert,
+        // "Copied your last dictation", "Nothing to paste yet"
+        // (pasting/last.rs): the answer to the person's own press, now or
+        // not at all.
+        "lastTranscript" => Rule { hold_dictation: false, max_wait_ms: Some(5_000), ..info },
         // Ready to install: waits for a dictation or a meeting to end, as
         // long as it takes.
         "update" => Rule { hold_meeting: true, max_wait_ms: None, yields: true, ..info },
