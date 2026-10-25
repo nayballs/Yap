@@ -12,7 +12,7 @@ kind, a folder each:
 
 | Folder | What's in it |
 |---|---|
-| `views/` | The main window: `ControlPanel.svelte` (sidebar, title bar, the Settings modal, toasts) and its views. A view with parts of its own has a folder: `home/` (`HomeView`, `homeData.js`), `chat/`, `notes/`, `integrations/` (`IntegrationsView`, `CalendarLinkCard`, `McpLinkCard`), `dictionary/` (`DictionaryView`, `ImportPreview`, `dictionaryList.js`, `dictionaryFile.js`); the rest are one file (`InsightsView`, `UploadView`, `MeetingsView`, `TasksView`) |
+| `views/` | The main window: `ControlPanel.svelte` (sidebar, title bar, the Settings modal, toasts) and its views. A view with parts of its own has a folder: `home/` (`HomeView`, `homeData.js`), `chat/`, `notes/`, `integrations/` (`IntegrationsView`, `CalendarLinkCard`, `McpLinkCard`), `dictionary/` (`DictionaryView`, `ImportPreview`, `dictionaryList.js`, `dictionaryFile.js`), `insights/` (`InsightsView`, `AiUsageCard`; 2026-10-25); the rest are one file (`UploadView`, `MeetingsView`, `TasksView`) |
 | `settings/` | The Settings modal: `Settings.svelte`, its pages and every part only Settings uses (the module map: [frontend-settings.md](./frontend-settings.md#the-module-map-split-2026-10-24)) |
 | `notepad/` | The meeting notepad window, and its split-screen preview (`SplitPreview.svelte`) |
 | `onboarding/` | The first-run window |
@@ -20,7 +20,7 @@ kind, a folder each:
 | `components/` | What more than one window or view draws: `BriefView`, `SpeakerMenu`, `SpeakerCard`, `MeetingJob`, `FailedChunk`, `CallAppIcon`, `CalendarMark`, `LocalContext`, `ConnectCalendarDialog` |
 | `stores/` | App-wide reactive stores (`*.svelte.js`): `account`, `attention`, `calendar`, `callAppIcons`, `chatRequest`, `meetingAudio`, `meetingDetect`, `meetingSummary`, `memory`, `modelCatalog`, `modelStore`, `speech`, `updates`, `upload` |
 | `notices/` | Rust's events turned into toasts: `alerts`, `cleanupOffer`, `meetingCheckIn`, `meetingGuard`, `saveErrors`, `wordSuggestions` |
-| `core/` | Helpers and catalogues with no Svelte state of their own: `markdown`, `streaming`, `hotkeys`, `providers`, `providerIcons`, `ppModels`, `speechModels` (the speech-to-text catalogue; `models.js` until 2026-10-24), `modelCatalog`, `localContext`, `aiModel`, `aiErrors`, `notepadText`, `noteEdits`, `itemMenus`, `wordDiff`, `appNames`, `appearance`, `brief`, `connections`, `externalLinks`, `ipcShared`, `findWords` (a search's words found again where its result opens: marked with the CSS Custom Highlight API, selected in a text box) |
+| `core/` | Helpers and catalogues with no Svelte state of their own: `markdown`, `streaming`, `hotkeys`, `providers`, `providerIcons`, `ppModels`, `speechModels` (the speech-to-text catalogue; `models.js` until 2026-10-24), `modelCatalog`, `localContext`, `aiModel`, `aiErrors`, `aiUsage` (the AI usage tracker in words: token counts, costs, the context ring's colour and label, the features' names), `notepadText`, `noteEdits`, `itemMenus`, `wordDiff`, `appNames`, `appearance`, `brief`, `connections`, `externalLinks`, `ipcShared`, `findWords` (a search's words found again where its result opens: marked with the CSS Custom Highlight API, selected in a text box) |
 | `ui/` | The primitives: rows, switches, selects, buttons, the right-click menu and confirm dialog, toasts |
 
 A store, helper or component one area alone uses lives in that area's
@@ -378,11 +378,31 @@ Flow's dark mode of 19 Oct 2026), for every Yap window.
   of words out and/or in is one change; the cleaned text's line breaks
   kept. The row's menu gets Paste / Copy what I said instead of Copy raw
   transcript there.
-- **`InsightsView.svelte`** = the stats
+- **`insights/InsightsView.svelte`** = the stats
   dashboard promoted out of Settings→History (serif hero number, stat grid,
   30-day amber heatmap, top-apps-by-words bars from `get_history`, grouped by
   `appLabel`); Settings → Privacy & data's History group keeps only the
-  enable toggle + clear (the list itself is Home's feed).
+  enable toggle + clear (the list itself is Home's feed). Then, since
+  2026-10-25, **`insights/AiUsageCard.svelte` — AI usage** (the AI usage
+  tracker, [ai-models.md](./ai-models.md) `ai/usage.rs`; shown once any
+  call is counted, in Insights' own chunk): "Counted on this PC from each AI
+  answer's own token count. Nothing leaves this PC."; three tiles — tokens
+  today, the last 7 days, the last 30 days, each "4.4K on this PC · 1.2K
+  cloud · ≈ $0.01" (or "free, on your PC") —; a Today / Last 7 days / Last
+  30 days switch (`aria-pressed`) for **By model** (name · where, a bar,
+  tokens, "free, on your PC" / "≈ $0.02" / "no price known", the speed when
+  said) and **By feature** (AI cleanup, Chat, Voice Assistant, Commands,
+  Transforms, Translation, Meeting notes, Notes, Memory, Speaker names,
+  Meeting briefs, Search by meaning: a bar, tokens, calls); calls that
+  didn't say their tokens counted apart; **On-device speed**, one bar a
+  day for the last 30 (tokens written a second, `role="img"` with the
+  latest in words); the fine line on the estimates (list prices, the day
+  they were checked, free plans, cached prompts, tokens with no price) and
+  the 90 days kept. Bars in `--yap-primary` on `--yap-raised`, as "Where you
+  dictate". Re-read on `yap-ai-usage`. `focus="ai-usage"` (Chat's context
+  ring's See all, through ControlPanel's `insightsFocus`) scrolls it into
+  view once drawn. Words and formats: `core/aiUsage.js` (shared with Chat's
+  context ring, [chat-and-assistant.md](./chat-and-assistant.md#the-context-ring-2026-10-25)).
 - **`UploadView.svelte`** = local audio-**file** transcription (drop/browse →
   Symphonia decode → chunked transcription on the warm engine with progress +
   cancel — see `dictation/media.rs`); its line names the model ("transcribes with
@@ -430,7 +450,11 @@ Flow's dark mode of 19 Oct 2026), for every Yap window.
   One part of it loads when first used: the Dictionary view's Import… /
   Export… (`dictionaryFile.js` + `ImportPreview.svelte`, ~16 KB, 2026-10-25),
   which kept the main chunk under the 700 KB warning (678 → 697 KB with
-  the view's search, stars, sorts and selection in it).
+  the view's search, stars, sorts and selection in it). Since 2026-10-25
+  Chat's model picker (`ChatModelPicker.svelte`, ~24 KB) and the context
+  ring's panel (`ContextPanel.svelte`, ~7 KB) load the first time they
+  open: the context ring took the chunk to 704 KB, and with them out it's
+  681 KB.
 - **Home's first paint** (2026-10-24): Home's data comes in **one call
   asked first** — `home_snapshot` (`dictation/commands.rs`, async: off the window's
   thread; the history page, the stats, the settings Home shows, the

@@ -1286,6 +1286,8 @@ async fn post_chat_request(
     // A model evaluation (`eval.rs`, debug builds) paces its calls and logs
     // every request and response; otherwise a no-op.
     let call = crate::ai::eval::Call::start(provider, &endpoint, &body).await;
+    // Who the answer's tokens are counted against (the AI usage tracker).
+    let counted = crate::ai::usage::Call { provider, model, base_url, turn: true, feature: None };
 
     // A rate limit (429) is waited out when the caller is happy to wait
     // (`rate_limit_patience` in all, as long as the provider says — else 2 s,
@@ -1426,8 +1428,8 @@ async fn post_chat_request(
                     };
                     let whole = asm.response(&message);
                     call.answered(&limits, &whole);
-                    let total_tokens = whole["usage"]["total_tokens"].as_u64().unwrap_or(0);
-                    crate::ai::usage::record(provider, total_tokens, remaining_req, limit_req);
+                    // Its tokens (usage.rs): counts only, never fails the call.
+                    crate::ai::usage::record_response(&counted, &whole, remaining_req, limit_req);
                     return Ok(message);
                 }
                 Err(ReadFail::Rejected(why)) => return Err(call.failed(format!("{TOOL_CALL_REJECTED}{why}"))),
@@ -1454,9 +1456,9 @@ async fn post_chat_request(
             .map_err(|e| call.failed(format!("failed to parse response: {}", e)))?;
         call.answered(&limits, &value);
 
-        // Best-effort daily-usage accounting (never fails the call).
-        let total_tokens = value["usage"]["total_tokens"].as_u64().unwrap_or(0);
-        crate::ai::usage::record(provider, total_tokens, remaining_req, limit_req);
+        // Its tokens (usage.rs): every AI call is counted here, best-effort
+        // (counts only, never fails the call).
+        crate::ai::usage::record_response(&counted, &value, remaining_req, limit_req);
 
         let message = value["choices"][0]["message"].clone();
         if message.is_null() {

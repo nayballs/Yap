@@ -67,6 +67,8 @@ pub(crate) fn shutdown_cleanup() {
     dictation::mute::restore_all();
     // The week of network receipts, as it stands (net.rs).
     privacy::net::flush();
+    // The AI calls' tokens counted since the last write (usage/store.rs).
+    ai::usage::store::flush();
     // A store whose last save failed (saving.rs): one more try.
     shell::saving::flush();
 }
@@ -241,6 +243,8 @@ pub fn run() {
             ai::local_llm::local_llm_set_context,
             ai::commands::open_llm_folder,
             ai::commands::get_groq_usage,
+            ai::usage::ai_usage_summary,
+            ai::usage::context::chat_context,
             dictation::commands::get_history,
             dictation::commands::clear_history,
             dictation::commands::delete_history_entry,
@@ -713,6 +717,9 @@ pub fn run() {
             // Register the app handle so the usage tracker can emit live
             // `groq-usage` updates after each AI-cleanup call.
             ai::usage::set_app_handle(handle.clone());
+            // Every AI call's tokens, kept 90 days in ai_usage.json
+            // (usage/store.rs): written by its own thread.
+            ai::usage::store::init(&handle);
             // Spoken replies (tts.rs): its state goes to every window.
             voice::tts::init(&handle);
 

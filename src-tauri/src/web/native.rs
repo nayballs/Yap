@@ -988,15 +988,11 @@ pub fn parse(provider: Provider, v: &Value, query: &str) -> Result<Native, Strin
     }
 }
 
-/// The tokens an answer used, for Yap's usage meter and a model
-/// evaluation's pacing (each provider says it its own way).
+/// The tokens an answer used (each provider says it its own way; the AI
+/// usage tracker reads them all, `usage::parse`).
+#[cfg(test)]
 fn total_tokens(v: &Value) -> u64 {
-    let u = &v["usage"];
-    u["total_tokens"]
-        .as_u64()
-        .or_else(|| v["usageMetadata"]["totalTokenCount"].as_u64())
-        .or_else(|| Some(u["input_tokens"].as_u64()? + u["output_tokens"].as_u64().unwrap_or(0)))
-        .unwrap_or(0)
+    crate::ai::usage::parse(v).total_tokens()
 }
 
 /// How long a provider's search that can't work for a model (refused key,
@@ -1077,7 +1073,10 @@ pub async fn search(ns: &NativeSearch, query: &str, question: &str) -> Result<Na
     }
     let v: Value = serde_json::from_str(&text).map_err(|_| call.failed(format!("{} sent an answer Yap couldn't read.", p.search_name())))?;
     call.answered(&limits, &v);
-    crate::ai::usage::record(p.id(), total_tokens(&v), remaining_req, limit_req);
+    // Its tokens (usage.rs), counted under the turn's feature but never as
+    // the conversation's context (a sub-call of its own).
+    let counted = crate::ai::usage::Call { provider: p.id(), model: &ns.model, base_url: &ns.base_url, turn: false, feature: None };
+    crate::ai::usage::record_response(&counted, &v, remaining_req, limit_req);
     let found = parse(p, &v, query).map_err(|e| call.failed(e))?;
     tracing::info!(provider = p.id(), results = found.hits.len(), "Web search: the provider's own search answered");
     Ok(found)

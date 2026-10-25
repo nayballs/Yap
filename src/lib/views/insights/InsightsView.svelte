@@ -2,13 +2,21 @@
   // Insights — the stats dashboard promoted out of Settings → History into its
   // own surface (Wispr "Insights"): serif hero number, stat grid, the 30-day
   // activity heatmap, and where you dictate most (top apps from history).
+  // Then AI usage (AiUsageCard: every AI call's tokens, by model and
+  // feature, counted on this PC); `focus` 'ai-usage' brings it into view
+  // (Chat's context ring's "See all").
   import { invoke } from '@tauri-apps/api/core';
   import { listen } from '@tauri-apps/api/event';
   import { onMount } from 'svelte';
-  import { appLabel } from '../core/appNames.js';
+  import { appLabel } from '../../core/appNames.js';
+  import AiUsageCard from './AiUsageCard.svelte';
+
+  let { focus = null, onfocused = null } = $props();
 
   let stats = $state(null);
   let entries = $state([]);
+  // The stats are in (the AI usage card comes into view after them).
+  let loaded = $state(false);
 
   async function refresh() {
     try {
@@ -21,6 +29,7 @@
     } catch {
       entries = [];
     }
+    loaded = true;
   }
 
   onMount(() => {
@@ -166,6 +175,9 @@
         <p>Dictate a few things and your stats will show up here.</p>
       </div>
     {/if}
+
+    <!-- AI usage: shown once any AI call has been counted (or asked for). -->
+    <AiUsageCard {focus} {onfocused} ready={loaded} />
   </div>
 </div>
 

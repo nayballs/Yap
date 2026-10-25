@@ -1,7 +1,8 @@
 //! AI models: what every model is told about you, the OpenAI-compatible
 //! client and its prompts, cleanup styles, the on-device model (llamafile,
 //! GGUF headers, the graphics card), which model a call goes to, the
-//! providers' live model lists, Groq usage and the model evaluations.
+//! providers' live model lists, the AI usage tracker (every call's tokens) and
+//! the model evaluations.
 //! How it works: docs/architecture/ai-models.md.
 
 pub mod about_you;

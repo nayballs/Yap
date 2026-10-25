@@ -52,6 +52,9 @@
   prefetchHome().catch(() => {});
 
   let activeView = $state('home');
+  // A part of Insights to bring into view when it opens ('ai-usage': Chat's
+  // context ring's "See all").
+  let insightsFocus = $state(null);
 
   // Sidebar account button: who's signed in (auth.rs via account.svelte.js).
   initAccount();
@@ -414,15 +417,22 @@
     {#if activeView === 'home'}
       <HomeView onopensettings={openSettings} onnavigate={(v) => (activeView = v)} />
     {:else if activeView === 'insights'}
-      {#await import('./InsightsView.svelte') then { default: InsightsView }}
-        <InsightsView />
+      {#await import('./insights/InsightsView.svelte') then { default: InsightsView }}
+        <InsightsView focus={insightsFocus} onfocused={() => (insightsFocus = null)} />
       {/await}
     {:else if activeView === 'dictionary'}
       {#await import('./dictionary/DictionaryView.svelte') then { default: DictionaryView }}
         <DictionaryView />
       {/await}
     {:else if activeView === 'chat'}
-      <ChatView onopensettings={openSettings} onopennote={openNoteAt} />
+      <ChatView
+        onopensettings={openSettings}
+        onopennote={openNoteAt}
+        onopenusage={() => {
+          insightsFocus = 'ai-usage';
+          activeView = 'insights';
+        }}
+      />
     {:else if activeView === 'notes'}
       <NotesView onopensettings={openSettings} />
     {:else if activeView === 'meetings'}

@@ -123,6 +123,9 @@ pub(crate) struct ChatTurn {
     pub sources: Vec<crate::chat::chats::Source>,
     /// Stopped while it was being written (the page's ■): what came so far.
     pub stopped: bool,
+    /// Its last model call's tokens (`usage::last_call`), kept with the
+    /// answer: Chat's context ring.
+    pub tokens: Option<crate::chat::chats::MessageTokens>,
 }
 
 impl ChatTurn {
@@ -169,8 +172,30 @@ impl ChatTurn {
 /// the Voice Assistant's first question, set aside for the barge-in that
 /// asked the second, was asked again after the second's answer, and both
 /// answers were saved under both questions.
+///
+/// **Its tokens** (`usage.rs`): the turn's last model call — the step that
+/// wrote the answer, which read the whole prompt — is kept with the answer
+/// (`ChatMessage::tokens`): how much of the model's context the
+/// conversation uses (Chat's context ring).
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn chat_turn(
+    app: Option<&AppHandle>,
+    conversation_id: Option<u64>,
+    text: &str,
+    scope: Option<&str>,
+    by_voice: bool,
+    asked: impl FnOnce(u64, usize) + Send,
+    watcher: Option<&dyn crate::chat::stream::Sink>,
+    stop: Option<&crate::chat::stream::Stoppable>,
+) -> Result<ChatTurn, String> {
+    // Boxed: a turn's future is big, and every caller's holds this one (a
+    // Chat turn inline overflowed the main thread's stack).
+    crate::ai::usage::tallied(Box::pin(answer_turn(app, conversation_id, text, scope, by_voice, asked, watcher, stop))).await
+}
+
+/// [`chat_turn`], its last model call kept by `usage::tallied`.
+#[allow(clippy::too_many_arguments)]
+async fn answer_turn(
     app: Option<&AppHandle>,
     conversation_id: Option<u64>,
     text: &str,
@@ -239,7 +264,7 @@ pub(crate) async fn chat_turn(
     // question, the last 8: every tool step sends them again. The window's
     // start moves a few turns at a time (`chats::history_start`: 14–19,
     // 5–8), so a long chat's prompt keeps its start from turn to turn.
-    let (keep, step) = if scope == Some("assistant") { (8, 4) } else { (19, 6) };
+    let (keep, step) = if scope == Some("assistant") { crate::chat::chats::ASSISTANT_HISTORY } else { crate::chat::chats::CHAT_HISTORY };
     let earlier = &conv.messages[crate::chat::chats::history_start(conv.messages.len(), keep, step)..];
     let history: Vec<(String, String)> = earlier.iter().map(|m| (m.role.clone(), m.text.clone())).collect();
     // The question, with the screenshots it carries (Snip to Chat, the
@@ -284,6 +309,7 @@ pub(crate) async fn chat_turn(
                 model: Some(answered_by),
                 sources: Vec::new(),
                 stopped: false,
+                tokens: None,
             });
         }
     }
@@ -699,6 +725,9 @@ pub(crate) async fn chat_turn(
     } else if let Some(note) = restored_note {
         reply = format!("{}\n\n{note}", reply.trim_end());
     }
+    // The last model call's tokens: the conversation's context use (a
+    // stopped answer's call never finished, so it has none to say).
+    let tokens = if stopped { None } else { crate::ai::usage::last_call().as_ref().and_then(crate::chat::chats::MessageTokens::of) };
     let index = crate::chat::chats::append_message(
         conv.id,
         "assistant",
@@ -708,10 +737,11 @@ pub(crate) async fn chat_turn(
         false,
         &sources,
         stopped,
+        tokens,
     )?;
     // Read for lasting facts once the chat goes quiet ("Learn from my chats").
     crate::memory::learn::after_turn(conv.id);
-    Ok(ChatTurn { conversation_id: conv.id, user_index, index, reply, tools_used, model: Some(answered_by), sources, stopped })
+    Ok(ChatTurn { conversation_id: conv.id, user_index, index, reply, tools_used, model: Some(answered_by), sources, stopped, tokens })
 }
 
 /// The fixed web pipeline's budgets for a model that can't call tools (an
@@ -974,8 +1004,8 @@ async fn passages_turn(
     let reply = crate::search::ask::passages_answer(&found);
     let sources = crate::search::ask::sources(&found);
     let tools_used = vec![crate::search::ask::chip(&found)];
-    let index = crate::chat::chats::append_message(conv.id, "assistant", &reply, &tools_used, None, false, &sources, false)?;
-    Ok(ChatTurn { conversation_id: conv.id, user_index, index, reply, tools_used, model: None, sources, stopped: false })
+    let index = crate::chat::chats::append_message(conv.id, "assistant", &reply, &tools_used, None, false, &sources, false, None)?;
+    Ok(ChatTurn { conversation_id: conv.id, user_index, index, reply, tools_used, model: None, sources, stopped: false, tokens: None })
 }
 
 /// A turn Yap answers itself (`apps.rs`): the request saved like any
@@ -1011,5 +1041,6 @@ async fn app_turn(
         model: None,
         sources: Vec::new(),
         stopped: false,
+        tokens: None,
     })
 }

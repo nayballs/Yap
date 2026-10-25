@@ -425,7 +425,10 @@ pub async fn translate_dictation(app: &AppHandle, raw: &str, cfg: &YapConfig) ->
     let started = std::time::Instant::now();
     let asked = crate::privacy::net::within(
         crate::privacy::net::Feature::Dictation,
-        crate::ai::llm::transform(&translate_instruction(from.as_deref(), to), raw, &m.base_url, &m.api_key, &m.model, &m.provider, m.disable_thinking),
+        crate::ai::usage::within(
+            crate::ai::usage::Feature::Translation,
+            crate::ai::llm::transform(&translate_instruction(from.as_deref(), to), raw, &m.base_url, &m.api_key, &m.model, &m.provider, m.disable_thinking),
+        ),
     )
     .await;
     match asked.map(|out| crate::dictation::transforms::clean_output(&out)) {

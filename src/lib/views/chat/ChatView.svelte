@@ -104,7 +104,8 @@
   // Opens a Settings section (ControlPanel's openSettings): the chip's
   // "Language model settings…". `onopennote({id, line, ts, field})`: a
   // passage an answer cites, opened in Notes at its line (ControlPanel).
-  let { onopensettings = null, onopennote = null } = $props();
+  // `onopenusage()`: the context ring's "See all" (Insights' AI usage card).
+  let { onopensettings = null, onopennote = null, onopenusage = null } = $props();
 
   const chat = createChatState({ onopensettings: () => onopensettings, onopennote: () => onopennote });
 
@@ -239,7 +240,7 @@
   <!-- Thread -->
   <section class="thread">
     <ChatThread {chat} {onopensettings} />
-    <Composer {chat} {onopensettings} />
+    <Composer {chat} {onopensettings} {onopenusage} />
   </section>
 </div>
 

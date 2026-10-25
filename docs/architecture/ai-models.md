@@ -1,6 +1,6 @@
 # AI models
 
-The language-model side: the OpenAI-compatible client and its prompts, the on-device model (llamafile sidecar, GGUF headers, the graphics card), which model a call goes to, the providers' live model lists, Groq usage and the model evaluations. See also [`docs/model-evals.md`](../model-evals.md).
+The language-model side: the OpenAI-compatible client and its prompts, the on-device model (llamafile sidecar, GGUF headers, the graphics card), which model a call goes to, the providers' live model lists, the AI usage tracker (every call's tokens, Groq's meter, cost estimates) and the model evaluations. See also [`docs/model-evals.md`](../model-evals.md).
 
 [Architecture index](./README.md) · [CLAUDE.md](../../CLAUDE.md)
 
@@ -779,7 +779,10 @@ The language-model side: the OpenAI-compatible client and its prompts, the on-de
   /api/show` per model, ≤ 16 (`model_info.<arch>.context_length`, a
   Modelfile's `num_ctx`); `ListView.contexts [{id, max, set, app}]`; a
   server that's neither says nothing). The picker shows it first in the row
-  ("8K context, set in Ollama · localhost:11434", "Up to 128K · …"). Commands `model_catalog`, `model_catalog_refresh
+  ("8K context, set in Ollama · localhost:11434", "Up to 128K · …").
+  Chat's context ring reads it too (`server_context`: what the list said,
+  any age; `server_context_here`: a server on this PC is asked first when
+  its list isn't in hand — one elsewhere never is). Commands `model_catalog`, `model_catalog_refresh
   {provider}` (Settings' Check now), `llm_models {provider, scope?, baseUrl?,
   force?}`. Logs: provider + counts. Test mode never contacts a provider:
   debug-only `YAP_MODELS_STANDIN` (`<standin>/<host><path>?<query>`,
@@ -787,9 +790,69 @@ The language-model side: the OpenAI-compatible client and its prompts, the on-de
   server only on 127.0.0.1. `#[ignore]`d `real_saved_lists`
   (`YAP_MODEL_LISTS=<dir>`) runs the parsers over saved real lists, never
   fetching.
-- **`ai/usage.rs`** — daily Groq usage tracker (tokens summed locally + requests from
-  `x-ratelimit-*` headers), persisted to `groq_usage.json`, auto-resets at midnight
-  UTC; powers the `get_groq_usage` command + `groq-usage` event.
+- **`ai/usage.rs`** (+ `ai/usage/`) — **the AI usage tracker** (2026-10-25):
+  every AI call's tokens, counted on this PC. **Counts only** — the
+  provider, the model, on this PC or not, the feature, the prompt's and
+  the answer's tokens, the on-device model's reading and writing time —
+  never a word asked or answered, in the store or the log (`debug` names
+  the provider, the feature and the counts). **One place**:
+  `record_response`, called by `llm::post_chat_request` (the one chat call
+  every other goes through, streamed or whole, the on-device model's load
+  included), by a provider's own web search (`web/native.rs`, a sub-call:
+  never the turn's context) and, through `record_embeddings` (the tracker
+  only), by search by meaning's embeddings (`search/embedder.rs`). **The
+  counts** (`parse`, pure): OpenAI-compatible `usage {prompt_tokens,
+  completion_tokens, total_tokens}` (OpenAI, Groq, Anthropic's and
+  Gemini's compatible endpoints, OpenRouter, llama.cpp, Ollama, LM
+  Studio), Groq's `x_groq.usage` (its stream), `{input_tokens,
+  output_tokens}` (Anthropic's own API with its cache's tokens as prompt,
+  OpenAI's Responses API), Gemini's `usageMetadata` (thinking as answer),
+  and llama.cpp's `timings`: the speed (`predicted_n` / `predicted_ms`, or
+  ÷ `predicted_per_second`; the prompt's the same) and, when `usage` is
+  missing, the counts (`cache_n` + `prompt_n` read, `predicted_n`
+  written). A streamed answer's come back on `stream::Assembler::response`.
+  **The feature**: the network receipts' scope (`net::within`, mapped:
+  Dictation → `cleanup`, Chat, the Voice Assistant, Commands, Notes,
+  Meetings, Brief, Memory), unless a finer one of the tracker's is set
+  around the call (`usage::within`, the innermost wins: `transforms` —
+  `dictation/transforms.rs`, the shortcut's and a dictation's —,
+  `translation` — `dictation/languages.rs` —, `speakers` —
+  `speakers/naming.rs`); embeddings are `search`; unscoped `other`. **On
+  this PC** as the receipts place it (`net::place_of_url`; a test run's
+  stand-in aliased to a cloud host counts as that cloud). **Where it goes**:
+  `usage/groq.rs` — Groq's "Usage today" meter, exactly as before
+  (`groq_usage.json`, the same shape and code: an older Yap reads and
+  writes it too; `get_groq_usage`, `groq-usage`); `usage/store.rs` — the
+  daily store, `ai_usage.json` (config-and-data.md): per local day, per
+  provider + model + on-this-PC + feature, calls (and those that didn't
+  say their tokens), prompt and answer tokens, an estimated cost and the
+  llama.cpp times; kept 90 days; written by its own thread every 3 s when
+  something was added and at exit (`shutdown_cleanup` → `flush`), through
+  `saving.rs` (`SAVER`, "your AI usage history"); what this Yap added since
+  its last write is kept apart and added to the file as it is on disk when
+  another Yap (Yap - Dev beside the installed nightly) wrote it meanwhile,
+  so neither's counts are lost (`subtract`, unit-tested); `yap-ai-usage`
+  after each write. **`ai_usage_summary`** (`store::summarize`, pure):
+  today, the last 7 days and the last 30 — tokens, on this PC and cloud,
+  the estimate, the cloud tokens with no price, by model (most first; the
+  on-device model named, `local_llm::display_for_id`; its speed) and by
+  feature — and the on-device models' speed by day. `usage/prices.rs` —
+  **the price table**: US dollars per million prompt and answer tokens at
+  the providers' list prices for Claude, OpenAI, Gemini and Groq (only
+  a call to that provider's own service; OpenRouter, custom and local
+  servers have none), checked 2026-10-25 against the pages in `SOURCES`
+  (`PRICES_AS_OF`); a price for longer prompts (`upto`: Haiku 5.5 past
+  100K, Gemini Pro past 200K, OpenAI's table to 272K) and one that changes
+  on a date (`from`: Gemini 4 Argon on 1 Dec 2026, the 3.x Flashes on 1 Jan
+  2027) apply per call; a dated snapshot costs what its model does
+  (`base_id`). The cost is worked out when a call is recorded (millionths
+  of a dollar). Pages say it's an estimate: free plans cost nothing, cached
+  prompts cost less. `usage/context.rs` — Chat's context ring
+  ([chat-and-assistant.md](./chat-and-assistant.md#the-context-ring-2026-10-25)).
+  **The turn's last call**: `usage::tallied` around a Chat turn keeps its
+  last model call (`last_call`), which `chat_turn` keeps with the answer
+  (`ChatMessage::tokens`). Unit tests never write the store (and Groq's
+  meter returns early under `cfg(test)`), but the tally works there.
 - **`ai/eval.rs`** (+ `ai/eval/`) — **model evaluations**, `yap.exe eval …` (main.rs;
   debug builds only): real models (Groq/OpenAI/Anthropic/OpenRouter/Gemini/
   custom, or a GGUF on Yap's own llamafile started for the run — the installed

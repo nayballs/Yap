@@ -120,7 +120,7 @@ pub async fn within<F: Future>(feature: Feature, fut: F) -> F::Output {
     }
 }
 
-fn current_feature() -> Option<Feature> {
+pub(crate) fn current_feature() -> Option<Feature> {
     FEATURE.try_with(|f| *f).ok()
 }
 

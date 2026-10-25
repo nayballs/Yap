@@ -18,7 +18,6 @@
   import { listen } from '@tauri-apps/api/event';
   import { onMount, tick } from 'svelte';
   import ProviderMark from './ProviderMark.svelte';
-  import ChatModelPicker from './ChatModelPicker.svelte';
   import { modelName, providerName, modelIcon, whereItRuns, noLongerOffered } from '../../core/aiModel.js';
   import { loadCatalog } from '../../stores/modelCatalog.svelte.js';
   import { refreshLocal, local, pushRecent } from './chatModels.svelte.js';
@@ -147,13 +146,17 @@
   {/if}
 
   {#if open && status}
-    <ChatModelPicker
-      {status}
-      anchor={chipEl}
-      onclose={close}
-      onstatus={(s) => (status = s)}
-      {onopensettings}
-    />
+    <!-- Its own chunk, loaded the first time it opens (the main window's
+         stays under Vite's 700 kB warning, 2026-10-25). -->
+    {#await import('./ChatModelPicker.svelte') then { default: ChatModelPicker }}
+      <ChatModelPicker
+        {status}
+        anchor={chipEl}
+        onclose={close}
+        onstatus={(s) => (status = s)}
+        {onopensettings}
+      />
+    {/await}
   {/if}
 </div>
 
