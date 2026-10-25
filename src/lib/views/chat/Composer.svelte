@@ -34,7 +34,7 @@
   );
 
   function removeShot(id) {
-    chat.attached = chat.attached.filter((a) => a.id !== id);
+    chat.removeShot(id);
     chat.inputEl?.focus();
   }
 
@@ -63,7 +63,7 @@
 
   /** "Send without the screenshot": for a question that doesn't need it. */
   function sendWithout() {
-    chat.attached = [];
+    chat.clearShots();
     if (chat.input.trim()) chat.send();
     else chat.inputEl?.focus();
   }
@@ -191,6 +191,10 @@
           {/each}
         </div>
       </div>
+      {#if chat.copiedShot && chat.attached.some((a) => a.id === chat.copiedShot)}
+        <!-- "Copy every snip to the clipboard" (snip.rs): said once, quietly. -->
+        <div class="copiedline" role="status" data-testid="chat-snip-copied">Copied · Ctrl+V to paste it anywhere</div>
+      {/if}
     </div>
   {/if}
   <div class="inputbar">
@@ -607,6 +611,11 @@
     color: var(--yap-muted);
     font-variant-numeric: tabular-nums;
     white-space: nowrap;
+  }
+  .copiedline {
+    margin-top: 6px;
+    font-size: 11.5px;
+    color: var(--yap-muted);
   }
   .shotx {
     position: absolute;

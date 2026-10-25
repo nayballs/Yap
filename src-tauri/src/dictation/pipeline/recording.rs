@@ -294,6 +294,34 @@ impl Shared {
         ASSISTANT_ARMED.store(false, Ordering::SeqCst);
     }
 
+    /// After a spoken "snip" landed in Chat ([`super::listen_after_snip`]):
+    /// a Voice Assistant question starts recording by itself, as its
+    /// shortcut's press would start one. Push-to-talk: nobody holds it, so
+    /// the next press of either key joins it and its release ends it
+    /// (`Gesture::wait_for_press`); toggle mode: the next press ends it.
+    /// `false`: nothing started.
+    pub(super) fn listen_after_snip(self: &Arc<Self>) -> bool {
+        if self.recording.load(Ordering::SeqCst) || self.processing.load(Ordering::SeqCst) {
+            tracing::info!("Voice Assistant: not listening after the snip (a dictation is under way)");
+            return false;
+        }
+        let mut g = self.gesture.lock().unwrap_or_else(|p| p.into_inner());
+        g.machine.reset();
+        g.edit = false;
+        g.assistant = true;
+        g.toggle_press = None;
+        crate::chat::assistant::about_screenshot(true);
+        ASSISTANT_ARMED.store(true, Ordering::SeqCst);
+        self.start_recording(false);
+        ASSISTANT_ARMED.store(false, Ordering::SeqCst);
+        crate::chat::assistant::about_screenshot(false);
+        let started = self.recording.load(Ordering::SeqCst);
+        if started && self.recording_mode() == "pushToTalk" {
+            g.machine.wait_for_press();
+        }
+        started
+    }
+
     /// The tap timer: a tap whose second press didn't come is thrown away.
     fn gesture_tick(self: &Arc<Self>) {
         let mut g = self.gesture.lock().unwrap_or_else(|p| p.into_inner());

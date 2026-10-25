@@ -14,9 +14,9 @@
 //!    dictation key does (`Pipeline::on_assistant_key`: toggle, or
 //!    push-to-talk with the double-tap lock; a press while Yap speaks stops
 //!    the voice first — barge-in). The bar's capsule shows its assistant
-//!    variant ("Ask Yap…"). Once you've said something, a pause ends it as
-//!    a second press would ("Stop listening when I pause", `pause.rs`;
-//!    never under a held push-to-talk key).
+//!    variant ("Ask Yap…"). It ends when the shortcut (or the dictation
+//!    key) is pressed again, on ✓, or as a push-to-talk key is let go —
+//!    never on a pause.
 //! 2. **Thinking** ([`heard`]): on stop the warm STT engine transcribes it
 //!    and the correction dictionary runs (`pipeline.rs`); the question goes
 //!    to Chat — the conversation open in the Chat view, else the last one if
@@ -63,7 +63,19 @@
 //! answer, and both answers showed under both questions (a tester's voice
 //! chat, 2026-10-23).
 //!
-//! Events: `yap-assistant {phase, conversationId, messageId}` (the bar's
+//! **The screenshots waiting in Chat's box** (Snip to Chat, 2026-10-25) go
+//! with a spoken question (`snip/waiting.rs`): it goes to the conversation
+//! they wait in, through the same image path a typed question takes
+//! (`snip::turn::prepare` / `with`, the vision rules, the caps), the box
+//! clears, and the question shows in Chat with its thumbnails. A model known
+//! not to read images gets nothing: the screenshots stay, the question goes
+//! into the box and Chat comes up with its "can't read images" line, as a
+//! typed one would ([`cant_read`]). After a **spoken "snip"** lands in
+//! Chat, Yap listens for the question by itself (`snip.rs`
+//! `listens_after`, `pipeline::listen_after_snip`): the capsule says "Ask
+//! about this screenshot…" ([`about_screenshot`]).
+//!
+//! Events: `yap-assistant {phase, conversationId, messageId, about?}` (the bar's
 //! capsule), `yap-assistant-turn {phase: asked | answered | failed |
 //! superseded | open, conversationId, userMessageId, text, show}` (the main
 //! window: `show` = bring the Chat view up; `userMessageId` = which question,
@@ -71,6 +83,7 @@
 //! userMessageId, event}` (the Chat view follows the answer as it's written:
 //! a `stream::Event`).
 
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, MutexGuard};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -258,6 +271,9 @@ struct State {
     message_id: Option<String>,
     /// The conversation the latest question went to.
     conversation: Option<u64>,
+    /// What the question is about, while it's listened for: "screenshot"
+    /// (after a spoken "snip": "Ask about this screenshot…").
+    about: Option<&'static str>,
 }
 
 static STATE: Mutex<State> = Mutex::new(State {
@@ -265,7 +281,26 @@ static STATE: Mutex<State> = Mutex::new(State {
     generation: 0,
     message_id: None,
     conversation: None,
+    about: None,
 });
+
+/// The next question listened for is about the screenshot just snipped
+/// ([`about_screenshot`]).
+static ABOUT_SCREENSHOT: AtomicBool = AtomicBool::new(false);
+
+/// The recording about to start is the question after a spoken "snip"
+/// (`pipeline::listen_after_snip`): its capsule says "Ask about this
+/// screenshot…". `false`: it didn't start after all.
+pub fn about_screenshot(on: bool) {
+    ABOUT_SCREENSHOT.store(on, Ordering::SeqCst);
+}
+
+/// The Voice Assistant is off now (a meeting records or a call is on:
+/// [`off_for_meeting`]'s rule), said to nobody: a spoken snip's question
+/// isn't listened for then.
+pub fn is_off() -> bool {
+    crate::voice::tts::meeting_quiet().is_some()
+}
 static VIEW: Mutex<Viewing> = Mutex::new(Viewing::Closed);
 
 /// Never held while emitting, touching windows or another module's lock.
@@ -294,10 +329,13 @@ pub struct PhaseEvent {
     pub phase: Phase,
     pub conversation_id: Option<u64>,
     pub message_id: Option<String>,
+    /// "screenshot": the question after a spoken "snip".
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub about: Option<&'static str>,
 }
 
 fn snapshot(s: &State) -> PhaseEvent {
-    PhaseEvent { phase: s.phase, conversation_id: s.conversation, message_id: s.message_id.clone() }
+    PhaseEvent { phase: s.phase, conversation_id: s.conversation, message_id: s.message_id.clone(), about: s.about }
 }
 
 fn emit(app: &AppHandle, ev: PhaseEvent) {
@@ -316,9 +354,10 @@ pub fn listening(app: &AppHandle) {
         s.phase = Phase::Listening;
         s.message_id = None;
         s.conversation = None;
+        s.about = ABOUT_SCREENSHOT.swap(false, Ordering::SeqCst).then_some("screenshot");
         snapshot(&s)
     };
-    tracing::info!("Voice Assistant: listening");
+    tracing::info!(about_screenshot = ev.about.is_some(), "Voice Assistant: listening");
     emit(app, ev);
     crate::bar::dismiss_card(app, CARD);
 }
@@ -333,6 +372,7 @@ pub fn nothing(app: &AppHandle) {
         }
         s.phase = Phase::Idle;
         s.message_id = None;
+        s.about = None;
         snapshot(&s)
     };
     emit(app, ev);
@@ -343,6 +383,7 @@ pub fn heard(app: &AppHandle, question: String) {
     let (generation, ev) = {
         let mut s = lock();
         s.phase = Phase::Thinking;
+        s.about = None;
         (s.generation, snapshot(&s))
     };
     emit(app, ev);
@@ -413,6 +454,33 @@ fn failed_alert(why: &str) -> crate::notices::alert::Alert {
         action: Some(crate::notices::alert::Action { id: crate::notices::alert::OPEN_AI_SETTINGS, label: "Open settings" }),
         timeout_ms: 15_000,
     }
+}
+
+/// A spoken question with screenshots for a model that can't read images
+/// (known before, or its server just turned the image down: `refused`),
+/// handled as a typed one is: no picture goes, the screenshots stay in
+/// Chat's box, the question goes into the box with them, and Chat comes up
+/// with its "can't read images" line (the switch, "Send its text instead",
+/// or without). An alert says so where it'll be seen.
+fn cant_read(app: &AppHandle, question: &str, conversation: Option<u64>, refused: bool) {
+    tracing::info!(refused, known_conversation = conversation.is_some(), "Voice Assistant: the Chat model can't read the screenshot; the question waits in Chat");
+    if let Err(e) = crate::shell::window::show_settings(app) {
+        tracing::warn!("Voice Assistant: couldn't open the main window ({e})");
+    }
+    // Into the box at the caret, not sent (ControlPanel opens Chat with it).
+    let _ = app.emit("yap-chat-dictation", serde_json::json!({ "text": question, "send": false }));
+    let title = if refused { crate::snip::vision::COULDNT_READ } else { crate::snip::vision::CANT_READ };
+    crate::notices::alert::show_soon(
+        app,
+        crate::notices::alert::Alert {
+            kind: FAILED,
+            icon: "assistant",
+            title: title.into(),
+            body: "Your question is waiting in Chat with the screenshot: pick a model that reads images, or send its text instead.".into(),
+            action: None,
+            timeout_ms: 10_000,
+        },
+    );
 }
 
 /// A price in a sentence ("$8", "£20 a month", "15 euros"): in a web
@@ -620,21 +688,63 @@ async fn answer(app: AppHandle, generation: u64, since: u64, question: String) {
     let viewing = view();
     let open_exists = matches!(viewing, Viewing::Conversation(id) if crate::chat::chats::get(id).is_some());
     let choice = choose_conversation(viewing, open_exists, crate::chat::chats::latest(), now_secs());
+    // Screenshots waiting in Chat's box (snip/waiting.rs): the question goes
+    // with them, to the conversation they wait in.
+    let waiting = crate::snip::waiting::now();
+    let shots_wait = !waiting.images.is_empty();
     let conversation_id = match choice {
+        _ if shots_wait => waiting.conversation_id,
         Choice::Continue(id) => Some(id),
         Choice::New => None,
     };
     // "Open Teams" needs no model, nor a "yes" to Yap's "Did you mean …?":
     // Yap opens it and says so (apps.rs).
     let opens_an_app = crate::apps::plan_for(&question, &cfg, conversation_id).await.is_some();
-    if !opens_an_app {
-        if let Err(why) = crate::chat::turn::resolve_chat_endpoint(&cfg) {
-            crate::notices::alert::show_soon(&app, no_model_alert(&why));
+    let endpoint = if opens_an_app {
+        None
+    } else {
+        match crate::chat::turn::resolve_chat_endpoint(&cfg) {
+            Ok(e) => Some(e),
+            Err(why) => {
+                crate::notices::alert::show_soon(&app, no_model_alert(&why));
+                give_up(&app, generation);
+                return;
+            }
+        }
+    };
+    // The screenshots, as a typed question takes them (`chat_send`): a model
+    // known not to read images gets none (they stay in the box, the
+    // question goes there too); else they leave the box and their copies
+    // for this provider go with every call of the turn.
+    let mut shots = crate::snip::turn::TurnImages::default();
+    let mut taken: Option<(Option<u64>, Vec<crate::chat::chats::ChatImage>)> = None;
+    let mut target: Option<(String, String)> = None;
+    if let (true, Some((base_url, _key, model, provider, _persona, _thinking))) = (shots_wait, &endpoint) {
+        if crate::snip::vision::reads_images(provider, model) == Some(false) {
+            cant_read(&app, &question, waiting.conversation_id, false);
             give_up(&app, generation);
             return;
         }
+        if let Some((conv, images)) = crate::snip::waiting::take_for_question(&app) {
+            let ids: Vec<String> = images.iter().map(|i| i.id.clone()).collect();
+            match crate::snip::turn::prepare(&ids, provider, base_url).await {
+                Ok(prepared) => {
+                    tracing::info!(images = prepared.images.len(), "Voice Assistant: a question with screenshots");
+                    shots = prepared;
+                    taken = Some((conv, images));
+                    target = Some((provider.clone(), model.clone()));
+                }
+                Err(e) => {
+                    tracing::warn!("Voice Assistant: the screenshots couldn't go ({e})");
+                    crate::snip::waiting::put_back(&app, conv, images);
+                    crate::notices::alert::show_soon(&app, failed_alert(&e));
+                    give_up(&app, generation);
+                    return;
+                }
+            }
+        }
     }
-    tracing::info!(?viewing, ?choice, "Voice Assistant: asking Chat");
+    tracing::info!(?viewing, ?choice, shots = shots.images.len(), "Voice Assistant: asking Chat");
     // The person is looking at Yap's main window: Chat comes up there with
     // the question (and no card on the bar).
     let (_, focused) = crate::notices::notice::window_view(&app);
@@ -670,15 +780,18 @@ async fn answer(app: AppHandle, generation: u64, since: u64, question: String) {
             }),
         );
     };
-    let turn = crate::chat::turn::chat_turn(
-        Some(&app),
-        conversation_id,
-        &question,
-        Some("assistant"),
-        true,
-        asked,
-        Some(&streamed as &dyn crate::chat::stream::Sink),
-        None,
+    let turn = crate::snip::turn::with(
+        shots,
+        crate::chat::turn::chat_turn(
+            Some(&app),
+            conversation_id,
+            &question,
+            Some("assistant"),
+            true,
+            asked,
+            Some(&streamed as &dyn crate::chat::stream::Sink),
+            None,
+        ),
     );
     // Its AI calls and searches are the Voice Assistant's in the network
     // receipts (net.rs), though they run Chat's code.
@@ -716,6 +829,24 @@ async fn answer(app: AppHandle, generation: u64, since: u64, question: String) {
             if let Some(feed) = &feed {
                 feed.close();
                 crate::voice::tts::stop();
+            }
+            // Its screenshots back in the box, to ask again (as a typed
+            // question's are); a server that turned the image down: that
+            // model is a "no" now, and Chat says so, as for a typed one.
+            if let Some((conv, images)) = taken {
+                crate::snip::waiting::put_back(&app, conv, images);
+                if let Some((provider, model)) = target.filter(|_| crate::snip::vision::is_image_refusal(&e)) {
+                    tracing::info!(provider, "Voice Assistant: the model refused the screenshot");
+                    crate::snip::vision::refused(&provider, &model);
+                    let conv = streamed.lock().conversation.or(conversation_id);
+                    let _ = app.emit(
+                        TURN,
+                        serde_json::json!({ "phase": "failed", "conversationId": conv, "userMessageId": question_id, "error": e }),
+                    );
+                    cant_read(&app, &question, conv, true);
+                    give_up(&app, generation);
+                    return;
+                }
             }
             tracing::warn!("Voice Assistant: no answer ({e})");
             let conv = streamed.lock().conversation.or(lock().conversation);
@@ -1011,7 +1142,8 @@ pub fn on_tts_state(app: &AppHandle, speaking: bool, message_id: Option<&str>) {
 // ---- commands -------------------------------------------------------------------------
 
 /// The Chat view says what it shows (on mount, on every switch, on leaving):
-/// where a spoken question goes ([`choose_conversation`]). `new_chat`: no
+/// where a spoken question goes ([`choose_conversation`]), and where the
+/// screenshots in its box wait (`snip/waiting.rs`). `new_chat`: no
 /// conversation, because "New chat" was clicked (a Chat view just opened on
 /// nothing has no preference: as if closed).
 #[tauri::command]
@@ -1022,6 +1154,8 @@ pub fn chat_view_state(open: bool, conversation_id: Option<u64>, new_chat: Optio
         (true, None) if new_chat.unwrap_or(false) => Viewing::New,
         (true, None) => Viewing::Closed,
     };
+    // The screenshots waiting in its box wait in what it shows.
+    crate::snip::waiting::viewing(open, conversation_id);
 }
 
 /// ■: stop the answer (see [`stop`]).

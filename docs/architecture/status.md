@@ -779,6 +779,24 @@ mixed-DPI monitors (the maintainer's two are both 100 %), OCR quality on
 real screenshots beyond the fixture (small print, other languages),
 picking windows on a third monitor or a rotated one.
 
+**Snip to Chat: the clipboard and the voice** (2026-10-25, the maintainer
+trying it; [snip.md](./snip.md)): every snip to Chat is on the clipboard
+too ("Copy every snip to the clipboard", on; Ctrl+V anywhere); Rust keeps
+the screenshots waiting in Chat's box (`snip/waiting.rs`), so a **Voice
+Assistant question takes them** (the image path a typed one uses; a model
+that can't read images leaves the question and screenshot in the box with
+its line); after saying "snip" **Yap listens for the question by itself**
+("Ask about this screenshot…", "Then listen for my question", on; either
+key or ✓ ends it, never a pause; not in a meeting or a call). **Tested**:
+unit (the waiting box, the listen decision, push-to-talk's join-and-release),
+e2e (`e2e/snip.spec.js`, 25 tests: the pretend clipboard and its switch, a
+spoken question with a waiting screenshot to the fake AI, no-vision, ✕
+first, a dictation into the box, the voice snip listening and sending, a
+call and Esc listening for nothing). **Not yet tried**: by hand with a real
+microphone (the chime after the snip, the dictation key ending it,
+push-to-talk's join-and-release); the robot spec's new real-clipboard check
+(`e2e-real/snip.real.js`) is written, not yet run.
+
 **Meeting search and Ask across meetings** (2026-10-25,
 [search.md](./search.md)): every meeting and note cut into passages and read
 by EmbeddingGemma-300M on Yap's own llamafile (downloaded on demand from

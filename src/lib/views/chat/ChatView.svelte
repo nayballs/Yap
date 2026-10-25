@@ -89,6 +89,7 @@
   // Rust's events while Chat is open, takes the keys, and lays out the
   // conversation list (ConversationList) beside the thread (ChatThread,
   // ChatMessage) and the composer (Composer).
+  import { invoke } from '@tauri-apps/api/core';
   import { listen } from '@tauri-apps/api/event';
   import { getCurrentWebview } from '@tauri-apps/api/webview';
   import { onMount, onDestroy, untrack } from 'svelte';
@@ -114,6 +115,14 @@
     }
     if (e.key === 'Escape' && chat.plusOpen) {
       chat.plusOpen = false;
+      return;
+    }
+    // A spoken question being listened for (after saying "snip", say): Esc
+    // calls it off, as ✕ on the capsule does; the screenshot stays in the box.
+    if (e.key === 'Escape' && chat.assistantListening && !e.defaultPrevented) {
+      e.preventDefault();
+      chat.assistantListening = false;
+      invoke('cancel_recording').catch(() => {});
       return;
     }
     if (e.key === 'Escape' && chat.picked.length && !e.defaultPrevented) {
@@ -156,6 +165,8 @@
       // "Open in Chat").
       listen('yap-assistant-turn', (e) => chat.followAssistant(e.payload)),
       listen('yap-assistant-stream', (e) => chat.followAssistantStream(e.payload)),
+      // Whether a spoken question is being listened for (Esc calls it off).
+      listen('yap-assistant', (e) => (chat.assistantListening = e.payload?.phase === 'listening')),
       listen('yap-voice-replies', (e) => {
         if (typeof e.payload?.on === 'boolean') chat.speakReplies = e.payload.on;
       }),

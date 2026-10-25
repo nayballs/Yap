@@ -41,9 +41,42 @@ impl Drop for FeedOn {
     }
 }
 
+/// Test mode's question after a spoken "snip" (`e2e_snip_question`): its
+/// transcript and how long it's "listened" for.
+#[cfg(debug_assertions)]
+static SNIP_QUESTION: std::sync::Mutex<Option<(String, u64)>> = std::sync::Mutex::new(None);
+
+/// Test mode: the question the next spoken snip's listening hears (`None`:
+/// nothing staged — it would listen, and nothing is asked).
+#[cfg(debug_assertions)]
+pub(crate) fn stage_snip_question(question: Option<(String, u64)>) {
+    *SNIP_QUESTION.lock().unwrap_or_else(|p| p.into_inner()) = question;
+}
+
 #[cfg(debug_assertions)]
 impl Robot {
     const BUSY: &'static str = "Yap is busy with another dictation";
+
+    /// A test run's [`super::listen_after_snip`]: the staged question asked
+    /// as the Voice Assistant's shortcut would ([`Robot::ask_assistant`]:
+    /// "listening" on the capsule, about the screenshot, then the
+    /// transcript), with no microphone. Nothing staged: it would have
+    /// listened, and nothing more happens.
+    pub(crate) fn listen_after_snip_staged(&self) -> bool {
+        let Some((text, listen_ms)) = SNIP_QUESTION.lock().unwrap_or_else(|p| p.into_inner()).take() else {
+            tracing::info!("e2e: the question after a spoken snip would be listened for now (none staged)");
+            return true;
+        };
+        let robot = Robot(Arc::clone(&self.0));
+        crate::chat::assistant::about_screenshot(true);
+        tauri::async_runtime::spawn(async move {
+            if let Err(e) = robot.ask_assistant(text, listen_ms).await {
+                tracing::info!("e2e: the staged question after the snip wasn't asked ({e})");
+            }
+            crate::chat::assistant::about_screenshot(false);
+        });
+        true
+    }
 
     /// The `processing` flag for a robot dictation (`None`: one records or
     /// transcribes already), let go however it ends ([`Busy`]).

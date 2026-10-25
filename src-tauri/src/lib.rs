@@ -271,6 +271,9 @@ pub fn run() {
             snip::chat_models_read_images,
             snip::attach::chat_image_paste,
             snip::attach::chat_image_drop,
+            snip::waiting::chat_waiting_get,
+            snip::waiting::chat_waiting_remove,
+            snip::waiting::chat_waiting_clear,
             dictation::stt_speed::stt_speed_status,
             dictation::stt_speed::stt_speed_measure,
             ai::hardware::hardware_advice,
@@ -563,6 +566,8 @@ pub fn run() {
             shell::e2e::e2e_snip_clipboard,
             #[cfg(debug_assertions)]
             shell::e2e::e2e_snip_ocr,
+            #[cfg(debug_assertions)]
+            shell::e2e::e2e_snip_question,
             #[cfg(debug_assertions)]
             shell::e2e::e2e_drag_drop,
             #[cfg(debug_assertions)]

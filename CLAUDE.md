@@ -164,10 +164,11 @@ One folder per area (an area's `<area>.rs` lists its modules); a big module's pa
 - `chat/tools.rs` (+ `tools/`: notes, memory, calendar, agent) / `chat/note_text.rs` — the tool loop: note tools (safe partial edits), apps, web (a local model must search first), the calendar (`check_calendar`: what's on, the next meeting with someone, free at a time; meetings cited), safety rule.
 - `chat/stream.rs` — streaming answers: SSE from every provider (tool calls reassembled and checked, a whole answer when streaming fails), a step's text held until it's an answer (a forced search's never shown), ■ Stop, a newer question in the conversation replacing the turn still answering, a local stream stepping aside for a dictation; the checked answer replaces what streamed.
 - `chat/commands.rs` / `chat/turn.rs` — the Chat view's commands; one chat turn (`chat_turn`: the prompt, the eager RAG, the tool loop or a small model's web pipeline, the checks).
-- `chat/assistant.rs` — the Voice Assistant: ask Chat out loud from any app, spoken from the answer's first sentence; off during meetings.
+- `chat/assistant.rs` — the Voice Assistant: ask Chat out loud from any app, spoken from the answer's first sentence, with the screenshots waiting in Chat's box; off during meetings.
 
 **Snip to Chat** — [snip.md](./docs/architecture/snip.md)
-- `snip.rs` — drag a box over any screen, into Chat: Win+Alt+S / ✂ on the bar / tray / Chat's + / saying "snip"; the conversation Chat shows, else a new one; never sent by itself; the `yapsnip` scheme.
+- `snip.rs` — drag a box over any screen, into Chat: Win+Alt+S / ✂ on the bar / tray / Chat's + / saying "snip"; the conversation Chat shows, else a new one; never sent by itself; on the clipboard too ("Copy every snip…"); after a spoken "snip", the question listened for (`listens_after`); the `yapsnip` scheme.
+- `snip/waiting.rs` — the screenshots waiting in Chat's box, kept in Rust (`yap-chat-waiting`): a typed question or a Voice Assistant one takes them.
 - `snip/capture.rs` / `snip/hdr.rs` — every monitor at once on Windows.Graphics.Capture (FP16 ÷ the SDR white level on an HDR monitor, GDI as the fallback); the HDR → sRGB tables.
 - `snip/overlay.rs` / `snip/geom.rs` — the native per-monitor overlay (painted cloaked, physical pixels) and its pure `Select`: a box (across monitors too), a click / Enter for the monitor, Space / Alt for a window, Ctrl to copy, Shift to save; the box, crop, compose-across-monitors and label maths.
 - `snip/pick.rs` / `snip/copy_save.rs` — the windows a click can pick (DWM frames, rects only); copy (PNG + DIB, out of Win+V history) and save (the dialog, the folder used last), from the overlay and a chat screenshot's menu.

@@ -106,12 +106,39 @@ pub async fn chat_send(
     images: Option<Vec<String>>,
     as_text: Option<bool>,
 ) -> Result<serde_json::Value, String> {
+    // The screenshots it sends leave Chat's box (`snip/waiting.rs`); a
+    // question that fails before its answer gives them back, as the page
+    // gives the question back (not one a newer question replaced, nor one
+    // stopped: those are kept as asked).
+    let image_ids = images.unwrap_or_default();
+    let taken = if image_ids.is_empty() { Vec::new() } else { crate::snip::waiting::sent(&app, &image_ids) };
+    let out = send_turn(&app, conversation_id, text, scope, voice, on_stream, turn_id, image_ids, as_text).await;
+    if let Err(e) = &out {
+        if !e.contains(crate::chat::stream::SUPERSEDED) && !e.contains(crate::chat::stream::STOPPED) {
+            crate::snip::waiting::put_back(&app, conversation_id, taken);
+        }
+    }
+    out
+}
+
+/// [`chat_send`]'s turn.
+#[allow(clippy::too_many_arguments)]
+async fn send_turn(
+    app: &AppHandle,
+    conversation_id: Option<u64>,
+    text: String,
+    scope: Option<String>,
+    voice: Option<bool>,
+    on_stream: crate::chat::stream::PageChannel,
+    turn_id: Option<String>,
+    image_ids: Vec<String>,
+    as_text: Option<bool>,
+) -> Result<serde_json::Value, String> {
     let by_voice = voice.unwrap_or(false);
     let stop = crate::chat::stream::Stoppable::new(turn_id.as_deref());
     let watched = on_stream.0.is_some();
     // Screenshots: the model must be able to read them, and their copies
     // for it are made (usually already, while the question was typed).
-    let image_ids = images.unwrap_or_default();
     let mut text = text;
     let (turn_images, target) = if image_ids.is_empty() {
         (crate::snip::turn::TurnImages::default(), None)
@@ -133,7 +160,7 @@ pub async fn chat_send(
     let turned = crate::snip::turn::with(
         turn_images,
         chat_turn(
-            Some(&app),
+            Some(app),
             conversation_id,
             &text,
             scope.as_deref(),

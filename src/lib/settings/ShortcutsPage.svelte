@@ -12,6 +12,7 @@
   import Group from '../ui/Group.svelte';
   import Row from '../ui/Row.svelte';
   import LinkRow from '../ui/LinkRow.svelte';
+  import Toggle from '../ui/Toggle.svelte';
   import SettingsHotkey from './SettingsHotkey.svelte';
   import { transformName } from './transforms.js';
   import { languageShortcuts, shortcutName } from './languages.svelte.js';
@@ -87,6 +88,16 @@
     setting="shortcut-snip"
   >
     <SettingsHotkey {cfg} target="snipHotkey" clearable more />
+  </Row>
+  <!-- Every snip to Chat on the clipboard too, as Windows' Snipping Tool
+       does (snip.rs; out of Win+V history). -->
+  <Row setting="snip-copy">
+    <Toggle
+      bind:checked={cfg.snipCopy}
+      label="Copy every snip to the clipboard"
+      desc="Paste it anywhere with Ctrl+V, as well as asking about it in Chat"
+      hint="Like Yap's pastes, it stays out of Windows' clipboard history (Win+V). Pictures you paste or drop into Chat aren't copied again."
+    />
   </Row>
   <LinkRow
     label="Language shortcuts"

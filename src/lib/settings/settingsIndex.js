@@ -57,6 +57,7 @@ export const SETTINGS_INDEX = [
   { page: 'dictation', section: 'Typing into apps', label: 'Press Enter after pasting', desc: 'Sends the message for you', keywords: 'auto-submit auto submit enter send paste', anchor: 'auto-submit', toggle: 'autoSubmit' },
   { page: 'dictation', section: 'Typing into apps', label: 'Say “press enter” to send', desc: 'Yap leaves the words out and presses the key after pasting', keywords: 'press enter voice command send return', anchor: 'voice-enter', toggle: 'voiceEnter' },
   { page: 'dictation', section: 'Typing into apps', label: 'Say “snip” to take a screenshot', desc: 'A dictation of just “snip” starts Snip to Chat', keywords: 'snip screenshot screen capture voice command picture image', anchor: 'snip-voice', toggle: 'snipVoice' },
+  { page: 'dictation', section: 'Typing into apps', label: 'Then listen for my question', desc: 'After you say “snip”, ask about the screenshot out loud', keywords: 'snip screenshot question voice assistant listen ask', anchor: 'snip-listen', toggle: 'snipListen' },
   { page: 'dictation', section: 'Typing into apps', label: 'Send key', desc: 'Enter, Ctrl + Enter or Shift + Enter', keywords: 'auto-submit key enter ctrl shift', anchor: 'send-key' },
   { page: 'dictation', section: 'Typing into apps', label: 'Safer pasting into terminals', desc: 'One line, and Enter only when you say “press enter”', keywords: 'terminal powershell command line claude code codex paste pasting', anchor: 'terminal-mode', toggle: 'terminalMode' },
   { page: 'dictation', section: 'Typing into apps', label: 'Restore clipboard after paste', desc: "Puts back what you'd copied. Dictations never show up in Win+V history", keywords: 'clipboard copy paste win+v history', anchor: 'restore-clipboard', toggle: 'restoreClipboard' },
@@ -74,6 +75,7 @@ export const SETTINGS_INDEX = [
   { page: 'shortcuts', section: 'Global shortcuts', label: 'Copy last transcript', desc: 'Copy your latest dictation, kept out of clipboard history', keywords: 'shortcut shortcuts hotkey copy last transcript clipboard previous dictation', anchor: 'shortcut-copy-last' },
   { page: 'shortcuts', section: 'Global shortcuts', label: 'Meeting notes', desc: 'Take notes on a call, press again to stop', keywords: 'shortcut shortcuts hotkey meeting win alt m', anchor: 'shortcut-meeting' },
   { page: 'shortcuts', section: 'Global shortcuts', label: 'Snip to Chat', desc: 'Drag a box over any screen, into Chat', keywords: 'shortcut shortcuts hotkey snip snipping screenshot screen capture picture image win alt s', anchor: 'shortcut-snip' },
+  { page: 'shortcuts', section: 'Global shortcuts', label: 'Copy every snip to the clipboard', desc: 'Paste a snip anywhere with Ctrl+V', keywords: 'snip screenshot clipboard copy paste ctrl+v snipping tool', anchor: 'snip-copy', toggle: 'snipCopy' },
 
   // ---- Meetings ----
   { page: 'meetings', section: 'Call detection', label: 'Detect calls and offer to take notes', desc: 'Nothing records until you click Record notes', keywords: 'call detection teams zoom meet calls notetaker', anchor: 'call-detection', toggle: 'meetingDetection' },

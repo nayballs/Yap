@@ -43,6 +43,9 @@ export const FIELD_DEFAULTS = {
   // Snip to Chat (snip.rs): its shortcut, saying "snip", keeping screenshots.
   snipHotkey: 'kb:alt+win+83',
   snipVoice: true,
+  // …then listen for the question; every snip to Chat on the clipboard too.
+  snipListen: true,
+  snipCopy: true,
   chatImageDays: 30,
   snipSaveDir: '',
   streamingPartials: true,

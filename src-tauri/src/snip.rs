@@ -24,6 +24,13 @@
 //! chat. Nothing is ever sent by itself. Esc, right-click or the shortcut
 //! again cancel, and the focus goes back to the app you were in.
 //!
+//! **Then** (2026-10-25): the snip waits in Chat's box, kept in Rust
+//! ([`waiting`]) so a question asked out loud takes it too; it's on the
+//! clipboard as well ("Copy every snip to the clipboard", `snip_copy`), off
+//! the overlay's and Chat's way; and after a spoken "snip" Yap listens for
+//! the question by itself ([`listens_after`], "Then listen for my
+//! question", `snip_listen`).
+//!
 //! **To the model**: a copy fitted to the provider's size limit is made in
 //! the background as the image lands ([`images::prepare`]), so Send is
 //! instant; the turn carries it as an `image_url` part ([`turn`]). Which
@@ -51,6 +58,7 @@ pub mod overlay;
 pub mod pick;
 pub mod turn;
 pub mod vision;
+pub mod waiting;
 
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
@@ -136,12 +144,38 @@ pub struct Last {
     pub size: Option<(u32, u32)>,
     /// The windows a click could pick (how many).
     pub windows: usize,
+    /// A snip to Chat that's on the clipboard too ("Copy every snip to the
+    /// clipboard").
+    pub copied: bool,
+    /// After a spoken "snip": a Voice Assistant question started by itself
+    /// ("Then listen for my question", [`listens_after`]).
+    pub listened: bool,
 }
 
 static LAST: Mutex<Option<Last>> = Mutex::new(None);
 
 fn set_last(last: Last) {
     *LAST.lock().unwrap_or_else(|p| p.into_inner()) = Some(last);
+}
+
+/// Change the last snip's record (what happened after it landed).
+fn update_last(f: impl FnOnce(&mut Last)) {
+    if let Some(last) = LAST.lock().unwrap_or_else(|p| p.into_inner()).as_mut() {
+        f(last);
+    }
+}
+
+/// The page event: a snip that went to Chat is on the clipboard too
+/// (`{id}`): the box says "Copied · Ctrl+V to paste it anywhere".
+pub const COPIED_EVENT: &str = "yap-snip-copied";
+
+/// **After a spoken "snip"**, does Yap listen for the question by itself
+/// ("Then listen for my question")? Only for a snip started by voice that
+/// landed in Chat (not cancelled, copied or saved), with the setting on,
+/// and never while the Voice Assistant is off (a meeting records or a call
+/// is on: the snip just waits in the box then). Pure.
+pub fn listens_after(origin: Origin, landed: bool, setting: bool, assistant_off: bool) -> bool {
+    origin == Origin::Voice && landed && setting && !assistant_off
 }
 
 pub fn last() -> Option<Last> {
@@ -419,10 +453,16 @@ fn finish(app: &AppHandle, generation: u64, outcome: overlay::Outcome) {
             last.kind = Some(kind);
             last.action = Some(action);
             last.rect = Some(rect);
+            // A snip for Chat goes on the clipboard too, once Chat is up.
+            let mut to_copy: Option<Picture> = None;
             let result = cut(&snip, &rect).and_then(|(rgba, w, h)| {
                 last.size = Some((w, h));
                 match action {
-                    overlay::Action::Chat => keep(&rgba, w, h).map(Some),
+                    overlay::Action::Chat => {
+                        let (image, png) = keep(&rgba, w, h)?;
+                        to_copy = Some(Picture { rgba, w, h, png });
+                        Ok(Some(image))
+                    }
                     overlay::Action::Copy => {
                         let png = images::encode_png(&rgba, w, h, true)?;
                         copy_save::copy(&rgba, w, h, &png)?;
@@ -458,7 +498,7 @@ fn finish(app: &AppHandle, generation: u64, outcome: overlay::Outcome) {
                     last.conversation_id = snip.conversation;
                     set_last(last);
                     match image {
-                        Some(image) => hand_to_chat(app, image, snip.conversation, snip.origin),
+                        Some(image) => hand_to_chat(app, image, snip.conversation, snip.origin, to_copy),
                         // Copied or saved: back to the app you were in.
                         None => give_focus_back(snip.foreground),
                     }
@@ -499,27 +539,61 @@ fn cut(snip: &Snip, rect: &Rect) -> Result<(Vec<u8>, u32, u32), String> {
     Ok((geom::compose_rgba(rect, &sources), rect.w as u32, rect.h as u32))
 }
 
-/// A picture kept for Chat: a PNG in `chat-images/`.
-fn keep(rgba: &[u8], w: u32, h: u32) -> Result<crate::chat::chats::ChatImage, String> {
-    let png = images::encode_png(rgba, w, h, true)?;
-    let saved = images::save(&png, w, h)?;
-    Ok(crate::chat::chats::ChatImage { id: saved.id, w: saved.w, h: saved.h, bytes: saved.bytes, source: "snip".into(), ..Default::default() })
+/// A snip's picture: its RGBA and the PNG kept for Chat (what the clipboard
+/// gets too).
+struct Picture {
+    rgba: Vec<u8>,
+    w: u32,
+    h: u32,
+    png: Vec<u8>,
 }
 
-/// The main window up on Chat with the image in its message box, and the
-/// copy for the selected model made meanwhile.
-fn hand_to_chat(app: &AppHandle, image: crate::chat::chats::ChatImage, conversation: Option<u64>, origin: Origin) {
+/// A picture kept for Chat: a PNG in `chat-images/` (and the PNG).
+fn keep(rgba: &[u8], w: u32, h: u32) -> Result<(crate::chat::chats::ChatImage, Vec<u8>), String> {
+    let png = images::encode_png(rgba, w, h, true)?;
+    let saved = images::save(&png, w, h)?;
+    let image =
+        crate::chat::chats::ChatImage { id: saved.id, w: saved.w, h: saved.h, bytes: saved.bytes, source: "snip".into(), ..Default::default() };
+    Ok((image, png))
+}
+
+/// The main window up on Chat with the image in its message box (waiting
+/// there, `snip/waiting.rs`), and the copy for the selected model made
+/// meanwhile. Then, off this thread: the picture on the clipboard too
+/// ("Copy every snip to the clipboard"), and — a spoken "snip" — the
+/// question listened for ([`listens_after`]).
+fn hand_to_chat(app: &AppHandle, image: crate::chat::chats::ChatImage, conversation: Option<u64>, origin: Origin, picture: Option<Picture>) {
     let cfg = crate::config::load();
     if let Ok((base_url, _key, _model, provider, _p, _t)) = crate::chat::turn::resolve_chat_endpoint(&cfg) {
         let here = crate::ai::ai_model::runs_here(&provider, &base_url);
         images::prepare(vec![image.id.clone()], images::long_edge(&provider, here));
     }
+    let id = image.id.clone();
+    waiting::landed(app, conversation, image.clone());
     let payload = serde_json::json!({ "image": image, "conversationId": conversation, "origin": origin });
     if let Some(main) = app.get_webview_window("settings") {
         let _ = main.emit(EVENT, payload);
     }
     if let Err(e) = crate::shell::window::show_settings(app) {
         tracing::warn!("snip: couldn't bring the main window up ({e})");
+    }
+    // On the clipboard too, as Windows' Snipping Tool does: the copy's own
+    // formats and privacy (out of Win+V history), after Chat is up.
+    if let Some(p) = picture.filter(|_| cfg.snip_copy) {
+        let app = app.clone();
+        let _ = std::thread::Builder::new().name("snip-copy".into()).spawn(move || match copy_save::copy(&p.rgba, p.w, p.h, &p.png) {
+            Ok(()) => {
+                update_last(|l| l.copied = true);
+                let _ = app.emit(COPIED_EVENT, serde_json::json!({ "id": id }));
+            }
+            Err(e) => tracing::info!("snip: not on the clipboard ({e})"),
+        });
+    }
+    // Said "snip": the question is listened for now, and takes it.
+    if listens_after(origin, true, cfg.snip_listen, crate::chat::assistant::is_off()) {
+        let started = crate::dictation::pipeline::listen_after_snip(app);
+        tracing::info!(started, "snip: listening for the question about it");
+        update_last(|l| l.listened = started);
     }
 }
 
@@ -671,6 +745,22 @@ mod tests {
             "please",
         ] {
             assert!(!is_snip_phrase(no), "{no:?}");
+        }
+    }
+
+    #[test]
+    fn a_spoken_snip_that_landed_listens_for_its_question() {
+        // Said "snip", landed in Chat, the setting on, no meeting: listens.
+        assert!(listens_after(Origin::Voice, true, true, false));
+        // During a meeting or a call the Voice Assistant is off: it waits in the box.
+        assert!(!listens_after(Origin::Voice, true, true, true));
+        // Cancelled (Esc), copied or saved: it never landed.
+        assert!(!listens_after(Origin::Voice, false, true, false));
+        // "Then listen for my question" off.
+        assert!(!listens_after(Origin::Voice, true, false, false));
+        // Not said: the shortcut, the bar, the tray, Chat's +.
+        for origin in [Origin::Shortcut, Origin::Bar, Origin::Tray, Origin::Chat] {
+            assert!(!listens_after(origin, true, true, false), "{origin:?}");
         }
     }
 

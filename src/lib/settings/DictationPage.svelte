@@ -239,6 +239,18 @@
       hint="Also “snip it” and “screenshot”, to the Voice Assistant too. Only on its own: “snip the ends off” is typed as you said it."
     />
   </Row>
+  {#if cfg.snipVoice}
+    <!-- After a spoken "snip" lands in Chat: a Voice Assistant question
+         starts by itself and takes the screenshot (snip.rs `listens_after`). -->
+    <Row setting="snip-listen">
+      <Toggle
+        bind:checked={cfg.snipListen}
+        label="Then listen for my question"
+        desc="Once the screenshot is in Chat, ask about it out loud and hear the answer"
+        hint="Press either shortcut, or ✓, when you've asked. Esc or ✕ leaves the screenshot in Chat. Not during a meeting or a call."
+      />
+    </Row>
+  {/if}
   {#if cfg.autoSubmit || cfg.voiceEnter}
     <Row label="Send key" desc="The key Yap presses to send" setting="send-key">
       <Select bind:value={cfg.autoSubmitKey} options={SEND_KEYS} ariaLabel="Send key" />

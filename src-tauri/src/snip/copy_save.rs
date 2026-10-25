@@ -6,6 +6,10 @@
 //!   `chat-images/`.
 //! - **From Chat**: a screenshot's right-click menu (in the message box, in
 //!   a question, opened large): Copy image, Save image as…
+//! - **Every snip to Chat** (2026-10-25, "Copy every snip to the
+//!   clipboard", on): copied too, once Chat is up (`snip.rs`
+//!   `hand_to_chat`), as Windows' Snipping Tool does — no alert, the box
+//!   says it. Pictures pasted or dropped into Chat are never copied back.
 //!
 //! **Copy** puts the picture on the clipboard as a PNG and a 32-bit DIB
 //! (`CF_DIBV5`: Windows makes the older bitmap formats from it, so every
@@ -68,6 +72,12 @@ static TEST_CLIPBOARD: Mutex<Option<Vec<u8>>> = Mutex::new(None);
 #[cfg_attr(not(debug_assertions), allow(dead_code))]
 pub fn test_clipboard() -> Option<Vec<u8>> {
     TEST_CLIPBOARD.lock().unwrap_or_else(|p| p.into_inner()).clone()
+}
+
+/// …taken (the pretend clipboard emptied).
+#[cfg(debug_assertions)]
+pub fn take_test_clipboard() -> Option<Vec<u8>> {
+    TEST_CLIPBOARD.lock().unwrap_or_else(|p| p.into_inner()).take()
 }
 
 /// The PNG on the clipboard (the last one Yap copied), for the robot's

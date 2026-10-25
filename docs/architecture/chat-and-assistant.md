@@ -142,7 +142,16 @@ The AI Chat surface (conversations, the tool-calling loop and its note tools) an
   after the question instead of the pictures, which stay with it marked
   `ChatImage.asText`; the reply's `question` is the text as saved, and a new
   conversation is named by the question's own words. Pictures pasted or
-  dropped into the box are stored like snips (`snip::attach`).
+  dropped into the box are stored like snips (`snip::attach`). **The
+  screenshots waiting in the box** (2026-10-25) are kept in Rust
+  (`snip/waiting.rs`, `yap-chat-waiting`; the page's `waitingShots` follows):
+  `chat_send` takes the ids it sends (back in the box if it fails before the
+  answer), and a **Voice Assistant question takes them all** — to the
+  conversation they wait in, through the same `vision` / `turn::prepare` /
+  `turn::with` steps; a model known not to read images gets nothing, the
+  question goes into the box beside them and Chat comes up with its line
+  (`assistant::cant_read`). After a spoken "snip" lands, Yap listens for the
+  question by itself ([snip.md](./snip.md#after-saying-snip-yap-listens-for-the-question-2026-10-25)).
   **The history window** moves three turns at a time
   (`chats::history_start`: 14–19 messages, the Voice Assistant's 5–8), not
   every turn, so a long chat keeps its prompt's start. **A note's Ask
@@ -560,6 +569,18 @@ The AI Chat surface (conversations, the tool-calling loop and its note tools) an
   2026-10-25**: a pause to think ended questions half-asked; the maintainer
   asked for it gone. Its `dictation/pause.rs`, the bar's run-down line, the
   setting, `e2e_assistant_audio` and the specs went with it.)
+  **Screenshots** (2026-10-25, [snip.md](./snip.md)): a question asked while
+  screenshots wait in Chat's box takes them (`snip::waiting::take_for_question`)
+  — sent as a typed question's are, saved with it (its bubble's thumbnails),
+  the box cleared, the answer spoken as usual; a model that can't read
+  images: nothing goes, the question waits in the box with them
+  (`cant_read`). **After a spoken "snip"** lands in Chat a question starts
+  by itself (`pipeline::listen_after_snip`; "Then listen for my question",
+  `snip_listen`): `yap-assistant {about: "screenshot"}` makes the capsule
+  say "Ask about this screenshot…"; either key or ✓ ends it, a push-to-talk
+  key joins it and its release ends it (`gesture::State::Joinable`); Esc in
+  Chat (`assistantListening`) or ✕ cancel it; never while the assistant is
+  off (`is_off`). Test runs stage its transcript (`e2e_snip_question`).
 
 ## The Chat view
 

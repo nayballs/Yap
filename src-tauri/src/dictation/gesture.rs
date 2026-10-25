@@ -65,6 +65,11 @@ pub enum State {
     LockHeld,
     /// Hands-free: recording until the next press.
     Locked,
+    /// Started by Yap itself (the question after a spoken "snip"): nobody
+    /// holds it; the next press joins it…
+    Joinable,
+    /// …and that key's release ends it, a tap or a hold alike.
+    JoinHeld,
 }
 
 /// What the pipeline should do.
@@ -156,7 +161,15 @@ impl Gesture {
     /// the state.)
     #[cfg(test)]
     pub fn hands_free(&self) -> bool {
-        matches!(self.state, State::LockHeld | State::Locked)
+        matches!(self.state, State::LockHeld | State::Locked | State::Joinable)
+    }
+
+    /// A recording Yap started by itself (the question after a spoken
+    /// "snip"): nobody holds it, so the next press joins it and that key's
+    /// release ends it — a tap or a hold alike (`Joinable`).
+    pub fn wait_for_press(&mut self) {
+        self.state = State::Joinable;
+        self.third_tap_until = None;
     }
 
     /// Back to idle (toggle mode, or a start that was refused).
@@ -206,8 +219,13 @@ impl Gesture {
                 self.reset();
                 Step::act(if third { Action::TripleTap } else { Action::Stop })
             }
+            // Yap's own recording: this key holds it now, until it's let go.
+            State::Joinable => {
+                self.state = State::JoinHeld;
+                Step::NOTHING
+            }
             // Already down (the other hotkey, or a repeat): nothing new.
-            State::Held { .. } | State::LockHeld => Step::NOTHING,
+            State::Held { .. } | State::LockHeld | State::JoinHeld => Step::NOTHING,
         }
     }
 
@@ -232,6 +250,11 @@ impl Gesture {
                 let tapped = now.saturating_sub(self.lock_press_at) < TAP_MAX_MS;
                 self.third_tap_until = tapped.then_some(now + DOUBLE_TAP_GAP_MS);
                 Step::NOTHING
+            }
+            // The key that joined Yap's own recording came up: it ends.
+            State::JoinHeld => {
+                self.reset();
+                Step::act(Action::Stop)
             }
             // Idle (the press that stopped it, or one whose start was
             // refused), Locked (hands-free ignores the key coming up),
@@ -275,7 +298,7 @@ impl Gesture {
     pub fn key_lost(&mut self, recording: bool) -> Step {
         self.sync(recording);
         match self.state {
-            State::Held { .. } | State::LockHeld => {
+            State::Held { .. } | State::LockHeld | State::JoinHeld => {
                 self.state = State::Locked;
                 self.third_tap_until = None;
                 Step::act(Action::Unstick)
@@ -349,6 +372,38 @@ mod tests {
         assert_eq!(r.release(2_000), act(Action::Stop));
         assert!(!r.recording);
         assert_eq!(r.g.state(), State::Idle);
+    }
+
+    #[test]
+    fn yaps_own_recording_ends_when_a_key_that_joined_it_is_let_go() {
+        // The question after a spoken "snip": Yap started it, nobody holds it.
+        let mut r = Rig::new();
+        r.recording = true;
+        r.g.wait_for_press();
+        assert!(r.g.hands_free());
+        // A tap ends it (on its release)…
+        assert_eq!(r.press(1_000), Step::NOTHING);
+        assert_eq!(r.g.state(), State::JoinHeld);
+        assert_eq!(r.release(1_080), act(Action::Stop));
+        assert!(!r.recording);
+        assert_eq!(r.g.state(), State::Idle);
+        // …and so does a hold, at its release: talk while it's held.
+        r.recording = true;
+        r.g.wait_for_press();
+        r.press(5_000);
+        assert_eq!(r.tick(5_000 + DOUBLE_TAP_GAP_MS + 10), Step::NOTHING, "no tap timer throws it away");
+        assert_eq!(r.chord(5_100), Step::NOTHING, "not a chord: it was already recording");
+        assert_eq!(r.release(9_000), act(Action::Stop));
+        // A key-up lost while it was held: hands-free, never stopped.
+        r.recording = true;
+        r.g.wait_for_press();
+        r.press(10_000);
+        assert_eq!(r.key_lost(), act(Action::Unstick));
+        assert_eq!(r.g.state(), State::Locked);
+        // Ended elsewhere (✓, ✕): back to idle at the next key.
+        r.recording = false;
+        r.g.wait_for_press();
+        assert_eq!(r.press(20_000), act(Action::Start));
     }
 
     #[test]
