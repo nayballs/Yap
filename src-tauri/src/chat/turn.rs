@@ -464,7 +464,7 @@ pub(crate) async fn chat_turn(
         };
         // Earlier screenshots: the newest few sent again, the rest a line
         // (snip/turn.rs).
-        crate::snip::turn::with_history_images(&mut messages, earlier, &provider, &base_url).await;
+        crate::snip::turn::with_history_images(&mut messages, earlier, &provider, &model, &base_url).await;
         let extra = crate::chat::tools::Extra { memory: true, search_chats: cfg.memory_search_chats, conversation: Some(conv.id) };
         let looped = crate::chat::tools::run_tool_loop_with(
             &system,
@@ -818,11 +818,13 @@ fn first_search(question: &str) -> crate::chat::tools::FirstStep {
 }
 
 /// The conversation a turn goes to: `conversation_id`'s, or a new one named
-/// after the first message (first 50 chars, OpenWhispr's rule).
+/// after the first message (first 50 chars, OpenWhispr's rule) — its own
+/// words: a screenshot's text sent with it (`snip::ocr`) isn't the title.
 fn turn_conversation(conversation_id: Option<u64>, text: &str) -> crate::chat::chats::Conversation {
     match conversation_id.and_then(crate::chat::chats::get) {
         Some(c) => c,
         None => {
+            let text = crate::snip::ocr::question_of(text);
             let title: String = if text.chars().count() > 50 {
                 format!("{}...", text.chars().take(50).collect::<String>())
             } else {

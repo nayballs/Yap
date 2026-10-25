@@ -161,8 +161,9 @@ pub fn rule(kind: &str) -> Rule {
         // made during one, so it shows over the meeting, every press.
         "assistantMeetingOff" => Rule { hold_meeting: false, ..alert },
         // Snip to Chat (snip.rs): "Finish the dictation first", "Couldn't
-        // take the screenshot" — the answer to the person's own press.
-        "snipDictating" | "snipFailed" => Rule { hold_meeting: false, ..alert },
+        // take the screenshot", "Screenshot copied / saved" — the answer to
+        // the person's own press.
+        "snipDictating" | "snipFailed" | "snipCopied" | "snipSaved" => Rule { hold_meeting: false, ..alert },
         // A dictation stopped at its length limit (dictation/cap.rs): what
         // was said is pasted or on the clipboard, Recover text copies it —
         // never held back, never dropped.

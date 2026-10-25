@@ -118,8 +118,15 @@ The AI Chat surface (conversations, the tool-calling loop and its note tools) an
   them (`snip::vision`) and runs the turn with them (`snip::turn`): each
   model call's question becomes a content array (the image parts, then the
   text; the text first for OpenRouter), the newest 3 earlier screenshots in
-  the history window go again, older ones as a line; a server's refusal
-  becomes `vision::COULDNT_READ` (that model a "no" this session).
+  the history window go again, older ones as a line (every one a line to a
+  model known not to read images); a server's refusal becomes
+  `vision::COULDNT_READ` (that model a "no" this session).
+  `chat_send(images, asText: true)` ("Send its text instead", 2026-10-25):
+  the screenshots' text, read on this PC by Windows' OCR (`snip::ocr`), goes
+  after the question instead of the pictures, which stay with it marked
+  `ChatImage.asText`; the reply's `question` is the text as saved, and a new
+  conversation is named by the question's own words. Pictures pasted or
+  dropped into the box are stored like snips (`snip::attach`).
   **The history window** moves three turns at a time
   (`chats::history_start`: 14–19 messages, the Voice Assistant's 5–8), not
   every turn, so a long chat keeps its prompt's start.

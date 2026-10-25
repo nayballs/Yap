@@ -183,7 +183,7 @@ pub fn stored(id: &str) -> Option<crate::chat::chats::ChatImage> {
     use std::io::Read;
     std::fs::File::open(&p).ok()?.read_exact(&mut head).ok()?;
     let (w, h) = png_size(&head)?;
-    Some(crate::chat::chats::ChatImage { id: id.to_string(), w, h, bytes, source: "snip".into(), gone: false })
+    Some(crate::chat::chats::ChatImage { id: id.to_string(), w, h, bytes, source: "snip".into(), ..Default::default() })
 }
 
 /// Delete images by id (a deleted conversation's). Returns how many went.

@@ -72,6 +72,10 @@ pub fn chat_rename(id: u64, title: String) -> Result<String, String> {
 /// that can't read images is refused before anything is saved
 /// (`snip::vision::CANT_READ`); one whose server turns the image down is
 /// remembered as such and the error says so (`snip::vision::COULDNT_READ`).
+/// `asText`: "Send its text instead" — the screenshots' text, read on this
+/// PC by Windows' OCR (`snip::ocr`), goes after the question in place of
+/// the pictures (any model takes it); the screenshots stay with the
+/// question, marked so. The reply's `question` is the question as saved.
 #[allow(clippy::too_many_arguments)]
 #[tauri::command]
 pub async fn chat_send(
@@ -83,6 +87,7 @@ pub async fn chat_send(
     on_stream: crate::chat::stream::PageChannel,
     turn_id: Option<String>,
     images: Option<Vec<String>>,
+    as_text: Option<bool>,
 ) -> Result<serde_json::Value, String> {
     let by_voice = voice.unwrap_or(false);
     let stop = crate::chat::stream::Stoppable::new(turn_id.as_deref());
@@ -90,8 +95,14 @@ pub async fn chat_send(
     // Screenshots: the model must be able to read them, and their copies
     // for it are made (usually already, while the question was typed).
     let image_ids = images.unwrap_or_default();
+    let mut text = text;
     let (turn_images, target) = if image_ids.is_empty() {
         (crate::snip::turn::TurnImages::default(), None)
+    } else if as_text.unwrap_or(false) {
+        // Their text instead: read here, after the question; no pictures go.
+        let (question, saved) = crate::snip::ocr::question_with_text(&image_ids, &text).await?;
+        text = question;
+        (crate::snip::turn::TurnImages { images: saved, ..Default::default() }, None)
     } else {
         let cfg = config::load();
         let (base_url, _key, model, provider, _persona, _thinking) = resolve_chat_endpoint(&cfg)?;
@@ -155,5 +166,6 @@ pub async fn chat_send(
         "userMessageId": format!("chat:{}:{}", turn.conversation_id, turn.user_index),
         "speak": speak && !turn.stopped,
         "stopped": turn.stopped,
+        "question": text,
     }))
 }

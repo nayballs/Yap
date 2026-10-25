@@ -10,6 +10,29 @@ export function readPng(bytes) {
   return { width: p.width, height: p.height, data: p.data };
 }
 
+/** A `width` × `height` PNG of one colour `[r, g, b]`, as bytes. */
+export function writePng(width, height, [r, g, b]) {
+  const p = new PNG({ width, height });
+  for (let i = 0; i < p.data.length; i += 4) {
+    p.data[i] = r;
+    p.data[i + 1] = g;
+    p.data[i + 2] = b;
+    p.data[i + 3] = 255;
+  }
+  return PNG.sync.write(p);
+}
+
+/** The RGB of one pixel. */
+export function pixel(png, x, y) {
+  const i = (y * png.width + x) * 4;
+  return [png.data[i], png.data[i + 1], png.data[i + 2]];
+}
+
+/** Whether a pixel is `[r, g, b]` within `tolerance` per channel. */
+export function near(got, want, tolerance = 1) {
+  return got.every((v, c) => Math.abs(v - want[c]) <= tolerance);
+}
+
 /** A `data:image/png;base64,…` URL → `{ width, height, data }`. */
 export function readDataUrl(url) {
   return readPng(Buffer.from(String(url).replace(/^data:image\/png;base64,/, ''), 'base64'));

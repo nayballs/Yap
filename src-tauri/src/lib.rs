@@ -254,6 +254,11 @@ pub fn run() {
             snip::snip_start,
             snip::chat_images_usage,
             snip::chat_images_prepare,
+            snip::chat_image_copy,
+            snip::chat_image_save,
+            snip::chat_models_read_images,
+            snip::attach::chat_image_paste,
+            snip::attach::chat_image_drop,
             dictation::stt_speed::stt_speed_status,
             dictation::stt_speed::stt_speed_measure,
             ai::hardware::hardware_advice,
@@ -497,6 +502,14 @@ pub fn run() {
             shell::e2e::e2e_snip_input,
             #[cfg(debug_assertions)]
             shell::e2e::e2e_snip_last,
+            #[cfg(debug_assertions)]
+            shell::e2e::e2e_snip_save_path,
+            #[cfg(debug_assertions)]
+            shell::e2e::e2e_snip_clipboard,
+            #[cfg(debug_assertions)]
+            shell::e2e::e2e_snip_ocr,
+            #[cfg(debug_assertions)]
+            shell::e2e::e2e_drag_drop,
             #[cfg(debug_assertions)]
             dictation::mic_privacy::e2e_mic_privacy,
             #[cfg(debug_assertions)]

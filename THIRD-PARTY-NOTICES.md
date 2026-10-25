@@ -15,7 +15,9 @@ Cargo and npm carry their own licences in their packages.
 - **NiiightmareXD/windows-capture** — turning the capture's cursor and yellow
   border off (`snip/capture.rs`). https://github.com/NiiightmareXD/windows-capture
 - **yuxino/Kiri** — the overlay's placement in physical pixels per monitor
-  and the borderless-capture request (`snip/overlay.rs`, `snip/capture.rs`).
+  and the borderless-capture request (`snip/overlay.rs`, `snip/capture.rs`);
+  the pattern of picking the window under the pointer from the visible
+  top-level windows' rects, listed once at the capture (`snip/pick.rs`).
   https://github.com/yuxino/Kiri
 - **microsoft/PowerToys (ZoomIt's `SelectRectangle`)** — the native
   selection overlay's shape: a topmost tool window per monitor, a cross

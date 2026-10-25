@@ -52,9 +52,9 @@ pub struct ChatMessage {
 }
 
 /// A screenshot a question carried: the file's id (`img_<16 hex>`), its
-/// size as stored, and where it came from ("snip"). The pixels stay in
-/// `<data>/chat-images/<id>.png`.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+/// size as stored, and where it came from ("snip", "paste", "drop"). The
+/// pixels stay in `<data>/chat-images/<id>.png`.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ChatImage {
     pub id: String,
@@ -68,6 +68,10 @@ pub struct ChatImage {
     /// a page gets (`chat_get`), never stored.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub gone: bool,
+    /// Sent as its text (read on this PC by Windows' OCR, `snip::ocr`) to a
+    /// model that can't read images: the picture itself never went.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub as_text: bool,
 }
 
 /// Every image id a conversation refers to (the screenshots sweep keeps

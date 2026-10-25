@@ -281,6 +281,11 @@ pub struct YapConfig {
     /// conversation deletes its screenshots whatever this says. Default 30.
     #[serde(default = "default_chat_image_days")]
     pub chat_image_days: u32,
+    /// Snip to Chat's **Save** (Shift as you let go, Ctrl+S, a chat
+    /// screenshot's "Save image as…"): the folder the Save dialog opened in
+    /// last (`snip::copy_save`). Empty = Pictures.
+    #[serde(default)]
+    pub snip_save_dir: String,
     /// Active model id from the STT registry (e.g. "parakeet-tdt-0.6b-v3",
     /// "small"). Field name kept as `model_size` for config back-compat.
     #[serde(default = "default_model_size")]
@@ -1071,6 +1076,7 @@ impl Default for YapConfig {
             snip_hotkey: default_snip_hotkey(),
             snip_voice: true,
             chat_image_days: default_chat_image_days(),
+            snip_save_dir: String::new(),
             model_size: default_model_size(),
             use_gpu: true,
             stt_device: default_stt_device(),
