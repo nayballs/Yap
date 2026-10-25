@@ -9,6 +9,7 @@
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { PROVIDER_ICONS } from '../core/providerIcons.js';
+import { cancelDownload, isCancelled } from '../core/downloads.js';
 import { config, persist } from './configSync.svelte.js';
 
 export const localLlm = $state({
@@ -23,6 +24,8 @@ export const localLlm = $state({
   installing: false,
   progress: { stage: '', percent: 0, downloaded_mb: 0, total_mb: 0 },
   error: '',
+  // The last download was cancelled (nothing to say about it).
+  cancelled: false,
   // Restarting the sidecar on another model.
   switching: false,
   // The curated model downloading right now (its card shows the progress).
@@ -122,6 +125,7 @@ export async function downloadCurated(m) {
   if (localLlm.downloadingId || localLlm.installing) return;
   localLlm.error = '';
   localLlm.downloadingId = m.id;
+  localLlm.cancelled = false;
   localLlm.installing = true;
   localLlm.progress = { stage: '', percent: 0 };
   try {
@@ -132,11 +136,23 @@ export async function downloadCurated(m) {
     await invoke('local_llm_start');
     await refreshLocalLlm();
   } catch (e) {
-    localLlm.error = `${e}`;
+    // Cancelled: nothing to say (its half-downloaded file is gone).
+    if (!isCancelled(e)) localLlm.error = `${e}`;
+    localLlm.cancelled = isCancelled(e);
   } finally {
     localLlm.installing = false;
     localLlm.downloadingId = '';
   }
+}
+
+/** Cancel the curated model's download (shell/download.rs: its partial file goes). */
+export function cancelCurated(m) {
+  return cancelDownload(localCancelId(m));
+}
+
+/** What cancels a curated model's install (Rust's `models::cancel_id`). */
+export function localCancelId(m) {
+  return `llm:${m?.id || 'qwen2.5-1.5b'}`;
 }
 
 /** Switch the active local model to an already-downloaded curated one. */
@@ -158,7 +174,7 @@ export async function takeUpgrade(m) {
     return;
   }
   await downloadCurated(m);
-  if (!localLlm.error) {
+  if (!localLlm.error && !localLlm.cancelled) {
     config.cfg.localLlmUpgradeDismissed = true;
     await persist();
     await refreshLocalLlm();

@@ -388,6 +388,7 @@ pub fn sources(found: &Found) -> Vec<Source> {
                 line: Some(p.line),
                 ts: p.ts,
                 quote: if p.text.chars().count() > 280 { format!("{quote}…") } else { quote },
+                ..Default::default()
             }
         })
         .collect()

@@ -381,6 +381,14 @@ run folder, `models[].bench` in `summary.json`; every request in `transcript.jso
   `evals/retrieval/notes.json` (24 notes, 25 questions mostly worded differently from the note)
   against Chat's keyword search (`tools::search_notes`, what its RAG uses). Query/document
   prefixes follow the model's card, by file name.
+- **`needle`** (2026-10-25): a long context's quality and speed. A made-up keepers' logbook of
+  `--bench-history` thousand tokens (default 24: a 32K context's worth; 56 for a 64K one) with
+  six lockers' codes hidden at 5–98 % of it, each asked for in turn (the logbook first, an
+  assistant "I've read it", the question last, so the server re-uses the logbook after the
+  first question): found / asked, the first question's time and prompt speed (the whole
+  logbook read), and each later one's. Run it with and without
+  `--llamafile-arg=-ctk --llamafile-arg=q8_0 --llamafile-arg=-ctv --llamafile-arg=q8_0` to
+  see what a quantised KV cache costs ("KV cache q8_0" below).
 
 Every scenario run **streams** its answers as the Chat view does (since 22 Oct 2026,
 `chat/stream.rs`) and measures **when each answer's first words showed** (`first_words_ms` per turn,
@@ -491,7 +499,13 @@ isn't logged.
       "transcript": [{ "source": "them", "text": "…", "ts": 12 }]
     }],
     "memory": [{ "section": "people", "title": "Rochelle", "summary": "Sister", "details": ["Lives in York"] }],
-    "chats": [{ "title": "Trip to Lisbon", "messages": [{ "role": "user", "text": "…" }, { "role": "assistant", "text": "…" }] }]
+    "chats": [{ "title": "Trip to Lisbon", "messages": [{ "role": "user", "text": "…" }, { "role": "assistant", "text": "…" }] }],
+    "calendar": {                             // a connected calendar for check_calendar (chat/tools/calendar.rs)
+      "connected": true,                      // false: none connected (the tool isn't offered)
+      "meetings": [{ "title": "Design review", "day": "tomorrow", "start": "10:00", "minutes": 60,
+                     "with": ["Tanay Kothari"], "on": "teams", "maybe": false }],   // day: as said ("friday"), or "+3"
+      "busy": [{ "title": "Dentist", "day": "thursday", "start": "15:00", "minutes": 60 }]   // nobody else on it
+    }
   },
   "turns": [
     { "user": "open python", "expect": { … }, "soft": { … } },   // soft: warnings, not failures
@@ -523,6 +537,7 @@ field is an error, so a typo can't silently skip a check):
 | `no_post_fixes` | Yap didn't have to fix the answer before showing it (`turn::chat_turn`'s checks: a sources list or note the model wrote, a claimed search, a citation with nothing behind it). Use it in `soft`: it measures the model, the hard checks what the person sees. A search Yap ran for the model isn't a fix. |
 | `min_sources`, `sources_any` | The answer came with at least n web sources (Chat's Sources row); one of their addresses holds one of these. |
 | `min_searches` | At least n web searches ran this turn (the model's and Yap's own: a price question's second search for local prices). |
+| `calendar_cited`, `calendar_not_cited` | The answer's sources hold (or don't) the calendar meetings with these titles: its pills open them (`check_calendar`'s numbers, or Yap's `cite_mentions`). |
 | `temperatures` | `"C"` or `"F"`: the answer's temperatures lead with that scale — it gives one, every one in the other scale is only a conversion right after one in it ("2°C (35°F)", "2°C / 35°F"), such a pair agrees, and each figure is one the turn's web pages give, or one of theirs converted (within 1°C). Degrees said without a scale ("about 7 degrees", a spoken answer) take the scale whose figures on the pages they fit. |
 | `speeds`, `distances` | `"km/h"` or `"mph"`; `"km"` or `"miles"`: the same check for the answer's speeds and distances (`ai/eval/units.rs`) — it gives one, every one in another unit (mph, km/h, m/s; miles, km) is only a conversion right after one in it ("29 km/h (18 mph)"), such a pair agrees, and each figure is one the pages give (a range's low end too) or one of theirs converted, within 2 km/h or 10 % (1 km or 6 %). Knots aren't read; nor is a speed as a distance, an area or fuel use. |
 | `clipboard_contains`, `clipboard_untouched` | What the clipboard tool was handed. |
@@ -2138,3 +2153,148 @@ The notes and memory scenarios (`--only notes-,memory-search-past-chats,memory-u
 13; no index in a scenario, so `search_notes` is BM25 per passage): **13/13** on
 Qwen3.5-4B with the new code, 11/13 with `--search-keyword` (`notes-create-in-folder`,
 `notes-long-chat` turn 10).
+
+## Calendar tools (25 Oct 2026)
+
+Chat's `check_calendar` (`chat/tools/calendar.rs`) over seven scenarios (`calendar-*`, a seeded
+calendar: `seed.calendar`; `--locale en-GB`): what's on tomorrow, the next meeting with Sam,
+free at 3 on Friday and then at 11, an event of your own (a dentist) as busy time, the Voice
+Assistant's "what's my next meeting", a model without tools (Yap's own lookup in its prompt) and
+no calendar connected. Run folders `<builds>/eval-runs/20261025-13*-chatlocal-calendar-*`.
+
+| Model | Passed | Mean turn | First words (mean / median) |
+|---|---|---|---|
+| Qwen3.5-4B, on the card (×3), final | **21/21** | 0.7 s | 0.55 / 0.58 s |
+| the same, first run | 5/21 | 1.8 s | 1.47 / 1.28 s |
+| Groq `openai/gpt-oss-20b` (3 scenarios, 13k tokens a run) | 1/3 → **3/3** | 1.0 s | 0.94 / 0.86 s |
+
+What the first runs showed, and what changed: the checks counted a meeting's "[1]" as a
+citation with no web source behind it (they count calendar sources now); the Voice
+Assistant's "what's my next meeting" was asked as `day: "today"` at 22:00 and answered
+"You have no meetings today" (a day with nothing still on now gives **the next meeting after
+it**, `next_meeting_after`, and earlier meetings are marked `over`); with no calendar the 4B
+searched the notes and said there were none (a calendar question now carries "No calendar is
+connected…" and it says so); gpt-oss wrote "Budget catch‑up" with a non-breaking hyphen and
+"Your next meeting with Sam is on Tuesday 27 Oct at 15:00" without the title, so Yap's
+citation missed them (`cite_mentions` now takes any dash for a hyphen, and a meeting named by
+someone only it has, or by a start time no other meeting shares). The second Groq run passed
+2/3; the third answer was right and cited ("… Tuesday 27 Oct, 15:00 [1]–15:30") but didn't
+say the title, which the scenario now only warns about.
+
+## Qwen3.5-9B against the 4B (25 Oct 2026)
+
+The research's 9B (bartowski Q4_K_M, SHA-256 `d784ce9e…`, 6,169,341,984 bytes, already in
+`E:\yap-builds\eval-models`) against the 4B on today's code, an RTX 5070 Ti, llamafile 0.10.6,
+the sidecar's own arguments (8K, MTP on): the 82 scenarios that need no live web, twice each,
+and the cleanup bench. **The 9B isn't better, so it isn't offered** (the 4B stays
+"Recommended"; the catalog is unchanged). Run folders `20261025-124423-chatlocal-suite-4b-vs-9b`,
+`20261025-125248-chatlocal-cleanup-4b-vs-9b`. The card was shared with another agent's
+evaluations at the time: the times are indicative, the pass rates aren't affected.
+
+| | Qwen3.5-4B | Qwen3.5-9B |
+|---|---|---|
+| Suite (164 runs) | **160 (97.6 %)** | 157 (95.7 %) |
+| Memory: false memories (tell / import) | **0** | 4 (`memory-import`: "Written by Imogen", "How you want answers") |
+| Model calls / tool calls | 371 / 124 | 330 / 82 |
+| Mean turn (model time) | **0.9 s** | 1.1 s |
+| First words, streamed (mean / median) | **0.47 / 0.37 s** | 0.66 / 0.40 s |
+| Prompt / generation (llama.cpp) | **2,343 / 192 tok/s** | 1,372 / 127 tok/s |
+| On the card at 8K (llama.cpp's projection) | **4,029 MB** | 6,500 MB |
+| Cleanup back to back (mean / median / p90) | **241 / 238 / 295 ms** | 285 / 238 / 435 ms |
+| Cleanup after a long Chat turn (median) | **241 ms** | 371 ms |
+| British spelling kept (48 words) | **43** | 32 |
+
+The 4B's failures: `apps-not-installed`#1, `injection-note-opens-app`#1 (a warning-level open
+attempt), `notes-create-in-folder`#2, `web-weather-uk-both-scales`#2; the 9B's: `memory-import`
+×2, `memory-remember-in-chat`#2, `notes-long-chat` ×2, `web-weather-uk-asks-fahrenheit`#2,
+`web-weather-uk-both-scales`#2. In the cleanup the 9B handled one self-correction better
+("resampling twice wait no it's downmixing twice" → only the correction) but kept "Tuesday,
+sorry, Thursday", wrote "New paragraph:" out, left "fourteen thousand two hundred pounds" in
+words (the 4B: "£14,200") and "call mum" in lower case. Same verdict as the research's 21 Oct
+run (57/58 vs 56/58 then: within noise, slower, 2.5 GB more).
+
+## KV cache q8_0 (25 Oct 2026)
+
+`-ctk q8_0 -ctv q8_0` on the 4B (RTX 5070 Ti, 0.10.6, MTP on), each measure with and without:
+`--bench needle` (a 24K logbook at 32K, a 56K one at 64K), the cleanup bench at 32K and 64K,
+and the suite ×2 at 32K. Run folders `20261025-13[3-4]*-chatlocal-{needle,cleanup,suite}-*`.
+The card was shared with another agent's runs, so the times are noisy (no interleaving).
+
+| | f16 (today) | q8_0 |
+|---|---|---|
+| On the card at 32K / 64K (the log's buffers) | 5,024 / 6,240 MiB | **4,623 / 5,487 MiB** (KV 1,024 → 544, 2,048 → 1,088; compute +80 / +208) |
+| Needle, 24K at 32K: found; first read; each later | 6/6; 6.2 s (4,241 tok/s); 236 ms | 6/6; 6.5 s (4,051 tok/s); 293 ms |
+| Needle, 56K at 64K: found; first read; each later | 6/6; 23.2 s (2,664 tok/s); 586 ms | 6/6; 20.9 s (2,965 tok/s); 419 ms |
+| Cleanup at 32K: back to back / after a long turn (median) | 233 / 223 ms | 220 / 313 ms |
+| Cleanup at 64K: back to back / after a long turn (median) | 263 / 283 ms | 178 / 213 ms |
+| Suite at 32K (164 runs) | 160 (97.6 %) | 160 (97.6 %) |
+| Suite: mean turn; prompt / generation | **1.1 s; 1,747 / 150 tok/s** | 1.5 s; 1,523 / 110 tok/s |
+
+Quality held (no needle lost, the suite the same, the failures the same kind), the memory
+saving is real but modest on Qwen3.5 (8 of its 32 layers have a KV cache), and Chat's
+generation was ~25 % slower over the suite. So Yap turns it on **only where it helps**:
+`local_llm::kv_q8_helps` — an NVIDIA card, a context of 32K or more whose f16 cache wouldn't
+fit beside Windows and the speech model while the q8_0 one would (a 128K–256K context on an
+8–12 GB card). `gguf::estimate` counts it (KV × 17/32, +3,600 bytes of compute a token: 4,698 /
+5,546 MiB estimated vs 4,623 / 5,487 logged).
+
+## The processor tier (25 Oct 2026)
+
+What a PC without a graphics card runs (`hardware::tier` "processor": the 1.5B,
+`local_llm::recommended_id(false)`), on this PC's Ryzen 7 9800X3D with `--ngl 0`, llamafile
+0.10.6, `--locale en-GB`. **Other agents' builds kept the processor at 100 % for much of it**:
+the times wander from run to run, so the comparisons below are within a run, or interleaved.
+Run folders `<builds>/eval-runs/20261025-14*-chatlocal-cpu*`.
+
+**Qwen3.5-2B against Qwen2.5-1.5B** (both without tools: Yap's rule gives Qwen3.5 tools from
+4B): the 82 scenarios that need no live web plus the calendar's, once each.
+
+| | Qwen2.5-1.5B (today) | Qwen3.5-2B |
+|---|---|---|
+| Suite (89; the 6 calendar scenarios that expect a tool call fail for both) | 72 (80.9 %) | 73 (82.0 %) |
+| Without the calendar's (82) | 71 | 72 |
+| Memory recall: learning / tell, import, remember | 21/22 / 16/16 | 19/22 / 15/16 |
+| Mean turn; first words (mean / median) | **5.0 s; 1.49 / 1.29 s** | 5.8 s; 1.88 / 1.71 s |
+| Prompt / generation | 193 / 16.6 tok/s | 224 / 20.1 tok/s |
+| Peak memory (the server's working set) | **1,460 MB** | 2,013 MB |
+| Cleanup, back to back (median, a calm run) | 802–940 ms | 1,032–1,100 ms |
+| British spelling kept (32 words) | 0 | 2 |
+
+Only the 1.5B failed `memory-learn-nothing-to-keep`, `notes-follow-ups` and `notes-long-chat`;
+only the 2B `honesty-no-tools-note` ("I've created a note" — it can't) and `voice-boil-an-egg`
+("9 minutes for a runny yolk"). The 2B is no better and takes ~550 MB more memory: **the 1.5B
+stays the processor tier's model.** The calendar without tools (Yap's lookup in the prompt,
+`calendar-no-tools-*` ×3): "what's on tomorrow?" 6/6 for both once the lookup was plain text;
+"am I free at 3 on Friday?" then "on Thursday at 3pm?" (a meeting, then a dentist of their
+own) — given JSON both said "Yes, you are free" over `"free": false`; given the verdict first
+in words the 2B said "not free" every time but named the earlier turn's meeting for Thursday
+in 2 of 3, the 1.5B said "free" in 1 of 3. Putting the lookup beside the question instead of
+in the system prompt was no better (the 1.5B then ignored it for "tomorrow" in 2 of 6), so it
+stays in the system prompt. A model this small answers calendar questions unreliably; the
+4B with the tool got 21/21.
+
+**Cleanup right after a long Chat turn** (the cleanup bench's 12 dictations, rounds 2, then 4
+after a ~5.6k-token Chat turn): today's server (4 slots sharing one KV cache) against two slots
+with a cache each (`-np 2 --no-kv-unified`, `-c` twice the context), median ms:
+
+| Server | Back to back | After a long Chat turn | Ratio | Generation (tok/s) |
+|---|---|---|---|---|
+| 1.5B, shared cache, run 1 (100 % load) | 1,293 | 3,139 (556 prompt tokens read again) | 2.4× | 16.5 → 10.3 |
+| 1.5B, shared cache, run 2 | 802 | 1,740 | 2.2× | 30.8 → 15.3 |
+| 1.5B, shared cache, run 3 | 940 | 1,918 | 2.0× | 23.4 → 14.3 |
+| 1.5B, 4 slots each with a cache (`-c` 32K) | 1,107 | 1,340 | 1.2× | 22.1 → 22.7 |
+| 1.5B, **2 slots each with a cache**, run 1 | 957 | 981 | **1.0×** | 24.7 → 28.4 |
+| 1.5B, 2 slots each with a cache, run 2 | 837 | 917 | **1.1×** | 30.2 → 28.5 |
+| 1.5B, 2 slots each with a cache, run 3 (b2b p90 3,288: contended) | 925 | 4,421 | — | 17.2 → 9.0 |
+| 2B, shared cache | 1,100 | 2,876 | 2.6× | 24.7 → 9.3 |
+| 2B, 2 slots each with a cache | 1,032 | 1,165 | **1.1×** | 26.0 → 25.1 |
+
+The cause: with one cache for every slot, the cleanup's attention runs over the long chat's
+cells too (generation about halved even with its prompt still cached: runs 2 and 3), and when
+the chat needs the room llama.cpp clears the cleanup's prompt (run 1: 556 tokens read again).
+Each slot with a cache of its own fixes both. The third two-slot run was taken while the
+processor was busy elsewhere (its back-to-back p90 is 3.3 s), with 4 samples after the long
+turn. So the sidecar on the processor now runs two slots with a cache each
+(`local_llm::per_slot_caches`; the KV once more, +224 MiB at 8K on the 1.5B); a graphics card
+keeps the shared cache, where it was never the slow part (the 4B's cleanup after a long turn:
+241 ms back to back, 243 after, "Qwen3.5-9B against the 4B" above).

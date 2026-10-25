@@ -5,7 +5,7 @@
   // the engine (Kokoro, the natural voices on this PC, recommended; or
   // Windows' own voices), Kokoro's download row (Download / Active / delete,
   // like the speech models'), the voice picker that follows the engine
-  // (Kokoro's 54 voices grouped by accent and gender), ▶ Preview, and where
+  // (Kokoro's voices grouped by accent and gender: 41, its Japanese and Mandarin ones left out, voice/tts/kokoro.rs `listed`), ▶ Preview, and where
   // Kokoro's files come from; for both, the speed and the volume (voice/tts.rs,
   // voice/tts/kokoro.rs, voice/tts/registry.rs, voice/tts/elevenlabs.rs).
   //
@@ -25,7 +25,9 @@
   import { speech } from '../stores/speech.svelte.js';
   import { toast } from '../ui/toast.svelte.js';
   import { openExternalLink } from '../core/externalLinks.js';
-  import { kokoro, startKokoro, downloadKokoro, deleteKokoro, formatMb, kokoroOptions } from './kokoro.svelte.js';
+  import { kokoro, startKokoro, downloadKokoro, deleteKokoro, cancelKokoro, formatMb, kokoroOptions } from './kokoro.svelte.js';
+  import DownloadProgress from '../ui/DownloadProgress.svelte';
+  import { fromEvent } from '../core/downloads.js';
 
   let { cfg } = $props();
 
@@ -104,7 +106,7 @@
     if (engine === 'kokoro') {
       if (!kokoro.inBuild) return 'Kokoro is in the full Yap build. This one speaks with Windows voices';
       if (!kokoro.installed) return "Pick one now: you'll hear it once Kokoro is downloaded";
-      return '54 voices in British and American English and seven other languages';
+      return '41 voices in British and American English and five other languages';
     }
     return voiceList?.windows?.error || 'The voices Windows has installed for apps';
   });
@@ -131,7 +133,7 @@
     engine: 'kokoro',
     desc: 'Natural voices on this PC',
     sizeMb: Math.max(1, Math.round((kokoro.sizeBytes || 379_000_000) / 1_000_000)),
-    langLabel: '54 voices',
+    langLabel: '41 voices',
     recommended: true,
     note: 'In the full Yap build',
   });
@@ -193,10 +195,8 @@
       <div class="kokoro" role="group" aria-label="Kokoro">
         <ModelRow model={row} status={rowStatus} percent={busy?.percent ?? 0} onclick={onRow} ondelete={() => (ask = { open: true, busy: false })} deleteActive />
         {#if busy}
-          <div class="progress" role="progressbar" aria-label="Downloading Kokoro" aria-valuenow={busy.percent} aria-valuemin="0" aria-valuemax="100">
-            <span style:width="{busy.percent}%"></span>
-          </div>
-          <span class="note">Downloading… {busy.percent}%. Windows voices speak until it's done</span>
+          <DownloadProgress progress={fromEvent(busy)} label="Downloading Kokoro" oncancel={cancelKokoro} />
+          <span class="note">Windows voices speak until it's done</span>
         {:else if !kokoro.inBuild}
           <span class="note">This build of Yap has no Kokoro (it's in the installed Yap): it speaks with Windows voices</span>
         {:else if !kokoro.installed}

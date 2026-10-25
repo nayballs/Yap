@@ -288,6 +288,71 @@ The AI Chat surface (conversations, the tool-calling loop and its note tools) an
   model read it all again); the person's next message is a clean turn.
   Unit-tested through the real loop against a local fake model + Exa
   (`a_web_page_can_never_make_the_chat_act`).
+- **`chat/tools/calendar.rs`** — **calendar tools in Chat** (2026-10-25):
+  "what's on tomorrow?", "when's my next meeting with Sam?", "am I free at
+  3 on Friday?" answered from the calendar Yap already keeps
+  ([calendar.md](./calendar.md): meetings from 12 h back to 7 days ahead,
+  and since this day **busy time of your own** — an event nobody else is
+  on, or over 6 h — kept only for this). **No sync, no network**:
+  `calendar::agenda()` copies the store and lets go of its lock before the
+  notes store (the meetings' notes) is read. **One tool, three plain
+  arguments** (`check_calendar(day, time, with)`, offered while a calendar
+  is connected, `Extra.calendar`; ~200 tokens with its instruction line,
+  `the_tool_stays_light`): small models do better with one tool than three.
+  **Yap reads the day and the time** (`resolve_day`, `resolve_time`, pure,
+  in the person's zone — About you's IANA zone, else this PC's: `Zone`):
+  today / tonight / tomorrow / yesterday / "day after tomorrow" / "in 3
+  days", a weekday (the next one, today included; "next Friday" never
+  today; "last Friday"), a date ("2026-10-30", "30 October", "Oct 30th",
+  "the 30th"; one long gone is next year's), "this week" (to Sunday), "next
+  week" (Monday–Sunday), "the weekend"; "15:00", "3pm", "half past 3", a
+  bare "3" as an afternoon hour (1–7 → pm), "morning" / "afternoon" /
+  "evening" / "lunchtime" as stretches. A time is checked for 30 minutes
+  (`free: true|false`, what's in the way); a time with no day is today's,
+  or tomorrow's once it has gone. Midnight is the person's own (a day of 25
+  hours when the clocks go back stays whole: `Zone::day_start`). `with`
+  matches every word of it to the start of an invitee's name or address
+  word, the organiser's or the title's ("Sam", "Sam Lee", "Priya's",
+  "roadmap"); with no day, the next 5 meetings with them. The result: the
+  meetings (`n`, title, "Fri 30 Oct, 10:00–10:30", who, the call app,
+  maybe, overlaps, on now, **over** — a meeting earlier today), the busy
+  time (`own_event`, never numbered), and **the next meeting after** a day
+  with nothing (still) on — "what's my next meeting?" asked as "today" late
+  in the day (the Voice Assistant's evaluation). A day outside what Yap
+  keeps says so; a calendar unsynced for 2 h+ says when it was. Chips:
+  "Checked your calendar: 2 meetings, Monday 26 October 2026", "Found 1
+  meeting with "Sam"", "Free Fri 30 Oct, 11:00–11:30" (a calendar mark in
+  Chat). **Citations**: every meeting it gives is numbered in **the
+  turn's one numbering** with the web's (`web::Turn::reserve_number`: a
+  page and a meeting never share a number; without the web, the turn's
+  `calendar::Log`), and becomes a `Source` with `event` (its key), `note`
+  (its note, if any), `field: "calendar"` and its time as `site`; a
+  meeting the answer names but didn't cite gets its number from Yap
+  (`cite_mentions`: by its title — a hyphen any dash, gpt-oss's
+  non-breaking one included —, else someone only it has, else its start
+  time when no other meeting starts then). The pills and the **From your
+  calendar** row open the meeting's notes — made from the invite if there
+  are none yet, as the Meetings view's row does (`calendar_event` "open").
+  **A model without tools** (Qwen2.5-1.5B, Qwen3.5-2B): Yap spots a
+  calendar question (`asks_about_calendar`), reads its day, time and person
+  from the question itself (`question_args`), looks it up and gives the
+  model the result in its prompt (`block`) as plain lines with **the
+  verdict first** (`plain`: "The answer: NO, the user is not free then;
+  they have: - [1] Roadmap planning — …"; given JSON, the 1.5B and the 2B
+  said "Yes, you are free" over `"free": false`), numbered and cited the
+  same way. Still unreliable on them (model-evals.md "The processor
+  tier"). An answer citing calendar meetings isn't one "written from the
+  web" (`chats::from_the_web` counts only sources with an address). **No calendar connected**: the tool isn't offered, and a calendar
+  question carries `NOT_CONNECTED_NOTE` (say so, and Settings → Connectors;
+  never make up meetings). **The Voice Assistant** says a calendar answer
+  whole (`assistant::web_sources` counts only web pages: it isn't cut short
+  with "The details and sources are in Chat."). Not offered across the
+  meetings (their passages are numbered on their own). Unit-tested (the
+  dates near midnight in London and New York, the clocks going back, every
+  phrasing above, `with`, free/busy, citations); e2e
+  `chat-calendar.spec.js` (a local iCal feed, the fake AI's tool call, the
+  chip, the pills, the note opened, the voice); model evaluations
+  `calendar-*` (model-evals.md "Calendar tools").
 - **`chat/stream.rs`** — **streaming answers** (2026-10-22): every model call
   of a Chat turn — each step of the tool loop, a small model's plain
   answer, the loop's last no-tools call — the notepad's Ask sheet and the
@@ -666,9 +731,10 @@ screenshots and their prompts, +, the box, the mic, Send / ■, `ModelChip`).
   context Ollama / LM Studio say: "8K context, set in Ollama · …"), and
   **Download** (the rest, "Recommended for this PC" first): a Download
   button with the size runs `local_llm_install` right in the row with a
-  progress bar from `local-llm-download-progress` (which now names the
-  curated `model`; one at a time, it carries on when the picker closes, no
-  cancel — the install path has none), then the row is installed and
+  progress bar from `local-llm-download-progress` (which names the curated
+  `model`; one at a time, it carries on when the picker closes), "2 MB of
+  4 MB · 24 MB/s · about 1 min left" and **Cancel** (2026-10-25, the shared
+  download helper: app-shell.md `shell/download.rs`), then the row is installed and
   pickable; "Open models folder". The footer: "Changes the model for Chat
   only. Dictation cleanup stays as it is." (or that Chat uses cleanup's
   model until one is picked) + **Language model settings…**

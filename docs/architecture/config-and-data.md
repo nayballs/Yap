@@ -280,6 +280,15 @@
   `#[serde(default)]`). Portable mode → `<exe>/Data/`.
 - Models: `%APPDATA%/yap/models/` — Whisper `.bin` files and extracted ONNX dirs,
   downloaded from `https://blob.handy.computer/` (SHA-256 verified).
+- **Downloads under way** (every big one, `shell/download.rs`, 2026-10-25):
+  a file's bytes wait as `<name>.partial` (`llm/<model>.partial`,
+  `models/<file>.partial`, `models/tts|diarization/<folder>.<n>.partial`,
+  `models/search/<file>.partial`) and a package's files in
+  `<folder>.installing/` until checked and moved into place, so no Yap —
+  this one or an older one sharing the folder — takes a half download for
+  a model. A download cut off (a dropped connection, Yap closed) leaves
+  its `.partial` to resume next time; Cancel deletes it (and the
+  `.installing` folder). Safe to delete.
 - Speaker models: `%APPDATA%/yap/models/diarization/` — `nemotron-3-diarization/`
   (the GGUF from Hugging Face `nvidia/`, pinned commit) and
   `nemo-speech-0.2.0-cpu/` (NVIDIA's runtime DLLs + `licenses/`) and
@@ -407,7 +416,12 @@
   last sync, error), meetings from 12 h ago to 7 days ahead, answered reminders,
   the nudge, and meetings' pre-meeting briefs (`briefs`, by event key, until
   2 days after the meeting, ≤ 40: their lines, sources — note and memory ids,
-  titles, dates — and a fingerprint) (`calendar.rs`). Never a token or a link: those are Credential
+  titles, dates — and a fingerprint), and since 2026-10-25 **busy time of
+  your own** (`busy`: events nobody else is on, over the same window, only
+  for Chat's calendar tool; an older Yap's save drops it until the next
+  sync) (`calendar.rs`). Chats' answers may cite calendar meetings
+  (`chats.json` sources with `event`, `field: "calendar"`; an older Yap's
+  save drops `event`, and such a pill then shows as plain "[1]"). Never a token or a link: those are Credential
   Manager generic credentials `yap-calendar-<1-8>.com.yap.dictation` (Local
   persistence; portable adds a data-dir hash), deleted on Disconnect and, for
   an installed copy, by the uninstaller's "Delete the application data".

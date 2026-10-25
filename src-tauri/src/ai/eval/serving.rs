@@ -23,6 +23,14 @@
 //!   `evals/retrieval/notes.json` against Chat's keyword search
 //!   (`tools::search_notes`) — recall@1 / @3 / @5.
 //!
+//! - **`needle`** (2026-10-25): a long context's quality and speed — a
+//!   made-up logbook of `--bench-history` thousand tokens (default 24K: a
+//!   32K context's worth) with six facts hidden at 5–98 % of its length,
+//!   each asked for in turn (the document first, the question last, so the
+//!   server re-uses the document after the first question). Run once with
+//!   the KV cache as Yap has it and once with `--llamafile-arg -ctk
+//!   --llamafile-arg q8_0 …` to see what a quantised cache costs.
+//!
 //! Every request and answer goes to `transcript.jsonl` (`bench_request`,
 //! `bench_response`); `--temperature` / `--set` apply here too.
 
@@ -34,7 +42,7 @@ use serde_json::{json, Value};
 use super::cleanup::Endpoint;
 use super::record;
 
-pub const BENCHES: &[&str] = &["stream", "layout", "loop", "embed"];
+pub const BENCHES: &[&str] = &["stream", "layout", "loop", "embed", "needle"];
 
 /// Run bench `kind` on one model; its results (JSON) for summary.json and
 /// serving.md.
@@ -46,6 +54,7 @@ pub async fn run(kind: &str, ep: &Endpoint<'_>, rounds: u32, history: usize) -> 
         "layout" => layout_bench(ep, rounds, history).await,
         "loop" => loop_bench(ep, rounds).await,
         "embed" => embed_bench(ep, rounds).await,
+        "needle" => needle_bench(ep, rounds, if history == 0 { 24 } else { history }).await,
         other => Err(format!("no bench {other}")),
     };
     match result {
@@ -154,6 +163,9 @@ struct Timed {
     first_tool_ms: Option<u64>,
     chunks: u32,
     content_chars: usize,
+    /// The answer's text (a whole answer).
+    #[serde(skip)]
+    content: String,
     /// Tool calls as they came: name and whether the arguments parse.
     tool_calls: Vec<(String, bool)>,
     prompt_n: u64,
@@ -186,6 +198,7 @@ async fn send_whole(client: &reqwest::Client, ep: &Endpoint<'_>, body: &Value) -
         Ok(v) => {
             let msg = &v["choices"][0]["message"];
             t.content_chars = msg["content"].as_str().map_or(0, |s| s.chars().count());
+            t.content = msg["content"].as_str().unwrap_or("").to_string();
             t.tool_calls = msg["tool_calls"]
                 .as_array()
                 .into_iter()
@@ -854,6 +867,110 @@ async fn embed_bench(ep: &Endpoint<'_>, rounds: u32) -> Result<Value, String> {
     Ok(result)
 }
 
+// ── needle ────────────────────────────────────────────────────────────────
+
+/// The facts hidden in the logbook: (where, as a share of its length; who;
+/// the code). Made up.
+const NEEDLES: &[(f64, &str, &str)] = &[
+    (0.05, "Harriet Quill", "4817"),
+    (0.25, "Osric Pellow", "2093"),
+    (0.45, "Marisol Venn", "7356"),
+    (0.65, "Tobiah Strand", "6142"),
+    (0.85, "Wenna Lark", "3908"),
+    (0.98, "Iolo Brack", "5271"),
+];
+
+/// A made-up logbook about `kilo_tokens` thousand tokens long (~4
+/// characters a token), the [`NEEDLES`] in it at their depths. Pure: the
+/// same every run.
+pub fn logbook(kilo_tokens: usize) -> String {
+    const PLACES: &[&str] = &["the north dock", "the seed store", "the radio hut", "the boat shed", "the long greenhouse", "the pump room", "the east stile", "the weather mast"];
+    const DID: &[&str] = &[
+        "checked the gutters and cleared two handfuls of leaves",
+        "logged the rain gauge at four millimetres",
+        "oiled the hinges on the gate and noted it still sticks in the damp",
+        "counted the oil drums and found one short of the list",
+        "swept the floor and moved the spare nets to the top shelf",
+        "repainted the number on the door, which had faded again",
+        "tested the backup lamp, which flickered twice and then held",
+        "left a note asking for more twine on the next supply boat",
+    ];
+    let target = kilo_tokens * 1000 * 4;
+    let mut out = String::from("Keepers' logbook, Skerrow Isle (a made-up island). Entries in order.\n\n");
+    let mut seed: u64 = 0x5eed;
+    let mut next = |n: usize| {
+        seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+        ((seed >> 33) as usize) % n
+    };
+    let mut placed = 0;
+    let mut day = 1;
+    while out.len() < target {
+        while placed < NEEDLES.len() && out.len() as f64 >= NEEDLES[placed].0 * target as f64 {
+            let (_, who, code) = NEEDLES[placed];
+            out.push_str(&format!("Day {day}: {who}'s locker in the radio hut was given a new code, {code}; the old one no longer opens it.\n"));
+            placed += 1;
+        }
+        out.push_str(&format!("Day {day}: at {} the keeper {}.\n", PLACES[next(PLACES.len())], DID[next(DID.len())]));
+        day += 1;
+    }
+    for (_, who, code) in &NEEDLES[placed..] {
+        out.push_str(&format!("Day {day}: {who}'s locker in the radio hut was given a new code, {code}; the old one no longer opens it.\n"));
+    }
+    out
+}
+
+async fn needle_bench(ep: &Endpoint<'_>, rounds: u32, kilo_tokens: usize) -> Result<Value, String> {
+    let client = client()?;
+    let book = logbook(kilo_tokens);
+    let mut asked = Vec::new();
+    let mut found = 0;
+    let mut first: Option<Timed> = None;
+    let mut later_ms = Vec::new();
+    for round in 0..rounds.max(1) {
+        for (depth, who, code) in NEEDLES {
+            let body = json!({
+                "model": ep.model,
+                "temperature": 0,
+                "max_tokens": 24,
+                "messages": [
+                    { "role": "system", "content": "You answer questions about the document the user gives you, from the document only. Reply with the code alone." },
+                    { "role": "user", "content": format!("<document>\n{book}\n</document>") },
+                    { "role": "assistant", "content": "I've read the document." },
+                    { "role": "user", "content": format!("What is the current code for {who}'s locker?") },
+                ],
+            });
+            let mut body = body;
+            record::adjust_body(&mut body);
+            record::write("bench_request", json!({ "bench": "needle", "round": round, "who": who, "depth": depth }));
+            let t = send_whole(&client, ep, &body).await;
+            if let Some(e) = &t.error {
+                return Err(format!("{who}: {e}"));
+            }
+            let answer = t.content.clone();
+            let ok = answer.contains(code);
+            found += usize::from(ok);
+            asked.push(json!({ "round": round, "who": who, "depth": depth, "ok": ok, "answer": answer.chars().take(60).collect::<String>(), "ms": t.total_ms, "prompt_tokens": t.prompt_n, "prompt_ms": t.prompt_ms }));
+            if first.is_none() {
+                first = Some(t);
+            } else {
+                later_ms.push(t.total_ms);
+            }
+        }
+    }
+    let first = first.unwrap_or_default();
+    let prompt_tok_s = if first.prompt_ms > 0.0 { (first.prompt_n as f64 / first.prompt_ms * 1000.0).round() } else { 0.0 };
+    Ok(json!({
+        "kilo_tokens": kilo_tokens,
+        "found": found,
+        "asked": asked.len(),
+        "first_ms": first.total_ms,
+        "first_prompt_tokens": first.prompt_n,
+        "prompt_tok_s": prompt_tok_s,
+        "later_ms_median": median(later_ms),
+        "questions": asked,
+    }))
+}
+
 // ── serving.md ────────────────────────────────────────────────────────────
 
 pub fn markdown(models: &[(String, Value)]) -> String {
@@ -937,6 +1054,18 @@ pub fn markdown(models: &[(String, Value)]) -> String {
                     ));
                 }
             }
+            "needle" => {
+                md.push_str(&format!(
+                    "A {}K-token logbook, six facts hidden at 5–98 % of it. **Found {} of {}**; the first question (the whole logbook read) {} ms for {} prompt tokens ({} tok/s); each later one {} ms (median).\n\n| Round | Who | Depth | Found | Answer | ms |\n|---|---|---|---|---|---|\n",
+                    res["kilo_tokens"], res["found"], res["asked"], ms(&res["first_ms"]), ms(&res["first_prompt_tokens"]), res["prompt_tok_s"], ms(&res["later_ms_median"]),
+                ));
+                for q in res["questions"].as_array().into_iter().flatten() {
+                    md.push_str(&format!(
+                        "| {} | {} | {} | {} | {} | {} |\n",
+                        q["round"], q["who"].as_str().unwrap_or(""), q["depth"], if q["ok"] == json!(true) { "yes" } else { "**no**" }, q["answer"].as_str().unwrap_or("").replace('|', "/"), ms(&q["ms"]),
+                    ));
+                }
+            }
             _ => {}
         }
     }
@@ -989,6 +1118,18 @@ mod tests {
         // system prompt every turn while "stable" never does.
         assert_ne!(rag_block(0), rag_block(1));
         assert!(NOTES.len() >= 8);
+    }
+
+    #[test]
+    fn the_logbook_hides_every_fact_once_at_its_depth() {
+        let book = logbook(8);
+        assert!((30_000..34_000).contains(&book.len()), "{}", book.len());
+        for (depth, who, code) in NEEDLES {
+            assert_eq!(book.matches(code).count(), 1, "{who}");
+            let at = book.find(code).unwrap() as f64 / book.len() as f64;
+            assert!((at - depth).abs() < 0.03, "{who} at {at}");
+        }
+        assert_eq!(logbook(8), book, "the same every run");
     }
 
     #[test]

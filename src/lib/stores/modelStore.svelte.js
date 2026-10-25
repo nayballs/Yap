@@ -7,6 +7,7 @@
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { getConfig, installedModels } from '../core/ipcShared.js';
+import { cancelDownload, fromEvent, isCancelled } from '../core/downloads.js';
 
 export const modelStore = $state({
   installed: [], // model ids on disk
@@ -44,26 +45,33 @@ function followProgress() {
   following = true;
   listen('stt-download-progress', (e) => {
     const d = modelStore.downloading;
-    if (d && e.payload?.modelSize === d.id) d.percent = e.payload.percent;
+    // Its percent, bytes, speed and time left (core/downloads.js).
+    if (d && e.payload?.modelSize === d.id) Object.assign(d, fromEvent(e.payload));
   }).catch(() => {});
 }
 
 /**
  * Download model `id` and make it the one in use (a newly downloaded model
- * is ready to use). One at a time; a failure is kept in `downloadError`.
+ * is ready to use). One at a time; a failure is kept in `downloadError`
+ * (a cancel isn't one).
  */
 export async function downloadModel(id) {
   if (modelStore.downloading) return;
   followProgress();
-  modelStore.downloading = { id, percent: 0 };
+  modelStore.downloading = { id, percent: 0, downloaded: 0, total: 0, bytesPerSec: 0, etaSecs: null };
   modelStore.downloadError = null;
   try {
     await invoke('download_model_size', { modelSize: id });
     await refreshModels();
     if (modelStore.active !== id) await setActiveModel(id).catch(() => {});
   } catch (e) {
-    modelStore.downloadError = { id, message: String(e) };
+    if (!isCancelled(e)) modelStore.downloadError = { id, message: String(e) };
   } finally {
     modelStore.downloading = null;
   }
+}
+
+/** Cancel model `id`'s download (Rust's `stt::cancel_id`): its half-downloaded file goes. */
+export function cancelModelDownload(id) {
+  return cancelDownload(`stt:${id}`);
 }

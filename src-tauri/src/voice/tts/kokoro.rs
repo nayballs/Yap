@@ -188,10 +188,38 @@ pub fn is_voice(id: &str) -> bool {
     VOICES.contains(&id)
 }
 
+/// **Japanese and Mandarin voices aren't offered** (2026-10-25). Kokoro
+/// reads them through its phonemes, and Yap's phonemizer gives it English
+/// ones: misaki's English lexicon, else eSpeak NG's English (`g2p.rs`).
+/// Kokoro was trained on misaki's Japanese (pyopenjtalk, kana → its own
+/// symbols) and Mandarin (pypinyin + jieba, with tones) phonemes, neither of
+/// which runs in Rust here, and eSpeak NG's `ja` / `cmn` give IPA Kokoro
+/// never saw — so these voices read text as heavily accented English, and a
+/// Japanese or Chinese answer as nonsense. A pronunciation step of their own
+/// isn't cheap (a dictionary and tokenizer per language, tens of MB), so
+/// they're left out of Settings' list; one already chosen (an older Yap
+/// offered them) speaks as the default voice ([`spoken_voice`]), and the
+/// saved setting stays as it was. Their files still download with the
+/// others: an older Yap sharing the data folder may use one.
+pub fn listed(id: &str) -> bool {
+    is_voice(id) && !matches!(id.chars().next(), Some('j' | 'z'))
+}
+
+/// The voice that speaks for the saved `id`: itself when it's listed, else
+/// the default ([`listed`]). Pure.
+pub fn spoken_voice(id: &str) -> &str {
+    if listed(id) {
+        id
+    } else {
+        DEFAULT_VOICE
+    }
+}
+
 /// Every voice as Settings lists it: "Bella", en-US, female, American English.
 pub fn voices() -> Vec<Voice> {
     VOICES
         .iter()
+        .filter(|id| listed(id))
         .map(|id| {
             let (lang, accent, _) = language(id);
             let name = id.split_once('_').map_or(*id, |(_, n)| n);
@@ -281,7 +309,7 @@ impl Engine for Kokoro {
         Some(DEFAULT_VOICE.into())
     }
     fn open(&self, voice: &str, rate: f32) -> Result<Box<dyn Synth>, String> {
-        let voice = if is_voice(voice) { voice } else { DEFAULT_VOICE };
+        let voice = spoken_voice(voice);
         if crate::shell::e2e::active() {
             files().ok_or("Kokoro isn't installed")?;
             return Ok(Box::new(super::Silence { rate: rate.clamp(0.5, 3.0) }));
@@ -972,18 +1000,28 @@ mod tests {
     }
 
     #[test]
-    fn fifty_four_voices_grouped_by_language() {
+    fn forty_one_voices_listed_grouped_by_language() {
         let v = voices();
-        assert_eq!(v.len(), 54);
+        // Kokoro's 54, less the 5 Japanese and 8 Mandarin ones it can't
+        // pronounce here (`listed`): 9 languages' voices → 7.
+        assert_eq!(VOICES.len(), 54);
+        assert_eq!(v.len(), 41);
         let bella = v.iter().find(|x| x.id == DEFAULT_VOICE).unwrap();
         assert_eq!((bella.name.as_str(), bella.language.as_str(), bella.gender.as_str(), bella.accent.as_str()), ("Bella", "en-US", "female", "American English"));
         let george = v.iter().find(|x| x.id == "bm_george").unwrap();
         assert_eq!((george.gender.as_str(), george.accent.as_str()), ("male", "British English"));
         assert_eq!(v.iter().filter(|x| x.accent == "British English").count(), 8);
         assert_eq!(v.iter().filter(|x| x.accent == "American English").count(), 20);
-        let gong = v.iter().find(|x| x.id == "jf_gongitsune").unwrap();
-        assert_eq!(gong.name, "Gongitsune");
+        assert!(!v.iter().any(|x| x.language == "ja" || x.language == "zh"), "no Japanese or Mandarin voice listed");
+        assert!(v.iter().any(|x| x.id == "ff_siwis") && v.iter().any(|x| x.id == "hf_alpha"), "eSpeak's languages stay");
         assert!(is_voice("bf_emma") && !is_voice("af") && !is_voice(""));
+        // One chosen before (an older Yap offered them): the default speaks,
+        // the saved setting untouched.
+        assert!(is_voice("jf_gongitsune") && !listed("jf_gongitsune"));
+        assert_eq!(spoken_voice("jf_gongitsune"), DEFAULT_VOICE);
+        assert_eq!(spoken_voice("zm_yunxi"), DEFAULT_VOICE);
+        assert_eq!(spoken_voice("bm_george"), "bm_george");
+        assert_eq!(spoken_voice("nonsense"), DEFAULT_VOICE);
     }
 
     #[test]

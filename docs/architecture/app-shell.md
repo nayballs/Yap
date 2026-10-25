@@ -207,6 +207,43 @@ re-exported by the module, except `local_llm`'s, which callers name
   themselves: [frontend.md](./frontend.md#the-dark-theme-2026-10-22).
 - **`shell/portable.rs`** — portable-mode detection (a `portable` marker next to the exe
   redirects data to `<exe>/Data`).
+- **`shell/download.rs`** — **one download helper for every big
+  download** (2026-10-25): the on-device AI models and their engine
+  (`ai/local_llm/models.rs`), the speech models (`dictation/stt.rs`), the
+  meeting search model (`search/embedder.rs`), Kokoro and eSpeak NG
+  (`voice/tts/registry.rs`) and the speaker engine
+  (`speakers/diarize/registry.rs`) all fetch through `fetch(Fetch {url,
+  partial, size, what, ticket}, report)`. **Resume**: the bytes already in
+  the `.partial` file are asked for no more (HTTP `Range`; a server that
+  sends the whole file instead starts it again, a 416 throws the partial
+  away); a dropped connection or a server silent for `STALL` (60 s) keeps
+  the partial for the next try. **Cancel** (`Ticket::begin(id)` for the
+  whole install, every file of it; the command `download_cancel {id}` →
+  bool; ids `llm:<curated id>`, `stt:<model>`, `search`, `kokoro`,
+  `diarization:<id>`; `Ticket::unlisted` for the background runtime
+  upgrade and the evaluations): it stops within 100 ms and **its partial
+  file goes** (`CANCELLED`, which the pages never show as a failure); an
+  install's half-made staging folder goes too. **Progress** (`Progress
+  {downloaded, total, bytesPerSec, etaSecs}`, at most every 250 ms and the
+  last always): the speed over the last 5 s (`Meter`) and the time left at
+  it; `Overall` does the same over a package of files (Kokoro's 60). Every
+  progress event (`local-llm-download-progress`, `stt-download-progress`,
+  `yap-search-download`, `tts-download-progress`,
+  `diarization-download-progress`) carries `bytesPerSec`, `etaSecs` and
+  `cancelId` besides its old fields. **Room**: one that won't fit on the
+  disk (with 64 MB to spare) is refused before it starts; one bigger than
+  its pinned size is refused and its partial deleted. Files stay under
+  their temporary names (`.partial`, `.installing`) until checked (each
+  caller's SHA-256) and moved into place, so a half download is never
+  taken for a model — by this Yap or an older one sharing the folder. The
+  pages: `core/downloads.js` (`fromEvent`, `downloadLine` "1.2 GB of 2.8
+  GB · 24 MB/s · about 1 min left", `cancelDownload`, `isCancelled`) and
+  `ui/DownloadProgress.svelte` (the bar, the line, Cancel; `compact` in a
+  model row) — Settings' Language Models, Speech-to-Text and speaker
+  models, Voice Assistant's Kokoro row and offer, meeting search, the Chat
+  model picker's row, onboarding. Unit-tested against a local server
+  (resume, a server that won't, cancel mid-way, a bigger download, the
+  maths); e2e `downloads.spec.js`.
 - **Logging** (`shell/logging.rs`: `init_logging`, first thing in `run`) — tracing → stdout + a daily-rolling
   `<data>/logs/yap.log.*` file at `info`; panics are hooked into the log.
   ONNX Runtime's own log (`ort`) is held at `warn` in both modes

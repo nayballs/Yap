@@ -356,13 +356,22 @@ pub fn status(root: &Path) -> Status {
 }
 
 /// Download progress, for `tts-download-progress`.
-#[derive(Debug, Clone, Serialize, PartialEq)]
+#[derive(Debug, Clone, Default, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct Progress {
     pub percent: u8,
     pub downloaded_bytes: u64,
     pub total_bytes: u64,
+    /// The speed and the time left over the whole download
+    /// (`shell/download.rs`).
+    pub bytes_per_sec: u64,
+    pub eta_secs: Option<u64>,
+    /// What Cancel cancels (`download_cancel`).
+    pub cancel_id: &'static str,
 }
+
+/// What cancels Kokoro's download (`download_cancel`).
+pub const CANCEL_ID: &str = "kokoro";
 
 /// A test run fetches only from this PC (the e2e suite's local server).
 fn allowed(url: &str) -> bool {
@@ -370,9 +379,12 @@ fn allowed(url: &str) -> bool {
 }
 
 /// Install Kokoro and eSpeak NG (whichever is missing) under `root`.
-pub async fn install(root: &Path, on_progress: &(dyn Fn(Progress) + Send + Sync)) -> Result<(), String> {
+/// Cancelled by `ticket` ([`CANCEL_ID`]): the file downloading goes, and
+/// no half-made folder stays.
+pub async fn install(root: &Path, ticket: &crate::shell::download::Ticket, on_progress: &(dyn Fn(Progress) + Send + Sync)) -> Result<(), String> {
     let todo: Vec<&Package> = [&KOKORO, &ESPEAK].into_iter().filter(|p| !installed(root, p)).collect();
     let total: u64 = todo.iter().map(|p| bytes(p)).sum();
+    let overall = crate::shell::download::Overall::new(total);
     std::fs::create_dir_all(root).map_err(|e| format!("create {}: {e}", root.display()))?;
     let mut done: u64 = 0;
     for pkg in todo {
@@ -381,21 +393,24 @@ pub async fn install(root: &Path, on_progress: &(dyn Fn(Progress) + Send + Sync)
         let _ = std::fs::remove_dir_all(&staging);
         std::fs::create_dir_all(&staging).map_err(|e| format!("create {}: {e}", staging.display()))?;
         // A failure leaves no half-made folder (partial downloads stay, to resume).
-        if let Err(e) = install_package(root, pkg, &staging, total, &mut done, on_progress).await {
+        if let Err(e) = install_package(root, pkg, &staging, total, &mut done, &overall, ticket, on_progress).await {
             let _ = std::fs::remove_dir_all(&staging);
             return Err(e);
         }
     }
-    on_progress(Progress { percent: 100, downloaded_bytes: total, total_bytes: total });
+    on_progress(Progress { percent: 100, downloaded_bytes: total, total_bytes: total, eta_secs: Some(0), cancel_id: CANCEL_ID, ..Default::default() });
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn install_package(
     root: &Path,
     pkg: &Package,
     staging: &Path,
     total: u64,
     done: &mut u64,
+    overall: &crate::shell::download::Overall,
+    ticket: &crate::shell::download::Ticket,
     on_progress: &(dyn Fn(Progress) + Send + Sync),
 ) -> Result<(), String> {
     {
@@ -405,10 +420,17 @@ async fn install_package(
             }
             let partial = root.join(format!("{}.{i}.partial", pkg.folder));
             let base = *done;
-            let report = |got: u64| {
-                let so_far = base + got;
-                let percent = (so_far * 100).checked_div(total).map_or(100, |p| p.min(100) as u8);
-                on_progress(Progress { percent, downloaded_bytes: so_far, total_bytes: total });
+            let report = |p: crate::shell::download::Progress| {
+                let so_far = base + p.downloaded;
+                let p = overall.at(so_far);
+                on_progress(Progress {
+                    percent: if total == 0 { 100 } else { p.percent() },
+                    downloaded_bytes: so_far,
+                    total_bytes: total,
+                    bytes_per_sec: p.bytes_per_sec,
+                    eta_secs: p.eta_secs,
+                    cancel_id: CANCEL_ID,
+                });
             };
             let as_dl = dl::Source { url: src.url.clone(), sha256: src.sha256.clone(), size: src.size, unpack: dl::Unpack::NotYet };
             // Already there from an earlier version of the package, and right:
@@ -432,11 +454,11 @@ async fn install_package(
                         .or_else(|_| std::fs::copy(&have, &to).map(|_| ()))
                         .map_err(|e| format!("keep {name}: {e}"))?;
                     *done += src.size;
-                    report(0);
+                    report(crate::shell::download::Progress::default());
                     continue;
                 }
             }
-            dl::download(&as_dl, &partial, &report, crate::privacy::net::Download::Voice).await?;
+            dl::download(&as_dl, &partial, ticket, &report, crate::privacy::net::Download::Voice).await?;
             dl::verify(&partial, &as_dl).await?;
             match src.dest {
                 Dest::File(name) => {
@@ -729,7 +751,7 @@ mod tests {
         let root = std::env::var_os("YAP_TTS_DOWNLOAD_DIR").map(PathBuf::from).unwrap_or_else(|| temp_root("download"));
         let rt = tokio::runtime::Runtime::new().unwrap();
         let last = std::sync::Mutex::new(0u8);
-        rt.block_on(install(&root, &|p: Progress| {
+        rt.block_on(install(&root, &crate::shell::download::Ticket::unlisted(), &|p: Progress| {
             let mut l = last.lock().unwrap();
             if p.percent >= *l + 10 || p.percent == 100 {
                 *l = p.percent;

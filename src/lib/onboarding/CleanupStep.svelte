@@ -37,9 +37,10 @@
     <div class="cleanup-progress">
       <span>
         Downloading the {setup.llmProgress.stage === 'runtime' ? 'engine' : 'model'}…
-        {setup.llmProgress.percent || 0}%
+        {setup.llmProgress.percent || 0}%{setup.llmLine ? ` · ${setup.llmLine}` : ''}
       </span>
       <div class="bar"><span style="width:{setup.llmProgress.percent || 0}%"></span></div>
+      <button class="skip" onclick={setup.cancelLlm}>Cancel the download</button>
     </div>
   {:else}
     <div class="cleanup-demo" aria-hidden="true">

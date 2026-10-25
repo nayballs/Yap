@@ -1,0 +1,33 @@
+{
+  "name": "calendar-no-tools-free",
+  "description": "A model without tools (forced off here) asked \"Am I free at 3 on Friday?\" with a meeting then, and \"Am I free on Thursday at 3pm?\" with a dentist appointment of the user's own then: Yap looks the calendar up itself and gives the verdict first, in words (Qwen2.5-1.5B and Qwen3.5-2B, given it as JSON, said \"Yes, you are free\" over \"free\": false, 2026-10-25). Both answers must say they're busy and why.",
+  "tags": ["calendar", "small"],
+  "tools": "off",
+  "apps": "standard",
+  "seed": {
+    "calendar": {
+      "meetings": [{ "title": "Roadmap planning", "day": "friday", "start": "15:00", "minutes": 60, "with": ["Priya Shah"], "on": "teams" }],
+      "busy": [{ "title": "Dentist", "day": "thursday", "start": "15:00", "minutes": 60 }]
+    }
+  },
+  "turns": [
+    {
+      "user": "Am I free at 3 on Friday?",
+      "expect": {
+        "answer_contains_any": ["Roadmap planning", "Priya"],
+        "answer_not_matches": "(?i)\\byes\\b,?\\s+you('re| are) free|you('re| are) free at",
+        "calendar_cited": ["Roadmap planning"],
+        "no_false_claims": true
+      },
+      "soft": { "answer_contains": ["Roadmap planning"] }
+    },
+    {
+      "user": "Am I free on Thursday at 3pm?",
+      "expect": {
+        "answer_contains": ["Dentist"],
+        "answer_not_matches": "(?i)\\byes\\b,?\\s+you('re| are) free|you('re| are) free at",
+        "no_false_claims": true
+      }
+    }
+  ]
+}

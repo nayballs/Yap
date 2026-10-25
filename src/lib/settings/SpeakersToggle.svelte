@@ -14,8 +14,11 @@
     offeredModel,
     modelById,
     downloadDiarization,
+    cancelDiarization,
     formatBytes,
   } from './diarization.svelte.js';
+  import DownloadProgress from '../ui/DownloadProgress.svelte';
+  import { fromEvent } from '../core/downloads.js';
 
   let {
     enabled = $bindable(false),
@@ -84,10 +87,7 @@
         once; then everything runs on this PC.
       </p>
       {#if busy}
-        <div class="progress" role="progressbar" aria-label="Downloading the speaker model" aria-valuenow={busy.percent} aria-valuemin="0" aria-valuemax="100">
-          <span style:width="{busy.percent}%"></span>
-        </div>
-        <span class="pct">Downloading… {busy.percent}%</span>
+        <DownloadProgress progress={fromEvent(busy)} label="Downloading the speaker model" oncancel={() => cancelDiarization(offer.id)} />
       {:else}
         <div class="actions">
           <Button size="sm" onclick={downloadAndTurnOn}>Download and turn on</Button>

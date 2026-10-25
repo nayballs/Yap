@@ -116,7 +116,9 @@ Reading answers aloud: Kokoro and Windows' voices on this PC, or ElevenLabs on t
   {voice, rate, engine?}` (Kokoro not installed → "Download Kokoro to hear
   its voices"), `tts_stop`, `tts_state`, `tts_kokoro_status` /
   `tts_kokoro_download` (`tts-download-progress {percent, downloadedBytes,
-  totalBytes}`, then `tts-kokoro-changed`) / `tts_kokoro_delete` (stops
+  totalBytes, bytesPerSec, etaSecs, cancelId: "kokoro"}`, then
+  `tts-kokoro-changed`; Cancel = `download_cancel {id: "kokoro"}`, the
+  shared helper's: app-shell.md `shell/download.rs`) / `tts_kokoro_delete` (stops
   speaking, unloads), `voice_replies_set {on}` (Chat's toggle: saved in one step, `settings::change_config`, applied like
   Settings, then `yap-voice-replies {on}` for Settings' copy). A
   `tts-idle` thread unloads Kokoro after the speech model's unload time (10
@@ -211,9 +213,18 @@ Reading answers aloud: Kokoro and Windows' voices on this PC, or ElevenLabs on t
     when idle (`idle_unload`, never under an open synthesiser); every run
     has its own `RunOptions`, so `cancel` (a stop, a new answer, a dictation
     starting: `Speaker::stop` → `Engine::cancel`) ends a sentence being made
-    within ~10 ms. 54 voices (`VOICES`, `voices/<id>.bin`: 510×256 styles, the
+    within ~10 ms. 54 voices downloaded (`VOICES`, `voices/<id>.bin`: 510×256 styles, the
     row for the call's token count; grouped by accent and gender, af_bella
-    the default); the phonemes go through Kokoro's own symbol table
+    the default), **41 offered** (2026-10-25, `listed`): its 5 Japanese and
+    8 Mandarin voices aren't — Yap's phonemes for them are English
+    (misaki's English lexicon, else eSpeak's English), while Kokoro learnt
+    misaki's Japanese (pyopenjtalk) and Mandarin (pypinyin + jieba, tones)
+    phonemes, neither runnable here without a dictionary and tokenizer per
+    language (tens of MB), and eSpeak NG's `ja` / `cmn` IPA is nothing it
+    saw: they read text as heavily accented English. One already chosen
+    speaks as af_bella (`spoken_voice`), its saved setting untouched (no
+    migration: an older Yap sharing the folder still has it), and their
+    files still download (that older Yap may use one); the phonemes go through Kokoro's own symbol table
     (`VOCAB`, `tokenize`), ≤ 510 tokens a call (`chunk`, cut at a space),
     Kokoro's padding trimmed and a 180 ms pause added (`trim_and_pad`).
     Test mode: silence once installed; a stub build outside test mode has
@@ -235,8 +246,8 @@ Reading answers aloud: Kokoro and Windows' voices on this PC, or ElevenLabs on t
     symbols (`espeak_english`, misaki's E2M, its dead GB "e^ə" rule fixed);
     no eSpeak → spelled out. Kokoro's es/fr/hi/it/pt-BR voices read their
     text all through eSpeak (`Phonemizer::Espeak`, misaki's `EspeakG2P`
-    map; punctuation kept by phonemizing between it); ja/zh voices read
-    English. `EspeakEnglish` (all of it through eSpeak, Voice Mirror's way)
+    map; punctuation kept by phonemizing between it); ja/zh voices would read
+    English (not offered, above). `EspeakEnglish` (all of it through eSpeak, Voice Mirror's way)
     only if a lexicon won't read, and for the comparison. Why dictionary
     first: it's what Kokoro was trained on, and eSpeak runs only for the
     odd name (both scored alike on Parakeet).
@@ -341,7 +352,8 @@ Reading answers aloud: Kokoro and Windows' voices on this PC, or ElevenLabs on t
     data of the languages Kokoro reads kept, 2.2 MB — + `COPYING` (GPL-3.0)
     from its repo at the tag + NOTICE.txt with the source link): ~379 MB
     down, ~352 MB on disk, every file pinned by size + SHA-256 (the
-    diarization registry's `download`/`verify`, resumable), staged in
+    diarization registry's `download`/`verify` — the shared, resumable,
+    cancellable helper `shell/download.rs` since 2026-10-25), staged in
     `<folder>.installing/` then renamed; a file already installed at its
     hash is kept (hard link); a failure leaves no half folder. Test runs
     only fetch from 127.0.0.1 (`YAP_TTS_SOURCES` stand-ins: `{package:

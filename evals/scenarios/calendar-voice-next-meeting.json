@@ -1,0 +1,29 @@
+{
+  "name": "calendar-voice-next-meeting",
+  "description": "The Voice Assistant: \"what's my next meeting\" asked out loud. The answer is said whole (not cut short for its sources like a web answer), so it must be short and spoken: the meeting and when, in a sentence or two.",
+  "tags": ["calendar", "voice"],
+  "voice": true,
+  "apps": "standard",
+  "seed": {
+    "calendar": {
+      "meetings": [
+        { "title": "Supplier call", "day": "tomorrow", "start": "09:15", "minutes": 30, "with": ["Ravi Menon"], "on": "teams" },
+        { "title": "Design review", "day": "tomorrow", "start": "13:00", "minutes": 60, "with": ["Tanay Kothari"] }
+      ]
+    }
+  },
+  "turns": [
+    {
+      "user": "what's my next meeting",
+      "expect": {
+        "tools_called": [{ "name": "check_calendar" }],
+        "answer_contains_any": ["Supplier call", "Ravi"],
+        "answer_not_matches": "(?i)no (more )?meetings (this week|in the next)",
+        "calendar_cited": ["Supplier call"],
+        "max_words": 45,
+        "no_false_claims": true
+      },
+      "soft": { "answer_not_contains": ["Design review"], "max_words": 30 }
+    }
+  ]
+}

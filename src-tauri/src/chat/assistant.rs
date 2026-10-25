@@ -212,6 +212,22 @@ pub fn spoken_answer(reply: &str, sources: usize) -> (String, String) {
 /// Said after a web answer's short version.
 pub const DETAILS_IN_CHAT: &str = "The details and sources are in Chat.";
 
+/// How many of an answer's sources are web pages: a calendar answer's
+/// meetings (`chat/tools/calendar.rs`) are said whole, like any answer
+/// ("You've the design review at 2."), not cut short for their sources.
+fn web_sources(turn: &crate::chat::turn::ChatTurn) -> usize {
+    turn.sources.iter().filter(|s| !s.url.is_empty()).count()
+}
+
+/// The card's note for a web answer: "2 sources in Chat".
+fn sources_note(web: usize) -> Option<String> {
+    match web {
+        0 => None,
+        1 => Some("1 source in Chat".to_string()),
+        n => Some(format!("{n} sources in Chat")),
+    }
+}
+
 /// Said after the short version of a long answer.
 pub const REST_IN_CHAT: &str = "The rest is in Chat.";
 
@@ -766,11 +782,8 @@ async fn answer(app: AppHandle, generation: u64, since: u64, question: String) {
     };
     // An answer from the web: one or two sentences out loud (and on the
     // card), the details and sources in Chat.
-    let (said, shown) = spoken_answer(&turn.reply, turn.sources.len());
-    let sources_note = (!turn.sources.is_empty()).then(|| match turn.sources.len() {
-        1 => "1 source in Chat".to_string(),
-        n => format!("{n} sources in Chat"),
-    });
+    let (said, shown) = spoken_answer(&turn.reply, web_sources(&turn));
+    let sources_note = sources_note(web_sources(&turn));
     let note = note.or(sources_note.as_deref());
     // The card first (the voice may be short), then the voice. With "Show
     // the answer on the Yap bar" off, a spoken answer has no card.
@@ -831,7 +844,7 @@ fn finish_streamed(
     let meeting = crate::voice::tts::meeting_quiet().is_some();
     let interrupted = crate::dictation::pipeline::dictation_state().0 != since;
     let how = reply(crate::config::load().speak_replies, meeting, interrupted);
-    let (said_text, shown) = spoken_answer(&turn.reply, turn.sources.len());
+    let (said_text, shown) = spoken_answer(&turn.reply, web_sources(turn));
     let still = current(generation);
     if how == Reply::Speak && still {
         let rest: Vec<String> = crate::voice::tts::utterances(&said_text).into_iter().skip(said).collect();
@@ -867,10 +880,7 @@ fn finish_streamed(
     } else {
         None
     };
-    let sources_note = (!turn.sources.is_empty()).then(|| match turn.sources.len() {
-        1 => "1 source in Chat".to_string(),
-        n => format!("{n} sources in Chat"),
-    });
+    let sources_note = sources_note(web_sources(turn));
     let note = note.or(sources_note.as_deref());
     if !still {
         return;

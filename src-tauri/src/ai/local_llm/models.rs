@@ -3,13 +3,10 @@
 //! progress for Settings.
 
 use std::path::Path;
-use std::time::Duration;
 
 use tauri::{AppHandle, Emitter};
 
-use crate::privacy::net::Recorded as _;
-
-use super::runtime::{free_bytes, next_is_whole, read_marker_at, room_for, write_marker_at, Marker, UpgradeLock};
+use super::runtime::{next_is_whole, read_marker_at, write_marker_at, Marker, UpgradeLock};
 use super::{
     llm_dir, model_path, ondevice_selected, runtime_path, MODEL_DISPLAY, MODEL_FILENAME, MODEL_SHA256, MODEL_URL, RUNTIME_MARKER,
     RUNTIME_NEXT, RUNTIME_SHA256, RUNTIME_URL, RUNTIME_VERSION,
@@ -17,6 +14,7 @@ use super::{
 
 /// Progress event payload for the on-device install (`local-llm-download-progress`).
 #[derive(serde::Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
 struct DownloadProgress {
     /// "runtime" (the llamafile engine) or "model" (the GGUF).
     stage: &'static str,
@@ -24,8 +22,22 @@ struct DownloadProgress {
     /// install): the Chat picker shows the bar in that model's row.
     model: String,
     percent: u8,
+    #[serde(rename = "downloaded_mb")]
     downloaded_mb: f64,
+    #[serde(rename = "total_mb")]
     total_mb: f64,
+    /// The speed over the last few seconds and the time left at it
+    /// (`shell/download.rs`).
+    bytes_per_sec: u64,
+    eta_secs: Option<u64>,
+    /// What Cancel cancels (`download_cancel {id}`).
+    cancel_id: String,
+}
+
+/// The id a curated model's install is cancelled by (`download_cancel`);
+/// its engine's download, when it brings one, is part of it.
+pub fn cancel_id(model: &str) -> String {
+    format!("llm:{}", if model.is_empty() { DEFAULT_MODEL_ID } else { model })
 }
 
 /// Where a download comes from: `url` + `sha256` as pinned, or in a debug
@@ -291,8 +303,9 @@ pub fn curated_by_id(id: &str) -> Option<&'static CuratedLlm> {
 /// Ensure the llamafile runtime is on disk (SHA-verified download if missing),
 /// with its marker ([`RUNTIME_MARKER`]). An older one already there stays
 /// until the background upgrade replaces it ([`spawn_runtime_upgrade`]).
-/// `model`: the curated id the install is for (its progress names it).
-pub(crate) async fn ensure_runtime(model: &str, app: Option<&AppHandle>) -> Result<(), String> {
+/// `model`: the curated id the install is for (its progress names it);
+/// `ticket`: what cancels it.
+pub(crate) async fn ensure_runtime(model: &str, app: Option<&AppHandle>, ticket: &crate::shell::download::Ticket) -> Result<(), String> {
     tokio::fs::create_dir_all(llm_dir())
         .await
         .map_err(|e| format!("failed to create llm dir: {}", e))?;
@@ -309,7 +322,7 @@ pub(crate) async fn ensure_runtime(model: &str, app: Option<&AppHandle>) -> Resu
         // into place: never a runtime on disk its marker doesn't describe.
         let next = dir.join(RUNTIME_NEXT);
         if !(next.is_file() && next_is_whole(&next, &sha).await) {
-            download_for(&url, &next, &sha, "runtime", model, app).await?;
+            download_for(&url, &next, &sha, "runtime", model, app, ticket).await?;
         }
         let learnt = read_marker_at(&dir.join(RUNTIME_MARKER)).unwrap_or_default();
         let marker = Marker { version: RUNTIME_VERSION.to_string(), sha256: sha, unproven: false, ..Default::default() }.learnt_from(&learnt);
@@ -333,26 +346,31 @@ pub(crate) async fn ensure_runtime(model: &str, app: Option<&AppHandle>) -> Resu
 /// SHA-verified, into `<data_dir>/llm/`. Idempotent — already-present files are
 /// skipped. Emits `local-llm-download-progress` so the UI can show a bar per stage.
 pub async fn install(app: Option<&AppHandle>) -> Result<(), String> {
-    ensure_runtime("", app).await?;
+    let ticket = crate::shell::download::Ticket::begin(&cancel_id(""))
+        .ok_or_else(|| "That model is already downloading".to_string())?;
+    ensure_runtime("", app, &ticket).await?;
     if !model_path().is_file() {
         let (url, sha) = source(DEFAULT_MODEL_ID, MODEL_URL, MODEL_SHA256);
-        download_for(&url, &model_path(), &sha, "model", "", app).await?;
+        download_for(&url, &model_path(), &sha, "model", "", app, &ticket).await?;
     }
     Ok(())
 }
 
 /// Download the runtime + a specific **curated** model by id. Returns the
 /// curated entry so the caller can point `pp_local_model` at its filename.
+/// Cancelled by [`cancel_id`] (`download_cancel`).
 pub async fn install_curated(
     id: &str,
     app: Option<&AppHandle>,
 ) -> Result<&'static CuratedLlm, String> {
     let m = curated_by_id(id).ok_or_else(|| format!("unknown cleanup model id: {}", id))?;
-    ensure_runtime(m.id, app).await?;
+    let ticket = crate::shell::download::Ticket::begin(&cancel_id(m.id))
+        .ok_or_else(|| format!("{} is already downloading", m.display))?;
+    ensure_runtime(m.id, app, &ticket).await?;
     let dest = llm_dir().join(m.filename);
     if !dest.is_file() {
         let (url, sha) = source(m.id, m.url, m.sha256);
-        download_for(&url, &dest, &sha, "model", m.id, app).await?;
+        download_for(&url, &dest, &sha, "model", m.id, app, &ticket).await?;
     }
     Ok(m)
 }
@@ -369,20 +387,16 @@ pub(crate) async fn download_verified(
     stage: &'static str,
     app: Option<&AppHandle>,
 ) -> Result<(), String> {
-    download_for(url, dest, expected_sha, stage, "", app).await
+    download_for(url, dest, expected_sha, stage, "", app, &crate::shell::download::Ticket::unlisted()).await
 }
 
-/// How long a download may go without a byte (or a server without an
-/// answer) before it's given up on: a stalled connection never leaves an
-/// install or the background upgrade at "downloading".
-const DOWNLOAD_STALL: Duration = Duration::from_secs(60);
-
-/// Room left on the disk beside a download, past its own size.
-const DOWNLOAD_SPARE: u64 = 64 * 1_048_576;
-
-/// A verified download, its progress naming the curated model `model`.
-/// Whatever goes wrong — the server, a stalled connection, a full disk, a
-/// bad hash — the partial file goes too.
+/// A verified download, its progress naming the curated model `model`,
+/// through the shared helper (`shell/download.rs`): it resumes a partial
+/// file an earlier try left, gives up on a server or connection silent for
+/// a minute (keeping the partial file, to resume), and a cancel (`ticket`)
+/// takes the partial file away. A bad hash deletes it too: a corrupt
+/// download can never be used.
+#[allow(clippy::too_many_arguments)]
 pub(super) async fn download_for(
     url: &str,
     dest: &Path,
@@ -390,89 +404,41 @@ pub(super) async fn download_for(
     stage: &'static str,
     model: &str,
     app: Option<&AppHandle>,
+    ticket: &crate::shell::download::Ticket,
 ) -> Result<(), String> {
     if crate::shell::e2e::active() && !allowed_in_test_run(url) {
         return Err("Test runs never download models from the internet".to_string());
     }
     let partial = dest.with_extension("partial");
     tracing::info!(url, dest = %dest.display(), stage, "Downloading on-device cleanup asset");
-    let result = fetch_to(url, dest, &partial, expected_sha, stage, model, app).await;
-    if result.is_err() {
-        let _ = tokio::fs::remove_file(&partial).await;
-    }
-    result
+    let report = |p: crate::shell::download::Progress| {
+        if let Some(app) = app {
+            let _ = app.emit(
+                "local-llm-download-progress",
+                DownloadProgress {
+                    stage,
+                    model: model.to_string(),
+                    percent: p.percent(),
+                    downloaded_mb: p.downloaded as f64 / 1_048_576.0,
+                    total_mb: p.total as f64 / 1_048_576.0,
+                    bytes_per_sec: p.bytes_per_sec,
+                    eta_secs: p.eta_secs,
+                    cancel_id: cancel_id(model),
+                },
+            );
+        }
+    };
+    crate::shell::download::fetch(
+        crate::shell::download::Fetch { url, partial: &partial, size: None, what: crate::privacy::net::Download::OnDeviceAi, ticket },
+        &report,
+    )
+    .await?;
+    verify_into(&partial, dest, expected_sha, stage).await
 }
 
-/// [`download_for`]'s work: `url` → `partial`, verified, renamed to `dest`.
-async fn fetch_to(
-    url: &str,
-    dest: &Path,
-    partial: &Path,
-    expected_sha: &str,
-    stage: &'static str,
-    model: &str,
-    app: Option<&AppHandle>,
-) -> Result<(), String> {
-    use futures_util::StreamExt;
-    use tokio::io::AsyncWriteExt;
-
-    let client = reqwest::Client::builder()
-        .connect_timeout(Duration::from_secs(30))
-        .build()
-        .map_err(|e| format!("request failed: {}", e))?;
-    let resp = tokio::time::timeout(DOWNLOAD_STALL, client.get(url).send_for(crate::privacy::net::Purpose::Download(crate::privacy::net::Download::OnDeviceAi)))
-        .await
-        .map_err(|_| "the server didn't answer".to_string())?
-        .map_err(|e| format!("request failed: {}", e))?;
-    if !resp.status().is_success() {
-        return Err(format!("HTTP {} from {}", resp.status(), url));
-    }
-    let total = resp.content_length();
-    if let Some(total) = total {
-        let free = dest.parent().and_then(free_bytes);
-        if !room_for(free, total + DOWNLOAD_SPARE) {
-            return Err(format!(
-                "not enough disk space: it needs {} MB, {} MB are free",
-                (total + DOWNLOAD_SPARE) / 1_048_576,
-                free.unwrap_or(0) / 1_048_576
-            ));
-        }
-    }
-
-    let mut file = tokio::fs::File::create(partial)
-        .await
-        .map_err(|e| format!("create temp file: {}", e))?;
-    let mut downloaded: u64 = 0;
-    let mut last_pct: u8 = 0;
-    let mut stream = resp.bytes_stream();
-    loop {
-        let chunk = match tokio::time::timeout(DOWNLOAD_STALL, stream.next()).await {
-            Ok(Some(chunk)) => chunk.map_err(|e| format!("download stream error: {}", e))?,
-            Ok(None) => break,
-            Err(_) => return Err("the download stalled".to_string()),
-        };
-        file.write_all(&chunk).await.map_err(|e| format!("write: {}", e))?;
-        downloaded += chunk.len() as u64;
-        if let (Some(total), Some(app)) = (total, app) {
-            let pct = ((downloaded as f64 / total as f64) * 100.0) as u8;
-            if pct >= last_pct + 2 {
-                last_pct = pct;
-                let _ = app.emit(
-                    "local-llm-download-progress",
-                    DownloadProgress {
-                        stage,
-                        model: model.to_string(),
-                        percent: pct,
-                        downloaded_mb: downloaded as f64 / 1_048_576.0,
-                        total_mb: total as f64 / 1_048_576.0,
-                    },
-                );
-            }
-        }
-    }
-    file.flush().await.map_err(|e| format!("flush: {}", e))?;
-    drop(file);
-
+/// The whole file checked against its SHA-256, then put in place (a bad
+/// one deleted).
+async fn verify_into(partial: &Path, dest: &Path, expected_sha: &str, stage: &'static str) -> Result<(), String> {
     // Verify SHA-256 on a blocking thread (files are hundreds of MB to ~1 GB).
     let verify_path = partial.to_path_buf();
     let expected = expected_sha.to_string();
@@ -483,6 +449,7 @@ async fn fetch_to(
     .await
     .map_err(|e| format!("sha task panicked: {}", e))?;
     if !ok {
+        let _ = tokio::fs::remove_file(partial).await;
         return Err(format!("{} verification failed (corrupt download) — retry", stage));
     }
 

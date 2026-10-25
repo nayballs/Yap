@@ -605,7 +605,7 @@ pub async fn upgrade_runtime(app: &AppHandle) -> UpgradeStep {
         }
         set_upgrade_phase("downloading");
         tracing::info!(from = %marker.as_ref().map(|m| m.version.clone()).unwrap_or_else(|| UNMARKED_RUNTIME_VERSION.into()), to = RUNTIME_VERSION, "llamafile upgrade: downloading the new runtime in the background");
-        if let Err(e) = download_for(&url, &next, &sha, "runtime", "", None).await {
+        if let Err(e) = download_for(&url, &next, &sha, "runtime", "", None, &crate::shell::download::Ticket::unlisted()).await {
             return UpgradeStep::Later(format!("the download failed: {e}"));
         }
         if let (Some(stamp), Ok(mut g)) = (file_stamp(&next), NEXT_CHECKED.lock()) {

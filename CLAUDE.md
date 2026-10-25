@@ -149,7 +149,7 @@ One folder per area (an area's `<area>.rs` lists its modules); a big module's pa
 - `ai/llm.rs` — OpenAI-compatible client, immutable base prompts, chat/tool calls, rate-limit waits.
 - `ai/cleanup_styles.rs` — styles by app: cleanup's tone per kind of app (email formal, chats casual, AI prompts literal, terminal commands as said; built-in app lists, editable), as cleanup profiles; app rules first; the one offer of cleanup.
 - `ai/cleanup_strength.rs` / `cleanup_format.rs` / `cleanup_context.rs` — cleanup strength (None/Light/Medium/High, one line before the transcript; None = cleanup off); spoken lists and an email's frame laid out (asked only when said); the text before the cursor (to a model on this PC; the cloud only with Privacy & data's switch).
-- `ai/local_llm.rs` (+ `local_llm/`: runtime, context, models) — on-device llamafile sidecar: models, recommendation, server args (MTP), context, restarts, warm-up, the runtime's background upgrade (retry without MTP, the way back, launch repair, cross-Yap lock).
+- `ai/local_llm.rs` (+ `local_llm/`: runtime, context, models) — on-device llamafile sidecar: models, recommendation, server args (MTP; a q8_0 KV cache only where it makes a long context fit), context, restarts, warm-up, the runtime's background upgrade (retry without MTP, the way back, launch repair, cross-Yap lock).
 - `ai/gguf.rs` — read-only GGUF headers and memory estimates per context length.
 - `ai/gpu.rs` — the graphics card (DXGI), for the recommended on-device model; every adapter, small ones, the card DirectML runs speech on.
 - `ai/hardware.rs` — picks by hardware (card / processor / small): where speech runs before it's timed, private or cloud cleanup with both times said (onboarding).
@@ -161,7 +161,7 @@ One folder per area (an area's `<area>.rs` lists its modules); a big module's pa
 **Chat and the Voice Assistant** — [chat-and-assistant.md](./docs/architecture/chat-and-assistant.md)
 - `chat/chats.rs` — conversations (`chats.json`; archived ones out of the list, `archivedTs`), tool chips, sources; a question's screenshots (ids; deleted with it); the history a model gets (earlier searches replayed) and the checks on every answer (made-up sources, claimed searches, unsourced citations).
 - `chat/note_chats.rs` — a meeting's Ask thread kept with it (a `chats.json` conversation with `note`, never in Chat's list): reopened in the notepad and Notes, New chat / Past chats, deleted with the note.
-- `chat/tools.rs` (+ `tools/`: notes, memory, agent) / `chat/note_text.rs` — the tool loop: note tools (safe partial edits), apps, web (a local model must search first), safety rule.
+- `chat/tools.rs` (+ `tools/`: notes, memory, calendar, agent) / `chat/note_text.rs` — the tool loop: note tools (safe partial edits), apps, web (a local model must search first), the calendar (`check_calendar`: what's on, the next meeting with someone, free at a time; meetings cited), safety rule.
 - `chat/stream.rs` — streaming answers: SSE from every provider (tool calls reassembled and checked, a whole answer when streaming fails), a step's text held until it's an answer (a forced search's never shown), ■ Stop, a newer question in the conversation replacing the turn still answering, a local stream stepping aside for a dictation; the checked answer replaces what streamed.
 - `chat/commands.rs` / `chat/turn.rs` — the Chat view's commands; one chat turn (`chat_turn`: the prompt, the eager RAG, the tool loop or a small model's web pipeline, the checks).
 - `chat/assistant.rs` — the Voice Assistant: ask Chat out loud from any app, spoken from the answer's first sentence; off during meetings.
@@ -186,7 +186,7 @@ One folder per area (an area's `<area>.rs` lists its modules); a big module's pa
 - `apps.rs` (+ `apps/`: index, matching, plan, tools, win) — opens Start-menu apps on request: index, matching, fast path, consent.
 
 **Spoken replies** — [spoken-replies.md](./docs/architecture/spoken-replies.md)
-- `voice/tts.rs` (+ `voice/tts/`: the engines, text, speaker, playback) — Kokoro / Windows voices / ElevenLabs (cloud, own key, local voice as fallback), text normalisation, the speaker queue (a read-aloud paced a sentence ahead, its position, pause), Kokoro's download; `voice/tts/marks.rs` word timing (Windows' word cues, ElevenLabs' timestamps, else from Kokoro's audio).
+- `voice/tts.rs` (+ `voice/tts/`: the engines, text, speaker, playback) — Kokoro (its Japanese and Mandarin voices not offered) / Windows voices / ElevenLabs (cloud, own key, local voice as fallback), text normalisation, the speaker queue (a read-aloud paced a sentence ahead, its position, pause), Kokoro's download; `voice/tts/marks.rs` word timing (Windows' word cues, ElevenLabs' timestamps, else from Kokoro's audio).
 - `voice/read_aloud.rs` — Read aloud, anywhere: the selection in any app (shortcut, 🔊 on the bar, tray), notes and Chat answers read with a karaoke reading card on the Yap bar; ⏮ ⏯ ⏭, speed, Stop, Esc.
 
 **Notes** — [notes.md](./docs/architecture/notes.md)
@@ -221,7 +221,7 @@ One folder per area (an area's `<area>.rs` lists its modules); a big module's pa
 - `calls/capture.rs` — hides meeting windows from screen capture while recording; every Yap window out of a snip's capture.
 
 **Calendar** — [calendar.md](./docs/architecture/calendar.md) (guide: [`docs/calendar.md`](./docs/calendar.md))
-- `calendar.rs` (+ `calendar/`) — Google/iCal connections, sync, parsing, reminder cards, notes tie-in, pre-meeting briefs (`calendar/brief.rs`: last time, open items, memory, the agenda, every line cited; the AI's lines checked).
+- `calendar.rs` (+ `calendar/`) — Google/iCal connections, sync, parsing (meetings, and busy time for Chat's calendar tool), reminder cards, notes tie-in, pre-meeting briefs (`calendar/brief.rs`: last time, open items, memory, the agenda, every line cited; the AI's lines checked).
 
 **Yap bar** — [yap-bar.md](./docs/architecture/yap-bar.md)
 - `bar.rs` — the bar: regions, click-through, never focused, placement, one card at a time.
@@ -254,6 +254,7 @@ One folder per area (an area's `<area>.rs` lists its modules); a big module's pa
 - `shell/tray.rs` — tray icon and menu (models, Paste / Copy last transcript, Read selection aloud, Snip to Chat, Record this call, updates).
 - `shell/context_menu.rs` — WebView2's context menu cut to editing commands (Inspect: debug + Shift).
 - `shell/procs.rs` — process lineage; the kill-on-close job so helpers never outlive Yap.
+- `shell/download.rs` — every big download (models, Kokoro, the speaker and search engines): resume, speed and time left, Cancel (`download_cancel`), no half file left.
 - `shell/webview_memory.rs` — hidden windows' webviews get WebView2's low memory target; back to normal on screen.
 - `shell/theme.rs` — the theme on the Rust side: the opaque windows' webview backgrounds (no white flash), onboarding's title bar, Windows' app mode (frontend.md).
 - `shell/portable.rs` — portable mode (a `portable` marker → `<exe>/Data`).

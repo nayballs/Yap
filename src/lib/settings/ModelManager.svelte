@@ -8,7 +8,8 @@
   import { invoke } from '@tauri-apps/api/core';
   import { onMount } from 'svelte';
   import { MODELS, formatSize } from '../core/speechModels.js';
-  import { modelStore, refreshModels, setActiveModel, downloadModel } from '../stores/modelStore.svelte.js';
+  import { modelStore, refreshModels, setActiveModel, downloadModel, cancelModelDownload } from '../stores/modelStore.svelte.js';
+  import DownloadProgress from '../ui/DownloadProgress.svelte';
   import ModelRow from './ModelRow.svelte';
   import Group from '../ui/Group.svelte';
   import Button from '../ui/Button.svelte';
@@ -174,8 +175,8 @@
         {/if}
       </div>
       <div class="cmeta">{formatSize(current.sizeMb)} · {current.langLabel} · {current.desc}</div>
-      {#if busyId === current.id}
-        <div class="bar" role="progressbar" aria-label={`Downloading ${current.name}`} aria-valuenow={percent} aria-valuemin="0" aria-valuemax="100"><span style:width="{percent}%"></span></div>
+      {#if busyId === current.id && modelStore.downloading}
+        <DownloadProgress progress={modelStore.downloading} label={`Downloading ${current.name}`} oncancel={() => cancelModelDownload(current.id)} />
       {/if}
     </div>
     <div class="cact">
@@ -194,7 +195,15 @@
       <PillTabs bind:value={tab} options={TABS} />
       <div class="rows">
         {#each shown as m (m.id)}
-          <ModelRow model={m} status={statusOf(m.id)} {percent} onclick={onCard} ondelete={onDelete} />
+          <ModelRow
+            model={m}
+            status={statusOf(m.id)}
+            {percent}
+            progress={modelStore.downloading?.id === m.id ? modelStore.downloading : null}
+            oncancel={() => cancelModelDownload(m.id)}
+            onclick={onCard}
+            ondelete={onDelete}
+          />
         {:else}
           <p class="empty">No other models in this group.</p>
         {/each}

@@ -21,6 +21,7 @@
   import { askConfirm } from '../ui/contextMenu.svelte.js';
   import { toast } from '../ui/toast.svelte.js';
   import { openExternalLink } from '../core/externalLinks.js';
+  import { cancelDownload, downloadLine, fromEvent, isCancelled } from '../core/downloads.js';
 
   let { cfg } = $props();
 
@@ -44,10 +45,10 @@
     load();
     const uns = [
       listen('yap-search-status', (e) => (status = e.payload)),
-      listen('yap-search-download', (e) => (progress = { stage: 'model', percent: e.payload?.percent ?? 0 })),
+      listen('yap-search-download', (e) => (progress = { stage: 'model', ...fromEvent(e.payload) })),
       // The engine's download, when the on-device model hasn't brought it.
       listen('local-llm-download-progress', (e) => {
-        if (e.payload?.model === 'search') progress = { stage: 'runtime', percent: e.payload.percent ?? 0 };
+        if (e.payload?.model === 'search') progress = { stage: 'runtime', ...fromEvent(e.payload) };
       }),
     ];
     return () => uns.forEach((u) => u.then((f) => f()));
@@ -63,9 +64,10 @@
   const modelDesc = $derived.by(() => {
     if (!status) return '';
     if (progress) {
-      return progress.stage === 'runtime'
-        ? `Downloading the on-device AI engine… ${progress.percent}%`
-        : `Downloading ${status.modelName}… ${progress.percent}%`;
+      // Its speed and time left once known (core/downloads.js).
+      const line = downloadLine(progress);
+      const what = progress.stage === 'runtime' ? 'the on-device AI engine' : status.modelName;
+      return `Downloading ${what}… ${progress.percent ?? 0}%${line ? ` · ${line}` : ''}`;
     }
     if (status.installed) {
       return [status.modelName, size(status.modelBytes), RUNS_ON[status.runsOn]].filter(Boolean).join(' · ');
@@ -108,7 +110,8 @@
       // Rust switched it on; Settings' copy follows (and adopts the save).
       cfg.searchByMeaning = true;
     } catch (e) {
-      toast({ title: "Couldn't download the search model", description: String(e), variant: 'destructive' });
+      // Cancelled: nothing to say (its half-downloaded file is gone).
+      if (!isCancelled(e)) toast({ title: "Couldn't download the search model", description: String(e), variant: 'destructive' });
     } finally {
       busy = false;
       progress = null;
@@ -160,10 +163,11 @@
     />
   </Row>
   <Row label="Search model" desc={modelDesc} setting="meeting-search-model">
-    {#if status && !status.installed}
-      <Button size="sm" disabled={busy || status.installing} onclick={download}>
-        {busy || status.installing ? 'Downloading…' : `Download ${size(status.downloadBytes)}`}
-      </Button>
+    {#if status && !status.installed && (busy || status.installing)}
+      <!-- Stops it; its half-downloaded file goes (shell/download.rs). -->
+      <Button variant="secondary" size="sm" onclick={() => cancelDownload('search')}>Cancel</Button>
+    {:else if status && !status.installed}
+      <Button size="sm" onclick={download}>Download {size(status.downloadBytes)}</Button>
     {:else if status?.installed}
       <Button variant="ghost" size="sm" onclick={() => openExternalLink(status.licenseUrl)}>{status.license}</Button>
     {/if}

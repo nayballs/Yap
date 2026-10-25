@@ -21,7 +21,14 @@
 
 <div class="cards">
   {#each setup.shownModels as m (m.id)}
-    <ModelCard model={m} status={setup.statusOf(m.id)} percent={setup.percent} onclick={setup.choose} />
+    <ModelCard
+      model={m}
+      status={setup.statusOf(m.id)}
+      percent={setup.percent}
+      line={setup.busyId === m.id ? setup.sttLine : ''}
+      oncancel={setup.cancelStt}
+      onclick={setup.choose}
+    />
   {/each}
   {#if setup.shownModels.length < orderedModels.length}
     <button class="more-models" onclick={() => (setup.allModels = true)}>

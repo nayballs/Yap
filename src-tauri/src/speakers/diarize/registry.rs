@@ -21,7 +21,6 @@
 //! a folder is either whole or not there.
 
 use std::io::Read;
-use crate::privacy::net::Recorded as _;
 use std::path::{Path, PathBuf};
 
 use serde::Serialize;
@@ -487,6 +486,17 @@ pub struct Progress {
     pub percent: u8,
     pub downloaded_bytes: u64,
     pub total_bytes: u64,
+    /// The speed and the time left (`shell/download.rs`).
+    #[serde(default)]
+    pub bytes_per_sec: u64,
+    pub eta_secs: Option<u64>,
+    /// What Cancel cancels (`download_cancel`).
+    pub cancel_id: String,
+}
+
+/// The id a speaker model's download is cancelled by.
+pub fn cancel_id(id: &str) -> String {
+    format!("diarization:{id}")
 }
 
 /// A test run fetches only from this PC (the e2e suite's local server).
@@ -499,8 +509,10 @@ fn allowed(url: &str) -> bool {
         .any(|p| url.starts_with(p))
 }
 
-/// Install model `id` (and its runtime, if missing) under `root`.
-pub async fn install(root: &Path, id: &str, on_progress: &(dyn Fn(Progress) + Send + Sync)) -> Result<(), String> {
+/// Install model `id` (and its runtime, if missing) under `root`. A cancel
+/// (`ticket`) or a failure leaves no half-made folder; a partial download
+/// that failed stays, to resume (a cancelled one goes).
+pub async fn install(root: &Path, id: &str, ticket: &crate::shell::download::Ticket, on_progress: &(dyn Fn(Progress) + Send + Sync)) -> Result<(), String> {
     let model = find(id).ok_or_else(|| format!("No diarization model '{id}'"))?;
     if !model.available {
         return Err(format!("{} isn't available yet", model.name));
@@ -511,6 +523,7 @@ pub async fn install(root: &Path, id: &str, on_progress: &(dyn Fn(Progress) + Se
         .filter(|(_, pkg)| !installed(root, pkg))
         .collect();
     let total: u64 = todo.iter().flat_map(|(_, pkg)| sources(pkg)).map(|s| s.size).sum();
+    let overall = crate::shell::download::Overall::new(total);
     std::fs::create_dir_all(root).map_err(|e| format!("create {}: {e}", root.display()))?;
     let mut done: u64 = 0;
     for (stage, pkg) in todo {
@@ -518,25 +531,32 @@ pub async fn install(root: &Path, id: &str, on_progress: &(dyn Fn(Progress) + Se
         let staging = root.join(format!("{}.installing", pkg.folder));
         let _ = std::fs::remove_dir_all(&staging);
         std::fs::create_dir_all(&staging).map_err(|e| format!("create {}: {e}", staging.display()))?;
+        let fail = |e: String| {
+            let _ = std::fs::remove_dir_all(&staging);
+            e
+        };
         for (i, src) in sources(pkg).into_iter().enumerate() {
             if !allowed(&src.url) {
-                return Err("Test runs never download from the internet".to_string());
+                return Err(fail("Test runs never download from the internet".to_string()));
             }
             let partial = root.join(format!("{}.{i}.partial", pkg.folder));
             let base = done;
-            let report = |downloaded: u64| {
-                let so_far = base + downloaded;
-                let percent = (so_far * 100).checked_div(total).map_or(100, |p| p.min(100) as u8);
+            let report = |p: crate::shell::download::Progress| {
+                let so_far = base + p.downloaded;
+                let p = overall.at(so_far);
                 on_progress(Progress {
                     id: id.to_string(),
                     stage,
-                    percent,
+                    percent: if total == 0 { 100 } else { p.percent() },
                     downloaded_bytes: so_far,
                     total_bytes: total,
+                    bytes_per_sec: p.bytes_per_sec,
+                    eta_secs: p.eta_secs,
+                    cancel_id: cancel_id(id),
                 });
             };
-            download(&src, &partial, &report, crate::privacy::net::Download::SpeakerModel).await?;
-            verify(&partial, &src).await?;
+            download(&src, &partial, ticket, &report, crate::privacy::net::Download::SpeakerModel).await.map_err(fail)?;
+            verify(&partial, &src).await.map_err(fail)?;
             match src.unpack {
                 Unpack::File(name) => {
                     std::fs::rename(&partial, staging.join(name)).map_err(|e| format!("move {name}: {e}"))?;
@@ -565,69 +585,37 @@ pub async fn install(root: &Path, id: &str, on_progress: &(dyn Fn(Progress) + Se
         std::fs::rename(&staging, &dest).map_err(|e| format!("install {}: {e}", pkg.id))?;
         tracing::info!(package = pkg.id, "Diarization: installed");
     }
+    let p = overall.at(total);
     on_progress(Progress {
         id: id.to_string(),
         stage: "model",
         percent: 100,
         downloaded_bytes: total,
         total_bytes: total,
+        bytes_per_sec: p.bytes_per_sec,
+        eta_secs: Some(0),
+        cancel_id: cancel_id(id),
     });
     Ok(())
 }
 
-/// Stream `src` to `partial`, resuming what an earlier try left.
-/// `what`: the download as the network receipts name it (`net.rs`).
-pub(crate) async fn download(src: &Source, partial: &Path, report: &(dyn Fn(u64) + Sync), what: crate::privacy::net::Download) -> Result<(), String> {
-    use futures_util::StreamExt;
-    use tokio::io::AsyncWriteExt;
-
-    let mut have = tokio::fs::metadata(partial).await.map(|m| m.len()).unwrap_or(0);
-    if have > src.size {
-        let _ = tokio::fs::remove_file(partial).await;
-        have = 0;
-    }
-    if have == src.size {
-        report(have);
-        return Ok(()); // a finished download that wasn't checked yet
-    }
-    let client = reqwest::Client::new();
-    let mut req = client.get(&src.url);
-    if have > 0 {
-        req = req.header(reqwest::header::RANGE, format!("bytes={have}-"));
-    }
-    let resp = req.send_for(crate::privacy::net::Purpose::Download(what)).await.map_err(|e| format!("Download failed: {e}"))?;
-    let resumed = have > 0 && resp.status() == reqwest::StatusCode::PARTIAL_CONTENT;
-    if !resp.status().is_success() {
-        return Err(format!("Download failed: HTTP {} from {}", resp.status(), host(&src.url)));
-    }
-    let mut file = if resumed {
-        tokio::fs::OpenOptions::new().append(true).open(partial).await
-    } else {
-        have = 0;
-        tokio::fs::File::create(partial).await
-    }
-    .map_err(|e| format!("Couldn't save the download: {e}"))?;
-    let mut got = have;
-    let mut last_step = u64::MAX;
-    let mut stream = resp.bytes_stream();
-    while let Some(chunk) = stream.next().await {
-        let chunk = chunk.map_err(|e| format!("Download interrupted: {e}"))?;
-        got += chunk.len() as u64;
-        if got > src.size {
-            drop(file);
-            let _ = tokio::fs::remove_file(partial).await;
-            return Err(format!("Download from {} is bigger than expected", host(&src.url)));
-        }
-        file.write_all(&chunk).await.map_err(|e| format!("Couldn't save the download: {e}"))?;
-        // Report each half-percent of this file.
-        let step = got * 200 / src.size.max(1);
-        if step != last_step {
-            last_step = step;
-            report(got);
-        }
-    }
-    file.flush().await.map_err(|e| format!("Couldn't save the download: {e}"))?;
-    Ok(())
+/// Stream `src` to `partial` through the shared helper
+/// (`shell/download.rs`): resuming what an earlier try left, stopped by
+/// `ticket` (the partial file goes then). `what`: the download as the
+/// network receipts name it (`net.rs`).
+pub(crate) async fn download(
+    src: &Source,
+    partial: &Path,
+    ticket: &crate::shell::download::Ticket,
+    report: &(dyn Fn(crate::shell::download::Progress) + Sync),
+    what: crate::privacy::net::Download,
+) -> Result<(), String> {
+    crate::shell::download::fetch(
+        crate::shell::download::Fetch { url: &src.url, partial, size: Some(src.size), what, ticket },
+        report,
+    )
+    .await
+    .map(|_| ())
 }
 
 /// Size and SHA-256, or the partial goes.
@@ -863,7 +851,7 @@ mod tests {
             .unwrap_or_else(|| temp_root("download"));
         let rt = tokio::runtime::Runtime::new().unwrap();
         let last = std::sync::Mutex::new(0u8);
-        rt.block_on(install(&root, DEFAULT_MODEL, &|p: Progress| {
+        rt.block_on(install(&root, DEFAULT_MODEL, &crate::shell::download::Ticket::unlisted(), &|p: Progress| {
             let mut l = last.lock().unwrap();
             if p.percent >= *l + 10 || p.percent == 100 {
                 *l = p.percent;

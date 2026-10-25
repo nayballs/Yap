@@ -130,8 +130,11 @@ Serving benches (local servers; instead of the scenarios; serving.md):
                            (today's: the action tools dropped, web_search only) or the same
   --bench embed            an --embedding server: throughput, query latency, and recall over
                            evals/retrieval/notes.json vs Chat's keyword search
+  --bench needle           a long context: six facts hidden in a made-up logbook, each asked for
+                           (found, and the time to read it), e.g. with and without a q8_0 KV cache
   --bench-rounds <n>       rounds per request (default 3)
-  --bench-history <n>      layout: n earlier question/answer pairs (~450 tokens each) first
+  --bench-history <n>      layout: n earlier question/answer pairs (~450 tokens each) first;
+                           needle: the logbook's size in thousands of tokens (default 24)
 Requests:
   --temperature <t>        every request's temperature (0: greedy, to compare outputs)
   --set <key>=<json>       a field laid over every request body (repeatable; null removes)
@@ -859,6 +862,7 @@ fn seed(s: &Scenario) -> Result<(), String> {
     crate::notes::eval_reset();
     crate::memory::eval_reset();
     crate::chat::chats::eval_reset();
+    crate::calendar::seed(s.seed.calendar.as_ref().map(seed_calendar).transpose()?);
     for m in &s.seed.memory {
         use crate::memory::ops::{Action, Change, Origin, Rules, Section};
         let section = Section::parse(&m.section).ok_or_else(|| format!("memory section \"{}\"", m.section))?;
@@ -912,6 +916,50 @@ fn seed(s: &Scenario) -> Result<(), String> {
         }
     }
     Ok(())
+}
+
+/// A scenario's calendar as Chat's calendar tool will read it: each
+/// meeting's day read in the person's zone from the run's clock ("friday",
+/// "tomorrow", "+3"), as the tool reads the question's.
+fn seed_calendar(c: &scenario::SeedCalendar) -> Result<crate::calendar::Agenda, String> {
+    use crate::chat::tools::calendar::{resolve_day, resolve_time, Zone};
+    let profile = crate::ai::about_you::profile(&crate::config::load());
+    let zone = Zone::of(profile.region.time_zone.as_deref());
+    let now = crate::ai::eval::now().timestamp();
+    let today = zone.wall(now).date();
+    let at = |m: &scenario::SeedMeeting| -> Result<(i64, i64), String> {
+        let day = match m.day.strip_prefix('+').and_then(|n| n.parse::<i64>().ok()) {
+            Some(n) => today + chrono::Duration::days(n),
+            None => resolve_day(&m.day, today)?.ok_or_else(|| format!("calendar seed \"{}\": no day", m.title))?.from,
+        };
+        let time = resolve_time(&m.start)?.ok_or_else(|| format!("calendar seed \"{}\": no start", m.title))?.start;
+        let start = zone.at(day.and_time(time));
+        Ok((start, start + m.minutes * 60))
+    };
+    let mut events = Vec::new();
+    for (i, m) in c.meetings.iter().enumerate() {
+        let (start, end) = at(m)?;
+        events.push(crate::calendar::Event {
+            key: format!("seed:{i}"),
+            connection: "seed".into(),
+            title: m.title.clone(),
+            start,
+            end,
+            attendees: m.with.iter().map(|n| crate::calendar::Attendee { name: n.clone(), email: String::new() }).collect(),
+            organizer: String::new(),
+            join_url: m.on.as_ref().map(|_| "https://meet.example/x".to_string()),
+            service: m.on.clone(),
+            description: String::new(),
+            tentative: m.maybe,
+        });
+    }
+    let mut busy = Vec::new();
+    for (i, m) in c.busy.iter().enumerate() {
+        let (start, end) = at(m)?;
+        busy.push(crate::calendar::Busy { key: format!("seed-busy:{i}"), connection: "seed".into(), title: m.title.clone(), start, end });
+    }
+    events.sort_by_key(|e| e.start);
+    Ok(crate::calendar::Agenda { connected: c.connected, events, busy, notes: Default::default(), synced_ts: now })
 }
 
 /// One scenario on one model: its result row.
@@ -1084,7 +1132,8 @@ async fn run_scenario(
                 o.reply = t.reply;
                 o.chips = t.tools_used;
                 o.fast_path = t.model.is_none();
-                o.sources = t.sources.iter().map(|x| (x.title.clone(), x.url.clone())).collect();
+                o.sources = t.sources.iter().filter(|x| x.event.is_none()).map(|x| (x.title.clone(), x.url.clone())).collect();
+                o.calendar = t.sources.iter().filter(|x| x.event.is_some()).map(|x| x.title.clone()).collect();
                 previous_numbers = t.sources.iter().map(|x| x.n).collect();
                 if !t.sources.is_empty() {
                     earlier_numbers = previous_numbers.clone();

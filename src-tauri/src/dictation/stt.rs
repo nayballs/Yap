@@ -23,7 +23,6 @@
 //! person's choice in Settings → Speech-to-Text → Runs on).
 
 use std::path::{Path, PathBuf};
-use crate::privacy::net::Recorded as _;
 
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter};
@@ -424,6 +423,16 @@ pub struct SttDownloadProgress {
     pub percent: u8,
     pub downloaded_mb: f64,
     pub total_mb: f64,
+    /// The speed and the time left (`shell/download.rs`).
+    pub bytes_per_sec: u64,
+    pub eta_secs: Option<u64>,
+    /// What Cancel cancels (`download_cancel`).
+    pub cancel_id: String,
+}
+
+/// The id a speech model's download is cancelled by (`download_cancel`).
+pub fn cancel_id(model_id: &str) -> String {
+    format!("stt:{model_id}")
 }
 
 /// Ensure a model's artifact exists on disk, downloading it if needed.
@@ -436,12 +445,15 @@ pub struct SttDownloadProgress {
 /// Interrupted downloads RESUME from the leftover `.partial` via an HTTP Range
 /// request; if the server ignores/rejects it, we cleanly restart. The final
 /// SHA-256 check guarantees a bad resume can never produce a usable-but-wrong
-/// model (it just fails verification and re-downloads).
+/// model (it just fails verification and re-downloads). Through the shared
+/// helper (`shell/download.rs`): a cancel ([`cancel_id`], `download_cancel`)
+/// takes the partial file away.
 pub async fn ensure_model_exists(
     data_dir: &Path,
     model_id: &str,
     app_handle: Option<&AppHandle>,
 ) -> Result<PathBuf, SttError> {
+    let ticket = crate::shell::download::Ticket::begin(&cancel_id(model_id)).unwrap_or_else(crate::shell::download::Ticket::unlisted);
     let resolved = resolve_model(model_id);
     let models_dir = data_dir.join("models");
     let final_path = models_dir.join(&resolved.filename);
@@ -471,113 +483,40 @@ pub async fn ensure_model_exists(
 
     tracing::info!(url = %url, dest = %partial_path.display(), model = %model_id, "Downloading model");
 
-    let client = reqwest::Client::new();
-
-    // Resume: continue from any leftover ".partial" via an HTTP Range request.
-    let mut resume_from = tokio::fs::metadata(&partial_path)
-        .await
-        .map(|m| m.len())
-        .unwrap_or(0);
-
-    let mut resp = {
-        let mut req = client.get(&url);
-        if resume_from > 0 {
-            req = req.header(reqwest::header::RANGE, format!("bytes={}-", resume_from));
-            tracing::info!(resume_from, model = %model_id, "Resuming interrupted download");
+    let last_logged = std::sync::atomic::AtomicU8::new(0);
+    let report = |p: crate::shell::download::Progress| {
+        let pct = p.percent();
+        if pct >= last_logged.load(std::sync::atomic::Ordering::Relaxed).saturating_add(10) {
+            last_logged.store(pct, std::sync::atomic::Ordering::Relaxed);
+            tracing::info!(model = %model_id, pct, "Downloading speech model");
         }
-        req.send_for(crate::privacy::net::Purpose::Download(crate::privacy::net::Download::SpeechModel))
-            .await
-            .map_err(|e| SttError::DownloadError(format!("HTTP request failed: {}", e)))?
-    };
-
-    // If the server rejected the Range (e.g. 416, or the partial is stale),
-    // throw the partial away and restart from scratch.
-    if resume_from > 0 && !resp.status().is_success() {
-        tracing::warn!(status = %resp.status(), "Resume rejected — restarting download");
-        let _ = tokio::fs::remove_file(&partial_path).await;
-        resume_from = 0;
-        resp = client
-            .get(&url)
-            .send_for(crate::privacy::net::Purpose::Download(crate::privacy::net::Download::SpeechModel))
-            .await
-            .map_err(|e| SttError::DownloadError(format!("HTTP request failed: {}", e)))?;
-    }
-
-    if !resp.status().is_success() {
-        return Err(SttError::DownloadError(format!(
-            "HTTP {} from {}",
-            resp.status(),
-            url
-        )));
-    }
-
-    // 206 = server honoured the Range (append). Anything else (incl. a 200 that
-    // ignored the Range) → start fresh so we don't duplicate bytes.
-    let resuming = resume_from > 0 && resp.status() == reqwest::StatusCode::PARTIAL_CONTENT;
-    let total_size = resp
-        .content_length()
-        .map(|len| if resuming { resume_from + len } else { len });
-
-    let mut file = if resuming {
-        tokio::fs::OpenOptions::new()
-            .append(true)
-            .open(&partial_path)
-            .await
-            .map_err(|e| SttError::DownloadError(format!("Failed to open temp file: {}", e)))?
-    } else {
-        // File::create truncates any stale partial → clean full download.
-        tokio::fs::File::create(&partial_path)
-            .await
-            .map_err(|e| SttError::DownloadError(format!("Failed to create temp file: {}", e)))?
-    };
-
-    use futures_util::StreamExt;
-    use tokio::io::AsyncWriteExt;
-
-    let mut downloaded: u64 = if resuming { resume_from } else { 0 };
-    let mut last_progress: u8 = match total_size {
-        Some(total) if total > 0 => ((downloaded as f64 / total as f64) * 100.0) as u8,
-        _ => 0,
-    };
-    let mut stream = resp.bytes_stream();
-
-    while let Some(chunk) = stream.next().await {
-        let chunk =
-            chunk.map_err(|e| SttError::DownloadError(format!("Download stream error: {}", e)))?;
-        file.write_all(&chunk)
-            .await
-            .map_err(|e| SttError::DownloadError(format!("Write error: {}", e)))?;
-        downloaded += chunk.len() as u64;
-
-        if let Some(total) = total_size {
-            let pct = ((downloaded as f64 / total as f64) * 100.0) as u8;
-            if pct >= last_progress + 5 {
-                last_progress = pct;
-                let downloaded_mb = downloaded as f64 / 1_048_576.0;
-                let total_mb = total as f64 / 1_048_576.0;
-                tracing::info!(
-                    "Downloading {} model... {}% ({:.1} MB / {:.1} MB)",
-                    model_id, pct, downloaded_mb, total_mb
-                );
-                if let Some(handle) = app_handle {
-                    let _ = handle.emit(
-                        "stt-download-progress",
-                        SttDownloadProgress {
-                            model_size: model_id.to_string(),
-                            percent: pct,
-                            downloaded_mb,
-                            total_mb,
-                        },
-                    );
-                }
-            }
+        if let Some(handle) = app_handle {
+            let _ = handle.emit(
+                "stt-download-progress",
+                SttDownloadProgress {
+                    model_size: model_id.to_string(),
+                    percent: pct,
+                    downloaded_mb: p.downloaded as f64 / 1_048_576.0,
+                    total_mb: p.total as f64 / 1_048_576.0,
+                    bytes_per_sec: p.bytes_per_sec,
+                    eta_secs: p.eta_secs,
+                    cancel_id: cancel_id(model_id),
+                },
+            );
         }
-    }
-
-    file.flush()
-        .await
-        .map_err(|e| SttError::DownloadError(format!("Flush error: {}", e)))?;
-    drop(file);
+    };
+    crate::shell::download::fetch(
+        crate::shell::download::Fetch {
+            url: &url,
+            partial: &partial_path,
+            size: None,
+            what: crate::privacy::net::Download::SpeechModel,
+            ticket: &ticket,
+        },
+        &report,
+    )
+    .await
+    .map_err(SttError::DownloadError)?;
 
     // Verify SHA-256 on a blocking thread (files can be ~1.6 GB).
     if let Some(expected) = resolved.sha256.clone() {

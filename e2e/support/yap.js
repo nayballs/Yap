@@ -163,7 +163,8 @@ export async function launchYap({ name, config = {}, env = {}, data = {}, runsDi
  * YAP_E2E, so it would hook the keyboard and paste into other apps).
  */
 async function assertTestMode(logPath, exe) {
-  const deadline = Date.now() + 15_000;
+  // (45 s: a PC busy compiling took 16 s to say so, and the run failed.)
+  const deadline = Date.now() + 45_000;
   while (Date.now() < deadline) {
     if (fs.readFileSync(logPath, 'utf8').includes('e2e: test mode on')) return;
     await sleep(200);

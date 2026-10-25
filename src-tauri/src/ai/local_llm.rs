@@ -137,13 +137,23 @@ pub const CTX_CHECKPOINTS: u32 = 4;
 pub struct Plan {
     pub runtime: Version,
     pub mtp: bool,
+    /// A q8_0 KV cache ([`kv_q8_helps`]): only where it makes a long
+    /// context fit on the card.
+    pub kv_q8: bool,
+    /// **Two slots with a cache each, on the processor** ([`plan_for`]).
+    pub per_slot: bool,
 }
 
 impl Plan {
     /// The memory estimate's view of it (`gguf::estimate`).
     pub fn server(self) -> crate::ai::gguf::Server {
         let current = self.runtime.is_current();
-        crate::ai::gguf::Server { current, mtp: current && self.mtp }
+        crate::ai::gguf::Server {
+            current,
+            mtp: current && self.mtp,
+            kv_q8: current && self.kv_q8,
+            per_slot: current && self.per_slot,
+        }
     }
 }
 
@@ -162,9 +172,21 @@ impl Plan {
 /// - `--spec-type draft-mtp` when `plan` says MTP (only on the runtime it's
 ///   measured on, 0.10.6; every other argument works on 0.10.3 and 0.10.6).
 pub fn server_args(model: &Path, port: u16, ngl: u32, ctx: u32, plan: Plan) -> Vec<String> {
-    let mut args = base_args(model, port, ngl, ctx);
+    let per_slot = plan.server().per_slot;
+    // Per-slot caches: the whole context for each slot (llama.cpp gives a
+    // slot `-c` / `-np` without a unified cache).
+    let total = if per_slot { ctx.saturating_mul(crate::ai::gguf::PER_SLOT_SLOTS as u32) } else { ctx };
+    let mut args = base_args(model, port, ngl, total);
+    if per_slot {
+        args.extend(["-np".to_string(), crate::ai::gguf::PER_SLOT_SLOTS.to_string(), "--no-kv-unified".to_string()]);
+    }
     if plan.server().mtp {
         args.extend(["--spec-type".to_string(), "draft-mtp".to_string()]);
+    }
+    // A matching K and V pair: CUDA's flash attention has kernels for
+    // q8_0/q8_0 only (a mismatched pair falls back to the processor).
+    if plan.server().kv_q8 && ngl > 0 {
+        args.extend(["-ctk", "q8_0", "-ctv", "q8_0"].map(String::from));
     }
     args
 }
@@ -257,14 +279,22 @@ pub fn log_facts(log: &str) -> LogFacts {
     let mut f = LogFacts::default();
     let (mut gpu, mut host) = (0.0f64, 0.0f64);
     let (mut any_gpu, mut any_host) = (false, false);
+    // A request's context: `n_ctx_seq` (per-slot caches give each slot
+    // `n_ctx` / slots), else `n_ctx`.
+    let mut per_seq: Option<u32> = None;
     for line in log.lines() {
         if let Some(rest) = line.split("llama_context:").nth(1) {
             let rest = rest.trim_start();
-            if let Some(after) = rest.strip_prefix("n_ctx") {
-                if after.starts_with([' ', '=']) {
-                    if let Some(v) = after.split('=').nth(1).and_then(|v| v.trim().parse().ok()) {
-                        f.n_ctx = Some(v);
-                    }
+            let value = |after: &str| -> Option<u32> {
+                after.starts_with([' ', '=']).then(|| after.split('=').nth(1).and_then(|v| v.trim().parse().ok())).flatten()
+            };
+            if let Some(after) = rest.strip_prefix("n_ctx_seq") {
+                if let Some(v) = value(after) {
+                    per_seq = Some(v);
+                }
+            } else if let Some(after) = rest.strip_prefix("n_ctx") {
+                if let Some(v) = value(after) {
+                    f.n_ctx = Some(v);
                 }
             }
         }
@@ -281,6 +311,7 @@ pub fn log_facts(log: &str) -> LogFacts {
             }
         }
     }
+    f.n_ctx = per_seq.or(f.n_ctx);
     f.gpu_mib = any_gpu.then(|| gpu.round() as u64);
     f.host_mib = any_host.then(|| host.round() as u64);
     f
@@ -981,23 +1012,74 @@ pub fn mtp_allowed(runtime: Version, setting: bool, vendor: Option<u32>, failed_
 /// the card.
 pub fn plan_for(cfg: &crate::config::YapConfig, model: &Path, ctx: u32, runtime: Version) -> Plan {
     let gpu = crate::ai::gpu::this_pc();
+    let vendor = gpu.as_ref().map(|g| g.vendor);
+    let vram = gpu.map(|g| g.vram_mib);
+    let kv_q8 = runtime.is_current() && vendor == Some(NVIDIA) && kv_q8_rescues(model, ctx, vram);
     let failed = mtp_failed_here(&llm_dir(), &mtp_key(runtime, model));
-    let mtp = mtp_allowed(runtime, cfg.local_mtp, gpu.as_ref().map(|g| g.vendor), failed)
-        && mtp_fits(model, ctx, gpu.map(|g| g.vram_mib));
-    Plan { runtime, mtp }
+    let mtp = mtp_allowed(runtime, cfg.local_mtp, vendor, failed) && mtp_fits(model, ctx, vram, kv_q8);
+    let per_slot = per_slot_caches(runtime, runs_on_card(None, vram));
+    Plan { runtime, mtp, kv_q8, per_slot }
+}
+
+/// **Two slots with a cache each, on the processor** (`-np 2
+/// --no-kv-unified`, each slot the whole context; 2026-10-25): with
+/// llama.cpp's one cache shared by 4 slots, a dictation's cleanup right
+/// after a long Chat turn ran 2.0–2.6× slower on the processor
+/// (Qwen2.5-1.5B, three runs: 0.80 → 1.74 s, 0.94 → 1.92 s, 1.29 → 3.14 s,
+/// generation about halved; Qwen3.5-2B 1.10 → 2.88 s): its attention went
+/// over the chat's cells too, and once, when the chat needed the room, the
+/// cleanup's prompt was cleared and read again (556 tokens). Each slot
+/// with its own cache, the cleanup reads only its own cells and keeps its
+/// prompt: 1.0–1.1× (the 1.5B 0.96 → 0.98 s and 0.84 → 0.92 s, the 2B 1.03
+/// → 1.17 s; docs/model-evals.md "The processor tier"). It costs the KV
+/// once more (the 1.5B: +224 MiB of memory at 8K) and leaves two slots
+/// instead of four; on a graphics card the shared cache was never the slow
+/// part. llamafile 0.10.6 or newer (the flags). Pure.
+pub fn per_slot_caches(runtime: Version, on_card: bool) -> bool {
+    runtime.is_current() && !on_card
+}
+
+/// The context from which a **q8_0 KV cache** is considered (a long one).
+pub const KV_Q8_FROM: u32 = 32_768;
+
+/// **A q8_0 KV cache, only where it helps** (2026-10-25, measured on the
+/// RTX 5070 Ti with Qwen3.5-4B, docs/model-evals.md "KV cache q8_0"): it
+/// saves 0.4 GB on the card at 32K and 0.75 GB at 64K (more on a model with
+/// attention in every layer) and the evaluations' answers were as good
+/// (the suite 160/164 both ways; a 24K and a 56K needle test 6/6 both ways),
+/// but Chat's generation ran ~25 % slower with it (150 → 110 tokens/s over
+/// the suite). So it's on only when it makes a long context fit on the card
+/// that otherwise wouldn't: a context of at least [`KV_Q8_FROM`] whose f16
+/// cache doesn't fit in [`card_room`] while the q8_0 one does. Pure.
+pub fn kv_q8_helps(ctx: u32, f16_mib: u64, q8_mib: u64, room_mib: Option<u64>) -> bool {
+    match room_mib {
+        Some(room) => ctx >= KV_Q8_FROM && f16_mib > room && q8_mib <= room,
+        None => false,
+    }
+}
+
+/// [`kv_q8_helps`] for `model` at `ctx` on a card of `vram_mib` (without
+/// MTP: drafting is only added where there's room for it too).
+pub fn kv_q8_rescues(model: &Path, ctx: u32, vram_mib: Option<u64>) -> bool {
+    let Some(f) = crate::ai::gguf::model_file(model) else { return false };
+    if !runs_on_card(None, vram_mib) {
+        return false;
+    }
+    let at = |kv_q8| crate::ai::gguf::estimate(&f.shape, f.bytes, ctx as u64, true, crate::ai::gguf::Server { current: true, mtp: false, kv_q8, per_slot: false }).total_mib;
+    kv_q8_helps(ctx, at(false), at(true), card_room(vram_mib))
 }
 
 /// Can `model` draft with MTP at `ctx`, and does it fit on a card of
 /// `vram_mib` with it ([`card_room`]: the card's memory less what Windows,
-/// the apps on screen and Yap's speech model keep there)? `false` without a
-/// card of its own.
-pub fn mtp_fits(model: &Path, ctx: u32, vram_mib: Option<u64>) -> bool {
+/// the apps on screen and Yap's speech model keep there) — with the KV
+/// cache as `kv_q8` says? `false` without a card of its own.
+pub fn mtp_fits(model: &Path, ctx: u32, vram_mib: Option<u64>, kv_q8: bool) -> bool {
     let Some(f) = crate::ai::gguf::model_file(model) else { return false };
     if !f.shape.has_mtp() || !runs_on_card(None, vram_mib) {
         return false;
     }
     let Some(room) = card_room(vram_mib) else { return false };
-    let server = crate::ai::gguf::Server { current: true, mtp: true };
+    let server = crate::ai::gguf::Server { current: true, mtp: true, kv_q8, per_slot: false };
     crate::ai::gguf::estimate(&f.shape, f.bytes, ctx as u64, true, server).total_mib <= room
 }
 
@@ -1355,7 +1437,7 @@ mod tests {
 
     #[test]
     fn the_server_runs_without_thinking_and_with_its_caches_capped() {
-        let args = server_args(Path::new("m.gguf"), 5000, 999, DEFAULT_CONTEXT, Plan { runtime: NEW, mtp: false });
+        let args = server_args(Path::new("m.gguf"), 5000, 999, DEFAULT_CONTEXT, Plan { runtime: NEW, mtp: false, kv_q8: false, per_slot: false });
         let after = |flag: &str| args.iter().position(|a| a == flag).map(|i| args[i + 1].as_str());
         assert_eq!(after("--reasoning"), Some("off"));
         assert_eq!(after("--cache-ram"), Some("0"));
@@ -1368,9 +1450,9 @@ mod tests {
         assert!(!args.iter().any(|a| a == "--spec-type"), "no MTP unless the plan says");
         // MTP drafting: on the runtime it's measured on, never on 0.10.3
         // (whatever the plan says), whose other arguments are the same.
-        let mtp = server_args(Path::new("m.gguf"), 5000, 999, DEFAULT_CONTEXT, Plan { runtime: NEW, mtp: true });
+        let mtp = server_args(Path::new("m.gguf"), 5000, 999, DEFAULT_CONTEXT, Plan { runtime: NEW, mtp: true, kv_q8: false, per_slot: false });
         assert_eq!(&mtp[mtp.len() - 2..], ["--spec-type", "draft-mtp"]);
-        let old = server_args(Path::new("m.gguf"), 5000, 999, DEFAULT_CONTEXT, Plan { runtime: OLD, mtp: true });
+        let old = server_args(Path::new("m.gguf"), 5000, 999, DEFAULT_CONTEXT, Plan { runtime: OLD, mtp: true, kv_q8: false, per_slot: false });
         assert_eq!(old, args);
     }
 
@@ -1564,19 +1646,46 @@ mod tests {
         std::fs::write(&qwen25, crate::ai::gguf::tests::qwen25_1_5b(1_000).bytes()).unwrap();
         // A 16 GB card: room for it (the stand-in file is small; the KV,
         // recurrent state and compute aren't).
-        assert!(mtp_fits(&qwen35, 8_192, Some(16_303)));
+        assert!(mtp_fits(&qwen35, 8_192, Some(16_303), false));
         // No prediction layer, no card of its own, or no room: off.
-        assert!(!mtp_fits(&qwen25, 8_192, Some(16_303)));
-        assert!(!mtp_fits(&qwen35, 8_192, None));
-        assert!(!mtp_fits(&qwen35, 8_192, Some(512)), "integrated graphics");
-        assert!(!mtp_fits(&qwen35, 8_192, Some(2_600)), "no room beside Windows and speech");
+        assert!(!mtp_fits(&qwen25, 8_192, Some(16_303), false));
+        assert!(!mtp_fits(&qwen35, 8_192, None, false));
+        assert!(!mtp_fits(&qwen35, 8_192, Some(512), false), "integrated graphics");
+        assert!(!mtp_fits(&qwen35, 8_192, Some(2_600), false), "no room beside Windows and speech");
         // At 256K the KV alone is 8 GiB: not on a 12 GB card with MTP.
-        assert!(!mtp_fits(&qwen35, 262_144, Some(12_282)));
+        assert!(!mtp_fits(&qwen35, 262_144, Some(12_282), false));
         // The plan: only on 0.10.6, only with the setting on.
         let cfg = crate::config::YapConfig::default();
         assert!(cfg.local_mtp, "on by default");
         assert!(!plan_for(&cfg, &qwen35, 8_192, OLD).server().mtp);
         assert!(!plan_for(&crate::config::YapConfig { local_mtp: false, ..cfg.clone() }, &qwen35, 8_192, NEW).mtp);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_q8_kv_cache_only_where_it_makes_a_long_context_fit() {
+        // Pure: 32K+, the f16 cache over the card's room and the q8_0 one in it.
+        assert!(kv_q8_helps(65_536, 9_000, 8_200, Some(8_500)));
+        assert!(!kv_q8_helps(65_536, 8_000, 7_300, Some(8_500)), "it fits anyway: f16 is faster");
+        assert!(!kv_q8_helps(65_536, 12_000, 9_000, Some(8_500)), "it wouldn't fit either way");
+        assert!(!kv_q8_helps(16_384, 9_000, 8_200, Some(8_500)), "a short context");
+        assert!(!kv_q8_helps(65_536, 9_000, 8_200, None), "no card");
+        // On a model file: Qwen3.5-4B's KV at 256K is 8 GiB (4.25 GiB as q8_0).
+        let dir = scratch("kvq8");
+        let qwen35 = dir.join("Qwen_Qwen3.5-4B-Q4_K_M.gguf");
+        std::fs::write(&qwen35, crate::ai::gguf::tests::qwen35_4b(1_000).bytes()).unwrap();
+        assert!(!kv_q8_rescues(&qwen35, 262_144, Some(16_303)), "fits a 16 GB card as f16");
+        assert!(kv_q8_rescues(&qwen35, 262_144, Some(10_240)), "a 10 GB card: only as q8_0");
+        assert!(!kv_q8_rescues(&qwen35, 262_144, Some(6_144)), "a 6 GB card: neither");
+        assert!(!kv_q8_rescues(&qwen35, 8_192, Some(4_096)), "a short context never");
+        assert!(!kv_q8_rescues(&qwen35, 262_144, None));
+        // The arguments: both K and V (a matching pair), on the card only.
+        let q8 = Plan { runtime: NEW, mtp: false, kv_q8: true, per_slot: false };
+        let args = server_args(Path::new("m.gguf"), 5000, 999, 262_144, q8);
+        assert_eq!(&args[args.len() - 4..], ["-ctk", "q8_0", "-ctv", "q8_0"]);
+        assert!(!server_args(Path::new("m.gguf"), 5000, 0, 262_144, q8).iter().any(|a| a == "-ctk"), "never on the processor");
+        assert!(!server_args(Path::new("m.gguf"), 5000, 999, 262_144, Plan { runtime: OLD, ..q8 }).iter().any(|a| a == "-ctk"));
+        assert!(q8.server().kv_q8 && !Plan { runtime: OLD, ..q8 }.server().kv_q8);
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -1587,6 +1696,33 @@ mod tests {
         // The default's id gets no tools; the 4B's does.
         assert!(!crate::chat::tools::supports_tools(PROVIDER_ONDEVICE, &model_id(&model_path())));
         assert!(crate::chat::tools::supports_tools(PROVIDER_ONDEVICE, "Qwen_Qwen3.5-4B-Q4_K_M"));
+    }
+
+    #[test]
+    fn on_the_processor_each_of_two_slots_has_a_cache_of_its_own() {
+        // The decision: the processor, the runtime that has the flags.
+        assert!(per_slot_caches(NEW, false));
+        assert!(!per_slot_caches(NEW, true), "a graphics card keeps the shared cache");
+        assert!(!per_slot_caches(OLD, false));
+        // The arguments: two slots, no unified cache, the whole context each.
+        let p = Plan { runtime: NEW, mtp: false, kv_q8: false, per_slot: true };
+        let args = server_args(Path::new("m.gguf"), 5000, 0, 8_192, p);
+        let after = |flag: &str| args.iter().position(|a| a == flag).map(|i| args[i + 1].as_str());
+        assert_eq!(after("-c"), Some("16384"));
+        assert_eq!(after("-np"), Some("2"));
+        assert!(args.iter().any(|a| a == "--no-kv-unified"));
+        assert_eq!(server_args(Path::new("m.gguf"), 5000, 0, 8_192, Plan { runtime: OLD, ..p }), base_args(Path::new("m.gguf"), 5000, 0, 8_192));
+        // What a slot gets is the context the server reports: no restart loop
+        // over "16384 isn't 8192".
+        let log = "0.00.419.239 I llama_context: n_ctx                 = 16384\n0.00.419.239 I llama_context: n_ctx_seq             = 8192\n0.00.419.242 I llama_context: n_ctx_seq (8192) < n_ctx_train (32768) -- the full capacity of the model will not be utilized\n";
+        assert_eq!(log_facts(log).n_ctx, Some(8_192));
+        assert!(!context::needs_restart(log_facts(log).n_ctx, 8_192));
+        // The estimate: the KV twice, the recurrent state for two slots.
+        let shape = crate::ai::gguf::tests::qwen25_1_5b(151_936);
+        let s = crate::ai::gguf::read_shape(std::io::Cursor::new(shape.bytes())).unwrap();
+        let one = crate::ai::gguf::estimate(&s, 1_000_000_000, 8_192, false, Plan { per_slot: false, ..p }.server());
+        let two = crate::ai::gguf::estimate(&s, 1_000_000_000, 8_192, false, p.server());
+        assert_eq!(two.kv_mib, 2 * one.kv_mib);
     }
 
     #[test]

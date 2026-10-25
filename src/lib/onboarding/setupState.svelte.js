@@ -7,6 +7,7 @@
 import { invoke } from '@tauri-apps/api/core';
 import { MODELS } from '../core/speechModels.js';
 import { CLOUD_PROVIDERS } from './cleanupProviders.js';
+import { cancelDownload, downloadLine, fromEvent, isCancelled } from '../core/downloads.js';
 
 // Diagnostics -> the backend's rolling yap.log (webview consoles are
 // invisible in normal runs; this made the event-delivery bug debuggable).
@@ -50,6 +51,8 @@ export function createSetupState() {
   let active = $state(null); // currently active model id
   let busyId = $state(null); // model id being downloaded / switched to
   let percent = $state(0); // download progress for busyId
+  // Its bytes, speed and time left (core/downloads.js): "… · 24 MB/s · about 1 min left".
+  let sttLine = $state('');
   let error = $state('');
 
   let allModels = $state(false);
@@ -99,10 +102,12 @@ export function createSetupState() {
       active = model.id;
       await refresh();
     } catch (e) {
-      error = `Couldn't set up ${model.name}: ${e}`;
+      // Cancelled: back to the cards, nothing to say.
+      if (!isCancelled(e)) error = `Couldn't set up ${model.name}: ${e}`;
     } finally {
       busyId = null;
       percent = 0;
+      sttLine = '';
     }
   }
 
@@ -232,7 +237,7 @@ export function createSetupState() {
       cleanupEnabled = true;
       await refreshLlm();
     } catch (e) {
-      llmError = `${e}`;
+      if (!isCancelled(e)) llmError = `${e}`;
     } finally {
       llmInstalling = false;
     }
@@ -405,7 +410,10 @@ export function createSetupState() {
     flog('registerListeners: registering 5 raw listeners');
     unsubs = [
       rawListen('stt-download-progress', (e) => {
-        if (e.payload && e.payload.modelSize === busyId) percent = e.payload.percent;
+        if (e.payload && e.payload.modelSize === busyId) {
+          percent = e.payload.percent;
+          sttLine = downloadLine(fromEvent(e.payload));
+        }
       }),
       rawListen('yap-amp', (e) => {
         // Shaped in Rust as for the Yap bar (dictation/meter.rs): decibels
@@ -455,6 +463,12 @@ export function createSetupState() {
     get active() { return active; },
     get busyId() { return busyId; },
     get percent() { return percent; },
+    get sttLine() { return sttLine; },
+    /** Cancel the speech model downloading (its half-downloaded file goes). */
+    cancelStt: () => cancelDownload(`stt:${busyId}`),
+    /** "… · 24 MB/s · about 1 min left" for the on-device model's download. */
+    get llmLine() { return downloadLine(fromEvent(llmProgress)); },
+    cancelLlm: () => cancelDownload(`llm:${localPick || 'qwen2.5-1.5b'}`),
     get error() { return error; },
     get allModels() { return allModels; },
     set allModels(v) { allModels = v; },

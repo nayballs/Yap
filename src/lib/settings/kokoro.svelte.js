@@ -4,6 +4,12 @@
 // engine row and its "Download Kokoro" offer.
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
+import { cancelDownload, isCancelled } from '../core/downloads.js';
+
+/** Cancel Kokoro's download (Rust's `registry::CANCEL_ID`). */
+export function cancelKokoro() {
+  return cancelDownload('kokoro');
+}
 
 export const kokoro = $state({
   loaded: false,
@@ -49,7 +55,8 @@ export async function downloadKokoro() {
     await invoke('tts_kokoro_download');
     return true;
   } catch (e) {
-    kokoro.error = `Couldn't download Kokoro: ${e}`;
+    // Cancelled: nothing to say (no half-downloaded file stays).
+    if (!isCancelled(e)) kokoro.error = `Couldn't download Kokoro: ${e}`;
     return false;
   } finally {
     kokoro.downloading = null;

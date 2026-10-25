@@ -119,6 +119,11 @@ pub struct Source {
     /// The passage's words, for its tooltip (≤ 280 characters).
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub quote: String,
+    /// A meeting on the calendar (`chat/tools/calendar.rs`): its event key.
+    /// Its pill opens the meeting's note (`note`), or makes one from the
+    /// invite (`calendar_event` "open"); `site` says when it is.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub event: Option<String>,
 }
 
 fn is_zero(n: &u64) -> bool {
@@ -724,10 +729,13 @@ pub fn searched_queries(tools: &[String]) -> Vec<String> {
     tools.iter().filter_map(|t| CHIP.captures(t).map(|c| c[1].to_string())).filter(|q| !q.trim().is_empty()).collect()
 }
 
-/// Was this answer written from the web (a search ran, or it has sources)?
-/// Pure.
+/// Was this answer written from the web (a search ran, or it has web
+/// sources)? A calendar meeting or a meeting's passage it cites isn't the
+/// web (no address): told "Yap searched the web to answer 'Am I free at 3
+/// on Friday?'", a small model answered the next calendar question from
+/// that answer (2026-10-25). Pure.
 pub fn from_the_web(m: &ChatMessage) -> bool {
-    m.role == "assistant" && (!m.sources.is_empty() || !searched_queries(&m.tools).is_empty())
+    m.role == "assistant" && (m.sources.iter().any(|s| !s.url.is_empty()) || !searched_queries(&m.tools).is_empty())
 }
 
 /// The id a replayed search's tool call carries ([`history_messages`]).
@@ -766,6 +774,7 @@ pub fn history_messages(messages: &[ChatMessage]) -> Vec<Value> {
             let results: Vec<Value> = m
                 .sources
                 .iter()
+                .filter(|s| !s.url.is_empty())
                 .map(|s| json!({ "n": s.n, "title": s.title.chars().take(90).collect::<String>(), "site": s.site, "url": s.url }))
                 .collect();
             // Not "the text isn't kept": told that, Qwen3.5-4B answered "the
@@ -1176,6 +1185,9 @@ mod tests {
         assert!(from_the_web(&web_answer("x", "q")));
         assert!(!from_the_web(&said("assistant", "x")));
         assert!(!from_the_web(&ChatMessage { role: "user".into(), ..web_answer("x", "q") }));
+        // A meeting on the calendar it cites isn't the web.
+        let meeting = Source { n: 1, title: "Roadmap planning".into(), event: Some("1:r".into()), field: "calendar".into(), ..Default::default() };
+        assert!(!from_the_web(&ChatMessage { sources: vec![meeting], ..said("assistant", "No, you have Roadmap planning [1].") }));
     }
 
     #[test]

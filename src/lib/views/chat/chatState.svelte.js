@@ -338,8 +338,18 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
    * meeting or note opened in Notes at the line it came from.
    */
   function openSource(s) {
+    // A meeting on the calendar with no note yet (chat/tools/calendar.rs):
+    // its note, made from the invite as the Meetings view's row makes it.
+    if (s?.note == null && s?.event) {
+      invoke('calendar_event', { key: s.event, action: 'open' })
+        .then((id) => {
+          if (id != null) onopennote()?.({ id, line: null, ts: null, field: '' });
+        })
+        .catch((e) => toast({ title: "Couldn't open the meeting", description: String(e?.message ?? e), variant: 'destructive' }));
+      return;
+    }
     if (s?.note == null) return;
-    onopennote()?.({ id: s.note, line: s.line ?? null, ts: s.ts ?? null, field: s.field || '' });
+    onopennote()?.({ id: s.note, line: s.line ?? null, ts: s.ts ?? null, field: s.field === 'calendar' ? '' : s.field || '' });
   }
 
   // What this view shows, for a question asked out loud (chat/assistant.rs

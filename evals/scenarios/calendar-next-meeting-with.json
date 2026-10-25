@@ -1,0 +1,35 @@
+{
+  "name": "calendar-next-meeting-with",
+  "description": "\"When's my next meeting with Sam?\": the first meeting with Sam still to come (two days on), not the later one or a meeting with someone else; the answer gives its day and time and cites it. check_calendar with Sam as `with` finds the meetings by an invitee's name.",
+  "tags": ["calendar"],
+  "apps": "standard",
+  "seed": {
+    "calendar": {
+      "meetings": [
+        { "title": "Roadmap planning", "day": "tomorrow", "start": "11:00", "minutes": 60, "with": ["Priya Shah"] },
+        { "title": "Pricing sync", "day": "+2", "start": "15:00", "minutes": 30, "with": ["Sam Lee", "Priya Shah"], "on": "meet" },
+        { "title": "Quarterly review", "day": "+5", "start": "09:00", "minutes": 90, "with": ["Sam Lee"] }
+      ]
+    }
+  },
+  "turns": [
+    {
+      "user": "When's my next meeting with Sam?",
+      "expect": {
+        "tools_called": [{ "name": "check_calendar" }],
+        "answer_matches": "(?i)pricing sync|15:00|3(:00)?\\s*(pm|p\\.m\\.)",
+        "answer_not_contains": ["Roadmap planning"],
+        "calendar_cited": ["Pricing sync"],
+        "calendar_not_cited": ["Roadmap planning"],
+        "tools_not_called": ["create_note", "update_note", "edit_note", "open_app", "copy_to_clipboard"],
+        "no_false_claims": true
+      },
+      "soft": {
+        "tools_called": [{ "name": "check_calendar", "args": { "with": { "contains": "sam" } } }],
+        "answer_contains": ["Pricing sync"],
+        "calendar_not_cited": ["Quarterly review"],
+        "max_steps": 3
+      }
+    }
+  ]
+}

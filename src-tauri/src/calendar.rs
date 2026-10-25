@@ -60,7 +60,9 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use tauri::{AppHandle, Emitter, Listener, Manager};
 
-use model::Event;
+pub(crate) use model::{Busy, Event};
+#[cfg(any(test, debug_assertions))] // the model evaluations' calendar
+pub(crate) use model::Attendee;
 
 /// The snapshot ([`Snapshot`]), on every change.
 const EVENT: &str = "yap-calendar";
@@ -163,6 +165,10 @@ struct Store {
     /// Meetings' briefs, by event key.
     #[serde(default)]
     briefs: BTreeMap<String, brief::Brief>,
+    /// Busy time of your own (events nobody else is on): only for Chat's
+    /// calendar tool ("am I free at 3?"), never a reminder or a note.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    busy: Vec<Busy>,
 }
 
 fn store_path() -> std::path::PathBuf {
@@ -483,6 +489,73 @@ fn emit(app: &AppHandle) {
     let _ = app.emit(EVENT, status());
 }
 
+// ---- for Chat's calendar tool --------------------------------------------------------------
+
+/// What Chat's calendar tool reads (`chat/tools/calendar.rs`): the meetings
+/// and busy time Yap keeps (from [`LOOK_BACK`] ago to [`LOOK_AHEAD`] on), as
+/// they are now: no sync, no network, nothing touched under the lock.
+#[derive(Debug, Clone, Default)]
+pub struct Agenda {
+    /// A calendar is connected.
+    pub connected: bool,
+    pub events: Vec<Event>,
+    pub busy: Vec<Busy>,
+    /// The notes made for meetings: event key → note id.
+    pub notes: HashMap<String, u64>,
+    /// The last good sync of any calendar (unix seconds; 0 = never).
+    pub synced_ts: i64,
+}
+
+/// A calendar is connected (Chat offers its calendar tool). Cheap: no copy.
+pub fn connected() -> bool {
+    #[cfg(debug_assertions)]
+    if let Some(a) = SEEDED.lock().unwrap_or_else(|p| p.into_inner()).as_ref() {
+        return a.connected;
+    }
+    lock_started().is_some_and(|s| !s.store.connections.is_empty())
+}
+
+/// The calendar as Chat sees it ([`Agenda`]). Before `init` (a unit test,
+/// a model evaluation): nothing connected, unless an evaluation seeded one.
+pub fn agenda() -> Agenda {
+    #[cfg(debug_assertions)]
+    if let Some(a) = SEEDED.lock().unwrap_or_else(|p| p.into_inner()).clone() {
+        return a;
+    }
+    let (connected, events, busy, synced_ts) = match lock_started() {
+        Some(s) => (
+            !s.store.connections.is_empty(),
+            s.store.events.clone(),
+            s.store.busy.clone(),
+            s.store.connections.iter().map(|c| c.synced_ts).max().unwrap_or(0),
+        ),
+        None => (false, Vec::new(), Vec::new(), 0),
+    };
+    // The notes store, never under the calendar's lock.
+    let notes = if events.is_empty() { HashMap::new() } else { note_links() };
+    Agenda { connected, events, busy, notes, synced_ts }
+}
+
+/// A model evaluation's calendar (`eval/scenario.rs` `seed.calendar`), in
+/// place of the real one; `None` takes it away. Debug builds.
+#[cfg(debug_assertions)]
+static SEEDED: Mutex<Option<Agenda>> = Mutex::new(None);
+
+#[cfg(debug_assertions)]
+pub fn seed(agenda: Option<Agenda>) {
+    *SEEDED.lock().unwrap_or_else(|p| p.into_inner()) = agenda;
+}
+
+/// Meetings in `events` that overlap another of them (by key).
+pub(crate) fn conflicts_of(events: &[Event]) -> HashSet<String> {
+    model::conflicts(events)
+}
+
+/// How far back and ahead the calendar is kept (seconds): what Chat's
+/// calendar tool can see.
+pub const KEPT_BACK: i64 = LOOK_BACK;
+pub const KEPT_AHEAD: i64 = LOOK_AHEAD;
+
 // ---- startup and the scheduler -------------------------------------------------------------
 
 /// Load calendar.json and start syncing and reminding (app setup).
@@ -496,6 +569,7 @@ pub fn init(app: &AppHandle) {
         let now = now_secs();
         s.store.answered.retain(|_, at| *at > now - ANSWER_KEEP);
         s.store.events.retain(|e| e.end > now - LOOK_BACK);
+        s.store.busy.retain(|b| b.end > now - LOOK_BACK);
         prune_briefs(&mut s.store, now);
         // A summary a quit left half-written: the brief is made again when
         // it's due or asked for.
@@ -621,12 +695,14 @@ async fn sync_all(app: &AppHandle) {
         for (id, result) in results {
             let Some(conn) = s.store.connections.iter_mut().find(|c| c.id == id) else { continue };
             match result {
-                Ok(events) => {
+                Ok(fetched) => {
                     conn.synced_ts = now;
                     conn.error = None;
                     conn.reconnect = false;
                     s.store.events.retain(|e| e.connection != id);
-                    s.store.events.extend(events);
+                    s.store.events.extend(fetched.events);
+                    s.store.busy.retain(|b| b.connection != id);
+                    s.store.busy.extend(fetched.busy);
                 }
                 Err(e) => {
                     conn.error = Some(e.message);
@@ -635,6 +711,7 @@ async fn sync_all(app: &AppHandle) {
             }
         }
         s.store.events.sort_by_key(|e| (e.start, e.key.clone()));
+        s.store.busy.sort_by_key(|b| (b.start, b.key.clone()));
         s.store.answered.retain(|_, at| *at > now - ANSWER_KEEP);
         s.syncing = false;
         // A calendar connected while this sync ran gets its own straight away.
@@ -660,7 +737,33 @@ impl From<String> for FetchError {
     }
 }
 
-async fn fetch(conn: &Connection, from: i64, to: i64) -> Result<Vec<Event>, FetchError> {
+/// A calendar's meetings, and the busy time of your own beside them.
+#[derive(Debug, Default)]
+struct Fetched {
+    events: Vec<Event>,
+    busy: Vec<Busy>,
+}
+
+impl Fetched {
+    /// Drafts from a source, sorted ([`model::sort`]); one key once.
+    fn from_drafts(drafts: impl IntoIterator<Item = model::Draft>) -> Fetched {
+        let mut seen = HashSet::new();
+        let mut out = Fetched::default();
+        for d in drafts {
+            if !seen.insert(d.key.clone()) {
+                continue;
+            }
+            match model::sort(d) {
+                model::Kept::Meeting(e) => out.events.push(e),
+                model::Kept::Busy(b) => out.busy.push(b),
+                model::Kept::Neither => {}
+            }
+        }
+        out
+    }
+}
+
+async fn fetch(conn: &Connection, from: i64, to: i64) -> Result<Fetched, FetchError> {
     match conn.kind.as_str() {
         "google" => fetch_google(conn, from, to).await,
         _ => {
@@ -727,19 +830,15 @@ async fn fetch_feed(link: &str) -> Result<Vec<u8>, String> {
     Ok(bytes)
 }
 
-/// A feed's meetings between `from` and `to`, and the calendar's name.
-fn events_from_feed(connection: &str, bytes: &[u8], from: i64, to: i64) -> Result<(Vec<Event>, Option<String>), String> {
+/// A feed's meetings (and busy time) between `from` and `to`, and the
+/// calendar's name.
+fn events_from_feed(connection: &str, bytes: &[u8], from: i64, to: i64) -> Result<(Fetched, Option<String>), String> {
     let calendar = ics::parse_bytes(bytes)
         .ok_or("That address didn't return a calendar. Check you copied the iCal (.ics) link.")?;
     let resolver = tz::Resolver::new(&calendar, tz::Zone::Local);
     let me = model::self_addresses(&calendar);
-    let mut seen = HashSet::new();
-    let events = ics::occurrences(&calendar, &resolver, from, to)
-        .iter()
-        .filter_map(|o| model::finish(model::draft_from_ics(connection, o, &me)))
-        .filter(|e| seen.insert(e.key.clone()))
-        .collect();
-    Ok((events, ics::calendar_name(&calendar)))
+    let fetched = Fetched::from_drafts(ics::occurrences(&calendar, &resolver, from, to).iter().map(|o| model::draft_from_ics(connection, o, &me)));
+    Ok((fetched, ics::calendar_name(&calendar)))
 }
 
 /// A Google connection's secret: the refresh token, the client it belongs
@@ -753,7 +852,7 @@ struct GoogleSecret {
     scope: String,
 }
 
-async fn fetch_google(conn: &Connection, from: i64, to: i64) -> Result<Vec<Event>, FetchError> {
+async fn fetch_google(conn: &Connection, from: i64, to: i64) -> Result<Fetched, FetchError> {
     let client = google::client().ok_or_else(|| NO_GOOGLE.to_string())?;
     let secret: GoogleSecret = vault::load(&conn.id)
         .and_then(|s| serde_json::from_str(&s).ok())
@@ -776,13 +875,7 @@ async fn fetch_google(conn: &Connection, from: i64, to: i64) -> Result<Vec<Event
         .await;
         match result {
             Ok(items) => {
-                let mut seen = HashSet::new();
-                return Ok(items
-                    .iter()
-                    .filter_map(|item| google::draft_from_item(&conn.id, item))
-                    .filter_map(model::finish)
-                    .filter(|e| seen.insert(e.key.clone()))
-                    .collect());
+                return Ok(Fetched::from_drafts(items.iter().filter_map(|item| google::draft_from_item(&conn.id, item))));
             }
             Err(google::Failure::Unauthorized) if !retried => {
                 // An access token Google no longer takes: drop it, try once more.
@@ -1011,7 +1104,7 @@ pub async fn calendar_add_link(app: AppHandle, link: String, kind: Option<String
     let now = now_secs();
     let (from, to) = (now - LOOK_BACK, now + LOOK_AHEAD + 3600);
     let slot = id.clone();
-    let (events, name) = tauri::async_runtime::spawn_blocking(move || events_from_feed(&slot, &bytes, from, to))
+    let (fetched, name) = tauri::async_runtime::spawn_blocking(move || events_from_feed(&slot, &bytes, from, to))
         .await
         .map_err(|e| e.to_string())??;
     vault::save(&id, &link)?;
@@ -1034,8 +1127,11 @@ pub async fn calendar_add_link(app: AppHandle, link: String, kind: Option<String
             reconnect: false,
         });
         s.store.events.retain(|e| e.connection != id);
-        s.store.events.extend(events);
+        s.store.events.extend(fetched.events);
         s.store.events.sort_by_key(|e| (e.start, e.key.clone()));
+        s.store.busy.retain(|b| b.connection != id);
+        s.store.busy.extend(fetched.busy);
+        s.store.busy.sort_by_key(|b| (b.start, b.key.clone()));
         s.next_sync = now + SYNC_EVERY;
         save_store(&s.store);
         upcoming_count(&s.store.events, &id, now)
@@ -1060,6 +1156,7 @@ pub async fn calendar_disconnect(app: AppHandle, id: String) -> Result<(), Strin
         let pos = s.store.connections.iter().position(|c| c.id == id).ok_or("That calendar isn't connected.")?;
         let conn = s.store.connections.remove(pos);
         s.store.events.retain(|e| e.connection != id);
+        s.store.busy.retain(|b| b.connection != id);
         s.access.remove(&id);
         save_store(&s.store);
         conn
@@ -2258,9 +2355,14 @@ mod tests {
             ATTENDEE:mailto:tanay@example.com\r\nEND:VEVENT\r\n\
             BEGIN:VEVENT\r\nUID:d\r\nSUMMARY:Workshop\r\nDTSTART:20261005T080000Z\r\nDTEND:20261005T150000Z\r\n\
             ATTENDEE:mailto:tanay@example.com\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n";
-        let (events, name) = events_from_feed("1", feed, 1_791_000_000, 1_792_000_000).unwrap();
+        let (fetched, name) = events_from_feed("1", feed, 1_791_000_000, 1_792_000_000).unwrap();
         assert_eq!(name.as_deref(), Some("imogen@example.com"));
-        assert_eq!(events.iter().map(|e| e.title.as_str()).collect::<Vec<_>>(), ["Design review"]);
+        assert_eq!(fetched.events.iter().map(|e| e.title.as_str()).collect::<Vec<_>>(), ["Design review"]);
+        // Focus time (nobody else) and the 7-hour workshop: busy, not meetings.
+        // (The all-day offsite never gets this far.)
+        let mut busy: Vec<&str> = fetched.busy.iter().map(|b| b.title.as_str()).collect();
+        busy.sort_unstable();
+        assert_eq!(busy, ["Focus", "Workshop"]);
         assert!(events_from_feed("1", b"<html>nope</html>", 0, 1).is_err());
     }
 

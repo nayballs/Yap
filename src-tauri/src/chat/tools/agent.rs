@@ -196,12 +196,16 @@ fn searching(live: Option<crate::chat::stream::Live<'_>>) {
 }
 
 /// The chips so far, and the web sources found so far (a "[1]" in the
-/// answer draws as a pill while it's written).
-fn report(live: Option<crate::chat::stream::Live<'_>>, tools_used: &[String], web: Option<&crate::web::Turn>) {
+/// answer draws as a pill while it's written) — with the calendar's
+/// meetings the turn numbered (`calendar`).
+fn report(live: Option<crate::chat::stream::Live<'_>>, tools_used: &[String], web: Option<&crate::web::Turn>, calendar: Option<&super::calendar::Log>) {
     if let Some(live) = live {
+        let mut sources = web.map(|w| w.sources.clone()).unwrap_or_default();
+        sources.extend(calendar.into_iter().flat_map(|log| log.all()).map(|c| c.source()));
+        sources.sort_by_key(|s| s.n);
         live.sink.send(crate::chat::stream::Event::Chips {
             chips: tools_used.to_vec(),
-            sources: web.map(|w| w.sources.clone()).unwrap_or_default(),
+            sources,
             web: web.is_some_and(crate::web::Turn::looked),
         });
     }
@@ -251,7 +255,7 @@ pub async fn run_tool_loop_with(
     on_change: &(dyn Fn(u64) + Send + Sync),
     web: Option<&mut crate::web::Turn>,
     first: FirstStep,
-    extra: Extra,
+    extra: Extra<'_>,
     live: Option<crate::chat::stream::Live<'_>>,
 ) -> Result<(String, Vec<String>), String> {
     tool_loop(system, history, question, context, base_url, api_key, model, provider, disable_thinking, open_apps, on_change, web, first, extra, live).await
@@ -293,7 +297,7 @@ async fn tool_loop(
     on_change: &(dyn Fn(u64) + Send + Sync),
     mut web: Option<&mut crate::web::Turn>,
     first: FirstStep,
-    extra: Extra,
+    extra: Extra<'_>,
     live: Option<crate::chat::stream::Live<'_>>,
 ) -> Result<(String, Vec<String>), String> {
     let must_search_first = first == FirstStep::MustSearch && web.is_some();
@@ -327,6 +331,12 @@ async fn tool_loop(
     if let (Some(all), Some(memory_tools)) = (tools.as_array_mut(), memory_definitions(extra).as_array()) {
         all.extend(memory_tools.iter().cloned());
     }
+    // The calendar (a calendar is connected): read-only, like the notes.
+    if extra.calendar.is_some() {
+        if let (Some(all), Some(cal)) = (tools.as_array_mut(), super::calendar::definitions().as_array()) {
+            all.extend(cal.iter().cloned());
+        }
+    }
     let mut tools_used: Vec<String> = Vec::new();
     // The answer just before the question: a "yes" to its offer to open an
     // app is the person asking (`apps::consented`).
@@ -339,7 +349,7 @@ async fn tool_loop(
     if let (FirstStep::YapSearches(query), Some(turn)) = (&first, web.as_deref_mut()) {
         searching(live);
         search_for_the_model(turn, query, &mut messages, &mut tools_used).await;
-        report(live, &tools_used, Some(turn));
+        report(live, &tools_used, Some(turn), extra.calendar.map(|c| c.log));
     }
     let mut must_search = must_search_first;
     // A notes search that finds nothing, for a question that isn't about the
@@ -407,7 +417,7 @@ async fn tool_loop(
                 if let Some(turn) = web.as_deref_mut() {
                     searching(live);
                     search_for_the_model(turn, &crate::web::search_query(question), &mut messages, &mut tools_used).await;
-                    report(live, &tools_used, Some(turn));
+                    report(live, &tools_used, Some(turn), extra.calendar.map(|c| c.log));
                 }
                 continue;
             }
@@ -522,6 +532,18 @@ async fn tool_loop(
             } else if name == "search_notes" {
                 // Ask across meetings' search: passages, by meaning too.
                 super::notes::search_notes_tool(&args).await
+            } else if let (Some(cal), true) = (extra.calendar, name == super::calendar::NAME) {
+                // Its meetings numbered with the turn's web sources (one
+                // numbering for the answer's citations).
+                let mut counter = cal.log.len();
+                let mut next = || match web.as_deref_mut() {
+                    Some(t) => t.reserve_number(),
+                    None => {
+                        counter += 1;
+                        counter
+                    }
+                };
+                super::calendar::run(&args, cal.log, cal.zone, cal.now, &mut next)
             } else if open_apps && crate::apps::TOOL_NAMES.contains(&name) {
                 // Off the async runtime: the index, the launch.
                 let (name, question, previous) = (name.to_string(), question.to_string(), previous.clone());
@@ -547,7 +569,7 @@ async fn tool_loop(
             if let Some(d) = result["displayText"].as_str() {
                 tools_used.push(d.to_string());
             }
-            report(live, &tools_used, web.as_deref());
+            report(live, &tools_used, web.as_deref(), extra.calendar.map(|c| c.log));
             messages.push(json!({
                 "role": "tool",
                 "tool_call_id": id,
@@ -562,7 +584,7 @@ async fn tool_loop(
                 tracing::info!(provider, "Chat: no local prices in the results; Yap searches again for them");
                 searching(live);
                 search_for_the_model(turn, &q, &mut messages, &mut tools_used).await;
-                report(live, &tools_used, Some(turn));
+                report(live, &tools_used, Some(turn), extra.calendar.map(|c| c.log));
             }
         }
         // Nothing in the notes for a question the web may answer: a model on
@@ -574,7 +596,7 @@ async fn tool_loop(
                 tracing::info!(provider, "Chat: nothing in the notes; Yap searches the web for the model");
                 searching(live);
                 search_for_the_model(turn, &crate::web::search_query(question), &mut messages, &mut tools_used).await;
-                report(live, &tools_used, Some(turn));
+                report(live, &tools_used, Some(turn), extra.calendar.map(|c| c.log));
             }
         }
     }
@@ -640,7 +662,7 @@ mod tests {
             Value::Null,
         );
         let base = format!("{}/v1", fake.base);
-        let extra = Extra { memory: true, search_chats: true, conversation: Some(1) };
+        let extra = Extra { memory: true, search_chats: true, conversation: Some(1), calendar: None };
         let ask = |q: &'static str| {
             let base = base.clone();
             async move {

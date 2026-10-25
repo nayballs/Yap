@@ -191,6 +191,47 @@ pub fn finish(d: Draft) -> Option<Event> {
     })
 }
 
+/// The longest event of your own kept as busy time ([`Busy`]).
+pub const MAX_BUSY_SECS: i64 = 24 * 3600;
+
+/// Time you're busy that isn't a meeting: an event of your own with nobody
+/// else on it and no join link ("Dentist"), or one over 6 hours. Kept only
+/// so Chat's calendar tool can answer "am I free at 3 on Friday?" truly;
+/// never a reminder, a brief or a meeting note.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Busy {
+    pub key: String,
+    pub connection: String,
+    #[serde(default)]
+    pub title: String,
+    pub start: i64,
+    pub end: i64,
+}
+
+/// What a draft from a source becomes.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Kept {
+    Meeting(Event),
+    Busy(Busy),
+    /// Cancelled, declined, or longer than [`MAX_BUSY_SECS`].
+    Neither,
+}
+
+/// A draft sorted: a meeting ([`finish`]), else busy time of your own, else
+/// nothing. Cancelled and declined events are never busy time.
+pub fn sort(d: Draft) -> Kept {
+    let declined = d.people.iter().any(|p| p.is_self && p.reply == Reply::Declined);
+    if d.cancelled || declined || d.end - d.start > MAX_BUSY_SECS {
+        return Kept::Neither;
+    }
+    let (key, connection, title, start, end) = (d.key.clone(), d.connection.clone(), d.title.trim().to_string(), d.start, d.end.max(d.start));
+    match finish(d) {
+        Some(e) => Kept::Meeting(e),
+        None => Kept::Busy(Busy { key, connection, title, start, end }),
+    }
+}
+
 /// A person's name for notes: the one the invite gives, else one made from
 /// their address ("tanay.kothari@…" → "Tanay Kothari").
 pub fn display_name(name: &str, email: &str) -> String {
@@ -473,6 +514,31 @@ mod tests {
         assert!(finish(six).is_some());
         // "Maybe" is kept, labelled.
         assert!(finish(draft(vec![me(Reply::Tentative), tanay])).unwrap().tentative);
+    }
+
+    #[test]
+    fn events_of_your_own_are_kept_as_busy_time() {
+        let tanay = person("Tanay", "tanay@example.com");
+        assert!(matches!(sort(draft(vec![me(Reply::Accepted), tanay.clone()])), Kept::Meeting(_)));
+        // Just you, no link: busy, not a meeting.
+        let mut dentist = draft(vec![me(Reply::Accepted)]);
+        dentist.title = " Dentist ".into();
+        match sort(dentist) {
+            Kept::Busy(b) => assert_eq!((b.title.as_str(), b.start, b.end), ("Dentist", 1_000, 4_600)),
+            other => panic!("{other:?}"),
+        }
+        // A day-long workshop with others: too long for a meeting, still busy.
+        let mut workshop = draft(vec![tanay.clone()]);
+        workshop.end = workshop.start + 8 * 3600;
+        assert!(matches!(sort(workshop), Kept::Busy(_)));
+        // Cancelled, declined, or longer than a day: neither.
+        let mut gone = draft(vec![tanay.clone()]);
+        gone.cancelled = true;
+        assert_eq!(sort(gone), Kept::Neither);
+        assert_eq!(sort(draft(vec![me(Reply::Declined), tanay.clone()])), Kept::Neither);
+        let mut week = draft(vec![]);
+        week.end = week.start + MAX_BUSY_SECS + 1;
+        assert_eq!(sort(week), Kept::Neither);
     }
 
     #[test]

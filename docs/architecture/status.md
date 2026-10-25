@@ -547,7 +547,19 @@ Recurrence and time zones (incl. Windows zone names) unit-tested; e2e-tested
 against a local iCal server and a local fake of Google. Google needs the
 OAuth client set up in Google Cloud + the two repository secrets
 ([`docs/calendar.md`](../calendar.md)); not yet tried against a real
-calendar.
+calendar. **Calendar tools in Chat** (2026-10-25, `chat/tools/calendar.rs`):
+"what's on tomorrow?", "when's my next meeting with Sam?", "am I free at 3
+on Friday?" from the calendar Yap keeps (busy time of your own included),
+the meetings cited and opened from the answer, spoken whole by the Voice
+Assistant, looked up by Yap for a model without tools; unit-tested (dates
+near midnight in two zones, the clocks going back), e2e-tested against a
+local iCal feed and the fake AI, evaluated on Qwen3.5-4B (21/21) and Groq's
+gpt-oss-20b (3 scenarios); not yet asked of a real calendar. **Every big
+download** (2026-10-25, `shell/download.rs`) resumes, says its speed and
+time left, and cancels without leaving a half file: unit-tested against a
+local server, e2e-tested with the on-device models' stand-ins; Kokoro's,
+the speaker engine's and meeting search's Cancel only through their specs'
+progress checks, a real slow download untried by hand.
 Every JSON store now writes
 atomically with corrupt-file quarantine, and **a write that fails is said**
 (2026-10-24, `shell/saving.rs`: the data kept in memory and saved with the next
@@ -825,6 +837,13 @@ OpenRouter stream, whose shapes are taken from their docs), no calendar
 tools; memory isn't synced between PCs and doesn't learn with a model too
 small to call tools; ElevenLabs as the reply voice isn't yet tried with a real key; spoken replies read Kokoro's
 Japanese and Mandarin voices' text as English, don't check a slow PC's
+
+OpenRouter stream, whose shapes are taken from their docs), no conversation
+search/archive (Chat's `search_chats` searches past chats by keyword for the
+model, not for the person); memory isn't synced between PCs, matches
+questions by keyword (no embeddings), and doesn't learn with a model too
+small to call tools; ElevenLabs as the reply voice isn't yet tried with a real key; spoken replies don't
+offer Kokoro's Japanese and Mandarin voices (no pronunciation step for them), don't check a slow PC's
 speed before choosing Kokoro (the research's first-use RTF check), wait for the whole answer
 before the first sentence, don't listen again by themselves after an answer,
 and have no echo cancellation (a mic that hears the speakers during an
