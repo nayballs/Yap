@@ -11,6 +11,7 @@
   import { nextModel, modelLine, whereItRuns } from '../../core/aiModel.js';
   import { messageItems } from '../../core/itemMenus.js';
   import { MEETING_HELPERS, meetingHelpers } from '../../core/notepadText.js';
+  import { pastChatItems } from '../../core/noteChat.js';
   import { speech, readAloud } from '../../stores/speech.svelte.js';
   import { openContextMenu, menuKey } from '../../ui/contextMenu.svelte.js';
   import { toast } from '../../ui/toast.svelte.js';
@@ -25,14 +26,15 @@
     notes.chatInput = '';
     notes.flushSave();
     const history = notes.chatThread.slice(-6).map((t) => [t.role, t.text]);
+    const id = notes.selected.id;
     notes.chatThread = [...notes.chatThread, { role: 'user', text: q }];
     notes.asking = true;
     try {
-      const [answer, model] = await Promise.all([
-        invoke('note_ask', { id: notes.selected.id, question: q, history }),
-        nextModel('chat'),
-      ]);
-      notes.chatThread = [...notes.chatThread, { role: 'assistant', text: answer, model, id: notes.turnId() }];
+      const [answer, model] = await Promise.all([invoke('note_ask', { id, question: q, history }), nextModel('chat')]);
+      const reply = { role: 'assistant', text: answer, model, id: notes.turnId() };
+      notes.chatThread = [...notes.chatThread, reply];
+      // Kept with the note (chat/note_chats.rs): here and in the notepad next time.
+      await notes.keepChat(id, [{ role: 'user', text: q }, reply]);
     } catch (e) {
       notes.chatThread = notes.chatThread.slice(0, -1);
       notes.chatInput = q; // give the question back
@@ -61,10 +63,9 @@
       const [r, model] = await Promise.all([invoke('meeting_assist', { noteId: id, kind }), nextModel('notes')]);
       if (notes.selected?.id !== id) return;
       // "Too little to go on" comes from Yap, not a model.
-      notes.chatThread = [
-        ...notes.chatThread,
-        { role: 'assistant', text: r.answer, plain: !!r.plain, copy: true, model: r.tooLittle ? null : model, id: notes.turnId() },
-      ];
+      const reply = { role: 'assistant', text: r.answer, plain: !!r.plain, copy: true, model: r.tooLittle ? null : model, id: notes.turnId() };
+      notes.chatThread = [...notes.chatThread, reply];
+      await notes.keepChat(id, [{ role: 'user', text: MEETING_HELPERS[kind].label }, reply]);
     } catch (e) {
       if (notes.selected?.id !== id) return;
       notes.chatThread = notes.chatThread.slice(0, -1);
@@ -100,6 +101,13 @@
     }
   }
 
+  // Past chats: the note's kept threads, the one shown ticked.
+  function pastChats(e) {
+    const id = notes.selected?.id;
+    if (id == null) return;
+    openContextMenu(e, pastChatItems(notes.chatThreads, notes.chatConvId, (conv) => notes.loadChat(id, conv)), { label: 'Past chats' });
+  }
+
   // The bar's mic: focus the input and start dictation — Yap types wherever
   // the caret is, so the answer box IS the dictation target.
   let askEl = $state(null);
@@ -109,7 +117,20 @@
   }
 </script>
 
-<!-- Embedded note chat thread (answers grounded in this note). -->
+<!-- Embedded note chat thread (answers grounded in this note), kept with
+     the note: New chat starts another, Past chats reopens one. -->
+{#if notes.chatThread.length > 0 || notes.chatThreads.length > 0}
+  <div class="chathead">
+    <span class="chatcap">{notes.chatThread.length ? 'Asked about this note' : 'Ask about this note'}</span>
+    <span class="tabspacer"></span>
+    {#if notes.chatThreads.length > 1 || (notes.chatThreads.length === 1 && notes.chatThreads[0].id !== notes.chatConvId)}
+      <button class="chatlink" data-more onclick={pastChats}>Past chats</button>
+    {/if}
+    {#if notes.chatThread.length}
+      <button class="chatlink" onclick={notes.newChat} disabled={notes.asking}>New chat</button>
+    {/if}
+  </div>
+{/if}
 {#if notes.chatThread.length > 0}
   <div class="chatthread">
     {#each notes.chatThread as turn, i (i)}
@@ -202,6 +223,42 @@
 </div>
 
 <style>
+  /* the kept thread's head: New chat, Past chats */
+  .chathead {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-top: 10px;
+  }
+  .chatcap {
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--yap-muted-70);
+  }
+  .tabspacer {
+    flex: 1;
+  }
+  .chatlink {
+    padding: 0;
+    border: none;
+    background: none;
+    color: var(--yap-primary);
+    font: inherit;
+    font-size: 11.5px;
+    cursor: pointer;
+  }
+  .chatlink:hover:not(:disabled) {
+    text-decoration: underline;
+  }
+  .chatlink:disabled {
+    opacity: 0.5;
+    cursor: default;
+  }
+  .chatlink:focus-visible {
+    outline: 2px solid var(--yap-focus-ring);
+    outline-offset: 2px;
+    border-radius: 4px;
+  }
   /* embedded note chat */
   .chatthread {
     flex: 0 0 auto;

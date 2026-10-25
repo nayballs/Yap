@@ -71,6 +71,12 @@
         <button class="copy" onclick={() => notes.copyEnhanced(true)}>
           {notes.copied === 'text' ? 'Copied!' : 'Copy as text'}
         </button>
+        {#if notes.tab === 'enhanced' && notes.selected.enhancedContent?.trim()}
+          <!-- Rich and plain at once, for an email (core/summaryTools.js). -->
+          <button class="copy" onclick={notes.copyForEmail}>
+            {notes.copied === 'email' ? 'Copied!' : 'Copy for email'}
+          </button>
+        {/if}
       </div>
     {/if}
 

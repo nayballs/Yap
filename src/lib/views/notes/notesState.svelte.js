@@ -16,6 +16,8 @@ import { tick } from 'svelte';
 import { markdownToText } from '../../core/markdown.js';
 import { noteMarkdown, withLineSpeakers, withLineSplice, hasLine, withLineEdit, newSinceSummary } from '../../core/notepadText.js';
 import { saveSummary, askReplaceSummary, SUMMARY_KEPT } from '../../core/noteEdits.js';
+import { copySummaryForEmail } from '../../core/summaryTools.js';
+import { loadNoteChat, openNoteChat, keepTurn, keptMessage, threadMessages } from '../../core/noteChat.js';
 import { toast } from '../../ui/toast.svelte.js';
 import { showSaveError } from '../../notices/saveErrors.js';
 import { summaries, loadSummary, summarise } from '../../stores/meetingSummary.svelte.js';
@@ -305,10 +307,12 @@ export function createNotesState() {
       selected.speakers = p.speakers;
     }
     if (typeof p.enhancedContent === 'string' && !summaryDirty) {
-      changing('enhancedContent', 'summaryEditedMs', 'summaryTs');
+      changing('enhancedContent', 'summaryEditedMs', 'summaryTs', 'summaryAi', 'summaryRating');
       selected.enhancedContent = p.enhancedContent;
       if (typeof p.summaryEditedMs === 'number') selected.summaryEditedMs = p.summaryEditedMs;
       if (typeof p.summaryTs === 'number') selected.summaryTs = p.summaryTs;
+      if ('summaryAi' in p) selected.summaryAi = p.summaryAi || '';
+      if ('summaryRating' in p) selected.summaryRating = p.summaryRating ?? null;
     }
     // A line's words fixed in the meeting notepad.
     if (p.lineEdit) {
@@ -395,9 +399,14 @@ export function createNotesState() {
       transcriptView = 'live';
       showEcho = false;
       error = null;
-      chatThread = []; // the embedded chat is pinned to one note
+      // The embedded chat is pinned to one note: its kept thread, when it
+      // has one (chat/note_chats.rs).
+      chatThread = [];
+      chatConvId = null;
+      chatThreads = [];
       chatInput = '';
       stopReading('notes:');
+      loadChat(id);
     } catch (e) {
       error = String(e);
     }
@@ -570,10 +579,12 @@ export function createNotesState() {
     try {
       const s = await saveSummary(id, text, LABEL);
       if (selected?.id !== id) return;
-      changing('enhancedContent', 'summaryEditedMs', 'summaryTs');
+      changing('enhancedContent', 'summaryEditedMs', 'summaryTs', 'summaryAi', 'summaryRating');
       if (!summaryDirty) selected.enhancedContent = s.enhancedContent;
       selected.summaryEditedMs = s.summaryEditedMs;
       selected.summaryTs = s.summaryTs;
+      if ('summaryAi' in s) selected.summaryAi = s.summaryAi || '';
+      if ('summaryRating' in s) selected.summaryRating = s.summaryRating ?? null;
       refreshList();
     } catch (e) {
       toast({ title: "Couldn't save the summary", description: String(e), variant: 'destructive' });
@@ -658,6 +669,19 @@ export function createNotesState() {
   }
   // `{ noteId, name }` of the action running, for the status line.
   let runningAction = $state(null);
+
+  // The summary for an email: rich (headings, lists, tasks) and plain text
+  // on the clipboard at once (core/summaryTools.js).
+  async function copyForEmail() {
+    if (!selected?.enhancedContent?.trim()) return;
+    if (await copySummaryForEmail(selected)) {
+      copied = 'email';
+      setTimeout(() => (copied = false), 1500);
+      toast({ title: 'Summary copied for email', description: 'Paste it into your email: headings, lists and tasks come with it.', variant: 'success' });
+    } else {
+      toast({ title: "Couldn't copy", description: 'The clipboard is busy. Try again.', variant: 'destructive' });
+    }
+  }
 
   // Copy the open tab: markdown as is, or as plain text (headings and
   // checkboxes spelled out) for chat apps and email.
@@ -766,6 +790,48 @@ export function createNotesState() {
   let turnSeq = 0;
   const turnId = () => `notes:${selected?.id ?? 0}:${++turnSeq}`;
 
+  // The thread kept with the note (chat/note_chats.rs, core/noteChat.js):
+  // shown when the note opens, each turn kept as it's shown, the notepad's
+  // turns followed (`yap-note-chat`); New chat, and Past chats.
+  let chatConvId = $state(null);
+  let chatThreads = $state([]);
+  /** Note `id`'s newest thread, or thread `conversation` of it. */
+  async function loadChat(id, conversation = null) {
+    try {
+      const chat = await loadNoteChat(id);
+      const c = conversation != null ? await openNoteChat(id, conversation) : chat.current;
+      if (selected?.id !== id || asking) return;
+      chatThreads = chat.threads || [];
+      chatConvId = c?.id ?? null;
+      chatThread = threadMessages(c, `notes:${id}:`).map((m) => ({ ...m, copy: m.plain || undefined }));
+    } catch {
+      /* none kept */
+    }
+  }
+  /** Keep a turn as shown in the note's thread. */
+  async function keepChat(id, messages) {
+    try {
+      const conv = await keepTurn(id, chatConvId, messages.map(keptMessage), LABEL);
+      if (selected?.id !== id) return;
+      chatConvId = conv;
+      chatThreads = (await loadNoteChat(id)).threads || chatThreads;
+    } catch (e) {
+      showSaveError(e);
+    }
+  }
+  /** New chat: the next question starts another thread (this one stays). */
+  function newChat() {
+    chatThread = [];
+    chatConvId = null;
+    chatInput = '';
+  }
+  /** The meeting notepad added to this note's thread. */
+  function onNoteChat(p) {
+    if (!p || p.origin === LABEL || selected?.id !== p.noteId || asking) return;
+    if (chatConvId === p.conversationId || (chatConvId == null && !chatThread.length)) loadChat(p.noteId, p.conversationId);
+    else loadNoteChat(p.noteId).then((c) => selected?.id === p.noteId && (chatThreads = c.threads || [])).catch(() => {});
+  }
+
   // ---- a note opened from elsewhere ----
 
   // The transcript line a note was opened at (the Tasks view's "said at
@@ -873,6 +939,12 @@ export function createNotesState() {
     set chatInput(v) { chatInput = v; },
     get asking() { return asking; },
     set asking(v) { asking = v; },
+    get chatConvId() { return chatConvId; },
+    get chatThreads() { return chatThreads; },
+    loadChat,
+    keepChat,
+    newChat,
+    onNoteChat,
     refreshActions,
     startElapsed,
     stopElapsed,
@@ -905,6 +977,7 @@ export function createNotesState() {
     canRun,
     runAction,
     copyEnhanced,
+    copyForEmail,
     moveToFolder,
     onNoteFiled,
     exportNote,

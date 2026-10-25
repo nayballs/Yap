@@ -205,6 +205,18 @@ pub fn compose_meeting_input_within(note: &Note, budget: FinalBudget) -> Meeting
     }
 }
 
+/// What the final call on a meeting note is asked: its input
+/// ([`compose_meeting_input_within`]) and, for a meeting in another
+/// language, the line after it that keeps the notes in that language —
+/// the action plan's (its headings named, in English) or, for any other
+/// action, the general one (`language.rs`). The input alone is what the
+/// checks read the reply against ([`postcheck_action_plan`]'s `source`).
+pub fn final_request(note: &Note, budget: FinalBudget, lang: &super::language::MeetingLanguage, action_plan: bool) -> (String, MeetingInput) {
+    let input = compose_meeting_input_within(note, budget);
+    let line = if action_plan { super::language::plan_line(lang) } else { super::language::notes_line(lang) };
+    (super::language::with_line(&input.text, line.as_deref()), input)
+}
+
 /// The meeting part of a note's chat context ("Ask anything…"), within
 /// `budget` tokens: the whole transcript when it fits, else the digests and
 /// as much of the latest transcript as fits.
@@ -262,6 +274,64 @@ fn task_line(task: &str, due: &str) -> String {
     } else {
         format!("- [ ] {task} (due: {due})")
     }
+}
+
+/// A "## " heading a model wrote in the meeting's language, as the layout
+/// spells it in English ("## Plan d'action" → "Action plan"): the notes are
+/// asked for with English headings (`language.rs`), which these checks,
+/// `notes/tasks.rs` and the Tasks view read, and a small model sometimes
+/// translates them anyway. `None`: none of the layout's.
+fn canonical_heading(title: &str) -> Option<&'static str> {
+    const NAMES: &[(&str, &[&str])] = &[
+        ("Recap", &["récapitulatif", "récap", "résumé", "resumen", "recapitulación", "zusammenfassung", "riepilogo", "resumo", "samenvatting"]),
+        (
+            "Action plan",
+            &["plan d'action", "plan de acción", "plan de accion", "aktionsplan", "maßnahmenplan", "piano d'azione", "plano de ação", "actieplan"],
+        ),
+        ("Decisions", &["décisions", "decisiones", "entscheidungen", "decisioni", "decisões", "besluiten"]),
+        (
+            "Open questions",
+            &["questions ouvertes", "questions en suspens", "preguntas abiertas", "offene fragen", "domande aperte", "questões em aberto", "perguntas em aberto", "open vragen"],
+        ),
+        (
+            "Unassigned",
+            &["non attribué", "non assigné", "sin asignar", "nicht zugewiesen", "non assegnat", "não atribuíd", "niet toegewezen"],
+        ),
+    ];
+    let t = title.trim().trim_end_matches(':').trim().to_lowercase().replace('’', "'");
+    NAMES.iter().find(|(_, names)| names.iter().any(|n| t.starts_with(n))).map(|(en, _)| *en)
+}
+
+/// A section's lines with the layout's list marks: `tasks` — every bullet a
+/// "- [ ]" task (an owner's or Unassigned) — else every bullet a plain "- "
+/// one (decisions, questions), a line that's only a reason ("— the quote is
+/// too expensive") joined to the bullet before it. Headings, blank lines,
+/// text and an indented list (the details under a task) stay.
+fn list_marks(body: Vec<String>, tasks: bool) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for line in body {
+        let t = line.trim();
+        let top = !line.starts_with([' ', '\t']);
+        let bullet = ["- ", "* ", "• "].iter().find_map(|b| t.strip_prefix(b)).map(str::trim).filter(|_| top);
+        if tasks {
+            match bullet {
+                Some(rest) if !is_task(&line) && !rest.is_empty() && !matches!(rest.to_lowercase().trim_end_matches('.'), "none" | "n/a" | "nothing") => {
+                    out.push(format!("- [ ] {rest}"))
+                }
+                _ => out.push(line),
+            }
+            continue;
+        }
+        let reason = t.strip_prefix('\u{2014}').or_else(|| bullet.and_then(|b| b.strip_prefix('\u{2014}'))).map(str::trim);
+        match (reason, out.last_mut()) {
+            (Some(r), Some(last)) if !r.is_empty() && last.trim_start().starts_with("- ") => {
+                *last = format!("{} \u{2014} {r}", last.trim_end());
+            }
+            _ if top && is_task(&line) => out.push(format!("- {}", strip_bullet(&line))),
+            _ => out.push(line),
+        }
+    }
+    out
 }
 
 fn is_plan_title(title: &str) -> bool {
@@ -341,6 +411,25 @@ pub fn postcheck_action_plan(
     let source_words: HashSet<String> = words(source).into_iter().collect();
     let mut doc = PlanDoc::parse(reply);
     let mut moved: Vec<String> = Vec::new();
+
+    // The layout's headings in English, whatever language the notes are in.
+    for (title, _) in doc.sections.iter_mut() {
+        if let Some(en) = canonical_heading(title) {
+            *title = en.to_string();
+        }
+    }
+    // Its list marks (a small model's slips, seen in the model evaluations):
+    // a task under an owner or in Unassigned is a "- [ ]" line, a decision
+    // or a question isn't one, and a reason on a line of its own ("— …")
+    // goes back on its decision's line.
+    for (title, body) in doc.sections.iter_mut() {
+        let lower = title.to_lowercase();
+        let tasks = is_plan_title(title) || lower.contains("unassigned");
+        let notes = lower.contains("decision") || lower.contains("question");
+        if tasks || notes {
+            *body = list_marks(std::mem::take(body), tasks);
+        }
+    }
 
     // Owner headings in the action-plan section.
     if let Some(i) = doc.sections.iter().position(|(t, _)| is_plan_title(t)) {
@@ -595,6 +684,98 @@ mod tests {
             postcheck_action_plan(clean, &attendees, "You: I'll send the deck", &you),
             clean
         );
+    }
+
+    fn french_meeting() -> Note {
+        let lines = [
+            ("you", "Bonjour à tous, on commence par le budget du salon de Lyon."),
+            ("them", "Alice ici. Le devis du traiteur est trop cher pour nous, donc on change de traiteur."),
+            ("you", "D'accord, c'est décidé : on garde le lieu mais on change de traiteur parce que le devis est trop cher."),
+            ("them", "Je vais demander deux autres devis avant vendredi."),
+            ("you", "Et il faut aussi réserver les chambres, mais qui s'en occupe ? On verra."),
+        ];
+        let mut note = note_with(
+            lines
+                .iter()
+                .enumerate()
+                .map(|(i, (s, t))| crate::notes::TranscriptSegment { source: s.to_string(), text: t.to_string(), ts: 1000 + i as u64 * 15, ..Default::default() })
+                .collect(),
+        );
+        note.participants = vec!["Alice".into()];
+        note
+    }
+
+    #[test]
+    fn a_french_meeting_is_asked_for_french_notes_with_english_headings() {
+        use crate::meetings::meeting_summary::language::{for_note, plan_line, How};
+        let note = french_meeting();
+        let lang = for_note(&note, &["en".to_string()]);
+        assert_eq!((lang.code.as_str(), lang.how), ("fr", How::Heard));
+        let (asked, input) = final_request(&note, FinalBudget::DEFAULT, &lang, true);
+        // The meeting, then the line, last: the input alone is the checks' source.
+        assert!(asked.starts_with(&input.text.trim_end().to_string()), "{asked}");
+        let line = plan_line(&lang).unwrap();
+        assert!(asked.ends_with(&line), "{asked}");
+        assert!(line.contains("French, the language of this meeting") && line.contains("\"## Action plan\""));
+        assert!(!input.text.contains("Write the notes in"));
+        // Another action on it: the general line.
+        let (other, _) = final_request(&note, FinalBudget::DEFAULT, &lang, false);
+        assert!(other.ends_with("Keep any headings the instructions give exactly as written."), "{other}");
+        // An English meeting: no line at all, as before.
+        let en = note_with(talk(20, 20, 15));
+        let (asked, input) = final_request(&en, FinalBudget::DEFAULT, &for_note(&en, &[]), true);
+        assert_eq!(asked, input.text);
+    }
+
+    #[test]
+    fn french_notes_keep_every_check_and_get_english_headings() {
+        let note = french_meeting();
+        let source = compose_meeting_input(&note).text;
+        // A small model translated the headings and wrote « Moi » for the
+        // user, invented an owner and a deadline, and lost a digest task.
+        // It also dropped a task's box, gave a decision one, and put a
+        // reason on a line of its own.
+        let reply = "## Récapitulatif\nLe budget du salon de Lyon.\n- Le traiteur\n\n## Plan d'action\n\n### Alice\n- [ ] Demander deux autres devis (due: vendredi)\n\n### Moi\n- Envoyer le compte rendu\n\n### Mallory\n- [ ] Imprimer les badges (due: jeudi)\n\n## Décisions\n- Garder le lieu mais changer de traiteur — le devis est trop cher\n- [ ] Pas de catalogue\n — tout est en ligne\n\n## Questions ouvertes\n- Qui réserve les chambres ?";
+        let lost = [DigestAction { owner: UNASSIGNED.into(), task: "réserver les chambres".into(), due: String::new() }];
+        let out = postcheck_action_plan(reply, &crate::speakers::known_people(&note), &source, &lost);
+        for h in ["## Recap", "## Action plan", "## Decisions", "## Open questions", "## Unassigned"] {
+            assert!(out.contains(h), "{h}: {out}");
+        }
+        assert!(!out.contains("Plan d'action") && !out.contains("Décisions"), "{out}");
+        // The said deadline stays, the invented one and its owner go.
+        assert!(out.contains("### Alice\n- [ ] Demander deux autres devis (due: vendredi)"), "{out}");
+        assert!(out.contains("### You\n- [ ] Envoyer le compte rendu"), "{out}");
+        assert!(!out.contains("Mallory") && !out.contains("jeudi"), "{out}");
+        let un = out.split("## Unassigned").nth(1).unwrap();
+        assert!(un.contains("- [ ] Imprimer les badges") && un.contains("- [ ] réserver les chambres"), "{out}");
+        // The decisions keep their reasons, in French, as bullets (not tasks).
+        assert!(out.contains("- Garder le lieu mais changer de traiteur — le devis est trop cher"), "{out}");
+        assert!(out.contains("\n- Pas de catalogue — tout est en ligne\n"), "{out}");
+        // The recap's topics stay bullets.
+        assert!(out.contains("Le budget du salon de Lyon.\n- Le traiteur"), "{out}");
+        // And the tasks read back as the Tasks view lists them.
+        let tasks = crate::notes::tasks::parse(&out);
+        assert!(tasks.iter().any(|t| t.owner == "You" && t.text.contains("compte rendu")), "{tasks:?}");
+        assert!(tasks.iter().any(|t| t.owner == "Unassigned" && t.text.contains("chambres")), "{tasks:?}");
+    }
+
+    #[test]
+    fn the_details_under_a_task_stay_a_list_of_their_own() {
+        let reply = "## Action plan\n### You\n- [x] Go through the budget\n- [ ] Pick up catering once the venue confirms:\n  - the headcount for both days\n  - dietary needs\n\n## Decisions\n1. Keep the budget.\n\n2. Report the deposit.";
+        let out = postcheck_action_plan(reply, &["Alice".to_string()], "", &[]);
+        assert_eq!(out, reply, "nothing to fix");
+    }
+
+    #[test]
+    fn other_languages_words_for_you_everyone_and_nobody() {
+        use crate::meetings::meeting_summary::digest::resolve_owner;
+        let known = vec!["Alice".to_string()];
+        assert_eq!(resolve_owner("Moi", &known, "moi je fais ça"), "You");
+        assert_eq!(resolve_owner("Tout le monde", &known, "tout le monde"), "Everyone");
+        assert_eq!(resolve_owner("Non attribué", &known, ""), UNASSIGNED);
+        assert_eq!(resolve_owner("Nadie", &known, "nadie"), UNASSIGNED);
+        assert_eq!(resolve_owner("Ich", &known, ""), "You");
+        assert_eq!(resolve_owner("alice", &known, ""), "Alice");
     }
 
     #[test]

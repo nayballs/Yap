@@ -54,6 +54,8 @@ export class SummaryEditor {
       if (!this.dirty) now.enhancedContent = s.enhancedContent;
       now.summaryEditedMs = s.summaryEditedMs;
       now.summaryTs = s.summaryTs;
+      if ('summaryAi' in s) now.summaryAi = s.summaryAi || '';
+      if ('summaryRating' in s) now.summaryRating = s.summaryRating ?? null;
     } catch (e) {
       toast({ title: "Couldn't save the summary", description: String(e), variant: 'destructive' });
     }

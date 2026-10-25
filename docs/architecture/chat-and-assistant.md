@@ -134,7 +134,28 @@ The AI Chat surface (conversations, the tool-calling loop and its note tools) an
   dropped into the box are stored like snips (`snip::attach`).
   **The history window** moves three turns at a time
   (`chats::history_start`: 14–19 messages, the Voice Assistant's 5–8), not
-  every turn, so a long chat keeps its prompt's start.
+  every turn, so a long chat keeps its prompt's start. **A note's Ask
+  threads** (2026-10-25) are conversations here too, with `note` set
+  (`create_for_note`, `for_note`, `delete_for_note`, `append_whole`; an
+  answer to show as plain text keeps `plain`): Chat never shows them — not
+  in `list`, `search` (past chats) or `latest` (the Voice Assistant) — and
+  deleting the note deletes them. An older Yap on the same data drops
+  `note` and `plain` when it saves: the thread is then an ordinary chat,
+  its messages whole (unit-tested).
+- **`chat/note_chats.rs`** — **a meeting's Ask thread, kept** (Wispr Flow's
+  "New chat" / "Past chats"; the private roadmap's R15): what was asked about
+  a meeting in the notepad's Ask sheet or its note's "Ask anything…" bar
+  stays with the note and reopens in both. Chat's own store rather than a
+  store of its own — its messages (model, stopped), saving (`SAVER`),
+  quarantine and deletes come with it. `note_chat(noteId)` → `{current,
+  threads}` (the newest thread whole, every thread newest first),
+  `note_chat_open(noteId, conversationId)` (never another note's or a
+  Chat conversation), `note_chat_add(noteId, conversationId|null, messages,
+  origin)` → the thread's id (a new one when there's none, or it isn't this
+  note's: named by its first question, ≤ 50 characters) and
+  `yap-note-chat {noteId, conversationId, origin}` to every window. The
+  windows keep each turn as it's shown (`core/noteChat.js`). Logs: ids and
+  counts.
 - **`chat/tools.rs`** — the AI Chat tool-calling agent loop: six tools ported
   near-verbatim from OpenWhispr's `services/tools/*` (`search_notes`,
   `get_note`, `create_note`, `update_note`, `list_folders`,

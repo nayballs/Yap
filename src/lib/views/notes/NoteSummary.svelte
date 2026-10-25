@@ -1,16 +1,40 @@
 <script>
   // The open note's summary (the Summary tab): rendered markdown whose tasks
   // tick in place (notes/tasks.rs), or its markdown while it's edited (Edit
-  // summary, notes/note_edits.rs); over it, what's new since it (Update) and
-  // whether it's the person's ("Edited").
+  // summary, notes/note_edits.rs); over it, what's new since it (Update),
+  // whether it's the person's ("Edited") and "Back to Yap's summary"; Ctrl+F
+  // finds in it (SummaryFind); under it, 👍 / 👎 (SummaryRating, on this PC
+  // only).
   import { renderMarkdown } from '../../core/markdown.js';
   import { withTaskMark, newSinceLine } from '../../core/notepadText.js';
   import { taskToggled, setTask } from '../../core/noteEdits.js';
+  import { canRestore, restoreSummary } from '../../core/summaryTools.js';
   import { toast } from '../../ui/toast.svelte.js';
+  import SummaryFind from '../../components/SummaryFind.svelte';
+  import SummaryRating from '../../components/SummaryRating.svelte';
   import { LABEL } from './notesState.svelte.js';
 
   /** `notes`: the view's state (notesState.svelte.js). */
   let { notes } = $props();
+
+  let renderedEl = $state(null);
+  let find = $state(null);
+  let findOpen = $state(false);
+  // Ctrl+F: find in the summary (while it's shown, not while it's edited).
+  function onWindowKeydown(e) {
+    if (!(e.ctrlKey || e.metaKey) || e.altKey || e.shiftKey || e.key.toLowerCase() !== 'f') return;
+    if (notes.summaryEditing || !notes.selected?.enhancedContent) return;
+    e.preventDefault();
+    find?.show();
+  }
+  function restore() {
+    const selected = notes.selected;
+    if (!selected) return;
+    restoreSummary(selected, LABEL, {
+      current: () => notes.selected,
+      changing: () => notes.changing('enhancedContent', 'summaryEditedMs', 'summaryTs', 'summaryAi', 'summaryRating'),
+    });
+  }
 
   function onSummaryKeydown(e) {
     if (e.key === 'Escape') {
@@ -39,6 +63,8 @@
   }
 </script>
 
+<svelte:window onkeydown={onWindowKeydown} />
+
 {#if (notes.newLines || notes.selected.summaryEditedMs) && !notes.summaryEditing}
   <!-- What's new since the summary (Update), and whether it's the person's. -->
   <div class="sumbar">
@@ -51,6 +77,9 @@
     <span class="tabspacer"></span>
     {#if notes.selected.summaryEditedMs}
       <span class="sumedited" title="You changed this summary: Yap asks before writing it again">Edited</span>
+      {#if canRestore(notes.selected)}
+        <button class="sumupdate" title="Put Yap's own summary back (Undo puts yours back)" onclick={restore}>Back to Yap's summary</button>
+      {/if}
     {/if}
   </div>
 {/if}
@@ -64,20 +93,27 @@
     onkeydown={onSummaryKeydown}
   ></textarea>
 {:else}
+  <SummaryFind bind:this={find} bind:open={findOpen} root={() => renderedEl} text={notes.selected.enhancedContent} look="app" />
   <!-- eslint-disable-next-line svelte/no-at-html-tags — renderMarkdown
        passes no raw HTML and sanitises its output (core/markdown.js);
        its tasks tick in place (notes/tasks.rs) -->
-  <div class="rendered" onchange={onTaskChange}>{@html renderMarkdown(notes.selected.enhancedContent, { tickable: true })}</div>
+  <div class="sumscroll">
+    <div class="rendered" bind:this={renderedEl} onchange={onTaskChange}>{@html renderMarkdown(notes.selected.enhancedContent, { tickable: true })}</div>
+    <SummaryRating note={notes.selected} origin={LABEL} look="app" changing={() => notes.changing('summaryRating')} />
+  </div>
 {/if}
 
 <style>
   .tabspacer {
     flex: 1;
   }
-  .rendered {
+  /* The summary and its rating, scrolled together. */
+  .sumscroll {
     flex: 1 1 auto;
     min-height: 0;
     overflow-y: auto;
+  }
+  .rendered {
     border: none;
     background: transparent;
     padding: 4px 2px;

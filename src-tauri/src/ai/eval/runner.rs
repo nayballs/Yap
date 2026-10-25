@@ -103,6 +103,12 @@ My languages (languages.rs; instead of the scenarios; languages.md):
                            after the language line (in its language, names kept), and a language
                            shortcut's translation (in the target language, nothing answered)
   --languages-phase <p>    before | after: one cleanup phase (a cloud model's tokens)
+Meeting summaries (summaries.rs; instead of the scenarios; summaries.md):
+  --summaries              each meeting in evals/summaries/cases.json (--only picks them by name or
+                           language) through the action plan's own call, before (the earlier layout,
+                           no language line) and after: in the meeting's language, tasks under their
+                           owners, the layout's headings, the recap and each decision's reason
+  --summaries-phase <p>    before | after: one phase (a cloud model's tokens)
 Meeting search (search/; instead of the scenarios; search.md):
   --search                 evals/search/meetings.json: recall@1/3/5 for keyword, meaning and hybrid
                            search (and Chat's whole-note search), then each --model's Ask across
@@ -171,6 +177,8 @@ struct Args {
     transforms: bool,
     languages: bool,
     languages_phase: Option<&'static str>,
+    summaries: bool,
+    summaries_phase: Option<&'static str>,
     search: bool,
     embed: Option<PathBuf>,
     embed_ngl: u32,
@@ -286,6 +294,17 @@ fn parse(argv: Vec<String>) -> Result<Args, String> {
                         .ok_or_else(|| format!("--languages-phase {}, not {p}", super::languages::PHASES.join("|")))?,
                 );
             }
+            "--summaries" => a.summaries = true,
+            "--summaries-phase" => {
+                let p = value()?;
+                a.summaries_phase = Some(
+                    super::summaries::PHASES
+                        .iter()
+                        .copied()
+                        .find(|x| *x == p)
+                        .ok_or_else(|| format!("--summaries-phase {}, not {p}", super::summaries::PHASES.join("|")))?,
+                );
+            }
             "--search" => a.search = true,
             "--embed" => a.embed = Some(PathBuf::from(value()?)),
             "--embed-ngl" => a.embed_ngl = num(value()?, &flag)? as u32,
@@ -339,6 +358,7 @@ pub fn main(argv: Vec<String>) -> i32 {
         || args.brief
         || args.transforms
         || args.languages
+        || args.summaries
         || args.search
         || args.bench.is_some())
         && !args.list
@@ -1371,6 +1391,19 @@ async fn run_all(args: &Args, run_dir: &Path, keys: &HashMap<String, String>, sc
         Vec::new()
     };
     let mut language_results: Vec<(String, Value)> = Vec::new();
+    let summary_cases = if args.summaries {
+        let path = scenarios_dir(args).join("..").join("summaries").join("cases.json");
+        match super::summaries::load(&path, &args.only) {
+            Ok(c) => c,
+            Err(e) => {
+                eprintln!("{e}");
+                return 2;
+            }
+        }
+    } else {
+        Vec::new()
+    };
+    let mut summary_results: Vec<(String, Value)> = Vec::new();
     // Meeting search (`--search`): the corpus in the run's notes, its
     // embedding server, and the retrieval half, before any model.
     let search_corpus = if args.search {
@@ -1548,6 +1581,19 @@ async fn run_all(args: &Args, run_dir: &Path, keys: &HashMap<String, String>, sc
             languages_result = super::languages::run(&language_cases, &ep, args.repeat, &phases).await;
             language_results.push((m.label.clone(), languages_result.clone()));
         }
+        let mut summaries_result = Value::Null;
+        if !summary_cases.is_empty() {
+            record::set_config(Some(crate::config::YapConfig::default()));
+            record::set_tools_forced(None);
+            let ep = super::cleanup::Endpoint { base_url: &m.base_url, key: &m.key, model: &m.model, provider: &m.provider };
+            let phases: Vec<&'static str> = match args.summaries_phase {
+                Some(p) => vec![p],
+                None => super::summaries::PHASES.to_vec(),
+            };
+            println!("  meeting summaries, {} meetings …", summary_cases.len());
+            summaries_result = super::summaries::run(&summary_cases, &ep, args.repeat, &phases).await;
+            summary_results.push((m.label.clone(), summaries_result.clone()));
+        }
         let mut search_result = Value::Null;
         if let (Some(c), Some(_)) = (&search_corpus, &search_server) {
             record::set_config(Some(super::search::settings(&m.provider, &m.base_url, &m.key, &m.model)));
@@ -1585,6 +1631,7 @@ async fn run_all(args: &Args, run_dir: &Path, keys: &HashMap<String, String>, sc
             "brief": brief_result,
             "transforms": transforms_result,
             "languages": languages_result,
+            "summaries": summaries_result,
             "search": search_result,
         });
         let (drafted, kept) = (sum("draft_tokens"), sum("draft_accepted"));
@@ -1689,6 +1736,20 @@ async fn run_all(args: &Args, run_dir: &Path, keys: &HashMap<String, String>, sc
                 r["passed"],
                 r["cases"],
                 r["by_phase"].as_object().map(|o| o.iter().map(|(k, v)| format!("{k} {}", v.as_str().unwrap_or(""))).collect::<Vec<_>>().join(", ")).unwrap_or_default(),
+                r["median_ms"].as_f64().unwrap_or(0.0) / 1000.0,
+                r["tokens"]
+            );
+        }
+    }
+    if !summary_results.is_empty() {
+        let md = record::redact(&super::summaries::markdown(&summary_results));
+        let _ = std::fs::write(run_dir.join("summaries.md"), &md);
+        println!("\n{}", md.split("\n## ").next().unwrap_or(""));
+        for (label, r) in &summary_results {
+            println!(
+                "{label}: {}/{} summaries pass; median {:.1} s; {} tokens",
+                r["passed"],
+                r["cases"],
                 r["median_ms"].as_f64().unwrap_or(0.0) / 1000.0,
                 r["tokens"]
             );

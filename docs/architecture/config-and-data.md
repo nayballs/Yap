@@ -325,8 +325,19 @@
   dialog says, in the folder used last (`snip_save_dir`).
 - History: `%APPDATA%/yap/history.json` (local-only; cleared from Settings → Privacy & data → History).
 - Notes: `%APPDATA%/yap/notes.json` — the AI Notepad store (folders, actions,
-  participants, meeting transcripts).
-- Chats: `%APPDATA%/yap/chats.json` — AI Chat conversations (`chat/chats.rs`).
+  participants, meeting transcripts). Since 2026-10-25 a note may also keep
+  `summaryAi` (Yap's own summary, for "Back to Yap's summary") and
+  `summaryRating` (`{up, why, ms}`, the person's 👍 / 👎 — never sent); an
+  older Yap on the same data drops both when it saves, never the person's
+  summary (`enhancedContent`). The built-in Action Plan's `prompt` moves on
+  to the recap-and-reasons layout once, when it's still an earlier default
+  word for word (`notes::seed_missing_builtins`: no field renamed or
+  removed).
+- Chats: `%APPDATA%/yap/chats.json` — AI Chat conversations (`chat/chats.rs`),
+  and since 2026-10-25 meetings' Ask threads: conversations with `note`
+  (the note's id; Chat leaves them out, deleted with the note) whose
+  answers may be `plain` (`chat/note_chats.rs`). An older Yap's save drops
+  `note`: the thread is then an ordinary chat in Chat, its messages kept.
 - Model lists: `%APPDATA%/yap/model_catalog.json` — each keyed AI provider's
   chat models as it last listed them (id, name, created, context, tools,
   first seen), when, and why the last check failed (`ai/model_catalog.rs`).

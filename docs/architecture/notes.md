@@ -13,7 +13,12 @@ The AI Notepad: the notes store, folders, the Actions engine, notes you can fix 
   `len+first-50` staleness marker), `summary_edited_ms` (the person changed
   the summary's words: Yap never writes over it unasked) and `summary_ts`
   (when the summary's input was read: "New since this summary"; both 0 and
-  unwritten on older notes, `notes/note_edits.rs`), `folder` (string, seeded with Personal +
+  unwritten on older notes, `notes/note_edits.rs`), `summary_ai` (Yap's
+  summary as it last wrote it, for "Back to Yap's summary") and
+  `summary_rating` (`{up, why, ms}`: the person's 👍 / 👎, on this PC only)
+  — both 2026-10-25, unwritten when empty; an older Yap on the same data
+  drops them when it saves, and the person's summary stays in
+  `enhanced_content` either way —, `folder` (string, seeded with Personal +
   Meetings), `folder_chosen` (the person moved the note there: `apply_update`
   sets it on any folder change — the Notes view, the local API, Chat),
   `participants`
@@ -47,7 +52,8 @@ The AI Notepad: the notes store, folders, the Actions engine, notes you can fix 
   lines transcribed after the fact (a crash's, `meetings/meeting_audio.rs`) where they
   belong by time, digests and stop marks moving along (a stop mark after
   them when a later recording follows). `delete` takes the note's meeting
-  audio with it (`meeting_audio::forget`). **Saves** go through `SAVER`
+  audio with it (`meeting_audio::forget`) and its Ask threads
+  (`chats::delete_for_note`, `chat/note_chats.rs`). **Saves** go through `SAVER`
   (`shell/saving.rs`, [config-and-data.md](./config-and-data.md)): a failed one
   keeps the notes in memory and is written with the next change; the
   commands that change notes return it as their error (`saved()`: "Couldn't
@@ -136,7 +142,21 @@ roadmap, "Meeting notes you can fix" and "Tasks").
   spending a model call, `meeting_end`'s job ends `kept`
   (`meeting_summarise(noteId, replace)`, `note_enhance(id, actionId,
   replace)`). A written summary clears the mark, sets `summary_ts` = the read
-  time (seconds) and keeps the old summary's ticks.
+  time (seconds), keeps the old summary's ticks, keeps itself as
+  `summary_ai` and clears the rating. **Back to Yap's summary**
+  (2026-10-25; `note_summary_restore(id, origin)` → `{state, previous}`;
+  `can_restore`, `restore_ai_summary`, pure): offered while the person's
+  summary differs from Yap's (ticks aside); Yap's words come back with the
+  person's ticks (`carry_ticks`), Yap's again; `previous` is the person's
+  version, which the window's toast's **Undo** saves back through
+  `note_summary_update`. Words edited back to Yap's own make it Yap's again.
+  **Rating it** (`note_summary_rate(id, rating: up|down|null, why, origin)`,
+  `apply_rating`, pure): 👍 / 👎 and, with a 👎, a "What was wrong?" note
+  (one paragraph, ≤ 500 characters); the same again is no change, `null`
+  takes it back; no summary, nothing to rate. Logged as up/down and the
+  note's length, never its words. `SummaryState` (every summary command's
+  answer, and `yap-note-changed`'s summary fields) carries `summaryAi` and
+  `summaryRating` too.
 - **`notes/tasks.rs`** — **the checkboxes in a summary**: `parse` (pure; line by
   line, fenced code skipped; `- * + •` bullets; owner from `### Name` — not a
   heading like "Action items" —, inline "Dave: …", or "Unassigned" under
@@ -218,7 +238,13 @@ dates). [frontend.md](./frontend.md#the-folder-layout-2026-10-24).
   box, saved as typed; Escape ends it), "Edited" once it's the person's,
   "2 new lines since this summary · **Update**", tasks ticked in place, and
   every rewrite of an edited summary (Action plan, an action, Update) asked
-  first (`askReplaceSummary`); a run the person outpaced says "Your summary
+  first (`askReplaceSummary`); since 2026-10-25 "Edited · **Back to Yap's
+  summary**" with Undo, **Ctrl+F** to find in it, **👍 👎** under it and
+  **Copy for email** beside Copy as Markdown / text (the notepad's, shared
+  components: [meetings.md](./meetings.md#frontend)); the note's Ask thread
+  is the meeting's kept one (`loadChat` on select, `keepChat` per turn,
+  "New chat" / "Past chats" over it, the notepad's turns followed through
+  `yap-note-chat`); a run the person outpaced says "Your summary
   was kept" (the safe
   renderer in `lib/core/markdown.js`, shared with chat answers, the notepad, the
   Voice Assistant's card and update notes — see "The markdown renderer"
@@ -322,7 +348,14 @@ dates). [frontend.md](./frontend.md#the-folder-layout-2026-10-24).
   the text's own colour, for light views, dark toasts and the bar alike);
   each view sets its own paragraph, list and heading spacing, and Chat its
   pills. `markdownToText` (Copy as text) is line-based: ☐ / ☑ tasks, • bullets,
-  plain headings, no bold or code marks. Tests: `e2e/markdown.spec.js`
+  plain headings, no bold or code marks. **`emailHtml(md, {title})`** /
+  **`emailText`** (2026-10-25, "Copy for email"): the same safe render made
+  mail-shaped — the title as an `h2`, tasks as ☐ / ☑ text (a mail client
+  has no checkboxes), a table without its scroller, inline styles and no
+  classes or colours (the reader's mail client sets them) — beside its
+  plain-text twin, both on the clipboard in one `ClipboardItem`. Exports
+  (Save as .md — `notes::commands::export_markdown`, pure —, Copy, Email)
+  carry talk only: never an echo line, nor a mic-change marker. Tests: `e2e/markdown.spec.js`
   (Node + jsdom: lists, tables, links, raw HTML, hostile input against the
   allowlist, citations), plus the rendered views in chat-model, web-search
   (`16-chat-rich-web-answer`), notepad (`46-summary-rich-markdown`,

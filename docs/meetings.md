@@ -657,17 +657,41 @@ for when it's wanted after all.
 3. One call: the immutable `llm::ACTION_PLAN_BASE_PROMPT` (use only the
    input; never invent tasks, names, owners or dates; an owner is someone
    who said they'd do it or was asked and agreed; deadlines only as said;
-   keep every distinct task) + the action's editable prompt, by default:
-   a 1–2 sentence summary, `## Action plan` with a `### Name` per person
-   (`### You` for the user) and `- [ ] task (due: …)` lines, then
-   `## Decisions`, `## Open questions` and `## Unassigned`.
+   keep every distinct task) + the action's editable prompt, by default
+   (since 2026-10-25): `## Recap` — a sentence or two, then up to four
+   topics —, `## Action plan` with a `### Name` per person (`### You` for
+   the user) and `- [ ] task (due: …)` lines, `## Decisions` (everything
+   agreed, each "decision — why", the reason only when one was said),
+   `## Open questions` and `## Unassigned`. **In the meeting's language**:
+   a meeting held in French gets its notes in French, the headings in
+   English (as Wispr Flow does; they're what the checks, the Tasks view and
+   the brief read). Yap reads the language from the meeting's own words
+   (`meeting_summary/language.rs`; whatever model transcribed it); not sure —
+   too little said, two languages half and half — it's your first language
+   in My languages, else English. The line saying so goes after the meeting
+   in the call (the digests get one too); an English meeting gets none.
 4. `postcheck_action_plan`, deterministic: a `### Name` that isn't "You",
    "Everyone", an attendee or a name said in the meeting moves its tasks to
    Unassigned; a deadline whose words aren't in the input is removed; and any
    digest task the reply left out is put back under its owner. (Feeding a
-   model summaries instead of the transcript is where tasks get lost.)
-5. The result is the note's Summary tab, with **Copy as Markdown** and **Copy
-   as text** (headings plain, tasks as ☐, for a chat message or an email).
+   model summaries instead of the transcript is where tasks get lost.) In any
+   language: a heading the model translated anyway is put back in English
+   ("Plan d'action" → "Action plan"), « Moi » / „Ich" is You, "Sin asignar"
+   Unassigned; a task under an owner that lost its checkbox gets it back,
+   a decision that gained one loses it.
+5. The result is the note's Summary tab, with **Copy as Markdown**, **Copy
+   as text** (headings plain, tasks as ☐, for a chat message) and **Copy for
+   email** (the notepad's ⋯ / Share: "Copy summary for email"): the summary
+   as rich HTML and plain text on the clipboard at once, so Outlook or Gmail
+   paste its headings, lists and tasks (☐ / ☑), a chat box its text.
+   Exports — Save as .md, Copy, Email — carry the talk only, never an echo
+   line (the call coming back through your mic).
+
+**"Your summary is ready."** When the plan is written while no Yap window is
+in front — the meeting stopped from the Yap bar or by itself, or you went
+back to work — a quiet card on the Yap bar says so ("“Supplier call” · 3
+tasks"), else a Windows notification; **Open note** opens it in Notes. With
+the main window or the notepad in front, nothing: it's on screen already.
 
 The Action Plan is a built-in action like Meeting Notes: editable, not
 deletable. It's found by `kind: "actionPlan"`, so renaming it is fine. It's
@@ -736,6 +760,22 @@ turns the summary into its Markdown in a box, saved as you type; **Done** or
 - an edit made while a replacing run was writing wins over the run.
 A Chat edit of the summary (its `edit_note` tool) counts as yours too.
 Emptying it leaves no summary (Generate summary comes back).
+
+**Back to Yap's summary.** Yap keeps its own version beside yours
+(`summary_ai`), so an edited summary offers "Edited · **Back to Yap's
+summary**": Yap's words come back with the tasks you ticked still ticked, and
+the toast's **Undo** puts yours back. Editing your words back to Yap's makes
+it Yap's again. (An older Yap sharing the same data folder drops Yap's kept
+version when it saves; your summary is never lost.)
+
+**Find in it.** **Ctrl+F** on a summary (the notepad's or the Notes view's)
+opens a find bar over it: every match lit, "2 of 5", Enter and Shift+Enter to
+move, Esc to close.
+
+**Rate it.** Under the summary, "Was this summary useful?" 👍 👎; a 👎 asks
+"What was wrong? (optional)". The rating stays in the note on this PC — Yap
+never sends it — for checking models against later; a new summary starts
+unrated, and pressing the same thumb again takes it back.
 
 **New since this summary.** When lines were said after the summary read the
 meeting (a recording resumed later), a quiet "2 new lines since this summary ·
@@ -926,6 +966,18 @@ on a local endpoint the call waits until no dictation is recording or
 transcribing (+2 s), and if one starts mid-call the request is dropped (the
 closed connection cancels it in llama.cpp) and asked again after it. Without
 an AI model the chat says so and links to Language Models.
+
+**The chat is kept with the meeting** (2026-10-25; until then it was gone
+when the notepad closed). Each question and its answer are saved as they're
+shown, with the meeting (`chat/note_chats.rs`, in `chats.json` but never in
+Chat's own list): open the meeting again — tomorrow, after a restart, in the
+notepad or in its note in Notes — and its latest chat is there, and a
+question asked in one window shows in the other. **New chat** starts another
+(the one before stays); **Past chats** (the clock in the sheet's head, or
+the link over the Notes view's chat) reopens an earlier one. Deleting the
+meeting deletes its chats. (An older Yap sharing the same data folder turns
+a saved meeting chat into an ordinary Chat conversation when it saves; its
+messages are kept.)
 
 ### One-tap helpers
 

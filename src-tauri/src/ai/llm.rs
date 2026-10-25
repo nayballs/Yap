@@ -468,14 +468,25 @@ pub const ACTION_PLAN_BASE_PROMPT: &str = concat!("You are a meeting assistant. 
 
 /// The built-in "Action Plan" action's editable prompt (the layout that
 /// `meeting_summary::postcheck_action_plan` understands; a user's own layout
-/// still works, it just gets fewer checks).
-pub const ACTION_PLAN_DEFAULT_FRAGMENT: &str = "Write an action plan. Start with a 1\u{2013}2 sentence summary of the meeting. Then \"## Action plan\" with one \"### Name\" heading per person who has tasks (\"### You\" for the user), each followed by that person's tasks as \"- [ ] task (due: deadline)\" lines, adding the deadline only when one was said. Then \"## Decisions\" and \"## Open questions\" as bullet lists, and last \"## Unassigned\" with the tasks nobody took on, as \"- [ ] task\" lines. Leave out any section that would be empty.";
+/// still works, it just gets fewer checks). Since 2026-10-25 it opens with a
+/// topic recap and gives each decision its reason (Wispr Flow's "Recap" and
+/// "Decisions made" with reasons); the built-in's stored prompt moves on to
+/// it when it's still an earlier default ([`ACTION_PLAN_EARLIER_FRAGMENTS`],
+/// `notes.rs`). The meeting's language is a line after the input
+/// (`meeting_summary::language`), so a person's own layout gets it too.
+pub const ACTION_PLAN_DEFAULT_FRAGMENT: &str = "Write an action plan. Start with \"## Recap\": one or two sentences on what the meeting was about, then the main topics as up to four short \"- \" bullets. Then \"## Action plan\" with one \"### Name\" heading per person who has tasks (\"### You\" for the user), each followed by that person's tasks as \"- [ ] task (due: deadline)\" lines, adding the deadline only when one was said. Then \"## Decisions\": everything agreed or settled, one \"- \" bullet each: the decision, then \" \u{2014} \" and why in a few words, only when a reason was said. Then \"## Open questions\" as a bullet list, and last \"## Unassigned\" with the tasks nobody took on, as \"- [ ] task\" lines. Leave out any section that would be empty.";
+
+/// The built-in Action Plan's earlier default prompts, newest first: a
+/// stored one still word for word one of these was never edited, and moves
+/// on to [`ACTION_PLAN_DEFAULT_FRAGMENT`] (`notes::seed_missing_builtins`).
+/// The model evaluations' "before" (`eval/summaries.rs`) is the first.
+pub const ACTION_PLAN_EARLIER_FRAGMENTS: &[&str] = &["Write an action plan. Start with a 1\u{2013}2 sentence summary of the meeting. Then \"## Action plan\" with one \"### Name\" heading per person who has tasks (\"### You\" for the user), each followed by that person's tasks as \"- [ ] task (due: deadline)\" lines, adding the deadline only when one was said. Then \"## Decisions\" and \"## Open questions\" as bullet lists, and last \"## Unassigned\" with the tasks nobody took on, as \"- [ ] task\" lines. Leave out any section that would be empty."];
 
 /// Immutable prompt for one rolling **meeting digest** (`meeting_summary.rs`):
 /// notes on one ~10-minute stretch of a meeting, in a fixed four-heading
 /// layout that `meeting_summary::parse_digest` reads back. Internal (no
 /// editable body): users shape the end result through the Action Plan action.
-pub const MEETING_DIGEST_PROMPT: &str = concat!("You are a meeting note-taker. You receive ONE PART of a longer meeting: its transcript, where \"You:\" is the person recording and ", other_speakers!(), ", plus the attendee list and the main points of the meeting so far (context only: never repeat them).\n\nWrite notes on THIS PART ONLY, under exactly these four headings, in this order:\n### Key points\n### Decisions\n### Action items\n### Open questions\n\nUnder each heading write short \"- \" bullets, or \"- None\".\nAction items: one per line as \"- [ ] Owner: task (due: deadline)\".\n- Owner: the person who said they would do it, or who was asked and agreed: \"You\" for the person recording, a name from the attendee list or a speaker's name (a line's speaker said its words), or a name said in this part. If nobody was named or nobody agreed, write \"Unassigned\". Never guess an owner.\n- Add \"(due: ...)\" only when a deadline was said, in the words used (\"by Friday\", \"end of March\").\nUse only what is said in this part. Never invent names, tasks, decisions or dates. At most 6 key points. No preamble, no closing remarks.");
+pub const MEETING_DIGEST_PROMPT: &str = concat!("You are a meeting note-taker. You receive ONE PART of a longer meeting: its transcript, where \"You:\" is the person recording and ", other_speakers!(), ", plus the attendee list and the main points of the meeting so far (context only: never repeat them).\n\nWrite notes on THIS PART ONLY, under exactly these four headings, in this order:\n### Key points\n### Decisions\n### Action items\n### Open questions\n\nUnder each heading write short \"- \" bullets, or \"- None\".\nAction items: one per line as \"- [ ] Owner: task (due: deadline)\".\n- Owner: the person who said they would do it, or who was asked and agreed: \"You\" for the person recording, a name from the attendee list or a speaker's name (a line's speaker said its words), or a name said in this part. If nobody was named or nobody agreed, write \"Unassigned\". Never guess an owner.\n- Add \"(due: ...)\" only when a deadline was said, in the words used (\"by Friday\", \"end of March\").\nDecisions: the decision, then \" \u{2014} \" and why in a few words, only when a reason was said.\nUse only what is said in this part. Never invent names, tasks, decisions or dates. At most 6 key points. No preamble, no closing remarks.");
 
 /// Immutable prompt for the notepad's **"What did I miss?"**
 /// (`meeting_assist.rs`): what was said since the person last looked at the
@@ -553,7 +564,15 @@ pub async fn enhance_note(
         { "role": "system", "content": system },
         { "role": "user", "content": content },
     ]);
-    let out = chat(base_url, api_key, model, provider, messages, opts).await?;
+    let mut out = chat(base_url, api_key, model, provider, messages.clone(), opts).await?;
+    if out.trim().is_empty() {
+        // A reasoning model can spend its whole reply thinking (Groq's
+        // gpt-oss-20b on a French meeting's notes stopped at 2,048 tokens
+        // of reasoning and no answer, docs/model-evals.md "Meeting
+        // summaries"): once more before it's an error.
+        tracing::info!(model, "Note enhancement: an empty reply; asking once more");
+        out = chat(base_url, api_key, model, provider, messages, opts).await?;
+    }
     if out.trim().is_empty() {
         return Err("The model returned an empty enhancement".to_string());
     }

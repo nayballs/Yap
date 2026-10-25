@@ -433,7 +433,20 @@ across meetings by meeting or person with "Said at" back to the line; read
 only over the local API and MCP; unit-tested and e2e-tested in
 `notes-edit.spec.js` against the stub engine and a fake model — not yet by
 hand in a real meeting, nor with a real model's plans in their many
-layouts),
+layouts), **summaries in the meeting's language and an Ask chat that's
+kept** (2026-10-25: the meeting's language read from its words — else your
+first language, else English — the notes written in it with English
+headings, a topic recap and a reason per decision, the checks working in
+any language; measured on Qwen3.5-4B and Groq's gpt-oss-20b with
+`--summaries`, French and Spanish meetings in English before, in their own
+language after; a meeting's Ask thread kept with it — after a restart, in
+the notepad and in Notes, New chat / Past chats, deleted with the meeting;
+"Back to Yap's summary" with Undo; 👍 👎 with "What was wrong?", on this PC
+only; Ctrl+F in a summary; "Copy for email" as rich HTML and text;
+"Your summary is ready" on the Yap bar when no Yap window is in front;
+unit-tested and e2e-tested in `notes-summary.spec.js` against a fake model —
+not yet in a real meeting in another language, nor pasted into a real
+Outlook or Gmail),
 and since
 2026-10-24 a **transcript you can trust**: a chunk that fails to transcribe
 is a marker with Try again, never silence, the person told once

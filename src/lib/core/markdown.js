@@ -362,6 +362,61 @@ function bulletsToDashes(src) {
     .join('\n');
 }
 
+// --- Copy for email ---------------------------------------------------------
+
+// Inline styles only (a mail client drops a page's stylesheet), and no
+// colours: the email takes its reader's own. Sizes as a mail client's body.
+const EMAIL_STYLE = {
+  DIV: 'font-family:Segoe UI,Calibri,Arial,sans-serif;font-size:14px;line-height:1.5',
+  H2: 'font-size:20px;margin:0 0 12px',
+  H3: 'font-size:17px;margin:18px 0 6px',
+  H4: 'font-size:15px;margin:14px 0 4px',
+  H5: 'font-size:14px;margin:12px 0 4px',
+  P: 'margin:0 0 8px',
+  UL: 'margin:0 0 8px;padding-left:22px',
+  OL: 'margin:0 0 8px;padding-left:22px',
+  LI: 'margin:2px 0',
+  TABLE: 'border-collapse:collapse;margin:0 0 8px',
+  TH: 'border:1px solid;padding:4px 8px;text-align:left',
+  TD: 'border:1px solid;padding:4px 8px',
+  BLOCKQUOTE: 'margin:0 0 8px;padding-left:10px;border-left:3px solid',
+  PRE: 'margin:0 0 8px;font-family:Consolas,monospace;white-space:pre-wrap',
+};
+
+/**
+ * A summary as an email: rich HTML for the clipboard's `text/html` (Outlook,
+ * Gmail and the rest paste headings, lists and tasks as they are), from the
+ * same safe render as the views (`renderMarkdown`), then made mail-shaped —
+ * the title as its heading, tasks as ☐ / ☑ (a mail client has no
+ * checkboxes), inline styles, no classes. `emailText` is its plain-text
+ * twin, for the same clipboard's `text/plain`.
+ */
+export function emailHtml(md, { title = '' } = {}) {
+  const doc = globalThis.window.document;
+  const box = doc.createElement('div');
+  box.innerHTML = renderMarkdown(md);
+  // (The renderer puts a space after a task's checkbox already.)
+  for (const input of [...box.querySelectorAll('li.task > input')]) {
+    input.replaceWith(doc.createTextNode(input.hasAttribute('checked') ? '☑' : '☐'));
+  }
+  for (const li of box.querySelectorAll('li.task')) li.setAttribute('style', `${EMAIL_STYLE.LI};list-style:none;margin-left:-18px`);
+  // A table's scrolling wrapper and a cite's span aren't needed in a mail.
+  for (const wrap of [...box.querySelectorAll('div.md-table')]) wrap.replaceWith(...wrap.childNodes);
+  for (const el of box.querySelectorAll('*')) {
+    el.removeAttribute('class');
+    el.removeAttribute('title');
+    if (EMAIL_STYLE[el.nodeName] && !el.hasAttribute('style')) el.setAttribute('style', EMAIL_STYLE[el.nodeName]);
+  }
+  const heading = title.trim() ? `<h2 style="${EMAIL_STYLE.H2}">${escapeHtml(title.trim())}</h2>` : '';
+  return `<div style="${EMAIL_STYLE.DIV}">${heading}${box.innerHTML}</div>`;
+}
+
+/** `emailHtml`'s plain-text twin: the title, then the summary as `markdownToText` writes it. */
+export function emailText(md, { title = '' } = {}) {
+  const body = markdownToText(md);
+  return title.trim() ? `${title.trim()}\n\n${body}` : body;
+}
+
 // The same markdown as plain text, for pasting where markdown shows raw
 // (Teams/Slack messages, email): heading marks and emphasis dropped, task
 // checkboxes as ☐ / ☑, bullets as •. Indentation and blank lines are kept.

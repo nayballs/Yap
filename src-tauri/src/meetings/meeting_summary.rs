@@ -52,6 +52,7 @@
 mod action_plan;
 mod digest;
 mod helpers;
+pub mod language;
 
 use std::future::Future;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -65,7 +66,10 @@ use crate::ai::llm::ChatOptions;
 use crate::notes::{MeetingDigest, Note, TranscriptSegment};
 use crate::speakers::Speakers;
 
-pub use action_plan::{ask_context, compose_meeting_input_within, digest_actions, postcheck_action_plan, render_digests};
+pub use action_plan::{ask_context, digest_actions, final_request, postcheck_action_plan, render_digests};
+// The model evaluations' "before" (the input without the language line).
+#[cfg(debug_assertions)]
+pub use action_plan::compose_meeting_input_within;
 pub use helpers::{
     catch_up_input, catch_up_messages, clean_email, clean_title, email_subject, helper_messages, meeting_ask_messages,
     questions_input, recap_input, title_messages,
@@ -448,7 +452,9 @@ async fn digest_window(
         clock(last.ts.saturating_sub(t0))
     );
     let context = context_so_far(&note.digests, t0);
-    let messages = digest_messages(&people_lines(note), &context, note.digests.len() + 1, &range, &lines);
+    // In the meeting's language, its headings in English (`language.rs`).
+    let line = language::digest_line(&language::of_note(note));
+    let messages = digest_messages(&people_lines(note), &context, note.digests.len() + 1, &range, &lines, line.as_deref());
     let opts = ep.options(DIGEST_REPLY_TOKENS, 0.2);
     let call = crate::ai::llm::chat(
         &ep.base_url,

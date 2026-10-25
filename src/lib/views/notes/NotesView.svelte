@@ -49,6 +49,8 @@
     listen('yap-meeting-digest', (e) => notes.onMeetingDigest(e.payload)).then((u) => unlisteners.push(u));
     listen('yap-meeting-summary', (e) => notes.onSummary(e.payload)).then((u) => unlisteners.push(u));
     listen('yap-note-changed', (e) => notes.onNoteChanged(e.payload)).then((u) => unlisteners.push(u));
+    // The meeting notepad added to a note's kept Ask thread (chat/note_chats.rs).
+    listen('yap-note-chat', (e) => notes.onNoteChat(e.payload)).then((u) => unlisteners.push(u));
     // (A recording's warnings are notices from notices/meetingGuard.js, in any view.)
     // The local API bridge (Integrations) can create/update/delete notes from
     // outside the app — refresh the list so external edits show up live.

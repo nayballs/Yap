@@ -370,6 +370,25 @@ pub fn window_view(app: &AppHandle) -> (bool, bool) {
         .unwrap_or((false, false))
 }
 
+/// A Yap window has the focus: the main window or the meeting notepad (a
+/// test run: as `e2e_focus` says, for either on screen). What "Your summary
+/// is ready" asks before it says anything (`meeting_end.rs`). Window
+/// getters: never with a lock held.
+pub fn yap_in_front(app: &AppHandle) -> bool {
+    if window_view(app).1 {
+        return true;
+    }
+    app.get_webview_window("notepad").is_some_and(|w| {
+        let visible = w.is_visible().unwrap_or(false) && !w.is_minimized().unwrap_or(false);
+        let focused = if crate::shell::e2e::active() {
+            TEST_FOCUS.load(Ordering::SeqCst) == 0
+        } else {
+            w.is_focused().unwrap_or(false)
+        };
+        visible && focused
+    })
+}
+
 /// Whether Yap may post Windows notifications at all (not portable, not a
 /// test run, Windows only).
 pub fn notifications_allowed() -> bool {

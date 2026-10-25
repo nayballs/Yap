@@ -320,7 +320,43 @@ The meeting recorder and its audio kept on disk, rolling digests and the action 
   preamble, fences and markdown out, "Subject: " first, `email_subject` when
   missing) — every helper call ≤ ~3.4k with its reply; and `chat_beside_dictation` (on a local endpoint: wait for
   dictation to finish, drop the call when one starts and ask again — never
-  slows a dictation). See [`docs/meetings.md`](../meetings.md).
+  slows a dictation). **The summary in the meeting's language** (2026-10-25,
+  `meeting_summary/language.rs`; Wispr Flow writes its notes in the language
+  spoken, its top headings in English): `for_note` (pure) reads the
+  meeting's talk and typed notes — a script of its own (Cyrillic, Greek,
+  Hangul, kana, Han, Arabic, Hebrew, Devanagari, Thai), else each
+  language's commonest little words, counting only words one language has
+  (en, fr, es, de, it, pt, nl, pl, sv; ≥ 8 of them, 60 % one language's,
+  twice the next) — so it works whatever model transcribed (Parakeet V3
+  never says); not sure (too little, two languages half and half): the
+  person's first language in My languages, else English (`How::Heard |
+  Yours | Default`; `of_note` logs the code and how, never words). The line
+  goes **after** the input, the last thing a small model reads, and none
+  for English: `plan_line` ("Write the notes in French, the language of
+  this meeting. Keep these in English exactly as written: the headings
+  (…) and "(due: …)". Names stay as they are."), `digest_line` (the four
+  headings, "You", "Unassigned", "(due: …)"), `notes_line` (any other action
+  on a meeting note). `final_request(note, budget, lang, action_plan)` →
+  `(asked, input)`: what `run_enhance` sends, and the input alone, which
+  `postcheck_action_plan` reads the reply against. **The layout**
+  (`llm::ACTION_PLAN_DEFAULT_FRAGMENT`, 2026-10-25): "## Recap" (one or two
+  sentences, then up to four topic bullets), the action plan, "## Decisions"
+  — everything agreed or settled, each "decision — why in a few words" only
+  when a reason was said (the digest prompt asks the same, so a long
+  meeting's reasons reach the plan) —, open questions, Unassigned; the
+  built-in Action Plan's stored prompt moves on to it when it's still an
+  earlier default (`llm::ACTION_PLAN_EARLIER_FRAGMENTS`,
+  `notes::seed_missing_builtins`), a person's own is never touched. **The
+  checks in any language**: `postcheck_action_plan` puts a translated "## "
+  heading back in English (`canonical_heading`: "Plan d'action", "Décisions",
+  "Preguntas abiertas", "Sin asignar"…), fixes a small model's list marks
+  (`list_marks`: a bullet under an owner or in Unassigned is a "- [ ]" task;
+  a decision or question isn't one; a reason on a line of its own joins its
+  decision) and `resolve_owner` knows the other languages' words for you,
+  everyone and nobody (« Moi », „Niemand“, "Sin asignar"). Measured:
+  [model-evals.md](../model-evals.md#meeting-summaries-25-oct-2026).
+  `llm::enhance_note` asks once more after an empty reply (a reasoning model
+  that spent its whole reply thinking). See [`docs/meetings.md`](../meetings.md).
 - **`meetings/meeting_end.rs`** — the end of a meeting recording, wherever it was
   stopped from (notepad Stop, Notes view "End meeting & summarise", the Yap
   bar, call detection, an automatic stop). It follows the recorder through
@@ -352,7 +388,15 @@ The meeting recorder and its audio kept on disk, rolling digests and the action 
   use `end()` / `pause()`. The job first asks the meeting's AI who each
   voice still unnamed is (`speakers::naming::ask_model`, "Suggest who's
   speaking" on, a model that can call tools; best-effort), so the plan
-  reads the names. **The end and the refine** (`finished` → `end_steps`):
+  reads the names. **"Your summary is ready"** (2026-10-25, Wispr Flow's
+  notice; `summary_ready`): a plan written while no Yap window is in front
+  (`notice::yap_in_front`: the main window or the notepad focused; a test
+  run's `e2e_focus`) is said quietly in one place — `meeting_guard::
+  notice_native`: a Yap bar card (kind "meeting-notice": not over a
+  dictation, the same words not twice in 10 minutes), else a Windows
+  notification — "Your summary is ready" · "“Supplier call” · 3 tasks"
+  (`ready_body`) with **Open note** (`guard:open:<id>` → the note in Notes);
+  with Yap in front, nothing (the window shows it). **The end and the refine** (`finished` → `end_steps`):
   the refine due (`meeting_refine::plan`) comes first when the live
   transcript has holes — then `end_steps` follows it however it ends —
   else `end_steps` now and the refine after the summary; a meeting with a
@@ -481,7 +525,18 @@ The meeting recorder and its audio kept on disk, rolling digests and the action 
   so far while recording; over the plan **Edit** / Done — its Markdown in a
   box, saved as typed —, "Edited", and "2 new lines since this summary ·
   **Update**"; its tasks tick in place; Update and Retry ask before writing
-  over an edited summary). **A line's words** are fixed by double-clicking
+  over an edited summary; since 2026-10-25 "Edited · **Back to Yap's
+  summary**" — Yap's own version back, the person's ticks kept, a toast with
+  **Undo** —, **Ctrl+F** (`components/SummaryFind.svelte`: a find bar over
+  the summary, "2 of 5", Enter / Shift+Enter, Esc; the matches painted with
+  the CSS Custom Highlight API, so the rendered HTML and its checkboxes'
+  line map stay as they are; found again when the summary changes under
+  it), and under it **"Was this summary useful?" 👍 👎**
+  (`components/SummaryRating.svelte`: kept in the note on this PC, never
+  sent; a 👎 offers "What was wrong? (optional)"; the same thumb again
+  takes it back), shared with the Notes view (`look="paper" | "app"`).
+  ⋯ and Share have **Copy summary for email** (`core/summaryTools.js`:
+  `emailHtml` + `emailText` on the clipboard at once). **A line's words** are fixed by double-clicking
   it or **Edit line** in its menu (Enter saves, Escape cancels, leaving
   saves; "edited" after it; the dictionary offer as this window's toast) —
   [notes.md](./notes.md#notes-you-can-fix-note_editsrs-tasksrs). **Bottom** (over the content, a 150 px fade):
@@ -512,7 +567,15 @@ The meeting recorder and its audio kept on disk, rolling digests and the action 
   `yap-notepad-visible`/`isVisible` — and scrolled to its newest line
   unsearched, or covered by the last answer); typed questions = the same
   command with `question`; no AI → a link to Language Models. Escape or a
-  click above it puts it away. Toasts sit above the bar
+  click above it puts it away. **The thread is kept with the meeting**
+  (2026-10-25, `chat/note_chats.rs`, `core/noteChat.js`; until then it was
+  page state, lost with the window): the note's newest thread loads when the
+  note does, each turn is kept as it's shown (`note_chat_add`: the question
+  and the answer — plain, stopped, its model —, or a stopped question alone;
+  errors aren't kept), the Notes view's turns on the same meeting arrive by
+  `yap-note-chat`, **New chat** starts another thread with the next
+  question and the earlier ones stay under **Past chats** (a clock button
+  in the sheet's head, a menu of the threads, the one shown ticked). Toasts sit above the bar
   (`--yap-toast-bottom`); the quiet countdown, "Still in your meeting?" and the quiet stop's
   notice whenever Rust picks the notepad (it's on screen;
   `meetingCheckIn.js`). It has

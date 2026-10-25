@@ -155,6 +155,7 @@ One folder per area (an area's `<area>.rs` lists its modules); a big module's pa
 
 **Chat and the Voice Assistant** — [chat-and-assistant.md](./docs/architecture/chat-and-assistant.md)
 - `chat/chats.rs` — conversations (`chats.json`), tool chips, sources; a question's screenshots (ids; deleted with it); the history a model gets (earlier searches replayed) and the checks on every answer (made-up sources, claimed searches, unsourced citations).
+- `chat/note_chats.rs` — a meeting's Ask thread kept with it (a `chats.json` conversation with `note`, never in Chat's list): reopened in the notepad and Notes, New chat / Past chats, deleted with the note.
 - `chat/tools.rs` (+ `tools/`: notes, memory, agent) / `chat/note_text.rs` — the tool loop: note tools (safe partial edits), apps, web (a local model must search first), safety rule.
 - `chat/stream.rs` — streaming answers: SSE from every provider (tool calls reassembled and checked, a whole answer when streaming fails), a step's text held until it's an answer (a forced search's never shown), ■ Stop, a newer question in the conversation replacing the turn still answering, a local stream stepping aside for a dictation; the checked answer replaces what streamed.
 - `chat/commands.rs` / `chat/turn.rs` — the Chat view's commands; one chat turn (`chat_turn`: the prompt, the eager RAG, the tool loop or a small model's web pipeline, the checks).
@@ -185,14 +186,14 @@ One folder per area (an area's `<area>.rs` lists its modules); a big module's pa
 
 **Notes** — [notes.md](./docs/architecture/notes.md)
 - `notes.rs` — the notes store (`notes.json`), folders, the Actions engine, transcript fields.
-- `notes/note_edits.rs` — notes you can fix: a transcript line's words (marked edited, kept through Transcribe again, offered to the dictionary), the summary's words; a summary run never writes over the person's unasked ("kept").
+- `notes/note_edits.rs` — notes you can fix: a transcript line's words (marked edited, kept through Transcribe again, offered to the dictionary), the summary's words; a summary run never writes over the person's unasked ("kept"); Back to Yap's summary (Undo); 👍 👎 on it, on this PC only.
 - `notes/tasks.rs` — the summary's checkboxes: ticked in place (`- [x]`), carried into a new summary, listed across notes for the Tasks view ("Said at" the line), read only over the local API / MCP.
 
 **Meetings** — [meetings.md](./docs/architecture/meetings.md) (guide: [`docs/meetings.md`](./docs/meetings.md))
 - `meetings/meeting.rs` — the recorder: mic + loopback, chunking, echo, dictations kept out, one clock; its mic unplugged → the next one in the order (marked); failed chunks marked (told once); one recorder per start (the slot claimed first); `delete_note` never the recording's; `replay` from disk.
 - `meetings/meeting_audio.rs` (+ `meetings/meeting_audio/`) — the meeting's audio kept on disk as it records (own FLAC encoder, 14 days): crash recovery, Transcribe again (`redo.rs`: notes, summary, names on matching lines kept), Try again on a failed stretch, ▶ a line; jobs with Cancel.
-- `meetings/meeting_summary.rs` (+ `meeting_summary/`: digest, action_plan, helpers) — rolling digests, bounded inputs, action-plan checks, helper inputs.
-- `meetings/meeting_end.rs` — a recording's end: "Started by mistake?", AI title, the action-plan job; the refine before or after it.
+- `meetings/meeting_summary.rs` (+ `meeting_summary/`: digest, action_plan, helpers, language) — rolling digests, bounded inputs, action-plan checks (in any language), helper inputs; the summary in the meeting's language (read from its words, else your first language), English headings, a recap and each decision's reason.
+- `meetings/meeting_end.rs` — a recording's end: "Started by mistake?", AI title, the action-plan job ("Your summary is ready" on the bar with no Yap window in front); the refine before or after it.
 - `meetings/meeting_refine.rs` — the refined transcript when a meeting ends: when it helps (failed chunks, a more accurate model for its language), always or never; summary first unless the transcript has holes; low priority, cancellable.
 - `meetings/meeting_assist.rs` — the notepad's AI: What did I miss?, one-tap helpers, the AI title.
 - `meetings/notepad.rs` — the meeting notepad window: docking, split screen and its preview.

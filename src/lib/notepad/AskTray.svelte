@@ -14,16 +14,22 @@
   // it's down): What did I miss? and Questions to ask while recording,
   // Follow-up email and Gaps and risks after (`meetingHelpers`). Answers are
   // streamed (chat/stream.rs, core/streaming.js), with ■ to stop one, and can be
-  // copied, read aloud and rated (kept on this PC only).
-  import { tick } from 'svelte';
+  // copied, read aloud and rated (kept on this PC only). The thread is kept
+  // with the meeting (chat/note_chats.rs, core/noteChat.js): it's there again
+  // when the note opens, here or in Notes, each turn saved as it's shown;
+  // New chat starts another, and Past chats reopens an earlier one.
+  import { tick, onMount } from 'svelte';
+  import { listen } from '@tauri-apps/api/event';
   import { renderMarkdown } from '../core/markdown.js';
+  import { loadNoteChat, openNoteChat, keepTurn, keptMessage, threadMessages, pastChatItems } from '../core/noteChat.js';
+  import { showSaveError } from '../notices/saveErrors.js';
   import { nextModel, modelLine, whereItRuns } from '../core/aiModel.js';
   import { messageItems } from '../core/itemMenus.js';
   import { MEETING_HELPERS, meetingHelpers } from '../core/notepadText.js';
   import { streamCall, liveAnswer, applyEvent, closePartial, settle, streamingHeight, STOPPED } from '../core/streaming.js';
   import { speech, readAloud } from '../stores/speech.svelte.js';
   import { openContextMenu, menuKey } from '../ui/contextMenu.svelte.js';
-  import { copyToClipboard, openSettings } from './actions.js';
+  import { copyToClipboard, openSettings, LABEL } from './actions.js';
   import Icon from './NotepadIcon.svelte';
 
   /**
@@ -79,18 +85,88 @@
     open = false;
     askEl?.blur();
   }
-  /** Another note: its own conversation. */
+  /** Another note: its own conversation (its kept thread follows, below). */
   export function reset() {
     askThread = [];
     askSetup = null;
+    threadId = null;
+    threads = [];
   }
+  /** New chat: another thread from the next question (this one stays, under Past chats). */
   function newChat() {
     askThread = [];
     askSetup = null;
+    threadId = null;
     askInput = '';
     fitAsk();
     askEl?.focus();
   }
+
+  // ---- the thread kept with the meeting (chat/note_chats.rs) ----
+
+  // The thread shown (null: none yet, or New chat) and the note's threads.
+  let threadId = $state(null);
+  let threads = $state([]);
+  let threadFor = null;
+  $effect(() => {
+    const id = note?.id ?? null;
+    if (id === threadFor) return;
+    threadFor = id;
+    reset();
+    if (id != null) loadThread(id);
+  });
+  /** Note `id`'s newest thread, or thread `conversation` of it. */
+  async function loadThread(id, conversation = null) {
+    try {
+      const chat = await loadNoteChat(id);
+      const c = conversation != null ? await openNoteChat(id, conversation) : chat.current;
+      if (note?.id !== id || askBusy) return;
+      threads = chat.threads || [];
+      threadId = c?.id ?? null;
+      askThread = threadMessages(c, 'np');
+      scrollThread();
+    } catch {
+      /* none kept: a new thread */
+    }
+  }
+  /** Keep a turn as shown; a new thread's id comes back. */
+  async function keep(id, messages) {
+    try {
+      const conv = await keepTurn(id, threadId, messages.map(keptMessage), LABEL);
+      if (note?.id !== id) return;
+      threadId = conv;
+      threads = (await loadNoteChat(id)).threads || threads;
+    } catch (e) {
+      // Kept in memory and saved with the next change (shell/saving.rs).
+      showSaveError(e);
+    }
+  }
+  /** Past chats: the note's threads, the one shown ticked. */
+  function pastChats(e) {
+    const id = note?.id;
+    if (id == null) return;
+    openContextMenu(
+      e,
+      pastChatItems(threads, threadId, (conv) => loadThread(id, conv)),
+      { label: 'Past chats' }
+    );
+  }
+  onMount(() => {
+    let un = null;
+    let gone = false;
+    // The Notes view added to this meeting's thread: show it, when it's
+    // the one here (or nothing is).
+    listen('yap-note-chat', (e) => {
+      const p = e.payload || {};
+      if (p.origin === LABEL || p.noteId !== note?.id || askBusy) return;
+      if (threadId === p.conversationId || (threadId == null && !askThread.length)) loadThread(p.noteId, p.conversationId);
+      else loadNoteChat(p.noteId).then((c) => note?.id === p.noteId && (threads = c.threads || [])).catch(() => {});
+    }).then((u) => (gone ? u() : (un = u)));
+    return () => {
+      gone = true;
+      un?.();
+    };
+  });
 
   /** Ask: no `question` = "What did I miss?" (since you last looked). */
   function ask(question = null) {
@@ -176,12 +252,16 @@
       };
       askThread = aid ? askThread.map((x) => (x.id === aid ? answer : x)) : [...askThread, answer];
       after?.(r);
+      // Kept with the meeting, as shown (chat/note_chats.rs).
+      await keep(id, [{ role: 'user', text: question }, answer]);
     } catch (e) {
       if (note?.id !== id) return;
       if (aid) askThread = askThread.filter((x) => x.id !== aid);
       const msg = String(e);
       if (askStopping && msg.includes(STOPPED)) {
         askThread = [...askThread, { id: `${Date.now()}-${++askSeq}`, role: 'assistant', text: 'Stopped.', quiet: true }];
+        // The question stays with the meeting; nothing came to keep.
+        await keep(id, [{ role: 'user', text: question }]);
       } else if (/No AI model configured|API key/i.test(msg)) askSetup = msg;
       else
         askThread = [
@@ -302,6 +382,9 @@
         <!-- The grab handle: a mouse target; the − button is the accessible one. -->
         <button class="handle" aria-hidden="true" tabindex="-1" onclick={close}><span></span></button>
         <div class="sheetbtns">
+          {#if threads.length > 1 || (threads.length === 1 && threads[0].id !== threadId)}
+            <button class="sbtn" aria-label="Past chats" data-tip="Past chats" data-more onclick={pastChats}><Icon name="clock" /></button>
+          {/if}
           <button class="sbtn" aria-label="New chat" data-tip="New chat" onclick={newChat}><Icon name="newchat" /></button>
           <button class="sbtn" aria-label="Minimise chat" data-tip="Minimise" onclick={close}><Icon name="min" /></button>
         </div>

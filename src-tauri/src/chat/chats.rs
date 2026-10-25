@@ -49,6 +49,10 @@ pub struct ChatMessage {
     /// (`snip::images`). Only written when there are some.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub images: Vec<ChatImage>,
+    /// An answer to show and copy as plain text, not markdown (a note's Ask
+    /// thread: the follow-up email, `note_chats.rs`).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub plain: bool,
 }
 
 /// A screenshot a question carried: the file's id (`img_<16 hex>`), its
@@ -154,6 +158,12 @@ pub struct Conversation {
     /// meetings, follow-ups too (`turn::chat_turn`). Empty: plain Chat.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub scope: String,
+    /// The note this is the Ask thread of (a meeting's, asked in the notepad
+    /// or in its note in Notes; `note_chats.rs`): kept with the note and
+    /// deleted with it, never in Chat's list, its past-chats search or the
+    /// Voice Assistant's "latest". `None`: a Chat conversation.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub note: Option<u64>,
 }
 
 #[derive(Debug, Default, Serialize, Deserialize)]
@@ -281,11 +291,12 @@ pub fn rename(id: u64, title: &str) -> Result<String, String> {
     })
 }
 
-/// Conversation summaries, newest-updated first:
-/// `{ id, title, updatedTs, messageCount }`.
+/// Chat's conversation summaries, newest-updated first:
+/// `{ id, title, updatedTs, messageCount }` (a note's Ask threads are the
+/// note's: [`for_note`]).
 pub fn list() -> Value {
     with_store(|s| {
-        let mut sorted: Vec<&Conversation> = s.conversations.iter().collect();
+        let mut sorted: Vec<&Conversation> = s.conversations.iter().filter(|c| c.note.is_none()).collect();
         sorted.sort_by_key(|c| std::cmp::Reverse(c.updated_ts));
         let items: Vec<Value> = sorted
             .into_iter()
@@ -306,18 +317,29 @@ pub fn get(id: u64) -> Option<Conversation> {
     with_store(|s| s.conversations.iter().find(|c| c.id == id).cloned())
 }
 
-/// The conversation updated last: `(id, updated_ts)` (the Voice Assistant
-/// continues it while it's recent, `assistant::choose_conversation`).
+/// Chat's conversation updated last: `(id, updated_ts)` (the Voice Assistant
+/// continues it while it's recent, `assistant::choose_conversation`; never a
+/// note's Ask thread).
 pub fn latest() -> Option<(u64, u64)> {
     with_store(|s| {
         s.conversations
             .iter()
+            .filter(|c| c.note.is_none())
             .max_by_key(|c| (c.updated_ts, c.id))
             .map(|c| (c.id, c.updated_ts))
     })
 }
 
 pub fn create(title: &str) -> Conversation {
+    create_with(title, None)
+}
+
+/// A new Ask thread of note `note` (`note_chats.rs`).
+pub fn create_for_note(note: u64, title: &str) -> Conversation {
+    create_with(title, Some(note))
+}
+
+fn create_with(title: &str, note: Option<u64>) -> Conversation {
     with_store(|s| {
         let id = s.conversations.iter().map(|c| c.id).max().unwrap_or(0) + 1;
         let now = now_secs();
@@ -328,10 +350,44 @@ pub fn create(title: &str) -> Conversation {
             updated_ts: now,
             messages: Vec::new(),
             scope: String::new(),
+            note,
         };
         s.conversations.push(conv.clone());
         save_to_disk(s);
         conv
+    })
+}
+
+/// Note `note`'s Ask threads, newest-updated first.
+pub fn for_note(note: u64) -> Vec<Conversation> {
+    with_store(|s| {
+        let mut mine: Vec<Conversation> = s.conversations.iter().filter(|c| c.note == Some(note)).cloned().collect();
+        mine.sort_by_key(|c| std::cmp::Reverse((c.updated_ts, c.id)));
+        mine
+    })
+}
+
+/// Note `note` was deleted: its Ask threads go with it (in one write).
+/// Returns how many.
+pub fn delete_for_note(note: u64) -> usize {
+    let ids: Vec<u64> = with_store(|s| s.conversations.iter().filter(|c| c.note == Some(note)).map(|c| c.id).collect());
+    if ids.is_empty() {
+        return 0;
+    }
+    delete_many(&ids)
+}
+
+/// Add a whole message to a conversation (a note's Ask thread keeps what
+/// the window showed: `plain`, `stopped`, the model). Returns its index.
+pub fn append_whole(id: u64, mut message: ChatMessage) -> Result<usize, String> {
+    with_store(|s| {
+        let conv = s.conversations.iter_mut().find(|c| c.id == id).ok_or("Conversation not found")?;
+        message.ts = now_secs();
+        conv.messages.push(message);
+        conv.updated_ts = now_secs();
+        let index = conv.messages.len() - 1;
+        save_to_disk(s);
+        Ok(index)
     })
 }
 
@@ -409,6 +465,7 @@ pub fn append_message(
             sources: sources.to_vec(),
             stopped,
             images: Vec::new(),
+            plain: false,
         });
         conv.updated_ts = now_secs();
         let index = conv.messages.len() - 1;
@@ -536,7 +593,7 @@ pub fn search(query: &str, exclude: Option<u64>, limit: usize) -> Vec<Found> {
         let mut scored: Vec<(usize, &Conversation, Vec<&ChatMessage>)> = s
             .conversations
             .iter()
-            .filter(|c| Some(c.id) != exclude)
+            .filter(|c| Some(c.id) != exclude && c.note.is_none())
             .filter_map(|c| {
                 let title = c.title.to_lowercase();
                 let in_title = words.iter().filter(|w| title.contains(w.as_str())).count();
@@ -1027,6 +1084,7 @@ mod tests {
             sources,
             stopped: false,
             images: vec![],
+            plain: false,
         };
         let messages = vec![
             msg("user", vec![]),
