@@ -13,14 +13,15 @@
 // the recording mode (and push-to-talk's tap / double-tap) is Rust's to
 // decide.
 import { invoke } from '@tauri-apps/api/core';
-import { hotkeyMatchesKeydown, hotkeyMatchesKeyup } from '../core/hotkeys.js';
+import {
+  actionMatchesKeydown as downOn,
+  actionMatchesKeyup as upOn,
+  hotkeyMatchesKeydown,
+  hotkeyMatchesKeyup,
+} from '../core/hotkeys.js';
 import { readPageSelection } from '../stores/speech.svelte.js';
-import { actionHotkeys, hotkeyCapture } from './hotkeys.svelte.js';
+import { hotkeyCapture } from './hotkeys.svelte.js';
 import { languageShortcuts } from './languages.svelte.js';
-
-// Any of an action's keys (its first, and its more: "+ Add another").
-const downOn = (e, cfg, key) => actionHotkeys(cfg, key).some((h) => hotkeyMatchesKeydown(e, h));
-const upOn = (e, cfg, key) => actionHotkeys(cfg, key).some((h) => hotkeyMatchesKeyup(e, h));
 
 /** Call while the component initialises; `getCfg()` = Settings' config copy (or null). */
 export function followHotkeyFallback(getCfg) {

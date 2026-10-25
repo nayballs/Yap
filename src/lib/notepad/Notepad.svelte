@@ -32,7 +32,7 @@
   import { initSpeech, readPageSelection } from '../stores/speech.svelte.js';
   import { summaries, initMeetingSummary, loadSummary, summarise, askStartedByMistake } from '../stores/meetingSummary.svelte.js';
   import { initMeetingAudio, refreshAudio, stopLine } from '../stores/meetingAudio.svelte.js';
-  import { hotkeyMatchesKeydown, hotkeyMatchesKeyup } from '../core/hotkeys.js';
+  import { actionMatchesKeydown, actionMatchesKeyup } from '../core/hotkeys.js';
   import { withLineSpeakers, withLineSplice, hasLine, withLineEdit } from '../core/notepadText.js';
   import { askReplaceSummary } from '../core/noteEdits.js';
   import { LABEL } from './actions.js';
@@ -491,22 +491,23 @@
   // without speaking).
   function onKeyDown(e) {
     if (e.repeat || !cfg) return;
-    if (cfg.meetingHotkey && hotkeyMatchesKeydown(e, cfg.meetingHotkey)) {
+    // (Each action's more keys too: "+ Add another".)
+    if (actionMatchesKeydown(e, cfg, 'meetingHotkey')) {
       e.preventDefault();
       e.stopPropagation();
       flushSave();
       invoke('meeting_shortcut', { origin: LABEL }).catch(() => {});
-    } else if (cfg.assistantHotkey && hotkeyMatchesKeydown(e, cfg.assistantHotkey)) {
+    } else if (actionMatchesKeydown(e, cfg, 'assistantHotkey')) {
       e.preventDefault();
       e.stopPropagation();
       invoke('assistant_key', { pressed: true }).catch(() => {});
-    } else if (cfg.readHotkey && hotkeyMatchesKeydown(e, cfg.readHotkey)) {
+    } else if (actionMatchesKeydown(e, cfg, 'readHotkey')) {
       // Read aloud (voice/read_aloud.rs): what's selected here. (During a meeting
       // Yap keeps quiet, and the card says so.)
       e.preventDefault();
       e.stopPropagation();
       readPageSelection();
-    } else if (hotkeyMatchesKeydown(e, cfg.hotkey)) {
+    } else if (actionMatchesKeydown(e, cfg, 'hotkey')) {
       e.preventDefault();
       e.stopPropagation();
       invoke('dictation_key', { pressed: true }).catch(() => {});
@@ -515,10 +516,10 @@
   // The key coming up: push-to-talk's release (Rust decides by the mode).
   function onKeyUp(e) {
     if (!cfg) return;
-    if (cfg.assistantHotkey && hotkeyMatchesKeyup(e, cfg.assistantHotkey)) {
+    if (actionMatchesKeyup(e, cfg, 'assistantHotkey')) {
       e.preventDefault();
       invoke('assistant_key', { pressed: false }).catch(() => {});
-    } else if (hotkeyMatchesKeyup(e, cfg.hotkey)) {
+    } else if (actionMatchesKeyup(e, cfg, 'hotkey')) {
       e.preventDefault();
       invoke('dictation_key', { pressed: false }).catch(() => {});
     }

@@ -50,11 +50,6 @@ export function moreHotkeys(cfg, target) {
   return Array.isArray(list) ? list.filter((s) => typeof s === 'string' && s) : [];
 }
 
-/** Every key of an action: its first, then its more. */
-export function actionHotkeys(cfg, target) {
-  return [cfg?.[target], ...moreHotkeys(cfg, target)].filter(Boolean);
-}
-
 /** Set an action's more shortcuts (blanks dropped; none: the key goes). */
 export function setMoreHotkeys(cfg, target, list) {
   const clean = list.filter(Boolean).slice(0, MORE_SHORTCUTS);
