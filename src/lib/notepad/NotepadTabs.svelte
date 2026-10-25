@@ -1,7 +1,7 @@
 <script>
   // The tabs, 44 px with a hairline under the whole row: My thoughts,
-  // Transcript (a live waveform on it while recording) and Summary (a +
-  // until there's one).
+  // Transcript (a live waveform on it while recording), Summary (a +
+  // until there's one) and Tasks.
   import Icon from './NotepadIcon.svelte';
 
   let { tab = $bindable(), recordingThis, hasSummary } = $props();
@@ -22,6 +22,8 @@
       {#if !hasSummary}<span class="plus" aria-hidden="true"><Icon name="plus" /></span>{/if}
       Summary
     </button>
+    <!-- The meeting's tasks: the summary's and the ones added (notes/tasks.rs). -->
+    <button role="tab" class="tab" aria-selected={tab === 'tasks'} onclick={() => (tab = 'tasks')}>Tasks</button>
   </div>
 </div>
 

@@ -45,6 +45,7 @@
   import ThoughtsTab from './ThoughtsTab.svelte';
   import TranscriptTab from './TranscriptTab.svelte';
   import SummaryTab from './SummaryTab.svelte';
+  import MeetingTasks from '../components/MeetingTasks.svelte';
   import GenerateSummary from './GenerateSummary.svelte';
   import ConsentLine from './ConsentLine.svelte';
   import AskTray from './AskTray.svelte';
@@ -59,7 +60,7 @@
   let elapsed = $state(0);
   let elapsedTimer = null;
   let stopping = $state(false);
-  let tab = $state('thoughts'); // thoughts | transcript | summary
+  let tab = $state('thoughts'); // thoughts | transcript | summary | tasks
   let cfg = null; // for the in-page hotkey fallback
   // "Show live transcript" (Settings → Meetings): off, the
   // Transcript tab stays quiet until the meeting stops.
@@ -624,6 +625,8 @@
             onreload={reload}
             onspeakerchanged={onSpeakerChanged}
           />
+        {:else if tab === 'tasks'}
+          <MeetingTasks noteId={note.id} look="paper" />
         {:else}
           <SummaryTab
             bind:note

@@ -8,12 +8,16 @@
   // (`note_task_set`), so the notepad and the Notes view show it too, and
   // a tick there shows here (`yap-note-changed`). A task just ticked stays
   // in the list, struck through, until you leave, so a slip is one click
-  // to undo; Show done lists the rest.
+  // to undo; Show done lists the rest. **Add a task** puts one of your own
+  // here, with no meeting ("Your tasks", first; a meeting's Tasks tab adds
+  // to that meeting); **Archive done** takes the done ones out of this list,
+  // with Undo (they stay ticked in their meeting).
   import { invoke } from '@tauri-apps/api/core';
   import { listen } from '@tauri-apps/api/event';
   import { onMount } from 'svelte';
   import { toast } from '../ui/toast.svelte.js';
-  import { clock, dateLine } from '../core/notepadText.js';
+  import { showSaveError } from '../notices/saveErrors.js';
+  import { clock, dateLine, taskRef } from '../core/notepadText.js';
   import { setTask } from '../core/noteEdits.js';
 
   /** This view's `origin` for its ticks. */
@@ -58,15 +62,80 @@
     }
   }
 
-  const keyOf = (t) => `${t.noteId}:${t.text}`;
+  const keyOf = (t) => (t.own != null ? `o${t.own}` : `${t.noteId}:${t.text}`);
+  // Archived ones aren't listed (they stay ticked in their meeting).
   const all = $derived(
     notes.flatMap((n) =>
-      n.tasks.map((t) => ({ ...t, noteId: n.noteId, title: n.title, createdTs: n.createdTs, noteType: n.noteType }))
+      n.tasks
+        .filter((t) => !t.archived)
+        .map((t) => ({ ...t, noteId: n.noteId, title: n.title, createdTs: n.createdTs, noteType: n.noteType }))
     )
   );
   const openCount = $derived(all.filter((t) => !t.done).length);
   const doneCount = $derived(all.length - openCount);
   const shown = $derived(all.filter((t) => showDone || !t.done || ticked.has(keyOf(t))));
+
+  function failed(title, e) {
+    if (showSaveError(e)) return;
+    toast({ title, description: String(e), variant: 'destructive' });
+  }
+
+  // Add a task of your own, with no meeting.
+  let newTask = $state('');
+  let adding = $state(false);
+  async function addTask(e) {
+    e?.preventDefault();
+    const text = newTask.trim();
+    if (!text || adding) return;
+    adding = true;
+    try {
+      await invoke('task_add', { text, noteId: null });
+      newTask = '';
+      await refresh();
+    } catch (err) {
+      failed("Couldn't add the task", err);
+    } finally {
+      adding = false;
+    }
+  }
+  async function removeTask(t) {
+    try {
+      await invoke('task_remove', { id: t.own });
+      await refresh();
+    } catch (e) {
+      failed("Couldn't remove the task", e);
+    }
+  }
+
+  // Archive the done tasks: out of this list, with Undo.
+  async function archiveDone() {
+    const items = all.filter((t) => t.done).map((t) => taskRef(t.noteId, t));
+    if (!items.length) return;
+    try {
+      const n = await invoke('tasks_archive', { items, archived: true });
+      ticked = new Set();
+      await refresh();
+      toast({
+        title: n === 1 ? '1 done task archived' : `${n} done tasks archived`,
+        description: 'They stay ticked in their meetings.',
+        key: 'tasks-archived',
+        duration: 8_000,
+        action: {
+          label: 'Undo',
+          onClick: async () => {
+            try {
+              await invoke('tasks_archive', { items, archived: false });
+            } catch (e) {
+              failed("Couldn't undo that", e);
+            }
+            refresh();
+          },
+        },
+      });
+    } catch (e) {
+      failed("Couldn't archive them", e);
+    }
+  }
 
   /** "You" first, then names A–Z, then Everyone, Unassigned and no owner. */
   function ownerRank(owner) {
@@ -81,9 +150,16 @@
   const byMeeting = $derived.by(() => {
     const groups = [];
     for (const n of notes) {
+      // (The summary's in order, then the ones added in it.)
       const tasks = shown
         .filter((t) => t.noteId === n.noteId)
-        .sort((a, b) => (a.owner === 'You' ? 0 : 1) - (b.owner === 'You' ? 0 : 1) || a.line - b.line);
+        .sort(
+          (a, b) =>
+            (a.owner === 'You' ? 0 : 1) - (b.owner === 'You' ? 0 : 1) ||
+            (a.own != null ? 1 : 0) - (b.own != null ? 1 : 0) ||
+            a.line - b.line ||
+            (a.own ?? 0) - (b.own ?? 0)
+        );
       if (tasks.length) groups.push({ key: `n${n.noteId}`, noteId: n.noteId, title: n.title, createdTs: n.createdTs, tasks });
     }
     return groups;
@@ -104,15 +180,20 @@
   async function toggleTask(t, done) {
     const k = keyOf(t);
     const at = notes.findIndex((n) => n.noteId === t.noteId);
-    const i = at < 0 ? -1 : notes[at].tasks.findIndex((x) => x.line === t.line && x.text === t.text);
+    const i =
+      at < 0
+        ? -1
+        : notes[at].tasks.findIndex((x) => (t.own != null ? x.own === t.own : x.own == null && x.line === t.line && x.text === t.text));
     if (i < 0) return;
     notes[at].tasks[i].done = done;
     if (done) ticked = new Set([...ticked, k]);
     try {
-      await setTask(t.noteId, { line: t.line, text: t.text, done }, LABEL);
+      // A summary's: its "- [x]"; one added: its own tick (notes/tasks.rs).
+      if (t.own != null) await invoke('tasks_set', { items: [taskRef(t.noteId, t)], done, origin: LABEL });
+      else await setTask(t.noteId, { line: t.line, text: t.text, done }, LABEL);
     } catch (e) {
       notes[at].tasks[i].done = !done;
-      toast({ title: "Couldn't tick the task", description: String(e), variant: 'destructive' });
+      if (!showSaveError(e)) toast({ title: "Couldn't tick the task", description: String(e), variant: 'destructive' });
       refresh();
     }
   }
@@ -130,7 +211,7 @@
       clearTimeout(timer);
       timer = setTimeout(refresh, 150);
     };
-    for (const name of ['yap-note-changed', 'yap-notes-changed', 'yap-note-deleted']) {
+    for (const name of ['yap-note-changed', 'yap-notes-changed', 'yap-note-deleted', 'yap-tasks-changed']) {
       listen(name, later).then((u) => uns.push(u));
     }
     listen('yap-meeting-summary', (e) => e.payload?.state === 'done' && later()).then((u) => uns.push(u));
@@ -142,7 +223,7 @@
 </script>
 
 {#snippet taskRow(t, showOwner, showMeeting)}
-  {@const id = `task-${t.noteId}-${t.line}`}
+  {@const id = t.own != null ? `task-o${t.own}` : `task-${t.noteId}-${t.line}`}
   <li class="task" class:done={t.done}>
     <input {id} type="checkbox" checked={t.done} onchange={(e) => toggleTask(t, e.currentTarget.checked)} />
     <div class="tbody">
@@ -152,9 +233,10 @@
           <span class="chip owner" class:you={t.owner === 'You'}>{ownerLabel(t.owner)}</span>
         {/if}
         {#if t.due}<span class="chip due">Due {t.due}</span>{/if}
-        {#if showMeeting}
+        {#if showMeeting && t.noteId}
           <button class="link" onclick={() => open(t)} title="Open this meeting in Notes">{t.title}</button>
         {/if}
+        {#if t.own != null}<span class="added">Added by you</span>{/if}
         {#if t.at}
           <button
             class="link moment"
@@ -168,6 +250,11 @@
         {/if}
       </div>
     </div>
+    {#if t.own != null}
+      <button class="remove" aria-label={`Remove “${t.task}”`} title="Remove this task" onclick={() => removeTask(t)}>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" /></svg>
+      </button>
+    {/if}
   </li>
 {/snippet}
 
@@ -177,9 +264,22 @@
       <header class="head">
         <div>
           <h1 tabindex="-1">Tasks</h1>
-          <p class="sub">From your meetings' action plans. Tick one here or in the meeting: it's the same task.</p>
+          <p class="sub">From your meetings' action plans, and your own. Tick one here or in the meeting: it's the same task.</p>
         </div>
       </header>
+
+      <!-- A task of your own, with no meeting (notes/tasks.rs). -->
+      <form class="addrow" onsubmit={addTask}>
+        <input
+          class="addin"
+          bind:value={newTask}
+          placeholder="Add a task… (“Priya: send the budget (due: Friday)”)"
+          aria-label="Add a task"
+          maxlength="500"
+          disabled={adding}
+        />
+        <button class="addbtn" type="submit" disabled={!newTask.trim() || adding}>Add</button>
+      </form>
 
       {#if loaded && all.length}
         <div class="bar">
@@ -189,6 +289,11 @@
           </div>
           <span class="count" aria-live="polite">{openCount} open</span>
           <span class="grow"></span>
+          {#if doneCount}
+            <button class="archive" onclick={archiveDone} title="Take the done tasks out of this list. They stay ticked in their meetings.">
+              Archive done ({doneCount})
+            </button>
+          {/if}
           <label class="showdone">
             <input type="checkbox" bind:checked={showDone} />
             Show done{doneCount ? ` (${doneCount})` : ''}
@@ -202,7 +307,10 @@
         <div class="empty">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3.5" y="3.5" width="17" height="17" rx="3" /><path d="M8 12.5l3 3 5-6" /></svg>
           <p class="e1">No tasks yet</p>
-          <p class="e2">When a meeting ends, its action plan lists who does what. Those tasks show here, to tick off as they're done.</p>
+          <p class="e2">
+            When a meeting ends, its action plan lists who does what. Those tasks show here, to tick off as they're done, with
+            any you add.
+          </p>
         </div>
       {:else if !shown.length}
         <div class="empty">
@@ -213,11 +321,16 @@
         {#each byMeeting as g (g.key)}
           <section class="sec" aria-labelledby={`h-${g.key}`}>
             <div class="seccap">
-              <h2 id={`h-${g.key}`}><button class="meetlink" onclick={() => onopennote?.(g.noteId, null)}>{g.title}</button></h2>
-              <span class="secdate">{dateLine(g.createdTs)}</span>
+              {#if g.noteId}
+                <h2 id={`h-${g.key}`}><button class="meetlink" onclick={() => onopennote?.(g.noteId, null)}>{g.title}</button></h2>
+                <span class="secdate">{dateLine(g.createdTs)}</span>
+              {:else}
+                <!-- Added here, with no meeting. -->
+                <h2 id={`h-${g.key}`}>Your tasks</h2>
+              {/if}
             </div>
             <ul class="list">
-              {#each g.tasks as t (`${t.noteId}:${t.line}`)}
+              {#each g.tasks as t (keyOf(t) + (t.own != null ? '' : `:${t.line}`))}
                 {@render taskRow(t, true, false)}
               {/each}
             </ul>
@@ -231,7 +344,7 @@
               <span class="secdate">{g.tasks.filter((t) => !t.done).length} open</span>
             </div>
             <ul class="list">
-              {#each g.tasks as t (`${t.noteId}:${t.line}`)}
+              {#each g.tasks as t (keyOf(t) + (t.own != null ? '' : `:${t.line}`))}
                 {@render taskRow(t, false, true)}
               {/each}
             </ul>
@@ -313,6 +426,91 @@
   .count {
     font-size: 12.5px;
     color: var(--yap-muted-70);
+  }
+  /* Add a task (no meeting). */
+  .addrow {
+    display: flex;
+    gap: 8px;
+    margin: 0 0 16px;
+  }
+  .addin {
+    flex: 1;
+    min-width: 0;
+    height: 34px;
+    box-sizing: border-box;
+    padding: 0 12px;
+    border: 1px solid var(--yap-border-subtle);
+    border-radius: var(--yap-r-lg);
+    background: var(--yap-s2);
+    color: var(--yap-fg);
+    font: inherit;
+    font-size: 13px;
+  }
+  .addin::placeholder {
+    color: var(--yap-muted-55);
+  }
+  .addbtn,
+  .archive {
+    height: 30px;
+    padding: 0 12px;
+    border: 1px solid var(--yap-border-subtle);
+    border-radius: var(--yap-r-full);
+    background: var(--yap-raised-soft);
+    color: var(--yap-fg-80);
+    font: inherit;
+    font-size: 12.5px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  .addbtn {
+    height: 34px;
+  }
+  .addbtn:disabled {
+    opacity: 0.5;
+    cursor: default;
+  }
+  .addbtn:hover:not(:disabled),
+  .archive:hover {
+    background: var(--yap-s2);
+    color: var(--yap-fg);
+  }
+  .added {
+    color: var(--yap-muted-55);
+  }
+  .remove {
+    flex: 0 0 auto;
+    margin-left: auto;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 24px;
+    height: 24px;
+    padding: 0;
+    border: none;
+    border-radius: 6px;
+    background: none;
+    color: var(--yap-muted);
+    opacity: 0;
+    cursor: pointer;
+  }
+  .remove svg {
+    width: 12px;
+    height: 12px;
+  }
+  .task:hover .remove,
+  .remove:focus-visible {
+    opacity: 1;
+  }
+  .remove:hover {
+    background: var(--yap-raised-soft);
+    color: var(--yap-fg);
+  }
+  .addin:focus,
+  .addbtn:focus-visible,
+  .archive:focus-visible,
+  .remove:focus-visible {
+    outline: none;
+    box-shadow: var(--yap-focus);
   }
   .showdone {
     display: inline-flex;

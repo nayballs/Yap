@@ -9,9 +9,14 @@
   import NoteSummary from './NoteSummary.svelte';
   import NoteTranscript from './NoteTranscript.svelte';
   import NoteChat from './NoteChat.svelte';
+  import MeetingTasks from '../../components/MeetingTasks.svelte';
 
   /** `notes`: the view's state; `onopensettings(section)`: ControlPanel's Settings. */
   let { notes, onopensettings = null } = $props();
+
+  const hasSummary = $derived(!!(notes.selected?.enhancedContent || notes.summaryEditing));
+  // A meeting note has a Tasks tab (the summary's tasks and the ones added).
+  const isMeeting = $derived(notes.selected?.noteType === 'meeting' || !!notes.selected?.transcript?.length);
 </script>
 
 <section class="editor">
@@ -39,9 +44,9 @@
          folder, with export at the right. -->
     <NoteMeta {notes} />
 
-    {#if notes.selected.enhancedContent || notes.summaryEditing}
+    {#if hasSummary || isMeeting}
       <div class="tabs">
-        <!-- The meeting notepad's names for the same two things. -->
+        <!-- The meeting notepad's names for the same things. -->
         <button
           class="tab"
           class:active={notes.tab === 'raw'}
@@ -50,27 +55,42 @@
             notes.tab = 'raw';
           }}>My thoughts</button
         >
-        <button class="tab" class:active={notes.tab === 'enhanced'} onclick={() => (notes.tab = 'enhanced')}>
-          Summary
-          {#if notes.isStale}<span class="staledot" title="Your notes changed since this summary: run the action again to update it"></span>{/if}
-        </button>
-        <span class="tabspacer"></span>
-        {#if notes.tab === 'enhanced'}
-          <!-- Fix the summary's words in place (notes/note_edits.rs). -->
-          <button
-            class="copy"
-            aria-pressed={notes.summaryEditing}
-            onclick={() => (notes.summaryEditing ? notes.finishSummaryEdit() : notes.startSummaryEdit())}
-          >
-            {notes.summaryEditing ? 'Done' : 'Edit summary'}
+        {#if hasSummary}
+          <button class="tab" class:active={notes.tab === 'enhanced'} onclick={() => (notes.tab = 'enhanced')}>
+            Summary
+            {#if notes.isStale}<span class="staledot" title="Your notes changed since this summary: run the action again to update it"></span>{/if}
           </button>
         {/if}
-        <button class="copy" onclick={() => notes.copyEnhanced(false)}>
-          {notes.copied === 'markdown' ? 'Copied!' : 'Copy as Markdown'}
-        </button>
-        <button class="copy" onclick={() => notes.copyEnhanced(true)}>
-          {notes.copied === 'text' ? 'Copied!' : 'Copy as text'}
-        </button>
+        {#if isMeeting}
+          <!-- The meeting's tasks: the summary's and those added (notes/tasks.rs). -->
+          <button
+            class="tab"
+            class:active={notes.tab === 'tasks'}
+            onclick={() => {
+              notes.finishSummaryEdit();
+              notes.tab = 'tasks';
+            }}>Tasks</button
+          >
+        {/if}
+        <span class="tabspacer"></span>
+        {#if !(notes.tab === 'tasks' && isMeeting)}
+          {#if notes.tab === 'enhanced'}
+            <!-- Fix the summary's words in place (notes/note_edits.rs). -->
+            <button
+              class="copy"
+              aria-pressed={notes.summaryEditing}
+              onclick={() => (notes.summaryEditing ? notes.finishSummaryEdit() : notes.startSummaryEdit())}
+            >
+              {notes.summaryEditing ? 'Done' : 'Edit summary'}
+            </button>
+          {/if}
+          <button class="copy" onclick={() => notes.copyEnhanced(false)}>
+            {notes.copied === 'markdown' ? 'Copied!' : 'Copy as Markdown'}
+          </button>
+          <button class="copy" onclick={() => notes.copyEnhanced(true)}>
+            {notes.copied === 'text' ? 'Copied!' : 'Copy as text'}
+          </button>
+        {/if}
       </div>
     {/if}
 
@@ -105,7 +125,9 @@
       <p class="errline">{notes.job.error}</p>
     {/if}
 
-    {#if notes.tab === 'enhanced' && (notes.selected.enhancedContent || notes.summaryEditing)}
+    {#if notes.tab === 'tasks' && isMeeting}
+      <MeetingTasks noteId={notes.selected.id} look="app" />
+    {:else if notes.tab === 'enhanced' && (notes.selected.enhancedContent || notes.summaryEditing)}
       <NoteSummary {notes} />
     {:else}
       <textarea
@@ -122,6 +144,12 @@
          MeetingTranscriptChat style). Live while recording; kept afterwards. -->
     {#if notes.recordingThisNote || notes.selected.transcript?.length}
       <NoteTranscript {notes} />
+    {:else if notes.selected.transcriptDeletedTs}
+      <!-- Deleted after its days (Settings → Privacy & data, notes/retention.rs). -->
+      <p class="tdeleted" role="note">
+        This meeting's transcript was deleted after the days set in Settings → Privacy & data. Your notes, the summary
+        and its tasks are kept.
+      </p>
     {/if}
 
     <NoteChat {notes} {onopensettings} />
@@ -358,5 +386,15 @@
     font-size: 12px;
     color: var(--yap-danger);
     line-height: 1.5;
+  }
+  /* A transcript deleted after its days (notes/retention.rs). */
+  .tdeleted {
+    margin: 14px 0 0;
+    padding: 10px 12px;
+    border: 1px dashed var(--yap-border);
+    border-radius: var(--yap-r-lg);
+    font-size: 12.5px;
+    line-height: 1.5;
+    color: var(--yap-muted);
   }
 </style>
