@@ -107,9 +107,14 @@ pub fn context_so_far(digests: &[MeetingDigest], t0: u64) -> String {
 
 /// The chat messages for digest `part` over `lines` (one-shot example first:
 /// it's what keeps a 1.5B model in the four-heading layout). `people`: the
-/// attendees and speakers lines ([`people_lines`]).
-pub fn digest_messages(people: &str, context: &str, part: usize, range: &str, lines: &str) -> Value {
-    let user = format!("{people}\nThe meeting so far:\n{context}\n\nTranscript, part {part} ({range}):\n{lines}");
+/// attendees and speakers lines ([`people_lines`]); `language`: the line
+/// that keeps a meeting in another language in it (`language::digest_line`),
+/// after the transcript.
+pub fn digest_messages(people: &str, context: &str, part: usize, range: &str, lines: &str, language: Option<&str>) -> Value {
+    let user = super::language::with_line(
+        &format!("{people}\nThe meeting so far:\n{context}\n\nTranscript, part {part} ({range}):\n{lines}"),
+        language,
+    );
     json!([
         { "role": "system", "content": crate::ai::llm::MEETING_DIGEST_PROMPT },
         { "role": "user", "content": DIGEST_EXAMPLE_IN },
@@ -375,7 +380,10 @@ pub fn resolve_owner(raw: &str, attendees: &[String], source: &str) -> String {
         .trim_matches(|c: char| "*@[]\"'.,:".contains(c))
         .trim();
     let lower = owner.to_lowercase();
-    const NOBODY: [&str; 15] = [
+    // English, and the words a meeting's notes in another language use for
+    // the same (`language.rs` asks for "You" and "Unassigned"; a small
+    // model sometimes writes « Moi » or „Niemand“ anyway).
+    const NOBODY: &[&str] = &[
         "",
         "unassigned",
         "none",
@@ -391,9 +399,28 @@ pub fn resolve_owner(raw: &str, attendees: &[String], source: &str) -> String {
         "they",
         "other",
         "others",
+        "personne",
+        "non attribué",
+        "non attribuée",
+        "non attribuées",
+        "non assigné",
+        "quelqu'un",
+        "sin asignar",
+        "nadie",
+        "alguien",
+        "niemand",
+        "nicht zugewiesen",
+        "jemand",
+        "nessuno",
+        "non assegnato",
+        "ninguém",
+        "não atribuído",
+        "niet toegewezen",
     ];
-    const YOU: [&str; 5] = ["you", "me", "i", "myself", "the user"];
-    const EVERYONE: [&str; 7] = [
+    const YOU: &[&str] = &[
+        "you", "me", "i", "myself", "the user", "moi", "vous", "toi", "yo", "usted", "tú", "ich", "du", "io", "eu", "você", "ik",
+    ];
+    const EVERYONE: &[&str] = &[
         "everyone",
         "everybody",
         "all",
@@ -401,6 +428,17 @@ pub fn resolve_owner(raw: &str, attendees: &[String], source: &str) -> String {
         "the team",
         "all of us",
         "we",
+        "tout le monde",
+        "tous",
+        "l'équipe",
+        "équipe",
+        "todos",
+        "el equipo",
+        "alle",
+        "das team",
+        "tutti",
+        "il team",
+        "iedereen",
     ];
     if NOBODY.contains(&lower.as_str()) {
         return UNASSIGNED.to_string();

@@ -1,0 +1,115 @@
+[
+  {
+    "name": "en-offsite",
+    "language": "en",
+    "mine": ["en"],
+    "attendees": ["Alice", "Bob Stone"],
+    "lines": [
+      ["you", "Thanks both. Let's sort out the offsite: the venue, the budget and the agenda."],
+      ["them", "Alice here. I've compared the two venues. Lisbon is cheaper on flights for most of the team, so I'd go with Lisbon."],
+      ["you", "Agreed, Lisbon it is, the flights make the difference."],
+      ["them", "Bob here. I can book the venue, I'll do it by Friday."],
+      ["you", "Great. I'll draft the agenda and share it on Monday."],
+      ["them", "What about catering? Nobody has picked that up yet."],
+      ["you", "Let's leave catering open for now, but someone needs to get quotes this week."],
+      ["them", "Alice again. We also decided to keep it to two days, because people can't be away from their teams any longer."],
+      ["you", "Yes, two days. And we still don't know if the client team wants to join us."]
+    ],
+    "expect": {
+      "tasks": [
+        { "owner": "Bob Stone", "any": ["venue"] },
+        { "owner": "You", "any": ["agenda"] },
+        { "owner": "Unassigned", "any": ["catering", "quote"] }
+      ],
+      "decisions": [
+        { "any": ["Lisbon"], "reason": ["flight", "cheaper"] },
+        { "any": ["two days", "2 days", "two-day"], "reason": ["away", "longer", "teams"] }
+      ],
+      "not_contains": ["Mallory"]
+    }
+  },
+  {
+    "name": "fr-salon-lyon",
+    "language": "fr",
+    "mine": ["en"],
+    "attendees": ["Alice Martin", "Karim"],
+    "lines": [
+      ["you", "Bonjour à tous. On fait le point sur le salon de Lyon : le budget, le traiteur et les chambres."],
+      ["them", "Alice ici. Le devis du traiteur est arrivé hier et il est beaucoup trop cher pour nous."],
+      ["you", "Alors on garde le lieu, mais on change de traiteur, parce que ce devis dépasse le budget."],
+      ["them", "Alice encore. D'accord, je vais demander deux autres devis avant vendredi."],
+      ["you", "Merci Alice. De mon côté, j'envoie le plan de salle à toute l'équipe demain."],
+      ["them", "Karim ici. Et pour les chambres des exposants, qui s'en occupe ? Personne n'a encore réservé."],
+      ["you", "Il faut les réserver cette semaine, mais on n'a pas encore décidé qui le fera."],
+      ["them", "Karim encore. On a aussi décidé de ne pas imprimer de catalogue cette année, parce que tout est en ligne maintenant."],
+      ["you", "Oui, pas de catalogue. Il reste la question des badges pour les visiteurs."]
+    ],
+    "expect": {
+      "tasks": [
+        { "owner": "Alice Martin", "any": ["devis", "quote"] },
+        { "owner": "You", "any": ["plan", "layout"] },
+        { "owner": "Unassigned", "any": ["chambre", "room"] }
+      ],
+      "decisions": [
+        { "any": ["traiteur"], "reason": ["cher", "budget", "dépasse"] },
+        { "any": ["catalogue"], "reason": ["ligne"] }
+      ],
+      "not_contains": ["Mallory"]
+    }
+  },
+  {
+    "name": "es-campana",
+    "language": "es",
+    "mine": ["en", "es"],
+    "attendees": ["Marta", "Diego"],
+    "lines": [
+      ["you", "Bueno, empezamos. Hoy toca revisar el lanzamiento de la campaña de primavera."],
+      ["them", "Marta aquí. El diseño está casi listo, pero todavía hay que revisar los textos con el equipo legal."],
+      ["you", "Entonces movemos el lanzamiento al lunes, porque el proveedor no puede imprimir antes."],
+      ["them", "Marta otra vez. Vale, yo hablo con el proveedor esta tarde para confirmar la fecha."],
+      ["you", "Perfecto. Yo preparo el presupuesto para el cliente y lo envío el jueves."],
+      ["them", "Diego aquí. ¿Quién revisa los textos con legal? Todavía no lo tiene nadie."],
+      ["you", "Hay que hacerlo esta semana, pero no hemos decidido quién lo hace."],
+      ["them", "Diego otra vez. También decidimos usar solo redes sociales, porque la radio es demasiado cara."],
+      ["you", "Sí, solo redes. Nos queda pendiente saber si el cliente quiere un vídeo."]
+    ],
+    "expect": {
+      "tasks": [
+        { "owner": "Marta", "any": ["proveedor", "supplier", "printer"] },
+        { "owner": "You", "any": ["presupuesto", "budget"] },
+        { "owner": "Unassigned", "any": ["texto", "legal"] }
+      ],
+      "decisions": [
+        { "any": ["lunes"], "reason": ["proveedor", "imprimir"] },
+        { "any": ["redes"], "reason": ["radio", "cara"] }
+      ],
+      "not_contains": ["Mallory"]
+    }
+  },
+  {
+    "name": "en-release-first-language-fr",
+    "language": "en",
+    "mine": ["fr", "en"],
+    "attendees": ["Priya", "Tom"],
+    "lines": [
+      ["you", "Quick sync on the website release. Where are we with the testing?"],
+      ["them", "Priya here. Testing is done except the payment page, which still fails on mobile."],
+      ["you", "Then we'll hold the release until Thursday, because we can't ship a broken checkout."],
+      ["them", "Tom here. I'll fix the mobile payment bug by Wednesday."],
+      ["you", "Thanks Tom. I will tell the support team about the new date."],
+      ["them", "Who updates the release notes? Nobody has done that yet."],
+      ["you", "We need someone on the release notes this week, it's still open."]
+    ],
+    "expect": {
+      "tasks": [
+        { "owner": "Tom", "any": ["payment", "bug", "mobile"] },
+        { "owner": "You", "any": ["support"] },
+        { "owner": "Unassigned", "any": ["release notes"] }
+      ],
+      "decisions": [
+        { "any": ["Thursday"], "reason": ["checkout", "broken"] }
+      ],
+      "not_contains": ["Mallory"]
+    }
+  }
+]

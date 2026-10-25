@@ -102,6 +102,14 @@ pub(crate) fn note_changed_payload(n: &crate::notes::Note, origin: &str) -> serd
 #[tauri::command]
 pub fn note_export(id: u64, path: String) -> Result<(), String> {
     let note = crate::notes::get(id).ok_or("Note not found")?;
+    std::fs::write(&path, export_markdown(&note)).map_err(|e| format!("Couldn't write file: {e}"))
+}
+
+/// What [`note_export`] writes (pure): the title, attendees, the summary
+/// (then My thoughts) or the typed notes, and the transcript — talk only:
+/// never an echo line (the call coming back through your mic) or a "your
+/// mic changed" marker; a dictation or a failed stretch as a short note.
+pub fn export_markdown(note: &crate::notes::Note) -> String {
     let mut out = String::new();
     let title = if note.title.trim().is_empty() {
         "Untitled note"
@@ -134,11 +142,45 @@ pub fn note_export(id: u64, path: String) -> Result<(), String> {
                 out.push_str(&format!("_Couldn't transcribe {}–{}._\n\n", at(seg.start_ms), at(seg.end_ms)));
                 continue;
             }
+            // Any other marker (a mic change) has no words to export.
+            if !seg.is_talk() || seg.text.trim().is_empty() {
+                continue;
+            }
             let who = crate::speakers::display_line(&note.speakers, seg);
             out.push_str(&format!("**{who}:** {}\n\n", seg.text));
         }
     }
-    std::fs::write(&path, out).map_err(|e| format!("Couldn't write file: {e}"))
+    out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::notes::TranscriptSegment;
+
+    #[test]
+    fn an_export_has_the_talk_never_echo_lines_or_markers() {
+        let mut note: crate::notes::Note = serde_json::from_value(serde_json::json!({
+            "id": 1, "title": "Launch sync", "content": "Ask about legal", "createdTs": 1, "updatedTs": 1,
+            "participants": ["Priya"], "enhancedContent": "## Action plan\n### Priya\n- [ ] Book legal review",
+        }))
+        .unwrap();
+        let line = |source: &str, text: &str, ts: u64| TranscriptSegment { source: source.into(), text: text.into(), ts, ..Default::default() };
+        note.transcript = vec![
+            line("you", "Morning.", 1),
+            line("them", "Hi there, ECHO-CHECK.", 2),
+            TranscriptSegment { echo: true, ..line("you", "Hi there, ECHO-CHECK.", 3) },
+            TranscriptSegment::dictation_marker(4),
+            line("them", "Legal needs a week.", 5),
+        ];
+        let md = export_markdown(&note);
+        assert!(md.starts_with("# Launch sync\n\nAttendees: Priya\n\n## Action plan"), "{md}");
+        assert!(md.contains("## My thoughts\n\nAsk about legal"));
+        assert_eq!(md.matches("ECHO-CHECK").count(), 1, "the echo line left out: {md}");
+        assert!(md.contains("**Them:** Legal needs a week."));
+        assert!(md.contains("_You dictated here (left out of the notes)._"));
+        assert!(!md.contains("**You:** \n"), "no empty line for a marker");
+    }
 }
 
 /// Folder names (seeded with Personal + Meetings, OpenWhispr-style).
@@ -302,21 +344,22 @@ pub(crate) async fn run_enhance(
     // Meeting notes: attendees + typed notes + the You:/Them: transcript
     // (OpenWhispr PersonalNotesView "assemble input"), long ones digested.
     let is_meeting = note.note_type == "meeting" && !note.transcript.is_empty();
-    let (content, attendees, digest_actions) = if is_meeting {
+    // `content` is what the model is asked; `source`, what its reply is
+    // checked against (the meeting without the language line).
+    let (content, source, attendees, digest_actions) = if is_meeting {
         // A bigger on-device context reads more of the meeting raw.
         let budget = crate::meetings::meeting_summary::FinalBudget::for_endpoint(&ep);
         let note = crate::meetings::meeting_summary::prepare_final(app, id, &ep, budget).await?;
-        let input = crate::meetings::meeting_summary::compose_meeting_input_within(&note, budget);
+        // In the language the meeting was held in (meeting_summary/language.rs).
+        let lang = crate::meetings::meeting_summary::language::of_note(&note);
+        let (asked, input) = crate::meetings::meeting_summary::final_request(&note, budget, &lang, action_plan);
         // The owner checks know the speaker map's names too.
-        (input.text, crate::speakers::known_people(&note), input.digest_actions)
+        (asked, input.text, crate::speakers::known_people(&note), input.digest_actions)
     } else if note.participants.is_empty() {
-        (note.content.clone(), Vec::new(), Vec::new())
+        (note.content.clone(), note.content.clone(), Vec::new(), Vec::new())
     } else {
-        (
-            format!("Attendees: {}\n\n{}", note.participants.join(", "), note.content),
-            note.participants.clone(),
-            Vec::new(),
-        )
+        let content = format!("Attendees: {}\n\n{}", note.participants.join(", "), note.content);
+        (content.clone(), content, note.participants.clone(), Vec::new())
     };
 
     let base = if action_plan {
@@ -343,7 +386,7 @@ pub(crate) async fn run_enhance(
         enhanced = crate::meetings::meeting_summary::postcheck_action_plan(
             &enhanced,
             &attendees,
-            &content,
+            &source,
             &digest_actions,
         );
     }
