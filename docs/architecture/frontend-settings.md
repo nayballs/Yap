@@ -536,7 +536,12 @@ there can move margins: compare a page before and after.
   (`keepRecentAudio`, `dictation/recent_audio.rs`: the last 24 hours, on this PC, to run
   a dictation again; greyed while history is off) and Clear recent audio…
   ("3 dictations · 1.2 MB" from `recent_audio_status`; asks first; history
-  stays). **Search my meetings by meaning** (`#settings-meeting-search`,
+  stays). **Meetings** (`#settings-meeting-transcripts`, 2026-10-25): "Delete
+  meeting transcripts after" (`meetingTranscriptDays`: Never / 30 / 90 / 365
+  days, `meeting-transcripts`; notes/retention.rs) — the meeting's audio goes
+  with it, and Settings → Meetings' "Keep it for" says so when it's sooner;
+  "What leaves this PC"'s meeting audio row shows the sooner of the two.
+  **Search my meetings by meaning** (`#settings-meeting-search`,
   `settings/MeetingSearchSettings.svelte`; [search.md](./search.md)): the
   switch (`searchByMeaning`, disabled until the model is here), Search model
   (Download with its size — the engine's too when it isn't here — and its

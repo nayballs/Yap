@@ -53,9 +53,22 @@ The AI Notepad: the notes store, folders, the Actions engine, notes you can fix 
   commands that change notes return it as their error (`saved()`: "Couldn't
   save your note: the disk is full."), which the Notes view and the notepad
   show with Try again (`saveErrors.js`), and a meeting's lines that couldn't
-  be saved are said once by the notice. Unit tests get an in-memory store per test
+  be saved are said once by the notice. **Written off the lock**
+  (2026-10-25): `save_to_disk`, under the store lock, takes a snapshot (the
+  JSON, numbered by `saving::Ordered`); `with_store` writes it once the lock
+  is let go, one write at a time, never an older snapshot over a newer one —
+  a long meeting's notes.json no longer holds every recorder chunk, line
+  edit and tick behind the disk (unit-tested: 8 threads, the file ends as
+  the store). Unit tests get an in-memory store per test
   thread (`cfg(test)`), never `notes.json` (saved only to a scratch file a
-  test names, `TEST_PATH`). `event` (optional) = the calendar meeting the note
+  test names, `TEST_PATH`). **An older Yap on the same data** (the installed
+  nightly beside a dev build) drops fields of notes.json it doesn't know when
+  it saves: nothing new is kept only there — tasks the person adds and
+  archive marks are `tasks.json` (`notes/task_store.rs`), a deleted line is
+  simply gone (its place in the meeting's `cuts.json`), a split line is two
+  ordinary lines. It would drop `edited`/`original` (if from before
+  2026-10-24) and `transcriptDeletedTs`; unit test `an_older_yap_saving_
+  notes_json_keeps_added_tasks_and_split_lines`. `event` (optional) = the calendar meeting the note
   belongs to (`NoteEvent`: key, title, start/end, the invite's description,
   service), set by `link_event` (also the meeting's title as a real title,
   attendees merged, `note_type` meeting) and found by `find_by_event`.
@@ -154,6 +167,42 @@ roadmap, "Meeting notes you can fix" and "Tasks").
   `integrations/mcp.rs` `list_tasks` ([integrations.md](./integrations.md)). The
   pre-meeting brief's open items (`calendar/brief.rs` `plan_tasks`) read only
   `- [ ]`, so a ticked task drops out of the next brief.
+- **`notes/transcript_edits.rs`** (2026-10-25) — **a fixed line, the rest**:
+  `transcript_line_revert` (`revert_line`: an edited line's `original`
+  back), `transcript_line_delete` (`remove_line`: the line leaves the
+  transcript; stop marks after it move up; digests from the one that read it
+  dropped, `drop_digests_from`; its place to `meeting_audio::set_cut` so
+  Transcribe again and the refine never bring it back; kept in memory for
+  Undo, `Removed`) and `transcript_line_restore` (`restore_line`: where it
+  was when nothing changed since, its stops as they were, else by time),
+  `transcript_line_split` (`split_line` at word `at`: each part its side,
+  voice, lock and stretch — the words' times, else shared by length; on an
+  edited line the times are the edited words' shares and `original` is split
+  where the cut falls; both parts `edited`; `notes::replace_line` moves
+  digests and stops). Delete and split refuse a note recording, being
+  summarised or transcribed (`busy`). Windows follow `lineEdit` (revert) or
+  `lineSplice` + `lineSpeakers` + `breaks` (delete: no lines; restore: the
+  line; split: two). Unit-tested (each edit; Transcribe again keeping a
+  deletion and splits).
+- **`notes/task_store.rs`** (2026-10-25) — **`tasks.json`**: `OwnTask`s (the
+  person's, with `noteId` or none) and `Archived` (a summary task by note and
+  words); `Saver` "your tasks", a corrupt file set aside, `forget_note` on a
+  note's delete. Commands in `tasks.rs`: `task_add`, `task_remove`,
+  `tasks_set` (`mark_own` + `mark_summary` per note: Complete all, Undo),
+  `tasks_archive` (`archive`), `note_tasks_get` (`note_tasks`: the summary's,
+  then the added), `tasks_list` (`list_all`: "Your tasks" first, note id 0),
+  event `yap-tasks-changed {notes}`. The local API and MCP list the added
+  ones too.
+- **`notes/retention.rs`** (2026-10-25) — **"Delete meeting transcripts
+  after"** (`meeting_transcript_days`, Privacy & data; 0 = never, 30 / 90 /
+  365): `due` (pure: notes with lines whose newest is older; never busy ones)
+  → `strip` under `modify_quietly` (lines, digests, stops, speaker map out;
+  `transcript_deleted_ts`; `updated_ts` untouched) → `meeting_audio::
+  drop_audio` → `search::index::drop_gone` (the deleted passages' vectors
+  out of the index now, and the next pass sweeps). At start (+90 s; 0.5 s in
+  test mode), hourly, and on the setting set or shortened
+  (`on_config_saved`). Events `yap-note-transcript-deleted`,
+  `yap-notes-changed`. Unit-tested (`due`, `strip`).
 - **Frontend** — `lib/core/noteEdits.js` (`editLine`, `taskToggled` + `setTask`,
   `saveSummary`, `askReplaceSummary`, `SUMMARY_KEPT`) and the pure helpers in
   `notepadText.js` (`lineRef`, `withLineEdit`, `taskText`, `withTaskMark`,
@@ -266,8 +315,14 @@ dates). [frontend.md](./frontend.md#the-folder-layout-2026-10-24).
   the note in Notes at that line. A tick is `note_task_set` (origin
   `tasks`), shown at once and put back on a refusal; a task ticked here
   stays listed, struck through, until the view closes (an easy undo); the
-  list follows `yap-note-changed` / `yap-notes-changed` / a summary written.
-  Empty: "No tasks yet" (what fills it), or "Nothing open".
+  list follows `yap-note-changed` / `yap-notes-changed` / `yap-tasks-changed`
+  / a summary written.
+  Empty: "No tasks yet" (what fills it), or "Nothing open". Since
+  2026-10-25: **Add a task** at the top (no meeting: the "Your tasks" group,
+  first; `task_add`), ✕ on an added task (`task_remove`), and **Archive done
+  (N)** with Undo (`tasks_archive`: archived tasks aren't listed; a summary's
+  stays ticked). A meeting note's **Tasks** tab (the Notes view's
+  NoteEditor, the notepad): `components/MeetingTasks.svelte`.
 
 ## The markdown renderer
 

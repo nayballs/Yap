@@ -98,7 +98,11 @@
   audio (`meetings/meeting_audio.rs`, Settings → Meetings): meeting_keep_audio ("Keep
   meeting audio", on: to transcribe a meeting again and play its lines; off,
   it's still written while a meeting records and deleted once it's
-  transcribed) + meeting_audio_days (14; 1 / 7 / 14 / 30 / 90) +
+  transcribed) + meeting_audio_days (14; 1 / 7 / 14 / 30 / 90; never longer
+  than the transcripts': `meeting_audio::keep_days`) +
+  meeting_transcript_days ("Delete meeting transcripts after", Privacy &
+  data: 0 = never, the default; 30 / 90 / 365 — a meeting's lines, digests
+  and audio go, its notes, summary and tasks stay; `notes/retention.rs`) +
   meeting_refine ("Improve the transcript after the meeting",
   `meetings/meeting_refine.rs`: "auto" — when chunks failed or a more accurate
   speech model is installed for the meeting's language —, "always",
@@ -291,7 +295,19 @@
   meeting audio, or once transcribed with "Keep meeting audio" off — held
   until the refine after the meeting or a Try again is done when one is
   due, a day at most (`release`, `HELD_MS`). Its `.json` also names the
-  speech model of the live pass (`model`), for the refine.
+  speech model of the live pass (`model`), for the refine. `cuts.json` beside
+  them: the places of lines the person deleted (`meeting_audio::Cut`), so a
+  meeting transcribed again never brings them back; it goes with the last
+  recording. Every one of these `.json` saved through `saving.rs`
+  (`meeting_audio::SAVER`), a torn one set aside (`.json.corrupt-<secs>`) and
+  made again from the audio. With "Delete meeting transcripts after" set, a
+  meeting's audio goes with its transcript (or sooner, by its own days).
+- Tasks: `%APPDATA%/yap/tasks.json` — the tasks the person added (in a
+  meeting's Tasks tab, `noteId`, or in the Tasks view with none) and the
+  summary tasks they archived (by note and words) (`notes/task_store.rs`,
+  through `saving.rs`). A file of its own, not new fields in notes.json, so an
+  older Yap sharing the data folder (it drops notes.json fields it doesn't
+  know when it saves) never loses them. A note's go with it.
 - Chat screenshots: `%APPDATA%/yap/chat-images/` — `img_<16 hex>.png` for each
   screenshot a question carries (Snip to Chat, `snip/images.rs`); `chats.json`
   keeps only its id, size, bytes and source. Deleted with its conversation, after
@@ -395,6 +411,15 @@
   neither says it saved. Caches (`model_catalog.json`, `stt_speed.json`,
   `updates.json`, `hints.json`, `quieted_apps.json`) are only logged. The
   log names the store and the error's kind, never what it holds.
+  **Since 2026-10-25**: notes.json is written **off its lock** (a snapshot
+  taken under it, written after, `saving::Ordered`: one write at a time,
+  never an older snapshot over a newer one); meeting audio's own `.json`
+  files go through a `Saver` of their own (`Saver::write_each`: a store in
+  several files, unsaved while any failed); `tasks.json` has one; the
+  summary an action writes (`note_enhance`, the action plan at a meeting's
+  end) and `calendar_add_link` / `calendar_disconnect` check their save and
+  return the failure (the page treats the change as made, with Try again;
+  the action plan's job ends done and the notice says it).
 - App icons: `%APPDATA%/yap/icons/` — `<app>.png` per installed call app and
   `sources.json` (what each was made from); a cache, rebuilt whenever it's
   missing, stale or unreadable (`calls/app_icons.rs`).
@@ -463,7 +488,8 @@
   `meeting_reminder`) and a **brief** of what to know going in
   (`meeting_brief`, on), meeting audio **kept 14 days** on this PC to
   transcribe a meeting again and play its lines (`meeting_keep_audio`,
-  `meeting_audio_days`), and a meeting **improved after it ends when it
+  `meeting_audio_days`), meeting transcripts **kept** until the meeting is
+  deleted (`meeting_transcript_days` 0), and a meeting **improved after it ends when it
   helps** (`meeting_refine` "auto": chunks failed, or a more accurate model
   is installed); spoken replies **off** (`speak_replies`; once on, only
   for questions asked by voice, `speak_when`, and a dictated question is sent

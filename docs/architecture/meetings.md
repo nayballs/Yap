@@ -237,6 +237,47 @@ The meeting recorder and its audio kept on disk, rolling digests and the action 
   each recording's `.json` names its live model (`Meta::model`);
   debug-only `e2e_meeting_recovery_offer`; events `yap-meeting-audio
   {noteId}` and `yap-meeting-redo`. Logs: ids, counts, lengths only.
+  **Saved through `saving.rs`** (2026-10-25): every `<recording>.json` and
+  `cuts.json` go through `SAVER` ("your meeting recording's details";
+  `Saver::write_each`): atomic, one that couldn't be written kept (`Pending`,
+  with what must still exist for it to be worth writing) and written with
+  the next or Try again, said once by the notice; a `.json` that doesn't
+  read is set aside (`<recording>.json.corrupt-<secs>`) and made again from
+  its audio as a recording that ended (`load_meta`/`repair_meta`). **Lines
+  deleted** (`Cut`, `cuts`/`set_cut`, `cuts.json` in the meeting's folder,
+  only when its audio is kept; `notes/transcript_edits.rs`): their side and
+  place, which `transcribe_again` passes to `redo::rebuild_with_cuts` so no
+  new line's words land there; an older Yap never reads it; it goes with the
+  last recording. **Retention** reads one rule: `keep_days(audio days,
+  meeting_transcript_days)` = the sooner; `drop_audio` when a transcript
+  goes (`notes/retention.rs`). `live_bytes`: the recording's files' size now
+  (the disk watch). **Export** (`meeting_audio/export.rs`, "Export audio…" /
+  "Export each side…"): `meeting_audio_export(noteId, separate)` opens
+  Windows' Save dialog over the calling window (test mode: the file
+  `e2e_audio_export_file` named), then `export` → `write`: each recording in
+  turn (`Part`: both files, its length), both sides `mix`ed or one file per
+  side (`targets`: "<stem> - You/Them"), FLAC through `flac::Writer` or WAV
+  by the name's extension (`Format::of`), a second at a time, to `.part`
+  then renamed; `yap-meeting-audio-export {noteId, percent, state, files,
+  error}`; refused while it records or with no audio (`cant_export`).
+  Unit-tested (the mix across two recordings, FLAC/WAV lengths, each side
+  padded to the clock, names; a meta saved after a failure, a torn one made
+  again; cuts kept and gone with the audio; audio days).
+- **`meetings/disk_watch.rs`** — **disk space while a meeting records**
+  (2026-10-25, Wispr Flow's low-disk guard): on `yap-meeting-state` it
+  watches the recording (a generation per recording, like
+  `meeting_guard`'s), every 60 s (300 ms in test mode): free space on
+  `config::data_dir()`'s drive (`local_llm::runtime::free_bytes`), the
+  meeting's bytes a minute (`rate`: `meeting_audio::live_bytes` over the time
+  watched; `FIRST_RATE`, the most FLAC can take, until a minute is in;
+  ≥ `MIN_RATE`), `minutes_left` above `RESERVE` (200 MB, kept for saving),
+  and `step`: under `WARN_MIN` (30) "About N minutes of recording left on
+  this drive" (`left_words`, kind `warning`, through `meeting_guard::notice`:
+  the window's toast, the bar, a Windows notification), again under
+  `LAST_MIN` (10); at the reserve `Stop` → `meeting_guard::
+  stop_and_summarise` + "Stopped: your disk is full". Test mode:
+  `e2e_disk_space {free, perMin}`. Logs: minutes and MB. Unit-tested
+  (`rate`, `minutes_left`, `step`); e2e in `meeting-guards.spec.js`.
   Unit-tested (the encoder against Symphonia: every block kind, cut-off
   files, seeking; retention, metas, a crash's recording found and clipped;
   `rebuild`, a failed chunk's marker replaced by a refine, `fill`; audio
@@ -483,8 +524,19 @@ The meeting recorder and its audio kept on disk, rolling digests and the action 
   **Update**"; its tasks tick in place; Update and Retry ask before writing
   over an edited summary). **A line's words** are fixed by double-clicking
   it or **Edit line** in its menu (Enter saves, Escape cancels, leaving
-  saves; "edited" after it; the dictionary offer as this window's toast) —
-  [notes.md](./notes.md#notes-you-can-fix-note_editsrs-tasksrs). **Bottom** (over the content, a 150 px fade):
+  saves; "edited" after it; the dictionary offer as this window's toast);
+  its menu also has **Revert to what Yap heard**, **Split line…** (a
+  read-only box: click, Enter; Shift+Enter while editing splits too) and
+  **Delete line** (Undo in the toast), Split and Delete off while it
+  records (`core/noteEdits.js` `revertLine`/`splitLine`/`deleteLine`) —
+  [notes.md](./notes.md#notes-you-can-fix-note_editsrs-tasksrs). **Tasks**
+  (2026-10-25, the fourth tab): `components/MeetingTasks.svelte` (look
+  "paper"; the Notes view uses look "app") — "1 of 5 done", the summary's
+  tasks and the ones added, Add a task, Complete all with Undo, ✕ on an added
+  one; ticks sent with origin `tasks`, so this window's Summary follows them.
+  The ⋯ menu after a meeting: **Export audio…** / **Export each side…**
+  (`meetingAudio.svelte.js` `exportAudio`: the progress toast, "Audio
+  exported"). **Bottom** (over the content, a 150 px fade):
   recording → the consent line "Let people know you're taking notes. **Learn
   more**" — a popover with why ("Yap transcribes on this PC; nothing is
   uploaded") and an **editable message for the meeting chat** (default in
@@ -574,7 +626,9 @@ The meeting recorder and its audio kept on disk, rolling digests and the action 
   calendar, one grey card (calendar icon, "No meetings found", ink Connect
   calendar → the dialog); **Past meeting notes** by day ("TODAY, 6 OCT",
   time · attendees · "Generate summary" on a meeting with talk and no plan
-  → `meeting_summarise` + opens the note) with search
+  → `meeting_summarise` + opens the note; its menu also has Export audio… /
+  Export each side… once `meeting_audio_note` says its audio is kept,
+  looked up for the rows shown) with search
   (`calendar_meeting_notes`) and, over the list, **Moments that match**
   (`search_moments`: up to 5 passages — title, day, time into the meeting,
   speaker, the line — "· by meaning" when the search model helped; one

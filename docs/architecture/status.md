@@ -55,6 +55,26 @@ tables, method and how anyone can run it and send theirs:
 
 ## What works
 
+**Meeting transcript, audio and tasks, the rest** (2026-10-25,
+[meetings.md](./meetings.md), [notes.md](./notes.md)): a meeting's audio
+**exported** (one FLAC or WAV with both sides, or each side; the notepad's ⋯,
+the Meetings and Notes menus); a transcript line **reverted, deleted with
+Undo, or split** at the cursor, Transcribe again and the refine keeping all
+three; a meeting's **Tasks tab** (done of total, add, Complete all) and the
+Tasks view's **add** and **Archive done**, the person's tasks in `tasks.json`;
+**"Delete meeting transcripts after"** 30 / 90 / 365 days (Privacy & data,
+off), keeping notes, summaries and tasks, the audio going with it and the
+search index swept; **"About N minutes of recording left on this drive"** and
+a clean stop when the disk is full; and the saves' rest — notes.json written
+off its lock, meeting audio's `.json` through `saving.rs`, Enhance's summary
+and calendar add/disconnect saying a failed save. An older Yap sharing the
+data folder keeps the tasks, the splits and the deletions (unit-tested with
+its notes.json shape). Unit- and e2e-tested (`notes-edit`, `tasks`,
+`notes-retention`, `meeting-guards`, `notepad`, `right-click` specs; the real-STT
+`meeting-audio.real.js`). **Not yet tried**: a real disk filling up, an
+exported hour-long meeting opened in other apps, the Save dialog itself
+(test runs name the file), retention over a real year of meetings.
+
 **Trust: network receipts and Report a problem** (2026-10-24,
 [privacy-receipts.md](./privacy-receipts.md)): every request Yap makes goes
 through `privacy/net.rs` (a unit test fails on any that doesn't), recorded by host,
