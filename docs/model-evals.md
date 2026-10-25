@@ -1511,7 +1511,7 @@ answered from memory without searching (a made-up "3.5 to 4 miles"), which measu
 about units.
 
 **Qwen3.5-4B**, RTX 5070 Ti, llamafile 0.10.6 (MTP on), ×5 (run folders
-`<builds>/eval-runs/20261025-09*`):
+`<builds>/eval-runs/loose-ends-20261025-09*`, the Groq and 2B runs beside them):
 
 | Scenario | Before | After |
 |---|---|---|
