@@ -84,8 +84,8 @@ test('Settings → Shortcuts: Paste last and Copy last transcript are unbound un
   const dialog = await openSettings(main, 'Shortcuts');
   const paste = dialog.locator('[data-setting="shortcut-paste-last"]');
   const copy = dialog.locator('[data-setting="shortcut-copy-last"]');
-  await expect(paste).toContainText('Paste last transcript');
-  await expect(copy).toContainText('Copy last transcript');
+  await expect(paste).toContainText('Paste last dictation');
+  await expect(copy).toContainText('Copy last dictation');
   await expect(paste.getByRole('button', { name: 'Set a shortcut' })).toBeVisible();
   await expect(copy.getByRole('button', { name: 'Set a shortcut' })).toBeVisible();
 
@@ -109,7 +109,7 @@ test('Settings → Shortcuts: Paste last and Copy last transcript are unbound un
   // Settings' search finds them.
   const search = dialog.getByRole('searchbox', { name: 'Search settings' });
   await search.fill('copy last');
-  await expect(dialog.getByRole('listbox', { name: 'Settings found' }).getByRole('option').first()).toContainText('Copy last transcript');
+  await expect(dialog.getByRole('listbox', { name: 'Settings found' }).getByRole('option').first()).toContainText('Copy last dictation');
   await search.fill('');
 
   // Both removed again.

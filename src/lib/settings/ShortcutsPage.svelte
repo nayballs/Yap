@@ -64,16 +64,16 @@
     <SettingsHotkey {cfg} target="asSaidHotkey" clearable more />
   </Row>
   <Row
-    label="Paste last transcript"
+    label="Paste last dictation"
     desc="Paste your latest dictation again where you're typing, for a paste that went astray"
     setting="shortcut-paste-last"
   >
     <SettingsHotkey {cfg} target="pasteLastHotkey" clearable more />
   </Row>
   <Row
-    label="Copy last transcript"
+    label="Copy last dictation"
     desc="Copy your latest dictation without pasting it"
-    hint="Like Yap's pastes, it stays out of Windows' clipboard history (Win+V). The tray menu has both too."
+    hint="Like Yap's pastes, it stays out of Windows' clipboard history (Win+V). The tray menu has it too."
     setting="shortcut-copy-last"
   >
     <SettingsHotkey {cfg} target="copyLastHotkey" clearable more />

@@ -43,9 +43,9 @@ test('search: words, their forms, ranking, grouping and highlights', () => {
   expect(stems('notes')).toEqual(expect.arrayContaining(['notes', 'note']));
 
   // "paste": a label starting with it on top (Shortcuts' Paste last
-  // transcript), then the Dictation rows, best match (in the label) first.
+  // dictation), then the Dictation rows, best match (in the label) first.
   const found = searchSettings('paste');
-  expect(found[0]).toMatchObject({ page: 'shortcuts', label: 'Paste last transcript' });
+  expect(found[0]).toMatchObject({ page: 'shortcuts', label: 'Paste last dictation' });
   expect(found[1]).toMatchObject({ page: 'dictation', label: 'Restore clipboard after paste' });
   expect(found.map((r) => r.label)).toEqual(expect.arrayContaining(['Safer pasting into terminals', 'Press Enter after pasting']));
   const groups = groupResults(found);
@@ -137,7 +137,7 @@ test('Settings search: Ctrl+F, results by page, ↑/↓, Enter lands on the row,
   const options = results(main).getByRole('option');
   const first = options.first();
   await expect(first).toHaveAttribute('aria-selected', 'true');
-  await expect(first).toContainText('Paste last transcript');
+  await expect(first).toContainText('Paste last dictation');
   await shot(main, '01-search-paste');
 
   // ↓ moves the highlight; the box keeps the focus.

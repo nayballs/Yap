@@ -88,7 +88,7 @@
   <Row
     label="Read aloud shortcut"
     desc="Select text in any app and press it: Yap reads it in the voice below, each word lit up on the Yap bar as it's said"
-    hint="Press it again, or Esc, to stop. 🔊 on the Yap bar and the tray's Read selection aloud do the same, and notes and Chat answers have Read aloud too. The text is in your reading font (General → Appearance)."
+    hint="Press it again, or Esc, to stop. 🔊 on the Yap bar and the tray's Read selected text aloud do the same, and notes and Chat answers have Read aloud too. The text is in your reading font (General → Appearance)."
     setting="read-shortcut"
   >
     <SettingsHotkey {cfg} target="readHotkey" clearable />

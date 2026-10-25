@@ -2088,26 +2088,15 @@ pub(crate) fn paste_last_blocking(app: &tauri::AppHandle, as_said: bool) -> Resu
     }
 }
 
-/// "Paste last transcript" (the tray menu; also callable from the page):
-/// pastes the latest dictation into the app you're in and returns it. Errors
-/// when there's nothing yet.
+/// "Paste last transcript" (callable from the page; the tray's item went
+/// on 2026-10-25): pastes the latest dictation into the app you're in and
+/// returns it. Errors when there's nothing yet.
 #[tauri::command]
 pub async fn paste_last_transcript(app: tauri::AppHandle, as_said: Option<bool>) -> Result<String, String> {
     let as_said = as_said.unwrap_or(false);
     tokio::task::spawn_blocking(move || paste_last_blocking(&app, as_said))
         .await
         .map_err(|e| format!("Paste task failed: {e}"))?
-}
-
-/// The tray's "Paste last transcript" (off the main thread); `as_said`:
-/// "Paste last transcript (as said)", the words before AI cleanup.
-pub fn paste_last_from_tray(app: &tauri::AppHandle, as_said: bool) {
-    let app = app.clone();
-    std::thread::spawn(move || {
-        if let Err(e) = paste_last_blocking(&app, as_said) {
-            warn!("Paste last transcript: {}", e);
-        }
-    });
 }
 
 /// Inject text into the target field via clipboard + Ctrl+V.

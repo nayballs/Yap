@@ -10,11 +10,12 @@
 //!   tooltip — Windows Update's own "restart required" idiom.
 //! - **Calls** (meeting_detect.rs): while a detected call is live and nothing
 //!   records, "Record this Teams call" sits at the top of the idle menu.
-//! - **Paste last transcript** (text_injector.rs): the latest dictation again,
-//!   into the app you were in — for a paste that went astray; **Copy last
-//!   transcript** (last.rs) puts it on the clipboard instead.
-//! - **Read selection aloud** (read_aloud.rs): the text selected in the app
-//!   you were in, read aloud with the reading card; "Stop reading aloud"
+//! - **Copy last dictation** (last.rs): the latest dictation on the
+//!   clipboard, for a paste that went astray. (Paste last transcript and its
+//!   "as said" twin left the tray on 2026-10-25: three ways to reuse one
+//!   dictation read as jargon; Paste last keeps its optional shortcut.)
+//! - **Read selected text aloud** (read_aloud.rs): the text selected in the
+//!   app you were in, read aloud with the reading card; "Stop reading aloud"
 //!   while it reads.
 //! - **Transforms** (transforms.rs): a submenu of the saved transforms, run
 //!   on the selection (or the last dictation) in the app you were in.
@@ -199,9 +200,9 @@ fn build_menu(app: &AppHandle, state: &str) -> tauri::Result<Menu<Wry>> {
         Box::new(MenuItem::with_id(app, "open_models", "Download a model…", true, None::<&str>)?)
     } else {
         let label = if installed.contains(&current) {
-            stt::model_name(&current)
+            format!("Speech model: {}", stt::model_name(&current))
         } else {
-            "Model".to_string()
+            "Speech model".to_string()
         };
         let submenu = Submenu::with_id(app, "model_submenu", label, true)?;
         for id in &installed {
@@ -227,28 +228,12 @@ fn build_menu(app: &AppHandle, state: &str) -> tauri::Result<Menu<Wry>> {
     let update = crate::updates::tray_item()
         .map(|(id, label, enabled)| MenuItem::with_id(app, id, label, enabled, None::<&str>))
         .transpose()?;
-    // The latest dictation again, into the app you're in: for a paste that
-    // went astray (greyed out until there's one).
-    let paste_last = MenuItem::with_id(
-        app,
-        "paste_last",
-        "Paste last transcript",
-        crate::pasting::text_injector::has_last_transcript(),
-        None::<&str>,
-    )?;
-    // …and as you said it: before AI cleanup (as_said.rs).
-    let paste_said = MenuItem::with_id(
-        app,
-        "paste_last_said",
-        "Paste last transcript (as said)",
-        crate::pasting::text_injector::has_last_transcript(),
-        None::<&str>,
-    )?;
-    // …or onto the clipboard, kept out of its history (pasting/last.rs).
+    // The latest dictation on the clipboard, kept out of its history, for a
+    // paste that went astray (pasting/last.rs; greyed out until there's one).
     let copy_last = MenuItem::with_id(
         app,
         "copy_last",
-        "Copy last transcript",
+        "Copy last dictation",
         crate::pasting::text_injector::has_last_transcript(),
         None::<&str>,
     )?;
@@ -257,7 +242,7 @@ fn build_menu(app: &AppHandle, state: &str) -> tauri::Result<Menu<Wry>> {
     let read = if crate::voice::read_aloud::active() {
         MenuItem::with_id(app, "read_stop", "Stop reading aloud", true, None::<&str>)?
     } else {
-        MenuItem::with_id(app, "read_selection", "Read selection aloud", true, None::<&str>)?
+        MenuItem::with_id(app, "read_selection", "Read selected text aloud", true, None::<&str>)?
     };
     // Snip to Chat (snip.rs): drag a box over any screen, into Chat.
     let snip = MenuItem::with_id(app, "snip", "Snip to Chat", true, None::<&str>)?;
@@ -279,8 +264,6 @@ fn build_menu(app: &AppHandle, state: &str) -> tauri::Result<Menu<Wry>> {
         items.push(&sep_models);
     }
     let sep_paste = sep()?;
-    items.push(&paste_last);
-    items.push(&paste_said);
     items.push(&copy_last);
     items.push(&read);
     if !transforms.items()?.is_empty() {
@@ -350,9 +333,6 @@ fn on_menu_event(app: &AppHandle, id: &str) {
         "open_models" => {
             let _ = crate::shell::window::show_onboarding(app);
         }
-        // Off the main thread: it focuses the app and waits on the paste.
-        "paste_last" => crate::pasting::text_injector::paste_last_from_tray(app, false),
-        "paste_last_said" => crate::pasting::text_injector::paste_last_from_tray(app, true),
         "copy_last" => crate::pasting::last::copy_soon(app),
         // Off the main thread (UI Automation can take a moment).
         "read_selection" => crate::voice::read_aloud::read_selection(app, crate::voice::read_aloud::Origin::Tray),

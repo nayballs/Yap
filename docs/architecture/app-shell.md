@@ -165,12 +165,11 @@ re-exported by the module, except `local_llm`'s, which callers name
   and "· Update X ready" in the tooltip (`tray::refresh`, driven by updates.rs).
   A live call Yap asks about, while nothing records, puts **"Record this Teams
   call"** above it (`meeting_detect::tray_item`; the click runs
-  `on_tray_record` on a worker thread). **"Paste last transcript"** sits above
-  the model submenu (greyed out until there's a dictation;
-  `text_injector::paste_last_from_tray`, worker thread) with "… (as said)"
-  and **"Copy last transcript"** (2026-10-25: onto the clipboard, out of
-  Win+V history, `pasting/last.rs`) under it, then **"Read
-  selection aloud"** — "Stop reading aloud" while Yap reads
+  `on_tray_record` on a worker thread). **"Copy last dictation"** sits above
+  the model submenu (greyed out until there's a dictation; onto the
+  clipboard, out of Win+V history, `pasting/last.rs`; "Paste last
+  transcript" and "… (as said)" left the tray on 2026-10-25 — three ways to
+  reuse one dictation read as jargon), then **"Read selected text aloud"** — "Stop reading aloud" while Yap reads
   (`read_aloud::read_selection(Origin::Tray)`: the app window on top, brought
   back, its selection read aloud with the reading card). All four are in the
   idle menu's cache key (`idle_menu_key`), so the menu rebuilds when they
