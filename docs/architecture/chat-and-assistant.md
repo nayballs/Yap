@@ -278,8 +278,9 @@ The AI Chat surface (conversations, the tool-calling loop and its note tools) an
   followed by more text, or 200 characters — so the line a model writes
   before a tool call ("I'll search your notes for that.") never shows; a
   tool-call delta turns the step into its chip (`Event::Tool`, "Searching
-  the web…" from `doing`), and text shown before it is taken back (on the
-  page: a voice already saying it goes on); without
+  the web…" from `doing`), and text shown before it is taken back (`text`
+  "", on the page — and a Voice Assistant already saying it stops,
+  `Streamed::taken_back` below, 2026-10-25); without
   tools (a small model, the last call) text shows at once. **A search
   that must come first shows no text at all** (`ChipsOnly`, a sink around
   the watcher that lets everything but `text` through; 2026-10-23): its
@@ -393,7 +394,17 @@ The AI Chat surface (conversations, the tool-calling loop and its note tools) an
   In a web answer a sentence with a price waits for the check
   (`mentions_price`: `about_you::restore_price_signs` may change "£8"
   back to "$8"). The answer's id is known before it's saved (the question's
-  index + 1). Barge-in, ■, a newer question, a meeting starting: the voice
+  index + 1). **Words taken back** (`Streamed::taken_back`, 2026-10-25): a
+  step's opening words long enough to show (`stream::releases`) that turn
+  out to come before a tool call are taken back (`text` "") — the voice may
+  have started on them: it stops, the sentences it hadn't said go (the feed
+  closed), the capsule goes back to Thinking and their card goes, and the
+  answer after the tool starts the voice again from its first sentence.
+  Before, the voice went on ("Let me look through your notes for that.")
+  and the answer's first sentences were skipped as already said (`said`
+  counted the words taken back). E2e-tested with the fake model scripting
+  words, then a call (`voice-assistant.spec.js`); a forced search's words
+  never get this far (`ChipsOnly`). Barge-in, ■, a newer question, a meeting starting: the voice
   stops and no more goes in (`Feed::push` says so); a meeting started
   meanwhile leaves the answer on its card for a reading time. **A newer
   question in the same conversation** (a barge-in or follow-up asked while

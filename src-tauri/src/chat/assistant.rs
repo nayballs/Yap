@@ -533,6 +533,46 @@ impl Streamed {
             self.lock().carded = carded;
         }
     }
+
+    /// **The text so far wasn't the answer** (2026-10-25): a step's opening
+    /// words, long enough to show, turned out to come before a tool call
+    /// (`stream::Step`, or a call the provider refused) and were taken back.
+    /// The voice may already be saying them: it stops, what it hadn't said
+    /// yet goes, the capsule is back to "Thinking…" and their card goes. The
+    /// answer, when it comes, starts the voice again from its first sentence
+    /// — before, the voice went on with the words taken back and the
+    /// answer's first sentences were skipped as already said. A forced
+    /// search's words never get this far (`stream::ChipsOnly`).
+    fn taken_back(&self) {
+        let (feed, carded) = {
+            let mut st = self.lock();
+            st.said = 0;
+            st.held = false;
+            (st.feed.take(), std::mem::take(&mut st.carded))
+        };
+        let Some(feed) = feed else { return };
+        tracing::info!("Voice Assistant: the words it was saying came before a tool call; stopped");
+        // "Thinking…" before the voice stops, so its end isn't the answer's.
+        let (ev, id) = {
+            let mut s = lock();
+            if s.generation == self.generation && s.phase == Phase::Speaking {
+                s.phase = Phase::Thinking;
+                (Some(snapshot(&s)), s.message_id.take())
+            } else {
+                (None, None)
+            }
+        };
+        feed.close();
+        if id.is_some() && crate::voice::tts::speaking_id() == id {
+            crate::voice::tts::stop();
+        }
+        if let Some(ev) = ev {
+            emit(&self.app, ev);
+        }
+        if carded {
+            crate::bar::dismiss_card(&self.app, CARD);
+        }
+    }
 }
 
 impl crate::chat::stream::Sink for Streamed {
@@ -545,7 +585,10 @@ impl crate::chat::stream::Sink for Streamed {
             self.lock().web = *web;
         }
         if let crate::chat::stream::Event::Text { text } = &ev {
-            if !text.trim().is_empty() {
+            if text.trim().is_empty() {
+                // Taken back: it came before a tool call.
+                self.taken_back();
+            } else {
                 self.speak_ready(text);
             }
         }
