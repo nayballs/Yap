@@ -173,7 +173,7 @@ mod tests {
     use super::*;
 
     fn entry(from: &str, to: &str) -> DictionaryEntry {
-        DictionaryEntry { from: from.into(), to: to.into(), fuzzy: true, snippet: false, starred: false }
+        DictionaryEntry { from: from.into(), to: to.into(), fuzzy: true, snippet: false, starred: false, also_heard: Vec::new() }
     }
 
     fn tos(dict: &[DictionaryEntry]) -> Vec<&str> {

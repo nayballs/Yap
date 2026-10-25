@@ -77,35 +77,72 @@ pub fn entries(items: &[Item], dictionary: &[DictionaryEntry], is_word: &dyn Fn(
         .filter(|i| matches!(i.section, Section::People | Section::Projects) && i.dictation)
         .collect();
     named.sort_by_key(|i| std::cmp::Reverse(i.updated_ts));
-    let mut seen: std::collections::HashSet<String> = dictionary
-        .iter()
-        .filter(|e| !e.snippet)
-        .flat_map(|e| [e.to.trim().to_lowercase(), e.from.trim().to_lowercase()])
-        .filter(|s| !s.is_empty())
-        .collect();
+    let mut seen = spelled(dictionary);
     let mut out = Vec::new();
     for i in named.into_iter().take(MAX_NAMES) {
-        let name = i.title.trim();
-        if name.is_empty() {
-            continue;
+        add_name(i.title.trim(), false, is_word, &mut seen, &mut out);
+    }
+    out
+}
+
+/// What the dictionary spells or hears already (lowercased): no name is
+/// added for those.
+fn spelled(dictionary: &[DictionaryEntry]) -> std::collections::HashSet<String> {
+    dictionary
+        .iter()
+        .filter(|e| !e.snippet)
+        .flat_map(|e| std::iter::once(e.to.trim()).chain(e.heard()).map(str::to_lowercase).collect::<Vec<_>>())
+        .filter(|s| !s.is_empty())
+        .collect()
+}
+
+/// `name` as vocabulary: the whole name (a near-miss target when it's
+/// safe), and each word of a longer name that's safe alone ("Sarah
+/// Jenkins": "Jenkins") — none already in `seen`. A one-word name a speech
+/// model spells far from how it's written carries how it's said
+/// (`spoken_names::said_as`: "Siobhan" ← "shivon"), for the names pass
+/// only; `own`: the person's own name (About you).
+fn add_name(name: &str, own: bool, is_word: &dyn Fn(&str) -> bool, seen: &mut std::collections::HashSet<String>, out: &mut Vec<DictionaryEntry>) {
+    if name.is_empty() {
+        return;
+    }
+    let words: Vec<&str> = name.split_whitespace().collect();
+    let mut add = |to: &str, fuzzy: bool| {
+        if seen.insert(to.to_lowercase()) {
+            let also_heard = if fuzzy && !to.contains(char::is_whitespace) {
+                crate::dictionary::spoken_names::said_as(to, own).into_iter().map(str::to_string).collect()
+            } else {
+                Vec::new()
+            };
+            out.push(DictionaryEntry { from: String::new(), to: to.to_string(), fuzzy, snippet: false, starred: false, also_heard });
         }
-        let words: Vec<&str> = name.split_whitespace().collect();
-        let mut add = |to: &str, fuzzy: bool| {
-            if seen.insert(to.to_lowercase()) {
-                out.push(DictionaryEntry { from: String::new(), to: to.to_string(), fuzzy, snippet: false, starred: false });
-            }
-        };
-        add(name, safe_for_fuzzy(name, is_word));
-        // "Sarah Jenkins": each word that's safe alone ("Jenkins") too.
-        if words.len() > 1 {
-            for w in words {
-                let w = w.trim_matches(|c: char| !c.is_alphanumeric());
-                if safe_for_fuzzy(w, is_word) {
-                    add(w, true);
-                }
+    };
+    add(name, safe_for_fuzzy(name, is_word));
+    if words.len() > 1 {
+        for w in words {
+            let w = w.trim_matches(|c: char| !c.is_alphanumeric());
+            if safe_for_fuzzy(w, is_word) {
+                add(w, true);
             }
         }
     }
+}
+
+/// **Your own name** (About you's "What should Yap call you?", 2026-10-25):
+/// dictation vocabulary the way memory's people are — a hidden term, never
+/// an entry to manage —, by the same rules (a near-miss target only when
+/// it can't swallow an ordinary word), unless the dictionary spells it
+/// already. Pure over its inputs.
+pub fn own_name(name: &str, dictionary: &[DictionaryEntry], is_word: &dyn Fn(&str) -> bool) -> Vec<DictionaryEntry> {
+    // One line, the characters a name has (as About you keeps it).
+    let name: String = name.split_whitespace().collect::<Vec<_>>().join(" ");
+    let name = name.trim_matches(|c: char| !c.is_alphanumeric());
+    if name.is_empty() || name.chars().count() > 60 {
+        return Vec::new();
+    }
+    let mut seen = spelled(dictionary);
+    let mut out = Vec::new();
+    add_name(name, true, is_word, &mut seen, &mut out);
     out
 }
 
@@ -163,7 +200,7 @@ mod tests {
         let mut topic = person(6, "Grafana");
         topic.section = Section::Topics;
         items.push(topic);
-        let dict = vec![DictionaryEntry { from: "cube and eighties".into(), to: "Kubernetes".into(), fuzzy: true, snippet: false, starred: false }];
+        let dict = vec![DictionaryEntry { from: "cube and eighties".into(), to: "Kubernetes".into(), fuzzy: true, snippet: false, starred: false, also_heard: Vec::new() }];
         let got: Vec<(String, bool)> = entries(&items, &dict, &words).into_iter().map(|e| (e.to, e.fuzzy)).collect();
         assert_eq!(
             got,
@@ -202,6 +239,9 @@ mod tests {
             "Shopify", "Kafka", "Postgres", "Redis", "Nginx", "Django", "Flask", "React", "Svelte", "Tauri", "Parakeet",
             "Yap", "Acme", "Bloom", "Harbour", "Lumen", "Orion", "Atlas", "Nova", "Apollo", "Sasha", "Kieran", "Declan",
             "Niamh", "Saoirse", "Ciara", "Eoin", "Ruairi", "Gareth", "Rhys", "Dylan", "Megan", "Bethan", "Ffion",
+            // Names spelled far from how they're said (spoken_names.rs).
+            "Sinead", "Grainne", "Roisin", "Oisin", "Sorcha", "Clodagh", "Tadhg", "Caoimhe", "Padraig", "Aisling",
+            "Dafydd", "Cerys", "Eilidh", "Joaquin", "Xavier", "Wojciech", "Nguyen", "Diarmuid", "Orlaith",
         ];
         let items: Vec<Item> = names.iter().enumerate().map(|(i, n)| person(i as u64 + 1, n)).collect();
         // Every name (memory gives dictation its newest MAX_NAMES at a time).
@@ -411,6 +451,30 @@ mod tests {
             "The figures don't add up.",
             "Slack off a bit, you've earned it.",
             "Let's notion this out on paper.",
+            // Near how those names are said (spoken_names.rs).
+            "We flew to Spain on Sunday.",
+            "Pass me the sieve and the colander.",
+            "That sounds a bit naive.",
+            "Shove it on the shelf, Sharon.",
+            "The seer said it would rain.",
+            "Never mind, I'll do it.",
+            "Keep the receipt in your wallet.",
+            "Shiver me timbers, it's cold.",
+            "The shave was close.",
+            "She ate a whole tin of olives.",
+            "Ask Owen and Rory about the venue.",
+            "Killian and Reece are coming too.",
+            "Dermot is driving.",
+            "Cheers, Joe.",
+            "The tan line is from the beach.",
+            "I put on a cardigan.",
+            "Pour me a coffee, Sean.",
+            "Kevin bought a new van.",
+            "She's an early riser.",
+            "Can you feed the cat?",
+            "Davis has the keys.",
+            "We'll walk along the quay.",
+            "Shane and Shona went home.",
         ];
         let mut changed = Vec::new();
         for s in sentences {
@@ -423,14 +487,46 @@ mod tests {
     }
 
     #[test]
+    fn your_own_name_is_vocabulary_by_the_same_rules() {
+        let got = |name: &str, dict: &[DictionaryEntry]| -> Vec<(String, bool)> {
+            own_name(name, dict, &words).into_iter().map(|e| (e.to, e.fuzzy)).collect()
+        };
+        assert_eq!(got("Siobhan", &[]), [("Siobhan".to_string(), true)]);
+        // A name that's a word: the Whisper prompt and its exact spelling only.
+        assert_eq!(got("  Will ", &[]), [("Will".to_string(), false)]);
+        assert_eq!(got("Sarah Jenkins", &[]).len(), 3);
+        // Spaces and stray punctuation as typed in About you.
+        assert_eq!(got("  Siobhan   Ní Bhriain.", &[])[0].0, "Siobhan Ní Bhriain");
+        // Nothing, or the dictionary spells it already (it has the say).
+        assert!(got("", &[]).is_empty());
+        let dict = vec![DictionaryEntry { from: "shiv on".into(), to: "Siobhan".into(), fuzzy: true, snippet: false, starred: false, also_heard: vec![] }];
+        assert!(got("siobhan", &dict).is_empty());
+        // No trigger: never an entry the exact pass runs.
+        assert!(own_name("Siobhan", &[], &words).iter().all(|e| e.from.is_empty() && !e.snippet));
+        // …and it's fixed in dictation like memory's names.
+        let is_word = |w: &str| crate::dictionary::learn::is_frequent(w);
+        let mine = own_name("Siobhan", &[], &words);
+        assert_eq!(crate::dictionary::fuzzy::apply_names("Ask Shiobhan to join.", &mine, &is_word), "Ask Siobhan to join.");
+        assert_eq!(crate::dictionary::fuzzy::apply_names("this is siobhan speaking", &mine, &is_word), "this is Siobhan speaking");
+    }
+
+    #[test]
     fn a_misheard_name_is_fixed() {
         let items = vec![person(1, "Siobhan"), person(2, "Rochelle"), person(3, "Priya")];
         let vocab = entries(&items, &[], &words);
         let is_word = |w: &str| crate::dictionary::learn::is_frequent(w) || ["row", "shell", "shiv", "lucky"].contains(&w);
         assert_eq!(crate::dictionary::fuzzy::apply_names("I'll ask Shiobhan about it.", &vocab, &is_word), "I'll ask Siobhan about it.");
         assert_eq!(crate::dictionary::fuzzy::apply_names("Siobahn is coming.", &vocab, &is_word), "Siobhan is coming.");
-        // Too far from the name (Handy's threshold): left as heard.
-        assert_eq!(crate::dictionary::fuzzy::apply_names("I'll ask Shivon.", &vocab, &is_word), "I'll ask Shivon.");
+        // Spelled far from the name, the way it's said (spoken_names.rs).
+        assert_eq!(crate::dictionary::fuzzy::apply_names("I'll ask Shivon.", &vocab, &is_word), "I'll ask Siobhan.");
+        assert_eq!(crate::dictionary::fuzzy::apply_names("Shivawn said so", &vocab, &is_word), "Siobhan said so");
+        assert_eq!(crate::dictionary::fuzzy::apply_names("Shivonn is here.", &vocab, &is_word), "Siobhan is here.");
+        let irish = entries(&[person(4, "Niamh"), person(5, "Saoirse"), person(6, "Aoife Byrne")], &[], &words);
+        assert_eq!(crate::dictionary::fuzzy::apply_names("Neev and Seersha met Eefa.", &irish, &is_word), "Niamh and Saoirse met Aoife.");
+        // Not a word near none of them, nor a place.
+        assert_eq!(crate::dictionary::fuzzy::apply_names("We flew to Spain with Sharon.", &vocab, &is_word), "We flew to Spain with Sharon.");
+        // Too far from the name and from how it's said: left as heard.
+        assert_eq!(crate::dictionary::fuzzy::apply_names("I'll ask Shona.", &vocab, &is_word), "I'll ask Shona.");
         assert_eq!(crate::dictionary::fuzzy::apply_names("Tell rochelle I'm late.", &vocab, &is_word), "Tell Rochelle I'm late.");
         assert_eq!(crate::dictionary::fuzzy::apply_names("Pria said yes.", &vocab, &is_word), "Priya said yes.");
         // Heard as ordinary words: left alone. ("row shell" sounds and

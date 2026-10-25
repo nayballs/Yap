@@ -324,6 +324,22 @@ pub fn latest_dictation() -> Option<String> {
         .map(|e| e.text.clone())
 }
 
+/// Every dictation's final text since `since` (unix secs), oldest first —
+/// not an Upload's, nor one never transcribed ("Type that often? Save it as
+/// a snippet", `dictionary/snippet_offer.rs`).
+pub fn dictation_texts_since(since: u64) -> Vec<(u64, String)> {
+    let mut guard = match STATE.lock() {
+        Ok(g) => g,
+        Err(poisoned) => poisoned.into_inner(),
+    };
+    let entries = guard.get_or_insert_with(load_from_disk);
+    entries
+        .iter()
+        .filter(|e| e.ts >= since && !e.failed() && is_dictation_app(&e.app) && !e.text.trim().is_empty())
+        .map(|e| (e.ts, e.text.clone()))
+        .collect()
+}
+
 /// The newest dictation's transcript before cleanup ([`latest_dictation`]'s
 /// `raw`): "Paste last transcript (as said)" after a restart.
 pub fn latest_dictation_raw() -> Option<String> {

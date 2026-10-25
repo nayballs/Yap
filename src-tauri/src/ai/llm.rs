@@ -138,10 +138,14 @@ fn dictionary_suffix(dictionary: &[crate::config::DictionaryEntry]) -> String {
         }
         if e.snippet {
             phrases.push(format!("\"{from}\""));
-        } else if from.eq_ignore_ascii_case(to) {
+            continue;
+        }
+        // Every way it's heard (`dictionary/variants.rs`) but the word itself.
+        let heard: Vec<String> = e.heard().into_iter().filter(|h| !h.eq_ignore_ascii_case(to)).map(|h| format!("\"{h}\"")).collect();
+        if heard.is_empty() {
             spellings.push(to);
         } else {
-            corrections.push(format!("\"{from}\" → \"{to}\""));
+            corrections.push(format!("{} → \"{to}\"", heard.join(" or ")));
         }
     }
     if spellings.is_empty() && corrections.is_empty() && phrases.is_empty() {
@@ -1719,6 +1723,7 @@ mod tests {
             fuzzy: true,
             snippet: false,
             starred: false,
+            also_heard: Vec::new(),
         };
         assert_eq!(dictionary_suffix(&[]), "");
         // same-word entry (e.g. an agent name) → exact-spelling bias
@@ -1728,6 +1733,14 @@ mod tests {
         let s = dictionary_suffix(&[de("cuber netties", "Kubernetes")]);
         assert!(
             s.contains("apply these corrections: \"cuber netties\" → \"Kubernetes\""),
+            "{s}"
+        );
+        // every way a word is heard, in one correction
+        let mut kube = de("cooper netties", "Kubernetes");
+        kube.also_heard = vec!["cube an eighties".into(), "kubernetes".into()];
+        let s = dictionary_suffix(&[kube]);
+        assert!(
+            s.contains("apply these corrections: \"cooper netties\" or \"cube an eighties\" → \"Kubernetes\""),
             "{s}"
         );
         // blank entries are skipped → empty suffix

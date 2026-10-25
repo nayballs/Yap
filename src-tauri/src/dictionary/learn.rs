@@ -41,9 +41,12 @@
 //!    contraction or a possessive ("it's", "Sinead's"), a single ordinary
 //!    word heard (an entry would rewrite that word every time you say it:
 //!    "motion" → "Notion"), a phrase of only function words, typo-style
-//!    fixes between ordinary words, terms already in the dictionary, and
-//!    edits that rewrite most of the dictation. One per spelling, terms with
-//!    a capital first, at most [`MAX_SUGGESTIONS`].
+//!    fixes between ordinary words, what a correction is heard as already,
+//!    a word the dictionary spells another way, and edits that rewrite most
+//!    of the dictation. A word the dictionary writes exactly so, heard a new
+//!    way, is offered as another way it's heard ("Add another way you say
+//!    “Kubernetes”?", `variants.rs`). One per spelling, terms with a capital
+//!    first, at most [`MAX_SUGGESTIONS`].
 //! 3. **The prompt** ([`offer`]), in one place (`notice::place`): a toast in
 //!    the main window while it's focused, else a card on the Yap bar
 //!    (`bar::show_card`; it waits out a dictation, up to a minute), else the
@@ -59,6 +62,13 @@
 //!    of the config); at most one prompt per [`MIN_GAP_MS`]. The answers
 //!    live in `<data>/word_suggestions.json` (not config.json: Settings
 //!    auto-saves its whole copy of the config).
+//!
+//! Also asked in the window that made the edit, without a watch: a meeting
+//! transcript line fixed by hand ([`offer_for_line`]) and a meeting summary
+//! edited from Edit to Done ([`offer_for_summary`]: only one or two clear
+//! swaps of a name or a term, never a rewrite). And what was typed right
+//! after a dictation, on its line (`Watch::typed_after`), is counted for
+//! "Type that often? Save it as a snippet" (`snippet_offer.rs`).
 //!
 //! Behaviour after Wispr Flow's dictionary auto-learn as measured from its
 //! shipped code (`references/wispr-flow/rea-teardown/
@@ -293,12 +303,23 @@ fn shaped_like_a_term(word: &str) -> bool {
     letters.iter().skip(1).any(|c| c.is_uppercase()) && letters.iter().any(|c| c.is_lowercase())
 }
 
-/// Already a correction's spelling (or its trigger): nothing to learn.
+/// Nothing to learn: a correction is heard this way already (any of its
+/// ways, `variants.rs`), or the dictionary spells the word another way
+/// ("JSON" there, "json" typed: the dictionary has the say). A word the
+/// dictionary writes exactly so, heard a new way, is something to learn
+/// (another way it's heard: [`known_term`]).
 fn in_dictionary(dict: &[DictionaryEntry], heard: &str, term: &str) -> bool {
-    let (heard, term) = (heard.to_lowercase(), term.to_lowercase());
-    dict.iter()
-        .filter(|e| !e.snippet)
-        .any(|e| e.to.trim().to_lowercase() == term || e.from.trim().to_lowercase() == heard)
+    let (heard, term) = (heard.trim().to_lowercase(), term.trim());
+    dict.iter().filter(|e| !e.snippet).any(|e| {
+        e.heard().iter().any(|h| h.to_lowercase() == heard)
+            || (e.to.trim().to_lowercase() == term.to_lowercase() && e.to.trim() != term)
+    })
+}
+
+/// A correction writes `term` exactly so already: a suggestion of it is
+/// another way it's heard.
+fn known_term(dict: &[DictionaryEntry], term: &str) -> bool {
+    dict.iter().any(|e| !e.snippet && e.to.trim() == term.trim())
 }
 
 /// Does `term` spell or sound like `heard` (`fuzzy::spelling_distance`,
@@ -1021,6 +1042,17 @@ impl Watch {
         self.last_good.as_deref()
     }
 
+    /// What was typed right after the dictation, as the last read found
+    /// it: the span is the pasted text, unchanged, and then more ("Type
+    /// that often? Save it as a snippet", `snippet_offer.rs`). On the same
+    /// line only: a line break ends the watch.
+    pub fn typed_after(&self) -> Option<String> {
+        let span = self.last_span.as_deref()?.trim();
+        let rest = span.strip_prefix(self.pasted.as_str())?;
+        let rest = rest.trim();
+        (rest.chars().filter(|c| c.is_alphanumeric()).count() >= 6).then(|| rest.to_string())
+    }
+
     /// One poll: `elapsed` since the watch began, `superseded` (another
     /// dictation started), `read` reads the field (only when it's needed).
     /// `Some`: the watch is over, and why.
@@ -1149,6 +1181,11 @@ fn watch(app: &AppHandle, pasted: &str, hwnd: isize, gen: u64, dictations: u64) 
     if let Some(edited) = edited {
         consider(app, pasted, edited, watch.starts_sentence());
     }
+    // Typed right after the dictation: counted for "Type that often? Save
+    // it as a snippet" (never kept as text).
+    if let Some(typed) = watch.typed_after() {
+        crate::dictionary::snippet_offer::typed(app, &typed);
+    }
 }
 
 /// The last good edit of a watch that ended: offer what's worth learning
@@ -1228,7 +1265,9 @@ pub fn removed_entries(old: &[DictionaryEntry], new: &[DictionaryEntry]) -> Vec<
     let key = |s: &str| s.trim().to_lowercase();
     let corrections = |d: &[DictionaryEntry]| d.iter().filter(|e| !e.snippet).cloned().collect::<Vec<_>>();
     let new = corrections(new);
-    let froms: HashSet<String> = new.iter().map(|e| key(&e.from)).collect();
+    // Every way each is heard (`variants.rs`): one kept as another entry's
+    // variant isn't gone.
+    let froms: HashSet<String> = new.iter().flat_map(|e| e.heard().into_iter().map(key).collect::<Vec<_>>()).collect();
     let tos: HashSet<String> = new.iter().map(|e| key(&e.to)).collect();
     corrections(old)
         .into_iter()
@@ -1305,9 +1344,16 @@ fn save_now() -> Result<(), crate::shell::saving::SaveError> {
 
 // ---- the prompt --------------------------------------------------------------------
 
-/// The prompt's title, its body and its "never" link.
-pub fn prompt_text(words: &[Suggestion]) -> (String, String, &'static str) {
+/// The prompt's title, its body and its "never" link, knowing the
+/// dictionary: one word it writes already, heard a new way, is "Add
+/// another way you say “Kubernetes”?" (`variants.rs`).
+pub fn prompt_text_with(words: &[Suggestion], dict: &[DictionaryEntry]) -> (String, String, &'static str) {
     match words {
+        [one] if known_term(dict, &one.term) => (
+            format!("Add another way you say “{}”?", one.term),
+            format!("Yap heard “{}”.", one.heard),
+            "Don't suggest this",
+        ),
         [one] => (
             format!("Add “{}” to your dictionary?", one.term),
             format!("Yap heard “{}”.", one.heard),
@@ -1382,7 +1428,7 @@ fn offer(app: &AppHandle, words: Vec<Suggestion>, ignore_gap: bool) -> bool {
         return false;
     }
     let id = NEXT_ID.fetch_add(1, Ordering::SeqCst);
-    let (title, body, never) = prompt_text(&words);
+    let (title, body, never) = prompt_text_with(&words, &crate::config::load().dictionary);
     // One place (`notice.rs`): the main window while the person is looking
     // at it, else the Yap bar (else the window, on screen after all).
     let place = crate::notices::notice::place(app, false);
@@ -1473,8 +1519,96 @@ pub fn offer_for_line(old: &str, new: &str) -> Option<Prompt> {
     if words.is_empty() {
         return None;
     }
+    tracing::info!(count = words.len(), "learn: offered words from a meeting line's edit");
+    Some(prompt_in_window(words, &cfg.dictionary))
+}
+
+/// A changed run of a summary this many words long at most, on either
+/// side, can be a swap of one name or term for another.
+const SWAP_WORDS: usize = 3;
+/// More different swaps than this in one edit is a rewrite.
+const MAX_SWAPS: usize = 2;
+
+/// **A meeting summary the person edited** (`old` → `new`, its markdown,
+/// over one editing session): the swaps of one name or term for another
+/// worth offering, by the same rules as a dictation's fix ([`judge`]:
+/// spelled or sounding alike, the new one a term, never one ordinary word
+/// heard; and [`judge_case`]). Conservative, as a summary is the AI's
+/// words, not what Yap heard: every change in the edit must be such a swap
+/// — one added, deleted or longer change anywhere and it's a rewrite,
+/// nothing offered — and at most [`MAX_SWAPS`] different ones (the same
+/// swap made in several places counts once). Task boxes are left out of
+/// the comparison (ticking isn't an edit of words). Pure.
+pub fn summary_swaps(old: &str, new: &str, dict: &[DictionaryEntry], ordinary: &dyn Fn(&str) -> bool) -> Vec<Suggestion> {
+    static TASK: OnceLock<regex::Regex> = OnceLock::new();
+    let task = TASK.get_or_init(|| regex::Regex::new(r"\[[ xX]\]").expect("a valid pattern"));
+    let (old, new) = (task.replace_all(old, " "), task.replace_all(new, " "));
+    let a = words(&old, true);
+    let b = words(&new, true);
+    if a.is_empty() || b.is_empty() || a.len() > 4_000 || b.len() > 4_000 {
+        return Vec::new();
+    }
+    let matched = align(&a, &b);
+    let mut out: Vec<Suggestion> = Vec::new();
+    let mut prev = (0, 0);
+    for &(i, j) in matched.iter().chain(std::iter::once(&(a.len(), b.len()))) {
+        let (heard, term) = (&a[prev.0..i], &b[prev.1..j]);
+        if !heard.is_empty() || !term.is_empty() {
+            let swap = (!heard.is_empty()
+                && !term.is_empty()
+                && word_count(heard) <= SWAP_WORDS
+                && word_count(term) <= SWAP_WORDS)
+                .then(|| judge(heard, term, dict, ordinary))
+                .flatten();
+            match swap {
+                Some(s) => out.push(s),
+                // Anything else changed: a rewrite.
+                None => return Vec::new(),
+            }
+        }
+        if i < a.len() {
+            out.extend(judge_case(&a[i], &b[j], dict, ordinary));
+        }
+        prev = (i + 1, j + 1);
+    }
+    let mut seen: HashSet<(String, String)> = HashSet::new();
+    out.retain(|s| seen.insert((s.heard.to_lowercase(), s.term.to_lowercase())));
+    if out.len() > MAX_SWAPS {
+        return Vec::new();
+    }
+    out
+}
+
+/// A meeting summary the person edited, `old` → `new` (from the moment
+/// they began editing to Done): the swaps worth learning in it
+/// ([`summary_swaps`]), the answers given before left out, handed back for
+/// the window to ask, as a meeting line's edit is ([`offer_for_line`]).
+/// `None`: nothing worth offering, or "Suggest words from your corrections"
+/// is off. Blocking (the spell checker): off the main thread.
+pub fn offer_for_summary(old: &str, new: &str) -> Option<Prompt> {
+    let cfg = crate::config::load();
+    if !cfg.learn_words || old == new {
+        return None;
+    }
+    let ordinary = Ordinary::new();
+    let rec = record();
+    let words: Vec<Suggestion> = summary_swaps(&normalise(old), &normalise(new), &cfg.dictionary, &|w| ordinary.is(w))
+        .into_iter()
+        .filter(|s| allowed(&rec, s))
+        .collect();
+    tracing::debug!(found = words.len(), "learn: looked at a summary's edit");
+    if words.is_empty() {
+        return None;
+    }
+    tracing::info!(count = words.len(), "learn: offered words from a summary's edit");
+    Some(prompt_in_window(words, &cfg.dictionary))
+}
+
+/// The prompt for words a window asks about itself (a meeting line's or a
+/// summary's edit): pending, counted as the last prompt.
+fn prompt_in_window(words: Vec<Suggestion>, dict: &[DictionaryEntry]) -> Prompt {
     let id = NEXT_ID.fetch_add(1, Ordering::SeqCst);
-    let (title, body, never) = prompt_text(&words);
+    let (title, body, never) = prompt_text_with(&words, dict);
     *pending() = Some(Pending {
         id,
         words: words.clone(),
@@ -1485,8 +1619,7 @@ pub fn offer_for_line(old: &str, new: &str) -> Option<Prompt> {
         r.last_offered_at = now;
         r
     });
-    tracing::info!(count = words.len(), "learn: offered words from a meeting line's edit");
-    Some(Prompt { id, title, body, never, words })
+    Prompt { id, title, body, never, words }
 }
 
 /// The words added, as their title: "“Kubernetes” is in your dictionary".
@@ -1509,14 +1642,11 @@ fn add_words(app: &AppHandle, words: &[Suggestion]) -> Result<Vec<String>, Strin
             if in_dictionary(&cfg.dictionary, &s.heard, &s.term) {
                 continue;
             }
-            cfg.dictionary.push(DictionaryEntry {
-                from: s.heard.clone(),
-                to: s.term.clone(),
-                fuzzy: true,
-                snippet: false,
-                starred: false,
-            });
-            added.push(s.term.clone());
+            // Another way an entry already writing the word is heard
+            // (`variants.rs`), else a new entry.
+            if crate::dictionary::variants::add_heard(&mut cfg.dictionary, &s.heard, &s.term) {
+                added.push(s.term.clone());
+            }
         }
     })?;
     if added.is_empty() {
@@ -1588,6 +1718,17 @@ pub async fn word_suggestion_respond(app: AppHandle, id: u64, answer: String) ->
     tauri::async_runtime::spawn_blocking(move || respond(&app, id, &answer))
         .await
         .map_err(|e| e.to_string())?
+}
+
+/// A meeting summary edited from `before` to `after` (the Summary tab's
+/// editor, from Edit to Done; the notepad and the Notes view): the word
+/// swap to offer for the dictionary, if any ([`offer_for_summary`]),
+/// answered with [`word_suggestion_respond`]. Logs counts only.
+#[tauri::command]
+pub async fn summary_word_offer(before: String, after: String) -> Result<Option<Prompt>, String> {
+    tauri::async_runtime::spawn_blocking(move || offer_for_summary(&before, &after))
+        .await
+        .map_err(|e| e.to_string())
 }
 
 /// Test mode only: an edit of a pasted dictation, as the watch would have
@@ -1704,6 +1845,7 @@ mod tests {
             fuzzy: true,
             snippet: false,
             starred: false,
+            also_heard: Vec::new(),
         }
     }
 
@@ -1841,8 +1983,20 @@ mod tests {
     #[test]
     fn words_already_in_the_dictionary_are_skipped() {
         let dict = vec![entry("cuber netties", "Kubernetes"), entry("jaison", "JSON")];
-        assert!(found_with("Deploy to cube and eighties.", "Deploy to Kubernetes.", &dict).is_empty());
+        // Heard a way the dictionary has already: nothing to learn.
+        assert!(found_with("Deploy to cuber netties.", "Deploy to Kubernetes.", &dict).is_empty());
+        // The word spelled another way than the dictionary's ("JSON"): its say.
         assert!(found_with("Send the jason payload.", "Send the json payload.", &dict).is_empty());
+        // The word as the dictionary writes it, heard a new way: another
+        // way it's heard (variants.rs), asked as such.
+        let new_way = found_with("Deploy to cube and eighties.", "Deploy to Kubernetes.", &dict);
+        assert_eq!(new_way, pair("cube and eighties", "Kubernetes"));
+        let s = vec![Suggestion { heard: "cube and eighties".into(), term: "Kubernetes".into() }];
+        assert_eq!(prompt_text_with(&s, &dict).0, "Add another way you say “Kubernetes”?");
+        let mut more = dict.clone();
+        assert!(crate::dictionary::variants::add_heard(&mut more, "cube and eighties", "Kubernetes"));
+        assert_eq!(more.len(), 2);
+        assert!(found_with("Deploy to cube and eighties.", "Deploy to Kubernetes.", &more).is_empty());
         // A snippet's text isn't a correction's spelling.
         let snippet = vec![DictionaryEntry { snippet: true, ..entry("k8s", "Kubernetes") }];
         assert_eq!(
@@ -2241,16 +2395,83 @@ mod tests {
     #[test]
     fn the_prompt_says_what_yap_heard() {
         let one = vec![Suggestion { heard: "cube and eighties".into(), term: "Kubernetes".into() }];
-        let (title, body, never) = prompt_text(&one);
+        let (title, body, never) = prompt_text_with(&one, &[]);
         assert_eq!(title, "Add “Kubernetes” to your dictionary?");
         assert_eq!(body, "Yap heard “cube and eighties”.");
         assert_eq!(never, "Don't suggest this");
         let two = vec![one[0].clone(), Suggestion { heard: "graph ana".into(), term: "Grafana".into() }];
-        let (title, body, never) = prompt_text(&two);
+        let (title, body, never) = prompt_text_with(&two, &[]);
         assert_eq!(title, "Add 2 words to your dictionary?");
         assert_eq!(body, "“Kubernetes” (Yap heard “cube and eighties”) and “Grafana” (Yap heard “graph ana”).");
         assert_eq!(never, "Don't suggest these");
         assert_eq!(added_title(&["Kubernetes".into()]), "“Kubernetes” is in your dictionary");
         assert_eq!(added_title(&["A".into(), "B".into()]), "Added 2 words to your dictionary");
+    }
+
+    const SUMMARY: &str = "## Summary\n\nShivon walked through the cube and eighties move. \
+        The team agreed to ship on Friday.\n\n## Action items\n\n- [ ] **Shivon** to send the cube and eighties plan\n- [x] Sam to book the room";
+
+    fn swaps(old: &str, new: &str) -> Vec<(String, String)> {
+        summary_swaps(old, new, &[], &is_frequent).into_iter().map(|s| (s.heard, s.term)).collect()
+    }
+
+    #[test]
+    fn a_summary_edit_that_swaps_a_name_or_a_term_is_offered() {
+        // One name, fixed everywhere it was (once offered).
+        let fixed = SUMMARY.replace("Shivon", "Siobhan");
+        assert_eq!(swaps(SUMMARY, &fixed), pair("Shivon", "Siobhan"));
+        // Two swaps: both.
+        let both = fixed.replace("cube and eighties", "Kubernetes");
+        assert_eq!(swaps(SUMMARY, &both), [("Shivon".to_string(), "Siobhan".to_string()), ("cube and eighties".to_string(), "Kubernetes".to_string())]);
+        // A task ticked as well: not a change of words.
+        let ticked = fixed.replace("- [ ] **Siobhan**", "- [x] **Siobhan**");
+        assert_eq!(swaps(SUMMARY, &ticked), pair("Shivon", "Siobhan"));
+        // Bold or not, the name's the name.
+        assert_eq!(swaps("Ask **Shivon** about it.", "Ask **Siobhan** about it."), pair("Shivon", "Siobhan"));
+    }
+
+    #[test]
+    fn a_summary_rewritten_or_fixed_in_other_ways_offers_nothing() {
+        let fixed = SUMMARY.replace("Shivon", "Siobhan");
+        // A sentence added beside the swap: an edit, not a correction.
+        let added = fixed.replace("on Friday.", "on Friday. Sam will check the budget first.");
+        assert!(swaps(SUMMARY, &added).is_empty());
+        // A line deleted.
+        assert!(swaps(SUMMARY, &fixed.replace("\n- [x] Sam to book the room", "")).is_empty());
+        // A fact changed, not a mishearing: Friday → Monday, Sam → Priya.
+        assert!(swaps(SUMMARY, &SUMMARY.replace("Friday", "Monday")).is_empty());
+        assert!(swaps(SUMMARY, &SUMMARY.replace("Sam to", "Priya to")).is_empty());
+        // Three different swaps: a rewrite.
+        let three = fixed.replace("cube and eighties", "Kubernetes").replace("Sam", "Sami");
+        assert!(swaps(SUMMARY, &three).is_empty());
+        // A longer run of words changed.
+        assert!(swaps(SUMMARY, &SUMMARY.replace("walked through the cube and eighties move", "explained the plan")).is_empty());
+        // Unchanged, or emptied.
+        assert!(swaps(SUMMARY, SUMMARY).is_empty());
+        assert!(swaps(SUMMARY, "").is_empty());
+        // The dictionary has it already (heard that way).
+        let dict = vec![entry("Shivon", "Siobhan")];
+        assert!(summary_swaps(SUMMARY, &fixed, &dict, &is_frequent).is_empty());
+    }
+
+    #[test]
+    fn text_typed_right_after_the_dictation_is_found() {
+        let pasted = "Here's the link to book a call:";
+        let typed = |reads: &[&str]| {
+            let reads: Vec<FieldWindow> = reads.iter().map(|r| whole_field(r)).collect();
+            let mut w = Watch::start(&reads[0], pasted).unwrap();
+            for (i, r) in reads[1..].iter().enumerate() {
+                if w.step(POLL * (i as u32 + 1), false, || Some(r.clone())).is_some() {
+                    break;
+                }
+            }
+            w.typed_after()
+        };
+        let link = format!("{pasted} https://calendly.com/sam-example/30min");
+        assert_eq!(typed(&[pasted, &link]).as_deref(), Some("https://calendly.com/sam-example/30min"));
+        // Nothing more, a word or two, or the dictation itself changed: nothing.
+        assert_eq!(typed(&[pasted, pasted]), None);
+        assert_eq!(typed(&[pasted, &format!("{pasted} ok")]), None);
+        assert_eq!(typed(&[pasted, &link.replace("Here's", "Here is")]), None);
     }
 }

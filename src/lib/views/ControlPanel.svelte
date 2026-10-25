@@ -25,6 +25,7 @@
   import { initMeetingGuard } from '../notices/meetingGuard.js';
   import { initCalendar, closeConnectDialog } from '../stores/calendar.svelte.js';
   import { initWordSuggestions } from '../notices/wordSuggestions.js';
+  import { initSnippetSuggestions } from '../notices/snippetSuggestions.js';
   import { initLanguageNudge } from '../notices/languageNudge.js';
   import { initAlerts } from '../notices/alerts.js';
   import { initMicOffers } from '../notices/micOffer.js';
@@ -91,6 +92,14 @@
   // "Add “Kubernetes” to your dictionary?" after you fix a word Yap typed
   // (dictionary/learn.rs via wordSuggestions.js), with Open Dictionary once added.
   initWordSuggestions({
+    showView: (view) => {
+      settingsOpen = false;
+      activeView = view;
+    },
+  });
+  // "Type that often? Save it as a snippet" (dictionary/snippet_offer.rs
+  // via snippetSuggestions.js), with Open Dictionary once saved.
+  initSnippetSuggestions({
     showView: (view) => {
       settingsOpen = false;
       activeView = view;

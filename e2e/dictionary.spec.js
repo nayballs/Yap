@@ -440,6 +440,113 @@ test('2,000 entries stay quick: the view opens, a search filters, typing in a ro
   await setConfig(yap, main, { dictionary: DICT });
 });
 
+test('one entry, several ways it is heard: + adds one, each is saved, searched and corrected, × takes it off', async ({
+  yap,
+  main,
+  shot,
+}) => {
+  await freshView(yap, main);
+  const kube = row(main, 'Kubernetes');
+  await kube.getByRole('button', { name: 'Add another way “Kubernetes” is heard' }).click();
+  const also = kube.getByRole('textbox', { name: 'Also heard as' });
+  await expect(also).toBeFocused();
+  await also.fill('cooper netties');
+  await expectStore(yap, 'config.json', (c) => {
+    const e = c.dictionary.find((x) => x.to === 'Kubernetes');
+    return e?.from === 'cube and eighties' && e.alsoHeard?.join('|') === 'cooper netties';
+  });
+  // Another, from the row's menu; an empty one isn't saved.
+  await kube.locator('.arrow').click({ button: 'right' });
+  await main.getByRole('menu').getByRole('menuitem', { name: 'Add another way it’s heard' }).click();
+  await expect(kube.getByRole('textbox', { name: 'Also heard as' })).toHaveCount(2);
+  await kube.getByRole('textbox', { name: 'Also heard as' }).last().fill('cuber nets');
+  await expectStore(yap, 'config.json', (c) => c.dictionary.find((x) => x.to === 'Kubernetes')?.alsoHeard?.length === 2);
+  // One entry still: the list has the word once.
+  await expect.poll(() => words(main)).toEqual(WORDS);
+  await shot(main, '11-heard-several-ways');
+
+  // The search finds it by any of them.
+  await searchBox(main).fill('cooper');
+  await expect.poll(() => words(main)).toEqual(['Kubernetes']);
+  await searchBox(main).fill('');
+
+  // Every way is corrected in a dictation (the stub's transcript, through
+  // the real passes: exact, then near-misses).
+  const r1 = await yap.invoke('e2e_dictation', { text: 'move it to cooper netties today' });
+  expect(r1.text).toContain('move it to Kubernetes today');
+  // A near-miss of one of them.
+  const r2 = await yap.invoke('e2e_dictation', { text: 'and the cuber net cluster' });
+  expect(r2.text).toContain('the Kubernetes cluster');
+
+  // Settings auto-saves its own copy of the config: the ways stay.
+  const dialog = await openSettings(main, 'Dictation');
+  const space = dialog.getByRole('button', { name: 'Append trailing space' });
+  const before = await space.getAttribute('aria-pressed');
+  await space.click();
+  await expectStore(yap, 'config.json', (c) => String(c.appendTrailingSpace) !== before);
+  await space.click();
+  await expectStore(yap, 'config.json', (c) => String(c.appendTrailingSpace) === before);
+  expect(yap.readConfig().dictionary.find((e) => e.to === 'Kubernetes').alsoHeard).toEqual(['cooper netties', 'cuber nets']);
+  await closeSettings(main);
+
+  // Export: a row a way; Import… of that file into this dictionary: all there.
+  const file = path.join(yap.runDir, 'ways.csv');
+  await yap.invoke('e2e_dictionary_file', { path: file });
+  await main.getByRole('button', { name: 'Export…' }).first().click();
+  await main.getByRole('menu').getByRole('menuitem', { name: 'As CSV…' }).click();
+  await expect.poll(() => fs.existsSync(file) && fs.readFileSync(file, 'utf8')).toContain('cooper netties,Kubernetes,correction,yes,\r\n');
+  await closeToasts(main);
+
+  // A file with a new way: it joins the entry, and Undo takes it off.
+  const more = path.join(yap.runDir, 'more-ways.csv');
+  fs.writeFileSync(more, 'heard,written\ncube an eighties,Kubernetes\n');
+  await yap.invoke('e2e_dictionary_file', { path: more });
+  await main.getByRole('button', { name: 'Import…' }).click();
+  const preview = main.getByRole('dialog', { name: 'Import from “more-ways.csv”' });
+  await expect(preview).toContainText('Another way it\'s heard');
+  await preview.getByRole('button', { name: 'Add 1 entry' }).click();
+  await expectStore(yap, 'config.json', (c) => c.dictionary.find((x) => x.to === 'Kubernetes')?.alsoHeard?.includes('cube an eighties'));
+  expect(yap.readConfig().dictionary.filter((e) => e.to === 'Kubernetes')).toHaveLength(1);
+  await toastWith(main, 'Added 1 entry').getByRole('button', { name: 'Undo' }).click();
+  await expectStore(yap, 'config.json', (c) => !c.dictionary.find((x) => x.to === 'Kubernetes')?.alsoHeard?.includes('cube an eighties'));
+
+  // × takes one off.
+  await kube.getByRole('button', { name: 'Remove “cuber nets”' }).click();
+  await expectStore(yap, 'config.json', (c) => c.dictionary.find((x) => x.to === 'Kubernetes')?.alsoHeard?.join('|') === 'cooper netties');
+  await setConfig(yap, main, { dictionary: DICT });
+});
+
+test("a snippet shows its length, and warns when its phrase is near another's or has a corrected word", async ({ yap, main, shot }) => {
+  await freshView(yap, main);
+  // The length, as you type.
+  const signOff = snippets(main).locator('.snip-row').first();
+  const address = snippets(main).locator('.snip-row').nth(1);
+  await expect(address.locator('.snip-count')).toHaveText('17 characters');
+  await address.getByRole('textbox', { name: 'Text Yap types' }).fill('1 Long Lane\nLeeds\nUK');
+  await expect(address.locator('.snip-count')).toHaveText('20 characters');
+  await expect(address.getByRole('textbox', { name: 'Text Yap types' })).toHaveAttribute('maxlength', '5000');
+
+  // A new snippet said nearly as another is warned about.
+  await snippets(main).getByRole('button', { name: '+ Add snippet' }).click();
+  const fresh = snippets(main).locator('.snip-row').last();
+  await fresh.getByRole('textbox', { name: 'Phrase you say' }).fill('my adress');
+  await fresh.getByRole('textbox', { name: 'Text Yap types' }).fill('2 Long Lane');
+  await expect(fresh.getByRole('note')).toHaveText('Close to the snippet “my address”: Yap may type the wrong one.');
+  await shot(main, '12-snippet-near-another');
+  // A word the dictionary corrects first: the snippet would never fire.
+  await fresh.getByRole('textbox', { name: 'Phrase you say' }).fill('the jaison file');
+  await expect(fresh.getByRole('note')).toHaveText('Yap changes “jaison” to “JSON” before it looks for snippets: say it another way.');
+  // A dictionary word: said anywhere, it types the snippet.
+  await fresh.getByRole('textbox', { name: 'Phrase you say' }).fill('Zentrix');
+  await expect(fresh.getByRole('note')).toContainText('“Zentrix” is a dictionary word');
+  // Fine.
+  await fresh.getByRole('textbox', { name: 'Phrase you say' }).fill('my office');
+  await expect(fresh.getByRole('note')).toHaveCount(0);
+  await expect(signOff.getByRole('note')).toHaveCount(0);
+  await expect(address.getByRole('note')).toHaveCount(0);
+  await setConfig(yap, main, { dictionary: DICT });
+});
+
 test('in the dark theme: the tools, a star, a selection, a search and the import preview', async ({ yap, main, shot }) => {
   await freshView(yap, main, DICT.map((e) => (e.to === 'Vexwell' ? { ...e, starred: true } : e)));
   const pick = async (label) => {

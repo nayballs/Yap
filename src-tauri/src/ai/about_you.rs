@@ -1285,7 +1285,17 @@ pub fn about_you_status(overrides: Option<serde_json::Value>) -> serde_json::Val
     let windows = resolve(&d, "");
     let region = resolve(&d, &picked);
     let profile = Profile { region: region.clone(), name: one_line(&name, NAME_MAX), about: one_line(&about, ABOUT_MAX) };
+    // Dictation spells the name this way too (memory/vocab.rs `own_name`):
+    // "fixed" (near-misses fixed), "prompt" (only the Whisper prompt and
+    // the exact spelling: short, or an everyday word), "" (no name).
+    let name_hint = if profile.name.trim().is_empty() {
+        ""
+    } else {
+        let words = crate::memory::Words::new();
+        crate::memory::vocab::name_hint(&profile.name, &|w| words.is(w))
+    };
     serde_json::json!({
+        "nameHint": name_hint,
         "windows": windows,
         "region": region,
         "summary": summary(&region),
