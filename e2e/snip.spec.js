@@ -44,6 +44,21 @@
 //   test sets in place of Windows', `e2e_snip_ocr`), folded under the
 //   question; no text: said.
 // - "Reads images" in the Chat model picker and in Settings' Chat list.
+//
+// The clipboard and the voice (2026-10-25, snip/waiting.rs):
+// - A snip to Chat is on the (pretend) clipboard too, the very PNG, "Copied ·
+//   Ctrl+V to paste it anywhere" in the box; Settings → Shortcuts' "Copy
+//   every snip to the clipboard" off stops it; a pasted picture isn't
+//   copied back.
+// - Rust keeps the screenshots waiting in the box (`chat_waiting_get`): a
+//   question asked out loud (`e2e_assistant_ask`) takes them — the image
+//   part and the question to the fake AI, the box cleared, the thumbnail in
+//   its bubble; a dictation into the box sends both with Enter; a model that
+//   can't read images leaves both in the box with its line; ✕ first: the
+//   question goes alone.
+// - Saying "snip": once it lands, Yap listens for the question by itself
+//   ("Ask about this screenshot…" on the capsule; the question staged with
+//   `e2e_snip_question`) and sends both; not during a call, nor after Esc.
 import fs from 'node:fs';
 import path from 'node:path';
 import { test as base, expect, openView, openSettings, closeSettings, expectStore, setConfig, sidebar } from './support/fixtures.js';
@@ -843,6 +858,241 @@ test('"Reads images" in the Chat model picker and in Settings\' Chat models', as
   await dialog.getByRole('tab', { name: 'Dictation Cleanup' }).click();
   await expect(dialog.locator('.simg')).toHaveCount(0);
   await closeSettings(main);
+});
+
+// ---- The clipboard and the voice (2026-10-25, snip/waiting.rs) ----
+// The maintainer: "When you take a screenshot it should go into Ctrl+V";
+// "If I press the AI Assistant after saying snip, it doesn't send what I
+// said and the snip; just one or the other".
+
+/** The dictation capsule on the Yap bar (its assistant variant has `data-ask`). */
+const capsule = (yap) => yap.overlay.locator('.capsule');
+const waitingIds = async (yap) => (await yap.invoke('chat_waiting_get')).images.map((i) => i.id);
+const pngB64 = (yap, id) => fs.readFileSync(imageFile(yap, id)).toString('base64');
+
+test('a snip to Chat is on the clipboard too; the setting off stops it; a pasted picture is not copied back', async ({ yap, main, shot }) => {
+  await clearBox(main);
+  await openView(main, 'Home');
+  await yap.invoke('e2e_snip_clipboard', { clear: true });
+  await startSnip(yap);
+  const img = await drag(yap, 0, [260, 40], [460, 140]);
+  await inChat(main);
+  // The very PNG Chat has (a pretend clipboard here; the robot test reads the real one).
+  await expect.poll(() => yap.invoke('e2e_snip_clipboard')).toBe(pngB64(yap, img.id));
+  await expect.poll(async () => (await last(yap)).copied).toBe(true);
+  await expect(main.getByTestId('chat-snip-copied')).toHaveText('Copied · Ctrl+V to paste it anywhere');
+  await shot(main, '13-snip-copied');
+
+  // Settings → Shortcuts: "Copy every snip to the clipboard", on by default.
+  const dialog = await openSettings(main, 'Shortcuts');
+  const row = dialog.locator('[data-setting="snip-copy"]');
+  const sw = row.getByRole('button', { name: 'Copy every snip to the clipboard' });
+  await expect(sw).toHaveAttribute('aria-pressed', 'true');
+  await sw.click();
+  await expectStore(yap, 'config.json', (c) => c.snipCopy === false);
+  await closeSettings(main);
+  await clearBox(main);
+  await yap.invoke('e2e_snip_clipboard', { clear: true });
+  await openView(main, 'Home');
+  await startSnip(yap);
+  await drag(yap, 0, [40, 40], [240, 140]);
+  await inChat(main);
+  await expect(attachments(main)).toBeVisible();
+  await main.waitForTimeout(500);
+  expect(await yap.invoke('e2e_snip_clipboard')).toBeNull();
+  expect((await last(yap)).copied).toBe(false);
+  await expect(main.getByTestId('chat-snip-copied')).toHaveCount(0);
+  await setConfig(yap, main, { snipCopy: true });
+
+  // A picture pasted into the box came from the clipboard: not copied back.
+  await clearBox(main);
+  await box(main).click();
+  await box(main).evaluate(async (el) => {
+    const c = document.createElement('canvas');
+    c.width = 32;
+    c.height = 24;
+    c.getContext('2d').fillRect(0, 0, 32, 24);
+    const blob = await new Promise((r) => c.toBlob(r, 'image/png'));
+    const dt = new DataTransfer();
+    dt.items.add(new File([blob], 'image.png', { type: 'image/png' }));
+    el.dispatchEvent(new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true }));
+  });
+  await expect(attachments(main)).toContainText('32 × 24');
+  // …and it waits in Rust's box too.
+  await expect.poll(async () => (await waitingIds(yap)).length).toBe(1);
+  await main.waitForTimeout(300);
+  expect(await yap.invoke('e2e_snip_clipboard')).toBeNull();
+  await clearBox(main);
+  expect(await waitingIds(yap)).toEqual([]);
+});
+
+test('a screenshot waiting in the box goes with a question asked out loud; a dictation into the box sends both too', async ({
+  yap,
+  main,
+  fakeLlm,
+  shot,
+}) => {
+  await clearBox(main);
+  await openView(main, 'Home');
+  await startSnip(yap);
+  const img = await drag(yap, 0, [260, 40], [460, 140]);
+  await inChat(main);
+  await expect(attachments(main)).toBeVisible();
+  // Rust holds it as the page does.
+  expect(await waitingIds(yap)).toEqual([img.id]);
+
+  // The Voice Assistant's shortcut, the question said (staged: no microphone).
+  const before = fakeLlm.requests.length;
+  fakeLlm.scriptChat([{ content: 'A red block.' }]);
+  await yap.invoke('e2e_assistant_ask', { text: 'What colour is this block?', listenMs: 50 });
+  await expect.poll(() => fakeLlm.requests.slice(before).filter((r) => r.images?.length).length, { timeout: 10_000 }).toBe(1);
+  const asked = fakeLlm.requests.slice(before).find((r) => r.images?.length);
+  expect(asked.user).toContain('What colour is this block?');
+  expect(asked.images).toHaveLength(1);
+  expect(worstError(readDataUrl(asked.images[0]), RED)).toBeLessThanOrEqual(1);
+  // The question as Groq gets it: the image part, then the text.
+  const q = asked.messages.filter((m) => m.role === 'user').at(-1);
+  expect(q.content[0].type).toBe('image_url');
+  // The box cleared (in Rust and here); the question in Chat with its thumbnail.
+  await expect(attachments(main)).toBeHidden();
+  expect(await waitingIds(yap)).toEqual([]);
+  const bubble = main.locator('.cbubble.user', { hasText: 'What colour is this block?' });
+  await expect(bubble.locator('.shots img')).toBeVisible();
+  await expect(main.locator('.cbubble.assistant').last()).toContainText('A red block.');
+  await expectStore(yap, 'chats.json', (s) =>
+    s.conversations.some((c) => c.messages.some((m) => m.text === 'What colour is this block?' && m.images?.[0]?.id === img.id))
+  );
+  await shot(main, '14-asked-out-loud-with-the-screenshot');
+
+  // A dictation into Chat's box (its mic, or the hotkey there): the words
+  // go in the box beside the screenshot, and Enter sends both.
+  await startSnip(yap);
+  const dark = await drag(yap, 0, [40, 160], [240, 260]);
+  await inChat(main);
+  await yap.invoke('e2e_chat_dictation', { text: 'What is the dark block?' });
+  await expect(box(main)).toHaveValue(/What is the dark block\?/);
+  await expect(attachments(main)).toContainText('200 × 100');
+  const typed = fakeLlm.requests.length;
+  await box(main).press('Enter');
+  await expect.poll(() => fakeLlm.requests.slice(typed).filter((r) => r.images?.length).length).toBe(1);
+  const both = fakeLlm.requests.slice(typed).find((r) => r.images?.length);
+  expect(both.user).toContain('What is the dark block?');
+  expect(worstError(readDataUrl(both.images[0]), DARK)).toBeLessThanOrEqual(1);
+  expect(await waitingIds(yap)).not.toContain(dark.id);
+});
+
+test("asked out loud with a screenshot, to a model that can't read images: nothing goes, the question waits in the box with it", async ({
+  yap,
+  main,
+  fakeLlm,
+}) => {
+  await setConfig(yap, main, { llmScopes: { chat: groqChat(fakeLlm, 'openai/gpt-oss-20b') } });
+  try {
+    await clearBox(main);
+    await openView(main, 'Home');
+    await startSnip(yap);
+    const img = await drag(yap, 0, [40, 40], [240, 140]);
+    await inChat(main);
+    const before = fakeLlm.requests.length;
+    await yap.invoke('e2e_assistant_ask', { text: 'What does it say?', listenMs: 50 });
+    // As a typed question: the line with the switch, the question and the
+    // screenshot in the box, nothing sent.
+    await expect(box(main)).toHaveValue(/What does it say\?/);
+    await expect(visionLine(main)).toContainText("GPT-OSS 20B can't read images.");
+    await expect(attachments(main)).toContainText('200 × 100');
+    await main.waitForTimeout(300);
+    expect(fakeLlm.requests.length).toBe(before);
+    expect(await waitingIds(yap)).toEqual([img.id]);
+  } finally {
+    await setConfig(yap, main, { llmScopes: { chat: groqChat(fakeLlm, 'qwen/qwen3.8-27b') } });
+  }
+  await box(main).fill('');
+  await clearBox(main);
+});
+
+test('✕ takes the screenshot out of the box: a question asked out loud then goes alone', async ({ yap, main, fakeLlm }) => {
+  await clearBox(main);
+  await openView(main, 'Home');
+  await startSnip(yap);
+  await drag(yap, 0, [40, 40], [240, 140]);
+  await inChat(main);
+  await attachments(main).getByRole('button', { name: 'Remove the screenshot' }).click();
+  await expect(attachments(main)).toBeHidden();
+  await expect.poll(() => waitingIds(yap)).toEqual([]);
+  const before = fakeLlm.requests.length;
+  await yap.invoke('e2e_assistant_ask', { text: 'Anything on today?', listenMs: 50 });
+  await expect.poll(() => fakeLlm.requests.slice(before).some((r) => r.user?.includes('Anything on today?')), { timeout: 10_000 }).toBe(true);
+  expect(fakeLlm.requests.slice(before).every((r) => !r.images?.length)).toBe(true);
+});
+
+test('saying "snip": the screenshot lands in Chat, Yap listens for the question by itself, and both go', async ({
+  yap,
+  main,
+  fakeLlm,
+  shot,
+}) => {
+  await clearBox(main);
+  await openView(main, 'Home');
+  await yap.invoke('e2e_snip', { monitors: MONITORS, start: false });
+  // What the question will say (in the microphone's place), heard for 1.5 s.
+  await yap.invoke('e2e_snip_question', { text: 'Which colour is this block?', listenMs: 1500 });
+  const said = await yap.invoke('e2e_dictation', { text: 'Snip.' });
+  expect(said.text).toBe('');
+  await expect.poll(async () => (await last(yap))?.outcome).toBe('selecting');
+  const before = fakeLlm.requests.length;
+  fakeLlm.scriptChat([{ content: 'It is red.' }]);
+  await drag(yap, 0, [260, 40], [460, 140]);
+  await inChat(main);
+  // Listening by itself: the capsule asks about the screenshot.
+  await expect.poll(async () => (await last(yap)).listened).toBe(true);
+  const cap = capsule(yap);
+  await expect(cap).toHaveAttribute('data-ask', 'listening');
+  await expect(cap).toContainText('Ask about this screenshot…');
+  await shot(yap.overlay, '15-ask-about-this-screenshot');
+  // The question goes with the screenshot.
+  await expect.poll(() => fakeLlm.requests.slice(before).filter((r) => r.images?.length).length, { timeout: 10_000 }).toBe(1);
+  const asked = fakeLlm.requests.slice(before).find((r) => r.images?.length);
+  expect(asked.user).toContain('Which colour is this block?');
+  expect(worstError(readDataUrl(asked.images[0]), RED)).toBeLessThanOrEqual(1);
+  await expect(attachments(main)).toBeHidden();
+  await expect(main.locator('.cbubble.user', { hasText: 'Which colour is this block?' }).locator('.shots img')).toBeVisible();
+  await expect(main.locator('.cbubble.assistant').last()).toContainText('It is red.');
+});
+
+test('saying "snip" during a call, or cancelling the snip: nothing listens, and the screenshot waits', async ({ yap, main, fakeLlm }) => {
+  await clearBox(main);
+  await yap.invoke('e2e_snip_question', { text: 'What is this?', listenMs: 50 });
+  try {
+    // Esc in the overlay: no snip, nothing listens.
+    await openView(main, 'Home');
+    await yap.invoke('e2e_snip', { monitors: MONITORS, start: false });
+    await yap.invoke('e2e_dictation', { text: 'Take a snip.' });
+    await expect.poll(async () => (await last(yap))?.outcome).toBe('selecting');
+    const before = fakeLlm.requests.length;
+    await yap.invoke('e2e_snip_input', { screen: 0, events: [{ kind: 'esc' }] });
+    await expect.poll(async () => (await last(yap))?.outcome).toBe('cancelled');
+    await main.waitForTimeout(500);
+    expect((await last(yap)).listened).toBe(false);
+    await expect(capsule(yap)).toHaveCount(0);
+
+    // A call is on: the Voice Assistant is off, so the snip just waits in the box.
+    await yap.invoke('meeting_detect_simulate', { appId: 'teams', active: true });
+    await yap.invoke('e2e_snip', { monitors: MONITORS, start: false });
+    await yap.invoke('e2e_dictation', { text: 'Snip it.' });
+    await expect.poll(async () => (await last(yap))?.outcome).toBe('selecting');
+    const img = await drag(yap, 0, [40, 40], [240, 140]);
+    await inChat(main);
+    await expect(attachments(main)).toBeVisible();
+    await main.waitForTimeout(600);
+    expect((await last(yap)).listened).toBe(false);
+    await expect(capsule(yap)).toHaveCount(0);
+    expect(fakeLlm.requests.length).toBe(before);
+    expect(await waitingIds(yap)).toEqual([img.id]);
+  } finally {
+    await yap.invoke('meeting_detect_simulate', { appId: 'teams', active: false });
+    await yap.invoke('e2e_snip_question', { text: null });
+  }
+  await clearBox(main);
 });
 
 async function pressKey(page, key, vk) {

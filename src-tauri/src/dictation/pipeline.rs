@@ -54,6 +54,8 @@ pub(crate) use rewrite::commands_model;
 pub(crate) use rewrite::Rewritten;
 #[cfg(debug_assertions)]
 pub(crate) use robot::Robot;
+#[cfg(debug_assertions)]
+pub(crate) use robot::stage_snip_question;
 
 pub(crate) const TARGET_SAMPLE_RATE: u32 = 16_000;
 
@@ -119,6 +121,29 @@ pub(crate) fn key_chord(app: &AppHandle, at: u64) {
 /// key-up it never heard: a recording it held goes on hands-free.
 pub(crate) fn key_stuck(app: &AppHandle) {
     with_pipeline(app, |p| p.shared.key_lost());
+}
+
+/// **After a spoken "snip" landed in Chat** (`snip.rs` `listens_after`): a
+/// Voice Assistant question starts by itself, as if its shortcut had been
+/// pressed — the start chime, the capsule saying "Ask about this
+/// screenshot…" — and takes the screenshot waiting in the box when it's
+/// asked (`assistant.rs`). It ends as a spoken question does: either key
+/// pressed (the dictation key that said "snip" too), ✓ on the capsule, or —
+/// push-to-talk — a key pressed and let go; never on a pause. Esc or ✕
+/// cancel it, and the screenshot stays in the box. `false`: nothing
+/// started (a dictation records or transcribes, no microphone). A test run
+/// asks the question it staged instead (`e2e_snip_question`).
+pub(crate) fn listen_after_snip(app: &AppHandle) -> bool {
+    let mut started = false;
+    with_pipeline(app, |p| {
+        #[cfg(debug_assertions)]
+        if crate::shell::e2e::active() && !crate::shell::realtest::on() {
+            started = p.robot().listen_after_snip_staged();
+            return;
+        }
+        started = p.shared.listen_after_snip();
+    });
+    started
 }
 
 /// The Chat view's mic asked for the next dictation (`dictation::commands::chat_dictate`;

@@ -32,7 +32,7 @@
   gets its next one moved up); the hook gives every first shortcut and
   earlier one precedence, `input_hook::assign_more`), triple_tap_meeting
   (`tripleTapMeeting`, off: push-to-talk's triple-tap starts meeting notes,
-  `dictation/gesture.rs`), snip_hotkey (Snip to Chat, default Win+Alt+S "kb:alt+win+83", "" = unbound; never a clash, `input_hook::configure_snip_from`) + snip_voice ("Say “snip” to take a screenshot", on) + chat_image_days ("Keep chat screenshots": 7 / 30 (default) / 90 / 0 = forever; another value counts as 30; changing it sweeps at once; all `snip.rs`, docs/architecture/snip.md) + snip_save_dir (the folder a snip's or a chat screenshot's Save opened in last, "" = Pictures; `snip/copy_save.rs`), rewrite_last_dictation (`rewriteLastDictation`,
+  `dictation/gesture.rs`), snip_hotkey (Snip to Chat, default Win+Alt+S "kb:alt+win+83", "" = unbound; never a clash, `input_hook::configure_snip_from`) + snip_voice ("Say “snip” to take a screenshot", on) + snip_listen ("Then listen for my question", on, 2026-10-25: after a spoken "snip" lands in Chat a Voice Assistant question starts by itself; `snip::listens_after`) + snip_copy ("Copy every snip to the clipboard", on, 2026-10-25: Settings → Shortcuts; a snip to Chat is copied too, out of Win+V history). Both new fields: an older Yap sharing the folder drops them on its next save and they come back on (their default) — harmless + chat_image_days ("Keep chat screenshots": 7 / 30 (default) / 90 / 0 = forever; another value counts as 30; changing it sweeps at once; all `snip.rs`, docs/architecture/snip.md) + snip_save_dir (the folder a snip's or a chat screenshot's Save opened in last, "" = Pictures; `snip/copy_save.rs`), rewrite_last_dictation (`rewriteLastDictation`,
   serde default on: the rewrite shortcut with nothing selected rewrites the
   last dictation — within a minute, in the same field, still ending at the
   cursor —; off, it writes new text as before 2026-10-23; Settings →
@@ -538,7 +538,9 @@
   (`as_said_offer`) with no shortcut (`as_said_hotkey` ""), no Paste last /
   Copy last transcript shortcuts (`paste_last_hotkey`, `copy_last_hotkey`
   ""), Snip to Chat on
-  Win+Alt+S (`snip_hotkey`), saying "snip" taking one (`snip_voice`) and chat
+  Win+Alt+S (`snip_hotkey`), saying "snip" taking one (`snip_voice`) and then
+  listening for the question (`snip_listen`), every snip to Chat on the
+  clipboard too (`snip_copy`), and chat
   screenshots kept 30 days (`chat_image_days`), a snip's Save opening in
   Pictures until a folder is chosen (`snip_save_dir` ""), the rewrite
   shortcut taking the last dictation when nothing is selected

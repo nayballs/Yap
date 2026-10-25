@@ -54,6 +54,9 @@ export const dictation = $state({
   // 'idle' | 'listening' | 'thinking' | 'speaking'. Not idle, the capsule is
   // the assistant's ("Ask Yap…", "Thinking…", "Speaking…" with ■).
   assistant: 'idle',
+  // What the question is about: 'screenshot' after a spoken "snip" (snip.rs:
+  // "Ask about this screenshot…"), else ''.
+  askAbout: '',
   // A saved transform (dictation/transforms.rs, `yap-transform`): its name, and
   // 'running' ("Polish…" while the AI works), 'done' ("Polish ✓ · Undo" for
   // `offerMs`) or 'unchanged' ("No changes needed"); '' for a dictation.
@@ -175,6 +178,7 @@ export function initDictation() {
   // first frame is already the assistant's.
   listen('yap-assistant', (e) => {
     dictation.assistant = e.payload?.phase || 'idle';
+    dictation.askAbout = e.payload?.about || '';
   });
   listen('yap-transform', (e) => {
     dictation.transform = e.payload?.name || '';

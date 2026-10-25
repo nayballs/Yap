@@ -14,6 +14,18 @@ in like a snip; a model that can't read images can be sent the screenshot's
 text, read on this PC by Windows' OCR; the model picker and Settings tag
 the models that read images.
 
+**The clipboard and the voice (2026-10-25, the maintainer trying it)**:
+"When you take a screenshot it should go into Ctrl+V, so you can paste it
+anywhere" — every snip to Chat is on the clipboard too ("Copy every snip to
+the clipboard", on); "If I press the AI Assistant after saying snip, it
+doesn't send what I said and the snip; just one or the other" — Rust keeps
+the screenshots waiting in Chat's box (`snip/waiting.rs`) and a Voice
+Assistant question takes them; and after saying "snip" Yap listens for the
+question by itself ("Then listen for my question", on). Below: [Every snip on
+the clipboard](#every-snip-on-the-clipboard-2026-10-25), [The screenshots
+waiting in the box](#the-screenshots-waiting-in-the-box-snipwaitingrs-2026-10-25),
+[After saying "snip"](#after-saying-snip-yap-listens-for-the-question-2026-10-25).
+
 [Architecture index](./README.md) · [CLAUDE.md](../../CLAUDE.md)
 
 ## How it works
@@ -50,10 +62,14 @@ cut at physical pixels (one monitor's frame, or put together from each)
         │   history), focus back
         ├── Shift held / Ctrl+S → the Save dialog, the folder used last
         ▼
-PNG → <data>/chat-images/ → yap-snip {image, conversationId} → the main
+PNG → <data>/chat-images/ → waiting in the box (snip/waiting.rs,
+        yap-chat-waiting) → yap-snip {image, conversationId} → the main
         window up on Chat, the screenshot in the message box, the caret
         there — never sent by itself; the copy for the selected model made
         in the background
+        ├── then, off that thread: on the clipboard too (snip_copy)
+        └── said "snip": a Voice Assistant question starts by itself
+            (snip_listen; not in a meeting or a call) and takes it
 ```
 
 Pictures pasted into Chat's box or dropped on Chat join the same path at
@@ -112,6 +128,8 @@ the PNG (`snip/attach.rs`).
 - **`snip/turn.rs`** — a question's screenshots on their way to the model
   (below).
 - **`snip/vision.rs`** — which models read images, and the switch (below).
+- **`snip/waiting.rs`** — the screenshots waiting in Chat's box, kept in
+  Rust so a spoken question takes them too (below).
 - **`snip/dump.rs`** — `yap.exe snip-dump` (debug builds), the spike.
 
 ## The overlay: native, not a webview (the spike)
@@ -282,7 +300,8 @@ global hook never sees keys while a Yap window has the focus.
   box, the caret there (dictating into it works: Chat's mic, or the hotkey's
   in-page fallback). **Enter on an empty box asks "What's this?"**. Up to 4
   screenshots a question (snipping again adds one). They wait while another
-  view shows (`chatShots.svelte.js`). Never sent by itself.
+  view shows — Rust keeps them since 2026-10-25 (`snip/waiting.rs`, below),
+  so a question asked out loud takes them too. Never sent by itself.
 - A question keeps its screenshots: a thumbnail in its bubble (click: large;
   Esc closes), or "Screenshot removed after 30 days" (the setting's period)
   once the sweep removed it (`chat_get` marks it `gone`).
@@ -322,8 +341,104 @@ global hook never sees keys while a Yap window has the focus.
   saved" with **Show in folder**.
 - A copy or a save from the overlay keeps nothing in `chat-images/`.
 - Test runs never touch the real clipboard (a pretend one, read by
-  `e2e_snip_clipboard`) nor open the dialog (`e2e_snip_save_path` names the
-  file); the robot tests use the real clipboard, saved and put back.
+  `e2e_snip_clipboard`, `{clear: true}` empties it) nor open the dialog
+  (`e2e_snip_save_path` names the file); the robot tests use the real
+  clipboard, saved and put back.
+
+## Every snip on the clipboard (2026-10-25)
+
+A snip that goes to Chat is **also copied**, as Windows' Snipping Tool
+does, so Ctrl+V pastes it anywhere (Claude Code, a mail): the same copy as
+Ctrl on release (`copy_save::copy`: the PNG Chat keeps and a `CF_DIBV5`,
+out of Win+V history and cloud clipboard sync, checked by the sequence
+number), on its own thread (`snip-copy`) **after** the main window is up on
+Chat — the overlay closing and Chat coming up never wait for it. No alert
+(the box says it): the thumbnail area shows "Copied · Ctrl+V to paste it
+anywhere" for six seconds (`yap-snip-copied {id}`, `chatShots.svelte.js`).
+`Last.copied` says it happened.
+
+- **"Copy every snip to the clipboard"** (`snip_copy`, on; Settings →
+  Shortcuts, under Snip to Chat; `settingsIndex.js` `snip-copy`). Off: Chat
+  only.
+- Ctrl on release (copy only, no Chat) and Shift (save) are unchanged.
+- A picture **pasted or dropped** into Chat (`attach.rs`) is never copied
+  back: it came from the clipboard or a file.
+
+## The screenshots waiting in the box (`snip/waiting.rs`, 2026-10-25)
+
+Before, only the page held the screenshots waiting in Chat's box, so a
+Voice Assistant question (`assistant::heard` → `turn::chat_turn`) went
+without them. **Rust keeps them now**, and the page follows:
+
+- **One box, in one conversation** (`Waiting {conversationId, images}`), as
+  the page has it: where a snip landed, then whichever conversation Chat
+  shows (`chat_view_state` → `waiting::viewing`: the box goes with it, as
+  the page's does). A snip landing in a new chat while the box waits in a
+  conversation starts it afresh (the page's `newChat`); landing in a
+  conversation adds. At most 4. Ids and sizes only; not saved (a restart
+  starts empty; never-sent PNGs are swept after a day as before).
+- **In**: a snip landing (`waiting::landed`, before `yap-snip`), a paste or
+  a drop (`chat_image_paste` / `chat_image_drop`: `waiting::added`).
+- **Out**: the box's ✕ (`chat_waiting_remove`), "New chat" and "Send
+  without the screenshot" (`chat_waiting_clear`), a typed question
+  (`chat_send` takes the ids it sends; a failure before the answer — not a
+  newer question replacing it, not ■ — puts them back, as the page gives the
+  question back), a spoken question (`waiting::take_for_question`: all of
+  them, with their conversation; a file the sweep removed is left out).
+- **The page** (`chatShots.svelte.js` `waitingShots`): follows
+  `yap-chat-waiting {conversationId, images}` (listened once per window,
+  read with `chat_waiting_get` each time Chat opens) and changes its copy at
+  once too (Send, ✕), so the box never lags; `chatState`'s `attached` is
+  that list.
+- **A spoken question with screenshots** (`assistant.rs` `answer`): goes to
+  the conversation they wait in (not `choose_conversation`'s), through the
+  typed path's image steps — `vision::reads_images`, `turn::prepare` (the
+  provider's size and per-request cap), `turn::with` around `chat_turn` —
+  so the question is saved with them and shows in Chat with its thumbnails
+  (the Chat view reloads it on `asked`); the box clears; the answer is
+  spoken as usual. **A model known not to read images** (the on-device one,
+  GPT-OSS…): nothing goes — the screenshots stay, the question goes into the
+  box (`yap-chat-dictation {send: false}`), Chat comes up with its line (the
+  switch, "Send its text instead", without), and an alert says so
+  (`assistant::cant_read`). A server that turns the image down: that model
+  is a "no" from then (`vision::refused`), the screenshots back in the box,
+  the same. Another failure: the screenshots back in the box, "couldn't
+  answer" as ever. "Open Teams" said with a screenshot waiting opens the app
+  and leaves it.
+- A **dictation into the Chat box** (its mic, or the hotkey while the box
+  has the focus) is unchanged: the words go in beside the screenshot and
+  Enter sends both.
+
+## After saying "snip", Yap listens for the question (2026-10-25)
+
+When a snip started by voice (`Origin::Voice`: "snip" said as a whole
+dictation or Voice Assistant question) **lands in Chat**, a Voice Assistant
+question starts by itself, as if its shortcut had been pressed
+(`snip::listens_after`, pure; `pipeline::listen_after_snip` →
+`Shared::listen_after_snip`): the start chime, the capsule saying **"Ask
+about this screenshot…"** (`assistant::about_screenshot` → `yap-assistant
+{phase: listening, about: "screenshot"}`), and the question takes the
+screenshot as above.
+
+- **It ends** as a spoken question does: either key pressed — the
+  assistant's shortcut or the dictation key that said "snip" (a recording's
+  destination is fixed at its start) — or ✓ on the capsule; in push-to-talk
+  nobody holds it, so a key pressed joins it and its release ends it, a tap
+  or a hold (`gesture::State::Joinable` / `JoinHeld`). **Never on a pause**
+  ("Stop listening when I pause" went on 25 Oct, `41b55aa`).
+- **Esc** (the main window's Chat view, `chat.assistantListening`) or **✕**
+  on the capsule cancel it (`cancel_recording`); the screenshot stays in the
+  box.
+- **Not** while the Voice Assistant is off (a meeting records or a call is
+  on, `assistant::is_off` — quietly: the snip just waits in the box), nor
+  after a cancelled snip (Esc in the overlay), a copy or a save (they never
+  land), nor with a dictation still recording or transcribing.
+- **"Then listen for my question"** (`snip_listen`, on; Settings →
+  Dictation, under "Say 'snip' to take a screenshot", shown while that's
+  on). `Last.listened` says it started.
+- A test run has no microphone: the question is staged (`e2e_snip_question
+  {text, listenMs}`) and asked the robot's way (`Robot::ask_assistant`,
+  "listening" about the screenshot for `listenMs`).
 
 ## Which models read images
 
@@ -522,7 +637,23 @@ doesn't show it (a screenshot never goes there).
   left out) go in and on to the model; "Send its text instead" with a fake
   OCR text (`e2e_snip_ocr`) to GPT-OSS, folded in its bubble, and "No text
   found"; "Reads images" in the picker and Settings' Chat list (not
-  Cleanup's).
+  Cleanup's). The clipboard and the voice (25 tests in all): a snip to
+  Chat lands on the pretend clipboard too (the very PNG, "Copied · Ctrl+V…"
+  in the box), Settings → Shortcuts' switch off stops it, a pasted picture
+  isn't copied back; a waiting screenshot plus a question asked out loud
+  (`e2e_assistant_ask`): the fake AI gets the image part and the question,
+  the box clears (Rust's too, `chat_waiting_get`), the bubble has the
+  thumbnail; a dictation into the box sends both with Enter; GPT-OSS:
+  nothing sent, the question and screenshot in the box with the line; ✕
+  then a question: no image; "Snip." dictated → the overlay → Chat → a
+  question listened for by itself ("Ask about this screenshot…" on the
+  capsule, the transcript staged with `e2e_snip_question`) → sent with the
+  image; during a call, and after Esc in the overlay, nothing listens.
+- **Unit**, 2026-10-25: `snip/waiting.rs` (land / add / remove / take /
+  put back, per conversation, cleared on send, the box following Chat),
+  `snip.rs` `listens_after` (voice and landed, not in a meeting, not after
+  a cancel, the setting), `dictation/gesture.rs` (Yap's own recording: a
+  key joins it, its release ends it, tap or hold).
 - **Real-app robot** (`e2e-real/snip.real.js`): real monitors, a real drag
   (`yaprobot snipdrag`, only onto the robot's own overlay) over swatches on
   an Edge page on each monitor: every swatch within ±2, the overlay within
@@ -535,16 +666,22 @@ doesn't show it (a screenshot never goes there).
   checkSnip`), and a real Ctrl+V in Chat's box pastes it back pixel for
   pixel. On the maintainer's PC (two 2560×1440 monitors, one HDR at 240
   nits), 25 Oct: 5 of 5 (twice), the overlay up in 92–101 ms (debug build), a
-  window of 12–13 on screen picked exactly.
+  window of 12–13 on screen picked exactly. 2026-10-25 (written, not yet
+  run): a plain real snip goes to Chat and onto the real clipboard too —
+  `checkSnip`: the very PNG, a DIB, the privacy formats.
 
 ## Not done yet
 
 - **Phase 2, left**: a magnifier; HDR highlight roll-off; a "Reads images"
   filter switch in the picker (searching "images" finds them now); a JPEG
   fallback for photo-heavy snips (a big photo dropped in is stored as a PNG,
-  sent fitted); the settings "Also copy / save each snip"; a true capture of
+  sent fitted); an "Also save each snip" setting (copying is done:
+  "Copy every snip to the clipboard"); a true capture of
   a window alone (an occluded one: WGC `CreateForWindow`) — Space picks
   what's on screen in its frame; the window pick's child controls.
 - **Phase 3**: the on-device model reading images (Qwen3.5-4B's projector,
   `--mmproj`), vision detection for Ollama / LM Studio / llama-server.
-- Snips in the Voice Assistant (asking about the screen out loud).
+- Snips in the Voice Assistant: done 2026-10-25 (a waiting screenshot goes
+  with a spoken question; after saying "snip" Yap listens). Not yet tried
+  by hand with a real microphone: the start chime after the snip, either
+  key ending it, push-to-talk's join-and-release.

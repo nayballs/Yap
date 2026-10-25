@@ -131,7 +131,7 @@ fn prepare(id: &str) {
 /// Chat's message box: a picture pasted (Ctrl+V). The body is the image's
 /// bytes as the paste event carried them.
 #[tauri::command]
-pub async fn chat_image_paste(request: tauri::ipc::Request<'_>) -> Result<ChatImage, String> {
+pub async fn chat_image_paste(app: tauri::AppHandle, request: tauri::ipc::Request<'_>) -> Result<ChatImage, String> {
     let tauri::ipc::InvokeBody::Raw(bytes) = request.body() else {
         return Err("No picture came with the paste".into());
     };
@@ -141,6 +141,8 @@ pub async fn chat_image_paste(request: tauri::ipc::Request<'_>) -> Result<ChatIm
     let bytes = bytes.clone();
     let image = tauri::async_runtime::spawn_blocking(move || keep(&bytes, "paste")).await.map_err(|e| e.to_string())??;
     tracing::info!(w = image.w, h = image.h, kb = image.bytes / 1024, "Chat: a picture pasted");
+    // Waiting in the box (never copied back to the clipboard: it came from there).
+    super::waiting::added(&app, vec![image.clone()]);
     Ok(image)
 }
 
@@ -156,7 +158,7 @@ pub struct Dropped {
 /// Chat's message box: files dropped on the window (Tauri's drag-drop
 /// event's paths). `room`: how many more the question can carry.
 #[tauri::command]
-pub async fn chat_image_drop(paths: Vec<String>, room: Option<usize>) -> Result<Dropped, String> {
+pub async fn chat_image_drop(app: tauri::AppHandle, paths: Vec<String>, room: Option<usize>) -> Result<Dropped, String> {
     let room = room.unwrap_or(super::images::MAX_PER_REQUEST).min(super::images::MAX_PER_REQUEST);
     let total = paths.len();
     let dropped = tauri::async_runtime::spawn_blocking(move || {
@@ -180,6 +182,10 @@ pub async fn chat_image_drop(paths: Vec<String>, room: Option<usize>) -> Result<
     .await
     .map_err(|e| e.to_string())?;
     tracing::info!(images = dropped.images.len(), skipped = dropped.skipped, "Chat: files dropped");
+    // Waiting in the box (not copied: they came from files).
+    if !dropped.images.is_empty() {
+        super::waiting::added(&app, dropped.images.clone());
+    }
     Ok(dropped)
 }
 

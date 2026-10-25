@@ -16,6 +16,7 @@
 // copies it to the real clipboard (a PNG and a DIB, out of Win+V history),
 // and Ctrl+V in Chat's box pastes it back as a screenshot, pixel for pixel.
 // The robot's clipboard is saved before and put back after (robot.js).
+// 2026-10-25: a plain snip (to Chat) is on the real clipboard too.
 //
 // It takes the mouse and the focus for a few seconds per monitor: say so
 // before running it while someone's at the PC.
@@ -288,6 +289,31 @@ test('Ctrl held as a real box is let go: copied for real, privately, and Ctrl+V 
   const png = pngOf(yap, { id });
   expect([png.width, png.height]).toEqual([box.w, box.h]);
   expectSwatches(png, rects, box, 'the pasted copy');
+});
+
+// The maintainer (2026-10-25): "When you take a screenshot it should go
+// into Ctrl+V, so you can paste it anywhere". A plain snip goes to Chat AND
+// onto the clipboard ("Copy every snip to the clipboard", on by default).
+test('a plain real snip goes to Chat and onto the real clipboard too: the very PNG, privately', async ({ robot }) => {
+  test.skip(!edgeExe(), 'Microsoft Edge is needed for the swatch page');
+  const { yap } = robot;
+  const screens = await monitors(yap);
+  const page = await swatchPage(robot);
+  const rects = await pageOn(robot, page, screens[0]);
+  await snipNow(yap);
+  const [a, z] = [rects[0], rects.at(-1)];
+  const box = { x: a.x + 3, y: a.y + 3, w: z.x + z.w - 3 - (a.x + 3), h: z.y + z.h - 3 - (a.y + 3) };
+  const drag = helper('snipdrag', yap.child.pid, box.x, box.y, box.x + box.w, box.y + box.h);
+  expect(drag.ok, drag.reason ?? 'dragged').toBe(true);
+  const snipped = await taken(yap);
+  expect(snipped.action).toBe('chat');
+  expect(snipped.image?.id, 'kept for Chat').toBeTruthy();
+  // Copied once Chat is up, off the overlay's way.
+  await expect.poll(async () => (await last(yap)).copied, { message: 'the snip on the clipboard', timeout: 5_000 }).toBe(true);
+  const check = await yap.invoke('realtest_clipboard', { action: 'checkSnip' });
+  expect(check).toMatchObject({ hasPng: true, matchesSnip: true, hasDib: true, private: true, width: box.w, height: box.h });
+  // The clipboard's PNG is the very one Chat keeps.
+  expectSwatches(pngOf(yap, snipped.image), rects, box, 'the snip in Chat');
 });
 
 test('Esc on a real snip cancels it, and the app you were in has the focus again', async ({ robot }) => {

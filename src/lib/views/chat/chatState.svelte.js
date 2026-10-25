@@ -15,7 +15,7 @@ import { aiError } from '../../core/aiErrors.js';
 import { streamCall, liveAnswer, applyEvent, streamingHeight, STOPPED, SUPERSEDED } from '../../core/streaming.js';
 import { speech, initSpeech, readAloud as speakText, speakReply, stopReading as stopSpeech } from '../../stores/speech.svelte.js';
 import { DEFAULT_PROMPT, MAX_SHOTS, visionRefused, pastedImage, keepPasted } from './chatImages.js';
-import { waitingShots } from './chatShots.svelte.js';
+import { waitingShots, followWaitingShots, removeWaiting, clearWaiting } from './chatShots.svelte.js';
 
 // The sources an answer's citations point at: its own, else — a follow-up
 // that cites "[1]" from an earlier answer without searching again ("the
@@ -69,11 +69,9 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
 
   // ---- Snip to Chat (snip.rs)
   // Screenshots waiting in the message box: { id, w, h, bytes, source };
-  // kept while another view shows (chatShots.svelte.js).
-  let attached = $state(waitingShots.list);
-  $effect(() => {
-    waitingShots.list = attached;
-  });
+  // Rust keeps them (snip/waiting.rs: a spoken question takes them too) and
+  // this follows it, kept while another view shows (chatShots.svelte.js).
+  followWaitingShots();
   // Can the Chat model read them (ai_model_status): images true | false |
   // null (not known: it may try), the switch Rust suggests, the model.
   let vision = $state({ images: null, imagesSwitch: null, model: null });
@@ -85,7 +83,7 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
   let snipHotkey = $state('');
   // Files are being dragged over the window (a drop lands in the box).
   let dragging = $state(false);
-  const visionBlocked = $derived(attached.length > 0 && vision.images === false);
+  const visionBlocked = $derived(waitingShots.list.length > 0 && vision.images === false);
   const switchName = $derived.by(() => {
     const s = vision.imagesSwitch;
     if (!s) return '';
@@ -125,6 +123,9 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
   // and that question's id ("chat:<conversation>:<index>").
   let assistantPending = $state(null);
   let assistantTurn = null;
+  // A spoken question is being listened for (`yap-assistant`): Esc here
+  // calls it off (the screenshot stays in the box).
+  let assistantListening = $state(false);
   // "New chat" was clicked: a spoken question starts a new conversation
   // rather than continuing the last one.
   let choseNew = false;
@@ -170,9 +171,10 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
     if (p.conversationId != null) {
       if (p.conversationId !== activeId) await selectConversation(p.conversationId);
     } else if (activeId != null) {
-      newChat();
+      // Rust has the box as it should be (yap-chat-waiting): kept.
+      newChat({ keepShots: true });
     }
-    if (!attached.some((a) => a.id === img.id)) attached = [...attached, img].slice(-MAX_SHOTS);
+    if (!waitingShots.list.some((a) => a.id === img.id)) waitingShots.list = [...waitingShots.list, img].slice(-MAX_SHOTS);
     refreshVision();
     await tick();
     inputEl?.focus();
@@ -180,9 +182,9 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
 
   /** Pictures pasted or dropped: into the box, as a snip lands (never sent by itself). */
   async function attachPictures(images) {
-    const fresh = (images || []).filter((img) => img?.id && !attached.some((a) => a.id === img.id));
+    const fresh = (images || []).filter((img) => img?.id && !waitingShots.list.some((a) => a.id === img.id));
     if (!fresh.length) return;
-    attached = [...attached, ...fresh].slice(-MAX_SHOTS);
+    waitingShots.list = [...waitingShots.list, ...fresh].slice(-MAX_SHOTS);
     refreshVision();
     await tick();
     inputEl?.focus();
@@ -207,7 +209,7 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
   async function dropFiles(paths) {
     dragging = false;
     if (!paths?.length) return;
-    const room = MAX_SHOTS - attached.length;
+    const room = MAX_SHOTS - waitingShots.list.length;
     if (room <= 0) {
       toast({ title: `A question carries ${MAX_SHOTS} screenshots at most`, description: 'Remove one to add another.', chip: 'Chat' });
       return;
@@ -314,12 +316,13 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
     }
   }
 
-  function newChat() {
+  // `keepShots`: a snip landing in a new chat (Rust has the box already).
+  function newChat(opts) {
     stopReading();
     activeId = null;
     messages = [];
     input = '';
-    attached = [];
+    if (opts?.keepShots !== true) clearWaiting();
     byVoice = false;
     scope = null;
     choseNew = true;
@@ -580,14 +583,15 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
   async function send(opts) {
     const asText = opts?.asText === true;
     // With a screenshot waiting, an empty box asks "What's this?".
-    const shots = attached;
+    const shots = waitingShots.list;
     const text = input.trim() || (shots.length ? DEFAULT_PROMPT : '');
     if (!text || sending) return;
     // The model can't read the screenshot: the line above the box says so.
     if (shots.length && vision.images === false && !asText) return;
     const voice = byVoice;
     input = '';
-    attached = [];
+    // Out of the box (Rust takes them with the question, chat_send).
+    waitingShots.list = [];
     byVoice = false;
     // The next question: the last answer stops talking.
     stopReading();
@@ -703,7 +707,8 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
       }
       messages = messages.slice(0, qi);
       input = text; // give the message back
-      attached = shots;
+      // …and its screenshots (Rust puts them back too, yap-chat-waiting).
+      waitingShots.list = shots;
       byVoice = voice;
       // Its text couldn't be read (no text in it, no OCR language): said.
       if (asText) {
@@ -794,8 +799,12 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
     set threadEl(v) { threadEl = v; },
     get scope() { return scope; },
     set scope(v) { scope = v; },
-    get attached() { return attached; },
-    set attached(v) { attached = v; },
+    get attached() { return waitingShots.list; },
+    get copiedShot() { return waitingShots.copied; },
+    removeShot: removeWaiting,
+    clearShots: clearWaiting,
+    get assistantListening() { return assistantListening; },
+    set assistantListening(v) { assistantListening = v; },
     get vision() { return vision; },
     get keepDays() { return keepDays; },
     get viewing() { return viewing; },

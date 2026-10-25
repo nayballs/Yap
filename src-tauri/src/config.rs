@@ -339,6 +339,18 @@ pub struct YapConfig {
     /// default.
     #[serde(default = "default_true")]
     pub snip_voice: bool,
+    /// "Then listen for my question" (under "Say 'snip'…", 2026-10-25):
+    /// after a spoken "snip" lands in Chat, a Voice Assistant question
+    /// starts by itself and takes the screenshot (`snip::listens_after`).
+    /// On by default; never during a meeting or a call.
+    #[serde(default = "default_true")]
+    pub snip_listen: bool,
+    /// "Copy every snip to the clipboard" (Settings → Shortcuts, 2026-10-25):
+    /// a snip that goes to Chat is on the clipboard too (PNG + DIB, out of
+    /// Win+V history), as Windows' Snipping Tool does. On by default. A
+    /// picture pasted or dropped into Chat isn't copied again.
+    #[serde(default = "default_true")]
+    pub snip_copy: bool,
     /// "Keep chat screenshots" (Settings → Privacy & data): days a chat's
     /// screenshots are kept (7, 30, 90; 0 = forever). Deleting a
     /// conversation deletes its screenshots whatever this says. Default 30.
@@ -1170,6 +1182,8 @@ impl Default for YapConfig {
             as_said_offer: true,
             snip_hotkey: default_snip_hotkey(),
             snip_voice: true,
+            snip_listen: true,
+            snip_copy: true,
             chat_image_days: default_chat_image_days(),
             snip_save_dir: String::new(),
             model_size: default_model_size(),

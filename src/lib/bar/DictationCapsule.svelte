@@ -151,8 +151,8 @@
           </span>
         </div>
       {:else}
-        <span class="txt asklabel">Ask Yap…</span>
-        <div class="wave short">
+        <span class="txt asklabel">{dictation.askAbout === 'screenshot' ? 'Ask about this screenshot…' : 'Ask Yap…'}</span>
+        <div class="wave short" class:narrow={dictation.askAbout === 'screenshot'}>
           {#each dictation.history.slice(-48) as v}
             <span style="height:{Math.max(7, Math.round(v * 100))}%"></span>
           {/each}
@@ -327,6 +327,10 @@
   }
   .wave.short {
     width: 120px;
+  }
+  /* "Ask about this screenshot…" needs the room. */
+  .wave.short.narrow {
+    width: 64px;
   }
   /* Speaking: three bars in the bar's amber, then ■. */
   .speakbars {

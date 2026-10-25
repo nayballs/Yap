@@ -860,15 +860,30 @@ pub fn e2e_snip_save_path(path: String) -> Result<(), String> {
 }
 
 /// Test mode only: the PNG a copy put on the pretend clipboard (the real
-/// one is never touched in a test run), as base64, or null.
+/// one is never touched in a test run), as base64, or null. `clear`: and
+/// empty it.
 #[cfg(debug_assertions)]
 #[tauri::command]
-pub fn e2e_snip_clipboard() -> Result<Option<String>, String> {
+pub fn e2e_snip_clipboard(clear: Option<bool>) -> Result<Option<String>, String> {
     if !active() {
         return Err("Only in e2e test mode".into());
     }
     use base64::Engine;
-    Ok(crate::snip::copy_save::test_clipboard().map(|png| base64::engine::general_purpose::STANDARD.encode(png)))
+    let png = if clear.unwrap_or(false) { crate::snip::copy_save::take_test_clipboard() } else { crate::snip::copy_save::test_clipboard() };
+    Ok(png.map(|png| base64::engine::general_purpose::STANDARD.encode(png)))
+}
+
+/// Test mode only: what the question after the next spoken "snip" says
+/// (its transcript, "listened" for `listenMs`), in the microphone's place;
+/// null: nothing staged (it would listen, and nothing is asked).
+#[cfg(debug_assertions)]
+#[tauri::command]
+pub fn e2e_snip_question(text: Option<String>, listen_ms: Option<u64>) -> Result<(), String> {
+    if !active() || crate::shell::realtest::on() {
+        return Err("Only in e2e test mode".into());
+    }
+    crate::dictation::pipeline::stage_snip_question(text.map(|t| (t, listen_ms.unwrap_or(300))));
+    Ok(())
 }
 
 /// Test mode only: the text "Send its text instead" reads from a
