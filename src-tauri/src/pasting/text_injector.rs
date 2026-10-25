@@ -1326,7 +1326,7 @@ pub fn has_last_transcript() -> bool {
     last_transcript().is_some()
 }
 
-const NOTHING_TO_PASTE: &str = "Nothing to paste yet — dictate something first";
+pub(crate) const NOTHING_TO_PASTE: &str = "Nothing to paste yet — dictate something first";
 
 /// The app at `receiver` runs as administrator: put `text` on the clipboard
 /// (privately, as a paste would: out of Win+V history) and leave it there
@@ -1347,8 +1347,8 @@ fn leave_on_clipboard(text: &str, receiver: Option<isize>) -> Result<Delivery, S
 /// fitted to its cursor like a dictation. For when a paste went astray.
 /// Returns what was pasted. A test run pastes nothing and returns it. An app
 /// running as administrator gets it on the clipboard instead, and the person
-/// is told (`elevated.rs`).
-fn paste_last_blocking(app: &tauri::AppHandle, as_said: bool) -> Result<String, String> {
+/// is told (`elevated.rs`). (Also its shortcut's, `last.rs`.)
+pub(crate) fn paste_last_blocking(app: &tauri::AppHandle, as_said: bool) -> Result<String, String> {
     let text = if as_said { last_said_transcript() } else { last_transcript() }.ok_or(NOTHING_TO_PASTE)?;
     let cfg = crate::config::load();
     let test_mode = || {

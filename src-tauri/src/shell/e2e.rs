@@ -420,12 +420,16 @@ pub fn e2e_mic_status(state: tauri::State<'_, crate::AppState>) -> Result<crate:
 /// microphone's place (the robot's `dictate_audio`: a real start and stop,
 /// the mic held and opened as for any dictation, the STT, the dictation's
 /// steps; nothing pasted in a test run) — a dictation without a microphone.
-/// `None`: nothing was transcribed.
+/// `amplitude`: the tone's peak (0.1 unless given; 0.005 is a whisper's,
+/// -46 dBFS — the bar's level meter, `meter.rs`), and then it comes in
+/// syllables as speech does: 240 ms of it, 160 ms at a tenth (a steady
+/// tone is the mic's noise to the meter). `None`: nothing was transcribed.
 #[cfg(debug_assertions)]
 #[tauri::command]
 pub async fn e2e_dictate_audio(
     state: tauri::State<'_, crate::AppState>,
     seconds: f32,
+    amplitude: Option<f32>,
 ) -> Result<Option<crate::dictation::pipeline::Delivered>, String> {
     if !active() {
         return Err("Only in e2e test mode".to_string());
@@ -435,8 +439,64 @@ pub async fn e2e_dictate_audio(
         guard.as_ref().ok_or("pipeline not started")?.robot()
     };
     let n = (seconds.clamp(0.2, 60.0) * 16_000.0) as usize;
-    let samples: Vec<f32> = (0..n).map(|i| 0.1 * (i as f32 * 2.0 * std::f32::consts::PI * 440.0 / 16_000.0).sin()).collect();
+    let peak = amplitude.unwrap_or(0.1).clamp(0.0, 1.0);
+    let syllables = amplitude.is_some();
+    let samples: Vec<f32> = (0..n)
+        .map(|i| {
+            let level = if syllables && i % 6_400 >= 3_840 { peak / 10.0 } else { peak };
+            level * (i as f32 * 2.0 * std::f32::consts::PI * 440.0 / 16_000.0).sin()
+        })
+        .collect();
     robot.dictate_audio(samples, false).await
+}
+
+/// Test mode only: a press-only shortcut as the input hook sends it (a
+/// test run has no hook: it must never see the developer's keys) —
+/// `name` "paste-last" or "copy-last" (`pasting/last.rs`).
+#[cfg(debug_assertions)]
+#[tauri::command]
+pub fn e2e_shortcut(app: AppHandle, name: String) -> Result<(), String> {
+    use tauri::Emitter;
+    if !active() {
+        return Err("Only in e2e test mode".to_string());
+    }
+    let event = match name.as_str() {
+        "paste-last" => "paste-last-key-pressed",
+        "copy-last" => "copy-last-key-pressed",
+        other => return Err(format!("No such shortcut: {other}")),
+    };
+    tracing::info!(event, "e2e: a shortcut pressed");
+    app.emit(event, crate::dictation::gesture::now_ms()).map_err(|e| e.to_string())
+}
+
+/// Test mode only: "Taking longer than usual…" sooner and on cue
+/// (`slow.rs`) — never before `floorMs` instead of 4 s (0: the real
+/// floor), the stub's transcription taking `sttMs` (0: at once), and this
+/// session's timings forgotten when `forget`.
+#[cfg(debug_assertions)]
+#[tauri::command]
+pub fn e2e_dictation_timing(floor_ms: Option<u64>, stt_ms: Option<u64>, forget: Option<bool>) -> Result<(), String> {
+    if !active() {
+        return Err("Only in e2e test mode".to_string());
+    }
+    let (floor, stt) = (floor_ms.unwrap_or(0).min(60_000), stt_ms.unwrap_or(0).min(60_000));
+    tracing::info!(floor, stt, "e2e: dictation timing");
+    crate::dictation::slow::set_test(floor, stt, forget.unwrap_or(false));
+    Ok(())
+}
+
+/// Test mode only: a dictation's length limit shortened to `limitMs`, the
+/// bar's warning at `warnMs` (`cap.rs`); none given, the real 15 minutes.
+#[cfg(debug_assertions)]
+#[tauri::command]
+pub fn e2e_dictation_cap(limit_ms: Option<u64>, warn_ms: Option<u64>) -> Result<(), String> {
+    if !active() {
+        return Err("Only in e2e test mode".to_string());
+    }
+    let cap = limit_ms.map(|limit_ms| crate::dictation::cap::Cap { limit_ms, warn_ms: warn_ms.unwrap_or(limit_ms) });
+    tracing::info!(?cap, "e2e: dictation length limit");
+    crate::dictation::cap::set_test(cap);
+    Ok(())
 }
 
 /// Test mode only: the next dictation panics in its paste step, as a bug

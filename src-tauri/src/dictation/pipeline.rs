@@ -13,7 +13,8 @@
 //! to the paste), `rewrite` (the rewrite shortcut and Commands), `finish`
 //! (the corrections, "press enter", snippets), `preview` (the live text),
 //! `engine` (the warm engine everyone shares), `busy` (the `processing`
-//! flag) and, in debug builds, `robot`.
+//! flag), `slow` ("Taking longer than usual…" and Skip cleanup) and, in
+//! debug builds, `robot`.
 
 mod busy;
 mod delivery;
@@ -24,6 +25,7 @@ mod recording;
 mod rewrite;
 #[cfg(debug_assertions)]
 mod robot;
+mod slow;
 mod transcribe;
 
 use std::collections::VecDeque;
@@ -273,18 +275,23 @@ struct Kept {
 #[cfg(debug_assertions)]
 static LAST_DELIVERED: Mutex<Option<Delivered>> = Mutex::new(None);
 
-/// The scrolling waveform's level meter: the peak over ~80 ms of audio.
+/// The scrolling waveform's level meter: the peak over ~80 ms of audio, on
+/// a perceptual scale (`meter.rs`).
 #[derive(Default)]
 struct AmpMeter {
     peak: f32,
     count: usize,
+    /// The scale's floor, following the mic's noise.
+    floor: crate::dictation::meter::Floor,
 }
 
 impl AmpMeter {
     /// Time-domain amplitude meter for the scrolling waveform (Claude Code
-    /// style): one peak level (raw 0..1) per ~1280 samples at 16 kHz ≈ 80 ms
-    /// per bar for a calm, readable scroll; the overlay pushes each onto a
-    /// scrolling history. `Some(peak)` when a bar is due.
+    /// style): one bar per ~1280 samples at 16 kHz ≈ 80 ms for a calm,
+    /// readable scroll — the peak, in decibels over the mic's noise, gently
+    /// compressed (`meter::Floor::level`: 0..0.92, a whisper about a third);
+    /// the overlay pushes each onto a scrolling history. `Some(level)` when
+    /// a bar is due.
     fn add(&mut self, samples: &[f32]) -> Option<f32> {
         const AMP_WINDOW: usize = 1280;
         for &s in samples {
@@ -298,7 +305,7 @@ impl AmpMeter {
             let peak = self.peak;
             self.peak = 0.0;
             self.count = 0;
-            Some(peak)
+            Some(self.floor.level(peak))
         } else {
             None
         }
@@ -430,6 +437,13 @@ struct Shared {
     /// The transcribing dictation's audio, kept a day to run it again
     /// (`recent_audio.rs`): taken by its history entry, else dropped.
     audio_id: Mutex<Option<String>>,
+    /// The bar's **Skip cleanup**, while a dictation's AI cleanup takes
+    /// longer than usual (`pipeline/slow.rs`).
+    skip_cleanup: tokio::sync::Notify,
+    /// The dictation being transcribed was stopped at its length limit
+    /// (`cap.rs`): its paste goes back to its own window or onto the
+    /// clipboard (as an Undo's), and an alert offers Recover text.
+    capped: AtomicBool,
 }
 
 /// Current wall-clock time in milliseconds since the Unix epoch.
@@ -636,6 +650,8 @@ impl Pipeline {
             kept_seq: AtomicU64::new(0),
             undoing: AtomicBool::new(false),
             audio_id: Mutex::new(None),
+            skip_cleanup: tokio::sync::Notify::new(),
+            capped: AtomicBool::new(false),
         });
 
         spawn_idle_watcher(&shared);
@@ -764,6 +780,12 @@ impl Pipeline {
     /// the window it was for. Errors once the audio is gone.
     pub fn undo(&self) -> Result<(), String> {
         self.shared.undo()
+    }
+
+    /// **Skip cleanup** (the bar, while a dictation's AI cleanup takes
+    /// longer than usual): the words as transcribed are pasted now.
+    pub fn skip_cleanup(&self) {
+        self.shared.skip_cleanup_now();
     }
 
     /// Recording, or transcribing a dictation / an Upload file — the updater

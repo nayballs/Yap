@@ -63,6 +63,8 @@ export const SETTINGS_INDEX = [
   { page: 'shortcuts', section: 'Global shortcuts', label: 'Ask the Voice Assistant', desc: 'Ask out loud from any app', keywords: 'shortcut shortcuts hotkey assistant voice', anchor: 'shortcut-assistant' },
   { page: 'shortcuts', section: 'Global shortcuts', label: 'Read aloud', desc: 'Select text in any app and press it to hear it', keywords: 'shortcut shortcuts hotkey read aloud speak selection text to speech tts dyslexia reading', anchor: 'shortcut-read' },
   { page: 'shortcuts', section: 'Global shortcuts', label: 'Use what I said', desc: 'Swap what Yap pasted for your words before AI cleanup', keywords: 'shortcut shortcuts hotkey raw transcript revert undo cleanup as said', anchor: 'shortcut-as-said' },
+  { page: 'shortcuts', section: 'Global shortcuts', label: 'Paste last transcript', desc: 'Paste your latest dictation again where you are typing', keywords: 'shortcut shortcuts hotkey paste last transcript again repeat previous dictation', anchor: 'shortcut-paste-last' },
+  { page: 'shortcuts', section: 'Global shortcuts', label: 'Copy last transcript', desc: 'Copy your latest dictation, kept out of clipboard history', keywords: 'shortcut shortcuts hotkey copy last transcript clipboard previous dictation', anchor: 'shortcut-copy-last' },
   { page: 'shortcuts', section: 'Global shortcuts', label: 'Meeting notes', desc: 'Take notes on a call, press again to stop', keywords: 'shortcut shortcuts hotkey meeting win alt m', anchor: 'shortcut-meeting' },
   { page: 'shortcuts', section: 'Global shortcuts', label: 'Snip to Chat', desc: 'Drag a box over any screen, into Chat', keywords: 'shortcut shortcuts hotkey snip snipping screenshot screen capture picture image win alt s', anchor: 'shortcut-snip' },
 

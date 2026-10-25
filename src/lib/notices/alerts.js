@@ -9,7 +9,11 @@
 //     microphone, with Open settings (dictation/mic_privacy.rs);
 //   "configReset" — config.json couldn't be read: set aside and the
 //     settings reset (all, or the ones it couldn't read), with Show file
-//     (config.rs).
+//     (config.rs);
+//   "dictationCapped" — a dictation stopped at its length limit, pasted (or
+//     not), with Recover text (dictation/cap.rs);
+//   "lastTranscript" — "Copied your last dictation", "Nothing to paste
+//     yet" (pasting/last.rs: Paste / Copy last transcript's shortcuts).
 // A button's id goes back to Rust (`alert_action`), which does it. Rust has
 // already applied the cooldowns (notices/notice.rs); here they're toasts of kind
 // "alert" (ui/noticePolicy.js): never held behind a dictation.

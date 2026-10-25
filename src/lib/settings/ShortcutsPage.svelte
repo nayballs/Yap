@@ -1,6 +1,6 @@
 <script>
   // Settings → Shortcuts (2026-10-22 review; OpenWhispr's Hotkeys page): the
-  // seven global shortcuts together (dictation/input_hook.rs), each in Yap's keycaps,
+  // nine global shortcuts together (dictation/input_hook.rs), each in Yap's keycaps,
   // with a clash said where it happens. Their own pages show them too
   // (Dictation, Commands, Voice Assistant, Meetings): the same setting. The
   // saved transforms' shortcuts are a link to Commands → Transforms.
@@ -51,6 +51,21 @@
   </Row>
   <Row label="Use what I said" desc="Right after a dictation, swap what Yap pasted for your words before AI cleanup" setting="shortcut-as-said">
     <SettingsHotkey {cfg} target="asSaidHotkey" clearable />
+  </Row>
+  <Row
+    label="Paste last transcript"
+    desc="Paste your latest dictation again where you're typing, for a paste that went astray"
+    setting="shortcut-paste-last"
+  >
+    <SettingsHotkey {cfg} target="pasteLastHotkey" clearable />
+  </Row>
+  <Row
+    label="Copy last transcript"
+    desc="Copy your latest dictation without pasting it"
+    hint="Like Yap's pastes, it stays out of Windows' clipboard history (Win+V). The tray menu has both too."
+    setting="shortcut-copy-last"
+  >
+    <SettingsHotkey {cfg} target="copyLastHotkey" clearable />
   </Row>
   <Row label="Meeting notes" desc="Take notes on a call, and press again to stop and summarise" setting="shortcut-meeting">
     <SettingsHotkey {cfg} target="meetingHotkey" clearable />

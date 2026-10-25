@@ -403,9 +403,13 @@ export function createSetupState() {
         if (e.payload && e.payload.modelSize === busyId) percent = e.payload.percent;
       }),
       rawListen('yap-amp', (e) => {
-        const amp = Math.min(1, (e.payload || 0) * 4); // same gain feel as the overlay
+        // Shaped in Rust as for the Yap bar (dictation/meter.rs): decibels
+        // over the mic's own noise, so the room's hiss is 0 and a whisper
+        // about a third. Above 0.3 (a whisper, ~-46 dBFS on a quiet mic)
+        // counts as hearing you.
+        const amp = Math.max(0, Math.min(1, Number(e.payload) || 0));
         bars = [...bars.slice(1), amp];
-        if (amp > 0.06) micHeard = true;
+        if (amp > 0.3) micHeard = true;
       }),
       rawListen('local-llm-download-progress', (e) => {
         if (e.payload) llmProgress = e.payload;

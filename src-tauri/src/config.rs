@@ -243,6 +243,17 @@ pub struct YapConfig {
     /// default). Never shares a key with the other shortcuts.
     #[serde(default)]
     pub as_said_hotkey: String,
+    /// **Paste last transcript** (Settings → Shortcuts, `pasting/last.rs`):
+    /// the latest dictation pasted again where you're typing, as the tray's
+    /// item does. Empty = unbound (the default). Never shares a key with the
+    /// other shortcuts (`input_hook::clashes`).
+    #[serde(default)]
+    pub paste_last_hotkey: String,
+    /// **Copy last transcript** (Settings → Shortcuts, `pasting/last.rs`): the
+    /// latest dictation onto the clipboard, kept out of Win+V history as a
+    /// paste is; nothing pasted. Empty = unbound (the default).
+    #[serde(default)]
+    pub copy_last_hotkey: String,
     /// The Yap bar offers "Use what I said" for a few seconds after a
     /// dictation whose words AI cleanup changed (`as_said.rs`). On by default.
     #[serde(default = "default_true")]
@@ -1036,6 +1047,8 @@ impl Default for YapConfig {
             assistant_hotkey: String::new(),
             read_hotkey: String::new(),
             as_said_hotkey: String::new(),
+            paste_last_hotkey: String::new(),
+            copy_last_hotkey: String::new(),
             as_said_offer: true,
             snip_hotkey: default_snip_hotkey(),
             snip_voice: true,

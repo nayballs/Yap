@@ -504,6 +504,16 @@ fn stored(model_id: &str) -> Option<Measured> {
     store.models.get(model_id).filter(|m| fits(m, &model_print, &pc)).cloned()
 }
 
+/// `model_id`'s warm timings on `device` as measured here — (clip ms,
+/// median ms) per length — for what a dictation's transcription usually
+/// takes (`slow.rs`). Empty: not measured (or not on that device).
+pub fn warm_points(model_id: &str, device: Device) -> Vec<(u64, u64)> {
+    stored(model_id)
+        .and_then(|m| m.runs.into_iter().find(|r| r.device == device))
+        .map(|r| r.lengths.iter().filter_map(|t| Some((t.clip_ms, t.warm_ms?))).collect())
+        .unwrap_or_default()
+}
+
 /// The device `model_id` loads on now (`stt::create_stt_engine`).
 pub fn device_for(model_id: &str, use_gpu: bool) -> Device {
     let (setting, synced_gpu) = {

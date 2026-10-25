@@ -6,8 +6,14 @@
 import { listen } from '@tauri-apps/api/event';
 
 // Scrolling amplitude waveform (Claude Code style): newest bar on the right.
+// Each bar comes shaped from Rust (`yap-amp`, dictation/meter.rs: decibels
+// over the mic's noise, gently compressed — a whisper about a third of the
+// height, a shout 0.92, never the top).
 const MAX_BARS = 80;
-const AMP_GAIN = 3.5;
+// "Hold on, still transcribing…" stays this long after the press.
+const HOLD_ON_MS = 2_500;
+// The length limit's warning shows as words this long, then as a hairline.
+const CAP_TEXT_MS = 6_000;
 
 export const dictation = $state({
   // idle | recording | processing | processing-slow | needs-model | error |
@@ -59,7 +65,26 @@ export const dictation = $state({
   // `offerMs`) or 'unchanged' ("No changes needed"); '' for a dictation.
   transform: '',
   transformPhase: '',
+  // "Taking longer than usual…" (dictation/slow.rs, `yap-slow`): `{stage,
+  // skip}` while the transcription ('transcribing') or the AI cleanup
+  // ('cleanup', with Skip cleanup: `skip`) runs well past this PC's usual
+  // time; null otherwise.
+  slow: null,
+  // The shortcut was pressed while the last dictation is still being
+  // transcribed (`yap-dictation-busy`): "Hold on, still transcribing…".
+  holdOn: false,
+  // The length limit is near (dictation/cap.rs, `yap-dictation-cap`): its
+  // words ("1 minute left · it'll stop at 15 minutes") for a few seconds
+  // (`capShow`), then a hairline running down the time left (`capMs`;
+  // `capKey` restarts it).
+  capText: '',
+  capShow: false,
+  capMs: 0,
+  capKey: 0,
 });
+
+let holdOnTimer = null;
+let capTimer = null;
 
 // ---- Live partial transcript (streaming preview) ----
 // The backend emits a full partial line every ~500 ms tick. Dumping a whole
@@ -126,8 +151,18 @@ export function initDictation() {
       dictation.micSilentFull = '';
       dictation.micWaiting = false;
       dictation.pauseMs = 0;
+      clearTimeout(capTimer);
+      dictation.capText = '';
+      dictation.capShow = false;
+      dictation.capMs = 0;
     }
-    if (state !== 'processing' && state !== 'processing-slow') dictation.modelLoading = false;
+    if (state !== 'processing' && state !== 'processing-slow') {
+      dictation.modelLoading = false;
+      clearTimeout(holdOnTimer);
+      dictation.holdOn = false;
+    }
+    // "Taking longer than usual…" goes with its own state only.
+    if (state !== 'processing-slow') dictation.slow = null;
     // A transform's name goes with its own states only (it says them just
     // before: "running" → processing, "done"/"unchanged" → cleaned).
     const transformState =
@@ -198,8 +233,30 @@ export function initDictation() {
   listen('yap-partial', (e) => {
     if (typeof e.payload === 'string') onPartial(e.payload);
   });
+  // Said just before `yap-state` "processing-slow" (and null before
+  // "processing" again).
+  listen('yap-slow', (e) => {
+    dictation.slow = e.payload?.stage ? { stage: e.payload.stage, skip: !!e.payload.skip } : null;
+  });
+  listen('yap-dictation-busy', () => {
+    if (dictation.state !== 'processing' && dictation.state !== 'processing-slow') return;
+    clearTimeout(holdOnTimer);
+    dictation.holdOn = true;
+    holdOnTimer = setTimeout(() => (dictation.holdOn = false), HOLD_ON_MS);
+  });
+  listen('yap-dictation-cap', (e) => {
+    if (dictation.state !== 'recording') return;
+    dictation.capText = e.payload?.text || '';
+    dictation.capMs = Math.max(0, e.payload?.leftMs || 0);
+    dictation.capKey += 1;
+    dictation.capShow = !!dictation.capText;
+    clearTimeout(capTimer);
+    // At most half the time left (a test run's short limit), so the
+    // waveform comes back before the end.
+    capTimer = setTimeout(() => (dictation.capShow = false), Math.min(CAP_TEXT_MS, (dictation.capMs || CAP_TEXT_MS) / 2));
+  });
   listen('yap-amp', (e) => {
-    const v = Math.min(1, Math.pow(Math.max(0, e.payload ?? 0) * AMP_GAIN, 0.7));
+    const v = Math.max(0, Math.min(1, Number(e.payload) || 0));
     const h = dictation.history;
     const next = h.length >= MAX_BARS ? h.slice(1) : h.slice();
     next.push(v);
