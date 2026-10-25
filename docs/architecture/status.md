@@ -55,6 +55,31 @@ tables, method and how anyone can run it and send theirs:
 
 ## What works
 
+**Chat's context ring and the AI usage tracker** (2026-10-25,
+[chat-and-assistant.md](./chat-and-assistant.md#the-context-ring-2026-10-25),
+[ai-models.md](./ai-models.md) `ai/usage.rs`): every AI call's tokens are
+counted on this PC from the answer's own counts (OpenAI-compatible `usage`,
+Groq's `x_groq.usage`, Anthropic's and Gemini's own shapes, llama.cpp's
+`timings` for the on-device model's speed), streamed or whole, at the one
+chat call every feature goes through, by feature (cleanup, Chat, the Voice
+Assistant, Commands, transforms, translation, meeting notes, notes, memory,
+speaker names, briefs, search's embeddings) — in `ai_usage.json`, 90 days,
+counts only — and Groq's "Usage today" meter keeps its own file as before.
+Chat's composer has a ring bottom right: the conversation's last answer
+(prompt + answer) against the Chat model's context (the on-device model's,
+a server's word, a cloud model's from its provider's list, else the
+provider's usual, "approximate"), an estimate before any answer; hover
+"38% of context used"; its panel shows this chat, the last answer's tokens
+and speed, a quiet "A new chat answers best" line with New chat past
+80 %, and today's and the week's use by model with an estimated cost at
+list prices (a dated table of Claude, OpenAI, Gemini and Groq prices);
+See all opens **Insights → AI usage** (totals for today, 7 and 30 days,
+by model and feature, the on-device speed by day). Unit-tested (every
+provider's counts, streamed and whole; the store's days, 90-day trim and
+two Yaps writing one file; the estimate; the price table's tiers and
+dates); e2e `chat-usage.spec.js` with the fake AI's counts. Not tried yet
+with real providers' answers or the on-device model's real speed.
+
 **Sturdier shortcuts, and no dictation lost** (2026-10-25,
 [dictation.md](./dictation.md)): **several shortcuts per action**
 (Settings → Shortcuts' "+ Add another", up to 3 more keys or mouse buttons,

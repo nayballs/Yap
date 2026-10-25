@@ -132,6 +132,9 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
 
   let waitedS = $state(0);
   let modelHere = $state(false);
+  // Goes up when an answer (or a question) lands: the context ring reads
+  // the conversation's use again (ContextRing.svelte, `chat_context`).
+  let contextStamp = $state(0);
   $effect(() => {
     const busy = sending || (assistantPending != null && assistantPending === activeId);
     if (!busy) {
@@ -455,6 +458,7 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
       }));
       refreshList();
       scrollThread();
+      contextStamp += 1;
     } catch {
       /* deleted meanwhile */
     }
@@ -689,6 +693,7 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
         sources: res.sources || [],
         id: res.messageId ?? null,
         stopped: !!res.stopped,
+        tokens: res.tokens ?? null,
         revisedFrom: streamed != null && streamed.trim() !== '' && streamed.trim() !== String(res.reply).trim() ? fromHeight : 0,
       };
       // The question as saved: with its screenshots' text when it went as text.
@@ -696,6 +701,7 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
       messages = [...messages.slice(0, qi), { ...asked, ...saved, id: res.userMessageId ?? null }, answer];
       refreshList();
       followThread();
+      contextStamp += 1;
       // Read out by itself ("When to speak", decided in Rust): the voice
       // alone, no reading card (that's ▶'s).
       if (res.speak && answer.id) speakReply(answer.text, answer.id);
@@ -709,6 +715,7 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
           .filter((m) => !(m.role === 'assistant' && m.streaming && m.turn === turn))
           .map((m) => (m.role === 'user' && m.turn === turn && m.id == null ? { ...m, id: askedId } : m));
         refreshList();
+        contextStamp += 1;
         return;
       }
       const qi = questionAt();
@@ -716,6 +723,7 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
         // Stopped before any of the answer came: the question stays.
         messages = [...messages.slice(0, qi), { ...messages[qi], stopped: true }];
         refreshList();
+        contextStamp += 1;
         return;
       }
       messages = messages.slice(0, qi);
@@ -842,6 +850,7 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
     get assistantPending() { return assistantPending; },
     get waitedS() { return waitedS; },
     get modelHere() { return modelHere; },
+    get contextStamp() { return contextStamp; },
     get picked() { return picked; },
     set picked(v) { picked = v; },
     get groups() { return groups; },

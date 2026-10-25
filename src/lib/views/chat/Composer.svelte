@@ -3,7 +3,9 @@
   // replies and their volume), the message, the mic, and Send once there's
   // something to send — ■ Stop while an answer comes (Esc too); under it,
   // quiet, the model the message goes to (ModelChip, whose picker opens
-  // above it all). Snip to Chat (snip.rs): the screenshots this question
+  // above it all), and bottom right the context ring (ContextRing: how much
+  // of the model's context this chat uses, and the day's AI use in its
+  // panel). Snip to Chat (snip.rs): the screenshots this question
   // carries sit over the box with three one-tap questions, and — a model
   // that can't read images — one line saying so, with the switch, or
   // "Send its text instead" (Windows' OCR on this PC: snip/ocr.rs). A
@@ -17,9 +19,14 @@
   import { modelName, providerName } from '../../core/aiModel.js';
   import { chatImageUrl, SNIP_PROMPTS, sizeLine, imageItems } from './chatImages.js';
   import ModelChip from './ModelChip.svelte';
+  import ContextRing from './ContextRing.svelte';
 
-  /** `chat`: the view's state; `onopensettings(section)`: ControlPanel's Settings. */
-  let { chat, onopensettings = null } = $props();
+  /**
+   * `chat`: the view's state; `onopensettings(section)`: ControlPanel's
+   * Settings; `onopenusage()`: Insights' AI usage card (the context ring's
+   * See all).
+   */
+  let { chat, onopensettings = null, onopenusage = null } = $props();
 
   // The model chip (its picker opens for "Choose another model…").
   let chipRef = $state(null);
@@ -303,6 +310,10 @@
   </div>
   <div class="composerfoot">
     <ModelChip bind:this={chipRef} {onopensettings} quiet />
+    <!-- How much of the model's context this chat uses (bottom right, as
+         Claude's chat box shows it); its panel has the day's AI use. -->
+    <span class="footgap"></span>
+    <ContextRing conversationId={chat.activeId} stamp={chat.contextStamp} onnewchat={() => chat.newChat()} onseeall={() => onopenusage?.()} />
   </div>
 </div>
 
@@ -490,6 +501,9 @@
     gap: 8px;
     min-height: 26px;
     padding: 0 4px;
+  }
+  .footgap {
+    flex: 1 1 auto;
   }
   .plusdot {
     position: absolute;

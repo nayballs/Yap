@@ -153,8 +153,16 @@ The AI Chat surface (conversations, the tool-calling loop and its note tools) an
   (`assistant::cant_read`). After a spoken "snip" lands, Yap listens for the
   question by itself ([snip.md](./snip.md#after-saying-snip-yap-listens-for-the-question-2026-10-25)).
   **The history window** moves three turns at a time
-  (`chats::history_start`: 14–19 messages, the Voice Assistant's 5–8), not
-  every turn, so a long chat keeps its prompt's start. **A note's Ask
+  (`chats::history_start` with `CHAT_HISTORY` (19, 6): 14–19 messages, the
+  Voice Assistant's `ASSISTANT_HISTORY` 5–8), not
+  every turn, so a long chat keeps its prompt's start. **An answer's
+  tokens** (2026-10-25): `chat_turn` runs inside `usage::tallied`, and the
+  turn's last model call — the step that wrote the answer, which read the
+  whole prompt — is kept with the answer (`ChatMessage.tokens` =
+  `MessageTokens {prompt, answer, perSecond?}`, only when the model said;
+  none for a stopped answer, whose call never finished) and returned by
+  `chat_send` (`tokens`): Chat's context ring ([below](#the-context-ring-2026-10-25)).
+  An older Yap's save drops it; the ring then estimates. **A note's Ask
   threads** (2026-10-25) are conversations here too, with `note` set
   (`create_for_note`, `for_note`, `delete_for_note`, `append_whole`; an
   answer to show as plain text keeps `plain`): Chat never shows them — not
@@ -648,8 +656,10 @@ screenshots and their prompts, +, the box, the mic, Send / ■, `ModelChip`).
   to — the provider's mark (`ProviderMark.svelte`), "GPT-OSS 20B · Groq" /
   "Qwen3.5 4B · On this PC", "· no note tools" for a local model under 4B,
   where it runs in its tooltip (and, on the on-device model, "Context: 8K
-  tokens": `ai_model_status.context`), "No AI model" when nothing is set up. The
-  chip opens **the Chat model picker** (`ChatModelPicker.svelte`, data in
+  tokens": `ai_model_status.context`), "No AI model" when nothing is set up;
+  bottom right of the same row, **the context ring** ([below](#the-context-ring-2026-10-25)). The
+  chip opens **the Chat model picker** (`ChatModelPicker.svelte`, its own
+  chunk loaded the first time it opens since 2026-10-25, data in
   `chatModels.svelte.js`; the maintainer's "Concept A, provider rail",
   2026-10-19): a popover above the composer (`data-model-picker-above`;
   560 px, its rail a strip across the top below 520) — **search** across
@@ -790,3 +800,62 @@ screenshots and their prompts, +, the box, the mic, Send / ■, `ModelChip`).
   screenshot" (`snip_start {origin: "chat"}`).
   Search by meaning — local embeddings, Ask across meetings with cited
   passages — is [search.md](./search.md) (2026-10-25; ROADMAP step 3).
+
+## The context ring (2026-10-25)
+
+After Claude's own chat box (the maintainer's ask): bottom right under the
+message box, beside the model chip's row, a small ring that fills as the
+open conversation uses up the Chat model's context.
+
+- **`ai/usage/context.rs`** — `chat_context {conversationId}` → `{used,
+  estimate, lastAnswer, perSecond, context, contextKnown, trimmed,
+  messages, model}`. **Used**: the last counted answer's prompt + answer
+  (`ChatMessage.tokens`, the provider's own counts), plus an estimate of
+  any messages after it (a question whose answer failed); with none
+  counted (before the first answer, a model that doesn't say, an older
+  Yap's save), **an estimate** of what the next question would send
+  (`estimate_next`: the instructions — about 300 tokens, and a tool
+  model's instructions and note tools' schemas, `tools::tool_prompt_chars`
+  — and the history window as `chats::history_messages` sends it, about
+  four characters a token). **The context** of the model the chip names
+  (`ai_model::target`, so a switch follows): the on-device model's
+  (`local_llm::context::context_now`, what the sidecar serves), a
+  self-hosted server's word (Ollama, LM Studio:
+  `model_catalog::server_context_here`), a cloud model's from its
+  provider's list (`model_catalog::listed_model(..).context`); none of
+  those: the provider's usual (`default_context`: Groq 128K, Claude 200K,
+  Gemini 1M, OpenAI and OpenRouter 128K, a server 8K) with `contextKnown`
+  false. **Trimmed**: the next question leaves older messages out
+  (`history_start(len, CHAT_HISTORY) > 0`). Unit-tested (the estimate,
+  the counted answer and what's after it, the window).
+- **`ContextRing.svelte`** (`views/chat/`, in the composer's foot): an SVG
+  ring (r 7 in 18 px) over `--yap-raised`, filled in `--yap-primary`,
+  warmer from 80 % (`--yap-danger` mixed in) and `--yap-danger` from 95 %
+  (`core/aiUsage.js ringColor`); light and dark from the tokens. Hidden on
+  a new chat (nothing to show). Hover or focus: a tooltip "38% of context
+  used" ("About 38%…" for an estimate or an approximate context); the
+  button's accessible name says the same; `data-percent`. Read again after
+  each answer, stop or newer question (`chatState`'s `contextStamp`), when
+  another conversation opens, and on `yap-chat-model-changed`,
+  `yap-config-saved`, `yap-local-llm-changed`. Click (Enter / Space):
+  **`ContextPanel.svelte`** (its own chunk, loaded the first time), a
+  popover above it (Claude's panel as the model: rows with thin bars;
+  `role="dialog"`, focused, Esc closes it and gives the focus back):
+  **This chat** — "1.6K of 4K tokens" (≈ for an estimate or an approximate
+  context), a bar (`role="meter"`), the percent and the provider, "Last
+  answer 400 tokens · 120 tokens/s" (the speed when the server said:
+  llama.cpp's timings), a line when it's an estimate or the context is
+  approximate; **from 80 %** one quiet line with **New chat** — "Long chat:
+  only the latest messages go to the model. A new chat answers best."
+  when older messages are already left out (Yap trims by message count,
+  `CHAT_HISTORY`), else "Nearly full: a long answer may be cut short. A
+  new chat answers best."; **Today** and **Last 7 days** (`ai_usage_summary`,
+  re-read on `yap-ai-usage`) — the tokens, the top 3 models (name ·
+  where, a thin bar, tokens; "free, on your PC" on this PC, "≈ $0.02" for
+  a cloud model with a known price, "no price known" otherwise), "4.4K on
+  this PC · 1.2K cloud · ≈ $0.01" under several models; a fine line ("Costs
+  are estimates at list prices (checked 25 Oct 2026); free plans cost
+  nothing. Counted on this PC: nothing leaves it.") and **See all** →
+  Insights' AI usage card in view (ControlPanel's `onopenusage`,
+  `InsightsView focus="ai-usage"`; [frontend.md](./frontend.md)).
+- E2e `chat-usage.spec.js` ([e2e-tests.md](../e2e-tests.md)).

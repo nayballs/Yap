@@ -42,6 +42,13 @@
 // `setStreaming(false)` answers whole even when asked to stream (a server
 // that ignores `stream`).
 //
+// **Token counts** (the AI usage tracker, src-tauri/src/ai/usage.rs):
+// `usage(kind, { usage, timings })` makes a kind's answers carry OpenAI's
+// `usage` and llama.cpp's `timings`, whole (in the body) or streamed (the
+// timings on the finish chunk, the usage chunk after it); a scripted step's
+// `counts` wins. Without it: `usage: {total_tokens: 0}` whole, 10 + 10
+// streamed, as before.
+//
 // It also lists models (src-tauri/src/ai/model_catalog.rs): `GET <base>/models`
 // as a self-hosted OpenAI-compatible server (`serverModels`), and — through
 // `modelsStandin`, the debug-only YAP_MODELS_STANDIN — each cloud provider's
@@ -182,7 +189,7 @@ export function pieces(text) {
  * llama.cpp streams it), paced by `pace` ({ gapMs, chunks, failAfter,
  * hangAfter }); `record.aborted` when the client hangs up mid-stream.
  */
-async function streamOut(res, record, model, message, finish, pace = {}) {
+async function streamOut(res, record, model, message, finish, pace = {}, counts = null) {
   res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache' });
   let gone = false;
   res.on('close', () => {
@@ -201,8 +208,14 @@ async function streamOut(res, record, model, message, finish, pace = {}) {
     const third = Math.max(1, Math.ceil(args.length / 3));
     for (let i = 0; i < args.length; i += third) out.push(chunk({ tool_calls: [{ index, function: { arguments: args.slice(i, i + third) } }] }));
   });
-  out.push(chunk({}, finish));
-  out.push(`data: ${JSON.stringify({ choices: [], usage: { prompt_tokens: 10, completion_tokens: 10, total_tokens: 20 } })}\n\n`);
+  // The finish chunk carries llama.cpp's `timings` when a spec gave some
+  // (`usage(kind, { timings })`), then the usage chunk.
+  out.push(
+    counts?.timings
+      ? `data: ${JSON.stringify({ id: 'fake-stream', object: 'chat.completion.chunk', model, choices: [{ index: 0, delta: {}, finish_reason: finish }], timings: counts.timings })}\n\n`
+      : chunk({}, finish)
+  );
+  out.push(`data: ${JSON.stringify({ choices: [], usage: counts?.usage ?? { prompt_tokens: 10, completion_tokens: 10, total_tokens: 20 } })}\n\n`);
   out.push('data: [DONE]\n\n');
   for (let i = 0; i < out.length; i++) {
     if (gone) return;
@@ -456,6 +469,7 @@ export async function startFakeLlm() {
   const chatScript = [];
   const replies = new Map();
   const paces = new Map();
+  const usages = new Map();
   let streaming = true;
   const lists = new Map();
   const listFailures = new Map();
@@ -621,9 +635,10 @@ export async function startFakeLlm() {
         res.writeHead(failing.status, { 'content-type': 'text/plain' }).end('fake failure: the model is down');
         return;
       }
-      // The answer, whole or (asked for, and on) streamed.
-      const answerWith = (message, finish, pace = {}) => {
-        if (body.stream && streaming) return streamOut(res, record, body.model, message, finish, pace);
+      // The answer, whole or (asked for, and on) streamed, with the token
+      // counts a spec set for the kind (`usage`) or the step.
+      const answerWith = (message, finish, pace = {}, counts = usages.get(kind) ?? null) => {
+        if (body.stream && streaming) return streamOut(res, record, body.model, message, finish, pace, counts);
         res.writeHead(200, { 'content-type': 'application/json' });
         res.end(
           JSON.stringify({
@@ -631,7 +646,8 @@ export async function startFakeLlm() {
             object: 'chat.completion',
             model: body.model,
             choices: [{ index: 0, message, finish_reason: finish }],
-            usage: { total_tokens: 0 },
+            usage: counts?.usage ?? { total_tokens: 0 },
+            ...(counts?.timings ? { timings: counts.timings } : {}),
           })
         );
       };
@@ -651,7 +667,7 @@ export async function startFakeLlm() {
               })),
             }
           : { role: 'assistant', content: step.content };
-        await answerWith(message, step.tools ? 'tool_calls' : 'stop', step.stream ?? paces.get(kind) ?? {});
+        await answerWith(message, step.tools ? 'tool_calls' : 'stop', step.stream ?? paces.get(kind) ?? {}, step.counts ?? usages.get(kind) ?? null);
         return;
       }
       const answer = {
@@ -692,6 +708,12 @@ export async function startFakeLlm() {
     streamPace: (kind, pace) => (pace ? paces.set(kind, pace) : paces.delete(kind)),
     /** Answer whole even when asked to stream (`false`), or stream again. */
     setStreaming: (on) => (streaming = on),
+    /**
+     * The token counts a kind's answers carry, whole or streamed: `{ usage,
+     * timings }` (OpenAI's `usage`, llama.cpp's `timings`); null: the
+     * defaults again. A scripted step's own `counts` wins.
+     */
+    usage: (kind, counts) => (counts ? usages.set(kind, counts) : usages.delete(kind)),
     /** Turn a request carrying images down with HTTP 400, as a text-only server does (`true`). */
     rejectImages: (on) => (rejectingImages = on),
     close: () => {
