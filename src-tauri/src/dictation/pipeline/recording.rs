@@ -575,6 +575,9 @@ impl Shared {
             hwnd == 0,
         );
         let assistant = goes == Goes::Assistant;
+        // A language shortcut's press: this dictation is in its language
+        // (My languages, languages.rs) — not a rewrite or a question.
+        crate::dictation::languages::begin_dictation(!edit && !assistant);
         self.to_chat.store(goes == Goes::ChatBox, Ordering::SeqCst);
         self.assistant.store(assistant, Ordering::SeqCst);
         match goes {

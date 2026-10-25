@@ -193,6 +193,46 @@ impl WhisperEngine {
         })
     }
 
+    /// Whether the model knows more languages than English (a `.en` model
+    /// doesn't).
+    pub fn is_multilingual(&self) -> bool {
+        self.is_multilingual
+    }
+
+    /// Yap (2026-10-25): whisper.cpp's own language detection on `samples`
+    /// — what `full()` runs on its first 30 s when no language is given —
+    /// as each language's code and probability, the most likely first.
+    /// `n_threads` 0: whisper.cpp's default (up to 4). An English-only
+    /// model has nothing to detect: `Err`.
+    pub fn detect_language(
+        &mut self,
+        samples: &[f32],
+        n_threads: i32,
+    ) -> Result<Vec<(&'static str, f32)>, TranscribeError> {
+        if !self.is_multilingual {
+            return Err(TranscribeError::Config("an English-only model detects no language".into()));
+        }
+        let threads = if n_threads > 0 {
+            n_threads as usize
+        } else {
+            std::thread::available_parallelism().map(|n| n.get().min(4)).unwrap_or(4)
+        };
+        self.state
+            .pcm_to_mel(samples, threads)
+            .map_err(|e| TranscribeError::Inference(e.to_string()))?;
+        let (_, probs) = self
+            .state
+            .lang_detect(0, threads)
+            .map_err(|e| TranscribeError::Inference(e.to_string()))?;
+        let mut out: Vec<(&'static str, f32)> = probs
+            .iter()
+            .enumerate()
+            .filter_map(|(id, p)| whisper_rs::get_lang_str(id as i32).map(|code| (code, *p)))
+            .collect();
+        out.sort_by(|a, b| b.1.total_cmp(&a.1));
+        Ok(out)
+    }
+
     /// Transcribe with model-specific parameters.
     pub fn transcribe_with(
         &mut self,

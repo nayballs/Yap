@@ -218,8 +218,9 @@ impl Shared {
             }
         }
 
-        // Snapshot the language/translate settings for this transcription.
-        let (language, translate) = self.language_settings();
+        // Snapshot the translate setting for this transcription (the
+        // language is My languages', below).
+        let (_, translate) = self.language_settings();
 
         // Slow-transcription watchdog: if no usable GPU is present, whisper (esp.
         // large-v3) runs on CPU and can take minutes, leaving the UI stuck on
@@ -249,14 +250,22 @@ impl Shared {
         });
 
         let dict_prompt = self.dictation_prompt();
+        // My languages (languages.rs): the language this dictation is in, or
+        // the ones it may be in — Whisper picks the likeliest and says so.
+        let spoken = self.config.read().map(|c| crate::dictation::languages::spoken(&c)).unwrap_or_default();
+        let secs = audio.len() as f32 / crate::dictation::pipeline::TARGET_SAMPLE_RATE as f32;
         let outcome = tokio::task::spawn_blocking(move || {
             let result = match lease.engine() {
-                Some(engine) => engine.transcribe(&audio, language.as_deref(), translate, dict_prompt.as_deref()),
+                Some(engine) => engine.transcribe_spoken(&audio, &spoken, translate, dict_prompt.as_deref()),
                 None => Err(SttError::NotReady),
             };
             (lease, result)
         })
         .await;
+        let outcome = outcome.map(|(lease, result)| {
+            let cfg = self.config.read().map(|c| c.clone()).unwrap_or_default();
+            (lease, result.map(|said| crate::dictation::languages::heard(&self.app, said, secs, &cfg)))
+        });
 
         done.store(true, Ordering::SeqCst);
         watchdog.abort();
@@ -362,12 +371,14 @@ impl Shared {
         let lease = lease_engine(&slot, DICTATION_ENGINE_WAIT)
             .await
             .map_err(|e| format!("Couldn't load {}: {e}", stt::model_name(&model_id)))?;
-        let (language, translate) = self.language_settings();
+        let (_, translate) = self.language_settings();
+        // The main shortcut's languages (My languages), as for a dictation.
+        let spoken = crate::dictation::languages::plan(&cfg, None);
         let prompt = if stt::is_whisper_model(&model_id) { self.dictionary_prompt() } else { None };
         tracing::info!(samples = audio.len(), model = %model_id, warm, "Running a dictation again");
         let (lease, result) = tokio::task::spawn_blocking(move || {
             let r = match lease.engine() {
-                Some(engine) => engine.transcribe(&audio, language.as_deref(), translate, prompt.as_deref()),
+                Some(engine) => engine.transcribe_spoken(&audio, &spoken, translate, prompt.as_deref()),
                 None => Err(SttError::NotReady),
             };
             (lease, r)
@@ -376,7 +387,8 @@ impl Shared {
         .map_err(|e| format!("The transcription crashed: {e}"))?;
         drop(lease);
         self.touch_activity();
-        let raw = result.map_err(|e| format!("The transcription failed: {e}"))?.trim().to_string();
+        let said = result.map_err(|e| format!("The transcription failed: {e}"))?;
+        let raw = crate::dictation::languages::rerun_heard(said).trim().to_string();
         if raw.is_empty() {
             return Err("Nothing was heard in it".into());
         }

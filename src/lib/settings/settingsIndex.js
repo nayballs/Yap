@@ -35,6 +35,11 @@ export const SETTINGS_INDEX = [
   // ---- Dictation ----
   { page: 'dictation', section: 'Start and stop', label: 'Hotkey', desc: 'Press it in any app to start and stop dictating', keywords: 'shortcut key keyboard f9 dictation start stop copilot key', anchor: 'hotkey' },
   { page: 'dictation', section: 'Start and stop', label: 'Recording mode', desc: 'Toggle, or hold the key while you talk', keywords: 'push-to-talk push to talk toggle hold hands-free double-tap', anchor: 'recording-mode' },
+  { page: 'dictation', section: 'My languages', label: 'Languages you speak', desc: 'Every language you dictate in', keywords: 'language languages multilingual bilingual french spanish german english auto-detect detect my languages', anchor: 'my-languages' },
+  { page: 'dictation', section: 'My languages', label: 'Your speech model', desc: 'Which model understands which of your languages', keywords: 'language languages model whisper parakeet multilingual covers supports recommended', anchor: 'language-models', fallback: 'my-languages' },
+  { page: 'dictation', section: 'My languages', label: 'Main shortcut', desc: 'Auto, or one of your languages', keywords: 'language auto-detect hotkey main fixed', anchor: 'main-language', fallback: 'my-languages' },
+  { page: 'dictation', section: 'My languages', label: 'Language shortcuts', desc: 'A key for a language, or to dictate in one and paste another', keywords: 'language shortcut shortcuts hotkey translate translation translating dual-language bilingual', anchor: 'language-shortcuts' },
+  { page: 'dictation', section: 'My languages', label: "Tell me when I speak a language I didn't pick", desc: 'Yap offers to add it', keywords: 'language nudge detect different language suggestion', anchor: 'language-nudge', fallback: 'my-languages', toggle: 'languageNudge' },
   { page: 'dictation', section: 'Microphone and sound', label: 'Microphone', desc: 'Changes apply straight away', keywords: 'mic input device audio headset', anchor: 'microphone' },
   { page: 'dictation', section: 'Microphone and sound', label: 'Keep the microphone ready', desc: 'Dictation starts instantly and catches your first word', keywords: 'mic microphone always open on in use privacy indicator bluetooth headset call quality hfp instant start first word pre-roll', anchor: 'keep-mic-ready', toggle: 'keepMicReady' },
   { page: 'dictation', section: 'Microphone and sound', label: 'Chime when recording starts and stops', desc: 'A sound, and its volume', keywords: 'sound cue beep volume chime audio feedback', anchor: 'chime', toggle: 'soundEnabled' },
@@ -59,6 +64,7 @@ export const SETTINGS_INDEX = [
   // ---- Shortcuts ----
   { page: 'shortcuts', section: 'Global shortcuts', label: 'Dictate', desc: 'Start and stop dictating where you are typing', keywords: 'shortcut shortcuts hotkey keyboard dictation key', anchor: 'shortcut-dictation' },
   { page: 'shortcuts', section: 'Global shortcuts', label: 'Rewrite selected text', desc: 'Select text, press it and say how to change it', keywords: 'shortcut shortcuts hotkey edit rewrite commands', anchor: 'shortcut-rewrite' },
+  { page: 'shortcuts', section: 'Global shortcuts', label: 'Language shortcuts', desc: 'A key for a language of yours, or to translate as you dictate', keywords: 'language languages shortcut shortcuts hotkey translate translation bilingual', anchor: 'shortcut-languages' },
   { page: 'shortcuts', section: 'Global shortcuts', label: 'Transforms', desc: 'Polish, Shorter, Translate and your own, each on a key', keywords: 'transform transforms shortcut shortcuts hotkey polish translate', anchor: 'shortcut-transforms' },
   { page: 'shortcuts', section: 'Global shortcuts', label: 'Ask the Voice Assistant', desc: 'Ask out loud from any app', keywords: 'shortcut shortcuts hotkey assistant voice', anchor: 'shortcut-assistant' },
   { page: 'shortcuts', section: 'Global shortcuts', label: 'Read aloud', desc: 'Select text in any app and press it to hear it', keywords: 'shortcut shortcuts hotkey read aloud speak selection text to speech tts dyslexia reading', anchor: 'shortcut-read' },
@@ -133,7 +139,7 @@ export const SETTINGS_INDEX = [
   // ---- Speech-to-Text ----
   { page: 'models', section: 'Speech model', label: 'Speech model', desc: 'The model that turns your voice into text', keywords: 'speech to text transcription model parakeet whisper canary moonshine download', anchor: 'stt-model' },
   { page: 'models', section: 'Speakers in meetings', label: 'Speaker models', desc: 'For telling speakers apart in meetings', keywords: 'diarization speakers model', anchor: 'speakers' },
-  { page: 'models', section: 'Language', label: 'Language', desc: 'The language you speak', keywords: 'spoken language auto-detect', anchor: 'language' },
+  { page: 'models', section: 'Language', label: 'Languages', desc: 'The languages you speak: Dictation → My languages', keywords: 'spoken language languages auto-detect multilingual', anchor: 'language' },
   { page: 'models', section: 'Language', label: 'Translate to English', desc: 'Output English whatever you speak', keywords: 'translation translate', anchor: 'translate' },
   { page: 'models', section: 'Performance', label: 'Speed', desc: 'Runs on the graphics card, or the processor when it is clearly faster on this PC', keywords: 'runs on gpu cpu processor graphics card directml vulkan performance speed fast benchmark measure', anchor: 'runs-on' },
   { page: 'models', section: 'Performance', label: 'Unload model when idle', desc: 'Free memory when not dictating', keywords: 'memory ram idle unload performance', anchor: 'unload' },

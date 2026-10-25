@@ -247,6 +247,11 @@ pub fn run() {
             dictation::commands::configure_as_said_hotkey,
             dictation::commands::configure_snip_hotkey,
             dictation::transforms::configure_transform_hotkey,
+            dictation::languages::languages_catalog,
+            dictation::languages::my_languages_status,
+            dictation::languages::configure_language_hotkey,
+            dictation::languages::language_key,
+            dictation::languages::nudge::language_nudge_respond,
             snip::snip_start,
             snip::chat_images_usage,
             snip::chat_images_prepare,
@@ -544,6 +549,10 @@ pub fn run() {
             #[cfg(debug_assertions)]
             dictation::transforms::e2e_transform_slots,
             #[cfg(debug_assertions)]
+            dictation::languages::e2e_language_stage,
+            #[cfg(debug_assertions)]
+            dictation::languages::e2e_language_slots,
+            #[cfg(debug_assertions)]
             shell::realtest::commands::realtest_transform,
             #[cfg(debug_assertions)]
             dictation::commands::e2e_target_window,
@@ -623,7 +632,9 @@ pub fn run() {
             dictation::input_hook::configure_as_said_from(&cfg);
             // Snip to Chat (snip.rs; Win+Alt+S by default, never a clash).
             dictation::input_hook::configure_snip_from(&cfg);
-            // Saved transforms' shortcuts (transforms.rs; none by default).
+            // Language shortcuts (My languages, languages.rs; none by
+            // default), then saved transforms' (transforms.rs; none by default).
+            dictation::input_hook::configure_languages_from(&cfg);
             dictation::input_hook::configure_transforms_from(&cfg);
 
             // Clear ort's 0-byte DirectML.dll stub so ONNX uses the real system
@@ -816,6 +827,9 @@ pub fn run() {
                     dictation::transforms::on_key(&transform_handle, slot);
                 }
             });
+            // A language shortcut's press and release (My languages): a
+            // dictation in its language, as the dictation key's.
+            dictation::languages::init(&handle);
 
             // Drive the overlay (the Yap bar) from the pipeline's `yap-state`
             // event (decoupled from the pipeline itself). It always shows

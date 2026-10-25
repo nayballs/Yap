@@ -77,6 +77,7 @@ fn apply_config(app: &AppHandle, state: State<'_, AppState>, prev: &YapConfig, c
     crate::dictation::input_hook::configure_read_from(&cfg);
     crate::dictation::input_hook::configure_as_said_from(&cfg);
     crate::dictation::input_hook::configure_snip_from(&cfg);
+    crate::dictation::input_hook::configure_languages_from(&cfg);
     crate::dictation::input_hook::configure_transforms_from(&cfg);
     // The tray's Transforms menu follows the list.
     if cfg.transforms != prev.transforms {

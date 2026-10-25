@@ -223,6 +223,22 @@ pub struct YapConfig {
     /// config without the key starts with Yap's five built-ins.
     #[serde(default = "crate::dictation::transforms::defaults")]
     pub transforms: Vec<crate::dictation::transforms::Transform>,
+    /// **My languages** (Settings → Dictation → My languages,
+    /// `dictation/languages.rs`): the languages you speak, as codes ("en",
+    /// "fr"), in your order. Empty: none picked (a config from before keeps
+    /// the one `selected_language` names). The main shortcut's language is
+    /// still `selected_language` ("auto": the likeliest of these).
+    #[serde(default)]
+    pub my_languages: Vec<String>,
+    /// **Language shortcuts**: a key of its own that dictates in a fixed
+    /// language (or any of yours), optionally pasted translated into
+    /// another (at most `languages::MAX_SHORTCUTS`).
+    #[serde(default)]
+    pub language_shortcuts: Vec<crate::dictation::languages::LanguageShortcut>,
+    /// "Tell me when I speak a language I didn't pick" (`languages/nudge.rs`;
+    /// only Whisper models say which language they heard). On by default.
+    #[serde(default = "default_true")]
+    pub language_nudge: bool,
     /// The **Voice Assistant** shortcut (Settings → Voice Assistant,
     /// `assistant.rs`): from any app, ask Yap's Chat something out loud and
     /// hear the answer; it never types into the app you're in. Empty =
@@ -1033,6 +1049,9 @@ impl Default for YapConfig {
             edit_hotkey: String::new(),
             rewrite_last_dictation: true,
             transforms: crate::dictation::transforms::defaults(),
+            my_languages: Vec::new(),
+            language_shortcuts: Vec::new(),
+            language_nudge: true,
             assistant_hotkey: String::new(),
             read_hotkey: String::new(),
             as_said_hotkey: String::new(),

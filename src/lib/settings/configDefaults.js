@@ -77,6 +77,11 @@ export const FIELD_DEFAULTS = {
   dictionary: [],
   selectedLanguage: 'auto',
   translateToEnglish: false,
+  // My languages (dictation/languages.rs): the languages you speak, the
+  // language shortcuts, and "Tell me when I speak a language I didn't pick".
+  myLanguages: [],
+  languageShortcuts: [],
+  languageNudge: true,
   modelUnloadTimeout: 'never',
   outputDevice: null,
   overlayPosition: 'bottom',

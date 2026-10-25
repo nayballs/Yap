@@ -1,8 +1,10 @@
 //! Unified input hook for the dictation, edit (Commands' rewrite), meeting,
 //! Voice Assistant, Read aloud, "Use what I said" and Snip to Chat key
-//! bindings, and up to `transforms::MAX` **saved transforms**' shortcuts
-//! (a slot each, [`configure_transforms_from`]; only their press, as
-//! `transform-key-pressed` with the slot). The snip shortcut (Win+Alt+S by
+//! bindings, up to `languages::MAX_SHORTCUTS` **language shortcuts** (My
+//! languages: a slot each, [`configure_languages_from`]; press and release,
+//! as `language-key` with the slot) and up to `transforms::MAX` **saved
+//! transforms**' shortcuts (a slot each, [`configure_transforms_from`]; only
+//! their press, as `transform-key-pressed` with the slot). The snip shortcut (Win+Alt+S by
 //! default) only acts on its press (`snip.rs`); while a snip's overlay is
 //! up, Esc cancels it here too and goes no further ([`snip_escape`]).
 //!
@@ -141,6 +143,22 @@ const TRANSFORM_EVENTS: [(&str, &str); crate::dictation::transforms::MAX] = [
     ("transform-key-9", "transform-key-9-up"),
     ("transform-key-10", "transform-key-10-up"),
     ("transform-key-11", "transform-key-11-up"),
+];
+/// Language shortcuts' keys (`languages.rs`, My languages): a slot each, in
+/// the list's order (`languages::assign`); press and release, as the
+/// dictation key's (push-to-talk holds them). Beside the seven fixed
+/// bindings, always giving way to them; saved transforms give way to these.
+static LANGUAGE_BINDINGS: [KeyBinding; crate::dictation::languages::MAX_SHORTCUTS] =
+    [const { KeyBinding::new() }; crate::dictation::languages::MAX_SHORTCUTS];
+/// Which language shortcut each slot is (its id).
+static LANGUAGE_IDS: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
+/// The slots' events (pressed, released); the forwarder turns both into one
+/// `language-key` event with the slot.
+const LANGUAGE_EVENTS: [(&str, &str); crate::dictation::languages::MAX_SHORTCUTS] = [
+    ("language-key-0", "language-key-0-up"),
+    ("language-key-1", "language-key-1-up"),
+    ("language-key-2", "language-key-2-up"),
+    ("language-key-3", "language-key-3-up"),
 ];
 /// A snip's overlay is up: Esc cancels it here too, in case Windows didn't
 /// let the overlay take the focus (`snip::cancel`).
@@ -415,6 +433,85 @@ pub fn transform_slots() -> Vec<(String, String)> {
 #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
 fn transform_slot(event: &str) -> Option<usize> {
     TRANSFORM_EVENTS.iter().position(|(pressed, _)| *pressed == event)
+}
+
+fn language_ids() -> std::sync::MutexGuard<'static, Vec<String>> {
+    LANGUAGE_IDS.lock().unwrap_or_else(|p| p.into_inner())
+}
+
+/// The language shortcuts' keys from config (`languages::assign`): a slot
+/// for each with a key, in list order; one whose key would fire with one of
+/// the seven fixed shortcuts, or an earlier language shortcut's, is left
+/// unbound and the log says why (Settings never saves one).
+pub fn configure_languages_from(cfg: &crate::config::YapConfig) {
+    let list = crate::dictation::languages::shortcuts(cfg);
+    let seven = crate::dictation::transforms::seven_shortcuts(cfg);
+    let fixed: Vec<(&str, &str)> = seven.iter().map(|(name, spec)| (*name, spec.as_str())).collect();
+    let slots = crate::dictation::languages::assign(&fixed, &list);
+    let mut ids = language_ids();
+    ids.clear();
+    let mut bound = 0usize;
+    for (i, binding) in LANGUAGE_BINDINGS.iter().enumerate() {
+        let Some(slot) = slots.get(i) else {
+            binding.configure(KEY_TYPE_NONE, 0, 0);
+            continue;
+        };
+        if let Some(clash) = &slot.clash {
+            tracing::warn!("A language shortcut's key clashes with {clash}: left unbound");
+        }
+        let (kind, code, mods) = parse_key_spec(&slot.spec).unwrap_or_else(|e| {
+            tracing::warn!("A language shortcut's key can't be read: {e}");
+            (KEY_TYPE_NONE, 0, 0)
+        });
+        binding.configure(kind, code, mods);
+        bound += usize::from(kind != KEY_TYPE_NONE);
+        ids.push(slot.id.clone());
+    }
+    info!(bound, "Language shortcuts configured");
+}
+
+/// Live-apply language shortcut `id`'s key (Settings pauses it with "" while
+/// a new key is picked): its slot, when it has one — a shortcut's first key
+/// gets its slot at the save.
+pub fn configure_language(id: &str, spec: &str) {
+    let Some(i) = language_ids().iter().position(|x| x == id) else { return };
+    match parse_key_spec(spec.trim()) {
+        Ok((kind, code, mods)) => LANGUAGE_BINDINGS[i].configure(kind, code, mods),
+        Err(e) => tracing::warn!("A language shortcut's key can't be read: {e}"),
+    }
+}
+
+/// The language shortcut input-hook slot `slot` is.
+pub fn language_at(slot: usize) -> Option<String> {
+    language_ids().get(slot).cloned()
+}
+
+/// The language slots as set now: each one's shortcut and key, in words —
+/// the e2e specs' check (debug builds).
+#[cfg(debug_assertions)]
+pub fn language_slots() -> Vec<(String, String)> {
+    language_ids()
+        .iter()
+        .zip(LANGUAGE_BINDINGS.iter())
+        .map(|(id, b)| {
+            let (kind, code, mods) = b.kind_code_mods();
+            (id.clone(), format_binding(kind, code, mods))
+        })
+        .collect()
+}
+
+/// A language slot's event → its slot and whether it's the press.
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+fn language_slot(event: &str) -> Option<(usize, bool)> {
+    LANGUAGE_EVENTS.iter().enumerate().find_map(|(i, (down, up))| {
+        if *down == event {
+            Some((i, true))
+        } else if *up == event {
+            Some((i, false))
+        } else {
+            None
+        }
+    })
 }
 
 /// The modifier family of a virtual key (any platform; the hook's own
@@ -966,7 +1063,11 @@ unsafe extern "system" fn low_level_keyboard_proc(
         ] {
             suppress |= process_keyboard_event(binding, pressed, released, vkey, is_keydown);
         }
-        // Saved transforms' shortcuts (an unbound slot is never matched).
+        // Language shortcuts' keys, then saved transforms' (an unbound
+        // slot is never matched).
+        for (binding, (pressed, released)) in LANGUAGE_BINDINGS.iter().zip(LANGUAGE_EVENTS) {
+            suppress |= process_keyboard_event(binding, pressed, released, vkey, is_keydown);
+        }
         for (binding, (pressed, released)) in TRANSFORM_BINDINGS.iter().zip(TRANSFORM_EVENTS) {
             suppress |= process_keyboard_event(binding, pressed, released, vkey, is_keydown);
         }
@@ -1068,7 +1169,13 @@ unsafe extern "system" fn low_level_mouse_proc(
                 return 1;
             }
 
-            // …and the saved transforms'.
+            // …and the language shortcuts', then the saved transforms'.
+            for (binding, (pressed, released)) in LANGUAGE_BINDINGS.iter().zip(LANGUAGE_EVENTS) {
+                if binding.matches_mouse(id) {
+                    handle_binding_event(binding, pressed, released, is_press);
+                    return 1;
+                }
+            }
             for (binding, (pressed, released)) in TRANSFORM_BINDINGS.iter().zip(TRANSFORM_EVENTS) {
                 if binding.matches_mouse(id) {
                     handle_binding_event(binding, pressed, released, is_press);
@@ -1117,6 +1224,16 @@ pub fn start_input_hook(app_handle: AppHandle) {
                     continue;
                 }
                 if event.starts_with("transform-key-") {
+                    continue;
+                }
+                // A language shortcut's press or release: one event, with
+                // its slot (`languages::init` hands it to the pipeline).
+                if let Some((slot, pressed)) = language_slot(event) {
+                    info!(slot, pressed, "Input hook: emitting language-key");
+                    let payload = serde_json::json!({ "slot": slot, "pressed": pressed, "at": at });
+                    if let Err(e) = app_handle.emit(crate::dictation::languages::KEY_EVENT, payload) {
+                        warn!("Input hook: failed to emit language-key: {}", e);
+                    }
                     continue;
                 }
                 info!("Input hook: emitting {}", event);
@@ -1397,6 +1514,54 @@ mod tests {
         configure_transforms_from(&cfg);
         assert!(TRANSFORM_BINDINGS.iter().all(|b| b.kind_code_mods().0 == KEY_TYPE_NONE));
         assert_eq!(transform_at(0), None);
+    }
+
+    #[test]
+    fn language_shortcuts_get_slots_giving_way_to_the_fixed_seven_and_transforms_to_them() {
+        use crate::dictation::languages::LanguageShortcut;
+        let sc = |id: &str, language: &str, to: &str, hotkey: &str| LanguageShortcut {
+            id: id.into(),
+            language: language.into(),
+            translate_to: to.into(),
+            hotkey: hotkey.into(),
+        };
+        let mut cfg = crate::config::YapConfig {
+            language_shortcuts: vec![
+                sc("l-fr", "fr", "", "kb:ctrl+alt+70"),
+                // The dictation hotkey's key: left for it.
+                sc("l-de", "de", "", &crate::config::YapConfig::default().hotkey),
+                sc("l-es", "en", "es", "mouse:4"),
+            ],
+            ..Default::default()
+        };
+        // A transform on the French shortcut's key gives way to it (the
+        // slots' rule, pure: another test owns the transform slots).
+        cfg.transforms[0].hotkey = "kb:ctrl+alt+70".into();
+        let fixed = crate::dictation::transforms::fixed_shortcuts(&cfg);
+        let fixed: Vec<(&str, &str)> = fixed.iter().map(|(n, s)| (*n, s.as_str())).collect();
+        let slots = crate::dictation::transforms::assign(&fixed, &crate::dictation::transforms::list(&cfg));
+        assert_eq!(slots[0].clash.as_deref(), Some("the language shortcut"));
+        configure_languages_from(&cfg);
+        assert_eq!(language_at(0).as_deref(), Some("l-fr"));
+        assert_eq!(language_at(1).as_deref(), Some("l-de"));
+        assert_eq!(language_at(2).as_deref(), Some("l-es"));
+        assert_eq!(LANGUAGE_BINDINGS[0].kind_code_mods(), (KEY_TYPE_KEYBOARD, 70, MOD_CTRL | MOD_ALT));
+        assert_eq!(LANGUAGE_BINDINGS[1].kind_code_mods().0, KEY_TYPE_NONE, "clashes: unbound");
+        assert!(LANGUAGE_BINDINGS[2].matches_mouse(4));
+        // Settings pausing one while a key is picked, then putting it back.
+        configure_language("l-fr", "");
+        assert_eq!(LANGUAGE_BINDINGS[0].kind_code_mods().0, KEY_TYPE_NONE);
+        configure_language("l-fr", "kb:ctrl+alt+70");
+        assert_eq!(LANGUAGE_BINDINGS[0].kind_code_mods().1, 70);
+        // Both of a slot's events go out, the press and the release.
+        assert_eq!(language_slot("language-key-2"), Some((2, true)));
+        assert_eq!(language_slot("language-key-2-up"), Some((2, false)));
+        assert_eq!(language_slot("transform-key-2"), None);
+        assert_eq!(LANGUAGE_EVENTS.len(), crate::dictation::languages::MAX_SHORTCUTS);
+        cfg.language_shortcuts.clear();
+        configure_languages_from(&cfg);
+        assert!(LANGUAGE_BINDINGS.iter().all(|b| b.kind_code_mods().0 == KEY_TYPE_NONE));
+        assert_eq!(language_at(0), None);
     }
 
     #[test]
