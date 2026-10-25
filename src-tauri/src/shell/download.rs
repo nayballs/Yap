@@ -575,7 +575,7 @@ mod tests {
         let seen = Mutex::new(0u64);
         let note = |p: Progress| *seen.lock().unwrap() = p.downloaded;
         let run = fetch(
-            Fetch { url: &url, partial: &partial, size: Some(400_000), what: crate::privacy::net::Download::Voice, ticket: &ticket },
+            Fetch { url: &url, partial: &partial, size: Some(400_000), what: crate::privacy::net::Download::SpeakerModel, ticket: &ticket },
             &note,
         );
         let canceller = async {
@@ -597,7 +597,7 @@ mod tests {
         let dir = scratch();
         let partial = dir.join("big.partial");
         let ticket = Ticket::unlisted();
-        let e = fetch(Fetch { url: &url, partial: &partial, size: Some(5_000), what: crate::privacy::net::Download::Voice, ticket: &ticket }, &|_| {})
+        let e = fetch(Fetch { url: &url, partial: &partial, size: Some(5_000), what: crate::privacy::net::Download::SpeakerModel, ticket: &ticket }, &|_| {})
             .await
             .unwrap_err();
         assert!(e.contains("bigger than expected"), "{e}");
