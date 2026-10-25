@@ -892,10 +892,67 @@ pub fn block(question: &str, zone: Zone, now: i64, cited: &mut Vec<Cited>) -> Op
     let (result, found) = look_up(&ask, &agenda, zone, now, &mut number);
     tracing::info!(meetings = found.len(), "Chat: calendar looked up for a model without tools");
     *cited = found;
-    let lead = "Yap looked up the user's calendar for this question (its result, as JSON; times are the user's). Answer from it, and cite each meeting you mention with its number, like [1]. If it says no calendar is connected, say so.";
-    let body = if result["success"].as_bool() == Some(false) { json!({ "error": result["error"] }) } else { result["data"].clone() };
+    let lead = "Yap looked up the user's calendar for the user's latest question (times are the user's). Answer it from this, not from earlier answers, and cite each meeting you mention with its number, like [1].";
+    let body = if result["success"].as_bool() == Some(false) {
+        result["error"].as_str().unwrap_or("Yap couldn't read the calendar.").to_string()
+    } else {
+        plain(&result["data"])
+    };
     let chip = result["displayText"].as_str().unwrap_or("Checked your calendar").to_string();
     Some((format!("{lead}\n<calendar>\n{body}\n</calendar>"), chip))
+}
+
+/// The lookup's result in plain lines, for a model without tools: Qwen2.5-1.5B
+/// and Qwen3.5-2B, given it as JSON, answered "Yes, you are free at 3 on
+/// Friday" over `"free": false` and the meeting at 15:00 (the evaluations,
+/// 2026-10-25), so the verdict comes first, in words. Pure.
+pub fn plain(data: &Value) -> String {
+    let mut out = Vec::new();
+    let asked = data["asked"].as_str().unwrap_or("");
+    match data["free"].as_bool() {
+        Some(true) => out.push(format!("Asked about {asked}. The answer: YES, the user is free then (nothing on their calendar).")),
+        Some(false) => out.push(format!("Asked about {asked}. The answer: NO, the user is not free then; they have:")),
+        None if !asked.is_empty() => out.push(format!("Asked about {asked}:")),
+        None => {}
+    }
+    let line = |m: &Value| {
+        let mut s = format!("{} — {}", m["title"].as_str().unwrap_or("Meeting"), m["when"].as_str().unwrap_or(""));
+        if let Some(w) = m["with"].as_str() {
+            s.push_str(&format!(", with {w}"));
+        }
+        if let Some(o) = m["on"].as_str() {
+            s.push_str(&format!(", on {o}"));
+        }
+        if m["maybe"] == json!(true) {
+            s.push_str(" (they said maybe)");
+        }
+        if m["on_now"] == json!(true) {
+            s.push_str(" (on now)");
+        } else if m["over"] == json!(true) {
+            s.push_str(" (already over)");
+        }
+        s
+    };
+    let meetings = data["meetings"].as_array().cloned().unwrap_or_default();
+    for m in &meetings {
+        out.push(format!("- [{}] {}", m["n"], line(m)));
+    }
+    for b in data["busy"].as_array().into_iter().flatten() {
+        out.push(format!("- {} (their own event, not a meeting: no number)", line(b)));
+    }
+    if meetings.is_empty() && data["busy"].as_array().is_none_or(Vec::is_empty) && data["free"].is_null() {
+        out.push("- No meetings.".to_string());
+    }
+    if let Some(next) = data["next_meeting_after"].as_object() {
+        let next = Value::Object(next.clone());
+        out.push(format!("Their next meeting after that: [{}] {}", next["n"], line(&next)));
+    }
+    for k in ["more", "note"] {
+        if let Some(s) = data[k].as_str() {
+            out.push(s.to_string());
+        }
+    }
+    out.join("\n")
 }
 
 #[cfg(test)]
@@ -1226,6 +1283,22 @@ mod tests {
         assert_eq!(question_args("Anything this afternoon?"), ask("today", "afternoon", ""));
         assert_eq!(question_args("Do I have a call with Priya Shah on 30 October at 10:30?"), ask("30 october", "10:30", "Priya Shah"));
         assert_eq!(question_args("What's on next week?").day, "next week");
+    }
+
+    #[test]
+    fn a_model_without_tools_reads_the_verdict_first_in_words() {
+        let (agenda, z, now) = week();
+        let (r, _) = run_on(&ask("Friday", "3pm", ""), &agenda, z, now);
+        let text = plain(&r["data"]);
+        assert!(text.starts_with("Asked about Fri 30 Oct, 15:00–15:30. The answer: NO, the user is not free then; they have:"), "{text}");
+        assert!(text.contains("- [1] Roadmap planning — Fri 30 Oct, 15:00–16:00, with Priya Shah, on Teams"), "{text}");
+        let (r, _) = run_on(&ask("Thursday", "15:00", ""), &agenda, z, now);
+        assert!(plain(&r["data"]).contains("- Dentist — Thu 29 Oct, 15:00–16:00 (their own event, not a meeting: no number)"));
+        let (r, _) = run_on(&ask("Friday", "11:00", ""), &agenda, z, now);
+        assert!(plain(&r["data"]).contains("The answer: YES, the user is free then"));
+        let (r, _) = run_on(&ask("today", "", ""), &agenda, z, now);
+        let text = plain(&r["data"]);
+        assert!(text.contains("- No meetings.") && text.contains("Their next meeting after that: [1] Standup"), "{text}");
     }
 
     #[test]
