@@ -5,7 +5,8 @@
 //   word or name it fixed is offered for the dictionary, here, by
 //   "Suggest words from your corrections": `askWordSuggestion`);
 // - the summary's words (`saveSummary`); an edited summary is replaced only
-//   after `askReplaceSummary` says so;
+//   after `askReplaceSummary` says so; a name or term swapped in it is
+//   offered for the dictionary at Done (`offerSummaryWords`);
 // - the summary's tasks, ticked in place (`taskToggled` + `setTask`, with
 //   notepadText.js `withTaskMark` for the instant change on screen).
 // The pure parts (`lineRef`, `withLineEdit`, `taskText`, `withTaskMark`,
@@ -54,6 +55,19 @@ export function setTask(noteId, task, origin) {
 /** Save the summary's markdown; resolves to `{ enhancedContent, summaryEditedMs, summaryTs }`. */
 export function saveSummary(id, text, origin) {
   return invoke('note_summary_update', { id, text, origin });
+}
+
+/**
+ * The summary edited from `before` (at Edit) to `after` (at Done): a name
+ * or term it swapped for another ("Shivon" → "Siobhan"; one or two clear
+ * swaps, never a rewrite) is offered for the dictionary in this window, as
+ * a fixed line's is (dictionary/learn.rs `offer_for_summary`). Best-effort.
+ */
+export function offerSummaryWords(before, after) {
+  if (!before?.trim() || !after?.trim() || before === after) return;
+  invoke('summary_word_offer', { before, after })
+    .then((offer) => offer && askWordSuggestion(offer))
+    .catch(() => {});
 }
 
 /**

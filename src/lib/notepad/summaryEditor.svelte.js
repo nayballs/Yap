@@ -3,7 +3,7 @@
 // Generate summary) saves what's left. Kept while another tab is up, and
 // read by the notepad's loads: words typed and not yet saved are never
 // replaced by an older copy (`dirty`).
-import { saveSummary } from '../core/noteEdits.js';
+import { saveSummary, offerSummaryWords } from '../core/noteEdits.js';
 import { toast } from '../ui/toast.svelte.js';
 import { LABEL } from './actions.js';
 
@@ -27,9 +27,13 @@ export class SummaryEditor {
     const note = this.#note();
     if (!note) return false;
     this.draft = note.enhancedContent || '';
+    this.#before = this.draft;
     this.editing = true;
     return true;
   }
+
+  /** The summary at Edit: a word swapped by Done is offered for the dictionary. */
+  #before = '';
 
   /** A keystroke: saved once typing stops. */
   queueSave() {
@@ -66,5 +70,6 @@ export class SummaryEditor {
     if (this.dirty && note) note.enhancedContent = this.draft;
     this.flush();
     this.editing = false;
+    offerSummaryWords(this.#before, this.draft);
   }
 }

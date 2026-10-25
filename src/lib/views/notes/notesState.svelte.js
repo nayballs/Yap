@@ -15,7 +15,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { tick } from 'svelte';
 import { markdownToText } from '../../core/markdown.js';
 import { noteMarkdown, withLineSpeakers, withLineSplice, hasLine, withLineEdit, newSinceSummary } from '../../core/notepadText.js';
-import { saveSummary, askReplaceSummary, SUMMARY_KEPT } from '../../core/noteEdits.js';
+import { saveSummary, askReplaceSummary, SUMMARY_KEPT, offerSummaryWords } from '../../core/noteEdits.js';
 import { toast } from '../../ui/toast.svelte.js';
 import { showSaveError } from '../../notices/saveErrors.js';
 import { summaries, loadSummary, summarise } from '../../stores/meetingSummary.svelte.js';
@@ -541,9 +541,13 @@ export function createNotesState() {
   // "3 new lines since this summary · Update" (not while it records: the
   // summary is written when it stops).
   const newLines = $derived(recordingThisNote ? 0 : newSinceSummary(selected));
+  // The summary as it was at Edit: a word swapped by Done is offered for
+  // the dictionary (noteEdits.js `offerSummaryWords`).
+  let summaryBefore = '';
   async function startSummaryEdit() {
     if (!selected) return;
     summaryDraft = selected.enhancedContent || '';
+    summaryBefore = summaryDraft;
     summaryEditing = true;
     await tick();
     summaryEl?.focus();
@@ -584,6 +588,7 @@ export function createNotesState() {
     if (summaryDirty && selected) selected.enhancedContent = summaryDraft;
     flushSummary();
     summaryEditing = false;
+    offerSummaryWords(summaryBefore, summaryDraft);
   }
 
   // ---- actions: a summary written from the note (note_enhance) ----
