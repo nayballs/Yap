@@ -29,6 +29,10 @@ jobs:
   release:
     permissions:
       contents: write
+      # Build provenance (actions/attest-build-provenance, below): an OIDC
+      # token to sign it with Sigstore, and the right to store it.
+      id-token: write
+      attestations: write
     runs-on: windows-latest
     steps:
       # whisper-rs-sys' cmake build produces paths that exceed Windows MAX_PATH
@@ -170,3 +174,54 @@ jobs:
             "https://uploads.github.com/repos/$env:GITHUB_REPOSITORY/releases/$env:RELEASE_ID/assets?name=Yap-setup.exe" | Out-Null
           if ($LASTEXITCODE -ne 0) { throw "Upload failed ($LASTEXITCODE)" }
           Write-Host "Attached Yap-setup.exe (copy of $($exe.Name))"
+
+      # SHA256SUMS.txt: a checksum of every file on the draft as it was
+      # uploaded — the versioned installer and its updater .sig, latest.json,
+      # Yap-setup.exe — read back from the release itself, so the names and
+      # bytes are the published ones (`sha256sum -c SHA256SUMS.txt` checks a
+      # download). The minisign .sig is untouched: the updater still checks
+      # it, this is for people downloading by hand.
+      - name: Attach SHA256SUMS.txt
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_ID: ${{ steps.tauri.outputs.releaseId }}
+        run: |
+          $release = "repos/$env:GITHUB_REPOSITORY/releases/$env:RELEASE_ID"
+          $assets = gh api "$release/assets?per_page=100" | ConvertFrom-Json
+          if ($LASTEXITCODE -ne 0 -or -not $assets) { throw "Couldn't list the release's files" }
+          foreach ($a in ($assets | Where-Object name -eq 'SHA256SUMS.txt')) {
+            gh api -X DELETE "repos/$env:GITHUB_REPOSITORY/releases/assets/$($a.id)" | Out-Null
+          }
+          New-Item -ItemType Directory -Force -Path release-assets | Out-Null
+          $files = @()
+          foreach ($a in ($assets | Where-Object name -ne 'SHA256SUMS.txt')) {
+            $file = Join-Path release-assets $a.name
+            curl.exe --fail-with-body -sSL `
+              -H "Authorization: Bearer $env:GH_TOKEN" `
+              -H "Accept: application/octet-stream" `
+              -o $file `
+              "https://api.github.com/repos/$env:GITHUB_REPOSITORY/releases/assets/$($a.id)"
+            if ($LASTEXITCODE -ne 0) { throw "Download of $($a.name) failed ($LASTEXITCODE)" }
+            $files += $file
+          }
+          if (-not ($files | Where-Object { $_ -like '*-setup.exe' })) { throw "No installer on the release" }
+          node scripts/sha256sums.mjs SHA256SUMS.txt @files
+          if ($LASTEXITCODE -ne 0) { throw "Checksums failed ($LASTEXITCODE)" }
+          curl.exe --fail-with-body -sS -X POST `
+            -H "Authorization: Bearer $env:GH_TOKEN" `
+            -H "Content-Type: text/plain" `
+            --data-binary "@SHA256SUMS.txt" `
+            "https://uploads.github.com/repos/$env:GITHUB_REPOSITORY/releases/$env:RELEASE_ID/assets?name=SHA256SUMS.txt" | Out-Null
+          if ($LASTEXITCODE -ne 0) { throw "Upload failed ($LASTEXITCODE)" }
+
+      # Build provenance (SLSA, signed with Sigstore through GitHub's OIDC
+      # token): proof the installers were built by this workflow from this
+      # commit of this repo. Anyone can check a download with
+      #   gh attestation verify Yap-setup.exe --repo nayballs/Yap
+      # When Authenticode lands (docs/SIGNING.md), attest the SIGNED
+      # installer: signing changes its bytes.
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@v4
+        with:
+          subject-path: release-assets/*-setup.exe

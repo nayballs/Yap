@@ -21,6 +21,10 @@ installer's bytes**. So the order MUST be:
 3. **Then** compute the minisign updater signature over the *signed* installer +
    write `latest.json`.
 4. Upload the signed installer + `latest.json` to the release.
+5. **Then** write `SHA256SUMS.txt` and the build provenance attestation over the
+   *signed* installer (both workflows already do these two last, over what was
+   uploaded: docs/architecture/updates-and-release.md, "Checksums and build
+   provenance").
 
 If we sign after generating `latest.json` (the naive "sign at the end" step), the
 minisign hash won't match and **auto-update breaks for existing users.** SignPath
@@ -100,6 +104,8 @@ The plan for `.github/workflows/release.yml`, reordered per the updater section:
    # then assemble latest.json with the resulting .sig + the release URL
    ```
 4. Create the GitHub release and upload the **signed** installer + `latest.json`.
+5. Keep the "Attach SHA256SUMS.txt" and "Attest build provenance" steps after the
+   upload, so the checksums and the attestation are of the signed installer.
 
 The existing inline-updater path (tauri-action with `TAURI_SIGNING_PRIVATE_KEY`)
 stays as the fallback until this is proven on a test tag.
