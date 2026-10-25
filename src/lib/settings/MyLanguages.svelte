@@ -418,7 +418,8 @@
   }
   .search {
     position: relative;
-    width: min(340px, 100%);
+    width: 340px;
+    max-width: 100%;
   }
   .search input {
     width: 100%;

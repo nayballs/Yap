@@ -218,10 +218,11 @@ pub fn consider(app: &AppHandle, heard: &Heard, secs: f32, mine: &[String], on: 
     let rec = record();
     if let Err(why) = verdict(heard, secs, mine, on, &rec, now_ms()) {
         // Every dictation in one of yours is no news; another language is.
-        if !on || mine.is_empty() || mine.contains(&heard.top) {
-            tracing::debug!(language = %heard.top, why, "Language nudge: not offered");
+        let code = heard.top.as_str();
+        if !on || mine.is_empty() || mine.iter().any(|m| m == code) {
+            tracing::debug!(language = %code, why, "Language nudge: not offered");
         } else {
-            tracing::info!(language = %heard.top, why, "Language nudge: not offered");
+            tracing::info!(language = %code, why, "Language nudge: not offered");
         }
         return;
     }
@@ -344,7 +345,8 @@ pub fn respond(app: &AppHandle, id: u64, answer: &str) -> Result<bool, String> {
         }
         "later" | "never" => {
             update_record(|r| answered(r, &open.code, answer));
-            tracing::info!(language = %open.code, answer, "Language nudge: turned down");
+            let never = answer == "never";
+            tracing::info!(language = %open.code, never, "Language nudge: turned down");
             Ok(false)
         }
         _ => Ok(false),

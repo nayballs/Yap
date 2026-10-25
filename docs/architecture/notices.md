@@ -22,7 +22,7 @@ How loud Yap may be: the notice policy (one place, one at a time, held while dic
   assistantNoModel, meetingRecovery ("Yap
   closed during a meeting", held while dictating or recording, waiting as
   long as it takes; `meetings/meeting_audio.rs`), and the Voice Assistant's
-  answer `assistant` (never held, never stale) — > Info > Tip — hint, word-suggestion), held
+  answer `assistant` (never held, never stale) — > Info > Tip — hint, word-suggestion, language-nudge — "You spoke French · Add it to My languages?", `dictation/languages/nudge.rs`, held over a dictation, dropped unseen after a minute; its "language-added" an Info of 10 s), held
   while dictating (+ `SETTLE_MS` 1.5 s, and while onboarding is on screen)
   or a meeting records, a cooldown for the same text (micBlocked and
   meeting-notice 10 min), how long it may wait unseen (tips 10 s, a word

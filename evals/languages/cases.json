@@ -87,8 +87,8 @@
     "kind": "translate",
     "from": "en",
     "to": "fr",
-    "text": "uh what time does the train to Brighton leave tomorrow morning",
-    "expect": { "keeps": ["Brighton", "?"], "contains_any": ["train", "demain", "heure"], "not_contains": ["uh", "tomorrow", "the train leaves", "le train part à 8"], "min_ratio": 0.6, "max_ratio": 1.8 }
+    "text": "uh what time does the train to Port Ellery leave tomorrow morning",
+    "expect": { "keeps": ["Port Ellery", "?"], "contains_any": ["train", "demain", "heure"], "not_contains": ["uh", "tomorrow", "the train leaves", "le train part à 8"], "min_ratio": 0.6, "max_ratio": 1.8 }
   },
   {
     "name": "translate-fr-en-room",
