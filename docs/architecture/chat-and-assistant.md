@@ -22,7 +22,12 @@ The AI Chat surface (conversations, the tool-calling loop and its note tools) an
   the pages use as its id (`chat:<conversation>:<index>`). A web answer keeps
   its sources (`ChatMessage.sources` = `Source {n, title, url, site}`,
   numbered as it cites them; `append_sourced`; only written when there are
-  some). **Every answer is checked before it's shown and saved**
+  some). An answer asked across the meetings keeps its passages the same way
+  (`Source` with `note`, `field`, `line`, `ts`, `quote`: the moment its pill
+  opens), and the conversation keeps `scope: "meetings"` (`set_scope` /
+  `scope_of`), so its follow-ups are asked across the meetings too — the
+  passages, the citation rules and checks are [search.md](./search.md#ask-across-meetings-in-chat).
+  **Every answer is checked before it's shown and saved**
   (`checked_answer`, in `chat_turn`, every model; each fix logged and, in a
   model evaluation, counted — `eval::post_fix`): a sources list or "(Yap
   searched the web for this answer…)" note the model wrote itself goes
@@ -539,7 +544,11 @@ screenshots and their prompts, +, the box, the mic, Send / ■, `ModelChip`).
   plain RAG chat; tool-activity chips render in the thread above the answer
   and are kept with it in chats.json; a question from
   the Meetings view's Ask bar arrives through `chatRequest` and is sent with
-  `scope: 'meetings'`). Answers render as markdown — headings, lists,
+  `scope: 'meetings'`, as is one in a chat started with **Ask across your
+  meetings** on the empty thread; such a chat says "Asking across your
+  meetings and notes" over its thread, its `[1]` pills and its **From your
+  meetings** row open the cited moment in Notes — `chatState.openSource` →
+  ControlPanel's `openNoteAt`; [search.md](./search.md)). Answers render as markdown — headings, lists,
   tables, code, quotes, links — through `renderMarkdown` (`markdown.js`:
   markdown-it + DOMPurify, never the model's own HTML; see
   [notes.md](./notes.md#the-markdown-renderer)). **A web answer** (`web.rs`): its `[1]` citations are
@@ -696,4 +705,5 @@ screenshots and their prompts, +, the box, the mic, Send / ■, `ModelChip`).
   screenshot", Send waiting. A question's screenshots show in its bubble
   (click: large) or "Screenshot removed after 30 days". + → "Take a
   screenshot" (`snip_start {origin: "chat"}`).
-  No semantic vectors yet (ROADMAP step 3).
+  Search by meaning — local embeddings, Ask across meetings with cited
+  passages — is [search.md](./search.md) (2026-10-25; ROADMAP step 3).

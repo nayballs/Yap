@@ -189,13 +189,27 @@ pub(crate) async fn chat_turn(
             &own_stop
         }
     };
+    // A conversation asked across the meetings stays so: its follow-ups too
+    // (`chats::Conversation::scope`). A scope the caller names wins.
+    let kept_scope = conversation_id.map(crate::chat::chats::scope_of).unwrap_or_default();
+    let scope: Option<&str> = scope.or((!kept_scope.is_empty()).then_some(kept_scope.as_str()));
+    let meetings = scope == Some("meetings");
     let cfg = config::load();
     if let Some(plan) = crate::apps::plan_for(&text, &cfg, conversation_id).await {
         return app_turn(conversation_id, &text, by_voice, asked, plan, stop).await;
     }
-    crate::ai::ai_model::wake_on_device(&cfg).await?;
-    let (base_url, api_key, model, provider, persona, disable_thinking) =
-        resolve_chat_endpoint(&cfg)?;
+    let endpoint = match crate::ai::ai_model::wake_on_device(&cfg).await {
+        Ok(_) => resolve_chat_endpoint(&cfg),
+        Err(e) => Err(e),
+    };
+    let (base_url, api_key, model, provider, persona, disable_thinking) = match endpoint {
+        Ok(e) => e,
+        // Asked across the meetings with no model to answer: the passages
+        // that match, themselves.
+        // (Boxed, as the search below: the turn's own future stays small.)
+        Err(why) if meetings => return Box::pin(passages_turn(conversation_id, &text, by_voice, asked, stop, &why)).await,
+        Err(why) => return Err(why),
+    };
     // The on-device model is busy for the whole turn — between its tool
     // steps too, while a web search or a page read runs — so a context
     // restart or a runtime swap never cuts the answer off.
@@ -211,6 +225,9 @@ pub(crate) async fn chat_turn(
 
     // Conversation bookkeeping (create on first message, OpenWhispr-style).
     let conv = turn_conversation(conversation_id, &text);
+    if meetings && conv.scope.is_empty() {
+        crate::chat::chats::set_scope(conv.id, "meetings");
+    }
     // The model answers this one: Yap's own question about apps has lapsed.
     crate::apps::moved_on(Some(conv.id));
     // The last 19 (+ the new user turn ≈ their slice(-20)); a spoken
@@ -349,24 +366,34 @@ pub(crate) async fn chat_turn(
     } else {
         crate::chat::tools::FirstStep::Model
     };
-    // Asked from the Meetings view: grounded in the latest meetings and the
-    // meeting notes that match (calendar.rs).
-    if scope == Some("meetings") {
-        let meetings = crate::calendar::meetings_context(&text);
+    // Asked across the meetings (the Meetings view's Ask bar, a conversation
+    // started there): the passages that match, found on this PC — by
+    // meaning and keywords, within the dates the question names — numbered
+    // for the model to cite, each a source that opens its meeting at the
+    // line (search/ask.rs).
+    let mut passages: Vec<crate::chat::chats::Source> = Vec::new();
+    let mut search_chip = None;
+    let mut asked_across = None;
+    if meetings {
+        let found = Box::pin(crate::search::ask::find(&text, crate::search::ask::ASK_PASSAGES)).await;
+        passages = crate::search::ask::sources(&found);
+        let chip = crate::search::ask::chip(&found);
+        if let Some(w) = watcher {
+            w.send(crate::chat::stream::Event::Chips { chips: vec![chip.clone()], sources: passages.clone(), web: false });
+        }
+        search_chip = Some(chip);
+        system.push_str("\n\n");
+        system.push_str(&crate::search::ask::instructions(in_message));
+        let block = crate::search::ask::context(&found);
+        asked_across = Some(found);
         if in_message {
-            system.push_str("\n\nThe user is asking about their meetings: the context of their message gives their most recent meetings (newest first) and the meeting notes that match it. Answer from them, say which meeting an answer comes from, and say so when they don't cover the question.");
-            context.push(if meetings.is_empty() {
-                "No meetings or meeting notes match this question.".to_string()
-            } else {
-                format!("Their most recent meetings and the meeting notes that match:\n\n{meetings}")
-            });
-        } else if !meetings.is_empty() {
-            system.push_str(&format!(
-                "\n\nThe user is asking about their meetings. Below are their most recent meetings (newest first) and the meeting notes that match the question. Answer from them, say which meeting an answer comes from, and say so when they don't cover the question.\n\n{meetings}"
-            ));
+            context.push(block);
+        } else {
+            system.push_str("\n\n");
+            system.push_str(&block);
         }
     }
-    let rag = if scope == Some("meetings") { String::new() } else { rag_context(&text, in_message) };
+    let rag = if meetings { String::new() } else { rag_context(&text, in_message) };
     if !rag.is_empty() {
         if in_message {
             context.push(format!("{RAG_LEAD}\n\n{rag}"));
@@ -546,12 +573,49 @@ pub(crate) async fn chat_turn(
     }
     // Every model's answer, checked before it's shown: no sources list or
     // "Yap searched…" note of its own, no search claimed that didn't
-    // happen, no "[1]" with nothing (or another question's pages) behind it.
-    let (mut reply, fixed) = crate::chat::chats::checked_answer(&reply, &text, looked, &conv.messages, &sources);
+    // happen, no "[1]" with nothing (or another question's pages) behind it
+    // — asked across the meetings, a number that's none of this turn's
+    // passages.
+    let (mut reply, fixed) = if meetings {
+        let (r, mut f) = crate::chat::chats::checked_answer(&reply, &text, looked, &[], &passages);
+        let only_these: Vec<usize> = passages.iter().map(|s| s.n).collect();
+        let stripped = crate::chat::chats::strip_unsourced_citations(&r, &only_these);
+        if stripped != r && !f.contains(&"stripped_citations") {
+            f.push("stripped_citations");
+        }
+        (stripped, f)
+    } else {
+        crate::chat::chats::checked_answer(&reply, &text, looked, &conv.messages, &sources)
+    };
     for f in fixed {
         tracing::info!(fix = f, "Chat: Yap fixed the model's answer");
         crate::ai::eval::post_fix(f);
     }
+    // Asked across the meetings: the passages it cites are its sources (none
+    // cited: the first few, to check it against), and an answer that cites
+    // none of them says so.
+    let (sources, tools_used) = if meetings {
+        // A statement plainly from one passage that the model left uncited
+        // ("Passage 2", or only the meeting's name): Yap cites it.
+        if let Some(found) = &asked_across {
+            let (cited, added) = crate::search::ask::cite_missing(&reply, &found.passages);
+            if added > 0 {
+                tracing::info!(added, "Chat: Yap put in citations the answer left out");
+                crate::ai::eval::post_fix("cited_by_yap");
+                reply = cited;
+            }
+        }
+        if crate::search::ask::needs_uncited_note(&reply, passages.len()) {
+            tracing::info!("Chat: the answer cited none of the passages; Yap says so under it");
+            crate::ai::eval::post_fix("uncited_answer");
+            reply = format!("{}\n\n{}", reply.trim_end(), crate::search::ask::UNCITED_NOTE);
+        }
+        let mut chips: Vec<String> = search_chip.into_iter().collect();
+        chips.extend(tools_used);
+        (crate::search::ask::shown(&reply, &passages), chips)
+    } else {
+        (sources, tools_used)
+    };
     // A price question that searched: no offer to look for prices where the
     // person is — Yap looked (and, finding only another country's, looked
     // again).
@@ -833,6 +897,34 @@ fn turn_conversation(conversation_id: Option<u64>, text: &str) -> crate::chat::c
             crate::chat::chats::create(&title)
         }
     }
+}
+
+/// A question asked across the meetings with no AI model to answer it (none
+/// set up, or the on-device one won't start: `why`): Yap answers with the
+/// passages that match, each cited so its pill opens the moment
+/// (`search::ask::passages_answer`). No model, so none is named.
+async fn passages_turn(
+    conversation_id: Option<u64>,
+    text: &str,
+    by_voice: bool,
+    asked: impl FnOnce(u64, usize) + Send,
+    stop: &crate::chat::stream::Stoppable,
+    why: &str,
+) -> Result<ChatTurn, String> {
+    tracing::info!(reason = %why.chars().take(80).collect::<String>(), "Chat: no model to answer across the meetings; showing the passages");
+    let conv = turn_conversation(conversation_id, text);
+    if conv.scope.is_empty() {
+        crate::chat::chats::set_scope(conv.id, "meetings");
+    }
+    let user_index = crate::chat::chats::append(conv.id, "user", text, &[], None, by_voice)?;
+    stop.answers(conv.id);
+    asked(conv.id, user_index);
+    let found = crate::search::ask::find(text, crate::search::ask::ASK_PASSAGES).await;
+    let reply = crate::search::ask::passages_answer(&found);
+    let sources = crate::search::ask::sources(&found);
+    let tools_used = vec![crate::search::ask::chip(&found)];
+    let index = crate::chat::chats::append_message(conv.id, "assistant", &reply, &tools_used, None, false, &sources, false)?;
+    Ok(ChatTurn { conversation_id: conv.id, user_index, index, reply, tools_used, model: None, sources, stopped: false })
 }
 
 /// A turn Yap answers itself (`apps.rs`): the request saved like any

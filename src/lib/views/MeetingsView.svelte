@@ -29,8 +29,10 @@
   import { copyText } from '../core/itemMenus.js';
   import { noteMarkdown } from '../core/notepadText.js';
 
-  // `onnavigate(view)` switches the main window's view; `onopensettings(section)`.
-  let { onnavigate = () => {}, onopensettings = () => {} } = $props();
+  // `onnavigate(view)` switches the main window's view; `onopensettings(section)`;
+  // `onopennote({id, line, ts, field})` opens a moment of a meeting or note
+  // in Notes at its line (ControlPanel).
+  let { onnavigate = () => {}, onopensettings = () => {}, onopennote = null } = $props();
 
   const PAGE = 3; // Wispr: three at a time, "Show more"
   const EARLY = 10 * 60; // actions from 10 minutes before the start
@@ -121,13 +123,49 @@
     }
   }
 
+  // The moments that match the search (search/ask.rs: meetings and notes
+  // cut into passages, found by meaning when "Search my meetings by
+  // meaning" is on, else by their words; dates in the query understood):
+  // { moments, semantic, range }. Each opens its meeting at the line.
+  let moments = $state({ moments: [], semantic: false, range: null, query: '' });
+  let momentsAsked = 0;
+  async function refreshMoments() {
+    const q = query.trim();
+    const mine = ++momentsAsked;
+    if (q.length < 3) {
+      moments = { moments: [], semantic: false, range: null, query: '' };
+      return;
+    }
+    try {
+      const r = await invoke('search_moments', { query: q, limit: 5 });
+      if (mine === momentsAsked) moments = { ...r, query: q };
+    } catch {
+      if (mine === momentsAsked) moments = { moments: [], semantic: false, range: null, query: q };
+    }
+  }
+
+  /** A moment's line, a little of it ("…" past ~180 characters), without the
+   *  speaker's "Priya Shah: " the line above already shows. */
+  const momentLine = (m) => {
+    let s = (m.quote || m.text || '').replace(/\s+/g, ' ').trim();
+    if (m.speaker && s.startsWith(`${m.speaker}: `)) s = s.slice(m.speaker.length + 2);
+    return s.length > 180 ? `${s.slice(0, 180).trimEnd()}…` : s;
+  };
+  /** "Sun 25 Oct · 12:40 · Priya" */
+  const momentWhere = (m) => [m.when.split(',')[0].replace(/ \d{4}$/, ''), m.at, m.speaker || (m.field === 'summary' ? 'summary' : m.kind === 'note' ? 'note' : '')].filter(Boolean).join(' · ');
+
+  function openMoment(m) {
+    onopennote?.({ id: m.noteId, line: m.line, ts: m.ts, field: m.field });
+  }
+
   let queryTimer = null;
   function onQuery() {
     clearTimeout(queryTimer);
     queryTimer = setTimeout(() => {
       pastShown = 5;
       refreshPast();
-    }, 200);
+      refreshMoments();
+    }, 250);
   }
 
   function openNote(id) {
@@ -484,8 +522,30 @@
             <input type="search" placeholder="Search meetings" aria-label="Search meetings" bind:value={query} oninput={onQuery} />
           </label>
         </div>
+        {#if moments.moments.length && moments.query === query.trim()}
+          <!-- The moments that answer the search, each opening at its line. -->
+          <div class="moments" role="region" aria-label="Moments that match">
+            <div class="momcap">
+              Moments that match{moments.semantic ? ' · by meaning' : ''}{moments.range ? ` · ${moments.range}` : ''}
+            </div>
+            <div class="momlist">
+              {#each moments.moments as m (`${m.noteId}:${m.field}:${m.line}`)}
+                <button class="moment" onclick={() => openMoment(m)} title="Open it at this moment">
+                  <span class="momhead">
+                    <span class="momtitle">{m.title}</span>
+                    <span class="momwhere">{momentWhere(m)}</span>
+                  </span>
+                  <span class="momline">{momentLine(m)}</span>
+                </button>
+              {/each}
+            </div>
+          </div>
+        {/if}
         {#if past.length === 0}
-          <p class="quiet">{query.trim() ? 'No meeting notes match that.' : 'Your meeting notes will appear here.'}</p>
+          <!-- The moments above found it by meaning: no "nothing matches" under them. -->
+          {#if !(query.trim() && moments.moments.length && moments.query === query.trim())}
+            <p class="quiet">{query.trim() ? 'No meeting notes match that.' : 'Your meeting notes will appear here.'}</p>
+          {/if}
         {:else}
           {#each pastGroups as g (g.label)}
             <div class="pday">{g.label}</div>
@@ -558,6 +618,71 @@
 </div>
 
 <style>
+  /* The moments a search found (search/ask.rs), over the notes it matches. */
+  .moments {
+    margin: 4px 0 18px;
+    padding: 10px 12px;
+    border: 1px solid var(--yap-border-subtle);
+    border-radius: var(--yap-r);
+    background: var(--yap-s1);
+  }
+  .momcap {
+    margin-bottom: 6px;
+    font-size: 10.5px;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--yap-muted-55);
+  }
+  .momlist {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+  .moment {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    width: 100%;
+    padding: 6px 8px;
+    border: none;
+    border-radius: var(--yap-r-sm);
+    background: none;
+    color: var(--yap-fg);
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+  }
+  .moment:hover {
+    background: var(--yap-s2);
+  }
+  .moment:focus-visible {
+    outline: 2px solid var(--yap-primary-line);
+    outline-offset: 1px;
+  }
+  .momhead {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    min-width: 0;
+  }
+  .momtitle {
+    font-size: 12.5px;
+    font-weight: 600;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .momwhere {
+    flex: 0 0 auto;
+    font-size: 11px;
+    color: var(--yap-muted);
+  }
+  .momline {
+    font-size: 12px;
+    line-height: 1.45;
+    color: var(--yap-fg-80);
+  }
   .meetings {
     flex: 1 1 auto;
     min-height: 0;

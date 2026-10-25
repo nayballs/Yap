@@ -270,8 +270,10 @@ re-exported by the module, except `local_llm`'s, which callers name
     is recording into — that's `meeting_delete` — and tells every window,
     `yap-note-deleted`) + `note_enhance` (`run_enhance`)/`note_ask`/`note_export`.
   - `chat/commands.rs` — chats CRUD (incl. `chat_rename`) + `chat_send` (RAG +
-    tool loop; `scope: "meetings"` = the Meetings view's Ask bar, grounded in
-    `calendar::meetings_context`; `voice` = the question was dictated; returns
+    tool loop; `scope: "meetings"` = asked across the meetings — the Meetings
+    view's Ask bar, kept with the conversation — answered from the passages
+    `search::ask` finds, cited ([search.md](./search.md)); `voice` = the
+    question was dictated; returns
     the two messages' ids and `speak`, `tts::auto_speak`); its turn is
     `chat/turn.rs`'s `chat_turn` (shared with the Voice Assistant).
   - `meetings/commands.rs` — `meeting_start` (then `calendar::on_meeting_started`)/

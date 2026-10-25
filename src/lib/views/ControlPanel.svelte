@@ -154,6 +154,21 @@
     }
   }
 
+  // A moment of a meeting or note (a passage an answer cites, a search
+  // result in the Meetings view: search/ask.rs) opened in Notes — a
+  // transcript at its line, else the tab it's on.
+  function openNoteAt({ id, line = null, ts = null, field = '' }) {
+    const transcript = field === 'transcript' || (!field && line != null);
+    noteRequest.pending = {
+      id,
+      stop: false,
+      line: transcript ? line : null,
+      ts: transcript ? ts : null,
+      tab: field === 'summary' ? 'enhanced' : field === 'content' ? 'raw' : null,
+    };
+    activeView = 'notes';
+  }
+
   function onOverlayKeydown(e) {
     // Esc closes a right-click menu or the confirm dialog first (ui/contextMenu.svelte.js).
     if (e.key === 'Escape' && (e.defaultPrevented || menuOrDialogOpen())) return;
@@ -388,11 +403,11 @@
     {:else if activeView === 'dictionary'}
       <DictionaryView />
     {:else if activeView === 'chat'}
-      <ChatView onopensettings={openSettings} />
+      <ChatView onopensettings={openSettings} onopennote={openNoteAt} />
     {:else if activeView === 'notes'}
       <NotesView onopensettings={openSettings} />
     {:else if activeView === 'meetings'}
-      <MeetingsView onopensettings={openSettings} onnavigate={(v) => (activeView = v)} />
+      <MeetingsView onopensettings={openSettings} onnavigate={(v) => (activeView = v)} onopennote={openNoteAt} />
     {:else if activeView === 'tasks'}
       <TasksView
         onopennote={(id, line) => {

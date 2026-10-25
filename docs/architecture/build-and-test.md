@@ -291,7 +291,10 @@ shell waiting for it.
   from the suite's local server — `YAP_TTS_SOURCES` —, a simulated clock, no
   audio device; what would have been said in `tts_e2e_spoken`), no on-device
   model downloaded but the suite's small fakes from 127.0.0.1
-  (`YAP_LLM_SOURCES`, `e2e/support/local-llm.js`), `e2e_chat_dictation {text}` (a
+  (`YAP_LLM_SOURCES`, `e2e/support/local-llm.js`; meeting search's model
+  under the key `embeddinggemma`), no embedding server started (`search/embedder.rs`:
+  the debug-only `YAP_E2E_EMBED_URL` points at `e2e/support/fake-embed.js`;
+  unset, a test run's search is keywords only), `e2e_chat_dictation {text}` (a
   question dictated into the Chat view, no mic needed), `e2e_assistant_ask
   {text, listenMs}` (a question to the Voice Assistant, as its shortcut
   asks it, no mic needed), no app ever launched (`apps.rs`: "open Teams"

@@ -208,7 +208,7 @@ impl Turn {
             return s.n;
         }
         let n = self.sources.len() + 1;
-        self.sources.push(Source { n, title: tidy(title, 120), url: url.to_string(), site: source_site(title, url) });
+        self.sources.push(Source { n, title: tidy(title, 120), url: url.to_string(), site: source_site(title, url), ..Default::default() });
         n
     }
 
@@ -464,7 +464,7 @@ mod tests {
         assert_eq!(citations("Gale is on the beach [1]. He can be recruited [2][3]."), [1, 2, 3]);
         assert_eq!(citations("See [1, 4] and [2–3]."), [1, 4, 2, 3]);
         assert_eq!(citations("A [link](https://x.y) and [1](https://a.b) aren't citations."), Vec::<usize>::new());
-        let sources: Vec<Source> = (1..=3).map(|n| Source { n, title: format!("T{n}"), url: format!("https://e{n}.com/"), site: format!("e{n}.com") }).collect();
+        let sources: Vec<Source> = (1..=3).map(|n| Source { n, title: format!("T{n}"), url: format!("https://e{n}.com/"), site: format!("e{n}.com"), ..Default::default() }).collect();
         assert_eq!(cited_sources(&sources, "Fact [2].").iter().map(|s| s.n).collect::<Vec<_>>(), [2]);
         assert_eq!(cited_sources(&sources, "No citations.").len(), 3);
     }

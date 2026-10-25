@@ -24,6 +24,7 @@ mod notes;
 mod notices;
 mod pasting;
 mod privacy;
+mod search;
 mod shell;
 mod snip;
 mod speakers;
@@ -60,6 +61,8 @@ pub struct AppState {
 pub(crate) fn shutdown_cleanup() {
     voice::tts::stop();
     ai::local_llm::shutdown();
+    // Meeting search's model (search/embedder.rs) on the same engine.
+    search::shutdown();
     integrations::bridge::stop();
     dictation::mute::restore_all();
     // The week of network receipts, as it stands (net.rs).
@@ -421,6 +424,12 @@ pub fn run() {
             calendar::calendar_brief,
             calendar::calendar_brief_for_note,
             calendar::calendar_brief_open,
+            search::commands::search_status,
+            search::commands::search_install,
+            search::commands::search_set_enabled,
+            search::commands::search_rebuild,
+            search::commands::search_delete,
+            search::commands::search_moments,
             bar::bar_status,
             bar::bar_regions,
             bar::bar_pointer_left,
@@ -1048,6 +1057,10 @@ pub fn run() {
             // them, and their titles and attendees for meeting notes (talks
             // to Google or the person's iCal link only; calendar.rs).
             calendar::init(&handle);
+
+            // Meeting search: every meeting and note read by the search
+            // model in the background, when it's on (search.rs).
+            search::init(&handle);
 
             // e2e test runs: announce test mode, quit when stdin closes.
             shell::e2e::start(&handle);

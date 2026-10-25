@@ -325,7 +325,7 @@ pub fn grounded_sources(hits: &[Hit], budget: usize) -> (Vec<Source>, String) {
         };
         let date = h.published.as_deref().map(|d| format!(" ({d})")).unwrap_or_default();
         block.push_str(&format!("[{n}] {} — {}{date}\n{}\n\n", h.title, site_of(&h.url), text.trim()));
-        sources.push(Source { n, title: tidy(&h.title, 120), url: h.url.clone(), site: site_of(&h.url) });
+        sources.push(Source { n, title: tidy(&h.title, 120), url: h.url.clone(), site: site_of(&h.url), ..Default::default() });
     }
     (sources, block.trim_end().to_string())
 }

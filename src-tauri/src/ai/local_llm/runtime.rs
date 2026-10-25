@@ -390,7 +390,7 @@ fn meeting_busy() -> bool {
 
 /// The runtime's size (the pinned download's): what a download and a swap
 /// need on the disk.
-const RUNTIME_BYTES: u64 = 368_094_430;
+pub const RUNTIME_BYTES: u64 = 368_094_430;
 
 /// Free space an upgrade wants before it downloads: the new runtime beside
 /// the old one (and the old one kept until the new one has started), plus
@@ -646,6 +646,10 @@ pub async fn upgrade_runtime(app: &AppHandle) -> UpgradeStep {
         if was_running {
             stop();
         }
+        // Meeting search's model runs on the same engine: stopped too (it
+        // starts again on the new one when it's next needed, and not while
+        // this restart is under way).
+        crate::search::embedder::stop();
         match swap_in(&dir, RUNTIME_VERSION, &sha) {
             Ok(()) => {
                 tracing::info!(version = RUNTIME_VERSION, restart = was_running, "llamafile upgrade: the new runtime is in place");

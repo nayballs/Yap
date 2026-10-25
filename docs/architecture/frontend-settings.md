@@ -488,7 +488,7 @@ there can move margins: compare a page before and after.
   notes): **What leaves this PC** — a table by feature as Yap is set up now
   (your voice, recent dictation audio, AI cleanup, names on screen — read on this PC for each
   dictation, or with cleanup on a cloud provider the names a dictation seems
-  to contain go there with it —, Chat and the Voice Assistant, screenshots (kept on this PC; one goes to the AI model only with a question you send), About you, memory, web search,
+  to contain go there with it —, Chat and the Voice Assistant, screenshots (kept on this PC; one goes to the AI model only with a question you send), About you, memory, meeting search (searched on this PC, by meaning once its model is here), web search,
   spoken replies, AI apps, calendar, account), each row linking to its
   setting. **Network connections** (`#settings-connections`): a link row
   ("12 today" · "3 left this PC today, 9 stayed on it") one level down to
@@ -501,7 +501,13 @@ there can move margins: compare a page before and after.
   (`keepRecentAudio`, `dictation/recent_audio.rs`: the last 24 hours, on this PC, to run
   a dictation again; greyed while history is off) and Clear recent audio…
   ("3 dictations · 1.2 MB" from `recent_audio_status`; asks first; history
-  stays). **Chat screenshots** (`#settings-chat-images`): "Keep chat
+  stays). **Search my meetings by meaning** (`#settings-meeting-search`,
+  `settings/MeetingSearchSettings.svelte`; [search.md](./search.md)): the
+  switch (`searchByMeaning`, disabled until the model is here), Search model
+  (Download with its size — the engine's too when it isn't here — and its
+  progress; then name · size · where it runs, the licence link) and Search
+  index (passages · notes · size, or what it's doing; Rebuild, Delete… asked
+  first), from `search_status` and `yap-search-status`. **Chat screenshots** (`#settings-chat-images`): "Keep chat
   screenshots" (`chatImageDays`: 7 / 30 / 90 days / Forever, `chat-images`;
   "4 screenshots · 1.2 MB" from `chat_images_usage`; Snip to Chat, [snip.md](./snip.md)).
   **Local API** (`#settings-local-api`): `bridgeEnabled` (the

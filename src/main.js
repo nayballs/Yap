@@ -21,6 +21,12 @@ import './app.css';
 // lib/core/markdown.js) open in the default browser. Left alone, a click would
 // navigate Yap's own window away from the app.
 document.addEventListener('click', (e) => {
+  // A passage pill (an answer asked across meetings, core/markdown.js): the
+  // view opens it in Yap (ChatMessage.svelte); it never navigates the page.
+  if (e.target instanceof Element && e.target.closest('a.md-passage')) {
+    e.preventDefault();
+    return;
+  }
   const a = e.target instanceof Element ? e.target.closest('a.md-link') : null;
   if (!a) return;
   e.preventDefault();

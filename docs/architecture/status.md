@@ -612,10 +612,32 @@ mixed-DPI monitors (the maintainer's two are both 100 %), OCR quality on
 real screenshots beyond the fixture (small print, other languages),
 picking windows on a third monitor or a rotated one.
 
+**Meeting search and Ask across meetings** (2026-10-25,
+[search.md](./search.md)): every meeting and note cut into passages and read
+by EmbeddingGemma-300M on Yap's own llamafile (downloaded on demand from
+Settings → Privacy & data, 318 MiB), the vectors kept in
+`search-index/` in the background and never in a dictation's way; hybrid
+search (BM25 + meaning, weighted RRF, the question's dates and the voices it
+names); the Meetings view's moments; Chat's Ask across meetings citing
+passages as pills that open the meeting at the line, kept for follow-ups,
+with the passages themselves when no model is set up. **Measured**
+(`yap.exe eval --search`, 33 questions over a made-up team's meetings):
+recall@1 0.82 / @3 1.0 hybrid against 0.30 / 0.67 for Chat's whole-note
+keyword search; on an RTX 5070 Ti 100 passages/s and a question in ~8 ms,
+on its processor 14 passages/s and ~14 ms; answers 33/35 on Qwen3.5-4B,
+4/5 on Groq gpt-oss-20b. Unit-tested (passages, store, dates, ranking, the
+checks) and e2e-tested against a stand-in embedding server
+(`e2e/meeting-search.spec.js`, 5 tests). **Not yet tried**: a real year of
+meetings (thousands of passages) on a laptop's processor, the app's own
+download from Hugging Face (tested against a stand-in), a dictation started
+mid-batch against the real server (the batch is dropped by the meeting
+digests' `unless_busy`, not exercised here end to end), and other languages'
+meetings (the model reads 100+; the keyword half's stemming is English).
+
 ## Not yet done
 
-Not yet done: the AI Chat surface has no semantic-vector
-search (keyword-RAG only; its answers stream since 2026-10-22 —
+Not yet done: the AI Chat surface searches by meaning only when asked
+across the meetings (search.md; elsewhere keyword-RAG; its answers stream since 2026-10-22 —
 unit- and e2e-tested against stand-ins, measured on the on-device
 Qwen3.5-4B and Groq, not yet through a real Anthropic, Gemini, OpenAI or
 OpenRouter stream, whose shapes are taken from their docs), no calendar tools and no conversation

@@ -896,6 +896,20 @@ pub fn all() -> Vec<Note> {
     with_notes(|notes| notes.clone())
 }
 
+/// A cheap fingerprint of every note: a hash of each one's id, last change
+/// and length — whether anything changed since the last look, without a
+/// copy of the notes (meeting search's index, `search/index.rs`).
+pub fn stamp() -> u64 {
+    use std::hash::{Hash, Hasher};
+    with_notes(|notes| {
+        let mut h = std::collections::hash_map::DefaultHasher::new();
+        for n in notes.iter() {
+            (n.id, n.updated_ts, n.title.len(), n.content.len(), n.enhanced_content.len(), n.transcript.len()).hash(&mut h);
+        }
+        h.finish()
+    })
+}
+
 pub fn create(title: &str, content: &str, source: &str, folder: &str) -> Note {
     with_store(|store| {
         let id = store.notes.iter().map(|n| n.id).max().unwrap_or(0) + 1;

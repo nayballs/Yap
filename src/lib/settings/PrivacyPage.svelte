@@ -20,6 +20,7 @@
   import Select from '../ui/Select.svelte';
   import LinkRow from '../ui/LinkRow.svelte';
   import ConnectionsView from './ConnectionsView.svelte';
+  import MeetingSearchSettings from './MeetingSearchSettings.svelte';
   import { askConfirm } from '../ui/contextMenu.svelte.js';
   import { toast } from '../ui/toast.svelte.js';
   import { showSaveError } from '../notices/saveErrors.js';
@@ -163,6 +164,15 @@
       what: 'Chat and the Voice Assistant',
       where: chat.provider ? goes(chat.provider, 'Your questions, and the notes they need,') : 'Not set up',
       page: 'cleanup#chat',
+    },
+    {
+      // search/: read and searched on this PC; an answer's passages go with
+      // the question to Chat's model (the row above).
+      what: 'Meeting search',
+      where: cfg.searchByMeaning
+        ? 'Read and searched by meaning on this PC. Only the passages a question needs go with it to Chat’s model'
+        : 'Searched on this PC by their words. Only the passages a question needs go with it to Chat’s model',
+      page: 'privacy#meeting-search',
     },
     {
       // snip.rs: kept on this PC; one leaves only inside a question you send.
@@ -340,6 +350,8 @@
     <Button variant="secondary" size="sm" disabled={!audio?.count} onclick={clearAudio}>Clear audio…</Button>
   </Row>
 </Group>
+
+<MeetingSearchSettings {cfg} />
 
 <Group title="Chat screenshots" id="settings-chat-images">
   <Row

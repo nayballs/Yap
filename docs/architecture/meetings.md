@@ -575,7 +575,13 @@ The meeting recorder and its audio kept on disk, rolling digests and the action 
   calendar → the dialog); **Past meeting notes** by day ("TODAY, 6 OCT",
   time · attendees · "Generate summary" on a meeting with talk and no plan
   → `meeting_summarise` + opens the note) with search
-  (`calendar_meeting_notes`); a bottom **Ask bar** cycling example
+  (`calendar_meeting_notes`) and, over the list, **Moments that match**
+  (`search_moments`: up to 5 passages — title, day, time into the meeting,
+  speaker, the line — "· by meaning" when the search model helped; one
+  opens its meeting at the line; [search.md](./search.md#the-meetings-views-moments));
+  a bottom **Ask bar** cycling example
   questions ("What questions were left unanswered in my last meeting?")
   that opens Chat with the question (scope `meetings`, through
-  `chatRequest.svelte.js`), plus a **Past chats ↗** chip (opens Chat).
+  `chatRequest.svelte.js`: asked across every meeting and note, answered
+  from cited passages — [search.md](./search.md)), plus a **Past chats ↗**
+  chip (opens Chat).

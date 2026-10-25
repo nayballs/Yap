@@ -33,7 +33,7 @@ export const STILL_WORKING_S = 8;
  * to the view). `onopensettings()`: ControlPanel's Settings opener, as the
  * view has it now (the "Couldn't send" toast's Open Language Models).
  */
-export function createChatState({ onopensettings = () => null } = {}) {
+export function createChatState({ onopensettings = () => null, onopennote = () => null } = {}) {
   let conversations = $state([]);
   let activeId = $state(null);
   let messages = $state([]); // { role, text, tools?, model?, voice?, id }
@@ -61,8 +61,10 @@ export function createChatState({ onopensettings = () => null } = {}) {
   const streaming = $derived(messages.some((m) => m.streaming));
   let inputEl = $state(null);
   let threadEl = $state(null);
-  // 'meetings' when the Meetings view's Ask bar started this chat: answers
-  // are grounded in your meeting notes (calendar::meetings_context).
+  // 'meetings' when this chat asks across the meetings (the Meetings view's
+  // Ask bar, or "Ask across your meetings" here): answers come from the
+  // passages Yap finds on this PC and cite them (search/ask.rs). Kept with
+  // the conversation (chats.rs `scope`), so its follow-ups are too.
   let scope = $state(null);
 
   // ---- Snip to Chat (snip.rs)
@@ -304,7 +306,7 @@ export function createChatState({ onopensettings = () => null } = {}) {
       const conv = await invoke('chat_get', { id });
       stopReading();
       activeId = id;
-      scope = null;
+      scope = conv.scope || null;
       messages = (conv.messages || []).map((m, i) => ({ ...m, id: chatId(id, i) }));
       scrollThread();
     } catch (e) {
@@ -323,6 +325,21 @@ export function createChatState({ onopensettings = () => null } = {}) {
     choseNew = true;
     reportView();
     setTimeout(() => inputEl?.focus(), 0);
+  }
+
+  /** A new chat asked across the meetings (its questions and follow-ups). */
+  function askAcrossMeetings() {
+    newChat();
+    scope = 'meetings';
+  }
+
+  /**
+   * A passage an answer cites (its pill, its row under the answer): its
+   * meeting or note opened in Notes at the line it came from.
+   */
+  function openSource(s) {
+    if (s?.note == null) return;
+    onopennote()?.({ id: s.note, line: s.line ?? null, ts: s.ts ?? null, field: s.field || '' });
   }
 
   // What this view shows, for a question asked out loud (chat/assistant.rs
@@ -398,7 +415,7 @@ export function createChatState({ onopensettings = () => null } = {}) {
       if (!alive) return;
       if (activeId !== id) {
         activeId = id;
-        scope = null;
+        scope = conv.scope || null;
       }
       // The answer that streamed here, replaced by the saved (checked) one
       // (only an answer: a newer question's arrival replaces nothing).
@@ -811,6 +828,8 @@ export function createChatState({ onopensettings = () => null } = {}) {
     refreshList,
     selectConversation,
     newChat,
+    askAcrossMeetings,
+    openSource,
     reportView,
     followAssistantStream,
     followAssistant,
