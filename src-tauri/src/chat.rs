@@ -5,6 +5,7 @@
 pub mod assistant;
 pub mod chats;
 pub mod commands;
+pub mod note_chats;
 pub mod note_text;
 pub mod stream;
 pub mod tools;

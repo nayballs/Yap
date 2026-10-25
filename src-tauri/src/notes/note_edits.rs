@@ -25,6 +25,14 @@
 //!   Tasks ticked in the old summary stay ticked in the new one
 //!   (`tasks::carry_ticks`). Whatever model writes it, on this PC or in the
 //!   cloud, the person's edits are local data and never go silently.
+//! - **Back to Yap's summary** ([`note_summary_restore`], 2026-10-25): Yap's
+//!   version is kept beside the person's (`summary_ai`, set by
+//!   [`write_summary`]), so an edited summary can go back to it — the
+//!   person's ticks carried over — with Undo (the window saves the person's
+//!   version back). Editing the words back to Yap's makes it Yap's again.
+//! - **Rating it** ([`note_summary_rate`]): 👍 / 👎 and, after a 👎, "What
+//!   was wrong?" — in the note, on this PC only, never sent; a new summary
+//!   clears it. For the model evaluations later.
 //!
 //! Logs: ids, indexes and counts only — never a line's or a summary's words.
 
@@ -162,8 +170,9 @@ pub async fn transcript_line_edit(
 
 /// The summary's markdown changed to `text` by the person (pure): a change
 /// of words makes it theirs (`now` = when, unix ms), a change of ticks
-/// alone doesn't; emptied, the note has no summary. Returns whether
-/// anything changed.
+/// alone doesn't, and words back to Yap's own (`summary_ai`) make it Yap's
+/// again; emptied, the note has no summary. Returns whether anything
+/// changed.
 pub fn apply_summary_edit(note: &mut Note, text: &str, now: u64) -> bool {
     if text == note.enhanced_content {
         return false;
@@ -178,7 +187,9 @@ pub fn apply_summary_edit(note: &mut Note, text: &str, now: u64) -> bool {
     let was_empty = note.enhanced_content.trim().is_empty();
     let ticks_only = !was_empty && crate::notes::tasks::same_but_ticks(&note.enhanced_content, text);
     note.enhanced_content = text.to_string();
-    if !ticks_only {
+    if !note.summary_ai.is_empty() && crate::notes::tasks::same_but_ticks(&note.summary_ai, text) {
+        note.summary_edited_ms = 0;
+    } else if !ticks_only {
         note.summary_edited_ms = now.max(1);
     }
     if was_empty {
@@ -189,13 +200,16 @@ pub fn apply_summary_edit(note: &mut Note, text: &str, now: u64) -> bool {
 }
 
 /// What the windows know of a note's summary after a change: its words,
-/// whether the person edited them, and when its input was read.
+/// whether the person edited them, when its input was read, Yap's own
+/// version (for "Back to Yap's summary") and the person's rating.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SummaryState {
     pub enhanced_content: String,
     pub summary_edited_ms: u64,
     pub summary_ts: u64,
+    pub summary_ai: String,
+    pub summary_rating: Option<SummaryRating>,
 }
 
 impl SummaryState {
@@ -204,6 +218,8 @@ impl SummaryState {
             enhanced_content: note.enhanced_content.clone(),
             summary_edited_ms: note.summary_edited_ms,
             summary_ts: note.summary_ts,
+            summary_ai: note.summary_ai.clone(),
+            summary_rating: note.summary_rating.clone(),
         }
     }
 }
@@ -216,8 +232,129 @@ pub(crate) fn summary_changed(app: &AppHandle, id: u64, origin: &str) {
         payload["enhancedContent"] = serde_json::json!(n.enhanced_content);
         payload["summaryEditedMs"] = serde_json::json!(n.summary_edited_ms);
         payload["summaryTs"] = serde_json::json!(n.summary_ts);
+        payload["summaryAi"] = serde_json::json!(n.summary_ai);
+        payload["summaryRating"] = serde_json::json!(n.summary_rating);
         let _ = app.emit("yap-note-changed", payload);
     }
+}
+
+// ---- Back to Yap's summary ---------------------------------------------------------------
+
+/// Whether note `note` offers "Back to Yap's summary": the person edited
+/// Yap's summary, and Yap's is kept and says something else. Pure.
+pub fn can_restore(note: &Note) -> bool {
+    note.summary_edited_ms != 0
+        && !note.summary_ai.trim().is_empty()
+        && !crate::notes::tasks::same_but_ticks(&note.summary_ai, &note.enhanced_content)
+}
+
+/// "Back to Yap's summary" (pure): Yap's version in place of the person's,
+/// the tasks they ticked still ticked (`tasks::carry_ticks`), Yap's again
+/// (not edited). Returns the person's version for Undo (the window saves it
+/// back through [`note_summary_update`]), or `None` when there's nothing to
+/// go back to.
+pub fn restore_ai_summary(note: &mut Note) -> Option<String> {
+    if !can_restore(note) {
+        return None;
+    }
+    let theirs = note.enhanced_content.clone();
+    note.enhanced_content = crate::notes::tasks::carry_ticks(&theirs, &note.summary_ai);
+    note.summary_edited_ms = 0;
+    Some(theirs)
+}
+
+/// What "Back to Yap's summary" did: the summary now, and the person's
+/// version it replaced (Undo puts it back).
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Restored {
+    pub state: SummaryState,
+    pub previous: String,
+}
+
+/// Put Yap's summary back over the person's edited one (the notepad's and
+/// the Notes view's "Back to Yap's summary"); every window follows. Undo is
+/// [`note_summary_update`] with `previous`.
+#[tauri::command]
+pub fn note_summary_restore(app: AppHandle, id: u64, origin: Option<String>) -> Result<Restored, String> {
+    let restored = crate::notes::modify(id, |note| match restore_ai_summary(note) {
+        Some(previous) => Ok((Restored { state: SummaryState::of(note), previous }, true)),
+        None => Err("There's no summary of Yap's to go back to".to_string()),
+    })?;
+    tracing::info!(note_id = id, len = restored.state.enhanced_content.len(), "Summary: back to Yap's");
+    summary_changed(&app, id, origin.as_deref().unwrap_or(""));
+    crate::notes::saved()?;
+    Ok(restored)
+}
+
+// ---- Rating a summary --------------------------------------------------------------------
+
+/// The person's rating of Yap's summary: 👍 (`up`) or 👎 with, optionally,
+/// what was wrong (`why`, ≤ [`WHY_MAX_CHARS`]). On this PC only.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SummaryRating {
+    pub up: bool,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub why: String,
+    /// When (unix ms).
+    pub ms: u64,
+}
+
+/// "What was wrong?" is a short note.
+pub const WHY_MAX_CHARS: usize = 500;
+
+/// Rate note `note`'s summary (pure): `rating` "up" | "down", or `None` to
+/// take the rating back; `why` only with a 👎 (one paragraph, cut to
+/// [`WHY_MAX_CHARS`]). No summary, nothing to rate.
+pub fn apply_rating(note: &mut Note, rating: Option<&str>, why: &str, now: u64) -> Result<bool, String> {
+    let next = match rating {
+        None => None,
+        Some(r @ ("up" | "down")) => {
+            if note.enhanced_content.trim().is_empty() {
+                return Err("There's no summary to rate yet".to_string());
+            }
+            let up = r == "up";
+            let why = if up { String::new() } else { why.split_whitespace().collect::<Vec<_>>().join(" ").chars().take(WHY_MAX_CHARS).collect() };
+            Some(SummaryRating { up, why, ms: now.max(1) })
+        }
+        Some(other) => return Err(format!("A rating is up or down, not {other}")),
+    };
+    let same = match (&note.summary_rating, &next) {
+        (Some(a), Some(b)) => a.up == b.up && a.why == b.why,
+        (None, None) => true,
+        _ => false,
+    };
+    if same {
+        return Ok(false);
+    }
+    note.summary_rating = next;
+    Ok(true)
+}
+
+/// 👍 / 👎 on a note's summary, and "What was wrong?" after a 👎 (the
+/// notepad and the Notes view): kept in the note on this PC, never sent.
+#[tauri::command]
+pub fn note_summary_rate(
+    app: AppHandle,
+    id: u64,
+    rating: Option<String>,
+    why: Option<String>,
+    origin: Option<String>,
+) -> Result<SummaryState, String> {
+    let state = crate::notes::modify(id, |note| {
+        let changed = apply_rating(note, rating.as_deref(), why.as_deref().unwrap_or(""), now_ms())?;
+        Ok((SummaryState::of(note), changed))
+    })?;
+    tracing::info!(
+        note_id = id,
+        rating = state.summary_rating.as_ref().map(|r| if r.up { "up" } else { "down" }).unwrap_or("none"),
+        why_len = state.summary_rating.as_ref().map(|r| r.why.len()).unwrap_or(0),
+        "Summary rated"
+    );
+    summary_changed(&app, id, origin.as_deref().unwrap_or(""));
+    crate::notes::saved()?;
+    Ok(state)
 }
 
 /// Edit a note's summary (its markdown, from the Summary tab's editor).
@@ -276,6 +413,10 @@ pub fn write_summary(id: u64, text: &str, at_hash: &str, read_ms: u64, heard_to:
         note.enhanced_at_hash = at_hash.to_string();
         note.summary_edited_ms = 0;
         note.summary_ts = (read_ms / 1000).max(heard_to);
+        // Yap's own, kept should the person edit it ("Back to Yap's
+        // summary"); a rating was of the summary before.
+        note.summary_ai = note.enhanced_content.clone();
+        note.summary_rating = None;
         Ok(((), true))
     })
 }
@@ -461,5 +602,72 @@ mod tests {
         crate::notes::modify(id, |n| Ok(((), apply_summary_edit(n, "Mine again.", 90_000)))).unwrap();
         assert_eq!(write_summary(id, "Late", "h4", 85_000, 0, true), Err(SUMMARY_KEPT.to_string()));
         assert_eq!(crate::notes::get(id).unwrap().enhanced_content, "Mine again.");
+    }
+
+    #[test]
+    fn back_to_yaps_summary_keeps_the_ticks_and_undo_puts_yours_back() {
+        let id = crate::notes::create("Sync", "notes", "manual", "").id;
+        let yaps = "## Recap\nThe launch.\n\n## Action plan\n### You\n- [ ] send the quote\n- [ ] book the room";
+        write_summary(id, yaps, "h1", 50_000, 0, false).unwrap();
+        let n = crate::notes::get(id).unwrap();
+        assert_eq!(n.summary_ai, yaps);
+        assert!(!can_restore(&n), "Yap's own: nothing to go back to");
+        // The person rewrites it and ticks a task.
+        let theirs = "## Recap\nThe launch, moved to May.\n\n## Action plan\n### You\n- [x] send the quote\n- [ ] book the room";
+        crate::notes::modify(id, |n| Ok(((), apply_summary_edit(n, theirs, 60_000)))).unwrap();
+        let mut n = crate::notes::get(id).unwrap();
+        assert!(n.summary_edited_ms != 0 && can_restore(&n));
+        // Back to Yap's: its words, their tick, Yap's again.
+        assert_eq!(restore_ai_summary(&mut n).as_deref(), Some(theirs));
+        assert!(n.enhanced_content.starts_with("## Recap\nThe launch.\n"), "{}", n.enhanced_content);
+        assert!(n.enhanced_content.contains("- [x] send the quote"));
+        assert_eq!(n.summary_edited_ms, 0);
+        assert!(restore_ai_summary(&mut n).is_none(), "once");
+        // Undo: their version saved back, theirs again.
+        assert!(apply_summary_edit(&mut n, theirs, 70_000));
+        assert_eq!((n.enhanced_content.as_str(), n.summary_edited_ms), (theirs, 70_000));
+        // Words back to Yap's by hand: Yap's again, ticks aside.
+        assert!(apply_summary_edit(&mut n, &yaps.replace("- [ ] send", "- [x] send"), 80_000));
+        assert_eq!(n.summary_edited_ms, 0);
+        // A summary from before Yap kept its own: nothing to go back to.
+        let mut old = summarised("Mine.");
+        old.summary_edited_ms = 5;
+        assert!(!can_restore(&old) && restore_ai_summary(&mut old).is_none());
+        // An older Yap on the same data saves the note without the fields it
+        // doesn't know: Yap's version and the rating go, the person's edited
+        // summary stays where every Yap reads it.
+        crate::notes::modify(id, |n| Ok(((), apply_summary_edit(n, theirs, 90_000) || apply_rating(n, Some("down"), "x", 1)?))).unwrap();
+        let mut v = serde_json::to_value(crate::notes::get(id).unwrap()).unwrap();
+        assert!(v.get("summaryAi").is_some());
+        v.as_object_mut().unwrap().remove("summaryAi");
+        v.as_object_mut().unwrap().remove("summaryRating");
+        let back: Note = serde_json::from_value(v).unwrap();
+        assert_eq!(back.enhanced_content, theirs);
+        assert!(back.summary_ai.is_empty() && back.summary_rating.is_none() && !can_restore(&back));
+    }
+
+    #[test]
+    fn a_rating_stays_on_this_pc_with_its_reason_and_a_new_summary_clears_it() {
+        let mut n = summarised("## Action plan\n### You\n- [ ] send the quote");
+        assert_eq!(apply_rating(&mut n, Some("up"), "ignored for a 👍", 5), Ok(true));
+        assert_eq!(n.summary_rating, Some(SummaryRating { up: true, why: String::new(), ms: 5 }));
+        assert_eq!(apply_rating(&mut n, Some("up"), "", 6), Ok(false), "the same again");
+        assert_eq!(apply_rating(&mut n, Some("down"), "  Missed   Priya's task\n", 7), Ok(true));
+        assert_eq!(n.summary_rating.as_ref().unwrap().why, "Missed Priya's task");
+        assert_eq!(apply_rating(&mut n, Some("down"), &"x".repeat(2_000), 8), Ok(true));
+        assert_eq!(n.summary_rating.as_ref().unwrap().why.chars().count(), WHY_MAX_CHARS);
+        assert!(apply_rating(&mut n, Some("meh"), "", 9).is_err());
+        assert_eq!(apply_rating(&mut n, None, "", 9), Ok(true));
+        assert!(n.summary_rating.is_none());
+        // Nothing to rate without a summary.
+        assert!(apply_rating(&mut summarised(""), Some("down"), "", 1).is_err());
+        // Stored with the note; a new summary from Yap clears it.
+        let id = crate::notes::create("Sync", "notes", "manual", "").id;
+        write_summary(id, "Summary one.", "h", 1_000, 0, false).unwrap();
+        crate::notes::modify(id, |n| Ok(((), apply_rating(n, Some("down"), "Too long", 2)?))).unwrap();
+        let v = serde_json::to_value(crate::notes::get(id).unwrap()).unwrap();
+        assert_eq!(v["summaryRating"], json!({ "up": false, "why": "Too long", "ms": 2 }));
+        write_summary(id, "Summary two.", "h", 3_000, 0, false).unwrap();
+        assert!(crate::notes::get(id).unwrap().summary_rating.is_none());
     }
 }

@@ -157,6 +157,8 @@
     'enhancedContent',
     'summaryEditedMs',
     'summaryTs',
+    'summaryAi',
+    'summaryRating',
   ]);
 
   async function reload() {
@@ -182,6 +184,9 @@
         note.enhancedContent = n.enhancedContent;
         note.summaryEditedMs = n.summaryEditedMs;
         note.summaryTs = n.summaryTs;
+        // Yap's own version and the person's rating (absent: none).
+        note.summaryAi = n.summaryAi || '';
+        note.summaryRating = n.summaryRating ?? null;
       }
       if (kept('participants')) note.participants = n.participants;
       // The rest as stored: no event brings them (its calendar meeting, tied
@@ -274,6 +279,8 @@
       note.enhancedContent = p.enhancedContent;
       if (typeof p.summaryEditedMs === 'number') note.summaryEditedMs = p.summaryEditedMs;
       if (typeof p.summaryTs === 'number') note.summaryTs = p.summaryTs;
+      if ('summaryAi' in p) note.summaryAi = p.summaryAi || '';
+      if ('summaryRating' in p) note.summaryRating = p.summaryRating ?? null;
     }
     if (p.lineEdit) {
       // A line's words fixed in the Notes view.

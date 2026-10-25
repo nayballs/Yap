@@ -3,17 +3,23 @@
   // (meetings/meeting_end.rs), with "Step 2 of 3" while it's written; above it the
   // meeting's pre-meeting brief (calendar/brief.rs), open until the plan is
   // written, then folded. The summary is edited in place (notes/note_edits.rs: Edit
-  // / Done, what's new since it with Update) and its tasks tick (notes/tasks.rs).
-  // Before there's one: the AI notes so far, or what the summary needs.
+  // / Done, what's new since it with Update, "Back to Yap's summary" after an
+  // edit) and its tasks tick (notes/tasks.rs); Ctrl+F finds in it
+  // (SummaryFind), and 👍 / 👎 under it rate it, on this PC only
+  // (SummaryRating). Before there's one: the AI notes so far, or what the
+  // summary needs.
   import { tick } from 'svelte';
   import { toast } from '../ui/toast.svelte.js';
   import { renderMarkdown } from '../core/markdown.js';
   import { briefTeaser } from '../core/brief.js';
   import { withTaskMark, newSinceSummary, newSinceLine } from '../core/notepadText.js';
   import { taskToggled, setTask } from '../core/noteEdits.js';
+  import { canRestore, restoreSummary } from '../core/summaryTools.js';
   import { stepLine } from '../stores/meetingSummary.svelte.js';
   import BriefView from '../components/BriefView.svelte';
   import SpeakerCard from '../components/SpeakerCard.svelte';
+  import SummaryFind from '../components/SummaryFind.svelte';
+  import SummaryRating from '../components/SummaryRating.svelte';
   import { LABEL, openSettings } from './actions.js';
   import Icon from './NotepadIcon.svelte';
 
@@ -68,6 +74,21 @@
       summary.finish();
     }
   }
+  // Ctrl+F: find in the summary (while it's shown, not while it's edited).
+  let renderedEl = $state(null);
+  let find = $state(null);
+  let findOpen = $state(false);
+  function onWindowKeydown(e) {
+    if (!(e.ctrlKey || e.metaKey) || e.altKey || e.shiftKey || e.key.toLowerCase() !== 'f') return;
+    if (!hasSummary || summary.editing || writing) return;
+    e.preventDefault();
+    find?.show();
+  }
+  // "Back to Yap's summary": Yap's version over the edited one, with Undo.
+  function restore() {
+    summary.finish();
+    restoreSummary(note, LABEL, { current: () => note, changing: () => changing('summary') });
+  }
   // A task's checkbox, ticked in the rendered summary.
   async function onTaskChange(e) {
     if (!note) return;
@@ -86,6 +107,8 @@
     }
   }
 </script>
+
+<svelte:window onkeydown={onWindowKeydown} />
 
 <div class="summary" role="region" aria-label="Summary">
   {#if note && !recordingThis}
@@ -133,6 +156,9 @@
       <span class="grow"></span>
       {#if note.summaryEditedMs && !summary.editing}
         <span class="sumedited" title="You changed this summary: Yap asks before writing it again">Edited</span>
+        {#if canRestore(note)}
+          <button class="sumrestore" title="Put Yap's own summary back (Undo puts yours back)" onclick={restore}>Back to Yap's summary</button>
+        {/if}
       {/if}
       <button
         class="sumeditbtn"
@@ -152,9 +178,11 @@
         onkeydown={onSummaryKeydown}
       ></textarea>
     {:else}
+      <SummaryFind bind:this={find} bind:open={findOpen} root={() => renderedEl} text={note.enhancedContent} look="paper" />
       <!-- renderMarkdown passes no raw HTML and sanitises its output (core/markdown.js);
            its tasks tick in place (notes/tasks.rs). -->
-      <div class="rendered" onchange={onTaskChange}>{@html renderMarkdown(note.enhancedContent, { tickable: true })}</div>
+      <div class="rendered" bind:this={renderedEl} onchange={onTaskChange}>{@html renderMarkdown(note.enhancedContent, { tickable: true })}</div>
+      <SummaryRating {note} origin={LABEL} look="paper" changing={() => changing('summary')} />
     {/if}
   {:else if !writing && job?.state !== 'needsAi'}
     <p class="sumempty">
@@ -410,6 +438,22 @@
     font-size: 11.5px;
     font-weight: 600;
     color: var(--yap-paper-faint);
+  }
+  .sumrestore {
+    padding: 0;
+    border: none;
+    background: none;
+    color: var(--yap-paper-ink);
+    font: inherit;
+    font-size: 12.5px;
+    font-weight: 600;
+    text-decoration: underline;
+    text-underline-offset: 2px;
+    cursor: pointer;
+  }
+  .sumrestore:focus-visible {
+    outline: 3px solid var(--yap-paper-ring);
+    outline-offset: 2px;
   }
   .sumeditbtn {
     display: inline-flex;

@@ -239,6 +239,16 @@ pub struct Note {
     /// older notes): lines dated after it are "new since this summary".
     #[serde(default, skip_serializing_if = "is_zero")]
     pub summary_ts: u64,
+    /// Yap's summary as it last wrote it, kept beside one the person edited:
+    /// "Back to Yap's summary" (`note_edits.rs`). Empty: Yap hasn't written
+    /// one since 2026-10-25.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub summary_ai: String,
+    /// The person's 👍 / 👎 on Yap's summary (and, for a 👎, what was
+    /// wrong): kept in this note on this PC only, never sent anywhere — for
+    /// the model evaluations later. A new summary clears it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub summary_rating: Option<note_edits::SummaryRating>,
     #[serde(default = "default_note_type")]
     pub note_type: String,
     /// Folder name (OpenWhispr seeds Personal + Meetings; user-creatable).
@@ -370,9 +380,18 @@ fn default_actions() -> Vec<Action> {
 
 /// Additive migration: stores created before a built-in existed get it added,
 /// matched by kind for built-ins that have one, else by name, so user edits
-/// to a built-in's name or prompt are never clobbered.
+/// to a built-in's name or prompt are never clobbered. The built-in Action
+/// Plan's prompt, still word for word an earlier default (never edited),
+/// moves on to today's (`llm::ACTION_PLAN_EARLIER_FRAGMENTS`; 2026-10-25: the
+/// recap and the decisions' reasons).
 fn seed_missing_builtins(store: &mut Store) -> bool {
     let mut changed = false;
+    for a in store.actions.iter_mut().filter(|a| a.kind == ACTION_PLAN) {
+        if crate::ai::llm::ACTION_PLAN_EARLIER_FRAGMENTS.contains(&a.prompt.as_str()) {
+            a.prompt = crate::ai::llm::ACTION_PLAN_DEFAULT_FRAGMENT.to_string();
+            changed = true;
+        }
+    }
     for (name, description, prompt, kind) in BUILTIN_ACTIONS {
         let present = store.actions.iter().any(|a| {
             if kind.is_empty() {
@@ -928,6 +947,8 @@ pub fn create(title: &str, content: &str, source: &str, folder: &str) -> Note {
             enhanced_at_hash: String::new(),
             summary_edited_ms: 0,
             summary_ts: 0,
+            summary_ai: String::new(),
+            summary_rating: None,
             note_type: default_note_type(),
             folder,
             folder_chosen: false,
@@ -1317,8 +1338,10 @@ pub fn delete(id: u64) {
         store.notes.retain(|n| n.id != id);
         save_to_disk(store);
     });
-    // Its meeting audio goes with it (meeting_audio.rs).
+    // Its meeting audio goes with it (meeting_audio.rs), and its Ask
+    // threads (chat/note_chats.rs).
     crate::meetings::meeting_audio::forget(id);
+    crate::chat::chats::delete_for_note(id);
 }
 
 #[cfg(test)]
@@ -1439,6 +1462,22 @@ mod tests {
         // Nor does the dictation flag: speech isn't a marker.
         assert!(seg.get("dictated").is_none());
         assert!(store.notes[0].transcript[0].is_talk());
+    }
+
+    #[test]
+    fn an_unedited_action_plan_prompt_moves_on_to_the_recap_and_reasons() {
+        let mut store = Store::default();
+        let at = store.actions.iter().position(|a| a.kind == ACTION_PLAN).unwrap();
+        // Still the earlier default, word for word: today's.
+        store.actions[at].prompt = crate::ai::llm::ACTION_PLAN_EARLIER_FRAGMENTS[0].to_string();
+        assert!(seed_missing_builtins(&mut store));
+        assert_eq!(store.actions[at].prompt, crate::ai::llm::ACTION_PLAN_DEFAULT_FRAGMENT);
+        assert!(store.actions[at].prompt.contains("## Recap"));
+        assert!(!seed_missing_builtins(&mut store), "once");
+        // The person's own words: never touched.
+        store.actions[at].prompt = format!("{} Keep it short.", crate::ai::llm::ACTION_PLAN_EARLIER_FRAGMENTS[0]);
+        assert!(!seed_missing_builtins(&mut store));
+        assert!(store.actions[at].prompt.ends_with("Keep it short."));
     }
 
     #[test]

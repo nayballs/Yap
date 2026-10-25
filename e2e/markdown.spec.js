@@ -9,7 +9,7 @@
 // file's tests only.
 import { test, expect } from '@playwright/test';
 import { JSDOM } from 'jsdom';
-import { renderMarkdown, markdownToText, taskLines } from '../src/lib/core/markdown.js';
+import { renderMarkdown, markdownToText, taskLines, emailHtml, emailText } from '../src/lib/core/markdown.js';
 
 let dom;
 test.beforeAll(() => {
@@ -302,4 +302,62 @@ test('markdownToText: plain text for pasting', () => {
   expect(markdownToText('## Plan\n- [ ] ship it\n- [x] test it\n- **bold** and `code`\n  * nested')).toBe(
     'Plan\n☐ ship it\n☑ test it\n• bold and code\n  • nested'
   );
+});
+
+test('a summary copied for email: headings, lists and tasks in HTML, the same as plain text', () => {
+  const md = [
+    '## Recap',
+    'The team planned the **offsite**.',
+    '- Budget',
+    '',
+    '## Action plan',
+    '### You',
+    '- [ ] Draft the agenda (due: tonight)',
+    '- [x] Share the slides',
+    '### Priya',
+    '- [ ] Send the [revised budget](https://example.com/budget)',
+    '',
+    '## Decisions',
+    '- Hold it in Lisbon — the flights are cheaper',
+    '',
+    '| Who | What |',
+    '|---|---|',
+    '| Priya | budget |',
+    '',
+    '<script>alert(1)</script>',
+  ].join('\n');
+  const html = emailHtml(md, { title: 'Offsite <planning>' });
+  const box = parse(html);
+  const root = box.firstElementChild;
+  // One wrapper with the mail client's body font, no colours anywhere.
+  expect(root.nodeName).toBe('DIV');
+  expect(root.getAttribute('style')).toContain('font-family');
+  expect(html).not.toMatch(/color\s*:/);
+  // The title is the heading (escaped), then the summary's own, a level down.
+  expect(root.firstElementChild.outerHTML).toMatch(/^<h2 style="[^"]+">Offsite &lt;planning&gt;<\/h2>$/);
+  expect([...box.querySelectorAll('h3')].map((h) => h.textContent)).toEqual(['Recap', 'Action plan', 'Decisions']);
+  expect([...box.querySelectorAll('h4')].map((h) => h.textContent)).toEqual(['You', 'Priya']);
+  // Tasks as ☐ / ☑ (a mail has no checkboxes), every list item styled, no classes.
+  const items = [...box.querySelectorAll('li')].map((li) => li.textContent.trim());
+  expect(items).toContain('☐ Draft the agenda (due: tonight)');
+  expect(items).toContain('☑ Share the slides');
+  expect(items).toContain('Hold it in Lisbon — the flights are cheaper');
+  expect(box.querySelector('input')).toBeNull();
+  expect(box.querySelector('[class]')).toBeNull();
+  expect([...box.querySelectorAll('li, p, ul, h3, h4, table, td, th')].every((el) => el.hasAttribute('style'))).toBe(true);
+  // A link stays a link; a table a table (its scroller gone); raw HTML stays text.
+  expect(box.querySelector('a').getAttribute('href')).toBe('https://example.com/budget');
+  expect(box.querySelector('table td').textContent).toBe('Priya');
+  expect(root.querySelector('div')).toBeNull();
+  expect(box.querySelector('script')).toBeNull();
+  expect(box.textContent).toContain('<script>alert(1)</script>');
+  // The plain-text twin: the title, then the summary as text.
+  const text = emailText(md, { title: 'Offsite <planning>' });
+  expect(text.split('\n').slice(0, 3)).toEqual(['Offsite <planning>', '', 'Recap']);
+  expect(text).toContain('☐ Draft the agenda (due: tonight)');
+  expect(text).toContain('☑ Share the slides');
+  expect(text).not.toMatch(/^#|\*\*/m);
+  // No title: no heading.
+  expect(parse(emailHtml('- [ ] one')).querySelector('h2')).toBeNull();
+  expect(emailText('- [ ] one')).toBe('☐ one');
 });

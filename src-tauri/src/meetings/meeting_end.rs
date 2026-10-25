@@ -368,6 +368,7 @@ fn start_summary_with(app: &AppHandle, note_id: u64, replace: bool) -> bool {
                 // "Learn from meetings" (memory.rs): who the attendees are,
                 // the person's projects.
                 crate::memory::learn::meeting_ended(note_id);
+                summary_ready(&app, note_id);
             }
         }
         // A discard or a resume meanwhile retired this run.
@@ -376,6 +377,52 @@ fn start_summary_with(app: &AppHandle, note_id: u64, replace: bool) -> bool {
         }
     });
     true
+}
+
+/// "Your summary is ready"'s second line: the meeting and its tasks
+/// ("“Supplier call” · 3 tasks"; "Your meeting" before it has a title).
+/// Pure.
+pub fn ready_body(title: &str, tasks: usize) -> String {
+    let title = title.trim();
+    let named = if title.is_empty() { "Your meeting".to_string() } else { format!("\u{201c}{title}\u{201d}") };
+    match tasks {
+        0 => format!("{named} · Open it to read it"),
+        1 => format!("{named} · 1 task"),
+        n => format!("{named} · {n} tasks"),
+    }
+}
+
+/// **"Your summary is ready"** (2026-10-25, Wispr Flow's notice): an action
+/// plan was written while no Yap window is in front (the meeting stopped
+/// from the bar, by itself, or the person went back to their work) — a
+/// quiet notice in one place, through the notice policy: a card on the Yap
+/// bar, else a Windows notification (not over a dictation), with **Open
+/// note** (the note in Notes). With the main window or the notepad in front
+/// they show it themselves, so nothing. On a thread of its own (window
+/// getters wait on the main thread).
+fn summary_ready(app: &AppHandle, note_id: u64) {
+    let app = app.clone();
+    std::thread::spawn(move || {
+        if crate::notices::notice::yap_in_front(&app) {
+            return;
+        }
+        let Some(note) = crate::notes::get(note_id) else {
+            return;
+        };
+        let tasks = crate::notes::tasks::parse(&note.enhanced_content).len();
+        tracing::info!(note_id, tasks, "Your summary is ready: said with no Yap window in front");
+        let notice = crate::calls::meeting_guard::Notice {
+            kind: "summaryReady",
+            title: "Your summary is ready".to_string(),
+            body: ready_body(&note.title, tasks),
+            icon: "notes",
+            variant: "success",
+            settings: None,
+            note_id: Some(note_id),
+            surface: None,
+        };
+        crate::calls::meeting_guard::notice_native(&app, &notice);
+    });
 }
 
 /// The action plan for `note_id`, through the same path as the Notes view's
@@ -492,6 +539,13 @@ mod tests {
         assert!(!started_by_mistake(MISTAKE_WORDS, ""));
         // Notes typed in My thoughts: never a mistake, whatever was said.
         assert!(!started_by_mistake(0, "Ask about the budget"));
+    }
+
+    #[test]
+    fn the_ready_notice_names_the_meeting_and_its_tasks() {
+        assert_eq!(ready_body("Supplier call", 3), "\u{201c}Supplier call\u{201d} · 3 tasks");
+        assert_eq!(ready_body(" Sync ", 1), "\u{201c}Sync\u{201d} · 1 task");
+        assert_eq!(ready_body("", 0), "Your meeting · Open it to read it");
     }
 
     #[test]

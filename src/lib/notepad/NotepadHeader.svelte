@@ -1,6 +1,7 @@
 <script>
   // The notepad's header, Wispr's buttons and spacing (52 px): back (this note
-  // in Yap's Notes), ⋯ (copy as Markdown or text, copy the consent message,
+  // in Yap's Notes), ⋯ (copy as Markdown or text, the summary for email —
+  // rich and plain at once —, copy the consent message,
   // audio settings while recording, save as .md, transcribe again, delete),
   // split the screen with the call (a glass preview on hover, meetings/notepad.rs),
   // Share (a local popover: copy, save, email) with a one-click copy, and the
@@ -11,6 +12,7 @@
   import { toast } from '../ui/toast.svelte.js';
   import { openExternalLink } from '../core/externalLinks.js';
   import { noteMarkdown, noteText, mailtoUrl } from '../core/notepadText.js';
+  import { copySummaryForEmail } from '../core/summaryTools.js';
   import { refreshAudio, cantTranscribeAgain, askTranscribeAgain } from '../stores/meetingAudio.svelte.js';
   import { copyToClipboard, openSettings, openNoteInYap } from './actions.js';
   import Icon from './NotepadIcon.svelte';
@@ -42,6 +44,17 @@
     onflushsave();
     if (await copyToClipboard(asText ? noteText(note) : noteMarkdown(note))) {
       toast({ title: asText ? 'Notes copied as text' : 'Notes copied as Markdown', variant: 'success' });
+    }
+  }
+  // The summary for an email: rich (headings, lists, tasks) and plain text
+  // on the clipboard at once (core/summaryTools.js).
+  async function copyForEmail() {
+    menu = null;
+    onflushsave();
+    if (await copySummaryForEmail(note)) {
+      toast({ title: 'Summary copied for email', description: 'Paste it into your email: headings, lists and tasks come with it.', variant: 'success' });
+    } else {
+      toast({ title: "Couldn't copy", description: 'The clipboard is busy. Try again.', variant: 'destructive' });
     }
   }
   // The link half of Share: the notes, copied in one click.
@@ -163,6 +176,11 @@
             <button role="menuitem" class="item" onclick={() => copyNote(true)}>
               <Icon name="text" /><span>Copy as text</span>
             </button>
+            {#if note.enhancedContent?.trim()}
+              <button role="menuitem" class="item" onclick={copyForEmail}>
+                <Icon name="mail" /><span>Copy summary for email</span>
+              </button>
+            {/if}
             <button role="menuitem" class="item" onclick={copySavedConsent}>
               <Icon name="chat" /><span>Copy consent message</span>
             </button>
@@ -227,6 +245,9 @@
             <p class="popsub">Your notes stay on this PC. Copy them, save a file or start an email.</p>
             <button class="item" onclick={() => copyNote(false)}><Icon name="markdown" /><span>Copy as Markdown</span></button>
             <button class="item" onclick={() => copyNote(true)}><Icon name="text" /><span>Copy as text</span></button>
+            {#if note.enhancedContent?.trim()}
+              <button class="item" onclick={copyForEmail}><Icon name="mail" /><span>Copy summary for email</span></button>
+            {/if}
             <button class="item" onclick={saveNote}><Icon name="save" /><span>Save as .md</span></button>
             <button class="item" onclick={emailNote}><Icon name="mail" /><span>Email</span></button>
           </div>
