@@ -163,12 +163,31 @@ Chat's and the Voice Assistant's two ways of reaching outside Yap: looking thing
   temperature in °C (the °F in brackets after it at most), converting any
   still in °F." (`about_you::temperature_note`). A question that names the
   other scale ("…in Fahrenheit?" from the UK) leaves the pages as they are
-  (`about_you::temperature_units`). **Models
+  (`about_you::temperature_units`). **Speeds and distances the same way**
+  (2026-10-25, `ai/about_you/units.rs`; Ireland's wind answers had kept their
+  pages' mph): **speeds** in mph for the UK and the US ("30 km/h" → "19 mph
+  (30 km/h)", "5 m/s" → "11 mph (5 m/s)"), km/h for the rest of the metric
+  world ("18 mph" → "29 km/h (18 mph)"; a page's m/s stays — Scandinavia's
+  forecasts give m/s; knots always stay); **distances** in miles for the UK
+  and the US ("38 km" → "24 miles (38 km)"), km elsewhere ("12 miles" → "19
+  km (12 miles)"), km and miles only (metres, feet, yards stay). Ranges, a
+  page's own conversion moved first, one already after theirs left; never a
+  speed read as a distance ("km/h", "miles per hour"), an area ("km²"), fuel
+  use ("miles per gallon"), a decimal comma ("1,5 km"), a road ("A9 miles")
+  or a hyphenated "a 5-mile walk". Each kind has its line, under its own key
+  in the result (`speeds`, `distances`: "The user uses mph for speeds: Yap
+  has put mph before these pages' km/h figures, like "40 mph (64 km/h)"…"),
+  and a question naming the other unit leaves that kind alone ("…in km/h?"
+  from the UK, "how many miles…" from Ireland: `speed_units`,
+  `distance_units`). `units::TheirUnits` puts the three together
+  (`for_question`, `convert`, `notes`), as `web::Turn` (search results, page
+  reads) and the small models' pipeline use them. **Models
   that can't call tools** (`turn::small_model_answer`): the fixed
   pipeline — `needs_web`, `search_query` (the ask stripped; a price
   question's aimed at the country, and searched once more for local prices,
   `local_prices_again`, their pages first or the "couldn't find" line in
-  the prompt; temperatures in their scale first, and the same line),
+  the prompt; temperatures, speeds and distances in their units first, and
+  the same lines),
   `grounded_sources` (≤ 3 sources, ≤ 1,500 tokens) + `grounded_prompt`
   (answer only from them, cite, < 80 words) with the history fitted
   (`fit_history`, ≤ 2,000) for an 8k model; no search → `NOT_SEARCHED_LINE`

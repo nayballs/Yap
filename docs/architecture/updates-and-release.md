@@ -116,6 +116,37 @@ two channels don't cross. Both channels sign with the **same** minisign key
 (`TAURI_SIGNING_PRIVATE_KEY`) — the pubkey in `tauri.conf.json` must match it or
 installed copies reject updates. See `docs/SIGNING.md` for Authenticode plans.
 
+### Checksums and build provenance (2026-10-25)
+For people who download an installer by hand (the updater keeps checking minisign
+signatures, untouched by this):
+
+- **`SHA256SUMS.txt`** on every release, written by `scripts/sha256sums.mjs`
+  (`<hex>  <name>` per file, sorted, LF: `sha256sum -c SHA256SUMS.txt` checks a
+  download in the same folder). **Stable** (`release.yml`, "Attach SHA256SUMS.txt"):
+  after tauri-action and the constant-name copy, every file on the draft is read
+  back from the release itself (the asset API, `curl -o`), so the names and bytes
+  are the published ones — `Yap_<v>_x64-setup.exe`, its `.sig`, `latest.json`,
+  `Yap-setup.exe`; an old `SHA256SUMS.txt` is deleted first, as `Yap-setup.exe`
+  is, so a re-run for the same version replaces it. **Nightly** (`nightly.yml`,
+  "Checksums"): over the staged constant-name files (`Yap-nightly-setup.exe`, its
+  `.sig`, `latest.json`), uploaded with them (`--clobber`).
+- **Build provenance attestations** (`actions/attest-build-provenance@v4`, a
+  wrapper over `actions/attest`): a SLSA provenance statement for the installers
+  (stable: `release-assets/*-setup.exe`, the versioned one and `Yap-setup.exe`;
+  nightly: `Yap-nightly-setup.exe`, attested before it's published, so a nightly
+  that can't be attested isn't), signed with Sigstore through the job's OIDC token
+  and stored by GitHub. Both jobs' permissions add `id-token: write` and
+  `attestations: write` (no `artifact-metadata`: that's for registry storage
+  records). Anyone can check a download with
+  `gh attestation verify Yap-setup.exe --repo nayballs/Yap` — it proves which
+  workflow, commit and repo built the file, not that the file is safe. When
+  Authenticode lands, attest (and checksum) **after** signing: signing changes the
+  installer's bytes.
+- Validated without a run (2026-10-25): `actionlint` 1.7.12 clean on all four
+  workflows; the stable step dry-run against the published v0.1.0 (listing,
+  downloads, `sha256sums.mjs`, the attestation glob; no delete or upload), its
+  `SHA256SUMS.txt` passing `sha256sum -c`. The first real run is the next nightly.
+
 ### How to run / cut a nightly (it's all CI — no local build needed)
 - **Trigger a nightly now:** `gh workflow run nightly.yml --repo nayballs/Yap`
   (otherwise it fires on the 05:00-UTC cron). Then find the run:

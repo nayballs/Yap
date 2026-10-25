@@ -1,0 +1,44 @@
+name: Feature request
+description: An idea for something Yap could do, or do better.
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the idea. The most useful requests start from what you were trying to do,
+        not only the feature: that way there may be a better way to get you there.
+  - type: textarea
+    id: problem
+    attributes:
+      label: What were you trying to do?
+      description: The situation, and what got in the way.
+      placeholder: I dictate into a terminal all day, and every time I have to…
+    validations:
+      required: true
+  - type: textarea
+    id: idea
+    attributes:
+      label: What would help?
+      description: How you imagine it working. Rough is fine.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Anything you've tried instead?
+      description: A workaround, a setting, or another app that does it well.
+  - type: dropdown
+    id: area
+    attributes:
+      label: Which part of Yap?
+      options:
+        - Dictation
+        - Pasting into apps
+        - AI cleanup, Commands or transforms
+        - Dictionary and snippets
+        - Meetings and the notepad
+        - Chat or the Voice Assistant
+        - Spoken replies or Read aloud
+        - The Yap bar
+        - Integrations (MCP, the local API, the calendar)
+        - Something new

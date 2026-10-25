@@ -133,7 +133,7 @@ One folder per area (an area's `<area>.rs` lists its modules); a big module's pa
 - `dictionary/screen_terms.rs` (+ `dictionary/screen_terms/`) — "Spell names the way they're written on screen": the target window's visible text read at record start (UIA, bounded) → its names and terms, for that dictation only: a strict near-miss pass (every model), cleanup's "Spell these names as written" line.
 
 **AI models** — [ai-models.md](./docs/architecture/ai-models.md)
-- `ai/about_you.rs` — About you: one Region (Windows' country, or one picked; money, units, language and spelling follow it, the clock is the PC's), name and note → the block every model's prompt ends with, searches and prices aimed at the country, the web's temperatures in their scale first, cleanup spelling.
+- `ai/about_you.rs` — About you: one Region (Windows' country, or one picked; money, units, language and spelling follow it, the clock is the PC's), name and note → the block every model's prompt ends with, searches and prices aimed at the country, the web's temperatures, speeds and distances in their units first (`about_you/units.rs`), cleanup spelling.
 - `ai/llm.rs` — OpenAI-compatible client, immutable base prompts, chat/tool calls, rate-limit waits.
 - `ai/cleanup_styles.rs` — styles by app: cleanup's tone per kind of app (email formal, chats casual, AI prompts literal, terminal commands as said; built-in app lists, editable), as cleanup profiles; app rules first; the one offer of cleanup.
 - `ai/local_llm.rs` (+ `local_llm/`: runtime, context, models) — on-device llamafile sidecar: models, recommendation, server args (MTP), context, restarts, warm-up, the runtime's background upgrade (retry without MTP, the way back, launch repair, cross-Yap lock).

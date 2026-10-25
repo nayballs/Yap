@@ -36,6 +36,10 @@ jobs:
   nightly:
     permissions:
       contents: write
+      # Build provenance (actions/attest-build-provenance, below): an OIDC
+      # token to sign it with Sigstore, and the right to store it.
+      id-token: write
+      attestations: write
     runs-on: windows-latest
     steps:
       # whisper-rs-sys' cmake build produces paths that exceed Windows MAX_PATH
@@ -220,6 +224,23 @@ jobs:
           EOF
           node stage-nightly.cjs
 
+      # SHA256SUMS.txt over the files as they're published (constant names),
+      # so `sha256sum -c SHA256SUMS.txt` checks a download. The minisign .sig
+      # is untouched: the updater still checks it.
+      - name: Checksums
+        shell: bash
+        run: node scripts/sha256sums.mjs SHA256SUMS.txt Yap-nightly-setup.exe Yap-nightly-setup.exe.sig latest.json
+
+      # Build provenance (SLSA, signed with Sigstore through GitHub's OIDC
+      # token): proof the installer was built by this workflow from this
+      # commit. Check a download with
+      #   gh attestation verify Yap-nightly-setup.exe --repo nayballs/Yap
+      # Before publishing: a nightly that can't be attested isn't published.
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@v4
+        with:
+          subject-path: Yap-nightly-setup.exe
+
       # Publish IN PLACE to the single rolling `nightly` pre-release. --clobber
       # overwrites the constant-named assets so the Releases page keeps ONE
       # nightly row and the updater URL never breaks.
@@ -246,6 +267,7 @@ jobs:
             Yap-nightly-setup.exe \
             Yap-nightly-setup.exe.sig \
             latest.json \
+            SHA256SUMS.txt \
             --clobber
           # After the upload, so a failed build never moves the marker.
           gh release edit nightly --notes-file release-body.md

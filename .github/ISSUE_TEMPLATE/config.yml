@@ -1,0 +1,11 @@
+# Blank issues stay on: Settings → About → Report a problem opens a new issue
+# with its own prefilled body (privacy/diagnostics.rs `issue_url`), which a
+# template-only chooser would drop.
+blank_issues_enabled: true
+contact_links:
+  - name: Questions and help
+    url: https://github.com/nayballs/Yap/discussions
+    about: How do I…? Is this normal? Ask in Discussions.
+  - name: Report a security vulnerability
+    url: https://github.com/nayballs/Yap/security/advisories/new
+    about: Privately, please, not as an issue (SECURITY.md).

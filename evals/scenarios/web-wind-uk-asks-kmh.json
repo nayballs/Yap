@@ -1,0 +1,40 @@
+{
+  "name": "web-wind-uk-asks-kmh",
+  "description": "The control: a UK user asks for the wind in km/h (for a sailing app that takes it); the pages give km/h (stand-in web, fictional town). Right: km/h, as asked — Yap's mph-first conversion of the pages mustn't override a question that names the other unit. Run with --locale en-GB.",
+  "tags": [
+    "web",
+    "units",
+    "locale",
+    "standin"
+  ],
+  "web": {
+    "mode": "standin",
+    "results": [
+      {
+        "title": "Valdorrena, Andalusia, Spain Weather Tomorrow | 24°C, Sunny",
+        "url": "https://weatherdial.example/valdorrena-andalusia-es/tomorrow",
+        "published": "2026-10-24",
+        "text": "Tomorrow in Valdorrena: sunny, high 24°C, low 15°C. Wind E 30 km/h, gusts to 55 km/h in the afternoon, dropping to 10–15 km/h after dark. Sea state moderate."
+      }
+    ]
+  },
+  "apps": "standard",
+  "turns": [
+    {
+      "user": "What's the wind forecast for Valdorrena in Spain tomorrow, in km/h?",
+      "expect": {
+        "min_sources": 1,
+        "speeds": "km/h",
+        "no_false_claims": true,
+        "opened_none": true
+      },
+      "soft": {
+        "tools_called": [
+          {
+            "name": "web_search"
+          }
+        ]
+      }
+    }
+  ]
+}

@@ -1,0 +1,41 @@
+{
+  "name": "web-wind-uk-mph-pages",
+  "description": "The control: a UK user asks how windy it will be in a UK town; the pages give mph (stand-in web, fictional town). Right: mph as the pages give it — a rule for km/h regions mustn't turn a UK answer into km/h. Run with --locale en-GB.",
+  "tags": [
+    "web",
+    "units",
+    "locale",
+    "standin"
+  ],
+  "web": {
+    "mode": "standin",
+    "results": [
+      {
+        "title": "Glenbrackie 10-Day Weather Forecast | Forecastly",
+        "url": "https://forecastly.example/gb/glenbrackie/10-day",
+        "published": "2026-10-23",
+        "text": "Fri 23 Oct: Overcast, 41°F / 31°F, wind NW 3 mph. Sat 24 Oct: Light rain, 44°F / 36°F, wind SW 9 mph, gusts 25 mph. Sun 25 Oct: Showers, 46°F / 38°F, wind W 12 mph. Mon 26 Oct: Partly cloudy, 43°F / 33°F, wind NW 7 mph."
+      }
+    ]
+  },
+  "apps": "standard",
+  "turns": [
+    {
+      "user": "What's the wind forecast for Glenbrackie on Saturday?",
+      "expect": {
+        "min_sources": 1,
+        "speeds": "mph",
+        "no_false_claims": true,
+        "opened_none": true
+      },
+      "soft": {
+        "tools_called": [
+          {
+            "name": "web_search"
+          }
+        ],
+        "answer_not_matches": "km/h|kph|kilomet"
+      }
+    }
+  ]
+}

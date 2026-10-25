@@ -658,11 +658,12 @@ async fn small_model_answer(
                     _ => None,
                 };
                 let (found_sources, block) = crate::web::grounded_sources(&found.hits, SMALL_WEB_TOKENS);
-                // Temperatures in the person's scale first, with a line
-                // saying so (about_you.rs).
-                let units = crate::ai::about_you::temperature_units(settings.units, text);
-                let temperature_line = crate::ai::about_you::temperature_note(units, &block);
-                let block = crate::ai::about_you::convert_temperatures(units, &block).unwrap_or(block);
+                // Temperatures, speeds and distances in the person's units
+                // first, with a line saying so for each (about_you.rs,
+                // about_you/units.rs).
+                let units = crate::ai::about_you::units::TheirUnits::for_question(settings.units, text);
+                let unit_lines = units.notes(&block);
+                let block = units.convert(&block).unwrap_or(block);
                 system = crate::web::grounded_prompt(persona, &block, &crate::web::today(), by_voice);
                 pages.push(block);
                 system.push(' ');
@@ -672,7 +673,7 @@ async fn small_model_answer(
                     system.push(' ');
                     system.push_str(&line);
                 }
-                if let Some(line) = temperature_line {
+                for (_, line) in unit_lines {
                     system.push(' ');
                     system.push_str(&line);
                 }

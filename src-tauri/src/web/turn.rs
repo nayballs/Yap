@@ -122,10 +122,11 @@ impl Turn {
         }
     }
 
-    /// The scale this turn's temperatures go in: the person's, unless the
-    /// question asks for the other (`about_you::temperature_units`).
-    fn temperature_units(&self) -> Option<crate::ai::about_you::Units> {
-        crate::ai::about_you::temperature_units(self.settings.units, &self.question)
+    /// The units this turn's temperatures, speeds and distances go in: the
+    /// person's, each unless the question asks for the other
+    /// (`about_you::units::TheirUnits`).
+    fn their_units(&self) -> crate::ai::about_you::units::TheirUnits {
+        crate::ai::about_you::units::TheirUnits::for_question(self.settings.units, &self.question)
     }
 
     /// Yap runs the search for local prices itself (a model on this PC),
@@ -250,13 +251,14 @@ impl Turn {
                 if found.native == Some(native::Provider::Gemini) && !found.hits.is_empty() {
                     self.grounded = true;
                 }
-                // Temperatures in the person's scale first ("2°C (35°F)"),
-                // with a line saying so (about_you.rs).
-                let units = self.temperature_units();
+                // Temperatures, speeds and distances in the person's units
+                // first ("2°C (35°F)", "19 mph (30 km/h)"), with a line
+                // saying so for each (about_you.rs, about_you/units.rs).
+                let units = self.their_units();
                 let original: Vec<&str> =
                     found.hits.iter().flat_map(|h| [h.title.as_str(), h.text.as_str()]).chain(found.summary.as_deref()).collect();
-                let temperatures = crate::ai::about_you::temperature_note(units, &original.join("\n"));
-                let theirs = |s: &str| crate::ai::about_you::convert_temperatures(units, s).unwrap_or_else(|| s.to_string());
+                let unit_notes = units.notes(&original.join("\n"));
+                let theirs = |s: &str| units.convert(s).unwrap_or_else(|| s.to_string());
                 let mut found = found;
                 for h in &mut found.hits {
                     h.title = theirs(&h.title);
@@ -302,8 +304,8 @@ impl Turn {
                 if let Some(note) = self.local_note(&query, &text) {
                     data["local_prices"] = json!(note);
                 }
-                if let Some(note) = temperatures {
-                    data["temperatures"] = json!(note);
+                for (key, note) in unit_notes {
+                    data[key] = json!(note);
                 }
                 self.texts.push(text);
                 ok(data, display)
@@ -340,10 +342,11 @@ impl Turn {
                 self.seen = true;
                 let n = self.number(&page.title, &url);
                 let (part, next) = page_part(&page.text, offset, PAGE_TOKENS);
-                // Temperatures in the person's scale first (about_you.rs).
-                let units = self.temperature_units();
-                let temperatures = crate::ai::about_you::temperature_note(units, &part);
-                let part = crate::ai::about_you::convert_temperatures(units, &part).unwrap_or(part);
+                // Temperatures, speeds and distances in the person's units
+                // first (about_you.rs, about_you/units.rs).
+                let units = self.their_units();
+                let unit_notes = units.notes(&part);
+                let part = units.convert(&part).unwrap_or(part);
                 self.texts.push(part.clone());
                 let mut data = json!({
                     "n": n,
@@ -357,8 +360,8 @@ impl Turn {
                 if let Some(next) = next {
                     data["next_offset"] = json!(next);
                 }
-                if let Some(note) = temperatures {
-                    data["temperatures"] = json!(note);
+                for (key, note) in unit_notes {
+                    data[key] = json!(note);
                 }
                 ok(data, format!("Read {}", short_url(&page.url)))
             }

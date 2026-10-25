@@ -18,6 +18,9 @@ use super::standin::Standin;
 /// Chat scope's prompt), which `chat_turn` builds on.
 pub(super) const DEFAULT_PERSONA: &str = "You are a helpful voice assistant. Answer concisely and conversationally, and handle informal spoken phrasing gracefully. Keep answers brief unless asked for detail.";
 
+/// The stack the scenarios run on.
+const STACK: usize = 64 * 1024 * 1024;
+
 const USAGE: &str = "\
 yap.exe eval [options]          (debug builds; docs/model-evals.md)
 
@@ -358,7 +361,15 @@ pub fn main(argv: Vec<String>) -> i32 {
     record::set_timeout(args.timeout.map(Duration::from_secs));
     record::set_run_body(run_body(&args));
     println!("Run folder: {}", run_dir.display());
-    let code = tauri::async_runtime::block_on(run_all(&args, &run_dir, &keys, scenarios));
+    // On a thread with room: a Chat turn's future, polled here, is deep in a
+    // debug build, and overflowed the main thread's 1 MB (2026-10-25).
+    let code = std::thread::scope(|s| {
+        std::thread::Builder::new()
+            .name("eval".into())
+            .stack_size(STACK)
+            .spawn_scoped(s, || tauri::async_runtime::block_on(run_all(&args, &run_dir, &keys, scenarios)))
+            .map_or(2, |h| h.join().unwrap_or(2))
+    });
     record::close();
     println!("\nRun folder: {}", run_dir.display());
     code

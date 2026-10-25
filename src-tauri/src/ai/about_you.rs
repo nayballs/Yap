@@ -50,6 +50,10 @@
 use chrono::{DateTime, Utc};
 use serde::Serialize;
 
+/// Speeds and distances in the person's units, and one web answer's
+/// figures all together (`units::TheirUnits`; 2026-10-25).
+pub mod units;
+
 /// "Anything the AI should know about you": at most this many characters.
 pub const ABOUT_MAX: usize = 300;
 /// "What should Yap call you?": at most this many characters.

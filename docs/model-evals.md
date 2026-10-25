@@ -380,6 +380,7 @@ field is an error, so a typo can't silently skip a check):
 | `min_sources`, `sources_any` | The answer came with at least n web sources (Chat's Sources row); one of their addresses holds one of these. |
 | `min_searches` | At least n web searches ran this turn (the model's and Yap's own: a price question's second search for local prices). |
 | `temperatures` | `"C"` or `"F"`: the answer's temperatures lead with that scale — it gives one, every one in the other scale is only a conversion right after one in it ("2°C (35°F)", "2°C / 35°F"), such a pair agrees, and each figure is one the turn's web pages give, or one of theirs converted (within 1°C). Degrees said without a scale ("about 7 degrees", a spoken answer) take the scale whose figures on the pages they fit. |
+| `speeds`, `distances` | `"km/h"` or `"mph"`; `"km"` or `"miles"`: the same check for the answer's speeds and distances (`ai/eval/units.rs`) — it gives one, every one in another unit (mph, km/h, m/s; miles, km) is only a conversion right after one in it ("29 km/h (18 mph)"), such a pair agrees, and each figure is one the pages give (a range's low end too) or one of theirs converted, within 2 km/h or 10 % (1 km or 6 %). Knots aren't read; nor is a speed as a distance, an area or fuel use. |
 | `clipboard_contains`, `clipboard_untouched` | What the clipboard tool was handed. |
 | `notes` | `[{ "title", "exists", "folder", "contains", "not_contains" }]`, as the notes are afterwards. |
 | `folders`, `notes_count` | The folders afterwards, exactly (no invented ones); how many notes. |
@@ -1486,7 +1487,61 @@ gets the same conversion and line), the seven ×2: **4/14 before** (the two cont
 
 **Left out**: speeds — Ireland's answers kept the pages' mph (5/5 before and after; the soft
 check says km/h); conversions of other units in pages (miles, pounds); a decade ("the mid-40s
-°F") isn't converted, only the line asks the model to.
+°F") isn't converted, only the line asks the model to. (Speeds and distances since 25 Oct:
+below.)
+
+## Speeds and distances where the user is (25 Oct 2026)
+
+The temperatures' follow-up: Ireland's weather answers kept their pages' mph, and nothing
+converted a distance. The same approach (`ai/about_you/units.rs`, web-and-apps.md): the web
+text puts the person's unit first — mph and miles for the UK and the US, km/h and km for the
+rest of the metric world ("18 mph" → "29 km/h (18 mph)", "30 km/h" → "19 mph (30 km/h)",
+"38 km" → "24 miles (38 km)") — with a line for each kind beside the results, and a question
+naming the other unit left alone.
+
+**The scenarios** (stand-in webs, fictional places, `--locale en-GB`; tag `units`):
+`web-wind-ie-mph-pages` (Region Ireland, mph pages: km/h wanted), `web-wind-uk-kmh-pages` (a
+UK user, a Spanish town's km/h pages: mph), `web-wind-us-kmh-pages` (Region US, the same pages:
+mph), `web-distance-uk-km-pages` (a UK user, km pages: miles), `web-distance-ie-miles-pages`
+(Region Ireland, miles pages: km), and two controls — `web-wind-uk-mph-pages` (mph stays) and
+`web-wind-uk-asks-kmh` ("…in km/h?" from the UK). The checks are `speeds` and `distances`
+(above). The questions say "wind forecast" and "look up": "How windy…?" and "How long is
+the walk?" don't need the web by `needs_web`'s words, so the on-device model sometimes
+answered from memory without searching (a made-up "3.5 to 4 miles"), which measured nothing
+about units.
+
+**Qwen3.5-4B**, RTX 5070 Ti, llamafile 0.10.6 (MTP on), ×5 (run folders
+`<builds>/eval-runs/loose-ends-20261025-09*`, the Groq and 2B runs beside them):
+
+| Scenario | Before | After |
+|---|---|---|
+| `web-wind-ie-mph-pages` | 0/5 ("from the west at 18 mph") | **5/5** ("29 km/h with gusts up to 56 km/h") |
+| `web-wind-uk-kmh-pages` | 0/5 ("from the east at 30 km/h") | **5/5** ("19 mph (30 km/h), gusting to 34 mph (55 km/h)") |
+| `web-wind-us-kmh-pages` | 0/5 | **5/5** |
+| `web-distance-uk-km-pages` | 0/5 ("about 38 km") | **5/5** ("24 miles (38 km)") |
+| `web-distance-ie-miles-pages` | 0/5 ("12 miles") | **5/5** ("19 km (12 miles)") |
+| `web-wind-uk-mph-pages` (control) | 5/5 | 5/5 |
+| `web-wind-uk-asks-kmh` (control) | 5/5 | 5/5 (30 km/h, as asked) |
+| **All** | **10/35** | **35/35** |
+
+About 100 more prompt tokens a turn where something is converted (the figures and the line);
+turn times the same (0.7–1.4 s). **Nothing else moved**: the seven temperature scenarios,
+`web-weather-voice-must-search` (its "14 km/h" now "9 mph (14 km/h)" for the UK) and the five
+stand-in UK price scenarios, ×3: **39/39 after** (21/21 and 18/18 before), and
+`web-weather-ie-fahrenheit`'s soft check (its wind in km/h) now holds 3/3 (0/3 before).
+
+**Groq `openai/gpt-oss-20b`** (`--keys-from-yap`, ~24k tokens in all): before, `wind-ie`
+failed — it led with the pages' mph, its own conversions in brackets ("about 18 mph (≈29
+km/h)"), after three searches (12.6k tokens; the run's cap then skipped `wind-uk-kmh`); after,
+2/2 ("about **29 km/h** (≈18 mph)", "east 19 mph (≈30 km/h)"), one search each.
+
+**Qwen3.5-2B** (no tools: the fixed web pipeline, `small_model_answer`, which gets the same
+conversion and lines), the seven ×2: **4/14 before** (the two controls), **14/14 after**.
+
+**Left out**: metres, feet and yards (a UK user's short distances are metric, heights often
+feet: no single rule), knots, m/s for the metric world (Scandinavia's forecasts use it), a
+hyphenated "a 5-mile walk", and anything outside web text (the model's own knowledge, notes).
+`needs_web` doesn't take "windy" or "how far" as needing the web — a separate question.
 
 ## A forced search's words (23 Oct 2026)
 

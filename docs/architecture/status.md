@@ -257,7 +257,10 @@ reads and Windows' spell checker by `--ignored` tests on hidden windows —
 not yet tried in real apps),
 the Groq usage meter, and the installer + auto-updater (background checks + download
 while Yap runs, "Restart to update" from toast/tray/About/Windows notification —
-`updates.rs`, 2026-10-05) + portable mode + release CI.
+`updates.rs`, 2026-10-05) + portable mode + release CI (since 2026-10-25 every
+release also carries `SHA256SUMS.txt` and a build provenance attestation for the
+installer — actionlint-checked and dry-run against v0.1.0, not yet through a real
+release or nightly run; [updates-and-release.md](./updates-and-release.md)).
 The **Yap bar** (`bar.rs`, 2026-10-05, after Wispr Flow's Flow Bar) is the
 always-there surface: a pill above the taskbar on the cursor's monitor,
 clickable only where it draws, never focused, hidden over fullscreen apps,
@@ -493,7 +496,16 @@ plan's 8,000 a minute makes the next answer wait), Gemini 3.5 Flash on a
 free key has no Google Search grounding ("check your plan and billing")
 and fell back to bg3.wiki correctly; Gemini 2.5 Flash/Flash-Lite are
 closed to new keys. Anthropic, OpenAI and OpenRouter searches untried
-with real keys; Gemini grounding untried on a billed key.
+with real keys; Gemini grounding untried on a billed key. **Units where the
+person is**: web pages' temperatures (2026-10-23), speeds and distances
+(2026-10-25, `ai/about_you/units.rs`: mph and miles for the UK and the US,
+km/h and km elsewhere) reach the model in the person's units first, with a
+line saying so — unit-tested, and model-evaluated on stand-in pages
+(Qwen3.5-4B 35/35 on the wind and distance scenarios, from 10/35; Groq
+gpt-oss-20b 2/2; Qwen3.5-2B's fixed pipeline 14/14; model-evals.md); not yet
+checked against real weather sites through Exa or Tavily. A Voice Assistant
+already speaking a step's opening words that turn out to come before a tool
+call now stops, and says the answer from its start (2026-10-25, e2e-tested).
 
 **Memory** (`memory.rs`, 2026-10-22; [memory.md](./memory.md)): what Yap
 remembers about the person, learned from quiet chats (and, opt-in,
