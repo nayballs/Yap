@@ -197,6 +197,14 @@
   `migrate_once`, keyed by `config_version` (`CONFIG_VERSION`; a missing field =
   0, a pre-versioning file). `load()` saves straight after one runs, and `save()`
   stamps the current version, so a later user choice is never undone.
+  **An older Yap reads the same files** (2026-10-25): the installed nightly and
+  Yap - Dev share `%APPDATA%\yap`, and anyone can go back a version. An older
+  build ignores fields it doesn't know and drops them on its next save. So new
+  saved data never moves the person's settings or content out of a field an
+  older Yap reads: the main value stays in today's field (a second shortcut goes
+  in a new field, the first stays where it was); a migration never removes or
+  renames a field that's still read; and new content lives in its own file, or
+  in fields whose loss on an old save is harmless (a flag, a cached copy).
   **config.json is never lost** (2026-10-23; before, any file that didn't
   parse — and any read error — became the defaults, and the next save wrote
   them over the real file: API keys, dictionary, hotkeys gone). `load_at`:
