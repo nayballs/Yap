@@ -127,7 +127,7 @@ test('Chat: a conversation is renamed in place, copied and deleted; messages cop
   // A right-click: its menu, and it opens, as a click does.
   await conv('Trip plans').click({ button: 'right' });
   await expect(menu(main)).toHaveAccessibleName('Conversation Trip plans');
-  await expect(allItems(main)).toHaveText(['Rename', 'Copy as Markdown', 'Delete…']);
+  await expect(allItems(main)).toHaveText(['Rename', 'Copy as Markdown', 'Archive', 'Delete…']);
   await expect(allItems(main).last()).toHaveClass(/danger/);
   await expect(main.locator('.msgs')).toContainText('Where should we stay in Lisbon?');
   await expect(conv('Trip plans')).toHaveClass(/active/);
@@ -271,10 +271,11 @@ test('Dictionary: Edit, near-misses and Delete… on a row; in its boxes, the bo
   const snippets = main.getByRole('region', { name: 'Snippets' });
   await expect(corrections.getByRole('textbox', { name: 'Replace with' })).toHaveValue('Parakeet');
 
-  // A right-click on the row (not in a box): Edit, Star, ≈ Catch near-misses (on), Delete….
+  // A right-click on the row (not in a box): Edit, Star, Add another way it's heard, ≈ Catch
+  // near-misses (on), Delete….
   await corrections.locator('.dict-row .arrow').first().click({ button: 'right' });
   await expect(menu(main)).toHaveAccessibleName('Correction');
-  await expect(allItems(main)).toHaveText(['Edit', 'Star', 'Catch near-misses', 'Delete…']);
+  await expect(allItems(main)).toHaveText(['Edit', 'Star', 'Add another way it’s heard', 'Catch near-misses', 'Delete…']);
   const near = menu(main).getByRole('menuitemcheckbox', { name: 'Catch near-misses' });
   await expect(near).toHaveAttribute('aria-checked', 'true');
   await shot(main, '07-dictionary-row-menu');

@@ -213,11 +213,18 @@ fn blocks(text: &str) -> Vec<&str> {
     out
 }
 
+/// A note in brackets, not words someone said: Whisper's "[BLANK_AUDIO]" or
+/// "[Music]", a test run's stand-in transcript ("[STT stub: …]").
+fn is_annotation(block: &str) -> bool {
+    let b = block.trim().trim_end_matches(['.', '!', '?']);
+    b.starts_with(['[', '(']) && b.ends_with([']', ')']) && !b[1..b.len() - 1].contains([']', ')'])
+}
+
 /// A sentence, a paragraph or a short dictation worth a snippet: a
 /// sign-off with a name, text with lines of its own, or a long one.
 fn block_kind(block: &str) -> Option<Kind> {
     let k = key(block);
-    if k.is_empty() || block.chars().count() > MAX_CHARS {
+    if k.is_empty() || block.chars().count() > MAX_CHARS || is_annotation(block) {
         return None;
     }
     if is_sign_off(block) {
@@ -736,6 +743,16 @@ mod tests {
     }
 
     const ADDRESS: &str = "Please send it to 12 Example Road, Anytown ZZ1 1ZZ.";
+
+    #[test]
+    fn a_note_in_brackets_is_never_a_phrase() {
+        assert!(kinds("[STT stub: received 1.0s of audio, engine=parakeet]").is_empty());
+        assert!(kinds("[BLANK_AUDIO]").is_empty());
+        assert!(kinds("(upbeat music playing in the background for a while)").is_empty());
+        // Words around a bracket are still words.
+        let said = "As I said [inaudible] we should move the launch to the second week of June.";
+        assert_eq!(kinds(said), [(Kind::Phrase, said.to_string())]);
+    }
 
     #[test]
     fn the_phrases_worth_a_snippet() {

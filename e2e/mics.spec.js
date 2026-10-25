@@ -48,8 +48,9 @@ async function startDictating(yap, main) {
 }
 
 test('the microphone picked before becomes the first in the order', async ({ yap, main, shot }) => {
-  // config.json moved the one pick into the order (config.rs migrate_once v4).
-  await expectStore(yap, 'config.json', (c) => c.micOrder?.[0]?.name === USB.name && !c.inputDevice);
+  // config.json moved the one pick into the order (config.rs migrate_once v4),
+  // and kept it where an older Yap on the same data reads it.
+  await expectStore(yap, 'config.json', (c) => c.micOrder?.[0]?.name === USB.name && c.inputDevice === USB.name);
   await openSettings(main, 'Dictation');
   const row = micRow(main);
   await expect(row).toContainText("Yap uses the first one that's connected");
