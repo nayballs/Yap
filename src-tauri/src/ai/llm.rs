@@ -1718,6 +1718,7 @@ mod tests {
             to: to.into(),
             fuzzy: true,
             snippet: false,
+            starred: false,
         };
         assert_eq!(dictionary_suffix(&[]), "");
         // same-word entry (e.g. an agent name) → exact-spelling bias

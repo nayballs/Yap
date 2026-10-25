@@ -34,6 +34,12 @@ pub struct DictionaryEntry {
     /// the exact/fuzzy correction passes or the Whisper vocabulary prompt.
     #[serde(default)]
     pub snippet: bool,
+    /// Starred in the Dictionary view: listed first there (its "Starred
+    /// first" sort) and given to the speech model first (`dict_usage::rank`,
+    /// as Wispr Flow ranks starred words). Written only when set, so a
+    /// dictionary with no stars saves as it always did.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub starred: bool,
 }
 
 /// A reusable, named cleanup profile (FluidVoice's `DictationPromptProfile`): a
@@ -2169,6 +2175,7 @@ mod tests {
             to: to.to_string(),
             fuzzy: true,
             snippet: false,
+            starred: false,
         }
     }
 

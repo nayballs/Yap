@@ -418,6 +418,9 @@ pub fn run() {
             bar::bar_action,
             bar::bar_card_action,
             dictionary::learn::word_suggestion_respond,
+            dictionary::dict_usage::dictionary_usage,
+            dictionary::files::dictionary_import_pick,
+            dictionary::files::dictionary_export_save,
             notices::alert::alert_action,
             #[cfg(debug_assertions)]
             bar::bar_simulate,
@@ -510,6 +513,8 @@ pub fn run() {
             notices::notice::e2e_focus,
             #[cfg(debug_assertions)]
             dictionary::learn::e2e_learn_correction,
+            #[cfg(debug_assertions)]
+            dictionary::files::e2e_dictionary_file,
             #[cfg(debug_assertions)]
             calls::meeting_guard::e2e_meeting_limit,
             #[cfg(debug_assertions)]

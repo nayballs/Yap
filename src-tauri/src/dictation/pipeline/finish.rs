@@ -147,6 +147,7 @@ mod tests {
             to: to.to_string(),
             fuzzy,
             snippet: false,
+            starred: false,
         }
     }
 
