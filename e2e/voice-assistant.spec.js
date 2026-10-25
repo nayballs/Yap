@@ -29,7 +29,7 @@
 // microphone needed). The "Groq" here is a local fake (support/fake-llm.js).
 //
 // Kokoro (voice/tts/kokoro.rs) is the default engine: the engine row, its download
-// row and the "Download Kokoro" offer when replies go on, the 54 voices
+// row and the "Download Kokoro" offer when replies go on, the 41 voices
 // grouped by accent and gender (af_bella the default), Windows voices
 // speaking until it's installed. Its download comes from a local server
 // (support/kokoro.js, the debug-only YAP_TTS_SOURCES): never the internet.
@@ -675,15 +675,16 @@ test('Settings → Voice Assistant: spoken replies, the engine, the voice and it
   const krow = dialog.getByRole('group', { name: 'Kokoro' });
   await expect(krow.locator('.mrow')).toContainText('Kokoro-82M');
   await expect(krow.locator('.mrow')).toContainText('Recommended');
-  await expect(krow.locator('.mrow')).toContainText('54 voices');
+  await expect(krow.locator('.mrow')).toContainText('41 voices');
   await expect(krow.getByRole('button', { name: 'Download', exact: true })).toBeVisible();
   await expect(krow).toContainText('Until then, Windows voices speak');
 
-  // Kokoro's 54 voices, grouped by accent and gender; Bella the default.
+  // Kokoro's 41 voices (its Japanese and Mandarin ones aren't offered: they
+  // read text as English), grouped by accent and gender; Bella the default.
   const voice = dialog.getByRole('combobox', { name: 'Voice' });
   await expect(voice).toHaveValue('af_bella');
   await expect(voice.locator('option:checked')).toHaveText('Bella (default)');
-  await expect(voice.locator('option')).toHaveCount(54);
+  await expect(voice.locator('option')).toHaveCount(41);
   expect(await voice.locator('optgroup').evaluateAll((gs) => gs.map((g) => g.label))).toEqual([
     'British English · Female',
     'British English · Male',
@@ -999,7 +1000,8 @@ test("Kokoro isn't installed: Windows voices read the replies, numbers written o
   expect(list.engine).toBe('kokoro');
   expect(list.active).toBe('windows');
   expect(list.kokoroStatus).toMatchObject({ inBuild: true, installed: false });
-  expect(list.kokoro.voices).toHaveLength(54);
+  expect(list.kokoro.voices).toHaveLength(41);
+  expect(list.kokoro.voices.some((v) => v.language === 'ja' || v.language === 'zh')).toBe(false);
   expect(list.kokoro.defaultVoice).toBe('af_bella');
   await yap.invoke('tts_speak', { text: 'Sure! It came to £12,400 on 18 Oct, about 45% over.', messageId: 'chat:900:1' });
   const [said] = await spoken(yap);

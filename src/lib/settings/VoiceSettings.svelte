@@ -5,7 +5,7 @@
   // the engine (Kokoro, the natural voices on this PC, recommended; or
   // Windows' own voices), Kokoro's download row (Download / Active / delete,
   // like the speech models'), the voice picker that follows the engine
-  // (Kokoro's 54 voices grouped by accent and gender), ▶ Preview, and where
+  // (Kokoro's voices grouped by accent and gender: 41, its Japanese and Mandarin ones left out, voice/tts/kokoro.rs `listed`), ▶ Preview, and where
   // Kokoro's files come from; for both, the speed and the volume (voice/tts.rs,
   // voice/tts/kokoro.rs, voice/tts/registry.rs, voice/tts/elevenlabs.rs).
   //
@@ -104,7 +104,7 @@
     if (engine === 'kokoro') {
       if (!kokoro.inBuild) return 'Kokoro is in the full Yap build. This one speaks with Windows voices';
       if (!kokoro.installed) return "Pick one now: you'll hear it once Kokoro is downloaded";
-      return '54 voices in British and American English and seven other languages';
+      return '41 voices in British and American English and five other languages';
     }
     return voiceList?.windows?.error || 'The voices Windows has installed for apps';
   });
@@ -131,7 +131,7 @@
     engine: 'kokoro',
     desc: 'Natural voices on this PC',
     sizeMb: Math.max(1, Math.round((kokoro.sizeBytes || 379_000_000) / 1_000_000)),
-    langLabel: '54 voices',
+    langLabel: '41 voices',
     recommended: true,
     note: 'In the full Yap build',
   });

@@ -191,11 +191,9 @@ pub fn engine(id: &str) -> Arc<dyn Engine> {
 pub fn chosen(cfg: &crate::config::YapConfig) -> (Arc<dyn Engine>, String) {
     let e = engine(&cfg.tts_engine);
     let voice = if e.id() == kokoro::ID {
-        if kokoro::is_voice(&cfg.tts_voice) {
-            cfg.tts_voice.clone()
-        } else {
-            kokoro::DEFAULT_VOICE.to_string()
-        }
+        // A Japanese or Mandarin voice an older Yap offered: the default
+        // speaks (`kokoro::listed`).
+        kokoro::spoken_voice(&cfg.tts_voice).to_string()
     } else {
         cfg.tts_windows_voice.clone()
     };
