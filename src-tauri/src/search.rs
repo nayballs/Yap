@@ -36,13 +36,14 @@ pub fn init(app: &AppHandle) {
     index::init(app);
 }
 
-/// A config just saved: search by meaning switched on starts a pass; off
-/// stops the model's server.
+/// A config just saved: search by meaning switched on starts a pass (and
+/// the model's server may try to start again); off stops it.
 pub fn on_config_saved(prev: &crate::config::YapConfig, cfg: &crate::config::YapConfig) {
     if prev.search_by_meaning == cfg.search_by_meaning {
         return;
     }
     if cfg.search_by_meaning {
+        embedder::reset_failures();
         index::poke();
     } else {
         embedder::stop();

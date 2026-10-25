@@ -35,7 +35,7 @@ const QUERY_WAIT: Duration = Duration::from_secs(20);
 
 /// The system prompt's line for a question asked across meetings (the same
 /// every turn; the passages come with the question).
-pub const ASK_INSTRUCTIONS: &str = "The user is asking about their meetings: the context of their message gives numbered passages from their meetings and notes that match the question, and their latest meetings. Answer only from those passages. After each statement, cite the passage it comes from by its number in square brackets, like [1] or [2, 3]. Cite only the passages' numbers, and never make up a quote, a name, a date or a number. Say which meeting an answer comes from. If the passages don't answer the question, say so plainly.";
+pub const ASK_INSTRUCTIONS: &str = "The user is asking about their meetings: the context of their message gives numbered passages from their meetings and notes that match the question, and their latest meetings. Answer only from those passages. After each statement, cite the passage it comes from by its number in square brackets, before the full stop: \"… by Friday [2].\" or \"[1, 3]\" (never \"Passage 2\"). Cite only the passages' numbers, and never make up a quote, a name, a date or a number. Say which meeting an answer comes from. If the passages don't answer the question, say so plainly.";
 
 /// [`ASK_INSTRUCTIONS`] where the passages go: the question's context (a
 /// model with tools) or, for one without, below in the system prompt.
@@ -427,8 +427,124 @@ pub fn shown(reply: &str, all: &[Source]) -> Vec<Source> {
     }
 }
 
+static PASSAGE_REF: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\b[Pp]assage\s+(\d{1,2})\b").expect("static regex"));
+static QUOTED: LazyLock<Regex> = LazyLock::new(|| Regex::new(r#"["“]([^"“”]{12,})["”]"#).expect("static regex"));
+
+/// Words with letters and digits only, lower case: for matching a quote.
+fn plain(s: &str) -> String {
+    s.to_lowercase()
+        .replace('’', "'")
+        .chars()
+        .map(|c| if c.is_alphanumeric() { c } else { ' ' })
+        .collect::<String>()
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+/// **Citations a model left out, put in where they're plain**: a small
+/// model on this PC often names the meeting ("This comes from the Northwind
+/// check-in") or writes "Passage 5" instead of "[5]" (Qwen3.5-4B left 11 of
+/// 33 answers uncited, `yap.exe eval --search`). "Passage 5" becomes "[5]";
+/// a statement with no citation gets the passage it quotes, or the one
+/// holding most of its words — at least three of them and half, and clearly
+/// more than any other passage — before its full stop. Anything less plain
+/// stays uncited (and [`UNCITED_NOTE`] may say so). Code, headings and
+/// "not mentioned" sentences are left alone. Returns the answer and how many
+/// citations Yap added. Pure.
+pub fn cite_missing(reply: &str, passages: &[Passage]) -> (String, usize) {
+    if passages.is_empty() {
+        return (reply.to_string(), 0);
+    }
+    let mut added = 0;
+    let max = passages.len();
+    // "Passage 5" → "[5]".
+    let text = PASSAGE_REF
+        .replace_all(reply, |c: &regex::Captures| match c[1].parse::<usize>() {
+            Ok(n) if (1..=max).contains(&n) => {
+                added += 1;
+                format!("[{n}]")
+            }
+            _ => c[0].to_string(),
+        })
+        .into_owned();
+    let words: Vec<std::collections::HashSet<String>> = passages
+        .iter()
+        .map(|p| rank::terms(&p.text).into_iter().chain(rank::terms(&p.title)).collect())
+        .collect();
+    let plains: Vec<String> = passages.iter().map(|p| plain(&p.text)).collect();
+    let mut out = String::with_capacity(text.len() + 16);
+    let mut fence = false;
+    for line in text.split_inclusive('\n') {
+        let t = line.trim_start();
+        if t.starts_with("```") {
+            fence = !fence;
+        }
+        if fence || t.starts_with("```") || t.starts_with('#') || t.starts_with('*') && t.trim_end().ends_with('*') && !t.starts_with("* ") {
+            out.push_str(line);
+            continue;
+        }
+        // Each sentence of the line.
+        let mut rest = line;
+        while !rest.is_empty() {
+            let end = rest
+                .char_indices()
+                .find(|&(i, c)| matches!(c, '.' | '!' | '?') && rest[i + c.len_utf8()..].starts_with([' ', '\n', '\r']) || i + c.len_utf8() == rest.len() && matches!(c, '.' | '!' | '?'))
+                .map(|(i, c)| i + c.len_utf8())
+                .unwrap_or(rest.len());
+            let (sentence, after) = rest.split_at(end);
+            rest = after;
+            let core = sentence.trim_end_matches(['\n', '\r']);
+            // "…four thousand pounds. [1]": its citation comes after the stop.
+            let cited_after = CITE.find(after.trim_start_matches([' ', '\t'])).is_some_and(|m| m.start() == 0);
+            if CITE.is_match(core) || cited_after || NOT_FOUND.is_match(&core.replace('’', "'")) {
+                out.push_str(sentence);
+                continue;
+            }
+            // A quote from one passage.
+            let pick: Option<usize> = QUOTED.captures_iter(core).find_map(|q| {
+                let qp = plain(&q[1]);
+                let hits: Vec<usize> = (0..max).filter(|&i| qp.split(' ').count() >= 4 && plains[i].contains(&qp)).collect();
+                (hits.len() == 1).then(|| hits[0])
+            });
+            let mut picks: Vec<usize> = pick.into_iter().collect();
+            if picks.is_empty() {
+                let s: std::collections::HashSet<String> = rank::terms(core).into_iter().collect();
+                if s.len() >= 3 {
+                    let mut scores: Vec<(usize, usize)> = words.iter().enumerate().map(|(i, w)| (i, s.intersection(w).count())).collect();
+                    scores.sort_by_key(|&(i, n)| (std::cmp::Reverse(n), i));
+                    let (best, n) = scores[0];
+                    let (other, second) = scores.get(1).copied().unwrap_or((best, 0));
+                    if n >= 3 && n * 2 >= s.len() && n > second + 1 {
+                        picks.push(best);
+                    } else if n >= 3 && second * 5 >= s.len() * 4 {
+                        // Two passages both holding nearly all of it (a line
+                        // and the summary that repeats it): both.
+                        picks.extend([best, other]);
+                    }
+                }
+            }
+            if picks.is_empty() {
+                out.push_str(sentence);
+            } else {
+                let mut ns: Vec<usize> = picks.iter().map(|&i| passages[i].n).collect();
+                ns.sort_unstable();
+                let list = ns.iter().map(|n| n.to_string()).collect::<Vec<_>>().join(", ");
+                let body = core.trim_end();
+                let stop = body.ends_with(['.', '!', '?']) as usize;
+                let (words_part, punct) = body.split_at(body.len() - stop);
+                // "**£4,000**." → "**£4,000** [1]."
+                out.push_str(&format!("{words_part} [{list}]{punct}"));
+                out.push_str(&sentence[body.len()..]);
+                added += 1;
+            }
+        }
+    }
+    (out, added)
+}
+
 static NOT_FOUND: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"(?i)(?:\b(?:no|not|nothing|none|cannot|unable)\b|n't\b)[^.!?\n]{0,60}\b(?:mention|mentioned|found|find|cover|covers|covered|say|says|said|passages?|meetings?|notes?|information|record|discuss|discussed)\b")
+    Regex::new(r"(?i)(?:\b(?:no|not|nothing|none|cannot|unable)\b|n't\b)[^.!?\n]{0,60}\b(?:mention|mentioned|found|find|cover|covers|covered|say|says|said|passages?|meetings?|notes?|information|record|discuss|discussed|decisions?|decided|talked|raised|came\s+up)\b")
         .expect("static regex")
 });
 
@@ -437,14 +553,23 @@ static NOT_FOUND: LazyLock<Regex> = LazyLock::new(|| {
 pub const UNCITED_NOTE: &str = "*Yap couldn't tie this answer to a passage from your meetings: check it against the passages below.*";
 
 /// Does an answer need [`UNCITED_NOTE`]? It cites nothing, passages were
-/// there, and it's more than a "that isn't in your meetings". Pure.
+/// there, it says something (12 words, or a short one with a number or a
+/// date in it: "The offsite is on December 4th to 6th."; not "You're
+/// welcome!") and it's more than a "that isn't in your meetings". Pure.
 pub fn needs_uncited_note(reply: &str, passages: usize) -> bool {
     if passages == 0 || !cited_numbers(reply).is_empty() {
         return false;
     }
     let words = reply.split_whitespace().count();
+    let says = words >= 12 || (words >= 4 && reply.chars().any(|c| c.is_ascii_digit()));
+    says && !says_not_found(reply)
+}
+
+/// Does an answer open by saying the meetings don't cover it (`No`,
+/// `not mentioned`, `couldn't find`… in its first two sentences)? Pure.
+pub fn says_not_found(reply: &str) -> bool {
     let first: String = reply.split_inclusive(['.', '!', '?', '\n']).take(2).collect();
-    words >= 12 && !NOT_FOUND.is_match(&first.replace('’', "'"))
+    NOT_FOUND.is_match(&first.replace('’', "'"))
 }
 
 /// The answer when no AI model is set up: the passages themselves, each
@@ -603,6 +728,8 @@ mod tests {
         assert!(!needs_uncited_note("The launch moves to March third [1], with the pricing page.", 3));
         assert!(!needs_uncited_note("Your meetings don't mention anything about the office move or its dates at all.", 3));
         assert!(!needs_uncited_note("Short answer.", 3));
+        assert!(!needs_uncited_note("You're welcome! Anything else?", 3));
+        assert!(needs_uncited_note("The offsite is scheduled for **December 4th to 6th**.", 3), "short, but a date");
         assert!(!needs_uncited_note("The launch moves to March third, so the pricing page ships with it then.", 0));
     }
 
@@ -627,6 +754,49 @@ mod tests {
         assert!(chip(&f).ends_with(" in \"Launch review\""), "{}", chip(&f));
         assert!(instructions(false).contains("below are numbered passages"));
         assert!(instructions(true).starts_with("The user is asking about their meetings"));
+    }
+
+    #[test]
+    fn yap_puts_in_the_citations_a_small_model_left_out() {
+        let f = search("When does the launch happen?", Mode::Hybrid);
+        let transcript = f.passages.iter().find(|p| p.field == Field::Transcript).unwrap().n;
+        // A statement plainly from one passage gets it; one naming only the
+        // meeting doesn't.
+        let (out, n) = cite_missing("The launch moves to March third so the pricing page ships with it.\n\nThis was in the Launch review.", &f.passages);
+        assert_eq!(n, 1, "{out}");
+        assert!(out.starts_with(&format!("The launch moves to March third so the pricing page ships with it [{transcript}].")), "{out}");
+        assert!(out.ends_with("This was in the Launch review."));
+        // "Passage 2" is a citation.
+        let (out, n) = cite_missing("As Passage 1 says, it moves.", &f.passages);
+        assert_eq!((out.as_str(), n), ("As [1] says, it moves.", 1));
+        assert_eq!(cite_missing("Passage 9 says so.", &f.passages).0, "Passage 9 says so.", "no such passage");
+        // A quote from one passage.
+        let (out, _) = cite_missing("Someone said \"I'll update the pricing copy by Friday\" then.", &f.passages);
+        assert!(out.contains(&format!("then [{transcript}].")), "{out}");
+        // Cited already, "not mentioned", a heading, code: left alone.
+        for s in [
+            "The launch moves to March third [2].",
+            "Your meetings don't mention the pricing page launch moving to March.",
+            "## The launch moves to March third so the pricing page ships",
+            "```\nThe launch moves to March third so the pricing page ships with it.\n```",
+        ] {
+            assert_eq!(cite_missing(s, &f.passages), (s.to_string(), 0), "{s}");
+        }
+        // Bold at the end keeps its marks, the citation before the stop.
+        let (out, _) = cite_missing("It moves to **March third so the pricing page ships**.", &f.passages);
+        assert!(out.ends_with(&format!("**March third so the pricing page ships** [{transcript}].")), "{out}");
+        // gpt-oss cites after the full stop ("…pounds. [1]"): that counts.
+        let s = "The launch moves to March third so the pricing page ships with it. [2]";
+        assert_eq!(cite_missing(s, &f.passages), (s.to_string(), 0));
+        // "We didn't make any decision about…" says the meetings don't have it.
+        assert!(says_not_found("We didn’t make any decision about relocating the office itself. The only related thing was a desk."));
+        assert!(!needs_uncited_note("We didn’t make any decision about relocating the office itself. The only related discussion was a desk by the window.", 3));
+        // A line and the summary that repeats it: both cited.
+        let summary = f.passages.iter().find(|p| p.field == Field::Summary).unwrap().n;
+        let (out, n) = cite_missing("The launch moves to March third.", &f.passages);
+        let mut both = [transcript, summary];
+        both.sort_unstable();
+        assert_eq!((out, n), (format!("The launch moves to March third [{}, {}].", both[0], both[1]), 1));
     }
 
     #[test]

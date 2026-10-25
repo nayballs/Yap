@@ -20,13 +20,29 @@
    * `m`: the message; `last`: the thread's last; `sources`: what its
    * citations point at (chatState's `citedSources`); `reading`: being read
    * aloud; `keepDays`: how long screenshots are kept; `onview(id)` opens a
-   * screenshot large, `onmenu(e)` its right-click menu, `onread()` ▶.
+   * screenshot large, `onmenu(e)` its right-click menu, `onread()` ▶,
+   * `onsource(s)` opens a passage of the person's meetings at its line (an
+   * answer asked across meetings: search/ask.rs).
    */
-  let { m, last, sources, reading, keepDays, onview, onmenu, onread } = $props();
+  let { m, last, sources, reading, keepDays, onview, onmenu, onread, onsource = null } = $props();
 
   // A chip about the web (web.rs) or the safety rule (chat/tools.rs).
   const WEB_CHIP = /^(Searched the web|Couldn't search the web|Didn't search for|Read [^"]|Couldn't read [^"]|Didn't read |Answered from )/;
   const chipKind = (t) => (/: not after reading the web$/.test(t) ? 'guard' : WEB_CHIP.test(t) ? 'web' : 'tool');
+
+  // A passage of the person's meetings and notes, not a web page.
+  const isPassage = (s) => s?.note != null && !s.url;
+  const fromMeetings = $derived((m.sources?.length ?? 0) > 0 && m.sources.every(isPassage));
+
+  // A passage pill in the answer ("[2]"): opened in Yap at its line.
+  function clickAnswer(e) {
+    const a = e.target instanceof Element ? e.target.closest('a.md-passage') : null;
+    if (!a) return;
+    e.preventDefault();
+    const n = Number(a.textContent);
+    const s = (sources || []).find((x) => x.n === n);
+    if (s) onsource?.(s);
+  }
 </script>
 
 {#if m.role === 'assistant' && (m.tools?.length || m.doing)}
@@ -76,8 +92,10 @@
   onkeydown={(e) => e.target === e.currentTarget && menuKey(e, onmenu)}
 >
   {#if m.role === 'assistant'}
+    <!-- (Its passage pills are links: Enter on one clicks it.) -->
     <!-- eslint-disable-next-line svelte/no-at-html-tags — renderMarkdown sanitises its output -->
-    <div class="cbody">{@html renderMarkdown(m.streaming ? closePartial(m.text) : m.text, { sources })}</div>
+    <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
+    <div class="cbody" onclick={clickAnswer}>{@html renderMarkdown(m.streaming ? closePartial(m.text) : m.text, { sources })}</div>
     {#if m.streaming && m.waiting}
       <p class="cwait" aria-live="polite">Waiting for your dictation to finish…</p>
     {/if}
@@ -118,16 +136,30 @@
   <p class="stoppednote">Stopped</p>
 {/if}
 {#if m.role === 'assistant' && m.sources?.length}
-  <!-- Where a web answer came from: each opens in the browser. -->
-  <div class="sources" role="group" aria-label="Sources">
-    <span class="srclabel">Sources</span>
+  <!-- Where an answer came from: a web page opens in the browser; a passage
+       of the person's meetings opens its meeting at the line. -->
+  <div class="sources" role="group" aria-label={fromMeetings ? 'From your meetings' : 'Sources'}>
+    <span class="srclabel">{fromMeetings ? 'From your meetings' : 'Sources'}</span>
     {#each m.sources as s (s.n)}
-      <button class="srcchip" title={s.url} onclick={() => openExternalLink(s.url)}>
-        <span class="srcn" aria-hidden="true">{s.n}</span>
-        <span class="srctitle">{s.title || s.site}</span>
-        <!-- (Google Search's links are titled with their site: once is enough.) -->
-        {#if s.site && s.site !== s.title}<span class="srcsite">{s.site}</span>{/if}
-      </button>
+      {#if isPassage(s)}
+        <button
+          class="srcchip passage"
+          title={s.quote || s.title}
+          aria-label={`Passage ${s.n}: ${s.title}${s.site ? `, ${s.site}` : ''}. Opens it.`}
+          onclick={() => onsource?.(s)}
+        >
+          <span class="srcn" aria-hidden="true">{s.n}</span>
+          <span class="srctitle">{s.title}</span>
+          {#if s.site}<span class="srcsite">{s.site}</span>{/if}
+        </button>
+      {:else}
+        <button class="srcchip" title={s.url} onclick={() => openExternalLink(s.url)}>
+          <span class="srcn" aria-hidden="true">{s.n}</span>
+          <span class="srctitle">{s.title || s.site}</span>
+          <!-- (Google Search's links are titled with their site: once is enough.) -->
+          {#if s.site && s.site !== s.title}<span class="srcsite">{s.site}</span>{/if}
+        </button>
+      {/if}
     {/each}
   </div>
 {/if}

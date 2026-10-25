@@ -1321,7 +1321,7 @@ async fn run_all(args: &Args, run_dir: &Path, keys: &HashMap<String, String>, sc
             let r = super::search::retrieval(c, &ids).await?;
             Ok::<_, String>((ids, server, r))
         };
-        match setup.await {
+        match Box::pin(setup).await {
             Ok((ids, server, r)) => {
                 search_ids = ids;
                 search_retrieval = r;
@@ -1442,7 +1442,7 @@ async fn run_all(args: &Args, run_dir: &Path, keys: &HashMap<String, String>, sc
             record::set_config(Some(super::search::settings(&m.provider, &m.base_url, &m.key, &m.model)));
             record::set_tools_forced(args.tools);
             println!("  Ask across meetings …");
-            search_result = super::search::answers(c, &search_ids, &m.label, &args.only, args.max_total_tokens).await;
+            search_result = Box::pin(super::search::answers(c, &search_ids, &m.label, &args.only, args.max_total_tokens)).await;
             search_answers.push((m.label.clone(), search_result.clone()));
         }
         let mut bench_result = Value::Null;

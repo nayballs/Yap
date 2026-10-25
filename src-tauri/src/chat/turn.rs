@@ -206,7 +206,8 @@ pub(crate) async fn chat_turn(
         Ok(e) => e,
         // Asked across the meetings with no model to answer: the passages
         // that match, themselves.
-        Err(why) if meetings => return passages_turn(conversation_id, &text, by_voice, asked, stop, &why).await,
+        // (Boxed, as the search below: the turn's own future stays small.)
+        Err(why) if meetings => return Box::pin(passages_turn(conversation_id, &text, by_voice, asked, stop, &why)).await,
         Err(why) => return Err(why),
     };
     // The on-device model is busy for the whole turn — between its tool
@@ -372,8 +373,9 @@ pub(crate) async fn chat_turn(
     // line (search/ask.rs).
     let mut passages: Vec<crate::chat::chats::Source> = Vec::new();
     let mut search_chip = None;
+    let mut asked_across = None;
     if meetings {
-        let found = crate::search::ask::find(&text, crate::search::ask::ASK_PASSAGES).await;
+        let found = Box::pin(crate::search::ask::find(&text, crate::search::ask::ASK_PASSAGES)).await;
         passages = crate::search::ask::sources(&found);
         let chip = crate::search::ask::chip(&found);
         if let Some(w) = watcher {
@@ -383,6 +385,7 @@ pub(crate) async fn chat_turn(
         system.push_str("\n\n");
         system.push_str(&crate::search::ask::instructions(in_message));
         let block = crate::search::ask::context(&found);
+        asked_across = Some(found);
         if in_message {
             context.push(block);
         } else {
@@ -592,6 +595,16 @@ pub(crate) async fn chat_turn(
     // cited: the first few, to check it against), and an answer that cites
     // none of them says so.
     let (sources, tools_used) = if meetings {
+        // A statement plainly from one passage that the model left uncited
+        // ("Passage 2", or only the meeting's name): Yap cites it.
+        if let Some(found) = &asked_across {
+            let (cited, added) = crate::search::ask::cite_missing(&reply, &found.passages);
+            if added > 0 {
+                tracing::info!(added, "Chat: Yap put in citations the answer left out");
+                crate::ai::eval::post_fix("cited_by_yap");
+                reply = cited;
+            }
+        }
         if crate::search::ask::needs_uncited_note(&reply, passages.len()) {
             tracing::info!("Chat: the answer cited none of the passages; Yap says so under it");
             crate::ai::eval::post_fix("uncited_answer");

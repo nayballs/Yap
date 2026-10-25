@@ -93,10 +93,11 @@
   import Composer from './Composer.svelte';
 
   // Opens a Settings section (ControlPanel's openSettings): the chip's
-  // "Language model settings…".
-  let { onopensettings = null } = $props();
+  // "Language model settings…". `onopennote({id, line, ts, field})`: a
+  // passage an answer cites, opened in Notes at its line (ControlPanel).
+  let { onopensettings = null, onopennote = null } = $props();
 
-  const chat = createChatState({ onopensettings: () => onopensettings });
+  const chat = createChatState({ onopensettings: () => onopensettings, onopennote: () => onopennote });
 
   function onKeydown(e) {
     if (e.key === 'Escape' && chat.viewing) {

@@ -172,6 +172,8 @@ static STATE: Mutex<State> = Mutex::new(State { phase: Phase::Off, error: None, 
 pub struct Status {
     pub enabled: bool,
     pub installed: bool,
+    /// The on-device AI engine is here (else a download brings it too).
+    pub runtime_installed: bool,
     pub installing: bool,
     pub phase: Phase,
     pub error: Option<String>,
@@ -206,6 +208,7 @@ pub fn status() -> Status {
     Status {
         enabled: cfg.search_by_meaning,
         installed,
+        runtime_installed: embedder::runtime_installed(),
         installing: embedder::installing(),
         phase,
         error,
@@ -260,8 +263,22 @@ const SETTLE: Duration = Duration::from_secs(8);
 /// the processor a few seconds at most, so a dictation never waits long.
 const BATCH_GPU: usize = 16;
 const BATCH_CPU: usize = 4;
-/// Compact once this share of the store is passages that are gone.
+/// Compact once this share of the store is passages that are gone (edits
+/// leave their old passages' vectors behind until then)…
 const DEAD_SHARE: f32 = 0.3;
+/// …or at once when a note is gone: the notes the last pass saw.
+static SEEN: Mutex<Option<HashSet<u64>>> = Mutex::new(None);
+
+/// Is a note the last pass saw gone now? The first pass of a run says yes
+/// (a note may have been deleted while Yap or the search was off).
+/// Remembers `now` for the next.
+fn note_gone(seen: &Mutex<Option<HashSet<u64>>>, now: &[u64]) -> bool {
+    let now: HashSet<u64> = now.iter().copied().collect();
+    let mut seen = seen.lock().unwrap_or_else(|e| e.into_inner());
+    let gone = seen.as_ref().is_none_or(|before| before.iter().any(|id| !now.contains(id)));
+    *seen = Some(now);
+    gone
+}
 
 /// Notes changed (or the setting): a pass soon.
 pub fn poke() {
@@ -395,9 +412,12 @@ async fn pass(app: &AppHandle) -> Result<bool, String> {
         }
         tracing::info!(read = done, ms = t0.elapsed().as_millis() as u64, on = embedder::runs_on().unwrap_or("?"), "Meeting search: indexed");
     }
-    // The vectors of passages that are gone, once they're a good part of it.
+    // The vectors of passages that are gone: a deleted note's at once (its
+    // index goes with it), an edit's once they're a good part of it.
+    let ids: Vec<u64> = notes.iter().map(|n| n.id).collect();
+    let deleted = note_gone(&SEEN, &ids);
     let dead = with_store(|s| s.dead_share(&keep));
-    if dead > DEAD_SHARE {
+    if dead > DEAD_SHARE || (deleted && dead > 0.0) {
         match with_store(|s| s.compact(&keep)) {
             Ok(gone) => tracing::info!(gone, "Meeting search: dropped the vectors of passages that are gone"),
             Err(e) => tracing::warn!("Meeting search: couldn't compact the index: {e}"),
@@ -439,5 +459,15 @@ mod tests {
         // A note that's gone leaves the cache.
         prepared(&[]);
         assert!(with_cache(|c| !c.contains_key(&41)));
+    }
+
+    #[test]
+    fn a_deleted_note_sweeps_the_index_at_once() {
+        let seen = Mutex::new(None);
+        assert!(note_gone(&seen, &[1, 2, 3]), "a run's first pass sweeps (deleted while off)");
+        assert!(!note_gone(&seen, &[1, 2, 3]));
+        assert!(!note_gone(&seen, &[1, 2, 3, 4]), "a new note isn't a deletion");
+        assert!(note_gone(&seen, &[1, 3, 4]), "note 2 is gone");
+        assert!(!note_gone(&seen, &[1, 3, 4]));
     }
 }

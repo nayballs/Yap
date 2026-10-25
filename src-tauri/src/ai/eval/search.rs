@@ -432,7 +432,7 @@ pub async fn answers(c: &Corpus, ids: &HashMap<u64, u64>, label: &str, only: &[S
         super::record::set_context(json!({ "model": label, "scenario": format!("search: {}", q.q) }));
         super::record::begin_turn();
         let t0 = Instant::now();
-        let turn = crate::chat::turn::chat_turn(None, None, &q.q, Some("meetings"), false, |_, _| {}, None, None).await;
+        let turn = Box::pin(crate::chat::turn::chat_turn(None, None, &q.q, Some("meetings"), false, |_, _| {}, None, None)).await;
         let stats = super::record::end_turn();
         used += stats.total_tokens;
         asked += 1;
@@ -444,13 +444,13 @@ pub async fn answers(c: &Corpus, ids: &HashMap<u64, u64>, label: &str, only: &[S
             }
         };
         // The passages it was given (the search is the same again).
-        let found = ask::find(&q.q, ask::ASK_PASSAGES).await;
+        let found = Box::pin(ask::find(&q.q, ask::ASK_PASSAGES)).await;
         let nums = ask::cited_numbers(&turn.reply);
         let cites_gold = nums.iter().any(|n| found.passages.iter().any(|p| p.n == *n && hits(p, &q.gold, ids)));
-        // No answer there: it cites nothing and says so (Yap's own note
-        // under an uncited answer isn't the model saying so).
+        // No answer there: it says so first (Yap's own note under an
+        // uncited answer isn't the model saying so).
         let own = turn.reply.replace(ask::UNCITED_NOTE, "");
-        let pass = if q.gold.is_empty() { nums.is_empty() && !ask::needs_uncited_note(&own, 1) } else { cites_gold };
+        let pass = if q.gold.is_empty() { ask::says_not_found(&own) || (nums.is_empty() && !ask::needs_uncited_note(&own, 1)) } else { cites_gold };
         cited += usize::from(!nums.is_empty());
         gold_cited += usize::from(cites_gold);
         passed += usize::from(pass);

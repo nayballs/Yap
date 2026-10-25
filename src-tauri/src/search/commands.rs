@@ -24,6 +24,7 @@ pub async fn search_install(app: AppHandle) -> Result<Status, String> {
         index::emit(&app);
         return Err(e.clone());
     }
+    embedder::reset_failures();
     crate::shell::settings::change_config(&app, |c| {
         c.search_by_meaning = true;
         Ok(())
@@ -85,7 +86,19 @@ pub struct Moment {
     pub when: String,
     pub at: Option<String>,
     pub speaker: String,
+    /// The passage, line by line…
     pub text: String,
+    /// …and the line it opens at (its words).
+    pub quote: String,
+}
+
+/// The words of the line a passage opens at (its text's lines are its lines,
+/// after a heading). Pure.
+fn quote_of(p: &ask::Passage) -> String {
+    let text: Vec<&str> = p.text.lines().collect();
+    let skip = text.len().saturating_sub(p.lines.len());
+    let at = p.lines.iter().position(|&l| l == p.line).unwrap_or(0);
+    text.get(skip + at).or(text.first()).map(|s| s.to_string()).unwrap_or_default()
 }
 
 /// The moments in meetings and notes that match `query` (the Meetings view's
@@ -112,6 +125,7 @@ pub async fn search_moments(query: String, limit: Option<usize>) -> serde_json::
             at: p.at.clone(),
             speaker: p.speaker.clone(),
             text: p.text.clone(),
+            quote: quote_of(p),
         })
         .collect();
     serde_json::json!({

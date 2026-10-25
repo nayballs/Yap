@@ -386,7 +386,9 @@ pub fn best_line(lines: &[LineView], query: &[String], named: &[String], subject
     }
 }
 
-/// Cosine similarity (0 for an empty or zero vector). Pure.
+/// Cosine similarity (0 for an empty or zero vector): the model evaluations'
+/// (debug builds); the store's own is over its unit vectors. Pure.
+#[cfg(any(debug_assertions, test))]
 pub fn cosine(a: &[f32], b: &[f32]) -> f32 {
     let (mut dot, mut na, mut nb) = (0.0f32, 0.0f32, 0.0f32);
     for (x, y) in a.iter().zip(b) {
