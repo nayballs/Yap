@@ -43,6 +43,7 @@
 //! **Logs**: note ids, counts, lengths and sizes only — never a path, a
 //! title or a line.
 
+pub mod export;
 pub mod flac;
 pub mod redo;
 
@@ -223,18 +224,99 @@ impl Meta {
     }
 }
 
-fn read_meta(path: &Path) -> Option<Meta> {
-    serde_json::from_str(&std::fs::read_to_string(path).ok()?).ok()
+/// The recordings' notes (`<recording>.json`) are saved through
+/// `saving.rs` (atomically; a failure kept in memory, written again with the
+/// next save or Try again, and said once by the notice).
+pub static SAVER: crate::shell::saving::Saver =
+    crate::shell::saving::Saver::new("meeting-audio", "your meeting recording's details", save_unsaved);
+
+/// The notes that couldn't be saved yet, by (note, recording): written with
+/// the next save of any of them.
+fn unsaved() -> std::sync::MutexGuard<'static, std::collections::BTreeMap<(u64, u64), Meta>> {
+    static UNSAVED: LazyLock<Mutex<std::collections::BTreeMap<(u64, u64), Meta>>> = LazyLock::new(Default::default);
+    UNSAVED.lock().unwrap_or_else(|p| p.into_inner())
 }
 
-fn save_meta(meta: &Meta) {
-    let path = meta_path(meta.note_id, meta.recording);
-    let written = serde_json::to_string_pretty(meta)
-        .map_err(std::io::Error::other)
-        .and_then(|json| crate::config::atomic_write(&path, &json));
-    if let Err(e) = written {
-        tracing::warn!(note_id = meta.note_id, "Meeting audio: couldn't save its notes: {e}");
+/// A recording's notes, read. One that doesn't read as one (torn, or
+/// changed by hand) is set aside as it was (`<recording>.json.corrupt-<unix
+/// secs>`, never written over) and made again from its audio files, as a
+/// recording that ended — never offered as a crash's, since what it had
+/// transcribed isn't known.
+fn load_meta(note_id: u64, recording: u64) -> Option<Meta> {
+    let path = meta_path(note_id, recording);
+    let text = std::fs::read_to_string(&path).ok()?;
+    match serde_json::from_str::<Meta>(&text) {
+        Ok(meta) => Some(meta),
+        Err(_) => repair_meta(note_id, recording),
     }
+}
+
+fn repair_meta(note_id: u64, recording: u64) -> Option<Meta> {
+    // A recording being written now: its writer saves it again.
+    if recording_now(note_id, recording) {
+        return None;
+    }
+    let path = meta_path(note_id, recording);
+    let secs = now_ms() / 1000;
+    let aside = path.with_file_name(format!("{recording}.json.corrupt-{secs}"));
+    if std::fs::rename(&path, &aside).is_err() {
+        return None;
+    }
+    tracing::warn!(note_id, "Meeting audio: a recording's notes couldn't be read; set aside, and made again from its audio");
+    if !["you", "them"].iter().all(|side| audio_path(note_id, recording, side).is_file()) {
+        return None;
+    }
+    let you_len = count_from(note_id, recording, "you", 0);
+    let them_len = count_from(note_id, recording, "them", 0);
+    for (side, len) in [("you", you_len), ("them", them_len)] {
+        let _ = flac::set_header_samples(&audio_path(note_id, recording, side), len);
+    }
+    let meta = Meta {
+        note_id,
+        recording,
+        started_ms: recording,
+        ended_ms: Some(now_ms()),
+        keep: crate::config::load().meeting_keep_audio,
+        you_done: you_len,
+        them_done: them_len,
+        you_len,
+        them_len,
+        ..Default::default()
+    };
+    save_meta(&meta);
+    Some(meta)
+}
+
+/// Save a recording's notes (with any that couldn't be saved before).
+fn save_meta(meta: &Meta) {
+    let mut waiting = unsaved();
+    waiting.insert((meta.note_id, meta.recording), meta.clone());
+    let _ = write_waiting(&mut waiting);
+}
+
+/// Write every waiting note; the ones that failed stay waiting.
+fn write_waiting(waiting: &mut std::collections::BTreeMap<(u64, u64), Meta>) -> Result<(), crate::shell::saving::SaveError> {
+    // A recording deleted meanwhile has nothing left to describe (and its
+    // folder isn't made again for it).
+    waiting.retain(|&(note_id, recording), _| audio_path(note_id, recording, "you").is_file());
+    let keys: Vec<(u64, u64)> = waiting.keys().copied().collect();
+    let files: Vec<(PathBuf, String)> = waiting
+        .values()
+        .map(|m| (meta_path(m.note_id, m.recording), serde_json::to_string_pretty(m).unwrap_or_default()))
+        .collect();
+    let (failed, result) = SAVER.write_each(&files);
+    let failed: BTreeSet<(u64, u64)> = failed.into_iter().map(|i| keys[i]).collect();
+    waiting.retain(|k, _| failed.contains(k));
+    if let Err(e) = &result {
+        tracing::warn!(waiting = waiting.len(), reason = ?e.reason, "Meeting audio: a recording's notes couldn't be saved; kept in memory");
+    }
+    result
+}
+
+/// Try again: every recording's notes that couldn't be saved.
+fn save_unsaved() -> Result<(), crate::shell::saving::SaveError> {
+    write_waiting(&mut unsaved())?;
+    SAVER.check()
 }
 
 /// A note's recordings with audio, oldest first.
@@ -247,7 +329,7 @@ pub fn recordings(note_id: u64) -> Vec<Meta> {
         .filter_map(|e| {
             let name = e.file_name().to_string_lossy().to_string();
             let id = id_of(name.strip_suffix(".json")?)?;
-            let meta = read_meta(&e.path())?;
+            let meta = load_meta(note_id, id)?;
             let both = ["you", "them"].iter().all(|side| audio_path(note_id, id, side).is_file());
             (both && meta.recording == id && meta.note_id == note_id).then_some(meta)
         })
@@ -274,11 +356,28 @@ fn recording_bytes(note_id: u64, recording: u64) -> u64 {
         + std::fs::metadata(meta_path(note_id, recording)).map(|m| m.len()).unwrap_or(0)
 }
 
+/// Bytes the recordings of note `note_id` being written now take (the
+/// disk watch's measure of a meeting's bytes a minute, `disk_watch.rs`).
+pub fn live_bytes(note_id: u64) -> u64 {
+    let live: Vec<u64> = live().iter().filter(|(n, _)| *n == note_id).map(|(_, r)| *r).collect();
+    live.into_iter().map(|r| recording_bytes(note_id, r)).sum()
+}
+
 fn delete_recording(note_id: u64, recording: u64) {
     for side in ["you", "them"] {
         let _ = std::fs::remove_file(audio_path(note_id, recording, side));
     }
     let _ = std::fs::remove_file(meta_path(note_id, recording));
+    unsaved().remove(&(note_id, recording));
+    // A copy of its notes set aside as unreadable goes too.
+    let aside = format!("{recording}.json.corrupt-");
+    if let Ok(entries) = std::fs::read_dir(note_dir(note_id)) {
+        for e in entries.flatten() {
+            if e.file_name().to_string_lossy().starts_with(&aside) {
+                let _ = std::fs::remove_file(e.path());
+            }
+        }
+    }
     // The note's folder goes with its last recording.
     let _ = std::fs::remove_dir(note_dir(note_id));
     // Nothing of it is waiting to be recovered any more.
@@ -540,6 +639,24 @@ pub fn to_drop(all: &[Kept], now_ms: u64, keep_ms: u64, max_bytes: u64) -> Vec<(
     out
 }
 
+/// The recordings in a note's folder, by their files' names (with or
+/// without their notes or both sides).
+fn recording_ids(note_id: u64) -> BTreeSet<u64> {
+    let mut ids: BTreeSet<u64> = BTreeSet::new();
+    let Ok(entries) = std::fs::read_dir(note_dir(note_id)) else { return ids };
+    for e in entries.flatten() {
+        let name = e.file_name().to_string_lossy().to_string();
+        let stem = name
+            .strip_suffix(".json")
+            .or_else(|| name.strip_suffix("-you.flac"))
+            .or_else(|| name.strip_suffix("-them.flac"));
+        if let Some(id) = stem.and_then(id_of) {
+            ids.insert(id);
+        }
+    }
+    ids
+}
+
 /// Every recording kept, as [`to_drop`] sees it.
 fn kept_all() -> Vec<Kept> {
     let notes: BTreeSet<u64> = crate::notes::all().iter().map(|n| n.id).collect();
@@ -548,20 +665,8 @@ fn kept_all() -> Vec<Kept> {
     let known = |id: u64| notes.is_empty() || notes.contains(&id);
     let mut out = Vec::new();
     for note_id in notes_with_audio() {
-        let Ok(entries) = std::fs::read_dir(note_dir(note_id)) else { continue };
-        let mut ids: BTreeSet<u64> = BTreeSet::new();
-        for e in entries.flatten() {
-            let name = e.file_name().to_string_lossy().to_string();
-            let stem = name
-                .strip_suffix(".json")
-                .or_else(|| name.strip_suffix("-you.flac"))
-                .or_else(|| name.strip_suffix("-them.flac"));
-            if let Some(id) = stem.and_then(id_of) {
-                ids.insert(id);
-            }
-        }
-        for recording in ids {
-            let meta = read_meta(&meta_path(note_id, recording));
+        for recording in recording_ids(note_id) {
+            let meta = load_meta(note_id, recording);
             let started_ms = meta.as_ref().map(|m| m.started_ms).unwrap_or(recording);
             out.push(Kept {
                 note_id,
@@ -577,9 +682,39 @@ fn kept_all() -> Vec<Kept> {
     out
 }
 
-/// How long audio is kept now (ms).
+/// How long audio is kept now (ms): its own days, or fewer when meeting
+/// transcripts are deleted sooner ("Delete meeting transcripts after",
+/// `notes/retention.rs`): a meeting's audio never outlives its transcript.
 fn keep_ms(cfg: &crate::config::YapConfig) -> u64 {
-    cfg.meeting_audio_days.max(1) as u64 * 24 * 60 * 60 * 1000
+    keep_days(cfg.meeting_audio_days, cfg.meeting_transcript_days) as u64 * 24 * 60 * 60 * 1000
+}
+
+/// The days audio is kept (pure): `audio_days` (at least 1), or
+/// `transcript_days` when that's set and shorter.
+pub fn keep_days(audio_days: u32, transcript_days: u32) -> u32 {
+    let audio = audio_days.max(1);
+    if transcript_days > 0 {
+        audio.min(transcript_days)
+    } else {
+        audio
+    }
+}
+
+/// Note `note_id`'s transcript was deleted after its days
+/// (`notes/retention.rs`): its audio goes with it — every recording but one
+/// being written now — and nothing of it waits to be recovered.
+pub fn drop_audio(note_id: u64) {
+    let mut n = 0;
+    for recording in recording_ids(note_id) {
+        if !recording_now(note_id, recording) {
+            delete_recording(note_id, recording);
+            n += 1;
+        }
+    }
+    pending().retain(|m| m.note_id != note_id);
+    if n > 0 {
+        tracing::info!(note_id, recordings = n, "Meeting audio: deleted with the meeting's transcript");
+    }
 }
 
 /// Drop the audio past its time, a deleted note's, and leftovers.
@@ -1548,6 +1683,12 @@ mod tests {
         // Audio not to be kept, held for a refine: a day at most.
         let held = [Kept { held: true, ..k(6, 60, 2, 5) }, Kept { held: true, started_ms: now - HELD_MS / 2, ..k(7, 70, 0, 5) }];
         assert_eq!(to_drop(&held, now, keep, u64::MAX), vec![(6, 60)]);
+        // Audio never outlives its meeting's transcript ("Delete meeting
+        // transcripts after", notes/retention.rs): the shorter of the two.
+        assert_eq!(keep_days(14, 0), 14);
+        assert_eq!(keep_days(90, 30), 30);
+        assert_eq!(keep_days(14, 365), 14);
+        assert_eq!(keep_days(0, 0), 1);
     }
 
     #[test]
@@ -1700,6 +1841,52 @@ mod tests {
             r.transcript.len(),
         );
         assert!(!out.cancelled);
+        let _ = std::fs::remove_dir_all(root());
+    }
+
+    /// A recording's notes go through `saving.rs`: a failed save is kept
+    /// and written with the next one; one that doesn't read is set aside
+    /// and made again from the audio, never offered as a crash's.
+    #[test]
+    fn a_recordings_notes_are_saved_safely_and_a_torn_one_is_made_again() {
+        let _ = std::fs::remove_dir_all(root());
+        let (note_id, recording) = (51, new_id());
+        std::fs::create_dir_all(note_dir(note_id)).unwrap();
+        for side in ["you", "them"] {
+            let mut w = flac::Writer::create(&audio_path(note_id, recording, side)).unwrap();
+            w.push(&tone(3.0)).unwrap();
+            w.finish().unwrap();
+        }
+        let meta = Meta { note_id, recording, started_ms: recording, keep: true, ended_ms: Some(recording + 3_000), ..Default::default() };
+        // The disk is full: kept in memory, the store unsaved.
+        crate::shell::saving::stage_failures("meeting-audio", 1);
+        save_meta(&meta);
+        assert!(SAVER.unsaved());
+        assert!(!meta_path(note_id, recording).exists());
+        assert_eq!(unsaved().len(), 1);
+        // Try again writes it.
+        assert!(save_unsaved().is_ok());
+        assert!(!SAVER.unsaved() && unsaved().is_empty());
+        assert_eq!(load_meta(note_id, recording), Some(meta.clone()));
+
+        // Torn: set aside as it was, and made again from the files.
+        std::fs::write(meta_path(note_id, recording), "{\"noteId\": 51, \"recor").unwrap();
+        let found = recordings(note_id);
+        assert_eq!(found.len(), 1);
+        let m = &found[0];
+        assert!(m.ended_ms.is_some(), "never offered as a crash's");
+        assert_eq!(m.you_len, m.you_done);
+        assert!(m.you_len >= 2 * RATE);
+        let aside: Vec<String> = std::fs::read_dir(note_dir(note_id))
+            .unwrap()
+            .flatten()
+            .map(|e| e.file_name().to_string_lossy().to_string())
+            .filter(|n| n.contains(".json.corrupt-"))
+            .collect();
+        assert_eq!(aside.len(), 1, "the unreadable copy, kept");
+        // Deleting the recording takes the copy too, and the folder.
+        forget(note_id);
+        assert!(!note_dir(note_id).exists());
         let _ = std::fs::remove_dir_all(root());
     }
 

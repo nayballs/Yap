@@ -11,12 +11,14 @@
 // - "Transcribe again…" behind the window's confirm dialog
 //   (ui/ConfirmDialog via askConfirm), and the crash banner's "Transcribe it";
 // - a transcript line's ▶ (`meeting_audio_clip`: both sides of its stretch,
-//   as a WAV), one line playing at a time.
+//   as a WAV), one line playing at a time;
+// - "Export audio…" (`exportAudio`, meetings/meeting_audio/export.rs): the
+//   Save dialog, then one mixed file or both sides, with its progress.
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { SvelteSet } from 'svelte/reactivity';
 import { askConfirm } from '../ui/contextMenu.svelte.js';
-import { toast } from '../ui/toast.svelte.js';
+import { toast, updateToast, dismiss } from '../ui/toast.svelte.js';
 
 export const meetingAudio = $state({
   /** noteId → `NoteAudio` (meetings/meeting_audio.rs). */
@@ -231,10 +233,62 @@ export async function recoverMeeting(noteId) {
   }
 }
 
+/** Why "Export audio…" can't run on `note` now (null: it can). */
+export function cantExportAudio(note, recordingThis) {
+  const a = meetingAudio.byNote[note?.id];
+  if (recordingThis) return 'After the meeting';
+  if (a && !a.recordings) return "This meeting's audio isn't kept";
+  return null;
+}
+
+/**
+ * "Export audio…" on `note`: Windows' Save dialog (FLAC, or WAV by the name
+ * picked; opened by Rust over this window), then one file with both sides
+ * mixed — or, `separate`, "<name> - You" and "<name> - Them" beside it —
+ * with a progress toast once it's writing. Resolves to what was written
+ * (`{ files, secs, bytes }`), or null (cancelled, or it failed: said).
+ */
+export async function exportAudio(note, { separate = false } = {}) {
+  if (!note) return null;
+  let id = null;
+  const unlisten = await listen('yap-meeting-audio-export', (e) => {
+    if (e.payload?.noteId !== note.id || e.payload.state !== 'running') return;
+    if (id == null) {
+      id = toast({
+        title: separate ? 'Exporting both sides' : 'Exporting the audio',
+        description: 'On this PC: nothing is uploaded.',
+        key: `audio-export-${note.id}`,
+        busy: true,
+        progress: e.payload.percent,
+        duration: 0,
+      });
+    } else updateToast(id, { progress: e.payload.percent });
+  });
+  try {
+    const r = await invoke('meeting_audio_export', { noteId: note.id, separate });
+    if (id != null) dismiss(id);
+    if (!r) return null; // cancelled
+    const names = (r?.files || []).map((f) => f.split(/[\\/]/).pop());
+    toast({
+      title: 'Audio exported',
+      description: names.join(' and '),
+      variant: 'success',
+      key: `audio-exported-${note.id}`,
+    });
+    return r;
+  } catch (e) {
+    if (id != null) dismiss(id);
+    toast({ title: "Couldn't export the audio", description: String(e), variant: 'destructive' });
+    return null;
+  } finally {
+    unlisten();
+  }
+}
+
 /** Whether line `seg` can be played (placed on its recording's clock, the audio kept). */
 export function canPlay(noteId, seg) {
   const a = meetingAudio.byNote[noteId];
-  return !!a?.recordings && seg?.startMs != null && seg?.endMs != null && !seg.dictated && !seg.failed;
+  return !!a?.recordings && seg?.startMs != null && seg?.endMs != null && !seg.dictated && !seg.failed && !seg.removed;
 }
 
 let player = null;

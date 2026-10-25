@@ -11,7 +11,7 @@
   import { toast } from '../ui/toast.svelte.js';
   import { openExternalLink } from '../core/externalLinks.js';
   import { noteMarkdown, noteText, mailtoUrl } from '../core/notepadText.js';
-  import { refreshAudio, cantTranscribeAgain, askTranscribeAgain } from '../stores/meetingAudio.svelte.js';
+  import { refreshAudio, cantTranscribeAgain, askTranscribeAgain, cantExportAudio, exportAudio } from '../stores/meetingAudio.svelte.js';
   import { copyToClipboard, openSettings, openNoteInYap } from './actions.js';
   import Icon from './NotepadIcon.svelte';
 
@@ -90,6 +90,14 @@
     onflushsave();
     await refreshAudio(note.id);
     askTranscribeAgain(note, { title: note.title?.trim() || '' });
+  }
+  // ⋯ → Export audio… (one file, both sides mixed) or Export each side…
+  async function exportMeetingAudio(separate) {
+    menu = null;
+    if (!note) return;
+    await refreshAudio(note.id);
+    if (cantExportAudio(note, recordingThis)) return;
+    exportAudio(note, { separate });
   }
   /** Back: the note in the main window's Notes view. */
   function openInYap() {
@@ -183,6 +191,25 @@
                 title={cantTranscribeAgain(note, recordingThis) || 'With the speech model you use now'}
               >
                 <Icon name="redo" /><span>Transcribe again</span>
+              </button>
+              <!-- The meeting's kept audio, where you pick (meetings/meeting_audio/export.rs). -->
+              <button
+                role="menuitem"
+                class="item"
+                onclick={() => exportMeetingAudio(false)}
+                disabled={!!cantExportAudio(note, recordingThis)}
+                title={cantExportAudio(note, recordingThis) || 'Both sides in one file (FLAC or WAV)'}
+              >
+                <Icon name="audio" /><span>Export audio…</span>
+              </button>
+              <button
+                role="menuitem"
+                class="item"
+                onclick={() => exportMeetingAudio(true)}
+                disabled={!!cantExportAudio(note, recordingThis)}
+                title={cantExportAudio(note, recordingThis) || 'You and Them as two files'}
+              >
+                <Icon name="audio" /><span>Export each side…</span>
               </button>
             {/if}
             <button role="menuitem" class="item danger" onclick={askDelete}>

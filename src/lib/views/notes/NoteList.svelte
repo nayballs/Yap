@@ -8,7 +8,7 @@
   import { toast } from '../../ui/toast.svelte.js';
   import { openContextMenu, menuKey, menuOpenFor, askConfirm, devInspect } from '../../ui/contextMenu.svelte.js';
   import { showSaveError } from '../../notices/saveErrors.js';
-  import { refreshAudio, cantTranscribeAgain, askTranscribeAgain } from '../../stores/meetingAudio.svelte.js';
+  import { refreshAudio, cantTranscribeAgain, askTranscribeAgain, cantExportAudio, exportAudio } from '../../stores/meetingAudio.svelte.js';
   import { displayTitle, relTime, dateOf } from './noteFormat.js';
 
   /** `notes`: the view's state (notesState.svelte.js). */
@@ -200,6 +200,13 @@
                 onselect: () => transcribeAgain(n),
               },
               ...(cantTranscribeAgain(n, recording) ? [{ note: cantTranscribeAgain(n, recording) }] : []),
+              // Its kept audio, where you pick (meetings/meeting_audio/export.rs).
+              {
+                label: 'Export audio…',
+                icon: 'audio',
+                disabled: !!cantExportAudio(n, recording),
+                onselect: () => exportAudio(n),
+              },
             ]
           : []),
         { separator: true },
