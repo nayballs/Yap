@@ -408,6 +408,16 @@ pub fn take_context() -> Option<FieldContext> {
     }
 }
 
+/// The text before the caret read for the dictation now, if the read is
+/// done — left for [`take_context`] (AI cleanup's context,
+/// `ai/cleanup_context.rs`; never waited for).
+pub fn peek_before() -> Option<String> {
+    match &session().reading {
+        Reading::Done(Some(ctx)) => Some(ctx.before.clone()),
+        _ => None,
+    }
+}
+
 /// Read the text around the caret in the focused field now (on this thread,
 /// each UI Automation call time-boxed). `target_hwnd`: the field must be in
 /// that window's process, or it isn't the one Yap will paste into. `None`

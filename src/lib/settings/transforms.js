@@ -90,3 +90,22 @@ export function newTransform(name, instruction) {
     language: '',
   };
 }
+
+/** Where a transform on every dictation runs (`autoTransformKind`): every
+ *  app, or one kind of app (ai/cleanup_styles.rs's kinds; never a terminal). */
+export const EVERY_KINDS = [
+  { value: '', label: 'In every app' },
+  { value: 'email', label: 'In email' },
+  { value: 'workChat', label: 'In work chat' },
+  { value: 'personalChat', label: 'In personal chat' },
+  { value: 'documents', label: 'In documents' },
+  { value: 'aiPrompts', label: 'In AI prompts' },
+  { value: 'other', label: 'Everywhere else' },
+];
+
+/** The line under "Run on every dictation". */
+export function everyLine(t, kind) {
+  if (!t) return 'Off. Pick a transform to run after cleanup on what you dictate';
+  const where = EVERY_KINDS.find((k) => k.value === (kind || ''))?.label.toLowerCase() || 'in every app';
+  return `${transformName(t)} runs after cleanup on each dictation ${where}, never in a terminal`;
+}

@@ -6,6 +6,9 @@
 
 pub mod about_you;
 pub mod ai_model;
+pub mod cleanup_context;
+pub mod cleanup_format;
+pub mod cleanup_strength;
 pub mod cleanup_styles;
 pub mod commands;
 pub mod eval;

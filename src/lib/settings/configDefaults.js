@@ -114,6 +114,16 @@ export const FIELD_DEFAULTS = {
   cleanupProfiles: [],
   // Styles by app (settings/CleanupStyles.svelte, ai/cleanup_styles.rs).
   cleanupStyles: true,
+  // Cleanup strength (ai/cleanup_strength.rs): light | medium | high; None
+  // is cleanup off.
+  cleanupStrength: 'medium',
+  // The text before the cursor to a cleanup model off this PC
+  // (ai/cleanup_context.rs; Privacy & data).
+  cursorContextCloud: false,
+  // A transform on every dictation (dictation/transforms.rs): its id, and
+  // the kind of app ('' = every app).
+  autoTransform: '',
+  autoTransformKind: '',
   llmScopes: {},
   agentName: '',
   editHotkey: '',

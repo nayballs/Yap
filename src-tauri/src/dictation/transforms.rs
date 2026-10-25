@@ -338,6 +338,56 @@ pub fn clean_output(out: &str) -> String {
     t.to_string()
 }
 
+// ---- A transform on every dictation ----------------------------------------------------
+
+/// **A transform on every dictation** (`config.auto_transform`, Settings →
+/// Commands → Transforms; optional, off by default): the transform to run
+/// after AI cleanup on a dictation into `kind` (`cleanup_styles::category`),
+/// or `None` — none picked, one that can't run, another kind than the one
+/// picked (`auto_transform_kind`), or a terminal (its text is a command;
+/// transforms never work there). Pure.
+///
+/// It runs **once**, in the dictation's cleanup step
+/// (`pipeline::clean_up`), on what the style's cleanup wrote: its result is
+/// never cleaned or transformed again, a transform's own shortcut never
+/// starts it (no dictation is delivered), a language shortcut that
+/// translates skips cleanup and it, and Run again runs it once on the fresh
+/// transcript. "Use what I said" swaps the paste back to the words as said.
+pub fn for_dictation(cfg: &YapConfig, kind: crate::ai::cleanup_styles::Category, terminal: bool) -> Option<Transform> {
+    let id = cfg.auto_transform.trim();
+    if id.is_empty() || terminal || kind == crate::ai::cleanup_styles::Category::Terminal {
+        return None;
+    }
+    let only = cfg.auto_transform_kind.trim();
+    if !only.is_empty() && only != kind.id() {
+        return None;
+    }
+    find(cfg, id)
+}
+
+/// Run `t` on a dictation's `text` (after its cleanup) on the Commands
+/// scope's model, as a dictation's AI call: the result, or why not (no
+/// model set up, the AI failed or wrote nothing) — the caller pastes `text`
+/// then. The log says which transform and lengths, never the text.
+pub async fn run_on_dictation(cfg: &YapConfig, t: &Transform, text: &str) -> Result<String, String> {
+    let m = crate::dictation::pipeline::commands_model(cfg);
+    let keyed = crate::ai::ai_model::KEYED_PROVIDERS.contains(&m.provider.as_str());
+    if m.base_url.is_empty() || (keyed && m.api_key.is_empty()) {
+        return Err("no AI model is set up".into());
+    }
+    let asked = crate::privacy::net::within(
+        crate::privacy::net::Feature::Dictation,
+        crate::ai::llm::transform(&t.instruction(), text, &m.base_url, &m.api_key, &m.model, &m.provider, m.disable_thinking),
+    )
+    .await?;
+    let out = clean_output(&asked);
+    if out.trim().is_empty() {
+        return Err("the AI wrote nothing".into());
+    }
+    tracing::info!(transform = %kind_of(t), chars = out.chars().count(), "A transform on every dictation: done");
+    Ok(out)
+}
+
 /// Where a transform was asked for.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -820,6 +870,27 @@ mod tests {
     fn with_key(mut t: Transform, hotkey: &str) -> Transform {
         t.hotkey = hotkey.into();
         t
+    }
+
+    #[test]
+    fn a_transform_on_every_dictation_is_off_by_default_and_never_in_a_terminal() {
+        use crate::ai::cleanup_styles::Category;
+        let cfg: YapConfig = serde_json::from_str("{}").unwrap();
+        assert_eq!(cfg.auto_transform, "");
+        assert!(for_dictation(&cfg, Category::Email, false).is_none(), "off by default");
+        let mut cfg = YapConfig { auto_transform: POLISH.into(), ..Default::default() };
+        assert_eq!(for_dictation(&cfg, Category::Email, false).map(|t| t.name()).as_deref(), Some("Polish"));
+        assert_eq!(for_dictation(&cfg, Category::Other, false).map(|t| t.name()).as_deref(), Some("Polish"));
+        // Never a terminal's command, by its kind or by what was read.
+        assert!(for_dictation(&cfg, Category::Terminal, false).is_none());
+        assert!(for_dictation(&cfg, Category::Other, true).is_none());
+        // One kind of app only.
+        cfg.auto_transform_kind = "email".into();
+        assert!(for_dictation(&cfg, Category::Email, false).is_some());
+        assert!(for_dictation(&cfg, Category::WorkChat, false).is_none());
+        // One that can't run (deleted): none.
+        cfg.auto_transform = "t-gone".into();
+        assert!(for_dictation(&cfg, Category::Email, false).is_none());
     }
 
     #[test]

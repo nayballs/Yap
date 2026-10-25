@@ -8,7 +8,10 @@
   // the order is the tray's Transforms menu too. Each shortcut in Yap's
   // keycaps, checked against the seven fixed shortcuts and the other
   // transforms' (`validateTransformHotkey`), its live binding paused while
-  // a key is picked. Auto-save does the saving (Settings' copy of config).
+  // a key is picked. Last, "Run on every dictation" (`autoTransform`, off by
+  // default; `transforms::for_dictation`): one transform after cleanup on
+  // every dictation, or only in one kind of app. Auto-save does the saving
+  // (Settings' copy of config).
   //
   //   cfg: Settings' config $state.
   import { tick } from 'svelte';
@@ -17,9 +20,10 @@
   import Input from '../ui/Input.svelte';
   import Textarea from '../ui/Textarea.svelte';
   import Button from '../ui/Button.svelte';
+  import Row from '../ui/Row.svelte';
   import ConfirmDialog from '../ui/ConfirmDialog.svelte';
   import { onTransformCapturing, validateTransformHotkey } from './hotkeys.svelte.js';
-  import { BUILTINS, LANGUAGES, MAX_TRANSFORMS, defaultTransforms, newTransform, transformName } from './transforms.js';
+  import { BUILTINS, EVERY_KINDS, LANGUAGES, MAX_TRANSFORMS, defaultTransforms, everyLine, newTransform, transformName } from './transforms.js';
 
   let { cfg } = $props();
 
@@ -102,12 +106,19 @@
 
   function doDelete() {
     if (deleting) cfg.transforms = list.filter((x) => x.id !== deleting.id);
+    // The one on every dictation goes with it.
+    if (deleting && cfg.autoTransform === deleting.id) cfg.autoTransform = '';
     confirmOpen = false;
     deleting = null;
     tick().then(() => addEl?.focus?.({ preventScroll: true }));
   }
 
   const line = (t) => (t.builtin ? BUILTINS[t.builtin]?.line || '' : t.instruction);
+
+  // "Run on every dictation": one of the list (one deleted since: none).
+  const everyT = $derived(list.find((t) => t.id === cfg.autoTransform) || null);
+  const everyOptions = $derived([{ value: '', label: 'None' }, ...list.map((t) => ({ value: t.id, label: transformName(t) }))]);
+  const everyKind = $derived(EVERY_KINDS.some((k) => k.value === cfg.autoTransformKind) ? cfg.autoTransformKind : '');
 </script>
 
 <div class="transforms" data-setting="transforms">
@@ -175,6 +186,19 @@
     <p class="full" data-setting="transform-add">That's {MAX_TRANSFORMS} transforms, the most Yap keeps. Delete one to add another.</p>
   {/if}
 </div>
+
+<Row
+  label="Run on every dictation"
+  desc={everyLine(everyT, everyKind)}
+  hint="One more AI call for each dictation, on the Commands model. “Use what I said” puts back your own words."
+  setting="transform-every"
+  stack
+>
+  <div class="every">
+    <Select bind:value={() => (everyT ? everyT.id : ''), (v) => (cfg.autoTransform = v)} options={everyOptions} ariaLabel="Transform on every dictation" />
+    <Select bind:value={() => everyKind, (v) => (cfg.autoTransformKind = v)} options={EVERY_KINDS} ariaLabel="Where it runs" disabled={!everyT} />
+  </div>
+</Row>
 
 {#snippet form(verb)}
   <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
@@ -356,6 +380,11 @@
   .actions {
     display: flex;
     justify-content: flex-end;
+    gap: 8px;
+  }
+  .every {
+    display: flex;
+    flex-wrap: wrap;
     gap: 8px;
   }
   @media (max-width: 720px) {

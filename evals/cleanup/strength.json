@@ -1,0 +1,263 @@
+{
+  "description": "Cleanup strength, smart formatting and the text before the cursor (ai/cleanup_strength.rs, ai/cleanup_format.rs, ai/cleanup_context.rs), for `yap.exe eval --strength`: dictations as speech-to-text writes them, each cleaned through the dictation's own code (`cleanup_styles::resolve` for a stand-in app of its kind, then `cleanup_styles::clean`) twice: **before** (the call every dictation made until 25 Oct 2026: Medium, no formatting line, no text before the cursor) and **after** (the case's strength, the formatting line when a list or an email frame is said, the text before the cursor in `before`). A case with `before` is judged after `smart_insert::fit_to_context` — what the field ends up with. `group`: strength | format | cursor. `strength`: light | medium | high (default medium). `category`: a kind of app (default other), `tone` one of its tones (default its own). `quick`: the cases a cloud model's run keeps (`--strength-quick`). Checks: those of styles.json (`has`, `has_any`, `not`, `exact`, `starts_with`, `lines_min`, `lowercase`, `keep`, `no_final_period`, `empty`, `max_words`), plus `keeps_words` (every word said but filler sounds and stutters is kept, at most `added_max` words added — default 1; apostrophes ignored, a number word may be a digit), `ratio_max` / `ratio_min` (its words against the dictation's, fillers out), `list_items` (at least n lines starting \"1.\", \"-\", \"*\" or \"•\"), `no_list` (one paragraph, no list line), `ends_with`, `not_starts_with` (any case), `first_line_max_words`, `last_line_has_any`. People and places are fictional.",
+  "cases": [
+    {
+      "name": "light-ramble-keeps-words",
+      "group": "strength",
+      "strength": "light",
+      "quick": true,
+      "text": "so um basically i was thinking that we should probably uh move the the team meeting to thursday because you know half of the people are going to be away on wednesday",
+      "checks": { "keeps_words": true, "has": ["basically", "probably", "Thursday", "Wednesday"], "not": ["um", "uh", "the the"] }
+    },
+    {
+      "name": "medium-ramble",
+      "group": "strength",
+      "strength": "medium",
+      "text": "so um basically i was thinking that we should probably uh move the the team meeting to thursday because you know half of the people are going to be away on wednesday",
+      "checks": { "has": ["Thursday", "Wednesday", "meeting"], "not": ["um", "uh", "the the", "you know"] }
+    },
+    {
+      "name": "high-ramble-tighter",
+      "group": "strength",
+      "strength": "high",
+      "quick": true,
+      "text": "so um basically i was thinking that we should probably uh move the the team meeting to thursday because you know half of the people are going to be away on wednesday",
+      "checks": { "has": ["Thursday", "Wednesday", "meeting"], "not": ["um", "uh", "basically", "you know"], "ratio_max": 0.75 }
+    },
+    {
+      "name": "light-grammar-stays",
+      "group": "strength",
+      "strength": "light",
+      "quick": true,
+      "text": "me and him was going to the shop but it were closed so we goes home",
+      "checks": { "keeps_words": true, "has": ["it were", "we goes"] }
+    },
+    {
+      "name": "medium-grammar-fixed",
+      "group": "strength",
+      "strength": "medium",
+      "text": "me and him was going to the shop but it were closed so we goes home",
+      "checks": { "not": ["it were", "we goes"] }
+    },
+    {
+      "name": "light-bug-report",
+      "group": "strength",
+      "strength": "light",
+      "text": "okay so the bug is that when you click save twice really fast it um it creates two copies of the same note and then the second one doesn't have a title",
+      "checks": { "keeps_words": true, "added_max": 2, "has": ["twice", "really fast", "second one"] }
+    },
+    {
+      "name": "high-bug-report",
+      "group": "strength",
+      "strength": "high",
+      "text": "okay so the bug is that when you click save twice really fast it um it creates two copies of the same note and then the second one doesn't have a title",
+      "checks": { "has_any": [["save", "Save"], ["twice", "two"], ["title"]], "not": ["um", "okay so"], "ratio_max": 0.9 }
+    },
+    {
+      "name": "high-keeps-voice",
+      "group": "strength",
+      "strength": "high",
+      "text": "honestly i'm super excited about this launch it's gonna be awesome and i can't wait to show everyone what we built",
+      "checks": { "has": ["excited", "launch"], "has_any": [["can't wait", "cannot wait"]], "not": ["thrilled", "delighted", "Dear"], "ratio_min": 0.5 }
+    },
+    {
+      "name": "high-adds-nothing",
+      "group": "strength",
+      "strength": "high",
+      "text": "can you send me the q3 numbers for northwind before friday",
+      "checks": { "has": ["Q3", "Northwind", "Friday"], "not": ["please", "thank", "thanks"], "max_words": 13 }
+    },
+    {
+      "name": "high-clean-stays",
+      "group": "strength",
+      "strength": "high",
+      "text": "The invoice for October is attached. Let me know if anything looks off.",
+      "checks": { "has": ["invoice", "October", "attached"], "ratio_min": 0.7 }
+    },
+    {
+      "name": "light-clean-stays",
+      "group": "strength",
+      "strength": "light",
+      "text": "The invoice for October is attached. Let me know if anything looks off.",
+      "checks": { "exact": "The invoice for October is attached. Let me know if anything looks off." }
+    },
+    {
+      "name": "light-email-formal-keeps-contractions",
+      "group": "strength",
+      "strength": "light",
+      "category": "email",
+      "tone": "formal",
+      "text": "hi tom i'll send the report tomorrow i can't do it today",
+      "checks": { "keeps_words": true, "has_any": [["I'll"], ["can't"]] }
+    },
+    {
+      "name": "list-ordinals",
+      "group": "format",
+      "quick": true,
+      "text": "for the offsite we need three things first book the venue second sort out the catering and third send the invites by friday",
+      "checks": { "list_items": 3, "has": ["venue", "catering", "invites", "Friday"] }
+    },
+    {
+      "name": "list-one-two-three",
+      "group": "format",
+      "quick": true,
+      "text": "my priorities this week are one finish the budget two hire the designer three fix the login bug",
+      "checks": { "list_items": 3, "has": ["budget", "designer", "login bug"] }
+    },
+    {
+      "name": "list-bullet-points",
+      "group": "format",
+      "quick": true,
+      "text": "bullet points milk eggs bread and coffee",
+      "checks": { "list_items": 4, "has": ["milk", "eggs", "bread", "coffee"], "not": ["bullet"] }
+    },
+    {
+      "name": "list-number-one",
+      "group": "format",
+      "text": "the steps are number one open settings number two click privacy number three turn off tracking",
+      "checks": { "list_items": 3, "has": ["Settings", "Privacy", "tracking"] }
+    },
+    {
+      "name": "list-firstly",
+      "group": "format",
+      "text": "firstly we're over budget secondly the deadline moved and lastly two people are off sick",
+      "checks": { "list_items": 3, "has": ["budget", "deadline", "sick"] }
+    },
+    {
+      "name": "list-high",
+      "group": "format",
+      "strength": "high",
+      "text": "um so the plan is first we finish the design then second we test it with five users and third we ship it in may",
+      "checks": { "list_items": 3, "has": ["design", "five", "May"], "has_any": [["test"]] }
+    },
+    {
+      "name": "no-list-pets",
+      "group": "format",
+      "text": "i have one cat two dogs and three fish",
+      "checks": { "no_list": true, "has_any": [["cat"], ["dogs"], ["fish"]] }
+    },
+    {
+      "name": "no-list-first-time",
+      "group": "format",
+      "text": "the first time i used it i thought it was broken but the second time it worked fine",
+      "checks": { "no_list": true, "has": ["first time", "second time"] }
+    },
+    {
+      "name": "no-list-floors",
+      "group": "format",
+      "text": "the first and second floors are closed for painting until friday",
+      "checks": { "no_list": true, "has": ["first and second floors", "Friday"] }
+    },
+    {
+      "name": "no-list-race",
+      "group": "format",
+      "text": "we came second in the first round but won the third",
+      "checks": { "no_list": true, "has": ["second", "first round", "third"] }
+    },
+    {
+      "name": "no-list-times",
+      "group": "format",
+      "text": "the train leaves at two and gets in at three so i'll be there by four",
+      "checks": { "no_list": true }
+    },
+    {
+      "name": "email-layout-formal",
+      "group": "format",
+      "category": "email",
+      "tone": "formal",
+      "quick": true,
+      "text": "hi priya thanks for sending the contract over i've had a look and it all seems fine i'll sign it tomorrow best regards tom",
+      "checks": { "lines_min": 3, "first_line_max_words": 3, "has_any": [["Hi Priya", "Dear Priya", "Hello Priya"]], "last_line_has_any": ["Tom", "regards"], "not": ["["] }
+    },
+    {
+      "name": "email-layout-casual",
+      "group": "format",
+      "category": "email",
+      "tone": "casual",
+      "text": "hey sam just checking you got the slides for monday cheers",
+      "checks": { "lines_min": 3, "first_line_max_words": 3, "has": ["slides", "Monday"], "last_line_has_any": ["Cheers"] }
+    },
+    {
+      "name": "email-layout-natural",
+      "group": "format",
+      "category": "email",
+      "tone": "natural",
+      "text": "hello mr okafor thank you for your letter we will reply in full within ten working days kind regards",
+      "checks": { "lines_min": 3, "first_line_max_words": 4, "has": ["Okafor"], "last_line_has_any": ["Kind regards"] }
+    },
+    {
+      "name": "email-no-frame-added",
+      "group": "format",
+      "category": "email",
+      "tone": "formal",
+      "text": "the meeting has moved to room four on the second floor",
+      "checks": { "no_list": true, "not": ["Dear", "Hi", "Hello", "regards", "Sincerely", "["] }
+    },
+    {
+      "name": "email-with-list",
+      "group": "format",
+      "category": "email",
+      "tone": "formal",
+      "text": "hi team quick update first the release is on track second we need one more tester thanks",
+      "checks": { "lines_min": 4, "list_items": 2, "has_any": [["Hi team", "Hi Team", "Dear team", "Dear Team", "Hello team"]], "last_line_has_any": ["Thanks", "Thank you"] }
+    },
+    {
+      "name": "cursor-continue",
+      "group": "cursor",
+      "before": "We spoke to the landlord yesterday and",
+      "text": "he said the heating will be fixed by monday",
+      "checks": { "starts_with": "he said", "has": ["Monday"] }
+    },
+    {
+      "name": "cursor-question",
+      "group": "cursor",
+      "quick": true,
+      "before": "Do you know whether",
+      "text": "the venue has step free access",
+      "checks": { "starts_with": "the venue", "ends_with": "?" }
+    },
+    {
+      "name": "cursor-no-repeat",
+      "group": "cursor",
+      "quick": true,
+      "before": "Could you send me the",
+      "text": "send me the final report by friday",
+      "checks": { "not_starts_with": "send me", "has": ["report", "Friday"] }
+    },
+    {
+      "name": "cursor-list-item",
+      "group": "cursor",
+      "before": "Shopping list:\n- Milk\n- Eggs\n- ",
+      "text": "um bread",
+      "checks": { "exact": "Bread" }
+    },
+    {
+      "name": "cursor-mid-number",
+      "group": "cursor",
+      "before": "The budget for next year is",
+      "text": "about two hundred thousand pounds",
+      "checks": { "starts_with": "about", "has_any": [["200,000", "200k", "200 000", "two hundred thousand"]] }
+    },
+    {
+      "name": "cursor-new-sentence",
+      "group": "cursor",
+      "before": "Thanks for the update. ",
+      "text": "i'll review it tonight",
+      "checks": { "starts_with": "I'll", "has": ["tonight"] }
+    },
+    {
+      "name": "cursor-no-echo",
+      "group": "cursor",
+      "before": "Dear Ms Okafor,\n\nThank you for your letter of 3 March. ",
+      "text": "we will reply in full within ten working days",
+      "checks": { "starts_with": "We will", "not": ["Thank you", "letter", "Dear"] }
+    },
+    {
+      "name": "cursor-after-comma",
+      "group": "cursor",
+      "before": "If the tests pass on Windows,",
+      "text": "we can ship on wednesday",
+      "checks": { "starts_with": "we can", "has": ["Wednesday"] }
+    }
+  ]
+}

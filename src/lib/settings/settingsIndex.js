@@ -103,6 +103,7 @@ export const SETTINGS_INDEX = [
   { page: 'commands', section: 'Rewrite selected text', label: 'Rewrite shortcut', desc: 'Select text, press it and say how to change it', keywords: 'edit rewrite shortcut hotkey selection last dictation transform formal shorter translate', anchor: 'rewrite-shortcut' },
   { page: 'commands', section: 'Rewrite selected text', label: 'Rewrite your last dictation when nothing is selected', desc: 'Within a minute, in the same field', keywords: 'rewrite last dictation nothing selected transform formal shorter translate undo edit previous', anchor: 'rewrite-last', toggle: 'rewriteLastDictation' },
   { page: 'commands', section: 'Transforms', label: 'Transforms', desc: 'Rewrite the selected text in one press: Polish, Shorter, Translate…', keywords: 'transform transforms polish shorter translate translation grammar prompt rewrite one key shortcut hotkey language', anchor: 'transforms' },
+  { page: 'commands', section: 'Transforms', label: 'Run on every dictation', desc: 'A transform after cleanup, everywhere or in one kind of app', keywords: 'transform every dictation always automatic auto polish after cleanup each', anchor: 'transform-every' },
   { page: 'commands', section: 'Transforms', label: 'Add a transform', desc: 'Your own one-key rewrite', keywords: 'transform custom new create rewrite shortcut', anchor: 'transform-add' },
   { page: 'commands', section: 'Model and prompt', label: 'Commands model and prompt', desc: 'Language Models → Commands', keywords: 'model prompt language model ai', anchor: 'commands-model' },
 
@@ -148,6 +149,7 @@ export const SETTINGS_INDEX = [
 
   // ---- Language Models ----
   { page: 'cleanup', scope: 'cleanup', section: 'Dictation cleanup', label: 'AI cleanup', desc: 'Remove filler words, fix grammar and punctuation', keywords: 'ai cleanup text cleanup grammar filler polish groq openai anthropic gemini api key model local on-device', anchor: 'cleanup-enable', toggle: 'postProcessEnabled' },
+  { page: 'cleanup', scope: 'cleanup', section: 'Dictation cleanup', label: 'Strength', desc: 'None, Light, Medium or High: how much cleanup changes', keywords: 'strength level how much light medium high none rephrase tighten concise shorter clearer filler punctuation words lists formatting', anchor: 'cleanup-strength' },
   { page: 'cleanup', scope: 'cleanup', section: 'Dictation cleanup', label: 'Smart routing', desc: 'A cleanup style per app, with cleanup on', keywords: 'profiles app rules routing per app', anchor: 'cleanup-enable' },
   { page: 'cleanup', scope: 'cleanup', section: 'Dictation cleanup', label: "Write in my region's spelling", desc: 'British, American or Canadian spelling', keywords: 'spelling british american english colour color', anchor: 'cleanup-spelling' },
   { page: 'cleanup', scope: 'cleanup', section: 'Dictation cleanup', label: 'Match the style to the app', desc: 'Emails formal, chats casual, AI prompts word for word, with cleanup on', keywords: 'styles tone tones formal casual very casual literal email chat slack whatsapp documents ai prompts terminal per app', anchor: 'cleanup-styles', fallback: 'cleanup-enable' },
@@ -168,6 +170,7 @@ export const SETTINGS_INDEX = [
 
   // ---- Privacy & data ----
   { page: 'privacy', section: 'What leaves this PC', label: 'What leaves this PC', desc: 'Feature by feature, as Yap is set up', keywords: 'privacy cloud data sent private', anchor: 'leaves' },
+  { page: 'privacy', section: 'What leaves this PC', label: 'Send the text before the cursor to cleanup', desc: 'A sentence or two, to a cleanup model off this PC', keywords: 'cursor context text before field sentence cleanup cloud privacy send', anchor: 'cursor-context', toggle: 'cursorContextCloud' },
   { page: 'privacy', section: 'Network connections', label: 'Network connections', desc: 'Every connection Yap made in the last 7 days, and why', keywords: 'network connections receipts internet traffic hosts cloud sent received requests online offline', anchor: 'connections' },
   { page: 'privacy', section: 'History', label: 'Keep dictation history', desc: 'Kept only on this PC', keywords: 'history dictations saved stats', anchor: 'history', toggle: 'historyEnabled' },
   { page: 'privacy', section: 'History', label: 'Clear history', desc: 'Removes every saved dictation', keywords: 'delete erase history', anchor: 'clear-history' },

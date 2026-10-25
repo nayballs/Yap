@@ -32,7 +32,10 @@ pub async fn test_post_process(text: String) -> Result<String, String> {
     // Route through the on-device sidecar when it's the selected provider + up.
     let (base_url, api_key, model, provider) = crate::ai::local_llm::effective_endpoint(&cfg);
     let spelling = crate::ai::about_you::cleanup_spelling(&cfg);
-    let cleanup = crate::ai::llm::cleanup(&text, &base_url, &api_key, &model, &provider, &cfg.pp_prompt, spelling.as_deref(), &cfg.dictionary, cfg.pp_disable_thinking);
+    // The main body at the strength set (and a spoken list laid out), as a
+    // dictation into an app with no style of its own gets it.
+    let plan = crate::ai::cleanup_styles::main_plan(&cfg);
+    let cleanup = crate::ai::cleanup_styles::clean(&text, &base_url, &api_key, &model, &provider, &plan, spelling.as_deref(), None, &cfg.dictionary, cfg.pp_disable_thinking);
     crate::privacy::net::within(crate::privacy::net::Feature::Dictation, cleanup).await
 }
 
