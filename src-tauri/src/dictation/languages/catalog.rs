@@ -182,6 +182,36 @@ pub fn names_joined(codes: &[String], last: &str) -> String {
     }
 }
 
+/// A language's own filler words, for cleanup's language line
+/// (`languages::language_line`): its one-shots name only English ones, and
+/// a model kept "Euh, …" and "Ähm, …" at the start of a French or German
+/// dictation (docs/model-evals.md, "My languages"). Sounds only, never a
+/// word that also means something ("este", "tipo", "no"). English's are the
+/// prompt's own.
+pub fn fillers(code: &str) -> Option<&'static str> {
+    Some(match code {
+        "fr" => "euh, bah",
+        "es" => "eh, em, mmm",
+        "de" => "äh, ähm, öh",
+        "it" => "ehm, uhm",
+        "pt" => "hum, ãh",
+        "nl" => "eh, uhm",
+        "pl" => "yyy, eee",
+        "sv" => "öh, eh",
+        "da" => "øh",
+        "no" | "nn" => "eh, ehm",
+        "fi" => "öö",
+        "cs" => "ehm, eee",
+        "ru" => "э-э, эм",
+        "uk" => "е-е, ем",
+        "tr" => "ıı, eee",
+        "ja" => "えーと, あのー",
+        "zh" => "嗯, 呃",
+        "ko" => "음, 어",
+        _ => return None,
+    })
+}
+
 // ---- the speech models ---------------------------------------------------------------
 
 /// Parakeet V3's and Canary 1B v2's 25 European languages.

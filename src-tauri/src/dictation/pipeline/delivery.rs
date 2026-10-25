@@ -214,7 +214,12 @@ impl Shared {
                     // Ok(empty) is a DELIBERATE empty result (filler-only
                     // input) — keep it empty so nothing is injected. Only a
                     // real request error falls back to the raw transcript.
-                    Ok(c) => (c, plan.style),
+                    // A filler a model left at the start of another
+                    // language's dictation comes off (languages.rs).
+                    Ok(c) => (
+                        self.config.read().map(|cfg| crate::dictation::languages::tidy_cleaned(&c, &cfg)).unwrap_or(c),
+                        plan.style,
+                    ),
                     Err(e) => {
                         tracing::warn!("AI cleanup failed, using raw: {}", e);
                         (raw.to_string(), None)

@@ -553,6 +553,8 @@ pub fn run() {
             #[cfg(debug_assertions)]
             dictation::languages::e2e_language_slots,
             #[cfg(debug_assertions)]
+            dictation::languages::e2e_language_heard,
+            #[cfg(debug_assertions)]
             shell::realtest::commands::realtest_transform,
             #[cfg(debug_assertions)]
             dictation::commands::e2e_target_window,

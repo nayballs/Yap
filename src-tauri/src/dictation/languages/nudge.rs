@@ -217,7 +217,12 @@ fn now_ms() -> u64 {
 pub fn consider(app: &AppHandle, heard: &Heard, secs: f32, mine: &[String], on: bool) {
     let rec = record();
     if let Err(why) = verdict(heard, secs, mine, on, &rec, now_ms()) {
-        tracing::debug!(language = %heard.top, why, "Language nudge: not offered");
+        // Every dictation in one of yours is no news; another language is.
+        if !on || mine.is_empty() || mine.contains(&heard.top) {
+            tracing::debug!(language = %heard.top, why, "Language nudge: not offered");
+        } else {
+            tracing::info!(language = %heard.top, why, "Language nudge: not offered");
+        }
         return;
     }
     let app = app.clone();

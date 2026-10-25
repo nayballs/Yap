@@ -116,7 +116,22 @@ The language-model side: the OpenAI-compatible client and its prompts, the on-de
   after the dictation's restated instruction, `cleanup_message`,
   `SpellingAt::Both`: in the system prompt alone Qwen3.5-4B changed only
   words like its examples and the 1.5B none, docs/model-evals.md) and the
-  custom dictionary. Records token/request usage (best-effort). Also carries
+  custom dictionary. **The dictation's language** (My languages,
+  `dictation/languages.rs`, 2026-10-25): `languages::language_line` goes
+  with the style's line and the names on screen just before the transcript
+  (`cleanup_styles::before_transcript` → `llm::with_names_line`; never in the
+  system prompt, which the server caches across dictations in different
+  languages) — "This transcript is in French: write the cleaned text in
+  French, never translating it." when Whisper heard it (or a language
+  shortcut fixed it), "This transcript may be in English or French: keep it
+  in the language it is in, never translating it." when My languages hold
+  another than English and the model can't tell, none for English — and
+  the spelling line goes only where the dictation may be English
+  (`languages::cleanup_spelling`). The guardrails already said "do not
+  translate", but the one-shots are English: measured in docs/model-evals.md
+  "My languages". A language shortcut that translates sends the dictation
+  to `transform` instead, with `languages::translate_instruction`.
+  Records token/request usage (best-effort). Also carries
   `EDIT_BASE_PROMPT` (edit/rewrite mode's guardrails),
   `TRANSFORM_BASE_PROMPT` + `transform_messages` / `transform` (**saved
   transforms**, `dictation/transforms.rs`, 2026-10-24: the text between `<text>`

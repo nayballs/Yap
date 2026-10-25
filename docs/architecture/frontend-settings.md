@@ -35,7 +35,9 @@ store.
 | `settings/configMerge.js` | The pure part: `merge3`, `fill`, `same`, `copy` |
 | `settings/adoptions.svelte.js` | `followOutsideChanges`: the one-off adoptions (`yap-config-patched`, `yap-provider-key-saved`, a call app's choice, the on-device context and state, the Chat chip's scope, spoken replies' switch / volume / speed, the consent message, the bar turned off) |
 | `settings/dictionarySync.svelte.js` | `followDictionary`: the Dictionary view's list both ways, its echo guard, learned words |
-| `settings/hotkeyFallback.svelte.js` | `followHotkeyFallback`: the in-page keys (meeting, assistant, read aloud, snip, dictation, in that order) |
+| `settings/hotkeyFallback.svelte.js` | `followHotkeyFallback`: the in-page keys (meeting, assistant, read aloud, snip, the language shortcuts, dictation, in that order) |
+| `settings/languages.svelte.js` | My languages' helpers: the language list read once (`loadLanguageCatalog`, `catalog`, `languageName`), `myLanguages(cfg)` (an old config's one language too), the language shortcuts (`languageShortcuts`, `shortcutName`, `newLanguageShortcut`, `MAX_LANGUAGE_SHORTCUTS`) |
+| `settings/MyLanguages.svelte` | Dictation → My languages: the search, the model coverage and recommendation, the main shortcut's language, the language shortcuts, the nudge's switch |
 | `lib/core/providers.js` | The providers in one place: ids, `BASE_URLS`, `KEYED_PROVIDERS`, `PP_PROVIDERS`, `PROVIDER_MODES`, `CLOUD_TABS`, `MODEL_HINTS`, `maskKey`, the four name sets each surface uses today (`PROVIDER_LABELS` short, `SCOPE_PROVIDER_LABELS` the scope tabs', `CLEANUP_PROVIDER_LABELS` cleanup's, `PROVIDER_DESTINATIONS` where the words go), and the key store's rules (`sharedKey`, `stashCleanupKey`, `creditCleanupKey`, `liftScopeKeys`, `adoptProviderKey`, `cleanupNeedsKey`) |
 | `lib/stores/attention.svelte.js` | The red count's items (`attentionItems`) kept live by `followAttention` |
 | `settings/localLlm.svelte.js` | Settings' on-device model: its status, the download and its progress, switching, the upgrade offer, delete, the family tab, the warm-up poll (`followLocalLlm`) |
@@ -207,7 +209,15 @@ there can move margins: compare a page before and after.
   transform"), and the seven against them (`validateHotkey` reads
   `cfg.transforms`); one being picked pauses its slot
   (`onTransformCapturing` → `configure_transform_hotkey`). No in-page
-  fallback for them: a transform works on another app's text.
+  fallback for them: a transform works on another app's text. **The
+  language shortcuts** (Dictation → My languages) are checked the same way
+  (`validateLanguageHotkey`: "Already used by the English → Spanish
+  shortcut"; the names from `settings/languages.svelte.js`, which reads the
+  language list once), come before the transforms in every clash message,
+  pause their slot while picked (`onLanguageCapturing` →
+  `configure_language_hotkey`), and do have an in-page fallback
+  (`hotkeyFallback.svelte.js` → `language_key { id, pressed }`: a dictation
+  into Yap's own Chat box in French works).
 
 ## The pages
 
@@ -248,6 +258,29 @@ there can move margins: compare a page before and after.
 - **Dictation** (`settings/DictationPage.svelte`): **Start and stop**
   (`#settings-hotkey`): Hotkey (`hotkey`), Recording mode (Toggle /
   Push-to-talk; in push-to-talk its line says how double-tap goes hands-free).
+  **My languages** (`#settings-languages`, `settings/MyLanguages.svelte`,
+  2026-10-25; [dictation.md](./dictation.md) `dictation/languages.rs`):
+  "Languages you speak" (`my-languages`) — the picked ones as chips with ✕,
+  and a search box (a combobox, "Add a language"; ↑/↓, Enter, Esc) over
+  `languages_catalog`'s hundred languages by English or own name ("franç"
+  finds French) → `myLanguages` (a config from before shows the language the
+  Speech page had picked, `myLanguages()` in `languages.svelte.js`).
+  With one or more: "Your speech model" (`language-models`,
+  `my_languages_status`) — one sentence on what your model makes of them
+  ("Parakeet V2, your speech model, understands English only. French needs
+  another model."), the model to recommend for them all (an installed one
+  first) with **Open Speech-to-Text** (Yap never changes the model here),
+  and a small table: each installed model × each language, ✓ or —, yours
+  marked; "Main shortcut (F9)" (`main-language`): Auto or one of them →
+  `selectedLanguage`, its line saying how Auto works with your model
+  (Whisper hears which; Parakeet V3 recognises it by itself; Canary must
+  be told, so the first; Parakeet V2 knows English only); **Language
+  shortcuts** (`language-shortcuts`): rows of Speak (Any of my languages /
+  each of yours) → Paste as (As spoken / Translated into each language), a
+  shortcut and Delete, at most four, "Add a language shortcut"; a note when
+  one translates (the model it uses, Use what I said); "Tell me when I speak
+  a language I didn't pick" (`languageNudge`, `language-nudge`; its line says
+  only Whisper models can tell).
   **Microphone and sound** (`#settings-microphone`): Microphone (`inputDevice`,
   `set_input_device` at once), "Chime when recording starts and stops" (the
   volume slider and the switch on one row: `audioFeedbackVolume`,
@@ -279,7 +312,9 @@ there can move margins: compare a page before and after.
   by default; `pasting/as_said.rs`), Meeting notes, **Snip to Chat** (`snipHotkey`,
   Win+Alt+S by default, its hint naming ✂, the tray, Esc and what Windows never
   lets an app capture; `snip.rs`, [snip.md](./snip.md)) — each in keycaps with Change, a
-  clash said under the one being set — and a **Transforms** link row
+  clash said under the one being set — a **Language shortcuts** link row
+  (`shortcut-languages`: "None set", the one's name — "English → Spanish" —
+  or "N shortcuts") to Dictation → My languages — and a **Transforms** link row
   (`shortcut-transforms`: "None set", the one transform's name, or "N
   shortcuts") to Commands → Transforms, where their shortcuts are set. Their own pages show the same control
   (Read aloud: Voice Assistant → **Read aloud**, `#settings-read-aloud`). (No
@@ -393,7 +428,7 @@ there can move margins: compare a page before and after.
   one installed), delete behind Yap's confirm dialog. **Speakers in meetings**
   (`#settings-speakers`, `SpeakerModels.svelte` + `diarization.svelte.js`: the
   switch, the speaker models' rows, credits behind a disclosure). **Language**
-  (Language, Translate to English) and **Performance**: **Speed**, where the
+  (a **Languages** link row — the languages you speak, "French, English", or Auto-detect — to Dictation → My languages, where the main shortcut's language is now; Translate to English) and **Performance**: **Speed**, where the
   model runs (`settings/RunsOn.svelte`, `dictation/stt_speed.rs`): the line says what
   Automatic chose and why, with each device's time for your dictations
   (`everydayMs`) — "Runs on: graphics card — fastest for your dictations on

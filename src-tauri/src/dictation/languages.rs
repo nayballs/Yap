@@ -291,14 +291,71 @@ pub fn language_line(known: Option<&str>, mine: &[String]) -> Option<String> {
         Some("en") => None,
         Some(code) => {
             let n = catalog::name(code);
-            Some(format!("This transcript is in {n}: write the cleaned text in {n}, never translating it."))
+            let fillers = catalog::fillers(code).map(|f| format!(", and leave out its filler words ({f})")).unwrap_or_default();
+            Some(format!("This transcript is in {n}: write the cleaned text in {n}, never translating it{fillers}."))
         }
-        None if mine.iter().any(|c| c != "en") => Some(format!(
-            "This transcript may be in {}: keep it in the language it is in, never translating it.",
-            catalog::names_joined(mine, "or")
-        )),
+        None if mine.iter().any(|c| c != "en") => {
+            let fillers: Vec<&str> = mine.iter().filter_map(|c| catalog::fillers(c)).collect();
+            let fillers = if fillers.is_empty() { String::new() } else { format!(", and leave out its filler words ({})", fillers.join(", ")) };
+            Some(format!(
+                "This transcript may be in {}: keep it in the language it is in, never translating it{fillers}.",
+                catalog::names_joined(mine, "or")
+            ))
+        }
         None => None,
     }
+}
+
+/// A filler a model left at the very start of a cleaned dictation in one
+/// of `codes` — "Ahm, also das Treffen…" → "Also das Treffen…" (Qwen3.5-4B
+/// kept it every time, whatever the language line said: docs/model-evals.md
+/// "My languages") — taken off, the next word given its capital. Only the
+/// language's own fillers (`catalog::fillers`, with or without their
+/// accents), only as a word of its own at the start; never all of the
+/// text. Pure.
+pub fn drop_leading_filler(text: &str, codes: &[&str]) -> String {
+    fn plain(s: &str) -> String {
+        s.chars()
+            .map(|c| match c {
+                'ä' | 'à' | 'á' | 'â' | 'ã' => 'a',
+                'ö' | 'ò' | 'ó' | 'ô' | 'õ' => 'o',
+                'ü' | 'ù' | 'ú' | 'û' => 'u',
+                'é' | 'è' | 'ê' | 'ë' => 'e',
+                other => other,
+            })
+            .collect()
+    }
+    let trimmed = text.trim_start();
+    let first: String = trimmed.chars().take_while(|c| c.is_alphabetic() || *c == '-').collect();
+    if first.is_empty() {
+        return text.to_string();
+    }
+    let word = plain(&first.to_lowercase());
+    let is_filler = codes
+        .iter()
+        .filter_map(|c| catalog::fillers(c))
+        .flat_map(|list| list.split(", "))
+        .any(|f| plain(f) == word);
+    if !is_filler {
+        return text.to_string();
+    }
+    let rest = trimmed[first.len()..].trim_start_matches([',', '…', '.', ' ']);
+    let mut chars = rest.chars();
+    match chars.next() {
+        Some(c) if c.is_alphanumeric() => c.to_uppercase().chain(chars).collect(),
+        _ => text.to_string(),
+    }
+}
+
+/// [`drop_leading_filler`] for this dictation's cleaned text: its language
+/// when known, else My languages (none: the text as it is).
+pub fn tidy_cleaned(text: &str, cfg: &YapConfig) -> String {
+    let codes: Vec<String> = match spoken_language(cfg) {
+        Some(code) => vec![code],
+        None => my_languages(cfg),
+    };
+    let codes: Vec<&str> = codes.iter().map(String::as_str).collect();
+    drop_leading_filler(text, &codes)
 }
 
 /// [`language_line`] for this dictation, before `names` (the names on
@@ -578,6 +635,24 @@ pub fn e2e_language_stage(shortcut: Option<String>, heard: Option<Vec<(String, f
     Ok(())
 }
 
+/// Debug-only, test mode: a transcription is in, `secs` long, and the model
+/// heard `heard` (`[[code, probability], …]`, the likeliest first) — what a
+/// Whisper dictation hands on, without a microphone: what's kept for its
+/// cleanup and the nudge's decision ([`heard`]), for the main shortcut and
+/// the model in config. Returns what was heard (the language picked among
+/// My languages).
+#[cfg(debug_assertions)]
+#[tauri::command]
+pub fn e2e_language_heard(app: AppHandle, heard: Vec<(String, f32)>, secs: f32) -> Result<Option<Heard>, String> {
+    if !crate::shell::e2e::active() {
+        return Err("e2e_language_heard is for test runs".into());
+    }
+    let cfg = crate::config::load();
+    let (_, h) = choose(&cfg.model_size, &plan(&cfg, None), Some(&heard));
+    let _ = self::heard(&app, Said { text: String::new(), heard: h.clone() }, secs, &cfg);
+    Ok(h)
+}
+
 /// Debug-only: the input hook's language slots as set now (`{ id, key }`,
 /// the key in words), and what the last dictation knew of its language.
 #[cfg(debug_assertions)]
@@ -729,15 +804,39 @@ mod tests {
     fn cleanup_is_told_the_language_and_spelling_is_for_english_only() {
         assert_eq!(
             language_line(Some("fr"), &v(&["en", "fr"])).as_deref(),
-            Some("This transcript is in French: write the cleaned text in French, never translating it.")
+            Some("This transcript is in French: write the cleaned text in French, never translating it, and leave out its filler words (euh, bah).")
+        );
+        // A language with no fillers listed: the language alone.
+        assert_eq!(
+            language_line(Some("cy"), &v(&["cy"])).as_deref(),
+            Some("This transcript is in Welsh: write the cleaned text in Welsh, never translating it.")
         );
         assert_eq!(language_line(Some("en"), &v(&["en", "fr"])), None);
         assert_eq!(
             language_line(None, &v(&["en", "fr", "de"])).as_deref(),
-            Some("This transcript may be in English, French or German: keep it in the language it is in, never translating it.")
+            Some(
+                "This transcript may be in English, French or German: keep it in the language it is in, never translating it, \
+                 and leave out its filler words (euh, bah, äh, ähm, öh)."
+            )
         );
         assert_eq!(language_line(None, &v(&["en"])), None);
         assert_eq!(language_line(None, &[]), None);
+    }
+
+    #[test]
+    fn a_filler_left_at_the_start_comes_off_in_its_own_language_only() {
+        assert_eq!(drop_leading_filler("Ahm, also das Treffen ist verschoben.", &["de"]), "Also das Treffen ist verschoben.");
+        assert_eq!(drop_leading_filler("Ähm also das Treffen.", &["de"]), "Also das Treffen.");
+        assert_eq!(drop_leading_filler("Euh, donc je voulais dire…", &["en", "fr"]), "Donc je voulais dire…");
+        assert_eq!(drop_leading_filler("  euh… la réunion", &["fr"]), "La réunion");
+        // Not a filler of these languages, or a word that starts like one.
+        assert_eq!(drop_leading_filler("Ahm, also das Treffen.", &["fr"]), "Ahm, also das Treffen.");
+        assert_eq!(drop_leading_filler("Euhemerism is a theory.", &["fr"]), "Euhemerism is a theory.");
+        assert_eq!(drop_leading_filler("Ähnlich wie gestern.", &["de"]), "Ähnlich wie gestern.");
+        // Never all of it, and nothing without a language.
+        assert_eq!(drop_leading_filler("Euh.", &["fr"]), "Euh.");
+        assert_eq!(drop_leading_filler("Euh, oui", &[]), "Euh, oui");
+        assert_eq!(drop_leading_filler("", &["fr"]), "");
     }
 
     #[test]

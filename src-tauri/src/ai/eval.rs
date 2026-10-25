@@ -38,6 +38,8 @@ mod runner;
 #[cfg(debug_assertions)]
 mod scenario;
 #[cfg(debug_assertions)]
+mod languages;
+#[cfg(debug_assertions)]
 mod serving;
 #[cfg(debug_assertions)]
 mod speakers;
