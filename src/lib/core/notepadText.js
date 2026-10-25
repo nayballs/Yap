@@ -57,7 +57,7 @@ const who = speakerLabel;
 export function noteVoices(note) {
   const out = [];
   const add = (id) => !out.includes(id) && out.push(id);
-  for (const s of note?.transcript || []) if (!s.echo && !s.dictated && !s.failed && !s.removed && s.mic == null) add(speakerId(note.speakers, s));
+  for (const s of note?.transcript || []) if (!s.echo && !s.dictated && !s.failed && s.mic == null) add(speakerId(note.speakers, s));
   const toldApart = !out.includes('them') && out.some((id) => id.startsWith('them-'));
   for (const id of Object.keys(note?.speakers || {})) {
     const v = speakerId(note.speakers, { speaker: id });
@@ -94,7 +94,8 @@ export function withLineSplice(transcript, change) {
   if (!Array.isArray(lines) || at < 0 || at + remove > transcript.length) return null;
   if (transcript.length - remove + lines.length !== change.lineSpeakers.length) return null;
   const first = transcript[at];
-  if (remove > 0 && (first?.source !== lines[0]?.source || first?.ts !== lines[0]?.ts || first?.startMs !== lines[0]?.startMs)) {
+  // (A line deleted: `lines` empty, nothing to match it with.)
+  if (remove > 0 && lines.length && (first?.source !== lines[0]?.source || first?.ts !== lines[0]?.ts || first?.startMs !== lines[0]?.startMs)) {
     return null;
   }
   return withLineSpeakers([...transcript.slice(0, at), ...lines, ...transcript.slice(at + remove)], change.lineSpeakers);
@@ -173,7 +174,7 @@ export function suggestionWhy(note, card) {
 }
 
 /** Spoken lines worth sharing: no echo (the call through the speakers), no markers. */
-const spoken = (transcript) => (transcript || []).filter((s) => !s.echo && !s.dictated && !s.failed && !s.removed && s.mic == null);
+const spoken = (transcript) => (transcript || []).filter((s) => !s.echo && !s.dictated && !s.failed && s.mic == null);
 
 /**
  * The note as Markdown, laid out as "Save as .md" writes it (commands.rs
@@ -252,9 +253,7 @@ export function transcriptItems(transcript, breaks = [], { showEcho = false, que
   const items = [];
   let group = null;
   (transcript || []).forEach((s, i) => {
-    if (s.removed) {
-      // A line the person deleted (notes/transcript_edits.rs): nothing shows.
-    } else if (s.dictated) {
+    if (s.dictated) {
       if (!q) items.push({ kind: 'dictated', key: `d${i}` });
       group = null;
     } else if (s.mic != null) {
@@ -380,11 +379,24 @@ export function withLineEdit(transcript, edit) {
   const line = edit.line;
   if (!old || old.source !== line.source || old.ts !== line.ts || (old.startMs ?? null) !== (line.startMs ?? null)) return null;
   const next = transcript.slice();
-  next[edit.index] = { ...old, text: line.text, edited: !!line.edited, original: line.original || '', removed: !!line.removed };
-  // Deleted: its words and their times go with it; put back: as it was.
-  if (line.removed) next[edit.index].words = [];
-  else if (Array.isArray(line.words)) next[edit.index].words = line.words;
+  next[edit.index] = { ...old, text: line.text, edited: !!line.edited, original: line.original || '' };
   return next;
+}
+
+/**
+ * A transcript with line `index` taken out (it was `line`: "Delete line"),
+ * or null when this copy isn't the one it changed (fetch the note).
+ */
+export function withLineRemoved(transcript, index, line) {
+  const old = transcript?.[index];
+  if (!old || !line || old.source !== line.source || old.ts !== line.ts || (old.startMs ?? null) !== (line.startMs ?? null)) return null;
+  return [...transcript.slice(0, index), ...transcript.slice(index + 1)];
+}
+
+/** A transcript with `line` put back at `index` (Undo of "Delete line"). */
+export function withLineRestored(transcript, index, line) {
+  if (!Array.isArray(transcript) || !line || index < 0 || index > transcript.length) return null;
+  return [...transcript.slice(0, index), line, ...transcript.slice(index)];
 }
 
 /**

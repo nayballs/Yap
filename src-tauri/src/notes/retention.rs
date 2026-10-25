@@ -192,14 +192,14 @@ mod tests {
     #[test]
     fn deleting_a_transcript_keeps_the_notes_summary_and_tasks() {
         let mut n = meeting(1, 100);
-        n.archived_tasks = vec!["send the quote".into()];
         let before = n.clone();
         strip(&mut n, NOW);
         assert!(n.transcript.is_empty() && n.digests.is_empty() && n.breaks.is_empty() && n.speakers.is_empty());
         assert_eq!(n.transcript_deleted_ts, NOW);
         assert_eq!(n.content, before.content, "what the person typed: never touched");
         assert_eq!(n.enhanced_content, before.enhanced_content);
-        assert_eq!((n.title.as_str(), &n.participants, &n.archived_tasks), (before.title.as_str(), &before.participants, &before.archived_tasks));
+        assert_eq!((n.title.as_str(), &n.participants), (before.title.as_str(), &before.participants));
+        // (Tasks added to it or archived live in tasks.json: never touched here.)
         assert_eq!(crate::notes::tasks::parse(&n.enhanced_content).len(), 1);
         // On disk: the mark, and no lines.
         let v = serde_json::to_value(&n).unwrap();

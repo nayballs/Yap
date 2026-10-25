@@ -13,6 +13,7 @@
 pub mod commands;
 pub mod note_edits;
 pub mod retention;
+pub mod task_store;
 pub mod tasks;
 pub mod transcript_edits;
 
@@ -98,12 +99,6 @@ pub struct TranscriptSegment {
     /// summaries skip it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mic: Option<String>,
-    /// The person deleted this line (`notes/transcript_edits.rs`): its words
-    /// are gone, its side and place stay (no text) so Transcribe again and
-    /// the refine never bring them back, and Undo can put them back. Not
-    /// talk: no view, summary or search shows it.
-    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
-    pub removed: bool,
 }
 
 impl TranscriptSegment {
@@ -152,10 +147,9 @@ impl TranscriptSegment {
     }
 
     /// Talk the summaries read: neither echo nor a marker (a dictation, a
-    /// stretch that couldn't be transcribed, the mic disconnected, a line
-    /// the person deleted).
+    /// stretch that couldn't be transcribed, the mic disconnected).
     pub fn is_talk(&self) -> bool {
-        !self.echo && !self.dictated && !self.failed && self.mic.is_none() && !self.removed
+        !self.echo && !self.dictated && !self.failed && self.mic.is_none()
     }
 }
 
@@ -289,14 +283,11 @@ pub struct Note {
     /// whether the user locked it, merges and refused names.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub speakers: Speakers,
-    /// Tasks of the summary the person archived in the Tasks view, by their
-    /// words as written there (`tasks.rs`): no longer listed there. Their
-    /// ticks stay in the summary.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub archived_tasks: Vec<String>,
     /// When the meeting's transcript was deleted by "Delete meeting
     /// transcripts after" (unix seconds; 0 = never): its notes, summary and
-    /// tasks stay (`notes/retention.rs`).
+    /// tasks stay (`notes/retention.rs`). Only what the windows say about it:
+    /// an older Yap saving notes.json drops it, and the note then reads as
+    /// one with no transcript.
     #[serde(default, skip_serializing_if = "is_zero")]
     pub transcript_deleted_ts: u64,
 }
@@ -427,10 +418,6 @@ struct Store {
     actions: Vec<Action>,
     #[serde(default)]
     notes: Vec<Note>,
-    /// Tasks the person added themselves (`tasks.rs`): in a meeting's Tasks
-    /// tab (`note_id`), or in the Tasks view with no meeting.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    tasks: Vec<tasks::OwnTask>,
 }
 
 impl Default for Store {
@@ -439,7 +426,6 @@ impl Default for Store {
             folders: default_folders(),
             actions: default_actions(),
             notes: Vec::new(),
-            tasks: Vec::new(),
         }
     }
 }
@@ -471,7 +457,6 @@ fn load_from_disk() -> Store {
                 folders: default_folders(),
                 actions: default_actions(),
                 notes,
-                tasks: Vec::new(),
             })
         }) {
             Ok(store) => store,
@@ -974,22 +959,19 @@ pub fn all() -> Vec<Note> {
     with_notes(|notes| notes.clone())
 }
 
-/// The tasks the person added themselves (`tasks.rs`).
-pub fn own_tasks() -> Vec<tasks::OwnTask> {
-    with_store(|s| s.tasks.clone())
+/// The store as notes.json holds it (a unit test reads it as an older Yap
+/// would).
+#[cfg(test)]
+pub fn store_json() -> String {
+    with_store(|s| serde_json::to_string(s).unwrap())
 }
 
-/// Change the person's own tasks and the notes together, under the store
-/// lock: `f` returns its result and whether it changed anything (then it's
-/// saved). An error from `f` changes nothing (`f` checks before it writes).
-pub fn with_tasks<R>(f: impl FnOnce(&mut Vec<tasks::OwnTask>, &mut Vec<Note>) -> Result<(R, bool), String>) -> Result<R, String> {
-    with_store(|store| {
-        let (out, changed) = f(&mut store.tasks, &mut store.notes)?;
-        if changed {
-            save_to_disk(store);
-        }
-        Ok(out)
-    })
+/// A unit test: this thread's store read again from `json`, as a start
+/// reads notes.json.
+#[cfg(test)]
+pub fn load_json_for_test(json: &str) {
+    let store: Store = serde_json::from_str(json).unwrap();
+    with_store(|s| *s = store);
 }
 
 /// A cheap fingerprint of every note: a hash of each one's id, last change
@@ -1036,7 +1018,6 @@ pub fn create(title: &str, content: &str, source: &str, folder: &str) -> Note {
             updated_ts: now,
             event: None,
             speakers: Speakers::new(),
-            archived_tasks: Vec::new(),
             transcript_deleted_ts: 0,
         };
         store.notes.push(note.clone());
@@ -1431,10 +1412,11 @@ pub fn set_enhanced(id: u64, enhanced: &str, at_hash: &str) -> Result<(), String
 pub fn delete(id: u64) {
     with_store(|store| {
         store.notes.retain(|n| n.id != id);
-        // Tasks added in its Tasks tab go with it (note ids come round again).
-        store.tasks.retain(|t| t.note_id != Some(id));
         save_to_disk(store);
     });
+    // Tasks added in its Tasks tab, and its archive marks, go with it (note
+    // ids come round again: tasks.json, task_store.rs).
+    task_store::forget_note(id);
     // Its meeting audio goes with it (meeting_audio.rs).
     crate::meetings::meeting_audio::forget(id);
 }

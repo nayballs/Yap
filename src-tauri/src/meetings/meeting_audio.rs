@@ -224,16 +224,26 @@ impl Meta {
     }
 }
 
-/// The recordings' notes (`<recording>.json`) are saved through
-/// `saving.rs` (atomically; a failure kept in memory, written again with the
-/// next save or Try again, and said once by the notice).
+/// The files Yap keeps about a meeting's audio — each recording's notes
+/// (`<recording>.json`) and the lines deleted from it (`cuts.json`) — are
+/// saved through `saving.rs` (atomically; a failure kept in memory, written
+/// again with the next save or Try again, and said once by the notice).
 pub static SAVER: crate::shell::saving::Saver =
     crate::shell::saving::Saver::new("meeting-audio", "your meeting recording's details", save_unsaved);
 
-/// The notes that couldn't be saved yet, by (note, recording): written with
-/// the next save of any of them.
-fn unsaved() -> std::sync::MutexGuard<'static, std::collections::BTreeMap<(u64, u64), Meta>> {
-    static UNSAVED: LazyLock<Mutex<std::collections::BTreeMap<(u64, u64), Meta>>> = LazyLock::new(Default::default);
+/// A file waiting to be written: its JSON, and what must still be there for
+/// it to be worth writing (the recording's audio, the meeting's folder) — a
+/// file of something deleted meanwhile is dropped, its folder never made
+/// again for it.
+struct Pending {
+    json: String,
+    needs: PathBuf,
+}
+
+/// The files that couldn't be saved yet, by path: written with the next
+/// save of any of them.
+fn unsaved() -> std::sync::MutexGuard<'static, std::collections::BTreeMap<PathBuf, Pending>> {
+    static UNSAVED: LazyLock<Mutex<std::collections::BTreeMap<PathBuf, Pending>>> = LazyLock::new(Default::default);
     UNSAVED.lock().unwrap_or_else(|p| p.into_inner())
 }
 
@@ -287,36 +297,87 @@ fn repair_meta(note_id: u64, recording: u64) -> Option<Meta> {
     Some(meta)
 }
 
-/// Save a recording's notes (with any that couldn't be saved before).
+/// Save a recording's notes (with any file that couldn't be saved before).
 fn save_meta(meta: &Meta) {
+    let json = serde_json::to_string_pretty(meta).unwrap_or_default();
+    queue(meta_path(meta.note_id, meta.recording), json, audio_path(meta.note_id, meta.recording, "you"));
+}
+
+/// Write `json` to `path` while `needs` is there, with every file still
+/// waiting.
+fn queue(path: PathBuf, json: String, needs: PathBuf) {
     let mut waiting = unsaved();
-    waiting.insert((meta.note_id, meta.recording), meta.clone());
+    waiting.insert(path, Pending { json, needs });
     let _ = write_waiting(&mut waiting);
 }
 
-/// Write every waiting note; the ones that failed stay waiting.
-fn write_waiting(waiting: &mut std::collections::BTreeMap<(u64, u64), Meta>) -> Result<(), crate::shell::saving::SaveError> {
-    // A recording deleted meanwhile has nothing left to describe (and its
-    // folder isn't made again for it).
-    waiting.retain(|&(note_id, recording), _| audio_path(note_id, recording, "you").is_file());
-    let keys: Vec<(u64, u64)> = waiting.keys().copied().collect();
-    let files: Vec<(PathBuf, String)> = waiting
-        .values()
-        .map(|m| (meta_path(m.note_id, m.recording), serde_json::to_string_pretty(m).unwrap_or_default()))
-        .collect();
+/// Write every waiting file; the ones that failed stay waiting.
+fn write_waiting(waiting: &mut std::collections::BTreeMap<PathBuf, Pending>) -> Result<(), crate::shell::saving::SaveError> {
+    waiting.retain(|_, p| p.needs.exists());
+    let files: Vec<(PathBuf, String)> = waiting.iter().map(|(path, p)| (path.clone(), p.json.clone())).collect();
     let (failed, result) = SAVER.write_each(&files);
-    let failed: BTreeSet<(u64, u64)> = failed.into_iter().map(|i| keys[i]).collect();
+    let failed: BTreeSet<PathBuf> = failed.into_iter().map(|i| files[i].0.clone()).collect();
     waiting.retain(|k, _| failed.contains(k));
     if let Err(e) = &result {
-        tracing::warn!(waiting = waiting.len(), reason = ?e.reason, "Meeting audio: a recording's notes couldn't be saved; kept in memory");
+        tracing::warn!(waiting = waiting.len(), reason = ?e.reason, "Meeting audio: a file about it couldn't be saved; kept in memory");
     }
     result
 }
 
-/// Try again: every recording's notes that couldn't be saved.
+/// Try again: every file that couldn't be saved.
 fn save_unsaved() -> Result<(), crate::shell::saving::SaveError> {
     write_waiting(&mut unsaved())?;
     SAVER.check()
+}
+
+// ---- Lines deleted from a meeting ----
+
+/// A line the person deleted from a meeting whose audio is kept
+/// (`notes/transcript_edits.rs`): its side and its place on its recording's
+/// clock, so Transcribe again and the refine never bring its words back
+/// from the audio (`redo::rebuild`). The line itself is gone from
+/// notes.json — an older Yap sharing the data folder keeps it gone — and
+/// these places live in `cuts.json` in the meeting's folder, which an older
+/// Yap never reads, and which goes with the meeting's audio.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Cut {
+    pub source: String,
+    /// The line's date (unix seconds): which recording it's in.
+    pub ts: u64,
+    pub start_ms: u64,
+    pub end_ms: u64,
+}
+
+fn cuts_path(note_id: u64) -> PathBuf {
+    note_dir(note_id).join("cuts.json")
+}
+
+/// The lines deleted from note `note_id`'s meeting (its audio kept).
+pub fn cuts(note_id: u64) -> Vec<Cut> {
+    let path = cuts_path(note_id);
+    let waiting = unsaved().get(&path).map(|p| p.json.clone());
+    let json = waiting.or_else(|| std::fs::read_to_string(&path).ok());
+    json.and_then(|j| serde_json::from_str(&j).ok()).unwrap_or_default()
+}
+
+/// Keep (`on`) or forget a deleted line's place. Nothing to keep for a
+/// meeting with no audio: it can't be transcribed again.
+pub fn set_cut(note_id: u64, cut: Cut, on: bool) {
+    if !note_dir(note_id).is_dir() {
+        return;
+    }
+    let mut all = cuts(note_id);
+    let had = all.contains(&cut);
+    if on && !had {
+        all.push(cut);
+    } else if !on && had {
+        all.retain(|c| *c != cut);
+    } else {
+        return;
+    }
+    let json = serde_json::to_string_pretty(&all).unwrap_or_default();
+    queue(cuts_path(note_id), json, note_dir(note_id));
 }
 
 /// A note's recordings with audio, oldest first.
@@ -368,7 +429,7 @@ fn delete_recording(note_id: u64, recording: u64) {
         let _ = std::fs::remove_file(audio_path(note_id, recording, side));
     }
     let _ = std::fs::remove_file(meta_path(note_id, recording));
-    unsaved().remove(&(note_id, recording));
+    unsaved().remove(&meta_path(note_id, recording));
     // A copy of its notes set aside as unreadable goes too.
     let aside = format!("{recording}.json.corrupt-");
     if let Ok(entries) = std::fs::read_dir(note_dir(note_id)) {
@@ -378,7 +439,12 @@ fn delete_recording(note_id: u64, recording: u64) {
             }
         }
     }
-    // The note's folder goes with its last recording.
+    // The note's folder goes with its last recording, the lines deleted
+    // from it too (nothing left to transcribe again).
+    if recording_ids(note_id).is_empty() {
+        unsaved().remove(&cuts_path(note_id));
+        let _ = std::fs::remove_file(cuts_path(note_id));
+    }
     let _ = std::fs::remove_dir(note_dir(note_id));
     // Nothing of it is waiting to be recovered any more.
     pending().retain(|m| !(m.note_id == note_id && m.recording == recording));
@@ -1391,8 +1457,10 @@ async fn transcribe_again(app: &AppHandle, engine: &crate::dictation::pipeline::
         }
         tokio::time::sleep(Duration::from_millis(250)).await;
     }
+    // The lines the person deleted stay deleted.
+    let cuts = cuts(note_id);
     let (replaced, added, voiced) = crate::notes::modify(note_id, |note| {
-        let r = redo::rebuild(&note.transcript, &note.breaks, &redone);
+        let r = redo::rebuild_with_cuts(&note.transcript, &note.breaks, &redone, &cuts);
         note.transcript = r.transcript;
         note.breaks = r.breaks;
         note.digests.clear();
@@ -1886,6 +1954,37 @@ mod tests {
         assert_eq!(aside.len(), 1, "the unreadable copy, kept");
         // Deleting the recording takes the copy too, and the folder.
         forget(note_id);
+        assert!(!note_dir(note_id).exists());
+        let _ = std::fs::remove_dir_all(root());
+    }
+
+    /// A deleted line's place is kept beside the meeting's audio (an older
+    /// Yap never reads cuts.json), and goes with the last recording.
+    #[test]
+    fn a_deleted_lines_place_is_kept_with_the_audio() {
+        let _ = std::fs::remove_dir_all(root());
+        let (note_id, recording) = (61, new_id());
+        let cut = Cut { source: "them".into(), ts: 100, start_ms: 2_000, end_ms: 5_000 };
+        // No audio kept: nothing to transcribe again, nothing kept.
+        set_cut(note_id, cut.clone(), true);
+        assert!(cuts(note_id).is_empty());
+        std::fs::create_dir_all(note_dir(note_id)).unwrap();
+        for side in ["you", "them"] {
+            flac::Writer::create(&audio_path(note_id, recording, side)).unwrap().finish().unwrap();
+        }
+        save_meta(&Meta { note_id, recording, started_ms: recording, ended_ms: Some(recording), keep: true, ..Default::default() });
+        set_cut(note_id, cut.clone(), true);
+        set_cut(note_id, cut.clone(), true);
+        assert_eq!(cuts(note_id), vec![cut.clone()], "once");
+        assert!(cuts_path(note_id).is_file());
+        // The recordings still read as they were (cuts.json isn't one).
+        assert_eq!(recordings(note_id).len(), 1);
+        // Undo: forgotten.
+        set_cut(note_id, cut.clone(), false);
+        assert!(cuts(note_id).is_empty());
+        set_cut(note_id, cut, true);
+        // The last recording goes: the folder, cuts.json with it.
+        delete_recording(note_id, recording);
         assert!(!note_dir(note_id).exists());
         let _ = std::fs::remove_dir_all(root());
     }

@@ -23,16 +23,18 @@
 //!
 //! - **Tasks the person adds** ([`OwnTask`], 2026-10-25, Wispr Flow's "add a
 //!   task"): in a meeting's **Tasks** tab (`note_id`: listed with that
-//!   meeting's) or in the Tasks view with no meeting. They live beside the
-//!   notes in notes.json (the store's `tasks`), never in the summary — so
-//!   adding one never makes the summary "edited", and Yap writing the
-//!   summary again never loses one. Read like a summary's task ("Priya: book
-//!   the room (due: Friday)"; nobody named = You). Deleted with their note.
+//!   meeting's) or in the Tasks view with no meeting. They live in
+//!   tasks.json (`task_store.rs`: a file an older Yap sharing the data
+//!   folder never opens, where new fields of notes.json would be dropped by
+//!   its next save), never in the summary — so adding one never makes the
+//!   summary "edited", and Yap writing the summary again never loses one.
+//!   Read like a summary's task ("Priya: book the room (due: Friday)";
+//!   nobody named = You). Deleted with their note.
 //! - **Complete all** and **Undo** ([`tasks_set`]): many ticks in one step,
 //!   each where it lives (the summary's "- [x]", an added task's `done`).
 //! - **Archive** ([`tasks_archive`]): done tasks out of the Tasks view's
 //!   list (with Undo), still ticked in their meeting: a summary's by its
-//!   words (`Note::archived_tasks`), an added one's `archived`.
+//!   note and words, an added one's `archived` — both in tasks.json.
 //!
 //! Parsing is line by line and pure (unit-tested); fenced code is skipped.
 //! Logs carry ids and counts, never a task's words.
@@ -430,57 +432,54 @@ pub fn task_words_typed(text: &str) -> Result<String, String> {
     Ok(one)
 }
 
-/// Tick (`done`) or untick each of `refs` (pure, on the store's own tasks
-/// and notes): an added task by its id, a summary's in its markdown (by
-/// line and words, as [`set_done`]). Returns the notes whose summary
-/// changed, and how many tasks changed.
-pub fn mark(own: &mut [OwnTask], notes: &mut [Note], refs: &[TaskRef], done: bool) -> (Vec<u64>, usize) {
-    let mut changed_notes = Vec::new();
+/// Tick (`done`) or untick the added tasks among `refs` (pure). Returns how
+/// many changed.
+pub fn mark_own(own: &mut [OwnTask], refs: &[TaskRef], done: bool) -> usize {
     let mut n = 0;
-    for r in refs {
-        if let Some(id) = r.own {
-            if let Some(t) = own.iter_mut().find(|t| t.id == id) {
-                if t.done != done {
-                    t.done = done;
-                    n += 1;
-                }
-            }
-            continue;
+    for id in refs.iter().filter_map(|r| r.own) {
+        if let Some(t) = own.iter_mut().find(|t| t.id == id && t.done != done) {
+            t.done = done;
+            n += 1;
         }
-        let Some(note) = r.note_id.and_then(|id| notes.iter_mut().find(|x| x.id == id)) else { continue };
+    }
+    n
+}
+
+/// Tick (`done`) or untick note `note`'s summary tasks among `refs` (pure):
+/// in its markdown, by line and words, as [`set_done`]; a task that's gone
+/// is skipped. Returns how many changed.
+pub fn mark_summary(note: &mut Note, refs: &[TaskRef], done: bool) -> usize {
+    let mut n = 0;
+    for r in refs.iter().filter(|r| r.own.is_none() && r.note_id == Some(note.id)) {
         let Ok(md) = set_done(&note.enhanced_content, r.line.unwrap_or(usize::MAX), &r.text, done) else { continue };
         if md != note.enhanced_content {
             note.enhanced_content = md;
             n += 1;
-            if !changed_notes.contains(&note.id) {
-                changed_notes.push(note.id);
-            }
         }
     }
-    (changed_notes, n)
+    n
 }
 
-/// Archive (`archived`) or bring back each of `refs` (pure): an added
-/// task's own mark, a summary task's words in its note's
-/// `archived_tasks`. Returns how many changed.
-pub fn archive(own: &mut [OwnTask], notes: &mut [Note], refs: &[TaskRef], archived: bool) -> usize {
+/// Archive (`archived`) or bring back each of `refs` (pure, on tasks.json's
+/// store): an added task's own mark, a summary task by its note and words.
+/// Returns how many changed.
+pub fn archive(store: &mut super::task_store::TaskStore, refs: &[TaskRef], archived: bool) -> usize {
     let mut n = 0;
     for r in refs {
         if let Some(id) = r.own {
-            if let Some(t) = own.iter_mut().find(|t| t.id == id).filter(|t| t.archived != archived) {
+            if let Some(t) = store.tasks.iter_mut().find(|t| t.id == id && t.archived != archived) {
                 t.archived = archived;
                 n += 1;
             }
             continue;
         }
-        let Some(note) = r.note_id.and_then(|id| notes.iter_mut().find(|x| x.id == id)) else { continue };
-        let words = r.text.trim().to_string();
-        let has = note.archived_tasks.contains(&words);
+        let (Some(note_id), words) = (r.note_id, r.text.trim().to_string()) else { continue };
+        let has = store.is_archived(note_id, &words);
         if archived && !has && !words.is_empty() {
-            note.archived_tasks.push(words);
+            store.archived.push(super::task_store::Archived { note_id, text: words });
             n += 1;
         } else if !archived && has {
-            note.archived_tasks.retain(|w| *w != words);
+            store.archived.retain(|a| !(a.note_id == note_id && a.text == words));
             n += 1;
         }
     }
@@ -499,9 +498,9 @@ pub struct NoteTasks {
 }
 
 /// Note `n`'s summary tasks, each with the moment it was said and whether
-/// it's archived, then the tasks added in it (`own`, in the order added).
-pub fn note_tasks(n: &Note, own: &[OwnTask]) -> NoteTasks {
-    let t0 = n.transcript.iter().find(|s| !s.dictated && !s.removed).map(|s| s.ts).unwrap_or(0);
+/// it's archived, then the tasks added in it (in the order added).
+pub fn note_tasks(n: &Note, store: &super::task_store::TaskStore) -> NoteTasks {
+    let t0 = n.transcript.iter().find(|s| !s.dictated).map(|s| s.ts).unwrap_or(0);
     let mut tasks: Vec<ListedTask> = parse(&n.enhanced_content)
         .into_iter()
         .map(|task| {
@@ -510,11 +509,11 @@ pub fn note_tasks(n: &Note, own: &[OwnTask]) -> NoteTasks {
                 ts: n.transcript[i].ts,
                 secs: n.transcript[i].ts.saturating_sub(t0),
             });
-            let archived = n.archived_tasks.contains(&task.text);
+            let archived = store.is_archived(n.id, &task.text);
             ListedTask { task, at, own: None, archived }
         })
         .collect();
-    tasks.extend(own.iter().filter(|t| t.note_id == Some(n.id)).map(OwnTask::listed));
+    tasks.extend(store.tasks.iter().filter(|t| t.note_id == Some(n.id)).map(OwnTask::listed));
     let title = if n.title.trim().is_empty() { "Untitled note".to_string() } else { n.title.trim().to_string() };
     NoteTasks { note_id: n.id, title, created_ts: n.created_ts, note_type: n.note_type.clone(), tasks }
 }
@@ -522,18 +521,19 @@ pub fn note_tasks(n: &Note, own: &[OwnTask]) -> NoteTasks {
 /// Every note with tasks in its summary, newest first.
 #[cfg(test)]
 pub fn list(notes: &[Note]) -> Vec<NoteTasks> {
-    list_all(notes, &[])
+    list_all(notes, &Default::default())
 }
 
 /// Every note with tasks (in its summary, or added in it), newest first;
 /// first of all, the tasks added with no meeting (note id 0, "Your tasks").
-pub fn list_all(notes: &[Note], own: &[OwnTask]) -> Vec<NoteTasks> {
+pub fn list_all(notes: &[Note], store: &super::task_store::TaskStore) -> Vec<NoteTasks> {
     let mut out: Vec<NoteTasks> = notes
         .iter()
-        .map(|n| note_tasks(n, own))
+        .map(|n| note_tasks(n, store))
         .filter(|n| !n.tasks.is_empty())
         .collect();
     out.sort_by_key(|n| std::cmp::Reverse(n.created_ts));
+    let own = &store.tasks;
     let loose: Vec<ListedTask> = own
         .iter()
         .filter(|t| t.note_id.is_none_or(|id| !notes.iter().any(|n| n.id == id)))
@@ -549,14 +549,14 @@ pub fn list_all(notes: &[Note], own: &[OwnTask]) -> Vec<NoteTasks> {
 /// Every note's tasks, and the ones added with no meeting (the Tasks view).
 #[tauri::command]
 pub fn tasks_list() -> Vec<NoteTasks> {
-    list_all(&crate::notes::all(), &crate::notes::own_tasks())
+    list_all(&crate::notes::all(), &super::task_store::snapshot())
 }
 
 /// One note's tasks (its Tasks tab): the summary's, then those added in it.
 #[tauri::command]
 pub fn note_tasks_get(note_id: u64) -> Result<NoteTasks, String> {
     let n = crate::notes::get(note_id).ok_or("Note not found")?;
-    Ok(note_tasks(&n, &crate::notes::own_tasks()))
+    Ok(note_tasks(&n, &super::task_store::snapshot()))
 }
 
 /// Every window: tasks changed (`notes`: the notes whose tasks did; 0 = the
@@ -567,61 +567,77 @@ fn tasks_changed(app: &tauri::AppHandle, notes: &[u64]) {
     let _ = app.emit(EVENT_TASKS, serde_json::json!({ "notes": notes }));
 }
 
+/// The notes `items` name (0: the tasks with no meeting), once each.
+fn touched(items: &[TaskRef]) -> Vec<u64> {
+    let mut out: Vec<u64> = items.iter().map(|r| r.note_id.unwrap_or(0)).collect();
+    out.sort_unstable();
+    out.dedup();
+    out
+}
+
 /// Add a task: in meeting note `note_id`'s Tasks tab, or (none) in the
 /// Tasks view with no meeting. Returns it.
 #[tauri::command]
 pub fn task_add(app: tauri::AppHandle, text: String, note_id: Option<u64>) -> Result<OwnTask, String> {
     let text = task_words_typed(&text)?;
+    if let Some(id) = note_id {
+        crate::notes::get(id).ok_or("Note not found")?;
+    }
     let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0);
-    let task = crate::notes::with_tasks(|own, notes| {
-        if let Some(id) = note_id {
-            if !notes.iter().any(|n| n.id == id) {
-                return Err("Note not found".to_string());
-            }
-        }
-        let id = own.iter().map(|t| t.id).max().unwrap_or(0) + 1;
+    let task = super::task_store::modify(|s| {
+        let id = s.tasks.iter().map(|t| t.id).max().unwrap_or(0) + 1;
         let task = OwnTask { id, text, done: false, note_id, created_ms: now, archived: false };
-        own.push(task.clone());
+        s.tasks.push(task.clone());
         Ok((task, true))
     })?;
     tracing::info!(task = task.id, in_note = note_id.is_some(), "Task added");
     tasks_changed(&app, &[note_id.unwrap_or(0)]);
-    crate::notes::saved()?;
+    super::task_store::saved()?;
     Ok(task)
 }
 
 /// Delete a task the person added (a summary's goes with the summary).
 #[tauri::command]
 pub fn task_remove(app: tauri::AppHandle, id: u64) -> Result<(), String> {
-    let note = crate::notes::with_tasks(|own, _| {
-        let at = own.iter().position(|t| t.id == id).ok_or("That task isn't there any more")?;
-        Ok((own.remove(at).note_id, true))
+    let note = super::task_store::modify(|s| {
+        let at = s.tasks.iter().position(|t| t.id == id).ok_or("That task isn't there any more")?;
+        Ok((s.tasks.remove(at).note_id, true))
     })?;
     tracing::info!(task = id, "Task removed");
     tasks_changed(&app, &[note.unwrap_or(0)]);
-    Ok(crate::notes::saved()?)
+    Ok(super::task_store::saved()?)
 }
 
 /// Tick (`done`) or untick many tasks in one step (Complete all, its Undo):
-/// each where it lives. Returns how many changed.
+/// each where it lives — an added one in tasks.json, a summary's in its
+/// note. Returns how many changed.
 #[tauri::command]
 pub fn tasks_set(app: tauri::AppHandle, items: Vec<TaskRef>, done: bool, origin: Option<String>) -> Result<usize, String> {
-    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
-    let (notes, n) = crate::notes::with_tasks(|own, notes| {
-        let (changed, n) = mark(own, notes, &items, done);
-        for note in notes.iter_mut().filter(|x| changed.contains(&x.id)) {
-            note.updated_ts = now;
-        }
-        Ok(((changed, n), n > 0))
+    let mut n = super::task_store::modify(|s| {
+        let n = mark_own(&mut s.tasks, &items, done);
+        Ok((n, n > 0))
     })?;
-    tracing::info!(tasks = n, notes = notes.len(), done, "Tasks ticked");
-    for id in &notes {
+    let mut notes: Vec<u64> = items.iter().filter(|r| r.own.is_none()).filter_map(|r| r.note_id).collect();
+    notes.sort_unstable();
+    notes.dedup();
+    let mut changed = Vec::new();
+    for id in notes {
+        let k = crate::notes::modify(id, |note| {
+            let k = mark_summary(note, &items, done);
+            Ok((k, k > 0))
+        })
+        .unwrap_or(0);
+        if k > 0 {
+            n += k;
+            changed.push(id);
+        }
+    }
+    tracing::info!(tasks = n, notes = changed.len(), done, "Tasks ticked");
+    for id in &changed {
         crate::notes::note_edits::summary_changed(&app, *id, origin.as_deref().unwrap_or(""));
     }
-    let mut touched: Vec<u64> = items.iter().map(|r| r.note_id.unwrap_or(0)).collect();
-    touched.sort_unstable();
-    touched.dedup();
-    tasks_changed(&app, &touched);
+    tasks_changed(&app, &touched(&items));
+    super::task_store::saved()?;
     crate::notes::saved()?;
     Ok(n)
 }
@@ -630,16 +646,13 @@ pub fn tasks_set(app: tauri::AppHandle, items: Vec<TaskRef>, done: bool, origin:
 /// its Undo). Returns how many changed.
 #[tauri::command]
 pub fn tasks_archive(app: tauri::AppHandle, items: Vec<TaskRef>, archived: bool) -> Result<usize, String> {
-    let n = crate::notes::with_tasks(|own, notes| {
-        let n = archive(own, notes, &items, archived);
+    let n = super::task_store::modify(|s| {
+        let n = archive(s, &items, archived);
         Ok((n, n > 0))
     })?;
     tracing::info!(tasks = n, archived, "Tasks archived");
-    let mut touched: Vec<u64> = items.iter().map(|r| r.note_id.unwrap_or(0)).collect();
-    touched.sort_unstable();
-    touched.dedup();
-    tasks_changed(&app, &touched);
-    crate::notes::saved()?;
+    tasks_changed(&app, &touched(&items));
+    super::task_store::saved()?;
     Ok(n)
 }
 
@@ -801,6 +814,10 @@ mod tests {
         assert!(task_words_typed(&"x".repeat(501)).is_err());
     }
 
+    fn store_of(tasks: Vec<OwnTask>) -> crate::notes::task_store::TaskStore {
+        crate::notes::task_store::TaskStore { tasks, archived: Vec::new() }
+    }
+
     #[test]
     fn added_tasks_list_with_their_meeting_or_on_their_own() {
         let mut n: Note = serde_json::from_value(serde_json::json!({
@@ -810,7 +827,7 @@ mod tests {
         n.enhanced_content = PLAN.to_string();
         let mut bare: Note = serde_json::from_value(serde_json::json!({ "id": 9, "title": "Sync", "createdTs": 60, "updatedTs": 60 })).unwrap();
         bare.enhanced_content = "Just talk.".into();
-        let mine = [own(1, "Book flights", Some(3)), own(2, "Renew the passport", None), own(3, "Order badges", Some(9))];
+        let mine = store_of(vec![own(1, "Book flights", Some(3)), own(2, "Renew the passport", None), own(3, "Order badges", Some(9))]);
         let listed = list_all(&[n.clone(), bare.clone()], &mine);
         // "Your tasks" first, then meetings newest first; a note with only
         // added tasks is listed too.
@@ -828,51 +845,137 @@ mod tests {
 
     #[test]
     fn complete_all_ticks_each_where_it_lives_and_undo_unticks() {
-        let mut notes: Vec<Note> = vec![serde_json::from_value(serde_json::json!({
+        let mut note: Note = serde_json::from_value(serde_json::json!({
             "id": 3, "title": "Offsite", "createdTs": 50, "updatedTs": 50, "enhancedContent": PLAN
         }))
-        .unwrap()];
-        let mut mine = vec![own(1, "Book flights", Some(3))];
-        let open: Vec<TaskRef> = note_tasks(&notes[0], &mine)
+        .unwrap();
+        let mut mine = store_of(vec![own(1, "Book flights", Some(3))]);
+        let open: Vec<TaskRef> = note_tasks(&note, &mine)
             .tasks
             .iter()
             .filter(|t| !t.task.done)
             .map(|t| TaskRef { note_id: Some(3), own: t.own, line: Some(t.task.line), text: t.task.text.clone() })
             .collect();
         assert_eq!(open.len(), 4);
-        let (changed, n) = mark(&mut mine, &mut notes, &open, true);
-        assert_eq!((changed, n), (vec![3], 4));
-        assert!(mine[0].done);
-        assert_eq!(parse(&notes[0].enhanced_content).iter().filter(|t| t.done).count(), 4);
-        assert!(same_but_ticks(PLAN, &notes[0].enhanced_content), "ticks, not an edit");
+        assert_eq!((mark_own(&mut mine.tasks, &open, true), mark_summary(&mut note, &open, true)), (1, 3));
+        assert!(mine.tasks[0].done);
+        assert_eq!(parse(&note.enhanced_content).iter().filter(|t| t.done).count(), 4);
+        assert!(same_but_ticks(PLAN, &note.enhanced_content), "ticks, not an edit");
         // Undo: the same ones unticked; the one ticked before stays ticked.
-        let (_, n) = mark(&mut mine, &mut notes, &open, false);
-        assert_eq!(n, 4);
-        assert_eq!(notes[0].enhanced_content, PLAN);
-        assert!(!mine[0].done);
-        // A task that's gone is skipped.
-        let gone = [TaskRef { note_id: Some(3), own: None, line: Some(5), text: "Not a task".into() }];
-        assert_eq!(mark(&mut mine, &mut notes, &gone, true).1, 0);
+        assert_eq!(mark_own(&mut mine.tasks, &open, false) + mark_summary(&mut note, &open, false), 4);
+        assert_eq!(note.enhanced_content, PLAN);
+        assert!(!mine.tasks[0].done);
+        // A task that's gone, or another note's, is skipped.
+        let gone = [
+            TaskRef { note_id: Some(3), own: None, line: Some(5), text: "Not a task".into() },
+            TaskRef { note_id: Some(4), own: None, line: Some(5), text: "Draft the agenda (due: tomorrow)".into() },
+        ];
+        assert_eq!(mark_summary(&mut note, &gone, true), 0);
     }
 
     #[test]
     fn archived_tasks_leave_the_list_and_come_back() {
-        let mut notes: Vec<Note> = vec![serde_json::from_value(serde_json::json!({
+        let notes: Vec<Note> = vec![serde_json::from_value(serde_json::json!({
             "id": 3, "title": "Offsite", "createdTs": 50, "updatedTs": 50, "enhancedContent": PLAN
         }))
         .unwrap()];
-        let mut mine = vec![OwnTask { done: true, ..own(1, "Book flights", None) }];
+        let mut store = store_of(vec![OwnTask { done: true, ..own(1, "Book flights", None) }]);
         let refs = [
             TaskRef { note_id: Some(3), own: None, line: Some(6), text: "Share the slides".into() },
             TaskRef { note_id: None, own: Some(1), line: None, text: String::new() },
         ];
-        assert_eq!(archive(&mut mine, &mut notes, &refs, true), 2);
-        assert_eq!(archive(&mut mine, &mut notes, &refs, true), 0, "once");
-        let listed = list_all(&notes, &mine);
+        assert_eq!(archive(&mut store, &refs, true), 2);
+        assert_eq!(archive(&mut store, &refs, true), 0, "once");
+        let listed = list_all(&notes, &store);
         assert!(listed.iter().flat_map(|g| &g.tasks).filter(|t| t.archived).count() == 2);
-        // Still ticked in its summary.
-        assert!(notes[0].enhanced_content.contains("- [x] Share the slides"));
-        assert_eq!(archive(&mut mine, &mut notes, &refs, false), 2);
-        assert!(notes[0].archived_tasks.is_empty() && !mine[0].archived);
+        // Still ticked in its summary, which archiving never touches.
+        assert_eq!(notes[0].enhanced_content, PLAN);
+        assert_eq!(archive(&mut store, &refs, false), 2);
+        assert!(store.archived.is_empty() && !store.tasks[0].archived);
+    }
+
+    /// The installed Yap and a newer dev build share one data folder: an
+    /// older Yap reads notes.json into the shape it knows and saves that back,
+    /// dropping every field it doesn't know. The person's added and archived
+    /// tasks live in tasks.json, which it never opens, and a split line is
+    /// two ordinary lines: all of it survives an old save. (What an older
+    /// Yap would drop: `edited`/`original` on lines, if it's from before
+    /// 2026-10-24 — so a split part's "Revert" — and `transcriptDeletedTs`.)
+    #[test]
+    fn an_older_yap_saving_notes_json_keeps_added_tasks_and_split_lines() {
+        // notes.json as an older Yap (before 2026-10-24) knows it.
+        #[derive(Serialize, Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        struct OldLine {
+            source: String,
+            text: String,
+            ts: u64,
+            #[serde(default, skip_serializing_if = "Option::is_none")]
+            start_ms: Option<u64>,
+            #[serde(default, skip_serializing_if = "Option::is_none")]
+            end_ms: Option<u64>,
+            #[serde(default, skip_serializing_if = "Vec::is_empty")]
+            words: Vec<[u32; 2]>,
+        }
+        #[derive(Serialize, Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        struct OldNote {
+            id: u64,
+            title: String,
+            content: String,
+            enhanced_content: String,
+            transcript: Vec<OldLine>,
+            created_ts: u64,
+            updated_ts: u64,
+        }
+        #[derive(Serialize, Deserialize)]
+        struct OldStore {
+            notes: Vec<OldNote>,
+        }
+
+        // This build: a summary task archived, tasks added, a line split.
+        let id = crate::notes::create("Offsite", "my notes", "meeting", "Meetings").id;
+        crate::notes::modify(id, |n| {
+            n.enhanced_content = PLAN.to_string();
+            n.transcript = vec![crate::notes::TranscriptSegment {
+                source: "them".into(),
+                text: "budget is due Friday okay thanks".into(),
+                ts: 100,
+                start_ms: Some(10_000),
+                end_ms: Some(16_000),
+                words: vec![[0, 400], [500, 800], [900, 1_200], [1_300, 2_000], [3_000, 3_600], [3_700, 4_500]],
+                ..Default::default()
+            }];
+            let parts = crate::notes::transcript_edits::split_line(&n.transcript[0], 4)?;
+            crate::notes::replace_line(n, 0, parts.to_vec());
+            Ok(((), true))
+        })
+        .unwrap();
+        crate::notes::task_store::modify(|s| {
+            s.tasks = vec![own(1, "Book flights", Some(id)), own(2, "Renew the passport", None)];
+            archive(s, &[TaskRef { note_id: Some(id), own: None, line: None, text: "Share the slides".into() }], true);
+            Ok(((), true))
+        })
+        .unwrap();
+        let tasks_before = crate::notes::task_store::snapshot();
+
+        // An older Yap loads notes.json and saves it back in its own shape.
+        let on_disk = crate::notes::store_json();
+        let old: OldStore = serde_json::from_str(&on_disk).unwrap();
+        let resaved = serde_json::to_string(&old).unwrap();
+        // This build reads it again.
+        crate::notes::load_json_for_test(&resaved);
+
+        let n = crate::notes::get(id).unwrap();
+        let texts: Vec<(&str, Option<u64>, Option<u64>)> = n.transcript.iter().map(|s| (s.text.as_str(), s.start_ms, s.end_ms)).collect();
+        assert_eq!(texts, [("budget is due Friday", Some(10_000), Some(12_000)), ("okay thanks", Some(13_000), Some(16_000))]);
+        assert_eq!(n.transcript[1].words, vec![[0, 600], [700, 1_500]], "each part keeps its words' times");
+        // The added and archived tasks were never in notes.json: untouched.
+        assert_eq!(crate::notes::task_store::snapshot(), tasks_before);
+        let listed = list_all(&[n], &tasks_before);
+        assert!(listed.iter().any(|g| g.note_id == 0 && g.tasks[0].task.task == "Renew the passport"));
+        let offsite = listed.iter().find(|g| g.note_id == id).unwrap();
+        assert!(offsite.tasks.iter().any(|t| t.own == Some(1)));
+        assert!(offsite.tasks.iter().any(|t| t.task.task == "Share the slides" && t.archived));
     }
 }

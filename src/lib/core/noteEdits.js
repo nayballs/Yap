@@ -17,7 +17,7 @@ import { askWordSuggestion } from '../notices/wordSuggestions.js';
 import { toast } from '../ui/toast.svelte.js';
 import { showSaveError } from '../notices/saveErrors.js';
 import { taskLines } from './markdown.js';
-import { lineRef, taskText, withLineEdit, withLineSplit, breaksAfterSplit } from './notepadText.js';
+import { lineRef, taskText, withLineEdit, withLineSplit, breaksAfterSplit, withLineRemoved, withLineRestored } from './notepadText.js';
 
 /** What a summary run says when it left the person's edited summary alone (notes/note_edits.rs). */
 export const SUMMARY_KEPT = "Your edited summary was kept: Yap didn't write over it.";
@@ -70,6 +70,17 @@ export async function revertLine(ctx, i) {
   }
 }
 
+/** This window's copy of the note with lines taken out or put back (`t`), and its stop marks; else reload. */
+function applyLines(ctx, t, breaks) {
+  const note = ctx.note();
+  if (!note) return;
+  ctx.changing('transcript', 'breaks');
+  if (t) {
+    note.transcript = t;
+    if (Array.isArray(breaks)) note.breaks = breaks;
+  } else ctx.reload();
+}
+
 /** "Delete line" on line `i`: gone at once, with Undo in the toast. */
 export async function deleteLine(ctx, i) {
   const note = ctx.note();
@@ -77,7 +88,8 @@ export async function deleteLine(ctx, i) {
   const id = note.id;
   try {
     const r = await invoke('transcript_line_delete', { noteId: id, line: lineRef(note.transcript, i), origin: ctx.origin });
-    if (ctx.note()?.id === id) applyLine(ctx, r.index, r.line);
+    const now = ctx.note();
+    if (now?.id === id) applyLines(ctx, withLineRemoved(now.transcript, r.index, r.line), r.breaks);
     toast({
       title: 'Line deleted',
       description: 'Its words are gone from the transcript and from what Yap writes from it.',
@@ -90,18 +102,19 @@ export async function deleteLine(ctx, i) {
   }
 }
 
-/** Undo a deleted line (`mark`: what's left of it, at `index`). */
-async function restoreLine(ctx, noteId, index, mark) {
+/** Undo a deleted line (`line`, from `index`). */
+async function restoreLine(ctx, noteId, index, line) {
   try {
     const r = await invoke('transcript_line_restore', {
       noteId,
       index,
-      source: mark.source,
-      ts: mark.ts,
-      startMs: mark.startMs ?? null,
+      source: line.source,
+      ts: line.ts,
+      startMs: line.startMs ?? null,
       origin: ctx.origin,
     });
-    if (ctx.note()?.id === noteId) applyLine(ctx, r.index, r.line);
+    const now = ctx.note();
+    if (now?.id === noteId) applyLines(ctx, withLineRestored(now.transcript, r.index, r.line), r.breaks);
   } catch (e) {
     failed("Couldn't put the line back", e, ctx);
   }

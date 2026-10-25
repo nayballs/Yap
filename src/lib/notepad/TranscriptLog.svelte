@@ -153,7 +153,7 @@
         canRevert(note?.transcript?.[line.i])
           ? { label: 'Revert to what Yap heard', icon: 'undo', onselect: () => revertLine(lineCtx, line.i) }
           : null,
-        // (Not while it records: the recorder holds places in the transcript.)
+        // (Split and Delete: not while it records — the recorder holds places in the transcript.)
         { label: 'Split line…', icon: 'split', disabled: recordingThis, onselect: () => startEditLine(line, true) },
         { label: 'Copy line', icon: 'copy', onselect: () => copyLine(line) },
         canPlay(note?.id, note?.transcript?.[line.i])
@@ -171,7 +171,7 @@
             }
           : null,
         { separator: true },
-        { label: 'Delete line', icon: 'trash', danger: true, onselect: () => deleteLine(lineCtx, line.i) },
+        { label: 'Delete line', icon: 'trash', danger: true, disabled: recordingThis, onselect: () => deleteLine(lineCtx, line.i) },
       ],
       { label: 'Transcript line', row: lineEls[line.i] }
     );

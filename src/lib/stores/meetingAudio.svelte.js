@@ -288,7 +288,7 @@ export async function exportAudio(note, { separate = false } = {}) {
 /** Whether line `seg` can be played (placed on its recording's clock, the audio kept). */
 export function canPlay(noteId, seg) {
   const a = meetingAudio.byNote[noteId];
-  return !!a?.recordings && seg?.startMs != null && seg?.endMs != null && !seg.dictated && !seg.failed && !seg.removed;
+  return !!a?.recordings && seg?.startMs != null && seg?.endMs != null && !seg.dictated && !seg.failed;
 }
 
 let player = null;

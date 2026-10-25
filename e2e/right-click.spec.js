@@ -347,9 +347,16 @@ test('Meetings: a past meeting and one from the calendar; a calendar connection'
   await expect(budget).toBeVisible();
 
   // A past meeting: Open, Generate summary (it has none), Copy as Markdown, Delete….
-  await budget.click({ button: 'right' });
-  await expect(menu(main)).toHaveAccessibleName('Meeting note Budget review');
-  await expect(allItems(main)).toHaveText(['Open', 'Generate summary', 'Copy as Markdown', 'Delete…']);
+  // (Its audio is kept: Export audio… once the view knows, meetings/meeting_audio/export.rs.)
+  await expect(async () => {
+    await main.keyboard.press('Escape');
+    await budget.click({ button: 'right' });
+    await expect(menu(main)).toHaveAccessibleName('Meeting note Budget review');
+    await expect(allItems(main)).toHaveText(
+      ['Open', 'Generate summary', 'Copy as Markdown', 'Export audio…', 'Export each side…', 'Delete…'],
+      { timeout: 1_000 }
+    );
+  }).toPass({ timeout: 10_000 });
   await shot(main, '08-past-meeting-menu');
   await menu(main).getByRole('menuitem', { name: 'Copy as Markdown' }).click();
   await expect.poll(copied).toContain('# Budget review');
@@ -486,7 +493,7 @@ test('the meeting notepad: a transcript line copies, and says who said it — in
 
   await row.locator('.bubble').click({ button: 'right' });
   await expect(menu(pad)).toHaveAccessibleName('Transcript line');
-  await expect(allItems(pad)).toHaveText(['Edit line', 'Copy line', 'Who said this?']);
+  await expect(allItems(pad)).toHaveText(['Edit line', 'Split line…', 'Copy line', 'Who said this?', 'Delete line']);
   await shot(pad, '12-notepad-line-menu');
   await menu(pad).getByRole('menuitem', { name: 'Copy line' }).click();
   await expect.poll(copied).toBe('Yes, the one by the river.');
@@ -519,7 +526,7 @@ test('the meeting notepad: a transcript line copies, and says who said it — in
   const mainCopied = await stubClipboard(main);
   await line.click({ button: 'right' });
   await expect(menu(main)).toHaveAccessibleName('Transcript line');
-  await expect(allItems(main)).toHaveText(['Edit line', 'Copy line', 'Who said this?']);
+  await expect(allItems(main)).toHaveText(['Edit line', 'Split line…', 'Copy line', 'Who said this?', 'Delete line']);
   await menu(main).getByRole('menuitem', { name: 'Copy line' }).click();
   await expect.poll(mainCopied).toBe('Yes, the one by the river.');
   await line.click({ button: 'right' });

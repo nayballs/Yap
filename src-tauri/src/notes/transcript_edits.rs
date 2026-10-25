@@ -6,16 +6,19 @@
 //!
 //! - **Revert** ([`revert_line`]): an edited line's words go back to
 //!   `original`; it's Yap's line again (Transcribe again may replace it).
-//! - **Delete** ([`remove_line`]): its words go — from the note, every view,
-//!   the summaries' inputs and search — but its side and place on the
-//!   recording's clock stay as a mark with no text (`removed`), so
-//!   Transcribe again and the refine after a meeting (`meeting_audio/
-//!   redo.rs`) never bring them back from the audio. The rolling digests
-//!   from the one that read it on are dropped (`drop_digests_from`): they
-//!   were written with its words, and the next summary writes them again
-//!   from what's left. **Undo** ([`restore_line`]) puts the line back as it
-//!   was, from this run's memory of it (never from disk: once Yap closes,
-//!   the words are gone for good).
+//! - **Delete** ([`remove_line`]): the line goes from the note — every
+//!   view, the summaries' inputs and search — so an older Yap sharing the
+//!   data folder keeps it gone too. Its side and place on the recording's
+//!   clock are kept beside the meeting's audio (`meeting_audio::Cut`, in
+//!   `cuts.json`), so Transcribe again and the refine after a meeting
+//!   (`meeting_audio/redo.rs`) never bring its words back. Stop marks after
+//!   it move up; the rolling digests from the one that read it on are
+//!   dropped (`drop_digests_from`): they were written with its words, and
+//!   the next summary writes them again from what's left. **Undo**
+//!   ([`restore_line`]) puts the line back where it was, from this run's
+//!   memory of it (never from disk: once Yap closes, the words are gone for
+//!   good). Not while the meeting records (the recorder and the voice
+//!   separation hold places in its transcript).
 //! - **Split** ([`split_line`]): the line becomes two at a word (the one
 //!   the cursor is in or before starts the second), each keeping its side,
 //!   voice and lock, and its own stretch of the recording's clock (by the
@@ -38,10 +41,10 @@ use tauri::{AppHandle, Emitter};
 use crate::notes::note_edits::{find_line, LineRef};
 use crate::notes::{Note, TranscriptSegment};
 
-/// A marker (a dictation, a failed stretch, the mic disconnected) or a
-/// deleted line: none of these edits apply.
+/// A marker (a dictation, a failed stretch, the mic disconnected): none of
+/// these edits apply.
 fn is_marker(seg: &TranscriptSegment) -> bool {
-    seg.dictated || seg.failed || seg.mic.is_some() || seg.removed
+    seg.dictated || seg.failed || seg.mic.is_some()
 }
 
 // ---- revert ----
@@ -74,49 +77,79 @@ pub fn drop_digests_from(note: &mut Note, at: usize) -> usize {
     before - note.digests.len()
 }
 
-/// Delete line `at` of `note` (pure): its words go, its side and place stay
-/// as a mark (see the module notes). Returns the line as it was, for Undo.
-pub fn remove_line(note: &mut Note, at: usize) -> Result<TranscriptSegment, String> {
+/// A line deleted, for Undo: the line as it was, where it was, and the stop
+/// marks and length of the transcript before.
+#[derive(Debug, Clone)]
+pub struct Removed {
+    pub line: TranscriptSegment,
+    pub index: usize,
+    pub breaks: Vec<usize>,
+    pub len: usize,
+}
+
+/// Delete line `at` of `note` (pure; see the module notes): stop marks after
+/// it move up one, digests from the one that read it go.
+pub fn remove_line(note: &mut Note, at: usize) -> Result<Removed, String> {
     let seg = note.transcript.get(at).ok_or("That line isn't there any more")?;
     if is_marker(seg) {
         return Err("That isn't a line of the transcript".to_string());
     }
-    let old = seg.clone();
-    note.transcript[at] = TranscriptSegment {
-        source: old.source.clone(),
-        ts: old.ts,
-        start_ms: old.start_ms,
-        end_ms: old.end_ms,
-        removed: true,
-        ..Default::default()
-    };
+    let removed = Removed { line: seg.clone(), index: at, breaks: note.breaks.clone(), len: note.transcript.len() };
+    note.transcript.remove(at);
     drop_digests_from(note, at);
-    Ok(old)
+    let mut breaks: Vec<usize> = note.breaks.iter().map(|&b| if b > at { b - 1 } else { b }).filter(|&b| b > 0).collect();
+    breaks.dedup();
+    note.breaks = breaks;
+    Ok(removed)
 }
 
-/// Put `line` back where it was deleted (pure): the mark at `at`, else the
-/// mark of the same side, date and place wherever it moved.
-pub fn restore_line(note: &mut Note, at: usize, line: &TranscriptSegment) -> Result<usize, String> {
-    let same = |s: &TranscriptSegment| s.removed && s.source == line.source && s.ts == line.ts && s.start_ms == line.start_ms;
-    let at = if note.transcript.get(at).is_some_and(same) {
-        at
+/// Put a deleted line back (pure): where it was when nothing else changed
+/// since (its stop marks as they were), else where it belongs by time.
+/// Returns its index.
+pub fn restore_line(note: &mut Note, removed: &Removed) -> Result<usize, String> {
+    let line = &removed.line;
+    if note.transcript.iter().any(|s| s.source == line.source && s.ts == line.ts && s.start_ms == line.start_ms && s.text == line.text) {
+        return Err("That line is back already".to_string());
+    }
+    let unchanged = note.transcript.len() + 1 == removed.len && removed.index <= note.transcript.len();
+    let at = if unchanged {
+        removed.index
     } else {
-        note.transcript.iter().position(same).ok_or("That line can't be put back any more")?
+        note.transcript.partition_point(|s| (s.ts, s.start_ms.unwrap_or(0)) <= (line.ts, line.start_ms.unwrap_or(0)))
     };
-    note.transcript[at] = line.clone();
+    note.transcript.insert(at, line.clone());
+    if unchanged {
+        note.breaks = removed.breaks.clone();
+    } else {
+        for b in &mut note.breaks {
+            if *b > at {
+                *b += 1;
+            }
+        }
+    }
     // Digests written while it was gone don't have its words.
     drop_digests_from(note, at);
     Ok(at)
 }
 
-/// Lines deleted in this run, for Undo: (note, the line as it was). The
-/// newest last; a few dozen at most.
-fn deleted() -> std::sync::MutexGuard<'static, Vec<(u64, TranscriptSegment)>> {
-    static DELETED: Mutex<Vec<(u64, TranscriptSegment)>> = Mutex::new(Vec::new());
+/// Lines deleted in this run, for Undo: (note, how it was). The newest
+/// last; a few dozen at most.
+fn deleted() -> std::sync::MutexGuard<'static, Vec<(u64, Removed)>> {
+    static DELETED: Mutex<Vec<(u64, Removed)>> = Mutex::new(Vec::new());
     DELETED.lock().unwrap_or_else(|p| p.into_inner())
 }
 
 const UNDO_KEEP: usize = 32;
+
+/// A deleted line's place, kept beside the meeting's audio.
+fn cut_of(line: &TranscriptSegment) -> Option<crate::meetings::meeting_audio::Cut> {
+    Some(crate::meetings::meeting_audio::Cut {
+        source: line.source.clone(),
+        ts: line.ts,
+        start_ms: line.start_ms?,
+        end_ms: line.end_ms?,
+    })
+}
 
 // ---- split ----
 
@@ -217,9 +250,9 @@ pub fn split_line(seg: &TranscriptSegment, k: usize) -> Result<[TranscriptSegmen
 
 /// Why line edits that move lines can't run on note `note_id` now (they
 /// hold places in its transcript), if so.
-fn busy(note_id: u64) -> Option<&'static str> {
+fn busy(note_id: u64, split: bool) -> Option<&'static str> {
     if crate::meetings::meeting::recording_note() == Some(note_id) {
-        Some("Split lines once the meeting stops recording")
+        Some(if split { "Split lines once the meeting stops recording" } else { "Delete lines once the meeting stops recording" })
     } else if crate::meetings::meeting_end::summary_running_for(note_id) {
         Some("Yap is writing this meeting's summary: try again in a moment")
     } else if crate::meetings::meeting_audio::running_job(note_id).is_some() {
@@ -270,30 +303,60 @@ pub fn transcript_line_revert(app: AppHandle, note_id: u64, line: LineRef, origi
     Ok(LineChanged { index, line: seg, changed })
 }
 
-/// "Delete line": its words go (Undo puts them back: [`transcript_line_restore`]).
+/// Tell every window lines of note `note_id` were taken out or put in at
+/// `at` (`yap-note-changed`'s `lineSplice`, as the voice separation's: the
+/// lines after it moved), with every line's voice and the stop marks.
+fn lines_spliced(app: &AppHandle, note_id: u64, at: usize, remove: usize, lines: &[TranscriptSegment], origin: &str) {
+    if let Some(n) = crate::notes::get(note_id) {
+        let mut payload = crate::notes::commands::note_changed_payload(&n, origin);
+        payload["lineSpeakers"] = serde_json::json!(crate::speakers::line_speakers(&n));
+        payload["lineSplice"] = serde_json::json!({ "at": at, "remove": remove, "lines": lines });
+        payload["breaks"] = serde_json::json!(n.breaks);
+        let _ = app.emit("yap-note-changed", payload);
+    }
+}
+
+/// Lines taken out or put back: where, which, and the stop marks now.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LineMoved {
+    pub index: usize,
+    pub line: TranscriptSegment,
+    pub breaks: Vec<usize>,
+}
+
+/// "Delete line" (Undo puts it back: [`transcript_line_restore`]).
 #[tauri::command]
-pub fn transcript_line_delete(app: AppHandle, note_id: u64, line: LineRef, origin: Option<String>) -> Result<LineChanged, String> {
-    let (index, mark, old, dropped) = crate::notes::modify(note_id, |note| {
+pub fn transcript_line_delete(app: AppHandle, note_id: u64, line: LineRef, origin: Option<String>) -> Result<LineMoved, String> {
+    if let Some(why) = busy(note_id, false) {
+        return Err(why.to_string());
+    }
+    let (removed, breaks, dropped) = crate::notes::modify(note_id, |note| {
         let at = find_line(&note.transcript, &line).ok_or("That line changed meanwhile. Try again.")?;
         let digests = note.digests.len();
-        let old = remove_line(note, at)?;
+        let removed = remove_line(note, at)?;
         let dropped = digests - note.digests.len();
-        Ok(((at, note.transcript[at].clone(), old, dropped), true))
+        Ok(((removed, note.breaks.clone(), dropped), true))
     })?;
+    // Its place, so the audio never brings it back.
+    if let Some(cut) = cut_of(&removed.line) {
+        crate::meetings::meeting_audio::set_cut(note_id, cut, true);
+    }
+    let (index, gone) = (removed.index, removed.line.clone());
     {
         let mut kept = deleted();
-        kept.push((note_id, old));
+        kept.push((note_id, removed));
         let over = kept.len().saturating_sub(UNDO_KEEP);
         kept.drain(..over);
     }
     tracing::info!(note_id, index, digests_dropped = dropped, "Transcript line deleted");
-    line_changed(&app, note_id, index, &mark, origin.as_deref().unwrap_or(""));
+    lines_spliced(&app, note_id, index, 1, &[], origin.as_deref().unwrap_or(""));
     crate::notes::saved()?;
-    Ok(LineChanged { index, line: mark, changed: true })
+    Ok(LineMoved { index, line: gone, breaks })
 }
 
-/// Undo a "Delete line": the line deleted at `index` (its side, date and
-/// place) put back as it was.
+/// Undo a "Delete line": the line deleted from where it was (`index`, its
+/// side, date and place) put back as it was.
 #[tauri::command]
 pub fn transcript_line_restore(
     app: AppHandle,
@@ -303,21 +366,29 @@ pub fn transcript_line_restore(
     ts: u64,
     start_ms: Option<u64>,
     origin: Option<String>,
-) -> Result<LineChanged, String> {
-    let line = {
-        let kept = deleted();
-        kept.iter()
-            .rev()
-            .find(|(n, s)| *n == note_id && s.source == source && s.ts == ts && s.start_ms == start_ms)
-            .map(|(_, s)| s.clone())
-            .ok_or("That line can't be put back any more")?
-    };
-    let index = crate::notes::modify(note_id, |note| Ok((restore_line(note, index, &line)?, true)))?;
-    deleted().retain(|(n, s)| !(*n == note_id && s.source == source && s.ts == ts && s.start_ms == start_ms));
-    tracing::info!(note_id, index, "Transcript line put back");
-    line_changed(&app, note_id, index, &line, origin.as_deref().unwrap_or(""));
+) -> Result<LineMoved, String> {
+    if let Some(why) = busy(note_id, false) {
+        return Err(why.to_string());
+    }
+    let is_it = |n: &u64, r: &Removed| *n == note_id && r.index == index && r.line.source == source && r.line.ts == ts && r.line.start_ms == start_ms;
+    let removed = deleted()
+        .iter()
+        .rev()
+        .find(|(n, r)| is_it(n, r))
+        .map(|(_, r)| r.clone())
+        .ok_or("That line can't be put back any more")?;
+    let (at, breaks) = crate::notes::modify(note_id, |note| {
+        let at = restore_line(note, &removed)?;
+        Ok(((at, note.breaks.clone()), true))
+    })?;
+    deleted().retain(|(n, r)| !is_it(n, r));
+    if let Some(cut) = cut_of(&removed.line) {
+        crate::meetings::meeting_audio::set_cut(note_id, cut, false);
+    }
+    tracing::info!(note_id, index = at, "Transcript line put back");
+    lines_spliced(&app, note_id, at, 0, std::slice::from_ref(&removed.line), origin.as_deref().unwrap_or(""));
     crate::notes::saved()?;
-    Ok(LineChanged { index, line, changed: true })
+    Ok(LineMoved { index: at, line: removed.line, breaks })
 }
 
 /// A line split in two: where, and the two parts.
@@ -331,7 +402,7 @@ pub struct LineSplit {
 /// "Split line" at word `at` (the second part starts with it).
 #[tauri::command]
 pub fn transcript_line_split(app: AppHandle, note_id: u64, line: LineRef, at: usize, origin: Option<String>) -> Result<LineSplit, String> {
-    if let Some(why) = busy(note_id) {
+    if let Some(why) = busy(note_id, true) {
         return Err(why.to_string());
     }
     let (index, parts) = crate::notes::modify(note_id, |note| {
@@ -341,13 +412,7 @@ pub fn transcript_line_split(app: AppHandle, note_id: u64, line: LineRef, at: us
         Ok(((i, parts.to_vec()), true))
     })?;
     tracing::info!(note_id, index, "Transcript line split");
-    if let Some(n) = crate::notes::get(note_id) {
-        let mut payload = crate::notes::commands::note_changed_payload(&n, origin.as_deref().unwrap_or(""));
-        payload["lineSpeakers"] = serde_json::json!(crate::speakers::line_speakers(&n));
-        payload["lineSplice"] = serde_json::json!({ "at": index, "remove": 1, "lines": parts });
-        payload["breaks"] = serde_json::json!(n.breaks);
-        let _ = app.emit("yap-note-changed", payload);
-    }
+    lines_spliced(&app, note_id, index, 1, &parts, origin.as_deref().unwrap_or(""));
     crate::notes::saved()?;
     Ok(LineSplit { index, lines: parts })
 }
@@ -386,32 +451,38 @@ mod tests {
     }
 
     #[test]
-    fn a_deleted_line_leaves_its_place_and_comes_back_with_undo() {
+    fn a_deleted_line_goes_and_comes_back_with_undo() {
         let lines = vec![
             seg("you", "hello all", 10, 0, 2_000),
             seg("them", "the password is hunter two", 12, 2_000, 5_000),
             seg("you", "let's start", 15, 5_000, 7_000),
         ];
-        // Digests [0,1) and [1,3): the second read the line.
-        let mut n = note_with(lines.clone(), &[(0, 1), (1, 3)], vec![3]);
-        let old = remove_line(&mut n, 1).unwrap();
-        assert_eq!(old.text, "the password is hunter two");
-        let mark = &n.transcript[1];
-        assert!(mark.removed && mark.text.is_empty() && mark.words.is_empty());
-        assert_eq!((mark.source.as_str(), mark.ts, mark.start_ms, mark.end_ms), ("them", 12, Some(2_000), Some(5_000)));
-        assert!(!mark.is_talk(), "no summary, view or search reads it");
-        // The digest written with its words goes; the one before stays.
+        // Digests [0,1) and [1,3): the second read the line. Stops after
+        // the line and at the end.
+        let mut n = note_with(lines.clone(), &[(0, 1), (1, 3)], vec![2, 3]);
+        let removed = remove_line(&mut n, 1).unwrap();
+        assert_eq!(removed.line.text, "the password is hunter two");
+        // Gone from the note (an older Yap keeps it gone too).
+        assert_eq!(n.transcript.iter().map(|s| s.text.as_str()).collect::<Vec<_>>(), ["hello all", "let's start"]);
+        // The digest written with its words goes; the one before stays; the
+        // stop marks after it move up.
         assert_eq!(n.digests.iter().map(|d| (d.from_seg, d.to_seg)).collect::<Vec<_>>(), [(0, 1)]);
-        // Indexes and stop marks don't move.
-        assert_eq!((n.transcript.len(), n.breaks.clone()), (3, vec![3]));
-        // Twice: refused (it's a mark now).
-        assert!(remove_line(&mut n, 1).is_err());
-        // Undo: back as it was, also after lines moved.
+        assert_eq!(n.breaks, vec![1, 2]);
+        // A marker isn't a line to delete.
+        n.transcript.push(TranscriptSegment::dictation_marker(20));
+        assert!(remove_line(&mut n, 2).is_err());
+        n.transcript.pop();
+        // Undo, nothing else changed: back where it was, the stops as they were.
+        assert_eq!(restore_line(&mut n, &removed), Ok(1));
+        let texts = |t: &[TranscriptSegment]| t.iter().map(|s| (s.text.clone(), s.ts, s.start_ms, s.end_ms)).collect::<Vec<_>>();
+        assert_eq!(texts(&n.transcript), texts(&lines));
+        assert_eq!(n.breaks, vec![2, 3]);
+        assert!(restore_line(&mut n, &removed).is_err(), "back already");
+        // Undo after lines moved: where it belongs by time.
+        let removed = remove_line(&mut n, 1).unwrap();
         n.transcript.insert(0, seg("you", "early", 9, 0, 500));
-        assert_eq!(restore_line(&mut n, 1, &old), Ok(2));
+        assert_eq!(restore_line(&mut n, &removed), Ok(2));
         assert_eq!(n.transcript[2].text, "the password is hunter two");
-        assert!(!n.transcript[2].removed);
-        assert!(restore_line(&mut n, 2, &old).is_err(), "nothing left to put back");
     }
 
     #[test]
@@ -478,7 +549,7 @@ mod tests {
     /// changes: a deleted line's words never come back, a split stays split.
     #[test]
     fn transcribing_again_keeps_deletions_and_splits() {
-        use crate::meetings::meeting_audio::redo::{rebuild, Redone};
+        use crate::meetings::meeting_audio::redo::{rebuild_with_cuts, Redone};
         const T0: u64 = 1_761_000_000_000;
         let line = |source: &str, text: &str, s: u64, e: u64| TranscriptSegment {
             ts: (T0 + s) / 1000,
@@ -489,18 +560,19 @@ mod tests {
             &[],
             vec![3],
         );
-        remove_line(&mut n, 1).unwrap();
-        let parts = split_line(&n.transcript[2], 1).unwrap();
-        crate::notes::replace_line(&mut n, 2, parts.to_vec());
+        let removed = remove_line(&mut n, 1).unwrap();
+        let cuts = [cut_of(&removed.line).unwrap()];
+        let parts = split_line(&n.transcript[1], 1).unwrap();
+        crate::notes::replace_line(&mut n, 1, parts.to_vec());
         let redone = vec![Redone {
             started_ms: T0,
             end_ms: T0 + 11_000,
             lines: vec![line("you", "Hello.", 0, 2_000), line("them", "My card number is.", 3_100, 5_900), line("you", "OK, one two.", 7_000, 10_000)],
         }];
-        let r = rebuild(&n.transcript, &n.breaks, &redone);
-        let texts: Vec<&str> = r.transcript.iter().filter(|s| !s.removed).map(|s| s.text.as_str()).collect();
+        let r = rebuild_with_cuts(&n.transcript, &n.breaks, &redone, &cuts);
+        let texts: Vec<&str> = r.transcript.iter().map(|s| s.text.as_str()).collect();
         assert_eq!(texts, ["Hello.", "ok", "one two"]);
         assert!(!r.transcript.iter().any(|s| s.text.contains("card")), "a deleted line's words never come back");
-        assert_eq!(r.transcript.iter().filter(|s| s.removed).count(), 1, "its mark stays");
+        assert_eq!(r.breaks, vec![3]);
     }
 }

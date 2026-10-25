@@ -31,6 +31,9 @@ import {
   transcriptItems,
   splitWordAt,
   withLineSplit,
+  withLineRemoved,
+  withLineRestored,
+  withLineSplice,
   breaksAfterSplit,
   canRevert,
   taskRef,
@@ -116,14 +119,17 @@ base('the pure helpers: a line reverted, deleted and split; a meeting tasks tab'
   expect(withLineSplit(t, 0, parts)).toBeNull(); // not that line: fetch the note
   expect(breaksAfterSplit([1, 2, 3], 1)).toEqual([1, 3, 4]);
 
-  // Deleted: nothing shows, its words and times go; Undo puts them back.
-  const mark = { source: 'them', text: '', ts: 2, startMs: 1000, removed: true };
-  const gone = withLineEdit(t, { index: 1, line: mark });
-  expect(gone[1]).toMatchObject({ text: '', removed: true, words: [] });
+  // Deleted: the line goes from the note (an older Yap keeps it gone too);
+  // Undo puts it back where it was.
+  const gone = withLineRemoved(t, 1, t[1]);
+  expect(gone.map((s) => s.text)).toEqual(['hi', 'ok']);
+  expect(withLineRemoved(t, 0, t[1])).toBeNull(); // not that line: fetch the note
   expect(transcriptItems(gone).flatMap((g) => g.lines.map((l) => l.text))).toEqual(['hi', 'ok']);
   expect(noteMarkdown({ title: 'Call', transcript: gone, speakers: {} })).not.toContain('**Them:**');
-  const back = withLineEdit(gone, { index: 1, line: t[1] });
-  expect(back[1]).toMatchObject({ text: 'a b c', removed: false, words: t[1].words });
+  expect(withLineRestored(gone, 1, t[1])).toEqual(t);
+  // Another window follows it as a splice with no lines.
+  const lineSpeakers = gone.map((s) => [s.source, false]);
+  expect(withLineSplice(t, { lineSplice: { at: 1, remove: 1, lines: [] }, lineSpeakers }).map((s) => s.text)).toEqual(['hi', 'ok']);
 
   // Revert: only an edit that says something else than what Yap heard.
   expect(canRevert({ edited: true, text: 'Kubernetes', original: 'cube and eighties' })).toBe(true);
@@ -605,20 +611,20 @@ audioTest.describe('with the meeting audio kept', () => {
     });
     await expect(log).not.toContainText('Venue options');
 
-    // Deleted (its words gone, its place kept), Undo, then deleted for good.
+    // Deleted (gone from the note; its place kept beside the audio, cuts.json), Undo, then deleted for good.
+    const cutsFile = path.join(yap.dataDir, 'meeting-audio', String(noteId), 'cuts.json');
     await bubble('you', you.text).click({ button: 'right' });
     await main.getByRole('menuitem', { name: 'Delete line' }).click();
     const deleted = toastIn(main, 'Line deleted');
     await expect(deleted).toBeVisible();
-    const isGone = (s) => {
-      const l = meetingNote(s, 'Line fixes')?.transcript?.find((x) => x.source === 'you' && x.startMs === you.startMs);
-      return l?.removed === true && !l.text && l.endMs === you.endMs && l.ts === you.ts;
-    };
+    const isGone = (s) => !meetingNote(s, 'Line fixes')?.transcript?.some((x) => x.source === 'you' && x.startMs === you.startMs);
     await expectStore(yap, 'notes.json', isGone);
+    expect(JSON.parse(fs.readFileSync(cutsFile, 'utf8'))).toEqual([{ source: 'you', ts: you.ts, startMs: you.startMs, endMs: you.endMs }]);
     await expect(log.locator('.bubble.you')).toHaveCount(youCount - 1);
     await shot(main, '14-line-deleted-undo');
     await deleted.getByRole('button', { name: 'Undo' }).click();
-    await expectStore(yap, 'notes.json', (s) => meetingNote(s, 'Line fixes')?.transcript?.some((x) => x.source === 'you' && x.text === you.text && !x.removed));
+    await expectStore(yap, 'notes.json', (s) => meetingNote(s, 'Line fixes')?.transcript?.some((x) => x.source === 'you' && x.text === you.text));
+    expect(JSON.parse(fs.readFileSync(cutsFile, 'utf8'))).toEqual([]);
     await expect(bubble('you', you.text)).toBeVisible();
     await bubble('you', you.text).click({ button: 'right' });
     await main.getByRole('menuitem', { name: 'Delete line' }).click();
@@ -679,13 +685,12 @@ audioTest.describe('with the meeting audio kept', () => {
       .poll(() => meetingAudioJob(yap, noteId), { message: 'transcribed again', timeout: 20_000 })
       .toBe('done');
     const again = lines();
-    expect(again.filter((l) => l.removed)).toHaveLength(1);
     const overlaps = (l, o) => {
       const shared = Math.min(l.endMs, o.endMs) - Math.max(l.startMs, o.startMs);
       return shared * 2 >= Math.min(l.endMs - l.startMs, o.endMs - o.startMs);
     };
     // No new "you" line fills the deleted one's place.
-    for (const l of again.filter((x) => x.source === 'you' && !x.removed && x.text)) {
+    for (const l of again.filter((x) => x.source === 'you' && x.text)) {
       expect(l.text.startsWith('[Redone:'), JSON.stringify(l)).toBe(true);
       expect(overlaps(l, you), JSON.stringify(l)).toBe(false);
     }
