@@ -1,11 +1,88 @@
 # The dictionary
 
-The correction dictionary: near-miss (fuzzy) matching, the Whisper vocabulary's order, and learning words from your corrections, plus the Dictionary view. The exact pass, snippets and "press enter" are in [dictation.md](./dictation.md) (the pipeline order); see also [`docs/fuzzy-dictionary.md`](../fuzzy-dictionary.md).
+The correction dictionary: near-miss (fuzzy) matching, several ways one word is heard, your own name and names spelled far from how they're said, the Whisper vocabulary's order, learning words from your corrections (dictations, meeting lines, summaries), snippets offered for text you use often, plus the Dictionary view. The exact pass, snippets and "press enter" are in [dictation.md](./dictation.md) (the pipeline order); see also [`docs/fuzzy-dictionary.md`](../fuzzy-dictionary.md).
 
 [Architecture index](./README.md) · [CLAUDE.md](../../CLAUDE.md)
 
 ## Modules
 
+- **`dictionary/variants.rs`** — **one entry, several ways it's heard**
+  (2026-10-25): "Kubernetes" ← "cooper netties", "cube an eighties". A
+  correction keeps them in `alsoHeard` beside `from`
+  (`DictionaryEntry::heard()` lists them all; a snippet's phrase is one).
+  The exact pass (`config::apply_dictionary`) takes every one, the longest
+  first ("cube" never eats the start of "cube an eighties"); the near-miss
+  pass matches each, and the written form, as a spelling; AI cleanup is told
+  `"cooper netties" or "cube an eighties" → "Kubernetes"`
+  (`llm::dictionary_suffix`); the **Whisper prompt** has the written word
+  once (`config::dictionary_prompt`). **The one-time change** (`migrate`,
+  from `config::load`, by the dictionary's own `dictionary_version` — apart
+  from `config_version`, stamped on every save like it): corrections
+  written exactly the same way with the same ≈ switch become one entry
+  where the first was, a star on any kept, every way heard kept in the
+  order added; snippets and half-written rows never merge. Rows made one
+  at a time since stay as they are (it ran once). **New ways in** go to the
+  entry already writing the word (`add_heard`, near-misses on): a word
+  offered from your corrections, an import's rows. An older Yap ignores
+  `alsoHeard` (it keeps `from`) and drops it on its next save.
+- **`dictionary/snippet_offer.rs`** — **"Type that often? Save it as a
+  snippet"** (Wispr Flow's nudge, by behaviour; 2026-10-25). **What counts**
+  (`phrases`, pure): in a dictation's text, every link, email address and
+  phone number (9–15 digits); an address up to its UK postcode or US ZIP
+  ("12 Station Road, Norwich NR1 4AB" wherever in the sentence, from the
+  house number, with a "Flat 3" before it); each sentence or paragraph (and
+  a short dictation of up to three, whole) that's a sign-off with a name
+  ("Best wishes,\nSam"), has lines of its own, or is long (≥ 40 characters
+  and 6 words) — compared by their words alone (`key`). **Where from**: the
+  week's dictation history (`history::dictation_texts_since`; history off,
+  none) and what was typed right after a dictation on its line (`learn.rs`'
+  watch, `Watch::typed_after`; only with "Suggest words from your
+  corrections" on — a line break ends that watch, so a typed sign-off on
+  new lines isn't seen). Typed text is never kept: a fingerprint of its
+  words and when, a week (`snippet_suggestions.json`); the third time it's
+  offered from the text in hand. **When** (`verdict`, pure): seen 3 times in
+  7 days, not a snippet's text (nor inside one: a snippet that expanded in
+  those dictations), never offered before (each phrase once, whatever the
+  answer; one left to fade may come back), one offer a day, "Suggest
+  snippets for text you use often" on. Links, addresses and the like beat a
+  plain long phrase, then the longest. Worked out first, then it waits out
+  a dictation (≤ a minute; notice kind `snippet-suggestion`, held and
+  dropped unseen after a minute). **The offer**, in one place
+  (`notice::place`): a toast in the main window while it's focused
+  (`yap-snippet-suggestion`, `notices/snippetSuggestions.js`: Save snippet
+  / Not now / "Don't suggest this again"), else a Yap bar card (✕ = Not
+  now, 30 s fade = no answer); never a Windows notification. **Save
+  snippet** adds `{from: the phrase to say, to: the text, snippet: true}`
+  (`settings::change_config`, then `yap-dictionary-learned` for the
+  Dictionary view) and says "Say “my address” and Yap types it" with Open
+  Dictionary. **The phrase to say** (`trigger`): "my address", "my email",
+  "my number", "my <site> link", "my sign-off", else "my" and the text's
+  first two words; "2", "3"… after it when a snippet says that already.
+  "Don't suggest this again" turns them off (the Dictionary view's switch,
+  `snippet_suggestions_enabled` / `_set`, its own store, not config.json).
+  Logs: counts, lengths and kinds. Debug-only `e2e_snippet_offer_reset`.
+- **`dictionary/spoken_names.rs`** — **names a speech model spells far from
+  how they're written** (2026-10-25): "Shivon" for "Siobhan", "Neev" for
+  "Niamh", "Seersha" for "Saoirse". By their letters, and their Soundex and
+  sound keys, "Spain" is nearer "Siobhan" than "Shivon" is: no distance
+  finds them. So a built-in list (`said_as`: Irish, Scottish Gaelic, Welsh
+  and a few other names, accents folded) gives each a few respellings of how
+  it's said, which memory's names and your own carry as `alsoHeard`
+  (`memory/vocab.rs` `add_name`; one-word names that are near-miss targets
+  only). The names pass (`fuzzy::apply_names`) takes a match through one of
+  them only when what was heard isn't an ordinary word and it's that
+  respelling exactly or — three sounds or more — a letter off and sounding
+  the same (`near_how_said`); a near-miss of the name's own spelling is
+  Handy's score as before. Left out: respellings that are a name of their
+  own ("Owen", "Rory", "Killian", "Reece"; Siân altogether: "Shan" is a
+  letter from "Shane"), and some only for your own name ("Dermot" said by a
+  Diarmuid is him; another person's Dermot isn't). Measured: memory's
+  `no_everyday_sentence_changes` with 109 names (these 20 among them) and
+  ~220 sentences, other people's names (Sharon, Shane, Shona, Owen, Rory,
+  Dermot, Sean…) and near words (naive, sieve, Spain) included — none
+  changes with this PC's spell checker. (Found while measuring, not new:
+  the names pass takes another name one letter off a remembered one —
+  "Sean" with a Sian remembered — as Handy's score allows.)
 - **`dictionary/fuzzy.rs`** — fuzzy dictionary correction (Handy `audio_toolkit/text.rs` port):
   1–3-word n-grams vs the dictionary's `from`/`to` spellings, normalized Levenshtein
   + Soundex phonetic boost (the `natural` crate's nonstandard variant, replicated
@@ -24,12 +101,22 @@ The correction dictionary: near-miss (fuzzy) matching, the Whisper vocabulary's 
   the names on screen — put the words back together with single spaces, and
   the real-app robot's Gmail page got "Hi Sam, Thank you for the figures.").
   Runs after `apply_dictionary` for ONNX models (`dictionary_fuzzy`, default on);
-  snippets are never candidates. **`apply_names`** is the same loop for the
-  names Yap remembers (`memory/vocab.rs`, run after the dictionary's own pass
-  in `pipeline::apply_corrections`), refusing a near-miss heard as an
-  ordinary word ("lucky" with a Lucy in memory, "row shell" for Rochelle); the
-  Whisper prompt gets those names after the dictionary's words
-  (`memory::with_names`). See [memory.md](./memory.md).
+  snippets are never candidates; every way an entry is heard is one
+  (`variants.rs`). **`apply_names`** is the same loop for **your own name**
+  (About you's "What should Yap call you?", `memory/vocab.rs` `own_name`,
+  2026-10-25: a hidden term — never an entry to manage — by the same rules
+  as memory's names, unless the dictionary spells it; About you's row says
+  "Dictation spells it this way too, and fixes near-misses of it" or, where
+  it can only go in the prompt, "Whisper models are told how to spell it",
+  `about_you_status` `nameHint`) and the names Yap remembers
+  (`memory/vocab.rs`, run after the dictionary's own pass in
+  `pipeline::apply_corrections`), refusing a near-miss heard as an ordinary
+  word ("lucky" with a Lucy in memory, "row shell" for Rochelle), and one
+  through how a name is said only by `near_how_said`
+  (`spoken_names.rs`); the Whisper prompt gets your name, then memory's,
+  after the dictionary's words (`memory::with_names(dictionary,
+  about_name)`), and the screen's pass never changes them
+  (`screen_terms::protected`). See [memory.md](./memory.md).
   Also `is_prompt_echo` (OpenWhispr `dictionaryEchoFilter` port) used by `dictation/stt.rs`
   against Whisper hallucinating the dictionary prompt on silence, and, for
   `dictionary/learn.rs`, `spelling_distance` (Handy's score on the letters alone, no
@@ -172,9 +259,13 @@ The correction dictionary: near-miss (fuzzy) matching, the Whisper vocabulary's 
   in a contraction/possessive (`'s 't 'll 've 're 'd 'm` or a bare `'`;
   "O'Brien" is fine), a single everyday
   word heard ("motion" → "Notion" would rewrite every "motion"), only
-  function words, terms (or triggers) already in the dictionary, and edits
-  rewriting most of the dictation. One per spelling (case-blind), terms
-  with a capital first, ≤ 3. **The prompt** (`offer`): "Add
+  function words, what a correction is heard as already (any of its ways),
+  a word the dictionary spells another way ("JSON" there, "json" typed),
+  and edits rewriting most of the dictation. A word the dictionary writes
+  exactly so, heard a new way, is offered as **another way it's heard**
+  ("Add another way you say “Kubernetes”? Yap heard “cube an eighties”.";
+  Add puts it in that entry, `variants::add_heard`; 2026-10-25). One per
+  spelling (case-blind), terms with a capital first, ≤ 3. **The prompt** (`offer`): "Add
   “Kubernetes” to your dictionary? Yap heard “cube and eighties”." — Add /
   Not now / "Don't suggest this"; in one place (`notice::place`): a toast
   (`yap-word-suggestion`, `wordSuggestions.js`, kind `tip`) while the main
@@ -200,7 +291,22 @@ The correction dictionary: near-miss (fuzzy) matching, the Whisper vocabulary's 
   last prompt), and the prompt handed back to the window that made the edit,
   which asks in its own toast (`wordSuggestions.js` `askWordSuggestion`;
   Open Dictionary only where there's a sidebar) — answered with
-  `word_suggestion_respond` like any other. Answers in
+  `word_suggestion_respond` like any other. **A meeting summary the person
+  edited** (`offer_for_summary`, 2026-10-25; `summary_word_offer {before,
+  after}` from the Summary tab's editor at Done — the notepad's
+  `summaryEditor.svelte.js` and the Notes view's `notesState.svelte.js`,
+  through `noteEdits.js` `offerSummaryWords`; the summary as it was at Edit
+  against what Done leaves): `summary_swaps` (pure) aligns the two as a
+  dictation's edit, task boxes left out, and offers only when **every**
+  change is a swap of 1–3 words for 1–3 words that `judge` (or
+  `judge_case`) takes — a name or a term, spelled or sounding alike, never
+  one everyday word heard — and there are at most two different ones (the
+  same swap in several places counts once); one added, deleted or longer
+  change anywhere is a rewrite and nothing is offered ("Shivon" →
+  "Siobhan" yes; Friday → Monday, Sam → Priya, a sentence added: no). The
+  same prompt and answers as a line's. **Typed right after a dictation**
+  (`Watch::typed_after`: the span is the pasted text unchanged, then more,
+  on its line) goes to `snippet_offer.rs`. Answers in
   `<data>/word_suggestions.json` (not config.json: Settings' wholesale
   saves). Debug-only `e2e_learn_correction {pasted, edited?, before?,
   reads?, fresh?}` stages an edit for the e2e suite (skips the 3-min gap):
@@ -223,6 +329,29 @@ The correction dictionary: near-miss (fuzzy) matching, the Whisper vocabulary's 
   turns snippets into corrections. Settings → Dictation → Typing into apps has "Say
   “press enter” to send" (`voiceEnter`) under Auto-submit; the key picker
   shows when either is on.
+- **One correction, several ways it's heard** (2026-10-25, `variants.rs`):
+  "+" beside "Heard" (and "Add another way it's heard" in the row's menu)
+  adds a box under it, "Also heard as", each with its ×; the list shows
+  the word once. `dictionaryList.js` `heardForms` / `cleanEntry` (the view's
+  saves; Settings' `cleanConfig` keeps `alsoHeard` too, or its auto-save
+  would drop them), the search matches every way, a delete's Undo brings
+  them back, and Delete… says "Yap stops changing “a” or “b” to “K”".
+- **Snippets' length and warnings** (2026-10-25, Wispr Flow's richer
+  snippets): under a snippet's text, "N characters" (at most 5,000, as an
+  import takes; the box stops there); under its phrase, a warning
+  (`snippetWarnings`, the corrections indexed once per change so 2,000
+  entries stay quick) when it's another snippet's phrase, close to one
+  ("my adress" beside "my address": a fifth of the letters apart), has words
+  a correction changes before snippets are looked for ("the jaison file"
+  with "jaison → JSON": Yap writes "the JSON file" first and the snippet
+  never fires; a one-word way heard with ≈ on, near-misses of it too), or
+  is a dictionary word (said in any sentence, it types the snippet). Not
+  done: rich text (bold, links, lists pasted as HTML beside plain) — it
+  needs a second clipboard format through the paste path
+  (`text_injector.rs`, the robot tests).
+- **"Suggest snippets for text you use often"** under Snippets
+  (`snippet_offer.rs`; its own store, read and set by
+  `snippet_suggestions_enabled` / `_set`).
 - **For a dictionary of hundreds** (2026-10-25; ROADMAP's "The Dictionary
   view", Wispr Flow's dictionary). A sticky bar over the list:
   - **Search** (Ctrl+F, Esc clears): filters as you type over what's heard
@@ -262,7 +391,11 @@ The correction dictionary: near-miss (fuzzy) matching, the Whisper vocabulary's 
     none (heard, written; one column = words) — or **text**, one entry a
     line: `heard → written` (or `->`, `=>`) or a word alone; `# notes`,
     bullets and quotes around words are left out. A word alone becomes a
-    correction of itself ("Zentrix → Zentrix"). Then a **preview**
+    correction of itself ("Zentrix → Zentrix"). Rows writing the same word
+    (≈ alike) become one entry with several ways it's heard, or join the
+    entry already writing it ("Another way it's heard" in the preview;
+    `importChanges` `extend`, and the Undo takes those ways off again).
+    Then a **preview**
     (`ImportPreview.svelte`) before anything changes: **to add** (each
     ticked, untick to leave out), **spelled differently** — the same thing
     heard written another way, or a word you have spelled another way
@@ -275,7 +408,8 @@ The correction dictionary: near-miss (fuzzy) matching, the Whisper vocabulary's 
     selection's): **CSV** (snippets, stars and ≈ kept; a BOM so Excel
     reads it as UTF-8; Import… reads it back the same) or **text**
     (`heard → written` a line, corrections only: "Snippets need CSV" says
-    how many were left out).
+    how many were left out). A word heard several ways is a row (a line) a
+    way, the written word on each.
   - **2,000 entries**: 200 rows drawn at a time, more as the end of the
     list scrolls into view (or "Show 200 more"), and off-screen rows skip
     layout (`content-visibility`). Measured in the stub debug build
@@ -286,5 +420,15 @@ The correction dictionary: near-miss (fuzzy) matching, the Whisper vocabulary's 
     saves it at once.
   - Tests: `e2e/dictionary-list.spec.js` (the pure parts, no app: search,
     sorts, CSV and text parsing, the import's plan and choices, export
-    round trips, both Undos) and `e2e/dictionary.spec.js` (the view, in
-    light and dark).
+    round trips — several ways heard included —, both Undos, the snippet
+    warnings and their speed at 2,200 entries), `e2e/dictionary.spec.js`
+    (the view, in light and dark; several ways heard added, saved,
+    corrected in a dictation, exported, imported and undone; a snippet's
+    length and warnings) and `e2e/dictionary-learning.spec.js` (your own
+    name in a dictation; the snippet offer — toast, bar card, "Don't
+    suggest this again" and the switch; a summary edit's word offer). Rust
+    unit tests: `variants.rs` (the merge, the migration, the passes and
+    the prompt), `snippet_offer.rs` (what counts, three in a week, once, a
+    day, the phrase to say), `learn.rs` (`summary_swaps`, `typed_after`,
+    another way heard), `spoken_names.rs`, `memory/vocab.rs` (your own
+    name; the respellings against everyday sentences).

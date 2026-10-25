@@ -325,6 +325,22 @@ of what's added, already there, spelled differently and left out; the
 parsing, sorting and Undo rules unit-tested, the view e2e-tested in light
 and dark with 2,000 entries measured quick in the stub debug build; not yet
 tried with a file exported from another app or by hand in Excel),
+**the dictionary learning more by itself** (2026-10-25,
+[dictionary.md](./dictionary.md)): **one entry, several ways it's heard**
+(`dictionary/variants.rs`: the exact and near-miss passes take every one,
+the Whisper prompt the word once; the one-time merge by the dictionary's
+own version, import/export a row a way and back; a word you fix that the
+dictionary writes, heard a new way, offered as another way it's heard),
+**your own name** (About you) a hidden term for the names pass and the
+Whisper prompt, **names spelled far from how they're said** ("Shivon" →
+Siobhan, `dictionary/spoken_names.rs`; ~200 everyday sentences and other
+people's names measured unchanged with this PC's spell checker), **"Type
+that often? Save it as a snippet"** (`dictionary/snippet_offer.rs`), a
+**summary's word swap** offered at Done, and **snippets' length and
+warnings** — the rules unit-tested, all five e2e-tested through the stub
+engine's dictations (the snippet offer's bar card too); not yet tried with
+real speech, a real week of dictations, or text typed after a real paste
+(the watch's `typed_after` is unit-tested only),
 the Groq usage meter, and the installer + auto-updater (background checks + download
 while Yap runs, "Restart to update" from toast/tray/About/Windows notification —
 `updates.rs`, 2026-10-05) + portable mode + release CI (since 2026-10-25 every
@@ -704,7 +720,8 @@ its notes both say can pass (no "In short" from a small on-device model for
 that reason);
 a true streaming model for the partial pass (spike-gated
 Stage 2 — see `ROADMAP.md` Phase 1);
-multi-phrase dictionary entries; verify-after-paste beyond Win32 edit
+rich-text snippets (bold, links, lists pasted as HTML beside plain text);
+snippets with several spoken phrases; verify-after-paste beyond Win32 edit
 controls (a web or code editor's hidden input can't say whether a paste
 landed); a JetBrains IDE's or Visual Studio's terminal, and a browser's
 (vscode.dev, Codespaces), still count as the editor;

@@ -136,7 +136,10 @@ One folder per area (an area's `<area>.rs` lists its modules); a big module's pa
 - `dictionary/fuzzy.rs` — near-miss correction (Levenshtein + Soundex), prompt-echo guard, sound distances.
 - `dictionary/dict_usage.rs` — how often each dictionary word is used; orders the Whisper prompt (starred words first).
 - `dictionary/files.rs` — the Dictionary view's Import… / Export… files: Windows' dialogs opened in Rust, a file's text decoded (UTF-8, UTF-16, Windows-1252).
-- `dictionary/learn.rs` — "Suggest words from your corrections": the 60 s field watch and the offer.
+- `dictionary/learn.rs` — "Suggest words from your corrections": the 60 s field watch and the offer; a meeting line's fix and a summary's word swap (at Done) offered too.
+- `dictionary/variants.rs` — one entry, several ways it's heard (`alsoHeard`): every pass takes each, the Whisper prompt the word once; the one-time merge (`dictionary_version`).
+- `dictionary/snippet_offer.rs` — "Type that often? Save it as a snippet": a phrase dictated or typed 3× in a week offered once (one a day), with a phrase to say.
+- `dictionary/spoken_names.rs` — how names spelled far from how they're said sound ("Shivon" → Siobhan), for the names pass (memory's names and your own).
 - `dictionary/screen_terms.rs` (+ `dictionary/screen_terms/`) — "Spell names the way they're written on screen": the target window's visible text read at record start (UIA, bounded) → its names and terms, for that dictation only: a strict near-miss pass (every model), cleanup's "Spell these names as written" line.
 
 **AI models** — [ai-models.md](./docs/architecture/ai-models.md)
@@ -169,7 +172,7 @@ One folder per area (an area's `<area>.rs` lists its modules); a big module's pa
 - `snip/images.rs` / `snip/turn.rs` / `snip/vision.rs` — `chat-images/` and "Keep chat screenshots"; a question's `image_url` parts per provider; which models read images (the picker's "Reads images" tag) and the one-click switch. `snip/dump.rs`: `yap.exe snip-dump` (debug).
 
 **Memory** — [memory.md](./docs/architecture/memory.md)
-- `memory.rs` (+ `memory/`) — what Yap remembers about you (`memory.json`): learned from quiet chats and meetings (a model without tools by the careful small path, `memory/small.rs`), sent with questions, remember/forget/search_chats tools, names for dictation, export, Undo.
+- `memory.rs` (+ `memory/`) — what Yap remembers about you (`memory.json`): learned from quiet chats and meetings (a model without tools by the careful small path, `memory/small.rs`), sent with questions, remember/forget/search_chats tools, names for dictation (About you's name first), export, Undo.
 
 **Meeting search** — [search.md](./docs/architecture/search.md)
 - `search.rs` (+ `search/`) — search by meaning over every meeting and note, on this PC: passages with their lines (`chunks.rs`), EmbeddingGemma-300M on Yap's llamafile in `--embedding` mode, downloaded on demand (`embedder.rs`), the vectors in `search-index/` kept up to date in the background, never in a dictation's way (`store.rs`, `index.rs`), the question's dates (`dates.rs`), BM25 + meaning by weighted RRF (`rank.rs`), Ask across meetings' cited passages that open the moment (`ask.rs`).
@@ -261,7 +264,7 @@ One folder per area (an area's `<area>.rs` lists its modules); a big module's pa
 - `views/ControlPanel.svelte` — the main window (label `settings`): sidebar, Settings modal, title bar.
 - `ui/toast.svelte.js` + `ui/noticePolicy.js` — app-wide toasts running the page's notice policy; `notices/` — alerts, the meeting guard rails and check-ins, the cleanup offer, word suggestions, `saveErrors.js` (a command's failed save shown with Try again).
 - `views/home/HomeView` / `views/InsightsView` / `views/UploadView` — dictation feed (a dictation's "AI edited · N changes" word diff, `core/wordDiff.js`, and Paste what I said), stats, audio-file transcription (its job in `stores/upload.svelte.js`, kept when you leave the view); `views/home/homeData.js` (Home's data in one call, asked first), `core/ipcShared.js` (one call for reads asked at once), `core/appNames.js` (apps by their names), `core/aiErrors.js` (AI failures in plain words), `notices/cleanupOffer.js` (the one tip offering AI cleanup).
-- `views/dictionary/` — the Dictionary view: corrections and snippets, search (Ctrl+F), stars and sorts, select several, Import… / Export… as CSV or text with a preview ([dictionary.md](./docs/architecture/dictionary.md)).
+- `views/dictionary/` — the Dictionary view: corrections (several ways heard each) and snippets (their length, a warning for a risky phrase), search (Ctrl+F), stars and sorts, select several, Import… / Export… as CSV or text with a preview ([dictionary.md](./docs/architecture/dictionary.md)); `notices/snippetSuggestions.js` the snippet offer's toast.
 - `views/notes/` — the AI Notepad ([notes.md](./docs/architecture/notes.md)): `NotesView.svelte` with `notesState.svelte.js`, `NoteList`, `NoteEditor` (+ `NoteMeta`, `NoteSummary`, `NoteTranscript`, `NoteChat`, `ActionPicker`), `ActionManager`; `core/noteEdits.js` — fixing a line, the summary, ticking tasks (shared with the notepad); `views/TasksView.svelte` — sidebar Tasks across meetings.
 - `core/markdown.js` — every rendered answer/note: markdown-it + DOMPurify, citation pills ([notes.md](./docs/architecture/notes.md#the-markdown-renderer)).
 - `views/chat/` — Chat ([chat-and-assistant.md](./docs/architecture/chat-and-assistant.md)): `ChatView.svelte` with `chatState.svelte.js`, `ConversationList`, `ChatThread` + `ChatMessage`, `Composer`; the model chip and picker (`ModelChip`, `ChatModelPicker`, `chatModels.svelte.js`; "Reads images": `stores/visionTags.svelte.js`), a snip, a pasted or dropped picture in the box, a screenshot's Copy / Save menu, "Send its text instead" (`chatImages.js`, `chatShots.svelte.js`; [snip.md](./docs/architecture/snip.md)); `core/streaming.js` — streamed answers in Chat and the notepad's Ask sheet (the channel, ■, half-written markdown closed off, the checked answer's smooth swap).
@@ -400,7 +403,7 @@ Installer, channels and notes: [updates-and-release.md](./docs/architecture/upda
 Everything lives in `%APPDATA%/yap/` (portable: `<exe>/Data/`): `config.json`,
 `models/` (speech; `diarization/`, `tts/`, `search/`), `llm/` (on-device GGUFs), `history.json`,
 `notes.json`, `chats.json`, `calendar.json`, `updates.json`, `model_catalog.json`,
-`groq_usage.json`, `dictionary_usage.json`, `hints.json`, `word_suggestions.json`,
+`groq_usage.json`, `dictionary_usage.json`, `hints.json`, `word_suggestions.json`, `snippet_suggestions.json`,
 `language_nudges.json` (the "You spoke French" answers), `notices.json`, `memory.json` (what Yap remembers about you), `chat-images/` (Chat's screenshots, Snip to Chat), `connections.json` (a week of network receipts: hosts and purposes, never content), `quieted_apps.json`
 (only mid-dictation), `stt_speed.json` (each model's device timings),
 `recent-audio/` (a day of dictation audio), `meeting-audio/` (each meeting's audio as

@@ -257,7 +257,14 @@ is [ai-models.md](./ai-models.md); the dictionary passes it feeds are
   memory, "olive" with an Olivia — or a run of them, "row shell"). **No spell
   checker on the PC: no name is a near-miss target** (`memory::Words`); only
   the Whisper prompt and a case fix. `name_hint` tells Settings which applies.
-  Cached until memory changes.
+  Cached until memory changes. **Your own name** (About you's, `own_name`,
+  2026-10-25) joins them first, by the same rules: `memory::dictation_names(
+  dictionary, about_name)` / `with_names(dictionary, about_name)`, cached by
+  the name; About you's row says which applies (`about_you_status`
+  `nameHint`). A one-word name a speech model spells far from how it's
+  written carries respellings of how it's said ("Siobhan" ← "shivon",
+  `dictionary/spoken_names.rs`) as `alsoHeard`, for the names pass only
+  ([dictionary.md](./dictionary.md)).
 - **`memory/export.rs`** — "Export memory": `You.md` (About you's name,
   region and note first, under "About you"; then Profile, Preferences),
   `People.md`, `Projects.md`, `Topics.md` in a .zip written by hand (Deflate,

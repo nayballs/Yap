@@ -195,7 +195,11 @@ itself (`.toolchip.tool`).
   “Kubernetes” to your dictionary? Yap heard “cube and eighties”." with Add /
   Not now / a "Don't suggest this" link, chip Dictionary, `icon:
   'dictionary'`, 30 s; ✕ = Not now; after Add "“Kubernetes” is in your
-  dictionary" + Open Dictionary), **alerts** (`alerts.js` — notices/alert.rs's
+  dictionary" + Open Dictionary), **snippet suggestions**
+  (`snippetSuggestions.js` — dictionary/snippet_offer.rs's
+  `yap-snippet-suggestion`: "Type that often? Save it as a snippet" with Save
+  snippet / Not now / "Don't suggest this again", chip Dictionary, 30 s; ✕ =
+  Not now; after Save "Snippet saved" + Open Dictionary), **alerts** (`alerts.js` — notices/alert.rs's
   `yap-alert`, kind `alert` (a test's `level` may name another): "Your text
   is copied: press Ctrl+V" with chip Paste, `icon: 'clipboard'`; "Windows is
   blocking microphone access for desktop apps" + Open settings, chip

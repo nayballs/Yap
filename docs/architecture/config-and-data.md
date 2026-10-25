@@ -58,7 +58,11 @@
   open the whole time Yap runs, as before 2026-10-22; `dictation/mic.rs`), recording_mode,
   overlay_position, dictionary (`DictionaryEntry`: from/to + `fuzzy` (default
   on) + `snippet` (default off) + `starred` (default off, written only when
-  set; 2026-10-25)), append_trailing_space, smart_spacing ("Match
+  set; 2026-10-25) + `alsoHeard` (a correction's other ways it's heard,
+  written only when it has some; 2026-10-25, `dictionary/variants.rs`)),
+  dictionary_version (the dictionary's own one-time changes, apart from
+  `config_version`: v1 merged corrections written the same way into one
+  entry; stamped on every save like `config_version`), append_trailing_space, smart_spacing ("Match
   the text around the cursor", default on), screen_names ("Spell names the
   way they're written on screen", default on; `dictionary/screen_terms.rs`),
   chat_no_full_stop ("Leave the full
@@ -345,6 +349,13 @@
   count and "Don't suggest this", and the words you removed from the
   dictionary (`removed`, never suggested again) (`dictionary/learn.rs`). Never the
   field text it read.
+- Snippet suggestions: `%APPDATA%/yap/snippet_suggestions.json` — "Type
+  that often? Save it as a snippet" (`dictionary/snippet_offer.rs`): whether
+  it's off ("Don't suggest this again", or the Dictionary view's switch),
+  when Yap last offered one, the phrases offered and answered, and the
+  phrases typed right after a dictation in the last week — fingerprints of
+  their words and when, never the text (dictated phrases are counted from
+  `history.json`).
 - Language nudges: `%APPDATA%/yap/language_nudges.json` — when Yap last
   offered to add a language to My languages, and per language your "Not now"
   count and "Don't ask about it" (`dictation/languages/nudge.rs`). Codes only.
