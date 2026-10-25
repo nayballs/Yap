@@ -286,6 +286,26 @@ pub fn poke() {
     WAKE.notify_one();
 }
 
+/// The next pass drops the vectors of passages that are gone, however few.
+static SWEEP: AtomicBool = AtomicBool::new(false);
+
+/// Words were deleted from the notes on purpose (a meeting's transcript
+/// after its days, `notes/retention.rs`): the vectors of passages no note
+/// has any more go now, from the notes as they are — not when they pile up
+/// — and the next pass sweeps again (a batch read before the deletion may
+/// land after it). Nothing to do without an index on disk. Returns how many
+/// went.
+pub fn drop_gone() -> Result<usize, String> {
+    SWEEP.store(true, Ordering::SeqCst);
+    poke();
+    if !dir().join(super::store::FILE).exists() {
+        return Ok(0);
+    }
+    let notes = crate::notes::all();
+    let keep: HashSet<Key> = prepared(&notes).iter().flat_map(|v| v.iter()).map(|p| p.key).collect();
+    with_store(|s| s.compact(&keep)).map_err(|e| format!("couldn't compact the search index: {e}"))
+}
+
 fn first_delay() -> Duration {
     if crate::shell::e2e::active() {
         return Duration::from_millis(300);
@@ -415,7 +435,8 @@ async fn pass(app: &AppHandle) -> Result<bool, String> {
     // The vectors of passages that are gone: a deleted note's at once (its
     // index goes with it), an edit's once they're a good part of it.
     let ids: Vec<u64> = notes.iter().map(|n| n.id).collect();
-    let deleted = note_gone(&SEEN, &ids);
+    let swept = SWEEP.swap(false, Ordering::SeqCst);
+    let deleted = note_gone(&SEEN, &ids) || swept;
     let dead = with_store(|s| s.dead_share(&keep));
     if dead > DEAD_SHARE || (deleted && dead > 0.0) {
         match with_store(|s| s.compact(&keep)) {

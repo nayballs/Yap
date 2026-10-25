@@ -799,6 +799,12 @@ pub struct YapConfig {
     /// For how many days (14, like Wispr Flow's playback).
     #[serde(default = "default_meeting_audio_days")]
     pub meeting_audio_days: u32,
+    /// "Delete meeting transcripts after" (Settings → Privacy & data): a
+    /// meeting's transcript (and its audio) goes this many days after the
+    /// meeting, its notes, summary and tasks kept (`notes/retention.rs`; 30
+    /// / 90 / 365). 0, the default: kept.
+    #[serde(default)]
+    pub meeting_transcript_days: u32,
     /// "Improve the transcript after the meeting" (Settings → Meetings):
     /// "auto" (when it helps: chunks failed, or a more accurate speech
     /// model is installed), "always" or "never" (`meeting_refine.rs`).
@@ -1197,6 +1203,7 @@ impl Default for YapConfig {
             meeting_consent_message: String::new(),
             meeting_keep_audio: true,
             meeting_audio_days: default_meeting_audio_days(),
+            meeting_transcript_days: 0,
             meeting_refine: default_meeting_refine(),
             meeting_diarization: false,
             diarization_model: default_diarization_model(),

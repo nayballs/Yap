@@ -297,7 +297,13 @@
         onchange={loadAudio}
       />
     </Row>
-    <Row label="Keep it for" desc="Then it's deleted. The notes and transcripts stay" setting="meeting-audio-days">
+    <Row
+      label="Keep it for"
+      desc={cfg.meetingTranscriptDays && cfg.meetingTranscriptDays < (cfg.meetingAudioDays || 14)
+        ? `${cfg.meetingTranscriptDays} days: transcripts are deleted after ${cfg.meetingTranscriptDays} days (Privacy & data), and their audio with them`
+        : "Then it's deleted. The notes and transcripts stay"}
+      setting="meeting-audio-days"
+    >
       <Select bind:value={cfg.meetingAudioDays} options={daysOptions} ariaLabel="Keep meeting audio for" disabled={!cfg.meetingKeepAudio} />
     </Row>
     <!-- The refined transcript when a meeting ends (meetings/meeting_refine.rs). -->

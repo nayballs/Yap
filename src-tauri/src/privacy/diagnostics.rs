@@ -132,6 +132,7 @@ const COPY: &[&str] = &[
     "meetingLiveTranscript",
     "meetingKeepAudio",
     "meetingAudioDays",
+    "meetingTranscriptDays",
     "meetingDiarization",
     "diarizationModel",
     "meetingSpeakerNames",
