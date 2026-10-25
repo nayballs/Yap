@@ -43,6 +43,13 @@ function pastes(received) {
   return { inside, outside };
 }
 
+/**
+ * A console window that conhost never started (no window, the program
+ * never ran, twice: support/targets.js `startConsoleCli`) is the harness's
+ * failure, not a paste's: said, and that part skipped.
+ */
+const conhostDidntStart = (e) => /console window never showed up.*didn't start/.test(e.message);
+
 const lf = (s) => s.replace(/\r\n?/g, '\n');
 /** What arrived, without the bracketed paste markers, line breaks as "\n". */
 const plain = (s) => lf(s).replace(/\x1b\[20[01]~/g, '');
@@ -71,7 +78,13 @@ test('Claude Code in Windows Terminal: a long dictation in slices it shows as te
 });
 
 test('Claude Code in a console window: the console pastes it, one line, in slices, all of it', async ({ robot }) => {
-  const cli = await robot.consoleCli();
+  let cli;
+  try {
+    cli = await robot.consoleCli();
+  } catch (e) {
+    test.skip(conhostDidntStart(e), `conhost started nothing: ${e.message}`);
+    throw e;
+  }
   const text = sentences(2_000);
   const r = await robot.dictate(cli, text);
   expect(r.kind).toBe('terminal (Claude Code in a console)');
@@ -93,7 +106,15 @@ test('a long paste arrives whole: Windows Terminal and conhost, 1,000 to 64,000 
     ['conhost', () => robot.consoleCli('raw-conhost', { title: `Yap robot raw ${robot.nonce}` })],
   ]) {
     // One window each, the sizes one after another into it.
-    const cli = await open();
+    let cli;
+    try {
+      cli = await open();
+    } catch (e) {
+      if (!conhostDidntStart(e)) throw e;
+      console.warn(`long paste: ${label} skipped — conhost started nothing`);
+      test.info().annotations.push({ type: 'skipped part', description: `${label}: ${e.message}` });
+      continue;
+    }
     for (const size of [1_000, 4_000, 16_000, 64_000]) {
       const had = plain(cli.received()).length;
       const text = sentences(size);
