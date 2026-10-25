@@ -22,18 +22,19 @@ try {
         exit 0
     }
 
-    # The Tauri CLI rewrites src-tauri/Cargo.toml with other line endings, which
-    # shows as a change and blocks the update. Put back any file whose only
-    # difference is line endings; real edits stay.
+    # The Tauri CLI rewrites src-tauri/Cargo.toml with other line endings (and
+    # its own spacing), which shows as a change and blocks the update. Put back
+    # any file whose only difference is line endings or spaces; real edits stay.
+    # (25 Oct 2026: a missing space after a comma kept every update out.)
     # (`git diff --name-only` doesn't list such a file: its content is the
     # same once normalised, but `git status` still has it modified.)
     foreach ($line in @(git -c core.quotepath=off status --porcelain --untracked-files=no)) {
         if ($line -notmatch '^ M (.+)$') { continue }
         $file = $Matches[1]
-        git diff --ignore-cr-at-eol --quiet -- $file 2>$null
+        git diff --ignore-cr-at-eol --ignore-all-space --quiet -- $file 2>$null
         if ($LASTEXITCODE -eq 0) { git checkout --quiet -- $file 2>$null }
     }
-    git diff --ignore-cr-at-eol --quiet HEAD
+    git diff --ignore-cr-at-eol --ignore-all-space --quiet HEAD
     if ($LASTEXITCODE -ne 0) {
         Say 'This checkout has local edits, so it is not updated (running them as they are):' Yellow
         git status --short | Select-Object -First 10 | ForEach-Object { Say "  $_" Yellow }
