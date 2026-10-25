@@ -22,6 +22,15 @@
 //! (`config.keep_recent_audio`, on; only with history on) and **Clear**
 //! ([`clear`]). Nothing here ever leaves the PC.
 //!
+//! **Cancelled dictations** (2026-10-25): a dictation the person cancelled
+//! (the bar's ✕, Esc, the tray) keeps its audio here too, and Home lists it
+//! as "Cancelled" with **Transcribe** (Run again's path) for its day — after
+//! the bar's 10 s of Undo, which takes it back out. **Keep** ([`set_keep`]:
+//! moved into `recent-audio/kept/`, a folder no sweep reads — an older Yap
+//! sharing the data folder never deletes it either) exempts a dictation's audio from the day and the
+//! caps until its history entry is deleted or the audio cleared; **Save
+//! audio…** ([`recent_audio_save`]) writes its WAV where the person picks.
+//!
 //! **Logs**: ids, lengths and counts only — never the folder's path next to
 //! a transcript (`log_privacy.rs`).
 
@@ -43,6 +52,8 @@ pub const MAX_BYTES: u64 = 200 * 1024 * 1024;
 /// How often the old audio is looked for while Yap runs.
 const PRUNE_EVERY: Duration = Duration::from_secs(60 * 60);
 const DIR: &str = "recent-audio";
+/// `recent-audio/kept/`: the audio the person keeps past its day.
+const KEPT_DIR: &str = "kept";
 const SAMPLE_RATE: u32 = 16_000;
 
 fn now_ms() -> u64 {
@@ -54,12 +65,56 @@ pub fn dir() -> PathBuf {
     crate::config::data_dir().join(DIR)
 }
 
-fn wav_path(id: &str) -> PathBuf {
+/// Where a dictation's audio waits out its day (and the caps).
+fn day_path(id: &str) -> PathBuf {
     dir().join(format!("{id}.wav"))
+}
+
+/// Where audio the person keeps lives (**Keep**): a folder of its own, which
+/// no sweep reads — an older Yap sharing the data folder (the installed
+/// nightly beside a dev build) never deletes it either.
+fn kept_path(id: &str) -> PathBuf {
+    dir().join(KEPT_DIR).join(format!("{id}.wav"))
+}
+
+/// A dictation's audio file: kept, else its day's.
+fn wav_path(id: &str) -> PathBuf {
+    let kept = kept_path(id);
+    if kept.is_file() {
+        kept
+    } else {
+        day_path(id)
+    }
 }
 
 fn marker_path(id: &str) -> PathBuf {
     dir().join(format!("{id}.pending"))
+}
+
+/// Whether a dictation's audio is kept past its day (**Keep**).
+pub fn is_kept(id: &str) -> bool {
+    valid_id(id) && kept_path(id).is_file()
+}
+
+/// **Keep** a dictation's audio past its day (`on`: moved into `kept/`),
+/// or let it go with the rest again (`off`: back, its day counted from when
+/// it was said). Errors when its audio is gone.
+pub fn set_keep(id: &str, on: bool) -> Result<(), String> {
+    if !has(id) {
+        return Err("This dictation's audio isn't kept any more".into());
+    }
+    if on == is_kept(id) {
+        return Ok(());
+    }
+    written(id);
+    let moved = if on {
+        std::fs::create_dir_all(dir().join(KEPT_DIR)).and_then(|()| std::fs::rename(day_path(id), kept_path(id)))
+    } else {
+        std::fs::rename(kept_path(id), day_path(id))
+    };
+    moved.map_err(|e| format!("Couldn't change it: {e}"))?;
+    tracing::info!(id = %id, keep = on, "Recent audio: kept past its day, or not");
+    Ok(())
 }
 
 /// An id is digits only (it names a file: never a path).
@@ -109,7 +164,7 @@ pub fn keep(samples: &[f32], cfg: &crate::config::YapConfig) -> Option<String> {
     let file_id = id.clone();
     let writer = std::thread::Builder::new().name("recent-audio".into()).spawn(move || {
         let tmp = dir().join(format!("{file_id}.wav.tmp"));
-        let written = std::fs::write(&tmp, &bytes).and_then(|()| std::fs::rename(&tmp, wav_path(&file_id)));
+        let written = std::fs::write(&tmp, &bytes).and_then(|()| std::fs::rename(&tmp, day_path(&file_id)));
         match written {
             Ok(()) => tracing::debug!(id = %file_id, bytes = bytes.len(), "Recent audio: kept"),
             Err(e) => {
@@ -164,12 +219,13 @@ pub fn discard(id: &str) {
     }
     written(id);
     let _ = std::fs::remove_file(marker_path(id));
-    let _ = std::fs::remove_file(wav_path(id));
+    let _ = std::fs::remove_file(day_path(id));
+    let _ = std::fs::remove_file(kept_path(id));
 }
 
-/// Whether a dictation's audio is still kept.
+/// Whether a dictation's audio is still kept (its day's, or kept for good).
 pub fn has(id: &str) -> bool {
-    valid_id(id) && wav_path(id).is_file()
+    valid_id(id) && (day_path(id).is_file() || kept_path(id).is_file())
 }
 
 /// A dictation's audio, as 16 kHz mono samples.
@@ -220,6 +276,7 @@ pub struct Kept {
 
 /// Which of `files` go (pure): those older than [`KEEP_SECS`], then the
 /// oldest while there are more than [`MAX_FILES`] or [`MAX_BYTES`] of them.
+/// (Audio the person keeps is in `kept/`, which this never sees.)
 pub fn to_drop(files: &[Kept], now: u64) -> Vec<String> {
     let mut keep: Vec<&Kept> = files.iter().filter(|f| now.saturating_sub(f.at) <= KEEP_SECS).collect();
     let mut out: Vec<String> = files
@@ -267,7 +324,7 @@ pub fn prune() {
     let files = kept();
     let drop = to_drop(&files, now);
     for id in &drop {
-        let _ = std::fs::remove_file(wav_path(id));
+        let _ = std::fs::remove_file(day_path(id));
         let _ = std::fs::remove_file(marker_path(id));
     }
     if !drop.is_empty() {
@@ -284,8 +341,7 @@ pub fn prune() {
             .and_then(|m| m.modified().ok())
             .and_then(|t| t.elapsed().ok())
             .is_some_and(|age| age > Duration::from_secs(3_600));
-        let stray = name.ends_with(".tmp")
-            || name.strip_suffix(".pending").is_some_and(|id| !wav_path(id).is_file());
+        let stray = name.ends_with(".tmp") || name.strip_suffix(".pending").is_some_and(|id| !day_path(id).is_file());
         if stray && old {
             let _ = std::fs::remove_file(e.path());
         }
@@ -355,7 +411,14 @@ pub struct Status {
 #[tauri::command]
 pub fn recent_audio_status() -> Status {
     let files = kept();
-    Status { count: files.len(), bytes: files.iter().map(|f| f.bytes).sum() }
+    // …and the audio the person keeps past its day.
+    let kept_for_good: Vec<u64> = std::fs::read_dir(dir().join(KEPT_DIR))
+        .map(|entries| entries.flatten().filter_map(|e| e.metadata().ok().filter(|m| m.is_file()).map(|m| m.len())).collect())
+        .unwrap_or_default();
+    Status {
+        count: files.len() + kept_for_good.len(),
+        bytes: files.iter().map(|f| f.bytes).sum::<u64>() + kept_for_good.iter().sum::<u64>(),
+    }
 }
 
 /// Settings → Privacy & data → Clear recent audio.
@@ -371,6 +434,79 @@ pub fn recent_audio_wav(id: String) -> Result<tauri::ipc::Response, String> {
     wav_bytes(&id)
         .map(tauri::ipc::Response::new)
         .ok_or_else(|| "This dictation's audio isn't kept any more".to_string())
+}
+
+/// Home's **Keep**: a dictation's audio kept past its day (`keep`), or let
+/// go with the rest again.
+#[tauri::command]
+pub fn recent_audio_keep(app: AppHandle, id: String, keep: bool) -> Result<(), String> {
+    set_keep(&id, keep)?;
+    let _ = app.emit("yap-history-changed", ());
+    Ok(())
+}
+
+/// A test run's save path, in place of Windows' Save dialog
+/// ([`e2e_audio_save_path`]).
+#[cfg(debug_assertions)]
+static E2E_SAVE: Mutex<Option<PathBuf>> = Mutex::new(None);
+
+/// "Yap dictation 2026-10-25 14.30.wav" for audio `id` (recorded then).
+fn save_name(id: &str) -> String {
+    let when = recorded_at(id)
+        .and_then(|secs| chrono::DateTime::from_timestamp(secs as i64, 0))
+        .map(|t| t.with_timezone(&chrono::Local).format("%Y-%m-%d %H.%M").to_string())
+        .unwrap_or_else(|| id.to_string());
+    format!("Yap dictation {when}.wav")
+}
+
+/// Where to save: Windows' Save dialog (`None`: cancelled) — a test run's
+/// named path instead.
+async fn pick_save_path(app: &AppHandle, window: &tauri::WebviewWindow, name: &str) -> Result<Option<PathBuf>, String> {
+    #[cfg(debug_assertions)]
+    if crate::shell::e2e::active() {
+        return E2E_SAVE
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .take()
+            .map(Some)
+            .ok_or_else(|| "A test run names the save path first (e2e_audio_save_path).".to_string());
+    }
+    use tauri_plugin_dialog::DialogExt;
+    let dialog = app
+        .dialog()
+        .file()
+        .set_parent(window)
+        .set_title("Save the dictation's audio")
+        .set_file_name(name)
+        .add_filter("WAV audio", &["wav"]);
+    let picked = tauri::async_runtime::spawn_blocking(move || dialog.blocking_save_file()).await.map_err(|e| e.to_string())?;
+    Ok(picked.and_then(|p| p.into_path().ok()))
+}
+
+/// Home's **Save audio…**: a dictation's WAV written where the person picks
+/// (Windows' Save dialog); the path, or `None` when they cancelled.
+#[tauri::command]
+pub async fn recent_audio_save(app: AppHandle, window: tauri::WebviewWindow, id: String) -> Result<Option<String>, String> {
+    let bytes = wav_bytes(&id).ok_or("This dictation's audio isn't kept any more")?;
+    let Some(path) = pick_save_path(&app, &window, &save_name(&id)).await? else { return Ok(None) };
+    let to = path.clone();
+    tauri::async_runtime::spawn_blocking(move || std::fs::write(&to, &bytes))
+        .await
+        .map_err(|e| e.to_string())?
+        .map_err(|e| format!("Couldn't save the audio: {e}"))?;
+    tracing::info!(id = %id, "Recent audio: a dictation's audio saved where the person picked");
+    Ok(Some(path.to_string_lossy().into_owned()))
+}
+
+/// Test mode: the path the next Save audio writes to, in place of the dialog.
+#[cfg(debug_assertions)]
+#[tauri::command]
+pub fn e2e_audio_save_path(path: String) -> Result<(), String> {
+    if !crate::shell::e2e::active() {
+        return Err("test mode only".into());
+    }
+    *E2E_SAVE.lock().unwrap_or_else(|p| p.into_inner()) = Some(PathBuf::from(path));
+    Ok(())
 }
 
 /// Home's **Run again**: the dictation at `ts` (its audio `audio`)
@@ -405,6 +541,23 @@ mod tests {
 
     fn k(id: &str, at: u64, bytes: u64) -> Kept {
         Kept { id: id.into(), at, bytes }
+    }
+
+    #[test]
+    fn audio_the_person_keeps_lives_where_no_sweep_reads() {
+        // The sweep (`kept`, `to_drop`, an older Yap's too) reads
+        // recent-audio/ itself; kept audio is one folder down.
+        let (day, kept) = (day_path("1761140000123"), kept_path("1761140000123"));
+        assert_eq!(day.parent(), Some(dir().as_path()));
+        assert_eq!(kept.parent(), Some(dir().join(KEPT_DIR).as_path()));
+        assert_eq!(day.file_name(), kept.file_name());
+    }
+
+    #[test]
+    fn a_saved_file_is_named_for_when_it_was_said() {
+        let name = save_name("1761140000123");
+        assert!(name.starts_with("Yap dictation 20") && name.ends_with(".wav"), "{name}");
+        assert!(!name.contains(':'), "a Windows file name: {name}");
     }
 
     #[test]

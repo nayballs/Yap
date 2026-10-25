@@ -35,6 +35,11 @@ export const FIELD_DEFAULTS = {
   // Paste last / Copy last transcript (pasting/last.rs): unbound.
   pasteLastHotkey: '',
   copyLastHotkey: '',
+  // More shortcuts per action ("+ Add another", dictation/input_hook.rs), by
+  // the first one's key: { hotkey: ['mouse:4'] }.
+  moreHotkeys: {},
+  // Push-to-talk's triple-tap starts meeting notes (dictation/gesture.rs).
+  tripleTapMeeting: false,
   // Snip to Chat (snip.rs): its shortcut, saying "snip", keeping screenshots.
   snipHotkey: 'kb:alt+win+83',
   snipVoice: true,

@@ -87,6 +87,17 @@
   >
     <Segmented bind:value={cfg.recordingMode} options={MODES} label="Recording mode" />
   </Row>
+  {#if cfg.recordingMode === 'pushToTalk'}
+    <!-- Three quick taps: meeting notes instead of a dictation (dictation/gesture.rs). -->
+    <Row setting="triple-tap-meeting">
+      <Toggle
+        bind:checked={cfg.tripleTapMeeting}
+        label="Triple-tap for meeting notes"
+        desc={fillHotkey('Tap {key} three times quickly to start meeting notes instead of a dictation', cfg.hotkey)}
+        hint="During a meeting, three taps just stop the dictation, as ever. The meeting shortcut works too."
+      />
+    </Row>
+  {/if}
 </Group>
 
 <!-- The languages you speak, a language or translation per shortcut, the

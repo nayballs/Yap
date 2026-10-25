@@ -351,7 +351,18 @@ to **Run again** from Home.
   for `UNDO_MS` (10 s): `yap-dictation-cancelled { undoMs }` + `yap-state`
   "cancelled" (the bar's "Dictation cancelled · Undo"), then "idle" and it's
   dropped; a new dictation drops it too (`capture_target`), and
-  push-to-talk's lone tap is simply thrown away. `Pipeline::undo` (`bar_action`
+  push-to-talk's lone tap is simply thrown away (as is a press that grew
+  into a chord, below). **Never lost** (2026-10-25): a kept cancel's audio
+  also goes to `recent_audio` at once and history lists it as **Cancelled**
+  (`keep_cancelled` → `history::record_cancelled`; not edit mode's
+  instruction, never the assistant's question) — Home's **Transcribe** is
+  Run again's path, for its day (or longer with **Keep**); Undo takes it
+  back out (`history::forget_audio` + `recent_audio::discard`: it's
+  transcribed as a new one). **A ten-minute dictation** (`stop_and_transcribe`,
+  `cap::meeting_hint_ms`; not a rewrite's instruction or a question)
+  suggests meeting notes once it's delivered (`suggest_meeting_notes`:
+  "Long dictation? Try meeting notes", naming the meeting shortcut — they
+  go on past the 15-minute limit and summarise; `coaching.rs`, once ever). `Pipeline::undo` (`bar_action`
   "dictation-undo") puts the target back and runs `run_stt` on the kept audio
   as a stop would — the paste goes back to the window the dictation started
   in, whatever has the focus now, or nowhere (`undoing` → `inject_text`'s
@@ -379,10 +390,27 @@ to **Run again** from Home.
   `DOUBLE_TAP_GAP_MS` 500, `LONG_HOLD_MS` 60 s. Every call is told whether a
   dictation records right now and follows that first. `hands_free()`:
   locked (LockHeld / Locked), what the Voice Assistant's pause asks before
-  it ends a question. Unit-tested.
+  it ends a question. **`chord(now)`** (2026-10-25, Wispr Flow's
+  other-shortcut guard): another key down under `CHORD_MS` (1 s) into a
+  hold (Held only: never locked, never a tap's wait) → Discard + the
+  `ChordHold` hint — the person meant a shortcut sharing the key (AltGr+E,
+  Ctrl+Win+D); the pipeline drops it silently (`cancel(false)`: no stop
+  chime, no Undo, nothing kept). **`key_lost()`**: the input hook's sweep
+  let go of a stuck key → Held / LockHeld become Locked (`Unstick`: the
+  bar's hands-free lock, `yap-dictation-locked`, not counted as double-tap
+  used) — never a start or a stop. **Triple-tap** (`set_triple_tap`,
+  `triple_tap_meeting`, off): a double-tap whose second press was a tap
+  too, and a third press within `DOUBLE_TAP_GAP_MS` of it → `TripleTap`
+  (the pipeline throws the dictation away and calls
+  `meeting_guard::start_or_stop`; during a meeting it just stops the
+  dictation, never the meeting). Unit-tested.
 - **`dictation/coaching.rs`** — push-to-talk coaching hints: a lone tap → "Hold {key} while
   you talk" (or double-tap for hands-free), a minute-long hold → "Double-tap
-  {key} for hands-free". Each ≤ 3 times, never within 10 min of another, none
+  {key} for hands-free", a press that grew into a chord → "Hold only {key}
+  to dictate" ("Press only…" in toggle mode; 2026-10-25), and a dictation of
+  ten minutes → "Long dictation? Try meeting notes" (naming the meeting
+  shortcut, `{key}` its spec; once ever, `max_shows`). Each ≤ 3 times, never
+  within 10 min of another, the tap and long-hold ones none
   once double-tap has been used; counts in `<data>/hints.json` (not config.json:
   Settings' auto-saved copy would write old counts back). Surface (one
   place, `notice::place`): a Tip toast in the main window while it's focused
@@ -429,7 +457,53 @@ to **Run again** from Home.
   My languages: `configure_languages_from` / `configure_language`,
   `languages::assign`; their press and release go out as one
   `language-key {slot, pressed, at}` event — `dictation/languages.rs`
-  below). **`clashes(a, b)`** (pure, unit-tested;
+  below). **More shortcuts for one action** (2026-10-25, Wispr Flow's "Add
+  another"): each of the nine fixed actions (`FIXED`, indexed by
+  `DICTATION`…`COPY_LAST`, with `FIXED_KEYS` / `FIXED_NAMES` /
+  `FIXED_EVENTS`) has its first shortcut (its old config field) and up to
+  `MORE` (3) more (`MORE_BINDINGS`, `config.more_hotkeys`,
+  `configure_more_from` at setup and every save; Settings' live pause
+  `configure_more` → `configure_more_hotkeys`). `assign_more` (pure): each
+  gives way to every first shortcut and earlier more ones — its own
+  action's too —; `transforms::nine_shortcuts` lists them, so language
+  shortcuts and transforms give way to them all. An action's keys act as
+  one (`handle_binding_event`'s `action`: the press goes out when the first
+  goes down, the release when the last comes up). `tidy_more` (at `load`)
+  keeps the lists clean. **What's held** (`HELD`, a bit per virtual key;
+  `is_held`, `held_keys`): every key the hook saw go down and not up,
+  swallowed ones included (Windows' own key state never shows those —
+  measured: a key an LL hook swallows never reaches `GetAsyncKeyState`).
+  **A hold that grows into a chord**: a key going down that wasn't held
+  (`note_new_key`; not the binding's own key or modifiers, AltGr's made-up
+  left Ctrl, nor the menu-mask key — `held::another_key`) under a second
+  after a hold-to-talk press (`HOLDS`: dictation, rewrite, assistant, and
+  the language slots) is sent once as `CHORD` → `pipeline::key_chord`
+  (push-to-talk: `gesture::chord`; toggle: the press that started this
+  recording, `GestureSlot.toggle_press`) — dropped silently, with the "hold
+  only {key}" tip. **The stuck-key sweep** (`sweep`, on the hook's thread;
+  `input_hook/held.rs`, pure, unit-tested): every `SWEEP_MS` (5 s), at once
+  on `EVENT_SYSTEM_DESKTOPSWITCH` (the lock screen, a UAC prompt, and
+  back), and on `sweep_now` (a push-to-talk hold of a minute,
+  `ask_sweep_after_a_long_hold`; a dictation near its length limit). It
+  notices a sleep since the last sweep (the tick count ran > 2 s past the
+  unbiased interrupt time) and input the hook missed (`GetLastInputInfo`
+  newer than `HEARD_TICK` by > 1 s: another desktop, a hook Windows took
+  away) — `Evidence::Away` — and checks every active binding: a chord, a
+  modifier bound alone or a combo's modifiers against `GetAsyncKeyState`
+  (never judged in its first second, `GRACE_MS`); a swallowed key by
+  evidence only — the keyboard's repeats of it stopped ≥ 2 s ago with no
+  other key down since (a key that never repeated, a mouse button or a key
+  a mouse's software sends, is never judged so), or `Away`. A stuck one is
+  let go **without its release event** (a warning in the log: which
+  shortcut and why); one that held a recording sends `STUCK` →
+  `pipeline::key_stuck` → `gesture::key_lost`: the recording goes on
+  hands-free, the next press stops it. The table is kept honest too (a key
+  no binding holds that Windows says is up is forgotten). **Robot mode**
+  (`realtest.rs`, debug builds): the hook runs, acting only on events whose
+  extra info is `ROBOT_MARK`; `UNHEARD_MARK` events pass by unheard (the
+  robot's lost key-up); everything else passes untouched (the developer's
+  keys are never seen). Debug-only `e2e_hotkey_bindings` (`binding_states`).
+  **`clashes(a, b)`** (pure, unit-tested;
   `hotkeysClash` in `lib/core/hotkeys.js` is the same rule, Settings refuses with
   it): the same key however written, combos on one key nesting (Ctrl+Space
   inside Ctrl+Shift+Space), a chord completing inside a combo or bigger
@@ -442,7 +516,10 @@ to **Run again** from Home.
   callback never blocks — plus a 30 s re-hook self-heal), each with the moment the
   key moved as its payload (`gesture::now_ms`): events are handled one after
   another, and push-to-talk's tap timing mustn't stretch while the last one starts. The capture UI is
-  `ui/HotkeyInput.svelte` + shared `lib/core/hotkeys.js` (parse/format/match — also
+  `ui/HotkeyInput.svelte` (with a guided **Mouse button** pick, 2026-10-25:
+  "Press the mouse button you want to use" — the middle one or a side
+  button; left and right refused, saying why, as is a button the hook
+  can't hear) + shared `lib/core/hotkeys.js` (parse/format/match — also
   drives the in-window fallbacks; combos read Win first, "Win + Alt + M"). ⚠ **Known Windows
   gotcha:** when one of Yap's OWN WebView2 windows has focus, the LL hook never
   receives the hotkey (WebView2/Chromium front-runs the hook chain on focus) —
@@ -936,7 +1013,10 @@ to **Run again** from Home.
   ends, however it ends (`ClearCapped`). Unit tests (`cap::tests`: the
   warning and the stop each crossed once, the words); e2e
   `dictation-polish.spec.js` and robot `dictation-extras.real.js` with a
-  shortened limit (debug-only `e2e_dictation_cap { limitMs, warnMs }`).
+  shortened limit (debug-only `e2e_dictation_cap { limitMs, warnMs,
+  meetingHintMs }` — the last the length that suggests meeting notes,
+  `MEETING_HINT_MS`, 10 minutes). The warning also asks the input hook to
+  check for a stuck key (`input_hook::sweep_now`).
 - **`dictation/meter.rs`** — **the level meter that moves for whispers**
   (2026-10-25): what `yap-amp` carries since (the bar's waveform,
   onboarding's mic check), pure, unit-tested. The pipeline's `AmpMeter`
@@ -965,7 +1045,17 @@ to **Run again** from Home.
   oldest first (`to_drop`, pure; `prune` at start, after each dictation and
   hourly); deleting a history entry deletes its audio, clearing history
   clears it all, and Settings → Privacy & data has the switch and Clear
-  (`recent_audio_status`, `recent_audio_clear`). **Run again**
+  (`recent_audio_status`, `recent_audio_clear`). **A cancelled dictation**
+  (2026-10-25) keeps its audio too and is listed as "Cancelled" (above,
+  `dictation/pipeline.rs`); **Keep** (`set_keep`, `recent_audio_keep`:
+  moved into `recent-audio/kept/`, which no sweep reads — so an older Yap
+  sharing the data folder, the installed nightly beside a dev build, never
+  deletes it either) holds any dictation's audio past its day and outside
+  the caps until its entry is deleted or the audio cleared (un-keeping
+  moves it back, its day counted from when it was said); **Save audio…** (`recent_audio_save`: Windows' Save dialog,
+  "Yap dictation 2026-10-25 14.30.wav"; a test run names the path,
+  debug-only `e2e_audio_save_path`) writes its WAV where the person picks.
+  **Run again**
   (`history_rerun {ts, audio, model?}` → `pipeline::Rerun`, under the
   `processing` guard: the warm engine, or another installed model loaded for
   it; AI cleanup as for its app, the corrections, snippets; nothing pasted)
@@ -1041,7 +1131,10 @@ to **Run again** from Home.
   audio's id (`audio`, `dictation/recent_audio.rs`; listed only while the file's kept)
   and, for one that went wrong, `status` (`failed`: never transcribed, empty
   text, kept in time order — `record_failed`; `notPasted`: its paste didn't
-  land — `record_with`) and `error`; `rerun_result` (Run again) fixes it up.
+  land — `record_with`; `cancelled`: the person cancelled it, kept with its
+  audio — `record_cancelled`, taken back out by Undo, `forget_audio`) and
+  `error`; `rerun_result` (Run again, Home's Transcribe) fixes it up. The
+  list says `keep` for one whose audio is kept past its day.
   Failed entries don't count in the stats nor as the last dictation to paste;
   unit tests keep it in memory. Best-effort,
   gated by `history_enabled`. Derives the stats dashboard (words, time-saved vs

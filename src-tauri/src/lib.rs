@@ -252,6 +252,9 @@ pub fn run() {
             dictation::commands::configure_snip_hotkey,
             dictation::commands::configure_paste_last_hotkey,
             dictation::commands::configure_copy_last_hotkey,
+            dictation::commands::configure_more_hotkeys,
+            #[cfg(debug_assertions)]
+            dictation::commands::e2e_hotkey_bindings,
             pasting::last::copy_last_transcript,
             dictation::transforms::configure_transform_hotkey,
             dictation::languages::languages_catalog,
@@ -273,6 +276,10 @@ pub fn run() {
             dictation::recent_audio::recent_audio_status,
             dictation::recent_audio::recent_audio_clear,
             dictation::recent_audio::recent_audio_wav,
+            dictation::recent_audio::recent_audio_keep,
+            dictation::recent_audio::recent_audio_save,
+            #[cfg(debug_assertions)]
+            dictation::recent_audio::e2e_audio_save_path,
             dictation::recent_audio::history_rerun,
             dictation::commands::transcribe_file,
             dictation::commands::cancel_file_transcription,
@@ -666,8 +673,9 @@ pub fn run() {
             voice::tts::init(&handle);
 
             // Global input hook + dictation hotkey. (Not in e2e test runs: a
-            // test instance must never see, or swallow, the developer's keys.)
-            if !shell::e2e::active() && !bench_child() {
+            // test instance must never see, or swallow, the developer's keys.
+            // Robot mode runs it, acting on the robot's own keys only.)
+            if (!shell::e2e::active() || shell::realtest::on()) && !bench_child() {
                 dictation::input_hook::start_input_hook(handle.clone());
             }
             if let Err(e) = dictation::input_hook::configure_dictation(&cfg.hotkey) {
@@ -694,6 +702,8 @@ pub fn run() {
             // default, never a clash).
             dictation::input_hook::configure_paste_last_from(&cfg);
             dictation::input_hook::configure_copy_last_from(&cfg);
+            // More shortcuts for each ("+ Add another"; giving way to all of these).
+            dictation::input_hook::configure_more_from(&cfg);
             // Language shortcuts (My languages, languages.rs; none by
             // default), then saved transforms' (transforms.rs; none by default).
             dictation::input_hook::configure_languages_from(&cfg);

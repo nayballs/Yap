@@ -241,3 +241,21 @@ export function hotkeyMatchesKeyup(e, spec) {
   }
   return false;
 }
+
+/// Every key of one of the nine actions (dictation/input_hook.rs): its first
+/// shortcut (`cfg[key]`: "hotkey", "meetingHotkey"…) and its more ones
+/// ("+ Add another", `cfg.moreHotkeys[key]`). For the in-page fallbacks.
+export function actionHotkeys(cfg, key) {
+  const more = cfg?.moreHotkeys?.[key];
+  return [cfg?.[key], ...(Array.isArray(more) ? more : [])].filter((s) => typeof s === 'string' && s);
+}
+
+/// Does this keydown press any of the action's keys?
+export function actionMatchesKeydown(e, cfg, key) {
+  return actionHotkeys(cfg, key).some((spec) => hotkeyMatchesKeydown(e, spec));
+}
+
+/// Does this keyup end any of the action's keys?
+export function actionMatchesKeyup(e, cfg, key) {
+  return actionHotkeys(cfg, key).some((spec) => hotkeyMatchesKeyup(e, spec));
+}

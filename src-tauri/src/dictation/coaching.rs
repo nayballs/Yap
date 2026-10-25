@@ -2,7 +2,11 @@
 //! the dictation hotkey, or a hold of a minute or more, earns a short tip
 //! (`gesture::Hint`). Each shows at most [`MAX_SHOWS`] times, never within
 //! [`MIN_GAP_MS`] of another, and none at all once double-tap has been used
-//! (they're about learning it).
+//! (they're about learning it). Two more share the budget: a press that
+//! grew into a chord ("Hold only {key} to dictate", either recording mode;
+//! not silenced by double-tap) and a dictation of ten minutes or more
+//! ("Long dictation? Try meeting notes", naming the meeting shortcut: shown
+//! once, ever — [`max_shows`]).
 //!
 //! Where: one place (`notice::place`): a toast in the main window while the
 //! person is looking at it, else a card on the Yap bar, else the window's
@@ -45,22 +49,47 @@ pub struct Record {
     pub tap: u32,
     /// Times the long-hold hint showed.
     pub long_hold: u32,
+    /// Times the "hold only {key}" hint showed (a press that grew into a
+    /// chord, either recording mode).
+    pub chord: u32,
+    /// Times the "try meeting notes" hint showed (a ten-minute dictation).
+    pub long_dictation: u32,
     /// When a hint last showed (unix ms).
     pub last_shown_at: u64,
-    /// Double-tap has locked a recording at least once: no more hints.
+    /// Double-tap has locked a recording at least once: no more hints
+    /// about it (the tap and long-hold ones).
     pub hands_free_used: bool,
+}
+
+/// How many times `hint` shows at most: the meeting-notes suggestion once,
+/// ever; the others [`MAX_SHOWS`].
+pub fn max_shows(hint: Hint) -> u32 {
+    match hint {
+        Hint::LongDictation => 1,
+        _ => MAX_SHOWS,
+    }
+}
+
+/// The hints that teach double-tap (none once it's been used).
+fn about_double_tap(hint: Hint) -> bool {
+    matches!(hint, Hint::Tap | Hint::LongHold)
+}
+
+fn count(rec: &Record, hint: Hint) -> u32 {
+    match hint {
+        Hint::Tap => rec.tap,
+        Hint::LongHold => rec.long_hold,
+        Hint::ChordHold | Hint::ChordPress => rec.chord,
+        Hint::LongDictation => rec.long_dictation,
+    }
 }
 
 /// May `hint` show at `now` (unix ms)?
 pub fn eligible(rec: &Record, hint: Hint, now: u64) -> bool {
-    if rec.hands_free_used {
+    if rec.hands_free_used && about_double_tap(hint) {
         return false;
     }
-    let shown = match hint {
-        Hint::Tap => rec.tap,
-        Hint::LongHold => rec.long_hold,
-    };
-    shown < MAX_SHOWS && (rec.last_shown_at == 0 || now.saturating_sub(rec.last_shown_at) >= MIN_GAP_MS)
+    count(rec, hint) < max_shows(hint) && (rec.last_shown_at == 0 || now.saturating_sub(rec.last_shown_at) >= MIN_GAP_MS)
 }
 
 /// `rec` after `hint` showed at `now`.
@@ -68,12 +97,15 @@ pub fn shown(mut rec: Record, hint: Hint, now: u64) -> Record {
     match hint {
         Hint::Tap => rec.tap += 1,
         Hint::LongHold => rec.long_hold += 1,
+        Hint::ChordHold | Hint::ChordPress => rec.chord += 1,
+        Hint::LongDictation => rec.long_dictation += 1,
     }
     rec.last_shown_at = now;
     rec
 }
 
-/// The hint's title and body; `{key}` stands for the hotkey's name.
+/// The hint's title and body; `{key}` stands for the hotkey's name (the
+/// meeting shortcut's, for [`Hint::LongDictation`]).
 pub fn text(hint: Hint) -> (&'static str, &'static str) {
     match hint {
         Hint::Tap => (
@@ -84,14 +116,30 @@ pub fn text(hint: Hint) -> (&'static str, &'static str) {
             "Double-tap {key} for hands-free",
             "No need to hold the key through a long dictation: double-tap {key} and Yap keeps recording until you press it again.",
         ),
+        Hint::ChordHold => (
+            "Hold only {key} to dictate",
+            "Another key went down with {key} within a second, so Yap took it for a shortcut and didn't keep the recording. To dictate, hold {key} on its own.",
+        ),
+        Hint::ChordPress => (
+            "Press only {key} to dictate",
+            "Another key went down with {key} within a second, so Yap took it for a shortcut and didn't keep the recording. To dictate, press {key} on its own.",
+        ),
+        Hint::LongDictation => (
+            "Long dictation? Try meeting notes",
+            "Meeting notes keep going past a dictation's 15-minute limit, and summarise what was said. Press {key} to start them next time.",
+        ),
     }
 }
+
+/// [`Hint::LongDictation`]'s body when the meeting shortcut is unbound.
+const LONG_DICTATION_NO_KEY: &str =
+    "Meeting notes keep going past a dictation's 15-minute limit, and summarise what was said. Start them from Meetings next time.";
 
 /// What the main window gets (`yap-hint`).
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct HintToast {
-    /// "tap" | "longHold".
+    /// "tap" | "longHold" | "chord" | "longDictation".
     pub kind: &'static str,
     pub title: &'static str,
     pub body: &'static str,
@@ -156,9 +204,10 @@ fn save_now() -> Result<(), crate::shell::saving::SaveError> {
 
 // ---- showing -------------------------------------------------------------------------------
 
-/// Show `hint` if it's due, about the dictation hotkey `hotkey` (a spec,
-/// "kb:120"). Blocking (window queries): run it off the pipeline's locks,
-/// on a thread of its own.
+/// Show `hint` if it's due, about the hotkey `hotkey` (a spec, "kb:120": the
+/// dictation hotkey; the meeting shortcut for [`Hint::LongDictation`]).
+/// Blocking (window queries): run it off the pipeline's locks, on a thread
+/// of its own.
 pub fn offer(app: &AppHandle, hint: Hint, hotkey: &str) {
     let now = now_ms();
     if crate::notices::notice::tips_off() {
@@ -169,7 +218,10 @@ pub fn offer(app: &AppHandle, hint: Hint, hotkey: &str) {
         tracing::debug!(?hint, "coaching: not now");
         return;
     }
-    let (title, body) = text(hint);
+    let (title, mut body) = text(hint);
+    if hint == Hint::LongDictation && hotkey.trim().is_empty() {
+        body = LONG_DICTATION_NO_KEY;
+    }
     // One place (`notice.rs`): the main window while the person is looking
     // at it, else the Yap bar; never a Windows notification for a tip.
     let place = crate::notices::notice::place(app, false);
@@ -178,6 +230,8 @@ pub fn offer(app: &AppHandle, hint: Hint, hotkey: &str) {
         let kind = match hint {
             Hint::Tap => "tap",
             Hint::LongHold => "longHold",
+            Hint::ChordHold | Hint::ChordPress => "chord",
+            Hint::LongDictation => "longDictation",
         };
         app.emit(EVENT, HintToast { kind, title, body, hotkey: hotkey.to_string() }).is_ok()
     } else if place == crate::notices::notice::Place::Bar {
@@ -282,9 +336,44 @@ mod tests {
 
     #[test]
     fn the_texts_name_the_key() {
-        for hint in [Hint::Tap, Hint::LongHold] {
+        for hint in [Hint::Tap, Hint::LongHold, Hint::ChordHold, Hint::ChordPress] {
             let (title, body) = text(hint);
             assert!(title.contains("{key}") && body.contains("{key}"), "{hint:?}");
         }
+        // The meeting-notes one names the meeting shortcut in its body, and
+        // has words for none.
+        assert!(text(Hint::LongDictation).1.contains("{key}"));
+        assert!(!LONG_DICTATION_NO_KEY.contains("{key}"));
+    }
+
+    #[test]
+    fn the_chord_hint_shares_the_budget_but_not_double_taps_silence() {
+        // Double-tap learned: tap and long-hold hints stop, the chord one
+        // doesn't (it's about a different mistake).
+        let r = Record { hands_free_used: true, ..Record::default() };
+        assert!(eligible(&r, Hint::ChordHold, T0));
+        assert!(eligible(&r, Hint::LongDictation, T0));
+        // Both chord texts count as one hint: three at most, ten minutes apart.
+        let mut r = Record::default();
+        let mut t = T0;
+        for hint in [Hint::ChordHold, Hint::ChordPress, Hint::ChordHold] {
+            assert!(eligible(&r, hint, t));
+            r = shown(r, hint, t);
+            assert!(!eligible(&r, Hint::Tap, t + 1), "the gap holds for every hint");
+            t += MIN_GAP_MS;
+        }
+        assert_eq!(r.chord, 3);
+        assert!(!eligible(&r, Hint::ChordPress, t));
+        assert!(eligible(&r, Hint::Tap, t));
+    }
+
+    #[test]
+    fn the_meeting_notes_suggestion_shows_once_ever() {
+        let r = shown(Record::default(), Hint::LongDictation, T0);
+        assert_eq!(r.long_dictation, 1);
+        assert!(!eligible(&r, Hint::LongDictation, T0 + 365 * 24 * 3_600_000));
+        // An old hints.json without the new counts reads as none shown.
+        let old: Record = serde_json::from_str(r#"{"tap":1,"handsFreeUsed":true}"#).unwrap();
+        assert_eq!((old.chord, old.long_dictation), (0, 0));
     }
 }

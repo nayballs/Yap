@@ -352,7 +352,12 @@ Flow's dark mode of 19 Oct 2026), for every Yap window.
   again with ›"), answered by a "Transcribed again" toast with Copy. A failed
   one (`status`: `failed` — "Not transcribed · Yap closed before it was
   transcribed" — or `notPasted` — a "Didn't paste" flag and why) says so in the
-  row, with a Run again button in view. **What the AI changed** (2026-10-23):
+  row, with a Run again button in view; a **cancelled** one (2026-10-25,
+  `cancelled`: "Cancelled · not transcribed") has **Transcribe** (the same
+  `history_rerun`, "Transcribed") and **Keep** / "Kept" (`aria-pressed`,
+  `recent_audio_keep`). Any dictation with its audio has **Save audio…**
+  (`recent_audio_save`, Windows' Save dialog) and **Keep its audio** /
+  "Don't keep its audio" in its right-click menu. **What the AI changed** (2026-10-23):
   a dictation whose words AI cleanup changed (history's `said`, the words as
   said, beside its `text`) shows a quiet pill under its text, always in view
   — "✦ AI edited · N changes" (a `button`, `aria-expanded` /

@@ -561,7 +561,10 @@ test('dictating: the dictation overlay in the pill\'s place', async ({ yap, main
 // while the pointer is on the capsule — Rust's pointer, here the pretend
 // cursor) or "always" first. A test run pastes nothing: what Undo and ✓
 // deliver shows in history.json (the stub's "[STT stub: …]").
-const dictations = (yap) => (yap.readJson('history.json') || []).length;
+// Transcribed dictations (a cancelled one is listed too, as "Cancelled",
+// with its audio to transcribe later: dictation/recent_audio.rs).
+const dictations = (yap) => (yap.readJson('history.json') || []).filter((e) => e.status !== 'cancelled').length;
+const cancelledOnes = (yap) => (yap.readJson('history.json') || []).filter((e) => e.status === 'cancelled').length;
 
 /** Settings → Yap bar → Cancel and finish buttons, saved and on the bar. */
 async function setButtons(yap, value) {
@@ -676,7 +679,7 @@ test('while dictating, ✓ stops and pastes; the capsule takes clicks without ac
 
   // ✓: stopped and transcribed, as the hotkey's second press would.
   await done.click();
-  await expectStore(yap, 'history.json', (h) => h.length === before + 1 && JSON.stringify(h).includes('STT stub'));
+  await expectStore(yap, 'history.json', (h) => h.filter((e) => e.status !== 'cancelled').length === before + 1 && JSON.stringify(h).includes('STT stub'));
   const d = await debug(yap);
   expect(d.barActive).toBe(false);
   expect(d.threadActiveIsBar).toBe(false);
@@ -690,6 +693,7 @@ test('✕ keeps the audio for Undo: "Dictation cancelled", then Undo transcribes
   const bar = yap.overlay;
   const capsule = bar.locator('.capsule');
   const before = dictations(yap);
+  const cancelledBefore = cancelledOnes(yap);
   await setButtons(yap, 'hover');
 
   await pressHotkey(main);
@@ -707,6 +711,8 @@ test('✕ keeps the audio for Undo: "Dictation cancelled", then Undo transcribes
   await shot(bar, '19-dictation-cancelled-undo');
   await bar.waitForTimeout(500);
   expect(dictations(yap)).toBe(before);
+  // Never lost: listed as "Cancelled" meanwhile, with its audio.
+  expect(cancelledOnes(yap)).toBe(cancelledBefore + 1);
   // Still a region (Undo takes the click), still never activated.
   await simulate(yap, { pointer: 'dictation' });
   await expect.poll(() => debug(yap).then((d) => d.interactive)).toBe(true);
@@ -714,7 +720,9 @@ test('✕ keeps the audio for Undo: "Dictation cancelled", then Undo transcribes
 
   // Undo: transcribed and delivered as if it had been stopped.
   await undo.click();
-  await expectStore(yap, 'history.json', (h) => h.length === before + 1 && JSON.stringify(h).includes('STT stub'));
+  await expectStore(yap, 'history.json', (h) => h.filter((e) => e.status !== 'cancelled').length === before + 1 && JSON.stringify(h).includes('STT stub'));
+  // Taken back: no longer "Cancelled".
+  expect(cancelledOnes(yap)).toBe(cancelledBefore);
   await dictationOver(yap);
   // Once only: the audio is gone.
   expect(await invokeError(yap, 'bar_action', { action: 'dictation-undo' })).toMatch(/Nothing to undo/);
@@ -726,6 +734,7 @@ test('a new dictation drops a cancelled one; left alone, Undo goes after 10 s', 
   const bar = yap.overlay;
   const capsule = bar.locator('.capsule');
   const before = dictations(yap);
+  const cancelledBefore = cancelledOnes(yap);
 
   // The tray's Cancel (cancel_recording) keeps it for Undo too…
   await pressHotkey(main);
@@ -739,7 +748,7 @@ test('a new dictation drops a cancelled one; left alone, Undo goes after 10 s', 
   await expect(capsule.locator('.dot.rec')).toBeVisible();
   await bar.waitForTimeout(800);
   await pressHotkey(main);
-  await expectStore(yap, 'history.json', (h) => h.length === before + 1);
+  await expectStore(yap, 'history.json', (h) => h.filter((e) => e.status !== 'cancelled').length === before + 1);
   await dictationOver(yap);
   expect(await invokeError(yap, 'bar_action', { action: 'dictation-undo' })).toMatch(/Nothing to undo/);
 
@@ -752,6 +761,8 @@ test('a new dictation drops a cancelled one; left alone, Undo goes after 10 s', 
   await expect(capsule).toBeHidden({ timeout: 13_000 });
   expect(await invokeError(yap, 'bar_action', { action: 'dictation-undo' })).toMatch(/Nothing to undo/);
   expect(dictations(yap)).toBe(before + 1);
+  // Past Undo, both cancelled ones are still in Home, to transcribe later.
+  expect(cancelledOnes(yap)).toBe(cancelledBefore + 2);
 });
 
 test('with the bar off, the dictation capsule still takes clicks on ✓', async ({ yap, main }) => {
@@ -770,7 +781,7 @@ test('with the bar off, the dictation capsule still takes clicks on ✓', async 
     await expect(capsule.getByRole('button', { name: 'Stop and paste' })).toBeVisible();
     await bar.waitForTimeout(800);
     await capsule.getByRole('button', { name: 'Stop and paste' }).click();
-    await expectStore(yap, 'history.json', (h) => h.length === before + 1);
+    await expectStore(yap, 'history.json', (h) => h.filter((e) => e.status !== 'cancelled').length === before + 1);
     await dictationOver(yap);
     await expect.poll(() => debug(yap).then((d) => d.shown)).toBe(false);
   } finally {
@@ -806,7 +817,7 @@ test('"Always": ✕ / ✓ on the capsule the whole time it records, as wide as w
   await shot(bar, '20-dictating-buttons-always');
   await pointAtCapsule(yap);
   await done.click();
-  await expectStore(yap, 'history.json', (h) => h.length === before + 1);
+  await expectStore(yap, 'history.json', (h) => h.filter((e) => e.status !== 'cancelled').length === before + 1);
   expect((await debug(yap)).barActive).toBe(false);
   await dictationOver(yap);
   await pointerAway(yap);
@@ -839,7 +850,7 @@ test('off by default: no ✕ / ✓, even pointed at; the tray cancels, and Undo 
   await bar.waitForTimeout(300);
   await shot(bar, '21b-cancelled-from-the-tray-undo');
   await undo.click();
-  await expectStore(yap, 'history.json', (h) => h.length === before + 1 && JSON.stringify(h).includes('STT stub'));
+  await expectStore(yap, 'history.json', (h) => h.filter((e) => e.status !== 'cancelled').length === before + 1 && JSON.stringify(h).includes('STT stub'));
   await dictationOver(yap);
   await pointerAway(yap);
 });

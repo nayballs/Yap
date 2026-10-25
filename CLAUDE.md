@@ -102,9 +102,9 @@ One folder per area (an area's `<area>.rs` lists its modules); a big module's pa
 
 **Dictation** — [dictation.md](./docs/architecture/dictation.md)
 - `dictation/pipeline.rs` (+ `pipeline/`: recording, transcribe, delivery, rewrite, finish, preview, engine, busy, slow, robot) — the heart: buffer and pre-roll, modes, the start chime on the mic's first audio, the model loaded off the startup thread, `run_stt` → `deliver`, Undo, chat/assistant routing; the `processing` guard (`Busy`) let go however a task ends, a crash said; the warm engine lent in turns (`EngineCell`: a taker waits for it, never loads a second copy).
-- `dictation/gesture.rs` — push-to-talk's pure state machine: hold, double-tap hands-free, lone tap.
-- `dictation/coaching.rs` — push-to-talk coaching hints (≤ 3 each; counts in `hints.json`).
-- `dictation/input_hook.rs` — low-level keyboard/mouse hooks: nine bindings (Read aloud's the fifth, Use what I said's the sixth, Snip to Chat's the seventh, Paste last / Copy last transcript's the last two) + four language shortcuts' and up to 12 saved transforms' slots, combo rules, `clashes`, menu-mask key; Esc while a snip is up.
+- `dictation/gesture.rs` — push-to-talk's pure state machine: hold, double-tap hands-free, lone tap; a hold under 1 s that grows into a chord dropped; a stuck key → hands-free; optional triple-tap for meeting notes.
+- `dictation/coaching.rs` — push-to-talk coaching hints (≤ 3 each; "hold only {key}", "try meeting notes" once; counts in `hints.json`).
+- `dictation/input_hook.rs` (+ `input_hook/held.rs`) — low-level keyboard/mouse hooks: nine bindings (Read aloud's the fifth, Use what I said's the sixth, Snip to Chat's the seventh, Paste last / Copy last transcript's the last two), each with up to 3 more keys (`moreHotkeys`), + four language shortcuts' and up to 12 saved transforms' slots, combo rules, `clashes`, menu-mask key; Esc while a snip is up; the keys held (`is_held`), chords, the stuck-key sweep; robot mode's marked keys.
 - `dictation/transforms.rs` — saved transforms: one-key rewrites (Polish, Shorter, Fix grammar only, Translate, Make it a prompt, your own) of the selection or the last dictation, no speaking; their shortcuts, the tray's Transforms menu, the bar's Undo.
 - `dictation/languages.rs` (+ `languages/`) — My languages: the languages you speak and which model covers which (`catalog.rs`), Whisper picking the likeliest of them, language shortcuts (a language, or translated by the AI), cleanup kept in the language spoken, the "You spoke French" nudge (`nudge.rs`).
 - `dictation/partials.rs` / `dictation/agent_detect.rs` — live partials' sliding window; Commands by name (see `dictation/pipeline.rs`).
@@ -115,13 +115,13 @@ One folder per area (an area's `<area>.rs` lists its modules); a big module's pa
 - `dictation/stt.rs` — `SttEngine` over transcribe-rs, the 14-model registry, download + verify, word times; each engine loads on a `Device` (graphics card or processor).
 - `dictation/stt_speed.rs` — the speech engine's device on this PC: a one-time background benchmark per model and PC at three dictation lengths (new driver, new download → again); everyday lengths (3 and 11 s) decide: the graphics card unless the processor takes ≥ 20 % less time at both; Settings' "Runs on" says what it chose and why.
 - `dictation/slow.rs` — "Taking longer than usual…": this PC's usual transcription (stt_speed's timings, recent dictations) and cleanup (by model, local or cloud) times; 2.5× + 1 s, never before 4 s; the bar's Skip cleanup.
-- `dictation/cap.rs` — the 15-minute length limit: the bar warns at 14, it stops, transcribes and pastes back into its window (or the clipboard), Recover text.
+- `dictation/cap.rs` — the 15-minute length limit: the bar warns at 14, it stops, transcribes and pastes back into its window (or the clipboard), Recover text; 10 minutes suggests meeting notes.
 - `dictation/meter.rs` — the waveform's level (`yap-amp`): dB over a floor following the mic's noise, gently compressed, so a whisper moves it and a shout never clips.
-- `dictation/recent_audio.rs` — a day of dictation audio (`recent-audio/`): failed dictations listed, Home's Run again and Play.
+- `dictation/recent_audio.rs` — a day of dictation audio (`recent-audio/`), cancelled ones too: failed and cancelled dictations listed, Home's Run again / Transcribe, Play, Keep, Save audio….
 - `dictation/media.rs` — Upload's audio-file decoding (Symphonia) and chunking.
 - `dictation/sound.rs` — start/stop chimes; the output device shared with spoken replies.
 - `dictation/mute.rs` / `dictation/media_pause.rs` — silence other apps / pause media while dictating; exact restore.
-- `dictation/history.rs` — local dictation history (with its audio's id and the words as said when cleanup changed them; failed / not pasted) and the stats dashboard.
+- `dictation/history.rs` — local dictation history (with its audio's id and the words as said when cleanup changed them; failed / not pasted / cancelled) and the stats dashboard.
 
 **Pasting** — [pasting.md](./docs/architecture/pasting.md)
 - `pasting/text_injector.rs` — private, verified clipboard paste with each app's paste keys, a lost paste typed, submit key, re-focus, Paste last transcript (and as said).

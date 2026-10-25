@@ -17,7 +17,22 @@
   (`pasteLastHotkey` / `copyLastHotkey`, Paste / Copy last transcript, "" =
   unbound, the default; never a clash — `input_hook::configure_paste_last_from`
   / `configure_copy_last_from` leave one another shortcut has unbound;
-  `pasting/last.rs`), snip_hotkey (Snip to Chat, default Win+Alt+S "kb:alt+win+83", "" = unbound; never a clash, `input_hook::configure_snip_from`) + snip_voice ("Say “snip” to take a screenshot", on) + chat_image_days ("Keep chat screenshots": 7 / 30 (default) / 90 / 0 = forever; another value counts as 30; changing it sweeps at once; all `snip.rs`, docs/architecture/snip.md) + snip_save_dir (the folder a snip's or a chat screenshot's Save opened in last, "" = Pictures; `snip/copy_save.rs`), rewrite_last_dictation (`rewriteLastDictation`,
+  `pasting/last.rs`), more_hotkeys (`moreHotkeys`, 2026-10-25: **more
+  shortcuts for one action**, Settings → Shortcuts' "+ Add another" — a map
+  from an action's first shortcut's field ("hotkey", "editHotkey",
+  "meetingHotkey", "assistantHotkey", "readHotkey", "asSaidHotkey",
+  "snipHotkey", "pasteLastHotkey", "copyLastHotkey") to up to 3 more specs.
+  The first stays in its own field, so a config from before reads as it
+  is (no migration: nothing moved) and an older Yap still finds its key —
+  an older Yap's save (the installed nightly sharing the folder with a dev
+  build) drops only `moreHotkeys` and `tripleTapMeeting`, never a first
+  shortcut (`an_older_yap_saving_this_config_keeps_every_first_shortcut`);
+  `load` tidies the lists (`input_hook::tidy_more`: unknown actions, blanks
+  and repeats out, at most 3, and an action whose first was emptied by hand
+  gets its next one moved up); the hook gives every first shortcut and
+  earlier one precedence, `input_hook::assign_more`), triple_tap_meeting
+  (`tripleTapMeeting`, off: push-to-talk's triple-tap starts meeting notes,
+  `dictation/gesture.rs`), snip_hotkey (Snip to Chat, default Win+Alt+S "kb:alt+win+83", "" = unbound; never a clash, `input_hook::configure_snip_from`) + snip_voice ("Say “snip” to take a screenshot", on) + chat_image_days ("Keep chat screenshots": 7 / 30 (default) / 90 / 0 = forever; another value counts as 30; changing it sweeps at once; all `snip.rs`, docs/architecture/snip.md) + snip_save_dir (the folder a snip's or a chat screenshot's Save opened in last, "" = Pictures; `snip/copy_save.rs`), rewrite_last_dictation (`rewriteLastDictation`,
   serde default on: the rewrite shortcut with nothing selected rewrites the
   last dictation — within a minute, in the same field, still ending at the
   cursor —; off, it writes new text as before 2026-10-23; Settings →
@@ -299,9 +314,13 @@
   (the method, the model's files, the graphics adapters and drivers): a
   stale one is measured again (`dictation/stt_speed.rs`). Safe to delete (the graphics card until measured again).
 - Recent dictation audio: `%APPDATA%/yap/recent-audio/` — `<id>.wav` (16 kHz
-  mono) for each dictation of the last 24 h (≤ 500, ≤ 200 MB), and
-  `<id>.pending` while one is being transcribed (`dictation/recent_audio.rs`). Never
-  leaves the PC; deleted on schedule, with its history entry, by clearing
+  mono) for each dictation of the last 24 h (≤ 500, ≤ 200 MB) — cancelled
+  ones included (history's "Cancelled", 2026-10-25) —, `<id>.pending` while
+  one is being transcribed, and `kept/<id>.wav` for one Home's **Keep** holds
+  past its day (a folder no sweep reads, outside the caps — an older Yap
+  sharing the folder never deletes it either) (`dictation/recent_audio.rs`). Never
+  leaves the PC (Save audio… writes a copy only where the person picks);
+  deleted on schedule, with its history entry, by clearing
   history and by Settings → Privacy & data → Clear recent audio.
 - Meeting audio: `%APPDATA%/yap/meeting-audio/<note id>/` — for each
   recording of the meeting, `<recording>-you.flac` and `-them.flac` (16 kHz
@@ -370,7 +389,9 @@
 - The Dictionary view's sort: the main window's `localStorage`
   (`yap.dictionarySort`), a convenience of that window, never config.json.
 - Hints: `%APPDATA%/yap/hints.json` — how often each push-to-talk coaching hint
-  showed, when the last did, and whether double-tap has been used (`dictation/coaching.rs`).
+  showed (`tap`, `longHold`, `chord` — "Hold only {key}" —, `longDictation`
+  — "Try meeting notes", once ever), when the last did, and whether
+  double-tap has been used (`dictation/coaching.rs`).
 - Quieted apps: `%APPDATA%/yap/quieted_apps.json` — only while a dictation
   has other apps silenced (each session's id, exe and level before), so a
   Yap that crashed mid-dictation brings them back at its next start
