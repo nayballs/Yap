@@ -240,7 +240,9 @@ re-exported by the module, except `local_llm`'s, which callers name
     loads off the window's thread, and not at all when the model is already
     warm on its device — onboarding loaded it twice, the second time freezing
     the window), devices (`list_audio_devices`, `list_output_devices`,
-    `set_input_device` — live stream swap, `set_mic_test` — idle level meter),
+    `set_mic_test` — idle level meter; the microphones' order is
+    `dictation/mics.rs`'s `list_mics` and `mic_offer_respond`, since
+    2026-10-25 instead of `set_input_device`),
     the shortcuts re-bound live (`configure_hotkey`, `configure_assistant_hotkey`
     / `assistant_key` — the assistant shortcut, live-applied / in-page,
     `configure_read_hotkey` — Read aloud's; its press is `read-key-pressed` →

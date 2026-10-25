@@ -45,6 +45,30 @@ The meeting recorder and its audio kept on disk, rolling digests and the action 
   default render endpoint id every 2 s (`IMMDeviceEnumerator`, eConsole like
   cpal; `OutputFollower` decides) and reopens the loopback stream on a new one
   (old stream first, a failure keeps the old one and retries; logged).
+  **Follows the microphone** (2026-10-25, "Following the microphone"):
+  "You" opens the first microphone in the person's order that's connected,
+  then Windows' default (`open_mic` over `mics::candidates`, as dictation;
+  a meeting with none fails with `no_mic_error`, which names the first in
+  the order). `MicFollower` on the capture thread looks again when its
+  stream stops by itself (cpal's error callback sets `stopped`) or Windows'
+  list moves (`mics::generation`): pure `mic_move(open, stopped, listed)` →
+  **Stay**, **Reopen** (the same device, still listed: a reset; a failed
+  reopen is a Next), **Next** (its device is gone: the next one, the gap
+  `keep_in_step`'s silence, a marker at that place —
+  `Captured::mic_changed`, `TranscriptSegment::mic_marker`: `source` "you",
+  `mic` the new one's name or "" with none left, no text, taken with the
+  chunks that pass it, `take_switches` — and "Your microphone was
+  disconnected · Yap is recording you with Northwind Audio now" through
+  `warn`, button Update settings → Dictation → Microphone) or **Retry**
+  (none was left: the order again with every change). A microphone that
+  merely arrives mid-meeting is left for dictation; the meeting keeps its
+  own. The marker isn't talk (`is_talk`), so digests, the action plan and
+  the Ask context skip it; Transcribe again keeps it where it was
+  (`redo.rs`); the views draw "Your mic was disconnected · now Northwind
+  Audio" (`notepadText.js` `transcriptItems` kind `mic`). The test player
+  follows made-up microphones the same way (`e2e_mic_unplug`: "You" gets
+  nothing for a second, then the marker). Unit tests (`mic_move`,
+  `a_mic_change_is_marked…`), e2e `meeting-mic.spec.js`.
   **Quiet sides**: `QuietWatch` (every 200 ms) — one side heard nothing above
   the silence gate for 3 min of meeting while the other talked ≥ 10 s →
   "Yap can't hear the call" / "…your mic" once per quiet stretch ("Yap
@@ -79,7 +103,8 @@ The meeting recorder and its audio kept on disk, rolling digests and the action 
   `meeting_state`; a recording ends through `meeting_end`/`meeting_pause`
   (meetings/meeting_end.rs). Test mode opens no audio device (WAVs
   from `YAP_E2E_MEETING_AUDIO`, or silence; `e2e::e2e_meeting_feed`; the
-  player also stages a dictation and an output switch, see `shell/e2e.rs`). A
+  player also stages a dictation and an output switch, and follows made-up
+  microphones unplugged, see `shell/e2e.rs`). A
   meeting started right after Yap did waits for the speech model, still
   loading in the background (`pipeline::wait_for_model`), never loading a
   second copy. **Memory after a meeting** (measured 2026-10-22, the e2e

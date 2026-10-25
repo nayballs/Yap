@@ -27,7 +27,16 @@
   "Spanish" until picked. Serde default = Yap's five, no shortcuts; at most
   12 run (`transforms::list`: usable ones, each id once). A key that would
   fire with one of the seven fixed shortcuts or an earlier transform's is
-  left unbound, `transforms::assign`), input_device, sound +
+  left unbound, `transforms::assign`), mic_order (Settings → Dictation →
+  Microphone, 2026-10-25, `dictation/mics.rs`: `[{id, name}]` — the Core
+  Audio endpoint id, else the name — in the person's order; the first one
+  connected is used, then Windows' default; empty, the default, is Windows'
+  default alone) + mic_not_now (the microphones answered "Not now" to
+  "… connected · Use it for dictation?": never asked again), input_device
+  (the one mic picked before 25 Oct; **`migrate_once` v4** moves it to the
+  front of `mic_order` by name and clears it — nothing else reads it; an
+  unplugged pick now falls back to Windows' default instead of "No
+  microphone found"), sound +
   volume, output_device, quiet_other_apps ("Silence other apps while you
   dictate", off; reads old configs' `muteWhileRecording`) + pause_media
   ("Pause music and videos while you dictate", off; both `dictation/mute.rs`),
