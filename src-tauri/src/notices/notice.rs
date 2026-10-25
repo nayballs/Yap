@@ -185,6 +185,10 @@ pub fn rule(kind: &str) -> Rule {
         // your corrections" is its own switch.)
         "word-suggestion" => Rule { max_wait_ms: Some(MIN), ..tip },
         "word-added" => Rule { max_wait_ms: Some(10_000), ..info },
+        // "Type that often? Save it as a snippet" (dictionary/snippet_offer.rs,
+        // one a day there): after a dictation, gone if unseen a minute.
+        "snippet-suggestion" => Rule { max_wait_ms: Some(MIN), ..tip },
+        "snippet-saved" => Rule { max_wait_ms: Some(10_000), ..info },
         // "You spoke French · Add it to My languages?" (dictation/languages/nudge.rs):
         // after a dictation, never over one; dropped unseen after a minute.
         "language-nudge" => Rule { max_wait_ms: Some(MIN), ..tip },
