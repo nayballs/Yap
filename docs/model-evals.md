@@ -93,7 +93,11 @@ Two environment switches compare Chat's web behaviour (read only in a run): `YAP
 = `must` (the default: a model on this PC asked something that needs the web must search
 first) | `yap` (Yap searches first, the question as the query) | `model` (it decides), and
 `YAP_EVAL_WEB_HISTORY` = `replay` (the default: earlier web answers' searches replayed as
-tool calls for a tool model) | `note` (a system-prompt line instead) | `none`.
+tool calls for a tool model) | `note` (a system-prompt line instead) | `none`. Two compare a
+long chat's history ("Long chats" below): `YAP_EVAL_HISTORY` = `summary` (the default: the
+token window and the summary of older messages, written after the answer that fills the
+room and waited for) | `window` (the token window alone) | `messages` (the last 19, as until
+25 Oct 2026); `YAP_EVAL_CONTEXT=<tokens>` sizes the budget for a context that small.
 
 ### Speaker names (`--speakers`)
 
@@ -2298,3 +2302,52 @@ turn. So the sidecar on the processor now runs two slots with a cache each
 (`local_llm::per_slot_caches`; the KV once more, +224 MiB at 8K on the 1.5B); a graphics card
 keeps the shared cache, where it was never the slow part (the 4B's cleanup after a long turn:
 241 ms back to back, 243 after, "Qwen3.5-9B against the 4B" above).
+
+## Long chats: the window and the summary (25 Oct 2026)
+
+Chat's history by tokens for the model in use, and a summary of the older messages once a
+chat outgrows it ([chat-and-assistant.md](./architecture/chat-and-assistant.md#long-chats-sized-to-the-model-2026-10-25):
+`chat/budget.rs`, `chat/compact.rs`). Before, Chat sent the last 19 messages whatever the
+model. `YAP_EVAL_HISTORY` picks how a turn's history is chosen: `messages` (the last 19, as
+until this day), `window` (the token window alone) or `summary` (the default: the window
+and the summary, written after the answer that fills the room; a model evaluation waits
+for it, so the next turn has it). `YAP_EVAL_CONTEXT=<tokens>` makes a cloud model's budget
+that of a small context, so it fills on a few thousand tokens.
+
+**The scenarios** (fictional details): `chat-long-memory` — two facts in the first message
+("the budget is £18,400, and Marta Quill is organising it"), a pasted ~870-token venue
+schedule, ten questions with long answers (a welcome message, checklists, dietary needs,
+activities, a rain plan…), then "Remind me: what budget did I give you right at the start,
+and who's organising the offsite?" (passes on "18,400" and "Marta"). `chat-long-memory-short`
+is the same chat in six turns, for a cloud model's tokens. Both `tools: off` (the history is
+what's measured).
+
+**Qwen3.5-4B on this PC** (Q4_K_M, the card, `--ctx 4096`: a real 4K context, read from the
+server's `/props`; the budget left 2,580–2,840 tokens for the history), three runs each:
+
+| History | `chat-long-memory` | Model calls | Tokens a run | Mean turn |
+|---|---|---|---|---|
+| `messages` (the last 19, before) | **1 of 3** — "I don't have access to the initial budget figures or the name of the person organizing the offsite…" | 13 | 22.4–22.9k | 0.9 s |
+| `window` (by tokens, no summary) | **0 of 3** — "Each session is treated as a fresh conversation…" | 13 | 22.1–22.9k | 1.0 s |
+| `summary` | **3 of 3** — "£18,400 … Marta Quill" | 16–18 (3–5 summaries) | 24.0–28.9k | 1.5 s (the summaries waited for; in the app they're in the background) |
+
+The one `messages` run that passed is no memory: Marta came from the model's own later
+answers (the 19 messages still held two that named her), and "£18,400" was in none of the
+20 messages that request sent (the transcript) — a lucky answer, or the server's cache. The
+summaries were incremental — messages 0–6, then 6–12, 12–16, 16–20: each pass the old notes
+plus the newly dropped messages — and kept the facts word for word ("- Budget: £18,400. -
+Organiser: Marta Quill."), the venue, times and decisions. The 4K context fills quickly,
+so a summary came every two or three turns; an 8K or bigger context needs one far less often.
+`chat-long-memory-short` fits a 4K context whole: 3 of 3 in every mode.
+
+**Groq's gpt-oss-20b** (`--keys-from-yap`, `YAP_EVAL_CONTEXT=2048`: a budget of ~1,370 tokens
+for the history), `chat-long-memory-short`, once each (22.9k tokens in all):
+
+| History | Result | Model calls | Tokens |
+|---|---|---|---|
+| `window` | **fail** — "I'm not sure what budget you mentioned or who's handling the offsite. Could you let me know the details again?" | 6 | 6.0k |
+| `summary`, first try | **fail** — the summary came back empty: gpt-oss spent its whole reply (2,048 tokens) reasoning about the notes (`finish_reason: length`), so the window took over | 7 | 9.0k |
+| `summary`, `reasoning_effort: "low"` for gpt-oss (`compact::extra`) and an empty reply asked once more | **pass** — "You mentioned a budget of **£18,400** and that **Marta Quill** is handling the off-site planning." | 8 (2 summaries, 214 and 274 tokens) | 7.9k |
+
+So: the window forgets the start of a long chat, on the card and in the cloud; the summary
+remembers it, at a few extra calls (free on this PC, ~2k tokens each on Groq's free plan).

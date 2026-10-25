@@ -426,7 +426,14 @@
   its next save, so it shows in the list again). An answer may keep
   `tokens` (`{prompt, answer, perSecond?}`, 2026-10-25: its last model
   call's counts, for Chat's context ring); an older Yap's save drops it,
-  and the ring estimates instead.
+  and the ring estimates instead. A long conversation (or Ask thread) may
+  keep `summary` (2026-10-25, `chat/compact.rs`: `{text, upto, after,
+  model?, ts}` — what its messages before `upto` said, the count when it
+  was written, the model that wrote it), written only when there is one.
+  **A cache**: the messages all stay; an older Yap sharing the folder drops
+  the field on its next save (harmless — the next long turn writes it
+  again), and a summary covering more messages than there are is never
+  used (`Conversation::usable_summary`).
 - Model lists: `%APPDATA%/yap/model_catalog.json` — each keyed AI provider's
   chat models as it last listed them (id, name, created, context, tools,
   first seen), when, and why the last check failed (`ai/model_catalog.rs`).
