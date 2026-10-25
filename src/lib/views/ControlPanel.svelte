@@ -38,7 +38,6 @@
   // you'd see — Home on screen 63 → 57 ms (inside run-to-run noise), 256 →
   // 253 ms with the CPU 4× slower — since V8 compiles code only when it
   // runs; the load's time goes to its ~77 IPC calls (frontend.md).
-  import MeetingsView from './MeetingsView.svelte';
   import HomeView from './home/HomeView.svelte';
   import NotesView from './notes/NotesView.svelte';
   import ChatView from './chat/ChatView.svelte';
@@ -202,6 +201,10 @@
   // (`yap-dictation-error`): one place.
   onMount(() => {
     const uns = [];
+    // Meetings loads on first use (its own chunk): fetched once the window
+    // is idle, so opening it never waits.
+    const idle = window.requestIdleCallback ?? ((f) => setTimeout(f, 2000));
+    idle(() => import('./MeetingsView.svelte').catch(() => {}));
     listen('yap-error', (e) => {
       const msg = String(e.payload || 'Something went wrong');
       toast({ kind: 'alert', title: 'Yap ran into a problem', description: msg, variant: 'destructive' });
@@ -403,9 +406,10 @@
     </div>
   </nav>
 
-  <!-- Home, Chat, Notes and Meetings are in this window's chunk; the views
-       opened less often load on first use (each its own chunk), which keeps
-       the main window's chunk under Vite's 700 kB warning (25 Oct 2026). -->
+  <!-- Home, Chat and Notes are in this window's chunk; the other views load
+       on first use (each its own chunk; Meetings fetched when the window is
+       idle), which keeps the main window's chunk under Vite's 700 kB warning
+       (25 Oct 2026). -->
   <main class="view">
     {#if activeView === 'home'}
       <HomeView onopensettings={openSettings} onnavigate={(v) => (activeView = v)} />
@@ -422,7 +426,9 @@
     {:else if activeView === 'notes'}
       <NotesView onopensettings={openSettings} />
     {:else if activeView === 'meetings'}
-      <MeetingsView onopensettings={openSettings} onnavigate={(v) => (activeView = v)} onopennote={openNoteAt} />
+      {#await import('./MeetingsView.svelte') then { default: MeetingsView }}
+        <MeetingsView onopensettings={openSettings} onnavigate={(v) => (activeView = v)} onopennote={openNoteAt} />
+      {/await}
     {:else if activeView === 'tasks'}
       {#await import('./TasksView.svelte') then { default: TasksView }}
         <TasksView
