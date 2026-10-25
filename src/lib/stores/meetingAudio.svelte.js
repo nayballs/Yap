@@ -7,11 +7,13 @@
 //   refine after a meeting, Try again on a stretch that failed), from
 //   `yap-meeting-redo` { noteId, kind: again|recover|refine|retry, state:
 //   running|done|error|cancelled, percent, model, error, summary, waiting,
-//   thenSummary }, with Cancel and the refine's "Update summary";
+//   thenSummary }, with Cancel and the refine's "Update summary"; "Find
+//   speakers" (speakers/rerun.rs) runs as a job of kind `speakers` too;
 // - "Transcribe again…" behind the window's confirm dialog
 //   (ui/ConfirmDialog via askConfirm), and the crash banner's "Transcribe it";
 // - a transcript line's ▶ (`meeting_audio_clip`: both sides of its stretch,
-//   as a WAV), one line playing at a time.
+//   as a WAV), and a voice's ▶ (`speaker_clip`: a few seconds of its
+//   clearest speech, speakers/clip.rs), one playing at a time.
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { SvelteSet } from 'svelte/reactivity';
@@ -57,9 +59,17 @@ export function initMeetingAudio() {
               ? "Couldn't transcribe the rest of the meeting"
               : job.kind === 'retry'
                 ? "Couldn't transcribe that part"
-                : "Couldn't transcribe the meeting again",
+                : job.kind === 'speakers'
+                  ? "Couldn't find the speakers"
+                  : "Couldn't transcribe the meeting again",
           description: job.error || '',
           variant: 'destructive',
+        });
+      } else if (job.kind === 'speakers' && job.state === 'done') {
+        toast({
+          title: 'Speakers found',
+          description: 'Names you gave stay on their voices, and lines you said who said keep their speaker.',
+          variant: 'success',
         });
       } else if (job.kind === 'again' && job.state === 'done') {
         toast({
@@ -120,6 +130,7 @@ export function jobLine(job) {
     return `${job.thenSummary ? 'Improving the transcript, then the summary' : 'Improving the transcript'}${pct}`;
   }
   if (job.kind === 'retry') return `Transcribing that part again${pct}`;
+  if (job.kind === 'speakers') return `Finding speakers${pct}`;
   return job.kind === 'recover'
     ? `Transcribing the rest of the meeting${pct}`
     : `Transcribing again with ${job.model || 'your speech model'}${pct}`;
@@ -220,6 +231,33 @@ export function askTranscribeAgain(note, { title = '', returnFocus = null } = {}
   });
 }
 
+/** Why "Find speakers" can't run on `note` now (null: it can). */
+export function cantFindSpeakers(note, recordingThis) {
+  const a = meetingAudio.byNote[note?.id];
+  const job = runningJob(note?.id);
+  if (recordingThis) return 'Stop the recording first';
+  if (job) return job.kind === 'speakers' ? 'Finding speakers already' : "It's being transcribed";
+  if (a && !a.recordings) return "This meeting's audio isn't kept";
+  return null;
+}
+
+/**
+ * "Find speakers": the speaker engine run again over the meeting's audio
+ * (speakers/rerun.rs; progress and Cancel on the note's job line). Names
+ * the person gave stay; lines they said who said keep their speaker.
+ */
+export async function findSpeakers(noteId) {
+  try {
+    startedHere.add(noteId);
+    await invoke('speaker_find', { noteId });
+    return true;
+  } catch (e) {
+    startedHere.delete(noteId);
+    toast({ title: "Couldn't find the speakers", description: String(e), variant: 'destructive' });
+    return false;
+  }
+}
+
 /** The crash banner's "Transcribe it". */
 export async function recoverMeeting(noteId) {
   try {
@@ -247,6 +285,33 @@ export function stopLine() {
     player = null;
   }
   meetingAudio.playing = null;
+}
+
+/** What `meetingAudio.playing` is while voice `voice` of note `noteId` plays. */
+export const voiceKey = (noteId, voice) => `voice:${noteId}:${voice}`;
+
+/** Whether a voice of note `noteId` can be played (its audio is kept; never You). */
+export function canPlayVoice(noteId, voice) {
+  return !!meetingAudio.byNote[noteId]?.recordings && !!voice && voice !== 'you';
+}
+
+/** ▶ on a voice (its speaker menu, a card): a few seconds of its clearest speech; again: stop. */
+export async function playVoice(noteId, voice) {
+  const key = voiceKey(noteId, voice);
+  const again = meetingAudio.playing === key;
+  stopLine();
+  if (again) return;
+  try {
+    const bytes = await invoke('speaker_clip', { noteId, speaker: voice });
+    const a = new Audio(URL.createObjectURL(new Blob([bytes], { type: 'audio/wav' })));
+    a.onended = () => player === a && stopLine();
+    player = a;
+    meetingAudio.playing = key;
+    await a.play();
+  } catch (e) {
+    stopLine();
+    toast({ title: "Couldn't play their voice", description: String(e), variant: 'destructive' });
+  }
 }
 
 /** ▶ on line `i` (`seg`) of note `noteId`; again: stop. */

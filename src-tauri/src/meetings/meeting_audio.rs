@@ -859,6 +859,9 @@ pub enum Kind {
     Refine,
     /// "Try again" on a stretch that couldn't be transcribed.
     Retry,
+    /// "Find speakers": the speaker engine run again over the meeting's
+    /// call side (`speakers/rerun.rs`, through [`start_side_job`]).
+    Speakers,
 }
 
 /// A note's audio being transcribed, as every window shows it
@@ -1092,13 +1095,66 @@ pub fn start_job(app: &AppHandle, note_id: u64, kind: Kind) -> Result<(), String
             _ => transcribe_again(&app, &engine_slot, note_id, todo, &model, Kind::Again, &ctl, false).await,
         };
         let recovered = kind == Kind::Recover && result.is_ok();
+        let again = kind == Kind::Again && result.is_ok();
         ends.end(&result);
         if recovered && crate::meetings::meeting::recording_note() != Some(note_id) {
             // The end of the meeting, as a stop would have been.
             crate::meetings::meeting_end::recovered(&app, note_id);
         }
+        if again {
+            // The new lines' speakers, from the engine run again over the
+            // same audio (when speaker separation is on).
+            crate::speakers::rerun::after_transcribe_again(&app, note_id);
+        }
     });
     Ok(())
+}
+
+/// What a job of another area's gets ([`start_side_job`]): its Cancel, and
+/// its progress to publish (0–100).
+pub struct SideJob<'a> {
+    pub cancel: &'a AtomicBool,
+    pub progress: &'a (dyn Fn(u8) + Send + Sync),
+}
+
+impl SideJob<'_> {
+    pub fn cancelled(&self) -> bool {
+        self.cancel.load(Ordering::SeqCst)
+    }
+}
+
+/// A job of another area's on a note's meeting audio — Find speakers
+/// (`speakers/rerun.rs`): one per note like the others (refused while one
+/// runs), published as [`EVENT_REDO`] with its `kind` and `label` (the
+/// job line's model), stopped by the same Cancel. `run` runs on a thread of
+/// its own; [`CANCELLED`] is how it says it stopped.
+pub fn start_side_job(
+    app: &AppHandle,
+    note_id: u64,
+    kind: Kind,
+    label: &str,
+    run: impl FnOnce(&AppHandle, &SideJob) -> Result<(), String> + Send + 'static,
+) -> Result<(), String> {
+    crate::notes::get(note_id).ok_or("Note not found")?;
+    let ctl = begin(app, Redo::running(note_id, kind, label), false)?;
+    let cancel = ctl.cancel.clone().unwrap_or_default();
+    let ends = JobEnd::new(app, note_id, kind, label);
+    let app = app.clone();
+    let label = label.to_string();
+    let spawned = std::thread::Builder::new().name("meeting-job".into()).spawn(move || {
+        let last = AtomicU64::new(u64::MAX);
+        let progress_app = app.clone();
+        let progress = move |p: u8| {
+            let p = p.min(99);
+            if last.swap(p as u64, Ordering::SeqCst) != p as u64 {
+                publish(&progress_app, Redo { percent: p, ..Redo::running(note_id, kind, &label) });
+            }
+        };
+        let job = SideJob { cancel: &cancel, progress: &progress };
+        let result = run(&app, &job);
+        ends.end(&result);
+    });
+    spawned.map(|_| ()).map_err(|e| format!("couldn't start it: {e}"))
 }
 
 /// **The refine** of note `note_id` (`meeting_refine.rs` decides when, and
@@ -1364,8 +1420,26 @@ async fn retry(app: &AppHandle, engine: &crate::dictation::pipeline::EngineSlot,
 
 // ---- Playing a line ----
 
+/// Up to `n` samples of one side ("you" | "them") of a note's recording,
+/// from sample `from` (fewer at its end): what the speaker features
+/// (`speakers/`) listen to — a voice's clip, its voiceprint, the engine run
+/// again.
+pub fn read_side(note_id: u64, recording: u64, side: &str, from: u64, n: usize) -> Result<Vec<f32>, String> {
+    let mut r = open_side(note_id, recording, side)?;
+    r.seek(from);
+    Ok(r.read(n))
+}
+
+/// One side of a note's recording, to read from the start.
+pub fn open_side(note_id: u64, recording: u64, side: &str) -> Result<flac::Reader, String> {
+    if side != "you" && side != "them" {
+        return Err(format!("no side {side}"));
+    }
+    flac::Reader::open(&audio_path(note_id, recording, side))
+}
+
 /// The recording a line dated `ts` (unix seconds) belongs to.
-fn recording_at(note_id: u64, ts: u64) -> Option<Meta> {
+pub fn recording_at(note_id: u64, ts: u64) -> Option<Meta> {
     let ms = ts * 1000;
     recordings(note_id).into_iter().rev().find(|m| {
         let end = if m.you_len.max(m.them_len) > 0 { m.end_ms() } else { now_ms() };

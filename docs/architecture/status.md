@@ -681,7 +681,10 @@ only with the beta speaker engine on, and name them only from what's said
 and the invite (suggestions to confirm, a strong one as a guess; 0 wrong
 names but 34–60% found in the evaluation's fictional meetings; reading the
 call app's window is built behind a flag but untried in a real call; voices
-of two recordings of one meeting aren't matched up; tasks are attributed
+of two recordings of one meeting are matched by voiceprint only when sure,
+and similar voices merged by the engine are offered a Split, not fixed —
+both measured on the spike's synthetic meetings only, never on a real
+call; tasks are attributed
 from attendees, the speaker map and names said)
 and remove speaker echo only from chunks that are entirely the call (see
 [`docs/meetings.md`](../meetings.md) "Limits"), and a real call (live
@@ -692,8 +695,9 @@ met made-up devices in tests (a real headset's plug, unplug and Bluetooth
 wake-up are the maintainer's to try); the refine after
 a meeting judges models by the leaderboard's figures and the meeting's
 language by Settings or Windows (not measured, not detected), and lowers
-only its calling thread's priority; the speaker engine isn't run again
-over meeting audio, and it can't be exported; a fixed line can't be split
+only its calling thread's priority; meeting audio can't be exported
+(Find speakers runs the speaker engine again over it, 2026-10-25: e2e- and
+real-engine-tested on test meetings, not yet on a real one); a fixed line can't be split
 or deleted, an edited summary has no "back to Yap's" (only Replace), and a
 task's "Said at" is the line sharing most of its words (a guess: none when
 no line shares enough);

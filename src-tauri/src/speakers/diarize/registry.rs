@@ -7,7 +7,14 @@
 //!   nemotron-3-diarization/        Nemotron-3-Diarization.q8_0.gguf, NOTICE.txt
 //!   nemo-speech-0.2.0-cpu/         the C API DLLs + their ggml and MSVC
 //!                                  runtime, licenses/, NOTICE.txt
+//!   eres2net-voxceleb-en/          the voice-matching model (voiceprint.rs),
+//!                                  NOTICE.txt
 //! ```
+//!
+//! A model's **extras** come with it but don't decide whether it's
+//! installed: Nemotron's is the voice-matching model, which a speaker model
+//! installed before it existed fetches on its own (Settings' "Download voice
+//! matching", `list`'s `extras_bytes`).
 //!
 //! Install = download each file (resuming a partial one), check its size and
 //! SHA-256, unpack into `<folder>.installing/`, then rename that into place:
@@ -72,6 +79,8 @@ pub struct Model {
     pub runtime_license_url: &'static str,
     pub weights: &'static Package,
     pub runtime: &'static Package,
+    /// Installed with it, never required by it (see the module's notes).
+    pub extras: &'static [&'static Package],
     /// The engine's file in `weights`.
     pub weights_file: &'static str,
     /// NeMo-Speech.cpp's streaming geometry: "v3-offline" = 30.4 s chunks,
@@ -126,6 +135,31 @@ pub static NEMO_RUNTIME: Package = Package {
              third-party notices that came with it are in licenses/.\n\
              Downloaded from https://github.com/NVIDIA/NeMo-Speech.cpp/releases/tag/v0.2.0\n",
 };
+
+/// **Voice matching** (`speakers/voiceprint.rs`): 3D-Speaker's ERes2Net
+/// (VoxCeleb, English), k2-fsa's ONNX export — the embedding the spike chose
+/// (§4.1: the best of four on these meetings; it separates voices Nemotron
+/// merges). Run on Yap's own ONNX Runtime, so no sherpa: one file.
+pub static VOICE_MATCHING: Package = Package {
+    id: "eres2net-voxceleb-en",
+    folder: "eres2net-voxceleb-en",
+    artifacts: &[Artifact {
+        // "recongition": the release's own spelling.
+        url: "https://github.com/k2-fsa/sherpa-onnx/releases/download/speaker-recongition-models/3dspeaker_speech_eres2net_sv_en_voxceleb_16k.onnx",
+        sha256: "c59158379255ad66e161679cca6af8d52d51e389e3224ab7d7a7baae295c2db5",
+        size: 26_485_263,
+        unpack: Unpack::File(VOICE_MATCHING_FILE),
+    }],
+    required: &[VOICE_MATCHING_FILE],
+    notice: "3D-Speaker ERes2Net, English (VoxCeleb), k2-fsa's ONNX export.\n\
+             3D-Speaker (Alibaba's speech lab), licensed under the Apache\n\
+             License, Version 2.0: https://github.com/modelscope/3D-Speaker\n\
+             Trained on VoxCeleb (CC BY 4.0): https://www.robots.ox.ac.uk/~vgg/data/voxceleb/\n\
+             Downloaded from https://github.com/k2-fsa/sherpa-onnx/releases/tag/speaker-recongition-models\n",
+};
+
+/// The voice-matching model's file.
+pub const VOICE_MATCHING_FILE: &str = "3dspeaker_speech_eres2net_sv_en_voxceleb_16k.onnx";
 
 /// The fallback the spike recommends for calls where everyone is on a phone
 /// line (Nemotron fails on all-narrowband audio): sherpa-onnx's offline
@@ -185,6 +219,7 @@ pub static MODELS: &[Model] = &[
         runtime_license_url: "https://github.com/NVIDIA/NeMo-Speech.cpp",
         weights: &NEMOTRON_WEIGHTS,
         runtime: &NEMO_RUNTIME,
+        extras: &[&VOICE_MATCHING],
         weights_file: "Nemotron-3-Diarization.q8_0.gguf",
         preset: "v3-offline",
     },
@@ -206,6 +241,7 @@ pub static MODELS: &[Model] = &[
         runtime_license_url: "https://github.com/k2-fsa/sherpa-onnx",
         weights: &SHERPA_WEIGHTS,
         runtime: &SHERPA_RUNTIME,
+        extras: &[],
         weights_file: "segmentation.onnx",
         preset: "",
     },
@@ -297,6 +333,12 @@ pub fn model_installed(root: &Path, model: &Model) -> bool {
     model.available && installed(root, model.weights) && installed(root, model.runtime)
 }
 
+/// The voice-matching model's file, if it's installed (`voiceprint.rs`).
+pub fn voice_matching_file() -> Option<PathBuf> {
+    let root = root();
+    installed(&root, &VOICE_MATCHING).then(|| root.join(VOICE_MATCHING.folder).join(VOICE_MATCHING_FILE))
+}
+
 /// What `yap.exe diarize` needs to run a model.
 #[derive(Debug, Clone)]
 pub struct EngineFiles {
@@ -331,8 +373,12 @@ pub struct ModelInfo {
     pub recommended: bool,
     pub available: bool,
     pub note: Option<&'static str>,
-    /// What a download fetches now (the runtime too, unless it's there).
+    /// What a download fetches now (the runtime too, unless it's there; its
+    /// extras too, when they're missing).
     pub download_bytes: u64,
+    /// Its extras (voice matching) are missing: what fetching them takes
+    /// (0: none missing).
+    pub extras_bytes: u64,
     /// The model and its runtime, on disk.
     pub size_bytes: u64,
     pub installed: bool,
@@ -355,6 +401,8 @@ pub fn list(root: &Path) -> Vec<ModelInfo> {
                     download_bytes += size(pkg);
                 }
             }
+            let extras_bytes: u64 = m.extras.iter().filter(|p| !installed(root, p)).map(|p| size(p)).sum();
+            download_bytes += extras_bytes;
             ModelInfo {
                 id: m.id,
                 name: m.name,
@@ -366,7 +414,8 @@ pub fn list(root: &Path) -> Vec<ModelInfo> {
                 available: m.available,
                 note: m.note,
                 download_bytes,
-                size_bytes: size(m.weights) + size(m.runtime),
+                extras_bytes,
+                size_bytes: size(m.weights) + size(m.runtime) + m.extras.iter().map(|p| size(p)).sum::<u64>(),
                 installed: model_installed(root, m),
                 license: m.license,
                 license_url: m.license_url,
@@ -458,6 +507,7 @@ pub async fn install(root: &Path, id: &str, on_progress: &(dyn Fn(Progress) + Se
     }
     let todo: Vec<(&'static str, &Package)> = [("runtime", model.runtime), ("model", model.weights)]
         .into_iter()
+        .chain(model.extras.iter().map(|p| ("voices", *p)))
         .filter(|(_, pkg)| !installed(root, pkg))
         .collect();
     let total: u64 = todo.iter().flat_map(|(_, pkg)| sources(pkg)).map(|s| s.size).sum();
@@ -632,6 +682,9 @@ pub fn delete(root: &Path, id: &str) -> Result<(), String> {
         Ok(())
     };
     remove(model.weights)?;
+    for extra in model.extras {
+        remove(extra)?;
+    }
     let shared = MODELS
         .iter()
         .any(|m| m.id != id && std::ptr::eq(m.runtime, model.runtime) && installed(root, m.weights));
@@ -652,7 +705,7 @@ mod tests {
         for m in MODELS {
             assert!(!ids.contains(&m.id), "duplicate {}", m.id);
             ids.push(m.id);
-            for pkg in [m.weights, m.runtime] {
+            for pkg in [m.weights, m.runtime].into_iter().chain(m.extras.iter().copied()) {
                 assert!(!pkg.artifacts.is_empty());
                 for a in pkg.artifacts {
                     assert_eq!(a.sha256.len(), 64, "{}", a.url);
@@ -737,12 +790,27 @@ mod tests {
         let info = list(&root);
         let row = info.iter().find(|m| m.id == DEFAULT_MODEL).unwrap();
         assert!(!row.installed);
-        assert_eq!(row.download_bytes, 107_012_128, "the runtime is there: only the model to fetch");
-        assert_eq!(row.size_bytes, 107_012_128 + 5_528_418);
+        assert_eq!(row.download_bytes, 107_012_128 + 26_485_263, "the runtime is there: the model (and voice matching) to fetch");
+        assert_eq!(row.extras_bytes, 26_485_263);
+        assert_eq!(row.size_bytes, 107_012_128 + 5_528_418 + 26_485_263);
 
-        // Deleting the model takes its runtime too (nothing else uses it).
+        // Installed without voice matching (a model from before it): still
+        // installed; the extra is what's left to fetch.
+        std::fs::write(w.join(model.weights_file), vec![0u8; 107_012_128]).unwrap();
+        assert!(model_installed(&root, model));
+        let row = list(&root).into_iter().find(|m| m.id == DEFAULT_MODEL).unwrap();
+        assert!(row.installed);
+        assert_eq!((row.download_bytes, row.extras_bytes), (26_485_263, 26_485_263));
+        let vm = root.join(VOICE_MATCHING.folder);
+        std::fs::create_dir_all(&vm).unwrap();
+        std::fs::write(vm.join(VOICE_MATCHING_FILE), vec![0u8; 26_485_263]).unwrap();
+        assert!(installed(&root, &VOICE_MATCHING));
+        let row = list(&root).into_iter().find(|m| m.id == DEFAULT_MODEL).unwrap();
+        assert_eq!((row.download_bytes, row.extras_bytes), (0, 0));
+
+        // Deleting the model takes its runtime and extras too (nothing else uses them).
         delete(&root, DEFAULT_MODEL).unwrap();
-        assert!(!rt.exists() && !w.exists());
+        assert!(!rt.exists() && !w.exists() && !vm.exists());
         let _ = std::fs::remove_dir_all(&root);
     }
 

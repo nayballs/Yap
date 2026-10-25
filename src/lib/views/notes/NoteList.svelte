@@ -8,7 +8,7 @@
   import { toast } from '../../ui/toast.svelte.js';
   import { openContextMenu, menuKey, menuOpenFor, askConfirm, devInspect } from '../../ui/contextMenu.svelte.js';
   import { showSaveError } from '../../notices/saveErrors.js';
-  import { refreshAudio, cantTranscribeAgain, askTranscribeAgain } from '../../stores/meetingAudio.svelte.js';
+  import { refreshAudio, cantTranscribeAgain, askTranscribeAgain, cantFindSpeakers, findSpeakers } from '../../stores/meetingAudio.svelte.js';
   import { displayTitle, relTime, dateOf } from './noteFormat.js';
 
   /** `notes`: the view's state (notesState.svelte.js). */
@@ -200,6 +200,13 @@
                 onselect: () => transcribeAgain(n),
               },
               ...(cantTranscribeAgain(n, recording) ? [{ note: cantTranscribeAgain(n, recording) }] : []),
+              // The speaker engine run again over its audio (speakers/rerun.rs).
+              {
+                label: 'Find speakers',
+                icon: 'person',
+                disabled: !!cantFindSpeakers(n, recording),
+                onselect: () => findSpeakers(n.id),
+              },
             ]
           : []),
         { separator: true },

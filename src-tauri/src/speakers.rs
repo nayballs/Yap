@@ -40,9 +40,14 @@
 //! when the recording stops, before the summary is written.
 
 pub mod call_ui;
+pub mod clip;
 pub mod diarize;
+pub mod flags;
 pub mod labels;
 pub mod naming;
+pub mod rerun;
+pub mod voiceprint;
+pub mod voices;
 
 use std::collections::BTreeMap;
 
@@ -127,6 +132,46 @@ pub struct Speaker {
     /// is Priya?": [`naming`]).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub suggestion: Option<Suggestion>,
+    /// This voice and another sound alike: they may be one person the
+    /// engine split ("These may be one voice · Merge", [`flags`]).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub alike: Option<Alike>,
+    /// This voice's lines fall into two clear groups: two people the engine
+    /// heard as one ("Split", [`flags`]).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub split: Option<SplitOffer>,
+    /// Voices the person said aren't this one ("They're different"): never
+    /// offered as one again.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub apart: Vec<String>,
+    /// The person said this voice is one person: no Split offered again.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub whole: bool,
+}
+
+/// "These may be one voice": the other voice, how alike (0–1), and "Not
+/// now" (not offered again in this meeting while it stands).
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Alike {
+    pub with: String,
+    pub score: f32,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub later: bool,
+}
+
+/// "May be two people": the lines that would become a new voice (each by
+/// its date and place: `[ts, startMs]`), how alike the two groups sound,
+/// and "Not now".
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SplitOffer {
+    pub lines: Vec<[u64; 2]>,
+    /// How many lines stay.
+    pub kept: usize,
+    pub score: f32,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub later: bool,
 }
 
 /// A name Yap suggests for a voice ([`naming`]): the notepad and the Notes
@@ -411,8 +456,16 @@ fn merge_into(map: &mut Speakers, from: &str, into: &str) {
             target.not.push(n);
         }
     }
-    // Who either was is asked again from the merged voice's evidence.
+    for a in gone.apart {
+        if a != into && !target.apart.contains(&a) {
+            target.apart.push(a);
+        }
+    }
+    // Who either was is asked again from the merged voice's evidence, and
+    // whether it's one voice too ([`flags`], at the next pass).
     target.suggestion = None;
+    target.alike = None;
+    target.split = None;
     map.insert(
         from.to_string(),
         Speaker {
@@ -420,6 +473,11 @@ fn merge_into(map: &mut Speakers, from: &str, into: &str) {
             ..Speaker::default()
         },
     );
+    for s in map.values_mut() {
+        if s.alike.as_ref().is_some_and(|a| a.with == from || a.with == into) {
+            s.alike = None;
+        }
+    }
 }
 
 /// **Rename everywhere**: voice `id` is `name`, on every line of it (the

@@ -83,6 +83,10 @@ fn threads() -> usize {
 /// console window.
 fn spawn(files: &EngineFiles, every_ms: u64) -> Result<Child, String> {
     let exe = std::env::current_exe().map_err(|e| format!("can't find yap.exe: {e}"))?;
+    // A debug build's unit tests run as a test binary: they name a yap.exe
+    // to be the child (`voices.rs`'s real-meeting checks).
+    #[cfg(debug_assertions)]
+    let exe = std::env::var_os("YAP_DIARIZE_EXE").filter(|v| !v.is_empty()).map(std::path::PathBuf::from).unwrap_or(exe);
     let mut cmd = Command::new(exe);
     cmd.arg("diarize")
         .arg("--runtime")
@@ -473,6 +477,9 @@ impl Feeder {
                 if let Feed::Audio(a) = feed {
                     self.queued.fetch_sub(a.len(), Ordering::Relaxed);
                 }
+                // Counted before the child can see it: its labels never run
+                // ahead of the timeline's audio (a big batch on a busy PC).
+                self.lock().audio_ms = (sent + feed.samples()) * 1000 / 16_000;
                 if let Some(r) = running.as_mut() {
                     if Self::write(r, feed).is_err() {
                         let dead = running.take().expect("running");
@@ -576,6 +583,142 @@ fn read_messages(stdout: impl std::io::Read, stream: u32, state: &Mutex<State>) 
     false
 }
 
+// ---- Over a meeting's saved audio (Find speakers) ----
+
+/// What [`run_saved`] hands the engine.
+pub enum Piece {
+    /// Samples (16 kHz).
+    Audio(Vec<f32>),
+    /// This many samples of silence (dithered by the child, as live).
+    Silence(u32),
+}
+
+/// A session's worth of "a model is in use" (it can't be deleted).
+struct InUse;
+
+impl InUse {
+    fn new() -> InUse {
+        RUNNING.fetch_add(1, Ordering::SeqCst);
+        InUse
+    }
+}
+
+impl Drop for InUse {
+    fn drop(&mut self) {
+        RUNNING.fetch_sub(1, Ordering::SeqCst);
+    }
+}
+
+/// The engine over audio already on disk (**Find speakers**, `rerun.rs`):
+/// every piece `next` hands it (`None`: the end) in one stream, as fast as
+/// the engine takes them (the pipe is the pace: ~2.4% of real time on 4
+/// threads, so an hour in ~1.5 min), and its final segments on that one
+/// clock, voices numbered by first appearance (stream 0). `progress` gets
+/// the samples sent so far; `cancelled` stops it (the child killed:
+/// `Err(cancelled_as)`).
+pub fn run_saved(
+    next: impl FnMut() -> Option<Piece>,
+    progress: &dyn Fn(u64),
+    cancelled: &dyn Fn() -> bool,
+    cancelled_as: &str,
+) -> Result<Vec<Segment>, String> {
+    let cfg = crate::config::load();
+    let files = registry::engine_files(&cfg.diarization_model).ok_or("The speaker model isn't installed")?;
+    run_saved_on(&files, next, progress, cancelled, cancelled_as)
+}
+
+/// [`run_saved`] on these engine files.
+pub(crate) fn run_saved_on(
+    files: &EngineFiles,
+    mut next: impl FnMut() -> Option<Piece>,
+    progress: &dyn Fn(u64),
+    cancelled: &dyn Fn() -> bool,
+    cancelled_as: &str,
+) -> Result<Vec<Segment>, String> {
+    let _in_use = InUse::new();
+    let started = std::time::Instant::now();
+    let mut child = spawn(files, 0)?;
+    forward_stderr(&mut child);
+    let (Some(stdin), Some(stdout)) = (child.stdin.take(), child.stdout.take()) else {
+        let _ = child.kill();
+        return Err("couldn't talk to the speaker engine".to_string());
+    };
+    let (done_tx, done_rx) = mpsc::channel::<Result<Vec<protocol::RawSegment>, String>>();
+    let _ = std::thread::Builder::new().name("diarize-read".into()).spawn(move || {
+        let mut error = None;
+        for line in BufReader::new(stdout).lines().map_while(Result::ok) {
+            match protocol::parse_line(&line) {
+                Some(Message::Ready { protocol: p, .. }) if p != protocol::PROTOCOL => {
+                    error = Some("The speaker engine doesn't match this Yap.".to_string());
+                }
+                Some(Message::Segments { is_final: true, segments, .. }) => {
+                    let _ = done_tx.send(Ok(segments));
+                    return;
+                }
+                Some(Message::Error { message }) => error = Some(message),
+                _ => {}
+            }
+        }
+        let _ = done_tx.send(Err(error.unwrap_or_else(|| "The speaker engine stopped before it finished".to_string())));
+    });
+    let stop = |mut child: Child| {
+        let _ = child.kill();
+        let _ = child.wait();
+    };
+    let mut stdin = BufWriter::with_capacity(1 << 16, stdin);
+    let mut sent: u64 = 0;
+    loop {
+        if cancelled() {
+            stop(child);
+            return Err(cancelled_as.to_string());
+        }
+        let wrote = match next() {
+            Some(Piece::Audio(a)) => {
+                sent += a.len() as u64;
+                protocol::write_audio(&mut stdin, &a)
+            }
+            Some(Piece::Silence(n)) => {
+                sent += n as u64;
+                protocol::write_silence(&mut stdin, n)
+            }
+            None => break,
+        };
+        if wrote.and_then(|_| stdin.flush()).is_err() {
+            break; // the child died: its reader says why
+        }
+        progress(sent);
+    }
+    drop(stdin);
+    // The tail, labelled at the end (normally well under a second).
+    let waited = std::time::Instant::now();
+    let result = loop {
+        match done_rx.recv_timeout(Duration::from_millis(200)) {
+            Ok(r) => break r,
+            Err(RecvTimeoutError::Timeout) if cancelled() => {
+                stop(child);
+                return Err(cancelled_as.to_string());
+            }
+            Err(RecvTimeoutError::Timeout) if waited.elapsed() > FINISH_TIMEOUT * 3 => {
+                break Err("The speaker engine didn't finish in time".to_string());
+            }
+            Err(RecvTimeoutError::Timeout) => {}
+            Err(RecvTimeoutError::Disconnected) => break Err("The speaker engine stopped before it finished".to_string()),
+        }
+    };
+    stop(child);
+    let segments: Vec<Segment> = result?
+        .into_iter()
+        .map(|s| Segment { start_ms: s.start_ms, end_ms: s.end_ms, speaker: s.speaker, stream: 0 })
+        .collect();
+    tracing::info!(
+        audio_s = sent / 16_000,
+        segments = segments.len(),
+        secs = started.elapsed().as_secs(),
+        "Diarization: saved audio labelled"
+    );
+    Ok(segments)
+}
+
 // ---- Commands (Settings → Speech-to-Text → Tell speakers apart) ----
 
 static DOWNLOADING: Mutex<Option<registry::Progress>> = Mutex::new(None);
@@ -589,7 +732,23 @@ pub fn diarization_status() -> serde_json::Value {
         "downloading": DOWNLOADING.lock().unwrap_or_else(|p| p.into_inner()).clone(),
         "inUse": RUNNING.load(Ordering::SeqCst) > 0,
         "defaultModel": DEFAULT_MODEL,
+        // Voice matching (voiceprint.rs): ready here, and whether this
+        // build can run it at all (a stub build can't).
+        "voiceMatching": super::voiceprint::available(),
+        "voiceMatchingInBuild": cfg!(feature = "engines") || test_mode(),
     })
+}
+
+/// A test run (whose stub build has stand-ins for voice matching).
+fn test_mode() -> bool {
+    #[cfg(debug_assertions)]
+    {
+        crate::shell::e2e::active()
+    }
+    #[cfg(not(debug_assertions))]
+    {
+        false
+    }
 }
 
 /// Download model `id` (and its runtime): `diarization-download-progress`

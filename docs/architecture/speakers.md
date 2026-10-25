@@ -34,7 +34,14 @@ Telling the call side's voices apart (the beta speaker engine, a child process) 
   frames into the child's stdin; a child that dies is started again
   (`MAX_RESTARTS` 2) at its place on the clock as a new `stream` (a voice is
   `(stream, speaker)`; the gap is in `gaps`); past 5 min of queued audio the
-  tee sends silence (memory bounded, clock right). **The API for the speaker
+  tee sends silence (memory bounded, clock right). **Over saved audio**
+  (`run_saved`, Find speakers, `rerun.rs`): the same child with no live
+  updates, fed `Piece`s as fast as it takes them (the pipe is the pace),
+  its final segments on the one stream's clock; cancelled = the child
+  killed; counted as a model in use. Measuring only: `--gpu`,
+  `--chunk-frames`, `--right-context-frames` (the child's defaults are
+  what Yap runs: the processor, the preset as it is); a debug build's
+  `YAP_DIARIZE_EXE` names the child for unit tests. **The API for the speaker
   map**: `diarize::on_segments(|tl: &Timeline| …)` — every few seconds while
   recording and once with `done: true`; `diarize::timeline(note_id)` — the
   latest. `Timeline {note_id, session, segments: [Segment {start_ms, end_ms,
@@ -121,8 +128,23 @@ Telling the call side's voices apart (the beta speaker engine, a child process) 
   final labels (as far as they went). **Voice ids**: engine voice `(stream,
   speaker)` → "them-N", N numbered on from the note's highest "them-N" in
   the order voices first get a line (`VoiceIds`; a restarted engine's
-  voices and a resumed meeting's are new numbers, never merged by
-  themselves). **The 1:1 rule** (`settle_them`, each pass, per recording):
+  voices and a resumed meeting's are new numbers — unless surely heard
+  before, below). **Voices heard again** (`Matching`, 2026-10-25): a new
+  stream's voice (a resumed meeting's engine, a restarted one) is compared
+  by voiceprint (`voiceprint.rs`) with every told-apart voice on the
+  note's lines but its own stream's (the engine says those are other
+  people): its settled turns from `MATCH_MIN_MS` (6 s) of speech, again at
+  half as much more, and once more in the final pass before the summary;
+  `voices::verdict` → the earlier id (`VoiceIds::alias`; its lines so far
+  move over in the next pass, `retarget`: never a line the person
+  assigned, the new number's map entry dropped when it's only a number), new
+  for good (< `NEW_BELOW` with 20 s), or not yet (unsure at the end: a new
+  number). The prints are made with no lock held (`heard_again`, before
+  the labelling pass); a voice the person named meanwhile is left as it
+  is. The earlier voices' prints are kept for the recording (from their
+  lines' audio, ≤ 45 s each). Without voice matching (a stub build, the
+  model not downloaded) nothing changes. At the recording's end, the
+  flags are looked for in the background (`flags.rs`). **The 1:1 rule** (`settle_them`, each pass, per recording):
   "Them"'s name (a calendar guess, or the user's) goes to the recording's
   voice when it found exactly one (a guess stays a guess); with several, a
   guess goes to the voice with the most words (the first to qualify keeps
@@ -236,6 +258,116 @@ Telling the call side's voices apart (the beta speaker engine, a child process) 
   `Dump` JSON (each read with what the rules found), `--names
   "Real=Stand-in;…"` swapping names for sharing. The fixtures in
   `call_ui/fixtures/` are synthetic, not captures.
+- **`speakers/voiceprint.rs`** (+ `voiceprint/fbank.rs`,
+  `voiceprint/eres2net.rs`; 2026-10-25) — **voiceprints of one meeting's
+  voices**, for the engine's blind spots (a voice heard again after a
+  pause or a restart gets a new number; similar voices come out as one;
+  one person sometimes as two). The model: 3D-Speaker's **ERes2Net**
+  (VoxCeleb, English; k2-fsa's ONNX export, 26.5 MB, Apache-2.0 — the
+  spike's §4.1 pick) on Yap's own ONNX Runtime on the processor (`engines`
+  builds, 1–2 threads, no spinning): a clip's Kaldi fbank (`fbank.rs`: 80
+  mel bins 20–7,600 Hz, 25 ms frames every 10 ms, Povey window,
+  pre-emphasis 0.97, DC removed, its own radix-2 FFT, each bin's mean over
+  the clip off — the model's "global-mean") in, 192 numbers out, unit
+  length. Checked against sherpa-onnx's own embeddings of the same
+  stretches: cosine 0.986–0.995 (`voiceprint::tests::matches_sherpa`).
+  `Printer::for_note` reads a stretch of one side of one recording from
+  disk (`meeting_audio::read_side`), passes over clips < 1 s and near
+  silence (RMS < 1e-3), cuts a clip at 10 s; `voice(spans, budget)` is the
+  length-weighted centroid of the longest stretches up to `budget`.
+  **Nothing is kept**: a print is made when needed and dropped — no
+  voiceprint is written anywhere, none leaves its meeting (known voices
+  across meetings would be biometric data: the spike's step 6, not this).
+  The model is the speaker model's **extra** (`registry.rs`
+  `VOICE_MATCHING`, `Model::extras`): downloaded with it (stage `voices`),
+  deleted with it, never what decides it's installed; a speaker model from
+  before it shows "Voice matching … Download voice matching" under the
+  switch (`ModelInfo::extras_bytes`; `diarization_status`'s
+  `voiceMatching` / `voiceMatchingInBuild`). Test mode stands in with
+  `e2e_voice_prints {prints: [{noteId, recording (its index), side,
+  startMs, endMs, print}]}` (a stub build has no model): a stretch's print
+  is the staged one it overlaps most (a quarter of it at least).
+- **`speakers/voices.rs`** — **what the prints decide** (pure, unit-tested;
+  thresholds measured below): `match_voices` — one to one, a pair taken at
+  cosine ≥ `SAME` 0.70 when that's ≥ `MARGIN` 0.15 ahead of what either is
+  to anyone else and both have ≥ `MATCH_MIN_MS` 6 s of speech, else left
+  apart; `verdict` (a new voice: matched, new for good below `NEW_BELOW`
+  0.45 with `SETTLED_MS` 20 s, or not yet); `map_by_overlap` (Find
+  speakers: a new voice takes the old id whose lines it holds — half the
+  old voice's lines, or half of what it said on labelled lines — the
+  person's names first, so a name they gave is never lost to an unnamed
+  voice the engine now hears as the same person, then by overlap, lines the
+  person assigned counting ×3); `alike_pairs` (`ALIKE` 0.70, ≥ 10 s each,
+  a voice in one pair at most); `split` (two-means on a voice's lines'
+  prints, started from the two least alike; offered when the two groups
+  are ≤ `SPLIT_APART` 0.75 alike, lines sit ≥ `SPLIT_GAP` 0.15 nearer
+  their own group, each group ≥ 15 s in ≥ 3 lines and the smaller ≥ a
+  fifth of the voice — a few lines of crosstalk aren't a second person;
+  the group with lines the person assigned, else the bigger, keeps the
+  voice); `choose_clip` (below).
+- **`speakers/rerun.rs`** — **Find speakers**: the engine run again over
+  a past meeting's call side from its audio on disk — the notepad's ⋯,
+  the Meetings view's and the Notes list's menus (`speaker_find`), and by
+  itself after **Transcribe again** when "Tell speakers apart" is on
+  (`after_transcribe_again`, hooked in `meeting_audio::start_job`).
+  Refused while a meeting records, without call lines, without the model
+  (or a staged test run), or without kept audio. **One stream for the whole
+  meeting** (`diarize::run_saved`: the child with no live updates, fed as
+  fast as it takes it, `Piece::Audio`/`Silence`): every ended recording's
+  "Them" in order with 2 s of (dithered) silence between, so a voice keeps
+  its number across a pause; `split_by_recording` puts the turns back on
+  each recording's clock. A job of `meeting_audio`'s (`start_side_job`,
+  kind `speakers`: one per note, `yap-meeting-redo`, the same Cancel —
+  `meeting_job_cancel` — and job line, "Finding speakers · 40%"; the
+  engine's run is 90% of it). **Only a run that completes changes
+  anything**, all at once under the notes' lock: ids (`ids_for`: by
+  overlap with the old labels, else by sound for a named old voice left
+  over, else new numbers on from the note's highest), every call line
+  labelled again (`relabel`: split where the speaker changes; a line the
+  person assigned keeps its speaker; one they edited is never split, it
+  takes the voice heard most over it; a line near no voice stays as it
+  was), map entries of numbers no line uses dropped (never a name the
+  person gave), "Them"'s 1:1 guess settled, names suggested again, then
+  the flags looked for. Cancelled or failed: nothing changes. Test mode:
+  `e2e_find_speakers {noteId, recordings: [[{startMs, endMs, speaker}]],
+  paceMs}` is the next run's result (consumed by it), paced so its
+  progress and Cancel can be seen. Logs: counts and times.
+- **`speakers/flags.rs`** — **"may be one voice · Merge" and "may be two
+  people · Split"**, never done by themselves: looked for (`refresh`) after
+  a recording's final labels (in the background, once its audio is
+  closed), after Find speakers, and after a Split; prints per line (each
+  voice's 60 longest ≥ 1.5 s); `find` → `store` into the map
+  (`Speaker::alike {with, score, later}` on the first voice of a pair,
+  `Speaker::split {lines: [[ts, startMs]], kept, score, later}`); a voice
+  that may be two is offered its Split first (no merge offer for it until
+  then); two voices the person named differently, or said are different,
+  are never offered as one. Answers (`speaker_flag {speaker, kind: alike |
+  split, answer: yes | no | later}`, through `speakers::edit`): **Merge**
+  (the later number into the earlier, `merge`: the more trusted name
+  stays), **They're different** (`apart` on both, never again), **Split**
+  (those lines, unless the person assigned them, to a new number; the two
+  `apart`; looked for again), **It's one person** (`whole`), **Not now**
+  (`later`, while the same flag stands). The cards: `SpeakerCard.svelte`
+  shows them before the name cards (`pendingFlags`, `flagQuestion`), with
+  ▶ for each voice.
+- **`speakers/clip.rs`** — **a voice's ▶** (`speaker_clip {speaker}` → a
+  WAV): its speaker menu's "Play their voice" and every card's ▶ (not
+  You). Which seconds (`voices::choose_clip`): one of its lines — longer is
+  better up to 8 s (cut at a word's end), under 1.5 s poor, ×0.3 when
+  another voice talks within 0.5 s (either side of the call), ×0.6 when
+  it's mostly pause (< 1.2 words a second), ×1.25 when the person said who
+  said it, ×0.1 when near silent (the best five by their lines are read
+  for their loudness); only that line's side, 150 ms padding. Lines from
+  recordings no longer on disk are passed over.
+
+**An older Yap on the same data** (the installed nightly beside the dev
+build): names stay in the fields it reads (`name`, `source`, `locked`,
+`mergedInto` in the map, `speaker`/`speakerLocked` on lines) — a merge, a
+split, a voice matched across a pause and a Find speakers run are all
+written there. The new map fields (`alike`, `split`, `apart`, `whole`) are
+dropped by its next save: the offers come back at the next pass, a
+"They're different" or "It's one person" can be asked again. Its delete of
+the speaker model leaves `eres2net-voxceleb-en/` behind. No migration.
 
 ## Testing the speaker engine
 
@@ -266,6 +398,22 @@ Automation read, on a window of the test's own far off screen), and the e2e
 Someone else / Not now, the names in the action plan's input, the AI's
 checked answer at the end of a meeting, "It was me" and Undo, the call
 app's readings naming voices through `e2e_call_readings`).
+
+**The voices after the fact** (2026-10-25): `cargo test speakers::`
+covers the matching across a pause (`voices::tests`: the threshold, unsure
+left apart, one to one), Find speakers' mapping and relabelling (names
+kept, the person's lines kept, `rerun::tests`), the flags and their
+answers (`flags::tests`), the clip choice, the fbank (`voiceprint::fbank`)
+and staged prints; with the files on disk and an `engines` build,
+`voiceprint::tests::matches_sherpa` and `voices::real::real_meetings`
+(below). The e2e `speaker-voices.spec.js` (Find speakers from the
+notepad's ⋯ — progress, Cancel, nothing changed — and the Meetings view's
+menu, names kept and a line the person assigned kept; "may be one voice"
+after a recording, ▶ on the card, Merge; a resumed meeting's voice matched
+live) and `speaker-audio.spec.js` (on a recording with audio: Find
+speakers by itself after Transcribe again; a voice's clip and "Play their
+voice"); `diarization.spec.js` installs voice matching with the model and
+alone for a model from before it.
 
 ## Names for the voices: evaluations
 
@@ -411,3 +559,101 @@ own meeting with the call app's names as the truth once `call_ui.rs` is
 checked), and the similar-voices case improved or at least flagged in the
 notepad.
 
+(2026-10-25: flagged — a voice that may be two people is offered a
+Split, below; still not fixed by itself.)
+
+## Voices after the fact, measured (2026-10-25)
+
+`cargo test --features engines --lib speakers::voices::real -- --ignored
+--nocapture` (`YAP_DIARIZATION_MODELS` with the voice-matching model too,
+`YAP_DIARIZE_EXE` a `yap.exe` to be the child, `YAP_DIARIZATION_AUDIO` the
+spike's `audio/conv-kokoro;audio/conv`): the real child and ERes2Net over
+16 of the spike's 6-minute meetings, frame error with a 0.25 s collar as
+above. Per meeting, three runs of the engine: **one stream** (what Find
+speakers does; a meeting with no pause), and each **half** alone — a
+meeting paused in the middle and resumed, a new engine for the second
+half — its voices left apart (before) and matched by voiceprint
+(`match_voices` on ≤ 45 s / ≤ 30 s of each voice, after). The flags are
+looked for on the one stream's voices (each engine turn ≥ 1.5 s as a
+line).
+
+| Meeting | People / found | One stream | Pause: apart → matched | A Split taken |
+|---|---|---|---|---|
+| Kokoro 2 / 3 / 4 voices, clean | all | 0.4% / 3.0% / 1.6% | 49.0 → 0.4% / 52.5 → 7.2% / 47.3 → 1.6% | — |
+| Kokoro 5 / 6 voices, clean | all | 7.7% / 10.0% | 32.4 → 8.7% / 39.5 → 10.3% | — |
+| Kokoro 4 / 6 noisy, overlaps | all | 0.3% / 5.5% | 37.4 → 0.3% / 46.8 → 21.5% | — |
+| Kokoro crosstalk 3 / 4 | all | 0.6% / 0.8% | 47.3 → 0.5% / 45.9 → 0.9% | — |
+| Kokoro + Windows mixed, 5 | all | 1.6% | 45.3 → 3.0% | — |
+| **Three similar voices** | 3 / **2** | **32.9%** | 47.9 → 33.0% | **→ 19.6%** |
+| Spike 3 clean / 4 hard / 4 dial-in | all | 1.5% / 2.3% / 8.0% | 49.2 → 12.2% / 43.1 → 7.7% / 38.6 → 21.6% | — |
+| Spike 5 / 6 made from three (pitch-shifted) | 5 / 5, 6 / 5 | 21.0% / 14.8% | 48.5 → 26.0% / 49.1 → 19.6% | → 16.4% / **→ 6.9%** |
+
+- **Across a pause**: 55 voice pairs matched right, **none wrong**, 5 left
+  apart that were one voice (a runner-up too close: a Windows voice and its
+  pitch-shifted copy, a noisy six-voice meeting), 201 different pairs left
+  apart. Where the halves' errors stay above the one stream's, it's each
+  half's own engine (a shorter run hears a voice less), not the matching.
+  One voice heard again scores 0.72–0.99 (Kokoro 0.82–0.99); two different
+  voices ≤ 0.52 (Kokoro), ≤ 0.62 (a Windows voice and its pitch-shifted
+  copy). Find speakers needs none of it: one stream keeps each voice's
+  number across the pause.
+- **Built to merge** (the halves' voices as one meeting's: an engine
+  restarted, or a resume nothing matched): "may be one voice" offered for
+  50 of the 60 pairs that were one voice, for no two clear people, and once
+  pairing a voice with one the engine had made of two people (45% / 55%;
+  its Split too small to offer) — an offer the person checks with ▶. (A
+  voice offered a Split isn't offered a merge until that's answered.)
+- **Split**: offered on 3 voices, all three holding two people (three
+  similar women 32.9% → 19.6%; the pitch-shifted copies 21.0% → 16.4% and
+  14.8% → 6.9%), on none of the ~60 one-person voices. The rule that the
+  smaller group be a fifth of the voice took away the one false offer (3
+  crosstalk lines of 33 in a 3-voice meeting, which would have made it
+  0.6% → 3.6%).
+- **In the app** (`diarization-real.spec.js`, an `engines` debug build with
+  Parakeet V3, the spike's 3-voice s3_clean at 20×): a resumed meeting's
+  three voices took the first recording's ids live; Find speakers over the
+  saved 6-minute meeting found its 3 voices in 27 s (the flags included)
+  and kept the person's name on all 25 lines it was on; the live labels
+  still put 99.0% of the words on the right person.
+- **Time**: the engine over a 6-minute meeting in one stream 9–15 s on 4
+  threads (2.5–4% of real time; the PC shared with other builds), so Find
+  speakers on an hour's meeting is a couple of minutes; the prints ~4–9 s
+  for a 6-minute meeting's ~120 stretches in the unoptimised test build
+  (ERes2Net 25–60 ms per 2–5 s clip there; the fbank is Rust, so a
+  release build is faster).
+
+## The label lag on a graphics card, measured (2026-10-25)
+
+Labels trail the talk ~15 s in the notepad. `cargo test --test
+diarize_child -- --ignored --nocapture` with the measuring arguments
+(`YAP_DIARIZATION_RUNTIME` = NeMo-Speech.cpp 0.2.0's Vulkan build from the
+spike, `YAP_DIARIZATION_GPU=0`, `YAP_DIARIZATION_PRESET`,
+`YAP_DIARIZATION_CHUNK_FRAMES`), the spike's s4_hard / s3_noisy (6 min)
+and long30_opus (30 min), pushed a second at a time as fast as the engine
+takes them; the lag is how far its labels trail the audio pushed (median /
+most). RTX 5070 Ti; the processor on 4 threads with the PC shared with
+other builds (cost alternated twice, the ranges below).
+
+| Engine | Lag, median / most | Cost (share of real time) | Error s4_hard / s3_noisy / long30 |
+|---|---|---|---|
+| Processor, 30 s preset (**what Yap runs**) | 10.7 / 21.2 s | 3.8–4.8% (4 threads) | 2.3 / 0.7 / 0.3% |
+| Processor, 10 s chunk | 6.0 / 10.0 s | 5.1–7.1% | 2.3 / 0.6% |
+| Processor, 5 s chunk | 2.6 / 5.1 s | 8.5–9.6% | 2.4 / 0.5% |
+| Processor, streaming preset (1.04 s) | 0.6 / 1.1 s | 79% (a busy PC; the spike's 26%: a core) | 2.6% |
+| Graphics card, 30 s preset | **10.7 / 21.2 s** | 0.3–3.1% | 2.3 / 0.7 / 0.3% |
+| Graphics card, 5 s chunk | 2.6 / 5.1 s | 0.5–0.6% | 2.4 / 0.5 / 0.4% |
+| **Graphics card, streaming preset (1.04 s)** | **0.6 / 1.1 s** | 1.2–1.5% | 2.7 / 0.7 / 0.5% |
+
+**What it says**: the lag is real, and it's the preset's 30-second
+chunks, not the processor — a graphics card on the same preset lags just
+as much. On a graphics card the streaming preset labels within about a
+second at ~1.3% of real time with the same error (±0.4 points). Getting
+it to people: the Vulkan runtime (a second 19.3 MB package, pinned in the
+spike), a check for a graphics card that runs it (`gpu.rs`), the child's
+`--gpu`/preset per PC with the processor as the fallback when Vulkan
+fails, and Yap's own updates every 5 s of audio (`EVERY_MS`) made shorter
+to match — a small-to-medium job, not done here (measure only). On a
+processor alone, a 5 s chunk halves the wait to ~3–5 s for about twice the
+CPU (still under a tenth of 4 threads), the error unchanged: the cheaper
+step, no download; it wants a longer meeting measured (memory, an hour)
+before it's the default.

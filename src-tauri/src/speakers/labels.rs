@@ -22,8 +22,10 @@
 //! **Voice ids.** The engine's voices (`(stream, speaker)`; an engine started
 //! again after a crash counts from 1 again) become "them-N", numbered on
 //! from the note's highest in the order they first get a line, so a resumed
-//! meeting (a new recording, new engine numbers) carries on at "Speaker 4"
-//! and is never merged with the earlier voices by itself. The engine only
+//! meeting (a new recording, new engine numbers) carries on at "Speaker 4" —
+//! unless its voiceprint says it's surely an earlier voice heard again
+//! ([`Matching`], `voices::verdict`): then its lines take that voice's id
+//! (unsure: a new number, never a guess). The engine only
 //! says which lines are one voice: names stay the speaker map's
 //! (user > call app > voice > calendar / AI guess), and "Them"'s name is
 //! handed on by [`settle_them`].
@@ -37,7 +39,7 @@ use std::sync::{Mutex, MutexGuard};
 use serde_json::json;
 use tauri::{AppHandle, Emitter};
 
-use super::{resolve, split_line, suggest, Speaker, Turn, NEAR_MS, SEPARATED_PREFIX, THEM, YOU};
+use super::{resolve, split_line, suggest, voices, Speaker, Turn, NEAR_MS, SEPARATED_PREFIX, THEM, YOU};
 use crate::speakers::diarize::Timeline;
 use crate::notes::{Note, TranscriptSegment};
 
@@ -83,9 +85,15 @@ impl VoiceIds {
         if let Some((_, id)) = self.ids.iter().find(|(k, _)| *k == v) {
             return id.clone();
         }
+        let id = self.next_id();
+        self.ids.push((v, id.clone()));
+        id
+    }
+
+    /// The next new number ("them-7"), used up.
+    pub fn next_id(&mut self) -> String {
         let id = format!("{SEPARATED_PREFIX}{}", self.next);
         self.next += 1;
-        self.ids.push((v, id.clone()));
         id
     }
 
@@ -97,6 +105,45 @@ impl VoiceIds {
     pub fn get(&self, v: (u32, u8)) -> Option<&str> {
         self.ids.iter().find(|(k, _)| *k == v).map(|(_, id)| id.as_str())
     }
+
+    /// Engine voice `v` is earlier voice `id` heard again (a pause, a
+    /// restarted engine): its lines from now on get that id. Returns the
+    /// id it had (its lines so far, to move over).
+    fn alias(&mut self, v: (u32, u8), id: &str) -> Option<String> {
+        match self.ids.iter_mut().find(|(k, _)| *k == v) {
+            Some((_, was)) => Some(std::mem::replace(was, id.to_string())),
+            None => {
+                self.ids.push((v, id.to_string()));
+                None
+            }
+        }
+    }
+
+    /// The ids this recording's engine stream `stream` gave its voices
+    /// (they're different people, by the engine).
+    fn of_stream(&self, stream: u32) -> Vec<&str> {
+        self.ids.iter().filter(|((s, _), _)| *s == stream).map(|(_, id)| id.as_str()).collect()
+    }
+}
+
+/// Voice `from`'s lines are voice `to`'s (a voice heard again after a
+/// pause, matched): every line of `from` the person didn't assign, and
+/// `from`'s map entry when it's nothing but a number (or a suggestion).
+/// Returns whether anything changed.
+pub fn retarget(note: &mut Note, from: &str, to: &str) -> bool {
+    if from == to {
+        return false;
+    }
+    let mut changed = false;
+    for seg in note.transcript.iter_mut().filter(|s| s.speaker == from && !s.speaker_locked) {
+        seg.speaker = to.to_string();
+        changed = true;
+    }
+    let keep = note.speakers.get(from).is_some_and(|s| s.named() || !s.not.is_empty() || !s.merged_into.is_empty());
+    if !keep && note.speakers.remove(from).is_some() {
+        changed = true;
+    }
+    changed
 }
 
 /// A turn's stand-in for engine voice `(stream, speaker)` until a line of it
@@ -338,6 +385,34 @@ struct Recording {
     /// Its first line: the transcript's length when it started.
     base: usize,
     voices: VoiceIds,
+    /// Its voices matched with earlier ones (voiceprints).
+    matching: Matching,
+}
+
+/// **Voices heard again** (a resumed meeting, a restarted engine): the
+/// engine numbers a new stream's voices from 1 again, so each new voice
+/// is compared, by voiceprint (`voiceprint.rs`), with the voices on the
+/// note's lines it could be — every told-apart voice but its own stream's
+/// (the engine says those are other people) — and takes the earlier id
+/// when [`voices::verdict`] says it's surely that voice (else it stays
+/// a new "Speaker N"; unsure at the recording's end: new). Tried as its
+/// speech grows (from [`voices::MATCH_MIN_MS`], again at half as much
+/// more), once more at the end before the summary; a voice the person
+/// named meanwhile is left as it is.
+#[derive(Default)]
+struct Matching {
+    /// The recording on disk: its place among the note's and its id.
+    rec: Option<(usize, u64)>,
+    /// Engine voices settled: matched, or new for good.
+    decided: Vec<(u32, u8)>,
+    /// Speech each undecided voice had when last tried.
+    tried: Vec<((u32, u8), u64)>,
+    /// Earlier voices' prints so far: (id, print, the speech it's from).
+    earlier: Vec<voices::Voice<String>>,
+    /// A pass is making prints now (another skips).
+    busy: bool,
+    /// Matches to put on the lines at the next pass: (old id, matched id).
+    moves: Vec<(String, String)>,
 }
 
 static RECORDINGS: Mutex<Vec<Recording>> = Mutex::new(Vec::new());
@@ -365,7 +440,10 @@ fn scripted(_: &Timeline) -> bool {
 /// Follow the speaker engine (app setup).
 pub fn init(app: &AppHandle) {
     let app = app.clone();
-    crate::speakers::diarize::on_segments(move |tl| apply(&app, tl, tl.done));
+    crate::speakers::diarize::on_segments(move |tl| {
+        heard_again(tl);
+        apply(&app, tl, tl.done)
+    });
 }
 
 /// A recording into `note_id` started (`meeting::start`, before its first
@@ -375,11 +453,18 @@ pub fn begin(note_id: u64, session: Option<u64>) {
     let Some(note) = crate::notes::get(note_id) else {
         return;
     };
+    // Its audio on disk (`meeting_audio::Recorder` started first): the
+    // newest of the note's recordings.
+    let on_disk = crate::meetings::meeting_audio::recordings(note_id);
     let rec = Recording {
         note_id,
         session,
         base: note.transcript.len(),
         voices: VoiceIds::for_note(&note),
+        matching: Matching {
+            rec: on_disk.last().map(|m| (on_disk.len() - 1, m.recording)),
+            ..Default::default()
+        },
     };
     let base = rec.base;
     let mut all = recordings();
@@ -443,6 +528,7 @@ pub fn end(app: &AppHandle, note_id: u64) {
         Some(mut tl) => {
             tl.done = true;
             tl.error.get_or_insert_with(|| "the speaker engine didn't finish".to_string());
+            heard_again(&tl);
             apply(app, &tl, true);
         }
         None => {
@@ -467,6 +553,7 @@ fn apply(app: &AppHandle, tl: &Timeline, last: bool) {
     };
     let rec = &mut all[pos];
     let base = rec.base;
+    let moves = std::mem::take(&mut rec.matching.moves);
     let voices = &mut rec.voices;
     // Who each voice is (`naming.rs`): the settings read before the notes'
     // lock; the call app's readings once this pass gave its voices their
@@ -476,7 +563,17 @@ fn apply(app: &AppHandle, tl: &Timeline, last: bool) {
     let words = crate::memory::Words::new();
     let ordinary = |w: &str| words.is(w);
     let result = crate::notes::modify(tl.note_id, |note| {
+        // Voices heard again: their lines so far onto the earlier voice.
+        let mut moved = false;
+        for (from, to) in &moves {
+            moved |= retarget(note, from, to);
+        }
         let mut out = label(note, base, tl, voices);
+        if moved {
+            // Lines outside the stretch changed: the windows take every line's voice.
+            out.span = None;
+            out.map = true;
+        }
         if sources.enabled && (out.changed() || last || super::call_ui::watching(tl.note_id)) {
             let platform = super::call_ui::votes_for(tl, voices);
             out.map |= super::naming::refresh(note, &sources.context(&ordinary, platform));
@@ -510,7 +607,182 @@ fn apply(app: &AppHandle, tl: &Timeline, last: bool) {
     if last {
         finished(app, tl, out.voices);
         super::call_ui::finish(tl.note_id);
+        if out.voices > 0 {
+            // Two voices that may be one, one that may be two (`flags.rs`):
+            // in the background, once the recording's audio is closed.
+            let (app, note_id) = (app.clone(), tl.note_id);
+            let _ = std::thread::Builder::new().name("speaker-flags".into()).spawn(move || {
+                std::thread::sleep(std::time::Duration::from_secs(3));
+                super::flags::refresh(&app, note_id);
+            });
+        }
     }
+}
+
+// ---- Voices heard again ----
+
+/// What a matching pass found.
+#[derive(Default)]
+struct Found {
+    earlier: Vec<voices::Voice<String>>,
+    decided: Vec<(u32, u8)>,
+    tried: Vec<((u32, u8), u64)>,
+    matched: Vec<((u32, u8), String)>,
+}
+
+/// A matching pass for the recording `tl` belongs to ([`Matching`]): the
+/// prints made with no lock held, the matches kept for the labelling pass
+/// that follows.
+fn heard_again(tl: &Timeline) {
+    let taken = {
+        let mut all = recordings();
+        let Some(r) = all.iter_mut().find(|r| accepts(r, tl)) else { return };
+        let Some(rec) = r.matching.rec.filter(|_| !r.matching.busy) else { return };
+        r.matching.busy = true;
+        (
+            r.note_id,
+            rec,
+            r.voices.clone(),
+            r.matching.decided.clone(),
+            r.matching.tried.clone(),
+            std::mem::take(&mut r.matching.earlier),
+        )
+    };
+    let (note_id, rec, ids, decided, tried, earlier) = taken;
+    let found = try_matching(note_id, rec, tl, &ids, &decided, tried, earlier);
+    let mut all = recordings();
+    if let Some(r) = all.iter_mut().find(|r| accepts(r, tl)) {
+        r.matching.busy = false;
+        r.matching.earlier = found.earlier;
+        r.matching.decided.extend(found.decided);
+        r.matching.tried = found.tried;
+        for (v, id) in found.matched {
+            tracing::info!(note_id, stream = v.0, "Speakers: a voice heard again (a pause, a restart), matched");
+            if let Some(was) = r.voices.alias(v, &id) {
+                r.matching.moves.push((was, id));
+            }
+        }
+    }
+}
+
+/// The voices of `tl` not settled yet, each tried against the note's
+/// voices it could be (see [`Matching`]).
+fn try_matching(
+    note_id: u64,
+    (index, recording): (usize, u64),
+    tl: &Timeline,
+    ids: &VoiceIds,
+    decided: &[(u32, u8)],
+    mut tried: Vec<((u32, u8), u64)>,
+    mut earlier: Vec<voices::Voice<String>>,
+) -> Found {
+    use super::voiceprint::{Printer, Span};
+    let last = tl.done;
+    let mut found = Found::default();
+    let Some(note) = crate::notes::get(note_id) else {
+        return Found { earlier, tried, ..Default::default() };
+    };
+    let settled_ms = settled(tl);
+    // Every told-apart voice on the note's lines (after merges).
+    let mut on_lines: Vec<String> = Vec::new();
+    for seg in note.transcript.iter().filter(|s| s.source == THEM && s.is_talk()) {
+        let id = resolve(&note.speakers, seg.speaker_id());
+        if id.starts_with(SEPARATED_PREFIX) && !on_lines.iter().any(|o| o == id) {
+            on_lines.push(id.to_string());
+        }
+    }
+    // This recording's voices to try: its stretches, its speech, what it could be.
+    struct Todo {
+        v: (u32, u8),
+        spans: Vec<Span>,
+        ms: u64,
+        could_be: Vec<String>,
+    }
+    let mut todo: Vec<Todo> = Vec::new();
+    for v in tl.voices() {
+        if decided.contains(&v) {
+            continue;
+        }
+        // Named by the person meanwhile: theirs, as it is.
+        if ids.get(v).is_some_and(|id| note.speakers.get(id).is_some_and(|s| s.locked)) {
+            found.decided.push(v);
+            continue;
+        }
+        let own = ids.of_stream(v.0);
+        let could_be: Vec<String> = on_lines.iter().filter(|id| !own.contains(&id.as_str())).cloned().collect();
+        if could_be.is_empty() {
+            // Nobody it could be (the meeting's first recording and engine).
+            found.decided.push(v);
+            continue;
+        }
+        let spans: Vec<Span> = tl
+            .segments
+            .iter()
+            .filter(|s| (s.stream, s.speaker) == v && s.start_ms < settled_ms)
+            .map(|s| Span { recording, index, side: THEM.to_string(), start_ms: s.start_ms, end_ms: s.end_ms.min(settled_ms) })
+            .collect();
+        let ms: u64 = spans.iter().map(Span::ms).sum();
+        let before = tried.iter().find(|(k, _)| *k == v).map_or(0, |(_, m)| *m);
+        if !last && (ms < voices::MATCH_MIN_MS || (before > 0 && ms * 2 < before * 3)) {
+            continue;
+        }
+        todo.push(Todo { v, spans, ms, could_be });
+    }
+    if todo.is_empty() {
+        found.earlier = earlier;
+        found.tried = tried;
+        return found;
+    }
+    let Some(printer) = Printer::for_note(note_id) else {
+        // No voice matching here: the new voices stay new.
+        found.decided.extend(todo.iter().map(|t| t.v));
+        found.tried = tried;
+        return found;
+    };
+    let metas = crate::meetings::meeting_audio::recordings(note_id);
+    let mut taken: Vec<(u32, String)> = Vec::new();
+    for Todo { v, spans, ms, could_be } in todo {
+        let mut cands: Vec<voices::Voice<String>> = Vec::new();
+        for id in could_be.iter().filter(|id| !taken.iter().any(|(s, t)| *s == v.0 && t == *id)) {
+            let lines = super::rerun::line_spans(&note, &metas, |seg| resolve(&note.speakers, seg.speaker_id()) == id);
+            let have: u64 = lines.iter().map(Span::ms).sum();
+            match earlier.iter().find(|e| &e.key == id) {
+                Some(e) if e.ms * 3 >= have * 2 => cands.push(e.clone()),
+                _ => {
+                    if let Some(print) = printer.voice(&lines, 45_000) {
+                        let e = voices::Voice { key: id.clone(), print, ms: have };
+                        earlier.retain(|o| o.key != e.key);
+                        earlier.push(e.clone());
+                        cands.push(e);
+                    }
+                }
+            }
+        }
+        let Some(print) = printer.voice(&spans, 30_000) else {
+            tried.retain(|(k, _)| *k != v);
+            tried.push((v, ms));
+            if last {
+                found.decided.push(v);
+            }
+            continue;
+        };
+        match voices::verdict(&cands, &voices::Voice { key: (), print, ms }) {
+            Some(Some((id, _))) => {
+                taken.push((v.0, id.clone()));
+                found.matched.push((v, id));
+                found.decided.push(v);
+            }
+            Some(None) => found.decided.push(v),
+            None if last => found.decided.push(v),
+            None => {
+                tried.retain(|(k, _)| *k != v);
+                tried.push((v, ms));
+            }
+        }
+    }
+    found.earlier = earlier;
+    found.tried = tried;
+    found
 }
 
 /// Every window: the map, each line's voice, and the stretch that changed

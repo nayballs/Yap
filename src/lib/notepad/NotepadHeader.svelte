@@ -1,7 +1,8 @@
 <script>
   // The notepad's header, Wispr's buttons and spacing (52 px): back (this note
   // in Yap's Notes), ⋯ (copy as Markdown or text, copy the consent message,
-  // audio settings while recording, save as .md, transcribe again, delete),
+  // audio settings while recording, save as .md, transcribe again, find
+  // speakers, delete),
   // split the screen with the call (a glass preview on hover, meetings/notepad.rs),
   // Share (a local popover: copy, save, email) with a one-click copy, and the
   // window buttons. The window is undecorated: the header is its drag region.
@@ -11,7 +12,7 @@
   import { toast } from '../ui/toast.svelte.js';
   import { openExternalLink } from '../core/externalLinks.js';
   import { noteMarkdown, noteText, mailtoUrl } from '../core/notepadText.js';
-  import { refreshAudio, cantTranscribeAgain, askTranscribeAgain } from '../stores/meetingAudio.svelte.js';
+  import { refreshAudio, cantTranscribeAgain, askTranscribeAgain, cantFindSpeakers, findSpeakers } from '../stores/meetingAudio.svelte.js';
   import { copyToClipboard, openSettings, openNoteInYap } from './actions.js';
   import Icon from './NotepadIcon.svelte';
 
@@ -90,6 +91,14 @@
     onflushsave();
     await refreshAudio(note.id);
     askTranscribeAgain(note, { title: note.title?.trim() || '' });
+  }
+  // ⋯ → Find speakers (speakers/rerun.rs): progress and Cancel on the
+  // transcript's job line.
+  async function findThem() {
+    menu = null;
+    if (!note) return;
+    onflushsave();
+    await findSpeakers(note.id);
   }
   /** Back: the note in the main window's Notes view. */
   function openInYap() {
@@ -183,6 +192,15 @@
                 title={cantTranscribeAgain(note, recordingThis) || 'With the speech model you use now'}
               >
                 <Icon name="redo" /><span>Transcribe again</span>
+              </button>
+              <button
+                role="menuitem"
+                class="item"
+                onclick={findThem}
+                disabled={!!cantFindSpeakers(note, recordingThis)}
+                title={cantFindSpeakers(note, recordingThis) || 'Tell the call’s voices apart again, from the meeting’s audio'}
+              >
+                <Icon name="person" /><span>Find speakers</span>
               </button>
             {/if}
             <button role="menuitem" class="item danger" onclick={askDelete}>

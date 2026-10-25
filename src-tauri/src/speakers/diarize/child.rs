@@ -35,6 +35,13 @@ pub struct Args {
     pub every_ms: u64,
     pub dither: bool,
     pub seed: u64,
+    /// The graphics card to run on (Vulkan runtime builds; -1: the
+    /// processor, what Yap uses). Measuring only (speakers.md, label lag).
+    pub gpu: i32,
+    /// The preset's chunk / right context overridden (80 ms frames; 0:
+    /// the preset's). Measuring only.
+    pub chunk_frames: i32,
+    pub right_context_frames: i32,
 }
 
 pub fn parse_args(args: impl IntoIterator<Item = OsString>) -> Result<Args, String> {
@@ -44,6 +51,7 @@ pub fn parse_args(args: impl IntoIterator<Item = OsString>) -> Result<Args, Stri
     let mut every_ms = 5_000;
     let mut dither = true;
     let mut seed = 0x5eed_d17e_u64;
+    let (mut gpu, mut chunk_frames, mut right_context_frames) = (-1i32, 0i32, 0i32);
     let mut it = args.into_iter();
     while let Some(arg) = it.next() {
         let name = arg.to_string_lossy().into_owned();
@@ -57,6 +65,14 @@ pub fn parse_args(args: impl IntoIterator<Item = OsString>) -> Result<Args, Stri
             }
             "--seed" => seed = value()?.to_string_lossy().parse().map_err(|_| "--seed takes a number".to_string())?,
             "--no-dither" => dither = false,
+            "--gpu" => gpu = value()?.to_string_lossy().parse().map_err(|_| "--gpu takes a number".to_string())?,
+            "--chunk-frames" => {
+                chunk_frames = value()?.to_string_lossy().parse().map_err(|_| "--chunk-frames takes a number".to_string())?
+            }
+            "--right-context-frames" => {
+                right_context_frames =
+                    value()?.to_string_lossy().parse().map_err(|_| "--right-context-frames takes a number".to_string())?
+            }
             other => return Err(format!("unknown argument {other}")),
         }
     }
@@ -67,6 +83,9 @@ pub fn parse_args(args: impl IntoIterator<Item = OsString>) -> Result<Args, Stri
         every_ms,
         dither,
         seed,
+        gpu,
+        chunk_frames,
+        right_context_frames,
     })
 }
 
@@ -451,10 +470,10 @@ mod nemo {
         let cfg = ModelConfig {
             size: std::mem::size_of::<ModelConfig>(),
             model_path: file.as_ptr(),
-            gpu: -1,
+            gpu: args.gpu,
             preset: preset.as_ptr(),
-            chunk_frames: 0,
-            right_context_frames: 0,
+            chunk_frames: args.chunk_frames,
+            right_context_frames: args.right_context_frames,
             left_context_frames: -1,
             fifo_frames: 0,
             spkcache_frames: 0,
@@ -599,12 +618,15 @@ mod tests {
         assert_eq!(a.preset, "v3-offline");
         assert_eq!(a.every_ms, 5_000);
         assert!(a.dither);
+        assert_eq!((a.gpu, a.chunk_frames, a.right_context_frames), (-1, 0, 0), "the processor, the preset as it is");
         let b = parse_args(os(&["--model", "m", "--runtime", "r", "--every-ms", "0", "--no-dither", "--preset", "v3-streaming", "--seed", "7"])).unwrap();
         assert_eq!((b.every_ms, b.dither, b.preset.as_str(), b.seed), (0, false, "v3-streaming", 7));
         assert!(parse_args(os(&["--model", "m"])).is_err(), "runtime required");
         assert!(parse_args(os(&["--runtime", "r", "--model"])).is_err(), "value missing");
         assert!(parse_args(os(&["--runtime", "r", "--model", "m", "--loud"])).is_err());
         assert!(parse_args(os(&["--runtime", "r", "--model", "m", "--every-ms", "soon"])).is_err());
+        let c = parse_args(os(&["--runtime", "r", "--model", "m", "--gpu", "0", "--chunk-frames", "125", "--right-context-frames", "7"])).unwrap();
+        assert_eq!((c.gpu, c.chunk_frames, c.right_context_frames), (0, 125, 7));
     }
 
     #[test]

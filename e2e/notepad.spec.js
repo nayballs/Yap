@@ -783,6 +783,7 @@ test('the header: back to Notes, the ⋯ menu, Share, split screen, delete', asy
     'Copy consent message',
     'Save as .md',
     'Transcribe again',
+    'Find speakers',
     'Delete',
   ]);
   await shot(pad, '17-more-menu-stopped');

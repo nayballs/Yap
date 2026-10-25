@@ -153,6 +153,7 @@ export function frameError(ref, hyp, collar = 0.25) {
 /** The DLLs Yap needs from the runtime (registry.rs `required`). */
 export const RUNTIME_DLLS = ['nemo_speech_asr_c.dll', 'nemo_speech_asr.dll', 'ggml.dll', 'ggml-base.dll', 'ggml-cpu.dll'];
 export const MODEL_FILE = 'Nemotron-3-Diarization.q8_0.gguf';
+export const VOICES_FILE = '3dspeaker_speech_eres2net_sv_en_voxceleb_16k.onnx';
 
 /**
  * Serve a fake model and runtime from 127.0.0.1, and write the sources file
@@ -170,7 +171,9 @@ export async function startFakeSpeakerModels(dir) {
   zipFiles[`${top}/include/nemo_speech/diar.h`] = '// headers stay out';
   const runtime = makeZip(zipFiles);
   const model = crypto.randomBytes(320 * 1024);
-  const bodies = { '/runtime.zip': runtime, '/model.gguf': model };
+  // The voice-matching model (registry.rs VOICE_MATCHING), a stand-in too.
+  const voices = crypto.randomBytes(96 * 1024);
+  const bodies = { '/runtime.zip': runtime, '/model.gguf': model, '/voices.onnx': voices };
   const requests = [];
 
   const server = http.createServer(async (req, res) => {
@@ -196,6 +199,7 @@ export async function startFakeSpeakerModels(dir) {
   const local = {
     'nemotron-3-diarization': [{ url: `${base}/model.gguf`, sha256: sha256(model), size: model.length }],
     'nemo-speech-0.2.0-cpu': [{ url: `${base}/runtime.zip`, sha256: sha256(runtime), size: runtime.length }],
+    'eres2net-voxceleb-en': [{ url: `${base}/voices.onnx`, sha256: sha256(voices), size: voices.length }],
   };
   const write = (sources) => fs.writeFileSync(sourcesFile, JSON.stringify(sources, null, 2));
   write(local);
@@ -203,6 +207,7 @@ export async function startFakeSpeakerModels(dir) {
     env: { YAP_DIARIZATION_SOURCES: sourcesFile },
     requests,
     modelBytes: model.length,
+    voicesBytes: voices.length,
     /** Point the model at another URL (the internet, say), or back. */
     setModelUrl(url) {
       write({ ...local, 'nemotron-3-diarization': [{ ...local['nemotron-3-diarization'][0], url: url ?? `${base}/model.gguf` }] });

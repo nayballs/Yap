@@ -3,7 +3,9 @@
 // scored against its reference turns, and a meeting recording whose "Them"
 // side is that meeting, labelled while it records and finished when it
 // stops (speakers/diarize.rs, meetings/meeting.rs's tee) — its "Them" lines ending up with
-// one voice per person (speakers/labels.rs).
+// one voice per person (speakers/labels.rs) — and Find speakers over a saved
+// meeting (speakers/rerun.rs: the engine again, a name the person gave
+// kept on its voice).
 //
 // Skipped unless the model and runtime are on disk (it never downloads them):
 //   YAP_E2E_DIARIZATION_MODELS  a folder laid out like <data>/models/diarization
@@ -256,7 +258,7 @@ test('a meeting recording labels "Them" as it goes and finishes when it stops', 
   await shot(yap.notepad, '02-notepad-voices-from-the-engine');
 });
 
-test('a resumed meeting starts the engine again, and its voices carry on numbering', async ({ yap }) => {
+test('a resumed meeting starts the engine again: its voices matched by voiceprint, else numbered on', async ({ yap }) => {
   test.setTimeout(STT ? 1_200_000 : 240_000);
   fs.mkdirSync(meetingDir, { recursive: true });
   fs.copyFileSync(path.join(AUDIO, `${FILE}.wav`), path.join(meetingDir, 'them.wav'));
@@ -284,11 +286,62 @@ test('a resumed meeting starts the engine again, and its voices carry on numberi
   const secondVoices = new Set(after.filter((s) => s.speaker?.startsWith('them-')).map((s) => s.speaker));
   const n = (id) => Number(id.slice('them-'.length));
   console.log(`resumed: first recording ${[...firstVoices].join(', ')}; second ${[...secondVoices].join(', ')}; ${both.breaks?.length ?? 0} stops`);
-  // A new recording is a new engine session: its voices are new numbers,
-  // after the first recording's (never merged by themselves).
   expect(firstVoices.size).toBe(people);
   expect(secondVoices.size).toBe(people);
-  expect(Math.min(...[...secondVoices].map(n))).toBeGreaterThan(Math.max(...[...firstVoices].map(n)));
+  const { voiceMatching } = await yap.invoke('diarization_status');
+  if (!voiceMatching) {
+    // Without voice matching (a stub build, or its model not in the
+    // folder), a new recording's voices are new numbers, after the first
+    // recording's (never merged by themselves).
+    expect(Math.min(...[...secondVoices].map(n))).toBeGreaterThan(Math.max(...[...firstVoices].map(n)));
+  }
+  // (With it — an `engines` build, its model in the folder — the second
+  // recording's voices take the first's ids when the voiceprints are sure:
+  // on 25 Oct all three did. Not asserted: at 20× the first recording's
+  // lines are dated past the resume, which a real meeting's never are, so
+  // which recording such a line is in can't be told here. Voices across a
+  // pause are measured in `speakers::voices::real`.)
   // The first recording's lines kept their voices.
   expect(both.transcript.slice(0, first.transcript.length).map((s) => s.speaker)).toEqual(first.transcript.map((s) => s.speaker));
+});
+
+test('Find speakers runs the real engine again over a saved meeting, and names stay', async ({ yap }) => {
+  test.setTimeout(STT ? 1_200_000 : 240_000);
+  fs.mkdirSync(meetingDir, { recursive: true });
+  fs.copyFileSync(path.join(AUDIO, `${FILE}.wav`), path.join(meetingDir, 'them.wav'));
+  writeWav(path.join(meetingDir, 'you.wav'), { seconds: 2, gaps: [[0, 2]] });
+  const people = new Set(readRttm(path.join(AUDIO, `${FILE}.rttm`)).map((s) => s.speaker)).size;
+  const note = await yap.invoke('note_create', { title: 'Saved meeting', folder: 'Meetings' });
+  const played = fs.readFileSync(yap.logPath, 'utf8').split('e2e: the test audio has played to the end').length - 1;
+  await yap.invoke('meeting_start', { noteId: note.id });
+  await expect.poll(() => yap.invoke('meeting_state').then((s) => s.recording)).toBe(true);
+  await expect
+    .poll(() => fs.readFileSync(yap.logPath, 'utf8').split('e2e: the test audio has played to the end').length - 1, {
+      timeout: STT ? 840_000 : 120_000,
+      intervals: [500],
+    })
+    .toBeGreaterThan(played);
+  await yap.invoke('meeting_pause');
+  await expect.poll(() => yap.invoke('meeting_state').then((s) => s.recording), { timeout: STT ? 300_000 : 30_000 }).toBe(false);
+  const live = await yap.invoke('note_get', { id: note.id });
+  const them = (n) => n.transcript.filter((s) => s.source === 'them' && s.text?.trim());
+  // The person names the voice of the first line.
+  const named = them(live)[0].speaker;
+  expect(named).toMatch(/^them-\d+$/);
+  await yap.invoke('speaker_rename', { noteId: note.id, speaker: named, name: 'Imogen Hart' });
+  const hers = them(live).filter((s) => s.speaker === named).map((s) => s.text);
+
+  const t0 = Date.now();
+  await yap.invoke('speaker_find', { noteId: note.id });
+  const job = () => yap.invoke('meeting_audio_note', { noteId: note.id }).then((a) => `${a.job?.kind}:${a.job?.state}`);
+  await expect.poll(job, { timeout: 180_000, intervals: [500] }).toMatch(/^speakers:(done|error)$/);
+  expect(await job()).toBe('speakers:done');
+  const found = await yap.invoke('note_get', { id: note.id });
+  const voices = new Set(them(found).filter((s) => s.speaker?.startsWith('them-')).map((s) => s.speaker));
+  const keptName = them(found).filter((s) => found.speakers?.[s.speaker]?.name === 'Imogen Hart').map((s) => s.text);
+  console.log(`find speakers: ${voices.size} voices (${people} people) in ${((Date.now() - t0) / 1000).toFixed(1)} s; her name on ${keptName.length} lines (${hers.length} before)`);
+  expect(voices.size).toBe(people);
+  // Her name is still on her voice: on (most of) the lines it was on.
+  const still = hers.filter((t) => keptName.some((k) => t.includes(k) || k.includes(t))).length;
+  expect(still).toBeGreaterThanOrEqual(Math.ceil(hers.length * 0.8));
 });

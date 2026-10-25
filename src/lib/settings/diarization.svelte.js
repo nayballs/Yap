@@ -9,6 +9,9 @@ export const diarization = $state({
   loaded: false,
   downloading: null, // { id, stage, percent, downloadedBytes, totalBytes }
   inUse: false, // a meeting recording is using a model
+  // Voice matching (speakers/voiceprint.rs): ready, and whether this build runs it.
+  voiceMatching: false,
+  voiceMatchingInBuild: false,
   error: '',
 });
 
@@ -20,17 +23,19 @@ export async function refreshDiarization() {
     diarization.models = s.models || [];
     diarization.downloading = s.downloading || null;
     diarization.inUse = !!s.inUse;
+    diarization.voiceMatching = !!s.voiceMatching;
+    diarization.voiceMatchingInBuild = !!s.voiceMatchingInBuild;
     diarization.loaded = true;
   } catch {
     /* an older backend: the section stays empty */
   }
 }
 
-/** Load once and follow downloads (Settings is always mounted). */
+/** Load, and follow downloads (once); every page showing it asks again (files can change under it). */
 export function startDiarization() {
+  refreshDiarization();
   if (started) return;
   started = true;
-  refreshDiarization();
   listen('diarization-download-progress', (e) => {
     if (e.payload) diarization.downloading = e.payload;
   });

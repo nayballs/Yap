@@ -10,10 +10,27 @@
   // voice again and opens the rename; "Not now" doesn't ask again in this
   // meeting. A voice repeating yours asks "Speaker 3 is you?" — "It was me"
   // makes its lines yours (Undo in the toast).
+  //
+  // Before the names, the voice flags (speakers/flags.rs; beta): "Speaker 2
+  // and Speaker 4 may be one voice" — ▶ each, Merge / They're different /
+  // Not now — and "Speaker 3 may be two people" — Split / It's one person /
+  // Not now. Yap never merges or splits by itself. Every card's voice has
+  // ▶ (a few seconds of its clearest speech, speakers/clip.rs) while the
+  // meeting's audio is kept.
   import { invoke } from '@tauri-apps/api/core';
   import SpeakerMenu from './SpeakerMenu.svelte';
   import { toast } from '../ui/toast.svelte.js';
-  import { pendingSuggestions, suggestionQuestion, suggestionWhy, speakerInfo } from '../core/notepadText.js';
+  import {
+    pendingSuggestions,
+    suggestionQuestion,
+    suggestionWhy,
+    speakerInfo,
+    defaultSpeakerName,
+    pendingFlags,
+    flagQuestion,
+    flagWhy,
+  } from '../core/notepadText.js';
+  import { meetingAudio, canPlayVoice, playVoice, voiceKey } from '../stores/meetingAudio.svelte.js';
 
   let {
     note,
@@ -26,10 +43,42 @@
   // After "Someone else": the rename for that voice.
   let renaming = $state(null);
 
-  const cards = $derived(pendingSuggestions(note));
+  const flags = $derived(pendingFlags(note));
+  const flag = $derived(flags[0] || null);
+  const cards = $derived(flag ? [] : pendingSuggestions(note));
   const card = $derived(cards[0] || null);
   const question = $derived(card ? suggestionQuestion(note, card) : '');
   const why = $derived(card ? suggestionWhy(note, card) : '');
+  // A card's ▶s: the voices it's about.
+  const listen = $derived(flag ? (flag.kind === 'alike' ? [flag.voice, flag.with] : [flag.voice]) : card && !card.me ? [card.voice] : []);
+  const playable = $derived(listen.filter((v) => canPlayVoice(note?.id, v)));
+  const shortName = (voice) => {
+    const info = speakerInfo(note?.speakers, voice);
+    return info.guess ? defaultSpeakerName(voice) : info.label;
+  };
+
+  async function answerFlag(reply) {
+    if (busy || !flag) return;
+    const { kind, voice } = flag;
+    const label = shortName(voice);
+    const other = flag.kind === 'alike' ? shortName(flag.with) : '';
+    busy = true;
+    try {
+      const updated = await invoke('speaker_flag', { noteId: note.id, speaker: voice, kind, answer: reply, origin });
+      onchanged(updated);
+      if (reply === 'yes') {
+        toast({
+          title: kind === 'alike' ? `${label} and ${other} are one speaker now` : `${label} is two speakers now`,
+          description: kind === 'alike' ? 'Their lines read as one voice.' : 'The lines that sounded like someone else are a new speaker.',
+          variant: 'success',
+        });
+      }
+    } catch (e) {
+      toast({ title: "Couldn't change the speakers", description: String(e), variant: 'destructive' });
+    } finally {
+      busy = false;
+    }
+  }
 
   async function answer(reply) {
     if (busy || !card) return;
@@ -66,7 +115,54 @@
   }
 </script>
 
-{#if card || renaming}
+{#snippet plays()}
+  {#if playable.length}
+    <div class="plays">
+      {#each playable as v (v)}
+        {@const on = meetingAudio.playing === voiceKey(note.id, v)}
+        <button
+          class="play"
+          class:on
+          aria-label={on ? `Stop playing ${shortName(v)}` : `Play ${shortName(v)}'s voice`}
+          title={on ? 'Stop' : 'A few seconds of their clearest speech'}
+          onclick={() => playVoice(note.id, v)}
+        >
+          {#if on}
+            <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="7" y="7" width="10" height="10" rx="1.5" /></svg>
+          {:else}
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5.5v13l10.5-6.5z" /></svg>
+          {/if}
+          <span>{shortName(v)}</span>
+        </button>
+      {/each}
+    </div>
+  {/if}
+{/snippet}
+
+{#if flag && !renaming}
+  <section class="namecard flag" aria-label="Speakers that may be wrong" aria-live="polite">
+    <span class="ico" aria-hidden="true">
+      {#if flag.kind === 'alike'}
+        <svg viewBox="0 0 24 24"><circle cx="8.5" cy="9" r="3" /><circle cx="15.5" cy="9" r="3" /><path d="M3 19a5.5 5.5 0 0 1 11 0M10 19a5.5 5.5 0 0 1 11 0" /></svg>
+      {:else}
+        <svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="3.5" /><path d="M5 19.5a7 7 0 0 1 14 0" /><path d="M12 3v18" stroke-dasharray="2 2.5" /></svg>
+      {/if}
+    </span>
+    <div class="body">
+      <p class="q">
+        {flagQuestion(note, flag)}
+        {#if flags.length > 1}<span class="count">1 of {flags.length}</span>{/if}
+      </p>
+      <p class="why">{flagWhy(flag)}</p>
+      {@render plays()}
+      <div class="actions">
+        <button class="yes" disabled={busy} onclick={() => answerFlag('yes')}>{flag.kind === 'alike' ? 'Merge' : 'Split'}</button>
+        <button class="ghost" disabled={busy} onclick={() => answerFlag('no')}>{flag.kind === 'alike' ? "They're different" : "It's one person"}</button>
+        <button class="later" disabled={busy} onclick={() => answerFlag('later')}>Not now</button>
+      </div>
+    </div>
+  </section>
+{:else if card || renaming}
   <section class="namecard" aria-label="Who's speaking" aria-live="polite">
     {#if renaming}
       <div class="body">
@@ -95,6 +191,7 @@
           {#if cards.length > 1}<span class="count">1 of {cards.length}</span>{/if}
         </p>
         {#if why}<p class="why">{why}</p>{/if}
+        {@render plays()}
         <div class="actions">
           <button class="yes" disabled={busy} onclick={() => answer('yes')}>{card.me ? 'It was me' : 'Yes'}</button>
           <button class="ghost" disabled={busy} onclick={() => answer('no')}>{card.me ? 'No' : 'Someone else'}</button>
@@ -187,6 +284,36 @@
     border: none;
     background: var(--yap-paper-ink, var(--yap-ink));
     color: var(--yap-paper, #fff);
+  }
+  .plays {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-top: 4px;
+  }
+  .play {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    height: 24px;
+    padding: 0 9px 0 7px;
+    border: 1px solid var(--yap-paper-s2, var(--yap-border));
+    border-radius: 999px;
+    background: var(--yap-paper, var(--yap-s1));
+    color: var(--yap-paper-ink, var(--yap-fg));
+    font: inherit;
+    font-size: 12.5px;
+    cursor: pointer;
+  }
+  .play svg {
+    width: 12px;
+    height: 12px;
+    fill: currentColor;
+  }
+  .play:hover,
+  .play.on {
+    border-color: var(--yap-paper-s2-strong, var(--yap-border));
+    background: var(--yap-paper-s2, var(--yap-s2));
   }
   .ghost {
     border: 1px solid var(--yap-paper-s2-strong, var(--yap-border));

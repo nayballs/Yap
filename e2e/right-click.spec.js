@@ -346,10 +346,11 @@ test('Meetings: a past meeting and one from the calendar; a calendar connection'
   const budget = past.getByRole('listitem').filter({ hasText: 'Budget review' });
   await expect(budget).toBeVisible();
 
-  // A past meeting: Open, Generate summary (it has none), Copy as Markdown, Delete….
+  // A past meeting: Open, Generate summary (it has none), Copy as Markdown,
+  // Find speakers (the engine again over its audio), Delete….
   await budget.click({ button: 'right' });
   await expect(menu(main)).toHaveAccessibleName('Meeting note Budget review');
-  await expect(allItems(main)).toHaveText(['Open', 'Generate summary', 'Copy as Markdown', 'Delete…']);
+  await expect(allItems(main)).toHaveText(['Open', 'Generate summary', 'Copy as Markdown', 'Find speakers', 'Delete…']);
   await shot(main, '08-past-meeting-menu');
   await menu(main).getByRole('menuitem', { name: 'Copy as Markdown' }).click();
   await expect.poll(copied).toContain('# Budget review');
