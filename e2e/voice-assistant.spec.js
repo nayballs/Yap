@@ -212,7 +212,8 @@ test('Commands and the Voice Assistant: two pages that say what they do, with li
 test('the assistant shortcut: set in Settings, never one that clashes, and Chat points to it', async ({ yap, main, shot }) => {
   // None set: an empty chat says how to ask out loud.
   await freshChat(main);
-  await expect(main.locator('.asknote')).toContainText('Set an assistant shortcut to ask out loud from any app');
+  // The shortcut's line, not Ask across meetings' (Chat shows both, 25 Oct 2026).
+  await expect(main.locator('.asknote', { hasText: 'assistant shortcut' })).toContainText('Set an assistant shortcut to ask out loud from any app');
   await shot(main, '13-chat-set-an-assistant-shortcut');
   await main.getByRole('button', { name: 'Set an assistant shortcut' }).click();
   const dialog = settingsDialog(main);
@@ -246,7 +247,7 @@ test('the assistant shortcut: set in Settings, never one that clashes, and Chat 
   expect(yap.readJson('config.json').editHotkey).toBe('');
   await closeSettings(main);
   // Chat names it.
-  await expect(main.locator('.asknote')).toContainText('Or press F23 in any app to ask out loud');
+  await expect(main.locator('.asknote', { hasText: 'to ask out loud' })).toContainText('Or press F23 in any app to ask out loud');
 
   // Cleared again.
   await openSettings(main, 'Voice Assistant');
