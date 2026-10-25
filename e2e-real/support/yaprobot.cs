@@ -21,6 +21,13 @@
 //   yaprobot keys <hwnd> <nonce> <key>   press a key (escape, enter, ctrl+s,
 //                                 ctrl+w, ctrl+end) — only when that window
 //                                 is in front and titled with the nonce
+//   yaprobot hookkeys <hwnd> <nonce> <seq>   keys for the robot's own Yap's
+//                                 input hook (robot mode acts only on keys
+//                                 marked as the robot's): "d:135,w:300,u:135"
+//                                 — d/u a key down/up, U a key-up marked for
+//                                 the hook to miss (a key-up the lock screen
+//                                 took), w a wait in ms — only while that
+//                                 window is in front and titled with the nonce
 //   yaprobot close <hwnd> <nonce> ask a window titled with the nonce to close
 //   yaprobot caret <hwnd> <nonce> what UI Automation reports around the caret
 //                                 in that window (in front, titled with the
@@ -173,6 +180,7 @@ static class Program {
                 case "find": Print(Find(args[1])); return 0;
                 case "text": Print(ReadText(new IntPtr(long.Parse(args[1])))); return 0;
                 case "keys": Print(PressKey(new IntPtr(long.Parse(args[1])), args[2], args[3])); return 0;
+                case "hookkeys": Print(HookKeys(new IntPtr(long.Parse(args[1])), args[2], args[3])); return 0;
                 case "close": Print(Close(new IntPtr(long.Parse(args[1])), args[2])); return 0;
                 case "caret": Print(Caret(new IntPtr(long.Parse(args[1])), args[2])); return 0;
                 case "yapwindow": Print(YapWindow(uint.Parse(args[1]))); return 0;
@@ -350,6 +358,29 @@ static class Program {
         uint sent = Native.SendInput((uint)inputs.Count, inputs.ToArray(), Marshal.SizeOf(typeof(Native.INPUT)));
         Thread.Sleep(50);
         return Obj("ok", sent == inputs.Count);
+    }
+
+    /// Keys for the robot's own Yap's input hook (input_hook.rs, robot
+    /// mode): each marked as the robot's own (ROBOT_MARK), or a key-up
+    /// marked for the hook to miss (UNHEARD_MARK). `seq`: "d:135,w:300,u:135"
+    /// (d/u down/up, U up unheard, w wait ms). Only while that window is in
+    /// front and titled with the nonce — checked before every key.
+    static Dictionary<string, object> HookKeys(IntPtr h, string nonce, string seq) {
+        const long MARK = 0x59415052, UNHEARD = 0x59415055;
+        if (!Ours(h, nonce)) return Obj("ok", false, "error", "not the test's window");
+        int sent = 0;
+        foreach (var step in seq.Split(',')) {
+            var parts = step.Split(':');
+            string op = parts[0];
+            int n = int.Parse(parts[1]);
+            if (op == "w") { Thread.Sleep(n); continue; }
+            if (op != "d" && op != "u" && op != "U") return Obj("ok", false, "error", "unknown step " + step, "sent", sent);
+            if (Native.Root(Native.GetForegroundWindow()) != h) return Obj("ok", false, "error", "the test's window isn't in front", "sent", sent);
+            var i = new Native.INPUT { type = 1 };
+            i.u.ki = new Native.KEYBDINPUT { wVk = (ushort)n, dwFlags = op == "d" ? 0u : 2u, dwExtraInfo = new IntPtr(op == "U" ? UNHEARD : MARK) };
+            sent += (int)Native.SendInput(1, new[] { i }, Marshal.SizeOf(typeof(Native.INPUT)));
+        }
+        return Obj("ok", true, "sent", sent);
     }
 
     // ---- right-clicking the robot's own Yap (shell/context_menu.rs) ----

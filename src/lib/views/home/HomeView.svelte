@@ -625,7 +625,6 @@
                     {#if e.status}
                       <p class="failline">
                         {#if e.status === 'notPasted'}<span class="flag">Didn't paste</span><span class="why">{e.error}</span>{/if}
-                        {#if e.status === 'cancelled'}<span class="flag">Cancelled</span>{/if}
                         {#if e.audio}
                           <button class="retry" disabled={!!running} onclick={() => rerun(e)}>
                             {running === rowKey(e) ? 'Running…' : e.status === 'cancelled' ? 'Transcribe' : 'Run again'}

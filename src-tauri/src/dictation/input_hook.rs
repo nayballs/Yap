@@ -123,6 +123,11 @@ impl KeyBinding {
     }
 
     fn configure(&self, key_type: u8, key_code: u32, mods: u8) {
+        // The same key again (every save applies them all): a press held
+        // through the save keeps its release.
+        if self.kind_code_mods() == (key_type, key_code, mods) {
+            return;
+        }
         self.active.store(false, Ordering::Relaxed);
         self.key_type.store(key_type, Ordering::Release);
         self.key_code.store(key_code, Ordering::Release);
@@ -1439,7 +1444,7 @@ fn hold_bindings() -> impl Iterator<Item = &'static KeyBinding> {
 /// A key went down that wasn't held (`vkey`, scan code `scan`, at `now`): a
 /// hold-to-talk press under a second it isn't part of grew into a chord —
 /// the person meant a shortcut sharing the key. Said once per press, with
-/// the press's time.
+/// the moment the other key went down.
 #[cfg(target_os = "windows")]
 fn note_new_key(vkey: u32, scan: u32, now: u64) {
     LAST_NEW_KEY_AT.store(now, Ordering::Relaxed);
@@ -1455,7 +1460,7 @@ fn note_new_key(vkey: u32, scan: u32, now: u64) {
         {
             if let Some(tx) = EVENT_TX.get() {
                 info!("Input hook: a hold-to-talk press grew into a chord");
-                let _ = tx.send((CHORD, since));
+                let _ = tx.send((CHORD, now));
             }
         }
     }
@@ -2299,6 +2304,57 @@ mod tests {
         // And it saves under its camelCase name.
         let json = serde_json::to_value(&cfg).unwrap();
         assert_eq!(json["moreHotkeys"]["hotkey"][0], "mouse:5");
+    }
+
+    /// The data folder is shared with an older Yap (the installed nightly
+    /// beside a dev build): one that doesn't know `moreHotkeys` reads a
+    /// config that has them and saves it as it knows it. Every action's
+    /// first shortcut survives, in the shape it always had; only the more
+    /// ones (and triple-tap) are dropped.
+    #[test]
+    fn an_older_yap_saving_this_config_keeps_every_first_shortcut() {
+        // An older Yap's config, as far as shortcuts go: the nine fields it
+        // knows (serde ignores the rest, as YapConfig always has).
+        #[derive(serde::Deserialize, serde::Serialize)]
+        #[serde(rename_all = "camelCase")]
+        struct Older {
+            hotkey: String,
+            edit_hotkey: String,
+            meeting_hotkey: String,
+            assistant_hotkey: String,
+            read_hotkey: String,
+            as_said_hotkey: String,
+            snip_hotkey: String,
+            paste_last_hotkey: String,
+            copy_last_hotkey: String,
+        }
+        let mut cfg = crate::config::YapConfig {
+            hotkey: "kb:121".into(),
+            edit_hotkey: "mouse:5".into(),
+            triple_tap_meeting: true,
+            ..Default::default()
+        };
+        cfg.more_hotkeys.insert("hotkey".into(), vec!["mouse:4".into(), "kb:ctrl+alt+68".into()]);
+        let saved = serde_json::to_value(&cfg).unwrap();
+        // This Yap writes the first shortcut as it always was: one spec.
+        assert_eq!(saved["hotkey"], "kb:121");
+        let older: Older = serde_json::from_value(saved).unwrap();
+        let resaved = serde_json::to_string(&older).unwrap();
+        // …and reads the older Yap's save back.
+        let mut back: crate::config::YapConfig = serde_json::from_str(&resaved).unwrap();
+        tidy_more(&mut back);
+        let firsts: Vec<&str> = (0..FIXED_COUNT).map(|i| first_spec(&back, i)).collect();
+        let want: Vec<&str> = (0..FIXED_COUNT).map(|i| first_spec(&cfg, i)).collect();
+        assert_eq!(firsts, want, "every first shortcut survives an older Yap's save");
+        assert_eq!(back.hotkey, "kb:121");
+        assert_eq!(back.meeting_hotkey, crate::config::YapConfig::default().meeting_hotkey);
+        // What the older save drops: the more shortcuts and triple-tap.
+        assert!(back.more_hotkeys.is_empty());
+        assert!(!back.triple_tap_meeting);
+        // A config with no more shortcuts is the old shape plus an empty map.
+        let plain = serde_json::to_value(crate::config::YapConfig::default()).unwrap();
+        assert_eq!(plain["moreHotkeys"], serde_json::json!({}));
+        assert!(plain["hotkey"].is_string());
     }
 
     #[test]

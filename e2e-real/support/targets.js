@@ -182,6 +182,8 @@ export async function startTestPad(label) {
   return {
     hwnd,
     pid,
+    /** In the pad's title: what the helper checks before sending it keys. */
+    label,
     call,
     /** Bring the pad to the front with `field` (default: the last one used) focused. */
     async focus(field = current) {

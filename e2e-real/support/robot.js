@@ -20,6 +20,7 @@ import {
   RUNS,
   OUT,
   compileHelper,
+  helper,
   makeNonce,
   startTestPad,
   startPowerShell,
@@ -115,6 +116,20 @@ export class Robot {
 
   clipboard(action, text) {
     return this.yap.invoke('realtest_clipboard', { action, text });
+  }
+
+  /**
+   * Real keys (SendInput) for Yap's input hook, with the test pad in front:
+   * robot mode's hook acts only on keys marked as the robot's own
+   * (dictation/input_hook.rs). `seq`: "d:135,w:300,u:135" — d/u a key
+   * down/up, U a key-up marked for the hook to miss (one the lock screen
+   * took), w a wait in ms. The pad gets the keys the hook doesn't swallow.
+   */
+  async hookKeys(seq) {
+    await this.pad.focus();
+    const r = helper('hookkeys', this.pad.hwnd, this.pad.label, seq);
+    if (!r.ok) throw new Error(`robot: hook keys refused: ${r.error}`);
+    return r;
   }
 
   /** Change Yap's settings the way Settings does (`save_config`). */

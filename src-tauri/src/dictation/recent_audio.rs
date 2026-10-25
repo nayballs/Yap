@@ -25,8 +25,9 @@
 //! **Cancelled dictations** (2026-10-25): a dictation the person cancelled
 //! (the bar's ✕, Esc, the tray) keeps its audio here too, and Home lists it
 //! as "Cancelled" with **Transcribe** (Run again's path) for its day — after
-//! the bar's 10 s of Undo, which takes it back out. **Keep** ([`set_keep`],
-//! a `<id>.keep` marker) exempts a dictation's audio from the day and the
+//! the bar's 10 s of Undo, which takes it back out. **Keep** ([`set_keep`]:
+//! moved into `recent-audio/kept/`, a folder no sweep reads — an older Yap
+//! sharing the data folder never deletes it either) exempts a dictation's audio from the day and the
 //! caps until its history entry is deleted or the audio cleared; **Save
 //! audio…** ([`recent_audio_save`]) writes its WAV where the person picks.
 //!
@@ -51,6 +52,8 @@ pub const MAX_BYTES: u64 = 200 * 1024 * 1024;
 /// How often the old audio is looked for while Yap runs.
 const PRUNE_EVERY: Duration = Duration::from_secs(60 * 60);
 const DIR: &str = "recent-audio";
+/// `recent-audio/kept/`: the audio the person keeps past its day.
+const KEPT_DIR: &str = "kept";
 const SAMPLE_RATE: u32 = 16_000;
 
 fn now_ms() -> u64 {
@@ -62,31 +65,54 @@ pub fn dir() -> PathBuf {
     crate::config::data_dir().join(DIR)
 }
 
-fn wav_path(id: &str) -> PathBuf {
+/// Where a dictation's audio waits out its day (and the caps).
+fn day_path(id: &str) -> PathBuf {
     dir().join(format!("{id}.wav"))
+}
+
+/// Where audio the person keeps lives (**Keep**): a folder of its own, which
+/// no sweep reads — an older Yap sharing the data folder (the installed
+/// nightly beside a dev build) never deletes it either.
+fn kept_path(id: &str) -> PathBuf {
+    dir().join(KEPT_DIR).join(format!("{id}.wav"))
+}
+
+/// A dictation's audio file: kept, else its day's.
+fn wav_path(id: &str) -> PathBuf {
+    let kept = kept_path(id);
+    if kept.is_file() {
+        kept
+    } else {
+        day_path(id)
+    }
 }
 
 fn marker_path(id: &str) -> PathBuf {
     dir().join(format!("{id}.pending"))
 }
 
-fn keep_path(id: &str) -> PathBuf {
-    dir().join(format!("{id}.keep"))
-}
-
 /// Whether a dictation's audio is kept past its day (**Keep**).
 pub fn is_kept(id: &str) -> bool {
-    valid_id(id) && keep_path(id).is_file()
+    valid_id(id) && kept_path(id).is_file()
 }
 
-/// **Keep** a dictation's audio past its day (`on`), or let it go with the
-/// rest again. Errors when its audio is gone.
+/// **Keep** a dictation's audio past its day (`on`: moved into `kept/`),
+/// or let it go with the rest again (`off`: back, its day counted from when
+/// it was said). Errors when its audio is gone.
 pub fn set_keep(id: &str, on: bool) -> Result<(), String> {
     if !has(id) {
         return Err("This dictation's audio isn't kept any more".into());
     }
-    let done = if on { std::fs::write(keep_path(id), b"") } else { std::fs::remove_file(keep_path(id)).or(Ok(())) };
-    done.map_err(|e| format!("Couldn't change it: {e}"))?;
+    if on == is_kept(id) {
+        return Ok(());
+    }
+    written(id);
+    let moved = if on {
+        std::fs::create_dir_all(dir().join(KEPT_DIR)).and_then(|()| std::fs::rename(day_path(id), kept_path(id)))
+    } else {
+        std::fs::rename(kept_path(id), day_path(id))
+    };
+    moved.map_err(|e| format!("Couldn't change it: {e}"))?;
     tracing::info!(id = %id, keep = on, "Recent audio: kept past its day, or not");
     Ok(())
 }
@@ -138,7 +164,7 @@ pub fn keep(samples: &[f32], cfg: &crate::config::YapConfig) -> Option<String> {
     let file_id = id.clone();
     let writer = std::thread::Builder::new().name("recent-audio".into()).spawn(move || {
         let tmp = dir().join(format!("{file_id}.wav.tmp"));
-        let written = std::fs::write(&tmp, &bytes).and_then(|()| std::fs::rename(&tmp, wav_path(&file_id)));
+        let written = std::fs::write(&tmp, &bytes).and_then(|()| std::fs::rename(&tmp, day_path(&file_id)));
         match written {
             Ok(()) => tracing::debug!(id = %file_id, bytes = bytes.len(), "Recent audio: kept"),
             Err(e) => {
@@ -193,13 +219,13 @@ pub fn discard(id: &str) {
     }
     written(id);
     let _ = std::fs::remove_file(marker_path(id));
-    let _ = std::fs::remove_file(wav_path(id));
-    let _ = std::fs::remove_file(keep_path(id));
+    let _ = std::fs::remove_file(day_path(id));
+    let _ = std::fs::remove_file(kept_path(id));
 }
 
-/// Whether a dictation's audio is still kept.
+/// Whether a dictation's audio is still kept (its day's, or kept for good).
 pub fn has(id: &str) -> bool {
-    valid_id(id) && wav_path(id).is_file()
+    valid_id(id) && (day_path(id).is_file() || kept_path(id).is_file())
 }
 
 /// A dictation's audio, as 16 kHz mono samples.
@@ -240,22 +266,19 @@ pub(crate) fn wav(samples: &[f32]) -> Vec<u8> {
     w
 }
 
-/// A kept file: its id, size and when it was recorded (unix seconds), and
-/// whether the person asked to **Keep** it past its day.
+/// A kept file: its id, size and when it was recorded (unix seconds).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Kept {
     pub id: String,
     pub bytes: u64,
     pub at: u64,
-    pub keep: bool,
 }
 
 /// Which of `files` go (pure): those older than [`KEEP_SECS`], then the
 /// oldest while there are more than [`MAX_FILES`] or [`MAX_BYTES`] of them.
-/// One the person keeps never goes, nor counts towards the caps.
+/// (Audio the person keeps is in `kept/`, which this never sees.)
 pub fn to_drop(files: &[Kept], now: u64) -> Vec<String> {
-    let files: Vec<&Kept> = files.iter().filter(|f| !f.keep).collect();
-    let mut keep: Vec<&Kept> = files.iter().copied().filter(|f| now.saturating_sub(f.at) <= KEEP_SECS).collect();
+    let mut keep: Vec<&Kept> = files.iter().filter(|f| now.saturating_sub(f.at) <= KEEP_SECS).collect();
     let mut out: Vec<String> = files
         .iter()
         .filter(|f| now.saturating_sub(f.at) > KEEP_SECS)
@@ -289,7 +312,7 @@ fn kept() -> Vec<Kept> {
                 return None;
             }
             let bytes = e.metadata().ok()?.len();
-            Some(Kept { at: recorded_at(&id)?, keep: keep_path(&id).is_file(), id, bytes })
+            Some(Kept { at: recorded_at(&id)?, id, bytes })
         })
         .collect()
 }
@@ -301,9 +324,8 @@ pub fn prune() {
     let files = kept();
     let drop = to_drop(&files, now);
     for id in &drop {
-        let _ = std::fs::remove_file(wav_path(id));
+        let _ = std::fs::remove_file(day_path(id));
         let _ = std::fs::remove_file(marker_path(id));
-        let _ = std::fs::remove_file(keep_path(id));
     }
     if !drop.is_empty() {
         tracing::info!(dropped = drop.len(), kept = files.len() - drop.len(), "Recent audio: old dictations' audio deleted");
@@ -319,9 +341,7 @@ pub fn prune() {
             .and_then(|m| m.modified().ok())
             .and_then(|t| t.elapsed().ok())
             .is_some_and(|age| age > Duration::from_secs(3_600));
-        let stray = name.ends_with(".tmp")
-            || name.strip_suffix(".pending").is_some_and(|id| !wav_path(id).is_file())
-            || name.strip_suffix(".keep").is_some_and(|id| !wav_path(id).is_file());
+        let stray = name.ends_with(".tmp") || name.strip_suffix(".pending").is_some_and(|id| !day_path(id).is_file());
         if stray && old {
             let _ = std::fs::remove_file(e.path());
         }
@@ -391,7 +411,14 @@ pub struct Status {
 #[tauri::command]
 pub fn recent_audio_status() -> Status {
     let files = kept();
-    Status { count: files.len(), bytes: files.iter().map(|f| f.bytes).sum() }
+    // …and the audio the person keeps past its day.
+    let kept_for_good: Vec<u64> = std::fs::read_dir(dir().join(KEPT_DIR))
+        .map(|entries| entries.flatten().filter_map(|e| e.metadata().ok().filter(|m| m.is_file()).map(|m| m.len())).collect())
+        .unwrap_or_default();
+    Status {
+        count: files.len() + kept_for_good.len(),
+        bytes: files.iter().map(|f| f.bytes).sum::<u64>() + kept_for_good.iter().sum::<u64>(),
+    }
 }
 
 /// Settings → Privacy & data → Clear recent audio.
@@ -513,19 +540,17 @@ mod tests {
     use super::*;
 
     fn k(id: &str, at: u64, bytes: u64) -> Kept {
-        Kept { id: id.into(), at, bytes, keep: false }
+        Kept { id: id.into(), at, bytes }
     }
 
     #[test]
-    fn audio_the_person_keeps_outlives_its_day_and_the_caps() {
-        let now = 10 * KEEP_SECS;
-        let kept = Kept { keep: true, ..k("old", now - 3 * KEEP_SECS, MAX_BYTES) };
-        let files = [kept, k("1", now - KEEP_SECS - 1, 10), k("2", now - 60, 10)];
-        assert_eq!(to_drop(&files, now), vec!["1".to_string()]);
-        // It doesn't count towards the caps either.
-        let mut many: Vec<Kept> = (0..MAX_FILES as u64).map(|i| k(&i.to_string(), now - 1_000 + i, 1)).collect();
-        many.push(Kept { keep: true, ..k("mine", now - 5, MAX_BYTES) });
-        assert!(to_drop(&many, now).is_empty());
+    fn audio_the_person_keeps_lives_where_no_sweep_reads() {
+        // The sweep (`kept`, `to_drop`, an older Yap's too) reads
+        // recent-audio/ itself; kept audio is one folder down.
+        let (day, kept) = (day_path("1761140000123"), kept_path("1761140000123"));
+        assert_eq!(day.parent(), Some(dir().as_path()));
+        assert_eq!(kept.parent(), Some(dir().join(KEPT_DIR).as_path()));
+        assert_eq!(day.file_name(), kept.file_name());
     }
 
     #[test]

@@ -997,10 +997,13 @@ impl Shared {
         let app_name = crate::pasting::text_injector::app_name_for((target_hwnd != 0).then_some(target_hwnd)).unwrap_or_default();
         crate::dictation::history::record_cancelled(&model, &app_name, &id);
         tracing::info!(id = %id, "A cancelled dictation is in history with its audio (Transcribe)");
-        let _ = self.app.emit("yap-history-changed", ());
-        // Its WAV is being written on its own thread: done pending once it is.
-        let finished = id.clone();
-        std::thread::spawn(move || crate::dictation::recent_audio::finished(&finished));
+        // Its WAV is being written on its own thread: once it's there, no
+        // longer pending, and Home lists it with its audio (Transcribe, Play).
+        let (finished, app) = (id.clone(), self.app.clone());
+        std::thread::spawn(move || {
+            crate::dictation::recent_audio::finished(&finished);
+            let _ = app.emit("yap-history-changed", ());
+        });
         Some(id)
     }
 
