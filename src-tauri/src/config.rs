@@ -332,8 +332,10 @@ pub struct YapConfig {
     #[serde(default = "default_true")]
     pub keep_recent_audio: bool,
     /// The one microphone picked before 2026-10-25 (its name; None =
-    /// Windows' default). Read once, by [`migrate_once`] v4, into
-    /// [`YapConfig::mic_order`]; nothing else reads it.
+    /// Windows' default), and what an older Yap still reads: [`save`] writes
+    /// the first of [`YapConfig::mic_order`] here, and a different name on
+    /// load is a pick made in an older build, which goes first
+    /// ([`follow_an_older_builds_mic`]).
     #[serde(default)]
     pub input_device: Option<String>,
     /// Settings → Dictation → Microphone (`dictation/mics.rs`, 2026-10-25):
@@ -1318,6 +1320,7 @@ pub fn load() -> YapConfig {
     }
     // One-time migrations are saved straight away, so they can never run a
     // second time and undo a choice the user makes afterwards.
+    follow_an_older_builds_mic(&mut cfg);
     if migrate_once(&mut cfg) {
         if let Err(e) = save(&cfg) {
             tracing::warn!("Failed to save migrated config: {}", e);
@@ -1417,7 +1420,8 @@ fn migrate_once(cfg: &mut YapConfig) -> bool {
         // saves the order) — then Windows' default, which is what an
         // unplugged pick fell back to anyway… except it said "No microphone
         // found" before.
-        if let Some(name) = cfg.input_device.take().map(|n| n.trim().to_string()).filter(|n| !n.is_empty()) {
+        // `input_device` itself stays: an older Yap reads only that.
+        if let Some(name) = cfg.input_device.clone().map(|n| n.trim().to_string()).filter(|n| !n.is_empty()) {
             if !cfg.mic_order.iter().any(|m| m.name == name) {
                 cfg.mic_order.insert(0, crate::dictation::mics::MicChoice { id: String::new(), name });
             }
@@ -1425,6 +1429,24 @@ fn migrate_once(cfg: &mut YapConfig) -> bool {
     }
     cfg.config_version = CONFIG_VERSION;
     true
+}
+
+/// The installed nightly and Yap - Dev share one config, and an older Yap
+/// knows a single microphone (`input_device`). [`save`] writes the first of
+/// the order there, so a different name means the person picked one in an
+/// older build: it goes first here too. (None with an order: left alone.)
+fn follow_an_older_builds_mic(cfg: &mut YapConfig) {
+    let Some(name) = cfg.input_device.as_deref().map(str::trim).filter(|n| !n.is_empty()).map(str::to_string) else {
+        return;
+    };
+    if cfg.mic_order.first().is_some_and(|m| m.name == name) {
+        return;
+    }
+    let choice = match cfg.mic_order.iter().position(|m| m.name == name) {
+        Some(i) => cfg.mic_order.remove(i),
+        None => crate::dictation::mics::MicChoice { id: String::new(), name },
+    };
+    cfg.mic_order.insert(0, choice);
 }
 
 // ---- Files on disk: atomic writes, corrupt files set aside ------------------
@@ -1894,6 +1916,8 @@ fn save_at(path: &Path, cfg: &YapConfig) -> Result<(), String> {
         config_version: cfg.config_version.max(CONFIG_VERSION),
         // "Runs on" is what's chosen; the old GPU switch follows it.
         use_gpu: cfg.stt_device != "cpu",
+        // An older Yap knows one microphone: the first of the order.
+        input_device: cfg.mic_order.first().map(|m| m.name.clone()),
         ..cfg.clone()
     };
     write_at(path, &cfg)
@@ -2846,18 +2870,50 @@ mod tests {
         let mut cfg: YapConfig = serde_json::from_str(r#"{"configVersion":3,"inputDevice":"Microphone (Fabrikam USB Mic)"}"#).unwrap();
         assert!(migrate_once(&mut cfg));
         assert_eq!(cfg.mic_order, vec![MicChoice { id: String::new(), name: "Microphone (Fabrikam USB Mic)".into() }]);
-        assert_eq!(cfg.input_device, None);
+        // Kept for an older Yap, which reads only that.
+        assert_eq!(cfg.input_device.as_deref(), Some("Microphone (Fabrikam USB Mic)"));
         // Windows' default: nothing to keep, the order stays empty.
         let mut cfg: YapConfig = serde_json::from_str(r#"{"configVersion":3,"inputDevice":null}"#).unwrap();
         assert!(migrate_once(&mut cfg));
         assert!(cfg.mic_order.is_empty());
         // The order changed afterwards (and saved): it stays as it is.
+        let path = scratch("mic-cleared").join("config.json");
         let mut cfg: YapConfig = serde_json::from_str(r#"{"configVersion":3,"inputDevice":"Old mic"}"#).unwrap();
         assert!(migrate_once(&mut cfg));
         cfg.mic_order.clear();
-        let mut reloaded: YapConfig = serde_json::from_str(&serde_json::to_string(&cfg).unwrap()).unwrap();
+        save_at(&path, &cfg).unwrap();
+        let Read::Parsed(reloaded) = read_at(&path) else { panic!("saved config unreadable") };
+        let mut reloaded = *reloaded;
+        follow_an_older_builds_mic(&mut reloaded);
         assert!(!migrate_once(&mut reloaded));
         assert!(reloaded.mic_order.is_empty());
+    }
+
+    #[test]
+    fn an_older_yap_keeps_the_microphone_and_its_pick_comes_back() {
+        use crate::dictation::mics::MicChoice;
+        let mic = |name: &str| MicChoice { id: String::new(), name: name.into() };
+        let path = scratch("mic-older-yap").join("config.json");
+        let cfg = YapConfig { mic_order: vec![mic("Headset"), mic("Desk mic")], ..YapConfig::default() };
+        save_at(&path, &cfg).unwrap();
+        // An older Yap reads only `inputDevice`, and saves back without the order.
+        let mut old: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        assert_eq!(old["inputDevice"], "Headset");
+        old.as_object_mut().unwrap().remove("micOrder");
+        let mut back: YapConfig = serde_json::from_value(old.clone()).unwrap();
+        follow_an_older_builds_mic(&mut back);
+        assert_eq!(back.mic_order, vec![mic("Headset")]);
+        // A mic picked in the older build goes first; the rest keep their order.
+        let mut cfg = YapConfig { mic_order: vec![mic("Headset"), mic("Desk mic")], input_device: Some("Desk mic".into()), ..YapConfig::default() };
+        follow_an_older_builds_mic(&mut cfg);
+        assert_eq!(cfg.mic_order, vec![mic("Desk mic"), mic("Headset")]);
+        let mut cfg = YapConfig { mic_order: vec![mic("Headset")], input_device: Some("Webcam mic".into()), ..YapConfig::default() };
+        follow_an_older_builds_mic(&mut cfg);
+        assert_eq!(cfg.mic_order, vec![mic("Webcam mic"), mic("Headset")]);
+        // Already first: nothing moves.
+        let mut cfg = YapConfig { mic_order: vec![mic("Headset"), mic("Desk mic")], input_device: Some("Headset".into()), ..YapConfig::default() };
+        follow_an_older_builds_mic(&mut cfg);
+        assert_eq!(cfg.mic_order, vec![mic("Headset"), mic("Desk mic")]);
         // A fresh install: Windows' default.
         assert!(YapConfig::default().mic_order.is_empty() && YapConfig::default().mic_not_now.is_empty());
     }

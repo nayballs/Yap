@@ -50,10 +50,12 @@
   connected is used, then Windows' default; empty, the default, is Windows'
   default alone) + mic_not_now (the microphones answered "Not now" to
   "… connected · Use it for dictation?": never asked again), input_device
-  (the one mic picked before 25 Oct; **`migrate_once` v4** moves it to the
-  front of `mic_order` by name and clears it — nothing else reads it; an
-  unplugged pick now falls back to Windows' default instead of "No
-  microphone found"), sound +
+  (the one mic picked before 25 Oct; **`migrate_once` v4** puts it at the
+  front of `mic_order` by name; an unplugged pick now falls back to Windows'
+  default instead of "No microphone found". It stays for an older Yap, which
+  reads only this: `save` writes the first of `mic_order` there, and a
+  different name on load — picked in an older build — goes first,
+  `follow_an_older_builds_mic`), sound +
   volume, output_device, quiet_other_apps ("Silence other apps while you
   dictate", off; reads old configs' `muteWhileRecording`) + pause_media
   ("Pause music and videos while you dictate", off; both `dictation/mute.rs`),
