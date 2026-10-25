@@ -39,14 +39,9 @@
   // runs; the load's time goes to its ~77 IPC calls (frontend.md).
   import MeetingsView from './MeetingsView.svelte';
   import HomeView from './home/HomeView.svelte';
-  import InsightsView from './InsightsView.svelte';
-  import DictionaryView from './dictionary/DictionaryView.svelte';
-  import UploadView from './UploadView.svelte';
   import NotesView from './notes/NotesView.svelte';
-  import TasksView from './TasksView.svelte';
   import ChatView from './chat/ChatView.svelte';
   import { chatRequest } from '../stores/chatRequest.svelte.js';
-  import IntegrationsView from './integrations/IntegrationsView.svelte';
   import { menuOrDialogOpen } from '../ui/contextMenu.svelte.js';
   import { noteAccountPicture } from '../core/connections.js';
   import { prefetchHome } from './home/homeData.js';
@@ -399,13 +394,20 @@
     </div>
   </nav>
 
+  <!-- Home, Chat, Notes and Meetings are in this window's chunk; the views
+       opened less often load on first use (each its own chunk), which keeps
+       the main window's chunk under Vite's 700 kB warning (25 Oct 2026). -->
   <main class="view">
     {#if activeView === 'home'}
       <HomeView onopensettings={openSettings} onnavigate={(v) => (activeView = v)} />
     {:else if activeView === 'insights'}
-      <InsightsView />
+      {#await import('./InsightsView.svelte') then { default: InsightsView }}
+        <InsightsView />
+      {/await}
     {:else if activeView === 'dictionary'}
-      <DictionaryView />
+      {#await import('./dictionary/DictionaryView.svelte') then { default: DictionaryView }}
+        <DictionaryView />
+      {/await}
     {:else if activeView === 'chat'}
       <ChatView onopensettings={openSettings} onopennote={openNoteAt} />
     {:else if activeView === 'notes'}
@@ -413,16 +415,22 @@
     {:else if activeView === 'meetings'}
       <MeetingsView onopensettings={openSettings} onnavigate={(v) => (activeView = v)} onopennote={openNoteAt} />
     {:else if activeView === 'tasks'}
-      <TasksView
-        onopennote={(id, line) => {
-          noteRequest.pending = { id, stop: false, line };
-          activeView = 'notes';
-        }}
-      />
+      {#await import('./TasksView.svelte') then { default: TasksView }}
+        <TasksView
+          onopennote={(id, line) => {
+            noteRequest.pending = { id, stop: false, line };
+            activeView = 'notes';
+          }}
+        />
+      {/await}
     {:else if activeView === 'upload'}
-      <UploadView />
+      {#await import('./UploadView.svelte') then { default: UploadView }}
+        <UploadView />
+      {/await}
     {:else if activeView === 'integrations'}
-      <IntegrationsView onopensettings={openSettings} />
+      {#await import('./integrations/IntegrationsView.svelte') then { default: IntegrationsView }}
+        <IntegrationsView onopensettings={openSettings} />
+      {/await}
     {/if}
   </main>
   </div>

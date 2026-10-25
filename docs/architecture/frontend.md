@@ -401,8 +401,12 @@ Flow's dark mode of 19 Oct 2026), for every Yap window.
   ternary of imports, which Vite gave one preload list, the last one's, so
   the main window lost its CSS). The Yap bar loads ~150 KB of script
   instead of the whole ~1 MB app; the notepad ~310 KB. **The main window
-  stays one chunk** (~590 KB, `chunkSizeWarningLimit` 700 in
-  vite.config.js), measured 2026-10-22: loading the seven views other than
+  keeps its everyday views in its chunk** — Home, Chat, Notes, Meetings —
+  and since 2026-10-25 Insights, Dictionary, Tasks, Upload and Integrations
+  load on first use (`{#await import(…)}` in ControlPanel): the views
+  added that week took the chunk to 735 KB, past `chunkSizeWarningLimit`
+  700 in vite.config.js; now 683 KB. Not for start-up speed — measured
+  2026-10-22, when it stayed one chunk (~590 KB): loading the seven views other than
   Home on demand (with an idle-time preload, the old view kept until the
   new one's code was in) cut its initial script 904 → 711 KB and its heap
   4.9 → 4.7 MB, but Home came up no sooner — 62.7 → 57.3 ms from a reload
