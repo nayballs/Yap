@@ -409,13 +409,18 @@ pub fn get_note_base_prompt() -> String {
 /// One turn of the embedded note chat (the "Ask anything…" bar, OpenWhispr
 /// `useEmbeddedChat`): the **Chat** scope's endpoint + prompt with the note's
 /// content and transcript injected as context — falling back to the global
-/// cleanup endpoint when the scope is off. `history` is the prior turns as
-/// `[role, text]` pairs (the UI sends the last few).
+/// cleanup endpoint when the scope is off. `conversationId`: the note's Ask
+/// thread (`chat/note_chats.rs`), whose earlier turns go with the question,
+/// sized to the model — its summary and the turns after it, or the latest
+/// that fit (`note_chats::history_for`); without one, `history`, the prior
+/// turns the page sends as `[role, text]` pairs. A question too long for the
+/// model, or a provider's "too long", is said plainly.
 #[tauri::command]
 pub async fn note_ask(
     id: u64,
     question: String,
     history: Option<Vec<(String, String)>>,
+    conversation_id: Option<u64>,
 ) -> Result<String, String> {
     let note = crate::notes::get(id).ok_or("Note not found")?;
     let cfg = config::load();
@@ -423,7 +428,50 @@ pub async fn note_ask(
     let (base_url, api_key, model, provider, persona, disable_thinking) =
         resolve_chat_endpoint(&cfg)?;
     let _sidecar = crate::ai::local_llm::hold(&base_url);
+    crate::chat::compact::turn_started();
+    let now = chrono::Utc::now();
+    let (mut system, asked) = note_prompt(&note, &cfg, &persona, &provider, &model, &base_url, &question, now);
+    // The thread's earlier turns, sized to the model (budget.rs).
+    let call = crate::chat::note_chats::Call { provider: &provider, model: &model, base_url: &base_url };
+    let thread = crate::chat::note_chats::history_for(id, conversation_id, call, &system, &asked).await?;
+    if let Some(block) = &thread.summary {
+        system.push_str("\n\n");
+        system.push_str(block);
+    }
+    let history = if conversation_id.is_some() { thread.turns.clone() } else { history.unwrap_or_default() };
+    let answer = crate::ai::llm::note_chat(
+        &system,
+        &history,
+        &asked,
+        &base_url,
+        &api_key,
+        &model,
+        &provider,
+        disable_thinking,
+        None,
+    );
+    crate::privacy::net::within(crate::privacy::net::Feature::Notes, answer)
+        .await
+        .map_err(|e| crate::chat::budget::plain_error(e, &thread.label, thread.context, &provider))
+}
 
+/// The Notes view's Ask bar's prompt about `note` ([`note_ask`]): the system
+/// prompt (the persona, the note — its attendees, speakers, invite, typed
+/// notes, the transcript bounded for the model, the summary — About you and
+/// memory's "You") and the question as sent (a model that calls tools gets
+/// the clock with it). Also what a thread's summary is sized beside
+/// (`compact::after_thread_turn`).
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn note_prompt(
+    note: &crate::notes::Note,
+    cfg: &crate::config::YapConfig,
+    persona: &str,
+    provider: &str,
+    model: &str,
+    base_url: &str,
+    question: &str,
+    now: chrono::DateTime<chrono::Utc>,
+) -> (String, String) {
     // Inject the note as grounding context (content + transcript + attendees).
     // A long meeting's transcript comes as its digests + the latest stretch,
     // so the context fits an 8k local model.
@@ -431,10 +479,10 @@ pub async fn note_ask(
     if !note.participants.is_empty() {
         context.push_str(&format!("Attendees: {}\n", note.participants.join(", ")));
     }
-    if let Some(line) = crate::speakers::speakers_line(&note) {
+    if let Some(line) = crate::speakers::speakers_line(note) {
         context.push_str(&format!("{line}\n"));
     }
-    if let Some(invite) = crate::calendar::invite_context(&note) {
+    if let Some(invite) = crate::calendar::invite_context(note) {
         context.push_str(&invite);
     }
     if !note.content.trim().is_empty() {
@@ -444,9 +492,9 @@ pub async fn note_ask(
     if !note.transcript.is_empty() {
         const ASK_TRANSCRIPT_TOKENS: usize = 3_000;
         // A bigger on-device context reads more of it raw (×1–4).
-        let budget = ASK_TRANSCRIPT_TOKENS * crate::ai::local_llm::context::budget_factor_for(&provider, &base_url);
+        let budget = ASK_TRANSCRIPT_TOKENS * crate::ai::local_llm::context::budget_factor_for(provider, base_url);
         context.push('\n');
-        context.push_str(&crate::meetings::meeting_summary::ask_context(&note, budget));
+        context.push_str(&crate::meetings::meeting_summary::ask_context(note, budget));
     }
     if !note.enhanced_content.trim().is_empty() {
         context.push_str(&format!("\nEnhanced notes:\n{}\n", note.enhanced_content.trim()));
@@ -456,9 +504,8 @@ pub async fn note_ask(
     // a hybrid local model re-uses the note's prompt from one question to
     // the next instead of reading it again. A model without tools keeps the
     // clock in the system prompt too, as `chat_turn` does.
-    let profile = crate::ai::about_you::profile(&cfg);
-    let now = chrono::Utc::now();
-    let in_message = crate::chat::tools::supports_tools(&provider, &model);
+    let profile = crate::ai::about_you::profile(cfg);
+    let in_message = crate::chat::tools::supports_tools(provider, model);
     let mut system = format!(
         "{}\n\nThe user is asking about the following note. Ground your answers in it; if the answer isn't in the note, say so briefly.\n\n<note>\n{}\n</note>",
         persona.trim(),
@@ -472,11 +519,11 @@ pub async fn note_ask(
             system.push_str("\n\n");
             system.push_str(&profile_block);
         }
-        crate::chat::chats::with_context(&[crate::ai::about_you::clock_line(&profile, now)], &question)
+        crate::chat::chats::with_context(&[crate::ai::about_you::clock_line(&profile, now)], question)
     } else {
         system.push_str("\n\n");
         system.push_str(&crate::ai::about_you::prompt_block(&profile, now));
-        question.clone()
+        question.to_string()
     };
     // Memory's "You" part, as every Chat answer gets it (memory.rs).
     let memory_you = crate::memory::you_block();
@@ -484,18 +531,5 @@ pub async fn note_ask(
         system.push_str("\n\n");
         system.push_str(&memory_you);
     }
-
-    let history = history.unwrap_or_default();
-    let answer = crate::ai::llm::note_chat(
-        &system,
-        &history,
-        &asked,
-        &base_url,
-        &api_key,
-        &model,
-        &provider,
-        disable_thinking,
-        None,
-    );
-    crate::privacy::net::within(crate::privacy::net::Feature::Notes, answer).await
+    (system, asked)
 }

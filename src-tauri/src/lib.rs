@@ -245,6 +245,7 @@ pub fn run() {
             ai::commands::get_groq_usage,
             ai::usage::ai_usage_summary,
             ai::usage::context::chat_context,
+            chat::turn::chat_limits,
             dictation::commands::get_history,
             dictation::commands::clear_history,
             dictation::commands::delete_history_entry,

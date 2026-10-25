@@ -1159,6 +1159,67 @@ fn rate_limit_wait(retry_after_ms: Option<&str>, retry_after: Option<&str>, body
     any.then(|| secs(total))
 }
 
+/// What a call too long for the model's context fails with
+/// ([`says_too_long`]); `chat/budget.rs` says it plainly
+/// (`budget::plain_error`): "That's too long for Qwen3.5 4B (64K
+/// context)."
+pub(crate) const CONTEXT_EXCEEDED: &str = "The request is longer than the model's context";
+/// What a request bigger than the key's tokens a minute fails with, then
+/// the limit.
+pub(crate) const TOO_MUCH_A_MINUTE: &str = "The request is more than the plan sends in a minute: ";
+
+/// Is a provider's refusal "too long for the model's context"? Each says it
+/// its own way:
+/// - llama.cpp (the on-device model, self-hosted ones):
+///   `exceed_context_size_error`, "the request exceeds the available context
+///   size, try increasing it";
+/// - OpenAI: `context_length_exceeded`, "This model's maximum context length
+///   is 128000 tokens…";
+/// - Anthropic: "prompt is too long: 210000 tokens > 200000 maximum", and
+///   "input length and `max_tokens` exceed context limit";
+/// - Groq: "Please reduce the length of the messages or completion."
+///   (`context_length_exceeded`);
+/// - Gemini: "The input token count (1234567) exceeds the maximum number of
+///   tokens allowed (1048576).";
+/// - OpenRouter: "This endpoint's maximum context length is 131072 tokens.
+///   However, you requested about 140000 tokens…";
+/// - LM Studio: "…the model is loaded with context length of only 4096
+///   tokens".
+///
+/// Pure.
+pub(crate) fn says_too_long(status: u16, body: &str) -> bool {
+    if status < 400 {
+        return false;
+    }
+    const SAID: &[&str] = &[
+        "exceed_context_size_error",
+        "exceeds the available context size",
+        "context_length_exceeded",
+        "maximum context length",
+        "prompt is too long",
+        "exceed context limit",
+        "reduce the length of the messages",
+        "exceeds the maximum number of tokens",
+        "context length of only",
+        "longer than the model's context",
+    ];
+    let lower = body.to_ascii_lowercase();
+    SAID.iter().any(|s| lower.contains(s))
+}
+
+/// A request refused for being more than the key's plan sends in a minute
+/// on its own (Groq's 413 "Request too large for model … on tokens per
+/// minute (TPM): Limit 8000, Requested 9817"): the limit. Pure.
+pub(crate) fn tokens_a_minute_refusal(status: u16, body: &str) -> Option<u64> {
+    let lower = body.to_ascii_lowercase();
+    if !(status == 413 || lower.contains("request too large")) || !lower.contains("tokens per minute") {
+        return None;
+    }
+    let at = lower.find("limit")? + "limit".len();
+    let digits: String = lower[at..].trim_start_matches([' ', ':']).chars().take_while(|c| c.is_ascii_digit() || *c == ',').filter(char::is_ascii_digit).collect();
+    digits.parse::<u64>().ok().filter(|n| *n > 0)
+}
+
 /// The error for a rate limit we didn't (or couldn't) wait out: said plainly,
 /// with how long to wait when the provider told us.
 fn rate_limited_error(provider: &str, wait: Option<Duration>) -> String {
@@ -1390,10 +1451,35 @@ async fn post_chat_request(
                 tracing::info!("{} takes tools from {} only with reasoning off; asking again so", model, provider);
                 continue;
             }
+            // Too long for the model's context, in each provider's words:
+            // said plainly by the caller (`chat/budget.rs`), never raw.
+            if says_too_long(status.as_u16(), &detail) {
+                tracing::info!(provider, status = status.as_u16(), "The request is longer than the model's context");
+                return Err(call.failed(format!("{CONTEXT_EXCEEDED} (HTTP {})", status.as_u16())));
+            }
+            // More than the key's plan sends in a minute, in one request
+            // (Groq's 413 "Request too large … on tokens per minute"): the
+            // next ones are kept under it.
+            if let Some(limit) = tokens_a_minute_refusal(status.as_u16(), &detail) {
+                tracing::info!(provider, limit, "The request is more than the plan's tokens a minute");
+                crate::chat::budget::heard_rate_limit(provider, limit);
+                return Err(call.failed(format!("{TOO_MUCH_A_MINUTE}{limit}")));
+            }
             let detail: String = detail.chars().take(300).collect();
             return Err(call.failed(format!("HTTP {}: {}", status.as_u16(), detail)));
         };
         let limits = crate::ai::eval::limit_headers(resp.headers());
+        // The key's tokens a minute, as a cloud provider says it (Groq,
+        // OpenAI): Chat keeps a request under it (`chat/budget.rs`).
+        if let Some(tpm) = resp
+            .headers()
+            .get("x-ratelimit-limit-tokens")
+            .and_then(|v| v.to_str().ok())
+            .and_then(|s| s.trim().parse::<u64>().ok())
+            .filter(|_| matches!(provider, "groq" | "openai" | "openrouter" | "anthropic" | "gemini"))
+        {
+            crate::chat::budget::heard_rate_limit(provider, tpm);
+        }
 
         // Capture Groq's daily request headers BEFORE consuming the body. These are
         // absent on non-Groq endpoints (local servers, OpenAI), which is fine — the

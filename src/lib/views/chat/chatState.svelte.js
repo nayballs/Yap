@@ -16,6 +16,8 @@ import { streamCall, liveAnswer, applyEvent, streamingHeight, STOPPED, SUPERSEDE
 import { speech, initSpeech, readAloud as speakText, speakReply, stopReading as stopSpeech } from '../../stores/speech.svelte.js';
 import { DEFAULT_PROMPT, MAX_SHOTS, visionRefused, pastedImage, keepPasted } from './chatImages.js';
 import { waitingShots, followWaitingShots, removeWaiting, clearWaiting } from './chatShots.svelte.js';
+import { questionTokens, isTooLong } from './chatBudget.js';
+import { fmtContext } from '../../core/aiUsage.js';
 
 // The sources an answer's citations point at: its own, else — a follow-up
 // that cites "[1]" from an earlier answer without searching again ("the
@@ -135,6 +137,72 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
   // Goes up when an answer (or a question) lands: the context ring reads
   // the conversation's use again (ContextRing.svelte, `chat_context`).
   let contextStamp = $state(0);
+
+  // ---- Sized to the model (chat/budget.rs, chat/compact.rs)
+  // What a question may be for the Chat model now (`chat_limits`):
+  // { questionMax, context, label, tooLong, more }.
+  let limits = $state(null);
+  // The open conversation's summary of its older messages ({ text, upto,
+  // model }): a divider over the messages after it, "Show summary".
+  let summary = $state(null);
+  // The summary shown read-only (Show summary).
+  let showingSummary = $state(false);
+  // The last send's "too long" (Rust's plain sentence), until the next send.
+  let tooLong = $state('');
+  // A paste too long for the model: said under the box, never sent.
+  const inputTokens = $derived(questionTokens(input));
+  const inputTooLong = $derived(!!limits?.questionMax && inputTokens > limits.questionMax);
+
+  async function refreshLimits() {
+    try {
+      limits = await invoke('chat_limits');
+    } catch {
+      /* keep the last */
+    }
+  }
+
+  /** A conversation's summary was written (`yap-chat-summary`): its divider and the ring follow. */
+  async function onSummary(p) {
+    const id = p?.conversationId;
+    if (id == null || id !== activeId) return;
+    try {
+      const conv = await invoke('chat_get', { id });
+      if (activeId === id) summary = conv.summary ?? null;
+    } catch {
+      /* deleted meanwhile */
+    }
+    contextStamp += 1;
+  }
+
+  /**
+   * "Give it more room": the on-device model's context raised to the next
+   * size that fits the graphics card (Settings → Language Models → Local
+   * does the same); it restarts once nothing is using it.
+   */
+  async function giveMoreRoom() {
+    const tokens = limits?.more;
+    if (!tokens) return;
+    try {
+      await invoke('local_llm_set_context', { tokens });
+      toast({
+        title: `Giving ${limits.label} ${fmtContext(tokens)} of context`,
+        description: 'It restarts with the room in a moment. Then send your message again.',
+        variant: 'success',
+      });
+      tooLong = '';
+      await refreshLimits();
+    } catch (e) {
+      toast({ title: "Couldn't give it more room", description: String(e), variant: 'destructive' });
+    }
+  }
+
+  /** "Shorten what you pasted": the message selected in the box, to cut down. */
+  function shortenPaste() {
+    tick().then(() => {
+      inputEl?.focus();
+      inputEl?.select?.();
+    });
+  }
   $effect(() => {
     const busy = sending || (assistantPending != null && assistantPending === activeId);
     if (!busy) {
@@ -312,6 +380,9 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
       stopReading();
       activeId = id;
       scope = conv.scope || null;
+      summary = conv.summary ?? null;
+      showingSummary = false;
+      tooLong = '';
       messages = (conv.messages || []).map((m, i) => ({ ...m, id: chatId(id, i) }));
       scrollThread();
     } catch (e) {
@@ -326,18 +397,26 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
     const id = activeId;
     try {
       const conv = await invoke('chat_get', { id });
-      if (activeId === id) messages = (conv.messages || []).map((m, i) => ({ ...m, id: chatId(id, i) }));
+      if (activeId === id) {
+        messages = (conv.messages || []).map((m, i) => ({ ...m, id: chatId(id, i) }));
+        summary = conv.summary ?? null;
+      }
     } catch {
       /* it stays as it was */
     }
   }
 
   // `keepShots`: a snip landing in a new chat (Rust has the box already).
+  // `keepInput`: "New chat" under a message too long for this chat — the
+  // message goes with it.
   function newChat(opts) {
     stopReading();
     activeId = null;
     messages = [];
-    input = '';
+    summary = null;
+    showingSummary = false;
+    tooLong = '';
+    if (opts?.keepInput !== true) input = '';
     if (opts?.keepShots !== true) clearWaiting();
     byVoice = false;
     scope = null;
@@ -446,6 +525,7 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
         activeId = id;
         scope = conv.scope || null;
       }
+      summary = conv.summary ?? null;
       // The answer that streamed here, replaced by the saved (checked) one
       // (only an answer: a newer question's arrival replaces nothing).
       const streamedAt = p?.phase === 'answered' ? spokenAt() : -1;
@@ -605,6 +685,13 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
     if (!text || sending) return;
     // The model can't read the screenshot: the line above the box says so.
     if (shots.length && vision.images === false && !asText) return;
+    // Too long for the model on its own: the line under the box says so,
+    // and nothing goes (chat/budget.rs checks again).
+    if (inputTooLong) {
+      shortenPaste();
+      return;
+    }
+    tooLong = '';
     const voice = byVoice;
     input = '';
     // Out of the box (Rust takes them with the question, chat_send).
@@ -731,6 +818,14 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
       // …and its screenshots (Rust puts them back too, yap-chat-waiting).
       waitingShots.list = shots;
       byVoice = voice;
+      // Too long for the model (Rust's plain sentence, never the provider's
+      // JSON): said over the box with what helps — New chat, more room for
+      // the on-device model, shortening the message.
+      if (isTooLong(e)) {
+        tooLong = String(e?.message ?? e);
+        refreshLimits();
+        return;
+      }
       // Its text couldn't be read (no text in it, no OCR language): said.
       if (asText) {
         toast({ title: "Couldn't send its text", description: String(e), variant: 'default', kind: 'error', chip: 'Error', icon: 'alert' });
@@ -851,6 +946,18 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
     get waitedS() { return waitedS; },
     get modelHere() { return modelHere; },
     get contextStamp() { return contextStamp; },
+    get limits() { return limits; },
+    get summary() { return summary; },
+    get showingSummary() { return showingSummary; },
+    set showingSummary(v) { showingSummary = v; },
+    get tooLong() { return tooLong; },
+    set tooLong(v) { tooLong = v; },
+    get inputTokens() { return inputTokens; },
+    get inputTooLong() { return inputTooLong; },
+    refreshLimits,
+    onSummary,
+    giveMoreRoom,
+    shortenPaste,
     get picked() { return picked; },
     set picked(v) { picked = v; },
     get groups() { return groups; },

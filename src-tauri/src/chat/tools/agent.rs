@@ -149,7 +149,7 @@ fn empty_notes_rule(local: bool) -> EmptyNotes {
 /// model would have made: its chip, its result in the messages (numbered
 /// sources, the safety rule's flag and the 3-search cap all as for a call
 /// of the model's).
-async fn search_for_the_model(turn: &mut crate::web::Turn, query: &str, messages: &mut Vec<Value>, tools_used: &mut Vec<String>) {
+async fn search_for_the_model(turn: &mut crate::web::Turn, query: &str, messages: &mut Vec<Value>, tools_used: &mut Vec<String>, room: Room<'_>) {
     // A price question's search names the person's country ("… UK").
     let query = turn.local_query(query).unwrap_or_else(|| query.to_string());
     let args = json!({ "query": query });
@@ -169,7 +169,61 @@ async fn search_for_the_model(turn: &mut crate::web::Turn, query: &str, messages
             "function": { "name": "web_search", "arguments": args.to_string() },
         }],
     }));
-    messages.push(json!({ "role": "tool", "tool_call_id": YAP_SEARCH_ID, "content": result.to_string() }));
+    let content = room.fit(&result, messages);
+    messages.push(json!({ "role": "tool", "tool_call_id": YAP_SEARCH_ID, "content": content }));
+}
+
+/// What a turn's request may still take (`chat/budget.rs`): a tool's result
+/// is trimmed to it, so one turn's page reads and notes can't overflow the
+/// model's context.
+#[derive(Clone, Copy)]
+struct Room<'a> {
+    /// The whole request's limit (`Budget::request`); `None`: no limit.
+    limit: Option<u64>,
+    /// The tools the steps offer (they're sent every step).
+    tools: &'a Value,
+}
+
+impl Room<'_> {
+    /// `result` as the next tool message carries it: within what's left
+    /// beside `messages` (`budget::fit_result`).
+    fn fit(&self, result: &Value, messages: &[Value]) -> String {
+        let Some(limit) = self.limit else { return result.to_string() };
+        let left = limit.saturating_sub(crate::chat::budget::request_tokens(messages, self.tools) + crate::chat::budget::MESSAGE_OVERHEAD);
+        let fitted = crate::chat::budget::fit_result(result, left);
+        if fitted.len() < result.to_string().len() {
+            tracing::info!(left, "Chat: a tool's result was shortened to fit the model's context");
+            crate::ai::eval::post_fix("tool_result_cut");
+        }
+        fitted
+    }
+}
+
+/// The tools a turn's steps offer (every step the same): the note tools,
+/// and the apps', the web's, memory's and the calendar's when the turn has
+/// them. Also what Chat's budget measures (`turn.rs`).
+pub fn offered_tools(open_apps: bool, web: bool, extra: Extra<'_>) -> Value {
+    let mut tools = definitions();
+    if open_apps {
+        if let (Some(all), Some(apps)) = (tools.as_array_mut(), app_definitions().as_array()) {
+            all.extend(apps.iter().cloned());
+        }
+    }
+    if web {
+        if let (Some(all), Some(web_tools)) = (tools.as_array_mut(), web_definitions().as_array()) {
+            all.extend(web_tools.iter().cloned());
+        }
+    }
+    if let (Some(all), Some(memory_tools)) = (tools.as_array_mut(), memory_definitions(extra).as_array()) {
+        all.extend(memory_tools.iter().cloned());
+    }
+    // The calendar (a calendar is connected): read-only, like the notes.
+    if extra.calendar.is_some() {
+        if let (Some(all), Some(cal)) = (tools.as_array_mut(), super::calendar::definitions().as_array()) {
+            all.extend(cal.iter().cloned());
+        }
+    }
+    tools
 }
 
 /// One model call of the loop: streamed to `live` when someone watches
@@ -317,26 +371,8 @@ async fn tool_loop(
     // without any).
     crate::snip::turn::attach(&mut messages);
 
-    let mut tools = definitions();
-    if open_apps {
-        if let (Some(all), Some(apps)) = (tools.as_array_mut(), app_definitions().as_array()) {
-            all.extend(apps.iter().cloned());
-        }
-    }
-    if web.is_some() {
-        if let (Some(all), Some(web_tools)) = (tools.as_array_mut(), web_definitions().as_array()) {
-            all.extend(web_tools.iter().cloned());
-        }
-    }
-    if let (Some(all), Some(memory_tools)) = (tools.as_array_mut(), memory_definitions(extra).as_array()) {
-        all.extend(memory_tools.iter().cloned());
-    }
-    // The calendar (a calendar is connected): read-only, like the notes.
-    if extra.calendar.is_some() {
-        if let (Some(all), Some(cal)) = (tools.as_array_mut(), super::calendar::definitions().as_array()) {
-            all.extend(cal.iter().cloned());
-        }
-    }
+    let tools = offered_tools(open_apps, web.is_some(), extra);
+    let room = Room { limit: extra.room, tools: &tools };
     let mut tools_used: Vec<String> = Vec::new();
     // The answer just before the question: a "yes" to its offer to open an
     // app is the person asking (`apps::consented`).
@@ -348,7 +384,7 @@ async fn tool_loop(
     // Yap searches first: the results go to the model as its own call's.
     if let (FirstStep::YapSearches(query), Some(turn)) = (&first, web.as_deref_mut()) {
         searching(live);
-        search_for_the_model(turn, query, &mut messages, &mut tools_used).await;
+        search_for_the_model(turn, query, &mut messages, &mut tools_used, room).await;
         report(live, &tools_used, Some(turn), extra.calendar.map(|c| c.log));
     }
     let mut must_search = must_search_first;
@@ -416,7 +452,7 @@ async fn tool_loop(
                 tracing::info!(provider, "Chat: the model wasn't made to search; Yap searches for it");
                 if let Some(turn) = web.as_deref_mut() {
                     searching(live);
-                    search_for_the_model(turn, &crate::web::search_query(question), &mut messages, &mut tools_used).await;
+                    search_for_the_model(turn, &crate::web::search_query(question), &mut messages, &mut tools_used, room).await;
                     report(live, &tools_used, Some(turn), extra.calendar.map(|c| c.log));
                 }
                 continue;
@@ -570,10 +606,13 @@ async fn tool_loop(
                 tools_used.push(d.to_string());
             }
             report(live, &tools_used, web.as_deref(), extra.calendar.map(|c| c.log));
+            // Within what the request has left (a long page read on an 8K
+            // model, several notes): never past the model's context.
+            let content = room.fit(&result, &messages);
             messages.push(json!({
                 "role": "tool",
                 "tool_call_id": id,
-                "content": result.to_string(),
+                "content": content,
             }));
         }
         // A price question whose results only had another country's prices:
@@ -583,7 +622,7 @@ async fn tool_loop(
             if let Some(q) = turn.take_local_retry() {
                 tracing::info!(provider, "Chat: no local prices in the results; Yap searches again for them");
                 searching(live);
-                search_for_the_model(turn, &q, &mut messages, &mut tools_used).await;
+                search_for_the_model(turn, &q, &mut messages, &mut tools_used, room).await;
                 report(live, &tools_used, Some(turn), extra.calendar.map(|c| c.log));
             }
         }
@@ -595,7 +634,7 @@ async fn tool_loop(
                 led_to_web = true;
                 tracing::info!(provider, "Chat: nothing in the notes; Yap searches the web for the model");
                 searching(live);
-                search_for_the_model(turn, &crate::web::search_query(question), &mut messages, &mut tools_used).await;
+                search_for_the_model(turn, &crate::web::search_query(question), &mut messages, &mut tools_used, room).await;
                 report(live, &tools_used, Some(turn), extra.calendar.map(|c| c.log));
             }
         }
@@ -662,7 +701,7 @@ mod tests {
             Value::Null,
         );
         let base = format!("{}/v1", fake.base);
-        let extra = Extra { memory: true, search_chats: true, conversation: Some(1), calendar: None };
+        let extra = Extra { memory: true, search_chats: true, conversation: Some(1), ..Default::default() };
         let ask = |q: &'static str| {
             let base = base.clone();
             async move {

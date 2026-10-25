@@ -18,6 +18,7 @@
   import { formatHotkeySpec } from '../../core/hotkeys.js';
   import { modelName, providerName } from '../../core/aiModel.js';
   import { chatImageUrl, SNIP_PROMPTS, sizeLine, imageItems } from './chatImages.js';
+  import { tooLongLine } from './chatBudget.js';
   import ModelChip from './ModelChip.svelte';
   import ContextRing from './ContextRing.svelte';
 
@@ -204,6 +205,21 @@
       {/if}
     </div>
   {/if}
+  {#if chat.inputTooLong || chat.tooLong}
+    <!-- Too long for the model (chat/budget.rs): said plainly, before it's
+         sent (a paste the model can't take) or after the provider said so,
+         with what helps. Never the provider's own error. -->
+    <div class="visionline toolong" role="alert" data-testid="chat-too-long">
+      <span class="vtext">{chat.inputTooLong ? tooLongLine(chat.limits, chat.inputTokens) : chat.tooLong}</span>
+      {#if !chat.inputTooLong && chat.activeId != null}
+        <button type="button" class="vbtn" onclick={() => chat.newChat({ keepInput: true })}>New chat</button>
+      {/if}
+      {#if chat.limits?.more}
+        <button type="button" class="vbtn primary" onclick={chat.giveMoreRoom}>Give it more room</button>
+      {/if}
+      <button type="button" class="vlink" onclick={chat.shortenPaste}>Shorten what you pasted</button>
+    </div>
+  {/if}
   <div class="inputbar">
     <div class="pluswrap" bind:this={plusEl}>
       <button
@@ -279,7 +295,10 @@
       onkeydown={(e) => e.key === 'Enter' && !e.isComposing && chat.send()}
       onpaste={chat.pasteImage}
       oninput={() => {
-        if (!chat.input.trim()) chat.byVoice = false;
+        if (!chat.input.trim()) {
+          chat.byVoice = false;
+          chat.tooLong = '';
+        }
       }}
       onfocus={() => chat.reportFocus(true)}
       onblur={() => chat.reportFocus(false)}
@@ -299,10 +318,10 @@
     {:else if chat.input.trim() || chat.attached.length}
       <button
         class="sendbtn"
-        disabled={chat.sending || chat.visionBlocked}
+        disabled={chat.sending || chat.visionBlocked || chat.inputTooLong}
         onclick={chat.send}
         aria-label="Send"
-        title={chat.visionBlocked ? "This model can't read images" : 'Send (Enter)'}
+        title={chat.visionBlocked ? "This model can't read images" : chat.inputTooLong ? 'Too long for this model' : 'Send (Enter)'}
       >
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 10 4 15l5 5" /><path d="M20 4v7a4 4 0 0 1-4 4H4" /></svg>
       </button>

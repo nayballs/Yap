@@ -5,58 +5,29 @@
 //! - **Used**: the conversation's last answer's own last model call — its
 //!   prompt (instructions, history, question, the tools' results) plus the
 //!   answer, as the provider counted them (`ChatMessage::tokens`, kept by
-//!   the turn: `usage::last_call`). Before any answer, after an older Yap's
-//!   save dropped them, or for a model that doesn't say, an **estimate**
-//!   of what the next question would send ([`estimate_next`]: the history
-//!   Yap sends, `chats::history_messages`, and the instructions, at about
-//!   four characters a token); messages after the last counted answer are
-//!   estimated and added.
-//! - **The context** of the model the next message goes to (the model chip's,
-//!   so a switch in the picker changes it): the on-device model's own
-//!   (`local_llm::context`, what the sidecar serves), a self-hosted server's
-//!   word (Ollama, LM Studio: `model_catalog::server_context_here`), a cloud
-//!   model's from its provider's list (`model_catalog`'s `context`); none
-//!   of those: [`default_context`] for the provider, marked approximate.
-//! - **Trimmed**: Chat sends only the latest messages
-//!   (`chats::CHAT_HISTORY`, 14–19); the ring's panel says a long chat is
-//!   trimmed and offers a new one when it's nearly full.
+//!   the turn: `usage::last_call`); messages after it are estimated and
+//!   added. Before any answer, after an older Yap's save dropped the
+//!   counts, for a model that doesn't say — or once the older messages were
+//!   summarised after it (`chat/compact.rs`: the next request is smaller,
+//!   and the ring drops) — **an estimate of what the next question sends**:
+//!   the parts measured as a turn measures them (`turn::stable_prompt`,
+//!   the tools' schemas) and the history as the turn chooses it
+//!   (`chat/budget.rs` `plan`: the summary and what came after it, or the
+//!   latest that fit), counted the same way (`budget::Counter`).
+//! - **The context** of the model the next message goes to (the model
+//!   chip's, so a switch in the picker changes it): `budget::context_window`
+//!   — the on-device model's own, a self-hosted server's word, a cloud
+//!   model's from its provider's list; else the provider's usual, marked
+//!   approximate.
+//! - **Summarised**: the next request carries the summary of the older
+//!   messages (the panel: "Summarised · the chat stays within the model's
+//!   context"). **Trimmed**: older messages are left out with nothing in
+//!   their place (no summary yet).
 
 use serde::Serialize;
 
-use crate::chat::chats::{ChatMessage, ChatModel};
-
-/// The start of every Chat request before its history: the persona, the
-/// line on the context block, About you (about 300 tokens).
-const PROMPT_START: u64 = 300;
-
-/// About four characters a token. Pure.
-pub fn estimate_tokens(chars: usize) -> u64 {
-    (chars as u64).div_ceil(4)
-}
-
-/// [`estimate_tokens`] of `messages` as Chat sends them (an earlier web
-/// answer's search replayed: `chats::history_messages`). Pure.
-pub fn estimate_messages(messages: &[ChatMessage]) -> u64 {
-    if messages.is_empty() {
-        return 0;
-    }
-    let sent = serde_json::to_string(&crate::chat::chats::history_messages(messages)).unwrap_or_default();
-    estimate_tokens(sent.chars().count())
-}
-
-/// What a Chat request carries before its history: [`PROMPT_START`], and a
-/// tool model's instructions and schemas.
-pub fn prompt_allowance(tools: bool) -> u64 {
-    PROMPT_START + if tools { estimate_tokens(crate::chat::tools::tool_prompt_chars()) } else { 0 }
-}
-
-/// What the next question in a conversation of `messages` would send, about:
-/// the instructions and the history window (`chats::CHAT_HISTORY`).
-pub fn estimate_next(messages: &[ChatMessage], tools: bool) -> u64 {
-    let (keep, step) = crate::chat::chats::CHAT_HISTORY;
-    let window = &messages[crate::chat::chats::history_start(messages.len(), keep, step)..];
-    prompt_allowance(tools) + estimate_messages(window)
-}
+use crate::chat::budget::{self, Counter, Kind};
+use crate::chat::chats::{ChatMessage, ChatModel, ChatSummary};
 
 /// A conversation's context use.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Serialize)]
@@ -71,54 +42,29 @@ pub struct Use {
     pub per_second: Option<f64>,
 }
 
-/// How much of a model's context `messages` use: the last counted
-/// answer's prompt and answer, plus an estimate of anything after it; with
-/// none counted, [`estimate_next`]. `tools`: the model gets Chat's tools
-/// (their instructions count). Pure.
-pub fn use_of(messages: &[ChatMessage], tools: bool) -> Use {
+/// The tokens of `messages` as a turn sends them, estimated (their text and
+/// each one's overhead). Pure.
+pub fn estimate_messages(messages: &[ChatMessage]) -> u64 {
+    messages.iter().map(|m| budget::estimate(&m.text) + budget::MESSAGE_OVERHEAD).sum()
+}
+
+/// How much of a model's context `messages` use: the last counted answer's
+/// prompt and answer, plus an estimate of anything after it; with none
+/// counted — or a summary written after it (the next request is smaller)
+/// — `next`, the estimate of the next request. Pure.
+pub fn use_of(messages: &[ChatMessage], summary: Option<&ChatSummary>, next: u64) -> Use {
     if messages.is_empty() {
         return Use::default();
     }
     let last = messages.iter().rposition(|m| m.role == "assistant").and_then(|i| messages[i].tokens);
     let (last_answer, per_second) = (last.map(|t| t.answer), last.and_then(|t| t.per_second));
     match messages.iter().rposition(|m| m.role == "assistant" && m.tokens.is_some()) {
-        Some(i) => {
+        Some(i) if summary.is_none_or(|s| s.after <= i) => {
             let t = messages[i].tokens.unwrap_or_default();
             let after = &messages[i + 1..];
             Use { used: t.prompt + t.answer + estimate_messages(after), estimate: !after.is_empty(), last_answer, per_second }
         }
-        None => Use { used: estimate_next(messages, tools), estimate: true, last_answer, per_second },
-    }
-}
-
-/// A provider's context when nothing says (its list didn't have the model,
-/// a server didn't say): the page calls it approximate. Pure.
-pub fn default_context(provider: &str) -> u64 {
-    match provider {
-        "groq" => 131_072,
-        "anthropic" => 200_000,
-        "gemini" => 1_048_576,
-        "openai" | "openrouter" => 128_000,
-        // Ollama's and LM Studio's own defaults are smaller still.
-        _ => 8_192,
-    }
-}
-
-/// The context of the model `t` (the chip's), and whether that came from
-/// the model or its server (else it's [`default_context`]).
-async fn context_of(cfg: &crate::config::YapConfig, t: &crate::ai::ai_model::Target, on_device: u32) -> (u64, bool) {
-    if t.provider == crate::ai::local_llm::PROVIDER_ONDEVICE && on_device > 0 {
-        return (u64::from(on_device), true);
-    }
-    if matches!(t.provider.as_str(), "local" | "custom") {
-        return match crate::ai::model_catalog::server_context_here(cfg, &t.provider, &t.base_url, &t.model).await {
-            Some(n) => (n, true),
-            None => (default_context(&t.provider), false),
-        };
-    }
-    match crate::ai::model_catalog::listed_model(&t.provider, &t.model).and_then(|m| m.context) {
-        Some(n) if n > 0 => (n, true),
-        _ => (default_context(&t.provider), false),
+        _ => Use { used: next, estimate: true, last_answer, per_second },
     }
 }
 
@@ -133,36 +79,79 @@ pub struct ContextUse {
     /// The context came from the model or its server (else a provider's
     /// usual one: approximate).
     pub context_known: bool,
-    /// The next question leaves older messages out (`chats::CHAT_HISTORY`).
+    /// The next question leaves older messages out with nothing in their
+    /// place (no summary yet).
     pub trimmed: bool,
+    /// The next question carries the summary of the older messages.
+    pub summarised: bool,
     pub messages: usize,
+    /// The most the next question may be, in tokens.
+    pub question_max: u64,
     /// The model the next message goes to (the context is its).
     pub model: Option<ChatModel>,
 }
 
 /// The open conversation's context use against the Chat model's context
 /// (none open: nothing used). The page asks after each answer, when the
-/// model changes and when another conversation opens.
+/// model changes, when another conversation opens and when its summary is
+/// written (`yap-chat-summary`).
 #[tauri::command]
 pub async fn chat_context(conversation_id: Option<u64>) -> ContextUse {
     let cfg = crate::config::load();
     let on_device = crate::ai::ai_model::OnDevice::here(&cfg);
-    let target = crate::ai::ai_model::target(&cfg, crate::ai::ai_model::Scope::Chat, &on_device).ok();
-    let messages = conversation_id.and_then(crate::chat::chats::get).map(|c| c.messages).unwrap_or_default();
-    let used = use_of(&messages, target.as_ref().is_some_and(|t| t.tools));
-    let (context, context_known) = match &target {
-        Some(t) => context_of(&cfg, t, on_device.context).await,
-        None => (0, false),
+    let Ok(target) = crate::ai::ai_model::target(&cfg, crate::ai::ai_model::Scope::Chat, &on_device) else {
+        return ContextUse::default();
     };
-    let (keep, step) = crate::chat::chats::CHAT_HISTORY;
+    let conv = conversation_id.and_then(crate::chat::chats::get);
+    let messages: &[ChatMessage] = conv.as_ref().map(|c| c.messages.as_slice()).unwrap_or_default();
+    let counter = Counter::for_call(&target.provider, &target.base_url);
+    let (context, context_known) = budget::context_window(&cfg, &target.provider, &target.model, &target.base_url).await;
+    // The parts every request carries, as `chat_limits` measures them.
+    let fixed = fixed_of(&cfg, &target, &counter).await;
+    let b = budget::budget(context, context_known, fixed, Kind::Chat, target.tools, budget::rate_cap(&target.provider));
+    let replay = target.tools && cfg.web_search;
+    let costs = budget::message_costs(&counter, messages, replay).await;
+    let summary = conv.as_ref().and_then(|c| c.usable_summary());
+    let summary_cost = match summary {
+        Some(s) => Some((s.upto, counter.count(&crate::chat::compact::block(&s.text)).await)),
+        None => None,
+    };
+    let plan = budget::plan(&costs, summary_cost, crate::chat::turn::next_room(b.history), Kind::Chat.step());
+    let used = use_of(messages, summary, fixed + plan.tokens);
     ContextUse {
         used,
         context,
         context_known,
-        trimmed: crate::chat::chats::history_start(messages.len(), keep, step) > 0,
+        trimmed: plan.left_out > 0,
+        summarised: plan.summary,
         messages: messages.len(),
-        model: target.map(|t| t.chat_model()),
+        question_max: b.history,
+        model: Some(target.chat_model()),
     }
+}
+
+/// The parts of a Chat request that don't change with the question, for
+/// `target`: the stable prompt and the tools' schemas.
+async fn fixed_of(cfg: &crate::config::YapConfig, target: &crate::ai::ai_model::Target, counter: &Counter) -> u64 {
+    let persona = cfg
+        .llm_scopes
+        .get("chat")
+        .map(|s| s.prompt.clone())
+        .filter(|p| !p.trim().is_empty())
+        .unwrap_or_else(|| "You are a helpful assistant. Answer concisely.".to_string());
+    let calendar_on = crate::calendar::connected();
+    let profile = crate::ai::about_you::profile(cfg);
+    let stable = crate::chat::turn::stable_prompt(cfg, &persona, target.tools, cfg.web_search, calendar_on, &profile, crate::ai::eval::now());
+    let log = crate::chat::tools::calendar::Log::default();
+    let extra = crate::chat::tools::Extra {
+        memory: true,
+        search_chats: cfg.memory_search_chats,
+        conversation: None,
+        calendar: calendar_on.then_some(crate::chat::tools::CalendarTurn { log: &log, zone: crate::chat::tools::calendar::Zone::of(None), now: 0 }),
+        room: None,
+    };
+    let schemas = if target.tools { counter.count(&crate::chat::tools::offered_tools(cfg.open_apps, cfg.web_search, extra).to_string()).await } else { 0 };
+    counter.count(&stable).await + schemas
 }
 
 #[cfg(test)]
@@ -179,50 +168,36 @@ mod tests {
     }
 
     #[test]
-    fn about_four_characters_a_token() {
-        assert_eq!(estimate_tokens(0), 0);
-        assert_eq!(estimate_tokens(1), 1);
-        assert_eq!(estimate_tokens(4_000), 1_000);
-        assert_eq!(estimate_tokens(4_001), 1_001);
-    }
-
-    #[test]
     fn a_counted_answer_is_the_conversations_use() {
         let chat = vec![said("user", "When is the launch?"), answered("Friday.", 1_200, 300)];
-        let u = use_of(&chat, true);
+        let u = use_of(&chat, None, 999);
         assert_eq!(u, Use { used: 1_500, estimate: false, last_answer: Some(300), per_second: Some(118.5) });
         // A question after it (its answer failed): estimated on top.
         let mut more = chat.clone();
         more.push(said("user", &"x".repeat(400)));
-        let u = use_of(&more, true);
+        let u = use_of(&more, None, 999);
         assert!(u.estimate);
-        assert!(u.used > 1_500 + 100 && u.used < 1_500 + 130, "{}", u.used);
+        assert_eq!(u.used, 1_500 + budget::estimate(&"x".repeat(400)) + budget::MESSAGE_OVERHEAD);
     }
 
     #[test]
-    fn with_no_count_the_next_request_is_estimated() {
-        assert_eq!(use_of(&[], true), Use::default());
-        // An answer from a model that didn't say: the history and the
-        // instructions, about four characters a token.
+    fn with_no_count_or_a_newer_summary_the_next_request_is_estimated() {
+        assert_eq!(use_of(&[], None, 500), Use::default());
+        // An answer from a model that didn't say: the next request's estimate.
         let chat = vec![said("user", &"a".repeat(4_000)), said("assistant", &"b".repeat(4_000))];
-        let small = use_of(&chat, false);
-        assert!(small.estimate);
-        assert!(small.used >= PROMPT_START + 2_000 && small.used < PROMPT_START + 2_100, "{}", small.used);
-        assert_eq!(small.last_answer, None);
-        // A model with tools carries their instructions too.
-        let tools = use_of(&chat, true);
-        assert!(tools.used > small.used + 500, "{} vs {}", tools.used, small.used);
-        // Only the window Chat sends counts: 40 messages ≈ the last 14–19.
-        let long: Vec<ChatMessage> = (0..40).map(|i| said(if i % 2 == 0 { "user" } else { "assistant" }, &"c".repeat(400))).collect();
-        let u = use_of(&long, false);
-        assert!(u.used < PROMPT_START + 20 * 130, "{}", u.used);
-    }
-
-    #[test]
-    fn a_provider_without_a_word_on_the_model_has_its_usual_context() {
-        assert_eq!(default_context("groq"), 131_072);
-        assert_eq!(default_context("gemini"), 1_048_576);
-        assert_eq!(default_context("local"), 8_192);
-        assert_eq!(default_context("custom"), 8_192);
+        let u = use_of(&chat, None, 2_600);
+        assert!(u.estimate);
+        assert_eq!((u.used, u.last_answer), (2_600, None));
+        // The older messages summarised after the last counted answer: the
+        // next request carries the summary instead, and the ring drops.
+        let chat = vec![said("user", "Plan the offsite"), answered("Sure.", 7_000, 200), said("user", "And the budget?"), answered("£18,400.", 7_400, 50)];
+        let summary = ChatSummary { text: "- Budget £18,400".into(), upto: 2, after: 4, model: None, ts: 1 };
+        let u = use_of(&chat, Some(&summary), 1_900);
+        assert_eq!((u.used, u.estimate, u.last_answer), (1_900, true, Some(50)));
+        // An answer counted after the summary: its count again.
+        let mut later = chat.clone();
+        later.push(said("user", "Who's organising it?"));
+        later.push(answered("Marta Quill.", 2_100, 20));
+        assert_eq!(use_of(&later, Some(&summary), 1_900).used, 2_120);
     }
 }

@@ -1,0 +1,54 @@
+{
+  "name": "chat-long-memory-short",
+  "description": "chat-long-memory in six turns, for a cloud model's tokens: run it with YAP_EVAL_CONTEXT=2048 and compare YAP_EVAL_HISTORY=window (the token window alone) with summary (the window and the summary of what's older): the window forgets, the summary remembers.",
+  "tags": [
+    "long-chat",
+    "follow-up",
+    "compaction"
+  ],
+  "tools": "off",
+  "settings": {
+    "open_apps": false,
+    "memory_search_chats": false
+  },
+  "turns": [
+    {
+      "user": "I'm planning our team offsite in Lisbon. Two things to keep in mind for later: the budget is £18,400, and Marta Quill is organising it. Just reply OK for now.",
+      "soft": {
+        "max_words": 30
+      }
+    },
+    {
+      "user": "Here's the draft schedule the venue sent over. Can you sum it up in three short bullets?\n\nDAY ONE (Thursday)\n08:30 Coaches leave the hotel on Rua das Flores for the venue at Quinta do Lago Azul, about forty minutes away. Breakfast pastries and coffee are served on board; please let the coordinator know about allergies before boarding.\n09:30 Arrival and welcome in the Glass Room. The venue manager walks everyone through the fire exits, the Wi-Fi codes and the quiet rooms on the first floor, which can be booked at the front desk in half-hour slots.\n10:00 Opening session: the year so far, the three big projects for next year and what the leadership team wants from the two days. Screens and microphones are provided; slides need to be sent to the venue's technician by the Tuesday before.\n11:15 Coffee break on the terrace, weather permitting. If it rains the break moves to the library, which seats forty.\n11:45 Breakout one: four rooms of up to twelve people each, with flip charts, sticky notes and a facilitator from the venue's partner agency. Topics are chosen by the team leads in advance.\n13:00 Lunch in the courtyard: a buffet with grilled fish, a vegetarian moqueca, salads and fruit. A vegan and a gluten-free table are clearly marked.\n14:30 Breakout two: the same rooms, new mixes of people. The facilitators collect the flip charts at the end and photograph them for the summary pack.\n16:00 Free time: the pool, the walking trail around the lake, or the tile-painting workshop in the old stables (places for sixteen, first come first served).\n19:30 Drinks on the lawn with a guitar duo, then dinner in the main hall at 20:30: three courses, wine from the estate, and soft drinks. Coaches back to the hotel at 23:00 and 23:45.\n\nDAY TWO (Friday)\n09:00 Coaches leave the hotel; breakfast at the hotel from 07:00.\n09:45 Share-back: each breakout group presents its two best ideas in five minutes. The venue provides a timer and a bell.\n11:00 Coffee break.\n11:30 Planning session: owners and dates for the ideas the room votes for, with a facilitator keeping the list.\n12:45 Closing words and a group photo on the steps of the main house, then a packed lunch for the journey.\n13:30 Coaches leave for the hotel and the airport, with a stop at the hotel first for anyone staying on.\n\nNotes from the venue: the Glass Room gets warm in the afternoon, so blinds are drawn after lunch; the terrace has no shade before eleven; the trail is uneven in places and not suitable for anyone with mobility needs, but the lake path is level and paved. Parking for the coaches is behind the stables. The venue asks for final numbers ten days before, and charges for no-shows after that.",
+      "soft": {
+        "answer_contains_any": [
+          "Quinta",
+          "breakout",
+          "Breakout",
+          "coach",
+          "Coach"
+        ]
+      }
+    },
+    {
+      "user": "What should a good welcome message to the team say before the trip? Write me one, about 150 words."
+    },
+    {
+      "user": "Give me a checklist for the week before we leave, with a line on each item."
+    },
+    {
+      "user": "How should we plan around people's dietary needs at the dinners? Go through the main things to get right."
+    },
+    {
+      "user": "Remind me: what budget did I give you right at the start, and who's organising the offsite?",
+      "expect": {
+        "answer_contains": [
+          "18,400"
+        ],
+        "answer_contains_any": [
+          "Marta"
+        ]
+      }
+    }
+  ]
+}

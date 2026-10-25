@@ -8,7 +8,15 @@
   import { messageItems } from '../../core/itemMenus.js';
   import { openContextMenu } from '../../ui/contextMenu.svelte.js';
   import { STILL_WORKING_S } from './chatState.svelte.js';
+  import { SUMMARY_DIVIDER } from './chatBudget.js';
   import ChatMessage from './ChatMessage.svelte';
+
+  // Show summary's button, the focus's way back when its dialog closes.
+  let summaryBtn = $state(null);
+  function closeSummary() {
+    chat.showingSummary = false;
+    summaryBtn?.focus({ preventScroll: true });
+  }
 
   /** `chat`: the view's state; `onopensettings(section)`: ControlPanel's Settings. */
   let { chat, onopensettings = null } = $props();
@@ -64,6 +72,16 @@
   {/if}
   <div class="msgs" bind:this={chat.threadEl}>
     {#each chat.messages as m, i (i)}
+      {#if chat.summary && i === chat.summary.upto}
+        <!-- A long chat's older messages, summarised (chat/compact.rs): the
+             model gets the summary in their place, the latest whole. -->
+        <div class="summarised" role="separator" aria-label={SUMMARY_DIVIDER} data-testid="chat-summary-divider">
+          <span class="rule"></span>
+          <span class="stext">{SUMMARY_DIVIDER} ·</span>
+          <button type="button" class="showsum" bind:this={summaryBtn} onclick={() => (chat.showingSummary = true)}>Show summary</button>
+          <span class="rule"></span>
+        </div>
+      {/if}
       <ChatMessage
         {m}
         last={i === chat.messages.length - 1}
@@ -93,7 +111,50 @@
   </div>
 {/if}
 
+{#if chat.showingSummary && chat.summary}
+  <!-- Its own chunk, loaded the first time it opens. -->
+  {#await import('./SummaryDialog.svelte') then { default: SummaryDialog }}
+    <SummaryDialog summary={chat.summary} onclose={closeSummary} />
+  {/await}
+{/if}
+
 <style>
+  /* Where the summary takes over: a thin rule, quiet words, Show summary. */
+  .summarised {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin: 6px 0;
+    font-size: 11px;
+    color: var(--yap-muted);
+  }
+  .summarised .rule {
+    flex: 1 1 16px;
+    height: 1px;
+    background: var(--yap-border-subtle);
+  }
+  .summarised .stext {
+    flex: 0 1 auto;
+    text-align: center;
+  }
+  .showsum {
+    flex: 0 0 auto;
+    padding: 0;
+    border: none;
+    background: none;
+    color: var(--yap-primary);
+    font: inherit;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  .showsum:hover {
+    text-decoration: underline;
+  }
+  .showsum:focus-visible {
+    outline: 2px solid var(--yap-focus-ring);
+    outline-offset: 2px;
+    border-radius: 4px;
+  }
   .empty {
     flex: 1 1 auto;
     display: flex;

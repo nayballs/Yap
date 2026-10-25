@@ -180,7 +180,9 @@
     return converse(
       q ?? MEETING_HELPERS.catchUp.label,
       q ? 'Looking through the meeting…' : MEETING_HELPERS.catchUp.busy,
-      (onEvent) => streamCall('meeting_catch_up', { noteId: id, since: seen.get(id) ?? 0, question: q }, onEvent),
+      // A question carries the kept thread's earlier turns (Rust sizes them
+      // to the model: chat/note_chats.rs).
+      (onEvent) => streamCall('meeting_catch_up', { noteId: id, since: seen.get(id) ?? 0, question: q, conversationId: q ? threadId : null }, onEvent),
       (r) => !q && seen.set(id, Math.max(seen.get(id) ?? 0, r.upto))
     );
   }

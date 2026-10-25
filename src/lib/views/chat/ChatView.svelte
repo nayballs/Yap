@@ -155,12 +155,21 @@
     chat.refreshList();
     chat.loadVoiceSettings();
     chat.refreshVision();
+    chat.refreshLimits();
     setTimeout(() => chat.inputEl?.focus(), 0);
     const uns = [
       // A snip landed while Chat is open (snip.rs).
       listen('yap-snip', (e) => chat.takeSnip(e.payload)),
-      // Another Chat model: can it read the screenshot?
-      listen('yap-chat-model-changed', chat.refreshVision),
+      // Another Chat model: can it read the screenshot? And what may a
+      // question be for it (chat/budget.rs)?
+      listen('yap-chat-model-changed', () => {
+        chat.refreshVision();
+        chat.refreshLimits();
+      }),
+      // The on-device model's context changed (Give it more room, Settings).
+      listen('yap-local-llm-changed', chat.refreshLimits),
+      // A long chat's older messages were summarised (chat/compact.rs).
+      listen('yap-chat-summary', (e) => chat.onSummary(e.payload)),
       listen('yap-chat-images-deleted', chat.reloadActive),
       listen('yap-chat-dictation', (e) => chat.onChatDictation(e.payload)),
       // A question asked with the assistant shortcut, live (and its card's
@@ -180,6 +189,7 @@
       listen('yap-config-saved', () => {
         chat.loadVoiceSettings();
         chat.refreshVision();
+        chat.refreshLimits();
       }),
       // Pictures dropped on Chat (Windows' drag and drop: Tauri reports the
       // files' paths) go in the box like a snip (snip/attach.rs).

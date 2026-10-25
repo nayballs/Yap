@@ -120,7 +120,11 @@
           : `${providerName(use.model) || 'the provider'} doesn’t list this model’s`}.
       </p>
     {/if}
-    {#if full}
+    {#if use.summarised}
+      <!-- The older messages go as their summary (chat/compact.rs): no
+           warning, the chat stays within the model's context. -->
+      <p class="summed" role="status" data-testid="context-summarised">Summarised · the chat stays within the model's context</p>
+    {:else if full}
       <div class="long" role="status" data-testid="context-long">
         <span>
           {use.trimmed
@@ -264,6 +268,15 @@
     background: var(--yap-primary-wash);
     font-size: 11.5px;
     line-height: 1.4;
+  }
+  .summed {
+    margin: 2px 0 0;
+    padding: 7px 8px;
+    border-radius: var(--yap-r);
+    background: var(--yap-s3);
+    font-size: 11.5px;
+    line-height: 1.4;
+    color: var(--yap-fg-80);
   }
   .newchat {
     flex: 0 0 auto;
