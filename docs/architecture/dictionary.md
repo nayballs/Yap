@@ -113,10 +113,24 @@ The correction dictionary: near-miss (fuzzy) matching, the Whisper vocabulary's 
   quarantined. `record(dict, text)` (from `apply_corrections`: dictations,
   meeting lines, Upload) counts every dictionary word in the corrected text —
   a correction that fired, or a word the recognizer (with the prompt) spelled
-  right by itself; a no-op in unit tests. `rank` (pure) / `ranked`: used in
-  the last day, then 14 days, then the rest; within each most uses first; then
-  the order added. The meeting prompt ranks the dictionary but keeps the
-  attendees ahead of it. Best-effort everywhere.
+  right by itself; a no-op in unit tests. `rank` (pure) / `ranked`: the
+  words you starred first (the Dictionary view's ☆, `DictionaryEntry.starred`;
+  Wispr Flow's context puts starred words first too, 2026-10-25), then used
+  in the last day, then 14 days, then the rest; within each most uses first;
+  then the order added. The meeting prompt ranks the dictionary but keeps the
+  attendees ahead of it. `dictionary_usage` hands the counts to the view's
+  "Most used" sort. Best-effort everywhere.
+- **`dictionary/files.rs`** — the Dictionary view's files (2026-10-25).
+  `dictionary_import_pick` opens Windows' Open dialog **in Rust** (CSV, text,
+  TSV; no path ever crosses the IPC boundary, so the page can't name a file
+  to read) and returns `{name, text}`: ≤ 5 MB ("too big to be a dictionary"
+  past that), decoded as UTF-8 (BOM or not), UTF-16 with a BOM (Excel's and
+  Notepad's "Unicode"), else Windows-1252 byte for byte (Excel's plain
+  "CSV"). `dictionary_export_save {text, name, kind}` opens the Save dialog
+  (CSV or text) and writes the page's text; the saved file's name back, or
+  `null` on Cancel. The log has sizes only, never a file's name or words.
+  Debug-only `e2e_dictionary_file` names the file the next Import… reads or
+  Export… writes (a test run never opens a dialog).
 - **`dictionary/learn.rs`** — **"Suggest words from your corrections"**
   (`config.learn_words`, default on; Wispr Flow's dictionary auto-learn as
   measured from its shipped code — `references/wispr-flow/rea-teardown/
@@ -195,7 +209,7 @@ The correction dictionary: near-miss (fuzzy) matching, the Whisper vocabulary's 
 
 ## The Dictionary view
 
-- **`DictionaryView.svelte`** =
+- **`views/dictionary/DictionaryView.svelte`** =
   the dictionary (promoted out of Settings → Advanced; syncs with
   Settings' cfg copy via `yap-dictionary-changed`/`-external` events) in two
   sections over the one list: **Corrections** (heard → replace with, the ≈
@@ -209,3 +223,68 @@ The correction dictionary: near-miss (fuzzy) matching, the Whisper vocabulary's 
   turns snippets into corrections. Settings → Dictation → Typing into apps has "Say
   “press enter” to send" (`voiceEnter`) under Auto-submit; the key picker
   shows when either is on.
+- **For a dictionary of hundreds** (2026-10-25; ROADMAP's "The Dictionary
+  view", Wispr Flow's dictionary). A sticky bar over the list:
+  - **Search** (Ctrl+F, Esc clears): filters as you type over what's heard
+    and what's written — a word's every heard-as variant, a snippet's
+    phrase and text —, every word of the query, any case or accent
+    (`dictionaryList.js` `matches`); "N of M match". Ctrl+F is the page's
+    only when nothing's over it: with Settings open it's Settings' search
+    (any visible `aria-modal`, the right-click menu, the confirm dialog or
+    the import preview takes it), and the in-page hotkey fallback
+    (`settings/hotkeyFallback.svelte.js`, capture phase) still wins a
+    binding of the same keys.
+  - **Stars and sorts**: ☆ on every row (and Star in its right-click menu)
+    sets `starred` (config.json keeps it only when set; Settings'
+    `cleanConfig` keeps it too). Sort: **Starred first** (the default; then
+    the order added), **A–Z** (a correction by its word, a snippet by its
+    phrase), **Most used** (`dictionary_usage`: uses, then the last use; a
+    Used column shows the count) and **Recently added** (the list's own
+    order backwards: + Add, a suggested word and an import all append).
+    The sort is remembered in the window's `localStorage`. The order is
+    worked out when the search, the sort or the entries change — never as
+    a row is typed in, so a row doesn't jump from under the cursor; a row
+    just added with + Add stays at the bottom whatever the search or sort.
+  - **Select several**: a checkbox on every row (and one per section for
+    every row shown), Shift-click for a range, Ctrl+A in the list (outside
+    a text box) for everything shown, drawn or not; Esc clears, Delete asks
+    to delete. The bar for the selection: Star / Unstar, ≈ Catch
+    near-misses, Exact only, Export…, Delete… (asked with
+    `ui/ConfirmDialog.svelte`: "Delete 3 entries? … You can undo it
+    straight after.") and ✕; ← → move between its buttons. A **delete has
+    Undo** in its toast — the bulk one and a row's × alike: the entries go
+    back where they were (`restoreRemoved`, matched by what they say), from
+    the view or, after leaving it, on config.json.
+  - **Import…** (`dictionary/files.rs` picks and reads; `dictionaryFile.js`
+    reads what's in it): **CSV** — comma, semicolon or tab; quotes, `""`
+    and line breaks inside quotes; a header naming the columns (Heard,
+    Written, Kind, Near-misses, Starred, or the obvious other names) or
+    none (heard, written; one column = words) — or **text**, one entry a
+    line: `heard → written` (or `->`, `=>`) or a word alone; `# notes`,
+    bullets and quotes around words are left out. A word alone becomes a
+    correction of itself ("Zentrix → Zentrix"). Then a **preview**
+    (`ImportPreview.svelte`) before anything changes: **to add** (each
+    ticked, untick to leave out), **spelled differently** — the same thing
+    heard written another way, or a word you have spelled another way
+    ("JSON" here, "Json" there) — with Keep yours (the default) / Use the
+    file's each, **already in your dictionary**, and **left out** (lines
+    said twice, and lines that aren't an entry, with their line number and
+    why). Add appends what's new, respells what you chose (every
+    correction spelling that word), and its toast has Undo (`undoImport`).
+  - **Export…** — everything (the bar's Export…) or the selection (the
+    selection's): **CSV** (snippets, stars and ≈ kept; a BOM so Excel
+    reads it as UTF-8; Import… reads it back the same) or **text**
+    (`heard → written` a line, corrections only: "Snippets need CSV" says
+    how many were left out).
+  - **2,000 entries**: 200 rows drawn at a time, more as the end of the
+    list scrolls into view (or "Show 200 more"), and off-screen rows skip
+    layout (`content-visibility`). Measured in the stub debug build
+    (`e2e/dictionary.spec.js`): the view on screen ~150–200 ms, a search
+    ~10 ms, a keystroke in a row ~10 ms. Import… / Export… load when first
+    used (the main window's chunk stays under 700 KB).
+  - Leaving the view with an edit not saved yet (the half-second wait)
+    saves it at once.
+  - Tests: `e2e/dictionary-list.spec.js` (the pure parts, no app: search,
+    sorts, CSV and text parsing, the import's plan and choices, export
+    round trips, both Undos) and `e2e/dictionary.spec.js` (the view, in
+    light and dark).

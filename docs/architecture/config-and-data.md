@@ -35,7 +35,8 @@
   dictate, stays warm a minute and closes, at once on Bluetooth; on, it's
   open the whole time Yap runs, as before 2026-10-22; `dictation/mic.rs`), recording_mode,
   overlay_position, dictionary (`DictionaryEntry`: from/to + `fuzzy` (default
-  on) + `snippet` (default off)), append_trailing_space, smart_spacing ("Match
+  on) + `snippet` (default off) + `starred` (default off, written only when
+  set; 2026-10-25)), append_trailing_space, smart_spacing ("Match
   the text around the cursor", default on), screen_names ("Spell names the
   way they're written on screen", default on; `dictionary/screen_terms.rs`),
   chat_no_full_stop ("Leave the full
@@ -286,7 +287,10 @@
   an installed copy, by the uninstaller's "Delete the application data".
 - Dictionary usage: `%APPDATA%/yap/dictionary_usage.json` — each dictionary
   word's use count and last use, which orders the Whisper vocabulary prompt
-  (`dictionary/dict_usage.rs`). Safe to delete (the order falls back to the list's).
+  (`dictionary/dict_usage.rs`) and the Dictionary view's "Most used" sort.
+  Safe to delete (the order falls back to the list's).
+- The Dictionary view's sort: the main window's `localStorage`
+  (`yap.dictionarySort`), a convenience of that window, never config.json.
 - Hints: `%APPDATA%/yap/hints.json` — how often each push-to-talk coaching hint
   showed, when the last did, and whether double-tap has been used (`dictation/coaching.rs`).
 - Quieted apps: `%APPDATA%/yap/quieted_apps.json` — only while a dictation

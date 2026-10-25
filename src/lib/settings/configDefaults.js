@@ -153,6 +153,8 @@ export function cleanConfig(cfg) {
         // Snippets (DictionaryView) ride along in this copy: keep the flag,
         // or this auto-save would turn them into corrections.
         snippet: !!e.snippet,
+        // A star too (the Dictionary view's), written only when set.
+        ...(e.starred ? { starred: true } : {}),
       }))
       .filter((e) => e.from),
     appRoutes: (cfg.appRoutes || [])

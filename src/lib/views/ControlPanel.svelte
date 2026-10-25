@@ -38,7 +38,7 @@
   import MeetingsView from './MeetingsView.svelte';
   import HomeView from './home/HomeView.svelte';
   import InsightsView from './InsightsView.svelte';
-  import DictionaryView from './DictionaryView.svelte';
+  import DictionaryView from './dictionary/DictionaryView.svelte';
   import UploadView from './UploadView.svelte';
   import NotesView from './notes/NotesView.svelte';
   import TasksView from './TasksView.svelte';
