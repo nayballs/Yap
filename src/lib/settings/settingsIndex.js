@@ -110,7 +110,6 @@ export const SETTINGS_INDEX = [
 
   // ---- Voice Assistant ----
   { page: 'voice', section: 'Assistant shortcut', label: 'Assistant shortcut', desc: 'Ask out loud from any app', keywords: 'shortcut hotkey assistant voice ask', anchor: 'assistant-shortcut' },
-  { page: 'voice', section: 'Assistant shortcut', label: 'Stop listening when I pause', desc: 'A pause after your question sends it', keywords: 'pause silence stop listening automatically auto end hands-free quiet voice activity', anchor: 'stop-on-pause', toggle: 'assistantStopOnPause' },
   { page: 'voice', section: 'Assistant shortcut', label: 'Show the answer on the Yap bar', desc: 'Your question and its answer above the bar', keywords: 'answer card bar', anchor: 'answer-card', toggle: 'assistantAnswerCard' },
   { page: 'voice', section: 'Read aloud', label: 'Read aloud shortcut', desc: 'Select text in any app and hear it, word by word on the Yap bar', keywords: 'read aloud shortcut hotkey selection speak text to speech tts dyslexia reading karaoke', anchor: 'read-shortcut' },
   { page: 'voice', section: 'Opening apps', label: 'Let Yap open apps when you ask', desc: '“Open Spotify”', keywords: 'open apps launch start programs', anchor: 'open-apps', toggle: 'openApps' },

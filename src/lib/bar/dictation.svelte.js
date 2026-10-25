@@ -54,12 +54,6 @@ export const dictation = $state({
   // 'idle' | 'listening' | 'thinking' | 'speaking'. Not idle, the capsule is
   // the assistant's ("Ask Yap…", "Thinking…", "Speaking…" with ■).
   assistant: 'idle',
-  // A Voice Assistant question about to end on a pause ("Stop listening
-  // when I pause", dictation/pause.rs: `yap-assistant-pause`): how long is left (ms)
-  // as it starts running out, 0 while it isn't; `pauseKey` restarts the
-  // capsule's run-down line each time.
-  pauseMs: 0,
-  pauseKey: 0,
   // A saved transform (dictation/transforms.rs, `yap-transform`): its name, and
   // 'running' ("Polish…" while the AI works), 'done' ("Polish ✓ · Undo" for
   // `offerMs`) or 'unchanged' ("No changes needed"); '' for a dictation.
@@ -150,7 +144,6 @@ export function initDictation() {
       dictation.micSilent = '';
       dictation.micSilentFull = '';
       dictation.micWaiting = false;
-      dictation.pauseMs = 0;
       clearTimeout(capTimer);
       dictation.capText = '';
       dictation.capShow = false;
@@ -182,16 +175,6 @@ export function initDictation() {
   // first frame is already the assistant's.
   listen('yap-assistant', (e) => {
     dictation.assistant = e.payload?.phase || 'idle';
-  });
-  // The pause after a question is running out (or you spoke again: null).
-  listen('yap-assistant-pause', (e) => {
-    const left = e.payload?.leftMs;
-    if (left > 0) {
-      dictation.pauseMs = left;
-      dictation.pauseKey += 1;
-    } else {
-      dictation.pauseMs = 0;
-    }
   });
   listen('yap-transform', (e) => {
     dictation.transform = e.payload?.name || '';

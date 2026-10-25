@@ -165,7 +165,6 @@ One folder per area (an area's `<area>.rs` lists its modules); a big module's pa
 - `chat/stream.rs` — streaming answers: SSE from every provider (tool calls reassembled and checked, a whole answer when streaming fails), a step's text held until it's an answer (a forced search's never shown), ■ Stop, a newer question in the conversation replacing the turn still answering, a local stream stepping aside for a dictation; the checked answer replaces what streamed.
 - `chat/commands.rs` / `chat/turn.rs` — the Chat view's commands; one chat turn (`chat_turn`: the prompt, the eager RAG, the tool loop or a small model's web pipeline, the checks).
 - `chat/assistant.rs` — the Voice Assistant: ask Chat out loud from any app, spoken from the answer's first sentence; off during meetings.
-- `dictation/pause.rs` — "Stop listening when I pause": a 1.5 s pause ends a Voice Assistant question (the mic's level against a learned noise floor, checked by the live preview's words; never before speech, never under a held key); pure.
 
 **Snip to Chat** — [snip.md](./docs/architecture/snip.md)
 - `snip.rs` — drag a box over any screen, into Chat: Win+Alt+S / ✂ on the bar / tray / Chat's + / saying "snip"; the conversation Chat shows, else a new one; never sent by itself; the `yapsnip` scheme.

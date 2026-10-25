@@ -53,7 +53,7 @@ pub(crate) use rewrite::commands_model;
 #[cfg(debug_assertions)]
 pub(crate) use rewrite::Rewritten;
 #[cfg(debug_assertions)]
-pub(crate) use robot::{AskedAloud, Press, Robot};
+pub(crate) use robot::Robot;
 
 pub(crate) const TARGET_SAMPLE_RATE: u32 = 16_000;
 
@@ -183,15 +183,6 @@ pub(crate) fn destination(edit: bool, assistant: bool, chat_armed: bool, chat_fo
 /// nothing else does (`notice.rs`: one notice, one place). Other errors
 /// (`yap-error`) are the main window's toasts.
 pub const DICTATION_ERROR: &str = "yap-dictation-error";
-
-/// "Stop listening when I pause" for one Voice Assistant recording
-/// (`pause.rs`): fed by the mic's audio, the start chime and the live
-/// preview; read by its watch thread (`spawn_pause_watch`).
-struct PauseSlot {
-    /// The recording it's for (`rec_session`).
-    session: u64,
-    pause: crate::dictation::pause::Pause,
-}
 
 /// Test mode only (`e2e::e2e_dictation_mic`): the mic's audio arrives as
 /// digital silence, as a muted mic's does — the dead-mic watchdog's case,
@@ -424,9 +415,6 @@ struct Shared {
     /// ([`destination`], at record start): transcribed, corrected and handed
     /// to `assistant::heard` — no cleanup, wake word, paste or history.
     assistant: AtomicBool,
-    /// The Voice Assistant recording's pause watch ("Stop listening when I
-    /// pause"); `None` for any other recording, or with the setting off.
-    pause: Mutex<Option<PauseSlot>>,
     /// Text selected in the target app, captured at edit-mode record-start. Empty
     /// (`None`) → "write mode" (generate new text from the instruction alone)
     /// — unless `rewrite_last`.
@@ -677,7 +665,6 @@ impl Pipeline {
             edit_mode: AtomicBool::new(false),
             to_chat: AtomicBool::new(false),
             assistant: AtomicBool::new(false),
-            pause: Mutex::new(None),
             selection: Mutex::new(None),
             rewrite_last: Mutex::new(None),
             processing: AtomicBool::new(false),

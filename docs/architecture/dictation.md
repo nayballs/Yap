@@ -242,18 +242,11 @@ to **Run again** from Home.
   `run_stt` hands its transcript, after `apply_corrections` only, to
   `assistant::heard` (`ask_assistant`): no cleanup, Command, paste or
   history; nothing heard → "Yap didn't catch a question"; a cancel isn't
-  kept for Undo; every early end calls `assistant::nothing`. **A pause ends
-  the assistant's question** ("Stop listening when I pause",
-  `assistant_stop_on_pause`, on; [chat-and-assistant.md](./chat-and-assistant.md),
-  `dictation/pause.rs`): `start_recording` arms a `PauseSlot` for the session
-  (`arm_pause`, an assistant recording only), `take_audio` feeds it the
-  mic's audio, `fire_pending_start` says "speak now", `stream_partials`
-  hands it each tick's words (`pause_words`, with the buffer length the
-  tick read), and `spawn_pause_watch` stops the recording on its verdict
-  as the key would — in toggle mode, or push-to-talk locked hands-free
-  (`gesture::hands_free`), never under a held key. Dictation itself never
-  ends on a pause. `stop_and_transcribe` does nothing for a recording
-  that's already stopped (a press racing the pause).
+  kept for Undo; every early end calls `assistant::nothing`. Nothing ends a
+  recording on a pause, the assistant's question included ("Stop listening
+  when I pause" was removed 2026-10-25: [chat-and-assistant.md](./chat-and-assistant.md)).
+  `stop_and_transcribe` does nothing for a recording that's already stopped
+  (two stops racing).
   **Barge-in**: `start_recording` first calls `tts::stop_for_dictation()` —
   a spoken reply stops before anything records, and if Yap was audible in
   the last ~450 ms the pre-roll is left out (it would hold Yap's voice).

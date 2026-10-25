@@ -551,7 +551,6 @@ pub fn run() {
             #[cfg(debug_assertions)]
             shell::e2e::e2e_upload_pace,
             #[cfg(debug_assertions)]
-            shell::e2e::e2e_assistant_audio,
             #[cfg(debug_assertions)]
             shell::e2e::e2e_snip,
             #[cfg(debug_assertions)]

@@ -418,9 +418,7 @@ there can move margins: compare a page before and after.
   answer", the example note (names the shortcut once set) linking to
   Commands. **Assistant shortcut** (`#settings-assistant-shortcut`,
   `assistantHotkey`, clearable; a quiet line while none is set; its line
-  follows the recording mode and the pause setting), "Stop listening when I
-  pause" (`assistantStopOnPause`, row `stop-on-pause`; `dictation/pause.rs`: its line
-  says "Asking hands-free (a double-tap)…" in push-to-talk), "Show the
+  follows the recording mode), "Show the
   answer on the Yap bar" (`assistantAnswerCard`). **Opening apps** (`OpenAppsSettings.svelte`,
   `#settings-opening-apps`: `openApps`, Nicknames `appNicknames`, Apps Yap
   found with a switch each → `appsBlocked`). **Web search**

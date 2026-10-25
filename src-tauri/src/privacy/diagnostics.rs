@@ -115,7 +115,6 @@ const COPY: &[&str] = &[
     "speakWhen",
     "talkBackHandsFree",
     "assistantAnswerCard",
-    "assistantStopOnPause",
     "openApps",
     "webSearch",
     "webSearchNative",

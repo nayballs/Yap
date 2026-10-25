@@ -151,9 +151,10 @@ impl Gesture {
     }
 
     /// The recording is locked hands-free (a double-tap, or one started
-    /// elsewhere and followed): nobody's holding it with the key, so the
-    /// Voice Assistant's pause may end it (`pause.rs`). A hold, or a tap
-    /// still waiting for its second press, isn't.
+    /// elsewhere and followed): nobody's holding it with the key. A hold, or
+    /// a tap still waiting for its second press, isn't. (The tests' word for
+    /// the state.)
+    #[cfg(test)]
     pub fn hands_free(&self) -> bool {
         matches!(self.state, State::LockHeld | State::Locked)
     }

@@ -22,7 +22,6 @@ pub mod mics;
 pub mod mic_watch;
 pub mod mute;
 pub mod partials;
-pub mod pause;
 pub mod pipeline;
 pub mod recent_audio;
 pub mod slow;

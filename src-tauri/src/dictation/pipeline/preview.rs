@@ -74,7 +74,7 @@ fn stream_partials(shared: Arc<Shared>, language: Option<String>, translate: boo
 
         // Snapshot this tick's window under the buffer lock — only the bounded
         // window is cloned, never the whole recording.
-        let (win, rel_cut, abs_cut, len) = {
+        let (win, rel_cut, abs_cut) = {
             let buf = match shared.buffer.lock() {
                 Ok(b) => b,
                 Err(_) => break,
@@ -85,13 +85,12 @@ fn stream_partials(shared: Arc<Shared>, language: Option<String>, translate: boo
             }
             match session.plan(len, &buf) {
                 crate::dictation::partials::TickPlan::Normal => {
-                    (buf[session.window_start..len].to_vec(), None, 0usize, len)
+                    (buf[session.window_start..len].to_vec(), None, 0usize)
                 }
                 crate::dictation::partials::TickPlan::Advance { cut } => (
                     buf[session.window_start..len].to_vec(),
                     Some(cut - session.window_start),
                     cut,
-                    len,
                 ),
             }
         };
@@ -160,9 +159,6 @@ fn stream_partials(shared: Arc<Shared>, language: Option<String>, translate: boo
         };
 
         let display = session.display();
-        // A Voice Assistant question's pause watch reads the words too: what
-        // the first `len` samples said (`pause.rs`).
-        shared.pause_words(len, &display);
         if !display.is_empty() && display != last_emitted {
             // Recording may have stopped while we were transcribing — don't emit
             // a stale partial over the authoritative final transcript.

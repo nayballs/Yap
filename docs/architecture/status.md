@@ -313,11 +313,9 @@ Assistant** (`chat/assistant.rs`, 2026-10-18: its own shortcut, ask Chat out lou
 from any app and hear the answer, a bar capsule and card, follow-ups,
 barge-in, off (and Yap silent) during a meeting recording or a call; the rules unit-tested and the whole
 flow e2e-tested from a staged transcript with the main window hidden and
-in front — not yet asked with a real mic and heard on speakers; since
-2026-10-23 a pause ends a question, `dictation/pause.rs`: unit-tested, e2e-tested
-with tones over a room's hiss through the real key path, and a robot test
-written with Windows TTS speech and Parakeet's live preview — not yet
-tried with a real voice in a real room), **opening
+in front — not yet asked with a real mic and heard on speakers; a pause
+ending a question, added 2026-10-23, was removed 2026-10-25 at the
+maintainer's request: thinking pauses cut questions short), **opening
 apps when asked** (`apps.rs`, 2026-10-18: "open Teams" in Chat or out loud,
 from the Start menu's list, with no model needed; nicknames, apps switched
 off, the `open_app`/`list_apps` tools; matching and the request patterns

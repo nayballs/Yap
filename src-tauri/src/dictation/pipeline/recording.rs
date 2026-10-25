@@ -17,7 +17,7 @@ use super::busy::{spawn_busy, Busy, Job};
 #[cfg(debug_assertions)]
 use super::{test_target, TEST_SILENT_MIC};
 use super::{
-    destination, dictation_began, dictation_ended, test_feed_on, AmpMeter, GestureSlot, Goes, Kept, PauseSlot,
+    destination, dictation_began, dictation_ended, test_feed_on, AmpMeter, GestureSlot, Goes, Kept,
     PendingStart, Shared, ASSISTANT_ARMED, CHAT_ARMED, CHAT_FOCUSED, DICTATION_ERROR, PREROLL_SAMPLES, UNDO_MS,
 };
 
@@ -29,13 +29,6 @@ const LIVE_FALLBACK_MS: u64 = 3_000;
 /// The dead-mic watchdog counts from when the stream is running; a stream
 /// still being opened after this long is watched anyway.
 const OPEN_PATIENCE_MS: u64 = 6_000;
-
-/// The bar's cue that a Voice Assistant question is about to end on a pause
-/// (`pause.rs`): `{leftMs}` as it starts running out, `{leftMs: null}` when
-/// you speak again.
-const PAUSE_CUE: &str = "yap-assistant-pause";
-/// How often the pause watch looks at its verdict.
-const PAUSE_POLL_MS: u64 = 50;
 
 /// A cancelled recording shorter than this (0.5 s at 16 kHz), or one that
 /// never heard a sound, isn't offered back: nothing worth transcribing.
@@ -95,13 +88,6 @@ impl Shared {
             || self.rec_session.load(Ordering::SeqCst) != session
         {
             return; // that recording is over
-        }
-        // "Speak now": a Voice Assistant question's pause watch counts
-        // speech from here (the chime itself left out, `pause.rs`).
-        if let Ok(mut p) = self.pause.lock() {
-            if let Some(slot) = p.as_mut().filter(|s| s.session == session) {
-                slot.pause.speak_now();
-            }
         }
         let token = start.token;
         let quiet: Option<crate::dictation::sound::Played> =
@@ -240,12 +226,6 @@ impl Shared {
                     }
                 }
                 None => {}
-            }
-            // A Voice Assistant question listens for its pause (`pause.rs`).
-            if let Ok(mut p) = self.pause.lock() {
-                if let Some(slot) = p.as_mut() {
-                    slot.pause.audio(samples);
-                }
             }
         }
         // The next scrolling-waveform bar (recording, or an active mic
@@ -544,9 +524,6 @@ impl Shared {
             self.end_without_mic();
             return;
         }
-        // A question for the Voice Assistant ends on a pause (before the
-        // start chime: the watch counts speech from it).
-        let pause_watch = self.arm_pause(session);
         // The start chime first (Yap's own sound is never silenced), then
         // the other apps go quiet / pause once it has played (`mute.rs`) —
         // once the mic is on: at once when it's warm, else at its first
@@ -590,100 +567,7 @@ impl Shared {
         // length — see `partials::PartialSession`).
         self.maybe_start_streaming();
         self.spawn_mic_watch(session);
-        if pause_watch {
-            self.spawn_pause_watch(session);
-        }
         tracing::info!("Recording started");
-    }
-
-    /// "Stop listening when I pause" (`pause.rs`): a fresh watch for
-    /// recording `session` if it's a Voice Assistant question and the
-    /// setting is on, else none. Its clock starts where the buffer is (the
-    /// pre-roll), as the live preview's does. `true`: watch it.
-    fn arm_pause(&self, session: u64) -> bool {
-        let on = self.assistant.load(Ordering::SeqCst)
-            && self.config.read().map(|c| c.assistant_stop_on_pause).unwrap_or(false);
-        let at = if on { self.buffer.lock().map(|b| b.len() as u64).unwrap_or(0) } else { 0 };
-        if let Ok(mut p) = self.pause.lock() {
-            *p = on.then(|| PauseSlot { session, pause: crate::dictation::pause::Pause::new(at) });
-        }
-        on
-    }
-
-    /// May a pause end the recording now? Toggle mode, or push-to-talk
-    /// locked hands-free — never under a held key (letting go ends it).
-    /// `g`: the gesture lock, held.
-    fn hands_free(&self, g: &GestureSlot) -> bool {
-        self.recording_mode() != "pushToTalk" || g.machine.hands_free()
-    }
-
-    /// The pause watch for Voice Assistant recording `session`: ends the
-    /// question when `pause.rs` says so, as a press of the shortcut would
-    /// (the stop chime, the transcription, the answer), and tells the bar
-    /// while a pause runs out. Until the recording ends, however it ends.
-    fn spawn_pause_watch(self: &Arc<Self>, session: u64) {
-        let shared = Arc::clone(self);
-        let spawned = std::thread::Builder::new().name("assistant-pause".into()).spawn(move || {
-            use crate::dictation::pause::Verdict;
-            let live = || shared.recording.load(Ordering::SeqCst) && shared.rec_session.load(Ordering::SeqCst) == session;
-            let mut cue = false;
-            loop {
-                std::thread::sleep(Duration::from_millis(PAUSE_POLL_MS));
-                if !live() {
-                    break;
-                }
-                let verdict = shared
-                    .pause
-                    .lock()
-                    .ok()
-                    .and_then(|p| p.as_ref().filter(|s| s.session == session).map(|s| (s.pause.verdict(), s.pause.heard_ms())));
-                let Some((verdict, heard_ms)) = verdict else { break };
-                // Under the gesture lock, as a key's stop is: a press at
-                // this very moment finds it stopped, or stops it itself.
-                let g = shared.gesture.lock().unwrap_or_else(|p| p.into_inner());
-                let verdict = if shared.hands_free(&g) { verdict } else { Verdict::Listen };
-                match verdict {
-                    Verdict::End(why) => {
-                        if live() {
-                            tracing::info!(?why, heard_ms, "Voice Assistant: you paused, so the question ends");
-                            shared.stop_and_transcribe();
-                        }
-                        break;
-                    }
-                    Verdict::Ending { left_ms } if !cue => {
-                        cue = true;
-                        let _ = shared.app.emit(PAUSE_CUE, serde_json::json!({ "leftMs": left_ms }));
-                    }
-                    Verdict::Listen if cue => {
-                        cue = false;
-                        let _ = shared.app.emit(PAUSE_CUE, serde_json::json!({ "leftMs": null }));
-                    }
-                    _ => {}
-                }
-                drop(g);
-            }
-            if cue {
-                let _ = shared.app.emit(PAUSE_CUE, serde_json::json!({ "leftMs": null }));
-            }
-            if let Ok(mut p) = shared.pause.lock() {
-                if p.as_ref().is_some_and(|s| s.session == session) {
-                    *p = None;
-                }
-            }
-        });
-        if let Err(e) = spawned {
-            tracing::warn!("Voice Assistant: no pause watch ({})", e);
-        }
-    }
-
-    /// The live preview read the recording's first `covered` samples as
-    /// `text`: the pause watch's words (`pause.rs`).
-    pub(super) fn pause_words(&self, covered: usize, text: &str) {
-        if let Ok(mut p) = self.pause.lock() {
-            if let Some(slot) = p.as_mut() {
-                slot.pause.words(covered as u64, text);
-            }
-        }
     }
 
     /// "Windows is blocking microphone access for desktop apps": in the
