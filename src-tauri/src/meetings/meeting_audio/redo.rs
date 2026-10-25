@@ -8,7 +8,9 @@
 //!   it), and every "You dictated here" marker (the audio has silence there;
 //!   the marker stays where it was);
 //! - **lines the person edited** (`TranscriptSegment::edited`,
-//!   `note_edits.rs`), as they wrote them: a new line of the same side over
+//!   `note_edits.rs`; a line they split is two edited lines), as they wrote
+//!   them, and **lines they deleted** (`removed`, `transcript_edits.rs`: a
+//!   mark with no words, whose place no new line fills): a new line of the same side over
 //!   one keeps only its words outside it (by its word times; without them
 //!   by its share of the line's place, and none when that's under half of
 //!   it) — whoever calls this (Transcribe again, a refined transcript)
@@ -208,7 +210,10 @@ pub fn rebuild(old: &[TranscriptSegment], old_breaks: &[usize], redone: &[Redone
         // (Markers the audio can't give again stay: a dictation, the mic
         // disconnected.)
         match recording_of(redone, seg.ts).filter(|_| !seg.dictated && seg.mic.is_none()) {
-            Some(i) if seg.edited => {
+            // A line the person edited (or split) stays as they wrote it,
+            // and one they deleted stays deleted: no new line takes its
+            // place (`notes/transcript_edits.rs`).
+            Some(i) if seg.edited || seg.removed => {
                 if let Some(p) = place(seg) {
                     fixed[i].push((seg.source.as_str(), p));
                 }

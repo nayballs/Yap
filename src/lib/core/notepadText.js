@@ -57,7 +57,7 @@ const who = speakerLabel;
 export function noteVoices(note) {
   const out = [];
   const add = (id) => !out.includes(id) && out.push(id);
-  for (const s of note?.transcript || []) if (!s.echo && !s.dictated && !s.failed && s.mic == null) add(speakerId(note.speakers, s));
+  for (const s of note?.transcript || []) if (!s.echo && !s.dictated && !s.failed && !s.removed && s.mic == null) add(speakerId(note.speakers, s));
   const toldApart = !out.includes('them') && out.some((id) => id.startsWith('them-'));
   for (const id of Object.keys(note?.speakers || {})) {
     const v = speakerId(note.speakers, { speaker: id });
@@ -173,7 +173,7 @@ export function suggestionWhy(note, card) {
 }
 
 /** Spoken lines worth sharing: no echo (the call through the speakers), no markers. */
-const spoken = (transcript) => (transcript || []).filter((s) => !s.echo && !s.dictated && !s.failed && s.mic == null);
+const spoken = (transcript) => (transcript || []).filter((s) => !s.echo && !s.dictated && !s.failed && !s.removed && s.mic == null);
 
 /**
  * The note as Markdown, laid out as "Save as .md" writes it (commands.rs
@@ -252,7 +252,9 @@ export function transcriptItems(transcript, breaks = [], { showEcho = false, que
   const items = [];
   let group = null;
   (transcript || []).forEach((s, i) => {
-    if (s.dictated) {
+    if (s.removed) {
+      // A line the person deleted (notes/transcript_edits.rs): nothing shows.
+    } else if (s.dictated) {
       if (!q) items.push({ kind: 'dictated', key: `d${i}` });
       group = null;
     } else if (s.mic != null) {
@@ -378,8 +380,58 @@ export function withLineEdit(transcript, edit) {
   const line = edit.line;
   if (!old || old.source !== line.source || old.ts !== line.ts || (old.startMs ?? null) !== (line.startMs ?? null)) return null;
   const next = transcript.slice();
-  next[edit.index] = { ...old, text: line.text, edited: !!line.edited, original: line.original || '' };
+  next[edit.index] = { ...old, text: line.text, edited: !!line.edited, original: line.original || '', removed: !!line.removed };
+  // Deleted: its words and their times go with it; put back: as it was.
+  if (line.removed) next[edit.index].words = [];
+  else if (Array.isArray(line.words)) next[edit.index].words = line.words;
   return next;
+}
+
+/**
+ * The word a split at cursor `pos` (an index into `text`, as a textarea's
+ * selectionStart) starts the second line with, counted from 0 — a cursor
+ * inside a word starts the second line with that word — or null when one
+ * side would have no words (notes/transcript_edits.rs `transcript_line_split`).
+ */
+export function splitWordAt(text, pos) {
+  const t = text || '';
+  const total = (t.match(/\S+/g) || []).length;
+  const before = (t.slice(0, pos).match(/\S+/g) || []).length;
+  const inWord = pos > 0 && pos < t.length && /\S/.test(t[pos - 1]) && /\S/.test(t[pos]);
+  const k = inWord ? before - 1 : before;
+  return k > 0 && k < total ? k : null;
+}
+
+/** A transcript with line `index` split into `lines` (two parts); null when it isn't the line it was. */
+export function withLineSplit(transcript, index, lines) {
+  if (!Array.isArray(transcript) || !Array.isArray(lines) || lines.length !== 2) return null;
+  const old = transcript[index];
+  if (!old || old.source !== lines[0].source || old.ts !== lines[0].ts || (old.startMs ?? null) !== (lines[0].startMs ?? null)) return null;
+  return [...transcript.slice(0, index), ...lines, ...transcript.slice(index + 1)];
+}
+
+/** Stop marks after line `index` move on one: it's two lines now. */
+export function breaksAfterSplit(breaks, index) {
+  return (breaks || []).map((b) => (b > index ? b + 1 : b));
+}
+
+/** Whether line `seg` can go back to what Yap heard: edited, and heard differently. */
+export function canRevert(seg) {
+  return !!seg?.edited && !!seg.original?.trim() && seg.original !== seg.text;
+}
+
+/** A task as `tasks_set` / `tasks_archive` name it (notes/tasks.rs `TaskRef`). */
+export function taskRef(noteId, t) {
+  return t.own != null
+    ? { own: t.own, noteId: noteId || null, text: t.text }
+    : { noteId, line: t.line, text: t.text };
+}
+
+/** "3 of 5 done" (a meeting's Tasks tab). */
+export function tasksDoneLine(tasks) {
+  const total = (tasks || []).length;
+  const done = (tasks || []).filter((t) => t.done).length;
+  return { done, total, label: total ? `${done} of ${total} done` : 'No tasks yet' };
 }
 
 // A checkbox line: "- [ ] words" (also "*", "+", "•"), any indent.

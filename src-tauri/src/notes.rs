@@ -12,7 +12,9 @@
 
 pub mod commands;
 pub mod note_edits;
+pub mod retention;
 pub mod tasks;
+pub mod transcript_edits;
 
 #[cfg(not(test))]
 use std::path::PathBuf;
@@ -96,6 +98,12 @@ pub struct TranscriptSegment {
     /// summaries skip it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mic: Option<String>,
+    /// The person deleted this line (`notes/transcript_edits.rs`): its words
+    /// are gone, its side and place stay (no text) so Transcribe again and
+    /// the refine never bring them back, and Undo can put them back. Not
+    /// talk: no view, summary or search shows it.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub removed: bool,
 }
 
 impl TranscriptSegment {
@@ -144,9 +152,10 @@ impl TranscriptSegment {
     }
 
     /// Talk the summaries read: neither echo nor a marker (a dictation, a
-    /// stretch that couldn't be transcribed, the mic disconnected).
+    /// stretch that couldn't be transcribed, the mic disconnected, a line
+    /// the person deleted).
     pub fn is_talk(&self) -> bool {
-        !self.echo && !self.dictated && !self.failed && self.mic.is_none()
+        !self.echo && !self.dictated && !self.failed && self.mic.is_none() && !self.removed
     }
 }
 
@@ -280,6 +289,16 @@ pub struct Note {
     /// whether the user locked it, merges and refused names.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub speakers: Speakers,
+    /// Tasks of the summary the person archived in the Tasks view, by their
+    /// words as written there (`tasks.rs`): no longer listed there. Their
+    /// ticks stay in the summary.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub archived_tasks: Vec<String>,
+    /// When the meeting's transcript was deleted by "Delete meeting
+    /// transcripts after" (unix seconds; 0 = never): its notes, summary and
+    /// tasks stay (`notes/retention.rs`).
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub transcript_deleted_ts: u64,
 }
 
 fn is_zero(n: &u64) -> bool {
@@ -408,6 +427,10 @@ struct Store {
     actions: Vec<Action>,
     #[serde(default)]
     notes: Vec<Note>,
+    /// Tasks the person added themselves (`tasks.rs`): in a meeting's Tasks
+    /// tab (`note_id`), or in the Tasks view with no meeting.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    tasks: Vec<tasks::OwnTask>,
 }
 
 impl Default for Store {
@@ -416,6 +439,7 @@ impl Default for Store {
             folders: default_folders(),
             actions: default_actions(),
             notes: Vec::new(),
+            tasks: Vec::new(),
         }
     }
 }
@@ -447,6 +471,7 @@ fn load_from_disk() -> Store {
                 folders: default_folders(),
                 actions: default_actions(),
                 notes,
+                tasks: Vec::new(),
             })
         }) {
             Ok(store) => store,
@@ -480,24 +505,82 @@ pub fn save_now() -> Result<(), crate::shell::saving::SaveError> {
     saved()
 }
 
-/// Save the store: a failure is recorded by [`SAVER`] (see [`saved`]).
+/// notes.json's writes, in order and outside the store's lock
+/// (`saving::Ordered`): [`save_to_disk`] takes a snapshot under the lock,
+/// [`with_store`] writes it once the lock is let go.
 #[cfg(not(test))]
+static ORDER: crate::shell::saving::Ordered = crate::shell::saving::Ordered::new();
+
+#[cfg(not(test))]
+fn order<R>(f: impl FnOnce(&crate::shell::saving::Ordered) -> R) -> R {
+    f(&ORDER)
+}
+
+// Unit tests: an order per test thread, as each has a store of its own.
+#[cfg(test)]
+thread_local! {
+    static ORDER: crate::shell::saving::Ordered = const { crate::shell::saving::Ordered::new() };
+}
+
+#[cfg(test)]
+fn order<R>(f: impl FnOnce(&crate::shell::saving::Ordered) -> R) -> R {
+    ORDER.with(|o| f(o))
+}
+
+// The snapshot this thread took under the lock, waiting to be written.
+thread_local! {
+    static PENDING: std::cell::RefCell<Option<(u64, String)>> = const { std::cell::RefCell::new(None) };
+}
+
+/// Save the store: called under its lock, it takes a snapshot (the JSON, a
+/// number in order); the write happens once the lock is let go
+/// ([`write_pending`]). A failure is recorded by [`SAVER`] (see [`saved`]).
 fn save_to_disk(store: &Store) {
     // A model evaluation (`eval.rs`) keeps its notes in memory only.
+    #[cfg(not(test))]
     if crate::ai::eval::active() {
         return;
     }
-    let _ = SAVER.write_json(&notes_path(), store, false);
+    match serde_json::to_string(store) {
+        Ok(json) => {
+            let seq = order(|o| o.take());
+            PENDING.with(|p| *p.borrow_mut() = Some((seq, json)));
+        }
+        Err(_) => {
+            // Yap's own types always serialise; if not, `write_json` logs it
+            // and records a failed save (nothing is written).
+            let _ = SAVER.write_json(std::path::Path::new("notes.json"), store, false);
+        }
+    }
+}
+
+/// Write the snapshot this thread took, if any (outside the store's lock):
+/// skipped when a newer one is on disk already.
+fn write_pending() {
+    let Some((seq, json)) = PENDING.with(|p| p.borrow_mut().take()) else {
+        return;
+    };
+    #[cfg(not(test))]
+    let path = Some(notes_path());
+    #[cfg(test)]
+    let path = TEST_PATH.with(|p| p.borrow().clone());
+    if let Some(path) = path {
+        order(|o| o.write(seq, || SAVER.write(&path, &json)));
+    }
 }
 
 #[cfg(not(test))]
 fn with_store<R>(f: impl FnOnce(&mut Store) -> R) -> R {
-    let mut guard = match STATE.lock() {
-        Ok(g) => g,
-        Err(poisoned) => poisoned.into_inner(),
+    let out = {
+        let mut guard = match STATE.lock() {
+            Ok(g) => g,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+        let store = guard.get_or_insert_with(load_from_disk);
+        f(store)
     };
-    let store = guard.get_or_insert_with(load_from_disk);
-    f(store)
+    write_pending();
+    out
 }
 
 // Unit tests never read or write the real notes.json: each test thread gets
@@ -515,15 +598,10 @@ thread_local! {
 }
 
 #[cfg(test)]
-fn save_to_disk(store: &Store) {
-    if let Some(path) = TEST_PATH.with(|p| p.borrow().clone()) {
-        let _ = SAVER.write_json(&path, store, false);
-    }
-}
-
-#[cfg(test)]
 fn with_store<R>(f: impl FnOnce(&mut Store) -> R) -> R {
-    TEST_STORE.with(|s| f(&mut s.borrow_mut()))
+    let out = TEST_STORE.with(|s| f(&mut s.borrow_mut()));
+    write_pending();
+    out
 }
 
 /// The model evaluation (`eval.rs`): each scenario starts from a fresh store
@@ -896,6 +974,24 @@ pub fn all() -> Vec<Note> {
     with_notes(|notes| notes.clone())
 }
 
+/// The tasks the person added themselves (`tasks.rs`).
+pub fn own_tasks() -> Vec<tasks::OwnTask> {
+    with_store(|s| s.tasks.clone())
+}
+
+/// Change the person's own tasks and the notes together, under the store
+/// lock: `f` returns its result and whether it changed anything (then it's
+/// saved). An error from `f` changes nothing (`f` checks before it writes).
+pub fn with_tasks<R>(f: impl FnOnce(&mut Vec<tasks::OwnTask>, &mut Vec<Note>) -> Result<(R, bool), String>) -> Result<R, String> {
+    with_store(|store| {
+        let (out, changed) = f(&mut store.tasks, &mut store.notes)?;
+        if changed {
+            save_to_disk(store);
+        }
+        Ok(out)
+    })
+}
+
 /// A cheap fingerprint of every note: a hash of each one's id, last change
 /// and length — whether anything changed since the last look, without a
 /// copy of the notes (meeting search's index, `search/index.rs`).
@@ -940,6 +1036,8 @@ pub fn create(title: &str, content: &str, source: &str, folder: &str) -> Note {
             updated_ts: now,
             event: None,
             speakers: Speakers::new(),
+            archived_tasks: Vec::new(),
+            transcript_deleted_ts: 0,
         };
         store.notes.push(note.clone());
         save_to_disk(store);
@@ -1103,6 +1201,24 @@ pub fn modify<R>(
         let (result, changed) = f(note)?;
         if changed {
             note.updated_ts = now_secs();
+            save_to_disk(store);
+        }
+        Ok(result)
+    })
+}
+
+/// [`modify`], leaving `updated_ts` as it was: a change Yap makes by itself
+/// that nobody wrote (a transcript deleted after its days), so the note
+/// doesn't float to the top of the list as edited "now".
+pub fn modify_quietly<R>(id: u64, f: impl FnOnce(&mut Note) -> Result<(R, bool), String>) -> Result<R, String> {
+    with_store(|store| {
+        let note = store
+            .notes
+            .iter_mut()
+            .find(|n| n.id == id)
+            .ok_or_else(|| format!("Note with ID {id} not found"))?;
+        let (result, changed) = f(note)?;
+        if changed {
             save_to_disk(store);
         }
         Ok(result)
@@ -1315,6 +1431,8 @@ pub fn set_enhanced(id: u64, enhanced: &str, at_hash: &str) -> Result<(), String
 pub fn delete(id: u64) {
     with_store(|store| {
         store.notes.retain(|n| n.id != id);
+        // Tasks added in its Tasks tab go with it (note ids come round again).
+        store.tasks.retain(|t| t.note_id != Some(id));
         save_to_disk(store);
     });
     // Its meeting audio goes with it (meeting_audio.rs).
