@@ -3,6 +3,12 @@
 // in meetings" section and the same switch in Settings → Meetings.
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
+import { cancelDownload, isCancelled } from '../core/downloads.js';
+
+/** Cancel speaker model `id`'s download (Rust's `registry::cancel_id`). */
+export function cancelDiarization(id) {
+  return cancelDownload(`diarization:${id}`);
+}
 
 export const diarization = $state({
   models: [], // registry::ModelInfo rows
@@ -62,7 +68,8 @@ export async function downloadDiarization(id) {
     await invoke('diarization_download', { id });
     return true;
   } catch (e) {
-    diarization.error = `Couldn't download ${name}: ${e}`;
+    // Cancelled: nothing to say (no half-downloaded file stays).
+    if (!isCancelled(e)) diarization.error = `Couldn't download ${name}: ${e}`;
     return false;
   } finally {
     diarization.downloading = null;

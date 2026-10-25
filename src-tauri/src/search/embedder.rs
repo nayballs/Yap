@@ -167,6 +167,10 @@ struct Progress {
     percent: u8,
     downloaded_bytes: u64,
     total_bytes: u64,
+    /// The speed and the time left (`shell/download.rs`).
+    bytes_per_sec: u64,
+    eta_secs: Option<u64>,
+    cancel_id: &'static str,
 }
 
 /// Download what's missing: the engine, then the model. One at a time.
@@ -182,10 +186,14 @@ pub async fn install(app: &AppHandle) -> Result<(), String> {
     result
 }
 
+/// What Cancel cancels (`download_cancel`): the engine's download and the model's.
+pub const CANCEL_ID: &str = "search";
+
 async fn install_inner(app: &AppHandle) -> Result<(), String> {
     use crate::speakers::diarize::registry as dl;
+    let ticket = crate::shell::download::Ticket::begin(CANCEL_ID).ok_or_else(|| "The search model is already downloading".to_string())?;
     if !runtime_installed() {
-        crate::ai::local_llm::models::ensure_runtime("search", Some(app)).await?;
+        crate::ai::local_llm::models::ensure_runtime("search", Some(app), &ticket).await?;
     }
     if model_installed() {
         return Ok(());
@@ -207,14 +215,21 @@ async fn install_inner(app: &AppHandle) -> Result<(), String> {
     let partial = dir.join(format!("{MODEL_FILE}.partial"));
     tracing::info!(bytes = src.size, "Meeting search: downloading the search model");
     let total = src.size;
-    let last = std::sync::atomic::AtomicU8::new(255);
-    let report = |got: u64| {
-        let pct = (got * 100).checked_div(total).map_or(100, |p| p.min(100) as u8);
-        if last.swap(pct, Ordering::Relaxed) != pct {
-            let _ = app.emit("yap-search-download", Progress { stage: "model", percent: pct, downloaded_bytes: got, total_bytes: total });
-        }
+    let report = |p: crate::shell::download::Progress| {
+        let _ = app.emit(
+            "yap-search-download",
+            Progress {
+                stage: "model",
+                percent: crate::shell::download::percent(p.downloaded, total),
+                downloaded_bytes: p.downloaded,
+                total_bytes: total,
+                bytes_per_sec: p.bytes_per_sec,
+                eta_secs: p.eta_secs,
+                cancel_id: CANCEL_ID,
+            },
+        );
     };
-    dl::download(&src, &partial, &report, crate::privacy::net::Download::SearchModel).await?;
+    dl::download(&src, &partial, &ticket, &report, crate::privacy::net::Download::SearchModel).await?;
     dl::verify(&partial, &src).await?;
     std::fs::rename(&partial, model_path()).map_err(|e| format!("Couldn't put the search model in place: {e}"))?;
     let _ = std::fs::write(dir.join("NOTICE.txt"), NOTICE);

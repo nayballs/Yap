@@ -7,6 +7,10 @@
     model,
     status = 'downloadable',
     percent = 0,
+    // "1.2 GB of 2.8 GB · 24 MB/s · about 1 min left" and Cancel while it
+    // downloads (core/downloads.js, shell/download.rs).
+    line = '',
+    oncancel = null,
     onclick,
     ondelete = null,
   } = $props();
@@ -84,10 +88,14 @@
     {#if status === 'downloading'}
       <div class="progress">
         <div class="track"><div class="value" style="width:{percent}%"></div></div>
-        <span class="pct">Downloading… {percent}%</span>
+        <span class="pct">Downloading… {percent}%{line ? ` · ${line}` : ''}</span>
       </div>
     {/if}
   </button>
+  {#if status === 'downloading' && oncancel}
+    <!-- Outside the card's own button: stops the download, and its half-downloaded file goes. -->
+    <button class="cancel" onclick={oncancel} aria-label={`Cancel the download of ${model.name}`}>Cancel</button>
+  {/if}
 
   {#if ondelete && status === 'available'}
     <button
@@ -265,6 +273,28 @@
     gap: 4px;
   }
 
+  .cancel {
+    align-self: flex-end;
+    margin: 4px 12px 10px 0;
+    height: 26px;
+    padding: 0 10px;
+    border: 1px solid var(--yap-border);
+    border-radius: var(--yap-r-sm);
+    background: var(--yap-s2);
+    color: var(--yap-fg-80);
+    font: inherit;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  .cancel:hover {
+    background: var(--yap-s3);
+    color: var(--yap-fg);
+  }
+  .cancel:focus-visible {
+    outline: none;
+    box-shadow: var(--yap-focus);
+  }
   .progress {
     margin-top: 2px;
   }

@@ -18,6 +18,7 @@ import { listen } from '@tauri-apps/api/event';
 import { PP_CLOUD_MODELS } from '../../core/ppModels.js';
 import { catalog, modelsFor } from '../../stores/modelCatalog.svelte.js';
 import { ago } from '../../core/modelCatalog.js';
+import { cancelDownload, downloadLine, fromEvent, isCancelled } from '../../core/downloads.js';
 import { familyIcon, providerIcon, modelName } from '../../core/aiModel.js';
 import { contextInfo, fmtTokens } from '../../core/localContext.js';
 import { readsImages } from '../../stores/visionTags.svelte.js';
@@ -110,8 +111,11 @@ export async function downloadLocal(id) {
     await refreshLocal();
     return true;
   } catch (e) {
-    local.error = String(e);
-    local.errorFor = id;
+    // Cancelled: back to its Download button, nothing to say.
+    if (!isCancelled(e)) {
+      local.error = String(e);
+      local.errorFor = id;
+    }
     return false;
   } finally {
     local.downloading = '';
@@ -119,13 +123,18 @@ export async function downloadLocal(id) {
   }
 }
 
-/** "Downloading… 45% · 1.2 of 2.8 GB", "Getting the AI engine… 30%". */
+/** Cancel a curated model's download (its half-downloaded file goes). */
+export function cancelLocal(id) {
+  return cancelDownload(`llm:${id}`);
+}
+
+/** "Downloading… 45% · 1.2 GB of 2.8 GB · 24 MB/s · about 1 min left", "Getting the AI engine… 30%". */
 export function progressLine(p) {
   if (!p) return 'Starting the download…';
   const pct = `${p.percent || 0}%`;
+  const line = downloadLine(fromEvent(p));
   if (p.stage === 'runtime') return `Getting the AI engine first… ${pct}`;
-  const of = p.total_mb ? ` · ${fmtSize(p.downloaded_mb)} of ${fmtSize(p.total_mb)}` : '';
-  return `Downloading… ${pct}${of}`;
+  return `Downloading… ${pct}${line ? ` · ${line}` : ''}`;
 }
 
 /** Where the on-device model runs, in one line (the pane's header). */

@@ -236,6 +236,7 @@ pub fn run() {
             ai::commands::local_llm_start,
             ai::commands::local_llm_stop,
             ai::commands::local_llm_install,
+            shell::download::download_cancel,
             ai::commands::local_llm_delete,
             ai::local_llm::local_llm_set_context,
             ai::commands::open_llm_folder,

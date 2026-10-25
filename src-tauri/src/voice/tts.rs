@@ -731,19 +731,21 @@ pub async fn tts_kokoro_download(app: tauri::AppHandle) -> Result<(), String> {
     if !kokoro::in_build() {
         return Err(kokoro::NOT_IN_BUILD.to_string());
     }
-    {
+    let ticket = {
         let mut d = DOWNLOADING.lock().unwrap_or_else(|p| p.into_inner());
         if d.is_some() {
             return Err("Kokoro is already downloading".into());
         }
-        *d = Some(registry::Progress { percent: 0, downloaded_bytes: 0, total_bytes: 0 });
-    }
+        let ticket = crate::shell::download::Ticket::begin(registry::CANCEL_ID).ok_or("Kokoro is already downloading")?;
+        *d = Some(registry::Progress { percent: 0, downloaded_bytes: 0, total_bytes: 0, ..Default::default() });
+        ticket
+    };
     let progress_app = app.clone();
     let on_progress = move |p: registry::Progress| {
         *DOWNLOADING.lock().unwrap_or_else(|p| p.into_inner()) = Some(p.clone());
         let _ = progress_app.emit("tts-download-progress", &p);
     };
-    let result = registry::install(&registry::root(), &on_progress).await;
+    let result = registry::install(&registry::root(), &ticket, &on_progress).await;
     *DOWNLOADING.lock().unwrap_or_else(|p| p.into_inner()) = None;
     if let Err(e) = &result {
         tracing::warn!("Kokoro: download failed: {e}");

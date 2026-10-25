@@ -5,12 +5,15 @@
   import { formatSize } from '../core/speechModels.js';
   import { ENGINE_PROVIDER, PROVIDER_ICONS, MONOCHROME_PROVIDERS } from '../core/providerIcons.js';
   import { openContextMenu, menuKey, menuOpenFor } from '../ui/contextMenu.svelte.js';
+  import DownloadProgress from '../ui/DownloadProgress.svelte';
 
   // status: downloadable | downloading | available | active | switching |
   // unavailable (listed, can't be installed yet: `model.note` says why).
   // `deleteActive`: the active model can be deleted too (the speaker models,
   // whose switch turns off with it; a speech model must be switched first).
-  let { model, status = 'downloadable', percent = 0, onclick, ondelete = null, deleteActive = false } = $props();
+  // `progress` (core/downloads.js `fromEvent`) and `oncancel`: a download
+  // shows its speed, the time left and Cancel (shell/download.rs).
+  let { model, status = 'downloadable', percent = 0, progress = null, oncancel = null, onclick, ondelete = null, deleteActive = false } = $props();
 
   const prov = $derived(ENGINE_PROVIDER[model.engine]);
   const icon = $derived(prov ? PROVIDER_ICONS[prov] : null);
@@ -75,6 +78,8 @@
     <span class="mtag active">Active</span>
   {:else if status === 'switching'}
     <span class="mpct">Switching…</span>
+  {:else if status === 'downloading' && (progress || oncancel)}
+    <DownloadProgress compact progress={progress ?? { percent }} label={`Downloading ${model.name}`} {oncancel} />
   {:else if status === 'downloading'}
     <span class="mpct">{percent}%</span>
   {:else if status === 'unavailable'}

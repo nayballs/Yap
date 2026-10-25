@@ -796,7 +796,6 @@ pub fn cite_mentions(reply: &str, cited: &[Cited]) -> String {
 /// writes it) and a space any run of spaces.
 fn find_word(hay: &str, needle: &str) -> Option<usize> {
     let pattern: String = needle
-        .trim()
         .split_whitespace()
         .map(|w| w.split('-').map(regex::escape).collect::<Vec<_>>().join(r"[-\u{2010}-\u{2015}]"))
         .collect::<Vec<_>>()

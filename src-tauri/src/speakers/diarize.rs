@@ -596,26 +596,31 @@ pub fn diarization_status() -> serde_json::Value {
 /// while it goes, `diarization-changed` at the end, either way.
 #[tauri::command]
 pub async fn diarization_download(app: AppHandle, id: String) -> Result<(), String> {
-    {
+    let ticket = {
         let mut d = DOWNLOADING.lock().unwrap_or_else(|p| p.into_inner());
         if d.is_some() {
             return Err("A speaker model is already downloading".into());
         }
+        let ticket = crate::shell::download::Ticket::begin(&registry::cancel_id(&id)).ok_or("A speaker model is already downloading")?;
         *d = Some(registry::Progress {
             id: id.clone(),
             stage: "runtime",
             percent: 0,
             downloaded_bytes: 0,
             total_bytes: 0,
+            bytes_per_sec: 0,
+            eta_secs: None,
+            cancel_id: registry::cancel_id(&id),
         });
-    }
+        ticket
+    };
     let root = registry::root();
     let progress_app = app.clone();
     let on_progress = move |p: registry::Progress| {
         *DOWNLOADING.lock().unwrap_or_else(|p| p.into_inner()) = Some(p.clone());
         let _ = progress_app.emit("diarization-download-progress", &p);
     };
-    let result = registry::install(&root, &id, &on_progress).await;
+    let result = registry::install(&root, &id, &ticket, &on_progress).await;
     *DOWNLOADING.lock().unwrap_or_else(|p| p.into_inner()) = None;
     if let Err(e) = &result {
         tracing::warn!(model = %id, "Diarization: download failed: {e}");

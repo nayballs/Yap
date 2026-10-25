@@ -1045,7 +1045,8 @@ test('switching replies on offers Kokoro; it downloads, becomes the voice, and d
   await speak.click();
   await expect(offer).toBeVisible();
   await offer.getByRole('button', { name: /^Download Kokoro \(\d+ MB\)$/ }).click();
-  await expect(offer.getByText(/Downloading… \d+%/)).toBeVisible();
+  await expect(offer.getByText(/Downloading Kokoro… \d+%/)).toBeVisible();
+  await expect(offer.getByRole('button', { name: 'Cancel the download: Downloading Kokoro' })).toBeVisible();
   const krow = dialog.getByRole('group', { name: 'Kokoro' });
   await expect(krow.locator('.mrow')).toContainText(/\d+%/);
   await shot(main, '10-kokoro-downloading');

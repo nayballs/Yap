@@ -3,7 +3,9 @@
   // download it (Settings → Voice Assistant). Speak replies stays on either way;
   // Windows voices speak until Kokoro is in.
   import Button from '../ui/Button.svelte';
-  import { kokoro, downloadKokoro, formatMb } from './kokoro.svelte.js';
+  import { kokoro, downloadKokoro, cancelKokoro, formatMb } from './kokoro.svelte.js';
+  import DownloadProgress from '../ui/DownloadProgress.svelte';
+  import { fromEvent } from '../core/downloads.js';
 
   let { open = $bindable(false), cfg } = $props();
 
@@ -24,10 +26,7 @@
       everything runs on this PC. Until then Yap speaks with Windows voices.
     </p>
     {#if busy}
-      <div class="progress" role="progressbar" aria-label="Downloading Kokoro" aria-valuenow={busy.percent} aria-valuemin="0" aria-valuemax="100">
-        <span style:width="{busy.percent}%"></span>
-      </div>
-      <span class="pct">Downloading… {busy.percent}%</span>
+      <DownloadProgress progress={fromEvent(busy)} label="Downloading Kokoro" oncancel={cancelKokoro} />
     {:else}
       <div class="actions">
         <Button size="sm" onclick={download}>Download Kokoro ({formatMb(kokoro.downloadBytes || kokoro.sizeBytes)})</Button>

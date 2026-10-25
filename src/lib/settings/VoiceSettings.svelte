@@ -25,7 +25,9 @@
   import { speech } from '../stores/speech.svelte.js';
   import { toast } from '../ui/toast.svelte.js';
   import { openExternalLink } from '../core/externalLinks.js';
-  import { kokoro, startKokoro, downloadKokoro, deleteKokoro, formatMb, kokoroOptions } from './kokoro.svelte.js';
+  import { kokoro, startKokoro, downloadKokoro, deleteKokoro, cancelKokoro, formatMb, kokoroOptions } from './kokoro.svelte.js';
+  import DownloadProgress from '../ui/DownloadProgress.svelte';
+  import { fromEvent } from '../core/downloads.js';
 
   let { cfg } = $props();
 
@@ -193,10 +195,8 @@
       <div class="kokoro" role="group" aria-label="Kokoro">
         <ModelRow model={row} status={rowStatus} percent={busy?.percent ?? 0} onclick={onRow} ondelete={() => (ask = { open: true, busy: false })} deleteActive />
         {#if busy}
-          <div class="progress" role="progressbar" aria-label="Downloading Kokoro" aria-valuenow={busy.percent} aria-valuemin="0" aria-valuemax="100">
-            <span style:width="{busy.percent}%"></span>
-          </div>
-          <span class="note">Downloading… {busy.percent}%. Windows voices speak until it's done</span>
+          <DownloadProgress progress={fromEvent(busy)} label="Downloading Kokoro" oncancel={cancelKokoro} />
+          <span class="note">Windows voices speak until it's done</span>
         {:else if !kokoro.inBuild}
           <span class="note">This build of Yap has no Kokoro (it's in the installed Yap): it speaks with Windows voices</span>
         {:else if !kokoro.installed}

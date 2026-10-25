@@ -14,6 +14,8 @@
   import { upTo } from '../core/localContext.js';
   import { createExternalLinkHandler } from '../core/externalLinks.js';
   import { openContextMenu, menuKey, menuOpenFor, askConfirm } from '../ui/contextMenu.svelte.js';
+  import DownloadProgress from '../ui/DownloadProgress.svelte';
+  import { fromEvent } from '../core/downloads.js';
   import {
     localLlm,
     LLM_FAMILIES,
@@ -22,6 +24,7 @@
     onLocalModelChange,
     openLlmFolder,
     downloadCurated,
+    cancelCurated,
     activateCurated,
     takeUpgrade,
     dismissUpgrade,
@@ -191,8 +194,11 @@
           <span class="lb-blurb">{m.blurb}</span>
           {#if isDownloading}
             <div class="lb-progress">
-              <span class="lb-plabel">{LOCAL_STAGE_LABELS[localLlm.progress.stage] || 'Downloading'}… {localLlm.progress.percent}%{#if localLlm.progress.total_mb} · {Math.round(localLlm.progress.downloaded_mb)} / {Math.round(localLlm.progress.total_mb)} MB{/if}</span>
-              <div class="lb-bar"><span style="width:{localLlm.progress.percent}%"></span></div>
+              <DownloadProgress
+                progress={fromEvent(localLlm.progress)}
+                label={localLlm.progress.stage === 'runtime' ? `Downloading the ${LOCAL_STAGE_LABELS.runtime}` : `Downloading ${m.display}`}
+                oncancel={() => cancelCurated(m)}
+              />
             </div>
           {/if}
         </div>

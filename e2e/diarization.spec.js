@@ -100,7 +100,8 @@ test('switching it on without a model offers the download, which installs it and
   // Download and turn on: progress, then installed, active and on.
   await theSwitch(group).click();
   await offer.getByRole('button', { name: 'Download and turn on' }).click();
-  await expect(offer.getByText(/Downloading… \d+%/)).toBeVisible();
+  await expect(offer.getByText(/Downloading the speaker model… \d+%/)).toBeVisible();
+  await expect(offer.getByRole('button', { name: 'Cancel the download: Downloading the speaker model' })).toBeVisible();
   await expect(row(group, 'Nemotron-3 Diarization')).toContainText(/\d+%/);
   await shot(main, '03-downloading');
   await expect(row(group, 'Nemotron-3 Diarization')).toContainText('Active', { timeout: 20_000 });

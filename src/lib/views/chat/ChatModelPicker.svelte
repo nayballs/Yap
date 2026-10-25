@@ -36,6 +36,7 @@
     refreshLocal,
     followLocalChanges,
     downloadLocal,
+    cancelLocal,
     progressLine,
     whereLocal,
     slowWarning,
@@ -385,6 +386,8 @@
             <span class="bar"><span style="width: {pct}%"></span></span>
             <span class="pline">{progressLine(local.progress)}</span>
           </div>
+          <!-- Stops it; its half-downloaded file goes (shell/download.rs). -->
+          <button class="btn sm" aria-label="Cancel the download of {r.name}" onclick={() => cancelLocal(r.curatedId)}>Cancel</button>
         {:else}
           <button
             class="btn sm"

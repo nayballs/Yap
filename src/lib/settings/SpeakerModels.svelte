@@ -8,7 +8,8 @@
   import SpeakersToggle from './SpeakersToggle.svelte';
   import ConfirmDialog from '../ui/ConfirmDialog.svelte';
   import { openExternalLink } from '../core/externalLinks.js';
-  import { diarization, startDiarization, downloadDiarization, deleteDiarization, isInstalled } from './diarization.svelte.js';
+  import { diarization, startDiarization, downloadDiarization, deleteDiarization, isInstalled, cancelDiarization } from './diarization.svelte.js';
+  import { fromEvent } from '../core/downloads.js';
 
   let { enabled = $bindable(false), model = $bindable('') } = $props();
 
@@ -76,6 +77,8 @@
           model={m}
           status={statusOf(m)}
           percent={diarization.downloading?.id === m.id ? diarization.downloading.percent : 0}
+          progress={diarization.downloading?.id === m.id ? fromEvent(diarization.downloading) : null}
+          oncancel={() => cancelDiarization(m.id)}
           onclick={onRow}
           ondelete={onDelete}
           deleteActive
