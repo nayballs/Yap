@@ -351,6 +351,19 @@ function cliReceived(log) {
  * is Claude Code's idle title). `close()` closes it and ends what it ran.
  */
 export async function startConsoleCli({ nonce, cwd, title = `✳ ${nonce}` }) {
+  // Now and then (3 of about a dozen launches on 2026-10-25, each the first
+  // console window after another test's windows) conhost starts nothing
+  // at all: no window, the program never runs. So once more.
+  try {
+    return await launchConsoleCli({ nonce, cwd, title, timeout: 20_000 });
+  } catch (e) {
+    if (!/never showed up.*didn't start/.test(e.message)) throw e;
+    console.warn(`robot: ${e.message}; launching the console window again`);
+    return launchConsoleCli({ nonce, cwd, title, timeout: 40_000 });
+  }
+}
+
+async function launchConsoleCli({ nonce, cwd, title, timeout }) {
   fs.mkdirSync(cwd, { recursive: true });
   const log = path.join(cwd, 'received.jsonl');
   fs.writeFileSync(log, '');
@@ -373,8 +386,7 @@ export async function startConsoleCli({ nonce, cwd, title = `✳ ${nonce}` }) {
   try {
     win = await waitForWindow(nonce, (w) => !before.has(w.hwnd) && w.cls === 'ConsoleWindowClass' && w.title === title, {
       what: 'console window',
-      // (conhost can be slow to show its first window.)
-      timeout: 40_000,
+      timeout,
     });
     await cliReady(log);
   } catch (e) {
