@@ -50,6 +50,27 @@ pub fn images() -> Vec<ChatImage> {
     TURN.try_with(|t| t.images.clone()).unwrap_or_default()
 }
 
+/// The bytes the turn's own images carry (their copies, before base64).
+fn current_bytes() -> usize {
+    TURN.try_with(|t| t.parts.iter().filter_map(|p| p["image_url"]["url"].as_str()).map(|u| u.len() * 3 / 4).sum())
+        .unwrap_or(0)
+}
+
+/// Which fitted earlier images still fit in the request (`room` bytes),
+/// newest first, stopping at the first that doesn't: an older one never
+/// goes when a newer one couldn't. Pure.
+pub fn within_room(fitted: Vec<(String, String, usize)>, mut room: usize) -> std::collections::HashMap<String, String> {
+    let mut kept = std::collections::HashMap::new();
+    for (id, url, bytes) in fitted {
+        if bytes > room {
+            break;
+        }
+        room -= bytes;
+        kept.insert(id, url);
+    }
+    kept
+}
+
 /// One image part, as `provider` takes it.
 pub fn part(url: &str, provider: &str) -> Value {
     let mut p = json!({ "type": "image_url", "image_url": { "url": url } });
@@ -226,17 +247,20 @@ pub async fn with_history_images(messages: &mut [Value], earlier: &[ChatMessage]
     let here = crate::ai::ai_model::runs_here(provider, base_url);
     let reads = super::vision::reads_images(provider, model) != Some(false);
     let budget = if reads { history_budget(provider, here, images().len()) } else { 0 };
-    let edge = super::images::long_edge(provider, here);
+    let fit = super::images::fit_for(provider, here);
+    let cap = fit.cap_for(images().len() + budget);
     let exists = |id: &str| super::images::exists(id);
     let wanted: Vec<String> = resend_plan(earlier, budget, &exists).into_iter().map(|(mi, ii)| earlier[mi].images[ii].id.clone()).collect();
-    let fitted: std::collections::HashMap<String, String> = tauri::async_runtime::spawn_blocking(move || {
+    let made: Vec<(String, String, usize)> = tauri::async_runtime::spawn_blocking(move || {
         wanted
             .into_iter()
-            .filter_map(|id| super::images::fitted(&id, edge).ok().map(|f| (id, f.url.to_string())))
+            .filter_map(|id| super::images::fitted(&id, fit.edge, cap).ok().map(|f| (id, f.url.to_string(), f.bytes)))
             .collect()
     })
     .await
     .unwrap_or_default();
+    // Within what the provider takes in one request, with the question's own.
+    let fitted = within_room(made, fit.request_bytes.saturating_sub(current_bytes()));
     history_images(messages, earlier, provider, budget, &exists, &|id| fitted.get(id).cloned());
 }
 
@@ -245,16 +269,18 @@ pub async fn with_history_images(messages: &mut [Value], earlier: &[ChatMessage]
 /// their copies fitted for `provider`.
 pub async fn prepare(ids: &[String], provider: &str, base_url: &str) -> Result<TurnImages, String> {
     let here = crate::ai::ai_model::runs_here(provider, base_url);
-    let edge = super::images::long_edge(provider, here);
+    let fit = super::images::fit_for(provider, here);
     let per = super::images::per_request(provider);
     let ids: Vec<String> = ids.iter().filter(|id| super::images::is_id(id)).take(per).cloned().collect();
+    // Each smaller when there are several, so all of them fit one request.
+    let cap = fit.cap_for(ids.len());
     let provider_owned = provider.to_string();
     tauri::async_runtime::spawn_blocking(move || {
         let mut images = Vec::new();
         let mut parts = Vec::new();
         for id in &ids {
             let stored = super::images::stored(id).ok_or("That screenshot isn't there any more")?;
-            let fitted = super::images::fitted(id, edge)?;
+            let fitted = super::images::fitted(id, fit.edge, cap)?;
             parts.push(part(&fitted.url, &provider_owned));
             images.push(stored);
         }
@@ -371,5 +397,38 @@ mod tests {
         assert_eq!(history_budget("anthropic", false, 1), 3);
         assert_eq!(history_budget("groq", false, 4), 0);
         assert_eq!(history_budget("custom", true, 1), 0);
+    }
+
+    #[test]
+    fn earlier_images_go_only_while_the_request_has_room() {
+        let made = |sizes: &[usize]| -> Vec<(String, String, usize)> {
+            sizes.iter().enumerate().map(|(i, &b)| (format!("img_{i}"), format!("data:{i}"), b)).collect()
+        };
+        // Newest first: both fit.
+        assert_eq!(within_room(made(&[1_000, 2_000]), 3_000).len(), 2);
+        // The newest doesn't fit: nothing older goes either.
+        assert!(within_room(made(&[4_000, 100]), 3_000).is_empty());
+        // The second stops it; the third, smaller, still doesn't go.
+        let kept = within_room(made(&[2_000, 2_000, 500]), 3_000);
+        assert_eq!(kept.keys().cloned().collect::<Vec<_>>(), ["img_0"]);
+        // No room at all.
+        assert!(within_room(made(&[1]), 0).is_empty());
+    }
+
+    #[test]
+    fn each_provider_takes_what_it_accepts_in_one_request() {
+        use super::super::images::{fit_for, MAX_SEND_BYTES};
+        let groq = fit_for("groq", false);
+        // Base64 adds a third: under Groq's 4 MB for one image.
+        assert!(groq.max_bytes * 4 / 3 < 4 * 1024 * 1024);
+        // Three Groq images share its request budget.
+        assert_eq!(groq.cap_for(3), groq.request_bytes / 3);
+        assert_eq!(groq.cap_for(1), groq.max_bytes);
+        assert_eq!(groq.cap_for(0), groq.max_bytes);
+        // Anthropic's 5 MB an image, base64.
+        assert!(fit_for("anthropic", false).max_bytes * 4 / 3 < 5 * 1024 * 1024);
+        // A model on this PC: its own edge, the usual cap.
+        let here = fit_for("custom", true);
+        assert_eq!((here.edge, here.max_bytes), (1024, MAX_SEND_BYTES));
     }
 }

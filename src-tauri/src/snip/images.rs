@@ -37,7 +37,8 @@ use base64::Engine;
 pub const FOLDER: &str = "chat-images";
 /// An image nothing refers to (a snip never sent) is kept this long.
 pub const ORPHAN_SECS: u64 = 24 * 60 * 60;
-/// A copy for a model bigger than this is made smaller.
+/// A copy for a model bigger than this is made smaller (a provider may
+/// take less: [`fit_for`]).
 pub const MAX_SEND_BYTES: usize = 4 * 1024 * 1024;
 /// Images per request, at most (Groq: 3).
 pub const MAX_PER_REQUEST: usize = 4;
@@ -289,6 +290,41 @@ pub fn long_edge(provider: &str, on_this_pc: bool) -> u32 {
     }
 }
 
+/// How a provider takes images: each copy at most `edge` px on its long
+/// side and `max_bytes` (base64 adds a third: Groq refuses a base64 image
+/// over 4 MB, Anthropic one over 5 MB), and a request's images together at
+/// most `request_bytes` — Groq answered 413 "Request Entity Too Large" to
+/// a question re-sending three 2,000 px game screenshots (25 Oct 2026).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Fit {
+    pub edge: u32,
+    pub max_bytes: usize,
+    pub request_bytes: usize,
+}
+
+/// [`Fit`] for a provider. Pure.
+pub fn fit_for(provider: &str, on_this_pc: bool) -> Fit {
+    let edge = long_edge(provider, on_this_pc);
+    let (max_bytes, request_bytes) = if on_this_pc {
+        (MAX_SEND_BYTES, 2 * MAX_SEND_BYTES)
+    } else {
+        match provider {
+            "groq" => (2_800_000, 4_500_000),
+            "anthropic" => (3_600_000, 18_000_000),
+            "gemini" => (MAX_SEND_BYTES, 13_000_000),
+            _ => (MAX_SEND_BYTES, 12_000_000),
+        }
+    };
+    Fit { edge, max_bytes, request_bytes }
+}
+
+impl Fit {
+    /// Each of `n` images' cap, so all `n` fit in one request.
+    pub fn cap_for(self, n: usize) -> usize {
+        self.max_bytes.min(self.request_bytes / n.max(1))
+    }
+}
+
 /// How many images one request may carry for a provider (Groq's
 /// `qwen/qwen3.8-27b` takes 3). Pure.
 pub fn per_request(provider: &str) -> usize {
@@ -380,30 +416,33 @@ pub struct Fitted {
     pub bytes: usize,
 }
 
-/// The copies made, by (id, long edge): the last few, in memory.
-static FITTED: Mutex<Vec<((String, u32), Fitted)>> = Mutex::new(Vec::new());
+/// A copy's key: the image's id, the long edge and the byte cap.
+type FitKey = (String, u32, usize);
+
+/// The copies made, by [`FitKey`]: the last few, in memory.
+static FITTED: Mutex<Vec<(FitKey, Fitted)>> = Mutex::new(Vec::new());
 const FITTED_KEPT: usize = 12;
 
 fn forget(id: &str) {
     if let Ok(mut f) = FITTED.lock() {
-        f.retain(|((i, _), _)| i != id);
+        f.retain(|((i, _, _), _)| i != id);
     }
 }
 
-/// `png` fitted to `edge` and under [`MAX_SEND_BYTES`]. Pure (but slow:
-/// decode, area average, encode).
-pub fn fit_png(png: &[u8], edge: u32) -> Result<Fitted, String> {
+/// `png` fitted to `edge` and under `cap` bytes. Pure (but slow: decode,
+/// area average, encode).
+pub fn fit_png(png: &[u8], edge: u32, cap: usize) -> Result<Fitted, String> {
     let (rgba, w, h) = decode_png(png)?;
     let (mut fw, mut fh) = fit(w, h, edge);
-    if (fw, fh) == (w, h) && png.len() <= MAX_SEND_BYTES {
+    if (fw, fh) == (w, h) && png.len() <= cap {
         let url = format!("data:image/png;base64,{}", base64::engine::general_purpose::STANDARD.encode(png));
         return Ok(Fitted { url: Arc::new(url), w, h, bytes: png.len() });
     }
     // Smaller until it's under the cap (a photo-heavy screenshot).
-    for _ in 0..5 {
+    for _ in 0..8 {
         let small = shrink(&rgba, w, h, fw, fh);
         let encoded = encode_png(&small, fw, fh, false)?;
-        if encoded.len() <= MAX_SEND_BYTES || fw.max(fh) <= 512 {
+        if encoded.len() <= cap || fw.max(fh) <= 512 {
             let url = format!("data:image/png;base64,{}", base64::engine::general_purpose::STANDARD.encode(&encoded));
             return Ok(Fitted { url: Arc::new(url), w: fw, h: fh, bytes: encoded.len() });
         }
@@ -412,15 +451,15 @@ pub fn fit_png(png: &[u8], edge: u32) -> Result<Fitted, String> {
     Err("the screenshot is too big to send".into())
 }
 
-/// The image `id` as a model with long edge `edge` gets it: from memory
-/// when [`prepare`] made it already, else made now.
-pub fn fitted(id: &str, edge: u32) -> Result<Fitted, String> {
-    let key = (id.to_string(), edge);
+/// The image `id` as a model with long edge `edge` gets it, under `cap`
+/// bytes: from memory when [`prepare`] made it already, else made now.
+pub fn fitted(id: &str, edge: u32, cap: usize) -> Result<Fitted, String> {
+    let key = (id.to_string(), edge, cap);
     if let Some(f) = FITTED.lock().ok().and_then(|f| f.iter().find(|(k, _)| *k == key).map(|(_, v)| v.clone())) {
         return Ok(f);
     }
     let png = read(id).ok_or("That screenshot isn't there any more")?;
-    let made = fit_png(&png, edge)?;
+    let made = fit_png(&png, edge, cap)?;
     if let Ok(mut f) = FITTED.lock() {
         f.retain(|(k, _)| *k != key);
         if f.len() >= FITTED_KEPT {
@@ -431,15 +470,16 @@ pub fn fitted(id: &str, edge: u32) -> Result<Fitted, String> {
     Ok(made)
 }
 
-/// Make the copy for `edge` in the background (the snip landed in Chat,
-/// or the model changed): Send then finds it ready.
-pub fn prepare(ids: Vec<String>, edge: u32) {
+/// Make the copy for `fit` in the background (the snip landed in Chat, or
+/// the model changed): Send then finds it ready (one image a question: its
+/// own cap).
+pub fn prepare(ids: Vec<String>, fit: Fit) {
     std::thread::Builder::new()
         .name("snip-fit".into())
         .spawn(move || {
             for id in ids {
                 let t = std::time::Instant::now();
-                match fitted(&id, edge) {
+                match fitted(&id, fit.edge, fit.max_bytes) {
                     Ok(f) => tracing::debug!(w = f.w, h = f.h, bytes = f.bytes, ms = t.elapsed().as_millis() as u64, "snip: copy for the model ready"),
                     Err(e) => tracing::debug!("snip: no copy for the model ({e})"),
                 }
@@ -452,7 +492,7 @@ pub fn prepare(ids: Vec<String>, edge: u32) {
 /// would carry. Debug and test only.
 #[allow(dead_code)]
 pub fn fitted_sizes() -> HashMap<String, (u32, u32)> {
-    FITTED.lock().map(|f| f.iter().map(|((id, _), v)| (id.clone(), (v.w, v.h))).collect()).unwrap_or_default()
+    FITTED.lock().map(|f| f.iter().map(|((id, _, _), v)| (id.clone(), (v.w, v.h))).collect()).unwrap_or_default()
 }
 
 #[cfg(test)]
@@ -524,10 +564,10 @@ mod tests {
     fn a_big_screenshot_is_fitted_and_a_small_one_sent_as_it_is() {
         let px = checker(300, 120);
         let png = encode_png(&px, 300, 120, true).unwrap();
-        let same = fit_png(&png, 2048).unwrap();
+        let same = fit_png(&png, 2048, MAX_SEND_BYTES).unwrap();
         assert_eq!((same.w, same.h, same.bytes), (300, 120, png.len()));
         assert!(same.url.starts_with("data:image/png;base64,iVBORw0KGgo"));
-        let small = fit_png(&png, 100).unwrap();
+        let small = fit_png(&png, 100, MAX_SEND_BYTES).unwrap();
         assert_eq!((small.w, small.h), (100, 40));
         let (_, w, h) = decode_png(
             &base64::engine::general_purpose::STANDARD.decode(small.url.trim_start_matches("data:image/png;base64,")).unwrap(),

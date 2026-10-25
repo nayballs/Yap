@@ -542,6 +542,16 @@ doesn't show it (a screenshot never goes there).
   takes 3 a request in all), each older one becomes "(An earlier
   screenshot, not sent again.)", a removed one "(A screenshot was here; it
   was removed.)". None to a model on this PC.
+- **Sizes per provider** (`images::fit_for`, 2026-10-25, after Groq
+  answered 413 "Request Entity Too Large" to a question re-sending three
+  2,000 px game screenshots): each copy at most the provider's long edge and
+  `max_bytes` (Groq 2.8 MB and Anthropic 3.6 MB before base64, under their 4
+  and 5 MB base64 caps; others 4 MB), and a request's images together at
+  most `request_bytes` (Groq 4.5 MB, Gemini 13, Anthropic 18, others 12):
+  several of the question's own share it (`Fit::cap_for`), and earlier
+  screenshots go again only while there's room, newest first
+  (`turn::within_room`). A 413 that still happens reads "That was too big
+  for the AI provider…" (`core/aiErrors.js`).
 - A request carrying images gets at least 45 s (`llm::IMAGE_TIMEOUT`: the
   upload). Code that reads a message's text accepts parts
   (`turn::text_of`). A model evaluation's log has each image as its size

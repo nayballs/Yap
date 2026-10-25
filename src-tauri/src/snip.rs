@@ -566,7 +566,7 @@ fn hand_to_chat(app: &AppHandle, image: crate::chat::chats::ChatImage, conversat
     let cfg = crate::config::load();
     if let Ok((base_url, _key, _model, provider, _p, _t)) = crate::chat::turn::resolve_chat_endpoint(&cfg) {
         let here = crate::ai::ai_model::runs_here(&provider, &base_url);
-        images::prepare(vec![image.id.clone()], images::long_edge(&provider, here));
+        images::prepare(vec![image.id.clone()], images::fit_for(&provider, here));
     }
     let id = image.id.clone();
     waiting::landed(app, conversation, image.clone());
@@ -613,7 +613,7 @@ pub fn chat_images_prepare(ids: Vec<String>) {
     let cfg = crate::config::load();
     if let Ok((base_url, _key, _model, provider, _p, _t)) = crate::chat::turn::resolve_chat_endpoint(&cfg) {
         let here = crate::ai::ai_model::runs_here(&provider, &base_url);
-        images::prepare(ids.into_iter().filter(|i| images::is_id(i)).collect(), images::long_edge(&provider, here));
+        images::prepare(ids.into_iter().filter(|i| images::is_id(i)).collect(), images::fit_for(&provider, here));
     }
 }
 

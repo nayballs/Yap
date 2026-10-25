@@ -34,6 +34,11 @@ export function aiError(err) {
   if (/\bhttp 404\b/.test(lower) && /model/.test(lower)) {
     return said("The AI provider doesn't offer that model any more. Pick another in Settings → Language Models.", true);
   }
+  // Screenshots past what the provider takes in one request (snip/images.rs
+  // `fit_for` keeps them under; this is the rest).
+  if (/\bhttp 413\b|request entity too large|request_too_large|payload too large/.test(lower)) {
+    return said('That was too big for the AI provider to take at once, usually the screenshots. Try fewer, or a new chat.', false);
+  }
   if (/\bhttp 5\d\d\b/.test(lower)) {
     return said('The AI provider had a problem on its side. Try again in a moment.', false);
   }

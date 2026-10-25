@@ -124,7 +124,7 @@ fn prepare(id: &str) {
     let cfg = crate::config::load();
     if let Ok((base_url, _key, _model, provider, _p, _t)) = crate::chat::turn::resolve_chat_endpoint(&cfg) {
         let here = crate::ai::ai_model::runs_here(&provider, &base_url);
-        super::images::prepare(vec![id.to_string()], super::images::long_edge(&provider, here));
+        super::images::prepare(vec![id.to_string()], super::images::fit_for(&provider, here));
     }
 }
 
