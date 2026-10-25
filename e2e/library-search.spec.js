@@ -362,7 +362,12 @@ test('Privacy & data counts the notes, chats and memory items read', async ({ ya
   expect(s.passages).toBe(s.kinds.notePassages + s.kinds.chatPassages + s.kinds.memoryPassages);
   const dialog = await openSettings(main, 'Privacy & data');
   const index = dialog.locator('[data-setting="meeting-search-index"]');
-  await expect(index).toContainText(new RegExp(`${s.passages} passages from 3 notes, ${s.chats} chats and 1 memory item`));
+  // The row and a fresh status agree (a chat still being read under load
+  // moves both).
+  await expect(async () => {
+    const now = await status(yap);
+    await expect(index).toContainText(new RegExp(`${now.passages} passages from 3 notes, ${now.chats} chats and 1 memory item`), { timeout: 1_000 });
+  }).toPass({ timeout: 15_000 });
   await expect(dialog.getByRole('row', { name: /^Search\b/ })).toContainText('Your meetings, notes, chats and memory: read and searched by meaning on this PC');
   await index.scrollIntoViewIfNeeded();
   await shot(main, '07-settings-counts');
