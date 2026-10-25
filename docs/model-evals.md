@@ -1891,7 +1891,7 @@ a topic recap and each decision's reason? `--summaries` over four fictional
 meetings in `evals/summaries/cases.json` (an offsite in English, a trade
 fair in French, a campaign launch in Spanish, an English release meeting
 whose person's first language is French: the meeting's language wins). Run
-folders `<builds>/meetsum/eval-runs/20261025-*-summaries-*`; an RTX 5070 Ti
+folders `<builds>/eval-runs/20261025-*-summaries-*`; an RTX 5070 Ti
 shared with other builds, so the times are only indicative.
 
 | Model | Phase | Passed | Language | Tasks | Headings | Never-say | Recap | Reasons |
