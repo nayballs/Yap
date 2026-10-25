@@ -559,7 +559,7 @@ mod tests {
     use super::*;
 
     fn entry(from: &str, to: &str) -> DictionaryEntry {
-        DictionaryEntry { from: from.to_string(), to: to.to_string(), fuzzy: true, snippet: false }
+        DictionaryEntry { from: from.to_string(), to: to.to_string(), fuzzy: true, snippet: false, starred: false }
     }
 
     // ── ports of Handy's apply_custom_words tests ──

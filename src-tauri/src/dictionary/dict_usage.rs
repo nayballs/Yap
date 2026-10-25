@@ -1,6 +1,6 @@
 //! How much each dictionary word gets used, so the Whisper vocabulary prompt
 //! leads with the words you actually say (Wispr Flow ranks its vocabulary the
-//! same way: recently used first, then most used).
+//! same way: starred words first, then recently used, then most used).
 //!
 //! `<data>/dictionary_usage.json` maps a word (the entry's `to` spelling,
 //! lowercased) to `{uses, lastUsed}` (unix seconds). It's its own store, never
@@ -131,9 +131,10 @@ fn save_now() -> Result<(), crate::shell::saving::SaveError> {
     SAVER.check()
 }
 
-/// The dictionary in vocabulary order: words used in the last day first,
-/// then the last 14 days, then the rest; within each, the most used first;
-/// then the order you added them. Pure (see [`ranked`]).
+/// The dictionary in vocabulary order: the words you starred (the
+/// Dictionary view's ☆) first, then words used in the last day, then the
+/// last 14 days, then the rest; within each, the most used first; then the
+/// order you added them. Pure (see [`ranked`]).
 pub fn rank(dict: &[DictionaryEntry], usage: &Usage, now: u64) -> Vec<DictionaryEntry> {
     let mut order: Vec<(usize, &DictionaryEntry)> = dict.iter().enumerate().collect();
     order.sort_by_key(|(i, e)| {
@@ -145,9 +146,16 @@ pub fn rank(dict: &[DictionaryEntry], usage: &Usage, now: u64) -> Vec<Dictionary
             _ if age <= 14 * DAY => 1,
             _ => 2,
         };
-        (tier, std::cmp::Reverse(u.uses), *i)
+        (!e.starred, tier, std::cmp::Reverse(u.uses), *i)
     });
     order.into_iter().map(|(_, e)| e.clone()).collect()
+}
+
+/// The saved counts, for the Dictionary view's "Most used" sort (the same
+/// keys: each entry's `to`, lowercased).
+#[tauri::command]
+pub fn dictionary_usage() -> Usage {
+    with_store(|u| u.clone()).unwrap_or_default()
 }
 
 /// [`rank`] against the saved usage, now. What every Whisper prompt is built
@@ -165,7 +173,7 @@ mod tests {
     use super::*;
 
     fn entry(from: &str, to: &str) -> DictionaryEntry {
-        DictionaryEntry { from: from.into(), to: to.into(), fuzzy: true, snippet: false }
+        DictionaryEntry { from: from.into(), to: to.into(), fuzzy: true, snippet: false, starred: false }
     }
 
     fn tos(dict: &[DictionaryEntry]) -> Vec<&str> {
@@ -200,6 +208,33 @@ mod tests {
         );
         // Nothing used: the order you added them, untouched.
         assert_eq!(tos(&rank(&dict, &Usage::new(), NOW)), tos(&dict));
+    }
+
+    #[test]
+    fn starred_words_lead_whatever_their_use() {
+        let dict = vec![
+            entry("", "Busy"),
+            DictionaryEntry { starred: true, ..entry("", "StarredNever") },
+            entry("", "Never"),
+            DictionaryEntry { starred: true, ..entry("", "StarredOld") },
+        ];
+        let mut usage = Usage::new();
+        usage.insert("busy".into(), WordUse { uses: 40, last_used: NOW - 60 });
+        usage.insert("starredold".into(), WordUse { uses: 2, last_used: NOW - 30 * DAY });
+        // Starred first (within them, use as ever), then the rest by use.
+        assert_eq!(tos(&rank(&dict, &usage, NOW)), ["StarredOld", "StarredNever", "Busy", "Never"]);
+        // Nothing used: the starred ones, then the order added.
+        assert_eq!(tos(&rank(&dict, &Usage::new(), NOW)), ["StarredNever", "StarredOld", "Busy", "Never"]);
+    }
+
+    #[test]
+    fn a_star_is_saved_only_when_set() {
+        let plain = serde_json::to_value(entry("jaison", "JSON")).unwrap();
+        assert!(plain.get("starred").is_none(), "{plain}");
+        let starred = serde_json::to_value(DictionaryEntry { starred: true, ..entry("jaison", "JSON") }).unwrap();
+        assert_eq!(starred["starred"], true);
+        let back: DictionaryEntry = serde_json::from_value(serde_json::json!({ "from": "a", "to": "B" })).unwrap();
+        assert!(!back.starred && back.fuzzy && !back.snippet);
     }
 
     #[test]

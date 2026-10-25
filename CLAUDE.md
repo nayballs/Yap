@@ -128,7 +128,8 @@ One folder per area (an area's `<area>.rs` lists its modules); a big module's pa
 
 **Dictionary** — [dictionary.md](./docs/architecture/dictionary.md)
 - `dictionary/fuzzy.rs` — near-miss correction (Levenshtein + Soundex), prompt-echo guard, sound distances.
-- `dictionary/dict_usage.rs` — how often each dictionary word is used; orders the Whisper prompt.
+- `dictionary/dict_usage.rs` — how often each dictionary word is used; orders the Whisper prompt (starred words first).
+- `dictionary/files.rs` — the Dictionary view's Import… / Export… files: Windows' dialogs opened in Rust, a file's text decoded (UTF-8, UTF-16, Windows-1252).
 - `dictionary/learn.rs` — "Suggest words from your corrections": the 60 s field watch and the offer.
 - `dictionary/screen_terms.rs` (+ `dictionary/screen_terms/`) — "Spell names the way they're written on screen": the target window's visible text read at record start (UIA, bounded) → its names and terms, for that dictation only: a strict near-miss pass (every model), cleanup's "Spell these names as written" line.
 
@@ -249,7 +250,7 @@ One folder per area (an area's `<area>.rs` lists its modules); a big module's pa
 - `views/ControlPanel.svelte` — the main window (label `settings`): sidebar, Settings modal, title bar.
 - `ui/toast.svelte.js` + `ui/noticePolicy.js` — app-wide toasts running the page's notice policy; `notices/` — alerts, the meeting guard rails and check-ins, the cleanup offer, word suggestions, `saveErrors.js` (a command's failed save shown with Try again).
 - `views/home/HomeView` / `views/InsightsView` / `views/UploadView` — dictation feed (a dictation's "AI edited · N changes" word diff, `core/wordDiff.js`, and Paste what I said), stats, audio-file transcription (its job in `stores/upload.svelte.js`, kept when you leave the view); `views/home/homeData.js` (Home's data in one call, asked first), `core/ipcShared.js` (one call for reads asked at once), `core/appNames.js` (apps by their names), `core/aiErrors.js` (AI failures in plain words), `notices/cleanupOffer.js` (the one tip offering AI cleanup).
-- `views/DictionaryView.svelte` — corrections and snippets ([dictionary.md](./docs/architecture/dictionary.md)).
+- `views/dictionary/` — the Dictionary view: corrections and snippets, search (Ctrl+F), stars and sorts, select several, Import… / Export… as CSV or text with a preview ([dictionary.md](./docs/architecture/dictionary.md)).
 - `views/notes/` — the AI Notepad ([notes.md](./docs/architecture/notes.md)): `NotesView.svelte` with `notesState.svelte.js`, `NoteList`, `NoteEditor` (+ `NoteMeta`, `NoteSummary`, `NoteTranscript`, `NoteChat`, `ActionPicker`), `ActionManager`; `core/noteEdits.js` — fixing a line, the summary, ticking tasks (shared with the notepad); `views/TasksView.svelte` — sidebar Tasks across meetings.
 - `core/markdown.js` — every rendered answer/note: markdown-it + DOMPurify, citation pills ([notes.md](./docs/architecture/notes.md#the-markdown-renderer)).
 - `views/chat/` — Chat ([chat-and-assistant.md](./docs/architecture/chat-and-assistant.md)): `ChatView.svelte` with `chatState.svelte.js`, `ConversationList`, `ChatThread` + `ChatMessage`, `Composer`; the model chip and picker (`ModelChip`, `ChatModelPicker`, `chatModels.svelte.js`), a snip in the box (`chatImages.js`, `chatShots.svelte.js`; [snip.md](./docs/architecture/snip.md)); `core/streaming.js` — streamed answers in Chat and the notepad's Ask sheet (the channel, ■, half-written markdown closed off, the checked answer's smooth swap).

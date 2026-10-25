@@ -1174,7 +1174,7 @@ fn with_attendees(note_id: u64, dictionary: &[crate::config::DictionaryEntry]) -
         .unwrap_or_default();
     names
         .into_iter()
-        .map(|to| crate::config::DictionaryEntry { from: String::new(), to, fuzzy: false, snippet: false })
+        .map(|to| crate::config::DictionaryEntry { from: String::new(), to, fuzzy: false, snippet: false, starred: false })
         .chain(dictionary.iter().cloned())
         .collect()
 }

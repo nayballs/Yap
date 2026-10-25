@@ -255,6 +255,14 @@ watch's ends unit-tested, the prompt/Add/toggle/bar card, a fix-then-send
 and a removed word e2e-tested through staged edits and field reads, the UIA
 reads and Windows' spell checker by `--ignored` tests on hidden windows —
 not yet tried in real apps),
+**the Dictionary view for hundreds of entries** (`views/dictionary/`,
+2026-10-25: search with Ctrl+F, stars (starred words lead the Whisper
+prompt) and four remembered sorts, select several with a bar for Delete…
+with Undo, ≈ and Export…, Import… / Export… as CSV or text with a preview
+of what's added, already there, spelled differently and left out; the
+parsing, sorting and Undo rules unit-tested, the view e2e-tested in light
+and dark with 2,000 entries measured quick in the stub debug build; not yet
+tried with a file exported from another app or by hand in Excel),
 the Groq usage meter, and the installer + auto-updater (background checks + download
 while Yap runs, "Restart to update" from toast/tray/About/Windows notification —
 `updates.rs`, 2026-10-05) + portable mode + release CI (since 2026-10-25 every
