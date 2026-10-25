@@ -238,6 +238,11 @@
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3" /><path d="M5 11a7 7 0 0 0 14 0" /><path d="M12 18v3" /></svg>
             <span>You dictated here · left out of the notes</span>
           </div>
+        {:else if run.kind === 'mic'}
+          <div class="dictated" role="separator" aria-label="Your mic was disconnected">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3" /><path d="M5 11a7 7 0 0 0 14 0" /><path d="M12 18v3" /></svg>
+            <span>Your mic was disconnected{run.next ? ` · now ${run.next}` : ' · none connected'}</span>
+          </div>
         {:else if run.kind === 'failed'}
           <FailedChunk
             noteId={notes.selected.id}

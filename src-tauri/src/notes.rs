@@ -89,6 +89,13 @@ pub struct TranscriptSegment {
     /// What Yap heard, before the person's first edit (empty unless `edited`).
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub original: String,
+    /// Not speech: a marker where the meeting's microphone was disconnected
+    /// and "You" moved to the next one in the order (`meeting.rs`; `source`
+    /// "you", no `text`, `ts` when): the name of the one it moved to, or
+    /// empty when none was left. The views show "Your mic was disconnected";
+    /// summaries skip it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mic: Option<String>,
 }
 
 impl TranscriptSegment {
@@ -98,6 +105,17 @@ impl TranscriptSegment {
             source: "you".to_string(),
             ts,
             dictated: true,
+            ..Default::default()
+        }
+    }
+
+    /// The marker for the meeting's microphone disconnected at `ts` (unix
+    /// seconds), "You" now on `next` (its name; empty: none left).
+    pub fn mic_marker(ts: u64, next: &str) -> Self {
+        TranscriptSegment {
+            source: "you".to_string(),
+            ts,
+            mic: Some(next.to_string()),
             ..Default::default()
         }
     }
@@ -126,9 +144,9 @@ impl TranscriptSegment {
     }
 
     /// Talk the summaries read: neither echo nor a marker (a dictation, a
-    /// stretch that couldn't be transcribed).
+    /// stretch that couldn't be transcribed, the mic disconnected).
     pub fn is_talk(&self) -> bool {
-        !self.echo && !self.dictated && !self.failed
+        !self.echo && !self.dictated && !self.failed && self.mic.is_none()
     }
 }
 

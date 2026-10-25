@@ -144,10 +144,13 @@ impl Shared {
         }
     }
 
-    /// End the recording that has no microphone (see [`Self::mic_failed`]).
-    fn end_without_mic(self: &Arc<Self>) {
+    /// End the recording now with nothing to transcribe (no microphone, or
+    /// it was unplugged before it heard anything): the mic and the other
+    /// apps' sound go back at once, its audio and edit-mode state go.
+    /// `false`: nothing was recording.
+    pub(super) fn end_now(self: &Arc<Self>) -> bool {
         if !self.recording.swap(false, Ordering::SeqCst) {
-            return;
+            return false;
         }
         dictation_ended();
         self.drop_pending_start();
@@ -166,6 +169,14 @@ impl Shared {
         crate::dictionary::screen_terms::forget();
         if self.assistant.swap(false, Ordering::SeqCst) {
             crate::chat::assistant::nothing(&self.app);
+        }
+        true
+    }
+
+    /// End the recording that has no microphone (see [`Self::mic_failed`]).
+    fn end_without_mic(self: &Arc<Self>) {
+        if !self.end_now() {
+            return;
         }
         // Windows' privacy switches, if they're why: that's what to fix
         // (unless the recording's start already said so).
@@ -384,6 +395,9 @@ impl Shared {
         self.capture_target(edit);
 
         self.mic_dead.store(false, Ordering::SeqCst);
+        if let Ok(mut u) = self.unplugged.lock() {
+            *u = None;
+        }
         let session = self.rec_session.fetch_add(1, Ordering::SeqCst) + 1;
 
         // A meeting recording keeps this dictation out of its "You" side.
@@ -961,6 +975,19 @@ impl crate::dictation::mic::Sink for Shared {
             if let Some(shared) = self.me.upgrade() {
                 shared.mic_failed(lease);
             }
+        }
+    }
+
+    fn lost(&self, device: &str, dictation: Option<u64>) {
+        // Off the mic's thread: the dictation's end releases the mic, which
+        // waits for that thread (`unplugged.rs`).
+        let (Some(shared), Some(lease)) = (self.me.upgrade(), dictation) else { return };
+        let device = device.to_string();
+        let spawned = std::thread::Builder::new()
+            .name("dictation-mic-lost".into())
+            .spawn(move || shared.mic_lost(lease, &device));
+        if let Err(e) = spawned {
+            tracing::warn!("Microphone: no thread to end the dictation on ({e})");
         }
     }
 }

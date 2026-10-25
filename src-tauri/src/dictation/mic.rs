@@ -22,6 +22,19 @@
 //!   the whole time, as before: instant start and the first word caught,
 //!   with the mic shown in use and a Bluetooth headset in call quality.
 //!
+//! **Which microphone** (2026-10-25, `mics.rs`): the first one in the
+//! person's order that's connected, then Windows' default
+//! (`mics::candidates`; one that won't open gives way to the next). Windows'
+//! list changing (`mics::on_change`) is looked at here: the stream's device
+//! gone — or its stream stopping by itself (cpal's error: unplugged) and
+//! Windows no longer listing it — is **lost** ([`Sink::lost`]: a dictation
+//! recording from it ends and keeps what it heard, `pipeline/unplugged.rs`);
+//! a device still listed is opened again once (a reset, a format change). A
+//! microphone higher in the order connecting, or the order changing, is used
+//! from the next dictation (never in the middle of one): a warm stream on
+//! another closes, one held by the mic test or "Keep the microphone ready"
+//! moves to it at once.
+//!
 //! One thread owns the stream ([`Mic`]: cpal streams are `!Send`, and opens
 //! and closes then happen one at a time, in order, never on the hotkey's
 //! thread). A dictation never waits for the open: it records from the
@@ -31,12 +44,13 @@
 //! [`ZEROS_LIVE_MS`] of silence (a muted mic: the dead-mic watchdog's case) —
 //! the start chime and the bar's "speak now" follow that, not the key, so
 //! nobody talks into a mic that isn't on yet (a Bluetooth headset takes
-//! 0.5–2 s to switch profiles).
+//! 0.5–2 s to switch profiles, an asleep one in the order included).
 //!
 //! The pure parts — what to do next ([`next`]), what's Bluetooth
-//! ([`is_bluetooth`]), when a stream is live ([`live_now`]) — are
-//! unit-tested; the `--ignored` `open_latency_this_pc` times each input on
-//! the PC it runs on.
+//! ([`is_bluetooth`]), when a stream is live ([`live_now`]), what a stopped
+//! stream means ([`after_stop`]) — are unit-tested; the `--ignored`
+//! `open_latency_this_pc` times each input on the PC it runs on. A test run
+//! with made-up microphones (`mics::fake`) "opens" them as a tone.
 
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{self, RecvTimeoutError, Sender};
@@ -45,6 +59,7 @@ use std::time::{Duration, Instant};
 
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 
+use crate::dictation::mics::{self, MicChoice, Target};
 use crate::dictation::pipeline::{resample_linear, TARGET_SAMPLE_RATE};
 
 /// How long the mic stays open after a dictation (or a mic test) unless
@@ -56,6 +71,13 @@ pub(crate) const WARM_MS: u64 = 60_000;
 /// switches block (the dead-mic watchdog takes it from there).
 pub(crate) const ZEROS_LIVE_MS: u64 = 1_500;
 const RATE: u64 = TARGET_SAMPLE_RATE as u64;
+/// A stream that stopped by itself on a device Windows still lists is
+/// opened again — at most once in this long (one that keeps stopping is
+/// lost).
+const REOPEN_GAP: Duration = Duration::from_secs(3);
+/// A device lost while Windows still listed it is passed over for this
+/// long (or until Windows' list drops it).
+const AWAY_FOR: Duration = Duration::from_secs(10);
 
 /// The warm window, [`WARM_MS`] — or, in a debug build, `YAP_MIC_WARM_MS`
 /// (the robot tests' short one).
@@ -121,6 +143,30 @@ pub(crate) fn next(holds: Holds, open: bool, bluetooth: bool, warm_until: Option
     }
 }
 
+/// What a stream that stopped by itself (cpal's error callback), or whose
+/// device left Windows' list, means.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Stopped {
+    /// Open the same device again: Windows still lists it (a reset, a
+    /// format changed in Sound settings), something holds the mic, and it
+    /// hasn't just been reopened.
+    Reopen,
+    /// It's gone (unplugged, a headset switched off): a dictation from it
+    /// ends; the next stream opens on the next microphone.
+    Lost,
+}
+
+/// See [`Stopped`]. `listed`: Windows lists the device now; `held`:
+/// something holds the mic; `reopened_lately`: it was opened again under
+/// [`REOPEN_GAP`] ago.
+pub(crate) fn after_stop(listed: bool, held: bool, reopened_lately: bool) -> Stopped {
+    if listed && held && !reopened_lately {
+        Stopped::Reopen
+    } else {
+        Stopped::Lost
+    }
+}
+
 /// Is this capture endpoint a Bluetooth headset's? From its device
 /// properties: `enumerator` (PKEY_Device_EnumeratorName — "BTHENUM" for a
 /// classic headset's hands-free profile, "BTHHFENUM" for Windows' own
@@ -165,6 +211,10 @@ pub(crate) trait Sink: Send + Sync + 'static {
     /// An open failed; `dictation`: the lease of the dictation that wanted
     /// it, if one did.
     fn failed(&self, error: &str, dictation: Option<u64>);
+    /// The stream's device `device` (its name) went away — unplugged, a
+    /// headset switched off; `dictation`: the lease of the dictation
+    /// recording from it, if one was.
+    fn lost(&self, device: &str, dictation: Option<u64>);
 }
 
 /// How the last open went, in ms from when it was asked for — what the log
@@ -196,7 +246,11 @@ pub(crate) struct State {
     /// Streams opened and closed since Yap started.
     opens: AtomicU64,
     closes: AtomicU64,
+    /// Devices lost (unplugged) under a stream.
+    losses: AtomicU64,
     last: Mutex<Option<OpenTiming>>,
+    /// The running stream's device (its name), if one runs.
+    device: Mutex<Option<String>>,
 }
 
 /// A snapshot of [`State`] (the test suites' `e2e_mic_status`; debug builds).
@@ -210,7 +264,10 @@ pub(crate) struct Status {
     pub bluetooth: bool,
     pub opens: u64,
     pub closes: u64,
+    pub losses: u64,
     pub last: Option<OpenTiming>,
+    /// The device a stream is open on now.
+    pub device: Option<String>,
     pub warm_ms: u64,
 }
 
@@ -223,14 +280,14 @@ enum Cmd {
     Release { lease: u64, done: Option<Sender<bool>> },
     /// Onboarding's mic test on or off.
     Test(bool),
-    /// Settings: "Keep the microphone ready" and the microphone.
-    Settings { keep_ready: bool, device: Option<String> },
-    /// Settings picked another microphone: switch a running stream to it
-    /// live (the old one keeps running if the new one fails), else check
-    /// it's there.
-    Switch { device: Option<String>, reply: Sender<Result<(), String>> },
+    /// Settings: "Keep the microphone ready" and the microphones' order.
+    Settings { keep_ready: bool, order: Vec<MicChoice> },
     /// The dead-mic watchdog: stop the stream and open it again.
     Reopen { reply: Sender<Result<(), String>> },
+    /// Windows' microphones changed (`mics::on_change`).
+    Devices,
+    /// Stream `serial` stopped by itself (cpal's error callback).
+    Stopped { serial: u64 },
 }
 
 /// The dictation's microphone: a handle on the thread that owns the stream.
@@ -247,6 +304,7 @@ impl Mic {
         let (tx, rx) = mpsc::channel::<Cmd>();
         let state = Arc::new(State::default());
         let owner_state = Arc::clone(&state);
+        let me = tx.clone();
         let spawned = std::thread::Builder::new().name("dictation-mic".into()).spawn(move || {
             let mut owner = Owner {
                 sink,
@@ -254,7 +312,11 @@ impl Mic {
                 stream: None,
                 holds: Holds::default(),
                 lease: None,
-                device: None,
+                order: Vec::new(),
+                away: Vec::new(),
+                serial: 0,
+                reopened: None,
+                me,
                 warm_until: None,
                 clock: Instant::now(),
             };
@@ -287,6 +349,11 @@ impl Mic {
         if let Err(e) = spawned {
             tracing::error!("Microphone: no thread to run it on ({})", e);
         }
+        // Windows' microphones changing: looked at on the mic's thread.
+        let devices = tx.clone();
+        mics::on_change(move || {
+            let _ = devices.send(Cmd::Devices);
+        });
         Mic { tx, state, lease: AtomicU64::new(0) }
     }
 
@@ -319,20 +386,10 @@ impl Mic {
         self.send(Cmd::Test(on));
     }
 
-    /// "Keep the microphone ready" and the configured microphone (every
-    /// config save).
-    pub fn settings(&self, keep_ready: bool, device: Option<String>) {
-        self.send(Cmd::Settings { keep_ready, device });
-    }
-
-    /// Settings picked `device`: a running stream switches to it live, else
-    /// it's checked that it's there. Errors (the old stream carries on).
-    pub fn switch(&self, device: Option<String>) -> Result<(), String> {
-        let (reply, answer) = mpsc::channel();
-        self.send(Cmd::Switch { device, reply });
-        answer
-            .recv_timeout(Duration::from_secs(10))
-            .unwrap_or_else(|_| Err("The microphone didn't answer in time".to_string()))
+    /// "Keep the microphone ready" and the microphones' order (every config
+    /// save): a change of order is used from the next dictation.
+    pub fn settings(&self, keep_ready: bool, order: Vec<MicChoice>) {
+        self.send(Cmd::Settings { keep_ready, order });
     }
 
     /// The dead-mic watchdog: stop the stream and open it again.
@@ -365,17 +422,32 @@ impl Mic {
             bluetooth: s.bluetooth.load(Ordering::SeqCst),
             opens: s.opens.load(Ordering::SeqCst),
             closes: s.closes.load(Ordering::SeqCst),
+            losses: s.losses.load(Ordering::SeqCst),
             last: s.last.lock().ok().and_then(|l| l.clone()),
+            device: s.device.lock().ok().and_then(|d| d.clone()),
             warm_ms: warm_ms(),
         }
     }
 }
 
+/// A stream's audio source.
+enum Source {
+    Cpal(#[allow(dead_code)] cpal::Stream),
+    /// A test run's made-up microphone: a tone, stopped when dropped.
+    #[cfg(debug_assertions)]
+    Fake(#[allow(dead_code)] fake::Tone),
+}
+
 /// A running stream.
 struct Running {
-    _stream: cpal::Stream,
+    _source: Source,
     device: String,
+    /// Its Core Audio endpoint id (`None`: opened as Windows' default
+    /// without a list to name it).
+    endpoint: Option<String>,
     bluetooth: bool,
+    /// Numbers the streams, so a stale "stopped" is ignored.
+    serial: u64,
 }
 
 /// The owner thread's state.
@@ -386,8 +458,15 @@ struct Owner {
     holds: Holds,
     /// The dictation holding it.
     lease: Option<u64>,
-    /// The configured microphone (`None`: Windows' default).
-    device: Option<String>,
+    /// The microphones' order (empty: Windows' default).
+    order: Vec<MicChoice>,
+    /// Devices lost while Windows still listed them, and when.
+    away: Vec<(String, Instant)>,
+    serial: u64,
+    /// When a stream that stopped by itself was last opened again.
+    reopened: Option<Instant>,
+    /// This thread's own queue (for the streams' "stopped").
+    me: Sender<Cmd>,
     warm_until: Option<Instant>,
     /// The clock [`next`]'s ms count on.
     clock: Instant,
@@ -417,6 +496,10 @@ impl Owner {
         )
     }
 
+    fn away_ids(&self) -> Vec<String> {
+        self.away.iter().map(|(id, _)| id.clone()).collect()
+    }
+
     fn handle(&mut self, cmd: Cmd) {
         match cmd {
             Cmd::Hold { lease, asked } => {
@@ -443,6 +526,9 @@ impl Owner {
                         } else {
                             "the dictation ended"
                         });
+                    } else if let Some(present) = mics::present() {
+                        // A microphone higher in the order came meanwhile.
+                        self.reconsider(&present);
                     }
                 }
                 if let Some(done) = done {
@@ -463,8 +549,9 @@ impl Owner {
                     self.warm_until = Some(Instant::now() + Duration::from_millis(warm_ms()));
                 }
             }
-            Cmd::Settings { keep_ready, device } => {
-                self.device = device;
+            Cmd::Settings { keep_ready, order } => {
+                let reordered = order != self.order;
+                self.order = order;
                 if keep_ready != self.holds.keep_ready {
                     self.holds.keep_ready = keep_ready;
                     tracing::info!(keep_ready, "Microphone: keep it ready");
@@ -472,27 +559,12 @@ impl Owner {
                         self.open(Instant::now());
                     }
                 }
-            }
-            Cmd::Switch { device, reply } => {
-                self.device = device.clone();
-                let result = match self.stream.take() {
-                    // Built before the old one stops: a failure leaves the
-                    // old one running.
-                    Some(old) => match self.build(device.as_deref(), Instant::now()) {
-                        Ok(new) => {
-                            drop(old);
-                            self.state.closes.fetch_add(1, Ordering::SeqCst);
-                            self.running(new);
-                            Ok(())
-                        }
-                        Err(e) => {
-                            self.stream = Some(old);
-                            Err(e)
-                        }
-                    },
-                    None => present(device.as_deref()),
-                };
-                let _ = reply.send(result);
+                if reordered {
+                    tracing::info!(microphones = self.order.len(), "Microphone: the order changed");
+                    if let Some(present) = mics::present() {
+                        self.reconsider(&present);
+                    }
+                }
             }
             Cmd::Reopen { reply } => {
                 // The dead stream stops first: two at once would interleave
@@ -510,6 +582,87 @@ impl Owner {
                 };
                 let _ = reply.send(result);
             }
+            Cmd::Devices => self.devices(),
+            Cmd::Stopped { serial } => self.stopped(serial, false),
+        }
+    }
+
+    /// Windows' microphones changed: the stream's device gone is lost; a
+    /// microphone that comes first now is used from the next dictation.
+    fn devices(&mut self) {
+        let present = mics::present();
+        // A lost device Windows no longer lists can come back; one still
+        // listed a while after is usable again.
+        self.away.retain(|(id, at)| at.elapsed() < AWAY_FOR && present.as_ref().is_some_and(|l| l.iter().any(|e| &e.id == id)));
+        let Some(present) = present else { return };
+        let Some(run) = &self.stream else { return };
+        if run.endpoint.as_ref().is_some_and(|id| !present.iter().any(|e| &e.id == id)) {
+            let serial = run.serial;
+            self.stopped(serial, true);
+            return;
+        }
+        self.reconsider(&present);
+    }
+
+    /// A stream open on another microphone than the order says now (a
+    /// higher one connected, the order changed, Windows' default moved):
+    /// never under a dictation. A warm stream closes (the next dictation
+    /// opens the right one); one the mic test or "Keep the microphone ready"
+    /// holds moves now.
+    fn reconsider(&mut self, present: &[mics::Endpoint]) {
+        if self.holds.dictation {
+            return;
+        }
+        let Some(open_id) = self.stream.as_ref().and_then(|r| r.endpoint.clone()) else { return };
+        let want = mics::in_use(&self.order, present, &self.away_ids());
+        if want.as_ref().is_some_and(|w| w.id == open_id) {
+            return;
+        }
+        self.close("another microphone comes first now");
+        if self.holds.any() {
+            self.open(Instant::now());
+        }
+    }
+
+    /// Stream `serial` stopped by itself (`gone`: its device left Windows'
+    /// list). See [`after_stop`].
+    fn stopped(&mut self, serial: u64, gone: bool) {
+        let Some(run) = self.stream.as_ref().filter(|r| r.serial == serial) else { return };
+        let (device, endpoint) = (run.device.clone(), run.endpoint.clone());
+        self.close(if gone { "its device was disconnected" } else { "its stream stopped" });
+        // Windows' list now (read again: it may not have caught up yet).
+        let listed = if gone {
+            None
+        } else {
+            endpoint
+                .as_ref()
+                .and_then(|id| mics::refresh().and_then(|l| l.into_iter().find(|e| &e.id == id)))
+        };
+        let lately = self.reopened.is_some_and(|t| t.elapsed() < REOPEN_GAP);
+        if let (Stopped::Reopen, Some(ep)) = (after_stop(listed.is_some(), self.holds.any(), lately), listed.as_ref()) {
+            self.reopened = Some(Instant::now());
+            match self.build(&Target::Mic(ep.clone()), Instant::now()) {
+                Ok(r) => {
+                    tracing::info!("Microphone: its stream stopped; opened it again");
+                    self.running(r);
+                    return;
+                }
+                Err(e) => tracing::info!("Microphone: couldn't open it again: {}", e),
+            }
+        }
+        if let (Some(id), true) = (endpoint, listed.is_some()) {
+            self.away.push((id, Instant::now()));
+        }
+        self.state.losses.fetch_add(1, Ordering::SeqCst);
+        let dictation = self.lease.filter(|_| self.holds.dictation);
+        tracing::warn!(recording = dictation.is_some(), "Microphone: disconnected");
+        if let Some(sink) = self.sink.upgrade() {
+            sink.lost(&device, dictation);
+        }
+        // The mic test or "Keep the microphone ready": the next one now. (A
+        // dictation from it ends; the next opens the next one.)
+        if dictation.is_none() && self.holds.any() {
+            self.open(Instant::now());
         }
     }
 
@@ -528,17 +681,35 @@ impl Owner {
         }
     }
 
+    /// Open the first microphone that will, in order (`mics::candidates`).
     fn open(&mut self, asked: Instant) {
         self.state.opening.store(true, Ordering::SeqCst);
         self.state.live.store(false, Ordering::SeqCst);
-        let device = self.device.clone();
-        match self.build(device.as_deref(), asked) {
-            Ok(running) => self.running(running),
-            Err(e) => {
-                tracing::warn!("Microphone: couldn't open it: {}", e);
-                if let Some(sink) = self.sink.upgrade() {
-                    sink.failed(&e, self.lease.filter(|_| self.holds.dictation));
+        let present = mics::present();
+        let targets = mics::candidates(&self.order, present.as_deref(), &self.away_ids());
+        let mut error: Option<String> = None;
+        for (rank, target) in targets.iter().enumerate() {
+            match self.build(target, asked) {
+                Ok(running) => {
+                    if rank > 0 {
+                        tracing::info!(rank, "Microphone: opened one further down the order");
+                    }
+                    self.running(running);
+                    break;
                 }
+                Err(e) => {
+                    tracing::warn!("Microphone: couldn't open it: {}", e);
+                    error.get_or_insert(e);
+                }
+            }
+        }
+        if self.stream.is_none() {
+            let e = error.unwrap_or_else(|| "No microphone found".to_string());
+            if targets.is_empty() {
+                tracing::warn!("Microphone: none connected");
+            }
+            if let Some(sink) = self.sink.upgrade() {
+                sink.failed(&e, self.lease.filter(|_| self.holds.dictation));
             }
         }
         self.state.opening.store(false, Ordering::SeqCst);
@@ -548,6 +719,9 @@ impl Owner {
         self.state.bluetooth.store(running.bluetooth, Ordering::SeqCst);
         self.state.open.store(true, Ordering::SeqCst);
         self.state.opens.fetch_add(1, Ordering::SeqCst);
+        if let Ok(mut d) = self.state.device.lock() {
+            *d = Some(running.device.clone());
+        }
         if let Some(sink) = self.sink.upgrade() {
             sink.opened(&running.device);
         }
@@ -562,21 +736,30 @@ impl Owner {
             self.state.live.store(false, Ordering::SeqCst);
             self.state.bluetooth.store(false, Ordering::SeqCst);
             self.state.closes.fetch_add(1, Ordering::SeqCst);
+            if let Ok(mut d) = self.state.device.lock() {
+                *d = None;
+            }
             tracing::info!(device = %device, "Microphone closed: {}", why);
         }
     }
 
-    /// Build and start a stream on `device_name` (`None`: Windows' default).
-    fn build(&self, device_name: Option<&str>, asked: Instant) -> Result<Running, String> {
+    /// Build and start a stream on `target`.
+    fn build(&mut self, target: &Target, asked: Instant) -> Result<Running, String> {
+        self.serial += 1;
+        let serial = self.serial;
+        #[cfg(debug_assertions)]
+        if let Some(ep) = target.endpoint().filter(|e| mics::fake::is_fake(&e.id)) {
+            return Ok(self.fake(ep, asked, serial));
+        }
         let started = Instant::now();
         let host = cpal::default_host();
-        let device = match device_name {
-            Some(name) => host
+        let device = match target {
+            Target::Mic(ep) => host
                 .input_devices()
                 .map_err(|e| format!("Failed to enumerate input devices: {}", e))?
-                .find(|d| d.name().map(|n| n == name).unwrap_or(false))
-                .ok_or_else(|| format!("Input device not found: {}", name))?,
-            None => host
+                .find(|d| d.name().map(|n| n == ep.name).unwrap_or(false))
+                .ok_or_else(|| format!("Input device not found: {}", ep.name))?,
+            Target::Default => host
                 .default_input_device()
                 .ok_or_else(|| "No default input device available".to_string())?,
         };
@@ -594,17 +777,17 @@ impl Owner {
         let needs_resample = native_rate != TARGET_SAMPLE_RATE;
         let needs_downmix = channels > 1;
 
-        let bluetooth = platform::bluetooth(&dev_name, device_name.is_none());
-        let sink = self.sink.clone();
-        let state = Arc::clone(&self.state);
+        let bluetooth = match target {
+            Target::Mic(ep) => ep.bluetooth,
+            Target::Default => platform::bluetooth(&dev_name),
+        };
+        let mut feed = Feed::new(self.sink.clone(), Arc::clone(&self.state), asked);
         let timing = OpenTiming {
             device: dev_name.clone(),
             bluetooth,
             ..Default::default()
         };
-        let mut delivered: u64 = 0;
-        let mut first = true;
-        let mut live = false;
+        let stopped = self.me.clone();
         let stream = device
             .build_input_stream(
                 &stream_config,
@@ -622,44 +805,18 @@ impl Owner {
                     } else {
                         mono
                     };
-                    if first {
-                        first = false;
-                        if let Ok(mut last) = state.last.lock() {
-                            if let Some(t) = last.as_mut() {
-                                t.first_audio_ms = Some(asked.elapsed().as_millis() as u64);
-                            }
-                        }
-                    }
-                    let sink = sink.upgrade();
-                    if let Some(sink) = &sink {
-                        sink.audio(&samples);
-                    }
-                    if !live {
-                        delivered += samples.len() as u64;
-                        if live_now(crate::dictation::mic_watch::has_sound(&samples), delivered) {
-                            live = true;
-                            state.live.store(true, Ordering::SeqCst);
-                            let ms = asked.elapsed().as_millis() as u64;
-                            if let Ok(mut last) = state.last.lock() {
-                                if let Some(t) = last.as_mut() {
-                                    t.live_ms = Some(ms);
-                                    tracing::info!(
-                                        device = %t.device,
-                                        bluetooth = t.bluetooth,
-                                        open_ms = t.open_ms,
-                                        first_audio_ms = t.first_audio_ms,
-                                        live_ms = ms,
-                                        "Microphone: live"
-                                    );
-                                }
-                            }
-                            if let Some(sink) = &sink {
-                                sink.live();
-                            }
-                        }
-                    }
+                    feed.push(&samples);
                 },
-                move |err| tracing::error!("Audio input stream error: {}", err),
+                // Every error stops cpal's stream (on WASAPI): the device
+                // unplugged (DeviceNotAvailable), the audio service gone…
+                // The owner decides what it means.
+                move |err| {
+                    match err {
+                        cpal::StreamError::DeviceNotAvailable => tracing::warn!("Microphone: its device is no longer available"),
+                        other => tracing::error!("Audio input stream error: {}", other),
+                    }
+                    let _ = stopped.send(Cmd::Stopped { serial });
+                },
                 None,
             )
             .map_err(|e| format!("Failed to build input stream: {}", e))?;
@@ -675,24 +832,141 @@ impl Owner {
             }
         }
         tracing::info!(device = %dev_name, native_rate, channels, bluetooth, open_ms, "Microphone opened");
-        Ok(Running { _stream: stream, device: dev_name, bluetooth })
+        Ok(Running {
+            _source: Source::Cpal(stream),
+            device: dev_name,
+            endpoint: target.endpoint().map(|e| e.id.clone()),
+            bluetooth,
+            serial,
+        })
+    }
+
+    /// A test run's made-up microphone `ep`: a tone at real-time pace,
+    /// stopping by itself (as cpal's stream does) when it's unplugged.
+    #[cfg(debug_assertions)]
+    fn fake(&mut self, ep: &mics::Endpoint, asked: Instant, serial: u64) -> Running {
+        if let Ok(mut last) = self.state.last.lock() {
+            *last = Some(OpenTiming { device: ep.name.clone(), bluetooth: ep.bluetooth, ..Default::default() });
+        }
+        let feed = Feed::new(self.sink.clone(), Arc::clone(&self.state), asked);
+        let tone = fake::Tone::start(ep.id.clone(), feed, self.me.clone(), serial);
+        tracing::info!(bluetooth = ep.bluetooth, "e2e: a made-up microphone opened");
+        Running {
+            _source: Source::Fake(tone),
+            device: ep.name.clone(),
+            endpoint: Some(ep.id.clone()),
+            bluetooth: ep.bluetooth,
+            serial,
+        }
     }
 }
 
-/// Is `device` (by name; `None`: the default) there to open?
-fn present(device: Option<&str>) -> Result<(), String> {
-    let host = cpal::default_host();
-    match device {
-        Some(name) => host
-            .input_devices()
-            .map_err(|e| format!("Failed to enumerate input devices: {}", e))?
-            .any(|d| d.name().map(|n| n == name).unwrap_or(false))
-            .then_some(())
-            .ok_or_else(|| format!("Input device not found: {}", name)),
-        None => host
-            .default_input_device()
-            .map(|_| ())
-            .ok_or_else(|| "No default input device available".to_string()),
+/// A stream's audio on its way to the sink, with its first audio and first
+/// real audio timed (the audio thread's side of [`OpenTiming`]).
+struct Feed {
+    sink: Weak<dyn Sink>,
+    state: Arc<State>,
+    asked: Instant,
+    first: bool,
+    live: bool,
+    delivered: u64,
+}
+
+impl Feed {
+    fn new(sink: Weak<dyn Sink>, state: Arc<State>, asked: Instant) -> Self {
+        Feed { sink, state, asked, first: true, live: false, delivered: 0 }
+    }
+
+    fn push(&mut self, samples: &[f32]) {
+        if self.first {
+            self.first = false;
+            if let Ok(mut last) = self.state.last.lock() {
+                if let Some(t) = last.as_mut() {
+                    t.first_audio_ms = Some(self.asked.elapsed().as_millis() as u64);
+                }
+            }
+        }
+        let sink = self.sink.upgrade();
+        if let Some(sink) = &sink {
+            sink.audio(samples);
+        }
+        if !self.live {
+            self.delivered += samples.len() as u64;
+            if live_now(crate::dictation::mic_watch::has_sound(samples), self.delivered) {
+                self.live = true;
+                self.state.live.store(true, Ordering::SeqCst);
+                let ms = self.asked.elapsed().as_millis() as u64;
+                if let Ok(mut last) = self.state.last.lock() {
+                    if let Some(t) = last.as_mut() {
+                        t.live_ms = Some(ms);
+                        tracing::info!(
+                            device = %t.device,
+                            bluetooth = t.bluetooth,
+                            open_ms = t.open_ms,
+                            first_audio_ms = t.first_audio_ms,
+                            live_ms = ms,
+                            "Microphone: live"
+                        );
+                    }
+                }
+                if let Some(sink) = &sink {
+                    sink.live();
+                }
+            }
+        }
+    }
+}
+
+/// A test run's made-up microphone's stream: a quiet tone on a thread of
+/// its own.
+#[cfg(debug_assertions)]
+mod fake {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::mpsc::Sender;
+    use std::sync::Arc;
+    use std::time::{Duration, Instant};
+
+    use super::{Cmd, Feed, RATE};
+
+    pub(super) struct Tone {
+        stop: Arc<AtomicBool>,
+    }
+
+    impl Tone {
+        /// Feed a tone from microphone `id` until dropped — or, as a real
+        /// stream does when its device goes, until `id` is unplugged
+        /// (`mics::fake`): then `Stopped` to the owner.
+        pub(super) fn start(id: String, mut feed: Feed, owner: Sender<Cmd>, serial: u64) -> Tone {
+            let stop = Arc::new(AtomicBool::new(false));
+            let flag = Arc::clone(&stop);
+            let _ = std::thread::Builder::new().name("e2e-mic".into()).spawn(move || {
+                let started = Instant::now();
+                let mut sent: u64 = 0;
+                while !flag.load(Ordering::SeqCst) {
+                    if !crate::dictation::mics::fake::connected(&id) {
+                        tracing::warn!("e2e: the made-up microphone's stream stopped (unplugged)");
+                        let _ = owner.send(Cmd::Stopped { serial });
+                        break;
+                    }
+                    let due = started.elapsed().as_millis() as u64 * RATE / 1_000;
+                    if due > sent {
+                        let chunk: Vec<f32> = (sent..due)
+                            .map(|i| 0.05 * (i as f32 * 2.0 * std::f32::consts::PI * 220.0 / RATE as f32).sin())
+                            .collect();
+                        sent = due;
+                        feed.push(&chunk);
+                    }
+                    std::thread::sleep(Duration::from_millis(10));
+                }
+            });
+            Tone { stop }
+        }
+    }
+
+    impl Drop for Tone {
+        fn drop(&mut self) {
+            self.stop.store(true, Ordering::SeqCst);
+        }
     }
 }
 
@@ -700,130 +974,11 @@ fn present(device: Option<&str>) -> Result<(), String> {
 
 #[cfg(windows)]
 mod platform {
-    use windows::core::GUID;
-    use windows::Win32::Foundation::PROPERTYKEY;
-    use windows::Win32::Media::Audio::{
-        eCapture, eConsole, IMMDevice, IMMDeviceEnumerator, MMDeviceEnumerator, DEVICE_STATE_ACTIVE,
-    };
-    use windows::Win32::System::Com::StructuredStorage::{PropVariantClear, PROPVARIANT};
-    use windows::Win32::System::Com::{
-        CoCreateInstance, CoInitializeEx, CoUninitialize, CLSCTX_ALL, COINIT_MULTITHREADED, STGM_READ,
-    };
-    use windows::Win32::System::Variant::{VT_LPWSTR, VT_UI4};
-
-    /// PKEY_Device_FriendlyName: "Microphone (Razer Seiren Mini)", the name cpal gives.
-    const FRIENDLY_NAME: PROPERTYKEY = PROPERTYKEY {
-        fmtid: GUID::from_u128(0xa45c254e_df1c_4efd_8020_67d146a850e0),
-        pid: 14,
-    };
-    /// PKEY_Device_EnumeratorName: "USB", "HDAUDIO", "BTHENUM", "BTHHFENUM"…
-    const ENUMERATOR_NAME: PROPERTYKEY = PROPERTYKEY {
-        fmtid: GUID::from_u128(0xa45c254e_df1c_4efd_8020_67d146a850e0),
-        pid: 24,
-    };
-    /// The endpoint's device path: "{1}.USB\VID_…", "{1}.BTHENUM\…".
-    const DEVICE_PATH: PROPERTYKEY = PROPERTYKEY {
-        fmtid: GUID::from_u128(0xb3f8fa53_0004_438e_9003_51a46e139bfc),
-        pid: 2,
-    };
-    /// PKEY_AudioEndpoint_FormFactor (Microphone 4, Headset 5…), for the log.
-    const FORM_FACTOR: PROPERTYKEY = PROPERTYKEY {
-        fmtid: GUID::from_u128(0x1da5d803_d492_4edd_8c23_e0c0ffee7f0e),
-        pid: 0,
-    };
-
-    /// What Windows says about a capture endpoint.
-    #[derive(Debug, Default, Clone)]
-    pub(crate) struct Facts {
-        pub name: String,
-        pub enumerator: String,
-        pub path: String,
-        pub form_factor: Option<u32>,
-    }
-
-    /// COM on this thread, undone on drop when this did it (cpal may have
-    /// set the thread up its own way already: RPC_E_CHANGED_MODE, and COM
-    /// works either way).
-    struct Com(bool);
-    impl Drop for Com {
-        fn drop(&mut self) {
-            if self.0 {
-                // SAFETY: balances this thread's successful CoInitializeEx.
-                unsafe { CoUninitialize() };
-            }
-        }
-    }
-
-    fn text(value: &PROPVARIANT) -> Option<String> {
-        // SAFETY: read as the type the PROPVARIANT says it holds.
-        unsafe {
-            let inner = &value.Anonymous.Anonymous;
-            if inner.vt == VT_LPWSTR && !inner.Anonymous.pwszVal.is_null() {
-                inner.Anonymous.pwszVal.to_string().ok()
-            } else {
-                None
-            }
-        }
-    }
-
-    fn facts(device: &IMMDevice) -> Option<Facts> {
-        // SAFETY: COM calls on this thread; each PROPVARIANT is read, then
-        // cleared once.
-        unsafe {
-            let store = device.OpenPropertyStore(STGM_READ).ok()?;
-            let read = |key: &PROPERTYKEY| -> (Option<String>, Option<u32>) {
-                match store.GetValue(key) {
-                    Ok(mut v) => {
-                        let s = text(&v);
-                        let inner = &v.Anonymous.Anonymous;
-                        let n = (inner.vt == VT_UI4).then(|| inner.Anonymous.ulVal);
-                        let _ = PropVariantClear(&mut v);
-                        (s, n)
-                    }
-                    Err(_) => (None, None),
-                }
-            };
-            Some(Facts {
-                name: read(&FRIENDLY_NAME).0.unwrap_or_default(),
-                enumerator: read(&ENUMERATOR_NAME).0.unwrap_or_default(),
-                path: read(&DEVICE_PATH).0.unwrap_or_default(),
-                form_factor: read(&FORM_FACTOR).1,
-            })
-        }
-    }
-
-    /// Every active capture endpoint's facts, the default one first.
-    pub(crate) fn inputs() -> Vec<Facts> {
-        // SAFETY: plain COM calls on this thread; every pointer comes from
-        // COM and is released by its wrapper.
-        unsafe {
-            let _com = Com(CoInitializeEx(None, COINIT_MULTITHREADED).is_ok());
-            let Ok(enumerator) = CoCreateInstance::<_, IMMDeviceEnumerator>(&MMDeviceEnumerator, None, CLSCTX_ALL) else {
-                return Vec::new();
-            };
-            let mut out = Vec::new();
-            if let Some(f) = enumerator.GetDefaultAudioEndpoint(eCapture, eConsole).ok().and_then(|d| facts(&d)) {
-                out.push(f);
-            }
-            if let Ok(all) = enumerator.EnumAudioEndpoints(eCapture, DEVICE_STATE_ACTIVE) {
-                for i in 0..all.GetCount().unwrap_or(0) {
-                    if let Some(f) = all.Item(i).ok().and_then(|d| facts(&d)) {
-                        if !out.iter().any(|o: &Facts| o.name == f.name && o.path == f.path) {
-                            out.push(f);
-                        }
-                    }
-                }
-            }
-            out
-        }
-    }
-
-    /// Is the input named `name` (cpal's name; `default`: it's Windows'
-    /// default input) a Bluetooth headset's?
-    pub(crate) fn bluetooth(name: &str, default: bool) -> bool {
-        let all = inputs();
-        let found = if default { all.first() } else { all.iter().find(|f| f.name == name) };
-        let found = found.or_else(|| all.iter().find(|f| f.name == name));
+    /// Is the input named `name` (cpal's name, opened as Windows' default
+    /// without a list) a Bluetooth headset's?
+    pub(crate) fn bluetooth(name: &str) -> bool {
+        let all = crate::dictation::mics::win::capture_endpoints().unwrap_or_default();
+        let found = all.iter().find(|f| f.default).or_else(|| all.iter().find(|f| f.name == name));
         match found {
             Some(f) => {
                 let bt = super::is_bluetooth(&f.enumerator, &f.path, &f.name);
@@ -838,7 +993,7 @@ mod platform {
 
 #[cfg(not(windows))]
 mod platform {
-    pub(crate) fn bluetooth(name: &str, _default: bool) -> bool {
+    pub(crate) fn bluetooth(name: &str) -> bool {
         super::is_bluetooth("", "", name)
     }
 }
@@ -885,19 +1040,31 @@ mod tests {
     }
 
     #[test]
+    fn a_stopped_stream_is_reopened_only_while_windows_lists_its_device() {
+        // A reset or a format change: the device is still there.
+        assert_eq!(after_stop(true, true, false), Stopped::Reopen);
+        // Unplugged: Windows no longer lists it.
+        assert_eq!(after_stop(false, true, false), Stopped::Lost);
+        // It keeps stopping: lost after one reopen.
+        assert_eq!(after_stop(true, true, true), Stopped::Lost);
+        // Nothing holds the mic (a warm stream): no need to open it again.
+        assert_eq!(after_stop(true, false, false), Stopped::Lost);
+    }
+
+    #[test]
     fn bluetooth_is_read_from_the_endpoint() {
         // Classic hands-free profile, Windows' own hands-free driver, LE Audio.
-        assert!(is_bluetooth("BTHENUM", "{1}.BTHENUM\\{0000111E-0000-1000-8000-00805F9B34FB}", "Headset (WH-1000XM4)"));
+        assert!(is_bluetooth("BTHENUM", "{1}.BTHENUM\\{0000111E-0000-1000-8000-00805F9B34FB}", "Headset (Contoso Buds)"));
         assert!(is_bluetooth("BTHHFENUM", "", "Headset"));
         assert!(is_bluetooth("bthledevice", "", "Microphone"));
         assert!(is_bluetooth("", "{2}.\\\\?\\bthhfenum#{0000111e-0000-1000-8000-00805f9b34fb}", "Headset"));
         // Older names say it when the properties don't.
-        assert!(is_bluetooth("", "", "Headset (Jabra Elite 85t Hands-Free AG Audio)"));
+        assert!(is_bluetooth("", "", "Headset (Contoso Buds Hands-Free AG Audio)"));
         // USB (a wireless headset's own dongle too), built-in, virtual.
-        assert!(!is_bluetooth("USB", "{1}.USB\\VID_046D&PID_0ACB&MI_00\\D&8F5086&0&0000", "Microphone (G435 Wireless Gaming Headset)"));
-        assert!(!is_bluetooth("HDAUDIO", "{1}.HDAUDIO\\FUNC_01&VEN_10EC", "Microphone Array (Realtek(R) Audio)"));
-        assert!(!is_bluetooth("ROOT", "{1}.ROOT\\STEAMSTREAMINGMICROPHONE\\0000", "Microphone (Steam Streaming Microphone)"));
-        assert!(!is_bluetooth("", "", "Microphone (Razer Seiren Mini)"));
+        assert!(!is_bluetooth("USB", "{1}.USB\\VID_046D&PID_0ACB&MI_00\\D&8F5086&0&0000", "Microphone (Contoso Wireless Headset)"));
+        assert!(!is_bluetooth("HDAUDIO", "{1}.HDAUDIO\\FUNC_01&VEN_10EC", "Microphone Array (Northwind Audio)"));
+        assert!(!is_bluetooth("ROOT", "{1}.ROOT\\STREAMINGMICROPHONE\\0000", "Microphone (Contoso Streaming)"));
+        assert!(!is_bluetooth("", "", "Microphone (Fabrikam USB Mic)"));
     }
 
     #[test]
@@ -926,12 +1093,13 @@ mod tests {
     #[ignore]
     fn open_latency_this_pc() {
         #[cfg(windows)]
-        for f in platform::inputs() {
+        for f in crate::dictation::mics::win::capture_endpoints().unwrap_or_default() {
             println!(
-                "{} — enumerator {:?}, form factor {:?}, bluetooth {}",
+                "{} — enumerator {:?}, form factor {:?}, default {}, bluetooth {}",
                 f.name,
                 f.enumerator,
                 f.form_factor,
+                f.default,
                 is_bluetooth(&f.enumerator, &f.path, &f.name)
             );
         }

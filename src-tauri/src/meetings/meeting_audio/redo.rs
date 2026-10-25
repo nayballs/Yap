@@ -205,7 +205,9 @@ pub fn rebuild(old: &[TranscriptSegment], old_breaks: &[usize], redone: &[Redone
     let mut fixed: Vec<Vec<(&str, (u64, u64))>> = vec![Vec::new(); redone.len()];
     let mut replaced = 0;
     for seg in old {
-        match recording_of(redone, seg.ts).filter(|_| !seg.dictated) {
+        // (Markers the audio can't give again stay: a dictation, the mic
+        // disconnected.)
+        match recording_of(redone, seg.ts).filter(|_| !seg.dictated && seg.mic.is_none()) {
             Some(i) if seg.edited => {
                 if let Some(p) = place(seg) {
                     fixed[i].push((seg.source.as_str(), p));
@@ -252,7 +254,7 @@ pub fn rebuild(old: &[TranscriptSegment], old_breaks: &[usize], redone: &[Redone
         .filter(|&&b| b > 0 && b <= old.len())
         .map(|&b| {
             let before = &old[b - 1];
-            let upto = match recording_of(redone, before.ts).filter(|_| !before.dictated) {
+            let upto = match recording_of(redone, before.ts).filter(|_| !before.dictated && before.mic.is_none()) {
                 Some(i) => redone[i].end_ms / 1000,
                 None => before.ts,
             };

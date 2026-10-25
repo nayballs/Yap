@@ -211,7 +211,8 @@ pub fn run() {
             dictation::commands::list_audio_devices,
             dictation::commands::list_output_devices,
             dictation::commands::set_mic_test,
-            dictation::commands::set_input_device,
+            dictation::mics::list_mics,
+            dictation::mics::offer::mic_offer_respond,
             shell::logging::frontend_log,
             dictation::commands::model_language_info,
             dictation::commands::configure_hotkey,
@@ -487,6 +488,12 @@ pub fn run() {
             #[cfg(debug_assertions)]
             dictation::mic_privacy::e2e_mic_privacy,
             #[cfg(debug_assertions)]
+            dictation::mics::e2e_mics,
+            #[cfg(debug_assertions)]
+            dictation::mics::e2e_mic_plug,
+            #[cfg(debug_assertions)]
+            dictation::mics::e2e_mic_unplug,
+            #[cfg(debug_assertions)]
             pasting::elevated::e2e_paste_elevated,
             #[cfg(debug_assertions)]
             shell::context_menu::e2e_context_menus,
@@ -638,6 +645,9 @@ pub fn run() {
             // (Settings → Speech-to-Text → Runs on; stt_speed.rs).
             dictation::stt_speed::sync(&cfg);
 
+            // Windows' microphones, read and watched (mics.rs): which one
+            // dictation and meetings use, and a new one plugged in.
+            dictation::mics::start(&handle);
             // Start the dictation pipeline (audio capture + STT engine). It
             // runs without a microphone too (see `Pipeline::start`).
             let pipeline = dictation::pipeline::Pipeline::start(handle.clone(), cfg.clone());

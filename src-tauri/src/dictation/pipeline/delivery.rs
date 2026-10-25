@@ -284,11 +284,15 @@ impl Shared {
                 0 => None,
                 h => Some(h),
             };
+            // An Undo, or a dictation whose mic was disconnected
+            // (`unplugged.rs`): into its own window or onto the clipboard,
+            // never into whatever has the focus now.
+            let unplugged = self.unplugged();
             match crate::pasting::text_injector::inject_text(
                 &corrected,
                 restore_clipboard,
                 target,
-                self.undoing.load(Ordering::SeqCst),
+                self.undoing.load(Ordering::SeqCst) || unplugged,
                 read,
             )
             .await
@@ -304,7 +308,9 @@ impl Shared {
                     if submit.is_some() {
                         tracing::info!("Not pressing the submit key: the app runs as administrator");
                     }
-                    crate::notices::alert::show_soon(&self.app, crate::pasting::elevated::alert());
+                    if !self.tell_unplugged(super::unplugged::Outcome::OnClipboard) {
+                        crate::notices::alert::show_soon(&self.app, crate::pasting::elevated::alert());
+                    }
                 }
                 // An Undo whose window is gone (or won't come to the
                 // front): never into another one; on the clipboard.
@@ -312,12 +318,21 @@ impl Shared {
                     crate::pasting::as_said::forget();
                     report.left_on_clipboard = true;
                     report.error = Some("the dictation's window is gone".into());
-                    not_pasted = Some("Left on the clipboard: its window was gone");
-                    crate::notices::alert::show_soon(&self.app, undo_window_gone());
+                    not_pasted = Some(if unplugged {
+                        super::unplugged::NOT_PASTED
+                    } else {
+                        "Left on the clipboard: its window was gone"
+                    });
+                    // One alert: the mic's, saying where the text is.
+                    if !self.tell_unplugged(super::unplugged::Outcome::OnClipboard) {
+                        crate::notices::alert::show_soon(&self.app, undo_window_gone());
+                    }
                 }
                 Ok(delivery @ (crate::pasting::text_injector::Delivery::Pasted | crate::pasting::text_injector::Delivery::Typed)) => {
                     // The paste didn't land and the text was typed instead.
                     report.typed = delivery == crate::pasting::text_injector::Delivery::Typed;
+                    // Its mic was unplugged: said, now it's in its window.
+                    self.tell_unplugged(super::unplugged::Outcome::Pasted);
                     // Once, whether auto-submit, the voice
                     // command or both asked for it.
                     if let Some(key) = &submit {

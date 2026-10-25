@@ -122,11 +122,16 @@ export function createSetupState() {
   let bars = $state(Array(36).fill(0)); // scrolling level meter
   let micHeard = $state(false); // any signal above the floor yet?
 
-  async function applyMic() {
+  // A microphone picked goes first in the order (the rest stay after it);
+  // "System default" ('') empties it. Saved, the mic switches to it live
+  // (dictation/mic.rs follows the order; the mic check holds it open).
+  async function applyMic(id) {
     if (!cfg) return;
     try {
-      cfgPatch.inputDevice = cfg.inputDevice || null; // set via bind:value
-      await invoke('set_input_device', { device: cfg.inputDevice || null });
+      const m = devices.find((d) => d.id === id);
+      const rest = (cfg.micOrder || []).filter((c) => c.id !== id && (!m || c.name !== m.name));
+      cfgPatch.micOrder = m ? [{ id: m.id, name: m.name }, ...rest] : [];
+      cfg.micOrder = cfgPatch.micOrder;
       await persistCfg();
       bars = Array(36).fill(0);
       micHeard = false;

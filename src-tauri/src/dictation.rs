@@ -14,6 +14,7 @@ pub mod media;
 pub mod media_pause;
 pub mod mic;
 pub mod mic_privacy;
+pub mod mics;
 pub mod mic_watch;
 pub mod mute;
 pub mod partials;

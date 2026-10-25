@@ -74,6 +74,11 @@ export const FIELD_DEFAULTS = {
   readingSize: 'default',
   motion: 'system',
   inputDevice: null,
+  // Settings → Dictation → Microphone (MicOrder.svelte, dictation/mics.rs):
+  // the microphones in order ([{ id, name }]; empty: Windows' default), and
+  // the ones answered "Not now" to.
+  micOrder: [],
+  micNotNow: [],
   dictionary: [],
   selectedLanguage: 'auto',
   translateToEnglish: false,
@@ -141,6 +146,10 @@ export function cleanConfig(cfg) {
   return {
     ...cfg,
     inputDevice: cfg.inputDevice || null,
+    micOrder: (Array.isArray(cfg.micOrder) ? cfg.micOrder : [])
+      .filter((m) => m && (m.id || m.name))
+      .map((m) => ({ id: String(m.id || ''), name: String(m.name || '') })),
+    micNotNow: (Array.isArray(cfg.micNotNow) ? cfg.micNotNow : []).filter((m) => m && (m.id || m.name)),
     outputDevice: cfg.outputDevice || null,
     audioFeedbackVolume: Number(cfg.audioFeedbackVolume),
     ttsRate: Number(cfg.ttsRate) || 1,

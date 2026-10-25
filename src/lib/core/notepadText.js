@@ -3,6 +3,7 @@
 // transcript is laid out, and what each line's speaker is called (the
 // note's speaker map, src-tauri/src/speakers.rs, read the same way).
 import { markdownToText } from './markdown.js';
+import { shortMicName } from './mics.js';
 
 /** The voice of the person using Yap (the mic). */
 export const YOU = 'you';
@@ -56,7 +57,7 @@ const who = speakerLabel;
 export function noteVoices(note) {
   const out = [];
   const add = (id) => !out.includes(id) && out.push(id);
-  for (const s of note?.transcript || []) if (!s.echo && !s.dictated && !s.failed) add(speakerId(note.speakers, s));
+  for (const s of note?.transcript || []) if (!s.echo && !s.dictated && !s.failed && s.mic == null) add(speakerId(note.speakers, s));
   const toldApart = !out.includes('them') && out.some((id) => id.startsWith('them-'));
   for (const id of Object.keys(note?.speakers || {})) {
     const v = speakerId(note.speakers, { speaker: id });
@@ -172,7 +173,7 @@ export function suggestionWhy(note, card) {
 }
 
 /** Spoken lines worth sharing: no echo (the call through the speakers), no markers. */
-const spoken = (transcript) => (transcript || []).filter((s) => !s.echo && !s.dictated && !s.failed);
+const spoken = (transcript) => (transcript || []).filter((s) => !s.echo && !s.dictated && !s.failed && s.mic == null);
 
 /**
  * The note as Markdown, laid out as "Save as .md" writes it (commands.rs
@@ -234,13 +235,16 @@ export function mailtoUrl(note) {
  * the transcript's length at each stop), and a marker where the person
  * dictated mid-meeting (a `dictated` segment), and a "Couldn't transcribe
  * 0:42–1:12" line where a chunk failed (a `failed` segment, meetings/meeting.rs; line
- * `i` of the transcript). Echo lines only with `showEcho`. With a search
+ * `i` of the transcript), and "Your mic was disconnected" where the
+ * meeting's microphone went and "You" moved to the next one (a `mic`
+ * segment: its name, or "" with none left). Echo lines only with `showEcho`. With a search
  * `query`, only the lines that match it, in their groups, without dividers.
  *   { kind: 'group', key, source ('you' | 'them': the user or someone else),
  *     speaker (the voice), label, guess, echo, lines: [{ text, i, edited,
  *     original }] } — `edited`: the person fixed its words (`original`: what
  *     Yap heard)
  *   { kind: 'pause', key } | { kind: 'dictated', key } | { kind: 'failed', key, i }
+ *   | { kind: 'mic', key, next } (`next`: the microphone's short name, or '')
  */
 export function transcriptItems(transcript, breaks = [], { showEcho = false, query = '', speakers = {} } = {}) {
   const q = query.trim().toLowerCase();
@@ -250,6 +254,9 @@ export function transcriptItems(transcript, breaks = [], { showEcho = false, que
   (transcript || []).forEach((s, i) => {
     if (s.dictated) {
       if (!q) items.push({ kind: 'dictated', key: `d${i}` });
+      group = null;
+    } else if (s.mic != null) {
+      if (!q) items.push({ kind: 'mic', key: `m${i}`, next: s.mic ? shortMicName(s.mic) : '' });
       group = null;
     } else if (s.failed) {
       if (!q) items.push({ kind: 'failed', key: `f${i}`, i });

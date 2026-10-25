@@ -176,6 +176,14 @@ pub fn rule(kind: &str) -> Rule {
         // your corrections" is its own switch.)
         "word-suggestion" => Rule { max_wait_ms: Some(MIN), ..tip },
         "word-added" => Rule { max_wait_ms: Some(10_000), ..info },
+        // "Contoso H2 connected · Use it for dictation?" (mics/offer.rs,
+        // rate-limited there): after a dictation, gone if unseen a minute.
+        "micOffer" => info,
+        // "Using Contoso H2 for dictation": the same words not twice in ten
+        // minutes (a headset that keeps dropping out).
+        "micSwitched" => Rule { cooldown_ms: 10 * MIN, ..info },
+        // "Contoso H2 disconnected": about the dictation that just ended.
+        "micLost" => alert,
         _ => info,
     }
 }
