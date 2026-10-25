@@ -40,6 +40,29 @@ pub struct DictionaryEntry {
     /// dictionary with no stars saves as it always did.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub starred: bool,
+    /// More ways a correction is heard, beside `from`: "Kubernetes" ←
+    /// "cooper netties", "cube an eighties" (`dictionary/variants.rs`). The
+    /// exact and near-miss passes take every one; the Whisper prompt gets
+    /// the written form only. Corrections only; written only when there
+    /// are some, so a dictionary without them saves as it always did.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub also_heard: Vec<String>,
+}
+
+impl DictionaryEntry {
+    /// Every way it's heard: `from`, then [`Self::also_heard`] — trimmed,
+    /// none empty, none twice (any case). A snippet's phrase only.
+    pub fn heard(&self) -> Vec<&str> {
+        let mut out: Vec<&str> = Vec::new();
+        let more = if self.snippet { &[][..] } else { &self.also_heard[..] };
+        for h in std::iter::once(self.from.as_str()).chain(more.iter().map(String::as_str)) {
+            let h = h.trim();
+            if !h.is_empty() && !out.iter().any(|o| o.to_lowercase() == h.to_lowercase()) {
+                out.push(h);
+            }
+        }
+        out
+    }
 }
 
 /// A reusable, named cleanup profile (FluidVoice's `DictationPromptProfile`): a
@@ -349,6 +372,12 @@ pub struct YapConfig {
     /// `initial_prompt` bias instead.
     #[serde(default = "default_true")]
     pub dictionary_fuzzy: bool,
+    /// The dictionary's own version, for its one-time change
+    /// (`dictionary/variants.rs` `migrate`, run by [`load`]): v1
+    /// (2026-10-25) put corrections written the same way into one entry
+    /// with several "heard as" variants. Kept apart from `config_version`.
+    #[serde(default)]
+    pub dictionary_version: u32,
     /// "Suggest words from your corrections" (the Dictionary view): after a
     /// paste Yap watches the field for a little while (UI Automation, in
     /// memory only) and, when you fix a word it got wrong, offers to add it
@@ -1114,6 +1143,7 @@ impl Default for YapConfig {
             sound_enabled: true,
             dictionary: Vec::new(),
             dictionary_fuzzy: true,
+            dictionary_version: crate::dictionary::variants::VERSION,
             learn_words: true,
             show_tips: true,
             recording_mode: default_recording_mode(),
@@ -1287,8 +1317,10 @@ pub fn load() -> YapConfig {
         cfg.stt_device = "cpu".into();
     }
     // One-time migrations are saved straight away, so they can never run a
-    // second time and undo a choice the user makes afterwards.
-    if migrate_once(&mut cfg) {
+    // second time and undo a choice the user makes afterwards. (The
+    // dictionary keeps a version of its own: `dictionary/variants.rs`.)
+    let migrated = migrate_once(&mut cfg);
+    if crate::dictionary::variants::migrate(&mut cfg) | migrated {
         if let Err(e) = save(&cfg) {
             tracing::warn!("Failed to save migrated config: {}", e);
         }
@@ -1862,6 +1894,8 @@ fn save_at(path: &Path, cfg: &YapConfig) -> Result<(), String> {
     // Never lower it (a newer build's file, opened after a downgrade).
     let cfg = YapConfig {
         config_version: cfg.config_version.max(CONFIG_VERSION),
+        // The dictionary's own version too (dictionary/variants.rs).
+        dictionary_version: cfg.dictionary_version.max(crate::dictionary::variants::VERSION),
         // "Runs on" is what's chosen; the old GPU switch follows it.
         use_gpu: cfg.stt_device != "cpu",
         ..cfg.clone()
@@ -2089,11 +2123,17 @@ impl YapConfig {
 pub fn apply_dictionary(text: &str, dict: &[DictionaryEntry]) -> String {
     let mut out = text.to_string();
     for entry in dict.iter().filter(|e| !e.snippet) {
-        if let Some(re) = term_regex(&entry.from) {
-            let to = entry.to.clone();
-            out = re
-                .replace_all(&out, |_: &regex::Captures| to.clone())
-                .into_owned();
+        // Every way it's heard, the longest first: "cube" never eats the
+        // start of "cube and eighties" (`dictionary/variants.rs`).
+        let mut heard = entry.heard();
+        heard.sort_by_key(|h| std::cmp::Reverse(h.chars().count()));
+        for h in heard {
+            if let Some(re) = term_regex(h) {
+                let to = entry.to.clone();
+                out = re
+                    .replace_all(&out, |_: &regex::Captures| to.clone())
+                    .into_owned();
+            }
         }
     }
     out
@@ -2250,6 +2290,7 @@ mod tests {
             fuzzy: true,
             snippet: false,
             starred: false,
+            also_heard: Vec::new(),
         }
     }
 
@@ -2738,8 +2779,13 @@ mod tests {
             serde_json::to_value(serde_json::from_str::<YapConfig>("{}").unwrap()).unwrap();
         assert_eq!(fresh["configVersion"], CONFIG_VERSION);
         assert_eq!(from_empty["configVersion"], 0);
-        fresh.as_object_mut().unwrap().remove("configVersion");
-        from_empty.as_object_mut().unwrap().remove("configVersion");
+        // …and the dictionary's own version (dictionary/variants.rs), likewise.
+        assert_eq!(fresh["dictionaryVersion"], crate::dictionary::variants::VERSION);
+        assert_eq!(from_empty["dictionaryVersion"], 0);
+        for key in ["configVersion", "dictionaryVersion"] {
+            fresh.as_object_mut().unwrap().remove(key);
+            from_empty.as_object_mut().unwrap().remove(key);
+        }
         assert_eq!(fresh, from_empty);
     }
 
