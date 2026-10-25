@@ -265,6 +265,8 @@ pub fn run() {
             dictation::languages::nudge::language_nudge_respond,
             snip::snip_start,
             snip::chat_images_usage,
+            snip::chat_images_open_folder,
+            snip::chat_images_delete_all,
             snip::chat_images_prepare,
             snip::chat_image_copy,
             snip::chat_image_save,

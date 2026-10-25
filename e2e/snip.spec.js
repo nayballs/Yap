@@ -1095,6 +1095,35 @@ test('saying "snip" during a call, or cancelling the snip: nothing listens, and 
   await clearBox(main);
 });
 
+test('Privacy & data: where chat screenshots are kept, Open folder, and Delete all', async ({ yap, main, shot }) => {
+  // One kept screenshot (its file is all Settings counts).
+  const dir = path.join(yap.dataDir, 'chat-images');
+  fs.mkdirSync(dir, { recursive: true });
+  const id = 'img_00000000000e2e01';
+  fs.writeFileSync(path.join(dir, `${id}.png`), Buffer.from('not really a png'));
+  const dialog = await openSettings(main, 'Privacy');
+  // Yap's own folder, never Pictures.
+  const where = dialog.locator('[data-setting="chat-images-folder"]');
+  await expect(where).toContainText("Where they're kept");
+  await expect(where).toContainText('chat-images');
+  const before = fs.readFileSync(yap.logPath, 'utf8').length;
+  await where.getByRole('button', { name: 'Open folder' }).click();
+  await expect.poll(() => fs.readFileSync(yap.logPath, 'utf8').slice(before)).toContain('e2e: not opening the chat screenshots folder');
+  // Delete all…: asked first, then the folder empty and the count says so.
+  const del = dialog.locator('[data-setting="chat-images-delete"]');
+  await expect(del).toContainText(/screenshots? ·/);
+  await where.scrollIntoViewIfNeeded();
+  await shot(main, '06-chat-screenshots-folder');
+  await del.getByRole('button', { name: 'Delete all…' }).click();
+  const confirm = main.getByRole('alertdialog', { name: 'Delete all chat screenshots?' });
+  await expect(confirm).toBeVisible();
+  await confirm.getByRole('button', { name: 'Delete screenshots' }).click();
+  await expect(del).toContainText('None kept right now');
+  expect(fs.existsSync(path.join(dir, `${id}.png`))).toBe(false);
+  await expect(del.getByRole('button', { name: 'Delete all…' })).toBeDisabled();
+  await closeSettings(main);
+});
+
 async function pressKey(page, key, vk) {
   const cdp = await page.context().newCDPSession(page);
   try {

@@ -160,6 +160,7 @@
       listen('yap-snip', (e) => chat.takeSnip(e.payload)),
       // Another Chat model: can it read the screenshot?
       listen('yap-chat-model-changed', chat.refreshVision),
+      listen('yap-chat-images-deleted', chat.reloadActive),
       listen('yap-chat-dictation', (e) => chat.onChatDictation(e.payload)),
       // A question asked with the assistant shortcut, live (and its card's
       // "Open in Chat").

@@ -52,7 +52,7 @@
   let historyCount = $state(null);
   // Recent dictation audio (dictation/recent_audio.rs): { count, bytes }.
   let audio = $state(null);
-  // Chat's screenshots (Snip to Chat, snip/images.rs): { count, bytes }.
+  // Chat's screenshots (Snip to Chat, snip/images.rs): { count, bytes, folder }.
   let shots = $state(null);
   async function loadShots() {
     try {
@@ -310,6 +310,26 @@
     });
   }
 
+  function deleteShots(e) {
+    const btn = e?.currentTarget;
+    askConfirm({
+      title: 'Delete all chat screenshots?',
+      body: 'Every screenshot Yap kept for Chat goes from this PC. Your chats stay; their pictures show as removed.',
+      confirmLabel: 'Delete screenshots',
+      busyLabel: 'Deleting…',
+      returnFocus: btn,
+      run: async () => {
+        try {
+          await invoke('chat_images_delete_all');
+          await loadShots();
+        } catch (err) {
+          toast({ title: "Couldn't delete the screenshots", description: String(err), variant: 'destructive' });
+          return false;
+        }
+      },
+    });
+  }
+
   function clearAudio(e) {
     const btn = e?.currentTarget;
     askConfirm({
@@ -443,10 +463,21 @@
   <Row
     label="Keep chat screenshots"
     desc={shotsDesc}
-    hint="Snip to Chat keeps each screenshot with its chat, on this PC only. Deleting a chat deletes its screenshots; after this long they're removed, and the chat says so."
+    hint="Snip to Chat keeps each screenshot with its chat, on this PC only. Deleting a chat deletes its screenshots; after this long they're removed, and the chat says so. A snip you never asked about goes after a day."
     setting="chat-images"
   >
     <Select bind:value={cfg.chatImageDays} options={KEEP_SHOTS} ariaLabel="Keep chat screenshots" onchange={() => setTimeout(loadShots, 1500)} />
+  </Row>
+  <Row
+    label="Where they're kept"
+    desc={shots?.folder || "In Yap's own folder on this PC"}
+    hint="Never in your Pictures folder: a snip only goes there, or anywhere else, when you save it (Shift as you let go, or Save image in Chat)."
+    setting="chat-images-folder"
+  >
+    <Button variant="secondary" size="sm" onclick={() => invoke('chat_images_open_folder').catch(() => {})}>Open folder</Button>
+  </Row>
+  <Row label="Delete all screenshots" desc={shotsDesc} setting="chat-images-delete">
+    <Button variant="secondary" size="sm" disabled={!shots?.count} onclick={deleteShots}>Delete all…</Button>
   </Row>
 </Group>
 

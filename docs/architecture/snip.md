@@ -570,6 +570,14 @@ doesn't show it (a screenshot never goes there).
   launch and daily, and at once when the setting changes) deletes files past
   it, an image no conversation refers to (a snip never sent) after a day,
   and leftover temp files.
+- **Settings → Privacy & data → Chat screenshots** (2026-10-25) says where
+  they are — Yap's own folder, never Pictures (a snip goes elsewhere only
+  when it's saved: Shift, Save image) — with **Open folder**
+  (`chat_images_open_folder`, never in a test run) and **Delete all…**
+  (`chat_images_delete_all`, asked first: every file, the waiting box
+  emptied, `yap-chat-images-deleted` → Chat reads the open conversation
+  again, its pictures "removed"); `chat_images_usage` is `{count, bytes,
+  folder}`.
 - **The copy a model gets** (`fitted`): never the stored PNG changed; long
   edge ≤ 2,576 px for Claude, 3,072 for Gemini, 2,048 for OpenAI, Groq and
   OpenRouter, 1,024 for a model on this PC (`long_edge`), area-averaged

@@ -316,6 +316,19 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
     }
   }
 
+  // Every chat screenshot deleted (Settings → Privacy & data): the open
+  // conversation read again, its pictures now "removed" (not mid-answer).
+  async function reloadActive() {
+    if (activeId == null || sending) return;
+    const id = activeId;
+    try {
+      const conv = await invoke('chat_get', { id });
+      if (activeId === id) messages = (conv.messages || []).map((m, i) => ({ ...m, id: chatId(id, i) }));
+    } catch {
+      /* it stays as it was */
+    }
+  }
+
   // `keepShots`: a snip landing in a new chat (Rust has the box already).
   function newChat(opts) {
     stopReading();
@@ -846,6 +859,7 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
     onChatDictation,
     refreshList,
     selectConversation,
+    reloadActive,
     newChat,
     askAcrossMeetings,
     openSource,

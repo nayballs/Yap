@@ -652,12 +652,48 @@ pub fn chat_models_read_images(models: Vec<ModelRef>) -> Vec<Option<bool>> {
     models.iter().take(2000).map(|m| vision::reads_images(&m.provider, &m.model)).collect()
 }
 
-/// The chat screenshots folder's count and size (Settings → Privacy &
-/// data).
+/// The chat screenshots folder: where it is, its count and size (Settings
+/// → Privacy & data). Yap's own data folder, never Pictures: a snip only
+/// lands where the person picks when they save it (Shift, Save image).
 #[tauri::command]
 pub fn chat_images_usage() -> serde_json::Value {
     let (count, bytes) = images::usage();
-    serde_json::json!({ "count": count, "bytes": bytes })
+    serde_json::json!({ "count": count, "bytes": bytes, "folder": images::dir().to_string_lossy() })
+}
+
+/// Settings' **Open folder**: the chat screenshots folder in Explorer (made
+/// first if it isn't there yet). Never in a test run.
+#[tauri::command]
+pub fn chat_images_open_folder(app: AppHandle) -> Result<(), String> {
+    let dir = images::dir();
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    if crate::shell::e2e::active() {
+        tracing::info!("e2e: not opening the chat screenshots folder");
+        return Ok(());
+    }
+    use tauri_plugin_opener::OpenerExt;
+    app.opener().open_path(dir.to_string_lossy(), None::<&str>).map_err(|e| e.to_string())
+}
+
+/// Settings' **Delete all…**: every chat screenshot gone from this PC, the
+/// ones waiting in Chat's box too. The chats stay; their pictures read
+/// "Screenshot removed" (`chat_get` marks them gone). Returns how many went.
+#[tauri::command]
+pub fn chat_images_delete_all(app: AppHandle) -> usize {
+    let ids: Vec<String> = std::fs::read_dir(images::dir())
+        .map(|entries| {
+            entries
+                .flatten()
+                .filter_map(|e| e.file_name().to_str().and_then(|n| n.strip_suffix(".png")).map(str::to_string))
+                .filter(|id| images::is_id(id))
+                .collect()
+        })
+        .unwrap_or_default();
+    let gone = images::delete(&ids);
+    waiting::chat_waiting_clear(app.clone());
+    let _ = app.emit("yap-chat-images-deleted", serde_json::json!({ "count": gone }));
+    tracing::info!(images = gone, "snip: every chat screenshot deleted (Settings)");
+    gone
 }
 
 /// `yapsnip://localhost/<id>` (`http://yapsnip.localhost/<id>` in WebView2;

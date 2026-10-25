@@ -187,7 +187,8 @@ pub fn stored(id: &str) -> Option<crate::chat::chats::ChatImage> {
     Some(crate::chat::chats::ChatImage { id: id.to_string(), w, h, bytes, source: "snip".into(), ..Default::default() })
 }
 
-/// Delete images by id (a deleted conversation's). Returns how many went.
+/// Delete images by id (a deleted conversation's, or all of them from
+/// Settings). Returns how many went.
 pub fn delete(ids: &[String]) -> usize {
     let mut gone = 0;
     for id in ids {
@@ -199,7 +200,7 @@ pub fn delete(ids: &[String]) -> usize {
         forget(id);
     }
     if gone > 0 {
-        tracing::info!(images = gone, "snip: chat screenshots deleted with their conversation");
+        tracing::debug!(images = gone, "snip: chat screenshots deleted");
     }
     gone
 }
