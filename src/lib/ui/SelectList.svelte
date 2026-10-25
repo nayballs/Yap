@@ -2,9 +2,10 @@
   // Radio-dot select rows, ported from OpenWhispr's ModelCardList (cloud mode):
   // status dot → brand icon → bold label → muted inline description → Active
   // chip on the selected row. Pure selection — no download affordances.
-  //   options: [{ value, label, desc?, icon?, mono?, tag? }]
+  //   options: [{ value, label, desc?, icon?, mono?, tag?, images? }]
   //   tag: 'new' (a model the provider added since Yap's list was made) or
-  //   'gone' (the saved model, which the provider no longer offers).
+  //   'gone' (the saved model, which the provider no longer offers);
+  //   images: true — "Reads images" (Snip to Chat: the Chat scope's list).
   let { value = $bindable(''), options = [], onchange, disabled = false } = $props();
 
   function pick(v) {
@@ -23,6 +24,7 @@
       {/if}
       <span class="slabel">{o.label}</span>
       {#if o.tag === 'new'}<span class="snew">New</span>{:else if o.tag === 'gone'}<span class="sgone">No longer offered</span>{/if}
+      {#if o.images}<span class="simg">Reads images</span>{/if}
       {#if o.desc}<span class="sdesc">{o.desc}</span>{/if}
       <span class="spacer"></span>
       {#if value === o.value}<span class="stag">Active</span>{/if}
@@ -117,7 +119,8 @@
     flex: 1 1 auto;
   }
   .snew,
-  .sgone {
+  .sgone,
+  .simg {
     flex: 0 0 auto;
     padding: 0 6px;
     border-radius: var(--yap-r-full);
@@ -130,6 +133,10 @@
   .snew {
     color: var(--yap-link);
     background: var(--yap-primary-wash);
+  }
+  .simg {
+    color: var(--yap-fg-80);
+    background: var(--yap-s3, var(--yap-raised));
   }
   .sgone {
     color: var(--yap-warning);

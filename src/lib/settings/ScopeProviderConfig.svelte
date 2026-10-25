@@ -178,7 +178,7 @@
         {/if}
 
         <h4 class="selhead">Model</h4>
-        <ModelPicker provider={cloudProvider} bind:value={scope.model} {disabled} />
+        <ModelPicker provider={cloudProvider} bind:value={scope.model} {disabled} images={scopeKey === 'chat'} />
       {/if}
     </div>
   {:else if mode === 'selfhosted'}

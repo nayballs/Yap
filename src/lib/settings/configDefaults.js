@@ -36,6 +36,7 @@ export const FIELD_DEFAULTS = {
   snipHotkey: 'kb:alt+win+83',
   snipVoice: true,
   chatImageDays: 30,
+  snipSaveDir: '',
   streamingPartials: true,
   historyEnabled: true,
   meetingDetection: true,

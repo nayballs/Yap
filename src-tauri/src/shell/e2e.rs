@@ -697,18 +697,36 @@ pub fn fake_frame(m: &FakeMonitor) -> crate::snip::capture::Frame {
     }
 }
 
+/// A fake window a test snip can pick (virtual-desktop pixels).
+#[cfg(debug_assertions)]
+#[derive(Debug, Clone, serde::Deserialize)]
+pub struct FakeWindow {
+    pub x: i32,
+    pub y: i32,
+    pub w: i32,
+    pub h: i32,
+}
+
 /// Test mode only: a snip over fake monitors (never the real screen; its
-/// overlay windows are made, painted and driven, but never shown). `origin`
-/// as the page would say it. Returns at once: poll `e2e_snip_last` for
-/// "selecting". `start: false`: the fake monitors only, for the next snip
-/// however it starts (a spoken "snip", the bar's ✂).
+/// overlay windows are made, painted and driven, but never shown), with
+/// `windows` to pick (topmost first). `origin` as the page would say it.
+/// Returns at once: poll `e2e_snip_last` for "selecting". `start: false`:
+/// the fake monitors only, for the next snip however it starts (a spoken
+/// "snip", the bar's ✂).
 #[cfg(debug_assertions)]
 #[tauri::command]
-pub fn e2e_snip(app: AppHandle, monitors: Vec<FakeMonitor>, origin: Option<String>, start: Option<bool>) -> Result<(), String> {
+pub fn e2e_snip(
+    app: AppHandle,
+    monitors: Vec<FakeMonitor>,
+    windows: Option<Vec<FakeWindow>>,
+    origin: Option<String>,
+    start: Option<bool>,
+) -> Result<(), String> {
     if !active() || crate::shell::realtest::on() {
         return Err("e2e_snip is for test runs (not robot mode)".into());
     }
-    crate::snip::set_fake_frames(monitors.iter().map(fake_frame).collect());
+    let windows = windows.unwrap_or_default().iter().map(|w| crate::snip::geom::Rect::new(w.x, w.y, w.w, w.h)).collect();
+    crate::snip::set_fake_frames(monitors.iter().map(fake_frame).collect(), windows);
     if start.unwrap_or(true) {
         crate::snip::start(&app, crate::snip::Origin::parse(origin.as_deref().or(Some("shortcut"))));
     }
@@ -720,16 +738,26 @@ pub fn e2e_snip(app: AppHandle, monitors: Vec<FakeMonitor>, origin: Option<Strin
 #[derive(Debug, Clone, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SnipEvent {
-    /// "down" | "move" | "up" | "right" | "esc"
+    /// "down" | "move" | "up" | "right" | "esc" | "key" | "keyup"
     pub kind: String,
     #[serde(default)]
     pub x: i32,
     #[serde(default)]
     pub y: i32,
+    /// A mouse event's Ctrl / Shift (`MK_CONTROL`, `MK_SHIFT`).
+    #[serde(default)]
+    pub ctrl: bool,
+    #[serde(default)]
+    pub shift: bool,
+    /// "key" / "keyup": "enter" | "space" | "ctrl" | "shift" | "alt" | "c" | "s".
+    #[serde(default)]
+    pub key: String,
 }
 
 /// Test mode (robot mode too): window messages to a snip overlay — the
-/// mouse and keys as Windows sends them, never the real ones.
+/// mouse and keys as Windows sends them, never the real ones. A point is
+/// in that screen's window's own pixels (past its edge: a drag the window
+/// has captured, into the next monitor).
 #[cfg(debug_assertions)]
 #[tauri::command]
 pub fn e2e_snip_input(screen: usize, events: Vec<SnipEvent>) -> Result<(), String> {
@@ -741,15 +769,41 @@ pub fn e2e_snip_input(screen: usize, events: Vec<SnipEvent>) -> Result<(), Strin
     const WM_LBUTTONUP: u32 = 0x0202;
     const WM_RBUTTONUP: u32 = 0x0205;
     const WM_KEYDOWN: u32 = 0x0100;
+    const WM_KEYUP: u32 = 0x0101;
+    const WM_SYSKEYDOWN: u32 = 0x0104;
+    const WM_SYSKEYUP: u32 = 0x0105;
     let lp = |x: i32, y: i32| ((y as u16 as isize) << 16) | (x as u16 as isize);
+    let mods = |e: &SnipEvent| (if e.ctrl { 0x0008 } else { 0 }) | (if e.shift { 0x0004 } else { 0 });
+    let key = |e: &SnipEvent, down: bool| -> Result<(u32, usize, isize), String> {
+        let vk = match e.key.as_str() {
+            "enter" => 0x0D,
+            "space" => 0x20,
+            "ctrl" => 0x11,
+            "shift" => 0x10,
+            "alt" => 0x12,
+            "c" => 0x43,
+            "s" => 0x53,
+            "esc" => 0x1B,
+            other => return Err(format!("unknown key {other}")),
+        };
+        Ok(match (vk == 0x12, down) {
+            (true, true) => (WM_SYSKEYDOWN, vk, 0),
+            (true, false) => (WM_SYSKEYUP, vk, 0),
+            (false, true) => (WM_KEYDOWN, vk, 0),
+            (false, false) => (WM_KEYUP, vk, 0),
+        })
+    };
     let msgs = events
         .iter()
         .map(|e| match e.kind.as_str() {
-            "down" => Ok((WM_LBUTTONDOWN, 1usize, lp(e.x, e.y))),
-            "move" => Ok((WM_MOUSEMOVE, 1, lp(e.x, e.y))),
-            "up" => Ok((WM_LBUTTONUP, 0, lp(e.x, e.y))),
+            "down" => Ok((WM_LBUTTONDOWN, 1usize | mods(e), lp(e.x, e.y))),
+            "move" => Ok((WM_MOUSEMOVE, 1 | mods(e), lp(e.x, e.y))),
+            "hover" => Ok((WM_MOUSEMOVE, mods(e), lp(e.x, e.y))),
+            "up" => Ok((WM_LBUTTONUP, mods(e), lp(e.x, e.y))),
             "right" => Ok((WM_RBUTTONUP, 0, lp(e.x, e.y))),
             "esc" => Ok((WM_KEYDOWN, 0x1B, 0)),
+            "key" => key(e, true),
+            "keyup" => key(e, false),
             other => Err(format!("unknown event {other}")),
         })
         .collect::<Result<Vec<_>, String>>()?;
@@ -773,6 +827,59 @@ pub fn e2e_snip_last() -> Result<Option<crate::snip::Last>, String> {
         return Err("Only in e2e test mode".into());
     }
     Ok(crate::snip::last())
+}
+
+/// Test mode only: where the next snip's or chat screenshot's Save goes
+/// (Windows' dialog never opens in a test run).
+#[cfg(debug_assertions)]
+#[tauri::command]
+pub fn e2e_snip_save_path(path: String) -> Result<(), String> {
+    if !active() || crate::shell::realtest::on() {
+        return Err("Only in e2e test mode".into());
+    }
+    crate::snip::copy_save::set_test_save_path(std::path::PathBuf::from(path));
+    Ok(())
+}
+
+/// Test mode only: the PNG a copy put on the pretend clipboard (the real
+/// one is never touched in a test run), as base64, or null.
+#[cfg(debug_assertions)]
+#[tauri::command]
+pub fn e2e_snip_clipboard() -> Result<Option<String>, String> {
+    if !active() {
+        return Err("Only in e2e test mode".into());
+    }
+    use base64::Engine;
+    Ok(crate::snip::copy_save::test_clipboard().map(|png| base64::engine::general_purpose::STANDARD.encode(png)))
+}
+
+/// Test mode only: the text "Send its text instead" reads from a
+/// screenshot (in place of Windows' OCR, whose languages differ per PC);
+/// null: Windows' own.
+#[cfg(debug_assertions)]
+#[tauri::command]
+pub fn e2e_snip_ocr(text: Option<String>) -> Result<(), String> {
+    if !active() {
+        return Err("Only in e2e test mode".into());
+    }
+    crate::snip::ocr::set_fake(text);
+    Ok(())
+}
+
+/// Test mode only: files dropped on the main window, as Windows' drag and
+/// drop reports them (Tauri's `tauri://drag-drop`, which Playwright can't
+/// make).
+#[cfg(debug_assertions)]
+#[tauri::command]
+pub fn e2e_drag_drop(app: AppHandle, paths: Vec<String>) -> Result<(), String> {
+    if !active() {
+        return Err("Only in e2e test mode".into());
+    }
+    use tauri::Emitter;
+    let target = tauri::EventTarget::AnyLabel { label: "settings".into() };
+    let at = serde_json::json!({ "x": 200, "y": 200 });
+    app.emit_to(target.clone(), "tauri://drag-enter", serde_json::json!({ "paths": paths, "position": at })).map_err(|e| e.to_string())?;
+    app.emit_to(target, "tauri://drag-drop", serde_json::json!({ "paths": paths, "position": at })).map_err(|e| e.to_string())
 }
 
 /// End of setup: say so in the log (the harness won't drive an instance that

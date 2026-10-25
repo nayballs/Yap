@@ -215,14 +215,17 @@ pub fn history_images(
     }
 }
 
-/// [`history_images`] for a Chat turn to `provider` at `base_url`: the
-/// copies fitted off the async runtime (they're usually made already).
-pub async fn with_history_images(messages: &mut [Value], earlier: &[ChatMessage], provider: &str, base_url: &str) {
+/// [`history_images`] for a Chat turn to `model` on `provider` at
+/// `base_url`: the copies fitted off the async runtime (they're usually
+/// made already). A model known not to read images (`vision.rs`: switched
+/// to after a question with a screenshot) gets none again, each one a line.
+pub async fn with_history_images(messages: &mut [Value], earlier: &[ChatMessage], provider: &str, model: &str, base_url: &str) {
     if !earlier.iter().any(|m| !m.images.is_empty()) {
         return;
     }
     let here = crate::ai::ai_model::runs_here(provider, base_url);
-    let budget = history_budget(provider, here, images().len());
+    let reads = super::vision::reads_images(provider, model) != Some(false);
+    let budget = if reads { history_budget(provider, here, images().len()) } else { 0 };
     let edge = super::images::long_edge(provider, here);
     let exists = |id: &str| super::images::exists(id);
     let wanted: Vec<String> = resend_plan(earlier, budget, &exists).into_iter().map(|(mi, ii)| earlier[mi].images[ii].id.clone()).collect();
@@ -266,7 +269,7 @@ mod tests {
     use super::*;
 
     fn img(id: &str) -> ChatImage {
-        ChatImage { id: id.into(), w: 10, h: 10, bytes: 100, source: "snip".into(), gone: false }
+        ChatImage { id: id.into(), w: 10, h: 10, bytes: 100, source: "snip".into(), ..Default::default() }
     }
 
     fn said(role: &str, text: &str, images: &[&str]) -> ChatMessage {

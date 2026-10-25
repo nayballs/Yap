@@ -23,6 +23,7 @@
   import { providerIcon } from '../../core/aiModel.js';
   import { PROVIDER_LABELS } from '../../core/providers.js';
   import { loadCatalog } from '../../stores/modelCatalog.svelte.js';
+  import { forgetVisionTags } from '../../stores/visionTags.svelte.js';
   import { openExternalLink } from '../../core/externalLinks.js';
   import { toast } from '../../ui/toast.svelte.js';
   import {
@@ -51,6 +52,10 @@
   } from './chatModels.svelte.js';
 
   let { status, anchor, onclose, onstatus, onopensettings } = $props();
+
+  // "Reads images" (Snip to Chat): asked afresh each time the picker opens
+  // (a provider's list, or a server's refusal, may have changed it).
+  forgetVisionTags();
 
   // Opens on the current model's provider (or the one the scope is set to).
   function startTab() {
@@ -1018,6 +1023,11 @@
   .tag.rec {
     background: color-mix(in srgb, var(--yap-success) 13%, transparent);
     color: var(--yap-success);
+  }
+  /* Reads images (Snip to Chat): quiet, it's a fact about the model. */
+  .tag.img {
+    background: var(--yap-s3, var(--yap-raised));
+    color: var(--yap-fg-80);
   }
   .tag.warn,
   .tag.gone {

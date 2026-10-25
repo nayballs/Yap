@@ -152,6 +152,41 @@ pub fn snip_failed(app: &AppHandle, why: &str) {
     );
 }
 
+/// **Show in folder**: the screenshot Snip to Chat saved last
+/// (`snip::copy_save`).
+pub const SHOW_SNIP: &str = "showSnip";
+
+/// A snip copied (Ctrl as you let go, Ctrl+C in the overlay): the answer
+/// to the person's own press.
+pub fn snip_copied(app: &AppHandle, w: u32, h: u32) {
+    show_soon(
+        app,
+        Alert {
+            kind: "snipCopied",
+            icon: "snip",
+            title: "Screenshot copied".into(),
+            body: format!("{w} × {h}, ready to paste. It stays out of your clipboard history."),
+            action: None,
+            timeout_ms: 3_000,
+        },
+    );
+}
+
+/// A snip saved (Shift as you let go, Ctrl+S in the overlay).
+pub fn snip_saved(app: &AppHandle, name: &str) {
+    show_soon(
+        app,
+        Alert {
+            kind: "snipSaved",
+            icon: "snip",
+            title: "Screenshot saved".into(),
+            body: format!("Saved as {name}."),
+            action: Some(Action { id: SHOW_SNIP, label: "Show in folder" }),
+            timeout_ms: 5_000,
+        },
+    );
+}
+
 /// An alert's button (the toast's, the bar card's, the notification's).
 pub fn act(app: &AppHandle, action: &str) {
     match action {
@@ -170,6 +205,7 @@ pub fn act(app: &AppHandle, action: &str) {
             }
         }
         SHOW_OLD_SETTINGS => crate::config::show_old_file(app),
+        SHOW_SNIP => crate::snip::copy_save::show_saved(app),
         crate::shell::saving::RETRY => crate::shell::saving::retry_soon(app),
         "" => {}
         other => tracing::debug!("alert: no such action {other}"),
