@@ -116,6 +116,8 @@ fn apply_config(app: &AppHandle, state: State<'_, AppState>, prev: &YapConfig, c
     crate::bar::sync(&app, &cfg);
     // …and "Show tips" (the notice policy).
     crate::notices::notice::sync(&cfg);
+    // …and "Search my meetings by meaning" (search.rs).
+    crate::search::on_config_saved(prev, &cfg);
     // …and the theme: the opaque windows' webview backgrounds (theme.rs; the
     // pages follow `yap-config-saved`).
     crate::shell::theme::apply(&app, &cfg);

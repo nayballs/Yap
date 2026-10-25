@@ -867,6 +867,14 @@ pub struct YapConfig {
     #[serde(default)]
     pub memory_sensitive: bool,
 
+    // ---- Meeting search (Settings → Privacy & data; `search.rs`) ----
+    /// "Search my meetings by meaning": the embedding model reads every
+    /// meeting and note on this PC, and Ask across meetings and the
+    /// Meetings view's search use it besides keywords. Off until its model
+    /// is downloaded (the download turns it on).
+    #[serde(default)]
+    pub search_by_meaning: bool,
+
     // ---- About you (Settings → General; `about_you.rs`) ----
     // Told to the AI model the person uses, with each question; kept here,
     // never sent to Yap's account service. (Until 22 Oct 2026, before it
@@ -1151,6 +1159,7 @@ impl Default for YapConfig {
             memory_learn_chats: true,
             memory_learn_meetings: false,
             memory_sensitive: false,
+            search_by_meaning: false,
             about_name: String::new(),
             about_me: String::new(),
             region_country: String::new(),

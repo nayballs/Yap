@@ -32,7 +32,7 @@ struct DownloadProgress {
 /// build a stand-in from the JSON file `YAP_LLM_SOURCES` (`{"runtime" |
 /// "<curated id>": {"url", "sha256"}}`): how the e2e suite downloads small
 /// fakes from a local server (`e2e/support/local-llm.js`).
-pub(super) fn source(key: &str, url: &str, sha256: &str) -> (String, String) {
+pub(crate) fn source(key: &str, url: &str, sha256: &str) -> (String, String) {
     #[cfg(debug_assertions)]
     if let Some(path) = std::env::var_os("YAP_LLM_SOURCES").filter(|v| !v.is_empty()) {
         let stand_ins = std::fs::read_to_string(&path)
@@ -50,7 +50,7 @@ pub(super) fn source(key: &str, url: &str, sha256: &str) -> (String, String) {
 
 /// A test run downloads only from its own servers (127.0.0.1), never a
 /// real model from the internet. Pure.
-pub(super) fn allowed_in_test_run(url: &str) -> bool {
+pub(crate) fn allowed_in_test_run(url: &str) -> bool {
     url::Url::parse(url).is_ok_and(|u| u.host_str() == Some("127.0.0.1"))
 }
 
@@ -292,7 +292,7 @@ pub fn curated_by_id(id: &str) -> Option<&'static CuratedLlm> {
 /// with its marker ([`RUNTIME_MARKER`]). An older one already there stays
 /// until the background upgrade replaces it ([`spawn_runtime_upgrade`]).
 /// `model`: the curated id the install is for (its progress names it).
-async fn ensure_runtime(model: &str, app: Option<&AppHandle>) -> Result<(), String> {
+pub(crate) async fn ensure_runtime(model: &str, app: Option<&AppHandle>) -> Result<(), String> {
     tokio::fs::create_dir_all(llm_dir())
         .await
         .map_err(|e| format!("failed to create llm dir: {}", e))?;
