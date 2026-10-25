@@ -44,7 +44,11 @@ impl Machine {
 
     /// This PC (cached). Test mode (debug builds): `YAP_E2E_CPU_THREADS` and
     /// `YAP_E2E_RAM_MIB` stand in for the processor and memory, as
-    /// `YAP_E2E_GPU` does for the card.
+    /// `YAP_E2E_GPU` does for the card — and without them a test run is a
+    /// fixed 16 threads and 32 GB, never the machine running it: a 4-thread
+    /// CI runner made setup offer the cloud as "Quicker on this PC" and hide
+    /// the on-device models, failing two specs that pass on a desktop
+    /// (25 Oct 2026).
     pub fn this_pc() -> Machine {
         static CACHE: std::sync::OnceLock<(u32, u64)> = std::sync::OnceLock::new();
         let (threads, ram_mib) = *CACHE.get_or_init(|| {
@@ -56,12 +60,8 @@ impl Machine {
         #[cfg(debug_assertions)]
         if crate::shell::e2e::active() {
             let var = |k: &str| std::env::var(k).ok().and_then(|v| v.trim().parse::<u64>().ok());
-            if let Some(t) = var("YAP_E2E_CPU_THREADS") {
-                m.threads = t as u32;
-            }
-            if let Some(r) = var("YAP_E2E_RAM_MIB") {
-                m.ram_mib = r;
-            }
+            m.threads = var("YAP_E2E_CPU_THREADS").map_or(16, |t| t as u32);
+            m.ram_mib = var("YAP_E2E_RAM_MIB").unwrap_or(32 * 1024);
         }
         m
     }

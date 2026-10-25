@@ -161,8 +161,17 @@ pub fn rule(kind: &str) -> Rule {
         // made during one, so it shows over the meeting, every press.
         "assistantMeetingOff" => Rule { hold_meeting: false, ..alert },
         // Snip to Chat (snip.rs): "Finish the dictation first", "Couldn't
-        // take the screenshot" — the answer to the person's own press.
-        "snipDictating" | "snipFailed" => Rule { hold_meeting: false, ..alert },
+        // take the screenshot", "Screenshot copied / saved" — the answer to
+        // the person's own press.
+        "snipDictating" | "snipFailed" | "snipCopied" | "snipSaved" => Rule { hold_meeting: false, ..alert },
+        // A dictation stopped at its length limit (dictation/cap.rs): what
+        // was said is pasted or on the clipboard, Recover text copies it —
+        // never held back, never dropped.
+        "dictationCapped" => alert,
+        // "Copied your last dictation", "Nothing to paste yet"
+        // (pasting/last.rs): the answer to the person's own press, now or
+        // not at all.
+        "lastTranscript" => Rule { hold_dictation: false, max_wait_ms: Some(5_000), ..info },
         // Ready to install: waits for a dictation or a meeting to end, as
         // long as it takes.
         "update" => Rule { hold_meeting: true, max_wait_ms: None, yields: true, ..info },
@@ -180,6 +189,14 @@ pub fn rule(kind: &str) -> Rule {
         // after a dictation, never over one; dropped unseen after a minute.
         "language-nudge" => Rule { max_wait_ms: Some(MIN), ..tip },
         "language-added" => Rule { max_wait_ms: Some(10_000), ..info },
+        // "Contoso H2 connected · Use it for dictation?" (mics/offer.rs,
+        // rate-limited there): after a dictation, gone if unseen a minute.
+        "micOffer" => info,
+        // "Using Contoso H2 for dictation": the same words not twice in ten
+        // minutes (a headset that keeps dropping out).
+        "micSwitched" => Rule { cooldown_ms: 10 * MIN, ..info },
+        // "Contoso H2 disconnected": about the dictation that just ended.
+        "micLost" => alert,
         _ => info,
     }
 }

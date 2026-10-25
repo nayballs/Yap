@@ -167,7 +167,9 @@ re-exported by the module, except `local_llm`'s, which callers name
   call"** above it (`meeting_detect::tray_item`; the click runs
   `on_tray_record` on a worker thread). **"Paste last transcript"** sits above
   the model submenu (greyed out until there's a dictation;
-  `text_injector::paste_last_from_tray`, worker thread), and under it **"Read
+  `text_injector::paste_last_from_tray`, worker thread) with "… (as said)"
+  and **"Copy last transcript"** (2026-10-25: onto the clipboard, out of
+  Win+V history, `pasting/last.rs`) under it, then **"Read
   selection aloud"** — "Stop reading aloud" while Yap reads
   (`read_aloud::read_selection(Origin::Tray)`: the app window on top, brought
   back, its selection read aloud with the reading card). All four are in the
@@ -240,7 +242,9 @@ re-exported by the module, except `local_llm`'s, which callers name
     loads off the window's thread, and not at all when the model is already
     warm on its device — onboarding loaded it twice, the second time freezing
     the window), devices (`list_audio_devices`, `list_output_devices`,
-    `set_input_device` — live stream swap, `set_mic_test` — idle level meter),
+    `set_mic_test` — idle level meter; the microphones' order is
+    `dictation/mics.rs`'s `list_mics` and `mic_offer_respond`, since
+    2026-10-25 instead of `set_input_device`),
     the shortcuts re-bound live (`configure_hotkey`, `configure_assistant_hotkey`
     / `assistant_key` — the assistant shortcut, live-applied / in-page,
     `configure_read_hotkey` — Read aloud's; its press is `read-key-pressed` →
@@ -266,8 +270,10 @@ re-exported by the module, except `local_llm`'s, which callers name
     is recording into — that's `meeting_delete` — and tells every window,
     `yap-note-deleted`) + `note_enhance` (`run_enhance`)/`note_ask`/`note_export`.
   - `chat/commands.rs` — chats CRUD (incl. `chat_rename`) + `chat_send` (RAG +
-    tool loop; `scope: "meetings"` = the Meetings view's Ask bar, grounded in
-    `calendar::meetings_context`; `voice` = the question was dictated; returns
+    tool loop; `scope: "meetings"` = asked across the meetings — the Meetings
+    view's Ask bar, kept with the conversation — answered from the passages
+    `search::ask` finds, cited ([search.md](./search.md)); `voice` = the
+    question was dictated; returns
     the two messages' ids and `speak`, `tts::auto_speak`); its turn is
     `chat/turn.rs`'s `chat_turn` (shared with the Voice Assistant).
   - `meetings/commands.rs` — `meeting_start` (then `calendar::on_meeting_started`)/

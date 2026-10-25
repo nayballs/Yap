@@ -36,13 +36,17 @@ pub const OPEN_VOICE_SETTINGS: &str = "openVoiceSettings";
 /// **Show file**: the settings file Yap couldn't read, set aside, in
 /// Explorer (`config::reset_alert`).
 pub const SHOW_OLD_SETTINGS: &str = "showOldSettings";
+/// **Change** / **Microphones**: Yap's Settings → Dictation → Microphone
+/// (the microphones' order, `mics.rs`).
+pub const OPEN_MIC_ORDER: &str = "openMicOrder";
 
 /// An alert's one button.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub struct Action {
     /// What [`act`] does: [`OPEN_MIC_SETTINGS`], [`STOP_ASKING_CALLS`],
     /// [`ASK_ABOUT_CALLS`], [`OPEN_AI_SETTINGS`], [`OPEN_VOICE_SETTINGS`],
-    /// [`SHOW_OLD_SETTINGS`], `saving::RETRY` (Try again).
+    /// [`SHOW_OLD_SETTINGS`], [`OPEN_MIC_ORDER`], `saving::RETRY` (Try again),
+    /// `cap::RECOVER` (Recover text).
     pub id: &'static str,
     pub label: &'static str,
 }
@@ -54,7 +58,11 @@ pub struct Alert {
     /// "assistantFailed" | "voiceFallback" (`tts.rs`: a cloud voice failed) |
     /// "configReset" (`config.rs`: config.json couldn't be read, set aside) |
     /// "saveFailed" (`saving.rs`: a store couldn't be saved; "Saved" after
-    /// Try again):
+    /// Try again) | "micLost" (`unplugged.rs`: the dictation's mic was
+    /// disconnected) | "micSwitched" (`mics/offer.rs`: "Using … for
+    /// dictation") | "dictationCapped" (`cap.rs`: stopped at its length
+    /// limit) | "lastTranscript" (`last.rs`: "Copied your last dictation",
+    /// shown with [`confirm`]):
     /// the bar card's id, the Windows notification's tag (a newer one
     /// replaces it) and its rule in `notice.rs`.
     pub kind: &'static str,
@@ -74,6 +82,18 @@ pub use crate::notices::notice::Place as Surface;
 /// Show `alert` where it'll be seen; returns where. Blocking (window
 /// queries): call it off the pipeline's locks — [`show_soon`] does.
 pub fn show(app: &AppHandle, alert: Alert) -> Surface {
+    show_at(app, alert, true)
+}
+
+/// A quiet note rather than an alert ("Copied your last dictation",
+/// `pasting/last.rs`): the main window's toast or a bar card, never a
+/// Windows notification. Blocking, as [`show`].
+pub fn confirm(app: &AppHandle, alert: Alert) -> Surface {
+    show_at(app, alert, false)
+}
+
+/// [`show`]; `notification`: it may be a Windows notification.
+fn show_at(app: &AppHandle, alert: Alert, notification: bool) -> Surface {
     let card = || crate::bar::Card {
         id: alert.kind.into(),
         icon: alert.icon,
@@ -83,7 +103,7 @@ pub fn show(app: &AppHandle, alert: Alert) -> Surface {
         timeout_ms: Some(alert.timeout_ms),
         ..Default::default()
     };
-    let mut place = crate::notices::notice::place(app, true);
+    let mut place = crate::notices::notice::place(app, notification);
     // The same alert again within its cooldown (`notice.rs`: the mic
     // privacy one is said once per ten minutes; the overlay's line says it
     // on every press). The bar and Windows check for themselves.
@@ -95,7 +115,7 @@ pub fn show(app: &AppHandle, alert: Alert) -> Surface {
         place = Surface::Bar;
     }
     if place == Surface::Bar && !crate::bar::show_card(app, card(), Box::new(act)) {
-        place = if crate::notices::notice::notifications_allowed() { Surface::Notification } else { Surface::Nowhere };
+        place = if notification && crate::notices::notice::notifications_allowed() { Surface::Notification } else { Surface::Nowhere };
     }
     if place == Surface::Notification {
         #[cfg(windows)]
@@ -152,16 +172,56 @@ pub fn snip_failed(app: &AppHandle, why: &str) {
     );
 }
 
+/// **Show in folder**: the screenshot Snip to Chat saved last
+/// (`snip::copy_save`).
+pub const SHOW_SNIP: &str = "showSnip";
+
+/// A snip copied (Ctrl as you let go, Ctrl+C in the overlay): the answer
+/// to the person's own press.
+pub fn snip_copied(app: &AppHandle, w: u32, h: u32) {
+    show_soon(
+        app,
+        Alert {
+            kind: "snipCopied",
+            icon: "snip",
+            title: "Screenshot copied".into(),
+            body: format!("{w} × {h}, ready to paste. It stays out of your clipboard history."),
+            action: None,
+            timeout_ms: 3_000,
+        },
+    );
+}
+
+/// A snip saved (Shift as you let go, Ctrl+S in the overlay).
+pub fn snip_saved(app: &AppHandle, name: &str) {
+    show_soon(
+        app,
+        Alert {
+            kind: "snipSaved",
+            icon: "snip",
+            title: "Screenshot saved".into(),
+            body: format!("Saved as {name}."),
+            action: Some(Action { id: SHOW_SNIP, label: "Show in folder" }),
+            timeout_ms: 5_000,
+        },
+    );
+}
+
 /// An alert's button (the toast's, the bar card's, the notification's).
 pub fn act(app: &AppHandle, action: &str) {
     match action {
         OPEN_MIC_SETTINGS => open_uri(app, crate::dictation::mic_privacy::SETTINGS_URI),
         STOP_ASKING_CALLS => crate::calls::meeting_detect::set_detection(app, false),
         crate::meetings::meeting_audio::RECOVER_ACTION => crate::meetings::meeting_audio::recover_all(app),
+        crate::dictation::cap::RECOVER => crate::dictation::cap::recover(app),
         ASK_ABOUT_CALLS => crate::calls::meeting_detect::set_detection(app, true),
-        OPEN_AI_SETTINGS | OPEN_VOICE_SETTINGS => {
+        OPEN_AI_SETTINGS | OPEN_VOICE_SETTINGS | OPEN_MIC_ORDER => {
             use tauri::Emitter;
-            let at = if action == OPEN_AI_SETTINGS { "cleanup#chat" } else { "voice#voice-provider" };
+            let at = match action {
+                OPEN_AI_SETTINGS => "cleanup#chat",
+                OPEN_MIC_ORDER => "dictation#microphone",
+                _ => "voice#voice-provider",
+            };
             match crate::shell::window::show_settings(app) {
                 Ok(()) => {
                     let _ = app.emit("yap-open-settings", at);
@@ -170,6 +230,7 @@ pub fn act(app: &AppHandle, action: &str) {
             }
         }
         SHOW_OLD_SETTINGS => crate::config::show_old_file(app),
+        SHOW_SNIP => crate::snip::copy_save::show_saved(app),
         crate::shell::saving::RETRY => crate::shell::saving::retry_soon(app),
         "" => {}
         other => tracing::debug!("alert: no such action {other}"),

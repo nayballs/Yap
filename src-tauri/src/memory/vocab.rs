@@ -92,7 +92,7 @@ pub fn entries(items: &[Item], dictionary: &[DictionaryEntry], is_word: &dyn Fn(
         let words: Vec<&str> = name.split_whitespace().collect();
         let mut add = |to: &str, fuzzy: bool| {
             if seen.insert(to.to_lowercase()) {
-                out.push(DictionaryEntry { from: String::new(), to: to.to_string(), fuzzy, snippet: false });
+                out.push(DictionaryEntry { from: String::new(), to: to.to_string(), fuzzy, snippet: false, starred: false });
             }
         };
         add(name, safe_for_fuzzy(name, is_word));
@@ -163,7 +163,7 @@ mod tests {
         let mut topic = person(6, "Grafana");
         topic.section = Section::Topics;
         items.push(topic);
-        let dict = vec![DictionaryEntry { from: "cube and eighties".into(), to: "Kubernetes".into(), fuzzy: true, snippet: false }];
+        let dict = vec![DictionaryEntry { from: "cube and eighties".into(), to: "Kubernetes".into(), fuzzy: true, snippet: false, starred: false }];
         let got: Vec<(String, bool)> = entries(&items, &dict, &words).into_iter().map(|e| (e.to, e.fuzzy)).collect();
         assert_eq!(
             got,

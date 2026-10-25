@@ -22,7 +22,12 @@ The AI Chat surface (conversations, the tool-calling loop and its note tools) an
   the pages use as its id (`chat:<conversation>:<index>`). A web answer keeps
   its sources (`ChatMessage.sources` = `Source {n, title, url, site}`,
   numbered as it cites them; `append_sourced`; only written when there are
-  some). **Every answer is checked before it's shown and saved**
+  some). An answer asked across the meetings keeps its passages the same way
+  (`Source` with `note`, `field`, `line`, `ts`, `quote`: the moment its pill
+  opens), and the conversation keeps `scope: "meetings"` (`set_scope` /
+  `scope_of`), so its follow-ups are asked across the meetings too — the
+  passages, the citation rules and checks are [search.md](./search.md#ask-across-meetings-in-chat).
+  **Every answer is checked before it's shown and saved**
   (`checked_answer`, in `chat_turn`, every model; each fix logged and, in a
   model evaluation, counted — `eval::post_fix`): a sources list or "(Yap
   searched the web for this answer…)" note the model wrote itself goes
@@ -118,8 +123,15 @@ The AI Chat surface (conversations, the tool-calling loop and its note tools) an
   them (`snip::vision`) and runs the turn with them (`snip::turn`): each
   model call's question becomes a content array (the image parts, then the
   text; the text first for OpenRouter), the newest 3 earlier screenshots in
-  the history window go again, older ones as a line; a server's refusal
-  becomes `vision::COULDNT_READ` (that model a "no" this session).
+  the history window go again, older ones as a line (every one a line to a
+  model known not to read images); a server's refusal becomes
+  `vision::COULDNT_READ` (that model a "no" this session).
+  `chat_send(images, asText: true)` ("Send its text instead", 2026-10-25):
+  the screenshots' text, read on this PC by Windows' OCR (`snip::ocr`), goes
+  after the question instead of the pictures, which stay with it marked
+  `ChatImage.asText`; the reply's `question` is the text as saved, and a new
+  conversation is named by the question's own words. Pictures pasted or
+  dropped into the box are stored like snips (`snip::attach`).
   **The history window** moves three turns at a time
   (`chats::history_start`: 14–19 messages, the Voice Assistant's 5–8), not
   every turn, so a long chat keeps its prompt's start.
@@ -278,8 +290,9 @@ The AI Chat surface (conversations, the tool-calling loop and its note tools) an
   followed by more text, or 200 characters — so the line a model writes
   before a tool call ("I'll search your notes for that.") never shows; a
   tool-call delta turns the step into its chip (`Event::Tool`, "Searching
-  the web…" from `doing`), and text shown before it is taken back (on the
-  page: a voice already saying it goes on); without
+  the web…" from `doing`), and text shown before it is taken back (`text`
+  "", on the page — and a Voice Assistant already saying it stops,
+  `Streamed::taken_back` below, 2026-10-25); without
   tools (a small model, the last call) text shows at once. **A search
   that must come first shows no text at all** (`ChipsOnly`, a sink around
   the watcher that lets everything but `text` through; 2026-10-23): its
@@ -393,7 +406,17 @@ The AI Chat surface (conversations, the tool-calling loop and its note tools) an
   In a web answer a sentence with a price waits for the check
   (`mentions_price`: `about_you::restore_price_signs` may change "£8"
   back to "$8"). The answer's id is known before it's saved (the question's
-  index + 1). Barge-in, ■, a newer question, a meeting starting: the voice
+  index + 1). **Words taken back** (`Streamed::taken_back`, 2026-10-25): a
+  step's opening words long enough to show (`stream::releases`) that turn
+  out to come before a tool call are taken back (`text` "") — the voice may
+  have started on them: it stops, the sentences it hadn't said go (the feed
+  closed), the capsule goes back to Thinking and their card goes, and the
+  answer after the tool starts the voice again from its first sentence.
+  Before, the voice went on ("Let me look through your notes for that.")
+  and the answer's first sentences were skipped as already said (`said`
+  counted the words taken back). E2e-tested with the fake model scripting
+  words, then a call (`voice-assistant.spec.js`); a forced search's words
+  never get this far (`ChipsOnly`). Barge-in, ■, a newer question, a meeting starting: the voice
   stops and no more goes in (`Feed::push` says so); a meeting started
   meanwhile leaves the answer on its card for a reading time. **A newer
   question in the same conversation** (a barge-in or follow-up asked while
@@ -521,7 +544,11 @@ screenshots and their prompts, +, the box, the mic, Send / ■, `ModelChip`).
   plain RAG chat; tool-activity chips render in the thread above the answer
   and are kept with it in chats.json; a question from
   the Meetings view's Ask bar arrives through `chatRequest` and is sent with
-  `scope: 'meetings'`). Answers render as markdown — headings, lists,
+  `scope: 'meetings'`, as is one in a chat started with **Ask across your
+  meetings** on the empty thread; such a chat says "Asking across your
+  meetings and notes" over its thread, its `[1]` pills and its **From your
+  meetings** row open the cited moment in Notes — `chatState.openSource` →
+  ControlPanel's `openNoteAt`; [search.md](./search.md)). Answers render as markdown — headings, lists,
   tables, code, quotes, links — through `renderMarkdown` (`markdown.js`:
   markdown-it + DOMPurify, never the model's own HTML; see
   [notes.md](./notes.md#the-markdown-renderer)). **A web answer** (`web.rs`): its `[1]` citations are
@@ -678,4 +705,5 @@ screenshots and their prompts, +, the box, the mic, Send / ■, `ModelChip`).
   screenshot", Send waiting. A question's screenshots show in its bubble
   (click: large) or "Screenshot removed after 30 days". + → "Take a
   screenshot" (`snip_start {origin: "chat"}`).
-  No semantic vectors yet (ROADMAP step 3).
+  Search by meaning — local embeddings, Ask across meetings with cited
+  passages — is [search.md](./search.md) (2026-10-25; ROADMAP step 3).

@@ -1,0 +1,83 @@
+name: Bug report
+description: Something in Yap doesn't work as it should.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report this.
+
+        **A diagnostic file helps a lot.** In Yap, open **Settings → About → Report a problem**. Yap
+        makes a .zip (your system, settings without keys, recent errors and logs), shows you
+        everything in it, and saves it where you choose. Nothing is uploaded. Look through it, then
+        drag it into the last box below if you're happy to share it.
+
+        **Please don't paste anything private**: no dictated text, meeting transcripts, names or API
+        keys. Describe what you said instead ("a two-sentence email").
+
+        Found a security problem? Please don't open an issue: see
+        [SECURITY.md](https://github.com/nayballs/Yap/blob/main/SECURITY.md).
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: What you did, and what Yap did.
+      placeholder: I pressed F9 in Slack, spoke for about ten seconds and pressed it again. The bar showed "Transcribing…" but nothing was pasted.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What did you expect to happen?
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: If it happens every time, the shortest way to make it happen.
+      placeholder: |
+        1. Open Notepad
+        2. Press the dictation key and say a sentence
+        3. …
+  - type: dropdown
+    id: area
+    attributes:
+      label: Which part of Yap?
+      options:
+        - Dictation (recording, transcription)
+        - Pasting into an app
+        - AI cleanup, Commands or transforms
+        - Dictionary and snippets
+        - Meetings and the notepad
+        - Chat or the Voice Assistant
+        - Spoken replies or Read aloud
+        - The Yap bar
+        - Settings, the installer or updates
+        - Something else
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Yap version
+      description: Settings → About shows it.
+      placeholder: 0.1.1, or 0.1.1-nightly.123
+    validations:
+      required: true
+  - type: input
+    id: windows
+    attributes:
+      label: Windows version
+      description: Press Win+R, type `winver` and press Enter.
+      placeholder: Windows 11 24H2 (build 26100)
+  - type: input
+    id: hardware
+    attributes:
+      label: Graphics card and microphone (if it's about dictation or meetings)
+      placeholder: NVIDIA RTX 3060, USB headset
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Diagnostic file or anything else
+      description: Drag the .zip from Settings → About → Report a problem here, or add screenshots.

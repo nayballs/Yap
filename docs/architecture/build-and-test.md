@@ -263,10 +263,21 @@ shell waiting for it.
   only go in-app while the window is on screen), `e2e_dictation_mic { silent }`
   (the dictation mic's real audio zeroed, as a muted mic's — the dead-mic
   watchdog's case, its stream really reopened), `e2e_mic_status` (the
-  dictation mic's state, `dictation/mic.rs`: open, live, Bluetooth, opens/closes, the
-  last open's timing), `e2e_dictate_audio { seconds }` (a dictation of a
+  dictation mic's state, `dictation/mic.rs`: open, live, Bluetooth, opens/closes,
+  losses, the device open, the last open's timing), `e2e_mics { devices }` /
+  `e2e_mic_plug { device }` / `e2e_mic_unplug { id }` and `YAP_E2E_MICS`
+  (made-up microphones instead of Windows', `dictation/mics.rs`: told as
+  Windows' notifications are, a stream on one a quiet tone that stops when
+  it's unplugged; the meeting player follows them too; `[]` = none at all —
+  the no-mic specs), `e2e_dictate_audio { seconds, amplitude? }` (a dictation of a
   tone played in the mic's place — a real start and stop, the mic held as
-  for any dictation; no microphone needed), `e2e_crash_next_dictation` (the
+  for any dictation; no microphone needed; with `amplitude`, that peak in
+  syllables, for the level meter), `e2e_shortcut { name }` (Paste last /
+  Copy last transcript's press, as the hook sends it: `pasting/last.rs`),
+  `e2e_dictation_timing { floorMs, sttMs, forget }` ("Taking longer than
+  usual…" sooner, the stub's transcription slowed: `dictation/slow.rs`),
+  `e2e_dictation_cap { limitMs, warnMs }` (the 15-minute limit shortened:
+  `dictation/cap.rs`), `e2e_crash_next_dictation` (the
   next dictation panics in its paste step: `pipeline::Busy`), `e2e_fail_saves
   { store, count }` (a store's next saves fail as a full disk would:
   `shell/saving.rs`), `e2e_upload_pace { ms }` (each Upload chunk held that long,
@@ -280,7 +291,10 @@ shell waiting for it.
   from the suite's local server — `YAP_TTS_SOURCES` —, a simulated clock, no
   audio device; what would have been said in `tts_e2e_spoken`), no on-device
   model downloaded but the suite's small fakes from 127.0.0.1
-  (`YAP_LLM_SOURCES`, `e2e/support/local-llm.js`), `e2e_chat_dictation {text}` (a
+  (`YAP_LLM_SOURCES`, `e2e/support/local-llm.js`; meeting search's model
+  under the key `embeddinggemma`), no embedding server started (`search/embedder.rs`:
+  the debug-only `YAP_E2E_EMBED_URL` points at `e2e/support/fake-embed.js`;
+  unset, a test run's search is keywords only), `e2e_chat_dictation {text}` (a
   question dictated into the Chat view, no mic needed), `e2e_assistant_ask
   {text, listenMs}` (a question to the Voice Assistant, as its shortcut
   asks it, no mic needed), no app ever launched (`apps.rs`: "open Teams"

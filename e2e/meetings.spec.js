@@ -7,7 +7,7 @@
 // summary is meeting-summary.spec.js.
 import path from 'node:path';
 import fs from 'node:fs';
-import { test, expect, settingsDialog, closeSettings, expectStore } from './support/fixtures.js';
+import { test, expect, settingsDialog, closeSettings, expectStore, closeToasts } from './support/fixtures.js';
 import { newMeetingNote, meetingNote } from './support/meetings.js';
 import { writeWav } from './support/wav.js';
 import { RUNS } from './support/yap.js';
@@ -99,6 +99,9 @@ test('the call leaking from the speakers into the mic is kept out of "You"', asy
   await expect(log.locator('.bubble.you')).toHaveCount(0);
   await shot(main, '03-echo-hidden');
 
+  // A toast over the toggle pauses while the pointer rests on it and takes
+  // the click (CI, 25 Oct 2026: the run timed out behind one).
+  await closeToasts(main);
   await toggle.click();
   await expect(log.locator('.bubble.you.echo')).toContainText('from the speakers');
   await shot(main, '04-echo-shown');

@@ -13,7 +13,11 @@
   measured clearly faster on this PC, `dictation/stt_speed.rs` — | "gpu" | "cpu"), keep_recent_audio (a day of dictation
   audio to run one again, on; `dictation/recent_audio.rs`), as_said_hotkey ("Use what I
   said", "" = unbound) + as_said_offer (the bar's offer after AI cleanup,
-  on; both `pasting/as_said.rs`), snip_hotkey (Snip to Chat, default Win+Alt+S "kb:alt+win+83", "" = unbound; never a clash, `input_hook::configure_snip_from`) + snip_voice ("Say “snip” to take a screenshot", on) + chat_image_days ("Keep chat screenshots": 7 / 30 (default) / 90 / 0 = forever; another value counts as 30; changing it sweeps at once; all `snip.rs`, docs/architecture/snip.md), rewrite_last_dictation (`rewriteLastDictation`,
+  on; both `pasting/as_said.rs`), paste_last_hotkey + copy_last_hotkey
+  (`pasteLastHotkey` / `copyLastHotkey`, Paste / Copy last transcript, "" =
+  unbound, the default; never a clash — `input_hook::configure_paste_last_from`
+  / `configure_copy_last_from` leave one another shortcut has unbound;
+  `pasting/last.rs`), snip_hotkey (Snip to Chat, default Win+Alt+S "kb:alt+win+83", "" = unbound; never a clash, `input_hook::configure_snip_from`) + snip_voice ("Say “snip” to take a screenshot", on) + chat_image_days ("Keep chat screenshots": 7 / 30 (default) / 90 / 0 = forever; another value counts as 30; changing it sweeps at once; all `snip.rs`, docs/architecture/snip.md) + snip_save_dir (the folder a snip's or a chat screenshot's Save opened in last, "" = Pictures; `snip/copy_save.rs`), rewrite_last_dictation (`rewriteLastDictation`,
   serde default on: the rewrite shortcut with nothing selected rewrites the
   last dictation — within a minute, in the same field, still ending at the
   cursor —; off, it writes new text as before 2026-10-23; Settings →
@@ -26,7 +30,7 @@
   instruction; `hotkey` an input-hook spec or ""; `language` Translate's,
   "Spanish" until picked. Serde default = Yap's five, no shortcuts; at most
   12 run (`transforms::list`: usable ones, each id once). A key that would
-  fire with one of the seven fixed shortcuts or an earlier transform's is
+  fire with one of the nine fixed shortcuts or an earlier transform's is
   left unbound, `transforms::assign`; a language shortcut's too), **My
   languages** (Settings → Dictation, `dictation/languages.rs`, 2026-10-25):
   `my_languages` (the languages you speak, codes in your order; empty = none
@@ -34,9 +38,18 @@
   `language_shortcuts` (at most 4 `{id, language, translateTo, hotkey}`:
   `language` a code or "auto" — any of yours —, `translateTo` a code or "" —
   as spoken —, `hotkey` an input-hook spec; a key that would fire with one of
-  the seven fixed shortcuts or an earlier one is left unbound,
+  the nine fixed shortcuts or an earlier one is left unbound,
   `languages::assign`), `language_nudge` ("Tell me when I speak a language I
-  didn't pick", on), input_device, sound +
+  didn't pick", on; no `migrate_once` step), mic_order (Settings → Dictation →
+  Microphone, 2026-10-25, `dictation/mics.rs`: `[{id, name}]` — the Core
+  Audio endpoint id, else the name — in the person's order; the first one
+  connected is used, then Windows' default; empty, the default, is Windows'
+  default alone) + mic_not_now (the microphones answered "Not now" to
+  "… connected · Use it for dictation?": never asked again), input_device
+  (the one mic picked before 25 Oct; **`migrate_once` v4** moves it to the
+  front of `mic_order` by name and clears it — nothing else reads it; an
+  unplugged pick now falls back to Windows' default instead of "No
+  microphone found"), sound +
   volume, output_device, quiet_other_apps ("Silence other apps while you
   dictate", off; reads old configs' `muteWhileRecording`) + pause_media
   ("Pause music and videos while you dictate", off; both `dictation/mute.rs`),
@@ -44,7 +57,8 @@
   dictate, stays warm a minute and closes, at once on Bluetooth; on, it's
   open the whole time Yap runs, as before 2026-10-22; `dictation/mic.rs`), recording_mode,
   overlay_position, dictionary (`DictionaryEntry`: from/to + `fuzzy` (default
-  on) + `snippet` (default off)), append_trailing_space, smart_spacing ("Match
+  on) + `snippet` (default off) + `starred` (default off, written only when
+  set; 2026-10-25)), append_trailing_space, smart_spacing ("Match
   the text around the cursor", default on), screen_names ("Spell names the
   way they're written on screen", default on; `dictionary/screen_terms.rs`),
   chat_no_full_stop ("Leave the full
@@ -153,6 +167,9 @@
   past chats", on) + memory_learn_chats ("Learn from my chats", on) +
   memory_learn_meetings ("Learn from meetings", off) + memory_sensitive
   ("Include sensitive topics in memory", off),
+  search_by_meaning ("Search my meetings by meaning", off; `search/`,
+  Settings → Privacy & data: switched on by the model's download, off by its
+  Delete; the index and model live in the data folder, below),
   Commands' edit_hotkey (the rewrite shortcut)
   + agent_name + the `voiceAgent` scope (field and key names unchanged by
   the 2026-10-18 rename, so no setting resets). JSON
@@ -237,6 +254,18 @@
   NOTICE.txt), each with a `NOTICE.txt` (`voice/tts/registry.rs`; size + SHA-256
   verified). Attribution: Settings → Voice Assistant → Voice. Deleted from the
   Kokoro row; ~352 MB.
+- Meeting search (`search/`, [search.md](./search.md)): the model in
+  `%APPDATA%/yap/models/search/` — `embeddinggemma-300M-Q8_0.gguf` (Hugging
+  Face ggml-org/embeddinggemma-300M-GGUF at a pinned commit, Gemma Terms of
+  Use; size + SHA-256 verified; ~318 MiB) with a `NOTICE.txt`, and the
+  embedding server's `embedder.log`; it runs on the on-device model's
+  engine (`llm/llamafile.exe`, downloaded with it when it isn't there). The
+  index in `%APPDATA%/yap/search-index/vectors.bin` — each passage's vector
+  (int8 + a scale, by a hash of its words; **no text**), appended as notes
+  change, compacted when a note is deleted; `vectors.bin.old` when one for
+  another model was set aside. Settings → Privacy & data → "Search my
+  meetings by meaning": Rebuild deletes the index and reads everything
+  again; Delete… removes the model and the index (the engine stays).
 - Groq usage: `%APPDATA%/yap/groq_usage.json`.
 - Speech engine timings: `%APPDATA%/yap/stt_speed.json` — per model id, the
   benchmark of each device on this PC (load, the first run after loading,
@@ -268,7 +297,11 @@
   keeps only its id, size, bytes and source. Deleted with its conversation, after
   "Keep chat screenshots" (30 days by default), and a day after a snip that was
   never sent. Never leaves the PC except inside the Chat request you send;
-  never logged.
+  never logged. Pictures pasted or dropped into Chat are stored here too (as
+  PNGs, `snip/attach.rs`); a question whose screenshot went as its text
+  (Windows' OCR, `snip/ocr.rs`) keeps it marked `asText`. A snip copied or
+  saved from the overlay keeps nothing here; a save goes where the Save
+  dialog says, in the folder used last (`snip_save_dir`).
 - History: `%APPDATA%/yap/history.json` (local-only; cleared from Settings → Privacy & data → History).
 - Notes: `%APPDATA%/yap/notes.json` — the AI Notepad store (folders, actions,
   participants, meeting transcripts).
@@ -297,7 +330,10 @@
   an installed copy, by the uninstaller's "Delete the application data".
 - Dictionary usage: `%APPDATA%/yap/dictionary_usage.json` — each dictionary
   word's use count and last use, which orders the Whisper vocabulary prompt
-  (`dictionary/dict_usage.rs`). Safe to delete (the order falls back to the list's).
+  (`dictionary/dict_usage.rs`) and the Dictionary view's "Most used" sort.
+  Safe to delete (the order falls back to the list's).
+- The Dictionary view's sort: the main window's `localStorage`
+  (`yap.dictionarySort`), a convenience of that window, never config.json.
 - Hints: `%APPDATA%/yap/hints.json` — how often each push-to-talk coaching hint
   showed, when the last did, and whether double-tap has been used (`dictation/coaching.rs`).
 - Quieted apps: `%APPDATA%/yap/quieted_apps.json` — only while a dictation
@@ -385,9 +421,12 @@
   speech models on the graphics card unless the processor measured clearly
   faster on this PC (`stt_device` "auto"; the graphics card until measured), a day of dictation audio kept
   (`keep_recent_audio`), "Use what I said" offered on the bar after AI cleanup
-  (`as_said_offer`) with no shortcut (`as_said_hotkey` ""), Snip to Chat on
+  (`as_said_offer`) with no shortcut (`as_said_hotkey` ""), no Paste last /
+  Copy last transcript shortcuts (`paste_last_hotkey`, `copy_last_hotkey`
+  ""), Snip to Chat on
   Win+Alt+S (`snip_hotkey`), saying "snip" taking one (`snip_voice`) and chat
-  screenshots kept 30 days (`chat_image_days`), the rewrite
+  screenshots kept 30 days (`chat_image_days`), a snip's Save opening in
+  Pictures until a folder is chosen (`snip_save_dir` ""), the rewrite
   shortcut taking the last dictation when nothing is selected
   (`rewrite_last_dictation` on; the shortcut itself unbound), Yap's five
   saved transforms with no shortcuts (`transforms`; Translate to Spanish),

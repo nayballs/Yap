@@ -298,7 +298,7 @@ pub fn main(args: Vec<String>) -> i32 {
             .map(|f| overlay::Screen { monitor: f.monitor.clone(), width: f.width, height: f.height, bgra: std::sync::Arc::new(f.bgra) })
             .collect();
         let captured_ms = ms(t0);
-        let opts = overlay::Options { focus: 0, interactive: false, hidden: false };
+        let opts = overlay::Options { focus: 0, interactive: false, hidden: false, ..Default::default() };
         let shown = overlay::open(screens, opts, Box::new(|_| {}));
         let total_ms = ms(t0);
         std::thread::sleep(std::time::Duration::from_millis(300));
@@ -327,7 +327,7 @@ pub fn main(args: Vec<String>) -> i32 {
             .map(|f| overlay::Screen { monitor: f.monitor.clone(), width: f.width, height: f.height, bgra: std::sync::Arc::new(f.bgra) })
             .collect();
         let (w, h) = screens.first().map(|s| (s.width as i32, s.height as i32)).unwrap_or((0, 0));
-        let opts = overlay::Options { focus: 0, interactive: false, hidden: false };
+        let opts = overlay::Options { focus: 0, interactive: false, hidden: false, ..Default::default() };
         if overlay::open(screens, opts, Box::new(|_| {})).is_ok() {
             let lp = |x: i32, y: i32| ((y as u16 as isize) << 16) | (x as u16 as isize);
             let _ = overlay::post_input(0, vec![(0x0201, 1, lp(w * 3 / 10, h * 3 / 10)), (0x0200, 1, lp(w * 11 / 20, h * 11 / 20))]);

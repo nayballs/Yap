@@ -236,8 +236,11 @@ dates). [frontend.md](./frontend.md#the-folder-layout-2026-10-24).
   a line's words fixed by double-click, Enter or F2 on it, or **Edit line**
   in its menu (Enter saves, Escape cancels, leaving saves; "edited" after
   it, what Yap heard in its tooltip; `notes/note_edits.rs`); opened from the
-  Tasks view at a line, that line scrolled to, focused and lit a moment
-  (`noteRequest {id, line}`);
+  Tasks view at a line, or from a passage an answer cites or a moment the
+  Meetings view's search found ([search.md](./search.md)), that line scrolled
+  to, focused and lit a moment (`noteRequest {id, line, ts, tab}`: `ts` finds
+  the line again if the transcript was done again since; `tab` opens a
+  summary passage on the Summary tab);
   over them "Transcribing again…" or, after a crash, "Yap closed while this
   meeting was recording…" with Transcribe it; echo lines
   hidden behind a "Show N lines…" toggle; a `dictated` marker is a quiet dashed

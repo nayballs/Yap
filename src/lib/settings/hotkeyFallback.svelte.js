@@ -8,7 +8,7 @@
 //
 // The meeting shortcut (Win+Alt+M) goes first: a combo is more specific than
 // a bare dictation key; then the Voice Assistant's shortcut, Read aloud,
-// Snip to Chat and the language shortcuts (My languages). Down and up go to
+// Snip to Chat, Copy last and the language shortcuts (My languages). Down and up go to
 // `dictation_key` / `assistant_key` / `language_key`, the hook's own paths:
 // the recording mode (and push-to-talk's tap / double-tap) is Rust's to
 // decide.
@@ -48,6 +48,15 @@ export function followHotkeyFallback(getCfg) {
       e.preventDefault();
       e.stopPropagation();
       invoke('snip_start', { origin: 'shortcut' }).catch(() => {});
+      return;
+    }
+    // Copy last transcript (pasting/last.rs): onto the clipboard here too.
+    // (Paste last has no fallback: it pastes into another app, as "Use
+    // what I said" and the transforms do.)
+    if (hotkeyMatchesKeydown(e, cfg?.copyLastHotkey)) {
+      e.preventDefault();
+      e.stopPropagation();
+      invoke('copy_last_transcript').catch(() => {});
       return;
     }
     // A language shortcut (My languages, dictation/languages.rs): a dictation in its

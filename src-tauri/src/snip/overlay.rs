@@ -21,11 +21,22 @@
 //! DWM's show animation is off for them. Repaints compose each changed
 //! rectangle off screen and copy it in one go.
 //!
-//! **Input**: drag a box (the mouse captured, so a drag past the monitor's
-//! edge keeps going, clamped to it); **release = done** (a box under 6 px
-//! does nothing); **Esc**, right-click or the snip shortcut again cancel;
-//! another app taking the focus, or the monitors changing, cancel too.
-//! Phase 1 keeps a box on the monitor it started on.
+//! **Input** ([`Select`], pure and unit-tested; the windows only feed it):
+//! - **drag a box** (the mouse captured, so it keeps going past a
+//!   monitor's edge — **into the next monitor**: the box is in virtual-
+//!   desktop pixels, clamped to the desktop, and every monitor's overlay
+//!   draws its part); **release = done** (a box under 6 px either way does
+//!   nothing);
+//! - **a click** (the mouse barely moved) or **Enter**: the whole monitor
+//!   under the pointer;
+//! - **Space** switches to picking **a window** (and back); holding **Alt**
+//!   picks windows while it's held. The window under the pointer is lit
+//!   with its frame; a click takes its visible area. Enter takes what's lit;
+//! - **Ctrl** held as you let go (or Ctrl+C while the box is up): **copy**
+//!   instead of Chat; **Shift** (or Ctrl+S): **save** — the box's label
+//!   says so as you hold them ("812 × 430 · Copy");
+//! - **Esc**, right-click or the snip shortcut again cancel; another app
+//!   taking the focus, or the monitors changing, cancel too.
 //!
 //! All of it runs on its own UI thread (`snip-ui`) with a message loop; the
 //! rest of Yap talks to it through [`open`] / [`close`].
@@ -44,17 +55,41 @@ pub struct Screen {
     pub bgra: Arc<Vec<u8>>,
 }
 
+/// What a finished snip is for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum Action {
+    /// Into Chat's message box (a plain release, a click, Enter).
+    Chat,
+    /// Onto the clipboard (Ctrl held as you let go, Ctrl+C).
+    Copy,
+    /// Saved as a PNG where you choose (Shift held, Ctrl+S).
+    Save,
+}
+
+/// What was taken.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum Kind {
+    /// A box you dragged (on one monitor or across several).
+    Box,
+    /// A whole monitor (a click, Enter).
+    Monitor,
+    /// A window's visible area (Space or Alt, then a click).
+    Window,
+}
+
 /// How a snip ended.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Outcome {
-    /// A box on screen `screen`, in that window's physical pixels.
-    Snipped { screen: usize, rect: Rect },
+    /// What was taken, in virtual-desktop physical pixels.
+    Snipped { rect: Rect, kind: Kind, action: Action },
     /// Esc, right-click, the shortcut again, another app, the monitors.
     Cancelled(&'static str),
 }
 
 /// How the overlays come up.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Default)]
 pub struct Options {
     /// The monitor under the cursor: it takes the focus and shows the hint.
     pub focus: usize,
@@ -64,6 +99,237 @@ pub struct Options {
     /// Never on screen (a test run): set up, painted and driven by posted
     /// messages, but kept cloaked and never focused.
     pub hidden: bool,
+    /// The windows a click can pick (Space / Alt), topmost first, in
+    /// virtual-desktop pixels (`pick.rs`; a test's own).
+    pub windows: Vec<Rect>,
+}
+
+/// Ctrl held: copy; Shift held: save; neither: Chat. Pure.
+pub fn action_for(ctrl: bool, shift: bool) -> Action {
+    if ctrl {
+        Action::Copy
+    } else if shift {
+        Action::Save
+    } else {
+        Action::Chat
+    }
+}
+
+/// A key the overlay acts on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Key {
+    Enter,
+    Space,
+    Escape,
+    /// Ctrl+C.
+    Copy,
+    /// Ctrl+S.
+    Save,
+    /// Ctrl went down (true) or up.
+    Ctrl(bool),
+    Shift(bool),
+    Alt(bool),
+}
+
+/// What a key or the mouse changed.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Step {
+    Nothing,
+    /// The box or its label changed: repaint.
+    Redraw,
+    /// Picking windows went on or off: repaint, and show the hint again.
+    Mode,
+    Done(Outcome),
+}
+
+/// The overlay's selection, pure: what the mouse and keys have picked so
+/// far, across every monitor (virtual-desktop pixels). The windows feed it
+/// their messages and draw [`Select::target`].
+#[derive(Debug, Clone, Default)]
+pub struct Select {
+    /// Each screen's place on the virtual desktop.
+    pub places: Vec<Rect>,
+    pub desktop: Rect,
+    /// The windows a click can pick, topmost first.
+    pub windows: Vec<Rect>,
+    /// The screen the snip started on (the pointer's, until it moves).
+    pub focus: usize,
+    /// Space switched to picking windows.
+    pub window_mode: bool,
+    /// Alt held: windows while it's held.
+    pub alt: bool,
+    pub ctrl: bool,
+    pub shift: bool,
+    drag: Option<(i32, i32)>,
+    pointer: Option<(i32, i32)>,
+    target: Option<(Rect, Kind)>,
+}
+
+impl Select {
+    pub fn new(places: Vec<Rect>, windows: Vec<Rect>, focus: usize) -> Select {
+        let desktop = super::geom::desktop(&places);
+        let windows = windows.iter().map(|w| w.intersect(&desktop)).filter(|w| !w.is_empty()).collect();
+        Select { places, desktop, windows, focus, ..Default::default() }
+    }
+
+    /// What's lit now (the box, or the window under the pointer), if
+    /// anything.
+    pub fn target(&self) -> Option<(Rect, Kind)> {
+        self.target
+    }
+
+    pub fn picking_windows(&self) -> bool {
+        self.window_mode || self.alt
+    }
+
+    pub fn dragging(&self) -> bool {
+        self.drag.is_some()
+    }
+
+    /// Where the pointer is (the focus screen's middle until it moves).
+    pub fn pointer(&self) -> (i32, i32) {
+        self.pointer.unwrap_or_else(|| {
+            let m = self.places.get(self.focus).or(self.places.first()).copied().unwrap_or_default();
+            (m.x + m.w / 2, m.y + m.h / 2)
+        })
+    }
+
+    /// Set where the pointer is without a move (the overlay coming up).
+    pub fn place_pointer(&mut self, at: (i32, i32)) {
+        self.pointer = Some(at);
+        self.refresh();
+    }
+
+    /// The monitor under a point, whole.
+    fn monitor_under(&self, at: (i32, i32)) -> Rect {
+        super::geom::monitor_at(&self.places, at.0, at.1).and_then(|i| self.places.get(i)).copied().unwrap_or_default()
+    }
+
+    /// The window under a point, when picking windows.
+    fn window_under(&self, at: (i32, i32)) -> Option<Rect> {
+        super::geom::window_at(&self.windows, at.0, at.1).map(|i| self.windows[i])
+    }
+
+    /// What's lit, from the state: a drag past a click's few pixels is a
+    /// box; else, picking windows, the one under the pointer.
+    fn refresh(&mut self) {
+        if let (Some(start), Some(now)) = (self.drag, self.pointer) {
+            if !super::geom::is_click(start, now) {
+                self.target = Some((super::geom::drag_box_on(start, now, &self.desktop), Kind::Box));
+                return;
+            }
+        }
+        self.target = if self.picking_windows() { self.window_under(self.pointer()).map(|w| (w, Kind::Window)) } else { None };
+    }
+
+    /// What Enter, Ctrl+C and Ctrl+S take: what's lit, else the monitor
+    /// under the pointer.
+    fn current(&self) -> (Rect, Kind) {
+        self.target.unwrap_or_else(|| (self.monitor_under(self.pointer()), Kind::Monitor))
+    }
+
+    /// The pointer moved (with Ctrl and Shift as the mouse message says).
+    pub fn moved(&mut self, at: (i32, i32), ctrl: bool, shift: bool) -> Step {
+        let before = (self.target, self.ctrl, self.shift);
+        self.pointer = Some(at);
+        self.ctrl = ctrl;
+        self.shift = shift;
+        self.refresh();
+        if (self.target, self.ctrl, self.shift) == before {
+            Step::Nothing
+        } else {
+            Step::Redraw
+        }
+    }
+
+    /// The left button went down.
+    pub fn pressed(&mut self, at: (i32, i32)) -> Step {
+        self.drag = Some(at);
+        self.pointer = Some(at);
+        self.refresh();
+        Step::Redraw
+    }
+
+    /// The left button came up: a click takes the monitor (or the window
+    /// picked), a drag its box — or nothing, a box too thin to snip.
+    pub fn released(&mut self, at: (i32, i32), ctrl: bool, shift: bool) -> Step {
+        let Some(start) = self.drag.take() else { return Step::Nothing };
+        self.pointer = Some(at);
+        self.ctrl = ctrl;
+        self.shift = shift;
+        let action = action_for(ctrl, shift);
+        if super::geom::is_click(start, at) {
+            let (rect, kind) = match self.picking_windows().then(|| self.window_under(at)).flatten() {
+                Some(w) => (w, Kind::Window),
+                None => (self.monitor_under(at), Kind::Monitor),
+            };
+            return Step::Done(Outcome::Snipped { rect, kind, action });
+        }
+        let rect = super::geom::drag_box_on(start, at, &self.desktop);
+        if super::geom::big_enough(&rect) {
+            return Step::Done(Outcome::Snipped { rect, kind: Kind::Box, action });
+        }
+        // A twitch: nothing; the box goes.
+        self.refresh();
+        Step::Redraw
+    }
+
+    /// A key.
+    pub fn key(&mut self, key: Key) -> Step {
+        let done = |s: &Select, action: Action| {
+            let (rect, kind) = s.current();
+            Step::Done(Outcome::Snipped { rect, kind, action })
+        };
+        match key {
+            Key::Escape => Step::Done(Outcome::Cancelled("escape")),
+            Key::Enter => done(self, action_for(self.ctrl, self.shift)),
+            Key::Copy => done(self, Action::Copy),
+            Key::Save => done(self, Action::Save),
+            Key::Space if self.dragging() => Step::Nothing,
+            Key::Space => {
+                self.window_mode = !self.window_mode;
+                self.refresh();
+                Step::Mode
+            }
+            Key::Alt(down) if down == self.alt => Step::Nothing,
+            Key::Alt(down) => {
+                self.alt = down;
+                self.refresh();
+                Step::Mode
+            }
+            Key::Ctrl(down) if down == self.ctrl => Step::Nothing,
+            Key::Ctrl(down) => {
+                self.ctrl = down;
+                Step::Redraw
+            }
+            Key::Shift(down) if down == self.shift => Step::Nothing,
+            Key::Shift(down) => {
+                self.shift = down;
+                Step::Redraw
+            }
+        }
+    }
+}
+
+/// The lit box's label: its size in physical pixels, and what letting go
+/// with Ctrl or Shift does — "812 × 430 · Ctrl copy · Shift save", or,
+/// while one's held, "812 × 430 · Copy". Pure.
+pub fn label_text(r: &Rect, ctrl: bool, shift: bool) -> String {
+    let size = size_text(r);
+    match action_for(ctrl, shift) {
+        Action::Copy => format!("{size}  \u{b7}  Copy"),
+        Action::Save => format!("{size}  \u{b7}  Save"),
+        Action::Chat => format!("{size}  \u{b7}  Ctrl copy  \u{b7}  Shift save"),
+    }
+}
+
+/// The hint at the top of the monitor under the pointer. Pure.
+pub fn hint_text(picking_windows: bool) -> &'static str {
+    if picking_windows {
+        WINDOW_HINT
+    } else {
+        HINT
+    }
 }
 
 /// How long the overlays took to come up (the spike and the log).
@@ -97,7 +363,9 @@ pub mod colours {
 pub const DIM: u16 = 150;
 
 /// The hint on the monitor under the cursor.
-pub const HINT: &str = "Drag to snip  ·  Esc to cancel";
+pub const HINT: &str = "Drag to snip  ·  Click for the whole screen  ·  Space for a window  ·  Esc to cancel";
+/// …while picking windows (Space, or Alt held).
+pub const WINDOW_HINT: &str = "Click a window  ·  Space to drag a box  ·  Esc to cancel";
 /// How long the hint stays before it fades.
 pub const HINT_MS: u32 = 2_500;
 
@@ -181,13 +449,16 @@ mod win {
     };
     use windows::Win32::System::LibraryLoader::GetModuleHandleW;
     use windows::Win32::System::Threading::GetCurrentThreadId;
-    use windows::Win32::UI::Input::KeyboardAndMouse::{ReleaseCapture, SetCapture, SetFocus, VK_ESCAPE};
+    use windows::Win32::UI::Input::KeyboardAndMouse::{
+        GetKeyState, ReleaseCapture, SetCapture, SetFocus, VK_CONTROL, VK_ESCAPE, VK_F4, VK_LCONTROL, VK_LMENU, VK_LSHIFT, VK_MENU, VK_RCONTROL,
+        VK_RETURN, VK_RMENU, VK_RSHIFT, VK_SHIFT, VK_SPACE,
+    };
     use windows::Win32::UI::WindowsAndMessaging::{
         CreateWindowExW, DefWindowProcW, DispatchMessageW, GetCursorPos, GetMessageW, KillTimer, LoadCursorW, PeekMessageW,
         PostThreadMessageW, RegisterClassExW, SetForegroundWindow, SetLayeredWindowAttributes, SetTimer, SetWindowLongPtrW,
-        SetWindowPos, ShowWindow, TranslateMessage, GWL_EXSTYLE, HWND_TOPMOST, IDC_CROSS, LWA_ALPHA, MSG, PM_NOREMOVE, SWP_NOACTIVATE,
-        SW_HIDE, SW_SHOWNOACTIVATE, WM_ACTIVATEAPP, WM_APP, WM_DISPLAYCHANGE, WM_DPICHANGED, WM_ERASEBKGND, WM_KEYDOWN, WM_LBUTTONDOWN,
-        WM_LBUTTONUP, WM_MOUSEACTIVATE, WM_MOUSEMOVE, WM_PAINT, WM_RBUTTONDOWN, WM_RBUTTONUP, WM_SETCURSOR, WM_TIMER, WNDCLASSEXW,
+        SetWindowPos, ShowWindow, TranslateMessage, GWL_EXSTYLE, HTCLIENT, HWND_TOPMOST, IDC_ARROW, IDC_CROSS, LWA_ALPHA, MSG, PM_NOREMOVE, SWP_NOACTIVATE,
+        SW_HIDE, SW_SHOWNOACTIVATE, WM_ACTIVATEAPP, WM_APP, WM_DISPLAYCHANGE, WM_CHAR, WM_DPICHANGED, WM_ERASEBKGND, WM_KEYDOWN, WM_KEYUP, WM_LBUTTONDOWN,
+        WM_LBUTTONUP, WM_MOUSEACTIVATE, WM_MOUSEMOVE, WM_PAINT, WM_RBUTTONDOWN, WM_RBUTTONUP, WM_SETCURSOR, WM_SYSCHAR, WM_SYSKEYDOWN, WM_SYSKEYUP, WM_TIMER, WNDCLASSEXW,
         WS_EX_LAYERED, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_EX_TRANSPARENT, WS_POPUP, MA_ACTIVATE,
     };
 
@@ -422,10 +693,11 @@ mod win {
         bright: Option<Dib>,
         dim: Option<Dib>,
         scratch: Option<Dib>,
-        /// The drag's start, while the button is down.
-        drag: Option<(i32, i32)>,
+        /// The lit box in this window's own pixels (it may reach past the
+        /// window: a box across monitors).
         sel: Option<Rect>,
-        label: Option<(Rect, Pill)>,
+        /// The label's place, its text and its pill.
+        label: Option<(Rect, String, Pill)>,
         /// The hint and its alpha (255 → 0 as it fades).
         hint: Option<(Rect, Pill, u8)>,
     }
@@ -434,6 +706,8 @@ mod win {
         opts: Options,
         done: Option<Done>,
         started: Instant,
+        /// What the mouse and keys picked (virtual-desktop pixels).
+        select: Select,
     }
 
     thread_local! {
@@ -499,13 +773,54 @@ mod win {
                 unsafe {
                     let _ = DwmSetWindowAttribute(hwnd, DWMWA_TRANSITIONS_FORCEDISABLED, &off as *const i32 as *const _, 4);
                 }
-                wins.push(Win { hwnd, screen: None, bright: None, dim: None, scratch: None, drag: None, sel: None, label: None, hint: None });
+                wins.push(Win { hwnd, screen: None, bright: None, dim: None, scratch: None, sel: None, label: None, hint: None });
             }
         });
     }
 
     fn index_of(hwnd: HWND) -> Option<usize> {
         WINDOWS.with(|w| w.borrow().iter().position(|x| x.hwnd == hwnd))
+    }
+
+    /// A screen's place on the virtual desktop.
+    fn place_of(s: &Screen) -> Rect {
+        Rect::new(s.monitor.x, s.monitor.y, s.width as i32, s.height as i32)
+    }
+
+    /// The hint at the top of screen `i`, at full strength (its fade timer
+    /// started when it's on screen); every other screen's goes.
+    fn show_hint(i: usize, text: &str) {
+        let shown = WINDOWS.with(|w| {
+            let mut wins = w.borrow_mut();
+            let mut gone = Vec::new();
+            for (k, win) in wins.iter_mut().enumerate() {
+                if k != i {
+                    if let Some((r, _, _)) = win.hint.take() {
+                        gone.push((win.hwnd, r));
+                    }
+                }
+            }
+            let win = wins.get_mut(i)?;
+            let (sw, scale) = win.screen.as_ref().map(|s| (s.width as i32, s.monitor.scale))?;
+            let p = pill(text, scale, 14.0)?;
+            let (pw, ph) = (p.dib.w, p.dib.h);
+            let at = Rect::new((sw - pw) / 2, super::super::geom::scaled(28.0, scale), pw, ph);
+            let before = win.hint.replace((at, p, 255)).map(|(r, _, _)| r);
+            gone.push((win.hwnd, before.unwrap_or_default().union(&at)));
+            Some((win.hwnd, gone))
+        });
+        if let Some((hwnd, gone)) = shown {
+            for (h, r) in gone {
+                invalidate(h, &r);
+                unsafe {
+                    let _ = KillTimer(Some(h), HINT_TIMER);
+                    let _ = KillTimer(Some(h), FADE_TIMER);
+                }
+            }
+            if !hidden_session() {
+                unsafe { SetTimer(Some(hwnd), HINT_TIMER, HINT_MS, None) };
+            }
+        }
     }
 
     fn do_open(screens: Vec<Screen>, opts: Options, done: Done) -> Result<Shown, String> {
@@ -526,29 +841,32 @@ mod win {
             let dim = Dib::from_pixels(w, h, &dimmed(&s.bgra)).ok_or("couldn't make a bitmap")?;
             prepared.push((bright, dim));
         }
-        let hint = pill(HINT, screens[opts.focus.min(screens.len() - 1)].monitor.scale, 14.0);
+        let focus = opts.focus.min(screens.len() - 1);
         let hwnds: Vec<HWND> = WINDOWS.with(|w| {
             let mut wins = w.borrow_mut();
             for (i, ((bright, dim), s)) in prepared.into_iter().zip(&screens).enumerate() {
                 let win = &mut wins[i];
                 win.bright = Some(bright);
                 win.dim = Some(dim);
-                win.drag = None;
                 win.sel = None;
                 win.label = None;
                 win.hint = None;
                 win.screen = Some(s.clone());
             }
-            if let (Some(p), Some(win)) = (hint, wins.get_mut(opts.focus.min(screens.len() - 1))) {
-                let s = win.screen.as_ref().map(|s| (s.width as i32, s.monitor.scale)).unwrap_or((0, 1.0));
-                let (pw, ph) = (p.dib.w, p.dib.h);
-                let at = Rect::new((s.0 - pw) / 2, super::super::geom::scaled(28.0, s.1), pw, ph);
-                win.hint = Some((at, p, 255));
-            }
             wins.iter().take(screens.len()).map(|w| w.hwnd).collect()
         });
-        SESSION.with(|s| *s.borrow_mut() = Some(Session { opts, done: Some(done), started: t0 }));
+        let mut select = Select::new(screens.iter().map(place_of).collect(), opts.windows.clone(), focus);
+        if opts.interactive && !opts.hidden {
+            if let Some(at) = cursor() {
+                select.place_pointer(at);
+            }
+        }
+        let interactive = opts.interactive;
+        let hidden = opts.hidden;
+        SESSION.with(|s| *s.borrow_mut() = Some(Session { opts, done: Some(done), started: t0, select }));
         OPEN.store(true, Ordering::SeqCst);
+        show_hint(focus, HINT);
+        let opts = Options { focus, interactive, hidden, windows: Vec::new() };
         // Placed, styled and painted while cloaked.
         for (hwnd, s) in hwnds.iter().zip(&screens) {
             let m = &s.monitor;
@@ -588,9 +906,6 @@ mod win {
                     }
                 }
             }
-            // The hint fades after a moment.
-            let target = hwnds[opts.focus.min(hwnds.len() - 1)];
-            unsafe { SetTimer(Some(target), HINT_TIMER, HINT_MS, None) };
         }
         // A snip nobody finishes doesn't stay up (nor keep Esc for itself).
         if let Some(first) = hwnds.first() {
@@ -612,7 +927,6 @@ mod win {
                 win.scratch = None;
                 win.label = None;
                 win.hint = None;
-                win.drag = None;
                 win.sel = None;
                 win.screen = None;
             }
@@ -721,7 +1035,7 @@ mod win {
     fn dirty(win: &Win) -> Rect {
         let scale = win.screen.as_ref().map(|s| s.monitor.scale).unwrap_or(1.0);
         let mut r = win.sel.map(|s| s.inflate(edge_px(scale) + 1)).unwrap_or_default();
-        if let Some((l, _)) = &win.label {
+        if let Some((l, _, _)) = &win.label {
             r = r.union(l);
         }
         r
@@ -783,7 +1097,7 @@ mod win {
                         let f = BLENDFUNCTION { BlendOp: AC_SRC_OVER as u8, BlendFlags: 0, SourceConstantAlpha: alpha, AlphaFormat: AC_SRC_ALPHA as u8 };
                         let _ = AlphaBlend(dst.dc, part.x - r.x, part.y - r.y, part.w, part.h, src.dc, part.x - at.x, part.y - at.y, part.w, part.h, f);
                     };
-                    if let Some((at, p)) = &win.label {
+                    if let Some((at, _, p)) = &win.label {
                         blend(scratch, at, &p.dib, 255);
                     }
                     if let Some((at, p, alpha)) = &win.hint {
@@ -823,26 +1137,58 @@ mod win {
         SESSION.with(|s| s.borrow().as_ref().is_some_and(|s| s.opts.interactive && !s.opts.hidden))
     }
 
-    /// The box moved: its new place, its label, what to repaint.
-    fn drag_to(hwnd: HWND, now: (i32, i32)) {
-        let dirty_rects = WINDOWS.with(|w| {
+    /// The selection changed: every screen's part of the lit box, the
+    /// label on the screen holding most of it, what to repaint.
+    fn redraw_all() {
+        let Some((target, ctrl, shift)) = SESSION.with(|s| s.borrow().as_ref().map(|s| (s.select.target(), s.select.ctrl, s.select.shift)))
+        else {
+            return;
+        };
+        let rect = target.map(|(r, _)| r);
+        let places: Vec<Rect> = WINDOWS.with(|w| w.borrow().iter().map(|x| x.screen.as_ref().map(place_of).unwrap_or_default()).collect());
+        let label_on = rect.and_then(|r| super::super::geom::main_monitor(&r, &places));
+        let text = rect.map(|r| label_text(&r, ctrl, shift));
+        let dirty_rects: Vec<(HWND, Rect, Rect)> = WINDOWS.with(|w| {
             let mut wins = w.borrow_mut();
-            let win = wins.iter_mut().find(|x| x.hwnd == hwnd)?;
-            let start = win.drag?;
-            let (sw, sh, scale) = win.screen.as_ref().map(|s| (s.width as i32, s.height as i32, s.monitor.scale))?;
-            let before = dirty(win);
-            let sel = super::super::geom::drag_box(start, now, sw, sh);
-            if Some(sel) == win.sel {
-                return None;
+            let mut out = Vec::new();
+            for (i, win) in wins.iter_mut().enumerate() {
+                let Some((place, scale)) = win.screen.as_ref().map(|s| (place_of(s), s.monitor.scale)) else { continue };
+                let local = rect.map(|r| Rect::new(r.x - place.x, r.y - place.y, r.w, r.h));
+                let wants_label = label_on == Some(i);
+                let same_label = match (&win.label, &text) {
+                    (Some((_, t, _)), Some(want)) => wants_label && t == want,
+                    (None, _) => !wants_label,
+                    _ => false,
+                };
+                if win.sel == local && same_label {
+                    continue;
+                }
+                let before = dirty(win);
+                win.sel = local;
+                if !same_label {
+                    win.label = None;
+                }
+                if let (true, Some(sel), Some(t)) = (wants_label, local, &text) {
+                    let keep = win.label.as_ref().is_some_and(|(_, lt, _)| lt == t);
+                    let made = if keep { win.label.take().map(|(_, lt, p)| (lt, p)) } else { pill(t, scale, 12.5).map(|p| (t.clone(), p)) };
+                    win.label = made.map(|(lt, p)| {
+                        // Where it goes: by the box's part on this screen.
+                        let part = sel.intersect(&Rect::new(0, 0, place.w, place.h));
+                        let at = super::super::geom::label_at(
+                            &part,
+                            (p.dib.w, p.dib.h),
+                            super::super::geom::scaled(8.0, scale),
+                            place.w,
+                            place.h,
+                        );
+                        (at, lt, p)
+                    });
+                }
+                out.push((win.hwnd, before, dirty(win)));
             }
-            win.sel = Some(sel);
-            win.label = (sel.w > 0 && sel.h > 0)
-                .then(|| pill(&size_text(&sel), scale, 12.5))
-                .flatten()
-                .map(|p| (super::super::geom::label_at(&sel, (p.dib.w, p.dib.h), super::super::geom::scaled(8.0, scale), sw, sh), p));
-            Some((before, dirty(win)))
+            out
         });
-        if let Some((before, after)) = dirty_rects {
+        for (hwnd, before, after) in dirty_rects {
             invalidate(hwnd, &before);
             invalidate(hwnd, &after);
         }
@@ -863,57 +1209,90 @@ mod win {
         }
     }
 
-    fn on_button_down(hwnd: HWND, at: (i32, i32)) {
-        // Every other monitor's hint and box go: one box at a time.
-        let others: Vec<HWND> = WINDOWS.with(|w| w.borrow().iter().filter(|x| x.hwnd != hwnd && x.screen.is_some()).map(|x| x.hwnd).collect());
-        for other in others {
-            hide_hint(other);
+    fn hide_every_hint() {
+        let all: Vec<HWND> = WINDOWS.with(|w| w.borrow().iter().filter(|x| x.screen.is_some()).map(|x| x.hwnd).collect());
+        for h in all {
+            hide_hint(h);
         }
-        hide_hint(hwnd);
-        WINDOWS.with(|w| {
-            if let Some(win) = w.borrow_mut().iter_mut().find(|x| x.hwnd == hwnd) {
-                win.drag = Some(at);
-            }
-        });
-        if interactive_session() {
-            unsafe { SetCapture(hwnd) };
-        }
-        drag_to(hwnd, at);
     }
 
-    fn on_button_up(hwnd: HWND, at: (i32, i32)) {
-        drag_to(hwnd, at);
-        let done = WINDOWS.with(|w| {
-            let mut wins = w.borrow_mut();
-            let i = wins.iter().position(|x| x.hwnd == hwnd)?;
-            let win = &mut wins[i];
-            win.drag.take()?;
-            let sel = win.sel?;
-            if super::super::geom::big_enough(&sel) {
-                Some((i, sel))
-            } else {
-                // A click or a twitch: nothing; the box goes.
-                None
-            }
-        });
-        unsafe {
-            let _ = ReleaseCapture();
-        }
-        match done {
-            Some((screen, rect)) => finish(Outcome::Snipped { screen, rect }),
-            None => {
-                let gone = WINDOWS.with(|w| {
-                    let mut wins = w.borrow_mut();
-                    let win = wins.iter_mut().find(|x| x.hwnd == hwnd)?;
-                    let r = dirty(win);
-                    win.sel = None;
-                    win.label = None;
-                    Some(r)
+    /// A point in `hwnd`'s own pixels on the virtual desktop. (A drag past
+    /// the window comes to it, captured, in its own pixels: physical ones
+    /// for a per-monitor-DPI-aware process, so the sum is exact.)
+    fn global(hwnd: HWND, local: (i32, i32)) -> (i32, i32) {
+        let origin = WINDOWS.with(|w| w.borrow().iter().find(|x| x.hwnd == hwnd).and_then(|x| x.screen.as_ref().map(place_of)));
+        let o = origin.unwrap_or_default();
+        (o.x + local.0, o.y + local.1)
+    }
+
+    /// Ctrl and Shift as a mouse message says them (`MK_CONTROL`, `MK_SHIFT`).
+    fn mouse_mods(wp: WPARAM) -> (bool, bool) {
+        (wp.0 & 0x0008 != 0, wp.0 & 0x0004 != 0)
+    }
+
+    /// Whether a key is held now (a real snip; a test's posted keys say it
+    /// themselves).
+    fn held(vk: u16) -> bool {
+        interactive_session() && unsafe { GetKeyState(vk as i32) } < 0
+    }
+
+    /// Feed the selection, then act on what it says.
+    fn step(change: impl FnOnce(&mut Select) -> Step) {
+        let step = SESSION.with(|s| s.borrow_mut().as_mut().map(|s| change(&mut s.select)));
+        match step {
+            None | Some(Step::Nothing) => {}
+            Some(Step::Redraw) => redraw_all(),
+            Some(Step::Mode) => {
+                redraw_all();
+                let hint = SESSION.with(|s| {
+                    s.borrow().as_ref().map(|s| {
+                        let at = s.select.pointer();
+                        let screen = super::super::geom::monitor_at(&s.select.places, at.0, at.1).unwrap_or(0);
+                        (screen, hint_text(s.select.picking_windows()))
+                    })
                 });
-                if let Some(r) = gone {
-                    invalidate(hwnd, &r);
+                if let Some((screen, text)) = hint {
+                    show_hint(screen, text);
                 }
+                set_cursor();
             }
+            Some(Step::Done(outcome)) => {
+                unsafe {
+                    let _ = ReleaseCapture();
+                }
+                finish(outcome);
+            }
+        }
+    }
+
+    /// The cross for a box, the arrow while picking windows.
+    fn set_cursor() {
+        if !interactive_session() {
+            return;
+        }
+        let picking = SESSION.with(|s| s.borrow().as_ref().is_some_and(|s| s.select.picking_windows()));
+        if let Ok(c) = unsafe { LoadCursorW(None, if picking { IDC_ARROW } else { IDC_CROSS }) } {
+            unsafe {
+                windows::Win32::UI::WindowsAndMessaging::SetCursor(Some(c));
+            }
+        }
+    }
+
+    fn on_key(vk: u16, down: bool) {
+        let ctrl_held = SESSION.with(|s| s.borrow().as_ref().is_some_and(|s| s.select.ctrl)) || held(VK_CONTROL.0);
+        let key = match (vk, down) {
+            (v, true) if v == VK_ESCAPE.0 => Some(Key::Escape),
+            (v, true) if v == VK_RETURN.0 => Some(Key::Enter),
+            (v, true) if v == VK_SPACE.0 => Some(Key::Space),
+            (v, d) if v == VK_CONTROL.0 || v == VK_LCONTROL.0 || v == VK_RCONTROL.0 => Some(Key::Ctrl(d)),
+            (v, d) if v == VK_SHIFT.0 || v == VK_LSHIFT.0 || v == VK_RSHIFT.0 => Some(Key::Shift(d)),
+            (v, d) if v == VK_MENU.0 || v == VK_LMENU.0 || v == VK_RMENU.0 => Some(Key::Alt(d)),
+            (0x43, true) if ctrl_held => Some(Key::Copy),
+            (0x53, true) if ctrl_held => Some(Key::Save),
+            _ => None,
+        };
+        if let Some(key) = key {
+            step(|s| s.key(key));
         }
     }
 
@@ -928,15 +1307,27 @@ mod win {
             WM_DPICHANGED => LRESULT(0),
             WM_MOUSEACTIVATE => LRESULT(MA_ACTIVATE as isize),
             WM_LBUTTONDOWN => {
-                on_button_down(hwnd, point(lp));
+                hide_every_hint();
+                if interactive_session() {
+                    unsafe { SetCapture(hwnd) };
+                }
+                let at = global(hwnd, point(lp));
+                step(|s| s.pressed(at));
                 LRESULT(0)
             }
             WM_MOUSEMOVE => {
-                drag_to(hwnd, point(lp));
+                let at = global(hwnd, point(lp));
+                let (ctrl, shift) = mouse_mods(wp);
+                step(|s| s.moved(at, ctrl, shift));
                 LRESULT(0)
             }
             WM_LBUTTONUP => {
-                on_button_up(hwnd, point(lp));
+                let at = global(hwnd, point(lp));
+                let (ctrl, shift) = mouse_mods(wp);
+                unsafe {
+                    let _ = ReleaseCapture();
+                }
+                step(|s| s.released(at, ctrl, shift));
                 LRESULT(0)
             }
             WM_RBUTTONDOWN => LRESULT(0),
@@ -944,10 +1335,21 @@ mod win {
                 finish(Outcome::Cancelled("right-click"));
                 LRESULT(0)
             }
-            WM_KEYDOWN if wp.0 as u16 == VK_ESCAPE.0 => {
+            WM_KEYDOWN | WM_KEYUP => {
+                on_key(wp.0 as u16, msg == WM_KEYDOWN);
+                LRESULT(0)
+            }
+            // Alt (and keys pressed with it) come as system keys: handled
+            // here, so Alt never opens a window menu. Alt+F4 cancels.
+            WM_SYSKEYDOWN if wp.0 as u16 == VK_F4.0 => {
                 finish(Outcome::Cancelled("escape"));
                 LRESULT(0)
             }
+            WM_SYSKEYDOWN | WM_SYSKEYUP => {
+                on_key(wp.0 as u16, msg == WM_SYSKEYDOWN);
+                LRESULT(0)
+            }
+            WM_SYSCHAR | WM_CHAR => LRESULT(0),
             // Another app took the focus (Alt+Tab, a notification clicked).
             WM_ACTIVATEAPP if wp.0 == 0 => {
                 if !hidden_session() && index_of(hwnd).is_some() && is_open() {
@@ -991,7 +1393,11 @@ mod win {
                 }
                 LRESULT(0)
             }
-            WM_SETCURSOR => unsafe { DefWindowProcW(hwnd, msg, wp, lp) },
+            // Over the client area: the cross (a box) or the arrow (windows).
+            WM_SETCURSOR if (lp.0 & 0xffff) as u32 == HTCLIENT && is_open() => {
+                set_cursor();
+                LRESULT(1)
+            }
             _ => unsafe { DefWindowProcW(hwnd, msg, wp, lp) },
         }
     }
@@ -1028,6 +1434,127 @@ mod tests {
     #[test]
     fn the_size_label_says_physical_pixels() {
         assert_eq!(size_text(&Rect::new(4, 5, 812, 430)), "812 × 430");
+        // …and what Ctrl or Shift does as you let go, or what it will do.
+        let r = Rect::new(0, 0, 812, 430);
+        assert_eq!(label_text(&r, false, false), "812 × 430  ·  Ctrl copy  ·  Shift save");
+        assert_eq!(label_text(&r, true, false), "812 × 430  ·  Copy");
+        assert_eq!(label_text(&r, false, true), "812 × 430  ·  Save");
+        assert_eq!(label_text(&r, true, true), "812 × 430  ·  Copy", "Ctrl wins");
+        assert_eq!(hint_text(false), HINT);
+        assert_eq!(hint_text(true), WINDOW_HINT);
+    }
+
+    /// The e2e suite's two fake monitors, and two windows on the first: a
+    /// dialog over a big window.
+    fn select() -> Select {
+        Select::new(
+            vec![Rect::new(0, 0, 1280, 720), Rect::new(1280, 0, 960, 540)],
+            vec![Rect::new(300, 200, 400, 300), Rect::new(100, 100, 1000, 560)],
+            0,
+        )
+    }
+
+    fn snipped(step: Step) -> (Rect, Kind, Action) {
+        match step {
+            Step::Done(Outcome::Snipped { rect, kind, action }) => (rect, kind, action),
+            other => panic!("not a snip: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_drag_is_a_box_even_across_monitors() {
+        let mut s = select();
+        assert_eq!(s.pressed((1100, 150)), Step::Redraw);
+        assert_eq!(s.target(), None, "nothing lit until it's a drag");
+        assert_eq!(s.moved((1300, 200), false, false), Step::Redraw);
+        assert_eq!(s.target(), Some((Rect::new(1100, 150, 200, 50), Kind::Box)));
+        // Ctrl as it moves: only the label changes.
+        assert_eq!(s.moved((1300, 200), true, false), Step::Redraw);
+        assert_eq!(s.moved((1300, 200), true, false), Step::Nothing);
+        let (rect, kind, action) = snipped(s.released((1580, 280), false, false));
+        assert_eq!((rect, kind, action), (Rect::new(1100, 150, 480, 130), Kind::Box, Action::Chat));
+        // A thin drag: nothing, the box goes, the snip goes on.
+        let mut s = select();
+        s.pressed((300, 300));
+        assert_eq!(s.released((303, 340), false, false), Step::Redraw);
+        assert_eq!(s.target(), None);
+        assert!(!s.dragging());
+    }
+
+    #[test]
+    fn a_click_or_enter_takes_the_whole_monitor() {
+        let mut s = select();
+        s.pressed((1500, 100));
+        let (rect, kind, _) = snipped(s.released((1502, 101), false, false));
+        assert_eq!((rect, kind), (Rect::new(1280, 0, 960, 540), Kind::Monitor));
+        // Enter: the monitor under the pointer (the focus screen's until it moves).
+        let mut s = select();
+        assert_eq!(snipped(s.key(Key::Enter)).0, Rect::new(0, 0, 1280, 720));
+        s.moved((2000, 500), false, false);
+        assert_eq!(snipped(s.key(Key::Enter)), (Rect::new(1280, 0, 960, 540), Kind::Monitor, Action::Chat));
+    }
+
+    #[test]
+    fn space_or_alt_picks_the_window_under_the_pointer() {
+        let mut s = select();
+        s.moved((350, 250), false, false);
+        assert_eq!(s.target(), None, "no window lit before Space");
+        assert_eq!(s.key(Key::Space), Step::Mode);
+        assert!(s.picking_windows());
+        assert_eq!(s.target(), Some((Rect::new(300, 200, 400, 300), Kind::Window)), "the dialog, on top");
+        s.moved((150, 150), false, false);
+        assert_eq!(s.target(), Some((Rect::new(100, 100, 1000, 560), Kind::Window)));
+        s.pressed((150, 150));
+        assert_eq!(snipped(s.released((151, 150), false, false)), (Rect::new(100, 100, 1000, 560), Kind::Window, Action::Chat));
+        // Over no window: the monitor.
+        let mut s = select();
+        s.key(Key::Space);
+        s.pressed((1200, 700));
+        assert_eq!(snipped(s.released((1200, 700), false, false)).1, Kind::Monitor);
+        // A drag while picking windows is still a box.
+        let mut s = select();
+        s.key(Key::Space);
+        s.pressed((150, 150));
+        assert_eq!(snipped(s.released((250, 260), false, false)).1, Kind::Box);
+        // Alt held: windows while it's held; Space again: boxes.
+        let mut s = select();
+        s.moved((350, 250), false, false);
+        assert_eq!(s.key(Key::Alt(true)), Step::Mode);
+        assert_eq!(s.target().map(|t| t.1), Some(Kind::Window));
+        assert_eq!(s.key(Key::Alt(true)), Step::Nothing, "a key's repeat");
+        assert_eq!(s.key(Key::Alt(false)), Step::Mode);
+        assert_eq!(s.target(), None);
+        // Enter takes what's lit.
+        s.key(Key::Space);
+        assert_eq!(snipped(s.key(Key::Enter)).1, Kind::Window);
+        // Space mid-drag does nothing.
+        let mut s = select();
+        s.pressed((10, 10));
+        assert_eq!(s.key(Key::Space), Step::Nothing);
+    }
+
+    #[test]
+    fn ctrl_copies_and_shift_saves() {
+        let mut s = select();
+        s.pressed((40, 40));
+        s.moved((240, 140), false, false);
+        assert_eq!(snipped(s.released((240, 140), true, false)).2, Action::Copy);
+        let mut s = select();
+        s.pressed((40, 40));
+        assert_eq!(snipped(s.released((240, 140), false, true)).2, Action::Save);
+        // Ctrl+C / Ctrl+S while the box is up: that box.
+        let mut s = select();
+        s.pressed((40, 40));
+        s.moved((240, 140), false, false);
+        assert_eq!(snipped(s.key(Key::Copy)), (Rect::new(40, 40, 200, 100), Kind::Box, Action::Copy));
+        let mut s = select();
+        assert_eq!(snipped(s.key(Key::Save)), (Rect::new(0, 0, 1280, 720), Kind::Monitor, Action::Save));
+        // Ctrl held with Enter: copy the monitor.
+        let mut s = select();
+        assert_eq!(s.key(Key::Ctrl(true)), Step::Redraw);
+        assert_eq!(snipped(s.key(Key::Enter)).2, Action::Copy);
+        assert_eq!(s.key(Key::Escape), Step::Done(Outcome::Cancelled("escape")));
+        assert_eq!(action_for(false, false), Action::Chat);
     }
 
     #[test]

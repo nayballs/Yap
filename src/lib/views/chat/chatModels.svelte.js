@@ -20,6 +20,7 @@ import { catalog, modelsFor } from '../../stores/modelCatalog.svelte.js';
 import { ago } from '../../core/modelCatalog.js';
 import { familyIcon, providerIcon, modelName } from '../../core/aiModel.js';
 import { contextInfo, fmtTokens } from '../../core/localContext.js';
+import { readsImages } from '../../stores/visionTags.svelte.js';
 
 /** The rail's cloud providers, in its order. `short` names the rail entry. */
 export const CLOUD_PROVIDERS = [
@@ -49,6 +50,8 @@ export function sameUrl(a, b) {
 const tag = (t, text) => ({ t, text });
 /** At most two tags a row. */
 const cap = (tags) => tags.filter(Boolean).slice(0, 2);
+/** "Reads images" (Snip to Chat): the model takes a screenshot (stores/visionTags.svelte.js). */
+const imagesTag = (images) => images === true && tag('img', 'Reads images');
 
 // ------------------------------------------------------------ on this PC
 
@@ -265,23 +268,27 @@ export function serverRows(s, status) {
     }
   }
   const ctxLine = (id) => serverContextLine((l?.contexts || []).find((c) => c.id === id));
-  return models.map((m) => ({
-    key: `${s.provider}:${s.baseUrl}:${m.id}`,
-    kind: 'server',
-    provider: s.provider,
-    model: m.id,
-    baseUrl: s.baseUrl,
-    name: m.name,
-    // The context first: a one-line row cuts its end off.
-    desc: [ctxLine(m.id), m.id === s.model ? `Set up in Settings · ${s.host}` : s.host].filter(Boolean).join(' · '),
-    where: s.onThisPc ? 'On this PC' : s.host,
-    icon: familyIcon(m.name, m.id),
-    glyph: 'server',
-    current: !!cur && m.id === cur,
-    action: 'pick',
-    tools: m.tools !== false,
-    tags: cap([m.tools === false && tag('warn', 'no note tools')]),
-  }));
+  return models.map((m) => {
+    const images = readsImages(s.provider, m.id);
+    return {
+      key: `${s.provider}:${s.baseUrl}:${m.id}`,
+      kind: 'server',
+      provider: s.provider,
+      model: m.id,
+      baseUrl: s.baseUrl,
+      name: m.name,
+      // The context first: a one-line row cuts its end off.
+      desc: [ctxLine(m.id), m.id === s.model ? `Set up in Settings · ${s.host}` : s.host].filter(Boolean).join(' · '),
+      where: s.onThisPc ? 'On this PC' : s.host,
+      icon: familyIcon(m.name, m.id),
+      glyph: 'server',
+      current: !!cur && m.id === cur,
+      action: 'pick',
+      tools: m.tools !== false,
+      images,
+      tags: cap([imagesTag(images), m.tools === false && tag('warn', 'no note tools')]),
+    };
+  });
 }
 
 // ------------------------------------------------------------ the cloud
@@ -300,26 +307,31 @@ export function cloudRows(p, status) {
     const info = contextInfo(ctxOf(i.value));
     return !info || /context/i.test(i.desc || '') ? i.desc : [i.desc, info].filter(Boolean).join(' · ');
   };
-  const row = (i) => ({
-    key: `${p}:${i.value}`,
-    kind: 'cloud',
-    provider: p,
-    model: i.value,
-    name: i.label,
-    desc: descOf(i),
-    where: short,
-    icon: familyIcon(i.label, i.value) ?? providerIcon(p),
-    current: !!cur && i.value === cur,
-    action: connected ? 'pick' : 'key',
-    tools: i.tools !== false,
-    tags: connected
-      ? cap([
-          i.missing && tag('gone', 'No longer offered'),
-          i.tag === 'new' && tag('new', 'New'),
-          i.tools === false && tag('warn', 'no note tools'),
-        ])
-      : [tag('key', 'Add key')],
-  });
+  const row = (i) => {
+    const images = readsImages(p, i.value);
+    return {
+      key: `${p}:${i.value}`,
+      kind: 'cloud',
+      provider: p,
+      model: i.value,
+      name: i.label,
+      desc: descOf(i),
+      where: short,
+      icon: familyIcon(i.label, i.value) ?? providerIcon(p),
+      current: !!cur && i.value === cur,
+      action: connected ? 'pick' : 'key',
+      tools: i.tools !== false,
+      images,
+      tags: connected
+        ? cap([
+            i.missing && tag('gone', 'No longer offered'),
+            i.tag === 'new' && tag('new', 'New'),
+            imagesTag(images),
+            i.tools === false && tag('warn', 'no note tools'),
+          ])
+        : [tag('key', 'Add key'), imagesTag(images)].filter(Boolean),
+    };
+  };
   const rows = merged.items.map(row);
   const more = merged.more.map(row);
   // The Chat model when no list has it (an id typed in Settings).
@@ -397,7 +409,8 @@ export function searchGroups(q, status) {
   const terms = q.toLowerCase().split(/\s+/).filter(Boolean);
   if (terms.length === 0) return [];
   const match = (r, extra) => {
-    const hay = `${r.name} ${r.model} ${r.file || ''} ${extra}`.toLowerCase();
+    // "images" (or "vision") finds the models that read them.
+    const hay = `${r.name} ${r.model} ${r.file || ''} ${extra} ${r.images ? 'reads images vision screenshots' : ''}`.toLowerCase();
     return terms.every((t) => hay.includes(t));
   };
   const groups = [];

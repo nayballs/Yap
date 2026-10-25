@@ -25,7 +25,9 @@
 //!   (a two-hour meeting in seconds). [`e2e_meeting_dictation`] and
 //!   [`e2e_meeting_output_change`] stage a hotkey dictation and a switch of
 //!   Windows' default output at a point of that audio, and
-//!   [`e2e_meeting_quiet`] shortens the quiet-side warning's timings;
+//!   [`e2e_meeting_quiet`] shortens the quiet-side warning's timings; the
+//!   player follows made-up microphones (`mics::e2e_mics`,
+//!   `mics::e2e_mic_unplug`) as the real capture follows Windows' list;
 //!   [`e2e_meeting_fail`] makes the live recorder's chunks over a stretch
 //!   fail, and `YAP_E2E_REFINE_CHUNK_MS` slows the refine's chunks
 //!   (`meeting_refine::e2e_slow_chunk`);
@@ -157,18 +159,15 @@ pub fn spawn_meeting_audio(
     stop: std::sync::Arc<std::sync::atomic::AtomicBool>,
     overflow: std::sync::Arc<std::sync::atomic::AtomicBool>,
 ) -> Result<(), String> {
+    use crate::dictation::mics;
     use crate::meetings::meeting::{Follow, OutputFollower};
-    use cpal::traits::{DeviceTrait, HostTrait};
     use std::sync::atomic::Ordering;
-    // Like the real capture, a configured microphone that isn't plugged in
-    // fails (found by listing the devices; none is opened).
-    if let Some(name) = crate::config::load().input_device {
-        let present = cpal::default_host()
-            .input_devices()
-            .map(|mut devices| devices.any(|d| d.name().is_ok_and(|n| n == name)))
-            .unwrap_or(false);
-        if !present {
-            return Err(format!("Input device not found: {name}"));
+    // Like the real capture, with made-up microphones (`mics::e2e_mics`)
+    // and none of them to open, it fails (none is opened either way).
+    let order = crate::config::load().mic_order;
+    if let Some(fake) = mics::fake::list() {
+        if mics::candidates(&order, Some(&fake), &[]).is_empty() {
+            return Err(crate::meetings::meeting::no_mic_error(&order));
         }
     }
     let dir = std::env::var("YAP_E2E_MEETING_AUDIO")
@@ -200,6 +199,13 @@ pub fn spawn_meeting_audio(
             let mut output = OutputFollower::listening_to(Some("e2e-speakers".to_string()));
             // "Them" hears nothing until here (a device switch under way).
             let mut switching: Option<usize> = None;
+            // The microphone "You" is on (the order and Windows' list, as
+            // the real capture picks it), and — its device unplugged
+            // (`e2e_mic_unplug`) — nothing until here, then the next one.
+            let mic_of = || mics::present().and_then(|l| mics::in_use(&order, &l, &[]));
+            let mut mic_at = mic_of();
+            let mut mics_seen = mics::generation();
+            let mut mic_gap: Option<usize> = None;
             let length = you.len().max(them.len());
             let mut played = false;
             while !stop.load(Ordering::SeqCst) {
@@ -226,6 +232,27 @@ pub fn spawn_meeting_audio(
                         switching = Some(pos + SWITCH_GAP_SAMPLES);
                     }
                 }
+                if mics::generation() != mics_seen {
+                    mics_seen = mics::generation();
+                    let gone = mic_at.as_ref().is_some_and(|at| !mics::present().is_some_and(|l| l.iter().any(|e| e.id == at.id)));
+                    if gone && mic_gap.is_none() {
+                        tracing::info!(secs, "e2e: the meeting's microphone is unplugged");
+                        mic_gap = Some(pos + SWITCH_GAP_SAMPLES);
+                    }
+                }
+                if mic_gap.is_some_and(|until| pos >= until) {
+                    mic_gap = None;
+                    mic_at = mic_of();
+                    let next = mic_at.as_ref().map(|e| e.name.clone()).unwrap_or_default();
+                    crate::meetings::meeting::keep_in_step(&mic, &sys);
+                    if let Ok(mut b) = mic.lock() {
+                        b.mic_changed(&next);
+                    }
+                    tracing::info!(secs, "e2e: \"You\" goes on with the next microphone");
+                    if let Some(app) = mics::app() {
+                        crate::meetings::meeting::tell_mic_changed(app, &next);
+                    }
+                }
                 if switching.is_some_and(|until| pos >= until) {
                     switching = None;
                     if let Follow::Switch(id) = output.poll(Some("e2e-headset".to_string())) {
@@ -234,7 +261,7 @@ pub fn spawn_meeting_audio(
                     }
                 }
                 for (src, buf, side) in [(&you, &mic, "you"), (&them, &sys, "them")] {
-                    if side == "them" && switching.is_some() {
+                    if (side == "them" && switching.is_some()) || (side == "you" && mic_gap.is_some()) {
                         continue;
                     }
                     if pos < src.len() {
@@ -420,12 +447,16 @@ pub fn e2e_mic_status(state: tauri::State<'_, crate::AppState>) -> Result<crate:
 /// microphone's place (the robot's `dictate_audio`: a real start and stop,
 /// the mic held and opened as for any dictation, the STT, the dictation's
 /// steps; nothing pasted in a test run) — a dictation without a microphone.
-/// `None`: nothing was transcribed.
+/// `amplitude`: the tone's peak (0.1 unless given; 0.005 is a whisper's,
+/// -46 dBFS — the bar's level meter, `meter.rs`), and then it comes in
+/// syllables as speech does: 240 ms of it, 160 ms at a tenth (a steady
+/// tone is the mic's noise to the meter). `None`: nothing was transcribed.
 #[cfg(debug_assertions)]
 #[tauri::command]
 pub async fn e2e_dictate_audio(
     state: tauri::State<'_, crate::AppState>,
     seconds: f32,
+    amplitude: Option<f32>,
 ) -> Result<Option<crate::dictation::pipeline::Delivered>, String> {
     if !active() {
         return Err("Only in e2e test mode".to_string());
@@ -435,8 +466,64 @@ pub async fn e2e_dictate_audio(
         guard.as_ref().ok_or("pipeline not started")?.robot()
     };
     let n = (seconds.clamp(0.2, 60.0) * 16_000.0) as usize;
-    let samples: Vec<f32> = (0..n).map(|i| 0.1 * (i as f32 * 2.0 * std::f32::consts::PI * 440.0 / 16_000.0).sin()).collect();
+    let peak = amplitude.unwrap_or(0.1).clamp(0.0, 1.0);
+    let syllables = amplitude.is_some();
+    let samples: Vec<f32> = (0..n)
+        .map(|i| {
+            let level = if syllables && i % 6_400 >= 3_840 { peak / 10.0 } else { peak };
+            level * (i as f32 * 2.0 * std::f32::consts::PI * 440.0 / 16_000.0).sin()
+        })
+        .collect();
     robot.dictate_audio(samples, false).await
+}
+
+/// Test mode only: a press-only shortcut as the input hook sends it (a
+/// test run has no hook: it must never see the developer's keys) —
+/// `name` "paste-last" or "copy-last" (`pasting/last.rs`).
+#[cfg(debug_assertions)]
+#[tauri::command]
+pub fn e2e_shortcut(app: AppHandle, name: String) -> Result<(), String> {
+    use tauri::Emitter;
+    if !active() {
+        return Err("Only in e2e test mode".to_string());
+    }
+    let event = match name.as_str() {
+        "paste-last" => "paste-last-key-pressed",
+        "copy-last" => "copy-last-key-pressed",
+        other => return Err(format!("No such shortcut: {other}")),
+    };
+    tracing::info!(event, "e2e: a shortcut pressed");
+    app.emit(event, crate::dictation::gesture::now_ms()).map_err(|e| e.to_string())
+}
+
+/// Test mode only: "Taking longer than usual…" sooner and on cue
+/// (`slow.rs`) — never before `floorMs` instead of 4 s (0: the real
+/// floor), the stub's transcription taking `sttMs` (0: at once), and this
+/// session's timings forgotten when `forget`.
+#[cfg(debug_assertions)]
+#[tauri::command]
+pub fn e2e_dictation_timing(floor_ms: Option<u64>, stt_ms: Option<u64>, forget: Option<bool>) -> Result<(), String> {
+    if !active() {
+        return Err("Only in e2e test mode".to_string());
+    }
+    let (floor, stt) = (floor_ms.unwrap_or(0).min(60_000), stt_ms.unwrap_or(0).min(60_000));
+    tracing::info!(floor, stt, "e2e: dictation timing");
+    crate::dictation::slow::set_test(floor, stt, forget.unwrap_or(false));
+    Ok(())
+}
+
+/// Test mode only: a dictation's length limit shortened to `limitMs`, the
+/// bar's warning at `warnMs` (`cap.rs`); none given, the real 15 minutes.
+#[cfg(debug_assertions)]
+#[tauri::command]
+pub fn e2e_dictation_cap(limit_ms: Option<u64>, warn_ms: Option<u64>) -> Result<(), String> {
+    if !active() {
+        return Err("Only in e2e test mode".to_string());
+    }
+    let cap = limit_ms.map(|limit_ms| crate::dictation::cap::Cap { limit_ms, warn_ms: warn_ms.unwrap_or(limit_ms) });
+    tracing::info!(?cap, "e2e: dictation length limit");
+    crate::dictation::cap::set_test(cap);
+    Ok(())
 }
 
 /// Test mode only: the next dictation panics in its paste step, as a bug
@@ -697,18 +784,36 @@ pub fn fake_frame(m: &FakeMonitor) -> crate::snip::capture::Frame {
     }
 }
 
+/// A fake window a test snip can pick (virtual-desktop pixels).
+#[cfg(debug_assertions)]
+#[derive(Debug, Clone, serde::Deserialize)]
+pub struct FakeWindow {
+    pub x: i32,
+    pub y: i32,
+    pub w: i32,
+    pub h: i32,
+}
+
 /// Test mode only: a snip over fake monitors (never the real screen; its
-/// overlay windows are made, painted and driven, but never shown). `origin`
-/// as the page would say it. Returns at once: poll `e2e_snip_last` for
-/// "selecting". `start: false`: the fake monitors only, for the next snip
-/// however it starts (a spoken "snip", the bar's ✂).
+/// overlay windows are made, painted and driven, but never shown), with
+/// `windows` to pick (topmost first). `origin` as the page would say it.
+/// Returns at once: poll `e2e_snip_last` for "selecting". `start: false`:
+/// the fake monitors only, for the next snip however it starts (a spoken
+/// "snip", the bar's ✂).
 #[cfg(debug_assertions)]
 #[tauri::command]
-pub fn e2e_snip(app: AppHandle, monitors: Vec<FakeMonitor>, origin: Option<String>, start: Option<bool>) -> Result<(), String> {
+pub fn e2e_snip(
+    app: AppHandle,
+    monitors: Vec<FakeMonitor>,
+    windows: Option<Vec<FakeWindow>>,
+    origin: Option<String>,
+    start: Option<bool>,
+) -> Result<(), String> {
     if !active() || crate::shell::realtest::on() {
         return Err("e2e_snip is for test runs (not robot mode)".into());
     }
-    crate::snip::set_fake_frames(monitors.iter().map(fake_frame).collect());
+    let windows = windows.unwrap_or_default().iter().map(|w| crate::snip::geom::Rect::new(w.x, w.y, w.w, w.h)).collect();
+    crate::snip::set_fake_frames(monitors.iter().map(fake_frame).collect(), windows);
     if start.unwrap_or(true) {
         crate::snip::start(&app, crate::snip::Origin::parse(origin.as_deref().or(Some("shortcut"))));
     }
@@ -720,16 +825,26 @@ pub fn e2e_snip(app: AppHandle, monitors: Vec<FakeMonitor>, origin: Option<Strin
 #[derive(Debug, Clone, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SnipEvent {
-    /// "down" | "move" | "up" | "right" | "esc"
+    /// "down" | "move" | "up" | "right" | "esc" | "key" | "keyup"
     pub kind: String,
     #[serde(default)]
     pub x: i32,
     #[serde(default)]
     pub y: i32,
+    /// A mouse event's Ctrl / Shift (`MK_CONTROL`, `MK_SHIFT`).
+    #[serde(default)]
+    pub ctrl: bool,
+    #[serde(default)]
+    pub shift: bool,
+    /// "key" / "keyup": "enter" | "space" | "ctrl" | "shift" | "alt" | "c" | "s".
+    #[serde(default)]
+    pub key: String,
 }
 
 /// Test mode (robot mode too): window messages to a snip overlay — the
-/// mouse and keys as Windows sends them, never the real ones.
+/// mouse and keys as Windows sends them, never the real ones. A point is
+/// in that screen's window's own pixels (past its edge: a drag the window
+/// has captured, into the next monitor).
 #[cfg(debug_assertions)]
 #[tauri::command]
 pub fn e2e_snip_input(screen: usize, events: Vec<SnipEvent>) -> Result<(), String> {
@@ -741,15 +856,41 @@ pub fn e2e_snip_input(screen: usize, events: Vec<SnipEvent>) -> Result<(), Strin
     const WM_LBUTTONUP: u32 = 0x0202;
     const WM_RBUTTONUP: u32 = 0x0205;
     const WM_KEYDOWN: u32 = 0x0100;
+    const WM_KEYUP: u32 = 0x0101;
+    const WM_SYSKEYDOWN: u32 = 0x0104;
+    const WM_SYSKEYUP: u32 = 0x0105;
     let lp = |x: i32, y: i32| ((y as u16 as isize) << 16) | (x as u16 as isize);
+    let mods = |e: &SnipEvent| (if e.ctrl { 0x0008 } else { 0 }) | (if e.shift { 0x0004 } else { 0 });
+    let key = |e: &SnipEvent, down: bool| -> Result<(u32, usize, isize), String> {
+        let vk = match e.key.as_str() {
+            "enter" => 0x0D,
+            "space" => 0x20,
+            "ctrl" => 0x11,
+            "shift" => 0x10,
+            "alt" => 0x12,
+            "c" => 0x43,
+            "s" => 0x53,
+            "esc" => 0x1B,
+            other => return Err(format!("unknown key {other}")),
+        };
+        Ok(match (vk == 0x12, down) {
+            (true, true) => (WM_SYSKEYDOWN, vk, 0),
+            (true, false) => (WM_SYSKEYUP, vk, 0),
+            (false, true) => (WM_KEYDOWN, vk, 0),
+            (false, false) => (WM_KEYUP, vk, 0),
+        })
+    };
     let msgs = events
         .iter()
         .map(|e| match e.kind.as_str() {
-            "down" => Ok((WM_LBUTTONDOWN, 1usize, lp(e.x, e.y))),
-            "move" => Ok((WM_MOUSEMOVE, 1, lp(e.x, e.y))),
-            "up" => Ok((WM_LBUTTONUP, 0, lp(e.x, e.y))),
+            "down" => Ok((WM_LBUTTONDOWN, 1usize | mods(e), lp(e.x, e.y))),
+            "move" => Ok((WM_MOUSEMOVE, 1 | mods(e), lp(e.x, e.y))),
+            "hover" => Ok((WM_MOUSEMOVE, mods(e), lp(e.x, e.y))),
+            "up" => Ok((WM_LBUTTONUP, mods(e), lp(e.x, e.y))),
             "right" => Ok((WM_RBUTTONUP, 0, lp(e.x, e.y))),
             "esc" => Ok((WM_KEYDOWN, 0x1B, 0)),
+            "key" => key(e, true),
+            "keyup" => key(e, false),
             other => Err(format!("unknown event {other}")),
         })
         .collect::<Result<Vec<_>, String>>()?;
@@ -773,6 +914,59 @@ pub fn e2e_snip_last() -> Result<Option<crate::snip::Last>, String> {
         return Err("Only in e2e test mode".into());
     }
     Ok(crate::snip::last())
+}
+
+/// Test mode only: where the next snip's or chat screenshot's Save goes
+/// (Windows' dialog never opens in a test run).
+#[cfg(debug_assertions)]
+#[tauri::command]
+pub fn e2e_snip_save_path(path: String) -> Result<(), String> {
+    if !active() || crate::shell::realtest::on() {
+        return Err("Only in e2e test mode".into());
+    }
+    crate::snip::copy_save::set_test_save_path(std::path::PathBuf::from(path));
+    Ok(())
+}
+
+/// Test mode only: the PNG a copy put on the pretend clipboard (the real
+/// one is never touched in a test run), as base64, or null.
+#[cfg(debug_assertions)]
+#[tauri::command]
+pub fn e2e_snip_clipboard() -> Result<Option<String>, String> {
+    if !active() {
+        return Err("Only in e2e test mode".into());
+    }
+    use base64::Engine;
+    Ok(crate::snip::copy_save::test_clipboard().map(|png| base64::engine::general_purpose::STANDARD.encode(png)))
+}
+
+/// Test mode only: the text "Send its text instead" reads from a
+/// screenshot (in place of Windows' OCR, whose languages differ per PC);
+/// null: Windows' own.
+#[cfg(debug_assertions)]
+#[tauri::command]
+pub fn e2e_snip_ocr(text: Option<String>) -> Result<(), String> {
+    if !active() {
+        return Err("Only in e2e test mode".into());
+    }
+    crate::snip::ocr::set_fake(text);
+    Ok(())
+}
+
+/// Test mode only: files dropped on the main window, as Windows' drag and
+/// drop reports them (Tauri's `tauri://drag-drop`, which Playwright can't
+/// make).
+#[cfg(debug_assertions)]
+#[tauri::command]
+pub fn e2e_drag_drop(app: AppHandle, paths: Vec<String>) -> Result<(), String> {
+    if !active() {
+        return Err("Only in e2e test mode".into());
+    }
+    use tauri::Emitter;
+    let target = tauri::EventTarget::AnyLabel { label: "settings".into() };
+    let at = serde_json::json!({ "x": 200, "y": 200 });
+    app.emit_to(target.clone(), "tauri://drag-enter", serde_json::json!({ "paths": paths, "position": at })).map_err(|e| e.to_string())?;
+    app.emit_to(target, "tauri://drag-drop", serde_json::json!({ "paths": paths, "position": at })).map_err(|e| e.to_string())
 }
 
 /// End of setup: say so in the log (the harness won't drive an instance that

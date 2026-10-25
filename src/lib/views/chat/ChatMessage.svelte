@@ -13,20 +13,46 @@
   import { modelLine, whereItRuns } from '../../core/aiModel.js';
   import { openExternalLink } from '../../core/externalLinks.js';
   import { closePartial, settle } from '../../core/streaming.js';
-  import { menuKey } from '../../ui/contextMenu.svelte.js';
-  import { chatImageUrl, removedLine, sizeLine } from './chatImages.js';
+  import { menuKey, openContextMenu } from '../../ui/contextMenu.svelte.js';
+  import { chatImageUrl, removedLine, sizeLine, imageItems, splitScreenText } from './chatImages.js';
 
   /**
    * `m`: the message; `last`: the thread's last; `sources`: what its
    * citations point at (chatState's `citedSources`); `reading`: being read
    * aloud; `keepDays`: how long screenshots are kept; `onview(id)` opens a
-   * screenshot large, `onmenu(e)` its right-click menu, `onread()` ▶.
+   * screenshot large, `onmenu(e)` its right-click menu, `onread()` ▶,
+   * `onsource(s)` opens a passage of the person's meetings at its line (an
+   * answer asked across meetings: search/ask.rs).
    */
-  let { m, last, sources, reading, keepDays, onview, onmenu, onread } = $props();
+  let { m, last, sources, reading, keepDays, onview, onmenu, onread, onsource = null } = $props();
 
   // A chip about the web (web.rs) or the safety rule (chat/tools.rs).
   const WEB_CHIP = /^(Searched the web|Couldn't search the web|Didn't search for|Read [^"]|Couldn't read [^"]|Didn't read |Answered from )/;
   const chipKind = (t) => (/: not after reading the web$/.test(t) ? 'guard' : WEB_CHIP.test(t) ? 'web' : 'tool');
+
+  // A question whose screenshot went as its text (snip/ocr.rs): its own
+  // words, and the text read from the picture, folded under them.
+  const said = $derived(m.role === 'user' ? splitScreenText(m.text) : { question: m.text, screenText: null });
+
+  /** A screenshot's right-click menu (its own: not the question's). */
+  function shotMenu(e, img) {
+    e.stopPropagation();
+    openContextMenu(e, imageItems(img, { onview }), { label: 'Screenshot' });
+  }
+
+  // A passage of the person's meetings and notes, not a web page.
+  const isPassage = (s) => s?.note != null && !s.url;
+  const fromMeetings = $derived((m.sources?.length ?? 0) > 0 && m.sources.every(isPassage));
+
+  // A passage pill in the answer ("[2]"): opened in Yap at its line.
+  function clickAnswer(e) {
+    const a = e.target instanceof Element ? e.target.closest('a.md-passage') : null;
+    if (!a) return;
+    e.preventDefault();
+    const n = Number(a.textContent);
+    const s = (sources || []).find((x) => x.n === n);
+    if (s) onsource?.(s);
+  }
 </script>
 
 {#if m.role === 'assistant' && (m.tools?.length || m.doing)}
@@ -76,8 +102,10 @@
   onkeydown={(e) => e.target === e.currentTarget && menuKey(e, onmenu)}
 >
   {#if m.role === 'assistant'}
+    <!-- (Its passage pills are links: Enter on one clicks it.) -->
     <!-- eslint-disable-next-line svelte/no-at-html-tags — renderMarkdown sanitises its output -->
-    <div class="cbody">{@html renderMarkdown(m.streaming ? closePartial(m.text) : m.text, { sources })}</div>
+    <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
+    <div class="cbody" onclick={clickAnswer}>{@html renderMarkdown(m.streaming ? closePartial(m.text) : m.text, { sources })}</div>
     {#if m.streaming && m.waiting}
       <p class="cwait" aria-live="polite">Waiting for your dictation to finish…</p>
     {/if}
@@ -93,11 +121,14 @@
             <button
               type="button"
               class="shot"
-              title="Open the screenshot"
-              aria-label={`Screenshot, ${sizeLine(img)}`}
+              class:astext={img.asText}
+              title={img.asText ? 'Sent as its text (read on this PC)' : 'Open the screenshot'}
+              aria-label={`Screenshot, ${sizeLine(img)}${img.asText ? ', sent as its text' : ''}`}
               onclick={() => onview(img.id)}
+              oncontextmenu={(e) => shotMenu(e, img)}
             >
               <img src={chatImageUrl(img.id)} alt="" style={`aspect-ratio: ${img.w} / ${img.h}`} />
+              {#if img.asText}<span class="astextnote">Sent as text</span>{/if}
             </button>
           {/if}
         {/each}
@@ -108,8 +139,15 @@
         <span class="viavoice" title="Asked by voice" aria-label="Asked by voice">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="2" width="6" height="12" rx="3" /><path d="M5 10v1a7 7 0 0 0 14 0v-1" /><path d="M12 18v4" /></svg>
         </span>
-      {/if}{m.text}
+      {/if}{said.question}
     </p>
+    {#if said.screenText}
+      <!-- What Windows read from the screenshot, sent in its place. -->
+      <details class="screentext" data-testid="chat-screen-text">
+        <summary>Text from the screenshot</summary>
+        <pre>{said.screenText}</pre>
+      </details>
+    {/if}
   {/if}
 </div>
 {/if}
@@ -118,16 +156,30 @@
   <p class="stoppednote">Stopped</p>
 {/if}
 {#if m.role === 'assistant' && m.sources?.length}
-  <!-- Where a web answer came from: each opens in the browser. -->
-  <div class="sources" role="group" aria-label="Sources">
-    <span class="srclabel">Sources</span>
+  <!-- Where an answer came from: a web page opens in the browser; a passage
+       of the person's meetings opens its meeting at the line. -->
+  <div class="sources" role="group" aria-label={fromMeetings ? 'From your meetings' : 'Sources'}>
+    <span class="srclabel">{fromMeetings ? 'From your meetings' : 'Sources'}</span>
     {#each m.sources as s (s.n)}
-      <button class="srcchip" title={s.url} onclick={() => openExternalLink(s.url)}>
-        <span class="srcn" aria-hidden="true">{s.n}</span>
-        <span class="srctitle">{s.title || s.site}</span>
-        <!-- (Google Search's links are titled with their site: once is enough.) -->
-        {#if s.site && s.site !== s.title}<span class="srcsite">{s.site}</span>{/if}
-      </button>
+      {#if isPassage(s)}
+        <button
+          class="srcchip passage"
+          title={s.quote || s.title}
+          aria-label={`Passage ${s.n}: ${s.title}${s.site ? `, ${s.site}` : ''}. Opens it.`}
+          onclick={() => onsource?.(s)}
+        >
+          <span class="srcn" aria-hidden="true">{s.n}</span>
+          <span class="srctitle">{s.title}</span>
+          {#if s.site}<span class="srcsite">{s.site}</span>{/if}
+        </button>
+      {:else}
+        <button class="srcchip" title={s.url} onclick={() => openExternalLink(s.url)}>
+          <span class="srcn" aria-hidden="true">{s.n}</span>
+          <span class="srctitle">{s.title || s.site}</span>
+          <!-- (Google Search's links are titled with their site: once is enough.) -->
+          {#if s.site && s.site !== s.title}<span class="srcsite">{s.site}</span>{/if}
+        </button>
+      {/if}
     {/each}
   </div>
 {/if}
@@ -543,5 +595,46 @@
     background: var(--yap-s2);
     border-style: dashed;
     cursor: default;
+  }
+  /* Sent as its text: the picture stays for you, quieter. */
+  .shot.astext {
+    position: relative;
+  }
+  .shot.astext img {
+    opacity: 0.75;
+  }
+  .astextnote {
+    position: absolute;
+    right: 6px;
+    bottom: 6px;
+    padding: 1px 7px;
+    border-radius: var(--yap-r-full);
+    background: var(--yap-s2);
+    color: var(--yap-muted);
+    font-family: var(--yap-font-ui, inherit);
+    font-size: 10.5px;
+    font-weight: 600;
+  }
+  .screentext {
+    margin-top: 6px;
+    font-family: var(--yap-font-ui, inherit);
+    font-size: 11.5px;
+    color: var(--yap-muted);
+  }
+  .screentext summary {
+    cursor: pointer;
+  }
+  .screentext pre {
+    max-height: 180px;
+    overflow: auto;
+    margin: 6px 0 0;
+    padding: 6px 8px;
+    border-radius: var(--yap-r-sm, 6px);
+    background: var(--yap-s1);
+    color: var(--yap-fg);
+    font-family: ui-monospace, Consolas, monospace;
+    font-size: 11px;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
   }
 </style>

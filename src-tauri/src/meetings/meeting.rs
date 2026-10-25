@@ -47,6 +47,12 @@
 //! instead, and the transcript a "you dictated here" marker that summaries
 //! skip (see "Dictation" below). "Them" carries on.
 //!
+//! The mic disconnected (2026-10-25, `mics.rs`): a headset unplugged or
+//! switched off mid-meeting. "You" moves to the next microphone in the
+//! person's order (or Windows' default) and goes on, the gap silent, with a
+//! "Your mic was disconnected" marker in the transcript (see "Following the
+//! microphone" below).
+//!
 //! Quiet sides: one side heard nothing for 3 minutes while the other talked
 //! (the call plays through a headset that isn't Windows' default output, or
 //! the mic is muted or the wrong one): the person is told once, in one
@@ -228,6 +234,9 @@ pub(crate) struct Captured {
     disk: Option<Vec<f32>>,
     /// Where dictations began that the disk's writer hasn't noted yet.
     disk_spans: Vec<u64>,
+    /// Where the mic was disconnected and "You" moved on, and to which (its
+    /// name; empty: none left): markers due in the transcript.
+    switches: Vec<(u64, String)>,
 }
 
 /// One source's audio, shared by its capture and the worker.
@@ -245,6 +254,7 @@ impl Captured {
             tee: None,
             disk: None,
             disk_spans: Vec::new(),
+            switches: Vec::new(),
         }
     }
 
@@ -370,6 +380,18 @@ impl Captured {
             from,
             dictated,
         })
+    }
+
+    /// The mic was disconnected here (now: the newest audio, the gap filled)
+    /// and "You" moved to `next` (its name; empty: none left).
+    pub(crate) fn mic_changed(&mut self, next: &str) {
+        self.switches.push((self.end(), next.to_string()));
+    }
+
+    /// Mic markers due up to session position `upto` (`None`: all).
+    fn take_switches(&mut self, upto: Option<u64>) -> Vec<(u64, String)> {
+        let due = self.switches.iter().take_while(|(at, _)| upto.is_none_or(|u| *at <= u)).count();
+        self.switches.drain(..due).collect()
     }
 
     /// Dictation markers no chunk carried (one began right at the stop).
@@ -958,29 +980,84 @@ mod default_output {
     }
 }
 
-/// Build a capture stream into `buf`. `loopback` selects the default OUTPUT
-/// device (WASAPI loopback) instead of an input device.
+// ---- Following the microphone ----
+//
+// "You" records from the first microphone in the person's order that's
+// connected, then Windows' default (`mics::candidates`, as dictation). When
+// its device goes — Windows' list (`mics::generation` moves) no longer has
+// it, or its stream stopped by itself and Windows doesn't list it — the
+// capture thread opens the next one; the gap is filled with silence, and a
+// marker goes into the transcript where it happened ("Your mic was
+// disconnected", `TranscriptSegment::mic_marker`), and the person is told
+// where they're looking. A stream that stopped on a device still listed (a
+// reset) is opened again. With none left "You" is silent (the quiet-side
+// watch says so after a while) until one connects. A microphone that merely
+// arrives mid-meeting is left for dictation: the meeting keeps the one it
+// has.
+
+/// What the meeting's mic does after a change of Windows' list or its
+/// stream stopping. Pure.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum MicMove {
+    /// Carry on.
+    Stay,
+    /// Open the same device again (its stream stopped; Windows still lists
+    /// it, or can't say).
+    Reopen,
+    /// Its device is gone: the next one in the order.
+    Next,
+    /// None is open (none was left): try the order again.
+    Retry,
+}
+
+/// See [`MicMove`]. `open`: a stream runs; `stopped`: it stopped by itself;
+/// `listed`: Windows lists its device (`None`: can't say — opened as
+/// Windows' default without a list).
+pub(crate) fn mic_move(open: bool, stopped: bool, listed: Option<bool>) -> MicMove {
+    if !open {
+        return MicMove::Retry;
+    }
+    match (listed, stopped) {
+        (Some(false), _) => MicMove::Next,
+        (_, true) => MicMove::Reopen,
+        _ => MicMove::Stay,
+    }
+}
+
+/// Why no microphone opened: the first in the order isn't there, or there's
+/// none at all.
+pub(crate) fn no_mic_error(order: &[crate::dictation::mics::MicChoice]) -> String {
+    match order.first() {
+        Some(c) => format!("Input device not found: {}", c.name),
+        None => "No default input device available".to_string(),
+    }
+}
+
+/// Build a capture stream into `buf`: on the microphone `mic`, or — `None`
+/// — WASAPI loopback on the default OUTPUT device. `stopped` hears the
+/// stream stop by itself (cpal's error: the device unplugged). Returns it
+/// with its device's name.
 fn build_capture_stream(
     buf: AudioBuf,
     overflow: Arc<AtomicBool>,
-    input_device_name: Option<String>,
-    loopback: bool,
-) -> Result<cpal::Stream, String> {
+    mic: Option<&crate::dictation::mics::Target>,
+    stopped: Option<Arc<AtomicBool>>,
+) -> Result<(cpal::Stream, String), String> {
+    use crate::dictation::mics::Target;
+    let loopback = mic.is_none();
     let host = cpal::default_host();
-    let device = if loopback {
-        host.default_output_device()
-            .ok_or("No default output device for loopback capture")?
-    } else {
-        match input_device_name.as_deref() {
-            Some(name) => host
-                .input_devices()
-                .map_err(|e| format!("Failed to enumerate input devices: {e}"))?
-                .find(|d| d.name().map(|n| n == name).unwrap_or(false))
-                .ok_or_else(|| format!("Input device not found: {name}"))?,
-            None => host
-                .default_input_device()
-                .ok_or("No default input device available")?,
-        }
+    let device = match mic {
+        None => host
+            .default_output_device()
+            .ok_or("No default output device for loopback capture")?,
+        Some(Target::Mic(ep)) => host
+            .input_devices()
+            .map_err(|e| format!("Failed to enumerate input devices: {e}"))?
+            .find(|d| d.name().map(|n| n == ep.name).unwrap_or(false))
+            .ok_or_else(|| format!("Input device not found: {}", ep.name))?,
+        Some(Target::Default) => host
+            .default_input_device()
+            .ok_or("No default input device available")?,
     };
 
     // Loopback streams are configured from the OUTPUT device's default config.
@@ -995,8 +1072,9 @@ fn build_capture_stream(
     };
     let native_rate = default_config.sample_rate().0;
     let channels = default_config.channels();
+    let name = device.name().unwrap_or_else(|_| "unknown".into());
     tracing::info!(
-        device = %device.name().unwrap_or_else(|_| "unknown".into()),
+        device = %name,
         native_rate,
         channels,
         loopback,
@@ -1011,7 +1089,7 @@ fn build_capture_stream(
     let needs_resample = native_rate != TARGET_SAMPLE_RATE;
     let needs_downmix = channels > 1;
 
-    device
+    let stream = device
         .build_input_stream(
             &stream_config,
             move |data: &[f32], _: &cpal::InputCallbackInfo| {
@@ -1030,20 +1108,51 @@ fn build_capture_stream(
                 };
                 push_audio(&buf, &resampled, &overflow);
             },
-            |err| tracing::warn!("Meeting capture stream error: {}", err),
+            move |err| {
+                tracing::warn!("Meeting capture stream error: {}", err);
+                if let Some(stopped) = &stopped {
+                    stopped.store(true, Ordering::SeqCst);
+                }
+            },
             None,
         )
-        .map_err(|e| format!("Failed to build capture stream: {e}"))
+        .map_err(|e| format!("Failed to build capture stream: {e}"))?;
+    Ok((stream, name))
 }
 
 /// Open the loopback stream ("Them") on Windows' current default output and
 /// start it.
 fn open_loopback(buf: &AudioBuf, overflow: &Arc<AtomicBool>) -> Result<cpal::Stream, String> {
-    let stream = build_capture_stream(Arc::clone(buf), Arc::clone(overflow), None, true)?;
+    let (stream, _) = build_capture_stream(Arc::clone(buf), Arc::clone(overflow), None, None)?;
     stream
         .play()
         .map_err(|e| format!("Failed to start capture: {e}"))?;
     Ok(stream)
+}
+
+/// A started mic stream, its endpoint (`None`: Windows' default without a
+/// list) and its device's name.
+type OpenMic = (cpal::Stream, Option<crate::dictation::mics::Endpoint>, String);
+
+/// The mic ("You"), started: the first microphone in the order that opens
+/// (`mics::candidates`; `away`: devices just lost, passed over).
+fn open_mic(buf: &AudioBuf, overflow: &Arc<AtomicBool>, stopped: &Arc<AtomicBool>, away: &[String]) -> Result<OpenMic, String> {
+    let order = crate::config::load().mic_order;
+    let present = crate::dictation::mics::present();
+    let targets = crate::dictation::mics::candidates(&order, present.as_deref(), away);
+    let mut error = None;
+    for target in &targets {
+        let opened = build_capture_stream(Arc::clone(buf), Arc::clone(overflow), Some(target), Some(Arc::clone(stopped)))
+            .and_then(|(s, name)| s.play().map(|_| (s, name)).map_err(|e| format!("Failed to start capture: {e}")));
+        match opened {
+            Ok((stream, name)) => return Ok((stream, target.endpoint().cloned(), name)),
+            Err(e) => {
+                tracing::warn!("Meeting: couldn't open a microphone: {e}");
+                error.get_or_insert(e);
+            }
+        }
+    }
+    Err(error.unwrap_or_else(|| no_mic_error(&order)))
 }
 
 /// The default output's name, for the log.
@@ -1054,28 +1163,124 @@ fn default_output_name() -> String {
         .unwrap_or_else(|| "unknown".to_string())
 }
 
+/// "Your microphone was disconnected" mid-meeting, where the person is
+/// looking (`meeting_guard::notice`, off this thread); `next`: the one
+/// "You" moved to (empty: none left).
+pub(crate) fn tell_mic_changed(app: &AppHandle, next: &str) {
+    let body = if next.is_empty() {
+        "Yap can't hear you until a microphone is connected. It goes on recording the call.".to_string()
+    } else {
+        format!("Yap is recording you with {} now.", crate::dictation::mics::short_name(next))
+    };
+    warn(app, "Your microphone was disconnected", body, Some("dictation#microphone"));
+}
+
+/// Follow the meeting's mic after its stream `stopped` or Windows' list
+/// moved (see "Following the microphone"): reopened, moved to the next one
+/// (a marker and a notice), or left. On the capture thread.
+struct MicFollower {
+    stopped: Arc<AtomicBool>,
+    /// The device it's on (`None`: Windows' default without a list, or none).
+    at: Option<crate::dictation::mics::Endpoint>,
+    /// Devices lost while Windows still listed them.
+    away: Vec<String>,
+    /// `mics::generation` when last looked.
+    seen: u64,
+}
+
+impl MicFollower {
+    fn look(&mut self, app: &AppHandle, mic: &mut Option<cpal::Stream>, buf: &AudioBuf, sys: &AudioBuf, overflow: &Arc<AtomicBool>) {
+        use crate::dictation::mics::{self, Target};
+        let stopped = self.stopped.swap(false, Ordering::SeqCst);
+        let generation = mics::generation();
+        if !stopped && generation == self.seen {
+            return;
+        }
+        self.seen = generation;
+        let present = mics::present();
+        self.away.retain(|id| present.as_ref().is_some_and(|l| l.iter().any(|e| &e.id == id)));
+        let listed = self.at.as_ref().and_then(|ep| present.as_ref().map(|l| l.iter().any(|e| e.id == ep.id)));
+        let mut step = mic_move(mic.is_some(), stopped, listed);
+        if step == MicMove::Reopen {
+            drop(mic.take());
+            let target = self.at.clone().map_or(Target::Default, Target::Mic);
+            let again = build_capture_stream(Arc::clone(buf), Arc::clone(overflow), Some(&target), Some(Arc::clone(&self.stopped)))
+                .and_then(|(s, _)| s.play().map(|_| s).map_err(|e| e.to_string()));
+            match again {
+                Ok(s) => {
+                    tracing::info!("Meeting: the microphone's stream stopped; opened it again");
+                    *mic = Some(s);
+                    return;
+                }
+                Err(e) => {
+                    tracing::warn!("Meeting: couldn't open the microphone again: {e}");
+                    step = MicMove::Next;
+                }
+            }
+        }
+        if step == MicMove::Stay {
+            return;
+        }
+        let had = step == MicMove::Next;
+        drop(mic.take());
+        if had && listed != Some(false) {
+            if let Some(ep) = &self.at {
+                self.away.push(ep.id.clone());
+            }
+        }
+        // The gap is silence, up to here.
+        keep_in_step(buf, sys);
+        match open_mic(buf, overflow, &self.stopped, &self.away) {
+            Ok((stream, ep, name)) => {
+                *mic = Some(stream);
+                self.at = ep;
+                if let Ok(mut b) = buf.lock() {
+                    b.mic_changed(&name);
+                }
+                tracing::warn!(had, "Meeting: the microphone changed; \"You\" goes on with the next one");
+                tell_mic_changed(app, &name);
+            }
+            Err(e) => {
+                self.at = None;
+                if had {
+                    if let Ok(mut b) = buf.lock() {
+                        b.mic_changed("");
+                    }
+                    tracing::warn!("Meeting: the microphone was disconnected and none is left: {e}");
+                    tell_mic_changed(app, "");
+                }
+            }
+        }
+    }
+}
+
 /// Open the mic + loopback streams on their own thread (cpal streams are
 /// !Send: the thread builds them and reports the result). Until stop it then
-/// keeps both sides on one clock (every 200 ms) and follows Windows' default
-/// output (every 2 s; see "Following the output device" above).
+/// keeps both sides on one clock (every 200 ms), follows the microphone (see
+/// "Following the microphone") and Windows' default output (every 2 s; see
+/// "Following the output device" above).
 fn spawn_device_capture(
+    app: AppHandle,
     mic_buf: AudioBuf,
     sys_buf: AudioBuf,
     stop: Arc<AtomicBool>,
     overflow: Arc<AtomicBool>,
 ) -> Result<(), String> {
     let (ready_tx, ready_rx) = std::sync::mpsc::channel::<Result<(), String>>();
-    let input_device = crate::config::load().input_device.clone();
     std::thread::Builder::new()
         .name("meeting-capture".into())
         .spawn(move || {
-            let mic = build_capture_stream(Arc::clone(&mic_buf), Arc::clone(&overflow), input_device, false);
-            let mic = match mic.and_then(|m| {
-                m.play()
-                    .map(|_| m)
-                    .map_err(|e| format!("Failed to start capture: {e}"))
-            }) {
-                Ok(m) => m,
+            let mut follow = MicFollower {
+                stopped: Arc::new(AtomicBool::new(false)),
+                at: None,
+                away: Vec::new(),
+                seen: crate::dictation::mics::generation(),
+            };
+            let mut mic = match open_mic(&mic_buf, &overflow, &follow.stopped, &[]) {
+                Ok((stream, ep, _)) => {
+                    follow.at = ep;
+                    Some(stream)
+                }
                 Err(e) => {
                     let _ = ready_tx.send(Err(e));
                     return;
@@ -1095,6 +1300,7 @@ fn spawn_device_capture(
             while !stop.load(Ordering::SeqCst) {
                 std::thread::sleep(Duration::from_millis(200));
                 keep_in_step(&mic_buf, &sys_buf);
+                follow.look(&app, &mut mic, &mic_buf, &sys_buf, &overflow);
                 if polled.elapsed() < OUTPUT_POLL {
                     continue;
                 }
@@ -1174,7 +1380,7 @@ fn with_attendees(note_id: u64, dictionary: &[crate::config::DictionaryEntry]) -
         .unwrap_or_default();
     names
         .into_iter()
-        .map(|to| crate::config::DictionaryEntry { from: String::new(), to, fuzzy: false, snippet: false })
+        .map(|to| crate::config::DictionaryEntry { from: String::new(), to, fuzzy: false, snippet: false, starred: false })
         .chain(dictionary.iter().cloned())
         .collect()
 }
@@ -1783,10 +1989,10 @@ pub fn start(app: AppHandle, engine_slot: EngineSlot, note_id: u64) -> Result<()
     let capture = if crate::shell::e2e::active() {
         crate::shell::e2e::spawn_meeting_audio(bufs.0, bufs.1, flags.0, flags.1)
     } else {
-        spawn_device_capture(bufs.0, bufs.1, flags.0, flags.1)
+        spawn_device_capture(app.clone(), bufs.0, bufs.1, flags.0, flags.1)
     };
     #[cfg(not(debug_assertions))]
-    let capture = spawn_device_capture(bufs.0, bufs.1, flags.0, flags.1);
+    let capture = spawn_device_capture(app.clone(), bufs.0, bufs.1, flags.0, flags.1);
     if let Err(e) = capture {
         if let Some(r) = recorder {
             r.discard();
@@ -1892,6 +2098,13 @@ pub fn start(app: AppHandle, engine_slot: EngineSlot, note_id: u64) -> Result<()
                     batch.push((h.onset, seg));
                 }
             }
+            // The mic disconnected (and "You" moved on) where "You" is
+            // transcribed up to.
+            let switched = you.buf.lock().map(|mut b| b.take_switches(Some(done.0))).unwrap_or_default();
+            for (from, next) in switched {
+                tracing::info!(note_id, "Meeting: the microphone changed; marked");
+                batch.push((from, TranscriptSegment::mic_marker(at(from), &next)));
+            }
             backlog = [&you, &them].iter().any(|s| {
                 let left = buffered(&s.buf);
                 left >= CHUNK_SECS * RATE || (stopping && left > 0)
@@ -1923,11 +2136,16 @@ pub fn start(app: AppHandle, engine_slot: EngineSlot, note_id: u64) -> Result<()
             }
         }
         // A dictation no chunk carried a marker for (one began right at the
-        // stop, with no audio after it).
+        // stop, with no audio after it), and a mic change after the last
+        // chunk.
         let left = you.buf.lock().map(|mut b| b.take_unmarked()).unwrap_or_default();
-        if !left.is_empty() {
-            let markers = left.into_iter().map(|from| TranscriptSegment::dictation_marker(at(from)));
-            if let Err(e) = ingest(&app, note_id, markers.collect()) {
+        let switched = you.buf.lock().map(|mut b| b.take_switches(None)).unwrap_or_default();
+        if !left.is_empty() || !switched.is_empty() {
+            let mut markers: Vec<(u64, TranscriptSegment)> =
+                left.into_iter().map(|from| (from, TranscriptSegment::dictation_marker(at(from)))).collect();
+            markers.extend(switched.into_iter().map(|(from, next)| (from, TranscriptSegment::mic_marker(at(from), &next))));
+            markers.sort_by_key(|(from, _)| *from);
+            if let Err(e) = ingest(&app, note_id, markers.into_iter().map(|(_, m)| m).collect()) {
                 tracing::warn!("Meeting segments not saved: {}", e);
             }
         }
@@ -2556,6 +2774,51 @@ mod tests {
     }
 
     // ---- following the output device ----
+
+    #[test]
+    fn the_meetings_mic_moves_on_only_when_its_device_is_gone() {
+        // Unplugged: Windows no longer lists it (its stream may or may not
+        // have said so yet).
+        assert_eq!(mic_move(true, false, Some(false)), MicMove::Next);
+        assert_eq!(mic_move(true, true, Some(false)), MicMove::Next);
+        // Its stream stopped but the device is still there (a reset): the
+        // same one again — or Windows' default without a list to say.
+        assert_eq!(mic_move(true, true, Some(true)), MicMove::Reopen);
+        assert_eq!(mic_move(true, true, None), MicMove::Reopen);
+        // Another device came or went: carry on.
+        assert_eq!(mic_move(true, false, Some(true)), MicMove::Stay);
+        assert_eq!(mic_move(true, false, None), MicMove::Stay);
+        // None left: try again with every change.
+        assert_eq!(mic_move(false, false, None), MicMove::Retry);
+    }
+
+    #[test]
+    fn a_mic_change_is_marked_where_it_happened_once_transcribed_up_to_it() {
+        let mut c = mic((0, false));
+        feed(&mut c, &vec![0.1; RATE * 3], (0, false));
+        c.mic_changed("Microphone (Fabrikam USB Mic)");
+        feed(&mut c, &vec![0.1; RATE * 2], (0, false));
+        c.mic_changed("");
+        let r = RATE as u64;
+        // "You" transcribed up to 2 s: neither is due yet.
+        assert!(c.take_switches(Some(2 * r)).is_empty());
+        // Up to 4 s: the first, where it happened.
+        assert_eq!(c.take_switches(Some(4 * r)), vec![(3 * r, "Microphone (Fabrikam USB Mic)".to_string())]);
+        // The rest at the end.
+        assert_eq!(c.take_switches(None), vec![(5 * r, String::new())]);
+        // The marker is no talk.
+        let m = TranscriptSegment::mic_marker(1_000, "Microphone (Fabrikam USB Mic)");
+        assert!(!m.is_talk() && m.source == "you" && m.text.is_empty());
+        assert_eq!(m.mic.as_deref(), Some("Microphone (Fabrikam USB Mic)"));
+    }
+
+    #[test]
+    fn no_mic_names_the_first_in_the_order() {
+        use crate::dictation::mics::MicChoice;
+        let first = MicChoice { id: "x".into(), name: "Headset Microphone (Contoso H2)".into() };
+        assert_eq!(no_mic_error(&[first]), "Input device not found: Headset Microphone (Contoso H2)");
+        assert_eq!(no_mic_error(&[]), "No default input device available");
+    }
 
     #[test]
     fn following_the_default_output() {

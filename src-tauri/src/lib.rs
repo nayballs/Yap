@@ -24,6 +24,7 @@ mod notes;
 mod notices;
 mod pasting;
 mod privacy;
+mod search;
 mod shell;
 mod snip;
 mod speakers;
@@ -60,6 +61,8 @@ pub struct AppState {
 pub(crate) fn shutdown_cleanup() {
     voice::tts::stop();
     ai::local_llm::shutdown();
+    // Meeting search's model (search/embedder.rs) on the same engine.
+    search::shutdown();
     integrations::bridge::stop();
     dictation::mute::restore_all();
     // The week of network receipts, as it stands (net.rs).
@@ -211,7 +214,8 @@ pub fn run() {
             dictation::commands::list_audio_devices,
             dictation::commands::list_output_devices,
             dictation::commands::set_mic_test,
-            dictation::commands::set_input_device,
+            dictation::mics::list_mics,
+            dictation::mics::offer::mic_offer_respond,
             shell::logging::frontend_log,
             dictation::commands::model_language_info,
             dictation::commands::configure_hotkey,
@@ -246,6 +250,9 @@ pub fn run() {
             pasting::as_said::as_said_paste_entry,
             dictation::commands::configure_as_said_hotkey,
             dictation::commands::configure_snip_hotkey,
+            dictation::commands::configure_paste_last_hotkey,
+            dictation::commands::configure_copy_last_hotkey,
+            pasting::last::copy_last_transcript,
             dictation::transforms::configure_transform_hotkey,
             dictation::languages::languages_catalog,
             dictation::languages::my_languages_status,
@@ -255,6 +262,11 @@ pub fn run() {
             snip::snip_start,
             snip::chat_images_usage,
             snip::chat_images_prepare,
+            snip::chat_image_copy,
+            snip::chat_image_save,
+            snip::chat_models_read_images,
+            snip::attach::chat_image_paste,
+            snip::attach::chat_image_drop,
             dictation::stt_speed::stt_speed_status,
             dictation::stt_speed::stt_speed_measure,
             ai::hardware::hardware_advice,
@@ -417,12 +429,21 @@ pub fn run() {
             calendar::calendar_brief,
             calendar::calendar_brief_for_note,
             calendar::calendar_brief_open,
+            search::commands::search_status,
+            search::commands::search_install,
+            search::commands::search_set_enabled,
+            search::commands::search_rebuild,
+            search::commands::search_delete,
+            search::commands::search_moments,
             bar::bar_status,
             bar::bar_regions,
             bar::bar_pointer_left,
             bar::bar_action,
             bar::bar_card_action,
             dictionary::learn::word_suggestion_respond,
+            dictionary::dict_usage::dictionary_usage,
+            dictionary::files::dictionary_import_pick,
+            dictionary::files::dictionary_export_save,
             notices::alert::alert_action,
             #[cfg(debug_assertions)]
             bar::bar_simulate,
@@ -476,6 +497,12 @@ pub fn run() {
             #[cfg(debug_assertions)]
             shell::e2e::e2e_dictate_audio,
             #[cfg(debug_assertions)]
+            shell::e2e::e2e_shortcut,
+            #[cfg(debug_assertions)]
+            shell::e2e::e2e_dictation_timing,
+            #[cfg(debug_assertions)]
+            shell::e2e::e2e_dictation_cap,
+            #[cfg(debug_assertions)]
             shell::e2e::e2e_crash_next_dictation,
             #[cfg(debug_assertions)]
             shell::e2e::e2e_fail_saves,
@@ -490,7 +517,21 @@ pub fn run() {
             #[cfg(debug_assertions)]
             shell::e2e::e2e_snip_last,
             #[cfg(debug_assertions)]
+            shell::e2e::e2e_snip_save_path,
+            #[cfg(debug_assertions)]
+            shell::e2e::e2e_snip_clipboard,
+            #[cfg(debug_assertions)]
+            shell::e2e::e2e_snip_ocr,
+            #[cfg(debug_assertions)]
+            shell::e2e::e2e_drag_drop,
+            #[cfg(debug_assertions)]
             dictation::mic_privacy::e2e_mic_privacy,
+            #[cfg(debug_assertions)]
+            dictation::mics::e2e_mics,
+            #[cfg(debug_assertions)]
+            dictation::mics::e2e_mic_plug,
+            #[cfg(debug_assertions)]
+            dictation::mics::e2e_mic_unplug,
             #[cfg(debug_assertions)]
             pasting::elevated::e2e_paste_elevated,
             #[cfg(debug_assertions)]
@@ -515,6 +556,8 @@ pub fn run() {
             notices::notice::e2e_focus,
             #[cfg(debug_assertions)]
             dictionary::learn::e2e_learn_correction,
+            #[cfg(debug_assertions)]
+            dictionary::files::e2e_dictionary_file,
             #[cfg(debug_assertions)]
             calls::meeting_guard::e2e_meeting_limit,
             #[cfg(debug_assertions)]
@@ -634,6 +677,10 @@ pub fn run() {
             dictation::input_hook::configure_as_said_from(&cfg);
             // Snip to Chat (snip.rs; Win+Alt+S by default, never a clash).
             dictation::input_hook::configure_snip_from(&cfg);
+            // Paste last / Copy last transcript (pasting/last.rs; unbound by
+            // default, never a clash).
+            dictation::input_hook::configure_paste_last_from(&cfg);
+            dictation::input_hook::configure_copy_last_from(&cfg);
             // Language shortcuts (My languages, languages.rs; none by
             // default), then saved transforms' (transforms.rs; none by default).
             dictation::input_hook::configure_languages_from(&cfg);
@@ -651,6 +698,9 @@ pub fn run() {
             // (Settings → Speech-to-Text → Runs on; stt_speed.rs).
             dictation::stt_speed::sync(&cfg);
 
+            // Windows' microphones, read and watched (mics.rs): which one
+            // dictation and meetings use, and a new one plugged in.
+            dictation::mics::start(&handle);
             // Start the dictation pipeline (audio capture + STT engine). It
             // runs without a microphone too (see `Pipeline::start`).
             let pipeline = dictation::pipeline::Pipeline::start(handle.clone(), cfg.clone());
@@ -819,6 +869,13 @@ pub fn run() {
             // (snip.rs, on its own thread); again while it's up cancels.
             let snip_handle = handle.clone();
             handle.listen("snip-key-pressed", move |_| snip::start(&snip_handle, snip::Origin::Shortcut));
+
+            // Paste last / Copy last transcript (pasting/last.rs), each on
+            // its own thread once the shortcut's keys are up.
+            let paste_last_handle = handle.clone();
+            handle.listen("paste-last-key-pressed", move |_| pasting::last::paste_soon(&paste_last_handle));
+            let copy_last_handle = handle.clone();
+            handle.listen("copy-last-key-pressed", move |_| pasting::last::copy_soon(&copy_last_handle));
             snip::init(&handle);
 
             // A saved transform's shortcut (transforms.rs): its slot, run on
@@ -1016,6 +1073,10 @@ pub fn run() {
             // them, and their titles and attendees for meeting notes (talks
             // to Google or the person's iCal link only; calendar.rs).
             calendar::init(&handle);
+
+            // Meeting search: every meeting and note read by the search
+            // model in the background, when it's on (search.rs).
+            search::init(&handle);
 
             // e2e test runs: announce test mode, quit when stdin closes.
             shell::e2e::start(&handle);

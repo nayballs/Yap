@@ -783,13 +783,28 @@ export function createNotesState() {
     setTimeout(() => hilite === i && (hilite = null), 2400);
   }
 
-  /** Open note `id` (at transcript line `line`), and end its meeting if `stop`. */
-  async function openRequested({ id, stop, line }) {
+  /**
+   * Open note `id` (at transcript line `line`; `ts`: when that line was
+   * said, to find it if lines moved since; `tab`: 'enhanced' | 'raw'), and
+   * end its meeting if `stop`.
+   */
+  async function openRequested({ id, stop, line, ts = null, tab: onTab = null }) {
     await select(id);
     if (selected?.id !== id) return;
     activeFolder = selected.folder || activeFolder;
     refreshList();
-    if (line != null) await showLine(line);
+    if (onTab === 'enhanced' && selected.enhancedContent) tab = 'enhanced';
+    else if (onTab === 'raw') tab = 'raw';
+    if (line != null) {
+      const lines = selected.transcript || [];
+      let at = line;
+      if (ts != null && lines[at]?.ts !== ts) {
+        // Lines moved since (a transcript done again): the one said then.
+        const found = lines.findIndex((s) => s.ts === ts);
+        if (found >= 0) at = found;
+      }
+      await showLine(Math.min(at, Math.max(lines.length - 1, 0)));
+    }
     if (!stop) return;
     meeting = (await invoke('meeting_state').catch(() => null)) || { recording: false };
     if (meeting.recording && meeting.noteId === id) await endMeeting();

@@ -27,6 +27,7 @@
   import { initWordSuggestions } from '../notices/wordSuggestions.js';
   import { initLanguageNudge } from '../notices/languageNudge.js';
   import { initAlerts } from '../notices/alerts.js';
+  import { initMicOffers } from '../notices/micOffer.js';
   import { initUpload } from '../stores/upload.svelte.js';
   import { initMemory } from '../stores/memory.svelte.js';
   import { initCleanupOffer } from '../notices/cleanupOffer.js';
@@ -39,7 +40,7 @@
   import MeetingsView from './MeetingsView.svelte';
   import HomeView from './home/HomeView.svelte';
   import InsightsView from './InsightsView.svelte';
-  import DictionaryView from './DictionaryView.svelte';
+  import DictionaryView from './dictionary/DictionaryView.svelte';
   import UploadView from './UploadView.svelte';
   import NotesView from './notes/NotesView.svelte';
   import TasksView from './TasksView.svelte';
@@ -104,6 +105,8 @@
   // administrator left on the clipboard, Windows' microphone privacy
   // switch — with Open settings.
   initAlerts();
+  // "Contoso H2 connected · Use it for dictation?" (dictation/mics/offer.rs).
+  initMicOffers();
   // Upload's job (upload.svelte.js): its progress, Cancel and result, and
   // the "Transcription complete" toast, whichever view is up — the view
   // unmounts when you leave it (or Chat opens by itself).
@@ -153,6 +156,21 @@
     if (section) {
       window.dispatchEvent(new CustomEvent('yap-settings-goto', { detail: section }));
     }
+  }
+
+  // A moment of a meeting or note (a passage an answer cites, a search
+  // result in the Meetings view: search/ask.rs) opened in Notes — a
+  // transcript at its line, else the tab it's on.
+  function openNoteAt({ id, line = null, ts = null, field = '' }) {
+    const transcript = field === 'transcript' || (!field && line != null);
+    noteRequest.pending = {
+      id,
+      stop: false,
+      line: transcript ? line : null,
+      ts: transcript ? ts : null,
+      tab: field === 'summary' ? 'enhanced' : field === 'content' ? 'raw' : null,
+    };
+    activeView = 'notes';
   }
 
   function onOverlayKeydown(e) {
@@ -389,11 +407,11 @@
     {:else if activeView === 'dictionary'}
       <DictionaryView />
     {:else if activeView === 'chat'}
-      <ChatView onopensettings={openSettings} />
+      <ChatView onopensettings={openSettings} onopennote={openNoteAt} />
     {:else if activeView === 'notes'}
       <NotesView onopensettings={openSettings} />
     {:else if activeView === 'meetings'}
-      <MeetingsView onopensettings={openSettings} onnavigate={(v) => (activeView = v)} />
+      <MeetingsView onopensettings={openSettings} onnavigate={(v) => (activeView = v)} onopennote={openNoteAt} />
     {:else if activeView === 'tasks'}
       <TasksView
         onopennote={(id, line) => {

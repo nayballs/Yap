@@ -122,11 +122,16 @@ export function createSetupState() {
   let bars = $state(Array(36).fill(0)); // scrolling level meter
   let micHeard = $state(false); // any signal above the floor yet?
 
-  async function applyMic() {
+  // A microphone picked goes first in the order (the rest stay after it);
+  // "System default" ('') empties it. Saved, the mic switches to it live
+  // (dictation/mic.rs follows the order; the mic check holds it open).
+  async function applyMic(id) {
     if (!cfg) return;
     try {
-      cfgPatch.inputDevice = cfg.inputDevice || null; // set via bind:value
-      await invoke('set_input_device', { device: cfg.inputDevice || null });
+      const m = devices.find((d) => d.id === id);
+      const rest = (cfg.micOrder || []).filter((c) => c.id !== id && (!m || c.name !== m.name));
+      cfgPatch.micOrder = m ? [{ id: m.id, name: m.name }, ...rest] : [];
+      cfg.micOrder = cfgPatch.micOrder;
       await persistCfg();
       bars = Array(36).fill(0);
       micHeard = false;
@@ -403,9 +408,13 @@ export function createSetupState() {
         if (e.payload && e.payload.modelSize === busyId) percent = e.payload.percent;
       }),
       rawListen('yap-amp', (e) => {
-        const amp = Math.min(1, (e.payload || 0) * 4); // same gain feel as the overlay
+        // Shaped in Rust as for the Yap bar (dictation/meter.rs): decibels
+        // over the mic's own noise, so the room's hiss is 0 and a whisper
+        // about a third. Above 0.3 (a whisper, ~-46 dBFS on a quiet mic)
+        // counts as hearing you.
+        const amp = Math.max(0, Math.min(1, Number(e.payload) || 0));
         bars = [...bars.slice(1), amp];
-        if (amp > 0.06) micHeard = true;
+        if (amp > 0.3) micHeard = true;
       }),
       rawListen('local-llm-download-progress', (e) => {
         if (e.payload) llmProgress = e.payload;

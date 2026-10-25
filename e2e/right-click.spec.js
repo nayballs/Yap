@@ -10,7 +10,7 @@
 //
 // One of each kind: a Chat conversation (Rename in place, Copy as Markdown,
 // Delete…) and its messages (Copy, Copy as Markdown, Read aloud), a Home
-// dictation (Copy, Copy raw transcript, Delete…), Dictionary rows (Edit, ≈,
+// dictation (Copy, Copy raw transcript, Delete…), Dictionary rows (Edit, Star, ≈,
 // Delete…), a past meeting (Open, Generate summary, Copy as Markdown,
 // Delete…) and one from the calendar (Open note, Join, Start…), a calendar
 // connection (Sync now, Disconnect…), a speech model (Download / Use /
@@ -271,10 +271,10 @@ test('Dictionary: Edit, near-misses and Delete… on a row; in its boxes, the bo
   const snippets = main.getByRole('region', { name: 'Snippets' });
   await expect(corrections.getByRole('textbox', { name: 'Replace with' })).toHaveValue('Parakeet');
 
-  // A right-click on the row (not in a box): Edit, ≈ Catch near-misses (on), Delete….
+  // A right-click on the row (not in a box): Edit, Star, ≈ Catch near-misses (on), Delete….
   await corrections.locator('.dict-row .arrow').first().click({ button: 'right' });
   await expect(menu(main)).toHaveAccessibleName('Correction');
-  await expect(allItems(main)).toHaveText(['Edit', 'Catch near-misses', 'Delete…']);
+  await expect(allItems(main)).toHaveText(['Edit', 'Star', 'Catch near-misses', 'Delete…']);
   const near = menu(main).getByRole('menuitemcheckbox', { name: 'Catch near-misses' });
   await expect(near).toHaveAttribute('aria-checked', 'true');
   await shot(main, '07-dictionary-row-menu');
@@ -301,10 +301,10 @@ test('Dictionary: Edit, near-misses and Delete… on a row; in its boxes, the bo
   await expect(menu(main)).toHaveAccessibleName('Correction');
   await main.keyboard.press('Escape');
 
-  // A snippet: Edit, Delete… (asked first).
+  // A snippet: Edit, Star, Delete… (asked first).
   await snippets.locator('.snip-row .arrow').first().click({ button: 'right' });
   await expect(menu(main)).toHaveAccessibleName('Snippet');
-  await expect(allItems(main)).toHaveText(['Edit', 'Delete…']);
+  await expect(allItems(main)).toHaveText(['Edit', 'Star', 'Delete…']);
   await menu(main).getByRole('menuitem', { name: 'Delete…' }).click();
   await expect(dialog(main)).toHaveAccessibleName('Delete the snippet “my sign-off”?');
   await dialog(main).getByRole('button', { name: 'Delete' }).click();

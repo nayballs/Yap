@@ -14,7 +14,7 @@ import { modelName } from '../../core/aiModel.js';
 import { aiError } from '../../core/aiErrors.js';
 import { streamCall, liveAnswer, applyEvent, streamingHeight, STOPPED, SUPERSEDED } from '../../core/streaming.js';
 import { speech, initSpeech, readAloud as speakText, speakReply, stopReading as stopSpeech } from '../../stores/speech.svelte.js';
-import { DEFAULT_PROMPT, MAX_SHOTS, visionRefused } from './chatImages.js';
+import { DEFAULT_PROMPT, MAX_SHOTS, visionRefused, pastedImage, keepPasted } from './chatImages.js';
 import { waitingShots } from './chatShots.svelte.js';
 
 // The sources an answer's citations point at: its own, else — a follow-up
@@ -33,7 +33,7 @@ export const STILL_WORKING_S = 8;
  * to the view). `onopensettings()`: ControlPanel's Settings opener, as the
  * view has it now (the "Couldn't send" toast's Open Language Models).
  */
-export function createChatState({ onopensettings = () => null } = {}) {
+export function createChatState({ onopensettings = () => null, onopennote = () => null } = {}) {
   let conversations = $state([]);
   let activeId = $state(null);
   let messages = $state([]); // { role, text, tools?, model?, voice?, id }
@@ -61,8 +61,10 @@ export function createChatState({ onopensettings = () => null } = {}) {
   const streaming = $derived(messages.some((m) => m.streaming));
   let inputEl = $state(null);
   let threadEl = $state(null);
-  // 'meetings' when the Meetings view's Ask bar started this chat: answers
-  // are grounded in your meeting notes (calendar::meetings_context).
+  // 'meetings' when this chat asks across the meetings (the Meetings view's
+  // Ask bar, or "Ask across your meetings" here): answers come from the
+  // passages Yap finds on this PC and cite them (search/ask.rs). Kept with
+  // the conversation (chats.rs `scope`), so its follow-ups are too.
   let scope = $state(null);
 
   // ---- Snip to Chat (snip.rs)
@@ -81,6 +83,8 @@ export function createChatState({ onopensettings = () => null } = {}) {
   let viewing = $state(null);
   // The snip shortcut, for the + menu's "Take a screenshot".
   let snipHotkey = $state('');
+  // Files are being dragged over the window (a drop lands in the box).
+  let dragging = $state(false);
   const visionBlocked = $derived(attached.length > 0 && vision.images === false);
   const switchName = $derived.by(() => {
     const s = vision.imagesSwitch;
@@ -174,6 +178,55 @@ export function createChatState({ onopensettings = () => null } = {}) {
     inputEl?.focus();
   }
 
+  /** Pictures pasted or dropped: into the box, as a snip lands (never sent by itself). */
+  async function attachPictures(images) {
+    const fresh = (images || []).filter((img) => img?.id && !attached.some((a) => a.id === img.id));
+    if (!fresh.length) return;
+    attached = [...attached, ...fresh].slice(-MAX_SHOTS);
+    refreshVision();
+    await tick();
+    inputEl?.focus();
+  }
+
+  /**
+   * Ctrl+V in the box: a picture copied in any app goes in as a screenshot
+   * (snip/attach.rs); text pastes as ever.
+   */
+  async function pasteImage(e) {
+    const file = pastedImage(e);
+    if (!file) return;
+    e.preventDefault();
+    try {
+      await attachPictures([await keepPasted(file)]);
+    } catch (err) {
+      toast({ title: "Couldn't paste the picture", description: String(err), variant: 'destructive' });
+    }
+  }
+
+  /** Files dropped on Chat (Windows' drag and drop): the pictures among them go in the box. */
+  async function dropFiles(paths) {
+    dragging = false;
+    if (!paths?.length) return;
+    const room = MAX_SHOTS - attached.length;
+    if (room <= 0) {
+      toast({ title: `A question carries ${MAX_SHOTS} screenshots at most`, description: 'Remove one to add another.', chip: 'Chat' });
+      return;
+    }
+    try {
+      const got = await invoke('chat_image_drop', { paths, room });
+      await attachPictures(got?.images);
+      if (got?.skipped) {
+        toast({
+          title: got.images?.length ? `${got.skipped} of the files weren't added` : "Those files weren't added",
+          description: `Chat takes pictures (PNG, JPEG, GIF, BMP, WebP…), up to ${MAX_SHOTS} a question.`,
+          chip: 'Chat',
+        });
+      }
+    } catch (err) {
+      toast({ title: "Couldn't add the pictures", description: String(err), variant: 'destructive' });
+    }
+  }
+
   async function loadVoiceSettings() {
     try {
       const c = await invoke('get_config');
@@ -253,7 +306,7 @@ export function createChatState({ onopensettings = () => null } = {}) {
       const conv = await invoke('chat_get', { id });
       stopReading();
       activeId = id;
-      scope = null;
+      scope = conv.scope || null;
       messages = (conv.messages || []).map((m, i) => ({ ...m, id: chatId(id, i) }));
       scrollThread();
     } catch (e) {
@@ -272,6 +325,21 @@ export function createChatState({ onopensettings = () => null } = {}) {
     choseNew = true;
     reportView();
     setTimeout(() => inputEl?.focus(), 0);
+  }
+
+  /** A new chat asked across the meetings (its questions and follow-ups). */
+  function askAcrossMeetings() {
+    newChat();
+    scope = 'meetings';
+  }
+
+  /**
+   * A passage an answer cites (its pill, its row under the answer): its
+   * meeting or note opened in Notes at the line it came from.
+   */
+  function openSource(s) {
+    if (s?.note == null) return;
+    onopennote()?.({ id: s.note, line: s.line ?? null, ts: s.ts ?? null, field: s.field || '' });
   }
 
   // What this view shows, for a question asked out loud (chat/assistant.rs
@@ -347,7 +415,7 @@ export function createChatState({ onopensettings = () => null } = {}) {
       if (!alive) return;
       if (activeId !== id) {
         activeId = id;
-        scope = null;
+        scope = conv.scope || null;
       }
       // The answer that streamed here, replaced by the saved (checked) one
       // (only an answer: a newer question's arrival replaces nothing).
@@ -493,13 +561,20 @@ export function createChatState({ onopensettings = () => null } = {}) {
     }, 0);
   }
 
-  async function send() {
+  /**
+   * Send the question (and the screenshots waiting). `{ asText: true }`:
+   * "Send its text instead" — the screenshots' text, read on this PC by
+   * Windows (snip/ocr.rs), goes in their place to a model that can't read
+   * images. (As a click handler it gets the event: a plain send.)
+   */
+  async function send(opts) {
+    const asText = opts?.asText === true;
     // With a screenshot waiting, an empty box asks "What's this?".
     const shots = attached;
     const text = input.trim() || (shots.length ? DEFAULT_PROMPT : '');
     if (!text || sending) return;
     // The model can't read the screenshot: the line above the box says so.
-    if (shots.length && vision.images === false) return;
+    if (shots.length && vision.images === false && !asText) return;
     const voice = byVoice;
     input = '';
     attached = [];
@@ -556,7 +631,14 @@ export function createChatState({ onopensettings = () => null } = {}) {
     };
     const call = streamCall(
       'chat_send',
-      { conversationId: activeId, text, scope, voice, images: shots.length ? shots.map((s) => s.id) : null },
+      {
+        conversationId: activeId,
+        text,
+        scope,
+        voice,
+        images: shots.length ? shots.map((s) => s.id) : null,
+        asText: asText && shots.length ? true : null,
+      },
       onEvent
     );
     stopAnswerCall = call.stop;
@@ -582,7 +664,9 @@ export function createChatState({ onopensettings = () => null } = {}) {
         stopped: !!res.stopped,
         revisedFrom: streamed != null && streamed.trim() !== '' && streamed.trim() !== String(res.reply).trim() ? fromHeight : 0,
       };
-      messages = [...messages.slice(0, qi), { ...asked, id: res.userMessageId ?? null }, answer];
+      // The question as saved: with its screenshots' text when it went as text.
+      const saved = asText && res.question ? { text: res.question, images: shots.map((s) => ({ ...s, asText: true })) } : {};
+      messages = [...messages.slice(0, qi), { ...asked, ...saved, id: res.userMessageId ?? null }, answer];
       refreshList();
       followThread();
       // Read out by itself ("When to speak", decided in Rust): the voice
@@ -611,6 +695,11 @@ export function createChatState({ onopensettings = () => null } = {}) {
       input = text; // give the message back
       attached = shots;
       byVoice = voice;
+      // Its text couldn't be read (no text in it, no OCR language): said.
+      if (asText) {
+        toast({ title: "Couldn't send its text", description: String(e), variant: 'default', kind: 'error', chip: 'Error', icon: 'alert' });
+        return;
+      }
       // The model couldn't read the screenshot: the line above the box says
       // so, with the switch (Rust remembers it as a "no" now).
       if (shots.length && visionRefused(e)) {
@@ -702,6 +791,8 @@ export function createChatState({ onopensettings = () => null } = {}) {
     get viewing() { return viewing; },
     set viewing(v) { viewing = v; },
     get snipHotkey() { return snipHotkey; },
+    get dragging() { return dragging; },
+    set dragging(v) { dragging = v; },
     get visionBlocked() { return visionBlocked; },
     get switchName() { return switchName; },
     get speakReplies() { return speakReplies; },
@@ -727,6 +818,9 @@ export function createChatState({ onopensettings = () => null } = {}) {
     citedSources,
     refreshVision,
     takeSnip,
+    attachPictures,
+    pasteImage,
+    dropFiles,
     loadVoiceSettings,
     readAloud,
     stopReading,
@@ -734,6 +828,8 @@ export function createChatState({ onopensettings = () => null } = {}) {
     refreshList,
     selectConversation,
     newChat,
+    askAcrossMeetings,
+    openSource,
     reportView,
     followAssistantStream,
     followAssistant,

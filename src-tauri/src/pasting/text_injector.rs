@@ -686,6 +686,30 @@ mod clip {
         false
     }
 
+    /// Put a picture on the clipboard — a DIB (`CF_DIBV5`, which Windows
+    /// turns into the older bitmap formats) and a PNG (`"PNG"`, which
+    /// browsers and image apps prefer) — and check it took, as
+    /// [`put_text_verified`] does (Snip to Chat's copy, `snip/copy_save.rs`).
+    pub fn put_image_verified(png: &[u8], dibv5: &[u8], private: bool) -> bool {
+        let items = [(CF_DIBV5, dibv5.to_vec()), (registered("PNG"), png.to_vec())];
+        for (attempt, wait_ms) in [0u64, 15, 40, 80].into_iter().enumerate() {
+            sleep(Duration::from_millis(wait_ms));
+            let before = sequence();
+            match put(&items, private) {
+                Ok(()) if sequence() != before => return true,
+                Ok(()) => debug!(attempt, "Clipboard image write didn't take (sequence number unchanged)"),
+                Err(e) => debug!(attempt, error = %e, "Clipboard image write failed"),
+            }
+        }
+        false
+    }
+
+    /// Robot mode: the clipboard's PNG, if it has one.
+    #[cfg(debug_assertions)]
+    pub fn read_png() -> Option<Vec<u8>> {
+        read_format(registered("PNG"))
+    }
+
     /// What was on the clipboard before Yap borrowed it.
     pub enum Snapshot {
         /// Couldn't open the clipboard to look: leave it be afterwards.
@@ -852,6 +876,22 @@ pub(crate) fn robot_clipboard(action: &str, text: Option<&str>) -> Result<serde_
             clip::put_private(&[(clip::DIBV5, dib.clone())])?;
             *lock(&IMAGE) = Some(dib);
             Ok(json!({ "set": true }))
+        }
+        // Snip to Chat's copy (snip/copy_save.rs): whether the clipboard
+        // holds exactly the PNG Yap copied last, a DIB beside it, and the
+        // privacy formats — its size, never its pixels.
+        "checkSnip" => {
+            let png = clip::read_png();
+            let copied = crate::snip::copy_save::last_copied();
+            let size = png.as_deref().and_then(crate::snip::images::png_size);
+            Ok(json!({
+                "hasPng": png.is_some(),
+                "matchesSnip": matches!((&png, &copied), (Some(got), Some(want)) if got.len() >= want.len() && got[..want.len()] == want[..]),
+                "hasDib": clip::read_format(clip::DIBV5).is_some(),
+                "width": size.map(|s| s.0),
+                "height": size.map(|s| s.1),
+                "private": clip::all_private(),
+            }))
         }
         "check" => {
             let now = clip::read_text();
@@ -1250,6 +1290,21 @@ pub fn copy_privately(text: &str) -> bool {
     }
 }
 
+/// Put a picture on the clipboard (its PNG and a `CF_DIBV5` DIB) the way a
+/// dictation's paste goes there: out of Win+V history and cloud sync (Snip
+/// to Chat's copy). `false` if the clipboard couldn't be written.
+pub fn copy_image_privately(png: &[u8], dibv5: &[u8]) -> bool {
+    #[cfg(target_os = "windows")]
+    {
+        clip::put_image_verified(png, dibv5, true)
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = (png, dibv5);
+        false
+    }
+}
+
 /// `text` for the paste. A terminal gets it as `app_kind::terminal_text`
 /// makes it (one line unless the coding CLI there takes a paste; no space
 /// after it, no cursor context). A chat app's short message loses its final
@@ -1326,7 +1381,7 @@ pub fn has_last_transcript() -> bool {
     last_transcript().is_some()
 }
 
-const NOTHING_TO_PASTE: &str = "Nothing to paste yet — dictate something first";
+pub(crate) const NOTHING_TO_PASTE: &str = "Nothing to paste yet — dictate something first";
 
 /// The app at `receiver` runs as administrator: put `text` on the clipboard
 /// (privately, as a paste would: out of Win+V history) and leave it there
@@ -1347,8 +1402,8 @@ fn leave_on_clipboard(text: &str, receiver: Option<isize>) -> Result<Delivery, S
 /// fitted to its cursor like a dictation. For when a paste went astray.
 /// Returns what was pasted. A test run pastes nothing and returns it. An app
 /// running as administrator gets it on the clipboard instead, and the person
-/// is told (`elevated.rs`).
-fn paste_last_blocking(app: &tauri::AppHandle, as_said: bool) -> Result<String, String> {
+/// is told (`elevated.rs`). (Also its shortcut's, `last.rs`.)
+pub(crate) fn paste_last_blocking(app: &tauri::AppHandle, as_said: bool) -> Result<String, String> {
     let text = if as_said { last_said_transcript() } else { last_transcript() }.ok_or(NOTHING_TO_PASTE)?;
     let cfg = crate::config::load();
     let test_mode = || {

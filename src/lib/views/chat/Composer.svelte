@@ -5,13 +5,17 @@
   // quiet, the model the message goes to (ModelChip, whose picker opens
   // above it all). Snip to Chat (snip.rs): the screenshots this question
   // carries sit over the box with three one-tap questions, and — a model
-  // that can't read images — one line saying so, with the switch. Nothing
-  // goes until you send.
+  // that can't read images — one line saying so, with the switch, or
+  // "Send its text instead" (Windows' OCR on this PC: snip/ocr.rs). A
+  // picture pasted (Ctrl+V) or dropped on Chat joins them (snip/attach.rs);
+  // a screenshot's right-click menu copies or saves it. Nothing goes until
+  // you send.
   import { invoke } from '@tauri-apps/api/core';
   import { toast } from '../../ui/toast.svelte.js';
+  import { openContextMenu } from '../../ui/contextMenu.svelte.js';
   import { formatHotkeySpec } from '../../core/hotkeys.js';
   import { modelName, providerName } from '../../core/aiModel.js';
-  import { chatImageUrl, SNIP_PROMPTS, sizeLine } from './chatImages.js';
+  import { chatImageUrl, SNIP_PROMPTS, sizeLine, imageItems } from './chatImages.js';
   import ModelChip from './ModelChip.svelte';
 
   /** `chat`: the view's state; `onopensettings(section)`: ControlPanel's Settings. */
@@ -64,6 +68,17 @@
     else chat.inputEl?.focus();
   }
 
+  /** "Send its text instead": read on this PC (Windows' OCR), sent in the picture's place. */
+  function sendAsText() {
+    if (chat.sending) return;
+    chat.send({ asText: true });
+  }
+
+  /** A screenshot's right-click menu: Open, Copy image, Save image as…. */
+  function shotMenu(e, img) {
+    openContextMenu(e, imageItems(img, { onview: (id) => (chat.viewing = id) }), { label: 'Screenshot' });
+  }
+
   /** + → "Take a screenshot": Yap's window leaves the shot (snip.rs). */
   function takeScreenshot() {
     chat.plusOpen = false;
@@ -110,7 +125,11 @@
      the message, the mic, and Send once there's something to send;
      under it, quiet, whether answers are read aloud and the model the
      message goes to. The model picker opens above it all. -->
-<div class="composer" data-model-picker-above>
+<div class="composer" class:dropping={chat.dragging} data-model-picker-above>
+  {#if chat.dragging}
+    <!-- Files dragged over Chat: a drop puts the pictures in the box. -->
+    <div class="dropnote" data-testid="chat-drop-note" aria-live="polite">Drop pictures to ask about them</div>
+  {/if}
   {#if chat.attached.length}
     <!-- Snip to Chat (snip.rs): the screenshots this question carries, three
          one-tap questions, and — a model that can't read images — one line
@@ -127,6 +146,14 @@
               Use {chat.switchName} on {providerName({ provider: chat.vision.imagesSwitch.provider })}
             </button>
           {/if}
+          <button
+            type="button"
+            class="vbtn"
+            class:primary={!chat.vision.imagesSwitch}
+            disabled={chat.sending}
+            title="Windows reads the screenshot's text on this PC, and that goes to the model instead of the picture"
+            onclick={sendAsText}>Send its text instead</button
+          >
           <button type="button" class="vbtn" onclick={() => chipRef?.openPicker()}>
             {chat.vision.imagesSwitch ? 'Choose another model…' : 'Connect one…'}
           </button>
@@ -139,9 +166,10 @@
             <button
               type="button"
               class="thumb"
-              title="Open the screenshot"
+              title="Open the screenshot (right-click to copy or save it)"
               aria-label={`Screenshot, ${sizeLine(img)}`}
               onclick={() => (chat.viewing = img.id)}
+              oncontextmenu={(e) => shotMenu(e, img)}
             >
               <img src={chatImageUrl(img.id)} alt="" />
             </button>
@@ -238,6 +266,7 @@
       aria-label="Message"
       aria-busy={chat.sending}
       onkeydown={(e) => e.key === 'Enter' && !e.isComposing && chat.send()}
+      onpaste={chat.pasteImage}
       oninput={() => {
         if (!chat.input.trim()) chat.byVoice = false;
       }}
@@ -659,6 +688,27 @@
   }
   .vbtn.primary:hover {
     background: var(--yap-ink-hover, var(--yap-ink));
+  }
+  .vbtn:disabled {
+    opacity: 0.5;
+    cursor: default;
+  }
+
+  /* Files dragged over Chat: the box says a drop lands here. */
+  .composer.dropping .inputbar {
+    border-color: var(--yap-primary-line);
+    border-style: dashed;
+    background: var(--yap-primary-wash);
+  }
+  .dropnote {
+    padding: 6px 10px;
+    border: 1px dashed var(--yap-primary-line);
+    border-radius: var(--yap-r);
+    background: var(--yap-primary-wash);
+    color: var(--yap-fg);
+    font-size: 12px;
+    font-weight: 600;
+    text-align: center;
   }
   .vlink {
     padding: 0;

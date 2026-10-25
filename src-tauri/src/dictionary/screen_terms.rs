@@ -86,6 +86,7 @@ fn entry(to: &str) -> DictionaryEntry {
         to: to.to_string(),
         fuzzy: true,
         snippet: false,
+        starred: false,
     }
 }
 
@@ -1019,6 +1020,7 @@ mod tests {
             to: "ZenTrix".into(),
             fuzzy: true,
             snippet: false,
+            starred: false,
         }];
         let keep: HashSet<String> = dict.iter().flat_map(|e| [crate::dictionary::fuzzy::ngram_key(&e.to), crate::dictionary::fuzzy::ngram_key(&e.from)]).collect();
         assert_eq!(s.correct("The ZenTrix pilot.", &|k| keep.contains(k), &words), "The ZenTrix pilot.");

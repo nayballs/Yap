@@ -1,0 +1,259 @@
+{
+  "description": "Ask across meetings: a made-up team's meetings and personal notes over six weeks (fictional people, company and customers), and questions as someone would ask them, each with the transcript lines (or notes) that answer it. Many share few words with their answer; several are about a person, a number or a date, and two have no answer. Used by `yap.exe eval --search` (src-tauri/src/ai/eval/search.rs): recall@k for keyword, meaning and hybrid search over the passages Yap cuts (src-tauri/src/search/), and with --model, Ask across meetings' answers checked for citations that point at the right lines. Line numbers count from 0. `now` is when the questions are asked.",
+  "now": "2026-10-25T15:00:00+00:00",
+  "notes": [
+    {
+      "id": 101,
+      "title": "Q3 budget review",
+      "start": "2026-09-14T10:00:00+01:00",
+      "participants": ["Priya Shah", "Tom Okafor"],
+      "speakers": { "them-1": "Priya Shah", "them-2": "Tom Okafor" },
+      "lines": [
+        ["you", "Thanks for making time. Let's go through where the offsite and the quarter stand."],
+        ["them-1", "The venue quote came in at four thousand pounds, which is over what finance allowed for the whole event."],
+        ["them-2", "We could drop the second night and keep most of the agenda."],
+        ["you", "Can we move some of the catering money across instead?"],
+        ["them-1", "Only if Tom signs it off by Friday, otherwise the original numbers stand."],
+        ["them-2", "I'll sign it off on Thursday, I just need the revised spreadsheet."],
+        ["them-1", "One more thing: there's a hiring freeze until January, except the support engineer role."],
+        ["you", "Understood. Does that include contractors?"],
+        ["them-1", "Contractor spend is cut by ten percent, so yes, keep it lean."],
+        ["them-2", "I'll tell the design agency we're pausing the illustration work."]
+      ],
+      "summary": "## Action plan\n### Tom Okafor\n- [ ] Sign off moving catering money to the venue (due: Thursday)\n### Priya Shah\n- [ ] Send the revised spreadsheet\n\n## Decisions\n- Hiring freeze until January, except the support engineer role\n- Contractor spend cut by 10%"
+    },
+    {
+      "id": 102,
+      "title": "Launch planning",
+      "start": "2026-09-22T14:00:00+01:00",
+      "participants": ["Dana Whitfield", "Marcus Lee"],
+      "speakers": { "them-1": "Dana Whitfield", "them-2": "Marcus Lee" },
+      "lines": [
+        ["them-1", "Marketing is ready to announce the beta on the third of November."],
+        ["them-2", "That works if the installer bug is fixed by mid-October. It still crashes on machines without a graphics driver."],
+        ["you", "Who's on the installer?"],
+        ["them-2", "Me. I'll pair with Grace on the error screen."],
+        ["them-1", "I need screenshots of the new onboarding by the twelfth for the press kit."],
+        ["you", "We can give journalists early access under embargo."],
+        ["them-1", "Good, the embargo lifts at nine in the morning on launch day."],
+        ["them-2", "We should hold the Mac build until December, it's not stable."],
+        ["you", "Agreed, Windows only for the beta."]
+      ]
+    },
+    {
+      "id": 103,
+      "title": "Northwind check-in",
+      "start": "2026-10-01T16:00:00+01:00",
+      "participants": ["Elena Novak", "Sam Rivera"],
+      "speakers": { "them-1": "Elena Novak", "them-2": "Sam Rivera" },
+      "lines": [
+        ["them-2", "Elena, thanks for joining. How's the rollout going?"],
+        ["them-1", "Mostly well, but our security team won't sign off without single sign-on through Azure AD."],
+        ["them-1", "We're at a hundred and twenty seats now and want to grow to two hundred next year."],
+        ["you", "Single sign-on is on the roadmap for January."],
+        ["them-1", "Our renewal is in March. If it isn't there by then, we'll have to look at other vendors."],
+        ["them-2", "Understood. What else would help?"],
+        ["them-1", "A monthly export of all meeting transcripts for our compliance archive."],
+        ["you", "We can do a CSV export as a stopgap this quarter."]
+      ],
+      "summary": "## Open questions\n- Can SSO ship before Northwind's March renewal?\n\n## Action plan\n### You\n- [ ] Prototype the monthly transcript export (CSV)\n### Sam Rivera\n- [ ] Send Northwind the SSO timeline"
+    },
+    {
+      "id": 104,
+      "title": "Weekly standup",
+      "start": "2026-10-12T09:30:00+01:00",
+      "participants": ["Marcus Lee", "Dana Whitfield", "Priya Shah"],
+      "speakers": { "them-1": "Marcus Lee", "them-2": "Dana Whitfield", "them-3": "Priya Shah" },
+      "lines": [
+        ["them-1", "The end-to-end tests failed again on CI overnight, the same three flaky ones."],
+        ["them-1", "I'll quarantine them today and file a bug for each."],
+        ["them-2", "Nobody has been answering the support inbox since Tuesday."],
+        ["you", "Let's set up a rota: one person a day."],
+        ["them-3", "I can take Mondays and Thursdays."],
+        ["them-2", "I'll draft the rota and share it by lunchtime."],
+        ["you", "Anything blocking the launch?"],
+        ["them-1", "The signing certificate still hasn't arrived from the issuer."]
+      ]
+    },
+    {
+      "id": 105,
+      "title": "Design review: onboarding",
+      "start": "2026-10-14T11:00:00+01:00",
+      "participants": ["Grace Ito", "Marcus Lee"],
+      "speakers": { "them-1": "Grace Ito", "them-2": "Marcus Lee" },
+      "lines": [
+        ["them-1", "The new onboarding is three steps: pick a voice model, test the microphone, try a dictation."],
+        ["them-1", "People drop off on the microphone permission screen, about a third of them."],
+        ["them-2", "We could explain why we need it before Windows asks."],
+        ["you", "Let's do that, with one sentence and a picture."],
+        ["them-1", "Dark mode has a contrast problem on the grey buttons, they fail accessibility checks."],
+        ["them-2", "I'll fix the tokens so every button meets the contrast ratio."],
+        ["you", "And the tutorial video?"],
+        ["them-1", "I'd drop it. Nobody watched it past ten seconds in testing."],
+        ["you", "Agreed, the video goes."]
+      ]
+    },
+    {
+      "id": 106,
+      "title": "Launch go/no-go",
+      "start": "2026-10-15T15:00:00+01:00",
+      "participants": ["Dana Whitfield", "Marcus Lee", "Tom Okafor"],
+      "speakers": { "them-1": "Dana Whitfield", "them-2": "Marcus Lee", "them-3": "Tom Okafor" },
+      "lines": [
+        ["them-2", "The signing certificate arrived this morning but the store review takes ten working days."],
+        ["them-1", "So the third of November is out?"],
+        ["them-2", "Yes. The earliest safe date is the seventeenth of November."],
+        ["them-3", "Then we move the launch to the seventeenth. I'll tell the board."],
+        ["them-1", "I'll push the embargo and the press briefing back two weeks."],
+        ["you", "Do we keep the beta Windows only?"],
+        ["them-2", "Yes, the Mac build still waits for December."]
+      ],
+      "summary": "## Decisions\n- The launch moves from 3 November to 17 November (the store review takes ten working days)\n- The beta stays Windows only\n\n## Action plan\n### Tom Okafor\n- [ ] Tell the board about the new launch date\n### Dana Whitfield\n- [ ] Move the embargo and press briefing back two weeks"
+    },
+    {
+      "id": 107,
+      "title": "1:1 with Priya",
+      "start": "2026-10-16T13:00:00+01:00",
+      "participants": ["Priya Shah"],
+      "speakers": { "them-1": "Priya Shah" },
+      "lines": [
+        ["you", "How are you finding the new role?"],
+        ["them-1", "Good, but I'd like to take over the vendor contracts properly from next month."],
+        ["you", "That makes sense. What do you need for it?"],
+        ["them-1", "A procurement course. It's twelve hundred pounds and runs in November."],
+        ["you", "Book it, it comes out of the training budget."],
+        ["them-1", "Also, the open-plan noise is getting to me. Could I move to a desk by the window?"],
+        ["you", "I'll ask facilities on Monday."]
+      ]
+    },
+    {
+      "id": 108,
+      "title": "Hiring sync",
+      "start": "2026-10-19T10:00:00+01:00",
+      "participants": ["Priya Shah", "Sam Rivera"],
+      "speakers": { "them-1": "Priya Shah", "them-2": "Sam Rivera" },
+      "lines": [
+        ["them-2", "Two candidates made the final round for the support engineer job: Farah and Jonah."],
+        ["them-1", "Farah was much stronger on SQL and stayed calm in the role play."],
+        ["them-2", "Jonah has more scripting experience but struggled with the angry customer exercise."],
+        ["you", "I'd go with Farah."],
+        ["them-1", "Agreed. She asked for thirty-eight thousand, which fits the band."],
+        ["them-2", "She can start in mid-January after her notice period."],
+        ["you", "Send the offer today."]
+      ]
+    },
+    {
+      "id": 109,
+      "title": "Weekly standup",
+      "start": "2026-10-21T09:30:00+01:00",
+      "participants": ["Marcus Lee", "Dana Whitfield"],
+      "speakers": { "them-1": "Marcus Lee", "them-2": "Dana Whitfield" },
+      "lines": [
+        ["them-1", "The flaky tests are fixed: it was a race in the audio mock, not the tests themselves."],
+        ["them-2", "The press list is done, forty-two journalists and six newsletters."],
+        ["you", "Nice. Anything for this week?"],
+        ["them-1", "I'm on holiday all of next week, so reviews go to Grace."],
+        ["them-2", "I'll send the embargoed builds on Friday."]
+      ]
+    },
+    {
+      "id": 110,
+      "title": "Customer call: Harbour Dental",
+      "start": "2026-10-22T11:00:00+01:00",
+      "participants": ["Ruth Adler"],
+      "speakers": { "them-1": "Ruth Adler" },
+      "lines": [
+        ["them-1", "Our patients keep asking for text message reminders the day before their appointment."],
+        ["you", "SMS reminders are planned, we're picking a provider now."],
+        ["them-1", "The other problem is double bookings on Monday mornings, it's happened three times this month."],
+        ["you", "That sounds like the recurring appointments bug. I'll get an engineer on it."],
+        ["them-1", "And honestly eighty-nine pounds a month is steep for a practice our size."],
+        ["you", "Let me see if the small-practice plan fits you better."]
+      ]
+    },
+    {
+      "id": 111,
+      "title": "Offsite planning",
+      "start": "2026-10-23T14:00:00+01:00",
+      "participants": ["Tom Okafor", "Dana Whitfield"],
+      "speakers": { "them-1": "Tom Okafor", "them-2": "Dana Whitfield" },
+      "lines": [
+        ["them-1", "Lisbon or Porto for the offsite? Lisbon has more direct flights."],
+        ["them-2", "Porto is cheaper and the venue near the river has a big room for workshops."],
+        ["you", "Let's go with Lisbon, flights matter more for a two-day trip."],
+        ["them-1", "Dates: the fourth to the sixth of December."],
+        ["them-1", "The whole budget is nine and a half thousand, flights included."],
+        ["them-2", "I'll book the venue by next Wednesday."],
+        ["you", "Can someone sort out a vegetarian option for the team dinner?"],
+        ["them-1", "I'll handle the dinner."]
+      ]
+    },
+    {
+      "id": 201,
+      "title": "Dentist",
+      "start": "2026-10-02T08:00:00+01:00",
+      "notes": "Appointment with Dr Patel at Riverside Dental on Thursday 6 November at 9:40. Check-up and a scale and polish. Bring the exemption form."
+    },
+    {
+      "id": 202,
+      "title": "Lisbon ideas",
+      "start": "2026-10-23T18:00:00+01:00",
+      "notes": "For the offsite: the Alfama walking tour on the first morning, dinner somewhere with fado, and a day trip to Sintra if the weather holds. Book the walking tour two weeks ahead."
+    },
+    {
+      "id": 203,
+      "title": "Vendor contracts",
+      "start": "2026-10-17T09:00:00+01:00",
+      "notes": "Contracts to review before handing them to Priya: the cloud hosting deal renews on 1 December, the SMS provider trial ends in November, the design agency retainer is paused."
+    },
+    {
+      "id": 204,
+      "title": "Car service",
+      "start": "2026-09-20T12:00:00+01:00",
+      "notes": "The car is due its 60,000-mile service: £340 plus £95 for front brake pads. MOT expires 3 January."
+    },
+    {
+      "id": 205,
+      "title": "Book club",
+      "start": "2026-10-05T19:00:00+01:00",
+      "notes": "Next book: The Remains of the Day. Meeting at Sarah's on the 28th at 7:30."
+    }
+  ],
+  "questions": [
+    { "q": "How much was the venue quote for the offsite?", "tags": ["number"], "gold": [{ "note": 101, "line": 1 }] },
+    { "q": "Who has to approve moving the catering money?", "tags": ["paraphrase"], "gold": [{ "note": 101, "line": 4 }, { "note": 101, "line": 5 }, { "note": 101, "field": "summary" }] },
+    { "q": "Are we allowed to take on new staff at the moment?", "tags": ["paraphrase"], "gold": [{ "note": 101, "line": 6 }, { "note": 101, "field": "summary" }] },
+    { "q": "What did Priya say about contractors?", "tags": ["name"], "gold": [{ "note": 101, "line": 8 }] },
+    { "q": "When was the beta first supposed to come out?", "tags": ["paraphrase"], "gold": [{ "note": 102, "line": 0 }, { "note": 106, "line": 1 }, { "note": 106, "field": "summary" }] },
+    { "q": "What's wrong with the installer?", "tags": ["keyword"], "gold": [{ "note": 102, "line": 1 }] },
+    { "q": "When does the press embargo lift?", "tags": ["keyword"], "gold": [{ "note": 102, "line": 6 }] },
+    { "q": "What does Northwind need before they'll renew?", "tags": ["paraphrase"], "gold": [{ "note": 103, "line": 1 }, { "note": 103, "line": 4 }, { "note": 103, "field": "summary" }] },
+    { "q": "How many seats does Northwind have?", "tags": ["number"], "gold": [{ "note": 103, "line": 2 }] },
+    { "q": "What did Elena ask for besides single sign-on?", "tags": ["name", "paraphrase"], "gold": [{ "note": 103, "line": 6 }] },
+    { "q": "Who offered to take Mondays on the support rota?", "tags": ["name"], "gold": [{ "note": 104, "line": 4 }] },
+    { "q": "Why were the tests failing?", "tags": ["paraphrase"], "gold": [{ "note": 109, "line": 0 }] },
+    { "q": "What did we decide about the tutorial video?", "tags": ["keyword"], "gold": [{ "note": 105, "line": 7 }, { "note": 105, "line": 8 }] },
+    { "q": "Where do people give up during setup?", "tags": ["paraphrase"], "gold": [{ "note": 105, "line": 1 }] },
+    { "q": "What launch date did we agree last week?", "tags": ["date"], "gold": [{ "note": 106, "line": 2 }, { "note": 106, "line": 3 }, { "note": 106, "field": "summary" }] },
+    { "q": "What launch date were we planning on in September?", "tags": ["date"], "gold": [{ "note": 102, "line": 0 }] },
+    { "q": "Why did the launch slip?", "tags": ["paraphrase"], "gold": [{ "note": 106, "line": 0 }, { "note": 106, "field": "summary" }] },
+    { "q": "How much does Priya's course cost?", "tags": ["name", "number"], "gold": [{ "note": 107, "line": 3 }] },
+    { "q": "What did Priya ask me for in our one-to-one?", "tags": ["name"], "gold": [{ "note": 107, "line": 1 }, { "note": 107, "line": 3 }, { "note": 107, "line": 5 }] },
+    { "q": "Which candidate are we hiring for support?", "tags": ["paraphrase"], "gold": [{ "note": 108, "line": 3 }, { "note": 108, "line": 4 }] },
+    { "q": "What salary did the new support hire want?", "tags": ["paraphrase", "number"], "gold": [{ "note": 108, "line": 4 }] },
+    { "q": "Who reviews code while Marcus is away?", "tags": ["name", "paraphrase"], "gold": [{ "note": 109, "line": 3 }] },
+    { "q": "What did the dental practice complain about?", "tags": ["paraphrase"], "gold": [{ "note": 110, "line": 2 }, { "note": 110, "line": 4 }] },
+    { "q": "How much does Harbour Dental pay each month?", "tags": ["number"], "gold": [{ "note": 110, "line": 4 }] },
+    { "q": "Which city did we pick for the offsite?", "tags": ["paraphrase"], "gold": [{ "note": 111, "line": 2 }] },
+    { "q": "When is the offsite?", "tags": ["keyword"], "gold": [{ "note": 111, "line": 3 }] },
+    { "q": "What's the total budget for the trip?", "tags": ["paraphrase", "number"], "gold": [{ "note": 111, "line": 4 }] },
+    { "q": "What should we do on the first morning in Lisbon?", "tags": ["notes"], "gold": [{ "note": 202 }] },
+    { "q": "When is my teeth cleaning?", "tags": ["notes", "paraphrase"], "gold": [{ "note": 201 }] },
+    { "q": "When does the hosting contract renew?", "tags": ["notes"], "gold": [{ "note": 203 }] },
+    { "q": "What did we decide in my last meeting?", "tags": ["latest"], "gold": [{ "note": 111, "line": 2 }, { "note": 111, "line": 3 }] },
+    { "q": "What did I promise Ruth?", "tags": ["name"], "gold": [{ "note": 110, "line": 3 }, { "note": 110, "line": 5 }] },
+    { "q": "What did Tom say he'd do about the dinner?", "tags": ["name"], "gold": [{ "note": 111, "line": 7 }] },
+    { "q": "What did Dana say yesterday?", "tags": ["date", "none"], "gold": [] },
+    { "q": "What did we decide about moving office?", "tags": ["none"], "gold": [] }
+  ]
+}

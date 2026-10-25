@@ -1514,6 +1514,7 @@ fn add_words(app: &AppHandle, words: &[Suggestion]) -> Result<Vec<String>, Strin
                 to: s.term.clone(),
                 fuzzy: true,
                 snippet: false,
+                starred: false,
             });
             added.push(s.term.clone());
         }
@@ -1702,6 +1703,7 @@ mod tests {
             to: to.into(),
             fuzzy: true,
             snippet: false,
+            starred: false,
         }
     }
 

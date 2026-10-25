@@ -54,7 +54,7 @@
         if (a?.cleanup === 'cloud' && !setup.cleanupEnabled) setup.cleanupMode = 'cloud';
       })
       .catch(() => {});
-    invoke('list_audio_devices')
+    invoke('list_mics')
       .then((d) => (setup.devices = d || []))
       .catch(() => {});
     const onVis = () => {

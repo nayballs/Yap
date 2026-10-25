@@ -12,7 +12,7 @@ kind, a folder each:
 
 | Folder | What's in it |
 |---|---|
-| `views/` | The main window: `ControlPanel.svelte` (sidebar, title bar, the Settings modal, toasts) and its views. A view with parts of its own has a folder: `home/` (`HomeView`, `homeData.js`), `chat/`, `notes/`, `integrations/` (`IntegrationsView`, `CalendarLinkCard`, `McpLinkCard`); the rest are one file (`InsightsView`, `UploadView`, `MeetingsView`, `TasksView`, `DictionaryView`) |
+| `views/` | The main window: `ControlPanel.svelte` (sidebar, title bar, the Settings modal, toasts) and its views. A view with parts of its own has a folder: `home/` (`HomeView`, `homeData.js`), `chat/`, `notes/`, `integrations/` (`IntegrationsView`, `CalendarLinkCard`, `McpLinkCard`), `dictionary/` (`DictionaryView`, `ImportPreview`, `dictionaryList.js`, `dictionaryFile.js`); the rest are one file (`InsightsView`, `UploadView`, `MeetingsView`, `TasksView`) |
 | `settings/` | The Settings modal: `Settings.svelte`, its pages and every part only Settings uses (the module map: [frontend-settings.md](./frontend-settings.md#the-module-map-split-2026-10-24)) |
 | `notepad/` | The meeting notepad window, and its split-screen preview (`SplitPreview.svelte`) |
 | `onboarding/` | The first-run window |
@@ -412,6 +412,10 @@ Flow's dark mode of 19 Oct 2026), for every Yap window.
   ControlPanel's code and most of the rest in IPC: 77 calls per load, 64
   before Home shows (50 `plugin:event|listen`, `get_config` ×4,
   `installed_models` ×2). Fewer round trips there is the start-up win.
+  One part of it loads when first used: the Dictionary view's Import… /
+  Export… (`dictionaryFile.js` + `ImportPreview.svelte`, ~16 KB, 2026-10-25),
+  which kept the main chunk under the 700 KB warning (678 → 697 KB with
+  the view's search, stars, sorts and selection in it).
 - **Home's first paint** (2026-10-24): Home's data comes in **one call
   asked first** — `home_snapshot` (`dictation/commands.rs`, async: off the window's
   thread; the history page, the stats, the settings Home shows, the
@@ -461,7 +465,8 @@ Flow's dark mode of 19 Oct 2026), for every Yap window.
   else Whisper Large v3 Turbo; the rest behind "More models (12)", as the AI
   cleanup step does, so the Download button shows without scrolling; a model
   already installed or being set up further down keeps the list open) →
-  mic check (live level meter via `set_mic_test` idle-amp mode + live device switch)
+  mic check (live level meter via `set_mic_test` idle-amp mode — the bar's
+  perceptual levels, `dictation/meter.rs`, "Hearing you" above 0.3 — + live device switch)
   → one-click **local AI cleanup** install (the model recommended for this PC
   first and picked: Qwen3.5 4B with a graphics card that can run it, "Your
   <card> runs Qwen3.5 4B quickly…", else Qwen2.5 1.5B; then Qwen2.5 1.5B as
@@ -521,8 +526,8 @@ Flow's dark mode of 19 Oct 2026), for every Yap window.
   I said and Copy what I said —, Run again, Play, Delete…; the trash asks
   too), Meetings' past notes (Open, Generate summary, Copy as Markdown,
   Delete… via `meeting_delete`; a hover ⋯) and calendar meetings (Open note
-  + their row buttons), Dictionary rows (Edit, ≈ Catch near-misses,
-  Delete…; × asks too unless the row is empty), model rows (`ModelRow`:
+  + their row buttons), Dictionary rows (Edit, Star, ≈ Catch near-misses,
+  Delete…; × asks too unless the row is empty; a delete has Undo), model rows (`ModelRow`:
   speech, speaker, Kokoro — Download / Use / Delete…) and the local LLM
   cards (Download / Use / Delete…, now asked first), Connectors' calendars
   (their ⋯ = this menu: Sync now, Disconnect… asked first), Account's other

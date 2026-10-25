@@ -98,6 +98,33 @@ a web mail page, a chat page, a plain page, PowerShell, the Claude Code
 stand-in). Not yet tried with a real voice in real Outlook, Slack or
 WhatsApp, nor the 1.5B on a PC without a graphics card day to day.
 
+**Dictation polish** (2026-10-25, Wispr Flow's by behaviour): **Paste last
+transcript** and **Copy last transcript** on shortcuts of their own
+(Settings → Shortcuts, unbound by default; Copy last also in the tray; the
+copy out of Win+V history, `pasting/last.rs`); **"Taking longer than
+usual…"** on the bar when the transcription or the AI cleanup runs well
+past this PC's usual time — measured (`stt_speed`'s timings, this
+session's dictations and cleanups), 2.5× + 1 s, never before 4 s — with
+**Skip cleanup** for a slow cleanup, local or cloud (`dictation/slow.rs`);
+**the 15-minute limit** warned a minute before on the bar, then stopped,
+transcribed and pasted back into its own window (or left on the
+clipboard) with **Recover text** (`dictation/cap.rs`; before, the buffer
+stopped growing with only a log line); **a level meter that moves for
+whispers** (`dictation/meter.rs`: dB over the mic's noise, gently
+compressed); **"Hold on, still transcribing…"** when the shortcut is
+pressed during a transcription. Tested: unit tests (the meter's scale and
+floor, the usual time and its threshold, the limit's crossings and words,
+the shortcuts' clash rules); e2e `dictation-polish.spec.js` (8: the
+Settings rows, both shortcuts through `e2e_shortcut`, a slowed stub
+transcription, a slowed fake cleanup skipped from the bar, an 8 s limit
+with Recover text, whisper and full-scale tones on the waveform, Hold on);
+robot (`last-transcript.real.js`: Paste last into the test pad and an Edge
+text box, Copy last's private clipboard; `dictation-extras.real.js`: a 2 s
+limit pasting a spoken dictation, Recover text's clipboard). Not yet tried
+by hand: the shortcuts on a real keyboard, a real slow model (a big local
+model's first cleanup, a slow network) and a real 15-minute dictation; how
+the whisper meter looks with a real quiet voice on different mics.
+
 **Trusting a dictation** (2026-10-22): **the speech engine's device on each
 PC** (`dictation/stt_speed.rs`: a one-time background benchmark per model at three
 dictation lengths, Settings → Speech-to-Text → Speed "Runs on: graphics card
@@ -194,7 +221,16 @@ speech not yet tried by a person.
 builds), and the dictation pipeline around it is complete: multi-engine STT
 (Whisper/Vulkan + ONNX/DirectML), the 14-model registry + manager, recording modes
 (push-to-talk with double-tap hands-free and coaching tips, 2026-10-17), a dead-mic
-watchdog (reopen, then "No sound from <mic>"),
+watchdog (reopen, then "No sound from <mic>"), **microphone management**
+(2026-10-25, `dictation/mics.rs`: an order of microphones — the first
+connected, then Windows' default —, "Contoso H2 connected · Use it for
+dictation?" for a new one, "Using …" when the order switches by itself, and a
+microphone unplugged mid-dictation ending it, its words transcribed, pasted
+only into their own window and kept, the next dictation on the next one; a
+meeting moving to the next microphone with a marker — unit-tested, e2e-tested
+with made-up devices (`mics.spec.js`, `meeting-mic.spec.js`); Core Audio's
+real notifications, a real USB headset pulled out mid-dictation and a
+Bluetooth headset in the order are not yet tried by a person),
 language/translate, **AI cleanup** (BYO key or local sidecar — Qwen3.5 4B on a capable
 graphics card, else Qwen2.5 1.5B, 2026-10-18, chosen and measured with the model
 evaluations; cleanup ~0.34 s a dictation on the 4B, ~0.13 s on the 1.5B, on an RTX
@@ -281,9 +317,20 @@ watch's ends unit-tested, the prompt/Add/toggle/bar card, a fix-then-send
 and a removed word e2e-tested through staged edits and field reads, the UIA
 reads and Windows' spell checker by `--ignored` tests on hidden windows —
 not yet tried in real apps),
+**the Dictionary view for hundreds of entries** (`views/dictionary/`,
+2026-10-25: search with Ctrl+F, stars (starred words lead the Whisper
+prompt) and four remembered sorts, select several with a bar for Delete…
+with Undo, ≈ and Export…, Import… / Export… as CSV or text with a preview
+of what's added, already there, spelled differently and left out; the
+parsing, sorting and Undo rules unit-tested, the view e2e-tested in light
+and dark with 2,000 entries measured quick in the stub debug build; not yet
+tried with a file exported from another app or by hand in Excel),
 the Groq usage meter, and the installer + auto-updater (background checks + download
 while Yap runs, "Restart to update" from toast/tray/About/Windows notification —
-`updates.rs`, 2026-10-05) + portable mode + release CI.
+`updates.rs`, 2026-10-05) + portable mode + release CI (since 2026-10-25 every
+release also carries `SHA256SUMS.txt` and a build provenance attestation for the
+installer — actionlint-checked and dry-run against v0.1.0, not yet through a real
+release or nightly run; [updates-and-release.md](./updates-and-release.md)).
 The **Yap bar** (`bar.rs`, 2026-10-05, after Wispr Flow's Flow Bar) is the
 always-there surface: a pill above the taskbar on the cursor's monitor,
 clickable only where it draws, never focused, hidden over fullscreen apps,
@@ -519,7 +566,16 @@ plan's 8,000 a minute makes the next answer wait), Gemini 3.5 Flash on a
 free key has no Google Search grounding ("check your plan and billing")
 and fell back to bg3.wiki correctly; Gemini 2.5 Flash/Flash-Lite are
 closed to new keys. Anthropic, OpenAI and OpenRouter searches untried
-with real keys; Gemini grounding untried on a billed key.
+with real keys; Gemini grounding untried on a billed key. **Units where the
+person is**: web pages' temperatures (2026-10-23), speeds and distances
+(2026-10-25, `ai/about_you/units.rs`: mph and miles for the UK and the US,
+km/h and km elsewhere) reach the model in the person's units first, with a
+line saying so — unit-tested, and model-evaluated on stand-in pages
+(Qwen3.5-4B 35/35 on the wind and distance scenarios, from 10/35; Groq
+gpt-oss-20b 2/2; Qwen3.5-2B's fixed pipeline 14/14; model-evals.md); not yet
+checked against real weather sites through Exa or Tavily. A Voice Assistant
+already speaking a step's opening words that turn out to come before a tool
+call now stops, and says the answer from its start (2026-10-25, e2e-tested).
 
 **Memory** (`memory.rs`, 2026-10-22; [memory.md](./memory.md)): what Yap
 remembers about the person, learned from quiet chats (and, opt-in,
@@ -556,10 +612,58 @@ is written, not yet run; an HDR-aware app's swatches (Edge) on the HDR
 monitor; a real Anthropic / OpenAI / Gemini / OpenRouter request with an
 image (shapes from their docs; the fake's checked).
 
+**Snip to Chat, phase 2** (2026-10-25, [snip.md](./snip.md)): a click or
+Enter takes the whole monitor, Space or Alt picks a window (its DWM frame), a
+box can cross monitors (put together from each frame); Ctrl as you let go
+copies (PNG + DIB, out of Win+V history), Shift saves (the dialog, the folder
+used last), and a chat screenshot's menu does both; pictures pasted or
+dropped into Chat go in like a snip (Windows' decoders); "Send its text
+instead" sends a screenshot's text, read by Windows' OCR on this PC, to a
+model that can't read images; "Reads images" in the model picker and
+Settings' Chat list. **Tested**: unit (the selection state machine, the
+geometry across monitors, the DIB, the decoders, and Windows' **real OCR on
+a fixture** on the maintainer's PC), e2e (`e2e/snip.spec.js`, now 19 tests
+over fake monitors and windows: every action above, a synthetic paste and a
+Tauri drop event, a fake OCR text, the tags), and **robot-tested on the
+maintainer's PC** (`e2e-real/snip.real.js`, 5 of 5, 25 Oct — which also
+settles phase 1's "not yet run" above: real drags over Edge swatches on
+both monitors, the HDR one included, within ±2, the overlay up in 92–101
+ms in a debug build, a real Esc): a real click and Enter for the whole
+monitor, Space and a real click picking the Edge window exactly, Ctrl held
+on a real release putting the very PNG, a DIB and the privacy formats on
+the real clipboard, and a real Ctrl+V pasting it into Chat pixel for pixel.
+**Not yet tried**: a real drop from File Explorer (the e2e test sends
+Tauri's own event), the Save dialog by hand, a box across monitors on real
+mixed-DPI monitors (the maintainer's two are both 100 %), OCR quality on
+real screenshots beyond the fixture (small print, other languages),
+picking windows on a third monitor or a rotated one.
+
+**Meeting search and Ask across meetings** (2026-10-25,
+[search.md](./search.md)): every meeting and note cut into passages and read
+by EmbeddingGemma-300M on Yap's own llamafile (downloaded on demand from
+Settings → Privacy & data, 318 MiB), the vectors kept in
+`search-index/` in the background and never in a dictation's way; hybrid
+search (BM25 + meaning, weighted RRF, the question's dates and the voices it
+names); the Meetings view's moments; Chat's Ask across meetings citing
+passages as pills that open the meeting at the line, kept for follow-ups,
+with the passages themselves when no model is set up. **Measured**
+(`yap.exe eval --search`, 33 questions over a made-up team's meetings):
+recall@1 0.82 / @3 1.0 hybrid against 0.30 / 0.67 for Chat's whole-note
+keyword search; on an RTX 5070 Ti 100 passages/s and a question in ~8 ms,
+on its processor 14 passages/s and ~14 ms; answers 33/35 on Qwen3.5-4B,
+4/5 on Groq gpt-oss-20b. Unit-tested (passages, store, dates, ranking, the
+checks) and e2e-tested against a stand-in embedding server
+(`e2e/meeting-search.spec.js`, 5 tests). **Not yet tried**: a real year of
+meetings (thousands of passages) on a laptop's processor, the app's own
+download from Hugging Face (tested against a stand-in), a dictation started
+mid-batch against the real server (the batch is dropped by the meeting
+digests' `unless_busy`, not exercised here end to end), and other languages'
+meetings (the model reads 100+; the keyword half's stemming is English).
+
 ## Not yet done
 
-Not yet done: the AI Chat surface has no semantic-vector
-search (keyword-RAG only; its answers stream since 2026-10-22 —
+Not yet done: the AI Chat surface searches by meaning only when asked
+across the meetings (search.md; elsewhere keyword-RAG; its answers stream since 2026-10-22 —
 unit- and e2e-tested against stand-ins, measured on the on-device
 Qwen3.5-4B and Groq, not yet through a real Anthropic, Gemini, OpenAI or
 OpenRouter stream, whose shapes are taken from their docs), no calendar tools and no conversation
@@ -582,7 +686,10 @@ from attendees, the speaker map and names said)
 and remove speaker echo only from chunks that are entirely the call (see
 [`docs/meetings.md`](../meetings.md) "Limits"), and a real call (live
 WASAPI loopback + a real LLM's action plan, a headset plugged in mid-call, a
-hotkey dictation mid-call) still wants one hands-on pass; the refine after
+hotkey dictation mid-call, the mic unplugged mid-call) still wants one
+hands-on pass; the microphones' order and the unplug handling have only
+met made-up devices in tests (a real headset's plug, unplug and Bluetooth
+wake-up are the maintainer's to try); the refine after
 a meeting judges models by the leaderboard's figures and the meeting's
 language by Settings or Windows (not measured, not detected), and lowers
 only its calling thread's priority; the speaker engine isn't run again

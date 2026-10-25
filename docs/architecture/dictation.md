@@ -124,8 +124,9 @@ to **Run again** from Home.
   audio (`mic::Sink` for `Shared`: downmixed→mono, resampled→16 kHz on the
   audio thread) is buffered while recording — and from the moment
   `start_recording` begins (`gather`), so a cold mic's first audio is all
-  kept —, and emits a throttled **peak amplitude** (`yap-amp`) for the
-  scrolling waveform; while idle and the mic is warm it keeps a rolling
+  kept —, and emits a throttled **level** (`yap-amp`: each ~80 ms's peak on
+  a perceptual scale, `dictation/meter.rs`) for the scrolling waveform;
+  while idle and the mic is warm it keeps a rolling
   ~300 ms **pre-roll** ring that `start_recording` prepends (anti
   first-word-clipping; never a closed mic's stale ring). **The start chime
   follows the mic, not the key** (2026-10-22): `start_recording` holds the
@@ -261,8 +262,11 @@ to **Run again** from Home.
   `tts::sends_by_itself`: "Talk back hands-free" or "press enter" said) and
   keeps it in history. A `processing` guard blocks
   starting a new recording while one is still transcribing (no overlapping `run_stt`
-  / duplicate model load), and the buffer is capped at 15 min so a stuck key can't
-  OOM. **The guard goes with the task, however it ends** (`Busy`,
+  / duplicate model load) — the press is ignored, and since 2026-10-25 the
+  bar says "Hold on, still transcribing…" (`yap-dictation-busy`, for
+  2.5 s) — and a recording stops at its **length limit**
+  (`dictation/cap.rs`, below: 15 minutes, warned at 14, nothing lost; the
+  buffer never grows past it, so a stuck key can't OOM). **The guard goes with the task, however it ends** (`Busy`,
   2026-10-23): a stop's `run_stt`, Undo, Upload, Run again and robot mode's
   dictations each hold a `Busy` (`take`: refused while held; `hold` for a
   stop), spawned with it (`spawn_busy`) or done by hand (`done`). A panic in
@@ -287,9 +291,9 @@ to **Run again** from Home.
   `model_unload_timeout`; the next dictation lazily reloads it. **No microphone** (none
   plugged in, a headset that connects after login, a CI runner) doesn't take the
   pipeline down: no stream is open until a recording needs one, every recording
-  tries to open it (`dictation/mic.rs`), picking a mic (`set_input_device`) switches a
-  running stream live or checks the device is there, and a recording
-  attempt without one says "No microphone found" (on the overlay) — or, when
+  tries to open it (`dictation/mic.rs`) — the first microphone in the person's
+  order that's connected, then Windows' default (`dictation/mics.rs`, below) —
+  and a recording attempt with none says "No microphone found" (on the overlay) — or, when
   Windows' privacy switches are why, "Windows is blocking microphone access for
   desktop apps" (`dictation/mic_privacy.rs`) — Upload, models and Settings work regardless. **Dead-mic watchdog** (`dictation/mic_watch.rs`): the audio
   callback tallies each recording's live audio (`mic_tally`: how much, any sample
@@ -311,6 +315,31 @@ to **Run again** from Home.
   watchdog's report, which then blames the switch instead of the mic.
   Opening, closing, the device switch and the reopen all happen on the mic's
   own thread (`dictation/mic.rs`; the reopen stops the dead stream first).
+  **The mic unplugged mid-dictation** (2026-10-25, `pipeline/unplugged.rs`):
+  until then the recording went on hearing nothing (its stream had stopped
+  and the watchdog had stopped watching once the mic first worked). Now the
+  mic's thread tells the dictation recording from it (`mic::Sink::lost`,
+  on a thread of its own) and pure `on_lost(recording, ours, robot, heard,
+  samples)` decides: it heard something (≥ 0.25 s, not all zeros) → it ends
+  as a stop would (`stop_and_transcribe`: stop chime, other apps back) and
+  what it heard is transcribed and kept like any dictation (history, its
+  audio a day in `recent_audio`), pasted **only into the window it was
+  for** (`unplugged` set → `inject_text`'s strict paste, as Undo's: a window
+  gone leaves it on the clipboard, and
+  Home lists it as "Didn't paste · Your microphone was disconnected and its
+  window was gone", with Copy and Run again); nothing heard → it ends at once
+  (`end_now`, shared with `end_without_mic`), the bar saying "<mic> was
+  disconnected". Either way **one** alert (`lost_alert`, kind `micLost`,
+  button **Microphones** → Settings), by what became of the words
+  (`Outcome`): "Contoso H2 disconnected · Yap stopped the dictation and
+  pasted what it heard. The next one uses Fabrikam USB Mic." — or "What it
+  heard is on the clipboard: press Ctrl+V." (instead of Undo's own "Your text
+  is copied"), "kept what it heard" (the Chat box, the assistant, no words:
+  said once the transcription is done) or "before it heard anything"; the
+  paste says it (`tell_unplugged`, once). The next microphone named is the
+  next one in the order, which the next dictation opens (the one lost passed
+  over while Windows still lists it). Unit tests (`unplugged::tests`), e2e
+  `mics.spec.js`.
   **Cancel and Undo**: `cancel(undo)` — the bar's ✕, the tray's Cancel and
   `cancel_recording` keep a recording of ≥ 0.5 s that heard a sound in `kept`
   (`Kept`: its audio, `target_hwnd`, `target_kind`, edit mode and selection)
@@ -366,7 +395,7 @@ to **Run again** from Home.
   (press = key down w/ required modifiers held, release = key up OR required
   modifier up; chords fire on completion; suppressed keys are excluded from the
   GetAsyncKeyState self-heal — the hook eats them before the key-state table
-  updates). Seven bindings: dictation, edit (`edit-key-*`, Commands' rewrite
+  updates). Nine bindings: dictation, edit (`edit-key-*`, Commands' rewrite
   shortcut), the meeting
   shortcut (`meeting-key-*`, `configure_meeting`; only its press is used —
   `meeting_guard`) and the Voice Assistant's (`assistant-key-*`,
@@ -376,11 +405,16 @@ to **Run again** from Home.
   `read_aloud::read_selection`) and "Use what I said" (`as-said-key-*`,
   `configure_as_said`/`_from`, unbound by default, giving way to any of the
   other five; only its press is used — `as_said::swap_soon`), then Snip to
-  Chat's (`snip-key-*`, [snip.md](./snip.md)). Beside them, **up to 12
+  Chat's (`snip-key-*`, [snip.md](./snip.md)), then **Paste last
+  transcript** and **Copy last transcript** (2026-10-25; `paste-last-key-*`
+  / `copy-last-key-*`, `configure_paste_last`/`_from`,
+  `configure_copy_last`/`_from`; unbound by default, each giving way to
+  every shortcut older than it — `older_shortcuts`, `unless_clash`; only
+  the press is used — `pasting/last.rs`, [pasting.md](./pasting.md)). Beside them, **up to 12
   saved transforms' shortcuts** (`TRANSFORM_BINDINGS`, a slot each;
   `configure_transforms_from` at setup and every save,
   `transforms::assign` giving each transform with a key a slot in list
-  order unless it would fire with one of the seven or an earlier
+  order unless it would fire with one of the nine or an earlier
   transform's — left unbound, logged; `configure_transform(id, spec)` is
   Settings' pause while a key is picked); a slot's press goes to the
   forwarder as `transform-key-N` and out as one `transform-key-pressed`
@@ -530,7 +564,7 @@ to **Run again** from Home.
   `LanguageShortcut { id, language (code | "auto"), translateTo, hotkey }`,
   at most `MAX_SHORTCUTS` 4): `input_hook.rs`'s four language slots
   (`configure_languages_from`; `assign`, pure: never a key that fires with
-  one of the seven fixed shortcuts or an earlier one; **transforms give way
+  one of the nine fixed shortcuts (Paste last and Copy last included) or an earlier one; **transforms give way
   to them**, `transforms::fixed_shortcuts`), press **and release** as
   `language-key {slot, pressed, at}` (`init` → `Pipeline::on_language_key`),
   plus the in-page fallback (`language_key`). A press records exactly as the
@@ -621,6 +655,73 @@ to **Run again** from Home.
   same wait covers. Against the old always-open ring, a cold start on a
   wired mic loses what was said in the 300 ms before the press and the
   ~30 ms after it.
+  **Which microphone, and a device going** (2026-10-25, `dictation/mics.rs`):
+  `open` tries `mics::candidates(order, Windows' list, away)` in turn — the
+  person's order (`config.mic_order`), then Windows' default; one that won't
+  open gives way to the next; none at all → "No microphone found". The
+  running stream knows its endpoint (`Running.endpoint`). Windows' list
+  changing (`mics::on_change` → `Cmd::Devices`) and cpal's error callback
+  (every error stops a WASAPI stream: `DeviceNotAvailable` when it's
+  unplugged → `Cmd::Stopped { serial }`) both come to the mic's thread:
+  pure `after_stop(listed, held, reopened_lately)` → **Reopen** the same
+  device once (Windows still lists it: a reset, a format change in Sound
+  settings) or **Lost** (`Sink::lost`; the device goes on an `away` list for
+  10 s or until Windows drops it; the mic test or "Keep the microphone
+  ready" opens the next one at once). A microphone that comes first now (a
+  higher one plugged in, the order changed in Settings, Windows' default
+  moved for someone on it) is used from the next dictation, **never in the
+  middle of one** (`reconsider`): a warm stream on another closes, one the
+  mic test or "Keep the microphone ready" holds moves. The Bluetooth rules
+  are the stream's (never warm, closed after the stop chime), whichever
+  microphone in the order it is, and a ranked headset that's connected but
+  asleep holds nothing up: the recording starts at once and the chime
+  waits for its first audio, as above. `Status` has `device` and `losses`.
+  A test run's made-up microphones (`mics::fake`) open as a quiet tone
+  (`fake::Tone`, real-time pace) that stops by itself when unplugged.
+- **`dictation/mics.rs`** (+ `mics/watch.rs`, `mics/offer.rs`) — **the
+  microphones' order and Windows' list** (2026-10-25; Wispr Flow's ranked
+  mics, by behaviour). `MicChoice { id, name }` (`config.mic_order`,
+  `mic_not_now`): kept by its Core Audio **endpoint id**, the same when the
+  device is plugged in again, with its name for one picked before ids were
+  kept (`migrate_once` v4) or plugged into another port (`matches`: the id,
+  else the name when no device has that id). `Endpoint { id, name,
+  bluetooth, default, virtual }`: Windows' active capture endpoints
+  (`win::capture_endpoints`, the default first; `virtual` = enumerator
+  "ROOT", a streaming app's). Pure: `candidates(order, present, away)` →
+  `[Target]` (each connected one in order, then Windows' default — the next
+  one if the default is away; `Target::Default` only when Windows' list
+  couldn't be read, as before), `in_use`, `rank_of`, `short_name`
+  ("Headset Microphone (Contoso H2)" → "Contoso H2"), `on_arrival(ep, order,
+  not_now, present)` → **Ask** (new to Yap, not what Yap uses) / **Using**
+  (in the order and now in use: higher than the one before) / **Quiet** (lower
+  in the order, "Not now" before, virtual, or Windows' new default that Yap
+  follows anyway), and `Gate` (one question per `ASK_GAP_MS`, 10 min, and
+  per microphone per run). The list: `present()` (cached; read on first
+  use), `refresh()` (read now, one at a time; a change goes to `changed`:
+  the listeners — the dictation's mic —, `GENERATION` for a meeting's
+  capture, `yap-mics-changed` for Settings, and each arrival to the offer).
+  **`watch.rs`** registers an `IMMNotificationClient` (`#[implement]`,
+  hence the `windows-core` dependency) on a `mic-devices` thread: its
+  callbacks only nudge a channel (nothing may wait in them); a burst of
+  notifications settles (400 ms), then `refresh()`. **`offer.rs`**: an
+  arrival waits 800 ms (Windows may make it its default), then until no
+  dictation is going on (`notice::moment`, the settle after one included;
+  dropped if it's gone again or after 10 min), then **Ask** → "Contoso H2
+  connected · Use it for dictation?" in one place (`notice::place`, never a
+  Windows notification): the main window's toast (`yap-mic-offer` →
+  `lib/notices/micOffer.js`, kind `info`) or a Yap bar card (`micOffer`),
+  **Use it** (`put_first`: first in the order, off "Not now") / **Not now**
+  (`add_not_now`: never asked again; Settings can still add it), answered
+  through `mic_offer_respond` or the card (`shell/settings::change_config`:
+  saved and applied); **Using** → "Using Contoso H2 for dictation" (an
+  alert, kind `micSwitched`, the same words not twice in 10 minutes, button
+  **Change** → Settings → Dictation → Microphone). Commands `list_mics`,
+  `mic_offer_respond`; debug-only `e2e_mics { devices }` (made-up
+  microphones instead of Windows', ids prefixed "e2e-"; the gate forgotten),
+  `e2e_mic_plug { device }`, `e2e_mic_unplug { id }` (told as Windows tells
+  a change), `YAP_E2E_MICS` (made-up ones from the start; `[]`: none). The
+  log says counts at `info`, names only at `debug`. Unit tests
+  (`mics::tests`, `offer::tests`), e2e `mics.spec.js`.
 - **`dictation/mic_watch.rs`** — the dictation's dead-mic watchdog, pure: `MicTally`
   (lock-free, fed by the audio callback), `DeadMicWatch::poll(elapsed, samples,
   heard)` → Wait / Reopen / Report / Recovered / Fine, the messages (the full one
@@ -757,7 +858,79 @@ to **Run again** from Home.
   (preprocessor, encoder, decoder loop) on each device with ort directly,
   and with `YAP_PROFILE_SHAPES` / `_BUCKETS` / `_SAME` shows how DirectML's
   encoder takes lengths, fixed lengths, and the old path's words against the
-  new one's.
+  new one's. `warm_points(model, device)`: the stored warm medians per
+  length, what "Taking longer than usual…" (`slow.rs`) calls usual.
+- **`dictation/slow.rs`** (+ `dictation/pipeline/slow.rs`) — **"Taking
+  longer than usual…"** (2026-10-25, Wispr Flow's by behaviour). When a
+  dictation's transcription or its AI cleanup runs well past what's usual
+  on this PC, the bar's capsule says so quietly instead of "Transcribing…"
+  (`yap-slow {stage, skip}` + `yap-state` "processing-slow"; back to
+  "processing" and `yap-slow null` when the stage ends — `SlowWatch`, both
+  under one lock so "slow" never lands after "done"), and while it's the
+  **AI cleanup** — the on-device model or a cloud one, whichever is set up
+  — it offers **Skip cleanup** (`bar_action "skip-cleanup"` →
+  `Pipeline::skip_cleanup` → a `tokio::sync::Notify` the watched cleanup
+  races in `Shared::watched_cleanup`: the request is dropped and the words
+  as transcribed go on to the corrections and the paste, as a failed
+  cleanup's would). Run again's cleanup isn't watched (`clean_up`'s
+  `watch`). **Usual** (pure, unit-tested): a transcription's is a straight
+  line (`fit`: a fixed cost plus a cost per second of audio, least squares,
+  never sloping down) through `stt_speed`'s measured warm timings for the
+  model and device the warm engine is on (`stt_speed::warm_points`),
+  scaled by this session's own dictations against it (the median ratio,
+  0.5–3×), or — not measured yet — the line through those dictations; a
+  cleanup's, the line through this session's cleanups by the same model
+  (`cleanup_key`: on this PC — `ai_model::runs_here` — or the cloud, the
+  provider and model) by the transcript's length. **Well past**
+  (`slow_after_ms`): 2.5× the usual + 1 s, never before 4 s; nothing known:
+  4 s + half the audio's length (a transcription), 4 s + 6 ms a character
+  (a cleanup). The last 20 of each are kept in memory (`record_stt` with
+  the transcribe call's own time; `record_cleanup` for a cleanup that
+  finished, not one skipped or failed). It replaced a fixed 8 s
+  "Transcribing (CPU — slow)…". The log says the stage, the times and
+  lengths, never the words. Test mode: `e2e_dictation_timing { floorMs,
+  sttMs, forget }` (a lower floor, the stub's transcription slowed).
+- **`dictation/cap.rs`** — **a dictation's length limit** (2026-10-25; Wispr
+  warns at 19 minutes and stops at 20 with "Recover text"; Yap at 14 and
+  15). The buffer never grows past `LIMIT_MS` (`take_audio` takes only what
+  fits); `crossed(cap, before, after)` (pure) tells when the mic's latest
+  audio crossed the warning or the limit, once each. At `WARN_MS` the bar
+  gets `yap-dictation-cap {leftMs, text}` ("1 minute left · it'll stop at
+  15 minutes", `warning`): the capsule shows the words for a few seconds
+  (at most half the time left), then an amber hairline runs down the time
+  left. At the limit the mic's thread hands off to `stop_at_cap` (its own
+  thread, under the gesture lock as the pause watch's stop): `capped` is
+  set and the recording stops as the hotkey's second press would — chime,
+  transcription, cleanup, the paste **back into its own window or onto the
+  clipboard** (`inject_text`'s `strict`, as Undo's: nobody pressed
+  anything, so never into whatever is in front now; Undo's own "window
+  gone" alert gives way). `deliver_text` then calls `stopped`: an alert
+  ("Dictation stopped at 15 minutes", kind `dictationCapped`: never held,
+  never dropped) saying it's pasted, or that it couldn't be, with
+  **Recover text** (`RECOVER` → `recover`: that dictation's text onto the
+  clipboard again, privately — out of Win+V history — and a quiet
+  "Copied your dictation"). History keeps it with its audio (Run again).
+  `capped` is cleared at every recording's start and when its `run_stt`
+  ends, however it ends (`ClearCapped`). Unit tests (`cap::tests`: the
+  warning and the stop each crossed once, the words); e2e
+  `dictation-polish.spec.js` and robot `dictation-extras.real.js` with a
+  shortened limit (debug-only `e2e_dictation_cap { limitMs, warnMs }`).
+- **`dictation/meter.rs`** — **the level meter that moves for whispers**
+  (2026-10-25): what `yap-amp` carries since (the bar's waveform,
+  onboarding's mic check), pure, unit-tested. The pipeline's `AmpMeter`
+  takes each ~80 ms's peak and `Floor::level` puts it on a perceptual
+  scale: its dBFS between a **floor that follows the mic's noise** (the
+  quietest recent bars + 6 dB, kept within -60…-48 dBFS; it falls to a
+  quieter bar at once and rises ~3 dB a second, so only a steady hiss or
+  hum lifts it, never the dips between syllables, and a whisper always
+  stays above it) and 0 dBFS, gently compressed (`0.92 · t^0.75`). A
+  whisper (-45 dBFS) now draws about a third of the height (the old linear
+  gain ×3.5, ^0.7 gave it 6 %, under the bars' 7 % minimum), speech
+  (-20…-10) two thirds to four fifths, full scale 0.92 — a shout never
+  flattens against the top. The page draws the level as it comes
+  (`dictation.svelte.js`); onboarding counts > 0.3 as hearing you. Test
+  mode: `e2e_dictate_audio`'s `amplitude` (the tone then comes in
+  syllables: 240 ms of it, 160 ms at a tenth).
 - **`dictation/recent_audio.rs`** — **never lose a dictation** (2026-10-22, Wispr
   Flow's of Aug 2026): each dictation's audio (16 kHz mono 16-bit WAV) in
   `<data>/recent-audio/<id>.wav`, the id its time in unix ms, written on its

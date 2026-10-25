@@ -19,10 +19,18 @@ How loud Yap may be: the notice policy (one place, one at a time, held while dic
   pasteBlocked, calls-fatigue, configReset (held over a dictation, never
   dropped), saveFailed ("Couldn't save your dictation history", `shell/saving.rs`:
   held over a dictation, never dropped, the same words not twice in 10 min),
-  assistantNoModel, meetingRecovery ("Yap
+  assistantNoModel, micLost ("Contoso H2 disconnected", the dictation's mic
+  unplugged: `dictation/pipeline/unplugged.rs`), meetingRecovery ("Yap
   closed during a meeting", held while dictating or recording, waiting as
   long as it takes; `meetings/meeting_audio.rs`), and the Voice Assistant's
-  answer `assistant` (never held, never stale) — > Info > Tip — hint, word-suggestion, language-nudge — "You spoke French · Add it to My languages?", `dictation/languages/nudge.rs`, held over a dictation, dropped unseen after a minute; its "language-added" an Info of 10 s), held
+  answer `assistant` (never held, never stale) — > Info — micOffer ("Contoso
+  H2 connected · Use it for dictation?", `dictation/mics/offer.rs`, which
+  rate-limits it itself and never asks during a dictation), micSwitched
+  ("Using Contoso H2 for dictation", the same words not twice in 10 min),
+  language-added ("French is in My languages", 10 s) — > Tip — hint,
+  word-suggestion, language-nudge ("You spoke French · Add it to My
+  languages?", `dictation/languages/nudge.rs`, which rate-limits it itself:
+  held over a dictation, dropped unseen after a minute)), held
   while dictating (+ `SETTLE_MS` 1.5 s, and while onboarding is on screen)
   or a meeting records, a cooldown for the same text (micBlocked and
   meeting-notice 10 min), how long it may wait unseen (tips 10 s, a word
@@ -53,7 +61,11 @@ How loud Yap may be: the notice policy (one place, one at a time, held while dic
   for the Voice Assistant" with Open settings → Language Models → Chat &
   Voice Assistant, spoken replies' "ElevenLabs didn't answer (quota used
   up)" — kind `voiceFallback`, once per reason in 10 minutes
-  (`voice/tts/cloud.rs`), Open settings → Voice Assistant → Voice; `meetings/meeting_audio.rs`'s
+  (`voice/tts/cloud.rs`), Open settings → Voice Assistant → Voice; the
+  microphones' "Contoso H2 disconnected" (kind `micLost`) and "Using
+  Contoso H2 for dictation" (kind `micSwitched`), with **Microphones** /
+  **Change** → Settings → Dictation → Microphone (`OPEN_MIC_ORDER`,
+  `dictation/mics.rs`); `meetings/meeting_audio.rs`'s
   "Yap closed during a meeting" at the next start, with **Transcribe it**
   — `recoverMeetings`), a settings
   file Yap couldn't read ("Your settings were reset" / "Some of your
@@ -73,7 +85,14 @@ How loud Yap may be: the notice policy (one place, one at a time, held while dic
   `meeting_detect::set_detection`) comes back to `act` from all three
   (`alert_action` from the toast). `show_soon` runs it on a thread of its
   own (window queries; a hotkey's handler may hold the pipeline's locks).
-  Test mode only logs what Open settings would open.
+  Test mode only logs what Open settings would open. Since 2026-10-25 also
+  a dictation stopped at its length limit ("Dictation stopped at 15
+  minutes", kind `dictationCapped`: never held or dropped, with **Recover
+  text** → `cap::recover`; `dictation/cap.rs`), and **`confirm`**: the same
+  place minus the Windows notification, for quiet notes — Paste / Copy last
+  transcript's "Copied your last dictation", "Nothing to paste yet" (kind
+  `lastTranscript`: shown now or within 5 s, else dropped;
+  `pasting/last.rs`) and Recover text's "Copied your dictation".
 - **`notices/win_toast.rs`** — the shared Windows-notification plumbing (WinRT
   `ToastNotification`, Windows only): `app_id` (the NSIS shortcut's
   AppUserModelID; dev builds borrow PowerShell's), `logo_xml`, `esc`, and

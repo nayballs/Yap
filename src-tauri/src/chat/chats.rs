@@ -52,9 +52,9 @@ pub struct ChatMessage {
 }
 
 /// A screenshot a question carried: the file's id (`img_<16 hex>`), its
-/// size as stored, and where it came from ("snip"). The pixels stay in
-/// `<data>/chat-images/<id>.png`.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+/// size as stored, and where it came from ("snip", "paste", "drop"). The
+/// pixels stay in `<data>/chat-images/<id>.png`.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ChatImage {
     pub id: String,
@@ -68,6 +68,10 @@ pub struct ChatImage {
     /// a page gets (`chat_get`), never stored.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub gone: bool,
+    /// Sent as its text (read on this PC by Windows' OCR, `snip::ocr`) to a
+    /// model that can't read images: the picture itself never went.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub as_text: bool,
 }
 
 /// Every image id a conversation refers to (the screenshots sweep keeps
@@ -82,9 +86,12 @@ pub fn image_ids() -> std::collections::HashSet<String> {
     })
 }
 
-/// One web source of an answer: its number in the answer's citations, the
-/// page's title, its address and site ("bg3.wiki").
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+/// One source of an answer: its number in the answer's citations, the
+/// page's title, its address and site ("bg3.wiki") — or, for an answer asked
+/// across meetings (`search/ask.rs`), a passage of the person's meetings and
+/// notes: the meeting's title, no address, "Sun 25 Oct · 12:40 · Priya" as
+/// its site, and where it opens.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Source {
     pub n: usize,
@@ -92,6 +99,26 @@ pub struct Source {
     pub url: String,
     #[serde(default)]
     pub site: String,
+    /// A passage's note (opened at `line` of `field` when its pill or row is
+    /// clicked).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub note: Option<u64>,
+    /// "transcript" | "content" | "summary".
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub field: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub line: Option<usize>,
+    /// When that line was said (unix seconds): finds it again if lines moved
+    /// since (a transcript redone).
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub ts: u64,
+    /// The passage's words, for its tooltip (≤ 280 characters).
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub quote: String,
+}
+
+fn is_zero(n: &u64) -> bool {
+    *n == 0
 }
 
 /// Which model wrote an answer: the provider and the model id the call went
@@ -122,6 +149,11 @@ pub struct Conversation {
     pub updated_ts: u64,
     #[serde(default)]
     pub messages: Vec<ChatMessage>,
+    /// "meetings": started with the Meetings view's Ask bar (or Chat's "Ask
+    /// across your meetings"), so every question in it is asked across the
+    /// meetings, follow-ups too (`turn::chat_turn`). Empty: plain Chat.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub scope: String,
 }
 
 #[derive(Debug, Default, Serialize, Deserialize)]
@@ -295,11 +327,30 @@ pub fn create(title: &str) -> Conversation {
             created_ts: now,
             updated_ts: now,
             messages: Vec::new(),
+            scope: String::new(),
         };
         s.conversations.push(conv.clone());
         save_to_disk(s);
         conv
     })
+}
+
+/// A conversation asked across the meetings from now on (`scope`
+/// "meetings"), or plain Chat again ("").
+pub fn set_scope(id: u64, scope: &str) {
+    with_store(|s| {
+        if let Some(c) = s.conversations.iter_mut().find(|c| c.id == id) {
+            if c.scope != scope {
+                c.scope = scope.to_string();
+                save_to_disk(s);
+            }
+        }
+    });
+}
+
+/// A conversation's scope ("" when it has none, or isn't there).
+pub fn scope_of(id: u64) -> String {
+    with_store(|s| s.conversations.iter().find(|c| c.id == id).map(|c| c.scope.clone()).unwrap_or_default())
 }
 
 /// Add a message; `tools` = an answer's tool chips (empty for the user's),
@@ -929,7 +980,7 @@ mod tests {
     #[test]
     fn an_answer_keeps_its_web_sources() {
         let c = create("Where's Gale?");
-        let src = Source { n: 1, title: "Gale".into(), url: "https://bg3.wiki/wiki/Gale".into(), site: "bg3.wiki".into() };
+        let src = Source { n: 1, title: "Gale".into(), url: "https://bg3.wiki/wiki/Gale".into(), site: "bg3.wiki".into(), ..Default::default() };
         append(c.id, "user", "Where's Gale?", &[], None, false).unwrap();
         append_sourced(c.id, "assistant", "On the beach [1].", &[], None, false, std::slice::from_ref(&src)).unwrap();
         let conv = get(c.id).unwrap();
@@ -965,7 +1016,7 @@ mod tests {
 
     #[test]
     fn a_follow_up_may_cite_the_latest_answer_that_had_sources() {
-        let src = |n| Source { n, title: format!("S{n}"), url: format!("https://s{n}.example"), site: String::new() };
+        let src = |n| Source { n, title: format!("S{n}"), url: format!("https://s{n}.example"), ..Default::default() };
         let msg = |role: &str, sources: Vec<Source>| ChatMessage {
             role: role.into(),
             text: "x".into(),
@@ -998,8 +1049,8 @@ mod tests {
             text: text.into(),
             tools: vec![format!("Searched the web: \"{query}\"")],
             sources: vec![
-                Source { n: 1, title: "Bayern vs. Arsenal".into(), url: "https://espn.com/x".into(), site: "espn.com".into() },
-                Source { n: 2, title: "Fixtures".into(), url: "https://arsenal.com/f".into(), site: "arsenal.com".into() },
+                Source { n: 1, title: "Bayern vs. Arsenal".into(), url: "https://espn.com/x".into(), site: "espn.com".into(), ..Default::default() },
+                Source { n: 2, title: "Fixtures".into(), url: "https://arsenal.com/f".into(), site: "arsenal.com".into(), ..Default::default() },
             ],
             ..Default::default()
         }
@@ -1103,7 +1154,7 @@ mod tests {
         let (out, _) = checked_answer("I searched the web: it's 42.", "What's the answer?", false, &[], &[]);
         assert!(out.ends_with(crate::web::NOT_SEARCHED_NOTE), "{out}");
         // A turn that searched: its claim is true, its own citations stay.
-        let src = [Source { n: 1, title: "RPGs".into(), url: "https://rpg.example".into(), site: "rpg.example".into() }];
+        let src = [Source { n: 1, title: "RPGs".into(), url: "https://rpg.example".into(), site: "rpg.example".into(), ..Default::default() }];
         let (out, fixed) = checked_answer("I searched: Starfall [1].", "best RPGs 2026", true, &indie, &src);
         assert_eq!((out.as_str(), fixed.len()), ("I searched: Starfall [1].", 0));
         // Denials aren't claims.

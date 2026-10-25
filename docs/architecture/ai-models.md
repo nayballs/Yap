@@ -57,7 +57,9 @@ The language-model side: the OpenAI-compatible client and its prompts, the on-de
   wrong), so **the web text itself puts their scale first**
   (`convert_temperatures`: "35°F" → "2°C (35°F)", with `temperature_note`'s
   line beside it; `temperature_units`: not when the question names the
-  other scale — web-and-apps.md) — only the parts known; with
+  other scale — web-and-apps.md), and since 2026-10-25 its speeds and
+  distances too (`about_you/units.rs`: mph and miles for the UK and the US,
+  km/h and km elsewhere; `TheirUnits` does all three) — only the parts known; with
   nothing known, just the date and time (its clock changes every minute, so
   it goes last and the rest of the prompt stays cacheable). `about_name`
   (≤ 60 characters) and `about_me` (≤ 300, one line). **Search** is aimed at
@@ -643,7 +645,9 @@ The language-model side: the OpenAI-compatible client and its prompts, the on-de
   without it no region reaches the prompts; a scenario's `settings.region`
   picks a country over it, as Settings' Region does (`config.region_country`;
   the US and Ireland controls of the weather scenarios, checked with
-  `temperatures`: "C" | "F"). A scenario with `needs_web` and
+  `temperatures`: "C" | "F"; the wind and distance ones with `speeds`:
+  "km/h" | "mph" and `distances`: "km" | "miles", `ai/eval/units.rs`). A
+  scenario with `needs_web` and
   no `web` object runs live with the run's key (until 2026-10-21 a derived
   `Default` left them keyless: Wikipedia). `--cleanup-layout combined |
   system` tries the cleanup's prompt laid out another way (`combined` = the

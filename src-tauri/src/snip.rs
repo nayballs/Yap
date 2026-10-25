@@ -38,13 +38,17 @@
 //! Logs say counts, sizes and timings only — never a window, an app, a
 //! pixel or a path.
 
+pub mod attach;
 pub mod capture;
+pub mod copy_save;
 #[cfg(debug_assertions)]
 pub mod dump;
 pub mod geom;
 pub mod hdr;
 pub mod images;
+pub mod ocr;
 pub mod overlay;
+pub mod pick;
 pub mod turn;
 pub mod vision;
 
@@ -122,6 +126,16 @@ pub struct Last {
     pub focused: bool,
     pub image: Option<crate::chat::chats::ChatImage>,
     pub conversation_id: Option<u64>,
+    /// What was taken: "box" | "monitor" | "window".
+    pub kind: Option<overlay::Kind>,
+    /// What it was for: "chat" | "copy" | "save".
+    pub action: Option<overlay::Action>,
+    /// What was taken, in virtual-desktop pixels.
+    pub rect: Option<Rect>,
+    /// The picture's size (a copy or a save: there's no `image` then).
+    pub size: Option<(u32, u32)>,
+    /// The windows a click could pick (how many).
+    pub windows: usize,
 }
 
 static LAST: Mutex<Option<Last>> = Mutex::new(None);
@@ -138,10 +152,16 @@ pub fn last() -> Option<Last> {
 /// monitors' frames. Never read in a real run.
 static FAKE: Mutex<Option<Vec<Frame>>> = Mutex::new(None);
 
-/// Debug builds, test mode: the next snip "captures" these frames.
+/// …and the windows a click can pick on them (virtual-desktop pixels,
+/// topmost first).
+static FAKE_WINDOWS: Mutex<Vec<Rect>> = Mutex::new(Vec::new());
+
+/// Debug builds, test mode: the next snip "captures" these frames, with
+/// these windows on them.
 #[cfg(debug_assertions)]
-pub fn set_fake_frames(frames: Vec<Frame>) {
+pub fn set_fake_frames(frames: Vec<Frame>, windows: Vec<Rect>) {
     *FAKE.lock().unwrap_or_else(|p| p.into_inner()) = Some(frames);
+    *FAKE_WINDOWS.lock().unwrap_or_else(|p| p.into_inner()) = windows;
 }
 
 /// Whether this run snips fake monitors (test mode, not the robot tests,
@@ -302,6 +322,13 @@ fn run(app: &AppHandle, origin: Origin) -> Result<(), String> {
     // The overlay: the monitor under the cursor takes the focus.
     let rects: Vec<Rect> = frames.iter().map(|f| Rect::new(f.monitor.x, f.monitor.y, f.monitor.width as i32, f.monitor.height as i32)).collect();
     let focus = overlay::cursor().and_then(|(x, y)| geom::monitor_at(&rects, x, y)).unwrap_or(0);
+    // The windows a click can pick: as they were at the capture (rects only).
+    let windows = if faking() {
+        FAKE_WINDOWS.lock().unwrap_or_else(|p| p.into_inner()).clone()
+    } else {
+        pick::windows_on_screen(&geom::desktop(&rects))
+    };
+    let window_count = windows.len();
     let screens: Vec<overlay::Screen> = frames
         .iter()
         .map(|f| overlay::Screen { monitor: f.monitor.clone(), width: f.width, height: f.height, bgra: Arc::new(f.bgra.clone()) })
@@ -310,7 +337,7 @@ fn run(app: &AppHandle, origin: Origin) -> Result<(), String> {
     *CURRENT.lock().unwrap_or_else(|p| p.into_inner()) =
         Some(Snip { generation, frames, conversation, foreground, started, origin });
     let done_app = app.clone();
-    let opts = overlay::Options { focus, interactive: !faking(), hidden: faking() };
+    let opts = overlay::Options { focus, interactive: !faking(), hidden: faking(), windows };
     let shown = overlay::open(
         screens,
         opts,
@@ -356,6 +383,7 @@ fn run(app: &AppHandle, origin: Origin) -> Result<(), String> {
         overlay_ms,
         focused: shown.focused,
         conversation_id: conversation,
+        windows: window_count,
         ..Default::default()
     });
     Ok(())
@@ -386,27 +414,57 @@ fn finish(app: &AppHandle, generation: u64, outcome: overlay::Outcome) {
             last.reason = why.into();
             set_last(last);
         }
-        overlay::Outcome::Snipped { screen, rect } => {
+        overlay::Outcome::Snipped { rect, kind, action } => {
             let t = Instant::now();
-            match save(&snip, screen, &rect) {
+            last.kind = Some(kind);
+            last.action = Some(action);
+            last.rect = Some(rect);
+            let result = cut(&snip, &rect).and_then(|(rgba, w, h)| {
+                last.size = Some((w, h));
+                match action {
+                    overlay::Action::Chat => keep(&rgba, w, h).map(Some),
+                    overlay::Action::Copy => {
+                        let png = images::encode_png(&rgba, w, h, true)?;
+                        copy_save::copy(&rgba, w, h, &png)?;
+                        crate::notices::alert::snip_copied(app, w, h);
+                        Ok(None)
+                    }
+                    overlay::Action::Save => {
+                        let png = images::encode_png(&rgba, w, h, false)?;
+                        // The dialog comes up now: the overlay is gone.
+                        if let Some(path) = copy_save::save(app, &png, None)? {
+                            let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+                            crate::notices::alert::snip_saved(app, &name);
+                        }
+                        Ok(None)
+                    }
+                }
+            });
+            match result {
                 Ok(image) => {
                     last.save_ms = t.elapsed().as_secs_f64() * 1000.0;
+                    let (w, h) = last.size.unwrap_or_default();
                     tracing::info!(
-                        w = image.w,
-                        h = image.h,
-                        kb = image.bytes / 1024,
+                        w,
+                        h,
+                        kind = ?kind,
+                        action = ?action,
                         ms = last.save_ms.round() as u64,
                         total_ms = snip.started.elapsed().as_millis() as u64,
-                        "snip: kept"
+                        "snip: taken"
                     );
                     last.outcome = "snipped".into();
-                    last.image = Some(image.clone());
+                    last.image = image.clone();
                     last.conversation_id = snip.conversation;
                     set_last(last);
-                    hand_to_chat(app, image, snip.conversation, snip.origin);
+                    match image {
+                        Some(image) => hand_to_chat(app, image, snip.conversation, snip.origin),
+                        // Copied or saved: back to the app you were in.
+                        None => give_focus_back(snip.foreground),
+                    }
                 }
                 Err(e) => {
-                    tracing::warn!("snip: couldn't save it ({e})");
+                    tracing::warn!("snip: couldn't keep it ({e})");
                     last.outcome = "failed".into();
                     last.reason = e.clone();
                     set_last(last);
@@ -418,17 +476,34 @@ fn finish(app: &AppHandle, generation: u64, outcome: overlay::Outcome) {
     }
 }
 
-/// The box cut out of its monitor's frame and saved as a PNG.
-fn save(snip: &Snip, screen: usize, rect: &Rect) -> Result<crate::chat::chats::ChatImage, String> {
-    let frame = snip.frames.get(screen).ok_or("that monitor's picture is gone")?;
-    let r = geom::to_frame(rect, (frame.monitor.width, frame.monitor.height), (frame.width, frame.height));
-    if !geom::big_enough(&r) {
+/// What was taken, as RGBA: a box on one monitor cut from that monitor's
+/// frame (at the frame's own resolution); one across monitors put
+/// together from each (`geom::compose_rgba`).
+fn cut(snip: &Snip, rect: &Rect) -> Result<(Vec<u8>, u32, u32), String> {
+    let places: Vec<Rect> =
+        snip.frames.iter().map(|f| Rect::new(f.monitor.x, f.monitor.y, f.monitor.width as i32, f.monitor.height as i32)).collect();
+    if let Some(i) = geom::on_one_monitor(rect, &places) {
+        let frame = &snip.frames[i];
+        let local = Rect::new(rect.x - frame.monitor.x, rect.y - frame.monitor.y, rect.w, rect.h);
+        let r = geom::to_frame(&local, (frame.monitor.width, frame.monitor.height), (frame.width, frame.height));
+        if !geom::big_enough(&r) {
+            return Err("the box was too small".into());
+        }
+        return Ok((geom::crop_rgba(&frame.bgra, frame.width, &r), r.w as u32, r.h as u32));
+    }
+    if !geom::big_enough(rect) || geom::pieces(rect, &places).is_empty() {
         return Err("the box was too small".into());
     }
-    let rgba = geom::crop_rgba(&frame.bgra, frame.width, &r);
-    let png = images::encode_png(&rgba, r.w as u32, r.h as u32, true)?;
-    let saved = images::save(&png, r.w as u32, r.h as u32)?;
-    Ok(crate::chat::chats::ChatImage { id: saved.id, w: saved.w, h: saved.h, bytes: saved.bytes, source: "snip".into(), gone: false })
+    let sources: Vec<geom::Source> =
+        snip.frames.iter().zip(&places).map(|(f, p)| geom::Source { bgra: &f.bgra, width: f.width, height: f.height, place: *p }).collect();
+    Ok((geom::compose_rgba(rect, &sources), rect.w as u32, rect.h as u32))
+}
+
+/// A picture kept for Chat: a PNG in `chat-images/`.
+fn keep(rgba: &[u8], w: u32, h: u32) -> Result<crate::chat::chats::ChatImage, String> {
+    let png = images::encode_png(rgba, w, h, true)?;
+    let saved = images::save(&png, w, h)?;
+    Ok(crate::chat::chats::ChatImage { id: saved.id, w: saved.w, h: saved.h, bytes: saved.bytes, source: "snip".into(), ..Default::default() })
 }
 
 /// The main window up on Chat with the image in its message box, and the
@@ -466,6 +541,41 @@ pub fn chat_images_prepare(ids: Vec<String>) {
         let here = crate::ai::ai_model::runs_here(&provider, &base_url);
         images::prepare(ids.into_iter().filter(|i| images::is_id(i)).collect(), images::long_edge(&provider, here));
     }
+}
+
+/// A chat screenshot's "Copy image" (its right-click menu): onto the
+/// clipboard, out of Win+V history.
+#[tauri::command]
+pub async fn chat_image_copy(id: String) -> Result<(), String> {
+    if !images::is_id(&id) {
+        return Err("That isn't a screenshot".into());
+    }
+    tauri::async_runtime::spawn_blocking(move || copy_save::copy_stored(&id)).await.map_err(|e| e.to_string())?
+}
+
+/// A chat screenshot's "Save image as…": Windows' Save dialog, in the
+/// folder used last. `true` when it was saved (not cancelled).
+#[tauri::command]
+pub async fn chat_image_save(app: AppHandle, id: String) -> Result<bool, String> {
+    let png = images::is_id(&id).then(|| images::read(&id)).flatten().ok_or("That screenshot isn't there any more")?;
+    let parent = app.get_webview_window("settings");
+    let saved = tauri::async_runtime::spawn_blocking(move || copy_save::save(&app, &png, parent.as_ref())).await.map_err(|e| e.to_string())??;
+    Ok(saved.is_some())
+}
+
+/// A model to ask about (`chat_models_read_images`).
+#[derive(Debug, Clone, Deserialize)]
+pub struct ModelRef {
+    pub provider: String,
+    pub model: String,
+}
+
+/// Which of these models read images (`true`), don't (`false`) or nobody
+/// says (`null`): the Chat model picker's and Settings' "Reads images" tag,
+/// by the same rules Chat sends by (`vision::reads_images`).
+#[tauri::command]
+pub fn chat_models_read_images(models: Vec<ModelRef>) -> Vec<Option<bool>> {
+    models.iter().take(2000).map(|m| vision::reads_images(&m.provider, &m.model)).collect()
 }
 
 /// The chat screenshots folder's count and size (Settings → Privacy &

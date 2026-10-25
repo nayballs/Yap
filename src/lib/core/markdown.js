@@ -146,16 +146,22 @@ md.core.ruler.push('yap_tasks', (state) => {
 // An answer written from the web (chat/chats.rs `sources`, web.rs): only links
 // its sources gave stay links — any other address the model wrote shows as
 // text (no phishing link, nothing smuggled out in one) — and its citation
-// markers ("[1]", "[2, 3]") become pills that open their source.
+// markers ("[1]", "[2, 3]") become pills that open their source. An answer
+// asked across meetings (search/ask.rs) cites passages of the person's
+// meetings and notes instead: a source with a `note` and no address, whose
+// pill (`a.md-passage`, href "#passage-<n>") the view opens at its line.
 function webContext(sources) {
   if (!Array.isArray(sources) || sources.length === 0) return null;
   const strip = (u) => String(u || '').replace(/#.*$/, '').replace(/\/+$/, '');
-  const urls = new Set(sources.map((s) => strip(md.normalizeLink(String(s.url || '')))));
+  const urls = new Set(sources.filter((s) => s.url).map((s) => strip(md.normalizeLink(String(s.url || '')))));
   return {
     byN: new Map(sources.map((s) => [String(s.n), s])),
     allows: (href) => urls.has(strip(href)),
   };
 }
+
+/** A passage of the person's meetings and notes (not a web page). */
+const isPassage = (s) => s && s.note != null && !s.url;
 
 const CITATION = /\[(\d{1,2}(?:\s*,\s*\d{1,2})*)\]/g;
 
@@ -185,7 +191,7 @@ md.core.ruler.push('yap_web', (state) => {
       let at = 0;
       for (const m of t.content.matchAll(CITATION)) {
         const cited = m[1].split(',').map((n) => web.byN.get(n.trim()));
-        if (!cited.every((s) => s && SAFE_URL.test(String(s.url)))) continue;
+        if (!cited.every((s) => s && (SAFE_URL.test(String(s.url)) || isPassage(s)))) continue;
         if (m.index > at) out.push(textToken(state, t.content.slice(at, m.index)));
         const pills = new state.Token('yap_cite', '', 0);
         pills.meta = { sources: cited };
@@ -218,6 +224,10 @@ rules.yap_cite = (tokens, idx) => {
   const pills = tokens[idx].meta.sources.map((s) => {
     const label = escapeHtml(`${s.title || s.site}${s.site ? ` · ${s.site}` : ''}`);
     const n = escapeHtml(String(s.n));
+    if (isPassage(s)) {
+      // Opened in Yap by the view (its click handler), never as a link.
+      return `<a class="md-cite md-passage" href="#passage-${n}" title="${label}" aria-label="Passage ${n}: ${label}">${n}</a>`;
+    }
     return `<a class="md-link md-cite" href="${escapeHtml(s.url)}" title="${label}" aria-label="Source ${n}: ${label}">${n}</a>`;
   });
   return `<span class="md-cites">${pills.join('')}</span>`;
@@ -263,7 +273,9 @@ const PURIFY = {
   ALLOW_DATA_ATTR: false,
   ALLOW_ARIA_ATTR: false,
 };
-const CLASSES = new Set(['md-link', 'md-cite', 'md-cites', 'md-code', 'md-table', 'md-quote', 'md-rule', 'md-loose', 'task', 'c', 'r']);
+const CLASSES = new Set(['md-link', 'md-cite', 'md-cites', 'md-passage', 'md-code', 'md-table', 'md-quote', 'md-rule', 'md-loose', 'task', 'c', 'r']);
+// The one in-page address: a passage pill's (rendered by yap_cite only).
+const PASSAGE_HREF = /^#passage-\d{1,2}$/;
 // Which elements may carry which of the narrower attributes.
 const ONLY_ON = { href: ['A'], 'aria-label': ['A', 'INPUT'], start: ['OL'], type: ['INPUT'], checked: ['INPUT'], disabled: ['INPUT'] };
 
@@ -280,7 +292,11 @@ function purify() {
     for (const name of node.getAttributeNames()) {
       if (ONLY_ON[name] && !ONLY_ON[name].includes(node.nodeName)) node.removeAttribute(name);
     }
-    if (node.hasAttribute('href') && !SAFE_URL.test(node.getAttribute('href'))) node.removeAttribute('href');
+    if (node.hasAttribute('href')) {
+      const href = node.getAttribute('href');
+      const passage = PASSAGE_HREF.test(href) && /(^|\s)md-passage(\s|$)/.test(node.getAttribute('class') || '');
+      if (!passage && !SAFE_URL.test(href)) node.removeAttribute('href');
+    }
     if (node.hasAttribute('class')) {
       const kept = node.getAttribute('class').split(/\s+/).filter((c) => CLASSES.has(c));
       if (kept.length) node.setAttribute('class', kept.join(' '));

@@ -78,25 +78,34 @@
   // meanwhile. The question keeps its screenshots (chat/chats.rs `images`): a
   // thumbnail in its bubble, or "Screenshot removed after 30 days" once
   // "Keep chat screenshots" has removed it. + → "Take a screenshot" snips too.
+  // Phase 2 (2026-10-25): a picture pasted into the box (Ctrl+V) or files
+  // dropped on Chat join the screenshots (snip/attach.rs); a screenshot's
+  // right-click menu copies it (out of Win+V history) or saves it; a model
+  // that can't read images is also offered "Send its text instead"
+  // (Windows' OCR on this PC, snip/ocr.rs: the text folds under the
+  // question in its bubble).
   //
   // This file is the view: it makes its state (chatState.svelte.js), follows
   // Rust's events while Chat is open, takes the keys, and lays out the
   // conversation list (ConversationList) beside the thread (ChatThread,
   // ChatMessage) and the composer (Composer).
   import { listen } from '@tauri-apps/api/event';
+  import { getCurrentWebview } from '@tauri-apps/api/webview';
   import { onMount, onDestroy, untrack } from 'svelte';
   import { chatRequest } from '../../stores/chatRequest.svelte.js';
+  import { openContextMenu } from '../../ui/contextMenu.svelte.js';
   import { createChatState } from './chatState.svelte.js';
-  import { chatImageUrl } from './chatImages.js';
+  import { chatImageUrl, imageItems } from './chatImages.js';
   import ConversationList from './ConversationList.svelte';
   import ChatThread from './ChatThread.svelte';
   import Composer from './Composer.svelte';
 
   // Opens a Settings section (ControlPanel's openSettings): the chip's
-  // "Language model settings…".
-  let { onopensettings = null } = $props();
+  // "Language model settings…". `onopennote({id, line, ts, field})`: a
+  // passage an answer cites, opened in Notes at its line (ControlPanel).
+  let { onopensettings = null, onopennote = null } = $props();
 
-  const chat = createChatState({ onopensettings: () => onopensettings });
+  const chat = createChatState({ onopensettings: () => onopensettings, onopennote: () => onopennote });
 
   function onKeydown(e) {
     if (e.key === 'Escape' && chat.viewing) {
@@ -121,6 +130,15 @@
       e.preventDefault();
       chat.stopAnswer();
     }
+  }
+
+  // Ctrl+V of a picture anywhere in Chat but another text field (a thumbnail
+  // or the thread has the focus): into the box too. The box's own paste
+  // handled it already when it had the focus.
+  function onPaste(e) {
+    if (e.defaultPrevented) return;
+    if (e.target?.closest?.('input, textarea, [contenteditable="true"], [contenteditable=""]') && e.target !== chat.inputEl) return;
+    chat.pasteImage(e);
   }
 
   onMount(() => {
@@ -150,8 +168,16 @@
         chat.loadVoiceSettings();
         chat.refreshVision();
       }),
+      // Pictures dropped on Chat (Windows' drag and drop: Tauri reports the
+      // files' paths) go in the box like a snip (snip/attach.rs).
+      getCurrentWebview().onDragDropEvent((event) => {
+        const t = event.payload.type;
+        if (t === 'enter' || t === 'over') chat.dragging = true;
+        else if (t === 'leave') chat.dragging = false;
+        else if (t === 'drop') chat.dropFiles(event.payload.paths || []);
+      }),
     ];
-    return () => uns.forEach((u) => u.then((f) => f()));
+    return () => uns.forEach((u) => u.then((f) => f()).catch(() => {}));
   });
 
   // Leaving Chat: its voice stops, and its box no longer has the focus.
@@ -192,7 +218,7 @@
   });
 </script>
 
-<svelte:window onkeydown={onKeydown} />
+<svelte:window onkeydown={onKeydown} onpaste={onPaste} />
 
 <div class="chat">
   <!-- Conversation sidebar -->
@@ -207,8 +233,13 @@
 
 {#if chat.viewing}
   <!-- A screenshot opened large: a click or Esc closes it. -->
+  <!-- Its right-click menu copies or saves it. -->
   <div class="shotview" role="dialog" aria-label="Screenshot" aria-modal="true" tabindex="-1" onclick={() => (chat.viewing = null)} onkeydown={(e) => e.key === 'Escape' && (chat.viewing = null)}>
-    <img src={chatImageUrl(chat.viewing)} alt="Screenshot" />
+    <img
+      src={chatImageUrl(chat.viewing)}
+      alt="Screenshot"
+      oncontextmenu={(e) => openContextMenu(e, imageItems({ id: chat.viewing }), { label: 'Screenshot' })}
+    />
   </div>
 {/if}
 

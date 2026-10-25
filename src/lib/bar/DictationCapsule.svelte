@@ -32,6 +32,14 @@
   // A saved transform (dictation/transforms.rs): its name while it runs ("Polish…",
   // the amber dot), then "Polish ✓" with **Undo** (the text from before put
   // back) for as long, or "Polish: no changes needed".
+  // "Taking longer than usual…" instead of "Transcribing…" once the
+  // transcription or the AI cleanup runs well past this PC's usual time
+  // (dictation/slow.rs) — with **Skip cleanup** when it's the cleanup: the
+  // words as transcribed, pasted now. "Hold on, still transcribing…" a
+  // moment after the shortcut is pressed during it (the press is ignored).
+  // Near a dictation's length limit (dictation/cap.rs): "1 minute left ·
+  // it'll stop at 15 minutes" for a few seconds in the waveform's place,
+  // then an amber hairline running down the time left.
   //
   // A question to the **Voice Assistant** (chat/assistant.rs; `dictation.assistant`
   // isn't 'idle') has its own variant, never mistaken for a dictation: an
@@ -69,6 +77,18 @@
   const transforming = $derived(processing && !!dictation.transform && dictation.transformPhase === 'running');
   const transformed = $derived(cleaned && !!dictation.transform && dictation.transformPhase === 'done');
   const unchanged = $derived(cleaned && !!dictation.transform && dictation.transformPhase === 'unchanged');
+  // The AI cleanup is taking longer than usual: Skip cleanup on offer.
+  const skipOffer = $derived(processing && !!dictation.slow?.skip && !dictation.transform);
+  // What the capsule says while it works.
+  const workText = $derived(
+    dictation.holdOn
+      ? 'Hold on, still transcribing…'
+      : dictation.modelLoading
+        ? 'Loading the speech model…'
+        : dictation.slow
+          ? 'Taking longer than usual…'
+          : 'Transcribing…'
+  );
   // The push-to-talk key is down (not locked hands-free): no buttons.
   const keyHeld = $derived(dictation.held && !dictation.locked);
   // ✕ / ✓ have their places (and the capsule takes the pointer)…
@@ -97,10 +117,14 @@
   class:rec={recording}
   class:offer
   class:show={showButtons}
-  class:cancelled={cancelled || (cleaned && !unchanged)}
+  class:cancelled={cancelled || (cleaned && !unchanged) || skipOffer}
   class:ask
   class:askstop={askThinking || askSpeaking}
-  data-region={offer || cancelled || (cleaned && !unchanged) ? 'dictation' : askThinking || askSpeaking ? 'assistant' : undefined}
+  data-region={offer || cancelled || (cleaned && !unchanged) || skipOffer
+    ? 'dictation'
+    : askThinking || askSpeaking
+      ? 'assistant'
+      : undefined}
   data-ask={ask ? dictation.assistant : undefined}
 >
   {#if ask}
@@ -195,7 +219,9 @@
       <span class="txt warn" role="alert" title={dictation.micSilentFull}>{dictation.micSilent}</span>
     {:else if dictation.micWaiting && !processing}
       <span class="txt soft" role="status">Starting the mic…</span>
-    {:else if dictation.words.length}
+    {:else if recording && dictation.capShow}
+      <span class="txt soft" role="status">{dictation.capText}</span>
+    {:else if dictation.words.length && !dictation.slow && !dictation.holdOn}
       <div class="partial" bind:this={clipEl}>
         <span class="ptext" bind:this={textEl} style="transform: translateX({shift}px)">
           {#each dictation.words as w, i (i)}<span class="pw">{w}&nbsp;</span>{/each}
@@ -204,19 +230,26 @@
     {:else if transforming}
       <span class="txt" role="status">{dictation.transform}…</span>
     {:else if processing}
-      <span class="txt" role="status"
-        >{dictation.modelLoading
-          ? 'Loading the speech model…'
-          : dictation.state === 'processing-slow'
-            ? 'Transcribing (CPU — slow)…'
-            : 'Transcribing…'}</span
-      >
+      <span class="txt" class:soft={!!dictation.slow && !dictation.holdOn} role="status">{workText}</span>
+      {#if skipOffer}
+        <button class="undo" title="Paste the words as transcribed, without AI cleanup" onclick={() => act('skip-cleanup')}
+          >Skip cleanup</button
+        >
+      {/if}
     {:else}
       <div class="wave">
         {#each dictation.history as v}
           <span style="height:{Math.max(7, Math.round(v * 100))}%"></span>
         {/each}
       </div>
+    {/if}
+    {#if recording && dictation.capMs > 0 && !dictation.micSilent}
+      <!-- Near the length limit (dictation/cap.rs): the time left running out. -->
+      {#key dictation.capKey}
+        <span class="capline" aria-hidden="true">
+          <span data-keep-motion style={`animation-duration:${dictation.capMs}ms`}></span>
+        </span>
+      {/key}
     {/if}
     {#if offer}
       <button class="cbtn done" aria-label="Stop and paste" title="Stop and paste" onclick={() => act('dictation-stop')}>
@@ -497,6 +530,25 @@
     height: 100%;
     background: var(--bar-wave);
     transform-origin: center;
+    animation: run-down linear forwards;
+  }
+  /* Near the length limit: the time left as an amber hairline running down
+     (the time itself, so it moves with Motion reduced too). */
+  .capline {
+    position: absolute;
+    left: 14px;
+    right: 14px;
+    bottom: 3px;
+    height: 2px;
+    border-radius: 1px;
+    background: var(--bar-track);
+    overflow: hidden;
+  }
+  .capline span {
+    display: block;
+    height: 100%;
+    background: var(--bar-wave);
+    transform-origin: left;
     animation: run-down linear forwards;
   }
 

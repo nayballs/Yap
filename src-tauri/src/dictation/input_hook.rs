@@ -1,10 +1,11 @@
 //! Unified input hook for the dictation, edit (Commands' rewrite), meeting,
-//! Voice Assistant, Read aloud, "Use what I said" and Snip to Chat key
-//! bindings, up to `languages::MAX_SHORTCUTS` **language shortcuts** (My
-//! languages: a slot each, [`configure_languages_from`]; press and release,
-//! as `language-key` with the slot) and up to `transforms::MAX` **saved
-//! transforms**' shortcuts (a slot each, [`configure_transforms_from`]; only
-//! their press, as `transform-key-pressed` with the slot). The snip shortcut (Win+Alt+S by
+//! Voice Assistant, Read aloud, "Use what I said", Snip to Chat, Paste last
+//! transcript and Copy last transcript key bindings (the last four act on
+//! their press only), up to `languages::MAX_SHORTCUTS` **language shortcuts**
+//! (My languages: a slot each, [`configure_languages_from`]; press and
+//! release, as `language-key` with the slot) and up to `transforms::MAX`
+//! **saved transforms**' shortcuts (a slot each, [`configure_transforms_from`];
+//! only their press, as `transform-key-pressed` with the slot). The snip shortcut (Win+Alt+S by
 //! default) only acts on its press (`snip.rs`); while a snip's overlay is
 //! up, Esc cancels it here too and goes no further ([`snip_escape`]).
 //!
@@ -121,9 +122,15 @@ static AS_SAID_BINDING: KeyBinding = KeyBinding::new();
 /// Snip to Chat (`snip.rs`): drag a box over any screen. Win+Alt+S by
 /// default; its press only.
 static SNIP_BINDING: KeyBinding = KeyBinding::new();
+/// Paste last transcript (`pasting/last.rs`): the latest dictation again,
+/// where you're typing. Unbound by default; its press only.
+static PASTE_LAST_BINDING: KeyBinding = KeyBinding::new();
+/// Copy last transcript (`pasting/last.rs`): the latest dictation onto the
+/// clipboard. Unbound by default; its press only.
+static COPY_LAST_BINDING: KeyBinding = KeyBinding::new();
 /// Saved transforms' shortcuts (`transforms.rs`): a slot each, in the
 /// list's order (`transforms::assign`); only the press is used. Beside the
-/// seven fixed bindings, always giving way to them.
+/// nine fixed bindings, always giving way to them.
 static TRANSFORM_BINDINGS: [KeyBinding; crate::dictation::transforms::MAX] = [const { KeyBinding::new() }; crate::dictation::transforms::MAX];
 /// Which transform each slot runs (its id). Read by the forwarder thread,
 /// never the hook callback.
@@ -146,7 +153,7 @@ const TRANSFORM_EVENTS: [(&str, &str); crate::dictation::transforms::MAX] = [
 ];
 /// Language shortcuts' keys (`languages.rs`, My languages): a slot each, in
 /// the list's order (`languages::assign`); press and release, as the
-/// dictation key's (push-to-talk holds them). Beside the seven fixed
+/// dictation key's (push-to-talk holds them). Beside the nine fixed
 /// bindings, always giving way to them; saved transforms give way to these.
 static LANGUAGE_BINDINGS: [KeyBinding; crate::dictation::languages::MAX_SHORTCUTS] =
     [const { KeyBinding::new() }; crate::dictation::languages::MAX_SHORTCUTS];
@@ -359,6 +366,74 @@ pub fn configure_snip_from(cfg: &crate::config::YapConfig) {
     }
 }
 
+/// Parse a key spec string and configure the **Paste last transcript**
+/// shortcut (`pasting/last.rs`). An empty spec unbinds it (the default).
+pub fn configure_paste_last(key_spec: &str) -> Result<String, String> {
+    let (key_type, key_code, mods) = parse_key_spec(key_spec)?;
+    PASTE_LAST_BINDING.configure(key_type, key_code, mods);
+    let desc = format_binding(key_type, key_code, mods);
+    info!("Paste-last key configured: {} (spec: {:?})", desc, key_spec);
+    Ok(desc)
+}
+
+/// Parse a key spec string and configure the **Copy last transcript**
+/// shortcut (`pasting/last.rs`). An empty spec unbinds it (the default).
+pub fn configure_copy_last(key_spec: &str) -> Result<String, String> {
+    let (key_type, key_code, mods) = parse_key_spec(key_spec)?;
+    COPY_LAST_BINDING.configure(key_type, key_code, mods);
+    let desc = format_binding(key_type, key_code, mods);
+    info!("Copy-last key configured: {} (spec: {:?})", desc, key_spec);
+    Ok(desc)
+}
+
+/// The shortcuts Paste last and Copy last give way to, by name, oldest
+/// first: the seven before them, then Paste last's (Copy last's only).
+fn older_shortcuts(cfg: &crate::config::YapConfig) -> [(&'static str, &str); 8] {
+    [
+        ("dictation hotkey", cfg.hotkey.as_str()),
+        ("rewrite shortcut", cfg.edit_hotkey.as_str()),
+        ("meeting shortcut", cfg.meeting_hotkey.as_str()),
+        ("assistant shortcut", cfg.assistant_hotkey.as_str()),
+        ("read-aloud shortcut", cfg.read_hotkey.as_str()),
+        ("Use-what-I-said shortcut", cfg.as_said_hotkey.as_str()),
+        ("snip shortcut", cfg.snip_hotkey.as_str()),
+        ("Paste-last shortcut", cfg.paste_last_hotkey.as_str()),
+    ]
+}
+
+/// `spec`, unless it clashes with one of `others` (a hand-edited
+/// config.json: Settings never saves a clash) — then "" and the log says
+/// which.
+fn unless_clash<'a>(what: &str, spec: &'a str, others: &[(&str, &str)]) -> &'a str {
+    match others.iter().find(|(_, other)| clashes(spec, other)) {
+        Some((name, _)) => {
+            tracing::warn!("The {what} {spec:?} clashes with the {name}: left unbound");
+            ""
+        }
+        None => spec,
+    }
+}
+
+/// The Paste last shortcut from config, unless it clashes with one of the
+/// seven older ones (it gives way to them all).
+pub fn configure_paste_last_from(cfg: &crate::config::YapConfig) {
+    let older = older_shortcuts(cfg);
+    let spec = unless_clash("Paste-last shortcut", cfg.paste_last_hotkey.trim(), &older[..7]);
+    if let Err(e) = configure_paste_last(spec) {
+        tracing::warn!("Failed to apply the Paste-last shortcut: {}", e);
+    }
+}
+
+/// The Copy last shortcut from config, unless it clashes with one of the
+/// eight before it (Paste last's included).
+pub fn configure_copy_last_from(cfg: &crate::config::YapConfig) {
+    let older = older_shortcuts(cfg);
+    let spec = unless_clash("Copy-last shortcut", cfg.copy_last_hotkey.trim(), &older);
+    if let Err(e) = configure_copy_last(spec) {
+        tracing::warn!("Failed to apply the Copy-last shortcut: {}", e);
+    }
+}
+
 /// While a snip's overlay is up, Esc goes to it (`snip.rs`).
 pub fn snip_escape(on: bool) {
     SNIP_ESC.store(on, Ordering::SeqCst);
@@ -370,7 +445,7 @@ fn transform_ids() -> std::sync::MutexGuard<'static, Vec<String>> {
 
 /// The saved transforms' shortcuts from config (`transforms::assign`): a
 /// slot for each transform with a key, in list order; one whose key would
-/// fire with one of the seven fixed shortcuts, or an earlier transform's,
+/// fire with one of the nine fixed shortcuts, or an earlier transform's,
 /// is left unbound and the log says why (Settings never saves one).
 pub fn configure_transforms_from(cfg: &crate::config::YapConfig) {
     let list = crate::dictation::transforms::list(cfg);
@@ -441,12 +516,13 @@ fn language_ids() -> std::sync::MutexGuard<'static, Vec<String>> {
 
 /// The language shortcuts' keys from config (`languages::assign`): a slot
 /// for each with a key, in list order; one whose key would fire with one of
-/// the seven fixed shortcuts, or an earlier language shortcut's, is left
-/// unbound and the log says why (Settings never saves one).
+/// the nine fixed shortcuts (Paste last's and Copy last's included), or an
+/// earlier language shortcut's, is left unbound and the log says why
+/// (Settings never saves one).
 pub fn configure_languages_from(cfg: &crate::config::YapConfig) {
     let list = crate::dictation::languages::shortcuts(cfg);
-    let seven = crate::dictation::transforms::seven_shortcuts(cfg);
-    let fixed: Vec<(&str, &str)> = seven.iter().map(|(name, spec)| (*name, spec.as_str())).collect();
+    let nine = crate::dictation::transforms::nine_shortcuts(cfg);
+    let fixed: Vec<(&str, &str)> = nine.iter().map(|(name, spec)| (*name, spec.as_str())).collect();
     let slots = crate::dictation::languages::assign(&fixed, &list);
     let mut ids = language_ids();
     ids.clear();
@@ -1060,6 +1136,8 @@ unsafe extern "system" fn low_level_keyboard_proc(
             (&READ_BINDING, "read-key-pressed", "read-key-released"),
             (&AS_SAID_BINDING, "as-said-key-pressed", "as-said-key-released"),
             (&SNIP_BINDING, "snip-key-pressed", "snip-key-released"),
+            (&PASTE_LAST_BINDING, "paste-last-key-pressed", "paste-last-key-released"),
+            (&COPY_LAST_BINDING, "copy-last-key-pressed", "copy-last-key-released"),
         ] {
             suppress |= process_keyboard_event(binding, pressed, released, vkey, is_keydown);
         }
@@ -1167,6 +1245,17 @@ unsafe extern "system" fn low_level_mouse_proc(
             if SNIP_BINDING.matches_mouse(id) {
                 handle_binding_event(&SNIP_BINDING, "snip-key-pressed", "snip-key-released", is_press);
                 return 1;
+            }
+
+            // …and Paste last / Copy last transcript's.
+            for (binding, pressed, released) in [
+                (&PASTE_LAST_BINDING, "paste-last-key-pressed", "paste-last-key-released"),
+                (&COPY_LAST_BINDING, "copy-last-key-pressed", "copy-last-key-released"),
+            ] {
+                if binding.matches_mouse(id) {
+                    handle_binding_event(binding, pressed, released, is_press);
+                    return 1;
+                }
             }
 
             // …and the language shortcuts', then the saved transforms'.
@@ -1469,6 +1558,43 @@ mod tests {
         assert!(needs_menu_mask(MOD_ALT | MOD_WIN, false));
     }
 
+    /// Paste last and Copy last transcript: unbound until set; a hand-made
+    /// key one of the older shortcuts has is left to it (and Copy last gives
+    /// way to Paste last). (The one test that sets their bindings.)
+    #[test]
+    fn paste_and_copy_last_are_unbound_and_give_way_to_the_older_shortcuts() {
+        let mut cfg = crate::config::YapConfig::default();
+        assert_eq!(cfg.paste_last_hotkey, "");
+        assert_eq!(cfg.copy_last_hotkey, "");
+        configure_paste_last_from(&cfg);
+        configure_copy_last_from(&cfg);
+        assert_eq!(PASTE_LAST_BINDING.kind_code_mods().0, KEY_TYPE_NONE);
+        assert_eq!(COPY_LAST_BINDING.kind_code_mods().0, KEY_TYPE_NONE);
+        // Their own keys: bound.
+        cfg.paste_last_hotkey = "kb:ctrl+alt+86".into();
+        cfg.copy_last_hotkey = "mouse:4".into();
+        configure_paste_last_from(&cfg);
+        configure_copy_last_from(&cfg);
+        assert_eq!(PASTE_LAST_BINDING.kind_code_mods(), (KEY_TYPE_KEYBOARD, 86, MOD_CTRL | MOD_ALT));
+        assert!(COPY_LAST_BINDING.matches_mouse(4));
+        // The snip's Win+Alt+S, and Copy last on Paste last's key: unbound.
+        cfg.paste_last_hotkey = "kb:win+alt+83".into();
+        configure_paste_last_from(&cfg);
+        assert_eq!(PASTE_LAST_BINDING.kind_code_mods().0, KEY_TYPE_NONE);
+        cfg.paste_last_hotkey = "kb:ctrl+alt+86".into();
+        cfg.copy_last_hotkey = "kb:alt+ctrl+86".into();
+        configure_paste_last_from(&cfg);
+        configure_copy_last_from(&cfg);
+        assert_eq!(PASTE_LAST_BINDING.kind_code_mods().1, 86);
+        assert_eq!(COPY_LAST_BINDING.kind_code_mods().0, KEY_TYPE_NONE);
+        // The transforms give way to both.
+        let fixed = crate::dictation::transforms::fixed_shortcuts(&cfg);
+        assert!(fixed.iter().any(|(name, spec)| *name == "Paste-last shortcut" && spec == "kb:ctrl+alt+86"));
+        assert!(fixed.iter().any(|(name, _)| *name == "Copy-last shortcut"));
+        configure_paste_last("").unwrap();
+        configure_copy_last("").unwrap();
+    }
+
     /// (The one test that sets the transform slots: tests run at once.)
     #[test]
     fn transform_shortcuts_get_slots_in_list_order_giving_way_to_the_fixed_seven() {
@@ -1517,7 +1643,7 @@ mod tests {
     }
 
     #[test]
-    fn language_shortcuts_get_slots_giving_way_to_the_fixed_seven_and_transforms_to_them() {
+    fn language_shortcuts_get_slots_giving_way_to_the_fixed_nine_and_transforms_to_them() {
         use crate::dictation::languages::LanguageShortcut;
         let sc = |id: &str, language: &str, to: &str, hotkey: &str| LanguageShortcut {
             id: id.into(),
@@ -1531,7 +1657,10 @@ mod tests {
                 // The dictation hotkey's key: left for it.
                 sc("l-de", "de", "", &crate::config::YapConfig::default().hotkey),
                 sc("l-es", "en", "es", "mouse:4"),
+                // Copy last's key (one of the nine): left for it too.
+                sc("l-it", "it", "", "kb:ctrl+alt+67"),
             ],
+            copy_last_hotkey: "kb:ctrl+alt+67".into(),
             ..Default::default()
         };
         // A transform on the French shortcut's key gives way to it (the
@@ -1548,6 +1677,8 @@ mod tests {
         assert_eq!(LANGUAGE_BINDINGS[0].kind_code_mods(), (KEY_TYPE_KEYBOARD, 70, MOD_CTRL | MOD_ALT));
         assert_eq!(LANGUAGE_BINDINGS[1].kind_code_mods().0, KEY_TYPE_NONE, "clashes: unbound");
         assert!(LANGUAGE_BINDINGS[2].matches_mouse(4));
+        assert_eq!(language_at(3).as_deref(), Some("l-it"));
+        assert_eq!(LANGUAGE_BINDINGS[3].kind_code_mods().0, KEY_TYPE_NONE, "Copy last's key: unbound");
         // Settings pausing one while a key is picked, then putting it back.
         configure_language("l-fr", "");
         assert_eq!(LANGUAGE_BINDINGS[0].kind_code_mods().0, KEY_TYPE_NONE);

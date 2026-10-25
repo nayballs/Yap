@@ -82,13 +82,17 @@ pub fn this_pc() -> Option<Gpu> {
 }
 
 /// Test mode (debug builds): `YAP_E2E_GPU` = "none", or "<name>,<MiB>",
-/// stands in for the card (the e2e suite's "Recommended for this PC").
+/// stands in for the card (the e2e suite's "Recommended for this PC") —
+/// and without it a test run has a fixed 12 GB card, never the machine's
+/// own: a CI runner has none, so setup recommended the cloud and hid the
+/// on-device models in a spec that passes on a desktop with a card (25 Oct
+/// 2026; `hardware.rs` does the same for the processor and memory).
 #[cfg(debug_assertions)]
 fn e2e_gpu() -> Option<Option<Gpu>> {
     if !crate::shell::e2e::active() {
         return None;
     }
-    let spec = std::env::var("YAP_E2E_GPU").ok()?;
+    let spec = std::env::var("YAP_E2E_GPU").unwrap_or_else(|_| "NVIDIA GeForce RTX 4070 (test stand-in),12282".to_string());
     if spec.trim().eq_ignore_ascii_case("none") || spec.trim().is_empty() {
         return Some(None);
     }

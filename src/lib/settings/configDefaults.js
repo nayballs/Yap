@@ -32,10 +32,14 @@ export const FIELD_DEFAULTS = {
   // "Use what I said" (pasting/as_said.rs): its shortcut and the bar's offer.
   asSaidHotkey: '',
   asSaidOffer: true,
+  // Paste last / Copy last transcript (pasting/last.rs): unbound.
+  pasteLastHotkey: '',
+  copyLastHotkey: '',
   // Snip to Chat (snip.rs): its shortcut, saying "snip", keeping screenshots.
   snipHotkey: 'kb:alt+win+83',
   snipVoice: true,
   chatImageDays: 30,
+  snipSaveDir: '',
   streamingPartials: true,
   historyEnabled: true,
   meetingDetection: true,
@@ -64,6 +68,8 @@ export const FIELD_DEFAULTS = {
   memoryLearnChats: true,
   memoryLearnMeetings: false,
   memorySensitive: false,
+  // "Search my meetings by meaning" (search/): off until its model is in.
+  searchByMeaning: false,
   barEnabled: true,
   barHideFullscreen: true,
   barTheme: 'app',
@@ -74,6 +80,11 @@ export const FIELD_DEFAULTS = {
   readingSize: 'default',
   motion: 'system',
   inputDevice: null,
+  // Settings → Dictation → Microphone (MicOrder.svelte, dictation/mics.rs):
+  // the microphones in order ([{ id, name }]; empty: Windows' default), and
+  // the ones answered "Not now" to.
+  micOrder: [],
+  micNotNow: [],
   dictionary: [],
   selectedLanguage: 'auto',
   translateToEnglish: false,
@@ -146,6 +157,10 @@ export function cleanConfig(cfg) {
   return {
     ...cfg,
     inputDevice: cfg.inputDevice || null,
+    micOrder: (Array.isArray(cfg.micOrder) ? cfg.micOrder : [])
+      .filter((m) => m && (m.id || m.name))
+      .map((m) => ({ id: String(m.id || ''), name: String(m.name || '') })),
+    micNotNow: (Array.isArray(cfg.micNotNow) ? cfg.micNotNow : []).filter((m) => m && (m.id || m.name)),
     outputDevice: cfg.outputDevice || null,
     audioFeedbackVolume: Number(cfg.audioFeedbackVolume),
     ttsRate: Number(cfg.ttsRate) || 1,
@@ -158,6 +173,8 @@ export function cleanConfig(cfg) {
         // Snippets (DictionaryView) ride along in this copy: keep the flag,
         // or this auto-save would turn them into corrections.
         snippet: !!e.snippet,
+        // A star too (the Dictionary view's), written only when set.
+        ...(e.starred ? { starred: true } : {}),
       }))
       .filter((e) => e.from),
     appRoutes: (cfg.appRoutes || [])

@@ -470,8 +470,9 @@ pub struct Slot {
 }
 
 /// The input hook's language slots (pure): each shortcut with a key, in
-/// order, unless its key would fire with one of `fixed` (the seven fixed
-/// shortcuts, by name) or an earlier language shortcut's — then left
+/// order, unless its key would fire with one of `fixed` (the nine fixed
+/// shortcuts, by name: `transforms::nine_shortcuts`) or an earlier language
+/// shortcut's — then left
 /// unbound, with what it clashes with. (Saved transforms give way to these:
 /// `transforms::fixed_shortcuts`.)
 pub fn assign(fixed: &[(&str, &str)], list: &[LanguageShortcut]) -> Vec<Slot> {

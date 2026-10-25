@@ -77,6 +77,8 @@ fn apply_config(app: &AppHandle, state: State<'_, AppState>, prev: &YapConfig, c
     crate::dictation::input_hook::configure_read_from(&cfg);
     crate::dictation::input_hook::configure_as_said_from(&cfg);
     crate::dictation::input_hook::configure_snip_from(&cfg);
+    crate::dictation::input_hook::configure_paste_last_from(&cfg);
+    crate::dictation::input_hook::configure_copy_last_from(&cfg);
     crate::dictation::input_hook::configure_languages_from(&cfg);
     crate::dictation::input_hook::configure_transforms_from(&cfg);
     // The tray's Transforms menu follows the list.
@@ -117,6 +119,8 @@ fn apply_config(app: &AppHandle, state: State<'_, AppState>, prev: &YapConfig, c
     crate::bar::sync(&app, &cfg);
     // …and "Show tips" (the notice policy).
     crate::notices::notice::sync(&cfg);
+    // …and "Search my meetings by meaning" (search.rs).
+    crate::search::on_config_saved(prev, &cfg);
     // …and the theme: the opaque windows' webview backgrounds (theme.rs; the
     // pages follow `yap-config-saved`).
     crate::shell::theme::apply(&app, &cfg);

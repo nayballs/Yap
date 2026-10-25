@@ -495,6 +495,53 @@ test('a spoken answer starts at its first sentence, while the rest is still bein
   await mainOnScreen(yap);
 });
 
+// A step's opening words that turn out to come before a tool call are taken
+// back (chat/stream.rs `Step`): long enough to pass `releases`, the voice had
+// already started on them. It stops there, drops what it hadn't said, and the
+// answer after the tool is said from its first sentence (chat/assistant.rs
+// `Streamed::taken_back`). Before (23 Oct follow-up): the voice went on with
+// the words taken back, and the answer's first sentences were skipped as
+// already said.
+test('words taken back for a tool call stop the voice, and the answer is said from its start', async ({
+  yap,
+  main,
+  fakeLlm,
+}) => {
+  await setConfig(yap, main, { speakReplies: true, speakWhen: 'voice' });
+  await inAnotherApp(yap);
+  await yap.invoke('tts_e2e_spoken', { clear: true });
+  const preamble = 'Let me look through your notes for that. I will check the launch plan first. Then I can tell you who has them.';
+  const answer = 'Sam has the slides. They are in the shared launch folder.';
+  fakeLlm.scriptChat([
+    { preamble, tools: [{ name: 'search_notes', args: { query: 'launch slides' } }], stream: { gapMs: 300 } },
+    { content: answer, stream: { gapMs: 700 } },
+  ]);
+  const cap = capsule(yap);
+  const chatCalls = () => fakeLlm.requests.filter((r) => r.kind === 'other' && r.tools.length > 0);
+  const before = chatCalls().length;
+  await ask(yap, 'who has the launch slides');
+  // The voice started on the words before the call.
+  await expect.poll(() => speaking(yap), { timeout: 10_000 }).toBe(true);
+  await expect(cap).toHaveAttribute('data-ask', 'speaking');
+  // The call came: the voice stops while the answer is still to come, and
+  // the capsule is back to thinking.
+  await expect.poll(() => chatCalls().length, { timeout: 10_000 }).toBe(before + 2);
+  await expect.poll(() => speaking(yap), { timeout: 1_500 }).toBe(false);
+  await expect(cap).toHaveAttribute('data-ask', 'thinking');
+  // The answer, said whole from its first sentence; the words taken back
+  // never reached it.
+  await expect.poll(async () => (await spoken(yap)).map((s) => s.text).at(-1), { timeout: 15_000 }).toBe(answer);
+  const said = await spoken(yap);
+  expect(said.at(-1).streamed).toBe(true);
+  expect(said.filter((s) => s.text.includes('Sam has the slides'))).toHaveLength(1);
+  expect(said.some((s) => s.text.includes('Then I can tell you'))).toBe(false);
+  await expect(answerCard(yap)).toContainText('Sam has the slides');
+  await expect(answerCard(yap)).not.toContainText('Let me look');
+  await yap.invoke('tts_stop');
+  await setConfig(yap, main, { speakReplies: false, speakWhen: 'voice' });
+  await mainOnScreen(yap);
+});
+
 // The maintainer (2026-10-18): "We do not want this feature enabled during meetings,
 // we don't want Bella to talk … this would be too much". While a meeting
 // records or a call is on, the shortcut doesn't listen and Yap doesn't talk.

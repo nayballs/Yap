@@ -99,7 +99,7 @@ impl Shared {
         let cfg = self.config.read().map(|c| c.clone()).unwrap_or_default();
         let (cleaned, style) = match crate::dictation::languages::translate_dictation(&self.app, &raw, &cfg).await {
             Some(translated) => (translated, None),
-            None => self.clean_up(&raw, &style_target, screen.as_deref()).await,
+            None => self.clean_up(&raw, &style_target, screen.as_deref(), true).await,
         };
 
         // The correction dictionary (exact, then fuzzy for
@@ -131,12 +131,15 @@ impl Shared {
     /// one (filler only). `screen`: the names on screen the dictation read
     /// (`screen_terms`), for the line telling the model how they're
     /// spelled. Also returns the style it was written in, if any
-    /// (`cleanup_styles`).
+    /// (`cleanup_styles`). `watch`: a dictation's (not Run again's) — past
+    /// its usual time the bar says so and offers Skip cleanup, which gives
+    /// the transcript back at once (`pipeline/slow.rs`).
     pub(super) async fn clean_up(
         &self,
         raw: &str,
         target: &crate::ai::cleanup_styles::Target,
         screen: Option<&crate::dictionary::screen_terms::ScreenTerms>,
+        watch: bool,
     ) -> (String, Option<crate::ai::cleanup_styles::Style>) {
         // Snapshot the cleanup-related config under one read lock.
         // `plan` is the routed cleanup (`cleanup_styles::resolve`): the body
@@ -197,7 +200,7 @@ impl Shared {
                 if let Some(s) = plan.style {
                     tracing::debug!(style = %s.describe(), "AI cleanup's style");
                 }
-                match crate::privacy::net::within(crate::privacy::net::Feature::Dictation, crate::ai::cleanup_styles::clean(
+                let call = crate::privacy::net::within(crate::privacy::net::Feature::Dictation, crate::ai::cleanup_styles::clean(
                     raw,
                     &pp_base_url,
                     &pp_api_key,
@@ -208,9 +211,18 @@ impl Shared {
                     names.as_deref(),
                     &dict,
                     pp_disable_thinking,
-                ))
-                .await
-                {
+                ));
+                let result = if watch {
+                    let key = crate::dictation::slow::cleanup_key(&pp_provider, &pp_base_url, &pp_model);
+                    match self.watched_cleanup(call, &key, raw.chars().count() as u64).await {
+                        Some(result) => result,
+                        // Skip cleanup (the bar): the transcript as it is.
+                        None => return (raw.to_string(), None),
+                    }
+                } else {
+                    call.await
+                };
+                match result {
                     // Ok(empty) is a DELIBERATE empty result (filler-only
                     // input) — keep it empty so nothing is injected. Only a
                     // real request error falls back to the raw transcript.
@@ -303,11 +315,17 @@ impl Shared {
                 0 => None,
                 h => Some(h),
             };
+            // An Undo, a dictation whose mic was disconnected (`unplugged.rs`)
+            // or one stopped at its length limit (`cap.rs`), with nobody
+            // pressing anything: into its own window or onto the clipboard,
+            // never into whatever has the focus now.
+            let unplugged = self.unplugged();
+            let capped = self.capped.load(Ordering::SeqCst);
             match crate::pasting::text_injector::inject_text(
                 &corrected,
                 restore_clipboard,
                 target,
-                self.undoing.load(Ordering::SeqCst),
+                self.undoing.load(Ordering::SeqCst) || unplugged || capped,
                 read,
             )
             .await
@@ -323,7 +341,9 @@ impl Shared {
                     if submit.is_some() {
                         tracing::info!("Not pressing the submit key: the app runs as administrator");
                     }
-                    crate::notices::alert::show_soon(&self.app, crate::pasting::elevated::alert());
+                    if !self.tell_unplugged(super::unplugged::Outcome::OnClipboard) {
+                        crate::notices::alert::show_soon(&self.app, crate::pasting::elevated::alert());
+                    }
                 }
                 // An Undo whose window is gone (or won't come to the
                 // front): never into another one; on the clipboard.
@@ -331,12 +351,22 @@ impl Shared {
                     crate::pasting::as_said::forget();
                     report.left_on_clipboard = true;
                     report.error = Some("the dictation's window is gone".into());
-                    not_pasted = Some("Left on the clipboard: its window was gone");
-                    crate::notices::alert::show_soon(&self.app, undo_window_gone());
+                    not_pasted = Some(if unplugged {
+                        super::unplugged::NOT_PASTED
+                    } else {
+                        "Left on the clipboard: its window was gone"
+                    });
+                    // One alert: the mic's, saying where the text is (a
+                    // dictation stopped at its limit says so itself, below).
+                    if !self.tell_unplugged(super::unplugged::Outcome::OnClipboard) && !capped {
+                        crate::notices::alert::show_soon(&self.app, undo_window_gone());
+                    }
                 }
                 Ok(delivery @ (crate::pasting::text_injector::Delivery::Pasted | crate::pasting::text_injector::Delivery::Typed)) => {
                     // The paste didn't land and the text was typed instead.
                     report.typed = delivery == crate::pasting::text_injector::Delivery::Typed;
+                    // Its mic was unplugged: said, now it's in its window.
+                    self.tell_unplugged(super::unplugged::Outcome::Pasted);
                     // Once, whether auto-submit, the voice
                     // command or both asked for it.
                     if let Some(key) = &submit {
@@ -373,6 +403,10 @@ impl Shared {
                     not_pasted = Some("The paste didn't go through");
                     crate::pasting::as_said::forget();
                 }
+            }
+            // Stopped at its length limit: said, with Recover text (`cap.rs`).
+            if capped {
+                crate::dictation::cap::stopped(&self.app, &corrected, not_pasted.is_none());
             }
 
             // Local-only history for the stats dashboard

@@ -30,6 +30,8 @@ mod brief;
 #[cfg(debug_assertions)]
 mod cleanup;
 #[cfg(debug_assertions)]
+mod languages;
+#[cfg(debug_assertions)]
 mod local;
 #[cfg(debug_assertions)]
 mod record;
@@ -38,7 +40,7 @@ mod runner;
 #[cfg(debug_assertions)]
 mod scenario;
 #[cfg(debug_assertions)]
-mod languages;
+mod search;
 #[cfg(debug_assertions)]
 mod serving;
 #[cfg(debug_assertions)]
@@ -51,6 +53,8 @@ mod standin;
 mod transforms;
 #[cfg(debug_assertions)]
 mod styles;
+#[cfg(debug_assertions)]
+mod units;
 
 #[cfg(debug_assertions)]
 static ACTIVE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);

@@ -26,7 +26,17 @@
 {#if chat.messages.length === 0}
   <div class="empty">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" /><path d="M8 9h8M8 13h5" /></svg>
-    <p>Ask about your notes, transcripts, or anything else</p>
+    {#if chat.scope === 'meetings'}
+      <!-- Asked across the meetings (search/ask.rs): found on this PC, cited. -->
+      <p class="across">Ask across your meetings and notes</p>
+      <p class="asknote">Answers come from what was said and written, and cite the moment: click a number to open it.</p>
+    {:else}
+      <p>Ask about your notes, transcripts, or anything else</p>
+      <p class="asknote">
+        <button class="setkey" onclick={() => chat.askAcrossMeetings()}>Ask across your meetings</button>
+        for answers that cite the moment they come from.
+      </p>
+    {/if}
     {#if !chat.chatReady}
       <!-- Before a first question fails: what Chat needs. -->
       <p class="asknote needsai">
@@ -45,6 +55,13 @@
     </p>
   </div>
 {:else}
+  {#if chat.scope === 'meetings'}
+    <!-- This conversation asks across the meetings, follow-ups too. -->
+    <p class="scopeline" data-testid="chat-across-meetings">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7" /><path d="m20 20-3.5-3.5" /></svg>
+      Asking across your meetings and notes
+    </p>
+  {/if}
   <div class="msgs" bind:this={chat.threadEl}>
     {#each chat.messages as m, i (i)}
       <ChatMessage
@@ -56,6 +73,7 @@
         onview={(id) => (chat.viewing = id)}
         onmenu={(e) => messageMenu(e, m)}
         onread={() => chat.readAloud(m)}
+        onsource={(s) => chat.openSource(s)}
       />
     {/each}
     {#if (chat.sending || (chat.assistantPending != null && chat.assistantPending === chat.activeId)) && !chat.streaming}
@@ -106,6 +124,26 @@
   .empty .asknote.needsai {
     max-width: 320px;
     color: var(--yap-fg-80);
+  }
+  .empty .across {
+    max-width: 280px;
+    color: var(--yap-fg);
+    font-weight: 600;
+  }
+  /* A conversation asked across the meetings says so over its thread. */
+  .scopeline {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin: 0 0 8px;
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--yap-muted);
+  }
+  .scopeline svg {
+    width: 12px;
+    height: 12px;
+    color: var(--yap-primary);
   }
   .asknote kbd {
     padding: 1px 6px;

@@ -13,9 +13,9 @@
 //! moved and deleted. At most [`MAX`].
 //!
 //! **Shortcuts**: `input_hook.rs` keeps [`MAX`] transform slots beside its
-//! seven fixed bindings. [`assign`] (pure) gives each transform with a
+//! nine fixed bindings. [`assign`] (pure) gives each transform with a
 //! shortcut a slot, in list order, unless its key would fire with one of the
-//! seven or an earlier transform's ([`crate::dictation::input_hook::clashes`]): it's
+//! nine or an earlier transform's ([`crate::dictation::input_hook::clashes`]): it's
 //! left unbound and the log says why (Settings refuses such a key in the
 //! first place, `hotkeysClash`). Only the press is used. No in-page fallback:
 //! a transform works on another app's text.
@@ -234,7 +234,7 @@ pub struct Slot {
 
 /// The input hook's transform slots (pure): each listed transform with a
 /// shortcut, in order, unless its key would fire with one of `fixed` (the
-/// seven fixed shortcuts, by name) or an earlier transform's — then left
+/// nine fixed shortcuts, by name) or an earlier transform's — then left
 /// unbound, with what it clashes with.
 pub fn assign(fixed: &[(&str, &str)], transforms: &[Transform]) -> Vec<Slot> {
     let mut out: Vec<Slot> = Vec::new();
@@ -259,8 +259,9 @@ pub fn assign(fixed: &[(&str, &str)], transforms: &[Transform]) -> Vec<Slot> {
     out
 }
 
-/// The seven fixed shortcuts, by name (`input_hook.rs`).
-pub fn seven_shortcuts(cfg: &YapConfig) -> Vec<(&'static str, String)> {
+/// The nine fixed shortcuts, by name (`input_hook.rs`): what the language
+/// shortcuts give way to.
+pub fn nine_shortcuts(cfg: &YapConfig) -> Vec<(&'static str, String)> {
     vec![
         ("dictation hotkey", cfg.hotkey.clone()),
         ("rewrite shortcut", cfg.edit_hotkey.clone()),
@@ -269,14 +270,16 @@ pub fn seven_shortcuts(cfg: &YapConfig) -> Vec<(&'static str, String)> {
         ("read-aloud shortcut", cfg.read_hotkey.clone()),
         ("Use-what-I-said shortcut", cfg.as_said_hotkey.clone()),
         ("snip shortcut", cfg.snip_hotkey.clone()),
+        ("Paste-last shortcut", cfg.paste_last_hotkey.clone()),
+        ("Copy-last shortcut", cfg.copy_last_hotkey.clone()),
     ]
 }
 
 /// The shortcuts a transform's gives way to, by name, as [`assign`] takes
-/// them: the seven fixed ones, then the language shortcuts' (My languages,
+/// them: the nine fixed ones, then the language shortcuts' (My languages,
 /// `languages.rs`: a dictation key comes first).
 pub fn fixed_shortcuts(cfg: &YapConfig) -> Vec<(&'static str, String)> {
-    let mut out = seven_shortcuts(cfg);
+    let mut out = nine_shortcuts(cfg);
     out.extend(crate::dictation::languages::shortcuts(cfg).into_iter().map(|s| ("language shortcut", s.hotkey)));
     out
 }

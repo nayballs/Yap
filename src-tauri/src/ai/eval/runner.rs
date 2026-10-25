@@ -18,6 +18,9 @@ use super::standin::Standin;
 /// Chat scope's prompt), which `chat_turn` builds on.
 pub(super) const DEFAULT_PERSONA: &str = "You are a helpful voice assistant. Answer concisely and conversationally, and handle informal spoken phrasing gracefully. Keep answers brief unless asked for detail.";
 
+/// The stack the scenarios run on.
+const STACK: usize = 64 * 1024 * 1024;
+
 const USAGE: &str = "\
 yap.exe eval [options]          (debug builds; docs/model-evals.md)
 
@@ -95,6 +98,13 @@ My languages (languages.rs; instead of the scenarios; languages.md):
                            after the language line (in its language, names kept), and a language
                            shortcut's translation (in the target language, nothing answered)
   --languages-phase <p>    before | after: one cleanup phase (a cloud model's tokens)
+Meeting search (search/; instead of the scenarios; search.md):
+  --search                 evals/search/meetings.json: recall@1/3/5 for keyword, meaning and hybrid
+                           search (and Chat's whole-note search), then each --model's Ask across
+                           meetings answers checked for citations of the right lines (--only picks
+                           questions by words or tag; --max-total-tokens caps a model's spend)
+  --embed <path.gguf>      the embedding model (default: the installed app's, else downloaded)
+  --embed-ngl <n>          its GPU layers (default 999; 0 = the processor)
 Serving benches (local servers; instead of the scenarios; serving.md):
   --bench stream           time to the first token, streamed vs not, on Chat-shaped requests
                            (a short answer, a long one, a web answer, a tool call)
@@ -153,6 +163,9 @@ struct Args {
     transforms: bool,
     languages: bool,
     languages_phase: Option<&'static str>,
+    search: bool,
+    embed: Option<PathBuf>,
+    embed_ngl: u32,
     bench: Option<String>,
     bench_rounds: u32,
     bench_history: usize,
@@ -161,7 +174,7 @@ struct Args {
 }
 
 fn parse(argv: Vec<String>) -> Result<Args, String> {
-    let mut a = Args { ngl: 0, ctx: 8192, repeat: 1, cleanup_rounds: 3, bench_rounds: 3, ..Default::default() };
+    let mut a = Args { ngl: 0, ctx: 8192, repeat: 1, cleanup_rounds: 3, bench_rounds: 3, embed_ngl: 999, ..Default::default() };
     let mut it = argv.into_iter();
     while let Some(arg) = it.next() {
         let (flag, inline) = match arg.split_once('=') {
@@ -253,6 +266,9 @@ fn parse(argv: Vec<String>) -> Result<Args, String> {
                         .ok_or_else(|| format!("--languages-phase {}, not {p}", super::languages::PHASES.join("|")))?,
                 );
             }
+            "--search" => a.search = true,
+            "--embed" => a.embed = Some(PathBuf::from(value()?)),
+            "--embed-ngl" => a.embed_ngl = num(value()?, &flag)? as u32,
             "--bench" => {
                 let b = value()?;
                 if !super::serving::BENCHES.contains(&b.as_str()) {
@@ -302,6 +318,7 @@ pub fn main(argv: Vec<String>) -> i32 {
         || args.brief
         || args.transforms
         || args.languages
+        || args.search
         || args.bench.is_some())
         && !args.list
     {
@@ -327,7 +344,7 @@ pub fn main(argv: Vec<String>) -> i32 {
         }
         return 0;
     }
-    if args.models.is_empty() && args.raw.is_none() && !args.speakers {
+    if args.models.is_empty() && args.raw.is_none() && !args.speakers && !args.search {
         eprintln!("Give at least one --model (or --raw).\n\n{USAGE}");
         return 2;
     }
@@ -341,6 +358,8 @@ pub fn main(argv: Vec<String>) -> i32 {
     let label = args.label.clone().unwrap_or_else(|| {
         if args.models.is_empty() && args.speakers {
             "speakers".to_string()
+        } else if args.models.is_empty() && args.search {
+            "search".to_string()
         } else if args.models.is_empty() {
             "raw".to_string()
         } else {
@@ -384,7 +403,15 @@ pub fn main(argv: Vec<String>) -> i32 {
     record::set_timeout(args.timeout.map(Duration::from_secs));
     record::set_run_body(run_body(&args));
     println!("Run folder: {}", run_dir.display());
-    let code = tauri::async_runtime::block_on(run_all(&args, &run_dir, &keys, scenarios));
+    // On a thread with room: a Chat turn's future, polled here, is deep in a
+    // debug build, and overflowed the main thread's 1 MB (2026-10-25).
+    let code = std::thread::scope(|s| {
+        std::thread::Builder::new()
+            .name("eval".into())
+            .stack_size(STACK)
+            .spawn_scoped(s, || tauri::async_runtime::block_on(run_all(&args, &run_dir, &keys, scenarios)))
+            .map_or(2, |h| h.join().unwrap_or(2))
+    });
     record::close();
     println!("\nRun folder: {}", run_dir.display());
     code
@@ -1310,6 +1337,54 @@ async fn run_all(args: &Args, run_dir: &Path, keys: &HashMap<String, String>, sc
         Vec::new()
     };
     let mut language_results: Vec<(String, Value)> = Vec::new();
+    // Meeting search (`--search`): the corpus in the run's notes, its
+    // embedding server, and the retrieval half, before any model.
+    let search_corpus = if args.search {
+        let path = scenarios_dir(args).join("..").join("search").join("meetings.json");
+        match super::search::load(&path) {
+            Ok(c) => Some(c),
+            Err(e) => {
+                eprintln!("{e}");
+                return 2;
+            }
+        }
+    } else {
+        None
+    };
+    let mut search_answers: Vec<(String, Value)> = Vec::new();
+    let mut search_retrieval = Value::Null;
+    let mut search_server: Option<super::search::Server> = None;
+    let mut search_ids = HashMap::new();
+    if let Some(c) = &search_corpus {
+        println!("\n=== Meeting search: {} notes, {} questions ===", c.notes.len(), c.questions.len());
+        // The run's clock at the corpus's "now" (its "last week").
+        if let Ok(t) = chrono::DateTime::parse_from_rfc3339(&c.now) {
+            crate::ai::eval::clock_forward(t.timestamp() - crate::ai::eval::now().timestamp());
+        }
+        record::set_config(Some(crate::config::YapConfig { search_by_meaning: true, ..Default::default() }));
+        let setup = async {
+            let ids = super::search::seed(c)?;
+            let runtime = local::runtime(args.llamafile.as_deref(), &models_dir).await?;
+            let gguf = super::search::model(args.embed.as_deref(), &models_dir).await?;
+            println!("  embedding server: {} (ngl {}) …", gguf.display(), args.embed_ngl);
+            let server = super::search::start(&runtime, &gguf, args.embed_ngl, run_dir).await?;
+            println!("  ready in {:.1} s (its log: {})", server.load_ms as f64 / 1000.0, server.log.display());
+            let r = super::search::retrieval(c, &ids).await?;
+            Ok::<_, String>((ids, server, r))
+        };
+        match Box::pin(setup).await {
+            Ok((ids, server, r)) => {
+                search_ids = ids;
+                search_retrieval = r;
+                search_server = Some(server);
+            }
+            Err(e) => {
+                eprintln!("  meeting search: {e}");
+                summary["search_error"] = json!(e);
+                failed = true;
+            }
+        }
+    }
     let mut cleanups: Vec<(String, Value)> = Vec::new();
     let mut benches: Vec<(String, Value)> = Vec::new();
     let mut rows: Vec<Value> = Vec::new();
@@ -1426,6 +1501,14 @@ async fn run_all(args: &Args, run_dir: &Path, keys: &HashMap<String, String>, sc
             languages_result = super::languages::run(&language_cases, &ep, args.repeat, &phases).await;
             language_results.push((m.label.clone(), languages_result.clone()));
         }
+        let mut search_result = Value::Null;
+        if let (Some(c), Some(_)) = (&search_corpus, &search_server) {
+            record::set_config(Some(super::search::settings(&m.provider, &m.base_url, &m.key, &m.model)));
+            record::set_tools_forced(args.tools);
+            println!("  Ask across meetings …");
+            search_result = Box::pin(super::search::answers(c, &search_ids, &m.label, &args.only, args.max_total_tokens)).await;
+            search_answers.push((m.label.clone(), search_result.clone()));
+        }
         let mut bench_result = Value::Null;
         if let Some(kind) = &args.bench {
             record::set_context(json!({ "model": m.label, "scenario": format!("bench-{kind}") }));
@@ -1454,6 +1537,7 @@ async fn run_all(args: &Args, run_dir: &Path, keys: &HashMap<String, String>, sc
             "brief": brief_result,
             "transforms": transforms_result,
             "languages": languages_result,
+            "search": search_result,
         });
         let (drafted, kept) = (sum("draft_tokens"), sum("draft_accepted"));
         if drafted > 0.0 {
@@ -1495,6 +1579,17 @@ async fn run_all(args: &Args, run_dir: &Path, keys: &HashMap<String, String>, sc
     }
     let text = record::redact(&serde_json::to_string_pretty(&summary).unwrap_or_default());
     let _ = std::fs::write(run_dir.join("summary.json"), text);
+    if !search_retrieval.is_null() {
+        let md = record::redact(&super::search::markdown(&search_retrieval, &search_answers));
+        let _ = std::fs::write(run_dir.join("search.md"), &md);
+        let all = json!({
+            "retrieval": search_retrieval,
+            "answers": search_answers.iter().map(|(l, v)| json!({ "model": l, "result": v })).collect::<Vec<_>>(),
+        });
+        let _ = std::fs::write(run_dir.join("search.json"), record::redact(&serde_json::to_string_pretty(&all).unwrap_or_default()));
+        println!("\n{}", md.split("\n| Question").next().unwrap_or(""));
+    }
+    drop(search_server);
     if !cleanups.is_empty() {
         let md = record::redact(&super::cleanup::markdown(&cleanups));
         let _ = std::fs::write(run_dir.join("cleanup.md"), &md);

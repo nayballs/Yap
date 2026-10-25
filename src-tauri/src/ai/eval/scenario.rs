@@ -389,6 +389,13 @@ pub struct Expect {
     /// of theirs converted (within 1°C). A UK weather answer copied the
     /// pages' "35°F (1.5°C)" (Qwen3.5-4B, 2026-10-23). See [`temperature_fault`].
     pub temperatures: Option<String>,
+    /// The answer's speeds lead with this unit, "km/h" or "mph", as
+    /// `temperatures` checks its scale (within 2 km/h or 10 %); Ireland's
+    /// weather answers kept their pages' mph (2026-10-23). See `units::fault`.
+    pub speeds: Option<String>,
+    /// The answer's distances lead with this unit, "km" or "miles" (within
+    /// 1 km or 6 %).
+    pub distances: Option<String>,
     /// Memory afterwards: items holding these words (or not).
     #[serde(default)]
     pub memory: Vec<MemoryExpect>,
@@ -810,7 +817,7 @@ fn bare_degrees_in(text: &str) -> Vec<(usize, usize, f64)> {
 
 /// Is `gap`, the text between two temperatures, only what joins one to its
 /// conversion: " (", " / ", "** (about ", " | ", " (30 to "? Pure.
-fn joins_a_conversion(gap: &str) -> bool {
+pub(super) fn joins_a_conversion(gap: &str) -> bool {
     const WORDS: &[&str] = &["about", "around", "roughly", "approx", "approximately", "or", "to", "which", "is", "that", "s", "equivalent", "i", "e", "ie"];
     gap.chars().count() <= 30
         && gap.chars().all(|c| c.is_alphabetic() || c.is_whitespace() || c.is_ascii_digit() || "([/,~≈-–−‑.:=|*_'’".contains(c))
@@ -1063,6 +1070,15 @@ pub fn check(e: &Expect, o: &Observed) -> Vec<String> {
                 }
             }
             _ => fails.push(format!("temperatures: \"{want}\" isn't C or F")),
+        }
+    }
+    for (want, kind) in [(&e.speeds, super::units::Kind::Speed), (&e.distances, super::units::Kind::Distance)] {
+        if let Some(want) = want {
+            match super::units::fault(&o.reply, want, &pages(), kind) {
+                Ok(None) => {}
+                Ok(Some(fault)) => fails.push(format!("{}: {fault}", kind.name())),
+                Err(e) => fails.push(e),
+            }
         }
     }
     if let Some(want) = &e.clipboard_contains {

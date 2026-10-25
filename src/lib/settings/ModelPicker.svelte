@@ -11,9 +11,12 @@
   import { PROVIDER_ICONS, MONOCHROME_PROVIDERS } from '../core/providerIcons.js';
   import { PROVIDER_LABELS } from '../core/providers.js';
   import { catalog, loadCatalog, checkCatalog, modelsFor } from '../stores/modelCatalog.svelte.js';
+  import { readsImages } from '../stores/visionTags.svelte.js';
   import { ago } from '../core/modelCatalog.js';
 
-  let { provider, value = $bindable(''), disabled = false } = $props();
+  // `images`: tag the models that read images ("Reads images": the Chat
+  // scope's list, where a screenshot may go — snip/vision.rs's rules).
+  let { provider, value = $bindable(''), disabled = false, images = false } = $props();
 
   let showMore = $state(false);
   let filter = $state('');
@@ -33,6 +36,7 @@
     icon,
     mono,
     tag: i.missing ? 'gone' : i.tag,
+    images: images && readsImages(provider, i.value) === true,
   });
   const options = $derived.by(() => {
     const opts = merged.items.map(toOption);

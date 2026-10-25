@@ -1,4 +1,4 @@
-// Settings' seven global shortcuts (dictation/input_hook.rs): which command applies
+// Settings' nine global shortcuts (dictation/input_hook.rs): which command applies
 // each, their names for clash messages, and whether one is being picked
 // right now (Settings' in-page hotkey fallback stands down meanwhile, so
 // pressing the current hotkey to replace it doesn't start a dictation).
@@ -22,6 +22,8 @@ export const HOTKEY_CMD = {
   readHotkey: 'configure_read_hotkey',
   asSaidHotkey: 'configure_as_said_hotkey',
   snipHotkey: 'configure_snip_hotkey',
+  pasteLastHotkey: 'configure_paste_last_hotkey',
+  copyLastHotkey: 'configure_copy_last_hotkey',
 };
 
 export const HOTKEY_NAMES = {
@@ -32,6 +34,8 @@ export const HOTKEY_NAMES = {
   readHotkey: 'read-aloud shortcut',
   asSaidHotkey: 'Use-what-I-said shortcut',
   snipHotkey: 'snip shortcut',
+  pasteLastHotkey: 'Paste-last shortcut',
+  copyLastHotkey: 'Copy-last shortcut',
 };
 
 /** True while any <SettingsHotkey> is capturing a new key. */
@@ -50,7 +54,7 @@ export function onHotkeyCapturing(cfg, target, on) {
 
 /**
  * Every shortcut but `except` (a fixed one's config key, `transform:<id>`
- * or `language:<id>`), as [name, spec]: the seven fixed ones, the language
+ * or `language:<id>`), as [name, spec]: the nine fixed ones, the language
  * shortcuts' (dictation/languages.rs; "the French shortcut"), then the
  * saved transforms' (dictation/transforms.rs; "the Polish transform").
  */
@@ -75,7 +79,7 @@ function clashMessage([name, other], spec) {
 }
 
 /**
- * The seven, and the saved transforms', never fire on one press
+ * The nine, the language shortcuts' and the saved transforms' never fire on one press
  * (`hotkeysClash`, dictation/input_hook.rs `clashes`): the message for a refused
  * spec, else null.
  */
@@ -102,7 +106,7 @@ export function onLanguageCapturing(cfg, id, on) {
   invoke('configure_language_hotkey', { id, spec: on ? '' : s?.hotkey || '' }).catch(() => {});
 }
 
-/** A transform's key is being picked: its live binding paused, as for the seven. */
+/** A transform's key is being picked: its live binding paused, as for the nine. */
 export function onTransformCapturing(cfg, id, on) {
   hotkeyCapture.on = on;
   const t = (cfg?.transforms || []).find((x) => x.id === id);

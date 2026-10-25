@@ -42,6 +42,7 @@ builds and runs out of the checkout: `YAP_EVAL_TARGET_DIR=<builds>/evals`, `--ou
 | `--brief` | Write the pre-meeting brief of each meeting in `evals/briefs/*.json` instead of the scenarios (below; `--only` picks them, `--repeat` repeats them). |
 | `--transforms` | Run the saved transforms' cases in `evals/transforms/cases.json` instead of the scenarios ("Saved transforms" below; `--only` picks them by name or transform, `--repeat` repeats them). |
 | `--languages`, `--languages-phase before\|after` | Run My languages' cases in `evals/languages/cases.json` instead of the scenarios ("My languages" below): cleanup of French, Spanish and German dictations before and after the language line, and a language shortcut's translation. |
+| `--search`, `--embed <gguf>`, `--embed-ngl <n>` | Meeting search instead of the scenarios: recall@k for keyword, meaning and hybrid search over `evals/search/meetings.json`, then each `--model`'s Ask across meetings answers checked for citations of the right lines ("Meeting search" below). The embedding model: `--embed` (else the installed app's, read-only, else downloaded into `--models-dir`), on the card unless `--embed-ngl 0`. |
 | `--mtp on\|off`, `--no-warm-up` | A local model's MTP drafting (default: as Yap's sidecar decides on this PC, never with `--ngl 0`) and its warm-up request. |
 | `--clock-step <min>` | Each turn of a scenario, the clock Chat tells the model moves on this much (a real chat's turns are minutes apart). |
 | `--bench stream\|layout\|loop\|embed`, `--bench-rounds <n>` | Serving benches instead of the scenarios (below; `serving.md`). |
@@ -247,6 +248,34 @@ phase after` keeps a cloud run near 20k. `YAP_EVAL_LANGUAGE_LINE` /
 and places without a rebuild. `languages.md` in the run folder;
 `models[].languages` in `summary.json`.
 
+### Meeting search (`--search`)
+
+```bash
+yap.exe eval --search --embed <embeddinggemma-300M-Q8_0.gguf> --embed-ngl 999
+yap.exe eval --search --embed <…gguf> --model local:<4b.gguf> --ngl 999 --llamafile <llamafile.exe>
+yap.exe eval --search --embed <…gguf> --model groq:openai/gpt-oss-20b --keys-from-yap --only "venue,teeth" --max-total-tokens 20000
+```
+
+`evals/search/meetings.json` is a made-up team's meetings (transcripts with
+speakers and times, summaries) and notes, a `now` for the run's clock, and
+questions with their **gold** lines (`{"note": 102, "line": 3}`, or a note's
+`field`), tagged `paraphrase`, `name`, `number`, `date`, `latest`, `notes`,
+`keyword`; a question with no gold has no answer in the corpus. The corpus
+goes into the run's own notes store; every passage is read by the embedding
+model on Yap's llamafile (`search::embedder::server_args`, the server's log in
+the run folder). **Retrieval** (no chat model needed): each question searched
+as Ask across meetings searches (`search::ask::find_in` at the corpus's
+`now`) by keyword, meaning and hybrid, and the hybrid's other tunings, beside
+Chat's whole-note keyword search (`chat::tools::search_notes`): recall@1/3/5
+(a passage holding a gold line), MRR, and how often the first passage's
+line — the one its citation opens at — is a gold line. **Answers** (each
+`--model`): every question through Chat's own turn with scope `meetings`
+(`chat_turn`, the vectors in the run's index): it passes when it cites a
+passage holding a gold line, or, with no gold, says so without citing
+(`ask::says_not_found`). Yap's own fixes are counted (`cited_by_yap`,
+`uncited_answer`). `search.md` and `search.json` in the run folder; the
+numbers in `summary.json` (`models[].search`).
+
 ### Serving benches (`--bench`)
 
 How the server is used rather than what the model says (`ai/eval/serving.rs`; `serving.md` in the
@@ -413,6 +442,7 @@ field is an error, so a typo can't silently skip a check):
 | `min_sources`, `sources_any` | The answer came with at least n web sources (Chat's Sources row); one of their addresses holds one of these. |
 | `min_searches` | At least n web searches ran this turn (the model's and Yap's own: a price question's second search for local prices). |
 | `temperatures` | `"C"` or `"F"`: the answer's temperatures lead with that scale — it gives one, every one in the other scale is only a conversion right after one in it ("2°C (35°F)", "2°C / 35°F"), such a pair agrees, and each figure is one the turn's web pages give, or one of theirs converted (within 1°C). Degrees said without a scale ("about 7 degrees", a spoken answer) take the scale whose figures on the pages they fit. |
+| `speeds`, `distances` | `"km/h"` or `"mph"`; `"km"` or `"miles"`: the same check for the answer's speeds and distances (`ai/eval/units.rs`) — it gives one, every one in another unit (mph, km/h, m/s; miles, km) is only a conversion right after one in it ("29 km/h (18 mph)"), such a pair agrees, and each figure is one the pages give (a range's low end too) or one of theirs converted, within 2 km/h or 10 % (1 km or 6 %). Knots aren't read; nor is a speed as a distance, an area or fuel use. |
 | `clipboard_contains`, `clipboard_untouched` | What the clipboard tool was handed. |
 | `notes` | `[{ "title", "exists", "folder", "contains", "not_contains" }]`, as the notes are afterwards. |
 | `folders`, `notes_count` | The folders afterwards, exactly (no invented ones); how many notes. |
@@ -1519,7 +1549,61 @@ gets the same conversion and line), the seven ×2: **4/14 before** (the two cont
 
 **Left out**: speeds — Ireland's answers kept the pages' mph (5/5 before and after; the soft
 check says km/h); conversions of other units in pages (miles, pounds); a decade ("the mid-40s
-°F") isn't converted, only the line asks the model to.
+°F") isn't converted, only the line asks the model to. (Speeds and distances since 25 Oct:
+below.)
+
+## Speeds and distances where the user is (25 Oct 2026)
+
+The temperatures' follow-up: Ireland's weather answers kept their pages' mph, and nothing
+converted a distance. The same approach (`ai/about_you/units.rs`, web-and-apps.md): the web
+text puts the person's unit first — mph and miles for the UK and the US, km/h and km for the
+rest of the metric world ("18 mph" → "29 km/h (18 mph)", "30 km/h" → "19 mph (30 km/h)",
+"38 km" → "24 miles (38 km)") — with a line for each kind beside the results, and a question
+naming the other unit left alone.
+
+**The scenarios** (stand-in webs, fictional places, `--locale en-GB`; tag `units`):
+`web-wind-ie-mph-pages` (Region Ireland, mph pages: km/h wanted), `web-wind-uk-kmh-pages` (a
+UK user, a Spanish town's km/h pages: mph), `web-wind-us-kmh-pages` (Region US, the same pages:
+mph), `web-distance-uk-km-pages` (a UK user, km pages: miles), `web-distance-ie-miles-pages`
+(Region Ireland, miles pages: km), and two controls — `web-wind-uk-mph-pages` (mph stays) and
+`web-wind-uk-asks-kmh` ("…in km/h?" from the UK). The checks are `speeds` and `distances`
+(above). The questions say "wind forecast" and "look up": "How windy…?" and "How long is
+the walk?" don't need the web by `needs_web`'s words, so the on-device model sometimes
+answered from memory without searching (a made-up "3.5 to 4 miles"), which measured nothing
+about units.
+
+**Qwen3.5-4B**, RTX 5070 Ti, llamafile 0.10.6 (MTP on), ×5 (run folders
+`<builds>/eval-runs/loose-ends-20261025-09*`, the Groq and 2B runs beside them):
+
+| Scenario | Before | After |
+|---|---|---|
+| `web-wind-ie-mph-pages` | 0/5 ("from the west at 18 mph") | **5/5** ("29 km/h with gusts up to 56 km/h") |
+| `web-wind-uk-kmh-pages` | 0/5 ("from the east at 30 km/h") | **5/5** ("19 mph (30 km/h), gusting to 34 mph (55 km/h)") |
+| `web-wind-us-kmh-pages` | 0/5 | **5/5** |
+| `web-distance-uk-km-pages` | 0/5 ("about 38 km") | **5/5** ("24 miles (38 km)") |
+| `web-distance-ie-miles-pages` | 0/5 ("12 miles") | **5/5** ("19 km (12 miles)") |
+| `web-wind-uk-mph-pages` (control) | 5/5 | 5/5 |
+| `web-wind-uk-asks-kmh` (control) | 5/5 | 5/5 (30 km/h, as asked) |
+| **All** | **10/35** | **35/35** |
+
+About 100 more prompt tokens a turn where something is converted (the figures and the line);
+turn times the same (0.7–1.4 s). **Nothing else moved**: the seven temperature scenarios,
+`web-weather-voice-must-search` (its "14 km/h" now "9 mph (14 km/h)" for the UK) and the five
+stand-in UK price scenarios, ×3: **39/39 after** (21/21 and 18/18 before), and
+`web-weather-ie-fahrenheit`'s soft check (its wind in km/h) now holds 3/3 (0/3 before).
+
+**Groq `openai/gpt-oss-20b`** (`--keys-from-yap`, ~24k tokens in all): before, `wind-ie`
+failed — it led with the pages' mph, its own conversions in brackets ("about 18 mph (≈29
+km/h)"), after three searches (12.6k tokens; the run's cap then skipped `wind-uk-kmh`); after,
+2/2 ("about **29 km/h** (≈18 mph)", "east 19 mph (≈30 km/h)"), one search each.
+
+**Qwen3.5-2B** (no tools: the fixed web pipeline, `small_model_answer`, which gets the same
+conversion and lines), the seven ×2: **4/14 before** (the two controls), **14/14 after**.
+
+**Left out**: metres, feet and yards (a UK user's short distances are metric, heights often
+feet: no single rule), knots, m/s for the metric world (Scandinavia's forecasts use it), a
+hyphenated "a 5-mile walk", and anything outside web text (the model's own knowledge, notes).
+`needs_web` doesn't take "windy" or "how far" as needing the web — a separate question.
 
 ## A forced search's words (23 Oct 2026)
 
@@ -1711,3 +1795,57 @@ heard as English with p = 1.00, in 74 and 56 ms — the work `full()` did by
 itself before whenever it wasn't given a language. Told French (My languages
 French only), large-v3 still wrote clear English as English ("The quick
 brown fox jumps over the lazy dog."), and Yap offered to add English.
+
+## Meeting search (25 Oct 2026)
+
+**The question**: does Ask across meetings find the passage that answers a question —
+when the words differ ("can we take on new staff?" for "hiring freeze"), when it names
+a person, a number or a time — and do the models then cite it? `docs/architecture/search.md`
+has the design. The corpus: 11 meetings and 5 notes of a made-up team (29 passages,
+~1,400 words), 35 questions, 33 with gold lines.
+
+**Retrieval** (EmbeddingGemma-300M Q8_0 on Yap's llamafile 0.10.6):
+
+| Search | Recall@1 | @3 | @5 | MRR | Line exact @1 |
+|---|---|---|---|---|---|
+| Chat's note search (whole notes, keywords; the Ask bar's until now) | 0.303 | 0.667 | 0.848 | 0.484 | — |
+| keyword (BM25 per passage, titles at half weight) | 0.667 | 0.909 | 0.939 | 0.779 | 0.485 |
+| meaning | 0.818 | 1.0 | 1.0 | 0.904 | 0.545 |
+| **hybrid: weighted RRF, K 10 (Yap's)** | **0.818** | **1.0** | **1.0** | 0.899 | 0.515 |
+| hybrid: plain RRF, K 60, title words in full | 0.818 | 0.97 | 0.97 | 0.888 | 0.606 |
+| hybrid: plain RRF, K 20 | 0.788 | 0.97 | 0.97 | 0.872 | 0.576 |
+| hybrid: weighted, K 60 | 0.788 | 1.0 | 1.0 | 0.884 | 0.515 |
+| hybrid: weighted, K 20 | 0.788 | 1.0 | 1.0 | 0.884 | 0.515 |
+
+Speed: on an RTX 5070 Ti the 29 passages in 0.28 s (~100/s), a question 7–8 ms (median);
+on its processor (`--embed-ngl 0`, 8 threads) 2.0 s (14/s), a question 14 ms — the same
+recall. Plain RRF ranked passages that matched a little by both words and meaning above a
+meaning-only gold ("new staff"), so each list's place is weighed by its match's strength;
+tiny tail passages ranked high until a tail under 25 words joined the passage before it;
+a meeting's title words matched everything in it until they counted half. Keyword search
+alone misses the paraphrases ("teeth cleaning" for a scale and polish, "new staff"):
+meaning finds every gold in the top 3. The line a citation opens at is picked by words
+(0.515 exact); by meaning it would be 0.606, but that embeds every line of a passage at
+question time.
+
+**Answers** (Chat's turn, scope `meetings`):
+
+| Model | Passed | Cite a passage | Cite a gold line | Yap's fixes | Tokens | Median |
+|---|---|---|---|---|---|---|
+| Qwen3.5-4B Q4_K_M, on the card (ctx 8K, MTP), final code | **33/35** | 31 | 31 | cited 10, note 1 | 130,652 | 0.41 s |
+| the same, the run before | 33/35 | 33 | 32 | cited 8, note 1 | 130,716 | 0.42 s |
+| Groq `openai/gpt-oss-20b` (5 questions) | 4/5 | 4 | 4 | — | 17,115 | — |
+
+The 4B wrote "[1]" for most statements unasked once the instruction showed the form
+("… by Friday [2]."), but left 11/33 answers uncited before Yap's repair
+(`ask::cite_missing`: a statement plainly from one passage gets its number; 24/35 → 33/35).
+Its misses: "When does the press embargo lift?" (two passages share the words, so Yap
+won't guess: the answer carries the uncited note) and "When is the offsite?" ("December 4th
+to 6th" against "the fourth to the sixth of December": too few words in common; the note
+is now added to a short answer with a date or number in it too). Groq, before two fixes:
+"… pounds. [1]" after the full stop (Yap had added a second [1]: `cited_after` now sees
+it) and "We didn't make any decision about relocating the office" not read as "not in your
+meetings" (the words added to `NOT_FOUND`). In the final run the 4B said plainly that
+nothing answers the two questions the corpus can't ("What did Dana say yesterday?": no
+meeting yesterday; the office move: never decided); the run before, it listed every
+passage it had for the office move instead.

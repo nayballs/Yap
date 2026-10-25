@@ -204,9 +204,9 @@ there can move margins: compare a page before and after.
   stands down. The fallback catches the meeting, assistant, read-aloud and
   dictation keys, in that order (read aloud: the page's own selection,
   `speech.svelte.js` `readPageSelection`). **The saved transforms'
-  shortcuts** (Commands → Transforms) are checked against the seven and
+  shortcuts** (Commands → Transforms) are checked against the nine and
   each other (`validateTransformHotkey`: "Already used by the Polish
-  transform"), and the seven against them (`validateHotkey` reads
+  transform"), and the nine against them (`validateHotkey` reads
   `cfg.transforms`); one being picked pauses its slot
   (`onTransformCapturing` → `configure_transform_hotkey`). No in-page
   fallback for them: a transform works on another app's text. **The
@@ -281,8 +281,19 @@ there can move margins: compare a page before and after.
   one translates (the model it uses, Use what I said); "Tell me when I speak
   a language I didn't pick" (`languageNudge`, `language-nudge`; its line says
   only Whisper models can tell).
-  **Microphone and sound** (`#settings-microphone`): Microphone (`inputDevice`,
-  `set_input_device` at once), "Chime when recording starts and stops" (the
+  **Microphone and sound** (`#settings-microphone`): Microphone — since
+  2026-10-25 an **order** (`settings/MicOrder.svelte`, `micOrder`,
+  `dictation/mics.rs`): numbered rows, each "In use" / "Connected" / "Not
+  connected" (its name shortened, `lib/core/mics.js` `shortMicName`; the
+  page's own copy of the order runs the same rules as Rust: `matches`,
+  `findMic`, `micInUse`), ↑ ↓ to move and ✕ to take off, then a fixed
+  "then Windows' default · <its name>" row; "Add a microphone…" lists the
+  connected ones not in it (a Row with `stack`). Windows' list from
+  `list_mics`, again on `yap-mics-changed`. Saved by the auto-save; every
+  connected entry gets its endpoint id on the first edit (one migrated by
+  name). Used from the next dictation (`mic.rs`). The first-run setup's
+  mic check (`onboarding/MicStep.svelte`) picks one the same way: first in
+  the order ("System default" empties it). "Chime when recording starts and stops" (the
   volume slider and the switch on one row: `audioFeedbackVolume`,
   `soundEnabled`), "Chime plays on" (`outputDevice`), "Silence other apps while
   you dictate" (`quietOtherApps`; ⓘ: calls are never silenced), "Pause music
@@ -307,9 +318,13 @@ there can move margins: compare a page before and after.
   (dictations never show up in Win+V history), and the **Dictionary** link row
   (its counts; it leaves Settings for the Dictionary view, `onshowview`).
 - **Shortcuts** (`settings/ShortcutsPage.svelte`, OpenWhispr's Hotkeys page):
-  the seven global shortcuts together — Dictate, Rewrite selected text, Ask the
+  the nine global shortcuts together — Dictate, Rewrite selected text, Ask the
   Voice Assistant, Read aloud, **Use what I said** (`asSaidHotkey`, unbound
-  by default; `pasting/as_said.rs`), Meeting notes, **Snip to Chat** (`snipHotkey`,
+  by default; `pasting/as_said.rs`), **Paste last transcript**
+  (`pasteLastHotkey`, `shortcut-paste-last`) and **Copy last transcript**
+  (`copyLastHotkey`, `shortcut-copy-last`, its hint: out of Win+V history,
+  the tray has both) — both unbound by default, `pasting/last.rs` —
+  Meeting notes, **Snip to Chat** (`snipHotkey`,
   Win+Alt+S by default, its hint naming ✂, the tray, Esc and what Windows never
   lets an app capture; `snip.rs`, [snip.md](./snip.md)) — each in keycaps with Change, a
   clash said under the one being set — a **Language shortcuts** link row
@@ -318,7 +333,10 @@ there can move margins: compare a page before and after.
   (`shortcut-transforms`: "None set", the one transform's name, or "N
   shortcuts") to Commands → Transforms, where their shortcuts are set. Their own pages show the same control
   (Read aloud: Voice Assistant → **Read aloud**, `#settings-read-aloud`). (No
-  in-page fallback for Use what I said: its paste is never in a Yap window.)
+  in-page fallback for Use what I said or Paste last: their paste is never
+  in a Yap window; Copy last's has one, `copy_last_transcript`.) The
+  search finds both new rows ("paste" now puts Paste last transcript first,
+  the Dictation rows after it).
 - **Meetings** (`settings/MeetingsPage.svelte`, Wispr's Notetaker page and
   order): **Call detection** (`#settings-meetings`): "Detect calls and offer
   to take notes" (`meetingDetection`), **"Ask about calls in · 8 of 12 apps ›"**
@@ -505,7 +523,7 @@ there can move margins: compare a page before and after.
   notes): **What leaves this PC** — a table by feature as Yap is set up now
   (your voice, recent dictation audio, AI cleanup, names on screen — read on this PC for each
   dictation, or with cleanup on a cloud provider the names a dictation seems
-  to contain go there with it —, Chat and the Voice Assistant, screenshots (kept on this PC; one goes to the AI model only with a question you send), About you, memory, web search,
+  to contain go there with it —, Chat and the Voice Assistant, screenshots (kept on this PC; one goes to the AI model only with a question you send), About you, memory, meeting search (searched on this PC, by meaning once its model is here), web search,
   spoken replies, AI apps, calendar, account), each row linking to its
   setting. **Network connections** (`#settings-connections`): a link row
   ("12 today" · "3 left this PC today, 9 stayed on it") one level down to
@@ -518,7 +536,13 @@ there can move margins: compare a page before and after.
   (`keepRecentAudio`, `dictation/recent_audio.rs`: the last 24 hours, on this PC, to run
   a dictation again; greyed while history is off) and Clear recent audio…
   ("3 dictations · 1.2 MB" from `recent_audio_status`; asks first; history
-  stays). **Chat screenshots** (`#settings-chat-images`): "Keep chat
+  stays). **Search my meetings by meaning** (`#settings-meeting-search`,
+  `settings/MeetingSearchSettings.svelte`; [search.md](./search.md)): the
+  switch (`searchByMeaning`, disabled until the model is here), Search model
+  (Download with its size — the engine's too when it isn't here — and its
+  progress; then name · size · where it runs, the licence link) and Search
+  index (passages · notes · size, or what it's doing; Rebuild, Delete… asked
+  first), from `search_status` and `yap-search-status`. **Chat screenshots** (`#settings-chat-images`): "Keep chat
   screenshots" (`chatImageDays`: 7 / 30 / 90 days / Forever, `chat-images`;
   "4 screenshots · 1.2 MB" from `chat_images_usage`; Snip to Chat, [snip.md](./snip.md)).
   **Local API** (`#settings-local-api`): `bridgeEnabled` (the

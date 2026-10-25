@@ -18,16 +18,8 @@ use super::busy::{spawn_busy, Busy, Job};
 use super::{test_target, TEST_SILENT_MIC};
 use super::{
     destination, dictation_began, dictation_ended, test_feed_on, AmpMeter, GestureSlot, Goes, Kept, PauseSlot,
-    PendingStart, Shared, ASSISTANT_ARMED, CHAT_ARMED, CHAT_FOCUSED, DICTATION_ERROR, PREROLL_SAMPLES, TARGET_SAMPLE_RATE,
-    UNDO_MS,
+    PendingStart, Shared, ASSISTANT_ARMED, CHAT_ARMED, CHAT_FOCUSED, DICTATION_ERROR, PREROLL_SAMPLES, UNDO_MS,
 };
-
-/// Hard cap on a single recording's captured audio (16 kHz mono f32 ≈ 64 KB/s).
-/// A stuck hotkey or a forgotten toggle-mode session would otherwise grow the
-/// buffer without bound (~3.8 MB/min) until the process runs out of memory. At
-/// 15 minutes that's ~57 MB — far longer than any real dictation — after which
-/// the callback stops appending (and logs once) rather than risk an OOM.
-const MAX_RECORDING_SAMPLES: usize = 15 * 60 * TARGET_SAMPLE_RATE as usize;
 
 /// A recording that started while the mic was still opening waits this long
 /// at most for its first real audio (`mic::Sink::live`) before the start
@@ -48,6 +40,11 @@ const PAUSE_POLL_MS: u64 = 50;
 /// A cancelled recording shorter than this (0.5 s at 16 kHz), or one that
 /// never heard a sound, isn't offered back: nothing worth transcribing.
 const UNDO_MIN_SAMPLES: usize = 8_000;
+
+/// The shortcut was pressed while the last dictation is still being
+/// transcribed: the bar says "Hold on, still transcribing…" (the press is
+/// ignored, as ever).
+const HOLD_ON: &str = "yap-dictation-busy";
 
 impl Shared {
     /// The stop chime (if it's on), then the recording lets go of the mic
@@ -144,10 +141,13 @@ impl Shared {
         }
     }
 
-    /// End the recording that has no microphone (see [`Self::mic_failed`]).
-    fn end_without_mic(self: &Arc<Self>) {
+    /// End the recording now with nothing to transcribe (no microphone, or
+    /// it was unplugged before it heard anything): the mic and the other
+    /// apps' sound go back at once, its audio and edit-mode state go.
+    /// `false`: nothing was recording.
+    pub(super) fn end_now(self: &Arc<Self>) -> bool {
         if !self.recording.swap(false, Ordering::SeqCst) {
-            return;
+            return false;
         }
         dictation_ended();
         self.drop_pending_start();
@@ -166,6 +166,14 @@ impl Shared {
         crate::dictionary::screen_terms::forget();
         if self.assistant.swap(false, Ordering::SeqCst) {
             crate::chat::assistant::nothing(&self.app);
+        }
+        true
+    }
+
+    /// End the recording that has no microphone (see [`Self::mic_failed`]).
+    fn end_without_mic(self: &Arc<Self>) {
+        if !self.end_now() {
+            return;
         }
         // Windows' privacy switches, if they're why: that's what to fix
         // (unless the recording's start already said so).
@@ -202,18 +210,34 @@ impl Shared {
             // The dead-mic watchdog's tally: how much arrived, and
             // whether any of it wasn't digital silence.
             self.mic_tally.note(samples);
+            // The length limit (`cap.rs`): the buffer never grows past it (a
+            // stuck key can't fill the memory); a minute before, the bar
+            // warns; at it, the recording stops and is transcribed.
+            let cap = crate::dictation::cap::current();
+            let mut crossed = None;
             if let Ok(mut buf) = self.buffer.lock() {
-                // Bound the buffer so a stuck key can't grow it without limit
-                // (OOM). Past the cap we drop further audio and warn once.
-                if buf.len() < MAX_RECORDING_SAMPLES {
-                    buf.extend_from_slice(samples);
-                    if buf.len() >= MAX_RECORDING_SAMPLES {
-                        tracing::warn!(
-                            "Recording hit the {}-minute cap — further audio dropped; stop the recording",
-                            MAX_RECORDING_SAMPLES / (60 * TARGET_SAMPLE_RATE as usize)
-                        );
+                let before = buf.len();
+                let room = cap.limit_samples().saturating_sub(before);
+                buf.extend_from_slice(&samples[..samples.len().min(room)]);
+                crossed = crate::dictation::cap::crossed(&cap, before, buf.len());
+            }
+            match crossed {
+                Some(crate::dictation::cap::Crossed::Warn) => {
+                    tracing::info!(left_ms = cap.left_ms(), "Dictation: nearing its length limit");
+                    let _ = self.app.emit(
+                        crate::dictation::cap::EVENT,
+                        serde_json::json!({ "leftMs": cap.left_ms(), "text": crate::dictation::cap::warning(&cap) }),
+                    );
+                }
+                Some(crate::dictation::cap::Crossed::Stop) => {
+                    // Off the mic's thread: the stop plays a chime and
+                    // hands the audio on.
+                    let session = self.rec_session.load(Ordering::SeqCst);
+                    if let Some(shared) = self.me.upgrade() {
+                        let _ = std::thread::Builder::new().name("dictation-cap".into()).spawn(move || shared.stop_at_cap(session));
                     }
                 }
+                None => {}
             }
             // A Voice Assistant question listens for its pause (`pause.rs`).
             if let Ok(mut p) = self.pause.lock() {
@@ -348,8 +372,13 @@ impl Shared {
         // Processing is normally sub-second on a GPU, so this rarely bites.
         if self.processing.load(Ordering::SeqCst) {
             tracing::info!("Ignoring start — a transcription is still processing");
+            // "Hold on, still transcribing…" on the bar's capsule, which
+            // is showing the last one.
+            let _ = self.app.emit(HOLD_ON, ());
             return;
         }
+        // A new recording hasn't reached any limit (`cap.rs`).
+        self.capped.store(false, Ordering::SeqCst);
         // The mic: still warm from a moment ago (the stream delivers, with
         // the pre-roll), or opened now in the background — the recording
         // doesn't wait for it, it keeps everything the new stream delivers.
@@ -384,6 +413,9 @@ impl Shared {
         self.capture_target(edit);
 
         self.mic_dead.store(false, Ordering::SeqCst);
+        if let Ok(mut u) = self.unplugged.lock() {
+            *u = None;
+        }
         let session = self.rec_session.fetch_add(1, Ordering::SeqCst) + 1;
 
         // A meeting recording keeps this dictation out of its "You" side.
@@ -734,6 +766,21 @@ impl Shared {
         MicSilent::for_mic(&name)
     }
 
+    /// Recording `session` reached its length limit (`cap.rs`): stopped as
+    /// the hotkey's second press would — under the gesture lock, as the
+    /// pause watch's stop is — and marked `capped`, so its paste goes back
+    /// to its own window or onto the clipboard and an alert offers Recover
+    /// text. Nothing said is lost.
+    fn stop_at_cap(self: &Arc<Self>, session: u64) {
+        let _g = self.gesture.lock().unwrap_or_else(|p| p.into_inner());
+        if !self.recording.load(Ordering::SeqCst) || self.rec_session.load(Ordering::SeqCst) != session {
+            return;
+        }
+        tracing::info!(limit_ms = crate::dictation::cap::current().limit_ms, "Dictation: reached its length limit, stopping and transcribing");
+        self.capped.store(true, Ordering::SeqCst);
+        self.stop_and_transcribe();
+    }
+
     /// Reopen the mic stream on the configured device, mid-recording (the
     /// recording carries on into the new stream). The dead stream stops
     /// first: two running at once would interleave their audio.
@@ -964,6 +1011,19 @@ impl crate::dictation::mic::Sink for Shared {
             if let Some(shared) = self.me.upgrade() {
                 shared.mic_failed(lease);
             }
+        }
+    }
+
+    fn lost(&self, device: &str, dictation: Option<u64>) {
+        // Off the mic's thread: the dictation's end releases the mic, which
+        // waits for that thread (`unplugged.rs`).
+        let (Some(shared), Some(lease)) = (self.me.upgrade(), dictation) else { return };
+        let device = device.to_string();
+        let spawned = std::thread::Builder::new()
+            .name("dictation-mic-lost".into())
+            .spawn(move || shared.mic_lost(lease, &device));
+        if let Err(e) = spawned {
+            tracing::warn!("Microphone: no thread to end the dictation on ({e})");
         }
     }
 }

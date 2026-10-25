@@ -241,7 +241,9 @@ pub fn settings_summary(cfg: &Value) -> Value {
                     let snippets = entries.iter().filter(|e| e["snippet"].as_bool() == Some(true)).count();
                     Some(json!({ "corrections": entries.len() - snippets, "snippets": snippets }))
                 }
-                "appRoutes" | "appNicknames" | "appsBlocked" => Some(json!(value.as_array().map_or(0, Vec::len))),
+                // How many microphones are in the order / were answered
+                // "Not now": never their names (a headset can carry one).
+                "appRoutes" | "appNicknames" | "appsBlocked" | "micOrder" | "micNotNow" => Some(json!(value.as_array().map_or(0, Vec::len))),
                 "cleanupProfiles" => {
                     let profiles = value.as_array().map(Vec::as_slice).unwrap_or_default();
                     let mut providers: Vec<Value> = profiles.iter().map(|p| provider(&p["provider"])).filter(|p| p != "").collect();

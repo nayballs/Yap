@@ -64,9 +64,9 @@ Connecting Google Calendar or an iCal link, sync, parsing, the reminder card, pr
   `_nudge`/`_meeting_notes(query)` (`hasPlan`, `hasTalk`: "Generate
   summary"); events `yap-calendar` (snapshot), `yap-calendar-connected`
   (`{kind, label, meetings}`: the new calendar's meetings on now or in the
-  next 7 days, which `_add_link` also returns), `yap-calendar-error`;
-  `meetings_context` backs the
-  Meetings view's Ask bar (`chat_send` scope "meetings"). Debug-only:
+  next 7 days, which `_add_link` also returns), `yap-calendar-error`. (The
+  Meetings view's Ask bar, once `meetings_context` here, is meeting search's
+  since 2026-10-25: [search.md](./search.md).) Debug-only:
   `YAP_GOOGLE_{AUTH,TOKEN,REVOKE,API}_URL` (+ the client at run time) and
   `calendar_e2e_opened` (test mode records links instead of opening them).
   Lock rule: never hold its state lock while touching windows, the network,

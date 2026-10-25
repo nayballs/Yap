@@ -3,6 +3,14 @@
 //! (Windows' own coordinates for a per-monitor-DPI-aware process), so a
 //! box is exact at 100 %, 125 %, 150 %, 175 % and 200 %, on a monitor left
 //! of or above the primary (negative coordinates) too.
+//!
+//! **Across monitors** (phase 2): a box is kept in virtual-desktop pixels
+//! and clamped to the desktop's bounds ([`desktop`], [`drag_box_on`]); each
+//! monitor's overlay draws its own part of it, and the picture is put
+//! together from every monitor it touches ([`pieces`], [`compose_rgba`]) —
+//! a part that's on no monitor (two monitors of different heights) is
+//! black. A box on one monitor is still cut from that monitor's frame
+//! alone, at the frame's own resolution ([`to_frame`], [`crop_rgba`]).
 
 /// A rectangle: left, top, width, height.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
@@ -138,6 +146,119 @@ pub fn label_at(sel: &Rect, label: (i32, i32), gap: i32, w: i32, h: i32) -> Rect
     Rect::new(x, y, lw, lh)
 }
 
+/// The virtual desktop's bounds: the smallest rect holding every monitor.
+pub fn desktop(monitors: &[Rect]) -> Rect {
+    monitors.iter().fold(Rect::default(), |acc, m| acc.union(m))
+}
+
+/// The box a drag from `start` to `now` makes in virtual-desktop pixels,
+/// clamped to `bounds` (the desktop): a box can cross from one monitor
+/// into another. As [`drag_box`], the point reached is the far edge.
+pub fn drag_box_on(start: (i32, i32), now: (i32, i32), bounds: &Rect) -> Rect {
+    let local = drag_box((start.0 - bounds.x, start.1 - bounds.y), (now.0 - bounds.x, now.1 - bounds.y), bounds.w, bounds.h);
+    Rect::new(local.x + bounds.x, local.y + bounds.y, local.w, local.h)
+}
+
+/// Whether a press at `down` and a release at `up` are a click (the mouse
+/// moved under [`MIN_SIDE`] pixels each way): the whole monitor, or the
+/// window picked, rather than a box.
+pub fn is_click(down: (i32, i32), up: (i32, i32)) -> bool {
+    (up.0 - down.0).abs() < MIN_SIDE && (up.1 - down.1).abs() < MIN_SIDE
+}
+
+/// The topmost window under a point (`windows` top to bottom, virtual-
+/// desktop pixels), by index.
+pub fn window_at(windows: &[Rect], x: i32, y: i32) -> Option<usize> {
+    windows.iter().position(|w| w.contains(x, y))
+}
+
+/// One monitor's part of a box: the monitor (index), the part in that
+/// monitor's own pixels, and where it goes in the box's picture.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Piece {
+    pub monitor: usize,
+    pub local: Rect,
+    pub at: (i32, i32),
+}
+
+/// A box's parts on each monitor it touches (virtual-desktop pixels in,
+/// each monitor's own out). Pure.
+pub fn pieces(sel: &Rect, monitors: &[Rect]) -> Vec<Piece> {
+    monitors
+        .iter()
+        .enumerate()
+        .filter_map(|(i, m)| {
+            let part = sel.intersect(m);
+            (!part.is_empty()).then(|| Piece {
+                monitor: i,
+                local: Rect::new(part.x - m.x, part.y - m.y, part.w, part.h),
+                at: (part.x - sel.x, part.y - sel.y),
+            })
+        })
+        .collect()
+}
+
+/// The one monitor a box lies on whole, if it does (its picture is then
+/// cut from that monitor's frame alone).
+pub fn on_one_monitor(sel: &Rect, monitors: &[Rect]) -> Option<usize> {
+    monitors.iter().position(|m| m.intersect(sel) == *sel)
+}
+
+/// The monitor holding the most of a box (its size label goes there).
+pub fn main_monitor(sel: &Rect, monitors: &[Rect]) -> Option<usize> {
+    monitors
+        .iter()
+        .enumerate()
+        .map(|(i, m)| (i, m.intersect(sel)))
+        .filter(|(_, r)| !r.is_empty())
+        .max_by_key(|(i, r)| (r.w as i64 * r.h as i64, -(*i as i64)))
+        .map(|(i, _)| i)
+}
+
+/// A monitor's frozen picture for [`compose_rgba`]: BGRA rows of
+/// `width` × `height` pixels, standing for the monitor at `place`
+/// (virtual-desktop pixels; a frame of another size is scaled to it).
+pub struct Source<'a> {
+    pub bgra: &'a [u8],
+    pub width: u32,
+    pub height: u32,
+    pub place: Rect,
+}
+
+/// A box's picture put together from every monitor it touches, as RGBA
+/// (`sel.w` × `sel.h`, physical pixels): each monitor's part from its own
+/// frame (scaled to the monitor's pixels when the frame's size differs —
+/// nearest pixel), anything on no monitor black. Pure.
+pub fn compose_rgba(sel: &Rect, sources: &[Source]) -> Vec<u8> {
+    let (w, h) = (sel.w.max(0) as usize, sel.h.max(0) as usize);
+    let mut out = vec![0u8; w * h * 4];
+    for px in out.as_chunks_mut::<4>().0 {
+        px[3] = 255;
+    }
+    let places: Vec<Rect> = sources.iter().map(|s| s.place).collect();
+    for p in pieces(sel, &places) {
+        let s = &sources[p.monitor];
+        let (fw, fh) = (s.width as usize, s.height as usize);
+        let (mw, mh) = (s.place.w.max(1) as usize, s.place.h.max(1) as usize);
+        let same = (fw, fh) == (mw, mh);
+        for row in 0..p.local.h as usize {
+            let ly = p.local.y as usize + row;
+            let fy = if same { ly } else { ((ly * 2 + 1) * fh / (mh * 2)).min(fh.saturating_sub(1)) };
+            let dst_row = (p.at.1 as usize + row) * w;
+            for col in 0..p.local.w as usize {
+                let lx = p.local.x as usize + col;
+                let fx = if same { lx } else { ((lx * 2 + 1) * fw / (mw * 2)).min(fw.saturating_sub(1)) };
+                let si = (fy * fw + fx) * 4;
+                let di = (dst_row + p.at.0 as usize + col) * 4;
+                if let Some(px) = s.bgra.get(si..si + 4) {
+                    out[di..di + 4].copy_from_slice(&[px[2], px[1], px[0], 255]);
+                }
+            }
+        }
+    }
+    out
+}
+
 /// Which monitor a point (virtual-desktop pixels) is on, by index; the
 /// nearest one when it's in a gap between them.
 pub fn monitor_at(monitors: &[Rect], x: i32, y: i32) -> Option<usize> {
@@ -249,6 +370,85 @@ mod tests {
         assert_eq!(label_at(&Rect::new(0, 0, w, h), (80, 24), 8, w, h), Rect::new(1840, 1048, 80, 24));
         // A box at the left edge narrower than the label: kept on screen.
         assert_eq!(label_at(&Rect::new(0, 100, 20, 20), (80, 24), 8, w, h).x, 0);
+    }
+
+    /// Two monitors side by side, a 150 % one right of a 100 % primary and
+    /// shorter than it (the e2e suite's fake pair).
+    const PAIR: [Rect; 2] = [Rect::new(0, 0, 1280, 720), Rect::new(1280, 0, 960, 540)];
+
+    #[test]
+    fn a_box_crosses_from_one_monitor_into_another() {
+        let desk = desktop(&PAIR);
+        assert_eq!(desk, Rect::new(0, 0, 2240, 720));
+        // Dragged from the primary into the second: one box over both.
+        let sel = drag_box_on((1100, 150), (1580, 280), &desk);
+        assert_eq!(sel, Rect::new(1100, 150, 480, 130));
+        assert_eq!(on_one_monitor(&sel, &PAIR), None);
+        assert_eq!(
+            pieces(&sel, &PAIR),
+            vec![
+                Piece { monitor: 0, local: Rect::new(1100, 150, 180, 130), at: (0, 0) },
+                Piece { monitor: 1, local: Rect::new(0, 150, 300, 130), at: (180, 0) },
+            ]
+        );
+        assert_eq!(main_monitor(&sel, &PAIR), Some(1));
+        // Back the other way, and past the desktop's edges: clamped to it.
+        assert_eq!(drag_box_on((1580, 280), (-50, 900), &desk), Rect::new(0, 280, 1580, 440));
+        // On one monitor: that monitor's.
+        assert_eq!(on_one_monitor(&Rect::new(1300, 10, 50, 50), &PAIR), Some(1));
+        // A monitor left of and above the primary (negative coordinates).
+        let mixed = [Rect::new(0, 0, 2560, 1440), Rect::new(-1920, -200, 1920, 1080)];
+        let desk = desktop(&mixed);
+        assert_eq!(desk, Rect::new(-1920, -200, 4480, 1640));
+        let sel = drag_box_on((-100, -150), (100, 100), &desk);
+        assert_eq!(sel, Rect::new(-100, -150, 200, 250));
+        let p = pieces(&sel, &mixed);
+        assert_eq!(p[0], Piece { monitor: 0, local: Rect::new(0, 0, 100, 100), at: (100, 150) });
+        assert_eq!(p[1], Piece { monitor: 1, local: Rect::new(1820, 50, 100, 250), at: (0, 0) });
+    }
+
+    #[test]
+    fn a_click_is_a_press_that_barely_moves() {
+        assert!(is_click((100, 100), (100, 100)));
+        assert!(is_click((100, 100), (105, 95)));
+        assert!(!is_click((100, 100), (106, 100)));
+        assert!(!is_click((100, 100), (100, 130)), "a thin drag isn't a click");
+    }
+
+    #[test]
+    fn the_window_under_the_pointer_is_the_topmost() {
+        // Top to bottom: a small dialog over a big window.
+        let windows = [Rect::new(300, 200, 400, 300), Rect::new(100, 100, 1000, 700)];
+        assert_eq!(window_at(&windows, 350, 250), Some(0));
+        assert_eq!(window_at(&windows, 150, 150), Some(1));
+        assert_eq!(window_at(&windows, 1200, 50), None);
+    }
+
+    #[test]
+    fn a_box_over_two_monitors_is_put_together_from_both() {
+        // Each monitor's frame a flat colour (BGRA): the primary red, the
+        // second blue; the second's frame at half its size (scaled up).
+        let red: Vec<u8> = std::iter::repeat_n([0u8, 0, 200, 255], 1280 * 720).flatten().collect();
+        let blue: Vec<u8> = std::iter::repeat_n([200u8, 0, 0, 255], 480 * 270).flatten().collect();
+        let sources = [
+            Source { bgra: &red, width: 1280, height: 720, place: PAIR[0] },
+            Source { bgra: &blue, width: 480, height: 270, place: PAIR[1] },
+        ];
+        // From (1270, 530) to (1290, 550): ten pixels each side of the join,
+        // the bottom-right quarter below the second monitor (on none).
+        let sel = Rect::new(1270, 530, 20, 20);
+        let out = compose_rgba(&sel, &sources);
+        assert_eq!(out.len(), 20 * 20 * 4);
+        let at = |x: usize, y: usize| out[(y * 20 + x) * 4..(y * 20 + x) * 4 + 4].to_vec();
+        assert_eq!(at(0, 0), vec![200, 0, 0, 255], "the primary's red, as RGBA");
+        assert_eq!(at(9, 19), vec![200, 0, 0, 255]);
+        assert_eq!(at(10, 0), vec![0, 0, 200, 255], "the second's blue");
+        assert_eq!(at(19, 9), vec![0, 0, 200, 255]);
+        assert_eq!(at(15, 15), vec![0, 0, 0, 255], "on no monitor: black");
+        // A frame of the monitor's own size is copied pixel for pixel.
+        let ramp: Vec<u8> = (0..4u8).flat_map(|i| [i, i * 2, i * 3, 255]).collect();
+        let one = [Source { bgra: &ramp, width: 4, height: 1, place: Rect::new(0, 0, 4, 1) }];
+        assert_eq!(compose_rgba(&Rect::new(1, 0, 2, 1), &one), vec![3, 2, 1, 255, 6, 4, 2, 255]);
     }
 
     #[test]
