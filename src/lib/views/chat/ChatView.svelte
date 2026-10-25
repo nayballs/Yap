@@ -131,6 +131,15 @@
     }
   }
 
+  // Ctrl+V of a picture anywhere in Chat but another text field (a thumbnail
+  // or the thread has the focus): into the box too. The box's own paste
+  // handled it already when it had the focus.
+  function onPaste(e) {
+    if (e.defaultPrevented) return;
+    if (e.target?.closest?.('input, textarea, [contenteditable="true"], [contenteditable=""]') && e.target !== chat.inputEl) return;
+    chat.pasteImage(e);
+  }
+
   onMount(() => {
     chat.refreshList();
     chat.loadVoiceSettings();
@@ -208,7 +217,7 @@
   });
 </script>
 
-<svelte:window onkeydown={onKeydown} />
+<svelte:window onkeydown={onKeydown} onpaste={onPaste} />
 
 <div class="chat">
   <!-- Conversation sidebar -->

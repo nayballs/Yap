@@ -13,7 +13,11 @@
 //! window, which isn't in the picture when the snip came from Chat).
 //!
 //! Read once, after the capture and before the overlay comes up, so the
-//! list is the picture's. Never a window's title or contents: rects only.
+//! list is the picture's (well under a millisecond: 10 windows in 0.6 ms on
+//! the maintainer's PC). Never a window's title or contents: rects only.
+//! The pattern — the visible top-level windows' rects, the topmost one
+//! under the pointer — is Kiri's (MIT, Copyright (c) 2026 yuxino; notice in
+//! `THIRD-PARTY-NOTICES.md`), written here with Yap's own filters.
 
 use super::geom::{Rect, MIN_SIDE};
 
@@ -157,7 +161,8 @@ mod tests {
             .iter()
             .map(|m| Rect::new(m.x, m.y, m.width as i32, m.height as i32))
             .collect();
+        let t = std::time::Instant::now();
         let list = windows_on_screen(&crate::snip::geom::desktop(&monitors));
-        println!("{} windows: {list:?}", list.len());
+        println!("{} windows in {:.1} ms: {list:?}", list.len(), t.elapsed().as_secs_f64() * 1000.0);
     }
 }
