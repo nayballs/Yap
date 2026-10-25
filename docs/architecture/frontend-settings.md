@@ -248,8 +248,19 @@ there can move margins: compare a page before and after.
 - **Dictation** (`settings/DictationPage.svelte`): **Start and stop**
   (`#settings-hotkey`): Hotkey (`hotkey`), Recording mode (Toggle /
   Push-to-talk; in push-to-talk its line says how double-tap goes hands-free).
-  **Microphone and sound** (`#settings-microphone`): Microphone (`inputDevice`,
-  `set_input_device` at once), "Chime when recording starts and stops" (the
+  **Microphone and sound** (`#settings-microphone`): Microphone — since
+  2026-10-25 an **order** (`settings/MicOrder.svelte`, `micOrder`,
+  `dictation/mics.rs`): numbered rows, each "In use" / "Connected" / "Not
+  connected" (its name shortened, `lib/core/mics.js` `shortMicName`; the
+  page's own copy of the order runs the same rules as Rust: `matches`,
+  `findMic`, `micInUse`), ↑ ↓ to move and ✕ to take off, then a fixed
+  "then Windows' default · <its name>" row; "Add a microphone…" lists the
+  connected ones not in it (a Row with `stack`). Windows' list from
+  `list_mics`, again on `yap-mics-changed`. Saved by the auto-save; every
+  connected entry gets its endpoint id on the first edit (one migrated by
+  name). Used from the next dictation (`mic.rs`). The first-run setup's
+  mic check (`onboarding/MicStep.svelte`) picks one the same way: first in
+  the order ("System default" empties it). "Chime when recording starts and stops" (the
   volume slider and the switch on one row: `audioFeedbackVolume`,
   `soundEnabled`), "Chime plays on" (`outputDevice`), "Silence other apps while
   you dictate" (`quietOtherApps`; ⓘ: calls are never silenced), "Pause music

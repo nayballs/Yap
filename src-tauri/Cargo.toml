@@ -155,6 +155,10 @@ tauri-plugin-updater = "2"
 # request's status (Security_Authorization_AppCapabilityAccess). All in the
 # same windows 0.61: no second copy.
 windows = { version = "0.61", features = ["Graphics_Capture", "Graphics_DirectX", "Graphics_DirectX_Direct3D11", "Win32_Graphics_Direct3D", "Win32_Graphics_Direct3D11", "Win32_Graphics_Dxgi_Common", "Win32_System_WinRT", "Win32_System_WinRT_Direct3D11", "Win32_System_WinRT_Graphics_Capture", "Win32_Devices_Display", "Win32_Graphics_Dwm", "Win32_UI_HiDpi", "Win32_UI_Input_KeyboardAndMouse", "Security_Authorization_AppCapabilityAccess","Win32_UI_Accessibility", "Win32_System_Com", "Win32_Foundation", "Win32_Media_Audio", "Win32_Media_Audio_Endpoints", "Win32_System_Diagnostics_ToolHelp", "Win32_System_Threading", "Win32_System_JobObjects", "Win32_Security", "Foundation", "Foundation_Collections", "UI_Notifications", "Data_Xml_Dom", "Networking_Connectivity", "Win32_System_Registry", "Win32_System_SystemInformation", "Win32_System_Ole", "Win32_System_Variant", "Win32_System_DataExchange", "Win32_System_Memory", "Win32_Globalization", "Win32_System_Time", "Media_Control", "Media_SpeechSynthesis", "Media_Core", "Storage_Streams", "Win32_UI_Shell", "Win32_UI_Shell_Common", "Win32_UI_Shell_PropertiesSystem", "Win32_Graphics_Gdi", "Win32_UI_WindowsAndMessaging", "Win32_System_Com_StructuredStorage", "Win32_Graphics_Dxgi", "Win32_Storage_FileSystem"] }
+# Core Audio's device notifications (`dictation/mics/watch.rs`): the
+# `#[implement]` of an `IMMNotificationClient` names `::windows_core`. The
+# same copy the `windows` crate above is built on (already in the tree).
+windows-core = "0.61"
 # Yap accounts: the session token lives in Windows Credential Manager. The
 # keyring crate's own docs steer apps to keyring-core + the one store they use.
 keyring-core = "1"

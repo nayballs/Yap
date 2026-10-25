@@ -25,7 +25,9 @@
 //!   (a two-hour meeting in seconds). [`e2e_meeting_dictation`] and
 //!   [`e2e_meeting_output_change`] stage a hotkey dictation and a switch of
 //!   Windows' default output at a point of that audio, and
-//!   [`e2e_meeting_quiet`] shortens the quiet-side warning's timings;
+//!   [`e2e_meeting_quiet`] shortens the quiet-side warning's timings; the
+//!   player follows made-up microphones (`mics::e2e_mics`,
+//!   `mics::e2e_mic_unplug`) as the real capture follows Windows' list;
 //!   [`e2e_meeting_fail`] makes the live recorder's chunks over a stretch
 //!   fail, and `YAP_E2E_REFINE_CHUNK_MS` slows the refine's chunks
 //!   (`meeting_refine::e2e_slow_chunk`);
@@ -157,18 +159,15 @@ pub fn spawn_meeting_audio(
     stop: std::sync::Arc<std::sync::atomic::AtomicBool>,
     overflow: std::sync::Arc<std::sync::atomic::AtomicBool>,
 ) -> Result<(), String> {
+    use crate::dictation::mics;
     use crate::meetings::meeting::{Follow, OutputFollower};
-    use cpal::traits::{DeviceTrait, HostTrait};
     use std::sync::atomic::Ordering;
-    // Like the real capture, a configured microphone that isn't plugged in
-    // fails (found by listing the devices; none is opened).
-    if let Some(name) = crate::config::load().input_device {
-        let present = cpal::default_host()
-            .input_devices()
-            .map(|mut devices| devices.any(|d| d.name().is_ok_and(|n| n == name)))
-            .unwrap_or(false);
-        if !present {
-            return Err(format!("Input device not found: {name}"));
+    // Like the real capture, with made-up microphones (`mics::e2e_mics`)
+    // and none of them to open, it fails (none is opened either way).
+    let order = crate::config::load().mic_order;
+    if let Some(fake) = mics::fake::list() {
+        if mics::candidates(&order, Some(&fake), &[]).is_empty() {
+            return Err(crate::meetings::meeting::no_mic_error(&order));
         }
     }
     let dir = std::env::var("YAP_E2E_MEETING_AUDIO")
@@ -200,6 +199,13 @@ pub fn spawn_meeting_audio(
             let mut output = OutputFollower::listening_to(Some("e2e-speakers".to_string()));
             // "Them" hears nothing until here (a device switch under way).
             let mut switching: Option<usize> = None;
+            // The microphone "You" is on (the order and Windows' list, as
+            // the real capture picks it), and — its device unplugged
+            // (`e2e_mic_unplug`) — nothing until here, then the next one.
+            let mic_of = || mics::present().and_then(|l| mics::in_use(&order, &l, &[]));
+            let mut mic_at = mic_of();
+            let mut mics_seen = mics::generation();
+            let mut mic_gap: Option<usize> = None;
             let length = you.len().max(them.len());
             let mut played = false;
             while !stop.load(Ordering::SeqCst) {
@@ -226,6 +232,27 @@ pub fn spawn_meeting_audio(
                         switching = Some(pos + SWITCH_GAP_SAMPLES);
                     }
                 }
+                if mics::generation() != mics_seen {
+                    mics_seen = mics::generation();
+                    let gone = mic_at.as_ref().is_some_and(|at| !mics::present().is_some_and(|l| l.iter().any(|e| e.id == at.id)));
+                    if gone && mic_gap.is_none() {
+                        tracing::info!(secs, "e2e: the meeting's microphone is unplugged");
+                        mic_gap = Some(pos + SWITCH_GAP_SAMPLES);
+                    }
+                }
+                if mic_gap.is_some_and(|until| pos >= until) {
+                    mic_gap = None;
+                    mic_at = mic_of();
+                    let next = mic_at.as_ref().map(|e| e.name.clone()).unwrap_or_default();
+                    crate::meetings::meeting::keep_in_step(&mic, &sys);
+                    if let Ok(mut b) = mic.lock() {
+                        b.mic_changed(&next);
+                    }
+                    tracing::info!(secs, "e2e: \"You\" goes on with the next microphone");
+                    if let Some(app) = mics::app() {
+                        crate::meetings::meeting::tell_mic_changed(app, &next);
+                    }
+                }
                 if switching.is_some_and(|until| pos >= until) {
                     switching = None;
                     if let Follow::Switch(id) = output.poll(Some("e2e-headset".to_string())) {
@@ -234,7 +261,7 @@ pub fn spawn_meeting_audio(
                     }
                 }
                 for (src, buf, side) in [(&you, &mic, "you"), (&them, &sys, "them")] {
-                    if side == "them" && switching.is_some() {
+                    if (side == "them" && switching.is_some()) || (side == "you" && mic_gap.is_some()) {
                         continue;
                     }
                     if pos < src.len() {

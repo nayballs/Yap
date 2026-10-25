@@ -290,9 +290,21 @@ pub struct YapConfig {
     /// Settings → Privacy & data). On by default; only with history on.
     #[serde(default = "default_true")]
     pub keep_recent_audio: bool,
-    /// Preferred input device name (None = system default).
+    /// The one microphone picked before 2026-10-25 (its name; None =
+    /// Windows' default). Read once, by [`migrate_once`] v4, into
+    /// [`YapConfig::mic_order`]; nothing else reads it.
     #[serde(default)]
     pub input_device: Option<String>,
+    /// Settings → Dictation → Microphone (`dictation/mics.rs`, 2026-10-25):
+    /// the microphones in the person's order — dictation and meetings use
+    /// the first one that's connected, then Windows' default. Empty (the
+    /// default): Windows' default only.
+    #[serde(default)]
+    pub mic_order: Vec<crate::dictation::mics::MicChoice>,
+    /// Microphones the person answered "Not now" to ("… connected · Use it
+    /// for dictation?", `mics/offer.rs`): never asked about again.
+    #[serde(default)]
+    pub mic_not_now: Vec<crate::dictation::mics::MicChoice>,
     /// Play a chime when recording starts/stops.
     #[serde(default = "default_true")]
     pub sound_enabled: bool,
@@ -1051,6 +1063,8 @@ impl Default for YapConfig {
             stt_device: default_stt_device(),
             keep_recent_audio: true,
             input_device: None,
+            mic_order: Vec::new(),
+            mic_not_now: Vec::new(),
             sound_enabled: true,
             dictionary: Vec::new(),
             dictionary_fuzzy: true,
@@ -1279,7 +1293,7 @@ fn migrate_retired_groq_models(cfg: &mut YapConfig) {
 
 /// Current config schema version (see [`YapConfig::config_version`]). Bump it
 /// together with a new step in [`migrate_once`].
-const CONFIG_VERSION: u32 = 3;
+const CONFIG_VERSION: u32 = 4;
 
 /// One-time migrations, keyed by `config_version`. Returns whether anything
 /// ran; [`load`] then saves the result so no step ever runs twice.
@@ -1317,6 +1331,19 @@ fn migrate_once(cfg: &mut YapConfig) -> bool {
         // stays dark.
         if cfg.bar_theme.eq_ignore_ascii_case("light") {
             cfg.bar_theme = default_bar_theme();
+        }
+    }
+    if cfg.config_version < 4 {
+        // v4 (2026-10-25): one microphone became an order of them
+        // (`mics.rs`). The one picked stays first — by its name, the only
+        // thing kept until now (its endpoint id is added when Settings next
+        // saves the order) — then Windows' default, which is what an
+        // unplugged pick fell back to anyway… except it said "No microphone
+        // found" before.
+        if let Some(name) = cfg.input_device.take().map(|n| n.trim().to_string()).filter(|n| !n.is_empty()) {
+            if !cfg.mic_order.iter().any(|m| m.name == name) {
+                cfg.mic_order.insert(0, crate::dictation::mics::MicChoice { id: String::new(), name });
+            }
         }
     }
     cfg.config_version = CONFIG_VERSION;
@@ -2733,6 +2760,29 @@ mod tests {
         assert_eq!((fresh.theme.as_str(), fresh.bar_theme.as_str()), ("system", "app"));
         let old: YapConfig = serde_json::from_str("{}").unwrap();
         assert_eq!((old.theme.as_str(), old.bar_theme.as_str()), ("system", "app"));
+    }
+
+    #[test]
+    fn the_one_microphone_picked_becomes_the_first_in_the_order_once() {
+        use crate::dictation::mics::MicChoice;
+        // Picked before 25 Oct: its name only.
+        let mut cfg: YapConfig = serde_json::from_str(r#"{"configVersion":3,"inputDevice":"Microphone (Fabrikam USB Mic)"}"#).unwrap();
+        assert!(migrate_once(&mut cfg));
+        assert_eq!(cfg.mic_order, vec![MicChoice { id: String::new(), name: "Microphone (Fabrikam USB Mic)".into() }]);
+        assert_eq!(cfg.input_device, None);
+        // Windows' default: nothing to keep, the order stays empty.
+        let mut cfg: YapConfig = serde_json::from_str(r#"{"configVersion":3,"inputDevice":null}"#).unwrap();
+        assert!(migrate_once(&mut cfg));
+        assert!(cfg.mic_order.is_empty());
+        // The order changed afterwards (and saved): it stays as it is.
+        let mut cfg: YapConfig = serde_json::from_str(r#"{"configVersion":3,"inputDevice":"Old mic"}"#).unwrap();
+        assert!(migrate_once(&mut cfg));
+        cfg.mic_order.clear();
+        let mut reloaded: YapConfig = serde_json::from_str(&serde_json::to_string(&cfg).unwrap()).unwrap();
+        assert!(!migrate_once(&mut reloaded));
+        assert!(reloaded.mic_order.is_empty());
+        // A fresh install: Windows' default.
+        assert!(YapConfig::default().mic_order.is_empty() && YapConfig::default().mic_not_now.is_empty());
     }
 
     #[test]

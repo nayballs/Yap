@@ -168,7 +168,16 @@ speech not yet tried by a person.
 builds), and the dictation pipeline around it is complete: multi-engine STT
 (Whisper/Vulkan + ONNX/DirectML), the 14-model registry + manager, recording modes
 (push-to-talk with double-tap hands-free and coaching tips, 2026-10-17), a dead-mic
-watchdog (reopen, then "No sound from <mic>"),
+watchdog (reopen, then "No sound from <mic>"), **microphone management**
+(2026-10-25, `dictation/mics.rs`: an order of microphones — the first
+connected, then Windows' default —, "Contoso H2 connected · Use it for
+dictation?" for a new one, "Using …" when the order switches by itself, and a
+microphone unplugged mid-dictation ending it, its words transcribed, pasted
+only into their own window and kept, the next dictation on the next one; a
+meeting moving to the next microphone with a marker — unit-tested, e2e-tested
+with made-up devices (`mics.spec.js`, `meeting-mic.spec.js`); Core Audio's
+real notifications, a real USB headset pulled out mid-dictation and a
+Bluetooth headset in the order are not yet tried by a person),
 language/translate, **AI cleanup** (BYO key or local sidecar — Qwen3.5 4B on a capable
 graphics card, else Qwen2.5 1.5B, 2026-10-18, chosen and measured with the model
 evaluations; cleanup ~0.34 s a dictation on the 4B, ~0.13 s on the 1.5B, on an RTX
@@ -576,7 +585,10 @@ from attendees, the speaker map and names said)
 and remove speaker echo only from chunks that are entirely the call (see
 [`docs/meetings.md`](../meetings.md) "Limits"), and a real call (live
 WASAPI loopback + a real LLM's action plan, a headset plugged in mid-call, a
-hotkey dictation mid-call) still wants one hands-on pass; the refine after
+hotkey dictation mid-call, the mic unplugged mid-call) still wants one
+hands-on pass; the microphones' order and the unplug handling have only
+met made-up devices in tests (a real headset's plug, unplug and Bluetooth
+wake-up are the maintainer's to try); the refine after
 a meeting judges models by the leaderboard's figures and the meeting's
 language by Settings or Windows (not measured, not detected), and lowers
 only its calling thread's priority; the speaker engine isn't run again

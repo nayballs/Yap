@@ -36,13 +36,16 @@ pub const OPEN_VOICE_SETTINGS: &str = "openVoiceSettings";
 /// **Show file**: the settings file Yap couldn't read, set aside, in
 /// Explorer (`config::reset_alert`).
 pub const SHOW_OLD_SETTINGS: &str = "showOldSettings";
+/// **Change** / **Microphones**: Yap's Settings → Dictation → Microphone
+/// (the microphones' order, `mics.rs`).
+pub const OPEN_MIC_ORDER: &str = "openMicOrder";
 
 /// An alert's one button.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub struct Action {
     /// What [`act`] does: [`OPEN_MIC_SETTINGS`], [`STOP_ASKING_CALLS`],
     /// [`ASK_ABOUT_CALLS`], [`OPEN_AI_SETTINGS`], [`OPEN_VOICE_SETTINGS`],
-    /// [`SHOW_OLD_SETTINGS`], `saving::RETRY` (Try again).
+    /// [`SHOW_OLD_SETTINGS`], [`OPEN_MIC_ORDER`], `saving::RETRY` (Try again).
     pub id: &'static str,
     pub label: &'static str,
 }
@@ -54,7 +57,9 @@ pub struct Alert {
     /// "assistantFailed" | "voiceFallback" (`tts.rs`: a cloud voice failed) |
     /// "configReset" (`config.rs`: config.json couldn't be read, set aside) |
     /// "saveFailed" (`saving.rs`: a store couldn't be saved; "Saved" after
-    /// Try again):
+    /// Try again) | "micLost" (`unplugged.rs`: the dictation's mic was
+    /// disconnected) | "micSwitched" (`mics/offer.rs`: "Using … for
+    /// dictation"):
     /// the bar card's id, the Windows notification's tag (a newer one
     /// replaces it) and its rule in `notice.rs`.
     pub kind: &'static str,
@@ -159,9 +164,13 @@ pub fn act(app: &AppHandle, action: &str) {
         STOP_ASKING_CALLS => crate::calls::meeting_detect::set_detection(app, false),
         crate::meetings::meeting_audio::RECOVER_ACTION => crate::meetings::meeting_audio::recover_all(app),
         ASK_ABOUT_CALLS => crate::calls::meeting_detect::set_detection(app, true),
-        OPEN_AI_SETTINGS | OPEN_VOICE_SETTINGS => {
+        OPEN_AI_SETTINGS | OPEN_VOICE_SETTINGS | OPEN_MIC_ORDER => {
             use tauri::Emitter;
-            let at = if action == OPEN_AI_SETTINGS { "cleanup#chat" } else { "voice#voice-provider" };
+            let at = match action {
+                OPEN_AI_SETTINGS => "cleanup#chat",
+                OPEN_MIC_ORDER => "dictation#microphone",
+                _ => "voice#voice-provider",
+            };
             match crate::shell::window::show_settings(app) {
                 Ok(()) => {
                     let _ = app.emit("yap-open-settings", at);

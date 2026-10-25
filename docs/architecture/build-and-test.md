@@ -263,8 +263,13 @@ shell waiting for it.
   only go in-app while the window is on screen), `e2e_dictation_mic { silent }`
   (the dictation mic's real audio zeroed, as a muted mic's — the dead-mic
   watchdog's case, its stream really reopened), `e2e_mic_status` (the
-  dictation mic's state, `dictation/mic.rs`: open, live, Bluetooth, opens/closes, the
-  last open's timing), `e2e_dictate_audio { seconds }` (a dictation of a
+  dictation mic's state, `dictation/mic.rs`: open, live, Bluetooth, opens/closes,
+  losses, the device open, the last open's timing), `e2e_mics { devices }` /
+  `e2e_mic_plug { device }` / `e2e_mic_unplug { id }` and `YAP_E2E_MICS`
+  (made-up microphones instead of Windows', `dictation/mics.rs`: told as
+  Windows' notifications are, a stream on one a quiet tone that stops when
+  it's unplugged; the meeting player follows them too; `[]` = none at all —
+  the no-mic specs), `e2e_dictate_audio { seconds }` (a dictation of a
   tone played in the mic's place — a real start and stop, the mic held as
   for any dictation; no microphone needed), `e2e_crash_next_dictation` (the
   next dictation panics in its paste step: `pipeline::Busy`), `e2e_fail_saves

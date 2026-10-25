@@ -19,7 +19,8 @@ pub fn installed_models() -> Vec<String> {
         .collect()
 }
 
-/// List available microphone input device names.
+/// List available microphone input device names (cpal's). Settings and the
+/// first-run setup use `mics::list_mics` (endpoint ids, Windows' default).
 #[tauri::command]
 pub fn list_audio_devices() -> Vec<String> {
     use cpal::traits::{DeviceTrait, HostTrait};
@@ -37,20 +38,6 @@ pub fn set_mic_test(state: State<'_, AppState>, on: bool) {
         if let Some(p) = guard.as_ref() {
             p.set_mic_test(on);
         }
-    }
-}
-
-/// Switch the capture stream to a different input device live (no restart).
-/// `device` = a name from `list_audio_devices`, or null for the system default.
-#[tauri::command]
-pub fn set_input_device(state: State<'_, AppState>, device: Option<String>) -> Result<(), String> {
-    let guard = state
-        .pipeline
-        .lock()
-        .map_err(|_| "pipeline lock poisoned".to_string())?;
-    match guard.as_ref() {
-        Some(p) => p.set_input_device(device.as_deref()),
-        None => Err("pipeline not running".into()),
     }
 }
 

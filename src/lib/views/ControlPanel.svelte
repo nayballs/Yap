@@ -26,6 +26,7 @@
   import { initCalendar, closeConnectDialog } from '../stores/calendar.svelte.js';
   import { initWordSuggestions } from '../notices/wordSuggestions.js';
   import { initAlerts } from '../notices/alerts.js';
+  import { initMicOffers } from '../notices/micOffer.js';
   import { initUpload } from '../stores/upload.svelte.js';
   import { initMemory } from '../stores/memory.svelte.js';
   import { initCleanupOffer } from '../notices/cleanupOffer.js';
@@ -103,6 +104,8 @@
   // administrator left on the clipboard, Windows' microphone privacy
   // switch — with Open settings.
   initAlerts();
+  // "Contoso H2 connected · Use it for dictation?" (dictation/mics/offer.rs).
+  initMicOffers();
   // Upload's job (upload.svelte.js): its progress, Cancel and result, and
   // the "Transcription complete" toast, whichever view is up — the view
   // unmounts when you leave it (or Chat opens by itself).

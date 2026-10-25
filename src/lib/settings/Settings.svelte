@@ -84,7 +84,6 @@
         motion: cfg.motion,
       });
   });
-  let devices = $state([]);
   let outputs = $state([]); // audio output device names (for the chime)
   let section = $state('general'); // a page id (settings/nav.js)
   // Sidebar account button (account state lives in account.svelte.js).
@@ -160,11 +159,6 @@
     // Persist the migration immediately so it isn't redone (and duplicated) on
     // the next load. The auto-save effect skips its first (priming) run.
     if (migrated) persist();
-    try {
-      devices = await invoke('list_audio_devices');
-    } catch {
-      devices = [];
-    }
     try {
       outputs = await invoke('list_output_devices');
     } catch {
@@ -571,7 +565,7 @@
           {:else if section === 'general'}
             <GeneralPage {cfg} {barHiddenUntil} {goto} />
           {:else if section === 'dictation'}
-            <DictationPage {cfg} {devices} {outputs} {onshowview} />
+            <DictationPage {cfg} {outputs} {onshowview} />
           {:else if section === 'shortcuts'}
             <ShortcutsPage {cfg} {goto} />
           {:else if section === 'meetings'}

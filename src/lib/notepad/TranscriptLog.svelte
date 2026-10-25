@@ -264,6 +264,12 @@
       <div class="divider" role="separator" aria-label="Recording paused here">
         <span class="rule"></span><Icon name="pause" /><span class="rule"></span>
       </div>
+    {:else if item.kind === 'mic'}
+      <div class="divider dictated" role="separator" aria-label="Your mic was disconnected">
+        <span class="rule"></span><Icon name="mic" /><span class="dtext"
+          >Your mic was disconnected{item.next ? ` · now ${item.next}` : ' · none connected'}</span
+        ><span class="rule"></span>
+      </div>
     {:else if item.kind === 'failed'}
       <FailedChunk
         noteId={note.id}

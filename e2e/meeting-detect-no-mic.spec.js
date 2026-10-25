@@ -1,11 +1,12 @@
-// Call detection when the call can't be recorded (calls/meeting_detect.rs): a
-// configured microphone that isn't there makes "Record notes" fail on any
-// machine — it must say why and leave no empty meeting note behind. (See
-// meeting-detect.spec.js for the flow that records.)
+// Call detection when the call can't be recorded (calls/meeting_detect.rs): no
+// microphone connected — made-up ones, none there (`YAP_E2E_MICS`,
+// dictation/mics.rs) — makes "Record notes" fail on any machine; it must say
+// why (the first microphone in the order) and leave no empty meeting note
+// behind. (See meeting-detect.spec.js for the flow that records.)
 import { test, expect, mainOnScreen } from './support/fixtures.js';
 
 test.use({
-  yapOptions: { name: 'meeting-detect-no-mic', config: { inputDevice: 'Missing microphone (e2e)' } },
+  yapOptions: { name: 'meeting-detect-no-mic', env: { YAP_E2E_MICS: '[]' }, config: { inputDevice: 'Missing microphone (e2e)' } },
 });
 
 const toast = (main, title) => main.getByRole('status').filter({ hasText: title });

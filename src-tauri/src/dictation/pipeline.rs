@@ -13,7 +13,8 @@
 //! to the paste), `rewrite` (the rewrite shortcut and Commands), `finish`
 //! (the corrections, "press enter", snippets), `preview` (the live text),
 //! `engine` (the warm engine everyone shares), `busy` (the `processing`
-//! flag) and, in debug builds, `robot`.
+//! flag), `unplugged` (the mic disconnected mid-dictation) and, in debug
+//! builds, `robot`.
 
 mod busy;
 mod delivery;
@@ -25,6 +26,7 @@ mod rewrite;
 #[cfg(debug_assertions)]
 mod robot;
 mod transcribe;
+mod unplugged;
 
 use std::collections::VecDeque;
 use std::sync::atomic::{AtomicBool, AtomicIsize, AtomicU64, Ordering};
@@ -430,6 +432,11 @@ struct Shared {
     /// The transcribing dictation's audio, kept a day to run it again
     /// (`recent_audio.rs`): taken by its history entry, else dropped.
     audio_id: Mutex<Option<String>>,
+    /// The dictation ended because its microphone was disconnected
+    /// (`unplugged.rs`): its paste goes to its own window or the clipboard,
+    /// never another, and the person is told once, by what became of it.
+    /// Cleared when the next one starts.
+    unplugged: Mutex<Option<unplugged::Lost>>,
 }
 
 /// Current wall-clock time in milliseconds since the Unix epoch.
@@ -636,13 +643,14 @@ impl Pipeline {
             kept_seq: AtomicU64::new(0),
             undoing: AtomicBool::new(false),
             audio_id: Mutex::new(None),
+            unplugged: Mutex::new(None),
         });
 
         spawn_idle_watcher(&shared);
 
         // The mic: closed until something needs it, unless "Keep the
         // microphone ready" (then open now, as Yap always was).
-        shared.mic.settings(cfg.keep_mic_ready, cfg.input_device.clone());
+        shared.mic.settings(cfg.keep_mic_ready, cfg.mic_order.clone());
         // If Windows' privacy switches keep desktop apps off the mic, the log
         // says so now (a recording says it to the person).
         if let Some(blocked) = crate::dictation::mic_privacy::blocked() {
@@ -847,8 +855,8 @@ impl Pipeline {
 
     /// Replace the live config (e.g. after the user saves settings).
     pub fn update_config(&self, cfg: YapConfig) {
-        // "Keep the microphone ready" and the microphone, for the mic.
-        self.shared.mic.settings(cfg.keep_mic_ready, cfg.input_device.clone());
+        // "Keep the microphone ready" and the microphones' order, for the mic.
+        self.shared.mic.settings(cfg.keep_mic_ready, cfg.mic_order.clone());
         if let Ok(mut c) = self.shared.config.write() {
             *c = cfg;
         }
@@ -860,16 +868,6 @@ impl Pipeline {
     pub fn set_mic_test(&self, on: bool) {
         self.shared.mic_test.store(on, Ordering::Relaxed);
         self.shared.mic.test(on);
-    }
-
-    /// Swap the capture stream to a different input device **live** (no app
-    /// restart) when one is running — the new stream is built first, so on
-    /// failure the old one keeps running and an error is returned — else
-    /// check the device is there for the next recording.
-    pub fn set_input_device(&self, device: Option<&str>) -> Result<(), String> {
-        self.shared.mic.switch(device.map(str::to_string))?;
-        tracing::info!(device = device.unwrap_or("default"), "Input device switched");
-        Ok(())
     }
 
     /// The mic's state (`mic.rs`): open, live, Bluetooth, how the last open

@@ -107,7 +107,8 @@ One folder per area (an area's `<area>.rs` lists its modules); a big module's pa
 - `dictation/input_hook.rs` — low-level keyboard/mouse hooks: seven bindings (Read aloud's the fifth, Use what I said's the sixth, Snip to Chat's the seventh) + up to 12 saved transforms' slots, combo rules, `clashes`, menu-mask key; Esc while a snip is up.
 - `dictation/transforms.rs` — saved transforms: one-key rewrites (Polish, Shorter, Fix grammar only, Translate, Make it a prompt, your own) of the selection or the last dictation, no speaking; their shortcuts, the tray's Transforms menu, the bar's Undo.
 - `dictation/partials.rs` / `dictation/agent_detect.rs` — live partials' sliding window; Commands by name (see `dictation/pipeline.rs`).
-- `dictation/mic.rs` — the dictation mic, opened on demand: held by a dictation / the mic check / "Keep the microphone ready", warm a minute after, closed at once on Bluetooth (HFP); its own thread.
+- `dictation/mic.rs` — the dictation mic, opened on demand: held by a dictation / the mic check / "Keep the microphone ready", warm a minute after, closed at once on Bluetooth (HFP); the first connected one in the order; its device gone → reopened once or lost (`Sink::lost`); its own thread.
+- `dictation/mics.rs` (+ `mics/`) — the microphones' order (endpoint ids, then Windows' default), Windows' list watched (`IMMNotificationClient`), "X connected · Use it for dictation?" / "Using X" (`offer.rs`); `pipeline/unplugged.rs` ends a dictation whose mic was unplugged, its words kept.
 - `dictation/mic_watch.rs` — dead-mic watchdog: reopen the stream, then "No sound from <mic>".
 - `dictation/mic_privacy.rs` — reads Windows' microphone privacy switches; names the one blocking Yap.
 - `dictation/stt.rs` — `SttEngine` over transcribe-rs, the 14-model registry, download + verify, word times; each engine loads on a `Device` (graphics card or processor).
@@ -177,7 +178,7 @@ One folder per area (an area's `<area>.rs` lists its modules); a big module's pa
 - `notes/tasks.rs` — the summary's checkboxes: ticked in place (`- [x]`), carried into a new summary, listed across notes for the Tasks view ("Said at" the line), read only over the local API / MCP.
 
 **Meetings** — [meetings.md](./docs/architecture/meetings.md) (guide: [`docs/meetings.md`](./docs/meetings.md))
-- `meetings/meeting.rs` — the recorder: mic + loopback, chunking, echo, dictations kept out, one clock; failed chunks marked (told once); one recorder per start (the slot claimed first); `delete_note` never the recording's; `replay` from disk.
+- `meetings/meeting.rs` — the recorder: mic + loopback, chunking, echo, dictations kept out, one clock; its mic unplugged → the next one in the order (marked); failed chunks marked (told once); one recorder per start (the slot claimed first); `delete_note` never the recording's; `replay` from disk.
 - `meetings/meeting_audio.rs` (+ `meetings/meeting_audio/`) — the meeting's audio kept on disk as it records (own FLAC encoder, 14 days): crash recovery, Transcribe again (`redo.rs`: notes, summary, names on matching lines kept), Try again on a failed stretch, ▶ a line; jobs with Cancel.
 - `meetings/meeting_summary.rs` (+ `meeting_summary/`: digest, action_plan, helpers) — rolling digests, bounded inputs, action-plan checks, helper inputs.
 - `meetings/meeting_end.rs` — a recording's end: "Started by mistake?", AI title, the action-plan job; the refine before or after it.

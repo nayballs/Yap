@@ -1,12 +1,16 @@
 // Yap without a microphone (none plugged in, a headset that connects after
 // login, a CI runner): it starts and stays usable, says so when asked to
-// record, and Upload still transcribes files. A configured microphone that
-// isn't there forces this path on any machine.
+// record, and Upload still transcribes files. Made-up microphones, none of
+// them connected (`YAP_E2E_MICS`, dictation/mics.rs), force this path on any
+// machine (a configured one that isn't there falls back to Windows' default
+// since 25 Oct).
 import path from 'node:path';
 import { test, expect, openView, pressHotkey } from './support/fixtures.js';
 import { writeWav } from './support/wav.js';
 
-test.use({ yapOptions: { name: 'no-mic', config: { inputDevice: 'Missing microphone (e2e)' } } });
+test.use({
+  yapOptions: { name: 'no-mic', env: { YAP_E2E_MICS: '[]' }, config: { inputDevice: 'Missing microphone (e2e)' } },
+});
 
 test('starts without a microphone and says so when asked to record', async ({ yap, main, shot }) => {
   await expect(main.getByRole('heading', { level: 1 })).toContainText('to start yapping');

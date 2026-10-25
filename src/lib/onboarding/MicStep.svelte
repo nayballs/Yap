@@ -1,20 +1,32 @@
 <script>
-  // Setup's microphone check: the device (switched live) and a scrolling
-  // level meter (`set_mic_test`'s idle levels, `yap-amp`); with no
-  // microphone, it says so.
+  // Setup's microphone check: the device (switched live: picked, it goes
+  // first in the microphones' order, dictation/mics.rs) and a scrolling level
+  // meter (`set_mic_test`'s idle levels, `yap-amp`); with no microphone, it
+  // says so.
   import StepHeader from './StepHeader.svelte';
+  import { findMic } from '../core/mics.js';
 
   /** `setup`: onboarding's state (setupState.svelte.js). */
   let { setup } = $props();
+
+  // The one in use now: the first in the order that's connected ('' =
+  // Windows' default).
+  const picked = $derived.by(() => {
+    for (const c of setup.cfg?.micOrder || []) {
+      const m = findMic(c, setup.devices);
+      if (m) return m.id;
+    }
+    return '';
+  });
 </script>
 
 <StepHeader title="Let's check your microphone">Say something — the bars should react. Silence? Pick a different device.</StepHeader>
 
 <div class="mic-box">
-  <select class="mic-pick" bind:value={setup.cfg.inputDevice} onchange={setup.applyMic} aria-label="Microphone">
-    <option value={null}>System default</option>
-    {#each setup.devices as d}
-      <option value={d}>{d}</option>
+  <select class="mic-pick" value={picked} onchange={(e) => setup.applyMic(e.currentTarget.value)} aria-label="Microphone">
+    <option value="">System default</option>
+    {#each setup.devices as d (d.id)}
+      <option value={d.id}>{d.name}</option>
     {/each}
   </select>
 

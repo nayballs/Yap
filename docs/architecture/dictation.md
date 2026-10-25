@@ -280,9 +280,9 @@ to **Run again** from Home.
   `model_unload_timeout`; the next dictation lazily reloads it. **No microphone** (none
   plugged in, a headset that connects after login, a CI runner) doesn't take the
   pipeline down: no stream is open until a recording needs one, every recording
-  tries to open it (`dictation/mic.rs`), picking a mic (`set_input_device`) switches a
-  running stream live or checks the device is there, and a recording
-  attempt without one says "No microphone found" (on the overlay) — or, when
+  tries to open it (`dictation/mic.rs`) — the first microphone in the person's
+  order that's connected, then Windows' default (`dictation/mics.rs`, below) —
+  and a recording attempt with none says "No microphone found" (on the overlay) — or, when
   Windows' privacy switches are why, "Windows is blocking microphone access for
   desktop apps" (`dictation/mic_privacy.rs`) — Upload, models and Settings work regardless. **Dead-mic watchdog** (`dictation/mic_watch.rs`): the audio
   callback tallies each recording's live audio (`mic_tally`: how much, any sample
@@ -304,6 +304,31 @@ to **Run again** from Home.
   watchdog's report, which then blames the switch instead of the mic.
   Opening, closing, the device switch and the reopen all happen on the mic's
   own thread (`dictation/mic.rs`; the reopen stops the dead stream first).
+  **The mic unplugged mid-dictation** (2026-10-25, `pipeline/unplugged.rs`):
+  until then the recording went on hearing nothing (its stream had stopped
+  and the watchdog had stopped watching once the mic first worked). Now the
+  mic's thread tells the dictation recording from it (`mic::Sink::lost`,
+  on a thread of its own) and pure `on_lost(recording, ours, robot, heard,
+  samples)` decides: it heard something (≥ 0.25 s, not all zeros) → it ends
+  as a stop would (`stop_and_transcribe`: stop chime, other apps back) and
+  what it heard is transcribed and kept like any dictation (history, its
+  audio a day in `recent_audio`), pasted **only into the window it was
+  for** (`unplugged` set → `inject_text`'s strict paste, as Undo's: a window
+  gone leaves it on the clipboard, and
+  Home lists it as "Didn't paste · Your microphone was disconnected and its
+  window was gone", with Copy and Run again); nothing heard → it ends at once
+  (`end_now`, shared with `end_without_mic`), the bar saying "<mic> was
+  disconnected". Either way **one** alert (`lost_alert`, kind `micLost`,
+  button **Microphones** → Settings), by what became of the words
+  (`Outcome`): "Contoso H2 disconnected · Yap stopped the dictation and
+  pasted what it heard. The next one uses Fabrikam USB Mic." — or "What it
+  heard is on the clipboard: press Ctrl+V." (instead of Undo's own "Your text
+  is copied"), "kept what it heard" (the Chat box, the assistant, no words:
+  said once the transcription is done) or "before it heard anything"; the
+  paste says it (`tell_unplugged`, once). The next microphone named is the
+  next one in the order, which the next dictation opens (the one lost passed
+  over while Windows still lists it). Unit tests (`unplugged::tests`), e2e
+  `mics.spec.js`.
   **Cancel and Undo**: `cancel(undo)` — the bar's ✕, the tray's Cancel and
   `cancel_recording` keep a recording of ≥ 0.5 s that heard a sound in `kept`
   (`Kept`: its audio, `target_hwnd`, `target_kind`, edit mode and selection)
@@ -517,6 +542,73 @@ to **Run again** from Home.
   same wait covers. Against the old always-open ring, a cold start on a
   wired mic loses what was said in the 300 ms before the press and the
   ~30 ms after it.
+  **Which microphone, and a device going** (2026-10-25, `dictation/mics.rs`):
+  `open` tries `mics::candidates(order, Windows' list, away)` in turn — the
+  person's order (`config.mic_order`), then Windows' default; one that won't
+  open gives way to the next; none at all → "No microphone found". The
+  running stream knows its endpoint (`Running.endpoint`). Windows' list
+  changing (`mics::on_change` → `Cmd::Devices`) and cpal's error callback
+  (every error stops a WASAPI stream: `DeviceNotAvailable` when it's
+  unplugged → `Cmd::Stopped { serial }`) both come to the mic's thread:
+  pure `after_stop(listed, held, reopened_lately)` → **Reopen** the same
+  device once (Windows still lists it: a reset, a format change in Sound
+  settings) or **Lost** (`Sink::lost`; the device goes on an `away` list for
+  10 s or until Windows drops it; the mic test or "Keep the microphone
+  ready" opens the next one at once). A microphone that comes first now (a
+  higher one plugged in, the order changed in Settings, Windows' default
+  moved for someone on it) is used from the next dictation, **never in the
+  middle of one** (`reconsider`): a warm stream on another closes, one the
+  mic test or "Keep the microphone ready" holds moves. The Bluetooth rules
+  are the stream's (never warm, closed after the stop chime), whichever
+  microphone in the order it is, and a ranked headset that's connected but
+  asleep holds nothing up: the recording starts at once and the chime
+  waits for its first audio, as above. `Status` has `device` and `losses`.
+  A test run's made-up microphones (`mics::fake`) open as a quiet tone
+  (`fake::Tone`, real-time pace) that stops by itself when unplugged.
+- **`dictation/mics.rs`** (+ `mics/watch.rs`, `mics/offer.rs`) — **the
+  microphones' order and Windows' list** (2026-10-25; Wispr Flow's ranked
+  mics, by behaviour). `MicChoice { id, name }` (`config.mic_order`,
+  `mic_not_now`): kept by its Core Audio **endpoint id**, the same when the
+  device is plugged in again, with its name for one picked before ids were
+  kept (`migrate_once` v4) or plugged into another port (`matches`: the id,
+  else the name when no device has that id). `Endpoint { id, name,
+  bluetooth, default, virtual }`: Windows' active capture endpoints
+  (`win::capture_endpoints`, the default first; `virtual` = enumerator
+  "ROOT", a streaming app's). Pure: `candidates(order, present, away)` →
+  `[Target]` (each connected one in order, then Windows' default — the next
+  one if the default is away; `Target::Default` only when Windows' list
+  couldn't be read, as before), `in_use`, `rank_of`, `short_name`
+  ("Headset Microphone (Contoso H2)" → "Contoso H2"), `on_arrival(ep, order,
+  not_now, present)` → **Ask** (new to Yap, not what Yap uses) / **Using**
+  (in the order and now in use: higher than the one before) / **Quiet** (lower
+  in the order, "Not now" before, virtual, or Windows' new default that Yap
+  follows anyway), and `Gate` (one question per `ASK_GAP_MS`, 10 min, and
+  per microphone per run). The list: `present()` (cached; read on first
+  use), `refresh()` (read now, one at a time; a change goes to `changed`:
+  the listeners — the dictation's mic —, `GENERATION` for a meeting's
+  capture, `yap-mics-changed` for Settings, and each arrival to the offer).
+  **`watch.rs`** registers an `IMMNotificationClient` (`#[implement]`,
+  hence the `windows-core` dependency) on a `mic-devices` thread: its
+  callbacks only nudge a channel (nothing may wait in them); a burst of
+  notifications settles (400 ms), then `refresh()`. **`offer.rs`**: an
+  arrival waits 800 ms (Windows may make it its default), then until no
+  dictation is going on (`notice::moment`, the settle after one included;
+  dropped if it's gone again or after 10 min), then **Ask** → "Contoso H2
+  connected · Use it for dictation?" in one place (`notice::place`, never a
+  Windows notification): the main window's toast (`yap-mic-offer` →
+  `lib/notices/micOffer.js`, kind `info`) or a Yap bar card (`micOffer`),
+  **Use it** (`put_first`: first in the order, off "Not now") / **Not now**
+  (`add_not_now`: never asked again; Settings can still add it), answered
+  through `mic_offer_respond` or the card (`shell/settings::change_config`:
+  saved and applied); **Using** → "Using Contoso H2 for dictation" (an
+  alert, kind `micSwitched`, the same words not twice in 10 minutes, button
+  **Change** → Settings → Dictation → Microphone). Commands `list_mics`,
+  `mic_offer_respond`; debug-only `e2e_mics { devices }` (made-up
+  microphones instead of Windows', ids prefixed "e2e-"; the gate forgotten),
+  `e2e_mic_plug { device }`, `e2e_mic_unplug { id }` (told as Windows tells
+  a change), `YAP_E2E_MICS` (made-up ones from the start; `[]`: none). The
+  log says counts at `info`, names only at `debug`. Unit tests
+  (`mics::tests`, `offer::tests`), e2e `mics.spec.js`.
 - **`dictation/mic_watch.rs`** — the dictation's dead-mic watchdog, pure: `MicTally`
   (lock-free, fed by the audio callback), `DeadMicWatch::poll(elapsed, samples,
   heard)` → Wait / Reopen / Report / Recovered / Fine, the messages (the full one

@@ -4,10 +4,9 @@
   // while you talk, and how your words land in other apps (pasting.md).
   //
   //   cfg:        Settings' config $state (auto-save does the saving).
-  //   devices:    microphone names (list_audio_devices).
   //   outputs:    output device names (list_output_devices).
+  // The microphones' order is MicOrder.svelte (it reads Windows' list itself).
   //   onshowview: leaves Settings for a main-window view ("dictionary").
-  import { invoke } from '@tauri-apps/api/core';
   import Group from '../ui/Group.svelte';
   import Row from '../ui/Row.svelte';
   import Toggle from '../ui/Toggle.svelte';
@@ -16,12 +15,12 @@
   import Segmented from '../ui/Segmented.svelte';
   import LinkRow from '../ui/LinkRow.svelte';
   import SettingsHotkey from './SettingsHotkey.svelte';
+  import MicOrder from './MicOrder.svelte';
   import { fillHotkey, isCopilotKey } from '../core/hotkeys.js';
   import { PROVIDER_DESTINATIONS } from '../core/providers.js';
 
-  let { cfg, devices = [], outputs = [], onshowview = null } = $props();
+  let { cfg, outputs = [], onshowview = null } = $props();
 
-  const micOptions = $derived([{ value: null, label: 'System default' }, ...devices.map((d) => ({ value: d, label: d }))]);
   const outputOptions = $derived([{ value: null, label: 'System default' }, ...outputs.map((d) => ({ value: d, label: d }))]);
 
   const MODES = [
@@ -89,14 +88,15 @@
 </Group>
 
 <Group title="Microphone and sound" id="settings-microphone">
-  <Row label="Microphone" desc="Changes apply straight away" setting="microphone">
-    <Select
-      bind:value={cfg.inputDevice}
-      options={micOptions}
-      ariaLabel="Microphone"
-      wide
-      onchange={() => invoke('set_input_device', { device: cfg.inputDevice || null }).catch(() => {})}
-    />
+  <!-- An order of microphones, not one (dictation/mics.rs): the first connected is used. -->
+  <Row
+    label="Microphone"
+    desc="Yap uses the first one that's connected, then Windows' default"
+    hint="One plugged in while you dictate is used from the next dictation. Unplugged while you dictate, the dictation stops and keeps what it heard; a meeting goes on with the next microphone."
+    setting="microphone"
+    stack
+  >
+    <MicOrder {cfg} />
   </Row>
   <!-- The mic opens when you dictate and closes after (dictation/mic.rs); this keeps
        it open the whole time, as Yap used to. -->
