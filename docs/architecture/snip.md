@@ -6,6 +6,14 @@ the chat screenshots on disk, which models read images and how a question
 carries one. Chat itself is [chat-and-assistant.md](./chat-and-assistant.md);
 the models are [ai-models.md](./ai-models.md).
 
+**Phase 2 (2026-10-25)**: a click or Enter takes the whole monitor, Space
+(or Alt held) picks a window, a box can cross from one monitor into
+another; Ctrl as you let go copies and Shift saves (and a chat screenshot's
+right-click menu does both); pictures pasted (Ctrl+V) or dropped on Chat go
+in like a snip; a model that can't read images can be sent the screenshot's
+text, read on this PC by Windows' OCR; the model picker and Settings tag
+the models that read images.
+
 [Architecture index](./README.md) · [CLAUDE.md](../../CLAUDE.md)
 
 ## How it works
@@ -28,16 +36,28 @@ snip/capture.rs ─ every monitor at once: WGC, FP16 + SDR white on an HDR
 capture::for_snip(false) ─ back as the meeting setting wants
         ▼
 snip/overlay.rs ─ one native window per monitor, the frozen picture dimmed,
-        │         painted while cloaked, uncloaked together, the focus taken
+        │         painted while cloaked, uncloaked together, the focus taken;
+        │         the windows on screen listed (snip/pick.rs, rects only)
         ├── Esc · right-click · the shortcut again · another app · the
         │   monitors changing · two minutes: cancelled, focus back
         ▼
-release (≥ 6×6 px) → crop at physical pixels → PNG → <data>/chat-images/
+what's taken (overlay::Select, virtual-desktop pixels):
+        a box (≥ 6×6 px, may cross monitors) · a click / Enter: the monitor
+        · Space or Alt, then a click: a window's visible frame
         ▼
-yap-snip {image, conversationId} → the main window up on Chat, the
-        screenshot in the message box, the caret there — never sent by
-        itself; the copy for the selected model made in the background
+cut at physical pixels (one monitor's frame, or put together from each)
+        ├── Ctrl held / Ctrl+C → the clipboard (PNG + DIB, out of Win+V
+        │   history), focus back
+        ├── Shift held / Ctrl+S → the Save dialog, the folder used last
+        ▼
+PNG → <data>/chat-images/ → yap-snip {image, conversationId} → the main
+        window up on Chat, the screenshot in the message box, the caret
+        there — never sent by itself; the copy for the selected model made
+        in the background
 ```
+
+Pictures pasted into Chat's box or dropped on Chat join the same path at
+the PNG (`snip/attach.rs`).
 
 ## Modules
 
@@ -73,12 +93,20 @@ yap-snip {image, conversationId} → the main window up on Chat, the
   bits straight to its 8-bit sRGB value (`v × 80 / white_nits`, negatives →
   0, highlights clip; never a frame-adaptive tone map — ShareX #8895's
   bug), the frame converted on every core.
-- **`snip/geom.rs`** — pure: the drag's box (clamped to its monitor; a
-  click or a twitch under 6 px snips nothing), the size label's place, a
-  box scaled to a frame of another size, the crop (BGRA → RGBA), the
-  monitor under a point, `scaled` (the overlay's own lengths at a monitor's
-  DPI). Physical pixels end to end, so mixed DPI needs no conversion.
-- **`snip/overlay.rs`** — the native overlay (below).
+- **`snip/geom.rs`** — pure: the drag's box (on a monitor, or across the
+  desktop's bounds: `drag_box_on`; a twitch under 6 px snips nothing), a
+  click (`is_click`), the window under a point, a box's pieces on each
+  monitor and the picture put together from them (`compose_rgba`, black
+  where no monitor is), the size label's place, a box scaled to a frame of
+  another size, the crop (BGRA → RGBA), the monitor under a point, `scaled`
+  (the overlay's own lengths at a monitor's DPI). Physical pixels end to
+  end, so mixed DPI needs no conversion.
+- **`snip/overlay.rs`** — the native overlay and its pure selection
+  (`Select`) (below).
+- **`snip/pick.rs`** — the windows a click can pick (below).
+- **`snip/copy_save.rs`** — copy and save (below).
+- **`snip/attach.rs`** — pictures pasted or dropped into Chat (below).
+- **`snip/ocr.rs`** — "Send its text instead": Windows' OCR (below).
 - **`snip/images.rs`** — the screenshots on disk and the copies models get
   (below).
 - **`snip/turn.rs`** — a question's screenshots on their way to the model
@@ -136,12 +164,60 @@ How it looks and behaves:
 - Its colours are the bar's tokens (`--bar-tooltip`, `--bar-tooltip-key`,
   `--bar-chip`): a native window can't read app.css, so a test reads app.css
   and checks they match.
-- Input: drag (the mouse captured past the monitor's edge, clamped to it);
-  release = done; Esc, right-click, the shortcut again, another app taking the
-  focus (`WM_ACTIVATEAPP`), the monitors changing (`WM_DISPLAYCHANGE`) or two
-  minutes cancel. If Windows didn't let the overlay take the focus, Esc still
-  cancels through Yap's keyboard hook (`input_hook::snip_escape`: swallowed
-  while a snip is up). Phase 1 keeps a box on the monitor it started on.
+- Input: drag (the mouse captured, so the drag goes on past the monitor's
+  edge — **into the next monitor**); release = done; Esc, right-click, the
+  shortcut again, Alt+F4, another app taking the focus (`WM_ACTIVATEAPP`),
+  the monitors changing (`WM_DISPLAYCHANGE`) or two minutes cancel. If
+  Windows didn't let the overlay take the focus, Esc still cancels through
+  Yap's keyboard hook (`input_hook::snip_escape`: swallowed while a snip is
+  up).
+
+### What a snip takes (phase 2)
+
+The windows only feed their messages to one **`overlay::Select`** (pure,
+unit-tested), which keeps the selection in **virtual-desktop pixels** (each
+window's point plus its monitor's place: physical pixels in a per-monitor-
+DPI-aware process, so the sum is exact at mixed DPI) and says what to draw
+and when the snip is done. Every monitor's window draws its own part of the
+lit box (edge and all); the size label goes on the monitor holding most of
+it.
+
+| You do | It takes |
+|---|---|
+| drag (≥ 6 px each way) | the box — on one monitor, or across two or more: clamped to the desktop's bounds |
+| a click (moved under 6 px) | the whole monitor under the pointer |
+| Enter | what's lit, else the whole monitor under the pointer |
+| Space, then a click | the window under the pointer (Space again: boxes) |
+| Alt held, then a click | the same, while Alt is held |
+| a thin drag (under 6 px one way) | nothing: the box goes, the snip goes on |
+
+- **Windows** (`snip/pick.rs`): read once, after the capture (the picture's
+  z-order), topmost first, as each one's **visible frame**
+  (`DWMWA_EXTENDED_FRAME_BOUNDS`: no invisible resize borders; a maximised
+  window is its monitor); left out: hidden, minimised, cloaked (another
+  virtual desktop, a suspended Store app), click-through
+  (`WS_EX_TRANSPARENT` overlays), the desktop itself (`Progman` /
+  `WorkerW`), anything under 6 px, and Yap's own. Rects only — never a
+  title. While picking windows the one under the pointer is lit with its
+  frame, the cursor is the arrow, and the hint says "Click a window · Space
+  to drag a box · Esc to cancel". A window is what's on screen in its frame
+  at the capture (a window over it shows too): the "visible area" of the
+  plan, not a capture of the window alone.
+- **What's for** — **Ctrl held as you let go** (or **Ctrl+C** while the box
+  is up, Ctrl+Enter): copy; **Shift** (or **Ctrl+S**): save; neither: Chat.
+  The label says it as you hold them: "812 × 430 · Ctrl copy · Shift save",
+  then "812 × 430 · Copy". Ctrl+C / Ctrl+S with nothing lit take the monitor
+  under the pointer. Kept from the plan's "small toolbar after selecting":
+  release = done stays (the 23 Oct decision, no second confirm), so the
+  toolbar is the label's legend and the keys rather than buttons to click.
+- **The picture** (`snip::cut`): a box on one monitor is cut from that
+  monitor's frame alone, at the frame's own resolution (as phase 1); one
+  across monitors is put together from each frame it touches
+  (`geom::compose_rgba`), black where the box is on no monitor (two
+  monitors of different heights).
+- The hint at the top of the monitor under the pointer: "Drag to snip ·
+  Click for the whole screen · Space for a window · Esc to cancel"; it
+  comes back (on the pointer's monitor) when Space or Alt switch modes.
 
 ## No Yap window in the shot
 
@@ -212,6 +288,42 @@ global hook never sees keys while a Yap window has the focus.
   once the sweep removed it (`chat_get` marks it `gone`).
 - + → "Take a screenshot" starts one from Chat (the main window leaves the
   shot).
+- **Pasted or dropped** (`snip/attach.rs`, phase 2): Ctrl+V of a picture in
+  the message box (WebView2's paste event carries it as a PNG file; its
+  bytes go to `chat_image_paste` as the call's raw body, never base64), or
+  image files dropped on Chat (Tauri's drag-drop event, its paths to
+  `chat_image_drop`; the box says "Drop pictures to ask about them" while
+  they're dragged over). Only pictures (PNG, JPEG, GIF, BMP, WebP, TIFF,
+  HEIC with Windows' codec), ≤ 50 MB a file, ≤ 100 MP, as many as the
+  question has room for (4); the rest are left with a line saying so. Each
+  is decoded — PNG here, anything else by **Windows' own codecs**
+  (`Windows.Graphics.Imaging.BitmapDecoder`: EXIF rotation and colour
+  profile applied; no image crate) — its see-through pixels laid on white,
+  and stored again as a PNG in `chat-images/`: from there it's a snip
+  (retention, deletion with its conversation, the vision rules, the copy for
+  the model). `source` says "paste" / "drop" in the page's copy.
+- **A screenshot's right-click menu** (in the box, in a question, opened
+  large): Open, **Copy image**, **Save image as…** (`chat_image_copy`,
+  `chat_image_save`: below).
+
+## Copy and save (`snip/copy_save.rs`, phase 2)
+
+- **Copy**: the PNG and a 32-bit `CF_DIBV5` (bottom-up BGRA, sRGB; Windows
+  makes `CF_DIB` / `CF_BITMAP` from it for older apps) on the clipboard with
+  the formats that keep a dictation's paste out of **Win+V history**, cloud
+  clipboard sync and clipboard managers
+  (`text_injector::copy_image_privately`), checked by the clipboard's
+  sequence number and retried. "Screenshot copied" says it (an alert, so
+  the bar shows it when Yap's window isn't in front); the focus goes back
+  to the app you were in.
+- **Save**: Windows' Save dialog through the dialog plugin, opened in the
+  folder used last (`snip_save_dir`; at first Pictures), named "Snip
+  2026-10-25 at 14.03.12.png"; the folder chosen is remembered. "Screenshot
+  saved" with **Show in folder**.
+- A copy or a save from the overlay keeps nothing in `chat-images/`.
+- Test runs never touch the real clipboard (a pretend one, read by
+  `e2e_snip_clipboard`) nor open the dialog (`e2e_snip_save_path` names the
+  file); the robot tests use the real clipboard, saved and put back.
 
 ## Which models read images
 
@@ -249,6 +361,52 @@ Claude, Gemini and OpenAI models can. [Connect one…]" (the model picker).
 read them (`vision::CANT_READ`), and turns a server's refusal into
 `vision::COULDNT_READ`: the page shows the line instead of an error, the
 question and its screenshot back in the box.
+
+**Earlier screenshots** never go again to a model known not to read
+images (switched to after a question with one): each is a line
+(`turn::with_history_images` with the model).
+
+### "Send its text instead" (`snip/ocr.rs`, phase 2)
+
+The line also offers **Send its text instead** (the first button when no
+connected provider has a model that reads images): the screenshots' text,
+read **on this PC** by Windows' own OCR (`Windows.Media.Ocr`: free,
+offline, in every Windows 10 and 11), goes after the question in their
+place, to any model — GPT-OSS, the on-device model.
+
+- `chat_send(images, asText: true)`: Rust reads each screenshot
+  (`OcrEngine::TryCreateFromUserProfileLanguages`, else the first language
+  Windows has text recognition for; a picture bigger than
+  `MaxImageDimension` made smaller, a small one twice as big — smoothly: on
+  a fixture of 13 px Segoe UI, 2× bilinear read "settings.json" where 1×
+  and a blocky 2× lost its dot), tidies the lines (`assemble`; a hex code
+  read "Ox80070005" gets its zero back, `fix_hex`), and sends
+  `compose(question, texts)`: the question, then "[Text read from the
+  screenshot on this PC, sent instead of the picture]" and the text (≤
+  12,000 characters). No image part goes; the vision check is skipped.
+- The question is saved as sent; its screenshots stay with it marked
+  `asText` (`ChatImage.asText`), so the thread still shows what was asked
+  about ("Sent as text" on the thumbnail) and the bubble folds the text
+  under the question ("Text from the screenshot", `chatImages.js`
+  `splitScreenText`). A new conversation is named by the question's own
+  words (`ocr::question_of`). The reply's `question` is the saved text.
+- No text in it: "No text found in the screenshot"; no OCR language on the
+  PC: "Windows' text recognition isn't set up on this PC: add a language in
+  Settings → Time & language" — the question and screenshot back in the box.
+- Logs: line and character counts, never the text.
+
+### The "Reads images" tag (phase 2)
+
+The Chat model picker (each provider's rows, Recent, search, a self-hosted
+server's models) and Settings → Language Models → Chat & Voice Assistant's
+model list tag the models that read images, "Reads images". The page asks
+Rust (`chat_models_read_images`, every model a picker shows in one call a
+moment after it draws: `stores/visionTags.svelte.js`), so the tag says
+exactly what Chat sends by — a refusal this session, the provider's list,
+the family rules — for cloud and on-device models alike (the on-device
+model never has it). Asked afresh each time the picker opens. Searching
+"images" or "vision" in the picker finds them. Dictation Cleanup's list
+doesn't show it (a screenshot never goes there).
 
 ## A question's screenshots on their way (`snip/turn.rs`)
 
@@ -296,7 +454,11 @@ question and its screenshot back in the box.
 - **Privacy**: never logged (sizes, counts and timings only; `privacy/log_privacy.rs`
   now also flags `png`, `rgba`, `bgra`, `pixels`, `data_url`), never synced,
   not in the local API or the MCP server; an image leaves the PC only inside
-  the Chat request you send (and that conversation's follow-ups).
+  the Chat request you send (and that conversation's follow-ups). Phase 2:
+  the OCR text is read on this PC and never logged (counts only); a copy
+  stays out of Win+V history and cloud clipboard sync; the window list is
+  rects only; a pasted or dropped picture is decoded and stored again, so
+  nothing but a PNG lands in `chat-images/`.
 
 ## When capture can't work
 
@@ -317,7 +479,19 @@ question and its screenshot back in the box.
   white levels; a light grey isn't white; out of gamut, NaN, highlights; a
   frame row by row), `snip/geom.rs` (drags any way, clamping, the 6 px
   minimum, physical pixels at 100–200 %, a monitor left of the primary,
-  frames of another size, the crop, the label), `snip/images.rs` (ids, PNG
+  frames of another size, the crop, the label; phase 2: a box across two
+  monitors and one left of and above the primary, its pieces, a click, the
+  window under a point, the picture put together from two frames — one
+  scaled — with black off them), `snip/overlay.rs` `Select` (a drag across
+  monitors, a click and Enter, Space and Alt picking windows, Ctrl and
+  Shift, Ctrl+C / Ctrl+S, the label and hint), `snip/pick.rs` (which
+  windows can be picked), `snip/copy_save.rs` (the DIB, the file name, the
+  folder), `snip/attach.rs` (picture names, PNG and a BMP through Windows'
+  decoder, see-through on white), `snip/ocr.rs` (the lines, the question
+  with its text and its title, scaling for the engine, the hex fix, and
+  **Windows' real OCR on a fixture**, `snip/fixtures/ocr-error.png`: a
+  made-up dialog's "Error 0x80070005: Access is denied." — it says so and
+  passes on a PC with no OCR language), `snip/images.rs` (ids, PNG
   round trip, per-provider sizes, area averaging, fitting, the sweep and
   retention, deleting with a conversation), `snip/turn.rs` (request shapes
   per provider, only the question gets the images, the task-local,
@@ -326,7 +500,7 @@ question and its screenshot back in the box.
   pill, the colours against app.css), `snip.rs` (the voice phrases and their
   negatives), `model_catalog` (the lists' vision flags), `input_hook`
   (Win+Alt+S, its clashes).
-- **e2e** (`e2e/snip.spec.js`, 11 tests): fake monitors through
+- **e2e** (`e2e/snip.spec.js`, 11 tests in phase 1): fake monitors through
   `e2e_snip` (a 1280×720 HDR one at 240 nits through the real FP16 path, a
   960×540 one at 150 %), the hidden overlay driven by `e2e_snip_input`, how
   it went from `e2e_snip_last`: the snip in a new chat with its pixels exact,
@@ -335,20 +509,42 @@ question and its screenshot back in the box.
   server's refusal, saying "snip", the Settings rows, ✂ / + / the in-page
   shortcut, retention and deletion. `e2e/support/png.js` reads PNGs with
   Playwright's own pngjs; the fake AI records `images` and can refuse them
-  (`rejectImages`).
+  (`rejectImages`). Phase 2 (19 tests in all): a click and Enter take the
+  whole monitor (the HDR one's colours converted back); Space and Alt pick
+  fake windows (`e2e_snip {windows}`) on either monitor, and over none the
+  monitor; a box dragged from one fake monitor into the other is put
+  together from both, black below the shorter; Ctrl on release and Ctrl+C
+  copy (a pretend clipboard, `e2e_snip_clipboard`), Shift and Ctrl+S save
+  (`e2e_snip_save_path`, the folder remembered), Home still showing; a chat
+  screenshot's menu copies and saves it; a picture pasted (a synthetic paste
+  event carrying a PNG) and files dropped (`e2e_drag_drop`: Tauri's
+  drag-drop event — a PNG, a JPEG through Windows' decoder, a text file
+  left out) go in and on to the model; "Send its text instead" with a fake
+  OCR text (`e2e_snip_ocr`) to GPT-OSS, folded in its bubble, and "No text
+  found"; "Reads images" in the picker and Settings' Chat list (not
+  Cleanup's).
 - **Real-app robot** (`e2e-real/snip.real.js`): real monitors, a real drag
   (`yaprobot snipdrag`, only onto the robot's own overlay) over swatches on
   an Edge page on each monitor: every swatch within ±2, the overlay within
-  150 ms; a real Esc cancels and the focus goes back.
+  150 ms; a real Esc cancels and the focus goes back. Phase 2: a real click
+  takes the whole monitor and Enter (`yaprobot snipkey … enter x y`) the
+  one under the pointer, every swatch where it is; Space then a real click
+  picks the Edge window — exactly its DWM frame (`yaprobot framerect`); Ctrl
+  held as a real box is let go (`snipdrag … ctrl`): on the real clipboard
+  the very PNG, a DIB and the privacy formats (`realtest_clipboard
+  checkSnip`), and a real Ctrl+V in Chat's box pastes it back pixel for
+  pixel. On the maintainer's PC (two 2560×1440 monitors, one HDR at 240
+  nits), 25 Oct: 5 of 5 (twice), the overlay up in 92–101 ms (debug build), a
+  window of 12–13 on screen picked exactly.
 
 ## Not done yet
 
-- **Phase 2**: a box across monitors; Enter/Space for the whole monitor and
-  click-to-pick a window; a magnifier; HDR highlight roll-off; copy and save
-  (right-click a screenshot, Ctrl/Shift on release); paste and drag-drop into
-  Chat; "Send its text instead" (Windows OCR) for a text-only model; the
-  picker's "Reads images" tag and filter; a JPEG fallback for photo-heavy
-  snips.
+- **Phase 2, left**: a magnifier; HDR highlight roll-off; a "Reads images"
+  filter switch in the picker (searching "images" finds them now); a JPEG
+  fallback for photo-heavy snips (a big photo dropped in is stored as a PNG,
+  sent fitted); the settings "Also copy / save each snip"; a true capture of
+  a window alone (an occluded one: WGC `CreateForWindow`) — Space picks
+  what's on screen in its frame; the window pick's child controls.
 - **Phase 3**: the on-device model reading images (Qwen3.5-4B's projector,
   `--mmproj`), vision detection for Ollama / LM Studio / llama-server.
 - Snips in the Voice Assistant (asking about the screen out loud).

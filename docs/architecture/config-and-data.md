@@ -13,7 +13,7 @@
   measured clearly faster on this PC, `dictation/stt_speed.rs` — | "gpu" | "cpu"), keep_recent_audio (a day of dictation
   audio to run one again, on; `dictation/recent_audio.rs`), as_said_hotkey ("Use what I
   said", "" = unbound) + as_said_offer (the bar's offer after AI cleanup,
-  on; both `pasting/as_said.rs`), snip_hotkey (Snip to Chat, default Win+Alt+S "kb:alt+win+83", "" = unbound; never a clash, `input_hook::configure_snip_from`) + snip_voice ("Say “snip” to take a screenshot", on) + chat_image_days ("Keep chat screenshots": 7 / 30 (default) / 90 / 0 = forever; another value counts as 30; changing it sweeps at once; all `snip.rs`, docs/architecture/snip.md), rewrite_last_dictation (`rewriteLastDictation`,
+  on; both `pasting/as_said.rs`), snip_hotkey (Snip to Chat, default Win+Alt+S "kb:alt+win+83", "" = unbound; never a clash, `input_hook::configure_snip_from`) + snip_voice ("Say “snip” to take a screenshot", on) + chat_image_days ("Keep chat screenshots": 7 / 30 (default) / 90 / 0 = forever; another value counts as 30; changing it sweeps at once; all `snip.rs`, docs/architecture/snip.md) + snip_save_dir (the folder a snip's or a chat screenshot's Save opened in last, "" = Pictures; `snip/copy_save.rs`), rewrite_last_dictation (`rewriteLastDictation`,
   serde default on: the rewrite shortcut with nothing selected rewrites the
   last dictation — within a minute, in the same field, still ending at the
   cursor —; off, it writes new text as before 2026-10-23; Settings →
@@ -257,7 +257,11 @@
   keeps only its id, size, bytes and source. Deleted with its conversation, after
   "Keep chat screenshots" (30 days by default), and a day after a snip that was
   never sent. Never leaves the PC except inside the Chat request you send;
-  never logged.
+  never logged. Pictures pasted or dropped into Chat are stored here too (as
+  PNGs, `snip/attach.rs`); a question whose screenshot went as its text
+  (Windows' OCR, `snip/ocr.rs`) keeps it marked `asText`. A snip copied or
+  saved from the overlay keeps nothing here; a save goes where the Save
+  dialog says, in the folder used last (`snip_save_dir`).
 - History: `%APPDATA%/yap/history.json` (local-only; cleared from Settings → Privacy & data → History).
 - Notes: `%APPDATA%/yap/notes.json` — the AI Notepad store (folders, actions,
   participants, meeting transcripts).
@@ -373,7 +377,8 @@
   (`keep_recent_audio`), "Use what I said" offered on the bar after AI cleanup
   (`as_said_offer`) with no shortcut (`as_said_hotkey` ""), Snip to Chat on
   Win+Alt+S (`snip_hotkey`), saying "snip" taking one (`snip_voice`) and chat
-  screenshots kept 30 days (`chat_image_days`), the rewrite
+  screenshots kept 30 days (`chat_image_days`), a snip's Save opening in
+  Pictures until a folder is chosen (`snip_save_dir` ""), the rewrite
   shortcut taking the last dictation when nothing is selected
   (`rewrite_last_dictation` on; the shortcut itself unbound), Yap's five
   saved transforms with no shortcuts (`transforms`; Translate to Spanish),

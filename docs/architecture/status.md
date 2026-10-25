@@ -530,6 +530,32 @@ is written, not yet run; an HDR-aware app's swatches (Edge) on the HDR
 monitor; a real Anthropic / OpenAI / Gemini / OpenRouter request with an
 image (shapes from their docs; the fake's checked).
 
+**Snip to Chat, phase 2** (2026-10-25, [snip.md](./snip.md)): a click or
+Enter takes the whole monitor, Space or Alt picks a window (its DWM frame), a
+box can cross monitors (put together from each frame); Ctrl as you let go
+copies (PNG + DIB, out of Win+V history), Shift saves (the dialog, the folder
+used last), and a chat screenshot's menu does both; pictures pasted or
+dropped into Chat go in like a snip (Windows' decoders); "Send its text
+instead" sends a screenshot's text, read by Windows' OCR on this PC, to a
+model that can't read images; "Reads images" in the model picker and
+Settings' Chat list. **Tested**: unit (the selection state machine, the
+geometry across monitors, the DIB, the decoders, and Windows' **real OCR on
+a fixture** on the maintainer's PC), e2e (`e2e/snip.spec.js`, now 19 tests
+over fake monitors and windows: every action above, a synthetic paste and a
+Tauri drop event, a fake OCR text, the tags), and **robot-tested on the
+maintainer's PC** (`e2e-real/snip.real.js`, 5 of 5, 25 Oct — which also
+settles phase 1's "not yet run" above: real drags over Edge swatches on
+both monitors, the HDR one included, within ±2, the overlay up in 92–101
+ms in a debug build, a real Esc): a real click and Enter for the whole
+monitor, Space and a real click picking the Edge window exactly, Ctrl held
+on a real release putting the very PNG, a DIB and the privacy formats on
+the real clipboard, and a real Ctrl+V pasting it into Chat pixel for pixel.
+**Not yet tried**: a real drop from File Explorer (the e2e test sends
+Tauri's own event), the Save dialog by hand, a box across monitors on real
+mixed-DPI monitors (the maintainer's two are both 100 %), OCR quality on
+real screenshots beyond the fixture (small print, other languages),
+picking windows on a third monitor or a rotated one.
+
 ## Not yet done
 
 Not yet done: the AI Chat surface has no semantic-vector
