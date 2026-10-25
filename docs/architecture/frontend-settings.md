@@ -194,7 +194,8 @@ there can move margins: compare a page before and after.
   banner over "Your model", whose own Download is the fix), Language Models
   with cleanup on a cloud provider and no key ("Add your Groq API key" + Add
   key, which opens and focuses the field).
-- **Hotkeys** (`settings/hotkeys.svelte.js` + `SettingsHotkey.svelte`): the
+- **Hotkeys** (`settings/hotkeys.svelte.js` + `SettingsHotkey.svelte`; their
+  more keys, `moreHotkeys`, checked in the same list — see Shortcuts below): the
   six (`HOTKEY_CMD` / `HOTKEY_NAMES`: dictation hotkey, rewrite shortcut,
   meeting shortcut, assistant shortcut, read-aloud shortcut, Use-what-I-said
   shortcut) are refused when they'd fire on one
@@ -257,7 +258,9 @@ there can move margins: compare a page before and after.
   **Notifications** (`#settings-notifications`): "Show tips" (`showTips`).
 - **Dictation** (`settings/DictationPage.svelte`): **Start and stop**
   (`#settings-hotkey`): Hotkey (`hotkey`), Recording mode (Toggle /
-  Push-to-talk; in push-to-talk its line says how double-tap goes hands-free).
+  Push-to-talk; in push-to-talk its line says how double-tap goes hands-free),
+  and in push-to-talk **Triple-tap for meeting notes** (`tripleTapMeeting`,
+  off, `triple-tap-meeting`; `dictation/gesture.rs`).
   **My languages** (`#settings-languages`, `settings/MyLanguages.svelte`,
   2026-10-25; [dictation.md](./dictation.md) `dictation/languages.rs`):
   "Languages you speak" (`my-languages`) — the picked ones as chips with ✕,
@@ -327,7 +330,14 @@ there can move margins: compare a page before and after.
   Meeting notes, **Snip to Chat** (`snipHotkey`,
   Win+Alt+S by default, its hint naming ✂, the tray, Esc and what Windows never
   lets an app capture; `snip.rs`, [snip.md](./snip.md)) — each in keycaps with Change, a
-  clash said under the one being set — a **Language shortcuts** link row
+  clash said under the one being set, and **"+ Add another"** (2026-10-25:
+  `SettingsHotkey`'s `more`, up to `MORE_SHORTCUTS` 3 more keys or mouse
+  buttons for the same action, `cfg.moreHotkeys[target]`, each with ✕;
+  checked by the same `validateHotkey` list — one of the same action's is
+  "Already used by another of this action's shortcuts" —, paused while
+  picked, `onMoreCapturing` → `configure_more_hotkeys`; the first taken
+  away moves the next up; the in-page fallback catches every one,
+  `actionHotkeys`) — a **Language shortcuts** link row
   (`shortcut-languages`: "None set", the one's name — "English → Spanish" —
   or "N shortcuts") to Dictation → My languages — and a **Transforms** link row
   (`shortcut-transforms`: "None set", the one transform's name, or "N

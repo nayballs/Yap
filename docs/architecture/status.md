@@ -55,6 +55,34 @@ tables, method and how anyone can run it and send theirs:
 
 ## What works
 
+**Sturdier shortcuts, and no dictation lost** (2026-10-25,
+[dictation.md](./dictation.md)): **several shortcuts per action**
+(Settings → Shortcuts' "+ Add another", up to 3 more keys or mouse buttons,
+`moreHotkeys` — the first stays in its old field, so an older Yap sharing
+the data folder keeps it); a **stuck-key sweep** in the input hook (every
+5 s, on a desktop switch, after a sleep, on a minute-long hold: a key whose
+key-up was lost is let go and its recording goes on hands-free, never
+stopped); a **push-to-talk press under a second that grows into a chord**
+dropped silently with a "Hold only {key}" tip; a **cancelled dictation
+kept** a day in Home ("Cancelled", Transcribe, Keep — `recent-audio/kept/`
+— and Save audio… on any dictation); a **ten-minute dictation suggests
+meeting notes** (once); and optional **triple-tap for meeting notes** and a
+guided **mouse-button pick**. Unit-tested (`input_hook/held.rs`'s verdicts,
+`assign_more`, `tidy_more`, an older Yap's save keeping every first
+shortcut, the gestures, the hints' budget, history's cancelled entries),
+e2e-tested (`shortcuts-more.spec.js`: Add another, clashes, the mouse
+guide, two keys through the in-page fallback; `cancelled-dictations.spec.js`:
+Cancelled → Keep → Transcribe, Undo taking it out, Save audio through the
+stubbed dialog, the meeting-notes tip with a shortened length;
+`bar.spec.js` counts cancelled ones apart) and robot-tested with real keys
+through the real hook (`e2e-real/hotkeys.real.js`: a second key, a
+key-down whose key-up the hook never heard — swept, hands-free, the next
+press pasting it —, a short press growing into a chord). **Not yet
+tried**: the sweep after a real lock screen, UAC prompt or sleep (the
+robot stages a lost key-up; a desktop switch can't be staged), a real
+mouse's side button held for push-to-talk, and the triple-tap starting a
+real meeting.
+
 **Trust: network receipts and Report a problem** (2026-10-24,
 [privacy-receipts.md](./privacy-receipts.md)): every request Yap makes goes
 through `privacy/net.rs` (a unit test fails on any that doesn't), recorded by host,
