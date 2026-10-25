@@ -42,6 +42,7 @@ builds and runs out of the checkout: `YAP_EVAL_TARGET_DIR=<builds>/evals`, `--ou
 | `--brief` | Write the pre-meeting brief of each meeting in `evals/briefs/*.json` instead of the scenarios (below; `--only` picks them, `--repeat` repeats them). |
 | `--transforms` | Run the saved transforms' cases in `evals/transforms/cases.json` instead of the scenarios ("Saved transforms" below; `--only` picks them by name or transform, `--repeat` repeats them). |
 | `--languages`, `--languages-phase before\|after` | Run My languages' cases in `evals/languages/cases.json` instead of the scenarios ("My languages" below): cleanup of French, Spanish and German dictations before and after the language line, and a language shortcut's translation. |
+| `--summaries`, `--summaries-phase before\|after` | Write the action plan of each meeting in `evals/summaries/cases.json` instead of the scenarios ("Meeting summaries" below): before (the earlier layout, no language line) and after, judged on the language, tasks under their owners, the headings, the recap and the decisions' reasons. |
 | `--search`, `--embed <gguf>`, `--embed-ngl <n>` | Meeting search instead of the scenarios: recall@k for keyword, meaning and hybrid search over `evals/search/meetings.json`, then each `--model`'s Ask across meetings answers checked for citations of the right lines ("Meeting search" below). The embedding model: `--embed` (else the installed app's, read-only, else downloaded into `--models-dir`), on the card unless `--embed-ngl 0`. |
 | `--mtp on\|off`, `--no-warm-up` | A local model's MTP drafting (default: as Yap's sidecar decides on this PC, never with `--ngl 0`) and its warm-up request. |
 | `--clock-step <min>` | Each turn of a scenario, the clock Chat tells the model moves on this much (a real chat's turns are minutes apart). |
@@ -247,6 +248,34 @@ phase after` keeps a cloud run near 20k. `YAP_EVAL_LANGUAGE_LINE` /
 (`instruction`: where the spelling line goes, or `both`) compare wordings
 and places without a rebuild. `languages.md` in the run folder;
 `models[].languages` in `summary.json`.
+
+### Meeting summaries (`--summaries`)
+
+```bash
+yap.exe eval --summaries --model local:<4b.gguf> --ngl 999 --repeat 5
+yap.exe eval --summaries --summaries-phase after --model groq:openai/gpt-oss-20b --keys-from-yap --max-total-tokens 20000
+```
+
+Each case in `evals/summaries/cases.json` is a short fictional meeting —
+its lines ("you" / "them"), attendees, My languages (`mine`) and the
+language its notes must be in — with the tasks its notes must list under
+their owners (`expect.tasks`: an owner and words, in the meeting's language
+and in English, so the task check doesn't double as a language check), the
+decisions with the words their reason must have, and never-say words (an
+invented owner). Each is written twice through the action plan's own call
+(`llm::enhance_note` under `ACTION_PLAN_BASE_PROMPT`, then
+`postcheck_action_plan`, as `notes::commands::run_enhance` sends it):
+**before** — `ACTION_PLAN_EARLIER_FRAGMENTS[0]` and the input alone, the call
+every meeting made until 25 Oct 2026 — and **after** — today's layout and
+`meeting_summary::final_request` (the language line after the input). Both
+go through today's checks. Judged on the notes as shown: **language** (the
+prose's little words, `language::detect`, or for notes too terse to be sure
+of, `language::leading`), **tasks** (`notes::tasks::parse`, as the Tasks view
+reads them), **headings** (the reply's own "## " headings, before the checks
+put them in English), **never-say**, and after only **recap** ("## Recap",
+≤ 4 topics) and **reasons**. ~1.5–2.8k tokens a summary on Groq (gpt-oss
+reasons for 350–2,000 of them): one phase of the four meetings is 6–9k.
+`summaries.md` in the run folder; `models[].summaries` in `summary.json`.
 
 ### Meeting search (`--search`)
 
@@ -1849,3 +1878,62 @@ meetings" (the words added to `NOT_FOUND`). In the final run the 4B said plainly
 nothing answers the two questions the corpus can't ("What did Dana say yesterday?": no
 meeting yesterday; the office move: never decided); the run before, it listed every
 passage it had for the office move instead.
+
+## Meeting summaries (25 Oct 2026)
+
+**The question**: a meeting held in French or Spanish got its action plan in
+English (the prompt and its layout are English, and nothing said otherwise).
+Does a line after the meeting — "Write the notes in French, the language of
+this meeting. Keep these in English exactly as written: the headings … and
+"(due: …)"" — keep the notes in the meeting's language without losing a
+task, an owner or the headings the checks read; and does the new layout give
+a topic recap and each decision's reason? `--summaries` over four fictional
+meetings in `evals/summaries/cases.json` (an offsite in English, a trade
+fair in French, a campaign launch in Spanish, an English release meeting
+whose person's first language is French: the meeting's language wins). Run
+folders `<builds>/meetsum/eval-runs/20261025-*-summaries-*`; an RTX 5070 Ti
+shared with other builds, so the times are only indicative.
+
+| Model | Phase | Passed | Language | Tasks | Headings | Never-say | Recap | Reasons |
+|---|---|---|---|---|---|---|---|---|
+| Qwen3.5-4B Q4_K_M, graphics card (×5) | before | 8/20 | 10/20 | 9/20 | 20/20 | 20/20 | – | – |
+| Qwen3.5-4B Q4_K_M, graphics card (×5) | **after** | **15/20** | **20/20** | **15/20** | 20/20 | 20/20 | 20/20 | 20/20 |
+| Groq `openai/gpt-oss-20b` | before | 2/4 | 2/4 | 3/4 | 4/4 | 4/4 | – | – |
+| Groq `openai/gpt-oss-20b` | **after** | **3/4** | **4/4** | 3/4 | 4/4 | 4/4 | 4/4 | 4/4 |
+
+(4B: 32,623 tokens for the 40 summaries, median 3.6 s; Groq: 5,958 tokens
+before, 9,067 after — four runs in all, ~31k tokens, none over 10k.) The
+Groq "after" row is its last run judged as the harness judges now: its
+release notes were so terse ("Tell support team about new release date")
+that the word count couldn't be sure they were English, so the judge takes
+the language most of the words are when it isn't sure (`language::leading`;
+a unit test holds that run's notes).
+
+**Before, every French and Spanish meeting came back in English**, on both
+models ("Request two additional caterer quotes by Friday"); the two English
+meetings stayed English. **After, every one is in its language** — "Demander
+deux autres devis de traiteur avant vendredi", "Se movió el lanzamiento al
+lunes — el proveedor no puede imprimir antes" — with the headings in English
+every time (20/20, 4/4; the check that puts a translated heading back,
+`canonical_heading`, never had to). The English meeting of a person whose
+first language is French stayed English (the meeting's language wins over
+yours).
+
+**What the 4B still gets wrong** is who a "Them" line is: with several
+people behind "Them", it gave Alice's quotes to Karim, or Bob's venue to
+Alice, in 5 of 20 — the before runs did it too (owners need the voices told
+apart, `speakers.md`). Along the way the eval showed three things the checks
+now fix rather than the prompt: a task under an owner written as "- Draft the
+agenda" without its box (now "- [ ]"), a decision written as a task ("- [ ]
+Pas de catalogue"), and a reason on a line of its own ("— tout est en
+ligne": joined to its decision) — `postcheck_action_plan`'s `list_marks`,
+which leaves the details indented under a task alone. Both models missed the
+French meeting's first decision ("on garde le lieu, mais on change de
+traiteur, parce que…", said without "décidé") until the layout asked for
+"everything agreed or settled" (reasons 9/12 → 11/12 on the 4B, ×3), and
+Groq once put the French rooms task under Decisions ("Il faut réserver les
+chambres cette semaine") instead of Unassigned. Groq wrote five topics under
+the recap once (the layout says four). And once, on the French meeting,
+gpt-oss-20b reasoned through its whole reply — 2,048 tokens, `finish_reason:
+length`, no answer — so `llm::enhance_note` now asks once more after an empty
+reply before it's an error.
