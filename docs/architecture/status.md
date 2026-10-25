@@ -98,6 +98,33 @@ a web mail page, a chat page, a plain page, PowerShell, the Claude Code
 stand-in). Not yet tried with a real voice in real Outlook, Slack or
 WhatsApp, nor the 1.5B on a PC without a graphics card day to day.
 
+**Dictation polish** (2026-10-25, Wispr Flow's by behaviour): **Paste last
+transcript** and **Copy last transcript** on shortcuts of their own
+(Settings → Shortcuts, unbound by default; Copy last also in the tray; the
+copy out of Win+V history, `pasting/last.rs`); **"Taking longer than
+usual…"** on the bar when the transcription or the AI cleanup runs well
+past this PC's usual time — measured (`stt_speed`'s timings, this
+session's dictations and cleanups), 2.5× + 1 s, never before 4 s — with
+**Skip cleanup** for a slow cleanup, local or cloud (`dictation/slow.rs`);
+**the 15-minute limit** warned a minute before on the bar, then stopped,
+transcribed and pasted back into its own window (or left on the
+clipboard) with **Recover text** (`dictation/cap.rs`; before, the buffer
+stopped growing with only a log line); **a level meter that moves for
+whispers** (`dictation/meter.rs`: dB over the mic's noise, gently
+compressed); **"Hold on, still transcribing…"** when the shortcut is
+pressed during a transcription. Tested: unit tests (the meter's scale and
+floor, the usual time and its threshold, the limit's crossings and words,
+the shortcuts' clash rules); e2e `dictation-polish.spec.js` (8: the
+Settings rows, both shortcuts through `e2e_shortcut`, a slowed stub
+transcription, a slowed fake cleanup skipped from the bar, an 8 s limit
+with Recover text, whisper and full-scale tones on the waveform, Hold on);
+robot (`last-transcript.real.js`: Paste last into the test pad and an Edge
+text box, Copy last's private clipboard; `dictation-extras.real.js`: a 2 s
+limit pasting a spoken dictation, Recover text's clipboard). Not yet tried
+by hand: the shortcuts on a real keyboard, a real slow model (a big local
+model's first cleanup, a slow network) and a real 15-minute dictation; how
+the whisper meter looks with a real quiet voice on different mics.
+
 **Trusting a dictation** (2026-10-22): **the speech engine's device on each
 PC** (`dictation/stt_speed.rs`: a one-time background benchmark per model at three
 dictation lengths, Settings → Speech-to-Text → Speed "Runs on: graphics card

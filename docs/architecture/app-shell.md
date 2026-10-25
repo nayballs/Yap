@@ -167,7 +167,9 @@ re-exported by the module, except `local_llm`'s, which callers name
   call"** above it (`meeting_detect::tray_item`; the click runs
   `on_tray_record` on a worker thread). **"Paste last transcript"** sits above
   the model submenu (greyed out until there's a dictation;
-  `text_injector::paste_last_from_tray`, worker thread), and under it **"Read
+  `text_injector::paste_last_from_tray`, worker thread) with "… (as said)"
+  and **"Copy last transcript"** (2026-10-25: onto the clipboard, out of
+  Win+V history, `pasting/last.rs`) under it, then **"Read
   selection aloud"** — "Stop reading aloud" while Yap reads
   (`read_aloud::read_selection(Origin::Tray)`: the app window on top, brought
   back, its selection read aloud with the reading card). All four are in the

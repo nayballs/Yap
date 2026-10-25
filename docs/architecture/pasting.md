@@ -163,8 +163,34 @@ Putting a dictation into the app you're in: the clipboard paste and the submit k
   it can't, that text is copied privately and said ("Couldn't undo it here
   — copied your text instead", `Undid::Copied`); a test run only logs
   ("e2e: not undoing the transform"). `wait_for_modifiers_up` is shared
-  with the transforms (a shortcut's Alt still down turns Ctrl+V into
-  another key).
+  with the transforms and Paste last's shortcut (a shortcut's Alt still
+  down turns Ctrl+V into another key).
+- **`pasting/last.rs`** — **Paste last transcript** and **Copy last
+  transcript** on shortcuts of their own (2026-10-25; Wispr Flow's, by
+  behaviour; Settings → Shortcuts, `paste_last_hotkey` /
+  `copy_last_hotkey`, unbound by default — `input_hook.rs`, only the press,
+  never a key another shortcut has). **Paste last** (`paste_soon`, its own
+  thread): once the shortcut's keys are up (`as_said::wait_for_modifiers_up`),
+  exactly the tray's item — `text_injector::paste_last_blocking`: the
+  latest dictation (this session's, else history's newest) into the window
+  in front, fitted to its cursor and kind of app; an app running as
+  administrator gets it on the clipboard and the alert. **Copy last**
+  (`copy_soon`; the tray's new "Copy last transcript"; Yap's own windows'
+  in-page fallback through `copy_last_transcript`, which also returns it):
+  the latest dictation as it was before fitting, onto the clipboard
+  privately (`text_injector::copy_privately`: out of Win+V history, cloud
+  sync and clipboard managers, as a paste), nothing typed anywhere. Either
+  with nothing dictated yet: "Nothing to paste yet" / "Nothing to copy yet".
+  Those and "Copied your last dictation" are **quiet notes**
+  (`alert::confirm`, kind `lastTranscript`: the main window's toast while
+  you look at it, else a bar card; never a Windows notification; shown now
+  or within 5 s, else dropped). Paste last has no in-page fallback (it
+  pastes into another app, as "Use what I said" does). The log says
+  lengths, never the text. Test mode copies and pastes nothing ("e2e: not
+  copying the last transcript"); debug-only `e2e_shortcut { name:
+  "paste-last" | "copy-last" }` sends a press as the hook would. e2e
+  `dictation-polish.spec.js`; robot `e2e-real/last-transcript.real.js`
+  (the pad, Notepad, an Edge text box; the clipboard's private formats).
 - **`pasting/elevated.rs`** — apps running as administrator: Windows (UIPI) drops keys
   sent to a higher integrity level, and `SendInput` doesn't say so. The target's
   level is compared with Yap's (`OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION)`

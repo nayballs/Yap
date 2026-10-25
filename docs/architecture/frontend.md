@@ -461,7 +461,8 @@ Flow's dark mode of 19 Oct 2026), for every Yap window.
   else Whisper Large v3 Turbo; the rest behind "More models (12)", as the AI
   cleanup step does, so the Download button shows without scrolling; a model
   already installed or being set up further down keeps the list open) →
-  mic check (live level meter via `set_mic_test` idle-amp mode + live device switch)
+  mic check (live level meter via `set_mic_test` idle-amp mode — the bar's
+  perceptual levels, `dictation/meter.rs`, "Hearing you" above 0.3 — + live device switch)
   → one-click **local AI cleanup** install (the model recommended for this PC
   first and picked: Qwen3.5 4B with a graphics card that can run it, "Your
   <card> runs Qwen3.5 4B quickly…", else Qwen2.5 1.5B; then Qwen2.5 1.5B as

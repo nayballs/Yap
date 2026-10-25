@@ -73,7 +73,14 @@ How loud Yap may be: the notice policy (one place, one at a time, held while dic
   `meeting_detect::set_detection`) comes back to `act` from all three
   (`alert_action` from the toast). `show_soon` runs it on a thread of its
   own (window queries; a hotkey's handler may hold the pipeline's locks).
-  Test mode only logs what Open settings would open.
+  Test mode only logs what Open settings would open. Since 2026-10-25 also
+  a dictation stopped at its length limit ("Dictation stopped at 15
+  minutes", kind `dictationCapped`: never held or dropped, with **Recover
+  text** → `cap::recover`; `dictation/cap.rs`), and **`confirm`**: the same
+  place minus the Windows notification, for quiet notes — Paste / Copy last
+  transcript's "Copied your last dictation", "Nothing to paste yet" (kind
+  `lastTranscript`: shown now or within 5 s, else dropped;
+  `pasting/last.rs`) and Recover text's "Copied your dictation".
 - **`notices/win_toast.rs`** — the shared Windows-notification plumbing (WinRT
   `ToastNotification`, Windows only): `app_id` (the NSIS shortcut's
   AppUserModelID; dev builds borrow PowerShell's), `logo_xml`, `esc`, and
