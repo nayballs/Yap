@@ -31,7 +31,11 @@
   "Spanish" until picked. Serde default = Yap's five, no shortcuts; at most
   12 run (`transforms::list`: usable ones, each id once). A key that would
   fire with one of the nine fixed shortcuts or an earlier transform's is
-  left unbound, `transforms::assign`; a language shortcut's too), **My
+  left unbound, `transforms::assign`; a language shortcut's too) +
+  `auto_transform` / `auto_transform_kind` (**a transform on every
+  dictation**, 2026-10-25, Settings → Commands → Transforms: a transform's id,
+  "" = none, the default; a `cleanup_styles` kind's id, "" = every app;
+  `transforms::for_dictation`), **My
   languages** (Settings → Dictation, `dictation/languages.rs`, 2026-10-25):
   `my_languages` (the languages you speak, codes in your order; empty = none
   picked, and a config from before keeps the one `selected_language` names),
@@ -87,7 +91,14 @@
   ("Match the style to the app": missing = decided once at load, on unless
   `pp_preset` isn't "default" — a body the person picked for everywhere
   stays as it was; no `migrate_once`) + `cleanup_offer_seen` (the one tip
-  offering cleanup was shown; `cleanup_styles::offer`), streaming_partials,
+  offering cleanup was shown; `cleanup_styles::offer`) + `cleanup_strength`
+  (2026-10-25, `ai/cleanup_strength.rs`: "light" | "medium" | "high"; missing
+  = "medium", exactly what cleanup did before — no `migrate_once` step, as
+  no saved value changes; None on the page is `post_process_enabled` off)
+  + `cursor_context_cloud` ("Send the text before the cursor to cleanup",
+  Privacy & data, off: a sentence or two before the cursor to a cleanup
+  model off this PC; one on this PC gets it whenever `smart_spacing` reads
+  it; `ai/cleanup_context.rs`), streaming_partials,
   history_enabled, update_checks_enabled, dictionary_fuzzy, learn_words
   ("Suggest words from your corrections", default on, `dictionary/learn.rs`),
   show_tips ("Show tips", default on: coaching hints and nudges;

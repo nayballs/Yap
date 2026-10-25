@@ -604,6 +604,8 @@ pub fn run() {
             #[cfg(debug_assertions)]
             ai::cleanup_styles::e2e_style_app,
             #[cfg(debug_assertions)]
+            ai::cleanup_context::e2e_cursor_before,
+            #[cfg(debug_assertions)]
             shell::realtest::commands::realtest_dictate_wav,
             #[cfg(debug_assertions)]
             shell::realtest::commands::realtest_clipboard,

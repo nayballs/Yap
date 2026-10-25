@@ -87,7 +87,7 @@ global hotkey ─▶ input_hook ─▶ "dictation-key-pressed" / "-released"
                                             emits "yap-transcript"
 ```
 
-After transcription: **AI cleanup (in the style of the kind of app: `ai/cleanup_styles.rs`) → dictionary (exact, then fuzzy near-misses) →
+After transcription: **AI cleanup (in the style of the kind of app, at its strength: `ai/cleanup_styles.rs`) → a transform on every dictation (optional) → dictionary (exact, then fuzzy near-misses) →
 the "press enter" voice command → snippets → fit to the kind of app and the text
 around the cursor → inject → submit key, or the correction watch**. Cleanup is
 best-effort — any error/timeout falls back to the raw transcript, so dictation never
@@ -143,6 +143,7 @@ One folder per area (an area's `<area>.rs` lists its modules); a big module's pa
 - `ai/about_you.rs` — About you: one Region (Windows' country, or one picked; money, units, language and spelling follow it, the clock is the PC's), name and note → the block every model's prompt ends with, searches and prices aimed at the country, the web's temperatures, speeds and distances in their units first (`about_you/units.rs`), cleanup spelling.
 - `ai/llm.rs` — OpenAI-compatible client, immutable base prompts, chat/tool calls, rate-limit waits.
 - `ai/cleanup_styles.rs` — styles by app: cleanup's tone per kind of app (email formal, chats casual, AI prompts literal, terminal commands as said; built-in app lists, editable), as cleanup profiles; app rules first; the one offer of cleanup.
+- `ai/cleanup_strength.rs` / `cleanup_format.rs` / `cleanup_context.rs` — cleanup strength (None/Light/Medium/High, one line before the transcript; None = cleanup off); spoken lists and an email's frame laid out (asked only when said); the text before the cursor (to a model on this PC; the cloud only with Privacy & data's switch).
 - `ai/local_llm.rs` (+ `local_llm/`: runtime, context, models) — on-device llamafile sidecar: models, recommendation, server args (MTP), context, restarts, warm-up, the runtime's background upgrade (retry without MTP, the way back, launch repair, cross-Yap lock).
 - `ai/gguf.rs` — read-only GGUF headers and memory estimates per context length.
 - `ai/gpu.rs` — the graphics card (DXGI), for the recommended on-device model; every adapter, small ones, the card DirectML runs speech on.

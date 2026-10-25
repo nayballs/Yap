@@ -81,6 +81,11 @@ Dictation cleanup:
                            kind's style, checked and timed per kind; styles.md
                            (--cleanup-rounds rounds)   --styles-phase before|after  one of them
   --styles-quick           only the cases marked quick (~8 cleanups: a cloud model's tokens)
+  --strength               instead of the scenarios: cleanup strength, smart formatting and the
+                           text before the cursor on evals/cleanup/strength.json, each case before
+                           (Medium, as until 25 Oct 2026) and after; strength.md (--cleanup-rounds
+                           rounds)   --strength-phase before|after  one of them
+  --strength-quick         only the cases marked quick (~11 cleanups: a cloud model's tokens)
 Speaker names (speakers/naming.rs; instead of the scenarios; speakers.md):
   --speakers               score Rust alone, then Rust + each --model's answers, on
                            evals/speakers/*.json: correct / wrong / missed names per voice
@@ -159,6 +164,9 @@ struct Args {
     styles: bool,
     styles_phase: Option<&'static str>,
     styles_quick: bool,
+    strength: bool,
+    strength_phase: Option<&'static str>,
+    strength_quick: bool,
     brief: bool,
     transforms: bool,
     languages: bool,
@@ -253,6 +261,18 @@ fn parse(argv: Vec<String>) -> Result<Args, String> {
                 );
             }
             "--styles-quick" => a.styles_quick = true,
+            "--strength" => a.strength = true,
+            "--strength-phase" => {
+                let p = value()?;
+                a.strength_phase = Some(
+                    super::strength::PHASES
+                        .iter()
+                        .copied()
+                        .find(|x| *x == p)
+                        .ok_or_else(|| format!("--strength-phase {}, not {p}", super::strength::PHASES.join("|")))?,
+                );
+            }
+            "--strength-quick" => a.strength_quick = true,
             "--brief" => a.brief = true,
             "--transforms" => a.transforms = true,
             "--languages" => a.languages = true,
@@ -314,6 +334,7 @@ pub fn main(argv: Vec<String>) -> i32 {
     let scenarios = if (args.models.is_empty()
         || args.cleanup
         || args.styles
+        || args.strength
         || args.speakers
         || args.brief
         || args.transforms
@@ -1281,6 +1302,19 @@ async fn run_all(args: &Args, run_dir: &Path, keys: &HashMap<String, String>, sc
         None
     };
     let mut style_runs: Vec<(String, Value)> = Vec::new();
+    let strength_cases = if args.strength {
+        let path = scenarios_dir(args).join("..").join("cleanup").join("strength.json");
+        match super::strength::load(&path) {
+            Ok(b) => Some(b),
+            Err(e) => {
+                eprintln!("{e}");
+                return 2;
+            }
+        }
+    } else {
+        None
+    };
+    let mut strength_runs: Vec<(String, Value)> = Vec::new();
     let speaker_meetings = if args.speakers {
         let dir = scenarios_dir(args).join("..").join("speakers");
         match super::speakers::load(&dir) {
@@ -1456,6 +1490,19 @@ async fn run_all(args: &Args, run_dir: &Path, keys: &HashMap<String, String>, sc
             styles_result = super::styles::run(b, &ep, args.cleanup_rounds, &phases, args.styles_quick, &args.only).await;
             style_runs.push((m.label.clone(), styles_result.clone()));
         }
+        let mut strength_result = Value::Null;
+        if let Some(b) = &strength_cases {
+            record::set_context(json!({ "model": m.label, "scenario": "strength" }));
+            record::set_config(Some(crate::config::YapConfig::default()));
+            record::set_tools_forced(None);
+            let ep = super::cleanup::Endpoint { base_url: &m.base_url, key: &m.key, model: &m.model, provider: &m.provider };
+            let phases: Vec<&'static str> = match args.strength_phase {
+                Some(p) => vec![p],
+                None => super::strength::PHASES.to_vec(),
+            };
+            strength_result = super::strength::run(b, &ep, args.cleanup_rounds, &phases, args.strength_quick, &args.only).await;
+            strength_runs.push((m.label.clone(), strength_result.clone()));
+        }
         let mut speakers_result = Value::Null;
         if let Some(meetings) = &speaker_meetings {
             record::set_config(Some(crate::config::YapConfig::default()));
@@ -1532,6 +1579,7 @@ async fn run_all(args: &Args, run_dir: &Path, keys: &HashMap<String, String>, sc
             "wall_ms": model_started.elapsed().as_millis() as u64,
             "cleanup": cleanup,
             "styles": styles_result,
+            "strength": strength_result,
             "speakers": speakers_result,
             "bench": bench_result,
             "brief": brief_result,
@@ -1597,6 +1645,10 @@ async fn run_all(args: &Args, run_dir: &Path, keys: &HashMap<String, String>, sc
     if !style_runs.is_empty() {
         let md = record::redact(&super::styles::markdown(&style_runs));
         let _ = std::fs::write(run_dir.join("styles.md"), &md);
+    }
+    if !strength_runs.is_empty() {
+        let md = record::redact(&super::strength::markdown(&strength_runs));
+        let _ = std::fs::write(run_dir.join("strength.md"), &md);
     }
     if !speaker_runs.is_empty() {
         let md = record::redact(&super::speakers::markdown(&speaker_runs));

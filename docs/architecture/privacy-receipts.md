@@ -45,7 +45,11 @@ person sees what their choices send where. It never says "nothing leaves".
   words and service names (`provider_name` names only Yap's own provider ids,
   else "AI provider"). An AI call (`Purpose::Ai(provider)`) is labelled by
   the **feature** it ran under, a task-local (`net::within(Feature, fut)`;
-  the outermost wins): "AI cleanup · Groq" (dictation/pipeline.rs and Prompt Studio's
+  the outermost wins): "AI cleanup · Groq" — "AI cleanup + text before the
+  cursor · Groq" when a cleanup carried it (`Feature::DictationContext`,
+  `ai/cleanup_context.rs`, 2026-10-25; `place_of_url` is what decides it may
+  go: a model on this PC, by the same rules, a test run's stand-ins as the
+  services they stand in for) — (dictation/pipeline.rs and Prompt Studio's
   test), "Commands · …", "Chat · …" (chat/tools.rs `ask`, the small-model
   pipeline), "Voice Assistant · …" (chat/assistant.rs, around Chat's turn),
   "Notes · …" (Enhance, a note's Ask), "Meeting notes · …"

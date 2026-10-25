@@ -121,6 +121,31 @@
     if (provider === 'local') return `${what} go to your own server`;
     return `${what} go to ${PROVIDER_DESTINATIONS[provider] || provider}`;
   }
+  // The text before the cursor (ai/cleanup_context.rs): read for each
+  // dictation by "Match the text around the cursor"; a sentence or two goes
+  // to a cleanup model on this PC, or to one off it with the switch on.
+  const LOOPBACK = /^https?:\/\/(localhost|127\.\d+\.\d+\.\d+|\[::1\])(:\d+)?(\/|$)/i;
+  const cleanupHere = $derived(
+    cfg.ppProvider === 'ondevice' || (['local', 'custom'].includes(cfg.ppProvider) && LOOPBACK.test((cfg.ppBaseUrl || '').trim()))
+  );
+  const cleanupDest = $derived(PROVIDER_DESTINATIONS[cfg.ppProvider] || 'the cleanup model');
+  const cursorWhere = $derived(
+    !cfg.postProcessEnabled
+      ? 'Not used: AI cleanup is off'
+      : cfg.smartSpacing === false
+        ? 'Not read: “Match the text around the cursor” is off'
+        : cleanupHere
+          ? 'Read on this PC for each dictation. A sentence or two goes with it to the cleanup model on this PC, never sent'
+          : cfg.cursorContextCloud
+            ? `A sentence or two before the cursor goes to ${cleanupDest} with each dictation, for cleanup`
+            : 'Read on this PC for each dictation, never sent'
+  );
+  const cursorDesc = $derived(
+    cleanupHere
+      ? 'Your cleanup runs on this PC: it gets the text before the cursor without sending anything'
+      : `A sentence or two before where you dictate goes to ${cleanupDest} with each dictation, so cleanup can carry on from it. Off: only what you say goes`
+  );
+
   // Chat's own model when its tab is on, else the cleanup model's endpoint.
   const chat = $derived(cfg.llmScopes?.chat?.enabled ? cfg.llmScopes.chat : { provider: cfg.ppProvider });
   const leaves = $derived([
@@ -160,6 +185,21 @@
           : 'Read on this PC for each dictation, never kept or sent',
       page: 'dictation#screen-names',
     },
+    { what: 'Text before the cursor', where: cursorWhere, page: 'privacy#cursor-context' },
+    // A transform on every dictation (dictation/transforms.rs): on the
+    // Commands model, cleanup on or off. Only while one is picked.
+    ...(cfg.autoTransform
+      ? [
+          {
+            what: 'Transform on every dictation',
+            where: goes(
+              cfg.llmScopes?.voiceAgent?.enabled && cfg.llmScopes.voiceAgent.provider ? cfg.llmScopes.voiceAgent.provider : cfg.ppProvider,
+              'Your dictations, as text,'
+            ),
+            page: 'commands#transform-every',
+          },
+        ]
+      : []),
     {
       what: 'Chat and the Voice Assistant',
       where: chat.provider ? goes(chat.provider, 'Your questions, and the notes they need,') : 'Not set up',
@@ -315,6 +355,15 @@
       </div>
     {/each}
   </div>
+  <Row setting="cursor-context">
+    <Toggle
+      bind:checked={cfg.cursorContextCloud}
+      label="Send the text before the cursor to cleanup"
+      desc={cursorDesc}
+      hint="Only with AI cleanup on a model off this PC, and only what “Match the text around the cursor” reads: never a password box, never kept. Network connections lists each one."
+      disabled={cleanupHere}
+    />
+  </Row>
 </Group>
 
 <Group title="Network connections" id="settings-connections">

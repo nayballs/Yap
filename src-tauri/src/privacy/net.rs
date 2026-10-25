@@ -64,6 +64,10 @@ const FILE: &str = "connections.json";
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Feature {
     Dictation,
+    /// A dictation's AI cleanup that carried the text before the cursor
+    /// (`ai/cleanup_context.rs`): its own label, so the list shows when it
+    /// went.
+    DictationContext,
     Commands,
     Chat,
     Assistant,
@@ -76,7 +80,7 @@ pub enum Feature {
 impl Feature {
     fn name(self) -> &'static str {
         match self {
-            Feature::Dictation => "Dictation",
+            Feature::Dictation | Feature::DictationContext => "Dictation",
             Feature::Commands => "Commands",
             Feature::Chat => "Chat",
             Feature::Assistant => "Voice Assistant",
@@ -90,6 +94,7 @@ impl Feature {
     fn activity(self) -> &'static str {
         match self {
             Feature::Dictation => "AI cleanup",
+            Feature::DictationContext => "AI cleanup + text before the cursor",
             Feature::Commands => "Commands",
             Feature::Chat => "Chat",
             Feature::Assistant => "Voice Assistant",
@@ -350,6 +355,15 @@ fn logical_host(url: &reqwest::Url) -> String {
         }
     }
     host_of(url)
+}
+
+/// Where a request to `url` goes, as the list records it (a test run's
+/// stand-in as the service it stands in for): what decides whether the
+/// text before the cursor may go with a cleanup (`ai/cleanup_context.rs`).
+/// `None`: not a URL.
+pub fn place_of_url(url: &str) -> Option<Place> {
+    let u = reqwest::Url::parse(url.trim()).ok()?;
+    Some(place_of(&logical_host(&u)))
 }
 
 // ---- a request on its way --------------------------------------------------------------

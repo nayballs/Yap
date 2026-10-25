@@ -40,8 +40,9 @@
 
 use serde_json::{json, Value};
 
-use crate::pasting::app_kind::{self, AppKind};
+use crate::ai::cleanup_strength::Strength;
 use crate::config::{CleanupProfile, YapConfig};
+use crate::pasting::app_kind::{self, AppKind};
 
 /// The kinds of app a dictation's style follows.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -334,6 +335,18 @@ pub fn drop_unsaid_frame(raw: &str, text: &str) -> String {
     if lines.len() < 2 {
         return text.to_string();
     }
+    // A subject line nobody said ("Subject: Quick update", the 4B laying
+    // out an email, model-evals.md "Cleanup strength and formatting").
+    let subject = |l: &str| l.trim_start().to_lowercase().starts_with("subject:");
+    if subject(lines[0]) && !said.iter().any(|w| w == "subject") {
+        lines.remove(0);
+        while lines.first().is_some_and(|l| l.trim().is_empty()) {
+            lines.remove(0);
+        }
+        if lines.is_empty() {
+            return text.to_string();
+        }
+    }
     while lines.len() > 1 {
         match lines.last() {
             Some(l) if l.trim().is_empty() => {
@@ -624,6 +637,11 @@ impl Target {
         }
     }
 
+    /// A terminal, as `app_kind.rs` read it.
+    pub fn is_terminal(&self) -> bool {
+        self.kind.is_terminal()
+    }
+
     /// The app of a history entry (Run again): its process only.
     pub fn of_app(process: &str) -> Target {
         Target::new(Some(process), "", AppKind::Other)
@@ -768,6 +786,33 @@ pub struct Plan {
     /// `(provider, base_url, api_key, model)`.
     pub endpoint: Option<(String, String, String, String)>,
     pub style: Option<Style>,
+    /// How much cleanup changes (`cleanup_strength.rs`; Medium: as ever).
+    pub strength: Strength,
+    /// Lay out a spoken list or an email's frame (`cleanup_format.rs`) —
+    /// always, but for a model evaluation's "before".
+    pub formatting: bool,
+}
+
+impl Plan {
+    fn new(body: String, endpoint: Option<(String, String, String, String)>, style: Option<Style>, cfg: &YapConfig) -> Plan {
+        Plan { body, endpoint, style, strength: Strength::configured(cfg), formatting: true }
+    }
+
+    /// The style as it's written at the plan's strength (at Light, no tone
+    /// rewords: `Strength::style`).
+    pub fn written_style(&self) -> Option<Style> {
+        self.strength.style(self.style)
+    }
+}
+
+/// The main cleanup at the strength set, with no style (Prompt Studio's
+/// Test). Pure.
+pub fn main_plan(cfg: &YapConfig) -> Plan {
+    let mut plan = Plan::new(cfg.pp_prompt.clone(), None, None, cfg);
+    if plan.strength == Strength::None {
+        plan.strength = Strength::Medium;
+    }
+    plan
 }
 
 /// How a dictation into `t` is cleaned (`None`: not at all — "only clean
@@ -777,6 +822,10 @@ pub struct Plan {
 /// rule", then the kind's style while "Match the style to the app" is on,
 /// else the main cleanup. Pure.
 pub fn resolve(cfg: &YapConfig, t: &Target) -> Option<Plan> {
+    // A strength of "none" (cleanup off, `cleanup_strength.rs`): no model.
+    if Strength::configured(cfg) == Strength::None {
+        return None;
+    }
     if let Some(proc) = t.process.as_deref().map(str::trim) {
         let route = cfg.app_routes.iter().find(|r| !r.app.trim().is_empty() && r.app.trim().eq_ignore_ascii_case(proc));
         if let Some(route) = route {
@@ -789,7 +838,7 @@ pub fn resolve(cfg: &YapConfig, t: &Target) -> Option<Plan> {
             if let Some(c) = style {
                 return style_plan(cfg, c);
             }
-            return cfg.resolve_cleanup(Some(proc)).map(|p| Plan { body: p.body, endpoint: p.endpoint, style: None });
+            return cfg.resolve_cleanup(Some(proc)).map(|p| Plan::new(p.body, p.endpoint, None, cfg));
         }
     }
     if cfg.routing_scope == "selected_apps_only" {
@@ -798,7 +847,7 @@ pub fn resolve(cfg: &YapConfig, t: &Target) -> Option<Plan> {
     if styles_on(cfg) {
         return style_plan(cfg, category(cfg, t));
     }
-    Some(Plan { body: cfg.pp_prompt.clone(), endpoint: None, style: None })
+    Some(Plan::new(cfg.pp_prompt.clone(), None, None, cfg))
 }
 
 /// Clean a dictation's `text` with its `plan`: the style's line, then the
@@ -824,8 +873,17 @@ pub async fn clean(
     if filler_only(text) {
         return Ok(String::new());
     }
-    let style_line = line(plan.style);
-    let before = before_transcript(style_line.as_deref(), names);
+    // The style as written at this strength (at Light no tone rewords),
+    // then Yap's lines in order: the style's, the strength's, a list's or
+    // an email's layout when one is said (`cleanup_format.rs`), then the
+    // caller's (names on screen, the language, the text before the cursor).
+    let style = plan.written_style();
+    let style_line = line(style);
+    let strength_line = crate::ai::cleanup_strength::line(plan.strength, style);
+    let format_line = if plan.formatting { crate::ai::cleanup_format::hint(text, style, plan.strength) } else { None };
+    let ours = before_transcript(style_line.as_deref(), strength_line.as_deref());
+    let ours = before_transcript(ours.as_deref(), format_line.as_deref());
+    let before = before_transcript(ours.as_deref(), names);
     let out = crate::ai::llm::cleanup_with_names(
         text,
         base_url,
@@ -839,7 +897,10 @@ pub async fn clean(
         disable_thinking,
     )
     .await?;
-    Ok(fit(plan.style, text, &out))
+    let fitted = fit(style, text, &out);
+    // A list or an email the line asked for, laid out where the model kept
+    // it on one line (`cleanup_format::lay_out`).
+    Ok(if plan.formatting { crate::ai::cleanup_format::lay_out(text, &fitted, style, plan.strength) } else { fitted })
 }
 
 /// An app of each kind, as a dictation would find it (the model
@@ -872,7 +933,7 @@ fn style_plan(cfg: &YapConfig, c: Category) -> Option<Plan> {
     let endpoint = p
         .filter(|p| !p.provider.trim().is_empty())
         .map(|p| (p.provider.clone(), p.base_url.clone(), p.api_key.clone(), p.model.clone()));
-    Some(Plan { body, endpoint, style: Some(Style { category: c, tone }) })
+    Some(Plan::new(body, endpoint, Some(Style { category: c, tone }), cfg))
 }
 
 // ---- The one offer -----------------------------------------------------------------
@@ -1256,6 +1317,13 @@ mod tests {
         // A list's short items were said.
         let raw = "we need milk eggs and bread";
         assert_eq!(fit(email, raw, "We need:\n- milk\n- eggs\n- bread"), "We need:\n- milk\n- eggs\n- bread");
+        // A subject line nobody said (the 4B, laying out an email): off.
+        let raw = "hi team quick update first the release is on track second we need one more tester thanks";
+        let out = "Subject: Quick Update\n\nHi Team,\n\n1. The release is on track.\n2. We need one more tester.\n\nThanks,";
+        assert_eq!(fit(email, raw, out), "Hi Team,\n\n1. The release is on track.\n2. We need one more tester.\n\nThanks,");
+        let raw = "subject budget sign off hi priya can you sign it today thanks";
+        let out = "Subject: Budget sign-off\n\nHi Priya,\n\nCan you sign it today?\n\nThanks,";
+        assert_eq!(fit(email, raw, out), out, "said: kept");
         // One line: as it is.
         assert_eq!(fit(email, "x", "Best regards"), "Best regards");
         // Other kinds: never.

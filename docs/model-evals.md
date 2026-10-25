@@ -39,6 +39,7 @@ builds and runs out of the checkout: `YAP_EVAL_TARGET_DIR=<builds>/evals`, `--ou
 | `--cleanup-slot <n>`, `--chat-slot <n>` | Send the cleanup (and the Chat turns between) to llama.cpp slot n (`id_slot`). |
 | `--cleanup-layout combined\|system` | The same cleanup prompt laid out another way (below). |
 | `--cleanup-quick`, `--cleanup-limit <n>` | Only the back-to-back rounds (no first call, Chat turns or spelling), of the first n dictations: a cloud model's tokens. |
+| `--strength`, `--strength-phase before\|after`, `--strength-quick` | Run the cleanup strength, formatting and text-before-the-cursor cases in `evals/cleanup/strength.json` instead of the scenarios ("Cleanup strength…" below): each before (Medium, as until 25 Oct 2026) and after. |
 | `--brief` | Write the pre-meeting brief of each meeting in `evals/briefs/*.json` instead of the scenarios (below; `--only` picks them, `--repeat` repeats them). |
 | `--transforms` | Run the saved transforms' cases in `evals/transforms/cases.json` instead of the scenarios ("Saved transforms" below; `--only` picks them by name or transform, `--repeat` repeats them). |
 | `--languages`, `--languages-phase before\|after` | Run My languages' cases in `evals/languages/cases.json` instead of the scenarios ("My languages" below): cleanup of French, Spanish and German dictations before and after the language line, and a language shortcut's translation. |
@@ -161,6 +162,36 @@ for (filler alone and "As said" ask none). `--styles-phase before|after` runs on
 `--only` cases by name; `YAP_EVAL_STYLE_LINES=<file.json>` (`{"email": "…", "formal": "…",
 "wins": "…"}`) tries other wording for a kind's or a tone's sentence without a rebuild.
 `styles.md` in the run folder.
+
+### Cleanup strength, formatting and the text before the cursor (`--strength`)
+
+```bash
+yap.exe eval --strength --model local:<4b.gguf> --ngl 999 --cleanup-rounds 3
+yap.exe eval --strength --strength-quick --strength-phase after --model groq:openai/gpt-oss-20b --keys-from-yap
+```
+
+Instead of the scenarios, each case in `evals/cleanup/strength.json` (a dictation as
+speech-to-text writes it, its `group` — strength, format or cursor —, its strength,
+kind of app and tone, the text `before` the cursor for a cursor case, and checks)
+is cleaned through the dictation's own code (`cleanup_styles::resolve` for a
+stand-in app, `cleanup_styles::clean`) **before** — Medium, no formatting line, no
+text before the cursor: the call every dictation made until 25 Oct 2026 — and
+**after**: its strength (`ai/cleanup_strength.rs`), the list or email line when one
+is said and the layout where the model didn't (`ai/cleanup_format.rs`), and the
+text before the cursor with what the model wrote out again of it taken off
+(`ai/cleanup_context.rs`). A cursor case is judged as the field ends up, after
+`smart_insert::fit_to_context` (which a dictation gets either way). The checks are
+styles.json's plus `keeps_words` (Light: every word said but filler sounds, "you
+know" and stutters, in order, at most `added_max` added), `ratio_max`/`ratio_min`
+(words out against words said), `list_items`, `no_list`, `ends_with`,
+`not_starts_with`, `first_line_max_words`, `last_line_has_any`. Per phase: the pass
+rate overall, per group and per strength, the time and llama.cpp's prompt tokens
+processed. `--strength-quick` keeps the 9 cases marked `quick` (~22k Groq tokens a
+phase: run the phases apart); `--only` picks cases by name or group.
+`YAP_EVAL_STRENGTH_LINES` (`{"light": "…", "high": "…"}`), `YAP_EVAL_FORMAT_LINES`
+(`{"numbered": "…", "bullets": "…", "email": "…"}`) and `YAP_EVAL_CURSOR_LINE` (the
+line, `{text}` the text) try other wordings without a rebuild. `strength.md` in the
+run folder; `models[].strength` in `summary.json`.
 
 ### Pre-meeting briefs (`--brief`)
 
@@ -1849,3 +1880,97 @@ meetings" (the words added to `NOT_FOUND`). In the final run the 4B said plainly
 nothing answers the two questions the corpus can't ("What did Dana say yesterday?": no
 meeting yesterday; the office move: never decided); the run before, it listed every
 passage it had for the office move instead.
+
+## Cleanup strength and formatting (25 Oct 2026)
+
+**The questions**: does a strength line make Light keep the words and High tighten
+without adding anything, on the models cleanup runs on; does a spoken list
+reliably become a list and an email's greeting and sign-off land on lines of their
+own, without a sentence that only mentions numbers turning into one; and does the
+text before the cursor help a dictation fit where it goes? `--strength` over the 36
+cases in `evals/cleanup/strength.json` (12 strength — Light, Medium and High on the
+same dictations, one a formal email at Light —, 16 format — five lists said five
+ways, a list at High, five sentences with numbers or ordinals that aren't lists,
+four emails, an email with a list —, 8 cursor — a sentence continued, after a
+comma, a question begun, the words before the cursor said again, a list item, a
+number mid-sentence, a new sentence and a letter's opening that mustn't be
+repeated). Run folders `<builds>/eval-runs/20261025-1*-strength-*` (the numbers
+below: `…-4b-final`, `…-1.5b-cpu-final`, `…-groq-before`, `…-groq-after`; the
+wordings tried: `…-4b-n2` … `…-4b-c7`); an RTX 5070 Ti and a Ryzen 7 9800X3D shared
+with other agents' builds and models, so the times compare before with after only.
+
+| Model | Before | After | Strength | Format | Cursor |
+|---|---|---|---|---|---|
+| Qwen3.5-4B, graphics card (×3) | 69/108 (64 %) | **104/108 (96 %)** | 24/36 → **36/36** | 27/48 → **47/48** | 18/24 → **21/24** |
+| Qwen2.5-1.5B, processor (×2) | 38/72 (53 %) | **54/72 (75 %)** | 12/24 → 15/24 | 16/32 → **27/32** | 10/16 → 12/16 |
+| Groq `openai/gpt-oss-20b` (the 9 quick cases) | 1/9 | **7/9** | 0/3 → **3/3** | 0/4 → **4/4** | 0/2 → 0/2 |
+
+Per strength on the 4B: Light 9/15 → 15/15, Medium 6/6 → 6/6, High 9/15 → 15/15; on
+the 1.5B Light 3/10 → 5/10, Medium 3/4 → 4/4, High 6/10 → 6/10 (it fixes "it were …
+we goes" at Light and hardly tightens at High: the processor's model follows the
+lines less, as it follows the tones less). The 1.5B's processor was busy enough
+that four of its after-phase calls hit cleanup's 20 s timeout, each counted as a
+fail. Groq used 23.3k tokens before (11 cases; one call refused by its rate limit)
+and 22.3k after (9). Mean time a cleanup on the 4B 354 → 295 ms (interleaved, so
+noise); the lines cost ~45–55 tokens (a strength), ~90 (a list or email, only when
+one is said) and ~40 plus the text (the cursor), read afresh after the cached
+prompt.
+
+**Strength**: the first wording held on the 4B and Groq (`LIGHT_LINE`, `HIGH_LINE`
+in `cleanup_strength.rs`). What before failed: Light's "it were … we goes" fixed
+into "it was … we went", a formal email's "I'll" written out ("I will" at Light,
+where no tone rewords any more), High's ramble kept at 90 % of its words. At High
+the 4B kept the voice ("I'm super excited… can't wait") and added nothing to "send
+me the q3 numbers for northwind before friday".
+
+**Lists**: the default body only allows lists "when they genuinely improve
+readability", and before, no model made one from "first … second … third", "one …
+two … three" or "bullet points" (1 of 6 on the 4B, the "number one" case). The
+line, only when the words of a list are said (`list_cue`): "If the speaker is
+listing items (…), write the items as a numbered list…" made the 4B list "i have
+one cat two dogs and three fish" as "1. Cat 2. Dog 3. Fish"; "The speaker may be
+dictating a numbered list: if … each start a new item (an action or a point) …
+Numbers that count things ("one cat, two dogs") or say an order inside a sentence
+("the first time") are not a list" fixed it but left an email's two items as prose
+(2 of 3); "Only if the speaker lists separate items…" was worse (30/39); the shipped
+line adds "even inside an email" (48/48 on the format group ×3). Rust also sends it
+less: an ordinal after "the", "a", "our"… ("the first time", "the second floor") or
+a "one, two, three" without a lead-in ("are", "things", "steps"…, or the start)
+gets no line at all. The 1.5B mostly kept a list on one line ("first, book the
+venue; second, …"), so a list of three or more spoken markers the model left on
+one line is laid out by Rust (`cleanup_format::lay_out`: its own words, "1. …" per
+item, the lead-in kept, what follows the last item a paragraph); two markers stay
+as the model wrote them.
+
+**Emails**: the Email kind's line ("the body of an email") kept the frame that was
+said but on one line: before, the 4B laid out 1 of 3 (the formal one), Groq none.
+"Lay it out as an email: the greeting on its own line…" made the 4B write a
+"Subject: Quick Update" line (2 of 3, the email with a list); "Put the greeting on
+its own line, then a blank line, the body, a blank line, and the sign-off on its
+own line" doesn't, and `drop_unsaid_frame` now also takes off a subject line nobody
+said. Where the model still keeps it on one line (the 1.5B), `lay_out` puts a
+greeting of up to four words ending in "," or "!" and a sign-off starting the last
+sentence (with a capitalised name of a word or two) on lines of their own.
+
+**The text before the cursor**: before, the cases fail where only the text could
+tell — a question begun ("Do you know whether" + "the venue has step free access"
+gets "."), the words before the cursor said again ("Could you send me the" + "send
+me the final report by friday" pastes "send me the" twice). Wordings, after ×3 on
+the 4B, cursor cases only: "Fit the transcript to it: no capital when…, the right
+end mark (a question stays a question), and don't repeat words…" 4/8 a round (it
+wrote the text out again — "do you know whether the venue has…" — and a "?" after
+statements); naming the capital and "?" 7/24 (both, nearly everywhere); "Already
+typed before the cursor (context only, never output it)" 12/24 (it copied the
+list's "- " and the text again); **"Where it goes: right after "…", which is
+already written and is not part of your output. Clean up only the transcript, so
+it follows on from that text."** 20/24; that with "…and ends as that whole sentence
+needs" 8/24 (written out again). So the 4B is sensitive to the wording, and
+`trim_echo` takes off what a cleanup writes out again (a bullet the cursor's line
+already has; the text's last sentence of three words or more at the start). With
+both: 18/24 → 21/24 on the 4B (the repeat 0/3 → 3/3, nothing worse), 10/16 → 12/16
+on the 1.5B, no change on Groq (0/2 either way). No model got the question's "?".
+**Shipped**: on for a cleanup model on this PC (the on-device model, a server on
+`localhost`), whenever "Match the text around the cursor" reads it; **off for any
+other** (a cloud provider, a server on the network) unless Privacy & data's "Send
+the text before the cursor to cleanup" is on — it didn't help gpt-oss-20b here, and
+it sends what's on screen.

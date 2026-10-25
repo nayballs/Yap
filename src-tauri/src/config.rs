@@ -229,6 +229,15 @@ pub struct YapConfig {
     /// config without the key starts with Yap's five built-ins.
     #[serde(default = "crate::dictation::transforms::defaults")]
     pub transforms: Vec<crate::dictation::transforms::Transform>,
+    /// **A transform on every dictation** (Settings → Commands →
+    /// Transforms, `transforms::for_dictation`): a saved transform's id run
+    /// after cleanup on every dictation. "" (the default): none.
+    #[serde(default)]
+    pub auto_transform: String,
+    /// …only for dictations into this kind of app (a
+    /// `cleanup_styles::Category` id: "email"); "" = every app.
+    #[serde(default)]
+    pub auto_transform_kind: String,
     /// **My languages** (Settings → Dictation → My languages,
     /// `dictation/languages.rs`): the languages you speak, as codes ("en",
     /// "fr"), in your order. Empty: none picked (a config from before keeps
@@ -627,6 +636,20 @@ pub struct YapConfig {
     /// shown: it never comes back.
     #[serde(default)]
     pub cleanup_offer_seen: bool,
+    /// **Cleanup strength** (Language Models → Dictation cleanup,
+    /// `ai/cleanup_strength.rs`): "light" | "medium" | "high", how much AI
+    /// cleanup changes a dictation. None is cleanup off
+    /// (`post_process_enabled`), so it isn't stored here. Missing =
+    /// "medium", what cleanup always did: a config from before keeps it.
+    #[serde(default = "default_cleanup_strength")]
+    pub cleanup_strength: String,
+    /// "Send the text before the cursor to cleanup" (Privacy & data,
+    /// `ai/cleanup_context.rs`): a sentence or two before the cursor goes
+    /// with a dictation to a cleanup model that isn't on this PC (a cloud
+    /// provider, a server on the network). Off by default; a model on this
+    /// PC gets it whenever it's read (`smart_spacing`).
+    #[serde(default)]
+    pub cursor_context_cloud: bool,
 
     /// Per-mode LLM config for the AI **scopes** beyond cleanup (OpenWhispr's
     /// Language-Model bubbles), keyed `"voiceAgent"|"noteFormatting"|"chat"`.
@@ -1009,6 +1032,9 @@ fn default_pp_prompt() -> String {
 fn default_pp_preset() -> String {
     "default".into()
 }
+fn default_cleanup_strength() -> String {
+    "medium".into()
+}
 fn default_routing_scope() -> String {
     "all_apps".into()
 }
@@ -1091,6 +1117,8 @@ impl Default for YapConfig {
             edit_hotkey: String::new(),
             rewrite_last_dictation: true,
             transforms: crate::dictation::transforms::defaults(),
+            auto_transform: String::new(),
+            auto_transform_kind: String::new(),
             my_languages: Vec::new(),
             language_shortcuts: Vec::new(),
             language_nudge: true,
@@ -1165,6 +1193,8 @@ impl Default for YapConfig {
             cleanup_profiles: Vec::new(),
             cleanup_styles: None,
             cleanup_offer_seen: false,
+            cleanup_strength: default_cleanup_strength(),
+            cursor_context_cloud: false,
             llm_scopes: std::collections::HashMap::new(),
             agent_name: String::new(),
             speak_replies: false,

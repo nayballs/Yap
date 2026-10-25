@@ -22,6 +22,7 @@
   import Input from '../ui/Input.svelte';
   import ModeSelector from '../ui/ModeSelector.svelte';
   import PillTabs from '../ui/PillTabs.svelte';
+  import Segmented from '../ui/Segmented.svelte';
   import PromptStudio from './PromptStudio.svelte';
   import VoiceAgentConfig from './VoiceAgentConfig.svelte';
   import RegionSpelling from './RegionSpelling.svelte';
@@ -62,6 +63,34 @@
   let { cfg, goto = null } = $props();
 
   const wakeName = $derived((cfg?.agentName || '').trim() || 'Yap');
+
+  // Cleanup strength (ai/cleanup_strength.rs): None is cleanup off, so the
+  // row and the switch above stay one setting; a strength picked turns
+  // cleanup on. A config from before has none saved: Medium, as it was.
+  const STRENGTHS = [
+    { value: 'none', label: 'None' },
+    { value: 'light', label: 'Light' },
+    { value: 'medium', label: 'Medium' },
+    { value: 'high', label: 'High' },
+  ];
+  const STRENGTH_LINES = {
+    none: 'No AI cleanup',
+    light: 'Punctuation, capitals and filler sounds only: your words stay',
+    medium: 'Also fixes grammar and false starts, and lays out spoken lists',
+    high: 'Also tightens and rephrases for clarity, keeping your meaning and voice',
+  };
+  const STRENGTH_HINT = 'One setting for every app. AI prompts and terminal commands keep your words at any strength.';
+  const strength = $derived(
+    !cfg.postProcessEnabled ? 'none' : ['light', 'medium', 'high'].includes(cfg.cleanupStrength) ? cfg.cleanupStrength : 'medium'
+  );
+  function setStrength(v) {
+    if (v === 'none') {
+      cfg.postProcessEnabled = false;
+      return;
+    }
+    cfg.cleanupStrength = v;
+    cfg.postProcessEnabled = true;
+  }
   // The modes' icons, by kind (cloud, this PC, a server).
   const PP_ICON_KIND = Object.fromEntries(PROVIDER_MODES.map((o) => [o.value, o.kind]));
 
@@ -198,6 +227,9 @@
         label="Clean up dictations with AI"
         desc="Filler words out, grammar and punctuation fixed"
       />
+    </Row>
+    <Row setting="cleanup-strength" label="Strength" desc={STRENGTH_LINES[strength]} hint={STRENGTH_HINT}>
+      <Segmented bind:value={() => strength, setStrength} options={STRENGTHS} label="Cleanup strength" />
     </Row>
     {#if cfg.postProcessEnabled}
       <ModeSelector bind:value={lm.mode} options={PROVIDER_MODES} icon={provIcon} onchange={onModeChange} />

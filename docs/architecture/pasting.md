@@ -242,7 +242,9 @@ Putting a dictation into the app you're in: the clipboard paste and the submit k
   neither answers, and only then Ctrl+C (`copy_fallback`; a transform never
   asks in a terminal). Read again before the result goes over it
   (`transforms::verify_selection`). **The text around the cursor** (`begin_dictation(target,
-  read)` from `start_recording`, `take_context()` at paste): when `smart_spacing` is
+  read)` from `start_recording`, `take_context()` at paste; `peek_before()`, 2026-10-25,
+  gives AI cleanup the text before the caret without taking it — `ai/cleanup_context.rs`,
+  [ai-models.md](./ai-models.md)): when `smart_spacing` is
   on and it isn't edit mode, a background thread reads ≤ 500 characters before and
   after the caret and the selection (a long selection as its start + end) —
   TextPattern (`GetSelection`, else TextPattern2's caret), else ValuePattern for

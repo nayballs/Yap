@@ -52,6 +52,8 @@ mod standin;
 #[cfg(debug_assertions)]
 mod transforms;
 #[cfg(debug_assertions)]
+mod strength;
+#[cfg(debug_assertions)]
 mod styles;
 #[cfg(debug_assertions)]
 mod units;

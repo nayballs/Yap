@@ -141,6 +141,51 @@ impl Shared {
         screen: Option<&crate::dictionary::screen_terms::ScreenTerms>,
         watch: bool,
     ) -> (String, Option<crate::ai::cleanup_styles::Style>) {
+        match self.cleanup_pass(raw, target, screen, watch).await {
+            // Skip cleanup (the bar): the words as transcribed, nothing more.
+            (text, style, true) => (text, style),
+            // Then a transform on every dictation, if one is picked.
+            (text, style, false) => (self.transform_after(text, target, watch).await, style),
+        }
+    }
+
+    /// **A transform on every dictation** (`transforms::for_dictation`):
+    /// after the cleanup, once, on its result — watched as the cleanup is
+    /// (Skip gives the cleaned text back); no model or a failure pastes the
+    /// cleaned text. Not for the Chat view's box (a question for Yap's AI).
+    async fn transform_after(&self, text: String, target: &crate::ai::cleanup_styles::Target, watch: bool) -> String {
+        if text.trim().is_empty() || self.to_chat.load(Ordering::SeqCst) {
+            return text;
+        }
+        let Ok(cfg) = self.config.read().map(|c| c.clone()) else { return text };
+        let kind = crate::ai::cleanup_styles::category(&cfg, target);
+        let Some(t) = crate::dictation::transforms::for_dictation(&cfg, kind, target.is_terminal()) else { return text };
+        let call = crate::dictation::transforms::run_on_dictation(&cfg, &t, &text);
+        let result = if watch {
+            let m = super::commands_model(&cfg);
+            let key = format!("transform:{}", crate::dictation::slow::cleanup_key(&m.provider, &m.base_url, &m.model));
+            match self.watched_cleanup(call, &key, text.chars().count() as u64).await {
+                Some(r) => r,
+                None => return text,
+            }
+        } else {
+            call.await
+        };
+        result.unwrap_or_else(|e| {
+            tracing::warn!("A transform on every dictation didn't run: {e}");
+            text
+        })
+    }
+
+    /// The AI cleanup itself ([`Shared::clean_up`]): the text, the style it
+    /// was written in, and whether the bar's Skip cleanup cut it short.
+    async fn cleanup_pass(
+        &self,
+        raw: &str,
+        target: &crate::ai::cleanup_styles::Target,
+        screen: Option<&crate::dictionary::screen_terms::ScreenTerms>,
+        watch: bool,
+    ) -> (String, Option<crate::ai::cleanup_styles::Style>, bool) {
         // Snapshot the cleanup-related config under one read lock.
         // `plan` is the routed cleanup (`cleanup_styles::resolve`): the body
         // and style to clean with, or `None` to skip cleanup (selected-apps-
@@ -197,10 +242,30 @@ impl Shared {
                     Ok(c) => crate::dictation::languages::with_language_line(names, &c),
                     Err(_) => names,
                 };
-                if let Some(s) = plan.style {
-                    tracing::debug!(style = %s.describe(), "AI cleanup's style");
+                // The text before the cursor (`cleanup_context.rs`), last
+                // before the transcript: a live dictation's only, to a model
+                // on this PC, or a cloud one with its switch on.
+                let cursor = if watch {
+                    self.config.read().ok().and_then(|c| crate::ai::cleanup_context::for_cleanup(&c, &pp_base_url))
+                } else {
+                    None
+                };
+                let names = match &cursor {
+                    Some(before) => {
+                        crate::ai::cleanup_styles::before_transcript(names.as_deref(), Some(&crate::ai::cleanup_context::line(before)))
+                    }
+                    None => names,
+                };
+                // The receipts say when the text before the cursor went too.
+                let feature = if cursor.is_some() {
+                    crate::privacy::net::Feature::DictationContext
+                } else {
+                    crate::privacy::net::Feature::Dictation
+                };
+                if let Some(s) = plan.written_style() {
+                    tracing::debug!(style = %s.describe(), strength = plan.strength.id(), "AI cleanup's style");
                 }
-                let call = crate::privacy::net::within(crate::privacy::net::Feature::Dictation, crate::ai::cleanup_styles::clean(
+                let call = crate::privacy::net::within(feature, crate::ai::cleanup_styles::clean(
                     raw,
                     &pp_base_url,
                     &pp_api_key,
@@ -217,7 +282,7 @@ impl Shared {
                     match self.watched_cleanup(call, &key, raw.chars().count() as u64).await {
                         Some(result) => result,
                         // Skip cleanup (the bar): the transcript as it is.
-                        None => return (raw.to_string(), None),
+                        None => return (raw.to_string(), None, true),
                     }
                 } else {
                     call.await
@@ -228,17 +293,26 @@ impl Shared {
                     // real request error falls back to the raw transcript.
                     // A filler a model left at the start of another
                     // language's dictation comes off (languages.rs).
-                    Ok(c) => (
-                        self.config.read().map(|cfg| crate::dictation::languages::tidy_cleaned(&c, &cfg)).unwrap_or(c),
-                        plan.style,
-                    ),
+                    Ok(c) => {
+                        // What it wrote out again of the text before the
+                        // cursor goes.
+                        let c = match &cursor {
+                            Some(before) => crate::ai::cleanup_context::trim_echo(before, &c),
+                            None => c,
+                        };
+                        (
+                            self.config.read().map(|cfg| crate::dictation::languages::tidy_cleaned(&c, &cfg)).unwrap_or(c),
+                            plan.written_style(),
+                            false,
+                        )
+                    }
                     Err(e) => {
                         tracing::warn!("AI cleanup failed, using raw: {}", e);
-                        (raw.to_string(), None)
+                        (raw.to_string(), None, false)
                     }
                 }
             }
-            _ => (raw.to_string(), None),
+            _ => (raw.to_string(), None, false),
         }
     }
 

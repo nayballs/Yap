@@ -396,7 +396,12 @@ there can move margins: compare a page before and after.
   with it"); Yap's five keep empty places there so every shortcut lines
   up. **Add a transform** (`[data-setting=transform-add]`) opens the same
   form (no name: the instruction's first words); at 12 a line says that's
-  the most. **Model and prompt**: a link row with the model in use →
+  the most. **Run on every dictation** (`transform-every`, 2026-10-25): two
+  Selects — None or a transform (`autoTransform`), and In every app / In
+  email / … / Everywhere else (`autoTransformKind`, greyed while None) —, a
+  line saying what runs where ("Polish runs after cleanup on each dictation
+  in email, never in a terminal"), an ⓘ (one more AI call a dictation, Use
+  what I said puts back your words); deleting that transform clears it. **Model and prompt**: a link row with the model in use →
   Language Models → Commands (its line: with "Answer to its name" off, the
   rewrite shortcut and transforms use the cleanup model).
 - **Voice Assistant** (`voice`): "Ask Yap something by voice and hear the
@@ -467,7 +472,13 @@ there can move margins: compare a page before and after.
   Note Formatting / Chat & Voice Assistant (scope keys `cleanup`,
   `voiceAgent`, `noteFormatting`, `chat`; `cleanup#<scope>` opens one).
   **Dictation cleanup** (`#settings-cleanup`): "Clean up dictations with AI"
-  (`postProcessEnabled`); **off, one line** ("Turn on cleanup to pick a
+  (`postProcessEnabled`), then **Strength** (`cleanup-strength`, 2026-10-25,
+  `ai/cleanup_strength.rs`): a Segmented None / Light / Medium / High (aria
+  "Cleanup strength"), a line per strength, an ⓘ that it's one setting for
+  every app and AI prompts and terminal commands keep your words; None is
+  the switch off (picking it turns cleanup off, a strength turns it back on
+  and saves `cleanupStrength`; the switch off and on keeps the strength; a
+  config from before shows Medium); **off, one line** ("Turn on cleanup to pick a
   model…") instead of a screen of greyed choices. On: where it runs (Cloud
   providers / Local / Self-hosted — the same names on every tab;
   `ppMode`/`cloudProvider` are UI-only and resolve to `ppProvider`), the key
@@ -525,7 +536,16 @@ there can move margins: compare a page before and after.
   dictation, or with cleanup on a cloud provider the names a dictation seems
   to contain go there with it —, Chat and the Voice Assistant, screenshots (kept on this PC; one goes to the AI model only with a question you send), About you, memory, meeting search (searched on this PC, by meaning once its model is here), web search,
   spoken replies, AI apps, calendar, account), each row linking to its
-  setting. **Network connections** (`#settings-connections`): a link row
+  setting; **Text before the cursor** (2026-10-25, `ai/cleanup_context.rs`:
+  "Not used: AI cleanup is off", "Not read: …" with Match the text around
+  the cursor off, "…goes with it to the cleanup model on this PC, never
+  sent", "Read on this PC for each dictation, never sent", or "A sentence or
+  two before the cursor goes to Groq with each dictation, for cleanup"),
+  **Transform on every dictation** while one is picked (where the Commands
+  model sends it, cleanup on or off), and
+  under the table **"Send the text before the cursor to cleanup"**
+  (`cursor-context`, `cursorContextCloud`, off; its line says what goes
+  where; greyed when cleanup runs on this PC, which gets it anyway). **Network connections** (`#settings-connections`): a link row
   ("12 today" · "3 left this PC today, 9 stayed on it") one level down to
   `settings/ConnectionsView.svelte` (`privacy#connections-list` opens it
   directly; the network receipts, [privacy-receipts.md](./privacy-receipts.md)).
