@@ -1,0 +1,38 @@
+{
+  "name": "calendar-free-at-three-friday",
+  "description": "\"Am I free at 3 on Friday?\" then \"What about 11?\": at 3 on Friday there's a meeting (Roadmap planning, 15:00–16:00), so no, and the answer says what it is and cites it; at 11 nothing's on, so yes, without making a meeting up. Yap reads \"Friday\" and \"3\" (an afternoon hour) itself.",
+  "tags": ["calendar", "follow-up"],
+  "apps": "standard",
+  "seed": {
+    "calendar": {
+      "meetings": [
+        { "title": "Roadmap planning", "day": "friday", "start": "15:00", "minutes": 60, "with": ["Priya Shah"], "on": "teams" },
+        { "title": "Coffee with Lena", "day": "friday", "start": "09:00", "minutes": 30, "with": ["Lena Okoro"] }
+      ]
+    }
+  },
+  "turns": [
+    {
+      "user": "Am I free at 3 on Friday?",
+      "expect": {
+        "tools_called": [{ "name": "check_calendar" }],
+        "answer_contains": ["Roadmap planning"],
+        "answer_not_matches": "(?i)\\byes\\b,?\\s+you('re| are) free",
+        "calendar_cited": ["Roadmap planning"],
+        "tools_not_called": ["create_note", "update_note", "edit_note", "open_app"],
+        "no_false_claims": true
+      },
+      "soft": { "tools_called": [{ "name": "check_calendar", "args": { "day": { "contains": "fri" } } }], "max_steps": 3 }
+    },
+    {
+      "user": "What about 11?",
+      "expect": {
+        "answer_matches": "(?i)\\b(yes|free|nothing|no meetings|clear)\\b",
+        "answer_not_contains": ["Coffee with Lena is at 11"],
+        "tools_not_called": ["create_note", "update_note", "edit_note", "open_app"],
+        "no_false_claims": true
+      },
+      "soft": { "tools_called": [{ "name": "check_calendar" }], "calendar_not_cited": ["Roadmap planning"] }
+    }
+  ]
+}

@@ -70,12 +70,17 @@
 //! ends the turn in an error: the model is told what was wrong and asked
 //! again once, then answers without tools.
 //!
+//! **The calendar** (Yap's own; [`calendar`]): `check_calendar`, offered
+//! while a calendar is connected: read-only, the meetings it gives numbered
+//! for the answer to cite.
+//!
 //! Here: the instructions, what a turn offers ([`Extra`]), the safety rule,
 //! which models get tools, and the web's and the apps' definitions. Its
 //! parts: `notes` (the note tools and the keyword search), `memory`
-//! (`remember`, `forget`, `search_chats`) and `agent` (the loop).
+//! (`remember`, `forget`, `search_chats`), `calendar` and `agent` (the loop).
 
 mod agent;
+pub mod calendar;
 mod memory;
 mod notes;
 
@@ -134,13 +139,26 @@ pub const CHATS_TOOL_INSTRUCTIONS: &[&str] = &["Use search_chats when the user r
 
 /// What a turn offers besides the note tools (`turn::chat_turn`).
 #[derive(Debug, Clone, Copy, Default)]
-pub struct Extra {
+pub struct Extra<'a> {
     /// `remember` / `forget` (memory.rs).
     pub memory: bool,
     /// `search_chats` ("Search and reference past chats").
     pub search_chats: bool,
     /// The conversation asking (left out of `search_chats`).
     pub conversation: Option<u64>,
+    /// `check_calendar` (a calendar is connected): the turn's meetings, the
+    /// person's zone and the clock.
+    pub calendar: Option<CalendarTurn<'a>>,
+}
+
+/// The calendar tool in a turn ([`calendar::run`]).
+#[derive(Debug, Clone, Copy)]
+pub struct CalendarTurn<'a> {
+    /// What the lookups numbered, for the answer's sources.
+    pub log: &'a calendar::Log,
+    pub zone: calendar::Zone,
+    /// Unix seconds.
+    pub now: i64,
 }
 
 /// The tools that act (open an app, write or change a note, the
@@ -452,7 +470,7 @@ mod tests {
         let list = all.as_array_mut().unwrap();
         list.extend(app_definitions().as_array().unwrap().iter().cloned());
         list.extend(web_definitions().as_array().unwrap().iter().cloned());
-        list.extend(memory_definitions(Extra { memory: true, search_chats: true, conversation: None }).as_array().unwrap().iter().cloned());
+        list.extend(memory_definitions(Extra { memory: true, search_chats: true, conversation: None, calendar: None }).as_array().unwrap().iter().cloned());
         all
     }
 

@@ -1,0 +1,25 @@
+{
+  "name": "calendar-busy-own-event",
+  "description": "An event of the person's own with nobody else on it (a dentist appointment, Thursday 15:00–16:00) isn't a meeting, but it's busy time: \"Am I free on Thursday at 3pm?\" must say no and why, never \"you're free\". It has no number to cite.",
+  "tags": ["calendar"],
+  "apps": "standard",
+  "seed": {
+    "calendar": {
+      "meetings": [{ "title": "Hiring panel", "day": "thursday", "start": "10:00", "minutes": 60, "with": ["Mei Tanaka"] }],
+      "busy": [{ "title": "Dentist", "day": "thursday", "start": "15:00", "minutes": 60 }]
+    }
+  },
+  "turns": [
+    {
+      "user": "Am I free on Thursday at 3pm?",
+      "expect": {
+        "tools_called": [{ "name": "check_calendar" }],
+        "answer_contains": ["Dentist"],
+        "answer_not_matches": "(?i)\\byes\\b,?\\s+you('re| are) free",
+        "calendar_not_cited": ["Hiring panel"],
+        "tools_not_called": ["create_note", "update_note", "edit_note", "open_app"],
+        "no_false_claims": true
+      }
+    }
+  ]
+}

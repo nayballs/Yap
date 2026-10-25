@@ -215,6 +215,50 @@ pub struct Seed {
     /// Earlier conversations (for `search_chats`).
     #[serde(default)]
     pub chats: Vec<SeedChat>,
+    /// The calendar Yap keeps (Chat's calendar tool,
+    /// `chat/tools/calendar.rs`), its days as the run's clock sees them.
+    #[serde(default)]
+    pub calendar: Option<SeedCalendar>,
+}
+
+/// A connected calendar: its meetings and busy time of your own.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SeedCalendar {
+    /// `false`: no calendar connected (the tool says how to connect one).
+    #[serde(default = "yes")]
+    pub connected: bool,
+    #[serde(default)]
+    pub meetings: Vec<SeedMeeting>,
+    /// Events with nobody else on them ("Dentist").
+    #[serde(default)]
+    pub busy: Vec<SeedMeeting>,
+}
+
+/// A meeting, on a day the run's clock reads as the person would say it
+/// ("today", "tomorrow", "friday", "+3": days from today).
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SeedMeeting {
+    pub title: String,
+    pub day: String,
+    /// "14:30", the person's time.
+    pub start: String,
+    #[serde(default = "half_hour")]
+    pub minutes: i64,
+    /// The invitees' names.
+    #[serde(default)]
+    pub with: Vec<String>,
+    /// Its call service ("teams", "zoom", "meet").
+    #[serde(default)]
+    pub on: Option<String>,
+    /// You said "maybe".
+    #[serde(default)]
+    pub maybe: bool,
+}
+
+fn half_hour() -> i64 {
+    30
 }
 
 /// One remembered item.
@@ -360,6 +404,13 @@ pub struct Expect {
     /// One of the sources' addresses holds one of these ("bg3.wiki").
     #[serde(default)]
     pub sources_any: Vec<String>,
+    /// The answer cites these calendar meetings (by title, case-insensitive):
+    /// each is among its sources, so its pill opens the meeting.
+    #[serde(default)]
+    pub calendar_cited: Vec<String>,
+    /// …and never these.
+    #[serde(default)]
+    pub calendar_not_cited: Vec<String>,
     /// The turn may end in an error (else an error fails it).
     #[serde(default)]
     pub allow_error: bool,
@@ -476,6 +527,8 @@ pub struct Observed {
     pub opened: Vec<String>,
     /// The web sources the answer came with: (title, url).
     pub sources: Vec<(String, String)>,
+    /// The calendar meetings it cites (their titles).
+    pub calendar: Vec<String>,
     /// The source numbers of the latest earlier answer that had any (what
     /// a follow-up's "[1]" points at in Chat, `chats::earlier_source_numbers`).
     pub earlier_sources: Vec<usize>,
@@ -504,6 +557,7 @@ impl Observed {
             }
             all.opened.extend(t.opened.iter().cloned());
             all.sources.extend(t.sources.iter().cloned());
+            all.calendar.extend(t.calendar.iter().cloned());
             all.memory_done.extend(t.memory_done.iter().cloned());
             all.memory_gained.extend(t.memory_gained.iter().cloned());
             let (a, b) = (&mut all.stats, &t.stats);
@@ -685,11 +739,12 @@ fn false_claims(o: &Observed) -> Vec<String> {
             out.push(format!("claims text was copied, but nothing was: \"{}\"", clip(m.as_str(), 60)));
         }
     }
-    // A citation with no web source behind it ("… 3.12 [1]" from memory); a
-    // follow-up may cite the latest earlier answer's sources, as Chat draws it.
+    // A citation with no web source (or calendar meeting) behind it ("…
+    // 3.12 [1]" from memory); a follow-up may cite the latest earlier
+    // answer's sources, as Chat draws it.
     static CITE: OnceLock<regex::Regex> = OnceLock::new();
     let cite = CITE.get_or_init(|| re(r"\[(\d{1,2})\]"));
-    if o.sources.is_empty() {
+    if o.sources.is_empty() && o.calendar.is_empty() {
         let unsourced = cite
             .captures_iter(&reply)
             .find(|c| c[1].parse::<usize>().is_ok_and(|n| !o.earlier_sources.contains(&n)));
@@ -1116,6 +1171,19 @@ pub fn check(e: &Expect, o: &Observed) -> Vec<String> {
                 o.sources.iter().map(|(_, u)| u.as_str()).collect::<Vec<_>>().join(", ")
             }
         ));
+    }
+    for want in &e.calendar_cited {
+        if !o.calendar.iter().any(|t| lower(t).contains(&lower(want))) {
+            fails.push(format!(
+                "the answer doesn't cite the meeting \"{want}\"; it cites: {}",
+                if o.calendar.is_empty() { "none".to_string() } else { o.calendar.join(", ") }
+            ));
+        }
+    }
+    for not in &e.calendar_not_cited {
+        if o.calendar.iter().any(|t| lower(t).contains(&lower(not))) {
+            fails.push(format!("the answer cites the meeting \"{not}\" (not expected)"));
+        }
     }
     if !e.notes.is_empty() || e.folders.is_some() || e.notes_count.is_some() {
         let notes = crate::notes::all();

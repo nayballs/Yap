@@ -295,6 +295,10 @@ pub(crate) async fn chat_turn(
     // "Look things up on the web" (web.rs). Not for the Meetings view's Ask
     // bar: that's about the meetings.
     let web_on = cfg.web_search && scope != Some("meetings");
+    // The calendar (chat/tools/calendar.rs): a tool while one is connected
+    // (not across the meetings, whose passages are numbered on their own).
+    let calendar_on = scope != Some("meetings") && crate::calendar::connected();
+    let calendar_log = crate::chat::tools::calendar::Log::default();
     // Which earlier answers came from a search: a tool-calling model with
     // the web gets each one's search replayed as the call it was
     // (`chats::history_messages`); any other model, a line in the
@@ -308,6 +312,7 @@ pub(crate) async fn chat_turn(
     let now = crate::ai::eval::now();
     let about = crate::ai::about_you::prompt_block(&profile, now);
     let zone = profile.region.time_zone_label.clone();
+    let calendar_zone = crate::chat::tools::calendar::Zone::of(profile.region.time_zone.as_deref());
     let mut system = persona.trim().to_string();
     let mut context: Vec<String> = Vec::new();
     if in_message {
@@ -337,6 +342,10 @@ pub(crate) async fn chat_turn(
         if cfg.memory_search_chats {
             system.push(' ');
             system.push_str(&crate::chat::tools::CHATS_TOOL_INSTRUCTIONS.join(" "));
+        }
+        if calendar_on {
+            system.push(' ');
+            system.push_str(&crate::chat::tools::calendar::CALENDAR_TOOL_INSTRUCTIONS.join(" "));
         }
     } else {
         // No tools: it can't do anything on the PC, so it mustn't say so.
@@ -401,7 +410,17 @@ pub(crate) async fn chat_turn(
             system.push_str(&format!("\n\n{RAG_LEAD}\n\n{rag}"));
         }
     }
-    for block in memory_here.into_iter().chain(past_chats) {
+    // A model without tools asked about the calendar: Yap looks it up for it
+    // (not beside the fixed web pipeline, whose prompt is its own).
+    let mut small_calendar: Vec<crate::chat::tools::calendar::Cited> = Vec::new();
+    let (calendar_block, calendar_chip) = (calendar_on && !tools_supported && !(web_on && crate::web::needs_web(&text)))
+        .then(|| crate::chat::tools::calendar::block(&text, calendar_zone, now.timestamp(), &mut small_calendar))
+        .flatten()
+        .unzip();
+    // Asked about the calendar with none connected: say so, not guess.
+    let calendar_missing = (!calendar_on && scope != Some("meetings") && crate::chat::tools::calendar::asks_about_calendar(&text))
+        .then(|| crate::chat::tools::calendar::NOT_CONNECTED_NOTE.to_string());
+    for block in memory_here.into_iter().chain(past_chats).chain(calendar_block).chain(calendar_missing) {
         if in_message {
             context.push(block);
         } else {
@@ -492,7 +511,12 @@ pub(crate) async fn chat_turn(
         // Earlier screenshots: the newest few sent again, the rest a line
         // (snip/turn.rs).
         crate::snip::turn::with_history_images(&mut messages, earlier, &provider, &model, &base_url).await;
-        let extra = crate::chat::tools::Extra { memory: true, search_chats: cfg.memory_search_chats, conversation: Some(conv.id) };
+        let extra = crate::chat::tools::Extra {
+            memory: true,
+            search_chats: cfg.memory_search_chats,
+            conversation: Some(conv.id),
+            calendar: calendar_on.then_some(crate::chat::tools::CalendarTurn { log: &calendar_log, zone: calendar_zone, now: now.timestamp() }),
+        };
         let looped = crate::chat::tools::run_tool_loop_with(
             &system,
             &messages,
@@ -525,9 +549,13 @@ pub(crate) async fn chat_turn(
             }
         };
         // gpt-oss sometimes cites as "【1】" (its own browsing style): Yap's [1].
-        let reply = if web.is_some() { crate::web::bracket_citations(&reply) } else { reply };
+        let reply = if web.is_some() || calendar_log.len() > 0 { crate::web::bracket_citations(&reply) } else { reply };
+        // A meeting the answer names without its number gets it.
+        let reply = crate::chat::tools::calendar::cite_mentions(&reply, &calendar_log.all());
         let looked = web.as_ref().is_some_and(crate::web::Turn::looked);
-        let sources = web.as_ref().map(|w| w.sources_for(&reply)).unwrap_or_default();
+        let mut sources = web.as_ref().map(|w| w.sources_for(&reply)).unwrap_or_default();
+        sources.extend(crate::chat::tools::calendar::sources_for(&reply, &calendar_log.all()));
+        sources.sort_by_key(|s| s.n);
         let pages = web.map(|w| w.texts).unwrap_or_default();
         (reply, tools_used, sources, looked, pages, stopped)
     } else {
@@ -565,7 +593,22 @@ pub(crate) async fn chat_turn(
         } else {
             None
         };
-        (corrected.unwrap_or(reply), chips, sources, looked, pages, stopped)
+        // The calendar Yap looked up for it: the meetings it names, cited.
+        let mut sources = sources;
+        let reply = corrected.unwrap_or(reply);
+        let reply = if small_calendar.is_empty() {
+            reply
+        } else {
+            let reply = crate::chat::tools::calendar::cite_mentions(&reply, &small_calendar);
+            sources.extend(crate::chat::tools::calendar::sources_for(&reply, &small_calendar));
+            sources.sort_by_key(|s| s.n);
+            reply
+        };
+        let mut chips = chips;
+        if let Some(chip) = calendar_chip {
+            chips.insert(0, chip);
+        }
+        (reply, chips, sources, looked, pages, stopped)
     };
     // Stopped before any of the answer showed: nothing to save.
     if stopped && reply.trim().is_empty() {

@@ -115,6 +115,11 @@ pub struct Source {
     /// The passage's words, for its tooltip (≤ 280 characters).
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub quote: String,
+    /// A meeting on the calendar (`chat/tools/calendar.rs`): its event key.
+    /// Its pill opens the meeting's note (`note`), or makes one from the
+    /// invite (`calendar_event` "open"); `site` says when it is.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub event: Option<String>,
 }
 
 fn is_zero(n: &u64) -> bool {

@@ -1,0 +1,34 @@
+{
+  "name": "calendar-whats-on-tomorrow",
+  "description": "\"What's on tomorrow?\" with a calendar connected: the model checks the calendar (check_calendar, day \"tomorrow\": Yap works out the date), names tomorrow's two meetings with their times, cites each so its pill opens the meeting, and leaves out today's and Thursday's. Nothing is changed. A model without tools gets the same lookup from Yap (calendar-no-tools-tomorrow).",
+  "tags": ["calendar"],
+  "apps": "standard",
+  "seed": {
+    "calendar": {
+      "meetings": [
+        { "title": "Standup", "day": "today", "start": "09:30", "minutes": 15, "with": ["Priya Shah", "Sam Lee"], "on": "teams" },
+        { "title": "Design review", "day": "tomorrow", "start": "10:00", "minutes": 60, "with": ["Tanay Kothari"], "on": "teams" },
+        { "title": "Budget catch-up", "day": "tomorrow", "start": "14:30", "minutes": 30, "with": ["Sam Lee"] },
+        { "title": "Vendor demo", "day": "+4", "start": "11:00", "minutes": 45, "with": ["Lena Okoro"], "on": "zoom" }
+      ]
+    }
+  },
+  "turns": [
+    {
+      "user": "What's on tomorrow?",
+      "expect": {
+        "tools_called": [{ "name": "check_calendar" }],
+        "answer_contains": ["Design review", "Budget"],
+        "answer_not_contains": ["Vendor demo"],
+        "calendar_cited": ["Design review", "Budget catch-up"],
+        "tools_not_called": ["create_note", "update_note", "edit_note", "open_app", "copy_to_clipboard", "web_search"],
+        "no_false_claims": true
+      },
+      "soft": {
+        "tools_called": [{ "name": "check_calendar", "args": { "day": { "contains": "tomorrow" } } }],
+        "answer_matches": "10(:00|\\s*am)|ten",
+        "max_steps": 3
+      }
+    }
+  ]
+}

@@ -95,6 +95,9 @@ pub struct Turn {
     /// what an answer's prices are checked against
     /// (`about_you::restore_price_signs`).
     pub texts: Vec<String>,
+    /// Citation numbers given to other sources this turn (the calendar's
+    /// meetings, `chat/tools/calendar.rs`): one numbering for the answer.
+    reserved: usize,
 }
 
 impl Turn {
@@ -119,7 +122,15 @@ impl Turn {
             yap_retries: false,
             pending_retry: None,
             texts: Vec::new(),
+            reserved: 0,
         }
+    }
+
+    /// A citation number for a source that isn't a web page (a meeting on
+    /// the calendar): the next one, never a web source's.
+    pub fn reserve_number(&mut self) -> usize {
+        self.reserved += 1;
+        self.sources.len() + self.reserved
     }
 
     /// The units this turn's temperatures, speeds and distances go in: the
@@ -207,7 +218,7 @@ impl Turn {
         if let Some(s) = self.sources.iter().find(|s| normal_url(&s.url) == key) {
             return s.n;
         }
-        let n = self.sources.len() + 1;
+        let n = self.sources.len() + self.reserved + 1;
         self.sources.push(Source { n, title: tidy(title, 120), url: url.to_string(), site: source_site(title, url), ..Default::default() });
         n
     }
@@ -467,6 +478,17 @@ mod tests {
         let sources: Vec<Source> = (1..=3).map(|n| Source { n, title: format!("T{n}"), url: format!("https://e{n}.com/"), site: format!("e{n}.com"), ..Default::default() }).collect();
         assert_eq!(cited_sources(&sources, "Fact [2].").iter().map(|s| s.n).collect::<Vec<_>>(), [2]);
         assert_eq!(cited_sources(&sources, "No citations.").len(), 3);
+    }
+
+    #[test]
+    fn a_meeting_and_a_page_never_share_a_number() {
+        let mut turn = Turn::new(settings("exa-key"), offline(), "what's on Friday, and the weather?", &[]);
+        assert_eq!(turn.number("Forecast", "https://weather.example/a"), 1);
+        assert_eq!(turn.reserve_number(), 2); // the calendar's meeting
+        assert_eq!(turn.number("Radar", "https://weather.example/b"), 3);
+        assert_eq!(turn.number("Forecast", "https://weather.example/a"), 1);
+        assert_eq!(turn.reserve_number(), 4);
+        assert_eq!(turn.sources.iter().map(|s| s.n).collect::<Vec<_>>(), [1, 3]);
     }
 
     #[tokio::test]

@@ -28,7 +28,10 @@
 
   // A chip about the web (web.rs) or the safety rule (chat/tools.rs).
   const WEB_CHIP = /^(Searched the web|Couldn't search the web|Didn't search for|Read [^"]|Couldn't read [^"]|Didn't read |Answered from )/;
-  const chipKind = (t) => (/: not after reading the web$/.test(t) ? 'guard' : WEB_CHIP.test(t) ? 'web' : 'tool');
+  // The calendar's (chat/tools/calendar.rs).
+  const CALENDAR_CHIP = /^(Checked your calendar|Found \d+ meetings? with|No meetings with|Free |Busy |No calendar connected|Couldn't read the (day|time) )/;
+  const chipKind = (t) =>
+    /: not after reading the web$/.test(t) ? 'guard' : WEB_CHIP.test(t) ? 'web' : CALENDAR_CHIP.test(t) ? 'calendar' : 'tool';
 
   // A question whose screenshot went as its text (snip/ocr.rs): its own
   // words, and the text read from the picture, folded under them.
@@ -40,9 +43,12 @@
     openContextMenu(e, imageItems(img, { onview }), { label: 'Screenshot' });
   }
 
-  // A passage of the person's meetings and notes, not a web page.
-  const isPassage = (s) => s?.note != null && !s.url;
+  // A passage of the person's meetings and notes, or a meeting on their
+  // calendar (chat/tools/calendar.rs), not a web page.
+  const isPassage = (s) => (s?.note != null || !!s?.event) && !s?.url;
   const fromMeetings = $derived((m.sources?.length ?? 0) > 0 && m.sources.every(isPassage));
+  const fromCalendar = $derived(fromMeetings && m.sources.every((s) => !!s.event));
+  const sourcesLabel = $derived(fromCalendar ? 'From your calendar' : fromMeetings ? 'From your meetings' : 'Sources');
 
   // A passage pill in the answer ("[2]"): opened in Yap at its line.
   function clickAnswer(e) {
@@ -63,6 +69,8 @@
       <span class="toolchip {kind}">
         {#if kind === 'web'}
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9" /><path d="M3 12h18" /><path d="M12 3a14 14 0 0 1 0 18a14 14 0 0 1 0-18z" /></svg>
+        {:else if kind === 'calendar'}
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3.5" y="5" width="17" height="15" rx="2.5" /><path d="M3.5 10h17" /><path d="M8 3v4M16 3v4" /></svg>
         {:else if kind === 'guard'}
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3 4.5 6v5.5c0 4.6 3.1 8.2 7.5 9.5 4.4-1.3 7.5-4.9 7.5-9.5V6z" /><path d="m9 12 2 2 4-4" /></svg>
         {:else}
@@ -158,14 +166,16 @@
 {#if m.role === 'assistant' && m.sources?.length}
   <!-- Where an answer came from: a web page opens in the browser; a passage
        of the person's meetings opens its meeting at the line. -->
-  <div class="sources" role="group" aria-label={fromMeetings ? 'From your meetings' : 'Sources'}>
-    <span class="srclabel">{fromMeetings ? 'From your meetings' : 'Sources'}</span>
+  <div class="sources" role="group" aria-label={sourcesLabel}>
+    <span class="srclabel">{sourcesLabel}</span>
     {#each m.sources as s (s.n)}
       {#if isPassage(s)}
         <button
           class="srcchip passage"
+          class:meeting={!!s.event}
+          data-testid={s.event ? 'chat-calendar-source' : undefined}
           title={s.quote || s.title}
-          aria-label={`Passage ${s.n}: ${s.title}${s.site ? `, ${s.site}` : ''}. Opens it.`}
+          aria-label={`${s.event ? 'Meeting' : 'Passage'} ${s.n}: ${s.title}${s.site ? `, ${s.site}` : ''}. Opens ${s.event ? 'its notes' : 'it'}.`}
           onclick={() => onsource?.(s)}
         >
           <span class="srcn" aria-hidden="true">{s.n}</span>
