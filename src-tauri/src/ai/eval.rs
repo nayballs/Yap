@@ -49,6 +49,8 @@ mod standin;
 mod transforms;
 #[cfg(debug_assertions)]
 mod styles;
+#[cfg(debug_assertions)]
+mod units;
 
 #[cfg(debug_assertions)]
 static ACTIVE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);

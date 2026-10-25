@@ -1,0 +1,43 @@
+{
+  "name": "web-distance-ie-miles-pages",
+  "description": "Someone whose Region is Ireland (km) asks how long a coastal walk in Scotland is; the pages give miles (stand-in web, fictional places). Right: the distances in km, a mile figure at most in brackets after one. Run with --locale en-GB: the scenario picks Ireland in Settings (`settings.region`).",
+  "tags": [
+    "web",
+    "units",
+    "locale",
+    "standin"
+  ],
+  "settings": {
+    "region": "IE"
+  },
+  "web": {
+    "mode": "standin",
+    "results": [
+      {
+        "title": "Glenbrackie Coastal Path | Walk Highlands Guide",
+        "url": "https://walkguide.example/glenbrackie-coastal-path",
+        "published": "2026-07-02",
+        "text": "The Glenbrackie Coastal Path runs 12 miles from the harbour to Ardnish Point, one way. Allow 5 to 6 hours. The first 3 miles follow a level track; after that the path climbs over the cliffs. The bus back leaves from Ardnish, 2 miles inland."
+      }
+    ]
+  },
+  "apps": "standard",
+  "turns": [
+    {
+      "user": "Can you look up how long the Glenbrackie coastal path walk in Scotland is?",
+      "expect": {
+        "min_sources": 1,
+        "distances": "km",
+        "no_false_claims": true,
+        "opened_none": true
+      },
+      "soft": {
+        "tools_called": [
+          {
+            "name": "web_search"
+          }
+        ]
+      }
+    }
+  ]
+}

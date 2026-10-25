@@ -167,8 +167,9 @@ pub struct Settings {
     /// search names the country ([`local_query`]), and results with only
     /// another country's prices lead to one more search ([`Turn`]).
     pub local: Option<crate::ai::about_you::LocalPrices>,
-    /// How the person measures: results with temperatures in the other
-    /// scale get a line to convert them (`about_you::temperature_note`).
+    /// How the person measures: results with temperatures, speeds or
+    /// distances in another unit get theirs first, and a line saying so
+    /// (`about_you::units::TheirUnits`).
     pub units: Option<crate::ai::about_you::Units>,
 }
 

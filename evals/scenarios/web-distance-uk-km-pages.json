@@ -1,0 +1,46 @@
+{
+  "name": "web-distance-uk-km-pages",
+  "description": "A UK user asks how far a Spanish town is from the airport; the pages give km (stand-in web, fictional places). Right: the distances in miles (the UK's metric but for distances and speeds), a km at most in brackets after one. Run with --locale en-GB.",
+  "tags": [
+    "web",
+    "units",
+    "locale",
+    "standin"
+  ],
+  "web": {
+    "mode": "standin",
+    "results": [
+      {
+        "title": "Getting to Valdorrena from Puerto Alcena airport | Costa Guide",
+        "url": "https://costaguide.example/valdorrena/getting-there",
+        "published": "2026-09-30",
+        "text": "Valdorrena is 38 km from Puerto Alcena airport, about 35 minutes by car on the coast road. The shuttle bus takes an hour and stops in Las Calas, 12 km before town. A taxi costs around €55."
+      },
+      {
+        "title": "Valdorrena travel guide | Wanderline",
+        "url": "https://wanderline.example/spain/valdorrena",
+        "published": "2026-08-14",
+        "text": "Valdorrena sits on a quiet bay 38 km east of the airport. The old town is compact: the beach is a 1.5 km walk from the main square, and the lighthouse trail is 6 km return."
+      }
+    ]
+  },
+  "apps": "standard",
+  "turns": [
+    {
+      "user": "Can you look up how far Valdorrena is from Puerto Alcena airport?",
+      "expect": {
+        "min_sources": 1,
+        "distances": "miles",
+        "no_false_claims": true,
+        "opened_none": true
+      },
+      "soft": {
+        "tools_called": [
+          {
+            "name": "web_search"
+          }
+        ]
+      }
+    }
+  ]
+}

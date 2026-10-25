@@ -1,0 +1,43 @@
+{
+  "name": "web-wind-us-kmh-pages",
+  "description": "Someone whose Region is the United States asks how windy it will be in a Spanish town they're visiting; the pages give °C and the wind in km/h (stand-in web, fictional town). Right: the speeds in mph, a km/h at most in brackets after one. Run with --locale en-GB: the scenario picks the US in Settings (`settings.region`).",
+  "tags": [
+    "web",
+    "units",
+    "locale",
+    "standin"
+  ],
+  "settings": {
+    "region": "US"
+  },
+  "web": {
+    "mode": "standin",
+    "results": [
+      {
+        "title": "Valdorrena, Andalusia, Spain Weather Tomorrow | 24°C, Sunny",
+        "url": "https://weatherdial.example/valdorrena-andalusia-es/tomorrow",
+        "published": "2026-10-24",
+        "text": "Tomorrow in Valdorrena: sunny, high 24°C, low 15°C. Wind E 30 km/h, gusts to 55 km/h in the afternoon, dropping to 10–15 km/h after dark. Sea state moderate."
+      }
+    ]
+  },
+  "apps": "standard",
+  "turns": [
+    {
+      "user": "I'm visiting Valdorrena in Spain. What's the wind forecast there for tomorrow?",
+      "expect": {
+        "min_sources": 1,
+        "speeds": "mph",
+        "no_false_claims": true,
+        "opened_none": true
+      },
+      "soft": {
+        "tools_called": [
+          {
+            "name": "web_search"
+          }
+        ]
+      }
+    }
+  ]
+}
