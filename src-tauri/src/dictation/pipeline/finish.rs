@@ -16,7 +16,7 @@ use crate::dictation::stt;
 /// count as used, for the Whisper prompt's ranking (`dict_usage`).
 pub(crate) fn apply_corrections(text: &str, cfg: &YapConfig) -> String {
     let corrected = corrections(text, cfg);
-    crate::dictionary::dict_usage::record(&crate::memory::with_names(&cfg.dictionary), &corrected);
+    crate::dictionary::dict_usage::record(&crate::memory::with_names(&cfg.dictionary, &cfg.about_name), &corrected);
     corrected
 }
 
@@ -26,9 +26,11 @@ fn corrections(text: &str, cfg: &YapConfig) -> String {
     let corrected = config::apply_dictionary(text, &cfg.dictionary);
     if cfg.dictionary_fuzzy && !stt::is_whisper_model(&cfg.model_size) {
         let fixed = crate::dictionary::fuzzy::apply_fuzzy(&corrected, &cfg.dictionary);
-        // The names Yap remembers (memory/vocab.rs), more carefully: only
-        // where what was heard isn't an ordinary word itself.
-        let names: Vec<_> = crate::memory::dictation_names(&cfg.dictionary).into_iter().filter(|e| e.fuzzy).collect();
+        // Your own name (About you) and the names Yap remembers
+        // (memory/vocab.rs), more carefully: only where what was heard
+        // isn't an ordinary word itself.
+        let names: Vec<_> =
+            crate::memory::dictation_names(&cfg.dictionary, &cfg.about_name).into_iter().filter(|e| e.fuzzy).collect();
         if names.is_empty() {
             fixed
         } else {
@@ -148,6 +150,7 @@ mod tests {
             fuzzy,
             snippet: false,
             starred: false,
+            also_heard: Vec::new(),
         }
     }
 
@@ -271,6 +274,26 @@ mod tests {
     fn corrections_respect_the_per_entry_opt_out() {
         let c = cfg("parakeet-tdt-0.6b-v3", true, vec![entry("json", "JSON", false)]);
         assert_eq!(apply_corrections("Dear Jason, the json is attached", &c), "Dear Jason, the JSON is attached");
+    }
+
+    #[test]
+    fn your_own_name_is_spelled_right_without_a_dictionary_entry() {
+        // About you's name is a hidden term (memory/vocab.rs `own_name`): a
+        // near-miss target where Windows' spell checker can tell names from
+        // words (without one, no name is: only the Whisper prompt).
+        let mut c = cfg("parakeet-tdt-0.6b-v3", true, Vec::new());
+        c.about_name = "Siobhan".into();
+        if crate::dictionary::learn::Ordinary::new().has_spell_checker() {
+            assert_eq!(apply_corrections("ask shiobhan about it", &c), "ask Siobhan about it");
+        }
+        // Ordinary words stay; nothing without the name.
+        assert_eq!(apply_corrections("ask the team about it", &c), "ask the team about it");
+        c.about_name.clear();
+        assert_eq!(apply_corrections("ask shiobhan about it", &c), "ask shiobhan about it");
+        // A Whisper model gets it in its prompt (the words of the dictation
+        // vocabulary), whatever the spell checker.
+        let names = crate::memory::with_names(&[], "Siobhan");
+        assert_eq!(crate::config::dictionary_prompt(&names).as_deref().map(|p| p.contains("Siobhan")), Some(true));
     }
 
     #[test]
