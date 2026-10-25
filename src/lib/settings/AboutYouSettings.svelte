@@ -8,8 +8,9 @@
   //   (cfg.regionCountry, '' = Automatic). Its currency, units, language and
   //   spelling follow it; the time zone is always the PC's. Its line says
   //   what follows: "Prices in £ · miles and °C · British spelling · UK time".
-  // - "What should Yap call you?" (cfg.aboutName) and "Anything the AI should
-  //   know about you" (cfg.aboutMe, ≤ 300 characters);
+  // - "What should Yap call you?" (cfg.aboutName; dictation spells it too,
+  //   its line says how: memory/vocab.rs `own_name`) and "Anything the AI
+  //   should know about you" (cfg.aboutMe, ≤ 300 characters);
   // - "See what the AI is told": the block itself, as it reads now;
   // - where it goes, in one line, and the way to Privacy & data.
   // The spelling's off switch is in Language Models → Dictation cleanup
@@ -61,6 +62,15 @@
     !status ? '…' : status.summary || 'Pick your country, so answers come with your prices and units',
   );
 
+  // What dictation does with the name (ai/about_you.rs `nameHint`).
+  const nameInDictation = $derived(
+    status?.nameHint === 'fixed'
+      ? 'Dictation spells it this way too, and fixes near-misses of it.'
+      : status?.nameHint === 'prompt'
+        ? 'Whisper models are told how to spell it when you dictate.'
+        : '',
+  );
+
   const aboutMax = $derived(status?.aboutMax ?? 300);
   const aboutLen = $derived([...(cfg.aboutMe ?? '')].length);
 </script>
@@ -77,7 +87,8 @@
 </Group>
 
 <Group title="About you" id="settings-about-you" desc="What the AI keeps in mind when it answers. Optional.">
-  <Row label="What should Yap call you?" setting="about-name">
+  <!-- Your name in dictation too (memory/vocab.rs `own_name`): never an entry to manage. -->
+  <Row label="What should Yap call you?" setting="about-name" desc={nameInDictation}>
     <div class="name">
       <Input
         bind:value={cfg.aboutName}

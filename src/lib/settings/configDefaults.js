@@ -175,6 +175,10 @@ export function cleanConfig(cfg) {
         snippet: !!e.snippet,
         // A star too (the Dictionary view's), written only when set.
         ...(e.starred ? { starred: true } : {}),
+        // …and a correction's other ways it's heard (dictionary/variants.rs).
+        ...(!e.snippet && Array.isArray(e.alsoHeard) && e.alsoHeard.some((h) => String(h).trim())
+          ? { alsoHeard: e.alsoHeard.map((h) => String(h).trim()).filter(Boolean) }
+          : {}),
       }))
       .filter((e) => e.from),
     appRoutes: (cfg.appRoutes || [])
