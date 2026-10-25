@@ -331,7 +331,28 @@
   Privacy & data → "Search by meaning": Rebuild deletes the index and reads
   everything again; Delete… removes the model and the index (the engine
   stays).
-- Groq usage: `%APPDATA%/yap/groq_usage.json`.
+- Groq usage: `%APPDATA%/yap/groq_usage.json` — Groq's "Usage today" meter
+  (`ai/usage/groq.rs`): today's tokens and requests (UTC day), Groq's
+  daily request cap, each provider's day. Unchanged by the AI usage
+  tracker (2026-10-25): the same shape, so an older Yap sharing the folder
+  reads and writes it as ever.
+- AI usage: `%APPDATA%/yap/ai_usage.json` (2026-10-25, `ai/usage/store.rs`)
+  — every AI call's tokens: `{version: 1, days: {"2026-10-25": [{provider,
+  model, here, feature, calls, unreported?, prompt, answer, costMicros?,
+  readTokens?, readMs?, genTokens?, genMs?}]}}`, one row per local day and
+  provider + model + on this PC + feature (`cleanup`, `chat`, `assistant`,
+  `commands`, `transforms`, `translation`, `meetings`, `notes`, `memory`,
+  `speakers`, `brief`, `search`, `other`); `costMicros` an estimate at list
+  prices in millionths of a dollar, the times llama.cpp's. **Counts only**:
+  never a word asked or answered, never a key. Kept 90 days (older days
+  go at each write). Written by its own thread (every 3 s when something
+  was added, and at exit) through `saving.rs`; what this Yap added since
+  its last write is added to the file as another Yap left it (Yap - Dev
+  beside the installed nightly), so neither's counts are lost. **A file of
+  its own**: an older Yap never reads or writes it (its AI calls aren't
+  counted here, only in `groq_usage.json`). Safe to delete (the counts
+  start again). Chats keep each answer's tokens too (`chats.json`
+  messages' `tokens`, below).
 - Speech engine timings: `%APPDATA%/yap/stt_speed.json` — per model id, the
   benchmark of each device on this PC (load, the first run after loading,
   the warm ms at three dictation lengths, its time for your dictations,
@@ -402,7 +423,10 @@
   `note`: the thread is then an ordinary chat in Chat, its messages kept.
   An archived conversation has `archivedTs` (when; 2026-10-25, written only when
   set — a Yap from before keeps the conversation and drops the field on
-  its next save, so it shows in the list again).
+  its next save, so it shows in the list again). An answer may keep
+  `tokens` (`{prompt, answer, perSecond?}`, 2026-10-25: its last model
+  call's counts, for Chat's context ring); an older Yap's save drops it,
+  and the ring estimates instead.
 - Model lists: `%APPDATA%/yap/model_catalog.json` — each keyed AI provider's
   chat models as it last listed them (id, name, created, context, tools,
   first seen), when, and why the last check failed (`ai/model_catalog.rs`).

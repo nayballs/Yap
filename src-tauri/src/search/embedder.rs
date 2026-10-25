@@ -630,7 +630,18 @@ pub async fn embed(texts: &[String]) -> Result<Vec<Vec<f32>>, String> {
         let msg = v["error"]["message"].as_str().unwrap_or("").chars().take(160).collect::<String>();
         return Err(format!("the search model said HTTP {}{}", status.as_u16(), if msg.is_empty() { String::new() } else { format!(": {msg}") }));
     }
-    parse(&v, texts.len())
+    let vectors = parse(&v, texts.len())?;
+    // Its tokens (the AI usage tracker, `usage.rs`): search by meaning, on
+    // this PC. Counts only.
+    let counted = crate::ai::usage::Call {
+        provider: crate::ai::local_llm::PROVIDER_ONDEVICE,
+        model: model().tag,
+        base_url: &url,
+        turn: false,
+        feature: Some(crate::ai::usage::Feature::Search),
+    };
+    crate::ai::usage::record_embeddings(&counted, &v);
+    Ok(vectors)
 }
 
 /// The vectors in an `/embeddings` answer, in input order, unit length and

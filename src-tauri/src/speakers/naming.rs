@@ -1882,7 +1882,9 @@ pub async fn ask_model(app: &tauri::AppHandle, note_id: u64) -> usize {
                 json!({ "type": "json_schema", "json_schema": { "name": "speaker", "schema": ask_schema(ask) } }),
             );
         }
-        match crate::meetings::meeting_summary::chat_beside_dictation_with(app, &ep, ask_messages(ask), &opts, extra).await {
+        let asked = crate::meetings::meeting_summary::chat_beside_dictation_with(app, &ep, ask_messages(ask), &opts, extra);
+        // Counted as speaker naming (the AI usage tracker), not meeting notes.
+        match crate::ai::usage::within(crate::ai::usage::Feature::Speakers, asked).await {
             Ok(reply) => {
                 if let Some(v) = check_answer(ask, &reply) {
                     votes.push(v);

@@ -55,6 +55,11 @@ person sees what their choices send where. It never says "nothing leaves".
   "Notes · …" (Enhance, a note's Ask), "Meeting notes · …"
   (meetings/meeting_summary.rs), "Meeting brief · …" (calendar/brief.rs, around the
   meeting helpers), "Memory · …" (memory/learn.rs); unscoped: "AI model · …".
+  The AI usage tracker (`ai/usage.rs`, 2026-10-25) counts each call's
+  tokens under the same scope (`net::current_feature`), with finer ones of
+  its own where it needs them (a transform, a translation, speaker
+  names), and places a call on this PC the way this list does
+  (`place_of_url`).
 - **Every call site** (2026-10-24): `ai/llm.rs` (the one chat call), `web.rs`
   (Exa/Tavily: "Web search · Exa"; the keyless lookup: "Web search ·
   Wikipedia and wikis"; `read_page`: "Reading a web page"), `web/native.rs`

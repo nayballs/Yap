@@ -68,7 +68,8 @@ pub fn chat_rename(id: u64, title: String) -> Result<String, String> {
 
 /// Send one chat turn from the Chat view ([`chat_turn`]). Returns `{
 /// conversationId, reply, toolsUsed, model, sources, messageId,
-/// userMessageId, speak, stopped }`: the two messages' ids ("chat:<conversation>:<index>", what the page
+/// userMessageId, speak, stopped, tokens }` (`tokens`: the answer's last
+/// model call, `{prompt, answer, perSecond?}`, when it said): the two messages' ids ("chat:<conversation>:<index>", what the page
 /// calls them) and whether the answer is read out by itself
 /// (`tts::auto_speak`: spoken replies on, and "When to speak" says so —
 /// `voice`: the question was dictated, kept with it).
@@ -211,5 +212,6 @@ async fn send_turn(
         "speak": speak && !turn.stopped,
         "stopped": turn.stopped,
         "question": text,
+        "tokens": turn.tokens,
     }))
 }

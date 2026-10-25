@@ -373,7 +373,10 @@ pub async fn run_on_dictation(cfg: &YapConfig, t: &Transform, text: &str) -> Res
     }
     let asked = crate::privacy::net::within(
         crate::privacy::net::Feature::Dictation,
-        crate::ai::llm::transform(&t.instruction(), text, &m.base_url, &m.api_key, &m.model, &m.provider, m.disable_thinking),
+        crate::ai::usage::within(
+            crate::ai::usage::Feature::Transforms,
+            crate::ai::llm::transform(&t.instruction(), text, &m.base_url, &m.api_key, &m.model, &m.provider, m.disable_thinking),
+        ),
     )
     .await?;
     let out = clean_output(&asked);
@@ -611,14 +614,9 @@ pub fn run(app: &AppHandle, cfg: &YapConfig, t: &Transform, origin: Origin, stan
 
     let _ = app.emit(EVENT, serde_json::json!({ "name": name, "phase": "running" }));
     let _ = app.emit("yap-state", "processing");
-    let asked = tauri::async_runtime::block_on(crate::ai::llm::transform(
-        &t.instruction(),
-        &r.input,
-        &m.base_url,
-        &m.api_key,
-        &m.model,
-        &m.provider,
-        m.disable_thinking,
+    let asked = tauri::async_runtime::block_on(crate::ai::usage::within(
+        crate::ai::usage::Feature::Transforms,
+        crate::ai::llm::transform(&t.instruction(), &r.input, &m.base_url, &m.api_key, &m.model, &m.provider, m.disable_thinking),
     ));
     let out = match asked {
         Ok(out) => clean_output(&out),

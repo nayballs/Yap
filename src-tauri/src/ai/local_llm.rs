@@ -716,6 +716,20 @@ pub fn active_model_path(cfg: &crate::config::YapConfig) -> PathBuf {
 /// Human-readable name of the active model: the friendly name for the bundled
 /// default or a curated model ("Qwen3.5 4B"), else the custom GGUF's
 /// filename without extension.
+/// The on-device model's name for the id a call sent ([`model_id`]: its
+/// GGUF's stem): the bundled default's, a curated model's, else the id
+/// itself (a GGUF of the person's own). The AI usage tracker's rows.
+pub fn display_for_id(id: &str) -> String {
+    if id == model_id(&model_path()) {
+        return MODEL_DISPLAY.to_string();
+    }
+    CURATED_MODELS
+        .iter()
+        .find(|m| m.filename.trim_end_matches(".gguf") == id)
+        .map(|m| m.display.to_string())
+        .unwrap_or_else(|| id.to_string())
+}
+
 pub fn active_model_display(cfg: &crate::config::YapConfig) -> String {
     let path = active_model_path(cfg);
     if path == model_path() {

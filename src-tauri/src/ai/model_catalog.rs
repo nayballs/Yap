@@ -1335,6 +1335,32 @@ async fn local_models(
     Ok((models, contexts))
 }
 
+/// What a self-hosted server said of `model`'s context when its list was
+/// last asked (in memory, any age): what it runs it with, else what the
+/// model was trained for. `None`: not asked, or it didn't say.
+pub fn server_context(base: &str, model: &str) -> Option<u64> {
+    let base = base.trim().trim_end_matches('/');
+    let guard = LOCAL.lock().ok()?;
+    let (_, _, contexts) = guard.as_ref()?.get(base)?;
+    contexts.iter().find(|c| c.id == model).and_then(|c| c.set.or(c.max))
+}
+
+/// [`server_context`], asking the server for its list first when it's on
+/// this PC and hasn't been asked in the last minute (Chat's context ring).
+/// A server elsewhere is never asked for this: only what its list said
+/// when someone opened it.
+pub async fn server_context_here(cfg: &YapConfig, provider: &str, base: &str, model: &str) -> Option<u64> {
+    if let Some(n) = server_context(base, model) {
+        return Some(n);
+    }
+    if !crate::ai::ai_model::runs_here(provider, base) {
+        return None;
+    }
+    let key = endpoint_key(cfg, Some("chat"), provider);
+    let (_, contexts) = local_models(base, &key, false).await.ok()?;
+    contexts.iter().find(|c| c.id == model).and_then(|c| c.set.or(c.max))
+}
+
 /// The server's own address under its OpenAI-compatible `/v1`. Pure.
 fn server_root(base: &str) -> &str {
     let b = base.trim().trim_end_matches('/');

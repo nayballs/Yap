@@ -91,6 +91,13 @@ pub use notes::{rag_notes, search_notes};
 #[cfg(debug_assertions)]
 pub use notes::{changed_note, definitions};
 
+/// The characters a tool step's own part takes — the instructions and the
+/// note tools' schemas, which every step sends — for Chat's context
+/// estimate (`usage/context.rs`).
+pub fn tool_prompt_chars() -> usize {
+    TOOL_INSTRUCTIONS.join(" ").chars().count() + notes::definitions().to_string().chars().count()
+}
+
 const MAX_TOOL_STEPS: usize = 20;
 const MAX_CONTENT_LENGTH: usize = 500;
 const LOCAL_TOOL_MIN_PARAMS_B: f32 = 4.0;
