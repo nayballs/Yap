@@ -119,3 +119,30 @@ test("Undo after the dictation's window closed: never into another one; the text
     yap.main.getByRole('status').filter({ hasText: "couldn't get back to the window you were dictating into" }),
   ).toBeVisible();
 });
+
+test('the length limit (shortened to 2 s): stopped at it, pasted where it started, and Recover text copies it', async ({ robot }) => {
+  const { yap, pad } = robot;
+  await pad.set('box', '');
+  // dictation/cap.rs: 15 minutes for real, the warning a minute before.
+  await yap.invoke('e2e_dictation_cap', { limitMs: 2_000, warnMs: 1_000 });
+  try {
+    const mark = robot.logMark();
+    const r = await robot.dictateWav(pad, speechWav('This dictation runs on well past the little limit set for the test.'));
+    // Stopped at two seconds by itself: what was said by then transcribed
+    // (the stub says how much) and pasted into the pad.
+    expect(r.raw).toMatch(/received 2\.0s of audio/);
+    await expect.poll(() => pad.text('box')).toContain('received 2.0s of audio');
+    expect(robot.logSince(mark)).toContain('Dictation: nearing its length limit');
+    expect(robot.logSince(mark)).toContain('Dictation: reached its length limit');
+    const stopped = yap.main.getByRole('status').filter({ hasText: 'Dictation stopped at 2 seconds' });
+    await expect(stopped).toBeVisible();
+    await expect(stopped).toContainText('Everything you said is pasted');
+    // Recover text: on the clipboard again, kept out of Win+V history.
+    await robot.clipboard('setText', 'something else');
+    await stopped.getByRole('button', { name: 'Recover text' }).click();
+    await expect.poll(async () => (await robot.clipboard('check', r.text.trim())).matchesText).toBe(true);
+    expect((await robot.clipboard('check', r.text.trim())).private).toBe(true);
+  } finally {
+    await yap.invoke('e2e_dictation_cap', {});
+  }
+});
