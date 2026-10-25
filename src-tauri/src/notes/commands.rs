@@ -348,6 +348,10 @@ pub(crate) async fn run_enhance(
         );
     }
     crate::notes::note_edits::write_summary(id, &enhanced, &hash, read_ms, heard_to, replace)?;
+    // Written, but not on disk (a full disk, the file held): said by the
+    // caller ("Couldn't save your note: …", with Try again), never as if it
+    // saved. The summary is kept in memory and saved with the next change.
+    crate::notes::saved()?;
     // What's stored: the tasks ticked in the summary before stay ticked.
     Ok(crate::notes::get(id).map(|n| n.enhanced_content).unwrap_or(enhanced))
 }

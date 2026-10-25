@@ -1045,6 +1045,9 @@ pub async fn calendar_add_link(app: AppHandle, link: String, kind: Option<String
     let _ = app.emit(EVENT_CONNECTED, connected.clone());
     emit(&app);
     wake();
+    // Connected, but calendar.json couldn't be written: said by the page
+    // ("Couldn't save your calendar: …", Try again), never as if it saved.
+    saved()?;
     Ok(connected)
 }
 
@@ -1070,6 +1073,9 @@ pub async fn calendar_disconnect(app: AppHandle, id: String) -> Result<(), Strin
     tracing::info!(connection = %id, kind = %conn.kind, "calendar: disconnected");
     emit(&app);
     wake();
+    // Disconnected, but calendar.json still lists it until Yap can save:
+    // the page says so, with Try again.
+    saved()?;
     Ok(())
 }
 

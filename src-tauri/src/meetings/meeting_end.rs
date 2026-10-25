@@ -400,8 +400,17 @@ async fn write_action_plan(app: &AppHandle, note_id: u64, replace: bool, step: i
         .find(|a| a.kind == crate::notes::ACTION_PLAN)
         .or_else(|| actions.iter().find(|a| a.name == "Meeting Notes"))
         .map(|a| a.id);
-    crate::notes::commands::run_enhance(app, note_id, action, replace, step).await?;
-    Ok(())
+    match crate::notes::commands::run_enhance(app, note_id, action, replace, step).await {
+        // The plan is written (in memory) but couldn't be saved: the job is
+        // done, and the notice says the save failed, with Try again.
+        Err(e) if e.starts_with("Couldn't save ") => {
+            if let Err(save) = crate::notes::saved() {
+                crate::notices::alert::show(app, crate::shell::saving::failed_alert(save, 0, false));
+            }
+            Ok(())
+        }
+        other => other.map(|_| ()),
+    }
 }
 
 // ---- commands ------------------------------------------------------------------------------

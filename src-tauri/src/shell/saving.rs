@@ -271,6 +271,26 @@ impl Saver {
         })
     }
 
+    /// A store kept in several files (meeting audio's notes, one per
+    /// recording): write each of `files` (path, JSON), and settle once — the
+    /// store is unsaved while any of them couldn't be written (the first
+    /// failure says why). The caller keeps the ones that failed for the next
+    /// try. Returns which failed (their indexes).
+    pub fn write_each(&'static self, files: &[(std::path::PathBuf, String)]) -> (Vec<usize>, Result<(), SaveError>) {
+        let mut failed = Vec::new();
+        let mut first: Option<(Reason, io::Error)> = None;
+        for (i, (path, json)) in files.iter().enumerate() {
+            if let Err(e) = write_file(self.id, path, json) {
+                failed.push(i);
+                if first.is_none() {
+                    first = Some((Reason::at(&e, path), e));
+                }
+            }
+        }
+        let result = self.settle(first.map_or(Ok(()), Err));
+        (failed, result)
+    }
+
     /// The store's file was removed on purpose (nothing left to keep): no
     /// longer unsaved.
     pub fn nothing_to_save(&'static self) {
@@ -281,6 +301,51 @@ impl Saver {
     #[cfg(test)]
     pub fn unsaved(&'static self) -> bool {
         with_failed(|list| list.iter().any(|f| std::ptr::eq(f.saver, self)))
+    }
+}
+
+/// **Writes in order, outside the store's lock** (notes.json: its notes can
+/// hold hours of transcript, and every recorder chunk, line edit and tick
+/// used to wait for the disk under the lock). The store takes a snapshot
+/// under its lock ([`Ordered::take`] numbers it, then the JSON), lets the
+/// lock go, and writes it ([`Ordered::write`]): one write at a time, and a
+/// snapshot older than one already written is never written (it would put
+/// older notes back over newer ones). The newer snapshot holds every change
+/// the older one did, so skipping it loses nothing; a write that fails
+/// leaves the store unsaved ([`Saver`]) and the next one writes it all.
+#[derive(Debug)]
+pub struct Ordered {
+    taken: std::sync::atomic::AtomicU64,
+    written: std::sync::Mutex<u64>,
+}
+
+impl Default for Ordered {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl Ordered {
+    pub const fn new() -> Self {
+        Self { taken: std::sync::atomic::AtomicU64::new(0), written: std::sync::Mutex::new(0) }
+    }
+
+    /// The number of a snapshot taken now. Call it under the store's lock,
+    /// so the numbers follow the changes.
+    pub fn take(&self) -> u64 {
+        self.taken.fetch_add(1, Ordering::SeqCst) + 1
+    }
+
+    /// Write snapshot `seq` (`write`), unless a later one was written
+    /// already: `None` then. Writes wait for each other.
+    pub fn write<R>(&self, seq: u64, write: impl FnOnce() -> R) -> Option<R> {
+        let mut last = self.written.lock().unwrap_or_else(|p| p.into_inner());
+        if seq <= *last {
+            return None;
+        }
+        let out = write();
+        *last = seq;
+        Some(out)
     }
 }
 
@@ -430,32 +495,53 @@ pub fn saves_retry() -> Result<(), String> {
 
 /// Failures staged by `e2e_fail_saves`: store id → how many writes still
 /// fail.
-#[cfg(debug_assertions)]
+#[cfg(all(debug_assertions, not(test)))]
 static STAGED: std::sync::Mutex<Vec<(String, u32)>> = std::sync::Mutex::new(Vec::new());
+
+// Unit tests stage failures for their own thread's writes: tests running
+// side by side never use up each other's.
+#[cfg(test)]
+thread_local! {
+    static STAGED: std::cell::RefCell<Vec<(String, u32)>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+
+#[cfg(debug_assertions)]
+fn with_staged<R>(f: impl FnOnce(&mut Vec<(String, u32)>) -> R) -> R {
+    #[cfg(not(test))]
+    {
+        f(&mut STAGED.lock().unwrap_or_else(|p| p.into_inner()))
+    }
+    #[cfg(test)]
+    {
+        STAGED.with(|s| f(&mut s.borrow_mut()))
+    }
+}
 
 /// The next `count` writes of store `id` fail as if the disk were full
 /// (0: none).
 #[cfg(debug_assertions)]
 pub fn stage_failures(id: &str, count: u32) {
-    let mut staged = STAGED.lock().unwrap_or_else(|p| p.into_inner());
-    staged.retain(|(s, _)| s != id);
-    if count > 0 {
-        staged.push((id.to_string(), count));
-    }
+    with_staged(|staged| {
+        staged.retain(|(s, _)| s != id);
+        if count > 0 {
+            staged.push((id.to_string(), count));
+        }
+    });
 }
 
 /// Whether this write of store `id` fails (one staged failure used up).
 #[cfg(debug_assertions)]
 fn staged_failure(id: &str) -> bool {
-    let mut staged = STAGED.lock().unwrap_or_else(|p| p.into_inner());
-    let Some(i) = staged.iter().position(|(s, _)| s == id) else {
-        return false;
-    };
-    staged[i].1 -= 1;
-    if staged[i].1 == 0 {
-        staged.remove(i);
-    }
-    true
+    with_staged(|staged| {
+        let Some(i) = staged.iter().position(|(s, _)| s == id) else {
+            return false;
+        };
+        staged[i].1 -= 1;
+        if staged[i].1 == 0 {
+            staged.remove(i);
+        }
+        true
+    })
 }
 
 #[cfg(test)]
@@ -593,6 +679,67 @@ mod tests {
         NOTES.write(&path, "{}").unwrap();
         CACHE.write(&dir.join("model_catalog.json"), "{}").unwrap();
         assert!(retry_all().is_ok());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Snapshots taken under a store's lock and written after it, in any
+    /// order the threads get there: the file ends as the last snapshot,
+    /// never an older one written over a newer one.
+    #[test]
+    fn snapshots_written_outside_the_lock_never_go_back_in_time() {
+        static ORDER: Ordered = Ordered::new();
+        static NOTES_ORDERED: Saver = Saver::new("test-ordered", "your note", nothing_to_redo);
+        let dir = scratch("ordered");
+        let path = dir.join("notes.json");
+        // Taken 1 then 2; 2 reaches the disk first: 1 is never written.
+        let (a, b) = (ORDER.take(), ORDER.take());
+        assert_eq!(ORDER.write(b, || NOTES_ORDERED.write(&path, "[1,2]")), Some(Ok(())));
+        assert_eq!(ORDER.write(a, || NOTES_ORDERED.write(&path, "[1]")), None);
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "[1,2]");
+
+        // Eight threads, each changing a shared store under its lock and
+        // writing its snapshot after: the file is the store's last state.
+        let store = std::sync::Arc::new(std::sync::Mutex::new(Vec::<u32>::new()));
+        let threads: Vec<_> = (0..8u32)
+            .map(|t| {
+                let (store, path) = (std::sync::Arc::clone(&store), path.clone());
+                std::thread::spawn(move || {
+                    for k in 0..25u32 {
+                        let (seq, json) = {
+                            let mut s = store.lock().unwrap();
+                            s.push(t * 100 + k);
+                            (ORDER.take(), serde_json::to_string(&*s).unwrap())
+                        };
+                        if k % 3 == 0 {
+                            std::thread::yield_now();
+                        }
+                        let _ = ORDER.write(seq, || NOTES_ORDERED.write(&path, &json));
+                    }
+                })
+            })
+            .collect();
+        for t in threads {
+            t.join().unwrap();
+        }
+        let on_disk: Vec<u32> = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        assert_eq!(on_disk, *store.lock().unwrap());
+        assert_eq!(on_disk.len(), 200);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A store kept in several files: unsaved while any of them failed.
+    #[test]
+    fn a_store_in_several_files_is_unsaved_until_each_is_written() {
+        static METAS: Saver = Saver::new("test-metas", "your meeting audio's notes", nothing_to_redo);
+        let dir = scratch("each");
+        let files = vec![(dir.join("1.json"), "{}".to_string()), (dir.join("2.json"), "{}".to_string())];
+        stage_failures("test-metas", 1);
+        let (failed, r) = METAS.write_each(&files);
+        assert_eq!(failed, vec![0]);
+        assert!(r.is_err() && METAS.unsaved());
+        assert!(dir.join("2.json").is_file(), "the others still written");
+        let (failed, r) = METAS.write_each(&files[..1]);
+        assert!(failed.is_empty() && r.is_ok() && !METAS.unsaved());
         let _ = std::fs::remove_dir_all(&dir);
     }
 
