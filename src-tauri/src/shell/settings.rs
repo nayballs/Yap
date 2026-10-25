@@ -91,6 +91,12 @@ fn apply_config(app: &AppHandle, state: State<'_, AppState>, prev: &YapConfig, c
         let days = cfg.chat_image_days;
         std::thread::spawn(move || crate::snip::images::sweep(days));
     }
+    // "Delete meeting transcripts after" set or shortened: the older ones
+    // go now (notes/retention.rs), and their audio with them.
+    crate::notes::retention::on_config_saved(&app, prev, &cfg);
+    if cfg.meeting_transcript_days != prev.meeting_transcript_days && cfg.meeting_transcript_days > 0 {
+        std::thread::spawn(|| crate::meetings::meeting_audio::prune(None));
+    }
     // Settings → Speech-to-Text → Runs on (stt_speed.rs): the warm engine
     // moves to the device chosen now, at a quiet moment.
     crate::dictation::stt_speed::sync(&cfg);

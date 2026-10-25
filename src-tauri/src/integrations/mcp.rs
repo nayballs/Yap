@@ -192,12 +192,13 @@ pub fn list_meetings(notes: &[Note], folder: Option<&str>, limit: usize) -> Vec<
         .collect()
 }
 
-/// `GET /v1/tasks/list`: the tasks in notes' summaries (`tasks.rs`), newest
-/// note first, the person's own ("You") first within each; `status` "open"
+/// `GET /v1/tasks/list`: the tasks in notes' summaries and the ones the
+/// person added (`tasks.rs`; note id 0: added with no meeting), newest note
+/// first, the person's own ("You") first within each; `status` "open"
 /// (unticked), "done" (ticked) or "all". Read only.
 pub fn list_tasks(notes: &[Note], status: &str, limit: usize) -> Vec<Value> {
     let mut out = Vec::new();
-    for n in crate::notes::tasks::list(notes) {
+    for n in crate::notes::tasks::list_all(notes, &crate::notes::task_store::snapshot()) {
         let mut tasks: Vec<_> = n
             .tasks
             .into_iter()

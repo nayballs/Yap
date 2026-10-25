@@ -18,6 +18,7 @@
   import LinkRow from '../ui/LinkRow.svelte';
   import { calendar } from '../stores/calendar.svelte.js';
   import { toast } from '../ui/toast.svelte.js';
+  import { showSaveError } from '../notices/saveErrors.js';
   import CalendarMark from '../components/CalendarMark.svelte';
   import { openContextMenu, menuKey, menuOpenFor, askConfirm } from '../ui/contextMenu.svelte.js';
   import claudeLogo from '../../assets/providers/claude.svg';
@@ -78,7 +79,11 @@
       link = '';
       form = null;
     } catch (e) {
-      formError = String(e);
+      // Connected, but not saved yet: said with Try again (saveErrors.js).
+      if (showSaveError(e)) {
+        link = '';
+        form = null;
+      } else formError = String(e);
     } finally {
       adding = false;
     }
@@ -98,6 +103,8 @@
       await invoke('calendar_disconnect', { id: c.id });
       return true;
     } catch (e) {
+      // Disconnected, but not saved yet: said with Try again (saveErrors.js).
+      if (showSaveError(e)) return true;
       toast({ title: "Couldn't disconnect", description: String(e), variant: 'destructive' });
       return false;
     }

@@ -15,8 +15,10 @@
 import { invoke } from '@tauri-apps/api/core';
 import { askConfirm } from '../ui/contextMenu.svelte.js';
 import { askWordSuggestion } from '../notices/wordSuggestions.js';
+import { toast } from '../ui/toast.svelte.js';
+import { showSaveError } from '../notices/saveErrors.js';
 import { taskLines } from './markdown.js';
-import { lineRef, taskText } from './notepadText.js';
+import { lineRef, taskText, withLineEdit, withLineSplit, breaksAfterSplit, withLineRemoved, withLineRestored } from './notepadText.js';
 
 /** What a summary run says when it left the person's edited summary alone (notes/note_edits.rs). */
 export const SUMMARY_KEPT = "Your edited summary was kept: Yap didn't write over it.";
@@ -30,6 +32,116 @@ export async function editLine(noteId, transcript, i, text, origin) {
   const r = await invoke('transcript_line_edit', { noteId, line: lineRef(transcript, i), text, origin });
   if (r?.offer) askWordSuggestion(r.offer);
   return r;
+}
+
+// ---- a line, the rest (notes/transcript_edits.rs): revert, delete with Undo, split ----
+//
+// Each takes the view's `ctx`: `{ note: () => the open note (its $state),
+// origin, changing(...fields), reload() }`, changes the line on screen
+// as Rust stored it, and says what went wrong in a toast.
+
+/** Put this window's copy of line `index` as Rust says it is now (else reload). */
+function applyLine(ctx, index, line) {
+  const note = ctx.note();
+  if (!note) return;
+  const t = withLineEdit(note.transcript, { index, line });
+  ctx.changing('transcript');
+  if (t) note.transcript = t;
+  else ctx.reload();
+}
+
+/** A failed save is said with Try again (the change itself happened). */
+function failed(title, e, ctx) {
+  if (showSaveError(e)) {
+    ctx.reload();
+    return;
+  }
+  toast({ title, description: String(e), variant: 'destructive' });
+}
+
+/** "Revert to what Yap heard" on line `i`. */
+export async function revertLine(ctx, i) {
+  const note = ctx.note();
+  if (!note) return;
+  try {
+    const r = await invoke('transcript_line_revert', { noteId: note.id, line: lineRef(note.transcript, i), origin: ctx.origin });
+    if (r?.changed && ctx.note()?.id === note.id) applyLine(ctx, r.index, r.line);
+  } catch (e) {
+    failed("Couldn't put the line back", e, ctx);
+  }
+}
+
+/** This window's copy of the note with lines taken out or put back (`t`), and its stop marks; else reload. */
+function applyLines(ctx, t, breaks) {
+  const note = ctx.note();
+  if (!note) return;
+  ctx.changing('transcript', 'breaks');
+  if (t) {
+    note.transcript = t;
+    if (Array.isArray(breaks)) note.breaks = breaks;
+  } else ctx.reload();
+}
+
+/** "Delete line" on line `i`: gone at once, with Undo in the toast. */
+export async function deleteLine(ctx, i) {
+  const note = ctx.note();
+  if (!note) return;
+  const id = note.id;
+  try {
+    const r = await invoke('transcript_line_delete', { noteId: id, line: lineRef(note.transcript, i), origin: ctx.origin });
+    const now = ctx.note();
+    if (now?.id === id) applyLines(ctx, withLineRemoved(now.transcript, r.index, r.line), r.breaks);
+    toast({
+      title: 'Line deleted',
+      description: 'Its words are gone from the transcript and from what Yap writes from it.',
+      key: `line-deleted-${id}`,
+      duration: 8_000,
+      action: { label: 'Undo', onClick: () => restoreLine(ctx, id, r.index, r.line) },
+    });
+  } catch (e) {
+    failed("Couldn't delete the line", e, ctx);
+  }
+}
+
+/** Undo a deleted line (`line`, from `index`). */
+async function restoreLine(ctx, noteId, index, line) {
+  try {
+    const r = await invoke('transcript_line_restore', {
+      noteId,
+      index,
+      source: line.source,
+      ts: line.ts,
+      startMs: line.startMs ?? null,
+      origin: ctx.origin,
+    });
+    const now = ctx.note();
+    if (now?.id === noteId) applyLines(ctx, withLineRestored(now.transcript, r.index, r.line), r.breaks);
+  } catch (e) {
+    failed("Couldn't put the line back", e, ctx);
+  }
+}
+
+/** "Split line" on line `i`, before word `at` (notepadText.js `splitWordAt`). */
+export async function splitLine(ctx, i, at) {
+  const note = ctx.note();
+  if (!note) return false;
+  const id = note.id;
+  try {
+    const r = await invoke('transcript_line_split', { noteId: id, line: lineRef(note.transcript, i), at, origin: ctx.origin });
+    const now = ctx.note();
+    if (now?.id === id) {
+      const t = withLineSplit(now.transcript, r.index, r.lines);
+      ctx.changing('transcript', 'breaks');
+      if (t) {
+        now.transcript = t;
+        now.breaks = breaksAfterSplit(now.breaks, r.index);
+      } else ctx.reload();
+    }
+    return true;
+  } catch (e) {
+    failed("Couldn't split the line", e, ctx);
+    return false;
+  }
 }
 
 /**

@@ -62,6 +62,8 @@ export const FIELD_DEFAULTS = {
   // Meeting audio kept on disk (meetings/meeting_audio.rs): to transcribe again, play a line.
   meetingKeepAudio: true,
   meetingAudioDays: 14,
+  // Delete meeting transcripts after N days (notes/retention.rs): 0 = keep; 30 | 90 | 365.
+  meetingTranscriptDays: 0,
   // The refined transcript after a meeting (meetings/meeting_refine.rs): auto | always | never.
   meetingRefine: 'auto',
   meetingDiarization: false,

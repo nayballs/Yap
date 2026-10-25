@@ -7,12 +7,14 @@
   // paused divider where a recording stopped (`Note::breaks`); a marker where
   // the person dictated mid-meeting (a `dictated` segment); a stretch that
   // failed to transcribe, with Try again. A line's words are fixed in place:
-  // double-click it, or Edit line in its menu.
+  // double-click it, or Edit line in its menu; its menu also puts it back to
+  // what Yap heard, deletes it (with Undo) or splits it at the cursor
+  // (Shift+Enter while editing it does too: notes/transcript_edits.rs).
   import { tick } from 'svelte';
   import { toast } from '../ui/toast.svelte.js';
   import { openContextMenu, menuKey, menuOpenFor } from '../ui/contextMenu.svelte.js';
-  import { bubbleShape, highlightParts, withLineEdit } from '../core/notepadText.js';
-  import { editLine } from '../core/noteEdits.js';
+  import { bubbleShape, highlightParts, withLineEdit, splitWordAt, canRevert } from '../core/notepadText.js';
+  import { editLine, revertLine, deleteLine, splitLine } from '../core/noteEdits.js';
   import { meetingAudio, canPlay, playLine } from '../stores/meetingAudio.svelte.js';
   import SpeakerMenu from '../components/SpeakerMenu.svelte';
   import FailedChunk from '../components/FailedChunk.svelte';
@@ -62,14 +64,32 @@
   // a misheard word it fixed is offered for the dictionary.
   let lineEditEl = $state(null);
   let lineSaving = false;
-  async function startEditLine(line) {
+  /** `split`: Split line from the menu (the words stay; Enter splits at the cursor). */
+  async function startEditLine(line, split = false) {
     if (!note || view.searchQuery) return;
     view.speakerMenu = null;
-    view.editingLine = { i: line.i, text: note.transcript?.[line.i]?.text ?? line.text };
+    view.editingLine = { i: line.i, text: note.transcript?.[line.i]?.text ?? line.text, split };
     await tick();
     lineEditEl?.focus();
-    lineEditEl?.select();
+    if (!split) lineEditEl?.select();
     fitLineEdit();
+  }
+  // Revert, delete and split (core/noteEdits.js) on this window's note.
+  const lineCtx = { note: () => note, origin: LABEL, changing: (...f) => changing(...f), reload: () => onreload() };
+  /** Split the line being edited at the cursor (its words saved first if they changed). */
+  async function splitAtCaret() {
+    const edit = view.editingLine;
+    if (!edit || !lineEditEl || lineSaving) return;
+    const k = splitWordAt(edit.text, lineEditEl.selectionStart ?? 0);
+    if (k == null) {
+      toast({ title: 'Put the cursor between two words', description: 'The second line starts at the cursor.' });
+      return;
+    }
+    const changed = !edit.split && edit.text.trim() !== (note?.transcript?.[edit.i]?.text ?? '');
+    if (changed) await finishEditLine(true);
+    else view.editingLine = null;
+    await splitLine(lineCtx, edit.i, k);
+    refocusLine(edit.i);
   }
   function fitLineEdit() {
     if (!lineEditEl) return;
@@ -106,7 +126,11 @@
     setTimeout(() => lineEls[i]?.focus({ preventScroll: true }), 0);
   }
   function onLineEditKeydown(e) {
-    if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
+    if (e.key === 'Enter' && !e.isComposing && (e.shiftKey || view.editingLine?.split)) {
+      // Shift+Enter (or Enter in Split line): two lines, at the cursor.
+      e.preventDefault();
+      splitAtCaret();
+    } else if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
       e.preventDefault();
       finishEditLine(true);
     } else if (e.key === 'Escape') {
@@ -126,6 +150,11 @@
       e,
       [
         { label: 'Edit line', icon: 'pencil', onselect: () => startEditLine(line) },
+        canRevert(note?.transcript?.[line.i])
+          ? { label: 'Revert to what Yap heard', icon: 'undo', onselect: () => revertLine(lineCtx, line.i) }
+          : null,
+        // (Split and Delete: not while it records — the recorder holds places in the transcript.)
+        { label: 'Split line…', icon: 'split', disabled: recordingThis, onselect: () => startEditLine(line, true) },
         { label: 'Copy line', icon: 'copy', onselect: () => copyLine(line) },
         canPlay(note?.id, note?.transcript?.[line.i])
           ? {
@@ -141,6 +170,8 @@
               onselect: () => (view.speakerMenu = { key: `l${line.i}`, voice: item.speaker, lines: [line.i], start: 'lines' }),
             }
           : null,
+        { separator: true },
+        { label: 'Delete line', icon: 'trash', danger: true, disabled: recordingThis, onselect: () => deleteLine(lineCtx, line.i) },
       ],
       { label: 'Transcript line', row: lineEls[line.i] }
     );
@@ -207,17 +238,25 @@
                   <textarea
                     class="lineedit"
                     rows="1"
-                    aria-label="Edit line: Enter saves, Escape cancels"
+                    readonly={view.editingLine.split}
+                    aria-label={view.editingLine.split
+                      ? 'Split line: put the cursor where the new line starts, then press Enter. Escape cancels'
+                      : 'Edit line: Enter saves, Shift+Enter splits it at the cursor, Escape cancels'}
                     bind:this={lineEditEl}
                     bind:value={view.editingLine.text}
                     oninput={fitLineEdit}
                     onkeydown={onLineEditKeydown}
-                    onblur={() => finishEditLine(true)}
+                    onblur={() => finishEditLine(!view.editingLine?.split)}
                   ></textarea>
+                  {#if view.editingLine.split}
+                    <span class="splithint" aria-hidden="true">Click where the new line starts, then press Enter</span>
+                  {/if}
                 {:else}
                   {#each highlightParts(line.text, view.searchQuery) as part, k (k)}{#if part.hit}<mark>{part.text}</mark>{:else}{part.text}{/if}{/each}{#if line.edited}<span
                       class="lineedited"
-                      title={`You edited this line. Yap heard: “${line.original}”`}
+                      title={line.original && line.original !== line.text
+                        ? `You edited this line. Yap heard: “${line.original}”`
+                        : 'You split this line'}
                     >edited</span>{/if}
                 {/if}
               </div>
@@ -405,6 +444,15 @@
   }
   .lineedit:focus {
     outline: none;
+  }
+  /* Split line: where to click (the words stay as they are). */
+  .splithint {
+    display: block;
+    margin-top: 4px;
+    font-family: Figtree, sans-serif;
+    font-size: 11.5px;
+    font-weight: 500;
+    color: var(--yap-paper-date);
   }
   /* "edited": the person fixed this line (its title says what Yap heard). */
   .lineedited {

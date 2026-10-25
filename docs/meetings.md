@@ -261,6 +261,46 @@ summary is written from the new lines.
 its right-click menu) plays both sides of its stretch, a quarter second
 either side, mixed — while the meeting still records, too.
 
+**Export the audio** (2026-10-25, `meetings/meeting_audio/export.rs`). The
+notepad's ⋯ has **Export audio…** and **Export each side…** after the
+meeting; the Meetings view's menu on a past meeting has them when its audio
+is kept, and the Notes view's note menu has Export audio…. Windows' Save
+dialog opens (Rust opens it over the window), named after the meeting; Yap
+writes **one file with both sides mixed** (as ▶ plays them; a resumed
+meeting's recordings one after the other), or **"<name> - You"** and
+**"<name> - Them"** beside the name picked. **FLAC** by default — what Yap
+keeps already, through the same encoder, lossless and about half a WAV's
+size, and Windows plays it; **WAV** when the name picked ends `.wav`
+(16-bit, 16 kHz mono, as kept). A long meeting shows its progress in a
+toast; the file is written as `.part` and renamed when whole, so a failure
+leaves nothing half-written; "Audio exported" names the files. Not while it
+records. Nothing leaves the PC except where you saved it.
+
+**Low disk while recording** (`meetings/disk_watch.rs`). The audio and the
+lines need room. While a meeting records, Yap looks at the free space on the
+drive its data is on every minute: under 30 minutes left — the free space
+above a 200 MB reserve, at **this meeting's own bytes a minute** (its audio
+files' size over the time recorded) — it says "**About 25 minutes of
+recording left on this drive**" in one place (a toast while the main window
+is looked at, else the Yap bar, else a Windows notification), and once more
+under 10. At the reserve it **stops the recording**, as the length limit
+does — every chunk transcribed, the audio closed, the summary written — and
+says "Stopped: your disk is full", so nothing is lost.
+
+**Deleting transcripts after N days** (Settings → Privacy & data →
+Meetings → "Delete meeting transcripts after": **Never** by default, 30, 90
+or 365 days; `notes/retention.rs`). A meeting whose newest line is older
+loses what was heard — its lines, the rolling digests written from them, its
+stop marks, the voices' names, **and its audio** — while **My thoughts**
+(never touched), the **summary** and its ticks, the attendees, the calendar
+event and the **tasks** stay. The note says "Transcript deleted" instead of
+the transcript and isn't floated to the top of the list. Never the meeting
+recording, being transcribed or summarised. It runs at start, hourly, and at
+once when the setting is set or shortened. The two retention rules read as
+one: meeting audio is kept for its own days or the transcripts', whichever
+is sooner. Ask across meetings reads only the lines that are there; the
+deleted lines' passages leave its index at once.
+
 ### A part that couldn't be transcribed
 
 Since 2026-10-24 (`meetings/meeting.rs`, "Failed chunks"; code review #6). A chunk
@@ -745,6 +785,32 @@ none when it's mostly the fixed line) (`meetings/meeting_audio/redo.rs` `rebuild
 anything that replaces a meeting's lines that way keeps fixes too). The voice
 separation never splits a fixed line either.
 
+**Revert, delete, split** (2026-10-25, `notes/transcript_edits.rs`). A line's
+right-click menu also has:
+- **Revert to what Yap heard** (on a line you edited): its words back, and
+  it's Yap's line again.
+- **Delete line**: gone at once, with **Undo** in the toast. It leaves the
+  note (every view, the summaries' inputs, Ask across meetings); its place
+  on the recording is kept beside the meeting's audio (`cuts.json`) so
+  **Transcribe again** and the refine never bring its words back. The
+  rolling digests written with it are dropped (the next summary writes them
+  from what's left). Undo works while Yap runs; after that the words are
+  gone for good.
+- **Split line…**: click where the new line starts and press **Enter** (or
+  **Shift+Enter** while editing a line): two lines, each keeping its side,
+  voice and its own stretch of the recording (by the words' times when the
+  speech model gave them), so ▶ plays each; both are yours, so Transcribe
+  again keeps them as they are.
+Split and Delete wait until the meeting stops recording (the recorder and
+the voice separation hold places in the transcript).
+
+**An older Yap on the same data** (the installed nightly beside a newer dev
+build) drops fields of notes.json it doesn't know when it saves. So a split
+line is two ordinary lines, a deleted line is simply gone, and the tasks you
+add and archive live in `tasks.json`, which it never opens. What it would
+drop: an edited line's `edited`/`original` if it's from before 24 Oct (its
+Revert, and Transcribe again keeping it), and the "Transcript deleted" mark.
+
 ### The summary
 
 **Edit** (the notepad's Summary tab) or **Edit summary** (the Notes view)
@@ -801,6 +867,18 @@ Ticking there ticks in the note (and the other way round); a task just ticked
 stays in the list, struck through, until you leave, so a slip is one click to
 undo. AI apps read them, read only: `GET /v1/tasks/list?status=open|done|all`
 and MCP's `list_tasks` ([integrations.md](./architecture/integrations.md)).
+
+**A meeting's Tasks tab** (2026-10-25, the notepad and the Notes view,
+`components/MeetingTasks.svelte`): "1 of 5 done" with a bar, every task of
+the summary with its owner and date, **Add a task** ("Priya: book flights
+(due: Monday)" reads its owner and date; nobody named is You), **Complete
+all** (with Undo), and ✕ on a task you added. The Tasks view can **add a
+task with no meeting** ("Your tasks", first) and **Archive done** (with
+Undo): the done ones leave the list and stay ticked in their meeting. Tasks
+you add live in `tasks.json` (`notes/task_store.rs`), never in the summary:
+adding one never makes the summary yours, and Yap writing it again never
+loses one; a summary's tick stays its own `- [x]`. Added tasks go with
+their meeting's note.
 
 ## The meeting notepad
 

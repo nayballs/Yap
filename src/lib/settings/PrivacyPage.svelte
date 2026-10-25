@@ -61,6 +61,25 @@
       shots = null;
     }
   }
+  // "Delete meeting transcripts after" (config meetingTranscriptDays, notes/retention.rs;
+  // 0 = keep them). The meetings' notes, summaries and tasks stay; their
+  // audio goes with the transcript (or sooner: Settings → Meetings).
+  const TRANSCRIPT_DAYS = [
+    { value: 0, label: 'Never' },
+    { value: 30, label: '30 days' },
+    { value: 90, label: '90 days' },
+    { value: 365, label: '365 days' },
+  ];
+  const transcriptOptions = $derived(
+    TRANSCRIPT_DAYS.some((o) => o.value === (cfg.meetingTranscriptDays ?? 0))
+      ? TRANSCRIPT_DAYS
+      : [...TRANSCRIPT_DAYS, { value: cfg.meetingTranscriptDays, label: `${cfg.meetingTranscriptDays} days` }]
+  );
+  const transcriptDesc = $derived(
+    cfg.meetingTranscriptDays
+      ? `A meeting's transcript and audio go ${cfg.meetingTranscriptDays} days after it. Its notes, summary and tasks stay`
+      : 'Kept until you delete the meeting'
+  );
   // "Keep chat screenshots" (config chatImageDays; 0 = forever).
   const KEEP_SHOTS = [
     { value: 7, label: '7 days' },
@@ -146,6 +165,11 @@
       : `A sentence or two before where you dictate goes to ${cleanupDest} with each dictation, so cleanup can carry on from it. Off: only what you say goes`
   );
 
+  // Meeting audio's days: its own, or the transcripts' when that's sooner
+  // (meetings/meeting_audio.rs `keep_days`).
+  const audioDays = $derived(
+    cfg.meetingTranscriptDays ? Math.min(cfg.meetingAudioDays || 14, cfg.meetingTranscriptDays) : cfg.meetingAudioDays || 14
+  );
   // Chat's own model when its tab is on, else the cleanup model's endpoint.
   const chat = $derived(cfg.llmScopes?.chat?.enabled ? cfg.llmScopes.chat : { provider: cfg.ppProvider });
   const leaves = $derived([
@@ -164,7 +188,7 @@
       what: 'Meeting audio',
       where:
         cfg.meetingKeepAudio !== false
-          ? `Never leaves this PC: kept here for ${cfg.meetingAudioDays || 14} ${cfg.meetingAudioDays === 1 ? 'day' : 'days'}, to transcribe a meeting again and play its lines`
+          ? `Never leaves this PC: kept here for ${audioDays} ${audioDays === 1 ? 'day' : 'days'}, to transcribe a meeting again and play its lines`
           : 'Never leaves this PC: deleted once a meeting is transcribed',
       page: 'meetings#meeting-audio',
     },
@@ -398,6 +422,18 @@
   </Row>
   <Row label="Clear recent audio" desc={audioDesc} setting="clear-recent-audio">
     <Button variant="secondary" size="sm" disabled={!audio?.count} onclick={clearAudio}>Clear audio…</Button>
+  </Row>
+</Group>
+
+<!-- How long meeting transcripts are kept (notes/retention.rs), with their audio. -->
+<Group title="Meetings" id="settings-meeting-transcripts">
+  <Row
+    label="Delete meeting transcripts after"
+    desc={transcriptDesc}
+    hint="What you typed in My thoughts, the summary and its tasks are never deleted. The meeting's audio goes with its transcript, or sooner if Settings → Meetings keeps it for fewer days. Ask across meetings forgets the deleted lines too."
+    setting="meeting-transcripts"
+  >
+    <Select bind:value={cfg.meetingTranscriptDays} options={transcriptOptions} ariaLabel="Delete meeting transcripts after" />
   </Row>
 </Group>
 

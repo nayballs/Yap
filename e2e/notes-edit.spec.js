@@ -29,6 +29,16 @@ import {
   newSinceSummary,
   newSinceLine,
   transcriptItems,
+  splitWordAt,
+  withLineSplit,
+  withLineRemoved,
+  withLineRestored,
+  withLineSplice,
+  breaksAfterSplit,
+  canRevert,
+  taskRef,
+  tasksDoneLine,
+  noteMarkdown,
 } from '../src/lib/core/notepadText.js';
 
 const visible = (yap, label) => yap.invoke('plugin:window|is_visible', { label });
@@ -84,6 +94,54 @@ base('the pure helpers: a line edit from another window, ticks, what is new sinc
   expect(newSinceSummary({ ...note, enhancedContent: '' })).toBe(0);
   expect(newSinceLine(1)).toBe('1 new line since this summary');
   expect(newSinceLine(3)).toBe('3 new lines since this summary');
+});
+
+base('the pure helpers: a line reverted, deleted and split; a meeting tasks tab', () => {
+  // Split at the cursor: the word it's in (or before) starts the second line.
+  const text = 'budget is due Friday okay';
+  expect(splitWordAt(text, text.indexOf(' okay'))).toBe(4); // after "Friday"
+  expect(splitWordAt(text, text.indexOf('okay'))).toBe(4); // before "okay"
+  expect(splitWordAt(text, text.indexOf('ue Friday'))).toBe(2); // inside "due"
+  expect(splitWordAt(text, 0)).toBeNull(); // nothing before it
+  expect(splitWordAt(text, text.length)).toBeNull(); // nothing after it
+  expect(splitWordAt('one', 1)).toBeNull();
+
+  const t = [
+    { source: 'you', text: 'hi', ts: 1, startMs: 0 },
+    { source: 'them', text: 'a b c', ts: 2, startMs: 1000, words: [[0, 100], [200, 300], [400, 500]] },
+    { source: 'you', text: 'ok', ts: 5, startMs: 4000 },
+  ];
+  const parts = [
+    { source: 'them', text: 'a', ts: 2, startMs: 1000, edited: true, original: 'a' },
+    { source: 'them', text: 'b c', ts: 2, startMs: 1200, edited: true, original: 'b c' },
+  ];
+  expect(withLineSplit(t, 1, parts).map((s) => s.text)).toEqual(['hi', 'a', 'b c', 'ok']);
+  expect(withLineSplit(t, 0, parts)).toBeNull(); // not that line: fetch the note
+  expect(breaksAfterSplit([1, 2, 3], 1)).toEqual([1, 3, 4]);
+
+  // Deleted: the line goes from the note (an older Yap keeps it gone too);
+  // Undo puts it back where it was.
+  const gone = withLineRemoved(t, 1, t[1]);
+  expect(gone.map((s) => s.text)).toEqual(['hi', 'ok']);
+  expect(withLineRemoved(t, 0, t[1])).toBeNull(); // not that line: fetch the note
+  expect(transcriptItems(gone).flatMap((g) => g.lines.map((l) => l.text))).toEqual(['hi', 'ok']);
+  expect(noteMarkdown({ title: 'Call', transcript: gone, speakers: {} })).not.toContain('**Them:**');
+  expect(withLineRestored(gone, 1, t[1])).toEqual(t);
+  // Another window follows it as a splice with no lines.
+  const lineSpeakers = gone.map((s) => [s.source, false]);
+  expect(withLineSplice(t, { lineSplice: { at: 1, remove: 1, lines: [] }, lineSpeakers }).map((s) => s.text)).toEqual(['hi', 'ok']);
+
+  // Revert: only an edit that says something else than what Yap heard.
+  expect(canRevert({ edited: true, text: 'Kubernetes', original: 'cube and eighties' })).toBe(true);
+  expect(canRevert({ edited: true, text: 'b c', original: 'b c' })).toBe(false); // a split part as heard
+  expect(canRevert({ text: 'x' })).toBe(false);
+
+  // Tasks: as `tasks_set` names them, and "3 of 5 done".
+  expect(taskRef(7, { line: 4, text: 'Send the budget', task: 'Send the budget' })).toEqual({ noteId: 7, line: 4, text: 'Send the budget' });
+  expect(taskRef(7, { own: 3, text: 'Book flights' })).toEqual({ own: 3, noteId: 7, text: 'Book flights' });
+  expect(taskRef(0, { own: 3, text: 'x' }).noteId).toBeNull();
+  expect(tasksDoneLine([{ done: true }, { done: false }, { done: true }]).label).toBe('2 of 3 done');
+  expect(tasksDoneLine([]).label).toBe('No tasks yet');
 });
 
 // ---------------------------------------------------------------- with the fake AI
@@ -492,5 +550,222 @@ audioTest.describe('with the meeting audio kept', () => {
     await expect(log).toContainText('Budget call with Priya about the venue.');
     await expect(log).toContainText('[Again: received');
     await shot(main, '13-transcribed-again-fix-kept');
+  });
+
+  /** "STT stub" becomes `to` in the next lines (and Settings' copy agrees). */
+  async function setSpelling(yap, main, to) {
+    const cfg = await yap.invoke('get_config');
+    const patch = { dictionary: [{ from: 'STT stub', to, fuzzy: false, snippet: false }] };
+    await yap.invoke('save_config', { cfg: { ...cfg, ...patch } });
+    await main.evaluate((p) => window.dispatchEvent(new CustomEvent('yap-config-patched', { detail: p })), patch);
+    await main.waitForTimeout(700);
+    await expectStore(yap, 'config.json', (c) => c.dictionary?.[0]?.to === to);
+  }
+
+  /** A new meeting note recorded from the WAVs (24 s: a line a side), paused; its id. */
+  async function recordFromWavs(yap, main, title, seconds = 24) {
+    await setSpelling(yap, main, 'Heard');
+    fs.mkdirSync(audioDir, { recursive: true });
+    writeWav(path.join(audioDir, 'you.wav'), { seconds, gaps: [[0, 1], [8, 13], [20, 24]] });
+    writeWav(path.join(audioDir, 'them.wav'), { seconds, gaps: [[4.5, 4.8], [9.5, 9.9], [14.2, 14.6], [19.5, 19.9]] });
+    await newMeetingNote(main, title);
+    const played = () => fs.readFileSync(yap.logPath, 'utf8').split('e2e: the test audio has played to the end').length - 1;
+    const before = played();
+    await main.getByRole('button', { name: 'Record' }).click();
+    await expect.poll(played, { message: 'the test audio to play out', timeout: 30_000 }).toBeGreaterThan(before);
+    await main.getByRole('button', { name: 'Pause recording' }).click();
+    await expect.poll(() => recording(yap), { timeout: 20_000 }).toBe(false);
+    await expectStore(yap, 'notes.json', (s) => {
+      const t = meetingNote(s, title)?.transcript || [];
+      return t.some((l) => l.source === 'them' && l.startMs != null && l.text) && t.some((l) => l.source === 'you' && l.startMs != null && l.text);
+    });
+    return meetingNote(yap.readJson('notes.json'), title).id;
+  }
+
+  test('a line is put back, deleted with Undo and split; Transcribe again keeps what you did', async ({ yap, main, shot }) => {
+    const noteId = await recordFromWavs(yap, main, 'Line fixes');
+    const lines = () => meetingNote(yap.readJson('notes.json'), 'Line fixes').transcript;
+    const first = lines();
+    // (The recorder makes one or two lines a side of the 24 s: the first is used.)
+    const them = first.find((s) => s.source === 'them' && s.startMs != null && s.text);
+    const you = first.find((s) => s.source === 'you' && s.startMs != null && s.text);
+    const themCount = first.filter((s) => s.source === 'them' && s.text).length;
+    const youCount = first.filter((s) => s.source === 'you' && s.text).length;
+    const esc = (t) => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const log = main.getByRole('log', { name: 'Meeting transcript' });
+    const bubble = (side, text) => log.locator(`.bubble.${side}`).filter({ hasText: text }).first();
+    const toastIn = (page, title) => page.getByRole('status').filter({ hasText: title });
+
+    // Edited, then put back to what Yap heard (its menu).
+    await bubble('them', them.text).click({ button: 'right' });
+    await main.getByRole('menuitem', { name: 'Edit line' }).click();
+    const box = main.getByRole('textbox', { name: /Edit line/ });
+    await box.fill('Venue options for the offsite.');
+    await box.press('Enter');
+    await expectStore(yap, 'notes.json', (s) => meetingNote(s, 'Line fixes')?.transcript?.some((l) => l.text === 'Venue options for the offsite.'));
+    await bubble('them', 'Venue options').click({ button: 'right' });
+    await main.getByRole('menuitem', { name: 'Revert to what Yap heard' }).click();
+    await expectStore(yap, 'notes.json', (s) => {
+      const l = meetingNote(s, 'Line fixes')?.transcript?.find((x) => x.source === 'them' && x.startMs === them.startMs);
+      return l?.text === them.text && !l.edited && !l.original;
+    });
+    await expect(log).not.toContainText('Venue options');
+
+    // Deleted (gone from the note; its place kept beside the audio, cuts.json), Undo, then deleted for good.
+    const cutsFile = path.join(yap.dataDir, 'meeting-audio', String(noteId), 'cuts.json');
+    await bubble('you', you.text).click({ button: 'right' });
+    await main.getByRole('menuitem', { name: 'Delete line' }).click();
+    const deleted = toastIn(main, 'Line deleted');
+    await expect(deleted).toBeVisible();
+    const isGone = (s) => !meetingNote(s, 'Line fixes')?.transcript?.some((x) => x.source === 'you' && x.startMs === you.startMs);
+    await expectStore(yap, 'notes.json', isGone);
+    expect(JSON.parse(fs.readFileSync(cutsFile, 'utf8'))).toEqual([{ source: 'you', ts: you.ts, startMs: you.startMs, endMs: you.endMs }]);
+    await expect(log.locator('.bubble.you')).toHaveCount(youCount - 1);
+    await shot(main, '14-line-deleted-undo');
+    await deleted.getByRole('button', { name: 'Undo' }).click();
+    await expectStore(yap, 'notes.json', (s) => meetingNote(s, 'Line fixes')?.transcript?.some((x) => x.source === 'you' && x.text === you.text));
+    expect(JSON.parse(fs.readFileSync(cutsFile, 'utf8'))).toEqual([]);
+    await expect(bubble('you', you.text)).toBeVisible();
+    await bubble('you', you.text).click({ button: 'right' });
+    await main.getByRole('menuitem', { name: 'Delete line' }).click();
+    await expectStore(yap, 'notes.json', isGone);
+
+    // Split at the cursor, in the notepad: Shift+Enter while editing it.
+    await yap.invoke('notepad_open', { noteId });
+    const pad = yap.notepad;
+    await pad.getByRole('tab', { name: /Transcript/ }).click();
+    const padLog = pad.getByRole('log', { name: 'Transcript' });
+    const words = them.text.split(/\s+/);
+    const [head, tail] = [words.slice(0, 3).join(' '), words.slice(3).join(' ')];
+    await padLog.locator('.group.them .bubble').first().dblclick();
+    const padBox = pad.getByRole('textbox', { name: /Edit line/ });
+    await expect(padBox).toBeFocused();
+    await padBox.evaluate((el, at) => el.setSelectionRange(at, at), head.length); // after the third word
+    await padBox.press('Shift+Enter');
+    await expectStore(yap, 'notes.json', (s) => (meetingNote(s, 'Line fixes')?.transcript || []).some((l) => l.source === 'them' && l.text === tail));
+    const split = lines();
+    const a = split.find((l) => l.source === 'them' && l.text === head);
+    const b = split.find((l) => l.source === 'them' && l.text === tail);
+    expect(a).toMatchObject({ ts: them.ts, startMs: them.startMs, edited: true });
+    expect(b).toMatchObject({ edited: true, endMs: them.endMs });
+    expect(b.startMs).toBeGreaterThan(a.startMs);
+    expect(a.endMs).toBeLessThanOrEqual(b.startMs);
+    expect(b.ts).toBeGreaterThanOrEqual(a.ts);
+    await expect(padLog.locator('.group.them .bubble').nth(0)).toHaveText(new RegExp(`^${esc(head)}`));
+    await expect(padLog.locator('.group.them .bubble').nth(1)).toHaveText(new RegExp(`^${esc(tail)}`));
+    // The Notes view follows (lineSplice).
+    await expect(log.locator('.bubble.them')).toHaveCount(themCount + 1);
+    await shot(pad, '15-line-split');
+    // Each part plays its own stretch.
+    const clip = (seg) =>
+      main.evaluate((args) => window.__TAURI_INTERNALS__.invoke('meeting_audio_clip', args).then((x) => x.byteLength), {
+        noteId,
+        ts: seg.ts,
+        startMs: seg.startMs,
+        endMs: seg.endMs,
+      });
+    expect(await clip(a)).toBeGreaterThan(44);
+    expect(await clip(b)).toBeGreaterThan(44);
+    expect(await clip(a)).not.toBe(await clip(b));
+
+    // Split line… from the menu (the Notes view): the cursor, then Enter.
+    const wordsA = head.split(/\s+/);
+    await log.locator('.bubble.them').first().click({ button: 'right' });
+    await main.getByRole('menuitem', { name: 'Split line…' }).click();
+    const splitBox = main.getByRole('textbox', { name: /Split line/ });
+    await expect(splitBox).toBeFocused();
+    await splitBox.evaluate((el, at) => el.setSelectionRange(at, at), wordsA[0].length + 1);
+    await splitBox.press('Enter');
+    await expectStore(yap, 'notes.json', (s) => (meetingNote(s, 'Line fixes')?.transcript || []).filter((l) => l.source === 'them').length === themCount + 2);
+
+    // Transcribe again: the deleted words don't come back, the splits stay.
+    await setSpelling(yap, main, 'Redone');
+    await yap.invoke('meeting_transcribe_again', { noteId });
+    await expect
+      .poll(() => meetingAudioJob(yap, noteId), { message: 'transcribed again', timeout: 20_000 })
+      .toBe('done');
+    const again = lines();
+    const overlaps = (l, o) => {
+      const shared = Math.min(l.endMs, o.endMs) - Math.max(l.startMs, o.startMs);
+      return shared * 2 >= Math.min(l.endMs - l.startMs, o.endMs - o.startMs);
+    };
+    // No new "you" line fills the deleted one's place.
+    for (const l of again.filter((x) => x.source === 'you' && x.text)) {
+      expect(l.text.startsWith('[Redone:'), JSON.stringify(l)).toBe(true);
+      expect(overlaps(l, you), JSON.stringify(l)).toBe(false);
+    }
+    // The three parts, as the person left them; nothing new over them.
+    expect(again.filter((l) => l.edited).map((l) => l.text)).toEqual([wordsA[0], wordsA.slice(1).join(' '), tail]);
+    for (const l of again.filter((x) => x.source === 'them' && !x.edited)) {
+      expect(l.text.startsWith('[Redone:'), JSON.stringify(l)).toBe(true);
+      expect(overlaps(l, them), JSON.stringify(l)).toBe(false);
+    }
+    await expect(log.locator('.bubble.them').first()).toContainText(wordsA[0]);
+    await expect(log.locator('.bubble.them').nth(1)).toContainText(wordsA.slice(1).join(' '));
+  });
+
+  /** The latest transcription job's state on a note (meeting_audio.rs). */
+  async function meetingAudioJob(yap, noteId) {
+    const a = await yap.invoke('meeting_audio_note', { noteId });
+    return a?.job?.state ?? null;
+  }
+
+  /** The Save dialog answers `file` (a test run never opens it: `e2e_audio_export_file`). */
+  async function stubSave(yap, file) {
+    await yap.invoke('e2e_audio_export_file', { path: file });
+  }
+  /** The samples a FLAC file's header says it holds. */
+  function flacSamples(file) {
+    const b = fs.readFileSync(file);
+    expect(b.subarray(0, 4).toString()).toBe('fLaC');
+    return (b[21] & 0x0f) * 2 ** 32 + b[22] * 2 ** 24 + b[23] * 2 ** 16 + b[24] * 2 ** 8 + b[25];
+  }
+
+  test("the meeting's audio exports where you pick: one mixed file, or each side, FLAC or WAV", async ({ yap, main, shot }) => {
+    const noteId = await recordFromWavs(yap, main, 'Export me');
+    const folder = path.join(yap.dataDir, 'meeting-audio', String(noteId));
+    await expect.poll(() => fs.readdirSync(folder).some((f) => f.endsWith('.json'))).toBe(true);
+    const metaFile = fs.readdirSync(folder).find((f) => f.endsWith('.json'));
+    await expect.poll(() => JSON.parse(fs.readFileSync(path.join(folder, metaFile), 'utf8')).youLen).toBeGreaterThan(0);
+    const meta = JSON.parse(fs.readFileSync(path.join(folder, metaFile), 'utf8'));
+    const len = Math.max(meta.youLen, meta.themLen);
+    expect(len / 16_000).toBeCloseTo(24, 0);
+    const out = path.join(yap.dataDir, '..', 'exports');
+    fs.rmSync(out, { recursive: true, force: true });
+    fs.mkdirSync(out, { recursive: true });
+
+    // The notepad's ⋯ → Export audio…: both sides in one FLAC, as long as the meeting.
+    await yap.invoke('notepad_open', { noteId });
+    const pad = yap.notepad;
+    await stubSave(yap, path.join(out, 'Export me.flac'));
+    await pad.getByRole('button', { name: 'More', exact: true }).click();
+    const more = pad.getByRole('menu', { name: 'More' });
+    await expect(more.getByRole('menuitem', { name: 'Export audio…' })).toBeEnabled();
+    await shot(pad, '16-export-audio-menu');
+    await more.getByRole('menuitem', { name: 'Export audio…' }).click();
+    await expect(pad.getByRole('status').filter({ hasText: 'Audio exported' })).toBeVisible({ timeout: 20_000 });
+    await expect(pad.getByRole('status').filter({ hasText: 'Audio exported' })).toContainText('Export me.flac');
+    expect(flacSamples(path.join(out, 'Export me.flac'))).toBe(len);
+    expect(fs.readdirSync(out).filter((f) => f.endsWith('.part'))).toEqual([]);
+
+    // The Meetings view's menu → Export each side…, as WAV: You and Them, each the meeting's length.
+    await stubSave(yap, path.join(out, 'Export me.wav'));
+    await openView(main, 'Meetings');
+    // (Offered once the view knows the meeting's audio is kept.)
+    await expect(async () => {
+      await main.keyboard.press('Escape');
+      await main.getByRole('button', { name: 'More for Export me' }).click();
+      await expect(main.getByRole('menuitem', { name: 'Export each side…' })).toBeVisible({ timeout: 1_000 });
+    }).toPass({ timeout: 10_000 });
+    await main.getByRole('menuitem', { name: 'Export each side…' }).click();
+    await expect(main.getByRole('status').filter({ hasText: 'Audio exported' })).toBeVisible({ timeout: 20_000 });
+    for (const side of ['You', 'Them']) {
+      const wav = fs.readFileSync(path.join(out, `Export me - ${side}.wav`));
+      expect(wav.subarray(0, 4).toString()).toBe('RIFF');
+      expect(wav.length).toBe(44 + 2 * len);
+    }
+    await shot(main, '17-exported-each-side');
+    // Its files are its own: the kept audio is untouched.
+    expect(fs.readdirSync(folder).filter((f) => f.endsWith('.flac'))).toHaveLength(2);
   });
 });

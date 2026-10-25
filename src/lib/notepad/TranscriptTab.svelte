@@ -135,6 +135,10 @@
     {#if recordingThis}
       <p class="t1">Yap is listening</p>
       <p class="t2">Say hello: your first line lands here in about 15 seconds. Your mic is You, the call is Them.</p>
+    {:else if note?.transcriptDeletedTs}
+      <!-- Deleted after its days (Settings → Privacy & data, notes/retention.rs). -->
+      <p class="t1">Transcript deleted</p>
+      <p class="t2">Yap deletes meeting transcripts after the days set in Settings → Privacy & data. Your notes, the summary and its tasks are kept.</p>
     {:else}
       <p class="t1">No transcript yet</p>
       <p class="t2">Press Start and Yap transcribes the meeting here, on this PC.</p>

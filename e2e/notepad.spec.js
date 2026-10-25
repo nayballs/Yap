@@ -773,7 +773,8 @@ test('the header: back to Notes, the ⋯ menu, Share, split screen, delete', asy
   await expect(main.getByPlaceholder('Untitled Note')).toHaveValue('Header check');
 
   // After the meeting the ⋯ menu has no Audio settings, and Transcribe again
-  // (its audio kept: meetings/meeting_audio.rs); Delete asks first.
+  // and Export audio (its audio kept: meetings/meeting_audio.rs, export.rs);
+  // Delete asks first.
   await pauseAll(yap);
   await closeToasts(pad);
   await more.click();
@@ -783,6 +784,8 @@ test('the header: back to Notes, the ⋯ menu, Share, split screen, delete', asy
     'Copy consent message',
     'Save as .md',
     'Transcribe again',
+    'Export audio…',
+    'Export each side…',
     'Delete',
   ]);
   await shot(pad, '17-more-menu-stopped');

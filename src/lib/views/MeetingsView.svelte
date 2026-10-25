@@ -28,6 +28,7 @@
   import { openContextMenu, menuKey, menuOpenFor, askConfirm } from '../ui/contextMenu.svelte.js';
   import { copyText } from '../core/itemMenus.js';
   import { noteMarkdown } from '../core/notepadText.js';
+  import { meetingAudio, refreshAudio, exportAudio } from '../stores/meetingAudio.svelte.js';
 
   // `onnavigate(view)` switches the main window's view; `onopensettings(section)`;
   // `onopennote({id, line, ts, field})` opens a moment of a meeting or note
@@ -121,6 +122,8 @@
     } catch {
       past = [];
     }
+    // Which have their audio kept: their menus offer Export audio….
+    for (const n of past.slice(0, pastShown)) if (!(n.id in meetingAudio.byNote)) refreshAudio(n.id);
   }
 
   // The moments that match the search (search/ask.rs: meetings and notes
@@ -238,6 +241,7 @@
   let pastEls = $state({});
   function pastMenu(e, n) {
     const title = n.title || 'Untitled meeting';
+    if (!(n.id in meetingAudio.byNote)) refreshAudio(n.id);
     openContextMenu(
       e,
       [
@@ -247,6 +251,14 @@
           : null,
         { separator: true },
         { label: 'Copy as Markdown', icon: 'copy', onselect: () => copyMeeting(n.id) },
+        // Its kept audio, where you pick (meetings/meeting_audio/export.rs):
+        // only a meeting whose audio Yap still has.
+        ...(n.recording || !meetingAudio.byNote[n.id]?.recordings
+          ? []
+          : [
+              { label: 'Export audio…', icon: 'audio', onselect: () => exportPast(n, false) },
+              { label: 'Export each side…', icon: 'audio', onselect: () => exportPast(n, true) },
+            ]),
         { separator: true },
         {
           label: 'Delete…',
@@ -265,6 +277,15 @@
       ],
       { label: `Meeting note ${title}`, row: pastEls[n.id] }
     );
+  }
+  /** "Export audio…" on a past meeting (its audio looked up first). */
+  async function exportPast(n, separate) {
+    await refreshAudio(n.id);
+    if (!meetingAudio.byNote[n.id]?.recordings) {
+      toast({ title: "This meeting's audio isn't kept", description: 'Settings → Meetings → Meeting audio says how long Yap keeps it.' });
+      return;
+    }
+    exportAudio({ id: n.id, title: n.title }, { separate });
   }
   async function copyMeeting(id) {
     try {

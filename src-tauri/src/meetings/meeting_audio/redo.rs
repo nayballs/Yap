@@ -8,7 +8,9 @@
 //!   it), and every "You dictated here" marker (the audio has silence there;
 //!   the marker stays where it was);
 //! - **lines the person edited** (`TranscriptSegment::edited`,
-//!   `note_edits.rs`), as they wrote them: a new line of the same side over
+//!   `note_edits.rs`; a line they split is two edited lines), as they wrote
+//!   them, and **lines they deleted** (gone from the note; their places in
+//!   `cuts.json`, `meeting_audio::cuts`, no new line fills): a new line of the same side over
 //!   one keeps only its words outside it (by its word times; without them
 //!   by its share of the line's place, and none when that's under half of
 //!   it) — whoever calls this (Transcribe again, a refined transcript)
@@ -195,19 +197,35 @@ fn outside_edited(line: TranscriptSegment, fixed: &[(u64, u64)]) -> Vec<Transcri
     parts
 }
 
+/// [`rebuild_with_cuts`] with no lines deleted.
+#[cfg(test)]
+pub fn rebuild(old: &[TranscriptSegment], old_breaks: &[usize], redone: &[Redone]) -> Rebuilt {
+    rebuild_with_cuts(old, old_breaks, redone, &[])
+}
+
 /// The note's transcript with each of `redone`'s recordings' lines put in
 /// place of the old ones (see the module notes). `old_breaks` are the old
-/// transcript's stop marks.
-pub fn rebuild(old: &[TranscriptSegment], old_breaks: &[usize], redone: &[Redone]) -> Rebuilt {
+/// transcript's stop marks; `cuts` the places of lines the person deleted
+/// (`meeting_audio::cuts`): no new line's words there.
+pub fn rebuild_with_cuts(old: &[TranscriptSegment], old_breaks: &[usize], redone: &[Redone], cuts: &[super::Cut]) -> Rebuilt {
     let mut kept: Vec<TranscriptSegment> = Vec::new();
     let mut by_recording: Vec<Vec<&TranscriptSegment>> = vec![Vec::new(); redone.len()];
-    // Per recording: the places of its lines the person edited, by side.
+    // Per recording: the places of its lines the person edited or deleted,
+    // by side.
     let mut fixed: Vec<Vec<(&str, (u64, u64))>> = vec![Vec::new(); redone.len()];
+    for cut in cuts {
+        if let Some(i) = recording_of(redone, cut.ts) {
+            fixed[i].push((cut.source.as_str(), (cut.start_ms, cut.end_ms)));
+        }
+    }
     let mut replaced = 0;
     for seg in old {
         // (Markers the audio can't give again stay: a dictation, the mic
         // disconnected.)
         match recording_of(redone, seg.ts).filter(|_| !seg.dictated && seg.mic.is_none()) {
+            // A line the person edited (or split: two edited lines) stays as
+            // they wrote it: no new line takes its place
+            // (`notes/transcript_edits.rs`).
             Some(i) if seg.edited => {
                 if let Some(p) = place(seg) {
                     fixed[i].push((seg.source.as_str(), p));

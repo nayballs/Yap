@@ -26,6 +26,7 @@
   // it's open and goes back where it was.
   import { invoke } from '@tauri-apps/api/core';
   import { tick, untrack } from 'svelte';
+  import { showSaveError } from '../notices/saveErrors.js';
   import { calendar, connectDialog, closeConnectDialog, connectDialogOpener } from '../stores/calendar.svelte.js';
   import CallCard from '../bar/CallCard.svelte';
   import CalendarMark from './CalendarMark.svelte';
@@ -237,7 +238,11 @@
       const result = await invoke('calendar_add_link', { link: value, kind });
       if (connectDialog.open && !connectDialog.done) connectDialog.done = result ?? { kind };
     } catch (e) {
-      formError = String(e);
+      // Connected, but calendar.json couldn't be written yet: said with Try
+      // again (saveErrors.js), and the calendar is connected all the same.
+      if (showSaveError(e)) {
+        if (connectDialog.open && !connectDialog.done) connectDialog.done = { kind };
+      } else formError = String(e);
     } finally {
       adding = false;
     }

@@ -661,6 +661,19 @@ export function createNotesState() {
       if (msg === SUMMARY_KEPT) {
         // Edited again while it ran: the person's words stay.
         toast({ kind: 'done', title: 'Your summary was kept', description: 'You changed it while Yap was writing a new one.' });
+      } else if (showSaveError(msg)) {
+        // Written, but not on disk yet (said with Try again): show it.
+        if (selected?.id === id) {
+          try {
+            const n = await invoke('note_get', { id });
+            selected.enhancedContent = n.enhancedContent;
+            selected.summaryEditedMs = n.summaryEditedMs;
+            selected.summaryTs = n.summaryTs;
+            tab = 'enhanced';
+          } catch {
+            /* keep current */
+          }
+        }
       } else if (needsAiSetup(msg)) {
         // Not a failure: the note is saved, it just needs a model. The card
         // in the editor says so (and links to Settings).

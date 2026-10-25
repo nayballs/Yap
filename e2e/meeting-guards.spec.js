@@ -301,3 +301,46 @@ test('Settings → Meetings has the guard rails, and the shortcut can be changed
   await expectStore(yap, 'config.json', (c) => c.meetingHotkey === 'kb:alt+win+77');
   await expect(shortcut).toBeVisible();
 });
+
+test('little disk left: "About N minutes of recording left", then a clean stop when it runs out', async ({
+  yap,
+  main,
+  shot,
+}) => {
+  // The drive's free space and the meeting's bytes a minute, stood in for
+  // (debug-only `e2e_disk_space`, meetings/disk_watch.rs): 25 minutes above
+  // the 200 MB Yap keeps for saving, at 1 MB a minute.
+  const MB = 1024 * 1024;
+  const RESERVE = 200 * MB;
+  await yap.invoke('e2e_disk_space', { free: RESERVE + 25 * MB, perMin: MB });
+  try {
+    await newMeetingNote(main, 'Low disk');
+    await main.getByRole('button', { name: 'Record' }).click();
+    const left = toast(main, 'About 25 minutes of recording left on this drive');
+    await expect(left).toBeVisible({ timeout: 10_000 });
+    await expect(left).toContainText('Your disk is almost full');
+    await shot(main, '13-low-disk-warning');
+    expect(await recording(yap)).toBe(true);
+    await closeToasts(main);
+
+    // Near the end: said once more.
+    await yap.invoke('e2e_disk_space', { free: RESERVE + 6 * MB, perMin: MB });
+    await expect(toast(main, 'About 6 minutes of recording left on this drive')).toBeVisible({ timeout: 10_000 });
+    expect(await recording(yap)).toBe(true);
+    await closeToasts(main);
+
+    // Out of space: the recording stops, keeping everything, and says why.
+    await yap.invoke('e2e_disk_space', { free: RESERVE - MB, perMin: MB });
+    const stopped = toast(main, 'Stopped: your disk is full');
+    await expect(stopped).toBeVisible({ timeout: 10_000 });
+    await expect(stopped).toContainText('everything up to now is kept');
+    await expect.poll(() => recording(yap), { timeout: 20_000 }).toBe(false);
+    await expectAutoStopEnded(yap, main);
+    expect(yap.readJson('notes.json').notes.some((n) => n.title === 'Low disk' && n.noteType === 'meeting')).toBe(true);
+    await shot(main, '14-stopped-disk-full');
+  } finally {
+    await yap.invoke('e2e_disk_space', {});
+  }
+  await closeToasts(main);
+  await closeToasts(yap.notepad);
+});
