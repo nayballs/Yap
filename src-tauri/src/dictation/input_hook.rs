@@ -280,6 +280,10 @@ static SNIP_ESC: AtomicBool = AtomicBool::new(false);
 #[cfg(target_os = "windows")]
 const SNIP_ESCAPE: &str = "input-hook:snip-escape";
 
+/// Print Screen's virtual key: a shortcut may use it (Snip to Chat's "Use
+/// Print Screen"), and its press can be missing ([`process_keyboard_event`]).
+const VK_SNAPSHOT: u32 = 0x2C;
+
 /// Channel from the hook callback to the emit-forwarder thread. The callback
 /// must NEVER do slow work (like `app.emit`, which can block on a busy webview):
 /// Windows silently REMOVES a low-level hook whose callback exceeds the
@@ -1394,6 +1398,16 @@ fn process_keyboard_event(
                     }
                     handle_binding_event(binding, action, pressed, released, true);
                     return !bound_is_modifier; // never suppress modifier keys
+                }
+                // Print Screen can arrive as its release alone (Windows keeps
+                // its press for the screenshot key): a release whose press
+                // never came is the press too, then the release.
+                if vkey == VK_SNAPSHOT && !binding.active.load(Ordering::Relaxed) {
+                    let held = mods_now(vkey, false);
+                    if (required == 0 && held != 0) || held & required != required {
+                        return false;
+                    }
+                    handle_binding_event(binding, action, pressed, released, true);
                 }
                 let ours = handle_binding_event(binding, action, pressed, released, false);
                 return ours && !bound_is_modifier;

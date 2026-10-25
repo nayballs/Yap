@@ -140,6 +140,7 @@ export function vkeyName(v) {
     13: 'Enter',
     19: 'Pause',
     20: 'CapsLock',
+    44: 'Print Screen',
     32: 'Space',
     33: 'PageUp',
     34: 'PageDown',

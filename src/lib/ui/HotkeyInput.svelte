@@ -123,6 +123,17 @@
   }
 
   function onKeyUp(e) {
+    // Print Screen: Windows sends the page only its release, never a press.
+    if (capturing && e.keyCode === 44 && !eventModifierFamily(e)) {
+      e.preventDefault();
+      e.stopPropagation();
+      const mods = [];
+      if (e.ctrlKey) mods.push('ctrl');
+      if (e.altKey) mods.push('alt');
+      if (e.shiftKey) mods.push('shift');
+      if (e.metaKey) mods.push('win');
+      return finalize(mods.length ? `kb:${mods.join('+')}+44` : 'kb:44');
+    }
     const fam = eventModifierFamily(e);
     if (!fam || !capturing) return;
     e.preventDefault();

@@ -14,6 +14,8 @@
   import LinkRow from '../ui/LinkRow.svelte';
   import Toggle from '../ui/Toggle.svelte';
   import SettingsHotkey from './SettingsHotkey.svelte';
+  import { validateHotkey } from './hotkeys.svelte.js';
+  import { toast } from '../ui/toast.svelte.js';
   import { transformName } from './transforms.js';
   import { languageShortcuts, shortcutName } from './languages.svelte.js';
 
@@ -84,11 +86,27 @@
   <Row
     label="Snip to Chat"
     desc="Drag a box over any screen: the picture goes into Chat for you to ask about"
-    hint="Esc or right-click cancels. ✂ on the Yap bar and the tray's Snip to Chat do the same. Windows never lets an app capture its administrator prompts, and video protected from copying comes out black."
+    hint="Esc or right-click cancels. ✂ on the Yap bar and the tray's Snip to Chat do the same. With Print Screen, Yap snips instead of Windows while it runs. Windows never lets an app capture its administrator prompts, and video protected from copying comes out black."
     setting="shortcut-snip"
   >
     <SettingsHotkey {cfg} target="snipHotkey" clearable more />
   </Row>
+  {#if cfg.snipHotkey !== 'kb:44'}
+    <Row>
+      <p class="set-note">
+        Rather snip with Print Screen?
+        <button
+          class="set-link"
+          type="button"
+          onclick={() => {
+            const err = validateHotkey(cfg, 'snipHotkey', 'kb:44');
+            if (err) toast({ title: "Couldn't use Print Screen", description: err, variant: 'destructive' });
+            else cfg.snipHotkey = 'kb:44';
+          }}>Use Print Screen</button
+        >
+      </p>
+    </Row>
+  {/if}
   <!-- Every snip to Chat on the clipboard too, as Windows' Snipping Tool
        does (snip.rs; out of Win+V history). -->
   <Row setting="snip-copy">

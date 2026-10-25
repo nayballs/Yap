@@ -1124,6 +1124,30 @@ test('Privacy & data: where chat screenshots are kept, Open folder, and Delete a
   await closeSettings(main);
 });
 
+test('Snip to Chat on Print Screen: the recorder takes its release alone, and "Use Print Screen" sets it', async ({ yap, main }) => {
+  let dialog = await openSettings(main, 'Shortcuts');
+  const row = () => dialog.locator('[data-setting="shortcut-snip"]');
+  // Windows gives the page only Print Screen's release, never its press.
+  await row().getByRole('button', { name: /Change$/ }).first().click();
+  const cdp = await main.context().newCDPSession(main);
+  try {
+    await cdp.send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'PrintScreen', code: 'PrintScreen', windowsVirtualKeyCode: 44, nativeVirtualKeyCode: 44 });
+  } finally {
+    await cdp.detach().catch(() => {});
+  }
+  await expectStore(yap, 'config.json', (c) => c.snipHotkey === 'kb:44');
+  await expect(row()).toContainText('Print Screen');
+  await expect(dialog.getByRole('button', { name: 'Use Print Screen' })).toHaveCount(0);
+  await closeSettings(main);
+  // Back to Win+Alt+S: one click puts Print Screen there.
+  await setConfig(yap, main, { snipHotkey: 'kb:alt+win+83' });
+  dialog = await openSettings(main, 'Shortcuts');
+  await dialog.getByRole('button', { name: 'Use Print Screen' }).click();
+  await expectStore(yap, 'config.json', (c) => c.snipHotkey === 'kb:44');
+  await closeSettings(main);
+  await setConfig(yap, main, { snipHotkey: 'kb:alt+win+83' });
+});
+
 async function pressKey(page, key, vk) {
   const cdp = await page.context().newCDPSession(page);
   try {
