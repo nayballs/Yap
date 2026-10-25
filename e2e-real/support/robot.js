@@ -24,12 +24,14 @@ import {
   startTestPad,
   startPowerShell,
   startFakeClaudeCode,
+  startConsoleCli,
   startChatPage,
   startEditorPage,
   startEditorTerminal,
   startMediaPage,
   startMintty,
   startNotepad,
+  startPage,
   startReadingPage,
 } from './targets.js';
 
@@ -133,9 +135,20 @@ export class Robot {
     return this.track(await startPowerShell({ nonce: this.nonce, cwd: path.join(this.dir, `${label}-${this.targets.length}`) }));
   }
 
-  /** The stand-in for Claude Code in a new Windows Terminal window. */
-  async claudeCode(label = 'cli') {
-    return this.track(await startFakeClaudeCode({ nonce: this.nonce, cwd: path.join(this.dir, `${label}-${this.targets.length}`) }));
+  /**
+   * The stand-in for Claude Code in a new Windows Terminal window (`title`:
+   * another title, with the nonce — "Yap robot raw <nonce>" is a plain
+   * program, no coding CLI).
+   */
+  async claudeCode(label = 'cli', { title } = {}) {
+    return this.track(
+      await startFakeClaudeCode({ nonce: this.nonce, cwd: path.join(this.dir, `${label}-${this.targets.length}`), title }),
+    );
+  }
+
+  /** The stand-in CLI in a classic console window (conhost), titled `title` (default Claude Code's "✳ <nonce>"). */
+  async consoleCli(label = 'conhost', { title } = {}) {
+    return this.track(await startConsoleCli({ nonce: this.nonce, cwd: path.join(this.dir, `${label}-${this.targets.length}`), title }));
   }
 
   /**
@@ -167,6 +180,16 @@ export class Robot {
   async editorTerminal(terminalTitle) {
     return this.track(
       await startEditorTerminal({ nonce: this.nonce, dir: path.join(this.dir, `vscode-${this.targets.length}`), terminalTitle }),
+    );
+  }
+
+  /**
+   * An Edge app window on a page of `body`'s markup ("Yap robot page -
+   * <nonce>": an ordinary app), its element `#box` focused.
+   */
+  async page(body, label = 'page') {
+    return this.track(
+      await startPage({ nonce: this.nonce, dir: path.join(this.dir, `${label}-${this.targets.length}`), title: `Yap robot page - ${this.nonce}`, body }),
     );
   }
 

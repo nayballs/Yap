@@ -57,6 +57,7 @@ mod platform {
     // for its cbSize parameter.
 
     #[repr(C)]
+    #[derive(Copy, Clone)]
     struct INPUT {
         type_: u32,
         union: INPUT_UNION,
@@ -107,6 +108,9 @@ mod platform {
     const WS_EX_TOOLWINDOW: i32 = 0x0000_0080;
     const WS_EX_NOACTIVATE: i32 = 0x0800_0000;
     const DWMWA_CLOAKED: u32 = 14;
+    const WM_COMMAND: u32 = 0x0111;
+    /// A console window's Edit → Paste (conhost's `ID_CONSOLE_PASTE`).
+    const ID_CONSOLE_PASTE: usize = 0xFFF1;
 
     type HWND = *mut core::ffi::c_void;
 
@@ -142,6 +146,7 @@ mod platform {
         fn GetWindowLongW(hwnd: *mut core::ffi::c_void, index: i32) -> i32;
         fn GetClassNameW(hwnd: HWND, buf: *mut u16, max: i32) -> i32;
         fn GetWindowTextLengthW(hwnd: HWND) -> i32;
+        fn PostMessageW(hwnd: HWND, msg: u32, wparam: usize, lparam: isize) -> i32;
     }
     #[link(name = "dwmapi")]
     extern "system" {
@@ -331,28 +336,22 @@ mod platform {
     ///
     /// Fallback for when the clipboard/paste path is unavailable. Sends each
     /// UTF-16 code unit as a key down/up pair (surrogate pairs go through as
-    /// consecutive units, which Windows recombines).
-    pub fn type_unicode(text: &str) {
+    /// consecutive units, which Windows recombines). In chunks, each with the
+    /// modifiers sorted around it ([`send_keys`]): a held Alt would make
+    /// every letter a menu key. `Err` when Windows didn't take them all.
+    pub fn type_unicode(text: &str) -> Result<(), String> {
         let mut inputs: Vec<INPUT> = Vec::with_capacity(text.len() * 2);
         for unit in text.encode_utf16() {
             inputs.push(make_unicode(unit, false));
             inputs.push(make_unicode(unit, true));
         }
-        if inputs.is_empty() {
-            return;
-        }
         // Send in chunks so a very long transcript doesn't overflow the input
         // queue in a single call.
         for chunk in inputs.chunks(512) {
-            unsafe {
-                SendInput(
-                    chunk.len() as u32,
-                    chunk.as_ptr(),
-                    mem::size_of::<INPUT>() as i32,
-                );
-            }
+            send_keys(chunk.to_vec(), "typing")?;
             thread::sleep(Duration::from_millis(2));
         }
+        Ok(())
     }
 
     fn make_key(vk: u16, up: bool) -> INPUT {
@@ -397,14 +396,147 @@ mod platform {
         }
     }
 
+    /// A modifier Yap lets go of or presses again (`modifiers.rs`): its
+    /// side-specific key, scan code and extended flag, as a keyboard sends it.
+    fn make_modifier(key: crate::pasting::modifiers::Key) -> INPUT {
+        let scan = unsafe { MapVirtualKeyExW(u32::from(key.vk), MAPVK_VK_TO_VSC_EX, GetKeyboardLayout(0)) };
+        let mut flags = if key.up { KEYEVENTF_KEYUP } else { 0 };
+        if key.extended {
+            flags |= KEYEVENTF_EXTENDEDKEY;
+        }
+        INPUT {
+            type_: INPUT_KEYBOARD,
+            union: INPUT_UNION {
+                ki: KEYBDINPUT {
+                    w_vk: key.vk,
+                    w_scan: (scan & 0xFF) as u16,
+                    dw_flags: flags,
+                    time: 0,
+                    dw_extra_info: 0,
+                },
+            },
+        }
+    }
+
+    /// One `SendInput` call, checked: Windows says how many events it put
+    /// in the input stream, and fewer than asked (a secure desktop — a UAC
+    /// prompt, the lock screen —, another app blocking input, UIPI) means
+    /// the keys didn't go. Any key the events that did go left down is let
+    /// go again. `Err(why)` for the log.
+    fn send(inputs: &[INPUT], what: &str) -> Result<(), String> {
+        if inputs.is_empty() {
+            return Ok(());
+        }
+        #[cfg(debug_assertions)]
+        let blocked = super::test_keys_blocked();
+        #[cfg(not(debug_assertions))]
+        let blocked = false;
+        let sent = if blocked {
+            0
+        } else {
+            unsafe { SendInput(inputs.len() as u32, inputs.as_ptr(), mem::size_of::<INPUT>() as i32) }
+        };
+        if sent as usize == inputs.len() {
+            return Ok(());
+        }
+        let error = if blocked {
+            "a test run's stand-in for a blocked input".to_string()
+        } else {
+            std::io::Error::last_os_error().to_string()
+        };
+        tracing::warn!(sent, expected = inputs.len(), "Windows didn't take Yap's keys ({what}): {error}");
+        // Keys the events that went in left down: up again (best-effort).
+        let left_down = keys_left_down(&inputs[..sent as usize]);
+        if !left_down.is_empty() {
+            let ups: Vec<INPUT> = left_down.into_iter().map(|vk| make_key(vk, true)).collect();
+            unsafe { SendInput(ups.len() as u32, ups.as_ptr(), mem::size_of::<INPUT>() as i32) };
+        }
+        Err(format!("Windows took {sent} of {} key events ({error})", inputs.len()))
+    }
+
+    /// The virtual keys `inputs` press and don't let go (Unicode characters
+    /// aside).
+    fn keys_left_down(inputs: &[INPUT]) -> Vec<u16> {
+        let mut down: Vec<u16> = Vec::new();
+        for input in inputs {
+            let ki = unsafe { input.union.ki };
+            if input.type_ != INPUT_KEYBOARD || ki.dw_flags & KEYEVENTF_UNICODE != 0 || ki.w_vk == 0 {
+                continue;
+            }
+            if ki.dw_flags & KEYEVENTF_KEYUP != 0 {
+                down.retain(|&vk| vk != ki.w_vk);
+            } else if !down.contains(&ki.w_vk) {
+                down.push(ki.w_vk);
+            }
+        }
+        down
+    }
+
+    /// Yap's keys (`body`) with the modifiers sorted around them
+    /// (`modifiers.rs`): any Windows says is down goes up first — Ctrl+V
+    /// with a stuck Alt is Ctrl+Alt+V —, and those the person is holding
+    /// come back down after, in the same call (Windows never interleaves
+    /// other input with one `SendInput`). Checked ([`send`]); after a
+    /// failure, a modifier it let go of that the person holds is pressed
+    /// again (best-effort).
+    fn send_keys(body: Vec<INPUT>, what: &str) -> Result<(), String> {
+        use crate::pasting::modifiers;
+        let plan = modifiers::plan(modifiers::down_now(), modifiers::held());
+        if plan.is_empty() {
+            return send(&body, what);
+        }
+        tracing::info!(
+            stuck = %modifiers::names(plan.release & !plan.restore),
+            held = %modifiers::names(plan.restore),
+            "Modifiers down before {what}: let go of around Yap's keys"
+        );
+        let (before, after) = modifiers::around(plan);
+        let inputs: Vec<INPUT> = before
+            .into_iter()
+            .map(make_modifier)
+            .chain(body)
+            .chain(after.into_iter().map(make_modifier))
+            .collect();
+        let result = send(&inputs, what);
+        if result.is_err() {
+            let missing = plan.restore & !modifiers::down_now();
+            if missing != 0 {
+                let (_, again) = modifiers::around(modifiers::Plan { release: 0, restore: missing });
+                let again: Vec<INPUT> = again.into_iter().map(make_modifier).collect();
+                unsafe { SendInput(again.len() as u32, again.as_ptr(), mem::size_of::<INPUT>() as i32) };
+            }
+        }
+        result
+    }
+
     /// Simulate the paste keys via SendInput (into `target`: robot mode
     /// checks it's still in front right after): Ctrl+V, or what the
-    /// terminal there binds (`app_kind::Host::paste_key`).
-    pub fn simulate_paste(target: Option<isize>, key: crate::pasting::app_kind::PasteKey) {
+    /// terminal there binds (`app_kind::Host::paste_key`). `Err` when
+    /// Windows didn't take them.
+    pub fn simulate_paste(target: Option<isize>, key: crate::pasting::app_kind::PasteKey) -> Result<(), String> {
         use crate::pasting::app_kind::PasteKey;
+        // A classic console window: its own Edit → Paste, no keys (a raw
+        // keyboard program there gets Ctrl+V as a ^V).
+        if key == PasteKey::ConsoleMenu {
+            if let Some(hwnd) = target.filter(|&h| class_of(h as HWND) == "ConsoleWindowClass") {
+                #[cfg(debug_assertions)]
+                if super::test_keys_blocked() {
+                    return Err("a test run's stand-in for a refused paste".into());
+                }
+                let posted = unsafe { PostMessageW(hwnd as HWND, WM_COMMAND, ID_CONSOLE_PASTE, 0) } != 0;
+                crate::shell::realtest::check_after(target, "paste");
+                tracing::debug!(posted, "The console's own Paste");
+                thread::sleep(Duration::from_millis(80));
+                return if posted {
+                    Ok(())
+                } else {
+                    Err(format!("the console didn't take its Paste ({})", std::io::Error::last_os_error()))
+                };
+            }
+        }
         let inputs: Vec<INPUT> = match key {
             // As it always was (no scan codes): every app it's been tried in pastes.
-            PasteKey::CtrlV => vec![
+            PasteKey::CtrlV | PasteKey::ConsoleMenu => vec![
                 make_key(VK_CONTROL, false),
                 make_key(VK_V, false),
                 make_key(VK_V, true),
@@ -431,49 +563,31 @@ mod platform {
             }
         };
 
-        let sent = unsafe {
-            SendInput(
-                inputs.len() as u32,
-                inputs.as_ptr(),
-                mem::size_of::<INPUT>() as i32,
-            )
-        };
+        let sent = send_keys(inputs, key.name());
         crate::shell::realtest::check_after(target, "paste");
-
-        tracing::debug!(
-            sent,
-            expected = inputs.len(),
-            cb_size = mem::size_of::<INPUT>(),
-            "SendInput {}",
-            key.name()
-        );
+        tracing::debug!(ok = sent.is_ok(), "SendInput {}", key.name());
 
         // Brief delay to let the target app process the paste
         thread::sleep(Duration::from_millis(80));
+        sent
     }
 
     /// Simulate Ctrl+C keystroke via SendInput (used by the edit-mode selection
     /// capture fallback to copy the current selection into the clipboard).
-    pub fn simulate_copy() {
-        let inputs = [
+    pub fn simulate_copy() -> Result<(), String> {
+        let inputs = vec![
             make_key(VK_CONTROL, false),
             make_key(VK_C, false),
             make_key(VK_C, true),
             make_key(VK_CONTROL, true),
         ];
-        let sent = unsafe {
-            SendInput(
-                inputs.len() as u32,
-                inputs.as_ptr(),
-                mem::size_of::<INPUT>() as i32,
-            )
-        };
-        tracing::debug!(sent, expected = inputs.len(), "SendInput Ctrl+C");
+        send_keys(inputs, "Ctrl+C")
     }
 
     /// Simulate a submit keystroke via SendInput (used by auto-submit):
-    /// plain Enter, Ctrl+Enter, or Shift+Enter depending on `key`.
-    pub fn press_submit(key: &str) {
+    /// plain Enter, Ctrl+Enter, or Shift+Enter depending on `key`. `Err`
+    /// when Windows didn't take them.
+    pub fn press_submit(key: &str) -> Result<(), String> {
         let modifier = match key {
             "ctrlEnter" => Some(VK_CONTROL),
             "shiftEnter" => Some(VK_SHIFT),
@@ -490,16 +604,10 @@ mod platform {
             inputs.push(make_key(m, true));
         }
 
-        let sent = unsafe {
-            SendInput(
-                inputs.len() as u32,
-                inputs.as_ptr(),
-                mem::size_of::<INPUT>() as i32,
-            )
-        };
-
-        tracing::debug!(sent, expected = inputs.len(), key, "SendInput submit");
+        let sent = send_keys(inputs, key);
+        tracing::debug!(ok = sent.is_ok(), key, "SendInput submit");
         thread::sleep(Duration::from_millis(20));
+        sent
     }
 }
 
@@ -514,7 +622,7 @@ mod clip {
     use windows::core::PCWSTR;
     use windows::Win32::Foundation::{GlobalFree, HANDLE, HGLOBAL};
     use windows::Win32::System::DataExchange::{
-        CloseClipboard, CountClipboardFormats, EmptyClipboard, GetClipboardData,
+        CloseClipboard, CountClipboardFormats, EmptyClipboard, EnumClipboardFormats, GetClipboardData,
         GetClipboardSequenceNumber, IsClipboardFormatAvailable, OpenClipboard,
         RegisterClipboardFormatW, SetClipboardData,
     };
@@ -773,10 +881,250 @@ mod clip {
     }
 
     /// Empty the clipboard (so a Ctrl+C that copies nothing shows as nothing).
+    #[cfg(test)]
     pub fn clear() {
         if let Some(_open) = Open::new() {
             let _ = unsafe { EmptyClipboard() };
         }
+    }
+
+    /// The clipboard, open, trying for up to `patience` while another app
+    /// holds it (a clipboard manager, the app reading a paste…).
+    fn open_within(patience: Duration) -> Option<Open> {
+        let started = std::time::Instant::now();
+        loop {
+            if unsafe { OpenClipboard(None) }.is_ok() {
+                return Some(Open);
+            }
+            if started.elapsed() >= patience {
+                return None;
+            }
+            sleep(Duration::from_millis(25));
+        }
+    }
+
+    const CF_BITMAP: u32 = 2;
+    const CF_METAFILEPICT: u32 = 3;
+    const CF_DIB: u32 = 8;
+    const CF_PALETTE: u32 = 9;
+    const CF_ENHMETAFILE: u32 = 14;
+
+    /// One clipboard format as Yap can put it back.
+    #[derive(Clone, Debug, PartialEq, Eq)]
+    pub enum Item {
+        /// Memory (nearly every format): its bytes.
+        Bytes(u32, Vec<u8>),
+        /// An enhanced metafile (Office's pictures): its bits.
+        Metafile(Vec<u8>),
+    }
+
+    /// Everything on the clipboard, every format byte for byte — for edit
+    /// mode's Ctrl+C, which borrows the clipboard: put back exactly, or the
+    /// clipboard is never touched.
+    pub enum Exact {
+        /// Every format (none: it was empty).
+        Kept(Vec<Item>),
+        /// Another app held it the whole time.
+        Busy,
+        /// It holds something Yap can't put back exactly (why).
+        CantKeep(&'static str),
+    }
+
+    /// Whether a format Windows lists can be left out because Windows makes
+    /// it again from another one that's kept (`formats`: all listed): the
+    /// bitmap and palette from a DIB, the old metafile picture from an
+    /// enhanced metafile. Pure.
+    pub fn remade(format: u32, formats: &[u32]) -> bool {
+        let dib = formats.contains(&CF_DIB) || formats.contains(&CF_DIBV5);
+        match format {
+            CF_BITMAP | CF_PALETTE => dib,
+            CF_METAFILEPICT => formats.contains(&CF_ENHMETAFILE),
+            _ => false,
+        }
+    }
+
+    /// Formats whose data is a handle Yap can't copy: owner-drawn, GDI
+    /// objects and private handles (and those Windows can't remake from
+    /// another format). Pure.
+    pub fn uncopyable(format: u32) -> bool {
+        matches!(format, CF_BITMAP | CF_METAFILEPICT | CF_PALETTE | 0x80 | 0x82 | 0x83 | 0x8E)
+            || (0x200..=0x3FF).contains(&format)
+    }
+
+    /// OLE's own bookkeeping for the app that copied (a live object of its
+    /// process): never put back; OLE answers from the formats themselves.
+    const OLE_INTERNAL: [&str; 2] = ["DataObject", "Ole Private Data"];
+
+    /// [`Exact`] now, waiting up to `patience` for the clipboard.
+    pub fn snapshot_exact(patience: Duration) -> Exact {
+        let Some(_open) = open_within(patience) else {
+            return Exact::Busy;
+        };
+        let mut formats = Vec::new();
+        let mut f = 0u32;
+        loop {
+            f = unsafe { EnumClipboardFormats(f) };
+            if f == 0 {
+                break;
+            }
+            formats.push(f);
+        }
+        let ole: Vec<u32> = OLE_INTERNAL.iter().map(|n| registered(n)).collect();
+        let mut items = Vec::new();
+        let mut total = 0usize;
+        for &format in &formats {
+            if remade(format, &formats) || ole.contains(&format) {
+                continue;
+            }
+            if uncopyable(format) {
+                return Exact::CantKeep("something only the app that copied it can draw");
+            }
+            let item = if format == CF_ENHMETAFILE {
+                match read_metafile() {
+                    Some(bits) => Item::Metafile(bits),
+                    None => return Exact::CantKeep("a picture Yap couldn't read"),
+                }
+            } else {
+                match read_any(format) {
+                    Ok(Some(bytes)) => Item::Bytes(format, bytes),
+                    // Listed but nothing behind it (an app that couldn't
+                    // render it): nothing to lose.
+                    Ok(None) => continue,
+                    Err(why) => return Exact::CantKeep(why),
+                }
+            };
+            total += match &item {
+                Item::Bytes(_, b) | Item::Metafile(b) => b.len(),
+            };
+            if total > MAX_SNAPSHOT_BYTES {
+                return Exact::CantKeep("more than Yap keeps");
+            }
+            items.push(item);
+        }
+        debug!(formats = items.len(), bytes = total, "Clipboard kept, every format");
+        Exact::Kept(items)
+    }
+
+    /// One memory format's bytes (the clipboard open), however small:
+    /// `Ok(None)` when nothing is behind it, `Err` when it isn't memory.
+    fn read_any(format: u32) -> Result<Option<Vec<u8>>, &'static str> {
+        unsafe {
+            let Ok(handle) = GetClipboardData(format) else { return Ok(None) };
+            if handle.is_invalid() {
+                return Ok(None);
+            }
+            let global = HGLOBAL(handle.0);
+            let size = GlobalSize(global);
+            if size > MAX_SNAPSHOT_BYTES {
+                return Err("more than Yap keeps");
+            }
+            let ptr = GlobalLock(global) as *const u8;
+            if ptr.is_null() {
+                return Err("something that isn't plain data");
+            }
+            let bytes = std::slice::from_raw_parts(ptr, size).to_vec();
+            let _ = GlobalUnlock(global);
+            Ok(Some(bytes))
+        }
+    }
+
+    /// The enhanced metafile's bits (the clipboard open).
+    fn read_metafile() -> Option<Vec<u8>> {
+        use windows::Win32::Graphics::Gdi::{GetEnhMetaFileBits, HENHMETAFILE};
+        unsafe {
+            let handle = GetClipboardData(CF_ENHMETAFILE).ok()?;
+            let emf = HENHMETAFILE(handle.0);
+            let size = GetEnhMetaFileBits(emf, None);
+            if size == 0 || size as usize > MAX_SNAPSHOT_BYTES {
+                return None;
+            }
+            let mut bits = vec![0u8; size as usize];
+            (GetEnhMetaFileBits(emf, Some(&mut bits)) == size).then_some(bits)
+        }
+    }
+
+    /// Put back what [`snapshot_exact`] kept — every format, then the
+    /// keep-it-out-of-history ones when `private` — waiting up to
+    /// `patience` for the clipboard. `true` once the write took (its
+    /// sequence number moved).
+    pub fn restore_exact(items: &[Item], private: bool, patience: Duration) -> bool {
+        let started = std::time::Instant::now();
+        loop {
+            let left = patience.saturating_sub(started.elapsed());
+            let before = sequence();
+            if let Some(_open) = open_within(left) {
+                match put_items(items, private) {
+                    Ok(()) if sequence() != before => return true,
+                    Ok(()) => debug!("Clipboard restore didn't take (sequence number unchanged)"),
+                    Err(e) => debug!(error = %e, "Clipboard restore failed"),
+                }
+            }
+            if started.elapsed() >= patience {
+                return false;
+            }
+            sleep(Duration::from_millis(50));
+        }
+    }
+
+    /// The clipboard emptied and `items` put on it (it's open).
+    fn put_items(items: &[Item], private: bool) -> Result<(), String> {
+        use windows::Win32::Graphics::Gdi::{DeleteEnhMetaFile, SetEnhMetaFileBits};
+        unsafe { EmptyClipboard() }.map_err(|e| format!("EmptyClipboard: {e}"))?;
+        for item in items {
+            match item {
+                Item::Bytes(format, bytes) => set(*format, bytes)?,
+                Item::Metafile(bits) => unsafe {
+                    let emf = SetEnhMetaFileBits(bits);
+                    if emf.is_invalid() {
+                        return Err("SetEnhMetaFileBits failed".into());
+                    }
+                    if let Err(e) = SetClipboardData(CF_ENHMETAFILE, Some(HANDLE(emf.0))) {
+                        let _ = DeleteEnhMetaFile(Some(emf));
+                        return Err(format!("SetClipboardData (a metafile): {e}"));
+                    }
+                },
+            }
+        }
+        if private && !items.is_empty() {
+            for (name, value) in PRIVATE {
+                if let Err(e) = set(registered(name), &value.to_le_bytes()) {
+                    debug!(format = name, error = %e, "Couldn't add a privacy format");
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Robot mode and tests: the clipboard's formats as Yap keeps them,
+    /// each format's number and a hash of its bytes (never the bytes).
+    #[cfg(debug_assertions)]
+    pub fn fingerprint() -> Option<Vec<(u32, u64)>> {
+        use std::hash::{Hash, Hasher};
+        match snapshot_exact(Duration::from_millis(500)) {
+            Exact::Kept(items) => {
+                let mut all: Vec<(u32, u64)> = items
+                    .iter()
+                    .map(|item| {
+                        let (format, bytes) = match item {
+                            Item::Bytes(f, b) => (*f, b),
+                            Item::Metafile(b) => (CF_ENHMETAFILE, b),
+                        };
+                        let mut h = std::collections::hash_map::DefaultHasher::new();
+                        bytes.hash(&mut h);
+                        (format, h.finish())
+                    })
+                    .collect();
+                all.sort_unstable();
+                Some(all)
+            }
+            _ => None,
+        }
+    }
+
+    /// Robot mode: a registered format's number.
+    #[cfg(debug_assertions)]
+    pub fn format_id(name: &str) -> u32 {
+        registered(name)
     }
 
     /// Robot mode: put raw formats on the clipboard, privately.
@@ -832,6 +1180,16 @@ mod clip {
 
     #[cfg(test)]
     pub const HDROP: u32 = CF_HDROP;
+
+    /// Tests: text as a word processor copies it (plain, HTML, its own).
+    #[cfg(test)]
+    pub fn rich_items() -> Vec<(u32, Vec<u8>)> {
+        vec![
+            (CF_UNICODETEXT, text_bytes("Quarterly plan")),
+            (registered("HTML Format"), b"Version:0.9\r\n<b>Quarterly plan</b>".to_vec()),
+            (registered("Yap Test Format"), (0u8..=255).collect()),
+        ]
+    }
 }
 
 /// Robot mode's clipboard (`realtest_clipboard`), which never hands the
@@ -871,6 +1229,24 @@ pub(crate) fn robot_clipboard(action: &str, text: Option<&str>) -> Result<serde_
             }
             Ok(json!({ "set": true }))
         }
+        // Text as a word processor copies it: plain text, HTML and a
+        // format of the app's own (privately).
+        "setRich" => {
+            let text = text.ok_or("setRich needs a text")?;
+            let html = format!(
+                "Version:0.9\r\nStartHTML:-1\r\nEndHTML:-1\r\nStartFragment:0000000000\r\nEndFragment:0000000000\r\n<b>{text}</b>"
+            );
+            let unicode: Vec<u8> = text.encode_utf16().chain(std::iter::once(0)).flat_map(|u| u.to_le_bytes()).collect();
+            clip::put_private(&[
+                (13, unicode),
+                (clip::format_id("HTML Format"), html.into_bytes()),
+                (clip::format_id("Yap Robot Format"), (0u8..=255).collect()),
+            ])?;
+            Ok(json!({ "set": true }))
+        }
+        // Every format on the clipboard as Yap keeps it: its number and a
+        // hash of its bytes (never the bytes).
+        "fingerprint" => Ok(json!({ "formats": clip::fingerprint() })),
         "setImage" => {
             let dib = test_image();
             clip::put_private(&[(clip::DIBV5, dib.clone())])?;
@@ -1030,14 +1406,126 @@ pub enum Delivery {
     /// was (`selection::PasteCheck`) — so the text was typed into it
     /// instead, once.
     Typed,
-    /// The app runs as administrator, so Windows would drop Yap's keys
-    /// (`elevated.rs`): none were sent, and the text is on the clipboard
-    /// for the person to paste. The caller says so (`elevated::alert`).
-    LeftOnClipboard,
+    /// It wasn't pasted, and the text is on the clipboard for the person to
+    /// paste: the caller says so, once ([`Left::alert`]).
+    LeftOnClipboard(Left),
     /// The paste had to go back to its own window (an Undo) and couldn't:
     /// the window is gone, or Windows wouldn't bring it to the front. No
     /// keys were sent anywhere else; the text is on the clipboard.
     WindowGone,
+}
+
+/// Why a dictation was left on the clipboard instead of pasted.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Left {
+    /// The app runs as administrator, so Windows would drop Yap's keys
+    /// (`elevated.rs`): none were sent.
+    Elevated,
+    /// Windows didn't take the paste keys (`SendInput` put in fewer events
+    /// than asked: a secure desktop, another app blocking input, UIPI), even
+    /// on a second try.
+    KeysBlocked,
+    /// Nothing that takes text had the focus — UI Automation said so
+    /// plainly, before the keys and after them (`selection::focus_editable`)
+    /// — so the paste landed nowhere.
+    NoTextBox,
+}
+
+impl Left {
+    /// The one notice for it (a toast, a bar card or a Windows
+    /// notification, through `notices/alert.rs`): the text is copied.
+    pub fn alert(self) -> crate::notices::alert::Alert {
+        let (title, body) = match self {
+            Left::Elevated => return crate::pasting::elevated::alert(),
+            Left::KeysBlocked => (
+                "Couldn't paste · it's copied, press Ctrl+V",
+                "Windows didn't let Yap press keys just then (a secure screen or another app had the keyboard), so your dictation is on the clipboard instead.",
+            ),
+            Left::NoTextBox => (
+                "Select a text box first",
+                "Nothing that takes text had the focus, so your dictation is on the clipboard: click where it goes and press Ctrl+V.",
+            ),
+        };
+        crate::notices::alert::Alert {
+            kind: "pasteBlocked",
+            icon: "clipboard",
+            title: title.to_string(),
+            body: body.to_string(),
+            action: None,
+            timeout_ms: 12_000,
+        }
+    }
+
+    /// Why it isn't pasted, for history.
+    pub fn not_pasted(self) -> &'static str {
+        match self {
+            Left::Elevated => "Left on the clipboard: the app runs as administrator",
+            Left::KeysBlocked => "Left on the clipboard: Windows didn't take the paste keys",
+            Left::NoTextBox => "Left on the clipboard: no text box had the focus",
+        }
+    }
+
+    /// For the robot's report and the log.
+    pub fn code(self) -> &'static str {
+        match self {
+            Left::Elevated => "admin",
+            Left::KeysBlocked => "keysBlocked",
+            Left::NoTextBox => "noTextBox",
+        }
+    }
+}
+
+/// Test mode: a paste fails this way (0 none, 1 keys blocked, 2 no text
+/// box). Plain test mode says what each says; robot mode really leaves
+/// the text on the clipboard for keys blocked (every `SendInput` counts as
+/// refused), and finds "no text box" for real.
+#[cfg(debug_assertions)]
+static TEST_LEFT: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(0);
+
+/// Test mode's stand-in failure, if any ([`e2e_paste_fails`]).
+fn test_left() -> Option<Left> {
+    #[cfg(debug_assertions)]
+    {
+        if !crate::shell::e2e::active() {
+            return None;
+        }
+        match TEST_LEFT.load(std::sync::atomic::Ordering::SeqCst) {
+            1 => Some(Left::KeysBlocked),
+            2 => Some(Left::NoTextBox),
+            _ => None,
+        }
+    }
+    #[cfg(not(debug_assertions))]
+    None
+}
+
+/// Robot mode: every `SendInput` counts as refused (`e2e_paste_fails
+/// "keysBlocked"`).
+#[cfg(debug_assertions)]
+pub(crate) fn test_keys_blocked() -> bool {
+    crate::shell::realtest::on() && test_left() == Some(Left::KeysBlocked)
+}
+
+/// Test mode only: pastes fail with `why` ("keysBlocked": Windows didn't
+/// take the keys; "noTextBox": nothing that takes text had the focus), or
+/// don't (`null`). Plain test mode pastes nothing either way and says what
+/// that failure says; robot mode refuses its own keys for "keysBlocked",
+/// leaving the text on the clipboard for real.
+#[cfg(debug_assertions)]
+#[tauri::command]
+pub fn e2e_paste_fails(why: Option<String>) -> Result<(), String> {
+    if !crate::shell::e2e::active() {
+        return Err("Only in e2e test mode".to_string());
+    }
+    let value = match why.as_deref() {
+        None => 0,
+        Some("keysBlocked") => 1,
+        Some("noTextBox") => 2,
+        Some(other) => return Err(format!("Unknown failure {other}")),
+    };
+    info!(why = ?why, "e2e: pastes fail");
+    TEST_LEFT.store(value, std::sync::atomic::Ordering::SeqCst);
+    Ok(())
 }
 
 /// Simulate the auto-submit keystroke in the focused window. `key` is one of
@@ -1058,7 +1546,7 @@ pub async fn press_submit(key: &str) -> Result<(), String> {
             return Err("Yap can't press keys in an app running as administrator".to_string());
         }
         #[cfg(target_os = "windows")]
-        platform::press_submit(&key);
+        platform::press_submit(&key).map_err(|e| format!("Windows didn't take the {key} key: {e}"))?;
         crate::shell::realtest::check_after(None, &format!("{key} key"));
         #[cfg(not(target_os = "windows"))]
         {
@@ -1145,63 +1633,184 @@ pub fn window_process(hwnd: isize) -> Option<u32> {
     }
 }
 
+/// How long edit mode's Ctrl+C waits for a clipboard another app holds,
+/// before it takes the clipboard and before it puts it back.
+const BORROW_PATIENCE_MS: u64 = 1_000;
+const RESTORE_PATIENCE_MS: u64 = 2_000;
+/// How long Ctrl+C has to show on the clipboard (an app that copies
+/// nothing — no selection — never changes it).
+const COPY_WAIT_MS: u64 = 400;
+
+static APP: std::sync::OnceLock<tauri::AppHandle> = std::sync::OnceLock::new();
+
+/// At start (`lib.rs`): edit mode's Ctrl+C can say when it left the
+/// clipboard alone.
+pub fn init(app: &tauri::AppHandle) {
+    let _ = APP.set(app.clone());
+}
+
+/// Why edit mode's Ctrl+C trick didn't read the selection.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Trouble {
+    /// Another app held the clipboard the whole wait: nothing touched.
+    Busy,
+    /// It holds something Yap couldn't put back exactly: nothing touched.
+    CantKeep(&'static str),
+    /// Windows didn't take Ctrl+C: nothing copied, nothing touched.
+    KeysBlocked,
+    /// The selection was read, but the clipboard couldn't be put back in
+    /// time: it holds the selection now.
+    NotRestored,
+}
+
+impl Trouble {
+    /// What the person is told (one notice).
+    pub fn alert(self) -> crate::notices::alert::Alert {
+        let (title, body) = match self {
+            Trouble::Busy => (
+                "Couldn't read your selection".to_string(),
+                "Another app was using the clipboard, so Yap left it alone. Try again in a moment.".to_string(),
+            ),
+            Trouble::CantKeep(what) => (
+                "Couldn't read your selection".to_string(),
+                format!("Your clipboard holds {what}, so Yap left it alone rather than lose it."),
+            ),
+            Trouble::KeysBlocked => (
+                "Couldn't read your selection".to_string(),
+                "Windows didn't let Yap press Ctrl+C just then. Your clipboard is as it was.".to_string(),
+            ),
+            Trouble::NotRestored => (
+                "Your clipboard couldn't be put back".to_string(),
+                "Another app held on to the clipboard, so it still has the text you selected instead of what you'd copied.".to_string(),
+            ),
+        };
+        crate::notices::alert::Alert {
+            kind: "clipboardBusy",
+            icon: "clipboard",
+            title,
+            body,
+            action: None,
+            timeout_ms: 10_000,
+        }
+    }
+}
+
+/// What edit mode's Ctrl+C trick found.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Copied {
+    /// The selection, if one was copied.
+    pub text: Option<String>,
+    /// What went wrong, if anything (the clipboard left alone, or not put back).
+    pub trouble: Option<Trouble>,
+}
+
 /// Capture the current text selection via the **clipboard Ctrl+C trick** — the
 /// fallback for edit/rewrite mode when UI Automation can't read the selection
-/// (common in Electron/Chromium/terminal apps).
-///
-/// Snapshots the clipboard, clears it (so we can tell whether Ctrl+C actually
-/// copied anything), sends Ctrl+C to `target_hwnd`, reads the result, then
-/// restores the original clipboard. Returns `None` if nothing was selected
-/// (clipboard stayed empty) or off Windows.
+/// (common in Electron/Chromium/terminal apps). `None` if nothing was
+/// selected or the clipboard couldn't be borrowed; then, or when it
+/// couldn't be put back, the person is told once (`notices/alert.rs`).
 pub fn selection_via_copy(target_hwnd: Option<isize>) -> Option<String> {
-    if crate::shell::e2e::active() {
+    say_trouble(copy_selection(target_hwnd, false)).text
+}
+
+/// The person told what went wrong, once, if anything did.
+pub(crate) fn say_trouble(copied: Copied) -> Copied {
+    if let Some(trouble) = copied.trouble {
+        warn!(?trouble, "Edit mode's Ctrl+C: the clipboard");
+        if let Some(app) = APP.get() {
+            crate::notices::alert::show_soon(app, trouble.alert());
+        }
+    }
+    copied
+}
+
+/// The Ctrl+C trick, borrowing the clipboard without ever losing it:
+///
+/// 1. Everything on it is kept first, every format byte for byte
+///    (`clip::snapshot_exact`), waiting up to a second for an app that
+///    holds it. Busy all that time, or holding something Yap can't put
+///    back exactly → nothing is pressed, nothing touched.
+/// 2. Ctrl+C, then its result is told by the clipboard's sequence number
+///    (the clipboard is never emptied first): unchanged → nothing was
+///    selected, and nothing needs putting back.
+/// 3. The text read, everything is put back (privately: out of Win+V
+///    history, as a paste's restore), waiting up to two seconds for the
+///    clipboard; still busy → it holds the selection, and that's said.
+///
+/// Test mode never; robot mode only when its spec asks (`robot`:
+/// `realtest_copy_selection`) and into a window the test opened.
+pub fn copy_selection(target_hwnd: Option<isize>, robot: bool) -> Copied {
+    let nothing = Copied { text: None, trouble: None };
+    let robot_may = robot && crate::shell::realtest::on() && crate::shell::realtest::permits(target_hwnd);
+    if crate::shell::e2e::active() && !robot_may {
         info!("e2e: not sending Ctrl+C to another app");
-        return None;
+        return nothing;
     }
     #[cfg(target_os = "windows")]
     {
+        use std::time::Duration;
         // Make sure the target window has focus so Ctrl+C hits the right field.
         if let Some(hwnd) = target_hwnd {
             platform::focus_window(hwnd);
-            std::thread::sleep(std::time::Duration::from_millis(20));
+            std::thread::sleep(Duration::from_millis(20));
         }
-
-        // Snapshot text *or* image/files so restoring doesn't wipe them.
-        let previous = clip::snapshot();
-        // Clear first: if Ctrl+C copies nothing (no selection), the clipboard
-        // stays empty and we correctly return None instead of the old contents.
-        clip::clear();
-        std::thread::sleep(std::time::Duration::from_millis(30));
-
-        platform::simulate_copy();
-        // Poll for the copy to land (up to ~200 ms) rather than a fixed sleep —
-        // returns as soon as text appears (fast common case) but tolerates a slow
-        // Ctrl+C in RDP/Electron/busy apps.
-        let mut copied = None;
-        for _ in 0..10 {
-            std::thread::sleep(std::time::Duration::from_millis(20));
-            if let Some(t) = clip::read_text() {
-                if !t.trim().is_empty() {
-                    copied = Some(t);
-                    break;
-                }
+        let kept = match clip::snapshot_exact(Duration::from_millis(BORROW_PATIENCE_MS)) {
+            clip::Exact::Kept(items) => items,
+            clip::Exact::Busy => return Copied { text: None, trouble: Some(Trouble::Busy) },
+            clip::Exact::CantKeep(what) => return Copied { text: None, trouble: Some(Trouble::CantKeep(what)) },
+        };
+        // Robot mode: the window in front is still the test's.
+        if let Err(why) = crate::shell::realtest::recheck_foreground(target_hwnd, "press Ctrl+C") {
+            info!("{why}");
+            return nothing;
+        }
+        let before = clip::sequence();
+        if platform::simulate_copy().is_err() {
+            return Copied { text: None, trouble: Some(Trouble::KeysBlocked) };
+        }
+        crate::shell::realtest::check_after(target_hwnd, "Ctrl+C");
+        // Poll for the copy to land rather than a fixed sleep: as soon as
+        // the clipboard changes (fast common case), up to COPY_WAIT_MS for
+        // a slow Ctrl+C in RDP/Electron/busy apps.
+        let started = std::time::Instant::now();
+        let changed = loop {
+            std::thread::sleep(Duration::from_millis(20));
+            if clip::sequence() != before {
+                break true;
             }
+            if started.elapsed() >= Duration::from_millis(COPY_WAIT_MS) {
+                break false;
+            }
+        };
+        if !changed {
+            debug!("Ctrl+C copied nothing (no selection); the clipboard untouched");
+            return nothing;
         }
-
-        // Restore the user's clipboard (best-effort), kept out of history: it
-        // is in there already.
+        // The app (or a clipboard manager reading it) may still hold it:
+        // read with up to a second's patience.
+        let mut text = None;
+        let reading = std::time::Instant::now();
+        while reading.elapsed() < Duration::from_millis(BORROW_PATIENCE_MS) {
+            if let Some(t) = clip::read_text() {
+                text = Some(t);
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(30));
+        }
+        // Everything back as it was, kept out of history (it's in there
+        // already) — unless the app syncs the clipboard to another machine.
         let private = !syncs_clipboard(app_name_for(target_hwnd).as_deref());
-        clip::restore(previous, private);
-
-        match copied {
-            Some(t) if !t.trim().is_empty() => Some(t),
-            _ => None,
+        let restored = clip::restore_exact(&kept, private, Duration::from_millis(RESTORE_PATIENCE_MS));
+        debug!(restored, formats = kept.len(), "Edit mode's Ctrl+C: the clipboard put back");
+        Copied {
+            text: text.filter(|t| !t.trim().is_empty()),
+            trouble: (!restored).then_some(Trouble::NotRestored),
         }
     }
     #[cfg(not(target_os = "windows"))]
     {
         let _ = target_hwnd;
-        None
+        nothing
     }
 }
 
@@ -1383,15 +1992,26 @@ pub fn has_last_transcript() -> bool {
 
 pub(crate) const NOTHING_TO_PASTE: &str = "Nothing to paste yet — dictate something first";
 
-/// The app at `receiver` runs as administrator: put `text` on the clipboard
-/// (privately, as a paste would: out of Win+V history) and leave it there
-/// for the person to paste. Nothing else is touched.
+/// Put `text` on the clipboard (privately, as a paste would: out of Win+V
+/// history) and leave it there for the person to paste (`why`: the app
+/// runs as administrator…). Nothing else is touched.
 #[cfg(target_os = "windows")]
-fn leave_on_clipboard(text: &str, receiver: Option<isize>) -> Result<Delivery, String> {
+fn leave_on_clipboard(text: &str, receiver: Option<isize>, why: Left) -> Result<Delivery, String> {
+    put_aside(text, receiver, why.code()).map(|()| Delivery::LeftOnClipboard(why))
+}
+
+/// [`leave_on_clipboard`] for an Undo whose window is gone.
+#[cfg(target_os = "windows")]
+fn window_gone(text: &str) -> Result<Delivery, String> {
+    put_aside(text, None, "windowGone").map(|()| Delivery::WindowGone)
+}
+
+#[cfg(target_os = "windows")]
+fn put_aside(text: &str, receiver: Option<isize>, why: &str) -> Result<(), String> {
     let private = !syncs_clipboard(app_name_for(receiver).as_deref());
     if clip::put_text_verified(text, private) {
-        warn!(len = text.len(), "Not pasted: the text is left on the clipboard");
-        Ok(Delivery::LeftOnClipboard)
+        warn!(len = text.len(), why, "Not pasted: the text is left on the clipboard");
+        Ok(())
     } else {
         Err("The text couldn't be pasted, nor put on the clipboard".into())
     }
@@ -1402,7 +2022,8 @@ fn leave_on_clipboard(text: &str, receiver: Option<isize>) -> Result<Delivery, S
 /// fitted to its cursor like a dictation. For when a paste went astray.
 /// Returns what was pasted. A test run pastes nothing and returns it. An app
 /// running as administrator gets it on the clipboard instead, and the person
-/// is told (`elevated.rs`). (Also its shortcut's, `last.rs`.)
+/// is told (`elevated.rs`) — as when Windows doesn't take the keys or no
+/// text box has the focus. (Also its shortcut's, `last.rs`.)
 pub(crate) fn paste_last_blocking(app: &tauri::AppHandle, as_said: bool) -> Result<String, String> {
     let text = if as_said { last_said_transcript() } else { last_transcript() }.ok_or(NOTHING_TO_PASTE)?;
     let cfg = crate::config::load();
@@ -1411,6 +2032,9 @@ pub(crate) fn paste_last_blocking(app: &tauri::AppHandle, as_said: bool) -> Resu
         if crate::pasting::elevated::test_override() {
             info!(len = out.len(), "e2e: the app counts as an admin app; not pasting the last transcript");
             crate::notices::alert::show(app, crate::pasting::elevated::alert());
+        } else if let Some(left) = test_left() {
+            info!(len = out.len(), why = left.code(), "e2e: the paste fails; not pasting the last transcript");
+            crate::notices::alert::show(app, left.alert());
         } else {
             info!(len = out.len(), "e2e: not pasting the last transcript");
         }
@@ -1431,7 +2055,7 @@ pub(crate) fn paste_last_blocking(app: &tauri::AppHandle, as_said: bool) -> Resu
         if target.is_some_and(crate::pasting::elevated::target_blocked) {
             let out = fit_for_paste(&text, None, cfg.append_trailing_space, &cfg.dictionary, AppKind::Other);
             warn!("The app runs as administrator: Windows won't let Yap type into it");
-            leave_on_clipboard(&out, target)?;
+            leave_on_clipboard(&out, target, Left::Elevated)?;
             crate::notices::alert::show(app, crate::pasting::elevated::alert());
             return Ok(out);
         }
@@ -1452,8 +2076,8 @@ pub(crate) fn paste_last_blocking(app: &tauri::AppHandle, as_said: bool) -> Resu
         };
         let out = fit_for_paste(&text, ctx.as_ref(), cfg.append_trailing_space, &cfg.dictionary, kind);
         info!(len = out.len(), found_window = target.is_some(), fitted = ctx.is_some(), "Pasting the last transcript");
-        if inject_text_sync(&out, cfg.restore_clipboard, target, false, raw)? == Delivery::LeftOnClipboard {
-            crate::notices::alert::show(app, crate::pasting::elevated::alert());
+        if let Delivery::LeftOnClipboard(left) = inject_text_sync(&out, cfg.restore_clipboard, target, false, raw)? {
+            crate::notices::alert::show(app, left.alert());
         }
         Ok(out)
     }
@@ -1490,16 +2114,20 @@ pub fn paste_last_from_tray(app: &tauri::AppHandle, as_said: bool) {
 ///
 /// `target_hwnd` (from [`current_foreground`] at record-start) is re-focused
 /// before pasting so focus changes during transcription don't misfire. Runs on a
-/// blocking thread to avoid blocking the tokio runtime. An app running as
-/// administrator gets no keys: the text is left on the clipboard
-/// ([`Delivery::LeftOnClipboard`]) and the caller tells the person.
-/// `strict` (an Undo, seconds after the dictation): the paste goes back to
-/// `target_hwnd` or nowhere — a window that's gone or won't come to the
-/// front leaves the text on the clipboard ([`Delivery::WindowGone`]) rather
-/// than pasting into whatever has the focus now. `kind`: the kind of app
-/// the window is, as read (before the settings): which keys paste there
-/// (`AppKind::paste_key`; Shift+Insert in Git Bash…), and — anything but a
-/// terminal — whether to check a Win32 edit control got the paste.
+/// blocking thread to avoid blocking the tokio runtime. When it can't be
+/// pasted — an app running as administrator, keys Windows didn't take,
+/// nothing that takes text with the focus — the text is left on the
+/// clipboard ([`Delivery::LeftOnClipboard`]) and the caller tells the
+/// person, once. `strict` (an Undo, seconds after the dictation): the paste
+/// goes back to `target_hwnd` or nowhere — a window that's gone or won't
+/// come to the front leaves the text on the clipboard
+/// ([`Delivery::WindowGone`]) rather than pasting into whatever has the
+/// focus now. `kind`: the kind of app the window is, as read (before the
+/// settings): which keys paste there (`AppKind::paste_key`; Shift+Insert in
+/// Git Bash…), whether a long paste goes in slices (a coding CLI that folds
+/// long pastes, `slices.rs`), and — anything but a terminal — whether to
+/// check a Win32 edit control got the paste, and that something that takes
+/// text has the focus.
 pub async fn inject_text(
     text: &str,
     restore_clipboard: bool,
@@ -1516,7 +2144,7 @@ pub async fn inject_text(
         #[cfg(target_os = "windows")]
         {
             let text = text.to_string();
-            return tokio::task::spawn_blocking(move || leave_on_clipboard(&text, None).map(|_| Delivery::WindowGone))
+            return tokio::task::spawn_blocking(move || window_gone(&text))
                 .await
                 .map_err(|e| format!("Inject task panicked: {}", e))?;
         }
@@ -1528,7 +2156,11 @@ pub async fn inject_text(
         crate::shell::realtest::Gate::TestMode => {
             if crate::pasting::elevated::test_override() {
                 info!(len = text.len(), "e2e: the target counts as an admin app; not pasting the text");
-                return Ok(Delivery::LeftOnClipboard);
+                return Ok(Delivery::LeftOnClipboard(Left::Elevated));
+            }
+            if let Some(left) = test_left() {
+                info!(len = text.len(), why = left.code(), "e2e: the paste fails; not pasting the text");
+                return Ok(Delivery::LeftOnClipboard(left));
             }
             info!(len = text.len(), "e2e: not pasting the text");
             return Ok(Delivery::Pasted);
@@ -1549,6 +2181,12 @@ pub async fn inject_text(
 const PASTE_LANDS_MS: u64 = 1_000;
 /// How often the control is read meanwhile.
 const PASTE_CHECK_EVERY_MS: u64 = 40;
+/// When nothing that takes text had the focus before the keys, how long
+/// after them it's looked at again (an app that moves the focus to its
+/// message box on a paste — Discord, Slack — has done it by then).
+const FOCUS_AGAIN_MS: u64 = 250;
+/// The pause before the paste keys go again when Windows didn't take them.
+const KEYS_AGAIN_MS: u64 = 150;
 
 /// Wait for the paste `check` was taken before to show in its control:
 /// the first read that sees a change says it landed, one that fails says
@@ -1578,6 +2216,21 @@ pub fn window_exists(hwnd: isize) -> bool {
     }
 }
 
+/// The paste keys into `target`, checked: Windows didn't take them → once
+/// more after a moment (robot mode: still the test's window in front).
+#[cfg(target_os = "windows")]
+fn press_paste(target: Option<isize>, key: app_kind::PasteKey) -> Result<(), String> {
+    match platform::simulate_paste(target, key) {
+        Ok(()) => Ok(()),
+        Err(first) => {
+            warn!("The paste keys didn't go ({first}); once more");
+            std::thread::sleep(std::time::Duration::from_millis(KEYS_AGAIN_MS));
+            crate::shell::realtest::recheck_foreground(target, "paste")?;
+            platform::simulate_paste(target, key)
+        }
+    }
+}
+
 fn inject_text_sync(
     text: &str,
     restore_clipboard: bool,
@@ -1600,13 +2253,15 @@ fn inject_text_sync(
 
     #[cfg(target_os = "windows")]
     {
+        use crate::pasting::selection::Editable;
+
         // An app running as administrator takes no keys from Yap (Windows
         // drops them without a word): the text stays on the clipboard for
         // the person to paste (`elevated.rs`).
         let receiver = target_hwnd.or_else(current_foreground);
         if receiver.is_some_and(crate::pasting::elevated::target_blocked) {
             warn!("The app runs as administrator: Windows won't let Yap type into it");
-            return leave_on_clipboard(text, receiver);
+            return leave_on_clipboard(text, receiver, Left::Elevated);
         }
 
         // Re-focus the window the user was dictating into (best-effort; an
@@ -1615,11 +2270,21 @@ fn inject_text_sync(
             let back = platform::focus_window(hwnd) && platform::is_foreground(hwnd);
             if !back && strict {
                 warn!("Couldn't get back to the dictation's window; leaving the text on the clipboard");
-                return leave_on_clipboard(text, None).map(|_| Delivery::WindowGone);
+                return window_gone(text);
             }
             if !back {
                 warn!("Could not re-focus the dictation target window; pasting into current focus");
             }
+        }
+
+        // A long paste into a coding CLI that folds long pastes into a
+        // placeholder goes in slices (`slices.rs`); everything else in one.
+        let slices: Vec<&str> = match crate::pasting::slices::limits(kind) {
+            Some(limits) => crate::pasting::slices::cut(text, limits),
+            None => vec![text],
+        };
+        if slices.len() > 1 {
+            info!(slices = slices.len(), "A long paste into {}: in slices", kind.describe());
         }
 
         // Kept out of clipboard history and sync, unless the target is a
@@ -1629,20 +2294,20 @@ fn inject_text_sync(
         // we'll restore it.
         let previous = restore_clipboard.then(clip::snapshot);
 
-        if !clip::put_text_verified(text, private) {
+        if !clip::put_text_verified(slices[0], private) {
             // The clipboard can't be written: type the text instead.
             warn!("Couldn't put the text on the clipboard; typing it instead");
             // Robot mode: still the test's window in front (always fine in a
             // normal run).
             let checked = crate::shell::realtest::recheck_foreground(target_hwnd, "type the text");
-            if checked.is_ok() {
-                platform::type_unicode(text);
+            let typed = checked.and_then(|()| platform::type_unicode(text));
+            if typed.is_ok() {
                 crate::shell::realtest::check_after(target_hwnd, "typing");
             }
             if let Some(prev) = previous {
                 clip::restore(prev, private);
             }
-            return checked.map(|()| Delivery::Pasted);
+            return typed.map(|()| Delivery::Pasted);
         }
         trace!(private, "Dictation on the clipboard");
 
@@ -1651,12 +2316,21 @@ fn inject_text_sync(
 
         // A Win32 edit control (a WinForms text box, a classic EDIT or
         // RichEdit), as it stands before the keys: to check the paste lands
-        // there (never a terminal's).
+        // there (never a terminal's). And whether anything that takes text
+        // has the focus at all (UI Automation; never asked of a terminal).
         let check = if kind.is_terminal() {
             None
         } else {
             crate::pasting::selection::PasteCheck::before(target_hwnd)
         };
+        let focus_before = if kind.is_terminal() || check.is_some() {
+            Editable::Unknown
+        } else {
+            crate::pasting::selection::focus_editable(target_hwnd)
+        };
+        if focus_before == Editable::No {
+            info!("Nothing that takes text has the focus; pasting anyway, then looking again");
+        }
 
         // Robot mode: the window in front must still be the test's, and the
         // one this paste is for — checked right before the keys go out.
@@ -1667,9 +2341,34 @@ fn inject_text_sync(
             return Err(why);
         }
 
-        // Ctrl+V, or the terminal's own paste keys.
-        platform::simulate_paste(target_hwnd, key);
-        let pasted_at = std::time::Instant::now();
+        // Ctrl+V, or the terminal's own paste keys. Windows didn't take
+        // them (twice): the text stays on the clipboard, and that's said.
+        if let Err(e) = press_paste(target_hwnd, key) {
+            warn!("Windows didn't take the paste keys: {e}; the text is left on the clipboard");
+            // A sliced paste: the whole text on it, not just its first slice.
+            if slices.len() > 1 && !clip::put_text_verified(text, private) {
+                return Err("The text couldn't be pasted, nor put on the clipboard".into());
+            }
+            return Ok(Delivery::LeftOnClipboard(Left::KeysBlocked));
+        }
+        let mut pasted_at = std::time::Instant::now();
+
+        // The rest of a sliced paste, a moment apart: the terminal has read
+        // the clipboard before the next slice takes its place.
+        for (i, slice) in slices.iter().enumerate().skip(1) {
+            std::thread::sleep(std::time::Duration::from_millis(crate::pasting::slices::PACE_MS));
+            let rest: String = slices[i..].concat();
+            if !clip::put_text_verified(slice, private) {
+                warn!(slice = i, "Couldn't put a slice on the clipboard; the rest is left there");
+                return leave_on_clipboard(&rest, target_hwnd, Left::KeysBlocked);
+            }
+            let next = crate::shell::realtest::recheck_foreground(target_hwnd, "paste").and_then(|()| press_paste(target_hwnd, key));
+            if let Err(e) = next {
+                warn!(slice = i, "The paste stopped after {i} slices ({e}); the rest is left on the clipboard");
+                return leave_on_clipboard(&rest, target_hwnd, Left::KeysBlocked);
+            }
+            pasted_at = std::time::Instant::now();
+        }
 
         // Did it land? A control that stayed exactly as it was for a second
         // didn't get it (a paste lost to a busy clipboard, an app that
@@ -1693,7 +2392,11 @@ fn inject_text_sync(
                                 "The paste didn't reach the field (it hadn't changed after {} ms): typing the text instead",
                                 PASTE_LANDS_MS
                             );
-                            platform::type_unicode(text);
+                            if let Err(e) = platform::type_unicode(text) {
+                                // The dictation is still on the clipboard.
+                                warn!("Windows didn't take the typing either: {e}; the text is left on the clipboard");
+                                return Ok(Delivery::LeftOnClipboard(Left::KeysBlocked));
+                            }
                             crate::shell::realtest::check_after(target_hwnd, "typing");
                             delivery = Delivery::Typed;
                         }
@@ -1701,6 +2404,23 @@ fn inject_text_sync(
                     }
                 }
             }
+        }
+
+        // Nothing took text before the keys: look again once the app has
+        // had its moment (some move the focus to their message box on a
+        // paste). Still nothing → the paste landed nowhere: the text stays
+        // on the clipboard (the person's own isn't put back), and that's said.
+        if focus_before == Editable::No {
+            let wait = std::time::Duration::from_millis(FOCUS_AGAIN_MS).saturating_sub(pasted_at.elapsed());
+            std::thread::sleep(wait);
+            if crate::pasting::selection::focus_editable(target_hwnd) == Editable::No {
+                warn!("Nothing that takes text had the focus before or after the paste; the text is left on the clipboard");
+                if slices.len() > 1 && !clip::put_text_verified(text, private) {
+                    return Err("The text couldn't be pasted, nor put on the clipboard".into());
+                }
+                return Ok(Delivery::LeftOnClipboard(Left::NoTextBox));
+            }
+            debug!("Something that takes text has the focus after the paste");
         }
 
         // Restore previous clipboard (delayed to ensure paste completes). Webview/
@@ -1946,5 +2666,44 @@ mod tests {
         assert!(clip::put_text_verified("Dictated", true));
         clip::restore(before, true);
         assert_eq!(clip::read_raw(clip::HDROP).1, 0);
+
+        // Edit mode's Ctrl+C borrows it: every format comes back byte for
+        // byte (Windows' own text formats made from the text too).
+        clip::put_raw(&clip::rich_items());
+        let fingerprint = clip::fingerprint().expect("kept");
+        assert!(fingerprint.len() >= 3, "{fingerprint:?}");
+        let clip::Exact::Kept(items) = clip::snapshot_exact(std::time::Duration::from_millis(500)) else {
+            panic!("the clipboard couldn't be kept");
+        };
+        assert!(clip::put_text_verified("The selected words", false));
+        assert!(clip::restore_exact(&items, false, std::time::Duration::from_millis(500)));
+        assert_eq!(clip::fingerprint().expect("kept again"), fingerprint);
+        assert_eq!(clip::read_text().as_deref(), Some("Quarterly plan"));
+        // An empty one is empty again.
+        clip::clear();
+        let clip::Exact::Kept(none) = clip::snapshot_exact(std::time::Duration::from_millis(500)) else { panic!() };
+        assert!(none.is_empty());
+        assert!(clip::put_text_verified("The selected words", false));
+        assert!(clip::restore_exact(&none, false, std::time::Duration::from_millis(500)));
+        assert_eq!(clip::read_raw(clip::HDROP).1, 0);
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn formats_windows_makes_again_are_left_out_and_handles_are_never_copied() {
+        // A bitmap and a palette come back from the DIB, an old metafile
+        // picture from the enhanced metafile.
+        assert!(clip::remade(2, &[2, 8]));
+        assert!(clip::remade(9, &[9, 17]));
+        assert!(clip::remade(3, &[3, 14]));
+        assert!(!clip::remade(2, &[2]));
+        assert!(!clip::remade(13, &[13, 1, 7]));
+        // Owner-drawn, GDI and private handles: never copied as bytes.
+        for format in [0x80, 0x82, 0x83, 0x8E, 0x200, 0x2FF, 0x300, 0x3FF, 2, 3, 9] {
+            assert!(clip::uncopyable(format), "{format:#x}");
+        }
+        for format in [1, 7, 8, 13, 15, 16, 17, 0x81, 0xC0FF] {
+            assert!(!clip::uncopyable(format), "{format:#x}");
+        }
     }
 }

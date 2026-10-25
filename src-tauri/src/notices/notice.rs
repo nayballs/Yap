@@ -135,6 +135,9 @@ pub fn rule(kind: &str) -> Rule {
         // The dictation's text is on the clipboard: every time (it's the
         // only way to know it didn't land), never held back.
         "pasteBlocked" => alert,
+        // Edit mode's Ctrl+C left the clipboard alone, or couldn't put it
+        // back (text_injector.rs): said at once, about the press just made.
+        "clipboardBusy" => alert,
         // "Stop asking about calls?": after a prompt, never during a
         // dictation.
         "calls-fatigue" => Rule { hold_dictation: true, max_wait_ms: None, ..alert },

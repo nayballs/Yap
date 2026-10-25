@@ -609,11 +609,11 @@ pub fn run(app: &AppHandle, cfg: &YapConfig, t: &Transform, origin: Origin, stan
                     r = r.ended(if stand_in.is_some() { "testMode" } else { "pasted" }, None);
                     crate::pasting::as_said::undoable(sel, &pasted)
                 }
-                Ok(crate::pasting::text_injector::Delivery::LeftOnClipboard) => {
+                Ok(crate::pasting::text_injector::Delivery::LeftOnClipboard(left)) => {
                     crate::pasting::as_said::forget();
-                    crate::notices::alert::show_soon(app, crate::pasting::elevated::alert());
+                    crate::notices::alert::show_soon(app, left.alert());
                     idle(app);
-                    return r.ended("copied", Some("the app runs as administrator".into()));
+                    return r.ended("copied", Some(left.not_pasted().into()));
                 }
                 Ok(crate::pasting::text_injector::Delivery::WindowGone) => {
                     crate::pasting::as_said::forget();

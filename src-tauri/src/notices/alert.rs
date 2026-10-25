@@ -54,7 +54,8 @@ pub struct Action {
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Alert {
-    /// "pasteBlocked" | "micBlocked" | "calls-fatigue" | "assistantNoModel" |
+    /// "pasteBlocked" (`text_injector::Left`) | "clipboardBusy" (edit mode's
+    /// Ctrl+C, `text_injector::Trouble`) | "micBlocked" | "calls-fatigue" | "assistantNoModel" |
     /// "assistantFailed" | "voiceFallback" (`tts.rs`: a cloud voice failed) |
     /// "configReset" (`config.rs`: config.json couldn't be read, set aside) |
     /// "saveFailed" (`saving.rs`: a store couldn't be saved; "Saved" after

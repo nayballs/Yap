@@ -82,6 +82,59 @@ Putting a dictation into the app you're in: the clipboard paste and the submit k
   moves the caret). The clipboard restore still waits its 500 ms from the
   keys. `#[ignore]`d `private_clipboard_round_trip` runs
   the real clipboard code on a private window station (never the person's clipboard).
+  **When it can't be pasted** (2026-10-25): `inject_text` returns
+  `Delivery::LeftOnClipboard(Left)` — `Elevated` (above), `KeysBlocked`
+  or `NoTextBox` — the text on the clipboard, and the caller says it
+  **once** with `Left::alert()` (kind "pasteBlocked", through
+  `notices/alert.rs`; history keeps the dictation "not pasted" with
+  `Left::not_pasted()`; the robot's report says `leftWhy`). **Did Windows
+  take the keys?** Every `SendInput` is checked (`platform::send`): fewer
+  events put in the input stream than asked (a secure desktop — a UAC
+  prompt, the lock screen —, another app blocking input, UIPI) is a
+  failure, logged with the counts and `GetLastError`; any key the events
+  that did go left down is let go. The paste keys go again once after
+  150 ms (`press_paste`); still refused → `KeysBlocked`: the dictation stays
+  on the clipboard (the person's own isn't put back) and "Couldn't paste ·
+  it's copied, press Ctrl+V". Typing (`type_unicode`), the submit key and
+  edit mode's Ctrl+C are checked the same way (a submit key refused is the
+  dictation's `error`; typing refused after a lost paste → `KeysBlocked`).
+  **"Select a text box first"**: before the paste keys (not in a terminal,
+  not when a Win32 edit control is being checked) `selection::focus_editable`
+  asks UI Automation whether what has the focus takes text; on a plain
+  **no** the keys still go (Discord and Slack move the focus to their box on
+  a paste), and 250 ms after them it's asked again: still no → `NoTextBox`,
+  the text left on the clipboard and "Select a text box first · …click
+  where it goes and press Ctrl+V" (calm, not blaming). Unknown is never a
+  no (a game, a canvas, an app UI Automation can't see). **The modifier
+  keys** around every key sequence Yap sends: `pasting/modifiers.rs` (below).
+  **The console's own paste**: a classic console window (conhost,
+  `ConsoleWindowClass`) gets no keys — `PasteKey::ConsoleMenu` posts its
+  Edit → Paste (`WM_COMMAND` 0xFFF1): its Ctrl+V pastes only for a program
+  reading lines (cmd, PowerShell); one reading the keyboard raw (Claude Code,
+  Codex, vim) gets Ctrl+V as a ^V and Shift+Insert as an escape sequence,
+  where the console's paste reaches it, in bracketed paste when it asked
+  (the robot, 2026-10-25). **Long pastes in slices** (`pasting/slices.rs`,
+  below): `inject_text_sync` pastes a long text into Claude Code, Codex or
+  anything in Windows Terminal slice by slice, each put on the clipboard and
+  pasted `slices::PACE_MS` (250 ms) after the last; a slice that can't go
+  leaves the rest of the text on the clipboard (`KeysBlocked`). **Edit
+  mode's Ctrl+C** (`copy_selection`, `selection_via_copy`; Trouble said once
+  through `notices/alert.rs`, kind "clipboardBusy"): everything on the
+  clipboard is kept first, **every format byte for byte**
+  (`clip::snapshot_exact`: memory formats as bytes, an enhanced metafile by
+  its bits; the bitmap, palette and old metafile picture Windows makes again
+  from a DIB / an enhanced metafile left out; OLE's own `DataObject` / `Ole
+  Private Data` never put back; anything else held as a handle — owner
+  display, GDI or private handles — or over 64 MB → `CantKeep`), waiting up
+  to 1 s for an app that holds it (`Busy`); either → nothing pressed,
+  nothing touched, "Couldn't read your selection". Ctrl+C's result is told
+  by the clipboard's sequence number (the clipboard is never emptied
+  first: no selection, nothing changes, nothing to put back); the text read
+  with up to 1 s's patience; everything put back (`clip::restore_exact`,
+  privately, verified by the sequence number) within 2 s, else
+  "Your clipboard couldn't be put back" (`NotRestored`: it holds the
+  selection). Test mode never presses Ctrl+C; robot mode only when its spec
+  asks (`realtest_copy_selection`).
 - **`pasting/as_said.rs`** — **"Use what I said"** (2026-10-22; Windows' fluid
   dictation's Revert, TypeWhisper's Restore Raw Transcript): right after a
   dictation AI cleanup changed, swap what Yap pasted for the words as said
@@ -191,6 +244,50 @@ Putting a dictation into the app you're in: the clipboard paste and the submit k
   "paste-last" | "copy-last" }` sends a press as the hook would. e2e
   `dictation-polish.spec.js`; robot `e2e-real/last-transcript.real.js`
   (the pad, Notepad, an Edge text box; the clipboard's private formats).
+- **`pasting/modifiers.rs`** — **the modifier keys around Yap's own**
+  (2026-10-25). A dictation ended by a chord can leave Alt, Win, Shift or
+  Ctrl down as far as Windows knows (a key-up the hook swallowed, Win+L in
+  between, Sticky Keys), and then Ctrl+V is Ctrl+Alt+V, Win+V opens
+  clipboard history and typed letters are menu keys. Every key sequence
+  Yap sends (`text_injector::platform::send_keys`: the paste keys, typing,
+  the submit key, Ctrl+C) goes out with them sorted (`plan`, `around`,
+  pure, unit-tested over every combination): every modifier Windows says is
+  down (`GetAsyncKeyState`, left and right apart) is let go first; those the
+  person **holds** are pressed again straight after the keys, **in the same
+  `SendInput` call** (Windows never interleaves other input with one), so
+  none is ever logically up under a finger; letting go of Alt or Win taps
+  the menu mask key (vkE8, as `input_hook.rs`) first, and pressing one
+  again taps it after, so no menu bar or Start opens. What the person holds
+  comes from the keyboard hook: `input_hook.rs` calls `note_key` for every
+  key event (one line; its rules untouched), and only events without
+  `LLKHF_INJECTED` set or clear a key's bit; the hook's word counts only
+  for a key Windows also says is down (a release missed while one of Yap's
+  own windows had the focus). `wait_until_let_go` (`as_said::
+  wait_for_modifiers_up`: a shortcut's keys before it pastes) waits only
+  for keys the person holds, not stuck ones. The log says which were stuck
+  and which held (names only). Test mode has no hook: nothing counts as
+  held unless debug-only `e2e_held_keys { keys }` says so (robot:
+  `paste-safety.real.js`, an Alt or Shift pressed as an injected key).
+- **`pasting/slices.rs`** — **long pastes in slices** (2026-10-25; Wispr
+  Flow's chunked paste, by behaviour). Claude Code folds a paste of more
+  than 800 characters or more than 2 line breaks into "[Pasted text #N +L
+  lines]" (2.1's own code), Codex one of more than 1,000 characters into
+  "[Pasted Content N chars]": the text goes in, but as a blob the person
+  can't read before sending. And Windows Terminal stops any paste over 5 KiB
+  with its `largePasteWarning` dialog — nothing arrives until it's answered
+  (the robot: 4,004 characters arrived, 16,019 nothing). So `limits(kind)`
+  (the kind as read): Claude Code 800 / 2 breaks, Codex 1,000, Windows
+  Terminal 4,000 — the stricter of the CLI's and the host's; everything
+  else one paste. `cut` (pure, unit-tested): each slice as long as it can
+  be, in UTF-16 units as the CLIs count, ending after the last space or
+  line break (after the last line break when it's the breaks that ran
+  out), a word cut only when it alone is longer than a slice, never inside
+  a character or a "\r\n"; joined, exactly the text. Measured in real
+  terminals (`long-paste.real.js`): 1,000 to 64,000 characters arrive whole
+  in Windows Terminal (in slices) and conhost (one paste, its own Edit →
+  Paste); Claude Code's stand-in gets slices of ≤ 800 / ≤ 2 breaks, all of
+  it, no Enter. VS Code's terminal isn't installed here (unmeasured: only
+  the CLI's limits apply there).
 - **`pasting/elevated.rs`** — apps running as administrator: Windows (UIPI) drops keys
   sent to a higher integrity level, and `SendInput` doesn't say so. The target's
   level is compared with Yap's (`OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION)`
@@ -284,7 +381,19 @@ Putting a dictation into the app you're in: the clipboard paste and the submit k
   never waits: still reading → no context. Kept in memory for that dictation only;
   logged as lengths, never text. **`focused_element(pid)`** (for `app_kind`):
   the focused element's ClassName and Name in one round trip (a UIA cache
-  request, 100 ms timeout), only if it's in `pid`. **`PasteCheck`** (for
+  request, 100 ms timeout), only if it's in `pid`. **`focus_editable(target)`**
+  (for the paste, 2026-10-25): the focused element and up to 3 parents
+  (`FocusFacts`: control type, framework, TextPattern / ValuePattern and
+  whether read-only, the legacy read-only bit; 200 ms) → `editable` (pure,
+  unit-tested): **Yes** when it or a parent in the same app takes text (a
+  TextPattern or a ValuePattern not read-only — a spreadsheet's cell —, an
+  edit control); **No** only when a framework that shows fields plainly
+  (Win32, WinForm, WPF, XAML, DirectUI, Chrome, Gecko) says the focus is on
+  a control that never takes text (a button, a list item, a tab, a menu
+  item, a link…) or on read-only text (a web page with no box focused, a
+  mail being read); else **Unknown** (a pane, a custom control, Java, Qt,
+  the focus in another app, a timeout). Test mode never reads; robot mode
+  only the test's windows. **`PasteCheck`** (for
   `text_injector`'s verify-after-paste): the focused control of the target's
   thread (`GetGUIThreadInfo`), same process, an `edit_class` control without
   `ES_PASSWORD`/`ES_READONLY`; its state = `WM_GETTEXTLENGTH` + `EM_GETSEL`
@@ -352,9 +461,27 @@ Putting a dictation into the app you're in: the clipboard paste and the submit k
   `CtrlShiftShortcuts`, off), PuTTY/KiTTY and MobaXterm; Ctrl+Shift+V in
   Alacritty (its `Paste`; Shift+Insert is `PasteSelection`), WezTerm
   (`PasteFrom "Clipboard"`; Shift+Insert is the primary selection), Tabby,
-  Hyper (`editor:paste`) and Rio; Ctrl+V in Windows Terminal, a console
-  ("Enable Ctrl key shortcuts"), ConEmu/Cmder (Shift+Ins pastes only the
-  first line there), VS Code's terminal and anything unknown.
+  Hyper (`editor:paste`) and Rio; Ctrl+V in Windows Terminal, ConEmu/Cmder
+  (Shift+Ins pastes only the first line there), VS Code's terminal, a
+  browser's and Visual Studio's, and anything unknown; a classic console
+  window its own Edit → Paste (`PasteKey::ConsoleMenu`, no keys: a raw
+  keyboard program there gets Ctrl+V as ^V; Ctrl+V when the window turns
+  out not to be a console). **More terminals** (2026-10-25): **a browser's
+  terminal** (`Host::Browser`) — a browser window whose title names a page
+  that may hold one (`web_terminal_page`: "Visual Studio Code", vscode.dev,
+  github.dev, Codespaces, code-server, Gitpod, Jupyter, Colab, a cloud shell,
+  Replit, StackBlitz, CodeSandbox, "terminal", "shell", "ssh", "console") is
+  asked, as an editor is, whether xterm.js's input has the focus, with the
+  coding CLI from VS Code's label; only then (one UIA call, 100 ms).
+  **Visual Studio's terminal** (`Host::VisualStudio`) — Windows Terminal's
+  own control as `Microsoft.Terminal.Wpf` hosts it: the focused window's
+  class `HwndTerminalClass` (`terminal_control`, Win32 `GetGUIThreadInfo`,
+  no UIA; also ConEmu's `VirtualConsoleClass` inside another app). Untried
+  in a real Visual Studio (not installed here). **JetBrains IDEs' terminal
+  isn't told apart**: Swing draws the editor and the terminal in one window
+  and shows UI Automation nothing (Java Access Bridge isn't UIA), so a
+  JetBrains IDE stays an ordinary app — Ctrl+V pastes in both, but lines
+  aren't joined and edit mode's Ctrl+C trick isn't held back there.
   **Coding CLIs** from the terminal's title, as they set it on Windows (2026):
   Claude Code "✳ <session>" idle / "◐"/"◑" working / "Claude Code" / "claude";
   Gemini CLI "◇  Ready (…)", "✦  …", "✋  …", "⏲  …", "Gemini CLI (…)"; Qwen Code;

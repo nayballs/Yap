@@ -500,6 +500,35 @@ window test, and robot-tested: Shift+Insert into the real Git Bash
 breaks, now handled), the pad's "nopaste" box typed into once, and no
 other paste in the full run typed twice. VS Code itself isn't installed
 here, and Alacritty, WezTerm, PuTTY & co. are untried.
+**Pasting hardened** (2026-10-25): every `SendInput` checked (a refused
+paste left on the clipboard, "Couldn't paste · it's copied, press
+Ctrl+V", once); a stuck Alt/Win/Shift/Ctrl let go before Yap's keys and
+a held one pressed again in the same call (`pasting/modifiers.rs`, the
+hook saying which are held); "Select a text box first" when UI Automation
+says plainly nothing that takes text has the focus, before and after the
+keys; edit mode's Ctrl+C keeping every clipboard format byte for byte,
+waiting for a busy clipboard or leaving it untouched, and saying when it
+couldn't put it back; long pastes in slices for Claude Code / Codex (their
+blob limits) and Windows Terminal (its 5 KiB warning); a classic console
+window pasted through its own Edit → Paste (a raw keyboard program there
+got Ctrl+V as ^V); a browser's terminal (vscode.dev, Codespaces…) and
+Visual Studio's (Windows Terminal's control) count as terminals. Unit-
+tested (the plan over every modifier combination, the slicing, the
+editability verdict, terminal detection, the exact clipboard round trip on
+a private window station), e2e (`paste-failures.spec.js`: the notices,
+once, history) and robot-tested (`paste-safety.real.js`: a stuck and a
+held Alt, a stuck Shift while typing, the pad's button and a web page's
+focus, keys refused, a clipboard held before / after Ctrl+C;
+`long-paste.real.js`: Claude Code's stand-in in Windows Terminal and
+conhost, 1,000–64,000 characters intact in both). Not tried: a real
+Visual Studio or JetBrains IDE (neither installed; JetBrains' terminal
+can't be told from its editor — Swing shows UI Automation nothing), the
+real Claude Code / Codex (their limits read from their own code, a
+stand-in pasted into), a real secure desktop refusing keys (a test
+stand-in refuses them). Not done: spotting a late paste that read the old
+clipboard (it needs the field read before and after every paste, only
+where UI Automation can; the clipboard filled only when the app reads it
+is the real fix — the roadmap's "a paste that knows it worked").
 **Names as written on screen** (`dictionary/screen_terms.rs`, 2026-10-22;
 [dictionary.md](./dictionary.md)): the target window's visible text read
 over UI Automation at record start (in the background, never waited for),

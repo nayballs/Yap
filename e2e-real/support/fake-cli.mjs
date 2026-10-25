@@ -9,6 +9,9 @@ import fs from 'node:fs';
 
 const log = process.argv[2];
 const write = (entry) => fs.appendFileSync(log, `${JSON.stringify(entry)}\n`);
+// A classic console window's title (conhost: the window is the console's,
+// titled as the program says); Windows Terminal's comes from --title.
+if (process.argv[3]) process.title = process.argv[3];
 
 process.stdout.write('\x1b[?2004h'); // bracketed paste on, as Claude Code does
 process.stdout.write('Yap robot: a stand-in for a coding CLI. It runs nothing; it shows what arrives.\r\n> ');

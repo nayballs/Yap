@@ -200,6 +200,22 @@ export async function startTestPad(label) {
     async pastes() {
       return (await call({ cmd: 'pastes' })).pastes;
     },
+    /** Select `length` characters of `field` from `start`. */
+    async select(field, start, length) {
+      current = field;
+      await call({ cmd: 'select', field, start, length });
+    },
+    /** Hold the clipboard open for `ms` (a busy clipboard manager). */
+    async holdClipboard(ms) {
+      return (await call({ cmd: 'holdClipboard', ms })).held;
+    },
+    /** Once the pad's own next copy has landed, hold the clipboard `ms`. */
+    async holdAfterCopy(ms) {
+      return (await call({ cmd: 'holdAfterCopy', ms })).listening;
+    },
+    async clipboardHeld() {
+      return (await call({ cmd: 'clipboardHeld' })).held;
+    },
     /** Play a WAV on a loop from the pad's own process (its own audio session). */
     async play(file) {
       await call({ cmd: 'play', path: file });
@@ -295,35 +311,101 @@ export function startPowerShell({ nonce, cwd }) {
  * Code does, turns on bracketed paste and reads the keyboard raw. It runs
  * nothing: it logs what arrives (`received()`) and echoes it.
  */
-export async function startFakeClaudeCode({ nonce, cwd }) {
+export async function startFakeClaudeCode({ nonce, cwd, title = `✳ ${nonce}` }) {
   fs.mkdirSync(cwd, { recursive: true });
   const log = path.join(cwd, 'received.jsonl');
   fs.writeFileSync(log, '');
   const script = fileURLToPath(new URL('./fake-cli.mjs', import.meta.url));
   const term = await startTerminal({
     nonce,
-    title: `✳ ${nonce}`,
+    title,
     cwd,
     command: [process.execPath, script, log],
     marker: log,
   });
-  // Ready once it has turned bracketed paste on.
+  await cliReady(log);
+  return { ...term, received: () => cliReceived(log) };
+}
+
+/** Once the stand-in CLI has turned bracketed paste on. */
+async function cliReady(log) {
   const deadline = Date.now() + 15_000;
   while (!fs.readFileSync(log, 'utf8').includes('"ready"') && Date.now() < deadline) await sleep(100);
-  return {
-    ...term,
-    /** Everything typed or pasted into it so far, as one string. */
-    received() {
-      return fs
-        .readFileSync(log, 'utf8')
-        .split('\n')
-        .filter(Boolean)
-        .map((l) => JSON.parse(l))
-        .filter((e) => e.data !== undefined)
-        .map((e) => e.data)
-        .join('');
-    },
+}
+
+/** Everything typed or pasted into the stand-in CLI so far, as one string. */
+function cliReceived(log) {
+  return fs
+    .readFileSync(log, 'utf8')
+    .split('\n')
+    .filter(Boolean)
+    .map((l) => JSON.parse(l))
+    .filter((e) => e.data !== undefined)
+    .map((e) => e.data)
+    .join('');
+}
+
+/**
+ * The stand-in CLI in a classic console window (conhost, whatever this
+ * PC's default terminal is), titled `title` (with the nonce: "✳ <nonce>"
+ * is Claude Code's idle title). `close()` closes it and ends what it ran.
+ */
+export async function startConsoleCli({ nonce, cwd, title = `✳ ${nonce}` }) {
+  fs.mkdirSync(cwd, { recursive: true });
+  const log = path.join(cwd, 'received.jsonl');
+  fs.writeFileSync(log, '');
+  const script = fileURLToPath(new URL('./fake-cli.mjs', import.meta.url));
+  const before = new Set(findWindows(nonce).map((w) => w.hwnd));
+  const child = spawn(path.join(process.env.WINDIR || 'C:\\Windows', 'System32', 'conhost.exe'), [process.execPath, script, log, title], {
+    cwd,
+    stdio: 'ignore',
+    detached: true,
+    windowsHide: false,
+  });
+  child.unref();
+  const cleanup = async (hwnd) => {
+    if (hwnd && findWindows(nonce).some((w) => w.hwnd === hwnd)) helper('close', hwnd, nonce);
+    await sleep(300);
+    for (const pid of processesWith(log, ['node.exe'])) killTree(pid);
+    killTree(child.pid);
   };
+  let win;
+  try {
+    win = await waitForWindow(nonce, (w) => !before.has(w.hwnd) && w.cls === 'ConsoleWindowClass' && w.title === title, {
+      what: 'console window',
+      // (conhost can be slow to show its first window.)
+      timeout: 40_000,
+    });
+    await cliReady(log);
+  } catch (e) {
+    // What did come up (the run's own windows only): a delegated terminal?
+    const seen = findWindows(nonce).filter((w) => !before.has(w.hwnd)).map((w) => `${w.cls} "${w.title}"`);
+    const ready = fs.existsSync(log) && fs.readFileSync(log, 'utf8').includes('"ready"');
+    await cleanup(win?.hwnd);
+    throw new Error(`${e.message}; new windows: ${seen.join(', ') || 'none'}; the program ${ready ? 'started' : "didn't start"}`);
+  }
+  return {
+    hwnd: win.hwnd,
+    title,
+    focus: () => focus(win.hwnd),
+    received: () => cliReceived(log),
+    close: () => cleanup(win.hwnd),
+  };
+}
+
+/** Which modifier keys Windows says are down ("lalt", "lshift"…). */
+export function keyState() {
+  return helper('keystate').down;
+}
+
+/**
+ * A modifier key pressed (`down`, only while the test's window is in
+ * front: `owner` is the nonce or "pid:<n>") or let go (`up`), as an
+ * injected key: down as far as Windows knows, no finger on it.
+ */
+export function modKey(hwnd, owner, key, how) {
+  const r = helper('modkey', hwnd, owner, key, how);
+  if (!r.ok) throw new Error(`Couldn't press ${key} ${how}: ${r.error}`);
 }
 
 // ---- Edge: a web page's text box, and a chat app ----

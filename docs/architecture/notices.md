@@ -16,7 +16,10 @@ How loud Yap may be: the notice policy (one place, one at a time, held while dic
   themselves whether the window counts as focused, `e2e_focus`). **Rules per
   kind** (`rule`: a bar card's id / a notification's tag): priority (Prompt —
   call, calendar, meeting-limit, meeting-checkin — > Alert — micBlocked,
-  pasteBlocked, calls-fatigue, configReset (held over a dictation, never
+  pasteBlocked (an admin app, keys Windows didn't take, "Select a text box
+  first": `pasting/text_injector.rs` `Left`, one per failed paste),
+  clipboardBusy (edit mode's Ctrl+C left the clipboard alone or couldn't
+  put it back), calls-fatigue, configReset (held over a dictation, never
   dropped), saveFailed ("Couldn't save your dictation history", `shell/saving.rs`:
   held over a dictation, never dropped, the same words not twice in 10 min),
   assistantNoModel, micLost ("Contoso H2 disconnected", the dictation's mic

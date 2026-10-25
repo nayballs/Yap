@@ -60,6 +60,17 @@
 //                                 what was in front
 //   yaprobot framerect <hwnd>     a window's visible frame (DWM's extended
 //                                 frame bounds), physical pixels
+//   yaprobot keystate             which modifier keys Windows says are down
+//   yaprobot modkey <hwnd> <owner> <key> <down|up>   a modifier (lalt,
+//                                 lshift, lctrl, lwin…) pressed as an injected
+//                                 key — stuck, no finger on it — only while
+//                                 the test's window (`owner`: the nonce, or
+//                                 pid:<n>) is in front; let go always
+//
+// The test pad also has a button ("button": a focus that takes no text)
+// and holds the clipboard open on request (`holdClipboard {ms}`, or
+// `holdAfterCopy {ms}`: once its own next Ctrl+C has copied), as a busy
+// clipboard manager would.
 //
 // Every command prints one JSON object. Nothing here reads or prints the
 // title or text of a window the test didn't open.
@@ -198,6 +209,8 @@ static class Program {
                         : SnipKey(uint.Parse(args[1]), args[2]));
                     return 0;
                 case "framerect": Print(FrameRect(new IntPtr(long.Parse(args[1])))); return 0;
+                case "keystate": Print(KeyState()); return 0;
+                case "modkey": Print(ModKey(new IntPtr(long.Parse(args[1])), args[2], args[3], args[4])); return 0;
                 default: throw new ArgumentException("unknown command " + args[0]);
             }
         } catch (Exception e) {
@@ -671,6 +684,49 @@ static class Program {
         return i;
     }
 
+    [DllImport("user32.dll")] static extern short GetAsyncKeyState(int vk);
+
+    static readonly string[] ModNames = { "lshift", "rshift", "lctrl", "rctrl", "lalt", "ralt", "lwin", "rwin" };
+    static readonly ushort[] ModKeys = { 0xA0, 0xA1, 0xA2, 0xA3, 0xA4, 0xA5, 0x5B, 0x5C };
+
+    /// Which modifier keys Windows says are down (its key state, nothing
+    /// else: no window is read).
+    static Dictionary<string, object> KeyState() {
+        var down = new List<object>();
+        for (int i = 0; i < ModKeys.Length; i++) if (GetAsyncKeyState(ModKeys[i]) < 0) down.Add(ModNames[i]);
+        return Obj("down", down);
+    }
+
+    /// A modifier key (`lalt`, `lshift`, `lctrl`, `lwin`…) pressed or let
+    /// go, as an injected key — "stuck" as far as Windows knows, no finger
+    /// on it. Pressing only while the test's window is in front (`owner`:
+    /// the run's nonce in its title, or `pid:<n>`, its process: the test
+    /// pad's); letting go always (the cleanup), with the menu mask key
+    /// tapped first so an Alt or Win release opens no menu or Start.
+    static Dictionary<string, object> ModKey(IntPtr h, string owner, string name, string how) {
+        int at = Array.IndexOf(ModNames, name);
+        if (at < 0) return Obj("ok", false, "error", "unknown key " + name);
+        bool up = how == "up";
+        if (!up) {
+            bool ours;
+            if (owner.StartsWith("pid:")) {
+                uint pid;
+                Native.GetWindowThreadProcessId(h, out pid);
+                ours = Native.IsWindow(h) && pid.ToString() == owner.Substring(4);
+            } else {
+                ours = Ours(h, owner);
+            }
+            if (!ours) return Obj("ok", false, "error", "not the test's window");
+            if (Native.Root(Native.GetForegroundWindow()) != h) return Obj("ok", false, "error", "the test's window isn't in front");
+        }
+        var inputs = new List<Native.INPUT>();
+        if (up && at >= 4) { inputs.Add(Key(0xE8, false)); inputs.Add(Key(0xE8, true)); }
+        inputs.Add(Key(ModKeys[at], up));
+        uint sent = Native.SendInput((uint)inputs.Count, inputs.ToArray(), Marshal.SizeOf(typeof(Native.INPUT)));
+        Thread.Sleep(30);
+        return Obj("ok", sent == inputs.Count);
+    }
+
     /// WM_CLOSE; and if the window asks first (Windows Terminal's "Do you
     /// want to close all tabs?"), its "Close all" over UI Automation.
     static Dictionary<string, object> Close(IntPtr h, string nonce) {
@@ -704,7 +760,11 @@ class TestPad : Form {
     readonly PadRich rich;
     readonly PadBox password;
     readonly PadBox nopaste;
+    readonly Button button;
     readonly List<object> pastes = new List<object>();
+    // The clipboard held open (a busy clipboard manager's stand-in).
+    System.Windows.Forms.Timer holding;
+    int holdAfterCopyMs;
     System.Media.SoundPlayer player;
 
     public static int Run(string label) {
@@ -747,11 +807,16 @@ class TestPad : Form {
         // that a paste landed (it types the text instead).
         nopaste = new PadBox { Name = "nopaste", ShortcutsEnabled = false,
             Location = new System.Drawing.Point(10, 390), Size = new System.Drawing.Size(540, 24) };
-        foreach (Control c in new Control[] { box, rich, password, nopaste }) {
+        // A button: a focus that takes no text ("Select a text box first").
+        button = new Button { Name = "button", Text = "A button",
+            Location = new System.Drawing.Point(10, 424), Size = new System.Drawing.Size(140, 30) };
+        ClientSize = new System.Drawing.Size(560, 464);
+        foreach (Control c in new Control[] { box, rich, password, nopaste, button }) {
             c.Font = new System.Drawing.Font("Segoe UI", 11f);
             Controls.Add(c);
         }
         box.Pasting += Record;
+        box.Copying = CopyThenHold;
         rich.Pasting += Record;
         password.Pasting += Record;
         ActiveControl = box;
@@ -760,6 +825,39 @@ class TestPad : Form {
     [DllImport("user32.dll")] static extern bool IsClipboardFormatAvailable(uint format);
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern uint RegisterClipboardFormat(string name);
     [DllImport("user32.dll")] static extern IntPtr GetOpenClipboardWindow();
+    [DllImport("user32.dll")] static extern bool OpenClipboard(IntPtr owner);
+    [DllImport("user32.dll")] static extern bool CloseClipboard();
+
+    /// Open the clipboard (on the pad's own thread) and close it `ms` later.
+    bool Hold(int ms) {
+        if (holding != null) return true;
+        if (!OpenClipboard(Handle)) return false;
+        holding = new System.Windows.Forms.Timer { Interval = Math.Max(1, ms) };
+        holding.Tick += delegate {
+            holding.Stop();
+            holding.Dispose();
+            holding = null;
+            CloseClipboard();
+        };
+        holding.Start();
+        return true;
+    }
+
+    /// Ctrl+C in a box while asked to hold the clipboard after a copy: the
+    /// copy, then the clipboard held at once (before anyone else can open it).
+    bool CopyThenHold(string field) {
+        if (holdAfterCopyMs <= 0) return false;
+        ((TextBoxBase)Controls[field]).Copy();
+        int ms = holdAfterCopyMs;
+        holdAfterCopyMs = 0;
+        Hold(ms);
+        return true;
+    }
+
+    protected override void OnFormClosed(FormClosedEventArgs e) {
+        if (holding != null) { holding.Stop(); holding = null; CloseClipboard(); }
+        base.OnFormClosed(e);
+    }
 
     /// Ctrl+V reached a field: which formats the clipboard held at that
     /// moment (never the text), whether another window had the clipboard
@@ -809,6 +907,7 @@ class TestPad : Form {
             case "rich": return rich;
             case "password": return password;
             case "nopaste": return nopaste;
+            case "button": return button;
             default: throw new ArgumentException("no field " + name);
         }
     }
@@ -870,6 +969,23 @@ class TestPad : Form {
                 if (player != null) { player.Stop(); player.Dispose(); player = null; }
                 break;
             }
+            case "holdClipboard": {
+                // The clipboard open for `ms` (as a busy clipboard manager
+                // holds it): nobody else can read or write it meanwhile.
+                reply["held"] = Hold(Convert.ToInt32(req["ms"]));
+                break;
+            }
+            case "holdAfterCopy": {
+                // At the box's next Ctrl+C: its copy, then the clipboard
+                // held for `ms`.
+                holdAfterCopyMs = Convert.ToInt32(req["ms"]);
+                reply["listening"] = true;
+                break;
+            }
+            case "clipboardHeld": {
+                reply["held"] = holding != null;
+                break;
+            }
             default: throw new ArgumentException("unknown command " + cmd);
         }
         return reply;
@@ -878,8 +994,11 @@ class TestPad : Form {
 
 class PadBox : TextBox {
     public event Action<string> Pasting;
+    /// Ctrl+C: the pad's own copy, when it wants to hold the clipboard after it.
+    public Func<string, bool> Copying;
     protected override bool ProcessCmdKey(ref Message msg, Keys keyData) {
         if (keyData == (Keys.Control | Keys.V) && Pasting != null) Pasting(Name);
+        if (keyData == (Keys.Control | Keys.C) && Copying != null && Copying(Name)) return true;
         return base.ProcessCmdKey(ref msg, keyData);
     }
 }

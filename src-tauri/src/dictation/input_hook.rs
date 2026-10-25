@@ -1111,6 +1111,9 @@ unsafe extern "system" fn low_level_keyboard_proc(
         let msg = wparam as u32;
 
         let is_keydown = msg == win32::WM_KEYDOWN || msg == win32::WM_SYSKEYDOWN;
+        // What the person is holding (not injected: LLKHF_INJECTED), for
+        // the keys Yap sends (pasting/modifiers.rs).
+        crate::pasting::modifiers::note_key(vkey, is_keydown, info.flags & 0x10 != 0);
 
         // Esc while a snip's overlay is up: it cancels the snip, and goes no
         // further (the app behind the overlay mustn't get it).
