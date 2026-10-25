@@ -104,7 +104,14 @@ pub struct Server {
     /// KV 1,024 → 544 MiB at 32K, 2,048 → 1,088 at 64K; the log's buffers
     /// 5,024 → 4,623 and 6,240 → 5,487 MiB (docs/model-evals.md "KV cache q8_0").
     pub kv_q8: bool,
+    /// Two slots with a cache of the whole context each (`-np 2
+    /// --no-kv-unified`, the processor: `local_llm::Plan::per_slot`): the
+    /// KV twice, the recurrent state for 2 slots instead of [`SLOTS`].
+    pub per_slot: bool,
 }
+
+/// The slots a per-slot server keeps ([`Server::per_slot`]).
+pub const PER_SLOT_SLOTS: u64 = 2;
 
 /// What a q8_0 KV cache adds to the compute buffer per token of context
 /// (Qwen3.5-4B on 0.10.6: +80 MiB at 32K, +208 at 64K; this errs high).
@@ -262,7 +269,7 @@ impl Shape {
         }
         let attention_layers = (0..self.layers()).filter(|&i| self.kv_heads(i) > 0).count() as u64;
         let kv_one_layer = self.kv_bytes_per_token().checked_div(attention_layers).unwrap_or(0) * ctx;
-        let draft_compute = self.compute_bytes(ctx, Server { current: true, mtp: false, kv_q8: false });
+        let draft_compute = self.compute_bytes(ctx, Server { current: true, mtp: false, kv_q8: false, per_slot: false });
         self.nextn_bytes + MTP_DRAFT * self.state_bytes() + MTP_COMPUTE + kv_one_layer + draft_compute
     }
 }
@@ -276,9 +283,10 @@ pub fn estimate(shape: &Shape, file_bytes: u64, ctx: u64, on_card: bool, server:
     let mib = |b: u64| b.div_ceil(MIB);
     let mtp_on = server.current && server.mtp && shape.has_mtp();
     let model = mib(shape.model_bytes(file_bytes, on_card, server));
-    let kv_f16 = shape.kv_bytes_per_token() * ctx;
+    let caches = if server.per_slot { PER_SLOT_SLOTS } else { 1 };
+    let kv_f16 = shape.kv_bytes_per_token() * ctx * caches;
     let kv = mib(if server.kv_q8 { kv_f16 * 17 / 32 } else { kv_f16 });
-    let state = mib(shape.state_bytes());
+    let state = mib(if server.per_slot { shape.state_bytes() / SLOTS * PER_SLOT_SLOTS } else { shape.state_bytes() });
     let compute = mib(shape.compute_bytes(ctx, server) + if server.kv_q8 { ctx * Q8_COMPUTE_PER_TOKEN } else { 0 });
     // MTP's share past the weights the model already counts.
     let mtp = if mtp_on { mib(shape.mtp_bytes(ctx).saturating_sub(shape.nextn_bytes)) } else { 0 };
@@ -788,9 +796,9 @@ pub mod tests {
     }
 
     /// llamafile 0.10.3's buffers; 0.10.6's, without and with MTP.
-    const OLD: Server = Server { current: false, mtp: false, kv_q8: false };
-    const NEW: Server = Server { current: true, mtp: false, kv_q8: false };
-    const MTP: Server = Server { current: true, mtp: true, kv_q8: false };
+    const OLD: Server = Server { current: false, mtp: false, kv_q8: false, per_slot: false };
+    const NEW: Server = Server { current: true, mtp: false, kv_q8: false, per_slot: false };
+    const MTP: Server = Server { current: true, mtp: true, kv_q8: false, per_slot: false };
 
     /// The real files' sizes (the test PC's %APPDATA%\yap\llm, 2026-10-20).
     const QWEN35_4B_FILE: u64 = 3_013_027_808;
@@ -866,7 +874,7 @@ pub mod tests {
         // MTP only on the runtime it's measured on, and only for a model
         // that can draft (the 1.5B can't).
         assert_eq!(
-            estimate(&s, QWEN35_4B_FILE, 8_192, true, Server { current: false, mtp: true, kv_q8: false }),
+            estimate(&s, QWEN35_4B_FILE, 8_192, true, Server { current: false, mtp: true, kv_q8: false, per_slot: false }),
             estimate(&s, QWEN35_4B_FILE, 8_192, true, OLD)
         );
         // A q8_0 KV cache (2026-10-25, with MTP as the evaluations ran it):
@@ -926,8 +934,8 @@ pub mod tests {
                 println!("{} ({} ms): {:?}", p.display(), started.elapsed().as_millis(), f.shape);
                 for ctx in [4_096u64, 8_192, 16_384, 32_768, 65_536, 131_072, 262_144] {
                     let old = estimate(&f.shape, f.bytes, ctx, true, Server::default());
-                    let new = estimate(&f.shape, f.bytes, ctx, true, Server { current: true, mtp: false, kv_q8: false });
-                    let mtp = estimate(&f.shape, f.bytes, ctx, true, Server { current: true, mtp: true, kv_q8: false });
+                    let new = estimate(&f.shape, f.bytes, ctx, true, Server { current: true, mtp: false, kv_q8: false, per_slot: false });
+                    let mtp = estimate(&f.shape, f.bytes, ctx, true, Server { current: true, mtp: true, kv_q8: false, per_slot: false });
                     println!("  {ctx}: 0.10.3 {} · 0.10.6 {} · +MTP {} ({:?})", old.total_mib, new.total_mib, mtp.total_mib, mtp);
                 }
             }
