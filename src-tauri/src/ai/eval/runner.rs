@@ -92,6 +92,12 @@ Saved transforms (transforms.rs; instead of the scenarios; transforms.md):
   --transforms             each case in evals/transforms/cases.json (--only picks them by name or
                            transform) through llm::transform: names and numbers kept, no answer,
                            Shorter shorter, Fix grammar only changing nothing correct
+My languages (languages.rs; instead of the scenarios; languages.md):
+  --languages              each case in evals/languages/cases.json (--only picks them by name or
+                           kind): cleanup of French, Spanish and German dictations before and
+                           after the language line (in its language, names kept), and a language
+                           shortcut's translation (in the target language, nothing answered)
+  --languages-phase <p>    before | after: one cleanup phase (a cloud model's tokens)
 Meeting search (search/; instead of the scenarios; search.md):
   --search                 evals/search/meetings.json: recall@1/3/5 for keyword, meaning and hybrid
                            search (and Chat's whole-note search), then each --model's Ask across
@@ -155,6 +161,8 @@ struct Args {
     styles_quick: bool,
     brief: bool,
     transforms: bool,
+    languages: bool,
+    languages_phase: Option<&'static str>,
     search: bool,
     embed: Option<PathBuf>,
     embed_ngl: u32,
@@ -247,6 +255,17 @@ fn parse(argv: Vec<String>) -> Result<Args, String> {
             "--styles-quick" => a.styles_quick = true,
             "--brief" => a.brief = true,
             "--transforms" => a.transforms = true,
+            "--languages" => a.languages = true,
+            "--languages-phase" => {
+                let p = value()?;
+                a.languages_phase = Some(
+                    super::languages::PHASES
+                        .iter()
+                        .copied()
+                        .find(|x| *x == p)
+                        .ok_or_else(|| format!("--languages-phase {}, not {p}", super::languages::PHASES.join("|")))?,
+                );
+            }
             "--search" => a.search = true,
             "--embed" => a.embed = Some(PathBuf::from(value()?)),
             "--embed-ngl" => a.embed_ngl = num(value()?, &flag)? as u32,
@@ -292,7 +311,15 @@ pub fn main(argv: Vec<String>) -> i32 {
         return dump_apps(p);
     }
     // Raw requests alone need no scenarios (and --only then names requests).
-    let scenarios = if (args.models.is_empty() || args.cleanup || args.styles || args.speakers || args.brief || args.transforms || args.search || args.bench.is_some())
+    let scenarios = if (args.models.is_empty()
+        || args.cleanup
+        || args.styles
+        || args.speakers
+        || args.brief
+        || args.transforms
+        || args.languages
+        || args.search
+        || args.bench.is_some())
         && !args.list
     {
         Vec::new()
@@ -1297,6 +1324,19 @@ async fn run_all(args: &Args, run_dir: &Path, keys: &HashMap<String, String>, sc
         Vec::new()
     };
     let mut transform_results: Vec<(String, Value)> = Vec::new();
+    let language_cases = if args.languages {
+        let path = scenarios_dir(args).join("..").join("languages").join("cases.json");
+        match super::languages::load(&path, &args.only) {
+            Ok(c) => c,
+            Err(e) => {
+                eprintln!("{e}");
+                return 2;
+            }
+        }
+    } else {
+        Vec::new()
+    };
+    let mut language_results: Vec<(String, Value)> = Vec::new();
     // Meeting search (`--search`): the corpus in the run's notes, its
     // embedding server, and the retrieval half, before any model.
     let search_corpus = if args.search {
@@ -1448,6 +1488,19 @@ async fn run_all(args: &Args, run_dir: &Path, keys: &HashMap<String, String>, sc
             }
             transform_results.push((m.label.clone(), transforms_result.clone()));
         }
+        let mut languages_result = Value::Null;
+        if !language_cases.is_empty() {
+            record::set_config(Some(crate::config::YapConfig::default()));
+            record::set_tools_forced(None);
+            let ep = super::cleanup::Endpoint { base_url: &m.base_url, key: &m.key, model: &m.model, provider: &m.provider };
+            let phases: Vec<&'static str> = match args.languages_phase {
+                Some(p) => vec![p],
+                None => super::languages::PHASES.to_vec(),
+            };
+            println!("  My languages, {} cases …", language_cases.len());
+            languages_result = super::languages::run(&language_cases, &ep, args.repeat, &phases).await;
+            language_results.push((m.label.clone(), languages_result.clone()));
+        }
         let mut search_result = Value::Null;
         if let (Some(c), Some(_)) = (&search_corpus, &search_server) {
             record::set_config(Some(super::search::settings(&m.provider, &m.base_url, &m.key, &m.model)));
@@ -1483,6 +1536,7 @@ async fn run_all(args: &Args, run_dir: &Path, keys: &HashMap<String, String>, sc
             "bench": bench_result,
             "brief": brief_result,
             "transforms": transforms_result,
+            "languages": languages_result,
             "search": search_result,
         });
         let (drafted, kept) = (sum("draft_tokens"), sum("draft_accepted"));
@@ -1569,6 +1623,20 @@ async fn run_all(args: &Args, run_dir: &Path, keys: &HashMap<String, String>, sc
                 r["cases"],
                 r["by_transform"].as_object().map(|o| o.iter().map(|(k, v)| format!("{k} {}", v.as_str().unwrap_or(""))).collect::<Vec<_>>().join(", ")).unwrap_or_default(),
                 r["stripped"],
+                r["median_ms"].as_f64().unwrap_or(0.0) / 1000.0,
+                r["tokens"]
+            );
+        }
+    }
+    if !language_results.is_empty() {
+        let md = record::redact(&super::languages::markdown(&language_results));
+        let _ = std::fs::write(run_dir.join("languages.md"), &md);
+        for (label, r) in &language_results {
+            println!(
+                "\n{label}: {}/{} language cases pass ({}); median {:.1} s; {} tokens",
+                r["passed"],
+                r["cases"],
+                r["by_phase"].as_object().map(|o| o.iter().map(|(k, v)| format!("{k} {}", v.as_str().unwrap_or(""))).collect::<Vec<_>>().join(", ")).unwrap_or_default(),
                 r["median_ms"].as_f64().unwrap_or(0.0) / 1000.0,
                 r["tokens"]
             );

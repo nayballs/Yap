@@ -769,6 +769,19 @@ impl Pipeline {
         self.shared.assistant_key(pressed, at);
     }
 
+    /// Route a **language shortcut**'s press/release (My languages,
+    /// `languages.rs`; the hook's `language-key`, or a Yap window's in-page
+    /// fallback): the dictation key's recording mode and gestures, the
+    /// recording a press starts in the shortcut's language (and translated,
+    /// when it says so). A press while a recording runs stops it, as the
+    /// other keys do.
+    pub fn on_language_key(&self, id: &str, pressed: bool, at: Option<u64>) {
+        crate::dictation::languages::arm(pressed.then_some(id));
+        self.shared.on_key(pressed, false, at);
+        // Taken by the recording if one started; never left for another.
+        crate::dictation::languages::arm(None);
+    }
+
     /// Cancel the recording (the bar's ✕, the tray's Cancel): nothing is
     /// transcribed, and its audio is kept a moment for **Undo**.
     pub fn cancel(&self) {

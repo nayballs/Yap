@@ -93,7 +93,14 @@ impl Shared {
         // dictation's only, and only if the read is done. Taken once, for
         // the cleanup, the corrections and the words as said alike.
         let screen = crate::dictionary::screen_terms::take();
-        let (cleaned, style) = self.clean_up(&raw, &style_target, screen.as_deref(), true).await;
+        // A language shortcut that translates (My languages, languages.rs):
+        // the AI translates it in cleanup's place; the words as said stay
+        // one "Use what I said" away.
+        let cfg = self.config.read().map(|c| c.clone()).unwrap_or_default();
+        let (cleaned, style) = match crate::dictation::languages::translate_dictation(&self.app, &raw, &cfg).await {
+            Some(translated) => (translated, None),
+            None => self.clean_up(&raw, &style_target, screen.as_deref(), true).await,
+        };
 
         // The correction dictionary (exact, then fuzzy for
         // ONNX models), exactly as meetings and Upload get it,
@@ -179,10 +186,17 @@ impl Shared {
             (Some(plan), true) => {
                 // "Write in my region's spelling" (Dictation cleanup): British "colour"
                 // for en-GB, American "color" for en-US.
-                let spelling = self.config.read().ok().and_then(|c| crate::ai::about_you::cleanup_spelling(&c));
+                // English only: none for a dictation known to be in another
+                // language (My languages, languages.rs).
+                let spelling = self.config.read().ok().and_then(|c| crate::dictation::languages::cleanup_spelling(&c));
                 // The names on screen the transcript seems to hold (after
-                // the style's line, just before the transcript).
+                // the style's line, just before the transcript), after the
+                // dictation's language: kept, never translated.
                 let names = crate::dictionary::screen_terms::cleanup_line(screen, raw, &dict);
+                let names = match self.config.read() {
+                    Ok(c) => crate::dictation::languages::with_language_line(names, &c),
+                    Err(_) => names,
+                };
                 if let Some(s) = plan.style {
                     tracing::debug!(style = %s.describe(), "AI cleanup's style");
                 }
@@ -212,7 +226,12 @@ impl Shared {
                     // Ok(empty) is a DELIBERATE empty result (filler-only
                     // input) — keep it empty so nothing is injected. Only a
                     // real request error falls back to the raw transcript.
-                    Ok(c) => (c, plan.style),
+                    // A filler a model left at the start of another
+                    // language's dictation comes off (languages.rs).
+                    Ok(c) => (
+                        self.config.read().map(|cfg| crate::dictation::languages::tidy_cleaned(&c, &cfg)).unwrap_or(c),
+                        plan.style,
+                    ),
                     Err(e) => {
                         tracing::warn!("AI cleanup failed, using raw: {}", e);
                         (raw.to_string(), None)

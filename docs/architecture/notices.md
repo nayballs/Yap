@@ -26,8 +26,11 @@ How loud Yap may be: the notice policy (one place, one at a time, held while dic
   answer `assistant` (never held, never stale) — > Info — micOffer ("Contoso
   H2 connected · Use it for dictation?", `dictation/mics/offer.rs`, which
   rate-limits it itself and never asks during a dictation), micSwitched
-  ("Using Contoso H2 for dictation", the same words not twice in 10 min) —
-  > Tip — hint, word-suggestion), held
+  ("Using Contoso H2 for dictation", the same words not twice in 10 min),
+  language-added ("French is in My languages", 10 s) — > Tip — hint,
+  word-suggestion, language-nudge ("You spoke French · Add it to My
+  languages?", `dictation/languages/nudge.rs`, which rate-limits it itself:
+  held over a dictation, dropped unseen after a minute)), held
   while dictating (+ `SETTLE_MS` 1.5 s, and while onboarding is on screen)
   or a meeting records, a cooldown for the same text (micBlocked and
   meeting-notice 10 min), how long it may wait unseen (tips 10 s, a word

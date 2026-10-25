@@ -185,7 +185,33 @@ Edge box and a contenteditable, Translate on the last dictation, a
 terminal refused, the bar's Undo), not yet run; not yet tried by a person
 (a real shortcut press, the tray's menu bringing the app back). The spoken
 "undo that" / "revert" was left out: "revert" alone is a real message, and
-"undo that" reads as "delete it" in Windows' own voice commands. **A day of dictation audio**
+"undo that" reads as "delete it" in Windows' own voice commands. **My
+languages** (2026-10-25, `dictation/languages.rs`; Settings → Dictation →
+My languages): the languages you speak picked from a search, which
+installed speech model covers which and the one to recommend (the model is
+never changed for you), the main shortcut on Auto or one language,
+language shortcuts (a key that dictates in a language, or pastes it
+translated by the AI: on this PC or in the cloud), cleanup told the
+dictation's language, and the nudge ("You spoke French · Add it to My
+languages?"). Whisper picks the likeliest of your languages from its own
+detection (74 / 56 ms for large-v3 on an RTX 5070 Ti: the work it already
+did when not given a language); Parakeet V3 and SenseVoice recognise the
+language by themselves, Canary and Cohere are told your first language,
+Parakeet V2 (English only) is unchanged — only Whisper says what it heard,
+so the nudge works with Whisper models alone. The rules (plans, slots,
+coverage, the nudge's limits, the language line, the leading filler)
+unit-tested; Settings, a translating shortcut through the fake AI (and
+through the stub speech engine), the AI failing and the nudge in the main
+window and on the bar e2e-tested (`languages.spec.js`); the prompts measured
+on the 4B (cleanup 27/27 after vs 21/27 before, translation 12/12), the 1.5B
+(0/27 → 15/27: it still writes German in English) and Groq's gpt-oss-20b
+(13/13, docs/model-evals.md "My languages"); robot tests run with Whisper
+large-v3 on English speech (`languages.real.js`: heard as English with
+French alone picked, the nudge offered, English added, a shortcut fixed to
+English with no detection asked). Not yet tried by a person: a real
+non-English voice (Windows' text-to-speech here speaks only English), a real
+key press of a language shortcut, Parakeet V3 or Canary with several
+languages. **A day of dictation audio**
 (`dictation/recent_audio.rs`): failed dictations listed, Run again (any installed
 model) and Play in Home, a crash mid-dictation recovered at the next start —
 e2e-tested on the stub engine (`dictation-trust.spec.js`), Run again on real

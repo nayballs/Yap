@@ -30,8 +30,17 @@
   instruction; `hotkey` an input-hook spec or ""; `language` Translate's,
   "Spanish" until picked. Serde default = Yap's five, no shortcuts; at most
   12 run (`transforms::list`: usable ones, each id once). A key that would
-  fire with one of the seven fixed shortcuts or an earlier transform's is
-  left unbound, `transforms::assign`), mic_order (Settings → Dictation →
+  fire with one of the nine fixed shortcuts or an earlier transform's is
+  left unbound, `transforms::assign`; a language shortcut's too), **My
+  languages** (Settings → Dictation, `dictation/languages.rs`, 2026-10-25):
+  `my_languages` (the languages you speak, codes in your order; empty = none
+  picked, and a config from before keeps the one `selected_language` names),
+  `language_shortcuts` (at most 4 `{id, language, translateTo, hotkey}`:
+  `language` a code or "auto" — any of yours —, `translateTo` a code or "" —
+  as spoken —, `hotkey` an input-hook spec; a key that would fire with one of
+  the nine fixed shortcuts or an earlier one is left unbound,
+  `languages::assign`), `language_nudge` ("Tell me when I speak a language I
+  didn't pick", on; no `migrate_once` step), mic_order (Settings → Dictation →
   Microphone, 2026-10-25, `dictation/mics.rs`: `[{id, name}]` — the Core
   Audio endpoint id, else the name — in the person's order; the first one
   connected is used, then Windows' default; empty, the default, is Windows'
@@ -56,7 +65,9 @@
   stop off chat messages", default on), auto_submit(+key),
   voice_enter (the "press enter" voice command, default on), terminal_mode
   ("Safer pasting into terminals", default on; both `pasting/app_kind.rs`),
-  restore_clipboard, autostart, model_unload_timeout, selected_language,
+  restore_clipboard, autostart, model_unload_timeout, selected_language (the
+  main shortcut's language: "auto" — with My languages, the likeliest of
+  them — or a code; set in Dictation → My languages since 2026-10-25),
   translate_to_english, the `pp*` AI-cleanup fields incl. `pp_preset` (Default/Email/
   Notes/Slack/Code/Custom), the editable `pp_prompt` body, `pp_api_keys` (per-provider
   key store — the UI swaps the active `pp_api_key` from it on provider switch),
@@ -334,6 +345,9 @@
   count and "Don't suggest this", and the words you removed from the
   dictionary (`removed`, never suggested again) (`dictionary/learn.rs`). Never the
   field text it read.
+- Language nudges: `%APPDATA%/yap/language_nudges.json` — when Yap last
+  offered to add a language to My languages, and per language your "Not now"
+  count and "Don't ask about it" (`dictation/languages/nudge.rs`). Codes only.
 - Memory: `%APPDATA%/yap/memory.json` — what Yap remembers about the person
   (Profile, Preferences, People, Projects, Topics: each a title, a summary,
   facts, where it came from, when), how far each chat has been read for it,
@@ -416,6 +430,9 @@
   shortcut taking the last dictation when nothing is selected
   (`rewrite_last_dictation` on; the shortcut itself unbound), Yap's five
   saved transforms with no shortcuts (`transforms`; Translate to Spanish),
+  no languages picked and no language shortcuts (`my_languages`,
+  `language_shortcuts`; the main shortcut on Auto) with the language nudge
+  on (`language_nudge`),
   live transcription preview **on**
   (`streaming_partials`), AI cleanup **off** (turned on locally, the model
   recommended for this PC: Qwen3.5 4B on a graphics card with ≥ 5.5 GiB of its

@@ -739,6 +739,42 @@ pub struct TimedText {
     pub end: f32,
 }
 
+/// What a dictation tells the engine about the language spoken ("My
+/// languages", `dictation/languages.rs`).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub enum Spoken {
+    /// Nothing known: the model decides (Whisper detects among all it knows).
+    #[default]
+    Auto,
+    /// One of these (My languages): Whisper picks the likeliest of them; a
+    /// model that must be told gets the first it knows; one that
+    /// recognises the language by itself is left to it.
+    Among(Vec<String>),
+    /// This language (a language shortcut's, or the main shortcut's).
+    Fixed(String),
+}
+
+/// The language a Whisper model heard: the likeliest of all, and the one it
+/// transcribed in (the likeliest of the person's languages).
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Heard {
+    /// The likeliest language of all ("fr") and its probability (0–1).
+    pub top: String,
+    pub p: f32,
+    /// The language it transcribed in, and its probability.
+    pub picked: String,
+    pub picked_p: f32,
+}
+
+/// A dictation's transcript and, when the model can tell, its language
+/// ([`SttAdapter::transcribe_spoken`]).
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct Said {
+    pub text: String,
+    pub heard: Option<Heard>,
+}
+
 /// A transcription with the times of its words ([`SttEngine::transcribe_timed`]).
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Timed {
@@ -784,6 +820,14 @@ pub trait SttEngine: Send + Sync {
     ) -> Result<Timed, SttError> {
         self.transcribe(audio, language, translate, initial_prompt)
             .map(|text| Timed { text, words: Vec::new() })
+    }
+
+    /// The language of `audio`: each language's code and probability, the
+    /// likeliest first — Whisper's own detection on its first 30 s (what it
+    /// runs anyway when it isn't given a language). `None`: this engine
+    /// can't tell (every other model).
+    fn detect_language(&self, _audio: &[f32]) -> Option<Vec<(String, f32)>> {
+        None
     }
 
     /// Process a streaming audio chunk and return a partial transcript when
@@ -1129,6 +1173,33 @@ mod engine_real {
             self.run(audio, language, translate, initial_prompt, true)
         }
 
+        fn detect_language(&self, audio: &[f32]) -> Option<Vec<(String, f32)>> {
+            if audio.len() < MIN_SAMPLES {
+                return None;
+            }
+            let mut engine = self.inner.lock().ok()?;
+            let LoadedEngine::Whisper(e) = &mut *engine else { return None };
+            if !e.is_multilingual() {
+                return None;
+            }
+            let started = std::time::Instant::now();
+            match e.detect_language(audio, CPU_THREADS.load(std::sync::atomic::Ordering::Relaxed) as i32) {
+                Ok(list) => {
+                    tracing::info!(
+                        ms = started.elapsed().as_millis() as u64,
+                        top = list.first().map(|(c, _)| *c).unwrap_or(""),
+                        p = format!("{:.2}", list.first().map(|(_, p)| *p).unwrap_or(0.0)),
+                        "Language detected"
+                    );
+                    Some(list.into_iter().map(|(c, p)| (c.to_string(), p)).collect())
+                }
+                Err(err) => {
+                    tracing::warn!("Language detection failed: {}", err);
+                    None
+                }
+            }
+        }
+
         fn name(&self) -> &str {
             self.name
         }
@@ -1198,6 +1269,17 @@ mod engine_stub {
             ))
         }
 
+        /// A test run's stand-in for Whisper's detection (debug builds:
+        /// `languages::e2e_language_stage`); never otherwise.
+        fn detect_language(&self, _audio: &[f32]) -> Option<Vec<(String, f32)>> {
+            #[cfg(debug_assertions)]
+            {
+                crate::dictation::languages::stand_in_detection()
+            }
+            #[cfg(not(debug_assertions))]
+            None
+        }
+
         fn name(&self) -> &str {
             "stub"
         }
@@ -1247,6 +1329,27 @@ impl SttAdapter {
         initial_prompt: Option<&str>,
     ) -> Result<String, SttError> {
         self.engine.transcribe(audio, language, translate, initial_prompt)
+    }
+
+    /// A dictation's transcription with what's known of its language
+    /// (`spoken`, My languages: `dictation/languages.rs`): a model that tells
+    /// the language (Whisper) is asked which it is first — what it would
+    /// have done anyway without a language — and transcribes in the
+    /// likeliest of the person's; one that must be told is told; the rest
+    /// get the language as before. The language it heard comes back with
+    /// the text, when it can tell.
+    pub fn transcribe_spoken(
+        &self,
+        audio: &[f32],
+        spoken: &Spoken,
+        translate: bool,
+        initial_prompt: Option<&str>,
+    ) -> Result<Said, SttError> {
+        let detect = !matches!(spoken, Spoken::Fixed(_)) && crate::dictation::languages::tells(&self.model);
+        let probs = if detect { self.engine.detect_language(audio) } else { None };
+        let (language, heard) = crate::dictation::languages::choose(&self.model, spoken, probs.as_deref());
+        let text = self.engine.transcribe(audio, language.as_deref(), translate, initial_prompt)?;
+        Ok(Said { text, heard })
     }
 
     /// [`SttAdapter::transcribe`] with the words' times (see

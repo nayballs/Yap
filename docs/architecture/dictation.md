@@ -6,6 +6,10 @@ How a dictation runs: the hotkey and push-to-talk gestures, the mic, speech-to-t
 
 ## The pipeline order
 
+The transcription itself is told what's known of the language (My
+languages, `dictation/languages.rs` below: Whisper picks the likeliest of
+the person's languages and says what it heard), and a language shortcut
+that translates sends the transcript to the AI in cleanup's place.
 Pipeline order after transcription: **AI cleanup (in the style of the kind
 of app it goes into — email formal, chats casual, AI prompts literal,
 terminal commands as said: `ai/cleanup_styles.rs`, [ai-models.md](./ai-models.md);
@@ -36,7 +40,10 @@ the region is About you's; 2026-10-21): a UK user's
 Yap's own layer of the cleanup prompt (the system prompt's end and the
 dictation's restated instruction: `llm::cleanup_system_prompt`,
 `cleanup_message`, `about_you::cleanup_spelling`), never in the editable
-preset; another language gets no line. How well it's followed depends on
+preset; another language gets no line, nor does a dictation known to be in
+another language (My languages, `languages::cleanup_spelling`), which gets
+a line keeping it in its language instead (`languages::language_line`,
+below). How well it's followed depends on
 the model (the 4B mostly; the 1.5B hardly — docs/model-evals.md). The dictionary runs Handy's split (ported from its source):
 **Whisper models** get the correct spellings as the decoder's `initial_prompt`
 (ASR biasing, threaded through `SttEngine::transcribe` at every call site —
@@ -412,7 +419,12 @@ to **Run again** from Home.
   Settings' pause while a key is picked); a slot's press goes to the
   forwarder as `transform-key-N` and out as one `transform-key-pressed`
   event carrying the slot (releases dropped), which `lib.rs` hands to
-  `transforms::on_key` — see `dictation/transforms.rs` below. **`clashes(a, b)`** (pure, unit-tested;
+  `transforms::on_key` — see `dictation/transforms.rs` below. Before the
+  transforms, **four language shortcuts' slots** (`LANGUAGE_BINDINGS`,
+  My languages: `configure_languages_from` / `configure_language`,
+  `languages::assign`; their press and release go out as one
+  `language-key {slot, pressed, at}` event — `dictation/languages.rs`
+  below). **`clashes(a, b)`** (pure, unit-tested;
   `hotkeysClash` in `lib/core/hotkeys.js` is the same rule, Settings refuses with
   it): the same key however written, combos on one key nesting (Ctrl+Space
   inside Ctrl+Shift+Space), a chord completing inside a combo or bigger
@@ -508,6 +520,98 @@ to **Run again** from Home.
   Unit tests (`transforms::tests`, `input_hook`'s slot test, `as_said`'s
   undoable), e2e `transforms.spec.js`, robot `e2e-real/transforms.real.js`
   (written, not yet run).
+- **`dictation/languages.rs`** (+ `languages/catalog.rs`, `languages/nudge.rs`)
+  — **My languages** (2026-10-25; Wispr Flow's languages and its "Speaking a
+  different language?" nudge of 28 Sep, OpenWhispr's dual-language hotkeys
+  request, by behaviour; Settings → Dictation → My languages,
+  [frontend-settings.md](./frontend-settings.md)).
+  **The languages** (`config.my_languages`, codes in the person's order;
+  `my_languages`: a config from before keeps the one language
+  `selected_language` named, no migration). **`catalog.rs`** (pure): Whisper's
+  hundred languages (code, English name, own name: the search), which model
+  covers which and **how it learns the language** (`Tells`): Whisper (Small,
+  Medium, Large v3, Turbo; Breeze ASR for Chinese and English) all of them
+  and says which it heard (`Probabilities`); Parakeet V3 (25 European) and
+  SenseVoice (Chinese, Cantonese, English, Japanese, Korean) recognise it by
+  themselves and never say (`Itself`); Canary 1B v2 (the same 25), Canary
+  180M Flash (en/de/es/fr) and Cohere (14) must be told (`Told`, English if
+  not); Parakeet V2, Moonshine and Distil Whisper are English only, GigaAM
+  Russian only (`One`). `recommend` names the model for a set of languages:
+  English alone → Parakeet V2 if installed, else V3; otherwise the first of
+  Parakeet V3, SenseVoice (only with a CJK language), Whisper Large v3 Turbo,
+  Large, Medium, Small, Canary 1B v2, Cohere, GigaAM that covers them all,
+  an installed one first. Settings says it; **Yap never changes the model**
+  (the maintainer's Parakeet V2 stays).
+  **What a dictation tells the engine** (`plan`, pure → `stt::Spoken`): a
+  language shortcut's language; else the main shortcut's fixed one
+  (`selected_language` still holds it: "auto" or a code); else
+  `Among(my languages)`; none → `Auto`, as before. `stt::SttAdapter::
+  transcribe_spoken` (`run_stt` and Run again; Upload, meetings, the live
+  preview and the speed benchmark keep `selected_language`): a model that
+  tells is first asked which language it is
+  (`SttEngine::detect_language`: Whisper's own detection —
+  `whisper_lang_auto_detect` on its first 30 s, the vendored transcribe-rs's
+  `WhisperEngine::detect_language`, see its `YAP.md` — exactly what
+  `full()` ran by itself when given no language, so it costs nothing more:
+  the language picked is then passed in), and `choose` (pure) picks **the
+  likeliest of the person's languages** — Whisper restricted to them, so a
+  short English dictation isn't heard as Welsh — and returns what it heard
+  (`stt::Heard`: the likeliest of all, its probability, the one picked); a
+  model that must be told gets the first of them it knows; one that
+  recognises by itself, or knows one language, gets nothing (Parakeet V2: no
+  change). `heard` keeps it for this dictation (the log: codes and
+  probabilities). **Language shortcuts** (`config.language_shortcuts`,
+  `LanguageShortcut { id, language (code | "auto"), translateTo, hotkey }`,
+  at most `MAX_SHORTCUTS` 4): `input_hook.rs`'s four language slots
+  (`configure_languages_from`; `assign`, pure: never a key that fires with
+  one of the nine fixed shortcuts (Paste last and Copy last included) or an earlier one; **transforms give way
+  to them**, `transforms::fixed_shortcuts`), press **and release** as
+  `language-key {slot, pressed, at}` (`init` → `Pipeline::on_language_key`),
+  plus the in-page fallback (`language_key`). A press records exactly as the
+  dictation key's (toggle, push-to-talk's gestures): `arm(id)` around
+  `on_key`, taken by the recording it starts (`begin_dictation`, from
+  `capture_target`; not for the rewrite shortcut's instruction or the Voice
+  Assistant), kept until the next recording (an Undo keeps it).
+  **Translate on a shortcut** (`translate_dictation`, in `deliver` before
+  cleanup): a shortcut with `translateTo` sends the transcript to
+  `llm::transform` with `translate_instruction(from, to)` (the language
+  spoken, the target, fillers out, names/numbers/links kept, a question
+  translated never answered — measured, docs/model-evals.md "My languages")
+  on the **Commands scope's model** (`pipeline::commands_model`: its own
+  provider, else the cleanup model — on this PC or in the cloud), in AI
+  cleanup's place; `transforms::clean_output`. Spoken in the target language
+  already: nothing to translate (cleanup as ever). No model, or it fails:
+  pasted as said, and "Couldn't translate into Spanish" (an alert) — a
+  dictation never waits on it. The words as said stay one **Use what I
+  said** away (the bar's offer: the original language). **Cleanup in the
+  right language** (`clean_up` in `pipeline/delivery.rs`): `language_line`
+  just before the transcript (with the style's line and the names on
+  screen, never in the system prompt the server caches): "This transcript is
+  in French: write the cleaned text in French, never translating it." when
+  it's known (Whisper heard it, or a fixed language the model knows), else —
+  My languages holding one besides English — "This transcript may be in
+  English or French: keep it in the language it is in, never translating
+  it."; none for English. The region's spelling line (`about_you`) only
+  where it may be English (`cleanup_spelling`). **The nudge**
+  (`languages/nudge.rs`): Whisper sure (`MIN_P` 0.85) of a language not in
+  My languages, after a dictation of at least 2 s, "Tell me when I speak a
+  language I didn't pick" on (`language_nudge`, default on) → "You spoke
+  French · Add it to My languages?" (Add French / Not now / Don't ask about
+  French) in one place (`notice::place`: the main window's toast,
+  `lib/notices/languageNudge.js`, else a Yap bar card `language-nudge`;
+  never a Windows notification), on its own thread once no dictation runs
+  (`notice::moment`, up to a minute; the policy holds the card too); at most
+  one per 10 minutes, Not now twice or Don't ask → never again for that
+  language (`<data>/language_nudges.json`); Add → `shell::settings::
+  change_config` (saved, applied, every window told). Only Whisper says
+  which language it heard: with any other model Settings says the nudge
+  can't work. Test mode: the stub engine's detection stands in
+  (`e2e_language_stage {shortcut?, heard?, fresh?}`, also the next
+  `e2e_dictation`'s language), `e2e_language_heard {heard, secs}` (a
+  transcription in, without a mic), `e2e_language_slots`. Unit tests
+  (`languages::tests`, `catalog::tests`, `nudge::tests`, `input_hook`'s
+  language slots), e2e `languages.spec.js`, robot
+  `e2e-real/languages.real.js`.
 - **`dictation/mic.rs`** — **the dictation's microphone, opened on demand**
   (2026-10-22). Until then Yap held Windows' default mic open the whole time
   it ran, for the pre-roll: Windows showed the mic in use all day, a
@@ -663,7 +767,10 @@ to **Run again** from Home.
   other — the model transcribes a second of silence at load to plan it. On
   this PC that took Parakeet V3 on DirectML from 441 / 630 / 1,244 ms to
   133 / 158 / 578 ms at 3 / 11 / 36 s of speech.
-  `transcribe_timed` (default: `transcribe`, no times) keeps the times the
+  `detect_language` (default `None`; Whisper's own detection, the vendored
+  transcribe-rs's `WhisperEngine::detect_language`) and
+  `SttAdapter::transcribe_spoken(audio, &Spoken, …) → Said { text, heard }`
+  are My languages' (`dictation/languages.rs`). `transcribe_timed` (default: `transcribe`, no times) keeps the times the
   model gives (`Timed { text, words: Vec<TimedText> }`, seconds from the
   audio's start): Parakeet's words (`TimestampGranularity::Word`), Whisper's
   segments (a phrase each), SenseVoice's tokens joined at "▁"; none for

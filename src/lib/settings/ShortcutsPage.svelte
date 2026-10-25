@@ -12,8 +12,16 @@
   import LinkRow from '../ui/LinkRow.svelte';
   import SettingsHotkey from './SettingsHotkey.svelte';
   import { transformName } from './transforms.js';
+  import { languageShortcuts, shortcutName } from './languages.svelte.js';
 
   let { cfg, goto = null } = $props();
+
+  // Language shortcuts (My languages, dictation/languages.rs) live with your
+  // languages (Dictation): a link.
+  const languageKeys = $derived(languageShortcuts(cfg).filter((s) => s.hotkey));
+  const languagesValue = $derived(
+    languageKeys.length === 0 ? 'None set' : languageKeys.length === 1 ? shortcutName(languageKeys[0]) : `${languageKeys.length} shortcuts`
+  );
 
   // Saved transforms' shortcuts live with the transforms (Commands): a link.
   const withKeys = $derived((cfg?.transforms || []).filter((t) => t.hotkey));
@@ -78,6 +86,13 @@
   >
     <SettingsHotkey {cfg} target="snipHotkey" clearable />
   </Row>
+  <LinkRow
+    label="Language shortcuts"
+    desc="Dictate in a language of yours, or in one and paste another, each on a key of its own"
+    value={languagesValue}
+    setting="shortcut-languages"
+    onclick={() => goto?.('dictation#language-shortcuts')}
+  />
   <LinkRow
     label="Transforms"
     desc="Polish, Shorter, Translate and your own, each on a key of its own"

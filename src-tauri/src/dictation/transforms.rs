@@ -259,9 +259,9 @@ pub fn assign(fixed: &[(&str, &str)], transforms: &[Transform]) -> Vec<Slot> {
     out
 }
 
-/// The nine fixed shortcuts, by name (`input_hook.rs`), as [`assign`] takes
-/// them.
-pub fn fixed_shortcuts(cfg: &YapConfig) -> Vec<(&'static str, String)> {
+/// The nine fixed shortcuts, by name (`input_hook.rs`): what the language
+/// shortcuts give way to.
+pub fn nine_shortcuts(cfg: &YapConfig) -> Vec<(&'static str, String)> {
     vec![
         ("dictation hotkey", cfg.hotkey.clone()),
         ("rewrite shortcut", cfg.edit_hotkey.clone()),
@@ -273,6 +273,15 @@ pub fn fixed_shortcuts(cfg: &YapConfig) -> Vec<(&'static str, String)> {
         ("Paste-last shortcut", cfg.paste_last_hotkey.clone()),
         ("Copy-last shortcut", cfg.copy_last_hotkey.clone()),
     ]
+}
+
+/// The shortcuts a transform's gives way to, by name, as [`assign`] takes
+/// them: the nine fixed ones, then the language shortcuts' (My languages,
+/// `languages.rs`: a dictation key comes first).
+pub fn fixed_shortcuts(cfg: &YapConfig) -> Vec<(&'static str, String)> {
+    let mut out = nine_shortcuts(cfg);
+    out.extend(crate::dictation::languages::shortcuts(cfg).into_iter().map(|s| ("language shortcut", s.hotkey)));
+    out
 }
 
 /// What was found where the transform is to work.

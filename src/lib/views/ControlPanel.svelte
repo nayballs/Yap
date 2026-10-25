@@ -25,6 +25,7 @@
   import { initMeetingGuard } from '../notices/meetingGuard.js';
   import { initCalendar, closeConnectDialog } from '../stores/calendar.svelte.js';
   import { initWordSuggestions } from '../notices/wordSuggestions.js';
+  import { initLanguageNudge } from '../notices/languageNudge.js';
   import { initAlerts } from '../notices/alerts.js';
   import { initMicOffers } from '../notices/micOffer.js';
   import { initUpload } from '../stores/upload.svelte.js';
@@ -116,6 +117,9 @@
   // The one offer of AI cleanup, to someone with it off on a PC the
   // on-device model fits (ai/cleanup_styles.rs via cleanupOffer.js).
   initCleanupOffer({ openSettings: (section) => openSettings(section) });
+  // "You spoke French · Add it to My languages?" after a dictation Whisper
+  // heard in a language you didn't pick (dictation/languages/nudge.rs via languageNudge.js).
+  initLanguageNudge({ openSettings: (section) => openSettings(section) });
   let bellOpen = $state(false);
 
   // Sidebar nav (Wispr order: Home, Insights, then the work surfaces).

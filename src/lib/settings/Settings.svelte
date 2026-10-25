@@ -565,7 +565,7 @@
           {:else if section === 'general'}
             <GeneralPage {cfg} {barHiddenUntil} {goto} />
           {:else if section === 'dictation'}
-            <DictationPage {cfg} {outputs} {onshowview} />
+            <DictationPage {cfg} {outputs} {onshowview} {goto} />
           {:else if section === 'shortcuts'}
             <ShortcutsPage {cfg} {goto} />
           {:else if section === 'meetings'}
@@ -581,7 +581,7 @@
             </div>
             <MemorySection {cfg} {goto} />
           {:else if section === 'models'}
-            <SpeechPage {cfg} {langInfo} />
+            <SpeechPage {cfg} {langInfo} {goto} />
           {:else if section === 'cleanup'}
             <LanguageModelsPage {cfg} {goto} />
           {:else if section === 'connectors'}

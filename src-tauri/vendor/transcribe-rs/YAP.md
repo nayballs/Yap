@@ -6,7 +6,9 @@ A copy of [transcribe-rs](https://github.com/cjpais/transcribe-rs) 0.3.11
 and `src/` are kept; the `[[example]]` and `[[test]]` targets were taken out of
 `Cargo.toml` because their files aren't here. Everything else is unchanged
 except the two DirectML fixes below (2026-10-22), measured with `stt_speed.rs`'s
-`--ignored` `profile_parakeet` and `bench_this_pc` on an RTX 5070 Ti.
+`--ignored` `profile_parakeet` and `bench_this_pc` on an RTX 5070 Ti; threads
+and the DirectML adapter (2026-10-24); and Whisper's language probabilities
+(2026-10-25).
 
 ## What changed
 
@@ -37,6 +39,21 @@ except the two DirectML fixes below (2026-10-22), measured with `stt_speed.rs`'s
    for that length at load, not in the first dictation (~0.5 s).
 
 The CPU path (`CpuOnly`) and every other model and accelerator are untouched.
+
+## Whisper's language probabilities (2026-10-25)
+
+`src/whisper_cpp/mod.rs`
+- `WhisperEngine::detect_language(samples, n_threads)`: whisper.cpp's own
+  language detection (`pcm_to_mel` then `whisper_lang_auto_detect_with_state`
+  at offset 0, on the loaded backend) — exactly what `full()` runs on its
+  first 30 s when it's given no language — returned as `(code, probability)`
+  pairs, the most likely first. `Err` for an English-only (`.en`) model.
+- `WhisperEngine::is_multilingual()`.
+
+Yap's "My languages" (`dictation/languages.rs`) calls it before a
+dictation's transcription and then passes the language it picked (the most
+likely of the person's languages) to `transcribe_with`, so `full()` doesn't
+detect a second time: the same work as before, plus the probabilities.
 
 ## Threads and the DirectML adapter (2026-10-24)
 

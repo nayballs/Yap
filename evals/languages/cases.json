@@ -1,0 +1,109 @@
+[
+  {
+    "name": "fr-meeting-moved",
+    "kind": "cleanup",
+    "language": "fr",
+    "mine": ["en", "fr"],
+    "text": "euh donc je voulais dire que la réunion avec Camille Lefèvre est déplacée à jeudi à quinze heures et euh il faut que les diapositives soient prêtes pour mercredi",
+    "expect": { "keeps": ["Camille Lefèvre"], "contains_any": ["réunion", "jeudi", "diapositives", "mercredi"], "not_contains": ["meeting", "Thursday", "Wednesday", "slides", "the", "euh", "heu"], "min_ratio": 0.5, "max_ratio": 1.3 }
+  },
+  {
+    "name": "fr-question-not-answered",
+    "kind": "cleanup",
+    "language": "fr",
+    "mine": ["en", "fr"],
+    "app": "workChat",
+    "text": "est-ce que tu peux m'envoyer le devis de Northwind avant vendredi s'il te plaît",
+    "expect": { "keeps": ["Northwind"], "contains_any": ["devis", "vendredi"], "not_contains": ["quote", "Friday", "please", "bien sûr", "voici"], "min_ratio": 0.6, "max_ratio": 1.3 }
+  },
+  {
+    "name": "fr-email",
+    "kind": "cleanup",
+    "language": "fr",
+    "mine": ["en", "fr"],
+    "app": "email",
+    "text": "bonjour Margaux je te confirme que le colis partira lundi matin depuis l'entrepôt de Saint-Brieuc bonne journée",
+    "expect": { "keeps": ["Margaux", "Saint-Brieuc"], "contains_any": ["colis", "lundi", "entrepôt"], "not_contains": ["package", "Monday", "warehouse", "Dear", "Best regards"], "min_ratio": 0.6, "max_ratio": 1.5 }
+  },
+  {
+    "name": "es-delivery-late",
+    "kind": "cleanup",
+    "language": "es",
+    "mine": ["en", "es"],
+    "text": "eh bueno quería decirte que la entrega para Lucía Moreno se retrasa hasta el martes porque el proveedor de Valdemoro no ha enviado las piezas",
+    "expect": { "keeps": ["Lucía Moreno", "Valdemoro"], "contains_any": ["entrega", "martes", "proveedor"], "not_contains": ["delivery", "Tuesday", "supplier", "the"], "min_ratio": 0.6, "max_ratio": 1.3 }
+  },
+  {
+    "name": "es-chat-casual",
+    "kind": "cleanup",
+    "language": "es",
+    "mine": ["en", "es"],
+    "app": "personalChat",
+    "text": "oye puedes traer las llaves del coche cuando vengas esta noche",
+    "expect": { "contains_any": ["llaves", "coche", "noche"], "not_contains": ["keys", "car", "tonight", "claro"], "min_ratio": 0.6, "max_ratio": 1.4 }
+  },
+  {
+    "name": "es-question-not-answered",
+    "kind": "cleanup",
+    "language": "es",
+    "mine": ["en", "es"],
+    "text": "cuánto cuesta el plan anual de Fabrikam para diez usuarios",
+    "expect": { "keeps": ["Fabrikam"], "contains_any": ["cuesta", "plan", "usuarios"], "not_contains": ["cost", "annual", "users", "aproximadamente", "depende"], "min_ratio": 0.6, "max_ratio": 1.5 }
+  },
+  {
+    "name": "de-meeting-moved",
+    "kind": "cleanup",
+    "language": "de",
+    "mine": ["en", "de"],
+    "text": "ähm also das Treffen mit Jonas Becker wird auf Donnerstag verschoben und äh die Präsentation muss bis Mittwoch fertig sein",
+    "expect": { "keeps": ["Jonas Becker"], "contains_any": ["Treffen", "Donnerstag", "Präsentation"], "not_contains": ["meeting", "Thursday", "presentation", "ähm", "ahm", "äh"], "min_ratio": 0.6, "max_ratio": 1.3 }
+  },
+  {
+    "name": "de-email",
+    "kind": "cleanup",
+    "language": "de",
+    "mine": ["en", "de"],
+    "app": "email",
+    "text": "hallo Frau Weber vielen Dank für Ihre Nachricht ich schicke Ihnen die Unterlagen bis Freitag zu mit freundlichen Grüßen",
+    "expect": { "keeps": ["Weber"], "contains_any": ["Unterlagen", "Freitag", "Nachricht"], "not_contains": ["documents", "Friday", "Dear", "Kind regards"], "min_ratio": 0.6, "max_ratio": 1.5 }
+  },
+  {
+    "name": "de-language-not-known",
+    "kind": "cleanup",
+    "mine": ["en", "de"],
+    "text": "können wir das Angebot für Contoso noch einmal durchgehen bevor wir es abschicken",
+    "expect": { "keeps": ["Contoso"], "contains_any": ["Angebot", "abschicken", "durchgehen"], "not_contains": ["offer", "quote", "before we", "send"], "min_ratio": 0.6, "max_ratio": 1.4 }
+  },
+  {
+    "name": "translate-en-es-invoice",
+    "kind": "translate",
+    "from": "en",
+    "to": "es",
+    "text": "um so can you tell Dana that the invoice for the Riverside project goes out on the 14th of March",
+    "expect": { "keeps": ["Dana", "Riverside", "14"], "contains_any": ["factura", "marzo", "proyecto"], "not_contains": ["invoice", "um", "March", "here is"], "min_ratio": 0.6, "max_ratio": 1.5 }
+  },
+  {
+    "name": "translate-en-fr-question",
+    "kind": "translate",
+    "from": "en",
+    "to": "fr",
+    "text": "uh what time does the train to Port Ellery leave tomorrow morning",
+    "expect": { "keeps": ["Port Ellery", "?"], "contains_any": ["train", "demain", "heure"], "not_contains": ["uh", "tomorrow", "the train leaves", "le train part à 8"], "min_ratio": 0.6, "max_ratio": 1.8 }
+  },
+  {
+    "name": "translate-fr-en-room",
+    "kind": "translate",
+    "from": "fr",
+    "to": "en",
+    "text": "euh est-ce que tu peux réserver une salle pour la réunion de lundi avec l'équipe de Lyon",
+    "expect": { "keeps": ["Lyon", "?"], "contains_any": ["room", "Monday", "meeting"], "not_contains": ["réunion", "euh", "salle", "sure"], "min_ratio": 0.6, "max_ratio": 1.5 }
+  },
+  {
+    "name": "translate-de-en-figures",
+    "kind": "translate",
+    "from": "de",
+    "to": "en",
+    "text": "äh schick mir bitte die Zahlen von Tailspin bis morgen",
+    "expect": { "keeps": ["Tailspin"], "contains_any": ["numbers", "figures", "tomorrow"], "not_contains": ["Zahlen", "äh", "morgen"], "min_ratio": 0.6, "max_ratio": 1.8 }
+  }
+]

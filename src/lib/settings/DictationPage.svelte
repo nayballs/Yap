@@ -7,6 +7,8 @@
   //   outputs:    output device names (list_output_devices).
   // The microphones' order is MicOrder.svelte (it reads Windows' list itself).
   //   onshowview: leaves Settings for a main-window view ("dictionary").
+  //   goto:       opens another Settings page (My languages' "Open Speech-to-Text").
+  import MyLanguages from './MyLanguages.svelte';
   import Group from '../ui/Group.svelte';
   import Row from '../ui/Row.svelte';
   import Toggle from '../ui/Toggle.svelte';
@@ -19,7 +21,7 @@
   import { fillHotkey, isCopilotKey } from '../core/hotkeys.js';
   import { PROVIDER_DESTINATIONS } from '../core/providers.js';
 
-  let { cfg, outputs = [], onshowview = null } = $props();
+  let { cfg, outputs = [], onshowview = null, goto = null } = $props();
 
   const outputOptions = $derived([{ value: null, label: 'System default' }, ...outputs.map((d) => ({ value: d, label: d }))]);
 
@@ -86,6 +88,10 @@
     <Segmented bind:value={cfg.recordingMode} options={MODES} label="Recording mode" />
   </Row>
 </Group>
+
+<!-- The languages you speak, a language or translation per shortcut, the
+     nudge (MyLanguages.svelte, dictation/languages.rs). -->
+<MyLanguages {cfg} {goto} />
 
 <Group title="Microphone and sound" id="settings-microphone">
   <!-- An order of microphones, not one (dictation/mics.rs): the first connected is used. -->

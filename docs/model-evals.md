@@ -41,6 +41,7 @@ builds and runs out of the checkout: `YAP_EVAL_TARGET_DIR=<builds>/evals`, `--ou
 | `--cleanup-quick`, `--cleanup-limit <n>` | Only the back-to-back rounds (no first call, Chat turns or spelling), of the first n dictations: a cloud model's tokens. |
 | `--brief` | Write the pre-meeting brief of each meeting in `evals/briefs/*.json` instead of the scenarios (below; `--only` picks them, `--repeat` repeats them). |
 | `--transforms` | Run the saved transforms' cases in `evals/transforms/cases.json` instead of the scenarios ("Saved transforms" below; `--only` picks them by name or transform, `--repeat` repeats them). |
+| `--languages`, `--languages-phase before\|after` | Run My languages' cases in `evals/languages/cases.json` instead of the scenarios ("My languages" below): cleanup of French, Spanish and German dictations before and after the language line, and a language shortcut's translation. |
 | `--search`, `--embed <gguf>`, `--embed-ngl <n>` | Meeting search instead of the scenarios: recall@k for keyword, meaning and hybrid search over `evals/search/meetings.json`, then each `--model`'s Ask across meetings answers checked for citations of the right lines ("Meeting search" below). The embedding model: `--embed` (else the installed app's, read-only, else downloaded into `--models-dir`), on the card unless `--embed-ngl 0`. |
 | `--mtp on\|off`, `--no-warm-up` | A local model's MTP drafting (default: as Yap's sidecar decides on this PC, never with `--ngl 0`) and its warm-up request. |
 | `--clock-step <min>` | Each turn of a scenario, the clock Chat tells the model moves on this much (a real chat's turns are minutes apart). |
@@ -214,6 +215,38 @@ a result Yap had to strip a preamble from is counted (`stripped`). About
 and result), the numbers in `summary.json` (`models[].transforms`).
 `eval::transforms`' unit tests check the file reads and every transform in
 it is one Yap has (≥ 3 cases per built-in), and the judge.
+
+### My languages (`--languages`)
+
+```bash
+yap.exe eval --languages --model local:qwen3.5-4b --ngl 999 --repeat 3
+yap.exe eval --languages --model groq:openai/gpt-oss-20b --keys-from-yap --languages-phase after
+```
+
+Each case in `evals/languages/cases.json` is either a **cleanup** — a
+dictation in French, Spanish or German as speech-to-text writes it
+(fillers, no punctuation), with the language Yap knows it's in
+(`language`: Whisper heard it, or a shortcut fixed it; "" when it isn't
+known), My languages (`mine`) and a kind of app (`app`, a
+`cleanup_styles` category) — or a **translate** (a language shortcut that
+pastes another language: `from`, `to`). Cleanup goes through the
+dictation's own code (`cleanup_styles::resolve` for the app's stand-in, then
+`cleanup_styles::clean`) twice: **before** (no word about the language, the
+call every dictation made until 25 Oct 2026) and **after** (with
+`languages::language_line` just before the transcript, no English spelling
+line for another language, and `languages::drop_leading_filler`); a
+translation through `llm::transform` with `languages::translate_instruction`
+and `transforms::clean_output`. Judged as transforms are (`expect`: `keeps`
+names exactly, `not_contains` the English words a translation would bring
+and the fillers, `contains_any` the language's own words, the length
+ratios). A cleanup call is ~1.7k tokens on Groq (the guardrails, the body,
+three one-shots that each restate the ~370-token instruction): `--languages-
+phase after` keeps a cloud run near 20k. `YAP_EVAL_LANGUAGE_LINE` /
+`YAP_EVAL_LANGUAGE_MAYBE` (the line for a known language, "{n}" its name and
+"{f}" its fillers; for one that isn't, "{names}") and `YAP_EVAL_LANGUAGE_AT`
+(`instruction`: where the spelling line goes, or `both`) compare wordings
+and places without a rebuild. `languages.md` in the run folder;
+`models[].languages` in `summary.json`.
 
 ### Meeting search (`--search`)
 
@@ -1705,6 +1738,63 @@ looks like code; a command's capital and full stop come off ("Git status." → "
 the 4B and Groq already wrote commands untouched (12/12, before too), so this is for the
 model that doesn't.
 
+## My languages (25 Oct 2026)
+
+**The question**: does cleanup keep a French, Spanish or German dictation in
+its language — the guardrails always said "do not translate", but the three
+one-shots are English — and does a language shortcut's translation come out
+in the target language, names kept, a question translated rather than
+answered? `--languages` over the 13 cases in `evals/languages/cases.json`
+(9 cleanups: a meeting moved, a question, an email, a casual chat, in
+French, Spanish and German, one with the language not known — My languages
+English and German —; 4 translations: English → Spanish and French, French
+and German → English). Run folders `<builds>/eval-runs/20261025-*-languages-*`;
+an RTX 5070 Ti shared with other builds, so the times are only indicative.
+
+| Model | Cleanup before | Cleanup after | Translate | Median |
+|---|---|---|---|---|
+| Qwen3.5-4B, graphics card (×3) | 21/27 | **27/27** | **12/12** | 0.2 s |
+| Qwen2.5-1.5B (the on-device default without a big card), graphics card (×3) | **0/27** | 15/27 | 10/12 | 0.1 s |
+| Groq `openai/gpt-oss-20b` (after only: its tokens) | — | **9/9** | **4/4** | 0.6 s |
+
+**The 1.5B translated every one into English** before the line ("I wanted to
+say that the meeting with Camille Lefèvre is being moved to Thursday…",
+"Hello Frau Weber, thank you for your message…") — 0 of 27. Told the
+language, it keeps French and Spanish (15/27), but still writes German in
+English (all 9 German cleanups, the case whose language wasn't known
+included); naming English as the wrong target ("do not translate it into
+English": 15/27) or putting the line where the spelling line goes (the
+system prompt and the restated instruction: 9/27; both places: 14/27)
+didn't help, so it stays just before the transcript. For German and a small
+model: the 4B or a cloud model.
+
+**The 4B never translated**, but kept the language's own fillers at the
+start: "Euh, donc je voulais dire…", "Ähm, das Treffen mit Jonas Becker…"
+(6 of 27 before). Naming them in the line ("…, and leave out its filler
+words (euh, bah)" — `catalog::fillers`: sounds only, never a word that also
+means something) cleared French; German kept "Ahm, also das Treffen…"
+whatever the wording ("Leave out every filler word, wherever it is", "…at
+the start too", listing "ahm" itself: 0/3 each), so a pass takes a filler
+the model left at the very start off (`languages::drop_leading_filler`: the
+language's own fillers with or without accents, never the whole text):
+27/27. Groq's gpt-oss-20b passed all, two of them on a second run (its 8k
+tokens a minute ran out on the first; the question case again after its town was made fictional: ~24k tokens in all).
+
+What they wrote, on the 4B (after): "Donc, je voulais dire que la réunion
+avec Camille Lefèvre est déplacée à jeudi à 15 heures et il faut que les
+diapositives soient prêtes pour mercredi."; "¿Cuánto cuesta el plan anual de
+Fabrikam para diez usuarios?" (a question kept, not answered); the
+translations "À quelle heure part le train pour Port Ellery demain matin ?" and
+"Please send me the figures for Tailspin by tomorrow." The 1.5B's
+translations lost the names' capitals ("can you book a meeting room for
+monday with the lyon team") 2 times of 12.
+
+**Whisper's language detection**, on the robot's engines build
+(`e2e-real/languages.real.js`, Whisper large-v3 on the same card): English
+heard as English with p = 1.00, in 74 and 56 ms — the work `full()` did by
+itself before whenever it wasn't given a language. Told French (My languages
+French only), large-v3 still wrote clear English as English ("The quick
+brown fox jumps over the lazy dog."), and Yap offered to add English.
 
 ## Meeting search (25 Oct 2026)
 
