@@ -117,6 +117,10 @@ export const FIELD_DEFAULTS = {
   ppModel: 'openai/gpt-oss-20b',
   ppPreset: 'default',
   ppDisableThinking: false,
+  // The on-device model loads on first use, freed after this many idle
+  // minutes (0 = never); at launch only when asked (ai/local_llm/on_demand.rs).
+  localModelAtLaunch: false,
+  localModelIdleMins: 15,
   // config.rs default_pp_prompt(), byte for byte (cleanupPresets.js).
   ppPrompt: PP_DEFAULT_BODY,
   routingScope: 'all_apps',

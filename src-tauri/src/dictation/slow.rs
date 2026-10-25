@@ -56,6 +56,9 @@ pub const EVENT: &str = "yap-slow";
 pub enum Stage {
     Transcribing,
     Cleanup,
+    /// The cleanup waits for Yap's on-device model to load
+    /// (`local_llm::on_demand`): "Loading the AI model…", with Skip cleanup.
+    Loading,
 }
 
 /// What the bar gets ([`EVENT`]).

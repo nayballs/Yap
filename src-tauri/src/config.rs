@@ -662,6 +662,18 @@ pub struct YapConfig {
     /// (config.json) turns it off, should a driver or model misbehave with it.
     #[serde(default = "default_true")]
     pub local_mtp: bool,
+    /// "Load the on-device model when Yap starts" (Settings → Language
+    /// Models → the on-device models): the sidecar starts at launch and
+    /// after a Settings save, as it always did. Off (the default): it loads
+    /// the first time something uses it (`local_llm::on_demand`). New in
+    /// 2026-10-25; an older Yap drops it on a save and it's off again.
+    #[serde(default)]
+    pub local_model_at_launch: bool,
+    /// "Free its memory after it's unused for": minutes with no request
+    /// before the sidecar is stopped (5 / 15 / 60; 0 = never). Missing =
+    /// 15 (`local_llm::on_demand::DEFAULT_IDLE_MINS`).
+    #[serde(default = "default_local_model_idle_mins")]
+    pub local_model_idle_mins: u32,
     /// Smart-routing scope (FluidVoice's `PromptRoutingScope`):
     /// - "all_apps" (default): the global `pp_prompt` cleans everywhere, and
     ///   `app_routes` override it for matching apps.
@@ -1045,6 +1057,9 @@ fn default_stt_device() -> String {
 fn default_true() -> bool {
     true
 }
+fn default_local_model_idle_mins() -> u32 {
+    crate::ai::local_llm::on_demand::DEFAULT_IDLE_MINS
+}
 fn default_recording_mode() -> String {
     "toggle".into()
 }
@@ -1245,6 +1260,8 @@ impl Default for YapConfig {
             local_llm_upgrade_dismissed: false,
             local_context: 0,
             local_mtp: true,
+            local_model_at_launch: false,
+            local_model_idle_mins: default_local_model_idle_mins(),
             routing_scope: default_routing_scope(),
             app_routes: Vec::new(),
             cleanup_profiles: Vec::new(),

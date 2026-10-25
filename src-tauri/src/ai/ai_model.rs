@@ -156,7 +156,7 @@ fn host_of(base_url: &str) -> String {
 }
 
 /// The resolved `(provider, model, base_url)` of a call, as the page names
-/// it. The one adjustment: "ondevice" whose sidecar is down resolves to the
+/// it. The one adjustment: "ondevice" whose model isn't installed resolves to the
 /// endpoint configured underneath (`local_llm::effective_endpoint_for`), so
 /// it's named by that endpoint, not "On this PC".
 pub fn describe(provider: &str, model: &str, base_url: &str, on_device_name: &str) -> Target {

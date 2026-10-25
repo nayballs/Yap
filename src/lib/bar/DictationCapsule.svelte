@@ -32,6 +32,8 @@
   // A saved transform (dictation/transforms.rs): its name while it runs ("Polish…",
   // the amber dot), then "Polish ✓" with **Undo** (the text from before put
   // back) for as long, or "Polish: no changes needed".
+  // "Loading the AI model…" (with Skip cleanup) while the cleanup waits for
+  // Yap's on-device model to load on its first use (ai/local_llm/on_demand.rs).
   // "Taking longer than usual…" instead of "Transcribing…" once the
   // transcription or the AI cleanup runs well past this PC's usual time
   // (dictation/slow.rs) — with **Skip cleanup** when it's the cleanup: the
@@ -83,9 +85,11 @@
       ? 'Hold on, still transcribing…'
       : dictation.modelLoading
         ? 'Loading the speech model…'
-        : dictation.slow
-          ? 'Taking longer than usual…'
-          : 'Transcribing…'
+        : dictation.slow?.stage === 'loading'
+          ? 'Loading the AI model…'
+          : dictation.slow
+            ? 'Taking longer than usual…'
+            : 'Transcribing…'
   );
   // The push-to-talk key is down (not locked hands-free): no buttons.
   const keyHeld = $derived(dictation.held && !dictation.locked);

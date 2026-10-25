@@ -306,7 +306,14 @@ Bluetooth headset in the order are not yet tried by a person),
 language/translate, **AI cleanup** (BYO key or local sidecar — Qwen3.5 4B on a capable
 graphics card, else Qwen2.5 1.5B, 2026-10-18, chosen and measured with the model
 evaluations; cleanup ~0.34 s a dictation on the 4B, ~0.13 s on the 1.5B, on an RTX
-5070 Ti) with per-app routing +
+5070 Ti; since 2026-10-25 **loaded when it's needed** — from the start of a
+dictation that will use it, freed after 15 idle minutes, at launch only with "Load
+the on-device model when Yap starts" on (`ai/local_llm/on_demand.rs`): the 4B was up
+3.2–3.3 s after launch on that card with its file in Windows' cache (llamafile 0.10.6,
+Yap's own arguments, MTP), its first request 0.77 s (cold) and the next 0.19 s, so a
+dictation longer than ~3 s hides the load; unit- and e2e-tested with a stand-in
+(`local-on-demand.spec.js`), the first use after a cold boot and a weaker card not yet
+measured) with per-app routing +
 named profiles + per-profile model choice, **Commands** (the rewrite shortcut +
 the agent's name in a dictation; "Voice Agent" until 2026-10-18), the **Voice
 Assistant** (`chat/assistant.rs`, 2026-10-18: its own shortcut, ask Chat out loud

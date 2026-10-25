@@ -98,7 +98,12 @@
   key store — the UI swaps the active `pp_api_key` from it on provider switch),
   `pp_local_model` (the on-device GGUF; empty = the 1.5B) + `local_llm_upgrade_dismissed`
   (the 4B offered once, `local_llm::models::upgrade_offer`) + `local_context` (the
-  on-device model's context in tokens; 0 = 8,192; `local_llm::context::effective_context`), `cleanup_profiles` (each
+  on-device model's context in tokens; 0 = 8,192; `local_llm::context::effective_context`) +
+  `local_model_at_launch` ("Load the on-device model when Yap starts", off: it loads on
+  first use) + `local_model_idle_mins` ("Free its memory after it's unused for": 5 / 15
+  (default) / 60, 0 = never) — both 2026-10-25, `ai/local_llm/on_demand.rs`; new fields
+  only, so an older Yap sharing the folder drops them on its save and they come back
+  at their defaults (it keeps its own autostart), `cleanup_profiles` (each
   with an optional per-profile LLM override: provider/base_url/model/api_key — empty
   provider = inherit global; since 2026-10-24 also **styles by app**,
   `ai/cleanup_styles.rs`: a profile with a `category` — "email", "workChat",
