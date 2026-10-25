@@ -40,6 +40,23 @@ pub fn chat_delete_many(ids: Vec<u64>) -> Result<usize, String> {
     Ok(gone)
 }
 
+/// The archived conversations (the Chat sidebar's "Archived"), archived
+/// last first.
+#[tauri::command]
+pub fn chats_archived() -> serde_json::Value {
+    crate::chat::chats::list_archived()
+}
+
+/// Archive conversations (out of the list, kept and still searched) or,
+/// with `archived: false`, bring them back. One write; returns how many
+/// changed.
+#[tauri::command]
+pub fn chat_archive(ids: Vec<u64>, archived: Option<bool>) -> Result<usize, String> {
+    let changed = crate::chat::chats::set_archived(&ids, archived.unwrap_or(true));
+    crate::chat::chats::saved()?;
+    Ok(changed)
+}
+
 /// Rename a conversation (the Chat sidebar's Rename, in place): the title as
 /// stored (one line, trimmed, ≤ 80 characters). Its place in the list stays.
 #[tauri::command]

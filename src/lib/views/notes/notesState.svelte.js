@@ -22,6 +22,7 @@ import { summaries, loadSummary, summarise } from '../../stores/meetingSummary.s
 import { refreshAudio, stopLine } from '../../stores/meetingAudio.svelte.js';
 import { speech, initSpeech, readAloud, stopReading } from '../../stores/speech.svelte.js';
 import { displayTitle } from './noteFormat.js';
+import { markWords, selectWords } from '../../core/findWords.js';
 
 /** This window's label: the `origin` of its saves and stops. */
 export const LABEL = 'settings';
@@ -106,6 +107,9 @@ export function createNotesState() {
   let lineEls = $state({});
   // The line a note was opened at (the Tasks view's "said at 12:40"): lit for a moment.
   let hilite = $state(null);
+  // My thoughts' box and the summary as shown: a search's words found there.
+  let rawEl = $state(null);
+  let renderedEl = $state(null);
 
   /** A speaker edit made here: the map, each line's voice (and echo: "It
    *  was me"), and the summary (a name put on "Speaker 2"). */
@@ -786,9 +790,11 @@ export function createNotesState() {
   /**
    * Open note `id` (at transcript line `line`; `ts`: when that line was
    * said, to find it if lines moved since; `tab`: 'enhanced' | 'raw'), and
-   * end its meeting if `stop`.
+   * end its meeting if `stop`. `find`: a search's `{ words, line }` — found
+   * again there (core/findWords.js): marked in the transcript line or the
+   * summary, selected in My thoughts at that line.
    */
-  async function openRequested({ id, stop, line, ts = null, tab: onTab = null }) {
+  async function openRequested({ id, stop, line, ts = null, tab: onTab = null, find = null }) {
     await select(id);
     if (selected?.id !== id) return;
     activeFolder = selected.folder || activeFolder;
@@ -803,7 +809,13 @@ export function createNotesState() {
         const found = lines.findIndex((s) => s.ts === ts);
         if (found >= 0) at = found;
       }
-      await showLine(Math.min(at, Math.max(lines.length - 1, 0)));
+      at = Math.min(at, Math.max(lines.length - 1, 0));
+      await showLine(at);
+      if (find?.words?.length) markWords(lineEls[at], find.words, { scroll: false });
+    } else if (find?.words?.length) {
+      await tick();
+      if (tab === 'enhanced') markWords(renderedEl, find.words);
+      else selectWords(rawEl, find.words, find.line ?? null);
     }
     if (!stop) return;
     meeting = (await invoke('meeting_state').catch(() => null)) || { recording: false };
@@ -855,6 +867,10 @@ export function createNotesState() {
     set editingLine(v) { editingLine = v; },
     get lineEls() { return lineEls; },
     get hilite() { return hilite; },
+    get rawEl() { return rawEl; },
+    set rawEl(v) { rawEl = v; },
+    get renderedEl() { return renderedEl; },
+    set renderedEl(v) { renderedEl = v; },
     get titleEl() { return titleEl; },
     set titleEl(v) { titleEl = v; },
     get isStale() { return isStale; },

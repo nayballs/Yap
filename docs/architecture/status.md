@@ -660,16 +660,38 @@ mid-batch against the real server (the batch is dropped by the meeting
 digests' `unless_busy`, not exercised here end to end), and other languages'
 meetings (the model reads 100+; the keyword half's stemming is English).
 
+**Search beyond the meetings** (2026-10-25, [search.md](./search.md#beyond-the-meetings-2026-10-25)):
+the Notes view's search over every note (title, My thoughts, summary,
+transcript: every word typed, marked, opening the note at the match) and by
+meaning; Chat's sidebar search over titles and messages, and **archive**
+(Archived, restore, delete from there); Chat's `search_notes` searching as
+Ask across meetings does, `search_chats` and memory's items for a question
+by meaning too; chats and memory items in the same index, read when they
+change, their vectors gone at once when deleted (search by meaning on or
+off, and at the first look after a start); Settings counting notes, chats
+and memory items; the model named in one place (EmbeddingGemma, with
+Qwen3-Embedding-0.6B defined beside it). **Measured** (`yap.exe eval
+--search-library`, a made-up person's notes, meetings, chats and memory):
+the Notes box recall@1 0.33 → 0.94, `search_notes` 0.67 → 1.0, past chats
+0.44 → 1.0, memory 0.44 → 1.0 with no item for unrelated questions; Chat's
+answers 12/17 → 16/17 on Qwen3.5-4B, 2/3 → 6/6 on Groq gpt-oss-20b for the
+questions that need a search. Unit- and e2e-tested
+(`e2e/library-search.spec.js`, 8 tests) against the stand-in embedding
+server. **Not yet tried**: a real library of a thousand notes and hundreds
+of chats with the real model on a processor (the search itself measured at
+~36 ms over 4,000 passages in a debug build), the Qwen3-Embedding model in
+the app (only in the evaluations' table so far, not run here this time),
+other languages' notes and chats.
+
 ## Not yet done
 
-Not yet done: the AI Chat surface searches by meaning only when asked
-across the meetings (search.md; elsewhere keyword-RAG; its answers stream since 2026-10-22 —
+Not yet done: the AI Chat surface's eager note context stays keyword-only
+(its `search_notes`, `search_chats` and memory search by meaning since
+2026-10-25, search.md; its answers stream since 2026-10-22 —
 unit- and e2e-tested against stand-ins, measured on the on-device
 Qwen3.5-4B and Groq, not yet through a real Anthropic, Gemini, OpenAI or
-OpenRouter stream, whose shapes are taken from their docs), no calendar tools and no conversation
-search/archive (Chat's `search_chats` searches past chats by keyword for the
-model, not for the person); memory isn't synced between PCs, matches
-questions by keyword (no embeddings), and doesn't learn with a model too
+OpenRouter stream, whose shapes are taken from their docs), no calendar
+tools; memory isn't synced between PCs and doesn't learn with a model too
 small to call tools; ElevenLabs as the reply voice isn't yet tried with a real key; spoken replies read Kokoro's
 Japanese and Mandarin voices' text as English, don't check a slow PC's
 speed before choosing Kokoro (the research's first-use RTF check), wait for the whole answer

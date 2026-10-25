@@ -68,7 +68,7 @@ export const FIELD_DEFAULTS = {
   memoryLearnChats: true,
   memoryLearnMeetings: false,
   memorySensitive: false,
-  // "Search my meetings by meaning" (search/): off until its model is in.
+  // "Search by meaning" (search/): off until its model is in.
   searchByMeaning: false,
   barEnabled: true,
   barHideFullscreen: true,

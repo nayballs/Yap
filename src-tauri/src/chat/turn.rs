@@ -85,11 +85,16 @@ fn rag_context(query: &str, strict: bool) -> String {
             } else if !n.enhanced_content.trim().is_empty() {
                 n.enhanced_content.clone()
             } else {
+                // Who said each line (a name the speaker map has, else
+                // You / Them): "who fixed the form?" answers from it
+                // (Qwen3.5-4B named the wrong person from the bare lines,
+                // `evals/search/library.json`, 2026-10-25).
                 n.transcript
                     .iter()
-                    .map(|s| s.text.as_str())
+                    .filter(|s| s.is_talk() && !s.text.trim().is_empty())
+                    .map(|s| format!("{}: {}", crate::speakers::prompt_label(&n.speakers, s), s.text.trim()))
                     .collect::<Vec<_>>()
-                    .join(" ")
+                    .join("\n")
             };
             let snippet: String = source.chars().take(RAG_NOTE_SNIPPET_LENGTH).collect();
             let title = if n.title.trim().is_empty() {
@@ -285,13 +290,16 @@ pub(crate) async fn chat_turn(
     // Memory (memory.rs): the "You" part in the system prompt with About
     // you (stable from turn to turn), what this question is about with it.
     let memory_you = crate::memory::you_block();
-    let memory_here = crate::memory::relevant_block(&text);
+    // By its words, and by meaning when that's on (search/library.rs).
+    let memory_here = crate::search::library::memory_block(&text).await;
     // "Search and reference past chats": a tool for a model with tools; for
     // one without, the chats a question points back to ("what did we say
     // about Lisbon?"), a couple of lines each.
-    let past_chats = (cfg.memory_search_chats && !tools_supported && crate::chat::chats::refers_to_past(&text))
-        .then(|| crate::chat::chats::past_chats_block(&text, conv.id))
-        .flatten();
+    let past_chats = if cfg.memory_search_chats && !tools_supported && crate::chat::chats::refers_to_past(&text) {
+        crate::search::library::past_chats_block(&text, conv.id).await
+    } else {
+        None
+    };
     // "Look things up on the web" (web.rs). Not for the Meetings view's Ask
     // bar: that's about the meetings.
     let web_on = cfg.web_search && scope != Some("meetings");

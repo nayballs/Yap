@@ -103,7 +103,12 @@ Meeting search (search/; instead of the scenarios; search.md):
                            search (and Chat's whole-note search), then each --model's Ask across
                            meetings answers checked for citations of the right lines (--only picks
                            questions by words or tag; --max-total-tokens caps a model's spend)
+  --search-library         evals/search/library.json instead: notes, chats and memory searched before
+                           (Yap's keyword searches) and after (search/library.rs); each --model's
+                           Chat answers to questions about them (--search-keyword: as before)
   --embed <path.gguf>      the embedding model (default: the installed app's, else downloaded)
+  --embed-model <m>        embeddinggemma (Yap's) | qwen3 (Qwen3-Embedding-0.6B: its prompts and
+                           pooling; give its GGUF with --embed)
   --embed-ngl <n>          its GPU layers (default 999; 0 = the processor)
 Serving benches (local servers; instead of the scenarios; serving.md):
   --bench stream           time to the first token, streamed vs not, on Chat-shaped requests
@@ -164,7 +169,10 @@ struct Args {
     languages: bool,
     languages_phase: Option<&'static str>,
     search: bool,
+    search_library: bool,
+    search_keyword: bool,
     embed: Option<PathBuf>,
+    embed_model: Option<String>,
     embed_ngl: u32,
     bench: Option<String>,
     bench_rounds: u32,
@@ -267,6 +275,18 @@ fn parse(argv: Vec<String>) -> Result<Args, String> {
                 );
             }
             "--search" => a.search = true,
+            "--search-library" => {
+                a.search = true;
+                a.search_library = true;
+            }
+            "--search-keyword" => a.search_keyword = true,
+            "--embed-model" => {
+                let m = value()?;
+                if !["embeddinggemma", "qwen3"].contains(&m.as_str()) {
+                    return Err(format!("--embed-model embeddinggemma|qwen3, not {m}"));
+                }
+                a.embed_model = Some(m);
+            }
             "--embed" => a.embed = Some(PathBuf::from(value()?)),
             "--embed-ngl" => a.embed_ngl = num(value()?, &flag)? as u32,
             "--bench" => {
@@ -1339,7 +1359,30 @@ async fn run_all(args: &Args, run_dir: &Path, keys: &HashMap<String, String>, sc
     let mut language_results: Vec<(String, Value)> = Vec::new();
     // Meeting search (`--search`): the corpus in the run's notes, its
     // embedding server, and the retrieval half, before any model.
-    let search_corpus = if args.search {
+    if args.embed_model.as_deref() == Some("qwen3") {
+        crate::search::embedder::use_model(Some(&crate::search::embedder::QWEN3_EMBEDDING_0_6B));
+    }
+    if args.search_keyword {
+        // Chat's searches as they were before 25 Oct 2026 (search::library::keyword_only).
+        std::env::set_var("YAP_EVAL_SEARCH", "keyword");
+    }
+    // The library (`--search-library`): its notes, chats and memory in the
+    // run's stores, the same server, its retrieval half.
+    let library_corpus = if args.search_library {
+        match super::library::load(&scenarios_dir(args).join("..").join("search").join("library.json")) {
+            Ok(c) => Some(c),
+            Err(e) => {
+                eprintln!("{e}");
+                return 2;
+            }
+        }
+    } else {
+        None
+    };
+    let mut library_answers: Vec<(String, Value)> = Vec::new();
+    let mut library_retrieval = Value::Null;
+    let mut library_ids = super::library::Ids::default();
+    let search_corpus = if args.search && !args.search_library {
         let path = scenarios_dir(args).join("..").join("search").join("meetings.json");
         match super::search::load(&path) {
             Ok(c) => Some(c),
@@ -1380,6 +1423,42 @@ async fn run_all(args: &Args, run_dir: &Path, keys: &HashMap<String, String>, sc
             }
             Err(e) => {
                 eprintln!("  meeting search: {e}");
+                summary["search_error"] = json!(e);
+                failed = true;
+            }
+        }
+    }
+    if let Some(l) = &library_corpus {
+        println!(
+            "\n=== Search beyond the meetings: {} notes, {} chats, {} memory items, {} questions ({}) ===",
+            l.notes.len(),
+            l.chats.len(),
+            l.memory.len(),
+            l.questions.len(),
+            crate::search::embedder::model().name
+        );
+        if let Ok(t) = chrono::DateTime::parse_from_rfc3339(&l.now) {
+            crate::ai::eval::clock_forward(t.timestamp() - crate::ai::eval::now().timestamp());
+        }
+        record::set_config(Some(crate::config::YapConfig { search_by_meaning: true, ..Default::default() }));
+        let setup = async {
+            let ids = super::library::seed(l)?;
+            let runtime = local::runtime(args.llamafile.as_deref(), &models_dir).await?;
+            let gguf = super::search::model(args.embed.as_deref(), &models_dir).await?;
+            println!("  embedding server: {} (ngl {}) …", gguf.display(), args.embed_ngl);
+            let server = super::search::start(&runtime, &gguf, args.embed_ngl, run_dir).await?;
+            println!("  ready in {:.1} s (its log: {})", server.load_ms as f64 / 1000.0, server.log.display());
+            let r = super::library::retrieval(l, &ids).await?;
+            Ok::<_, String>((ids, server, r))
+        };
+        match Box::pin(setup).await {
+            Ok((ids, server, r)) => {
+                library_ids = ids;
+                library_retrieval = r;
+                search_server = Some(server);
+            }
+            Err(e) => {
+                eprintln!("  library search: {e}");
                 summary["search_error"] = json!(e);
                 failed = true;
             }
@@ -1509,6 +1588,13 @@ async fn run_all(args: &Args, run_dir: &Path, keys: &HashMap<String, String>, sc
             search_result = Box::pin(super::search::answers(c, &search_ids, &m.label, &args.only, args.max_total_tokens)).await;
             search_answers.push((m.label.clone(), search_result.clone()));
         }
+        if let (Some(l), Some(_)) = (&library_corpus, &search_server) {
+            record::set_config(Some(super::search::settings(&m.provider, &m.base_url, &m.key, &m.model)));
+            record::set_tools_forced(args.tools);
+            println!("  Chat's questions about notes, meetings and chats{} …", if args.search_keyword { " (keyword searches, as before)" } else { "" });
+            search_result = Box::pin(super::library::answers(l, &library_ids, &m.label, &args.only, args.max_total_tokens)).await;
+            library_answers.push((m.label.clone(), search_result.clone()));
+        }
         let mut bench_result = Value::Null;
         if let Some(kind) = &args.bench {
             record::set_context(json!({ "model": m.label, "scenario": format!("bench-{kind}") }));
@@ -1588,6 +1674,16 @@ async fn run_all(args: &Args, run_dir: &Path, keys: &HashMap<String, String>, sc
         });
         let _ = std::fs::write(run_dir.join("search.json"), record::redact(&serde_json::to_string_pretty(&all).unwrap_or_default()));
         println!("\n{}", md.split("\n| Question").next().unwrap_or(""));
+    }
+    if !library_retrieval.is_null() {
+        let md = record::redact(&super::library::markdown(&library_retrieval, &library_answers));
+        let _ = std::fs::write(run_dir.join("search.md"), &md);
+        let all = json!({
+            "retrieval": library_retrieval,
+            "answers": library_answers.iter().map(|(l, v)| json!({ "model": l, "result": v })).collect::<Vec<_>>(),
+        });
+        let _ = std::fs::write(run_dir.join("search.json"), record::redact(&serde_json::to_string_pretty(&all).unwrap_or_default()));
+        println!("\n{}", md.split("\n| Kind | Question").next().unwrap_or(""));
     }
     drop(search_server);
     if !cleanups.is_empty() {

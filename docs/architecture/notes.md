@@ -101,6 +101,12 @@ The AI Notepad: the notes store, folders, the Actions engine, notes you can fix 
   which stores the result through `note_edits::write_summary` (never over the
   person's edited summary unless `replace`; ticks carried over).
   `set_enhanced` is the evaluations' and the tests' only (debug builds).
+  For search by meaning ([search.md](./search.md)): `with_all(f)` reads
+  every note in place (no copy of a thousand notes per keystroke), `stamp()`
+  is a cheap fingerprint of them, and `delete(id)` tells the index
+  (`search::removed`: its vectors go too). Code that removes part of a note
+  for good — a meeting's transcript retention deleting lines — calls
+  `crate::search::removed()` after the store has let go.
 
 ## Notes you can fix (`notes/note_edits.rs`, `notes/tasks.rs`)
 
@@ -178,7 +184,20 @@ the Ask bar) with `ActionPicker`; `ActionManager`; `noteFormat.js` (titles,
 dates). [frontend.md](./frontend.md#the-folder-layout-2026-10-24).
 
 - **`NotesView.svelte`** = the AI Notepad (OpenWhispr
-  sidebar port: **New note / Search notes / Actions** rows; **FOLDERS with
+  sidebar port: **New note / Search notes / Actions** rows; **Search notes**
+  (2026-10-25) opens "Search all notes…": every note, whatever its folder —
+  its title, My thoughts, summary and transcript — holding every word typed
+  (each at the start of a word, the last one half-typed too), and with
+  "Search by meaning" on a few more that mean them ("by meaning"), ranked as
+  Ask across meetings ranks; the results replace the folder's notes
+  (`NoteSearch.svelte`, loaded the first time: the note, the line found with
+  the words marked, where it is — "Transcript · 12:40 · Priya", "My
+  thoughts", "Summary", the folder when it's another; ↓ / Enter from the
+  box, Esc closes it) and a result opens its note **at the match**
+  (`openRequested({…, find})`: the transcript line lit with its words
+  marked, My thoughts with the words selected on their line, the Summary
+  tab with them marked — `core/findWords.js`; `notes_search`,
+  [search.md](./search.md#beyond-the-meetings-2026-10-25)); **FOLDERS with
   counts + NOTES list**; **right-click menus** (OpenWhispr's folder and note
   dropdowns, as context menus too: `ui/ContextMenu.svelte`, also from a row's
   hover **⋯** and the keyboard — the ContextMenu key, Shift+F10): a folder's

@@ -276,6 +276,28 @@ passage holding a gold line, or, with no gold, says so without citing
 `uncited_answer`). `search.md` and `search.json` in the run folder; the
 numbers in `summary.json` (`models[].search`).
 
+**Beyond the meetings** (`--search-library`, `src-tauri/src/ai/eval/library.rs`):
+
+```bash
+yap.exe eval --search-library --embed <embeddinggemma-300M-Q8_0.gguf>
+yap.exe eval --search-library --embed <…gguf> --model local:<4b.gguf> --ngl 999            # the new searches
+yap.exe eval --search-library --search-keyword --embed <…gguf> --model local:<4b.gguf> --ngl 999   # as before
+yap.exe eval --search-library --embed-model qwen3 --embed <Qwen3-Embedding-0.6B-Q8_0.gguf>
+```
+
+`evals/search/library.json` instead: a made-up person's notes, meetings, past chats
+and memory, and questions of five kinds (`box`, `tool`, `chats`, `memory`, `chat`;
+see its description). **Retrieval**, before (the Notes view's title-and-preview
+filter, `search_notes`' whole-note keyword count, `chats::search`, memory's keyword
+rule) and after (`search::library`, by words and with meaning): recall@1/3/5 and MRR
+by item; memory's gold items found and unrelated questions given an item; the
+similarities the floors are set by. **Answers**: each `chat` question asked in Chat
+with no scope (chats and memory seeded afresh), passing when the answer holds one of
+its `expect` words (spaces and `*` aside); `--search-keyword` runs them with Chat's
+searches as they were (`search::library::keyword_only`, `YAP_EVAL_SEARCH=keyword`).
+`--embed-model qwen3` runs everything with Qwen3-Embedding-0.6B's prompts, pooling and
+floors (`search::embedder::QWEN3_EMBEDDING_0_6B`; give its GGUF with `--embed`).
+
 ### Serving benches (`--bench`)
 
 How the server is used rather than what the model says (`ai/eval/serving.rs`; `serving.md` in the
@@ -1849,3 +1871,57 @@ meetings" (the words added to `NOT_FOUND`). In the final run the 4B said plainly
 nothing answers the two questions the corpus can't ("What did Dana say yesterday?": no
 meeting yesterday; the office move: never decided); the run before, it listed every
 passage it had for the office move instead.
+
+## Search beyond the meetings (25 Oct 2026)
+
+`yap.exe eval --search-library` (`evals/search/library.json`: 9 notes, 2 meetings, 6
+chats, 7 memory items, 25 passages; 85 questions), EmbeddingGemma-300M Q8_0 on an RTX
+5070 Ti (llamafile 0.10.6). Run folders `E:/yap-builds/eval-runs/20261025-13*-search`,
+`20261025-13*-qwen-qwen3.5-4b-*`, `20261025-13*-gpt-oss-20b`, `20261025-14*-search`.
+
+**Retrieval**, recall@1 (n):
+
+| | Before | Words | Words + meaning | Qwen3-Embedding-0.6B (own floors) |
+|---|---|---|---|---|
+| Notes view's box (18) | 0.333 | 0.444 | **0.944** | 0.833 |
+| `search_notes` (15) | 0.667 (@5 0.933) | 0.867 | **1.0** | 1.0 |
+| `search_chats` (9) | 0.444 | 0.556 | **1.0** | 1.0 |
+| memory: gold items (9) | 0.444 | — | **1.0** | 0.778 |
+| memory: unrelated questions given an item (6) | 0 | — | **0** | 0 (4 with Gemma's floors) |
+
+"Before" is what each search did until 25 Oct: the Notes view filtered the open
+folder by title and the first 120 characters (the eval looks in every folder); the
+box's "words" finds every note holding every word anywhere (title, notes, summary,
+transcript), the rest are paraphrases ("heating engineer visit" for a boiler service).
+The meaning-only floors came from these runs (`embedder::Floors`): Gemma's box golds at
+0.39–0.51 against any other note's 0.26 at most (0.33), memory's golds at 0.31–0.52
+against unrelated questions' 0.16 at most (0.3; 0.42 found 0.667). Qwen3-Embedding's
+cosines run higher (other notes to 0.46, unrelated memory to 0.48): its own floors
+(0.48 / 0.5 / 0.45) keep it clean but miss more.
+
+**Chat's answers** (no scope; pass = the fact in the answer):
+
+| Model | New searches | As before (`--search-keyword`) |
+|---|---|---|
+| Qwen3.5-4B Q4_K_M on the card, all 17 | **16/17**, 91,847 tokens | 12/17, 116,531 tokens |
+| the same, the 7 that need a search (`tool`) | **6/7** | 4/7 |
+| Groq `openai/gpt-oss-20b`, the 7 `tool` questions | **6/6** (18,454 tokens; the 7th past the cap) | 2/3 (42,325 tokens: one question ran 11 empty searches and ended empty) |
+
+Most `chat` questions share words with a note's title, so the eager RAG gives the model
+the note before any tool: both runs pass them. The `tool` questions don't ("How much
+will my motor cover cost?", "What did the joinery firm offer us for the hold-up?",
+"What vegetables am I growing this year?"): the old `search_notes` found nothing and the
+4B tried up to 10 other wordings; the new one finds the note by meaning and gives the
+passage. Two fixes beside the search came from these runs: the eager RAG's transcript
+snippet names each line's speaker ("Who fixed the enquiry form?" got the wrong person
+from bare lines, both ways), and `search_chats`' instruction now covers "something you
+said or suggested before" ("Remind me where you said we should eat in Portugal" searched
+the notes). The 4B's last miss ("what you suggested for my seven-year-old's
+celebration") searched notes, not chats. The scoring ignores spaces: gpt-oss writes
+"5 %" and "2 May" with narrow ones. The Groq baseline run overshot its 20k budget
+(`--max-total-tokens` stops starting questions, not a running one).
+
+The notes and memory scenarios (`--only notes-,memory-search-past-chats,memory-use`,
+13; no index in a scenario, so `search_notes` is BM25 per passage): **13/13** on
+Qwen3.5-4B with the new code, 11/13 with `--search-keyword` (`notes-create-in-folder`,
+`notes-long-chat` turn 10).

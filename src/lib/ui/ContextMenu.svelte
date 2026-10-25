@@ -14,7 +14,7 @@
   // { separator: true } | { note } (a quiet line, e.g. why the items above
   // are off). Icons: pencil, trash, folder, copy, download, check, open,
   // play, stop, sparkle, join, record, person, sync, unlink, signout,
-  // star, approx, use.
+  // star, approx, use, archive, restore.
   import { tick } from 'svelte';
   import ContextMenu from './ContextMenu.svelte';
 
@@ -270,6 +270,10 @@
       <path d="M4 9.5c2.5-2 5.5 2 8 0s5.5-2 8 0" /><path d="M4 15c2.5-2 5.5 2 8 0s5.5-2 8 0" />
     {:else if name === 'use'}
       <circle cx="12" cy="12" r="8" /><path d="M8.5 12.2l2.4 2.4 4.6-4.9" />
+    {:else if name === 'archive'}
+      <rect x="3" y="4" width="18" height="5" rx="1" /><path d="M5 9v10a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V9M10 13h4" />
+    {:else if name === 'restore'}
+      <path d="M3 12a9 9 0 1 0 3-6.7L3 8" /><path d="M3 3v5h5" />
     {/if}
   </svg>
 {/snippet}

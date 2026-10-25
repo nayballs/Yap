@@ -278,7 +278,14 @@ is [ai-models.md](./ai-models.md); the dictionary passes it feeds are
   immutable prompt.
 - **The question's `<context>`** (a tool model) or the system prompt (one
   without tools, as the rest of its context): the people, projects and topics
-  the question is about (`relevant_block`, ≤ 3), and for a tool model
+  the question is about (≤ 3: `search::library::memory_block` — memory's
+  keyword rule, `prompt::relevant_indexes`, and with "Search by meaning" on,
+  the items whose meaning is close to the question's, the model's `floors.memory`,
+  fused by weighted RRF; each person, project and topic is a passage in the
+  search index, kind "memory", read again when it changes and dropped when
+  it's forgotten; the question's vector waited for only 1.5 s, the words
+  answering alone meanwhile; [search.md](./search.md#beyond-the-meetings-2026-10-25)),
+  and for a tool model
   Preferences again last (`answer_note`: in the system prompt alone, Qwen3.5-4B
   answered "two or three sentences, no lists" with 138 words and a list).
 - **Tools** (a model with tools, `tools::run_tool_loop_with` + `Extra`):
@@ -287,8 +294,10 @@ is [ai-models.md](./ai-models.md); the dictionary passes it feeds are
   keep in mind, "no longer"…; else refused with the chip "Didn't change Yap's
   memory: not asked to") and never after web content in a turn (they're
   `ACTION_TOOLS`); `search_chats` with "Search and reference past chats" on
-  (`chats::search`: two of the query's words or one in a title, ≤ 5
-  conversations, ≤ 2 lines each around the hit, the asking chat left out).
+  (`search::library::chats_for`: two of the query's words or one in a
+  title, as `chats::search` had it, or — search by meaning on — a chat
+  close in meaning; ≤ 5 conversations, ≤ 2 lines each — the best one and
+  its question or answer — the asking chat left out; archived chats too).
   The three add ≈ 400 tokens a step (`the_memory_tools_stay_light`). A
   `search_memory` tool isn't offered: the relevant items already come with the
   question (not measured as needed).
@@ -296,8 +305,8 @@ is [ai-models.md](./ai-models.md); the dictionary passes it feeds are
   `learn::spoken`; and with "Search and reference past chats" on, a question
   pointing back at an earlier chat (`chats::refers_to_past`: "last time", "what
   did we say about…", "you told me") gets the two best-matching chats' lines in
-  its system prompt (`chats::past_chats_block`; the evaluations' 1.5B found
-  the Lisbon restaurant with it).
+  its system prompt (`search::library::past_chats_block`, by words and
+  meaning; the evaluations' 1.5B found the Lisbon restaurant with it).
 
 ## Settings → Memory
 

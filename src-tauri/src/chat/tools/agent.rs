@@ -518,7 +518,10 @@ async fn tool_loop(
                     )
                 }
             } else if extra.search_chats && name == "search_chats" {
-                search_chats(&args, extra.conversation)
+                search_chats(&args, extra.conversation).await
+            } else if name == "search_notes" {
+                // Ask across meetings' search: passages, by meaning too.
+                super::notes::search_notes_tool(&args).await
             } else if open_apps && crate::apps::TOOL_NAMES.contains(&name) {
                 // Off the async runtime: the index, the launch.
                 let (name, question, previous) = (name.to_string(), question.to_string(), previous.clone());

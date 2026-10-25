@@ -17,7 +17,7 @@ pub fn definitions() -> Value {
             "type": "function",
             "function": {
                 "name": "search_notes",
-                "description": "Search the user's notes by keywords. Returns matching notes with title, date, relevance score, and a preview of content.",
+                "description": "Search the user's notes and meetings by keywords and meaning. Returns matching notes with title, date, relevance score, and the passages that matched.",
                 "parameters": {
                     "type": "object",
                     "properties": {
@@ -158,6 +158,74 @@ pub fn definitions() -> Value {
             }
         }
     ])
+}
+
+/// **`search_notes`** (2026-10-25): Ask across meetings' search — BM25 per
+/// passage and, with search by meaning on, meaning; the dates and voices
+/// the query names (`search/library.rs` `notes_for`) — each note with the
+/// passages that matched (where each is from, ≤ 600 characters), so the
+/// model reads the part that answers rather than a note's first lines.
+/// (A model evaluation compares the whole-note keyword search it replaced:
+/// `search::library::keyword_only`.)
+pub async fn search_notes_tool(args: &Value) -> Value {
+    if crate::search::library::keyword_only() {
+        return execute("search_notes", args);
+    }
+    let query = args["query"].as_str().unwrap_or("").trim().to_string();
+    let limit = arg_u64(args, &["limit"]).unwrap_or(5).clamp(1, 20) as usize;
+    if query.chars().count() < 2 {
+        return tool_result(true, json!([]), format!("No notes found for \"{query}\""));
+    }
+    let (found, semantic) = crate::search::library::notes_for(&query, limit).await;
+    let results: Vec<Value> = found
+        .iter()
+        .filter_map(|f| {
+            let n = crate::notes::get(f.id)?;
+            Some(json!({
+                "id": n.id,
+                "title": n.title,
+                "date": n.created_ts,
+                "type": n.note_type,
+                "score": (f.score * 1000.0).round() / 1000.0,
+                "content": matched_passages(&f.passages, 600),
+            }))
+        })
+        .collect();
+    tracing::info!(found = results.len(), semantic, "Chat: search_notes");
+    let display = if results.is_empty() {
+        format!("No notes found for \"{query}\"")
+    } else {
+        format!("Found {} note{} for \"{query}\"{}", results.len(), if results.len() == 1 { "" } else { "s" }, if semantic { " by meaning" } else { "" })
+    };
+    tool_result(true, json!(results), display)
+}
+
+/// A note's matched passages as `search_notes` gives them: each with where
+/// it's from ("(transcript, 12:40)", "(notes)", "(summary)"), at most
+/// `max` characters in all. Pure.
+pub fn matched_passages(passages: &[crate::search::ask::Passage], max: usize) -> String {
+    use crate::search::chunks::Field as F;
+    let mut out = String::new();
+    for p in passages {
+        let from = match (p.field, &p.at) {
+            (F::Transcript, Some(at)) => format!("(transcript, {at})"),
+            (F::Transcript, None) => "(transcript)".to_string(),
+            (F::Summary, _) => "(summary)".to_string(),
+            _ => "(notes)".to_string(),
+        };
+        let piece = format!("{from} {}", p.text.trim());
+        if !out.is_empty() {
+            out.push_str("\n…\n");
+        }
+        out.push_str(&piece);
+        if out.chars().count() >= max {
+            break;
+        }
+    }
+    if out.chars().count() > max {
+        out = format!("{}…", out.chars().take(max).collect::<String>().trim_end());
+    }
+    out
 }
 
 /// Keyword search over the notes library (the same scorer the eager RAG uses:

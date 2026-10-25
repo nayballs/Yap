@@ -72,6 +72,27 @@ pub fn search_delete(app: AppHandle) -> Result<Status, String> {
     Ok(index::status())
 }
 
+/// **The Notes view's search** (`library::notes_now`): every note holding
+/// the words typed (title, My thoughts, summary, transcript), and with
+/// `meaning` — the page asks again once the words' results are shown —
+/// what means it too. `{hits, semantic}`: each hit's note, the line it
+/// opens at and that line with the words marked (`library::Hit`).
+#[tauri::command]
+pub async fn notes_search(query: String, meaning: Option<bool>, limit: Option<usize>) -> serde_json::Value {
+    let (hits, semantic) = super::library::notes_now(&query, meaning.unwrap_or(true), limit.unwrap_or(60).clamp(1, 200)).await;
+    serde_json::json!({ "hits": hits, "semantic": semantic })
+}
+
+/// **The Chat sidebar's search** (`library::chats_now`): every
+/// conversation, archived ones too, by the words typed in its title and
+/// messages, and with `meaning` what means it. `{hits, semantic}`; a hit's
+/// `line` is the message's index.
+#[tauri::command]
+pub async fn chats_search(query: String, meaning: Option<bool>, limit: Option<usize>) -> serde_json::Value {
+    let (hits, semantic) = super::library::chats_now(&query, meaning.unwrap_or(true), limit.unwrap_or(40).clamp(1, 200)).await;
+    serde_json::json!({ "hits": hits, "semantic": semantic })
+}
+
 /// One moment a search found, for the Meetings view.
 #[derive(Debug, Clone, serde::Serialize)]
 #[serde(rename_all = "camelCase")]

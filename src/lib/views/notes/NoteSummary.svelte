@@ -67,7 +67,7 @@
   <!-- eslint-disable-next-line svelte/no-at-html-tags — renderMarkdown
        passes no raw HTML and sanitises its output (core/markdown.js);
        its tasks tick in place (notes/tasks.rs) -->
-  <div class="rendered" onchange={onTaskChange}>{@html renderMarkdown(notes.selected.enhancedContent, { tickable: true })}</div>
+  <div class="rendered" bind:this={notes.renderedEl} onchange={onTaskChange}>{@html renderMarkdown(notes.selected.enhancedContent, { tickable: true })}</div>
 {/if}
 
 <style>

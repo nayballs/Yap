@@ -92,16 +92,24 @@ fn has_word(text: &str, w: &str) -> bool {
 /// is ×2, its facts ×1 — and only items that match the name, or two of the
 /// question's words ("When's my sister's birthday?" finds Rochelle, "Sister"
 /// with a birthday fact). At most `limit`.
+#[cfg(test)]
 pub fn relevant(items: &[Item], question: &str, limit: usize) -> Vec<Item> {
+    relevant_indexes(items, question, limit).into_iter().map(|i| items[i].clone()).collect()
+}
+
+/// [`relevant`] as indexes into `items` (search by meaning fuses them with
+/// its own list: `search/library.rs`).
+pub fn relevant_indexes(items: &[Item], question: &str, limit: usize) -> Vec<usize> {
     let words = words(question);
     if words.is_empty() {
         return Vec::new();
     }
     let need = words.len().min(2);
-    let mut scored: Vec<(usize, u64, &Item)> = items
+    let mut scored: Vec<(usize, u64, usize)> = items
         .iter()
-        .filter(|i| !i.section.is_you())
-        .filter_map(|i| {
+        .enumerate()
+        .filter(|(_, i)| !i.section.is_you())
+        .filter_map(|(at, i)| {
             let title = i.title.to_lowercase();
             let about = i.summary.to_lowercase();
             let facts = i.details.join(" \n ").to_lowercase();
@@ -114,17 +122,23 @@ pub fn relevant(items: &[Item], question: &str, limit: usize) -> Vec<Item> {
                 distinct += (t || a || f) as usize;
                 named |= t;
             }
-            (named || distinct >= need).then_some((score, i.updated_ts, i))
+            (named || distinct >= need).then_some((score, i.updated_ts, at))
         })
         .collect();
     scored.sort_by(|a, b| b.0.cmp(&a.0).then(b.1.cmp(&a.1)));
-    scored.into_iter().take(limit).map(|(_, _, i)| i.clone()).collect()
+    scored.into_iter().take(limit).map(|(_, _, at)| at).collect()
 }
 
 /// The question's memory, for its `<context>` block (a tool model) or the
-/// system prompt (one without tools): `None` when nothing matches.
+/// system prompt (one without tools): `None` when nothing matches. (A Chat
+/// question's: `search::library::memory_block`, by meaning too.)
+#[cfg(test)]
 pub fn relevant_block(items: &[Item], question: &str) -> Option<String> {
-    let found = relevant(items, question, 3);
+    block_of(&relevant(items, question, 3))
+}
+
+/// The items found for a question, as [`relevant_block`] gives them.
+pub fn block_of(found: &[Item]) -> Option<String> {
     if found.is_empty() {
         return None;
     }

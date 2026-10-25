@@ -154,6 +154,10 @@ pub struct Conversation {
     /// meetings, follow-ups too (`turn::chat_turn`). Empty: plain Chat.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub scope: String,
+    /// When it was archived (the Chat sidebar's Archive; 0: it wasn't): out
+    /// of the list, in "Archived" to restore or delete, still searched.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub archived_ts: u64,
 }
 
 #[derive(Debug, Default, Serialize, Deserialize)]
@@ -212,6 +216,8 @@ fn save_now() -> Result<(), crate::shell::saving::SaveError> {
 #[cfg(not(test))]
 fn save_to_disk(store: &Store) {
     let _ = SAVER.write_json(&chats_path(), store, false);
+    // Search by meaning reads what changed, in the background.
+    crate::search::changed();
 }
 
 #[cfg(not(test))]
@@ -281,11 +287,11 @@ pub fn rename(id: u64, title: &str) -> Result<String, String> {
     })
 }
 
-/// Conversation summaries, newest-updated first:
+/// Conversation summaries, newest-updated first, the archived ones left out:
 /// `{ id, title, updatedTs, messageCount }`.
 pub fn list() -> Value {
     with_store(|s| {
-        let mut sorted: Vec<&Conversation> = s.conversations.iter().collect();
+        let mut sorted: Vec<&Conversation> = s.conversations.iter().filter(|c| c.archived_ts == 0).collect();
         sorted.sort_by_key(|c| std::cmp::Reverse(c.updated_ts));
         let items: Vec<Value> = sorted
             .into_iter()
@@ -302,16 +308,70 @@ pub fn list() -> Value {
     })
 }
 
+/// The archived conversations, archived last first:
+/// `{ id, title, updatedTs, archivedTs, messageCount }`.
+pub fn list_archived() -> Value {
+    with_store(|s| {
+        let mut sorted: Vec<&Conversation> = s.conversations.iter().filter(|c| c.archived_ts > 0).collect();
+        sorted.sort_by_key(|c| (std::cmp::Reverse(c.archived_ts), std::cmp::Reverse(c.id)));
+        json!(sorted
+            .into_iter()
+            .map(|c| json!({ "id": c.id, "title": c.title, "updatedTs": c.updated_ts, "archivedTs": c.archived_ts, "messageCount": c.messages.len() }))
+            .collect::<Vec<_>>())
+    })
+}
+
+/// Archive conversations (`on`) or bring them back, in one write; their
+/// place in the list stays theirs (`updated_ts` untouched). Returns how
+/// many changed.
+pub fn set_archived(ids: &[u64], on: bool) -> usize {
+    with_store(|s| {
+        let now = now_secs().max(1);
+        let mut changed = 0;
+        for c in s.conversations.iter_mut().filter(|c| ids.contains(&c.id)) {
+            if (c.archived_ts > 0) != on {
+                c.archived_ts = if on { now } else { 0 };
+                changed += 1;
+            }
+        }
+        if changed > 0 {
+            save_to_disk(s);
+        }
+        changed
+    })
+}
+
+/// Every conversation (archived ones too), read in place under the store's
+/// lock (search). `f` mustn't touch the chats store.
+pub fn with_all<R>(f: impl FnOnce(&[Conversation]) -> R) -> R {
+    with_store(|s| f(&s.conversations))
+}
+
+/// A cheap fingerprint of every conversation (ids, titles' and messages'
+/// counts): has anything changed since the last look (search's index).
+pub fn stamp() -> u64 {
+    use std::hash::{Hash, Hasher};
+    with_store(|s| {
+        let mut h = std::collections::hash_map::DefaultHasher::new();
+        for c in &s.conversations {
+            (c.id, c.title.len(), c.messages.len(), c.updated_ts).hash(&mut h);
+        }
+        h.finish()
+    })
+}
+
 pub fn get(id: u64) -> Option<Conversation> {
     with_store(|s| s.conversations.iter().find(|c| c.id == id).cloned())
 }
 
-/// The conversation updated last: `(id, updated_ts)` (the Voice Assistant
-/// continues it while it's recent, `assistant::choose_conversation`).
+/// The conversation updated last, of those not archived: `(id,
+/// updated_ts)` (the Voice Assistant continues it while it's recent,
+/// `assistant::choose_conversation`).
 pub fn latest() -> Option<(u64, u64)> {
     with_store(|s| {
         s.conversations
             .iter()
+            .filter(|c| c.archived_ts == 0)
             .max_by_key(|c| (c.updated_ts, c.id))
             .map(|c| (c.id, c.updated_ts))
     })
@@ -328,6 +388,7 @@ pub fn create(title: &str) -> Conversation {
             updated_ts: now,
             messages: Vec::new(),
             scope: String::new(),
+            archived_ts: 0,
         };
         s.conversations.push(conv.clone());
         save_to_disk(s);
@@ -411,6 +472,8 @@ pub fn append_message(
             images: Vec::new(),
         });
         conv.updated_ts = now_secs();
+        // Asked again in an archived chat: it's back in the list.
+        conv.archived_ts = 0;
         let index = conv.messages.len() - 1;
         save_to_disk(s);
         Ok(index)
@@ -455,6 +518,10 @@ pub fn delete_many(ids: &[u64]) -> usize {
         }
         (gone, images)
     });
+    // Their vectors in the search index go with them.
+    if gone > 0 {
+        crate::search::removed();
+    }
     // Their screenshots go with them, once the store no longer has them.
     if !images.is_empty() {
         crate::snip::images::delete(&images);
@@ -581,31 +648,14 @@ pub fn search(query: &str, exclude: Option<u64>, limit: usize) -> Vec<Found> {
 
 /// Does a question point back at an earlier chat ("what did we say about
 /// Lisbon?", "like you told me last time")? For a model without tools,
-/// which gets those chats' lines with the question ([`past_chats_block`]).
+/// which gets those chats' lines with the question
+/// (`search::library::past_chats_block`).
 pub fn refers_to_past(question: &str) -> bool {
     static PAST: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
         regex::Regex::new(r"(?i)\b(?:(?:we|you|i)\s+(?:talked|spoke|chatted|discussed|went over|decided|agreed)|(?:we|you|i)\s+(?:said|told|mentioned|asked)\b.{0,40}\b(?:before|earlier|last time|the other day|yesterday|last week)|what did (?:we|you|i) (?:say|decide|talk|come up with|agree)|last time|(?:earlier|previous|other|last|old) (?:chat|conversation)s?|you told me|i told you|remember when|we were talking|as (?:we|you) said)")
             .expect("static regex")
     });
     PAST.is_match(&question.replace('’', "'"))
-}
-
-/// The earlier chats a question points back to, as a block for a model
-/// without tools: up to two conversations, their matching lines (`search`).
-/// `None` when none match.
-pub fn past_chats_block(question: &str, conversation: u64) -> Option<String> {
-    let found = search(question, Some(conversation), 2);
-    if found.is_empty() {
-        return None;
-    }
-    let mut out = String::from("From the user's earlier chats with you (their own words and your answers then):");
-    for f in found {
-        out.push_str(&format!("\n- \"{}\":", f.title));
-        for l in f.lines {
-            out.push_str(&format!("\n  {l}"));
-        }
-    }
-    Some(out)
 }
 
 /// The web searches an answer ran, as its chips say them (`Searched the
@@ -1217,5 +1267,38 @@ mod tests {
         assert_eq!(rename(9999, "Nope").unwrap_err(), "Conversation not found");
         // The list shows the new name.
         assert!(list().as_array().unwrap().iter().any(|c| c["title"] == "Launch plan"));
+    }
+
+    #[test]
+    fn an_archived_chat_leaves_the_list_until_restored_or_asked_again() {
+        let a = create("Trip ideas");
+        let b = create("Bread");
+        append(a.id, "user", "Where to eat?", &[], None, false).unwrap();
+        append(b.id, "user", "How long to prove?", &[], None, false).unwrap();
+        let titles = |v: Value| v.as_array().unwrap().iter().map(|c| c["title"].as_str().unwrap().to_string()).collect::<Vec<_>>();
+        let before = get(b.id).unwrap().updated_ts;
+        assert_eq!(set_archived(&[b.id, 999], true), 1, "only what's there");
+        assert_eq!(set_archived(&[b.id], true), 0, "already archived");
+        assert_eq!(titles(list()), ["Trip ideas"]);
+        assert_eq!(titles(list_archived()), ["Bread"]);
+        assert!(list_archived()[0]["archivedTs"].as_u64().unwrap() > 0);
+        assert_eq!(get(b.id).unwrap().updated_ts, before, "its place stays its own");
+        // The Voice Assistant never continues an archived chat.
+        assert_eq!(latest().map(|(id, _)| id), Some(a.id));
+        // Kept, and still searched.
+        assert_eq!(with_all(|c| c.len()), 2);
+        // Restored: back in the list.
+        assert_eq!(set_archived(&[b.id], false), 1);
+        assert_eq!(titles(list_archived()), Vec::<String>::new());
+        assert_eq!(titles(list()).len(), 2);
+        // Asked again in an archived chat: it's back.
+        set_archived(&[a.id, b.id], true);
+        assert!(titles(list()).is_empty());
+        append(a.id, "user", "And breakfast?", &[], None, false).unwrap();
+        assert_eq!(titles(list()), ["Trip ideas"]);
+        assert_eq!(titles(list_archived()), ["Bread"]);
+        // Deleted from the archive: gone.
+        assert_eq!(delete_many(&[b.id]), 1);
+        assert!(titles(list_archived()).is_empty());
     }
 }

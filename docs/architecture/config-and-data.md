@@ -254,18 +254,22 @@
   NOTICE.txt), each with a `NOTICE.txt` (`voice/tts/registry.rs`; size + SHA-256
   verified). Attribution: Settings → Voice Assistant → Voice. Deleted from the
   Kokoro row; ~352 MB.
-- Meeting search (`search/`, [search.md](./search.md)): the model in
+- Search by meaning (`search/`, [search.md](./search.md)): the model in
   `%APPDATA%/yap/models/search/` — `embeddinggemma-300M-Q8_0.gguf` (Hugging
   Face ggml-org/embeddinggemma-300M-GGUF at a pinned commit, Gemma Terms of
-  Use; size + SHA-256 verified; ~318 MiB) with a `NOTICE.txt`, and the
-  embedding server's `embedder.log`; it runs on the on-device model's
-  engine (`llm/llamafile.exe`, downloaded with it when it isn't there). The
-  index in `%APPDATA%/yap/search-index/vectors.bin` — each passage's vector
-  (int8 + a scale, by a hash of its words; **no text**), appended as notes
-  change, compacted when a note is deleted; `vectors.bin.old` when one for
-  another model was set aside. Settings → Privacy & data → "Search my
-  meetings by meaning": Rebuild deletes the index and reads everything
-  again; Delete… removes the model and the index (the engine stays).
+  Use; size + SHA-256 verified; ~318 MiB; named in one place,
+  `search::embedder::MODEL`) with a `NOTICE.txt`, and the embedding
+  server's `embedder.log`; it runs on the on-device model's engine
+  (`llm/llamafile.exe`, downloaded with it when it isn't there). The index
+  in `%APPDATA%/yap/search-index/vectors.bin` — each passage's vector of
+  every note, meeting, chat (archived too) and memory item (int8 + a scale,
+  by a hash of its words; **no text**), appended as they change, compacted
+  at once when one is deleted (search by meaning on or off) and at the first
+  look after a start (what another Yap on the same folder deleted);
+  `vectors.bin.old` when one for another model was set aside. Settings →
+  Privacy & data → "Search by meaning": Rebuild deletes the index and reads
+  everything again; Delete… removes the model and the index (the engine
+  stays).
 - Groq usage: `%APPDATA%/yap/groq_usage.json`.
 - Speech engine timings: `%APPDATA%/yap/stt_speed.json` — per model id, the
   benchmark of each device on this PC (load, the first run after loading,
@@ -305,7 +309,10 @@
 - History: `%APPDATA%/yap/history.json` (local-only; cleared from Settings → Privacy & data → History).
 - Notes: `%APPDATA%/yap/notes.json` — the AI Notepad store (folders, actions,
   participants, meeting transcripts).
-- Chats: `%APPDATA%/yap/chats.json` — AI Chat conversations (`chat/chats.rs`).
+- Chats: `%APPDATA%/yap/chats.json` — AI Chat conversations (`chat/chats.rs`);
+  an archived one has `archivedTs` (when; 2026-10-25, written only when
+  set — a Yap from before keeps the conversation and drops the field on
+  its next save, so it shows in the list again).
 - Model lists: `%APPDATA%/yap/model_catalog.json` — each keyed AI provider's
   chat models as it last listed them (id, name, created, context, tools,
   first seen), when, and why the last check failed (`ai/model_catalog.rs`).

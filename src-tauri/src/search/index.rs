@@ -1,20 +1,26 @@
 //! **The index, kept up to date in the background**: every passage of every
-//! note ([`chunks`](super::chunks)) read by the embedding model once, its
-//! vector kept in the store ([`store`](super::store)) by the passage's key.
+//! note, chat and memory item ([`chunks`](super::chunks); three [`Kind`]s
+//! in one index) read by the embedding model once, its vector kept in the
+//! store ([`store`](super::store)) by the passage's key.
 //!
-//! **When**: a while after Yap starts, then whenever notes change (Yap's
-//! own events — `yap-note-changed`, `yap-notes-changed`, a deletion, a
-//! recording's end — or, every two minutes, a cheap fingerprint of the notes,
-//! `notes::stamp`, which also catches the local API's and Chat's edits).
-//! **Never in a dictation's way**: a pass waits while a dictation or a
-//! meeting recording runs, and a batch under way is dropped the moment one
-//! starts (`meeting_summary::unless_busy`: the connection closes) and read
-//! again after. Passages already read are never read again (their key is a
-//! hash of their words), so a pass cut off keeps what it did, and the store
-//! drops the vectors of passages that are gone once they're over 30 % of it.
+//! **When**: a while after Yap starts, then whenever something changes
+//! (Yap's own events — `yap-note-changed`, `yap-notes-changed`, a deletion,
+//! a recording's end, `yap-memory-changed`, a chat saved ([`changed`]) — or,
+//! every two minutes, a cheap fingerprint of the notes and chats,
+//! `notes::stamp` / `chats::stamp`, which also catches the local API's
+//! edits). **Never in a dictation's way**: a pass waits while a dictation
+//! or a meeting recording runs, and a batch under way is dropped the moment
+//! one starts (`meeting_summary::unless_busy`: the connection closes) and
+//! read again after. Passages already read are never read again (their key
+//! is a hash of their words), so a pass cut off keeps what it did, and the
+//! store drops the vectors of passages that are gone once they're over 30 %
+//! of it — **at once when something was deleted** ([`removed`]: a note, a
+//! chat, a memory item, a transcript's lines), even with search by meaning
+//! off.
 //!
-//! The passages themselves are cut from the notes whenever they're needed,
-//! kept per note while its fingerprint holds ([`prepared`]).
+//! The passages themselves are cut from the notes, chats and memory whenever
+//! they're needed, kept per item while its fingerprint holds ([`prepared`],
+//! [`prepared_chats`], [`prepared_memory`]).
 
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -28,6 +34,17 @@ use super::embedder;
 use super::rank;
 use super::store::{Key, Store};
 
+/// What a passage belongs to. Each searches apart (their ids are their own).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Kind {
+    /// A note or a meeting.
+    Note,
+    /// A conversation in Chat.
+    Chat,
+    /// A person, project or topic Yap remembers.
+    Memory,
+}
+
 /// A passage with what search needs of it, made once per version of its note.
 pub struct Prepared {
     pub chunk: Chunk,
@@ -40,31 +57,52 @@ pub struct Prepared {
     /// Each line's search words.
     pub line_terms: Vec<Vec<String>>,
     pub speakers: Vec<String>,
+    /// Its words as written, in lower case: the Notes view's and the Chat
+    /// sidebar's search by the words typed (`library.rs`).
+    pub lower: String,
 }
 
 impl Prepared {
     pub fn of(chunk: Chunk) -> Prepared {
         let embedded = chunks::embed_text(&chunk);
-        let key = chunks::key(embedder::MODEL_TAG, &embedded);
-        let terms = rank::terms(&chunk.text());
+        let key = chunks::key(embedder::model().tag, &embedded);
+        let text = chunk.text();
+        let terms = rank::terms(&text);
         let title_terms = rank::terms(&chunk.title);
         let line_terms = chunk.lines.iter().map(|l| rank::terms(&l.text)).collect();
         let speakers = chunk.speakers().into_iter().map(str::to_string).collect();
-        Prepared { chunk, embedded, key, terms, title_terms, line_terms, speakers }
+        let lower = text.to_lowercase();
+        Prepared { chunk, embedded, key, terms, title_terms, line_terms, speakers, lower }
     }
+}
+
+fn hash_of(v: impl std::hash::Hash) -> u64 {
+    use std::hash::Hasher;
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    v.hash(&mut h);
+    h.finish()
 }
 
 /// A note's version, for the passages kept of it.
 fn fingerprint(n: &crate::notes::Note) -> u64 {
-    use std::hash::{Hash, Hasher};
-    let mut h = std::collections::hash_map::DefaultHasher::new();
-    (n.updated_ts, &n.title, n.content.len(), n.enhanced_content.len(), n.transcript.len(), &n.note_type, &n.breaks).hash(&mut h);
-    serde_json::to_string(&n.speakers).unwrap_or_default().hash(&mut h);
-    n.transcript.last().map(|s| (s.ts, s.text.len())).hash(&mut h);
-    h.finish()
+    hash_of((
+        (n.updated_ts, &n.title, n.content.len(), n.enhanced_content.len(), n.transcript.len(), &n.note_type, &n.breaks),
+        serde_json::to_string(&n.speakers).unwrap_or_default(),
+        n.transcript.last().map(|s| (s.ts, s.text.len())),
+    ))
 }
 
-type Cached = HashMap<u64, (u64, Arc<Vec<Prepared>>)>;
+/// A chat's version: its title and messages (what's searched of it).
+fn chat_fingerprint(c: &crate::chat::chats::Conversation) -> u64 {
+    hash_of((&c.title, c.messages.len(), c.messages.iter().map(|m| (m.ts, m.text.len())).collect::<Vec<_>>()))
+}
+
+/// A memory item's version: its name, who or what it is, its facts.
+fn memory_fingerprint(i: &crate::memory::ops::Item) -> u64 {
+    hash_of((&i.title, &i.summary, &i.details, i.section.is_you()))
+}
+
+type Cached = HashMap<(Kind, u64), (u64, Arc<Vec<Prepared>>)>;
 #[cfg(not(test))]
 static CACHE: Mutex<Option<Cached>> = Mutex::new(None);
 
@@ -87,26 +125,81 @@ fn with_cache<R>(f: impl FnOnce(&mut Cached) -> R) -> R {
 
 /// Every note's passages, prepared (kept while the note doesn't change).
 pub fn prepared(notes: &[crate::notes::Note]) -> Vec<Arc<Vec<Prepared>>> {
-    with_cache(|cache| prepared_in(cache, notes))
+    with_cache(|cache| prepared_in(cache, Kind::Note, notes, |n| n.id, fingerprint, chunks::chunk_note))
 }
 
-fn prepared_in(cache: &mut Cached, notes: &[crate::notes::Note]) -> Vec<Arc<Vec<Prepared>>> {
-    let mut out = Vec::with_capacity(notes.len());
-    let mut seen = HashSet::with_capacity(notes.len());
-    for n in notes {
-        seen.insert(n.id);
-        let fp = fingerprint(n);
-        match cache.get(&n.id) {
+/// Every chat's passages, prepared (archived ones too).
+pub fn prepared_chats(convs: &[crate::chat::chats::Conversation]) -> Vec<Arc<Vec<Prepared>>> {
+    with_cache(|cache| prepared_in(cache, Kind::Chat, convs, |c| c.id, chat_fingerprint, chunks::chunk_chat))
+}
+
+/// Every memory item's passage (people, projects and topics; none for
+/// Profile and Preferences).
+pub fn prepared_memory(items: &[crate::memory::ops::Item]) -> Vec<Arc<Vec<Prepared>>> {
+    with_cache(|cache| prepared_in(cache, Kind::Memory, items, |i| i.id, memory_fingerprint, |i| chunks::chunk_memory(i).into_iter().collect()))
+}
+
+/// `items`' passages (one list per item, in order), from the cache while
+/// an item's fingerprint holds; the cache forgets the items of `kind` that
+/// are gone.
+fn prepared_in<T>(
+    cache: &mut Cached,
+    kind: Kind,
+    items: &[T],
+    id: impl Fn(&T) -> u64,
+    fingerprint: impl Fn(&T) -> u64,
+    chunk: impl Fn(&T) -> Vec<Chunk>,
+) -> Vec<Arc<Vec<Prepared>>> {
+    let mut out = Vec::with_capacity(items.len());
+    let mut seen = HashSet::with_capacity(items.len());
+    for item in items {
+        let key = (kind, id(item));
+        seen.insert(key.1);
+        let fp = fingerprint(item);
+        match cache.get(&key) {
             Some((f, p)) if *f == fp => out.push(p.clone()),
             _ => {
-                let p = Arc::new(chunks::chunk_note(n).into_iter().map(Prepared::of).collect::<Vec<_>>());
-                cache.insert(n.id, (fp, p.clone()));
+                let p = Arc::new(chunk(item).into_iter().map(Prepared::of).collect::<Vec<_>>());
+                cache.insert(key, (fp, p.clone()));
                 out.push(p);
             }
         }
     }
-    cache.retain(|id, _| seen.contains(id));
+    cache.retain(|(k, id), _| *k != kind || seen.contains(id));
     out
+}
+
+/// Every chat, its memory and its notes' passages, as the index reads them.
+pub struct Library {
+    pub notes: Vec<Arc<Vec<Prepared>>>,
+    pub chats: Vec<Arc<Vec<Prepared>>>,
+    pub memory: Vec<Arc<Vec<Prepared>>>,
+    /// Each item, by kind and id (for the sweep).
+    pub ids: Vec<(Kind, u64)>,
+}
+
+impl Library {
+    /// Everything as it is now.
+    pub fn now() -> Library {
+        let (notes, mut ids) = crate::notes::with_all(|ns| (prepared(ns), ns.iter().map(|n| (Kind::Note, n.id)).collect::<Vec<_>>()));
+        let (chats, chat_ids) = crate::chat::chats::with_all(|cs| (prepared_chats(cs), cs.iter().map(|c| (Kind::Chat, c.id)).collect::<Vec<_>>()));
+        let items = crate::memory::items();
+        let memory = prepared_memory(&items);
+        ids.extend(chat_ids);
+        ids.extend(items.iter().map(|i| (Kind::Memory, i.id)));
+        Library { notes, chats, memory, ids }
+    }
+
+    /// Every passage: the notes', then memory's, then the chats'.
+    pub fn passages(&self) -> impl Iterator<Item = &Prepared> {
+        self.notes.iter().chain(&self.memory).chain(&self.chats).flat_map(|v| v.iter())
+    }
+
+    /// The items with at least one passage, of each kind: (notes, chats, memory).
+    pub fn counts(&self) -> (usize, usize, usize) {
+        let n = |v: &[Arc<Vec<Prepared>>]| v.iter().filter(|p| !p.is_empty()).count();
+        (n(&self.notes), n(&self.chats), n(&self.memory))
+    }
 }
 
 // ---- the store, shared with the searches ---------------------------------------
@@ -121,7 +214,8 @@ static STORE: Mutex<Option<Store>> = Mutex::new(None);
 /// The store, opened on first use.
 pub fn with_store<R>(f: impl FnOnce(&mut Store) -> R) -> R {
     let mut g = STORE.lock().unwrap_or_else(|p| p.into_inner());
-    let s = g.get_or_insert_with(|| Store::open(&dir(), embedder::MODEL_TAG, embedder::DIMS));
+    let m = embedder::model();
+    let s = g.get_or_insert_with(|| Store::open(&dir(), m.tag, m.dims));
     f(s)
 }
 
@@ -134,8 +228,25 @@ pub fn forget() -> Result<(), String> {
     if d.exists() {
         std::fs::remove_dir_all(&d).map_err(|e| format!("Couldn't delete the search index: {e}"))?;
     }
-    set_counts(0, 0, None);
+    set_counts(0, 0, Some(Counts::default()));
     Ok(())
+}
+
+/// The vectors of every passage that's gone, dropped now (a deletion: the
+/// note's, chat's or memory item's vectors go with it). Works with search
+/// by meaning off too; nothing to do without an index on disk.
+fn sweep(library: &Library) {
+    if !dir().join(super::store::FILE).is_file() {
+        return;
+    }
+    let keep: HashSet<Key> = library.passages().map(|p| p.key).collect();
+    let dead = with_store(|s| s.dead_share(&keep));
+    if dead > 0.0 {
+        match with_store(|s| s.compact(&keep)) {
+            Ok(gone) => tracing::info!(gone, "Search: dropped the vectors of what was deleted"),
+            Err(e) => tracing::warn!("Search: couldn't drop the vectors of what was deleted: {e}"),
+        }
+    }
 }
 
 // ---- status -------------------------------------------------------------------
@@ -144,7 +255,7 @@ pub fn forget() -> Result<(), String> {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum Phase {
-    /// "Search my meetings by meaning" is off.
+    /// "Search by meaning" is off.
     Off,
     /// On, but the model isn't downloaded.
     NotInstalled,
@@ -156,15 +267,34 @@ pub enum Phase {
     Error,
 }
 
+/// What the index holds, by kind: the notes, chats and memory items it
+/// read, and each kind's passages.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Counts {
+    pub notes: usize,
+    pub chats: usize,
+    pub memories: usize,
+    pub note_passages: usize,
+    pub chat_passages: usize,
+    pub memory_passages: usize,
+}
+
 struct State {
     phase: Phase,
     error: Option<String>,
     passages: usize,
     indexed: usize,
-    notes: usize,
+    counts: Counts,
 }
 
-static STATE: Mutex<State> = Mutex::new(State { phase: Phase::Off, error: None, passages: 0, indexed: 0, notes: 0 });
+static STATE: Mutex<State> = Mutex::new(State {
+    phase: Phase::Off,
+    error: None,
+    passages: 0,
+    indexed: 0,
+    counts: Counts { notes: 0, chats: 0, memories: 0, note_passages: 0, chat_passages: 0, memory_passages: 0 },
+});
 
 /// The index as Settings shows it.
 #[derive(Debug, Clone, serde::Serialize)]
@@ -177,10 +307,16 @@ pub struct Status {
     pub installing: bool,
     pub phase: Phase,
     pub error: Option<String>,
-    /// Passages in every note, and how many of them the index has read.
+    /// Passages in every note, chat and memory item, and how many of them
+    /// the index has read.
     pub passages: usize,
     pub indexed: usize,
+    /// The notes, chats and memory items with passages.
     pub notes: usize,
+    pub chats: usize,
+    pub memories: usize,
+    /// Each kind's passages.
+    pub kinds: Counts,
     /// The index on disk (bytes).
     pub index_bytes: u64,
     /// The model on disk, and what a download would fetch now.
@@ -196,15 +332,16 @@ pub struct Status {
 pub fn status() -> Status {
     let cfg = crate::config::load();
     let installed = embedder::installed();
-    let (phase, error, passages, indexed, notes) = {
+    let (phase, error, passages, indexed, counts) = {
         let s = STATE.lock().unwrap_or_else(|p| p.into_inner());
-        (s.phase, s.error.clone(), s.passages, s.indexed, s.notes)
+        (s.phase, s.error.clone(), s.passages, s.indexed, s.counts)
     };
     let phase = match (cfg.search_by_meaning, installed) {
         (false, _) => Phase::Off,
         (true, false) => Phase::NotInstalled,
         _ => phase,
     };
+    let m = embedder::model();
     Status {
         enabled: cfg.search_by_meaning,
         installed,
@@ -214,14 +351,17 @@ pub fn status() -> Status {
         error,
         passages,
         indexed,
-        notes,
+        notes: counts.notes,
+        chats: counts.chats,
+        memories: counts.memories,
+        kinds: counts,
         index_bytes: std::fs::metadata(dir().join(super::store::FILE)).map(|m| m.len()).unwrap_or(0),
         model_bytes: std::fs::metadata(embedder::model_path()).map(|m| m.len()).unwrap_or(0),
         download_bytes: embedder::download_bytes(),
         runs_on: embedder::runs_on(),
-        model_name: embedder::MODEL_NAME,
-        license: embedder::LICENSE,
-        license_url: embedder::LICENSE_URL,
+        model_name: m.name,
+        license: m.license,
+        license_url: m.license_url,
     }
 }
 
@@ -231,13 +371,20 @@ fn set_phase(phase: Phase, error: Option<String>) {
     s.error = error;
 }
 
-fn set_counts(passages: usize, indexed: usize, notes: Option<usize>) {
+fn set_counts(passages: usize, indexed: usize, counts: Option<Counts>) {
     let mut s = STATE.lock().unwrap_or_else(|p| p.into_inner());
     s.passages = passages;
     s.indexed = indexed;
-    if let Some(n) = notes {
-        s.notes = n;
+    if let Some(c) = counts {
+        s.counts = c;
     }
+}
+
+/// What `library` holds, by kind.
+fn counts_of(library: &Library) -> Counts {
+    let (notes, chats, memories) = library.counts();
+    let n = |v: &[Arc<Vec<Prepared>>]| v.iter().map(|p| p.len()).sum();
+    Counts { notes, chats, memories, note_passages: n(&library.notes), chat_passages: n(&library.chats), memory_passages: n(&library.memory) }
 }
 
 /// Tell the pages (`yap-search-status`).
@@ -266,24 +413,41 @@ const BATCH_CPU: usize = 4;
 /// Compact once this share of the store is passages that are gone (edits
 /// leave their old passages' vectors behind until then)…
 const DEAD_SHARE: f32 = 0.3;
-/// …or at once when a note is gone: the notes the last pass saw.
-static SEEN: Mutex<Option<HashSet<u64>>> = Mutex::new(None);
+/// …or at once when a note, a chat or a memory item is gone: the ones the
+/// last pass saw.
+static SEEN: Mutex<Option<HashSet<(Kind, u64)>>> = Mutex::new(None);
+/// Something was deleted ([`removed`]): its vectors go at the next look,
+/// search by meaning on or off. True at start: another Yap on the same data
+/// folder (the installed nightly beside a dev build, an older version that
+/// doesn't keep the index) may have deleted or changed notes and chats
+/// since — the first look drops what's gone, and the first pass reads what's
+/// new. (Searches never show what's gone either way: their passages are cut
+/// from the stores as they are; a vector is only looked up by its key.)
+static SWEEP: AtomicBool = AtomicBool::new(true);
 
-/// Is a note the last pass saw gone now? The first pass of a run says yes
-/// (a note may have been deleted while Yap or the search was off).
-/// Remembers `now` for the next.
-fn note_gone(seen: &Mutex<Option<HashSet<u64>>>, now: &[u64]) -> bool {
-    let now: HashSet<u64> = now.iter().copied().collect();
+/// Is an item the last pass saw gone now? The first pass of a run says yes
+/// (one may have been deleted while Yap or the search was off). Remembers
+/// `now` for the next.
+fn item_gone<K: Copy + Eq + std::hash::Hash>(seen: &Mutex<Option<HashSet<K>>>, now: &[K]) -> bool {
+    let now: HashSet<K> = now.iter().copied().collect();
     let mut seen = seen.lock().unwrap_or_else(|e| e.into_inner());
     let gone = seen.as_ref().is_none_or(|before| before.iter().any(|id| !now.contains(id)));
     *seen = Some(now);
     gone
 }
 
-/// Notes changed (or the setting): a pass soon.
+/// Notes, chats or memory changed (or the setting): a pass soon.
 pub fn poke() {
     DIRTY.store(true, Ordering::SeqCst);
     WAKE.notify_one();
+}
+
+/// Something was deleted — a note, a chat, a memory item, a transcript's
+/// lines — and its vectors go too: at the next look (a few seconds), with
+/// search by meaning on or off.
+pub fn removed() {
+    SWEEP.store(true, Ordering::SeqCst);
+    poke();
 }
 
 fn first_delay() -> Duration {
@@ -305,8 +469,12 @@ pub fn init(app: &AppHandle) {
     if STARTED.swap(true, Ordering::SeqCst) {
         return;
     }
-    for event in ["yap-note-changed", "yap-notes-changed", "yap-note-deleted", "yap-meeting-state"] {
+    for event in ["yap-note-changed", "yap-notes-changed", "yap-meeting-state"] {
         app.listen(event, |_| poke());
+    }
+    // A deletion (memory's changes may be one: an item forgotten, Clear all).
+    for event in ["yap-note-deleted", crate::memory::EVENT_CHANGED] {
+        app.listen(event, |_| removed());
     }
     let app = app.clone();
     tauri::async_runtime::spawn(async move {
@@ -315,14 +483,18 @@ pub fn init(app: &AppHandle) {
         let mut wait = POLL;
         loop {
             let cfg = crate::config::load();
-            if !cfg.search_by_meaning {
-                set_phase(Phase::Off, None);
-            } else if !embedder::installed() {
-                set_phase(Phase::NotInstalled, None);
+            let swept = SWEEP.load(Ordering::SeqCst);
+            if !cfg.search_by_meaning || !embedder::installed() {
+                set_phase(if cfg.search_by_meaning { Phase::NotInstalled } else { Phase::Off }, None);
+                // Off, a deletion still takes its vectors with it.
+                if SWEEP.swap(false, Ordering::SeqCst) {
+                    sweep(&Library::now());
+                    emit(&app);
+                }
             } else {
-                let stamp = crate::notes::stamp();
+                let stamp = crate::notes::stamp() ^ crate::chat::chats::stamp().rotate_left(1);
                 let dirty = DIRTY.swap(false, Ordering::SeqCst);
-                if dirty || last_stamp != Some(stamp) {
+                if dirty || swept || last_stamp != Some(stamp) {
                     match pass(&app).await {
                         Ok(true) => {
                             last_stamp = Some(stamp);
@@ -364,16 +536,16 @@ async fn pass(app: &AppHandle) -> Result<bool, String> {
             return Ok(false);
         }
     }
-    let notes = crate::notes::all();
-    let prepared = prepared(&notes);
-    let all: Vec<&Prepared> = prepared.iter().flat_map(|v| v.iter()).collect();
+    let library = Library::now();
+    let all: Vec<&Prepared> = library.passages().collect();
     let keep: HashSet<Key> = all.iter().map(|p| p.key).collect();
     let mut queued = HashSet::new();
     let missing: Vec<&Prepared> = with_store(|s| all.iter().copied().filter(|p| !s.has(&p.key) && queued.insert(p.key)).collect());
     let total = keep.len();
-    set_counts(total, total - missing.len(), Some(notes.len()));
+    let counts = counts_of(&library);
+    set_counts(total, total - missing.len(), Some(counts));
     if !missing.is_empty() {
-        tracing::info!(passages = total, to_read = missing.len(), notes = notes.len(), "Meeting search: indexing");
+        tracing::info!(passages = total, to_read = missing.len(), notes = counts.notes, chats = counts.chats, memories = counts.memories, "Search: indexing");
         set_phase(Phase::Indexing, None);
         emit(app);
         let t0 = Instant::now();
@@ -412,10 +584,11 @@ async fn pass(app: &AppHandle) -> Result<bool, String> {
         }
         tracing::info!(read = done, ms = t0.elapsed().as_millis() as u64, on = embedder::runs_on().unwrap_or("?"), "Meeting search: indexed");
     }
-    // The vectors of passages that are gone: a deleted note's at once (its
-    // index goes with it), an edit's once they're a good part of it.
-    let ids: Vec<u64> = notes.iter().map(|n| n.id).collect();
-    let deleted = note_gone(&SEEN, &ids);
+    // The vectors of passages that are gone: a deleted note's, chat's or
+    // memory item's at once (its index goes with it), and whatever else was
+    // deleted (`removed`: a transcript's lines); an edit's once they're a
+    // good part of it.
+    let deleted = item_gone(&SEEN, &library.ids) | SWEEP.swap(false, Ordering::SeqCst);
     let dead = with_store(|s| s.dead_share(&keep));
     if dead > DEAD_SHARE || (deleted && dead > 0.0) {
         match with_store(|s| s.compact(&keep)) {
@@ -458,16 +631,78 @@ mod tests {
         assert_ne!(changed[0][0].key, p.key);
         // A note that's gone leaves the cache.
         prepared(&[]);
-        assert!(with_cache(|c| !c.contains_key(&41)));
+        assert!(with_cache(|c| !c.contains_key(&(Kind::Note, 41))));
     }
 
     #[test]
     fn a_deleted_note_sweeps_the_index_at_once() {
         let seen = Mutex::new(None);
-        assert!(note_gone(&seen, &[1, 2, 3]), "a run's first pass sweeps (deleted while off)");
-        assert!(!note_gone(&seen, &[1, 2, 3]));
-        assert!(!note_gone(&seen, &[1, 2, 3, 4]), "a new note isn't a deletion");
-        assert!(note_gone(&seen, &[1, 3, 4]), "note 2 is gone");
-        assert!(!note_gone(&seen, &[1, 3, 4]));
+        assert!(item_gone(&seen, &[1, 2, 3]), "a run's first pass sweeps (deleted while off)");
+        assert!(!item_gone(&seen, &[1, 2, 3]));
+        assert!(!item_gone(&seen, &[1, 2, 3, 4]), "a new note isn't a deletion");
+        assert!(item_gone(&seen, &[1, 3, 4]), "note 2 is gone");
+        assert!(!item_gone(&seen, &[1, 3, 4]));
+        // Kinds apart: a chat 2 isn't note 2.
+        let seen = Mutex::new(None);
+        item_gone(&seen, &[(Kind::Note, 2), (Kind::Chat, 2)]);
+        assert!(!item_gone(&seen, &[(Kind::Note, 2), (Kind::Chat, 2), (Kind::Memory, 2)]));
+        assert!(item_gone(&seen, &[(Kind::Note, 2), (Kind::Memory, 2)]), "the chat is gone");
+    }
+
+    fn conversation(id: u64, title: &str, messages: &[(&str, &str)]) -> crate::chat::chats::Conversation {
+        serde_json::from_value(json!({
+            "id": id,
+            "title": title,
+            "createdTs": 100,
+            "updatedTs": 200,
+            "messages": messages.iter().enumerate().map(|(i, (role, text))| json!({ "role": role, "text": text, "ts": 100 + i as u64 })).collect::<Vec<_>>(),
+        }))
+        .expect("a conversation")
+    }
+
+    #[test]
+    fn chats_and_memory_are_kinds_of_their_own_in_one_cache() {
+        let note = note(json!({ "id": 7, "title": "Lisbon", "content": "Flights booked for May." }));
+        let chat = conversation(7, "Trip ideas", &[("user", "Where should we eat in Lisbon?"), ("assistant", "Try the seafood places in Alfama.")]);
+        let n = prepared(std::slice::from_ref(&note));
+        let c = prepared_chats(std::slice::from_ref(&chat));
+        assert_eq!(c[0][0].chunk.kind, "chat");
+        assert_eq!(c[0][0].chunk.text(), "You: Where should we eat in Lisbon?\nYap: Try the seafood places in Alfama.");
+        assert!(c[0][0].lower.contains("alfama"));
+        // The same id in two kinds: two entries, neither replacing the other.
+        assert!(Arc::ptr_eq(&n[0], &prepared(std::slice::from_ref(&note))[0]));
+        assert!(Arc::ptr_eq(&c[0], &prepared_chats(std::slice::from_ref(&chat))[0]));
+        // A new message: the chat's passages again (a new key), the note's kept.
+        let mut more = chat.clone();
+        more.messages.push(serde_json::from_value(json!({ "role": "user", "text": "And for breakfast?", "ts": 300 })).unwrap());
+        let c2 = prepared_chats(std::slice::from_ref(&more));
+        assert_ne!(c2[0][0].key, c[0][0].key);
+        assert!(Arc::ptr_eq(&n[0], &prepared(std::slice::from_ref(&note))[0]));
+        // Chats gone: only theirs leave the cache.
+        prepared_chats(&[]);
+        assert!(with_cache(|cache| !cache.contains_key(&(Kind::Chat, 7)) && cache.contains_key(&(Kind::Note, 7))));
+    }
+
+    #[test]
+    fn a_deleted_chat_takes_its_vectors_with_it() {
+        let dir = std::env::temp_dir().join(format!("yap-search-sweep-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let mut store = Store::open(&dir, "test-model", 4);
+        let a = conversation(1, "Trip", &[("user", "Where should we eat in Lisbon?")]);
+        let b = conversation(2, "Bread", &[("user", "How long do I prove sourdough?")]);
+        let both = prepared_chats(&[a.clone(), b.clone()]);
+        let items: Vec<(Key, Vec<f32>)> = both.iter().flat_map(|v| v.iter()).map(|p| (p.key, vec![1.0, 0.0, 0.5, 0.0])).collect();
+        store.add(&items).unwrap();
+        // Chat 2 deleted: what's kept is what the library holds now (`sweep`).
+        let left = prepared_chats(std::slice::from_ref(&a));
+        let keep: HashSet<Key> = left.iter().flat_map(|v| v.iter()).map(|p| p.key).collect();
+        assert!((store.dead_share(&keep) - 0.5).abs() < 1e-6);
+        assert_eq!(store.compact(&keep).unwrap(), 1);
+        assert!(store.has(&both[0][0].key) && !store.has(&both[1][0].key));
+        // On disk too.
+        let again = Store::open(&dir, "test-model", 4);
+        assert_eq!(again.len(), 1);
+        assert!(!again.has(&both[1][0].key));
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

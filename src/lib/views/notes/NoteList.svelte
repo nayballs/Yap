@@ -14,22 +14,24 @@
   /** `notes`: the view's state (notesState.svelte.js). */
   let { notes } = $props();
 
-  // Search notes (the OpenWhispr sidebar action): filters the list pane.
+  // Search notes (the OpenWhispr sidebar action): every note, whatever its
+  // folder — by the words typed, and by meaning when that's on — its
+  // results in place of the folder's notes (NoteSearch.svelte, loaded the
+  // first time a search is typed).
   let searchOpen = $state(false);
   let query = $state('');
   let searchEl = $state(null);
+  let searchView = $state(null);
   // Inline "new folder" input (the + next to FOLDERS).
   let addingFolder = $state(false);
 
-  // Notes shown in the list pane: the active folder, filtered by search.
-  const shownNotes = $derived.by(() => {
-    const q = query.trim().toLowerCase();
-    return notes.notes.filter(
-      (n) =>
-        (n.folder || 'Personal') === notes.activeFolder &&
-        (!q || (n.title || '').toLowerCase().includes(q) || (n.preview || '').toLowerCase().includes(q))
-    );
-  });
+  // Notes shown in the list pane: the active folder (a search shows its results instead).
+  const shownNotes = $derived(notes.notes.filter((n) => (n.folder || 'Personal') === notes.activeFolder));
+
+  function searchKeydown(e) {
+    if (e.key === 'Escape') toggleSearch();
+    else searchView?.keydown(e);
+  }
   const folderCounts = $derived.by(() => {
     const counts = {};
     for (const n of notes.notes) counts[n.folder || 'Personal'] = (counts[n.folder || 'Personal'] || 0) + 1;
@@ -251,10 +253,12 @@
     {#if searchOpen}
       <input
         class="searchinput"
+        type="search"
+        aria-label="Search all notes"
         bind:this={searchEl}
         bind:value={query}
-        placeholder="Search…"
-        onkeydown={(e) => e.key === 'Escape' && toggleSearch()}
+        placeholder="Search all notes…"
+        onkeydown={searchKeydown}
       />
     {/if}
   </div>
@@ -332,6 +336,12 @@
     {/if}
   </div>
 
+  {#if searchOpen && query.trim()}
+    <!-- RESULTS: every note holding the words (and, by meaning, a few that mean them). -->
+    {#await import('./NoteSearch.svelte') then { default: NoteSearch }}
+      <NoteSearch bind:this={searchView} {notes} {query} {searchEl} />
+    {/await}
+  {:else}
   <!-- NOTES -->
   <div class="seccap">
     <span>Notes</span>
@@ -342,10 +352,8 @@
   {#if shownNotes.length === 0}
     <div class="listempty">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><path d="M14 2v6h6M9 13h6M9 17h4" /></svg>
-      <p>{query.trim() ? 'No matching notes' : 'No notes in this folder'}</p>
-      {#if !query.trim()}
-        <button class="createbtn" onclick={notes.newNote}>+ Create note</button>
-      {/if}
+      <p>No notes in this folder</p>
+      <button class="createbtn" onclick={notes.newNote}>+ Create note</button>
     </div>
   {:else}
     <div class="items">
@@ -390,6 +398,7 @@
         </div>
       {/each}
     </div>
+  {/if}
   {/if}
 </aside>
 
@@ -443,6 +452,10 @@
     color: var(--yap-fg);
     font: inherit;
     font-size: 12px;
+  }
+  /* (Esc closes it; the browser's own × isn't in Yap's colours.) */
+  .searchinput::-webkit-search-cancel-button {
+    appearance: none;
   }
   .searchinput:focus {
     outline: none;
