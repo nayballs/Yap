@@ -285,8 +285,17 @@ pub fn run() {
             notes::commands::note_enhance,
             notes::note_edits::transcript_line_edit,
             notes::note_edits::note_summary_update,
+            notes::transcript_edits::transcript_line_revert,
+            notes::transcript_edits::transcript_line_delete,
+            notes::transcript_edits::transcript_line_restore,
+            notes::transcript_edits::transcript_line_split,
             notes::tasks::tasks_list,
             notes::tasks::note_task_set,
+            notes::tasks::note_tasks_get,
+            notes::tasks::task_add,
+            notes::tasks::task_remove,
+            notes::tasks::tasks_set,
+            notes::tasks::tasks_archive,
             notes::commands::get_note_base_prompt,
             notes::commands::notes_folders,
             notes::commands::notes_folder_create,
@@ -390,6 +399,7 @@ pub fn run() {
             meetings::meeting_audio::meeting_audio_clear,
             meetings::meeting_audio::meeting_audio_note,
             meetings::meeting_audio::meeting_audio_clip,
+            meetings::meeting_audio::export::meeting_audio_export,
             meetings::meeting_audio::meeting_transcribe_again,
             meetings::meeting_audio::meeting_recover,
             meetings::meeting_audio::meeting_retry_chunk,
@@ -488,6 +498,10 @@ pub fn run() {
             shell::e2e::e2e_meeting_start_twice,
             #[cfg(debug_assertions)]
             meetings::meeting_audio::e2e_meeting_recovery_offer,
+            #[cfg(debug_assertions)]
+            meetings::disk_watch::e2e_disk_space,
+            #[cfg(debug_assertions)]
+            meetings::meeting_audio::export::e2e_audio_export_file,
             #[cfg(debug_assertions)]
             shell::e2e::e2e_main_on_screen,
             #[cfg(debug_assertions)]
@@ -716,6 +730,12 @@ pub fn run() {
             // Meeting audio past its days goes, and what a crash left of a
             // meeting is offered to transcribe (meeting_audio.rs).
             meetings::meeting_audio::init(&handle);
+            // Meeting transcripts past "Delete meeting transcripts after"
+            // go, their notes and summaries kept (notes/retention.rs).
+            notes::retention::init(&handle);
+            // A meeting recording watches the disk space it has left
+            // (meetings/disk_watch.rs).
+            meetings::disk_watch::init(&handle);
 
             // Clear any orphaned cleanup sidecar from a previous session (a
             // crash or task-kill skips every exit path; installers launched by
