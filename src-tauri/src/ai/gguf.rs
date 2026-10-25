@@ -98,7 +98,17 @@ pub struct Server {
     /// MTP speculative decoding on (`--spec-type draft-mtp`, current
     /// runtime only).
     pub mtp: bool,
+    /// The KV cache quantised to q8_0 (`-ctk q8_0 -ctv q8_0`): 34 bytes per
+    /// 32 values instead of f16's 64, but a bigger compute buffer
+    /// ([`Q8_COMPUTE_PER_TOKEN`]). Measured on Qwen3.5-4B (0.10.6, MTP on):
+    /// KV 1,024 → 544 MiB at 32K, 2,048 → 1,088 at 64K; the log's buffers
+    /// 5,024 → 4,623 and 6,240 → 5,487 MiB (docs/model-evals.md "KV cache q8_0").
+    pub kv_q8: bool,
 }
+
+/// What a q8_0 KV cache adds to the compute buffer per token of context
+/// (Qwen3.5-4B on 0.10.6: +80 MiB at 32K, +208 at 64K; this errs high).
+const Q8_COMPUTE_PER_TOKEN: u64 = 3_600;
 
 /// What the header says about a model's size and shape.
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -252,7 +262,7 @@ impl Shape {
         }
         let attention_layers = (0..self.layers()).filter(|&i| self.kv_heads(i) > 0).count() as u64;
         let kv_one_layer = self.kv_bytes_per_token().checked_div(attention_layers).unwrap_or(0) * ctx;
-        let draft_compute = self.compute_bytes(ctx, Server { current: true, mtp: false });
+        let draft_compute = self.compute_bytes(ctx, Server { current: true, mtp: false, kv_q8: false });
         self.nextn_bytes + MTP_DRAFT * self.state_bytes() + MTP_COMPUTE + kv_one_layer + draft_compute
     }
 }
@@ -266,9 +276,10 @@ pub fn estimate(shape: &Shape, file_bytes: u64, ctx: u64, on_card: bool, server:
     let mib = |b: u64| b.div_ceil(MIB);
     let mtp_on = server.current && server.mtp && shape.has_mtp();
     let model = mib(shape.model_bytes(file_bytes, on_card, server));
-    let kv = mib(shape.kv_bytes_per_token() * ctx);
+    let kv_f16 = shape.kv_bytes_per_token() * ctx;
+    let kv = mib(if server.kv_q8 { kv_f16 * 17 / 32 } else { kv_f16 });
     let state = mib(shape.state_bytes());
-    let compute = mib(shape.compute_bytes(ctx, server));
+    let compute = mib(shape.compute_bytes(ctx, server) + if server.kv_q8 { ctx * Q8_COMPUTE_PER_TOKEN } else { 0 });
     // MTP's share past the weights the model already counts.
     let mtp = if mtp_on { mib(shape.mtp_bytes(ctx).saturating_sub(shape.nextn_bytes)) } else { 0 };
     Estimate {
@@ -777,9 +788,9 @@ pub mod tests {
     }
 
     /// llamafile 0.10.3's buffers; 0.10.6's, without and with MTP.
-    const OLD: Server = Server { current: false, mtp: false };
-    const NEW: Server = Server { current: true, mtp: false };
-    const MTP: Server = Server { current: true, mtp: true };
+    const OLD: Server = Server { current: false, mtp: false, kv_q8: false };
+    const NEW: Server = Server { current: true, mtp: false, kv_q8: false };
+    const MTP: Server = Server { current: true, mtp: true, kv_q8: false };
 
     /// The real files' sizes (the test PC's %APPDATA%\yap\llm, 2026-10-20).
     const QWEN35_4B_FILE: u64 = 3_013_027_808;
@@ -855,9 +866,19 @@ pub mod tests {
         // MTP only on the runtime it's measured on, and only for a model
         // that can draft (the 1.5B can't).
         assert_eq!(
-            estimate(&s, QWEN35_4B_FILE, 8_192, true, Server { current: false, mtp: true }),
+            estimate(&s, QWEN35_4B_FILE, 8_192, true, Server { current: false, mtp: true, kv_q8: false }),
             estimate(&s, QWEN35_4B_FILE, 8_192, true, OLD)
         );
+        // A q8_0 KV cache (2026-10-25, with MTP as the evaluations ran it):
+        // KV 544 / 1,088 MiB at 32K / 64K, compute +80 / +208 MiB; the log's
+        // buffers 4,623 / 5,487 MiB (f16: 5,024 / 6,240).
+        for (ctx, kv, f16_log, q8_log) in [(32_768, 544, 5_024, 4_623), (65_536, 1_088, 6_240, 5_487)] {
+            let q8 = estimate(&s, QWEN35_4B_FILE, ctx, true, Server { kv_q8: true, ..MTP });
+            assert_eq!(q8.kv_mib, kv, "{ctx}: {q8:?}");
+            assert!((q8_log..=q8_log + 100).contains(&q8.total_mib), "{ctx}: {q8:?}");
+            let f16 = estimate(&s, QWEN35_4B_FILE, ctx, true, MTP);
+            assert!(f16.total_mib - q8.total_mib >= (f16_log - q8_log) * 7 / 10, "{ctx}: saves about what the log says");
+        }
 
         // Qwen2.5-1.5B: compute 69.5 / 93.5 MiB at 8K / 32K: 1,228 / 1,920
         // MiB in all; no MTP.
@@ -905,8 +926,8 @@ pub mod tests {
                 println!("{} ({} ms): {:?}", p.display(), started.elapsed().as_millis(), f.shape);
                 for ctx in [4_096u64, 8_192, 16_384, 32_768, 65_536, 131_072, 262_144] {
                     let old = estimate(&f.shape, f.bytes, ctx, true, Server::default());
-                    let new = estimate(&f.shape, f.bytes, ctx, true, Server { current: true, mtp: false });
-                    let mtp = estimate(&f.shape, f.bytes, ctx, true, Server { current: true, mtp: true });
+                    let new = estimate(&f.shape, f.bytes, ctx, true, Server { current: true, mtp: false, kv_q8: false });
+                    let mtp = estimate(&f.shape, f.bytes, ctx, true, Server { current: true, mtp: true, kv_q8: false });
                     println!("  {ctx}: 0.10.3 {} · 0.10.6 {} · +MTP {} ({:?})", old.total_mib, new.total_mib, mtp.total_mib, mtp);
                 }
             }

@@ -130,7 +130,7 @@ pub async fn plan(runtime: &Path, model: &Path, ngl: u32, ctx: u32, mtp: Option<
         .expect("a version");
     let yap = crate::ai::local_llm::plan_for(&crate::config::load(), model, ctx, version);
     let on = ngl > 0 && mtp.unwrap_or(yap.mtp);
-    crate::ai::local_llm::Plan { runtime: version, mtp: on }
+    crate::ai::local_llm::Plan { runtime: version, mtp: on, kv_q8: ngl > 0 && yap.kv_q8 }
 }
 
 /// Start `runtime` serving `model` with `local_llm::server_args` — as Yap's

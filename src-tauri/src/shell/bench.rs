@@ -569,7 +569,7 @@ async fn time_local_cleanup(runtime: &Path, gguf: &Path, sc: &Scenario, work: &P
     let plan = if on_gpu {
         crate::ai::local_llm::plan_for(&crate::config::YapConfig::default(), gguf, ctx, version)
     } else {
-        crate::ai::local_llm::Plan { runtime: version, mtp: false }
+        crate::ai::local_llm::Plan { runtime: version, mtp: false, kv_q8: false }
     };
     let mut args = crate::ai::local_llm::server_args(gguf, port, if on_gpu { 999 } else { 0 }, ctx, plan);
     if let Some(n) = sc.threads {
