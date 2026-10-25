@@ -345,7 +345,7 @@ the **latest stable** toolchain — keep local Rust current (`rustup update`).
 `.github/workflows/e2e.yml` runs the e2e suite on the same triggers.
 
 **Tests:**
-- `npm run test:app` — the end-to-end UI suite: Playwright drives a real stub debug build over CDP (~20 s + the build), leaving named screenshots in `test-results/app/screenshots/`. Guide: [`docs/e2e-tests.md`](./docs/e2e-tests.md).
+- `npm run test:app` — the end-to-end UI suite: Playwright drives a real stub debug build over CDP (~35 min for all 530+; one spec in seconds), leaving named screenshots in `test-results/app/screenshots/`; its windows sit behind yours. Guide: [`docs/e2e-tests.md`](./docs/e2e-tests.md).
 - `npm run test:real` — real-app robot tests: a robot-mode Yap pastes into real windows the harness opens (`--engines` build: real STT). ⚠ **It takes the keyboard focus for ~2 min** (local only, not CI): say so before running it while the maintainer is at the PC. Guide: [`docs/e2e-tests.md`](./docs/e2e-tests.md) "Real-app robot tests".
 - `npm run privacy:scan` / `npm run test:privacy` — the privacy guard over the whole tree, and its own tests ([build-and-test.md](./docs/architecture/build-and-test.md#the-privacy-guard-scriptsprivacy-guardmjs)).
 - `npm run eval` — model evaluations: real models through Yap's own Chat code, every request logged; use it before changing a prompt, a tool or the default local model. Guide: [`docs/model-evals.md`](./docs/model-evals.md).
@@ -353,9 +353,10 @@ the **latest stable** toolchain — keep local Rust current (`rustup update`).
 ### The dev → nightly → stable workflow (agreed 2026-10-05)
 **Dev first, nightly for batches.** Every change goes through these steps in order:
 1. **Claude builds it and tests it.** `npm run build` + `cargo clippy --all-targets
-   --locked -- -D warnings` + `cargo test`, then the e2e robot suite (`npm run
-   test:app`: drives the real app in ~20 s and leaves screenshots to look at; add or
-   extend a spec for anything new). For anything about **pasting, inserting text,
+   --locked -- -D warnings` + `cargo test`, then **the e2e specs the change touches**
+   (`npx playwright test -c e2e <spec>` after `npm run test:app:build`; add or extend
+   a spec for anything new). The full suite (`npm run test:app`, ~35 min) only for a
+   batch of changes or before a nightly (the maintainer, 2026-10-25). For anything about **pasting, inserting text,
    the clipboard, terminals/chat apps, the mic path or STT**, also the real-app
    robot tests (`npm run test:real`, + `npm run test:real:build -- --engines` for
    real STT): they paste into real windows, so Claude checks it itself instead of

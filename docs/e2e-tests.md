@@ -96,10 +96,14 @@ points the suite at an exe directly), so it never competes with a running
   user profile when Settings → AI apps (MCP) edits AI apps' config files
   (`YAP_MCP_CLIENT_ROOT`): a run never adds Yap to your real Claude, Cursor…
 
-A Yap window (1200×800) shows on screen while the suite runs, plus the
-onboarding window for a moment, the Yap bar (the `overlay` window, a small
-pill above the taskbar of the primary monitor), and in the meeting specs the
-meeting notepad, docked to the right edge of the screen. They never take the
+A Yap window (1200×800) is shown while the suite runs, plus the onboarding
+window for a moment, the Yap bar (the `overlay` window, a small pill above
+the taskbar of the primary monitor), and in the meeting specs the meeting
+notepad, docked to the right edge of the screen. Since 2026-10-25 the main
+window, onboarding and the notepad go to the bottom of the z-order when shown
+(`shell::window::behind_in_test_runs`; not in robot mode), behind the apps
+you're working in, and still draw there (`e2e/support/yap.js` turns WebView2's
+occlusion tracking off: `--disable-features=CalculateNativeWinOcclusion`). They never take the
 focus, and Playwright's clicks and keys go to the webviews, not to your mouse
 or keyboard. (Don't click on them while the suite runs: a real click on the
 notepad's Stop, say, ends a test's meeting.) A test run's bar never reads

@@ -274,6 +274,7 @@ fn show(w: &tauri::WebviewWindow, focus: bool) {
     if focus && !crate::shell::e2e::active() {
         let _ = w.set_focus();
     }
+    crate::shell::window::behind_in_test_runs(w);
 }
 
 /// A meeting note was discarded: if the notepad showed it, it goes away.

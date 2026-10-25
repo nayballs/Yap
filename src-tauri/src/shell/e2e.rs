@@ -409,6 +409,7 @@ pub fn e2e_main_on_screen(app: AppHandle) -> Result<(), String> {
     if !w.is_visible().unwrap_or(false) {
         tracing::info!("e2e: the main window was hidden; showing it");
         w.show().map_err(|e| e.to_string())?;
+        crate::shell::window::behind_in_test_runs(&w);
     }
     Ok(())
 }

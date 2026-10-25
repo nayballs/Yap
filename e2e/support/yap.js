@@ -125,7 +125,10 @@ export async function launchYap({ name, config = {}, env = {}, data = {}, runsDi
     // Port 0: WebView2 picks a free port and writes it to DevToolsActivePort
     // in the profile. (An elevated process ignores WEBVIEW2_* variables; CI
     // runners are elevated, so e2e.yml sets the same flag as a machine policy.)
-    WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: '--remote-debugging-port=0',
+    // Test windows sit behind the developer's apps (shell/window.rs
+    // `behind_in_test_runs`): with occlusion tracking off they still draw.
+    WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS:
+      '--remote-debugging-port=0 --disable-features=CalculateNativeWinOcclusion --disable-backgrounding-occluded-windows',
     NO_COLOR: '1',
     YAP_BRIDGE_FILE: bridgeFile,
     YAP_MCP_CLIENT_ROOT: path.join(runDir, 'ai-apps'),

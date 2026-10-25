@@ -23,6 +23,7 @@ pub fn show_settings(app: &AppHandle) -> Result<(), String> {
     fit_to_screen(&w);
     let _ = w.show();
     focus(&w);
+    behind_in_test_runs(&w);
     // The window is on screen now: a pending update announcement moves into
     // it. Not left to the Focused event alone: Windows can refuse a
     // background app the foreground, and e2e test runs never take it.
@@ -72,6 +73,25 @@ pub(crate) fn fit_rect(window: (i32, i32, u32, u32), area: (i32, i32, u32, u32))
     (fitted != window).then_some(fitted)
 }
 
+/// A test run's window, just shown: at the bottom of the z-order, behind the
+/// apps of whoever works beside the suite (it still draws there: the suite
+/// turns WebView2's occlusion tracking off, `e2e/support/yap.js`). Nothing
+/// outside test runs, nor in robot mode, whose real windows are its point.
+/// (25 Oct 2026: the main window kept popping up mid-screen during runs.)
+pub fn behind_in_test_runs(w: &tauri::WebviewWindow) {
+    if !crate::shell::e2e::active() || crate::shell::realtest::on() {
+        return;
+    }
+    #[cfg(windows)]
+    if let Ok(hwnd) = w.hwnd() {
+        use windows::Win32::Foundation::HWND;
+        use windows::Win32::UI::WindowsAndMessaging::{SetWindowPos, HWND_BOTTOM, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE};
+        unsafe {
+            let _ = SetWindowPos(HWND(hwnd.0), Some(HWND_BOTTOM), 0, 0, 0, 0, SWP_NOACTIVATE | SWP_NOMOVE | SWP_NOSIZE);
+        }
+    }
+}
+
 /// `set_focus`, except in e2e test runs: when Windows won't hand a background
 /// process the foreground, tao falls back to pressing Alt in whichever app has
 /// focus — the developer's, while the suite runs beside them.
@@ -101,6 +121,7 @@ pub fn show_onboarding(app: &AppHandle) -> Result<(), String> {
     fit_to_screen(&w);
     let _ = w.show();
     focus(&w);
+    behind_in_test_runs(&w);
     // Tips and notices wait while the first-run setup is on screen.
     crate::notices::notice::on_onboarding(true);
     let _ = w.eval("window.location.reload()");

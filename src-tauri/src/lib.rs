@@ -833,6 +833,7 @@ pub fn run() {
             #[cfg(debug_assertions)]
             if let Some(settings) = app.get_webview_window("settings") {
                 let _ = settings.show();
+                shell::window::behind_in_test_runs(&settings);
             }
             // Release builds: a launch by the person brings the main window
             // up (`launch_shows_window`); sign-in and "Start hidden" stay in
