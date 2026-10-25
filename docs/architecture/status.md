@@ -55,6 +55,30 @@ tables, method and how anyone can run it and send theirs:
 
 ## What works
 
+**Long chats, sized to the model** (2026-10-25,
+[chat-and-assistant.md](./chat-and-assistant.md#long-chats-sized-to-the-model-2026-10-25)):
+Chat, the Voice Assistant and a meeting's Ask threads send their history by
+tokens for the model in use — its real context (the on-device model's
+`n_ctx`, a server's word, a cloud model's list), about 70% of it for the
+history and the question (the Voice Assistant 35%, at most 6K), after the
+system prompt and tools' schemas are measured, within a plan's tokens a
+minute — instead of the last 19 messages. Once a chat fills 75% of that
+room, its older messages are summarised in the background by the chat's own
+model (incremental, kept in `chats.json` as a cache), and the next question
+carries "Earlier in this chat: …" and the latest messages; a divider and
+**Show summary** in the thread, the ring drops and says "Summarised". A
+paste too long for the model is refused before it's sent; every provider's
+"too long" refusal is said plainly ("That's too long for Qwen3.5 4B (64K
+context).") with New chat, **Give it more room** (the on-device model, when
+the card has room) and Shorten what you pasted; a turn's tool results are
+trimmed to the room left. Unit-tested (the budget per model, the window,
+the summary's ranges, each provider's real error shape, the pre-send check,
+tool-result trimming); e2e `chat-long.spec.js`, `chat-room.spec.js`; model
+evaluations `chat-long-memory` on Qwen3.5-4B and Groq
+([model-evals.md](../model-evals.md#long-chats-the-window-and-the-summary-25-oct-2026)).
+Not tried yet in a real long chat on the maintainer's PC, nor with Claude's,
+OpenAI's or Gemini's real refusals (their shapes are from their docs).
+
 **Chat's context ring and the AI usage tracker** (2026-10-25,
 [chat-and-assistant.md](./chat-and-assistant.md#the-context-ring-2026-10-25),
 [ai-models.md](./ai-models.md) `ai/usage.rs`): every AI call's tokens are

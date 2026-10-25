@@ -25,12 +25,16 @@
     if (!q || !notes.selected || notes.asking) return;
     notes.chatInput = '';
     notes.flushSave();
+    // The kept thread's earlier turns go from Rust, sized to the model (its
+    // summary and the latest turns: chat/note_chats.rs); these only when
+    // there's no kept thread yet.
     const history = notes.chatThread.slice(-6).map((t) => [t.role, t.text]);
     const id = notes.selected.id;
+    const conversationId = notes.chatConvId ?? null;
     notes.chatThread = [...notes.chatThread, { role: 'user', text: q }];
     notes.asking = true;
     try {
-      const [answer, model] = await Promise.all([invoke('note_ask', { id, question: q, history }), nextModel('chat')]);
+      const [answer, model] = await Promise.all([invoke('note_ask', { id, question: q, history, conversationId }), nextModel('chat')]);
       const reply = { role: 'assistant', text: answer, model, id: notes.turnId() };
       notes.chatThread = [...notes.chatThread, reply];
       // Kept with the note (chat/note_chats.rs): here and in the notepad next time.

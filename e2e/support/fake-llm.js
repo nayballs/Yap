@@ -266,6 +266,10 @@ const SPEAKER_NAME = 'You identify one voice in a meeting transcript';
 // calendar/brief.rs). "Nothing to add." unless a spec scripts it
 // (`reply('brief', fn)`; brief.spec.js).
 const BRIEF = 'You write a short brief for someone about to go into a meeting';
+// A long chat's older messages, summarised (src-tauri/src/chat/compact.rs):
+// "- " lines from the messages it's given (each "User: …" line's first
+// words) unless a spec scripts it (`reply('chatSummary', fn)`).
+const CHAT_SUMMARY = 'You keep the notes of a long chat';
 
 const KINDS = [
   [DIGEST, 'digest'],
@@ -282,7 +286,16 @@ const KINDS = [
   [MEMORY, 'memory'],
   [SPEAKER_NAME, 'speakerName'],
   [BRIEF, 'brief'],
+  [CHAT_SUMMARY, 'chatSummary'],
 ];
+
+/** A long chat's summary: the notes so far, and a line for each question it's given. */
+function chatSummaryReply(user) {
+  const before = (/Notes so far:\n([\s\S]*?)\n\nNext messages:/.exec(user)?.[1] ?? '').trim();
+  const kept = before && before !== '(none yet)' ? before.split('\n') : [];
+  const asked = [...user.matchAll(/^User: (.*)$/gm)].map((m) => `- The user said: ${m[1].split(' ').slice(0, 12).join(' ')}`);
+  return [...kept, ...asked].join('\n') || '- Nothing yet.';
+}
 
 /**
  * A transcript line as Yap's meeting prompts write it: "You: …", "Them: …",
@@ -632,6 +645,12 @@ export async function startFakeLlm() {
       const failing = failures.get(kind);
       if (failing?.n > 0) {
         failing.n -= 1;
+        // A provider's own refusal (`failNext(kind, n, status, body)`: its
+        // JSON, e.g. llama.cpp's "exceeds the available context size").
+        if (failing.body != null) {
+          res.writeHead(failing.status, { 'content-type': 'application/json' }).end(typeof failing.body === 'string' ? failing.body : JSON.stringify(failing.body));
+          return;
+        }
         res.writeHead(failing.status, { 'content-type': 'text/plain' }).end('fake failure: the model is down');
         return;
       }
@@ -683,6 +702,7 @@ export async function startFakeLlm() {
         memory: () => '{"changes": []}',
         speakerName: () => '{"quote": "", "name": "unknown"}',
         brief: () => 'Nothing to add.',
+        chatSummary: chatSummaryReply,
       };
       const content = (replies.get(kind) ?? answer[kind] ?? (() => 'OK'))(user);
       await answerWith({ role: 'assistant', content }, 'stop', paces.get(kind) ?? {});
@@ -700,7 +720,7 @@ export async function startFakeLlm() {
     setServerModels: (models) => (serverModels = models),
     serveOllama: (o) => (ollama = o),
     requests,
-    failNext: (kind, n = 1, status = 500) => failures.set(kind, { n, status }),
+    failNext: (kind, n = 1, status = 500, body = null) => failures.set(kind, { n, status, body }),
     delay: (kind, ms) => delays.set(kind, ms),
     scriptChat: (steps) => chatScript.push(...steps),
     reply: (kind, fn) => replies.set(kind, fn),

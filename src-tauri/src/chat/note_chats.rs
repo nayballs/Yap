@@ -115,6 +115,98 @@ pub fn add(note: u64, conversation: Option<u64>, messages: &[NewMessage]) -> Res
     Ok(id)
 }
 
+// ---- a thread's history, sized to the model -------------------------------------------------
+
+/// Where a note's Ask goes.
+#[derive(Debug, Clone, Copy)]
+pub struct Call<'a> {
+    pub provider: &'a str,
+    pub model: &'a str,
+    pub base_url: &'a str,
+}
+
+/// What a note's Ask sends before its question ([`history_for`]).
+#[derive(Debug, Clone, Default)]
+pub struct ThreadHistory {
+    /// The summary of the older turns, as the system prompt carries it
+    /// (`compact::block`), when they're left out.
+    pub summary: Option<String>,
+    /// The turns sent whole, oldest first: `(role, text)`.
+    pub turns: Vec<(String, String)>,
+    /// The model as a sentence names it, and its context (for "That's too
+    /// long for …").
+    pub label: String,
+    pub context: u64,
+}
+
+/// **A note's Ask thread, sized to the model** (`chat/budget.rs`, 2026-10-25):
+/// thread `thread` of note `note` before a question (`question`, as sent)
+/// to `call`, whose prompt besides it is `fixed` (the note, About you…):
+/// every earlier turn when they fit; else the thread's summary
+/// (`compact.rs`) and the turns after it; else the latest that fit. A
+/// question too long for the model alone is the plain sentence (`Err`).
+/// No thread (a new one), or another note's: no history.
+pub async fn history_for(note: u64, thread: Option<u64>, call: Call<'_>, fixed: &str, question: &str) -> Result<ThreadHistory, String> {
+    use crate::chat::budget::{self, Counter, Kind, Mode};
+    let cfg = crate::config::load();
+    let counter = Counter::for_call(call.provider, call.base_url);
+    let (context, known) = budget::context_window(&cfg, call.provider, call.model, call.base_url).await;
+    let label = budget::model_label(call.provider, call.model, &crate::ai::local_llm::active_model_display(&cfg));
+    let b = budget::budget(context, known, counter.count(fixed).await, Kind::Note, false, budget::rate_cap(call.provider));
+    let asked = counter.count(question).await + budget::MESSAGE_OVERHEAD;
+    let mode = budget::mode();
+    if mode != Mode::Messages && asked > b.history {
+        tracing::info!(note, question_tokens = asked, room = b.history, "Note chat: the question is too long for the model; not sent");
+        return Err(budget::too_long(&label, context));
+    }
+    let mut out = ThreadHistory { label, context, ..Default::default() };
+    let Some(conv) = thread.and_then(chats::get).filter(|c| c.note == Some(note)) else {
+        return Ok(out);
+    };
+    let plan = if mode == Mode::Messages {
+        // As the pages sent it until 25 Oct 2026: the last six messages.
+        let start = conv.messages.len().saturating_sub(6);
+        budget::Plan { start, summary: false, left_out: start, tokens: 0 }
+    } else {
+        let costs = budget::message_costs(&counter, &conv.messages, false).await;
+        let summary = match conv.usable_summary().filter(|_| mode == Mode::Summary) {
+            Some(s) => Some((s.upto, counter.count(&crate::chat::compact::block(&s.text)).await)),
+            None => None,
+        };
+        budget::plan(&costs, summary, b.history.saturating_sub(asked), Kind::Note.step())
+    };
+    if plan.summary {
+        out.summary = conv.usable_summary().map(|s| crate::chat::compact::block(&s.text));
+    }
+    out.turns = conv.messages[plan.start..]
+        .iter()
+        .map(|m| (if m.role == "assistant" { "assistant" } else { "user" }.to_string(), m.text.clone()))
+        .collect();
+    tracing::info!(note, thread = conv.id, sent = out.turns.len(), summary = plan.summary, left_out = plan.left_out, "Note chat: the thread, sized to the model");
+    Ok(out)
+}
+
+/// A one-off request (`[system, user]`, the notepad's question about the
+/// meeting) with a thread's history: its summary after the system prompt,
+/// its turns before the question. Pure.
+pub fn with_thread(messages: serde_json::Value, thread: &ThreadHistory) -> serde_json::Value {
+    let Some(list) = messages.as_array() else { return messages };
+    let mut out: Vec<serde_json::Value> = Vec::with_capacity(list.len() + thread.turns.len());
+    for (i, m) in list.iter().enumerate() {
+        let last = i + 1 == list.len();
+        if last {
+            out.extend(thread.turns.iter().map(|(role, text)| serde_json::json!({ "role": role, "content": text })));
+        }
+        let mut m = m.clone();
+        if let (Some(block), "system") = (&thread.summary, m["role"].as_str().unwrap_or("")) {
+            let content = m["content"].as_str().unwrap_or("").to_string();
+            m["content"] = serde_json::Value::String(format!("{content}\n\n{block}"));
+        }
+        out.push(m);
+    }
+    serde_json::Value::Array(out)
+}
+
 // ---- commands ----------------------------------------------------------------------------
 
 /// Note `noteId`'s Ask threads: the newest whole, and all of them (Past
@@ -145,7 +237,11 @@ pub fn note_chat_add(
 ) -> Result<u64, String> {
     let id = add(note_id, conversation_id, &messages)?;
     tracing::info!(note_id, conversation = id, messages = messages.len(), "Note chat: a turn kept");
-    let _ = app.emit(EVENT, serde_json::json!({ "noteId": note_id, "conversationId": id, "origin": origin.unwrap_or_default() }));
+    let origin = origin.unwrap_or_default();
+    // A long thread's older turns summarised, with the model its next
+    // question goes to from this window (compact.rs).
+    crate::chat::compact::after_thread_turn(&app, note_id, id, origin == "notepad");
+    let _ = app.emit(EVENT, serde_json::json!({ "noteId": note_id, "conversationId": id, "origin": origin }));
     chats::saved().map_err(|e| e.to_string())?;
     Ok(id)
 }

@@ -1420,6 +1420,12 @@ pub fn parse_ollama_show(v: &Value) -> (Option<u64>, Option<u64>) {
     (max, num_ctx.filter(|&n: &u64| n > 0))
 }
 
+/// llama.cpp's `GET /props`: the context a request gets
+/// (`default_generation_settings.n_ctx`, else `n_ctx`). Pure.
+pub fn parse_llamacpp_props(v: &Value) -> Option<u64> {
+    positive(&v["default_generation_settings"]["n_ctx"]).or_else(|| positive(&v["n_ctx"]))
+}
+
 /// The most models one server is asked about (Ollama: one `/api/show` each).
 const SERVER_CONTEXT_MODELS: usize = 16;
 const SERVER_CONTEXT_TIMEOUT: Duration = Duration::from_secs(3);
@@ -1444,6 +1450,13 @@ async fn server_contexts(base: &str, key: &str, models: &[CatalogModel]) -> Vec<
             if !found.is_empty() {
                 return found.into_iter().filter(|c| ids.contains(&c.id.as_str())).collect();
             }
+        }
+    }
+    // llama.cpp's own server (llama-server, a llamafile): `/props` says the
+    // context it serves its one model with.
+    if let Ok(url) = Url::parse(&format!("{root}/props")) {
+        if let Some(n) = get_json(&client, url, &[], Some(key), "the server").await.ok().and_then(|v| parse_llamacpp_props(&v)) {
+            return ids.iter().map(|id| ServerContext { id: id.to_string(), max: None, set: Some(n), app: "llama.cpp" }).collect();
         }
     }
     let Ok(url) = Url::parse(&format!("{root}/api/ps")) else {
@@ -2178,5 +2191,9 @@ mod tests {
         assert_eq!(parse_ollama_show(&show), (Some(131_072), Some(16_384)));
         assert_eq!(parse_ollama_show(&json!({"model_info": {"qwen2.context_length": 32768}})), (Some(32_768), None));
         assert_eq!(parse_ollama_show(&json!({})), (None, None));
+        // llama.cpp's own server (a llamafile): the context it serves.
+        assert_eq!(parse_llamacpp_props(&json!({"default_generation_settings": {"n_ctx": 8192}, "total_slots": 1})), Some(8_192));
+        assert_eq!(parse_llamacpp_props(&json!({"n_ctx": 32768})), Some(32_768));
+        assert_eq!(parse_llamacpp_props(&json!({"models": []})), None);
     }
 }

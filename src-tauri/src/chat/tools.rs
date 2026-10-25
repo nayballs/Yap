@@ -86,17 +86,10 @@ mod notes;
 
 use serde_json::{json, Value};
 
-pub use agent::{run_tool_loop_with, FirstStep};
+pub use agent::{offered_tools, run_tool_loop_with, FirstStep};
 pub use notes::{rag_notes, search_notes};
 #[cfg(debug_assertions)]
 pub use notes::{changed_note, definitions};
-
-/// The characters a tool step's own part takes — the instructions and the
-/// note tools' schemas, which every step sends — for Chat's context
-/// estimate (`usage/context.rs`).
-pub fn tool_prompt_chars() -> usize {
-    TOOL_INSTRUCTIONS.join(" ").chars().count() + notes::definitions().to_string().chars().count()
-}
 
 const MAX_TOOL_STEPS: usize = 20;
 const MAX_CONTENT_LENGTH: usize = 500;
@@ -156,6 +149,10 @@ pub struct Extra<'a> {
     /// `check_calendar` (a calendar is connected): the turn's meetings, the
     /// person's zone and the clock.
     pub calendar: Option<CalendarTurn<'a>>,
+    /// The most one request of the turn may carry, in tokens
+    /// (`budget::Budget::request`): each tool result is trimmed to what's
+    /// left (`budget::fit_result`). `None`: no limit.
+    pub room: Option<u64>,
 }
 
 /// The calendar tool in a turn ([`calendar::run`]).
@@ -477,7 +474,7 @@ mod tests {
         let list = all.as_array_mut().unwrap();
         list.extend(app_definitions().as_array().unwrap().iter().cloned());
         list.extend(web_definitions().as_array().unwrap().iter().cloned());
-        list.extend(memory_definitions(Extra { memory: true, search_chats: true, conversation: None, calendar: None }).as_array().unwrap().iter().cloned());
+        list.extend(memory_definitions(Extra { memory: true, search_chats: true, ..Default::default() }).as_array().unwrap().iter().cloned());
         all
     }
 

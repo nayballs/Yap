@@ -203,6 +203,40 @@ pub struct Conversation {
     /// of the list, in "Archived" to restore or delete, still searched.
     #[serde(default, skip_serializing_if = "is_zero")]
     pub archived_ts: u64,
+    /// **What the older messages said, summarised** (`compact.rs`): sent in
+    /// their place once the chat no longer fits the model's context. A
+    /// cache: the messages stay, and an older Yap's save drops it (the next
+    /// long turn writes it again).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub summary: Option<ChatSummary>,
+}
+
+/// A long conversation's summary of its older messages (`compact.rs`).
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ChatSummary {
+    /// "- " lines: the facts, names, numbers, decisions, what was asked and
+    /// told, what's still open.
+    pub text: String,
+    /// It covers `messages[..upto]`.
+    pub upto: usize,
+    /// How many messages the conversation had when it was written (an
+    /// answer counted before that was sent without it: Chat's ring).
+    #[serde(default)]
+    pub after: usize,
+    /// The model that wrote it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<ChatModel>,
+    #[serde(default)]
+    pub ts: u64,
+}
+
+impl Conversation {
+    /// Its summary, when it still fits the conversation (an older Yap may
+    /// have changed the messages under it).
+    pub fn usable_summary(&self) -> Option<&ChatSummary> {
+        self.summary.as_ref().filter(|s| s.upto > 0 && s.upto <= self.messages.len() && !s.text.trim().is_empty())
+    }
 }
 
 #[derive(Debug, Default, Serialize, Deserialize)]
@@ -446,6 +480,7 @@ fn create_with(title: &str, note: Option<u64>) -> Conversation {
             scope: String::new(),
             note,
             archived_ts: 0,
+            summary: None,
         };
         s.conversations.push(conv.clone());
         save_to_disk(s);
@@ -502,6 +537,23 @@ pub fn set_scope(id: u64, scope: &str) {
 /// A conversation's scope ("" when it has none, or isn't there).
 pub fn scope_of(id: u64) -> String {
     with_store(|s| s.conversations.iter().find(|c| c.id == id).map(|c| c.scope.clone()).unwrap_or_default())
+}
+
+/// Keep `summary` as conversation `id`'s (`compact.rs`) — only while the
+/// one it extends is still there (`from`: the old one's `upto`, 0 for none)
+/// and the messages it covers are: another pass, or an older Yap's save,
+/// may have changed it meanwhile. Returns whether it was kept.
+pub fn set_summary(id: u64, from: usize, summary: ChatSummary) -> bool {
+    with_store(|s| {
+        let Some(c) = s.conversations.iter_mut().find(|c| c.id == id) else { return false };
+        let had = c.usable_summary().map(|x| x.upto).unwrap_or(0);
+        if had != from || summary.upto > c.messages.len() || summary.upto <= had {
+            return false;
+        }
+        c.summary = Some(summary);
+        save_to_disk(s);
+        true
+    })
 }
 
 /// Add a message; `tools` = an answer's tool chips (empty for the user's),
@@ -783,8 +835,15 @@ const REPLAYED: &str = "yap-earlier-search";
 /// copied word for word into an answer that searched nothing (Qwen3.5-4B,
 /// a tester's chat, 2026-10-21). Pure.
 pub fn history_messages(messages: &[ChatMessage]) -> Vec<Value> {
+    (0..messages.len()).flat_map(|i| history_message(messages, i)).collect()
+}
+
+/// Message `i` of `messages` as [`history_messages`] sends it: its text,
+/// after its search replayed when it was written from the web. Pure.
+pub fn history_message(messages: &[ChatMessage], i: usize) -> Vec<Value> {
     let mut out = Vec::new();
-    for (i, m) in messages.iter().enumerate() {
+    let Some(m) = messages.get(i) else { return out };
+    {
         let role = if m.role == "assistant" { "assistant" } else { "user" };
         if from_the_web(m) {
             let queries = searched_queries(&m.tools);

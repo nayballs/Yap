@@ -3,8 +3,10 @@
 //! How it works: docs/architecture/chat-and-assistant.md.
 
 pub mod assistant;
+pub mod budget;
 pub mod chats;
 pub mod commands;
+pub mod compact;
 pub mod note_chats;
 pub mod note_text;
 pub mod stream;

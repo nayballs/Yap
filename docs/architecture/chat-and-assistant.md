@@ -152,10 +152,17 @@ The AI Chat surface (conversations, the tool-calling loop and its note tools) an
   question goes into the box beside them and Chat comes up with its line
   (`assistant::cant_read`). After a spoken "snip" lands, Yap listens for the
   question by itself ([snip.md](./snip.md#after-saying-snip-yap-listens-for-the-question-2026-10-25)).
-  **The history window** moves three turns at a time
-  (`chats::history_start` with `CHAT_HISTORY` (19, 6): 14–19 messages, the
-  Voice Assistant's `ASSISTANT_HISTORY` 5–8), not
-  every turn, so a long chat keeps its prompt's start. **An answer's
+  **The history** is sized to the model in tokens since 2026-10-25
+  ([below](#long-chats-sized-to-the-model-2026-10-25): `chat/budget.rs`,
+  `chat/compact.rs`); until then it was the last 19 messages
+  (`chats::history_start` with `CHAT_HISTORY` (19, 6), the Voice
+  Assistant's `ASSISTANT_HISTORY` (8, 4)), which a model evaluation can
+  still ask for (`YAP_EVAL_HISTORY=messages`). Its start still moves a few
+  messages at a time, not every turn, so a long chat keeps its prompt's
+  start. A conversation keeps its **summary** of older messages
+  (`Conversation.summary` = `ChatSummary {text, upto, after, model, ts}`,
+  `set_summary` only over the one it extends; `usable_summary`; an older
+  Yap's save drops it — a cache, the messages stay). **An answer's
   tokens** (2026-10-25): `chat_turn` runs inside `usage::tallied`, and the
   turn's last model call — the step that wrote the answer, which read the
   whole prompt — is kept with the answer (`ChatMessage.tokens` =
@@ -182,8 +189,31 @@ The AI Chat surface (conversations, the tool-calling loop and its note tools) an
   origin)` → the thread's id (a new one when there's none, or it isn't this
   note's: named by its first question, ≤ 50 characters) and
   `yap-note-chat {noteId, conversationId, origin}` to every window. The
-  windows keep each turn as it's shown (`core/noteChat.js`). Logs: ids and
-  counts.
+  windows keep each turn as it's shown (`core/noteChat.js`). **The next
+  question carries the thread** (2026-10-25): the Notes view's bar
+  (`note_ask {conversationId}`) and the notepad's Ask sheet
+  (`meeting_catch_up {question, conversationId}`; "What did I miss?" stays
+  without) send the thread's id, and Rust adds its earlier turns sized to
+  the model beside the note's own prompt (`history_for`: every turn when
+  they fit, else its summary and the turns after it, else the latest that
+  fit; a question too long for the model alone is the plain sentence;
+  `with_thread` lays them into the notepad's one-off request). A kept turn
+  (`note_chat_add`) looks for a summary in the background with the model
+  that window asks (`compact::after_thread_turn`: the notepad's Note
+  Formatting model, else Chat's). Logs: ids and counts.
+- **`chat/budget.rs`** — **a chat sized to its model** (2026-10-25): the
+  context of the model a call goes to (`context_window`, shared with the
+  ring), the budget (`budget`), the token counter (`Counter`, `estimate`),
+  the window (`plan`), when a summary is due (`due`), a turn's tool results
+  trimmed to the room left (`fit_result`), a plan's tokens a minute
+  (`rate_cap`) and "too long" said plainly (`too_long`, `plain_error`).
+  [Below](#long-chats-sized-to-the-model-2026-10-25).
+- **`chat/compact.rs`** — **long chats remember their start** (2026-10-25):
+  the older messages summarised in the background after an answer
+  (`after_answer`, `after_thread_turn`), incrementally, by the chat's own
+  model; the summariser's prompt (`prompt`), its input (`request`, `line`,
+  `parts`) and what's kept (`tidy`); `yap-chat-summary {conversationId,
+  upto}`. [Below](#long-chats-sized-to-the-model-2026-10-25).
 - **`chat/tools.rs`** — the AI Chat tool-calling agent loop: six tools ported
   near-verbatim from OpenWhispr's `services/tools/*` (`search_notes`,
   `get_note`, `create_note`, `update_note`, `list_folders`,
@@ -498,7 +528,9 @@ The AI Chat surface (conversations, the tool-calling loop and its note tools) an
   conversation chosen first, then "Open Teams" — or "Yes." to Yap's "Did
   you mean …?" — needs no model (`apps::plan_for`, below: opened,
   "Opening Microsoft Teams." said); the turn goes through `chat_turn` with
-  scope "assistant" (8 history messages, not 19); otherwise no Chat model
+  scope "assistant" (its own smaller history budget, `budget::Kind::Assistant`:
+  35% of the context, at most 6K tokens, with the conversation's summary
+  when it has one); otherwise no Chat model
   (`turn::resolve_chat_endpoint` errs) → the `assistantNoModel` alert
   with **Open settings** (`alert::OPEN_AI_SETTINGS` → Language Models →
   Chat & Voice Assistant; a model that fails → `assistantFailed`, the
@@ -809,25 +841,28 @@ open conversation uses up the Chat model's context.
 
 - **`ai/usage/context.rs`** — `chat_context {conversationId}` → `{used,
   estimate, lastAnswer, perSecond, context, contextKnown, trimmed,
-  messages, model}`. **Used**: the last counted answer's prompt + answer
-  (`ChatMessage.tokens`, the provider's own counts), plus an estimate of
-  any messages after it (a question whose answer failed); with none
-  counted (before the first answer, a model that doesn't say, an older
-  Yap's save), **an estimate** of what the next question would send
-  (`estimate_next`: the instructions — about 300 tokens, and a tool
-  model's instructions and note tools' schemas, `tools::tool_prompt_chars`
-  — and the history window as `chats::history_messages` sends it, about
-  four characters a token). **The context** of the model the chip names
-  (`ai_model::target`, so a switch follows): the on-device model's
-  (`local_llm::context::context_now`, what the sidecar serves), a
-  self-hosted server's word (Ollama, LM Studio:
-  `model_catalog::server_context_here`), a cloud model's from its
-  provider's list (`model_catalog::listed_model(..).context`); none of
-  those: the provider's usual (`default_context`: Groq 128K, Claude 200K,
-  Gemini 1M, OpenAI and OpenRouter 128K, a server 8K) with `contextKnown`
-  false. **Trimmed**: the next question leaves older messages out
-  (`history_start(len, CHAT_HISTORY) > 0`). Unit-tested (the estimate,
-  the counted answer and what's after it, the window).
+  summarised, messages, questionMax, model}`. **Used**: the last counted
+  answer's prompt + answer (`ChatMessage.tokens`, the provider's own
+  counts), plus an estimate of any messages after it (a question whose
+  answer failed); with none counted (before the first answer, a model
+  that doesn't say, an older Yap's save) — or **a summary written after
+  it** (`ChatSummary.after`: the next request is smaller, so the ring
+  drops) — **an estimate** of what the next question sends: the parts a
+  turn measures (`turn::stable_prompt`, the tools' schemas) and the
+  history as the turn chooses it (`budget::plan`: the summary and the
+  messages after it, or the latest that fit), with the same counter
+  (`budget::Counter`). **The context** of the model the chip names
+  (`ai_model::target`, so a switch follows): `budget::context_window` —
+  the on-device model's (`local_llm::context::context_now`, what the
+  sidecar serves), a self-hosted server's word (Ollama, LM Studio,
+  llama.cpp's `/props`: `model_catalog::server_context_here`), a cloud
+  model's from its provider's list (`model_catalog::listed_model(..).context`);
+  none of those: the provider's usual (`budget::default_context`: Groq
+  128K, Claude 200K, Gemini 1M, OpenAI and OpenRouter 128K, a server 8K)
+  with `contextKnown` false. **Summarised**: the next question carries the
+  summary. **Trimmed**: it leaves older messages out with nothing in their
+  place (no summary yet). Unit-tested (the counted answer and what's after
+  it, a newer summary, the estimate).
 - **`ContextRing.svelte`** (`views/chat/`, in the composer's foot): an SVG
   ring (r 7 in 18 px) over `--yap-raised`, filled in `--yap-primary`,
   warmer from 80 % (`--yap-danger` mixed in) and `--yap-danger` from 95 %
@@ -845,11 +880,12 @@ open conversation uses up the Chat model's context.
   context), a bar (`role="meter"`), the percent and the provider, "Last
   answer 400 tokens · 120 tokens/s" (the speed when the server said:
   llama.cpp's timings), a line when it's an estimate or the context is
-  approximate; **from 80 %** one quiet line with **New chat** — "Long chat:
+  approximate; when the older messages go as their summary, one quiet line
+  "Summarised · the chat stays within the model's context" (no warning);
+  else **from 80 %** one quiet line with **New chat** — "Long chat:
   only the latest messages go to the model. A new chat answers best."
-  when older messages are already left out (Yap trims by message count,
-  `CHAT_HISTORY`), else "Nearly full: a long answer may be cut short. A
-  new chat answers best."; **Today** and **Last 7 days** (`ai_usage_summary`,
+  when older messages are already left out (no summary yet), else "Nearly
+  full: a long answer may be cut short. A new chat answers best."; **Today** and **Last 7 days** (`ai_usage_summary`,
   re-read on `yap-ai-usage`) — the tokens, the top 3 models (name ·
   where, a thin bar, tokens; "free, on your PC" on this PC, "≈ $0.02" for
   a cloud model with a known price, "no price known" otherwise), "4.4K on
@@ -859,3 +895,119 @@ open conversation uses up the Chat model's context.
   Insights' AI usage card in view (ControlPanel's `onopenusage`,
   `InsightsView focus="ai-usage"`; [frontend.md](./frontend.md)).
 - E2e `chat-usage.spec.js` ([e2e-tests.md](../e2e-tests.md)).
+
+## Long chats, sized to the model (2026-10-25)
+
+The maintainer: "something people would pay money for". Until this day Chat
+sent the last 19 messages whatever the model — an 8K model on this PC could
+overflow, a 64K or a 1M one forgot a long chat's start for nothing — and a
+request too long came back as "Couldn't send · HTTP 400 {…}". Now a chat
+sizes itself to its model, remembers its start, and never hits a wall with
+a technical error.
+
+**What a long chat does, turn by turn** (`turn::chat_turn`):
+
+1. **The context** of the model the question goes to (`budget::context_window`,
+   the ring's too): the on-device model's real `n_ctx` (the sidecar's log,
+   else what it starts with), a self-hosted server's word (Ollama, LM
+   Studio, llama.cpp's `/props`), a cloud model's from its provider's list,
+   else the provider's usual. A model evaluation may stand in a small one
+   (`YAP_EVAL_CONTEXT`).
+2. **The question alone** must fit: measured against the parts that stay
+   (`turn::stable_prompt` — the persona, the instructions, the prompt's end,
+   the clock — and the tools' schemas, `tools::offered_tools`). Too long
+   (a huge paste): **not sent and not saved**, the plain sentence back —
+   "That's too long for Qwen3.5 4B (64K context)." The Chat view says so
+   before sending (below).
+3. **The budget** (`budget::budget`): the parts measured for this turn —
+   the system prompt as built, the `<context>` block, the schemas — and
+   room for the answer (an eighth of the context, 512 to 8K) and, for a
+   model with tools, the tools' results (an eighth of the request, 512 to
+   16K); the history and the question get what's left, at most **70%** of
+   the context (**35%**, at most 6K tokens, for the Voice Assistant: every
+   tool step sends it again; 70% for a note's Ask thread, beside the note).
+   A plan that counts tokens a minute caps the whole request at 90% of it
+   (`rate_cap`: Groq's `x-ratelimit-limit-tokens` once it said, its free
+   plan's 8,000 until then; a 413 "Request too large … tokens per minute"
+   teaches it too).
+4. **Counting** (`budget::Counter`): about four characters a token with a
+   margin (`estimate`: ASCII at 3.6, any other character one — accents,
+   other alphabets, CJK), each message +6; a long text (≥ 1,500 characters)
+   sent to a llama.cpp server on this PC (the on-device model once loaded,
+   a self-hosted one) is counted by its own `/tokenize`, cached; a server
+   without it isn't asked again. An earlier web answer's replayed search
+   counts (`chats::history_message`), and the newest three screenshots sent
+   again (1,000 tokens each).
+5. **The window** (`budget::plan`): every message when they fit — with a
+   summary written, only while they take half the room or less (a much
+   bigger model since); else **the summary and the messages after it**;
+   else the latest that fit (and the summary beside them when it fits).
+   The start moves 6 messages at a time (the Voice Assistant's 4), so a
+   hybrid local model re-reads only from the first change. The summary goes
+   in the system prompt before its end ("Earlier in this chat (Yap's notes
+   on the older messages, which aren't shown; the latest messages follow in
+   full): …", `compact::block`). Logged: counts and tokens only.
+6. **Mid-turn**: each tool result (a page read, a note, search passages,
+   Yap's own search for the model) is trimmed to what the request has left
+   (`budget::fit_result`, `agent.rs` `Room`): its longest texts shortened
+   and marked "… [cut to fit the model's context]", then its longest lists
+   halved, with a note for the model; no room at all — "no room left …
+   answer with what you have". The existing bounds stay (`get_note` 2,000
+   tokens, `read_note` pages of 3,000, `search_in_note` ~4k characters,
+   `read_page` parts): this is the last line for a small context.
+7. **A provider's "too long"** (`llm::says_too_long`, every provider's own
+   words: llama.cpp `exceed_context_size_error` / "exceeds the available
+   context size", OpenAI `context_length_exceeded`, Anthropic "prompt is
+   too long" / "exceed context limit", Groq "reduce the length of the
+   messages", Gemini "exceeds the maximum number of tokens", OpenRouter
+   "maximum context length", LM Studio "context length of only") comes back
+   as `llm::CONTEXT_EXCEEDED`, said plainly by `budget::plain_error` — never
+   the JSON. Chat, the Voice Assistant (its alert), the Notes view's bar and
+   the notepad's sheet all say it this way.
+8. **After the answer** (`compact::after_answer`, in the background; a model
+   evaluation waits for it): when the history fills **75%** of its room —
+   or the ring is 75% full and the history fills half the room — and
+   there's enough older to be worth it (a tenth of the room, ≥ 300
+   tokens), the older messages are **summarised**, keeping the latest ~40%
+   of the room whole (at least the last turn, starting on a question):
+   `budget::due`. **Incremental**: from the summary there is (covering
+   `..upto`) and the newly dropped messages, never the whole chat again; a
+   long stretch in parts that fit half the context, a paste read by its
+   start and end. **The model**: the chat's own (it already reads the
+   history it summarises). A model on this PC waits out a dictation and
+   gives way to the next question (dropped, tried after the next answer).
+   A failure leaves the window in charge; not tried again for a minute.
+   **Kept** on the conversation (`chats.json` `summary`), only over the one
+   it extends; `yap-chat-summary` to every window.
+9. **The prompt** (`compact::prompt`, ~180 tokens, short and firm for small
+   local models): keep every fact the user gave — names, numbers, amounts,
+   dates, places, decisions, preferences — exactly; what was asked and
+   told; what's open; "- " lines; nothing added; the chat's language; at
+   most N words (15% of the room, 250 to 1,500 tokens).
+
+**In the Chat view**:
+
+- **The divider** (`ChatThread.svelte`) before the first message the
+  summary doesn't cover: a thin rule, "Earlier messages summarised to keep
+  this chat within the model's memory · **Show summary**"; Show summary
+  opens it read-only (`SummaryDialog.svelte`, its own chunk: the notes, what
+  they cover, "Summarised by GPT-OSS 20B · Groq"; Esc gives the focus back).
+  It follows `yap-chat-summary` live.
+- **The ring drops** (the next request's estimate, above) and its panel says
+  "Summarised · the chat stays within the model's context".
+- **A paste too long** (`chat_limits` → `{questionMax, context, label,
+  tooLong, more}`, read on opening and when the model or its context
+  changes; the page counts with Rust's estimate, `chatBudget.js`): a line
+  over the box — "That's too long for GPT-OSS 20B (8K context). It's about
+  11.1K tokens; there's room for 3.7K." — Send and Enter wait.
+- **A provider's "too long"** after sending: the same line with Rust's
+  sentence, the question back in the box. **Buttons**: **New chat** (in a
+  chat with messages; the question goes with it), **Give it more room**
+  (the on-device model only, when a bigger context fits the graphics card:
+  `turn::more_room` over `gguf.rs`' estimates — `local_llm_set_context` to
+  the next size, the toast "Giving Qwen3.5 4B 16K of context"), **Shorten
+  what you pasted** (the message selected in the box).
+
+E2e `chat-long.spec.js` and `chat-room.spec.js`
+([e2e-tests.md](../e2e-tests.md)); the model evaluations' `chat-long-memory`
+([model-evals.md](../model-evals.md#long-chats-the-window-and-the-summary-25-oct-2026)).

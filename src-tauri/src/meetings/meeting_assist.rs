@@ -181,9 +181,13 @@ async fn streamed_answer(
 
 /// "What did I miss?" for meeting `note_id`: what was said since transcript
 /// segment `since` (where the person last looked). With `question`, a
-/// follow-up asked in the same chat, answered from the meeting so far.
+/// follow-up asked in the same chat, answered from the meeting so far —
+/// with the thread's earlier turns (`conversationId`, `note_chats.rs`),
+/// sized to the model (its summary and the turns after it, or the latest
+/// that fit; a question too long for the model said plainly).
 /// `onStream` / `turnId`: streamed to the sheet, stoppable
 /// ([`streamed_answer`]).
+#[allow(clippy::too_many_arguments)]
 #[tauri::command]
 pub async fn meeting_catch_up(
     app: AppHandle,
@@ -192,10 +196,14 @@ pub async fn meeting_catch_up(
     question: Option<String>,
     on_stream: crate::chat::stream::PageChannel,
     turn_id: Option<String>,
+    conversation_id: Option<u64>,
 ) -> Result<CatchUp, String> {
     let note = crate::notes::get(note_id).ok_or("Note not found")?;
     let upto = note.transcript.len();
     let question = question.map(|q| q.trim().to_string()).filter(|q| !q.is_empty());
+    let cfg = crate::config::load();
+    let ep = summary::resolve_endpoint(&cfg)?;
+    let mut said = None;
     let messages = match &question {
         None => match summary::catch_up_input(&note, since) {
             Some(input) => summary::catch_up_messages(&input),
@@ -203,13 +211,25 @@ pub async fn meeting_catch_up(
                 return Ok(CatchUp { answer: NOTHING_NEW.to_string(), nothing_new: true, upto, stopped: false });
             }
         },
-        Some(q) => summary::meeting_ask_messages(&note, q),
+        Some(q) => {
+            crate::chat::compact::turn_started();
+            let asked = summary::meeting_ask_messages(&note, q);
+            let call = crate::chat::note_chats::Call { provider: &ep.provider, model: &ep.model, base_url: &ep.base_url };
+            let fixed: String = asked.as_array().into_iter().flatten().map(crate::chat::budget::message_text).collect::<Vec<_>>().join("\n");
+            let thread = crate::chat::note_chats::history_for(note_id, conversation_id, call, &fixed, q).await?;
+            let messages = crate::chat::note_chats::with_thread(asked, &thread);
+            said = Some((thread.label, thread.context));
+            messages
+        }
     };
-    let cfg = crate::config::load();
-    let ep = summary::resolve_endpoint(&cfg)?;
     let opts = ep.options(summary::CATCH_UP_REPLY_TOKENS, 0.3);
     let messages = crate::memory::with_helper_block(messages, &cfg);
-    let (answer, stopped) = streamed_answer(&app, &ep, messages, &opts, &on_stream, turn_id.as_deref()).await?;
+    let (answer, stopped) = streamed_answer(&app, &ep, messages, &opts, &on_stream, turn_id.as_deref())
+        .await
+        .map_err(|e| match &said {
+            Some((label, context)) => crate::chat::budget::plain_error(e, label, *context, &ep.provider),
+            None => e,
+        })?;
     let answer = answer.trim().to_string();
     if answer.is_empty() {
         return Err("The model returned an empty answer".to_string());

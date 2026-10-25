@@ -184,7 +184,18 @@ The language-model side: the OpenAI-compatible client and its prompts, the on-de
   s."), not as a raw `HTTP 429` body. A 400 about the temperature is asked
   again without one; a 400 about reasoning on a call with tools (OpenAI's
   GPT-6 take tools on Chat Completions only with reasoning off) again with
-  `reasoning_effort: "none"`, once each.
+  `reasoning_effort: "none"`, once each. **Too long for the model's
+  context** (2026-10-25, `says_too_long`: llama.cpp's
+  `exceed_context_size_error`, OpenAI's `context_length_exceeded`,
+  Anthropic's "prompt is too long", Groq's "reduce the length of the
+  messages", Gemini's "exceeds the maximum number of tokens", OpenRouter's
+  "maximum context length", LM Studio's "context length of only") fails as
+  `CONTEXT_EXCEEDED`, and a request bigger than the key's tokens a minute
+  (Groq's 413) as `TOO_MUCH_A_MINUTE` + the limit: `chat/budget.rs` says
+  them plainly ("That's too long for Qwen3.5 4B (64K context)."). A cloud
+  provider's `x-ratelimit-limit-tokens` (its tokens a minute for this key)
+  is heard on every answer (`budget::heard_rate_limit`): Chat keeps a
+  request under it ([chat-and-assistant.md](./chat-and-assistant.md#long-chats-sized-to-the-model-2026-10-25)).
 - **`ai/cleanup_styles.rs`** — **styles by app** (2026-10-24; Wispr Flow's
   styles per kind of app and OpenWhispr's Tone & Style of 21 Oct, by
   behaviour; the market analysis' #5): cleanup that sounds right where you
@@ -775,6 +786,8 @@ The language-model side: the OpenAI-compatible client and its prompts, the on-de
   minute in memory, plus what the server says of each model's **context**
   (`server_contexts`, read-only, best-effort, 3 s each: LM Studio's `GET
   /api/v0/models` `max_context_length` / `loaded_context_length`, else
+  llama.cpp's own `GET /props` (`default_generation_settings.n_ctx`, the
+  context it serves its one model with; 2026-10-25), else
   Ollama's `GET /api/ps` (a loaded model's `context_length`) and `POST
   /api/show` per model, ≤ 16 (`model_info.<arch>.context_length`, a
   Modelfile's `num_ctx`); `ListView.contexts [{id, max, set, app}]`; a
