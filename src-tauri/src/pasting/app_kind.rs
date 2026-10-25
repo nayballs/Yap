@@ -82,6 +82,15 @@ pub enum Host {
     /// An editor's integrated terminal (VS Code, Cursor, Windsurf…): the
     /// focused element is xterm.js's input ([`editor_terminal`]).
     Editor,
+    /// A terminal in a browser page — vscode.dev, github.dev and
+    /// Codespaces' terminal, a cloud shell, JupyterLab's —: xterm.js's input
+    /// has the focus ([`web_terminal_page`]).
+    Browser,
+    /// Visual Studio's terminal: Windows Terminal's own control
+    /// (`Microsoft.Terminal.Wpf`, its window class `HwndTerminalClass`)
+    /// has the focus, in Visual Studio or any app that hosts it
+    /// ([`terminal_control`]).
+    VisualStudio,
 }
 
 impl Host {
@@ -100,6 +109,8 @@ impl Host {
             Host::Rio => "Rio",
             Host::ConEmu => "ConEmu",
             Host::Editor => "an editor's terminal",
+            Host::Browser => "a browser's terminal",
+            Host::VisualStudio => "Visual Studio's terminal",
         }
     }
 
@@ -116,13 +127,23 @@ impl Host {
     /// - **Ctrl+V**: Windows Terminal (its default `paste` bindings include
     ///   it), a console window ("Enable Ctrl key shortcuts", on since Windows
     ///   10), ConEmu/Cmder (Ctrl+V pastes it all; Shift+Ins only the first
-    ///   line), VS Code's terminal (`workbench.action.terminal.paste`), and
-    ///   any terminal whose keys Yap doesn't know — as before.
+    ///   line), VS Code's terminal (`workbench.action.terminal.paste`), a
+    ///   browser's (the page's own paste event, which xterm.js takes),
+    ///   Visual Studio's (its terminal binds Ctrl+V to paste), and any
+    ///   terminal whose keys Yap doesn't know — as before.
+    ///
+    /// A classic console window (conhost) gets no keys at all: its own Edit
+    /// → Paste ([`PasteKey::ConsoleMenu`]). Its Ctrl+V pastes only for a
+    /// program reading lines (cmd, PowerShell); one that reads the keyboard
+    /// raw — Claude Code, Codex, vim — gets a ^V instead (Shift+Insert an
+    /// escape sequence), where the console's own paste reaches it, in
+    /// bracketed paste when it asked for it (the robot, 2026-10-25).
     pub fn paste_key(self) -> PasteKey {
         match self {
             Host::Mintty | Host::Putty | Host::MobaXterm => PasteKey::ShiftInsert,
             Host::Alacritty | Host::WezTerm | Host::Tabby | Host::Hyper | Host::Rio => PasteKey::CtrlShiftV,
-            Host::WindowsTerminal | Host::Console | Host::ConEmu | Host::Editor => PasteKey::CtrlV,
+            Host::Console => PasteKey::ConsoleMenu,
+            Host::WindowsTerminal | Host::ConEmu | Host::Editor | Host::Browser | Host::VisualStudio => PasteKey::CtrlV,
         }
     }
 }
@@ -134,6 +155,10 @@ pub enum PasteKey {
     CtrlV,
     ShiftInsert,
     CtrlShiftV,
+    /// A classic console window's own Edit → Paste (its menu command,
+    /// `WM_COMMAND` 0xFFF1 to the window): no keys. Ctrl+V when the window
+    /// turns out not to be one (a terminal known only by its name).
+    ConsoleMenu,
 }
 
 impl PasteKey {
@@ -142,6 +167,7 @@ impl PasteKey {
             PasteKey::CtrlV => "Ctrl+V",
             PasteKey::ShiftInsert => "Shift+Insert",
             PasteKey::CtrlShiftV => "Ctrl+Shift+V",
+            PasteKey::ConsoleMenu => "the console's Paste",
         }
     }
 }
@@ -349,6 +375,51 @@ pub fn editor_terminal(class: &str, name: &str) -> Option<Terminal> {
         coding_cli: cli,
         host: Host::Editor,
     })
+}
+
+/// Words in a browser window's title that say its page may hold a terminal
+/// (lower case): VS Code in the browser (vscode.dev, github.dev,
+/// Codespaces, code-server, Gitpod), notebooks, cloud shells and online
+/// IDEs. Only then is UI Automation asked what has the focus.
+const WEB_TERMINAL_PAGES: &[&str] = &[
+    "visual studio code",
+    "vscode.dev",
+    "github.dev",
+    "codespaces",
+    "code-server",
+    "gitpod",
+    "jupyter",
+    "colab",
+    "cloud shell",
+    "cloudshell",
+    "replit",
+    "stackblitz",
+    "codesandbox",
+    "terminal",
+    "shell",
+    "ssh",
+    "console",
+];
+
+/// A browser window (`stem`: its process, lower case, no ".exe") whose
+/// title names a page that may hold a terminal ([`WEB_TERMINAL_PAGES`]).
+pub fn web_terminal_page(stem: &str, title: &str) -> bool {
+    if !is_browser(stem) {
+        return false;
+    }
+    let title = title.to_lowercase();
+    WEB_TERMINAL_PAGES.iter().any(|w| title.contains(w))
+}
+
+/// Windows Terminal's control as other apps host it (`Microsoft.Terminal.Wpf`'s
+/// `HwndTerminal`: Visual Studio's terminal): its window's class. Other
+/// apps' focused child windows that are a terminal.
+const TERMINAL_CONTROL_CLASSES: &[(&str, Host)] = &[("HwndTerminalClass", Host::VisualStudio), ("VirtualConsoleClass", Host::ConEmu)];
+
+/// The window with the keyboard focus in an app (`focus_class`: its class,
+/// from Win32, no UI Automation) is a terminal control: which one.
+pub fn terminal_control(focus_class: &str) -> Option<Host> {
+    TERMINAL_CONTROL_CLASSES.iter().find(|(c, _)| *c == focus_class).map(|&(_, host)| host)
 }
 
 /// The title in an integrated terminal's label: what follows "Terminal
@@ -622,11 +693,27 @@ pub fn of_window(hwnd: Option<isize>) -> AppKind {
     #[cfg(windows)]
     {
         let exe = crate::pasting::text_injector::app_name_for(Some(hwnd));
-        let mut kind = classify(exe.as_deref(), &win::class(hwnd), &win::title(hwnd));
-        if kind == AppKind::Other && is_editor(&exe_stem(exe.as_deref().unwrap_or(""))) {
+        let stem = exe_stem(exe.as_deref().unwrap_or(""));
+        let title = win::title(hwnd);
+        let mut kind = classify(exe.as_deref(), &win::class(hwnd), &title);
+        let focused_xterm = || {
             let focused = crate::pasting::text_injector::window_process(hwnd).and_then(crate::pasting::selection::focused_element);
-            if let Some(t) = focused.and_then(|(class, name)| editor_terminal(&class, &name)) {
+            focused.and_then(|(class, name)| editor_terminal(&class, &name))
+        };
+        if kind == AppKind::Other && is_editor(&stem) {
+            if let Some(t) = focused_xterm() {
                 kind = AppKind::Terminal(t);
+            }
+        } else if kind == AppKind::Other && web_terminal_page(&stem, &title) {
+            // vscode.dev, a cloud shell…: xterm.js's input in the page.
+            if let Some(t) = focused_xterm() {
+                kind = AppKind::Terminal(Terminal { host: Host::Browser, ..t });
+            }
+        } else if kind == AppKind::Other {
+            // Visual Studio's terminal (Windows Terminal's control), ConEmu
+            // inside another app: the window with the focus says.
+            if let Some(host) = terminal_control(&win::focus_class(hwnd)) {
+                kind = AppKind::Terminal(Terminal { coding_cli: None, host });
             }
         }
         tracing::debug!(app = exe.as_deref().unwrap_or("?"), kind = %kind.describe(), "The dictation's app");
@@ -679,6 +766,25 @@ mod win {
         let mut buf = [0u16; 256];
         let n = unsafe { GetClassNameW(hwnd as *mut c_void, buf.as_mut_ptr(), buf.len() as i32) };
         String::from_utf16_lossy(&buf[..n.clamp(0, buf.len() as i32) as usize])
+    }
+
+    /// The class of the window with the keyboard focus in `hwnd`'s thread
+    /// (`GetGUIThreadInfo`: no message to the app), empty when none.
+    pub fn focus_class(hwnd: isize) -> String {
+        use windows::Win32::Foundation::HWND;
+        use windows::Win32::UI::WindowsAndMessaging::{GetGUIThreadInfo, GetWindowThreadProcessId, GUITHREADINFO};
+        unsafe {
+            let thread = GetWindowThreadProcessId(HWND(hwnd as *mut c_void), None);
+            if thread == 0 {
+                return String::new();
+            }
+            let mut info: GUITHREADINFO = std::mem::zeroed();
+            info.cbSize = std::mem::size_of::<GUITHREADINFO>() as u32;
+            if GetGUIThreadInfo(thread, &mut info).is_err() || info.hwndFocus.is_invalid() {
+                return String::new();
+            }
+            class(info.hwndFocus.0 as isize)
+        }
     }
 }
 
@@ -1021,10 +1127,13 @@ mod tests {
         assert_eq!(key("rio.exe", "Window Class"), PasteKey::CtrlShiftV);
         // Ctrl+V where it pastes, and wherever Yap doesn't know better.
         assert_eq!(key("WindowsTerminal.exe", "CASCADIA_HOSTING_WINDOW_CLASS"), PasteKey::CtrlV);
-        assert_eq!(key("cmd.exe", "ConsoleWindowClass"), PasteKey::CtrlV);
-        assert_eq!(key("claude.exe", "ConsoleWindowClass"), PasteKey::CtrlV);
         assert_eq!(key("ConEmu64.exe", "VirtualConsoleClass"), PasteKey::CtrlV);
-        assert_eq!(key("warp.exe", "Window Class"), PasteKey::CtrlV);
+        // A classic console window: its own Edit → Paste (a raw keyboard
+        // program there would get Ctrl+V as ^V); Ctrl+V at paste time when
+        // the window isn't one after all (a terminal known by name).
+        assert_eq!(key("cmd.exe", "ConsoleWindowClass"), PasteKey::ConsoleMenu);
+        assert_eq!(key("claude.exe", "ConsoleWindowClass"), PasteKey::ConsoleMenu);
+        assert_eq!(key("warp.exe", "Window Class"), PasteKey::ConsoleMenu);
         assert_eq!(on(None, Host::Editor).paste_key(), PasteKey::CtrlV);
         // Every other app.
         assert_eq!(key("notepad.exe", "Notepad"), PasteKey::CtrlV);
@@ -1078,6 +1187,36 @@ mod tests {
         assert_eq!(editor_terminal("xterm-helper-textarea-ish", "Terminal 1, pwsh"), None);
         assert_eq!(on(None, Host::Editor).describe(), "terminal (an editor's terminal)");
         assert_eq!(on(Some(CodingCli::ClaudeCode), Host::Editor).describe(), "terminal (Claude Code in an editor's terminal)");
+    }
+
+    #[test]
+    fn a_browsers_terminal_page_and_visual_studios_terminal() {
+        // Pages that may hold a terminal: only these are asked what has the focus.
+        for title in [
+            "main.rs - yap [Codespaces: fluffy-fiesta] - Visual Studio Code - Google Chrome",
+            "README.md - github.dev - Personal - Microsoft\u{200b} Edge",
+            "Welcome - Visual Studio Code - vscode.dev",
+            "Terminal 1 - JupyterLab - Google Chrome",
+            "Cloud Shell - Google Chrome",
+        ] {
+            assert!(web_terminal_page("chrome", title), "{title}");
+        }
+        assert!(!web_terminal_page("chrome", "Inbox (3) - sam@example.com - Gmail - Google Chrome"));
+        assert!(!web_terminal_page("notepad", "terminal notes.txt - Notepad"));
+        // xterm.js's input in the page: a terminal, Ctrl+V, its coding CLI by VS Code's label.
+        let t = editor_terminal("xterm-helper-textarea", "Terminal 1, claude").unwrap();
+        let web = AppKind::Terminal(Terminal { host: Host::Browser, ..t });
+        assert_eq!(web.paste_key(), PasteKey::CtrlV);
+        assert_eq!(web.describe(), "terminal (Claude Code in a browser's terminal)");
+        if let AppKind::Terminal(t) = web {
+            assert!(!t.keeps_lines(), "one line in a browser's terminal until it's known safe");
+        }
+        // Windows Terminal's control in Visual Studio (or any app hosting it), ConEmu inside another app.
+        assert_eq!(terminal_control("HwndTerminalClass"), Some(Host::VisualStudio));
+        assert_eq!(terminal_control("VirtualConsoleClass"), Some(Host::ConEmu));
+        assert_eq!(terminal_control("WindowsForms10.EDIT.app.0.141b42a_r6_ad1"), None);
+        assert_eq!(terminal_control(""), None);
+        assert_eq!(Host::VisualStudio.paste_key(), PasteKey::CtrlV);
     }
 
     #[test]

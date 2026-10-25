@@ -3,8 +3,13 @@
 // the Yap bar, or in a Windows notification).
 //
 // `yap-alert` { kind, icon, title, body, action: { id, label } | null, timeoutMs }:
-//   "pasteBlocked" — the app runs as administrator, so the dictation is on
-//     the clipboard instead: "Your text is copied: press Ctrl+V" (pasting/elevated.rs);
+//   "pasteBlocked" — the dictation is on the clipboard instead of pasted:
+//     the app runs as administrator ("Your text is copied: press Ctrl+V",
+//     pasting/elevated.rs), Windows didn't take the keys ("Couldn't paste ·
+//     it's copied, press Ctrl+V") or nothing that takes text had the focus
+//     ("Select a text box first"): pasting/text_injector.rs `Left`;
+//   "clipboardBusy" — edit mode's Ctrl+C left the clipboard alone, or
+//     couldn't put it back (pasting/text_injector.rs `Trouble`);
 //   "micBlocked" — Windows' privacy settings keep desktop apps off the
 //     microphone, with Open settings (dictation/mic_privacy.rs);
 //   "configReset" — config.json couldn't be read: set aside and the

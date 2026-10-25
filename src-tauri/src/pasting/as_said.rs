@@ -651,26 +651,12 @@ pub fn swap_soon(app: &AppHandle) {
     });
 }
 
-/// Wait (≤ 1.5 s) until Ctrl, Shift, Alt and Win are all up (also before
-/// a saved transform reads or pastes, `transforms.rs`).
+/// Wait (≤ 1.5 s) until the person has let go of Ctrl, Shift, Alt and Win
+/// (also before a saved transform reads or pastes, `transforms.rs`). A key
+/// only stuck down isn't waited for: Yap's keys let go of it
+/// (`modifiers.rs`).
 pub(crate) fn wait_for_modifiers_up() {
-    #[cfg(windows)]
-    {
-        #[link(name = "user32")]
-        extern "system" {
-            fn GetAsyncKeyState(vkey: i32) -> i16;
-        }
-        // VK_SHIFT, VK_CONTROL, VK_MENU (Alt), VK_LWIN, VK_RWIN.
-        const MODIFIERS: [i32; 5] = [0x10, 0x11, 0x12, 0x5B, 0x5C];
-        let started = Instant::now();
-        while started.elapsed() < Duration::from_millis(1_500) {
-            let down = MODIFIERS.iter().any(|&vk| unsafe { GetAsyncKeyState(vk) } as u16 & 0x8000 != 0);
-            if !down {
-                return;
-            }
-            std::thread::sleep(Duration::from_millis(20));
-        }
-    }
+    crate::pasting::modifiers::wait_until_let_go(Duration::from_millis(1_500));
 }
 
 /// The bar's "Cleaned up · Use what I said" goes (unless a dictation took
@@ -726,7 +712,7 @@ fn replace_in_field(p: &Pasted, with: &dyn Fn(&str) -> String, anywhere: bool) -
     ))?;
     match delivery {
         crate::pasting::text_injector::Delivery::Pasted | crate::pasting::text_injector::Delivery::Typed => {}
-        crate::pasting::text_injector::Delivery::LeftOnClipboard | crate::pasting::text_injector::Delivery::WindowGone => {
+        crate::pasting::text_injector::Delivery::LeftOnClipboard(_) | crate::pasting::text_injector::Delivery::WindowGone => {
             return Ok(Put::OnClipboard);
         }
     }

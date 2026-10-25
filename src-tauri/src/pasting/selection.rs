@@ -527,6 +527,157 @@ pub fn focused_element(pid: u32) -> Option<(String, String)> {
     }
 }
 
+// ---- Does anything that takes text have the focus? ----
+
+/// Whether what has the focus takes text ([`focus_editable`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Editable {
+    Yes,
+    /// UI Automation says plainly that nothing there takes text: a button,
+    /// a list item, a web page with no box focused, read-only text.
+    No,
+    /// Can't tell (a game, a canvas, an app UI Automation can't see, a
+    /// timeout, the focus in another app): treated as yes.
+    Unknown,
+}
+
+/// What UI Automation says about one element on the way up from the focus.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct FocusFacts {
+    pub pid: u32,
+    /// Its control type (`UIA_*ControlTypeId`).
+    pub control_type: i32,
+    /// The UI framework it's from ("Win32", "WinForm", "WPF", "XAML",
+    /// "DirectUI", "Chrome", "Gecko"…; empty: it doesn't say).
+    pub framework: String,
+    /// A TextPattern, and whether its text is read-only.
+    pub text: bool,
+    pub text_read_only: bool,
+    /// A ValuePattern (any control: a spreadsheet's cell takes a paste
+    /// through one), and whether it's read-only.
+    pub value: bool,
+    pub value_read_only: bool,
+    /// The legacy IAccessible state says read-only.
+    pub legacy_read_only: bool,
+}
+
+const UIA_BUTTON: i32 = 50000;
+const UIA_CHECK_BOX: i32 = 50002;
+const UIA_EDIT: i32 = 50004;
+const UIA_HYPERLINK: i32 = 50005;
+const UIA_IMAGE: i32 = 50006;
+const UIA_LIST_ITEM: i32 = 50007;
+const UIA_LIST: i32 = 50008;
+const UIA_MENU: i32 = 50009;
+const UIA_MENU_BAR: i32 = 50010;
+const UIA_MENU_ITEM: i32 = 50011;
+const UIA_RADIO_BUTTON: i32 = 50013;
+const UIA_SCROLL_BAR: i32 = 50014;
+const UIA_SLIDER: i32 = 50015;
+const UIA_TAB: i32 = 50018;
+const UIA_TAB_ITEM: i32 = 50019;
+const UIA_TOOL_BAR: i32 = 50021;
+const UIA_TREE: i32 = 50023;
+const UIA_TREE_ITEM: i32 = 50024;
+const UIA_DOCUMENT: i32 = 50030;
+const UIA_SPLIT_BUTTON: i32 = 50031;
+const UIA_HEADER_ITEM: i32 = 50035;
+const UIA_TITLE_BAR: i32 = 50037;
+
+/// Controls that never take typed text, whatever they say.
+const NOT_TEXT: [i32; 20] = [
+    UIA_BUTTON,
+    UIA_CHECK_BOX,
+    UIA_HYPERLINK,
+    UIA_IMAGE,
+    UIA_LIST_ITEM,
+    UIA_LIST,
+    UIA_MENU,
+    UIA_MENU_BAR,
+    UIA_MENU_ITEM,
+    UIA_RADIO_BUTTON,
+    UIA_SCROLL_BAR,
+    UIA_SLIDER,
+    UIA_TAB,
+    UIA_TAB_ITEM,
+    UIA_TOOL_BAR,
+    UIA_TREE,
+    UIA_TREE_ITEM,
+    UIA_SPLIT_BUTTON,
+    UIA_HEADER_ITEM,
+    UIA_TITLE_BAR,
+];
+
+/// UI frameworks whose UI Automation shows a text field as one: when
+/// they say the focus is on a button, it is. (A game, a canvas, Java,
+/// Qt… may not: they never count as "no".)
+const PLAIN_FRAMEWORKS: [&str; 7] = ["Win32", "WinForm", "WPF", "XAML", "DirectUI", "Chrome", "Gecko"];
+
+impl FocusFacts {
+    /// It takes text: a TextPattern or a ValuePattern that isn't
+    /// read-only, or an edit control that doesn't say it is.
+    fn takes_text(&self) -> bool {
+        let read_only = self.legacy_read_only;
+        (self.text && !self.text_read_only && !read_only)
+            || (self.value && !self.value_read_only && !read_only)
+            || (self.control_type == UIA_EDIT && !read_only && !self.value_read_only && !self.text_read_only)
+    }
+
+    /// Text that says it's read-only (a web page with no box focused, a
+    /// mail being read).
+    fn read_only_text(&self) -> bool {
+        (self.text || self.value || self.control_type == UIA_EDIT)
+            && (self.text_read_only || self.value_read_only || self.legacy_read_only)
+    }
+}
+
+/// Does what has the focus in process `pid` take text? `chain`: the focused
+/// element, then up to [`PARENT_LEVELS`] parents. Yes when it or a parent
+/// in the same app takes text; **no** only when a framework that shows
+/// fields plainly ([`PLAIN_FRAMEWORKS`]) says the focus is on a control
+/// that never takes text ([`NOT_TEXT`]) or on read-only text, with no field
+/// around it; else unknown. Pure.
+pub fn editable(chain: &[FocusFacts], pid: u32) -> Editable {
+    let Some(first) = chain.first() else { return Editable::Unknown };
+    if first.pid != pid {
+        return Editable::Unknown;
+    }
+    if chain.iter().take(PARENT_LEVELS + 1).take_while(|f| f.pid == pid).any(FocusFacts::takes_text) {
+        return Editable::Yes;
+    }
+    if !PLAIN_FRAMEWORKS.contains(&first.framework.as_str()) {
+        return Editable::Unknown;
+    }
+    if NOT_TEXT.contains(&first.control_type) || (matches!(first.control_type, UIA_DOCUMENT | UIA_EDIT) && first.read_only_text()) {
+        Editable::No
+    } else {
+        Editable::Unknown
+    }
+}
+
+/// Does anything that takes text have the focus in `target_hwnd`'s app
+/// (UI Automation, one time-boxed look)? For the paste: "Select a text box
+/// first" only on a plain no. Test mode never reads (unknown); robot mode
+/// only a window the test opened.
+pub fn focus_editable(target_hwnd: Option<isize>) -> Editable {
+    let Some(hwnd) = target_hwnd else { return Editable::Unknown };
+    if !crate::shell::realtest::permits(Some(hwnd)) {
+        return Editable::Unknown;
+    }
+    let Some(pid) = crate::pasting::text_injector::window_process(hwnd) else { return Editable::Unknown };
+    #[cfg(windows)]
+    {
+        let verdict = uia::focus_facts().map_or(Editable::Unknown, |chain| editable(&chain, pid));
+        tracing::debug!(?verdict, "What has the focus takes text?");
+        verdict
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = pid;
+        Editable::Unknown
+    }
+}
+
 // ---- Did the paste land? ----
 
 /// A Win32 edit control's text length and selection (its own units): what
@@ -927,6 +1078,59 @@ pub(crate) mod uia {
             let class = element.CachedClassName().map(|b| b.to_string()).unwrap_or_default();
             let name = element.CachedName().map(|b| b.to_string()).unwrap_or_default();
             Some((class, name))
+        }
+    }
+
+    /// The focused element and up to [`super::PARENT_LEVELS`] parents, as
+    /// [`super::editable`] reads them; each within [`super::CHECK_TIMEOUT_MS`].
+    pub fn focus_facts() -> Option<Vec<super::FocusFacts>> {
+        let _com = Com::init()?;
+        let automation = automation(super::CHECK_TIMEOUT_MS)?;
+        unsafe {
+            let focused = automation.GetFocusedElement().ok()?;
+            let walker = automation.ControlViewWalker().ok();
+            let mut chain = Vec::new();
+            let mut e = focused;
+            loop {
+                let facts = focus_facts_of(&e);
+                let stop = chain.first().is_some_and(|f: &super::FocusFacts| f.pid != facts.pid);
+                chain.push(facts);
+                if stop || chain.len() > super::PARENT_LEVELS {
+                    break;
+                }
+                match walker.as_ref().and_then(|w| w.GetParentElement(&e).ok()) {
+                    Some(parent) => e = parent,
+                    None => break,
+                }
+            }
+            Some(chain)
+        }
+    }
+
+    unsafe fn focus_facts_of(e: &IUIAutomationElement) -> super::FocusFacts {
+        let text = e
+            .GetCurrentPattern(UIA_TextPatternId)
+            .ok()
+            .and_then(|u| u.cast::<IUIAutomationTextPattern>().ok());
+        let text_read_only = text
+            .as_ref()
+            .and_then(|p| p.DocumentRange().ok())
+            .and_then(|r| r.GetAttributeValue(UIA_IsReadOnlyAttributeId).ok())
+            .and_then(|v| bool::try_from(&v).ok())
+            .unwrap_or(false);
+        let value = e
+            .GetCurrentPattern(UIA_ValuePatternId)
+            .ok()
+            .and_then(|u| u.cast::<IUIAutomationValuePattern>().ok());
+        super::FocusFacts {
+            pid: e.CurrentProcessId().map(|p| p as u32).unwrap_or(0),
+            control_type: e.CurrentControlType().map(|t| t.0).unwrap_or(0),
+            framework: e.CurrentFrameworkId().map(|b| b.to_string()).unwrap_or_default(),
+            text: text.is_some(),
+            text_read_only,
+            value: value.is_some(),
+            value_read_only: value.as_ref().is_some_and(|p| p.CurrentIsReadOnly().is_ok_and(|r| r.as_bool())),
+            legacy_read_only: legacy_state(e).is_some_and(super::legacy_read_only),
         }
     }
 
@@ -1646,6 +1850,66 @@ mod paste_check_tests {
 
 /// What a field's text over UI Automation says about whether it's empty
 /// (Chromium's empty boxes, rich editors' placeholders).
+#[cfg(test)]
+mod focus_tests {
+    use super::*;
+
+    fn el(control_type: i32, framework: &str) -> FocusFacts {
+        FocusFacts { pid: 7, control_type, framework: framework.into(), ..Default::default() }
+    }
+
+    #[test]
+    fn a_text_box_or_anything_in_one_takes_text() {
+        let edit = FocusFacts { value: true, ..el(UIA_EDIT, "Win32") };
+        assert_eq!(editable(&[edit], 7), Editable::Yes);
+        // A web text box: a TextPattern that isn't read-only.
+        let web = FocusFacts { text: true, value: true, ..el(UIA_EDIT, "Chrome") };
+        assert_eq!(editable(std::slice::from_ref(&web), 7), Editable::Yes);
+        // A spreadsheet's cell: a ValuePattern that takes a value.
+        let cell = FocusFacts { value: true, ..el(50029, "Win32") };
+        assert_eq!(editable(&[cell], 7), Editable::Yes);
+        // An editor's inner element with no text of its own, in its field.
+        let inner = el(50025, "Chrome");
+        assert_eq!(editable(&[inner, web], 7), Editable::Yes);
+        // An edit control that says nothing more.
+        assert_eq!(editable(&[el(UIA_EDIT, "WinForm")], 7), Editable::Yes);
+    }
+
+    #[test]
+    fn a_button_a_list_or_read_only_text_takes_none() {
+        assert_eq!(editable(&[el(UIA_BUTTON, "WinForm"), el(50032, "WinForm")], 7), Editable::No);
+        assert_eq!(editable(&[el(UIA_LIST_ITEM, "DirectUI")], 7), Editable::No); // Explorer's files
+        assert_eq!(editable(&[el(UIA_BUTTON, "Chrome")], 7), Editable::No);
+        assert_eq!(editable(&[el(UIA_TAB_ITEM, "XAML")], 7), Editable::No);
+        // A web page with no box focused: its document, read-only.
+        let page = FocusFacts { text: true, text_read_only: true, value: true, value_read_only: true, ..el(UIA_DOCUMENT, "Chrome") };
+        assert_eq!(editable(&[page], 7), Editable::No);
+        // A read-only text box, by its legacy state alone.
+        let viewer = FocusFacts { value: true, legacy_read_only: true, ..el(UIA_EDIT, "Win32") };
+        assert_eq!(editable(&[viewer], 7), Editable::No);
+    }
+
+    #[test]
+    fn what_ui_automation_cant_show_is_never_a_no() {
+        // A game or a canvas: a pane or a custom control.
+        assert_eq!(editable(&[el(50033, "Win32")], 7), Editable::Unknown);
+        assert_eq!(editable(&[el(50025, "Chrome")], 7), Editable::Unknown);
+        assert_eq!(editable(&[el(50032, "Win32")], 7), Editable::Unknown);
+        // A framework that may hide its fields (Java, Qt, none said).
+        assert_eq!(editable(&[el(UIA_BUTTON, "")], 7), Editable::Unknown);
+        assert_eq!(editable(&[el(UIA_BUTTON, "Qt")], 7), Editable::Unknown);
+        // A document that doesn't say it's read-only takes text.
+        let doc = FocusFacts { text: true, ..el(UIA_DOCUMENT, "Win32") };
+        assert_eq!(editable(&[doc], 7), Editable::Yes);
+        // The focus in another app, or no answer.
+        assert_eq!(editable(&[FocusFacts { pid: 9, ..el(UIA_BUTTON, "Win32") }], 7), Editable::Unknown);
+        assert_eq!(editable(&[], 7), Editable::Unknown);
+        // A field in another process above a button doesn't count.
+        let other = FocusFacts { pid: 9, value: true, ..el(UIA_EDIT, "Win32") };
+        assert_eq!(editable(&[el(UIA_BUTTON, "Win32"), other], 7), Editable::No);
+    }
+}
+
 #[cfg(test)]
 mod field_text_tests {
     use super::*;

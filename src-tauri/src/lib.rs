@@ -555,6 +555,10 @@ pub fn run() {
             #[cfg(debug_assertions)]
             pasting::elevated::e2e_paste_elevated,
             #[cfg(debug_assertions)]
+            pasting::text_injector::e2e_paste_fails,
+            #[cfg(debug_assertions)]
+            pasting::modifiers::e2e_held_keys,
+            #[cfg(debug_assertions)]
             shell::context_menu::e2e_context_menus,
             #[cfg(debug_assertions)]
             shell::webview_memory::e2e_webview_memory,
@@ -632,6 +636,8 @@ pub fn run() {
             #[cfg(debug_assertions)]
             shell::realtest::commands::realtest_clipboard,
             #[cfg(debug_assertions)]
+            shell::realtest::commands::realtest_copy_selection,
+            #[cfg(debug_assertions)]
             shell::realtest::commands::realtest_other_apps,
             #[cfg(debug_assertions)]
             shell::realtest::commands::realtest_delivered,
@@ -666,6 +672,8 @@ pub fn run() {
             privacy::net::init(&handle);
             // A store's save that fails is said from now on (saving.rs).
             shell::saving::init(&handle);
+            // Edit mode's Ctrl+C says when it left the clipboard alone (text_injector.rs).
+            pasting::text_injector::init(&handle);
             // Temp files a crash mid-write left behind (config.rs): Yap's
             // own names only, off the startup thread.
             let _ = std::thread::Builder::new().name("temp-sweep".into()).spawn(config::sweep_temp_files);

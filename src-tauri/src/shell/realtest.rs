@@ -740,6 +740,25 @@ pub mod commands {
         tauri::async_runtime::spawn_blocking(crate::dictation::mute::robot_view).await.map_err(|e| e.to_string())
     }
 
+    /// Edit mode's Ctrl+C trick in the window in front (`hwnd`, when given,
+    /// must be it): everything on the clipboard kept, Ctrl+C, the selection
+    /// read, the clipboard put back (`text_injector::copy_selection`), and
+    /// what went wrong said as edit mode says it. Returns `{ text, trouble }`
+    /// (`trouble`: "Busy", "CantKeep(…)", "KeysBlocked", "NotRestored").
+    #[tauri::command]
+    pub async fn realtest_copy_selection(hwnd: Option<i64>) -> Result<serde_json::Value, String> {
+        only_robot()?;
+        in_front(hwnd)?;
+        let target = hwnd.map(|h| h as isize);
+        tauri::async_runtime::spawn_blocking(move || {
+            let copied = crate::pasting::text_injector::copy_selection(target, true);
+            let copied = crate::pasting::text_injector::say_trouble(copied);
+            serde_json::json!({ "text": copied.text, "trouble": copied.trouble.map(|t| format!("{t:?}")) })
+        })
+        .await
+        .map_err(|e| format!("the copy task failed: {e}"))
+    }
+
     #[tauri::command]
     pub fn realtest_clipboard(action: String, text: Option<String>) -> Result<serde_json::Value, String> {
         only_robot()?;

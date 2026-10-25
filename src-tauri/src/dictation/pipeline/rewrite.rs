@@ -294,10 +294,10 @@ impl Shared {
                         crate::pasting::as_said::remember(target, read, &out, None, restore_clipboard);
                         report_rewrite(false, &out, "pasted", None);
                     }
-                    // An app running as administrator: on the clipboard.
-                    Ok(crate::pasting::text_injector::Delivery::LeftOnClipboard) => {
+                    // Not pasted (an app running as administrator…): on the clipboard.
+                    Ok(crate::pasting::text_injector::Delivery::LeftOnClipboard(left)) => {
                         crate::pasting::as_said::forget();
-                        crate::notices::alert::show_soon(&self.app, crate::pasting::elevated::alert());
+                        crate::notices::alert::show_soon(&self.app, left.alert());
                     }
                     // An Undo whose window is gone: on the clipboard.
                     Ok(crate::pasting::text_injector::Delivery::WindowGone) => {

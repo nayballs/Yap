@@ -405,19 +405,21 @@ impl Shared {
             )
             .await
             {
-                // An app running as administrator took no keys: the
-                // text is on the clipboard, and the person is told
+                // Not pasted (an app running as administrator, keys
+                // Windows didn't take, no text box with the focus): the
+                // text is on the clipboard, and the person is told once
                 // to paste it (no submit key, no correction watch).
-                Ok(crate::pasting::text_injector::Delivery::LeftOnClipboard) => {
+                Ok(crate::pasting::text_injector::Delivery::LeftOnClipboard(left)) => {
                     // Nothing in the field to swap or rewrite.
                     crate::pasting::as_said::forget();
                     report.left_on_clipboard = true;
-                    not_pasted = Some("Left on the clipboard: the app runs as administrator");
+                    report.left_why = Some(left.code());
+                    not_pasted = Some(left.not_pasted());
                     if submit.is_some() {
-                        tracing::info!("Not pressing the submit key: the app runs as administrator");
+                        tracing::info!(why = left.code(), "Not pressing the submit key: nothing was pasted");
                     }
                     if !self.tell_unplugged(super::unplugged::Outcome::OnClipboard) {
-                        crate::notices::alert::show_soon(&self.app, crate::pasting::elevated::alert());
+                        crate::notices::alert::show_soon(&self.app, left.alert());
                     }
                 }
                 // An Undo whose window is gone (or won't come to the

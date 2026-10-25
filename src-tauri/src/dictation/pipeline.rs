@@ -259,9 +259,12 @@ pub(crate) struct Delivered {
     pub submit: Option<String>,
     /// Why the paste or the key didn't happen (a refusal in robot mode).
     pub error: Option<String>,
-    /// The app runs as administrator: nothing was pasted, the text was
-    /// left on the clipboard (`elevated.rs`).
+    /// Nothing was pasted, the text was left on the clipboard (`elevated.rs`:
+    /// the app runs as administrator, …)…
     pub left_on_clipboard: bool,
+    /// …and why: "admin", "keysBlocked" (Windows didn't take the keys),
+    /// "noTextBox" (nothing that takes text had the focus): `Left::code`.
+    pub left_why: Option<&'static str>,
     /// The keys that pasted it ("Ctrl+V", "Shift+Insert", "Ctrl+Shift+V":
     /// `AppKind::paste_key`).
     pub paste: String,
