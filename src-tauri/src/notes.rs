@@ -915,6 +915,12 @@ pub fn all() -> Vec<Note> {
     with_notes(|notes| notes.clone())
 }
 
+/// Every note, read in place under the store's lock (search: no copy of
+/// a thousand notes per keystroke). `f` mustn't touch the notes store.
+pub fn with_all<R>(f: impl FnOnce(&[Note]) -> R) -> R {
+    with_notes(|notes| f(notes))
+}
+
 /// A cheap fingerprint of every note: a hash of each one's id, last change
 /// and length — whether anything changed since the last look, without a
 /// copy of the notes (meeting search's index, `search/index.rs`).
@@ -1338,10 +1344,12 @@ pub fn delete(id: u64) {
         store.notes.retain(|n| n.id != id);
         save_to_disk(store);
     });
-    // Its meeting audio goes with it (meeting_audio.rs), and its Ask
-    // threads (chat/note_chats.rs).
+    // Its meeting audio goes with it (meeting_audio.rs), its Ask threads
+    // (chat/note_chats.rs) and its vectors in the search index
+    // (search/index.rs).
     crate::meetings::meeting_audio::forget(id);
     crate::chat::chats::delete_for_note(id);
+    crate::search::removed();
 }
 
 #[cfg(test)]

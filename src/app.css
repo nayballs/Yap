@@ -580,3 +580,15 @@ a.md-link {
 a.md-link:hover {
   color: var(--yap-primary-hover);
 }
+
+/* The words a search found, marked where its result opens (core/findWords.js:
+   the CSS Custom Highlight API), and in a result's own line (<mark class="found">). */
+::highlight(yap-found) {
+  background-color: var(--yap-primary-tint);
+  color: inherit;
+}
+mark.found {
+  border-radius: 3px;
+  background: var(--yap-primary-tint);
+  color: inherit;
+}

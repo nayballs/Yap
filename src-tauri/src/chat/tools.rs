@@ -130,7 +130,7 @@ pub const MEMORY_TOOL_INSTRUCTIONS: &[&str] = &[
 ];
 
 /// Added with "Search and reference past chats" on.
-pub const CHATS_TOOL_INSTRUCTIONS: &[&str] = &["Use search_chats when the user refers to an earlier chat with you."];
+pub const CHATS_TOOL_INSTRUCTIONS: &[&str] = &["Use search_chats when the user refers to an earlier chat with you, or to something you said or suggested before."];
 
 /// What a turn offers besides the note tools (`turn::chat_turn`).
 #[derive(Debug, Clone, Copy, Default)]

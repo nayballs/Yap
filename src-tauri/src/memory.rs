@@ -426,11 +426,6 @@ pub fn answer_note() -> Option<String> {
     prompt::answer_note(&items())
 }
 
-/// The people, projects and topics a question is about, as a block for its
-/// context (`None`: nothing matches).
-pub fn relevant_block(question: &str) -> Option<String> {
-    prompt::relevant_block(&items(), question)
-}
 
 /// The block a notepad helper ends with: About you's name and note, then
 /// what Yap remembers about the person. "" when there's nothing.

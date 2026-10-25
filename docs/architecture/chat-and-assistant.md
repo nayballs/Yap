@@ -10,7 +10,15 @@ The AI Chat surface (conversations, the tool-calling loop and its note tools) an
   `Conversation` (title, messages, timestamps) with `list`/`get`/`create`/
   `append`/`delete`/`rename` (`chat_rename`: one trimmed line ≤ 80 chars,
   `updated_ts` untouched so the list order stays; unit tests use an
-  in-memory store per thread, never `chats.json`); `chat_send` (`chat/commands.rs`; the turn itself is
+  in-memory store per thread, never `chats.json`); **archive**
+  (2026-10-25: `Conversation.archived_ts`, 0 when it isn't; `set_archived(ids,
+  on)` in one write, its place in the list kept; `list` leaves archived ones
+  out, `list_archived` has them, archived last first; `latest` — the Voice
+  Assistant's — skips them; a message added to an archived conversation
+  brings it back; commands `chats_archived`, `chat_archive(ids, archived?)`);
+  every save tells search by meaning (`search::changed`), a deletion
+  `search::removed` (its vectors go, [search.md](./search.md)); `with_all` /
+  `stamp` for the index; `chat_send` (`chat/commands.rs`; the turn itself is
   `chat/turn.rs`'s `chat_turn`) creates a conversation on the first message using a first-50-chars title
   rule. An answer keeps its tool
   chips (`ChatMessage.tools`, only written when there are some), so a
@@ -111,7 +119,10 @@ The AI Chat surface (conversations, the tool-calling loop and its note tools) an
   "Search and reference past chats", `search_chats` (`tools::Extra`,
   `run_tool_loop_with`); a model without tools gets "Remember that…" done
   by Yap (`memory::learn::spoken`) and a past chat's lines when the question
-  points back at one (`chats::refers_to_past`). Every turn tells memory's
+  points back at one (`chats::refers_to_past`). The question's memory, and
+  past chats, are found by their words and — search by meaning on — their
+  meaning (`search::library::memory_block`, `past_chats_block`,
+  [search.md](./search.md#beyond-the-meetings-2026-10-25)). Every turn tells memory's
   scheduler (`memory::learn::after_turn`): the chat is read for lasting
   facts once it's gone quiet.
   **Screenshots** (Snip to Chat, [snip.md](./snip.md)): a question may carry
@@ -159,7 +170,12 @@ The AI Chat surface (conversations, the tool-calling loop and its note tools) an
 - **`chat/tools.rs`** — the AI Chat tool-calling agent loop: six tools ported
   near-verbatim from OpenWhispr's `services/tools/*` (`search_notes`,
   `get_note`, `create_note`, `update_note`, `list_folders`,
-  `copy_to_clipboard` — executed locally over `notes.rs`/`arboard`) and
+  `copy_to_clipboard` — executed locally over `notes.rs`/`arboard`;
+  **`search_notes` searches as Ask across meetings does** since 2026-10-25 —
+  passages by BM25 and meaning, the query's dates and voices, each note with
+  the passages that matched: `search_notes_tool`, run by the loop,
+  [search.md](./search.md#beyond-the-meetings-2026-10-25); `search_chats`
+  likewise, by words and meaning) and
   three of Yap's own for **changing part of a note safely** (after the note
   tools of Wispr Flow's live Ask — behaviour only; the pure part is
   **`chat/note_text.rs`**): `search_in_note(note_id, query, field?)` (the lines a
@@ -542,7 +558,10 @@ answer with ■ and a newer question replacing one, the Voice Assistant's
 questions, Snip to Chat and whether the model reads images, spoken replies,
 several picked at once), follows Rust's events while Chat is open, takes
 its keys and shows a screenshot large. Its parts: `ConversationList` (the
-list, its menus, rename in place, the selection bar), `ChatThread` (the
+list, its menus, rename in place, the selection bar, the search box and the
+Archived button; its search results and the archive are
+`ChatLibraryList.svelte`, loaded the first time one shows, over
+`chatLibrary.svelte.js`), `ChatThread` (the
 empty state, "Thinking…") with `ChatMessage` (tool chips, the bubble,
 Stopped, Sources, ▶ and the model under an answer) and `Composer` (the
 screenshots and their prompts, +, the box, the mic, Send / ■, `ModelChip`).
@@ -554,7 +573,17 @@ screenshots and their prompts, +, the box, the mic, Send / ■, `ModelChip`).
   **several at once**: Shift+click a range, Ctrl+click one, Ctrl+A in the
   list → a "3 selected · Delete · Cancel" bar, Delete key / Esc; the list's
   ⋯ menu has Select all and "Delete all chats…", every delete asked first;
-  `chat_delete_many` = one write, `chats::delete_many`) +
+  `chat_delete_many` = one write, `chats::delete_many`; **search**
+  (2026-10-25): "Search chats…" under New chat — every conversation's title
+  and messages, archived ones too, by the words typed and then by meaning
+  (`chats_search`), each result its title and the message it found with
+  the words marked ("by meaning", "Archived" tags); a click opens the
+  conversation at that message (`data-msg-id`), focused and its words
+  marked; Esc clears; **archive**: a conversation's menu (and the selection's
+  menu and bar) has **Archive** (toast with Undo); "Archived N" at the foot
+  of the list opens the archive — click one to open it, ↺ Restore, Delete…
+  (asked first), the same in its menu; asking in an archived conversation
+  brings it back) +
   thread; `chat_send` answers via the Chat scope with **eager keyword-RAG**
   over the notes library (top-5 `<note>` snippets; `chat/chats.rs` persists
   conversations to `chats.json`) **plus the tool-calling agent loop**

@@ -32,6 +32,8 @@ mod cleanup;
 #[cfg(debug_assertions)]
 mod languages;
 #[cfg(debug_assertions)]
+mod library;
+#[cfg(debug_assertions)]
 mod local;
 #[cfg(debug_assertions)]
 mod record;

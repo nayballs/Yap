@@ -37,27 +37,131 @@ use tauri::{AppHandle, Emitter};
 
 use crate::privacy::net::Recorded as _;
 
-/// The GGUF, pinned to ggml-org's conversion (its commit and LFS oid).
-pub const MODEL_FILE: &str = "embeddinggemma-300M-Q8_0.gguf";
-pub const MODEL_URL: &str =
-    "https://huggingface.co/ggml-org/embeddinggemma-300M-GGUF/resolve/0f741b5a6585bd53aeb15cd1372c56f2a0f65e12/embeddinggemma-300M-Q8_0.gguf";
-pub const MODEL_SHA256: &str = "b5ce9d77a3fc4b3b39ccb5643c36777911cc4eb46a66962eadfa3f5f60490d63";
-pub const MODEL_BYTES: u64 = 333_590_944;
-/// What Settings calls it.
-pub const MODEL_NAME: &str = "EmbeddingGemma 300M";
-pub const LICENSE: &str = "Gemma Terms of Use";
-pub const LICENSE_URL: &str = "https://ai.google.dev/gemma/terms";
-/// The model as the index knows it: another model (or another quantisation)
-/// means another index.
-pub const MODEL_TAG: &str = "embeddinggemma-300m-q8_0";
-pub const DIMS: usize = 768;
+/// An embedding model, as Yap downloads, runs and prompts it.
+#[derive(Debug)]
+pub struct Model {
+    /// What Settings calls it.
+    pub name: &'static str,
+    /// The model as the index knows it: another model (or another
+    /// quantisation) means another index (the old one is set aside and
+    /// everything is read again, `store.rs`).
+    pub tag: &'static str,
+    /// The GGUF: its file name, where it comes from (pinned to a commit),
+    /// its SHA-256 and size.
+    pub file: &'static str,
+    pub url: &'static str,
+    pub sha256: &'static str,
+    pub bytes: u64,
+    pub dims: usize,
+    pub license: &'static str,
+    pub license_url: &'static str,
+    /// Written beside it (`NOTICE.txt`).
+    pub notice: &'static str,
+    /// A passage as it reads it (`{title}`, `{text}`)…
+    pub document: &'static str,
+    /// …and a question (`{query}`): the model card's prompts.
+    pub query: &'static str,
+    /// Its own arguments for the engine's `--embedding` server.
+    pub server_args: &'static [&'static str],
+    /// How close a match must be to count by meaning alone: each model's
+    /// cosines sit on a scale of their own (`search/library.rs`).
+    pub floors: Floors,
+}
 
-/// Written beside the model.
-const NOTICE: &str = "EmbeddingGemma 300M (Q8_0 GGUF, ggml-org/embeddinggemma-300M-GGUF)\n\
+/// A model's meaning-only floors, measured on `evals/search/library.json`
+/// (`yap.exe eval --search-library`: the gold items' similarities against
+/// the closest unrelated one's).
+#[derive(Debug, Clone, Copy)]
+pub struct Floors {
+    /// A note or chat in a search box that holds none of the words typed.
+    pub typed: f32,
+    /// A memory item with a Chat question (it goes into the answer's prompt).
+    pub memory: f32,
+    /// A past chat for `search_chats`.
+    pub chats: f32,
+}
+
+/// **EmbeddingGemma-300M**, Q8_0, pinned to ggml-org's conversion (its
+/// commit and LFS oid): 768 dimensions, 100+ languages, the Gemma Terms of
+/// Use.
+pub const EMBEDDINGGEMMA_300M: Model = Model {
+    name: "EmbeddingGemma 300M",
+    tag: "embeddinggemma-300m-q8_0",
+    file: "embeddinggemma-300M-Q8_0.gguf",
+    url: "https://huggingface.co/ggml-org/embeddinggemma-300M-GGUF/resolve/0f741b5a6585bd53aeb15cd1372c56f2a0f65e12/embeddinggemma-300M-Q8_0.gguf",
+    sha256: "b5ce9d77a3fc4b3b39ccb5643c36777911cc4eb46a66962eadfa3f5f60490d63",
+    bytes: 333_590_944,
+    dims: 768,
+    license: "Gemma Terms of Use",
+    license_url: "https://ai.google.dev/gemma/terms",
+    notice: "EmbeddingGemma 300M (Q8_0 GGUF, ggml-org/embeddinggemma-300M-GGUF)\n\
 Gemma is provided under and subject to the Gemma Terms of Use found at\n\
 https://ai.google.dev/gemma/terms, and its Prohibited Use Policy at\n\
 https://ai.google.dev/gemma/prohibited_use_policy.\n\
-Yap uses it on this PC only, to search your meetings and notes by meaning.\n";
+Yap uses it on this PC only, to search your meetings, notes, chats and memory by meaning.\n",
+    document: "title: {title} | text: {text}",
+    query: "task: search result | query: {query}",
+    server_args: &[],
+    // The box's gold notes 0.39–0.51, the closest other 0.26; memory's gold
+    // 0.31–0.52, unrelated questions ≤ 0.16 (25 Oct 2026).
+    floors: Floors { typed: 0.33, memory: 0.3, chats: 0.3 },
+};
+
+/// **Qwen3-Embedding-0.6B**, Q8_0 (Qwen's own GGUF; Apache-2.0): 1,024
+/// dimensions, last-token pooling, an instruction before a question and
+/// none before a passage. The other candidate (twice the size and the cost,
+/// `yap-private/docs/local-ai-research.md` #7); the model evaluations
+/// compare the two (`--search --embed-model qwen3`). Before it ships, pin
+/// `url` to a commit: the hash is the file measured there.
+#[cfg_attr(not(debug_assertions), allow(dead_code))]
+pub const QWEN3_EMBEDDING_0_6B: Model = Model {
+    name: "Qwen3-Embedding 0.6B",
+    tag: "qwen3-embedding-0.6b-q8_0",
+    file: "Qwen3-Embedding-0.6B-Q8_0.gguf",
+    url: "https://huggingface.co/Qwen/Qwen3-Embedding-0.6B-GGUF/resolve/main/Qwen3-Embedding-0.6B-Q8_0.gguf",
+    sha256: "06507c7b42688469c4e7298b0a1e16deff06caf291cf0a5b278c308249c3e439",
+    bytes: 639_150_592,
+    dims: 1024,
+    license: "Apache 2.0",
+    license_url: "https://www.apache.org/licenses/LICENSE-2.0",
+    notice: "Qwen3-Embedding 0.6B (Q8_0 GGUF, Qwen/Qwen3-Embedding-0.6B-GGUF), Apache License 2.0.\n\
+Yap uses it on this PC only, to search your meetings, notes, chats and memory by meaning.\n",
+    document: "{title}\n{text}",
+    query: "Instruct: Given a question, retrieve the passages that answer it\nQuery:{query}",
+    server_args: &["--pooling", "last"],
+    // Higher across the board: the box's closest other note 0.46, memory's
+    // unrelated questions up to 0.48 against gold from 0.37 (25 Oct 2026,
+    // one run: measure again before shipping it).
+    floors: Floors { typed: 0.48, memory: 0.5, chats: 0.45 },
+};
+
+/// **The model, in one place**: Yap's search by meaning downloads, runs and
+/// prompts this one (still being decided between EmbeddingGemma's terms and
+/// Qwen3-Embedding's; switching is this line — a new download, and the
+/// index read again).
+pub const MODEL: Model = EMBEDDINGGEMMA_300M;
+
+/// The test runs' stand-in download (`YAP_LLM_SOURCES`) is filed under this.
+const TEST_SOURCE_KEY: &str = "embeddinggemma";
+
+/// The model in use: [`MODEL`] (a model evaluation may compare another,
+/// [`use_model`], debug builds).
+pub fn model() -> &'static Model {
+    #[cfg(debug_assertions)]
+    if let Some(m) = *EVAL_MODEL.lock().unwrap_or_else(|p| p.into_inner()) {
+        return m;
+    }
+    &MODEL
+}
+
+#[cfg(debug_assertions)]
+static EVAL_MODEL: Mutex<Option<&'static Model>> = Mutex::new(None);
+
+/// A model evaluation's model (`--embed-model`), before anything is read.
+#[cfg(debug_assertions)]
+pub fn use_model(m: Option<&'static Model>) {
+    *EVAL_MODEL.lock().unwrap_or_else(|p| p.into_inner()) = m;
+}
 
 /// Stopped after this long unused.
 pub const IDLE: Duration = Duration::from_secs(120);
@@ -67,15 +171,26 @@ const START_WAIT: Duration = Duration::from_secs(120);
 /// (until the model is downloaded again or the index rebuilt).
 const MAX_FAILED_STARTS: u32 = 3;
 
-/// EmbeddingGemma's document prompt.
+/// A passage as the model reads it (its document prompt; "none" for no
+/// title, as EmbeddingGemma's card has it).
 pub fn document(title: &str, text: &str) -> String {
-    let title = if title.trim().is_empty() { "none" } else { title.trim() };
-    format!("title: {title} | text: {text}")
+    document_for(model(), title, text)
 }
 
-/// …and its query prompt.
+/// [`document`] for `m`. Pure.
+pub fn document_for(m: &Model, title: &str, text: &str) -> String {
+    let title = if title.trim().is_empty() { "none" } else { title.trim() };
+    m.document.replace("{title}", title).replace("{text}", text)
+}
+
+/// …and a question (its query prompt).
 pub fn query(q: &str) -> String {
-    format!("task: search result | query: {}", q.trim())
+    query_for(model(), q)
+}
+
+/// [`query`] for `m`. Pure.
+pub fn query_for(m: &Model, q: &str) -> String {
+    m.query.replace("{query}", q.trim())
 }
 
 /// Where the model lives: `<data>/models/search/`.
@@ -84,24 +199,25 @@ pub fn dir() -> PathBuf {
 }
 
 pub fn model_path() -> PathBuf {
-    dir().join(MODEL_FILE)
+    dir().join(model().file)
 }
 
 /// The model's download: pinned, or a test run's stand-in (`YAP_LLM_SOURCES`,
 /// `{"embeddinggemma": {url, sha256, size}}`, debug builds).
 fn source() -> crate::speakers::diarize::registry::Source {
-    let (url, sha256) = crate::ai::local_llm::models::source("embeddinggemma", MODEL_URL, MODEL_SHA256);
+    let m = model();
+    let (url, sha256) = crate::ai::local_llm::models::source(TEST_SOURCE_KEY, m.url, m.sha256);
     #[cfg_attr(not(debug_assertions), allow(unused_mut))]
-    let mut size = MODEL_BYTES;
+    let mut size = m.bytes;
     #[cfg(debug_assertions)]
-    if url != MODEL_URL {
+    if url != m.url {
         size = std::env::var_os("YAP_LLM_SOURCES")
             .and_then(|p| std::fs::read_to_string(p).ok())
             .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
-            .and_then(|v| v["embeddinggemma"]["size"].as_u64())
-            .unwrap_or(MODEL_BYTES);
+            .and_then(|v| v[TEST_SOURCE_KEY]["size"].as_u64())
+            .unwrap_or(m.bytes);
     }
-    crate::speakers::diarize::registry::Source { url, sha256, size, unpack: crate::speakers::diarize::registry::Unpack::File(MODEL_FILE) }
+    crate::speakers::diarize::registry::Source { url, sha256, size, unpack: crate::speakers::diarize::registry::Unpack::File(m.file) }
 }
 
 /// The model is on disk, whole.
@@ -204,7 +320,7 @@ async fn install_inner(app: &AppHandle) -> Result<(), String> {
             free.unwrap_or(0) / 1_048_576
         ));
     }
-    let partial = dir.join(format!("{MODEL_FILE}.partial"));
+    let partial = dir.join(format!("{}.partial", model().file));
     tracing::info!(bytes = src.size, "Meeting search: downloading the search model");
     let total = src.size;
     let last = std::sync::atomic::AtomicU8::new(255);
@@ -217,7 +333,7 @@ async fn install_inner(app: &AppHandle) -> Result<(), String> {
     dl::download(&src, &partial, &report, crate::privacy::net::Download::SearchModel).await?;
     dl::verify(&partial, &src).await?;
     std::fs::rename(&partial, model_path()).map_err(|e| format!("Couldn't put the search model in place: {e}"))?;
-    let _ = std::fs::write(dir.join("NOTICE.txt"), NOTICE);
+    let _ = std::fs::write(dir.join("NOTICE.txt"), model().notice);
     tracing::info!("Meeting search: the search model is installed");
     Ok(())
 }
@@ -226,7 +342,8 @@ async fn install_inner(app: &AppHandle) -> Result<(), String> {
 pub fn delete_model() -> Result<(), String> {
     stop();
     let dir = dir();
-    for f in [MODEL_FILE.to_string(), format!("{MODEL_FILE}.partial"), "NOTICE.txt".into(), "embedder.log".into()] {
+    let file = model().file;
+    for f in [file.to_string(), format!("{file}.partial"), "NOTICE.txt".into(), "embedder.log".into()] {
         let p = dir.join(f);
         if p.exists() {
             std::fs::remove_file(&p).map_err(|e| format!("Couldn't delete the search model: {e}"))?;
@@ -273,16 +390,23 @@ pub fn runs_on() -> Option<&'static str> {
 /// The server's arguments: the sidecar's runtime in embedding mode, the
 /// context and batches for passages of a few hundred tokens, all layers on
 /// the card that fit (`ngl` 999; none on a PC without one), half the
-/// processor's threads. Pure.
-pub fn server_args(model: &Path, port: u16, threads: usize) -> Vec<String> {
+/// processor's threads, and the model's own (its pooling). Pure.
+pub fn server_args(gguf: &Path, port: u16, threads: usize) -> Vec<String> {
+    server_args_for(model(), gguf, port, threads)
+}
+
+/// [`server_args`] for `m`. Pure.
+pub fn server_args_for(m: &Model, gguf: &Path, port: u16, threads: usize) -> Vec<String> {
     let t = threads.to_string();
-    [
-        "--server", "--host", "127.0.0.1", "--port", &port.to_string(), "-m", &model.to_string_lossy(), "--embedding", "-c", "4096", "-b",
+    let mut args: Vec<String> = [
+        "--server", "--host", "127.0.0.1", "--port", &port.to_string(), "-m", &gguf.to_string_lossy(), "--embedding", "-c", "4096", "-b",
         "2048", "-ub", "2048", "-ngl", "999", "-t", &t, "-tb", &t, "-lv", "4",
     ]
     .iter()
     .map(|s| s.to_string())
-    .collect()
+    .collect();
+    args.extend(m.server_args.iter().map(|s| s.to_string()));
+    args
 }
 
 /// Half the processor's threads, at least 2.
@@ -465,7 +589,7 @@ impl Drop for Busy {
 }
 
 /// The embeddings of `texts` (each with its prompt already, [`document`] /
-/// [`query`]): unit length, [`DIMS`] each, in order.
+/// [`query`]): unit length, the model's dimensions each, in order.
 pub async fn embed(texts: &[String]) -> Result<Vec<Vec<f32>>, String> {
     if texts.is_empty() {
         return Ok(Vec::new());
@@ -477,7 +601,7 @@ pub async fn embed(texts: &[String]) -> Result<Vec<Vec<f32>>, String> {
         .timeout(Duration::from_secs(60 + 10 * texts.len() as u64))
         .build()
         .map_err(|e| e.to_string())?;
-    let body = serde_json::json!({ "model": MODEL_TAG, "input": texts });
+    let body = serde_json::json!({ "model": model().tag, "input": texts });
     let res = client
         .post(format!("{url}/embeddings"))
         .json(&body)
@@ -495,9 +619,14 @@ pub async fn embed(texts: &[String]) -> Result<Vec<Vec<f32>>, String> {
 }
 
 /// The vectors in an `/embeddings` answer, in input order, unit length and
-/// [`DIMS`] long (a longer one cut — Matryoshka — a shorter one refused).
-/// Pure.
+/// the model's dimensions long (a longer one cut — Matryoshka — a shorter
+/// one refused).
 pub fn parse(v: &serde_json::Value, want: usize) -> Result<Vec<Vec<f32>>, String> {
+    parse_dims(v, want, model().dims)
+}
+
+/// [`parse`] for `dims` dimensions. Pure.
+pub fn parse_dims(v: &serde_json::Value, want: usize, dims: usize) -> Result<Vec<Vec<f32>>, String> {
     let data = v["data"].as_array().ok_or("no vectors in the search model's answer")?;
     let mut rows: Vec<(u64, Vec<f32>)> = data
         .iter()
@@ -512,10 +641,10 @@ pub fn parse(v: &serde_json::Value, want: usize) -> Result<Vec<Vec<f32>>, String
     rows.sort_by_key(|(i, _)| *i);
     rows.into_iter()
         .map(|(_, e)| {
-            if e.len() < DIMS {
-                return Err(format!("the search model's vectors have {} dimensions, not {DIMS}", e.len()));
+            if e.len() < dims {
+                return Err(format!("the search model's vectors have {} dimensions, not {dims}", e.len()));
             }
-            Ok(super::store::normalised(&e[..DIMS]))
+            Ok(super::store::normalised(&e[..dims]))
         })
         .collect()
 }
@@ -525,17 +654,68 @@ pub async fn embed_query(q: &str) -> Result<Vec<f32>, String> {
     embed(&[query(q)]).await?.pop().ok_or_else(|| "no vector for the question".to_string())
 }
 
+/// The last questions' vectors (a search typed letter by letter, the same
+/// question searched twice in a turn), by model and words.
+static RECENT: Mutex<Vec<(String, Vec<f32>)>> = Mutex::new(Vec::new());
+const RECENT_MAX: usize = 32;
+
+/// **A question's vector for a search**, or `None` to search by keywords
+/// alone: search by meaning off or its model not here, the server failing,
+/// or not ready within `wait`. A start that takes longer goes on in the
+/// background (the next search has the model ready); the vector of a
+/// question asked again lately comes from memory.
+pub async fn query_vector(q: &str, wait: Duration) -> Option<Vec<f32>> {
+    let q = q.trim();
+    if q.is_empty() || !crate::config::load().search_by_meaning || !installed() {
+        return None;
+    }
+    let key = format!("{}\u{0}{q}", model().tag);
+    if let Some(v) = RECENT.lock().ok().and_then(|r| r.iter().find(|(k, _)| *k == key).map(|(_, v)| v.clone())) {
+        return Some(v);
+    }
+    let text = q.to_string();
+    let job = tauri::async_runtime::spawn(async move { embed_query(&text).await });
+    match tokio::time::timeout(wait, job).await {
+        Ok(Ok(Ok(v))) => {
+            if let Ok(mut r) = RECENT.lock() {
+                r.retain(|(k, _)| *k != key);
+                r.push((key, v.clone()));
+                if r.len() > RECENT_MAX {
+                    r.remove(0);
+                }
+            }
+            Some(v)
+        }
+        Ok(Ok(Err(e))) => {
+            tracing::info!("Search: keywords only this time ({e})");
+            None
+        }
+        Ok(Err(_)) => None,
+        Err(_) => {
+            tracing::info!(wait_ms = wait.as_millis() as u64, "Search: keywords only this time (the search model is still starting)");
+            None
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use serde_json::json;
 
     #[test]
-    fn the_model_is_pinned() {
-        assert!(MODEL_URL.starts_with("https://huggingface.co/ggml-org/embeddinggemma-300M-GGUF/resolve/"));
-        assert!(MODEL_URL.ends_with(MODEL_FILE));
-        assert_eq!(MODEL_SHA256.len(), 64);
-        assert!(MODEL_SHA256.chars().all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase()));
+    fn the_model_is_named_in_one_place_and_pinned() {
+        assert_eq!(model().tag, MODEL.tag, "no evaluation's model in a unit test");
+        for m in [&EMBEDDINGGEMMA_300M, &QWEN3_EMBEDDING_0_6B] {
+            assert!(m.url.starts_with("https://huggingface.co/"), "{}", m.name);
+            assert!(m.url.ends_with(m.file), "{}", m.name);
+            assert_eq!(m.sha256.len(), 64);
+            assert!(m.sha256.chars().all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase()));
+            assert!(m.document.contains("{text}") && m.query.contains("{query}"));
+            assert!(!m.notice.is_empty() && !m.license_url.is_empty());
+        }
+        assert!(EMBEDDINGGEMMA_300M.url.contains("/resolve/0f741b5a6585bd53aeb15cd1372c56f2a0f65e12/"), "pinned to a commit");
+        assert_ne!(EMBEDDINGGEMMA_300M.tag, QWEN3_EMBEDDING_0_6B.tag, "another model, another index");
     }
 
     #[test]
@@ -543,6 +723,9 @@ mod tests {
         assert_eq!(document("Launch review", "Them: March third."), "title: Launch review | text: Them: March third.");
         assert_eq!(document(" ", "x"), "title: none | text: x");
         assert_eq!(query(" when is the launch? "), "task: search result | query: when is the launch?");
+        // Qwen3-Embedding: an instruction before a question, the passage as it is.
+        assert_eq!(document_for(&QWEN3_EMBEDDING_0_6B, "Dentist", "Thursday at 9:40"), "Dentist\nThursday at 9:40");
+        assert!(query_for(&QWEN3_EMBEDDING_0_6B, " when? ").starts_with("Instruct: ") && query_for(&QWEN3_EMBEDDING_0_6B, "when?").ends_with("\nQuery:when?"));
     }
 
     #[test]
@@ -556,18 +739,22 @@ mod tests {
         assert_eq!(after("-t"), Some("4"));
         assert_eq!(after("-ub"), Some("2048"), "a whole passage in one batch");
         assert!(threads() >= 2);
+        // A model's own arguments come last: Qwen3-Embedding pools its last token.
+        let qwen = server_args_for(&QWEN3_EMBEDDING_0_6B, Path::new("q.gguf"), 5001, 4);
+        assert_eq!(&qwen[qwen.len() - 2..], ["--pooling", "last"]);
     }
 
     #[test]
     fn answers_are_read_in_order_and_cut_to_size() {
+        let dims = MODEL.dims;
         let v = |n: usize, x: f32| json!(vec![x; n]);
         let answer = json!({ "data": [
-            { "index": 1, "embedding": v(DIMS + 256, 2.0) },
-            { "index": 0, "embedding": v(DIMS, 1.0) },
+            { "index": 1, "embedding": v(dims + 256, 2.0) },
+            { "index": 0, "embedding": v(dims, 1.0) },
         ]});
         let rows = parse(&answer, 2).unwrap();
         assert_eq!(rows.len(), 2);
-        assert!(rows.iter().all(|r| r.len() == DIMS));
+        assert!(rows.iter().all(|r| r.len() == dims));
         let norm: f32 = rows[0].iter().map(|x| x * x).sum::<f32>().sqrt();
         assert!((norm - 1.0).abs() < 1e-4, "unit length");
         assert!(parse(&answer, 3).is_err(), "one missing");
@@ -613,7 +800,7 @@ mod tests {
             let t0 = Instant::now();
             let res: serde_json::Value = client
                 .post(format!("http://127.0.0.1:{port}/v1/embeddings"))
-                .json(&json!({ "model": MODEL_TAG, "input": texts }))
+                .json(&json!({ "model": MODEL.tag, "input": texts }))
                 .send_for(crate::privacy::net::Purpose::Embeddings)
                 .await
                 .unwrap()

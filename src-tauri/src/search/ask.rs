@@ -214,6 +214,7 @@ where
             Field::Summary => 0,
             Field::Content => 1,
             Field::Transcript => 2,
+            Field::Chat | Field::Memory => 3,
         };
         rest.sort_by_key(|&i| {
             let (n, p) = cands[i];
@@ -274,17 +275,15 @@ where
 /// model's half when it's on and installed (started if need be, up to
 /// [`QUERY_WAIT`]), the keyword half always.
 pub async fn find(question: &str, limit: usize) -> Found {
+    find_waiting(question, limit, QUERY_WAIT).await
+}
+
+/// [`find`], the model awaited up to `wait` (Chat's `search_notes`: a tool
+/// call's own, shorter).
+pub async fn find_waiting(question: &str, limit: usize, wait: Duration) -> Found {
+    let vector = super::embedder::query_vector(question, wait).await;
     let notes = crate::notes::all();
     let prepared = index::prepared(&notes);
-    let cfg = crate::config::load();
-    let mut vector = None;
-    if cfg.search_by_meaning && super::embedder::installed() {
-        match tokio::time::timeout(QUERY_WAIT, super::embedder::embed_query(question)).await {
-            Ok(Ok(v)) => vector = Some(v),
-            Ok(Err(e)) => tracing::info!("Meeting search: keywords only for this question ({e})"),
-            Err(_) => tracing::info!("Meeting search: keywords only for this question (the search model was slow to start)"),
-        }
-    }
     // Every passage's cosine with the question, under one look at the store.
     let sims: HashMap<Key, f32> = match &vector {
         Some(q) => index::with_store(|s| prepared.iter().flat_map(|v| v.iter()).filter_map(|p| s.similarity(&p.key, q).map(|x| (p.key, x))).collect()),
@@ -339,6 +338,8 @@ pub fn context(found: &Found) -> String {
             Field::Transcript => "transcript",
             Field::Content => "their notes",
             Field::Summary => "the summary",
+            Field::Chat => "a chat",
+            Field::Memory => "memory",
         };
         let at = p.at.as_ref().map(|a| format!(" at=\"{a}\"")).unwrap_or_default();
         out.push_str(&format!(

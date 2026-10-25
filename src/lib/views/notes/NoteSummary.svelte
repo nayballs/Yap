@@ -17,7 +17,6 @@
   /** `notes`: the view's state (notesState.svelte.js). */
   let { notes } = $props();
 
-  let renderedEl = $state(null);
   let find = $state(null);
   let findOpen = $state(false);
   // Ctrl+F: find in the summary (while it's shown, not while it's edited).
@@ -93,12 +92,12 @@
     onkeydown={onSummaryKeydown}
   ></textarea>
 {:else}
-  <SummaryFind bind:this={find} bind:open={findOpen} root={() => renderedEl} text={notes.selected.enhancedContent} look="app" />
+  <SummaryFind bind:this={find} bind:open={findOpen} root={() => notes.renderedEl} text={notes.selected.enhancedContent} look="app" />
   <!-- eslint-disable-next-line svelte/no-at-html-tags — renderMarkdown
        passes no raw HTML and sanitises its output (core/markdown.js);
        its tasks tick in place (notes/tasks.rs) -->
   <div class="sumscroll">
-    <div class="rendered" bind:this={renderedEl} onchange={onTaskChange}>{@html renderMarkdown(notes.selected.enhancedContent, { tickable: true })}</div>
+    <div class="rendered" bind:this={notes.renderedEl} onchange={onTaskChange}>{@html renderMarkdown(notes.selected.enhancedContent, { tickable: true })}</div>
     <SummaryRating note={notes.selected} origin={LABEL} look="app" changing={() => notes.changing('summaryRating')} />
   </div>
 {/if}

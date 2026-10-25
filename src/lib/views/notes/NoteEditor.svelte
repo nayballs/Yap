@@ -116,6 +116,8 @@
     {:else}
       <textarea
         class="raw"
+        aria-label="My thoughts"
+        bind:this={notes.rawEl}
         placeholder={notes.recordingThisNote
           ? 'Take rough notes while Yap listens — they get woven into the minutes…'
           : 'Start writing…'}

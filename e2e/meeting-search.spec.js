@@ -129,13 +129,13 @@ async function installed(yap) {
 test('Settings: the search model downloads, and every meeting and note is read', async ({ yap, main, fakeEmbed, fakeModels, shot }) => {
   const dialog = await openSettings(main, 'Privacy & data');
   const group = dialog.locator('[data-setting="meeting-search"]').locator('..');
-  const toggle = dialog.getByRole('button', { name: 'Search my meetings by meaning', exact: true });
+  const toggle = dialog.getByRole('button', { name: 'Search by meaning', exact: true });
   await expect(toggle).toBeDisabled();
   const row = dialog.locator('[data-setting="meeting-search-model"]');
   await expect(row).toContainText('EmbeddingGemma 300M');
   await expect(row).toContainText('the on-device AI engine included');
   // "What leaves this PC" says where it's searched.
-  await expect(dialog.getByRole('row', { name: /Meeting search/ })).toContainText('Searched on this PC');
+  await expect(dialog.getByRole('row', { name: /^Search\b/ })).toContainText('Searched on this PC');
   await shot(main, '01-settings-before-download');
 
   // The download, held half-way to see its progress.
@@ -160,7 +160,7 @@ test('Settings: the search model downloads, and every meeting and note is read',
   expect(fs.existsSync(path.join(yap.dataDir, 'models', 'search', 'NOTICE.txt'))).toBe(true);
   const index = dialog.locator('[data-setting="meeting-search-index"]');
   await expect(index).toContainText(`${s.passages} passages from 3 notes`);
-  await expect(dialog.getByRole('row', { name: /Meeting search/ })).toContainText('Read and searched by meaning on this PC');
+  await expect(dialog.getByRole('row', { name: /^Search\b/ })).toContainText('read and searched by meaning on this PC');
   await group.scrollIntoViewIfNeeded();
   await shot(main, '03-settings-indexed');
   await closeSettings(main);
@@ -300,15 +300,15 @@ test('Rebuild reads everything again, Delete takes the model and the index, and 
   // Every request to the model was to this PC, and said what it was for.
   const sum = await yap.invoke('connections_summary');
   const labels = JSON.stringify(sum);
-  expect(labels).toContain('Meeting search · on-device model');
-  expect(labels).toContain('Meeting search model download');
+  expect(labels).toContain('Search by meaning · on-device model');
+  expect(labels).toContain('Search model download');
 
   await index.getByRole('button', { name: 'Delete…' }).click();
   const confirm = main.getByRole('alertdialog', { name: 'Delete the search model and its index?' });
   await confirm.getByRole('button', { name: 'Delete', exact: true }).click();
   const row = dialog.locator('[data-setting="meeting-search-model"]');
   await expect(row.getByRole('button', { name: /^Download/ })).toBeVisible();
-  await expect(dialog.getByRole('button', { name: 'Search my meetings by meaning', exact: true })).toHaveAttribute('aria-pressed', 'false');
+  await expect(dialog.getByRole('button', { name: 'Search by meaning', exact: true })).toHaveAttribute('aria-pressed', 'false');
   expect(fs.existsSync(path.join(yap.dataDir, 'search-index'))).toBe(false);
   expect(fs.existsSync(path.join(yap.dataDir, 'models', 'search', 'embeddinggemma-300M-Q8_0.gguf'))).toBe(false);
   // The engine stays: the on-device model may use it.

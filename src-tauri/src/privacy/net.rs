@@ -131,7 +131,7 @@ pub enum Download {
     OnDeviceAi,
     SpeakerModel,
     Voice,
-    /// Meeting search's embedding model (`search/embedder.rs`).
+    /// Search by meaning's embedding model (`search/embedder.rs`).
     SearchModel,
 }
 
@@ -145,7 +145,7 @@ pub enum Purpose {
     OnDeviceCheck,
     /// Its first, warm-up answer.
     OnDeviceWarmUp,
-    /// Meeting search's embedding model on this PC (`search/embedder.rs`):
+    /// Search by meaning's embedding model on this PC (`search/embedder.rs`):
     /// its start and the passages and questions it reads.
     Embeddings,
     /// Yap's own search: "Exa" | "Tavily".
@@ -212,7 +212,7 @@ impl Purpose {
             ),
             Purpose::OnDeviceCheck => ("ai", "On-device AI · starting up".into(), "AI models"),
             Purpose::OnDeviceWarmUp => ("ai", "On-device AI · warming up".into(), "AI models"),
-            Purpose::Embeddings => ("ai", "Meeting search · on-device model".into(), "Meeting search"),
+            Purpose::Embeddings => ("ai", "Search by meaning · on-device model".into(), "Search"),
             Purpose::WebSearch(s) => ("web", format!("Web search · {s}"), f("Chat")),
             Purpose::WikiSearch => ("web", "Web search · Wikipedia and wikis".into(), f("Chat")),
             Purpose::ProviderSearch(p) => ("web", format!("Web search · {p}"), f("Chat")),
@@ -223,7 +223,7 @@ impl Purpose {
                 Download::OnDeviceAi => ("download", "On-device AI download".into(), "AI models"),
                 Download::SpeakerModel => ("download", "Speaker model download".into(), "Meetings"),
                 Download::Voice => ("download", "Voice download (Kokoro)".into(), "Spoken replies"),
-                Download::SearchModel => ("download", "Meeting search model download".into(), "Meeting search"),
+                Download::SearchModel => ("download", "Search model download".into(), "Search"),
             },
             Purpose::UpdateCheck => ("update", "Update check".into(), "Updates"),
             Purpose::UpdateDownload => ("update", "Update download".into(), "Updates"),

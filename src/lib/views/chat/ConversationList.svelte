@@ -12,9 +12,23 @@
   import { openContextMenu, menuKey, menuOpenFor, devInspect } from '../../ui/contextMenu.svelte.js';
   import { showSaveError } from '../../notices/saveErrors.js';
   import { copyText, conversationMarkdown } from '../../core/itemMenus.js';
+  import { createChatLibrary } from './chatLibrary.svelte.js';
 
   /** `chat`: the view's state (chatState.svelte.js). */
   let { chat } = $props();
+
+  // Search every chat, and the archive (chatLibrary.svelte.js; their lists
+  // are ChatLibraryList.svelte, loaded the first time one shows).
+  const lib = createChatLibrary(() => chat);
+  let searchEl = $state(null);
+  let libView = $state(null);
+  function searchKeydown(e) {
+    if (e.key === 'Escape' && lib.query) {
+      e.preventDefault();
+      e.stopPropagation();
+      lib.clear();
+    } else libView?.keydown(e);
+  }
 
   // Rename in place, like Notes' folders: `{ id, value }`.
   let renaming = $state(null);
@@ -62,6 +76,7 @@
       openContextMenu(
         e,
         [
+          { label: `Archive ${picked.length} chats`, icon: 'archive', onselect: () => lib.archive([...chat.picked]) },
           { label: `Delete ${picked.length} chats…`, icon: 'trash', danger: true, onselect: () => chat.askDeleteMany(chat.picked) },
           { separator: true },
           { label: 'Clear selection', onselect: chat.clearPicked },
@@ -79,6 +94,7 @@
         { label: 'Rename', icon: 'pencil', onselect: () => startRename(c) },
         { separator: true },
         { label: 'Copy as Markdown', icon: 'copy', onselect: () => copyConversation(c.id) },
+        { label: 'Archive', icon: 'archive', onselect: () => lib.archive([c.id]) },
         { separator: true },
         { label: 'Delete…', icon: 'trash', danger: true, onselect: () => chat.askDelete(c) },
       ],
@@ -126,6 +142,7 @@
   {#if chat.picked.length}
     <div class="tools selbar" role="toolbar" aria-label="Selected chats">
       <span class="selcount" title="Shift+click selects a range, Ctrl+click adds or takes out one">{chat.picked.length} selected</span>
+      <button class="selbtn" onclick={() => lib.archive([...chat.picked])}>Archive</button>
       <button class="selbtn danger" onclick={() => chat.askDeleteMany(chat.picked)}>Delete</button>
       <button class="selbtn" onclick={chat.clearPicked}>Cancel</button>
     </div>
@@ -143,7 +160,27 @@
     </div>
   {/if}
 
-  {#if chat.conversations.length === 0}
+  {#if chat.conversations.length || lib.archived.length}
+    <div class="searchrow">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7" /><path d="m21 21-4.3-4.3" /></svg>
+      <input
+        bind:this={searchEl}
+        class="searchinput"
+        type="search"
+        aria-label="Search chats"
+        placeholder="Search chats…"
+        bind:value={lib.query}
+        oninput={lib.run}
+        onkeydown={searchKeydown}
+      />
+    </div>
+  {/if}
+
+  {#if lib.query.trim() || lib.showArchived}
+    {#await import('./ChatLibraryList.svelte') then { default: ChatLibraryList }}
+      <ChatLibraryList bind:this={libView} {chat} {lib} {searchEl} oncopy={copyConversation} />
+    {/await}
+  {:else if chat.conversations.length === 0}
     <p class="convempty">Start your first conversation</p>
   {:else}
     <div class="convscroll">
@@ -208,6 +245,13 @@
         {/each}
       {/each}
     </div>
+  {/if}
+  {#if lib.archived.length && !lib.showArchived && !lib.query.trim()}
+    <button class="archivedbtn" onclick={() => (lib.showArchived = true)}>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="5" rx="1" /><path d="M5 9v10a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V9M10 13h4" /></svg>
+      Archived
+      <span class="fcount">{lib.archived.length}</span>
+    </button>
   {/if}
 </aside>
 
@@ -383,6 +427,75 @@
   .conv.renaming {
     padding: 3px 4px;
     cursor: default;
+  }
+  /* Search: the box under New chat; a result's title, its line, its tags. */
+  .searchrow {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin: 2px 8px 4px;
+    padding: 0 8px;
+    height: 28px;
+    border: 1px solid var(--yap-border-subtle);
+    border-radius: var(--yap-r);
+    background: var(--yap-s1);
+    color: var(--yap-muted);
+  }
+  .searchrow:focus-within {
+    border-color: var(--yap-primary-line);
+  }
+  .searchrow svg {
+    width: 12px;
+    height: 12px;
+    flex: 0 0 auto;
+  }
+  .searchinput {
+    flex: 1 1 auto;
+    min-width: 0;
+    height: 100%;
+    border: none;
+    background: none;
+    color: var(--yap-fg);
+    font: inherit;
+    font-size: 12px;
+    outline: none;
+  }
+  /* (Esc clears it; the browser's own × isn't in Yap's colours.) */
+  .searchinput::-webkit-search-cancel-button {
+    appearance: none;
+  }
+  /* The archive's button, under the list. */
+  .archivedbtn {
+    display: flex;
+    flex: 0 0 auto;
+    align-items: center;
+    gap: 7px;
+    height: 36px;
+    margin: 4px 8px 10px;
+    padding: 6px 10px 0;
+    border: none;
+    border-top: 1px solid var(--yap-border-subtle);
+    background: none;
+    color: var(--yap-muted);
+    font: inherit;
+    font-size: 12px;
+    font-weight: 600;
+    text-align: left;
+    cursor: pointer;
+  }
+  .archivedbtn:hover {
+    color: var(--yap-fg);
+  }
+  .archivedbtn svg {
+    width: 13px;
+    height: 13px;
+    flex: 0 0 auto;
+  }
+  .archivedbtn .fcount {
+    margin-left: auto;
+    font-size: 10px;
+    font-weight: 500;
+    color: var(--yap-muted-55);
   }
   .renameinput {
     width: 100%;

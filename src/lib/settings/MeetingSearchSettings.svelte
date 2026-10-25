@@ -1,11 +1,13 @@
 <script>
-  // Settings → Privacy & data → "Search my meetings by meaning" (search/):
-  // the embedding model that reads every meeting and note on this PC, so a
-  // search — the Meetings view's, and Ask across meetings in Chat — finds
-  // what was meant, not just the words. Download it (its size, and the
-  // on-device engine's when that isn't here yet, shown first), switch it on
-  // and off, see the index (passages read, its size, where it runs, what
-  // it's doing), rebuild it, delete the model and the index.
+  // Settings → Privacy & data → "Search by meaning" (search/): the
+  // embedding model that reads every meeting, note, chat and memory item on
+  // this PC, so a search — Notes', the Meetings view's, Chat's sidebar, Ask
+  // across meetings, and what Chat looks up for you — finds what was meant,
+  // not just the words. Download it (its size, and the on-device engine's
+  // when that isn't here yet, shown first), switch it on and off, see the
+  // index (passages read from how many notes, chats and memory items, its
+  // size, where it runs, what it's doing), rebuild it, delete the model and
+  // the index.
   //
   //   cfg: Settings' config copy (the switch is cfg.searchByMeaning; the
   //        auto-save saves it, and search.rs follows).
@@ -23,8 +25,8 @@
   let { cfg } = $props();
 
   // search_status: { enabled, installed, runtimeInstalled, installing, phase, error, passages,
-  // indexed, notes, indexBytes, modelBytes, downloadBytes, runsOn,
-  // modelName, license, licenseUrl }.
+  // indexed, notes, chats, memories, kinds, indexBytes, modelBytes,
+  // downloadBytes, runsOn, modelName, license, licenseUrl }.
   let status = $state(null);
   // A download under way: { stage: 'runtime' | 'model', percent }.
   let progress = $state(null);
@@ -81,15 +83,22 @@
       case 'waiting':
         return `Waiting for your dictation or meeting to finish · ${status.indexed.toLocaleString()} of ${status.passages.toLocaleString()} passages read`;
       case 'indexing':
-        return `Reading your meetings and notes: ${status.indexed.toLocaleString()} of ${status.passages.toLocaleString()} passages`;
+        return `Reading your meetings, notes and chats: ${status.indexed.toLocaleString()} of ${status.passages.toLocaleString()} passages`;
       case 'error':
         return `Couldn't read them: ${status.error || 'the search model didn’t start'}. Yap tries again later`;
       default:
-        return status.passages
-          ? `${status.passages.toLocaleString()} passages from ${status.notes.toLocaleString()} ${status.notes === 1 ? 'note' : 'notes'} · ${size(status.indexBytes)}`
-          : 'Nothing to read yet';
+        return status.passages ? `${status.passages.toLocaleString()} passages from ${sources(status)} · ${size(status.indexBytes)}` : 'Nothing to read yet';
     }
   });
+
+  // "3 notes, 2 chats and 5 memory items": what the index read, by kind.
+  function sources(s) {
+    const n = (count, one, many) => `${count.toLocaleString()} ${count === 1 ? one : many}`;
+    const parts = [n(s.notes || 0, 'note', 'notes')];
+    if (s.chats) parts.push(n(s.chats, 'chat', 'chats'));
+    if (s.memories) parts.push(n(s.memories, 'memory item', 'memory items'));
+    return parts.length > 1 ? `${parts.slice(0, -1).join(', ')} and ${parts.at(-1)}` : parts[0];
+  }
 
   async function download() {
     busy = true;
@@ -119,7 +128,7 @@
     const btn = e?.currentTarget;
     askConfirm({
       title: 'Delete the search model and its index?',
-      body: 'Searches go back to matching your words. Your meetings and notes stay. You can download it again later.',
+      body: 'Searches go back to matching your words. Your meetings, notes and chats stay. You can download it again later.',
       confirmLabel: 'Delete',
       busyLabel: 'Deleting…',
       returnFocus: btn,
@@ -137,15 +146,15 @@
 </script>
 
 <Group
-  title="Search my meetings by meaning"
+  title="Search by meaning"
   id="settings-meeting-search"
-  desc="A small AI model reads your meetings and notes on this PC, so a search finds what you meant, not just the words you remember. Ask across meetings answers from what it finds, and cites the moment."
+  desc="A small AI model reads your meetings, notes, chats and what Yap remembers on this PC, so a search finds what you meant, not just the words you remember. Ask across meetings answers from what it finds, and cites the moment."
 >
   <Row setting="meeting-search">
     <Toggle
       bind:checked={cfg.searchByMeaning}
-      label="Search my meetings by meaning"
-      desc={status?.installed ? 'In the Meetings view’s search and when you ask across your meetings' : 'Download the search model first'}
+      label="Search by meaning"
+      desc={status?.installed ? 'In Notes, Meetings and Chat’s searches, when you ask across your meetings, and in what Chat looks up for you' : 'Download the search model below to switch it on'}
       hint="Nothing leaves this PC to search: the model runs here, in the background, and waits while you dictate or record a meeting. Only an answer’s passages go to Chat’s model with your question."
       disabled={!status?.installed}
     />

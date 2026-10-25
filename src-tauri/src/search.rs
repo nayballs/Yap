@@ -26,6 +26,7 @@ pub mod commands;
 pub mod dates;
 pub mod embedder;
 pub mod index;
+pub mod library;
 pub mod rank;
 pub mod store;
 
@@ -34,6 +35,21 @@ use tauri::AppHandle;
 /// Start the background index (it waits until it's wanted).
 pub fn init(app: &AppHandle) {
     index::init(app);
+}
+
+/// Something searched changed (a chat saved, a note edited outside Yap's
+/// events): the index reads it in the background, a few seconds on.
+#[cfg_attr(test, allow(dead_code))] // unit tests' chats are never saved
+pub fn changed() {
+    index::poke();
+}
+
+/// **Something was deleted** — a note, a chat, a memory item, or lines of a
+/// transcript (the meeting's retention) — and the index must let go of it:
+/// the vectors of every passage that's gone are dropped a few seconds on,
+/// with search by meaning on or off. Call it after the store has let go.
+pub fn removed() {
+    index::removed();
 }
 
 /// A config just saved: search by meaning switched on starts a pass (and

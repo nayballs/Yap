@@ -47,7 +47,7 @@ pub fn memory_definitions(extra: Extra) -> Value {
             "type": "function",
             "function": {
                 "name": "search_chats",
-                "description": "Search the user's earlier chats with you by keywords.",
+                "description": "Search the user's earlier chats with you by keywords and meaning.",
                 "parameters": {
                     "type": "object",
                     "properties": {
@@ -76,18 +76,25 @@ pub fn asked_to_remember(question: &str) -> bool {
     ASK.is_match(&question.replace('’', "'"))
 }
 
-/// `search_chats`: the earlier conversations matching the query (`chats::search`).
-pub(super) fn search_chats(args: &Value, conversation: Option<u64>) -> Value {
+/// `search_chats`: the earlier conversations matching the query — by its
+/// words and, with search by meaning on, its meaning (`search/library.rs`
+/// `chats_for`; a model evaluation compares the keyword search it replaced,
+/// `chats::search`: `search::library::keyword_only`).
+pub(super) async fn search_chats(args: &Value, conversation: Option<u64>) -> Value {
     let query = args["query"].as_str().unwrap_or("").trim();
-    let found = crate::chat::chats::search(query, conversation, 5);
+    let found: Vec<(u64, String, u64, Vec<String>)> = if crate::search::library::keyword_only() {
+        crate::chat::chats::search(query, conversation, 5).into_iter().map(|f| (f.id, f.title, f.updated_ts, f.lines)).collect()
+    } else {
+        crate::search::library::chats_for(query, conversation, 5).await.into_iter().map(|f| (f.id, f.title, f.updated, f.lines)).collect()
+    };
     let results: Vec<Value> = found
         .iter()
-        .map(|f| {
+        .map(|(id, title, updated, lines)| {
             json!({
-                "id": f.id,
-                "title": f.title,
-                "date": crate::memory::export::day(f.updated_ts),
-                "lines": f.lines,
+                "id": id,
+                "title": title,
+                "date": crate::memory::export::day(*updated),
+                "lines": lines,
             })
         })
         .collect();

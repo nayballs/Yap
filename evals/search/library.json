@@ -1,0 +1,184 @@
+{
+  "description": "Search beyond the meetings: one made-up person's notes (a boiler service, car insurance, gifts, a trip, a vet, a kitchen, an allotment…), two work meetings, their past chats with Yap and what Yap remembers about them (fictional people, firms and details throughout), with questions of five kinds, each with the items that answer it. `box`: words typed in the Notes view's search (the gold notes; `meaning` tags those whose words aren't in them). `tool`: what Chat's search_notes is called with, as a model writes it. `chats`: a question about an earlier chat (search_chats). `memory`: a Chat question and the people, projects and topics it's about (none: nothing in memory is). `chat`: a question asked in Chat (not across meetings), with words its answer must hold (`expect`, any one). Used by `yap.exe eval --search` (src-tauri/src/ai/eval/library.rs): recall@k before (Yap's keyword searches until 25 Oct 2026) and after (src-tauri/src/search/library.rs), and with --model each `chat` question answered (with --search-keyword, as before).",
+  "now": "2026-10-25T15:00:00+00:00",
+  "notes": [
+    {
+      "id": 1,
+      "title": "Boiler service",
+      "start": "2026-10-02T09:00:00+01:00",
+      "notes": "Booked with Hearth & Home Heating for 14 November, 8am to 12pm. Reference HH-20931.\n\nAsk the engineer about the pressure dropping overnight."
+    },
+    {
+      "id": 2,
+      "title": "Car insurance",
+      "start": "2026-10-05T19:00:00+01:00",
+      "notes": "Renewal due 3 December. The current premium is £412 with Kestrel Insurance.\n\nFernway quoted £368 with a £250 excess. Check whether it covers a courtesy car."
+    },
+    {
+      "id": 3,
+      "title": "Gift ideas",
+      "start": "2026-10-08T21:00:00+01:00",
+      "notes": "- Mum: gardening gloves, the blue teapot from the Saturday market\n- Dad: a cycling jacket, size L\n- Leah: the board game Cartographers"
+    },
+    {
+      "id": 4,
+      "title": "Porto trip",
+      "start": "2026-10-10T12:00:00+01:00",
+      "notes": "Flight AZ742 leaves Bristol at 06:40 on 2 May, seat 14C. Booking reference QX7RTM.\n\nHotel: Casa do Rio, two nights, breakfast included."
+    },
+    {
+      "id": 5,
+      "title": "Reading list",
+      "start": "2026-10-11T22:00:00+01:00",
+      "notes": "The Glass Orchard by Mira Holt\nTidewater by Sam Okafor\nSalt and Signal by Ines Varga"
+    },
+    {
+      "id": 6,
+      "title": "Vet",
+      "start": "2026-10-12T10:00:00+01:00",
+      "notes": "Biscuit's booster jab is due in March, with Dr Okoye at Meadowbank Vets. She is allergic to chicken, so no chicken treats."
+    },
+    {
+      "id": 7,
+      "title": "Kitchen renovation",
+      "start": "2026-10-14T20:00:00+01:00",
+      "notes": "Quotes: Oakline £8,200, Birch & Co £9,050. We want soft-close drawers and a pantry cupboard.",
+      "summary": "## Decision\nGo with Oakline if they can start before February."
+    },
+    {
+      "id": 8,
+      "title": "Running plan",
+      "start": "2026-10-16T07:00:00+01:00",
+      "notes": "Couch to 10k: three runs a week, Tuesday, Thursday and a long one on Sunday. The left knee felt sore after the hill session."
+    },
+    {
+      "id": 9,
+      "title": "Allotment",
+      "start": "2026-10-18T15:00:00+01:00",
+      "notes": "Plot 17. Plant the garlic in October and the broad beans in November. The water butt leaks at the tap."
+    },
+    {
+      "id": 10,
+      "title": "Website relaunch check-in",
+      "start": "2026-10-20T10:00:00+01:00",
+      "participants": ["Nadia Kerr", "Tomas Bell"],
+      "speakers": { "them-1": "Nadia Kerr", "them-2": "Tomas Bell" },
+      "lines": [
+        ["them-1", "The new homepage goes live on the ninth of November."],
+        ["you", "Is the contact form fixed yet?"],
+        ["them-2", "Yes, I fixed the spam filter yesterday, so the form works again."],
+        ["them-1", "We still need alt text on the gallery images before launch."],
+        ["you", "I'll write the alt text by Wednesday."]
+      ]
+    },
+    {
+      "id": 11,
+      "title": "Supplier call",
+      "start": "2026-10-22T14:00:00+01:00",
+      "participants": ["Grace Wu"],
+      "speakers": { "them-1": "Grace Wu" },
+      "lines": [
+        ["them-1", "The oak panels will arrive two weeks late because of a fault in our kiln."],
+        ["you", "Can you give us something for the delay? We had fitters booked."],
+        ["them-1", "We can take five percent off your next order, and we'll pay for the re-booking."]
+      ]
+    }
+  ],
+  "chats": [
+    { "id": 1, "title": "Lisbon food", "messages": [["user", "Where should we eat in Lisbon on the first night?"], ["assistant", "Try a small tasca in Alfama for grilled sardines, or the market hall at Cais do Sodré if everyone wants something different."]] },
+    { "id": 2, "title": "Sourdough help", "messages": [["user", "My sourdough comes out too dense, what am I doing wrong?"], ["assistant", "It's probably under-proved: give the bulk ferment longer, until the dough has grown by about half, and keep it somewhere warmer."]] },
+    { "id": 3, "title": "Interview prep", "messages": [["user", "I have an interview for a product manager role on Friday. What should I prepare?"], ["assistant", "Prepare two stories about shipping something, one about a disagreement you resolved, and questions about how they set priorities."]] },
+    { "id": 4, "title": "Bike repair", "messages": [["user", "My bike chain keeps slipping when I pedal hard."], ["assistant", "The chain or the cassette is probably worn. Measure the chain's stretch, and check the derailleur hanger isn't bent."]] },
+    { "id": 5, "title": "Party ideas", "messages": [["user", "Ideas for a seventh birthday party at home?"], ["assistant", "A treasure hunt round the garden, a decorate-your-own cupcake table, and a short film to finish."]] },
+    { "id": 6, "title": "Tax return", "messages": [["user", "When is the deadline for my self assessment?"], ["assistant", "The online deadline is 31 January; a paper return is due by 31 October."]] }
+  ],
+  "memory": [
+    { "id": 1, "section": "people", "name": "Leah", "about": "Sister", "facts": ["Lives in Leeds", "Birthday on 12 May"] },
+    { "id": 2, "section": "people", "name": "Dr Okoye", "about": "Vet at Meadowbank Vets", "facts": [] },
+    { "id": 3, "section": "projects", "name": "Kitchen renovation", "about": "Redoing the kitchen", "facts": ["Choosing between two quotes"] },
+    { "id": 4, "section": "topics", "name": "Running", "about": "Training for a 10k", "facts": ["Sore knee after hills"] },
+    { "id": 5, "section": "people", "name": "Nadia Kerr", "about": "Colleague who runs the website relaunch", "facts": [] },
+    { "id": 6, "section": "projects", "name": "Allotment", "about": "Plot 17", "facts": ["Grows garlic and broad beans"] },
+    { "id": 7, "section": "people", "name": "Biscuit", "about": "Dog", "facts": ["Allergic to chicken"] }
+  ],
+  "questions": [
+    { "kind": "box", "q": "HH-20931", "gold": [1] },
+    { "kind": "box", "q": "premium", "gold": [2] },
+    { "kind": "box", "q": "teapot", "gold": [3] },
+    { "kind": "box", "q": "seat 14C", "gold": [4] },
+    { "kind": "box", "q": "alt text", "gold": [10] },
+    { "kind": "box", "q": "kiln", "gold": [11] },
+    { "kind": "box", "q": "garl", "gold": [9] },
+    { "kind": "box", "q": "oakline", "gold": [7] },
+    { "kind": "box", "q": "heating engineer visit", "gold": [1], "tags": ["meaning"] },
+    { "kind": "box", "q": "present for my sister", "gold": [3], "tags": ["meaning"] },
+    { "kind": "box", "q": "plane tickets", "gold": [4], "tags": ["meaning"] },
+    { "kind": "box", "q": "books to read", "gold": [5], "tags": ["meaning"] },
+    { "kind": "box", "q": "dog vaccination", "gold": [6], "tags": ["meaning"] },
+    { "kind": "box", "q": "new kitchen costs", "gold": [7], "tags": ["meaning"] },
+    { "kind": "box", "q": "jogging schedule", "gold": [8], "tags": ["meaning"] },
+    { "kind": "box", "q": "vegetable patch", "gold": [9], "tags": ["meaning"] },
+    { "kind": "box", "q": "website launch date", "gold": [10], "tags": ["meaning"] },
+    { "kind": "box", "q": "late delivery compensation", "gold": [11], "tags": ["meaning"] },
+
+    { "kind": "tool", "q": "boiler service date", "gold": [1] },
+    { "kind": "tool", "q": "car insurance renewal quote", "gold": [2] },
+    { "kind": "tool", "q": "gift for dad", "gold": [3] },
+    { "kind": "tool", "q": "flight booking reference", "gold": [4] },
+    { "kind": "tool", "q": "dog allergy", "gold": [6] },
+    { "kind": "tool", "q": "kitchen decision", "gold": [7] },
+    { "kind": "tool", "q": "homepage go live date", "gold": [10] },
+    { "kind": "tool", "q": "supplier discount for the delay", "gold": [11] },
+    { "kind": "tool", "q": "when is the heating engineer coming", "gold": [1], "tags": ["paraphrase"] },
+    { "kind": "tool", "q": "how much is my car cover", "gold": [2], "tags": ["paraphrase"] },
+    { "kind": "tool", "q": "what can't my pet eat", "gold": [6], "tags": ["paraphrase"] },
+    { "kind": "tool", "q": "who repaired the enquiry form", "gold": [10], "tags": ["paraphrase"] },
+    { "kind": "tool", "q": "compensation offered for late wood", "gold": [11], "tags": ["paraphrase"] },
+    { "kind": "tool", "q": "novels I want to read", "gold": [5], "tags": ["paraphrase"] },
+    { "kind": "tool", "q": "knee pain training", "gold": [8], "tags": ["paraphrase"] },
+
+    { "kind": "chats", "q": "what did you suggest for dinner in Lisbon", "gold": [1] },
+    { "kind": "chats", "q": "where to eat in Portugal", "gold": [1], "tags": ["paraphrase"] },
+    { "kind": "chats", "q": "how to fix dense bread", "gold": [2], "tags": ["paraphrase"] },
+    { "kind": "chats", "q": "what did we say about bread rising", "gold": [2], "tags": ["paraphrase"] },
+    { "kind": "chats", "q": "job interview tips", "gold": [3] },
+    { "kind": "chats", "q": "chain slipping on my bicycle", "gold": [4] },
+    { "kind": "chats", "q": "my bicycle gears jumping", "gold": [4], "tags": ["paraphrase"] },
+    { "kind": "chats", "q": "kids party games", "gold": [5], "tags": ["paraphrase"] },
+    { "kind": "chats", "q": "when do I have to file taxes", "gold": [6], "tags": ["paraphrase"] },
+
+    { "kind": "memory", "q": "When is my sister's birthday?", "gold": [1] },
+    { "kind": "memory", "q": "What can't the dog eat?", "gold": [7] },
+    { "kind": "memory", "q": "How is the kitchen renovation going?", "gold": [3] },
+    { "kind": "memory", "q": "Who runs the website project?", "gold": [5] },
+    { "kind": "memory", "q": "Book a check-up with my pet's vet", "gold": [2] },
+    { "kind": "memory", "q": "My knee hurts after my run, should I rest?", "gold": [4], "tags": ["paraphrase"] },
+    { "kind": "memory", "q": "What should I plant on my plot this autumn?", "gold": [6], "tags": ["paraphrase"] },
+    { "kind": "memory", "q": "What could I get my sibling for her birthday?", "gold": [1], "tags": ["paraphrase"] },
+    { "kind": "memory", "q": "Is it OK to give my puppy a bit of roast?", "gold": [7], "tags": ["paraphrase"] },
+    { "kind": "memory", "q": "What's the capital of Peru?", "gold": [] },
+    { "kind": "memory", "q": "Write a haiku about rain", "gold": [] },
+    { "kind": "memory", "q": "How do I boil an egg?", "gold": [] },
+    { "kind": "memory", "q": "Convert 5 miles to kilometres", "gold": [] },
+    { "kind": "memory", "q": "What's a good name for a goldfish?", "gold": [] },
+    { "kind": "memory", "q": "Explain how vaccines work", "gold": [] },
+
+    { "kind": "chat", "q": "When is my boiler being serviced?", "expect": ["14 November", "14th November", "November 14"] },
+    { "kind": "chat", "q": "How much was the Fernway car insurance quote?", "expect": ["368"] },
+    { "kind": "chat", "q": "What did the supplier offer us because of the delay?", "expect": ["five percent", "5%", "5 percent", "5 per cent"] },
+    { "kind": "chat", "q": "What's my flight booking reference?", "expect": ["QX7RTM"] },
+    { "kind": "chat", "q": "When is the heating engineer coming round?", "expect": ["14 November", "14th November", "November 14"], "tags": ["paraphrase"] },
+    { "kind": "chat", "q": "What is Biscuit allergic to?", "expect": ["chicken"] },
+    { "kind": "chat", "q": "Who fixed the enquiry form on the website?", "expect": ["Tomas"], "tags": ["paraphrase"] },
+    { "kind": "chat", "q": "Which kitchen company are we going with?", "expect": ["Oakline"] },
+    { "kind": "chat", "q": "What did you tell me last time about my dense sourdough?", "expect": ["ferment", "prove", "proof", "warmer"] },
+    { "kind": "chat", "q": "Remind me where you said we should eat in Portugal", "expect": ["Alfama", "sardine", "Cais do Sodré", "market"], "tags": ["paraphrase"] },
+    { "kind": "chat", "q": "How much will my motor cover cost?", "expect": ["412", "368"], "tags": ["tool"] },
+    { "kind": "chat", "q": "What can't my pup eat?", "expect": ["chicken"], "tags": ["tool"] },
+    { "kind": "chat", "q": "What did the joinery firm offer us for the hold-up?", "expect": ["five percent", "5%", "5 percent", "5 per cent"], "tags": ["tool"] },
+    { "kind": "chat", "q": "Who sorted out the spam problem on the enquiry page?", "expect": ["Tomas"], "tags": ["tool"] },
+    { "kind": "chat", "q": "What vegetables am I growing this year?", "expect": ["garlic", "broad bean"], "tags": ["tool"] },
+    { "kind": "chat", "q": "When do I fly out?", "expect": ["2 May", "May 2", "2nd May", "May 2nd"], "tags": ["tool"] },
+    { "kind": "chat", "q": "Remind me what you suggested for my seven-year-old's celebration", "expect": ["treasure hunt", "cupcake"], "tags": ["tool"] }
+  ]
+}

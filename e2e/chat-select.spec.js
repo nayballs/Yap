@@ -65,7 +65,7 @@ test('Shift+click and Ctrl+click select chats; the bar deletes them after asking
 
   // A right-click on a selected row offers the selection's delete.
   await row(main, 'Delta').click({ button: 'right' });
-  await expect(menu(main).getByRole('menuitem')).toHaveText(['Delete 3 chats…', 'Clear selection']);
+  await expect(menu(main).getByRole('menuitem')).toHaveText(['Archive 3 chats', 'Delete 3 chats…', 'Clear selection']);
   await menu(main).getByRole('menuitem', { name: 'Delete 3 chats…' }).click();
   await dialog(main).getByRole('button', { name: 'Delete' }).click();
   await expect(main.locator('.conv')).toHaveText(['Echo', 'Bravo', 'Alpha']);

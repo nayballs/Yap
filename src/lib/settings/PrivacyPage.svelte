@@ -206,11 +206,12 @@
       page: 'cleanup#chat',
     },
     {
-      // search/: read and searched on this PC; an answer's passages go with
-      // the question to Chat's model (the row above).
-      what: 'Meeting search',
+      // search/: meetings, notes, chats and memory read and searched on
+      // this PC; an answer's passages go with the question to Chat's model
+      // (the row above).
+      what: 'Search',
       where: cfg.searchByMeaning
-        ? 'Read and searched by meaning on this PC. Only the passages a question needs go with it to Chat’s model'
+        ? 'Your meetings, notes, chats and memory: read and searched by meaning on this PC. Only the passages a question needs go with it to Chat’s model'
         : 'Searched on this PC by their words. Only the passages a question needs go with it to Chat’s model',
       page: 'privacy#meeting-search',
     },

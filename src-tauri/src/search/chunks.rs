@@ -29,8 +29,12 @@ pub const GAP_SECS: u64 = 300;
 /// A meeting's last passage under this many words joins the one before (at
 /// most [`MAX_WORDS`] + 24 words together).
 const MIN_TAIL_WORDS: usize = 25;
+/// A chat's long answer starts in its question's passage when at least
+/// this many of its words fit there.
+const MIN_FIRST_PIECE: usize = 40;
 
-/// Where in a note a passage comes from.
+/// Where in a note a passage comes from (or that it's a chat's, or a memory
+/// item's).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Field {
     /// The meeting's transcript.
@@ -39,6 +43,10 @@ pub enum Field {
     Content,
     /// The summary / action plan.
     Summary,
+    /// A chat's messages (each line one, by its index in the conversation).
+    Chat,
+    /// A memory item: who or what it is, and its facts.
+    Memory,
 }
 
 impl Field {
@@ -47,6 +55,8 @@ impl Field {
             Field::Transcript => "transcript",
             Field::Content => "content",
             Field::Summary => "summary",
+            Field::Chat => "chat",
+            Field::Memory => "memory",
         }
     }
 }
@@ -66,11 +76,13 @@ pub struct Line {
 /// A passage.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Chunk {
+    /// Its note's id (a chat's, a memory item's: their own ids, never mixed
+    /// with notes' in one search).
     pub note: u64,
     pub field: Field,
     /// The note's title ("Untitled meeting" / "Untitled note" when empty).
     pub title: String,
-    /// "meeting" | "note".
+    /// "meeting" | "note" | "chat" | "memory".
     pub kind: &'static str,
     /// The heading it sits under (notes and summaries), if any.
     pub heading: String,
@@ -345,8 +357,108 @@ fn text_chunks(note: u64, title: &str, kind: &'static str, field: Field, text: &
     out
 }
 
-/// What the embedding model reads for a passage (EmbeddingGemma's document
-/// prompt: "title: … | text: …").
+/// The title a chat's passages show.
+pub fn chat_title(c: &crate::chat::chats::Conversation) -> String {
+    let t = c.title.trim();
+    if t.is_empty() {
+        "Untitled chat".to_string()
+    } else {
+        t.to_string()
+    }
+}
+
+/// **A chat in passages** (search by meaning over past chats, the Chat
+/// sidebar's search, `search_chats`): its messages as lines ("You: …",
+/// "Yap: …", each by its index in the conversation), a passage holding a
+/// question and its answer where they fit — at most [`MAX_WORDS`], ending
+/// at the person's next question once it has [`TARGET_WORDS`]; a message
+/// longer than a passage cut at its sentences (its question with its first
+/// piece); a few words of an answer left at the end joining the passage
+/// before. Tool chips, sources and screenshots aren't searched: what was
+/// said is. Pure.
+pub fn chunk_chat(conv: &crate::chat::chats::Conversation) -> Vec<Chunk> {
+    let title = chat_title(conv);
+    let mut out: Vec<Chunk> = Vec::new();
+    let mut cur: Vec<Line> = Vec::new();
+    let mut words = 0usize;
+    let flush = |cur: &mut Vec<Line>, words: &mut usize, out: &mut Vec<Chunk>| {
+        if !cur.is_empty() {
+            out.push(Chunk { note: conv.id, field: Field::Chat, title: title.clone(), kind: "chat", heading: String::new(), lines: std::mem::take(cur) });
+        }
+        *words = 0;
+    };
+    for (i, m) in conv.messages.iter().enumerate() {
+        let text = m.text.split_whitespace().collect::<Vec<_>>().join(" ");
+        if text.is_empty() {
+            continue;
+        }
+        let speaker = if m.role == "user" { "You" } else { "Yap" }.to_string();
+        let w = word_count(&text);
+        let asks = m.role == "user";
+        if w > MAX_WORDS {
+            // A long answer: its question goes with its first piece (when
+            // there's room for a good part of one), every other piece is a
+            // passage of its own.
+            if MAX_WORDS.saturating_sub(words) < MIN_FIRST_PIECE || (asks && words >= TARGET_WORDS) {
+                flush(&mut cur, &mut words, &mut out);
+            }
+            let first = split_long(&text, MAX_WORDS - words).into_iter().next().unwrap_or_default();
+            let used = word_count(&first);
+            cur.push(Line { index: i, speaker: speaker.clone(), text: first, ts: m.ts });
+            flush(&mut cur, &mut words, &mut out);
+            let rest = text.split_whitespace().skip(used).collect::<Vec<_>>().join(" ");
+            for piece in split_long(&rest, MAX_WORDS) {
+                cur.push(Line { index: i, speaker: speaker.clone(), text: piece, ts: m.ts });
+                flush(&mut cur, &mut words, &mut out);
+            }
+            continue;
+        }
+        if !cur.is_empty() && (words + w > MAX_WORDS || (asks && words >= TARGET_WORDS)) {
+            flush(&mut cur, &mut words, &mut out);
+        }
+        cur.push(Line { index: i, speaker, text, ts: m.ts });
+        words += w;
+    }
+    // A few words of an answer left at the end go with their question's
+    // passage (a new question is a passage of its own, however short).
+    if !cur.is_empty() && words < MIN_TAIL_WORDS && cur[0].speaker != "You" {
+        if let Some(prev) = out.last_mut() {
+            if prev.lines.iter().map(|l| word_count(&l.text)).sum::<usize>() + words <= MAX_WORDS + 24 {
+                prev.lines.append(&mut cur);
+            }
+        }
+    }
+    flush(&mut cur, &mut words, &mut out);
+    out
+}
+
+/// A memory item as one passage (search by meaning over what Yap remembers:
+/// the people, projects and topics a question is about): its name as the
+/// title, then who or what it is and its facts, a line each. Profile and
+/// Preferences aren't searched: they go with every question. Pure.
+pub fn chunk_memory(item: &crate::memory::ops::Item) -> Option<Chunk> {
+    if item.section.is_you() || item.title.trim().is_empty() {
+        return None;
+    }
+    let mut lines = Vec::new();
+    let mut add = |index: usize, text: &str| {
+        let t = text.split_whitespace().collect::<Vec<_>>().join(" ");
+        if !t.is_empty() {
+            lines.push(Line { index, speaker: String::new(), text: t, ts: item.updated_ts });
+        }
+    };
+    add(0, &item.summary);
+    for (i, f) in item.details.iter().enumerate() {
+        add(i + 1, f);
+    }
+    if lines.is_empty() {
+        lines.push(Line { index: 0, speaker: String::new(), text: item.title.trim().to_string(), ts: item.updated_ts });
+    }
+    Some(Chunk { note: item.id, field: Field::Memory, title: item.title.trim().to_string(), kind: "memory", heading: String::new(), lines })
+}
+
+/// What the embedding model reads for a passage (its document prompt:
+/// EmbeddingGemma's "title: … | text: …").
 pub fn embed_text(c: &Chunk) -> String {
     super::embedder::document(&c.title, &c.text())
 }
@@ -520,5 +632,72 @@ pub(crate) mod tests {
         assert_eq!(a, key("m1", "title: x | text: y"));
         assert_ne!(a, key("m2", "title: x | text: y"));
         assert_ne!(a, key("m1", "title: x | text: z"));
+    }
+
+    fn chat(title: &str, messages: &[(&str, &str)]) -> crate::chat::chats::Conversation {
+        serde_json::from_value(json!({
+            "id": 9, "title": title, "createdTs": 100, "updatedTs": 100,
+            "messages": messages.iter().enumerate().map(|(i, (r, t))| json!({ "role": r, "text": t, "ts": 100 + i as u64 })).collect::<Vec<_>>(),
+        }))
+        .unwrap()
+    }
+
+    #[test]
+    fn a_chat_is_cut_into_questions_with_their_answers() {
+        let forty = "word ".repeat(40);
+        let c = chat(
+            "Trip ideas",
+            &[
+                ("user", "Where should we eat in Lisbon?"),
+                ("assistant", &format!("Try Alfama. {forty}")),
+                ("user", "And breakfast?"),
+                ("assistant", "A pastelaria near the hotel."),
+                ("user", ""),
+            ],
+        );
+        let chunks = chunk_chat(&c);
+        // The first question and answer (48 words) take the next question
+        // in too: under 60 words, a passage goes on.
+        assert_eq!(chunks.len(), 1, "{chunks:#?}");
+        assert_eq!((chunks[0].kind, chunks[0].field, chunks[0].title.as_str(), chunks[0].note), ("chat", Field::Chat, "Trip ideas", 9));
+        assert_eq!(chunks[0].lines.iter().map(|l| l.index).collect::<Vec<_>>(), [0, 1, 2, 3], "the empty message left out");
+        assert_eq!(chunks[0].speakers(), ["You", "Yap"]);
+        assert!(chunks[0].text().starts_with("You: Where should we eat in Lisbon?\nYap: Try Alfama."));
+        // Past 60 words, the person's next question starts a passage.
+        let sixty = "word ".repeat(62);
+        let c = chat("Long", &[("user", "First?"), ("assistant", &sixty), ("user", "Second question here please"), ("assistant", "A short answer to it, in a few more words than that.")]);
+        let chunks = chunk_chat(&c);
+        assert_eq!(chunks.iter().map(|c| c.lines.iter().map(|l| l.index).collect::<Vec<_>>()).collect::<Vec<_>>(), [vec![0, 1], vec![2, 3]]);
+    }
+
+    #[test]
+    fn a_long_answer_starts_with_its_question_and_goes_on_in_passages() {
+        let sentence = "This sentence has exactly ten words in it, all told. ";
+        let long = sentence.repeat(30); // 300 words
+        let c = chat("Essay", &[("user", "Write me three hundred words please"), ("assistant", &long)]);
+        let chunks = chunk_chat(&c);
+        assert!(chunks.len() >= 3, "{}", chunks.len());
+        // The question and the answer's first piece together.
+        assert_eq!(chunks[0].lines.len(), 2);
+        assert_eq!((chunks[0].lines[0].index, chunks[0].lines[1].index), (0, 1));
+        assert!(chunks.iter().all(|c| c.words() <= MAX_WORDS + 24), "{:?}", chunks.iter().map(|c| c.words()).collect::<Vec<_>>());
+        // Every word of the answer once.
+        let answer: usize = chunks.iter().flat_map(|c| c.lines.iter().filter(|l| l.index == 1)).map(|l| word_count(&l.text)).sum();
+        assert_eq!(answer, 300);
+        assert!(chunks[1..].iter().all(|c| c.lines.iter().all(|l| l.index == 1 && l.speaker == "Yap")));
+    }
+
+    #[test]
+    fn a_memory_item_is_one_passage_and_you_none() {
+        let item: crate::memory::ops::Item = serde_json::from_value(json!({
+            "id": 4, "section": "people", "title": "Leah", "summary": "Sister", "details": ["Lives in Leeds", "Birthday on 12 May"], "updatedTs": 50,
+        }))
+        .unwrap();
+        let c = chunk_memory(&item).unwrap();
+        assert_eq!((c.kind, c.field, c.note, c.title.as_str()), ("memory", Field::Memory, 4, "Leah"));
+        assert_eq!(c.text(), "Sister\nLives in Leeds\nBirthday on 12 May");
+        assert_eq!(embed_text(&c), "title: Leah | text: Sister\nLives in Leeds\nBirthday on 12 May");
+        let you: crate::memory::ops::Item = serde_json::from_value(json!({ "id": 1, "section": "profile", "title": "Profile", "details": ["Lives in Leeds"] })).unwrap();
+        assert!(chunk_memory(&you).is_none(), "Profile goes with every question already");
     }
 }

@@ -97,6 +97,7 @@
   aria-label={m.role === 'assistant' ? 'Answer' : 'Your question'}
   aria-busy={m.streaming ? 'true' : undefined}
   data-testid={m.streaming ? 'chat-streaming' : undefined}
+  data-msg-id={m.id || undefined}
   use:settle={m.revisedFrom || 0}
   oncontextmenu={onmenu}
   onkeydown={(e) => e.target === e.currentTarget && menuKey(e, onmenu)}

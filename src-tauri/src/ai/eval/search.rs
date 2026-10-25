@@ -40,7 +40,7 @@ pub struct Corpus {
     pub questions: Vec<Question>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct CNote {
     pub id: u64,
     pub title: String,
@@ -230,18 +230,18 @@ pub async fn start(runtime: &Path, gguf: &Path, ngl: u32, run_dir: &Path) -> Res
 /// The embedding model: `--embed`, else the installed app's (read-only),
 /// else `models_dir`'s, else downloaded there (verified).
 pub async fn model(explicit: Option<&Path>, models_dir: &Path) -> Result<PathBuf, String> {
-    use crate::search::embedder::{MODEL_FILE, MODEL_SHA256, MODEL_URL};
+    let m = crate::search::embedder::model();
     if let Some(p) = explicit {
         return if p.is_file() { Ok(p.to_path_buf()) } else { Err(format!("no GGUF at {}", p.display())) };
     }
-    if let Some(p) = dirs::data_dir().map(|d| d.join("yap").join("models").join("search").join(MODEL_FILE)).filter(|p| p.is_file()) {
+    if let Some(p) = dirs::data_dir().map(|d| d.join("yap").join("models").join("search").join(m.file)).filter(|p| p.is_file()) {
         return Ok(p);
     }
-    let dest = models_dir.join(MODEL_FILE);
+    let dest = models_dir.join(m.file);
     if !dest.is_file() {
         std::fs::create_dir_all(models_dir).map_err(|e| e.to_string())?;
-        println!("Downloading {MODEL_FILE} into {} …", models_dir.display());
-        crate::ai::local_llm::models::download_verified(MODEL_URL, &dest, MODEL_SHA256, "model", None).await?;
+        println!("Downloading {} into {} …", m.file, models_dir.display());
+        crate::ai::local_llm::models::download_verified(m.url, &dest, m.sha256, "model", None).await?;
     }
     Ok(dest)
 }
