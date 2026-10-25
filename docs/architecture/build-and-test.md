@@ -126,9 +126,10 @@ Any uncaught JS error in any webview fails the test. ~20 s plus the build
 data dir, own WebView2 profile + CDP port, F24 hotkey, test mode (`shell/e2e.rs`),
 unreachable account service. (Runners are elevated, so WebView2 ignores the suite's
 `WEBVIEW2_*` variables there; e2e.yml sets the DevTools flag as an HKLM WebView2
-policy for `yap.exe` instead.) CI uploads `test-results/app` as the **`e2e-results`**
-artifact on every run — review it with
-`gh run download <run-id> --repo nayballs/Yap --name e2e-results --dir e2e-<run-id>`
+policy for `yap.exe` instead.) CI runs it in two shards side by side (by spec file; one runner outgrew the job's
+30-minute limit, 24 Oct 2026) and uploads each shard's `test-results/app` as
+**`e2e-results-1`** / **`e2e-results-2`** on every run — review one with
+`gh run download <run-id> --repo nayballs/Yap --name e2e-results-1 --dir e2e-<run-id>`
 and read the PNGs under `screenshots/`. Full guide (incl. adding a test):
 [`docs/e2e-tests.md`](../e2e-tests.md).
 
