@@ -1,9 +1,11 @@
 <script>
   // Settings → Shortcuts (2026-10-22 review; OpenWhispr's Hotkeys page): the
   // nine global shortcuts together (dictation/input_hook.rs), each in Yap's keycaps,
-  // with a clash said where it happens. Their own pages show them too
-  // (Dictation, Commands, Voice Assistant, Meetings): the same setting. The
-  // saved transforms' shortcuts are a link to Commands → Transforms.
+  // with a clash said where it happens, and "+ Add another" for more keys
+  // for the same action (Wispr Flow's, 2026-10-25: `moreHotkeys`). Their own
+  // pages show the first one too (Dictation, Commands, Voice Assistant,
+  // Meetings): the same setting. The saved transforms' shortcuts are a link
+  // to Commands → Transforms.
   //
   //   cfg:  Settings' config $state (auto-save does the saving).
   //   goto: opens another Settings page.
@@ -41,13 +43,13 @@
 
 <Group title="Global shortcuts" id="settings-shortcuts">
   <Row label="Dictate" desc="Start and stop dictating where you're typing" setting="shortcut-dictation">
-    <SettingsHotkey {cfg} target="hotkey" />
+    <SettingsHotkey {cfg} target="hotkey" more />
   </Row>
   <Row label="Rewrite selected text" desc="Select text, press it and say how to change it" setting="shortcut-rewrite">
-    <SettingsHotkey {cfg} target="editHotkey" clearable />
+    <SettingsHotkey {cfg} target="editHotkey" clearable more />
   </Row>
   <Row label="Ask the Voice Assistant" desc="Ask out loud from any app and hear the answer" setting="shortcut-assistant">
-    <SettingsHotkey {cfg} target="assistantHotkey" clearable />
+    <SettingsHotkey {cfg} target="assistantHotkey" clearable more />
   </Row>
   <Row
     label="Read aloud"
@@ -55,17 +57,17 @@
     hint="Press it again, or Esc, to stop. 🔊 on the Yap bar does the same."
     setting="shortcut-read"
   >
-    <SettingsHotkey {cfg} target="readHotkey" clearable />
+    <SettingsHotkey {cfg} target="readHotkey" clearable more />
   </Row>
   <Row label="Use what I said" desc="Right after a dictation, swap what Yap pasted for your words before AI cleanup" setting="shortcut-as-said">
-    <SettingsHotkey {cfg} target="asSaidHotkey" clearable />
+    <SettingsHotkey {cfg} target="asSaidHotkey" clearable more />
   </Row>
   <Row
     label="Paste last transcript"
     desc="Paste your latest dictation again where you're typing, for a paste that went astray"
     setting="shortcut-paste-last"
   >
-    <SettingsHotkey {cfg} target="pasteLastHotkey" clearable />
+    <SettingsHotkey {cfg} target="pasteLastHotkey" clearable more />
   </Row>
   <Row
     label="Copy last transcript"
@@ -73,10 +75,10 @@
     hint="Like Yap's pastes, it stays out of Windows' clipboard history (Win+V). The tray menu has both too."
     setting="shortcut-copy-last"
   >
-    <SettingsHotkey {cfg} target="copyLastHotkey" clearable />
+    <SettingsHotkey {cfg} target="copyLastHotkey" clearable more />
   </Row>
   <Row label="Meeting notes" desc="Take notes on a call, and press again to stop and summarise" setting="shortcut-meeting">
-    <SettingsHotkey {cfg} target="meetingHotkey" clearable />
+    <SettingsHotkey {cfg} target="meetingHotkey" clearable more />
   </Row>
   <Row
     label="Snip to Chat"
@@ -84,7 +86,7 @@
     hint="Esc or right-click cancels. ✂ on the Yap bar and the tray's Snip to Chat do the same. Windows never lets an app capture its administrator prompts, and video protected from copying comes out black."
     setting="shortcut-snip"
   >
-    <SettingsHotkey {cfg} target="snipHotkey" clearable />
+    <SettingsHotkey {cfg} target="snipHotkey" clearable more />
   </Row>
   <LinkRow
     label="Language shortcuts"
@@ -103,6 +105,7 @@
 </Group>
 
 <p class="set-note">
+  Each can have up to three more keys or mouse buttons: "+ Add another" (F9 and a mouse's side button, say).
   Two shortcuts can't share a key, or fire on one press: Yap says which one has it.
   How the dictation hotkey records (toggle or push-to-talk) is in
   {#if goto}<button type="button" class="set-link" onclick={() => goto('dictation#recording-mode')}>Dictation</button>{:else}Dictation{/if}.

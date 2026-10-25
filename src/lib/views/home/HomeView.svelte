@@ -150,13 +150,15 @@
   async function rerun(e, model = null) {
     if (running) return;
     running = rowKey(e);
-    const busy = toast({ title: 'Running it again…', description: modelName(model || activeModel), busy: true, duration: 0, chip: 'Dictation' });
+    // A cancelled one (dictation/recent_audio.rs) is transcribed for the first time.
+    const first = e.status === 'cancelled';
+    const busy = toast({ title: first ? 'Transcribing it…' : 'Running it again…', description: modelName(model || activeModel), busy: true, duration: 0, chip: 'Dictation' });
     try {
       const r = await invoke('history_rerun', { ts: e.ts, audio: e.audio, model });
       dismiss(busy);
       const preview = r.text.length > 90 ? `${r.text.slice(0, 87).trimEnd()}…` : r.text;
       toast({
-        title: 'Transcribed again',
+        title: first ? 'Transcribed' : 'Transcribed again',
         description: `${r.modelName}: “${preview}”`,
         variant: 'success',
         action: { label: 'Copy', onClick: () => copyText(r.text) },
@@ -183,6 +185,31 @@
       ],
       { label: 'Run again' }
     );
+  }
+
+  /** **Keep** a dictation's audio past its day, or let it go with the rest (`recent_audio_keep`). */
+  async function setKeep(e, keep) {
+    try {
+      await invoke('recent_audio_keep', { id: e.audio, keep });
+      toast({
+        title: keep ? 'Kept' : 'No longer kept',
+        description: keep ? "Its audio stays until you delete it." : "Its audio goes a day after it was said, with the rest.",
+        chip: 'Dictation',
+      });
+    } catch (err) {
+      toast({ title: "Couldn't change it", description: String(err), variant: 'destructive' });
+    }
+    refresh();
+  }
+
+  /** **Save audio…**: the dictation's WAV where you pick (`recent_audio_save`). */
+  async function saveAudio(e) {
+    try {
+      const path = await invoke('recent_audio_save', { id: e.audio });
+      if (path) toast({ title: 'Audio saved', description: String(path).split(/[\\/]/).pop(), variant: 'success', chip: 'Dictation' });
+    } catch (err) {
+      toast({ title: "Couldn't save the audio", description: String(err), variant: 'destructive' });
+    }
   }
 
   function stopPlaying() {
@@ -363,6 +390,12 @@
           ? { label: 'Run again with', items: installed.filter((m) => m !== activeModel).map((m) => ({ label: modelName(m), onselect: () => rerun(e, m) })) }
           : null,
         e.audio ? { label: playing === rowKey(e) ? 'Stop playing' : 'Play', icon: playing === rowKey(e) ? 'stop' : 'play', onselect: () => play(e) } : null,
+        e.audio ? { label: 'Save audio…', icon: 'download', onselect: () => saveAudio(e) } : null,
+        e.audio
+          ? e.keep
+            ? { label: "Don't keep its audio", onselect: () => setKeep(e, false) }
+            : { label: 'Keep its audio', onselect: () => setKeep(e, true) }
+          : null,
         { separator: true },
         { label: 'Delete…', icon: 'trash', danger: true, onselect: () => askRemove(e) },
       ],
@@ -544,7 +577,7 @@
                 <!-- svelte-ignore a11y_no_noninteractive_tabindex, a11y_no_noninteractive_element_interactions -->
                 <div
                   class="item"
-                  class:failed={e.status === 'failed' || e.status === 'notPasted'}
+                  class:failed={e.status === 'failed' || e.status === 'notPasted' || e.status === 'cancelled'}
                   class:menuopen={menuOpenFor(rowEls[rowKey(e)])}
                   bind:this={rowEls[rowKey(e)]}
                   role="article"
@@ -557,6 +590,9 @@
                   <div class="body">
                     {#if e.status === 'failed'}
                       <p class="text failedtext">Not transcribed{e.error ? ` · ${e.error}` : ''}</p>
+                    {:else if e.status === 'cancelled'}
+                      <!-- Cancelled (the bar's ✕, Esc): its audio kept a day, to transcribe after all. -->
+                      <p class="text failedtext">Cancelled · not transcribed</p>
                     {:else}
                       <p class="text">{e.text}</p>
                     {/if}
@@ -589,10 +625,16 @@
                     {#if e.status}
                       <p class="failline">
                         {#if e.status === 'notPasted'}<span class="flag">Didn't paste</span><span class="why">{e.error}</span>{/if}
+                        {#if e.status === 'cancelled'}<span class="flag">Cancelled</span>{/if}
                         {#if e.audio}
                           <button class="retry" disabled={!!running} onclick={() => rerun(e)}>
-                            {running === rowKey(e) ? 'Running…' : 'Run again'}
+                            {running === rowKey(e) ? 'Running…' : e.status === 'cancelled' ? 'Transcribe' : 'Run again'}
                           </button>
+                          {#if e.status === 'cancelled'}
+                            <button class="retry" aria-pressed={!!e.keep} onclick={() => setKeep(e, !e.keep)} title={e.keep ? 'Kept until you delete it: let it go after a day' : 'Keep its audio past the day'}>
+                              {e.keep ? 'Kept' : 'Keep'}
+                            </button>
+                          {/if}
                         {/if}
                       </p>
                     {/if}

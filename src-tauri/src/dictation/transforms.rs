@@ -260,19 +260,15 @@ pub fn assign(fixed: &[(&str, &str)], transforms: &[Transform]) -> Vec<Slot> {
 }
 
 /// The nine fixed shortcuts, by name (`input_hook.rs`): what the language
-/// shortcuts give way to.
+/// shortcuts give way to — each action's first shortcut, then their more
+/// shortcuts ("+ Add another", `moreHotkeys`) under the same names.
 pub fn nine_shortcuts(cfg: &YapConfig) -> Vec<(&'static str, String)> {
-    vec![
-        ("dictation hotkey", cfg.hotkey.clone()),
-        ("rewrite shortcut", cfg.edit_hotkey.clone()),
-        ("meeting shortcut", cfg.meeting_hotkey.clone()),
-        ("assistant shortcut", cfg.assistant_hotkey.clone()),
-        ("read-aloud shortcut", cfg.read_hotkey.clone()),
-        ("Use-what-I-said shortcut", cfg.as_said_hotkey.clone()),
-        ("snip shortcut", cfg.snip_hotkey.clone()),
-        ("Paste-last shortcut", cfg.paste_last_hotkey.clone()),
-        ("Copy-last shortcut", cfg.copy_last_hotkey.clone()),
-    ]
+    use crate::dictation::input_hook::{first_spec, more_specs, FIXED_COUNT, FIXED_NAMES};
+    let mut out: Vec<(&'static str, String)> = (0..FIXED_COUNT).map(|i| (FIXED_NAMES[i], first_spec(cfg, i).to_string())).collect();
+    for (i, name) in FIXED_NAMES.iter().enumerate() {
+        out.extend(more_specs(cfg, i).into_iter().map(|spec| (*name, spec)));
+    }
+    out
 }
 
 /// The shortcuts a transform's gives way to, by name, as [`assign`] takes

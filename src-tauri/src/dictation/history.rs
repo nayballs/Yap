@@ -65,10 +65,15 @@ pub struct HistoryEntry {
 pub const FAILED: &str = "failed";
 /// A dictation transcribed whose paste couldn't land.
 pub const NOT_PASTED: &str = "notPasted";
+/// A dictation the person cancelled (the bar's ✕, Esc, the tray), kept
+/// with its audio a day so it can still be transcribed (Home's
+/// **Transcribe**). Not one in the stats, nor the last dictation.
+pub const CANCELLED: &str = "cancelled";
 
 impl HistoryEntry {
+    /// Never transcribed: failed, or cancelled.
     fn failed(&self) -> bool {
-        self.status.as_deref() == Some(FAILED)
+        matches!(self.status.as_deref(), Some(FAILED | CANCELLED))
     }
 }
 
@@ -219,6 +224,39 @@ pub fn record_failed(ts: Option<u64>, model: &str, app: &str, audio: &str, error
     });
 }
 
+/// A dictation the person cancelled ([`CANCELLED`]), with its audio (it
+/// needs it: there's no text), dated now.
+pub fn record_cancelled(model: &str, app: &str, audio: &str) {
+    push(HistoryEntry {
+        ts: now_secs(),
+        raw: String::new(),
+        text: String::new(),
+        said: None,
+        model: model.to_string(),
+        app: app.to_string(),
+        audio: Some(audio.to_string()),
+        status: Some(CANCELLED.to_string()),
+        error: Some("You cancelled it".to_string()),
+    });
+}
+
+/// The entry with audio `audio` taken out again (a cancelled dictation the
+/// person took back with Undo: it's transcribed as a new one). `false` when
+/// none has it. Its audio is the caller's to drop.
+pub fn forget_audio(audio: &str) -> bool {
+    let mut guard = match STATE.lock() {
+        Ok(g) => g,
+        Err(poisoned) => poisoned.into_inner(),
+    };
+    let entries = guard.get_or_insert_with(load_from_disk);
+    let Some(pos) = entries.iter().position(|e| e.audio.as_deref() == Some(audio)) else {
+        return false;
+    };
+    entries.remove(pos);
+    save_to_disk(entries);
+    true
+}
+
 fn push(entry: HistoryEntry) {
     let mut guard = match STATE.lock() {
         Ok(g) => g,
@@ -294,9 +332,13 @@ pub fn list(limit: usize) -> Value {
             if let Some(said) = &e.said {
                 item["said"] = json!(said);
             }
-            // Its audio, while it's kept (Run again, Play).
+            // Its audio, while it's kept (Run again, Play), and whether
+            // it's kept past its day (Keep).
             if let Some(id) = e.audio.as_deref().filter(|id| crate::dictation::recent_audio::has(id)) {
                 item["audio"] = json!(id);
+                if crate::dictation::recent_audio::is_kept(id) {
+                    item["keep"] = json!(true);
+                }
             }
             if let Some(status) = &e.status {
                 item["status"] = json!(status);
@@ -352,7 +394,7 @@ pub fn recent_dictation_secs(limit: usize) -> Vec<f32> {
     entries
         .iter()
         .rev()
-        .filter(|e| is_dictation_app(&e.app) && e.status.as_deref() != Some(FAILED))
+        .filter(|e| is_dictation_app(&e.app) && !e.failed())
         .map(|e| if e.raw.trim().is_empty() { &e.text } else { &e.raw })
         .map(|t| t.split_whitespace().count() as f32 * 60.0 / SPEAKING_WPM as f32)
         .filter(|secs| *secs > 0.0)
@@ -553,6 +595,23 @@ mod tests {
         assert_eq!((fixed.status, fixed.text.as_str(), fixed.model.as_str()), (None, "The plan is ready.", "large"));
         assert_eq!(fixed.said.as_deref(), Some("um the plan is ready"));
         assert!(!rerun_result("t-gone", "x", "x", None, "large"));
+    }
+
+    #[test]
+    fn a_cancelled_dictation_is_listed_until_transcribed_or_taken_back() {
+        let before = now_secs();
+        record_cancelled("parakeet-tdt-0.6b-v3", "notepad.exe", "t-cancelled");
+        let e = (before..=now_secs()).find_map(|ts| find_audio(ts, "t-cancelled")).expect("listed");
+        assert_eq!(e.status.as_deref(), Some(CANCELLED));
+        assert!(e.failed(), "not in the stats");
+        assert!(e.text.is_empty());
+        // Transcribe (Run again's path): a dictation like any other.
+        assert!(rerun_result("t-cancelled", "the draft", "The draft.", None, "large"));
+        assert!(!find_audio(e.ts, "t-cancelled").unwrap().failed());
+        // Undo took one back: it leaves the list.
+        record_cancelled("parakeet-tdt-0.6b-v3", "notepad.exe", "t-undone");
+        assert!(forget_audio("t-undone"));
+        assert!(!forget_audio("t-undone"));
     }
 
     #[test]

@@ -96,6 +96,31 @@ pub(crate) fn dictation_ended() {
     DICTATION.fetch_and(!1, Ordering::SeqCst);
 }
 
+/// The running pipeline, if there is one, for the input hook's news.
+fn with_pipeline(app: &AppHandle, f: impl FnOnce(&Pipeline)) {
+    use tauri::Manager;
+    let Some(state) = app.try_state::<crate::AppState>() else { return };
+    let guard = state.pipeline.lock();
+    if let Ok(guard) = guard {
+        if let Some(p) = guard.as_ref() {
+            f(p);
+        }
+    }
+}
+
+/// The input hook: a hold-to-talk press grew into a chord (another key went
+/// down at `at`, under a second after it): the person meant a shortcut, so
+/// the recording it started is dropped silently (`input_hook.rs`).
+pub(crate) fn key_chord(app: &AppHandle, at: u64) {
+    with_pipeline(app, |p| p.shared.key_chord(at));
+}
+
+/// The input hook's stuck-key sweep let go of a hold-to-talk key whose
+/// key-up it never heard: a recording it held goes on hands-free.
+pub(crate) fn key_stuck(app: &AppHandle) {
+    with_pipeline(app, |p| p.shared.key_lost());
+}
+
 /// The Chat view's mic asked for the next dictation (`dictation::commands::chat_dictate`;
 /// taken by the recording it starts, cleared right after).
 static CHAT_ARMED: AtomicBool = AtomicBool::new(false);
@@ -269,6 +294,9 @@ struct Kept {
     selection: Option<String>,
     /// Edit mode's last dictation to rewrite (nothing was selected).
     rewrite_last: Option<crate::pasting::as_said::Pasted>,
+    /// Its audio in `recent_audio` and its "Cancelled" entry in history
+    /// (Home's Transcribe, for a day); Undo takes both back out.
+    audio_id: Option<String>,
 }
 
 /// The latest dictation's report, for the robot's WAV dictations (which
@@ -333,6 +361,10 @@ struct GestureSlot {
     /// …or the assistant shortcut's (no coaching hints for it either: they
     /// name the dictation hotkey).
     assistant: bool,
+    /// Toggle mode: the press that started the recording now (when, and
+    /// the recording's `rec_session`) — another key joining it within a
+    /// second makes it a chord (`key_chord`).
+    toggle_press: Option<(u64, u64)>,
 }
 
 /// State shared between the audio callback, the hotkey toggle, and STT.

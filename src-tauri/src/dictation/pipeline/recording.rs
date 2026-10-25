@@ -224,6 +224,8 @@ impl Shared {
             match crossed {
                 Some(crate::dictation::cap::Crossed::Warn) => {
                     tracing::info!(left_ms = cap.left_ms(), "Dictation: nearing its length limit");
+                    // Suspiciously long: is a key stuck down? (Never stops it.)
+                    crate::dictation::input_hook::sweep_now("a dictation near its length limit");
                     let _ = self.app.emit(
                         crate::dictation::cap::EVENT,
                         serde_json::json!({ "leftMs": cap.left_ms(), "text": crate::dictation::cap::warning(&cap) }),
@@ -273,15 +275,23 @@ impl Shared {
     /// stamped by the input hook); `None` = now.
     pub(super) fn on_key(self: &Arc<Self>, pressed: bool, edit: bool, at: Option<u64>) {
         let mut g = self.gesture.lock().unwrap_or_else(|p| p.into_inner());
+        let now = at.unwrap_or_else(crate::dictation::gesture::now_ms);
         if self.recording_mode() != "pushToTalk" {
             g.machine.reset();
             drop(g);
             if pressed {
+                let was = self.recording.load(Ordering::SeqCst);
                 self.toggle(edit);
+                // The press that started this recording (a chord joining it
+                // within a second drops it: `key_chord`).
+                let started = !was && self.recording.load(Ordering::SeqCst);
+                let session = self.rec_session.load(Ordering::SeqCst);
+                self.gesture.lock().unwrap_or_else(|p| p.into_inner()).toggle_press = started.then_some((now, session));
             }
             return;
         }
-        let now = at.unwrap_or_else(crate::dictation::gesture::now_ms);
+        let triple = self.config.read().map(|c| c.triple_tap_meeting).unwrap_or(false);
+        g.machine.set_triple_tap(triple);
         let recording = self.recording.load(Ordering::SeqCst);
         let step = if pressed {
             g.machine.press(now, recording)
@@ -312,6 +322,60 @@ impl Shared {
         self.apply_gesture(&mut g, step, edit);
     }
 
+    /// Another key went down at `at` while a hold-to-talk key was held,
+    /// under a second after its press (the input hook): the person meant a
+    /// shortcut that shares the key (AltGr+E, Ctrl+Win+D). A recording that
+    /// press started is thrown away silently — nothing transcribed or
+    /// pasted, no stop chime, no Undo — with the "hold only {key}" tip.
+    /// Push-to-talk: the gesture decides (`gesture::chord`); toggle mode:
+    /// the press that started this recording, under a second before.
+    pub(super) fn key_chord(self: &Arc<Self>, at: u64) {
+        let mut g = self.gesture.lock().unwrap_or_else(|p| p.into_inner());
+        let recording = self.recording.load(Ordering::SeqCst);
+        if self.recording_mode() == "pushToTalk" {
+            let step = g.machine.chord(at, recording);
+            let edit = g.edit;
+            self.apply_gesture(&mut g, step, edit);
+            return;
+        }
+        let session = self.rec_session.load(Ordering::SeqCst);
+        let ours = g
+            .toggle_press
+            .is_some_and(|(pressed, s)| s == session && at.saturating_sub(pressed) < crate::dictation::gesture::CHORD_MS);
+        if !(recording && ours) {
+            return;
+        }
+        g.toggle_press = None;
+        let quiet = self.edit_mode.load(Ordering::SeqCst) || self.assistant.load(Ordering::SeqCst);
+        tracing::info!("Toggle: the press grew into a chord within a second, so it was a shortcut: dropped");
+        self.cancel(false);
+        if !quiet {
+            self.offer_hint(crate::dictation::gesture::Hint::ChordPress);
+        }
+    }
+
+    /// The input hook's stuck-key sweep let go of the key holding a
+    /// push-to-talk recording (its key-up was lost: the lock screen, a UAC
+    /// prompt, sleep): the recording goes on **hands-free** — never stopped
+    /// here — and the bar shows it can be stopped (`yap-dictation-locked`).
+    pub(super) fn key_lost(self: &Arc<Self>) {
+        let mut g = self.gesture.lock().unwrap_or_else(|p| p.into_inner());
+        if self.recording_mode() != "pushToTalk" {
+            return;
+        }
+        let step = g.machine.key_lost(self.recording.load(Ordering::SeqCst));
+        let edit = g.edit;
+        self.apply_gesture(&mut g, step, edit);
+    }
+
+    /// A coaching hint about the dictation hotkey, off the locks (showing it
+    /// asks the main thread whether the window is on screen).
+    fn offer_hint(&self, hint: crate::dictation::gesture::Hint) {
+        let hotkey = self.config.read().map(|c| c.hotkey.clone()).unwrap_or_default();
+        let app = self.app.clone();
+        std::thread::spawn(move || crate::dictation::coaching::offer(&app, hint, &hotkey));
+    }
+
     /// Do what a gesture step says (with the gesture lock held, so a key
     /// event and the tap timer never act at once). `edit`: the hotkey that
     /// starts a recording here.
@@ -331,9 +395,15 @@ impl Shared {
                 // to hold, tap or lock.
                 if !self.recording.load(Ordering::SeqCst) {
                     g.machine.reset();
+                } else {
+                    self.ask_sweep_after_a_long_hold();
                 }
             }
             Action::Stop => self.stop_and_transcribe(),
+            Action::Discard if step.hint == Some(crate::dictation::gesture::Hint::ChordHold) => {
+                tracing::info!("Push-to-talk: the press grew into a chord within a second, so it was a shortcut: dropped");
+                self.cancel(false);
+            }
             Action::Discard => {
                 tracing::info!("Push-to-talk: a lone tap, nothing to transcribe");
                 self.cancel(false);
@@ -342,6 +412,23 @@ impl Shared {
                 tracing::info!("Push-to-talk: double-tap, recording hands-free");
                 let _ = self.app.emit("yap-dictation-locked", true);
                 std::thread::spawn(crate::dictation::coaching::hands_free_used);
+            }
+            Action::Unstick => {
+                tracing::info!("Push-to-talk: the key holding the recording was stuck down; it goes on hands-free");
+                let _ = self.app.emit("yap-dictation-locked", true);
+            }
+            Action::TripleTap => {
+                // A meeting being recorded already: the press stops the
+                // dictation as ever (never the meeting).
+                if crate::meetings::meeting::is_recording() {
+                    tracing::info!("Push-to-talk: a triple-tap during a meeting stops the dictation");
+                    self.stop_and_transcribe();
+                } else {
+                    tracing::info!("Push-to-talk: triple-tap, meeting notes instead of a dictation");
+                    self.cancel(false);
+                    let app = self.app.clone();
+                    std::thread::spawn(move || crate::calls::meeting_guard::start_or_stop(&app));
+                }
             }
             Action::None => {}
         }
@@ -352,13 +439,41 @@ impl Shared {
                 shared.gesture_tick();
             });
         }
-        // Coaching is about the dictation hotkey. Off the locks: showing it
-        // asks the main thread whether the window is on screen.
+        // Coaching is about the dictation hotkey.
         if let (Some(hint), false, false) = (step.hint, g.edit, g.assistant) {
-            let hotkey = self.config.read().map(|c| c.hotkey.clone()).unwrap_or_default();
-            let app = self.app.clone();
-            std::thread::spawn(move || crate::dictation::coaching::offer(&app, hint, &hotkey));
+            self.offer_hint(hint);
         }
+    }
+
+    /// "Long dictation? Try meeting notes" (`coaching.rs`, once ever), naming
+    /// the meeting shortcut — once this dictation is done (transcribed and
+    /// pasted; a tip never lands mid-dictation), within a minute.
+    fn suggest_meeting_notes(&self) {
+        let app = self.app.clone();
+        let hotkey = self.config.read().map(|c| c.meeting_hotkey.clone()).unwrap_or_default();
+        let _ = std::thread::Builder::new().name("dictation-meeting-tip".into()).spawn(move || {
+            let started = Instant::now();
+            std::thread::sleep(Duration::from_millis(500));
+            while crate::notices::notice::moment().dictating && started.elapsed() < Duration::from_secs(60) {
+                std::thread::sleep(Duration::from_millis(250));
+            }
+            tracing::info!("Dictation: a long one; meeting notes suggested if it's due");
+            crate::dictation::coaching::offer(&app, crate::dictation::gesture::Hint::LongDictation, &hotkey);
+        });
+    }
+
+    /// A push-to-talk hold of a minute is suspiciously long: the input hook
+    /// checks its keys then (`input_hook::sweep_now`; it never stops the
+    /// recording — a stuck one goes on hands-free).
+    fn ask_sweep_after_a_long_hold(self: &Arc<Self>) {
+        let shared = Arc::clone(self);
+        let session = self.rec_session.load(Ordering::SeqCst);
+        let _ = std::thread::Builder::new().name("dictation-long-hold".into()).spawn(move || {
+            std::thread::sleep(Duration::from_millis(crate::dictation::gesture::LONG_HOLD_MS));
+            if shared.recording.load(Ordering::SeqCst) && shared.rec_session.load(Ordering::SeqCst) == session {
+                crate::dictation::input_hook::sweep_now("a push-to-talk hold of a minute");
+            }
+        });
     }
 
     pub(super) fn start_recording(self: &Arc<Self>, edit: bool) {
@@ -824,14 +939,19 @@ impl Shared {
             return;
         }
         let id = self.kept_seq.fetch_add(1, Ordering::SeqCst) + 1;
+        let target_hwnd = self.target_hwnd.load(Ordering::Relaxed);
+        // Never lost: kept a day too, in Home as "Cancelled" with Transcribe
+        // (not a rewrite's spoken instruction, which isn't a dictation).
+        let audio_id = if edit { None } else { self.keep_cancelled(&audio, target_hwnd) };
         let kept = Kept {
             id,
             audio,
-            target_hwnd: self.target_hwnd.load(Ordering::Relaxed),
+            target_hwnd,
             target_kind: self.target_kind.lock().map(|k| *k).unwrap_or_default(),
             edit,
             selection,
             rewrite_last,
+            audio_id,
         };
         if let Ok(mut k) = self.kept.lock() {
             *k = Some(kept);
@@ -866,6 +986,24 @@ impl Shared {
         }
     }
 
+    /// A cancelled dictation's audio kept a day (`recent_audio.rs`) and
+    /// listed in history as "Cancelled" — Home's **Transcribe** runs it
+    /// again — when recent audio and history are on. Its audio's id.
+    fn keep_cancelled(&self, audio: &[f32], target_hwnd: isize) -> Option<String> {
+        let (id, model) = {
+            let cfg = self.config.read().ok()?;
+            (crate::dictation::recent_audio::keep(audio, &cfg)?, cfg.model_size.clone())
+        };
+        let app_name = crate::pasting::text_injector::app_name_for((target_hwnd != 0).then_some(target_hwnd)).unwrap_or_default();
+        crate::dictation::history::record_cancelled(&model, &app_name, &id);
+        tracing::info!(id = %id, "A cancelled dictation is in history with its audio (Transcribe)");
+        let _ = self.app.emit("yap-history-changed", ());
+        // Its WAV is being written on its own thread: done pending once it is.
+        let finished = id.clone();
+        std::thread::spawn(move || crate::dictation::recent_audio::finished(&finished));
+        Some(id)
+    }
+
     /// **Undo** a cancel: the kept recording is transcribed and pasted
     /// exactly as if it had been stopped — into the window it was meant for
     /// (never the one in front now, if that's another), with its own kind of
@@ -882,6 +1020,13 @@ impl Shared {
             busy.done();
             return Err("Nothing to undo: the cancelled dictation is gone".into());
         };
+        // Taken back: no longer "Cancelled" in Home (it's transcribed now,
+        // as a dictation of its own, its audio kept afresh).
+        if let Some(id) = &k.audio_id {
+            crate::dictation::history::forget_audio(id);
+            crate::dictation::recent_audio::discard(id);
+            let _ = self.app.emit("yap-history-changed", ());
+        }
         self.target_hwnd.store(k.target_hwnd, Ordering::Relaxed);
         if let Ok(mut kind) = self.target_kind.lock() {
             *kind = k.target_kind;
@@ -956,6 +1101,16 @@ impl Shared {
             .map(|mut b| std::mem::take(&mut *b))
             .unwrap_or_default();
         tracing::info!(samples = audio.len(), "Recording stopped, transcribing");
+        // A dictation of ten minutes: meeting notes would have gone on past
+        // the limit and summarised (a quiet tip, once ever; not for a
+        // rewrite's instruction or a question).
+        let ms = audio.len() as u64 * 1000 / super::TARGET_SAMPLE_RATE as u64;
+        if ms >= crate::dictation::cap::meeting_hint_ms()
+            && !self.edit_mode.load(Ordering::SeqCst)
+            && !self.assistant.load(Ordering::SeqCst)
+        {
+            self.suggest_meeting_notes();
+        }
 
         // Mark "processing" so a rapid re-toggle can't start an overlapping
         // transcription. Cleared when the task ends, however it ends (`Busy`).

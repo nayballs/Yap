@@ -276,6 +276,19 @@ pub struct YapConfig {
     /// paste is; nothing pasted. Empty = unbound (the default).
     #[serde(default)]
     pub copy_last_hotkey: String,
+    /// **More shortcuts for one action** (Settings → Shortcuts, "+ Add
+    /// another"; `input_hook.rs`, 2026-10-25): up to `input_hook::MORE` more
+    /// keys or mouse buttons per action, keyed by its first shortcut's
+    /// field ("hotkey", "editHotkey", "meetingHotkey"…). The first stays in
+    /// its own field, so a config from before (or an older Yap reading this
+    /// one) is read as ever; [`load`] tidies the lists.
+    #[serde(default)]
+    pub more_hotkeys: std::collections::BTreeMap<String, Vec<String>>,
+    /// "Triple-tap for meeting notes" (Settings → Dictation, push-to-talk;
+    /// `gesture.rs`): three quick taps of the dictation key throw the
+    /// dictation away and start meeting notes. Off by default.
+    #[serde(default)]
+    pub triple_tap_meeting: bool,
     /// The Yap bar offers "Use what I said" for a few seconds after a
     /// dictation whose words AI cleanup changed (`as_said.rs`). On by default.
     #[serde(default = "default_true")]
@@ -1099,6 +1112,8 @@ impl Default for YapConfig {
             as_said_hotkey: String::new(),
             paste_last_hotkey: String::new(),
             copy_last_hotkey: String::new(),
+            more_hotkeys: Default::default(),
+            triple_tap_meeting: false,
             as_said_offer: true,
             snip_hotkey: default_snip_hotkey(),
             snip_voice: true,
@@ -1280,6 +1295,8 @@ pub fn load() -> YapConfig {
     // built-in styles' profiles there to edit.
     crate::ai::cleanup_styles::on_load(&mut cfg);
     migrate_retired_groq_models(&mut cfg);
+    // More shortcuts per action: tidied (`input_hook::tidy_more`).
+    crate::dictation::input_hook::tidy_more(&mut cfg);
     // The GPU switch from before "Runs on" (2026-10-22): off meant the
     // processor. (`save` keeps the two in step, so this never undoes a
     // choice made since.)

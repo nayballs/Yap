@@ -35,6 +35,7 @@ export const SETTINGS_INDEX = [
   // ---- Dictation ----
   { page: 'dictation', section: 'Start and stop', label: 'Hotkey', desc: 'Press it in any app to start and stop dictating', keywords: 'shortcut key keyboard f9 dictation start stop copilot key', anchor: 'hotkey' },
   { page: 'dictation', section: 'Start and stop', label: 'Recording mode', desc: 'Toggle, or hold the key while you talk', keywords: 'push-to-talk push to talk toggle hold hands-free double-tap', anchor: 'recording-mode' },
+  { page: 'dictation', section: 'Start and stop', label: 'Triple-tap for meeting notes', desc: 'Three quick taps of the dictation key start meeting notes (push-to-talk)', keywords: 'triple tap triple-tap meeting notes push-to-talk notetaker', anchor: 'triple-tap-meeting', fallback: 'recording-mode' },
   { page: 'dictation', section: 'My languages', label: 'Languages you speak', desc: 'Every language you dictate in', keywords: 'language languages multilingual bilingual french spanish german english auto-detect detect my languages', anchor: 'my-languages' },
   { page: 'dictation', section: 'My languages', label: 'Your speech model', desc: 'Which model understands which of your languages', keywords: 'language languages model whisper parakeet multilingual covers supports recommended', anchor: 'language-models', fallback: 'my-languages' },
   { page: 'dictation', section: 'My languages', label: 'Main shortcut', desc: 'Auto, or one of your languages', keywords: 'language auto-detect hotkey main fixed', anchor: 'main-language', fallback: 'my-languages' },
@@ -62,7 +63,7 @@ export const SETTINGS_INDEX = [
   { page: 'dictation', section: 'Typing into apps', label: 'Dictionary', desc: 'Words Yap should spell your way, and snippets', keywords: 'corrections snippets words spelling vocabulary jargon', anchor: 'dictionary' },
 
   // ---- Shortcuts ----
-  { page: 'shortcuts', section: 'Global shortcuts', label: 'Dictate', desc: 'Start and stop dictating where you are typing', keywords: 'shortcut shortcuts hotkey keyboard dictation key', anchor: 'shortcut-dictation' },
+  { page: 'shortcuts', section: 'Global shortcuts', label: 'Dictate', desc: 'Start and stop dictating where you are typing', keywords: 'shortcut shortcuts hotkey keyboard dictation key mouse button side button add another second more', anchor: 'shortcut-dictation' },
   { page: 'shortcuts', section: 'Global shortcuts', label: 'Rewrite selected text', desc: 'Select text, press it and say how to change it', keywords: 'shortcut shortcuts hotkey edit rewrite commands', anchor: 'shortcut-rewrite' },
   { page: 'shortcuts', section: 'Global shortcuts', label: 'Language shortcuts', desc: 'A key for a language of yours, or to translate as you dictate', keywords: 'language languages shortcut shortcuts hotkey translate translation bilingual', anchor: 'shortcut-languages' },
   { page: 'shortcuts', section: 'Global shortcuts', label: 'Transforms', desc: 'Polish, Shorter, Translate and your own, each on a key', keywords: 'transform transforms shortcut shortcuts hotkey polish translate', anchor: 'shortcut-transforms' },

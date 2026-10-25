@@ -30,11 +30,41 @@
 //! (AutoHotkey's `#MenuMaskKey`): otherwise letting go of Alt would open the
 //! focused app's menu bar (Office shows its KeyTips) and Win the Start menu,
 //! as neither saw another key in between.
+//!
+//! **Several shortcuts for one action** (2026-10-25, Wispr Flow's "Add
+//! another"): each of the nine fixed actions has its first shortcut (the
+//! config's `hotkey`, `editHotkey`…, as ever) and up to [`MORE`] more
+//! (`moreHotkeys`, [`configure_more_from`]). They act as one key: the
+//! action's press goes out when the first of them goes down and its release
+//! when the last comes up, so holding F9 and a mouse button together is one
+//! hold. The extras give way to every first shortcut and to earlier extras
+//! ([`clashes`]); language shortcuts and transforms give way to them all.
+//!
+//! **What's held** ([`is_held`], [`held_keys`]): the hook keeps every key it
+//! has seen go down and not up — swallowed ones too, which Windows' own key
+//! state never shows. Two things read it: a key going down that wasn't held
+//! is **another key**, which makes a hold-to-talk press under a second a
+//! chord ([`held::another_key`] → the pipeline's `key_chord`: dropped
+//! silently, the "hold only {key}" tip); and the **stuck-key sweep**
+//! (`held.rs`): every [`held::SWEEP_MS`], at once on a desktop switch (the
+//! lock screen, a UAC prompt) or after a sleep, and when the pipeline asks
+//! ([`sweep_now`]), active bindings are checked against `GetAsyncKeyState`
+//! and the evidence; a stuck one is let go **without** its release (the
+//! pipeline's `key_stuck`: a recording it held goes on hands-free — the
+//! sweep never starts or stops a dictation).
+//!
+//! **Robot mode** (`realtest.rs`, debug builds): the hook runs too, but acts
+//! only on keys the robot marks as its own ([`ROBOT_MARK`] in the event's
+//! extra info); everything else passes by untouched, as if no hook were
+//! there. [`UNHEARD_MARK`] is a key event the hook pretends it never heard
+//! (a key-up lost to the lock screen, staged).
 
 // FFI type names match Win32 API conventions (HHOOK, POINT, MSG, etc.)
 #![allow(clippy::upper_case_acronyms)]
 
-use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU8, Ordering};
+mod held;
+
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, AtomicU8, Ordering};
 use tauri::AppHandle;
 #[cfg(target_os = "windows")]
 use tauri::Emitter;
@@ -69,6 +99,14 @@ struct KeyBinding {
     mods: AtomicU8,
     /// Whether the key is currently pressed (for repeat suppression)
     active: AtomicBool,
+    /// When its press fired (`gesture::now_ms`).
+    since: AtomicU64,
+    /// When its main key last went down again while held (the keyboard
+    /// repeating it); 0: not yet in this press. The stuck-key sweep's
+    /// evidence (`held.rs`).
+    repeat_at: AtomicU64,
+    /// This press already grew into a chord (said once).
+    chorded: AtomicBool,
 }
 
 impl KeyBinding {
@@ -78,6 +116,9 @@ impl KeyBinding {
             key_code: AtomicU32::new(0),
             mods: AtomicU8::new(0),
             active: AtomicBool::new(false),
+            since: AtomicU64::new(0),
+            repeat_at: AtomicU64::new(0),
+            chorded: AtomicBool::new(false),
         }
     }
 
@@ -86,6 +127,10 @@ impl KeyBinding {
         self.key_type.store(key_type, Ordering::Release);
         self.key_code.store(key_code, Ordering::Release);
         self.mods.store(mods, Ordering::Release);
+    }
+
+    fn is_active(&self) -> bool {
+        self.active.load(Ordering::Relaxed)
     }
 
     fn matches_mouse(&self, button_id: u32) -> bool {
@@ -111,23 +156,79 @@ impl KeyBinding {
 
 // ---- Shared state ----
 
-static DICTATION_BINDING: KeyBinding = KeyBinding::new();
-static EDIT_BINDING: KeyBinding = KeyBinding::new();
-static MEETING_BINDING: KeyBinding = KeyBinding::new();
-static ASSISTANT_BINDING: KeyBinding = KeyBinding::new();
-static READ_BINDING: KeyBinding = KeyBinding::new();
+/// The nine fixed actions, in the order they give way to each other: each
+/// one's index into [`FIXED`], [`FIXED_KEYS`], [`FIXED_NAMES`] and
+/// [`FIXED_EVENTS`].
+pub(crate) const DICTATION: usize = 0;
+const EDIT: usize = 1;
+const MEETING: usize = 2;
+const ASSISTANT: usize = 3;
+const READ: usize = 4;
 /// "Use what I said" (`as_said.rs`): swap the last cleaned dictation's
 /// paste for the words as said. Unbound by default.
-static AS_SAID_BINDING: KeyBinding = KeyBinding::new();
+const AS_SAID: usize = 5;
 /// Snip to Chat (`snip.rs`): drag a box over any screen. Win+Alt+S by
 /// default; its press only.
-static SNIP_BINDING: KeyBinding = KeyBinding::new();
+const SNIP: usize = 6;
 /// Paste last transcript (`pasting/last.rs`): the latest dictation again,
 /// where you're typing. Unbound by default; its press only.
-static PASTE_LAST_BINDING: KeyBinding = KeyBinding::new();
+const PASTE_LAST: usize = 7;
 /// Copy last transcript (`pasting/last.rs`): the latest dictation onto the
 /// clipboard. Unbound by default; its press only.
-static COPY_LAST_BINDING: KeyBinding = KeyBinding::new();
+const COPY_LAST: usize = 8;
+/// How many fixed actions there are.
+pub const FIXED_COUNT: usize = 9;
+/// Each fixed action's config key — its first shortcut's field, as
+/// Settings and `moreHotkeys` name it.
+pub const FIXED_KEYS: [&str; FIXED_COUNT] = [
+    "hotkey",
+    "editHotkey",
+    "meetingHotkey",
+    "assistantHotkey",
+    "readHotkey",
+    "asSaidHotkey",
+    "snipHotkey",
+    "pasteLastHotkey",
+    "copyLastHotkey",
+];
+/// …its name in messages ("clashes with the dictation hotkey").
+pub const FIXED_NAMES: [&str; FIXED_COUNT] = [
+    "dictation hotkey",
+    "rewrite shortcut",
+    "meeting shortcut",
+    "assistant shortcut",
+    "read-aloud shortcut",
+    "Use-what-I-said shortcut",
+    "snip shortcut",
+    "Paste-last shortcut",
+    "Copy-last shortcut",
+];
+/// …and its events (pressed, released).
+const FIXED_EVENTS: [(&str, &str); FIXED_COUNT] = [
+    ("dictation-key-pressed", "dictation-key-released"),
+    ("edit-key-pressed", "edit-key-released"),
+    ("meeting-key-pressed", "meeting-key-released"),
+    ("assistant-key-pressed", "assistant-key-released"),
+    ("read-key-pressed", "read-key-released"),
+    ("as-said-key-pressed", "as-said-key-released"),
+    ("snip-key-pressed", "snip-key-released"),
+    ("paste-last-key-pressed", "paste-last-key-released"),
+    ("copy-last-key-pressed", "copy-last-key-released"),
+];
+/// The actions a key is held for (push-to-talk): a chord or a stuck key
+/// matters to them.
+const HOLDS: [usize; 3] = [DICTATION, EDIT, ASSISTANT];
+/// Each fixed action's first shortcut.
+static FIXED: [KeyBinding; FIXED_COUNT] = [const { KeyBinding::new() }; FIXED_COUNT];
+/// More shortcuts for one action, beside its first ("+ Add another").
+pub const MORE: usize = 3;
+/// Each fixed action's more shortcuts ([`configure_more_from`]).
+static MORE_BINDINGS: [[KeyBinding; MORE]; FIXED_COUNT] = [const { [const { KeyBinding::new() }; MORE] }; FIXED_COUNT];
+
+/// Fixed action `i`'s shortcuts: its first, then its more.
+fn group(i: usize) -> impl Iterator<Item = &'static KeyBinding> {
+    std::iter::once(&FIXED[i]).chain(MORE_BINDINGS[i].iter())
+}
 /// Saved transforms' shortcuts (`transforms.rs`): a slot each, in the
 /// list's order (`transforms::assign`); only the press is used. Beside the
 /// nine fixed bindings, always giving way to them.
@@ -189,8 +290,228 @@ static EVENT_TX: std::sync::OnceLock<std::sync::mpsc::Sender<(&'static str, u64)
 /// `send_menu_mask`) — SendInput is kept out of the hook callback too.
 #[cfg(target_os = "windows")]
 const MENU_MASK: &str = "input-hook:menu-mask";
+/// Not an event: a hold-to-talk key's press under a second grew into a
+/// chord (its press's time with it); the forwarder tells the pipeline.
+#[cfg(target_os = "windows")]
+const CHORD: &str = "input-hook:chord";
+/// Not an event: the sweep let go of a hold-to-talk key that was stuck
+/// "down"; the forwarder tells the pipeline.
+#[cfg(target_os = "windows")]
+const STUCK: &str = "input-hook:stuck";
+
+/// Every key the hook has seen go down and not up (a bit per virtual key):
+/// swallowed ones too, which Windows' key state never shows.
+static HELD: [AtomicU64; 4] = [const { AtomicU64::new(0) }; 4];
+/// When a key last went down that wasn't held already (`gesture::now_ms`):
+/// the keyboard stops repeating an older key then.
+static LAST_NEW_KEY_AT: AtomicU64 = AtomicU64::new(0);
+/// The tick count (`GetTickCount`) of the last input the hook heard, to
+/// compare with Windows' own last input (`held::missed_input`).
+static HEARD_TICK: AtomicU32 = AtomicU32::new(0);
+/// The hook's thread (its id), for [`sweep_now`].
+static HOOK_THREAD: AtomicU32 = AtomicU32::new(0);
+/// Robot mode: act only on the robot's own keys ([`ROBOT_MARK`]).
+static ROBOT_ONLY: AtomicBool = AtomicBool::new(false);
+/// A key event the robot sent for the hook to act on (its extra info).
+pub const ROBOT_MARK: usize = 0x5941_5052;
+/// A key event the robot sent for the hook to miss (a key-up the lock
+/// screen took): it passes by unheard.
+pub const UNHEARD_MARK: usize = 0x5941_5055;
+
+/// Whether the hook has `vk` down (pure bookkeeping, any thread).
+pub fn is_held(vk: u32) -> bool {
+    vk < 256 && HELD[(vk / 64) as usize].load(Ordering::Relaxed) & (1u64 << (vk % 64)) != 0
+}
+
+/// The keys the hook has down now (virtual keys), swallowed ones included.
+/// Kept honest by the stuck-key sweep: a key Windows says is up, that no
+/// binding is holding, is forgotten there.
+pub fn held_keys() -> Vec<u32> {
+    (0..256u32).filter(|&vk| is_held(vk)).collect()
+}
+
+/// Mark `vk` down or up; whether it was down before.
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+fn set_held(vk: u32, down: bool) -> bool {
+    if vk >= 256 {
+        return false;
+    }
+    let bit = 1u64 << (vk % 64);
+    let word = &HELD[(vk / 64) as usize];
+    let before = if down { word.fetch_or(bit, Ordering::Relaxed) } else { word.fetch_and(!bit, Ordering::Relaxed) };
+    before & bit != 0
+}
 
 // ---- Public API ----
+
+/// Parse a key spec and set fixed action `i`'s first shortcut.
+fn configure_fixed(i: usize, what: &str, key_spec: &str) -> Result<String, String> {
+    let (key_type, key_code, mods) = parse_key_spec(key_spec)?;
+    FIXED[i].configure(key_type, key_code, mods);
+    let desc = format_binding(key_type, key_code, mods);
+    info!("{} key configured: {} (spec: {:?})", what, desc, key_spec);
+    Ok(desc)
+}
+
+/// Fixed action `i`'s first shortcut in `cfg` (its old single field).
+pub fn first_spec(cfg: &crate::config::YapConfig, i: usize) -> &str {
+    match i {
+        DICTATION => &cfg.hotkey,
+        EDIT => &cfg.edit_hotkey,
+        MEETING => &cfg.meeting_hotkey,
+        ASSISTANT => &cfg.assistant_hotkey,
+        READ => &cfg.read_hotkey,
+        AS_SAID => &cfg.as_said_hotkey,
+        SNIP => &cfg.snip_hotkey,
+        PASTE_LAST => &cfg.paste_last_hotkey,
+        COPY_LAST => &cfg.copy_last_hotkey,
+        _ => "",
+    }
+}
+
+/// Set fixed action `i`'s first shortcut in `cfg`.
+fn set_first_spec(cfg: &mut crate::config::YapConfig, i: usize, spec: String) {
+    let field = match i {
+        DICTATION => &mut cfg.hotkey,
+        EDIT => &mut cfg.edit_hotkey,
+        MEETING => &mut cfg.meeting_hotkey,
+        ASSISTANT => &mut cfg.assistant_hotkey,
+        READ => &mut cfg.read_hotkey,
+        AS_SAID => &mut cfg.as_said_hotkey,
+        SNIP => &mut cfg.snip_hotkey,
+        PASTE_LAST => &mut cfg.paste_last_hotkey,
+        COPY_LAST => &mut cfg.copy_last_hotkey,
+        _ => return,
+    };
+    *field = spec;
+}
+
+/// `moreHotkeys` tidied at load (idempotent, so not a one-time migration:
+/// the first shortcut never moved, and a config from before has none): only
+/// the nine actions' keys, no blanks, no repeats of the action's own keys,
+/// at most [`MORE`] each — and an action whose first shortcut was taken away
+/// by hand gets its next one moved up into it.
+pub fn tidy_more(cfg: &mut crate::config::YapConfig) {
+    let map = std::mem::take(&mut cfg.more_hotkeys);
+    for (i, key) in FIXED_KEYS.iter().enumerate() {
+        let Some(list) = map.get(*key) else { continue };
+        let mut first = first_spec(cfg, i).trim().to_string();
+        let mut kept: Vec<String> = Vec::new();
+        for spec in list.iter().map(|s| s.trim()).filter(|s| !s.is_empty()) {
+            if first.is_empty() {
+                first = spec.to_string();
+                set_first_spec(cfg, i, first.clone());
+            } else if spec != first && !kept.iter().any(|k| k == spec) && kept.len() < MORE {
+                kept.push(spec.to_string());
+            }
+        }
+        if !kept.is_empty() {
+            cfg.more_hotkeys.insert((*key).to_string(), kept);
+        }
+    }
+}
+
+/// Fixed action `i`'s more shortcuts in `cfg` (`moreHotkeys`), as saved.
+pub fn more_specs(cfg: &crate::config::YapConfig, i: usize) -> Vec<String> {
+    FIXED_KEYS
+        .get(i)
+        .and_then(|key| cfg.more_hotkeys.get(*key))
+        .map(|list| list.iter().map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).take(MORE).collect())
+        .unwrap_or_default()
+}
+
+/// One more shortcut's place: its action, its slot, the key it gets (""
+/// when it's left unbound) and why not.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MoreSlot {
+    pub action: usize,
+    pub slot: usize,
+    pub spec: String,
+    pub clash: Option<String>,
+}
+
+/// Which more shortcuts get their keys (pure): each gives way to every
+/// first shortcut (`firsts`, by name) and to the more shortcuts before it —
+/// its own action's included (two keys of one action firing on one press
+/// would be one press twice). Settings never saves a clash; a hand-edited
+/// config.json gets its clashing ones left unbound.
+pub fn assign_more(firsts: &[(&str, &str)], more: &[Vec<String>]) -> Vec<MoreSlot> {
+    let mut taken: Vec<(String, String)> = firsts
+        .iter()
+        .filter(|(_, spec)| !spec.trim().is_empty())
+        .map(|(name, spec)| ((*name).to_string(), spec.trim().to_string()))
+        .collect();
+    let mut out = Vec::new();
+    for (action, specs) in more.iter().enumerate().take(FIXED_COUNT) {
+        for (slot, spec) in specs.iter().take(MORE).enumerate() {
+            let spec = spec.trim();
+            let clash = taken.iter().find(|(_, other)| clashes(spec, other)).map(|(name, _)| format!("the {name}"));
+            if clash.is_none() && !spec.is_empty() {
+                taken.push((FIXED_NAMES[action].to_string(), spec.to_string()));
+            }
+            out.push(MoreSlot {
+                action,
+                slot,
+                spec: if clash.is_some() { String::new() } else { spec.to_string() },
+                clash,
+            });
+        }
+    }
+    out
+}
+
+/// Every fixed action's more shortcuts from config ([`assign_more`]), at
+/// setup and every save; the slots past an action's list unbound.
+pub fn configure_more_from(cfg: &crate::config::YapConfig) {
+    let firsts: Vec<(&str, &str)> = (0..FIXED_COUNT).map(|i| (FIXED_NAMES[i], first_spec(cfg, i))).collect();
+    let more: Vec<Vec<String>> = (0..FIXED_COUNT).map(|i| more_specs(cfg, i)).collect();
+    for row in MORE_BINDINGS.iter() {
+        for b in row {
+            b.configure(KEY_TYPE_NONE, 0, 0);
+        }
+    }
+    let mut bound = 0usize;
+    for slot in assign_more(&firsts, &more) {
+        if let Some(clash) = &slot.clash {
+            tracing::warn!("Another {} clashes with {clash}: left unbound", FIXED_NAMES[slot.action]);
+        }
+        match parse_key_spec(&slot.spec) {
+            Ok((kind, code, mods)) => {
+                MORE_BINDINGS[slot.action][slot.slot].configure(kind, code, mods);
+                bound += usize::from(kind != KEY_TYPE_NONE);
+            }
+            Err(e) => tracing::warn!("Another {} can't be read: {e}", FIXED_NAMES[slot.action]),
+        }
+    }
+    info!(bound, "More shortcuts configured");
+}
+
+/// Live-set fixed action `key`'s more shortcuts (Settings pauses one with
+/// "" while a new key is picked, then puts the list back). Settings checks
+/// clashes before it saves; the save applies [`configure_more_from`].
+pub fn configure_more(key: &str, specs: &[String]) -> Result<(), String> {
+    let i = FIXED_KEYS.iter().position(|k| *k == key).ok_or_else(|| format!("No such shortcut: {key}"))?;
+    for (slot, b) in MORE_BINDINGS[i].iter().enumerate() {
+        let spec = specs.get(slot).map(|s| s.trim()).unwrap_or("");
+        let (kind, code, mods) = parse_key_spec(spec)?;
+        b.configure(kind, code, mods);
+    }
+    Ok(())
+}
+
+/// Every fixed action's shortcuts as set now, in words, and whether each is
+/// held — the e2e specs' and the robot's check (debug builds).
+#[cfg(debug_assertions)]
+pub fn binding_states() -> serde_json::Value {
+    let row = |b: &KeyBinding| {
+        let (kind, code, mods) = b.kind_code_mods();
+        serde_json::json!({ "key": format_binding(kind, code, mods), "active": b.is_active() })
+    };
+    let actions: serde_json::Map<String, serde_json::Value> = (0..FIXED_COUNT)
+        .map(|i| (FIXED_KEYS[i].to_string(), serde_json::Value::Array(group(i).map(row).collect())))
+        .collect();
+    serde_json::json!({ "actions": actions, "held": held_keys() })
+}
 
 /// Parse a key spec string and configure the dictation binding.
 ///
@@ -202,53 +523,33 @@ const MENU_MASK: &str = "input-hook:menu-mask";
 /// - `"mouse:4"` — mouse button 4 (XBUTTON1 / back)
 /// - `"MouseButton4"` — legacy format, equivalent to `"mouse:4"`
 pub fn configure_dictation(key_spec: &str) -> Result<String, String> {
-    let (key_type, key_code, mods) = parse_key_spec(key_spec)?;
-    DICTATION_BINDING.configure(key_type, key_code, mods);
-    let desc = format_binding(key_type, key_code, mods);
-    info!("Dictation key configured: {} (spec: {:?})", desc, key_spec);
-    Ok(desc)
+    configure_fixed(DICTATION, "Dictation", key_spec)
 }
 
 /// Parse a key spec string and configure the edit/rewrite-mode binding. An empty
 /// spec unbinds it (edit mode is opt-in).
 pub fn configure_edit(key_spec: &str) -> Result<String, String> {
-    let (key_type, key_code, mods) = parse_key_spec(key_spec)?;
-    EDIT_BINDING.configure(key_type, key_code, mods);
-    let desc = format_binding(key_type, key_code, mods);
-    info!("Edit key configured: {} (spec: {:?})", desc, key_spec);
-    Ok(desc)
+    configure_fixed(EDIT, "Edit", key_spec)
 }
 
 /// Parse a key spec string and configure the meeting shortcut (start taking
 /// notes / stop and summarise — `meeting_guard`). An empty spec unbinds it.
 pub fn configure_meeting(key_spec: &str) -> Result<String, String> {
-    let (key_type, key_code, mods) = parse_key_spec(key_spec)?;
-    MEETING_BINDING.configure(key_type, key_code, mods);
-    let desc = format_binding(key_type, key_code, mods);
-    info!("Meeting key configured: {} (spec: {:?})", desc, key_spec);
-    Ok(desc)
+    configure_fixed(MEETING, "Meeting", key_spec)
 }
 
 /// Parse a key spec string and configure the **Voice Assistant** shortcut
 /// (`assistant.rs`: a question to Yap's Chat, answered out loud). An empty
 /// spec unbinds it (the default).
 pub fn configure_assistant(key_spec: &str) -> Result<String, String> {
-    let (key_type, key_code, mods) = parse_key_spec(key_spec)?;
-    ASSISTANT_BINDING.configure(key_type, key_code, mods);
-    let desc = format_binding(key_type, key_code, mods);
-    info!("Assistant key configured: {} (spec: {:?})", desc, key_spec);
-    Ok(desc)
+    configure_fixed(ASSISTANT, "Assistant", key_spec)
 }
 
 /// Parse a key spec string and configure the **Read aloud** shortcut
 /// (`read_aloud.rs`: the selection in the app you're in, read aloud). An
 /// empty spec unbinds it (the default).
 pub fn configure_read(key_spec: &str) -> Result<String, String> {
-    let (key_type, key_code, mods) = parse_key_spec(key_spec)?;
-    READ_BINDING.configure(key_type, key_code, mods);
-    let desc = format_binding(key_type, key_code, mods);
-    info!("Read-aloud key configured: {} (spec: {:?})", desc, key_spec);
-    Ok(desc)
+    configure_fixed(READ, "Read-aloud", key_spec)
 }
 
 /// The read-aloud shortcut from config, unless it clashes with one of the
@@ -299,11 +600,7 @@ pub fn configure_assistant_from(cfg: &crate::config::YapConfig) {
 /// Parse a key spec string and configure the **"Use what I said"**
 /// shortcut (`as_said.rs`). An empty spec unbinds it (the default).
 pub fn configure_as_said(key_spec: &str) -> Result<String, String> {
-    let (key_type, key_code, mods) = parse_key_spec(key_spec)?;
-    AS_SAID_BINDING.configure(key_type, key_code, mods);
-    let desc = format_binding(key_type, key_code, mods);
-    info!("Use-what-I-said key configured: {} (spec: {:?})", desc, key_spec);
-    Ok(desc)
+    configure_fixed(AS_SAID, "Use-what-I-said", key_spec)
 }
 
 /// The "Use what I said" shortcut from config, unless it clashes with one
@@ -333,11 +630,7 @@ pub fn configure_as_said_from(cfg: &crate::config::YapConfig) {
 /// Parse a key spec string and configure the **Snip to Chat** shortcut
 /// (`snip.rs`). An empty spec unbinds it.
 pub fn configure_snip(key_spec: &str) -> Result<String, String> {
-    let (key_type, key_code, mods) = parse_key_spec(key_spec)?;
-    SNIP_BINDING.configure(key_type, key_code, mods);
-    let desc = format_binding(key_type, key_code, mods);
-    info!("Snip key configured: {} (spec: {:?})", desc, key_spec);
-    Ok(desc)
+    configure_fixed(SNIP, "Snip", key_spec)
 }
 
 /// The snip shortcut from config, unless it clashes with one of the other
@@ -369,21 +662,13 @@ pub fn configure_snip_from(cfg: &crate::config::YapConfig) {
 /// Parse a key spec string and configure the **Paste last transcript**
 /// shortcut (`pasting/last.rs`). An empty spec unbinds it (the default).
 pub fn configure_paste_last(key_spec: &str) -> Result<String, String> {
-    let (key_type, key_code, mods) = parse_key_spec(key_spec)?;
-    PASTE_LAST_BINDING.configure(key_type, key_code, mods);
-    let desc = format_binding(key_type, key_code, mods);
-    info!("Paste-last key configured: {} (spec: {:?})", desc, key_spec);
-    Ok(desc)
+    configure_fixed(PASTE_LAST, "Paste-last", key_spec)
 }
 
 /// Parse a key spec string and configure the **Copy last transcript**
 /// shortcut (`pasting/last.rs`). An empty spec unbinds it (the default).
 pub fn configure_copy_last(key_spec: &str) -> Result<String, String> {
-    let (key_type, key_code, mods) = parse_key_spec(key_spec)?;
-    COPY_LAST_BINDING.configure(key_type, key_code, mods);
-    let desc = format_binding(key_type, key_code, mods);
-    info!("Copy-last key configured: {} (spec: {:?})", desc, key_spec);
-    Ok(desc)
+    configure_fixed(COPY_LAST, "Copy-last", key_spec)
 }
 
 /// The shortcuts Paste last and Copy last give way to, by name, oldest
@@ -882,7 +1167,34 @@ mod win32 {
         pub fn GetModuleHandleW(module_name: *const u16) -> isize;
         pub fn GetAsyncKeyState(vkey: i32) -> i16;
         pub fn SendInput(count: u32, inputs: *const INPUT, size: i32) -> u32;
+        pub fn GetTickCount() -> u32;
+        pub fn GetTickCount64() -> u64;
+        pub fn QueryUnbiasedInterruptTime(time: *mut u64) -> i32;
+        pub fn GetLastInputInfo(info: *mut LASTINPUTINFO) -> i32;
+        pub fn GetCurrentThreadId() -> u32;
+        pub fn PostThreadMessageW(thread: u32, msg: u32, wparam: usize, lparam: isize) -> i32;
+        pub fn SetWinEventHook(
+            event_min: u32,
+            event_max: u32,
+            hmod: isize,
+            callback: unsafe extern "system" fn(isize, u32, isize, i32, i32, u32, u32),
+            process: u32,
+            thread: u32,
+            flags: u32,
+        ) -> isize;
     }
+
+    #[repr(C)]
+    pub struct LASTINPUTINFO {
+        pub size: u32,
+        pub time: u32,
+    }
+
+    /// The input desktop changed (the lock screen, a UAC prompt, and back).
+    pub const EVENT_SYSTEM_DESKTOPSWITCH: u32 = 0x0020;
+    pub const WINEVENT_OUTOFCONTEXT: u32 = 0;
+    /// [`super::sweep_now`]'s thread message.
+    pub const WM_APP_SWEEP: u32 = 0x8000 + 0x59;
 }
 
 /// Tap the menu mask key (down + up) while a combo's Alt / Win is still
@@ -973,26 +1285,43 @@ fn mods_now(current_vk: u32, is_down: bool) -> u8 {
 /// always ours (we swallow the raw key so it doesn't land in the field); a
 /// release is only ours if the binding was actually `active` (so the keyup of a
 /// pass-through combo isn't swallowed).
+///
+/// `action`: the fixed action the binding is one of the shortcuts of — its
+/// press goes out only when none of its other shortcuts is down already,
+/// its release only when none is still down (they act as one key).
 #[cfg(target_os = "windows")]
 fn handle_binding_event(
     binding: &KeyBinding,
+    action: Option<usize>,
     event_pressed: &'static str,
     event_released: &'static str,
     is_press: bool,
 ) -> bool {
+    let now = crate::dictation::gesture::now_ms();
+    let others_down = || action.is_some_and(|i| group(i).any(|b| !std::ptr::eq(b, binding) && b.is_active()));
     if is_press {
-        if let Some(tx) = EVENT_TX.get() {
-            // Only emit on first press (not repeats)
-            if !binding.active.swap(true, Ordering::Relaxed) {
-                info!("Input hook: queueing {}", event_pressed);
-                let _ = tx.send((event_pressed, crate::dictation::gesture::now_ms()));
+        // Only emit on first press (not repeats)
+        if !binding.active.swap(true, Ordering::Relaxed) {
+            binding.since.store(now, Ordering::Relaxed);
+            binding.repeat_at.store(0, Ordering::Relaxed);
+            binding.chorded.store(false, Ordering::Relaxed);
+            if !others_down() {
+                if let Some(tx) = EVENT_TX.get() {
+                    info!("Input hook: queueing {}", event_pressed);
+                    let _ = tx.send((event_pressed, now));
+                }
             }
+        } else {
+            // Down again while held: the keyboard repeating it.
+            binding.repeat_at.store(now, Ordering::Relaxed);
         }
         true
     } else if binding.active.swap(false, Ordering::Relaxed) {
-        if let Some(tx) = EVENT_TX.get() {
-            info!("Input hook: queueing {}", event_released);
-            let _ = tx.send((event_released, crate::dictation::gesture::now_ms()));
+        if !others_down() {
+            if let Some(tx) = EVENT_TX.get() {
+                info!("Input hook: queueing {}", event_released);
+                let _ = tx.send((event_released, now));
+            }
         }
         true
     } else {
@@ -1026,6 +1355,7 @@ fn handle_binding_event(
 #[cfg(target_os = "windows")]
 fn process_keyboard_event(
     binding: &KeyBinding,
+    action: Option<usize>,
     pressed: &'static str,
     released: &'static str,
     vkey: u32,
@@ -1057,10 +1387,10 @@ fn process_keyboard_event(
                             let _ = tx.send((MENU_MASK, 0));
                         }
                     }
-                    handle_binding_event(binding, pressed, released, true);
+                    handle_binding_event(binding, action, pressed, released, true);
                     return !bound_is_modifier; // never suppress modifier keys
                 }
-                let ours = handle_binding_event(binding, pressed, released, false);
+                let ours = handle_binding_event(binding, action, pressed, released, false);
                 return ours && !bound_is_modifier;
             }
             // Another key's event while our press is active: two safety rules.
@@ -1069,7 +1399,7 @@ fn process_keyboard_event(
                 if required != 0 && !is_keydown && family != 0 && required & family != 0 {
                     // 1. A required modifier was released → end the press.
                     if mods_now(vkey, false) & required != required {
-                        handle_binding_event(binding, pressed, released, false);
+                        handle_binding_event(binding, action, pressed, released, false);
                     }
                 } else if bound_is_modifier
                     && unsafe { win32::GetAsyncKeyState(code as i32) } >= 0
@@ -1079,7 +1409,7 @@ fn process_keyboard_event(
                     // registers in GetAsyncKeyState (the hook eats the event
                     // before the key-state table updates), so an async check
                     // on it would "heal" a perfectly live press.
-                    handle_binding_event(binding, pressed, released, false);
+                    handle_binding_event(binding, action, pressed, released, false);
                 }
             }
             false
@@ -1088,15 +1418,63 @@ fn process_keyboard_event(
             let held = mods_now(vkey, is_keydown);
             if is_keydown {
                 if held & required == required {
-                    handle_binding_event(binding, pressed, released, true);
+                    handle_binding_event(binding, action, pressed, released, true);
                 }
             } else if binding.active.load(Ordering::Relaxed) && held & required != required {
-                handle_binding_event(binding, pressed, released, false);
+                handle_binding_event(binding, action, pressed, released, false);
             }
             false // chords are made of modifiers — never suppressed
         }
         _ => false,
     }
+}
+
+/// The bindings a key is held for (push-to-talk): the dictation key's, the
+/// rewrite shortcut's and the assistant's (all their shortcuts), and the
+/// language shortcuts'.
+fn hold_bindings() -> impl Iterator<Item = &'static KeyBinding> {
+    HOLDS.iter().flat_map(|&i| group(i)).chain(LANGUAGE_BINDINGS.iter())
+}
+
+/// A key went down that wasn't held (`vkey`, scan code `scan`, at `now`): a
+/// hold-to-talk press under a second it isn't part of grew into a chord —
+/// the person meant a shortcut sharing the key. Said once per press, with
+/// the press's time.
+#[cfg(target_os = "windows")]
+fn note_new_key(vkey: u32, scan: u32, now: u64) {
+    LAST_NEW_KEY_AT.store(now, Ordering::Relaxed);
+    for b in hold_bindings() {
+        if !b.is_active() {
+            continue;
+        }
+        let (kind, code, mods) = b.kind_code_mods();
+        let since = b.since.load(Ordering::Relaxed);
+        if now.saturating_sub(since) < crate::dictation::gesture::CHORD_MS
+            && held::another_key(kind, code, mods, vkey, scan)
+            && !b.chorded.swap(true, Ordering::Relaxed)
+        {
+            if let Some(tx) = EVENT_TX.get() {
+                info!("Input hook: a hold-to-talk press grew into a chord");
+                let _ = tx.send((CHORD, since));
+            }
+        }
+    }
+}
+
+/// Robot mode (debug builds): whether the hook acts on this event — only the
+/// robot's own ([`ROBOT_MARK`]); everything else passes by as if no hook
+/// were there (`Some(true)`: heard, `Some(false)`: an [`UNHEARD_MARK`]
+/// event, not even heard). `None`: act on it.
+#[cfg(target_os = "windows")]
+fn robot_skip(extra: usize) -> Option<bool> {
+    if ROBOT_ONLY.load(Ordering::Relaxed) {
+        return match extra {
+            ROBOT_MARK => None,
+            UNHEARD_MARK => Some(false),
+            _ => Some(true),
+        };
+    }
+    None
 }
 
 #[cfg(target_os = "windows")]
@@ -1110,7 +1488,23 @@ unsafe extern "system" fn low_level_keyboard_proc(
         let vkey = info.vk_code;
         let msg = wparam as u32;
 
+        // Robot mode: only the robot's own keys (`heard`: still counted as
+        // input the hook heard).
+        if let Some(heard) = robot_skip(info.dw_extra_info) {
+            if heard {
+                HEARD_TICK.store(win32::GetTickCount(), Ordering::Relaxed);
+            }
+            return win32::CallNextHookEx(0, code, wparam, lparam);
+        }
+        HEARD_TICK.store(win32::GetTickCount(), Ordering::Relaxed);
+
         let is_keydown = msg == win32::WM_KEYDOWN || msg == win32::WM_SYSKEYDOWN;
+
+        // What's held: a key that wasn't is a new key — maybe a chord.
+        let was_held = set_held(vkey, is_keydown);
+        if is_keydown && !was_held {
+            note_new_key(vkey, info.scan_code, crate::dictation::gesture::now_ms());
+        }
 
         // Esc while a snip's overlay is up: it cancels the snip, and goes no
         // further (the app behind the overlay mustn't get it).
@@ -1124,30 +1518,19 @@ unsafe extern "system" fn low_level_keyboard_proc(
         }
 
         let mut suppress = false;
-        for (binding, pressed, released) in [
-            (
-                &DICTATION_BINDING,
-                "dictation-key-pressed",
-                "dictation-key-released",
-            ),
-            (&EDIT_BINDING, "edit-key-pressed", "edit-key-released"),
-            (&MEETING_BINDING, "meeting-key-pressed", "meeting-key-released"),
-            (&ASSISTANT_BINDING, "assistant-key-pressed", "assistant-key-released"),
-            (&READ_BINDING, "read-key-pressed", "read-key-released"),
-            (&AS_SAID_BINDING, "as-said-key-pressed", "as-said-key-released"),
-            (&SNIP_BINDING, "snip-key-pressed", "snip-key-released"),
-            (&PASTE_LAST_BINDING, "paste-last-key-pressed", "paste-last-key-released"),
-            (&COPY_LAST_BINDING, "copy-last-key-pressed", "copy-last-key-released"),
-        ] {
-            suppress |= process_keyboard_event(binding, pressed, released, vkey, is_keydown);
+        // The nine fixed actions, each with its first and more shortcuts.
+        for (i, (pressed, released)) in FIXED_EVENTS.iter().enumerate() {
+            for binding in group(i) {
+                suppress |= process_keyboard_event(binding, Some(i), pressed, released, vkey, is_keydown);
+            }
         }
         // Language shortcuts' keys, then saved transforms' (an unbound
         // slot is never matched).
         for (binding, (pressed, released)) in LANGUAGE_BINDINGS.iter().zip(LANGUAGE_EVENTS) {
-            suppress |= process_keyboard_event(binding, pressed, released, vkey, is_keydown);
+            suppress |= process_keyboard_event(binding, None, pressed, released, vkey, is_keydown);
         }
         for (binding, (pressed, released)) in TRANSFORM_BINDINGS.iter().zip(TRANSFORM_EVENTS) {
-            suppress |= process_keyboard_event(binding, pressed, released, vkey, is_keydown);
+            suppress |= process_keyboard_event(binding, None, pressed, released, vkey, is_keydown);
         }
         if suppress {
             return 1;
@@ -1167,12 +1550,20 @@ unsafe extern "system" fn low_level_mouse_proc(
 ) -> isize {
     if code >= 0 {
         let msg = wparam as u32;
+        let hook_info = &*(lparam as *const win32::MSLLHOOKSTRUCT);
+
+        if let Some(heard) = robot_skip(hook_info.dw_extra_info) {
+            if heard {
+                HEARD_TICK.store(win32::GetTickCount(), Ordering::Relaxed);
+            }
+            return win32::CallNextHookEx(0, code, wparam, lparam);
+        }
+        HEARD_TICK.store(win32::GetTickCount(), Ordering::Relaxed);
 
         let (is_press, button_id) = match msg {
             win32::WM_MBUTTONDOWN => (true, Some(3u32)),
             win32::WM_MBUTTONUP => (false, Some(3u32)),
             win32::WM_XBUTTONDOWN | win32::WM_XBUTTONUP => {
-                let hook_info = &*(lparam as *const win32::MSLLHOOKSTRUCT);
                 let xbutton = (hook_info.mouse_data >> 16) & 0xFFFF;
                 let id = match xbutton {
                     1 => Some(4u32), // XBUTTON1 (back)
@@ -1185,89 +1576,26 @@ unsafe extern "system" fn low_level_mouse_proc(
         };
 
         if let Some(id) = button_id {
-            // Check dictation binding — suppress the mouse button at OS level
-            if DICTATION_BINDING.matches_mouse(id) {
-                handle_binding_event(
-                    &DICTATION_BINDING,
-                    "dictation-key-pressed",
-                    "dictation-key-released",
-                    is_press,
-                );
-                return 1;
-            }
-
-            // Check edit/rewrite binding — suppress the mouse button at OS level
-            if EDIT_BINDING.matches_mouse(id) {
-                handle_binding_event(
-                    &EDIT_BINDING,
-                    "edit-key-pressed",
-                    "edit-key-released",
-                    is_press,
-                );
-                return 1;
-            }
-
-            // …and the meeting shortcut.
-            if MEETING_BINDING.matches_mouse(id) {
-                handle_binding_event(
-                    &MEETING_BINDING,
-                    "meeting-key-pressed",
-                    "meeting-key-released",
-                    is_press,
-                );
-                return 1;
-            }
-
-            // …and the Voice Assistant's.
-            if ASSISTANT_BINDING.matches_mouse(id) {
-                handle_binding_event(
-                    &ASSISTANT_BINDING,
-                    "assistant-key-pressed",
-                    "assistant-key-released",
-                    is_press,
-                );
-                return 1;
-            }
-
-            // …and Read aloud's.
-            if READ_BINDING.matches_mouse(id) {
-                handle_binding_event(&READ_BINDING, "read-key-pressed", "read-key-released", is_press);
-                return 1;
-            }
-
-            // …and "Use what I said".
-            if AS_SAID_BINDING.matches_mouse(id) {
-                handle_binding_event(&AS_SAID_BINDING, "as-said-key-pressed", "as-said-key-released", is_press);
-                return 1;
-            }
-
-            // …and Snip to Chat's.
-            if SNIP_BINDING.matches_mouse(id) {
-                handle_binding_event(&SNIP_BINDING, "snip-key-pressed", "snip-key-released", is_press);
-                return 1;
-            }
-
-            // …and Paste last / Copy last transcript's.
-            for (binding, pressed, released) in [
-                (&PASTE_LAST_BINDING, "paste-last-key-pressed", "paste-last-key-released"),
-                (&COPY_LAST_BINDING, "copy-last-key-pressed", "copy-last-key-released"),
-            ] {
-                if binding.matches_mouse(id) {
-                    handle_binding_event(binding, pressed, released, is_press);
-                    return 1;
+            // The fixed actions' shortcuts (first and more), then the
+            // language shortcuts', then the saved transforms': the first
+            // binding on this button takes it, and the button is swallowed.
+            for (i, (pressed, released)) in FIXED_EVENTS.iter().enumerate() {
+                for binding in group(i) {
+                    if binding.matches_mouse(id) {
+                        handle_binding_event(binding, Some(i), pressed, released, is_press);
+                        return 1;
+                    }
                 }
             }
-
-            // …and the language shortcuts', then the saved transforms'.
             for (binding, (pressed, released)) in LANGUAGE_BINDINGS.iter().zip(LANGUAGE_EVENTS) {
                 if binding.matches_mouse(id) {
-                    handle_binding_event(binding, pressed, released, is_press);
+                    handle_binding_event(binding, None, pressed, released, is_press);
                     return 1;
                 }
             }
             for (binding, (pressed, released)) in TRANSFORM_BINDINGS.iter().zip(TRANSFORM_EVENTS) {
                 if binding.matches_mouse(id) {
-                    handle_binding_event(binding, pressed, released, is_press);
+                    handle_binding_event(binding, None, pressed, released, is_press);
                     return 1;
                 }
             }
@@ -1277,6 +1605,137 @@ unsafe extern "system" fn low_level_mouse_proc(
     win32::CallNextHookEx(0, code, wparam, lparam)
 }
 
+// ---- The stuck-key sweep ----
+
+/// The clocks at the last sweep (the hook's thread only): the tick count,
+/// which counts sleep, and the unbiased interrupt time, which doesn't (ms).
+#[cfg(target_os = "windows")]
+static SWEEP_TICKS: AtomicU64 = AtomicU64::new(0);
+#[cfg(target_os = "windows")]
+static SWEEP_AWAKE: AtomicU64 = AtomicU64::new(0);
+
+/// Ask the hook's thread to sweep now (`held.rs`): a push-to-talk hold of a
+/// minute, a dictation near its length limit. Any thread; nothing waits.
+pub fn sweep_now(why: &str) {
+    #[cfg(target_os = "windows")]
+    {
+        let thread = HOOK_THREAD.load(Ordering::SeqCst);
+        if thread != 0 {
+            tracing::debug!(why, "Input hook: a sweep asked for");
+            unsafe { win32::PostThreadMessageW(thread, win32::WM_APP_SWEEP, 0, 0) };
+        }
+    }
+    #[cfg(not(target_os = "windows"))]
+    let _ = why;
+}
+
+/// Check every active binding against Windows' key state and the evidence
+/// (`held::stuck`), on the hook's own thread (between hook callbacks). A
+/// stuck one is let go **without** its release — never a dictation started
+/// or stopped here — and when it held a recording (push-to-talk), the
+/// pipeline is told (`STUCK`: it goes on hands-free). `away`: why the hook
+/// may have missed input (a desktop switch), else found here (a sleep since
+/// the last sweep, input Windows saw and the hook didn't).
+#[cfg(target_os = "windows")]
+fn sweep(away: Option<&'static str>) {
+    let now = crate::dictation::gesture::now_ms();
+    let ticks = unsafe { win32::GetTickCount64() };
+    let mut unbiased = 0u64;
+    unsafe { win32::QueryUnbiasedInterruptTime(&mut unbiased) };
+    let awake = unbiased / 10_000;
+    let (last_ticks, last_awake) = (SWEEP_TICKS.swap(ticks, Ordering::Relaxed), SWEEP_AWAKE.swap(awake, Ordering::Relaxed));
+    let slept = last_ticks != 0 && held::slept(ticks.saturating_sub(last_ticks), awake.saturating_sub(last_awake));
+    let mut input = win32::LASTINPUTINFO { size: std::mem::size_of::<win32::LASTINPUTINFO>() as u32, time: 0 };
+    let missed = unsafe { win32::GetLastInputInfo(&mut input) } != 0
+        && held::missed_input(input.time, HEARD_TICK.load(Ordering::Relaxed));
+    let away = away.or(slept.then_some("a sleep")).or(missed.then_some("input the hook didn't hear"));
+    let evidence = if away.is_some() { held::Evidence::Away } else { held::Evidence::Regular };
+    let windows_mods = mods_now(0, false);
+    let last_new = LAST_NEW_KEY_AT.load(Ordering::Relaxed);
+
+    // One binding: let go if it's stuck. `true`: it was.
+    let check = |b: &KeyBinding, name: &str| -> bool {
+        if !b.is_active() {
+            return false;
+        }
+        let (kind, code, mods) = b.kind_code_mods();
+        let since = b.since.load(Ordering::Relaxed);
+        let repeat_at = b.repeat_at.load(Ordering::Relaxed);
+        let h = held::Held {
+            kind,
+            code,
+            mods,
+            age_ms: now.saturating_sub(since),
+            repeat_ago_ms: (repeat_at != 0).then(|| now.saturating_sub(repeat_at)),
+            other_key_since: last_new > repeat_at.max(since),
+        };
+        let alone_modifier = kind == KEY_TYPE_KEYBOARD && mods == 0 && modifier_family(code) != 0;
+        let key_down = alone_modifier && unsafe { win32::GetAsyncKeyState(code as i32) } < 0;
+        let Some(why) = held::stuck(&h, &held::Windows { mods_down: windows_mods, key_down }, evidence) else {
+            return false;
+        };
+        b.active.store(false, Ordering::Relaxed);
+        if kind == KEY_TYPE_KEYBOARD {
+            set_held(code, false);
+        }
+        warn!(away = away.unwrap_or("no"), "Input hook: the {name} was stuck down ({}): let go, without its release", why.describe());
+        true
+    };
+    let mut hold_lost = false;
+    for (i, name) in FIXED_NAMES.iter().enumerate() {
+        let mut any = false;
+        for b in group(i) {
+            any |= check(b, name);
+        }
+        // A recording key, none of its shortcuts down any more.
+        if any && HOLDS.contains(&i) && !group(i).any(KeyBinding::is_active) {
+            hold_lost = true;
+        }
+    }
+    for b in LANGUAGE_BINDINGS.iter() {
+        hold_lost |= check(b, "language shortcut");
+    }
+    for b in TRANSFORM_BINDINGS.iter() {
+        check(b, "transform shortcut");
+    }
+    // What's held, kept honest: a key no binding holds that Windows says is
+    // up (a key-up lost on another desktop) is forgotten. (A key a binding
+    // swallows never shows in Windows' state: it's kept while held.)
+    for vk in held_keys() {
+        let swallowed = group_all().any(|b| {
+            let (kind, code, _) = b.kind_code_mods();
+            b.is_active() && kind == KEY_TYPE_KEYBOARD && code == vk && modifier_family(code) == 0
+        });
+        if !swallowed && unsafe { win32::GetAsyncKeyState(vk as i32) } >= 0 {
+            set_held(vk, false);
+        }
+    }
+    if hold_lost {
+        if let Some(tx) = EVENT_TX.get() {
+            let _ = tx.send((STUCK, now));
+        }
+    }
+    if let Some(away) = away {
+        tracing::debug!(away, "Input hook: swept after the hook may have missed input");
+    }
+}
+
+/// Every binding: the fixed actions' (first and more), the language
+/// shortcuts', the transforms'.
+#[cfg(target_os = "windows")]
+fn group_all() -> impl Iterator<Item = &'static KeyBinding> {
+    (0..FIXED_COUNT).flat_map(group).chain(LANGUAGE_BINDINGS.iter()).chain(TRANSFORM_BINDINGS.iter())
+}
+
+/// The input desktop switched — the lock screen, a UAC prompt, or back
+/// (`EVENT_SYSTEM_DESKTOPSWITCH`, on the hook's thread): the hook hears
+/// nothing on another desktop, so any key-up may have been lost there.
+#[cfg(target_os = "windows")]
+unsafe extern "system" fn on_desktop_switch(_hook: isize, _event: u32, _hwnd: isize, _object: i32, _child: i32, _thread: u32, _time: u32) {
+    info!("Input hook: the input desktop switched (the lock screen, a UAC prompt, or back): sweeping");
+    sweep(Some("a desktop switch"));
+}
+
 // ---- Start the unified hook ----
 
 /// Start the unified input hook on a background thread.
@@ -1284,9 +1743,15 @@ unsafe extern "system" fn low_level_mouse_proc(
 /// Installs both WH_KEYBOARD_LL and WH_MOUSE_LL hooks. The hooks check
 /// configured key bindings (set via `configure_dictation`/`configure_edit`)
 /// and emit Tauri events when matched. Keyboard keys are suppressed at the
-/// OS level to prevent them from reaching other applications.
+/// OS level to prevent them from reaching other applications. In robot mode
+/// (debug builds) it acts only on the robot's own keys ([`ROBOT_MARK`]).
 #[cfg(target_os = "windows")]
 pub fn start_input_hook(app_handle: AppHandle) {
+    #[cfg(debug_assertions)]
+    if crate::shell::realtest::on() {
+        info!("Input hook: robot mode, only the robot's own keys");
+        ROBOT_ONLY.store(true, Ordering::SeqCst);
+    }
     // Emit-forwarder: the hook callback queues event names here and this thread
     // does the (potentially slow) `app.emit`, keeping the callback fast enough
     // that Windows never times it out (see EVENT_TX).
@@ -1302,6 +1767,16 @@ pub fn start_input_hook(app_handle: AppHandle) {
                 }
                 if event == SNIP_ESCAPE {
                     crate::snip::cancel("escape");
+                    continue;
+                }
+                // A hold-to-talk press grew into a chord (`at`: its press),
+                // or the sweep let go of a stuck one: the pipeline decides.
+                if event == CHORD {
+                    crate::dictation::pipeline::key_chord(&app_handle, at);
+                    continue;
+                }
+                if event == STUCK {
+                    crate::dictation::pipeline::key_stuck(&app_handle);
                     continue;
                 }
                 // A saved transform's press: one event, with its slot.
@@ -1339,6 +1814,7 @@ pub fn start_input_hook(app_handle: AppHandle) {
             info!("Starting unified input hook (WH_KEYBOARD_LL + WH_MOUSE_LL)");
 
             unsafe {
+                HOOK_THREAD.store(win32::GetCurrentThreadId(), Ordering::SeqCst);
                 let hmod = win32::GetModuleHandleW(std::ptr::null());
                 type HookProc = unsafe extern "system" fn(std::ffi::c_int, usize, isize) -> isize;
                 let install = |id: std::ffi::c_int, proc_: HookProc| {
@@ -1360,8 +1836,23 @@ pub fn start_input_hook(app_handle: AppHandle) {
                 }
                 info!("WH_MOUSE_LL installed (handle: {})", mouse_hook);
 
-                // Heartbeat timer: logs, and re-installs the hooks (below).
-                win32::SetTimer(0, 1, 30_000, None);
+                // Heartbeat timer: logs, and re-installs the hooks (below);
+                // the stuck-key sweep's (held.rs).
+                let rehook_timer = win32::SetTimer(0, 0, 30_000, None);
+                let sweep_timer = win32::SetTimer(0, 0, held::SWEEP_MS, None);
+                // The lock screen, a UAC prompt: the input desktop switching.
+                let desktop_hook = win32::SetWinEventHook(
+                    win32::EVENT_SYSTEM_DESKTOPSWITCH,
+                    win32::EVENT_SYSTEM_DESKTOPSWITCH,
+                    0,
+                    on_desktop_switch,
+                    0,
+                    0,
+                    win32::WINEVENT_OUTOFCONTEXT,
+                );
+                if desktop_hook == 0 {
+                    warn!("Input hook: no desktop-switch events (the timer's sweep still runs)");
+                }
 
                 info!("Input hooks ready — configure bindings via configure_dictation/configure_edit");
 
@@ -1374,7 +1865,15 @@ pub fn start_input_hook(app_handle: AppHandle) {
                         break;
                     }
 
-                    if msg.message == win32::WM_TIMER {
+                    if msg.message == win32::WM_TIMER && msg.wparam == sweep_timer {
+                        sweep(None);
+                        continue;
+                    }
+                    if msg.message == win32::WM_APP_SWEEP {
+                        sweep(None);
+                        continue;
+                    }
+                    if msg.message == win32::WM_TIMER && msg.wparam == rehook_timer {
                         // Self-heal: Windows silently REMOVES a low-level hook
                         // whose callback ever exceeds LowLevelHooksTimeout —
                         // the hotkey would stay dead forever with no error. Cheap
@@ -1391,8 +1890,8 @@ pub fn start_input_hook(app_handle: AppHandle) {
                                 kb_hook, mouse_hook
                             );
                         }
-                        let (dict_t, dict_c) = DICTATION_BINDING.type_and_code();
-                        let (edit_t, edit_c) = EDIT_BINDING.type_and_code();
+                        let (dict_t, dict_c) = FIXED[DICTATION].type_and_code();
+                        let (edit_t, edit_c) = FIXED[EDIT].type_and_code();
                         trace!(
                             "Input hook heartbeat (re-hooked): dict=({},{}) edit=({},{})",
                             dict_t, dict_c, edit_t, edit_c
@@ -1568,25 +2067,25 @@ mod tests {
         assert_eq!(cfg.copy_last_hotkey, "");
         configure_paste_last_from(&cfg);
         configure_copy_last_from(&cfg);
-        assert_eq!(PASTE_LAST_BINDING.kind_code_mods().0, KEY_TYPE_NONE);
-        assert_eq!(COPY_LAST_BINDING.kind_code_mods().0, KEY_TYPE_NONE);
+        assert_eq!(FIXED[PASTE_LAST].kind_code_mods().0, KEY_TYPE_NONE);
+        assert_eq!(FIXED[COPY_LAST].kind_code_mods().0, KEY_TYPE_NONE);
         // Their own keys: bound.
         cfg.paste_last_hotkey = "kb:ctrl+alt+86".into();
         cfg.copy_last_hotkey = "mouse:4".into();
         configure_paste_last_from(&cfg);
         configure_copy_last_from(&cfg);
-        assert_eq!(PASTE_LAST_BINDING.kind_code_mods(), (KEY_TYPE_KEYBOARD, 86, MOD_CTRL | MOD_ALT));
-        assert!(COPY_LAST_BINDING.matches_mouse(4));
+        assert_eq!(FIXED[PASTE_LAST].kind_code_mods(), (KEY_TYPE_KEYBOARD, 86, MOD_CTRL | MOD_ALT));
+        assert!(FIXED[COPY_LAST].matches_mouse(4));
         // The snip's Win+Alt+S, and Copy last on Paste last's key: unbound.
         cfg.paste_last_hotkey = "kb:win+alt+83".into();
         configure_paste_last_from(&cfg);
-        assert_eq!(PASTE_LAST_BINDING.kind_code_mods().0, KEY_TYPE_NONE);
+        assert_eq!(FIXED[PASTE_LAST].kind_code_mods().0, KEY_TYPE_NONE);
         cfg.paste_last_hotkey = "kb:ctrl+alt+86".into();
         cfg.copy_last_hotkey = "kb:alt+ctrl+86".into();
         configure_paste_last_from(&cfg);
         configure_copy_last_from(&cfg);
-        assert_eq!(PASTE_LAST_BINDING.kind_code_mods().1, 86);
-        assert_eq!(COPY_LAST_BINDING.kind_code_mods().0, KEY_TYPE_NONE);
+        assert_eq!(FIXED[PASTE_LAST].kind_code_mods().1, 86);
+        assert_eq!(FIXED[COPY_LAST].kind_code_mods().0, KEY_TYPE_NONE);
         // The transforms give way to both.
         let fixed = crate::dictation::transforms::fixed_shortcuts(&cfg);
         assert!(fixed.iter().any(|(name, spec)| *name == "Paste-last shortcut" && spec == "kb:ctrl+alt+86"));
@@ -1693,6 +2192,129 @@ mod tests {
         configure_languages_from(&cfg);
         assert!(LANGUAGE_BINDINGS.iter().all(|b| b.kind_code_mods().0 == KEY_TYPE_NONE));
         assert_eq!(language_at(0), None);
+    }
+
+    /// More shortcuts for one action: each gives way to every first
+    /// shortcut and to the more shortcuts before it, its own action's
+    /// included; the language shortcuts and transforms give way to them.
+    #[test]
+    fn more_shortcuts_give_way_to_every_first_one_and_earlier_ones() {
+        let firsts = [
+            ("dictation hotkey", "kb:120"),
+            ("rewrite shortcut", ""),
+            ("meeting shortcut", "kb:alt+win+77"),
+        ];
+        let none = Vec::<String>::new;
+        let more = vec![
+            // Dictation: a mouse button (fine), F9 again (its own first
+            // one: a clash), Ctrl+Alt (fine).
+            vec!["mouse:4".to_string(), "kb:120".to_string(), "mods:ctrl+alt".to_string()],
+            // Rewrite: the dictation's mouse button (taken), Ctrl+Alt+K
+            // (Ctrl+Alt completes inside it: taken).
+            vec!["mouse:4".to_string(), "kb:ctrl+alt+75".to_string()],
+            // Meeting: Win+Alt+M written the other way (its own first one).
+            vec!["kb:win+alt+77".to_string()],
+            none(),
+            none(),
+            none(),
+            none(),
+            none(),
+            none(),
+        ];
+        let slots = assign_more(&firsts, &more);
+        let got: Vec<(usize, usize, &str, Option<&str>)> =
+            slots.iter().map(|s| (s.action, s.slot, s.spec.as_str(), s.clash.as_deref())).collect();
+        assert_eq!(
+            got,
+            vec![
+                (0, 0, "mouse:4", None),
+                (0, 1, "", Some("the dictation hotkey")),
+                (0, 2, "mods:ctrl+alt", None),
+                (1, 0, "", Some("the dictation hotkey")),
+                (1, 1, "", Some("the dictation hotkey")),
+                (2, 0, "", Some("the meeting shortcut")),
+            ]
+        );
+        // Never more than MORE for one action.
+        let lots = vec![vec!["mouse:3".into(), "mouse:4".into(), "mouse:5".into(), "kb:121".into()]];
+        assert_eq!(assign_more(&[], &lots).len(), MORE);
+    }
+
+    /// (The one test that sets the more shortcuts' bindings.)
+    #[test]
+    fn more_shortcuts_are_read_from_the_config_and_feed_the_slots_rule() {
+        let mut cfg = crate::config::YapConfig::default();
+        cfg.more_hotkeys.insert("hotkey".into(), vec!["mouse:5".into(), "  ".into(), "kb:ctrl+alt+68".into()]);
+        cfg.more_hotkeys.insert("snipHotkey".into(), vec!["kb:121".into()]);
+        cfg.more_hotkeys.insert("nonsense".into(), vec!["kb:122".into()]);
+        assert_eq!(more_specs(&cfg, DICTATION), vec!["mouse:5".to_string(), "kb:ctrl+alt+68".to_string()]);
+        assert_eq!(first_spec(&cfg, SNIP), cfg.snip_hotkey);
+        configure_more_from(&cfg);
+        assert!(MORE_BINDINGS[DICTATION][0].matches_mouse(5));
+        assert_eq!(MORE_BINDINGS[DICTATION][1].kind_code_mods(), (KEY_TYPE_KEYBOARD, 68, MOD_CTRL | MOD_ALT));
+        assert_eq!(MORE_BINDINGS[DICTATION][2].kind_code_mods().0, KEY_TYPE_NONE);
+        assert_eq!(MORE_BINDINGS[SNIP][0].kind_code_mods(), (KEY_TYPE_KEYBOARD, 121, 0));
+        // Language shortcuts and transforms give way to them.
+        let nine = crate::dictation::transforms::nine_shortcuts(&cfg);
+        assert!(nine.iter().any(|(name, spec)| *name == "dictation hotkey" && spec == "mouse:5"));
+        assert!(nine.iter().any(|(name, spec)| *name == "snip shortcut" && spec == "kb:121"));
+        // Settings pausing one while a key is picked, then putting them back.
+        configure_more("hotkey", &["".into(), "kb:ctrl+alt+68".into()]).unwrap();
+        assert_eq!(MORE_BINDINGS[DICTATION][0].kind_code_mods().0, KEY_TYPE_NONE);
+        assert!(configure_more("nonsense", &[]).is_err());
+        // An empty list unbinds them all.
+        cfg.more_hotkeys.clear();
+        configure_more_from(&cfg);
+        assert!(MORE_BINDINGS.iter().flatten().all(|b| b.kind_code_mods().0 == KEY_TYPE_NONE));
+    }
+
+    /// A config from before (one key per action) reads as ever: its keys
+    /// stay the first, and no more. A hand-edited list is tidied.
+    #[test]
+    fn old_configs_read_correctly_and_hand_edited_lists_are_tidied() {
+        let old: crate::config::YapConfig =
+            serde_json::from_str(r#"{"hotkey":"kb:121","editHotkey":"mouse:4","meetingHotkey":""}"#).unwrap();
+        let mut cfg = old.clone();
+        tidy_more(&mut cfg);
+        assert_eq!((cfg.hotkey.as_str(), cfg.edit_hotkey.as_str()), ("kb:121", "mouse:4"));
+        assert!(cfg.more_hotkeys.is_empty());
+        assert!((0..FIXED_COUNT).all(|i| more_specs(&cfg, i).is_empty()));
+
+        let mut cfg = old;
+        cfg.more_hotkeys.insert("hotkey".into(), vec![" mouse:5 ".into(), "kb:121".into(), "".into(), "mouse:5".into(), "kb:122".into(), "kb:123".into(), "kb:124".into()]);
+        // The meeting shortcut taken away by hand, one more left: it moves up.
+        cfg.more_hotkeys.insert("meetingHotkey".into(), vec!["kb:ctrl+alt+77".into()]);
+        cfg.more_hotkeys.insert("bogus".into(), vec!["kb:125".into()]);
+        cfg.more_hotkeys.insert("readHotkey".into(), vec!["  ".into()]);
+        tidy_more(&mut cfg);
+        assert_eq!(cfg.more_hotkeys.get("hotkey").unwrap(), &vec!["mouse:5".to_string(), "kb:122".into(), "kb:123".into()]);
+        assert_eq!(cfg.meeting_hotkey, "kb:ctrl+alt+77");
+        assert!(!cfg.more_hotkeys.contains_key("meetingHotkey"));
+        assert!(!cfg.more_hotkeys.contains_key("bogus"));
+        assert!(!cfg.more_hotkeys.contains_key("readHotkey"));
+        // Tidy twice: the same.
+        let again = cfg.more_hotkeys.clone();
+        tidy_more(&mut cfg);
+        assert_eq!(cfg.more_hotkeys, again);
+        // And it saves under its camelCase name.
+        let json = serde_json::to_value(&cfg).unwrap();
+        assert_eq!(json["moreHotkeys"]["hotkey"][0], "mouse:5");
+    }
+
+    #[test]
+    fn the_held_table_keeps_each_key_down_until_it_comes_up() {
+        // (Virtual keys no other test or person touches: 0xFC, 0xFD.)
+        assert!(!is_held(0xFC));
+        assert!(!set_held(0xFC, true), "it wasn't down: a new key");
+        assert!(set_held(0xFC, true), "down again: a repeat");
+        assert!(is_held(0xFC));
+        assert!(held_keys().contains(&0xFC));
+        assert!(!is_held(0xFD));
+        assert!(set_held(0xFC, false));
+        assert!(!is_held(0xFC));
+        // Out of range: never held.
+        assert!(!set_held(300, true));
+        assert!(!is_held(300));
     }
 
     #[test]

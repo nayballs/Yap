@@ -125,6 +125,34 @@ pub fn set_test(cap: Option<Cap>) {
     *TEST_CAP.lock().unwrap_or_else(|p| p.into_inner()) = cap;
 }
 
+/// A dictation this long suggests meeting notes at its end ("Long
+/// dictation? Try meeting notes", `coaching.rs`, once ever): they go on
+/// past the limit and summarise.
+pub const MEETING_HINT_MS: u64 = 10 * 60_000;
+
+/// A test run's shorter [`MEETING_HINT_MS`] (`e2e_dictation_cap`); 0: the real one.
+#[cfg(debug_assertions)]
+static TEST_HINT_MS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// The length that suggests meeting notes: the real one, or a test run's.
+pub fn meeting_hint_ms() -> u64 {
+    #[cfg(debug_assertions)]
+    {
+        let test = TEST_HINT_MS.load(std::sync::atomic::Ordering::SeqCst);
+        if test > 0 && crate::shell::e2e::active() {
+            return test;
+        }
+    }
+    MEETING_HINT_MS
+}
+
+/// Test mode only: a shorter length for the meeting-notes tip (`None`: the
+/// real one again).
+#[cfg(debug_assertions)]
+pub fn set_test_hint(ms: Option<u64>) {
+    TEST_HINT_MS.store(ms.unwrap_or(0), std::sync::atomic::Ordering::SeqCst);
+}
+
 /// The text of the dictation that stopped at the limit, for Recover text.
 static STOPPED: Mutex<Option<String>> = Mutex::new(None);
 

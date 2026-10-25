@@ -22,6 +22,14 @@
 //! (`config.keep_recent_audio`, on; only with history on) and **Clear**
 //! ([`clear`]). Nothing here ever leaves the PC.
 //!
+//! **Cancelled dictations** (2026-10-25): a dictation the person cancelled
+//! (the bar's ✕, Esc, the tray) keeps its audio here too, and Home lists it
+//! as "Cancelled" with **Transcribe** (Run again's path) for its day — after
+//! the bar's 10 s of Undo, which takes it back out. **Keep** ([`set_keep`],
+//! a `<id>.keep` marker) exempts a dictation's audio from the day and the
+//! caps until its history entry is deleted or the audio cleared; **Save
+//! audio…** ([`recent_audio_save`]) writes its WAV where the person picks.
+//!
 //! **Logs**: ids, lengths and counts only — never the folder's path next to
 //! a transcript (`log_privacy.rs`).
 
@@ -60,6 +68,27 @@ fn wav_path(id: &str) -> PathBuf {
 
 fn marker_path(id: &str) -> PathBuf {
     dir().join(format!("{id}.pending"))
+}
+
+fn keep_path(id: &str) -> PathBuf {
+    dir().join(format!("{id}.keep"))
+}
+
+/// Whether a dictation's audio is kept past its day (**Keep**).
+pub fn is_kept(id: &str) -> bool {
+    valid_id(id) && keep_path(id).is_file()
+}
+
+/// **Keep** a dictation's audio past its day (`on`), or let it go with the
+/// rest again. Errors when its audio is gone.
+pub fn set_keep(id: &str, on: bool) -> Result<(), String> {
+    if !has(id) {
+        return Err("This dictation's audio isn't kept any more".into());
+    }
+    let done = if on { std::fs::write(keep_path(id), b"") } else { std::fs::remove_file(keep_path(id)).or(Ok(())) };
+    done.map_err(|e| format!("Couldn't change it: {e}"))?;
+    tracing::info!(id = %id, keep = on, "Recent audio: kept past its day, or not");
+    Ok(())
 }
 
 /// An id is digits only (it names a file: never a path).
@@ -165,6 +194,7 @@ pub fn discard(id: &str) {
     written(id);
     let _ = std::fs::remove_file(marker_path(id));
     let _ = std::fs::remove_file(wav_path(id));
+    let _ = std::fs::remove_file(keep_path(id));
 }
 
 /// Whether a dictation's audio is still kept.
@@ -210,18 +240,22 @@ pub(crate) fn wav(samples: &[f32]) -> Vec<u8> {
     w
 }
 
-/// A kept file: its id, size and when it was recorded (unix seconds).
+/// A kept file: its id, size and when it was recorded (unix seconds), and
+/// whether the person asked to **Keep** it past its day.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Kept {
     pub id: String,
     pub bytes: u64,
     pub at: u64,
+    pub keep: bool,
 }
 
 /// Which of `files` go (pure): those older than [`KEEP_SECS`], then the
 /// oldest while there are more than [`MAX_FILES`] or [`MAX_BYTES`] of them.
+/// One the person keeps never goes, nor counts towards the caps.
 pub fn to_drop(files: &[Kept], now: u64) -> Vec<String> {
-    let mut keep: Vec<&Kept> = files.iter().filter(|f| now.saturating_sub(f.at) <= KEEP_SECS).collect();
+    let files: Vec<&Kept> = files.iter().filter(|f| !f.keep).collect();
+    let mut keep: Vec<&Kept> = files.iter().copied().filter(|f| now.saturating_sub(f.at) <= KEEP_SECS).collect();
     let mut out: Vec<String> = files
         .iter()
         .filter(|f| now.saturating_sub(f.at) > KEEP_SECS)
@@ -255,7 +289,7 @@ fn kept() -> Vec<Kept> {
                 return None;
             }
             let bytes = e.metadata().ok()?.len();
-            Some(Kept { at: recorded_at(&id)?, id, bytes })
+            Some(Kept { at: recorded_at(&id)?, keep: keep_path(&id).is_file(), id, bytes })
         })
         .collect()
 }
@@ -269,6 +303,7 @@ pub fn prune() {
     for id in &drop {
         let _ = std::fs::remove_file(wav_path(id));
         let _ = std::fs::remove_file(marker_path(id));
+        let _ = std::fs::remove_file(keep_path(id));
     }
     if !drop.is_empty() {
         tracing::info!(dropped = drop.len(), kept = files.len() - drop.len(), "Recent audio: old dictations' audio deleted");
@@ -285,7 +320,8 @@ pub fn prune() {
             .and_then(|t| t.elapsed().ok())
             .is_some_and(|age| age > Duration::from_secs(3_600));
         let stray = name.ends_with(".tmp")
-            || name.strip_suffix(".pending").is_some_and(|id| !wav_path(id).is_file());
+            || name.strip_suffix(".pending").is_some_and(|id| !wav_path(id).is_file())
+            || name.strip_suffix(".keep").is_some_and(|id| !wav_path(id).is_file());
         if stray && old {
             let _ = std::fs::remove_file(e.path());
         }
@@ -373,6 +409,79 @@ pub fn recent_audio_wav(id: String) -> Result<tauri::ipc::Response, String> {
         .ok_or_else(|| "This dictation's audio isn't kept any more".to_string())
 }
 
+/// Home's **Keep**: a dictation's audio kept past its day (`keep`), or let
+/// go with the rest again.
+#[tauri::command]
+pub fn recent_audio_keep(app: AppHandle, id: String, keep: bool) -> Result<(), String> {
+    set_keep(&id, keep)?;
+    let _ = app.emit("yap-history-changed", ());
+    Ok(())
+}
+
+/// A test run's save path, in place of Windows' Save dialog
+/// ([`e2e_audio_save_path`]).
+#[cfg(debug_assertions)]
+static E2E_SAVE: Mutex<Option<PathBuf>> = Mutex::new(None);
+
+/// "Yap dictation 2026-10-25 14.30.wav" for audio `id` (recorded then).
+fn save_name(id: &str) -> String {
+    let when = recorded_at(id)
+        .and_then(|secs| chrono::DateTime::from_timestamp(secs as i64, 0))
+        .map(|t| t.with_timezone(&chrono::Local).format("%Y-%m-%d %H.%M").to_string())
+        .unwrap_or_else(|| id.to_string());
+    format!("Yap dictation {when}.wav")
+}
+
+/// Where to save: Windows' Save dialog (`None`: cancelled) — a test run's
+/// named path instead.
+async fn pick_save_path(app: &AppHandle, window: &tauri::WebviewWindow, name: &str) -> Result<Option<PathBuf>, String> {
+    #[cfg(debug_assertions)]
+    if crate::shell::e2e::active() {
+        return E2E_SAVE
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .take()
+            .map(Some)
+            .ok_or_else(|| "A test run names the save path first (e2e_audio_save_path).".to_string());
+    }
+    use tauri_plugin_dialog::DialogExt;
+    let dialog = app
+        .dialog()
+        .file()
+        .set_parent(window)
+        .set_title("Save the dictation's audio")
+        .set_file_name(name)
+        .add_filter("WAV audio", &["wav"]);
+    let picked = tauri::async_runtime::spawn_blocking(move || dialog.blocking_save_file()).await.map_err(|e| e.to_string())?;
+    Ok(picked.and_then(|p| p.into_path().ok()))
+}
+
+/// Home's **Save audio…**: a dictation's WAV written where the person picks
+/// (Windows' Save dialog); the path, or `None` when they cancelled.
+#[tauri::command]
+pub async fn recent_audio_save(app: AppHandle, window: tauri::WebviewWindow, id: String) -> Result<Option<String>, String> {
+    let bytes = wav_bytes(&id).ok_or("This dictation's audio isn't kept any more")?;
+    let Some(path) = pick_save_path(&app, &window, &save_name(&id)).await? else { return Ok(None) };
+    let to = path.clone();
+    tauri::async_runtime::spawn_blocking(move || std::fs::write(&to, &bytes))
+        .await
+        .map_err(|e| e.to_string())?
+        .map_err(|e| format!("Couldn't save the audio: {e}"))?;
+    tracing::info!(id = %id, "Recent audio: a dictation's audio saved where the person picked");
+    Ok(Some(path.to_string_lossy().into_owned()))
+}
+
+/// Test mode: the path the next Save audio writes to, in place of the dialog.
+#[cfg(debug_assertions)]
+#[tauri::command]
+pub fn e2e_audio_save_path(path: String) -> Result<(), String> {
+    if !crate::shell::e2e::active() {
+        return Err("test mode only".into());
+    }
+    *E2E_SAVE.lock().unwrap_or_else(|p| p.into_inner()) = Some(PathBuf::from(path));
+    Ok(())
+}
+
 /// Home's **Run again**: the dictation at `ts` (its audio `audio`)
 /// transcribed again — on `model` (an installed one; none = the one in
 /// use) — then AI cleanup as for its app, the corrections and snippets
@@ -404,7 +513,26 @@ mod tests {
     use super::*;
 
     fn k(id: &str, at: u64, bytes: u64) -> Kept {
-        Kept { id: id.into(), at, bytes }
+        Kept { id: id.into(), at, bytes, keep: false }
+    }
+
+    #[test]
+    fn audio_the_person_keeps_outlives_its_day_and_the_caps() {
+        let now = 10 * KEEP_SECS;
+        let kept = Kept { keep: true, ..k("old", now - 3 * KEEP_SECS, MAX_BYTES) };
+        let files = [kept, k("1", now - KEEP_SECS - 1, 10), k("2", now - 60, 10)];
+        assert_eq!(to_drop(&files, now), vec!["1".to_string()]);
+        // It doesn't count towards the caps either.
+        let mut many: Vec<Kept> = (0..MAX_FILES as u64).map(|i| k(&i.to_string(), now - 1_000 + i, 1)).collect();
+        many.push(Kept { keep: true, ..k("mine", now - 5, MAX_BYTES) });
+        assert!(to_drop(&many, now).is_empty());
+    }
+
+    #[test]
+    fn a_saved_file_is_named_for_when_it_was_said() {
+        let name = save_name("1761140000123");
+        assert!(name.starts_with("Yap dictation 20") && name.ends_with(".wav"), "{name}");
+        assert!(!name.contains(':'), "a Windows file name: {name}");
     }
 
     #[test]

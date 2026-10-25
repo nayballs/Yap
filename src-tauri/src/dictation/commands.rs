@@ -139,6 +139,24 @@ pub fn configure_copy_last_hotkey(spec: String) {
     let _ = crate::dictation::input_hook::configure_copy_last(&spec);
 }
 
+/// Live-apply an action's more shortcuts ("+ Add another"; `target`: its
+/// first shortcut's config key, "hotkey"…): Settings pauses the one being
+/// picked with "", then puts the list back. The save applies them with
+/// their clash rules (`input_hook::configure_more_from`).
+#[tauri::command]
+pub fn configure_more_hotkeys(target: String, specs: Vec<String>) -> Result<(), String> {
+    crate::dictation::input_hook::configure_more(&target, &specs)
+}
+
+/// Debug-only: every fixed action's shortcuts as the input hook has them
+/// (`{ actions: { hotkey: [{ key, active }…] }, held }`) — the e2e specs'
+/// and the robot's check.
+#[cfg(debug_assertions)]
+#[tauri::command]
+pub fn e2e_hotkey_bindings() -> serde_json::Value {
+    crate::dictation::input_hook::binding_states()
+}
+
 /// Debug-only, test mode: `text` as if a dictation had just heard it —
 /// the dictation's own steps from cleanup on (nothing is pasted in a test
 /// run), the bar's "Use what I said" offer included. Stands in for a

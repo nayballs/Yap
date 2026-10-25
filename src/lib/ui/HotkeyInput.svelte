@@ -47,6 +47,7 @@
 
   function setCapturing(on) {
     capturing = on;
+    mouseMode = false;
     heldMods = [];
     chordAt = 0;
     sawNonModifier = false;
@@ -145,12 +146,33 @@
     }
   }
 
+  // The guided mouse set-up (Wispr Flow's, by behaviour): "Press the mouse
+  // button you want to use" — a side button or the middle one; left and
+  // right are refused, saying why (they're for clicking).
+  let mouseMode = $state(false);
+
+  /** Which mouse buttons Yap can use (input_hook.rs): the middle one, Back, Forward. */
+  const MOUSE_IDS = { 1: 3, 3: 4, 4: 5 }; // browser button -> our id
+
   function onMouse(e) {
-    if (e.button === 0 || e.button === 2) return; // left/right reserved for UI
+    const own = e.target?.closest?.('.capture button');
+    if (e.button === 0 || e.button === 2) {
+      // Left/right are for clicking: the strip's own buttons still work.
+      if (mouseMode && !own) {
+        e.preventDefault();
+        e.stopPropagation();
+        warn('Left and right click are for clicking. Press a side button or the middle button (the wheel).');
+      }
+      return;
+    }
     e.preventDefault();
     e.stopPropagation();
-    const map = { 1: 3, 3: 4, 4: 5 }; // browser button -> our id
-    finalize(`mouse:${map[e.button] ?? e.button + 1}`);
+    const id = MOUSE_IDS[e.button];
+    if (!id) {
+      warn("Yap can use the middle button and the two side buttons. For another, have your mouse's own app send a key, then press that key.");
+      return;
+    }
+    finalize(`mouse:${id}`);
   }
 
   function clear() {
@@ -161,7 +183,10 @@
 <div class="hk" class:disabled>
   {#if capturing}
     <div class="capture" role="status" aria-live="polite">
-      {#if heldMods.length}
+      {#if mouseMode}
+        <span class="hint">Press the mouse button you want to use <span class="dim">· a side button or the middle one · Esc cancels</span></span>
+        <button class="copilot" onclick={() => (mouseMode = false)} title="Pick a key instead">Keys</button>
+      {:else if heldMods.length}
         {#each heldMods as m (m)}
           <kbd class="key live">{MOD_LABELS[m]}</kbd>
         {/each}
@@ -174,6 +199,8 @@
           class="copilot"
           onclick={() => finalize(COPILOT_KEY)}
           title="The Copilot key on new Windows laptops (it sends Win + Shift + F23)">Copilot key</button>
+        <!-- A mouse's side button or middle button, guided. -->
+        <button class="copilot" onclick={() => (mouseMode = true)} title="Use a mouse button: a side button or the middle one">Mouse button</button>
       {/if}
     </div>
   {:else}

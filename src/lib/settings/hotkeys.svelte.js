@@ -41,6 +41,29 @@ export const HOTKEY_NAMES = {
 /** True while any <SettingsHotkey> is capturing a new key. */
 export const hotkeyCapture = $state({ on: false });
 
+/** More shortcuts for one action, beside its first (input_hook.rs `MORE`). */
+export const MORE_SHORTCUTS = 3;
+
+/** An action's more shortcuts ("+ Add another"): `cfg.moreHotkeys[target]`. */
+export function moreHotkeys(cfg, target) {
+  const list = cfg?.moreHotkeys?.[target];
+  return Array.isArray(list) ? list.filter((s) => typeof s === 'string' && s) : [];
+}
+
+/** Every key of an action: its first, then its more. */
+export function actionHotkeys(cfg, target) {
+  return [cfg?.[target], ...moreHotkeys(cfg, target)].filter(Boolean);
+}
+
+/** Set an action's more shortcuts (blanks dropped; none: the key goes). */
+export function setMoreHotkeys(cfg, target, list) {
+  const clean = list.filter(Boolean).slice(0, MORE_SHORTCUTS);
+  const all = { ...(cfg.moreHotkeys || {}) };
+  if (clean.length) all[target] = clean;
+  else delete all[target];
+  cfg.moreHotkeys = all;
+}
+
 /**
  * Capturing started or stopped: pause the live global binding while the
  * person picks (so pressing the current key doesn't fire it), then apply
@@ -53,15 +76,34 @@ export function onHotkeyCapturing(cfg, target, on) {
 }
 
 /**
- * Every shortcut but `except` (a fixed one's config key, `transform:<id>`
- * or `language:<id>`), as [name, spec]: the nine fixed ones, the language
- * shortcuts' (dictation/languages.rs; "the French shortcut"), then the
- * saved transforms' (dictation/transforms.rs; "the Polish transform").
+ * One of an action's more shortcuts (`index`; one past the list: the one
+ * being added) is being picked: that one paused, then the list applied.
+ */
+export function onMoreCapturing(cfg, target, index, on) {
+  if (!cfg) return;
+  hotkeyCapture.on = on;
+  const specs = moreHotkeys(cfg, target).map((s, i) => (on && i === index ? '' : s));
+  invoke('configure_more_hotkeys', { target, specs }).catch(() => {});
+}
+
+/**
+ * Every shortcut but `except` (a fixed one's config key, `more:<key>:<n>`
+ * for its more ones, `transform:<id>` or `language:<id>`), as [name, spec]:
+ * the nine fixed ones with their more shortcuts (one of the action being
+ * set is "another of this action's shortcuts"), the language shortcuts'
+ * (dictation/languages.rs; "the French shortcut"), then the saved
+ * transforms' (dictation/transforms.rs; "the Polish transform").
  */
 function otherShortcuts(cfg, except) {
-  const fixed = Object.keys(HOTKEY_NAMES)
-    .filter((k) => k !== except)
-    .map((k) => [`the ${HOTKEY_NAMES[k]}`, cfg?.[k]]);
+  const own = String(except).startsWith('more:') ? String(except).split(':')[1] : except;
+  const nameOf = (k) => (k === own ? "another of this action's shortcuts" : `the ${HOTKEY_NAMES[k]}`);
+  const fixed = Object.keys(HOTKEY_NAMES).flatMap((k) => [
+    ...(k !== except ? [[nameOf(k), cfg?.[k]]] : []),
+    ...moreHotkeys(cfg, k)
+      .map((spec, i) => [`more:${k}:${i}`, spec])
+      .filter(([id]) => id !== except)
+      .map(([, spec]) => [nameOf(k), spec]),
+  ]);
   const languages = languageShortcuts(cfg)
     .filter((s) => `language:${s.id}` !== except && s.hotkey)
     .map((s) => [`the ${shortcutName(s)} shortcut`, s.hotkey]);
@@ -87,6 +129,11 @@ export function validateHotkey(cfg, target, spec) {
   if (!spec) return null;
   const clash = otherShortcuts(cfg, target).find(([, other]) => hotkeysClash(other, spec));
   return clash ? clashMessage(clash, spec) : null;
+}
+
+/** One of an action's more shortcuts (`index`), checked the same way. */
+export function validateMoreHotkey(cfg, target, index, spec) {
+  return validateHotkey(cfg, `more:${target}:${index}`, spec);
 }
 
 /** A saved transform's shortcut (`id`), checked the same way. */

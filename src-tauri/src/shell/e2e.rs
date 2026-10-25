@@ -451,12 +451,15 @@ pub fn e2e_mic_status(state: tauri::State<'_, crate::AppState>) -> Result<crate:
 /// -46 dBFS — the bar's level meter, `meter.rs`), and then it comes in
 /// syllables as speech does: 240 ms of it, 160 ms at a tenth (a steady
 /// tone is the mic's noise to the meter). `None`: nothing was transcribed.
+/// `cancel`: cancelled at its end (the bar's ✕) instead of stopped — kept
+/// for Undo, and in Home as "Cancelled".
 #[cfg(debug_assertions)]
 #[tauri::command]
 pub async fn e2e_dictate_audio(
     state: tauri::State<'_, crate::AppState>,
     seconds: f32,
     amplitude: Option<f32>,
+    cancel: Option<bool>,
 ) -> Result<Option<crate::dictation::pipeline::Delivered>, String> {
     if !active() {
         return Err("Only in e2e test mode".to_string());
@@ -474,7 +477,7 @@ pub async fn e2e_dictate_audio(
             level * (i as f32 * 2.0 * std::f32::consts::PI * 440.0 / 16_000.0).sin()
         })
         .collect();
-    robot.dictate_audio(samples, false).await
+    robot.dictate_audio(samples, cancel.unwrap_or(false)).await
 }
 
 /// Test mode only: a press-only shortcut as the input hook sends it (a
@@ -514,15 +517,17 @@ pub fn e2e_dictation_timing(floor_ms: Option<u64>, stt_ms: Option<u64>, forget: 
 
 /// Test mode only: a dictation's length limit shortened to `limitMs`, the
 /// bar's warning at `warnMs` (`cap.rs`); none given, the real 15 minutes.
+/// `meetingHintMs`: the length that suggests meeting notes (10 minutes).
 #[cfg(debug_assertions)]
 #[tauri::command]
-pub fn e2e_dictation_cap(limit_ms: Option<u64>, warn_ms: Option<u64>) -> Result<(), String> {
+pub fn e2e_dictation_cap(limit_ms: Option<u64>, warn_ms: Option<u64>, meeting_hint_ms: Option<u64>) -> Result<(), String> {
     if !active() {
         return Err("Only in e2e test mode".to_string());
     }
     let cap = limit_ms.map(|limit_ms| crate::dictation::cap::Cap { limit_ms, warn_ms: warn_ms.unwrap_or(limit_ms) });
-    tracing::info!(?cap, "e2e: dictation length limit");
+    tracing::info!(?cap, ?meeting_hint_ms, "e2e: dictation length limit");
     crate::dictation::cap::set_test(cap);
+    crate::dictation::cap::set_test_hint(meeting_hint_ms);
     Ok(())
 }
 
