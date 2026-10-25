@@ -10,10 +10,11 @@
 //! **Three ways in**: the "Use what I said" shortcut (`config.
 //! as_said_hotkey`, unbound by default, Settings → Shortcuts), the Yap
 //! bar's capsule for [`OFFER_MS`] after a cleaned dictation ("Cleaned up ·
-//! Use what I said", `yap-state` "cleaned"; `config.as_said_offer`, on —
-//! only when cleanup changed the words, [`words_differ`]), and the tray's
-//! "Paste last transcript (as said)" (a plain paste where you are, not a
-//! swap: `text_injector`).
+//! Use what I said", `yap-state` "cleaned"; `config.as_said_offer`, off
+//! by default since 2026-10-25 — only when cleanup changed the words,
+//! [`words_differ`]), and Paste last as said (`paste_last_transcript`'s
+//! `as_said`: a plain paste where you are, not a swap; the tray's item went
+//! on 2026-10-25).
 //!
 //! **Replacing the paste, safely** ([`swap`]): only within [`SWAP_WITHIN`]
 //! of the dictation, while **its window is still in front**, never in a

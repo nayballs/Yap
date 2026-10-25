@@ -128,10 +128,12 @@ test('Runs on: measured once on this PC, everyday dictations decide (the process
   await closeSettings(main);
 });
 
-test('"Use what I said": the bar offers it after AI cleanup changed the words, once; the tray pastes it', async ({ yap, main, shot }) => {
+test('"Use what I said": with its setting on, the bar offers it after AI cleanup changed the words, once; Paste last pastes it', async ({ yap, main, shot }) => {
   const llm = await startFakeLlm();
   llm.reply('cleanup', () => 'Send the report to Sam by Friday.');
-  await configure(yap, { postProcessEnabled: true, ppProvider: 'custom', ppBaseUrl: llm.base, ppModel: 'fake-cleanup', ppApiKey: '' });
+  // Off by default since 25 Oct (config.rs migrate_once v5).
+  expect(yap.readConfig().asSaidOffer ?? false).toBe(false);
+  await configure(yap, { postProcessEnabled: true, ppProvider: 'custom', ppBaseUrl: llm.base, ppModel: 'fake-cleanup', ppApiKey: '', asSaidOffer: true });
   const bar = yap.overlay;
   const capsule = bar.locator('.capsule');
   try {
@@ -162,8 +164,8 @@ test('"Use what I said": the bar offers it after AI cleanup changed the words, o
     await expect(capsule).toBeHidden({ timeout: 10_000 });
     expect((await yap.invoke('as_said_swap')).outcome).toBe('testMode');
 
-    // The tray's "Paste last transcript (as said)": the words before
-    // cleanup (a test run returns them without pasting).
+    // Paste last as said (its command): the words before cleanup (a test
+    // run returns them without pasting).
     expect((await yap.invoke('paste_last_transcript', { asSaid: true })).trim()).toBe('um so send the report to sam by friday');
     expect((await yap.invoke('paste_last_transcript')).trim()).toBe('Send the report to Sam by Friday.');
 
@@ -191,12 +193,12 @@ test('"Use what I said": the bar offers it after AI cleanup changed the words, o
     // (The shortcut still works without the bar's offer.)
     expect((await yap.invoke('as_said_swap')).outcome).toBe('testMode');
   } finally {
-    await configure(yap, { postProcessEnabled: false, ppBaseUrl: '', asSaidOffer: true });
+    await configure(yap, { postProcessEnabled: false, ppBaseUrl: '', asSaidOffer: false });
     await llm.close();
   }
 });
 
-test('the tray\'s "Paste last transcript (as said)" after a dictation cleanup left alone (cleanup off): the dictation itself, and Yap still answers', async ({ yap }) => {
+test('Paste last as said (its command) after a dictation cleanup left alone (cleanup off): the dictation itself, and Yap still answers', async ({ yap }) => {
   // Cleanup off, the default (the test before switched it back off): no
   // words as said for this dictation.
   await configure(yap, { postProcessEnabled: false });

@@ -13,7 +13,8 @@
   measured clearly faster on this PC, `dictation/stt_speed.rs` — | "gpu" | "cpu"), keep_recent_audio (a day of dictation
   audio to run one again, on; `dictation/recent_audio.rs`), as_said_hotkey ("Use what I
   said", "" = unbound) + as_said_offer (the bar's offer after AI cleanup,
-  on; both `pasting/as_said.rs`), paste_last_hotkey + copy_last_hotkey
+  off: since 2026-10-25, `migrate_once` v5 turned it off once; both
+  `pasting/as_said.rs`), paste_last_hotkey + copy_last_hotkey
   (`pasteLastHotkey` / `copyLastHotkey`, Paste / Copy last transcript, "" =
   unbound, the default; never a clash — `input_hook::configure_paste_last_from`
   / `configure_copy_last_from` leave one another shortcut has unbound;

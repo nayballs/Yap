@@ -44,7 +44,7 @@ test('a speech model switched outside Settings stays when a setting is changed i
   dialog = await openSettings(main, 'Dictation');
   const offer = dialog.getByRole('button', { name: 'Offer what you said after AI cleanup' });
   await offer.click();
-  await expectStore(yap, 'config.json', (c) => c.asSaidOffer === false);
+  await expectStore(yap, 'config.json', (c) => c.asSaidOffer === true);
   await main.waitForTimeout(700);
   expect(yap.readConfig().modelSize).toBe('sense-voice-int8');
 

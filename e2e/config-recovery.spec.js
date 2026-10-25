@@ -52,9 +52,9 @@ test("a settings file Yap can't read is set aside, what it can read kept, and th
   const dialog = await openSettings(main, 'Dictation');
   const offer = dialog.getByRole('button', { name: 'Offer what you said after AI cleanup' });
   await offer.click();
-  await expectStore(yap, 'config.json', (c) => c.asSaidOffer === false && c.ppApiKeys?.groq === 'example-key');
+  await expectStore(yap, 'config.json', (c) => c.asSaidOffer === true && c.ppApiKeys?.groq === 'example-key');
   await offer.click();
-  await expectStore(yap, 'config.json', (c) => c.asSaidOffer === true);
+  await expectStore(yap, 'config.json', (c) => c.asSaidOffer === false);
   await closeSettings(main);
   expect(setAside(yap)).toEqual(copies);
   expect(fs.readFileSync(path.join(yap.dataDir, copies[0]), 'utf8')).toBe(BROKEN);

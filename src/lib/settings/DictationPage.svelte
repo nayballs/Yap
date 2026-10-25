@@ -169,7 +169,7 @@
       bind:checked={cfg.asSaidOffer}
       label="Offer what you said after AI cleanup"
       desc="When cleanup changes your words, the Yap bar offers Use what I said for a few seconds"
-      hint="It swaps the paste for your words before cleanup (corrections and snippets kept). Give it a shortcut in Shortcuts; the tray has Paste last transcript (as said)."
+      hint="It swaps the paste for your words before cleanup (corrections and snippets kept). A shortcut for it is in Shortcuts, and works with this off."
     />
   </Row>
   <Row

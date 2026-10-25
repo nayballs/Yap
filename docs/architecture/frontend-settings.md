@@ -302,7 +302,7 @@ there can move margins: compare a page before and after.
   you dictate" (`quietOtherApps`; ⓘ: calls are never silenced), "Pause music
   and videos while you dictate" (`pauseMedia`). **While you dictate**: "Live
   preview on the Yap bar" (`streamingPartials`), "Offer what you said after AI
-  cleanup" (`asSaidOffer`, on: the bar's "Cleaned up · Use what I said",
+  cleanup" (`asSaidOffer`, off since 2026-10-25: the bar's "Cleaned up · Use what I said",
   `pasting/as_said.rs`), "Cancel and finish buttons"
   (a Select When you point at it / Always / Off → `barDictationButtons`, Off
   by default, a line per choice). **Typing into apps** (`#settings-typing`,

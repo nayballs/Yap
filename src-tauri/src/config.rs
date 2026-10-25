@@ -324,8 +324,11 @@ pub struct YapConfig {
     #[serde(default)]
     pub triple_tap_meeting: bool,
     /// The Yap bar offers "Use what I said" for a few seconds after a
-    /// dictation whose words AI cleanup changed (`as_said.rs`). On by default.
-    #[serde(default = "default_true")]
+    /// dictation whose words AI cleanup changed (`as_said.rs`). Off by
+    /// default since 2026-10-25 (`migrate_once` v5): an offer to undo the
+    /// cleanup after every dictation made it look unsure of itself. Its
+    /// shortcut works either way.
+    #[serde(default)]
     pub as_said_offer: bool,
     /// **Snip to Chat** (Settings → Shortcuts, `snip.rs`): drag a box over
     /// any screen and the image goes into Chat. Default Win+Alt+S (free in
@@ -1179,7 +1182,7 @@ impl Default for YapConfig {
             copy_last_hotkey: String::new(),
             more_hotkeys: Default::default(),
             triple_tap_meeting: false,
-            as_said_offer: true,
+            as_said_offer: false,
             snip_hotkey: default_snip_hotkey(),
             snip_voice: true,
             snip_listen: true,
@@ -1427,7 +1430,7 @@ fn migrate_retired_groq_models(cfg: &mut YapConfig) {
 
 /// Current config schema version (see [`YapConfig::config_version`]). Bump it
 /// together with a new step in [`migrate_once`].
-const CONFIG_VERSION: u32 = 4;
+const CONFIG_VERSION: u32 = 5;
 
 /// One-time migrations, keyed by `config_version`. Returns whether anything
 /// ran; [`load`] then saves the result so no step ever runs twice.
@@ -1480,6 +1483,13 @@ fn migrate_once(cfg: &mut YapConfig) -> bool {
                 cfg.mic_order.insert(0, crate::dictation::mics::MicChoice { id: String::new(), name });
             }
         }
+    }
+    if cfg.config_version < 5 {
+        // v5 (2026-10-25): the bar's "Use what I said" after a cleaned
+        // dictation is off unless chosen (the maintainer: offering to undo
+        // the cleanup every time looked unprofessional). Turned off once,
+        // for everyone; switched on again in Settings it stays on.
+        cfg.as_said_offer = false;
     }
     cfg.config_version = CONFIG_VERSION;
     true
@@ -2952,6 +2962,20 @@ mod tests {
         follow_an_older_builds_mic(&mut reloaded);
         assert!(!migrate_once(&mut reloaded));
         assert!(reloaded.mic_order.is_empty());
+    }
+
+    #[test]
+    fn the_bars_use_what_i_said_is_off_once_and_then_as_chosen() {
+        let mut cfg: YapConfig = serde_json::from_str(r#"{"configVersion":4,"asSaidOffer":true}"#).unwrap();
+        assert!(migrate_once(&mut cfg));
+        assert!(!cfg.as_said_offer);
+        // Switched on again afterwards: it stays on.
+        cfg.as_said_offer = true;
+        assert!(!migrate_once(&mut cfg));
+        assert!(cfg.as_said_offer);
+        // A fresh install, and a file without the field: off.
+        assert!(!YapConfig::default().as_said_offer);
+        assert!(!serde_json::from_str::<YapConfig>("{}").unwrap().as_said_offer);
     }
 
     #[test]

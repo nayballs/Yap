@@ -143,7 +143,7 @@ Putting a dictation into the app you're in: the clipboard paste and the submit k
   `remember`s the paste (window, kind, both texts) unless a submit key sent
   it; three ways in: the shortcut (`as_said_hotkey`, unbound by default —
   `input_hook`'s sixth binding, `as-said-key-pressed`), the Yap bar's
-  "Cleaned up · Use what I said" for `OFFER_MS` (6 s; `as_said_offer`, on;
+  "Cleaned up · Use what I said" for `OFFER_MS` (6 s; `as_said_offer`, off by default since 2026-10-25;
   only when the words differ, `words_differ`), the command `as_said_swap`.
   **The swap** (`swap`, within `SWAP_WITHIN` = 2 min, once): the dictation's
   window must still be in front; never a terminal (its line can't be

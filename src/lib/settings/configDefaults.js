@@ -31,7 +31,7 @@ export const FIELD_DEFAULTS = {
   keepRecentAudio: true,
   // "Use what I said" (pasting/as_said.rs): its shortcut and the bar's offer.
   asSaidHotkey: '',
-  asSaidOffer: true,
+  asSaidOffer: false,
   // Paste last / Copy last transcript (pasting/last.rs): unbound.
   pasteLastHotkey: '',
   copyLastHotkey: '',

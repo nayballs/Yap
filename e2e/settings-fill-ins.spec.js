@@ -40,11 +40,11 @@ test("a Chat scope saved where config.json had none survives Settings' next save
   // A switch flipped in Settings: the Chat scope stays.
   const offer = dialog.getByRole('button', { name: 'Offer what you said after AI cleanup' });
   await offer.click();
-  await expectStore(yap, 'config.json', (c) => c.asSaidOffer === false);
+  await expectStore(yap, 'config.json', (c) => c.asSaidOffer === true);
   await main.waitForTimeout(700);
   const chat = yap.readConfig().llmScopes.chat;
   expect([chat.enabled, chat.baseUrl, chat.apiKey]).toEqual([true, CHAT.baseUrl, CHAT.apiKey]);
   await offer.click();
-  await expectStore(yap, 'config.json', (c) => c.asSaidOffer === true);
+  await expectStore(yap, 'config.json', (c) => c.asSaidOffer === false);
   await closeSettings(main);
 });
