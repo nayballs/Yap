@@ -1894,9 +1894,10 @@ ways, a list at High, five sentences with numbers or ordinals that aren't lists,
 four emails, an email with a list —, 8 cursor — a sentence continued, after a
 comma, a question begun, the words before the cursor said again, a list item, a
 number mid-sentence, a new sentence and a letter's opening that mustn't be
-repeated). Run folders `<builds>/eval-runs/20261025-13*-strength-*`; an RTX 5070
-Ti and a Ryzen 7 9800X3D shared with other agents' builds and models, so the times
-compare before with after only.
+repeated). Run folders `<builds>/eval-runs/20261025-1*-strength-*` (the numbers
+below: `…-4b-final`, `…-1.5b-cpu-final`, `…-groq-before`, `…-groq-after`; the
+wordings tried: `…-4b-n2` … `…-4b-c7`); an RTX 5070 Ti and a Ryzen 7 9800X3D shared
+with other agents' builds and models, so the times compare before with after only.
 
 | Model | Before | After | Strength | Format | Cursor |
 |---|---|---|---|---|---|
