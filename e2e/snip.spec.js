@@ -27,11 +27,28 @@
 //   Win+Alt+S start one.
 // - Kept for their time: a screenshot past "Keep chat screenshots" goes and
 //   its message says so; deleting a conversation deletes its screenshots.
+//
+// Phase 2 (2026-10-25):
+// - A click takes the whole monitor, Enter the one under the pointer; Space
+//   (or Alt held) picks the window under the pointer, on either monitor; a
+//   box dragged from one monitor into the other is put together from both
+//   (black where neither is).
+// - Ctrl as you let go (or Ctrl+C) copies, Shift (or Ctrl+S) saves: nothing
+//   goes to Chat. The copy lands on a pretend clipboard (the real one is
+//   never touched here; the robot tests use it); the save at a path the test
+//   names (Windows' dialog never opens).
+// - A chat screenshot's right-click menu copies or saves it.
+// - A picture pasted into the box (Ctrl+V) and image files dropped on Chat
+//   go in as screenshots; a text file is left out.
+// - A model that can't read images: "Send its text instead" (the OCR text a
+//   test sets in place of Windows', `e2e_snip_ocr`), folded under the
+//   question; no text: said.
+// - "Reads images" in the Chat model picker and in Settings' Chat list.
 import fs from 'node:fs';
 import path from 'node:path';
 import { test as base, expect, openView, openSettings, closeSettings, expectStore, setConfig, sidebar } from './support/fixtures.js';
 import { startFakeLlm } from './support/fake-llm.js';
-import { readPng, readDataUrl, worstError } from './support/png.js';
+import { readPng, readDataUrl, worstError, writePng, pixel, near } from './support/png.js';
 
 const TEST_KEY = 'e2e-fake-key';
 
@@ -70,6 +87,10 @@ const MONITORS = [
 ];
 const GREY = [0xc0, 0xc0, 0xc0];
 const RED = [0xe5, 0x39, 0x35];
+const DARK = [0x20, 0x20, 0x20];
+const MID = [0x80, 0x80, 0x80];
+const LIGHT = [0xf5, 0xf5, 0xf5];
+const BLACK = [0, 0, 0];
 
 const box = (main) => main.getByRole('textbox', { name: 'Message' });
 const attachments = (main) => main.getByTestId('chat-attachments');
@@ -201,7 +222,7 @@ test('the three prompts ask in one tap; a snip on the 150 % monitor is exact too
   expect(worstError(readDataUrl(asked.images[0]), RED)).toBeLessThanOrEqual(1);
 });
 
-test('Esc, right-click and a plain click: nothing is snipped', async ({ yap, main }) => {
+test('Esc, right-click and a thin twitch: nothing is snipped', async ({ yap, main }) => {
   await openView(main, 'Home');
   await startSnip(yap);
   await yap.invoke('e2e_snip_input', { screen: 0, events: [{ kind: 'esc' }] });
@@ -213,9 +234,9 @@ test('Esc, right-click and a plain click: nothing is snipped', async ({ yap, mai
   await expect.poll(async () => (await last(yap))?.outcome).toBe('cancelled');
   expect((await last(yap)).reason).toBe('right-click');
 
-  // A click, and a 4-pixel twitch: still selecting, nothing saved.
+  // A 4-pixel-wide twitch (too thin a box, too long a move for a click):
+  // still selecting, nothing saved.
   await startSnip(yap);
-  await yap.invoke('e2e_snip_input', { screen: 0, events: [{ kind: 'down', x: 300, y: 300 }, { kind: 'up', x: 300, y: 300 }] });
   await yap.invoke('e2e_snip_input', { screen: 0, events: [{ kind: 'down', x: 300, y: 300 }, { kind: 'up', x: 304, y: 330 }] });
   await main.waitForTimeout(300);
   expect((await last(yap)).outcome).toBe('selecting');
@@ -443,6 +464,385 @@ test('screenshots are kept their time: removed after 7 days, and with their conv
   expect(otherIds.every((id) => fs.existsSync(imageFile(yap, id)))).toBe(true);
   await yap.invoke('chat_delete', { id: other.id });
   await expect.poll(() => otherIds.some((id) => fs.existsSync(imageFile(yap, id)))).toBe(false);
+});
+
+// ---- Phase 2 -----------------------------------------------------------------------------
+
+/** Post events to a fake monitor's overlay; wait for the snip to be taken. */
+async function snipBy(yap, screen, events) {
+  await yap.invoke('e2e_snip_input', { screen, events });
+  await expect.poll(async () => (await last(yap))?.outcome, { message: 'the snip to be taken' }).toBe('snipped');
+  return last(yap);
+}
+
+const click = (x, y, extra = {}) => [
+  { kind: 'down', x, y },
+  { kind: 'up', x, y, ...extra },
+];
+
+/** Chat's message box emptied of screenshots (they wait between tests). */
+async function clearBox(main) {
+  await openView(main, 'Chat');
+  const remove = attachments(main).getByRole('button', { name: 'Remove the screenshot' });
+  while ((await remove.count()) > 0) await remove.first().click();
+  await expect(attachments(main)).toBeHidden();
+}
+
+/** The PNG a copy put on the test's pretend clipboard. */
+async function clipboardPng(yap) {
+  const b64 = await yap.invoke('e2e_snip_clipboard');
+  return b64 ? readPng(Buffer.from(b64, 'base64')) : null;
+}
+
+test('a click takes the whole monitor, and Enter the one under the pointer', async ({ yap, main, shot }) => {
+  await clearBox(main);
+  await openView(main, 'Home');
+  await startSnip(yap);
+  // A click (the mouse barely moving) on the 150 % monitor.
+  const one = await snipBy(yap, 1, [
+    { kind: 'down', x: 500, y: 300 },
+    { kind: 'up', x: 502, y: 301 },
+  ]);
+  expect(one).toMatchObject({ kind: 'monitor', action: 'chat', rect: { x: 1280, y: 0, w: 960, h: 540 } });
+  expect(one.image).toMatchObject({ w: 960, h: 540 });
+  const png = readPng(fs.readFileSync(imageFile(yap, one.image.id)));
+  expect([png.width, png.height]).toEqual([960, 540]);
+  expect(near(pixel(png, 300, 60), RED, 0)).toBe(true);
+  expect(near(pixel(png, 60, 60), GREY, 0)).toBe(true);
+  expect(near(pixel(png, 5, 5), LIGHT, 0)).toBe(true);
+  await inChat(main);
+  await expect(attachments(main)).toContainText('960 × 540');
+  await shot(main, '07-whole-monitor-in-the-box');
+
+  // Enter, with the pointer over the HDR monitor: all of it, its colours
+  // converted back.
+  await startSnip(yap);
+  const all = await snipBy(yap, 0, [
+    { kind: 'hover', x: 600, y: 400 },
+    { kind: 'key', key: 'enter' },
+  ]);
+  expect(all).toMatchObject({ kind: 'monitor', rect: { x: 0, y: 0, w: 1280, h: 720 } });
+  const hdr = readPng(fs.readFileSync(imageFile(yap, all.image.id)));
+  expect([hdr.width, hdr.height]).toEqual([1280, 720]);
+  expect(near(pixel(hdr, 100, 90), GREY)).toBe(true);
+  expect(near(pixel(hdr, 700, 600), LIGHT)).toBe(true);
+  await clearBox(main);
+});
+
+test('Space (or Alt held) picks the window under the pointer, on either monitor', async ({ yap, main }) => {
+  // Topmost first: a dialog over a big window on the HDR monitor, and a
+  // window on the 150 % one.
+  const windows = [
+    { x: 250, y: 30, w: 220, h: 120 },
+    { x: 20, y: 20, w: 700, h: 400 },
+    { x: 1280 + 240, y: 20, w: 300, h: 200 },
+  ];
+  await openView(main, 'Home');
+  await startSnip(yap, { windows });
+  expect((await last(yap)).windows).toBe(3);
+  const dialog = await snipBy(yap, 0, [{ kind: 'key', key: 'space' }, { kind: 'hover', x: 300, y: 60 }, ...click(300, 60)]);
+  expect(dialog).toMatchObject({ kind: 'window', rect: { x: 250, y: 30, w: 220, h: 120 } });
+  const png = readPng(fs.readFileSync(imageFile(yap, dialog.image.id)));
+  expect([png.width, png.height]).toEqual([220, 120]);
+  // Its part of the red block, and the grey around it.
+  expect(near(pixel(png, 20, 20), RED)).toBe(true);
+  expect(near(pixel(png, 5, 5), LIGHT)).toBe(true);
+  await inChat(main);
+
+  // Alt held: the window under the pointer while it's held.
+  await openView(main, 'Home');
+  await startSnip(yap, { windows });
+  const big = await snipBy(yap, 0, [{ kind: 'key', key: 'alt' }, { kind: 'hover', x: 30, y: 300 }, ...click(30, 300)]);
+  expect(big).toMatchObject({ kind: 'window', rect: { x: 20, y: 20, w: 700, h: 400 } });
+
+  // On the 150 % monitor: its window, exact.
+  await openView(main, 'Home');
+  await startSnip(yap, { windows });
+  const there = await snipBy(yap, 1, [{ kind: 'key', key: 'space' }, { kind: 'hover', x: 300, y: 100 }, ...click(300, 100)]);
+  expect(there).toMatchObject({ kind: 'window', rect: { x: 1520, y: 20, w: 300, h: 200 } });
+  const p2 = readPng(fs.readFileSync(imageFile(yap, there.image.id)));
+  expect([p2.width, p2.height]).toEqual([300, 200]);
+  expect(near(pixel(p2, 40, 40), RED, 0)).toBe(true);
+
+  // Over no window: the monitor.
+  await openView(main, 'Home');
+  await startSnip(yap, { windows });
+  const none = await snipBy(yap, 0, [{ kind: 'key', key: 'space' }, ...click(1200, 700)]);
+  expect(none.kind).toBe('monitor');
+  await clearBox(main);
+});
+
+test('a box dragged from one monitor into the other is put together from both', async ({ yap, main, shot }) => {
+  await openView(main, 'Home');
+  await startSnip(yap);
+  // From the HDR monitor at (1100, 150) into the second, to (300, 280) on
+  // it: the drag stays with the window it started on, past its edge.
+  const across = await snipBy(yap, 0, [
+    { kind: 'down', x: 1100, y: 150 },
+    { kind: 'move', x: 1400, y: 200 },
+    { kind: 'up', x: 1580, y: 280 },
+  ]);
+  expect(across).toMatchObject({ kind: 'box', action: 'chat', rect: { x: 1100, y: 150, w: 480, h: 130 } });
+  const png = readPng(fs.readFileSync(imageFile(yap, across.image.id)));
+  expect([png.width, png.height]).toEqual([480, 130]);
+  // The first monitor's part (converted from HDR), then the second's two blocks.
+  expect(near(pixel(png, 10, 10), LIGHT)).toBe(true);
+  expect(near(pixel(png, 180 + 50, 20), DARK, 0)).toBe(true);
+  expect(near(pixel(png, 180 + 270, 20), MID, 0)).toBe(true);
+  await inChat(main);
+  await expect(attachments(main)).toContainText('480 × 130');
+  await shot(main, '08-box-across-monitors');
+
+  // Below the shorter monitor is on neither: black.
+  await openView(main, 'Home');
+  await startSnip(yap);
+  const corner = await snipBy(yap, 0, [
+    { kind: 'down', x: 1200, y: 500 },
+    { kind: 'up', x: 1400, y: 700 },
+  ]);
+  expect(corner.rect).toEqual({ x: 1200, y: 500, w: 200, h: 200 });
+  const c = readPng(fs.readFileSync(imageFile(yap, corner.image.id)));
+  expect(near(pixel(c, 150, 100), BLACK, 0)).toBe(true);
+  expect(near(pixel(c, 150, 20), LIGHT, 0)).toBe(true);
+  await clearBox(main);
+});
+
+test('Ctrl as you let go copies, Shift saves — nothing goes to Chat', async ({ yap, main }) => {
+  await openView(main, 'Home');
+  // Ctrl held as the box is let go: copied, privately (a pretend clipboard here).
+  await startSnip(yap);
+  const copied = await snipBy(yap, 0, [
+    { kind: 'down', x: 40, y: 40 },
+    { kind: 'move', x: 140, y: 90, ctrl: true },
+    { kind: 'up', x: 240, y: 140, ctrl: true },
+  ]);
+  expect(copied).toMatchObject({ kind: 'box', action: 'copy', size: [200, 100], image: null });
+  const clip = await clipboardPng(yap);
+  expect([clip.width, clip.height]).toEqual([200, 100]);
+  expect(worstError(clip, GREY)).toBeLessThanOrEqual(1);
+  // Ctrl+C while the box is up.
+  await startSnip(yap);
+  const keyed = await snipBy(yap, 0, [
+    { kind: 'down', x: 260, y: 40 },
+    { kind: 'move', x: 460, y: 140 },
+    { kind: 'key', key: 'ctrl' },
+    { kind: 'key', key: 'c' },
+  ]);
+  expect(keyed).toMatchObject({ action: 'copy', rect: { x: 260, y: 40, w: 200, h: 100 } });
+  expect(worstError(await clipboardPng(yap), RED)).toBeLessThanOrEqual(1);
+
+  // Shift: saved where the person chooses (here, a path the test names);
+  // the folder is remembered for next time.
+  const dir = path.join(yap.dataDir, 'saved-snips');
+  fs.mkdirSync(dir, { recursive: true });
+  const file = path.join(dir, 'dark block.png');
+  await yap.invoke('e2e_snip_save_path', { path: file });
+  await startSnip(yap);
+  const saved = await snipBy(yap, 0, [
+    { kind: 'down', x: 40, y: 160 },
+    { kind: 'up', x: 240, y: 260, shift: true },
+  ]);
+  expect(saved).toMatchObject({ action: 'save', size: [200, 100] });
+  await expect.poll(() => fs.existsSync(file)).toBe(true);
+  expect(worstError(readPng(fs.readFileSync(file)), DARK)).toBeLessThanOrEqual(1);
+  await expectStore(yap, 'config.json', (c) => c.snipSaveDir === dir);
+  // Ctrl+S with no box: the whole monitor under the pointer.
+  const whole = path.join(dir, 'second monitor.png');
+  await yap.invoke('e2e_snip_save_path', { path: whole });
+  await startSnip(yap);
+  const second = await snipBy(yap, 1, [{ kind: 'hover', x: 100, y: 100 }, { kind: 'key', key: 'ctrl' }, { kind: 'key', key: 's' }]);
+  expect(second).toMatchObject({ kind: 'monitor', action: 'save', size: [960, 540] });
+  await expect.poll(() => fs.existsSync(whole)).toBe(true);
+  // Nothing came up: Home is still showing.
+  await expect(sidebar(main).getByRole('button', { name: 'Home', exact: true })).toHaveAttribute('aria-current', 'page');
+});
+
+test("a chat screenshot's right-click menu copies and saves it", async ({ yap, main }) => {
+  const conv = yap.readJson('chats.json').conversations.find((c) => c.messages.some((m) => m.images?.length && !m.images[0].asText));
+  const id = conv.messages.find((m) => m.images?.length).images[0].id;
+  await openConversation(main, conv.id);
+  const shotBtn = main.locator('.cbubble.user .shots .shot').first();
+  await shotBtn.click({ button: 'right' });
+  await expect(main.getByRole('menuitem', { name: 'Copy image' })).toBeVisible();
+  await expect(main.getByRole('menuitem', { name: 'Save image as…' })).toBeVisible();
+  await main.getByRole('menuitem', { name: 'Copy image' }).click();
+  await expect.poll(() => yap.invoke('e2e_snip_clipboard')).toBe(fs.readFileSync(imageFile(yap, id)).toString('base64'));
+
+  const file = path.join(yap.dataDir, 'saved-snips', 'from chat.png');
+  await yap.invoke('e2e_snip_save_path', { path: file });
+  await shotBtn.click({ button: 'right' });
+  await main.getByRole('menuitem', { name: 'Save image as…' }).click();
+  await expect.poll(() => fs.existsSync(file)).toBe(true);
+  expect(fs.readFileSync(file).equals(fs.readFileSync(imageFile(yap, id)))).toBe(true);
+});
+
+test('a picture pasted into the box or image files dropped on Chat go in as screenshots', async ({ yap, main, fakeLlm, shot }) => {
+  await clearBox(main);
+  await box(main).click();
+  // Ctrl+V of a picture copied in another app: WebView2's paste event
+  // carries it as a PNG file.
+  await box(main).evaluate(async (el) => {
+    const c = document.createElement('canvas');
+    c.width = 64;
+    c.height = 48;
+    const g = c.getContext('2d');
+    g.fillStyle = '#e8a33c';
+    g.fillRect(0, 0, 64, 48);
+    const blob = await new Promise((r) => c.toBlob(r, 'image/png'));
+    const dt = new DataTransfer();
+    dt.items.add(new File([blob], 'image.png', { type: 'image/png' }));
+    el.dispatchEvent(new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true }));
+  });
+  await expect(attachments(main)).toContainText('64 × 48');
+  await expect(box(main)).toHaveValue('');
+
+  // Dropped on Chat: a PNG, a JPEG (Windows' own decoder) and a text file.
+  const dir = path.join(yap.dataDir, 'to-drop');
+  fs.mkdirSync(dir, { recursive: true });
+  const pngFile = path.join(dir, 'chart.png');
+  fs.writeFileSync(pngFile, writePng(90, 30, [0x20, 0x60, 0xa0]));
+  const jpegB64 = await main.evaluate(() => {
+    const c = document.createElement('canvas');
+    c.width = 40;
+    c.height = 40;
+    const g = c.getContext('2d');
+    g.fillStyle = '#3cb043';
+    g.fillRect(0, 0, 40, 40);
+    return c.toDataURL('image/jpeg', 0.95).split(',')[1];
+  });
+  const jpegFile = path.join(dir, 'photo.jpg');
+  fs.writeFileSync(jpegFile, Buffer.from(jpegB64, 'base64'));
+  const textFile = path.join(dir, 'notes.txt');
+  fs.writeFileSync(textFile, 'not a picture');
+  await yap.invoke('e2e_drag_drop', { paths: [pngFile, jpegFile, textFile] });
+  await expect(attachments(main).locator('.shotchip')).toHaveCount(3);
+  await expect(attachments(main)).toContainText('90 × 30');
+  await expect(attachments(main)).toContainText('40 × 40');
+  await expect(main.getByRole('status').filter({ hasText: "1 of the files weren't added" })).toBeVisible();
+  await shot(main, '09-pasted-and-dropped');
+
+  // They go like a snip's: three image parts (Groq takes three).
+  const before = fakeLlm.requests.length;
+  await box(main).fill('Compare these');
+  await box(main).press('Enter');
+  await expect(main.locator('.cbubble.assistant').last()).toContainText('OK');
+  const asked = fakeLlm.requests.slice(before).find((r) => r.images?.length);
+  expect(asked.images).toHaveLength(3);
+  const sizes = asked.images.map(readDataUrl).map((p) => `${p.width}x${p.height}`);
+  expect(sizes.sort()).toEqual(['40x40', '64x48', '90x30']);
+  const orange = asked.images.map(readDataUrl).find((p) => p.width === 64);
+  expect(worstError(orange, [0xe8, 0xa3, 0x3c])).toBeLessThanOrEqual(1);
+  const green = asked.images.map(readDataUrl).find((p) => p.width === 40);
+  expect(worstError(green, [0x3c, 0xb0, 0x43])).toBeLessThanOrEqual(6);
+
+  // Ctrl+V with the focus elsewhere in Chat (not a text field): into the box too.
+  await expect(attachments(main)).toBeHidden();
+  await main.evaluate(async () => {
+    const c = document.createElement('canvas');
+    c.width = 30;
+    c.height = 20;
+    c.getContext('2d').fillRect(0, 0, 30, 20);
+    const blob = await new Promise((r) => c.toBlob(r, 'image/png'));
+    const dt = new DataTransfer();
+    dt.items.add(new File([blob], 'image.png', { type: 'image/png' }));
+    document.activeElement?.blur();
+    document.body.dispatchEvent(new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true }));
+  });
+  await expect(attachments(main)).toContainText('30 × 20');
+  await clearBox(main);
+});
+
+test("a model that can't read images: \"Send its text instead\", read on this PC", async ({ yap, main, fakeLlm, shot }) => {
+  await setConfig(yap, main, { llmScopes: { chat: groqChat(fakeLlm, 'openai/gpt-oss-20b') } });
+  // The text Windows' OCR would read (its languages differ per PC).
+  await yap.invoke('e2e_snip_ocr', { text: "Error 0x80070005: Access is denied.\nCouldn't open settings.json" });
+  try {
+    await clearBox(main);
+    await openView(main, 'Home');
+    await startSnip(yap);
+    await drag(yap, 0, [40, 40], [240, 140]);
+    await inChat(main);
+    await expect(visionLine(main)).toBeVisible();
+    const asText = visionLine(main).getByRole('button', { name: 'Send its text instead' });
+    await expect(asText).toBeVisible();
+    await shot(main, '10-send-its-text-instead');
+    const before = fakeLlm.requests.length;
+    await box(main).fill('What does it say?');
+    await asText.click();
+    await expect(main.locator('.cbubble.assistant').last()).toContainText('OK');
+    const asked = fakeLlm.requests.slice(before).find((r) => r.user.includes('Access is denied'));
+    expect(asked, 'the question with the screenshot text').toBeTruthy();
+    expect(asked.images).toHaveLength(0);
+    expect(asked.model).toBe('openai/gpt-oss-20b');
+    expect(asked.user).toContain('What does it say?');
+    expect(asked.user).toContain('[Text read from the screenshot on this PC, sent instead of the picture]');
+    expect(asked.user).toContain("Couldn't open settings.json");
+    // The bubble: the question, the screenshot marked, its text folded under it.
+    const q = main.locator('.cbubble.user').last();
+    await expect(q.locator('.cbody')).toHaveText('What does it say?');
+    await expect(q.locator('.astextnote')).toHaveText('Sent as text');
+    const folded = q.getByTestId('chat-screen-text');
+    await expect(folded).toContainText('Text from the screenshot');
+    await folded.locator('summary').click();
+    await expect(folded.locator('pre')).toContainText('Error 0x80070005: Access is denied.');
+    await shot(main, '11-sent-as-text');
+    // Kept with the question, marked as sent as text; the conversation
+    // named by the question's own words.
+    await expectStore(yap, 'chats.json', (s) =>
+      s.conversations.some((c) => c.title === 'What does it say?' && c.messages.some((m) => m.images?.[0]?.asText === true))
+    );
+
+    // No text in it: said, and the question kept.
+    await yap.invoke('e2e_snip_ocr', { text: '' });
+    await openView(main, 'Home');
+    await startSnip(yap);
+    await drag(yap, 0, [40, 40], [240, 140]);
+    await inChat(main);
+    await box(main).fill('And this?');
+    await visionLine(main).getByRole('button', { name: 'Send its text instead' }).click();
+    await expect(main.getByRole('status').filter({ hasText: 'No text found in the screenshot' })).toBeVisible();
+    await expect(box(main)).toHaveValue('And this?');
+    await expect(attachments(main)).toContainText('200 × 100');
+  } finally {
+    await yap.invoke('e2e_snip_ocr', { text: null });
+    await setConfig(yap, main, { llmScopes: { chat: groqChat(fakeLlm, 'qwen/qwen3.8-27b') } });
+    await clearBox(main);
+  }
+});
+
+test('"Reads images" in the Chat model picker and in Settings\' Chat models', async ({ main, shot }) => {
+  await openView(main, 'Chat');
+  await main.locator('.modelchip .chip').click();
+  const pop = main.getByRole('dialog', { name: 'Switch the Chat model' });
+  await expect(pop).toBeVisible();
+  await pop.getByRole('tab', { name: /^Groq/ }).click();
+  const row = (name) => pop.locator('.pane .mrow', { has: main.locator('.nm', { hasText: new RegExp(`^${name}$`) }) });
+  await expect(row('Qwen3.8 27B').locator('.tag.img')).toHaveText('Reads images');
+  await expect(row('GPT-OSS 20B').locator('.tag.img')).toHaveCount(0);
+  // Every Claude reads images, connected or not.
+  await pop.getByRole('tab', { name: /^Claude/ }).click();
+  await expect(row('Claude Haiku 4.5').locator('.tag.img')).toHaveText('Reads images');
+  await expect(row('Claude Haiku 4.5').locator('.tag.key')).toHaveText('Add key');
+  await shot(main, '12-picker-reads-images');
+  // Search "images": the models that read them.
+  await pop.getByRole('searchbox').fill('reads images');
+  await expect(pop.locator('.mrow').first()).toBeVisible();
+  const names = await pop.locator('.mrow .nm').allTextContents();
+  expect(names).toContain('Qwen3.8 27B');
+  expect(names).not.toContain('GPT-OSS 20B');
+  await main.keyboard.press('Escape');
+  await expect(pop).toBeHidden();
+
+  // Settings → Language Models → Chat & Voice Assistant: the same tag.
+  const dialog = await openSettings(main, 'Language Models');
+  await dialog.getByRole('tab', { name: 'Chat & Voice Assistant' }).click();
+  const list = dialog.locator('.picker[data-provider="groq"]');
+  await expect(list.locator('.srow', { hasText: 'Qwen3.8 27B' }).locator('.simg')).toHaveText('Reads images');
+  await expect(list.locator('.srow', { hasText: 'GPT-OSS 20B' }).locator('.simg')).toHaveCount(0);
+  // Dictation Cleanup's list doesn't say it (a screenshot never goes there).
+  await dialog.getByRole('tab', { name: 'Dictation Cleanup' }).click();
+  await expect(dialog.locator('.simg')).toHaveCount(0);
+  await closeSettings(main);
 });
 
 async function pressKey(page, key, vk) {

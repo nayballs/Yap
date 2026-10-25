@@ -46,13 +46,20 @@
 //   yaprobot contentrect <hwnd>   a browser window's page area on screen
 //                                 (its Chrome_RenderWidgetHostHWND), in
 //                                 physical pixels
-//   yaprobot snipdrag <pid> <x0> <y0> <x1> <y1>   a real drag from (x0, y0)
-//                                 to (x1, y1), physical pixels — only when
+//   yaprobot snipdrag <pid> <x0> <y0> <x1> <y1> [ctrl|shift]   a real drag
+//                                 from (x0, y0) to (x1, y1), physical pixels
+//                                 (the same point twice: a click) — only when
 //                                 the robot's own Yap's snip overlay is under
-//                                 the pointer; the pointer goes back
-//   yaprobot snipkey <pid> <key>  escape: pressed while the robot's own
-//                                 Yap's snip overlay is in front; says what
-//                                 was in front
+//                                 the pointer; Ctrl or Shift held as it's let
+//                                 go only while that overlay is in front; the
+//                                 pointer goes back
+//   yaprobot snipkey <pid> <key> [<x> <y>]   escape, enter or space:
+//                                 pressed while the robot's own Yap's snip
+//                                 overlay is in front (the pointer first moved
+//                                 to (x, y), only onto that overlay); says
+//                                 what was in front
+//   yaprobot framerect <hwnd>     a window's visible frame (DWM's extended
+//                                 frame bounds), physical pixels
 //
 // Every command prints one JSON object. Nothing here reads or prints the
 // title or text of a window the test didn't open.
@@ -93,6 +100,7 @@ static class Native {
     [DllImport("user32.dll")] public static extern IntPtr WindowFromPoint(POINT p);
     [DllImport("user32.dll")] public static extern bool GetCursorPos(out POINT p);
     [DllImport("user32.dll")] public static extern bool SetCursorPos(int x, int y);
+    [DllImport("dwmapi.dll")] public static extern int DwmGetWindowAttribute(IntPtr h, int attr, out RECT r, int size);
     [DllImport("kernel32.dll", SetLastError = true)] public static extern IntPtr CreateToolhelp32Snapshot(uint flags, uint pid);
     [DllImport("kernel32.dll", CharSet = CharSet.Unicode)] public static extern bool Process32FirstW(IntPtr snap, ref PROCESSENTRY32W e);
     [DllImport("kernel32.dll", CharSet = CharSet.Unicode)] public static extern bool Process32NextW(IntPtr snap, ref PROCESSENTRY32W e);
@@ -181,9 +189,15 @@ static class Program {
                 case "contentrect": Print(ContentRect(new IntPtr(long.Parse(args[1])))); return 0;
                 case "place": Print(Place(new IntPtr(long.Parse(args[1])), args[2], int.Parse(args[3]), int.Parse(args[4]))); return 0;
                 case "snipdrag":
-                    Print(SnipDrag(uint.Parse(args[1]), int.Parse(args[2]), int.Parse(args[3]), int.Parse(args[4]), int.Parse(args[5])));
+                    Print(SnipDrag(uint.Parse(args[1]), int.Parse(args[2]), int.Parse(args[3]), int.Parse(args[4]), int.Parse(args[5]),
+                        args.Length > 6 ? args[6] : ""));
                     return 0;
-                case "snipkey": Print(SnipKey(uint.Parse(args[1]), args[2])); return 0;
+                case "snipkey":
+                    Print(args.Length > 4
+                        ? SnipKey(uint.Parse(args[1]), args[2], int.Parse(args[3]), int.Parse(args[4]))
+                        : SnipKey(uint.Parse(args[1]), args[2]));
+                    return 0;
+                case "framerect": Print(FrameRect(new IntPtr(long.Parse(args[1])))); return 0;
                 default: throw new ArgumentException("unknown command " + args[0]);
             }
         } catch (Exception e) {
@@ -513,11 +527,25 @@ static class Program {
         return underPid == pid && Native.Class(under) == "YapSnipOverlay";
     }
 
+    /// Whether the robot's own snip overlay is the window in front (a key
+    /// pressed now goes to it, nowhere else).
+    static bool SnipOverlayInFront(uint pid) {
+        IntPtr fg = Native.Root(Native.GetForegroundWindow());
+        uint fgPid;
+        Native.GetWindowThreadProcessId(fg, out fgPid);
+        return fgPid == pid && Native.Class(fg) == "YapSnipOverlay";
+    }
+
     /// A real drag over the robot's own snip overlay: down at (x0, y0), a
-    /// few moves, up at (x1, y1). Refused unless that overlay is under the
-    /// pointer at the start (a drag anywhere else would go to another app).
-    static Dictionary<string, object> SnipDrag(uint pid, int x0, int y0, int x1, int y1) {
+    /// few moves, up at (x1, y1) — the same point twice is a click. Refused
+    /// unless that overlay is under the pointer at the start (a drag
+    /// anywhere else would go to another app). `mod` "ctrl" / "shift": held
+    /// as the button is let go (Snip to Chat's copy / save), only while the
+    /// overlay is in front.
+    static Dictionary<string, object> SnipDrag(uint pid, int x0, int y0, int x1, int y1, string mod) {
         Native.SetProcessDpiAwarenessContext(new IntPtr(-4)); // per-monitor v2: physical pixels
+        ushort modVk = mod == "ctrl" ? (ushort)0x11 : mod == "shift" ? (ushort)0x10 : (ushort)0;
+        if (mod != "" && modVk == 0) return Obj("ok", false, "reason", "only ctrl or shift");
         Native.POINT back;
         Native.GetCursorPos(out back);
         Native.SetCursorPos(x0, y0);
@@ -525,6 +553,10 @@ static class Program {
         if (!SnipOverlayAt(pid, x0, y0)) {
             Native.SetCursorPos(back.X, back.Y);
             return Obj("ok", false, "reason", "the robot's snip overlay isn't under the pointer");
+        }
+        if (modVk != 0 && !SnipOverlayInFront(pid)) {
+            Native.SetCursorPos(back.X, back.Y);
+            return Obj("ok", false, "reason", "the snip overlay isn't in front");
         }
         var size = Marshal.SizeOf(typeof(Native.INPUT));
         var down = new Native.INPUT[1];
@@ -535,26 +567,68 @@ static class Program {
             Thread.Sleep(15);
             Native.SetCursorPos(x0 + (x1 - x0) * i / 8, y0 + (y1 - y0) * i / 8);
         }
+        if (modVk != 0) {
+            Native.SendInput(1, new[] { Key(modVk, false) }, size);
+            Thread.Sleep(30);
+            // A move with the key held, as a person's hand would make.
+            Native.SetCursorPos(x1, y1);
+        }
         Thread.Sleep(40);
         var up = new Native.INPUT[1];
         up[0].type = 0;
         up[0].u.mi = new Native.MOUSEINPUT { dwFlags = 0x0004 };
         Native.SendInput(1, up, size);
+        if (modVk != 0) {
+            Thread.Sleep(20);
+            Native.SendInput(1, new[] { Key(modVk, true) }, size);
+        }
         Thread.Sleep(100);
         Native.SetCursorPos(back.X, back.Y);
         return Obj("ok", true);
     }
 
-    /// Esc while the robot's own snip overlay is in front (else nothing).
-    static Dictionary<string, object> SnipKey(uint pid, string key) {
-        if (key != "escape") return Obj("ok", false, "reason", "only escape");
-        IntPtr fg = Native.Root(Native.GetForegroundWindow());
-        uint fgPid;
-        Native.GetWindowThreadProcessId(fg, out fgPid);
-        bool ours = fgPid == pid && Native.Class(fg) == "YapSnipOverlay";
-        if (!ours) return Obj("ok", false, "reason", "the snip overlay isn't in front", "fgIsYap", fgPid == pid);
-        Native.SendInput(2, new[] { Key(0x1B, false), Key(0x1B, true) }, Marshal.SizeOf(typeof(Native.INPUT)));
+    /// A key (escape, enter, space) while the robot's own snip overlay is in
+    /// front (else nothing); with (x, y), the pointer moved there first —
+    /// only onto that overlay — and left there (Enter takes the monitor
+    /// under it, Space lights the window under it).
+    static Dictionary<string, object> SnipKey(uint pid, string key, int x = int.MinValue, int y = int.MinValue) {
+        ushort vk = key == "escape" ? (ushort)0x1B : key == "enter" ? (ushort)0x0D : key == "space" ? (ushort)0x20 : (ushort)0;
+        if (vk == 0) return Obj("ok", false, "reason", "only escape, enter or space");
+        if (!SnipOverlayInFront(pid)) {
+            IntPtr fg = Native.Root(Native.GetForegroundWindow());
+            uint fgPid;
+            Native.GetWindowThreadProcessId(fg, out fgPid);
+            return Obj("ok", false, "reason", "the snip overlay isn't in front", "fgIsYap", fgPid == pid);
+        }
+        if (x != int.MinValue) {
+            Native.SetProcessDpiAwarenessContext(new IntPtr(-4));
+            Native.POINT back;
+            Native.GetCursorPos(out back);
+            Native.SetCursorPos(x, y);
+            Thread.Sleep(80);
+            if (!SnipOverlayAt(pid, x, y)) {
+                Native.SetCursorPos(back.X, back.Y);
+                return Obj("ok", false, "reason", "the robot's snip overlay isn't under the pointer");
+            }
+            // A small move so the overlay sees where the pointer is.
+            Native.SetCursorPos(x + 1, y);
+            Thread.Sleep(30);
+            Native.SetCursorPos(x, y);
+            Thread.Sleep(50);
+        }
+        Native.SendInput(2, new[] { Key(vk, false), Key(vk, true) }, Marshal.SizeOf(typeof(Native.INPUT)));
         return Obj("ok", true);
+    }
+
+    /// A window's visible frame on screen (DWM's extended frame bounds, no
+    /// invisible resize borders), physical pixels: what Snip to Chat's
+    /// window pick takes.
+    static Dictionary<string, object> FrameRect(IntPtr h) {
+        Native.SetProcessDpiAwarenessContext(new IntPtr(-4));
+        Native.RECT r;
+        int hr = Native.DwmGetWindowAttribute(h, 9, out r, Marshal.SizeOf(typeof(Native.RECT)));
+        if (hr != 0) return Obj("error", "no frame bounds");
+        return Obj("x", r.Left, "y", r.Top, "w", r.Right - r.Left, "h", r.Bottom - r.Top);
     }
 
     /// F12 in the robot's own Yap window (in front): what came up in Yap's

@@ -9,6 +9,14 @@
 // monitor in turn, HDR or not. And the overlay must be on screen within
 // 150 ms of the request; Esc on it cancels, and the focus goes back.
 //
+// Phase 2 (2026-10-25), for real: a click takes the whole monitor and
+// Enter the one under the pointer (every swatch where it is on it); Space
+// then a click picks the swatch page's window — exactly its visible frame
+// (DWM's bounds, `yaprobot framerect`); Ctrl held as the box is let go
+// copies it to the real clipboard (a PNG and a DIB, out of Win+V history),
+// and Ctrl+V in Chat's box pastes it back as a screenshot, pixel for pixel.
+// The robot's clipboard is saved before and put back after (robot.js).
+//
 // It takes the mouse and the focus for a few seconds per monitor: say so
 // before running it while someone's at the PC.
 import fs from 'node:fs';
@@ -138,6 +146,148 @@ test('a real snip of swatches on every monitor: the PNG holds their colours, HDR
     }
   }
   console.log(`snip overlay timings: ${timings.map((t) => Math.round(t.overlayMs)).join(', ')} ms`);
+});
+
+/** The monitors, as a snip sees them (a snip started and cancelled). */
+async function monitors(yap) {
+  const first = await snipNow(yap);
+  helper('snipkey', yap.child.pid, 'escape');
+  await yap.invoke('e2e_snip_input', { screen: 0, events: [{ kind: 'esc' }] });
+  await expect.poll(async () => (await last(yap))?.outcome).toBe('cancelled');
+  return first.screens;
+}
+
+/** The swatch page on `screen`, in front; its swatches' rects. */
+async function pageOn(robot, page, screen) {
+  const placed = helper('place', page.hwnd, robot.nonce, screen.x + 80, screen.y + 120);
+  expect(placed.ok, 'the swatch page onto the monitor').toBe(true);
+  await page.focus();
+  await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
+  return swatchRects(page);
+}
+
+/** Every swatch's colour (±2) in a PNG whose top-left is at `origin` on screen. */
+function expectSwatches(png, rects, origin, what) {
+  for (const [k, want] of SWATCHES.entries()) {
+    const r = rects[k];
+    const got = meanAt(png, r.x - origin.x, r.y - origin.y, r.w, r.h);
+    const worst = Math.max(...got.map((v, c) => Math.abs(v - want[c])));
+    expect(worst, `swatch ${hex(want)} in ${what}: read ${hex(got)}`).toBeLessThanOrEqual(2);
+  }
+}
+
+/** The snip just taken, once it's saved. */
+async function taken(yap) {
+  await expect.poll(async () => (await last(yap))?.outcome, { message: 'the snip taken' }).toBe('snipped');
+  return last(yap);
+}
+
+const pngOf = (yap, image) => readPng(fs.readFileSync(path.join(yap.dataDir, 'chat-images', `${image.id}.png`)));
+
+test('a real click takes the whole monitor, and Enter the one under the pointer', async ({ robot }) => {
+  test.skip(!edgeExe(), 'Microsoft Edge is needed for the swatch page');
+  const { yap } = robot;
+  const screens = await monitors(yap);
+  const page = await swatchPage(robot);
+  // A click on the first monitor, away from the page.
+  const s0 = screens[0];
+  let rects = await pageOn(robot, page, s0);
+  await snipNow(yap);
+  const at = [s0.x + Math.floor(s0.width * 0.8), s0.y + Math.floor(s0.height * 0.8)];
+  const clicked = helper('snipdrag', yap.child.pid, at[0], at[1], at[0], at[1]);
+  expect(clicked.ok, clicked.reason ?? 'clicked').toBe(true);
+  const one = await taken(yap);
+  expect(one.kind).toBe('monitor');
+  expect(one.rect).toEqual({ x: s0.x, y: s0.y, w: s0.width, h: s0.height });
+  const png = pngOf(yap, one.image);
+  expect([png.width, png.height]).toEqual([s0.width, s0.height]);
+  expectSwatches(png, rects, s0, `monitor 0, whole${s0.hdr ? ' (HDR)' : ''}`);
+
+  // Enter with the pointer on the last monitor (the other one, with two).
+  const sN = screens.at(-1);
+  rects = await pageOn(robot, page, sN);
+  await snipNow(yap);
+  const enter = helper('snipkey', yap.child.pid, 'enter', sN.x + 30, sN.y + sN.height - 30);
+  expect(enter.ok, enter.reason ?? 'enter').toBe(true);
+  const all = await taken(yap);
+  expect(all.kind).toBe('monitor');
+  expect(all.rect).toEqual({ x: sN.x, y: sN.y, w: sN.width, h: sN.height });
+  expectSwatches(pngOf(yap, all.image), rects, sN, `monitor ${screens.length - 1}, by Enter${sN.hdr ? ' (HDR)' : ''}`);
+});
+
+test('Space then a real click picks the window: exactly its visible frame', async ({ robot }) => {
+  test.skip(!edgeExe(), 'Microsoft Edge is needed for the swatch page');
+  const { yap } = robot;
+  const screens = await monitors(yap);
+  const page = await swatchPage(robot);
+  const rects = await pageOn(robot, page, screens[0]);
+  const frame = helper('framerect', page.hwnd);
+  expect(frame.error, 'the page window has a frame').toBeUndefined();
+  // What's picked is the frame on the desktop (a window past its edge is cut there).
+  const desk = screens.reduce(
+    (d, s) => ({ l: Math.min(d.l, s.x), t: Math.min(d.t, s.y), r: Math.max(d.r, s.x + s.width), b: Math.max(d.b, s.y + s.height) }),
+    { l: Infinity, t: Infinity, r: -Infinity, b: -Infinity },
+  );
+  const l = Math.max(frame.x, desk.l);
+  const t = Math.max(frame.y, desk.t);
+  const want = { x: l, y: t, w: Math.min(frame.x + frame.w, desk.r) - l, h: Math.min(frame.y + frame.h, desk.b) - t };
+
+  await snipNow(yap);
+  const [px, py] = [rects[1].x + 5, rects[1].y + 5];
+  const space = helper('snipkey', yap.child.pid, 'space', px, py);
+  expect(space.ok, space.reason ?? 'space').toBe(true);
+  const clicked = helper('snipdrag', yap.child.pid, px, py, px, py);
+  expect(clicked.ok, clicked.reason ?? 'clicked').toBe(true);
+  const picked = await taken(yap);
+  console.log(`snip: picked a ${picked.rect.w}x${picked.rect.h} window (frame ${frame.w}x${frame.h}) of ${picked.windows} on screen`);
+  expect(picked.kind).toBe('window');
+  expect(picked.rect).toEqual(want);
+  const png = pngOf(yap, picked.image);
+  expect([png.width, png.height]).toEqual([want.w, want.h]);
+  expectSwatches(png, rects, want, 'the picked window');
+});
+
+test('Ctrl held as a real box is let go: copied for real, privately, and Ctrl+V pastes it into Chat', async ({ robot }) => {
+  test.skip(!edgeExe(), 'Microsoft Edge is needed for the swatch page');
+  const { yap } = robot;
+  const screens = await monitors(yap);
+  const page = await swatchPage(robot);
+  const rects = await pageOn(robot, page, screens[0]);
+  await snipNow(yap);
+  const [a, z] = [rects[0], rects.at(-1)];
+  const box = { x: a.x + 3, y: a.y + 3, w: z.x + z.w - 3 - (a.x + 3), h: z.y + z.h - 3 - (a.y + 3) };
+  const drag = helper('snipdrag', yap.child.pid, box.x, box.y, box.x + box.w, box.y + box.h, 'ctrl');
+  expect(drag.ok, drag.reason ?? 'dragged').toBe(true);
+  const copied = await taken(yap);
+  expect(copied.action).toBe('copy');
+  expect(copied.size).toEqual([box.w, box.h]);
+  expect(copied.image).toBeNull();
+  // On the real clipboard: a PNG (exactly the one Yap made) and a DIB,
+  // with the formats that keep it out of Win+V history.
+  const check = await yap.invoke('realtest_clipboard', { action: 'checkSnip' });
+  expect(check).toMatchObject({ hasPng: true, matchesSnip: true, hasDib: true, private: true, width: box.w, height: box.h });
+
+  // Ctrl+V in Chat's box: WebView2 hands the picture over, Yap keeps it.
+  await yap.invoke('e2e_main_on_screen');
+  const main = yap.main;
+  await main.getByRole('navigation', { name: 'Main' }).getByRole('button', { name: 'Chat', exact: true }).click();
+  const input = main.getByRole('textbox', { name: 'Message' });
+  // The earlier tests' snips wait in the box: out first.
+  const shots = main.getByTestId('chat-attachments');
+  const remove = shots.getByRole('button', { name: 'Remove the screenshot' });
+  while ((await remove.count()) > 0) await remove.first().click();
+  await expect(shots).toBeHidden();
+  await input.click();
+  await main.keyboard.press('Control+V');
+  await expect(shots.locator('.shotchip')).toHaveCount(1);
+  await expect(shots).toContainText(`${box.w} × ${box.h}`);
+  await expect(input).toHaveValue('');
+  const src = await shots.locator('img').first().getAttribute('src');
+  const id = src.match(/img_[0-9a-f]{16}/)?.[0];
+  expect(id, 'the pasted picture kept as a chat screenshot').toBeTruthy();
+  const png = pngOf(yap, { id });
+  expect([png.width, png.height]).toEqual([box.w, box.h]);
+  expectSwatches(png, rects, box, 'the pasted copy');
 });
 
 test('Esc on a real snip cancels it, and the app you were in has the focus again', async ({ robot }) => {
