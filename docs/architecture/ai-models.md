@@ -272,8 +272,28 @@ The language-model side: the OpenAI-compatible client and its prompts, the on-de
   copy back of the saved prompt — and a 4B server peaked at 6.7 GB on the
   processor; Qwen3.5-4B's peak is now 3.85 GB there, 3.7 GB on the card),
   `--ctx-checkpoints 4` (Qwen3.5's recurrent-state checkpoints, ~50 MB each),
-  `-lv 4` (the log names the layers that went to the GPU), and MTP as the
-  `Plan` says (below). **The runtime** (2026-10-22): **llamafile 0.10.6**
+  `-lv 4` (the log names the layers that went to the GPU), MTP as the
+  `Plan` says (below), and **a q8_0 KV cache only where it helps**
+  (`-ctk q8_0 -ctv q8_0`, `Plan.kv_q8`, `kv_q8_helps`, 2026-10-25): on an
+  NVIDIA card, llamafile 0.10.6+, a context of 32K or more
+  (`KV_Q8_FROM`) whose f16 cache wouldn't fit in `card_room` while the
+  q8_0 one would — then MTP is decided with it. Measured on the 4B
+  (model-evals.md "KV cache q8_0"): −401 MiB on the card at 32K, −753 at
+  64K, the suite 160/164 both ways and a 24K / 56K needle test 6/6 both
+  ways, but Chat's generation ~25 % slower (150 → 110 tokens/s), so never
+  where the f16 cache fits; never on the processor. **On the processor,
+  two slots with a cache each** (`Plan.per_slot`, `per_slot_caches`,
+  2026-10-25: `-np 2 --no-kv-unified`, `-c` twice the context so each slot
+  has all of it; no card, 0.10.6+): with llama.cpp's one cache shared by 4
+  slots a dictation's cleanup right after a long Chat turn ran 2.0–2.6×
+  slower (its attention over the chat's cells; once its prompt cleared for
+  the room) — now 1.0–1.1×, for the KV once more (the 1.5B +224 MiB at 8K;
+  model-evals.md "The processor tier"). `log_facts` reads `n_ctx_seq`, the
+  context a request has, so the context view and the restart rule see 8K,
+  not 16K; `gguf::estimate` counts the second cache (`Server.per_slot`).
+  **Qwen3.5-9B** was
+  measured again for 16 GB cards and isn't offered: no better than the 4B
+  (model-evals.md "Qwen3.5-9B against the 4B"). **The runtime** (2026-10-22): **llamafile 0.10.6**
   (`RUNTIME_VERSION`, mozilla-ai's release, SHA-256 `d579f61d…` = GitHub's
   digest; over 0.10.3: CUDA graphs, a ~430 MiB smaller compute buffer, the
   June tool-call grammar fixes, checkpoints at every user message, the
@@ -337,10 +357,14 @@ The language-model side: the OpenAI-compatible client and its prompts, the on-de
   `llamafile.exe` comes back from `llamafile-previous.exe`, else from a
   whole `llamafile-next.exe` of the pinned runtime (`repair_runtime`); a
   previous one kept past a proven start goes, and so does a cut-off
-  `llamafile-next.partial`. Every download (`download_for`) checks the
-  disk for its size + 64 MB first, gives up on a server or connection
-  silent for 60 s (`DOWNLOAD_STALL`), and deletes its partial file on any
-  error. All of them run as `llamafile.exe`, so the orphan sweep
+  `llamafile-next.partial`. Every download (`download_for`) goes through
+  the shared helper (app-shell.md `shell/download.rs`, 2026-10-25): it
+  checks the disk for its size + 64 MB first, gives up on a server or
+  connection silent for 60 s, **resumes** a partial file an earlier try
+  left (before, any error deleted it), shows its speed and time left, and
+  **Cancel** (`download_cancel {id: "llm:<curated id>"}`, the runtime's
+  download part of the model's install) stops it and deletes the partial
+  file; a bad hash deletes it too (`verify_into`). All of them run as `llamafile.exe`, so the orphan sweep
   (`procs::orphaned`) and the job object cover them. **Yap's own restart**
   (a new context, the swap; `PlannedRestart`): meanwhile an on-device
   cleanup gets no endpoint (`effective_endpoint_for`: the raw text; edit
@@ -458,7 +482,10 @@ The language-model side: the OpenAI-compatible client and its prompts, the on-de
   on 0.10.3 = vocab × 512 × 4 + 2 KiB per token of context, on 0.10.6 = 2
   × feed-forward × 512 × 4 + embedding × 512 × 20 + 12 MiB + 1 KiB per
   token; MTP (`mtp_mib`) = the prediction block + the recurrent state × 3
-  more + 36 MiB + one attention layer's KV + a draft compute buffer.
+  more + 36 MiB + one attention layer's KV + a draft compute buffer; a
+  q8_0 KV cache (`Server.kv_q8`) = the KV × 17/32 and 3,600 bytes of
+  compute per token of context more (the 4B with MTP: 4,698 / 5,546 MiB
+  estimated vs 4,623 / 5,487 in the log at 32K / 64K).
   Within 1% of the log, erring high: Qwen3.5-4B on 0.10.3 3,821 / 4,637
   MiB estimated vs 3,815 / 4,641 at 8K / 32K; on 0.10.6 3,279 / 4,071 /
   5,127 vs 3,270 / 4,062 / 5,118 at 8K / 32K / 64K, with MTP 4,153 / 5,065
@@ -665,7 +692,13 @@ The language-model side: the OpenAI-compatible client and its prompts, the on-de
   measure the first words, `YAP_EVAL_STREAM=off` whole), `layout` (a Chat turn's prompt re-read
   with the time + notes in the system prompt vs the last user message),
   `loop` (a tool step after one that offered other tools), `embed` (an
-  embedding model's speed and recall vs Chat's keyword search);
+  embedding model's speed and recall vs Chat's keyword search), `needle`
+  (a long context: six facts hidden in a made-up logbook of
+  `--bench-history` thousand tokens, each asked for — found, and the time
+  to read it; with and without a q8_0 KV cache); **`seed.calendar`** gives
+  a scenario a connected calendar (`calendar::seed`: meetings and busy time
+  on days the run's clock reads as the person would say them), and
+  `calendar_cited` / `calendar_not_cited` check the answer's meetings;
   `--temperature` / `--set` lay fields over every request
   (`eval::adjust_body`, in `llm::post_chat_request`). The hooks in
   `ai/llm.rs` (`eval::Call`, `eval::adjust_body`), `chat/tools.rs`, `config.rs`,

@@ -48,7 +48,10 @@ Telling the call side's voices apart (the beta speaker engine, a child process) 
   CLI/llama/nmt/tts, `share/licenses/` → `licenses/`), and the sherpa-onnx
   fallback (pyannote seg-3.0 + ERes2Net + sherpa 1.13.8, pinned) listed as
   **"For phone-only calls — coming later"** (`available: false`, no engine).
-  Install = download (resume), size + SHA-256, unpack into
+  Install = download (resume; Cancel, `download_cancel {id:
+  "diarization:<id>"}`, through the shared helper `shell/download.rs`,
+  app-shell.md, 2026-10-25: the partial file and the half-made folder
+  go), size + SHA-256, unpack into
   `<folder>.installing/`, rename into `<data>/models/diarization/<folder>/`,
   plus a `NOTICE.txt`; installed = every required file there at its pinned
   size; delete takes the runtime too when nothing else uses it (refused

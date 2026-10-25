@@ -65,7 +65,9 @@ the on-device model hasn't brought it (`local_llm::models::ensure_runtime
 "search"`), then the GGUF into `<data>/models/search/` through the
 registry's resumable, verified download ("Meeting search model download" in
 the network receipts), progress on `yap-search-download {stage, percent,
-downloadedBytes, totalBytes}`. Then the setting is switched on
+downloadedBytes, totalBytes, bytesPerSec, etaSecs, cancelId: "search"}`
+(Settings' row says how fast and how long; Cancel = `download_cancel {id:
+"search"}`: app-shell.md `shell/download.rs`, 2026-10-25). Then the setting is switched on
 (`config.search_by_meaning`) and a pass starts. **Delete** removes the GGUF
 and the index; the runtime stays (the on-device model may use it).
 

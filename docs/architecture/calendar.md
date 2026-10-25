@@ -62,7 +62,19 @@ Connecting Google Calendar or an iCal link, sync, parsing, the reminder card, pr
   `_cancel_google`/`_add_link`/`_disconnect`/`_event(key, open|join|start|
   joinStart|switch|joinSwitch)`/`_card(id, join|start|snooze|dismiss)`/
   `_nudge`/`_meeting_notes(query)` (`hasPlan`, `hasTalk`: "Generate
-  summary"); events `yap-calendar` (snapshot), `yap-calendar-connected`
+  summary"); **for Chat's calendar tool** (2026-10-25,
+  [chat-and-assistant.md](./chat-and-assistant.md) `chat/tools/calendar.rs`):
+  `agenda()` (the meetings and busy time as kept, the meetings' notes read
+  after the lock is let go, the last sync; no sync, no network),
+  `connected()`, `conflicts_of`, `KEPT_BACK` / `KEPT_AHEAD`, and debug-only
+  `seed` (a model evaluation's calendar). **Busy time of your own**
+  (`model::Busy`, `model::sort`: a draft is a meeting, busy time — an
+  event with nobody else on it and no join link, or one over 6 h up to a
+  day — or neither: cancelled, declined, longer): `calendar.json` `busy`
+  (pruned and replaced per connection like the meetings), only for "am I
+  free at 3?", never a reminder, a brief or a note; all-day events still
+  never get this far. An older Yap saving calendar.json drops `busy` until
+  the next sync puts it back. Events `yap-calendar` (snapshot), `yap-calendar-connected`
   (`{kind, label, meetings}`: the new calendar's meetings on now or in the
   next 7 days, which `_add_link` also returns), `yap-calendar-error`. (The
   Meetings view's Ask bar, once `meetings_context` here, is meeting search's
