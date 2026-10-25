@@ -194,35 +194,54 @@ impl Shared {
         // endpoint comes from the matched profile's LLM override when it
         // has one, else the global settings — either way "ondevice" routes
         // through the sidecar when it's up.
-        let (dict, pp_enabled, pp_base_url, pp_api_key, pp_model, pp_provider, plan, pp_disable_thinking) = self
-            .config
-            .read()
-            .map(|c| {
-                let plan = crate::ai::cleanup_styles::resolve(&c, target);
-                let (pp_base_url, pp_api_key, pp_model, pp_provider) =
-                    match plan.as_ref().and_then(|p| p.endpoint.as_ref()) {
-                        Some((provider, base_url, api_key, model)) => {
-                            // Profile keys fall back to the global
-                            // per-provider store, like scopes do.
-                            let key = c.provider_api_key(provider, api_key);
-                            crate::ai::local_llm::effective_endpoint_for(
-                                provider, base_url, &key, model,
-                            )
-                        }
-                        None => crate::ai::local_llm::effective_endpoint(&c),
-                    };
-                (
-                    c.dictionary.clone(),
-                    c.post_process_enabled,
-                    pp_base_url,
-                    pp_api_key,
-                    pp_model,
-                    pp_provider,
-                    plan,
-                    c.pp_disable_thinking,
-                )
-            })
-            .unwrap_or_else(|_| (Vec::new(), false, String::new(), String::new(), String::new(), String::new(), None, false));
+        let snapshot = || {
+            self.config
+                .read()
+                .map(|c| {
+                    let plan = crate::ai::cleanup_styles::resolve(&c, target);
+                    let (pp_base_url, pp_api_key, pp_model, pp_provider) =
+                        match plan.as_ref().and_then(|p| p.endpoint.as_ref()) {
+                            Some((provider, base_url, api_key, model)) => {
+                                // Profile keys fall back to the global
+                                // per-provider store, like scopes do.
+                                let key = c.provider_api_key(provider, api_key);
+                                crate::ai::local_llm::effective_endpoint_for(
+                                    provider, base_url, &key, model,
+                                )
+                            }
+                            None => crate::ai::local_llm::effective_endpoint(&c),
+                        };
+                    (
+                        c.dictionary.clone(),
+                        c.post_process_enabled,
+                        pp_base_url,
+                        pp_api_key,
+                        pp_model,
+                        pp_provider,
+                        plan,
+                        c.pp_disable_thinking,
+                    )
+                })
+                .unwrap_or_else(|_| (Vec::new(), false, String::new(), String::new(), String::new(), String::new(), None, false))
+        };
+        let (mut dict, mut pp_enabled, mut pp_base_url, mut pp_api_key, mut pp_model, mut pp_provider, mut plan, mut pp_disable_thinking) = snapshot();
+        // Yap's on-device model isn't loaded (yet: it started loading when
+        // the dictation did, `local_llm::on_demand`): wait for it — "Loading
+        // the AI model…" on the bar, with Skip cleanup — then clean with it.
+        // It won't start: the words as said, and the person told once.
+        if pp_enabled && plan.is_some() && !raw.trim().is_empty() && crate::ai::local_llm::on_demand::is_standby(&pp_base_url) {
+            match Box::pin(self.wait_for_model(watch)).await {
+                None => return (raw.to_string(), None, true),
+                Some(Err(e)) => {
+                    tracing::warn!("AI cleanup went without the on-device model: {e}");
+                    crate::ai::local_llm::on_demand::say_failed_once(&self.app);
+                    return (raw.to_string(), None, false);
+                }
+                Some(Ok(_)) => {
+                    (dict, pp_enabled, pp_base_url, pp_api_key, pp_model, pp_provider, plan, pp_disable_thinking) = snapshot();
+                }
+            }
+        }
 
         // `plan` is `None` when smart routing says "skip cleanup for this
         // app" (selected-apps-only scope, unbound app) or its style is

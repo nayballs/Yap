@@ -69,3 +69,18 @@ export async function startFakeLocalModels(dir, ids = ['qwen3.5-4b', 'qwen2.5-1.
       }),
   };
 }
+
+/**
+ * Yap's on-device model "installed" in `dataDir` for a test run: an empty
+ * llamafile engine and an empty model file. Nothing here runs: a spec that
+ * needs the model to answer points YAP_E2E_LOCAL_LLM at a fake AI
+ * (support/fake-llm.js), which then stands in for the started sidecar
+ * (ai/local_llm.rs `e2e_stand_in`), up `YAP_E2E_LOCAL_LLM_LOAD_MS` after
+ * it's asked to start.
+ */
+export function installStandInModel(dataDir, file = 'qwen2.5-1.5b-instruct-q4_k_m.gguf') {
+  const llm = path.join(dataDir, 'llm');
+  fs.mkdirSync(llm, { recursive: true });
+  fs.writeFileSync(path.join(llm, 'llamafile.exe'), '');
+  fs.writeFileSync(path.join(llm, file), '');
+}

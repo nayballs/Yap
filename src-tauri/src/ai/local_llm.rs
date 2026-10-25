@@ -16,6 +16,7 @@
 
 pub mod context;
 pub mod models;
+pub mod on_demand;
 pub mod runtime;
 
 use std::path::{Path, PathBuf};
@@ -319,6 +320,24 @@ pub fn log_facts(log: &str) -> LogFacts {
 
 static CHILD: Mutex<Option<Child>> = Mutex::new(None);
 static PORT: AtomicU16 = AtomicU16::new(0);
+/// The ports the sidecar served on this session (kept after a stop or a
+/// restart): a call that resolved its address before the model was freed
+/// or restarted goes to the model as it is now, never to whatever listens
+/// on the old port ([`was_ours`], [`served_on`]).
+static SERVED_PORTS: Mutex<Vec<u16>> = Mutex::new(Vec::new());
+
+/// The sidecar is serving on `port` (kept for [`was_ours`]).
+fn served_on(port: u16) {
+    if let Ok(mut p) = SERVED_PORTS.lock() {
+        if !p.contains(&port) {
+            p.push(port);
+            // A session's few restarts; never a long list.
+            if p.len() > 32 {
+                p.remove(0);
+            }
+        }
+    }
+}
 static READY: AtomicBool = AtomicBool::new(false);
 /// Bumped by every [`stop`] (Yap stopping the sidecar: a model switch, the
 /// Stop button, a restart, quitting): a start under way that sees it move
@@ -372,6 +391,8 @@ pub struct Busy;
 impl Drop for Busy {
     fn drop(&mut self) {
         IN_FLIGHT.fetch_sub(1, Ordering::SeqCst);
+        // The idle clock counts from the end of the last request.
+        on_demand::touch();
     }
 }
 
@@ -388,12 +409,31 @@ pub fn request_starting(url: &str) -> Option<Busy> {
 /// digests; a notepad helper that waits out a dictation): when that's the
 /// running sidecar, it counts as busy until the guard drops — between the
 /// requests too — so a context restart or a runtime swap never cuts it off.
+///
+/// The stand-by address (the model not loaded yet, [`on_demand::STANDBY_URL`])
+/// counts too: the run is about to load it, and it isn't freed meanwhile.
 pub fn hold(url: &str) -> Option<Busy> {
-    if !base_url().is_some_and(|ours| url.trim_end_matches('/') == ours) {
+    let url = url.trim_end_matches('/');
+    if !(base_url().is_some_and(|ours| url == ours) || on_demand::is_standby(url)) {
         return None;
     }
     IN_FLIGHT.fetch_add(1, Ordering::SeqCst);
+    on_demand::touch();
     Some(Busy)
+}
+
+/// Is `url` an address the sidecar served on before, but not now (freed
+/// while idle, restarted on another port)? A call to it goes to the model
+/// as it is now — loaded again if need be (`llm::post_chat_request`).
+pub fn was_ours(url: &str) -> bool {
+    let url = url.trim_end_matches('/');
+    if base_url().is_some_and(|now| now == url) {
+        return false;
+    }
+    let Some(port) = url.strip_prefix("http://127.0.0.1:").and_then(|r| r.strip_suffix("/v1")).and_then(|p| p.parse::<u16>().ok()) else {
+        return false;
+    };
+    SERVED_PORTS.lock().is_ok_and(|p| p.contains(&port))
 }
 
 /// Requests to the sidecar under way now.
@@ -596,6 +636,48 @@ pub fn e2e_local_llm_busy(busy: bool) -> Result<(), String> {
     Ok(())
 }
 
+/// Test mode: the stand-in sidecar's starts ([`e2e_stand_in_start`]).
+#[cfg(debug_assertions)]
+static E2E_STARTS: AtomicU32 = AtomicU32::new(0);
+
+/// Test mode: an OpenAI-compatible stand-in (the e2e suite's fake AI, its
+/// `…/v1` address in `YAP_E2E_LOCAL_LLM`) serves as the sidecar — no
+/// process is started.
+#[cfg(debug_assertions)]
+fn e2e_stand_in() -> Option<String> {
+    if !crate::shell::e2e::active() {
+        return None;
+    }
+    std::env::var("YAP_E2E_LOCAL_LLM").ok().filter(|u| !u.trim().is_empty())
+}
+
+/// Test mode: "start" the stand-in: after `YAP_E2E_LOCAL_LLM_LOAD_MS`
+/// (default 400 ms, the model "loading"), the sidecar is up at its port,
+/// serving the active model's id. A stop meanwhile stops it, as for a real
+/// start.
+#[cfg(debug_assertions)]
+async fn e2e_stand_in_start(url: &str, gen: u64) -> Result<String, String> {
+    let ms = std::env::var("YAP_E2E_LOCAL_LLM_LOAD_MS").ok().and_then(|v| v.parse::<u64>().ok()).unwrap_or(400);
+    tokio::time::sleep(Duration::from_millis(ms)).await;
+    if CLOSING.load(Ordering::SeqCst) || STOP_GEN.load(Ordering::SeqCst) != gen {
+        return Err(Failure::Stopped.to_string());
+    }
+    let port = url::Url::parse(url).ok().and_then(|u| u.port()).ok_or("the stand-in's address has no port")?;
+    let cfg = crate::config::load();
+    let model = active_model_path(&cfg);
+    if let Ok(mut s) = SERVING.lock() {
+        let plan = Plan { runtime: Version(0, 10, 6), mtp: false, kv_q8: false, per_slot: false };
+        *s = Some(Serving { model_id: model_id(&model), placement: None, ctx: context_for(&cfg), plan, hybrid: false, facts: LogFacts::default() });
+    }
+    PORT.store(port, Ordering::SeqCst);
+    READY.store(true, Ordering::SeqCst);
+    served_on(port);
+    on_demand::touch();
+    E2E_STARTS.fetch_add(1, Ordering::SeqCst);
+    tracing::info!(port, "e2e: the on-device model's stand-in is up");
+    Ok(format!("http://127.0.0.1:{port}/v1"))
+}
+
 /// Where the sidecar's files live: `<data_dir>/llm/`. Users can drop their own
 /// GGUF models in here and pick one in Settings.
 pub fn llm_dir() -> PathBuf {
@@ -681,12 +763,19 @@ pub fn is_running() -> bool {
     base_url().is_some()
 }
 
+/// A start is under way (at launch, on demand, Settings' Start, Chat
+/// waking it, a restart).
+pub fn starting() -> bool {
+    STARTING.try_lock().is_err()
+}
+
 /// The `(base_url, api_key, model, provider)` the cleanup client should use:
-/// the managed on-device sidecar when the provider is "ondevice" AND it's up,
-/// else the user's configured cloud/local endpoint. Falling back keeps cleanup
-/// working even if the sidecar failed to start (worst case: raw transcript,
-/// never a hang). `provider` is the id the call is attributed to for the
-/// per-provider usage meter.
+/// the managed on-device sidecar when the provider is "ondevice" AND it's up;
+/// when it's installed but not loaded, the stand-by address
+/// ([`on_demand::STANDBY_URL`]: the call loads it); else the user's
+/// configured cloud/local endpoint (not installed: worst case the raw
+/// transcript, never a hang). `provider` is the id the call is attributed
+/// to for the per-provider usage meter.
 pub fn effective_endpoint(cfg: &crate::config::YapConfig) -> (String, String, String, String) {
     effective_endpoint_for(
         &cfg.pp_provider,
@@ -718,6 +807,15 @@ pub fn effective_endpoint_for(
         // cloud endpoint someone on the on-device model left configured.
         if restart_under_way() {
             return (String::new(), String::new(), model_id(&model_path()), PROVIDER_ONDEVICE.to_string());
+        }
+        // Not loaded (yet, or freed while idle) but here: the stand-by
+        // address, which the call loads it at (`llm::post_chat_request`,
+        // `on_demand::wake`) — never the endpoint configured underneath.
+        // (Not in unit tests: what this PC has installed isn't theirs.)
+        let cfg = if cfg!(test) { None } else { Some(crate::config::load()) };
+        if let Some(cfg) = cfg.filter(|c| is_installed(c) && !CLOSING.load(Ordering::SeqCst)) {
+            let id = model_id(&active_model_path(&cfg));
+            return (on_demand::STANDBY_URL.to_string(), String::new(), id, PROVIDER_ONDEVICE.to_string());
         }
     }
     (
@@ -838,6 +936,10 @@ pub struct Failed {
 async fn start_locked() -> Result<String, String> {
     // A stop from now on — by anyone — makes this start "stopped".
     let gen = STOP_GEN.load(Ordering::SeqCst);
+    #[cfg(debug_assertions)]
+    if let Some(url) = e2e_stand_in() {
+        return e2e_stand_in_start(&url, gen).await;
+    }
     start_with(&llm_dir(), &WENT_BACK, &|| CLOSING.load(Ordering::SeqCst), |a| spawn_and_wait(a, gen)).await
 }
 
@@ -1192,6 +1294,8 @@ async fn spawn_and_wait(attempt: Attempt, gen: u64) -> Result<Started, Failed> {
                     *s = Some(Serving { model_id: model_id(&model), placement, ctx, plan, hybrid, facts });
                 }
                 READY.store(true, Ordering::SeqCst);
+                served_on(port);
+                on_demand::touch();
                 tracing::info!(
                     port,
                     model = %model_id(&model),
@@ -1359,14 +1463,21 @@ fn ondevice_selected(cfg: &crate::config::YapConfig) -> bool {
             .any(|s| s.enabled && s.provider == PROVIDER_ONDEVICE)
 }
 
-/// If on-device cleanup is selected anywhere (globally or by a profile
-/// override) and the files are installed, start the sidecar (best-effort —
-/// logs and moves on if it can't). Called at startup and after config saves.
+/// At startup and after config saves: start the sidecar only with "Load
+/// the on-device model when Yap starts" on (`local_model_at_launch`, off
+/// by default) and something really routed to it ([`on_demand::launch_gate`],
+/// [`on_demand::in_use`]); otherwise it loads when it's first needed
+/// ([`on_demand`]). Best-effort — logs and moves on if it can't.
 pub async fn autostart_if_configured(cfg: &crate::config::YapConfig) {
-    if cfg.post_process_enabled && ondevice_selected(cfg) && is_installed(cfg) && !is_running() {
+    // A save may have fixed what made the last start fail: on demand tries
+    // again at once.
+    on_demand::forget_failure();
+    if on_demand::launch_gate(cfg.local_model_at_launch, on_demand::in_use(cfg), is_installed(cfg), is_running()) {
+        tracing::info!("Loading the on-device model at launch (Load when Yap starts is on)");
         if let Err(e) = start().await {
             tracing::warn!("On-device cleanup sidecar failed to start: {}", e);
         }
+        on_demand::changed();
     }
 }
 

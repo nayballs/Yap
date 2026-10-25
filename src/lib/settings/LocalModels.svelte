@@ -8,7 +8,13 @@
   // progress, when you leave the page.
   //
   //   cfg: Settings' config $state (auto-save does the saving).
+  //
+  // When it loads (ai/local_llm/on_demand.rs): its state ("Loaded · ready",
+  // "Loading…", or "Not loaded · loads when needed" with Load now), "Load
+  // the on-device model when Yap starts" (off by default: it loads the
+  // first time it's used) and "Free its memory after it's unused for".
   import Select from '../ui/Select.svelte';
+  import Toggle from '../ui/Toggle.svelte';
   import PillTabs from '../ui/PillTabs.svelte';
   import LocalContext from '../components/LocalContext.svelte';
   import { upTo } from '../core/localContext.js';
@@ -29,9 +35,22 @@
     takeUpgrade,
     dismissUpgrade,
     deleteCurated,
+    loadLocalNow,
+    freeLocalNow,
   } from './localLlm.svelte.js';
 
   let { cfg } = $props();
+
+  // "Free its memory after it's unused for" (minutes; 0 = never).
+  const IDLE_OPTIONS = [
+    { value: 5, label: '5 minutes' },
+    { value: 15, label: '15 minutes' },
+    { value: 60, label: '1 hour' },
+    { value: 0, label: 'Never' },
+  ];
+  const loadState = $derived(
+    localLlm.status.running ? 'Loaded · ready' : localLlm.status.loading ? 'Loading…' : 'Not loaded · loads when needed'
+  );
 
   const llm = $derived(localLlm.status);
   // What each install stage actually downloads, so the progress bar names it.
@@ -156,6 +175,27 @@
     <div class="lb-context">
       <LocalContext status={llm} disabled={!cfg.postProcessEnabled} onchange={(v) => (localLlm.status = { ...localLlm.status, context: v })} />
     </div>
+    <!-- When it's in memory: loaded on first use, freed when idle. -->
+    <div class="lb-load" data-testid="local-load" data-setting="local-load">
+      <div class="lb-state" role="status" data-testid="local-state">
+        <span class="lb-dot" class:on={llm.running} class:wait={llm.loading}></span>
+        <span class="lb-statetext">{loadState}</span>
+        {#if llm.running}
+          <button class="lb-later" onclick={freeLocalNow}>Free memory</button>
+        {:else if !llm.loading}
+          <button class="lb-later" onclick={loadLocalNow}>Load now</button>
+        {/if}
+      </div>
+      <Toggle
+        bind:checked={cfg.localModelAtLaunch}
+        label="Load the on-device model when Yap starts"
+        desc="Off: it loads the first time you use it — mostly while you're still talking — and frees its memory when it's been idle a while."
+      />
+      <div class="lb-idle">
+        <span class="lb-idlelabel">Free its memory after it's unused for</span>
+        <Select bind:value={cfg.localModelIdleMins} options={IDLE_OPTIONS} ariaLabel="Free its memory after it's unused for" />
+      </div>
+    </div>
   {/if}
   {#if families.length > 1}
     <div class="lb-families">
@@ -252,6 +292,42 @@
   .ondevice-err {
     color: var(--yap-danger);
     font-size: 12.5px;
+  }
+
+  /* When the model is in memory. */
+  .lb-load {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 10px 12px;
+    border: 1px solid var(--yap-border-subtle);
+    border-radius: 12px;
+    background: var(--yap-s1);
+    font-size: 12.5px;
+  }
+  .lb-state {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px;
+    color: var(--yap-fg);
+    font-weight: 600;
+  }
+  .lb-statetext {
+    flex: 1 1 auto;
+  }
+  .lb-dot.wait {
+    background: var(--yap-warning);
+  }
+  .lb-idle {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 8px 14px;
+  }
+  .lb-idlelabel {
+    color: var(--yap-fg);
   }
 
   /* On-device model browser (curated downloadable cleanup models). */

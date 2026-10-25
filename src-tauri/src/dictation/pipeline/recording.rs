@@ -701,6 +701,35 @@ impl Shared {
         // visible text, read in the background for its names
         // (`screen_terms.rs`) — for a dictation that's pasted, not a rewrite.
         crate::dictionary::screen_terms::begin_dictation((hwnd != 0).then_some(hwnd), goes == Goes::Paste && !edit && screen_names);
+        // Yap's on-device model, when what starts now will use it: it loads
+        // while the person talks (`local_llm::on_demand`).
+        self.load_ai_early(goes, edit, hwnd, kind);
+    }
+
+    /// **Start loading Yap's on-device model now** when the recording
+    /// starting will use it: a dictation whose cleanup, translation or
+    /// transform goes to it (`on_demand::dictation_uses_it`), the rewrite
+    /// shortcut or a question for Chat or the Voice Assistant whose model
+    /// it is. A cheap look; the load runs in the background, never holding
+    /// up the recording. Nothing for cloud models.
+    fn load_ai_early(&self, goes: Goes, edit: bool, hwnd: isize, kind: crate::pasting::app_kind::AppKind) {
+        use crate::ai::local_llm::{on_demand, PROVIDER_ONDEVICE};
+        let Ok(c) = self.config.read() else { return };
+        let why = match goes {
+            Goes::Assistant => (on_demand::scope_provider(&c, "chat") == PROVIDER_ONDEVICE).then_some("assistant"),
+            Goes::ChatBox => (on_demand::scope_provider(&c, "chat") == PROVIDER_ONDEVICE).then_some("chat"),
+            Goes::Paste if edit => (on_demand::scope_provider(&c, "voiceAgent") == PROVIDER_ONDEVICE).then_some("rewrite"),
+            Goes::Paste => {
+                let target_hwnd = (hwnd != 0).then_some(hwnd);
+                let app = crate::pasting::text_injector::app_name_for(target_hwnd);
+                let target = crate::ai::cleanup_styles::Target::of_window(target_hwnd, app.as_deref(), kind);
+                let translating = crate::dictation::languages::shortcut_now(&c).is_some_and(|s| s.target().is_some());
+                on_demand::dictation_uses_it(&c, &target, translating).then_some("dictation")
+            }
+        };
+        if let Some(why) = why {
+            on_demand::load_soon(&c, why);
+        }
     }
 
     /// The dead-mic watchdog for recording `session` (`mic_watch.rs`): polls

@@ -430,7 +430,7 @@ The language-model side: the OpenAI-compatible client and its prompts, the on-de
   either, the fault isn't the runtime's: the new one goes back in
   (`swap_in`) and the failure is taken back (`uncount_failure`). Once the
   new one has started, the previous one is deleted (`prove`). **At
-  launch** (`tidy_runtime`, before the autostart): a missing
+  launch** (`tidy_runtime`, before the launch gate): a missing
   `llamafile.exe` comes back from `llamafile-previous.exe`, else from a
   whole `llamafile-next.exe` of the pinned runtime (`repair_runtime`); a
   previous one kept past a proven start goes, and so does a cut-off
@@ -536,7 +536,83 @@ The language-model side: the OpenAI-compatible client and its prompts, the on-de
   holds, so Windows ends it however Yap ends: Quit, a crash, End task, the
   updater's exit; never used for apps Yap opens, a link's browser or an
   installer), and `effective_endpoint()` which routes `ai/llm.rs` to the sidecar when
-  provider = "ondevice" (falls back to the configured endpoint if it's down).
+  provider = "ondevice": its address while it's up, the **stand-by address**
+  while it's installed but not loaded (below), else (not installed) the
+  configured endpoint.
+- **`ai/local_llm/on_demand.rs`** — **the on-device model loaded when it's
+  needed, its memory freed when it's idle** (2026-10-25; before, it started
+  at launch whenever cleanup was routed to it: ~10 GB in use as soon as Yap
+  opened, on an evening of cloud models only). **At launch** (and after a
+  Settings save, `autostart_if_configured`) it starts only with **"Load the
+  on-device model when Yap starts"** on (`local_model_at_launch`, off by
+  default; Settings → Language Models, the on-device models) and something
+  really routed to it (`launch_gate`, `in_use`: the cleanup's provider,
+  which Chat, Commands and the meeting notes inherit; a profile an app's
+  rule or a style reaches, with cleanup on; a scope switched on with it — a
+  stale profile nothing reaches doesn't count). Explicit actions still
+  start it: a download, choosing a model (`onLocalModelChange` now always
+  starts it), Settings' **Load now** (`local_llm_start`, which also forgets
+  a recent failure), the Chat picker switching to On this PC. **On first
+  use**: a call routed on-device while the model isn't loaded resolves to
+  `STANDBY_URL` (`http://127.0.0.1:0/v1`, a port nothing listens on;
+  `effective_endpoint_for`, not in unit tests), so display code still names
+  it On this PC with its model id (the tools check, the chips, a brief's
+  "isn't running" plain path, memory's "stopped: put off") — and **the one
+  chat call every other goes through** (`llm::post_chat_request`) loads it
+  there and waits (`wake`, `LOAD_WAIT` 30 s; the start carries on past it,
+  so the next call finds it up) before it sends, to the sidecar's real
+  address: no path that reaches the model can miss it. A URL the sidecar
+  served on before but not now (`was_ours`: every port served this session,
+  `served_on`) goes the same way — a call resolved just before the model
+  was freed or restarted is never sent to whatever listens there now.
+  `hold` counts the stand-by address as busy (a run about to load it isn't
+  freed meanwhile); `budget_factor_for` gives it the context it will load
+  with. A start that fails isn't tried again on demand for `RETRY_AFTER`
+  (60 s); a dictation that went without it says so **once**
+  (`say_failed_once`: "The on-device AI model didn't start", Open
+  settings; alert kind `aiModelFailed`, ten-minute cooldown) until it
+  loads again. **Early**: a dictation starting to record
+  (`pipeline/recording.rs` `load_ai_early`, at the end of `capture_target`)
+  starts loading it in the background when this dictation will use it
+  (`dictation_uses_it`: cleanup on and the app's routed plan on it — its
+  rule's or style's profile, else the cleanup's provider — or a translating
+  language shortcut, or the transform on every dictation, both the Commands
+  model's), as do the Voice Assistant's key and a question dictated into
+  Chat (the Chat scope's provider), the rewrite shortcut (the Commands
+  model) and a transform (`transforms::run`): it loads while the person
+  talks. A cheap look under the config's read lock; never for cloud
+  models. Measured (2026-10-25, the 4B on an RTX 5070 Ti, llamafile 0.10.6
+  with Yap's arguments and MTP, its file in Windows' cache): up 3.2–3.3 s
+  after launch, the first request 0.77 s (a cold prompt; the warm-up runs
+  first when the dictation is still going), the next 0.19 s — a dictation
+  longer than ~3 s hides the load. **The cleanup's wait** (`pipeline/delivery.rs` → `pipeline/slow.rs`
+  `wait_for_model`): when its endpoint is the stand-by address it waits
+  for the model before the call, the bar saying **"Loading the AI model…"**
+  after 300 ms (`slow::Stage::Loading` through the "Taking longer than
+  usual" watch) with **Skip cleanup**; it won't start, or is still loading
+  after 30 s: the words as said (then the cleanup's own 20 s as ever).
+  Logged with the time it waited. **Idle**: a watch (`init`, from setup;
+  every 20 s) stops the sidecar after **"Free its memory after it's unused
+  for"** (`local_model_idle_mins`: 5 / **15** (default) / 60 minutes, 0 =
+  never; another value counts as 15) with no request (`touch`: a request
+  starting or ending, `hold`, a load, a dictation that will use it) —
+  `idle_step` (pure): never under a request or a stream
+  (`requests_in_flight`), a dictation (`context::sidecar_busy`), a start, a
+  restart or a pending one, or a meeting recording whose live digests go to
+  it (the Note Formatting scope, else the cleanup's provider) or an action
+  plan being written; looked at again under the start lock. Logged ("On-device
+  model unused for a while: freeing its memory", minutes only). The next
+  use loads it again. `yap-local-llm-changed` after a load or a free
+  (Settings and the Chat picker re-read). `local_llm_status().loading`: a
+  start under way. Settings shows **"Loaded · ready"** (Free memory),
+  **"Loading…"**, or **"Not loaded · loads when needed"** (Load now), and
+  polls only while it loads. Test mode: `YAP_E2E_LOCAL_LLM` (a fake AI's
+  `…/v1`) stands in for the started sidecar after
+  `YAP_E2E_LOCAL_LLM_LOAD_MS` (no process; `e2e_stand_in_start`),
+  `e2e_local_llm_loads` ({loads: [why…], starts, running, loading}),
+  `e2e_local_llm_idle_ms {ms}` (the idle limit in ms; "Never" stays never).
+  Unit-tested: the launch gate, `in_use`, `dictation_uses_it`, the idle
+  decision and setting, the stand-by address, `was_ours`.
 - **`ai/gguf.rs`** — a GGUF model's header, **read-only** (2026-10-20): magic,
   version 2/3, the metadata (a few scalars kept, everything else skipped by
   seeking — the tokenizer's ~250 k strings too: ~20 ms for the 4B's 10 MB

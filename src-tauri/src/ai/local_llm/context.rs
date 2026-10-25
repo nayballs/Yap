@@ -109,6 +109,10 @@ pub fn budget_factor(context: u32) -> usize {
 /// server's window is its own; "ondevice" fallen back to the endpoint
 /// underneath is that endpoint).
 pub fn budget_factor_for(provider: &str, base_url: &str) -> usize {
+    // Not loaded yet (the stand-by address): it loads with the context set.
+    if provider == PROVIDER_ONDEVICE && super::on_demand::is_standby(base_url) {
+        return budget_factor(context_for(&crate::config::load()));
+    }
     let on_it = provider == PROVIDER_ONDEVICE && super::base_url().is_some_and(|u| u == base_url);
     if !on_it {
         return 1;

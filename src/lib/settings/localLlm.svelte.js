@@ -18,6 +18,8 @@ export const localLlm = $state({
   status: {
     installed: false,
     running: false,
+    // A start under way (on first use, at launch, Load now).
+    loading: false,
     model: 'Qwen2.5 1.5B Instruct',
     engine: 'Mozilla llamafile (llama.cpp)',
   },
@@ -71,14 +73,15 @@ export function listenLocalProgress() {
 }
 
 /**
- * While Settings lives (call it while it initialises): with the on-device
- * model picked but not running yet (the sidecar warming up after launch),
- * read its status every 3 s so the page flips to "Ready" on its own; and
- * the family tab defaults to the active model's (or the first there is).
+ * While Settings lives (call it while it initialises): while the on-device
+ * model loads, read its status every 3 s so the page flips to "Loaded" on
+ * its own (a load on first use, or an idle model freed, comes as
+ * `yap-local-llm-changed`: adoptions.svelte.js); and the family tab
+ * defaults to the active model's (or the first there is).
  */
 export function followLocalLlm(getCfg) {
   $effect(() => {
-    if (getCfg()?.ppProvider !== 'ondevice' || localLlm.status.running) return;
+    if (!localLlm.status.loading) return;
     const id = setInterval(refreshLocalLlm, 3000);
     return () => clearInterval(id);
   });
@@ -93,23 +96,47 @@ export function followLocalLlm(getCfg) {
 }
 
 /**
- * Switching models restarts the sidecar with the newly selected GGUF. The
- * sidecar reads the selection from config.json, so save first.
+ * Switching models (re)starts the sidecar with the newly selected GGUF:
+ * choosing one loads it, as a download does. The sidecar reads the
+ * selection from config.json, so save first.
  */
 export async function onLocalModelChange() {
   localLlm.error = '';
   localLlm.switching = true;
   try {
     await persist();
-    if (localLlm.status.running) {
-      await invoke('local_llm_stop');
-      await invoke('local_llm_start');
-    }
+    if (localLlm.status.running) await invoke('local_llm_stop');
+    await invoke('local_llm_start');
   } catch (e) {
     localLlm.error = `${e}`;
   } finally {
     localLlm.switching = false;
     refreshLocalLlm();
+  }
+}
+
+/** "Load now": the model loads (Settings' own Start). */
+export async function loadLocalNow() {
+  localLlm.error = '';
+  localLlm.status = { ...localLlm.status, loading: true };
+  try {
+    await invoke('local_llm_start');
+  } catch (e) {
+    localLlm.error = `${e}`;
+  } finally {
+    await refreshLocalLlm();
+  }
+}
+
+/** "Free memory": the model stops now; it loads again when it's needed. */
+export async function freeLocalNow() {
+  localLlm.error = '';
+  try {
+    await invoke('local_llm_stop');
+  } catch (e) {
+    localLlm.error = `${e}`;
+  } finally {
+    await refreshLocalLlm();
   }
 }
 
@@ -134,7 +161,6 @@ export async function downloadCurated(m) {
     await persist();
     if (localLlm.status.running) await invoke('local_llm_stop');
     await invoke('local_llm_start');
-    await refreshLocalLlm();
   } catch (e) {
     // Cancelled: nothing to say (its half-downloaded file is gone).
     if (!isCancelled(e)) localLlm.error = `${e}`;
@@ -142,6 +168,9 @@ export async function downloadCurated(m) {
   } finally {
     localLlm.installing = false;
     localLlm.downloadingId = '';
+    // What's on disk and running now, whatever happened (nothing polls
+    // while the model isn't loading).
+    await refreshLocalLlm();
   }
 }
 
@@ -200,8 +229,9 @@ export async function deleteCurated(m) {
         await invoke('local_llm_start');
       }
     }
-    await refreshLocalLlm();
   } catch (e) {
     localLlm.error = `${e}`;
+  } finally {
+    await refreshLocalLlm();
   }
 }

@@ -516,6 +516,11 @@ fn target_window(origin: Origin, stand_in: bool) -> Option<isize> {
 pub fn run(app: &AppHandle, cfg: &YapConfig, t: &Transform, origin: Origin, stand_in: Option<StandIn>) -> Transformed {
     let name = t.name();
     let mut r = Transformed { name: name.clone(), kind: kind_of(t), ..Default::default() };
+    // Its model on this PC and not loaded: loading while the selection is
+    // read (`local_llm::on_demand`); the call waits for the rest.
+    if crate::ai::local_llm::on_demand::scope_provider(cfg, "voiceAgent") == crate::ai::local_llm::PROVIDER_ONDEVICE {
+        crate::ai::local_llm::on_demand::load_soon(cfg, "transform");
+    }
     // The shortcut's own modifiers let go first: Ctrl+C or Ctrl+V with Alt
     // still down is another key in most apps.
     if origin == Origin::Shortcut {

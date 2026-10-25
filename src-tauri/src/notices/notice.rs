@@ -160,6 +160,10 @@ pub fn rule(kind: &str) -> Rule {
         // The Voice Assistant has no AI model, or its model failed: right
         // after its own question.
         "assistantNoModel" | "assistantFailed" => alert,
+        // "The on-device AI model didn't start" (local_llm/on_demand.rs): a
+        // dictation went without its cleanup — once, and not again within
+        // ten minutes.
+        "aiModelFailed" => Rule { cooldown_ms: 10 * MIN, ..alert },
         // "The Voice Assistant is off during meetings": the answer to a press
         // made during one, so it shows over the meeting, every press.
         "assistantMeetingOff" => Rule { hold_meeting: false, ..alert },

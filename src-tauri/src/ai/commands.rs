@@ -128,6 +128,10 @@ pub fn local_llm_status() -> serde_json::Value {
     serde_json::json!({
         "installed": crate::ai::local_llm::is_installed(&cfg),
         "running": running,
+        // Loading now (on demand, or at launch): Settings says "Loading…";
+        // installed, not running and not loading: "Not loaded · loads when
+        // needed" (local_llm/on_demand.rs).
+        "loading": !running && (crate::ai::local_llm::on_demand::loading() || crate::ai::local_llm::starting()),
         "modelFile": crate::ai::local_llm::MODEL_FILENAME,
         "model": crate::ai::local_llm::active_model_display(&cfg),
         "engine": crate::ai::local_llm::ENGINE_DISPLAY,
@@ -184,6 +188,8 @@ pub fn open_llm_folder() -> Result<(), String> {
 /// Resolves once the server's /health endpoint is ready.
 #[tauri::command]
 pub async fn local_llm_start() -> Result<(), String> {
+    // Asked for: tried now, whatever failed a moment ago.
+    crate::ai::local_llm::on_demand::forget_failure();
     crate::ai::local_llm::start().await.map(|_| ())
 }
 

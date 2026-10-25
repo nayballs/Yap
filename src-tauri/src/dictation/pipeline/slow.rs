@@ -12,6 +12,10 @@ use crate::dictation::slow::{self, Notice, Stage};
 
 use super::Shared;
 
+/// A cleanup waiting for the on-device model to load says so on the bar
+/// after this long (a model already nearly up never flickers it).
+const LOADING_NOTICE_MS: u64 = 300;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Watch {
     Running,
@@ -95,6 +99,39 @@ impl Shared {
             Some(Ok(_)) => slow::record_cleanup(key, chars, ms),
             Some(Err(_)) => {}
             None => tracing::info!(ms, "AI cleanup skipped from the bar: pasting the words as transcribed"),
+        }
+        out
+    }
+
+    /// **Yap's on-device model loading for this dictation's cleanup** (it
+    /// wasn't up: `local_llm::on_demand`): its address once it's up, or why
+    /// not — [`on_demand::LOAD_WAIT`] at most. A dictation's (`watch`):
+    /// after a moment the bar says "Loading the AI model…" with **Skip
+    /// cleanup** (`None`: skipped). Logged with the time it took (the first
+    /// use's wait).
+    ///
+    /// [`on_demand::LOAD_WAIT`]: crate::ai::local_llm::on_demand::LOAD_WAIT
+    pub(super) async fn wait_for_model(&self, watch: bool) -> Option<Result<String, String>> {
+        use crate::ai::local_llm::on_demand;
+        let started = Instant::now();
+        let wake = on_demand::wake(on_demand::LOAD_WAIT, "cleanup");
+        let out = if watch {
+            let watch = SlowWatch::start(&self.app, Notice { stage: Stage::Loading, skip: true }, LOADING_NOTICE_MS, None);
+            let skip = self.skip_cleanup.notified();
+            let out = tokio::select! {
+                r = wake => Some(r),
+                _ = skip => None,
+            };
+            watch.finish();
+            out
+        } else {
+            Some(wake.await)
+        };
+        let ms = started.elapsed().as_millis() as u64;
+        match &out {
+            Some(Ok(_)) => tracing::info!(ms, "AI cleanup waited for the on-device model to load"),
+            Some(Err(_)) => tracing::info!(ms, "AI cleanup gave up waiting for the on-device model"),
+            None => tracing::info!(ms, "AI cleanup skipped from the bar while the on-device model loaded"),
         }
         out
     }

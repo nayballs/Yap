@@ -1225,6 +1225,20 @@ async fn post_chat_request(
     extra: serde_json::Map<String, Value>,
     mut on: Option<OnDelta<'_>>,
 ) -> Result<Value, String> {
+    // Yap's on-device model not loaded (yet, or freed while idle; the call
+    // has its stand-by address, or the one it had before it was freed): it
+    // loads now — or is already loading, since the dictation started — and
+    // the call goes to it once it's up, waiting `LOAD_WAIT` at most
+    // (`local_llm::on_demand`). Never sent anywhere else.
+    let woken;
+    let base_url = if crate::ai::local_llm::on_demand::is_standby(base_url) || crate::ai::local_llm::was_ours(base_url) {
+        // Boxed: this call's own future stays small (it sits inside a
+        // Chat turn's, deep in the stack).
+        woken = Box::pin(crate::ai::local_llm::on_demand::wake(crate::ai::local_llm::on_demand::LOAD_WAIT, "call")).await?;
+        woken.as_str()
+    } else {
+        base_url
+    };
     let endpoint = format!("{}/chat/completions", base_url.trim_end_matches('/'));
     let mut body = json!({
         "model": model,

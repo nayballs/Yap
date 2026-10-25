@@ -62,7 +62,8 @@ pub struct Alert {
     /// Try again) | "micLost" (`unplugged.rs`: the dictation's mic was
     /// disconnected) | "micSwitched" (`mics/offer.rs`: "Using … for
     /// dictation") | "dictationCapped" (`cap.rs`: stopped at its length
-    /// limit) | "lastTranscript" (`last.rs`: "Copied your last dictation",
+    /// limit) | "aiModelFailed" (`local_llm/on_demand.rs`: the on-device AI
+    /// model didn't start, a dictation went as said) | "lastTranscript" (`last.rs`: "Copied your last dictation",
     /// shown with [`confirm`]):
     /// the bar card's id, the Windows notification's tag (a newer one
     /// replaces it) and its rule in `notice.rs`.

@@ -601,6 +601,10 @@ pub fn run() {
             #[cfg(debug_assertions)]
             ai::local_llm::e2e_local_llm_busy,
             #[cfg(debug_assertions)]
+            ai::local_llm::on_demand::e2e_local_llm_loads,
+            #[cfg(debug_assertions)]
+            ai::local_llm::on_demand::e2e_local_llm_idle_ms,
+            #[cfg(debug_assertions)]
             notices::notice::e2e_notice_reset,
             #[cfg(debug_assertions)]
             notices::notice::e2e_notice,
@@ -788,13 +792,15 @@ pub fn run() {
 
             // Clear any orphaned cleanup sidecar from a previous session (a
             // crash or task-kill skips every exit path; installers launched by
-            // older builds' updater did too), then — if on-device cleanup is
-            // selected + installed — warm up a fresh one off-thread so the
-            // first dictation cleanup skips the cold load. (An e2e test run
+            // older builds' updater did too), then — only with "Load the
+            // on-device model when Yap starts" on — start a fresh one
+            // off-thread; otherwise it loads when it's first needed, and is
+            // freed when idle (local_llm/on_demand.rs). (An e2e test run
             // leaves other processes alone.)
             if !shell::e2e::active() && !bench_child() {
                 ai::local_llm::kill_orphans();
             }
+            ai::local_llm::on_demand::init(&handle);
             {
                 let cfg2 = cfg.clone();
                 tauri::async_runtime::spawn(async move {
