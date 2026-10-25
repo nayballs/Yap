@@ -445,22 +445,27 @@ test('one entry, several ways it is heard: + adds one, each is saved, searched a
   main,
   shot,
 }) => {
+  // config.json keeps a row per way a word is heard (what an older Yap
+  // reads and keeps); the rows writing the same word are one entry here.
+  const heardAs = (c, word) => c.dictionary.filter((x) => x.to === word && !x.snippet).map((x) => x.from);
+  await freshView(yap, main, [...DICT, { from: 'power two keep', to: 'Parakeet', fuzzy: true, snippet: false }]);
+  await expect.poll(() => words(main)).toEqual(WORDS);
+  await expect(row(main, 'Parakeet').getByRole('textbox', { name: 'Also heard as' })).toHaveValue('power two keep');
+  await setConfig(yap, main, { dictionary: DICT });
   await freshView(yap, main);
   const kube = row(main, 'Kubernetes');
   await kube.getByRole('button', { name: 'Add another way “Kubernetes” is heard' }).click();
   const also = kube.getByRole('textbox', { name: 'Also heard as' });
   await expect(also).toBeFocused();
   await also.fill('cooper netties');
-  await expectStore(yap, 'config.json', (c) => {
-    const e = c.dictionary.find((x) => x.to === 'Kubernetes');
-    return e?.from === 'cube and eighties' && e.alsoHeard?.join('|') === 'cooper netties';
-  });
+  await expectStore(yap, 'config.json', (c) => heardAs(c, 'Kubernetes').join('|') === 'cube and eighties|cooper netties');
+  expect(JSON.stringify(yap.readConfig().dictionary)).not.toContain('alsoHeard');
   // Another, from the row's menu; an empty one isn't saved.
   await kube.locator('.arrow').click({ button: 'right' });
   await main.getByRole('menu').getByRole('menuitem', { name: 'Add another way it’s heard' }).click();
   await expect(kube.getByRole('textbox', { name: 'Also heard as' })).toHaveCount(2);
   await kube.getByRole('textbox', { name: 'Also heard as' }).last().fill('cuber nets');
-  await expectStore(yap, 'config.json', (c) => c.dictionary.find((x) => x.to === 'Kubernetes')?.alsoHeard?.length === 2);
+  await expectStore(yap, 'config.json', (c) => heardAs(c, 'Kubernetes').length === 3);
   // One entry still: the list has the word once.
   await expect.poll(() => words(main)).toEqual(WORDS);
   await shot(main, '11-heard-several-ways');
@@ -486,7 +491,7 @@ test('one entry, several ways it is heard: + adds one, each is saved, searched a
   await expectStore(yap, 'config.json', (c) => String(c.appendTrailingSpace) !== before);
   await space.click();
   await expectStore(yap, 'config.json', (c) => String(c.appendTrailingSpace) === before);
-  expect(yap.readConfig().dictionary.find((e) => e.to === 'Kubernetes').alsoHeard).toEqual(['cooper netties', 'cuber nets']);
+  expect(heardAs(yap.readConfig(), 'Kubernetes')).toEqual(['cube and eighties', 'cooper netties', 'cuber nets']);
   await closeSettings(main);
 
   // Export: a row a way; Import… of that file into this dictionary: all there.
@@ -505,14 +510,15 @@ test('one entry, several ways it is heard: + adds one, each is saved, searched a
   const preview = main.getByRole('dialog', { name: 'Import from “more-ways.csv”' });
   await expect(preview).toContainText('Another way it\'s heard');
   await preview.getByRole('button', { name: 'Add 1 entry' }).click();
-  await expectStore(yap, 'config.json', (c) => c.dictionary.find((x) => x.to === 'Kubernetes')?.alsoHeard?.includes('cube an eighties'));
-  expect(yap.readConfig().dictionary.filter((e) => e.to === 'Kubernetes')).toHaveLength(1);
+  await expectStore(yap, 'config.json', (c) => heardAs(c, 'Kubernetes').includes('cube an eighties'));
+  await expect.poll(() => words(main)).toEqual(WORDS); // still one entry
   await toastWith(main, 'Added 1 entry').getByRole('button', { name: 'Undo' }).click();
-  await expectStore(yap, 'config.json', (c) => !c.dictionary.find((x) => x.to === 'Kubernetes')?.alsoHeard?.includes('cube an eighties'));
+  await expectStore(yap, 'config.json', (c) => !heardAs(c, 'Kubernetes').includes('cube an eighties'));
 
   // × takes one off.
   await kube.getByRole('button', { name: 'Remove “cuber nets”' }).click();
-  await expectStore(yap, 'config.json', (c) => c.dictionary.find((x) => x.to === 'Kubernetes')?.alsoHeard?.join('|') === 'cooper netties');
+  await expectStore(yap, 'config.json', (c) => heardAs(c, 'Kubernetes').join('|') === 'cube and eighties|cooper netties');
+  await openView(main, 'Home');
   await setConfig(yap, main, { dictionary: DICT });
 });
 
@@ -522,8 +528,8 @@ test("a snippet shows its length, and warns when its phrase is near another's or
   const signOff = snippets(main).locator('.snip-row').first();
   const address = snippets(main).locator('.snip-row').nth(1);
   await expect(address.locator('.snip-count')).toHaveText('17 characters');
-  await address.getByRole('textbox', { name: 'Text Yap types' }).fill('1 Long Lane\nLeeds\nUK');
-  await expect(address.locator('.snip-count')).toHaveText('20 characters');
+  await address.getByRole('textbox', { name: 'Text Yap types' }).fill('1 Long Lane\nAnytown\nZZ1 1ZZ');
+  await expect(address.locator('.snip-count')).toHaveText('27 characters');
   await expect(address.getByRole('textbox', { name: 'Text Yap types' })).toHaveAttribute('maxlength', '5000');
 
   // A new snippet said nearly as another is warned about.
@@ -544,6 +550,8 @@ test("a snippet shows its length, and warns when its phrase is near another's or
   await expect(fresh.getByRole('note')).toHaveCount(0);
   await expect(signOff.getByRole('note')).toHaveCount(0);
   await expect(address.getByRole('note')).toHaveCount(0);
+  // Leaving saves what's typed; then the list as the other tests want it.
+  await openView(main, 'Home');
   await setConfig(yap, main, { dictionary: DICT });
 });
 

@@ -27,7 +27,10 @@
   //
   // One correction, several ways it's heard (2026-10-25,
   // dictionary/variants.rs): + beside "Heard" adds another ("Kubernetes" ←
-  // "cooper netties", "cube an eighties"), each with its ×. A snippet shows
+  // "cooper netties", "cube an eighties"), each with its ×. config.json
+  // keeps a row per way (an older Yap reads and keeps them all): the rows
+  // writing the same word are one entry here (`groupRows`, its star and ≈
+  // from its first row) and go back as rows (`entryRows`). A snippet shows
   // its text's length against the most it may be, and a warning under its
   // phrase when that's the same as or close to another snippet's, has words
   // a correction changes first, or is a dictionary word (`snippetWarnings`).
@@ -47,7 +50,8 @@
     entriesLabel,
     restoreRemoved,
     heardForms,
-    cleanEntry,
+    entryRows,
+    groupRows,
     snippetWarnings,
     SNIPPET_MAX,
   } from './dictionaryList.js';
@@ -66,6 +70,8 @@
   /** The warnings under snippets' phrases, worked out when the dictionary changes. */
   const warnings = $derived(snippetWarnings(dict));
   let saveTimer = null;
+  /** The rows Settings last sent, or this view last saved: the same again is nothing new. */
+  let lastExternal = null;
   let pending = false;
   let priming = true;
   let gone = false;
@@ -265,15 +271,25 @@
     // Settings can also touch the dictionary (Commands' name save) — track it.
     const onExternal = (e) => {
       if (!Array.isArray(e.detail)) return;
-      if (JSON.stringify(clean(e.detail)) === JSON.stringify(clean(dict))) return; // no change → no save churn
+      // The same rows again (Settings sends its copy when anything in it
+      // stirs): nothing new — an edit here not saved yet (the half-second
+      // wait) stays, and is saved.
+      const json = JSON.stringify(e.detail);
+      if (json === lastExternal) return;
+      lastExternal = json;
+      const grouped = groupRows(e.detail);
+      if (JSON.stringify(clean(grouped)) === JSON.stringify(clean(dict))) return; // no change → no save churn
       priming = true;
-      dict = e.detail.map((x) => ({ ...x }));
+      dict = grouped;
       setTimeout(() => (priming = false), 50);
     };
     (async () => {
       try {
         const cfg = await invoke('get_config');
-        dict = Array.isArray(cfg?.dictionary) ? cfg.dictionary : [];
+        // config.json's rows, the ones writing the same word as one entry.
+        const rows = Array.isArray(cfg?.dictionary) ? cfg.dictionary : [];
+        lastExternal = JSON.stringify(rows);
+        dict = groupRows(rows);
         fuzzy = cfg?.dictionaryFuzzy ?? true;
         learnWords = cfg?.learnWords ?? true;
       } catch {
@@ -311,12 +327,13 @@
   });
 
   /**
-   * The entries as config.json keeps them: trimmed, a star only when set,
-   * a correction's other ways it's heard only when it has some, no empty
-   * rows (dictionaryList.js `cleanEntry`).
+   * The entries as config.json keeps them: a row per way a word is heard
+   * (the shape every Yap reads, so an older one sharing config.json keeps
+   * them all), trimmed, the entry's star and ≈ on each, no empty rows
+   * (dictionaryList.js `entryRows`).
    */
   function clean(list) {
-    return list.map(cleanEntry).filter(Boolean);
+    return list.flatMap(entryRows);
   }
 
   async function persist() {
@@ -325,6 +342,7 @@
     try {
       const fresh = await invoke('get_config');
       const cleaned = clean(dict);
+      lastExternal = JSON.stringify(cleaned);
       await invoke('save_config', {
         cfg: { ...fresh, dictionary: cleaned, dictionaryFuzzy: fuzzy, learnWords },
       });
@@ -350,7 +368,7 @@
         dict = change(dict);
       } else {
         const cfg = await invoke('get_config');
-        const entries = clean(change(Array.isArray(cfg?.dictionary) ? cfg.dictionary : []));
+        const entries = clean(change(groupRows(Array.isArray(cfg?.dictionary) ? cfg.dictionary : [])));
         await invoke('save_config', { cfg: { ...cfg, dictionary: entries } });
         window.dispatchEvent(
           new CustomEvent('yap-dictionary-changed', {
@@ -959,7 +977,7 @@
                   </div>
                   <span class="arrow">→</span>
                   <textarea
-                    placeholder={'e.g. 12 Station Road\nNorwich NR1 4AB'}
+                    placeholder={'e.g. 12 Example Road\nAnytown ZZ1 1ZZ'}
                     aria-label="Text Yap types"
                     rows={snippetRows(entry.to)}
                     maxlength={SNIPPET_MAX}

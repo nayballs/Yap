@@ -1642,8 +1642,8 @@ fn add_words(app: &AppHandle, words: &[Suggestion]) -> Result<Vec<String>, Strin
             if in_dictionary(&cfg.dictionary, &s.heard, &s.term) {
                 continue;
             }
-            // Another way an entry already writing the word is heard
-            // (`variants.rs`), else a new entry.
+            // A row of its own: beside the rows already writing the word,
+            // one entry in the Dictionary view (`variants.rs`).
             if crate::dictionary::variants::add_heard(&mut cfg.dictionary, &s.heard, &s.term) {
                 added.push(s.term.clone());
             }
@@ -1995,7 +1995,7 @@ mod tests {
         assert_eq!(prompt_text_with(&s, &dict).0, "Add another way you say “Kubernetes”?");
         let mut more = dict.clone();
         assert!(crate::dictionary::variants::add_heard(&mut more, "cube and eighties", "Kubernetes"));
-        assert_eq!(more.len(), 2);
+        assert_eq!(more.len(), 3); // a row of its own, beside the word's
         assert!(found_with("Deploy to cube and eighties.", "Deploy to Kubernetes.", &more).is_empty());
         // A snippet's text isn't a correction's spelling.
         let snippet = vec![DictionaryEntry { snippet: true, ..entry("k8s", "Kubernetes") }];
@@ -2467,8 +2467,8 @@ mod tests {
             }
             w.typed_after()
         };
-        let link = format!("{pasted} https://calendly.com/sam-example/30min");
-        assert_eq!(typed(&[pasted, &link]).as_deref(), Some("https://calendly.com/sam-example/30min"));
+        let link = format!("{pasted} https://bookings.example/sam-example/30min");
+        assert_eq!(typed(&[pasted, &link]).as_deref(), Some("https://bookings.example/sam-example/30min"));
         // Nothing more, a word or two, or the dictation itself changed: nothing.
         assert_eq!(typed(&[pasted, pasted]), None);
         assert_eq!(typed(&[pasted, &format!("{pasted} ok")]), None);

@@ -16,7 +16,8 @@ import {
   restoreRemoved,
   sameEntry,
   heardForms,
-  cleanEntry,
+  entryRows,
+  groupRows,
   snippetWarning,
   snippetWarnings,
   SNIPPET_MAX,
@@ -341,16 +342,63 @@ test("every way a word is heard: listed, searched, kept clean", () => {
   // The search finds a word by any way it's heard.
   expect(matches(kube, 'eighties')).toBe(true);
   expect(matches(c('cooper netties', 'Kubernetes'), 'eighties')).toBe(false);
-  // As config.json keeps it: none twice, none the same as `from`, none empty;
-  // none at all, no field.
-  expect(cleanEntry(kube)).toEqual({ from: 'cooper netties', to: 'Kubernetes', fuzzy: true, snippet: false, alsoHeard: ['cube an eighties', 'kubernetes'] });
-  expect(cleanEntry(c(' jaison ', 'JSON', { alsoHeard: ['  '] }))).toEqual({ from: 'jaison', to: 'JSON', fuzzy: true, snippet: false });
-  expect(cleanEntry(s('my sign-off', 'Speak soon,', { alsoHeard: ['x'] }))).toEqual({ from: 'my sign-off', to: 'Speak soon,', fuzzy: true, snippet: true });
-  expect(cleanEntry(c('', 'Kubernetes'))).toBe(null);
+  // As config.json keeps it: a row per way, none twice, none empty, the
+  // entry's flags on each.
+  const r = (from, to, more = {}) => ({ from, to, fuzzy: true, snippet: false, ...more });
+  expect(entryRows({ ...kube, starred: true, fuzzy: false })).toEqual([
+    r('cooper netties', 'Kubernetes', { starred: true, fuzzy: false }),
+    r('cube an eighties', 'Kubernetes', { starred: true, fuzzy: false }),
+    r('kubernetes', 'Kubernetes', { starred: true, fuzzy: false }),
+  ]);
+  expect(entryRows(c(' jaison ', 'JSON', { alsoHeard: ['  '] }))).toEqual([r('jaison', 'JSON')]);
+  expect(entryRows(s('my sign-off', 'Speak soon,', { alsoHeard: ['x'] }))).toEqual([{ from: 'my sign-off', to: 'Speak soon,', fuzzy: true, snippet: true }]);
+  expect(entryRows(c('', ''))).toEqual([]);
+  // The first box emptied: the next way is the first row.
+  expect(entryRows(c('', 'Kubernetes', { alsoHeard: ['cuber'] }))).toEqual([r('cuber', 'Kubernetes')]);
   // A delete's Undo brings its ways back too, in a list of their own.
   const back = restoreRemoved([], [{ entry: kube, index: 0 }]);
   expect(back[0].alsoHeard).toEqual(kube.alsoHeard);
   expect(back[0].alsoHeard).not.toBe(kube.alsoHeard);
+});
+
+test("config.json's rows: grouped by the word in the view, back as rows, every phrase kept by an older Yap", () => {
+  const r = (from, to, more = {}) => ({ from, to, fuzzy: true, snippet: false, ...more });
+  const rows = [
+    r('cooper netties', 'Kubernetes', { starred: true }),
+    r('jaison', 'JSON', { fuzzy: false }),
+    { from: 'my sign-off', to: 'Speak soon,\nRobin', fuzzy: true, snippet: true },
+    r('cube an eighties', 'Kubernetes'), // its own flags differ: the group's are the first row's
+    r('jay son', 'JSON'),
+    r('Kubernetes', 'kubernetes'), // another spelling: its own entry
+    r('', 'Half'), // a row being written: as it is
+  ];
+  const groups = groupRows(rows);
+  expect(groups.map((g) => [g.to, heardForms(g), !!g.starred, g.fuzzy])).toEqual([
+    ['Kubernetes', ['cooper netties', 'cube an eighties'], true, true],
+    ['JSON', ['jaison', 'jay son'], false, false],
+    ['Speak soon,\nRobin', ['my sign-off'], false, true],
+    ['kubernetes', ['Kubernetes'], false, true],
+    ['Half', [], false, true],
+  ]);
+  expect(groups[0]).not.toBe(rows[0]); // copies
+  // Back as rows: a group's together, its flags on every row.
+  const saved = groups.flatMap(entryRows);
+  expect(saved).toEqual([
+    r('cooper netties', 'Kubernetes', { starred: true }),
+    r('cube an eighties', 'Kubernetes', { starred: true }),
+    r('jaison', 'JSON', { fuzzy: false }),
+    r('jay son', 'JSON', { fuzzy: false }),
+    { from: 'my sign-off', to: 'Speak soon,\nRobin', fuzzy: true, snippet: true },
+    r('Kubernetes', 'kubernetes'),
+  ]);
+  expect(JSON.stringify(saved)).not.toContain('alsoHeard');
+  // An older Yap reads those rows and saves them back as plain rows, what
+  // it doesn't know left out: every phrase is still there, the same groups.
+  const older = JSON.parse(JSON.stringify(saved)).map(({ from, to, fuzzy, snippet }) => ({ from, to, fuzzy, snippet }));
+  const again = groupRows(older);
+  expect(again.map((g) => [g.to, heardForms(g)])).toEqual(groups.filter((g) => g.from).map((g) => [g.to, heardForms(g)]));
+  // Grouped again, saved again: the same rows (stable).
+  expect(groupRows(saved).flatMap(entryRows)).toEqual(saved);
 });
 
 test('export and import round-trip a word heard several ways: a row a way, one entry back', () => {

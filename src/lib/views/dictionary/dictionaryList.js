@@ -1,8 +1,10 @@
 // The Dictionary view's list, pure (e2e/dictionary-list.spec.js tests it
 // without the app): what a search matches, the four sorts, the key "Most
 // used" counts under, a delete's Undo, every way a correction is heard
-// (`heardForms`, `cleanEntry`: dictionary/variants.rs) and the warnings
-// under a snippet's phrase (`snippetWarnings`).
+// (`heardForms`; config.json's rows grouped by the word they write,
+// `groupRows`, and written back as rows, `entryRows`:
+// dictionary/variants.rs) and the warnings under a snippet's phrase
+// (`snippetWarnings`).
 //
 // The dictionary is one list in the order the entries were added (new ones
 // go on the end: + Add, a suggested word, an import), so its index is its
@@ -69,21 +71,58 @@ export function matches(entry, query) {
 }
 
 /**
- * An entry as config.json keeps it (DictionaryView and Settings' copy
- * alike): trimmed, a star only when set, a correction's other ways it's
- * heard only when it has some (none twice, none the same as `from`).
- * `null` for a row with nothing heard or written.
+ * config.json's rows as the view shows them (dictionary/variants.rs): the
+ * corrections that write the same word exactly are one entry — its `from`
+ * the first row's, the others' in `alsoHeard`, its star and ≈ the first
+ * row's. Snippets and half-written rows stay as they are. In the rows'
+ * order (an entry where its first row was). Copies; pure.
  */
-export function cleanEntry(e) {
+export function groupRows(rows) {
+  const out = [];
+  const byWord = new Map();
+  for (const row of rows ?? []) {
+    if (!row) continue;
+    const to = String(row.to ?? '').trim();
+    const from = String(row.from ?? '').trim();
+    const word = !row.snippet && from && to ? to : null;
+    const into = word !== null ? byWord.get(word) : undefined;
+    if (into) {
+      if (!heardForms(into).some((h) => h.toLowerCase() === oneLine(from).toLowerCase())) {
+        into.alsoHeard = [...(into.alsoHeard ?? []), from];
+      }
+      continue;
+    }
+    const entry = { ...row };
+    if (Array.isArray(row.alsoHeard)) entry.alsoHeard = [...row.alsoHeard];
+    else delete entry.alsoHeard;
+    out.push(entry);
+    if (word !== null) byWord.set(word, entry);
+  }
+  return out;
+}
+
+/**
+ * An entry as config.json keeps it (the view's saves): a row per way it's
+ * heard — the shape every Yap reads, so an older one sharing config.json
+ * keeps them all — each trimmed, with the entry's ≈ and star (only when
+ * set); none twice. A snippet, or a row with nothing heard or written:
+ * as ever (or nothing). Pure.
+ */
+export function entryRows(e) {
   const from = String(e?.from ?? '').trim();
   // A snippet's text keeps its inner line breaks; only the ends trim.
   const to = String(e?.to ?? '').trim();
-  if (!from || !to) return null;
-  const out = { from, to, fuzzy: e.fuzzy ?? true, snippet: !!e.snippet };
-  if (e.starred) out.starred = true;
+  if (!to) return [];
+  const flags = { fuzzy: e.fuzzy ?? true, snippet: !!e.snippet, ...(e.starred ? { starred: true } : {}) };
+  const out = from ? [{ from, to, ...flags }] : [];
   if (!e.snippet) {
-    const more = heardForms({ ...e, from: oneLine(from) }).slice(1);
-    if (more.length) out.alsoHeard = more;
+    const seen = new Set(out.map((r) => oneLine(r.from).toLowerCase()));
+    for (const h of Array.isArray(e.alsoHeard) ? e.alsoHeard : []) {
+      const more = String(h ?? '').trim();
+      if (!more || seen.has(oneLine(more).toLowerCase())) continue;
+      seen.add(oneLine(more).toLowerCase());
+      out.push({ from: more, to, ...flags });
+    }
   }
   return out;
 }

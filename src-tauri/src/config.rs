@@ -40,12 +40,14 @@ pub struct DictionaryEntry {
     /// dictionary with no stars saves as it always did.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub starred: bool,
-    /// More ways a correction is heard, beside `from`: "Kubernetes" ←
-    /// "cooper netties", "cube an eighties" (`dictionary/variants.rs`). The
-    /// exact and near-miss passes take every one; the Whisper prompt gets
-    /// the written form only. Corrections only; written only when there
-    /// are some, so a dictionary without them saves as it always did.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    /// More ways an entry **in memory** is heard, beside `from` — never on
+    /// disk: config.json keeps one row per way a word is heard (the shape
+    /// every Yap reads; `dictionary/variants.rs`), and the Dictionary view
+    /// groups the rows that write the same word. Memory's names and yours
+    /// carry how they're said here (`spoken_names.rs`). Read if a page ever
+    /// sends it, and [`save`] writes it out as rows of their own, so nothing
+    /// sent this way is lost.
+    #[serde(default, skip_serializing)]
     pub also_heard: Vec<String>,
 }
 
@@ -372,12 +374,6 @@ pub struct YapConfig {
     /// `initial_prompt` bias instead.
     #[serde(default = "default_true")]
     pub dictionary_fuzzy: bool,
-    /// The dictionary's own version, for its one-time change
-    /// (`dictionary/variants.rs` `migrate`, run by [`load`]): v1
-    /// (2026-10-25) put corrections written the same way into one entry
-    /// with several "heard as" variants. Kept apart from `config_version`.
-    #[serde(default)]
-    pub dictionary_version: u32,
     /// "Suggest words from your corrections" (the Dictionary view): after a
     /// paste Yap watches the field for a little while (UI Automation, in
     /// memory only) and, when you fix a word it got wrong, offers to add it
@@ -1143,7 +1139,6 @@ impl Default for YapConfig {
             sound_enabled: true,
             dictionary: Vec::new(),
             dictionary_fuzzy: true,
-            dictionary_version: crate::dictionary::variants::VERSION,
             learn_words: true,
             show_tips: true,
             recording_mode: default_recording_mode(),
@@ -1317,10 +1312,8 @@ pub fn load() -> YapConfig {
         cfg.stt_device = "cpu".into();
     }
     // One-time migrations are saved straight away, so they can never run a
-    // second time and undo a choice the user makes afterwards. (The
-    // dictionary keeps a version of its own: `dictionary/variants.rs`.)
-    let migrated = migrate_once(&mut cfg);
-    if crate::dictionary::variants::migrate(&mut cfg) | migrated {
+    // second time and undo a choice the user makes afterwards.
+    if migrate_once(&mut cfg) {
         if let Err(e) = save(&cfg) {
             tracing::warn!("Failed to save migrated config: {}", e);
         }
@@ -1894,8 +1887,10 @@ fn save_at(path: &Path, cfg: &YapConfig) -> Result<(), String> {
     // Never lower it (a newer build's file, opened after a downgrade).
     let cfg = YapConfig {
         config_version: cfg.config_version.max(CONFIG_VERSION),
-        // The dictionary's own version too (dictionary/variants.rs).
-        dictionary_version: cfg.dictionary_version.max(crate::dictionary::variants::VERSION),
+        // One row per way a word is heard, as every Yap reads it
+        // (dictionary/variants.rs): an entry sent with `alsoHeard` is
+        // written out as rows of its own, never dropped.
+        dictionary: crate::dictionary::variants::rows(&cfg.dictionary),
         // "Runs on" is what's chosen; the old GPU switch follows it.
         use_gpu: cfg.stt_device != "cpu",
         ..cfg.clone()
@@ -2779,13 +2774,8 @@ mod tests {
             serde_json::to_value(serde_json::from_str::<YapConfig>("{}").unwrap()).unwrap();
         assert_eq!(fresh["configVersion"], CONFIG_VERSION);
         assert_eq!(from_empty["configVersion"], 0);
-        // …and the dictionary's own version (dictionary/variants.rs), likewise.
-        assert_eq!(fresh["dictionaryVersion"], crate::dictionary::variants::VERSION);
-        assert_eq!(from_empty["dictionaryVersion"], 0);
-        for key in ["configVersion", "dictionaryVersion"] {
-            fresh.as_object_mut().unwrap().remove(key);
-            from_empty.as_object_mut().unwrap().remove(key);
-        }
+        fresh.as_object_mut().unwrap().remove("configVersion");
+        from_empty.as_object_mut().unwrap().remove("configVersion");
         assert_eq!(fresh, from_empty);
     }
 

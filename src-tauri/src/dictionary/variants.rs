@@ -1,108 +1,76 @@
-//! **One entry, several phrases** (2026-10-25): a correction can be heard
-//! more than one way — "Kubernetes" ← "cooper netties", "cube an eighties" —
-//! and keeps them all in one entry (`DictionaryEntry::also_heard` beside
-//! `from`; `DictionaryEntry::heard` lists them).
+//! **One word, several ways it's heard** (2026-10-25): "Kubernetes" ←
+//! "cooper netties", "cube an eighties".
 //!
-//! - **The passes** take every way it's heard: the exact pass
-//!   (`config::apply_dictionary`, the longest first), the near-miss pass
-//!   (`fuzzy.rs`: each one, and the written form, a spelling to match);
-//!   AI cleanup is told `"cooper netties" or "cube an eighties" →
-//!   "Kubernetes"` (`llm::dictionary_suffix`). The Whisper prompt gets the
-//!   written form only (`config::dictionary_prompt`).
-//! - **The one-time change** ([`migrate`], from `config::load`, by the
-//!   dictionary's own version `dictionary_version`, apart from the config's
-//!   `config_version`): corrections written exactly the same way, with the
-//!   same near-miss switch, become one entry where the first of them was —
-//!   its star if any had one. Nothing is lost: every way each was heard is
-//!   kept, in the order they were added. Snippets never merge.
-//! - **New ways in** go to the entry already writing that word: a word
-//!   offered from your corrections (`learn.rs` [`add_heard`]) and an
-//!   import's rows (`views/dictionary/dictionaryFile.js`).
-//!
-//! An older Yap reading config.json ignores `alsoHeard` (it keeps `from`).
+//! - **On disk it's rows** — one `{from, to, fuzzy, snippet, starred}` per
+//!   way a word is heard, the shape config.json has always had — so an
+//!   older Yap sharing `%APPDATA%\yap\config.json` (the installed nightly
+//!   beside Yap - Dev) reads every one and writes every one back: nothing
+//!   to migrate, nothing it can drop. ([`rows`]: an entry that ever arrives
+//!   with `alsoHeard` is written out as rows of its own, `config::save`.)
+//! - **The Dictionary view groups them**: the rows that write the same word
+//!   exactly (corrections) are one entry with several ways it's heard, its
+//!   star and ≈ from its first row (`views/dictionary/dictionaryList.js`
+//!   `groupRows`), and go back as rows, every row with the entry's star and
+//!   ≈ (`entryRows`). Import and export work on the same rows.
+//! - **The passes** take every row as ever (the exact pass, the near-miss
+//!   pass); the Whisper prompt has the word once (`config::dictionary_prompt`
+//!   keeps one of each written form); AI cleanup is told `"cooper netties"
+//!   or "cube an eighties" → "Kubernetes"` (`llm::dictionary_suffix`
+//!   groups them too).
+//! - **New ways in** are new rows for the same word ([`add_heard`]): a word
+//!   offered from your corrections that the dictionary writes already.
+//! - `DictionaryEntry::also_heard` is for memory only: memory's names and
+//!   your own carry how they're said (`spoken_names.rs`), never saved.
 
-use crate::config::{DictionaryEntry, YapConfig};
+use crate::config::DictionaryEntry;
 
-/// The dictionary's current version (`YapConfig::dictionary_version`).
-pub const VERSION: u32 = 1;
-
-/// The one-time change for a config whose dictionary is older than
-/// [`VERSION`]. Returns whether anything changed (the caller saves).
-pub fn migrate(cfg: &mut YapConfig) -> bool {
-    if cfg.dictionary_version >= VERSION {
-        return false;
-    }
-    let before = cfg.dictionary.len();
-    cfg.dictionary = merge(std::mem::take(&mut cfg.dictionary));
-    cfg.dictionary_version = VERSION;
-    let merged = before - cfg.dictionary.len();
-    if merged > 0 {
-        tracing::info!(merged, entries = cfg.dictionary.len(), "Dictionary: corrections written the same way are one entry now");
-    }
-    true
-}
-
-/// Corrections written the same way (`to`, exactly) with the same
-/// near-miss switch, as one entry with every way they're heard (pure). The
-/// entry stays where the first of them was; a star on any is kept.
-/// Snippets and half-written rows are left as they are.
-pub fn merge(entries: Vec<DictionaryEntry>) -> Vec<DictionaryEntry> {
-    let mut out: Vec<DictionaryEntry> = Vec::with_capacity(entries.len());
+/// `entries` as config.json keeps them: an entry with `also_heard` as a
+/// row per way it's heard (its flags on each, in place); the rest as they
+/// are. Pure.
+pub fn rows(entries: &[DictionaryEntry]) -> Vec<DictionaryEntry> {
+    let mut out = Vec::with_capacity(entries.len());
     for e in entries {
-        let mergeable = !e.snippet && !e.to.trim().is_empty() && !e.from.trim().is_empty();
-        let into = mergeable
-            .then(|| {
-                out.iter_mut().find(|o| {
-                    !o.snippet && !o.from.trim().is_empty() && o.fuzzy == e.fuzzy && o.to.trim() == e.to.trim()
-                })
-            })
-            .flatten();
-        match into {
-            Some(o) => {
-                o.starred |= e.starred;
-                for h in e.heard() {
-                    push_heard(o, h);
-                }
-            }
-            None => out.push(e),
+        if e.also_heard.is_empty() {
+            out.push(e.clone());
+            continue;
+        }
+        let row = |from: &str| DictionaryEntry { from: from.to_string(), also_heard: Vec::new(), ..e.clone() };
+        if e.snippet {
+            out.push(row(&e.from));
+            continue;
+        }
+        let heard = e.heard();
+        if heard.is_empty() {
+            out.push(row(&e.from));
+        }
+        for h in heard {
+            out.push(row(h));
         }
     }
     out
 }
 
-/// Add `heard` to `entry`'s ways of being heard, unless it's one of them
-/// already (any case). Returns whether it was added.
-pub fn push_heard(entry: &mut DictionaryEntry, heard: &str) -> bool {
-    let heard = heard.trim();
-    if heard.is_empty() || entry.heard().iter().any(|h| h.to_lowercase() == heard.to_lowercase()) {
-        return false;
-    }
-    if entry.from.trim().is_empty() {
-        entry.from = heard.to_string();
-    } else {
-        entry.also_heard.push(heard.to_string());
-    }
-    true
-}
-
-/// A correction `heard` → `term` into `dict`: another way the entry that
-/// writes `term` already (exactly, near-misses on) is heard, else a new
-/// entry at the end (near-misses on, as every new correction). Returns
-/// whether the dictionary changed.
+/// A correction `heard` → `term` into `dict` (a word offered from your
+/// corrections): a new row — beside the rows already writing `term`, which
+/// the Dictionary view shows as one entry — with their star, near-misses
+/// on (as every new correction). Nothing when a row writing `term` is heard
+/// that way already. Returns whether the dictionary changed.
 pub fn add_heard(dict: &mut Vec<DictionaryEntry>, heard: &str, term: &str) -> bool {
     let (heard, term) = (heard.trim(), term.trim());
     if heard.is_empty() || term.is_empty() {
         return false;
     }
-    if let Some(e) = dict.iter_mut().find(|e| !e.snippet && e.fuzzy && e.to.trim() == term) {
-        return push_heard(e, heard);
+    let same_word = |e: &&DictionaryEntry| !e.snippet && e.to.trim() == term;
+    if dict.iter().filter(same_word).any(|e| e.heard().iter().any(|h| h.to_lowercase() == heard.to_lowercase())) {
+        return false;
     }
+    let starred = dict.iter().find(same_word).is_some_and(|e| e.starred);
     dict.push(DictionaryEntry {
         from: heard.to_string(),
         to: term.to_string(),
         fuzzy: true,
         snippet: false,
-        starred: false,
+        starred,
         also_heard: Vec::new(),
     });
     true
@@ -111,106 +79,119 @@ pub fn add_heard(dict: &mut Vec<DictionaryEntry>, heard: &str, term: &str) -> bo
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::YapConfig;
 
     fn c(from: &str, to: &str) -> DictionaryEntry {
         DictionaryEntry { from: from.into(), to: to.into(), fuzzy: true, snippet: false, starred: false, also_heard: vec![] }
     }
 
-    #[test]
-    fn corrections_written_the_same_way_become_one_entry() {
-        let mut exact = c("jaison", "JSON");
-        exact.fuzzy = false;
-        let snippet = DictionaryEntry { snippet: true, ..c("my sign off", "Kubernetes") };
-        let list = vec![
-            c("cooper netties", "Kubernetes"),
-            exact.clone(),
-            c("graph ana", "Grafana"),
-            DictionaryEntry { starred: true, ..c("cube an eighties", "Kubernetes") },
-            c("Cooper Netties", "Kubernetes"), // the same way, another case
-            c("jason", "Json"),                // another spelling: its own
-            DictionaryEntry { fuzzy: false, ..c("jay son", "JSON") },
-            c("j son", "JSON"), // near-misses on: not with the exact-only ones
-            snippet.clone(),
-            c("", "Kubernetes"), // a row being written
-        ];
-        let out = merge(list);
-        let kube = &out[0];
-        assert_eq!((kube.from.as_str(), kube.to.as_str()), ("cooper netties", "Kubernetes"));
-        assert_eq!(kube.also_heard, ["cube an eighties"]);
-        assert!(kube.starred);
-        assert_eq!(kube.heard(), ["cooper netties", "cube an eighties"]);
-        assert_eq!(out[1].heard(), ["jaison", "jay son"]);
-        assert!(!out[1].fuzzy);
-        let rest: Vec<(&str, &str)> = out[2..].iter().map(|e| (e.from.as_str(), e.to.as_str())).collect();
-        assert_eq!(rest, [("graph ana", "Grafana"), ("jason", "Json"), ("j son", "JSON"), ("my sign off", "Kubernetes"), ("", "Kubernetes")]);
-        assert!(out[5].snippet);
-        // Again: nothing more to do.
-        let again = merge(out.clone());
-        assert_eq!(serde_json::to_value(&again).unwrap(), serde_json::to_value(&out).unwrap());
+    /// A Yap from before 2026-10-25, as it reads config.json and writes it
+    /// back: `{from, to, fuzzy, snippet}` rows, anything else ignored on
+    /// read and gone on write.
+    mod older {
+        use serde::{Deserialize, Serialize};
+
+        #[derive(Serialize, Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        pub struct Entry {
+            pub from: String,
+            pub to: String,
+            #[serde(default)]
+            pub fuzzy: bool,
+            #[serde(default)]
+            pub snippet: bool,
+        }
+
+        #[derive(Serialize, Deserialize)]
+        pub struct Config {
+            #[serde(default)]
+            pub dictionary: Vec<Entry>,
+        }
     }
 
     #[test]
-    fn the_migration_runs_once_and_saves_as_before_without_variants() {
-        let mut cfg = YapConfig { dictionary: vec![c("a b", "Ab"), c("ay bee", "Ab")], dictionary_version: 0, ..YapConfig::default() };
-        assert!(migrate(&mut cfg));
-        assert_eq!(cfg.dictionary.len(), 1);
-        assert_eq!(cfg.dictionary_version, VERSION);
-        assert!(!migrate(&mut cfg));
-        // A person's two rows made since stay two (the change ran once).
-        cfg.dictionary.push(c("eh bee", "Ab"));
-        assert!(!migrate(&mut cfg));
-        assert_eq!(cfg.dictionary.len(), 2);
-        // A config made now needs nothing.
-        assert!(!migrate(&mut YapConfig::default()));
-        // On disk: `alsoHeard` only when there are some.
-        let json = serde_json::to_value(&cfg.dictionary).unwrap();
-        assert_eq!(json[0]["alsoHeard"], serde_json::json!(["ay bee"]));
-        assert!(json[1].get("alsoHeard").is_none());
-        let back: Vec<DictionaryEntry> = serde_json::from_value(json).unwrap();
-        assert_eq!(back[0].heard(), ["a b", "ay bee"]);
-        // An older file (no field) reads as before.
-        let old: DictionaryEntry = serde_json::from_str(r#"{"from":"x","to":"Y"}"#).unwrap();
-        assert!(old.also_heard.is_empty() && old.heard() == ["x"]);
-    }
-
-    #[test]
-    fn a_new_way_it_is_heard_joins_the_entry_writing_that_word() {
-        let mut dict = vec![c("cooper netties", "Kubernetes"), DictionaryEntry { fuzzy: false, ..c("jaison", "JSON") }];
-        assert!(add_heard(&mut dict, "cube an eighties", "Kubernetes"));
-        assert!(!add_heard(&mut dict, "Cube An Eighties", "Kubernetes"));
-        assert_eq!(dict.len(), 2);
-        assert_eq!(dict[0].heard(), ["cooper netties", "cube an eighties"]);
-        // Only an entry with near-misses on takes it; else a new one.
-        assert!(add_heard(&mut dict, "jay son", "JSON"));
-        assert_eq!(dict.len(), 3);
-        assert_eq!((dict[2].from.as_str(), dict[2].fuzzy), ("jay son", true));
-        // Another spelling of the word is another entry.
-        assert!(add_heard(&mut dict, "kubernetis", "kubernetes"));
-        assert_eq!(dict.len(), 4);
-    }
-
-    #[test]
-    fn every_way_it_is_heard_is_corrected_and_the_prompt_has_the_word_once() {
-        let mut kube = c("cooper netties", "Kubernetes");
-        kube.also_heard = vec!["cube an eighties".into(), "cube".into()];
-        let dict = vec![kube];
-        // Exact: each one, the longest first ("cube" doesn't eat "cube an eighties").
+    fn an_older_yap_reads_and_saves_every_way_a_word_is_heard() {
+        // The Dictionary view's entry, as it sends it (rows: dictionaryList.js
+        // `entryRows`), and one sent grouped all the same (`alsoHeard`).
+        let mut grouped = DictionaryEntry { starred: true, ..c("cooper netties", "Kubernetes") };
+        grouped.also_heard = vec!["cube an eighties".into(), "kuber nets".into()];
+        let cfg = YapConfig {
+            dictionary: vec![grouped, c("jaison", "JSON"), c("jay son", "JSON"), DictionaryEntry { snippet: true, ..c("my sign off", "Speak soon,") }],
+            ..YapConfig::default()
+        };
+        // Saved by this Yap: rows, no field an older one doesn't know.
+        let saved = serde_json::to_value(YapConfig { dictionary: rows(&cfg.dictionary), ..cfg.clone() }).unwrap();
+        assert!(saved["dictionary"].as_array().unwrap().iter().all(|e| e.get("alsoHeard").is_none()));
+        // Read and saved again by an older Yap.
+        let old: older::Config = serde_json::from_value(saved).unwrap();
+        let resaved = serde_json::to_value(&old).unwrap();
+        // …and read by this one: every way each word is heard is there.
+        let back: YapConfig = serde_json::from_value(resaved).unwrap();
+        let pairs: Vec<(&str, &str, bool)> = back.dictionary.iter().map(|e| (e.from.as_str(), e.to.as_str(), e.snippet)).collect();
         assert_eq!(
-            crate::config::apply_dictionary("cooper netties and cube an eighties, or cube", &dict),
-            "Kubernetes and Kubernetes, or Kubernetes"
+            pairs,
+            [
+                ("cooper netties", "Kubernetes", false),
+                ("cube an eighties", "Kubernetes", false),
+                ("kuber nets", "Kubernetes", false),
+                ("jaison", "JSON", false),
+                ("jay son", "JSON", false),
+                ("my sign off", "Speak soon,", true),
+            ]
         );
-        // Near-misses of each.
-        let mut kube = c("cooper netties", "Kubernetes");
-        kube.also_heard = vec!["cube an eighties".into()];
-        let two = vec![kube];
-        assert_eq!(crate::dictionary::fuzzy::apply_fuzzy("deploy to cooper nettie now", &two), "deploy to Kubernetes now");
-        assert_eq!(crate::dictionary::fuzzy::apply_fuzzy("deploy to cube an eightys now", &two), "deploy to Kubernetes now");
-        assert_eq!(crate::dictionary::fuzzy::apply_fuzzy("a cube of ice", &two), "a cube of ice");
-        // The Whisper prompt: the written form only.
-        assert_eq!(crate::config::dictionary_prompt(&dict).as_deref(), Some("Kubernetes"));
-        // A snippet's phrase is one phrase: its variants (none in the UI) aren't used.
+        // And every one is still corrected.
+        assert_eq!(
+            crate::config::apply_dictionary("cooper netties, cube an eighties and kuber nets", &back.dictionary),
+            "Kubernetes, Kubernetes and Kubernetes"
+        );
+    }
+
+    #[test]
+    fn rows_write_an_entry_out_a_row_a_way_its_flags_on_each() {
+        let mut kube = DictionaryEntry { starred: true, fuzzy: false, ..c("cooper netties", "Kubernetes") };
+        kube.also_heard = vec!["Cooper Netties".into(), " cube an eighties ".into(), String::new()];
+        let out = rows(&[c("jaison", "JSON"), kube]);
+        let got: Vec<(&str, bool, bool)> = out.iter().map(|e| (e.from.as_str(), e.starred, e.fuzzy)).collect();
+        assert_eq!(got, [("jaison", false, true), ("cooper netties", true, false), ("cube an eighties", true, false)]);
+        assert!(out.iter().all(|e| e.also_heard.is_empty()));
+        // Saved by config::save as rows too (the JSON has no `alsoHeard`).
+        let json = serde_json::to_string(&out).unwrap();
+        assert!(!json.contains("alsoHeard"));
+        // A snippet is one phrase.
         let mut snip = DictionaryEntry { snippet: true, ..c("my sign off", "Speak soon,") };
         snip.also_heard = vec!["sign me off".into()];
-        assert_eq!(snip.heard(), ["my sign off"]);
+        assert_eq!(rows(&[snip]).len(), 1);
+    }
+
+    #[test]
+    fn a_new_way_it_is_heard_is_a_new_row_for_the_word() {
+        let mut dict = vec![DictionaryEntry { starred: true, ..c("cooper netties", "Kubernetes") }];
+        assert!(add_heard(&mut dict, "cube an eighties", "Kubernetes"));
+        assert!(!add_heard(&mut dict, "Cube An Eighties", "Kubernetes"));
+        assert!(!add_heard(&mut dict, "cooper netties", "Kubernetes"));
+        assert_eq!(dict.len(), 2);
+        // Beside the word's rows, with its star (one entry in the view).
+        assert_eq!((dict[1].from.as_str(), dict[1].to.as_str(), dict[1].starred, dict[1].fuzzy), ("cube an eighties", "Kubernetes", true, true));
+        assert!(!add_heard(&mut dict, " ", "Kubernetes"));
+    }
+
+    #[test]
+    fn every_row_is_corrected_and_the_prompt_has_the_word_once() {
+        let dict = vec![c("cooper netties", "Kubernetes"), c("cube an eighties", "Kubernetes"), c("cube", "Kubernetes")];
+        // Exact: each one ("cube" after "cube an eighties" doesn't eat it: rows
+        // run in order, and that row is first here).
+        assert_eq!(crate::config::apply_dictionary("cooper netties and cube an eighties", &dict), "Kubernetes and Kubernetes");
+        // Near-misses of each.
+        let two = &dict[..2];
+        assert_eq!(crate::dictionary::fuzzy::apply_fuzzy("deploy to cooper nettie now", two), "deploy to Kubernetes now");
+        assert_eq!(crate::dictionary::fuzzy::apply_fuzzy("deploy to cube an eightys now", two), "deploy to Kubernetes now");
+        assert_eq!(crate::dictionary::fuzzy::apply_fuzzy("a cube of ice", two), "a cube of ice");
+        // The Whisper prompt: the written form once.
+        assert_eq!(crate::config::dictionary_prompt(&dict).as_deref(), Some("Kubernetes"));
+        // In memory, an entry may carry more ways (memory's names): the same.
+        let mut name = c("", "Siobhan");
+        name.also_heard = vec!["shivon".into()];
+        assert_eq!(name.heard(), ["shivon"]);
+        assert_eq!(crate::dictionary::fuzzy::apply_fuzzy("ask shivon", &[name]), "ask Siobhan");
     }
 }

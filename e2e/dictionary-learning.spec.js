@@ -53,7 +53,7 @@ const test = base.extend({
 });
 
 const toastWith = (main, text) => main.getByRole('status').filter({ hasText: text });
-const ADDRESS = '12 Station Road, Norwich NR1 4AB';
+const ADDRESS = '12 Example Road, Anytown ZZ1 1ZZ';
 const LINK = 'https://example.com/book/sam-example';
 
 test('your own name is spelled right in a dictation, without a dictionary entry', async ({ yap, main, shot }) => {

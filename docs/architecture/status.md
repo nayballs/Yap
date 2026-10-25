@@ -328,8 +328,9 @@ tried with a file exported from another app or by hand in Excel),
 **the dictionary learning more by itself** (2026-10-25,
 [dictionary.md](./dictionary.md)): **one entry, several ways it's heard**
 (`dictionary/variants.rs`: the exact and near-miss passes take every one,
-the Whisper prompt the word once; the one-time merge by the dictionary's
-own version, import/export a row a way and back; a word you fix that the
+the Whisper prompt the word once; a row per way on disk, grouped in the
+view, so an older Yap sharing config.json keeps every one — unit-tested
+against a stand-in older reader; import/export a row a way and back; a word you fix that the
 dictionary writes, heard a new way, offered as another way it's heard),
 **your own name** (About you) a hidden term for the names pass and the
 Whisper prompt, **names spelled far from how they're said** ("Shivon" →

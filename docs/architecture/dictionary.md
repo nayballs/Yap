@@ -6,30 +6,32 @@ The correction dictionary: near-miss (fuzzy) matching, several ways one word is 
 
 ## Modules
 
-- **`dictionary/variants.rs`** — **one entry, several ways it's heard**
-  (2026-10-25): "Kubernetes" ← "cooper netties", "cube an eighties". A
-  correction keeps them in `alsoHeard` beside `from`
-  (`DictionaryEntry::heard()` lists them all; a snippet's phrase is one).
-  The exact pass (`config::apply_dictionary`) takes every one, the longest
-  first ("cube" never eats the start of "cube an eighties"); the near-miss
-  pass matches each, and the written form, as a spelling; AI cleanup is told
-  `"cooper netties" or "cube an eighties" → "Kubernetes"`
-  (`llm::dictionary_suffix`); the **Whisper prompt** has the written word
-  once (`config::dictionary_prompt`). **The one-time change** (`migrate`,
-  from `config::load`, by the dictionary's own `dictionary_version` — apart
-  from `config_version`, stamped on every save like it): corrections
-  written exactly the same way with the same ≈ switch become one entry
-  where the first was, a star on any kept, every way heard kept in the
-  order added; snippets and half-written rows never merge. Rows made one
-  at a time since stay as they are (it ran once). **New ways in** go to the
-  entry already writing the word (`add_heard`, near-misses on): a word
-  offered from your corrections, an import's rows. An older Yap ignores
-  `alsoHeard` (it keeps `from`) and drops it on its next save.
+- **`dictionary/variants.rs`** — **one word, several ways it's heard**
+  (2026-10-25): "Kubernetes" ← "cooper netties", "cube an eighties".
+  **On disk it's rows**: one `{from, to, fuzzy, snippet, starred}` per way,
+  the shape config.json always had, so an older Yap sharing
+  `%APPDATA%\yap\config.json` (the installed nightly beside Yap - Dev)
+  reads and writes every one back — no migration, nothing it can drop
+  (unit-tested against a stand-in older Yap that keeps only `{from, to,
+  fuzzy, snippet}`). `DictionaryEntry::also_heard` is never written
+  (`skip_serializing`): an entry that arrives with `alsoHeard` is saved as
+  rows of its own (`rows`, in `config::save`); in memory it carries how
+  memory's names and yours are said (`spoken_names.rs`). **The Dictionary
+  view groups the rows** that write the same word exactly into one entry,
+  its star and ≈ from its first row (`dictionaryList.js` `groupRows`), and
+  saves it back as rows, the entry's star and ≈ on each, together where
+  its first row was (`entryRows`). The exact and near-miss passes take
+  every row as ever; AI cleanup is told `"cooper netties" or "cube an
+  eighties" → "Kubernetes"` (`llm::dictionary_suffix` groups by the word);
+  the **Whisper prompt** has the written word once
+  (`config::dictionary_prompt`). **New ways in** are new rows for the word
+  (`add_heard`, with its star): a word offered from your corrections; an
+  import's rows join the entry in the view.
 - **`dictionary/snippet_offer.rs`** — **"Type that often? Save it as a
   snippet"** (Wispr Flow's nudge, by behaviour; 2026-10-25). **What counts**
   (`phrases`, pure): in a dictation's text, every link, email address and
   phone number (9–15 digits); an address up to its UK postcode or US ZIP
-  ("12 Station Road, Norwich NR1 4AB" wherever in the sentence, from the
+  ("12 Example Road, Anytown ZZ1 1ZZ" wherever in the sentence, from the
   house number, with a "Flat 3" before it); each sentence or paragraph (and
   a short dictation of up to three, whole) that's a sign-off with a name
   ("Best wishes,\nSam"), has lines of its own, or is long (≥ 40 characters
@@ -332,10 +334,11 @@ The correction dictionary: near-miss (fuzzy) matching, several ways one word is 
 - **One correction, several ways it's heard** (2026-10-25, `variants.rs`):
   "+" beside "Heard" (and "Add another way it's heard" in the row's menu)
   adds a box under it, "Also heard as", each with its ×; the list shows
-  the word once. `dictionaryList.js` `heardForms` / `cleanEntry` (the view's
-  saves; Settings' `cleanConfig` keeps `alsoHeard` too, or its auto-save
-  would drop them), the search matches every way, a delete's Undo brings
-  them back, and Delete… says "Yap stops changing “a” or “b” to “K”".
+  the word once. config.json's rows writing the same word are grouped as
+  the view loads them (`dictionaryList.js` `groupRows`; Settings' copy
+  stays rows) and written back as rows (`entryRows`); the search matches
+  every way, a delete's Undo brings them back, and Delete… says "Yap stops
+  changing “a” or “b” to “K”".
 - **Snippets' length and warnings** (2026-10-25, Wispr Flow's richer
   snippets): under a snippet's text, "N characters" (at most 5,000, as an
   import takes; the box stops there); under its phrase, a warning
@@ -427,8 +430,8 @@ The correction dictionary: near-miss (fuzzy) matching, several ways one word is 
     length and warnings) and `e2e/dictionary-learning.spec.js` (your own
     name in a dictation; the snippet offer — toast, bar card, "Don't
     suggest this again" and the switch; a summary edit's word offer). Rust
-    unit tests: `variants.rs` (the merge, the migration, the passes and
-    the prompt), `snippet_offer.rs` (what counts, three in a week, once, a
+    unit tests: `variants.rs` (an older Yap reading and re-saving the rows
+    keeps every phrase; rows out of an entry; the passes and the prompt), `snippet_offer.rs` (what counts, three in a week, once, a
     day, the phrase to say), `learn.rs` (`summary_swaps`, `typed_after`,
     another way heard), `spoken_names.rs`, `memory/vocab.rs` (your own
     name; the respellings against everyday sentences).

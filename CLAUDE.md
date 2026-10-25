@@ -137,7 +137,7 @@ One folder per area (an area's `<area>.rs` lists its modules); a big module's pa
 - `dictionary/dict_usage.rs` — how often each dictionary word is used; orders the Whisper prompt (starred words first).
 - `dictionary/files.rs` — the Dictionary view's Import… / Export… files: Windows' dialogs opened in Rust, a file's text decoded (UTF-8, UTF-16, Windows-1252).
 - `dictionary/learn.rs` — "Suggest words from your corrections": the 60 s field watch and the offer; a meeting line's fix and a summary's word swap (at Done) offered too.
-- `dictionary/variants.rs` — one entry, several ways it's heard (`alsoHeard`): every pass takes each, the Whisper prompt the word once; the one-time merge (`dictionary_version`).
+- `dictionary/variants.rs` — one word, several ways it's heard: a row per way on disk (an older Yap keeps them all), one entry in the Dictionary view; the Whisper prompt has the word once.
 - `dictionary/snippet_offer.rs` — "Type that often? Save it as a snippet": a phrase dictated or typed 3× in a week offered once (one a day), with a phrase to say.
 - `dictionary/spoken_names.rs` — how names spelled far from how they're said sound ("Shivon" → Siobhan), for the names pass (memory's names and your own).
 - `dictionary/screen_terms.rs` (+ `dictionary/screen_terms/`) — "Spell names the way they're written on screen": the target window's visible text read at record start (UIA, bounded) → its names and terms, for that dictation only: a strict near-miss pass (every model), cleanup's "Spell these names as written" line.

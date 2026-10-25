@@ -7,7 +7,7 @@
 //!
 //! - **What counts** ([`phrases`], pure): in each dictation's text, every
 //!   link, email address and phone number; an address up to its postcode
-//!   or ZIP code ("12 Station Road, Norwich NR1 4AB", wherever in the
+//!   or ZIP code ("12 Example Road, Anytown ZZ1 1ZZ", wherever in the
 //!   sentence); and each sentence or paragraph (and the whole dictation,
 //!   when it's short) that is a sign-off with a name ("Best wishes,\nSam"),
 //!   has lines of its own, or is long ([`LONG_CHARS`]). Compared by their
@@ -187,7 +187,7 @@ fn address_in(block: &str) -> Option<String> {
         offset += w.len();
     }
     let mut start = start?;
-    // "Flat 3, 12 Station Road": the word before the number when it says which flat.
+    // "Flat 3, 12 Example Road": the word before the number when it says which flat.
     let head = before[..start].trim_end();
     if let Some(prev) = head.rsplit(char::is_whitespace).next() {
         if ["flat", "apartment", "apt", "unit", "suite"].contains(&prev.to_lowercase().trim_end_matches('.')) {
@@ -735,18 +735,18 @@ mod tests {
         DictionaryEntry { from: from.into(), to: to.into(), fuzzy: true, snippet: true, starred: false, also_heard: vec![] }
     }
 
-    const ADDRESS: &str = "Please send it to 12 Station Road, Norwich NR1 4AB.";
+    const ADDRESS: &str = "Please send it to 12 Example Road, Anytown ZZ1 1ZZ.";
 
     #[test]
     fn the_phrases_worth_a_snippet() {
-        assert_eq!(kinds(ADDRESS), [(Kind::Address, "12 Station Road, Norwich NR1 4AB".to_string()), (Kind::Phrase, ADDRESS.to_string())]);
-        assert_eq!(kinds("My flat is Flat 3, 12 Station Road, Norwich NR1 4AB")[0].1, "Flat 3, 12 Station Road, Norwich NR1 4AB");
+        assert_eq!(kinds(ADDRESS), [(Kind::Address, "12 Example Road, Anytown ZZ1 1ZZ".to_string()), (Kind::Phrase, ADDRESS.to_string())]);
+        assert_eq!(kinds("My flat is Flat 3, 12 Example Road, Anytown ZZ1 1ZZ")[0].1, "Flat 3, 12 Example Road, Anytown ZZ1 1ZZ");
         assert_eq!(
-            kinds("Book a time at https://calendly.com/sam-example/30min, or email sam@example.com."),
+            kinds("Book a time at https://bookings.example/sam-example/30min, or email sam@example.com."),
             [
                 (Kind::Email, "sam@example.com".to_string()),
-                (Kind::Link, "https://calendly.com/sam-example/30min".to_string()),
-                (Kind::Phrase, "Book a time at https://calendly.com/sam-example/30min, or email sam@example.com.".to_string()),
+                (Kind::Link, "https://bookings.example/sam-example/30min".to_string()),
+                (Kind::Phrase, "Book a time at https://bookings.example/sam-example/30min, or email sam@example.com.".to_string()),
             ]
         );
         assert_eq!(kinds("Call me on 07700 900123 after six")[0], (Kind::Phone, "07700 900123".to_string()));
@@ -776,16 +776,16 @@ mod tests {
     #[test]
     fn three_times_in_a_week_and_it_is_offered_once() {
         let now = phrases(ADDRESS);
-        let two = vec![ADDRESS.to_string(), "Send the parcel to 12 Station Road, Norwich NR1 4AB please".to_string()];
+        let two = vec![ADDRESS.to_string(), "Send the parcel to 12 Example Road, Anytown ZZ1 1ZZ please".to_string()];
         let mut three = two.clone();
         three.push("Lunch was good.".into());
-        three.push("It's 12 station road, Norwich NR1 4AB".into());
+        three.push("It's 12 example road, Anytown ZZ1 1ZZ".into());
         let rec = Record::default();
         // Twice (this one included): not yet.
         assert_eq!(verdict(&now, &two, &rec, &[], 1), Err("nothing used three times this week"));
         // Three times, said three ways: the address, not the sentence.
         let f = verdict(&now, &three, &rec, &[], 1).unwrap();
-        assert_eq!((f.phrase.kind, f.phrase.text.as_str(), f.times), (Kind::Address, "12 Station Road, Norwich NR1 4AB", 3));
+        assert_eq!((f.phrase.kind, f.phrase.text.as_str(), f.times), (Kind::Address, "12 Example Road, Anytown ZZ1 1ZZ", 3));
         // Typed twice more counts too.
         let typed = Record {
             typed: vec![Typed { key: fingerprint(&now[0].key), at: 1 }, Typed { key: fingerprint(&now[0].key), at: 2 }],
@@ -801,16 +801,16 @@ mod tests {
         assert_eq!(verdict(&now, &three, &today, &[], 1_000 + MIN_GAP_MS - 1), Err("one offer a day"));
         assert!(verdict(&now, &three, &today, &[], 1_000 + MIN_GAP_MS).is_ok());
         // A snippet's text already (it expanded in those dictations).
-        let dict = vec![snippet("my address", "12 Station Road\nNorwich NR1 4AB")];
+        let dict = vec![snippet("my address", "12 Example Road\nAnytown ZZ1 1ZZ")];
         assert_ne!(verdict(&now, &three, &rec, &dict, 1).map(|f| f.phrase.kind), Ok(Kind::Address));
     }
 
     #[test]
     fn the_phrase_to_say_is_named_by_the_text_and_never_one_taken() {
         let p = |text: &str| phrases(text).into_iter().next().unwrap();
-        assert_eq!(trigger(&p("12 Station Road, Norwich NR1 4AB"), &[]), "my address");
+        assert_eq!(trigger(&p("12 Example Road, Anytown ZZ1 1ZZ"), &[]), "my address");
         assert_eq!(trigger(&p("sam@example.com"), &[]), "my email");
-        assert_eq!(trigger(&p("https://www.calendly.com/sam-example"), &[]), "my calendly link");
+        assert_eq!(trigger(&p("https://www.bookings.example/sam-example"), &[]), "my bookings link");
         assert_eq!(trigger(&p("07700 900123"), &[]), "my number");
         assert_eq!(trigger(&p("Best wishes,\nSam"), &[]), "my sign-off");
         assert_eq!(
@@ -818,10 +818,10 @@ mod tests {
             "my thanks for"
         );
         let taken = vec![snippet("my address", "1 Long Lane"), snippet("My Address 2", "2 Long Lane")];
-        assert_eq!(trigger(&p("12 Station Road, Norwich NR1 4AB"), &taken), "my address 3");
-        let (title, body) = prompt_text(&p("12 Station Road, Norwich NR1 4AB"), 3, "my address");
+        assert_eq!(trigger(&p("12 Example Road, Anytown ZZ1 1ZZ"), &taken), "my address 3");
+        let (title, body) = prompt_text(&p("12 Example Road, Anytown ZZ1 1ZZ"), 3, "my address");
         assert_eq!(title, "Type that often? Save it as a snippet");
-        assert_eq!(body, "You've used “12 Station Road, Norwich NR1 4AB” 3 times this week. Say “my address” and Yap types it.");
+        assert_eq!(body, "You've used “12 Example Road, Anytown ZZ1 1ZZ” 3 times this week. Say “my address” and Yap types it.");
     }
 
     #[test]
