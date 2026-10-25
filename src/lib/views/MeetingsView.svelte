@@ -28,7 +28,7 @@
   import { openContextMenu, menuKey, menuOpenFor, askConfirm } from '../ui/contextMenu.svelte.js';
   import { copyText } from '../core/itemMenus.js';
   import { noteMarkdown } from '../core/notepadText.js';
-  import { meetingAudio, refreshAudio, exportAudio } from '../stores/meetingAudio.svelte.js';
+  import { meetingAudio, refreshAudio, exportAudio, initMeetingAudio, findSpeakers, runningJob, jobLine, cancelJob } from '../stores/meetingAudio.svelte.js';
 
   // `onnavigate(view)` switches the main window's view; `onopensettings(section)`;
   // `onopennote({id, line, ts, field})` opens a moment of a meeting or note
@@ -251,6 +251,9 @@
           : null,
         { separator: true },
         { label: 'Copy as Markdown', icon: 'copy', onselect: () => copyMeeting(n.id) },
+        // The speaker engine run again over its audio (speakers/rerun.rs):
+        // its progress and Cancel on the row.
+        !n.recording && n.hasTalk ? { label: 'Find speakers', icon: 'person', onselect: () => findSpeakers(n.id) } : null,
         // Its kept audio, where you pick (meetings/meeting_audio/export.rs):
         // only a meeting whose audio Yap still has.
         ...(n.recording || !meetingAudio.byNote[n.id]?.recordings
@@ -339,6 +342,8 @@
 
   onMount(() => {
     refreshPast();
+    // A past meeting's job (Find speakers, Transcribe again) on its row.
+    initMeetingAudio();
     invoke('meeting_state')
       .then((s) => (meeting = s || { recording: false }))
       .catch(() => {});
@@ -600,6 +605,12 @@
                       {#if n.participants?.length}<span class="pwho">{n.participants.join(', ')}</span>{/if}
                       {#if !n.hasPlan && !n.recording && n.hasTalk}
                         <span><button class="gen" onclick={() => generate(n)}>Generate summary</button></span>
+                      {/if}
+                      {#if runningJob(n.id)}
+                        <span class="pjob" role="status">
+                          {jobLine(runningJob(n.id))}
+                          <button class="gen" onclick={() => cancelJob(n.id)}>Cancel</button>
+                        </span>
                       {/if}
                     </span>
                   </span>
@@ -1308,6 +1319,11 @@
     min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
+  }
+  .pjob {
+    display: inline-flex;
+    gap: 8px;
+    color: var(--yap-muted);
   }
   .gen {
     position: relative;

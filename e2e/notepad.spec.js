@@ -784,6 +784,7 @@ test('the header: back to Notes, the ⋯ menu, Share, split screen, delete', asy
     'Copy consent message',
     'Save as .md',
     'Transcribe again',
+    'Find speakers',
     'Export audio…',
     'Export each side…',
     'Delete',

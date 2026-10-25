@@ -13,6 +13,7 @@
   import { onMount, tick, untrack } from 'svelte';
   import { toast } from '../ui/toast.svelte.js';
   import { YOU, speakerInfo, noteVoices } from '../core/notepadText.js';
+  import { canPlayVoice, playVoice } from '../stores/meetingAudio.svelte.js';
 
   let {
     note,
@@ -148,6 +149,20 @@
       <button role="menuitem" class="item" disabled={busy} onclick={() => run('speaker_suggestion', { speaker: voice, answer: 'yes' })}>
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5" /></svg>
         <span>It's {suggested}</span>
+      </button>
+    {/if}
+    {#if canPlayVoice(note?.id, voice)}
+      <!-- A few seconds of their clearest speech (speakers/clip.rs). -->
+      <button
+        role="menuitem"
+        class="item"
+        onclick={() => {
+          playVoice(note.id, voice);
+          onclose();
+        }}
+      >
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5.5v13l10.5-6.5z" /></svg>
+        <span>Play their voice</span>
       </button>
     {/if}
     {#if !isYou}

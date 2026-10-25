@@ -3,7 +3,8 @@
 // fallback listed as coming later, where the files come from), the "Tell
 // speakers apart in meetings" switch that stays off until a model is
 // installed and offers the download instead, the download itself (progress,
-// SHA-256, the runtime zip unpacked), the same switch in General →
+// SHA-256, the runtime zip unpacked; voice matching with it, and fetched
+// alone for a model from before it), the same switch in General →
 // Meetings, delete, and test runs never downloading from the internet.
 //
 // Nothing here downloads from the internet: a local server serves a fake
@@ -13,7 +14,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { test as base, expect, openSettings, closeSettings, settingsDialog } from './support/fixtures.js';
-import { startFakeSpeakerModels, RUNTIME_DLLS, MODEL_FILE } from './support/diarization.js';
+import { startFakeSpeakerModels, RUNTIME_DLLS, MODEL_FILE, VOICES_FILE } from './support/diarization.js';
 import { RUNS } from './support/yap.js';
 
 const test = base.extend({
@@ -118,15 +119,46 @@ test('switching it on without a model offers the download, which installs it and
   expect(fs.existsSync(folder(yap, 'nemo-speech-0.2.0-cpu', 'llama.dll'))).toBe(false);
   expect(fs.readFileSync(folder(yap, 'nemotron-3-diarization', 'NOTICE.txt'), 'utf8')).toContain('OpenMDW');
   expect(fs.readFileSync(folder(yap, 'nemo-speech-0.2.0-cpu', 'NOTICE.txt'), 'utf8')).toContain('Apache');
+  // Voice matching came with it (speakers/voiceprint.rs: ERes2Net, Apache-2.0).
+  expect(fs.statSync(folder(yap, 'eres2net-voxceleb-en', VOICES_FILE)).size).toBe(models.voicesBytes);
+  expect(fs.readFileSync(folder(yap, 'eres2net-voxceleb-en', 'NOTICE.txt'), 'utf8')).toContain('Apache');
   // Nothing half-done left behind.
   const left = fs.readdirSync(folder(yap)).filter((f) => /partial|installing/.test(f));
   expect(left).toEqual([]);
-  expect(models.requests).toEqual(expect.arrayContaining(['/runtime.zip', '/model.gguf']));
+  expect(models.requests).toEqual(expect.arrayContaining(['/runtime.zip', '/model.gguf', '/voices.onnx']));
   const s = await status(yap);
   expect(nemotron(s).installed).toBe(true);
   expect(nemotron(s).downloadBytes).toBe(0);
+  expect(nemotron(s).extrasBytes).toBe(0);
   await expect(group).not.toContainText('Needs a speaker model');
+  await expect(group.locator('[data-setting="voice-matching"]')).toHaveCount(0);
   await shot(main, '04-installed');
+  await closeSettings(main);
+});
+
+test('a speaker model from before voice matching offers it, and fetches only that', async ({ yap, main, models, shot }) => {
+  // As a model installed before 25 Oct: no voice-matching folder.
+  fs.rmSync(folder(yap, 'eres2net-voxceleb-en'), { recursive: true, force: true });
+  const before = models.requests.length;
+  const s = await status(yap);
+  expect(nemotron(s).installed).toBe(true);
+  expect(nemotron(s).extrasBytes).toBe(models.voicesBytes);
+  expect(s.voiceMatching).toBe(false);
+
+  // (Another page first: the speaker models' page asks again as it opens.)
+  await openSettings(main, 'Meetings');
+  await closeSettings(main);
+  const dialog = await openSettings(main, 'Speech-to-Text');
+  const group = speakersGroup(dialog);
+  await group.scrollIntoViewIfNeeded();
+  await expect(theSwitch(group)).toHaveAttribute('aria-pressed', 'true');
+  const offer = group.locator('[data-setting="voice-matching"]');
+  await expect(offer).toContainText("keeps a voice's number across a pause");
+  await shot(main, '04b-voice-matching-offer');
+  await offer.getByRole('button', { name: 'Download voice matching' }).click();
+  await expect(offer).toHaveCount(0, { timeout: 20_000 });
+  expect(models.requests.slice(before)).toEqual(['/voices.onnx']);
+  expect(fs.statSync(folder(yap, 'eres2net-voxceleb-en', VOICES_FILE)).size).toBe(models.voicesBytes);
   await closeSettings(main);
 });
 

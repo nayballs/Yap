@@ -282,9 +282,13 @@
   downloaded from `https://blob.handy.computer/` (SHA-256 verified).
 - Speaker models: `%APPDATA%/yap/models/diarization/` — `nemotron-3-diarization/`
   (the GGUF from Hugging Face `nvidia/`, pinned commit) and
-  `nemo-speech-0.2.0-cpu/` (NVIDIA's runtime DLLs + `licenses/`), each with a
+  `nemo-speech-0.2.0-cpu/` (NVIDIA's runtime DLLs + `licenses/`) and
+  `eres2net-voxceleb-en/` (voice matching: 3D-Speaker's ERes2Net ONNX from
+  k2-fsa's release, Apache-2.0, 26.5 MB; installed with the speaker model, or
+  on its own for one from before 25 Oct), each with a
   `NOTICE.txt` naming its source and licence (`speakers/diarize/registry.rs`; size +
-  SHA-256 verified). Yap has no central third-party notices page: the
+  SHA-256 verified). No voiceprint is ever written anywhere: they're made
+  from a meeting's audio when needed (`speakers/voiceprint.rs`). Yap has no central third-party notices page: the
   attribution is in Settings → Speech-to-Text → Speakers in meetings and in
   those files.
 - Kokoro (spoken replies' natural voice): `%APPDATA%/yap/models/tts/` —
@@ -367,7 +371,9 @@
   dialog says, in the folder used last (`snip_save_dir`).
 - History: `%APPDATA%/yap/history.json` (local-only; cleared from Settings → Privacy & data → History).
 - Notes: `%APPDATA%/yap/notes.json` — the AI Notepad store (folders, actions,
-  participants, meeting transcripts). Since 2026-10-25 a note may also keep
+  participants, meeting transcripts; a meeting's speaker map, with its
+  name cards and the "may be one voice / two people" offers and answers:
+  [speakers.md](./speakers.md)). Since 2026-10-25 a note may also keep
   `summaryAi` (Yap's own summary, for "Back to Yap's summary") and
   `summaryRating` (`{up, why, ms}`, the person's 👍 / 👎 — never sent); an
   older Yap on the same data drops both when it saves, never the person's

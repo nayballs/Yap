@@ -199,6 +199,8 @@ test('rename a voice everywhere or one line, merge two, in the notepad and the N
   await log.getByRole('button', { name: 'Speaker 1' }).first().click();
   const menu = pad.getByRole('menu', { name: 'Speaker: Speaker 1' });
   await expect(menu.getByRole('menuitem')).toHaveText([
+    // A few seconds of their clearest speech (the meeting's audio is kept).
+    'Play their voice',
     'Rename Speaker 1 everywhere…',
     'Rename just this line…',
     'Merge with…',
@@ -338,6 +340,7 @@ test('a 1:1 meeting names "Them" after the other invitee, as a guess; "Not Alice
     await expect(menu.getByRole('menuitem')).toHaveText([
       "It's Alice Moreau",
       'Not Alice Moreau',
+      'Play their voice',
       'Rename Alice Moreau everywhere…',
       'Rename just this line…',
     ]);

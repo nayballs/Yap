@@ -12,6 +12,7 @@
     startDiarization,
     isInstalled,
     offeredModel,
+    modelById,
     downloadDiarization,
     formatBytes,
   } from './diarization.svelte.js';
@@ -30,6 +31,15 @@
   const offer = $derived(offeredModel(model));
   const busy = $derived(offer && diarization.downloading?.id === offer.id ? diarization.downloading : null);
   let asking = $state(false);
+  // Voice matching (speakers/voiceprint.rs), the speaker model's extra: a
+  // model installed before it existed fetches it here.
+  const matchingMissing = $derived(
+    ready && diarization.voiceMatchingInBuild && (modelById(model)?.extrasBytes || 0) > 0 ? modelById(model) : null
+  );
+
+  async function downloadMatching() {
+    if (matchingMissing) await downloadDiarization(matchingMissing.id);
+  }
 
   function set(on) {
     if (on && !ready) {
@@ -86,6 +96,25 @@
       {/if}
       <!-- Under the model rows, the section says it itself. -->
       {#if diarization.error && place === 'meetings'}<p class="err" role="alert">{diarization.error}</p>{/if}
+    </div>
+  {/if}
+
+  {#if matchingMissing && enabled}
+    <div class="offer" role="group" aria-label="Voice matching" data-setting="voice-matching">
+      <p>
+        Voice matching ({formatBytes(matchingMissing.extrasBytes)}) keeps a voice's number across a pause and spots two
+        speakers that may be one person, or one that may be two. It runs on this PC.
+      </p>
+      {#if busy}
+        <div class="progress" role="progressbar" aria-label="Downloading voice matching" aria-valuenow={busy.percent} aria-valuemin="0" aria-valuemax="100">
+          <span style:width="{busy.percent}%"></span>
+        </div>
+        <span class="pct">Downloading… {busy.percent}%</span>
+      {:else}
+        <div class="actions">
+          <Button size="sm" variant="ghost" onclick={downloadMatching}>Download voice matching</Button>
+        </div>
+      {/if}
     </div>
   {/if}
 

@@ -427,6 +427,9 @@ pub fn run() {
             speakers::speaker_suggestion,
             speakers::speaker_is_me,
             speakers::speaker_not_me,
+            speakers::rerun::speaker_find,
+            speakers::clip::speaker_clip,
+            speakers::flags::speaker_flag,
             meetings::notepad::notepad_open,
             meetings::notepad::notepad_state,
             meetings::notepad::notepad_split,
@@ -488,6 +491,10 @@ pub fn run() {
             speakers::diarize::diarization_timeline,
             #[cfg(debug_assertions)]
             speakers::diarize::e2e_diarize_timeline,
+            #[cfg(debug_assertions)]
+            speakers::rerun::e2e_find_speakers,
+            #[cfg(debug_assertions)]
+            speakers::voiceprint::e2e_voice_prints,
             #[cfg(debug_assertions)]
             speakers::call_ui::e2e_call_readings,
             // Test mode only (e2e.rs); not in release builds at all.

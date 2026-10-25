@@ -134,6 +134,45 @@ export function pendingSuggestions(note) {
     .sort((a, b) => (b.confidence || 0) - (a.confidence || 0));
 }
 
+/**
+ * The voice flags still to answer (speakers/flags.rs): two voices that may
+ * be one (`{ kind: 'alike', voice, with, score }`) and a voice that may be
+ * two people (`{ kind: 'split', voice, moved, kept, score }`), not put off
+ * ("Not now"), each voice with lines of its own — the pairs first.
+ */
+export function pendingFlags(note) {
+  const onLines = new Set(
+    (note?.transcript || [])
+      .filter((s) => !s.echo && !s.dictated && !s.failed && s.mic == null)
+      .map((s) => speakerId(note.speakers, s))
+  );
+  const out = [];
+  for (const [voice, s] of Object.entries(note?.speakers || {})) {
+    if (s?.mergedInto || !onLines.has(voice)) continue;
+    if (s.alike && !s.alike.later) {
+      const other = speakerId(note.speakers, { speaker: s.alike.with });
+      if (other !== voice && onLines.has(other)) out.push({ kind: 'alike', voice, with: other, score: s.alike.score || 0 });
+    }
+    if (s.split && !s.split.later && s.split.lines?.length) {
+      out.push({ kind: 'split', voice, moved: s.split.lines.length, kept: s.split.kept || 0, score: s.split.score || 0 });
+    }
+  }
+  return out.sort((a, b) => (a.kind === b.kind ? (b.score || 0) - (a.score || 0) : a.kind === 'alike' ? -1 : 1));
+}
+
+/** "Speaker 2 and Speaker 4 may be one voice" / "Speaker 3 may be two people". */
+export function flagQuestion(note, flag) {
+  const who = cardVoice(note, flag.voice);
+  return flag.kind === 'alike' ? `${who} and ${cardVoice(note, flag.with)} may be one voice` : `${who} may be two people`;
+}
+
+/** The flag card's small print. */
+export function flagWhy(flag) {
+  if (flag.kind === 'alike') return 'They sound alike. Listen to both, and merge them if they’re one person.';
+  const lines = flag.moved === 1 ? '1 of their lines sounds' : `${flag.moved} of their lines sound`;
+  return `${lines} like someone else. Split makes those a new speaker.`;
+}
+
 /** What a card calls the voice it asks about: "Speaker 2" (not the guess on it). */
 function cardVoice(note, voice) {
   const info = speakerInfo(note?.speakers, voice);

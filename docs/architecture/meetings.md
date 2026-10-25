@@ -191,7 +191,7 @@ The meeting recorder and its audio kept on disk, rolling digests and the action 
   **Transcribe it** (`RECOVER_ACTION` → `recover_all`); the note says it
   too (`meeting_audio_note`'s `recoverableSecs`). **Jobs** (`start_job`, one
   per note, refused while a meeting records — `replay` also waits for one that starts, and for a dictation —; `yap-meeting-redo {noteId, kind:
-  recover|again|refine|retry, state: running|done|error|cancelled,
+  recover|again|refine|retry|speakers, state: running|done|error|cancelled,
   percent, model, error, summary, waiting, thenSummary}`; every job has a
   **Cancel**, `meeting_job_cancel`, between chunks): **recover** =
   `meeting::replay` from `done` to the end, `notes::insert_transcript` (by
@@ -216,6 +216,11 @@ The meeting recorder and its audio kept on disk, rolling digests and the action 
   WAV (`recent_audio::wav`), ≤ 60 s. Commands `meeting_audio_status` /
   `meeting_audio_clear` (Settings), `meeting_audio_note`,
   `meeting_audio_clip`, `meeting_transcribe_again`, `meeting_recover`,
+  `meeting_job_cancel`'s jobs also carry other areas' work on the audio
+  (`start_side_job`: Find speakers, kind `speakers`, `speakers/rerun.rs`,
+  which also runs by itself after an `again` job), and `read_side` /
+  `open_side` / `recording_at` are how `speakers/` reads a recording's
+  side (a voice's clip, voiceprints, the engine again).
   `meeting_retry_chunk {noteId, source, ts, startMs}` (**Try again** on a
   failed chunk's marker: that side's stretch read back — `RangeFeed` — and
   replayed on the model in use, its lines in the marker's place,

@@ -160,16 +160,33 @@ struct Run {
     load_ms: u64,
 }
 
+/// The engine as Yap runs it, or — measuring the label lag on a graphics
+/// card (speakers.md) — another runtime folder (`YAP_DIARIZATION_RUNTIME`,
+/// say NeMo-Speech.cpp's Vulkan build), preset (`YAP_DIARIZATION_PRESET`:
+/// "default" is its 1.04 s streaming one), graphics card
+/// (`YAP_DIARIZATION_GPU`) or chunk (`YAP_DIARIZATION_CHUNK_FRAMES`, 80 ms
+/// frames).
 fn diarize(models: &Path, wav: &Path) -> Run {
     let audio = read_wav(wav);
+    let runtime = std::env::var_os("YAP_DIARIZATION_RUNTIME").map(PathBuf::from).unwrap_or_else(|| models.join("nemo-speech-0.2.0-cpu"));
+    let preset = std::env::var("YAP_DIARIZATION_PRESET").unwrap_or_else(|_| "v3-offline".to_string());
+    let preset = if preset == "default" { String::new() } else { preset };
+    let gpu = std::env::var("YAP_DIARIZATION_GPU").unwrap_or_else(|_| "-1".to_string());
+    let chunk = std::env::var("YAP_DIARIZATION_CHUNK_FRAMES").unwrap_or_else(|_| "0".to_string());
     let mut child = Command::new(env!("CARGO_BIN_EXE_yap"))
         .arg("diarize")
         .arg("--runtime")
-        .arg(models.join("nemo-speech-0.2.0-cpu"))
+        .arg(runtime)
         .arg("--model")
         .arg(models.join("nemotron-3-diarization").join("Nemotron-3-Diarization.q8_0.gguf"))
         .arg("--every-ms")
         .arg("0")
+        .arg("--preset")
+        .arg(preset)
+        .arg("--gpu")
+        .arg(gpu)
+        .arg("--chunk-frames")
+        .arg(chunk)
         .env("OMP_NUM_THREADS", "4")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
