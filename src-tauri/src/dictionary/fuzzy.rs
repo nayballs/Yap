@@ -10,9 +10,9 @@
 //! mis-hearing. Punctuation and the original case pattern are preserved.
 //!
 //! Yap adaptation: Handy's dictionary is a flat list of correct words; Yap's
-//! entries are `{from → to}` pairs. An n-gram is fuzzy-matched against BOTH
-//! spellings (the canonical `to` and the mis-hearing trigger `from`) and always
-//! replaced with `to`. Runs for ONNX engines only — Whisper models get the
+//! entries are `{from → to}` pairs. An n-gram is fuzzy-matched against
+//! every spelling (the canonical `to` and each way it's heard: `from` and
+//! `also_heard`, `variants.rs`) and always replaced with `to`. Runs for ONNX engines only — Whisper models get the
 //! vocabulary as `initial_prompt` instead (Handy's exact split; see stt.rs).
 //!
 //! Also here: `is_prompt_echo`, a port of OpenWhispr's
@@ -111,7 +111,8 @@ fn build_candidates(dict: &[DictionaryEntry]) -> Vec<Candidate<'_>> {
         if to.is_empty() {
             continue;
         }
-        for spelling in [entry.to.trim(), entry.from.trim()] {
+        // The written form, then every way it's heard (`variants.rs`).
+        for spelling in std::iter::once(to).chain(entry.heard()) {
             let key: String = spelling.to_lowercase().replace(' ', "");
             if key.chars().filter(|c| c.is_alphanumeric()).count() >= MIN_TERM_LEN
                 && !out.iter().any(|c: &Candidate| c.key == key)
@@ -288,9 +289,34 @@ pub fn apply_screen(
 /// "Pria") or its case ("rochelle") is fixed. `is_word` gets the heard word
 /// lowercased.
 pub fn apply_names(text: &str, names: &[DictionaryEntry], is_word: &dyn Fn(&str) -> bool) -> String {
-    apply_with(text, names, &|run, _, dist| {
-        dist == 0 || run.iter().any(|w| !is_word(&build_ngram(std::slice::from_ref(w))))
+    apply_with(text, names, &|run, replacement, dist| {
+        // The name in another case ("rochelle"): always. (Not a way it's
+        // said, which may be an ordinary word.)
+        let itself = build_ngram(run) == replacement.to_lowercase().replace(' ', "");
+        let said: Vec<&str> = names.iter().filter(|e| e.to.trim() == replacement).flat_map(|e| e.heard()).collect();
+        (dist == 0 && itself)
+            || (run.iter().any(|w| !is_word(&build_ngram(std::slice::from_ref(w)))) && near_how_said(run, replacement, &said))
     })
+}
+
+/// A near-miss of the name's own spelling: Handy's score, as ever. One
+/// matched through how it's said (`spoken_names::said_as`, the entry's
+/// `also_heard`) is held much closer: that spelling exactly, or — when it
+/// has three sounds or more — one letter off and sounding the same
+/// ([`sound_key`]). By its letters "Spain" is as near "shivawn" (Siobhan)
+/// as a mishearing is, and "Shane" one letter from "shan" (Siân): measured
+/// on everyday sentences and other people's names
+/// (`memory/vocab.rs` `no_everyday_sentence_changes`).
+fn near_how_said(run: &[&str], name: &str, said_as: &[&str]) -> bool {
+    let heard = build_ngram(run);
+    let own = name.to_lowercase().replace(' ', "");
+    score(&heard, &own).is_some()
+        || said_as.iter().any(|said| {
+            let said = letters_key(said);
+            let heard = letters_key(&heard);
+            let sounds = sound_key(&said);
+            heard == said || (sounds.chars().count() >= 3 && sound_key(&heard) == sounds && levenshtein(&heard, &said) <= 1)
+        })
 }
 
 /// `text`'s words, each with the whitespace before it ("" for the first).
@@ -559,7 +585,7 @@ mod tests {
     use super::*;
 
     fn entry(from: &str, to: &str) -> DictionaryEntry {
-        DictionaryEntry { from: from.to_string(), to: to.to_string(), fuzzy: true, snippet: false, starred: false }
+        DictionaryEntry { from: from.to_string(), to: to.to_string(), fuzzy: true, snippet: false, starred: false, also_heard: Vec::new() }
     }
 
     // ── ports of Handy's apply_custom_words tests ──

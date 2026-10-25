@@ -13,11 +13,17 @@
 // A word alone becomes a correction of itself ("Kubernetes → Kubernetes"):
 // the recognizer gets it, any case is put right, and near-misses are caught.
 //
+// A correction heard several ways (dictionary/variants.rs: "Kubernetes" ←
+// "cooper netties", "cube an eighties") is one row per way in a file, the
+// written word on each: an export writes it so, and an import puts the
+// rows writing the same word (near-misses alike) back in one entry — or
+// into the entry already writing it, as more ways it's heard.
+//
 // Loaded when Import… or Export… is first used (not with the main window).
-import { oneLine, textOf, norm, entryKey } from './dictionaryList.js';
+import { oneLine, textOf, norm, entryKey, heardForms, SNIPPET_MAX } from './dictionaryList.js';
 
 /** Longer than this isn't a word (or a phrase you say); a snippet's text can be long. */
-export const LIMITS = { word: 100, text: 5000 };
+export const LIMITS = { word: 100, text: SNIPPET_MAX };
 
 const ARROW = /\s*(?:→|⟶|⇒|->|=>)\s*/;
 const COMMENT = /^(?:#(?:\s|#|$)|\/\/)/;
@@ -265,8 +271,11 @@ export function planImport(rows, dict) {
   const bySpelling = new Map();
   for (const e of dict ?? []) {
     if (!e) continue;
-    const k = kindKey(e.snippet, e.from);
-    if (!byTrigger.has(k)) byTrigger.set(k, e);
+    // Every way a correction is heard (dictionary/variants.rs).
+    for (const h of heardForms(e)) {
+      const k = kindKey(e.snippet, h);
+      if (!byTrigger.has(k)) byTrigger.set(k, e);
+    }
     if (!e.snippet && (e.to ?? '').trim()) {
       const s = norm(e.to);
       bySpelling.set(s, [...(bySpelling.get(s) ?? []), e]);
@@ -306,6 +315,14 @@ export function planImport(rows, dict) {
         continue;
       }
       if (!fileSpelling.has(norm(row.to))) fileSpelling.set(norm(row.to), row.to);
+      // Another way an entry already writing the word exactly (near-misses
+      // alike) is heard: the row says which (`into`; a copy — the file's
+      // rows stay as they were).
+      const into = spelt.find((e) => oneLine(e.to) === row.to && (e.fuzzy ?? true) === row.fuzzy);
+      if (into) {
+        plan.add.push({ ...row, into });
+        continue;
+      }
     }
     plan.add.push(row);
   }
@@ -326,11 +343,39 @@ export function entryOf(row) {
 /**
  * What applying `plan` does, given the person's choices: `leaveOut` (rows
  * of `plan.add` unticked) and `useFile` (conflicts where the file's
- * spelling wins; the rest keep yours). `{ add: entries, respell: [{entry,
- * to}] }` — `entry` one already in the dictionary.
+ * spelling wins; the rest keep yours). `{ add: entries, extend: [{entry,
+ * heard}], respell: [{entry, to}], rows }` — `entry` one already in the
+ * dictionary; `extend`: more ways it's heard (rows writing the word an
+ * entry writes already); `add`: new entries, the file's rows writing the
+ * same word (near-misses alike) in one; `rows`: how many rows come in.
  */
 export function importChanges(plan, { leaveOut = new Set(), useFile = new Set() } = {}) {
-  const add = plan.add.filter((row) => !leaveOut.has(row)).map(entryOf);
+  const add = [];
+  const extend = new Map(); // entry → heard
+  let rows = 0;
+  /** A correction row in: into `target` (an entry already there), else one added that writes it, else a new one. */
+  const take = (row, target) => {
+    rows++;
+    if (row.snippet) {
+      add.push(entryOf(row));
+      return;
+    }
+    if (target && (target.fuzzy ?? true) === (row.fuzzy ?? true)) {
+      const have = new Set([...heardForms(target), ...(extend.get(target) ?? [])].map((h) => h.toLowerCase()));
+      if (!have.has(oneLine(row.from).toLowerCase())) extend.set(target, [...(extend.get(target) ?? []), row.from]);
+      return;
+    }
+    const joined = add.find((e) => !e.snippet && e.to === row.to && e.fuzzy === (row.fuzzy ?? true));
+    if (joined) {
+      if (!heardForms(joined).some((h) => h.toLowerCase() === oneLine(row.from).toLowerCase())) {
+        joined.alsoHeard = [...(joined.alsoHeard ?? []), row.from];
+      }
+      if (row.starred) joined.starred = true;
+      return;
+    }
+    add.push(entryOf(row));
+  };
+  for (const row of plan.add) if (!leaveOut.has(row)) take(row, row.into);
   const respell = [];
   for (const c of plan.conflicts) {
     const fileWins = useFile.has(c);
@@ -339,21 +384,33 @@ export function importChanges(plan, { leaveOut = new Set(), useFile = new Set() 
       continue;
     }
     if (fileWins) for (const entry of c.all ?? [c.existing]) respell.push({ entry, to: c.row.to });
-    // A new way it's heard still comes in, in whichever spelling won.
-    if (norm(c.row.from) !== norm(c.row.to)) {
-      add.push(entryOf({ ...c.row, to: fileWins ? c.row.to : oneLine(c.existing.to) }));
-    }
+    // A new way it's heard still comes in, in whichever spelling won:
+    // another way the entry is heard.
+    if (norm(c.row.from) !== norm(c.row.to)) take({ ...c.row, to: fileWins ? c.row.to : oneLine(c.existing.to) }, c.existing);
   }
-  return { add, respell };
+  return { add, extend: [...extend].map(([entry, heard]) => ({ entry, heard })), respell, rows };
 }
 
 // ---- Undo (an import's; a delete's is dictionaryList.js `restoreRemoved`) ----
 
 /**
- * `list` without what an import added (`added`, entries) and with what it
+ * `list` without what an import added (`added`, entries; `extended`:
+ * `{from, to, snippet, heard}` — ways of being heard it gave entries
+ * already there, as those entries read after the import) and with what it
  * respelled put back (`respelled`: `{from, snippet, was, now}`).
  */
-export function undoImport(list, { added = [], respelled = [] }) {
+export function undoImport(list, { added = [], respelled = [], extended = [] }) {
+  if (extended.length) {
+    const less = new Map(extended.map((x) => [entryKey(x), new Set(x.heard.map((h) => oneLine(h).toLowerCase()))]));
+    list = list.map((e) => {
+      const drop = less.get(entryKey(e));
+      if (!drop || !Array.isArray(e.alsoHeard)) return e;
+      const kept = e.alsoHeard.filter((h) => !drop.has(oneLine(h).toLowerCase()));
+      const out = { ...e, alsoHeard: kept };
+      if (!kept.length) delete out.alsoHeard;
+      return out;
+    });
+  }
   // How many of each the import added: that many go, the last ones first
   // (the import put them at the end), so one of the same you had stays.
   const toGo = new Map();
@@ -387,18 +444,21 @@ const csvCell = (v) => {
 /**
  * `entries` as CSV: a header Import… reads back (Heard, Written, Kind,
  * Near-misses, Starred), Windows line ends, and a BOM so Excel reads it as
- * UTF-8.
+ * UTF-8. A correction heard several ways is a row per way.
  */
 export function toCsv(entries) {
   const rows = [['Heard', 'Written', 'Kind', 'Near-misses', 'Starred']];
   for (const e of entries) {
-    rows.push([
-      e.from ?? '',
-      e.to ?? '',
-      e.snippet ? 'snippet' : 'correction',
-      e.snippet ? '' : (e.fuzzy ?? true) ? 'yes' : 'no',
-      e.starred ? 'yes' : '',
-    ]);
+    const heard = e.snippet ? [e.from ?? ''] : heardForms(e);
+    for (const h of heard.length ? heard : ['']) {
+      rows.push([
+        h,
+        e.to ?? '',
+        e.snippet ? 'snippet' : 'correction',
+        e.snippet ? '' : (e.fuzzy ?? true) ? 'yes' : 'no',
+        e.starred ? 'yes' : '',
+      ]);
+    }
   }
   return `﻿${rows.map((r) => r.map(csvCell).join(',')).join('\r\n')}\r\n`;
 }
@@ -416,10 +476,13 @@ export function toText(entries) {
       left++;
       continue;
     }
-    const from = oneLine(e.from);
     const to = oneLine(e.to);
-    if (!from && !to) continue;
-    lines.push(!from || from === to ? to : `${from} → ${to || from}`);
+    const heard = heardForms(e);
+    if (!heard.length && !to) continue;
+    // A line per way it's heard.
+    for (const from of heard.length ? heard : ['']) {
+      lines.push(!from || from === to ? to : `${from} → ${to || from}`);
+    }
   }
   return { text: `${lines.join('\r\n')}\r\n`, left };
 }

@@ -40,6 +40,31 @@ pub struct DictionaryEntry {
     /// dictionary with no stars saves as it always did.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub starred: bool,
+    /// More ways an entry **in memory** is heard, beside `from` — never on
+    /// disk: config.json keeps one row per way a word is heard (the shape
+    /// every Yap reads; `dictionary/variants.rs`), and the Dictionary view
+    /// groups the rows that write the same word. Memory's names and yours
+    /// carry how they're said here (`spoken_names.rs`). Read if a page ever
+    /// sends it, and [`save`] writes it out as rows of their own, so nothing
+    /// sent this way is lost.
+    #[serde(default, skip_serializing)]
+    pub also_heard: Vec<String>,
+}
+
+impl DictionaryEntry {
+    /// Every way it's heard: `from`, then [`Self::also_heard`] — trimmed,
+    /// none empty, none twice (any case). A snippet's phrase only.
+    pub fn heard(&self) -> Vec<&str> {
+        let mut out: Vec<&str> = Vec::new();
+        let more = if self.snippet { &[][..] } else { &self.also_heard[..] };
+        for h in std::iter::once(self.from.as_str()).chain(more.iter().map(String::as_str)) {
+            let h = h.trim();
+            if !h.is_empty() && !out.iter().any(|o| o.to_lowercase() == h.to_lowercase()) {
+                out.push(h);
+            }
+        }
+        out
+    }
 }
 
 /// A reusable, named cleanup profile (FluidVoice's `DictationPromptProfile`): a
@@ -1914,6 +1939,10 @@ fn save_at(path: &Path, cfg: &YapConfig) -> Result<(), String> {
     // Never lower it (a newer build's file, opened after a downgrade).
     let cfg = YapConfig {
         config_version: cfg.config_version.max(CONFIG_VERSION),
+        // One row per way a word is heard, as every Yap reads it
+        // (dictionary/variants.rs): an entry sent with `alsoHeard` is
+        // written out as rows of its own, never dropped.
+        dictionary: crate::dictionary::variants::rows(&cfg.dictionary),
         // "Runs on" is what's chosen; the old GPU switch follows it.
         use_gpu: cfg.stt_device != "cpu",
         // An older Yap knows one microphone: the first of the order.
@@ -2143,11 +2172,17 @@ impl YapConfig {
 pub fn apply_dictionary(text: &str, dict: &[DictionaryEntry]) -> String {
     let mut out = text.to_string();
     for entry in dict.iter().filter(|e| !e.snippet) {
-        if let Some(re) = term_regex(&entry.from) {
-            let to = entry.to.clone();
-            out = re
-                .replace_all(&out, |_: &regex::Captures| to.clone())
-                .into_owned();
+        // Every way it's heard, the longest first: "cube" never eats the
+        // start of "cube and eighties" (`dictionary/variants.rs`).
+        let mut heard = entry.heard();
+        heard.sort_by_key(|h| std::cmp::Reverse(h.chars().count()));
+        for h in heard {
+            if let Some(re) = term_regex(h) {
+                let to = entry.to.clone();
+                out = re
+                    .replace_all(&out, |_: &regex::Captures| to.clone())
+                    .into_owned();
+            }
         }
     }
     out
@@ -2304,6 +2339,7 @@ mod tests {
             fuzzy: true,
             snippet: false,
             starred: false,
+            also_heard: Vec::new(),
         }
     }
 

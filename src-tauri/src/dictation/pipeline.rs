@@ -581,17 +581,18 @@ impl Shared {
     /// (`dict_usage::ranked`). Snapshotted per transcription like
     /// `language_settings`; only Whisper engines consume it.
     fn dictionary_prompt(&self) -> Option<String> {
-        let dict = self.config.read().ok()?.dictionary.clone();
-        // The dictionary's words, then the names Yap remembers (memory.rs).
-        config::dictionary_prompt(&crate::dictionary::dict_usage::ranked(&crate::memory::with_names(&dict)))
+        let (dict, name) = self.config.read().ok().map(|c| (c.dictionary.clone(), c.about_name.clone()))?;
+        // The dictionary's words, then your name and the names Yap
+        // remembers (memory.rs).
+        config::dictionary_prompt(&crate::dictionary::dict_usage::ranked(&crate::memory::with_names(&dict, &name)))
     }
 
     /// A dictation's Whisper prompt: [`Self::dictionary_prompt`]'s words,
     /// then the names on screen, if they've been read by now
     /// (`screen_terms`; never waited for).
     fn dictation_prompt(&self) -> Option<String> {
-        let dict = self.config.read().ok()?.dictionary.clone();
-        let words = crate::dictionary::dict_usage::ranked(&crate::memory::with_names(&dict));
+        let (dict, name) = self.config.read().ok().map(|c| (c.dictionary.clone(), c.about_name.clone()))?;
+        let words = crate::dictionary::dict_usage::ranked(&crate::memory::with_names(&dict, &name));
         crate::dictionary::screen_terms::whisper_prompt(words, crate::dictionary::screen_terms::peek().as_deref())
     }
 

@@ -31,7 +31,10 @@ How loud Yap may be: the notice policy (one place, one at a time, held while dic
   rate-limits it itself and never asks during a dictation), micSwitched
   ("Using Contoso H2 for dictation", the same words not twice in 10 min),
   language-added ("French is in My languages", 10 s) — > Tip — hint,
-  word-suggestion, language-nudge ("You spoke French · Add it to My
+  word-suggestion, snippet-suggestion ("Type that often? Save it as a
+  snippet", `dictionary/snippet_offer.rs`, one a day there; held over a
+  dictation, dropped unseen after a minute; snippet-saved 10 s),
+  language-nudge ("You spoke French · Add it to My
   languages?", `dictation/languages/nudge.rs`, which rate-limits it itself:
   held over a dictation, dropped unseen after a minute)), held
   while dictating (+ `SETTLE_MS` 1.5 s, and while onboarding is on screen)

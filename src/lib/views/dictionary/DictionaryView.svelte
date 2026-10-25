@@ -24,13 +24,37 @@
   // is worked out when the search, the sort or the entries change — never as
   // you type in a row, so a row never jumps away from the cursor — and a row
   // just added with + Add stays at the bottom, whatever the search or sort.
+  //
+  // One correction, several ways it's heard (2026-10-25,
+  // dictionary/variants.rs): + beside "Heard" adds another ("Kubernetes" ←
+  // "cooper netties", "cube an eighties"), each with its ×. config.json
+  // keeps a row per way (an older Yap reads and keeps them all): the rows
+  // writing the same word are one entry here (`groupRows`, its star and ≈
+  // from its first row) and go back as rows (`entryRows`). A snippet shows
+  // its text's length against the most it may be, and a warning under its
+  // phrase when that's the same as or close to another snippet's, has words
+  // a correction changes first, or is a dictionary word (`snippetWarnings`).
+  // "Suggest snippets for text you use often" (dictionary/snippet_offer.rs)
+  // lives in its own store, not config.json.
   import { invoke } from '@tauri-apps/api/core';
   import { onMount, tick, untrack } from 'svelte';
   import { SvelteSet } from 'svelte/reactivity';
   import Toggle from '../../ui/Toggle.svelte';
   import { openContextMenu, menuKey, askConfirm, menuOrDialogOpen } from '../../ui/contextMenu.svelte.js';
   import { toast } from '../../ui/toast.svelte.js';
-  import { SORTS, sortOrDefault, arrange, usageKey, entriesLabel, restoreRemoved } from './dictionaryList.js';
+  import {
+    SORTS,
+    sortOrDefault,
+    arrange,
+    usageKey,
+    entriesLabel,
+    restoreRemoved,
+    heardForms,
+    entryRows,
+    groupRows,
+    snippetWarnings,
+    SNIPPET_MAX,
+  } from './dictionaryList.js';
 
   // Import… and Export… (the file's reading and writing, the preview) load
   // the first time they're used: the main window's chunk stays as small as
@@ -41,8 +65,13 @@
   let dict = $state([]);
   let fuzzy = $state(true);
   let learnWords = $state(true);
+  let suggestSnippets = $state(true);
   let loaded = $state(false);
+  /** The warnings under snippets' phrases, worked out when the dictionary changes. */
+  const warnings = $derived(snippetWarnings(dict));
   let saveTimer = null;
+  /** The rows Settings last sent, or this view last saved: the same again is nothing new. */
+  let lastExternal = null;
   let pending = false;
   let priming = true;
   let gone = false;
@@ -242,19 +271,34 @@
     // Settings can also touch the dictionary (Commands' name save) — track it.
     const onExternal = (e) => {
       if (!Array.isArray(e.detail)) return;
-      if (JSON.stringify(clean(e.detail)) === JSON.stringify(clean(dict))) return; // no change → no save churn
+      // The same rows again (Settings sends its copy when anything in it
+      // stirs): nothing new — an edit here not saved yet (the half-second
+      // wait) stays, and is saved.
+      const json = JSON.stringify(e.detail);
+      if (json === lastExternal) return;
+      lastExternal = json;
+      const grouped = groupRows(e.detail);
+      if (JSON.stringify(clean(grouped)) === JSON.stringify(clean(dict))) return; // no change → no save churn
       priming = true;
-      dict = e.detail.map((x) => ({ ...x }));
+      dict = grouped;
       setTimeout(() => (priming = false), 50);
     };
     (async () => {
       try {
         const cfg = await invoke('get_config');
-        dict = Array.isArray(cfg?.dictionary) ? cfg.dictionary : [];
+        // config.json's rows, the ones writing the same word as one entry.
+        const rows = Array.isArray(cfg?.dictionary) ? cfg.dictionary : [];
+        lastExternal = JSON.stringify(rows);
+        dict = groupRows(rows);
         fuzzy = cfg?.dictionaryFuzzy ?? true;
         learnWords = cfg?.learnWords ?? true;
       } catch {
         dict = [];
+      }
+      try {
+        suggestSnippets = await invoke('snippet_suggestions_enabled');
+      } catch {
+        /* stays on */
       }
       loaded = true;
       if (gone) return;
@@ -282,18 +326,14 @@
     return () => clearTimeout(saveTimer);
   });
 
-  /** The entries as config.json keeps them: trimmed, a star only when set, no empty rows. */
+  /**
+   * The entries as config.json keeps them: a row per way a word is heard
+   * (the shape every Yap reads, so an older one sharing config.json keeps
+   * them all), trimmed, the entry's star and ≈ on each, no empty rows
+   * (dictionaryList.js `entryRows`).
+   */
   function clean(list) {
-    return list
-      .map((e) => ({
-        from: (e.from || '').trim(),
-        // A snippet's text keeps its inner line breaks; only the ends trim.
-        to: (e.to || '').trim(),
-        fuzzy: e.fuzzy ?? true,
-        snippet: !!e.snippet,
-        ...(e.starred ? { starred: true } : {}),
-      }))
-      .filter((e) => e.from && e.to);
+    return list.flatMap(entryRows);
   }
 
   async function persist() {
@@ -302,6 +342,7 @@
     try {
       const fresh = await invoke('get_config');
       const cleaned = clean(dict);
+      lastExternal = JSON.stringify(cleaned);
       await invoke('save_config', {
         cfg: { ...fresh, dictionary: cleaned, dictionaryFuzzy: fuzzy, learnWords },
       });
@@ -327,7 +368,7 @@
         dict = change(dict);
       } else {
         const cfg = await invoke('get_config');
-        const entries = clean(change(Array.isArray(cfg?.dictionary) ? cfg.dictionary : []));
+        const entries = clean(change(groupRows(Array.isArray(cfg?.dictionary) ? cfg.dictionary : [])));
         await invoke('save_config', { cfg: { ...cfg, dictionary: entries } });
         window.dispatchEvent(
           new CustomEvent('yap-dictionary-changed', {
@@ -348,6 +389,35 @@
   function setLearnWords(on) {
     learnWords = on;
     persist();
+  }
+  async function setSuggestSnippets(on) {
+    suggestSnippets = on;
+    try {
+      await invoke('snippet_suggestions_set', { on });
+    } catch {
+      /* best-effort */
+    }
+  }
+
+  // ---- One correction, several ways it's heard ----
+  /** + beside "Heard": another way it's heard, its box focused. */
+  async function addHeard(entry) {
+    entry.alsoHeard = [...(Array.isArray(entry.alsoHeard) ? entry.alsoHeard : []), ''];
+    await tick();
+    const boxes = rowEls.get(entry)?.querySelectorAll('input[data-also]');
+    boxes?.[boxes.length - 1]?.focus();
+  }
+  /** A way it's heard taken off (an empty one just goes). */
+  function removeHeard(entry, i) {
+    const list = Array.isArray(entry.alsoHeard) ? entry.alsoHeard : [];
+    entry.alsoHeard = list.filter((_, k) => k !== i);
+    if (!entry.alsoHeard.length) delete entry.alsoHeard;
+    firstInput(entry)?.focus();
+  }
+  /** "“a”, “b” or “c”": every way a correction is heard, for a sentence. */
+  function heardSaid(entry) {
+    const said = heardForms(entry).map((h) => `“${h}”`);
+    return said.length > 1 ? `${said.slice(0, -1).join(', ')} or ${said[said.length - 1]}` : (said[0] ?? '');
   }
 
   async function addEntry(snippet) {
@@ -421,7 +491,7 @@
           ? `Saying “${from}” stops typing its text.`
           : 'The snippet goes for good.'
         : from && to
-          ? `Yap stops changing “${from}” to “${to}”.`
+          ? `Yap stops changing ${heardSaid(entry)} to “${to}”.`
           : 'The correction goes for good.',
       run: () => removeEntries([entry]),
       returnFocus: firstInput(entry),
@@ -465,6 +535,7 @@
       { label: 'Star', icon: 'star', toggle: true, checked: !!entry.starred, onselect: () => toggleStar(entry) },
     ];
     if (!entry.snippet) {
+      items.push({ label: 'Add another way it’s heard', onselect: () => addHeard(entry) });
       items.push({
         label: 'Catch near-misses',
         icon: 'approx',
@@ -484,6 +555,8 @@
   function snippetRows(text) {
     return Math.min(8, Math.max(2, (text || '').split('\n').length));
   }
+  /** A snippet text's length, as a person counts characters (an emoji is one). */
+  const chars = (text) => [...String(text ?? '')].length;
 
   // ---- What's selected, together ----
   function setSelectedFuzzy(on) {
@@ -571,16 +644,22 @@
     const job = importing;
     importing = null;
     if (!job) return;
-    const { add, respell } = job.file.importChanges(job.plan, choices);
+    const { add, extend, respell, rows } = job.file.importChanges(job.plan, choices);
     const respelled = [];
     for (const { entry, to } of respell) {
       if (entry.to === to) continue;
       respelled.push({ from: entry.from, snippet: !!entry.snippet, was: entry.to, now: to });
       entry.to = to;
     }
+    // More ways entries already there are heard (as they read after a respelling).
+    const extended = [];
+    for (const { entry, heard } of extend) {
+      entry.alsoHeard = [...(Array.isArray(entry.alsoHeard) ? entry.alsoHeard : []), ...heard];
+      extended.push({ from: entry.from, to: entry.to, snippet: false, heard });
+    }
     if (add.length) dict = [...dict, ...add];
-    if (!add.length && !respelled.length) return;
-    const bits = [add.length && `Added ${entriesLabel(add.length)}`, respelled.length && `${add.length ? 'changed' : 'Changed'} ${respelled.length.toLocaleString()}`].filter(Boolean);
+    if (!rows && !respelled.length) return;
+    const bits = [rows && `Added ${entriesLabel(rows)}`, respelled.length && `${rows ? 'changed' : 'Changed'} ${respelled.length.toLocaleString()}`].filter(Boolean);
     toast({
       kind: 'info',
       title: bits.join(', '),
@@ -588,7 +667,7 @@
       chip: 'Dictionary',
       icon: 'dictionary',
       duration: 8_000,
-      action: { label: 'Undo', onClick: () => undo((list) => job.file.undoImport(list, { added: add, respelled })) },
+      action: { label: 'Undo', onClick: () => undo((list) => job.file.undoImport(list, { added: add, respelled, extended })) },
     });
   }
 
@@ -784,7 +863,32 @@
                 >
                   {@render check(entry, entry.to || entry.from ? `“${entry.to || entry.from}”` : 'this correction')}
                   {@render star(entry)}
-                  <input placeholder="Power to Keep" aria-label="Heard" bind:value={entry.from} />
+                  <div class="heard">
+                    <input placeholder="Power to Keep" aria-label="Heard" bind:value={entry.from} />
+                    <button
+                      type="button"
+                      class="also-add"
+                      title="Add another way it's heard"
+                      aria-label={entry.to ? `Add another way “${entry.to}” is heard` : "Add another way it's heard"}
+                      onclick={() => addHeard(entry)}
+                    >+</button>
+                  </div>
+                  {#if entry.alsoHeard?.length}
+                    <div class="also" role="group" aria-label={entry.to ? `Other ways “${entry.to}” is heard` : "Other ways it's heard"}>
+                      {#each entry.alsoHeard as _, i (i)}
+                        <div class="also-row">
+                          <input data-also placeholder="Another way it's heard" aria-label="Also heard as" bind:value={entry.alsoHeard[i]} />
+                          <button
+                            type="button"
+                            class="also-rm"
+                            title="Remove this way it's heard"
+                            aria-label={entry.alsoHeard[i] ? `Remove “${entry.alsoHeard[i]}”` : 'Remove this way it’s heard'}
+                            onclick={() => removeHeard(entry, i)}
+                          >×</button>
+                        </div>
+                      {/each}
+                    </div>
+                  {/if}
                   <span class="arrow">→</span>
                   <input placeholder="Parakeet" aria-label="Replace with" bind:value={entry.to} />
                   {#if sort === 'used'}
@@ -873,12 +977,22 @@
                   </div>
                   <span class="arrow">→</span>
                   <textarea
-                    placeholder={'e.g. 12 Station Road\nNorwich NR1 4AB'}
+                    placeholder={'e.g. 12 Example Road\nAnytown ZZ1 1ZZ'}
                     aria-label="Text Yap types"
                     rows={snippetRows(entry.to)}
+                    maxlength={SNIPPET_MAX}
                     bind:value={entry.to}
                   ></textarea>
                   <button class="rm" title="Remove" aria-label="Remove snippet" onclick={() => askRemove(entry)}>×</button>
+                  {#if warnings.get(entry)}
+                    <p class="snip-warn" role="note">{warnings.get(entry).text}</p>
+                  {/if}
+                  {#if entry.to}
+                    {@const n = chars(entry.to)}
+                    <span class="snip-count" class:full={n >= SNIPPET_MAX} title={`${n.toLocaleString()} of at most ${SNIPPET_MAX.toLocaleString()} characters`}>
+                      {n.toLocaleString()} {n === 1 ? 'character' : 'characters'}
+                    </span>
+                  {/if}
                 </div>
               {/each}
             </div>
@@ -892,6 +1006,15 @@
             </div>
           {/if}
           <button class="add" onclick={() => addEntry(true)}>+ Add snippet</button>
+        </div>
+
+        <div class="fuzzycard">
+          <Toggle
+            label="Suggest snippets for text you use often"
+            desc="Say or type the same address, sign-off or link three times in a week and Yap offers once to save it as a snippet, with a phrase to say for it. At most one a day; it never saves one without asking. Counted from your dictation history on this PC."
+            checked={suggestSnippets}
+            onchange={setSuggestSnippets}
+          />
         </div>
       </section>
     </div>
@@ -1309,6 +1432,79 @@
   .arrow {
     color: var(--yap-muted-55);
     text-align: center;
+  }
+
+  /* One correction, several ways it's heard: + beside the first, the
+     others under it in the same column (the row's second line). */
+  .heard,
+  .also-row {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    min-width: 0;
+  }
+  .also {
+    grid-column: 3;
+    grid-row: 2;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    min-width: 0;
+  }
+  .dict-row input[data-also] {
+    font-size: 12.5px;
+    padding: 4px 8px;
+    background: var(--yap-s2);
+  }
+  .also-add,
+  .also-rm {
+    flex: 0 0 auto;
+    display: grid;
+    place-items: center;
+    width: 20px;
+    height: 20px;
+    padding: 0;
+    border: 1px solid transparent;
+    border-radius: var(--yap-r-sm);
+    background: none;
+    color: var(--yap-muted-55);
+    font: inherit;
+    font-size: 15px;
+    line-height: 1;
+    cursor: pointer;
+  }
+  .also-add:hover {
+    color: var(--yap-primary);
+    border-color: var(--yap-border);
+  }
+  .also-rm:hover {
+    color: var(--yap-danger);
+  }
+  .also-add:focus-visible,
+  .also-rm:focus-visible {
+    outline: none;
+    box-shadow: var(--yap-focus);
+  }
+
+  /* A snippet's warning (under its phrase) and its length (under its text). */
+  .snip-warn {
+    grid-column: 3;
+    grid-row: 2;
+    margin: 0;
+    font-size: 11.5px;
+    line-height: 1.4;
+    color: var(--yap-warning);
+  }
+  .snip-count {
+    grid-column: 5;
+    grid-row: 2;
+    justify-self: end;
+    font-size: 11px;
+    color: var(--yap-muted-55);
+    font-variant-numeric: tabular-nums;
+  }
+  .snip-count.full {
+    color: var(--yap-danger);
   }
 
   /* Snippets: the phrase reads as something said (a mic and a quote-ish

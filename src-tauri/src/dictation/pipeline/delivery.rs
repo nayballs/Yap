@@ -237,7 +237,8 @@ impl Shared {
                 // The names on screen the transcript seems to hold (after
                 // the style's line, just before the transcript), after the
                 // dictation's language: kept, never translated.
-                let names = crate::dictionary::screen_terms::cleanup_line(screen, raw, &dict);
+                let about_name = self.config.read().map(|c| c.about_name.clone()).unwrap_or_default();
+                let names = crate::dictionary::screen_terms::cleanup_line(screen, raw, &dict, &about_name);
                 let names = match self.config.read() {
                     Ok(c) => crate::dictation::languages::with_language_line(names, &c),
                     Err(_) => names,
@@ -520,6 +521,9 @@ impl Shared {
                 // before the paste, so a view that re-pulled
                 // history on it could miss this dictation.
                 let _ = self.app.emit("yap-history-changed", ());
+                // "Type that often? Save it as a snippet" (counted over the
+                // week's history: dictionary/snippet_offer.rs).
+                crate::dictionary::snippet_offer::after_dictation(&self.app, corrected.trim());
             } else if let Some(id) = audio {
                 crate::dictation::recent_audio::discard(&id);
             }

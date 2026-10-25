@@ -127,9 +127,10 @@ pub fn build_system_prompt(body: &str) -> String {
 /// A snippet's phrase is listed to keep word for word (Yap expands it after
 /// cleanup, `config::apply_snippets`); its text never goes to the model.
 fn dictionary_suffix(dictionary: &[crate::config::DictionaryEntry]) -> String {
-    let mut spellings: Vec<&str> = Vec::new();
-    let mut corrections: Vec<String> = Vec::new();
     let mut phrases: Vec<String> = Vec::new();
+    // Each written word with every way it's heard (its rows, and an entry's
+    // own `also_heard`: `dictionary/variants.rs`), in the order first seen.
+    let mut words: Vec<(&str, Vec<&str>)> = Vec::new();
     for e in dictionary {
         let from = e.from.trim();
         let to = e.to.trim();
@@ -138,10 +139,30 @@ fn dictionary_suffix(dictionary: &[crate::config::DictionaryEntry]) -> String {
         }
         if e.snippet {
             phrases.push(format!("\"{from}\""));
-        } else if from.eq_ignore_ascii_case(to) {
+            continue;
+        }
+        let at = match words.iter().position(|(w, _)| *w == to) {
+            Some(i) => i,
+            None => {
+                words.push((to, Vec::new()));
+                words.len() - 1
+            }
+        };
+        for h in e.heard() {
+            let heard = &mut words[at].1;
+            if !h.eq_ignore_ascii_case(to) && !heard.iter().any(|x| x.eq_ignore_ascii_case(h)) {
+                heard.push(h);
+            }
+        }
+    }
+    let mut spellings: Vec<&str> = Vec::new();
+    let mut corrections: Vec<String> = Vec::new();
+    for (to, heard) in words {
+        if heard.is_empty() {
             spellings.push(to);
         } else {
-            corrections.push(format!("\"{from}\" → \"{to}\""));
+            let heard: Vec<String> = heard.iter().map(|h| format!("\"{h}\"")).collect();
+            corrections.push(format!("{} → \"{to}\"", heard.join(" or ")));
         }
     }
     if spellings.is_empty() && corrections.is_empty() && phrases.is_empty() {
@@ -1738,6 +1759,7 @@ mod tests {
             fuzzy: true,
             snippet: false,
             starred: false,
+            also_heard: Vec::new(),
         };
         assert_eq!(dictionary_suffix(&[]), "");
         // same-word entry (e.g. an agent name) → exact-spelling bias
@@ -1747,6 +1769,14 @@ mod tests {
         let s = dictionary_suffix(&[de("cuber netties", "Kubernetes")]);
         assert!(
             s.contains("apply these corrections: \"cuber netties\" → \"Kubernetes\""),
+            "{s}"
+        );
+        // every way a word is heard (its rows), in one correction
+        let s = dictionary_suffix(&[de("cooper netties", "Kubernetes"), de("jaison", "JSON"), de("cube an eighties", "Kubernetes"), de("kubernetes", "Kubernetes")]);
+        assert!(s.contains("\"jaison\" → \"JSON\""), "{s}");
+        assert!(!s.contains("exact spellings"), "{s}");
+        assert!(
+            s.contains("apply these corrections: \"cooper netties\" or \"cube an eighties\" → \"Kubernetes\""),
             "{s}"
         );
         // blank entries are skipped → empty suffix

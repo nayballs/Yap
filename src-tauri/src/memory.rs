@@ -235,10 +235,33 @@ impl Words {
     }
 }
 
-/// The names memory adds to dictation (all of them for the Whisper prompt;
-/// the safe ones also for the near-miss pass, `fuzzy` set). Excludes what
-/// the dictionary already spells.
-pub fn dictation_names(dictionary: &[crate::config::DictionaryEntry]) -> Vec<crate::config::DictionaryEntry> {
+/// About you's name as vocabulary (`vocab::own_name`), cached by the name.
+static OWN_NAME: Mutex<Option<(String, Vec<crate::config::DictionaryEntry>)>> = Mutex::new(None);
+
+fn own_name(about_name: &str) -> Vec<crate::config::DictionaryEntry> {
+    let name = about_name.trim();
+    if name.is_empty() {
+        return Vec::new();
+    }
+    if let Some((n, v)) = OWN_NAME.lock().ok().and_then(|g| g.clone()) {
+        if n == name {
+            return v;
+        }
+    }
+    let words = Words::new();
+    let v = vocab::own_name(name, &[], &|w| words.is(w));
+    if let Ok(mut slot) = OWN_NAME.lock() {
+        *slot = Some((name.to_string(), v.clone()));
+    }
+    v
+}
+
+/// The names dictation gets beside the dictionary (all of them for the
+/// Whisper prompt; the safe ones also for the near-miss pass, `fuzzy`
+/// set): **your own name** first (About you's, `about_name`), then the
+/// names memory remembers. Excludes what the dictionary already spells or
+/// hears.
+pub fn dictation_names(dictionary: &[crate::config::DictionaryEntry], about_name: &str) -> Vec<crate::config::DictionaryEntry> {
     let cached = VOCAB.lock().ok().and_then(|v| v.clone());
     let all = match cached {
         Some(v) => v,
@@ -251,19 +274,19 @@ pub fn dictation_names(dictionary: &[crate::config::DictionaryEntry]) -> Vec<cra
             v
         }
     };
-    let taken: std::collections::HashSet<String> = dictionary
+    let mut taken: std::collections::HashSet<String> = dictionary
         .iter()
         .filter(|e| !e.snippet)
-        .flat_map(|e| [e.to.trim().to_lowercase(), e.from.trim().to_lowercase()])
+        .flat_map(|e| std::iter::once(e.to.trim()).chain(e.heard()).map(str::to_lowercase).collect::<Vec<_>>())
         .collect();
-    all.into_iter().filter(|e| !taken.contains(&e.to.to_lowercase())).collect()
+    own_name(about_name).into_iter().chain(all).filter(|e| taken.insert(e.to.to_lowercase())).collect()
 }
 
 /// The dictionary a Whisper prompt is built from: the person's own words,
-/// then memory's names.
-pub fn with_names(dictionary: &[crate::config::DictionaryEntry]) -> Vec<crate::config::DictionaryEntry> {
+/// then their name and memory's names ([`dictation_names`]).
+pub fn with_names(dictionary: &[crate::config::DictionaryEntry], about_name: &str) -> Vec<crate::config::DictionaryEntry> {
     let mut all = dictionary.to_vec();
-    all.extend(dictation_names(dictionary));
+    all.extend(dictation_names(dictionary, about_name));
     all
 }
 

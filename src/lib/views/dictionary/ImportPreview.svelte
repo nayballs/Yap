@@ -43,7 +43,7 @@
   });
 
   const applyLabel = $derived.by(() => {
-    const a = change.add.length;
+    const a = change.rows;
     const c = respellCount;
     if (!a && !c) return 'Nothing to add';
     if (!c) return `Add ${entriesLabel(a)}`;
@@ -142,6 +142,7 @@
                   />
                   <span class="what">{shows(row)}</span>
                   {#if row.snippet}<span class="tag">Snippet</span>{/if}
+                  {#if row.into}<span class="tag" title={`Another way “${row.to}” is heard, in the entry you have`}>Another way it's heard</span>{/if}
                   {#if row.starred}<span class="tag">Starred</span>{/if}
                 </label>
               </li>
@@ -217,7 +218,7 @@
         type="button"
         class="btn primary"
         bind:this={primary}
-        disabled={!change.add.length && !respellCount}
+        disabled={!change.rows && !respellCount}
         onclick={apply}
       >{applyLabel}</button>
     </div>

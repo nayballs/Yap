@@ -87,6 +87,7 @@ fn entry(to: &str) -> DictionaryEntry {
         fuzzy: true,
         snippet: false,
         starred: false,
+        also_heard: Vec::new(),
     }
 }
 
@@ -264,14 +265,17 @@ fn letters(s: &str) -> String {
     s.chars().filter(|c| c.is_alphanumeric()).flat_map(char::to_lowercase).collect()
 }
 
-/// The spellings that have the final say (the dictionary's, memory's
-/// names), as [`fuzzy::ngram_key`]s: never changed by the screen's pass,
-/// nor named to cleanup a second time.
-pub fn protected(dictionary: &[DictionaryEntry]) -> HashSet<String> {
-    crate::memory::with_names(dictionary)
+/// The spellings that have the final say (the dictionary's — every way a
+/// word is heard too —, your name, memory's names), as
+/// [`fuzzy::ngram_key`]s: never changed by the screen's pass, nor named to
+/// cleanup a second time.
+pub fn protected(dictionary: &[DictionaryEntry], about_name: &str) -> HashSet<String> {
+    crate::memory::with_names(dictionary, about_name)
         .iter()
         .filter(|e| !e.snippet)
-        .flat_map(|e| [crate::dictionary::fuzzy::ngram_key(&e.to), crate::dictionary::fuzzy::ngram_key(&e.from)])
+        .flat_map(|e| {
+            std::iter::once(e.to.as_str()).chain(e.heard()).map(crate::dictionary::fuzzy::ngram_key).collect::<Vec<_>>()
+        })
         .filter(|k| !k.is_empty())
         .collect()
 }
@@ -347,7 +351,7 @@ pub fn correct(text: &str, screen: Option<&ScreenTerms>, cfg: &YapConfig) -> Str
     if screen.phrases.is_empty() && screen.words.is_empty() {
         return text.to_string();
     }
-    let keep = protected(&cfg.dictionary);
+    let keep = protected(&cfg.dictionary, &cfg.about_name);
     let words = crate::memory::Words::new();
     let out = screen.correct(text, &|k| keep.contains(k), &|w| words.is(w));
     if out != text {
@@ -358,9 +362,9 @@ pub fn correct(text: &str, screen: Option<&ScreenTerms>, cfg: &YapConfig) -> Str
 
 /// AI cleanup's line for this dictation's transcript (`raw`), if the
 /// screen showed terms it seems to contain.
-pub fn cleanup_line(screen: Option<&ScreenTerms>, raw: &str, dictionary: &[DictionaryEntry]) -> Option<String> {
+pub fn cleanup_line(screen: Option<&ScreenTerms>, raw: &str, dictionary: &[DictionaryEntry], about_name: &str) -> Option<String> {
     let screen = screen?;
-    let keep = protected(dictionary);
+    let keep = protected(dictionary, about_name);
     let line = screen.cleanup_line(raw, &|k| keep.contains(k));
     if let Some(l) = &line {
         tracing::debug!(terms = l.matches(", ").count() + 1, "AI cleanup is told how names on screen are spelled");
@@ -1021,6 +1025,7 @@ mod tests {
             fuzzy: true,
             snippet: false,
             starred: false,
+            also_heard: Vec::new(),
         }];
         let keep: HashSet<String> = dict.iter().flat_map(|e| [crate::dictionary::fuzzy::ngram_key(&e.to), crate::dictionary::fuzzy::ngram_key(&e.from)]).collect();
         assert_eq!(s.correct("The ZenTrix pilot.", &|k| keep.contains(k), &words), "The ZenTrix pilot.");
