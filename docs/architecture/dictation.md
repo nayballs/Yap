@@ -13,7 +13,12 @@ that translates sends the transcript to the AI in cleanup's place.
 Pipeline order after transcription: **AI cleanup (in the style of the kind
 of app it goes into — email formal, chats casual, AI prompts literal,
 terminal commands as said: `ai/cleanup_styles.rs`, [ai-models.md](./ai-models.md);
-the person's own app rules first, as ever) → dictionary (exact, then a
+the person's own app rules first, as ever; at the strength set — None /
+Light / Medium / High, `ai/cleanup_strength.rs`; a spoken list or an
+email's greeting and sign-off laid out, `ai/cleanup_format.rs`; with the
+text before the cursor for a model on this PC, `ai/cleanup_context.rs`) →
+a transform on every dictation, if one is picked (`transforms::for_dictation`,
+below) → dictionary (exact, then a
 fuzzy near-miss pass) → names on screen (`dictionary/screen_terms.rs`: a name heard a
 little wrong spelled as the window shows it) → the "press enter" voice
 command → snippets → fit to the
@@ -519,7 +524,24 @@ to **Run again** from Home.
   pasted), `e2e_transform_slots`; robot mode `realtest_transform`.
   Unit tests (`transforms::tests`, `input_hook`'s slot test, `as_said`'s
   undoable), e2e `transforms.spec.js`, robot `e2e-real/transforms.real.js`
-  (written, not yet run).
+  (written, not yet run). **A transform on every dictation** (2026-10-25;
+  Wispr Flow's auto-applied transform, by behaviour; optional, off by
+  default): Settings → Commands → Transforms → "Run on every dictation" picks
+  one (`config.auto_transform`) and where (`auto_transform_kind`: every app,
+  or one kind of app — `cleanup_styles::category`). `for_dictation` (pure):
+  none in a terminal (by its kind or what `app_kind` read), none in another
+  kind, none for a transform that can't run (deleted: Settings clears it).
+  It runs **once**, in `pipeline::clean_up` after the cleanup
+  (`Shared::transform_after`: `run_on_dictation` — the Commands scope's
+  model, `llm::transform`, `clean_output`, as a dictation's AI call), on what
+  the style's cleanup wrote, watched like the cleanup (the bar's Skip gives
+  the cleaned text back); its result is never cleaned or transformed again,
+  a transform's own shortcut never starts it (no dictation is delivered), a
+  language shortcut that translates skips cleanup and it, Run again runs it
+  once on its fresh transcript, the Chat view's box never gets it. With
+  cleanup off it still runs on the words as said; no model or a failure
+  pastes the text as it was (logged, lengths only). "Use what I said" swaps
+  the paste back to the words as said. e2e `cleanup-strength.spec.js`.
 - **`dictation/languages.rs`** (+ `languages/catalog.rs`, `languages/nudge.rs`)
   — **My languages** (2026-10-25; Wispr Flow's languages and its "Speaking a
   different language?" nudge of 28 Sep, OpenWhispr's dual-language hotkeys

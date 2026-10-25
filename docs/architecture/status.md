@@ -98,6 +98,30 @@ a web mail page, a chat page, a plain page, PowerShell, the Claude Code
 stand-in). Not yet tried with a real voice in real Outlook, Slack or
 WhatsApp, nor the 1.5B on a PC without a graphics card day to day.
 
+**Cleanup strength, smart formatting, a transform on every dictation, the
+text before the cursor** (2026-10-25; `ai/cleanup_strength.rs`,
+`ai/cleanup_format.rs`, `dictation/transforms.rs` `for_dictation`,
+`ai/cleanup_context.rs`): None / Light / Medium / High in Language Models →
+Dictation cleanup (a config from before cleans at Medium, exactly as it
+did); a spoken list ("first … second … third", "one, two, three", "bullet
+points") as a list and an email's greeting and sign-off on their own
+lines, a sentence with numbers left alone; one saved transform after
+cleanup on every dictation or in one kind of app (off by default, never in
+a terminal); a sentence or two before the cursor sent to a cleanup model on
+this PC, and to a cloud one only with Privacy & data's switch (off), named
+in the network receipts and "What leaves this PC". Model evaluations
+(`--strength`, docs/model-evals.md "Cleanup strength and formatting"): 36
+cases 64 % → 96 % on Qwen3.5-4B, 53 % → 75 % on Qwen2.5-1.5B (a busy
+processor), 1/9 → 7/9 on Groq's gpt-oss-20b. Unit-tested (strengths, the
+list and email cues, the layout, the bounded text and its echo, the
+transform's rules), e2e-tested (`cleanup-strength.spec.js`: the row and a
+config from before, each strength's line through the fake AI, a custom
+body, lists and emails laid out, the transform on every dictation, the
+switch, its row and the receipts). Not yet tried with a real voice, nor
+robot-tested with a real field's text before the cursor (the read is
+`selection.rs`'s, which the robot tests cover for fitting the paste), nor
+High on a cloud model day to day.
+
 **Dictation polish** (2026-10-25, Wispr Flow's by behaviour): **Paste last
 transcript** and **Copy last transcript** on shortcuts of their own
 (Settings → Shortcuts, unbound by default; Copy last also in the tray; the

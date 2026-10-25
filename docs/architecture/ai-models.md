@@ -248,7 +248,84 @@ The language-model side: the OpenAI-compatible client and its prompts, the on-de
   tidy what you say" with Set it up (Language Models) / Not now — and never
   again. A test run offers it only with `YAP_E2E_CLEANUP_OFFER`.
   `cleanup_styles_catalog` gives Settings the kinds, tones and built-in apps
-  (with the names they go by). Unit-tested.
+  (with the names they go by). Unit-tested. **Since 25 Oct 2026** a `Plan`
+  also carries the strength (`cleanup_strength.rs`) and `formatting`;
+  `clean` puts Yap's lines before the transcript in this order — the
+  style's (as written at the strength: `Plan::written_style`), the
+  strength's, a list's or an email's layout (`cleanup_format.rs`), then the
+  caller's (names on screen, the language, the text before the cursor) —
+  and after `fit` lays out what the model kept on one line
+  (`cleanup_format::lay_out`). `drop_unsaid_frame` also takes off a
+  "Subject:" line nobody said. `main_plan` (Prompt Studio's Test: the main
+  body at the strength set).
+- **`ai/cleanup_strength.rs`** — **cleanup strength** (2026-10-25; Wispr
+  Flow's None / Light / Medium / High, by behaviour; Language Models →
+  Dictation cleanup → Strength): `Strength` from `config.cleanup_strength`
+  ("light" | "medium" | "high"; missing or unknown = Medium, what cleanup
+  always did — no migration: a config from before cleans exactly as it
+  did). **None is cleanup off** (`post_process_enabled`): the page's None
+  turns the switch off, a strength turns it on; "none" in the file asks no
+  model (`resolve`). **Light** (`LIGHT_LINE`: filler sounds and stutters
+  out, punctuation and capitals in, every other word as said, no grammar
+  fixes), **Medium** (no line: the prompt byte for byte as before), **High**
+  (`HIGH_LINE`: tighter and clearer, the meaning, every fact and the
+  speaker's voice kept, nothing added). Yap's own layer, one line just
+  before the transcript (`line`): the guardrails and the editable body
+  (preset or the person's own) go as they are, and the cached system
+  prompt is the same at every strength. **One setting for every app, not
+  per style** (two knobs per kind of app would be fourteen choices for one
+  idea): a tone that keeps the words (AI prompts' Literal, Terminal's
+  Command) keeps them at any strength (no line), and at Light no tone
+  rewords (`Strength::tone`: Formal, Casual, Very casual write as Natural;
+  the kind's line stays). Light and High measured in docs/model-evals.md
+  "Cleanup strength and formatting"; `YAP_EVAL_STRENGTH_LINES` tries other
+  wordings in a run. "Use what I said" unchanged. Unit-tested.
+- **`ai/cleanup_format.rs`** — **smart formatting** (2026-10-25): a spoken
+  list becomes a list, an email's greeting and sign-off go on lines of
+  their own, a sentence that only mentions numbers stays a sentence.
+  **Asked only when it's said** (`hint`, Medium and High, never for a
+  Literal or Command tone): `list_cue` (pure) finds "bullet points" (or
+  "bullets"), "number one … number two", ordinals in order with words
+  between ("first … second", "firstly … secondly" — not after a determiner:
+  "the first time", "our second office"), or "one … two … three" after a
+  lead-in ("my priorities are one …", "three things one …") or at the start
+  — never "I have one cat, two dogs"; `email_frame` (pure) finds a greeting
+  at the start and a sign-off in the last words (with a name of up to two
+  words) of a dictation into the Email kind. The lines (`NUMBERED_LINE`,
+  `BULLETS_LINE`, `EMAIL_LINE`) go with the style's, before the transcript;
+  each wording measured (a first one made the 4B list "one cat, two dogs",
+  another write a "Subject:" line). **`lay_out`** (pure): where a line was
+  sent and the model kept it on one line (the 1.5B mostly did), Rust lays
+  out its own words — three or more spoken markers at clause starts as "1.
+  …" lines (two stay as written), a greeting of up to four words ending in
+  "," or "!" and a sign-off starting the last sentence on lines of their
+  own. `YAP_EVAL_FORMAT_LINES` in a run. Unit-tested.
+- **`ai/cleanup_context.rs`** — **the text before the cursor, for AI
+  cleanup** (2026-10-25): a sentence or two of what's already written where
+  the dictation goes, so cleanup continues it (no capital, no repeat of the
+  words said again). **The read is `selection.rs`'s** — "Match the text
+  around the cursor" (`smart_spacing`), at record start, in the background,
+  never waited for (`selection::peek_before`, which leaves it for the paste's
+  `take_context`); off, or a field Yap can't read, sends nothing; a live
+  dictation's only (not Run again). **Bounded** (`bounded`, pure): the last
+  two sentences, ≤ 240 characters cut at a word, never logged (a length at
+  `debug`). **Where it may go** (`allowed`): a cleanup model on this PC
+  (`net::place_of_url`: the on-device model, a server on `localhost`)
+  whenever it's read; any other — a cloud provider, a server on the network
+  — only with "Send the text before the cursor to cleanup" on
+  (`cursor_context_cloud`, Privacy & data, off: it didn't help gpt-oss-20b in
+  the evaluations, and it sends what's on screen). **The line** (`LINE`,
+  last before the transcript): "Where it goes: right after "…", which is
+  already written and is not part of your output. Clean up only the
+  transcript, so it follows on from that text." — other wordings made the
+  4B write the text out again (docs/model-evals.md); **`trim_echo`** (pure)
+  takes off what a cleanup writes out again anyway (a bullet the cursor's
+  line has; the text's last sentence of three words or more at the start).
+  Such a cleanup's receipt is "AI cleanup + text before the cursor · Groq"
+  (`net::Feature::DictationContext`); Privacy & data's "What leaves this PC"
+  has its row. Measured: 4B 18/24 → 21/24, 1.5B 10/16 → 12/16 on the cursor
+  cases. Test mode: debug-only `e2e_cursor_before {text}` stands in for the
+  read. Unit-tested.
 - **`ai/local_llm.rs`** — the on-device AI cleanup sidecar: runs **Mozilla llamafile**
   (llama.cpp, single-file OpenAI-compatible server) as a hidden child process on a
   free localhost port, serving **Qwen2.5-1.5B-Instruct** (Q4_K_M GGUF) when no
@@ -677,7 +754,9 @@ How real models do on Yap's own Chat code, with every request and response
 logged: `npm run eval -- --model groq:openai/gpt-oss-20b --keys-from-yap`,
 `--model local:installed` (Yap's llamafile on the CPU; `--ngl 999` on the GPU),
 `--only`, `--tools on`, `--raw evals/raw/groq-browser-search.json`, and
-`--cleanup` (dictation cleanup latency per model). Nothing launches, no window, the
+`--cleanup` (dictation cleanup latency per model), `--styles` and `--strength`
+(cleanup strength, formatting and the text before the cursor, before and after).
+Nothing launches, no window, the
 installed app's data and `%APPDATA%\yap` are never written (keys are read from
 its config.json read-only). Builds a debug stub into `$YAP_EVAL_TARGET_DIR`;
 runs land in `$YAP_EVAL_OUT` / `--out` (best outside the
