@@ -136,7 +136,7 @@
     } else if (e.key === 'Escape' && chat.speakingId?.startsWith('chat:')) {
       e.preventDefault();
       chat.stopReading();
-    } else if (e.key === 'Escape' && chat.sending && chat.streaming && !e.defaultPrevented) {
+    } else if (e.key === 'Escape' && ((chat.sending && chat.streaming) || chat.assistantAnswering) && !e.defaultPrevented) {
       e.preventDefault();
       chat.stopAnswer();
     }
@@ -156,6 +156,8 @@
     chat.loadVoiceSettings();
     chat.refreshVision();
     chat.refreshLimits();
+    // Opened while the Voice Assistant thinks or speaks: its ■ shows here too.
+    invoke('assistant_phase').then((p) => (chat.assistantPhase = p)).catch(() => {});
     setTimeout(() => chat.inputEl?.focus(), 0);
     const uns = [
       // A snip landed while Chat is open (snip.rs).
@@ -177,7 +179,10 @@
       listen('yap-assistant-turn', (e) => chat.followAssistant(e.payload)),
       listen('yap-assistant-stream', (e) => chat.followAssistantStream(e.payload)),
       // Whether a spoken question is being listened for (Esc calls it off).
-      listen('yap-assistant', (e) => (chat.assistantListening = e.payload?.phase === 'listening')),
+      listen('yap-assistant', (e) => {
+        chat.assistantListening = e.payload?.phase === 'listening';
+        chat.assistantPhase = e.payload?.phase;
+      }),
       listen('yap-voice-replies', (e) => {
         if (typeof e.payload?.on === 'boolean') chat.speakReplies = e.payload.on;
       }),

@@ -38,11 +38,17 @@ const groqModel = (id, name, context) => ({
   supported_features: ['tools', 'json_mode'],
 });
 
-/** About `n` characters of plain planning talk, starting with `lead`. */
+/**
+ * About `n` characters of plain planning talk, starting with `lead`: each
+ * sentence its own (numbered), since an answer that says the same sentence
+ * over and over is a loop Yap stops (chat/stream.rs `repeating_from`).
+ */
 const padded = (lead, n) => {
-  const filler = ' We keep the coaches booked early, confirm final numbers ten days ahead and keep a rain plan for the terrace.';
+  const things = ['the coaches', 'the rooms', 'the caterer', 'the speakers', 'the badges', 'the rain plan', 'the signage', 'the parking'];
   let s = lead;
-  while (s.length < n) s += filler;
+  for (let i = 1; s.length < n; i++) {
+    s += ` Item ${i}: check ${things[i % things.length]} by day ${(i * 7) % 31 + 1} and note who owns it.`;
+  }
   return s.slice(0, n);
 };
 

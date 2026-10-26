@@ -353,6 +353,22 @@ test('asked while Yap is in front: Chat comes up with the question and the answe
   await expect(capsule(yap)).toHaveCount(0);
 });
 
+// A spoken answer being written into the open chat has Chat's own ■ too
+// (26 Oct 2026: a looping on-device answer ran on with no Stop in the box).
+test('a spoken answer still being written into Chat has ■ in the message box, and it stops it', async ({ yap, main, fakeLlm }) => {
+  await mainOnScreen(yap);
+  fakeLlm.scriptChat([
+    { content: 'Your next meeting is the design review. Then lunch with the team at one. Then the planning call at three.', stream: { gapMs: 150, hangAfter: 3 } },
+  ]);
+  await ask(yap, 'what is on today');
+  const stop = main.getByRole('button', { name: 'Stop the answer' });
+  await expect(stop).toBeVisible({ timeout: 10_000 });
+  await stop.click();
+  await expect.poll(() => fakeLlm.requests.at(-1).aborted, { timeout: 10_000 }).toBe(true);
+  await expect(stop).toHaveCount(0, { timeout: 10_000 });
+  await expect(capsule(yap)).toHaveCount(0, { timeout: 10_000 });
+});
+
 test('■ stops the answer, and a press while Yap speaks cuts it off to listen (barge-in)', async ({
   yap,
   main,

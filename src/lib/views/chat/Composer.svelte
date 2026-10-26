@@ -310,8 +310,8 @@
     <button class="micbtn" title="Dictate your message" aria-label="Dictate your message" onclick={micChat}>
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="2" width="6" height="12" rx="3" /><path d="M5 10v1a7 7 0 0 0 14 0v-1" /><path d="M12 18v4" /></svg>
     </button>
-    {#if chat.sending}
-      <!-- ■: stop the answer being written (Esc too). -->
+    {#if chat.sending || chat.assistantAnswering}
+      <!-- ■: stop the answer being written (Esc too), a spoken one's voice and all. -->
       <button class="sendbtn stopbtn" disabled={chat.stopping} onclick={chat.stopAnswer} aria-label="Stop the answer" title="Stop (Esc)">
         <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="7" y="7" width="10" height="10" rx="2" /></svg>
       </button>

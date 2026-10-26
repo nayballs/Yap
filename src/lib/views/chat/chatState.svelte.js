@@ -61,6 +61,13 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
   let stopping = $state(false);
   // An answer is being written in the thread (its bubble shows, not "Thinking…").
   const streaming = $derived(messages.some((m) => m.streaming));
+  // The Voice Assistant's phase (`yap-assistant`: idle, listening, thinking,
+  // speaking). While it thinks or answers (or an answer of its is still
+  // being written here), ■ and Esc stop it, voice and all.
+  let assistantPhase = $state('idle');
+  const assistantAnswering = $derived(
+    assistantPhase === 'thinking' || assistantPhase === 'speaking' || messages.some((m) => m.streaming && m.spoken)
+  );
   let inputEl = $state(null);
   let threadEl = $state(null);
   // 'meetings' when this chat asks across the meetings (the Meetings view's
@@ -865,6 +872,10 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
 
   /** ■: stop the answer being written (what came stays, checked). */
   function stopAnswer() {
+    if (!sending && assistantAnswering) {
+      invoke('assistant_stop').catch(() => {});
+      return;
+    }
     if (!sending || stopping || !stopAnswerCall) return;
     stopping = true;
     stopAnswerCall();
@@ -907,6 +918,8 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
     get input() { return input; },
     set input(v) { input = v; },
     get sending() { return sending; },
+    get assistantAnswering() { return assistantAnswering; },
+    set assistantPhase(v) { assistantPhase = v || 'idle'; },
     get stopping() { return stopping; },
     get streaming() { return streaming; },
     get inputEl() { return inputEl; },

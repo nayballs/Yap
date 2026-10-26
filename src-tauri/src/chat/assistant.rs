@@ -393,6 +393,11 @@ pub fn heard(app: &AppHandle, question: String) {
     tauri::async_runtime::spawn(async move { answer(app, generation, since, question).await });
 }
 
+/// The stream id of question `generation`'s answer (`stream::Stoppable`).
+fn stop_id(generation: u64) -> String {
+    format!("assistant-{generation}")
+}
+
 /// Whether `generation` is still the latest question.
 fn current(generation: u64) -> bool {
     lock().generation == generation
@@ -780,6 +785,9 @@ async fn answer(app: AppHandle, generation: u64, since: u64, question: String) {
             }),
         );
     };
+    // ■ (the capsule's, the card's ✕, Chat's box, Esc) closes the model's
+    // stream too, not just the voice: a model on this PC stops writing.
+    let stoppable = crate::chat::stream::Stoppable::new(Some(&stop_id(generation)));
     let turn = crate::snip::turn::with(
         shots,
         crate::chat::turn::chat_turn(
@@ -790,7 +798,7 @@ async fn answer(app: AppHandle, generation: u64, since: u64, question: String) {
             true,
             asked,
             Some(&streamed as &dyn crate::chat::stream::Sink),
-            None,
+            Some(&stoppable),
         ),
     );
     // Its AI calls and searches are the Voice Assistant's in the network
@@ -829,6 +837,21 @@ async fn answer(app: AppHandle, generation: u64, since: u64, question: String) {
             if let Some(feed) = &feed {
                 feed.close();
                 crate::voice::tts::stop();
+            }
+            // ■ before any of the answer came: the question stays, nothing
+            // went wrong.
+            if e == crate::chat::stream::STOPPED {
+                tracing::info!("Voice Assistant: stopped before the answer began");
+                if let Some((conv, images)) = taken {
+                    crate::snip::waiting::put_back(&app, conv, images);
+                }
+                let conv = streamed.lock().conversation.or(conversation_id);
+                let _ = app.emit(
+                    TURN,
+                    serde_json::json!({ "phase": "failed", "conversationId": conv, "userMessageId": question_id, "error": e }),
+                );
+                give_up(&app, generation);
+                return;
             }
             // Its screenshots back in the box, to ask again (as a typed
             // question's are); a server that turned the image down: that
@@ -1097,18 +1120,24 @@ fn open_chat(app: &AppHandle) {
 /// ■ on the capsule, ✕ or Esc on the card: the voice stops, an answer still
 /// coming isn't said (it's in Chat), the card goes.
 pub fn stop(app: &AppHandle) {
-    let (ev, was_speaking) = {
+    let (ev, was_speaking, stopped) = {
         let mut s = lock();
         if matches!(s.phase, Phase::Thinking | Phase::Speaking) {
             let was = s.phase == Phase::Speaking;
+            let stopped = s.generation;
             s.generation += 1;
             s.phase = Phase::Idle;
             s.message_id = None;
-            (Some(snapshot(&s)), was)
+            (Some(snapshot(&s)), was, Some(stopped))
         } else {
-            (None, false)
+            (None, false, None)
         }
     };
+    // Its answer still being written: the stream closes (what was written
+    // is kept in Chat, as Chat's own ■ keeps it).
+    if let Some(generation) = stopped {
+        crate::chat::stream::stop(&stop_id(generation), crate::chat::stream::Halt::Stopped);
+    }
     if let Some(ev) = ev {
         tracing::info!("Voice Assistant: stopped");
         emit(app, ev);
@@ -1162,6 +1191,13 @@ pub fn chat_view_state(open: bool, conversation_id: Option<u64>, new_chat: Optio
 #[tauri::command]
 pub fn assistant_stop(app: AppHandle) {
     stop(&app);
+}
+
+/// Where the Voice Assistant is now (`yap-assistant`'s phase), for a Chat
+/// view that opened after it was said: its ■ shows while it thinks or speaks.
+#[tauri::command]
+pub fn assistant_phase() -> Phase {
+    lock().phase
 }
 
 /// Debug-only, test mode: a spoken question without a microphone — the

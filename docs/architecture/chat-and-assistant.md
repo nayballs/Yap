@@ -468,7 +468,19 @@ The AI Chat surface (conversations, the tool-calling loop and its note tools) an
   (llama.cpp stops generating on a closed connection); `chat_turn` keeps
   what was shown (`Watch`), checks it like any answer and saves it with
   `stopped: true` (`chats::append_message`); nothing shown yet → the error
-  `stream::STOPPED`, the question kept (as after a failure). **A newer
+  `stream::STOPPED`, the question kept (as after a failure). **An answer
+  that starts repeating itself stops there** (`Assembler`'s loop guard,
+  `repeating_from`, 2026-10-26: a small on-device model answered a
+  spoken question with the same paragraphs over and over for half a
+  minute): every 48 bytes of content the end of the answer is checked
+  for a block repeated back to back — two copies of 160+ bytes, or four
+  of a short phrase covering 480+ — and the answer ends after its first
+  copy, cut at a sentence or line end, as if the model had finished
+  (`finish_reason` "stop"; logged with lengths only). Lists whose lines
+  share words but differ, and ordinary prose, never trip it (tests).
+  **On-device answers are capped** at `llm::ON_DEVICE_ANSWER_TOKENS`
+  (4,096 `max_tokens`, Chat's calls to the sidecar only): a model that
+  runs on anyway can't hold the graphics card for minutes. **A newer
   question replaces an older one** (`Halt::Superseded`, 2026-10-23): every
   `chat_turn` has a `Stoppable` (its own when no page sent one: the Voice
   Assistant, an evaluation), and once its question is saved
@@ -599,7 +611,14 @@ The AI Chat surface (conversations, the tool-calling loop and its note tools) an
   plain speech…" — the model evaluations' egg answer was 55–98 words with
   lists before, 12–17 after), and one longer than `SPOKEN_MAX_WORDS` (60)
   anyway is said short too, "The rest is in Chat." `stop`
-  (■ on the capsule = `bar_action "assistant-stop"`, `assistant_stop`).
+  (■ on the capsule = `bar_action "assistant-stop"`, `assistant_stop`;
+  Chat's ■ and Esc too): the voice stops **and the answer's stream
+  closes** (each question's turn has a `Stoppable` called
+  `assistant-<generation>`, 2026-10-26; before, ■ only silenced the voice
+  and a model on this PC went on writing) — what was written stays in
+  Chat, as after Chat's own ■; stopped before anything came, the question
+  stays and no alert shows. `assistant_phase` tells a Chat view opened
+  after the question where the assistant is, so its ■ shows.
   The bar's capsule shows while `phase != Idle`, the bar on or off.
   Debug-only `e2e_assistant_ask {text, listenMs}` (`Robot::ask_assistant`:
   the press's own steps — barge-in, the target, "recording" for
@@ -795,7 +814,9 @@ screenshots and their prompts, +, the box, the mic, Send / ■, `ModelChip`).
   "Searching the web…"), "Waiting for your dictation to finish…" while a
   model on this PC steps aside; the thread follows the newest words unless
   you scrolled up. **■** (the composer's Send becomes Stop while an answer
-  comes; Esc) stops it: what came stays, "· Stopped" under it; stopped
+  comes — a Voice Assistant answer being written or said in this chat
+  too, `assistantAnswering` from `yap-assistant`'s phase; Esc) stops it:
+  what came stays, "· Stopped" under it; stopped
   before anything came, the question stays with "Stopped". **The checked
   answer** (`chat_send`'s reply) takes the streamed one's place in the
   same bubble: the same text stays put; a changed one (a sources list

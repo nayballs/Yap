@@ -364,6 +364,7 @@ pub fn run() {
             voice::read_aloud::read_aloud_state,
             chat::assistant::chat_view_state,
             chat::assistant::assistant_stop,
+            chat::assistant::assistant_phase,
             voice::tts::tts_voices,
             voice::tts::tts_speak,
             voice::tts::tts_preview,

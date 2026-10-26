@@ -909,9 +909,17 @@ pub(crate) struct ChatRequest {
     pub extra: serde_json::Map<String, Value>,
 }
 
+/// The longest answer a Chat step on Yap's on-device model may write
+/// (about 3,000 words): a small model that loops writes until something
+/// stops it (Qwen3.5-4B, 26 Oct 2026). Cloud models keep their own limits.
+/// The stream's loop guard (`stream::repeating_from`) usually ends one
+/// sooner.
+pub const ON_DEVICE_ANSWER_TOKENS: u32 = 4_096;
+
 impl ChatRequest {
     /// A Chat step's ([`post_chat_message`]): Chat's timeout, waiting out a
-    /// rate limit, `tool_choice` with the tools.
+    /// rate limit, `tool_choice` with the tools; on the on-device model, at
+    /// most [`ON_DEVICE_ANSWER_TOKENS`].
     #[allow(clippy::too_many_arguments)]
     pub fn chat(
         base_url: &str,
@@ -935,7 +943,7 @@ impl ChatRequest {
             temperature,
             messages,
             tools: tools.cloned(),
-            max_tokens: None,
+            max_tokens: (provider == crate::ai::local_llm::PROVIDER_ONDEVICE).then_some(ON_DEVICE_ANSWER_TOKENS),
             timeout: chat_timeout(base_url),
             rate_limit_patience: RATE_LIMIT_PATIENCE,
             extra,

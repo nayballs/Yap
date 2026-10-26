@@ -737,6 +737,67 @@ pub struct Assembler {
     model: Option<String>,
     done: bool,
     chunks: usize,
+    /// The content's length at the last look for a loop ([`repeating_from`]).
+    checked: usize,
+    /// The answer began repeating itself: cut there, and the stream ends.
+    looped: bool,
+}
+
+/// Look for a loop again after this much more text.
+const LOOP_CHECK_EVERY: usize = 48;
+
+/// Where a text that has begun repeating itself should end: the length to
+/// keep (one copy of what repeats), or `None`. A block of 160+ bytes said
+/// twice in a row at the end, or a shorter one (20+) said four times over
+/// 480+ bytes. Small models do this (Qwen3.5-4B wrote one answer's two
+/// paragraphs 12 times over until a new question stopped it, 26 Oct 2026);
+/// nothing a person wants repeats a whole paragraph back to back. Pure.
+pub fn repeating_from(text: &str) -> Option<usize> {
+    const KEY: usize = 24;
+    const LONG: usize = 160;
+    const SHORT: usize = 20;
+    const MAX: usize = 6_000;
+    let b = text.as_bytes();
+    let n = b.len();
+    if n < 2 * SHORT + KEY {
+        return None;
+    }
+    let key = &b[n - KEY..];
+    // Each earlier place the text's last bytes were written: a period.
+    let mut end = n - 1;
+    while let Some(at) = find_last(&b[..end], key) {
+        let p = n - (at + KEY);
+        end = at + KEY - 1;
+        if p > MAX || 2 * p > n {
+            break;
+        }
+        if p < SHORT {
+            continue;
+        }
+        let mut copies = 1;
+        while (copies + 1) * p <= n && b[n - (copies + 1) * p..n - copies * p] == b[n - p..] {
+            copies += 1;
+        }
+        if (p >= LONG && copies >= 2) || (copies >= 4 && copies * p >= 480) {
+            // Keep one copy: what came before the repeats, and the first.
+            let mut keep = n - (copies - 1) * p;
+            while !text.is_char_boundary(keep) {
+                keep -= 1;
+            }
+            // End on a sentence or line when one is near.
+            let cut = text[..keep].rfind(['\n', '.', '!', '?']).filter(|&i| keep - i <= p).map_or(keep, |i| i + 1);
+            return Some(cut);
+        }
+    }
+    None
+}
+
+/// The last place `needle` starts in `hay`. Pure.
+fn find_last(hay: &[u8], needle: &[u8]) -> Option<usize> {
+    if needle.len() > hay.len() {
+        return None;
+    }
+    (0..=hay.len() - needle.len()).rev().find(|&i| &hay[i..i + needle.len()] == needle)
 }
 
 /// Why a stream's message can't be used.
@@ -779,9 +840,22 @@ impl Assembler {
             // A server that sends `message` in its chunks, not `delta`.
             let delta = if choice["delta"].is_object() { &choice["delta"] } else { &choice["message"] };
             if let Some(s) = delta["content"].as_str() {
-                if !s.is_empty() {
+                if !s.is_empty() && !self.looped {
                     self.content.push_str(s);
                     out.push(Piece::Content(s.to_string()));
+                    // An answer that has begun repeating itself ends here:
+                    // one copy kept, the stream closed (llama.cpp stops
+                    // writing when it's gone).
+                    if self.content.len() >= self.checked + LOOP_CHECK_EVERY {
+                        self.checked = self.content.len();
+                        if let Some(cut) = repeating_from(&self.content) {
+                            tracing::info!(written = self.content.len(), kept = cut, "Chat: the answer began repeating itself; it stops there");
+                            self.content.truncate(cut);
+                            self.looped = true;
+                            self.done = true;
+                            self.finish.get_or_insert_with(|| "stop".to_string());
+                        }
+                    }
                 }
             }
             for tc in delta["tool_calls"].as_array().into_iter().flatten() {
@@ -911,6 +985,62 @@ impl Assembler {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    const BLOCK: &str = "You can find a spade very early in the game, in the first area you explore.\nSpecific Locations:\n- The First Area (Caves): look in the caves near the start.\n- The Ruins: the spade is in the ruins area.\n";
+
+    #[test]
+    fn an_answer_that_repeats_a_paragraph_stops_after_one_copy() {
+        let intro = "Here is what I found.\n";
+        // Said once: nothing to cut.
+        assert_eq!(repeating_from(&format!("{intro}{BLOCK}")), None);
+        // Twice, and part of a third: keep the intro and one copy.
+        let looped = format!("{intro}{BLOCK}{BLOCK}{}", &BLOCK[..30]);
+        let cut = repeating_from(&looped).expect("a loop");
+        assert_eq!(&looped[..cut], format!("{intro}{BLOCK}"));
+        // Twelve times over (the 26 Oct answer): the same.
+        let many = format!("{intro}{}", BLOCK.repeat(12));
+        assert_eq!(&many[..repeating_from(&many).unwrap()], format!("{intro}{BLOCK}"));
+    }
+
+    #[test]
+    fn a_short_phrase_said_over_and_over_stops_too_but_lists_and_normal_text_do_not() {
+        let phrase = "I'm sorry, I can't help. ";
+        let looped = format!("Well. {}", phrase.repeat(24));
+        let cut = repeating_from(&looped).expect("a loop");
+        assert!(looped[..cut].matches("I'm sorry").count() <= 4, "{}", &looped[..cut]);
+        // Twice is fine for a short phrase.
+        assert_eq!(repeating_from(&format!("Thanks. {phrase}{phrase}")), None);
+        // A list whose lines share words but differ.
+        let list: String = (1..=30).map(|i| format!("- Step {i}: check the settings page for option {i}.\n")).collect();
+        assert_eq!(repeating_from(&list), None);
+        // Ordinary prose.
+        let prose = "The meeting moved to Thursday. Sam will send the agenda, and the budget stays at the figure we agreed last week. ";
+        assert_eq!(repeating_from(prose), None);
+        // Non-ASCII text cut on a character boundary.
+        let accented = format!("Voilà. {}", "Le café est fermé le lundi, mais ouvert tous les autres jours de la semaine dès huit heures du matin, même les jours fériés. ".repeat(5));
+        let cut = repeating_from(&accented).expect("a loop");
+        assert!(accented.is_char_boundary(cut));
+    }
+
+    #[test]
+    fn a_streamed_loop_ends_the_stream_with_one_copy() {
+        let mut asm = Assembler::default();
+        let chunk = |s: &str| json!({ "choices": [{ "delta": { "content": s } }] }).to_string();
+        asm.push(&chunk("Here is what I found.\n")).unwrap();
+        // Fed in small pieces, as a server streams it.
+        for piece in BLOCK.repeat(5).as_bytes().chunks(9) {
+            let s = String::from_utf8_lossy(piece).to_string();
+            asm.push(&chunk(&s)).unwrap();
+            if asm.finished() {
+                break;
+            }
+        }
+        assert!(asm.finished() && asm.complete());
+        let msg = asm.message().unwrap();
+        assert_eq!(msg["content"].as_str().unwrap(), format!("Here is what I found.\n{BLOCK}"));
+        // Anything after it is ignored.
+        assert!(asm.push(&chunk("more")).unwrap().is_empty());
+    }
 
     /// Every event a sink got.
     #[derive(Default)]
