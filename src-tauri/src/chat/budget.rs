@@ -154,6 +154,45 @@ static COUNTED: Mutex<Option<HashMap<(String, u64), u64>>> = Mutex::new(None);
 /// The cache's size before it starts again.
 const COUNTED_MAX: usize = 4_096;
 
+/// Servers on this PC that weren't there when looked for, and when.
+static DOWN: Mutex<Option<HashMap<String, std::time::Instant>>> = Mutex::new(None);
+/// How long a server found not there is left alone by the probes.
+const DOWN_FOR: Duration = Duration::from_secs(15);
+/// What a server on this PC gets to take a connection, per address.
+const LOCAL_CONNECT: Duration = Duration::from_millis(300);
+
+fn is_down(root: &str) -> bool {
+    DOWN.lock().ok().is_some_and(|g| g.as_ref().and_then(|m| m.get(root)).is_some_and(|at| at.elapsed() < DOWN_FOR))
+}
+
+/// Whether a server on this PC is there at all: its port takes a
+/// connection within [`LOCAL_CONNECT`] (a connection only, nothing sent;
+/// it never leaves this PC). Windows retries a refused local connection
+/// for ~2 s, and each probe before a question — the server's model list,
+/// `/props`, `/tokenize` — paid it: a server that's off took ~8 s to say
+/// so (2026-10-26). One that isn't there is remembered for [`DOWN_FOR`].
+async fn there(root: &str) -> bool {
+    if is_down(root) {
+        return false;
+    }
+    let Some((host, port)) = reqwest::Url::parse(root).ok().and_then(|u| Some((u.host_str()?.trim_matches(['[', ']']).to_string(), u.port_or_known_default()?))) else {
+        return true;
+    };
+    let addrs: Vec<std::net::SocketAddr> = match tokio::net::lookup_host((host.as_str(), port)).await {
+        Ok(a) => a.collect(),
+        Err(_) => return true,
+    };
+    for addr in addrs {
+        if matches!(tokio::time::timeout(LOCAL_CONNECT, tokio::net::TcpStream::connect(addr)).await, Ok(Ok(_))) {
+            return true;
+        }
+    }
+    if let Ok(mut g) = DOWN.lock() {
+        g.get_or_insert_with(HashMap::new).insert(root.to_string(), std::time::Instant::now());
+    }
+    false
+}
+
 /// What counts a call's tokens: [`estimate`], or the server's tokenizer
 /// for a long text sent to a llama.cpp server on this PC.
 #[derive(Debug, Clone, Default)]
@@ -183,7 +222,7 @@ impl Counter {
 
     /// `text`'s tokens.
     pub async fn count(&self, text: &str) -> u64 {
-        let Some(root) = self.root.as_deref().filter(|_| text.len() >= TOKENIZE_FROM) else {
+        let Some(root) = self.root.as_deref().filter(|r| text.len() >= TOKENIZE_FROM && !is_down(r)) else {
             return estimate(text);
         };
         let key = (root.to_string(), hash(text));
@@ -331,12 +370,18 @@ pub async fn context_window(cfg: &crate::config::YapConfig, provider: &str, mode
         return (u64::from(crate::ai::local_llm::context::context_now(cfg)), true);
     }
     if matches!(provider, "local" | "custom") {
+        let here = crate::ai::ai_model::runs_here(provider, base_url);
+        // A server on this PC that's off: no probes (the question goes,
+        // and says it couldn't reach it, at once).
+        if here && !there(server_root(base_url)).await {
+            return (default_context(provider), false);
+        }
         if let Some(n) = crate::ai::model_catalog::server_context_here(cfg, provider, base_url, model).await {
             return (n, true);
         }
         // A llama.cpp server on this PC that lists its model by another
         // name: the one context it serves.
-        if crate::ai::ai_model::runs_here(provider, base_url) {
+        if here {
             if let Some(n) = served_context(base_url).await {
                 return (n, true);
             }
@@ -966,6 +1011,23 @@ mod tests {
         assert_eq!(message_text(&call), " web_search {\"query\":\"lisbon\"}");
         let parts = serde_json::json!({ "role": "user", "content": [{ "type": "text", "text": "What's this?" }, { "type": "image_url" }] });
         assert_eq!(message_text(&parts), "What's this?");
+    }
+
+    #[tokio::test]
+    async fn a_server_on_this_pc_that_is_off_is_found_out_fast_and_left_alone() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let root = format!("http://127.0.0.1:{}", listener.local_addr().unwrap().port());
+        assert!(there(&root).await, "a server listening is there");
+        drop(listener);
+        // Off: found out in a connection's short wait, not Windows' ~2 s
+        // retries of a refused one, and left alone after.
+        let started = std::time::Instant::now();
+        assert!(!there(&root).await);
+        assert!(started.elapsed() < Duration::from_millis(1_500), "{:?}", started.elapsed());
+        assert!(is_down(&root));
+        let again = std::time::Instant::now();
+        assert!(!there(&root).await);
+        assert!(again.elapsed() < Duration::from_millis(50));
     }
 
     #[tokio::test]

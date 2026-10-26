@@ -946,7 +946,13 @@ a technical error.
    else what it starts with), a self-hosted server's word (Ollama, LM
    Studio, llama.cpp's `/props`), a cloud model's from its provider's list,
    else the provider's usual. A model evaluation may stand in a small one
-   (`YAP_EVAL_CONTEXT`).
+   (`YAP_EVAL_CONTEXT`). A server on this PC is looked for first
+   (`budget::there`: its port takes a connection within 300 ms, nothing
+   sent); one that's off gets no probes and is left alone 15 s
+   (`DOWN_FOR`, `/tokenize` too) — Windows retries a refused local
+   connection for ~2 s, and with the model list, `/props` and `/tokenize`
+   each paying it, "Couldn't reach the AI model on this PC" took ~8 s
+   (2026-10-26; the e2e `polish.spec.js` test caught it).
 2. **The question alone** must fit: measured against the parts that stay
    (`turn::stable_prompt` — the persona, the instructions, the prompt's end,
    the clock — and the tools' schemas, `tools::offered_tools`). Too long
