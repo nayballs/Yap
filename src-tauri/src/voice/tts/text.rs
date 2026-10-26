@@ -263,6 +263,38 @@ pub fn brief(md: &str, n: usize) -> String {
     sentences(&first).into_iter().take(n.max(1)).collect::<Vec<_>>().join(" ")
 }
 
+/// The start of a long answer, said before "The rest is in Chat.": its
+/// blocks (paragraphs, list items) from the first while they fit in
+/// `max_words`, without markdown or citation markers — it stops at the end
+/// of a thought, not mid-paragraph; a first block longer than that, its
+/// sentences while they fit (two at least, as [`brief`]). Pure.
+pub fn lead(md: &str, max_words: usize) -> String {
+    let words = |s: &str| s.split_whitespace().count();
+    let blocks: Vec<String> = speakable_blocks(md).into_iter().filter(|b| b.chars().any(char::is_alphanumeric)).collect();
+    let mut kept: Vec<&str> = Vec::new();
+    let mut total = 0;
+    for b in &blocks {
+        if total + words(b) > max_words {
+            break;
+        }
+        total += words(b);
+        kept.push(b);
+    }
+    if !kept.is_empty() {
+        return kept.join("\n\n");
+    }
+    let mut said: Vec<String> = Vec::new();
+    let mut total = 0;
+    for s in sentences(blocks.first().map_or("", String::as_str)) {
+        if said.len() >= 2 && total + words(&s) > max_words {
+            break;
+        }
+        total += words(&s);
+        said.push(s);
+    }
+    said.join(" ")
+}
+
 /// What to say for an answer: its [`speakable_blocks`], each written for
 /// the ear (`normalize::for_speech`) and cut into [`sentences`]. Empty when
 /// there's nothing to say. Pure.

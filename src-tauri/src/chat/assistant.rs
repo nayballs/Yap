@@ -206,11 +206,12 @@ pub fn card_on_bar(show_answer_card: bool, spoken: bool) -> bool {
 pub fn spoken_answer(reply: &str, sources: usize) -> (String, String) {
     if sources == 0 {
         // Told to answer in a sentence or two (`SPOKEN_ANSWER_NOTE`); one
-        // that runs long anyway is said short too, the rest in Chat.
+        // that runs on anyway is said whole up to about a minute, else its
+        // first paragraphs, the rest in Chat.
         if reply.split_whitespace().count() > SPOKEN_MAX_WORDS {
-            let brief = crate::voice::tts::brief(reply, 2);
-            if !brief.is_empty() && brief.split_whitespace().count() < reply.split_whitespace().count() {
-                return (format!("{brief} {REST_IN_CHAT}"), brief);
+            let lead = crate::voice::tts::lead(reply, SPOKEN_LEAD_WORDS);
+            if !lead.is_empty() && lead.split_whitespace().count() < reply.split_whitespace().count() {
+                return (format!("{lead} {REST_IN_CHAT}"), lead);
             }
         }
         return (reply.to_string(), reply.to_string());
@@ -244,8 +245,14 @@ fn sources_note(web: usize) -> Option<String> {
 /// Said after the short version of a long answer.
 pub const REST_IN_CHAT: &str = "The rest is in Chat.";
 
-/// An answer longer than this is said short ([`spoken_answer`]).
-pub const SPOKEN_MAX_WORDS: usize = 60;
+/// An answer longer than this — about a minute of speech — is said short
+/// ([`spoken_answer`]). It was 60 until 2026-10-26: a 95-word answer in two
+/// paragraphs stopped after its second sentence, mid-thought.
+pub const SPOKEN_MAX_WORDS: usize = 150;
+
+/// How much of a longer answer is said: its paragraphs from the first while
+/// they fit (`tts::lead`).
+pub const SPOKEN_LEAD_WORDS: usize = 100;
 
 /// The end of Chat's system prompt for a question asked out loud whose
 /// answer is read aloud whole (`turn::chat_turn`): without it, "how long
@@ -1306,13 +1313,27 @@ mod tests {
 
     #[test]
     fn a_long_answer_is_said_short_with_the_rest_in_chat() {
-        // Qwen3.5-4B's 87-word egg answer (the model evaluations).
-        let reply = "I don't have a specific note on this, but for a runny yolk: - Start with a cold egg in a pot of cold water - Bring to a boil (about 5-7 minutes) - Once boiling, reduce to a simmer and cook for **6-7 minutes total** - Remove from water and let sit in ice water for 1-2 minutes to stop cooking. The exact time can vary slightly based on egg size and water temperature, so 6-7 minutes is a good starting point.";
-        assert!(reply.split_whitespace().count() > SPOKEN_MAX_WORDS);
-        let (said, shown) = spoken_answer(reply, 0);
+        // Two paragraphs, ~95 words: said whole (it stopped after its second
+        // sentence, mid-thought, with the old 60-word limit).
+        let two = "I don't have any special knowledge about how the app works inside. I'm an assistant it reaches through an API key, and I don't see how it starts me or what it tells me about itself.\n\nI just answer your messages and use the tools it gives me to search your notes, your calendar and the web. If you're curious what it costs, the app's own usage page is the place to look, rather than something I'd know from the inside.";
+        assert!(two.split_whitespace().count() <= SPOKEN_MAX_WORDS);
+        assert_eq!(spoken_answer(two, 0).0, two);
+        // Qwen3.5-4B's 87-word egg answer (the model evaluations): whole too.
+        let egg = "I don't have a specific note on this, but for a runny yolk: - Start with a cold egg in a pot of cold water - Bring to a boil (about 5-7 minutes) - Once boiling, reduce to a simmer and cook for **6-7 minutes total** - Remove from water and let sit in ice water for 1-2 minutes to stop cooking. The exact time can vary slightly based on egg size and water temperature, so 6-7 minutes is a good starting point.";
+        assert!(!spoken_answer(egg, 0).0.ends_with(REST_IN_CHAT));
+        // Over a minute: whole paragraphs from the first, then the rest in Chat.
+        let para = |topic: &str| format!("The {topic} part of the plan starts on Monday with a short review of what changed last week. After that the team checks each open item, writes down who owns it, and agrees a date for the next look at it."); // 41 words
+        let long = format!("{}\n\n{}\n\n{}\n\n{}", para("first"), para("second"), para("third"), para("fourth"));
+        assert!(long.split_whitespace().count() > SPOKEN_MAX_WORDS);
+        let (said, shown) = spoken_answer(&long, 0);
         assert!(said.ends_with(REST_IN_CHAT), "{said}");
-        assert!(said.split_whitespace().count() < reply.split_whitespace().count(), "{said}");
-        assert!(!shown.is_empty() && reply.starts_with(&shown[..10]), "{shown}");
+        assert_eq!(shown, format!("{}\n\n{}", para("first"), para("second")), "two whole paragraphs fit in {SPOKEN_LEAD_WORDS} words");
+        // One huge paragraph: its sentences while they fit, never fewer than two.
+        let wall = "This sentence goes on for a while to fill the paragraph up with words. ".repeat(20);
+        let (said, shown) = spoken_answer(&wall, 0);
+        assert!(said.ends_with(REST_IN_CHAT), "{said}");
+        let n = shown.split_whitespace().count();
+        assert!((28..=SPOKEN_LEAD_WORDS).contains(&n), "{n}: {shown}");
         // A short one is said whole.
         let short = "Boil it for six to seven minutes, then cool it in cold water.";
         assert_eq!(spoken_answer(short, 0).0, short);

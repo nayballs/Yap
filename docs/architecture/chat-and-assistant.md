@@ -609,8 +609,14 @@ The AI Chat surface (conversations, the tool-calling loop and its note tools) an
   system prompt for the Voice Assistant, or a question dictated into Chat
   with spoken replies on: "one or two short sentences (under 40 words) of
   plain speech…" — the model evaluations' egg answer was 55–98 words with
-  lists before, 12–17 after), and one longer than `SPOKEN_MAX_WORDS` (60)
-  anyway is said short too, "The rest is in Chat." `stop`
+  lists before, 12–17 after); one that runs on anyway is **said whole up
+  to `SPOKEN_MAX_WORDS` (150, about a minute)**, and a longer one is said
+  from its first paragraph while they fit in `SPOKEN_LEAD_WORDS` (100;
+  `tts::lead`: whole paragraphs or list items, so it stops at the end of a
+  thought — a first paragraph longer than that, its sentences while they
+  fit, two at least), then "The rest is in Chat." (The limit was 60 words
+  and two sentences until 2026-10-26: a 95-word answer in two paragraphs
+  stopped mid-thought.) `stop`
   (■ on the capsule = `bar_action "assistant-stop"`, `assistant_stop`;
   Chat's ■ and Esc too): the voice stops **and the answer's stream
   closes** (each question's turn has a `Stoppable` called

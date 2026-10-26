@@ -63,7 +63,7 @@ pub use speaker::{
     init, meeting_quiet, pause, position, prepare_for_reading, read, ready_sentences, resume, speak, speak_streamed,
     speaking_id, stop, stop_for_dictation, Feed, Track, TtsState,
 };
-pub use text::{brief, sentences, speakable_blocks, utterances};
+pub use text::{brief, lead, sentences, speakable_blocks, utterances};
 
 use speaker::{say, speaker};
 
