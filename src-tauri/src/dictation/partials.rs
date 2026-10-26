@@ -3,17 +3,33 @@
 //! The streaming-partials worker (`pipeline::stream_partials`) re-transcribes
 //! only a bounded tail **window** of the growing recording buffer each tick.
 //! This module owns the stitching: audio older than the window is frozen as
-//! `committed` text, the active window's text is de-flickered with
-//! [`smart_diff`], and `display()` joins the two. Pure logic — no engine, no
-//! audio I/O — so it unit-tests in the default (stub) build.
+//! `committed` text, and the window's words are shown **for good once two
+//! decodes in a row agree on them** (LocalAgreement, as in
+//! whisper_streaming): only the last words, still being said, can change.
+//! `display()` joins the three. Pure logic — no engine, no audio I/O — so it
+//! unit-tests in the default (stub) build.
+//!
+//! Why (2026-10-26, a tester's recordings replayed with `yap.exe
+//! partials-dump`, `dump.rs`): every decode of the window changes its mind
+//! somewhere — an "um" in or out, "Claude." / "Claude,", "haiku" / "hiking"
+//! / "haikyu" — and the old stitching (FluidVoice's `smartDiffUpdate`) kept
+//! only the words before the first change, so one early change rewrote the
+//! whole line: ~10 shown words changed on every update of a 36 s dictation,
+//! and the bar ran back and forth.
 //!
 //! Invariants:
-//! - `committed` covers exactly `buffer[..window_start]`, the tail exactly
-//!   `buffer[window_start..]` — disjoint audio, so no overlap dedupe is needed.
+//! - `committed` covers exactly `buffer[..window_start]`, the window's words
+//!   `buffer[window_start..]`.
+//! - Words shown as `committed` or `confirmed` never change or go: the line
+//!   only grows, except for its unconfirmed last words (`pending`).
 //! - Per-tick transcription cost is bounded by `WINDOW_HARD_MAX_SECS` no
 //!   matter how long the recording grows.
 
 use crate::dictation::media::quietest_index;
+
+/// `yap.exe partials-dump` (debug builds): the live preview replayed on a recording.
+#[cfg(debug_assertions)]
+pub mod dump;
 
 /// Window length beyond which we try to advance (freeze the oldest audio).
 const WINDOW_ADVANCE_SECS: usize = 12;
@@ -46,11 +62,20 @@ pub enum TickPlan {
 pub struct PartialSession {
     /// Frozen text of `buffer[..window_start]` — never changes once folded in.
     committed: String,
-    /// smart_diff-stabilised text of the active window.
-    tail: String,
+    /// The window's words two decodes in a row agreed on, as first shown —
+    /// never change.
+    confirmed: Vec<String>,
+    /// The latest decode's words after them: shown, but may still change.
+    pending: Vec<String>,
+    /// Decodes in a row that couldn't be lined up with `confirmed`.
+    misses: usize,
     /// Absolute sample index where the active window starts.
     pub window_start: usize,
 }
+
+/// Decodes in a row that may be passed over for not lining up with the
+/// confirmed words ([`PartialSession::apply_normal`]).
+const MAX_MISSES: usize = 2;
 
 impl PartialSession {
     /// Decide this tick's plan from the buffer length + amplitude data.
@@ -76,70 +101,137 @@ impl PartialSession {
         }
     }
 
-    /// Regular tick: de-flicker the window's new transcription into the tail.
+    /// Regular tick: the window's new decode. Where the confirmed words end
+    /// in it is found by their last words ([`find_end`]); what follows them
+    /// is compared with the last decode's — the words both agree on from the
+    /// start are confirmed (as they were shown), the rest is pending. A
+    /// decode whose words can't be lined up with the confirmed ones (the
+    /// model heard them differently, given more audio) changes nothing — up
+    /// to [`MAX_MISSES`] in a row, then it's lined up by their count, so the
+    /// line never stops growing.
     pub fn apply_normal(&mut self, text: &str) {
-        self.tail = smart_diff(&self.tail, text.trim());
+        let words = speech_words(text);
+        let from = match find_end(&self.confirmed, &words) {
+            Some(from) => {
+                self.misses = 0;
+                from
+            }
+            None if self.misses < MAX_MISSES => {
+                self.misses += 1;
+                return;
+            }
+            None => {
+                self.misses = 0;
+                self.confirmed.len().min(words.len())
+            }
+        };
+        let tail = &words[from..];
+        let agreed = self.pending.iter().zip(tail).take_while(|(a, b)| same_word(a, b)).count();
+        let shown = std::mem::take(&mut self.pending);
+        self.confirmed.extend(shown.into_iter().take(agreed));
+        self.pending = tail[agreed..].to_vec();
     }
 
     /// Advance tick: `commit_text` is the final transcription of
-    /// `buffer[window_start..cut]` (folded into `committed`), `tail_text` the
-    /// first transcription of the fresh window starting at `cut`. If the
-    /// commit transcription came back empty while the tail was already showing
-    /// words for that audio, the old tail is committed instead — the display
-    /// must never shrink at an advance.
+    /// `buffer[window_start..cut]`, `tail_text` the first of the fresh window
+    /// starting at `cut`. The words already shown, up to where the commit's
+    /// end among them, are frozen as they were shown (the line never changes
+    /// at a seam); those after the cut stay (the confirmed ones confirmed)
+    /// and meet the new window's decode. Nothing shown yet: the commit's
+    /// words. (Freezing everything shown at an empty commit, as before,
+    /// showed the window's words twice once the new window decoded them.)
     pub fn apply_advance(&mut self, commit_text: &str, tail_text: &str, cut: usize) {
-        let old_tail = std::mem::take(&mut self.tail);
-        let commit = match commit_text.trim() {
-            "" => old_tail.trim().to_string(),
-            t => t.to_string(),
+        let shown: Vec<String> = self.confirmed.iter().chain(&self.pending).cloned().collect();
+        let commit = speech_words(commit_text);
+        // Where the line splits at the cut: just after the commit's last
+        // words; if they can't be found, after as many words as it has (an
+        // empty commit — a quiet stretch, a lone "um" — none: everything
+        // shown is after the cut, and the new window's decode has it).
+        let split_at = |commit: &[String]| find_end(commit, &shown).unwrap_or(commit.len().min(shown.len()));
+        let (frozen, kept_confirmed, kept_pending) = if shown.is_empty() {
+            (commit, Vec::new(), Vec::new())
+        } else if let Some(from) = find_end(&shown, &commit).filter(|&f| f > 0 && f < commit.len() && find_end(&commit, &shown).is_none()) {
+            // The line hadn't got as far as the cut: all of it, then the
+            // commit's words after where it ends.
+            (shown.iter().cloned().chain(commit[from..].iter().cloned()).collect(), Vec::new(), Vec::new())
+        } else {
+            let split = split_at(&commit);
+            let confirmed_end = self.confirmed.len().max(split);
+            (shown[..split].to_vec(), shown[split..confirmed_end].to_vec(), shown[confirmed_end..].to_vec())
         };
-        if !commit.is_empty() {
+        if !frozen.is_empty() {
             if !self.committed.is_empty() {
                 self.committed.push(' ');
             }
-            self.committed.push_str(&commit);
+            self.committed.push_str(&frozen.join(" "));
         }
         self.window_start = cut;
-        // Fresh window ⇒ fresh diff base (the old tail covered different audio).
-        self.tail = tail_text.trim().to_string();
+        self.confirmed = kept_confirmed;
+        self.pending = kept_pending;
+        self.apply_normal(tail_text);
     }
 
-    /// The full partial line to show: committed prefix + live tail.
+    /// The full partial line to show: committed prefix + the window's words.
     pub fn display(&self) -> String {
-        match (self.committed.is_empty(), self.tail.is_empty()) {
-            (true, _) => self.tail.clone(),
+        let window = self.confirmed.iter().chain(&self.pending).map(String::as_str).collect::<Vec<_>>().join(" ");
+        match (self.committed.is_empty(), window.is_empty()) {
+            (true, _) => window,
             (_, true) => self.committed.clone(),
-            _ => format!("{} {}", self.committed, self.tail),
+            _ => format!("{} {}", self.committed, window),
         }
     }
 }
 
-/// De-flicker successive partials over the same audio (FluidVoice
-/// `smartDiffUpdate`). Keeps the stable longest-common **word** prefix of the
-/// previous emit and appends the new tail, so the displayed text grows smoothly
-/// instead of re-rendering wholesale. If the new transcript diverges from the
-/// previous one by more than half its words, it's replaced outright (the
-/// decode changed its mind). Word comparison ignores case and punctuation.
-pub fn smart_diff(prev: &str, next: &str) -> String {
-    let norm = |w: &str| {
-        w.trim_matches(|c: char| !c.is_alphanumeric())
-            .to_ascii_lowercase()
-    };
-    let pw: Vec<&str> = prev.split_whitespace().collect();
-    let nw: Vec<&str> = next.split_whitespace().collect();
+/// A word as compared: lower case, without the punctuation around it
+/// ("Claude." and "claude," are the same word).
+fn norm(w: &str) -> String {
+    w.trim_matches(|c: char| !c.is_alphanumeric()).to_lowercase()
+}
 
-    let mut common = 0;
-    while common < pw.len() && common < nw.len() && norm(pw[common]) == norm(nw[common]) {
-        common += 1;
-    }
+fn same_word(a: &str, b: &str) -> bool {
+    norm(a) == norm(b)
+}
 
-    if !pw.is_empty() && (common as f32 / pw.len() as f32) >= 0.5 {
-        let mut out: Vec<&str> = pw[..common].to_vec();
-        out.extend_from_slice(&nw[common..]);
-        out.join(" ")
-    } else {
-        next.to_string()
+/// Filler sounds the model writes in one decode and not the next: never
+/// shown in the preview (the most changeable words of all; the final pass
+/// decides about them).
+const FILLERS: [&str; 6] = ["um", "umm", "uh", "uhh", "erm", "hmm"];
+
+/// A decode's words, without its filler sounds. Pure.
+fn speech_words(text: &str) -> Vec<String> {
+    text.split_whitespace().filter(|w| !FILLERS.contains(&norm(w).as_str())).map(str::to_string).collect()
+}
+
+/// Where `known` (words already settled) ends in `words` (a new decode of
+/// the same audio): just after the place where `known`'s last words — up to three —
+/// match best, a majority of them at least: a place where the very last
+/// word matches first ("look at it, it says": "at it says" ends at "says",
+/// not at the first "it"), then the most words, then the nearest to where
+/// `known`'s length says. Empty `known`: 0. Pure.
+fn find_end(known: &[String], words: &[String]) -> Option<usize> {
+    if known.is_empty() {
+        return Some(0);
     }
+    let m = known.len().min(3);
+    let key = &known[known.len() - m..];
+    let expected = known.len();
+    // (the last word matches, matches, distance from `expected`, end)
+    let mut best: Option<(bool, usize, usize, usize)> = None;
+    for end in 1..=words.len() {
+        let matches = (0..m)
+            .filter(|&i| (end + i).checked_sub(m).is_some_and(|j| same_word(&words[j], &key[i])))
+            .count();
+        if matches * 2 <= m {
+            continue;
+        }
+        let last = same_word(&words[end - 1], &key[m - 1]);
+        let distance = end.abs_diff(expected);
+        let better = best.is_none_or(|(bl, bm, bd, _)| (last, matches, std::cmp::Reverse(distance)) > (bl, bm, std::cmp::Reverse(bd)));
+        if better {
+            best = Some((last, matches, distance, end));
+        }
+    }
+    best.map(|(_, _, _, end)| end)
 }
 
 #[cfg(test)]
@@ -152,30 +244,96 @@ mod tests {
         vec![0.5f32; secs * R]
     }
 
-    // ---- smart_diff (moved from pipeline.rs) ----
+    fn words(s: &str) -> Vec<String> {
+        s.split_whitespace().map(str::to_string).collect()
+    }
+
+    // ---- agreeing decodes ----
 
     #[test]
-    fn growing_transcript_keeps_prefix_and_appends() {
-        let out = smart_diff("the meeting is", "the meeting is at three");
-        assert_eq!(out, "the meeting is at three");
+    fn a_growing_transcript_grows_and_agreed_words_are_confirmed() {
+        let mut s = PartialSession::default();
+        s.apply_normal("the meeting is");
+        assert_eq!(s.display(), "the meeting is");
+        s.apply_normal("the meeting is at three");
+        assert_eq!(s.display(), "the meeting is at three");
+        assert_eq!(s.confirmed, words("the meeting is"));
+        assert_eq!(s.pending, words("at three"));
     }
 
     #[test]
-    fn from_empty_takes_next() {
-        assert_eq!(smart_diff("", "hello world"), "hello world");
+    fn a_word_once_agreed_never_changes_however_the_model_spells_it_next() {
+        // A tester's dictation, in fictional words: each decode of the window
+        // changes its mind about an early word.
+        let mut s = PartialSession::default();
+        s.apply_normal("Sam. The streaming works.");
+        s.apply_normal("Sam. The streaming works well.");
+        assert_eq!(s.display(), "Sam. The streaming works. well.");
+        // "Sam," now, and "work" — the shown words stay as they were.
+        s.apply_normal("Sam, the streaming work well. It likes haiku.");
+        assert!(s.display().starts_with("Sam. The streaming works."), "{}", s.display());
+        assert!(s.display().ends_with("It likes haiku."), "{}", s.display());
+        // A word in the middle heard differently never takes the line back.
+        s.apply_normal("Sam, the streaming works well. It likes hiking.");
+        s.apply_normal("Sam, the streaming works well. It likes haikyu a lot.");
+        assert!(s.display().starts_with("Sam. The streaming works. well. It likes"), "{}", s.display());
     }
 
     #[test]
-    fn case_and_punctuation_insensitive_prefix() {
-        // Prev tail lacked punctuation; new decode added it — prefix still stable.
-        let out = smart_diff("lets go to the", "Let's go to the bank.");
-        assert!(out.ends_with("bank."));
+    fn a_decode_that_does_not_line_up_changes_nothing_until_it_keeps_happening() {
+        let mut s = PartialSession::default();
+        s.apply_normal("Do you have any notes on");
+        s.apply_normal("Do you have any notes on the launch");
+        let line = s.display();
+        // More audio, and the model hears the start differently: the line
+        // keeps its words (they were going to be lost from the end).
+        s.apply_normal("Do any new to son");
+        assert_eq!(s.display(), line);
+        s.apply_normal("Do any new to son the");
+        assert_eq!(s.display(), line);
+        // A third in a row: lined up by the words' count, so it still grows.
+        s.apply_normal("Do any new to son the launch plan for");
+        assert!(s.display().ends_with("plan for"), "{}", s.display());
+        assert!(s.display().starts_with("Do you have any notes on"), "{}", s.display());
     }
 
     #[test]
-    fn large_divergence_replaces_wholesale() {
-        let out = smart_diff("alpha beta gamma delta", "totally different words here");
-        assert_eq!(out, "totally different words here");
+    fn filler_sounds_never_show_so_they_cannot_come_and_go() {
+        let mut s = PartialSession::default();
+        s.apply_normal("Sam, um, the plan");
+        assert_eq!(s.display(), "Sam, the plan");
+        s.apply_normal("Sam, the plan is set");
+        s.apply_normal("Sam, uh, the plan is set. Um");
+        assert_eq!(s.display(), "Sam, the plan is set");
+    }
+
+    #[test]
+    fn where_the_settled_words_end_in_a_new_decode() {
+        let known = words("the plan is ready");
+        // The same words, punctuated differently, with more after them.
+        assert_eq!(find_end(&known, &words("The plan is ready, and Sam")), Some(4));
+        // A word dropped before them: their last words still find the place.
+        assert_eq!(find_end(&known, &words("plan is ready and Sam")), Some(3));
+        // Nothing alike: not found.
+        assert_eq!(find_end(&known, &words("totally different words here and more")), None);
+        assert_eq!(find_end(&[], &words("anything")), Some(0));
+        // One word of three alike isn't a match.
+        assert_eq!(find_end(&known, &words("one two is three")), None);
+        // "look at it, it says": "at it says" ends at "says", not one word
+        // early at "at it, it" (two of three alike there too).
+        let known = words("you look at it says");
+        assert_eq!(find_end(&known, &words("if you look at it, it says it stopped")), Some(7));
+    }
+
+    #[test]
+    fn a_seam_whose_words_dont_line_up_never_shows_words_twice() {
+        let mut s = PartialSession::default();
+        s.apply_normal("says says it stopped where the notes are");
+        s.apply_normal("says says it stopped where the notes are kept");
+        // The frozen part comes back as words found nowhere on the line: as
+        // many words as it has are frozen, the rest stays and lines up.
+        s.apply_advance("It says,", "it stopped where the notes are kept today", 3 * R);
+        assert_eq!(s.display(), "says says it stopped where the notes are kept today");
     }
 
     // ---- window planning ----
@@ -232,9 +390,22 @@ mod tests {
         s.apply_advance("the quick", "brown fox jumps", 5 * R);
         assert_eq!(s.display(), "the quick brown fox jumps");
         assert_eq!(s.window_start, 5 * R);
-        // A wholesale tail change replaces only the tail, never committed text.
+        // A decode that's nothing alike changes nothing (once).
         s.apply_normal("totally different words here");
-        assert_eq!(s.display(), "the quick totally different words here");
+        assert_eq!(s.display(), "the quick brown fox jumps");
+    }
+
+    #[test]
+    fn a_seam_freezes_the_words_as_shown_and_the_line_never_jumps() {
+        let mut s = PartialSession::default();
+        s.apply_normal("Sam. The streaming stuff works well and it");
+        s.apply_normal("Sam. The streaming stuff works well and it likes");
+        let before = s.display();
+        // The frozen part decoded on its own comes back differently cased
+        // and punctuated, the new window capitalised mid-sentence.
+        s.apply_advance("Sam, the streaming stuff", "Works well and it likes haiku", 4 * R);
+        assert_eq!(s.display(), format!("{before} haiku"));
+        assert_eq!(s.committed, "Sam. The streaming stuff");
     }
 
     #[test]
@@ -254,7 +425,11 @@ mod tests {
         assert_eq!(s.display(), "hello");
         s.apply_advance("hello", "world", 2 * R);
         assert_eq!(s.display(), "hello world");
-        s.apply_advance("   ", "again", 3 * R); // whitespace-only commit
+        // A whitespace-only commit: the words shown are all after the cut,
+        // and the new window's decode has them — never twice.
+        s.apply_advance("   ", "world again", 3 * R);
         assert_eq!(s.display(), "hello world again");
+        s.apply_advance("um", "world again and more", 4 * R);
+        assert_eq!(s.display(), "hello world again and more");
     }
 }

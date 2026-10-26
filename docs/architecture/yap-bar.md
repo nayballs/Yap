@@ -152,7 +152,9 @@ The always-there pill above the taskbar: the `overlay` window's Rust side (regio
   until hovered; 5 2×18 bars in the scheme's amber (Wispr's staggered timing), then the 19 px
   stop circle with its 8×8 square; hovered, it widens to show the timer.
   `bar/DictationCapsule.svelte` (the dictation overlay — waveform in Yap
-  amber, live partials word-paced by `bar/dictation.svelte.js`, which listens
+  amber, live partials word-paced by `bar/dictation.svelte.js` — the line
+  glides left as it grows, and one a word or so shorter keeps its place
+  (`STAY_PX`, 2026-10-26) rather than gliding back and forth — which listens
   for the page's whole life; a question to the **Voice Assistant**
   (`dictation.assistant`, `data-ask`) is its own variant: an amber edge and
   a ✦ for the dot, "Ask Yap…" + waveform (or the words) while it listens,

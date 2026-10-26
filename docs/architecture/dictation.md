@@ -283,9 +283,34 @@ to **Run again** from Home.
   transcribes a bounded **sliding window** of the buffer every ~500 ms
   (`dictation/partials.rs`: text older than the window freezes as committed text, the
   window advances at quiet points via `media::quietest_index`, 20 s hard cap —
-  per-tick cost independent of recording length; de-flickered by `smart_diff`,
-  adaptive backoff on slow machines, warm-loads the engine if it was
-  idle-unloaded) and emits `yap-partial` text. An **idle watcher** unloads the model after
+  per-tick cost independent of recording length; adaptive backoff on slow
+  machines, warm-loads the engine if it was idle-unloaded) and emits
+  `yap-partial` text. **Words settle once two decodes agree on them**
+  (2026-10-26, LocalAgreement as in whisper_streaming; it replaced
+  FluidVoice's `smartDiffUpdate`): each decode of the window changes its mind
+  somewhere — an "um", "Claude." / "Claude,", "haiku" / "hiking" — and the
+  old prefix-keeping rewrote the whole line from the first change. Now the
+  window's words are `confirmed` (shown for good, as first shown) or
+  `pending` (the newest decode's last words, which may still change); a new
+  decode is lined up with the confirmed words by their last three
+  (`find_end`: the very last word matching first, then most words, then the
+  nearest place), and one that can't be lined up changes nothing, twice at
+  most (`MAX_MISSES`), then is lined up by count; filler sounds (um, uh…)
+  never show. At a window advance the words shown up to where the frozen
+  part's decode ends among them are frozen **as shown** — never re-decoded
+  onto the line — and those after the cut stay; an empty frozen part
+  freezes nothing (freezing everything shown, as before, showed the
+  window's words twice once the new window decoded them). Replayed on a
+  tester's 30 dictations (8 minutes, `yap.exe partials-dump`, below): shown
+  words that changed 3,235 → 293, lines shorter than the one before 42 →
+  11, the last line as close to the final transcript (median 0.97) — a
+  word confirmed wrongly stays wrong in the preview; the paste is always
+  the final pass. **`yap.exe partials-dump <audio.wav>… --out ticks.json`**
+  (debug builds, `--features engines`; `dictation/partials/dump.rs`) feeds
+  recordings to the model on the worker's timing and writes every tick's
+  decode and line; `--ticks ticks.json` replays them through today's
+  stitching with no model (compare one stitching with another on the same
+  words); it prints lines shown, lines shorter, shown words changed. An **idle watcher** unloads the model after
   `model_unload_timeout`; the next dictation lazily reloads it. **No microphone** (none
   plugged in, a headset that connects after login, a CI runner) doesn't take the
   pipeline down: no stream is open until a recording needs one, every recording

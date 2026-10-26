@@ -107,7 +107,7 @@ One folder per area (an area's `<area>.rs` lists its modules); a big module's pa
 - `dictation/input_hook.rs` (+ `input_hook/held.rs`) — low-level keyboard/mouse hooks: nine bindings (Read aloud's the fifth, Use what I said's the sixth, Snip to Chat's the seventh, Paste last / Copy last transcript's the last two), each with up to 3 more keys (`moreHotkeys`), + four language shortcuts' and up to 12 saved transforms' slots, combo rules, `clashes`, menu-mask key; Esc while a snip is up; the keys held (`is_held`), chords, the stuck-key sweep; robot mode's marked keys.
 - `dictation/transforms.rs` — saved transforms: one-key rewrites (Polish, Shorter, Fix grammar only, Translate, Make it a prompt, your own) of the selection or the last dictation, no speaking; their shortcuts, the tray's Transforms menu, the bar's Undo.
 - `dictation/languages.rs` (+ `languages/`) — My languages: the languages you speak and which model covers which (`catalog.rs`), Whisper picking the likeliest of them, language shortcuts (a language, or translated by the AI), cleanup kept in the language spoken, the "You spoke French" nudge (`nudge.rs`).
-- `dictation/partials.rs` / `dictation/agent_detect.rs` — live partials' sliding window; Commands by name (see `dictation/pipeline.rs`).
+- `dictation/partials.rs` / `dictation/agent_detect.rs` — live partials' sliding window, words shown for good once two decodes agree (`partials/dump.rs`: `yap.exe partials-dump`, debug, the preview replayed on recordings); Commands by name (see `dictation/pipeline.rs`).
 - `dictation/mic.rs` — the dictation mic, opened on demand: held by a dictation / the mic check / "Keep the microphone ready", warm a minute after, closed at once on Bluetooth (HFP); the first connected one in the order; its device gone → reopened once or lost (`Sink::lost`); its own thread.
 - `dictation/mics.rs` (+ `mics/`) — the microphones' order (endpoint ids, then Windows' default), Windows' list watched (`IMMNotificationClient`), "X connected · Use it for dictation?" / "Using X" (`offer.rs`); `pipeline/unplugged.rs` ends a dictation whose mic was unplugged, its words kept.
 - `dictation/mic_watch.rs` — dead-mic watchdog: reopen the stream, then "No sound from <mic>".
@@ -249,7 +249,7 @@ One folder per area (an area's `<area>.rs` lists its modules); a big module's pa
 - `updates.rs` — background update checks and downloads, announcements, safe install.
 
 **App shell, config, tests** — [app-shell.md](./docs/architecture/app-shell.md), [config-and-data.md](./docs/architecture/config-and-data.md), [build-and-test.md](./docs/architecture/build-and-test.md)
-- `main.rs` — entry; `yap.exe mcp` / `diarize` / `eval` / `bench` / `call-dump` / `snip-dump` run before the app starts.
+- `main.rs` — entry; `yap.exe mcp` / `diarize` / `eval` / `bench` / `call-dump` / `snip-dump` / `partials-dump` run before the app starts.
 - `shell/bench.rs` (+ `shell/bench/`) — `yap.exe bench` (release builds too): speech, AI cleanup and a cold start timed on this PC and on it held to 4 / 2 threads (emulated), a table + shareable JSON; read only ([`docs/benchmarks.md`](./docs/benchmarks.md), build-and-test.md).
 - `lib.rs` — setup and wiring: the module list, plugins, every command (`generate_handler!`), hotkeys → pipeline, shutdown cleanup.
 - `shell/tray.rs` — tray icon and menu (models, Paste / Copy last transcript, Read selection aloud, Snip to Chat, Record this call, updates).

@@ -40,5 +40,11 @@ fn main() {
     if std::env::args_os().nth(1).is_some_and(|arg| arg == "snip-dump") {
         std::process::exit(yap_lib::run_snip_dump());
     }
+    // `yap.exe partials-dump …` (debug builds): the live preview replayed on
+    // recordings (dictation/partials/dump.rs). Reads the model and the audio.
+    #[cfg(debug_assertions)]
+    if std::env::args_os().nth(1).is_some_and(|arg| arg == "partials-dump") {
+        std::process::exit(yap_lib::run_partials_dump());
+    }
     yap_lib::run()
 }

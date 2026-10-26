@@ -553,6 +553,40 @@ test('dictating: the dictation overlay in the pill\'s place', async ({ yap, main
   await expect(bar.getByLabel('Yap bar')).toBeVisible({ timeout: 10_000 });
 });
 
+// The live words while dictating (26 Oct 2026: the line ran back and forth).
+// Rust settles the words (dictation/partials.rs); the capsule glides left as
+// the line grows, and a line its last word shorter keeps its place.
+test('dictating: the live words glide left, and a line a word shorter stays put', async ({ yap, main, shot }) => {
+  await needsMic(yap);
+  // Only the lines sent here (the stub's own preview would add its own).
+  const cfg = await yap.invoke('get_config');
+  await yap.invoke('save_config', { cfg: { ...cfg, streamingPartials: false } });
+  const bar = yap.overlay;
+  await pressHotkey(main);
+  await expect(bar.locator('.capsule')).toBeVisible();
+  const say = (text) => yap.invoke('plugin:event|emit', { event: 'yap-partial', payload: text });
+  const line = 'The plan for the launch is ready and Sam will send the notes to everyone on the team before Friday'.split(' ');
+  const words = bar.locator('.partial .pw');
+  const shift = () => bar.locator('.partial .ptext').evaluate((el) => el.style.transform);
+  await say(line.join(' '));
+  await expect(words).toHaveCount(line.length);
+  await expect.poll(shift).not.toBe('translateX(0px)');
+  const at = await shift();
+  // Its last word heard again (one word shorter): the line keeps its place.
+  await say(line.slice(0, -1).join(' '));
+  await expect(words).toHaveCount(line.length - 1);
+  await bar.waitForTimeout(500);
+  expect(await shift()).toBe(at);
+  // Longer again: it glides on.
+  await say(`${line.join(' ')} and Monday`);
+  await expect(words).toHaveCount(line.length + 2);
+  await expect.poll(shift).not.toBe(at);
+  await shot(bar, '17b-dictating-live-words');
+  await pressHotkey(main);
+  await dictationOver(yap);
+  await yap.invoke('save_config', { cfg: { ...(await yap.invoke('get_config')), streamingPartials: true } });
+});
+
 // ✕ / ✓ on the dictation capsule, and "Dictation cancelled · Undo"
 // (dictation/pipeline.rs: a cancelled recording's audio is kept `UNDO_MS`; bar.rs:
 // the capsule is a clickable region of the click-through bar, never

@@ -123,6 +123,14 @@ pub fn run_snip_dump() -> i32 {
     snip::dump::main(std::env::args().skip(2).collect())
 }
 
+/// `yap.exe partials-dump …` (main.rs, debug builds): the live preview
+/// replayed on recordings, every line the bar would show written down
+/// (`dictation/partials/dump.rs`).
+#[cfg(debug_assertions)]
+pub fn run_partials_dump() -> i32 {
+    dictation::partials::dump::main(std::env::args().skip(2).collect())
+}
+
 pub fn run() {
     // Decide portable-vs-installed once, before anything reads the data dir
     // (the file log lives under it).

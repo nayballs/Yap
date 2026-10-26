@@ -50,6 +50,7 @@
   // transcribed and answered, then "Speaking…" with three bars while the
   // answer is read aloud. ■ stops the answer (`assistant-stop`) while it
   // thinks or speaks; ✕ / ✓ work as for a dictation while it listens.
+  import { untrack } from 'svelte';
   import { invoke } from '@tauri-apps/api/core';
   import { dictation } from './dictation.svelte.js';
 
@@ -58,13 +59,19 @@
 
   // Smooth left glide: keep the newest words visible by translating the text
   // run left whenever it outgrows the clip box (transition on the transform).
+  // A line a word or so shorter (its last words heard again) keeps its place
+  // rather than gliding back right and left again a moment later; a bigger
+  // change, or a new line, follows it.
+  const STAY_PX = 48;
   let clipEl = $state(null);
   let textEl = $state(null);
   let shift = $state(0);
   $effect(() => {
-    void dictation.words;
+    const n = dictation.words.length;
     if (clipEl && textEl) {
-      shift = Math.min(0, clipEl.clientWidth - textEl.scrollWidth);
+      const target = Math.min(0, clipEl.clientWidth - textEl.scrollWidth);
+      const current = untrack(() => shift);
+      shift = n === 0 || target <= current || target - current > STAY_PX ? target : current;
     }
   });
 
