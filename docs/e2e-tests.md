@@ -109,6 +109,16 @@ or keyboard. (Don't click on them while the suite runs: a real click on the
 notepad's Stop, say, ends a test's meeting.) A test run's bar never reads
 your cursor or the window in front of you: `bar_simulate` stands in.
 
+**Two instances on one run folder** (`launchYap({ restart: true })`: a
+restart, a crash): the newer one runs from the run folder's copy of the
+exe, with its WebView2 profile there. `YapApp.stop()` runs once, and an
+instance a newer one replaced leaves those files alone (`LIVE` in
+`support/yap.js`); the files go, without blocking the runner, when the
+instance that owns them stops. (A `finally` stopping the first instance
+after the second had started deleted the second's files: on CI,
+`rmSync`'s retries on WebView2's locked profile froze the runner for 5
+minutes — notes-summary's Ask-thread test, 2026-10-26.)
+
 ## Where the results go
 
 Everything lands in `test-results/app/` (git-ignored, cleared at the start of

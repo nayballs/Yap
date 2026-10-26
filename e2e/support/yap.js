@@ -71,6 +71,26 @@ function rmrf(dir) {
   }
 }
 
+/** `rmrf` without blocking the runner while it retries a locked file. */
+async function rmrfAsync(dir) {
+  try {
+    await fs.promises.rm(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 300 });
+  } catch (e) {
+    console.warn(`e2e: couldn't remove ${dir}: ${e.message}`);
+  }
+}
+
+/**
+ * The instance running in each run folder now. A restart
+ * (`launchYap({ restart: true })`) runs in the last one's folder, from its
+ * copy of the exe and with a WebView2 profile there: the older instance's
+ * `stop()` must leave them be. (A test's `finally` stopping the first
+ * instance after the second had started deleted the second's running exe
+ * and profile: on CI, `rmSync`'s retries on the locked files froze the
+ * runner for 5 minutes — notes-summary's Ask-thread test, 2026-10-26.)
+ */
+const LIVE = new Map();
+
 /**
  * Start a fresh test instance.
  * @param {object} opts
@@ -150,6 +170,7 @@ export async function launchYap({ name, config = {}, env = {}, data = {}, runsDi
   child.on('error', (e) => (exited = { error: e }));
 
   const app = new YapApp({ name, child, runDir, appDir, dataDir, logPath, bridgeFile: childEnv.YAP_BRIDGE_FILE });
+  LIVE.set(runDir, app);
   try {
     app.browser = await connect(webview2Dir, () => exited, logPath);
     await assertTestMode(logPath, exe);
@@ -322,8 +343,14 @@ export class YapApp {
     await sleep(500);
   }
 
-  /** Quit (by closing stdin), falling back to killing the process tree. */
+  /**
+   * Quit (by closing stdin), falling back to killing the process tree. Once
+   * only; and an instance a restart replaced leaves the run folder's files
+   * to the newer one (`LIVE`).
+   */
   async stop() {
+    if (this.stopped) return;
+    this.stopped = true;
     await this.browser?.close().catch(() => {});
     const { child } = this;
     if (child.exitCode === null && child.signalCode === null) {
@@ -340,9 +367,12 @@ export class YapApp {
         }
       }
     }
-    // Keep config, data and logs for the report; drop the big stuff.
+    // Keep config, data and logs for the report; drop the big stuff —
+    // unless a newer instance runs from them.
+    if (LIVE.get(this.runDir) !== this) return;
+    LIVE.delete(this.runDir);
     await sleep(500);
-    rmrf(path.join(this.appDir, 'yap.exe'));
-    rmrf(path.join(this.runDir, 'webview2'));
+    await rmrfAsync(path.join(this.appDir, 'yap.exe'));
+    await rmrfAsync(path.join(this.runDir, 'webview2'));
   }
 }
