@@ -788,7 +788,8 @@ test('a model on this PC: it must search first, and Yap checks what the answer c
 });
 
 test('the Voice Assistant says a web answer short, with the sources in Chat', async ({ yap, main, fakeLlm, shot }) => {
-  await setConfig(yap, main, { webSearch: true, webSearchKeys: { exa: EXA_KEY }, llmScopes: chatScope(fakeLlm), speakReplies: true });
+  // "How much to read aloud": a sentence or two (the short web answer).
+  await setConfig(yap, main, { webSearch: true, webSearchKeys: { exa: EXA_KEY }, llmScopes: chatScope(fakeLlm), speakReplies: true, spokenLength: 'short' });
   await yap.invoke('assistant_stop');
   await yap.invoke('tts_stop');
   await yap.invoke('tts_e2e_spoken', { clear: true });
@@ -821,7 +822,7 @@ test('the Voice Assistant says a web answer short, with the sources in Chat', as
   await expect(lastAnswer(main)).toContainText('He is a wizard from Waterdeep');
   await expect(sourcesOfLast(main).getByRole('button')).toHaveCount(2);
   await shot(main, '10-chat-after-the-assistant');
-  await setConfig(yap, main, { speakReplies: false });
+  await setConfig(yap, main, { speakReplies: false, spokenLength: '1m' });
 });
 
 // A tester's voice chat (2026-10-23): the step a model on this PC is made to
@@ -836,7 +837,8 @@ test('the Voice Assistant never says what a model on this PC wrote before the se
   fakeLlm,
   shot,
 }) => {
-  await setConfig(yap, main, { webSearch: true, webSearchKeys: { exa: EXA_KEY }, llmScopes: chatScope(fakeLlm), speakReplies: true });
+  // "How much to read aloud": a sentence or two (the short web answer).
+  await setConfig(yap, main, { webSearch: true, webSearchKeys: { exa: EXA_KEY }, llmScopes: chatScope(fakeLlm), speakReplies: true, spokenLength: 'short' });
   await yap.invoke('assistant_stop');
   await yap.invoke('tts_stop');
   await yap.invoke('tts_e2e_spoken', { clear: true });
@@ -879,5 +881,5 @@ test('the Voice Assistant never says what a model on this PC wrote before the se
   expect(steps[1].messages.at(-2).tool_calls[0].function.name).toBe('web_search');
   expect(steps[1].messages.at(-2).content).toBeNull();
   await yap.invoke('tts_stop');
-  await setConfig(yap, main, { speakReplies: false });
+  await setConfig(yap, main, { speakReplies: false, spokenLength: '1m' });
 });

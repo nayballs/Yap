@@ -601,22 +601,29 @@ The AI Chat surface (conversations, the tool-calling loop and its note tools) an
   read aloud always shows (`card_on_bar`, pure), also when the voice
   fails —, shown before the voice starts; it goes when the
   voice ends (`on_tts_state`), or after `read_ms` when shown only. **A web
-  answer** (`turn.sources`, `web.rs`) is said short (`spoken_answer`:
-  `tts::brief` — its first two sentences, no `[n]` — then "The details and
-  sources are in Chat."), its card shows that and "2 sources in Chat"; the
-  model is told a spoken question wants the answer first. **Any other
-  spoken answer** is asked for short (`SPOKEN_ANSWER_NOTE`, last in Chat's
-  system prompt for the Voice Assistant, or a question dictated into Chat
-  with spoken replies on: "one or two short sentences (under 40 words) of
-  plain speech…" — the model evaluations' egg answer was 55–98 words with
-  lists before, 12–17 after); one that runs on anyway is **said whole up
-  to `SPOKEN_MAX_WORDS` (150, about a minute)**, and a longer one is said
-  from its first paragraph while they fit in `SPOKEN_LEAD_WORDS` (100;
-  `tts::lead`: whole paragraphs or list items, so it stops at the end of a
-  thought — a first paragraph longer than that, its sentences while they
-  fit, two at least), then "The rest is in Chat." (The limit was 60 words
-  and two sentences until 2026-10-26: a 95-word answer in two paragraphs
-  stopped mid-thought.) `stop`
+  answer** (`turn.sources`, `web.rs`): the model is told a spoken question
+  wants the answer first. **Any other spoken answer** is asked for short
+  (`SPOKEN_ANSWER_NOTE`, last in Chat's system prompt for the Voice
+  Assistant, or a question dictated into Chat with spoken replies on: "one
+  or two short sentences (under 40 words) of plain speech…" — the model
+  evaluations' egg answer was 55–98 words with lists before, 12–17 after).
+  **How much of an answer is said is the person's choice** (2026-10-26):
+  Settings → Voice Assistant → Spoken replies → **How much to read aloud**
+  (`spoken_length`, `SpokenLength`): "A sentence or two" (`short`:
+  `tts::brief`, its first two sentences), "About 30 seconds" / "About a
+  minute" (the default) / "About 2 minutes" (`30s` / `1m` / `2m`: 75 / 150
+  / 300 words, ~150 a minute — all of it up to that, else its paragraphs
+  from the first while they fit, `tts::lead`: whole paragraphs or list
+  items, so it stops at the end of a thought; a first paragraph longer than
+  that, its sentences while they fit, two at least), or "The whole answer"
+  (`whole`). Cut short, it ends "The rest is in Chat." (a web answer: "The
+  details and sources are in Chat."); no `[n]` is ever said; the card
+  shows what's said (a web answer's without its markers) and "2 sources in
+  Chat". Chat's own voice replies follow the same setting (`chat_send`'s
+  `spokenText`, `spoken_in_chat`: "The rest is on screen."); ▶ Read aloud
+  on a message always reads all of it. (Until 2026-10-26 every answer over
+  60 words was said in two sentences, and every web answer short: a
+  95-word answer in two paragraphs stopped mid-thought.) `stop`
   (■ on the capsule = `bar_action "assistant-stop"`, `assistant_stop`;
   Chat's ■ and Esc too): the voice stops **and the answer's stream
   closes** (each question's turn has a `Stoppable` called

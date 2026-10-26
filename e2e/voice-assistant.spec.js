@@ -428,6 +428,80 @@ test('■ stops the answer, and a press while Yap speaks cuts it off to listen (
 // again after the newer one's answer, and both answers showed under both
 // questions. The newer question replaces it now (chat/stream.rs
 // `Halt::Superseded`): one answer, to the newer question, said once.
+// How much of an answer is said (26 Oct 2026: a 95-word answer stopped
+// after two sentences with "The rest is in Chat."; now the person's choice).
+test('"How much to read aloud": a sentence or two, about a minute, or the whole answer', async ({
+  yap,
+  main,
+  fakeLlm,
+  shot,
+}) => {
+  // The setting: under Speak replies, greyed out while the voice is off.
+  await setConfig(yap, main, { speakReplies: false, speakWhen: 'voice', spokenLength: '1m' });
+  let dialog = await openSettings(main, 'Voice Assistant');
+  let length = dialog.getByRole('combobox', { name: 'How much to read aloud' });
+  await expect(length).toHaveValue('1m');
+  await expect(length).toBeDisabled();
+  await closeSettings(main);
+  await setConfig(yap, main, { speakReplies: true });
+  dialog = await openSettings(main, 'Voice Assistant');
+  length = dialog.getByRole('combobox', { name: 'How much to read aloud' });
+  await expect(length).toBeEnabled();
+  await expect(length.locator('option')).toHaveText([
+    'A sentence or two',
+    'About 30 seconds',
+    'About a minute',
+    'About 2 minutes',
+    'The whole answer',
+  ]);
+  await expect(dialog.getByText('Up to about a minute of an answer; the rest is in Chat')).toBeVisible();
+  await length.selectOption('short');
+  await expect(dialog.getByText('Just the answer itself; the rest is in Chat')).toBeVisible();
+  await expect.poll(async () => (await yap.invoke('get_config')).spokenLength).toBe('short');
+  await length.scrollIntoViewIfNeeded();
+  await shot(main, '26-how-much-to-read-aloud');
+  await closeSettings(main);
+
+  // Four paragraphs, 164 words.
+  const para = (n) =>
+    `The ${n} part of the plan starts on Monday with a short review of what changed last week. After that the team checks each open item, writes down who owns it, and agrees a date for the next look at it.`;
+  const parts = ['first', 'second', 'third', 'fourth'].map(para);
+  const long = parts.join('\n\n');
+  const lastSaid = async () => (await spoken(yap)).at(-1)?.text;
+  await inAnotherApp(yap);
+
+  // A sentence or two: the answer itself, the rest in Chat.
+  fakeLlm.scriptChat([{ content: long }]);
+  await ask(yap, 'what is the plan');
+  await expect.poll(lastSaid, { timeout: 15_000 }).toBe(`${parts[0]} The rest is in Chat.`);
+  await yap.invoke('tts_stop');
+
+  // About a minute: whole paragraphs while they fit, then the rest in Chat.
+  await setConfig(yap, main, { spokenLength: '1m' });
+  fakeLlm.scriptChat([{ content: long }]);
+  await ask(yap, 'and the plan again');
+  await expect.poll(lastSaid, { timeout: 15_000 }).toBe(`${parts.slice(0, 3).join(' ')} The rest is in Chat.`);
+  await yap.invoke('tts_stop');
+
+  // The whole answer: all of it.
+  await setConfig(yap, main, { spokenLength: 'whole' });
+  fakeLlm.scriptChat([{ content: long }]);
+  await ask(yap, 'the whole plan please');
+  await expect.poll(lastSaid, { timeout: 15_000 }).toBe(parts.join(' '));
+  await yap.invoke('tts_stop');
+
+  // Chat's voice replies follow it too: about 30 seconds, the rest on screen.
+  await mainOnScreen(yap);
+  await setConfig(yap, main, { speakWhen: 'always', spokenLength: '30s' });
+  await freshChat(main);
+  fakeLlm.scriptChat([{ content: long }]);
+  await send(main, 'Typed: what is the plan');
+  await expect(thread(main)).toContainText('The fourth part of the plan');
+  await expect.poll(lastSaid, { timeout: 15_000 }).toBe(`${parts[0]} The rest is on screen.`);
+  await yap.invoke('tts_stop');
+  await setConfig(yap, main, { speakReplies: false, speakWhen: 'voice', spokenLength: '1m' });
+});
+
 test('a barge-in question replaces the one still being answered: one answer, to the newer one', async ({
   yap,
   main,

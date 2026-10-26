@@ -755,6 +755,13 @@ pub struct YapConfig {
     /// lost (`assistant::card_on_bar`). On by default.
     #[serde(default = "default_true")]
     pub assistant_answer_card: bool,
+    /// "Read aloud" (Settings → Voice Assistant → Spoken replies): how much
+    /// of an answer Yap reads out by itself — the assistant shortcut's and
+    /// Chat's voice replies — "short" (a sentence or two), "30s", "1m" (the
+    /// default), "2m" or "whole" (`assistant::SpokenLength`). The rest is in
+    /// Chat. ▶ Read aloud on a message always reads all of it.
+    #[serde(default = "default_spoken_length")]
+    pub spoken_length: String,
     /// "Let Yap open apps when you ask" (Settings → Voice Assistant → Opening
     /// apps; `apps.rs`): "open Spotify" in Chat or to the Voice Assistant
     /// opens an app from the Start menu's list of apps installed on this PC
@@ -1159,6 +1166,9 @@ fn default_web_search_service() -> String {
 fn default_speak_when() -> String {
     "voice".into()
 }
+fn default_spoken_length() -> String {
+    "1m".into()
+}
 fn default_tts_engine() -> String {
     crate::voice::tts::DEFAULT_ENGINE.into()
 }
@@ -1275,6 +1285,7 @@ impl Default for YapConfig {
             speak_when: default_speak_when(),
             talk_back_hands_free: true,
             assistant_answer_card: true,
+            spoken_length: default_spoken_length(),
             open_apps: true,
             apps_blocked: Vec::new(),
             app_nicknames: Vec::new(),

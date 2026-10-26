@@ -172,7 +172,9 @@
   "system" Segoe UI | "dyslexic" OpenDyslexic, default) + reading_size
   ("small" | "default" | "large" | "larger", default) + motion ("system" |
   "reduced", system), spoken replies (`voice/tts.rs`): speak_replies (off), speak_when ("voice" |
-  "always", voice), talk_back_hands_free (true; only while speak_replies is
+  "always", voice), spoken_length (how much of an answer is read out by
+  itself: "short" | "30s" | "1m" | "2m" | "whole", 1m;
+  `assistant::SpokenLength`), talk_back_hands_free (true; only while speak_replies is
   on), tts_engine ("kokoro" — Windows voices until it's downloaded — or
   "windows"), tts_voice (Kokoro's, "af_bella"), tts_windows_voice ("" =
   Windows' default), tts_rate (1.0, 0.5–2.0), tts_volume (0.5: Yap's own

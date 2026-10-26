@@ -210,6 +210,9 @@ async fn send_turn(
         "messageId": turn.message_id(),
         "userMessageId": format!("chat:{}:{}", turn.conversation_id, turn.user_index),
         "speak": speak && !turn.stopped,
+        // What's said: as much as "Read aloud" says (`assistant::SpokenLength`).
+        "spokenText": (speak && !turn.stopped)
+            .then(|| crate::chat::assistant::spoken_in_chat(&turn.reply, crate::chat::assistant::SpokenLength::configured(&now))),
         "stopped": turn.stopped,
         "question": text,
         "tokens": turn.tokens,

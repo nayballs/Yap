@@ -32,11 +32,12 @@
 //!    the one in front (`notice::place`), a quiet card on the Yap bar shows
 //!    the answer too; it goes when the voice ends, on ■ (the capsule), ✕ or
 //!    Esc. Pressing the shortcut again asks a follow-up in the same
-//!    conversation. An answer written from the web (`web.rs`, with
-//!    "Look things up on the web" on) is said short — its first one or two
-//!    sentences, citation markers left out — then "The details and sources
-//!    are in Chat." ([`spoken_answer`]); the card shows the short answer and
-//!    "3 sources in Chat".
+//!    conversation. As much of the answer is said as "How much to read
+//!    aloud" says ([`SpokenLength`]: a sentence or two, about 30 seconds, a
+//!    minute — the default — or 2 minutes, or all of it), citation markers
+//!    left out; cut short, "The rest is in Chat." (an answer written from
+//!    the web: "The details and sources are in Chat.", [`spoken_answer`]);
+//!    the card shows what's said and "3 sources in Chat".
 //!
 //! "Open Teams" needs no model: Yap opens the app itself and says "Opening
 //! Microsoft Teams." (`apps.rs`, through `chat_turn`), and so does "Yes."
@@ -198,38 +199,92 @@ pub fn card_on_bar(show_answer_card: bool, spoken: bool) -> bool {
     show_answer_card || !spoken
 }
 
-/// What the assistant says, and what its card shows, for an answer.
-/// Written from the web (`sources` > 0): the short answer — its first one
-/// or two sentences, without citation markers (`tts::brief`) — then "The
-/// details and sources are in Chat."; the card shows the short answer.
-/// Otherwise the whole answer, both ways. Pure.
-pub fn spoken_answer(reply: &str, sources: usize) -> (String, String) {
-    if sources == 0 {
-        // Told to answer in a sentence or two (`SPOKEN_ANSWER_NOTE`); one
-        // that runs on anyway is said whole up to about a minute, else its
-        // first paragraphs, the rest in Chat.
-        if reply.split_whitespace().count() > SPOKEN_MAX_WORDS {
-            let lead = crate::voice::tts::lead(reply, SPOKEN_LEAD_WORDS);
-            if !lead.is_empty() && lead.split_whitespace().count() < reply.split_whitespace().count() {
-                return (format!("{lead} {REST_IN_CHAT}"), lead);
-            }
+/// **How much of an answer Yap reads out by itself** — "Read aloud" in
+/// Settings → Voice Assistant → Spoken replies (`spoken_length`): the
+/// assistant shortcut's answers and Chat's voice replies. ▶ Read aloud on
+/// a message always reads all of it. The model is still asked to keep a
+/// spoken answer short (`SPOKEN_ANSWER_NOTE`); this is how much of what it
+/// wrote is said.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SpokenLength {
+    /// "A sentence or two": the answer's first two sentences.
+    Short,
+    /// "About 30 seconds" / "About a minute" / "About 2 minutes": all of
+    /// it up to this many words (~150 a minute), else its paragraphs from
+    /// the first while they fit (`tts::lead`).
+    Words(usize),
+    /// "The whole answer".
+    Whole,
+}
+
+impl SpokenLength {
+    /// The setting's value ("short", "30s", "1m", "2m", "whole"); anything
+    /// else is the default, about a minute.
+    pub fn from_setting(value: &str) -> SpokenLength {
+        match value {
+            "short" => SpokenLength::Short,
+            "30s" => SpokenLength::Words(SPOKEN_MAX_WORDS / 2),
+            "2m" => SpokenLength::Words(SPOKEN_MAX_WORDS * 2),
+            "whole" => SpokenLength::Whole,
+            _ => SpokenLength::Words(SPOKEN_MAX_WORDS),
         }
-        return (reply.to_string(), reply.to_string());
     }
-    let brief = crate::voice::tts::brief(reply, 2);
-    if brief.is_empty() {
+
+    /// The configured one.
+    pub fn configured(cfg: &crate::config::YapConfig) -> SpokenLength {
+        SpokenLength::from_setting(&cfg.spoken_length)
+    }
+}
+
+/// The part of an answer said before "The rest is in Chat.", plain text
+/// without markdown or citation markers; `None`: all of it is said. Pure.
+fn spoken_part(reply: &str, length: SpokenLength) -> Option<String> {
+    let words = |s: &str| s.split_whitespace().count();
+    let part = match length {
+        SpokenLength::Whole => return None,
+        SpokenLength::Short => crate::voice::tts::brief(reply, 2),
+        SpokenLength::Words(max) if words(reply) <= max => return None,
+        SpokenLength::Words(max) => crate::voice::tts::lead(reply, max),
+    };
+    (!part.is_empty() && words(&part) < words(reply)).then_some(part)
+}
+
+/// What the assistant says, and what its card shows, for an answer: as
+/// much as `length` says (all of it, or its start then "The rest is in
+/// Chat."; written from the web, `sources` > 0: "The details and sources
+/// are in Chat."). The card shows what's said; a web answer's without its
+/// `[n]` markers. Pure.
+pub fn spoken_answer(reply: &str, sources: usize, length: SpokenLength) -> (String, String) {
+    if sources > 0 && crate::voice::tts::brief(reply, 2).is_empty() {
         return ("The answer and its sources are in Chat.".to_string(), reply.to_string());
     }
-    (format!("{brief} {DETAILS_IN_CHAT}"), brief)
+    let after = if sources > 0 { DETAILS_IN_CHAT } else { REST_IN_CHAT };
+    match spoken_part(reply, length) {
+        Some(part) => (format!("{part} {after}"), part),
+        None if sources > 0 => (reply.to_string(), crate::voice::tts::lead(reply, usize::MAX)),
+        None => (reply.to_string(), reply.to_string()),
+    }
+}
+
+/// What Chat says for a voice reply (`chat_send`'s `spokenText`): as much
+/// as `length` says, then "The rest is on screen." Pure.
+pub fn spoken_in_chat(reply: &str, length: SpokenLength) -> String {
+    match spoken_part(reply, length) {
+        Some(part) => format!("{part} {REST_ON_SCREEN}"),
+        None => reply.to_string(),
+    }
 }
 
 /// Said after a web answer's short version.
 pub const DETAILS_IN_CHAT: &str = "The details and sources are in Chat.";
 
+/// Said after the start of a long voice reply in Chat.
+pub const REST_ON_SCREEN: &str = "The rest is on screen.";
+
 /// How many of an answer's sources are web pages: a calendar answer's
 /// meetings (`chat/tools/calendar.rs`) are said whole, like any answer
 /// ("You've the design review at 2."), not cut short for their sources.
-fn web_sources(turn: &crate::chat::turn::ChatTurn) -> usize {
+pub(crate) fn web_sources(turn: &crate::chat::turn::ChatTurn) -> usize {
     turn.sources.iter().filter(|s| !s.url.is_empty()).count()
 }
 
@@ -245,14 +300,10 @@ fn sources_note(web: usize) -> Option<String> {
 /// Said after the short version of a long answer.
 pub const REST_IN_CHAT: &str = "The rest is in Chat.";
 
-/// An answer longer than this — about a minute of speech — is said short
-/// ([`spoken_answer`]). It was 60 until 2026-10-26: a 95-word answer in two
+/// About a minute of speech, the default [`SpokenLength`]. An answer longer
+/// than 60 words was said short until 2026-10-26: a 95-word answer in two
 /// paragraphs stopped after its second sentence, mid-thought.
 pub const SPOKEN_MAX_WORDS: usize = 150;
-
-/// How much of a longer answer is said: its paragraphs from the first while
-/// they fit (`tts::lead`).
-pub const SPOKEN_LEAD_WORDS: usize = 100;
 
 /// The end of Chat's system prompt for a question asked out loud whose
 /// answer is read aloud whole (`turn::chat_turn`): without it, "how long
@@ -941,9 +992,8 @@ async fn answer(app: AppHandle, generation: u64, since: u64, question: String) {
     } else {
         None
     };
-    // An answer from the web: one or two sentences out loud (and on the
-    // card), the details and sources in Chat.
-    let (said, shown) = spoken_answer(&turn.reply, web_sources(&turn));
+    // As much as "Read aloud" says (and on the card), the rest in Chat.
+    let (said, shown) = spoken_answer(&turn.reply, web_sources(&turn), SpokenLength::configured(&crate::config::load()));
     let sources_note = sources_note(web_sources(&turn));
     let note = note.or(sources_note.as_deref());
     // The card first (the voice may be short), then the voice. With "Show
@@ -1005,7 +1055,7 @@ fn finish_streamed(
     let meeting = crate::voice::tts::meeting_quiet().is_some();
     let interrupted = crate::dictation::pipeline::dictation_state().0 != since;
     let how = reply(crate::config::load().speak_replies, meeting, interrupted);
-    let (said_text, shown) = spoken_answer(&turn.reply, web_sources(turn));
+    let (said_text, shown) = spoken_answer(&turn.reply, web_sources(turn), SpokenLength::configured(&crate::config::load()));
     let still = current(generation);
     if how == Reply::Speak && still {
         let rest: Vec<String> = crate::voice::tts::utterances(&said_text).into_iter().skip(said).collect();
@@ -1299,44 +1349,82 @@ mod tests {
 
     #[test]
     fn a_web_answer_is_said_short_with_the_rest_in_chat() {
-        let reply = "Gale is on the beach west of the Nautiloid crash site [1]. Pull him out of the portal to recruit him [1][2].\n\n## Details\n- He offers to join you [2].";
-        let (said, shown) = spoken_answer(reply, 2);
+        let reply = "Gale is on the beach west of the Nautiloid crash site [1]. Pull him out of the portal to recruit him [1][2].
+
+## Details
+- He offers to join you [2].";
+        let (said, shown) = spoken_answer(reply, 2, SpokenLength::Short);
         assert_eq!(
             said,
             "Gale is on the beach west of the Nautiloid crash site. Pull him out of the portal to recruit him. The details and sources are in Chat."
         );
         assert!(!said.contains('['));
         assert_eq!(shown, "Gale is on the beach west of the Nautiloid crash site. Pull him out of the portal to recruit him.");
-        // Not from the web: all of it, as before.
-        assert_eq!(spoken_answer("Your notes say Friday.", 0), ("Your notes say Friday.".into(), "Your notes say Friday.".into()));
+        // About a minute (the default): all of it, the card without its markers.
+        let (said, shown) = spoken_answer(reply, 2, SpokenLength::from_setting("1m"));
+        assert_eq!(said, reply);
+        assert!(!shown.contains('[') && shown.contains("He offers to join you"), "{shown}");
+        // Not from the web: all of it.
+        let one = "Your notes say Friday.";
+        assert_eq!(spoken_answer(one, 0, SpokenLength::Short), (one.into(), one.into()));
     }
 
     #[test]
-    fn a_long_answer_is_said_short_with_the_rest_in_chat() {
+    fn a_long_answer_is_said_as_far_as_read_aloud_says() {
+        let minute = SpokenLength::from_setting("1m");
+        assert_eq!(SpokenLength::from_setting(""), minute, "the default");
+        assert_eq!(SpokenLength::from_setting("30s"), SpokenLength::Words(75));
+        assert_eq!(SpokenLength::from_setting("2m"), SpokenLength::Words(300));
         // Two paragraphs, ~95 words: said whole (it stopped after its second
         // sentence, mid-thought, with the old 60-word limit).
-        let two = "I don't have any special knowledge about how the app works inside. I'm an assistant it reaches through an API key, and I don't see how it starts me or what it tells me about itself.\n\nI just answer your messages and use the tools it gives me to search your notes, your calendar and the web. If you're curious what it costs, the app's own usage page is the place to look, rather than something I'd know from the inside.";
+        let two = "I don't have any special knowledge about how the app works inside. I'm an assistant it reaches through an API key, and I don't see how it starts me or what it tells me about itself.
+
+I just answer your messages and use the tools it gives me to search your notes, your calendar and the web. If you're curious what it costs, the app's own usage page is the place to look, rather than something I'd know from the inside.";
         assert!(two.split_whitespace().count() <= SPOKEN_MAX_WORDS);
-        assert_eq!(spoken_answer(two, 0).0, two);
+        assert_eq!(spoken_answer(two, 0, minute).0, two);
+        // "A sentence or two": its first two sentences.
+        let (said, shown) = spoken_answer(two, 0, SpokenLength::Short);
+        assert!(said.ends_with(REST_IN_CHAT) && shown.ends_with("about itself."), "{said}");
+        // About 30 seconds: its first paragraph.
+        let (_, shown) = spoken_answer(two, 0, SpokenLength::from_setting("30s"));
+        assert!(shown.ends_with("about itself."), "{shown}");
         // Qwen3.5-4B's 87-word egg answer (the model evaluations): whole too.
         let egg = "I don't have a specific note on this, but for a runny yolk: - Start with a cold egg in a pot of cold water - Bring to a boil (about 5-7 minutes) - Once boiling, reduce to a simmer and cook for **6-7 minutes total** - Remove from water and let sit in ice water for 1-2 minutes to stop cooking. The exact time can vary slightly based on egg size and water temperature, so 6-7 minutes is a good starting point.";
-        assert!(!spoken_answer(egg, 0).0.ends_with(REST_IN_CHAT));
-        // Over a minute: whole paragraphs from the first, then the rest in Chat.
+        assert!(!spoken_answer(egg, 0, minute).0.ends_with(REST_IN_CHAT));
+        // Over a minute: whole paragraphs from the first while they fit, then the rest in Chat.
         let para = |topic: &str| format!("The {topic} part of the plan starts on Monday with a short review of what changed last week. After that the team checks each open item, writes down who owns it, and agrees a date for the next look at it."); // 41 words
-        let long = format!("{}\n\n{}\n\n{}\n\n{}", para("first"), para("second"), para("third"), para("fourth"));
+        let long = format!("{}
+
+{}
+
+{}
+
+{}", para("first"), para("second"), para("third"), para("fourth"));
         assert!(long.split_whitespace().count() > SPOKEN_MAX_WORDS);
-        let (said, shown) = spoken_answer(&long, 0);
+        let (said, shown) = spoken_answer(&long, 0, minute);
         assert!(said.ends_with(REST_IN_CHAT), "{said}");
-        assert_eq!(shown, format!("{}\n\n{}", para("first"), para("second")), "two whole paragraphs fit in {SPOKEN_LEAD_WORDS} words");
+        assert_eq!(shown, format!("{}
+
+{}
+
+{}", para("first"), para("second"), para("third")));
+        // About 2 minutes, or the whole answer: all of it.
+        assert_eq!(spoken_answer(&long, 0, SpokenLength::from_setting("2m")).0, long);
+        assert_eq!(spoken_answer(&long, 0, SpokenLength::Whole).0, long);
+        // Chat's voice reply: the same cut, "The rest is on screen."
+        assert!(spoken_in_chat(&long, minute).ends_with(REST_ON_SCREEN));
+        assert_eq!(spoken_in_chat(&long, SpokenLength::Whole), long);
         // One huge paragraph: its sentences while they fit, never fewer than two.
         let wall = "This sentence goes on for a while to fill the paragraph up with words. ".repeat(20);
-        let (said, shown) = spoken_answer(&wall, 0);
+        let (said, shown) = spoken_answer(&wall, 0, minute);
         assert!(said.ends_with(REST_IN_CHAT), "{said}");
         let n = shown.split_whitespace().count();
-        assert!((28..=SPOKEN_LEAD_WORDS).contains(&n), "{n}: {shown}");
-        // A short one is said whole.
+        assert!((28..=SPOKEN_MAX_WORDS).contains(&n), "{n}: {shown}");
+        // A short one is said whole, whatever the setting.
         let short = "Boil it for six to seven minutes, then cool it in cold water.";
-        assert_eq!(spoken_answer(short, 0).0, short);
+        for length in [SpokenLength::Short, minute, SpokenLength::Whole] {
+            assert_eq!(spoken_answer(short, 0, length).0, short);
+        }
     }
 
     #[test]

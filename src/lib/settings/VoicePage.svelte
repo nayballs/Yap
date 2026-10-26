@@ -13,6 +13,7 @@
   import Row from '../ui/Row.svelte';
   import Toggle from '../ui/Toggle.svelte';
   import Segmented from '../ui/Segmented.svelte';
+  import Select from '../ui/Select.svelte';
   import LinkRow from '../ui/LinkRow.svelte';
   import VoiceSettings from './VoiceSettings.svelte';
   import OpenAppsSettings from './OpenAppsSettings.svelte';
@@ -41,6 +42,22 @@
   const SPEAK_WHEN_DESC = {
     voice: 'In Chat, answers to questions you dictate are read aloud; typed ones stay quiet',
     always: 'Every answer in Chat is read aloud',
+  };
+  // How much of an answer is read out by itself (chat/assistant.rs
+  // SpokenLength): the assistant shortcut's and Chat's voice replies.
+  const SPOKEN_LENGTH = [
+    { value: 'short', label: 'A sentence or two' },
+    { value: '30s', label: 'About 30 seconds' },
+    { value: '1m', label: 'About a minute' },
+    { value: '2m', label: 'About 2 minutes' },
+    { value: 'whole', label: 'The whole answer' },
+  ];
+  const SPOKEN_LENGTH_DESC = {
+    short: 'Just the answer itself; the rest is in Chat',
+    '30s': 'Up to about 30 seconds of an answer; the rest is in Chat',
+    '1m': 'Up to about a minute of an answer; the rest is in Chat',
+    '2m': 'Up to about 2 minutes of an answer; the rest is in Chat',
+    whole: 'Every answer read out in full, however long',
   };
 </script>
 
@@ -107,6 +124,14 @@
       hint="The same switch as Voice replies in Chat."
     />
     <KokoroOffer bind:open={offerKokoro} {cfg} />
+  </Row>
+  <Row
+    label="How much to read aloud"
+    desc={SPOKEN_LENGTH_DESC[cfg.spokenLength] ?? SPOKEN_LENGTH_DESC['1m']}
+    hint="For answers Yap reads out by itself, from the assistant shortcut and in Chat. A long answer stops at the end of a paragraph. ▶ Read aloud on an answer reads all of it, and ■ or Esc stops Yap at any time."
+    setting="spoken-length"
+  >
+    <Select bind:value={cfg.spokenLength} options={SPOKEN_LENGTH} ariaLabel="How much to read aloud" disabled={!cfg.speakReplies} />
   </Row>
   <Row label="When to speak" desc={SPEAK_WHEN_DESC[cfg.speakWhen] ?? SPEAK_WHEN_DESC.voice} setting="speak-when">
     <Segmented bind:value={cfg.speakWhen} options={SPEAK_WHEN} label="When to speak" disabled={!cfg.speakReplies} />

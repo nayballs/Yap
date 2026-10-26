@@ -103,7 +103,9 @@ Reading answers aloud: Kokoro and Windows' voices on this PC, or ElevenLabs on t
   (`cloud::Health::announce`); the state then carries no error (no second
   toast). `yap-tts-state {speaking, messageId, error}` on every change. **When to speak** (pure):
   `auto_speak(speak_replies, speak_when, asked_by_voice, dictating,
-  meeting)` (chat_send's `speak`), `sends_by_itself(speak_replies,
+  meeting)` (chat_send's `speak`; what's said, `spokenText`, as much as
+  "How much to read aloud" says, `assistant::spoken_in_chat`),
+  `sends_by_itself(speak_replies,
   hands_free, said_enter)` — the Voice Assistant's answers ignore both
   (`assistant::reply`), and every state change is passed to
   `assistant::on_tts_state` (its answer ended). Commands `tts_voices` (`{provider,

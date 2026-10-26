@@ -431,7 +431,9 @@ there can move margins: compare a page before and after.
   Wikipedia and reference wikis, always; where the search words go, a link to
   Privacy & data, and the safety rule). **Spoken replies in Chat**: Speak
   replies (`speakReplies`; switching it on without Kokoro offers it,
-  `KokoroOffer.svelte`), When to speak (`speakWhen`), Talk back hands-free
+  `KokoroOffer.svelte`), How much to read aloud (`spokenLength`, a Select:
+  A sentence or two / About 30 seconds / About a minute / About 2 minutes /
+  The whole answer; greyed out with Speak replies off), When to speak (`speakWhen`), Talk back hands-free
   (`talkBackHandsFree`). **Voice** (`VoiceSettings.svelte`): Speaks with (On
   this PC / ElevenLabs → `ttsProvider`, `#settings-voice-provider`; with
   ElevenLabs, its line and `ElevenLabsSettings.svelte`: the key, the voices

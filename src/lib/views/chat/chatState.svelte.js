@@ -797,8 +797,9 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
       followThread();
       contextStamp += 1;
       // Read out by itself ("When to speak", decided in Rust): the voice
-      // alone, no reading card (that's ▶'s).
-      if (res.speak && answer.id) speakReply(answer.text, answer.id);
+      // alone, no reading card (that's ▶'s), as much as "How much to read
+      // aloud" says (Rust's spokenText).
+      if (res.speak && answer.id) speakReply(res.spokenText || answer.text, answer.id);
     } catch (e) {
       if (!alive) return;
       if (String(e).includes(SUPERSEDED)) {

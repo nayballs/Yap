@@ -118,6 +118,7 @@ export const SETTINGS_INDEX = [
   { page: 'voice', section: 'Opening apps', label: 'Nicknames', desc: 'Say a nickname, and Yap opens that app', keywords: 'open apps alias nickname', anchor: 'app-nicknames' },
   { page: 'voice', section: 'Web search', label: 'Look things up on the web', desc: 'Chat and the Voice Assistant search when a question needs it', keywords: 'web search internet google exa tavily wikipedia', anchor: 'web-search', toggle: 'webSearch' },
   { page: 'voice', section: 'Spoken replies in Chat', label: 'Speak replies', desc: 'Yap reads its answers aloud', keywords: 'read aloud tts text to speech voice replies spoken', anchor: 'speak-replies' },
+  { page: 'voice', section: 'Spoken replies in Chat', label: 'How much to read aloud', desc: 'A sentence or two, up to a minute or two, or the whole answer', keywords: 'read aloud spoken replies length long short whole answer voice', anchor: 'spoken-length' },
   { page: 'voice', section: 'Spoken replies in Chat', label: 'When to speak', desc: 'When you asked by voice, or always', keywords: 'read aloud spoken replies', anchor: 'speak-when' },
   { page: 'voice', section: 'Spoken replies in Chat', label: 'Talk back hands-free', desc: 'A dictated question is sent and the answer read out', keywords: 'hands-free conversation talk back', anchor: 'talk-back', toggle: 'talkBackHandsFree' },
   { page: 'voice', section: 'Voice', label: 'Speaks with', desc: 'A voice on this PC, or ElevenLabs', keywords: 'elevenlabs voice tts cloud voice', anchor: 'voice-provider' },

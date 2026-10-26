@@ -147,6 +147,7 @@ export const FIELD_DEFAULTS = {
   assistantHotkey: '',
   readHotkey: '',
   assistantAnswerCard: true,
+  spokenLength: '1m',
   openApps: true,
   appsBlocked: [],
   appNicknames: [],
