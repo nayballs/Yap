@@ -392,6 +392,10 @@ mod tests {
         // size (Ollama's tag too).
         assert!(!supports_tools("ondevice", "gemma-2-9b-it-Q4_K_M"));
         assert!(!supports_tools("local", "gemma2:9b"));
+        // Gemma 4 by its size: the 12B (200/210 in the evaluations) yes, the
+        // E4B ("E4B" isn't a size; 93 %) no.
+        assert!(supports_tools("ondevice", "gemma-4-12B-it-Q4_K_M"));
+        assert!(!supports_tools("ondevice", "google_gemma-4-E4B-it-Q4_K_M"));
         // Any other on-device model's chat format says once it has run
         // (`/props`); before that, its size.
         assert!(supports_tools("ondevice", "Example-Chat-12B-Q4_K_M"));

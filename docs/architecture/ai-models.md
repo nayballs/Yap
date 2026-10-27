@@ -358,9 +358,10 @@ The language-model side: the OpenAI-compatible client and its prompts, the on-de
   free localhost port, serving **Qwen2.5-1.5B-Instruct** (Q4_K_M GGUF) when no
   other is picked (`pp_local_model` empty = `MODEL_FILENAME`) — or a curated
   one (`CURATED_MODELS`, Q4_K_M GGUFs, SHA-pinned: since 2026-10-27
-  **Qwen3.5 0.8B / 2B / 4B / 9B** and **Granite 4.1 8B** beside the bundled
-  1.5B, the 9B and the Granite the files the evaluations measured — 57/58 and
-  56/58, docs/model-evals.md; the 2024 models left the list, and one already
+  **Qwen3.5 0.8B / 2B / 4B / 9B**, **Gemma 4 12B** and **Granite 4.1 8B**
+  beside the bundled 1.5B, each bigger one the file the evaluations ran —
+  none beat the 4B, which stays recommended (docs/model-evals.md, "The
+  on-device download list"); the 2024 models left the list, and one already
   downloaded is served as the person's own GGUF)
   or **any user GGUF** dropped into `<data>/llm/` and picked via `pp_local_model`
   (Settings shows a model picker + "Open models folder"; switching restarts the

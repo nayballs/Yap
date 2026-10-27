@@ -195,9 +195,10 @@ pub const CURATED_MODELS: &[CuratedLlm] = &[
     CuratedLlm {
         id: "qwen3.5-9b",
         display: "Qwen3.5 9B",
-        blurb: "The best answers on this PC. Wants a 12 GB graphics card",
-        // The file the evaluations ran: 57/58 with MTP, 1.4 s a Chat turn
-        // and 7.6 GB on the card at 32K on an RTX 5070 Ti.
+        blurb: "A bigger Qwen, a little slower. Wants a 12 GB graphics card",
+        // The file the evaluations ran: 204/210 at 1.2 s a Chat turn on an
+        // RTX 5070 Ti (the 4B: 206/210, 1.1 s), but 4 false memories from an
+        // import; not better than the 4B, which stays recommended (27 Oct 2026).
         filename: "Qwen_Qwen3.5-9B-Q4_K_M.gguf",
         url: "https://huggingface.co/bartowski/Qwen_Qwen3.5-9B-GGUF/resolve/main/Qwen_Qwen3.5-9B-Q4_K_M.gguf",
         sha256: "d784ce9eda1a5a7b51e8f705a9e6310844bf4f173654d115823c775fdea56d43",
@@ -207,13 +208,32 @@ pub const CURATED_MODELS: &[CuratedLlm] = &[
         family: "qwen",
         max_context: 262_144,
     },
+    // ── Gemma (Google) ───────────────────────────────────────────────────
+    CuratedLlm {
+        id: "gemma-4-12b",
+        display: "Gemma 4 12B",
+        blurb: "Google's Gemma, 12B. Wants a 12 GB graphics card",
+        // LM Studio's Q4_K_M of google/gemma-4-12B-it (Apache-2.0; bartowski
+        // has none): 200/210 in the model evaluations at 1.9 s a Chat turn,
+        // cleanup in 0.41 s (27 Oct 2026). The E4B (93 %, notes not
+        // created when asked) isn't offered.
+        filename: "gemma-4-12B-it-Q4_K_M.gguf",
+        url: "https://huggingface.co/lmstudio-community/gemma-4-12B-it-GGUF/resolve/main/gemma-4-12B-it-Q4_K_M.gguf",
+        sha256: "95d83ba36642b1f385fb906b5962a71763361be3bac930a709945f72d97473f8",
+        size_mb: 7039,
+        default: false,
+        needs_gpu: true,
+        family: "gemma",
+        max_context: 262_144,
+    },
     // ── IBM Granite ──────────────────────────────────────────────────────
     CuratedLlm {
         id: "granite-4.1-8b",
         display: "Granite 4.1 8B",
-        blurb: "IBM's 8B: the quickest cleanups, and Chat's tools. Wants a graphics card",
-        // The file the evaluations ran: 56/58, 2.2 s a Chat turn, cleanup in
-        // 195 ms. Dense, so a long context takes far more memory than Qwen3.5's.
+        blurb: "IBM's 8B, an alternative to Qwen. Wants a graphics card",
+        // The file the evaluations ran: 200/210 at 2.2 s a Chat turn (27 Oct
+        // 2026), cleanup in 195 ms (21 Oct). Dense, so a long context takes
+        // far more memory than Qwen3.5's.
         filename: "ibm-granite_granite-4.1-8b-Q4_K_M.gguf",
         url: "https://huggingface.co/bartowski/ibm-granite_granite-4.1-8b-GGUF/resolve/main/ibm-granite_granite-4.1-8b-Q4_K_M.gguf",
         sha256: "5f42811b446eeddf8ca50a287e0c49abafb11f0ca8ed23606fd758720d2a351f",

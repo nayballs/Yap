@@ -2351,3 +2351,39 @@ for the history), `chat-long-memory-short`, once each (22.9k tokens in all):
 
 So: the window forgets the start of a long chat, on the card and in the cloud; the summary
 remembers it, at a few extra calls (free on this PC, ~2k tokens each on Groq's free plan).
+
+## The on-device download list (27 Oct 2026)
+
+The one-click list (`local_llm::models::CURATED_MODELS`) was mostly 2024 models; the
+candidates (yap-private's local-AI research, "Addendum") were checked on Hugging Face (each
+GGUF's architecture is in llamafile 0.10.6, its template has tools, its SHA-256) and the
+bigger ones run here: an RTX 5070 Ti, llamafile 0.10.6, the sidecar's own arguments at
+`--ctx 32768`, MTP as Yap decides (on for Qwen3.5), `--tools on --repeat 2 --locale en-GB
+--clock-step 3 --keys-from-yap` (live web scenarios on Exa), the whole suite (105 scenarios ×2).
+Run folders `20261027-063600-…` (4B, Gemma 4 E4B), `-064954-…` (Gemma 4 12B), `-070439-…`
+(9B, Granite) and `-070112-…` (cleanup).
+
+| | Pass (210) | Mean turn | First words (mean / median) | False memories | File |
+|---|---|---|---|---|---|
+| **Qwen3.5-4B** (recommended) | **206 (98.1 %)** | **1.1 s** | 0.67 / 0.52 s | 1 | 2.9 GB |
+| Qwen3.5-9B | 204 (97.1 %) | 1.2 s | 0.71 / 0.51 s | 4 | 5.9 GB |
+| Gemma 4 12B (LM Studio's Q4_K_M) | 200 (95.2 %) | 1.9 s | 1.07 / 0.79 s | 0 | 7.0 GB |
+| Granite 4.1 8B | 200 (95.2 %) | 2.2 s | 0.73 / 0.55 s | 2 | 5.3 GB |
+| Gemma 4 E4B | 196 (93.3 %) | 1.1 s | 0.53 / 0.38 s | 0 | 5.2 GB |
+
+Cleanup back to back (`--cleanup`, 8K): the 4B **149 ms** (MTP), Gemma 4 12B 411 ms (no
+MTP; British spelling 48/48, the 4B 45/48).
+
+**None beats the 4B**, which stays "Recommended for this PC". On the list as alternatives,
+their blurbs claiming nothing the numbers don't show: the 9B (within noise of the 4B; an
+import's 4 false memories, once "have opened" with nothing opened), Gemma 4 12B (the Gemma
+for Gemma 2's people; never created the note in a named folder, gave the weather and wind
+without the units asked for, answered "Done" after an injected note, and — with tools off —
+said "I've saved that note"), Granite 4.1 8B (2 false memories; missed a renewal date in
+follow-ups ×2, an app that isn't installed ×2, swapped a page's £10 for $10 once). **Gemma 4
+E4B isn't offered**: bigger than the 4B and worse at the same speed — no note created when
+asked (×2), "I've saved a note" with tools off (×2), Mount Fuji refused as "not in my notes"
+(×2), a memory it was asked to forget kept (×2). Its id has no size Yap's rule reads
+("E4B"), so a copy someone adds gets no tools. Small ones for PCs without a card: Qwen3.5 2B
+and 0.8B (no tools under 4B; the processor tier above). Out of the list: Qwen2.5 0.5B/3B/7B,
+Llama 3.2 1B/3B, Llama 3.1 8B, Gemma 2 2B/9B, Mistral 7B v0.3, Phi-3.5 Mini.
