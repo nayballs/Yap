@@ -513,6 +513,54 @@ pub fn serving_hybrid_at(url: &str) -> Option<bool> {
     SERVING.lock().ok()?.as_ref().map(|s| s.hybrid)
 }
 
+/// What each model's chat format said about tools when it last ran, by
+/// model id ([`template_takes_tools`]); kept after the sidecar stops.
+static TEMPLATE_TOOLS: Mutex<Option<std::collections::HashMap<String, bool>>> = Mutex::new(None);
+
+/// Does `model`'s chat format have a place for tools? llama.cpp's own word
+/// for the one it serves (`GET /props`, `chat_template_caps.supports_tools`),
+/// asked once it's up: `Some(false)` for one with none (Gemma 2), whose
+/// engine then never shows the model Chat's tools, so it gets none
+/// (`tools::supports_tools`). `None` before it has run here, or when its
+/// server didn't say.
+pub fn template_takes_tools(model: &str) -> Option<bool> {
+    TEMPLATE_TOOLS.lock().ok()?.as_ref()?.get(model).copied()
+}
+
+/// Ask the sidecar at `port` whether its model's chat format takes tools,
+/// and keep the answer under `model` ([`template_takes_tools`]).
+async fn hear_template_tools(client: &reqwest::Client, port: u16, model: &str) {
+    let asked = async {
+        let resp = client
+            .get(format!("http://127.0.0.1:{port}/props"))
+            .send_for(crate::privacy::net::Purpose::OnDeviceCheck)
+            .await
+            .ok()?;
+        if !resp.status().is_success() {
+            return None;
+        }
+        let v: serde_json::Value = resp.json().await.ok()?;
+        template_caps_take_tools(&v)
+    };
+    let Some(takes) = asked.await else { return };
+    if !takes {
+        tracing::info!(model, "On-device model: its chat format has no place for tools; Chat answers without them");
+    }
+    remember_template_tools(model, takes);
+}
+
+/// Keep what `model`'s chat format said about tools.
+pub(crate) fn remember_template_tools(model: &str, takes: bool) {
+    if let Ok(mut g) = TEMPLATE_TOOLS.lock() {
+        g.get_or_insert_with(Default::default).insert(model.to_string(), takes);
+    }
+}
+
+/// `/props`'s `chat_template_caps.supports_tools`. Pure.
+pub(crate) fn template_caps_take_tools(props: &serde_json::Value) -> Option<bool> {
+    props["chat_template_caps"]["supports_tools"].as_bool()
+}
+
 /// The running sidecar's runtime and MTP (`None` while it isn't running).
 pub fn serving_plan() -> Option<Plan> {
     SERVING.lock().ok()?.as_ref().map(|s| s.plan)
@@ -665,6 +713,9 @@ async fn e2e_stand_in_start(url: &str, gen: u64) -> Result<String, String> {
     let port = url::Url::parse(url).ok().and_then(|u| u.port()).ok_or("the stand-in's address has no port")?;
     let cfg = crate::config::load();
     let model = active_model_path(&cfg);
+    if let Ok(client) = reqwest::Client::builder().timeout(Duration::from_secs(3)).build() {
+        hear_template_tools(&client, port, &model_id(&model)).await;
+    }
     if let Ok(mut s) = SERVING.lock() {
         let plan = Plan { runtime: Version(0, 10, 6), mtp: false, kv_q8: false, per_slot: false };
         *s = Some(Serving { model_id: model_id(&model), placement: None, ctx: context_for(&cfg), plan, hybrid: false, facts: LogFacts::default() });
@@ -1300,6 +1351,9 @@ async fn spawn_and_wait(attempt: Attempt, gen: u64) -> Result<Started, Failed> {
                     }
                     tokio::time::sleep(Duration::from_millis(300)).await;
                 }
+                // What its chat format takes: one with no place for tools
+                // gets none of Chat's (`tools::supports_tools`).
+                hear_template_tools(&client, port, &model_id(&model)).await;
                 if stopped() {
                     return Err(fail(Failure::Stopped));
                 }

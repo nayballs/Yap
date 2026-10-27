@@ -948,6 +948,36 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_strict_chat_format_is_asked_again_taking_turns_and_every_later_call_so() {
+        // Gemma 2's format on llama.cpp: two questions in a row refused.
+        let refused = (
+            400,
+            json!({ "error": { "code": 400, "message": "Unable to generate parser for this template. Automatic parser generation failed: \n------------\nWhile executing CallExpression at line 1, column 226 in source:\n...op.index0 % 2 == 0) %}{{ raise_exception('Conversation roles must alternate user/assistant/user/assistant/...') }}", "type": "invalid_request_error" } }),
+        );
+        let fake = fake_model(vec![refused, (200, json!({ "role": "assistant", "content": "Clean the vents." }))]);
+        let base = format!("{}/v1", fake.base);
+        // A question that got no answer, then the next.
+        let history = [json!({ "role": "user", "content": "Can you look up why the air flow is weak?" })];
+        let turn = |question: &'static str| {
+            run_tool_loop("You are helpful.", &history, question, &[], &base, "", "gemma-2-9b-it-Q4_K_M", "local", false, false, &|_| {}, None, FirstStep::Model)
+        };
+        let (reply, _) = turn("Try again.").await.expect("an answer, not the 400");
+        assert_eq!(reply, "Clean the vents.");
+        let roles = |body: &Value| body["messages"].as_array().unwrap().iter().map(|m| m["role"].as_str().unwrap().to_string()).collect::<Vec<_>>();
+        let requests = fake.requests.lock().unwrap().clone();
+        assert_eq!(requests.len(), 2);
+        assert_eq!(roles(&requests[0].1), ["system", "user", "user"]);
+        assert_eq!(roles(&requests[1].1), ["system", "user"]);
+        let asked = requests[1].1["messages"][1]["content"].as_str().unwrap().to_string();
+        assert!(asked.starts_with("Can you look up why the air flow is weak?") && asked.ends_with("Try again."), "{asked}");
+        // The next call to this model takes turns from the start.
+        turn("Thanks.").await.expect("an answer");
+        let requests = fake.requests.lock().unwrap().clone();
+        assert_eq!(requests.len(), 3);
+        assert_eq!(roles(&requests[2].1), ["system", "user"]);
+    }
+
+    #[tokio::test]
     async fn a_rejected_tool_call_is_asked_again_never_an_error() {
         let fake = fake_model(vec![
             groq_tool_use_failed(),

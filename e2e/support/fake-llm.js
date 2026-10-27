@@ -491,6 +491,8 @@ export async function startFakeLlm() {
   let callIds = 0;
   let ollama = null;
   let rejectingImages = false;
+  let templateCaps = null;
+  let strict = false;
   const server = http.createServer((req, res) => {
     let raw = '';
     req.on('data', (c) => (raw += c));
@@ -539,6 +541,16 @@ export async function startFakeLlm() {
             model_info: { 'general.architecture': 'llama', 'llama.context_length': m.max },
           })
         );
+        return;
+      }
+      // llama.cpp's `/props`: what the model's chat format takes, when a
+      // test said (`templateCaps`).
+      if (req.method === 'GET' && url.pathname === '/props') {
+        if (!templateCaps) {
+          res.writeHead(404).end();
+          return;
+        }
+        res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ chat_template_caps: templateCaps, total_slots: 4 }));
         return;
       }
       // A self-hosted server's own list.
@@ -618,6 +630,22 @@ export async function startFakeLlm() {
       );
       const kind = KINDS.find(([prefix]) => system.startsWith(prefix))?.[1] ?? 'other';
       const offered = (body.tools ?? []).map((t) => t.function?.name);
+      // A strict chat format (`strictTurns`), as llama.cpp says Gemma 2's
+      // refused a conversation: the person and the model must take turns,
+      // starting with the person (after any system message).
+      const turns = messages.filter((m) => m.role !== 'system').map((m) => m.role);
+      if (strict && turns.some((r, i) => r !== (i % 2 ? 'assistant' : 'user'))) {
+        requests.push({ kind: 'formatRefused', model: body.model, user, roles: turns, messages });
+        json(400, {
+          error: {
+            code: 400,
+            message:
+              "Unable to generate parser for this template. Automatic parser generation failed: \n------------\nWhile executing CallExpression at line 1, column 226 in source:\n...op.index0 % 2 == 0) %}{{ raise_exception('Conversation roles must alternate user/assistant/user/assistant/...') }}",
+            type: 'invalid_request_error',
+          },
+        });
+        return;
+      }
       // A model that can't read images, as a server says it (`rejectImages`).
       if (rejectingImages && images.length) {
         requests.push({ kind: 'imageRefused', model: body.model, user, images, messages });
@@ -736,6 +764,10 @@ export async function startFakeLlm() {
     usage: (kind, counts) => (counts ? usages.set(kind, counts) : usages.delete(kind)),
     /** Turn a request carrying images down with HTTP 400, as a text-only server does (`true`). */
     rejectImages: (on) => (rejectingImages = on),
+    /** What `/props` says the chat format takes (`{ supports_tools, … }`; null: no `/props`). */
+    setTemplateCaps: (caps) => (templateCaps = caps),
+    /** Refuse a conversation that doesn't take turns with HTTP 400, as llama.cpp does for Gemma 2 (`true`). */
+    strictTurns: (on) => (strict = on),
     close: () => {
       // A connection held open mid-stream (`hangAfter`) mustn't keep it up.
       server.closeAllConnections?.();

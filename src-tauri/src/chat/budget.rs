@@ -481,11 +481,15 @@ pub const TOO_LONG: &str = "That's too long for ";
 /// An AI call's error as the person reads it: a provider's "too long for
 /// the context" (`llm::says_too_long`) as [`too_long`]'s sentence; more
 /// than the plan sends in a minute as "That's too long for GPT-OSS 20B on
-/// your Groq plan (8,000 tokens a minute)."; anything else as it was.
-/// Pure.
+/// your Groq plan (8,000 tokens a minute)."; a chat format that refused
+/// the conversation even taking turns (`llm::format_refused`) in a
+/// sentence; anything else as it was. Pure.
 pub fn plain_error(err: String, label: &str, context: u64, provider: &str) -> String {
     if err.contains(crate::ai::llm::CONTEXT_EXCEEDED) {
         return too_long(label, context);
+    }
+    if crate::ai::llm::format_refused(&err) {
+        return format!("{label} couldn't read this conversation: its chat format is strict. Start a new chat, or pick another model.");
     }
     if let Some(at) = err.find(crate::ai::llm::TOO_MUCH_A_MINUTE) {
         let limit: u64 = err[at + crate::ai::llm::TOO_MUCH_A_MINUTE.len()..].trim().parse().unwrap_or(0);
@@ -984,6 +988,12 @@ mod tests {
         let err = format!("{}8000", crate::ai::llm::TOO_MUCH_A_MINUTE);
         assert_eq!(plain_error(err, "GPT-OSS 20B", 131_072, "groq"), "That's too long for GPT-OSS 20B on your Groq plan (8,000 tokens a minute).");
         assert_eq!(plain_error("HTTP 401: nope".into(), "x", 1, "groq"), "HTTP 401: nope");
+        // A chat format that refused the conversation (Gemma 2, llama.cpp).
+        let refused = r#"HTTP 400: {"error":{"code":400,"message":"Unable to generate parser for this template. Automatic parser generation failed: \n------------\nWhile executing CallExpression at line 1, column 226 in source:\n...op.index0 % 2 == 0) %}{{ raise_exception('Conversation roles must alternate user/assistant/user/assistant/...') }}"}}"#;
+        assert_eq!(
+            plain_error(refused.into(), "Gemma 2 9B IT", 8_192, "ondevice"),
+            "Gemma 2 9B IT couldn't read this conversation: its chat format is strict. Start a new chat, or pick another model."
+        );
         assert_eq!(thousands(1_234_567), "1,234,567");
         assert_eq!(thousands(800), "800");
     }

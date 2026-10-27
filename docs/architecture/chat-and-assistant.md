@@ -261,11 +261,19 @@ The AI Chat surface (conversations, the tool-calling loop and its note tools) an
   by `supports_tools` — cloud providers always qualify (unless the
   provider's own model list says that model can't call tools,
   `model_catalog::tools_for`), local models by
-  `local_model_uses_tools`: a family the model evaluations saw fail never
-  (`NO_TOOL_FAMILIES`: Llama 3.2, which loops), one they saw succeed from its
+  `local_model_uses_tools`: a family that can't never
+  (`NO_TOOL_FAMILIES`: Llama 3.2, which loops; Gemma 2, whose chat format
+  has no place for tools — 2026-10-27, a 9B was offered them and llama.cpp
+  refused the replayed search), one the evaluations saw succeed from its
   size (`TOOL_FAMILIES`: Qwen3.5 ≥ 4B, thinking off), else ≥4B params
   (`LOCAL_TOOL_MIN_PARAMS_B`; the size read from `-4B`, `_4B`, `:8b`) — so
-  smaller local models fall back to plain keyword-RAG chat instead. **A tool
+  smaller local models fall back to plain keyword-RAG chat instead. The
+  on-device model's own chat format has the last word once it has loaded
+  (`local_llm::template_takes_tools`, llama.cpp's `/props`): one with no
+  place for tools gets none, so a GGUF dropped into `llm/` is right too
+  (ai-models.md). A strict format that wants the person and the model to
+  take turns is asked again so (`llm::taking_turns`, ai-models.md); tested
+  in `e2e/chat-format.spec.js`. **A tool
   call the provider rejects** (Groq's HTTP 400 `tool_use_failed`: gpt-oss
   left out `note_id`, or called a tool not in the request; llama.cpp's 500
   "Failed to parse input" for a call written as text — `llm::rejected_tool_call`)

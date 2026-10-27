@@ -184,7 +184,23 @@ The language-model side: the OpenAI-compatible client and its prompts, the on-de
   s."), not as a raw `HTTP 429` body. A 400 about the temperature is asked
   again without one; a 400 about reasoning on a call with tools (OpenAI's
   GPT-6 take tools on Chat Completions only with reasoning off) again with
-  `reasoning_effort: "none"`, once each. **Too long for the model's
+  `reasoning_effort: "none"`, once each. **A strict chat format**
+  (2026-10-27, `format_refused`: llama.cpp's HTTP 400 "Unable to generate
+  parser for this template", the template's `raise_exception(` in it —
+  Gemma 2's "Conversation roles must alternate") is asked again with the
+  conversation **taking turns** (`taking_turns`: two questions in a row — a
+  question that got no answer, then the next; a question and Yap's note
+  after it — one message, the earlier first, as are two answers in a row; a
+  history that starts on an answer or a tool's result starts at its first
+  question; tool calls and results never merged), and every later call to
+  that model (by endpoint and id, `takes_turns_only`) goes so from the
+  start. Every other model gets the conversation as Yap keeps it (the
+  evaluations measured it so). Refused even then: said plainly by
+  `chat/budget.rs` ("Gemma 2 9B IT couldn't read this conversation: its
+  chat format is strict. Start a new chat, or pick another model."), never
+  its Jinja. Before 2026-10-27 one failed question (Gemma 2 refused a
+  replayed search) broke every later one in its chat, the unanswered
+  question sending two in a row. **Too long for the model's
   context** (2026-10-25, `says_too_long`: llama.cpp's
   `exceed_context_size_error`, OpenAI's `context_length_exceeded`,
   Anthropic's "prompt is too long", Groq's "reduce the length of the
@@ -549,7 +565,15 @@ The language-model side: the OpenAI-compatible client and its prompts, the on-de
   installer), and `effective_endpoint()` which routes `ai/llm.rs` to the sidecar when
   provider = "ondevice": its address while it's up, the **stand-by address**
   while it's installed but not loaded (below), else (not installed) the
-  configured endpoint.
+  configured endpoint. **What its chat format takes** (2026-10-27): once the
+  sidecar is up, `hear_template_tools` asks llama.cpp's `GET /props`
+  (`chat_template_caps.supports_tools`) and keeps the answer by model id
+  (`template_takes_tools`, kept after the sidecar stops): a model whose
+  format has no place for tools — the engine then never shows it Chat's
+  tools — gets none (`tools::supports_tools`), whatever its size says.
+  Gemma 2 9B's says `supports_tools: false`, `supports_system_role: false`
+  (its system prompt is folded into the first question); Qwen's and
+  Llama 3.1's take tools.
 - **`ai/local_llm/on_demand.rs`** — **the on-device model loaded when it's
   needed, its memory freed when it's idle** (2026-10-25; before, it started
   at launch whenever cleanup was routed to it: ~10 GB in use as soon as Yap

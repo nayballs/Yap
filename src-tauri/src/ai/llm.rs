@@ -1276,6 +1276,83 @@ pub(crate) fn takes_temperature(model: &str) -> bool {
     }
 }
 
+/// The conversation as a strict chat format takes it: the person and the
+/// model taking turns, starting with the person. Two questions in a row —
+/// one that failed and got no answer, then the next; a question and Yap's
+/// note after it — are one message (the earlier first), as are two answers
+/// in a row; a history that starts partway, on an answer or a tool's
+/// result, starts at its first question. Gemma 2's format raises "roles
+/// must alternate" for anything else, and llama.cpp answers HTTP 400 for
+/// the whole turn (2026-10-27): one failed question broke every later one
+/// in its chat. Only for a model that refused ([`takes_turns_only`]):
+/// every other model gets the conversation as Yap keeps it. Tool calls and
+/// their results are never merged. Pure.
+fn taking_turns(messages: Value) -> Value {
+    let Value::Array(list) = messages else { return messages };
+    let plain = |m: &Value| {
+        matches!(m["role"].as_str(), Some("user" | "assistant"))
+            && m.get("tool_calls").is_none_or(Value::is_null)
+            && (m["content"].is_string() || m["content"].is_array())
+    };
+    let mut out: Vec<Value> = Vec::with_capacity(list.len());
+    let mut asked = false;
+    for m in list {
+        let role = m["role"].as_str().unwrap_or("");
+        if !asked && role != "system" {
+            if role != "user" {
+                continue; // before the first question
+            }
+            asked = true;
+        }
+        if let Some(last) = out.last_mut() {
+            if plain(last) && plain(&m) && last["role"] == m["role"] {
+                last["content"] = joined(&last["content"], &m["content"]);
+                continue;
+            }
+        }
+        out.push(m);
+    }
+    Value::Array(out)
+}
+
+/// Two messages' contents as one: text and text a paragraph apart, else
+/// the parts of both (a screenshot's `image_url` among them). Pure.
+fn joined(a: &Value, b: &Value) -> Value {
+    if let (Some(a), Some(b)) = (a.as_str(), b.as_str()) {
+        return json!(format!("{a}\n\n{b}"));
+    }
+    let parts = |v: &Value| match v {
+        Value::Array(p) => p.clone(),
+        Value::String(s) => vec![json!({ "type": "text", "text": s })],
+        _ => Vec::new(),
+    };
+    Value::Array([parts(a), parts(b)].concat())
+}
+
+/// The models (by endpoint and id) whose chat format refused a conversation
+/// that didn't take turns, this session: theirs always do ([`taking_turns`]).
+static TURNS_ONLY: std::sync::Mutex<Option<std::collections::HashSet<String>>> = std::sync::Mutex::new(None);
+
+fn turns_key(base_url: &str, model: &str) -> String {
+    format!("{}|{model}", base_url.trim_end_matches('/'))
+}
+
+/// Did `model` at `base_url` refuse a conversation that didn't take turns?
+fn takes_turns_only(base_url: &str, model: &str) -> bool {
+    TURNS_ONLY.lock().unwrap_or_else(|p| p.into_inner()).as_ref().is_some_and(|s| s.contains(&turns_key(base_url, model)))
+}
+
+fn note_turns_only(base_url: &str, model: &str) {
+    TURNS_ONLY.lock().unwrap_or_else(|p| p.into_inner()).get_or_insert_with(Default::default).insert(turns_key(base_url, model));
+}
+
+/// A model's chat format refused the conversation: llama.cpp's HTTP 400
+/// when its template raised (Gemma 2's "Conversation roles must
+/// alternate"), its Jinja in the message. Pure.
+pub(crate) fn format_refused(detail: &str) -> bool {
+    detail.contains("Unable to generate parser for this template") || detail.contains("raise_exception(")
+}
+
 /// The one chat call every other goes through. `on`: someone watches the
 /// answer as it comes ([`post_chat_streamed`]) — then it's streamed, unless
 /// this endpoint can't ([`streams_to`]).
@@ -1312,7 +1389,7 @@ async fn post_chat_request(
     let mut body = json!({
         "model": model,
         "stream": false,
-        "messages": messages,
+        "messages": if takes_turns_only(base_url, model) { taking_turns(messages) } else { messages },
     });
     for (k, v) in extra {
         body[k] = v;
@@ -1441,6 +1518,16 @@ async fn post_chat_request(
                 && body.as_object_mut().and_then(|b| b.remove("temperature")).is_some()
             {
                 tracing::info!("{} wants {}'s default temperature; asking again without one", provider, model);
+                continue;
+            }
+            // A chat format that wants the person and the model to take
+            // turns (Gemma 2's): the same request taking turns, and every
+            // later one to this model so.
+            if status.as_u16() == 400 && format_refused(&detail) && !takes_turns_only(base_url, model) {
+                let turns = taking_turns(body["messages"].take());
+                body["messages"] = turns;
+                note_turns_only(base_url, model);
+                tracing::info!(provider, model, "The model's chat format wants turns; asking again so");
                 continue;
             }
             // The model's own tool call refused: the tool loop asks it again.
@@ -1673,6 +1760,54 @@ mod temperature_tests {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_conversation_sent_takes_turns_starting_with_a_question() {
+        let roles = |v: &Value| v.as_array().unwrap().iter().map(|m| m["role"].as_str().unwrap().to_string()).collect::<Vec<_>>();
+        // A question that failed (no answer saved), then the next: one
+        // message, the earlier first. Two answers in a row: one too.
+        let sent = taking_turns(json!([
+            { "role": "system", "content": "s" },
+            { "role": "user", "content": "Look up the air flow" },
+            { "role": "user", "content": "Try again" },
+            { "role": "assistant", "content": "a" },
+            { "role": "assistant", "content": "b" },
+            { "role": "user", "content": "q" },
+        ]));
+        assert_eq!(roles(&sent), ["system", "user", "assistant", "user"]);
+        assert_eq!(sent[1]["content"], "Look up the air flow\n\nTry again");
+        assert_eq!(sent[2]["content"], "a\n\nb");
+        // A history that starts partway, on an answer or a replayed search:
+        // from its first question.
+        let sent = taking_turns(json!([
+            { "role": "system", "content": "s" },
+            { "role": "assistant", "content": null, "tool_calls": [{ "id": "c" }] },
+            { "role": "tool", "tool_call_id": "c", "content": "{}" },
+            { "role": "assistant", "content": "an answer" },
+            { "role": "user", "content": "q" },
+        ]));
+        assert_eq!(roles(&sent), ["system", "user"]);
+        // Tool calls and results are never merged; a screenshot's parts are
+        // kept with the text.
+        let steps = json!([
+            { "role": "user", "content": "q" },
+            { "role": "assistant", "content": null, "tool_calls": [{ "id": "c" }] },
+            { "role": "tool", "tool_call_id": "c", "content": "{}" },
+            { "role": "tool", "tool_call_id": "d", "content": "{}" },
+            { "role": "assistant", "content": "done" },
+        ]);
+        assert_eq!(taking_turns(steps.clone()), steps);
+        let sent = taking_turns(json!([
+            { "role": "user", "content": "first" },
+            { "role": "user", "content": [{ "type": "text", "text": "this" }, { "type": "image_url", "image_url": { "url": "data:" } }] },
+        ]));
+        assert_eq!(roles(&sent), ["user"]);
+        assert_eq!(sent[0]["content"][0], json!({ "type": "text", "text": "first" }));
+        assert_eq!(sent[0]["content"][2]["type"], "image_url");
+        // Already taking turns: unchanged.
+        let fine = json!([{ "role": "system", "content": "s" }, { "role": "user", "content": "q" }, { "role": "assistant", "content": "a" }]);
+        assert_eq!(taking_turns(fine.clone()), fine);
+    }
 
     #[test]
     fn rate_limit_wait_reads_headers_then_the_message() {

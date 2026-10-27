@@ -258,11 +258,16 @@ fn estimate_model_size_b(model_id: &str) -> f32 {
         .unwrap_or(0.0)
 }
 
-/// Local model families the model evaluations (docs/model-evals.md) saw
-/// fail with tools whatever their size: Llama 3.2 loops on them (337 calls
-/// for 48 scenarios, up to the 20-step cap), writes its calls as text and
-/// gets llama.cpp's HTTP 500 for it. Matched in the lower-cased id.
-const NO_TOOL_FAMILIES: &[&str] = &["llama-3.2", "llama3.2", "llama_3.2"];
+/// Local model families that can't use tools whatever their size: Llama
+/// 3.2 loops on them in the model evaluations (docs/model-evals.md: 337
+/// calls for 48 scenarios, up to the 20-step cap), writes its calls as
+/// text and gets llama.cpp's HTTP 500 for it; Gemma 2's chat format has no
+/// place for tools (llama.cpp's `/props`: `supports_tools: false`), so the
+/// engine never shows it them, and a replayed search is refused with HTTP
+/// 400 (2026-10-27). Matched in the lower-cased id. Any other on-device
+/// model's chat format says for itself once it has run
+/// (`local_llm::template_takes_tools`).
+const NO_TOOL_FAMILIES: &[&str] = &["llama-3.2", "llama3.2", "llama_3.2", "gemma-2", "gemma2", "gemma_2"];
 
 /// Local model families the evaluations saw use tools well, and from what
 /// size: Qwen3.5-4B with thinking off (the sidecar's `--reasoning off`)
@@ -298,6 +303,8 @@ pub fn supports_tools(provider: &str, model: &str) -> bool {
             crate::ai::model_catalog::tools_for(provider, model) != Some(false)
         }
         "custom" => true,
+        // The on-device model's chat format said it has no place for tools.
+        p if p == crate::ai::local_llm::PROVIDER_ONDEVICE && crate::ai::local_llm::template_takes_tools(model) == Some(false) => false,
         _ => local_model_uses_tools(model),
     }
 }
@@ -380,8 +387,23 @@ mod tests {
         assert!(supports_tools("local", "llama3.1:8b"));
         assert!(!supports_tools("local", "qwen2.5:1.5b"));
         assert!(supports_tools("ondevice", "Qwen2.5-7B-Instruct-Q4_K_M"));
-        assert!(supports_tools("ondevice", "gemma-2-9b-it-Q4_K_M"));
         assert!(!supports_tools("ondevice", "Phi-3.5-mini-instruct-Q4_K_M"));
+        // Gemma 2's chat format has no place for tools: never, whatever its
+        // size (Ollama's tag too).
+        assert!(!supports_tools("ondevice", "gemma-2-9b-it-Q4_K_M"));
+        assert!(!supports_tools("local", "gemma2:9b"));
+        // Any other on-device model's chat format says once it has run
+        // (`/props`); before that, its size.
+        assert!(supports_tools("ondevice", "Example-Chat-12B-Q4_K_M"));
+        crate::ai::local_llm::remember_template_tools("Example-Chat-12B-Q4_K_M", false);
+        assert!(!supports_tools("ondevice", "Example-Chat-12B-Q4_K_M"));
+        crate::ai::local_llm::remember_template_tools("Example-Tools-12B-Q4_K_M", true);
+        assert!(supports_tools("ondevice", "Example-Tools-12B-Q4_K_M"));
+        assert_eq!(
+            crate::ai::local_llm::template_caps_take_tools(&json!({ "chat_template_caps": { "supports_tools": false, "supports_system_role": false } })),
+            Some(false)
+        );
+        assert_eq!(crate::ai::local_llm::template_caps_take_tools(&json!({ "n_ctx": 8192 })), None);
         // Not a size: a quant or a word with a b in it.
         assert_eq!(estimate_model_size_b("model-q4_k_m-8bit"), 0.0);
         assert_eq!(estimate_model_size_b("Qwen3-30B-A3B-Instruct"), 30.0);
