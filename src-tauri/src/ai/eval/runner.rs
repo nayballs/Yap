@@ -28,7 +28,7 @@ Models (repeat --model to compare):
   --model groq:openai/gpt-oss-20b     --model openai:<model>     --model anthropic:<model>
   --model openrouter:<model>          --model gemini:<model>     --model custom:<base_url>,<model>
   --model local:installed             (Yap's on-device Qwen2.5-1.5B; read-only from %APPDATA%\\yap\\llm)
-  --model local:<curated id>          (local_llm.rs' list, e.g. qwen2.5-3b, llama-3.2-3b)
+  --model local:<curated id>          (local_llm.rs' list, e.g. qwen3.5-9b, granite-4.1-8b)
   --model local:<path.gguf>           --model local:<https url>#sha256=<hex>
 
 Keys: GROQ_API_KEY, OPENAI_API_KEY, ANTHROPIC_API_KEY, OPENROUTER_API_KEY, GEMINI_API_KEY,

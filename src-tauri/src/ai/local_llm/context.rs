@@ -444,12 +444,12 @@ mod tests {
     #[test]
     fn a_curated_file_not_readable_yet_has_the_curated_maximum() {
         assert_eq!(trained_context(Path::new("C:/nowhere/Qwen_Qwen3.5-4B-Q4_K_M.gguf")), Some(262_144));
-        assert_eq!(trained_context(Path::new("C:/nowhere/gemma-2-2b-it-Q4_K_M.gguf")), Some(8_192));
+        assert_eq!(trained_context(Path::new("C:/nowhere/ibm-granite_granite-4.1-8b-Q4_K_M.gguf")), Some(131_072));
         assert_eq!(trained_context(Path::new("C:/nowhere/someone-elses.gguf")), None);
         // A real header wins.
         let dir = std::env::temp_dir().join(format!("yap-ctx-test-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
-        let p = dir.join("gemma-2-2b-it-Q4_K_M.gguf");
+        let p = dir.join("ibm-granite_granite-4.1-8b-Q4_K_M.gguf");
         std::fs::write(&p, crate::ai::gguf::tests::qwen25_1_5b(10).bytes()).unwrap();
         assert_eq!(trained_context(&p), Some(32_768));
         let _ = std::fs::remove_dir_all(&dir);

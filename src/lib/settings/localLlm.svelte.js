@@ -41,6 +41,7 @@ export const LLM_FAMILIES = [
   { value: 'qwen', label: 'Qwen', icon: PROVIDER_ICONS.qwen },
   { value: 'llama', label: 'Meta Llama', icon: PROVIDER_ICONS.llama },
   { value: 'gemma', label: 'Gemma', icon: PROVIDER_ICONS.gemini },
+  { value: 'granite', label: 'IBM Granite', icon: '' },
   { value: 'mistral', label: 'Mistral', icon: PROVIDER_ICONS.mistral },
   { value: 'phi', label: 'Phi', icon: '' },
 ];

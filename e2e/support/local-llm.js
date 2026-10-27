@@ -14,7 +14,7 @@ import path from 'node:path';
 const sha256 = (buf) => crypto.createHash('sha256').update(buf).digest('hex');
 
 /** Serve fake on-device models for `ids` and write the sources file into `dir`. */
-export async function startFakeLocalModels(dir, ids = ['qwen3.5-4b', 'qwen2.5-1.5b', 'qwen2.5-3b']) {
+export async function startFakeLocalModels(dir, ids = ['qwen3.5-4b', 'qwen2.5-1.5b', 'qwen3.5-2b']) {
   fs.mkdirSync(dir, { recursive: true });
   const bodies = { '/llm/runtime': crypto.randomBytes(64 * 1024) };
   for (const id of ids) bodies[`/llm/${id}.gguf`] = crypto.randomBytes(4 * 1024 * 1024);

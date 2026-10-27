@@ -283,9 +283,9 @@ test('search looks through every provider and this PC', async ({ yap, main, fake
   await expect(groups.nth(2).locator('.nm')).toHaveText([
     'Qwen2.5 1.5B Instruct',
     'Qwen3.5 4B',
-    'Qwen2.5 0.5B Instruct',
-    'Qwen2.5 3B Instruct',
-    'Qwen2.5 7B Instruct',
+    'Qwen3.5 0.8B',
+    'Qwen3.5 2B',
+    'Qwen3.5 9B',
   ]);
   // While searching no provider is selected.
   await expect(pop.getByRole('tab', { selected: true })).toHaveCount(0);

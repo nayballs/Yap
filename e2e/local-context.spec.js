@@ -102,7 +102,7 @@ test('the On this PC pane shows the context, what it takes, and each model’s m
   expect(st.context.options.find((o) => o.tokens === 8192).over).toBe(false);
   expect(st.curated.find((m) => m.id === 'qwen3.5-4b').maxContext).toBe(262144);
   expect(st.curated.find((m) => m.id === 'qwen2.5-1.5b').maxContext).toBe(32768);
-  expect(st.curated.find((m) => m.id === 'gemma-2-2b').maxContext).toBe(8192);
+  expect(st.curated.find((m) => m.id === 'granite-4.1-8b').maxContext).toBe(131072);
 
   const pop = await openPicker(main);
   await expect(control(pop)).toBeVisible();

@@ -14,7 +14,7 @@ import { startFakeLocalModels } from './support/local-llm.js';
 import { RUNS } from './support/yap.js';
 
 const CARD = 'NVIDIA GeForce RTX 5070 Ti';
-const SMALL_3B = 'qwen2.5-3b-instruct-q4_k_m.gguf';
+const SMALL = 'Qwen_Qwen3.5-2B-Q4_K_M.gguf';
 const BIG_FILE = 'Qwen_Qwen3.5-4B-Q4_K_M.gguf';
 
 /** Placeholder runtime + default model in <data>/llm (installed, never run). */
@@ -60,19 +60,19 @@ async function openLocalModels(main) {
 
 test('Settings: a download shows its speed and time left, and Cancel leaves no half file', async ({ yap, main, localModels, shot }) => {
   const dialog = await openLocalModels(main);
-  const row = card(dialog, 'Qwen2.5 3B');
+  const row = card(dialog, 'Qwen3.5 2B');
   localModels.hold();
   await row.getByRole('button', { name: 'Download' }).click();
 
   // How far, how fast, how long: once it's going (held half-way).
   const progress = row.getByTestId('download-progress');
   await expect(progress).toBeVisible();
-  await expect(progress).toContainText('Downloading Qwen2.5 3B Instruct…');
+  await expect(progress).toContainText('Downloading Qwen3.5 2B…');
   const line = row.getByTestId('download-line');
   await expect(line).toHaveText(/^\d+ MB of 4 MB · [\d.]+ (MB|KB)\/s · (about \d+ min left|less than a minute left|almost done)$/, { timeout: 15_000 });
   await expect(progress.getByRole('progressbar')).toHaveAttribute('aria-valuenow', /^(4\d|5\d)$/);
   // The bytes so far, waiting under a temporary name.
-  await expect.poll(() => partials(yap)).toEqual(['qwen2.5-3b-instruct-q4_k_m.partial']);
+  await expect.poll(() => partials(yap)).toEqual(['Qwen_Qwen3.5-2B-Q4_K_M.partial']);
   await shot(main, '01-settings-download-progress');
 
   // Cancel: at once, no error, and no half file.
@@ -81,9 +81,9 @@ test('Settings: a download shows its speed and time left, and Cancel leaves no h
   await expect(row.getByRole('button', { name: 'Download' })).toBeEnabled();
   await expect(dialog.getByRole('alert')).toHaveCount(0);
   await expect.poll(() => partials(yap)).toEqual([]);
-  expect(fs.existsSync(path.join(llmDir(yap), SMALL_3B))).toBe(false);
+  expect(fs.existsSync(path.join(llmDir(yap), SMALL))).toBe(false);
   // Nothing left to cancel.
-  expect(await yap.invoke('download_cancel', { id: 'llm:qwen2.5-3b' })).toBe(false);
+  expect(await yap.invoke('download_cancel', { id: 'llm:qwen3.5-2b' })).toBe(false);
   localModels.release();
   await shot(main, '02-settings-download-cancelled');
 
@@ -91,7 +91,7 @@ test('Settings: a download shows its speed and time left, and Cancel leaves no h
   await row.getByRole('button', { name: 'Download' }).click();
   // (A model downloaded from Settings is the one in use.)
   await expect(row).toContainText('✓ Active', { timeout: 20_000 });
-  expect(fs.existsSync(path.join(llmDir(yap), SMALL_3B))).toBe(true);
+  expect(fs.existsSync(path.join(llmDir(yap), SMALL))).toBe(true);
   expect(partials(yap)).toEqual([]);
   await closeSettings(main);
 });

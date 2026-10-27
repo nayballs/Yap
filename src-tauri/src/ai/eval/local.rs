@@ -59,7 +59,7 @@ pub async fn runtime(explicit: Option<&Path>, models_dir: &Path) -> Result<PathB
 
 /// The GGUF a `local:<spec>` names: "installed" (the on-device default,
 /// Qwen2.5-1.5B), a curated id from `local_llm::models::CURATED_MODELS`
-/// ("qwen2.5-3b"), a path, or an https URL with `#sha256=<hex>`. Installed
+/// ("qwen3.5-9b"), a path, or an https URL with `#sha256=<hex>`. Installed
 /// files are used where they are; anything else is downloaded (verified)
 /// into `models_dir`.
 pub async fn model(spec: &str, models_dir: &Path) -> Result<PathBuf, String> {

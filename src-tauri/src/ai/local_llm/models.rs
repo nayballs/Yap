@@ -85,7 +85,7 @@ pub struct CuratedLlm {
     /// (`gpu::can_run_big_model`): too slow on a processor.
     pub needs_gpu: bool,
     /// Model family for the browser's provider tabs + brand icon
-    /// ("qwen"|"llama"|"gemma"|"mistral"|"phi").
+    /// ("qwen"|"granite"|"gemma"|"llama"|"mistral"|"phi").
     pub family: &'static str,
     /// The context it was trained for (its GGUF's `context_length`; the
     /// file's own header wins once it's downloaded, `trained_context`).
@@ -128,22 +128,28 @@ pub fn in_use(cfg: &crate::config::YapConfig) -> bool {
 }
 
 /// Grouped by family, smallest→largest within a family. SHA-256s are the
-/// HuggingFace `lfs.oid` values (verified July 2026 from each repo's LFS
-/// pointer); all are real, ungated Q4_K_M GGUFs.
+/// HuggingFace `lfs.oid` values, read from each repo's file list; all are
+/// ungated Q4_K_M GGUFs whose architecture the pinned llamafile serves.
+/// Refreshed 2026-10-27 (yap-private's local-ai-research.md, "Addendum"):
+/// the 2024 models (Qwen2.5 0.5B/3B/7B, Llama 3.2 1B/3B, Llama 3.1 8B,
+/// Gemma 2 2B/9B, Mistral 7B v0.3, Phi-3.5 Mini) left the list for newer
+/// ones measured with the model evaluations (docs/model-evals.md); a file
+/// of theirs already downloaded is still listed and served as the person's
+/// own GGUF.
 pub const CURATED_MODELS: &[CuratedLlm] = &[
     // ── Qwen ─────────────────────────────────────────────────────────────
     CuratedLlm {
-        id: "qwen2.5-0.5b",
-        display: "Qwen2.5 0.5B Instruct",
-        blurb: "Tiny — instant even on a laptop",
-        filename: "Qwen2.5-0.5B-Instruct-Q4_K_M.gguf",
-        url: "https://huggingface.co/bartowski/Qwen2.5-0.5B-Instruct-GGUF/resolve/main/Qwen2.5-0.5B-Instruct-Q4_K_M.gguf",
-        sha256: "6eb923e7d26e9cea28811e1a8e852009b21242fb157b26149d3b188f3a8c8653",
-        size_mb: 398,
+        id: "qwen3.5-0.8b",
+        display: "Qwen3.5 0.8B",
+        blurb: "Tiny and instant, even on a laptop",
+        filename: "Qwen_Qwen3.5-0.8B-Q4_K_M.gguf",
+        url: "https://huggingface.co/bartowski/Qwen_Qwen3.5-0.8B-GGUF/resolve/main/Qwen_Qwen3.5-0.8B-Q4_K_M.gguf",
+        sha256: "fb044e93939a70469c905781334f5de1e6c8b608ced6cbc8c9249bd4127d9526",
+        size_mb: 553,
         default: false,
         needs_gpu: false,
         family: "qwen",
-        max_context: 32_768,
+        max_context: 262_144,
     },
     CuratedLlm {
         id: "qwen2.5-1.5b",
@@ -159,17 +165,17 @@ pub const CURATED_MODELS: &[CuratedLlm] = &[
         max_context: 32_768,
     },
     CuratedLlm {
-        id: "qwen2.5-3b",
-        display: "Qwen2.5 3B Instruct",
-        blurb: "The default's bigger sibling — noticeably smarter",
-        filename: "qwen2.5-3b-instruct-q4_k_m.gguf",
-        url: "https://huggingface.co/Qwen/Qwen2.5-3B-Instruct-GGUF/resolve/main/qwen2.5-3b-instruct-q4_k_m.gguf",
-        sha256: "626b4a6678b86442240e33df819e00132d3ba7dddfe1cdc4fbb18e0a9615c62d",
-        size_mb: 2105,
+        id: "qwen3.5-2b",
+        display: "Qwen3.5 2B",
+        blurb: "Newer and smarter than the default, still fine without a graphics card",
+        filename: "Qwen_Qwen3.5-2B-Q4_K_M.gguf",
+        url: "https://huggingface.co/bartowski/Qwen_Qwen3.5-2B-GGUF/resolve/main/Qwen_Qwen3.5-2B-Q4_K_M.gguf",
+        sha256: "57a1085840f497d764a7fc5d346922dbde961efb54cc792ea81d694fd846a1d8",
+        size_mb: 1332,
         default: false,
         needs_gpu: false,
         family: "qwen",
-        max_context: 32_768,
+        max_context: 262_144,
     },
     CuratedLlm {
         id: GPU_MODEL_ID,
@@ -187,111 +193,34 @@ pub const CURATED_MODELS: &[CuratedLlm] = &[
         max_context: 262_144,
     },
     CuratedLlm {
-        id: "qwen2.5-7b",
-        display: "Qwen2.5 7B Instruct",
-        blurb: "Big Qwen — best local cleanup quality",
-        filename: "Qwen2.5-7B-Instruct-Q4_K_M.gguf",
-        url: "https://huggingface.co/bartowski/Qwen2.5-7B-Instruct-GGUF/resolve/main/Qwen2.5-7B-Instruct-Q4_K_M.gguf",
-        sha256: "65b8fcd92af6b4fefa935c625d1ac27ea29dcb6ee14589c55a8f115ceaaa1423",
-        size_mb: 4683,
+        id: "qwen3.5-9b",
+        display: "Qwen3.5 9B",
+        blurb: "The best answers on this PC. Wants a 12 GB graphics card",
+        // The file the evaluations ran: 57/58 with MTP, 1.4 s a Chat turn
+        // and 7.6 GB on the card at 32K on an RTX 5070 Ti.
+        filename: "Qwen_Qwen3.5-9B-Q4_K_M.gguf",
+        url: "https://huggingface.co/bartowski/Qwen_Qwen3.5-9B-GGUF/resolve/main/Qwen_Qwen3.5-9B-Q4_K_M.gguf",
+        sha256: "d784ce9eda1a5a7b51e8f705a9e6310844bf4f173654d115823c775fdea56d43",
+        size_mb: 5884,
         default: false,
-        needs_gpu: false,
+        needs_gpu: true,
         family: "qwen",
-        max_context: 32_768,
+        max_context: 262_144,
     },
-    // ── Meta Llama ───────────────────────────────────────────────────────
+    // ── IBM Granite ──────────────────────────────────────────────────────
     CuratedLlm {
-        id: "llama-3.2-1b",
-        display: "Llama 3.2 1B Instruct",
-        blurb: "Smallest + fastest — great on modest PCs",
-        filename: "Llama-3.2-1B-Instruct-Q4_K_M.gguf",
-        url: "https://huggingface.co/bartowski/Llama-3.2-1B-Instruct-GGUF/resolve/main/Llama-3.2-1B-Instruct-Q4_K_M.gguf",
-        sha256: "6f85a640a97cf2bf5b8e764087b1e83da0fdb51d7c9fab7d0fece9385611df83",
-        size_mb: 808,
+        id: "granite-4.1-8b",
+        display: "Granite 4.1 8B",
+        blurb: "IBM's 8B: the quickest cleanups, and Chat's tools. Wants a graphics card",
+        // The file the evaluations ran: 56/58, 2.2 s a Chat turn, cleanup in
+        // 195 ms. Dense, so a long context takes far more memory than Qwen3.5's.
+        filename: "ibm-granite_granite-4.1-8b-Q4_K_M.gguf",
+        url: "https://huggingface.co/bartowski/ibm-granite_granite-4.1-8b-GGUF/resolve/main/ibm-granite_granite-4.1-8b-Q4_K_M.gguf",
+        sha256: "5f42811b446eeddf8ca50a287e0c49abafb11f0ca8ed23606fd758720d2a351f",
+        size_mb: 5283,
         default: false,
-        needs_gpu: false,
-        family: "llama",
-        max_context: 131_072,
-    },
-    CuratedLlm {
-        id: "llama-3.2-3b",
-        display: "Llama 3.2 3B Instruct",
-        blurb: "Stronger rewrites, still quick on a GPU",
-        filename: "Llama-3.2-3B-Instruct-Q4_K_M.gguf",
-        url: "https://huggingface.co/bartowski/Llama-3.2-3B-Instruct-GGUF/resolve/main/Llama-3.2-3B-Instruct-Q4_K_M.gguf",
-        sha256: "6c1a2b41161032677be168d354123594c0e6e67d2b9227c84f296ad037c728ff",
-        size_mb: 2019,
-        default: false,
-        needs_gpu: false,
-        family: "llama",
-        max_context: 131_072,
-    },
-    CuratedLlm {
-        id: "llama-3.1-8b",
-        display: "Llama 3.1 8B Instruct",
-        blurb: "Meta's 8B — strong and well-rounded",
-        filename: "Meta-Llama-3.1-8B-Instruct-Q4_K_M.gguf",
-        url: "https://huggingface.co/bartowski/Meta-Llama-3.1-8B-Instruct-GGUF/resolve/main/Meta-Llama-3.1-8B-Instruct-Q4_K_M.gguf",
-        sha256: "7b064f5842bf9532c91456deda288a1b672397a54fa729aa665952863033557c",
-        size_mb: 4921,
-        default: false,
-        needs_gpu: false,
-        family: "llama",
-        max_context: 131_072,
-    },
-    // ── Gemma (Google) ───────────────────────────────────────────────────
-    CuratedLlm {
-        id: "gemma-2-2b",
-        display: "Gemma 2 2B IT",
-        blurb: "Google's small model — polished, natural tone",
-        filename: "gemma-2-2b-it-Q4_K_M.gguf",
-        url: "https://huggingface.co/bartowski/gemma-2-2b-it-GGUF/resolve/main/gemma-2-2b-it-Q4_K_M.gguf",
-        sha256: "e0aee85060f168f0f2d8473d7ea41ce2f3230c1bc1374847505ea599288a7787",
-        size_mb: 1709,
-        default: false,
-        needs_gpu: false,
-        family: "gemma",
-        max_context: 8_192,
-    },
-    CuratedLlm {
-        id: "gemma-2-9b",
-        display: "Gemma 2 9B IT",
-        blurb: "Google's 9B — polished, high quality",
-        filename: "gemma-2-9b-it-Q4_K_M.gguf",
-        url: "https://huggingface.co/bartowski/gemma-2-9b-it-GGUF/resolve/main/gemma-2-9b-it-Q4_K_M.gguf",
-        sha256: "13b2a7b4115bbd0900162edcebe476da1ba1fc24e718e8b40d32f6e300f56dfe",
-        size_mb: 5761,
-        default: false,
-        needs_gpu: false,
-        family: "gemma",
-        max_context: 8_192,
-    },
-    // ── Mistral ──────────────────────────────────────────────────────────
-    CuratedLlm {
-        id: "mistral-7b-v0.3",
-        display: "Mistral 7B Instruct v0.3",
-        blurb: "Mistral's classic 7B — a solid all-rounder",
-        filename: "Mistral-7B-Instruct-v0.3-Q4_K_M.gguf",
-        url: "https://huggingface.co/bartowski/Mistral-7B-Instruct-v0.3-GGUF/resolve/main/Mistral-7B-Instruct-v0.3-Q4_K_M.gguf",
-        sha256: "1270d22c0fbb3d092fb725d4d96c457b7b687a5f5a715abe1e818da303e562b6",
-        size_mb: 4373,
-        default: false,
-        needs_gpu: false,
-        family: "mistral",
-        max_context: 32_768,
-    },
-    // ── Phi (Microsoft) ──────────────────────────────────────────────────
-    CuratedLlm {
-        id: "phi-3.5-mini",
-        display: "Phi-3.5 Mini Instruct",
-        blurb: "Microsoft's 3.8B — strong quality for its size",
-        filename: "Phi-3.5-mini-instruct-Q4_K_M.gguf",
-        url: "https://huggingface.co/bartowski/Phi-3.5-mini-instruct-GGUF/resolve/main/Phi-3.5-mini-instruct-Q4_K_M.gguf",
-        sha256: "e4165e3a71af97f1b4820da61079826d8752a2088e313af0c7d346796c38eff5",
-        size_mb: 2393,
-        default: false,
-        needs_gpu: false,
-        family: "phi",
+        needs_gpu: true,
+        family: "granite",
         max_context: 131_072,
     },
 ];
