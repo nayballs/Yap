@@ -567,8 +567,11 @@ Flow's dark mode of 19 Oct 2026), for every Yap window.
   Delete… via `meeting_delete`; a hover ⋯) and calendar meetings (Open note
   + their row buttons), Dictionary rows (Edit, Star, ≈ Catch near-misses,
   Delete…; × asks too unless the row is empty; a delete has Undo), model rows (`ModelRow`:
-  speech, speaker, Kokoro — Download / Use / Delete…) and the local LLM
-  cards (Download / Use / Delete…, now asked first), Connectors' calendars
+  speech, speaker, Kokoro — Download / Use / Delete…), the on-device model
+  cards in Settings and the Chat model picker's installed on-device models
+  (Download / Use / Uninstall…, 2026-10-27, `core/localModels.js`: off
+  with a `note` — "Switch to another model first" — while the model is in
+  use; the picker stays open meanwhile), Connectors' calendars
   (their ⋯ = this menu: Sync now, Disconnect… asked first), Account's other
   devices (Sign out), the Actions manager's rows (Edit, Delete…), the
   notepad's transcript lines (Copy line, Who said this?) and Ask answers

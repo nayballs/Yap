@@ -40,7 +40,7 @@ store.
 | `settings/MyLanguages.svelte` | Dictation → My languages: the search, the model coverage and recommendation, the main shortcut's language, the language shortcuts, the nudge's switch |
 | `lib/core/providers.js` | The providers in one place: ids, `BASE_URLS`, `KEYED_PROVIDERS`, `PP_PROVIDERS`, `PROVIDER_MODES`, `CLOUD_TABS`, `MODEL_HINTS`, `maskKey`, the four name sets each surface uses today (`PROVIDER_LABELS` short, `SCOPE_PROVIDER_LABELS` the scope tabs', `CLEANUP_PROVIDER_LABELS` cleanup's, `PROVIDER_DESTINATIONS` where the words go), and the key store's rules (`sharedKey`, `stashCleanupKey`, `creditCleanupKey`, `liftScopeKeys`, `adoptProviderKey`, `cleanupNeedsKey`) |
 | `lib/stores/attention.svelte.js` | The red count's items (`attentionItems`) kept live by `followAttention` |
-| `settings/localLlm.svelte.js` | Settings' on-device model: its status, the download and its progress, switching, the upgrade offer, delete, the family tab, the warm-up poll (`followLocalLlm`) |
+| `settings/localLlm.svelte.js` | Settings' on-device model: its status, the download and its progress, switching (a curated model or one of your own, `activateOwn`), the upgrade offer, the family tab, the warm-up poll (`followLocalLlm`); Uninstall is `lib/core/localModels.js`'s, shared with the Chat model picker |
 | `settings/languageModels.svelte.js` | Language Models' state that outlives the page (`lm`: the tab, cleanup's mode and cloud tab, the key field open, the Chat tab's remount count, Prompt Studio's guardrails, Smart routing's recent apps, the day's Groq usage), `providerUi`, `loadRecentApps`, `refreshUsage` |
 | `settings/scopes.js` | The four scopes (`SCOPE_TABS`, `SCOPE_DEFAULTS`…), `ensureScopes(cfg)`, `scopeModelLabel` |
 | `settings/cleanupPresets.js` / `settings/profiles.js` | The cleanup presets (`PP_DEFAULT_BODY` = `FIELD_DEFAULTS.ppPrompt`); profile ids and the pre-profiles migration |
@@ -498,7 +498,13 @@ there can move margins: compare a page before and after.
   endpoint's fields (`EndpointModels.svelte` suggests its server's models),
   Local's on-device model browser (Recommended for this PC, the one upgrade
   offer, the slow-on-this-PC line, the Context control `LocalContext.svelte`,
-  bring-your-own GGUFs), "Hide the model's thinking" for reasoning models.
+  the curated cards by family with Download / Use / Uninstall…, and the
+  person's own GGUFs as cards too — Use / Uninstall…, 2026-10-27, where a
+  dropdown was —; Uninstall… from a card's right-click menu or its trash
+  button, off with "Switch to another model first" while the model is in
+  use, Yap's confirm with the file's size, `lib/core/localModels.js` →
+  `local_llm_uninstall`: ai-models.md `ai/local_llm/uninstall.rs`), "Hide
+  the model's thinking" for reasoning models.
   **Spelling** (`#settings-cleanup-spelling`, `RegionSpelling.svelte`: "Write
   in my region's spelling" → `regionSpelling`, greyed while cleanup is off).
   With cleanup on: **Styles by app** (`#settings-cleanup-styles`,

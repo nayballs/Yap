@@ -7,8 +7,10 @@
 // - "On this PC": Yap's on-device models (local_llm_status: the curated set
 //   with "Recommended for this PC" from the graphics card check, GGUFs of
 //   the person's own in <data>/llm/), downloaded right here through
-//   `local_llm_install` and its `local-llm-download-progress` events; and
-//   any self-hosted server on this PC, from its `GET {base}/models`;
+//   `local_llm_install` and its `local-llm-download-progress` events, and
+//   uninstalled from an installed one's right-click menu
+//   (core/localModels.js); and any self-hosted server on this PC, from its
+//   `GET {base}/models`;
 // - "Custom": a server elsewhere that Settings has the address of;
 // - "Recent": the last three Chat models picked, kept in this webview
 //   (localStorage, a per-window convenience).
@@ -190,6 +192,10 @@ export function localRows(status) {
       current,
       action: m.installed ? 'pick' : local.downloading === m.id ? 'downloading' : 'download',
       sizeMb: m.sizeMb,
+      // Installed: its file's own size, and why it can't be uninstalled
+      // now ("selected" | "busy" | null; ai/local_llm/uninstall.rs).
+      fileMb: m.fileMb ?? null,
+      inUse: m.inUse ?? null,
       recommended: !!m.recommended,
       tools: m.tools !== false,
       tags: cap([
@@ -216,6 +222,9 @@ export function localRows(status) {
       glyph: 'chip',
       current,
       action: 'pick',
+      own: true,
+      fileMb: o.sizeMb ?? null,
+      inUse: o.inUse ?? null,
       tools: o.tools !== false,
       tags: cap([current && tag('use', 'In use'), o.tools === false && tag('warn', 'no note tools')]),
     });

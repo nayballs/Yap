@@ -49,10 +49,16 @@ pub fn local_llm_status() -> serde_json::Value {
     let gpu = crate::ai::gpu::this_pc();
     let capable = crate::ai::gpu::can_run_big_model(gpu.as_ref());
     let recommended = crate::ai::local_llm::models::recommended_id(capable);
+    // Which installed model is in use (the pickers' Uninstall waits for a
+    // switch): local_llm/uninstall.rs.
+    let use_facts = crate::ai::local_llm::uninstall::facts(&cfg);
+    let in_use = |f: &str| crate::ai::local_llm::uninstall::in_use(f, &use_facts).map(|u| u.as_str());
+    let file_mb = |f: &str| std::fs::metadata(crate::ai::local_llm::llm_dir().join(f)).map(|m| m.len() / 1_048_576).ok();
     // The curated one-click download set, with per-model installed state.
     let curated: Vec<serde_json::Value> = crate::ai::local_llm::models::CURATED_MODELS
         .iter()
         .map(|m| {
+            let installed = on_disk.iter().any(|f| f == m.filename);
             serde_json::json!({
                 "id": m.id,
                 "display": m.display,
@@ -70,7 +76,11 @@ pub fn local_llm_status() -> serde_json::Value {
                     &crate::ai::local_llm::model_id(std::path::Path::new(m.filename)),
                 ),
                 "family": m.family,
-                "installed": on_disk.iter().any(|f| f == m.filename),
+                "installed": installed,
+                // Installed: the file's own size (what an uninstall frees),
+                // and why it can't go now ("selected" | "busy" | null).
+                "fileMb": if installed { file_mb(m.filename) } else { None },
+                "inUse": if installed { in_use(m.filename) } else { None },
                 // What it was trained for ("up to 256K"): the file's own
                 // header once it's here, else the curated figure.
                 "maxContext": crate::ai::local_llm::context::trained_context(&crate::ai::local_llm::llm_dir().join(m.filename)),
@@ -93,11 +103,11 @@ pub fn local_llm_status() -> serde_json::Value {
         .filter(|f| !crate::ai::local_llm::models::CURATED_MODELS.iter().any(|m| m.filename == f.as_str()))
         .map(|f| {
             let id = crate::ai::local_llm::model_id(std::path::Path::new(f));
-            let mb = std::fs::metadata(crate::ai::local_llm::llm_dir().join(f)).map(|m| m.len() / 1_048_576).unwrap_or(0);
             serde_json::json!({
                 "file": f,
                 "name": id,
-                "sizeMb": mb,
+                "sizeMb": file_mb(f).unwrap_or(0),
+                "inUse": in_use(f),
                 "tools": crate::chat::tools::supports_tools(crate::ai::local_llm::PROVIDER_ONDEVICE, &id),
                 "maxContext": crate::ai::local_llm::context::trained_context(&crate::ai::local_llm::llm_dir().join(f)),
             })
@@ -216,27 +226,16 @@ pub async fn local_llm_install(app: AppHandle, model: Option<String>) -> Result<
     }
 }
 
-/// Delete a downloaded local-cleanup model GGUF from `<data>/llm/`. `filename`
-/// is a bare name from `local_llm_status().models`/`curated`. Refuses path
-/// traversal and non-`.gguf` names, and stops the sidecar first if it's serving
-/// the file being removed (Windows locks an open file).
+/// Uninstall an on-device model: its GGUF deleted from `<data>/llm/`
+/// (`file`: a bare name from `local_llm_status`'s `curated` / `own`). Only a
+/// `.gguf` directly in that folder, never the model in use (switch first),
+/// a loaded one nothing uses freed first; a refusal in plain words
+/// (local_llm/uninstall.rs). The Chat model picker's and Settings' Uninstall.
 #[tauri::command]
-pub fn local_llm_delete(filename: String) -> Result<(), String> {
-    let name = std::path::Path::new(&filename)
-        .file_name()
-        .and_then(|s| s.to_str())
-        .ok_or_else(|| "invalid filename".to_string())?;
-    if !name.to_ascii_lowercase().ends_with(".gguf") {
-        return Err("not a .gguf model".into());
-    }
-    let path = crate::ai::local_llm::llm_dir().join(name);
-    if !path.is_file() {
-        return Ok(());
-    }
-    if crate::ai::local_llm::active_model_path(&config::load()) == path {
-        crate::ai::local_llm::stop();
-    }
-    std::fs::remove_file(&path).map_err(|e| e.to_string())
+pub async fn local_llm_uninstall(app: AppHandle, file: String) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || crate::ai::local_llm::uninstall::uninstall(&app, &file))
+        .await
+        .map_err(|_| "Couldn't uninstall the model. Try again.".to_string())?
 }
 
 /// Today's Groq AI-cleanup usage snapshot for the Settings meter.

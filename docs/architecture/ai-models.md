@@ -652,6 +652,45 @@ The language-model side: the OpenAI-compatible client and its prompts, the on-de
   `e2e_local_llm_idle_ms {ms}` (the idle limit in ms; "Never" stays never).
   Unit-tested: the launch gate, `in_use`, `dictation_uses_it`, the idle
   decision and setting, the stand-by address, `was_ours`.
+- **`ai/local_llm/uninstall.rs`** — **uninstalling an on-device model**
+  (2026-10-27, the maintainer's ask after a 5.8 GB Gemma 2 9B that didn't
+  suit them): `local_llm_uninstall {file}` (it replaced `local_llm_delete`,
+  which deleted whatever `.gguf` name it was given, the model in use
+  included), from the Chat model picker's right-click menu and Settings →
+  Language Models (frontend: `core/localModels.js`). **Only a bare `.gguf`
+  name** (`checked_name`: no `/` `\` `:` or `..`, no control characters,
+  no space at either end) that the folder lists as a file directly inside
+  `llm/` (`remove_from`) — never the llamafile engine, its marker, a
+  `.partial` download or anything outside; a name already gone is done.
+  **Never the model in use** (`in_use`, pure, from `UseFacts`): one
+  sidecar serves one model, so the model every feature routed on-device
+  uses — the configured one (`pp_local_model`, else the bundled 1.5B,
+  which follows the same rule) or the one the engine serves — stays while
+  anything is routed there (`models::in_use`: the cleanup's provider,
+  which Chat, Commands and the meeting notes inherit, a cleanup profile, a
+  Language Models scope): "Qwen3.5 4B is in use. Switch to another model
+  first." (a curated model by its name, any other by its file — the person's
+  own, or one taken off the list since, like Gemma 2 9B). With nothing routed there it can go, unless the engine is busy
+  with it (a request or run in flight, a start, a context restart, an
+  on-demand load: "…in use right now. Try again in a moment."); it holds
+  the start lock while it deletes (`STARTING`, so no start opens the file
+  meanwhile; a start under way counts as busy). A model loaded but used by
+  nothing is freed first (`stop`): Windows won't delete a file the engine
+  holds open. The configured one leaves `pp_local_model` on the default
+  (`change_config`; `yap-chat-model-changed {ppLocalModel: ""}`, which
+  Settings' copy adopts); every list re-reads on `yap-local-llm-changed`.
+  **A refused delete in plain words** (`refusal`, never the system's own
+  message): another program has it open (sharing / lock violation, a
+  mapped file), another Yap on this PC uses it (`runtime::other_yaps_sidecar`:
+  the dev build beside the installed app), no permission, else "Couldn't
+  uninstall … Try again, or delete it from the models folder." Logged with
+  its size and the curated id, never its name or path. `local_llm_status`
+  gives each installed model `inUse` (`"selected"` | `"busy"` | null) and,
+  for the curated ones, `fileMb` (the file's own size: what the confirm
+  says it frees). Unit-tested: the names taken and refused, the in-use rule,
+  only a GGUF directly in the folder deleted (the engine and marker left),
+  the refusals' words; e2e `chat-model-picker.spec.js` and
+  `local-models.spec.js`.
 - **`ai/gguf.rs`** — a GGUF model's header, **read-only** (2026-10-20): magic,
   version 2/3, the metadata (a few scalars kept, everything else skipped by
   seeking — the tokenizer's ~250 k strings too: ~20 ms for the 4B's 10 MB

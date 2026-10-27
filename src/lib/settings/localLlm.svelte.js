@@ -1,9 +1,11 @@
 // Settings' on-device model (ai/local_llm.rs, the llamafile sidecar): its
 // status as Language Models and the scope link rows show it, the curated
 // model downloading and its progress, and what Settings does with it
-// (download, use, delete, the bigger model offered once). A store, not the
+// (download, use, the bigger model offered once). A store, not the
 // page's: Settings is always mounted and its pages aren't — a download
-// carries on, with its progress, when you leave the page.
+// carries on, with its progress, when you leave the page. Uninstall is
+// core/localModels.js's (Rust puts `ppLocalModel` back on the default when
+// it names the file that went; adoptions.svelte.js takes it).
 //
 // (The Chat model picker keeps its own, chatModels.svelte.js `local`.)
 import { invoke } from '@tauri-apps/api/core';
@@ -192,6 +194,13 @@ export async function activateCurated(m) {
   await onLocalModelChange();
 }
 
+/** Switch the active local model to a GGUF of the person's own. */
+export async function activateOwn(file) {
+  if (localLlm.switching) return;
+  config.cfg.ppLocalModel = file;
+  await onLocalModelChange();
+}
+
 /**
  * The bigger model offered once (local_llm::upgrade_offer: a graphics card
  * that can run it, the 1.5B in use): taken or turned down, it isn't
@@ -215,24 +224,4 @@ export async function dismissUpgrade() {
   config.cfg.localLlmUpgradeDismissed = true;
   await persist();
   await refreshLocalLlm();
-}
-
-/** Delete a downloaded curated model; if it was active, fall back to the default. */
-export async function deleteCurated(m) {
-  localLlm.error = '';
-  try {
-    await invoke('local_llm_delete', { filename: m.filename });
-    if (activeLocalFile(config.cfg) === m.filename) {
-      config.cfg.ppLocalModel = '';
-      await persist();
-      if (localLlm.status.running) {
-        await invoke('local_llm_stop');
-        await invoke('local_llm_start');
-      }
-    }
-  } catch (e) {
-    localLlm.error = `${e}`;
-  } finally {
-    await refreshLocalLlm();
-  }
 }

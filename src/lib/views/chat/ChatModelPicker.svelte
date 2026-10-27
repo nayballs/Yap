@@ -8,9 +8,12 @@
   // looks through all of them (Ctrl+K); a provider without a key connects
   // in place (the key saved where Settings keeps it, then its live list
   // checked at once); On this PC downloads Yap's on-device models right in
-  // their row. Picking changes the Chat scope only (chat_set_model) —
-  // except that the on-device model is one for every feature, which the
-  // pane says when cleanup uses it too.
+  // their row, and an installed one uninstalls from its right-click menu
+  // (core/localModels.js: off while it's in use; the picker stays open and
+  // the row goes back to Download, or away for a model the person added).
+  // Picking changes the Chat scope only (chat_set_model) — except that the
+  // on-device model is one for every feature, which the pane says when
+  // cleanup uses it too.
   //
   // Keyboard: ↑/↓ move through the rail (it switches as it goes) or the
   // models, ←/→ (or Tab) between the two, Enter picks, typing searches,
@@ -26,6 +29,8 @@
   import { forgetVisionTags } from '../../stores/visionTags.svelte.js';
   import { openExternalLink } from '../../core/externalLinks.js';
   import { toast } from '../../ui/toast.svelte.js';
+  import { openContextMenu, menuKey, menuOpenFor } from '../../ui/contextMenu.svelte.js';
+  import { uninstallItems } from '../../core/localModels.js';
   import {
     CLOUD_PROVIDERS,
     cloudInfo,
@@ -87,6 +92,8 @@
   let railEl = $state(null);
   let listEl = $state(null);
   let keyEl = $state(null);
+  // The rows by key: an installed model's keeps its hover look while its menu is open.
+  let rowEls = $state({});
 
   const narrow = $derived(pos.width < 520);
   const servers = $derived(status?.servers || []);
@@ -298,6 +305,32 @@
     }
   }
 
+  // An installed on-device model's menu: Use, then Uninstall… (off while
+  // it's in use, with why). Other rows have none.
+  function rowMenu(e, r) {
+    if (r.kind !== 'ondevice' || r.action !== 'pick') return;
+    const el = e.currentTarget;
+    openContextMenu(
+      e,
+      [
+        !r.current ? { label: 'Use', icon: 'use', disabled: !!busy, onselect: () => activate(r) } : null,
+        { separator: true },
+        ...uninstallItems(
+          { name: r.name, file: r.file, sizeMb: r.fileMb, own: !!r.own, inUse: r.inUse },
+          { returnFocus: el, done: refreshLocal, after: () => afterUninstall(r) }
+        ),
+      ],
+      { label: r.name, row: el }
+    );
+  }
+
+  // Gone: the focus goes to its Download button (a curated model), else
+  // to the list's first item.
+  function afterUninstall(r) {
+    const items = navItems();
+    return items.find((el) => el.dataset.nav === r.key) || items[0] || searchEl;
+  }
+
   async function saveKey(p) {
     const key = keyDraft.trim();
     if (!key || keySaving) return;
@@ -411,11 +444,15 @@
       class="mrow"
       class:on={r.current}
       class:locked={r.action === 'key'}
+      class:menuopen={menuOpenFor(rowEls[r.key])}
+      bind:this={rowEls[r.key]}
       data-nav={r.key}
       aria-pressed={r.current}
       aria-busy={busy === r.key}
       onfocus={() => (navKey = r.key)}
       onclick={() => activate(r)}
+      oncontextmenu={(e) => rowMenu(e, r)}
+      onkeydown={(e) => menuKey(e, (k) => rowMenu(k, r))}
     >
       {@render check(r)}
       <ProviderMark icon={r.icon} glyph={r.glyph} size={18} />
@@ -932,7 +969,8 @@
     text-align: left;
     cursor: pointer;
   }
-  button.mrow:hover {
+  button.mrow:hover,
+  .mrow.menuopen {
     background: var(--yap-s3);
   }
   .mrow.on {

@@ -247,7 +247,7 @@ pub fn run() {
             ai::commands::local_llm_stop,
             ai::commands::local_llm_install,
             shell::download::download_cancel,
-            ai::commands::local_llm_delete,
+            ai::commands::local_llm_uninstall,
             ai::local_llm::local_llm_set_context,
             ai::commands::open_llm_folder,
             ai::commands::get_groq_usage,

@@ -23,6 +23,7 @@
   import { refreshLocal, local, pushRecent } from './chatModels.svelte.js';
   import { chipContextLine } from '../../core/localContext.js';
   import { isKeyed } from '../../core/providers.js';
+  import { menuOrDialogOpen } from '../../ui/contextMenu.svelte.js';
 
   // `quiet`: no pill, just the words (under the Chat composer, as Claude
   // Code shows its model).
@@ -101,9 +102,11 @@
 
   // Outside the chip and its picker: closed. On pointerdown (the path is
   // taken as the event starts, so a row the click re-renders still counts
-  // as inside).
+  // as inside). Not while a row's menu or its confirm dialog is up (they're
+  // drawn outside it): a click there is theirs, and Uninstall's row moves
+  // to Download in front of you.
   function onWindowPointer(e) {
-    if (open && wrapEl && !e.composedPath().includes(wrapEl)) close(false);
+    if (open && wrapEl && !menuOrDialogOpen() && !e.composedPath().includes(wrapEl)) close(false);
   }
 
   onMount(() => {

@@ -3,8 +3,10 @@
   // model browser (ai/local_llm.rs, Mozilla llamafile): Recommended for this
   // PC, the bigger model offered once, the slow-on-this-PC line, the Context
   // control (LocalContext.svelte), the curated models by family with
-  // Download / Use / Delete…, and your own GGUFs. The status and the actions
-  // are settings/localLlm.svelte.js's: a download carries on, with its
+  // Download / Use / Uninstall…, and your own GGUFs with Use / Uninstall…
+  // (core/localModels.js: the model in use can't go — its Uninstall… is
+  // off, with why). The status and the actions are
+  // settings/localLlm.svelte.js's: a download carries on, with its
   // progress, when you leave the page.
   //
   //   cfg: Settings' config $state (auto-save does the saving).
@@ -19,7 +21,8 @@
   import LocalContext from '../components/LocalContext.svelte';
   import { upTo } from '../core/localContext.js';
   import { createExternalLinkHandler } from '../core/externalLinks.js';
-  import { openContextMenu, menuKey, menuOpenFor, askConfirm } from '../ui/contextMenu.svelte.js';
+  import { openContextMenu, menuKey, menuOpenFor } from '../ui/contextMenu.svelte.js';
+  import { askUninstall, uninstallItems, inUseNote } from '../core/localModels.js';
   import DownloadProgress from '../ui/DownloadProgress.svelte';
   import { fromEvent } from '../core/downloads.js';
   import {
@@ -27,14 +30,14 @@
     LLM_FAMILIES,
     localFamilies,
     activeLocalFile,
-    onLocalModelChange,
+    refreshLocalLlm,
     openLlmFolder,
     downloadCurated,
     cancelCurated,
     activateCurated,
+    activateOwn,
     takeUpgrade,
     dismissUpgrade,
-    deleteCurated,
     loadLocalNow,
     freeLocalNow,
   } from './localLlm.svelte.js';
@@ -60,12 +63,8 @@
   };
 
   const activeFile = $derived(activeLocalFile(cfg));
-  // User-supplied GGUFs in the folder that aren't part of the curated set.
-  const byoModelOptions = $derived(
-    (llm.models || [])
-      .filter((f) => !(llm.curated || []).some((c) => c.filename === f))
-      .map((f) => ({ value: f, label: f.replace(/\.gguf$/i, '') }))
-  );
+  // GGUFs of the person's own in the folder (not the curated set).
+  const ownModels = $derived(llm.own || []);
   function familyIcon(fam) {
     return (LLM_FAMILIES.find((f) => f.value === fam) || {}).icon || '';
   }
@@ -84,21 +83,30 @@
     return i > 0 ? url.slice(0, i) : url;
   }
 
-  // The trash button and the card's right-click Delete… ask first, as the
-  // speech models do.
+  // The trash button and the card's right-click Uninstall… ask first
+  // (core/localModels.js). The model in use can't go: Rust says which
+  // (`inUse`), and the active one here counts at once.
   let curatedEls = $state({});
-  function askDeleteCurated(m) {
-    askConfirm({
-      title: `Delete ${m.display}?`,
-      body: `The ${fmtLlmSize(m.sizeMb)} download leaves this PC. You can download it again at any time.`,
-      run: () => deleteCurated(m),
-      returnFocus: curatedEls[m.id],
-    });
-  }
+  let ownEls = $state({});
+  let folderEl = $state(null);
+  const inUseOf = (m, file) => m.inUse || (activeFile === file ? 'selected' : null);
+  const curatedModel = (m) => ({
+    name: m.display,
+    file: m.filename,
+    sizeMb: m.fileMb ?? m.sizeMb,
+    own: false,
+    inUse: inUseOf(m, m.filename),
+  });
+  const ownModel = (o) => ({ name: o.name, file: o.file, sizeMb: o.sizeMb, own: true, inUse: inUseOf(o, o.file) });
+  // A curated card stays (Download again); one of your own goes, so the
+  // focus goes to the models folder's link.
+  const curatedOpts = (m) => ({ returnFocus: curatedEls[m.id], done: refreshLocalLlm, after: () => curatedEls[m.id] });
+  const ownOpts = (o) => ({ returnFocus: ownEls[o.file], done: refreshLocalLlm, after: () => folderEl });
 
   // A local model card's right-click menu (ui/contextMenu.svelte.js): what
-  // its buttons do — Download, or Use — and Delete…. Nothing while it
-  // downloads, or with cleanup off (its buttons are off then too).
+  // its buttons do — Download, or Use — and Uninstall…. Nothing while it
+  // downloads (its Cancel is there); Download and Use are off with cleanup
+  // off (its buttons are off then too).
   function curatedMenu(e, m) {
     const isActive = m.installed && activeFile === m.filename;
     if (localLlm.downloadingId === m.id) return;
@@ -112,15 +120,33 @@
         m.installed && !isActive
           ? { label: 'Use', icon: 'use', disabled: off || localLlm.switching, onselect: () => activateCurated(m) }
           : null,
-        m.installed && !isActive ? { separator: true } : null,
-        m.installed && !isActive
-          ? { label: 'Delete…', icon: 'trash', danger: true, onselect: () => askDeleteCurated(m) }
-          : null,
+        { separator: true },
+        ...(m.installed ? uninstallItems(curatedModel(m), curatedOpts(m)) : []),
       ],
       { label: m.display, row: e.type === 'keydown' ? e.target : curatedEls[m.id] }
     );
   }
+
+  /** A model of your own: Use, and Uninstall…. */
+  function ownMenu(e, o) {
+    const isActive = activeFile === o.file;
+    openContextMenu(
+      e,
+      [
+        !isActive
+          ? { label: 'Use', icon: 'use', disabled: !cfg.postProcessEnabled || localLlm.switching, onselect: () => activateOwn(o.file) }
+          : null,
+        { separator: true },
+        ...uninstallItems(ownModel(o), ownOpts(o)),
+      ],
+      { label: o.file, row: e.type === 'keydown' ? e.target : ownEls[o.file] }
+    );
+  }
 </script>
+
+{#snippet trash()}
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M6 6v14a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V6M10 11v6M14 11v6" /></svg>
+{/snippet}
 
 <!-- Brand icon for a local-model family tab (img for known brands, chip svg for Phi). -->
 {#snippet familyTabIcon(v)}
@@ -248,9 +274,10 @@
           {:else if isActive}
             <span class="lb-activetag">✓ Active</span>
           {:else if m.installed}
+            {@const note = inUseNote(inUseOf(m, m.filename))}
             <button class="lb-use" onclick={() => activateCurated(m)} disabled={!cfg.postProcessEnabled || localLlm.switching}>Use</button>
-            <button class="lb-del" title="Delete download" aria-label="Delete download" onclick={() => askDeleteCurated(m)}>
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M6 6v14a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V6M10 11v6M14 11v6" /></svg>
+            <button class="lb-del" title={note || 'Uninstall'} aria-label="Uninstall {m.display}" disabled={!!note} onclick={() => askUninstall(curatedModel(m), curatedOpts(m))}>
+              {@render trash()}
             </button>
           {:else}
             <button class="lb-dl" onclick={() => downloadCurated(m)} disabled={!cfg.postProcessEnabled || !!localLlm.downloadingId}>
@@ -264,20 +291,52 @@
   </div>
   <p class="lb-byo">
     Or bring your own: drop any <code>.gguf</code> into the
-    <button class="ondevice-link" onclick={openLlmFolder}>models folder</button>.
+    <button class="ondevice-link" bind:this={folderEl} onclick={openLlmFolder}>models folder</button>.
   </p>
-  {#if byoModelOptions.length}
-    <div class="ondevice-models">
-      <Select bind:value={cfg.ppLocalModel} options={byoModelOptions} onchange={onLocalModelChange} disabled={!cfg.postProcessEnabled || localLlm.switching} />
+  {#if ownModels.length}
+    <div class="lb-list" data-testid="local-own">
+      {#each ownModels as o (o.file)}
+        {@const isActive = activeFile === o.file}
+        {@const note = inUseNote(inUseOf(o, o.file))}
+        <!-- svelte-ignore a11y_no_static_element_interactions -->
+        <div
+          class="lb-card"
+          class:sel={isActive}
+          class:menuopen={menuOpenFor(ownEls[o.file])}
+          bind:this={ownEls[o.file]}
+          tabindex="-1"
+          oncontextmenu={(e) => ownMenu(e, o)}
+          onkeydown={(e) => menuKey(e, (k) => ownMenu(k, o))}
+        >
+          <span class="lb-dot" class:on={isActive}></span>
+          <span class="lb-brand lb-brandfb">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5" y="5" width="14" height="14" rx="2" /><rect x="9.5" y="9.5" width="5" height="5" /></svg>
+          </span>
+          <div class="lb-info">
+            <div class="lb-top">
+              <span class="lb-name">{o.name}</span>
+              <span class="lb-size">{[fmtLlmSize(o.sizeMb), upTo(o.maxContext)].filter(Boolean).join(' · ')}</span>
+            </div>
+            <span class="lb-blurb">Your own model · {o.file}</span>
+          </div>
+          <div class="lb-action">
+            {#if isActive}
+              <span class="lb-activetag">✓ Active</span>
+            {:else}
+              <button class="lb-use" onclick={() => activateOwn(o.file)} disabled={!cfg.postProcessEnabled || localLlm.switching}>Use</button>
+              <button class="lb-del" title={note || 'Uninstall'} aria-label="Uninstall {o.file}" disabled={!!note} onclick={() => askUninstall(ownModel(o), ownOpts(o))}>
+                {@render trash()}
+              </button>
+            {/if}
+          </div>
+        </div>
+      {/each}
     </div>
   {/if}
   {#if localLlm.error}<span class="ondevice-err">{localLlm.error}</span>{/if}
 </div>
 
 <style>
-  .ondevice-models {
-    margin-top: 8px;
-  }
   .ondevice-link {
     padding: 0;
     border: none;
@@ -547,7 +606,11 @@
     width: 13px;
     height: 13px;
   }
-  .lb-del:hover {
+  .lb-del:disabled {
+    opacity: 0.45;
+    cursor: default;
+  }
+  .lb-del:hover:not(:disabled) {
     color: var(--yap-danger);
     border-color: color-mix(in srgb, var(--yap-danger) 45%, var(--yap-border));
   }

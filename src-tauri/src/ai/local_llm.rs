@@ -11,13 +11,15 @@
 //! This module owns the process lifecycle: spawn (hidden), wait for `/health`,
 //! expose the base URL, and kill on stop/exit. Beside it: [`runtime`] (the
 //! llamafile on disk and its background upgrade), [`context`] (the context
-//! length, and a restart when it changes) and [`models`] (the curated
-//! models and their downloads).
+//! length, and a restart when it changes), [`models`] (the curated
+//! models and their downloads) and [`uninstall`] (a model deleted from
+//! `llm/`, never the one in use).
 
 pub mod context;
 pub mod models;
 pub mod on_demand;
 pub mod runtime;
+pub mod uninstall;
 
 use std::path::{Path, PathBuf};
 use crate::privacy::net::Recorded as _;

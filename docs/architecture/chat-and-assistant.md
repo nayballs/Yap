@@ -775,7 +775,20 @@ screenshots and their prompts, +, the box, the mic, Send / ■, `ModelChip`).
   (`local_llm_status.sharedOnDevice`: picking another switches it there as
   well); **Installed** (Yap's curated GGUFs on disk and the person's own,
   `local_llm_status.own`; In use / pick to use; each row starts with its
-  maximum, "Up to 256K · …", `maxContext`), self-hosted servers on this
+  maximum, "Up to 256K · …", `maxContext`; **right-click → Use /
+  Uninstall…**, 2026-10-27, also the ContextMenu key or Shift+F10 on the
+  row: `core/localModels.js` — off with "Switch to another model first"
+  while it's in use, `local_llm_status`'s `inUse`; else Yap's confirm,
+  "Uninstall Qwen3.5 9B? This deletes its {size} file from this PC. You
+  can download it again." (the file's own size, as Windows counts it) — a GGUF not on Yap's
+  list (the person's own, or one taken off it since, like Gemma 2 9B) is
+  named by its file: "…It isn't on Yap's download list, so Yap can't
+  download it again." — then
+  `local_llm_uninstall` (ai-models.md `ai/local_llm/uninstall.rs`); a
+  refusal in a toast, the dialog left open. The picker stays open while
+  the menu and the dialog are up (`ModelChip` ignores a click outside then,
+  `menuOrDialogOpen`): the row goes back under Download, the focus on its
+  Download button, or away for a model of the person's own), self-hosted servers on this
   PC (`llm_models`: their `/models`, "3 models on this server", and the
   context Ollama / LM Studio say: "8K context, set in Ollama · …"), and
   **Download** (the rest, "Recommended for this PC" first): a Download

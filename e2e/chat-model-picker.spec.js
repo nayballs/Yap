@@ -10,7 +10,9 @@
 // - search looks through every provider and this PC;
 // - On this PC: Yap's on-device models ("Recommended for this PC" from the
 //   graphics card), one downloaded in its row with a progress bar, then
-//   picked; the processor warning and its switch to the 1.5B; a self-hosted
+//   picked; an installed one uninstalled from its right-click menu (off
+//   while it's in use; back under Download, or gone for a GGUF of your
+//   own); the processor warning and its switch to the 1.5B; a self-hosted
 //   server's models;
 // - the keyboard: arrows through the rail and the models, Ctrl+K, typing to
 //   search, Enter, Esc.
@@ -334,6 +336,8 @@ test('On this PC: the recommended model downloads in its row, then Chat uses it'
   await expect(bar).toBeVisible();
   await expect.poll(async () => Number(await bar.getAttribute('aria-valuenow')), { timeout: 15_000 }).toBeGreaterThanOrEqual(40);
   await expect(big.locator('.pline')).toContainText(/Downloading… \d+% · \d+ MB of 4 MB/);
+  // Mid-download it offers Cancel (never Uninstall: it isn't installed yet).
+  await expect(big.getByRole('button', { name: 'Cancel the download of Qwen3.5 4B' })).toBeVisible();
   // Only one at a time.
   await expect(available.locator('.dlrow').nth(1).getByRole('button')).toBeDisabled();
   await shot(main, '03-picker-on-this-pc-download');
@@ -372,6 +376,81 @@ test('a big model left on the processor says so, and the switch goes to the 1.5B
     await expectStore(yap, 'config.json', (c) => c.ppLocalModel === '' && c.llmScopes.chat.provider === 'ondevice');
   } finally {
     await yap.invoke('e2e_local_llm_serving', {});
+    await backToGroq(yap, main, fakeLlm);
+  }
+});
+
+test('an installed model uninstalls from its right-click menu, never the one in use', async ({ yap, main, fakeLlm, shot }) => {
+  const llm = path.join(yap.dataDir, 'llm');
+  const OWN = 'my-notes-model.gguf';
+  // The 4B (downloaded above, or a stand-in when this runs alone) and a
+  // GGUF of the person's own; nothing ever runs them.
+  fs.writeFileSync(path.join(llm, BIG_FILE), Buffer.alloc(3 * 1048576));
+  fs.writeFileSync(path.join(llm, OWN), Buffer.alloc(2 * 1048576));
+  const installed = () => pane(main).getByRole('group', { name: 'Installed' });
+  const menu = main.getByRole('menu');
+  const confirm = main.getByRole('alertdialog');
+  try {
+    // Chat on the 4B: in use, so its Uninstall… is off and says why.
+    await openPicker(main);
+    await tab(main, 'On this PC').click();
+    await installed().getByRole('button', { name: /^Qwen3\.5 4B/ }).click();
+    await expect(chip(main)).toHaveText('Qwen3.5 4B · On this PC');
+    await openPicker(main);
+    await installed().getByRole('button', { name: /^Qwen3\.5 4B/ }).click({ button: 'right' });
+    await expect(menu.getByRole('menuitem')).toHaveText(['Uninstall…']);
+    await expect(menu.getByRole('menuitem', { name: 'Uninstall…' })).toHaveAttribute('aria-disabled', 'true');
+    await expect(menu.locator('.note')).toHaveText('Switch to another model first');
+    await shot(main, '07-picker-uninstall-off-in-use');
+    await main.keyboard.press('Escape');
+    await expect(menu).toBeHidden();
+    await expect(picker(main)).toBeVisible();
+    // Rust refuses it too, in plain words, and keeps the file.
+    await expect(yap.invoke('local_llm_uninstall', { file: BIG_FILE })).rejects.toThrow('Qwen3.5 4B is in use. Switch to another model first.');
+    expect(fs.existsSync(path.join(llm, BIG_FILE))).toBe(true);
+
+    // Chat on the 1.5B: the 4B can go. Right-click → Uninstall… → confirm.
+    await installed().getByRole('button', { name: /^Qwen2\.5 1\.5B/ }).click();
+    await expect(chip(main)).toHaveText('Qwen2.5 1.5B Instruct · On this PC · no note tools');
+    await openPicker(main);
+    await installed().getByRole('button', { name: /^Qwen3\.5 4B/ }).click({ button: 'right' });
+    await expect(menu.getByRole('menuitem')).toHaveText(['Use', 'Uninstall…']);
+    await menu.getByRole('menuitem', { name: 'Uninstall…' }).click();
+    await expect(confirm.getByRole('heading')).toHaveText('Uninstall Qwen3.5 4B?');
+    await expect(confirm).toContainText('This deletes its 3 MB file from this PC. You can download it again.');
+    await shot(main, '08-picker-uninstall-confirm');
+    await confirm.getByRole('button', { name: 'Uninstall' }).click();
+    await expect(confirm).toBeHidden();
+    // Gone from the disk; the picker stays open, the row back under Download.
+    expect(fs.existsSync(path.join(llm, BIG_FILE))).toBe(false);
+    await expect(picker(main)).toBeVisible();
+    await expect(installed().locator('.nm')).toHaveText(['Qwen2.5 1.5B Instruct', 'my-notes-model']);
+    const available = pane(main).getByRole('group', { name: 'Download' });
+    const again = available.getByRole('button', { name: /^Download Qwen3\.5 4B/ });
+    await expect(again).toBeVisible();
+    await expect(again).toBeFocused();
+
+    // A model of the person's own: named by its file, and gone from the list.
+    await installed().getByRole('button', { name: /^my-notes-model/ }).click({ button: 'right' });
+    await menu.getByRole('menuitem', { name: 'Uninstall…' }).click();
+    await expect(confirm.getByRole('heading')).toHaveText(`Uninstall ${OWN}?`);
+    await expect(confirm).toContainText("This deletes its 2 MB file from this PC. It isn't on Yap's download list, so Yap can't download it again.");
+    await confirm.getByRole('button', { name: 'Uninstall' }).click();
+    await expect(confirm).toBeHidden();
+    await expect(installed().locator('.nm')).toHaveText(['Qwen2.5 1.5B Instruct']);
+    expect(fs.existsSync(path.join(llm, OWN))).toBe(false);
+    await shot(main, '09-picker-after-uninstall');
+    await main.keyboard.press('Escape');
+
+    // Only a bare .gguf name in the models folder: never the engine, a
+    // path, or anything outside it.
+    for (const bad of ['..\\config.json', '../config.json', 'llamafile.exe', 'C:x.gguf', `..\\llm\\${OWN}`]) {
+      await expect(yap.invoke('local_llm_uninstall', { file: bad })).rejects.toThrow("That isn't one of the on-device models on this PC.");
+    }
+    expect(fs.existsSync(path.join(llm, 'llamafile.exe'))).toBe(true);
+    expect(fs.existsSync(path.join(yap.dataDir, 'config.json'))).toBe(true);
+  } finally {
+    fs.rmSync(path.join(llm, OWN), { force: true });
     await backToGroq(yap, main, fakeLlm);
   }
 });

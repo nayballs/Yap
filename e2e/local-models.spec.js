@@ -5,7 +5,9 @@
 // 1.5B is offered it once, quietly (never downloaded by itself; "No thanks"
 // is remembered). Without one, the 1.5B is recommended and nothing is
 // offered. A big model whose layers stayed on the processor says so, and
-// points at the 1.5B.
+// points at the 1.5B. An installed model uninstalls from its card (the
+// right-click menu or the trash button, asked first), a GGUF of your own
+// too; the one in use can't (src-tauri/src/ai/local_llm/uninstall.rs).
 //
 // The card is a stand-in (`YAP_E2E_GPU`), the runtime and the default model
 // are empty placeholder files (so "installed"; nothing ever runs or
@@ -98,6 +100,61 @@ test('a big model left on the processor says so and points at the 1.5B', async (
     expect(status.slowOnThisPc).toBe(false);
   } finally {
     await yap.invoke('e2e_local_llm_serving', {});
+    await closeSettings(main);
+  }
+});
+
+test('Settings uninstalls a model and one of your own, never the one in use', async ({ yap, main, shot }) => {
+  const llm = path.join(yap.dataDir, 'llm');
+  const TWO_B = 'Qwen_Qwen3.5-2B-Q4_K_M.gguf';
+  const OWN = 'my-notes-model.gguf';
+  fs.writeFileSync(path.join(llm, TWO_B), Buffer.alloc(3 * 1048576));
+  fs.writeFileSync(path.join(llm, OWN), Buffer.alloc(2 * 1048576));
+  const menu = main.getByRole('menu');
+  const confirm = main.getByRole('alertdialog');
+  try {
+    const dialog = await openLocalModels(main);
+    // The 1.5B is the model cleanup uses: its Uninstall… is off, and says why.
+    await card(dialog, 'Qwen2.5 1.5B').click({ button: 'right' });
+    await expect(menu.getByRole('menuitem')).toHaveText(['Uninstall…']);
+    await expect(menu.getByRole('menuitem', { name: 'Uninstall…' })).toHaveAttribute('aria-disabled', 'true');
+    await expect(menu.locator('.note')).toHaveText('Switch to another model first');
+    await shot(main, '04-uninstall-off-in-use');
+    await main.keyboard.press('Escape');
+    await expect(menu).toBeHidden();
+
+    // The 2B: right-click → Uninstall… → confirm; its card offers Download again.
+    const two = card(dialog, 'Qwen3.5 2B');
+    await two.click({ button: 'right' });
+    await expect(menu.getByRole('menuitem')).toHaveText(['Use', 'Uninstall…']);
+    await menu.getByRole('menuitem', { name: 'Uninstall…' }).click();
+    await expect(confirm.getByRole('heading')).toHaveText('Uninstall Qwen3.5 2B?');
+    await expect(confirm).toContainText('This deletes its 3 MB file from this PC. You can download it again.');
+    await shot(main, '05-uninstall-confirm');
+    await confirm.getByRole('button', { name: 'Uninstall' }).click();
+    await expect(confirm).toBeHidden();
+    await expect(two.getByRole('button', { name: 'Download' })).toBeVisible();
+    expect(fs.existsSync(path.join(llm, TWO_B))).toBe(false);
+
+    // One of your own, by its trash button: named by its file, then gone.
+    const own = dialog.getByTestId('local-own');
+    await expect(own.locator('.lb-name')).toHaveText(['my-notes-model']);
+    await own.getByRole('button', { name: `Uninstall ${OWN}` }).click();
+    await expect(confirm.getByRole('heading')).toHaveText(`Uninstall ${OWN}?`);
+    await expect(confirm).toContainText("It isn't on Yap's download list, so Yap can't download it again.");
+    await confirm.getByRole('button', { name: 'Uninstall' }).click();
+    await expect(confirm).toBeHidden();
+    await expect(own).toHaveCount(0);
+    expect(fs.existsSync(path.join(llm, OWN))).toBe(false);
+    await shot(main, '06-after-uninstall');
+
+    // The model in use and the engine stayed; nothing else changed.
+    expect(fs.existsSync(path.join(llm, 'qwen2.5-1.5b-instruct-q4_k_m.gguf'))).toBe(true);
+    expect(fs.existsSync(path.join(llm, 'llamafile.exe'))).toBe(true);
+    await expectStore(yap, 'config.json', (c) => c.ppProvider === 'ondevice' && !c.ppLocalModel);
+  } finally {
+    fs.rmSync(path.join(llm, TWO_B), { force: true });
+    fs.rmSync(path.join(llm, OWN), { force: true });
     await closeSettings(main);
   }
 });

@@ -456,11 +456,11 @@ fn running_yap(_pid: u32) -> bool {
 /// Another running Yap's sidecar (a dev build beside the installed app),
 /// running the runtime in this `llm/`: a swap waits for it to stop.
 #[cfg(windows)]
-fn other_yaps_sidecar() -> bool {
+pub(super) fn other_yaps_sidecar() -> bool {
     crate::shell::procs::sidecars_of_other_yaps(&llm_dir(), RUNTIME_FILENAME) > 0
 }
 #[cfg(not(windows))]
-fn other_yaps_sidecar() -> bool {
+pub(super) fn other_yaps_sidecar() -> bool {
     false
 }
 
