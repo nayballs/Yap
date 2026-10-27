@@ -55,6 +55,32 @@ const DIRECTML_WAVEFORM: usize = 16_000 * 30 + 4_000;
 const WINDOW_SIZE: f32 = 0.01;
 const MAX_TOKENS_PER_STEP: usize = 10;
 
+/// The index of the largest value; `None` for an empty slice.
+fn argmax(xs: &[f32]) -> Option<usize> {
+    xs.iter()
+        .enumerate()
+        .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
+        .map(|(idx, _)| idx)
+}
+
+/// Where the TDT decode goes after one joint run at frame `t`, as NeMo and
+/// onnx-asr decode: on by the predicted duration `step` when it's > 0, else
+/// one frame after a blank or after [`MAX_TOKENS_PER_STEP`] tokens on this
+/// frame; otherwise this frame again. Returns `(t, emitted_tokens)`.
+///
+/// The duration was once ignored (this frame asked again after every token),
+/// which the model never saw in training: on some words it said the same
+/// token ten times a frame for several frames ("definitive d d d d d d d d").
+fn next_frame(t: usize, emitted_tokens: usize, blank: bool, step: usize) -> (usize, usize) {
+    if step > 0 {
+        (t + step, 0)
+    } else if blank || emitted_tokens == MAX_TOKENS_PER_STEP {
+        (t + 1, 0)
+    } else {
+        (t, emitted_tokens)
+    }
+}
+
 static DECODE_SPACE_RE: Lazy<Result<Regex, regex::Error>> =
     Lazy::new(|| Regex::new(r"\A\s|\s\B|(\s)\b"));
 
@@ -388,12 +414,15 @@ impl ParakeetModel {
                 vocab_logits_slice
             };
 
-            let token = vocab_logits
-                .iter()
-                .enumerate()
-                .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
-                .map(|(idx, _)| idx as i32)
+            let token = argmax(vocab_logits)
+                .map(|idx| idx as i32)
                 .unwrap_or(self.blank_idx);
+            // TDT: the joint's outputs after the vocabulary are its durations
+            // (0, 1, 2, 3, 4 frames), how far to move on after this token.
+            let step = vocab_logits_slice
+                .get(self.vocab_size..)
+                .and_then(argmax)
+                .unwrap_or(0);
 
             if token != self.blank_idx {
                 prev_state = new_state;
@@ -402,10 +431,7 @@ impl ParakeetModel {
                 emitted_tokens += 1;
             }
 
-            if token == self.blank_idx || emitted_tokens == MAX_TOKENS_PER_STEP {
-                t += 1;
-                emitted_tokens = 0;
-            }
+            (t, emitted_tokens) = next_frame(t, emitted_tokens, token == self.blank_idx, step);
         }
 
         Ok((tokens, timestamps))
@@ -719,4 +745,53 @@ fn group_words_into_segments(words: &[Word]) -> Vec<Segment> {
     }
 
     segments
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The decode loop's frames over a fake joint: `joint(t, emitted)` is the
+    /// token (`None`: blank) and the duration it predicts at frame `t`.
+    fn decode(frames: usize, joint: impl Fn(usize, usize) -> (Option<char>, usize)) -> String {
+        let (mut t, mut emitted, mut out) = (0, 0, String::new());
+        while t < frames {
+            let (token, step) = joint(t, emitted);
+            if let Some(c) = token {
+                out.push(c);
+                emitted += 1;
+            }
+            (t, emitted) = next_frame(t, emitted, token.is_none(), step);
+        }
+        out
+    }
+
+    #[test]
+    fn a_token_moves_on_by_its_duration() {
+        // Asked frame 2 again, the model would say "d" again (it was trained
+        // to move on two frames): one "d", not ten.
+        let joint = |t: usize, _| if t == 2 { (Some('d'), 2) } else { (None, 1) };
+        assert_eq!(decode(8, joint), "d");
+    }
+
+    #[test]
+    fn duration_zero_stays_on_the_frame_up_to_the_cap() {
+        let two = |t: usize, emitted: usize| if t == 1 && emitted < 2 { (Some('a'), 0) } else { (None, 1) };
+        assert_eq!(decode(4, two), "aa");
+        let stuck = |t: usize, _| if t == 0 { (Some('x'), 0) } else { (None, 1) };
+        assert_eq!(decode(3, stuck), "x".repeat(MAX_TOKENS_PER_STEP));
+    }
+
+    #[test]
+    fn a_blank_with_duration_zero_still_moves_on() {
+        assert_eq!(decode(5, |_, _| (None, 0)), "");
+    }
+
+    #[test]
+    fn the_duration_is_the_largest_of_the_outputs_after_the_vocabulary() {
+        let logits = [0.1, 0.9, 0.3, /* durations */ 0.2, 0.1, 0.7, 0.0, 0.0];
+        assert_eq!(argmax(&logits[..3]), Some(1));
+        assert_eq!(logits.get(3..).and_then(argmax), Some(2));
+        assert_eq!(argmax(&[]), None);
+    }
 }

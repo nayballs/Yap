@@ -883,7 +883,12 @@ to **Run again** from Home.
   in ~55 ms only at the length its first run planned for and ~350 ms at any
   other — the model transcribes a second of silence at load to plan it. On
   this PC that took Parakeet V3 on DirectML from 441 / 630 / 1,244 ms to
-  133 / 158 / 578 ms at 3 / 11 / 36 s of speech.
+  133 / 158 / 578 ms at 3 / 11 / 36 s of speech. **Parakeet's TDT decode
+  reads the model's durations** (2026-10-27, every device): 0.3.11 ignored
+  them and asked a frame again after every token, so on some words the model
+  said one token ten times a frame for several frames ("definitive d d d d
+  d d d d d d d d edition", "how how how how…"), in 4 of a day's 12 real
+  dictations replayed (`yap.exe partials-dump`); with the durations, none.
   `detect_language` (default `None`; Whisper's own detection, the vendored
   transcribe-rs's `WhisperEngine::detect_language`) and
   `SttAdapter::transcribe_spoken(audio, &Spoken, …) → Said { text, heard }`

@@ -52,7 +52,7 @@ Full list with versions and details: [app-shell.md](./docs/architecture/app-shel
 - **Shell:** Tauri 2 — Rust backend (`src-tauri/src/`) + Svelte 5 / Vite 6 frontend (`src/`).
 - **Windows:** `settings` (the main window), `onboarding`, `notepad` (meeting notes), `overlay` (the Yap bar).
 - **Audio:** `cpal` capture, `rodio` playback (chimes, spoken replies).
-- **STT:** `transcribe-rs` — whisper.cpp on Vulkan + ONNX models (Parakeet…) on DirectML; `engines` feature. Vendored (`src-tauri/vendor/transcribe-rs`, `[patch.crates-io]`) with two DirectML fixes for Parakeet — see its `YAP.md`.
+- **STT:** `transcribe-rs` — whisper.cpp on Vulkan + ONNX models (Parakeet…) on DirectML; `engines` feature. Vendored (`src-tauri/vendor/transcribe-rs`, `[patch.crates-io]`) with two DirectML fixes for Parakeet and its TDT durations read (no "d d d d" runs) — see its `YAP.md`.
 - **AI:** `reqwest` → any OpenAI-compatible endpoint, or the on-device llamafile sidecar (`ai/local_llm.rs`).
 - **Spoken replies:** Kokoro-82M (ONNX on `ort`, CPU; eSpeak NG run separately) or Windows' voices; or ElevenLabs (cloud, the user's own key, streamed PCM).
 - **Speaker diarization (beta):** Nemotron-3-Diarization on NeMo-Speech.cpp, in a `yap.exe diarize` child.

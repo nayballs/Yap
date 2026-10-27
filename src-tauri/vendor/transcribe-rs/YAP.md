@@ -7,8 +7,8 @@ and `src/` are kept; the `[[example]]` and `[[test]]` targets were taken out of
 `Cargo.toml` because their files aren't here. Everything else is unchanged
 except the two DirectML fixes below (2026-10-22), measured with `stt_speed.rs`'s
 `--ignored` `profile_parakeet` and `bench_this_pc` on an RTX 5070 Ti; threads
-and the DirectML adapter (2026-10-24); and Whisper's language probabilities
-(2026-10-25).
+and the DirectML adapter (2026-10-24); Whisper's language probabilities
+(2026-10-25); and Parakeet TDT's durations, read at last (2026-10-27).
 
 ## What changed
 
@@ -39,6 +39,21 @@ and the DirectML adapter (2026-10-24); and Whisper's language probabilities
    for that length at load, not in the first dictation (~0.5 s).
 
 The CPU path (`CpuOnly`) and every other model and accelerator are untouched.
+
+## Parakeet TDT's durations (2026-10-27)
+
+`src/onnx/parakeet/mod.rs` (every device)
+- **The decode moves on by the duration the model predicts.** Parakeet TDT's
+  joint gives, after the vocabulary's logits, five duration logits (0–4
+  frames: how far to move on after this token). 0.3.11 dropped them and
+  asked the same frame again after every token, which the model never saw in
+  training: on some words it said the token again, ten a frame
+  (`MAX_TOKENS_PER_STEP`) for several frames — "definitive d d d d d d d d
+  d d d d edition", "ha ha ha ha ha ha ha ha ha ha" — in about one dictation
+  in three of a day's real ones, on the GPU and the processor alike. The loop
+  now decodes as NeMo and onnx-asr do (`next_frame`): on by the duration when
+  it's > 0, else one frame after a blank or after `MAX_TOKENS_PER_STEP` tokens.
+  Fewer joint runs too (the frames a token covers aren't asked).
 
 ## Whisper's language probabilities (2026-10-25)
 

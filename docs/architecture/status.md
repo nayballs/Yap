@@ -270,7 +270,16 @@ Whisper large-v3 (q5_0) stays on Vulkan (345 / 805 / 2,279 ms warm; on the
 processor one 11-second dictation took 16 minutes, so it isn't tried beside
 a graphics card that's quick warm). Processor load slows the processor path
 only: the benchmark waits for a processor under 50 % busy, and a narrow win
-never moves a model off the graphics card. **"Use what
+never moves a model off the graphics card. **Parakeet's runs of one token
+fixed** (2026-10-27, vendored transcribe-rs reads the TDT durations): a
+day's 12 real dictations and the speed clip replayed through `yap.exe
+partials-dump` on V2 and V3, before and after — 4 of the 12 had a token
+said ten times a frame ("d d d…", "how how how…", "h h h…") in the final
+text or the live preview; after, none. Otherwise the same words, but for a
+stutter or a doubled small word gone ("th thing", "to tool calling") and
+one unsure word on each side ("Imogene" → "Imogen", "Siobhan" → "Sivan" in
+the speed clip; "a nightly" → "nightly"). Unit tests on the decode's frame
+step; not yet in the robot's STT spec. **"Use what
 I said"** (`pasting/as_said.rs`: the shortcut, the bar's offer, the tray's paste as
 said), checked by the robot in the test pad, Notepad, an Edge box, a chat
 app and its contenteditable (swapped) and in a terminal, after an edit and
