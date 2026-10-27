@@ -501,8 +501,8 @@ there can move margins: compare a page before and after.
   the curated cards by family with Download / Use / Uninstall…, and the
   person's own GGUFs as cards too — Use / Uninstall…, 2026-10-27, where a
   dropdown was —; Uninstall… from a card's right-click menu or its trash
-  button, off with "Switch to another model first" while the model is in
-  use, Yap's confirm with the file's size, `lib/core/localModels.js` →
+  button, off while the model is in use with what uses it ("Dictation
+  cleanup uses it. Switch that to another model first", `inUseNote`), Yap's confirm with the file's size, `lib/core/localModels.js` →
   `local_llm_uninstall`: ai-models.md `ai/local_llm/uninstall.rs`), "Hide
   the model's thinking" for reasoning models.
   **Spelling** (`#settings-cleanup-spelling`, `RegionSpelling.svelte`: "Write

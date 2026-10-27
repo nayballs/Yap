@@ -775,10 +775,15 @@ screenshots and their prompts, +, the box, the mic, Send / ■, `ModelChip`).
   (`local_llm_status.sharedOnDevice`: picking another switches it there as
   well); **Installed** (Yap's curated GGUFs on disk and the person's own,
   `local_llm_status.own`; In use / pick to use; each row starts with its
-  maximum, "Up to 256K · …", `maxContext`; **right-click → Use /
+  maximum, "Up to 256K · …", `maxContext`; every row's description
+  wraps, never cut off (2026-10-27: an ellipsis with no way to read the
+  rest), the name in full on hover; **right-click → Use /
   Uninstall…**, 2026-10-27, also the ContextMenu key or Shift+F10 on the
-  row: `core/localModels.js` — off with "Switch to another model first"
-  while it's in use, `local_llm_status`'s `inUse`; else Yap's confirm,
+  row: `core/localModels.js` — off while it's in use (`local_llm_status`'s
+  `inUse`) with what uses it under it: "Dictation cleanup and note
+  formatting use it. Switch them to another model first" (`inUseNote`;
+  a bare "Switch to another model first" made no sense with Chat on
+  Claude); else Yap's confirm,
   "Uninstall Qwen3.5 9B? This deletes its {size} file from this PC. You
   can download it again." (the file's own size, as Windows counts it) — a GGUF not on Yap's
   list (the person's own, or one taken off it since, like Gemma 2 9B) is

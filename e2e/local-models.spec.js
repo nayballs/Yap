@@ -114,11 +114,11 @@ test('Settings uninstalls a model and one of your own, never the one in use', as
   const confirm = main.getByRole('alertdialog');
   try {
     const dialog = await openLocalModels(main);
-    // The 1.5B is the model cleanup uses: its Uninstall… is off, and says why.
+    // The 1.5B is the model cleanup uses: its Uninstall… is off, and says what uses it.
     await card(dialog, 'Qwen2.5 1.5B').click({ button: 'right' });
     await expect(menu.getByRole('menuitem')).toHaveText(['Uninstall…']);
     await expect(menu.getByRole('menuitem', { name: 'Uninstall…' })).toHaveAttribute('aria-disabled', 'true');
-    await expect(menu.locator('.note')).toHaveText('Switch to another model first');
+    await expect(menu.locator('.note')).toHaveText('Dictation cleanup uses it. Switch that to another model first');
     await shot(main, '04-uninstall-off-in-use');
     await main.keyboard.press('Escape');
     await expect(menu).toBeHidden();

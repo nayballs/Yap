@@ -14,7 +14,7 @@ use std::path::Path;
 use tauri::{AppHandle, Emitter};
 
 use super::models::CURATED_MODELS;
-use super::{active_model_path, llm_dir, model_id};
+use super::{active_model_path, llm_dir, model_id, PROVIDER_ONDEVICE};
 
 /// Why a model can't be uninstalled now.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -50,6 +50,9 @@ pub struct UseFacts {
     pub serving: Option<String>,
     /// The engine busy: a request or a run of them, a start, a restart.
     pub busy: bool,
+    /// What's routed on-device, in plain words ([`users`]): what the note
+    /// names when the model in use can't go.
+    pub users: Vec<String>,
 }
 
 /// This PC's facts, now.
@@ -66,7 +69,54 @@ pub fn facts(cfg: &crate::config::YapConfig) -> UseFacts {
             || super::restart_under_way()
             || super::context::restart_pending()
             || super::on_demand::loading(),
+        users: users(cfg),
     }
+}
+
+/// What uses the on-device model, as the pickers name it (2026-10-27: the
+/// maintainer's Chat was on Claude, so "Switch to another model first"
+/// made no sense there). The routes `models::in_use` counts: dictation
+/// cleanup (which Chat, Commands and note formatting follow unless they
+/// have their own model), a style by app with its own model, a Language
+/// Models scope.
+pub fn users(cfg: &crate::config::YapConfig) -> Vec<String> {
+    let here = |p: &str| p == PROVIDER_ONDEVICE;
+    let mut out = Vec::new();
+    if here(&cfg.pp_provider) {
+        out.push("dictation cleanup".to_string());
+    }
+    let styles: Vec<&str> = cfg.cleanup_profiles.iter().filter(|p| here(&p.provider)).map(|p| p.name.trim()).collect();
+    match styles.as_slice() {
+        [] => {}
+        [""] => out.push("a style by app".to_string()),
+        [one] => out.push(format!("the {one} style")),
+        many => out.push(format!("{} styles by app", many.len())),
+    }
+    let mut named = 0;
+    for (key, label) in [("voiceAgent", "Commands"), ("noteFormatting", "note formatting"), ("chat", "Chat")] {
+        if cfg.llm_scopes.get(key).is_some_and(|s| s.enabled && here(&s.provider)) {
+            out.push(label.to_string());
+            named += 1;
+        }
+    }
+    // A scope this list doesn't name yet still counts.
+    if cfg.llm_scopes.values().filter(|s| s.enabled && here(&s.provider)).count() > named {
+        out.push("another feature".to_string());
+    }
+    out
+}
+
+/// "Dictation cleanup and note formatting use it. Switch them to another
+/// model first": `users` ([`users`]) and the model (`it` in the pickers'
+/// note, its name in an uninstall's refusal); `None` with nobody named.
+/// No full stop at the end: the note has none. Pure.
+pub fn in_use_by(users: &[String], what: &str) -> Option<String> {
+    let (last, rest) = users.split_last()?;
+    let list = if rest.is_empty() { last.clone() } else { format!("{} and {last}", rest.join(", ")) };
+    let mut c = list.chars();
+    let list = c.next().map(|f| f.to_uppercase().collect::<String>() + c.as_str()).unwrap_or_default();
+    let (verb, them) = if rest.is_empty() && !last.ends_with("styles by app") { ("uses", "that") } else { ("use", "them") };
+    Some(format!("{list} {verb} {what}. Switch {them} to another model first"))
 }
 
 /// Is `file` (a GGUF in `llm/`) in use? The model every feature routed
@@ -175,7 +225,10 @@ pub fn uninstall(app: &AppHandle, file: &str) -> Result<(), String> {
         let mut f = facts(&cfg);
         f.busy |= no_start.is_none();
         match in_use(name, &f) {
-            Some(InUse::Selected) => return Err(format!("{shown} is in use. Switch to another model first.")),
+            Some(InUse::Selected) => {
+                let why = in_use_by(&f.users, &shown).unwrap_or_else(|| format!("{shown} is in use. Switch to another model first"));
+                return Err(format!("{why}."));
+            }
             Some(InUse::Busy) => return Err(format!("{shown} is in use right now. Try again in a moment.")),
             None => {}
         }
@@ -247,7 +300,44 @@ mod tests {
     }
 
     fn facts(configured: &str, routed: bool, serving: Option<&str>, busy: bool) -> UseFacts {
-        UseFacts { configured: configured.to_string(), routed, serving: serving.map(str::to_string), busy }
+        UseFacts { configured: configured.to_string(), routed, serving: serving.map(str::to_string), busy, users: Vec::new() }
+    }
+
+    #[test]
+    fn the_note_names_what_uses_the_model() {
+        use crate::config::{CleanupProfile, LlmScope, YapConfig};
+        let mut cfg = YapConfig { pp_provider: "groq".into(), ..Default::default() };
+        cfg.cleanup_profiles.clear();
+        cfg.llm_scopes.clear();
+        assert!(users(&cfg).is_empty());
+        assert_eq!(in_use_by(&users(&cfg), "it"), None);
+
+        cfg.pp_provider = PROVIDER_ONDEVICE.into();
+        assert_eq!(in_use_by(&users(&cfg), "it").unwrap(), "Dictation cleanup uses it. Switch that to another model first");
+
+        let scope = |provider: &str, enabled: bool| LlmScope { enabled, provider: provider.into(), ..Default::default() };
+        cfg.llm_scopes.insert("noteFormatting".into(), scope(PROVIDER_ONDEVICE, true));
+        cfg.llm_scopes.insert("chat".into(), scope("anthropic", true));
+        // Off: it follows cleanup, which is already named.
+        cfg.llm_scopes.insert("voiceAgent".into(), scope(PROVIDER_ONDEVICE, false));
+        assert_eq!(
+            in_use_by(&users(&cfg), "gemma-2-9b-it-Q4_K_M.gguf").unwrap(),
+            "Dictation cleanup and note formatting use gemma-2-9b-it-Q4_K_M.gguf. Switch them to another model first"
+        );
+
+        let style = |name: &str, provider: &str| CleanupProfile { name: name.into(), provider: provider.into(), ..Default::default() };
+        cfg.pp_provider = "groq".into();
+        cfg.llm_scopes.clear();
+        cfg.cleanup_profiles = vec![style("Email", PROVIDER_ONDEVICE), style("Terminal", "")];
+        assert_eq!(in_use_by(&users(&cfg), "it").unwrap(), "The Email style uses it. Switch that to another model first");
+        cfg.cleanup_profiles.push(style("Documents", PROVIDER_ONDEVICE));
+        assert_eq!(in_use_by(&users(&cfg), "it").unwrap(), "2 styles by app use it. Switch them to another model first");
+        cfg.llm_scopes.insert("voiceAgent".into(), scope(PROVIDER_ONDEVICE, true));
+        cfg.llm_scopes.insert("somethingNew".into(), scope(PROVIDER_ONDEVICE, true));
+        assert_eq!(
+            in_use_by(&users(&cfg), "it").unwrap(),
+            "2 styles by app, Commands and another feature use it. Switch them to another model first"
+        );
     }
 
     #[test]

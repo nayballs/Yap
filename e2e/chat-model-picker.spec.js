@@ -391,22 +391,26 @@ test('an installed model uninstalls from its right-click menu, never the one in 
   const menu = main.getByRole('menu');
   const confirm = main.getByRole('alertdialog');
   try {
-    // Chat on the 4B: in use, so its Uninstall… is off and says why.
+    // Chat on the 4B: in use, so its Uninstall… is off and says what uses it.
     await openPicker(main);
     await tab(main, 'On this PC').click();
+    // Every description in full, wrapped: never cut off (2026-10-27).
+    const long = pane(main).locator('.ds', { hasText: 'Newer and smarter than the default' });
+    await expect(long).toHaveText(/still fine without a graphics card$/);
+    expect(await long.evaluate((el) => getComputedStyle(el).whiteSpace !== 'nowrap' && el.scrollWidth <= el.clientWidth)).toBe(true);
     await installed().getByRole('button', { name: /^Qwen3\.5 4B/ }).click();
     await expect(chip(main)).toHaveText('Qwen3.5 4B · On this PC');
     await openPicker(main);
     await installed().getByRole('button', { name: /^Qwen3\.5 4B/ }).click({ button: 'right' });
     await expect(menu.getByRole('menuitem')).toHaveText(['Uninstall…']);
     await expect(menu.getByRole('menuitem', { name: 'Uninstall…' })).toHaveAttribute('aria-disabled', 'true');
-    await expect(menu.locator('.note')).toHaveText('Switch to another model first');
+    await expect(menu.locator('.note')).toHaveText('Chat uses it. Switch that to another model first');
     await shot(main, '07-picker-uninstall-off-in-use');
     await main.keyboard.press('Escape');
     await expect(menu).toBeHidden();
     await expect(picker(main)).toBeVisible();
     // Rust refuses it too, in plain words, and keeps the file.
-    await expect(yap.invoke('local_llm_uninstall', { file: BIG_FILE })).rejects.toThrow('Qwen3.5 4B is in use. Switch to another model first.');
+    await expect(yap.invoke('local_llm_uninstall', { file: BIG_FILE })).rejects.toThrow('Chat uses Qwen3.5 4B. Switch that to another model first.');
     expect(fs.existsSync(path.join(llm, BIG_FILE))).toBe(true);
 
     // Chat on the 1.5B: the 4B can go. Right-click → Uninstall… → confirm.

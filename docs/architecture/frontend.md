@@ -570,8 +570,9 @@ Flow's dark mode of 19 Oct 2026), for every Yap window.
   speech, speaker, Kokoro — Download / Use / Delete…), the on-device model
   cards in Settings and the Chat model picker's installed on-device models
   (Download / Use / Uninstall…, 2026-10-27, `core/localModels.js`: off
-  with a `note` — "Switch to another model first" — while the model is in
-  use; the picker stays open meanwhile), Connectors' calendars
+  with a `note` naming what uses it — "Dictation cleanup uses it. Switch
+  that to another model first", `local_llm_status.inUseNote` — while the
+  model is in use; the picker stays open meanwhile), Connectors' calendars
   (their ⋯ = this menu: Sync now, Disconnect… asked first), Account's other
   devices (Sign out), the Actions manager's rows (Edit, Delete…), the
   notepad's transcript lines (Copy line, Who said this?) and Ask answers

@@ -90,14 +90,17 @@
   let ownEls = $state({});
   let folderEl = $state(null);
   const inUseOf = (m, file) => m.inUse || (activeFile === file ? 'selected' : null);
+  // What uses it, in plain words (local_llm_status's `inUseNote`).
+  const inUseWhy = $derived(localLlm.status?.inUseNote || '');
   const curatedModel = (m) => ({
     name: m.display,
     file: m.filename,
     sizeMb: m.fileMb ?? m.sizeMb,
     own: false,
     inUse: inUseOf(m, m.filename),
+    inUseWhy,
   });
-  const ownModel = (o) => ({ name: o.name, file: o.file, sizeMb: o.sizeMb, own: true, inUse: inUseOf(o, o.file) });
+  const ownModel = (o) => ({ name: o.name, file: o.file, sizeMb: o.sizeMb, own: true, inUse: inUseOf(o, o.file), inUseWhy });
   // A curated card stays (Download again); one of your own goes, so the
   // focus goes to the models folder's link.
   const curatedOpts = (m) => ({ returnFocus: curatedEls[m.id], done: refreshLocalLlm, after: () => curatedEls[m.id] });
@@ -274,7 +277,7 @@
           {:else if isActive}
             <span class="lb-activetag">✓ Active</span>
           {:else if m.installed}
-            {@const note = inUseNote(inUseOf(m, m.filename))}
+            {@const note = inUseNote(inUseOf(m, m.filename), inUseWhy)}
             <button class="lb-use" onclick={() => activateCurated(m)} disabled={!cfg.postProcessEnabled || localLlm.switching}>Use</button>
             <button class="lb-del" title={note || 'Uninstall'} aria-label="Uninstall {m.display}" disabled={!!note} onclick={() => askUninstall(curatedModel(m), curatedOpts(m))}>
               {@render trash()}
@@ -297,7 +300,7 @@
     <div class="lb-list" data-testid="local-own">
       {#each ownModels as o (o.file)}
         {@const isActive = activeFile === o.file}
-        {@const note = inUseNote(inUseOf(o, o.file))}
+        {@const note = inUseNote(inUseOf(o, o.file), inUseWhy)}
         <!-- svelte-ignore a11y_no_static_element_interactions -->
         <div
           class="lb-card"

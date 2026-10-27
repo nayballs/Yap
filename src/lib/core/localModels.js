@@ -15,16 +15,20 @@ export function fmtModelSize(mb) {
   return n >= 1024 ? `${(n / 1024).toFixed(1)} GB` : `${Math.round(n)} MB`;
 }
 
-/** Why an installed model can't go now (local_llm_status's `inUse`): the menu's note. */
-export function inUseNote(inUse) {
-  if (inUse === 'selected') return 'Switch to another model first';
+/**
+ * Why an installed model can't go now (local_llm_status's `inUse`): the
+ * menu's note. `why`: the status's `inUseNote`, what uses it in plain words
+ * ("Dictation cleanup uses it. Switch that to another model first").
+ */
+export function inUseNote(inUse, why = '') {
+  if (inUse === 'selected') return why || 'Switch to another model first';
   if (inUse === 'busy') return "It's working right now: try again in a moment";
   return '';
 }
 
 /**
  * The confirm dialog, then the uninstall. `m`: `{ name, file, sizeMb, own,
- * inUse }` — `own`, a GGUF not on Yap's download list (one the person
+ * inUse, inUseWhy }` — `own`, a GGUF not on Yap's download list (one the person
  * added, or one taken off the list since): named by its file, and Yap
  * can't download it again. `done` runs once it's gone (the list read
  * again); `after` says where the focus goes then.
@@ -57,7 +61,7 @@ export function askUninstall(m, { returnFocus = null, after = null, done = null 
 
 /** An installed model's Uninstall… for its right-click menu: off, with why under it, while it's in use. */
 export function uninstallItems(m, opts = {}) {
-  const note = inUseNote(m.inUse);
+  const note = inUseNote(m.inUse, m.inUseWhy);
   return [
     { label: 'Uninstall…', icon: 'trash', danger: true, disabled: !!note, onselect: () => askUninstall(m, opts) },
     note ? { note } : null,

@@ -196,6 +196,7 @@ export function localRows(status) {
       // now ("selected" | "busy" | null; ai/local_llm/uninstall.rs).
       fileMb: m.fileMb ?? null,
       inUse: m.inUse ?? null,
+      inUseWhy: st.inUseNote || '',
       recommended: !!m.recommended,
       tools: m.tools !== false,
       tags: cap([
@@ -225,6 +226,7 @@ export function localRows(status) {
       own: true,
       fileMb: o.sizeMb ?? null,
       inUse: o.inUse ?? null,
+      inUseWhy: st.inUseNote || '',
       tools: o.tools !== false,
       tags: cap([current && tag('use', 'In use'), o.tools === false && tag('warn', 'no note tools')]),
     });

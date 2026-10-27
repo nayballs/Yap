@@ -669,9 +669,16 @@ The language-model side: the OpenAI-compatible client and its prompts, the on-de
   which follows the same rule) or the one the engine serves — stays while
   anything is routed there (`models::in_use`: the cleanup's provider,
   which Chat, Commands and the meeting notes inherit, a cleanup profile, a
-  Language Models scope): "Qwen3.5 4B is in use. Switch to another model
-  first." (a curated model by its name, any other by its file — the person's
-  own, or one taken off the list since, like Gemma 2 9B). With nothing routed there it can go, unless the engine is busy
+  Language Models scope), and the refusal **names what uses it**
+  (`users` → `in_use_by`, pure; 2026-10-27: the maintainer's Chat was on
+  Claude while cleanup and note formatting ran Gemma 2 on this PC, so a
+  bare "Switch to another model first" made no sense in Chat's picker):
+  "Dictation cleanup and note formatting use Qwen3.5 4B. Switch them to
+  another model first." — dictation cleanup, the {name} style (or "N
+  styles by app"), Commands, note formatting, Chat, "another feature" for
+  a scope it doesn't name yet (a curated model by its name, any other by
+  its file — the person's own, or one taken off the list since, like
+  Gemma 2 9B). With nothing routed there it can go, unless the engine is busy
   with it (a request or run in flight, a start, a context restart, an
   on-demand load: "…in use right now. Try again in a moment."); it holds
   the start lock while it deletes (`STARTING`, so no start opens the file
@@ -686,7 +693,8 @@ The language-model side: the OpenAI-compatible client and its prompts, the on-de
   the dev build beside the installed app), no permission, else "Couldn't
   uninstall … Try again, or delete it from the models folder." Logged with
   its size and the curated id, never its name or path. `local_llm_status`
-  gives each installed model `inUse` (`"selected"` | `"busy"` | null) and,
+  gives `inUseNote` (the same sentence with "it": the pickers' note), each
+  installed model `inUse` (`"selected"` | `"busy"` | null) and,
   for the curated ones, `fileMb` (the file's own size: what the confirm
   says it frees). Unit-tested: the names taken and refused, the in-use rule,
   only a GGUF directly in the folder deleted (the engine and marker left),

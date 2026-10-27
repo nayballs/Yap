@@ -158,6 +158,10 @@ pub fn local_llm_status() -> serde_json::Value {
         "models": on_disk,
         "own": own,
         "sharedOnDevice": shared_on_device,
+        // Why the model in use can't be uninstalled, in plain words: "Dictation
+        // cleanup and note formatting use it. Switch them to another model
+        // first" (the pickers' note; null with nothing named).
+        "inUseNote": crate::ai::local_llm::uninstall::in_use_by(&use_facts.users, "it"),
         "curated": curated,
         "gpu": gpu,
         "gpuCapable": capable,

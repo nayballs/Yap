@@ -316,7 +316,7 @@
         !r.current ? { label: 'Use', icon: 'use', disabled: !!busy, onselect: () => activate(r) } : null,
         { separator: true },
         ...uninstallItems(
-          { name: r.name, file: r.file, sizeMb: r.fileMb, own: !!r.own, inUse: r.inUse },
+          { name: r.name, file: r.file, sizeMb: r.fileMb, own: !!r.own, inUse: r.inUse, inUseWhy: r.inUseWhy },
           { returnFocus: el, done: refreshLocal, after: () => afterUninstall(r) }
         ),
       ],
@@ -398,7 +398,7 @@
       {@render check(r)}
       <ProviderMark icon={r.icon} glyph={r.glyph} size={18} />
       <span class="txt">
-        <span class="nm">{r.name}</span>
+        <span class="nm" title={r.name}>{r.name}</span>
         <span class="ds">{where ? `${r.where} · ` : ''}{r.desc}</span>
       </span>
       {@render tags(r)}
@@ -457,7 +457,7 @@
       {@render check(r)}
       <ProviderMark icon={r.icon} glyph={r.glyph} size={18} />
       <span class="txt">
-        <span class="nm">{r.name}</span>
+        <span class="nm" title={r.name}>{r.name}</span>
         {#if r.desc || where}<span class="ds">{where ? `${r.where}${r.desc ? ' · ' : ''}` : ''}{r.desc}</span>{/if}
       </span>
       {@render tags(r)}
@@ -1035,18 +1035,21 @@
   .mrow.on .nm {
     font-weight: 600;
   }
+  /* All of it, wrapped: never cut off with no way to read the rest
+     (2026-10-27). Every description is a short line or two. */
   .ds {
     color: var(--yap-muted);
     font-size: 12px;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    line-height: 1.35;
+    overflow-wrap: anywhere;
   }
+  /* Stacked: two tags side by side squeezed the description to a word a line. */
   .tags {
     display: flex;
-    gap: 5px;
-    align-items: center;
-    justify-content: flex-end;
+    flex-direction: column;
+    gap: 3px;
+    align-items: flex-end;
+    justify-content: center;
   }
   .tag {
     padding: 0 7px;
