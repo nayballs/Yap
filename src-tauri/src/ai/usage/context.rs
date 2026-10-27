@@ -108,7 +108,7 @@ pub async fn chat_context(conversation_id: Option<u64>) -> ContextUse {
     let (context, context_known) = budget::context_window(&cfg, &target.provider, &target.model, &target.base_url).await;
     // The parts every request carries, as `chat_limits` measures them.
     let fixed = fixed_of(&cfg, &target, &counter).await;
-    let b = budget::budget(context, context_known, fixed, Kind::Chat, target.tools, budget::rate_cap(&target.provider));
+    let b = budget::budget(context, context_known, fixed, Kind::Chat, target.tools, budget::request_cap(&target.provider, &target.model));
     let replay = target.tools && cfg.web_search;
     let costs = budget::message_costs(&counter, messages, replay).await;
     let summary = conv.as_ref().and_then(|c| c.usable_summary());

@@ -152,7 +152,7 @@ pub async fn history_for(note: u64, thread: Option<u64>, call: Call<'_>, fixed: 
     let counter = Counter::for_call(call.provider, call.base_url);
     let (context, known) = budget::context_window(&cfg, call.provider, call.model, call.base_url).await;
     let label = budget::model_label(call.provider, call.model, &crate::ai::local_llm::active_model_display(&cfg));
-    let b = budget::budget(context, known, counter.count(fixed).await, Kind::Note, false, budget::rate_cap(call.provider));
+    let b = budget::budget(context, known, counter.count(fixed).await, Kind::Note, false, budget::request_cap(call.provider, call.model));
     let asked = counter.count(question).await + budget::MESSAGE_OVERHEAD;
     let mode = budget::mode();
     if mode != Mode::Messages && asked > b.history {

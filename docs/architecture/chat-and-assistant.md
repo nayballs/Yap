@@ -206,7 +206,7 @@ The AI Chat surface (conversations, the tool-calling loop and its note tools) an
   ring), the budget (`budget`), the token counter (`Counter`, `estimate`),
   the window (`plan`), when a summary is due (`due`), a turn's tool results
   trimmed to the room left (`fit_result`), a plan's tokens a minute
-  (`rate_cap`) and "too long" said plainly (`too_long`, `plain_error`).
+  (`rate_cap`), a model's cheaper rate (`price_cap`; `request_cap` both) and "too long" said plainly (`too_long`, `plain_error`).
   [Below](#long-chats-sized-to-the-model-2026-10-25).
 - **`chat/compact.rs`** — **long chats remember their start** (2026-10-25):
   the older messages summarised in the background after an answer
@@ -990,7 +990,17 @@ a technical error.
    A plan that counts tokens a minute caps the whole request at 90% of it
    (`rate_cap`: Groq's `x-ratelimit-limit-tokens` once it said, its free
    plan's 8,000 until then; a 413 "Request too large … tokens per minute"
-   teaches it too).
+   teaches it too). **A model whose longer prompts cost more** stays at its
+   cheaper rate (`price_cap`, 2026-10-27: 80% of `usage::prices::price_line`
+   — Claude Haiku 5.5's 100K tokens, after which a prompt costs five times
+   as much; OpenAI's 272K; Gemini Pro's 200K —, 80% since Yap estimates and
+   Claude's newer tokenizer counts up to ~30% more): the history is sized to
+   `request_cap` (the lower of the two) in a Chat turn, a note's Ask thread,
+   the context ring and each summariser call (`compact`'s reading), so a long
+   chat's summary takes over before a request would cost more. Before, a
+   long chat on Haiku 5.5 (1M of context) sent up to ~700K tokens a turn.
+   The "too long" check keeps `rate_cap` alone: a question longer than the
+   line on its own still goes (the person's own paste).
 4. **Counting** (`budget::Counter`): about four characters a token with a
    margin (`estimate`: ASCII at 3.6, any other character one — accents,
    other alphabets, CJK), each message +6; a long text (≥ 1,500 characters)

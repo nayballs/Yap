@@ -489,7 +489,9 @@ async fn answer_turn(
         + crate::chat::chats::context_block(&context).map(|b| crate::chat::budget::estimate(&b)).unwrap_or(0)
         + schemas
         + crate::chat::budget::MESSAGE_OVERHEAD;
-    let budget = crate::chat::budget::budget(context_size, context_known, fixed, kind, tools_supported, rate_cap);
+    // Sized within the model's cheaper rate too (`request_cap`): a long
+    // chat's summary takes over before a request would cost more.
+    let budget = crate::chat::budget::budget(context_size, context_known, fixed, kind, tools_supported, crate::chat::budget::request_cap(&provider, &model));
     let room = budget.history.saturating_sub(question_tokens);
     let summary = conv.usable_summary().filter(|_| mode == crate::chat::budget::Mode::Summary);
     let plan = match mode {

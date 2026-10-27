@@ -239,7 +239,7 @@ pub fn after_thread_turn(app: &AppHandle, note: u64, thread: u64, notepad: bool)
         };
         let counter = Counter::for_call(&ep.provider, &ep.base_url);
         let (context, known) = budget::context_window(&cfg, &ep.provider, &ep.model, &ep.base_url).await;
-        let b = budget::budget(context, known, counter.count(&fixed).await, Kind::Note, false, budget::rate_cap(&ep.provider));
+        let b = budget::budget(context, known, counter.count(&fixed).await, Kind::Note, false, budget::request_cap(&ep.provider, &ep.model));
         let look = Look { kind: Kind::Note, room: crate::chat::turn::next_room(b.history), context, ring: None, replay: false };
         check(Some(app), thread, ep, look).await;
     });
@@ -306,9 +306,12 @@ async fn summarise_claimed(app: Option<&AppHandle>, conversation: u64, range: Ra
     let here = crate::ai::ai_model::runs_here(&ep.provider, &ep.base_url);
     let words = target_tokens(room) * 7 / 10;
     let max_reply = target_tokens(room) * 2;
-    // What one call may read: half the context, less the prompt and the reply.
+    // What one call may read: half the context — within what one request
+    // may carry (`budget::request_cap`: a plan's tokens a minute, the
+    // model's cheaper rate) — less the prompt and the reply.
     let system = prompt(words);
-    let reading = (context / 2).saturating_sub(budget::estimate(&system) + max_reply + target_tokens(room)).max(800);
+    let most = (context / 2).min(budget::request_cap(&ep.provider, &ep.model).unwrap_or(u64::MAX));
+    let reading = most.saturating_sub(budget::estimate(&system) + max_reply + target_tokens(room)).max(800);
     // A paste longer than a third of that: its start and end.
     let max_chars = (reading as usize / 3) * 36 / 10;
     let lines: Vec<String> = conv.messages[range.clone()].iter().map(|m| line(m, max_chars.max(400))).collect();

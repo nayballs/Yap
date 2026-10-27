@@ -16,9 +16,13 @@
 //   and the latest messages, within its own smaller budget.
 // - A meeting's Ask thread in Notes: its earlier turns go with the next
 //   question from Rust (the thread's summary and the latest turns).
+// - A long chat on Claude Haiku 5.5 (1M of context, but a prompt over 100K
+//   tokens costs five times as much) stays under that price line: the latest
+//   messages that fit and a summary, never the whole chat (budget.rs
+//   `request_cap`, 2026-10-27).
 // Nothing leaves the PC: every provider is the local fake
 // (support/fake-llm.js) behind a test key. Fictional details only.
-import { test as base, expect, openView } from './support/fixtures.js';
+import { test as base, expect, openView, setConfig } from './support/fixtures.js';
 import { startFakeLlm } from './support/fake-llm.js';
 
 const TEST_KEY = 'gsk_FAKElong0123456789abcXYZ';
@@ -66,8 +70,23 @@ const SUPPLIER_THREAD = Array.from({ length: 8 }, (_, i) => ({
   text: i === 0 ? 'Who signs off the packaging order?' : padded(`Supplier point ${i}.`, 2_800),
   ts: NOW - 1_800 + i,
 }));
+// A chat far longer than Claude Haiku 5.5's cheaper rate: 40 messages of
+// ~15,000 characters (~170K tokens in all).
+const GARDEN = 'Allotment year plan';
+const gardenMessages = Array.from({ length: 40 }, (_, i) => ({
+  role: i % 2 ? 'assistant' : 'user',
+  text: i === 0 ? padded('Our allotment plot is number 14 and the greenhouse goes on the north side.', 15_000) : padded(`Allotment point ${i}.`, 15_000),
+  ts: NOW - 7_200 + i,
+}));
 const CHATS = {
   conversations: [
+    {
+      id: 9,
+      title: GARDEN,
+      createdTs: NOW - 7_200,
+      updatedTs: NOW - 7_100,
+      messages: gardenMessages,
+    },
     {
       id: 7,
       title: HARBOUR,
@@ -349,4 +368,40 @@ test("a meeting's Ask thread in Notes: the next question carries the thread's su
   expect(sent.some((t) => t === 'Who signs off the packaging order?')).toBe(false);
   expect(sent.some((t) => t.includes('Supplier point 7.'))).toBe(true);
   fakeLlm.reply('other', () => 'OK');
+});
+
+test('a long chat on Claude Haiku 5.5 stays under its 100K price line: the latest messages, never the whole chat', async ({ yap, main, fakeLlm, shot }) => {
+  // Haiku 5.5 as Anthropic lists it: a million tokens of context.
+  fakeLlm.listModels('anthropic', [
+    { id: 'claude-haiku-5-5', type: 'model', display_name: 'Claude Haiku 5.5', created_at: '2026-09-01T00:00:00Z', max_input_tokens: 1_000_000 },
+  ]);
+  const cfg = await yap.invoke('get_config');
+  const haiku = { enabled: true, provider: 'anthropic', baseUrl: fakeLlm.base, model: 'claude-haiku-5-5', apiKey: 'sk-ant-e2e-fake-1234567890', apiKeys: {}, prompt: '', disableThinking: false };
+  await setConfig(yap, main, { llmScopes: { ...cfg.llmScopes, chat: haiku } });
+  try {
+    await yap.invoke('llm_models', { provider: 'anthropic', scope: 'chat', force: true });
+    await openView(main, 'Chat');
+    await main.locator('.conv').filter({ hasText: GARDEN }).click();
+    const before = chatCalls(fakeLlm).length;
+    fakeLlm.reply('other', () => 'The greenhouse goes on the north side.');
+    await send(main, 'Where did we say the greenhouse goes?');
+    await expect(lastAnswer(main)).toContainText('The greenhouse goes on the north side.');
+    await shot(main, '06-haiku-long-chat');
+    const req = chatCalls(fakeLlm).slice(before).find((r) => r.messages.some((m) => textOf(m.content).includes('Where did we say the greenhouse goes?')));
+    expect(req).toBeTruthy();
+    // Under the line (by the fake's own count), and still most of the room:
+    // the latest messages that fit, not a handful.
+    expect(req.tokens).toBeLessThan(100_000);
+    expect(req.tokens).toBeGreaterThan(50_000);
+    const sent = history(req);
+    expect(sent.some((t) => t.includes('Our allotment plot is number 14'))).toBe(false);
+    expect(sent.some((t) => t.includes('Allotment point 39.'))).toBe(true);
+    expect(sent.at(-1)).toContain('Where did we say the greenhouse goes?');
+    // The older messages are summarised in the background, by the chat's model.
+    await expect.poll(() => fakeLlm.requests.filter((r) => r.kind === 'chatSummary' && r.model === 'claude-haiku-5-5').length, { timeout: 15_000 }).toBeGreaterThan(0);
+    for (const r of fakeLlm.requests.filter((x) => x.model === 'claude-haiku-5-5')) expect(r.tokens).toBeLessThan(100_000);
+  } finally {
+    fakeLlm.reply('other', () => 'OK');
+    await setConfig(yap, main, { llmScopes: cfg.llmScopes });
+  }
 });

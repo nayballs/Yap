@@ -152,6 +152,16 @@ pub fn price(provider: &str, model: &str, day: &str, prompt: u64) -> Option<Pric
         .map(|r| r.price)
 }
 
+/// The longest prompt `model`'s cheaper rate is for on `day`: the smallest
+/// `upto` of the rows in force (Claude Haiku 5.5's 100K, OpenAI's 272K,
+/// Gemini Pro's 200K); a longer prompt costs more, or has no price here.
+/// `None`: one price at any length, or no price known. Pure.
+pub fn price_line(provider: &str, model: &str, day: &str) -> Option<u64> {
+    let in_force: Vec<&Row> = rows_for(provider, model).filter(|r| r.from <= day).collect();
+    let latest = in_force.iter().map(|r| r.from).max()?;
+    in_force.into_iter().filter(|r| r.from == latest && r.upto > 0).map(|r| r.upto).min()
+}
+
 /// One call's estimated cost in millionths of a US dollar (`prompt` and
 /// `answer` tokens at the price [`price`] finds). Pure.
 pub fn cost_micros(provider: &str, model: &str, day: &str, prompt: u64, answer: u64) -> Option<u64> {
@@ -189,6 +199,18 @@ mod tests {
         assert_eq!(cost_micros("gemini", "gemini-3.1-pro-preview", "2026-10-25", 250_000, 1_000), Some(250_000 * 4 + 18_000));
         // OpenAI's table is for prompts up to 272K: past it, no estimate.
         assert!(price("openai", "gpt-5.5", "2026-10-25", 300_000).is_none());
+    }
+
+    #[test]
+    fn the_price_line_is_the_longest_prompt_at_the_cheaper_rate() {
+        assert_eq!(price_line("anthropic", "claude-haiku-5-5", "2026-10-27"), Some(100_000));
+        assert_eq!(price_line("openai", "gpt-6-luna", "2026-10-27"), Some(272_000));
+        assert_eq!(price_line("gemini", "gemini-2.5-pro", "2026-10-27"), Some(200_000));
+        // One price at any length, another service's copy, no price: none.
+        assert_eq!(price_line("anthropic", "claude-haiku-4-5", "2026-10-27"), None);
+        assert_eq!(price_line("groq", "openai/gpt-oss-20b", "2026-10-27"), None);
+        assert_eq!(price_line("openrouter", "anthropic/claude-haiku-5-5", "2026-10-27"), None);
+        assert_eq!(price_line("anthropic", "claude-nova-9", "2026-10-27"), None);
     }
 
     #[test]

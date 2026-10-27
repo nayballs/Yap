@@ -536,6 +536,28 @@ pub fn rate_cap(provider: &str) -> Option<u64> {
     known.or((provider == "groq").then_some(GROQ_FREE_TPM)).map(|t| t * 9 / 10)
 }
 
+/// The most a request to `model` may carry so it stays at the model's
+/// cheaper rate (`usage::prices::price_line`: Claude Haiku 5.5's prompts
+/// over 100K tokens cost five times as much, 2026-10-27): 80% of the line,
+/// since Yap estimates tokens (`estimate`) and a newer tokenizer (Claude's)
+/// counts up to ~30% more. `None`: one price at any length.
+pub fn price_cap(provider: &str, model: &str) -> Option<u64> {
+    let today = chrono::Local::now().format("%Y-%m-%d").to_string();
+    crate::ai::usage::prices::price_line(provider, model, &today).map(|line| line * 4 / 5)
+}
+
+/// What one request to `model` may carry: within the plan's tokens a
+/// minute ([`rate_cap`]) and the model's cheaper rate ([`price_cap`]). The
+/// history is sized to it, so a long chat's summary takes over before a
+/// request would cost more; a question longer than that still goes (it's
+/// the person's own paste: the "too long" check uses [`rate_cap`] alone).
+pub fn request_cap(provider: &str, model: &str) -> Option<u64> {
+    match (rate_cap(provider), price_cap(provider, model)) {
+        (Some(a), Some(b)) => Some(a.min(b)),
+        (a, b) => a.or(b),
+    }
+}
+
 // ---- the budget --------------------------------------------------------------------------------
 
 /// What a turn may send.
@@ -875,6 +897,22 @@ mod tests {
         assert_eq!(rate_cap("openai"), Some(180_000));
         heard_rate_limit("ondevice", 10);
         assert_eq!(rate_cap("ondevice"), None);
+    }
+
+    #[test]
+    fn a_long_chat_stays_at_the_models_cheaper_rate() {
+        // Claude Haiku 5.5: 1M of context, but a prompt over 100K tokens costs
+        // five times as much. Its requests stay under 80K of Yap's estimate.
+        assert_eq!(price_cap("anthropic", "claude-haiku-5-5"), Some(80_000));
+        assert_eq!(request_cap("anthropic", "claude-haiku-5-5"), Some(80_000));
+        let haiku = budget(1_000_000, true, 5_000, Kind::Chat, true, request_cap("anthropic", "claude-haiku-5-5"));
+        assert_eq!(haiku.request, 80_000);
+        assert_eq!(haiku.history, 80_000 - 5_000 - 10_000);
+        // One price at any length: as before. Groq's plan still caps its own.
+        assert_eq!(request_cap("anthropic", "claude-haiku-4-5"), None);
+        assert_eq!(request_cap("groq", "openai/gpt-oss-20b"), Some(7_200));
+        // Gemini 2.5 Pro: 200K → 160K.
+        assert_eq!(price_cap("gemini", "gemini-2.5-pro"), Some(160_000));
     }
 
     #[test]
