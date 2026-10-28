@@ -243,7 +243,7 @@ export function hotkeyMatchesKeyup(e, spec) {
   return false;
 }
 
-/// Every key of one of the nine actions (dictation/input_hook.rs): its first
+/// Every key of one of the ten actions (dictation/input_hook.rs): its first
 /// shortcut (`cfg[key]`: "hotkey", "meetingHotkey"…) and its more ones
 /// ("+ Add another", `cfg.moreHotkeys[key]`). For the in-page fallbacks.
 export function actionHotkeys(cfg, key) {

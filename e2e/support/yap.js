@@ -240,7 +240,7 @@ function describeWebView2(webview2Dir) {
   return lines.join('\n');
 }
 
-/** The webview's Tauri window label ("settings", "onboarding", "notepad", "overlay"). */
+/** The webview's Tauri window label ("settings", "onboarding", "notepad", "overlay", "quick-note"). */
 async function labelOf(page) {
   return page
     .evaluate(() => window.__TAURI_INTERNALS__?.metadata?.currentWindow?.label ?? null)
@@ -273,6 +273,10 @@ export class YapApp {
   get notepad() {
     return this.pages.notepad;
   }
+  /** The quick note (notes/quick_note.rs: its shortcut, the tray, Notes). */
+  get quickNote() {
+    return this.pages['quick-note'];
+  }
 
   /**
    * Find the webviews, start listening for errors, then reload each one so
@@ -280,7 +284,7 @@ export class YapApp {
    */
   async attachPages() {
     const context = this.browser.contexts()[0];
-    const labels = ['settings', 'onboarding', 'notepad', 'overlay'];
+    const labels = ['settings', 'onboarding', 'notepad', 'overlay', 'quick-note'];
     const deadline = Date.now() + 30_000;
     while (Date.now() < deadline) {
       for (const page of context.pages()) {

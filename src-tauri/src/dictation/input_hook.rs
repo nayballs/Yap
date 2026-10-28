@@ -1,7 +1,7 @@
 //! Unified input hook for the dictation, edit (Commands' rewrite), meeting,
 //! Voice Assistant, Read aloud, "Use what I said", Snip to Chat, Paste last
-//! transcript and Copy last transcript key bindings (the last four act on
-//! their press only), up to `languages::MAX_SHORTCUTS` **language shortcuts**
+//! transcript, Copy last transcript and Quick note key bindings (the last
+//! five act on their press only), up to `languages::MAX_SHORTCUTS` **language shortcuts**
 //! (My languages: a slot each, [`configure_languages_from`]; press and
 //! release, as `language-key` with the slot) and up to `transforms::MAX`
 //! **saved transforms**' shortcuts (a slot each, [`configure_transforms_from`];
@@ -32,7 +32,7 @@
 //! as neither saw another key in between.
 //!
 //! **Several shortcuts for one action** (2026-10-25, Wispr Flow's "Add
-//! another"): each of the nine fixed actions has its first shortcut (the
+//! another"): each of the ten fixed actions has its first shortcut (the
 //! config's `hotkey`, `editHotkey`…, as ever) and up to [`MORE`] more
 //! (`moreHotkeys`, [`configure_more_from`]). They act as one key: the
 //! action's press goes out when the first of them goes down and its release
@@ -161,7 +161,7 @@ impl KeyBinding {
 
 // ---- Shared state ----
 
-/// The nine fixed actions, in the order they give way to each other: each
+/// The ten fixed actions, in the order they give way to each other: each
 /// one's index into [`FIXED`], [`FIXED_KEYS`], [`FIXED_NAMES`] and
 /// [`FIXED_EVENTS`].
 pub(crate) const DICTATION: usize = 0;
@@ -181,8 +181,11 @@ const PASTE_LAST: usize = 7;
 /// Copy last transcript (`pasting/last.rs`): the latest dictation onto the
 /// clipboard. Unbound by default; its press only.
 const COPY_LAST: usize = 8;
+/// Quick note (`notes/quick_note.rs`): the quick-note window from any app,
+/// or away again while it's in front. Unbound by default; its press only.
+const QUICK_NOTE: usize = 9;
 /// How many fixed actions there are.
-pub const FIXED_COUNT: usize = 9;
+pub const FIXED_COUNT: usize = 10;
 /// Each fixed action's config key — its first shortcut's field, as
 /// Settings and `moreHotkeys` name it.
 pub const FIXED_KEYS: [&str; FIXED_COUNT] = [
@@ -195,6 +198,7 @@ pub const FIXED_KEYS: [&str; FIXED_COUNT] = [
     "snipHotkey",
     "pasteLastHotkey",
     "copyLastHotkey",
+    "quickNoteHotkey",
 ];
 /// …its name in messages ("clashes with the dictation hotkey").
 pub const FIXED_NAMES: [&str; FIXED_COUNT] = [
@@ -207,6 +211,7 @@ pub const FIXED_NAMES: [&str; FIXED_COUNT] = [
     "snip shortcut",
     "Paste-last shortcut",
     "Copy-last shortcut",
+    "Quick-note shortcut",
 ];
 /// …and its events (pressed, released).
 const FIXED_EVENTS: [(&str, &str); FIXED_COUNT] = [
@@ -219,6 +224,7 @@ const FIXED_EVENTS: [(&str, &str); FIXED_COUNT] = [
     ("snip-key-pressed", "snip-key-released"),
     ("paste-last-key-pressed", "paste-last-key-released"),
     ("copy-last-key-pressed", "copy-last-key-released"),
+    ("quick-note-key-pressed", "quick-note-key-released"),
 ];
 /// The actions a key is held for (push-to-talk): a chord or a stuck key
 /// matters to them.
@@ -236,7 +242,7 @@ fn group(i: usize) -> impl Iterator<Item = &'static KeyBinding> {
 }
 /// Saved transforms' shortcuts (`transforms.rs`): a slot each, in the
 /// list's order (`transforms::assign`); only the press is used. Beside the
-/// nine fixed bindings, always giving way to them.
+/// ten fixed bindings, always giving way to them.
 static TRANSFORM_BINDINGS: [KeyBinding; crate::dictation::transforms::MAX] = [const { KeyBinding::new() }; crate::dictation::transforms::MAX];
 /// Which transform each slot runs (its id). Read by the forwarder thread,
 /// never the hook callback.
@@ -259,7 +265,7 @@ const TRANSFORM_EVENTS: [(&str, &str); crate::dictation::transforms::MAX] = [
 ];
 /// Language shortcuts' keys (`languages.rs`, My languages): a slot each, in
 /// the list's order (`languages::assign`); press and release, as the
-/// dictation key's (push-to-talk holds them). Beside the nine fixed
+/// dictation key's (push-to-talk holds them). Beside the ten fixed
 /// bindings, always giving way to them; saved transforms give way to these.
 static LANGUAGE_BINDINGS: [KeyBinding; crate::dictation::languages::MAX_SHORTCUTS] =
     [const { KeyBinding::new() }; crate::dictation::languages::MAX_SHORTCUTS];
@@ -374,6 +380,7 @@ pub fn first_spec(cfg: &crate::config::YapConfig, i: usize) -> &str {
         SNIP => &cfg.snip_hotkey,
         PASTE_LAST => &cfg.paste_last_hotkey,
         COPY_LAST => &cfg.copy_last_hotkey,
+        QUICK_NOTE => &cfg.quick_note_hotkey,
         _ => "",
     }
 }
@@ -390,6 +397,7 @@ fn set_first_spec(cfg: &mut crate::config::YapConfig, i: usize, spec: String) {
         SNIP => &mut cfg.snip_hotkey,
         PASTE_LAST => &mut cfg.paste_last_hotkey,
         COPY_LAST => &mut cfg.copy_last_hotkey,
+        QUICK_NOTE => &mut cfg.quick_note_hotkey,
         _ => return,
     };
     *field = spec;
@@ -397,7 +405,7 @@ fn set_first_spec(cfg: &mut crate::config::YapConfig, i: usize, spec: String) {
 
 /// `moreHotkeys` tidied at load (idempotent, so not a one-time migration:
 /// the first shortcut never moved, and a config from before has none): only
-/// the nine actions' keys, no blanks, no repeats of the action's own keys,
+/// the ten actions' keys, no blanks, no repeats of the action's own keys,
 /// at most [`MORE`] each — and an action whose first shortcut was taken away
 /// by hand gets its next one moved up into it.
 pub fn tidy_more(cfg: &mut crate::config::YapConfig) {
@@ -680,9 +688,16 @@ pub fn configure_copy_last(key_spec: &str) -> Result<String, String> {
     configure_fixed(COPY_LAST, "Copy-last", key_spec)
 }
 
-/// The shortcuts Paste last and Copy last give way to, by name, oldest
-/// first: the seven before them, then Paste last's (Copy last's only).
-fn older_shortcuts(cfg: &crate::config::YapConfig) -> [(&'static str, &str); 8] {
+/// Parse a key spec string and configure the **Quick note** shortcut
+/// (`notes/quick_note.rs`). An empty spec unbinds it (the default).
+pub fn configure_quick_note(key_spec: &str) -> Result<String, String> {
+    configure_fixed(QUICK_NOTE, "Quick-note", key_spec)
+}
+
+/// The shortcuts Paste last, Copy last and Quick note give way to, by name,
+/// oldest first: the seven before them, then Paste last's (Copy last's and
+/// Quick note's), then Copy last's (Quick note's only).
+fn older_shortcuts(cfg: &crate::config::YapConfig) -> [(&'static str, &str); 9] {
     [
         ("dictation hotkey", cfg.hotkey.as_str()),
         ("rewrite shortcut", cfg.edit_hotkey.as_str()),
@@ -692,6 +707,7 @@ fn older_shortcuts(cfg: &crate::config::YapConfig) -> [(&'static str, &str); 8] 
         ("Use-what-I-said shortcut", cfg.as_said_hotkey.as_str()),
         ("snip shortcut", cfg.snip_hotkey.as_str()),
         ("Paste-last shortcut", cfg.paste_last_hotkey.as_str()),
+        ("Copy-last shortcut", cfg.copy_last_hotkey.as_str()),
     ]
 }
 
@@ -722,9 +738,19 @@ pub fn configure_paste_last_from(cfg: &crate::config::YapConfig) {
 /// eight before it (Paste last's included).
 pub fn configure_copy_last_from(cfg: &crate::config::YapConfig) {
     let older = older_shortcuts(cfg);
-    let spec = unless_clash("Copy-last shortcut", cfg.copy_last_hotkey.trim(), &older);
+    let spec = unless_clash("Copy-last shortcut", cfg.copy_last_hotkey.trim(), &older[..8]);
     if let Err(e) = configure_copy_last(spec) {
         tracing::warn!("Failed to apply the Copy-last shortcut: {}", e);
+    }
+}
+
+/// The Quick note shortcut from config, unless it clashes with one of the
+/// nine before it (it gives way to them all).
+pub fn configure_quick_note_from(cfg: &crate::config::YapConfig) {
+    let older = older_shortcuts(cfg);
+    let spec = unless_clash("Quick-note shortcut", cfg.quick_note_hotkey.trim(), &older);
+    if let Err(e) = configure_quick_note(spec) {
+        tracing::warn!("Failed to apply the Quick-note shortcut: {}", e);
     }
 }
 
@@ -739,7 +765,7 @@ fn transform_ids() -> std::sync::MutexGuard<'static, Vec<String>> {
 
 /// The saved transforms' shortcuts from config (`transforms::assign`): a
 /// slot for each transform with a key, in list order; one whose key would
-/// fire with one of the nine fixed shortcuts, or an earlier transform's,
+/// fire with one of the ten fixed shortcuts, or an earlier transform's,
 /// is left unbound and the log says why (Settings never saves one).
 pub fn configure_transforms_from(cfg: &crate::config::YapConfig) {
     let list = crate::dictation::transforms::list(cfg);
@@ -810,13 +836,13 @@ fn language_ids() -> std::sync::MutexGuard<'static, Vec<String>> {
 
 /// The language shortcuts' keys from config (`languages::assign`): a slot
 /// for each with a key, in list order; one whose key would fire with one of
-/// the nine fixed shortcuts (Paste last's and Copy last's included), or an
+/// the ten fixed shortcuts (Paste last's, Copy last's and Quick note's), or an
 /// earlier language shortcut's, is left unbound and the log says why
 /// (Settings never saves one).
 pub fn configure_languages_from(cfg: &crate::config::YapConfig) {
     let list = crate::dictation::languages::shortcuts(cfg);
-    let nine = crate::dictation::transforms::nine_shortcuts(cfg);
-    let fixed: Vec<(&str, &str)> = nine.iter().map(|(name, spec)| (*name, spec.as_str())).collect();
+    let ten = crate::dictation::transforms::action_shortcuts(cfg);
+    let fixed: Vec<(&str, &str)> = ten.iter().map(|(name, spec)| (*name, spec.as_str())).collect();
     let slots = crate::dictation::languages::assign(&fixed, &list);
     let mut ids = language_ids();
     ids.clear();
@@ -1540,7 +1566,7 @@ unsafe extern "system" fn low_level_keyboard_proc(
         }
 
         let mut suppress = false;
-        // The nine fixed actions, each with its first and more shortcuts.
+        // The ten fixed actions, each with its first and more shortcuts.
         for (i, (pressed, released)) in FIXED_EVENTS.iter().enumerate() {
             for binding in group(i) {
                 suppress |= process_keyboard_event(binding, Some(i), pressed, released, vkey, is_keydown);
@@ -2116,6 +2142,43 @@ mod tests {
         configure_copy_last("").unwrap();
     }
 
+    /// Quick note: unbound until set; a hand-made key one of the nine older
+    /// shortcuts has (Copy last's included) is left to it, and language
+    /// shortcuts and transforms give way to it. (The one test that sets its
+    /// binding.)
+    #[test]
+    fn the_quick_note_shortcut_is_unbound_and_gives_way_to_the_older_nine() {
+        let mut cfg = crate::config::YapConfig::default();
+        assert_eq!(cfg.quick_note_hotkey, "");
+        assert_eq!(FIXED_KEYS[QUICK_NOTE], "quickNoteHotkey");
+        assert_eq!(FIXED_EVENTS[QUICK_NOTE].0, "quick-note-key-pressed");
+        configure_quick_note_from(&cfg);
+        assert_eq!(FIXED[QUICK_NOTE].kind_code_mods().0, KEY_TYPE_NONE);
+        // Its own key: bound.
+        cfg.quick_note_hotkey = "kb:ctrl+alt+78".into();
+        configure_quick_note_from(&cfg);
+        assert_eq!(FIXED[QUICK_NOTE].kind_code_mods(), (KEY_TYPE_KEYBOARD, 78, MOD_CTRL | MOD_ALT));
+        assert_eq!(first_spec(&cfg, QUICK_NOTE), "kb:ctrl+alt+78");
+        // On the snip's Win+Alt+S, or Copy last's key: unbound.
+        cfg.quick_note_hotkey = "kb:win+alt+83".into();
+        configure_quick_note_from(&cfg);
+        assert_eq!(FIXED[QUICK_NOTE].kind_code_mods().0, KEY_TYPE_NONE);
+        cfg.copy_last_hotkey = "kb:ctrl+alt+78".into();
+        cfg.quick_note_hotkey = "kb:alt+ctrl+78".into();
+        configure_quick_note_from(&cfg);
+        assert_eq!(FIXED[QUICK_NOTE].kind_code_mods().0, KEY_TYPE_NONE);
+        // More shortcuts for it ("+ Add another") are read and tidied as any action's.
+        cfg.copy_last_hotkey.clear();
+        cfg.more_hotkeys.insert("quickNoteHotkey".into(), vec!["mouse:5".into(), "kb:alt+ctrl+78".into()]);
+        tidy_more(&mut cfg);
+        assert_eq!(more_specs(&cfg, QUICK_NOTE), vec!["mouse:5".to_string()], "its own key isn't another");
+        // Language shortcuts and transforms give way to it.
+        let fixed = crate::dictation::transforms::fixed_shortcuts(&cfg);
+        assert!(fixed.iter().any(|(name, spec)| *name == "Quick-note shortcut" && spec == "kb:alt+ctrl+78"));
+        assert!(fixed.iter().any(|(name, spec)| *name == "Quick-note shortcut" && spec == "mouse:5"));
+        configure_quick_note("").unwrap();
+    }
+
     /// (The one test that sets the transform slots: tests run at once.)
     #[test]
     fn transform_shortcuts_get_slots_in_list_order_giving_way_to_the_fixed_seven() {
@@ -2164,7 +2227,7 @@ mod tests {
     }
 
     #[test]
-    fn language_shortcuts_get_slots_giving_way_to_the_fixed_nine_and_transforms_to_them() {
+    fn language_shortcuts_get_slots_giving_way_to_the_fixed_ten_and_transforms_to_them() {
         use crate::dictation::languages::LanguageShortcut;
         let sc = |id: &str, language: &str, to: &str, hotkey: &str| LanguageShortcut {
             id: id.into(),
@@ -2178,7 +2241,7 @@ mod tests {
                 // The dictation hotkey's key: left for it.
                 sc("l-de", "de", "", &crate::config::YapConfig::default().hotkey),
                 sc("l-es", "en", "es", "mouse:4"),
-                // Copy last's key (one of the nine): left for it too.
+                // Copy last's key (one of the ten): left for it too.
                 sc("l-it", "it", "", "kb:ctrl+alt+67"),
             ],
             copy_last_hotkey: "kb:ctrl+alt+67".into(),
@@ -2277,9 +2340,9 @@ mod tests {
         assert_eq!(MORE_BINDINGS[DICTATION][2].kind_code_mods().0, KEY_TYPE_NONE);
         assert_eq!(MORE_BINDINGS[SNIP][0].kind_code_mods(), (KEY_TYPE_KEYBOARD, 121, 0));
         // Language shortcuts and transforms give way to them.
-        let nine = crate::dictation::transforms::nine_shortcuts(&cfg);
-        assert!(nine.iter().any(|(name, spec)| *name == "dictation hotkey" && spec == "mouse:5"));
-        assert!(nine.iter().any(|(name, spec)| *name == "snip shortcut" && spec == "kb:121"));
+        let ten = crate::dictation::transforms::action_shortcuts(&cfg);
+        assert!(ten.iter().any(|(name, spec)| *name == "dictation hotkey" && spec == "mouse:5"));
+        assert!(ten.iter().any(|(name, spec)| *name == "snip shortcut" && spec == "kb:121"));
         // Settings pausing one while a key is picked, then putting them back.
         configure_more("hotkey", &["".into(), "kb:ctrl+alt+68".into()]).unwrap();
         assert_eq!(MORE_BINDINGS[DICTATION][0].kind_code_mods().0, KEY_TYPE_NONE);
@@ -2331,7 +2394,8 @@ mod tests {
     #[test]
     fn an_older_yap_saving_this_config_keeps_every_first_shortcut() {
         // An older Yap's config, as far as shortcuts go: the nine fields it
-        // knows (serde ignores the rest, as YapConfig always has).
+        // knows (serde ignores the rest, as YapConfig always has). It never
+        // knew Quick note's.
         #[derive(serde::Deserialize, serde::Serialize)]
         #[serde(rename_all = "camelCase")]
         struct Older {
@@ -2348,6 +2412,7 @@ mod tests {
         let mut cfg = crate::config::YapConfig {
             hotkey: "kb:121".into(),
             edit_hotkey: "mouse:5".into(),
+            quick_note_hotkey: "kb:ctrl+alt+78".into(),
             triple_tap_meeting: true,
             ..Default::default()
         };
@@ -2360,9 +2425,11 @@ mod tests {
         // …and reads the older Yap's save back.
         let mut back: crate::config::YapConfig = serde_json::from_str(&resaved).unwrap();
         tidy_more(&mut back);
-        let firsts: Vec<&str> = (0..FIXED_COUNT).map(|i| first_spec(&back, i)).collect();
-        let want: Vec<&str> = (0..FIXED_COUNT).map(|i| first_spec(&cfg, i)).collect();
-        assert_eq!(firsts, want, "every first shortcut survives an older Yap's save");
+        let firsts: Vec<&str> = (0..QUICK_NOTE).map(|i| first_spec(&back, i)).collect();
+        let want: Vec<&str> = (0..QUICK_NOTE).map(|i| first_spec(&cfg, i)).collect();
+        assert_eq!(firsts, want, "every first shortcut it knew survives an older Yap's save");
+        // Quick note's, newer than it: unbound again (its default), nothing else.
+        assert_eq!(back.quick_note_hotkey, "");
         assert_eq!(back.hotkey, "kb:121");
         assert_eq!(back.meeting_hotkey, crate::config::YapConfig::default().meeting_hotkey);
         // What the older save drops: the more shortcuts and triple-tap.

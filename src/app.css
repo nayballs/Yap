@@ -461,7 +461,7 @@ body {
 
 /* The opaque windows' own background and native colour scheme (scrollbars,
    form controls): the main window and onboarding on the frame colour, the
-   notepad on its paper. index.html's head script names the window
+   notepad and the quick note on the paper. index.html's head script names the window
    (data-window) before the first paint. Never on the Yap bar or the split
    preview: a transparent window must keep a transparent body and no
    `color-scheme` (WebView2 paints an opaque backdrop for it — the grey box). */
@@ -473,7 +473,9 @@ body {
   color-scheme: light;
 }
 :root[data-window='notepad'],
-:root[data-window='notepad'] body {
+:root[data-window='notepad'] body,
+:root[data-window='quick-note'],
+:root[data-window='quick-note'] body {
   background: var(--yap-paper);
   color-scheme: light;
 }
@@ -482,7 +484,9 @@ body {
 :root[data-yap-theme='dark'][data-window='onboarding'],
 :root[data-yap-theme='dark'][data-window='onboarding'] body,
 :root[data-yap-theme='dark'][data-window='notepad'],
-:root[data-yap-theme='dark'][data-window='notepad'] body {
+:root[data-yap-theme='dark'][data-window='notepad'] body,
+:root[data-yap-theme='dark'][data-window='quick-note'],
+:root[data-yap-theme='dark'][data-window='quick-note'] body {
   color-scheme: dark;
 }
 

@@ -12,6 +12,7 @@
 
 pub mod commands;
 pub mod note_edits;
+pub mod quick_note;
 pub mod retention;
 pub mod task_store;
 pub mod tasks;
@@ -1441,6 +1442,43 @@ pub fn delete(id: u64) {
         store.notes.retain(|n| n.id != id);
         save_to_disk(store);
     });
+    forget_extras(id);
+}
+
+/// [`modify`], then the note taken away for good when `gone` says so of it
+/// as changed, under the same lock: a quick note emptied (`quick_note.rs`:
+/// a blank note is never kept). `Ok(None)`: it went.
+pub fn modify_or_remove<R>(
+    id: u64,
+    f: impl FnOnce(&mut Note) -> Result<(R, bool), String>,
+    gone: impl FnOnce(&Note) -> bool,
+) -> Result<Option<R>, String> {
+    let out = with_store(|store| -> Result<Option<R>, String> {
+        let at = store
+            .notes
+            .iter()
+            .position(|n| n.id == id)
+            .ok_or_else(|| format!("Note with ID {id} not found"))?;
+        let (result, changed) = f(&mut store.notes[at])?;
+        if gone(&store.notes[at]) {
+            store.notes.remove(at);
+            save_to_disk(store);
+            return Ok(None);
+        }
+        if changed {
+            store.notes[at].updated_ts = now_secs();
+            save_to_disk(store);
+        }
+        Ok(Some(result))
+    })?;
+    if out.is_none() {
+        forget_extras(id);
+    }
+    Ok(out)
+}
+
+/// What goes with a deleted note, outside the store's lock.
+fn forget_extras(id: u64) {
     // Tasks added in its Tasks tab, and its archive marks, go with it (note
     // ids come round again: tasks.json, task_store.rs).
     task_store::forget_note(id);

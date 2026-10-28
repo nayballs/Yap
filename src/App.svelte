@@ -4,8 +4,8 @@
   import { initAppearance } from './lib/core/appearance.js';
   import { prefetchHome } from './lib/views/home/homeData.js';
 
-  // The settings, onboarding, notepad and overlay windows (and the notepad's
-  // on-demand split preview) all load the same SPA; pick the rendered view
+  // The settings, onboarding, notepad, quick-note and overlay windows (and the
+  // notepad's on-demand split preview) all load the same SPA; pick the rendered view
   // from the window label. Each window loads only its own view's code (a
   // chunk of its own): the Yap bar no longer parses the whole app — Chat,
   // Notes, Settings — to draw a pill, and neither does the notepad.
@@ -21,6 +21,7 @@
     onboarding: () => import('./lib/onboarding/Onboarding.svelte'),
     notepad: () => import('./lib/notepad/Notepad.svelte'),
     'split-preview': () => import('./lib/notepad/SplitPreview.svelte'),
+    'quick-note': () => import('./lib/quicknote/QuickNote.svelte'),
     overlay: () => import('./lib/bar/Overlay.svelte'),
   };
   const view = (VIEWS[label] ?? VIEWS.overlay)();
@@ -44,7 +45,8 @@
 
 <!-- settings → the main control panel (Home feed + surfaces, Settings as a
      modal; the label is historic), onboarding, notepad → the meeting notepad
-     docked beside a call (meetings/notepad.rs), split-preview, else the Yap bar. -->
+     docked beside a call (meetings/notepad.rs), split-preview, quick-note → the
+     quick note (notes/quick_note.rs), else the Yap bar. -->
 {#await view then { default: View }}
   <View />
 {/await}

@@ -1,12 +1,12 @@
 <script>
-  // One of the nine global shortcuts, wherever Settings shows it: Yap's
+  // One of the ten global shortcuts, wherever Settings shows it: Yap's
   // keycaps + Change (+ ✕ when it can be unset), checked against the other
-  // eight, with the live binding paused while a new one is picked.
+  // nine, with the live binding paused while a new one is picked.
   //
   //   cfg:    Settings' config $state (auto-save does the saving).
   //   target: 'hotkey' | 'editHotkey' | 'meetingHotkey' | 'assistantHotkey' |
   //           'readHotkey' | 'asSaidHotkey' | 'snipHotkey' |
-  //           'pasteLastHotkey' | 'copyLastHotkey'.
+  //           'pasteLastHotkey' | 'copyLastHotkey' | 'quickNoteHotkey'.
   //   more:   also the action's more shortcuts (`moreHotkeys`, Settings →
   //           Shortcuts), each with ✕, and "+ Add another" (at most
   //           MORE_SHORTCUTS) — one key or mouse button more for the same

@@ -35,6 +35,8 @@ export const FIELD_DEFAULTS = {
   // Paste last / Copy last transcript (pasting/last.rs): unbound.
   pasteLastHotkey: '',
   copyLastHotkey: '',
+  // Quick note (notes/quick_note.rs): unbound.
+  quickNoteHotkey: '',
   // More shortcuts per action ("+ Add another", dictation/input_hook.rs), by
   // the first one's key: { hotkey: ['mouse:4'] }.
   moreHotkeys: {},

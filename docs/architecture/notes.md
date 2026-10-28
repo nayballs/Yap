@@ -1,6 +1,6 @@
 # Notes
 
-The AI Notepad: the notes store, folders, the Actions engine, notes you can fix (a line's words, the summary, tasks), and the Notes and Tasks views. Meeting notes' recording and summaries are [meetings.md](./meetings.md).
+The AI Notepad: the notes store, folders, the Actions engine, notes you can fix (a line's words, the summary, tasks), the quick-note window, and the Notes and Tasks views. Meeting notes' recording and summaries are [meetings.md](./meetings.md).
 
 [Architecture index](./README.md) · [CLAUDE.md](../../CLAUDE.md)
 
@@ -126,6 +126,120 @@ The AI Notepad: the notes store, folders, the Actions engine, notes you can fix 
   (`search::removed`: its vectors go too). Code that removes part of a note
   for good — a meeting's transcript retention deleting lines — calls
   `crate::search::removed()` after the store has let go.
+  `modify_or_remove(id, f, gone)` (2026-10-28) is `modify` and then the
+  note taken away under the same lock when `gone` says so of it as changed
+  (the quick note emptied, below); a note taken away either way loses its
+  added tasks, audio, Ask threads and vectors (`forget_extras`).
+
+## The quick note (`notes/quick_note.rs`)
+
+A small window on its own shortcut, to jot or dictate a note from any app
+and find it later in Notes (Wispr Flow's Scratchpad, adapted: local, no
+sync, no tabs, one note at a time; 2026-10-28). The page is
+`src/lib/quicknote/QuickNote.svelte` (+ `quickNote.js`, its pure helpers).
+
+- **The window** — `quick-note` in tauri.conf.json: 420×380 (min 300×220),
+  undecorated (its header is the drag region), always on top while it's
+  up, created hidden and unfocused, the DWM-cloaked first show like the
+  notepad (`shell::window::init_hidden_webview`), never remembered by the
+  window-state plugin, closing (Alt+F4) hides it (`init`). The notepad's
+  paper and ink (`--yap-paper*`; `shell/theme.rs` gives its webview the same
+  background, light #faf9f6 / dark #1c1a16), the reading font and size
+  for the text (`--yap-font-reading`, `--yap-reading-scale`). Hidden, its
+  webview gets WebView2's low memory target like every hidden window
+  (`shell/webview_memory.rs`). **Where**: the first time since Yap started,
+  and whenever it's on another monitor than the mouse cursor, at the bottom
+  right of the cursor's monitor's work area, 24 px in (`corner`, pure; a
+  test run uses the primary monitor and never reads the cursor) — clear
+  of what you're working on in the middle and of the Yap bar at the bottom
+  centre; moved by the person, it stays where they put it on that monitor
+  (kept inside the screen, `window::fit_rect`).
+- **Opening it** — the **Quick note** shortcut (Settings → Shortcuts,
+  `quickNoteHotkey`, unbound by default; the tenth fixed binding in
+  `dictation/input_hook.rs`, its press only, `quick-note-key-pressed` →
+  `toggle_soon`, on the main thread), the tray's **New quick note**
+  (always a new note), and **Quick note** in the Notes view's tools
+  (`quick_note_open`). `toggle`: away when it's the window in front
+  (`in_front`: Windows' foreground window is its handle; a test run never
+  has the focus, so there it's "shown"), else up and focused. From one of
+  Yap's own windows the hook never fires: the main window's, the notepad's
+  and the quick note's own in-page fallbacks call `quick_note_toggle`.
+- **What it opens on** — `pick` (pure): the note it was on, or — the first
+  open since Yap started — the newest quick note, **if it changed less than
+  a day ago** (`RESUME_SECS`); else a new note. Coming back within the day
+  you're still writing it; a note left alone a day is done (it's in Notes)
+  and the window starts a clean page, so a scratchpad never grows into one
+  endless note. "New note" (+, Ctrl+N) and the tray start one whenever.
+  Rust remembers the window's note (`Current`: Unset / New / Note) and says
+  what to show with `yap-quick-note-open {noteId, title, titleAuto,
+  content, folder, fresh}`; the page saves what it has before it switches,
+  keeps a new note being written, and calls `quick_note_new` itself for a
+  `fresh` open (so a save on its way can't take the new note's place).
+- **Saved as ordinary notes** — the page saves 400 ms after the last
+  keystroke, one save at a time (`quick_note_save {id, content}`), and on
+  the way out (Esc, hidden, another note). `save`: nothing is made until
+  there's a word; the first one makes the note (`new_note`: `source`
+  "quick", the **Quick notes** folder — made the first time, found in any
+  case if renamed so; the person may move or delete it like any folder —
+  and the first words as the title); later saves go through `apply_text`
+  (pure: the text, and the title from the first line's first six words,
+  "…" for more, ≤ 60 characters, no heading `#` or list mark, while the
+  title is Yap's — empty or `title_auto` — never over one the person typed
+  in Notes); **an emptied note goes** (`is_blank`, pure: no words, no title
+  of the person's, no transcript or summary, not a meeting; never the note
+  a meeting records into), under the store's lock (`modify_or_remove`).
+  Every window is told (`yap-note-changed` origin `quick-note`,
+  `yap-notes-changed`, `yap-note-deleted`), so Notes, search by meaning and
+  Chat's note tools see quick notes as they're typed. A save that failed
+  comes back as `unsaved` ("Couldn't save your note: …") rather than an
+  error, so a new note's id still reaches the page: the footer says "Not
+  saved yet" with **Try again** (`saves_retry`). The window follows Notes
+  too: a title typed there shows in its header (and stays), the words
+  change unless something's being typed, a note deleted there lets go.
+- **An older Yap on the same data** (the installed nightly beside a dev
+  build) keeps a quick note whole: it's made only of fields every Yap since
+  2026-10-05 reads and saves back (`source`, `folder`, `titleAuto`, the
+  folder in `folders`), so an older Yap lists it in Notes as an ordinary
+  note in the Quick notes folder and its save changes nothing (unit test
+  `an_older_yap_saving_notes_json_keeps_a_quick_note_a_quick_note`). It
+  drops only the shortcut (`quickNoteHotkey` and its `moreHotkeys` entry):
+  unbound again, as by default ([config-and-data.md](./config-and-data.md)).
+- **Dictating into it** — while its window is in front, the dictation key
+  (its in-page fallback's `dictation_key`, a language shortcut's
+  `language_key`, the bar's Dictate) starts a dictation that's the note's:
+  `capture_target` asks `takes_dictation(own_window)` (its mic button armed
+  it — `quick_note_dictate`, `Pipeline::toggle_for_quick_note` — or the
+  foreground window is its handle; atomics and one Win32 call, safe under
+  the pipeline's locks) → `Goes::QuickNote` → `Shared::to_note`. It's
+  cleaned up as any dictation (the AI cleanup, a transform on every
+  dictation, the dictionary, snippets; no Commands by name, which paste),
+  then `deliver_to_note` emits `yap-quick-note-dictation {text, newline}`
+  — nothing pasted, no key pressed, never into the app behind it nor into
+  Yap's own window by the clipboard — and the page puts it at the cursor
+  (`dictationPiece`: a space before it when it would touch a word, after
+  it before a word; a new line after it when "press enter" was said) with
+  `execCommand('insertText')`, so **Ctrl+Z takes it back out** in one step
+  (by hand, and saved, when the window hasn't the focus). Kept in history
+  like any dictation ("yap.exe"). **Undo** of a cancelled one (the bar's
+  "Dictation cancelled · Undo") lands in the note too: `to_note` lives
+  through the cancel, as the Chat box's `to_chat` does.
+- **Keys** — Esc puts it away (what's typed is saved), Ctrl+N a new note;
+  the buttons (New note, Open in Notes, Close, the mic) are in the tab
+  order. **Open in Notes**: the main window's Notes view on the note
+  (`yap-meeting-open-note`, as the notepad's back button), and the window
+  steps aside. The in-page fallback: the Quick note shortcut (away), the
+  meeting shortcut, the Voice Assistant's, Read aloud (its selection),
+  Snip to Chat, Copy last, the language shortcuts and the dictation key.
+- **Commands** — `quick_note_toggle`, `quick_note_open {fresh?}`,
+  `quick_note_hide`, `quick_note_state` (the page loading), `quick_note_save
+  {id, content}` → `{noteId, title, titleAuto, folder, removed, unsaved?}`,
+  `quick_note_new`, `quick_note_dictate`; debug-only
+  `e2e_quick_note_dictation {text}` (its mic hearing a transcript), with
+  `e2e_shortcut {name: 'quick-note'}` and the tray's `e2e_tray {click?}`
+  (`shell/tray.rs`). Tests: unit tests in `quick_note.rs` (titles, blank,
+  `pick`, `corner`, an older Yap's save, made and emptied) and
+  `pipeline.rs` (`Goes::QuickNote`), `input_hook.rs` (the binding);
+  `e2e/quick-note.spec.js`.
 
 ## Notes you can fix (`notes/note_edits.rs`, `notes/tasks.rs`)
 
@@ -253,7 +367,8 @@ the Ask bar) with `ActionPicker`; `ActionManager`; `noteFormat.js` (titles,
 dates). [frontend.md](./frontend.md#the-folder-layout-2026-10-24).
 
 - **`NotesView.svelte`** = the AI Notepad (OpenWhispr
-  sidebar port: **New note / Search notes / Actions** rows; **Search notes**
+  sidebar port: **New note / Quick note / Search notes / Actions** rows —
+  **Quick note** brings up the quick-note window, above; **Search notes**
   (2026-10-25) opens "Search all notes…": every note, whatever its folder —
   its title, My thoughts, summary and transcript — holding every word typed
   (each at the start of a word, the last one half-typed too), and with

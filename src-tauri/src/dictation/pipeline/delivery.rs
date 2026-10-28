@@ -56,6 +56,7 @@ impl Shared {
         if self.snip_said(text.trim()) {
             tracing::info!("Voice command: snip");
             self.to_chat.store(false, Ordering::SeqCst);
+            self.to_note.store(false, Ordering::SeqCst);
             crate::snip::start(&self.app, crate::snip::Origin::Voice);
             return Delivered::default();
         }
@@ -358,6 +359,10 @@ impl Shared {
         if self.to_chat.swap(false, Ordering::SeqCst) {
             return self.deliver_to_chat(raw, corrected, voice_enter);
         }
+        // The quick note's: its page puts the text at its cursor.
+        if self.to_note.swap(false, Ordering::SeqCst) {
+            return self.deliver_to_note(raw, corrected, voice_enter);
+        }
         // A terminal or a chat app (`app_kind.rs`), as the
         // settings have it: how the text is fitted and which
         // key, if any, follows the paste.
@@ -611,6 +616,47 @@ impl Shared {
             raw,
             kind: "the Chat view".into(),
             submit: send.then(|| "enter".to_string()),
+            ..Delivered::default()
+        };
+        #[cfg(debug_assertions)]
+        if let Ok(mut last) = LAST_DELIVERED.lock() {
+            *last = Some(report.clone());
+        }
+        report
+    }
+
+    /// A dictation for the **quick note** (`to_note`): `yap-quick-note-dictation
+    /// {text, newline}` — its page puts `text` at its cursor (a new line
+    /// after it when "press enter" was said), and saves the note. Nothing
+    /// is pasted or pressed. Kept in history like any dictation.
+    fn deliver_to_note(&self, raw: String, text: String, said_enter: bool) -> Delivered {
+        let text = text.trim().to_string();
+        tracing::info!(len = text.len(), said_enter, "Dictation: into the quick note");
+        let payload = serde_json::json!({ "text": text, "newline": said_enter });
+        let _ = self.app.emit(crate::notes::quick_note::EVENT_DICTATION, payload);
+        if !text.is_empty() {
+            let _ = self.app.emit("yap-transcript", text.clone());
+            let (history_enabled, model) = self
+                .config
+                .read()
+                .map(|c| (c.history_enabled, c.model_size.clone()))
+                .unwrap_or((false, String::new()));
+            let audio = self.audio_id.lock().ok().and_then(|mut a| a.take());
+            if history_enabled {
+                crate::dictation::history::record_with(&raw, &text, &model, "yap.exe", audio.as_deref(), None, None);
+                if let Some(id) = audio {
+                    crate::dictation::recent_audio::finished(&id);
+                }
+                let _ = self.app.emit("yap-history-changed", ());
+            } else if let Some(id) = audio {
+                crate::dictation::recent_audio::discard(&id);
+            }
+        }
+        let report = Delivered {
+            text,
+            raw,
+            kind: "the quick note".into(),
+            submit: said_enter.then(|| "enter".to_string()),
             ..Delivered::default()
         };
         #[cfg(debug_assertions)]

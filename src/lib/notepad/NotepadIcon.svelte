@@ -41,6 +41,7 @@
   {:else if name === 'note'}<path d="M14 3.5H7a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8.5z" /><path d="M14 3.5v5h5" />
   {:else if name === 'chat'}<path d="M20 11.5a7.5 7.5 0 0 1-10.9 6.7L4.5 19.5l1.3-4.3A7.5 7.5 0 1 1 20 11.5z" />
   {:else if name === 'chevron'}<path d="M6 9l6 6 6-6" />
+  {:else if name === 'open'}<path d="M13.5 4.5h6v6" /><path d="M19.5 4.5L11 13" /><path d="M17.5 13.5v4a2 2 0 0 1-2 2h-9a2 2 0 0 1-2-2v-9a2 2 0 0 1 2-2h4" />
   {:else if name === 'pencil'}<path d="M4.5 19.5h4l10-10a2.8 2.8 0 0 0-4-4l-10 10z" /><path d="M13.5 6.5l4 4" />
   {/if}
 </svg>

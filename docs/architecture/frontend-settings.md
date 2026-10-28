@@ -205,9 +205,9 @@ there can move margins: compare a page before and after.
   stands down. The fallback catches the meeting, assistant, read-aloud and
   dictation keys, in that order (read aloud: the page's own selection,
   `speech.svelte.js` `readPageSelection`). **The saved transforms'
-  shortcuts** (Commands → Transforms) are checked against the nine and
+  shortcuts** (Commands → Transforms) are checked against the ten and
   each other (`validateTransformHotkey`: "Already used by the Polish
-  transform"), and the nine against them (`validateHotkey` reads
+  transform"), and the ten against them (`validateHotkey` reads
   `cfg.transforms`); one being picked pauses its slot
   (`onTransformCapturing` → `configure_transform_hotkey`). No in-page
   fallback for them: a transform works on another app's text. **The
@@ -321,12 +321,15 @@ there can move margins: compare a page before and after.
   (dictations never show up in Win+V history), and the **Dictionary** link row
   (its counts; it leaves Settings for the Dictionary view, `onshowview`).
 - **Shortcuts** (`settings/ShortcutsPage.svelte`, OpenWhispr's Hotkeys page):
-  the nine global shortcuts together — Dictate, Rewrite selected text, Ask the
+  the ten global shortcuts together — Dictate, Rewrite selected text, Ask the
   Voice Assistant, Read aloud, **Use what I said** (`asSaidHotkey`, unbound
   by default; `pasting/as_said.rs`), **Paste last transcript**
   (`pasteLastHotkey`, `shortcut-paste-last`) and **Copy last transcript**
   (`copyLastHotkey`, `shortcut-copy-last`, its hint: out of Win+V history,
   the tray has both) — both unbound by default, `pasting/last.rs` —
+  **Quick note** (`quickNoteHotkey`, `shortcut-quick-note`, 2026-10-28,
+  unbound by default: the quick-note window, `notes/quick_note.rs`; its hint
+  says where the notes go and that the tray has New quick note),
   Meeting notes, **Snip to Chat** (`snipHotkey`,
   Win+Alt+S by default, its hint naming ✂, the tray, Esc and what Windows never
   lets an app capture; `snip.rs`, [snip.md](./snip.md)) — each in keycaps with Change, a

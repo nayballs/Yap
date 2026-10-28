@@ -186,16 +186,25 @@ pub(crate) enum Goes {
     /// A question for the Voice Assistant (`assistant.rs`): answered out
     /// loud, never pasted.
     Assistant,
+    /// Into the quick note at its cursor (`notes/quick_note.rs`): its window
+    /// in front, or its mic button. Never pasted.
+    QuickNote,
 }
 
 /// The edit hotkey's recording is always a rewrite; the assistant shortcut's
 /// is always the assistant's, even with the chat box focused (its answer
-/// lands in Chat anyway); else as [`chat_target`] says. Pure.
-pub(crate) fn destination(edit: bool, assistant: bool, chat_armed: bool, chat_focused: bool, own_window: bool) -> Goes {
+/// lands in Chat anyway); the Chat view's mic is the chat's; then the quick
+/// note's (`note`: its window in front, or its mic — `quick_note::takes_dictation`);
+/// else as [`chat_target`] says. Pure.
+pub(crate) fn destination(edit: bool, assistant: bool, chat_armed: bool, chat_focused: bool, own_window: bool, note: bool) -> Goes {
     if edit {
         Goes::Paste
     } else if assistant {
         Goes::Assistant
+    } else if chat_armed {
+        Goes::ChatBox
+    } else if note {
+        Goes::QuickNote
     } else if chat_target(edit, chat_armed, chat_focused, own_window) {
         Goes::ChatBox
     } else {
@@ -436,6 +445,11 @@ struct Shared {
     /// ([`chat_target`], decided at record start): its text goes to the page
     /// (`yap-chat-dictation`) instead of a paste, never to the wake word.
     to_chat: AtomicBool,
+    /// The current dictation is for the **quick note** ([`destination`], at
+    /// record start): its text goes to the quick note's page
+    /// (`yap-quick-note-dictation`) at its cursor, never a paste or the wake
+    /// word. Kept through a cancel, so Undo lands there too.
+    to_note: AtomicBool,
     /// The current recording is a question for the **Voice Assistant**
     /// ([`destination`], at record start): transcribed, corrected and handed
     /// to `assistant::heard` — no cleanup, wake word, paste or history.
@@ -689,6 +703,7 @@ impl Pipeline {
             target_kind: Mutex::new(AppKind::Other),
             edit_mode: AtomicBool::new(false),
             to_chat: AtomicBool::new(false),
+            to_note: AtomicBool::new(false),
             assistant: AtomicBool::new(false),
             selection: Mutex::new(None),
             rewrite_last: Mutex::new(None),
@@ -791,6 +806,15 @@ impl Pipeline {
         self.toggle();
         // Taken by the recording if it started; never left for another one.
         arm_chat_dictation(false);
+    }
+
+    /// The quick note's mic: start a dictation whose text goes into the
+    /// note (or stop the one recording).
+    pub fn toggle_for_quick_note(&self) {
+        let starting = !self.shared.recording.load(Ordering::SeqCst);
+        crate::notes::quick_note::arm(starting);
+        self.toggle();
+        crate::notes::quick_note::arm(false);
     }
 
     /// Route a **dictation** hotkey press/release through the recording mode.
@@ -1090,15 +1114,28 @@ mod tests {
     fn the_assistant_shortcuts_recordings_are_the_assistants() {
         // Wherever the focus is, the chat box's included: the answer lands
         // in Chat anyway, and is read aloud.
-        assert_eq!(destination(false, true, false, false, false), Goes::Assistant);
-        assert_eq!(destination(false, true, true, true, true), Goes::Assistant);
+        assert_eq!(destination(false, true, false, false, false, false), Goes::Assistant);
+        assert_eq!(destination(false, true, true, true, true, true), Goes::Assistant);
         // The edit hotkey's recording stays a rewrite.
-        assert_eq!(destination(true, true, false, false, false), Goes::Paste);
+        assert_eq!(destination(true, true, false, false, false, false), Goes::Paste);
+        assert_eq!(destination(true, false, false, false, true, true), Goes::Paste);
         // Without the shortcut: as before.
-        assert_eq!(destination(false, false, true, false, false), Goes::ChatBox);
-        assert_eq!(destination(false, false, false, true, true), Goes::ChatBox);
-        assert_eq!(destination(false, false, false, true, false), Goes::Paste);
-        assert_eq!(destination(false, false, false, false, false), Goes::Paste);
+        assert_eq!(destination(false, false, true, false, false, false), Goes::ChatBox);
+        assert_eq!(destination(false, false, false, true, true, false), Goes::ChatBox);
+        assert_eq!(destination(false, false, false, true, false, false), Goes::Paste);
+        assert_eq!(destination(false, false, false, false, false, false), Goes::Paste);
+    }
+
+    #[test]
+    fn a_dictation_with_the_quick_note_in_front_is_the_notes() {
+        // Its window in front (or its mic): the note's, never a paste.
+        assert_eq!(destination(false, false, false, false, true, true), Goes::QuickNote);
+        // A chat box focused a moment ago in the main window: still the note's.
+        assert_eq!(destination(false, false, false, true, true, true), Goes::QuickNote);
+        // The Chat view's own mic, the assistant's shortcut and a rewrite win.
+        assert_eq!(destination(false, false, true, false, true, true), Goes::ChatBox);
+        assert_eq!(destination(false, true, false, false, true, true), Goes::Assistant);
+        assert_eq!(destination(true, false, false, false, true, true), Goes::Paste);
     }
 
     #[test]

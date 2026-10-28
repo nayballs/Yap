@@ -79,6 +79,7 @@ fn apply_config(app: &AppHandle, state: State<'_, AppState>, prev: &YapConfig, c
     crate::dictation::input_hook::configure_snip_from(&cfg);
     crate::dictation::input_hook::configure_paste_last_from(&cfg);
     crate::dictation::input_hook::configure_copy_last_from(&cfg);
+    crate::dictation::input_hook::configure_quick_note_from(&cfg);
     crate::dictation::input_hook::configure_more_from(&cfg);
     crate::dictation::input_hook::configure_languages_from(&cfg);
     crate::dictation::input_hook::configure_transforms_from(&cfg);

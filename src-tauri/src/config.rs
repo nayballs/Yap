@@ -310,6 +310,13 @@ pub struct YapConfig {
     /// paste is; nothing pasted. Empty = unbound (the default).
     #[serde(default)]
     pub copy_last_hotkey: String,
+    /// **Quick note** (Settings → Shortcuts, `notes/quick_note.rs`): from any
+    /// app, a small window to jot or dictate a note, saved in Notes; again
+    /// while it's in front puts it away. Empty = unbound (the default).
+    /// Never shares a key with the other shortcuts. An older Yap sharing
+    /// the folder drops it on its next save: unbound again, nothing else.
+    #[serde(default)]
+    pub quick_note_hotkey: String,
     /// **More shortcuts for one action** (Settings → Shortcuts, "+ Add
     /// another"; `input_hook.rs`, 2026-10-25): up to `input_hook::MORE` more
     /// keys or mouse buttons per action, keyed by its first shortcut's
@@ -1205,6 +1212,7 @@ impl Default for YapConfig {
             as_said_hotkey: String::new(),
             paste_last_hotkey: String::new(),
             copy_last_hotkey: String::new(),
+            quick_note_hotkey: String::new(),
             more_hotkeys: Default::default(),
             triple_tap_meeting: false,
             as_said_offer: false,

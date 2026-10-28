@@ -60,6 +60,22 @@
         "center": false
       },
       {
+        "label": "quick-note",
+        "title": "Quick note · Yap",
+        "width": 420,
+        "height": 380,
+        "minWidth": 300,
+        "minHeight": 220,
+        "resizable": true,
+        "decorations": false,
+        "transparent": false,
+        "alwaysOnTop": true,
+        "skipTaskbar": false,
+        "visible": false,
+        "focus": false,
+        "center": false
+      },
+      {
         "label": "overlay",
         "title": "Yap",
         "width": 520,
