@@ -84,6 +84,10 @@ pub fn local_llm_status() -> serde_json::Value {
                 // What it was trained for ("up to 256K"): the file's own
                 // header once it's here, else the curated figure.
                 "maxContext": crate::ai::local_llm::context::trained_context(&crate::ai::local_llm::llm_dir().join(m.filename)),
+                // It can read screenshots on this PC (its projector, a
+                // separate download: local_llm/vision.rs), and does now.
+                "projectorMb": crate::ai::local_llm::vision::for_curated(m.id).map(|p| p.size_mb()),
+                "readsImages": installed && crate::ai::local_llm::vision::reads_images(&cfg, &crate::ai::local_llm::model_id(std::path::Path::new(m.filename))),
             })
         })
         .collect();
@@ -176,7 +180,37 @@ pub fn local_llm_status() -> serde_json::Value {
         // The active model's context: the setting, its maximum, the
         // choices with what each takes (local_llm::context::context_view).
         "context": crate::ai::local_llm::context::context_view(&cfg),
+        // "Read screenshots on this PC": the active model's projector, its
+        // download, the setting, whether it's loaded and where it would go
+        // (local_llm/vision.rs); null for a model without one.
+        "vision": crate::ai::local_llm::vision::status(&cfg),
     })
+}
+
+/// "Read screenshots on this PC": download the active on-device model's
+/// projector (SHA-256 checked; `local-vision-download-progress`; Cancel
+/// with `download_cancel {id: "llm-vision:<model>"}`), and turn it on. It
+/// loads the next time a screenshot goes to the model (local_llm/vision.rs).
+#[tauri::command]
+pub async fn local_vision_install(app: AppHandle) -> Result<(), String> {
+    crate::ai::local_llm::vision::install(&app).await
+}
+
+/// Remove an on-device model's projector (the active model's, or the
+/// curated `model`'s): the file goes; a model running with it is freed
+/// first when nothing uses it.
+#[tauri::command]
+pub async fn local_vision_remove(app: AppHandle, model: Option<String>) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || crate::ai::local_llm::vision::remove(&app, model.as_deref()))
+        .await
+        .map_err(|_| "Couldn't remove the screenshot reader. Try again.".to_string())?
+}
+
+/// "Read screenshots on this PC" on or off (Settings, Chat's line): saved
+/// the way Settings saves; off sends screenshots as their text.
+#[tauri::command]
+pub fn local_vision_set(app: AppHandle, on: bool) -> Result<(), String> {
+    crate::ai::local_llm::vision::set_on(&app, on)
 }
 
 /// Open the on-device models folder (`<data>/llm/`) in the file manager so the
@@ -207,9 +241,11 @@ pub async fn local_llm_start() -> Result<(), String> {
     crate::ai::local_llm::start().await.map(|_| ())
 }
 
-/// Stop the on-device cleanup sidecar.
+/// Stop the on-device cleanup sidecar (its next load is without the
+/// projector, until a screenshot asks for it).
 #[tauri::command]
 pub fn local_llm_stop() {
+    crate::ai::local_llm::vision::forget();
     crate::ai::local_llm::stop();
 }
 

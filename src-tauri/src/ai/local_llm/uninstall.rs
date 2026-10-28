@@ -240,6 +240,8 @@ pub fn uninstall(app: &AppHandle, file: &str) -> Result<(), String> {
             Ok(Some(bytes)) => {
                 let curated = CURATED_MODELS.iter().find(|m| m.filename.eq_ignore_ascii_case(name)).map(|m| m.id).unwrap_or("");
                 tracing::info!(size_mb = bytes / 1_048_576, curated, "Uninstalled an on-device model");
+                // Its screenshot reader goes with it (local_llm/vision.rs).
+                super::vision::remove_with_model(name);
             }
             Ok(None) => {}
             Err(e) => {

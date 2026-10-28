@@ -1,0 +1,28 @@
+<!doctype html>
+<!-- A made-up settings panel whose state is shown only by its switches
+     (Snip to Chat's screenshot evaluations): text alone can't say which
+     are on. -->
+<meta charset="utf-8">
+<style>
+  html, body { margin: 0; background: #f3f3f3; }
+  body { width: 820px; height: 560px; font-family: "Segoe UI", sans-serif; color: #1b1b1b; }
+  .wrap { padding: 28px 36px; }
+  h1 { font-size: 26px; font-weight: 600; margin: 0 0 18px; }
+  .card { background: #fff; border: 1px solid #e5e5e5; border-radius: 6px; margin-bottom: 6px; padding: 14px 18px; display: flex; align-items: center; }
+  .label { font-size: 14px; }
+  .sub { font-size: 12px; color: #5f5f5f; margin-top: 2px; }
+  .sw { margin-left: auto; width: 40px; height: 20px; border-radius: 10px; position: relative; }
+  .sw.on { background: #0067c0; }
+  .sw.off { background: #fff; border: 1px solid #8a8a8a; width: 38px; height: 18px; }
+  .sw::after { content: ""; position: absolute; top: 4px; width: 12px; height: 12px; border-radius: 50%; }
+  .sw.on::after { right: 4px; background: #fff; }
+  .sw.off::after { left: 4px; top: 3px; background: #5f5f5f; }
+</style>
+<div class="wrap">
+  <h1>Bluetooth &amp; devices</h1>
+  <div class="card"><div><div class="label">Bluetooth</div><div class="sub">Discoverable as "STUDY-PC"</div></div><div class="sw off"></div></div>
+  <div class="card"><div><div class="label">Show notifications to connect using Swift Pair</div><div class="sub">For supported Bluetooth devices</div></div><div class="sw on"></div></div>
+  <div class="card"><div><div class="label">Download over metered connections</div><div class="sub">Device software, info and apps for new devices</div></div><div class="sw off"></div></div>
+  <div class="card"><div><div class="label">Use the phone as a webcam</div><div class="sub">Phone Link</div></div><div class="sw on"></div></div>
+  <div class="card"><div><div class="label">Autoplay</div><div class="sub">Choose what happens when you plug in a USB drive</div></div><div class="sw on"></div></div>
+</div>

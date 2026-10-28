@@ -879,6 +879,23 @@ microphone (the chime after the snip, the dictation key ending it,
 push-to-talk's join-and-release); the robot spec's new real-clipboard check
 (`e2e-real/snip.real.js`) is written, not yet run.
 
+**Snip to Chat, phase 3: the on-device model reads screenshots** (2026-10-28,
+[snip.md](./snip.md#the-on-device-model-reads-screenshots-phase-3-2026-10-28),
+`ai/local_llm/vision.rs`): Qwen3.5 4B with its projector (`--mmproj`, an
+optional 642 MB download, "Read screenshots on this PC" in Settings and in
+Chat's line) answers about a screenshot on this PC; loaded only when a
+screenshot goes to the model (a restart once nothing uses it), on the card
+only where it fits beside the model. **Tested**: by hand on the maintainer's
+PC (a scratch llamafile 0.10.6 with Yap's arguments: it loads with MTP, six
+screenshots answered right, load +1.3 s, +0.85 GB on the card, a dictation's
+cleanup unchanged), the model evaluations (`eval --vision`: picture 22/22,
+OCR text 12/22, model-evals.md), unit, e2e (`e2e/local-vision.spec.js`, 3
+tests on a stand-in sidecar). **Not yet tried**: in the dev build with the
+real sidecar (the restart with the projector, a dictation during it, the
+idle free, the download from Hugging Face), the processor fallback on a
+small card, the Voice Assistant asking about a screenshot on the on-device
+model.
+
 **Meeting search and Ask across meetings** (2026-10-25,
 [search.md](./search.md)): every meeting and note cut into passages and read
 by EmbeddingGemma-300M on Yap's own llamafile (downloaded on demand from

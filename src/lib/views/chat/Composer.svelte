@@ -8,12 +8,17 @@
   // panel). Snip to Chat (snip.rs): the screenshots this question
   // carries sit over the box with three one-tap questions, and — a model
   // that can't read images — one line saying so, with the switch, or
-  // "Send its text instead" (Windows' OCR on this PC: snip/ocr.rs). A
+  // "Send its text instead" (Windows' OCR on this PC: snip/ocr.rs); the
+  // on-device model first offers its own projector, "Read screenshots on
+  // this PC" (ai/local_llm/vision.rs: a download, or switched back on). A
   // picture pasted (Ctrl+V) or dropped on Chat joins them (snip/attach.rs);
   // a screenshot's right-click menu copies or saves it. Nothing goes until
   // you send.
   import { invoke } from '@tauri-apps/api/core';
   import { toast } from '../../ui/toast.svelte.js';
+  import DownloadProgress from '../../ui/DownloadProgress.svelte';
+  import { fromEvent } from '../../core/downloads.js';
+  import { localVision, downloadVision, cancelVision, setVisionOn } from '../../stores/localVision.svelte.js';
   import { openContextMenu } from '../../ui/contextMenu.svelte.js';
   import { formatHotkeySpec } from '../../core/hotkeys.js';
   import { modelName, providerName } from '../../core/aiModel.js';
@@ -68,6 +73,21 @@
       toast({ title: "Couldn't switch the model", description: String(e), variant: 'destructive' });
     }
   }
+
+  /** "Read screenshots on this PC": the on-device model's projector, downloaded (or switched back on). */
+  async function readHere() {
+    const offer = chat.vision.imagesLocal;
+    if (!offer) return;
+    const ok = offer.installed ? await setVisionOn(true) : await downloadVision(offer.model);
+    if (!ok && localVision.error) {
+      toast({ title: "Couldn't get the screenshot reader", description: localVision.error, variant: 'destructive' });
+    }
+    await chat.refreshVision();
+    chipRef?.refresh?.();
+    chat.inputEl?.focus();
+  }
+
+  const fmtMb = (mb) => (mb >= 1024 ? `${(mb / 1024).toFixed(1)} GB` : `${mb} MB`);
 
   /** "Send without the screenshot": for a question that doesn't need it. */
   function sendWithout() {
@@ -144,20 +164,44 @@
          saying so, with the switch. Nothing goes until you send. -->
     <div class="snipbar" data-testid="chat-attachments">
       {#if chat.visionBlocked}
+        {@const here = chat.vision.imagesLocal}
         <div class="visionline" role="status" data-testid="chat-vision-line">
+          {#if here && localVision.downloading}
+            <!-- The on-device model's projector downloading (it carries on if you leave). -->
+            <div class="vprogress" data-testid="chat-vision-download">
+              <DownloadProgress
+                progress={fromEvent(localVision.progress)}
+                label="Downloading the screenshot reader"
+                oncancel={() => cancelVision(here.model)}
+              />
+            </div>
+          {/if}
           <span class="vtext">
-            <b>{modelName(chat.vision.model)} can't read images.</b>
-            {#if !chat.vision.imagesSwitch}None of your models can: Claude, Gemini and OpenAI models can.{/if}
+            {#if here && here.failed}
+              <b>{modelName(chat.vision.model)} couldn't load its screenshot reader.</b> Until Yap restarts:
+            {:else if here && here.installed}
+              <b>Reading screenshots on this PC is off.</b>
+            {:else if here}
+              <b>{modelName(chat.vision.model)} can read screenshots on this PC</b> with a {fmtMb(here.sizeMb)} download: free, and the picture never leaves it.
+            {:else}
+              <b>{modelName(chat.vision.model)} can't read images.</b>
+              {#if !chat.vision.imagesSwitch}None of your models can: Claude, Gemini and OpenAI models can.{/if}
+            {/if}
           </span>
+          {#if here && !here.failed}
+            <button type="button" class="vbtn primary" disabled={!!localVision.downloading} onclick={readHere}>
+              {here.installed ? 'Turn it on' : `Download it (${fmtMb(here.sizeMb)})`}
+            </button>
+          {/if}
           {#if chat.vision.imagesSwitch}
-            <button type="button" class="vbtn primary" onclick={useVisionModel}>
+            <button type="button" class="vbtn" class:primary={!here || here.failed} onclick={useVisionModel}>
               Use {chat.switchName} on {providerName({ provider: chat.vision.imagesSwitch.provider })}
             </button>
           {/if}
           <button
             type="button"
             class="vbtn"
-            class:primary={!chat.vision.imagesSwitch}
+            class:primary={!chat.vision.imagesSwitch && (!here || here.failed)}
             disabled={chat.sending}
             title="Windows reads the screenshot's text on this PC, and that goes to the model instead of the picture"
             onclick={sendAsText}>Send its text instead</button
@@ -709,6 +753,10 @@
   }
   .vtext {
     flex: 1 1 220px;
+  }
+  /* The screenshot reader's download: the line's whole width. */
+  .vprogress {
+    flex: 1 1 100%;
   }
   .vbtn {
     padding: 4px 10px;

@@ -681,6 +681,15 @@ pub struct YapConfig {
     /// 15 (`local_llm::on_demand::DEFAULT_IDLE_MINS`).
     #[serde(default = "default_local_model_idle_mins")]
     pub local_model_idle_mins: u32,
+    /// "Read screenshots on this PC" (Settings → Language Models, the
+    /// on-device models; Chat's "can't read images" line): the on-device
+    /// model loads its projector, once downloaded, when a screenshot goes to
+    /// it (`local_llm::vision`). On by default — downloading it is the
+    /// choice; off keeps the file and sends screenshots as their text. New
+    /// in 2026-10-28; an older Yap drops it on a save and it's on again,
+    /// which only matters once the projector is downloaded.
+    #[serde(default = "default_true")]
+    pub local_vision: bool,
     /// Smart-routing scope (FluidVoice's `PromptRoutingScope`):
     /// - "all_apps" (default): the global `pp_prompt` cleans everywhere, and
     ///   `app_routes` override it for matching apps.
@@ -1280,6 +1289,7 @@ impl Default for YapConfig {
             local_mtp: true,
             local_model_at_launch: false,
             local_model_idle_mins: default_local_model_idle_mins(),
+            local_vision: true,
             routing_scope: default_routing_scope(),
             app_routes: Vec::new(),
             cleanup_profiles: Vec::new(),

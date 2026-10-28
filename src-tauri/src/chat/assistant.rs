@@ -789,6 +789,16 @@ async fn answer(app: AppHandle, generation: u64, since: u64, question: String) {
             return;
         }
         if let Some((conv, images)) = crate::snip::waiting::take_for_question(&app) {
+            // The on-device model loads its projector first (local_llm/vision.rs).
+            if provider == crate::ai::local_llm::PROVIDER_ONDEVICE {
+                if let Err(e) = crate::ai::local_llm::vision::ensure(&app).await {
+                    tracing::info!("Voice Assistant: the on-device model can't read the screenshots now ({e})");
+                    crate::snip::waiting::put_back(&app, conv, images);
+                    cant_read(&app, &question, conv, true);
+                    give_up(&app, generation);
+                    return;
+                }
+            }
             let ids: Vec<String> = images.iter().map(|i| i.id.clone()).collect();
             match crate::snip::turn::prepare(&ids, provider, base_url).await {
                 Ok(prepared) => {

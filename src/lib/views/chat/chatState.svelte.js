@@ -83,7 +83,9 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
   followWaitingShots();
   // Can the Chat model read them (ai_model_status): images true | false |
   // null (not known: it may try), the switch Rust suggests, the model.
-  let vision = $state({ images: null, imagesSwitch: null, model: null });
+  // `imagesLocal`: the on-device model's projector to download or switch on
+  // ("Read screenshots on this PC", ai/local_llm/vision.rs).
+  let vision = $state({ images: null, imagesSwitch: null, imagesLocal: null, model: null });
   // "Keep chat screenshots" (config chatImageDays), for a removed one's line.
   let keepDays = $state(30);
   // A screenshot opened large (its id), or null.
@@ -232,7 +234,12 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
   async function refreshVision() {
     try {
       const s = await invoke('ai_model_status', { scope: 'chat' });
-      vision = { images: s?.images ?? null, imagesSwitch: s?.imagesSwitch ?? null, model: s?.ready ? s.model : null };
+      vision = {
+        images: s?.images ?? null,
+        imagesSwitch: s?.imagesSwitch ?? null,
+        imagesLocal: s?.imagesLocal ?? null,
+        model: s?.ready ? s.model : null,
+      };
     } catch {
       /* keep the last */
     }

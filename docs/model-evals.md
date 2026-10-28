@@ -42,6 +42,7 @@ builds and runs out of the checkout: `YAP_EVAL_TARGET_DIR=<builds>/evals`, `--ou
 | `--strength`, `--strength-phase before\|after`, `--strength-quick` | Run the cleanup strength, formatting and text-before-the-cursor cases in `evals/cleanup/strength.json` instead of the scenarios ("Cleanup strength…" below): each before (Medium, as until 25 Oct 2026) and after. |
 | `--brief` | Write the pre-meeting brief of each meeting in `evals/briefs/*.json` instead of the scenarios (below; `--only` picks them, `--repeat` repeats them). |
 | `--transforms` | Run the saved transforms' cases in `evals/transforms/cases.json` instead of the scenarios ("Saved transforms" below; `--only` picks them by name or transform, `--repeat` repeats them). |
+| `--vision`, `--vision-path picture\|text` | Ask the screenshot questions in `evals/vision/cases.json` instead of the scenarios ("Screenshot questions" below): each as a picture and as its text (Windows' OCR), through Chat's own turn; a local model's server gets its projector. |
 | `--languages`, `--languages-phase before\|after` | Run My languages' cases in `evals/languages/cases.json` instead of the scenarios ("My languages" below): cleanup of French, Spanish and German dictations before and after the language line, and a language shortcut's translation. |
 | `--summaries`, `--summaries-phase before\|after` | Write the action plan of each meeting in `evals/summaries/cases.json` instead of the scenarios ("Meeting summaries" below): before (the earlier layout, no language line) and after, judged on the language, tasks under their owners, the headings, the recap and the decisions' reasons. |
 | `--search`, `--embed <gguf>`, `--embed-ngl <n>` | Meeting search instead of the scenarios: recall@k for keyword, meaning and hybrid search over `evals/search/meetings.json`, then each `--model`'s Ask across meetings answers checked for citations of the right lines ("Meeting search" below). The embedding model: `--embed` (else the installed app's, read-only, else downloaded into `--models-dir`), on the card unless `--embed-ngl 0`. |
@@ -251,6 +252,40 @@ a result Yap had to strip a preamble from is counted (`stripped`). About
 and result), the numbers in `summary.json` (`models[].transforms`).
 `eval::transforms`' unit tests check the file reads and every transform in
 it is one Yap has (≥ 3 cases per built-in), and the judge.
+
+### Screenshot questions (`--vision`)
+
+```bash
+yap.exe eval --vision --model local:qwen3.5-4b --ngl 999
+yap.exe eval --vision --vision-path picture --model groq:qwen/qwen3.8-27b --keys-from-yap
+```
+
+Instead of the scenarios: Snip to Chat's question about a screenshot, through
+**Chat's own path** (`ai/eval/vision.rs`): the screenshot stored as a snip is
+(`snip::images`), then the turn `chat_send` runs — `turn::chat_turn` inside
+`snip::turn::with`, with Chat's persona and tools — two ways:
+
+- **picture**: an `image_url` part, fitted as Chat fits it for the provider
+  (`snip::turn::prepare`: 1,024 px on the long edge for a model on this PC). A
+  `local:` model's server is started with **its projector** (`--mmproj`, from
+  `local_llm::vision::PROJECTORS`: the installed app's `llm/vision/`, read-only,
+  else downloaded and checked into `--models-dir`); one without a projector has
+  its pictures refused.
+- **text**: "Send its text instead": **Windows' real OCR** on this PC
+  (`snip::ocr::question_with_text`), the text after the question.
+
+`evals/vision/cases.json`: made-up screenshots, each with a question and the
+words an answer must have (`expect.all`: a group each, one word of it; a plain
+word whole, so "off" isn't found in "office") and mustn't (`expect.not`): a till
+receipt (prices in a monospaced font), a Windows-style error dialog, a bar chart
+with no numbers on its bars, a page of 11.5 px small print in three columns, a
+settings page whose switches alone say what's on, and an editor with a failing
+test in its dark terminal (`kind`: "text" or "visual"). The pictures are drawn
+from `evals/vision/src/*.html` by Edge (`msedge --headless --screenshot
+--window-size=…`, at 100 %); every name, address and number in them is made up.
+`vision.md` in the run folder (per model and way: passed, median / slowest,
+mean prompt tokens; then every answer); `summary.json` has them
+(`models[].vision`).
 
 ### My languages (`--languages`)
 
@@ -2387,3 +2422,65 @@ asked (×2), "I've saved a note" with tools off (×2), Mount Fuji refused as "no
 ("E4B"), so a copy someone adds gets no tools. Small ones for PCs without a card: Qwen3.5 2B
 and 0.8B (no tools under 4B; the processor tier above). Out of the list: Qwen2.5 0.5B/3B/7B,
 Llama 3.2 1B/3B, Llama 3.1 8B, Gemma 2 2B/9B, Mistral 7B v0.3, Phi-3.5 Mini.
+
+## The on-device model reads screenshots (28 Oct 2026)
+
+Snip to Chat's phase 3 (snip.md, `ai/local_llm/vision.rs`): Qwen3.5-4B with its projector
+(bartowski's `mmproj-Qwen_Qwen3.5-4B-f16.gguf`, 641 MiB) on llamafile 0.10.6 as Yap pins it,
+the sidecar's own arguments (8K, MTP on) plus `--mmproj`; an RTX 5070 Ti 16 GB **with a game
+running on it** (12–70 % busy), so times move by a tenth or two between runs.
+
+**It works, MTP included.** Started by hand first (a scratch server, the six screenshots of
+`evals/vision/` at full size, Yap's server arguments): the server says "loaded multimodal
+model", then "speculative decoding context initialized" — llama.cpp's old refusal of
+speculative decoding with a projector is gone in this build — and every answer was right
+(£15.16 and £3.25 off the receipt; "September (600) … August (300)" off a chart with no
+numbers; "Bluetooth is off" off a switch; "line 42: `data.items` is `undefined`"), in
+0.33–0.66 s for a short answer (a 900×700 receipt: 657 prompt tokens, the picture encoded in
+94–134 ms) and 1.1–1.5 s for a long one. MTP kept 10 of 12 drafts on an image's answer.
+
+| | Without the projector | With it on the card | With it on the processor |
+|---|---|---|---|
+| Ready on `/health` | 3.1 s | 4.4 s (5.1–8.8 s with the game busy) | 4.4 s |
+| On the card (`nvidia-smi`) | +4.4 GB | +5.2 GB (its weights 641 MiB + a 223 MiB compute buffer; llama.cpp's worst case 889 MiB) | +4.4 GB |
+| A screenshot question | — | 0.3–0.7 s | 2.2–6.4 s |
+| Cleanup back to back (`--cleanup --cleanup-quick`, 96 each, alternated) | 245 / 176 ms | 220 / 180 ms | — |
+
+The cleanup pairs ran one after the other (without, with; then again): the first pair with
+the game at 40 % of the card, the second at 12–69 %; within the noise of each other, and
+generation the same (233 and 228 tokens/s in the quiet pair). A full `--cleanup` run with the
+projector, at a busy moment, came out at 287 ms against 182 — the game, not the projector: the
+alternated pairs never showed it again. `--image-max-tokens 1024` didn't shrink the compute
+buffer (llama.cpp still warms up on a 1472×1472 picture). So the projector costs a dictation
+nothing while it's loaded, but **~0.85 GB of the card and 1.3 s or more of every load** —
+hence Yap loads it only when a screenshot goes to the model, and frees it with the model.
+
+**Screenshot questions** (`--vision`, the new mode: through Chat's own turn, Chat's persona and
+tools; the picture fitted to 1,024 px as Yap fits it for a model on this PC; the text path
+Windows' real OCR): eleven questions on six made-up screenshots, twice each way. Run folder
+`20261028-212422-qwen3.5-4b` (and `-211051-` with ten, once: picture 10/10, text 5/10).
+
+| Way | Passed | Median / slowest | Prompt tokens (mean) |
+|---|---|---|---|
+| **Picture** (the projector) | **22/22** | 1.1 / 2.5 s | 4,660 |
+| Text (Windows' OCR, today's "Send its text instead") | 12/22 | 1.2 / 3.4 s | 3,181 |
+
+| Case | Picture | Text | What the text lost |
+|---|---|---|---|
+| receipt: total and the croissant | 2/2 | 0/2 | a monospaced receipt's prices read away from their items: the croissant "£4.50", once a made-up total |
+| receipt: the discount | 2/2 | 0/2 | "£4.65 off £46.50" |
+| error dialog: explain | 2/2 | 2/2 | passed on its words; the code read "Øx8øø70Ø3A", which the model "corrected" to the wrong 0x8007043A |
+| chart: most and fewest | 2/2 | 1/2 | no numbers on the bars: once "June (200)" |
+| chart: July, roughly | 2/2 | 0/2 | "200 sign-ups" (an axis label) |
+| small print: notice to cancel | 2/2 | 2/2 | — |
+| small print: a replacement card | 2/2 | 2/2 | — |
+| switches: is Bluetooth on? | 2/2 | 0/2 | a switch has no text: "on — it's discoverable" |
+| switches: is metered download on? | 2/2 | 2/2 | (a guess that came out right) |
+| switches: which are on? | 2/2 | 1/2 | its "pass" listed every switch as on: the check only wants the three on ones named |
+| editor: what's wrong, where | 2/2 | 2/2 | — |
+
+So the picture is right where OCR has the words (the 11.5 px small print at 1,024 px wide
+included), and right where it hasn't: a layout, a chart, a switch. 5 of the 22 picture
+answers first called `search_notes` (Chat's tools) and so sent the picture twice (the tool
+loop re-sends the question): 6.7–13.8k prompt tokens, still 1.1–1.6 s. Both ways stay on this
+PC; OCR stays the way for every model that can't read images.

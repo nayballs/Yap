@@ -15,6 +15,10 @@
   // "Loading…", or "Not loaded · loads when needed" with Load now), "Load
   // the on-device model when Yap starts" (off by default: it loads the
   // first time it's used) and "Free its memory after it's unused for".
+  //
+  // "Read screenshots on this PC" (ai/local_llm/vision.rs, 2026-10-28): for
+  // a model with a projector Yap offers (the 4B), its download, then the
+  // switch, where it runs and Remove (stores/localVision.svelte.js).
   import Select from '../ui/Select.svelte';
   import Toggle from '../ui/Toggle.svelte';
   import PillTabs from '../ui/PillTabs.svelte';
@@ -41,8 +45,34 @@
     loadLocalNow,
     freeLocalNow,
   } from './localLlm.svelte.js';
+  import { localVision, downloadVision, cancelVision, removeVision, setVisionOn } from '../stores/localVision.svelte.js';
 
   let { cfg } = $props();
+
+  // The active model's projector (null: it has none Yap offers).
+  const vision = $derived(localLlm.status?.vision || null);
+  const visionWhere = $derived(
+    !vision
+      ? ''
+      : vision.onCard
+        ? `On your graphics card, about ${fmtLlmSize(vision.sizeMb + 250)} more while it's loaded. It loads only when you ask about a screenshot, and goes when the model's memory is freed.`
+        : vision.card
+          ? "On the processor (no room for it beside the model on the graphics card): a screenshot's answer takes a few seconds. It loads only when you ask about one."
+          : "On the processor, like the model: a screenshot's answer takes a while. It loads only when you ask about one."
+  );
+
+  async function getVision() {
+    await downloadVision(vision?.model);
+    await refreshLocalLlm();
+  }
+  async function toggleVision(on) {
+    await setVisionOn(on);
+    await refreshLocalLlm();
+  }
+  async function dropVision() {
+    await removeVision(vision?.model);
+    await refreshLocalLlm();
+  }
 
   // "Free its memory after it's unused for" (minutes; 0 = never).
   const IDLE_OPTIONS = [
@@ -225,6 +255,44 @@
         <Select bind:value={cfg.localModelIdleMins} options={IDLE_OPTIONS} ariaLabel="Free its memory after it's unused for" />
       </div>
     </div>
+    {#if vision}
+      <!-- Snip to Chat on this PC: the model's projector, an optional download. -->
+      <div class="lb-load lb-vision" data-testid="local-vision" data-setting="local-vision">
+        {#if vision.installed}
+          <Toggle
+            checked={vision.on}
+            label="Read screenshots on this PC"
+            desc={vision.on ? visionWhere : 'Off: a screenshot in Chat goes as its text (Windows reads it on this PC), or to a model that reads images.'}
+            onchange={toggleVision}
+          />
+          {#if vision.failed}
+            <span class="lb-visionnote" role="status">It didn't load this time: screenshots go as their text until Yap restarts.</span>
+          {/if}
+          <span class="lb-visionfoot">
+            {#if vision.loaded != null}<span class="lb-visionstate">Loaded now{vision.loaded ? '' : ', on the processor'}</span> ·{/if}
+            <button class="lb-later" onclick={dropVision}>Remove ({fmtLlmSize(vision.sizeMb)})</button>
+          </span>
+        {:else if localVision.downloading}
+          <DownloadProgress
+            progress={fromEvent(localVision.progress)}
+            label="Downloading the screenshot reader"
+            oncancel={() => cancelVision(vision.model)}
+          />
+        {:else}
+          <div class="lb-state">
+            <span class="lb-statetext">Read screenshots on this PC</span>
+            <button class="lb-dl" onclick={getVision} disabled={!!localVision.downloading}>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12M7 10l5 5 5-5M5 21h14" /></svg>
+              Download ({fmtLlmSize(vision.sizeMb)})
+            </button>
+          </div>
+          <span class="lb-visiondesc">
+            {vision.modelName} can answer questions about screenshots in Chat, on this PC: free, and the picture never leaves it. Without it, a screenshot goes as its text.
+          </span>
+        {/if}
+        {#if localVision.error}<span class="ondevice-err">{localVision.error}</span>{/if}
+      </div>
+    {/if}
   {/if}
   {#if families.length > 1}
     <div class="lb-families">
@@ -390,6 +458,19 @@
   }
   .lb-idlelabel {
     color: var(--yap-fg);
+  }
+  .lb-visiondesc,
+  .lb-visionfoot {
+    color: var(--yap-muted);
+    line-height: 1.45;
+  }
+  .lb-visionfoot {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+  }
+  .lb-visionnote {
+    color: var(--yap-warning);
   }
 
   /* On-device model browser (curated downloadable cleanup models). */

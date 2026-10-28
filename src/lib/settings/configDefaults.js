@@ -123,6 +123,9 @@ export const FIELD_DEFAULTS = {
   // minutes (0 = never); at launch only when asked (ai/local_llm/on_demand.rs).
   localModelAtLaunch: false,
   localModelIdleMins: 15,
+  // "Read screenshots on this PC" (ai/local_llm/vision.rs): once its
+  // projector is downloaded. On: downloading it is the choice.
+  localVision: true,
   // config.rs default_pp_prompt(), byte for byte (cleanupPresets.js).
   ppPrompt: PP_DEFAULT_BODY,
   routingScope: 'all_apps',

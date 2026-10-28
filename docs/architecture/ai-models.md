@@ -708,6 +708,62 @@ The language-model side: the OpenAI-compatible client and its prompts, the on-de
   only a GGUF directly in the folder deleted (the engine and marker left),
   the refusals' words; e2e `chat-model-picker.spec.js` and
   `local-models.spec.js`.
+- **`ai/local_llm/vision.rs`** — **the on-device model reading
+  screenshots** (Snip to Chat's phase 3, 2026-10-28; the feature's side is
+  [snip.md](./snip.md#the-on-device-model-reads-screenshots-phase-3-2026-10-28)).
+  Qwen3.5 is a vision-language model: with its **projector** (a second GGUF,
+  `--mmproj`) llamafile 0.10.6's server takes the same `image_url` parts as
+  every cloud provider. **The projector** (`PROJECTORS`: only the 4B's so
+  far, bartowski's `mmproj-Qwen_Qwen3.5-4B-f16.gguf`, 672,423,488 bytes,
+  SHA-256 `659b59dd…` = its LFS oid; the 0.8B, 2B and 9B repos have theirs,
+  not yet tried) is **an optional download** into `llm/vision/`
+  (`install`: `shell/download.rs` — resume, speed, Cancel
+  `llm-vision:<model>`, `local-vision-download-progress`; checked by
+  `models::verify_into`; then `local_vision` on), offered by Settings →
+  Language Models (the on-device models, "Read screenshots on this PC") and
+  by Chat's "can't read images" line (`ai_model_status().imagesLocal`,
+  `snip::vision::local_offer`); `remove`, and a model's Uninstall takes its
+  projector too (`remove_with_model`). Never listed as a model
+  (`local_llm::is_model_file`: no `mmproj-…`). **Loaded only while it's
+  needed** (`ensure`, from `chat_send` and the Voice Assistant's question
+  with screenshots, before `turn::prepare`): the sidecar starts without it;
+  a screenshot to the on-device model sets `WANTED` and loads it — the
+  model started with it, or **restarted** with it once no dictation or
+  answer uses the model (`context::wait_until_idle` under the restart lock,
+  then `stop` and `on_demand::wake`: a dictation meanwhile waits for the
+  model as for any load) — and it stays until the model is freed for being
+  idle (`forget`; also Settings' Free memory): the next load, likely a
+  dictation's, is without it. Why: measured on the RTX 5070 Ti, a
+  dictation's cleanup takes the same time with it loaded (back to back 176
+  vs 180 ms mean, `yap.exe eval --cleanup` with and without
+  `--llamafile-arg=--mmproj`), but the model takes **~0.85 GB more** on the
+  card (641 MiB of weights + a 223 MiB compute buffer; llama.cpp's own worst
+  case 889 MiB) and **loads 1.3 s or more slower** (3.1 → 4.4 s; up to
+  8.8 s with a game on the card): a dictation that loads the model would
+  wait for it. **MTP works with it** (`draft-mtp` and `--mmproj` together
+  on llamafile 0.10.6: an image answer's drafts 10 of 12 kept); a start
+  with the projector never notes MTP as failed (its key is blank in
+  `spawn_and_wait`: the projector may be what failed). **Where**
+  (`for_start` → `Load {path, on_card}`, `fits_on_card`, pure): on the card
+  when the model as planned (`gguf::estimate` with its context, MTP and KV
+  cache) plus the projector (`mib`: its file + `COMPUTE_MIB` 250) fit in
+  `card_room`; else on the processor (`--no-mmproj-offload`: a screenshot
+  answer in 2–6 s instead of 0.3–0.7 s, cleanup and MTP untouched) — it
+  never pushes the model off the card. `Serving.vision` (`serving_vision`:
+  `Some(on_card)` when loaded); `log_facts` adds its weights from the log
+  (`in_log`: "CLIP using CUDA0 backend", "model size: 641.26 MiB"). **A
+  start with it that fails**: `FAILED` for the session (`reads_images` says
+  no, Chat's line says it couldn't load), the model started again without
+  it if it was running (dictation keeps its cleanup). `status` →
+  `local_llm_status().vision {model, modelName, sizeMb, installed, on,
+  loaded, onCard, failed, cancelId}` (null for a model without one), and
+  each curated model's `projectorMb` / `readsImages`. Commands
+  `local_vision_install`, `local_vision_remove {model?}`, `local_vision_set
+  {on}` (through `settings::change_config`); debug-only `e2e_local_vision`
+  (`{ensures, wanted, loaded, failed}`). Test mode: the stand-in sidecar
+  "loads" it as a start would (`e2e_stand_in_start`), and its download comes
+  from `YAP_LLM_SOURCES`' `vision:<curated id>`. Unit-tested: the table,
+  the card rule, the arguments, the log, the setting.
 - **`ai/gguf.rs`** — a GGUF model's header, **read-only** (2026-10-20): magic,
   version 2/3, the metadata (a few scalars kept, everything else skipped by
   seeking — the tokenizer's ~250 k strings too: ~20 ms for the 4B's 10 MB

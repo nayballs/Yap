@@ -11,8 +11,9 @@
 //! 3. family rules where the list doesn't say: every Claude model; every
 //!    `gemini-*` chat model; OpenAI's GPT-4o, 4.1, 5.x and 6 and o1/o3/
 //!    o4-mini (not gpt-oss, o1-mini, o3-mini or 3.5); Groq's GPT-OSS no;
-//!    the on-device model no (for now: its vision projector is a later
-//!    phase).
+//!    the on-device model **yes when its projector is downloaded and "Read
+//!    screenshots on this PC" is on** (phase 3, 2026-10-28:
+//!    `local_llm::vision`; it loads when a screenshot goes to it), else no.
 //!
 //! Anything else (a self-hosted server, an unknown id) is **not known**:
 //! Chat lets it send, and a refusal teaches it.
@@ -98,9 +99,43 @@ pub fn reads_images(provider: &str, model: &str) -> Option<bool> {
         return Some(false);
     }
     if provider == "ondevice" {
-        return Some(false);
+        return Some(crate::ai::local_llm::vision::reads_images(&crate::config::load(), model));
     }
     crate::ai::model_catalog::vision_for(provider, model).or_else(|| family_rule(provider, model))
+}
+
+/// What the on-device model needs to read a screenshot when it can't yet:
+/// its projector downloaded ("Read screenshots on this PC", the size) or
+/// switched back on — Chat's line offers it beside "Send its text
+/// instead". `None` for any other model, one without a projector Yap
+/// offers, or one that already reads images.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LocalOffer {
+    /// The curated model it's for.
+    pub model: String,
+    pub size_mb: u64,
+    /// Downloaded but switched off (else: to download).
+    pub installed: bool,
+    /// It failed to load this session.
+    pub failed: bool,
+}
+
+pub fn local_offer(provider: &str, model: &str) -> Option<LocalOffer> {
+    if provider != "ondevice" || was_refused(provider, model) {
+        return None;
+    }
+    let cfg = crate::config::load();
+    if crate::ai::local_llm::vision::reads_images(&cfg, model) {
+        return None;
+    }
+    let p = crate::ai::local_llm::vision::for_model_file(&format!("{model}.gguf"))?;
+    Some(LocalOffer {
+        model: p.model.to_string(),
+        size_mb: p.size_mb(),
+        installed: crate::ai::local_llm::vision::installed(p),
+        failed: crate::ai::local_llm::vision::failed(),
+    })
 }
 
 /// Yap's picks of a model that reads images, per provider, best first

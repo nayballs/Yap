@@ -12,14 +12,16 @@
 //! expose the base URL, and kill on stop/exit. Beside it: [`runtime`] (the
 //! llamafile on disk and its background upgrade), [`context`] (the context
 //! length, and a restart when it changes), [`models`] (the curated
-//! models and their downloads) and [`uninstall`] (a model deleted from
-//! `llm/`, never the one in use).
+//! models and their downloads), [`uninstall`] (a model deleted from
+//! `llm/`, never the one in use) and [`vision`] (its projector: the model
+//! reading screenshots, loaded only while it's needed).
 
 pub mod context;
 pub mod models;
 pub mod on_demand;
 pub mod runtime;
 pub mod uninstall;
+pub mod vision;
 
 use std::path::{Path, PathBuf};
 use crate::privacy::net::Recorded as _;
@@ -314,6 +316,16 @@ pub fn log_facts(log: &str) -> LogFacts {
             }
         }
     }
+    // The projector's weights (its compute buffer is a line above).
+    if let Some((mib, on_card)) = vision::in_log(log) {
+        if on_card {
+            gpu += mib as f64;
+            any_gpu = true;
+        } else {
+            host += mib as f64;
+            any_host = true;
+        }
+    }
     f.n_ctx = per_seq.or(f.n_ctx);
     f.gpu_mib = any_gpu.then(|| gpu.round() as u64);
     f.host_mib = any_host.then(|| host.round() as u64);
@@ -456,6 +468,9 @@ struct Serving {
     hybrid: bool,
     /// Its log's facts, read once it was ready.
     facts: LogFacts,
+    /// Its projector (it reads screenshots, [`vision`]): `Some(true)` on the
+    /// graphics card, `Some(false)` on the processor, `None` not loaded.
+    vision: Option<bool>,
 }
 
 /// The model id Yap sends for a GGUF: its file name without `.gguf`
@@ -566,6 +581,13 @@ pub(crate) fn template_caps_take_tools(props: &serde_json::Value) -> Option<bool
 /// The running sidecar's runtime and MTP (`None` while it isn't running).
 pub fn serving_plan() -> Option<Plan> {
     SERVING.lock().ok()?.as_ref().map(|s| s.plan)
+}
+
+/// The running sidecar's projector ([`vision`]): `Some(true)` on the card,
+/// `Some(false)` on the processor; `None` when it isn't running or was
+/// started without it.
+pub fn serving_vision() -> Option<bool> {
+    SERVING.lock().ok()?.as_ref().and_then(|s| s.vision)
 }
 
 /// The running sidecar's log facts (`None` while it isn't running).
@@ -720,7 +742,17 @@ async fn e2e_stand_in_start(url: &str, gen: u64) -> Result<String, String> {
     }
     if let Ok(mut s) = SERVING.lock() {
         let plan = Plan { runtime: Version(0, 10, 6), mtp: false, kv_q8: false, per_slot: false };
-        *s = Some(Serving { model_id: model_id(&model), placement: None, ctx: context_for(&cfg), plan, hybrid: false, facts: LogFacts::default() });
+        // Its projector as a real start would load it (asked for, usable).
+        let vision = vision::for_start(&cfg, &model, context_for(&cfg), plan, 999).map(|v| v.on_card);
+        *s = Some(Serving {
+            model_id: model_id(&model),
+            placement: None,
+            ctx: context_for(&cfg),
+            plan,
+            hybrid: false,
+            facts: LogFacts::default(),
+            vision,
+        });
     }
     PORT.store(port, Ordering::SeqCst);
     READY.store(true, Ordering::SeqCst);
@@ -797,6 +829,14 @@ pub fn active_model_display(cfg: &crate::config::YapConfig) -> String {
         .unwrap_or_else(|| MODEL_DISPLAY.to_string())
 }
 
+/// A file in `llm/` that's a model: a GGUF, never a vision projector
+/// (`mmproj-…`: Yap keeps its own in `llm/vision/`, and one dropped here
+/// can't be served as a model). Pure.
+pub fn is_model_file(name: &str) -> bool {
+    let lower = name.to_ascii_lowercase();
+    lower.ends_with(".gguf") && !lower.starts_with("mmproj")
+}
+
 /// All GGUF filenames in `llm/`, sorted, bundled default first. Powers the
 /// model picker in Settings.
 pub fn list_models() -> Vec<String> {
@@ -805,7 +845,7 @@ pub fn list_models() -> Vec<String> {
             rd.filter_map(|e| e.ok())
                 .filter(|e| e.path().is_file())
                 .filter_map(|e| e.file_name().into_string().ok())
-                .filter(|n| n.to_ascii_lowercase().ends_with(".gguf"))
+                .filter(|n| is_model_file(n))
                 .collect()
         })
         .unwrap_or_default();
@@ -1268,7 +1308,11 @@ async fn spawn_and_wait(attempt: Attempt, gen: u64) -> Result<Started, Failed> {
     let ctx = context_for(&cfg);
     let mut plan = plan_for(&cfg, &model, ctx, runtime_version().unwrap_or(Version(0, 10, 3)));
     plan.mtp &= attempt.mtp;
-    let key = mtp_key(plan.runtime, &model);
+    // Its projector, when a screenshot asked for it (`vision::ensure`).
+    let projector = vision::for_start(&cfg, &model, ctx, plan, 999);
+    // A start with the projector never teaches that MTP fails here: the
+    // projector may be what failed (a blank key is never noted).
+    let key = if projector.is_some() { String::new() } else { mtp_key(plan.runtime, &model) };
     let fail = |why: Failure| Failed { why, mtp: plan.server().mtp, key: key.clone() };
     let stopped = || CLOSING.load(Ordering::SeqCst) || STOP_GEN.load(Ordering::SeqCst) != gen;
     if stopped() {
@@ -1295,8 +1339,13 @@ async fn spawn_and_wait(attempt: Attempt, gen: u64) -> Result<Started, Failed> {
 
     let mut cmd = std::process::Command::new(&exe);
     // All layers on the GPU (999; llama.cpp fits what it can, the rest stays
-    // on the processor, `placement`), thinking off, the caches capped.
-    cmd.args(server_args(&model, port, 999, ctx, plan))
+    // on the processor, `placement`), thinking off, the caches capped; the
+    // projector after them, on the card only where it fits beside the model.
+    let mut args = server_args(&model, port, 999, ctx, plan);
+    if let Some(p) = &projector {
+        args.extend(vision::args(p));
+    }
+    cmd.args(args)
         .stdin(std::process::Stdio::null())
         .stdout(to_stdio(log.as_ref().and_then(|f| f.try_clone().ok())))
         .stderr(to_stdio(log.and_then(|f| f.try_clone().ok())));
@@ -1319,7 +1368,16 @@ async fn spawn_and_wait(attempt: Attempt, gen: u64) -> Result<Started, Failed> {
         stop_inner();
         return Err(fail(Failure::Stopped));
     }
-    tracing::info!(port, ctx, runtime = %plan.runtime, mtp = plan.server().mtp, wait_s = attempt.wait.as_secs(), model = %model.display(), "Starting on-device cleanup sidecar");
+    tracing::info!(
+        port,
+        ctx,
+        runtime = %plan.runtime,
+        mtp = plan.server().mtp,
+        projector = ?projector.as_ref().map(|p| if p.on_card { "card" } else { "processor" }),
+        wait_s = attempt.wait.as_secs(),
+        model = %model.display(),
+        "Starting on-device cleanup sidecar"
+    );
 
     // Poll /health until the model has loaded (or the process dies / we time out).
     let health = format!("http://127.0.0.1:{}/health", port);
@@ -1361,7 +1419,8 @@ async fn spawn_and_wait(attempt: Attempt, gen: u64) -> Result<Started, Failed> {
                 }
                 if let Ok(mut s) = SERVING.lock() {
                     let hybrid = crate::ai::gguf::model_file(&model).is_some_and(|f| f.shape.is_hybrid());
-                    *s = Some(Serving { model_id: model_id(&model), placement, ctx, plan, hybrid, facts });
+                    let vision = projector.as_ref().map(|p| p.on_card);
+                    *s = Some(Serving { model_id: model_id(&model), placement, ctx, plan, hybrid, facts, vision });
                 }
                 READY.store(true, Ordering::SeqCst);
                 served_on(port);
@@ -1596,6 +1655,25 @@ mod tests {
         assert_eq!(placement_after_load("I srv server_main: model loaded").map(|p| p.kind()), Some("cpu"));
         assert_eq!(placement_after_load("I srv load_model: loading model"), None);
         assert_eq!(placement_after_load(gpu).map(|p| p.kind()), Some("gpu"));
+    }
+
+    #[test]
+    fn a_projector_is_never_listed_as_a_model() {
+        assert!(is_model_file("Qwen_Qwen3.5-4B-Q4_K_M.gguf"));
+        assert!(is_model_file("my-own.GGUF"));
+        assert!(!is_model_file("mmproj-Qwen_Qwen3.5-4B-f16.gguf"));
+        assert!(!is_model_file("MMPROJ-something.gguf"));
+        assert!(!is_model_file("llamafile.exe"));
+        assert!(!is_model_file("Qwen_Qwen3.5-4B-Q4_K_M.partial"));
+    }
+
+    #[test]
+    fn the_projectors_weights_count_where_they_went() {
+        let log = "I llama_kv_cache:      CUDA0 KV buffer size =   256.00 MiB\nI clip_ctx: CLIP using CUDA0 backend\nI load_hparams: model size:         641.26 MiB\nI reserve_compute_meta:      CUDA0 compute buffer size =   223.30 MiB";
+        assert_eq!(log_facts(log).gpu_mib, Some(256 + 641 + 223));
+        let cpu = "I llama_kv_cache:      CUDA0 KV buffer size =   256.00 MiB\nI clip_ctx: CLIP using CPU backend\nI load_hparams: model size:         641.26 MiB\nI reserve_compute_meta:        CPU compute buffer size =   223.30 MiB";
+        let f = log_facts(cpu);
+        assert_eq!((f.gpu_mib, f.host_mib), (Some(256), Some(641 + 223)));
     }
 
     #[test]

@@ -1,0 +1,42 @@
+<!doctype html>
+<!-- A made-up bar chart with no value labels (Snip to Chat's screenshot
+     evaluations): the answer is in the bars' heights, not in any text. -->
+<meta charset="utf-8">
+<style>
+  html, body { margin: 0; background: #fff; }
+  body { width: 900px; height: 560px; font-family: "Segoe UI", sans-serif; }
+</style>
+<svg width="900" height="560" viewBox="0 0 900 560" xmlns="http://www.w3.org/2000/svg" font-family="Segoe UI, sans-serif">
+  <text x="60" y="44" font-size="22" font-weight="600" fill="#1f2937">Newsletter sign-ups, June to October 2026</text>
+  <text x="60" y="70" font-size="14" fill="#6b7280">Riverside Climbing Wall · new subscribers a month</text>
+  <!-- Plot: y from 480 (0) up to 120 (800), 0.45 px a sign-up. -->
+  <g font-size="13" fill="#6b7280" text-anchor="end">
+    <text x="92" y="484">0</text>
+    <text x="92" y="394">200</text>
+    <text x="92" y="304">400</text>
+    <text x="92" y="214">600</text>
+    <text x="92" y="124">800</text>
+  </g>
+  <g stroke="#e5e7eb">
+    <line x1="100" y1="390" x2="860" y2="390"/>
+    <line x1="100" y1="300" x2="860" y2="300"/>
+    <line x1="100" y1="210" x2="860" y2="210"/>
+    <line x1="100" y1="120" x2="860" y2="120"/>
+  </g>
+  <line x1="100" y1="480" x2="860" y2="480" stroke="#9ca3af"/>
+  <!-- Jun 312, Jul 458, Aug 291, Sep 604, Oct 517 -->
+  <g fill="#3b82f6">
+    <rect x="140" y="339.6" width="96" height="140.4"/>
+    <rect x="290" y="273.9" width="96" height="206.1"/>
+    <rect x="440" y="349.05" width="96" height="130.95"/>
+    <rect x="590" y="208.2" width="96" height="271.8" fill="#f59e0b"/>
+    <rect x="740" y="247.35" width="96" height="232.65"/>
+  </g>
+  <g font-size="15" fill="#374151" text-anchor="middle">
+    <text x="188" y="506">June</text>
+    <text x="338" y="506">July</text>
+    <text x="488" y="506">August</text>
+    <text x="638" y="506">September</text>
+    <text x="788" y="506">October</text>
+  </g>
+</svg>

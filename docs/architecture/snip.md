@@ -14,6 +14,14 @@ in like a snip; a model that can't read images can be sent the screenshot's
 text, read on this PC by Windows' OCR; the model picker and Settings tag
 the models that read images.
 
+**Phase 3 (2026-10-28)**: the on-device model reads the screenshot itself.
+Qwen3.5 4B with its projector (`--mmproj`, an optional 642 MB download:
+"Read screenshots on this PC") answers about a screenshot on this PC, free,
+the picture never leaving it — all 11 of the evaluations' screenshot
+questions, asked twice (22/22), where its OCR text got 12 of 22 — loaded
+only while it's needed, so a dictation never waits for it. Below: [The on-device model reads
+screenshots](#the-on-device-model-reads-screenshots-phase-3-2026-10-28).
+
 **The clipboard and the voice (2026-10-25, the maintainer trying it)**:
 "When you take a screenshot it should go into Ctrl+V, so you can paste it
 anywhere" — every snip to Chat is on the clipboard too ("Copy every snip to
@@ -455,8 +463,10 @@ for the Chat model (`snip/vision.rs`), most certain first:
 3. **family rules** where the list doesn't say: every Claude model; every
    `gemini-*` chat model; OpenAI's GPT-4o, 4.1, 5.x, 6, o1, o3, o4-mini (not
    gpt-oss, o1-mini, o3-mini, 3.5); ids that say so ("vision", "vl",
-   "llava", "pixtral", Groq's `qwen3.8`); **the on-device model: no**
-   (its projector is phase 3).
+   "llava", "pixtral", Groq's `qwen3.8`); **the on-device model: yes
+   when its projector is downloaded and "Read screenshots on this PC" is
+   on** (phase 3, `local_llm::vision::reads_images`: loaded or not — it
+   loads when a screenshot goes to it), else no.
 
 Anything else — a self-hosted server, an id nothing says about — is **not
 known**: Chat lets it try, and a refusal teaches it.
@@ -480,6 +490,67 @@ question and its screenshot back in the box.
 **Earlier screenshots** never go again to a model known not to read
 images (switched to after a question with one): each is a line
 (`turn::with_history_images` with the model).
+
+## The on-device model reads screenshots (phase 3, 2026-10-28)
+
+The maintainer's ask: screenshots asked about in Chat, free and on his own
+PC. Qwen3.5 is a vision-language model: with its **projector** (a second
+GGUF) llama.cpp's server takes the same `image_url` parts as the cloud, so
+`snip/turn.rs` needed no change — the model, its server and the switch did
+(`ai/local_llm/vision.rs`, [ai-models.md](./ai-models.md)).
+
+**Found first, by hand** (llamafile 0.10.6 as Yap pins it, Yap's server
+arguments, the 4B's Q4_K_M from Yap's folder, bartowski's
+`mmproj-Qwen_Qwen3.5-4B-f16.gguf`; RTX 5070 Ti 16 GB, with a game running on
+it, so times vary by a tenth or two):
+
+| | without the projector | with it |
+|---|---|---|
+| starts with MTP (`--spec-type draft-mtp`) | yes | **yes**: "loaded multimodal model", then "speculative decoding context initialized" |
+| load (ready on `/health`) | 3.1 s | 4.4 s (5.1–8.8 s with the game busy on the card) |
+| on the card | ~4.4 GB | ~5.2 GB (its weights 641 MiB, its compute buffer 223 MiB) |
+| a dictation's cleanup, back to back (`eval --cleanup`, 96) | 176 ms mean | 180 ms mean |
+| a screenshot question, its own request | — | 0.33–0.66 s (a 900×700 receipt: 657 tokens, encoded in 94–134 ms); 1.1–1.5 s for a long answer |
+| the projector on the processor (`--no-mmproj-offload`) | — | 2.2–6.4 s a question, the model's speed unchanged |
+
+So: it works, MTP included, and the projector costs a dictation nothing
+while it's loaded — but **memory and load time**. Hence:
+
+- **An optional download**, offered where it makes sense: Settings →
+  Language Models → the on-device models ("Read screenshots on this PC":
+  Download (642 MB), then the switch, where it runs and Remove), and Chat's
+  line when a screenshot meets the on-device model without it: "**Qwen3.5
+  4B can read screenshots on this PC** with a 642 MB download: free, and
+  the picture never leaves it." [Download it (642 MB)] — its progress in
+  the line — beside "Send its text instead" and a cloud model that reads
+  images. Switched off: "Reading screenshots on this PC is off." [Turn it
+  on]. Only for a model Yap has a projector for (the 4B so far).
+- **Loaded only while it's needed**: a screenshot to the on-device model
+  loads it (`vision::ensure`, before the question goes): the model started
+  with it, or — running without it — restarted with it once no dictation
+  or answer uses the model (a dictation during the restart waits for the
+  model, "Loading the AI model…" on the bar, as for any load). It stays
+  until the model is freed for being idle; the next load is without it.
+  The question waits ~4–5 s the first time.
+- **Never in the model's way on the card**: on the graphics card only when
+  the model as planned (context, MTP, KV cache) and the projector fit in
+  the card's room together; else on the processor (slower answers about
+  screenshots, the model untouched). On the processor tier, the processor.
+- **A start with it that fails**: not tried again this session, the model
+  back without it, and Chat's line says "couldn't load its screenshot
+  reader", with "Send its text instead". A server that turns an image down
+  is still a refusal (`vision::is_image_refusal`).
+- The picker's "Reads images" tag on the on-device row once it's
+  downloaded and on (`local_llm_status` `readsImages`); a copy for the
+  model on this PC is still 1,024 px on its long edge (`images::long_edge`),
+  and earlier screenshots aren't sent again to it (`turn::history_budget`).
+
+**Measured against today's OCR path** (`yap.exe eval --vision`,
+[model-evals.md](../model-evals.md#the-on-device-model-reads-screenshots-28-oct-2026)):
+the 4B with its projector answered every screenshot question; with
+Windows' OCR text it got the ones whose answer is in the text and was
+wrong where the layout or the picture says it — a receipt's prices in
+columns, a chart's bars, which switch is on.
 
 ### "Send its text instead" (`snip/ocr.rs`, phase 2)
 
@@ -672,6 +743,18 @@ doesn't show it (a screenshot never goes there).
   `snip.rs` `listens_after` (voice and landed, not in a meeting, not after
   a cancel, the setting), `dictation/gesture.rs` (Yap's own recording: a
   key joins it, its release ends it, tap or hold).
+- **Phase 3, 2026-10-28**: unit — `ai/local_llm/vision.rs` (the projector
+  table, the card rule, its arguments, the log, the setting),
+  `local_llm::is_model_file` (no `mmproj-…` among the models),
+  `ai/eval/vision.rs` (the cases file and every screenshot, the judging);
+  e2e `e2e/local-vision.spec.js` (3 tests, a stand-in sidecar and a fake
+  projector download): Chat on the 4B with a screenshot offers "Download it
+  (642 MB)" beside "Send its text instead", its progress in the line, then
+  the question goes with the picture and the model loaded its projector for
+  it; a model running without it is restarted with it, never while a
+  dictation is going on; Settings' switch (off: Chat's "Turn it on"),
+  Remove, the download there; the picker's "Reads images" on the 4B. The
+  model evaluations (`yap.exe eval --vision`, model-evals.md).
 - **Real-app robot** (`e2e-real/snip.real.js`): real monitors, a real drag
   (`yaprobot snipdrag`, only onto the robot's own overlay) over swatches on
   an Edge page on each monitor: every swatch within ±2, the overlay within
@@ -697,8 +780,13 @@ doesn't show it (a screenshot never goes there).
   "Copy every snip to the clipboard"); a true capture of
   a window alone (an occluded one: WGC `CreateForWindow`) — Space picks
   what's on screen in its frame; the window pick's child controls.
-- **Phase 3**: the on-device model reading images (Qwen3.5-4B's projector,
-  `--mmproj`), vision detection for Ollama / LM Studio / llama-server.
+- **Phase 3, left**: projectors for the other Qwen3.5 sizes (0.8B, 2B, 9B:
+  bartowski's repos have them, untried) and a GGUF of the person's own
+  (its `mmproj-…` beside it); vision detection for Ollama / LM Studio /
+  llama-server (they're "not known": Chat lets them try); a "Loading the
+  screenshot reader…" line in Chat while the model restarts with it (the
+  usual "Still working…" after 8 s says so for now); not yet tried by hand
+  in the dev build (the e2e suite drives a stand-in sidecar).
 - Snips in the Voice Assistant: done 2026-10-25 (a waiting screenshot goes
   with a spoken question; after saying "snip" Yap listens). Not yet tried
   by hand with a real microphone: the start chime after the snip, either

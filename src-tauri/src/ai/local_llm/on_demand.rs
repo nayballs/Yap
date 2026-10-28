@@ -410,6 +410,8 @@ pub fn init(app: &AppHandle) {
                 setting_mins = cfg.local_model_idle_mins,
                 "On-device model unused for a while: freeing its memory (it loads again when needed)"
             );
+            // Its next load (a dictation's, likely) is without the projector.
+            super::vision::forget();
             super::stop();
             changed();
         }

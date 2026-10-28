@@ -425,6 +425,9 @@ pub struct Status {
     pub images: Option<bool>,
     /// When it can't: the model to switch to, the same provider first.
     pub images_switch: Option<crate::snip::vision::Switch>,
+    /// When it's the on-device model and it can't yet: its projector to
+    /// download, or switch back on ("Read screenshots on this PC").
+    pub images_local: Option<crate::snip::vision::LocalOffer>,
 }
 
 pub fn status(cfg: &YapConfig, scope: Scope, on_device: &OnDevice) -> Status {
@@ -445,6 +448,9 @@ pub fn status(cfg: &YapConfig, scope: Scope, on_device: &OnDevice) -> Status {
     let images = model.as_ref().and_then(|m| crate::snip::vision::reads_images(&m.provider, &m.id));
     let images_switch = (images == Some(false))
         .then(|| crate::snip::vision::suggest(model.as_ref().map(|m| m.provider.as_str()).unwrap_or(""), &keyed_providers(cfg)))
+        .flatten();
+    let images_local = (images == Some(false))
+        .then(|| model.as_ref().and_then(|m| crate::snip::vision::local_offer(&m.provider, &m.id)))
         .flatten();
     Status {
         scope: scope.key(),
@@ -468,6 +474,7 @@ pub fn status(cfg: &YapConfig, scope: Scope, on_device: &OnDevice) -> Status {
         context,
         images,
         images_switch,
+        images_local,
     }
 }
 
