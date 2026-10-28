@@ -205,7 +205,7 @@ pub fn run() {
         builder.plugin(
             tauri_plugin_window_state::Builder::default()
                 .with_state_flags(shell::window::window_state_flags())
-                .with_denylist(&["overlay", "onboarding", "notepad", "split-preview"])
+                .with_denylist(&["overlay", "onboarding", "notepad", "split-preview", "quick-note"])
                 .build(),
         )
     };
@@ -274,6 +274,7 @@ pub fn run() {
             dictation::commands::configure_snip_hotkey,
             dictation::commands::configure_paste_last_hotkey,
             dictation::commands::configure_copy_last_hotkey,
+            dictation::commands::configure_quick_note_hotkey,
             dictation::commands::configure_more_hotkeys,
             #[cfg(debug_assertions)]
             dictation::commands::e2e_hotkey_bindings,
@@ -463,6 +464,13 @@ pub fn run() {
             meetings::notepad::notepad_split,
             meetings::notepad::notepad_split_preview,
             meetings::notepad::notepad_consent_message,
+            notes::quick_note::quick_note_toggle,
+            notes::quick_note::quick_note_open,
+            notes::quick_note::quick_note_hide,
+            notes::quick_note::quick_note_state,
+            notes::quick_note::quick_note_save,
+            notes::quick_note::quick_note_new,
+            notes::quick_note::quick_note_dictate,
             calls::meeting_guard::meeting_shortcut,
             calls::meeting_guard::meeting_keep_going,
             calls::meeting_guard::meeting_limit_status,
@@ -651,6 +659,10 @@ pub fn run() {
             #[cfg(debug_assertions)]
             dictation::commands::e2e_chat_dictation,
             #[cfg(debug_assertions)]
+            notes::quick_note::e2e_quick_note_dictation,
+            #[cfg(debug_assertions)]
+            shell::tray::e2e_tray,
+            #[cfg(debug_assertions)]
             dictation::commands::e2e_dictation,
             #[cfg(debug_assertions)]
             chat::assistant::e2e_assistant_ask,
@@ -771,6 +783,8 @@ pub fn run() {
             // default, never a clash).
             dictation::input_hook::configure_paste_last_from(&cfg);
             dictation::input_hook::configure_copy_last_from(&cfg);
+            // Quick note (notes/quick_note.rs; unbound by default, never a clash).
+            dictation::input_hook::configure_quick_note_from(&cfg);
             // More shortcuts for each ("+ Add another"; giving way to all of these).
             dictation::input_hook::configure_more_from(&cfg);
             // Language shortcuts (My languages, languages.rs; none by
@@ -977,6 +991,10 @@ pub fn run() {
             handle.listen("paste-last-key-pressed", move |_| pasting::last::paste_soon(&paste_last_handle));
             let copy_last_handle = handle.clone();
             handle.listen("copy-last-key-pressed", move |_| pasting::last::copy_soon(&copy_last_handle));
+            // Quick note (notes/quick_note.rs): up on the main thread, or
+            // away while it's in front.
+            let quick_note_handle = handle.clone();
+            handle.listen("quick-note-key-pressed", move |_| notes::quick_note::toggle_soon(&quick_note_handle));
             snip::init(&handle);
 
             // A saved transform's shortcut (transforms.rs): its slot, run on
@@ -1118,7 +1136,7 @@ pub fn run() {
             // DWM-cloaked show+hide forces those windows to finish
             // initialization while VISIBLE without anything flashing on screen.
             #[cfg(target_os = "windows")]
-            for label in ["onboarding", "settings", "notepad"] {
+            for label in ["onboarding", "settings", "notepad", notes::quick_note::LABEL] {
                 if let Some(w) = app.get_webview_window(label) {
                     shell::window::init_hidden_webview(&w);
                 }
@@ -1129,6 +1147,8 @@ pub fn run() {
             // written in Rust): both follow the recorder's events.
             meetings::notepad::init(&handle);
             meetings::meeting_end::init(&handle);
+            // The quick note: closing it hides it (notes/quick_note.rs).
+            notes::quick_note::init(&handle);
             // Memory: its events, and reading quiet chats for what to
             // remember (memory.rs).
             memory::init(&handle);

@@ -15,6 +15,7 @@ kind, a folder each:
 | `views/` | The main window: `ControlPanel.svelte` (sidebar, title bar, the Settings modal, toasts) and its views. A view with parts of its own has a folder: `home/` (`HomeView`, `homeData.js`), `chat/`, `notes/`, `integrations/` (`IntegrationsView`, `CalendarLinkCard`, `McpLinkCard`), `dictionary/` (`DictionaryView`, `ImportPreview`, `dictionaryList.js`, `dictionaryFile.js`), `insights/` (`InsightsView`, `AiUsageCard`; 2026-10-25); the rest are one file (`UploadView`, `MeetingsView`, `TasksView`) |
 | `settings/` | The Settings modal: `Settings.svelte`, its pages and every part only Settings uses (the module map: [frontend-settings.md](./frontend-settings.md#the-module-map-split-2026-10-24)) |
 | `notepad/` | The meeting notepad window, and its split-screen preview (`SplitPreview.svelte`) |
+| `quicknote/` | The quick-note window (2026-10-28, `notes/quick_note.rs`): `QuickNote.svelte` (the note, saved as typed one save at a time; New note, Open in Notes, Esc; a dictation at the cursor; the in-page hotkeys) and `quickNote.js` (pure: where a dictation goes, the status line). Its icons are the notepad's `NotepadIcon` |
 | `onboarding/` | The first-run window |
 | `bar/` | The Yap bar window: `Overlay.svelte` (its page) and its cards |
 | `components/` | What more than one window or view draws: `BriefView`, `SpeakerMenu`, `SpeakerCard`, `MeetingJob`, `FailedChunk`, `CallAppIcon`, `CalendarMark`, `LocalContext`, `ConnectCalendarDialog` |

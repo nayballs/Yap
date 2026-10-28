@@ -9,7 +9,9 @@ The full stack list, the app's entry and plumbing (`lib.rs`, the tray, context m
 - **Shell:** [Tauri 2](https://tauri.app) (Rust backend + webview frontend).
 - **Frontend:** Svelte 5 + Vite 6 (`src/`). Windows: **settings** (the main
   ControlPanel), **onboarding**, **notepad** (the meeting notepad, docked to
-  the screen edge while a meeting records), **overlay** (since 2026-10-05 the
+  the screen edge while a meeting records), **quick-note** (the quick note,
+  2026-10-28: a small floating window on its own shortcut,
+  `notes/quick_note.rs`, [notes.md](./notes.md#the-quick-note-notesquick_noters)), **overlay** (since 2026-10-05 the
   **Yap bar**, `bar.rs`: an always-there pill, click-through except over what
   it draws; with the bar off, the transcribing overlay as before). The old
   pill window was retired 2026-07-09.
@@ -152,7 +154,7 @@ re-exported by the module, except `local_llm`'s, which callers name
   ai-models.md).
   `shutdown_cleanup()` (sidecar, bridge, other apps' sound back — `mute::restore_all`) runs on `RunEvent::Exit`
   AND from the updater's pre-install hook. Clears ort's 0-byte `DirectML.dll` stub (`stt::fix_directml_stub`).
-  Gives the hidden settings/onboarding webviews a one-shot **DWM-cloaked** show+hide
+  Gives the hidden settings/onboarding/notepad/quick-note webviews a one-shot **DWM-cloaked** show+hide
   at startup (`init_hidden_webview`, `shell/window.rs` — WebView2 created-hidden workaround). ⚠ Never
   swap the cloak for "park off-screen, show+hide, move back": DWM's close animation
   follows the window back on-screen — that flashed the "Welcome to Yap" window on
@@ -174,7 +176,10 @@ re-exported by the module, except `local_llm`'s, which callers name
   back, its selection read aloud with the reading card). All four are in the
   idle menu's cache key (`idle_menu_key`), so the menu rebuilds when they
   change (the reading card coming or going refreshes it); all tray work runs
-  on the main thread.
+  on the main thread. After Snip to Chat, **"New quick note"** (2026-10-28:
+  the quick-note window on a new note, `notes/quick_note.rs`). Debug-only
+  `e2e_tray {click?}` lists the idle menu's items, or chooses one (a test
+  run's tray is never clicked).
 - **`shell/context_menu.rs`** — no browser context menu in Yap's windows: each
   webview's `ContextMenuRequested` (WebView2, via `webview2-com`) keeps only
   the editing commands, or shows nothing (pure `keep`, unit-tested on the
@@ -190,14 +195,15 @@ re-exported by the module, except `local_llm`'s, which callers name
   running (not `TrySuspend`: Settings' auto-save, the notepad and the toast
   policy need their hidden pages live). The Yap bar and the split preview
   are left alone. Debug-only `e2e_webview_memory` reports each window's
-  target (`polish.spec.js`). The main window, onboarding and the notepad
-  are hidden most of the day, each a renderer process of its own.
+  target (`polish.spec.js`, `quick-note.spec.js`). The main window,
+  onboarding, the notepad and the quick note are hidden most of the day,
+  each a renderer process of its own.
 - **`shell/theme.rs`** — the theme (Settings → General → Appearance → Theme,
   2026-10-22) on the Rust side: `resolve` (pure: "dark" / "light" as
   written, else Windows' app mode, `AppsUseLightTheme`), and `apply` gives
   the opaque windows' webviews their page's background
   (`set_background_color`: main and onboarding #f0ede7 / #161410, the
-  notepad #faf9f6 / #1c1a16 — a test keeps them equal to app.css) so
+  notepad and the quick note #faf9f6 / #1c1a16 — a test keeps them equal to app.css) so
   nothing shows WebView2's white before a page paints, plus onboarding's
   Windows title bar dark or light (DWM immersive dark mode). Run at setup
   (before the DWM-cloaked first show), from `save_config`, and on the main
@@ -324,7 +330,7 @@ re-exported by the module, except `local_llm`'s, which callers name
   **undecorated** (custom in-page title bar w/ drag region + caption buttons — see the
   "Custom window chrome" bullet above), hidden, hide-on-close. Size/position/maximized
   persisted by `tauri-plugin-window-state`
-  across launches; overlay, onboarding, notepad, split-preview are excluded from persistence; the VISIBLE flag
+  across launches; overlay, onboarding, notepad, split-preview, quick-note are excluded from persistence; the VISIBLE flag
   is excluded so the window never un-hides on start-hidden launches (see lib.rs window-state
   plugin setup; its flags: `shell/window.rs`). **Fitted to the screen** on every show (`window::fit_to_screen`,
   pure `fit_rect`, unit-tested): a window bigger than its monitor's work area,
@@ -337,13 +343,21 @@ re-exported by the module, except `local_llm`'s, which callers name
   title bar), hidden, **unfocused** (opening it beside a call never takes the
   foreground; only `notepad::open`, a click in Yap, focuses it), hide-on-close
   (`notepad::init`), gets the DWM-cloaked init like settings/onboarding.
+- **quick-note**: the quick note (2026-10-28, `notes/quick_note.rs`),
+  420×380 (min 300×220), undecorated (its header is the drag region),
+  **always on top**, hidden, unfocused (`focus: false`; its shortcut, the
+  tray and Notes show it and `set_focus` it, never in test runs), close =
+  hide (`quick_note::init`), the DWM-cloaked init. Placed by
+  `quick_note.rs` (the bottom right of the cursor's monitor the first time
+  and when it's on another one; else where the person put it), never by
+  the window-state plugin.
 - **split-preview** (not in tauri.conf.json): created on demand by
   `notepad::show_preview` the first time the notepad's split button is
   hovered — transparent, borderless, click-through, unfocusable, always on top,
   skip-taskbar; shown over the call's slot, hidden on pointer leave.
   Placed by `meetings/notepad.rs` (docked right, full height), never by the
   window-state plugin.
-- settings + onboarding + notepad are **created unfocused** (`focus: false`): otherwise wry
+- settings + onboarding + notepad + quick-note are **created unfocused** (`focus: false`): otherwise wry
   `MoveFocus`es each new webview and the hidden windows grab the foreground at launch,
   so typing (and a dictation's paste, which never targets Yap's own windows) can land
   in an invisible window. A
@@ -358,7 +372,7 @@ re-exported by the module, except `local_llm`'s, which callers name
 - **No browser context menu, in any window** (`shell/context_menu.rs`): WebView2's
   own right-click menu (Back, Refresh, Save as, Print, More tools, Inspect) is
   cut down to the editing commands. `on_page_load` (Started) hooks every
-  webview once — settings, onboarding, notepad, overlay, and split-preview
+  webview once — settings, onboarding, notepad, quick-note, overlay, and split-preview
   when it's made — through `ICoreWebView2_11::add_ContextMenuRequested`. The
   pure `keep` keeps undo, redo, cut, copy, paste, paste as plain text
   (`pasteAndMatchStyle`), select all, emoji and the spelling items

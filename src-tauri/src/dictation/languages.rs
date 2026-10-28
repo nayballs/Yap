@@ -473,8 +473,8 @@ pub struct Slot {
 }
 
 /// The input hook's language slots (pure): each shortcut with a key, in
-/// order, unless its key would fire with one of `fixed` (the nine fixed
-/// shortcuts, by name: `transforms::nine_shortcuts`) or an earlier language
+/// order, unless its key would fire with one of `fixed` (the ten fixed
+/// shortcuts, by name: `transforms::action_shortcuts`) or an earlier language
 /// shortcut's — then left
 /// unbound, with what it clashes with. (Saved transforms give way to these:
 /// `transforms::fixed_shortcuts`.)

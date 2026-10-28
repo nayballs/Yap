@@ -1,6 +1,6 @@
 <script>
   // Settings → Shortcuts (2026-10-22 review; OpenWhispr's Hotkeys page): the
-  // nine global shortcuts together (dictation/input_hook.rs), each in Yap's keycaps,
+  // ten global shortcuts together (dictation/input_hook.rs), each in Yap's keycaps,
   // with a clash said where it happens, and "+ Add another" for more keys
   // for the same action (Wispr Flow's, 2026-10-25: `moreHotkeys`). Their own
   // pages show the first one too (Dictation, Commands, Voice Assistant,
@@ -79,6 +79,14 @@
     setting="shortcut-copy-last"
   >
     <SettingsHotkey {cfg} target="copyLastHotkey" clearable more />
+  </Row>
+  <Row
+    label="Quick note"
+    desc="Jot or dictate a note from any app, in a small window. Press it again to put it away"
+    hint="Your quick notes are saved as you type, in the Quick notes folder in Notes. The tray menu has New quick note too."
+    setting="shortcut-quick-note"
+  >
+    <SettingsHotkey {cfg} target="quickNoteHotkey" clearable more />
   </Row>
   <Row label="Meeting notes" desc="Take notes on a call, and press again to stop and summarise" setting="shortcut-meeting">
     <SettingsHotkey {cfg} target="meetingHotkey" clearable more />

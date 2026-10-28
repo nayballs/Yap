@@ -139,6 +139,13 @@ pub fn configure_copy_last_hotkey(spec: String) {
     let _ = crate::dictation::input_hook::configure_copy_last(&spec);
 }
 
+/// Live-apply the Quick note shortcut (`notes/quick_note.rs`; paused while
+/// Settings picks a key, as for the others).
+#[tauri::command]
+pub fn configure_quick_note_hotkey(spec: String) {
+    let _ = crate::dictation::input_hook::configure_quick_note(&spec);
+}
+
 /// Live-apply an action's more shortcuts ("+ Add another"; `target`: its
 /// first shortcut's config key, "hotkey"…): Settings pauses the one being
 /// picked with "", then puts the list back. The save applies them with

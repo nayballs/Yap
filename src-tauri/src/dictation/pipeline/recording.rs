@@ -632,15 +632,19 @@ impl Shared {
             armed,
             CHAT_FOCUSED.load(Ordering::SeqCst),
             hwnd == 0,
+            // The quick note: its window in front, or its mic button.
+            crate::notes::quick_note::takes_dictation(hwnd == 0),
         );
         let assistant = goes == Goes::Assistant;
         // A language shortcut's press: this dictation is in its language
         // (My languages, languages.rs) — not a rewrite or a question.
         crate::dictation::languages::begin_dictation(!edit && !assistant);
         self.to_chat.store(goes == Goes::ChatBox, Ordering::SeqCst);
+        self.to_note.store(goes == Goes::QuickNote, Ordering::SeqCst);
         self.assistant.store(assistant, Ordering::SeqCst);
         match goes {
             Goes::ChatBox => tracing::info!("Dictation: a question for the Chat view"),
+            Goes::QuickNote => tracing::info!("Dictation: into the quick note"),
             // Said before the "recording" state, so the capsule's first
             // frame is the assistant's.
             Goes::Assistant => crate::chat::assistant::listening(&self.app),
@@ -719,7 +723,8 @@ impl Shared {
             Goes::Assistant => (on_demand::scope_provider(&c, "chat") == PROVIDER_ONDEVICE).then_some("assistant"),
             Goes::ChatBox => (on_demand::scope_provider(&c, "chat") == PROVIDER_ONDEVICE).then_some("chat"),
             Goes::Paste if edit => (on_demand::scope_provider(&c, "voiceAgent") == PROVIDER_ONDEVICE).then_some("rewrite"),
-            Goes::Paste => {
+            // A dictation, pasted or into the quick note: cleaned up as any.
+            Goes::Paste | Goes::QuickNote => {
                 let target_hwnd = (hwnd != 0).then_some(hwnd);
                 let app = crate::pasting::text_injector::app_name_for(target_hwnd);
                 let target = crate::ai::cleanup_styles::Target::of_window(target_hwnd, app.as_deref(), kind);

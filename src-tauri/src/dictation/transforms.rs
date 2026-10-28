@@ -13,9 +13,9 @@
 //! moved and deleted. At most [`MAX`].
 //!
 //! **Shortcuts**: `input_hook.rs` keeps [`MAX`] transform slots beside its
-//! nine fixed bindings. [`assign`] (pure) gives each transform with a
+//! ten fixed bindings. [`assign`] (pure) gives each transform with a
 //! shortcut a slot, in list order, unless its key would fire with one of the
-//! nine or an earlier transform's ([`crate::dictation::input_hook::clashes`]): it's
+//! ten or an earlier transform's ([`crate::dictation::input_hook::clashes`]): it's
 //! left unbound and the log says why (Settings refuses such a key in the
 //! first place, `hotkeysClash`). Only the press is used. No in-page fallback:
 //! a transform works on another app's text.
@@ -234,7 +234,7 @@ pub struct Slot {
 
 /// The input hook's transform slots (pure): each listed transform with a
 /// shortcut, in order, unless its key would fire with one of `fixed` (the
-/// nine fixed shortcuts, by name) or an earlier transform's — then left
+/// ten fixed shortcuts, by name) or an earlier transform's — then left
 /// unbound, with what it clashes with.
 pub fn assign(fixed: &[(&str, &str)], transforms: &[Transform]) -> Vec<Slot> {
     let mut out: Vec<Slot> = Vec::new();
@@ -259,10 +259,10 @@ pub fn assign(fixed: &[(&str, &str)], transforms: &[Transform]) -> Vec<Slot> {
     out
 }
 
-/// The nine fixed shortcuts, by name (`input_hook.rs`): what the language
+/// The ten fixed shortcuts, by name (`input_hook.rs`): what the language
 /// shortcuts give way to — each action's first shortcut, then their more
 /// shortcuts ("+ Add another", `moreHotkeys`) under the same names.
-pub fn nine_shortcuts(cfg: &YapConfig) -> Vec<(&'static str, String)> {
+pub fn action_shortcuts(cfg: &YapConfig) -> Vec<(&'static str, String)> {
     use crate::dictation::input_hook::{first_spec, more_specs, FIXED_COUNT, FIXED_NAMES};
     let mut out: Vec<(&'static str, String)> = (0..FIXED_COUNT).map(|i| (FIXED_NAMES[i], first_spec(cfg, i).to_string())).collect();
     for (i, name) in FIXED_NAMES.iter().enumerate() {
@@ -272,10 +272,10 @@ pub fn nine_shortcuts(cfg: &YapConfig) -> Vec<(&'static str, String)> {
 }
 
 /// The shortcuts a transform's gives way to, by name, as [`assign`] takes
-/// them: the nine fixed ones, then the language shortcuts' (My languages,
+/// them: the ten fixed ones, then the language shortcuts' (My languages,
 /// `languages.rs`: a dictation key comes first).
 pub fn fixed_shortcuts(cfg: &YapConfig) -> Vec<(&'static str, String)> {
-    let mut out = nine_shortcuts(cfg);
+    let mut out = action_shortcuts(cfg);
     out.extend(crate::dictation::languages::shortcuts(cfg).into_iter().map(|s| ("language shortcut", s.hotkey)));
     out
 }

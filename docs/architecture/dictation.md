@@ -238,7 +238,7 @@ to **Run again** from Home.
   `on_key` (toggle / push-to-talk gestures; no coaching hints for it) with
   `ASSISTANT_ARMED` set for the press, so the recording it starts is the
   assistant's (`destination(edit, assistant, chat_armed, chat_focused,
-  own_window)` → `Goes::Paste | ChatBox | Assistant`, pure, in
+  own_window, note)` → `Goes::Paste | ChatBox | Assistant | QuickNote`, pure, in
   `capture_target`, which calls `assistant::listening` before "recording");
   `run_stt` hands its transcript, after `apply_corrections` only, to
   `assistant::heard` (`ask_assistant`): no cleanup, Command, paste or
@@ -259,7 +259,15 @@ to **Run again** from Home.
   never edit mode. Such a dictation skips the wake word and the paste:
   `deliver_to_chat` emits `yap-chat-dictation {text, send}` (`send` =
   `tts::sends_by_itself`: "Talk back hands-free" or "press enter" said) and
-  keeps it in history. A `processing` guard blocks
+  keeps it in history. **Dictations for the quick note** (2026-10-28,
+  `to_note`, [notes.md](./notes.md#the-quick-note-notesquick_noters)):
+  while the quick-note window is the one in front, or its mic button asked
+  (`quick_note::takes_dictation`, the `note` of `destination`: after the
+  Chat view's own mic, before a focused chat box), a dictation is the
+  note's — cleaned up as any (no Commands by name), then
+  `deliver_to_note` emits `yap-quick-note-dictation {text, newline}` for
+  its page to put at the cursor; nothing pasted, kept in history; `to_note`
+  lives through a cancel, so Undo lands there too. A `processing` guard blocks
   starting a new recording while one is still transcribing (no overlapping `run_stt`
   / duplicate model load) — the press is ignored, and since 2026-10-25 the
   bar says "Hold on, still transcribing…" (`yap-dictation-busy`, for
@@ -447,7 +455,7 @@ to **Run again** from Home.
   (press = key down w/ required modifiers held, release = key up OR required
   modifier up; chords fire on completion; suppressed keys are excluded from the
   GetAsyncKeyState self-heal — the hook eats them before the key-state table
-  updates). Nine bindings: dictation, edit (`edit-key-*`, Commands' rewrite
+  updates). Ten bindings: dictation, edit (`edit-key-*`, Commands' rewrite
   shortcut), the meeting
   shortcut (`meeting-key-*`, `configure_meeting`; only its press is used —
   `meeting_guard`) and the Voice Assistant's (`assistant-key-*`,
@@ -462,11 +470,14 @@ to **Run again** from Home.
   / `copy-last-key-*`, `configure_paste_last`/`_from`,
   `configure_copy_last`/`_from`; unbound by default, each giving way to
   every shortcut older than it — `older_shortcuts`, `unless_clash`; only
-  the press is used — `pasting/last.rs`, [pasting.md](./pasting.md)). Beside them, **up to 12
+  the press is used — `pasting/last.rs`, [pasting.md](./pasting.md)), then
+  **Quick note** (2026-10-28; `quick-note-key-*`, `configure_quick_note`/`_from`,
+  unbound by default, giving way to all nine older ones; its press only —
+  `notes/quick_note.rs` `toggle_soon`, [notes.md](./notes.md#the-quick-note-notesquick_noters)). Beside them, **up to 12
   saved transforms' shortcuts** (`TRANSFORM_BINDINGS`, a slot each;
   `configure_transforms_from` at setup and every save,
   `transforms::assign` giving each transform with a key a slot in list
-  order unless it would fire with one of the nine or an earlier
+  order unless it would fire with one of the ten or an earlier
   transform's — left unbound, logged; `configure_transform(id, spec)` is
   Settings' pause while a key is picked); a slot's press goes to the
   forwarder as `transform-key-N` and out as one `transform-key-pressed`
@@ -477,14 +488,14 @@ to **Run again** from Home.
   `languages::assign`; their press and release go out as one
   `language-key {slot, pressed, at}` event — `dictation/languages.rs`
   below). **More shortcuts for one action** (2026-10-25, Wispr Flow's "Add
-  another"): each of the nine fixed actions (`FIXED`, indexed by
-  `DICTATION`…`COPY_LAST`, with `FIXED_KEYS` / `FIXED_NAMES` /
+  another"): each of the ten fixed actions (`FIXED`, indexed by
+  `DICTATION`…`QUICK_NOTE`, with `FIXED_KEYS` / `FIXED_NAMES` /
   `FIXED_EVENTS`) has its first shortcut (its old config field) and up to
   `MORE` (3) more (`MORE_BINDINGS`, `config.more_hotkeys`,
   `configure_more_from` at setup and every save; Settings' live pause
   `configure_more` → `configure_more_hotkeys`). `assign_more` (pure): each
   gives way to every first shortcut and earlier more ones — its own
-  action's too —; `transforms::nine_shortcuts` lists them, so language
+  action's too —; `transforms::action_shortcuts` lists them, so language
   shortcuts and transforms give way to them all. An action's keys act as
   one (`handle_binding_event`'s `action`: the press goes out when the first
   goes down, the release when the last comes up). `tidy_more` (at `load`)
@@ -682,7 +693,7 @@ to **Run again** from Home.
   `LanguageShortcut { id, language (code | "auto"), translateTo, hotkey }`,
   at most `MAX_SHORTCUTS` 4): `input_hook.rs`'s four language slots
   (`configure_languages_from`; `assign`, pure: never a key that fires with
-  one of the nine fixed shortcuts (Paste last and Copy last included) or an earlier one; **transforms give way
+  one of the ten fixed shortcuts (Paste last, Copy last and Quick note included) or an earlier one; **transforms give way
   to them**, `transforms::fixed_shortcuts`), press **and release** as
   `language-key {slot, pressed, at}` (`init` → `Pipeline::on_language_key`),
   plus the in-page fallback (`language_key`). A press records exactly as the

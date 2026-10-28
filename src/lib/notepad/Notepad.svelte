@@ -515,6 +515,12 @@
       e.preventDefault();
       e.stopPropagation();
       readPageSelection();
+    } else if (actionMatchesKeydown(e, cfg, 'quickNoteHotkey')) {
+      // The quick note (notes/quick_note.rs) comes up in front.
+      e.preventDefault();
+      e.stopPropagation();
+      flushSave();
+      invoke('quick_note_toggle').catch(() => {});
     } else if (actionMatchesKeydown(e, cfg, 'hotkey')) {
       e.preventDefault();
       e.stopPropagation();

@@ -19,6 +19,8 @@
 //!   while it reads.
 //! - **Transforms** (transforms.rs): a submenu of the saved transforms, run
 //!   on the selection (or the last dictation) in the app you were in.
+//! - **New quick note** (notes/quick_note.rs): the quick-note window on a
+//!   new note.
 //! - **Left-click** opens Settings.
 //!
 //! The tray is rebuilt on every `yap-state` change via [`update_tray`], and on
@@ -246,6 +248,8 @@ fn build_menu(app: &AppHandle, state: &str) -> tauri::Result<Menu<Wry>> {
     };
     // Snip to Chat (snip.rs): drag a box over any screen, into Chat.
     let snip = MenuItem::with_id(app, "snip", "Snip to Chat", true, None::<&str>)?;
+    // The quick-note window on a new note (notes/quick_note.rs).
+    let quick_note = MenuItem::with_id(app, "quick_note", "New quick note", true, None::<&str>)?;
     // Saved transforms (transforms.rs): the selection in the app you were
     // in — or your last dictation there — polished, translated…
     let transforms = Submenu::with_id(app, "transforms_submenu", "Transforms", true)?;
@@ -270,6 +274,7 @@ fn build_menu(app: &AppHandle, state: &str) -> tauri::Result<Menu<Wry>> {
         items.push(&transforms);
     }
     items.push(&snip);
+    items.push(&quick_note);
     items.push(&sep_paste);
     items.push(models.as_ref());
     let sep_settings = sep()?;
@@ -339,6 +344,8 @@ fn on_menu_event(app: &AppHandle, id: &str) {
         "read_stop" => crate::voice::read_aloud::stop(app),
         // Its own thread (snip.rs), after the menu has faded out.
         "snip" => crate::snip::start(app, crate::snip::Origin::Tray),
+        // The quick note on a new note (the menu runs on the main thread).
+        "quick_note" => crate::notes::quick_note::open(app, true),
         // A saved transform (transforms.rs), on its own thread: the app
         // you were in is brought back first.
         other if other.starts_with("transform:") => {
@@ -371,6 +378,30 @@ fn on_menu_event(app: &AppHandle, id: &str) {
         }
         _ => {}
     }
+}
+
+/// Test mode only: the idle menu's items as it's built now (id, text; the
+/// submenus and separators left out) — with `click`, that item chosen
+/// instead, as a click on it does (a test run's tray is never clicked).
+#[cfg(debug_assertions)]
+#[tauri::command]
+pub fn e2e_tray(app: AppHandle, click: Option<String>) -> Result<Vec<(String, String)>, String> {
+    if !crate::shell::e2e::active() {
+        return Err("Only in e2e test mode".to_string());
+    }
+    if let Some(id) = click {
+        on_menu_event(&app, &id);
+        return Ok(Vec::new());
+    }
+    let menu = build_menu(&app, "idle").map_err(|e| e.to_string())?;
+    let items = menu.items().map_err(|e| e.to_string())?;
+    Ok(items
+        .iter()
+        .filter_map(|item| match item {
+            tauri::menu::MenuItemKind::MenuItem(m) => Some((m.id().as_ref().to_string(), m.text().ok()?)),
+            _ => None,
+        })
+        .collect())
 }
 
 /// The active model + installed set + update and call items + whether

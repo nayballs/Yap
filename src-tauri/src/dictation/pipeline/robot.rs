@@ -143,6 +143,16 @@ impl Robot {
         out
     }
 
+    /// [`Robot::dictate_text`] as the quick note's mic would start it: into
+    /// the note at its cursor (`yap-quick-note-dictation`), never pasted.
+    /// (Test mode's `quick_note::e2e_quick_note_dictation`.)
+    pub(crate) async fn dictate_to_quick_note(&self, text: String) -> Result<Delivered, String> {
+        crate::notes::quick_note::arm(true);
+        let out = self.dictate_text(text).await;
+        crate::notes::quick_note::arm(false);
+        out
+    }
+
     /// A question for the **Voice Assistant** without a microphone (test
     /// mode's `assistant::e2e_assistant_ask`): what a press of its shortcut
     /// does — the barge-in, the target, "listening" on the capsule for

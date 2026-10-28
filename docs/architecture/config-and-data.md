@@ -18,11 +18,16 @@
   (`pasteLastHotkey` / `copyLastHotkey`, Paste / Copy last transcript, "" =
   unbound, the default; never a clash — `input_hook::configure_paste_last_from`
   / `configure_copy_last_from` leave one another shortcut has unbound;
-  `pasting/last.rs`), more_hotkeys (`moreHotkeys`, 2026-10-25: **more
+  `pasting/last.rs`), quick_note_hotkey (`quickNoteHotkey`, 2026-10-28: the
+  **Quick note** window from any app, Settings → Shortcuts; "" = unbound,
+  the default; never a clash — `input_hook::configure_quick_note_from`
+  gives way to all nine older shortcuts; `notes/quick_note.rs`. An older Yap
+  sharing the folder drops it, and its `moreHotkeys` entry, on its next
+  save: unbound again, nothing else), more_hotkeys (`moreHotkeys`, 2026-10-25: **more
   shortcuts for one action**, Settings → Shortcuts' "+ Add another" — a map
   from an action's first shortcut's field ("hotkey", "editHotkey",
   "meetingHotkey", "assistantHotkey", "readHotkey", "asSaidHotkey",
-  "snipHotkey", "pasteLastHotkey", "copyLastHotkey") to up to 3 more specs.
+  "snipHotkey", "pasteLastHotkey", "copyLastHotkey", "quickNoteHotkey") to up to 3 more specs.
   The first stays in its own field, so a config from before reads as it
   is (no migration: nothing moved) and an older Yap still finds its key —
   an older Yap's save (the installed nightly sharing the folder with a dev
@@ -46,7 +51,7 @@
   instruction; `hotkey` an input-hook spec or ""; `language` Translate's,
   "Spanish" until picked. Serde default = Yap's five, no shortcuts; at most
   12 run (`transforms::list`: usable ones, each id once). A key that would
-  fire with one of the nine fixed shortcuts or an earlier transform's is
+  fire with one of the ten fixed shortcuts or an earlier transform's is
   left unbound, `transforms::assign`; a language shortcut's too) +
   `auto_transform` / `auto_transform_kind` (**a transform on every
   dictation**, 2026-10-25, Settings → Commands → Transforms: a transform's id,
@@ -58,7 +63,7 @@
   `language_shortcuts` (at most 4 `{id, language, translateTo, hotkey}`:
   `language` a code or "auto" — any of yours —, `translateTo` a code or "" —
   as spoken —, `hotkey` an input-hook spec; a key that would fire with one of
-  the nine fixed shortcuts or an earlier one is left unbound,
+  the ten fixed shortcuts or an earlier one is left unbound,
   `languages::assign`), `language_nudge` ("Tell me when I speak a language I
   didn't pick", on; no `migrate_once` step), mic_order (Settings → Dictation →
   Microphone, 2026-10-25, `dictation/mics.rs`: `[{id, name}]` — the Core

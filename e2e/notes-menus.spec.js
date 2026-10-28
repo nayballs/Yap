@@ -361,7 +361,7 @@ test('WebView2’s own menu: nothing on plain UI, the edit commands in a text fi
   const menus = () => yap.invoke('e2e_context_menus');
   // Every window is hooked.
   const hooks = await menus();
-  for (const label of ['settings', 'onboarding', 'notepad', 'overlay']) {
+  for (const label of ['settings', 'onboarding', 'notepad', 'overlay', 'quick-note']) {
     expect(hooks[label]?.hooked, `${label} hooked`).toBe(true);
   }
   const seen = () => menus().then((m) => m.settings.menus);

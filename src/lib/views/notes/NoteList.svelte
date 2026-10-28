@@ -1,6 +1,7 @@
 <script>
-  // The Notes view's list pane (OpenWhispr's sidebar): New note, Search
-  // notes, Actions; the folders (renamed in place, their right-click and ⋯
+  // The Notes view's list pane (OpenWhispr's sidebar): New note, Quick
+  // note (the quick-note window, notes/quick_note.rs), Search notes,
+  // Actions; the folders (renamed in place, their right-click and ⋯
   // menus: Rename, Delete…); the active folder's notes, newest first, each
   // with its menu (Rename, Move to ▸, Read aloud, Copy as Markdown,
   // Export…, Transcribe again…, Delete…). Every delete asks first.
@@ -255,6 +256,11 @@
     <button class="tool" onclick={notes.newNote}>
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M13.4 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-7.4" /><path d="M18.4 2.6a2 2 0 0 1 2.8 2.8L13 13.6 9 14.6l1-4z" /></svg>
       New note
+    </button>
+    <!-- The quick-note window (notes/quick_note.rs): jot or dictate from any app. -->
+    <button class="tool" title="A small window for a quick note, over any app" onclick={() => invoke('quick_note_open').catch(() => {})}>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15.5 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V8.5z" /><path d="M15 3v6h6" /><path d="M7.5 13h6M7.5 17h4" /></svg>
+      Quick note
     </button>
     <button class="tool" class:on={searchOpen} onclick={toggleSearch}>
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7" /><path d="m21 21-4.3-4.3" /></svg>

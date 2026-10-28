@@ -55,6 +55,23 @@ tables, method and how anyone can run it and send theirs:
 
 ## What works
 
+**The quick note** (2026-10-28, [notes.md](./notes.md#the-quick-note-notesquick_noters)):
+a small floating window on its own shortcut (Settings → Shortcuts, unbound
+by default), the tray's New quick note and the Notes view's Quick note, to
+jot or dictate a note from any app. Saved as you type as an ordinary note
+(the Quick notes folder, its first words as the title; a blank note never
+kept), so Notes, search by meaning and Chat see it; it opens on the last
+quick note changed within a day, else a new one; a dictation with it in
+front goes in at its cursor, cleaned up, never pasted (Undo too). Unit-
+tested (titles, blank notes, what it opens on, placement, an older Yap's
+save, the binding, the dictation's destination) and e2e-tested
+(`quick-note.spec.js`: the shortcut, Esc, autosave, Notes, Open in Notes,
+dictation and Undo, the tray, Settings, a failed save, light and dark).
+Not tried yet on the maintainer's PC: the global shortcut from another app
+(the focus it takes, where it comes up on two monitors), and a real
+dictation's Ctrl+Z (a test run never has the focus, where the text goes in
+by hand).
+
 **Long chats, sized to the model** (2026-10-25,
 [chat-and-assistant.md](./chat-and-assistant.md#long-chats-sized-to-the-model-2026-10-25)):
 Chat, the Voice Assistant and a meeting's Ask threads send their history by

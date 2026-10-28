@@ -483,7 +483,8 @@ pub async fn e2e_dictate_audio(
 
 /// Test mode only: a press-only shortcut as the input hook sends it (a
 /// test run has no hook: it must never see the developer's keys) —
-/// `name` "paste-last" or "copy-last" (`pasting/last.rs`).
+/// `name` "paste-last" or "copy-last" (`pasting/last.rs`), or "quick-note"
+/// (`notes/quick_note.rs`).
 #[cfg(debug_assertions)]
 #[tauri::command]
 pub fn e2e_shortcut(app: AppHandle, name: String) -> Result<(), String> {
@@ -494,6 +495,7 @@ pub fn e2e_shortcut(app: AppHandle, name: String) -> Result<(), String> {
     let event = match name.as_str() {
         "paste-last" => "paste-last-key-pressed",
         "copy-last" => "copy-last-key-pressed",
+        "quick-note" => "quick-note-key-pressed",
         other => return Err(format!("No such shortcut: {other}")),
     };
     tracing::info!(event, "e2e: a shortcut pressed");

@@ -8,7 +8,7 @@
 //
 // The meeting shortcut (Win+Alt+M) goes first: a combo is more specific than
 // a bare dictation key; then the Voice Assistant's shortcut, Read aloud,
-// Snip to Chat, Copy last and the language shortcuts (My languages). Down and up go to
+// Snip to Chat, Copy last, Quick note and the language shortcuts (My languages). Down and up go to
 // `dictation_key` / `assistant_key` / `language_key`, the hook's own paths:
 // the recording mode (and push-to-talk's tap / double-tap) is Rust's to
 // decide.
@@ -62,6 +62,13 @@ export function followHotkeyFallback(getCfg) {
       e.preventDefault();
       e.stopPropagation();
       invoke('copy_last_transcript').catch(() => {});
+      return;
+    }
+    // Quick note (notes/quick_note.rs): its window comes up in front.
+    if (downOn(e, cfg, 'quickNoteHotkey')) {
+      e.preventDefault();
+      e.stopPropagation();
+      invoke('quick_note_toggle').catch(() => {});
       return;
     }
     // A language shortcut (My languages, dictation/languages.rs): a dictation in its

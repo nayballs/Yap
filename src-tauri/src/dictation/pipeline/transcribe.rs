@@ -324,8 +324,13 @@ impl Shared {
                     // cleanup — the agent prompt strips the name + command from
                     // the output. Agent unreachable / no match → normal cleanup.
                     // (Not a question for the Chat view: that already goes to
-                    // the AI, name or no name.)
-                    Ok(text) if !self.to_chat.load(Ordering::SeqCst) && self.wake_word_hit(text.trim()) => {
+                    // the AI, name or no name. Nor the quick note's: a
+                    // Command pastes, and the note takes text, never a paste.)
+                    Ok(text)
+                        if !self.to_chat.load(Ordering::SeqCst)
+                            && !self.to_note.load(Ordering::SeqCst)
+                            && self.wake_word_hit(text.trim()) =>
+                    {
                         tracing::info!("Agent's name heard — running the dictation as a Command");
                         self.drop_kept_audio();
                         self.run_agent(text.trim().to_string(), String::new(), None).await;

@@ -9,7 +9,7 @@
 //! the low memory target, `webview_memory.rs`), the area a resize or
 //! maximise uncovers. Left at WebView2's default (white), a dark Yap would
 //! flash light there. So the opaque windows — the main window, onboarding,
-//! the meeting notepad — get their page's background colour from here: at
+//! the meeting notepad, the quick note — get their page's background colour from here: at
 //! startup (before their DWM-cloaked first show), after every config save,
 //! and when Windows' app mode changes while the theme follows it
 //! (`WindowEvent::ThemeChanged`). The Yap bar and the split preview are
@@ -46,12 +46,13 @@ pub fn resolve(choice: &str, system_dark: bool) -> Theme {
 }
 
 /// The opaque windows and their page's background in each theme (app.css:
-/// the main window and onboarding on `--yap-bg`, the notepad on
-/// `--yap-paper`).
+/// the main window and onboarding on `--yap-bg`, the notepad and the quick
+/// note on `--yap-paper`).
 const OPAQUE: &[(&str, [u8; 3], [u8; 3])] = &[
     ("settings", [0xf0, 0xed, 0xe7], [0x16, 0x14, 0x10]),
     ("onboarding", [0xf0, 0xed, 0xe7], [0x16, 0x14, 0x10]),
     ("notepad", [0xfa, 0xf9, 0xf6], [0x1c, 0x1a, 0x16]),
+    ("quick-note", [0xfa, 0xf9, 0xf6], [0x1c, 0x1a, 0x16]),
 ];
 
 /// The background a window's webview gets in `theme` (None: a transparent
@@ -209,6 +210,7 @@ mod tests {
         assert_eq!(background("onboarding", Theme::Dark), Some([0x16, 0x14, 0x10]));
         assert_eq!(background("notepad", Theme::Dark), Some([0x1c, 0x1a, 0x16]));
         assert_eq!(background("notepad", Theme::Light), Some([0xfa, 0xf9, 0xf6]));
+        assert_eq!(background("quick-note", Theme::Dark), Some([0x1c, 0x1a, 0x16]));
         // Transparent windows: never (an opaque background is the grey box).
         assert_eq!(background("overlay", Theme::Dark), None);
         assert_eq!(background("split-preview", Theme::Dark), None);
