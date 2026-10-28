@@ -33,8 +33,9 @@ mod cleanup;
 mod languages;
 #[cfg(debug_assertions)]
 mod library;
+/// Also `yap.exe dictation-check`'s cleanup server (`dictation/check.rs`).
 #[cfg(debug_assertions)]
-mod local;
+pub(crate) mod local;
 #[cfg(debug_assertions)]
 mod record;
 #[cfg(debug_assertions)]

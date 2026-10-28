@@ -46,5 +46,12 @@ fn main() {
     if std::env::args_os().nth(1).is_some_and(|arg| arg == "partials-dump") {
         std::process::exit(yap_lib::run_partials_dump());
     }
+    // `yap.exe dictation-check collect|run <dir> …` (debug builds): your own
+    // dictations as a test set for speech-to-text and cleanup
+    // (dictation/check.rs). Reads Yap's data; writes only <dir>.
+    #[cfg(debug_assertions)]
+    if std::env::args_os().nth(1).is_some_and(|arg| arg == "dictation-check") {
+        std::process::exit(yap_lib::run_dictation_check());
+    }
     yap_lib::run()
 }

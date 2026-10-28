@@ -122,6 +122,7 @@ One folder per area (an area's `<area>.rs` lists its modules); a big module's pa
 - `dictation/sound.rs` — start/stop chimes; the output device shared with spoken replies.
 - `dictation/mute.rs` / `dictation/media_pause.rs` — silence other apps / pause media while dictating; exact restore.
 - `dictation/history.rs` — local dictation history (with its audio's id and the words as said when cleanup changed them; failed / not pasted / cancelled) and the stats dashboard.
+- `dictation/check.rs` (+ `check/score.rs`) — `yap.exe dictation-check collect|run <dir>` (debug): the person's own dictations as a test set — collected with their audio, replayed through today's speech model (and `--cleanup`), scored (word error rate, a word on repeat, nothing heard, a lost cleanup) against a baseline; reads Yap's data, never writes it.
 
 **Pasting** — [pasting.md](./docs/architecture/pasting.md)
 - `pasting/text_injector.rs` — private, verified clipboard paste with each app's paste keys (a console's own Paste), every `SendInput` checked, a lost paste typed, "Select a text box first", left on the clipboard and said once when it can't land, submit key, re-focus, edit mode's Ctrl+C keeping every clipboard format, Paste last transcript (and as said).
@@ -249,7 +250,7 @@ One folder per area (an area's `<area>.rs` lists its modules); a big module's pa
 - `updates.rs` — background update checks and downloads, announcements, safe install.
 
 **App shell, config, tests** — [app-shell.md](./docs/architecture/app-shell.md), [config-and-data.md](./docs/architecture/config-and-data.md), [build-and-test.md](./docs/architecture/build-and-test.md)
-- `main.rs` — entry; `yap.exe mcp` / `diarize` / `eval` / `bench` / `call-dump` / `snip-dump` / `partials-dump` run before the app starts.
+- `main.rs` — entry; `yap.exe mcp` / `diarize` / `eval` / `bench` / `call-dump` / `snip-dump` / `partials-dump` / `dictation-check` run before the app starts.
 - `shell/bench.rs` (+ `shell/bench/`) — `yap.exe bench` (release builds too): speech, AI cleanup and a cold start timed on this PC and on it held to 4 / 2 threads (emulated), a table + shareable JSON; read only ([`docs/benchmarks.md`](./docs/benchmarks.md), build-and-test.md).
 - `lib.rs` — setup and wiring: the module list, plugins, every command (`generate_handler!`), hotkeys → pipeline, shutdown cleanup.
 - `shell/tray.rs` — tray icon and menu (models, Paste / Copy last transcript, Read selection aloud, Snip to Chat, Record this call, updates).
@@ -350,6 +351,7 @@ the **latest stable** toolchain — keep local Rust current (`rustup update`).
 - `npm run test:real` — real-app robot tests: a robot-mode Yap pastes into real windows the harness opens (`--engines` build: real STT). ⚠ **It takes the keyboard focus for ~2 min** (local only, not CI): say so before running it while the maintainer is at the PC. Guide: [`docs/e2e-tests.md`](./docs/e2e-tests.md) "Real-app robot tests".
 - `npm run privacy:scan` / `npm run test:privacy` — the privacy guard over the whole tree, and its own tests ([build-and-test.md](./docs/architecture/build-and-test.md#the-privacy-guard-scriptsprivacy-guardmjs)).
 - `npm run eval` — model evaluations: real models through Yap's own Chat code, every request logged; use it before changing a prompt, a tool or the default local model. Guide: [`docs/model-evals.md`](./docs/model-evals.md).
+- `yap.exe dictation-check run <dir> --cleanup` (an engines debug build, e.g. `E:\t-real`) — the maintainer's own dictations replayed through speech-to-text and cleanup against a baseline: before pushing any change to either. The set is private (`../yap-private/dictation-tests/`, its README); never copy it here. [build-and-test.md](./docs/architecture/build-and-test.md#your-own-dictations-as-a-test-set-yapexe-dictation-check).
 
 ### The dev → nightly → stable workflow (agreed 2026-10-05)
 **Dev first, nightly for batches.** Every change goes through these steps in order:
@@ -361,7 +363,10 @@ the **latest stable** toolchain — keep local Rust current (`rustup update`).
    the clipboard, terminals/chat apps, the mic path or STT**, also the real-app
    robot tests (`npm run test:real`, + `npm run test:real:build -- --engines` for
    real STT): they paste into real windows, so Claude checks it itself instead of
-   handing the maintainer a checklist (they take the keyboard focus ~1.5 min). Push
+   handing the maintainer a checklist (they take the keyboard focus ~1.5 min). For
+   **speech-to-text or cleanup**, also the maintainer's own dictations
+   (`yap.exe dictation-check collect`, then `run … --cleanup`: nothing flagged or
+   worse than the baseline). Push
    to main: CI and the E2E workflow re-check every push (and the pre-push privacy
    guard every push from here).
 2. **The maintainer tries it in the dev build** ("Yap - Dev" desktop shortcut =

@@ -170,6 +170,45 @@ grabbing the focus mid-run makes Yap refuse (the harness retries a refused paste
 twice). A gap it finds becomes a "known gap: …" test pinning today's result
 until it's fixed (none open now). Guide: [`docs/e2e-tests.md`](../e2e-tests.md) "Real-app robot tests".
 
+## Your own dictations as a test set (`yap.exe dictation-check`)
+
+**`dictation/check.rs`** (+ `check/score.rs`; 2026-10-28, debug builds; `run`
+needs `engines`): real dictations replayed through today's speech model and
+cleanup, for any change to either. The robot's speech specs and the model
+evaluations use made-up audio and stand-in dictations; two bugs only real use
+found (Parakeet's "definitive d d d d d d edition" runs, 27 Oct; a cleanup
+that turned 114 words into "I've.", 28 Oct).
+
+- **`collect <dir> [--from <folder>…]`** copies every dictation Yap still has
+  audio for (`recent-audio/`: a day, or kept) with its history entry into
+  `<dir>/cases/` (`<audio id>.wav` + `.json`: the model, the app, what was
+  heard and pasted then, and `said`, the reference, which starts as what was
+  heard; correct it by hand and set `checked`). Run it every few days or the
+  audio is gone. A case already there is left alone.
+- **`run <dir> [--model <id>] [--cpu] [--cleanup [<local model>]] [--only
+  <id,…>] [--baseline <file>] [--set-baseline]`** transcribes each case (the
+  final pass; the live preview is `partials-dump`'s) and scores it
+  (`score.rs`): the word error rate against `said` (filler sounds left out),
+  and broken output whatever was said — a word 4+ times in a row, more than
+  was said; nothing heard. `--cleanup` then runs each transcript through
+  `cleanup_styles::clean` with the person's settings and the app it went into,
+  on the on-device model (theirs, served by Yap's llamafile for the run,
+  `eval::local`); an error, or an answer that lost the dictation, is flagged.
+  Each run goes to `<dir>/runs/<unix secs>.json` and is compared with
+  `<dir>/baseline.json`: 5 points worse, or a new flag, is a regression.
+  Exit 1 on any flag or regression; the heard and said lines are printed
+  for those.
+- **Read only for Yap**: its history, audio, settings (`config::peek`, never
+  `load`, which may save a migration) and models are read from their files;
+  what its code writes while running (AI usage, network receipts) goes to
+  `%TEMP%\yap-dictation-check` (`portable::use_data_dir`, as `bench` does).
+- **Privacy**: the folder is a person's voice and words. It never goes in
+  this repo; the maintainer's lives in the private docs repo, ignored by git.
+- First run (28 Oct, 20 dictations, 837 words): 0.8% of words wrong against
+  the references, nothing flagged, every cleanup whole (70–100% of the words
+  kept). With the decoder from before 27 Oct put back: "how" 10 times and "d"
+  61 times flagged, both worse than the baseline, exit 1.
+
 ## The benchmark (`yap.exe bench`)
 
 **`shell/bench.rs`** (+ `shell/bench/machine.rs`, `shell/bench/cold.rs`; 2026-10-24): how fast

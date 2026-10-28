@@ -131,6 +131,14 @@ pub fn run_partials_dump() -> i32 {
     dictation::partials::dump::main(std::env::args().skip(2).collect())
 }
 
+/// `yap.exe dictation-check …` (main.rs, debug builds): the person's own
+/// dictations replayed through speech-to-text and cleanup, scored against
+/// what was said (`dictation/check.rs`).
+#[cfg(debug_assertions)]
+pub fn run_dictation_check() -> i32 {
+    dictation::check::main(std::env::args().skip(2).collect())
+}
+
 pub fn run() {
     // Decide portable-vs-installed once, before anything reads the data dir
     // (the file log lives under it).

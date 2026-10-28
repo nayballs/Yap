@@ -7,6 +7,10 @@
 
 pub mod agent_detect;
 pub mod cap;
+/// `yap.exe dictation-check` (debug builds): the person's own dictations as
+/// a test set for speech-to-text and cleanup.
+#[cfg(debug_assertions)]
+pub mod check;
 pub mod coaching;
 pub mod commands;
 pub mod gesture;
