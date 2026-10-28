@@ -257,6 +257,14 @@ The language-model side: the OpenAI-compatible client and its prompts, the on-de
   sentence would have ("Git status." → "git status"), a casual message's
   semicolons as commas (not in code), a very casual one's final full stop.
   **Filler alone** ("um uh", `filler_only`) asks no model: nothing typed.
+  **An answer that lost the dictation is thrown out** (`lost_the_dictation`,
+  2026-10-28): under a quarter of the words said (12 or more, filler sounds
+  left out, counted from the last "scratch that" / "start again" /
+  "never mind"…) is an error, so the words as said go in. A tester's
+  44-second dictation of 114 words came back from the on-device Qwen3.5-4B as
+  "I've." and was pasted; the same request replayed nine times came back
+  whole, and the lowest share of words any other cleanup in their history
+  kept was 68%.
   `clean` is the one call (`pipeline::clean_up`, the model evaluations'
   `--styles`). **The window** (`Target::of_window`, at the paste): its
   process (`text_injector::app_name_for`), the kind read at record start,

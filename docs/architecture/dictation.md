@@ -38,7 +38,8 @@ the command and snippets;
 `text_injector::prepare_dictation` the fitting; `app_kind::submit_key` the
 key). Cleanup is
 best-effort — any error/timeout falls back to the raw transcript, so dictation
-never blocks. It keeps the person's **English spelling** ("Write in my
+never blocks; so does an answer that left out most of what was said
+(`cleanup_styles::lost_the_dictation`, ai-models.md). It keeps the person's **English spelling** ("Write in my
 region's spelling", on, Settings → Language Models → Dictation Cleanup;
 the region is About you's; 2026-10-21): a UK user's
 "color" comes out "colour", a US user's "colour" "color" — one line in

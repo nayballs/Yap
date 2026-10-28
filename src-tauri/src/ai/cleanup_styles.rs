@@ -400,6 +400,40 @@ pub fn filler_only(text: &str) -> bool {
     sound
 }
 
+/// Phrases that take back everything said before them: a cleanup rightly
+/// keeps only what follows, so [`lost_the_dictation`] counts from the last.
+const TAKE_BACKS: &[&str] = &[
+    "scratch that", "scratch all that", "start again", "start over", "never mind", "forget that",
+    "forget all that", "delete that", "delete all that", "ignore that", "ignore all that",
+];
+
+/// [`lost_the_dictation`] judges a dictation of this many words or more.
+const LOST_MIN_WORDS: usize = 12;
+
+/// **Did the cleanup lose the dictation?** Under a quarter of its words in
+/// the answer, of a dictation of [`LOST_MIN_WORDS`] or more (filler sounds
+/// left out; counted from its last "scratch that", [`TAKE_BACKS`]): a
+/// tester's 44-second dictation of 114 words came back from the on-device
+/// Qwen3.5-4B as "I've." and was pasted (2026-10-28; the same request,
+/// replayed nine times, came back whole every time). Then the words as said
+/// go in instead ([`clean`]'s error, the caller's fallback). Pure.
+pub fn lost_the_dictation(raw: &str, cleaned: &str) -> bool {
+    let said: Vec<String> = words_of(raw).into_iter().filter(|w| !FILLERS.contains(&w.as_str())).collect();
+    // From the last take-back on (a phrase that's only part of the
+    // sentence, "never mind the weather", just counts fewer words).
+    let from = TAKE_BACKS
+        .iter()
+        .filter_map(|p| {
+            let p: Vec<&str> = p.split(' ').collect();
+            said.windows(p.len()).rposition(|w| w.iter().zip(&p).all(|(a, b)| a.as_str() == *b)).map(|i| i + p.len())
+        })
+        .max()
+        .unwrap_or(0);
+    let said = said.len() - from;
+    let kept = words_of(cleaned).iter().filter(|w| !FILLERS.contains(&w.as_str())).count();
+    said >= LOST_MIN_WORDS && kept * 4 < said
+}
+
 /// A text without its one final full stop (an ellipsis stays).
 fn drop_full_stop(text: &str) -> String {
     match text.strip_suffix('.') {
@@ -897,6 +931,9 @@ pub async fn clean(
         disable_thinking,
     )
     .await?;
+    if lost_the_dictation(text, &out) {
+        return Err(format!("the answer left out most of the dictation ({} chars back)", out.chars().count()));
+    }
     let fitted = fit(style, text, &out);
     // A list or an email the line asked for, laid out where the model kept
     // it on one line (`cleanup_format::lay_out`).
@@ -1339,6 +1376,38 @@ mod tests {
         for t in ["you know", "um yes", "Okay.", "", "...", "um like this", "er, no"] {
             assert!(!filler_only(t), "{t}");
         }
+    }
+
+    #[test]
+    fn a_cleanup_that_lost_the_dictation_is_caught() {
+        // Like the tester's (2026-10-28; fictional words): a long dictation
+        // back as one word, or nothing.
+        let raw = "I mean for me local stuff is um well it's free do you know what I mean and the cloud ones \
+cost money every month so having a local model that's smart enough is honestly amazing to me";
+        assert!(lost_the_dictation(raw, "I've."));
+        assert!(lost_the_dictation(raw, ""));
+        // A real cleanup, however much it tidies, isn't.
+        assert!(!lost_the_dictation(
+            raw,
+            "For me, local stuff is free, and the cloud ones cost money every month, so a local model that's smart enough is amazing."
+        ));
+        let rambly = "so like I was thinking you know that maybe we could kind of like go to the the the shop and and get some stuff";
+        assert!(!lost_the_dictation(rambly, "Maybe we could go to the shop and get some stuff."));
+        // Filler sounds aren't words said: 13 words and 26 "um"s and "uh"s.
+        let hesitant: Vec<String> = "so the plan is fine by me and we can start on monday".split(' ').map(|w| format!("{w} um uh")).collect();
+        assert!(!lost_the_dictation(&hesitant.join(" "), "The plan's fine by me; we can start Monday."));
+        // Too short to judge.
+        assert!(!lost_the_dictation("yes yes yes yes okay okay okay fine", "Yes, okay, fine."));
+    }
+
+    #[test]
+    fn what_a_take_back_dropped_isnt_counted_lost() {
+        let raw = "dear team I wanted to let you all know that the launch is moving to next month because the \
+supplier is late scratch that the launch is on time";
+        assert!(!lost_the_dictation(raw, "The launch is on time."));
+        // After the take-back it's judged as any dictation is.
+        let long = format!("{raw} and everyone should plan for the review on Friday with the full slides and the budget ready");
+        assert!(lost_the_dictation(&long, "Okay."));
     }
 
     #[test]
