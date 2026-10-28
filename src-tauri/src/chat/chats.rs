@@ -996,6 +996,33 @@ pub fn web_history_note(messages: &[ChatMessage]) -> Option<String> {
     ))
 }
 
+/// **Answers another model wrote** (2026-10-28): the history's answers go
+/// to the model as its own, so after a switch in the model picker Claude
+/// Haiku 5.5 said "I wrote those earlier replies, and the last one was
+/// wrong" of Qwen3.5-4B's (a tester's chat). The line naming the other
+/// models, when an answer in `earlier` was written by one (`model`, as its
+/// chip names it; older answers have none and aren't counted), for the
+/// question's context — never in the answers' text, which a model copies
+/// ([`history_messages`]). `None` when every answer was `now`'s. Pure.
+pub fn other_models_note(earlier: &[ChatMessage], now: &ChatModel) -> Option<String> {
+    let label = |m: &ChatModel| crate::chat::budget::model_label(&m.provider, &m.id, &m.name);
+    let mine = (now.provider.as_str(), label(now));
+    let mut others: Vec<String> = Vec::new();
+    for by in earlier.iter().filter(|m| m.role == "assistant").filter_map(|m| m.model.as_ref()) {
+        let name = label(by);
+        if (by.provider.as_str(), name.clone()) != mine && !others.contains(&name) {
+            others.push(name);
+        }
+    }
+    if others.is_empty() {
+        return None;
+    }
+    Some(format!(
+        "Some earlier answers in this chat were written by another AI model ({}), not by you: the user switched models. Never say you wrote them; if one of them was wrong, say that answer was wrong.",
+        others.join(", ")
+    ))
+}
+
 /// What Yap checks in an answer before it's shown and saved — every model,
 /// every turn — returning the answer and what it had to fix (for the model
 /// evaluations, `eval::post_fix`):
@@ -1326,6 +1353,26 @@ mod tests {
         assert!(note.contains("Yap searched the web to answer: \"When do Arsenal play tonight?\""), "{note}");
         assert!(note.contains("other earlier answers came from your own knowledge"), "{note}");
         assert!(note.contains("never write a list of sources"), "{note}");
+    }
+
+    #[test]
+    fn a_model_is_told_which_answers_another_model_wrote() {
+        let qwen = ChatModel { provider: "ondevice".into(), id: "Qwen_Qwen3.5-4B-Q4_K_M".into(), name: "Qwen3.5 4B".into(), on_this_pc: true };
+        let haiku = ChatModel { provider: "anthropic".into(), id: "claude-haiku-5-5".into(), name: String::new(), on_this_pc: false };
+        let by = |m: &ChatModel, text: &str| ChatMessage { model: Some(m.clone()), ..said("assistant", text) };
+        let msgs = vec![said("user", "What's this?"), by(&qwen, "A trade screen."), said("user", "And this?"), by(&qwen, "Go code.")];
+        // Haiku after the 4B: told, the 4B named once.
+        let note = other_models_note(&msgs, &haiku).unwrap();
+        assert!(note.contains("another AI model (Qwen3.5 4B), not by you"), "{note}");
+        assert!(note.contains("Never say you wrote them"), "{note}");
+        // The same model all along, or answers from before models were kept: nothing.
+        assert_eq!(other_models_note(&msgs, &qwen), None);
+        assert_eq!(other_models_note(&[said("user", "Hi"), said("assistant", "Hello!")], &haiku), None);
+        // Back on the 4B after Haiku: Haiku's answers named.
+        let mut back = msgs.clone();
+        back.push(by(&haiku, "That was the other model."));
+        let note = other_models_note(&back, &qwen).unwrap();
+        assert!(note.contains("(Claude Haiku 5.5)"), "{note}");
     }
 
     #[test]

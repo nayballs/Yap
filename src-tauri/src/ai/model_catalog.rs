@@ -824,7 +824,17 @@ pub fn derive_name(id: &str) -> String {
         let word = if let Some(k) = known(&lower) {
             k.to_string()
         } else if lower.chars().all(|c| c.is_ascii_digit() || c == '.') {
-            t.to_string()
+            // A version split by hyphens joins up: "claude-haiku-5-5" →
+            // "Claude Haiku 5.5" (dates and longer numbers stay apart).
+            let short = |s: &str| (1..=2).contains(&s.len()) && s.bytes().all(|b| b.is_ascii_digit());
+            let mut v = t.to_string();
+            if short(t) {
+                while i + 1 < tokens.len() && short(tokens[i + 1]) {
+                    v = format!("{v}.{}", tokens[i + 1]);
+                    i += 1;
+                }
+            }
+            v
         } else if has_digit && (lower.len() <= 4 || (starts_with_digit && lower.len() <= 5)) {
             // Sizes and short codes: "20b" → "20B", "a4b" → "A4B", "k2" → "K2".
             t.to_ascii_uppercase()
@@ -1974,6 +1984,10 @@ mod tests {
             "Kimi K2 Instruct 0905"
         );
         assert_eq!(derive_name("gemma-4-26b-a4b-it"), "Gemma 4 26B A4B IT");
+        // A version split by hyphens joins up; a date stays apart.
+        assert_eq!(derive_name("claude-haiku-5-5"), "Claude Haiku 5.5");
+        assert_eq!(derive_name("claude-3-5-sonnet-20241022"), "Claude 3.5 Sonnet 20241022");
+        assert_eq!(derive_name("claude-opus-5"), "Claude Opus 5");
         assert_eq!(derive_name("chatgpt-4o-latest"), "ChatGPT-4o Latest");
         assert_eq!(clean_name("OpenAI: GPT-5 Mini"), "GPT-5 Mini");
         assert_eq!(clean_name("Qwen/Qwen3.8-27B"), "Qwen3.8-27B");

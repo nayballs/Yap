@@ -535,6 +535,15 @@ async fn answer_turn(
             }
         }
     }
+    // Answers another model wrote (a switch in the picker): said so, so
+    // this one never claims them (`chats::other_models_note`).
+    if let Some(note) = crate::chat::chats::other_models_note(earlier, &answered_by) {
+        if in_message {
+            context.insert(1.min(context.len()), note);
+        } else {
+            system.insert_str(note_at, &format!("\n\n{note}"));
+        }
+    }
     let history: Vec<(String, String)> = earlier.iter().map(|m| (m.role.clone(), m.text.clone())).collect();
 
     // Streamed to whoever watches: what was shown is kept (a Stop keeps

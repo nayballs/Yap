@@ -80,7 +80,13 @@ The AI Chat surface (conversations, the tool-calling loop and its note tools) an
   to read one of those pages, which `read_page` allows); any other model gets
   one line (in the question's context for a tool model, else the system
   prompt) naming the questions Yap searched the web to answer
-  (`web_history_note`). **Every** system prompt ends with the **About you
+  (`web_history_note`). **Answers another model wrote** (a switch in the
+  model picker; each answer keeps its `model`) are named in one line in the
+  same place (`other_models_note`, 2026-10-28): the history's answers go to
+  the model as its own, so Claude Haiku 5.5, picked after Qwen3.5-4B, said
+  "I wrote those earlier replies, and the last one was wrong" of the 4B's.
+  Never a note in the answers' text (a model copies it, above). **Every**
+  system prompt ends with the **About you
   block** (ai-models.md: where the person is and their English, prices in
   their currency — or a foreign price said as such —, times, units, their
   name and note) — a tool model's without its clock
