@@ -103,6 +103,11 @@ My languages (languages.rs; instead of the scenarios; languages.md):
                            after the language line (in its language, names kept), and a language
                            shortcut's translation (in the target language, nothing answered)
   --languages-phase <p>    before | after: one cleanup phase (a cloud model's tokens)
+Screenshot questions (vision.rs; instead of the scenarios; vision.md):
+  --vision                 each case in evals/vision/cases.json (--only picks them by name or kind)
+                           through Chat's own turn: the screenshot as a picture (a local model's
+                           server gets its projector, --mmproj) and as its text (Windows' OCR)
+  --vision-path <p>        picture | text: one way
 Meeting summaries (summaries.rs; instead of the scenarios; summaries.md):
   --summaries              each meeting in evals/summaries/cases.json (--only picks them by name or
                            language) through the action plan's own call, before (the earlier layout,
@@ -183,6 +188,8 @@ struct Args {
     strength_quick: bool,
     brief: bool,
     transforms: bool,
+    vision: bool,
+    vision_path: Option<&'static str>,
     languages: bool,
     languages_phase: Option<&'static str>,
     summaries: bool,
@@ -294,6 +301,18 @@ fn parse(argv: Vec<String>) -> Result<Args, String> {
             "--strength-quick" => a.strength_quick = true,
             "--brief" => a.brief = true,
             "--transforms" => a.transforms = true,
+            "--vision" => a.vision = true,
+            "--vision-path" => {
+                let p = value()?;
+                a.vision = true;
+                a.vision_path = Some(
+                    super::vision::PATHS
+                        .iter()
+                        .copied()
+                        .find(|x| *x == p)
+                        .ok_or_else(|| format!("--vision-path {}, not {p}", super::vision::PATHS.join("|")))?,
+                );
+            }
             "--languages" => a.languages = true,
             "--languages-phase" => {
                 let p = value()?;
@@ -380,6 +399,7 @@ pub fn main(argv: Vec<String>) -> i32 {
         || args.speakers
         || args.brief
         || args.transforms
+        || args.vision
         || args.languages
         || args.summaries
         || args.search
@@ -698,7 +718,23 @@ async fn prepare(spec: &str, args: &Args, keys: &HashMap<String, String>, run_di
                 args.ctx,
                 if plan.server().mtp { "on" } else { "off" }
             );
-            let server = local::start(&runtime, &gguf, args.ngl, args.ctx, plan, &args.llamafile_args, run_dir, !args.no_warm_up).await?;
+            // Screenshot questions as pictures: the model's projector
+            // (before `--llamafile-arg`s, which may say otherwise).
+            let mut extra = Vec::new();
+            if args.vision && args.vision_path != Some("text") {
+                match local::projector(&gguf, models_dir).await? {
+                    Some(p) => {
+                        println!("  with its projector {}", p.display());
+                        extra.extend(["--mmproj".to_string(), p.to_string_lossy().into_owned()]);
+                        if args.ngl == 0 {
+                            extra.push("--no-mmproj-offload".to_string());
+                        }
+                    }
+                    None => println!("  (no projector Yap offers for this model: its pictures will be refused)"),
+                }
+            }
+            extra.extend(args.llamafile_args.iter().cloned());
+            let server = local::start(&runtime, &gguf, args.ngl, args.ctx, plan, &extra, run_dir, !args.no_warm_up).await?;
             println!("  ready in {:.1} s", server.load_ms as f64 / 1000.0);
             if let Some(w) = &server.warm_up {
                 println!("  warm-up: {} ms{}{}", w.ms, if w.cancelled { " (cancelled)" } else { "" }, w.error.as_deref().map(|e| format!(" — {e}")).unwrap_or_default());
@@ -1447,6 +1483,19 @@ async fn run_all(args: &Args, run_dir: &Path, keys: &HashMap<String, String>, sc
         Vec::new()
     };
     let mut transform_results: Vec<(String, Value)> = Vec::new();
+    let vision_cases = if args.vision {
+        let path = scenarios_dir(args).join("..").join("vision").join("cases.json");
+        match super::vision::load(&path, &args.only) {
+            Ok(c) => Some(c),
+            Err(e) => {
+                eprintln!("{e}");
+                return 2;
+            }
+        }
+    } else {
+        None
+    };
+    let mut vision_results: Vec<(String, Value)> = Vec::new();
     let language_cases = if args.languages {
         let path = scenarios_dir(args).join("..").join("languages").join("cases.json");
         match super::languages::load(&path, &args.only) {
@@ -1696,6 +1745,19 @@ async fn run_all(args: &Args, run_dir: &Path, keys: &HashMap<String, String>, sc
             }
             transform_results.push((m.label.clone(), transforms_result.clone()));
         }
+        let mut vision_result = Value::Null;
+        if let Some(c) = &vision_cases {
+            record::set_config(Some(super::vision::settings(&m.provider, &m.base_url, &m.key, &m.model)));
+            record::set_tools_forced(args.tools);
+            let paths: Vec<&str> = match args.vision_path {
+                Some(p) => vec![p],
+                None => super::vision::PATHS.to_vec(),
+            };
+            println!("  screenshot questions, {} cases ({}) …", c.cases.len(), paths.join(" and "));
+            let ep = super::vision::Endpoint { base_url: &m.base_url, provider: &m.provider, model: &m.model };
+            vision_result = Box::pin(super::vision::run(c, &ep, &paths, args.repeat)).await;
+            vision_results.push((m.label.clone(), vision_result.clone()));
+        }
         let mut languages_result = Value::Null;
         if !language_cases.is_empty() {
             record::set_config(Some(crate::config::YapConfig::default()));
@@ -1765,6 +1827,7 @@ async fn run_all(args: &Args, run_dir: &Path, keys: &HashMap<String, String>, sc
             "bench": bench_result,
             "brief": brief_result,
             "transforms": transforms_result,
+            "vision": vision_result,
             "languages": languages_result,
             "summaries": summaries_result,
             "search": search_result,
@@ -1871,6 +1934,11 @@ async fn run_all(args: &Args, run_dir: &Path, keys: &HashMap<String, String>, sc
                 r["tokens"]
             );
         }
+    }
+    if !vision_results.is_empty() {
+        let md = record::redact(&super::vision::markdown(&vision_results));
+        let _ = std::fs::write(run_dir.join("vision.md"), &md);
+        println!("\n{}", md.split("\n## ").next().unwrap_or(""));
     }
     if !language_results.is_empty() {
         let md = record::redact(&super::languages::markdown(&language_results));

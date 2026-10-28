@@ -17,7 +17,9 @@ const sha256 = (buf) => crypto.createHash('sha256').update(buf).digest('hex');
 export async function startFakeLocalModels(dir, ids = ['qwen3.5-4b', 'qwen2.5-1.5b', 'qwen3.5-2b']) {
   fs.mkdirSync(dir, { recursive: true });
   const bodies = { '/llm/runtime': crypto.randomBytes(64 * 1024) };
-  for (const id of ids) bodies[`/llm/${id}.gguf`] = crypto.randomBytes(4 * 1024 * 1024);
+  // An id's file on the server ("vision:qwen3.5-4b", a projector: no colon in the path).
+  const at = (id) => `/llm/${id.replace(/[^a-z0-9.-]/gi, '-')}.gguf`;
+  for (const id of ids) bodies[at(id)] = crypto.randomBytes(4 * 1024 * 1024);
   const requests = [];
   let gate = null; // { promise, open }
 
@@ -42,7 +44,7 @@ export async function startFakeLocalModels(dir, ids = ['qwen3.5-4b', 'qwen2.5-1.
   await new Promise((r) => server.listen(0, '127.0.0.1', r));
   const base = `http://127.0.0.1:${server.address().port}`;
   const sources = { runtime: { url: `${base}/llm/runtime`, sha256: sha256(bodies['/llm/runtime']) } };
-  for (const id of ids) sources[id] = { url: `${base}/llm/${id}.gguf`, sha256: sha256(bodies[`/llm/${id}.gguf`]) };
+  for (const id of ids) sources[id] = { url: `${base}${at(id)}`, sha256: sha256(bodies[at(id)]) };
   const sourcesFile = path.join(dir, 'llm-sources.json');
   fs.writeFileSync(sourcesFile, JSON.stringify(sources, null, 2));
 

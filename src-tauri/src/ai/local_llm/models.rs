@@ -387,7 +387,7 @@ pub(super) async fn download_for(
 
 /// The whole file checked against its SHA-256, then put in place (a bad
 /// one deleted).
-async fn verify_into(partial: &Path, dest: &Path, expected_sha: &str, stage: &'static str) -> Result<(), String> {
+pub(super) async fn verify_into(partial: &Path, dest: &Path, expected_sha: &str, stage: &'static str) -> Result<(), String> {
     // Verify SHA-256 on a blocking thread (files are hundreds of MB to ~1 GB).
     let verify_path = partial.to_path_buf();
     let expected = expected_sha.to_string();

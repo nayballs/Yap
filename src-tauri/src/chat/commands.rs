@@ -154,6 +154,15 @@ async fn send_turn(
         if crate::snip::vision::reads_images(&provider, &model) == Some(false) {
             return Err(format!("{} ({model})", crate::snip::vision::CANT_READ));
         }
+        // The on-device model loads its projector first: started with it, or
+        // restarted with it once no dictation or answer uses the model
+        // (local_llm/vision.rs). It doesn't: the page's line, as for a refusal.
+        if provider == crate::ai::local_llm::PROVIDER_ONDEVICE {
+            if let Err(e) = crate::ai::local_llm::vision::ensure(app).await {
+                tracing::info!("Chat: the on-device model can't read the screenshot now ({e})");
+                return Err(format!("{} ({model})", crate::snip::vision::COULDNT_READ));
+            }
+        }
         let prepared = crate::snip::turn::prepare(&image_ids, &provider, &base_url).await?;
         tracing::info!(images = prepared.images.len(), "Chat: a question with screenshots");
         (prepared, Some((provider, model)))

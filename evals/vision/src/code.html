@@ -1,0 +1,39 @@
+<!doctype html>
+<!-- A made-up editor with a failing test run in its terminal (Snip to
+     Chat's screenshot evaluations): light text on a dark theme. -->
+<meta charset="utf-8">
+<style>
+  html, body { margin: 0; background: #1e1e1e; }
+  body { width: 1100px; height: 700px; font-family: Consolas, "Courier New", monospace; color: #d4d4d4; font-size: 13px; }
+  .tabs { height: 34px; background: #252526; display: flex; align-items: flex-end; font-family: "Segoe UI", sans-serif; font-size: 13px; }
+  .tab { padding: 8px 16px; color: #969696; }
+  .tab.on { background: #1e1e1e; color: #fff; }
+  .code { padding: 10px 0; line-height: 19px; height: 380px; }
+  .ln { display: inline-block; width: 48px; text-align: right; padding-right: 18px; color: #858585; }
+  .k { color: #569cd6; } .f { color: #dcdcaa; } .s { color: #ce9178; } .v { color: #9cdcfe; } .c { color: #6a9955; }
+  .hl { background: #3a1d1d; }
+  .term { border-top: 1px solid #3c3c3c; height: 266px; padding: 8px 18px; line-height: 19px; }
+  .term .hd { font-family: "Segoe UI", sans-serif; font-size: 11px; color: #cccccc; letter-spacing: .5px; margin-bottom: 6px; }
+  .red { color: #f48771; } .grn { color: #89d185; } .dim { color: #8b8b8b; }
+</style>
+<div class="tabs"><span class="tab on">list.js</span><span class="tab">api.js</span><span class="tab">list.test.js</span></div>
+<div class="code">
+<div><span class="ln">38</span><span class="k">export</span> <span class="k">function</span> <span class="f">renderList</span>(<span class="v">container</span>, <span class="v">data</span>) {</div>
+<div><span class="ln">39</span>  <span class="k">const</span> <span class="v">title</span> = <span class="v">data</span>.<span class="v">title</span> ?? <span class="s">'Untitled'</span>;</div>
+<div><span class="ln">40</span>  <span class="v">container</span>.<span class="f">querySelector</span>(<span class="s">'h2'</span>).<span class="v">textContent</span> = <span class="v">title</span>;</div>
+<div><span class="ln">41</span>  <span class="c">// one row per item</span></div>
+<div class="hl"><span class="ln">42</span>  <span class="k">const</span> <span class="v">rows</span> = <span class="v">data</span>.<span class="v">items</span>.<span class="f">map</span>((<span class="v">item</span>) =&gt; <span class="f">row</span>(<span class="v">item</span>));</div>
+<div><span class="ln">43</span>  <span class="v">container</span>.<span class="f">querySelector</span>(<span class="s">'ul'</span>).<span class="f">replaceChildren</span>(...<span class="v">rows</span>);</div>
+<div><span class="ln">44</span>  <span class="k">return</span> <span class="v">rows</span>.<span class="v">length</span>;</div>
+<div><span class="ln">45</span>}</div>
+</div>
+<div class="term">
+<div class="hd">TERMINAL</div>
+<div class="dim">&gt; npm test</div>
+<div><span class="red">FAIL</span> src/list.test.js</div>
+<div>  ● renderList › shows an empty list</div>
+<div class="red">    TypeError: Cannot read properties of undefined (reading 'map')</div>
+<div class="dim">      at renderList (src/list.js:42:28)</div>
+<div class="dim">      at Object.&lt;anonymous&gt; (src/list.test.js:17:5)</div>
+<div>Tests: <span class="red">1 failed</span>, <span class="grn">11 passed</span>, 12 total</div>
+</div>

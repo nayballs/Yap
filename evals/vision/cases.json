@@ -1,0 +1,79 @@
+[
+  {
+    "name": "receipt-total",
+    "kind": "text",
+    "image": "receipt.png",
+    "question": "What was the total on this receipt, and how much was the almond croissant?",
+    "expect": { "all": [["15.16"], ["3.25"]] }
+  },
+  {
+    "name": "receipt-discount",
+    "kind": "text",
+    "image": "receipt.png",
+    "question": "Did I get a discount? How much?",
+    "expect": { "all": [["1.69"]] }
+  },
+  {
+    "name": "error-explain",
+    "kind": "text",
+    "image": "error.png",
+    "question": "Explain this error",
+    "expect": { "all": [["0x8007003A", "network name", "network path", "network share", "nas-01", "network location"]] }
+  },
+  {
+    "name": "chart-most-fewest",
+    "kind": "visual",
+    "image": "chart.png",
+    "question": "Which month had the most sign-ups, and which had the fewest?",
+    "expect": { "all": [["september"], ["august"]] }
+  },
+  {
+    "name": "chart-july",
+    "kind": "visual",
+    "image": "chart.png",
+    "question": "Roughly how many sign-ups were there in July?",
+    "expect": { "all": [["450", "460", "455", "440", "445", "458", "about 450", "around 450", "470"]] }
+  },
+  {
+    "name": "terms-cancel",
+    "kind": "text",
+    "image": "terms.png",
+    "question": "How much notice do I need to give to cancel my membership?",
+    "expect": { "all": [["30 days", "thirty days", "30 day"]] }
+  },
+  {
+    "name": "terms-card",
+    "kind": "text",
+    "image": "terms.png",
+    "question": "How much does a replacement membership card cost?",
+    "expect": { "all": [["£5", "5 pounds", "five pounds"]] }
+  },
+  {
+    "name": "settings-bluetooth",
+    "kind": "visual",
+    "image": "settings.png",
+    "question": "Is Bluetooth on or off here?",
+    "expect": { "all": [["off"]], "not": ["bluetooth is on", "bluetooth is turned on", "bluetooth is enabled", "it is on", "it's on"] }
+  },
+  {
+    "name": "settings-metered",
+    "kind": "visual",
+    "image": "settings.png",
+    "question": "Is \"Download over metered connections\" switched on?",
+    "expect": { "all": [["no", "off", "not"]], "not": ["yes"] }
+  },
+  {
+    "name": "settings-which-on",
+    "kind": "visual",
+    "image": "settings.png",
+    "question": "Which of these switches are on?",
+    "expect": { "all": [["swift pair"], ["webcam"], ["autoplay"]] }
+  },
+  {
+    "name": "code-error",
+    "kind": "text",
+    "image": "code.png",
+    "question": "What's wrong here, and where?",
+    "expect": { "all": [["undefined"], ["42"], ["items"]] }
+  }
+]

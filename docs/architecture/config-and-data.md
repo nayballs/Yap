@@ -103,7 +103,12 @@
   first use) + `local_model_idle_mins` ("Free its memory after it's unused for": 5 / 15
   (default) / 60, 0 = never) — both 2026-10-25, `ai/local_llm/on_demand.rs`; new fields
   only, so an older Yap sharing the folder drops them on its save and they come back
-  at their defaults (it keeps its own autostart), `cleanup_profiles` (each
+  at their defaults (it keeps its own autostart) + `local_vision` ("Read screenshots on
+  this PC", on by default: the on-device model loads its projector, once it's
+  downloaded, when a screenshot goes to it; off keeps the file and sends screenshots as
+  their text — 2026-10-28, `ai/local_llm/vision.rs`; an older Yap drops it on its save
+  and it's on again, which only matters with the projector downloaded, and an older Yap
+  never loads the projector anyway), `cleanup_profiles` (each
   with an optional per-profile LLM override: provider/base_url/model/api_key — empty
   provider = inherit global; since 2026-10-24 also **styles by app**,
   `ai/cleanup_styles.rs`: a profile with a `category` — "email", "workChat",
@@ -296,6 +301,14 @@
   a model. A download cut off (a dropped connection, Yap closed) leaves
   its `.partial` to resume next time; Cancel deletes it (and the
   `.installing` folder). Safe to delete.
+- **The on-device model's projector** ("Read screenshots on this PC",
+  2026-10-28, `ai/local_llm/vision.rs`): `%APPDATA%/yap/llm/vision/` —
+  `mmproj-Qwen_Qwen3.5-4B-f16.gguf` (641 MiB, bartowski's, SHA-256
+  `659b59dd…`), downloaded only when asked for (Settings → Language Models,
+  or Chat's "can't read images" line), its `.partial` beside it meanwhile;
+  removed with Remove, or with its model's Uninstall. A folder of its own,
+  never among the models (`local_llm::is_model_file` leaves out
+  `mmproj-…` names in `llm/` too). An older Yap ignores it.
 - Speaker models: `%APPDATA%/yap/models/diarization/` — `nemotron-3-diarization/`
   (the GGUF from Hugging Face `nvidia/`, pinned commit) and
   `nemo-speech-0.2.0-cpu/` (NVIDIA's runtime DLLs + `licenses/`) and

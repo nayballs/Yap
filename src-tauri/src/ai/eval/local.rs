@@ -105,6 +105,26 @@ pub async fn model(spec: &str, models_dir: &Path) -> Result<PathBuf, String> {
     ))
 }
 
+/// The projector for `model` (`local_llm::vision::PROJECTORS`), for
+/// `--vision`: the installed app's (`llm/vision/`, read-only) when it's
+/// there, else downloaded (verified) into `models_dir`. `None`: the model
+/// has none Yap offers.
+pub async fn projector(model: &Path, models_dir: &Path) -> Result<Option<PathBuf>, String> {
+    let Some(p) = model.file_name().and_then(|f| f.to_str()).and_then(crate::ai::local_llm::vision::for_model_file) else {
+        return Ok(None);
+    };
+    if let Some(at) = installed_llm_dir().map(|d| d.join(crate::ai::local_llm::vision::DIR).join(p.file)).filter(|p| p.is_file()) {
+        return Ok(Some(at));
+    }
+    let dest = models_dir.join(p.file);
+    if !dest.is_file() {
+        std::fs::create_dir_all(models_dir).map_err(|e| e.to_string())?;
+        println!("Downloading {} into {} …", p.file, models_dir.display());
+        crate::ai::local_llm::models::download_verified(p.url, &dest, p.sha256, "projector", None).await?;
+    }
+    Ok(Some(dest))
+}
+
 /// A running llamafile server.
 pub struct Server {
     child: Option<Child>,

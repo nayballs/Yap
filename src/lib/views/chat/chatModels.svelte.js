@@ -199,8 +199,12 @@ export function localRows(status) {
       inUseWhy: st.inUseNote || '',
       recommended: !!m.recommended,
       tools: m.tools !== false,
+      // It reads screenshots here: its projector downloaded and on
+      // (ai/local_llm/vision.rs).
+      images: m.readsImages ? true : null,
       tags: cap([
         current && tag('use', 'In use'),
+        m.readsImages && imagesTag(true),
         m.recommended && tag('rec', 'Recommended for this PC'),
         m.tools === false && tag('warn', 'no note tools'),
       ]),

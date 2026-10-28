@@ -256,6 +256,9 @@ pub fn run() {
             ai::commands::local_llm_install,
             shell::download::download_cancel,
             ai::commands::local_llm_uninstall,
+            ai::commands::local_vision_install,
+            ai::commands::local_vision_remove,
+            ai::commands::local_vision_set,
             ai::local_llm::local_llm_set_context,
             ai::commands::open_llm_folder,
             ai::commands::get_groq_usage,
@@ -626,6 +629,8 @@ pub fn run() {
             ai::local_llm::on_demand::e2e_local_llm_loads,
             #[cfg(debug_assertions)]
             ai::local_llm::on_demand::e2e_local_llm_idle_ms,
+            #[cfg(debug_assertions)]
+            ai::local_llm::vision::e2e_local_vision,
             #[cfg(debug_assertions)]
             notices::notice::e2e_notice_reset,
             #[cfg(debug_assertions)]
