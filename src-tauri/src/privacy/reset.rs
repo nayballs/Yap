@@ -52,7 +52,7 @@ pub const GOES: &[Part] = &[
 
 /// What a reset keeps, as the dialog names it, and its files.
 pub const STAYS: &[Part] = &[
-    Part { id: "settings", label: "Your settings, dictionary and snippets", files: &["config.json", "dictionary_usage.json"] },
+    Part { id: "settings", label: "Your settings, dictionary and snippets", files: &["config.json", "dictionary_usage.json", "meeting_folders.json"] },
     Part { id: "models", label: "Downloaded speech, AI and voice models", files: &["models/", "llm/"] },
     Part { id: "account", label: "Your account sign-in, and your calendars", files: &["calendar.json"] },
     Part {

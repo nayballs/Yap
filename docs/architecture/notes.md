@@ -101,7 +101,14 @@ The AI Notepad: the notes store, folders, the Actions engine, notes you can fix 
   `FolderChange` (the folders, the ids moved); `find_folder` = a folder by
   any case, as the list spells it. Commands `notes_folder_rename(from, to)` /
   `notes_folder_delete(name)` emit `yap-note-changed` (origin "folders") per
-  moved note + `yap-notes-changed`. **Actions** (named
+  moved note + `yap-notes-changed`, and take the meeting folder rules along
+  (renamed: they follow; deleted: they go). **Folder rules for recurring
+  meetings** (2026-10-29, [calendar.md](./calendar.md#day-to-day-2026-10-29),
+  `calendar/filing.rs`, `meeting_folders.json`): the Meetings view's "File
+  this meeting in…" (one note, through `notes::update`, so `folder_chosen`)
+  and "Always file Weekly sync in…" (every note of the calendar series: the
+  earlier ones when asked, each new one as the calendar makes it or a
+  recording ties it to its meeting — never one the person moved). **Actions** (named
   prompt fragments) are built-in protected set (seeded "Generate Notes",
   "Meeting Notes", "Action Items", "Action Plan") + user-created; `note_enhance`
   (`notes/commands.rs`) invokes the **Actions engine**: picks an action by id, runs the

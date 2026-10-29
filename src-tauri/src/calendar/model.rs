@@ -68,6 +68,12 @@ pub struct Event {
     /// You answered "maybe".
     #[serde(default)]
     pub tentative: bool,
+    /// Its join codes (`codes.rs`: "meet:abc-defg-hij", "zoom:81234567890"…),
+    /// from its join link, location, conference data and description: a
+    /// call showing one of them is this meeting. An older Yap saving
+    /// calendar.json drops them until the next sync puts them back.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub codes: Vec<String>,
 }
 
 impl Event {
@@ -176,6 +182,11 @@ pub fn finish(d: Draft) -> Option<Event> {
     if attendees.is_empty() && join.is_none() {
         return None;
     }
+    let service = join.as_ref().map(|j| j.service.id);
+    let codes = super::codes::in_event(
+        join.iter().map(|j| j.url.as_str()).chain(d.link_sources.iter().map(String::as_str)).chain([description_text.as_str()]),
+        service,
+    );
     Some(Event {
         key: d.key,
         connection: d.connection,
@@ -188,6 +199,7 @@ pub fn finish(d: Draft) -> Option<Event> {
         join_url: join.map(|j| j.url),
         description: links::clean_description(&d.description, DESCRIPTION_CHARS),
         attendees,
+        codes,
     })
 }
 
@@ -379,6 +391,26 @@ pub fn is_current(e: &Event, now: i64) -> bool {
 /// join link fit any call), the one starting nearest `now` (back-to-back
 /// meetings: at 14:58 a recording is for the 15:00 one, not the 14:30 one).
 pub fn event_at<'a>(events: &'a [Event], now: i64, service: Option<&str>) -> Option<&'a Event> {
+    event_for_call(events, now, service, None)
+}
+
+/// A call's join code finds its event from this long before the start…
+pub const CODE_EARLY_SECS: i64 = 30 * 60;
+/// …until this long after the end (a meeting running over).
+pub const CODE_LATE_SECS: i64 = 30 * 60;
+
+/// The event a call at `now` belongs to, when its window showed join code
+/// `code` (`codes.rs`): **the code beats time and service** — the event with
+/// that code from [`CODE_EARLY_SECS`] before it starts until
+/// [`CODE_LATE_SECS`] after it ends, the one starting nearest `now` (a
+/// recurring meeting keeps its code every week); else [`event_at`]'s match
+/// by time and service, but never a meeting whose own code of that kind is
+/// another one (an ad-hoc Zoom call during a Zoom meeting isn't it). No
+/// code: time and service alone.
+pub fn event_for_call<'a>(events: &'a [Event], now: i64, service: Option<&str>, code: Option<&str>) -> Option<&'a Event> {
+    if let Some(found) = code.and_then(|c| event_by_code(events, now, c)) {
+        return Some(found);
+    }
     events
         .iter()
         .filter(|e| is_current(e, now))
@@ -386,7 +418,47 @@ pub fn event_at<'a>(events: &'a [Event], now: i64, service: Option<&str>) -> Opt
             (Some(call), Some(link)) => call == link,
             _ => true,
         })
+        .filter(|e| code.is_none_or(|c| !has_other_code(e, c)))
         .min_by_key(|e| ((e.start - now).abs(), e.start))
+}
+
+/// The event whose join codes include `code`, around `now` (see
+/// [`event_for_call`]).
+pub fn event_by_code<'a>(events: &'a [Event], now: i64, code: &str) -> Option<&'a Event> {
+    events
+        .iter()
+        .filter(|e| e.codes.iter().any(|c| c == code))
+        .filter(|e| e.start - CODE_EARLY_SECS <= now && now < e.end.max(e.start + 60) + CODE_LATE_SECS)
+        .min_by_key(|e| ((e.start - now).abs(), e.start))
+}
+
+/// `e` has codes of `code`'s kind, and `code` isn't one of them: it's
+/// another meeting on the same service.
+fn has_other_code(e: &Event, code: &str) -> bool {
+    let kind = super::codes::kind(code);
+    e.codes.iter().any(|c| super::codes::kind(c) == kind) && !e.codes.iter().any(|c| c == code)
+}
+
+/// The meeting the tray names ("Next: Weekly sync in 12 min"), at `now`:
+/// the one being recorded while it's on (`recording`: its key); else one
+/// starting within [`EARLY_SECS`] (the soonest); else one on now (the one
+/// that started last: of two overlapping, the one you most likely went
+/// into); else the next one to start. Never one that's over. The calendar
+/// keeps meetings only — all-day events and ones you declined never get
+/// this far ([`finish`]).
+pub fn next_meeting<'a>(events: &'a [Event], now: i64, recording: Option<&str>) -> Option<&'a Event> {
+    let on = |e: &&Event| e.start <= now && now < e.end.max(e.start + 60);
+    if let Some(e) = recording.and_then(|key| events.iter().filter(on).find(|e| e.key == key)) {
+        return Some(e);
+    }
+    let by_start = |e: &&Event| (e.start, e.end, e.key.clone());
+    if let Some(e) = events.iter().filter(|e| e.start > now && e.start - now <= EARLY_SECS).min_by_key(by_start) {
+        return Some(e);
+    }
+    if let Some(e) = events.iter().filter(on).max_by_key(|e| (e.start, std::cmp::Reverse(e.end), std::cmp::Reverse(e.key.clone()))) {
+        return Some(e);
+    }
+    events.iter().filter(|e| e.start > now).min_by_key(by_start)
 }
 
 /// The id a reminder answer is kept under: the occurrence and its start, so
@@ -481,7 +553,103 @@ mod tests {
             service: service.map(str::to_string),
             description: String::new(),
             tentative: false,
+            codes: Vec::new(),
         }
+    }
+
+    fn coded(key: &str, start: i64, end: i64, service: &str, codes: &[&str]) -> Event {
+        Event { codes: codes.iter().map(|c| c.to_string()).collect(), ..event(key, start, end, Some(service)) }
+    }
+
+    #[test]
+    fn a_join_code_beats_time_and_service() {
+        let now = 10_000;
+        // Two Zoom meetings on now; the call's window shows the second one's id.
+        let sync = coded("sync", now - 300, now + 1_500, "zoom", &["zoom:111222333"]);
+        let interview = coded("interview", now - 120, now + 1_680, "zoom", &["zoom:444555666"]);
+        let events = [sync.clone(), interview];
+        assert_eq!(event_at(&events, now, Some("zoom")).unwrap().key, "interview"); // nearest start
+        assert_eq!(event_for_call(&events, now, Some("zoom"), Some("zoom:111222333")).unwrap().key, "sync");
+        // Joined 25 minutes early, or 20 minutes over: still found by its code…
+        let later = [coded("standup", now + 1_500, now + 2_400, "meet", &["meet:abc-defg-hij"])];
+        assert!(event_at(&later, now, Some("meet")).is_none());
+        assert_eq!(event_for_call(&later, now, Some("meet"), Some("meet:abc-defg-hij")).unwrap().key, "standup");
+        let over = [coded("review", now - 3_000, now - 1_200, "meet", &["meet:abc-defg-hij"])];
+        assert_eq!(event_for_call(&over, now, None, Some("meet:abc-defg-hij")).unwrap().key, "review");
+        // …but not an hour early.
+        let far = [coded("standup", now + 3_600, now + 4_500, "meet", &["meet:abc-defg-hij"])];
+        assert!(event_for_call(&far, now, Some("meet"), Some("meet:abc-defg-hij")).is_none());
+        // An ad-hoc call with another code isn't the meeting on now…
+        assert!(event_for_call(std::slice::from_ref(&sync), now, Some("zoom"), Some("zoom:999888777")).is_none());
+        // …a code of another kind says nothing against it (a Teams id and a
+        // Teams thread can't be compared)…
+        let teams = coded("t", now - 60, now + 1_800, "teams", &["teams:19:meeting_a@thread.v2"]);
+        assert_eq!(event_for_call(&[teams], now, Some("teams"), Some("teamsid:312456789012")).unwrap().key, "t");
+        // …and a meeting with no codes takes the call by time and service.
+        let plain = [event("plain", now - 60, now + 1_800, Some("zoom"))];
+        assert_eq!(event_for_call(&plain, now, Some("zoom"), Some("zoom:999888777")).unwrap().key, "plain");
+        // A recurring meeting keeps its code: today's occurrence, not last week's.
+        let weekly = [
+            coded("w:1", now - 7 * 86_400, now - 7 * 86_400 + 1_800, "meet", &["meet:abc-defg-hij"]),
+            coded("w:2", now + 60, now + 1_860, "meet", &["meet:abc-defg-hij"]),
+        ];
+        assert_eq!(event_for_call(&weekly, now, Some("meet"), Some("meet:abc-defg-hij")).unwrap().key, "w:2");
+    }
+
+    #[test]
+    fn the_next_meeting_for_the_tray() {
+        let now = 50_000;
+        // Nothing, or only meetings that are over: none.
+        assert!(next_meeting(&[], now, None).is_none());
+        assert!(next_meeting(&[event("done", now - 3_600, now - 60, None)], now, None).is_none());
+        // The next one to start.
+        let later = event("later", now + 7_200, now + 9_000, None);
+        let soon = event("soon", now + 1_200, now + 3_000, None);
+        assert_eq!(next_meeting(&[later.clone(), soon.clone()], now, None).unwrap().key, "soon");
+        // One on now beats one later…
+        let on = event("on", now - 600, now + 1_200, None);
+        assert_eq!(next_meeting(&[soon.clone(), on.clone()], now, None).unwrap().key, "on");
+        // …but one starting within 10 minutes beats it (back to back, or an
+        // overlapping 1:1 during a long workshop).
+        let in_five = event("in-five", now + 300, now + 2_100, None);
+        assert_eq!(next_meeting(&[on.clone(), in_five.clone()], now, None).unwrap().key, "in-five");
+        // Two on now (overlapping): the one that started last.
+        let block = event("block", now - 3_600, now + 3_600, None);
+        let one_on_one = event("one-on-one", now - 300, now + 1_500, None);
+        assert_eq!(next_meeting(&[block.clone(), one_on_one.clone()], now, None).unwrap().key, "one-on-one");
+        // The meeting being recorded wins while it's on.
+        assert_eq!(next_meeting(&[block.clone(), one_on_one, in_five], now, Some("block")).unwrap().key, "block");
+        // Two starting together: the shorter, then by key, every time.
+        let a = event("a", now + 900, now + 2_700, None);
+        let b = event("b", now + 900, now + 1_800, None);
+        assert_eq!(next_meeting(&[a, b], now, None).unwrap().key, "b");
+    }
+
+    #[test]
+    fn all_day_and_declined_events_are_never_the_next_meeting() {
+        // Through the feed, as a sync reads it: an all-day offsite and a
+        // meeting you declined come before the one that counts.
+        let cal = ics::parse_text(
+            "BEGIN:VCALENDAR\r\nX-WR-CALNAME:imogen@example.com\r\n\
+             BEGIN:VEVENT\r\nUID:offsite\r\nSUMMARY:Offsite\r\nDTSTART;VALUE=DATE:20261005\r\nDTEND;VALUE=DATE:20261006\r\n\
+             ATTENDEE:mailto:tanay@example.com\r\nATTENDEE:mailto:imogen@example.com\r\nEND:VEVENT\r\n\
+             BEGIN:VEVENT\r\nUID:vendor\r\nSUMMARY:Vendor demo\r\nDTSTART:20261005T090000Z\r\nDTEND:20261005T093000Z\r\n\
+             ATTENDEE:mailto:tanay@example.com\r\nATTENDEE;PARTSTAT=DECLINED:mailto:imogen@example.com\r\nEND:VEVENT\r\n\
+             BEGIN:VEVENT\r\nUID:review\r\nSUMMARY:Design review\r\nDTSTART:20261005T100000Z\r\nDTEND:20261005T103000Z\r\n\
+             ATTENDEE:mailto:tanay@example.com\r\nATTENDEE:mailto:imogen@example.com\r\n\
+             LOCATION:https://meet.google.com/abc-defg-hij\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n",
+        )
+        .unwrap();
+        let resolver = super::super::tz::Resolver::new(&cal, super::super::tz::Zone::Utc);
+        let me = self_addresses(&cal);
+        let events: Vec<Event> = ics::occurrences(&cal, &resolver, 0, i64::MAX / 2)
+            .iter()
+            .filter_map(|o| finish(draft_from_ics("1", o, &me)))
+            .collect();
+        assert_eq!(events.iter().map(|e| e.key.as_str()).collect::<Vec<_>>(), ["1:review"]);
+        assert_eq!(events[0].codes, ["meet:abc-defg-hij"]);
+        let at_8 = 1_791_187_200; // 2026-10-05 08:00 UTC
+        assert_eq!(next_meeting(&events, at_8, None).unwrap().title, "Design review");
     }
 
     #[test]

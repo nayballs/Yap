@@ -418,6 +418,15 @@
   through `saving.rs`). A file of its own, not new fields in notes.json, so an
   older Yap sharing the data folder (it drops notes.json fields it doesn't
   know when it saves) never loses them. A note's go with it.
+- Meeting folder rules: `%APPDATA%/yap/meeting_folders.json` (2026-10-29) —
+  `{rules: {<series id>: {folder, title, createdTs}}}`, "Always file Weekly
+  sync in Design" (`calendar/filing.rs`, through `saving.rs`): the folder
+  each recurring meeting's notes go to (the series: an iCal UID, or
+  Google's recurring event id). A file of its own, not fields in notes.json
+  or calendar.json: an older Yap never reads it, so the notes it makes for
+  the series go to Meetings and stay there. A renamed folder's rules
+  follow it; a deleted one's go. Reset app keeps it (setup, like the
+  folders).
 - Chat screenshots: `%APPDATA%/yap/chat-images/` — `img_<16 hex>.png` for each
   screenshot a question carries (Snip to Chat, `snip/images.rs`); `chats.json`
   keeps only its id, size, bytes and source. Deleted with its conversation, after
@@ -479,7 +488,10 @@
   titles, dates — and a fingerprint), and since 2026-10-25 **busy time of
   your own** (`busy`: events nobody else is on, over the same window, only
   for Chat's calendar tool; an older Yap's save drops it until the next
-  sync) (`calendar.rs`). Chats' answers may cite calendar meetings
+  sync), and since 2026-10-29 each meeting's **join codes** (`codes`:
+  "meet:abc-defg-hij", "zoom:81234567890"…, to match a call by the code its
+  window shows; an older Yap's save drops them until the next sync, and
+  calls match by time and service meanwhile) (`calendar.rs`). Chats' answers may cite calendar meetings
   (`chats.json` sources with `event`, `field: "calendar"`; an older Yap's
   save drops `event`, and such a pill then shows as plain "[1]"). Never a token or a link: those are Credential
   Manager generic credentials `yap-calendar-<1-8>.com.yap.dictation` (Local

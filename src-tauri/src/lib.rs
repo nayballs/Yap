@@ -508,6 +508,10 @@ pub fn run() {
             calendar::calendar_brief,
             calendar::calendar_brief_for_note,
             calendar::calendar_brief_open,
+            calendar::calendar_day,
+            calendar::filing::meeting_file,
+            calendar::filing::meeting_file_past,
+            calendar::filing::meeting_unfile,
             search::commands::search_status,
             search::commands::search_install,
             search::commands::search_set_enabled,
@@ -676,6 +680,8 @@ pub fn run() {
             calls::meeting_guard::e2e_meeting_checkins,
             #[cfg(debug_assertions)]
             calendar::calendar_e2e_opened,
+            #[cfg(debug_assertions)]
+            calendar::calendar_e2e_call_window,
             #[cfg(debug_assertions)]
             shell::commands::e2e_opened_urls,
             #[cfg(debug_assertions)]

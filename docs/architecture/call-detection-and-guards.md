@@ -88,7 +88,12 @@ Noticing a call and offering to take notes, the call apps' own icons, the guard 
   summarises without asking, via `meeting_guard::stop_after_call` (same rule:
   only apps Yap asks about; no window comes up). For the notepad's split
   screen: `call_window_exes()` (the live call's exes) and `title_shows`.
-  **Calendar**: before asking, `calendar::claims_call(app)` (under this
+  **Calendar**: each new call's join code is read first,
+  `calendar::read_call_code(app)` in `on_edges` **before this module's lock**
+  (it looks at windows: Meet's tab title, a meeting's address in a browser;
+  [calendar.md](./calendar.md#day-to-day-2026-10-29)), so the matching below
+  prefers the meeting with that code over time and service. Before
+  asking, `calendar::claims_call(app)` (under this
   module's lock; it takes only the calendar's) — a call during a meeting
   whose reminder card is up or was answered isn't asked about, a snoozed
   card comes back instead; each call start also goes to

@@ -226,7 +226,7 @@ One folder per area (an area's `<area>.rs` lists its modules); a big module's pa
 - `calls/capture.rs` — hides meeting windows from screen capture while recording; every Yap window out of a snip's capture.
 
 **Calendar** — [calendar.md](./docs/architecture/calendar.md) (guide: [`docs/calendar.md`](./docs/calendar.md))
-- `calendar.rs` (+ `calendar/`) — Google/iCal connections, sync, parsing (meetings, and busy time for Chat's calendar tool), reminder cards, notes tie-in, pre-meeting briefs (`calendar/brief.rs`: last time, open items, memory, the agenda, every line cited; the AI's lines checked).
+- `calendar.rs` (+ `calendar/`) — Google/iCal connections, sync, parsing (meetings, and busy time for Chat's calendar tool), reminder cards, notes tie-in, pre-meeting briefs (`calendar/brief.rs`: last time, open items, memory, the agenda, every line cited; the AI's lines checked); a call matched by the join code its window shows (`calendar/codes.rs`, `call_windows.rs`), the next meeting in the tray, recurring meetings' folder rules (`calendar/filing.rs`), the day view's free time and "Done for today".
 
 **Yap bar** — [yap-bar.md](./docs/architecture/yap-bar.md)
 - `bar.rs` — the bar: regions, click-through, never focused, placement, one card at a time.
@@ -259,7 +259,7 @@ One folder per area (an area's `<area>.rs` lists its modules); a big module's pa
 - `main.rs` — entry; `yap.exe mcp` / `diarize` / `eval` / `bench` / `call-dump` / `snip-dump` / `partials-dump` / `dictation-check` run before the app starts.
 - `shell/bench.rs` (+ `shell/bench/`) — `yap.exe bench` (release builds too): speech, AI cleanup and a cold start timed on this PC and on it held to 4 / 2 threads (emulated), a table + shareable JSON; read only ([`docs/benchmarks.md`](./docs/benchmarks.md), build-and-test.md).
 - `lib.rs` — setup and wiring: the module list, plugins, every command (`generate_handler!`), hotkeys → pipeline, shutdown cleanup.
-- `shell/tray.rs` — tray icon and menu (models, Paste / Copy last transcript, Read selection aloud, Snip to Chat, New quick note, Record this call, updates).
+- `shell/tray.rs` — tray icon and menu (models, Paste / Copy last transcript, Read selection aloud, Snip to Chat, New quick note, Record this call, the next meeting, updates).
 - `shell/context_menu.rs` — WebView2's context menu cut to editing commands (Inspect: debug + Shift).
 - `shell/procs.rs` — process lineage; the kill-on-close job so helpers never outlive Yap.
 - `shell/download.rs` — every big download (models, Kokoro, the speaker and search engines): resume, speed and time left, Cancel (`download_cancel`), no half file left.
@@ -425,7 +425,7 @@ Installer, channels and notes: [updates-and-release.md](./docs/architecture/upda
 
 Everything lives in `%APPDATA%/yap/` (portable: `<exe>/Data/`): `config.json`,
 `models/` (speech; `diarization/`, `tts/`, `search/`), `llm/` (on-device GGUFs; `vision/` their projectors), `history.json`,
-`notes.json`, `tasks.json` (tasks the person added or archived), `chats.json`, `calendar.json`, `updates.json`, `model_catalog.json`,
+`notes.json`, `tasks.json` (tasks the person added or archived), `meeting_folders.json` (recurring meetings' folders), `chats.json`, `calendar.json`, `updates.json`, `model_catalog.json`,
 `groq_usage.json`, `ai_usage.json` (every AI call's tokens, 90 days, counts only), `dictionary_usage.json`, `hints.json`, `mic_tips.json` (the mic tips shown), `word_suggestions.json`, `snippet_suggestions.json`,
 `language_nudges.json` (the "You spoke French" answers), `notices.json`, `memory.json` (what Yap remembers about you), `chat-images/` (Chat's screenshots, Snip to Chat), `connections.json` (a week of network receipts: hosts and purposes, never content), `quieted_apps.json`
 (only mid-dictation), `stt_speed.json` (each model's device timings),

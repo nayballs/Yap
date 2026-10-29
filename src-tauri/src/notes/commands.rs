@@ -238,6 +238,7 @@ pub fn notes_folder_create(name: String) -> Result<Vec<String>, String> {
 #[tauri::command]
 pub fn notes_folder_rename(app: AppHandle, from: String, to: String) -> Result<Vec<String>, String> {
     let change = crate::notes::folder_rename(&from, &to)?;
+    crate::calendar::filing::folder_renamed(&from, &to);
     folders_changed(&app, &change);
     crate::notes::saved()?;
     Ok(change.folders)
@@ -248,6 +249,7 @@ pub fn notes_folder_rename(app: AppHandle, from: String, to: String) -> Result<V
 #[tauri::command]
 pub fn notes_folder_delete(app: AppHandle, name: String) -> Result<Vec<String>, String> {
     let change = crate::notes::folder_delete(&name)?;
+    crate::calendar::filing::folder_deleted(&name);
     folders_changed(&app, &change);
     crate::notes::saved()?;
     Ok(change.folders)

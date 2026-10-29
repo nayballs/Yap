@@ -15,6 +15,11 @@
   // meetings" on, each meeting still to come has a Brief button that
   // unfolds its pre-meeting brief under the row (calendar/brief.rs: made
   // now if need be; its summary follows), every line linked to its note.
+  // Today shows the free time between meetings ("45 min free", busy time of
+  // your own left out) and, once the day's last meeting is over, "Done for
+  // today": today's meetings, their open tasks, and the ones without notes
+  // (`calendar_day`). A past meeting's menu files it in a folder, or every
+  // meeting of its series (calendar/filing.rs).
   import { invoke } from '@tauri-apps/api/core';
   import { listen } from '@tauri-apps/api/event';
   import { onMount } from 'svelte';
@@ -29,6 +34,9 @@
   import { copyText } from '../core/itemMenus.js';
   import { noteMarkdown } from '../core/notepadText.js';
   import { meetingAudio, refreshAudio, exportAudio, initMeetingAudio, findSpeakers, runningJob, jobLine, cancelJob } from '../stores/meetingAudio.svelte.js';
+  import { showSaveError } from '../notices/saveErrors.js';
+  import { taskRef } from '../core/notepadText.js';
+  import { setTask } from '../core/noteEdits.js';
 
   // `onnavigate(view)` switches the main window's view; `onopensettings(section)`;
   // `onopennote({id, line, ts, field})` opens a moment of a meeting or note
@@ -98,6 +106,153 @@
 
   function live(ev) {
     return now >= ev.start - EARLY && now < ev.end;
+  }
+
+  // ---- Free time between today's meetings ----
+  const MIN_FREE = 15 * 60; // shorter gaps aren't worth a line
+
+  /** Seconds of [from, to) not in your own busy time (calendar.busy). */
+  function freeBetween(from, to) {
+    let free = to - from;
+    const spans = (calendar.busy || [])
+      .map((b) => [Math.max(b.start, from), Math.min(b.end, to)])
+      .filter(([a, b]) => b > a)
+      .sort((x, y) => x[0] - y[0]);
+    let upTo = from;
+    for (const [a, b] of spans) {
+      const start = Math.max(a, upTo);
+      if (b > start) free -= b - start;
+      upTo = Math.max(upTo, b);
+    }
+    return free;
+  }
+
+  /** The free time before today's row `i` (after every row above it ends, from now on). */
+  function gapBefore(list, i) {
+    if (i === 0) return 0;
+    const after = Math.max(now, ...list.slice(0, i).map((e) => e.end));
+    const free = list[i].start > after ? freeBetween(after, list[i].start) : 0;
+    return free >= MIN_FREE ? free : 0;
+  }
+
+  /** "45 min free", "1 h 30 min free", "2 h free". */
+  function freeText(secs) {
+    const mins = Math.round(secs / 60);
+    if (mins < 60) return `${mins} min free`;
+    const h = Math.floor(mins / 60);
+    const m = mins % 60;
+    return m ? `${h} h ${m} min free` : `${h} h free`;
+  }
+
+  // ---- "Done for today" (calendar.rs `calendar_day`) ----
+  // { meetings: [{ key, title, start, end, noteId, hasNotes, tasks }], pending }
+  let day = $state({ meetings: [], pending: 0 });
+  async function refreshDay() {
+    if (!connected) return;
+    try {
+      day = (await invoke('calendar_day')) || { meetings: [], pending: 0 };
+    } catch {
+      day = { meetings: [], pending: 0 };
+    }
+  }
+  const dayDone = $derived(connected && todays.length === 0 && day.pending === 0 && day.meetings.length > 0);
+  const openTasks = $derived(day.meetings.reduce((n, m) => n + m.tasks.length, 0));
+  const noNotes = $derived(day.meetings.filter((m) => !m.hasNotes).length);
+  // The last meeting ending (or a sync) brings the wrap-up up to date: a
+  // number, so the clock's tick alone doesn't ask again.
+  const todayCount = $derived(todays.length);
+  $effect(() => {
+    void todayCount;
+    void calendar.events;
+    refreshDay();
+  });
+
+  /** "1 open task", "3 meetings". */
+  const count = (n, one, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
+
+  /** Tick an open task in the wrap-up: done, it leaves the list. */
+  async function tickTask(m, t) {
+    m.tasks = m.tasks.filter((x) => x !== t);
+    try {
+      if (t.own != null) await invoke('tasks_set', { items: [taskRef(m.noteId, t)], done: true, origin: 'meetings' });
+      else await setTask(m.noteId, { line: t.line, text: t.text, done: true }, 'meetings');
+    } catch (e) {
+      if (!showSaveError(e)) toast({ title: "Couldn't tick the task", description: String(e), variant: 'destructive' });
+    }
+    refreshDay();
+  }
+
+  /** A meeting of today's without a note: its note, made now. */
+  async function addNotes(m) {
+    try {
+      const id = await invoke('calendar_event', { key: m.key, action: 'open' });
+      if (id != null) openNote(id);
+    } catch (e) {
+      toast({ title: "Couldn't open its note", description: String(e), variant: 'destructive' });
+    }
+  }
+
+  // ---- Folders for meeting notes (calendar/filing.rs) ----
+  let folders = $state([]);
+  async function refreshFolders() {
+    try {
+      folders = (await invoke('notes_folders')) || [];
+    } catch {
+      folders = [];
+    }
+  }
+
+  /** "Weekly sync", cut for a menu line. */
+  const shortName = (s) => (s.length > 32 ? `${s.slice(0, 31).trimEnd()}…` : s);
+
+  /**
+   * File past meeting `n` in `folder`: just this note, or (`series`) every
+   * note of its series from now on — then ask about the earlier ones.
+   */
+  async function fileIn(n, folder, series) {
+    let r;
+    try {
+      r = await invoke('meeting_file', { noteId: n.id, folder, series });
+    } catch (e) {
+      if (!showSaveError(e)) toast({ title: "Couldn't file the meeting", description: String(e), variant: 'destructive' });
+      return;
+    }
+    await refreshPast();
+    if (!series) {
+      toast({ title: `Filed in ${r.folder}` });
+      return;
+    }
+    toast({ title: `New “${r.series}” notes go to ${r.folder}` });
+    if (r.others > 0) {
+      askConfirm({
+        title: `Move the earlier “${shortName(r.series)}” notes too?`,
+        body: `${count(r.others, 'earlier note')} of this meeting ${r.others === 1 ? "isn't" : "aren't"} in ${r.folder}. New ones go there either way.`,
+        confirmLabel: 'Move them',
+        busyLabel: 'Moving…',
+        danger: false,
+        returnFocus: pastEls[n.id],
+        run: async () => {
+          try {
+            const moved = await invoke('meeting_file_past', { noteId: n.id });
+            toast({ title: `Moved ${count(moved, 'note')} to ${r.folder}` });
+            await refreshPast();
+          } catch (e) {
+            toast({ title: "Couldn't move them", description: String(e), variant: 'destructive' });
+            return false;
+          }
+        },
+      });
+    }
+  }
+
+  async function unfile(n) {
+    try {
+      await invoke('meeting_unfile', { noteId: n.id });
+      toast({ title: `New “${n.filing.series}” notes go to Meetings again` });
+      await refreshPast();
+    } catch (e) {
+      toast({ title: "Couldn't change that", description: String(e), variant: 'destructive' });
+    }
   }
 
   // ---- Briefs (calendar.svelte.js `loadBrief`) ----
@@ -249,6 +404,7 @@
         !n.hasPlan && !n.recording && n.hasTalk
           ? { label: 'Generate summary', icon: 'sparkle', onselect: () => generate(n) }
           : null,
+        ...filingItems(n),
         { separator: true },
         { label: 'Copy as Markdown', icon: 'copy', onselect: () => copyMeeting(n.id) },
         // The speaker engine run again over its audio (speakers/rerun.rs):
@@ -281,6 +437,34 @@
       { label: `Meeting note ${title}`, row: pastEls[n.id] }
     );
   }
+  /**
+   * A past meeting's folder items: "File this meeting in ▸" (the folders,
+   * its own ticked), and for a recurring meeting "Always file “Weekly sync”
+   * in ▸" (its series' folder ticked) and, with a rule, a way to stop it.
+   */
+  function filingItems(n) {
+    const f = n.filing || {};
+    const here = f.folder || 'Personal';
+    const same = (a, b) => (a || '').toLowerCase() === (b || '').toLowerCase();
+    const list = folders.length ? folders : [here];
+    const items = [
+      {
+        label: 'File this meeting in',
+        icon: 'folder',
+        items: list.map((name) => ({ label: name, checked: same(name, here), disabled: same(name, here), onselect: () => fileIn(n, name, false) })),
+      },
+    ];
+    if (f.series) {
+      items.push({
+        label: `Always file “${shortName(f.series)}” in`,
+        icon: 'folder',
+        items: list.map((name) => ({ label: name, checked: same(name, f.rule), disabled: same(name, f.rule), onselect: () => fileIn(n, name, true) })),
+      });
+      if (f.rule) items.push({ label: `Stop filing it in ${f.rule}`, icon: 'unlink', onselect: () => unfile(n) });
+    }
+    return items;
+  }
+
   /** "Export audio…" on a past meeting (its audio looked up first). */
   async function exportPast(n, separate) {
     await refreshAudio(n.id);
@@ -342,6 +526,7 @@
 
   onMount(() => {
     refreshPast();
+    refreshFolders();
     // A past meeting's job (Find speakers, Transcribe again) on its row.
     initMeetingAudio();
     invoke('meeting_state')
@@ -358,7 +543,13 @@
       meeting = e.payload || { recording: false };
       refreshPast();
     }).then((u) => uns.push(u));
-    listen('yap-notes-changed', () => refreshPast()).then((u) => uns.push(u));
+    listen('yap-notes-changed', () => {
+      refreshPast();
+      refreshFolders();
+      refreshDay();
+    }).then((u) => uns.push(u));
+    // A task ticked elsewhere leaves the wrap-up's list.
+    listen('yap-tasks-changed', () => refreshDay()).then((u) => uns.push(u));
     const tick = setInterval(() => (now = Date.now() / 1000), 15_000);
     const cycle = setInterval(() => {
       if (!askText) askIndex = (askIndex + 1) % ASK_EXAMPLES.length;
@@ -505,11 +696,59 @@
             <p class="e1">No meetings found</p>
             <button class="ink connect" onclick={openConnectDialog}>Connect calendar</button>
           </div>
+        {:else if dayDone}
+          <!-- After the day's last meeting: what it left you with. -->
+          <div class="wrapup" role="region" aria-labelledby="mt-done">
+            <div class="wraphead">
+              <h3 id="mt-done">Done for today</h3>
+              <span class="wrapsum">
+                {count(day.meetings.length, 'meeting')}{openTasks ? ` · ${count(openTasks, 'open task')}` : ''}{noNotes ? ` · ${noNotes} without notes` : ''}
+              </span>
+            </div>
+            <ul class="wraplist">
+              {#each day.meetings as m (m.key)}
+                <li class="wrapmeet">
+                  <div class="wraprow">
+                    <span class="wraptime">{clockTime(m.start)}</span>
+                    {#if m.noteId != null && m.hasNotes}
+                      <button class="wraptitle" onclick={() => openNote(m.noteId)} title="Open its note">{m.title}</button>
+                    {:else}
+                      <span class="wraptitle plain">{m.title}</span>
+                      <span class="tag nonotes">No notes</span>
+                      <button class="gen" onclick={() => addNotes(m)}>Add notes</button>
+                    {/if}
+                  </div>
+                  {#if m.tasks.length}
+                    <ul class="wraptasks" aria-label={`Open tasks from ${m.title}`}>
+                      {#each m.tasks as t (`${t.own ?? ''}:${t.line}:${t.text}`)}
+                        <li>
+                          <label class="wraptask">
+                            <input type="checkbox" onchange={() => tickTask(m, t)} />
+                            <span>
+                              {t.task || t.text}{#if t.owner && t.owner !== 'You'}<span class="who">{` · ${t.owner}`}</span>{/if}{#if t.due}<span class="who">{` · ${t.due}`}</span>{/if}
+                            </span>
+                          </label>
+                        </li>
+                      {/each}
+                    </ul>
+                  {/if}
+                </li>
+              {/each}
+            </ul>
+          </div>
         {:else if todays.length === 0}
           <p class="quiet">Nothing else on your calendar today.</p>
         {:else}
           <div class="mlist" role="list" aria-label="Today's meetings">
-            {#each todays.slice(0, todayShown) as ev (ev.key)}
+            {#each todays.slice(0, todayShown) as ev, i (ev.key)}
+              {@const gap = gapBefore(todays, i)}
+              {#if gap}
+                <div class="gap" role="separator" aria-label={freeText(gap)}>
+                  <span class="gapline" aria-hidden="true"></span>
+                  <span class="gaptext">{freeText(gap)}</span>
+                  <span class="gapline" aria-hidden="true"></span>
+                </div>
+              {/if}
               {@render row(ev)}
             {/each}
           </div>
@@ -977,6 +1216,124 @@
   .tag.plan {
     color: var(--yap-success);
     background: color-mix(in srgb, var(--yap-success) 10%, transparent);
+  }
+  .tag.nonotes {
+    color: var(--yap-muted);
+    background: var(--yap-s1);
+  }
+
+  /* Free time between today's meetings: a quiet line between the rows. */
+  .gap {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin: 0 12px;
+    font-size: 11.5px;
+    color: var(--yap-muted);
+  }
+  .gapline {
+    flex: 1 1 auto;
+    border-top: 1px dashed var(--yap-border-subtle);
+  }
+  .gaptext {
+    flex: 0 0 auto;
+  }
+
+  /* "Done for today": the day's meetings, their open tasks, the ones without notes. */
+  .wrapup {
+    padding: 14px 16px 12px;
+    border: 1px solid var(--yap-border-subtle);
+    border-radius: var(--yap-r-lg);
+    background: var(--yap-paper-s1);
+  }
+  .wraphead {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 4px 10px;
+    margin-bottom: 8px;
+  }
+  .wraphead h3 {
+    margin: 0;
+    font-family: var(--yap-font-display);
+    font-size: 17px;
+    font-weight: 600;
+    color: var(--yap-fg);
+  }
+  .wrapsum {
+    font-size: 12px;
+    color: var(--yap-muted);
+  }
+  .wraplist,
+  .wraptasks {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+  .wrapmeet + .wrapmeet {
+    margin-top: 6px;
+    padding-top: 6px;
+    border-top: 1px solid var(--yap-border-subtle);
+  }
+  .wraprow {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+    min-width: 0;
+    font-size: 13px;
+  }
+  .wraptime {
+    flex: 0 0 auto;
+    min-width: 42px;
+    font-variant-numeric: tabular-nums;
+    color: var(--yap-muted);
+  }
+  .wraptitle {
+    min-width: 0;
+    padding: 0;
+    border: none;
+    background: none;
+    color: var(--yap-fg);
+    font: inherit;
+    font-weight: 600;
+    text-align: left;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    cursor: pointer;
+  }
+  button.wraptitle:hover {
+    text-decoration: underline;
+    text-underline-offset: 2px;
+  }
+  button.wraptitle:focus-visible {
+    outline: none;
+    border-radius: 3px;
+    box-shadow: 0 0 0 2px var(--yap-primary-wash);
+  }
+  .wraptitle.plain {
+    cursor: default;
+    color: var(--yap-fg-80);
+  }
+  .wraptasks {
+    margin: 4px 0 0 52px;
+  }
+  .wraptask {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    padding: 2px 0;
+    font-size: 12.5px;
+    line-height: 1.4;
+    color: var(--yap-fg-80);
+    cursor: pointer;
+  }
+  .wraptask input {
+    margin: 2px 0 0;
+    accent-color: var(--yap-primary);
+  }
+  .who {
+    color: var(--yap-muted);
   }
   .mact {
     flex: 0 0 auto;
