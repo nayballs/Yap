@@ -250,7 +250,7 @@ test('Home: a dictation copies, copies its raw words and is deleted after asking
   await row('Lunch at noon?').hover();
   await row('Lunch at noon?').getByRole('button', { name: 'Delete' }).click();
   await expect(dialog(main)).toHaveAccessibleName('Delete this dictation?');
-  await expect(dialog(main)).toContainText('“Lunch at noon?” leaves your history and stats.');
+  await expect(dialog(main)).toContainText('“Lunch at noon?” leaves your history. Your stats still count it');
   await dialog(main).getByRole('button', { name: 'Cancel' }).click();
   expect(yap.readJson('history.json')).toHaveLength(2);
   await row('Lunch at noon?').click({ button: 'right' });

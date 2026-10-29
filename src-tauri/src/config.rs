@@ -886,6 +886,12 @@ pub struct YapConfig {
     /// only on this machine; can be cleared from Settings. On by default.
     #[serde(default = "default_true")]
     pub history_enabled: bool,
+    /// "Keep history" (Settings → Privacy & data): "always", "day" (24
+    /// hours) or "never" (which also turns `history_enabled` off: what an
+    /// older Yap reads). "" = never chosen: always. An older Yap's save
+    /// drops it; `dictation/history/keep.rs` brings "day" back.
+    #[serde(default)]
+    pub history_keep: String,
 
     /// Run the local API bridge (Integrations): a token-authenticated loopback
     /// HTTP server exposing notes/folders/history to CLIs and coding agents
@@ -1349,6 +1355,7 @@ impl Default for YapConfig {
             tts_cloud: std::collections::HashMap::new(),
             streaming_partials: true,
             history_enabled: true,
+            history_keep: String::new(),
             bridge_enabled: true,
             mcp_allow_writes: false,
             meeting_open_notepad: true,
