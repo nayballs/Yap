@@ -81,8 +81,15 @@ test('later, from Home: "Paste what I said" swaps the latest dictation in its wi
   // Home, its newest row first. (Clicked over DevTools: the pad keeps the
   // focus, as when Yap brings the dictation's window back to the front.)
   await main.getByRole('navigation', { name: 'Main' }).getByRole('button', { name: 'Home', exact: true }).click();
-  const row = (text) => main.locator('.daylist .item').filter({ hasText: text }).first();
-  const latest = row(CLEANED);
+  // Home re-pulls its list a moment after a dictation is saved (60 ms,
+  // HomeView's `refreshSoon`): wait for both new dictations at its top, or
+  // the first row with this text is test 1's, an earlier dictation — which
+  // Yap rightly only copies (failed every run from 2026-10-29 until this).
+  const items = main.locator('.daylist .item');
+  await expect(items.nth(0)).toContainText(CLEANED);
+  await expect(items.nth(1)).toContainText(EARLIER_CLEANED);
+  const row = (text) => items.filter({ hasText: text }).first();
+  const latest = items.nth(0);
   await latest.getByRole('button', { name: 'AI edited · 1 change' }).click();
   await expect(latest.getByRole('region', { name: 'What AI cleanup changed' }).locator('del')).toHaveText(['taken out: um so']);
   await latest.getByRole('button', { name: 'Paste what I said' }).click();
