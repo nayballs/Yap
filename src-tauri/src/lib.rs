@@ -355,6 +355,14 @@ pub fn run() {
             privacy::diagnostics::diagnostics_issue_url,
             #[cfg(debug_assertions)]
             privacy::diagnostics::e2e_save_path,
+            privacy::export::data_export_summary,
+            privacy::export::data_export_save,
+            privacy::export::data_export_cancel,
+            privacy::export::data_export_reveal,
+            #[cfg(debug_assertions)]
+            privacy::export::e2e_export_pace,
+            privacy::reset::data_reset_plan,
+            privacy::reset::data_reset,
             meetings::commands::meeting_start,
             meetings::commands::meeting_state,
             notes::commands::note_export,
@@ -615,6 +623,10 @@ pub fn run() {
             #[cfg(debug_assertions)]
             dictation::mics::e2e_mic_unplug,
             #[cfg(debug_assertions)]
+            dictation::mic_tips::e2e_mic_tips,
+            #[cfg(debug_assertions)]
+            dictation::lid::e2e_lid,
+            #[cfg(debug_assertions)]
             pasting::elevated::e2e_paste_elevated,
             #[cfg(debug_assertions)]
             pasting::text_injector::e2e_paste_fails,
@@ -817,6 +829,8 @@ pub fn run() {
             // Windows' microphones, read and watched (mics.rs): which one
             // dictation and meetings use, and a new one plugged in.
             dictation::mics::start(&handle);
+            // The laptop's lid (lid.rs): closed, its own mic goes last.
+            dictation::lid::start(&handle);
             // Start the dictation pipeline (audio capture + STT engine). It
             // runs without a microphone too (see `Pipeline::start`).
             let pipeline = dictation::pipeline::Pipeline::start(handle.clone(), cfg.clone());
