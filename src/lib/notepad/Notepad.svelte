@@ -516,11 +516,12 @@
       e.stopPropagation();
       readPageSelection();
     } else if (actionMatchesKeydown(e, cfg, 'quickNoteHotkey')) {
-      // The quick note (notes/quick_note.rs) comes up in front.
+      // The quick note (notes/quick_note/key.rs) comes up in front; held,
+      // a dictation into it.
       e.preventDefault();
       e.stopPropagation();
       flushSave();
-      invoke('quick_note_toggle').catch(() => {});
+      invoke('quick_note_key', { pressed: true }).catch(() => {});
     } else if (actionMatchesKeydown(e, cfg, 'hotkey')) {
       e.preventDefault();
       e.stopPropagation();
@@ -530,7 +531,10 @@
   // The key coming up: push-to-talk's release (Rust decides by the mode).
   function onKeyUp(e) {
     if (!cfg) return;
-    if (actionMatchesKeyup(e, cfg, 'assistantHotkey')) {
+    if (actionMatchesKeyup(e, cfg, 'quickNoteHotkey')) {
+      e.preventDefault();
+      invoke('quick_note_key', { pressed: false }).catch(() => {});
+    } else if (actionMatchesKeyup(e, cfg, 'assistantHotkey')) {
       e.preventDefault();
       invoke('assistant_key', { pressed: false }).catch(() => {});
     } else if (actionMatchesKeyup(e, cfg, 'hotkey')) {

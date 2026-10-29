@@ -28,6 +28,7 @@ export const SETTINGS_INDEX = [
   { page: 'general', section: 'Appearance', label: 'Motion', desc: 'Reduce sliding, fading and pulsing', keywords: 'animation reduced motion accessibility appearance', anchor: 'motion' },
   { page: 'general', section: 'Yap bar', label: 'Show the Yap bar', desc: 'A small pill above the taskbar', keywords: 'bar pill overlay taskbar flow bar', anchor: 'bar' },
   { page: 'general', section: 'Yap bar', label: 'Hide in fullscreen apps', desc: 'Games and presentations stay clear', keywords: 'bar games fullscreen presentation video', anchor: 'bar-fullscreen', toggle: 'barHideFullscreen' },
+  { page: 'general', section: 'Yap bar', label: 'Quick note button', desc: 'A button on the bar for the quick note', keywords: 'bar quick note scratchpad button jot', anchor: 'bar-quick-note', toggle: 'barQuickNote' },
   { page: 'general', section: 'Yap bar', label: 'Colours', desc: "The Yap bar's look: match Yap, light or dark", keywords: 'bar theme dark light colors match app', anchor: 'bar-colours' },
   { page: 'general', section: 'Yap bar', label: 'Position', desc: 'Where the bar and the dictation overlay sit', keywords: 'bar overlay top bottom placement', anchor: 'bar-position' },
   { page: 'general', section: 'Notifications', label: 'Show tips', desc: "Short tips, like push-to-talk's double-tap", keywords: 'tips hints coaching notifications nudge', anchor: 'tips', toggle: 'showTips' },

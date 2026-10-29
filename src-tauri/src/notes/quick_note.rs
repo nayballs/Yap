@@ -33,6 +33,12 @@
 //!   handed to the page (`yap-quick-note-dictation`), which puts it at the
 //!   cursor. Never pasted into the app behind it, nor into Yap's own window
 //!   through the clipboard. Undo of a cancelled one lands here too.
+//!   **Holding the shortcut** opens it and dictates into it until the key
+//!   comes up; a tap opens or hides it ([`key`]).
+//! - **Tabs** ([`tabs`]): several quick notes open at once, remembered
+//!   across restarts in a file of their own.
+//! - **Send to {app}** ([`send`]): the note's text, or its selection, pasted
+//!   into the app that was in front when it came up.
 
 use std::sync::atomic::{AtomicBool, AtomicIsize, Ordering};
 use std::sync::Mutex;
@@ -42,6 +48,10 @@ use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager};
 
 use crate::notes::Note;
+
+pub mod key;
+pub mod send;
+pub mod tabs;
 
 /// The window's label (tauri.conf.json).
 pub const LABEL: &str = "quick-note";
@@ -224,6 +234,22 @@ pub struct Shown {
     /// A new note asked for ("New quick note"): the window starts one
     /// whatever it had.
     pub fresh: bool,
+    /// The notes open as tabs, in order ([`tabs::for_open`]; the page builds
+    /// its tabs from them when it loads)…
+    pub tabs: Vec<TabNote>,
+    /// …and the remembered tabs that close now (left alone a day, gone).
+    pub close: Vec<u64>,
+}
+
+/// One tab's note.
+#[derive(Debug, Clone, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TabNote {
+    pub note_id: u64,
+    pub title: String,
+    pub title_auto: bool,
+    pub content: String,
+    pub folder: String,
 }
 
 fn shown_of(note: Option<Note>, fresh: bool) -> Shown {
@@ -235,6 +261,7 @@ fn shown_of(note: Option<Note>, fresh: bool) -> Shown {
             content: n.content,
             folder: n.folder,
             fresh,
+            ..Shown::default()
         },
         None => Shown {
             fresh,
@@ -243,14 +270,26 @@ fn shown_of(note: Option<Note>, fresh: bool) -> Shown {
     }
 }
 
-/// The note to open now ([`pick`]), remembered as the window's.
-fn choose() -> Option<Note> {
+/// What the window shows now: the note it opens on ([`pick`], remembered as
+/// the window's; none for a `fresh` one — the page starts it), and its tabs.
+fn shown_now(fresh: bool) -> Shown {
     let quick: Vec<(u64, u64)> = crate::notes::with_all(|notes| {
         notes.iter().filter(|n| is_quick(n)).map(|n| (n.id, n.updated_ts)).collect()
     });
-    let id = pick(current(), &quick, now_secs());
-    set_current(id.map_or(Current::New, Current::Note));
-    id.and_then(crate::notes::get)
+    let now = now_secs();
+    let picked = if fresh { None } else { pick(current(), &quick, now) };
+    if !fresh {
+        set_current(picked.map_or(Current::New, Current::Note));
+    }
+    let (open, close) = tabs::for_open(&tabs::remembered().tabs, &quick, picked, now);
+    let mut shown = shown_of(picked.and_then(crate::notes::get), fresh);
+    shown.tabs = open
+        .into_iter()
+        .filter_map(crate::notes::get)
+        .map(|n| TabNote { note_id: n.id, title: n.title, title_auto: n.title_auto, content: n.content, folder: n.folder })
+        .collect();
+    shown.close = close;
+    shown
 }
 
 /// What a save did, for the window.
@@ -430,14 +469,12 @@ pub fn takes_dictation(own_window: bool) -> bool {
 /// whatever it had) and give it the focus: the shortcut, the tray, Notes.
 /// Main thread (window calls); never under a lock.
 pub fn open(app: &AppHandle, fresh: bool) {
-    let shown = if fresh {
-        // The page saves what it has, then starts the new note
-        // (`quick_note_new`), so a save on its way can't take its place.
-        shown_of(None, true)
-    } else {
-        shown_of(choose(), false)
-    };
-    tracing::info!(fresh, resumed = shown.note_id.is_some(), "Quick note: opened");
+    // The app in front, for Send (before the window takes the front).
+    send::remember_before(in_front());
+    // Fresh: the page saves what it has, then starts the new note
+    // (`quick_note_new`), so a save on its way can't take its place.
+    let shown = shown_now(fresh);
+    tracing::info!(fresh, resumed = shown.note_id.is_some(), tabs = shown.tabs.len(), closed = shown.close.len(), "Quick note: opened");
     let _ = app.emit(EVENT_OPEN, &shown);
     let Some(w) = window(app) else { return };
     let up = w.is_visible().unwrap_or(false) && !w.is_minimized().unwrap_or(false);
@@ -475,7 +512,23 @@ pub fn toggle(app: &AppHandle) {
     }
 }
 
-/// The shortcut's press from the input hook: on the main thread.
+/// [`open`] on the main thread (the shortcut's tap or hold).
+pub fn open_soon(app: &AppHandle) {
+    let handle = app.clone();
+    if let Err(e) = app.run_on_main_thread(move || open(&handle, false)) {
+        tracing::warn!("Quick note: couldn't open it: {e}");
+    }
+}
+
+/// [`hide`] on the main thread (the shortcut's tap while it's in front).
+pub fn hide_soon(app: &AppHandle) {
+    let handle = app.clone();
+    if let Err(e) = app.run_on_main_thread(move || hide(&handle)) {
+        tracing::warn!("Quick note: couldn't put it away: {e}");
+    }
+}
+
+/// [`toggle`] on the main thread (the Yap bar's button).
 pub fn toggle_soon(app: &AppHandle) {
     let handle = app.clone();
     if let Err(e) = app.run_on_main_thread(move || toggle(&handle)) {
@@ -551,7 +604,7 @@ pub fn quick_note_hide(app: AppHandle) {
 /// an open would.
 #[tauri::command]
 pub fn quick_note_state() -> Shown {
-    shown_of(choose(), false)
+    shown_now(false)
 }
 
 /// The window's text, as typed (see [`save`]).
@@ -564,6 +617,20 @@ pub fn quick_note_save(app: AppHandle, id: Option<u64>, content: String) -> Resu
 #[tauri::command]
 pub fn quick_note_new() {
     set_current(Current::New);
+}
+
+/// "Add to the Yap bar" on its empty page (and Settings → Yap bar, which
+/// saves it as any setting): the bar's quick-note button on or off
+/// (`bar_quick_note`). Settings follows (`yap-bar-changed`).
+#[tauri::command]
+pub fn quick_note_bar_button(app: AppHandle, on: bool) -> Result<(), String> {
+    crate::shell::settings::change_config(&app, |c| {
+        c.bar_quick_note = on;
+        Ok(())
+    })?;
+    tracing::info!(on, "Quick note: the Yap bar's button switched from the quick note");
+    let _ = app.emit("yap-bar-changed", serde_json::json!({ "quickNote": on }));
+    Ok(())
 }
 
 /// Its mic button: a dictation into the note, or stop the one recording.

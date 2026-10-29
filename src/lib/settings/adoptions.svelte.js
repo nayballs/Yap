@@ -110,10 +110,12 @@ export function followOutsideChanges(getCfg) {
         const cfg = getCfg();
         if (cfg && typeof e.payload?.message === 'string') cfg.meetingConsentMessage = e.payload.message;
       }),
-      // "Turn off the bar" in the bar's own menu (bar.rs).
+      // "Turn off the bar" in the bar's own menu (bar.rs), and "Add to the
+      // Yap bar" on the quick note's empty page (notes/quick_note.rs).
       listen('yap-bar-changed', (e) => {
         const cfg = getCfg();
         if (cfg && typeof e.payload?.enabled === 'boolean') cfg.barEnabled = e.payload.enabled;
+        if (cfg && typeof e.payload?.quickNote === 'boolean') cfg.barQuickNote = e.payload.quickNote;
       }),
     ];
     return () => uns.forEach((u) => u.then((f) => f()));

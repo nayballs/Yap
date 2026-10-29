@@ -20,8 +20,15 @@ The always-there pill above the taskbar: the `overlay` window's Rust side (regio
   aloud shortcut, `Status.readHotkey`), ✂ Snip to Chat (`snip`: drag a box
   over any screen, the picture into Chat — `snip.rs`, [snip.md](./snip.md); the
   bar never took the focus, so a cancel gives it back to the app you were in;
-  its tooltip names the snip shortcut, `Status.snipHotkey`) and a ^ menu (Open Yap, New meeting note, Settings,
-  Hide the bar for 1 hour, Turn off the bar — `bar_action`); **dictating** =
+  its tooltip names the snip shortcut, `Status.snipHotkey`), 📝 **Quick
+  note** when it's switched on (`bar_quick_note`, off by default; Wispr's
+  "Add to Flow Bar", 2026-10-29: the quick note's empty page offers it,
+  Settings → General → Yap bar has it; `bar_action "quick-note"`: up, or
+  away while it's in front, as a tap of its shortcut — the bar never took
+  the focus, so the quick note's Send goes to the app you're in; its tooltip
+  names its shortcut, `Status.quickNoteHotkey`; [notes.md](./notes.md#the-quick-note-notesquick_noters))
+  and a ^ menu (Open Yap, New meeting note, Settings, Hide the bar for 1
+  hour, Turn off the bar — `bar_action`); **dictating** =
   the dictation overlay (waveform, live partials, Transcribing…, errors), with
   ✕ (`dictation-cancel`) and ✓ (`dictation-stop`: stop and paste, as the
   hotkey's second press — into the app the dictation started in) while it
@@ -108,7 +115,7 @@ The always-there pill above the taskbar: the `overlay` window's Rust side (regio
   real one, for checking a real click reaches it — never while the maintainer's
   using the mouse). Every card answer (button, ✕, Esc, its timer) is logged
   as "bar: card answered" with the card and action; the hover check logs at
-  debug when it changes. Settings → General → Yap bar (`bar_enabled`, `bar_hide_fullscreen`, `bar_theme` Match app / Light / Dark;
+  debug when it changes. Settings → General → Yap bar (`bar_enabled`, `bar_hide_fullscreen`, `bar_quick_note`, `bar_theme` Match app / Light / Dark;
   `overlay_position` puts it at the top) and Settings → Dictation → While you dictate (`bar_dictation_buttons`,
   the live preview). Bar off = the old behaviour: the
   overlay only while dictating, notices as Windows notifications — but a
@@ -145,7 +152,8 @@ The always-there pill above the taskbar: the `overlay` window's Rust side (regio
   **idle pill** is 40×8 (light: white at 85 % with a 1 px ink border at
   30 %; dark: warm ink at 55 %, cream border), radius 6, no shadow, in a
   60×20 wrapper; it morphs into the open
-  pill (not measured yet: Yap's own 196×38 — 🎤, ◉, 🔊, ✂ and ^); tooltips (ink in both schemes,
+  pill (not measured yet: Yap's own 196×38 — 🎤, ◉, 🔊, ✂ and ^; 230 wide
+  with the quick note's 📝, `.wide`); tooltips (ink in both schemes,
   radius 8, 12 / 600: "Dictate F9", "New note Win + Alt + M") and the ^ menu
   sit above it. The **meeting pill**: 69×30, the bar surface, a 2 px ring in Yap's
   recording red (`#e5645e`; Wispr's is emerald), radius 22.5, half opacity

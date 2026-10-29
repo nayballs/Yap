@@ -7,7 +7,8 @@
   //             in a 60 × 20 hit wrapper;
   //   hover     it opens into 🎤 Dictate, ◉ Meeting notes, 🔊 Read aloud (the
   //             selection in the app you're in; ■ while reading), ✂ Snip to
-  //             Chat (snip.rs) and a ^ menu, with a tooltip naming each
+  //             Chat (snip.rs), the quick note's button when it's switched
+  //             on (bar_quick_note) and a ^ menu, with a tooltip naming each
   //             button's shortcut;
   //   dictating the dictation overlay (waveform, live text, Transcribing…,
   //             the error) in the pill's place, with ✕ / ✓ while it records
@@ -60,6 +61,9 @@
     meetingHotkey: null,
     readHotkey: null,
     snipHotkey: null,
+    // The quick-note button (`bar_quick_note`, off by default) and its shortcut.
+    quickNote: false,
+    quickNoteHotkey: null,
     meeting: { recording: false },
     call: null,
     cards: [],
@@ -185,6 +189,7 @@
     notes: { label: bar.call ?? 'New note', keys: keys(bar.meetingHotkey) },
     read: { label: reading.phase === 'reading' || reading.phase === 'paused' ? 'Stop reading' : 'Read aloud', keys: keys(bar.readHotkey) },
     snip: { label: 'Snip to Chat', keys: keys(bar.snipHotkey) },
+    quicknote: { label: 'Quick note', keys: keys(bar.quickNoteHotkey) },
     open: { label: 'Open notes', keys: '' },
     stop: { label: 'Stop and summarise', keys: keys(bar.meetingHotkey) },
   });
@@ -227,12 +232,17 @@
   const readAloud = () => act(readingNow ? 'read-stop' : 'read-aloud');
   // ✂: Snip to Chat (snip.rs) — drag a box over any screen, into Chat.
   const snip = () => act('snip');
+  // The quick note (notes/quick_note.rs), when its button is on: up, or away
+  // while it's in front. The bar never takes the focus, so Send goes to the
+  // app you're in.
+  const quickNote = () => act('quick-note');
   const stopMeeting = () => act('stop-meeting');
   const openMeeting = () => act('open-note');
   function menuItem(action) {
     menuOpen = false;
     act(action);
   }
+
   function cardAction(card, action) {
     invoke('bar_card_action', { id: card.id, action }).catch((e) =>
       invoke('frontend_log', { msg: `bar: card ${card.id} ${action} failed: ${e}` }).catch(() => {})
@@ -397,7 +407,7 @@
         onpointerenter={() => (domHover = true)}
         onpointerleave={() => (domHover = false)}
       >
-        <div class="pill" class:open={expanded} aria-label="Yap bar">
+        <div class="pill" class:open={expanded} class:wide={bar.quickNote} aria-label="Yap bar">
           <button
             class="btn mic"
             aria-label="Dictate"
@@ -445,6 +455,18 @@
           >
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="6" cy="6" r="3" /><circle cx="6" cy="18" r="3" /><path d="M20 4 8.1 15.9" /><path d="M14.5 14.5 20 20" /><path d="M8.1 8.1 12 12" /></svg>
           </button>
+          {#if bar.quickNote}
+            <button
+              class="btn qnote"
+              aria-label="Quick note"
+              tabindex={expanded ? 0 : -1}
+              onclick={quickNote}
+              onpointerenter={(e) => hoverTip('quicknote', e)}
+              onpointerleave={() => hoverTip(null)}
+            >
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 3.5H7a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8.5z" /><path d="M14 3.5v5h5" /><path d="M9 13h6M9 16.5h4" /></svg>
+            </button>
+          {/if}
           <button
             class="btn more"
             class:on={menuOpen}
@@ -612,6 +634,10 @@
     background: var(--bar-surface);
     border-color: var(--bar-border);
     transition: all 0.16s cubic-bezier(0.05, 0.6, 0.4, 0.95);
+  }
+  /* The quick-note button switched on (bar_quick_note): 34 more. */
+  .pill.open.wide {
+    width: 230px;
   }
   .btn {
     position: relative;

@@ -91,6 +91,14 @@
       disabled={!cfg.barEnabled}
     />
   </Row>
+  <Row setting="bar-quick-note">
+    <Toggle
+      bind:checked={cfg.barQuickNote}
+      label="Quick note button"
+      desc="A button on the open bar for the quick note, to jot or dictate a note from any app"
+      disabled={!cfg.barEnabled}
+    />
+  </Row>
   <Row label="Colours" desc={BAR_COLOURS_DESC[cfg.barTheme] ?? BAR_COLOURS_DESC.app} setting="bar-colours">
     <Segmented bind:value={cfg.barTheme} options={BAR_THEME_OPTIONS} label="Bar colours" disabled={!cfg.barEnabled} />
   </Row>

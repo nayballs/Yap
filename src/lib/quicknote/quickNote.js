@@ -35,3 +35,29 @@ export function statusLine(state, folder) {
   if (state === 'saved') return folder ? `Saved in ${folder}` : 'Saved';
   return 'Saved as you type, in Notes';
 }
+
+/** A tab's name: its note's title, or "New quick note" before it has one. */
+export function tabLabel(tab) {
+  return String(tab?.title || '').trim() || 'New quick note';
+}
+
+/** The tab after (`step` 1) or before (-1) tab `i` of `count`, round the ends (Ctrl+Tab). */
+export function nextTab(count, i, step) {
+  if (count <= 0) return -1;
+  return (((i + step) % count) + count) % count;
+}
+
+/** The tab to show once tab `i` of `count` is closed: the one that takes its place, else the one before. */
+export function afterClose(count, i) {
+  return Math.max(0, Math.min(i, count - 2));
+}
+
+/** What Send sends (`value` the note, `start`..`end` the selection): the selection if it has words, else the note. */
+export function sendText(value, start, end) {
+  const v = String(value || '');
+  if (Number.isInteger(start) && Number.isInteger(end) && end > start) {
+    const picked = v.slice(start, end);
+    if (picked.trim()) return picked;
+  }
+  return v;
+}
