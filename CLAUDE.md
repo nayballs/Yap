@@ -229,6 +229,7 @@ One folder per area (an area's `<area>.rs` lists its modules); a big module's pa
 **Yap bar** — [yap-bar.md](./docs/architecture/yap-bar.md)
 - `bar.rs` — the bar: regions, click-through, never focused, placement, one card at a time.
 - `bar/overlay.rs` — the bar window's Win32 side and its pure placement / hit-test maths.
+- `bar/menu.rs` — the ^ menu's extras: the microphone in use and a picker in Yap's order, Paste last transcript, the language shortcuts' languages.
 
 **Notices** — [notices.md](./docs/architecture/notices.md)
 - `notices/notice.rs` — the notice policy: one place, priorities, holds, cooldowns, call-prompt fatigue.

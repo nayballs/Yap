@@ -56,6 +56,7 @@
 //! region (exercising the same hit-test and click-through code) and fakes a
 //! fullscreen app, and [`bar_debug`] reports the window's real ex-styles.
 
+pub mod menu;
 pub mod overlay;
 
 use std::collections::HashMap;
@@ -1464,6 +1465,17 @@ fn act(app: &AppHandle, action: &str) -> Result<(), String> {
             give_focus_back();
             crate::notes::quick_note::toggle_soon(app);
         }
+        // The ^ menu's Paste last transcript (`bar/menu.rs`): into the app
+        // you're in, as its shortcut does.
+        "paste-last" => {
+            give_focus_back();
+            crate::pasting::last::paste_soon(app);
+        }
+        // The ^ menu's languages: a dictation in one, as its shortcut starts.
+        other if other.starts_with("dictate-in:") => {
+            give_focus_back();
+            menu::dictate_in(app, &other["dictate-in:".len()..])?;
+        }
         // ■ on the recording pill: end the meeting, which writes the action
         // plan in Rust (or asks "Started by mistake?").
         "stop-meeting" => crate::meetings::meeting_end::end(app, Some(overlay::LABEL))?,
@@ -1542,7 +1554,8 @@ pub fn bar_pointer_left(app: AppHandle) {
 /// A bar button or menu item: "dictate" | "dictation-stop" |
 /// "dictation-cancel" | "dictation-undo" | "as-said" | "transform-undo" | "meeting" |
 /// "stop-meeting" | "read-aloud" | "read-stop" | "snip" | "quick-note" |
-/// "open-note" | "new-note" | "open" | "settings" | "hide" | "show" | "off".
+/// "paste-last" | "dictate-in:<language shortcut id>" | "open-note" |
+/// "new-note" | "open" | "settings" | "hide" | "show" | "off".
 #[tauri::command]
 pub async fn bar_action(app: AppHandle, action: String) -> Result<(), String> {
     tauri::async_runtime::spawn_blocking(move || act(&app, &action))

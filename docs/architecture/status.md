@@ -80,11 +80,13 @@ Ctrl+Tab), remembered across restarts in `quick_note_tabs.json`, a tab left
 alone a day closing as the window comes up; **Send to {app}** with the
 app's own icon pastes the note, or its selection, into the app it came up
 over, by the ordinary paste; an opt-in **quick-note button on the Yap bar**
-(its empty page offers it; Settings → Yap bar).
+(its empty page offers it; Settings → Yap bar). The bar's **^ menu** gained
+the microphone in use with a picker in the order Yap tries them, Paste last
+transcript and the language shortcuts' languages (`bar/menu.rs`).
 Unit-tested (the tap and hold, chords and a lost key-up; the tabs' rules and
-file) and e2e-tested (`quick-note.spec.js`: the hold
+file; the menu's microphones) and e2e-tested (`quick-note.spec.js`: the hold
 by the test shortcut and through a Yap window's page, tabs and a restart,
-Send with a stand-in app, the bar button). Not tried
+Send with a stand-in app, the bar button; `bar-menu.spec.js`). Not tried
 yet on the maintainer's PC: holding the real shortcut in another app (the
 release lands in the quick note, which took the focus), and Send's real
 paste into another app (a test run pastes nothing; no robot test yet).

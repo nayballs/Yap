@@ -513,6 +513,8 @@ pub fn run() {
             bar::bar_pointer_left,
             bar::bar_action,
             bar::bar_card_action,
+            bar::menu::bar_menu,
+            bar::menu::bar_use_mic,
             dictionary::learn::word_suggestion_respond,
             dictionary::learn::summary_word_offer,
             dictionary::snippet_offer::snippet_suggestion_respond,

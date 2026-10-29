@@ -27,8 +27,9 @@ The always-there pill above the taskbar: the `overlay` window's Rust side (regio
   away while it's in front, as a tap of its shortcut — the bar never took
   the focus, so the quick note's Send goes to the app you're in; its tooltip
   names its shortcut, `Status.quickNoteHotkey`; [notes.md](./notes.md#the-quick-note-notesquick_noters))
-  and a ^ menu (Open Yap, New meeting note, Settings, Hide the bar for 1
-  hour, Turn off the bar — `bar_action`); **dictating** =
+  and a ^ menu (Open Yap, New meeting note, Paste last transcript, Settings,
+  the microphone and the languages — `bar/menu.rs`, below —, Hide the bar
+  for 1 hour, Turn off the bar — `bar_action`); **dictating** =
   the dictation overlay (waveform, live partials, Transcribing…, errors), with
   ✕ (`dictation-cancel`) and ✓ (`dictation-stop`: stop and paste, as the
   hotkey's second press — into the app the dictation started in) while it
@@ -120,6 +121,21 @@ The always-there pill above the taskbar: the `overlay` window's Rust side (regio
   the live preview). Bar off = the old behaviour: the
   overlay only while dictating, notices as Windows notifications — but a
   showing dictation's ✕ / ✓ and Undo still take clicks (`clickable`).
+- **`bar/menu.rs`** — **the ^ menu's extras** (2026-10-29, Wispr Flow's Flow
+  Bar menu by behaviour), read when the menu opens (`bar_menu` →
+  `{mics, pasteLast, languages}`; Windows' microphones never polled): **the
+  microphone in use** ("Microphone: Contoso H2", `mics::short_name`), which
+  opens the others connected in the order Yap tries them (`mic_rows`,
+  pure: the person's order via `mics::candidates`, then Windows' default,
+  then the rest; software devices only when used) — picking one puts it
+  first in Settings → Dictation → Microphone's order (`bar_use_mic` →
+  `mics::offer::put_first`, as "Use it for dictation" does);
+  **Paste last transcript** when there's one (`bar_action "paste-last"` →
+  `pasting/last.rs` `paste_soon`, into the app you're in); and **Dictate in
+  French** for each language shortcut that can run (`bar_action
+  "dictate-in:<id>"` → `menu::dictate_in`: `languages::arm` around the
+  bar's own toggle, as its shortcut's press). The menu scrolls past 440 px
+  (the window is 560 tall). `e2e/bar-menu.spec.js` (made-up microphones).
 - **`bar/overlay.rs`** — the bar window's Win32 side + its pure, unit-tested maths:
   `place` (work-area placement), `fullscreen_on` (None / Borderless /
   Exclusive), `region_at` (hit-testing with slack), `enforced_ex_style`, and
