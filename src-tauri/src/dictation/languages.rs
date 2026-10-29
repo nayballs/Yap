@@ -295,7 +295,9 @@ pub fn spoken_language(cfg: &YapConfig) -> Option<String> {
 /// The line before the transcript that keeps cleanup in the dictation's
 /// language (pure): the language when it's `known` (none for English, the
 /// one-shots' language), else — My languages holding another than English
-/// — the languages it may be in.
+/// — the languages it may be in. (The app calls [`language_line_with`];
+/// this is the line before Hinglish, for the tests and the evaluations.)
+#[cfg(debug_assertions)]
 pub fn language_line(known: Option<&str>, mine: &[String]) -> Option<String> {
     language_line_with(known, mine, false)
 }
