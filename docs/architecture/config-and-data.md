@@ -19,7 +19,7 @@
   unbound, the default; never a clash — `input_hook::configure_paste_last_from`
   / `configure_copy_last_from` leave one another shortcut has unbound;
   `pasting/last.rs`), quick_note_hotkey (`quickNoteHotkey`, 2026-10-28: the
-  **Quick note** window from any app, Settings → Shortcuts; "" = unbound,
+  **Quick note** window from any app — held, a dictation into it —, Settings → Shortcuts; "" = unbound,
   the default; never a clash — `input_hook::configure_quick_note_from`
   gives way to all nine older shortcuts; `notes/quick_note.rs`. An older Yap
   sharing the folder drops it, and its `moreHotkeys` entry, on its next
@@ -189,7 +189,11 @@
   bar_hide_fullscreen (true) + bar_theme ("app" — Match app, the theme of
   Yap's windows — | "light" | "dark", app) +
   bar_dictation_buttons (the capsule's ✕ / ✓: "off" | "hover" | "always",
-  off), General → Appearance (`src/lib/core/appearance.js`, every window):
+  off) + bar_quick_note (`barQuickNote`, 2026-10-29: the quick note's button
+  on the open bar, off; switched on from the quick note's empty page —
+  `quick_note_bar_button` — or Settings → General → Yap bar. An older Yap
+  sharing the folder drops it on its next save: the button goes until it's
+  switched on again, nothing else), General → Appearance (`src/lib/core/appearance.js`, every window):
   theme ("system" — Windows' app mode, followed live — | "light" | "dark",
   system; `shell/theme.rs` gives the opaque windows' webviews its background) +
   reading_font ("default" Figtree | "sans" Geist | "serif" Literata |
@@ -428,6 +432,15 @@
   through `saving.rs`). A file of its own, not new fields in notes.json, so an
   older Yap sharing the data folder (it drops notes.json fields it doesn't
   know when it saves) never loses them. A note's go with it.
+- Skills: `%APPDATA%/yap/skills.json` (2026-10-29) — the person's own Skills
+  (`{skills: [{id, name, command, description, instructions, runsOn,
+  basedOn, createdMs, updatedMs}]}`, ≤ 50; Yap's own are in code, never
+  stored) (`chat/skills.rs`, through `saving.rs` as "your Skills"; a file
+  that doesn't read is set aside). A file of its own rather than notes.json's
+  actions: an older Yap never opens it (it has no Skills), so nothing it
+  saves can drop or turn a Skill into an action. Reset app keeps it (setup,
+  like folders and actions: `privacy/reset.rs` STAYS); Download your data
+  includes it (`skills.json` in the zip).
 - Chat screenshots: `%APPDATA%/yap/chat-images/` — `img_<16 hex>.png` for each
   screenshot a question carries (Snip to Chat, `snip/images.rs`); `chats.json`
   keeps only its id, size, bytes and source. Deleted with its conversation, after
@@ -504,7 +517,20 @@
 - Hints: `%APPDATA%/yap/hints.json` — how often each push-to-talk coaching hint
   showed (`tap`, `longHold`, `chord` — "Hold only {key}" —, `longDictation`
   — "Try meeting notes", once ever), when the last did, and whether
-  double-tap has been used (`dictation/coaching.rs`).
+  double-tap has been used (`dictation/coaching.rs`); since 2026-10-29 the
+  notepad's first-meeting coach marks too (`notepadNotes`,
+  `notepadCatchUp`: `meetings/coach_marks.rs`). An older Yap reads the file
+  and drops those two fields when it next saves a hint, which is harmless:
+  the marks only ever show in a first meeting, and once a meeting has talk
+  in it no later one is a first.
+- Quick note tabs: `%APPDATA%/yap/quick_note_tabs.json` (2026-10-29) —
+  `{tabs: [note ids, in order], active: id | null}`, the quick notes open
+  as tabs in the quick note's window (`notes/quick_note/tabs.rs`): read at
+  the first open, written after every change the page makes (at most 20,
+  ids only — the notes are in notes.json). A file of its own, so an older
+  Yap never reads or saves it; deleting it closes the tabs and loses
+  nothing else. Reset app clears it with the notes (`tabs::reset`). The quick note's "Not now" on its offer of the bar button
+  is that window's `localStorage` (`yap.quickNote.barOfferDismissed`).
 - Mic tips: `%APPDATA%/yap/mic_tips.json` (2026-10-29,
   `dictation/mic_tips.rs`) — how often each mic-quality tip ("Yap didn't
   hear you clearly": quiet, noisy, clipped, a Bluetooth headset in its call
@@ -586,13 +612,13 @@
   again for that store until a save of it worked. The local API and the
   chat's note tools answer an AI app or model with the failure too, so
   neither says it saved. Caches (`model_catalog.json`, `stt_speed.json`,
-  `updates.json`, `hints.json`, `quieted_apps.json`) are only logged. The
+  `updates.json`, `hints.json`, `quieted_apps.json`, `quick_note_tabs.json`) are only logged. The
   log names the store and the error's kind, never what it holds.
   **Since 2026-10-25**: notes.json is written **off its lock** (a snapshot
   taken under it, written after, `saving::Ordered`: one write at a time,
   never an older snapshot over a newer one); meeting audio's own `.json`
   files go through a `Saver` of their own (`Saver::write_each`: a store in
-  several files, unsaved while any failed); `tasks.json` has one; the
+  several files, unsaved while any failed); `tasks.json` and `skills.json` have one; the
   summary an action writes (`note_enhance`, the action plan at a meeting's
   end) and `calendar_add_link` / `calendar_disconnect` check their save and
   return the failure (the page treats the change as made, with Try again;

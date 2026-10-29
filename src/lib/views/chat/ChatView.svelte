@@ -241,7 +241,8 @@
       chat.newChat();
       chat.scope = req.scope ?? null;
       chat.input = req.text;
-      chat.send();
+      // A one-tap prompt or a "/" Skill from the Meetings view's Ask bar.
+      chat.send(req.skill ? { skill: req.skill } : undefined);
     });
   });
 </script>

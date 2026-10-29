@@ -822,6 +822,44 @@ impl Pipeline {
         crate::notes::quick_note::arm(false);
     }
 
+    /// The quick note's shortcut held (`notes/quick_note/key.rs`): a
+    /// push-to-talk dictation into the note, held by that key (the bar's
+    /// capsule shows no ✕ / ✓ while it's held). Its recording session, or
+    /// `None` when none started (one under way, no microphone).
+    pub(crate) fn start_for_quick_note(&self) -> Option<u64> {
+        if self.is_busy() {
+            return None;
+        }
+        let _ = self.shared.app.emit("yap-dictation-held", true);
+        crate::notes::quick_note::arm(true);
+        self.shared.start_recording(false);
+        crate::notes::quick_note::arm(false);
+        self.recording_session()
+    }
+
+    /// The recording now, if one is: its session (`rec_session`).
+    pub(crate) fn recording_session(&self) -> Option<u64> {
+        self.shared
+            .recording
+            .load(Ordering::SeqCst)
+            .then(|| self.shared.rec_session.load(Ordering::SeqCst))
+    }
+
+    /// Stop and transcribe recording `session`, if it still is the one.
+    pub(crate) fn stop_session(&self, session: u64) {
+        if session != 0 && self.recording_session() == Some(session) {
+            self.shared.stop_and_transcribe();
+        }
+    }
+
+    /// Drop recording `session` silently (no stop chime, no Undo), if it
+    /// still is the one: a hold that grew into a chord.
+    pub(crate) fn discard_session(&self, session: u64) {
+        if session != 0 && self.recording_session() == Some(session) {
+            self.shared.cancel(false);
+        }
+    }
+
     /// Route a **dictation** hotkey press/release through the recording mode.
     /// Called from the input-hook listeners for both press and release (`at`:
     /// the hook's timestamp, `gesture::now_ms`) and from the windows' in-page

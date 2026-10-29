@@ -219,7 +219,8 @@ uploaded…", **Open a GitHub issue**, Show in folder, Done.
   what "Save as .md" writes; `integrations::mcp::is_meeting` tells them apart;
   names made safe and unique, `file_stem`), and `notes/notes.json` (the whole
   store, folders and actions too); each chat as `chats/<date> <title>.md`
-  (who and when, the model) and `chats/chats.json`; `tasks.json`; `memory/`
+  (who and when, the model) and `chats/chats.json`; `tasks.json`;
+  `skills.json` (the person's own Skills, `chat/skills.rs`); `memory/`
   — Memory's own export's Markdown (`memory::export::files`, About you on
   You.md) and `memory.json`; `dictionary/dictionary.csv` — the CSV the
   Dictionary's Export… writes (`dictionary_csv`: Heard, Written, Kind,
@@ -278,7 +279,8 @@ uploaded…", **Open a GitHub issue**, Show in folder, Done.
   pre-meeting briefs (they quote notes and memory; `calendar.json`'s
   `briefs`). Set-aside copies of those stores (`<name>.corrupt-…`) go too.
 - **What stays** (`STAYS`): config.json (every setting, the dictionary and
-  snippets, the keys) and `dictionary_usage.json`; the models (`models/`,
+  snippets, the keys) and `dictionary_usage.json`; the person's own Skills
+  (`skills.json`: setup, like folders and actions); the models (`models/`,
   `llm/`); the account's sign-in and the calendars (Credential Manager,
   `calendar.json`'s connections and meetings); Yap's own records — tips
   shown (`hints.json`, `mic_tips.json`), answers to its offers

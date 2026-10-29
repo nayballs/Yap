@@ -13,6 +13,7 @@
   import ConnectorsSection from './ConnectorsSection.svelte';
   import McpSection from './McpSection.svelte';
   import MemorySection from './MemorySection.svelte';
+  import SkillsPage from './SkillsPage.svelte';
   import { account, displayName, initAccount, initials } from '../stores/account.svelte.js';
   // Last before settings.css: the CSS order (LanguageModelsPage.svelte says why).
   import LanguageModelsPage from './LanguageModelsPage.svelte';
@@ -391,6 +392,9 @@
     {:else if id === 'memory'}
       <!-- A bookmark with a spark: what Yap keeps about you (the toast's chip too). -->
       <path d="M6 3h12v18l-6-4-6 4z" /><path d="M12 7.5v4M10 9.5h4" />
+    {:else if id === 'skills'}
+      <!-- A slash in a box: run a Skill with /name. -->
+      <rect x="3.5" y="4.5" width="17" height="15" rx="3" /><path d="m13.5 8.5-3 7" />
     {:else if id === 'models'}
       <path d="M3 12h2M7 8v8M11 5v14M15 9v6M19 11v2" />
     {:else if id === 'cleanup'}
@@ -580,6 +584,8 @@
               <p>What Yap remembers about you, so its AI answers you better. See, change or clear any of it.</p>
             </div>
             <MemorySection {cfg} {goto} />
+          {:else if section === 'skills'}
+            <SkillsPage />
           {:else if section === 'models'}
             <SpeechPage {cfg} {langInfo} {goto} />
           {:else if section === 'cleanup'}
@@ -996,11 +1002,11 @@
     padding: 0;
     scrollbar-width: none;
   }
-  /* 13 pages, the search and the account in 600 px of window: every icon
-     on screen without scrolling the rail. */
+  /* 14 pages, the search and the account in 600 px of window: every icon
+     on screen without scrolling the rail (27 px each since Skills, 28 before). */
   .shell.rail .navitem {
     width: 38px;
-    height: 28px;
+    height: 27px;
     padding: 0;
     justify-content: center;
   }

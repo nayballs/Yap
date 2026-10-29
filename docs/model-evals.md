@@ -253,6 +253,28 @@ and result), the numbers in `summary.json` (`models[].transforms`).
 `eval::transforms`' unit tests check the file reads and every transform in
 it is one Yap has (≥ 3 cases per built-in), and the judge.
 
+### Meeting chips and Skills (`--chips`)
+
+```bash
+yap.exe eval --chips --model local:<4b.gguf> --ngl 999
+```
+
+Each case in `evals/chips/cases.json` is a fictional meeting (title,
+attendees, typed notes, Yap's summary, `[side, words]` lines) and what's
+asked of it: `smart` (the notepad's Make me sound smart), `skill` (a
+built-in Skill's command and the person's `words` with it) or `longer`
+(Make notes longer). Each goes through the app's own inputs and checks
+(`meeting_summary/chips.rs`: the numbered passages, `checked`,
+`clean_longer`, the action plan's checks) on the meeting's reply cap and
+temperature, and is judged as the app shows it: `contains_any` (it's
+about what was said), `not_contains` (a made-up place, sum or claim),
+`cites` (at least one real passage, and not marked as tied to none),
+`max_bullets`; longer notes must be a fifth longer and keep every task.
+Made-up citation numbers and tasks the model dropped are counted, though
+Yap fixes both. `chips.md` in the run folder, `summary.json`
+(`models[].chips`). `eval::chips`' unit tests check the file reads, each
+kind has ≥ 2 cases and every request fits an 8k model with its reply.
+
 ### Screenshot questions (`--vision`)
 
 ```bash
@@ -2484,3 +2506,38 @@ included), and right where it hasn't: a layout, a chart, a switch. 5 of the 22 p
 answers first called `search_notes` (Chat's tools) and so sent the picture twice (the tool
 loop re-sends the question): 6.7–13.8k prompt tokens, still 1.1–1.6 s. Both ways stay on this
 PC; OCR stays the way for every model that can't read images.
+
+## Meeting chips and Skills (29 Oct 2026)
+
+`yap.exe eval --chips` (above) on the on-device default, Qwen3.5-4B Q4_K_M, on this PC's
+graphics card (`--ngl 999`, 8K context, MTP on), each of the 9 cases in
+`evals/chips/cases.json` twice. No cloud model was run (no paid calls); the cloud providers
+get the same messages.
+
+| Run | Passed | Smart | Skill | Longer | Fixed by Yap | Median |
+|---|---|---|---|---|---|---|
+| First prompts | 7/9 | 2/3 | 3/4 | 2/2 (but see below) | 1 made-up citation | 0.6 s |
+| Final | **18/18** | 6/6 | 8/8 | 4/4 | 1 made-up citation | 1.0 s |
+
+What the first run showed, and what changed:
+
+- **One passage, a wrong number**: over a short meeting (one passage) the 4B cited "[3]";
+  Yap took it out and the answer was marked as tied to no moment. With one passage any
+  number can only be that one: `chips::checked` puts it right.
+- **A Skill's instructions in the system prompt** were half ignored: "/decisions about the
+  dates only" over a meeting that agreed Lisbon and May got "No decisions were made". The
+  instructions (and the person's words) now come last, after the meeting's passages
+  (`meeting_assist::skill_messages`): 8/8.
+- **Make notes longer** with the notes first and the meeting after: the 4B copied the whole
+  input back (headings, transcript) and wrote only a recap — a "pass" the judge then learnt
+  to catch (an echoed meeting, a lost heading). The meeting now comes first in `<meeting>`
+  tags, the notes last in `<notes>` tags, and a last line asks for them about twice as long,
+  never unchanged (once, the 4B sent them back as they were); `clean_longer` keeps what's in
+  `<notes>` when a reply echoes them. 4/4, every task and heading kept, no echo. Its
+  details are drawn from the meeting, though a 4B can still hang one on the wrong person
+  ("Alice requested…" for what You asked): the summary is the person's to read over, and
+  Undo is one click.
+
+Make me sound smart's answers stayed one or two short, specific lines tied to the latest
+talk ("Since the venue needs the final headcount before confirming the menu, can we get
+that number approved by Thursday…"), never a made-up number or name in the 6 runs.

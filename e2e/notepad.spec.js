@@ -198,9 +198,11 @@ test('the text it copies, saves and emails, and how the transcript is laid out',
   expect(consentToSave(` ${DEFAULT_CONSENT_MESSAGE} `)).toBe('');
   expect(consentToSave('Mine ')).toBe('Mine');
   // The one-tap AI helpers: by the recording state, once there's something to go on.
-  expect(meetingHelpers(note, true)).toEqual(['catchUp', 'questions']);
-  expect(meetingHelpers(note, false)).toEqual(['followUpEmail', 'blindSpots']);
-  expect(meetingHelpers({ transcript: [] }, true)).toEqual(['catchUp', 'questions']);
+  // (Since 2026-10-29: Make me sound smart while recording, Make notes
+  // longer once there's a summary: meeting-chips.spec.js.)
+  expect(meetingHelpers(note, true)).toEqual(['catchUp', 'questions', 'smart']);
+  expect(meetingHelpers(note, false)).toEqual(['followUpEmail', 'blindSpots', 'longer']);
+  expect(meetingHelpers({ transcript: [] }, true)).toEqual(['catchUp', 'questions', 'smart']);
   expect(meetingHelpers({ transcript: [{ source: 'you', text: '', ts: 1, dictated: true }] }, false)).toEqual([]);
   expect(meetingHelpers({ transcript: [], content: 'Ask about legal' }, false)).toHaveLength(2);
   expect(meetingHelpers(null, true)).toEqual([]);
@@ -607,9 +609,9 @@ test('one-tap helpers: Questions to ask while recording, a follow-up email and t
   await expect(pad.getByRole('button', { name: 'What did I miss?' })).toBeVisible();
   await expect(pad.getByRole('button', { name: 'Follow-up email' })).toHaveCount(0);
   const noteHelpers = main.getByRole('group', { name: 'Meeting helpers' });
-  await expect(noteHelpers.getByRole('button')).toHaveText(['Questions to ask']);
+  await expect(noteHelpers.getByRole('button')).toHaveText(['Questions to ask', 'Make me sound smart']);
   await askInput(pad).focus();
-  await expect(suggestions.getByRole('button')).toHaveText(['What did I miss?', 'Questions to ask']);
+  await expect(suggestions.getByRole('button')).toHaveText(['What did I miss?', 'Questions to ask', 'Make me sound smart']);
   await expect(sheet).toContainText('Questions to ask suggests what to ask next');
   await shot(pad, '40-helpers-recording');
 

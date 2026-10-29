@@ -9,7 +9,13 @@
   import { openContextMenu } from '../../ui/contextMenu.svelte.js';
   import { STILL_WORKING_S } from './chatState.svelte.js';
   import { SUMMARY_DIVIDER } from './chatBudget.js';
+  import { skills } from '../../stores/skills.svelte.js';
+  import { promptChips } from '../../core/skills.js';
   import ChatMessage from './ChatMessage.svelte';
+
+  // The one-tap prompts (chat/skills.rs: Coach me, List my open to-dos,
+  // Write a weekly recap), each asked across the meetings.
+  const prompts = $derived(promptChips(skills.list));
 
   // Show summary's button, the focus's way back when its dialog closes.
   let summaryBtn = $state(null);
@@ -44,6 +50,15 @@
         <button class="setkey" onclick={() => chat.askAcrossMeetings()}>Ask across your meetings</button>
         for answers that cite the moment they come from.
       </p>
+    {/if}
+    {#if prompts.length}
+      <!-- One-tap prompts: the question filled in and sent, across the meetings. -->
+      <div class="prompts" role="group" aria-label="Try asking">
+        {#each prompts as p (p.id)}
+          <button class="prompt" disabled={chat.sending} onclick={() => chat.runPrompt(p)}>{p.chip}</button>
+        {/each}
+      </div>
+      <p class="asknote">Or type / for Skills, like /decisions or /risks.</p>
     {/if}
     {#if !chat.chatReady}
       <!-- Before a first question fails: what Chat needs. -->
@@ -190,6 +205,42 @@
     max-width: 280px;
     color: var(--yap-fg);
     font-weight: 600;
+  }
+  /* The one-tap prompts on an empty chat. */
+  .prompts {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 6px;
+    max-width: 420px;
+    margin-top: 6px;
+  }
+  .prompt {
+    height: 28px;
+    padding: 0 12px;
+    border: 1px solid var(--yap-border-subtle);
+    border-radius: var(--yap-r-full);
+    background: var(--yap-s1);
+    color: var(--yap-fg);
+    font: inherit;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    transition:
+      background 0.15s,
+      border-color 0.15s;
+  }
+  .prompt:hover:not(:disabled) {
+    background: var(--yap-s2);
+    border-color: var(--yap-border-hover);
+  }
+  .prompt:disabled {
+    opacity: 0.55;
+    cursor: default;
+  }
+  .prompt:focus-visible {
+    outline: 2px solid var(--yap-focus-ring);
+    outline-offset: 2px;
   }
   /* A conversation asked across the meetings says so over its thread. */
   .scopeline {

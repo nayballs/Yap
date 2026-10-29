@@ -64,11 +64,12 @@ export function followHotkeyFallback(getCfg) {
       invoke('copy_last_transcript').catch(() => {});
       return;
     }
-    // Quick note (notes/quick_note.rs): its window comes up in front.
+    // Quick note (notes/quick_note/key.rs): its window comes up in front;
+    // held, a dictation into it (the release comes here or to the quick note).
     if (downOn(e, cfg, 'quickNoteHotkey')) {
       e.preventDefault();
       e.stopPropagation();
-      invoke('quick_note_toggle').catch(() => {});
+      invoke('quick_note_key', { pressed: true }).catch(() => {});
       return;
     }
     // A language shortcut (My languages, dictation/languages.rs): a dictation in its
@@ -88,6 +89,11 @@ export function followHotkeyFallback(getCfg) {
   function onKeyUp(e) {
     if (hotkeyCapture.on) return;
     const cfg = getCfg();
+    if (upOn(e, cfg, 'quickNoteHotkey')) {
+      e.preventDefault();
+      invoke('quick_note_key', { pressed: false }).catch(() => {});
+      return;
+    }
     if (upOn(e, cfg, 'assistantHotkey')) {
       e.preventDefault();
       invoke('assistant_key', { pressed: false }).catch(() => {});

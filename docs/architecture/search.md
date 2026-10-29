@@ -243,7 +243,11 @@ whole-note match Chat's tools use.
 ## Ask across meetings in Chat
 
 **Where**: the Meetings view's Ask bar, and Chat's "Ask across your
-meetings" button on an empty chat. Both send with `scope: "meetings"`, and
+meetings" button on an empty chat — and, since 2026-10-29, a Skill run in
+Chat or from the Meetings view's one-tap prompts, which brings passages of
+its own (the open tasks, a week of meetings, the latest meeting's talk) or
+searches for its words (`chat/skills.rs`, [chat-and-assistant.md](./chat-and-assistant.md#skills-and-one-tap-prompts-2026-10-29)),
+answered and checked as below. The first two send with `scope: "meetings"`, and
 **the conversation keeps it** (`chats::Conversation.scope`, `set_scope`):
 its follow-ups are asked across the meetings too, and the thread says
 "Asking across your meetings and notes" above it.

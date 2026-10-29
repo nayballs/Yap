@@ -49,6 +49,7 @@
   import GenerateSummary from './GenerateSummary.svelte';
   import ConsentLine from './ConsentLine.svelte';
   import AskTray from './AskTray.svelte';
+  import CoachMark from './CoachMark.svelte';
   import DeleteMeetingDialog from './DeleteMeetingDialog.svelte';
   import Icon from './NotepadIcon.svelte';
   import './notepad.css';
@@ -433,6 +434,56 @@
     if (s.state === 'done') reload();
   }
 
+  // ---- an answer's cited line (Make me sound smart, a Skill) ----
+
+  /** A passage an answer cites: its line on the Transcript tab (lit a
+   *  moment), or the Summary / My thoughts it came from. */
+  function openSource(s) {
+    if (!note || s?.note !== note.id) return;
+    askTray?.close();
+    if (s.field === 'summary') tab = 'summary';
+    else if (s.field === 'content') tab = 'thoughts';
+    else {
+      const t = note.transcript || [];
+      // Lines moved since (a transcript done again): the one said then.
+      const i = t[s.line]?.ts === s.ts || !s.ts ? s.line : t.findIndex((x) => x.ts === s.ts);
+      tab = 'transcript';
+      if (i != null && i >= 0) view.jumpTo(i);
+    }
+  }
+
+  // ---- first-meeting coach marks (meetings/coach_marks.rs) ----
+  // In the person's first recorded meeting: "Take notes here" over My
+  // thoughts and "Try What did I miss?" by the Ask bar, each once (counted
+  // as it shows), each dismissable; typing notes or opening the Ask sheet
+  // puts the one it's about away.
+  let coach = $state({ notes: false, catchUp: false });
+  let coachFor = null;
+  const counted = new Set();
+  $effect(() => {
+    const id = recordingThis ? (note?.id ?? null) : null;
+    if (id == null || id === coachFor) return;
+    coachFor = id;
+    invoke('notepad_coach_marks', { noteId: id })
+      .then((m) => {
+        if (note?.id === id) coach = { notes: !!m?.notes, catchUp: !!m?.catchUp };
+      })
+      .catch(() => {});
+  });
+  const showNotesMark = $derived(coach.notes && recordingThis && tab === 'thoughts');
+  const showCatchUpMark = $derived(coach.catchUp && recordingThis && !askOpen);
+  $effect(() => {
+    for (const [kind, on] of [['notes', showNotesMark], ['catchUp', showCatchUpMark]]) {
+      if (on && !counted.has(kind)) {
+        counted.add(kind);
+        invoke('notepad_coach_mark_shown', { kind }).catch(() => {});
+      }
+    }
+  });
+  $effect(() => {
+    if (askOpen && coach.catchUp) coach.catchUp = false;
+  });
+
   // ---- the Ask sheet: what the person has seen ----
 
   // The Transcript tab is up, showing its lines, at the newest one.
@@ -516,11 +567,12 @@
       e.stopPropagation();
       readPageSelection();
     } else if (actionMatchesKeydown(e, cfg, 'quickNoteHotkey')) {
-      // The quick note (notes/quick_note.rs) comes up in front.
+      // The quick note (notes/quick_note/key.rs) comes up in front; held,
+      // a dictation into it.
       e.preventDefault();
       e.stopPropagation();
       flushSave();
-      invoke('quick_note_toggle').catch(() => {});
+      invoke('quick_note_key', { pressed: true }).catch(() => {});
     } else if (actionMatchesKeydown(e, cfg, 'hotkey')) {
       e.preventDefault();
       e.stopPropagation();
@@ -530,7 +582,10 @@
   // The key coming up: push-to-talk's release (Rust decides by the mode).
   function onKeyUp(e) {
     if (!cfg) return;
-    if (actionMatchesKeyup(e, cfg, 'assistantHotkey')) {
+    if (actionMatchesKeyup(e, cfg, 'quickNoteHotkey')) {
+      e.preventDefault();
+      invoke('quick_note_key', { pressed: false }).catch(() => {});
+    } else if (actionMatchesKeyup(e, cfg, 'assistantHotkey')) {
       e.preventDefault();
       invoke('assistant_key', { pressed: false }).catch(() => {});
     } else if (actionMatchesKeyup(e, cfg, 'hotkey')) {
@@ -626,7 +681,26 @@
     {#key tab}
       <main class="body">
         {#if tab === 'thoughts'}
-          <ThoughtsTab bind:note {recordingThis} {brief} bind:briefLineGone onsave={() => queueSave('content')} onopenbrief={openBrief} />
+          {#if showNotesMark}
+            <div class="coachtop">
+              <CoachMark
+                title="Take notes here"
+                body="Type what matters to you. Yap's summary builds on your notes and the transcript."
+                ondismiss={() => (coach.notes = false)}
+              />
+            </div>
+          {/if}
+          <ThoughtsTab
+            bind:note
+            {recordingThis}
+            {brief}
+            bind:briefLineGone
+            onsave={() => {
+              coach.notes = false;
+              queueSave('content');
+            }}
+            onopenbrief={openBrief}
+          />
         {:else if tab === 'transcript'}
           <TranscriptTab
             bind:note
@@ -666,6 +740,17 @@
       {#if recordingThis && !askOpen}
         <ConsentLine bind:menu {consent} ontogglemenu={toggleMenu} />
       {/if}
+      {#if showCatchUpMark}
+        <div class="coachbottom">
+          <CoachMark
+            title="Try What did I miss?"
+            body="Looked away? It catches you up on what was said since you last read the transcript."
+            pointer="down"
+            align="right"
+            ondismiss={() => (coach.catchUp = false)}
+          />
+        </div>
+      {/if}
       <AskTray
         bind:this={askTray}
         bind:open={askOpen}
@@ -677,6 +762,8 @@
         {windowShown}
         onstop={stop}
         onresume={resume}
+        onsource={openSource}
+        onshowsummary={() => (tab = 'summary')}
       />
     </div>
 
@@ -739,6 +826,19 @@
     bottom: 0;
     height: 150px;
     background: linear-gradient(to top, var(--yap-paper) calc(100% - 45px), transparent);
+  }
+  /* The first-meeting coach marks: under the tabs, and over the Ask bar's
+     chip (above the consent line). */
+  .coachtop {
+    flex: 0 0 auto;
+    padding: 12px 20px 0;
+  }
+  .coachbottom {
+    position: absolute;
+    right: 6px;
+    bottom: 118px;
+    display: flex;
+    justify-content: flex-end;
   }
 
   /* ---- no note ---- */
