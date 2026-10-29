@@ -3,6 +3,12 @@
 // after "@" opens a list of matching entries, Tab (or Enter while it's open)
 // puts the highlighted one in as a pill, and Enter otherwise sends what's in
 // the box into a list above it. Nothing is sent anywhere.
+//
+// The box keeps its spaces as typed (`white-space: pre-wrap`), as the
+// editors chat apps are built on do (Slack's Quill, Discord's Slate,
+// Lexical, ProseMirror): the space a picked mention puts after itself is
+// then on screen, and in what a screen reader reads (without it, a trailing
+// space collapses and only shows once text follows it).
 
 /**
  * A message box with an "@" list of `items` (`{ label, insert }`), Enter
@@ -11,7 +17,7 @@
  */
 export function pickerPage({ items, boxAttrs, enterSends = true, describe = true, aside = '' }) {
   return `${aside}
-<style>#box{min-height:60px;border:1px solid #888;background:#fff;padding:4px}.pill{background:#e8e0ff;border-radius:3px;padding:0 2px}#picker{border:1px solid #888;background:#fff;margin:0;padding:2px;list-style:none}#picker [aria-selected=true]{background:#cde}</style>
+<style>#box{white-space:pre-wrap;min-height:60px;border:1px solid #888;background:#fff;padding:4px}.pill{background:#e8e0ff;border-radius:3px;padding:0 2px}#picker{border:1px solid #888;background:#fff;margin:0;padding:2px;list-style:none}#picker [aria-selected=true]{background:#cde}</style>
 <ul id="sent" aria-label="Sent messages"></ul>
 <div id="box" contenteditable="true" role="textbox" aria-multiline="true" aria-autocomplete="list" aria-haspopup="listbox" aria-expanded="false" aria-controls="picker" ${boxAttrs}></div>
 <ul id="picker" role="listbox" aria-label="Suggestions" hidden></ul>

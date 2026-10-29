@@ -74,11 +74,22 @@ test('"at Rochelle": typed, picked from the list with Tab, the text after it in 
   const chat = await slack(robot);
   const r = await robot.dictate(chat, 'At Rochelle, can you check the build?');
   expect(r.error).toBeNull();
-  expect(r.steps[0]).toEqual({ typed: '@Rochelle', picked: true });
+  // Picked; the space the app put after the mention (as Slack and Discord
+  // do) taken back before the comma; then the rest.
+  expect(r.steps).toEqual([
+    { typed: '@Rochelle', picked: true },
+    { key: 'backspace' },
+    { paste: ', can you check the build?' },
+  ]);
   await expect.poll(() => chat.pills()).toEqual(['@Rochelle Okafor']);
-  // The space the app put after the mention went before the comma.
   await expect.poll(() => chat.box()).toBe('@Rochelle Okafor, can you check the build?');
   expect(await chat.sent()).toEqual([]);
+
+  // A word after it: the app's space is the one between them (no second).
+  const other = await slack(robot);
+  const r2 = await robot.dictate(other, 'At Priyanka can you check the build?');
+  expect(r2.steps).toEqual([{ typed: '@Priyanka', picked: true }, { paste: 'can you check the build?' }]);
+  await expect.poll(() => other.box()).toBe('@Priyanka Raman can you check the build?');
 });
 
 test("a list that doesn't say what it highlights gets no key: plain @Rochelle", async ({ robot }) => {

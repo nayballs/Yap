@@ -388,6 +388,9 @@ pub async fn run(plan: &Plan, r: Run) -> Outcome {
                     // (Slack, Discord): not another, and none before a
                     // comma or a full stop ("@Sam Example, can you…").
                     let spaced = picked && field(r.target).await.is_some_and(|c| c.before.ends_with(char::is_whitespace));
+                    if picked {
+                        tracing::debug!(spaced, "After a picked mention or file: a space of the app's before the text that follows");
+                    }
                     if spaced && t.starts_with(' ') {
                         t.remove(0);
                     } else if spaced && t.starts_with([',', '.', ';', ':', '!', '?', ')']) {
