@@ -3,14 +3,42 @@
   // attendees (+ Add attendees, a popover), its folder (a menu: move it, or
   // a new folder), then at the right: the meeting notepad, Record / Pause
   // (the meeting recorder: mic "You" + system audio "Them"; "End meeting &
-  // summarise" is in the bottom bar), Read aloud and Export.
+  // summarise" is in the bottom bar), Read aloud, Export and the note's ⋯
+  // menu: Pin, Transform ▸ (the selection in My thoughts, else the note or
+  // the summary on its tab), Version history…, Copy as Markdown, Export….
   import { invoke } from '@tauri-apps/api/core';
+  import { openContextMenu, menuOpenFor } from '../../ui/contextMenu.svelte.js';
+  import { pinItem, historyItem, transformItem, selectionIn } from './noteMenus.js';
   import { toast } from '../../ui/toast.svelte.js';
   import { showSaveError } from '../../notices/saveErrors.js';
   import { chipDate, fmtElapsed } from './noteFormat.js';
 
-  /** `notes`: the view's state (notesState.svelte.js). */
-  let { notes } = $props();
+  /** `notes`: the view's state (notesState.svelte.js); `onopensettings(section)`: Settings. */
+  let { notes, onopensettings = null } = $props();
+
+  // The note's ⋯ menu.
+  let moreEl = $state(null);
+  function noteMenu(e) {
+    const n = notes.selected;
+    if (!n) return;
+    const summary = notes.tab === 'enhanced' && !!n.enhancedContent?.trim();
+    // The selection while its box has the focus (the button doesn't take
+    // it from the box): else the whole note, or the summary on its tab.
+    const box = summary ? (notes.summaryEditing ? notes.summaryEl : null) : notes.tab === 'raw' ? notes.rawEl : null;
+    const selection = box && document.activeElement === box ? selectionIn(box) : null;
+    openContextMenu(
+      e,
+      [
+        pinItem(notes, n.id),
+        transformItem(notes, { field: summary ? 'summary' : 'notes', selection, openSettings: onopensettings }),
+        historyItem(notes, n.id, moreEl),
+        { separator: true },
+        { label: 'Copy as Markdown', icon: 'copy', onselect: () => notes.copyNoteMarkdown(n.id) },
+        { label: 'Export…', icon: 'download', onselect: () => notes.exportNote(n.id) },
+      ],
+      { label: 'Note' }
+    );
+  }
 
   let addingAttendee = $state(false);
   let attendeeInput = $state('');
@@ -200,6 +228,20 @@
   </button>
   <button class="iconbtn" title="Export as Markdown" aria-label="Export as Markdown" onclick={() => notes.exportNote()}>
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><path d="M7 10l5 5 5-5" /><path d="M12 15V3" /></svg>
+  </button>
+  <!-- The note's menu: Pin, Transform ▸, Version history… (noteMenus.js). -->
+  <button
+    bind:this={moreEl}
+    class="iconbtn"
+    class:on={menuOpenFor(moreEl)}
+    title="More"
+    aria-label="More for this note"
+    aria-haspopup="menu"
+    data-more
+    onmousedown={(e) => e.preventDefault()}
+    onclick={noteMenu}
+  >
+    <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="5" cy="12" r="1.7" /><circle cx="12" cy="12" r="1.7" /><circle cx="19" cy="12" r="1.7" /></svg>
   </button>
 </div>
 

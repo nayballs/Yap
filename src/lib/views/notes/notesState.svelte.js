@@ -11,6 +11,11 @@
 // Rust (meetings/meeting_end.rs), whichever window is open, and shown here as it goes
 // (docs/meetings.md). The meeting notepad (notepad/Notepad.svelte) shows the
 // same note: edits sync both ways.
+//
+// Pinned notes (notes/pins.rs) come first in the list; every note keeps its
+// earlier versions (notes/versions.rs: Version history, Restore, Undo); the
+// saved transforms run on the note (notes/transform.rs: the selection or the
+// whole of My thoughts or the summary).
 import { invoke } from '@tauri-apps/api/core';
 import { tick } from 'svelte';
 import { markdownToText } from '../../core/markdown.js';
@@ -518,8 +523,20 @@ export function createNotesState() {
   // that were edited: the meeting notepad (or the AI title) may have changed
   // the other one meanwhile.
   let dirty = { title: false, content: false };
-  function queueSave(field = 'content') {
+  // A dictation went into My thoughts since the last save (its version is
+  // "Dictated", notes/versions.rs): a paste just after Yap delivered one.
+  let dictated = false;
+  let transcriptAt = 0;
+  /** Yap delivered a dictation (`yap-transcript`): a paste in the next seconds is it. */
+  function onTranscript() {
+    transcriptAt = Date.now();
+  }
+  function queueSave(field = 'content', e = null) {
     dirty[field] = true;
+    if (field === 'content' && e?.inputType === 'insertFromPaste' && Date.now() - transcriptAt < 15_000) {
+      dictated = true;
+      transcriptAt = 0;
+    }
     clearTimeout(saveTimer);
     saveTimer = setTimeout(flushSave, 600);
   }
@@ -531,11 +548,197 @@ export function createNotesState() {
     const args = { id: selected.id, origin: LABEL };
     if (dirty.title) args.title = selected.title;
     if (dirty.content) args.content = selected.content;
+    if (dirty.content && dictated) args.how = 'dictated';
     dirty = { title: false, content: false };
+    dictated = false;
     // A failed save keeps the edit in memory and says so, with Try again.
     invoke('note_update', args)
       .then(refreshList)
       .catch((e) => showSaveError(e));
+  }
+
+  // ---- pinned notes (notes/pins.rs) ----
+
+  /** Note `id` is pinned (the list says). */
+  const isPinned = (id) => !!notes.find((n) => n.id === id)?.pinned;
+  /** Pin or unpin note `id`: it comes first in its folder, or goes back to its place. */
+  async function setPinned(id, pinned) {
+    if (id == null) return;
+    // Shown at once; put back if Rust says no.
+    notes = notes.map((n) => (n.id === id ? { ...n, pinned } : n));
+    try {
+      await invoke('note_pin', { id, pinned });
+    } catch (e) {
+      if (!showSaveError(e)) {
+        toast({ title: pinned ? "Couldn't pin the note" : "Couldn't unpin the note", description: String(e), variant: 'destructive' });
+      }
+    }
+    refreshList();
+  }
+
+  // ---- version history (notes/versions.rs) ----
+
+  // The open note's Version history dialog (VersionHistory.svelte).
+  let historyOpen = $state(false);
+  // What gets the focus back when it closes.
+  let historyReturn = null;
+  /** Open note `id`'s Version history (its row's menu, the note's ⋯). */
+  async function openHistory(id = selected?.id, returnFocus = null) {
+    if (id == null) return;
+    if (selected?.id !== id) await select(id);
+    if (selected?.id !== id) return;
+    flushSave();
+    finishSummaryEdit();
+    historyReturn = returnFocus;
+    historyOpen = true;
+  }
+  function closeHistory() {
+    historyOpen = false;
+    const back = historyReturn;
+    historyReturn = null;
+    setTimeout(() => back?.focus?.({ preventScroll: true }), 0);
+  }
+  /**
+   * Bring version `n` of the open note back (Restore, and Undo after a
+   * transform or a restore): a version itself, so Undo works on it too.
+   * Returns what Rust did, or null.
+   */
+  async function restoreVersion(n, { undo = false } = {}) {
+    if (!selected || n == null) return null;
+    const id = selected.id;
+    flushSave();
+    finishSummaryEdit();
+    let r = null;
+    try {
+      r = await invoke('note_version_restore', { id, n, origin: LABEL });
+    } catch (e) {
+      if (!showSaveError(e)) {
+        toast({ title: "Couldn't restore that version", description: String(e), variant: 'destructive' });
+        return null;
+      }
+    }
+    if (selected?.id === id) {
+      if (r?.field === 'notes') {
+        changing('content');
+        selected.content = r.text;
+        tab = 'raw';
+      } else {
+        await reloadSelected();
+        if (r?.field === 'summary' && selected?.enhancedContent) tab = 'enhanced';
+      }
+    }
+    refreshList();
+    if (r && !undo) {
+      toast({
+        kind: 'done',
+        chip: 'Notes',
+        title: r.field === 'summary' ? 'Summary restored' : 'Version restored',
+        description: 'The text it replaced is in Version history.',
+        action: r.previous != null ? { label: 'Undo', onClick: () => restoreVersion(r.previous, { undo: true }) } : null,
+      });
+    }
+    return r;
+  }
+
+  // ---- transforms (notes/transform.rs) ----
+
+  // The saved transforms (Settings → Commands → Transforms), for the menus.
+  let transforms = $state([]);
+  async function loadTransforms() {
+    try {
+      transforms = (await invoke('note_transforms')) || [];
+    } catch {
+      transforms = [];
+    }
+    return transforms;
+  }
+  // `{ noteId, name, field }` while one runs: its box waits (read-only).
+  let transforming = $state(null);
+  // Settings, for "Open Language Models" (NotesView gives it).
+  let openSettings = null;
+  /**
+   * Run transform `t` on the open note: `field` 'notes' (My thoughts) or
+   * 'summary'; `selection` `{ start, end, text }` from its box, else the
+   * whole text. The result replaces it as a version of its own (Undo).
+   */
+  async function runTransform(t, { field = 'notes', selection = null } = {}) {
+    if (!selected || !t || transforming) return;
+    const id = selected.id;
+    flushSave();
+    if (field === 'summary' && summaryEditing) await flushSummary();
+    transforming = { noteId: id, name: t.name, field };
+    try {
+      const r = await invoke('note_transform', { id, transform: t.id, field, selection, origin: LABEL });
+      if (r.outcome === 'unchanged') {
+        toast({ kind: 'done', chip: 'Notes', title: `${t.name}: no changes needed`, description: 'The AI gave back the same text.' });
+        return;
+      }
+      if (r.outcome === 'moved') {
+        let onClipboard = false;
+        try {
+          await navigator.clipboard.writeText(r.result);
+          onClipboard = true;
+        } catch {
+          /* the clipboard is busy */
+        }
+        toast({
+          title: onClipboard ? `Couldn't put ${t.name} in place — copied the result` : `Couldn't put ${t.name} in place`,
+          description:
+            'The note changed while Yap was working on it, so Yap left it as it was.' +
+            (onClipboard ? ' The result is on the clipboard: press Ctrl+V.' : ''),
+          variant: 'destructive',
+        });
+        return;
+      }
+      if (selected?.id === id) await showTransformed(field, r);
+      refreshList();
+      toast({
+        kind: 'done',
+        chip: 'Notes',
+        title: `${r.name} ✓`,
+        description:
+          field === 'summary' ? 'The summary is yours now: Yap asks before writing it again.' : 'Undo, or find it in Version history.',
+        action: r.previous != null ? { label: 'Undo', onClick: () => restoreVersion(r.previous, { undo: true }) } : null,
+      });
+    } catch (e) {
+      const msg = String(e);
+      if (showSaveError(msg)) {
+        if (selected?.id === id) await reloadSelected();
+      } else {
+        toast({
+          title: `${t.name} didn't work`,
+          description: msg,
+          variant: 'destructive',
+          action:
+            /Set up an AI model|API key/i.test(msg) && openSettings
+              ? { label: 'Open Language Models', onClick: () => openSettings('cleanup') }
+              : null,
+        });
+      }
+    } finally {
+      transforming = null;
+    }
+  }
+  /** The open note's box after a transform: its new text, the result selected. */
+  async function showTransformed(field, r) {
+    if (field === 'notes') {
+      changing('content');
+      selected.content = r.text;
+      tab = 'raw';
+      await tick();
+      rawEl?.focus({ preventScroll: true });
+      rawEl?.setSelectionRange(r.start, r.end);
+      return;
+    }
+    if (summaryEditing) {
+      summaryDraft = r.text;
+      selected.enhancedContent = r.text;
+      await tick();
+      fitSummary();
+      summaryEl?.focus({ preventScroll: true });
+      summaryEl?.setSelectionRange(r.start, r.end);
+    }
+    await reloadSelected();
   }
 
   const isStale = $derived.by(() => {
@@ -975,6 +1178,18 @@ export function createNotesState() {
     set asking(v) { asking = v; },
     get chatConvId() { return chatConvId; },
     get chatThreads() { return chatThreads; },
+    get historyOpen() { return historyOpen; },
+    get transforms() { return transforms; },
+    get transforming() { return transforming; },
+    set openSettings(v) { openSettings = v; },
+    onTranscript,
+    isPinned,
+    setPinned,
+    openHistory,
+    closeHistory,
+    restoreVersion,
+    loadTransforms,
+    runTransform,
     loadChat,
     keepChat,
     newChat,

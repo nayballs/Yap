@@ -12,11 +12,14 @@
 
 pub mod commands;
 pub mod note_edits;
+pub mod pins;
 pub mod quick_note;
 pub mod retention;
 pub mod task_store;
 pub mod tasks;
 pub mod transcript_edits;
+pub mod transform;
+pub mod versions;
 
 #[cfg(not(test))]
 use std::path::PathBuf;
@@ -456,6 +459,10 @@ struct Store {
     actions: Vec<Action>,
     #[serde(default)]
     notes: Vec<Note>,
+    /// Each note's version history, as loaded (`notes/versions.rs`: its own
+    /// files, never notes.json).
+    #[serde(skip)]
+    versions: versions::Cache,
 }
 
 impl Default for Store {
@@ -464,6 +471,7 @@ impl Default for Store {
             folders: default_folders(),
             actions: default_actions(),
             notes: Vec::new(),
+            versions: versions::Cache::default(),
         }
     }
 }
@@ -492,9 +500,8 @@ fn load_from_disk() -> Store {
         // never overwritten — see config::quarantine_corrupt.
         Ok(s) => match serde_json::from_str::<Store>(&s).or_else(|_| {
             serde_json::from_str::<Vec<Note>>(&s).map(|notes| Store {
-                folders: default_folders(),
-                actions: default_actions(),
                 notes,
+                ..Store::default()
             })
         }) {
             Ok(store) => store,
@@ -603,6 +610,7 @@ fn with_store<R>(f: impl FnOnce(&mut Store) -> R) -> R {
         f(store)
     };
     write_pending();
+    let _ = versions::write_pending();
     out
 }
 
@@ -624,6 +632,7 @@ thread_local! {
 fn with_store<R>(f: impl FnOnce(&mut Store) -> R) -> R {
     let out = TEST_STORE.with(|s| f(&mut s.borrow_mut()));
     write_pending();
+    let _ = versions::write_pending();
     out
 }
 
@@ -975,6 +984,7 @@ pub fn list() -> Value {
                     "title": n.title,
                     "preview": preview,
                     "updatedTs": n.updated_ts,
+                    "createdTs": n.created_ts,
                     "hasEnhanced": !n.enhanced_content.is_empty(),
                     "stale": !n.enhanced_content.is_empty()
                         && n.enhanced_at_hash != content_hash(&n.content),
@@ -1152,7 +1162,12 @@ pub fn update(
     participants: Option<Vec<String>>,
 ) -> Result<(), String> {
     with_store(|store| {
+        let at = store.notes.iter().position(|n| n.id == id);
+        let before = at.map(|at| versions::Before::of(&store.notes[at]));
         if apply_update(store, id, title, content, folder, participants)? {
+            if let (Some(at), Some(before)) = (at, before) {
+                versions::noted(store, at, &before, versions::kind::EDITED);
+            }
             save_to_disk(store);
         }
         Ok(())
@@ -1219,14 +1234,16 @@ pub fn modify<R>(
     f: impl FnOnce(&mut Note) -> Result<(R, bool), String>,
 ) -> Result<R, String> {
     with_store(|store| {
-        let note = store
+        let at = store
             .notes
-            .iter_mut()
-            .find(|n| n.id == id)
+            .iter()
+            .position(|n| n.id == id)
             .ok_or_else(|| format!("Note with ID {id} not found"))?;
-        let (result, changed) = f(note)?;
+        let before = versions::Before::of(&store.notes[at]);
+        let (result, changed) = f(&mut store.notes[at])?;
         if changed {
-            note.updated_ts = now_secs();
+            store.notes[at].updated_ts = now_secs();
+            versions::noted(store, at, &before, versions::kind::EDITED);
             save_to_disk(store);
         }
         Ok(result)
@@ -1238,13 +1255,15 @@ pub fn modify<R>(
 /// doesn't float to the top of the list as edited "now".
 pub fn modify_quietly<R>(id: u64, f: impl FnOnce(&mut Note) -> Result<(R, bool), String>) -> Result<R, String> {
     with_store(|store| {
-        let note = store
+        let at = store
             .notes
-            .iter_mut()
-            .find(|n| n.id == id)
+            .iter()
+            .position(|n| n.id == id)
             .ok_or_else(|| format!("Note with ID {id} not found"))?;
-        let (result, changed) = f(note)?;
+        let before = versions::Before::of(&store.notes[at]);
+        let (result, changed) = f(&mut store.notes[at])?;
         if changed {
+            versions::noted(store, at, &before, versions::kind::EDITED);
             save_to_disk(store);
         }
         Ok(result)
@@ -1446,9 +1465,13 @@ pub fn set_enhanced(id: u64, enhanced: &str, at_hash: &str) -> Result<(), String
             .iter_mut()
             .find(|n| n.id == id)
             .ok_or("Note not found")?;
+        let before = versions::Before::of(note);
         note.enhanced_content = enhanced.to_string();
         note.enhanced_at_hash = at_hash.to_string();
         note.updated_ts = now_secs();
+        if let Some(at) = store.notes.iter().position(|n| n.id == id) {
+            versions::noted(store, at, &before, versions::kind::SUMMARY);
+        }
         save_to_disk(store);
         Ok(())
     })
@@ -1489,6 +1512,7 @@ pub fn modify_or_remove<R>(
             .iter()
             .position(|n| n.id == id)
             .ok_or_else(|| format!("Note with ID {id} not found"))?;
+        let before = versions::Before::of(&store.notes[at]);
         let (result, changed) = f(&mut store.notes[at])?;
         if gone(&store.notes[at]) {
             store.notes.remove(at);
@@ -1497,6 +1521,8 @@ pub fn modify_or_remove<R>(
         }
         if changed {
             store.notes[at].updated_ts = now_secs();
+            // The quick note's typing.
+            versions::noted(store, at, &before, versions::kind::TYPED);
             save_to_disk(store);
         }
         Ok(Some(result))
@@ -1518,6 +1544,9 @@ fn forget_extras(id: u64) {
     crate::meetings::meeting_audio::forget(id);
     crate::chat::chats::delete_for_note(id);
     crate::search::removed();
+    // Its version history and its pin (notes/versions.rs, notes/pins.rs).
+    versions::forget(id);
+    pins::forget(id);
 }
 
 #[cfg(test)]

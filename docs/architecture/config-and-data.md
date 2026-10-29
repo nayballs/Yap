@@ -445,6 +445,29 @@
   saves can drop or turn a Skill into an action. Reset app keeps it (setup,
   like folders and actions: `privacy/reset.rs` STAYS); Download your data
   includes it (`skills.json` in the zip).
+- Note versions: `%APPDATA%/yap/note-versions/<note id>.json` — each note's
+  version history (2026-10-29, `notes/versions.rs`): `{note, created, next,
+  versions: [{n, field: "notes" | "summary", kind, label?, from?, sinceMs,
+  ms, text}]}`, the last 50 texts of its My thoughts and summary, each with
+  how it came (typed, dictated, summary, action, transform, chat, restored,
+  edited, earlier). Through `saving.rs` ("your notes' history"; a file that
+  doesn't read set aside). `created` is the note's `createdTs`: a file left
+  by a note an older Yap deleted is ignored by a new note given its id.
+  Deleted with its note; a meeting's summary versions go with its
+  transcript ("Delete meeting transcripts after"). Never sent anywhere.
+  Files of their own, not notes.json fields: an older Yap never opens them
+  (its notes have no history there; an edit it makes shows here as an
+  "earlier" version), and notes.json stays the size it was. Download your
+  data puts every note's history in `notes/versions.json`; Reset app
+  deletes the folder's files with the notes (`versions::reset`).
+- Pinned notes: `%APPDATA%/yap/note_pins.json` — `{pins: [{id, created,
+  ms}]}` (2026-10-29, `notes/pins.rs`): the notes pinned in Notes, each by
+  its id and `createdTs`. A file of its own, so an older Yap saving
+  notes.json never drops a pin (it lists the notes unpinned and never opens
+  the file). A note's pin goes with it, and every pin with Reset app
+  (`pins::reset`); not in Download your data (a pin is a place in a list,
+  not something the person wrote). Through `saving.rs` ("your pinned
+  notes").
 - Chat screenshots: `%APPDATA%/yap/chat-images/` — `img_<16 hex>.png` for each
   screenshot a question carries (Snip to Chat, `snip/images.rs`); `chats.json`
   keeps only its id, size, bytes and source. Deleted with its conversation, after
@@ -597,10 +620,12 @@
   to the AI model the person uses, never to Yap.
 - **Download your data and Reset app** (2026-10-29, Settings → Privacy &
   data → Your data; [privacy-receipts.md](./privacy-receipts.md)): one .zip
-  of the history, notes and meetings, chats, tasks, memory, the dictionary
-  and settings without keys (the audio and screenshots with a tick box),
+  of the history, notes and meetings (and each note's earlier versions),
+  chats, tasks, memory, the dictionary and settings without keys (the audio
+  and screenshots with a tick box),
   never uploaded; and "Clear everything and keep my settings": the history
-  and its audio, notes and meetings with theirs, chats and screenshots,
+  and its audio, notes and meetings with theirs (and their versions and
+  pins), chats and screenshots,
   memory, tasks, the search index, the usage counts and the pre-meeting
   briefs go; config.json, `dictionary_usage.json`, the models, the account
   and calendars, and Yap's own records stay. **Every file this page names

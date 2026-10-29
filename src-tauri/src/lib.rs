@@ -474,6 +474,12 @@ pub fn run() {
             notes::note_edits::note_summary_restore,
             notes::note_edits::note_summary_put_back,
             notes::note_edits::note_summary_rate,
+            // Pinned notes, version history, transforms in notes.
+            notes::pins::note_pin,
+            notes::versions::note_versions,
+            notes::versions::note_version_restore,
+            notes::transform::note_transforms,
+            notes::transform::note_transform,
             speakers::speaker_rename,
             speakers::speaker_rename_lines,
             speakers::speaker_merge,

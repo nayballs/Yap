@@ -13,9 +13,18 @@
   import SummaryFind from '../../components/SummaryFind.svelte';
   import SummaryRating from '../../components/SummaryRating.svelte';
   import { LABEL } from './notesState.svelte.js';
+  import { openContextMenu, menuKey } from '../../ui/contextMenu.svelte.js';
+  import { selectionMenu } from './noteMenus.js';
 
-  /** `notes`: the view's state (notesState.svelte.js). */
-  let { notes } = $props();
+  /** `notes`: the view's state (notesState.svelte.js); `onopensettings(section)`: Settings. */
+  let { notes, onopensettings = null } = $props();
+
+  // A right-click on text selected in the summary's box: the transforms,
+  // Cut, Copy, Select all (noteMenus.js).
+  function onEditContextMenu(e) {
+    const items = selectionMenu(notes, e.currentTarget, { field: 'summary', openSettings: onopensettings });
+    if (items) openContextMenu(e, items, { label: 'Selected text', row: e.currentTarget });
+  }
 
   let find = $state(null);
   let findOpen = $state(false);
@@ -36,6 +45,7 @@
   }
 
   function onSummaryKeydown(e) {
+    if (menuKey(e, onEditContextMenu)) return;
     if (e.key === 'Escape') {
       e.preventDefault();
       e.stopPropagation();
@@ -88,8 +98,10 @@
     aria-label="Edit the summary (Markdown)"
     bind:this={notes.summaryEl}
     bind:value={notes.summaryDraft}
+    readonly={notes.transforming?.noteId === notes.selected.id && notes.transforming?.field === 'summary'}
     oninput={notes.queueSummarySave}
     onkeydown={onSummaryKeydown}
+    oncontextmenu={onEditContextMenu}
   ></textarea>
 {:else}
   <SummaryFind bind:this={find} bind:open={findOpen} root={() => notes.renderedEl} text={notes.selected.enhancedContent} look="app" />
