@@ -182,7 +182,8 @@ const PASTE_LAST: usize = 7;
 /// clipboard. Unbound by default; its press only.
 const COPY_LAST: usize = 8;
 /// Quick note (`notes/quick_note.rs`): the quick-note window from any app,
-/// or away again while it's in front. Unbound by default; its press only.
+/// or away again while it's in front; held, a dictation into it
+/// (`quick_note/key.rs`: its press and release). Unbound by default.
 const QUICK_NOTE: usize = 9;
 /// How many fixed actions there are.
 pub const FIXED_COUNT: usize = 10;
@@ -226,9 +227,9 @@ const FIXED_EVENTS: [(&str, &str); FIXED_COUNT] = [
     ("copy-last-key-pressed", "copy-last-key-released"),
     ("quick-note-key-pressed", "quick-note-key-released"),
 ];
-/// The actions a key is held for (push-to-talk): a chord or a stuck key
-/// matters to them.
-const HOLDS: [usize; 3] = [DICTATION, EDIT, ASSISTANT];
+/// The actions a key is held for (push-to-talk; Quick note's hold dictates
+/// into the note): a chord or a stuck key matters to them.
+const HOLDS: [usize; 4] = [DICTATION, EDIT, ASSISTANT, QUICK_NOTE];
 /// Each fixed action's first shortcut.
 static FIXED: [KeyBinding; FIXED_COUNT] = [const { KeyBinding::new() }; FIXED_COUNT];
 /// More shortcuts for one action, beside its first ("+ Add another").
@@ -692,6 +693,22 @@ pub fn configure_copy_last(key_spec: &str) -> Result<String, String> {
 /// (`notes/quick_note.rs`). An empty spec unbinds it (the default).
 pub fn configure_quick_note(key_spec: &str) -> Result<String, String> {
     configure_fixed(QUICK_NOTE, "Quick-note", key_spec)
+}
+
+/// A Yap window's page heard the Quick note shortcut come up
+/// (`notes/quick_note/key.rs`): the hook never hears keys while a Yap
+/// webview has the focus, and the quick note takes it on the press. Its
+/// shortcuts aren't held any more, so the next press from another app isn't
+/// taken for the key repeating. No event goes out.
+pub fn quick_note_key_up() {
+    for b in group(QUICK_NOTE) {
+        if b.active.swap(false, Ordering::Relaxed) {
+            let (kind, code, _) = b.kind_code_mods();
+            if kind == KEY_TYPE_KEYBOARD {
+                set_held(code, false);
+            }
+        }
+    }
 }
 
 /// The shortcuts Paste last, Copy last and Quick note give way to, by name,
@@ -1821,10 +1838,12 @@ pub fn start_input_hook(app_handle: AppHandle) {
                 // or the sweep let go of a stuck one: the pipeline decides.
                 if event == CHORD {
                     crate::dictation::pipeline::key_chord(&app_handle, at);
+                    crate::notes::quick_note::key::key_chord(&app_handle, at);
                     continue;
                 }
                 if event == STUCK {
                     crate::dictation::pipeline::key_stuck(&app_handle);
+                    crate::notes::quick_note::key::key_stuck(&app_handle);
                     continue;
                 }
                 // A saved transform's press: one event, with its slot.

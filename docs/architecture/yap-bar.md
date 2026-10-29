@@ -20,8 +20,16 @@ The always-there pill above the taskbar: the `overlay` window's Rust side (regio
   aloud shortcut, `Status.readHotkey`), ✂ Snip to Chat (`snip`: drag a box
   over any screen, the picture into Chat — `snip.rs`, [snip.md](./snip.md); the
   bar never took the focus, so a cancel gives it back to the app you were in;
-  its tooltip names the snip shortcut, `Status.snipHotkey`) and a ^ menu (Open Yap, New meeting note, Settings,
-  Hide the bar for 1 hour, Turn off the bar — `bar_action`); **dictating** =
+  its tooltip names the snip shortcut, `Status.snipHotkey`), 📝 **Quick
+  note** when it's switched on (`bar_quick_note`, off by default; Wispr's
+  "Add to Flow Bar", 2026-10-29: the quick note's empty page offers it,
+  Settings → General → Yap bar has it; `bar_action "quick-note"`: up, or
+  away while it's in front, as a tap of its shortcut — the bar never took
+  the focus, so the quick note's Send goes to the app you're in; its tooltip
+  names its shortcut, `Status.quickNoteHotkey`; [notes.md](./notes.md#the-quick-note-notesquick_noters))
+  and a ^ menu (Open Yap, New meeting note, Paste last transcript, Settings,
+  the microphone and the languages — `bar/menu.rs`, below —, Hide the bar
+  for 1 hour, Turn off the bar — `bar_action`); **dictating** =
   the dictation overlay (waveform, live partials, Transcribing…, errors), with
   ✕ (`dictation-cancel`) and ✓ (`dictation-stop`: stop and paste, as the
   hotkey's second press — into the app the dictation started in) while it
@@ -108,11 +116,26 @@ The always-there pill above the taskbar: the `overlay` window's Rust side (regio
   real one, for checking a real click reaches it — never while the maintainer's
   using the mouse). Every card answer (button, ✕, Esc, its timer) is logged
   as "bar: card answered" with the card and action; the hover check logs at
-  debug when it changes. Settings → General → Yap bar (`bar_enabled`, `bar_hide_fullscreen`, `bar_theme` Match app / Light / Dark;
+  debug when it changes. Settings → General → Yap bar (`bar_enabled`, `bar_hide_fullscreen`, `bar_quick_note`, `bar_theme` Match app / Light / Dark;
   `overlay_position` puts it at the top) and Settings → Dictation → While you dictate (`bar_dictation_buttons`,
   the live preview). Bar off = the old behaviour: the
   overlay only while dictating, notices as Windows notifications — but a
   showing dictation's ✕ / ✓ and Undo still take clicks (`clickable`).
+- **`bar/menu.rs`** — **the ^ menu's extras** (2026-10-29, Wispr Flow's Flow
+  Bar menu by behaviour), read when the menu opens (`bar_menu` →
+  `{mics, pasteLast, languages}`; Windows' microphones never polled): **the
+  microphone in use** ("Microphone: Contoso H2", `mics::short_name`), which
+  opens the others connected in the order Yap tries them (`mic_rows`,
+  pure: the person's order via `mics::candidates`, then Windows' default,
+  then the rest; software devices only when used) — picking one puts it
+  first in Settings → Dictation → Microphone's order (`bar_use_mic` →
+  `mics::offer::put_first`, as "Use it for dictation" does);
+  **Paste last transcript** when there's one (`bar_action "paste-last"` →
+  `pasting/last.rs` `paste_soon`, into the app you're in); and **Dictate in
+  French** for each language shortcut that can run (`bar_action
+  "dictate-in:<id>"` → `menu::dictate_in`: `languages::arm` around the
+  bar's own toggle, as its shortcut's press). The menu scrolls past 440 px
+  (the window is 560 tall). `e2e/bar-menu.spec.js` (made-up microphones).
 - **`bar/overlay.rs`** — the bar window's Win32 side + its pure, unit-tested maths:
   `place` (work-area placement), `fullscreen_on` (None / Borderless /
   Exclusive), `region_at` (hit-testing with slack), `enforced_ex_style`, and
@@ -145,7 +168,8 @@ The always-there pill above the taskbar: the `overlay` window's Rust side (regio
   **idle pill** is 40×8 (light: white at 85 % with a 1 px ink border at
   30 %; dark: warm ink at 55 %, cream border), radius 6, no shadow, in a
   60×20 wrapper; it morphs into the open
-  pill (not measured yet: Yap's own 196×38 — 🎤, ◉, 🔊, ✂ and ^); tooltips (ink in both schemes,
+  pill (not measured yet: Yap's own 196×38 — 🎤, ◉, 🔊, ✂ and ^; 230 wide
+  with the quick note's 📝, `.wide`); tooltips (ink in both schemes,
   radius 8, 12 / 600: "Dictate F9", "New note Win + Alt + M") and the ^ menu
   sit above it. The **meeting pill**: 69×30, the bar surface, a 2 px ring in Yap's
   recording red (`#e5645e`; Wispr's is emerald), radius 22.5, half opacity

@@ -41,7 +41,7 @@ pub struct Part {
 /// What a reset deletes, in the order the dialog says it.
 pub const GOES: &[Part] = &[
     Part { id: "history", label: "Your dictation history, and the last day of dictation audio", files: &["history.json", "recent-audio/"] },
-    Part { id: "notes", label: "Every note and meeting, with their audio (your folders and actions stay)", files: &["notes.json", "meeting-audio/"] },
+    Part { id: "notes", label: "Every note and meeting, with their audio (your folders and actions stay)", files: &["notes.json", "meeting-audio/", "quick_note_tabs.json"] },
     Part { id: "chats", label: "Every chat, with its screenshots", files: &["chats.json", "chat-images/"] },
     Part { id: "memory", label: "What Yap remembers about you", files: &["memory.json"] },
     Part { id: "tasks", label: "Your tasks", files: &["tasks.json"] },
@@ -196,6 +196,8 @@ fn run(app: &AppHandle) -> Result<Done, String> {
     // Notes and meetings: every window lets go of each.
     let ids = crate::notes::reset();
     done.notes = ids.len();
+    // The quick note's open tabs were those notes.
+    crate::notes::quick_note::tabs::reset();
     for id in &ids {
         let _ = app.emit(crate::meetings::meeting_end::EVENT_DELETED, serde_json::json!({ "id": id }));
         crate::meetings::notepad::on_note_deleted(app, *id);

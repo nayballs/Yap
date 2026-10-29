@@ -472,8 +472,11 @@ to **Run again** from Home.
   every shortcut older than it — `older_shortcuts`, `unless_clash`; only
   the press is used — `pasting/last.rs`, [pasting.md](./pasting.md)), then
   **Quick note** (2026-10-28; `quick-note-key-*`, `configure_quick_note`/`_from`,
-  unbound by default, giving way to all nine older ones; its press only —
-  `notes/quick_note.rs` `toggle_soon`, [notes.md](./notes.md#the-quick-note-notesquick_noters)). Beside them, **up to 12
+  unbound by default, giving way to all nine older ones; its press and
+  release since 2026-10-29 — `notes/quick_note/key.rs`: a tap opens or hides
+  it, a hold dictates into it — and one of the hold keys, `HOLDS`, so a
+  chord or a stuck key reaches it too; `quick_note_key_up` lets go of it
+  when a Yap window's page heard its release, [notes.md](./notes.md#the-quick-note-notesquick_noters)). Beside them, **up to 12
   saved transforms' shortcuts** (`TRANSFORM_BINDINGS`, a slot each;
   `configure_transforms_from` at setup and every save,
   `transforms::assign` giving each transform with a key a slot in list
@@ -506,8 +509,10 @@ to **Run again** from Home.
   **A hold that grows into a chord**: a key going down that wasn't held
   (`note_new_key`; not the binding's own key or modifiers, AltGr's made-up
   left Ctrl, nor the menu-mask key — `held::another_key`) under a second
-  after a hold-to-talk press (`HOLDS`: dictation, rewrite, assistant, and
-  the language slots) is sent once as `CHORD` → `pipeline::key_chord`
+  after a hold-to-talk press (`HOLDS`: dictation, rewrite, assistant, Quick
+  note, and the language slots) is sent once as `CHORD` → `pipeline::key_chord`
+  (and `quick_note::key::key_chord`; the stuck-key sweep's `STUCK` reaches
+  both too)
   (push-to-talk: `gesture::chord`; toggle: the press that started this
   recording, `GestureSlot.toggle_press`) — dropped silently, with the "hold
   only {key}" tip. **The stuck-key sweep** (`sweep`, on the hook's thread;
