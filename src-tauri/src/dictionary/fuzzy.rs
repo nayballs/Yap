@@ -271,6 +271,16 @@ pub fn apply_screen(
         if dist == 0 {
             return run.len() == 1 || unordinary;
         }
+        // A run ending with an everyday word the name doesn't end with
+        // ("Priyanka can" with "Priyanka Raman" on screen, in "Priyanka can
+        // you check?"): the word was said, not the name (2026-10-29).
+        if let [_, .., last] = run {
+            let last = build_ngram(std::slice::from_ref(last));
+            let name_last = replacement.split_whitespace().last().map(letters_key).unwrap_or_default();
+            if is_word(&last) && levenshtein(&last, &name_last) > 1 {
+                return false;
+            }
+        }
         let named = run.iter().any(|w| w.chars().find(|c| c.is_alphabetic()).is_some_and(char::is_uppercase));
         unordinary
             && named

@@ -169,7 +169,10 @@ The correction dictionary: near-miss (fuzzy) matching, several ways one word is 
   when what was heard isn't ordinary words only ("row shell", "zen tricks",
   "hash map" with a "HashMap" on screen stay as said), spells **and**
   sounds close (plain edit distance ≤ 0.34, `sound_distance` ≤ 0.4, on top
-  of Handy's score), and is never a spelling the dictionary or memory gives
+  of Handy's score), never ends with an everyday word the name doesn't end
+  with (2026-10-29, found by the chat robot: "Priyanka can you check?" had
+  become "Priyanka Raman you check?" with Priyanka Raman on screen; "Priyanka
+  Ramen" is still fixed), and is never a spelling the dictionary or memory gives
   (`protected`: they have the final say; those terms are no targets
   either); and only when the speech model wrote what it heard as a name (a
   capital: "Rachelle", "Zentrics", "GPTOSS" — Parakeet wrote a spoken "row

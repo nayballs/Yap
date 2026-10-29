@@ -71,9 +71,13 @@ button). Unit-tested (the splitting, mentions and file matching, the
 spoken forms, the focus, the binding, an older Yap's save) and e2e-tested
 (`e2e/chat-editors.spec.js`: the settings in light and dark, the steps a
 test run takes in a stand-in Slack, Teams, WhatsApp, VS Code, Cursor and
-Claude Code, the Send shortcut). Robot specs written, **not yet run**
+Claude Code, the Send shortcut) and robot-tested, 8 of 8
 (`e2e-real/chat-messages.real.js`, `editor-files.real.js`: stand-in pages
-with an "@" list in Edge, the stand-in Claude Code). **Not yet tried**: a
+with an "@" list in Edge — stacked messages sent and stopped, a mention
+picked with the app's space before a comma taken back, plain @Name where
+the list doesn't say what it highlights, a file tagged in the chat box and
+not in the editor —, the stand-in Claude Code's "@path", the Send
+shortcut in the test pad). **Not yet tried**: a
 real Slack, Discord, Teams, Cursor, Windsurf or VS Code — whether their "@"
 lists tell UI Automation which entry is highlighted (Yap presses no Tab
 until it sees it, so where they don't the mention stays plain text), the

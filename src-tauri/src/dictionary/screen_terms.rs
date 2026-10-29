@@ -1160,6 +1160,19 @@ mod tests {
         assert_eq!(crate::dictation::pipeline::as_said_text(heard, &off, Some(&s)), heard);
     }
 
+    /// A full name on screen never swallows the everyday word said after
+    /// its first name ("Priyanka can you…" isn't "Priyanka Raman you…"; the
+    /// robot's chat stand-in, 2026-10-29). Its last name heard a little
+    /// wrong is still spelled as shown.
+    #[test]
+    fn a_full_name_never_takes_the_word_after_a_first_name() {
+        let s = screen("Members: Priyanka Raman, Rochelle Okafor");
+        let keep = |_: &str| false;
+        assert_eq!(s.correct("Priyanka can you check the build?", &keep, &words), "Priyanka can you check the build?");
+        assert_eq!(s.correct("Rochelle can you look?", &keep, &words), "Rochelle can you look?");
+        assert_eq!(s.correct("Ask Priyanka Ramen about it.", &keep, &words), "Ask Priyanka Raman about it.");
+    }
+
     #[test]
     fn an_email_keeps_its_lines() {
         // The robot's Gmail page (2026-10-24): any term on screen and an

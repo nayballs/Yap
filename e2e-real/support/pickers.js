@@ -53,7 +53,8 @@ function open(q) {
   if (DESCRIBE) box.setAttribute('aria-activedescendant', 'opt0');
 }
 box.addEventListener('input', () => {
-  const m = /@([\\w.]*)$/.exec(before());
+  // A full name goes on matching past its space, as Slack's list does ("@Priyanka Ra").
+  const m = /@([\\w.]*(?: [\\w.]*)?)$/.exec(before());
   if (m) open(m[1]);
   else close();
 });
