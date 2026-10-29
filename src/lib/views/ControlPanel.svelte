@@ -36,8 +36,6 @@
   import { initCleanupOffer } from '../notices/cleanupOffer.js';
   import { initFeatureTips } from '../notices/featureTips.js';
   import { openConnectDialog } from '../stores/calendar.svelte.js';
-  import HelpMenu from './help/HelpMenu.svelte';
-  import MeetingSetup from './MeetingSetup.svelte';
   import ConnectCalendarDialog from '../components/ConnectCalendarDialog.svelte';
   // Every view is in this window's one chunk (~590 KB): loading the views
   // other than Home on demand was measured on 2026-10-22 and changed nothing
@@ -349,12 +347,15 @@
       <span class="brandname" data-tauri-drag-region>Yap</span>
     </div>
     <div class="winbtns">
-      <HelpMenu
-        bind:open={helpOpen}
-        onshortcuts={() => (sheetOpen = true)}
-        onsettings={(section) => openSettings(section)}
-        onwhatsnew={() => (whatsNewOpen = true)}
-      />
+      <!-- Help (views/help/, its own chunk: the main one stays under Vite's 700 kB). -->
+      {#await import('./help/HelpMenu.svelte') then { default: HelpMenu }}
+        <HelpMenu
+          bind:open={helpOpen}
+          onshortcuts={() => (sheetOpen = true)}
+          onsettings={(section) => openSettings(section)}
+          onwhatsnew={() => (whatsNewOpen = true)}
+        />
+      {/await}
       <div class="bellwrap">
         <button
           class="winbtn bell"
@@ -425,20 +426,23 @@
 
     <div class="spacer"></div>
 
-    <!-- "Set up meeting notes" until it's done or dismissed (shell/guide.rs). -->
-    <MeetingSetup
-      view={activeView}
-      onconnect={() => {
-        settingsOpen = false;
-        activeView = 'meetings';
-        openConnectDialog();
-      }}
-      onmeetings={() => {
-        settingsOpen = false;
-        activeView = 'meetings';
-      }}
-      onmcp={() => openSettings('mcp')}
-    />
+    <!-- "Set up meeting notes" until it's done or dismissed (shell/guide.rs;
+         its own chunk). -->
+    {#await import('./MeetingSetup.svelte') then { default: MeetingSetup }}
+      <MeetingSetup
+        view={activeView}
+        onconnect={() => {
+          settingsOpen = false;
+          activeView = 'meetings';
+          openConnectDialog();
+        }}
+        onmeetings={() => {
+          settingsOpen = false;
+          activeView = 'meetings';
+        }}
+        onmcp={() => openSettings('mcp')}
+      />
+    {/await}
 
     <div class="bottom">
       <button class="navitem" onclick={() => openSettings()}>
