@@ -967,11 +967,17 @@ fn hover(app: &AppHandle, cursor: Option<(i32, i32)>) {
 }
 
 /// The bar got activated after all (a WebView2 quirk): the app you were in
-/// gets the focus back, so typing and pasting carry on there.
+/// gets the focus back, so typing and pasting carry on there — unless the
+/// click opened one of Yap's windows (a card's Open in Chat): that one keeps
+/// it, rather than going behind the app (a game in borderless full screen).
 fn give_focus_back() {
     #[cfg(windows)]
     {
         if crate::shell::e2e::active() || !overlay::win::bar_in_front() {
+            return;
+        }
+        if crate::shell::window::brought_forward_within(2_000) {
+            tracing::info!("bar: a click opened a Yap window; the focus stays with it");
             return;
         }
         let prev = lock().prev_front;

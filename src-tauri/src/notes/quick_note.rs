@@ -487,6 +487,7 @@ pub fn open(app: &AppHandle, fresh: bool) {
     let _ = w.show();
     SHOWN.store(true, Ordering::SeqCst);
     let _ = app.emit(EVENT_VISIBLE, true);
+    crate::shell::window::brought_forward();
     if !crate::shell::e2e::active() {
         let _ = w.set_focus();
     }

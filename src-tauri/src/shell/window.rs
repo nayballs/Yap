@@ -3,7 +3,25 @@
 //! the first-run check; what the window-state plugin remembers; and the
 //! hidden webviews' DWM-cloaked first show at start.
 
+use std::sync::atomic::{AtomicU64, Ordering};
+
 use tauri::{AppHandle, Manager};
+
+/// When one of Yap's windows was last brought to the front (ms). A click on
+/// the Yap bar that opened one (a card's Open in Chat) must not then have
+/// the bar give the focus back to the app behind it (`bar.rs`
+/// `give_focus_back`): over a game, Chat came up behind it.
+static BROUGHT_FORWARD_MS: AtomicU64 = AtomicU64::new(0);
+
+/// A Yap window was just brought to the front.
+pub fn brought_forward() {
+    BROUGHT_FORWARD_MS.store(crate::notices::notice::now_ms(), Ordering::Relaxed);
+}
+
+/// Whether one was within the last `ms`.
+pub fn brought_forward_within(ms: u64) -> bool {
+    crate::notices::notice::now_ms().saturating_sub(BROUGHT_FORWARD_MS.load(Ordering::Relaxed)) <= ms
+}
 
 /// Show the settings window (defined hidden in tauri.conf.json). Shared by the
 /// `open_settings` command and the tray menu.
@@ -96,6 +114,7 @@ pub fn behind_in_test_runs(w: &tauri::WebviewWindow) {
 /// process the foreground, tao falls back to pressing Alt in whichever app has
 /// focus — the developer's, while the suite runs beside them.
 fn focus(w: &tauri::WebviewWindow) {
+    brought_forward();
     if !crate::shell::e2e::active() {
         let _ = w.set_focus();
     }

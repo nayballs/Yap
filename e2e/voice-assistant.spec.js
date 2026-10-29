@@ -586,6 +586,43 @@ test('a spoken answer starts at its first sentence, while the rest is still bein
   await mainOnScreen(yap);
 });
 
+// The card goes up at the answer's first sentence and grows upward as the
+// rest is written. Its ✕ and Open in Chat must both stay inside the bar's
+// clickable regions (bar.rs `bar_regions`): on 29 Oct a ✕ clicked over a game
+// never reached Yap while Open in Chat, at the card's foot, did.
+test("the answer's card stays clickable as it grows: its ✕ and Open in Chat inside the bar's regions", async ({
+  yap,
+  main,
+  fakeLlm,
+}) => {
+  await setConfig(yap, main, { speakReplies: true, speakWhen: 'voice' });
+  await inAnotherApp(yap);
+  const answer = [
+    'Only the first result is solid.',
+    'The sources I found confirm the two-nil win on the twenty-fourth, but they do not back up the rest of my last answer.',
+    'I should not have said they are level on points, or given the other two results, because I did not see those details.',
+    'Ask again and I will search for the table.',
+  ].join(' ');
+  fakeLlm.scriptChat([{ content: answer, stream: { gapMs: 250 } }]);
+  await ask(yap, 'was that right');
+  const card = answerCard(yap);
+  await expect(card).toContainText('Ask again and I will search for the table.', { timeout: 15_000 });
+  const inside = async () => {
+    const regions = (await yap.invoke('bar_debug')).regions.filter((r) => r.id === 'card:assistant');
+    const rectOf = (loc) => loc.evaluate((el) => el.getBoundingClientRect().toJSON());
+    const centre = (r) => ({ x: r.x + r.width / 2, y: r.y + r.height / 2 });
+    const hit = (p) => regions.some((r) => p.x >= r.x && p.x < r.x + r.w && p.y >= r.y && p.y < r.y + r.h);
+    return {
+      close: hit(centre(await rectOf(card.getByRole('button', { name: 'Close' })))),
+      open: hit(centre(await rectOf(card.getByRole('button', { name: 'Open in Chat' })))),
+    };
+  };
+  await expect.poll(inside, { timeout: 3_000 }).toEqual({ close: true, open: true });
+  await yap.invoke('tts_stop');
+  await yap.invoke('assistant_stop');
+  await mainOnScreen(yap);
+});
+
 // A step's opening words that turn out to come before a tool call are taken
 // back (chat/stream.rs `Step`): long enough to pass `releases`, the voice had
 // already started on them. It stops there, drops what it hadn't said, and the

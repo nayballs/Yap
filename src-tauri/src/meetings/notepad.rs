@@ -271,6 +271,9 @@ fn show(w: &tauri::WebviewWindow, focus: bool) {
     }
     let _ = w.show();
     let _ = w.emit(EVENT_VISIBLE, true);
+    if focus {
+        crate::shell::window::brought_forward();
+    }
     if focus && !crate::shell::e2e::active() {
         let _ = w.set_focus();
     }

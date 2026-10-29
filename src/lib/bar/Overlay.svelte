@@ -345,10 +345,30 @@
         return { id: el.dataset.region, x: r.left, y: r.top, w: r.width, h: r.height };
       })
       .filter((r) => r.w > 0 && r.h > 0);
+    afterAnimations();
     const json = JSON.stringify(regions);
     if (json === lastSent) return;
     lastSent = json;
     invoke('bar_regions', { regions }).catch(() => {});
+  }
+  // Svelte's transitions and `animate:flip` run on the Web Animations API,
+  // which fires no transitionend / animationend. A card growing as its
+  // answer is written is flipped from its old size: read mid-animation, its
+  // rect stayed the region, and its ✕ (now above it) took no clicks (29 Oct).
+  // Once the short animations running now end, report again.
+  let settling = false;
+  function afterAnimations() {
+    if (settling) return;
+    const short = document.getAnimations().filter((a) => {
+      const t = a.playState === 'running' ? a.effect?.getComputedTiming?.() : null;
+      return t && Number.isFinite(t.endTime) && t.endTime - (Number(t.localTime) || 0) <= 2000;
+    });
+    if (!short.length) return;
+    settling = true;
+    Promise.allSettled(short.map((a) => a.finished)).then(() => {
+      settling = false;
+      scheduleReport();
+    });
   }
   function scheduleReport() {
     if (!raf) raf = requestAnimationFrame(report);
