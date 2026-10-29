@@ -200,8 +200,20 @@ pub fn set_fake_frames(frames: Vec<Frame>, windows: Vec<Rect>) {
 
 /// Whether this run snips fake monitors (test mode, not the robot tests,
 /// which capture the real screen).
-fn faking() -> bool {
+pub(crate) fn faking() -> bool {
     crate::shell::e2e::active() && !crate::shell::realtest::on()
+}
+
+/// A test run's fake monitors and windows (`e2e_snip`), taken: what the
+/// Voice Assistant's look at the window in front captures in a test run
+/// (`chat/assistant/screen.rs`). `None` outside one, or none set.
+pub(crate) fn take_fake() -> Option<(Vec<Frame>, Vec<Rect>)> {
+    if !faking() {
+        return None;
+    }
+    let frames = FAKE.lock().unwrap_or_else(|p| p.into_inner()).take()?;
+    let windows = std::mem::take(&mut *FAKE_WINDOWS.lock().unwrap_or_else(|p| p.into_inner()));
+    Some((frames, windows))
 }
 
 // ---- saying "snip" ------------------------------------------------------------------------
@@ -520,10 +532,16 @@ fn finish(app: &AppHandle, generation: u64, outcome: overlay::Outcome) {
 /// frame (at the frame's own resolution); one across monitors put
 /// together from each (`geom::compose_rgba`).
 fn cut(snip: &Snip, rect: &Rect) -> Result<(Vec<u8>, u32, u32), String> {
+    cut_frames(&snip.frames, rect)
+}
+
+/// [`cut`] from any monitors' frames (the Voice Assistant's window in
+/// front, `chat/assistant/screen.rs`, too).
+pub(crate) fn cut_frames(frames: &[Frame], rect: &Rect) -> Result<(Vec<u8>, u32, u32), String> {
     let places: Vec<Rect> =
-        snip.frames.iter().map(|f| Rect::new(f.monitor.x, f.monitor.y, f.monitor.width as i32, f.monitor.height as i32)).collect();
+        frames.iter().map(|f| Rect::new(f.monitor.x, f.monitor.y, f.monitor.width as i32, f.monitor.height as i32)).collect();
     if let Some(i) = geom::on_one_monitor(rect, &places) {
-        let frame = &snip.frames[i];
+        let frame = &frames[i];
         let local = Rect::new(rect.x - frame.monitor.x, rect.y - frame.monitor.y, rect.w, rect.h);
         let r = geom::to_frame(&local, (frame.monitor.width, frame.monitor.height), (frame.width, frame.height));
         if !geom::big_enough(&r) {
@@ -535,7 +553,7 @@ fn cut(snip: &Snip, rect: &Rect) -> Result<(Vec<u8>, u32, u32), String> {
         return Err("the box was too small".into());
     }
     let sources: Vec<geom::Source> =
-        snip.frames.iter().zip(&places).map(|(f, p)| geom::Source { bgra: &f.bgra, width: f.width, height: f.height, place: *p }).collect();
+        frames.iter().zip(&places).map(|(f, p)| geom::Source { bgra: &f.bgra, width: f.width, height: f.height, place: *p }).collect();
     Ok((geom::compose_rgba(rect, &sources), rect.w as u32, rect.h as u32))
 }
 
@@ -550,10 +568,16 @@ struct Picture {
 
 /// A picture kept for Chat: a PNG in `chat-images/` (and the PNG).
 fn keep(rgba: &[u8], w: u32, h: u32) -> Result<(crate::chat::chats::ChatImage, Vec<u8>), String> {
+    keep_as(rgba, w, h, "snip")
+}
+
+/// [`keep`], saying where it came from (`source`: "snip", or "window" for
+/// the Voice Assistant's look at the window in front).
+pub(crate) fn keep_as(rgba: &[u8], w: u32, h: u32, source: &str) -> Result<(crate::chat::chats::ChatImage, Vec<u8>), String> {
     let png = images::encode_png(rgba, w, h, true)?;
     let saved = images::save(&png, w, h)?;
     let image =
-        crate::chat::chats::ChatImage { id: saved.id, w: saved.w, h: saved.h, bytes: saved.bytes, source: "snip".into(), ..Default::default() };
+        crate::chat::chats::ChatImage { id: saved.id, w: saved.w, h: saved.h, bytes: saved.bytes, source: source.into(), ..Default::default() };
     Ok((image, png))
 }
 

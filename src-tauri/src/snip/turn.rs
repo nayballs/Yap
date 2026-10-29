@@ -34,6 +34,13 @@ pub struct TurnImages {
     pub images: Vec<ChatImage>,
     pub parts: Vec<Value>,
     pub provider: String,
+    /// A line for the question's context about what came with it (the
+    /// Voice Assistant's look at the window in front: what the picture is,
+    /// or why there's none — `chat/assistant/screen.rs`).
+    pub note: Option<String>,
+    /// A source the answer names (the window's text, read on this PC, sent
+    /// in its picture's place): numbered after the turn's own.
+    pub source: Option<crate::chat::chats::Source>,
 }
 
 tokio::task_local! {
@@ -48,6 +55,21 @@ pub async fn with<F: std::future::Future>(images: TurnImages, f: F) -> F::Output
 /// The screenshots of the turn running here (none outside one).
 pub fn images() -> Vec<ChatImage> {
     TURN.try_with(|t| t.images.clone()).unwrap_or_default()
+}
+
+/// The turn's line for the question's context ([`TurnImages::note`]).
+pub fn note() -> Option<String> {
+    TURN.try_with(|t| t.note.clone()).ok().flatten()
+}
+
+/// The answer's sources with the turn's own ([`TurnImages::source`])
+/// after them, numbered next.
+pub fn with_source(mut sources: Vec<crate::chat::chats::Source>) -> Vec<crate::chat::chats::Source> {
+    if let Ok(Some(mut s)) = TURN.try_with(|t| t.source.clone()) {
+        s.n = sources.iter().map(|x| x.n).max().unwrap_or(0) + 1;
+        sources.push(s);
+    }
+    sources
 }
 
 /// The bytes the turn's own images carry (their copies, before base64).
@@ -284,7 +306,7 @@ pub async fn prepare(ids: &[String], provider: &str, base_url: &str) -> Result<T
             parts.push(part(&fitted.url, &provider_owned));
             images.push(stored);
         }
-        Ok(TurnImages { images, parts, provider: provider_owned })
+        Ok(TurnImages { images, parts, provider: provider_owned, ..Default::default() })
     })
     .await
     .map_err(|e| e.to_string())?
@@ -342,7 +364,12 @@ mod tests {
 
     #[tokio::test]
     async fn a_turn_carries_its_images_to_every_call() {
-        let turn = TurnImages { images: vec![img("img_0123456789abcdef")], parts: vec![part("data:x", "gemini")], provider: "gemini".into() };
+        let turn = TurnImages {
+            images: vec![img("img_0123456789abcdef")],
+            parts: vec![part("data:x", "gemini")],
+            provider: "gemini".into(),
+            ..Default::default()
+        };
         let got = with(turn, async {
             let mut m = vec![json!({ "role": "user", "content": "q" })];
             attach(&mut m);
@@ -352,6 +379,20 @@ mod tests {
         assert_eq!(got.0, 1);
         assert_eq!(got.1[0]["content"][1]["text"], "q");
         assert!(images().is_empty(), "outside the turn");
+    }
+
+    #[tokio::test]
+    async fn a_turn_names_its_own_source_after_the_answers() {
+        let web = |n| crate::chat::chats::Source { n, title: format!("Page {n}"), url: format!("https://example.com/{n}"), ..Default::default() };
+        let own = crate::chat::chats::Source { title: "The window's text".into(), screen: true, ..Default::default() };
+        let turn = TurnImages { note: Some("A line.".into()), source: Some(own), ..Default::default() };
+        let (said, sources) = with(turn, async { (note(), with_source(vec![web(1), web(3)])) }).await;
+        assert_eq!(said.as_deref(), Some("A line."));
+        assert_eq!(sources.iter().map(|s| s.n).collect::<Vec<_>>(), vec![1, 3, 4]);
+        assert!(sources[2].screen);
+        // Outside a turn: nothing added.
+        assert_eq!(with_source(vec![web(1)]).len(), 1);
+        assert!(note().is_none());
     }
 
     #[test]

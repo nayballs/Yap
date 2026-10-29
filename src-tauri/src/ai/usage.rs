@@ -97,7 +97,7 @@ impl Feature {
             N::Dictation | N::DictationContext => Feature::Cleanup,
             N::Commands => Feature::Commands,
             N::Chat => Feature::Chat,
-            N::Assistant => Feature::Assistant,
+            N::Assistant | N::AssistantScreen => Feature::Assistant,
             N::Notes => Feature::Notes,
             N::Meetings => Feature::Meetings,
             N::Brief => Feature::Brief,

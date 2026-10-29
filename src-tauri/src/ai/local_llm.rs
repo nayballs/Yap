@@ -170,6 +170,8 @@ impl Plan {
 ///   default and, so, loops and times out on Chat (and slows every dictation's
 ///   cleanup); the cleanup, Chat and the meeting notes all want the answer
 ///   only. llama.cpp renders the template with `enable_thinking` false.
+///   Chat's Think turns it on for one request, no restart (`chat/think.rs`:
+///   `chat_template_kwargs` and a thinking budget, measured on 0.10.6).
 /// - `--cache-ram` / `--ctx-checkpoints`: [`CACHE_RAM_MIB`], [`CTX_CHECKPOINTS`].
 /// - `-lv 4`: the log names the layers that went to the GPU
 ///   (`load_tensors: offloaded 33/33 layers to GPU`, [`placement_in_log`]);

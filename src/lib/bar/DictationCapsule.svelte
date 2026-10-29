@@ -170,7 +170,9 @@
         </div>
       {/if}
     {:else if askThinking}
-      <span class="txt" role="status">Thinking…</span>
+      <!-- (A question about the screen: the window in front is being taken
+           and read first, chat/assistant/screen.rs.) -->
+      <span class="txt" role="status">{dictation.askAbout === 'window' ? 'Looking at the window…' : 'Thinking…'}</span>
     {:else}
       <span class="speakbars" aria-hidden="true"><i></i><i></i><i></i></span>
       <span class="txt" role="status">Speaking…</span>

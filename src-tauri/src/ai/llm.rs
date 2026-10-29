@@ -917,6 +917,9 @@ pub(crate) enum Delta<'a> {
     Content(&'a str),
     /// The model began a tool call (its name).
     ToolCall(&'a str),
+    /// More of its thinking, sent apart from the answer (a Chat question
+    /// asked to think it through, `chat/think.rs`).
+    Reasoning(&'a str),
     /// Start over: what came so far is void (the stream broke, and the call
     /// goes again without streaming).
     Restart,
@@ -968,6 +971,11 @@ impl ChatRequest {
         if let (Some(choice), Some(_)) = (tool_choice, tools) {
             extra.insert("tool_choice".into(), choice);
         }
+        // A question asked to think it through (Chat's Think, chat/think.rs):
+        // its model's fields, room for the thinking, and more time.
+        let thinks = crate::chat::think::extra_for(provider, model).map(|x| extra.extend(x)).is_some();
+        let on_device = provider == crate::ai::local_llm::PROVIDER_ONDEVICE;
+        let thinking_room = if thinks { crate::chat::think::ON_DEVICE_BUDGET } else { 0 };
         ChatRequest {
             base_url: base_url.to_string(),
             api_key: api_key.to_string(),
@@ -976,8 +984,8 @@ impl ChatRequest {
             temperature,
             messages,
             tools: tools.cloned(),
-            max_tokens: (provider == crate::ai::local_llm::PROVIDER_ONDEVICE).then_some(ON_DEVICE_ANSWER_TOKENS),
-            timeout: chat_timeout(base_url),
+            max_tokens: on_device.then_some(ON_DEVICE_ANSWER_TOKENS + thinking_room),
+            timeout: if thinks { chat_timeout(base_url).max(crate::chat::think::TIMEOUT) } else { chat_timeout(base_url) },
             rate_limit_patience: RATE_LIMIT_PATIENCE,
             extra,
         }
@@ -1112,6 +1120,7 @@ async fn read_stream(mut resp: reqwest::Response, on: OnDelta<'_>) -> Result<cra
                     match p {
                         crate::chat::stream::Piece::Content(s) => on(Delta::Content(&s)),
                         crate::chat::stream::Piece::Call(name) => on(Delta::ToolCall(&name)),
+                        crate::chat::stream::Piece::Reasoning(s) => on(Delta::Reasoning(&s)),
                     }
                 }
                 Ok(())
@@ -1572,7 +1581,7 @@ async fn post_chat_request(
             // again with `reasoning_effort: "none"`, once.
             if status.as_u16() == 400
                 && body.get("tools").is_some()
-                && body.get("reasoning_effort").is_none()
+                && body.get("reasoning_effort").and_then(Value::as_str) != Some("none")
                 && lower.contains("reasoning")
             {
                 body["reasoning_effort"] = json!("none");
@@ -1640,8 +1649,11 @@ async fn post_chat_request(
                             )));
                         }
                     };
+                    let message = crate::chat::think::tidy_message(message);
                     let whole = asm.response(&message);
                     call.answered(&limits, &whole);
+                    // Its thinking, for a question asked to think it through.
+                    crate::chat::think::heard(asm.reasoning());
                     // Its tokens (usage.rs): counts only, never fails the call.
                     crate::ai::usage::record_response(&counted, &whole, remaining_req, limit_req);
                     return Ok(message);
@@ -1674,13 +1686,20 @@ async fn post_chat_request(
         // (counts only, never fails the call).
         crate::ai::usage::record_response(&counted, &value, remaining_req, limit_req);
 
-        let message = value["choices"][0]["message"].clone();
+        let message = crate::chat::think::tidy_message(value["choices"][0]["message"].clone());
         if message.is_null() {
             return Err("response missing choices[0].message".to_string());
         }
-        // Someone watching a whole answer hears it all at once: its tool
-        // calls (so its text is never taken for the answer), then its text.
+        // Its thinking, for a question asked to think it through.
+        let reasoning = crate::chat::think::reasoning_of(&message);
+        crate::chat::think::heard(reasoning);
+        // Someone watching a whole answer hears it all at once: its
+        // thinking, its tool calls (so its text is never taken for the
+        // answer), then its text.
         if let Some(on) = on.as_deref_mut() {
+            if !reasoning.is_empty() {
+                on(Delta::Reasoning(reasoning));
+            }
             for c in message["tool_calls"].as_array().into_iter().flatten() {
                 if let Some(name) = c["function"]["name"].as_str() {
                     on(Delta::ToolCall(name));

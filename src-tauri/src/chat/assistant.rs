@@ -76,6 +76,15 @@
 //! `listens_after`, `pipeline::listen_after_snip`): the capsule says "Ask
 //! about this screenshot…" ([`about_screenshot`]).
 //!
+//! **It sees the window in front** (2026-10-29, [`screen`]): a question
+//! about the screen ("what's this error?", "summarise this page") takes a
+//! screenshot of the window that was in front when the shortcut was
+//! pressed — by cheap rules in the question's language, and Chat's model
+//! for a lone "this" — every Yap window left out; on a model on this PC by
+//! default, a cloud one only when allowed (asked once). A model that can't
+//! read images gets the window's text, read on this PC. The capsule says
+//! "Looking at the window…" meanwhile.
+//!
 //! Events: `yap-assistant {phase, conversationId, messageId, about?}` (the bar's
 //! capsule), `yap-assistant-turn {phase: asked | answered | failed |
 //! superseded | open, conversationId, userMessageId, text, show}` (the main
@@ -83,6 +92,8 @@
 //! "chat:<conversation>:<index>") and `yap-assistant-stream {conversationId,
 //! userMessageId, event}` (the Chat view follows the answer as it's written:
 //! a `stream::Event`).
+
+pub mod screen;
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, MutexGuard};
@@ -330,7 +341,9 @@ struct State {
     /// The conversation the latest question went to.
     conversation: Option<u64>,
     /// What the question is about, while it's listened for: "screenshot"
-    /// (after a spoken "snip": "Ask about this screenshot…").
+    /// (after a spoken "snip": "Ask about this screenshot…"); while it's
+    /// thought about, "window" (the window in front being taken and read:
+    /// "Looking at the window…", [`screen`]).
     about: Option<&'static str>,
 }
 
@@ -449,6 +462,21 @@ pub fn heard(app: &AppHandle, question: String) {
     let since = crate::dictation::pipeline::dictation_state().0;
     let app = app.clone();
     tauri::async_runtime::spawn(async move { answer(app, generation, since, question).await });
+}
+
+/// The window in front is being taken and read for question `generation`
+/// (`on`), or that's done: the capsule says "Looking at the window…"
+/// meanwhile.
+fn looking(app: &AppHandle, generation: u64, on: bool) {
+    let ev = {
+        let mut s = lock();
+        if s.generation != generation || s.phase != Phase::Thinking {
+            return;
+        }
+        s.about = on.then_some("window");
+        snapshot(&s)
+    };
+    emit(app, ev);
 }
 
 /// The stream id of question `generation`'s answer (`stream::Stoppable`).
@@ -817,7 +845,29 @@ async fn answer(app: AppHandle, generation: u64, since: u64, question: String) {
             }
         }
     }
-    tracing::info!(?viewing, ?choice, shots = shots.images.len(), "Voice Assistant: asking Chat");
+    // A question about the screen (screen.rs): the window in front goes
+    // with it — its picture, or its text read on this PC — or a line tells
+    // the model why it can't see it. Not beside screenshots already waiting
+    // (they're what it's about), nor when Yap opens an app (no model).
+    let mut ask = question.clone();
+    let mut window_picture: Option<(String, String)> = None;
+    let mut took_window = false;
+    if let (false, Some((base_url, api_key, model, provider, _persona, _thinking))) = (shots_wait, &endpoint) {
+        let ep = screen::Endpoint { base_url, api_key, model, provider };
+        let look_app = app.clone();
+        let show = move |on: bool| looking(&look_app, generation, on);
+        if let Some(look) = screen::look(&app, &question, &cfg, ep, conversation_id, &show).await {
+            took_window = look.took;
+            if look.took && look.question.is_none() {
+                window_picture = Some((provider.clone(), model.clone()));
+            }
+            if let Some(with_text) = look.question {
+                ask = with_text;
+            }
+            shots = look.images;
+        }
+    }
+    tracing::info!(?viewing, ?choice, shots = shots.images.len(), window = took_window, "Voice Assistant: asking Chat");
     // The person is looking at Yap's main window: Chat comes up there with
     // the question (and no card on the bar).
     let (_, focused) = crate::notices::notice::window_view(&app);
@@ -861,7 +911,7 @@ async fn answer(app: AppHandle, generation: u64, since: u64, question: String) {
         crate::chat::turn::chat_turn(
             Some(&app),
             conversation_id,
-            &question,
+            &ask,
             Some("assistant"),
             true,
             asked,
@@ -870,8 +920,10 @@ async fn answer(app: AppHandle, generation: u64, since: u64, question: String) {
         ),
     );
     // Its AI calls and searches are the Voice Assistant's in the network
-    // receipts (net.rs), though they run Chat's code.
-    let turn = crate::privacy::net::within(crate::privacy::net::Feature::Assistant, turn).await;
+    // receipts (net.rs), though they run Chat's code — and say so when the
+    // window in front went with them.
+    let feature = if took_window { crate::privacy::net::Feature::AssistantScreen } else { crate::privacy::net::Feature::Assistant };
+    let turn = crate::privacy::net::within(feature, turn).await;
     let (feed, said, carded_early, question_id, answer_id) = {
         let st = streamed.lock();
         (st.feed.clone(), st.said, st.carded, st.question_id.clone(), st.message_id.clone())
@@ -938,6 +990,12 @@ async fn answer(app: AppHandle, generation: u64, since: u64, question: String) {
                     give_up(&app, generation);
                     return;
                 }
+            }
+            // The window's picture turned down: that model is a "no" from
+            // now on (its text goes next time).
+            if let Some((provider, model)) = window_picture.filter(|_| crate::snip::vision::is_image_refusal(&e)) {
+                tracing::info!(provider, "Voice Assistant: the model refused the window's picture");
+                crate::snip::vision::refused(&provider, &model);
             }
             tracing::warn!("Voice Assistant: no answer ({e})");
             let conv = streamed.lock().conversation.or(lock().conversation);

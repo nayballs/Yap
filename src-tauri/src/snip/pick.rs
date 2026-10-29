@@ -64,6 +64,21 @@ pub fn windows_on_screen(_desktop: &Rect) -> Vec<Rect> {
     Vec::new()
 }
 
+/// **One window's visible frame**, by its handle (the Voice Assistant's
+/// "window in front", `chat/assistant/screen.rs`), when it could be picked
+/// ([`pickable`]: on screen, not minimised or cloaked, not Yap's own, not
+/// the desktop). Rects only, as ever.
+#[cfg(windows)]
+pub fn window_frame(hwnd: isize) -> Option<Rect> {
+    let c = win::candidate(hwnd)?;
+    pickable(&c).then_some(c.rect)
+}
+
+#[cfg(not(windows))]
+pub fn window_frame(_hwnd: isize) -> Option<Rect> {
+    None
+}
+
 #[cfg(windows)]
 mod win {
     use super::{Candidate, Rect};
@@ -112,6 +127,23 @@ mod win {
             });
         }
         BOOL(1)
+    }
+
+    /// One top-level window (the root of `hwnd`), as [`each`] reads it;
+    /// `None`: no such window, or it isn't visible.
+    pub fn candidate(hwnd: isize) -> Option<Candidate> {
+        use windows::Win32::UI::WindowsAndMessaging::{GetAncestor, GA_ROOT};
+        if hwnd == 0 {
+            return None;
+        }
+        // (A handle that's gone: not visible, so `each` adds nothing.)
+        let root = unsafe { GetAncestor(HWND(hwnd as *mut _), GA_ROOT) };
+        let hwnd = if root.0.is_null() { HWND(hwnd as *mut _) } else { root };
+        let mut out: Vec<Candidate> = Vec::new();
+        unsafe {
+            let _ = each(hwnd, LPARAM(&mut out as *mut Vec<Candidate> as isize));
+        }
+        out.pop()
     }
 
     /// Every visible top-level window, top to bottom.

@@ -160,6 +160,9 @@ pub fn rule(kind: &str) -> Rule {
         // The Voice Assistant has no AI model, or its model failed: right
         // after its own question.
         "assistantNoModel" | "assistantFailed" => alert,
+        // "Let the Voice Assistant see the window in front?" (a question
+        // about the screen met a cloud model; asked once): right after it.
+        "assistantScreen" => alert,
         // "The on-device AI model didn't start" (local_llm/on_demand.rs): a
         // dictation went without its cleanup — once, and not again within
         // ten minutes.

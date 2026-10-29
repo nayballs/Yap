@@ -201,6 +201,8 @@ async function streamOut(res, record, model, message, finish, pace = {}, counts 
   const chunk = (delta, finishReason = null) =>
     `data: ${JSON.stringify({ id: 'fake-stream', object: 'chat.completion.chunk', model, choices: [{ index: 0, delta, finish_reason: finishReason }] })}\n\n`;
   const out = [chunk({ role: 'assistant', content: '' })];
+  // Its thinking first, apart from the answer (llama.cpp's `reasoning_content`).
+  for (const part of pieces(message.reasoning_content ?? '')) out.push(chunk({ reasoning_content: part }));
   for (const part of pace.chunks ?? pieces(message.content ?? '')) out.push(chunk({ content: part }));
   (message.tool_calls ?? []).forEach((call, index) => {
     out.push(chunk({ tool_calls: [{ index, id: call.id, type: 'function', function: { name: call.function.name, arguments: '' } }] }));
@@ -279,6 +281,10 @@ const CHAT_SUMMARY = 'You keep the notes of a long chat';
 const SMART = 'You help someone say something sharp in a meeting';
 const SKILL = 'You carry out a Skill';
 const LONGER = "You rewrite a meeting's notes in more detail";
+// Is a spoken question about the screen? (src-tauri/src/chat/assistant/screen.rs
+// ASK_PROMPT, for a lone "this"): "no" unless a spec says otherwise
+// (`reply('screenQuestion', fn)`). Never takes a scripted chat step.
+const SCREEN_QUESTION = 'You decide whether a question someone asked a voice assistant';
 
 const KINDS = [
   [DIGEST, 'digest'],
@@ -299,6 +305,7 @@ const KINDS = [
   [SMART, 'smart'],
   [SKILL, 'skill'],
   [LONGER, 'longer'],
+  [SCREEN_QUESTION, 'screenQuestion'],
 ];
 
 /** The numbers of the `<passage n="…">` blocks a request gives (search/ask.rs's layout). */
@@ -722,6 +729,17 @@ export async function startFakeLlm() {
         messages,
         stream: !!body.stream,
         streamOptions: body.stream_options ?? null,
+        // Asked to think it through (src-tauri/src/chat/think.rs): each
+        // provider's own fields, as sent.
+        think: {
+          reasoningEffort: body.reasoning_effort ?? null,
+          chatTemplateKwargs: body.chat_template_kwargs ?? null,
+          thinkingBudget: body.thinking_budget_tokens ?? null,
+          budgetMessage: body.reasoning_budget_message ?? null,
+          reasoning: body.reasoning ?? null,
+          thinking: body.thinking ?? null,
+          outputConfig: body.output_config ?? null,
+        },
       });
       const record = requests.at(-1);
       const wait = delays.get(kind) ?? 0;
@@ -757,7 +775,7 @@ export async function startFakeLlm() {
       // The chat's tool loop, scripted: the next step's tool calls or answer.
       // A step without tools offered takes one too when it says `plain`
       // (a model's answer without tools, the loop's last call).
-      const step = offered.length > 0 || chatScript[0]?.plain ? chatScript.shift() : undefined;
+      const step = kind !== 'screenQuestion' && (offered.length > 0 || chatScript[0]?.plain) ? chatScript.shift() : undefined;
       if (step) {
         const message = step.tools
           ? {
@@ -770,6 +788,8 @@ export async function startFakeLlm() {
               })),
             }
           : { role: 'assistant', content: step.content };
+        // A step that thinks first (`reasoning`), as llama.cpp sends it apart.
+        if (step.reasoning) message.reasoning_content = step.reasoning;
         await answerWith(message, step.tools ? 'tool_calls' : 'stop', step.stream ?? paces.get(kind) ?? {}, step.counts ?? usages.get(kind) ?? null);
         return;
       }
@@ -790,6 +810,7 @@ export async function startFakeLlm() {
         smart: smartReply,
         skill: skillReply,
         longer: longerReply,
+        screenQuestion: () => 'no',
       };
       // (The system prompt too: a Skill's name is in it.)
       const content = (replies.get(kind) ?? answer[kind] ?? (() => 'OK'))(user, system);

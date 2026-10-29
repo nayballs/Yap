@@ -54,7 +54,11 @@ person sees what their choices send where. It never says "nothing leaves".
   go: a model on this PC, by the same rules, a test run's stand-ins as the
   services they stand in for) — (dictation/pipeline.rs and Prompt Studio's
   test), "Commands · …", "Chat · …" (chat/tools.rs `ask`, the small-model
-  pipeline), "Voice Assistant · …" (chat/assistant.rs, around Chat's turn),
+  pipeline), "Voice Assistant · …" (chat/assistant.rs, around Chat's turn) —
+  "Voice Assistant + the window in front · Groq" when a question took the
+  window in front with it, its picture or its text (`Feature::AssistantScreen`,
+  `chat/assistant/screen.rs`, 2026-10-29: the upload named, on this PC or
+  not; its searches stay the Voice Assistant's),
   "Notes · …" (Enhance, a note's Ask), "Meeting notes · …"
   (meetings/meeting_summary.rs), "Meeting brief · …" (calendar/brief.rs, around the
   meeting helpers), "Memory · …" (memory/learn.rs); unscoped: "AI model · …".

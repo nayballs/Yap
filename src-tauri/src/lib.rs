@@ -374,6 +374,7 @@ pub fn run() {
             chat::commands::chats_archived,
             chat::commands::chat_archive,
             chat::commands::chat_send,
+            chat::think::chat_think_info,
             chat::stream::stream_stop,
             ai::ai_model::ai_model_status,
             ai::ai_model::chat_set_model,
