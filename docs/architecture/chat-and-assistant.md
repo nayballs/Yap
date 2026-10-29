@@ -745,7 +745,10 @@ The AI Chat surface (conversations, the tool-calling loop and its note tools) an
   (`calls::capture::for_snip`: the bar's capsule too; meeting windows as the
   meeting setting wants — and the assistant is off during meetings anyway),
   saved as a chat screenshot (`snip::keep_as`, source "window"): it shows on
-  the question in Chat and is kept as Chat's screenshots are. **Where it
+  the question in Chat and is kept as Chat's screenshots are — sent again
+  with a later question only where the window itself may go now
+  (`window_may_go`: Chat's model switched to a cloud one, it's a line, not
+  a picture, without "With cloud models too"). **Where it
   goes** (`allowed`, `leaves_pc`: the cloud providers always leave the PC,
   any other server unless it's on this PC): "Let the Voice Assistant see the
   window in front when you ask about it" (`assistant_screen`, on) for a
