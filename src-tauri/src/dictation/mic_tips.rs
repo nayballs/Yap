@@ -3,8 +3,11 @@
 //! weak, one concrete tip, rarely.
 //!
 //! - **The signal** ([`measure`], pure): the dictation's audio in 20 ms
-//!   frames, each one's level in dBFS. The loud frames (the 90th
-//!   percentile) are the voice, the quiet ones (the 10th) the room; and
+//!   frames, each one's level in dBFS. Its loudest half second is the
+//!   voice — however much of the recording is silence: a spoken "snip"
+//!   keeps listening while the box is drawn and for the question after it
+//!   (a share of the frames, the 90th percentile, called a clear voice
+//!   quiet there) —, the quiet frames (the 10th percentile) the room; and
 //!   how many samples hit full scale.
 //! - **What's wrong** ([`trouble`], pure): **clipped** (≥ 0.1 % of samples
 //!   at full scale: too loud, distorted), **quiet** (the voice under
@@ -34,6 +37,8 @@ use tauri::{AppHandle, Emitter};
 
 /// 20 ms at 16 kHz.
 const FRAME: usize = 320;
+/// The voice is the loudest this many frames (half a second).
+const VOICE_FRAMES: usize = 25;
 /// Shorter dictations aren't judged.
 pub const MIN_SECS: f32 = 2.0;
 /// The voice under this (dBFS, its loud frames) is quiet.
@@ -68,7 +73,7 @@ const CARD_MS: u64 = 12_000;
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Signal {
     pub secs: f32,
-    /// The voice: the 90th percentile of the frames' levels (dBFS).
+    /// The voice: its loudest half second ([`VOICE_FRAMES`]; dBFS).
     pub voice_db: f32,
     /// The room: the 10th percentile (dBFS).
     pub floor_db: f32,
@@ -95,7 +100,8 @@ pub fn measure(samples: &[f32]) -> Option<Signal> {
     levels.sort_by(|a, b| a.total_cmp(b));
     let at = |p: f32| levels[((levels.len() - 1) as f32 * p).round() as usize];
     let clipped = samples.iter().filter(|s| s.abs() >= CLIP_LEVEL).count() as f32 / samples.len() as f32;
-    Some(Signal { secs, voice_db: at(0.9), floor_db: at(0.1), clipped })
+    let voice_db = levels[levels.len().saturating_sub(VOICE_FRAMES)];
+    Some(Signal { secs, voice_db, floor_db: at(0.1), clipped })
 }
 
 /// What was wrong with a dictation's signal.
@@ -495,6 +501,21 @@ mod tests {
         assert_eq!(judge(&speech(4.0, 0.05, 0.06)), Some(Trouble::Noisy));
         // The level turned up so far it hits full scale.
         assert_eq!(judge(&speech(4.0, 1.4, 0.001)), Some(Trouble::Clipped));
+    }
+
+    #[test]
+    fn a_clear_voice_in_a_long_silence_is_not_quiet() {
+        // A spoken "snip": a second of clear speech, then the box drawn and
+        // the question waited for in a quiet room (5 % speech).
+        let mut audio = speech(1.0, 0.25, 0.001);
+        audio.extend(speech(19.0, 0.0, 0.001));
+        let s = measure(&audio).unwrap();
+        assert!(s.voice_db > -20.0, "{s:?}");
+        assert_eq!(trouble(&s), None);
+        // The same half second, far from the mic, still is.
+        let mut far = speech(1.0, 0.004, 0.0002);
+        far.extend(speech(19.0, 0.0, 0.0002));
+        assert_eq!(judge(&far), Some(Trouble::Quiet));
     }
 
     #[test]

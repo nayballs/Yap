@@ -38,6 +38,11 @@
   // words, and the text read from the picture, folded under them.
   const said = $derived(m.role === 'user' ? splitScreenText(m.text) : { question: m.text, screenText: null });
 
+  /** A screenshot's width in the question: at most 320 × 240, its own
+   *  shape (the bubble fits it, rather than a full-size picture's width
+   *  pushing the bubble out with room to spare). */
+  const shotWidth = (img) => (img.w > 0 && img.h > 0 ? Math.round(Math.min(320, (240 * img.w) / img.h)) : 320);
+
   /** A screenshot's right-click menu (its own: not the question's). */
   function shotMenu(e, img) {
     e.stopPropagation();
@@ -157,7 +162,7 @@
               onclick={() => onview(img.id)}
               oncontextmenu={(e) => shotMenu(e, img)}
             >
-              <img src={chatImageUrl(img.id)} alt="" style={`aspect-ratio: ${img.w} / ${img.h}`} />
+              <img src={chatImageUrl(img.id)} alt="" style={`aspect-ratio: ${img.w} / ${img.h}; width: ${shotWidth(img)}px`} />
               {#if img.asText}<span class="astextnote">Sent as text</span>{/if}
             </button>
           {/if}
@@ -608,7 +613,7 @@
   }
   .shot {
     display: block;
-    max-width: min(320px, 100%);
+    max-width: 100%;
     padding: 0;
     border: 1px solid var(--yap-border-subtle);
     border-radius: var(--yap-r);
@@ -618,8 +623,8 @@
   }
   .shot img {
     display: block;
-    width: 100%;
-    max-height: 240px;
+    max-width: 100%;
+    height: auto;
     object-fit: contain;
   }
   .shot:focus-visible {

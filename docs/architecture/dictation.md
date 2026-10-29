@@ -980,7 +980,10 @@ to **Run again** from Home.
   "didn't hear you clearly" and AirPods advice, by behaviour). As a
   dictation stops (`stop_and_transcribe`; every kind: a rewrite's
   instruction and a question too) its audio is measured (`measure`, pure:
-  20 ms frames' dBFS — the voice the 90th percentile, the room the 10th —
+  20 ms frames' dBFS — the voice its loudest half second (since 29 Oct:
+  the 90th percentile called a clear voice quiet in a recording that was
+  mostly silence, a spoken "snip" waiting for its question), the room
+  the 10th percentile —
   and the share of samples at full scale) and judged (`trouble`, pure, the
   worst first): **clipped** (≥ 0.1 % at ≥ 0.98), **quiet** (the voice under
   −42 dBFS), **noisy** (the voice < 12 dB above a room louder than −50
