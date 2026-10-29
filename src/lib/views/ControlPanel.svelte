@@ -420,6 +420,9 @@
        idle), which keeps the main window's chunk under Vite's 700 kB warning
        (25 Oct 2026). -->
   <main class="view">
+    <!-- Reset app (privacy/reset.rs): every view shown afresh, from the stores
+         as they are now. -->
+    {#key dataGeneration}
     {#if activeView === 'home'}
       <HomeView onopensettings={openSettings} onnavigate={(v) => (activeView = v)} />
     {:else if activeView === 'insights'}
@@ -463,6 +466,7 @@
         <IntegrationsView onopensettings={openSettings} />
       {/await}
     {/if}
+    {/key}
   </main>
   </div>
 </div>

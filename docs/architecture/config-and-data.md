@@ -523,6 +523,17 @@
   (`memory.rs`). Changed only as changes (Undo in the app); cleared from
   Settings → Memory, exported there as a .zip of Markdown. Sent with questions
   to the AI model the person uses, never to Yap.
+- **Download your data and Reset app** (2026-10-29, Settings → Privacy &
+  data → Your data; [privacy-receipts.md](./privacy-receipts.md)): one .zip
+  of the history, notes and meetings, chats, tasks, memory, the dictionary
+  and settings without keys (the audio and screenshots with a tick box),
+  never uploaded; and "Clear everything and keep my settings": the history
+  and its audio, notes and meetings with theirs, chats and screenshots,
+  memory, tasks, the search index, the usage counts and the pre-meeting
+  briefs go; config.json, `dictionary_usage.json`, the models, the account
+  and calendars, and Yap's own records stay. **Every file this page names
+  is in one list or the other** (`privacy/reset.rs` `GOES` / `STAYS`; a unit
+  test reads this page): a new store put here has to be decided there too.
 - All of the above (plus config) write atomically and quarantine a corrupt file
   on load rather than crashing (`config::atomic_write`/`quarantine_corrupt`;
   config.json its own way, above). Each write has a temp file of its own

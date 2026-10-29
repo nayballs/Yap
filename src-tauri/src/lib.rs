@@ -354,6 +354,14 @@ pub fn run() {
             privacy::diagnostics::diagnostics_issue_url,
             #[cfg(debug_assertions)]
             privacy::diagnostics::e2e_save_path,
+            privacy::export::data_export_summary,
+            privacy::export::data_export_save,
+            privacy::export::data_export_cancel,
+            privacy::export::data_export_reveal,
+            #[cfg(debug_assertions)]
+            privacy::export::e2e_export_pace,
+            privacy::reset::data_reset_plan,
+            privacy::reset::data_reset,
             meetings::commands::meeting_start,
             meetings::commands::meeting_state,
             notes::commands::note_export,
