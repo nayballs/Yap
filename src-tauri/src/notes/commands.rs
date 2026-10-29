@@ -7,10 +7,11 @@ use tauri::AppHandle;
 use crate::chat::turn::resolve_chat_endpoint;
 use crate::config;
 
-/// Note summaries for the list pane, newest-updated first.
+/// Note summaries for the list pane: the pinned ones first (`pins.rs`),
+/// then the rest, each newest-updated first.
 #[tauri::command]
 pub fn notes_list() -> serde_json::Value {
-    crate::notes::list()
+    crate::notes::pins::arrange(crate::notes::list())
 }
 
 /// One full note (raw + enhanced content).
@@ -45,8 +46,11 @@ pub fn note_create(
 /// editable fields and `origin`, the label of the window that saved (the
 /// Notes view and the meeting notepad keep each other in sync both ways).
 /// A save that failed is the error, after the windows are told (the edit
-/// is kept in memory: saving.rs).
+/// is kept in memory: saving.rs). `how`: "dictated" when a dictation went
+/// into the text since the last save, else it was typed (the note's version
+/// history, `versions.rs`).
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 pub fn note_update(
     app: AppHandle,
     id: u64,
@@ -55,8 +59,11 @@ pub fn note_update(
     folder: Option<String>,
     participants: Option<Vec<String>>,
     origin: Option<String>,
+    how: Option<String>,
 ) -> Result<(), String> {
-    crate::notes::update(id, title, content, folder, participants)?;
+    use crate::notes::versions::{by, kind, How};
+    let how = How::new(if how.as_deref() == Some("dictated") { kind::DICTATED } else { kind::TYPED });
+    by(how, || crate::notes::update(id, title, content, folder, participants))?;
     note_changed(&app, id, origin.as_deref().unwrap_or(""));
     Ok(crate::notes::saved()?)
 }
@@ -140,6 +147,10 @@ pub fn export_markdown(note: &crate::notes::Note) -> String {
             if seg.failed {
                 let at = |ms: Option<u64>| crate::meetings::meeting_summary::clock(ms.unwrap_or(0) / 1000);
                 out.push_str(&format!("_Couldn't transcribe {}–{}._\n\n", at(seg.start_ms), at(seg.end_ms)));
+                continue;
+            }
+            if let Some(ms) = seg.asleep_ms {
+                out.push_str(&format!("_Your PC was asleep for {}._\n\n", crate::meetings::sleep::span_words(ms)));
                 continue;
             }
             // Any other marker (a mic change) has no words to export.
@@ -238,6 +249,7 @@ pub fn notes_folder_create(name: String) -> Result<Vec<String>, String> {
 #[tauri::command]
 pub fn notes_folder_rename(app: AppHandle, from: String, to: String) -> Result<Vec<String>, String> {
     let change = crate::notes::folder_rename(&from, &to)?;
+    crate::calendar::filing::folder_renamed(&from, &to);
     folders_changed(&app, &change);
     crate::notes::saved()?;
     Ok(change.folders)
@@ -248,6 +260,7 @@ pub fn notes_folder_rename(app: AppHandle, from: String, to: String) -> Result<V
 #[tauri::command]
 pub fn notes_folder_delete(app: AppHandle, name: String) -> Result<Vec<String>, String> {
     let change = crate::notes::folder_delete(&name)?;
+    crate::calendar::filing::folder_deleted(&name);
     folders_changed(&app, &change);
     crate::notes::saved()?;
     Ok(change.folders)
@@ -337,6 +350,7 @@ pub(crate) async fn run_enhance(
     let action_plan = action
         .as_ref()
         .is_some_and(|a| a.kind == crate::notes::ACTION_PLAN);
+    let action_name = action.as_ref().map(|a| a.name.clone());
     let fragment = action
         .map(|a| a.prompt)
         .unwrap_or_else(|| ep.fragment.clone());
@@ -390,7 +404,15 @@ pub(crate) async fn run_enhance(
             &digest_actions,
         );
     }
-    crate::notes::note_edits::write_summary(id, &enhanced, &hash, read_ms, heard_to, replace)?;
+    // A version of the summary of its own (versions.rs): Yap's action plan,
+    // or the Action's name.
+    let how = match action_name {
+        Some(name) if !action_plan => crate::notes::versions::How::named(crate::notes::versions::kind::ACTION, &name),
+        _ => crate::notes::versions::How::new(crate::notes::versions::kind::SUMMARY),
+    };
+    crate::notes::versions::by(how, || {
+        crate::notes::note_edits::write_summary(id, &enhanced, &hash, read_ms, heard_to, replace)
+    })?;
     // Written, but not on disk (a full disk, the file held): said by the
     // caller ("Couldn't save your note: …", with Try again), never as if it
     // saved. The summary is kept in memory and saved with the next change.

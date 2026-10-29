@@ -11,6 +11,11 @@
 //     it: the countdown carries on, as on the bar.
 //   - kind "calendar" | "hour": "Still in your meeting?" with Stop and
 //     summarise (primary) / Keep recording. Its ✕ is Keep recording.
+//   - the meeting's other questions, the same way (✕ answers "keep"):
+//     "mic" — "Teams is using Contoso H2 but Yap is using Northwind Audio",
+//     Use Contoso H2 / Not now (calls/call_audio.rs); "asleep" — "Your PC was
+//     asleep", Resume / Summarise (meetings/sleep.rs); "autostart" — "Start
+//     notes automatically for Teams calls?" (calls/meeting_detect.rs).
 //   Answers go back as `meeting_checkin_respond { id, answer }`; Rust takes
 //   the prompt down everywhere (`null`). `meeting_checkin_status` restores
 //   it after a reload.
@@ -65,7 +70,7 @@ export function initMeetingCheckIns(label) {
       title: counting ? `Ending notes in ${secondsLeft(p.until - Date.now())}…` : p.title,
       description: p.body,
       chip: 'Meeting',
-      icon: 'timer',
+      icon: p.icon || 'timer',
       duration: 0,
       progress: progress(),
       action: { label: p.primary.label, onClick: () => answer(p, p.primary.id) },

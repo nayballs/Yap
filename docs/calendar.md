@@ -19,6 +19,9 @@ on the PC.
 | Time zones (IANA, Windows names, a feed's own VTIMEZONEs) | `src-tauri/src/calendar/tz.rs` |
 | Which events count, attendees, reminders, matching a recording to a meeting | `src-tauri/src/calendar/model.rs` |
 | Join links | `src-tauri/src/calendar/links.rs` |
+| Join codes: an event's, and a call window's | `src-tauri/src/calendar/codes.rs`, `src-tauri/src/calendar/call_windows.rs` |
+| Folder rules for recurring meetings | `src-tauri/src/calendar/filing.rs` |
+| The next meeting in the tray | `calendar.rs` (`tray_item`), `src-tauri/src/shell/tray.rs` |
 | Credential Manager | `src-tauri/src/calendar/vault.rs` |
 | A note's meeting (`Note::event`, `link_event`) | `src-tauri/src/notes.rs` |
 | UI | `src/lib/views/MeetingsView.svelte`, `src/lib/components/ConnectCalendarDialog.svelte`, `src/lib/settings/ConnectorsSection.svelte`, `src/lib/stores/calendar.svelte.js`, `src/lib/views/integrations/CalendarLinkCard.svelte`, `src/lib/components/CalendarMark.svelte`, `src/lib/components/BriefView.svelte`, `src/lib/core/brief.js` |
@@ -211,6 +214,91 @@ three that match the question, bounded for small local models), with
 meeting ends (its **Connect calendar** opens the dialog over the Meetings
 view), and **Not now** means never.
 
+**Today, day to day** (2026-10-29):
+
+- **Free time**: between today's meetings, a quiet line says how long
+  you're free ("45 min free", "1 h 30 min free"): from the end of every
+  meeting above it (or now) to the next start, less busy time of your own
+  (an event with nobody else on it, "Focus"); 15 minutes or more.
+- **Done for today**: once the day's last meeting is over, Today shows
+  what it left you with: today's meetings ("3 meetings · 2 open tasks · 1
+  without notes"), each with its time and its note; under each, its open
+  tasks (the summary's and those you added, not done or archived), each
+  ticked off right there (in the note's summary too); a meeting with
+  nothing in its note says **No notes** with **Add notes** (its note, made
+  now).
+- **Folders for recurring meetings**: a past meeting note's menu (right-click
+  or ⋯) has **File this meeting in ▸** (the folders; its own ticked) and,
+  for a meeting that repeats, **Always file "Weekly sync" in ▸**. Picking a
+  folder there moves this note, keeps the rule, and asks about the earlier
+  notes of the series ("Move the earlier "Weekly sync" notes too? 3 earlier
+  notes of this meeting aren't in Design. New ones go there either way.",
+  **Move them**). From then on each new note of the series goes there as
+  it's made: one opened from the Meetings view (or the tray) ahead of the
+  meeting, and one a recording ties to the meeting (call detection's
+  **Record notes**, the meeting shortcut, Notes' Record) — unless you moved
+  that note yourself. **Stop filing it in Design** drops the rule; the notes
+  stay. A folder renamed keeps its rules; one deleted drops them. The
+  series is the calendar's own recurring id: an iCal event's UID with its
+  RRULE, or Google's `recurringEventId` (its occurrences' ids start with
+  it), so a calendar connected again keeps its rules. Rules live in
+  `<data>/meeting_folders.json`: an older Yap sharing the data folder never
+  reads it, so notes it makes go to Meetings and stay there.
+
+### The next meeting in the tray
+
+The tray's menu says what's next at its top, under the version line, and
+its tooltip says it on a second line:
+
+| When | The menu item |
+|---|---|
+| Within the hour | Next: Weekly sync in 12 min |
+| Later today | Next: Weekly sync at 14:30 |
+| Tomorrow | Next: Weekly sync tomorrow at 09:00 |
+| Later in the week | Next: Weekly sync on Thu at 09:00 |
+| From 10 minutes before, nothing recording | Next: Stand-up in 4 min · Take notes |
+| On now | Now: Design review · Take notes |
+| Recording it | Now: Design review · Recording |
+
+The meeting it names: the one you're recording while it's on; else one
+starting within 10 minutes; else one on now (of two overlapping, the one
+that started last); else the next to start. All-day events and ones you
+declined never count (they're not meetings to Yap). A click takes notes
+on it when the line says **Take notes** (as the Meetings view's Start
+does; the note shows where you're looking, as the card's does), and
+otherwise opens its note in Notes, made ahead of the meeting if need be.
+It stays current on the calendar's own turns (at least every 30 seconds,
+which it makes anyway): nothing wakes the PC for it, and the countdown
+changes the item's text without rebuilding the menu.
+
+### Matching a call to its meeting by the join code
+
+A recording during a meeting takes that meeting's name, attendees and
+invite, and call detection doesn't ask about a call the reminder card
+asked about already. Which meeting a call is used to be the one on now
+(from 10 minutes before) on the call's service, starting nearest. Now the
+**join code** decides first: when a call starts, Yap reads the code its
+window shows and finds the meeting whose join link, location, conference
+data or description has it — from 30 minutes before that meeting to 30
+minutes after it ends, today's occurrence for a recurring one. A call with
+a code that matches no meeting isn't tied to a meeting on the same service
+whose own code differs (an ad-hoc Zoom call during a Zoom meeting).
+
+| App | What its window shows | Read |
+|---|---|---|
+| Google Meet (any browser) | The tab's title, "Meet - abc-defg-hij" | the code, from the title |
+| Zoom app | "Zoom Meeting" (older versions: "Zoom Meeting ID: 812-3456-7890") | the id only on older versions |
+| Zoom in a browser | The tab's title "Zoom"; the address `app.zoom.us/wc/<id>/…` | the id, from the address bar |
+| Teams app | The meeting's name, "Weekly sync \| Microsoft Teams" | nothing (time and service, as before) |
+| Teams in a browser | The address while joining: `…/meetup-join/19:meeting_…@thread.v2/…`, or `teams.microsoft.com/meet/<id>` | the thread or the id, from the address bar |
+| Webex, Slack, GoTo, Whereby, Jitsi… | — | nothing: no codes for them yet |
+
+The address bar is read with UI Automation, once, when the call starts:
+only the toolbars (never the page), and only for a browser tab whose title
+shows the meeting — which is the browser's active tab, so a meeting tab
+left behind another one isn't read. Codes are matched on this PC and never
+logged (the log says which kind of code was found).
+
 ### The reminder card
 
 **Settings → Meetings → Notify before scheduled meetings start**:
@@ -328,9 +416,12 @@ title (the AI title leaves it alone), the attendees join the note's
 participants (the names the action plan gives tasks to, and Whisper's
 spelling hints for the meeting), and the invite's description, without its
 links and dial-in boilerplate, becomes context for the action plan and the
-note's Ask bar. A recording is matched to the meeting on now (from 10
-minutes before it) whose service matches the live call, the one starting
-nearest. Resuming an older meeting's notes doesn't count.
+note's Ask bar. A recording is matched first to the meeting whose join
+code the call's window showed (see "Matching a call to its meeting by the
+join code" above), else to the meeting on now (from 10 minutes before it)
+whose service matches the live call, the one starting nearest. Resuming an
+older meeting's notes doesn't count. A recurring meeting with a folder rule
+files the note in its folder.
 
 **Not asking twice**: call detection asks the calendar before "Teams call
 detected — Record notes?" (`claims_call`): a call during a meeting whose
@@ -460,6 +551,25 @@ them at run time).
   notepad's line over My thoughts and the brief on Summary, and the
   setting (off takes the Brief buttons away). Screenshots:
   `…/screenshots/brief/`.
+- **Day to day** (2026-10-29): unit tests for join codes from every link,
+  title and invite form (Meet, Zoom's links and web client, Teams' threads
+  and short links, "Meeting ID" numbers by service and length, look-alike
+  words), matching by code (beating the nearest start, 30 minutes either
+  side, an ad-hoc call's other code, a code of another kind, a recurring
+  meeting's same code), the tray's next meeting (all-day and declined events
+  through a feed, overlapping ones, back to back, the one recording) and
+  its line (countdown, later today, tomorrow, later in the week, Take notes,
+  Recording, a long name), and folder rules (series from keys, which notes a
+  rule may move, earlier notes outside the folder, a folder renamed or
+  deleted). `e2e/calendar-day.spec.js`: the tray item and tooltip through
+  `e2e_tray` (a click opening a note made ahead, then taking notes on a
+  meeting a minute away), folder rules from the Meetings view's menu (a
+  one-off filed, a series always filed with the earlier note moved when
+  asked, the next one made in the folder, a renamed folder keeping its
+  rule, Stop filing), a simulated Meet call matched by its tab's code over
+  the meeting starting nearest, the free time between today's meetings with
+  busy time taken out, and "Done for today" (open tasks ticked there, Add
+  notes). Screenshots: `…/screenshots/calendar-day/`.
 - **Brief unit tests** (`cargo test --lib brief`): who counts as the same
   person, series from keys, tasks and questions from plans and digests,
   gathering (newest first, the same task once, someone else's meeting
@@ -478,6 +588,25 @@ them at run time).
   tenants require admin consent. Until then, the published calendar: it
   shows attendees only with "Can view all details", Outlook refreshes it on
   its own schedule (it can lag), and some organisations turn publishing off.
+  What it would take, beside the maintainer's account work (2026-10-29):
+  in the Entra admin centre, **App registrations → New registration**
+  ("Accounts in any organizational directory and personal Microsoft
+  accounts"), **Authentication → Mobile and desktop applications** with
+  `http://localhost` as the redirect (Entra lets a desktop client use any
+  loopback port) and public client flows on, **API permissions** →
+  Microsoft Graph, delegated `Calendars.Read`, `offline_access` (and
+  `User.Read` for the account's address), then **publisher verification**
+  (a verified Microsoft Partner Network ID) so people don't see an
+  "unverified" warning, and its client id baked in like Google's
+  (`option_env!`, a repository secret; no client secret for a public
+  client). In Yap: a `calendar/outlook.rs` beside `google.rs` — the same
+  PKCE loopback sign-in against `login.microsoftonline.com/common`, refresh
+  tokens in Credential Manager, `GET /me/calendarView` (it expands
+  recurrence; `seriesMasterId` is the series for folder rules,
+  `onlineMeeting.joinUrl` the join link, `responseStatus` the reply,
+  `isAllDay` skipped) with `$select` for the fields Yap reads and
+  `Prefer: outlook.timezone="UTC"`, drafts through `model::finish` like the
+  others, and a Connect button on the Outlook card instead of the guide.
 - **The brief's checks are word-level**: a bullet that mixes up two things
   its sources both say (which venue was cheaper, the order of two steps) or
   pins one task's deadline on another can still pass them — the reason a

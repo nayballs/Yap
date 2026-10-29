@@ -173,7 +173,12 @@
   override per app), call detection:
   meeting_detection + meeting_detect_style ("popup"|"quiet") +
   meeting_detect_apps (app id → bool overrides of `meeting_detect::APPS`'
-  defaults) + meeting_auto_start (the opt-in 10-second countdown, off),
+  defaults) + meeting_auto_start (the opt-in 10-second countdown, off) +
+  meeting_auto_start_apps (2026-10-29: app ids whose calls count down
+  and start notes by themselves, whatever meeting_auto_start says — a yes
+  to "Start notes automatically for Teams calls?", asked once,
+  `calls/meeting_detect.rs`; empty by default; an older Yap drops it on its
+  save and those calls ask again),
   meeting guard rails: meeting_hide_from_capture (true),
   meeting_max_minutes (120; 0 = no limit), meeting_call_end ("ask"|"stop"),
   meeting_end_when_quiet ("End notes when the meeting goes quiet", true),
@@ -434,6 +439,15 @@
   through `saving.rs`). A file of its own, not new fields in notes.json, so an
   older Yap sharing the data folder (it drops notes.json fields it doesn't
   know when it saves) never loses them. A note's go with it.
+- Meeting folder rules: `%APPDATA%/yap/meeting_folders.json` (2026-10-29) —
+  `{rules: {<series id>: {folder, title, createdTs}}}`, "Always file Weekly
+  sync in Design" (`calendar/filing.rs`, through `saving.rs`): the folder
+  each recurring meeting's notes go to (the series: an iCal UID, or
+  Google's recurring event id). A file of its own, not fields in notes.json
+  or calendar.json: an older Yap never reads it, so the notes it makes for
+  the series go to Meetings and stay there. A renamed folder's rules
+  follow it; a deleted one's go. Reset app keeps it (setup, like the
+  folders).
 - Skills: `%APPDATA%/yap/skills.json` (2026-10-29) — the person's own Skills
   (`{skills: [{id, name, command, description, instructions, runsOn,
   basedOn, createdMs, updatedMs}]}`, ≤ 50; Yap's own are in code, never
@@ -443,6 +457,29 @@
   saves can drop or turn a Skill into an action. Reset app keeps it (setup,
   like folders and actions: `privacy/reset.rs` STAYS); Download your data
   includes it (`skills.json` in the zip).
+- Note versions: `%APPDATA%/yap/note-versions/<note id>.json` — each note's
+  version history (2026-10-29, `notes/versions.rs`): `{note, created, next,
+  versions: [{n, field: "notes" | "summary", kind, label?, from?, sinceMs,
+  ms, text}]}`, the last 50 texts of its My thoughts and summary, each with
+  how it came (typed, dictated, summary, action, transform, chat, restored,
+  edited, earlier). Through `saving.rs` ("your notes' history"; a file that
+  doesn't read set aside). `created` is the note's `createdTs`: a file left
+  by a note an older Yap deleted is ignored by a new note given its id.
+  Deleted with its note; a meeting's summary versions go with its
+  transcript ("Delete meeting transcripts after"). Never sent anywhere.
+  Files of their own, not notes.json fields: an older Yap never opens them
+  (its notes have no history there; an edit it makes shows here as an
+  "earlier" version), and notes.json stays the size it was. Download your
+  data puts every note's history in `notes/versions.json`; Reset app
+  deletes the folder's files with the notes (`versions::reset`).
+- Pinned notes: `%APPDATA%/yap/note_pins.json` — `{pins: [{id, created,
+  ms}]}` (2026-10-29, `notes/pins.rs`): the notes pinned in Notes, each by
+  its id and `createdTs`. A file of its own, so an older Yap saving
+  notes.json never drops a pin (it lists the notes unpinned and never opens
+  the file). A note's pin goes with it, and every pin with Reset app
+  (`pins::reset`); not in Download your data (a pin is a place in a list,
+  not something the person wrote). Through `saving.rs` ("your pinned
+  notes").
 - Chat screenshots: `%APPDATA%/yap/chat-images/` — `img_<16 hex>.png` for each
   screenshot a question carries (Snip to Chat, `snip/images.rs`); `chats.json`
   keeps only its id, size, bytes and source. Deleted with its conversation, after
@@ -473,7 +510,10 @@
   `summaryAi` (Yap's own summary, for "Back to Yap's summary") and
   `summaryRating` (`{up, why, ms}`, the person's 👍 / 👎 — never sent); an
   older Yap on the same data drops both when it saves, never the person's
-  summary (`enhancedContent`). The built-in Action Plan's `prompt` moves on
+  summary (`enhancedContent`). Since 2026-10-29 a meeting transcript may
+  hold "Your PC was asleep for 12 min" (a line with `asleepMs`, no text,
+  `meetings/sleep.rs`); an older Yap's save drops the field, leaving an
+  empty "You" line (shown as an empty bubble there; nothing else lost). The built-in Action Plan's `prompt` moves on
   to the recap-and-reasons layout once, when it's still an earlier default
   word for word (`notes::seed_missing_builtins`: no field renamed or
   removed).
@@ -522,7 +562,10 @@
   titles, dates — and a fingerprint), and since 2026-10-25 **busy time of
   your own** (`busy`: events nobody else is on, over the same window, only
   for Chat's calendar tool; an older Yap's save drops it until the next
-  sync) (`calendar.rs`). Chats' answers may cite calendar meetings
+  sync), and since 2026-10-29 each meeting's **join codes** (`codes`:
+  "meet:abc-defg-hij", "zoom:81234567890"…, to match a call by the code its
+  window shows; an older Yap's save drops them until the next sync, and
+  calls match by time and service meanwhile) (`calendar.rs`). Chats' answers may cite calendar meetings
   (`chats.json` sources with `event`, `field: "calendar"`; an older Yap's
   save drops `event`, and such a pill then shows as plain "[1]"). Never a token or a link: those are Credential
   Manager generic credentials `yap-calendar-<1-8>.com.yap.dictation` (Local
@@ -543,6 +586,13 @@
   and drops those two fields when it next saves a hint, which is harmless:
   the marks only ever show in a first meeting, and once a meeting has talk
   in it no later one is a first.
+- Call apps: `%APPDATA%/yap/call_apps.json` (2026-10-29,
+  `calls/meeting_detect/auto_offer.rs`) — how many meetings were recorded
+  from each call app's calls and the apps already asked "Start notes
+  automatically for Teams calls?": `{recorded: {teams: 3}, offered:
+  ["teams"]}`. Counts only. A file of its own: an older Yap never reads or
+  writes it. Safe to delete (the counting starts again; an app may be asked
+  again). Reset app keeps it (an answer to an offer).
 - Quick note tabs: `%APPDATA%/yap/quick_note_tabs.json` (2026-10-29) —
   `{tabs: [note ids, in order], active: id | null}`, the quick notes open
   as tabs in the quick note's window (`notes/quick_note/tabs.rs`): read at
@@ -596,10 +646,12 @@
   to the AI model the person uses, never to Yap.
 - **Download your data and Reset app** (2026-10-29, Settings → Privacy &
   data → Your data; [privacy-receipts.md](./privacy-receipts.md)): one .zip
-  of the history, notes and meetings, chats, tasks, memory, the dictionary
-  and settings without keys (the audio and screenshots with a tick box),
+  of the history, notes and meetings (and each note's earlier versions),
+  chats, tasks, memory, the dictionary and settings without keys (the audio
+  and screenshots with a tick box),
   never uploaded; and "Clear everything and keep my settings": the history
-  and its audio, notes and meetings with theirs, chats and screenshots,
+  and its audio, notes and meetings with theirs (and their versions and
+  pins), chats and screenshots,
   memory, tasks, the search index, the usage counts and the pre-meeting
   briefs go; config.json, `dictionary_usage.json`, the models, the account
   and calendars, and Yap's own records stay. **Every file this page names

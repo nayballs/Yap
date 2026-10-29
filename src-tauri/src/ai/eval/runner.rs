@@ -1027,6 +1027,7 @@ fn seed_calendar(c: &scenario::SeedCalendar) -> Result<crate::calendar::Agenda, 
             service: m.on.clone(),
             description: String::new(),
             tentative: m.maybe,
+            codes: Vec::new(),
         });
     }
     let mut busy = Vec::new();

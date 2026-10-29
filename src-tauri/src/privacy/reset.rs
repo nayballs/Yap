@@ -44,7 +44,11 @@ pub struct Part {
 /// What a reset deletes, in the order the dialog says it.
 pub const GOES: &[Part] = &[
     Part { id: "history", label: "Your dictation history, and the last day of dictation audio", files: &["history.json", "recent-audio/"] },
-    Part { id: "notes", label: "Every note and meeting, with their audio (your folders and actions stay)", files: &["notes.json", "meeting-audio/", "quick_note_tabs.json"] },
+    Part {
+        id: "notes",
+        label: "Every note and meeting, with their audio, earlier versions and pins (your folders and actions stay)",
+        files: &["notes.json", "meeting-audio/", "quick_note_tabs.json", "note-versions/", "note_pins.json"],
+    },
     Part { id: "chats", label: "Every chat, with its screenshots", files: &["chats.json", "chat-images/"] },
     Part { id: "memory", label: "What Yap remembers about you", files: &["memory.json"] },
     Part { id: "tasks", label: "Your tasks", files: &["tasks.json"] },
@@ -63,8 +67,8 @@ pub const GOES: &[Part] = &[
 
 /// What a reset keeps, as the dialog names it, and its files.
 pub const STAYS: &[Part] = &[
-    // Skills are setup, like folders and actions: they stay.
-    Part { id: "settings", label: "Your settings, dictionary and snippets, and your Skills", files: &["config.json", "dictionary_usage.json", "skills.json"] },
+    // Skills and meeting folder rules are setup, like folders and actions: they stay.
+    Part { id: "settings", label: "Your settings, dictionary and snippets, and your Skills", files: &["config.json", "dictionary_usage.json", "skills.json", "meeting_folders.json"] },
     // Set up on purpose, like the dictionary (Settings → Commands).
     Part { id: "samples", label: "Your writing samples", files: &["writing_samples.json"] },
     Part { id: "models", label: "Downloaded speech, AI and voice models", files: &["models/", "llm/"] },
@@ -75,6 +79,7 @@ pub const STAYS: &[Part] = &[
         files: &[
             "hints.json",
             "mic_tips.json",
+            "call_apps.json",
             "notices.json",
             "word_suggestions.json",
             "snippet_suggestions.json",
@@ -93,7 +98,7 @@ pub const STAYS: &[Part] = &[
 
 /// The stores whose set-aside copies (`<stem>.corrupt-…`, `config::set_aside`)
 /// go with them: they hold the same content.
-const SET_ASIDE: &[&str] = &["history", "notes", "chats", "memory", "tasks", "dictation_stats", "ai_usage", "groq_usage"];
+const SET_ASIDE: &[&str] = &["history", "notes", "note_pins", "chats", "memory", "tasks", "dictation_stats", "ai_usage", "groq_usage"];
 
 /// Whether `file` (a name in the data folder) is a set-aside copy of a
 /// store that goes. Pure.
@@ -211,6 +216,9 @@ fn run(app: &AppHandle) -> Result<Done, String> {
     done.notes = ids.len();
     // The quick note's open tabs were those notes.
     crate::notes::quick_note::tabs::reset();
+    // Their version history and pins (notes/versions.rs, notes/pins.rs).
+    crate::notes::versions::reset();
+    crate::notes::pins::reset();
     for id in &ids {
         let _ = app.emit(crate::meetings::meeting_end::EVENT_DELETED, serde_json::json!({ "id": id }));
         crate::meetings::notepad::on_note_deleted(app, *id);
@@ -248,6 +256,7 @@ fn run(app: &AppHandle) -> Result<Done, String> {
     // tries again; saving.rs).
     crate::dictation::history::saved()?;
     crate::notes::saved()?;
+    crate::notes::pins::SAVER.check()?;
     crate::chat::chats::saved()?;
     crate::memory::saved()?;
     crate::notes::task_store::saved()?;
@@ -305,7 +314,7 @@ mod tests {
     #[test]
     fn what_goes_is_what_was_asked_and_settings_stay() {
         let goes: Vec<&str> = GOES.iter().flat_map(|p| p.files.iter().copied()).collect();
-        for f in ["history.json", "recent-audio/", "notes.json", "meeting-audio/", "chats.json", "chat-images/", "memory.json", "tasks.json", "search-index/", "dictation_stats.json", "ai_usage.json"] {
+        for f in ["history.json", "recent-audio/", "notes.json", "meeting-audio/", "note-versions/", "note_pins.json", "chats.json", "chat-images/", "memory.json", "tasks.json", "search-index/", "dictation_stats.json", "ai_usage.json"] {
             assert!(goes.contains(&f), "{f} goes");
         }
         let stays: Vec<&str> = STAYS.iter().flat_map(|p| p.files.iter().copied()).collect();

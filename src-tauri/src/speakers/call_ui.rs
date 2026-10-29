@@ -699,6 +699,52 @@ pub mod win {
         }
     }
 
+    /// The names of window `hwnd`'s buttons (`calls/call_audio.rs` reads its
+    /// mute button from them): one cached search, done in the app's own
+    /// process, only names read, nothing invoked. `Ok(None)`: minimised.
+    pub fn button_names(hwnd: isize) -> Result<Option<Vec<String>>, String> {
+        use windows::Win32::System::Variant::{VARIANT, VT_I4};
+        use windows::Win32::UI::Accessibility::{TreeScope_Descendants, UIA_ButtonControlTypeId};
+        let h = HWND(hwnd as *mut core::ffi::c_void);
+        unsafe {
+            if !IsWindow(Some(h)).as_bool() {
+                return Err("the window closed".to_string());
+            }
+            if IsIconic(h).as_bool() {
+                return Ok(None);
+            }
+        }
+        let _com = Com::init().ok_or("COM")?;
+        // SAFETY: plain COM calls on this thread; the VARIANT holds an i4
+        // (nothing to free); every pointer is released by its wrapper.
+        unsafe {
+            let automation: IUIAutomation = CoCreateInstance(&CUIAutomation8, None, CLSCTX_INPROC_SERVER)
+                .or_else(|_| CoCreateInstance(&CUIAutomation, None, CLSCTX_INPROC_SERVER))
+                .map_err(|e| e.to_string())?;
+            if let Ok(a2) = automation.cast::<IUIAutomation2>() {
+                let _ = a2.SetConnectionTimeout(TIMEOUT_MS);
+                let _ = a2.SetTransactionTimeout(TIMEOUT_MS);
+            }
+            let cache = automation.CreateCacheRequest().map_err(|e| e.to_string())?;
+            cache.AddProperty(UIA_NamePropertyId).map_err(|e| e.to_string())?;
+            let mut button = VARIANT::default();
+            (*button.Anonymous.Anonymous).vt = VT_I4;
+            (*button.Anonymous.Anonymous).Anonymous.lVal = UIA_ButtonControlTypeId.0;
+            let condition = automation
+                .CreatePropertyCondition(UIA_ControlTypePropertyId, &button)
+                .map_err(|e| e.to_string())?;
+            let root = automation.ElementFromHandle(h).map_err(|e| e.to_string())?;
+            let found = root.FindAllBuildCache(TreeScope_Descendants, &condition, &cache).map_err(|e| e.to_string())?;
+            let mut names = Vec::new();
+            for i in 0..found.Length().unwrap_or(0).min(2_000) {
+                if let Ok(name) = found.GetElement(i).and_then(|e| e.CachedName()) {
+                    names.push(name.to_string());
+                }
+            }
+            Ok(Some(names))
+        }
+    }
+
     unsafe fn convert(e: &IUIAutomationElement, count: &mut usize) -> Node {
         *count += 1;
         let text = |r: windows::core::Result<windows::core::BSTR>| r.map(|b| b.to_string()).unwrap_or_default();
@@ -783,6 +829,10 @@ pub mod win {
     use super::Node;
 
     pub fn snapshot(_hwnd: isize) -> Result<Option<Node>, String> {
+        Err("UI Automation is Windows only".to_string())
+    }
+
+    pub fn button_names(_hwnd: isize) -> Result<Option<Vec<String>>, String> {
         Err("UI Automation is Windows only".to_string())
     }
 }

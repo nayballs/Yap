@@ -1060,6 +1060,7 @@ mod tests {
             service: Some("teams".into()),
             description: String::new(),
             tentative: false,
+            codes: Vec::new(),
         }
     }
 

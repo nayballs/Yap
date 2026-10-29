@@ -41,10 +41,10 @@ use tauri::{AppHandle, Emitter};
 use crate::notes::note_edits::{find_line, LineRef};
 use crate::notes::{Note, TranscriptSegment};
 
-/// A marker (a dictation, a failed stretch, the mic disconnected): none of
-/// these edits apply.
+/// A marker (a dictation, a failed stretch, the mic disconnected, the PC
+/// asleep): none of these edits apply.
 fn is_marker(seg: &TranscriptSegment) -> bool {
-    seg.dictated || seg.failed || seg.mic.is_some()
+    seg.dictated || seg.failed || seg.mic.is_some() || seg.asleep_ms.is_some()
 }
 
 // ---- revert ----

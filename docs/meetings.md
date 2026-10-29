@@ -1861,6 +1861,39 @@ call ends: Stop and summarise automatically** (Wispr Flow's "Stop Notetaker
 when a call ends"; see [Guard rails](#when-a-call-ends)), which skips the
 question and says so.
 
+### Smarter about the call itself
+
+Since 2026-10-29 Yap looks at the call it records a little more closely
+(`calls/call_audio.rs`, `meetings/sleep.rs`, `calls/meeting_detect.rs`):
+
+- **Sure about the ending.** Off the mic for 15 s isn't enough on its own:
+  if the call app still plays sound, or a window still shows the meeting
+  (a Meet tab in front, Zoom's meeting window), Yap asks **"Stop taking
+  notes?"** instead, even with "Stop and summarise automatically". Once the
+  call is gone it becomes the usual ending.
+- **Back within 2 minutes.** After Yap stopped a call's notes by itself
+  (the call ended with "Stop and summarise automatically", or the PC went
+  to sleep), the same app's call within 2 minutes carries on in the same
+  note: "Back on your Teams call".
+- **Another call while one records**: "Switch to Zoom?" ends these notes
+  (the action plan written) and starts new ones on that call; Keep
+  recording leaves them. The calendar's own switch card asks instead when
+  the call is its next meeting.
+- **The call's microphone**: "Teams is using Contoso H2 but Yap is using
+  Northwind Audio", once per call and pair, with **Use Contoso H2** for
+  this meeting (your order in Settings stays as it is). Never about a
+  software microphone (Krisp and the like) or a closed laptop's own.
+- **Muted in the call**: while Teams, Zoom or Meet shows you muted (or the
+  call's microphone is muted in Windows), "Yap can't hear your mic" stays
+  quiet.
+- **The PC asleep**: a recording pauses cleanly when the PC sleeps; on
+  wake the transcript says "Your PC was asleep for 12 min" where it
+  happened, and Yap offers **Resume** or **Summarise**.
+- **Start automatically?** After you've stopped the third meeting of an
+  app's calls yourself, Yap asks once: "Start notes automatically for Teams
+  calls?". Yes counts that app's calls down 10 seconds and starts notes;
+  Settings → Meetings → Ask about calls in turns it off again.
+
 ### Setting
 
 Settings → Meetings: **Detect calls and offer to take notes**

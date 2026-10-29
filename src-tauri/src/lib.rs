@@ -476,6 +476,12 @@ pub fn run() {
             notes::note_edits::note_summary_restore,
             notes::note_edits::note_summary_put_back,
             notes::note_edits::note_summary_rate,
+            // Pinned notes, version history, transforms in notes.
+            notes::pins::note_pin,
+            notes::versions::note_versions,
+            notes::versions::note_version_restore,
+            notes::transform::note_transforms,
+            notes::transform::note_transform,
             speakers::speaker_rename,
             speakers::speaker_rename_lines,
             speakers::speaker_merge,
@@ -524,6 +530,10 @@ pub fn run() {
             calendar::calendar_brief,
             calendar::calendar_brief_for_note,
             calendar::calendar_brief_open,
+            calendar::calendar_day,
+            calendar::filing::meeting_file,
+            calendar::filing::meeting_file_past,
+            calendar::filing::meeting_unfile,
             search::commands::search_status,
             search::commands::search_install,
             search::commands::search_set_enabled,
@@ -693,7 +703,13 @@ pub fn run() {
             #[cfg(debug_assertions)]
             calls::meeting_guard::e2e_meeting_checkins,
             #[cfg(debug_assertions)]
+            calls::call_audio::e2e_call_audio,
+            #[cfg(debug_assertions)]
+            meetings::sleep::e2e_sleep,
+            #[cfg(debug_assertions)]
             calendar::calendar_e2e_opened,
+            #[cfg(debug_assertions)]
+            calendar::calendar_e2e_call_window,
             #[cfg(debug_assertions)]
             shell::commands::e2e_opened_urls,
             #[cfg(debug_assertions)]
@@ -1241,6 +1257,10 @@ pub fn run() {
             // and keeping meeting windows out of screen shares.
             calls::meeting_guard::init(&handle);
             calls::capture::init(&handle);
+            // The call's own audio while it's recorded (its microphone,
+            // muted or not), and the PC going to sleep mid-meeting.
+            calls::call_audio::init(&handle);
+            meetings::sleep::init(&handle);
 
             // Other apps' sound a crash left silenced mid-dictation comes back.
             dictation::mute::recover();

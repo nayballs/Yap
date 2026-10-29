@@ -25,11 +25,14 @@
   import ActionManager from './ActionManager.svelte';
   import NoteList from './NoteList.svelte';
   import NoteEditor from './NoteEditor.svelte';
+  import VersionHistory from './VersionHistory.svelte';
 
   // `onopensettings(section)` opens the Settings modal (ControlPanel).
   let { onopensettings = null } = $props();
 
   const notes = createNotesState();
+  // "Open Language Models" when a transform has no AI model to run on.
+  notes.openSettings = (section) => onopensettings?.(section);
 
   onMount(() => {
     notes.refreshList();
@@ -51,10 +54,20 @@
     listen('yap-note-changed', (e) => notes.onNoteChanged(e.payload)).then((u) => unlisteners.push(u));
     // The meeting notepad added to a note's kept Ask thread (chat/note_chats.rs).
     listen('yap-note-chat', (e) => notes.onNoteChat(e.payload)).then((u) => unlisteners.push(u));
+    // A dictation delivered: pasted into My thoughts, its version is "Dictated".
+    listen('yap-transcript', () => notes.onTranscript()).then((u) => unlisteners.push(u));
+    // The saved transforms, for the note's menus (Settings → Commands may change them).
+    notes.loadTransforms();
+    listen('yap-config-saved', () => notes.loadTransforms()).then((u) => unlisteners.push(u));
     // (A recording's warnings are notices from notices/meetingGuard.js, in any view.)
     // The local API bridge (Integrations) can create/update/delete notes from
     // outside the app — refresh the list so external edits show up live.
     listen('yap-notes-changed', () => notes.refreshList()).then((u) => unlisteners.push(u));
+    // A meeting's transcript changed outside a recording ("Your PC was
+    // asleep", meetings/sleep.rs): the open note as stored.
+    listen('yap-meeting-transcript', (e) => {
+      if (e.payload?.noteId === notes.selected?.id) notes.reloadSelected();
+    }).then((u) => unlisteners.push(u));
     // A recording made a note a meeting note and filed it in Meetings
     // (commands.rs `meeting_start` → notes::file_as_meeting).
     listen('yap-note-filed', (e) => notes.onNoteFiled(e.payload)).then((u) => unlisteners.push(u));
@@ -95,6 +108,7 @@
 />
 
 <ActionManager bind:open={notes.actionsOpen} onchanged={notes.refreshActions} />
+<VersionHistory {notes} />
 
 <div class="notes">
   <NoteList {notes} />

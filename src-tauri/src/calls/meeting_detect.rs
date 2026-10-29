@@ -65,8 +65,28 @@
 //! "Stop Notetaker when a call ends") it stops and summarises without asking
 //! (`meeting_guard::stop_after_call`).
 //!
+//! **Sure about the ending** (2026-10-29): 15 s off the mic, and a second
+//! opinion (`call_audio::still_on`: the call app still plays sound, or a
+//! window still shows the meeting). Still on → "Stop taking notes?"
+//! instead, also with "Stop and summarise automatically" (it may turn into
+//! the usual ending while it's up, once that's gone). After Yap stopped a
+//! call's notes by itself (the call ended, the PC slept), the same app's
+//! call within 2 minutes carries on in the same note ([`RESUME_MS`]).
+//!
+//! **Another call while one records** (2026-10-29): "Switch to Zoom?" — end
+//! these notes (the action plan written) and start new ones on that call,
+//! or Keep recording. A call during the calendar's next meeting gets the
+//! calendar's switch card instead (`calendar::on_call_started`).
+//!
+//! **"Start notes automatically for Teams calls?"** once, after the third
+//! meeting recorded from an app's calls, at the end of one the person
+//! stopped (`auto_offer.rs`; yes → `meeting_auto_start_apps`, the
+//! countdown for that app only).
+//!
 //! Test mode (`e2e::active`) reads no registry and posts no Windows
 //! notifications; the debug-only [`meeting_detect_simulate`] drives the flow.
+
+mod auto_offer;
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::mpsc::{self, RecvTimeoutError};
@@ -101,6 +121,13 @@ const AUTO_START_MS: u64 = 10_000;
 /// A call of an app asked about this recently (a rejoin, a reload) is asked
 /// about without the countdown, as Wispr does.
 const REDETECT_MS: u64 = 10 * 60_000;
+/// After Yap stopped a call's notes by itself (the call ended with "Stop
+/// and summarise automatically", or the PC went to sleep: from when it
+/// woke), the same app's call within this long carries on in that note.
+const RESUME_MS: u64 = 2 * 60_000;
+/// "Switch": how long the last meeting's notes may take to finish before
+/// the new call's start.
+const SWITCH_WAIT: Duration = Duration::from_secs(60);
 /// The prompt's card on the Yap bar (`crate::bar`).
 const BAR_CARD: &str = "call";
 
@@ -519,6 +546,20 @@ enum PromptKind {
     Start,
     /// "Teams call ended — Stop and summarise?"
     End,
+    /// "Stop taking notes?": the call app let go of the mic, but its call
+    /// still looks on (`call_audio::still_on`).
+    Unsure,
+    /// "Switch to Zoom?": another app's call started while one records.
+    Switch,
+}
+
+/// A prompt's two answers: (accept, decline).
+fn answers(kind: PromptKind) -> (&'static str, &'static str) {
+    match kind {
+        PromptKind::Start => ("record", "dismiss"),
+        PromptKind::End | PromptKind::Unsure => ("stop", "keep"),
+        PromptKind::Switch => ("switch", "keep"),
+    }
 }
 
 #[derive(Clone)]
@@ -567,16 +608,51 @@ struct State {
     prompt: Option<Prompt>,
     /// Prompts already answered (an answer can arrive from both surfaces).
     answered: Vec<u64>,
-    /// The meeting note a "Record notes" started: a later call while it's
-    /// still recording (a rejoin) is asked about at its end too.
-    our_note: Option<u64>,
+    /// The meeting note a "Record notes" started (or a resume carried on),
+    /// and its call's app: the same app's later call while it still records
+    /// (a rejoin) is asked about at its end too; another app's offers to
+    /// switch.
+    recorded: Option<Recorded>,
+    /// A call's notes Yap stopped by itself: its app's call soon after
+    /// carries on in them ([`RESUME_MS`]).
+    auto_stopped: Option<AutoStop>,
+    /// Apps whose calls start notes after the countdown
+    /// (`meeting_auto_start_apps`).
+    auto_apps: Vec<String>,
     /// A call waiting for its start prompt (held back while dictating).
     due: Option<u64>,
+    /// Another app's call while one records, waiting for "Switch to …?".
+    switch_due: Option<u64>,
     /// App id → until when "Not now" quiets its calls (ms).
     snoozed: HashMap<&'static str, u64>,
     /// When a dictation last recorded or transcribed (ms).
     last_dictation: u64,
     seq: u64,
+}
+
+/// The note Yap records a call app's call into.
+#[derive(Clone, Copy)]
+struct Recorded {
+    note_id: u64,
+    app: &'static App,
+    /// A click started it (Record notes, the tray, the shortcut), not the
+    /// countdown or a resume.
+    clicked: bool,
+}
+
+/// A call's notes Yap stopped by itself, at `at` (ms; for a sleep, when the
+/// PC woke).
+#[derive(Clone, Copy)]
+struct AutoStop {
+    note_id: u64,
+    app: &'static App,
+    at: u64,
+}
+
+/// Does a call starting at `now` come back soon enough after an automatic
+/// stop at `stopped` to carry on in its note? (ms)
+fn resumes(stopped: u64, now: u64) -> bool {
+    now >= stopped && now - stopped <= RESUME_MS
 }
 
 static STATE: LazyLock<Mutex<State>> = LazyLock::new(|| Mutex::new(State::default()));
@@ -655,9 +731,11 @@ struct PromptView {
     call_id: u64,
     app: &'static str,
     title: String,
-    body: &'static str,
+    body: String,
     accept: &'static str,
     decline: &'static str,
+    /// What `accept` and `decline` answer (`meeting_detect_respond`).
+    answers: [&'static str; 2],
     /// The quieter third answer, "Don't ask for Teams" (start prompts).
     never: Option<String>,
     note_id: Option<u64>,
@@ -674,7 +752,7 @@ struct PromptView {
 /// One wording for both surfaces (the in-app toast, the Windows notification).
 struct Wording {
     title: String,
-    body: &'static str,
+    body: String,
     accept: &'static str,
     decline: &'static str,
     never: Option<String>,
@@ -684,15 +762,32 @@ fn wording(kind: PromptKind, app: &App) -> Wording {
     match kind {
         PromptKind::Start => Wording {
             title: format!("{} {} detected", app.label, app.noun),
-            body: "Record notes? Let people know you're taking notes.",
+            body: "Record notes? Let people know you're taking notes.".into(),
             accept: "Record notes",
             decline: "Not now",
             never: Some(format!("Don't ask for {}", app.label)),
         },
         PromptKind::End => Wording {
             title: format!("{} {} ended", app.label, app.noun),
-            body: "Stop recording and summarise your notes?",
+            body: "Stop recording and summarise your notes?".into(),
             accept: "Stop and summarise",
+            decline: "Keep recording",
+            never: None,
+        },
+        PromptKind::Unsure => Wording {
+            title: "Stop taking notes?".to_string(),
+            body: format!("{} let go of your microphone, but the {} still looks open.", app.label, app.noun),
+            accept: "Stop and summarise",
+            decline: "Keep recording",
+            never: None,
+        },
+        PromptKind::Switch => Wording {
+            title: format!("Switch to {}?", app.label),
+            body: format!(
+                "A {} {} started while Yap takes notes on another. Switching ends those notes and starts new ones.",
+                app.label, app.noun
+            ),
+            accept: "Switch",
             decline: "Keep recording",
             never: None,
         },
@@ -732,6 +827,7 @@ fn status_of(s: &State) -> Status {
             .collect(),
         prompt: s.prompt.as_ref().map(|p| {
             let w = wording(p.kind, p.app);
+            let (yes, no) = answers(p.kind);
             PromptView {
                 id: p.id,
                 kind: p.kind,
@@ -741,6 +837,7 @@ fn status_of(s: &State) -> Status {
                 body: w.body,
                 accept: w.accept,
                 decline: w.decline,
+                answers: [yes, no],
                 never: w.never,
                 note_id: p.note_id,
                 in_app: p.in_app,
@@ -834,7 +931,7 @@ pub fn on_tray_record(app: &AppHandle, call_id: u64) {
     }
     run(app, todo);
     tracing::info!(call_id, "meeting detect: record from the tray");
-    if let Err(e) = record(app, call_id) {
+    if let Err(e) = record(app, call_id, true) {
         // Say why in a Windows notification, or in the window when it's on
         // screen (or no notification can be posted).
         #[cfg(windows)]
@@ -864,6 +961,9 @@ struct Todo {
     /// A start prompt went up: call-prompt fatigue counts it
     /// (`notice::Fatigue`).
     prompted: bool,
+    /// (note, call): the call came back soon after Yap stopped its notes by
+    /// itself: carry on recording in that note.
+    resume: Option<(u64, u64)>,
 }
 
 fn run(app: &AppHandle, todo: Todo) {
@@ -903,6 +1003,10 @@ fn run(app: &AppHandle, todo: Todo) {
     if let Some((note_id, call)) = todo.auto_stop {
         crate::calls::meeting_guard::stop_after_call(app, note_id, &format!("{} {}", call.label, call.noun));
     }
+    if let Some((note_id, call_id)) = todo.resume {
+        let app = app.clone();
+        std::thread::spawn(move || resume_into(&app, note_id, call_id));
+    }
     if todo.prompted {
         let ever = ever_recorded();
         if crate::notices::notice::with_call_fatigue(|f| f.prompted(ever)) == crate::notices::notice::Verdict::SwitchOff {
@@ -937,7 +1041,7 @@ fn auto_start_later(app: &AppHandle, prompt_id: u64, at: u64) {
             card.primary = None;
             card.escape_action = None;
         });
-        if let Err(e) = respond(&app, prompt_id, "record") {
+        if let Err(e) = respond_with(&app, prompt_id, "record", false) {
             #[cfg(windows)]
             if !window_view(&app).0 && native::failed(&app, &e).is_ok() {
                 return;
@@ -1013,7 +1117,7 @@ fn show_prompt(
     s.seq += 1;
     let (visible, focused) = view;
     let quiet = s.quiet;
-    let fade_ms = (kind == PromptKind::Start)
+    let fade_ms = matches!(kind, PromptKind::Start | PromptKind::Switch)
         .then(|| s.calls.iter().find(|c| c.id == call_id).and_then(|c| c.fade_ms).unwrap_or(FADE_MS));
     let place = crate::notices::notice::place_for(
         focused,
@@ -1028,7 +1132,7 @@ fn show_prompt(
     let now = now_ms();
     let redetected = s.asked_at.get(app.id).is_some_and(|at| now.saturating_sub(*at) < REDETECT_MS);
     let counts_down = kind == PromptKind::Start
-        && s.auto_start
+        && (s.auto_start || s.auto_apps.iter().any(|a| a == app.id))
         && !quiet
         && !redetected
         && (focused || crate::bar::cards_seen());
@@ -1067,11 +1171,38 @@ fn recording_of(call: &Call) -> Option<u64> {
     (started + 60_000 >= call.since).then_some(note)
 }
 
+/// [`recording_of`], but never the notes of another app's call that Yap
+/// records ("Keep recording" on "Switch to Zoom?": Zoom's call isn't them).
+fn recording_of_in(s: &State, call: &Call) -> Option<u64> {
+    recording_of(call).filter(|note| {
+        call.note_id == Some(*note) || !s.recorded.is_some_and(|r| r.note_id == *note && r.app.id != call.app.id)
+    })
+}
+
 fn on_edges(app: &AppHandle, edges: Vec<Edge>) {
     if edges.is_empty() {
         return;
     }
     let view = window_view(app);
+    // The calendar reads each new call's join code from its windows (Meet's
+    // tab title, a meeting's address in a browser) before the lock below:
+    // it touches windows, and `claims_call` then matches by it.
+    for edge in &edges {
+        if let Edge::Started { app: id, .. } = edge {
+            crate::calendar::read_call_code(id);
+        }
+    }
+    // A call Yap records ended by the mic: is it still on by a second
+    // signal? (Read before the lock: Windows' audio sessions, its windows.)
+    let recording = crate::meetings::meeting::recording_note().is_some();
+    let still: Vec<(&'static str, Option<bool>)> = edges
+        .iter()
+        .filter_map(|e| match e {
+            Edge::Ended { app } if recording => Some(*app),
+            _ => None,
+        })
+        .map(|id| (id, still_on(id)))
+        .collect();
     let mut todo = Todo::default();
     let mut started = Vec::new();
     {
@@ -1082,15 +1213,80 @@ fn on_edges(app: &AppHandle, edges: Vec<Edge>) {
                     started.push(id);
                     call_started(&mut s, &mut todo, id, since)
                 }
-                Edge::Ended { app: id } => call_ended(&mut s, &mut todo, view, id),
+                Edge::Ended { app: id } => {
+                    let there = still.iter().find(|(a, _)| *a == id).and_then(|(_, t)| *t);
+                    call_ended(&mut s, &mut todo, view, id, there)
+                }
             }
         }
     }
     run(app, todo);
     // The calendar: a call during the next meeting, while the last one's
-    // notes still record, offers to switch notes (calendar.rs).
+    // notes still record, offers to switch notes (calendar.rs) — its card,
+    // not "Switch to …?" too.
     for id in started {
-        crate::calendar::on_call_started(id);
+        if crate::calendar::on_call_started(id) {
+            let mut s = lock();
+            if s.switch_due.and_then(|c| s.calls.iter().find(|x| x.id == c)).is_some_and(|c| c.app.id == id) {
+                s.switch_due = None;
+            }
+        }
+    }
+}
+
+/// Is `app_id`'s call still on by a second signal (`call_audio::still_on`)?
+/// Never with the lock held.
+fn still_on(app_id: &str) -> Option<bool> {
+    let call_app = app_by_id(app_id)?;
+    let exes: Vec<String> = call_app.exes.iter().map(|e| e.to_string()).collect();
+    let there = crate::calls::call_audio::still_on(app_id, &exes);
+    tracing::info!(app = app_id, ?there, "meeting detect: is the call still on?");
+    there
+}
+
+/// What a call of `app` starting means (pure; see [`call_started`]).
+#[derive(Debug, PartialEq, Eq)]
+enum OnStart {
+    /// The note this app's call is recorded into still records (a rejoin,
+    /// or "Keep recording"): this call carries it on.
+    Carried(u64),
+    /// Yap stopped this app's call's notes by itself a moment ago (the call
+    /// ended, the PC slept): carry on in that note.
+    Resume(u64),
+    /// "Teams call detected — Record notes?" (unless the calendar asked).
+    Ask,
+    /// Another app's call's notes record: "Switch to Zoom?" (unless the
+    /// calendar's switch card asks: `on_edges`).
+    Switch,
+    Nothing,
+}
+
+/// `recording`: the note being recorded; `recorded`: the one a call's
+/// "Record notes" started; `asked`: Yap asks about `app`'s calls;
+/// `snoozed`: "Not now" lately.
+fn on_start(
+    app: &str,
+    recording: Option<u64>,
+    recorded: Option<Recorded>,
+    auto_stopped: Option<AutoStop>,
+    now: u64,
+    asked: bool,
+    snoozed: bool,
+) -> OnStart {
+    let ours = recorded.filter(|r| recording == Some(r.note_id));
+    if let Some(r) = ours.filter(|r| r.app.id == app) {
+        return OnStart::Carried(r.note_id);
+    }
+    if recording.is_none() {
+        if let Some(a) = auto_stopped.filter(|a| a.app.id == app && resumes(a.at, now)) {
+            return OnStart::Resume(a.note_id);
+        }
+        return if asked && !snoozed { OnStart::Ask } else { OnStart::Nothing };
+    }
+    if ours.is_some() && asked && !snoozed {
+        OnStart::Switch
+    } else {
+        OnStart::Nothing
     }
 }
 
@@ -1098,42 +1294,58 @@ fn call_started(s: &mut State, todo: &mut Todo, id: &'static str, since: u64) {
     let Some(app) = app_by_id(id) else { return };
     s.seq += 1;
     let call_id = s.seq;
-    // Still recording the note an earlier call's "Record notes" started (a
-    // rejoin, or "Keep recording"): this call carries it on, and a pending
-    // "…ended — Stop and summarise?" for the same app is moot.
     let recording_note = crate::meetings::meeting::state()["noteId"].as_u64();
-    let carried = recording_note.filter(|note| s.our_note == Some(*note));
-    let rejoin = s.prompt.as_ref().is_some_and(|p| p.kind == PromptKind::End && p.app.id == id);
-    if carried.is_some() && rejoin {
+    let asked = asks(&s.choices, app);
+    let snoozed = s.snoozed.get(id).is_some_and(|until| now_ms() < *until);
+    let start = on_start(id, recording_note, s.recorded, s.auto_stopped, now_ms(), asked, snoozed);
+    // A carried call's pending "…ended — Stop and summarise?" is moot.
+    let rejoin = s
+        .prompt
+        .as_ref()
+        .is_some_and(|p| matches!(p.kind, PromptKind::End | PromptKind::Unsure) && p.app.id == id);
+    if matches!(start, OnStart::Carried(_)) && rejoin {
         withdraw(s, todo);
     }
-    s.calls.push(Call { id: call_id, app, since, note_id: carried, fade_ms: None });
+    let note_id = match start {
+        OnStart::Carried(note) | OnStart::Resume(note) => Some(note),
+        _ => None,
+    };
+    s.calls.push(Call { id: call_id, app, since, note_id, fade_ms: None });
     todo.emit = true;
-    let asked = asks(&s.choices, app);
-    tracing::info!(app = id, carried = carried.is_some(), asked, "meeting detect: call started");
-    let snoozed = s.snoozed.get(id).is_some_and(|until| now_ms() < *until);
-    // A call during a meeting whose calendar card is up or was answered:
-    // asked about already (calendar.rs).
-    if recording_note.is_none() && !snoozed && asked && !crate::calendar::claims_call(id) {
-        s.due = Some(call_id);
+    tracing::info!(app = id, ?start, asked, "meeting detect: call started");
+    match start {
+        OnStart::Resume(note) => {
+            s.auto_stopped = None;
+            todo.resume = Some((note, call_id));
+        }
+        // A call during a meeting whose calendar card is up or was
+        // answered: asked about already (calendar.rs).
+        OnStart::Ask if !crate::calendar::claims_call(id) => s.due = Some(call_id),
+        OnStart::Switch => s.switch_due = Some(call_id),
+        _ => {}
     }
 }
 
-fn call_ended(s: &mut State, todo: &mut Todo, view: (bool, bool), id: &str) {
+fn call_ended(s: &mut State, todo: &mut Todo, view: (bool, bool), id: &str, there: Option<bool>) {
     let Some(pos) = s.calls.iter().position(|c| c.app.id == id) else { return };
     let call = s.calls.remove(pos);
     todo.emit = true;
-    tracing::info!(app = id, "meeting detect: call ended");
+    tracing::info!(app = id, ?there, "meeting detect: call ended");
     if s.due == Some(call.id) {
         s.due = None;
     }
-    match at_call_end(recording_of(&call), asks(&s.choices, call.app), s.auto_stop) {
+    if s.switch_due == Some(call.id) {
+        s.switch_due = None;
+    }
+    match at_call_end(recording_of_in(s, &call), asks(&s.choices, call.app), s.auto_stop, there != Some(true)) {
         AtCallEnd::Ask(note) => show_prompt(s, todo, view, PromptKind::End, call.id, call.app, Some(note)),
+        AtCallEnd::Unsure(note) => show_prompt(s, todo, view, PromptKind::Unsure, call.id, call.app, Some(note)),
         AtCallEnd::Stop(note) => {
             if s.prompt.as_ref().is_some_and(|p| p.call_id == call.id) {
                 withdraw(s, todo);
             }
             todo.auto_stop = Some((note, call.app));
+            s.auto_stopped = Some(AutoStop { note_id: note, app: call.app, at: now_ms() });
         }
         AtCallEnd::Nothing => {
             if s.prompt.as_ref().is_some_and(|p| p.call_id == call.id) {
@@ -1149,6 +1361,8 @@ enum AtCallEnd {
     Nothing,
     /// "Teams call ended — Stop and summarise?" about this note.
     Ask(u64),
+    /// "Stop taking notes?": off the mic, but the call still looks on.
+    Unsure(u64),
     /// "When a call ends: Stop and summarise automatically": stop and summarise it.
     Stop(u64),
 }
@@ -1156,9 +1370,11 @@ enum AtCallEnd {
 /// `note`: the meeting Yap is recording the call into, if any; `asked`:
 /// whether Yap asks about the call's app (one it doesn't gets no ending
 /// either, so a background Discord call can't stop an unrelated
-/// recording); `auto_stop`: `meeting_call_end` is "stop".
-fn at_call_end(note: Option<u64>, asked: bool, auto_stop: bool) -> AtCallEnd {
+/// recording); `auto_stop`: `meeting_call_end` is "stop"; `sure`: no
+/// second signal says the call is still on (`call_audio::still_on`).
+fn at_call_end(note: Option<u64>, asked: bool, auto_stop: bool, sure: bool) -> AtCallEnd {
     match note {
+        Some(note) if asked && !sure => AtCallEnd::Unsure(note),
         Some(note) if asked && auto_stop => AtCallEnd::Stop(note),
         Some(note) if asked => AtCallEnd::Ask(note),
         _ => AtCallEnd::Nothing,
@@ -1170,11 +1386,16 @@ fn at_call_end(note: Option<u64>, asked: bool, auto_stop: bool) -> AtCallEnd {
 fn tick(app: &AppHandle) {
     let busy = dictating(app);
     let recording = crate::meetings::meeting::is_recording();
-    let (wants_view, in_window) = {
+    let (wants_view, in_window, unsure) = {
         let s = lock();
         let in_window = s.prompt.as_ref().is_some_and(|p| p.in_app && !p.quiet);
-        (s.enabled && s.due.is_some() && s.prompt.is_none(), in_window)
+        let due = s.due.is_some() || s.switch_due.is_some();
+        let unsure = s.prompt.as_ref().filter(|p| p.kind == PromptKind::Unsure).map(|p| (p.id, p.app.id));
+        (s.enabled && due && s.prompt.is_none(), in_window, unsure)
     };
+    // "Stop taking notes?" is up: once the call is gone by the second
+    // signal too, it's the usual ending.
+    let gone = unsure.filter(|(_, id)| still_on(id) == Some(false)).map(|(prompt, _)| prompt);
     let view = if wants_view || in_window { window_view(app) } else { (false, false) };
     let now = now_ms();
     let mut todo = Todo::default();
@@ -1189,13 +1410,26 @@ fn tick(app: &AppHandle) {
         // Moot: recording started some other way, or the recording stopped.
         let moot = s.prompt.as_ref().is_some_and(|p| match p.kind {
             PromptKind::Start => recording,
-            PromptKind::End => !recording,
+            PromptKind::End | PromptKind::Unsure | PromptKind::Switch => !recording,
         });
         if moot {
             withdraw(&mut s, &mut todo);
         }
         if recording {
             s.due = None;
+        } else {
+            s.switch_due = None;
+        }
+        if let Some(p) = s.prompt.clone().filter(|p| gone == Some(p.id)) {
+            match p.note_id.filter(|_| s.auto_stop) {
+                Some(note) => {
+                    tracing::info!(app = p.app.id, "meeting detect: the call is gone after all; stopping automatically");
+                    withdraw(&mut s, &mut todo);
+                    todo.auto_stop = Some((note, p.app));
+                    s.auto_stopped = Some(AutoStop { note_id: note, app: p.app, at: now });
+                }
+                None => show_prompt(&mut s, &mut todo, view, PromptKind::End, p.call_id, p.app, p.note_id),
+            }
         }
         // One place (`notice.rs`): a prompt in the window follows the person
         // onto the Yap bar when the window loses the focus (and back when
@@ -1207,13 +1441,22 @@ fn tick(app: &AppHandle) {
                 todo.emit = true;
             }
         }
+        let settled = now.saturating_sub(s.last_dictation) >= AFTER_DICTATION_MS;
         if let Some(call_id) = s.due {
-            let settled = now.saturating_sub(s.last_dictation) >= AFTER_DICTATION_MS;
             if wants_view && s.prompt.is_none() && settled {
                 s.due = None;
                 let call = s.calls.iter().find(|c| c.id == call_id && asks(&s.choices, c.app));
                 if let Some(app) = call.map(|c| c.app) {
                     show_prompt(&mut s, &mut todo, view, PromptKind::Start, call_id, app, None);
+                }
+            }
+        }
+        if let Some(call_id) = s.switch_due {
+            if wants_view && recording && s.prompt.is_none() && settled {
+                s.switch_due = None;
+                let note = crate::meetings::meeting::recording_note();
+                if let Some(app) = s.calls.iter().find(|c| c.id == call_id).map(|c| c.app) {
+                    show_prompt(&mut s, &mut todo, view, PromptKind::Switch, call_id, app, note);
                 }
             }
         }
@@ -1239,6 +1482,7 @@ pub fn init(app: &AppHandle) {
         s.quiet = cfg.meeting_detect_style == QUIET;
         s.auto_stop = cfg.meeting_call_end == STOP_AT_CALL_END;
         s.auto_start = cfg.meeting_auto_start;
+        s.auto_apps = cfg.meeting_auto_start_apps;
         s.choices = cfg.meeting_detect_apps;
     }
     let (tx, rx) = mpsc::channel();
@@ -1369,8 +1613,9 @@ pub fn sync(app: &AppHandle, enabled: bool) {
     let mut todo = Todo::default();
     {
         let mut s = lock();
-        // The countdown setting applies to the next prompt; nothing to redo.
+        // The countdown settings apply to the next prompt; nothing to redo.
         s.auto_start = cfg.meeting_auto_start;
+        s.auto_apps = cfg.meeting_auto_start_apps.clone();
         if s.enabled == enabled && s.quiet == quiet && s.choices == cfg.meeting_detect_apps {
             // Only "When a call ends" changed (or nothing): no prompt changes.
             if s.auto_stop != auto_stop {
@@ -1436,6 +1681,11 @@ fn move_into_window(app: &AppHandle, quiet_too: bool) {
 /// fatigue counts apart), "stop" | "keep" (end prompts). "record" returns the new note's id. Blocking (the recorder takes
 /// up to a few seconds to start): run it off the main thread.
 pub fn respond(app: &AppHandle, prompt_id: u64, action: &str) -> Result<Option<u64>, String> {
+    respond_with(app, prompt_id, action, true)
+}
+
+/// [`respond`]; `clicked`: the person answered (not the countdown).
+fn respond_with(app: &AppHandle, prompt_id: u64, action: &str, clicked: bool) -> Result<Option<u64>, String> {
     let mut todo = Todo::default();
     let prompt = {
         let mut s = lock();
@@ -1477,9 +1727,10 @@ pub fn respond(app: &AppHandle, prompt_id: u64, action: &str) -> Result<Option<u
         }
     }
     match (action, prompt) {
-        ("record", Some(p)) if p.kind == PromptKind::Start => record(app, p.call_id).map(Some),
+        ("record", Some(p)) if p.kind == PromptKind::Start => record(app, p.call_id, clicked).map(Some),
         ("record", _) => Err("That call has ended.".to_string()),
-        ("stop", Some(p)) if p.kind == PromptKind::End => {
+        ("switch", Some(p)) if p.kind == PromptKind::Switch => switch_to(app, p.call_id).map(Some),
+        ("stop", Some(p)) if matches!(p.kind, PromptKind::End | PromptKind::Unsure) => {
             stop_and_summarise(app, p.note_id);
             Ok(None)
         }
@@ -1487,7 +1738,7 @@ pub fn respond(app: &AppHandle, prompt_id: u64, action: &str) -> Result<Option<u
             stop_asking(app, p.app);
             Ok(None)
         }
-        ("dismiss" | "ignore" | "keep" | "stop" | "never", _) => Ok(None),
+        ("dismiss" | "ignore" | "keep" | "stop" | "never" | "switch", _) => Ok(None),
         (other, _) => Err(format!("Unknown answer: {other}")),
     }
 }
@@ -1592,7 +1843,9 @@ fn stop_asking(app: &AppHandle, call_app: &'static App) {
 }
 
 /// "Record notes": a meeting note for the call, recording into it at once.
-fn record(app: &AppHandle, call_id: u64) -> Result<u64, String> {
+/// `clicked`: the person asked (not the countdown), for the auto-start
+/// offer (`auto_offer.rs`).
+fn record(app: &AppHandle, call_id: u64, clicked: bool) -> Result<u64, String> {
     let call_app = lock()
         .calls
         .iter()
@@ -1617,13 +1870,15 @@ fn record(app: &AppHandle, call_id: u64) -> Result<u64, String> {
     }
     {
         let mut s = lock();
-        s.our_note = Some(note.id);
+        s.recorded = Some(Recorded { note_id: note.id, app: call_app, clicked });
+        s.auto_stopped = None;
         if let Some(call) = s.calls.iter_mut().find(|c| c.id == call_id) {
             call.note_id = Some(note.id);
         }
     }
+    auto_offer::recorded(call_app.id);
     let _ = app.emit("yap-notes-changed", ());
-    tracing::info!(note_id = note.id, app = call_app.id, "meeting detect: recording the call");
+    tracing::info!(note_id = note.id, app = call_app.id, clicked, "meeting detect: recording the call");
     if window_view(app).0 {
         let _ = app.emit(EVENT_OPEN, serde_json::json!({ "noteId": note.id, "stop": false }));
     } else {
@@ -1632,6 +1887,205 @@ fn record(app: &AppHandle, call_id: u64) -> Result<u64, String> {
     }
     emit(app);
     Ok(note.id)
+}
+
+/// "Switch to Zoom?" → Switch: end the meeting recording now (its action
+/// plan written, as any end), then "Record notes" on call `call_id` once
+/// its last chunk is in. Blocking (off the main thread, as [`respond`]).
+fn switch_to(app: &AppHandle, call_id: u64) -> Result<u64, String> {
+    if let Some(note_id) = crate::meetings::meeting::recording_note() {
+        tracing::info!(note_id, call_id, "meeting detect: switching notes to the new call");
+        crate::meetings::meeting_end::end(app, None)?;
+        let until = std::time::Instant::now() + SWITCH_WAIT;
+        while crate::meetings::meeting::is_recording() {
+            if std::time::Instant::now() > until {
+                return Err("The last meeting's notes are still finishing. Try again in a moment.".to_string());
+            }
+            std::thread::sleep(Duration::from_millis(250));
+        }
+    }
+    record(app, call_id, true)
+}
+
+/// Call `call_id` came back soon after Yap stopped its notes by itself:
+/// carry on recording in note `note_id` (a resume, as the notepad's), and
+/// say so. If that can't be, the call is asked about as any other.
+fn resume_into(app: &AppHandle, note_id: u64, call_id: u64) {
+    // The stopped recording's last chunk first (it may still be on its way).
+    let until = std::time::Instant::now() + Duration::from_secs(30);
+    while crate::meetings::meeting::is_recording() && std::time::Instant::now() < until {
+        std::thread::sleep(Duration::from_millis(200));
+    }
+    let started = crate::meetings::commands::meeting_start(app.clone(), app.state::<crate::AppState>(), note_id);
+    let call_app = lock().calls.iter().find(|c| c.id == call_id).map(|c| c.app);
+    match (started, call_app) {
+        (Ok(_), Some(call_app)) => {
+            lock().recorded = Some(Recorded { note_id, app: call_app, clicked: false });
+            tracing::info!(note_id, app = call_app.id, "meeting detect: the call came back; carrying on in the same note");
+            crate::calls::meeting_guard::notice(
+                app,
+                &crate::calls::meeting_guard::Notice {
+                    kind: "recording",
+                    title: format!("Back on your {} {}", call_app.label, call_app.noun),
+                    body: "Yap carried on taking notes in the same note.".to_string(),
+                    icon: "call",
+                    variant: "success",
+                    settings: None,
+                    note_id: Some(note_id),
+                    surface: None,
+                },
+            );
+        }
+        (started, _) => {
+            if let Err(e) = started {
+                tracing::info!(note_id, "meeting detect: couldn't carry on in the same note ({e}); asking instead");
+            }
+            let mut s = lock();
+            let choices = s.choices.clone();
+            if let Some(call) = s.calls.iter_mut().find(|c| c.id == call_id) {
+                call.note_id = None;
+                let asked = asks(&choices, call.app);
+                if asked && crate::meetings::meeting::recording_note().is_none() {
+                    s.due = Some(call_id);
+                }
+            }
+            drop(s);
+            wake();
+        }
+    }
+}
+
+/// A recording ended (`meeting_end.rs`, once its last chunk is in): a
+/// pause, Yap's own stop (`automatic`) or the person's, "Started by
+/// mistake?" asked or not. The end of a call's meeting the person stopped,
+/// the third of that app's: "Start notes automatically for Teams calls?",
+/// once ever (`auto_offer.rs`).
+pub fn on_recording_finished(app: &AppHandle, note_id: u64, paused: bool, automatic: bool, mistake: bool) {
+    let moment = {
+        let s = lock();
+        let Some(r) = s.recorded.filter(|r| r.note_id == note_id) else { return };
+        let moment = auto_offer::Moment {
+            by_hand: !automatic && !paused,
+            clicked: r.clicked,
+            mistake,
+            asking: s.enabled && !s.quiet && asks(&s.choices, r.app),
+            automatic: s.auto_start || s.auto_apps.iter().any(|a| a == r.app.id),
+        };
+        (moment, r.app)
+    };
+    let (moment, call_app) = moment;
+    if !auto_offer::take_offer(call_app.id, moment) {
+        return;
+    }
+    tracing::info!(note_id, app = call_app.id, "meeting detect: offering to start notes automatically");
+    use crate::calls::meeting_guard::{About, Answer, Question};
+    crate::calls::meeting_guard::ask(
+        app,
+        Question {
+            note_id,
+            kind: "autostart",
+            icon: "call",
+            title: format!("Start notes automatically for {} {}s?", call_app.label, call_app.noun),
+            body: format!(
+                "You've taken notes on your last few {} {}s. Next time, notes start 10 seconds after the {} does, unless you say Not now.",
+                call_app.label, call_app.noun, call_app.noun
+            ),
+            primary: Answer::new("yes", "Start automatically"),
+            secondary: Answer::new("keep", "No thanks"),
+            about: About::AutoStart { app: call_app.id },
+            fade_ms: 2 * 60_000,
+        },
+    );
+}
+
+/// "Start notes automatically for Teams calls?" → yes (or Settings): that
+/// app's calls count down and start notes by themselves (`on`), or ask
+/// again. Saved in one step, outside this module's lock.
+pub fn set_auto_start(app_id: &str, on: bool) {
+    let Some(call_app) = app_by_id(app_id) else { return };
+    if let Err(e) = crate::config::update(|c| {
+        c.meeting_auto_start_apps.retain(|a| a != call_app.id);
+        if on {
+            c.meeting_auto_start_apps.push(call_app.id.to_string());
+        }
+    }) {
+        tracing::warn!("meeting detect: couldn't save the auto-start choice ({e})");
+    }
+    let apps = crate::config::load().meeting_auto_start_apps;
+    let mut s = lock();
+    s.auto_apps = apps;
+    // Its next call counts down, even straight after this meeting (not
+    // taken for a rejoin of a call just asked about).
+    s.asked_at.remove(call_app.id);
+    drop(s);
+    tracing::info!(app = call_app.id, on, "meeting detect: notes start automatically for this app");
+}
+
+/// The PC woke (`meetings/sleep.rs`): the call apps' microphones were reset
+/// by the sleep, so the calls are learnt again from the next scans (a call
+/// still on starts again; no ending is said for one that isn't). A call's
+/// notes the sleep paused (`paused`) carry on when its app's call is back
+/// within [`RESUME_MS`] of now.
+pub fn on_wake(app: &AppHandle, paused: Option<u64>) {
+    let mut todo = Todo::default();
+    {
+        let mut s = lock();
+        s.tracker = Tracker::default();
+        s.browser_calls.clear();
+        s.calls.clear();
+        s.due = None;
+        s.switch_due = None;
+        withdraw(&mut s, &mut todo);
+        if let Some(r) = s.recorded.filter(|r| Some(r.note_id) == paused) {
+            s.auto_stopped = Some(AutoStop { note_id: r.note_id, app: r.app, at: now_ms() });
+        }
+        todo.emit = true;
+    }
+    tracing::info!(paused = paused.is_some(), "meeting detect: the PC woke; looking at the calls again");
+    run(app, todo);
+    wake();
+}
+
+/// The call a recording is of: the one its notes are for, or one it
+/// started during (`recording_of`).
+#[derive(Debug, Clone)]
+pub struct CallInfo {
+    pub id: u64,
+    pub app: &'static str,
+    /// "Teams".
+    pub label: &'static str,
+    /// The exes (lowercase file names) whose audio is the call's: the
+    /// app's own, or the browser a meeting tab is in.
+    pub exes: Vec<String>,
+}
+
+/// The call note `note_id`'s recording is of, if any (`call_audio.rs`).
+pub fn call_for(note_id: u64) -> Option<CallInfo> {
+    let s = lock();
+    let call = s.calls.iter().rev().find(|c| c.note_id == Some(note_id) || recording_of_in(&s, c) == Some(note_id))?;
+    let mut exes: Vec<String> = call.app.exes.iter().map(|e| e.to_string()).collect();
+    exes.extend(s.browser_calls.iter().filter(|(_, a)| a.id == call.app.id).map(|(e, _)| e.clone()));
+    Some(CallInfo { id: call.id, app: call.app.id, label: call.app.label, exes })
+}
+
+/// Desktop call apps' own meeting windows, by title (lowercase start):
+/// Zoom's main window isn't its meeting's.
+const CALL_WINDOWS: &[(&str, &[&str])] = &[("zoom", &["zoom meeting", "zoom webinar"])];
+
+/// Does a window of `exe` titled `title` show a call of `app_id`? A
+/// browser window with the meeting's tab in front, or the call app's own
+/// meeting window where its title says so ([`CALL_WINDOWS`]).
+pub fn window_shows_call(app_id: &str, exe: &str, title: &str) -> bool {
+    let exe = exe.to_ascii_lowercase();
+    if BROWSERS.contains(&exe.as_str()) {
+        return title_shows(app_id, title);
+    }
+    let own = app_by_id(app_id).is_some_and(|a| a.exes.contains(&exe.as_str()));
+    let t = title.trim().to_lowercase();
+    own && CALL_WINDOWS
+        .iter()
+        .filter(|(id, _)| *id == app_id)
+        .any(|(_, starts)| starts.iter().any(|s| t.starts_with(s)))
 }
 
 /// "Stop and summarise" (the person's answer to "…call ended"): end the
@@ -1738,11 +2192,23 @@ pub async fn meeting_detect_simulate(
     app_id: String,
     active: bool,
     fade_ms: Option<u64>,
+    recorded: Option<u32>,
 ) -> Result<(), String> {
     if !cfg!(debug_assertions) {
         return Err("Call simulation is only in debug builds".to_string());
     }
     let call_app = app_by_id(&app_id).ok_or_else(|| format!("Unknown call app: {app_id}"))?;
+    // `recorded`: that many meetings recorded from this app's calls so far,
+    // never asked about starting automatically (`auto_offer.rs`).
+    #[cfg(debug_assertions)]
+    if let Some(n) = recorded {
+        auto_offer::with_counts(|c| {
+            c.recorded.insert(call_app.id.to_string(), n);
+            c.offered.retain(|a| a != call_app.id);
+        });
+    }
+    #[cfg(not(debug_assertions))]
+    let _ = recorded;
     let edge = {
         let mut s = lock();
         if !s.enabled {
@@ -1763,6 +2229,9 @@ pub async fn meeting_detect_simulate(
         }
     }
     tick(&app);
+    // The detector takes up the pace this calls for (every 2 s while a
+    // prompt is up: "Stop taking notes?" looks again), as after a real scan.
+    wake();
     Ok(())
 }
 
@@ -2045,10 +2514,7 @@ mod native {
     /// for Teams" on a start prompt.
     pub fn prompt_xml(p: &Prompt, logo: &str) -> String {
         let w = wording(p.kind, p.app);
-        let (accept, decline) = match p.kind {
-            PromptKind::Start => ("record", "dismiss"),
-            PromptKind::End => ("stop", "keep"),
-        };
+        let (accept, decline) = super::answers(p.kind);
         let never = w.never.as_deref().map_or(String::new(), |label| {
             format!(
                 "<action content=\"{}\" arguments=\"meeting:never:{}\" activationType=\"foreground\"/>",
@@ -2063,7 +2529,7 @@ mod native {
              <action content=\"{}\" arguments=\"meeting:{decline}:{id}\" activationType=\"foreground\"/>\
              {never}</actions><audio silent=\"true\"/></toast>",
             esc(&w.title),
-            esc(w.body),
+            esc(&w.body),
             esc(w.accept),
             esc(w.decline),
             id = p.id,
@@ -2081,10 +2547,7 @@ mod native {
     pub fn bar_card(p: &Prompt) -> crate::bar::Card {
         use crate::bar::{Card, CardAction, Countdown};
         let w = wording(p.kind, p.app);
-        let (accept, decline) = match p.kind {
-            PromptKind::Start => ("record", "dismiss"),
-            PromptKind::End => ("stop", "keep"),
-        };
+        let (accept, decline) = super::answers(p.kind);
         let arg = |answer: &str| format!("meeting:{answer}:{}", p.id);
         let countdown = p.auto_start_at.map(|until| Countdown::new(until, "Notes start in"));
         let counting = countdown.is_some();
@@ -2112,7 +2575,8 @@ mod native {
                 dot: "live",
                 ..card
             },
-            PromptKind::End => Card { title: w.title, body: w.body.into(), ..card },
+            // The call ending, unsure, another call: a notice card.
+            PromptKind::End | PromptKind::Unsure | PromptKind::Switch => Card { title: w.title, body: w.body, ..card },
         }
     }
 
@@ -2417,16 +2881,110 @@ mod tests {
 
     #[test]
     fn a_recorded_call_ending_asks_or_stops() {
-        assert_eq!(at_call_end(Some(4), true, false), AtCallEnd::Ask(4));
-        assert_eq!(at_call_end(Some(4), true, true), AtCallEnd::Stop(4));
+        assert_eq!(at_call_end(Some(4), true, false, true), AtCallEnd::Ask(4));
+        assert_eq!(at_call_end(Some(4), true, true, true), AtCallEnd::Stop(4));
         // Not recording it, or an app Yap doesn't ask about: nothing.
-        assert_eq!(at_call_end(None, true, true), AtCallEnd::Nothing);
-        assert_eq!(at_call_end(Some(4), false, true), AtCallEnd::Nothing);
-        assert_eq!(at_call_end(Some(4), false, false), AtCallEnd::Nothing);
+        assert_eq!(at_call_end(None, true, true, true), AtCallEnd::Nothing);
+        assert_eq!(at_call_end(Some(4), false, true, true), AtCallEnd::Nothing);
+        assert_eq!(at_call_end(Some(4), false, false, true), AtCallEnd::Nothing);
+        // Off the mic, but the call still looks on (it still plays, its tab
+        // is still there): "Stop taking notes?", never a stop by itself.
+        assert_eq!(at_call_end(Some(4), true, true, false), AtCallEnd::Unsure(4));
+        assert_eq!(at_call_end(Some(4), true, false, false), AtCallEnd::Unsure(4));
+        assert_eq!(at_call_end(Some(4), false, true, false), AtCallEnd::Nothing);
         // The setting: asks unless it says "stop".
         let cfg: crate::config::YapConfig = serde_json::from_str(r#"{"meetingCallEnd":"stop"}"#).unwrap();
         assert_eq!(cfg.meeting_call_end, STOP_AT_CALL_END);
         assert_eq!(crate::config::YapConfig::default().meeting_call_end, "ask");
+    }
+
+    #[test]
+    fn a_call_back_within_two_minutes_of_an_automatic_stop_carries_on() {
+        assert!(resumes(1_000, 1_000));
+        assert!(resumes(1_000, 1_000 + RESUME_MS));
+        assert!(!resumes(1_000, 1_001 + RESUME_MS));
+        // The clock went back: not a resume.
+        assert!(!resumes(5_000, 4_000));
+        let stop = AutoStop { note_id: 9, app: app("teams"), at: 10_000 };
+        let stopped = Some(stop);
+        let start = |id: &str, now: u64| on_start(id, None, None, stopped, now, true, false);
+        assert_eq!(start("teams", 10_000 + 60_000), OnStart::Resume(9));
+        // Too late, or another app's call: asked about as usual.
+        assert_eq!(start("teams", 10_001 + RESUME_MS), OnStart::Ask);
+        assert_eq!(start("zoom", 20_000), OnStart::Ask);
+        // Not even an app Yap asks about stays unrecorded when it comes back.
+        assert_eq!(on_start("teams", None, None, stopped, 20_000, false, true), OnStart::Resume(9));
+        // In call_started: the call carries the note, nothing to ask.
+        let mut s = State { enabled: true, auto_stopped: stopped, ..Default::default() };
+        let mut todo = Todo::default();
+        call_started(&mut s, &mut todo, "teams", 0);
+        // (now_ms is far past 10 s: the window is long gone.)
+        assert!(todo.resume.is_none());
+        s.auto_stopped = Some(AutoStop { at: now_ms(), ..stop });
+        s.due = None;
+        let mut todo = Todo::default();
+        call_started(&mut s, &mut todo, "teams", 0);
+        let call = s.calls.last().unwrap();
+        assert_eq!(todo.resume, Some((9, call.id)));
+        assert_eq!(call.note_id, Some(9));
+        assert!(s.auto_stopped.is_none() && s.due.is_none());
+    }
+
+    #[test]
+    fn another_apps_call_while_one_records_offers_to_switch() {
+        let teams = Some(Recorded { note_id: 4, app: app("teams"), clicked: true });
+        let start = |id: &str, recording: Option<u64>| on_start(id, recording, teams, None, 0, true, false);
+        // The recorded app's call again: carried on.
+        assert_eq!(start("teams", Some(4)), OnStart::Carried(4));
+        // Another app's: "Switch to Zoom?".
+        assert_eq!(start("zoom", Some(4)), OnStart::Switch);
+        // Snoozed, or an app Yap doesn't ask about: nothing.
+        assert_eq!(on_start("zoom", Some(4), teams, None, 0, true, true), OnStart::Nothing);
+        assert_eq!(on_start("discord", Some(4), teams, None, 0, false, false), OnStart::Nothing);
+        // A recording that isn't of a call Yap recorded (started by hand):
+        // the person meant it; no switch.
+        assert_eq!(start("zoom", Some(7)), OnStart::Nothing);
+        assert_eq!(on_start("zoom", Some(7), None, None, 0, true, false), OnStart::Nothing);
+        // Nothing records: asked as ever.
+        assert_eq!(start("zoom", None), OnStart::Ask);
+    }
+
+    #[test]
+    fn switch_and_unsure_prompts_say_what_they_do() {
+        let w = wording(PromptKind::Switch, app("zoom"));
+        assert_eq!(w.title, "Switch to Zoom?");
+        assert_eq!((w.accept, w.decline), ("Switch", "Keep recording"));
+        assert_eq!(answers(PromptKind::Switch), ("switch", "keep"));
+        let w = wording(PromptKind::Unsure, app("meet"));
+        assert_eq!(w.title, "Stop taking notes?");
+        assert_eq!(w.body, "Google Meet let go of your microphone, but the call still looks open.");
+        assert_eq!(answers(PromptKind::Unsure), ("stop", "keep"));
+        assert_eq!(answers(PromptKind::Start), ("record", "dismiss"));
+        // The snapshot names the answers for the window.
+        let mut s = State { enabled: true, ..Default::default() };
+        let mut todo = Todo::default();
+        call_started(&mut s, &mut todo, "zoom", 0);
+        let call = s.calls[0].id;
+        show_prompt(&mut s, &mut todo, (true, true), PromptKind::Switch, call, app("zoom"), Some(3));
+        let v = serde_json::to_value(status_of(&s)).unwrap();
+        assert_eq!(v["prompt"]["kind"], "switch");
+        assert_eq!(v["prompt"]["answers"], serde_json::json!(["switch", "keep"]));
+        // It fades as "Keep recording" when left alone.
+        assert_eq!(s.prompt.as_ref().unwrap().fade_ms, Some(FADE_MS));
+    }
+
+    #[test]
+    fn the_call_window_a_second_opinion_reads() {
+        // A browser: the meeting's tab in front.
+        assert!(window_shows_call("meet", "chrome.exe", "Meet - abc-defg-hij - Google Chrome"));
+        assert!(!window_shows_call("meet", "chrome.exe", "Inbox - Gmail - Google Chrome"));
+        // Zoom's meeting window, not its main one.
+        assert!(window_shows_call("zoom", "Zoom.exe", "Zoom Meeting"));
+        assert!(!window_shows_call("zoom", "Zoom.exe", "Zoom Workplace"));
+        // Teams' windows all say "Microsoft Teams": not a second opinion.
+        assert!(!window_shows_call("teams", "ms-teams.exe", "Chat | Microsoft Teams"));
+        // Another app's window never counts.
+        assert!(!window_shows_call("zoom", "obs64.exe", "Zoom Meeting"));
     }
 
     #[test]
@@ -2439,7 +2997,7 @@ mod tests {
         let discord = s.calls[1].id;
         // Even an app Yap doesn't ask about: the shortcut is an explicit ask.
         assert_eq!(latest_of(&s), Some((discord, "Discord call".to_string())));
-        call_ended(&mut s, &mut todo, (false, false), "discord");
+        call_ended(&mut s, &mut todo, (false, false), "discord", None);
         assert_eq!(latest_of(&s).map(|(_, what)| what).as_deref(), Some("Slack huddle"));
         s.enabled = false;
         assert_eq!(latest_of(&s), None);
