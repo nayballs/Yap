@@ -133,6 +133,12 @@ async fn ask(c: &Case, phase: &str, ep: &Endpoint<'_>) -> (String, bool, Option<
         Some(plan) => match cleanup_styles::clean(&input, ep.base_url, ep.key, ep.model, ep.provider, &plan, None, line.as_deref(), &[], false).await {
             Ok(out) => {
                 let wrote = hinglish::has_devanagari(&out);
+                // Latin: as a dictation does, a cleanup that translated it
+                // gives way to the rules' text (`languages::hinglish_kept`).
+                if phase == "latin" && !hinglish::kept_the_words(&input, &out) {
+                    println!("    (cleanup translated it: the rules' text instead)");
+                    return (input, wrote, None);
+                }
                 (hinglish::to_latin(&out), wrote, None)
             }
             Err(e) => (String::new(), false, Some(record::redact(&e))),

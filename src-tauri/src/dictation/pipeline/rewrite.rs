@@ -229,10 +229,24 @@ impl Shared {
             None => selection,
         };
 
-        // Recorded as Commands' in the network receipts (net.rs).
-        match crate::privacy::net::within(crate::privacy::net::Feature::Commands, crate::ai::llm::rewrite(
+        // The person's writing samples for the kind of app it's going into
+        // (`ai/writing_samples.rs`; none in a terminal or an AI prompt).
+        let samples = {
+            let app_name = crate::pasting::text_injector::app_name_for(target);
+            let style_target = crate::ai::cleanup_styles::Target::of_window(target, app_name.as_deref(), self.read_kind());
+            self.config
+                .read()
+                .ok()
+                .map(|c| crate::ai::cleanup_styles::category(&c, &style_target))
+                .and_then(|category| crate::ai::writing_samples::for_rewrite(category, &base_url))
+        };
+
+        // Recorded as Commands' in the network receipts (net.rs), saying
+        // when the writing samples went too.
+        match crate::privacy::net::within(crate::privacy::net::Feature::commands(samples.is_some()), crate::ai::llm::rewrite_with_samples(
             &instruction,
             &selection,
+            samples.as_deref(),
             &base_url,
             &api_key,
             &model,

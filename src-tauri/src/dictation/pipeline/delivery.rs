@@ -89,7 +89,11 @@ impl Shared {
         // Optional AI cleanup pass (best-effort, `clean_up`). Runs
         // before the dictionary so the user's corrections always have
         // the final say. The state stays `processing` meanwhile.
-        let raw = text.trim().to_string();
+        let cfg = self.config.read().map(|c| c.clone()).unwrap_or_default();
+        // Hindi written as Hinglish (My languages, `languages/hinglish.rs`):
+        // Whisper's Devanagari in Latin letters, here on this PC, so the
+        // cleanup, the words as said and history all have it so.
+        let raw = crate::dictation::languages::hinglish_text(text.trim(), &cfg);
         // The names on screen, read at record start (`screen_terms`): this
         // dictation's only, and only if the read is done. Taken once, for
         // the cleanup, the corrections and the words as said alike.
@@ -97,7 +101,6 @@ impl Shared {
         // A language shortcut that translates (My languages, languages.rs):
         // the AI translates it in cleanup's place; the words as said stay
         // one "Use what I said" away.
-        let cfg = self.config.read().map(|c| c.clone()).unwrap_or_default();
         let (cleaned, style) = match crate::dictation::languages::translate_dictation(&self.app, &raw, &cfg).await {
             Some(translated) => (translated, None),
             None => self.clean_up(&raw, &style_target, screen.as_deref(), true).await,
@@ -161,7 +164,7 @@ impl Shared {
         let Ok(cfg) = self.config.read().map(|c| c.clone()) else { return text };
         let kind = crate::ai::cleanup_styles::category(&cfg, target);
         let Some(t) = crate::dictation::transforms::for_dictation(&cfg, kind, target.is_terminal()) else { return text };
-        let call = crate::dictation::transforms::run_on_dictation(&cfg, &t, &text);
+        let call = crate::dictation::transforms::run_on_dictation_in(&cfg, &t, &text, Some(kind));
         let result = if watch {
             let m = super::commands_model(&cfg);
             let key = format!("transform:{}", crate::dictation::slow::cleanup_key(&m.provider, &m.base_url, &m.model));
@@ -321,11 +324,16 @@ impl Shared {
                             Some(before) => crate::ai::cleanup_context::trim_echo(before, &c),
                             None => c,
                         };
-                        (
-                            self.config.read().map(|cfg| crate::dictation::languages::tidy_cleaned(&c, &cfg)).unwrap_or(c),
-                            plan.written_style(),
-                            false,
-                        )
+                        // Hinglish: a cleanup that translated it gives way
+                        // to the words as spelt out; anything the model
+                        // still wrote in Devanagari, in Latin letters too.
+                        let c = crate::dictation::languages::hinglish_kept(raw, c);
+                        let c = self
+                            .config
+                            .read()
+                            .map(|cfg| crate::dictation::languages::hinglish_text(&crate::dictation::languages::tidy_cleaned(&c, &cfg), &cfg))
+                            .unwrap_or(c);
+                        (c, plan.written_style(), false)
                     }
                     Err(e) => {
                         tracing::warn!("AI cleanup failed, using raw: {}", e);

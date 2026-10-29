@@ -4,8 +4,9 @@
 // (only Whisper's). Then what a Hindi dictation does, through the test
 // hooks: Whisper's Devanagari spelt out in Latin letters with cleanup off;
 // with it on, cleanup is given the Latin letters and told to keep Hinglish,
-// and anything it still writes in Devanagari is spelt out too; with the
-// switch off, Hindi stays in Devanagari, exactly as before.
+// anything it still writes in Devanagari is spelt out too, and a cleanup
+// that translated it gives way to the words as spelt out; with the switch
+// off, Hindi stays in Devanagari, exactly as before.
 //
 // The worker runs "Whisper Large v3" (the stub engine stands in for it), so
 // a dictation can say it heard Hindi (`e2e_language_stage`); Parakeet V2's
@@ -126,6 +127,13 @@ test('a Hindi dictation in Latin letters: spelt out with cleanup off, cleaned as
   expect(asked.system).not.toContain('Latin letters');
   expect(r.text.trim()).toBe(`${HINGLISH} Theek hai.`);
   expect(hasDevanagari(r.text)).toBe(false);
+
+  // A cleanup that translated it into English (a small model does): the
+  // words as Yap spelt them out go in instead.
+  fakeLocal.reply('cleanup', () => "Okay, let's meet at 2 PM.");
+  await yap.invoke('e2e_language_stage', { heard: [['hi', 0.97]] });
+  r = await yap.invoke('e2e_dictation', { text: DEVANAGARI });
+  expect(r.text.trim()).toBe(HINGLISH);
 
   // The switch off: Devanagari, and cleanup's line as before Hinglish.
   fakeLocal.reply('cleanup', (user) => cleanupTranscript(user));

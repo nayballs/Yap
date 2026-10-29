@@ -1,0 +1,153 @@
+{
+  "samples": [
+    {
+      "kind": "email",
+      "text": "Hiya all,\n\nQuick one – the allotment committee has moved to Thursday at 7, in the Harbour Street hall. I reckon it'll take an hour, tops. Bring your seed orders if you've got them sorted.\n\nCheers,\nRobin"
+    },
+    {
+      "kind": "email",
+      "text": "Hi both,\n\nThanks for the plans – they look good to me. One thing: can we keep the shed where it is? Moving it would be a bit of a faff.\n\nCheers,\nRobin"
+    },
+    { "kind": "chat", "text": "running a bit late – be there in 10, sorry" },
+    { "kind": "chat", "text": "ta, sorted. see you at the quiz" },
+    {
+      "kind": "documents",
+      "text": "Short version: the roof needs two new slates, the gutter's fine, and the quote comes to £340. I'd go ahead – it'll only get worse over the winter."
+    },
+    { "kind": "", "text": "Sounds good to me – let's go with the cheaper one and see how we get on." }
+  ],
+  "leaks": ["Harbour Street", "allotment", "seed orders", "shed", "quiz", "slates", "gutter", "£340"],
+  "cases": [
+    {
+      "name": "t-polish-email",
+      "call": "transform",
+      "transform": "polish",
+      "app": "email",
+      "text": "hi everyone so um just to let you know the fire alarm test has been moved to friday the 14th at 10am so please make sure youre out of the building by then thanks robin",
+      "expect": { "keeps": ["14th"], "min_ratio": 0.5 },
+      "voice": ["cheers", "hiya", "–"],
+      "generic": ["best regards", "kind regards", "dear", "!", "thank you for your cooperation"]
+    },
+    {
+      "name": "t-shorter-email",
+      "call": "transform",
+      "transform": "shorter",
+      "app": "email",
+      "text": "Hi Sam, I just wanted to follow up on the invoice for the March work. As far as I can see it still hasn't been paid, and it was due on the 31st. Could you have a look and let me know when it's likely to go through? Thanks very much, Robin",
+      "expect": { "keeps": ["31st", "March"], "max_ratio": 0.85 },
+      "voice": ["cheers", "hiya", "–"],
+      "generic": ["best regards", "kind regards", "dear", "!"]
+    },
+    {
+      "name": "t-polish-chat",
+      "call": "transform",
+      "transform": "polish",
+      "app": "personalChat",
+      "text": "hey so im gonna be like twenty minutes late the train is stuck outside the station sorry",
+      "expect": { "min_ratio": 0.4 },
+      "voice": ["<lower>", "–", "a bit"],
+      "generic": ["!", "apologies", "i apologize", "i apologise"]
+    },
+    {
+      "name": "t-shorter-chat",
+      "call": "transform",
+      "transform": "shorter",
+      "app": "workChat",
+      "text": "Hi team, just a heads up that I won't be able to make the 2pm stand-up today because I've got a dentist appointment, but I'll catch up with everyone afterwards and read the notes.",
+      "expect": { "keeps": ["2pm"], "max_ratio": 0.85 },
+      "voice": ["<lower>", "–"],
+      "generic": ["!", "apologies", "unfortunately"]
+    },
+    {
+      "name": "t-polish-docs",
+      "call": "transform",
+      "transform": "polish",
+      "app": "documents",
+      "text": "so the main problem with the current process is that it takes too long because everything gets checked twice once by the team and once by finance which adds about three days",
+      "expect": { "keeps": ["three days"] },
+      "voice": ["short version", "i'd", "–"],
+      "generic": ["furthermore", "additionally", "in conclusion", "!"]
+    },
+    {
+      "name": "r-email-closure",
+      "call": "rewrite",
+      "app": "email",
+      "instruction": "write an email to the team saying the office is closed on Friday for the fire alarm test and to work from home",
+      "expect": { "keeps": ["Friday"] },
+      "voice": ["cheers", "hiya", "hi all", "–"],
+      "generic": ["dear", "best regards", "kind regards", "!", "[your name]"]
+    },
+    {
+      "name": "r-chat-late",
+      "call": "rewrite",
+      "app": "personalChat",
+      "instruction": "tell Sam I'm running ten minutes late for lunch",
+      "expect": { "contains_any": ["late"] },
+      "voice": ["<lower>", "–", "a bit"],
+      "generic": ["!", "apologies", "i apologize", "i apologise"]
+    },
+    {
+      "name": "r-chat-thanks",
+      "call": "rewrite",
+      "app": "workChat",
+      "instruction": "reply thanking Priya for sending the slides",
+      "expect": { "keeps": ["Priya"] },
+      "voice": ["<lower>", "ta", "cheers", "–"],
+      "generic": ["!", "thank you so much", "i really appreciate"]
+    },
+    {
+      "name": "r-docs-trial",
+      "call": "rewrite",
+      "app": "documents",
+      "instruction": "write two sentences saying the trial went well and we should roll it out in May",
+      "expect": { "keeps": ["May"] },
+      "voice": ["–", "short version", "i'd", "let's"],
+      "generic": ["furthermore", "additionally", "!"]
+    },
+    {
+      "name": "c-email-alarm",
+      "call": "cleanup",
+      "app": "email",
+      "text": "um hi all so the fire alarm test is on friday at ten so uh please leave the building when it goes off thanks robin",
+      "expect": { "contains_any": ["Friday"] },
+      "voice": ["cheers", "hiya", "–"],
+      "generic": ["dear", "best regards", "kind regards", "!"]
+    },
+    {
+      "name": "c-email-invoice",
+      "call": "cleanup",
+      "app": "email",
+      "text": "hi sam uh just checking on the invoice from march its still not been paid and it was due on the thirty first can you let me know when it'll go through thanks robin",
+      "expect": { "contains_any": ["March"] },
+      "voice": ["cheers", "–", "hiya"],
+      "generic": ["dear", "best regards", "kind regards", "!"]
+    },
+    {
+      "name": "c-chat-late",
+      "call": "cleanup",
+      "app": "personalChat",
+      "text": "uh yeah im on my way be there in like five minutes",
+      "expect": { "min_ratio": 0.4 },
+      "voice": ["<lower>", "–"],
+      "generic": ["!"]
+    },
+    {
+      "name": "c-chat-standup",
+      "call": "cleanup",
+      "app": "workChat",
+      "text": "so um i cant make the standup today ive got the dentist ill read the notes after",
+      "expect": { "min_ratio": 0.4 },
+      "voice": ["<lower>", "–"],
+      "generic": ["!", "apologies", "unfortunately"]
+    },
+    {
+      "name": "c-docs-process",
+      "call": "cleanup",
+      "app": "documents",
+      "text": "so basically the main problem is um that everything gets checked twice once by the team and once by finance and that adds about three days",
+      "expect": { "keeps": ["three days"] },
+      "voice": ["short version", "i'd", "–"],
+      "generic": ["furthermore", "additionally", "!"]
+    }
+  ]
+}

@@ -44,6 +44,8 @@ builds and runs out of the checkout: `YAP_EVAL_TARGET_DIR=<builds>/evals`, `--ou
 | `--transforms` | Run the saved transforms' cases in `evals/transforms/cases.json` instead of the scenarios ("Saved transforms" below; `--only` picks them by name or transform, `--repeat` repeats them). |
 | `--vision`, `--vision-path picture\|text` | Ask the screenshot questions in `evals/vision/cases.json` instead of the scenarios ("Screenshot questions" below): each as a picture and as its text (Windows' OCR), through Chat's own turn; a local model's server gets its projector. |
 | `--languages`, `--languages-phase before\|after` | Run My languages' cases in `evals/languages/cases.json` instead of the scenarios ("My languages" below): cleanup of French, Spanish and German dictations before and after the language line, and a language shortcut's translation. |
+| `--hinglish` | Hindi as Whisper writes it (`evals/hinglish/cases.json`), spelt out by Yap's rules alone, then cleaned from Devanagari and from the rules' Latin letters ("Hinglish" below). |
+| `--samples`, `--samples-phase without\|with` | A transform, a rewrite and a High cleanup without and with a made-up person's writing samples (`evals/samples/cases.json`): their voice, the facts kept, nothing taken from the samples, the tokens they cost ("Writing samples" below). |
 | `--summaries`, `--summaries-phase before\|after` | Write the action plan of each meeting in `evals/summaries/cases.json` instead of the scenarios ("Meeting summaries" below): before (the earlier layout, no language line) and after, judged on the language, tasks under their owners, the headings, the recap and the decisions' reasons. |
 | `--search`, `--embed <gguf>`, `--embed-ngl <n>` | Meeting search instead of the scenarios: recall@k for keyword, meaning and hybrid search over `evals/search/meetings.json`, then each `--model`'s Ask across meetings answers checked for citations of the right lines ("Meeting search" below). The embedding model: `--embed` (else the installed app's, read-only, else downloaded into `--models-dir`), on the card unless `--embed-ngl 0`. |
 | `--mtp on\|off`, `--no-warm-up` | A local model's MTP drafting (default: as Yap's sidecar decides on this PC, never with `--ngl 0`) and its warm-up request. |
@@ -318,6 +320,52 @@ phase after` keeps a cloud run near 20k. `YAP_EVAL_LANGUAGE_LINE` /
 (`instruction`: where the spelling line goes, or `both`) compare wordings
 and places without a rebuild. `languages.md` in the run folder;
 `models[].languages` in `summary.json`.
+
+### Writing samples (`--samples`)
+
+```bash
+yap.exe eval --samples --model local:<4b.gguf> --ngl 999 --repeat 3 --locale en-GB
+yap.exe eval --samples --samples-phase with --only rewrite,transform --model local:<4b.gguf> --ngl 0
+```
+
+`evals/samples/cases.json` holds a made-up person's writing samples (their
+voice: "Hiya all,", "Cheers, Robin", spaced dashes, no exclamation marks,
+lower-case chats, British spelling), the facts only the samples hold
+(`leaks`), and cases: a **transform** (Polish or Shorter, through
+`llm::transform_with_samples` with the built-in's instruction), a
+**rewrite** (the rewrite shortcut writing new text,
+`llm::rewrite_with_samples`) and a **cleanup** at High (`cleanup_styles::clean`
+with the plan's `samples`: what a dictation would send if cleanup used them —
+it doesn't), each for a kind of app. Each runs **without** samples and
+**with** the block for its kind (`writing_samples::pick` + `block`, the
+budget for where the model is, or `YAP_EVAL_SAMPLES_BUDGET` characters).
+Judged on **voice** (one of the case's `voice` markers — "cheers", "–",
+`<lower>`: starts with a small letter — and none of its `generic` ones —
+"best regards", "!"), **kept** (`expect`, as transforms are judged) and
+**leaks** (a sample's facts in a result whose text didn't have them). Times
+with the prompt's tokens and llama.cpp's tokens read (the rest came from
+its cache). `YAP_EVAL_SAMPLES_RULE` tries another wording of what the model
+is told to do with them; `YAP_EVAL_SAMPLES_TONE=natural` leaves the kind's
+tone sentence out of a cleanup with samples. `samples.md` in the run folder;
+`models[].samples` in `summary.json`.
+
+### Hinglish (`--hinglish`)
+
+```bash
+yap.exe eval --hinglish --model local:<4b.gguf> --ngl 999 --repeat 3
+```
+
+`evals/hinglish/cases.json`: made-up Hindi dictations as Whisper writes them
+(Devanagari; English words in Devanagari, or in Latin letters), with the
+Hinglish a person would type (`reference`), the English words that must stay
+English, Hindi words that show it wasn't translated, and words a
+translation into English would bring. Three phases: **rules** (Yap's own
+spelling-out alone, `hinglish::to_latin`: cleanup off, no model), **devanagari**
+(cleanup given Whisper's Devanagari and the Hinglish line), **latin**
+(cleanup given the rules' Latin letters and the line — what a dictation
+does); anything a model still writes in Devanagari is spelt out after, and
+counted. `overlap`: the share of the reference's words in the result.
+`hinglish.md` in the run folder; `models[].hinglish` in `summary.json`.
 
 ### Meeting summaries (`--summaries`)
 
@@ -2484,3 +2532,90 @@ included), and right where it hasn't: a layout, a chart, a switch. 5 of the 22 p
 answers first called `search_notes` (Chat's tools) and so sent the picture twice (the tool
 loop re-sends the question): 6.7–13.8k prompt tokens, still 1.1–1.6 s. Both ways stay on this
 PC; OCR stays the way for every model that can't read images.
+
+## Writing samples (29 Oct 2026)
+
+**The question**: do a person's own writing samples make Yap's rewrites
+sound like them — the rewrite shortcut writing new text, Polish and Shorter,
+AI cleanup at High — without copying their facts, and what do they cost on
+the on-device model? `--samples` over `evals/samples/cases.json`: a made-up
+writer (six samples: two emails, two chat messages, a document note, one
+for any app), five transforms, four rewrites, five High cleanups, each
+without and with the samples for its kind of app (`writing_samples::pick`
+at the on-device budget, 800 characters). Qwen3.5-4B (Q4_K_M), the
+graphics card (×3) and the processor (×2, transforms and rewrites only;
+other builds ran beside it, so its times are indicative). Run folders
+`<builds>/eval-runs/20261029-192704-*` and `-192752-*`.
+
+| Qwen3.5-4B | Voice (without → with) | Facts kept (with) | Taken from the samples |
+|---|---|---|---|
+| Rewrites (new text), card ×3 | 0/12 → **12/12** | 10/12 | 0 |
+| Transforms (Polish, Shorter), card ×3 | 0/15 → 4/15 | 15/15 | 0 |
+| High cleanup, card ×3 | 0/15 → 0/15 | 15/15 | 0 |
+| Rewrites, processor ×2 | 0/8 → 7/8 | 7/8 | 0 |
+| Transforms, processor ×2 | 0/10 → 1/10 | 10/10 | 0 |
+
+**Rewrites are where they work.** "Write an email to the team saying the
+office is closed on Friday…" went from "Subject: Office Closed… Please be
+advised… Thank you for your cooperation. Best regards, [Your Name]" to "Hi
+team, Just a heads up that the office is closed on Friday for the fire alarm
+test. Please work from home. Cheers, Robin"; "tell Sam I'm running ten
+minutes late" to "running ten mins late for lunch – be there in 10, sorry".
+The two "facts kept" misses: a chat reply in the writer's lower case wrote
+"priya" (and once left her name out). Without the samples, the processor's
+4B took over 20 s on the email twice (the cleanup timeout: a long formal
+email); with them, 6.3 and 2.4 s. **Transforms move a little** (a chat
+message's "hey" left lower case, "the train's"): Polish keeps the person's
+own words by design. **Cleanup doesn't move at all**: it keeps the words
+said, and the kind of app's tone line wins (an email at Formal stays "Dear
+Sam… Kind regards"); leaving the tone's sentence out for a cleanup with
+samples got 1 of 10 (`YAP_EVAL_SAMPLES_TONE=natural`). So **cleanup never
+sends them** (Yap's choice; the plumbing stays for a cloud model's
+measurement).
+
+**The wording** (`YAP_EVAL_SAMPLES_RULE`, ×2 on the card): asking for "their
+kind of words, sentence length, punctuation, capitals, greetings and
+sign-offs" moved rewrites 6/8 and transforms 0/10; naming each thing ("the
+same greetings and sign-offs, how casual it is, contractions… capitals
+(lower case where they use it)") 8/8 and 2/10 but wrote "thanks priya" twice;
+adding "names always keep theirs" and "never add anything" — what ships —
+6/8 and 1/10 with every fact kept, and ×3 the table's numbers.
+
+**What they cost** (the 4B): the block is ~890 characters with the rule
+(~220 tokens); a transform's prompt ~380 → ~640 tokens, a rewrite's
+~105 → ~300. On the card the median call went 225 → 231 ms. On the
+processor, a rewrite's median 3.6 → 4.1 s, and a transform of a new text
+in the same kind of app 4–5 s → 6–7 s: its prompt passes 512 tokens with the
+samples, and llama.cpp then resumed only ~130 tokens from its checkpoint
+(without them, the whole system prompt, ~228) — what the sidecar's
+checkpoints do past one batch, not the samples' place: a rewrite's (under
+512) resumed the whole system prompt with them (255 of 293 cached). The same
+text again: 2–3 s either way. Hence the budgets: 800 characters to a model
+on this PC or the home network, 2,000 to a cloud one.
+
+## Hinglish (29 Oct 2026)
+
+**The question**: with Hindi as Hinglish, should AI cleanup be given
+Whisper's Devanagari to write in Latin letters itself, or Yap's own
+spelling-out to tidy — and how good is the spelling-out alone, for cleanup
+off? `--hinglish` over the ten made-up dictations in
+`evals/hinglish/cases.json`, on the graphics card ×3 (run folders
+`<builds>/eval-runs/20261029-192704-*`, `-193358-*`).
+
+| Model | Rules alone (cleanup off) | Cleanup from Devanagari | Cleanup from the rules' Latin (ships) |
+|---|---|---|---|
+| Qwen3.5-4B | 9/10, overlap 0.92 | 25/30, 0.87; Devanagari left 14 times | **30/30, 0.94** |
+| Qwen3.5-2B | 9/10, 0.92 | 10/30, 0.54; Devanagari 11 times | **27/30, 0.92** |
+| Qwen2.5-1.5B (the bundled default) | 9/10, 0.92 | 0/30, 0.19 (translated) | 4/20 without the guard (×2); **27/30** with it |
+
+Given Devanagari, the models wrote some of it back in Devanagari and the
+small ones translated; given the rules' Latin letters, the 4B and 2B kept
+Hinglish and tidied it (the 4B's overlap with what a person types went up
+from 0.92 to 0.94: "jaoonga" stays, "baje" comes back). **The 1.5B
+translated even the Latin** ("Kal ki meeting teen baje hai." → "Okay, let's
+meet at 2 PM."), so a cleanup that keeps under half the
+dictation's words gives way to the rules' text (`hinglish::kept_the_words`,
+`languages::hinglish_kept`): it fired 24 times on the 1.5B, never on the 2B
+or 4B. The rules alone missed one case: "पिकनिक" came out "piknik" (not on
+the list of English words); their other misses are spellings ("jaoonga" for
+"jaunga", "mainne" for "maine").

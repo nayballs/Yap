@@ -270,8 +270,28 @@ pub async fn cleanup_with_names(
     dictionary: &[crate::config::DictionaryEntry],
     disable_thinking: bool,
 ) -> Result<String, String> {
+    cleanup_with_samples(text, base_url, api_key, model, provider, body, spelling, names, None, dictionary, disable_thinking).await
+}
+
+/// [`cleanup_with_names`] with the person's writing samples (`samples`:
+/// `writing_samples::block`, at High strength) at the end of the system
+/// prompt; `None`: exactly [`cleanup_with_names`]'s request.
+#[allow(clippy::too_many_arguments)]
+pub async fn cleanup_with_samples(
+    text: &str,
+    base_url: &str,
+    api_key: &str,
+    model: &str,
+    provider: &str,
+    body: &str,
+    spelling: Option<&str>,
+    names: Option<&str>,
+    samples: Option<&str>,
+    dictionary: &[crate::config::DictionaryEntry],
+    disable_thinking: bool,
+) -> Result<String, String> {
     let messages =
-        cleanup_messages_with_names(text, body, spelling, names, dictionary, splits_dictation(base_url, model));
+        cleanup_messages_full(text, body, spelling, names, samples, dictionary, splits_dictation(base_url, model));
     // Never waits out a rate limit: the dictation would wait with it, and the
     // raw transcript is a fine fallback.
     let out = post_chat(base_url, api_key, model, provider, 0.2, messages, Duration::ZERO).await?;
@@ -314,6 +334,23 @@ pub fn cleanup_messages_with_names(
     dictionary: &[crate::config::DictionaryEntry],
     split: bool,
 ) -> Value {
+    cleanup_messages_full(text, body, spelling, names, None, dictionary, split)
+}
+
+/// [`cleanup_messages_with_names`] with the writing samples (`samples`) at
+/// the end of the system prompt — the stable prefix the server caches,
+/// never the dictation's own message (`writing_samples::with_block`);
+/// `None`: byte for byte [`cleanup_messages_with_names`]'s. Pure but for the
+/// model evaluations' switches.
+pub fn cleanup_messages_full(
+    text: &str,
+    body: &str,
+    spelling: Option<&str>,
+    names: Option<&str>,
+    samples: Option<&str>,
+    dictionary: &[crate::config::DictionaryEntry],
+    split: bool,
+) -> Value {
     // System message = immutable guardrails + the user's editable body/preset,
     // plus the custom dictionary as spelling/correction bias (OpenWhispr's
     // `dictionarySuffix`) so the model uses the right spellings up front instead
@@ -321,7 +358,7 @@ pub fn cleanup_messages_with_names(
     let at = spelling_at();
     let in_system = spelling.filter(|_| at != SpellingAt::Message);
     let in_message = spelling.filter(|_| at != SpellingAt::System);
-    let system_prompt = cleanup_system_prompt(body, in_system, dictionary);
+    let system_prompt = crate::ai::writing_samples::with_block(&cleanup_system_prompt(body, in_system, dictionary), samples);
 
     // Frame the transcript as DATA, not a chat turn: a restated instruction +
     // delimiters in the user message, plus a one-shot example that cleans a
@@ -704,27 +741,15 @@ pub async fn note_chat(
     Ok(out.trim().to_string())
 }
 
-/// Edit/rewrite pass: apply a spoken `instruction` to `selection` (the text the
-/// user had selected). If `selection` is empty, this is "write mode" — generate
-/// new text from the instruction alone. Returns the rewritten text, or an `Err`
-/// the caller can fall back from.
-#[allow(clippy::too_many_arguments)]
-pub async fn rewrite(
-    instruction: &str,
-    selection: &str,
-    base_url: &str,
-    api_key: &str,
-    model: &str,
-    provider: &str,
-    body: &str,
-    disable_thinking: bool,
-) -> Result<String, String> {
+/// A rewrite's messages (pure; the evals send the same): the guardrails
+/// and the Commands body, then the writing samples (`samples`: before the
+/// selection, so the part the server caches stays the same from rewrite to
+/// rewrite into one kind of app), then the selection; the spoken
+/// instruction as the user's turn. `None`: exactly the rewrite before
+/// writing samples.
+pub fn rewrite_messages(instruction: &str, selection: &str, samples: Option<&str>, body: &str) -> Value {
     let instruction = instruction.trim();
-    if instruction.is_empty() {
-        return Err("empty instruction".to_string());
-    }
     let selection = selection.trim();
-
     // Immutable guardrails + the Commands scope's editable body (tone/behaviour),
     // same split as dictation cleanup — an empty body yields the guardrails alone.
     let base = {
@@ -735,6 +760,7 @@ pub async fn rewrite(
             format!("{EDIT_BASE_PROMPT}\n\n{body}")
         }
     };
+    let base = crate::ai::writing_samples::with_block(&base, samples);
     // Selected text goes in the system prompt as context (FluidVoice's
     // `runtimeContextBlock`); the spoken instruction is the user turn.
     let system_prompt = if selection.is_empty() {
@@ -749,11 +775,34 @@ pub async fn rewrite(
     } else {
         format!("User's instruction: {instruction}\n\nApply the instruction to the selected text above. Output ONLY the rewritten text, nothing else.")
     };
-
-    let messages = json!([
+    json!([
         { "role": "system", "content": system_prompt },
         { "role": "user", "content": user },
-    ]);
+    ])
+}
+
+/// Edit/rewrite pass: apply a spoken `instruction` to `selection` (the text the
+/// user had selected). If `selection` is empty, this is "write mode" — generate
+/// new text from the instruction alone. `samples`: the person's writing
+/// samples (`writing_samples::block`), or `None` — the rewrite as before
+/// them ([`rewrite_messages`]). Returns the rewritten text, or an `Err` the
+/// caller can fall back from.
+#[allow(clippy::too_many_arguments)]
+pub async fn rewrite_with_samples(
+    instruction: &str,
+    selection: &str,
+    samples: Option<&str>,
+    base_url: &str,
+    api_key: &str,
+    model: &str,
+    provider: &str,
+    body: &str,
+    disable_thinking: bool,
+) -> Result<String, String> {
+    if instruction.trim().is_empty() {
+        return Err("empty instruction".to_string());
+    }
+    let messages = rewrite_messages(instruction, selection, samples, body);
 
     // Slightly higher temperature than cleanup — rewriting is generative.
     let out = post_chat(base_url, api_key, model, provider, 0.7, messages, Duration::ZERO).await?;
@@ -777,15 +826,18 @@ instruction changes the layout.\n- Never wrap the output in code fences unless t
 
 /// A transform's messages (pure; the evals send the same): the guardrails
 /// as the system prompt; the instruction and the text, between `<text>`
-/// tags, as the user's turn, the order restated after the text.
-pub fn transform_messages(instruction: &str, text: &str) -> Value {
+/// tags, as the user's turn, the order restated after the text. `samples`:
+/// the person's writing samples (`writing_samples::block`) at the end of the
+/// system prompt — the part the server caches; `None`: the transform as
+/// before them.
+pub fn transform_messages_with(instruction: &str, text: &str, samples: Option<&str>) -> Value {
     let user = format!(
         "INSTRUCTION: {}\n\n<text>\n{}\n</text>\n\nApply the instruction to the text above. Output only the result.",
         instruction.trim(),
         text.trim()
     );
     json!([
-        { "role": "system", "content": TRANSFORM_BASE_PROMPT },
+        { "role": "system", "content": crate::ai::writing_samples::with_block(TRANSFORM_BASE_PROMPT, samples) },
         { "role": "user", "content": user },
     ])
 }
@@ -804,10 +856,26 @@ pub async fn transform(
     provider: &str,
     disable_thinking: bool,
 ) -> Result<String, String> {
+    transform_with_samples(instruction, text, None, base_url, api_key, model, provider, disable_thinking).await
+}
+
+/// [`transform`] with the person's writing samples ([`transform_messages_with`];
+/// `None`: exactly [`transform`]'s request).
+#[allow(clippy::too_many_arguments)]
+pub async fn transform_with_samples(
+    instruction: &str,
+    text: &str,
+    samples: Option<&str>,
+    base_url: &str,
+    api_key: &str,
+    model: &str,
+    provider: &str,
+    disable_thinking: bool,
+) -> Result<String, String> {
     if instruction.trim().is_empty() || text.trim().is_empty() {
         return Err("nothing to transform".to_string());
     }
-    let messages = transform_messages(instruction, text);
+    let messages = transform_messages_with(instruction, text, samples);
     let out = post_chat(base_url, api_key, model, provider, 0.2, messages, Duration::ZERO).await?;
     Ok(if disable_thinking { strip_thinking(&out) } else { out })
 }
@@ -1760,6 +1828,111 @@ mod temperature_tests {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A made-up person's writing samples, as a call carries them.
+    fn samples_block() -> String {
+        let samples = vec![
+            crate::ai::writing_samples::Sample {
+                id: "s-1".into(),
+                text: "Hiya both, quick one: the quiz moved to Thursday. Cheers, Robin".into(),
+                kind: "email".into(),
+                added_ms: 1,
+            },
+            crate::ai::writing_samples::Sample { id: "s-2".into(), text: "ta, see you there".into(), kind: String::new(), added_ms: 2 },
+        ];
+        let picked = crate::ai::writing_samples::pick(&samples, crate::ai::writing_samples::Kind::Email, crate::ai::writing_samples::BUDGET_LOCAL);
+        crate::ai::writing_samples::block(&picked).unwrap()
+    }
+
+    #[test]
+    fn writing_samples_go_at_the_end_of_the_system_prompt_and_nothing_else_changes() {
+        let b = samples_block();
+        // A transform: the system prompt is the guardrails then the samples;
+        // the user's turn is exactly as without.
+        let with = transform_messages_with("Polish the text.", "so um we moved it", Some(&b));
+        let without = transform_messages_with("Polish the text.", "so um we moved it", None);
+        assert_eq!(with[0]["content"], format!("{TRANSFORM_BASE_PROMPT}\n\n{b}"));
+        assert_eq!(with[1], without[1]);
+        // Without samples: the transform's request as it always was.
+        assert_eq!(without[0]["content"], TRANSFORM_BASE_PROMPT);
+        assert_eq!(
+            without[1]["content"],
+            "INSTRUCTION: Polish the text.\n\n<text>\nso um we moved it\n</text>\n\nApply the instruction to the text above. Output only the result."
+        );
+        // The same samples for another text: the same system prompt (cached).
+        assert_eq!(transform_messages_with("Shorter.", "another text", Some(&b))[0], with[0]);
+
+        // A rewrite: the samples before the selection, so the part before it
+        // is the same whatever is selected; without samples, as before.
+        let r1 = rewrite_messages("make it friendlier", "Send the file.", Some(&b), "");
+        let r2 = rewrite_messages("make it friendlier", "Another selection.", Some(&b), "");
+        let s1 = r1[0]["content"].as_str().unwrap();
+        let s2 = r2[0]["content"].as_str().unwrap();
+        let prefix = format!("{EDIT_BASE_PROMPT}\n\n{b}\n\nUse the following selected text");
+        assert!(s1.starts_with(&prefix) && s2.starts_with(&prefix), "{s1}");
+        assert!(s1.ends_with("\"\"\"\nSend the file.\n\"\"\""));
+        assert_eq!(r1[1], rewrite_messages("make it friendlier", "Send the file.", None, "")[1]);
+        assert_eq!(
+            rewrite_messages("write a reply", "", None, "Be brief.")[0]["content"],
+            format!("{EDIT_BASE_PROMPT}\n\nBe brief.")
+        );
+        assert_eq!(rewrite_messages("write a reply", "", Some(&b), "Be brief.")[0]["content"], format!("{EDIT_BASE_PROMPT}\n\nBe brief.\n\n{b}"));
+
+        // Cleanup: the samples end the system prompt; the one-shots and the
+        // dictation's own messages are byte for byte the same, split or not.
+        for split in [false, true] {
+            let with = cleanup_messages_full("so um the quiz moved", "", Some("Spell it the British way."), Some("Names: Robin."), Some(&b), &[], split);
+            let without = cleanup_messages_with_names("so um the quiz moved", "", Some("Spell it the British way."), Some("Names: Robin."), &[], split);
+            let (w, wo) = (with.as_array().unwrap(), without.as_array().unwrap());
+            assert_eq!(w.len(), wo.len());
+            assert_eq!(w[0]["content"], format!("{}\n\n{b}", wo[0]["content"].as_str().unwrap()));
+            assert_eq!(w[1..], wo[1..]);
+            // Another dictation: the same system prompt (the cached prefix).
+            let other = cleanup_messages_full("a different dictation", "", Some("Spell it the British way."), None, Some(&b), &[], split);
+            assert_eq!(other[0], with[0]);
+            assert_eq!(cleanup_messages_full("so um the quiz moved", "", None, None, None, &[], split), cleanup_messages("so um the quiz moved", "", None, &[], split));
+        }
+        // Capped: however many and however long, the block stays small.
+        let long: Vec<crate::ai::writing_samples::Sample> = (0..12)
+            .map(|i| crate::ai::writing_samples::Sample { id: format!("s-{i}"), text: "A sentence of mine. ".repeat(80), kind: String::new(), added_ms: 0 })
+            .collect();
+        let picked = crate::ai::writing_samples::pick(&long, crate::ai::writing_samples::Kind::Any, crate::ai::writing_samples::BUDGET_LOCAL);
+        let block = crate::ai::writing_samples::block(&picked).unwrap();
+        assert!(block.chars().count() < crate::ai::writing_samples::BUDGET_LOCAL + 600, "{}", block.chars().count());
+    }
+
+    /// With no writing samples (and no Hinglish), a dictation's cleanup
+    /// request is byte for byte what it was before them: its JSON for fixed
+    /// inputs, pinned by its SHA-256. Taken when writing samples came
+    /// (29 Oct 2026), whose only change on this path is
+    /// `writing_samples::with_block(system, None)`, which is `system` itself.
+    #[test]
+    fn the_cleanup_request_without_samples_is_byte_for_byte_as_before() {
+        use sha2::{Digest, Sha256};
+        let dictionary: Vec<crate::config::DictionaryEntry> =
+            serde_json::from_value(json!([{ "from": "cube cuttle", "to": "kubectl" }, { "from": "Yap", "to": "Yap" }])).unwrap();
+        let mut hashes = Vec::new();
+        for split in [false, true] {
+            let messages = cleanup_messages_full(
+                "so um the quiz moved to thursday",
+                "Keep it tidy.",
+                Some("When the transcript is in English, spell it the British way."),
+                Some("This dictation is the body of an email."),
+                None,
+                &dictionary,
+                split,
+            );
+            let hex: String = Sha256::digest(serde_json::to_string(&messages).unwrap()).iter().map(|b| format!("{b:02x}")).collect();
+            hashes.push(hex);
+        }
+        assert_eq!(
+            hashes,
+            [
+                "6753d634889f2409ea120a9f21842d99b0a984925b29517c63f6edf21c444290",
+                "ecfbb512515483694504ae97f9b6ab1a67b9b3fdf17ac5aafa698a8bae71d5b8"
+            ]
+        );
+    }
 
     #[test]
     fn the_conversation_sent_takes_turns_starting_with_a_question() {

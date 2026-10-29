@@ -94,8 +94,8 @@ impl Feature {
     fn of_net(f: crate::privacy::net::Feature) -> Feature {
         use crate::privacy::net::Feature as N;
         match f {
-            N::Dictation | N::DictationContext => Feature::Cleanup,
-            N::Commands => Feature::Commands,
+            N::Dictation | N::DictationContext | N::DictationSamples => Feature::Cleanup,
+            N::Commands | N::CommandsSamples => Feature::Commands,
             N::Chat => Feature::Chat,
             N::Assistant => Feature::Assistant,
             N::Notes => Feature::Notes,

@@ -639,6 +639,24 @@ pub fn to_latin(text: &str) -> String {
     out
 }
 
+/// Whether AI cleanup's `after` kept most of `before`'s words (a Hindi
+/// dictation as [`to_latin`] spelt it out): at least half of them, whole
+/// words, any case. A cleanup that translated it into English keeps few —
+/// the on-device Qwen2.5-1.5B did 16 times in 20 (docs/model-evals.md
+/// "Hinglish") — and then the dictation goes in as Yap spelt it out. Under
+/// three words: kept. Pure.
+pub fn kept_the_words(before: &str, after: &str) -> bool {
+    let words = |s: &str| -> Vec<String> {
+        s.to_lowercase().split(|c: char| !c.is_alphanumeric()).filter(|w| !w.is_empty()).map(str::to_string).collect()
+    };
+    let b = words(before);
+    if b.len() < 3 {
+        return true;
+    }
+    let a = words(after);
+    b.iter().filter(|w| a.contains(w)).count() * 2 >= b.len()
+}
+
 /// `s` with its first letter upper case.
 fn capitalised(s: &str) -> String {
     let mut chars = s.chars();
@@ -732,6 +750,19 @@ mod tests {
             assert!(seen.insert(*d), "{d} twice");
             assert!(!has_devanagari(l) && !l.is_empty(), "{d}");
         }
+    }
+
+    #[test]
+    fn a_cleanup_that_translated_it_is_caught() {
+        let said = "Mujhe lagta hai ki hamein project ki deadline aage badhani chahiye.";
+        // Tidied as Hinglish: kept.
+        assert!(kept_the_words(said, "Mujhe lagta hai ki hamein project ki deadline aage badhaani chahiye."));
+        assert!(kept_the_words("Kal ki meeting teen baje hai.", "Kal ki meeting 3 baje hai."));
+        // Translated into English: not.
+        assert!(!kept_the_words(said, "I think we need to extend the project deadline."));
+        assert!(!kept_the_words("Kal ki meeting teen baje hai.", "Okay, let's meet at 2 PM."));
+        // Too short to tell.
+        assert!(kept_the_words("Haan ji", "Yes"));
     }
 
     #[test]

@@ -333,6 +333,8 @@ pub struct Inputs {
     /// About you's lines for Memory's You.md.
     pub about: Vec<(&'static str, String)>,
     pub dictionary: Vec<crate::config::DictionaryEntry>,
+    /// The writing samples (`ai/writing_samples.rs`).
+    pub writing_samples: Vec<crate::ai::writing_samples::Sample>,
     /// config.json as `YapConfig` serialises.
     pub config: Value,
     /// Whether the audio is in it (the README says).
@@ -349,6 +351,7 @@ notes/notes.json is all of them as Yap keeps them, with your folders and actions
 - memory/: what Yap remembers about you, as Markdown, and memory.json.\n\
 - dictionary/dictionary.csv: your corrections and snippets, as the Dictionary's Export writes them \
 (Import reads it back).\n\
+- writing_samples.json: the writing samples you gave Yap (Settings → Commands).\n\
 - settings.json: your settings. Never in it: API keys, tokens, passwords and your account's sign-in. \
 `leftOut` names the settings taken out.\n\
 {audio}\n\
@@ -405,6 +408,7 @@ screenshots/: Chat's screenshots (PNG).\n"
 
     // Dictionary, settings.
     files.push(("dictionary/dictionary.csv".into(), dictionary_csv(&i.dictionary).into_bytes()));
+    files.push(("writing_samples.json".into(), pretty(&json!({ "samples": i.writing_samples }))));
     files.push(("settings.json".into(), pretty(&settings_export(&i.config))));
     files
 }
@@ -613,6 +617,7 @@ fn inputs(audio: bool) -> Inputs {
         memory: crate::memory::items(),
         about,
         dictionary: cfg.dictionary.clone(),
+        writing_samples: crate::ai::writing_samples::snapshot().samples,
         config: serde_json::to_value(&cfg).unwrap_or(Value::Null),
         audio,
     }
@@ -843,6 +848,12 @@ mod tests {
             memory: vec![],
             about: vec![("Name", "Robin Example".into())],
             dictionary: cfg.dictionary.clone(),
+            writing_samples: vec![crate::ai::writing_samples::Sample {
+                id: "s-1".into(),
+                text: "Hiya both, the allotment gate is fixed. Cheers".into(),
+                kind: "email".into(),
+                added_ms: 1,
+            }],
             config: serde_json::to_value(cfg).unwrap(),
             audio: false,
         }
@@ -867,10 +878,13 @@ mod tests {
             "memory/You.md",
             "memory/memory.json",
             "dictionary/dictionary.csv",
+            "writing_samples.json",
             "settings.json",
         ] {
             assert!(names.contains(&want), "{want} in {names:?}");
         }
+        let samples = String::from_utf8_lossy(&files.iter().find(|(n, _)| n == "writing_samples.json").unwrap().1).to_string();
+        assert!(samples.contains("allotment gate"), "{samples}");
         assert!(names.iter().any(|n| n.starts_with("notes/") && n.ends_with("Allotment plans.md")), "{names:?}");
         assert!(names.iter().any(|n| n.starts_with("meetings/") && n.ends_with("Weekly sync.md")), "{names:?}");
         for (name, bytes) in &files {

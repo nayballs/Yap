@@ -68,7 +68,12 @@ pub enum Feature {
     /// (`ai/cleanup_context.rs`): its own label, so the list shows when it
     /// went.
     DictationContext,
+    /// A transform on every dictation that carried the person's writing
+    /// samples (`ai/writing_samples.rs`).
+    DictationSamples,
     Commands,
+    /// A rewrite or a transform that carried the writing samples.
+    CommandsSamples,
     Chat,
     Assistant,
     Notes,
@@ -78,10 +83,29 @@ pub enum Feature {
 }
 
 impl Feature {
+    /// A dictation's transform on every dictation, with or without the
+    /// writing samples.
+    pub fn dictation(samples: bool) -> Feature {
+        if samples {
+            Feature::DictationSamples
+        } else {
+            Feature::Dictation
+        }
+    }
+
+    /// A rewrite's or a transform's, with or without the writing samples.
+    pub fn commands(samples: bool) -> Feature {
+        if samples {
+            Feature::CommandsSamples
+        } else {
+            Feature::Commands
+        }
+    }
+
     fn name(self) -> &'static str {
         match self {
-            Feature::Dictation | Feature::DictationContext => "Dictation",
-            Feature::Commands => "Commands",
+            Feature::Dictation | Feature::DictationContext | Feature::DictationSamples => "Dictation",
+            Feature::Commands | Feature::CommandsSamples => "Commands",
             Feature::Chat => "Chat",
             Feature::Assistant => "Voice Assistant",
             Feature::Notes => "Notes",
@@ -95,7 +119,9 @@ impl Feature {
         match self {
             Feature::Dictation => "AI cleanup",
             Feature::DictationContext => "AI cleanup + text before the cursor",
+            Feature::DictationSamples => "Transform + your writing samples",
             Feature::Commands => "Commands",
+            Feature::CommandsSamples => "Commands + your writing samples",
             Feature::Chat => "Chat",
             Feature::Assistant => "Voice Assistant",
             Feature::Notes => "Notes",

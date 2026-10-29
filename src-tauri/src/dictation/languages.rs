@@ -204,11 +204,13 @@ struct Now {
     shortcut: Option<String>,
     /// The language the model heard (Whisper).
     heard: Option<Heard>,
+    /// Its Devanagari was spelt out as Hinglish ([`hinglish_text`]).
+    hinglish: bool,
 }
 
 /// The shortcut pressed now (until its recording takes it).
 static ARMED: Mutex<Option<String>> = Mutex::new(None);
-static NOW: Mutex<Now> = Mutex::new(Now { shortcut: None, heard: None });
+static NOW: Mutex<Now> = Mutex::new(Now { shortcut: None, heard: None, hinglish: false });
 
 fn now() -> std::sync::MutexGuard<'static, Now> {
     NOW.lock().unwrap_or_else(|p| p.into_inner())
@@ -229,6 +231,7 @@ pub fn begin_dictation(take: bool) {
     let mut n = now();
     n.shortcut = armed.filter(|_| take);
     n.heard = None;
+    n.hinglish = false;
     if n.shortcut.is_some() {
         tracing::info!("Dictation: started with a language shortcut");
     }
@@ -271,6 +274,7 @@ pub fn rerun_heard(said: Said) -> String {
     let mut n = now();
     n.shortcut = None;
     n.heard = said.heard;
+    n.hinglish = false;
     said.text
 }
 
@@ -413,7 +417,22 @@ fn writes_hinglish_in(cfg: &YapConfig, spoken: Option<&str>) -> bool {
 /// (`writes_hinglish_in`, the language this dictation is in); else
 /// unchanged.
 pub fn hinglish_text(text: &str, cfg: &YapConfig) -> String {
-    hinglish_text_in(text, cfg, spoken_language(cfg).as_deref())
+    let out = hinglish_text_in(text, cfg, spoken_language(cfg).as_deref());
+    if out != text {
+        now().hinglish = true;
+    }
+    out
+}
+
+/// AI cleanup's `cleaned` for this dictation, unless it was spelt out as
+/// Hinglish and cleanup didn't keep its words (it translated it:
+/// [`hinglish::kept_the_words`]) — then `said`, as Yap spelt it out.
+pub fn hinglish_kept(said: &str, cleaned: String) -> String {
+    if now().hinglish && !hinglish::kept_the_words(said, &cleaned) {
+        tracing::warn!(chars = cleaned.chars().count(), "AI cleanup changed a Hinglish dictation's language: the words as spelt out go in");
+        return said.to_string();
+    }
+    cleaned
 }
 
 /// [`hinglish_text`] for a dictation known to be in `spoken` (pure).

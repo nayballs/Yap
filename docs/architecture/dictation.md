@@ -9,7 +9,11 @@ How a dictation runs: the hotkey and push-to-talk gestures, the mic, speech-to-t
 The transcription itself is told what's known of the language (My
 languages, `dictation/languages.rs` below: Whisper picks the likeliest of
 the person's languages and says what it heard), and a language shortcut
-that translates sends the transcript to the AI in cleanup's place.
+that translates sends the transcript to the AI in cleanup's place. Hindi
+written as Hinglish (My languages' "Write in Latin letters (Hinglish)",
+`languages/hinglish.rs`, 2026-10-29) is spelt out in Latin letters first,
+on this PC (`languages::hinglish_text`, at the start of `deliver` and Run
+again), so cleanup, the words as said and history all have it so.
 Pipeline order after transcription: **AI cleanup (in the style of the kind
 of app it goes into — email formal, chats casual, AI prompts literal,
 terminal commands as said: `ai/cleanup_styles.rs`, [ai-models.md](./ai-models.md);
@@ -611,6 +615,10 @@ to **Run again** from Home.
   (`TRANSFORM_BASE_PROMPT`'s guardrails + the instruction; never the
   Commands prompt, which may answer questions; [ai-models.md](./ai-models.md))
   and `clean_output` (an echoed `<text>` tag or a "Here is…:" line off).
+  Polish, Shorter and the person's own carry the **writing samples** for the
+  window's kind of app (`ai/writing_samples.rs`: `for_transform`, the
+  receipts' "Commands + your writing samples"); Fix grammar only, Translate
+  and Make it a prompt never do.
   The bar says the name meanwhile (`yap-transform` "running" + `yap-state`
   "processing": "Polish…"). **In place**: over the selection after
   `verify_selection` (the window still in front, the same text still
@@ -745,7 +753,38 @@ to **Run again** from Home.
   transcription in, without a mic), `e2e_language_slots`. Unit tests
   (`languages::tests`, `catalog::tests`, `nudge::tests`, `input_hook`'s
   language slots), e2e `languages.spec.js`, robot
-  `e2e-real/languages.real.js`.
+  `e2e-real/languages.real.js`. **Hinglish** (2026-10-29; Wispr Flow's
+  "Hindi in Latin letters", by behaviour; `languages/hinglish.rs`): with
+  Hindi among My languages, the page offers "Write in Latin letters
+  (Hinglish)" (`config.hinglish`, off) and says which speech model hears
+  Hindi — **only Whisper's** (Small, Medium, Large v3, Turbo; `catalog.rs`:
+  not Parakeet V2 or V3, Canary, Cohere, SenseVoice or Breeze), so a
+  Parakeet user is told to pick Whisper Large v3 Turbo. On, a dictation in
+  Hindi (Whisper heard it, or not known — never Marathi or Nepali, which share
+  the script: `writes_hinglish_in`) has its Devanagari **spelt out in Latin
+  letters on this PC** before anything else (`hinglish_text` → `to_latin`,
+  pure: Yap's own table — letters and vowel signs, Hindi's dropped "a"
+  ("kal", "karna", "samajhta"), "aa" in a word's first syllable and "a" at
+  its end, "ee" inside and "i" at the end — and two lists: Hindi's
+  commonest words as they're typed ("hai", "nahi", "mein", "chahiye") and
+  English words Whisper writes in Devanagari, back in English (मीटिंग →
+  "meeting"); Latin letters Whisper wrote are left as they are; dandas as
+  full stops, Devanagari digits as 0–9, a sentence's first word with its
+  capital). Then AI cleanup, when it's on, is told it's Hinglish
+  (`language_line_with`: "write the cleaned text in Latin letters, the way
+  Hinglish is typed (hai, nahi, kya, accha), English words in their English
+  spelling, never translating it and never writing Devanagari"), and
+  whatever it still writes in Devanagari is spelt out too; a cleanup that
+  kept under half the words (it translated them: the bundled Qwen2.5-1.5B
+  did, 24 times in 30) gives way to the words as Yap spelt them out
+  (`hinglish_kept`, `hinglish::kept_the_words`). Measured: the 4B 30/30
+  from the rules' Latin, against 25/30 given the Devanagari itself. A language
+  shortcut translating into Hindi writes Hinglish too. No dependency: the
+  only Rust crate found (vidyut-lipi, MIT) writes Sanskrit's schemes (IAST,
+  ITRANS), with no dropped "a" and no Hinglish spellings. Off, or Hindi not
+  among My languages: everything exactly as before (`language_line` and
+  `hinglish_text` unchanged, unit-tested). Measured in docs/model-evals.md
+  "Hinglish". e2e `hinglish.spec.js`.
 - **`dictation/mic.rs`** — **the dictation's microphone, opened on demand**
   (2026-10-22). Until then Yap held Windows' default mic open the whole time
   it ran, for the pre-roll: Windows showed the mic in use all day, a
