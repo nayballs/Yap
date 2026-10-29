@@ -54,6 +54,7 @@
 //! debug-only `e2e_meeting_limit` shortens the length timings and
 //! `e2e_meeting_checkins` the quiet ones.
 
+use std::borrow::Cow;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -286,11 +287,24 @@ fn stop_from(app: &AppHandle, note_id: Option<u64>, origin: Option<&str>) {
     }
 }
 
+/// [`stop_and_summarise`] as Yap's own stop, not the person's (the length
+/// limit, a quiet meeting, a call that ended, a full disk): call detection
+/// never offers auto-start after one, and may carry the meeting on when
+/// its call comes back (`meeting_end::end_automatically`).
+pub fn stop_automatically(app: &AppHandle, note_id: u64) {
+    if crate::meetings::meeting::recording_note() != Some(note_id) {
+        return;
+    }
+    if let Err(e) = crate::meetings::meeting_end::end_automatically(app) {
+        tracing::info!("meeting guard: nothing to stop ({e})");
+    }
+}
+
 /// "When a call ends: Stop and summarise automatically": the call (`call`:
 /// "Teams call") that Yap was recording into `note_id` ended.
 pub fn stop_after_call(app: &AppHandle, note_id: u64, call: &str) {
     tracing::info!(note_id, call, "meeting guard: the call ended; stopping automatically");
-    stop_and_summarise(app, Some(note_id));
+    stop_automatically(app, note_id);
     notice(app, &Notice::call_ended(call));
 }
 
@@ -479,7 +493,7 @@ fn length_tick(app: &AppHandle, gen: u64) -> bool {
             withdraw(app);
             withdraw_check_in(app);
             GEN.fetch_add(1, Ordering::SeqCst);
-            stop_and_summarise(app, Some(note_id));
+            stop_automatically(app, note_id);
             notice(app, &Notice::stopped_at_limit(now.saturating_sub(started)));
             return false;
         }
@@ -603,7 +617,8 @@ fn on_meeting_state(app: &AppHandle, payload: &str) {
             if previous.is_some_and(|w| w.warned.is_some()) {
                 emit_limit(app, None);
             }
-            withdraw_check_in(app);
+            // A new recording: every question about the last one is moot.
+            withdraw_check_in_where(app, |_| true);
             let handle = app.clone();
             let spawned = std::thread::Builder::new()
                 .name("meeting-length".into())
@@ -614,7 +629,9 @@ fn on_meeting_state(app: &AppHandle, payload: &str) {
         }
         None => {
             withdraw(app);
-            withdraw_check_in(app);
+            // What's about the recording goes with it; a question about the
+            // meeting after it (the PC woke, auto-start) stays.
+            withdraw_check_in_where(app, |p| matches!(p.about, None | Some(About::Mic { .. })));
             *watch_lock() = None;
         }
     }
@@ -879,7 +896,40 @@ fn surface_now(app: &AppHandle, countdown: bool) -> Surface {
 #[derive(Debug, Clone, Serialize)]
 pub struct Answer {
     id: &'static str,
-    label: &'static str,
+    label: Cow<'static, str>,
+}
+
+impl Answer {
+    pub fn new(id: &'static str, label: impl Into<Cow<'static, str>>) -> Self {
+        Answer { id, label: label.into() }
+    }
+
+    #[cfg(test)]
+    pub fn id(&self) -> &'static str {
+        self.id
+    }
+
+    #[cfg(test)]
+    pub fn label(&self) -> &str {
+        &self.label
+    }
+}
+
+/// What one of the meeting's other questions is about (besides the quiet
+/// countdown and the check-ins), for its answer. They show where the
+/// check-ins do; their quiet answer (or ✕) is always "keep".
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum About {
+    /// "Teams is using Contoso H2 but Yap is using Northwind Audio":
+    /// "use" moves "You" to that microphone for this meeting
+    /// (`calls/call_audio.rs`).
+    Mic { id: String, name: String },
+    /// The PC slept mid-meeting (`meetings/sleep.rs`): "resume" carries on
+    /// in the same note, "summarise" writes its action plan.
+    Asleep,
+    /// "Start notes automatically for Teams calls?" (`meeting_detect.rs`):
+    /// "yes" adds the app to `meeting_auto_start_apps`.
+    AutoStart { app: &'static str },
 }
 
 /// The countdown or a check-in, as the windows show it (`yap-meeting-checkin`).
@@ -888,8 +938,11 @@ pub struct Answer {
 pub struct CheckIn {
     id: u64,
     note_id: u64,
-    /// "quiet" (the countdown) | "calendar" | "hour".
+    /// "quiet" (the countdown) | "calendar" | "hour" | "mic" | "asleep" |
+    /// "autostart".
     kind: &'static str,
+    /// The chip's glyph: "timer" | "mic" | "notes" | "call".
+    icon: &'static str,
     title: String,
     body: String,
     /// When the countdown ends (unix ms): "Ending notes in 28 s…".
@@ -904,12 +957,16 @@ pub struct CheckIn {
     /// card's title under its headline, the Windows notification's body.
     #[serde(skip)]
     reason: String,
+    /// One of the meeting's other questions (`None`: the countdown or a
+    /// check-in).
+    #[serde(skip)]
+    about: Option<About>,
 }
 
-const KEEP_GOING: Answer = Answer { id: "keep", label: "Keep going" };
-const STOP_NOW: Answer = Answer { id: "stop", label: "Stop now" };
-const STOP_AND_SUMMARISE: Answer = Answer { id: "stop", label: "Stop and summarise" };
-const KEEP_RECORDING: Answer = Answer { id: "keep", label: "Keep recording" };
+const KEEP_GOING: Answer = Answer { id: "keep", label: Cow::Borrowed("Keep going") };
+const STOP_NOW: Answer = Answer { id: "stop", label: Cow::Borrowed("Stop now") };
+const STOP_AND_SUMMARISE: Answer = Answer { id: "stop", label: Cow::Borrowed("Stop and summarise") };
+const KEEP_RECORDING: Answer = Answer { id: "keep", label: Cow::Borrowed("Keep recording") };
 
 /// "30 s", "1 min 5 s" (rounded up): the countdown's time left.
 fn seconds_words(ms: u64) -> String {
@@ -929,6 +986,7 @@ impl CheckIn {
             id,
             note_id,
             kind: "quiet",
+            icon: "timer",
             title: format!("Ending notes in {}…", seconds_words(until.saturating_sub(now))),
             body: format!("{reason}. Yap will stop recording and write your action plan."),
             until: Some(until),
@@ -936,6 +994,7 @@ impl CheckIn {
             primary: KEEP_GOING,
             secondary: STOP_NOW,
             reason,
+            about: None,
         }
     }
 
@@ -973,6 +1032,7 @@ impl CheckIn {
             id,
             note_id,
             kind,
+            icon: "timer",
             title: "Still in your meeting?".to_string(),
             body,
             until: None,
@@ -980,9 +1040,63 @@ impl CheckIn {
             primary: STOP_AND_SUMMARISE,
             secondary: KEEP_RECORDING,
             reason: String::new(),
+            about: None,
         }
     }
 }
+
+/// One of the meeting's other questions ([`About`]), put where the
+/// check-ins go (see [`ask`]).
+pub struct Question {
+    pub note_id: u64,
+    /// "mic" | "asleep" | "autostart".
+    pub kind: &'static str,
+    pub icon: &'static str,
+    pub title: String,
+    pub body: String,
+    pub primary: Answer,
+    /// The quiet answer ("keep", or a second choice); the ✕ is always "keep".
+    pub secondary: Answer,
+    pub about: About,
+    /// Taken down unanswered after this long.
+    pub fade_ms: u64,
+}
+
+/// Ask `q` where the person is looking, as the check-ins are (the notepad
+/// if it's on screen, else the main window if it's focused, else the Yap
+/// bar, else a Windows notification), replacing whatever question is up;
+/// gone unanswered after its `fade_ms`. Never with a lock held.
+pub fn ask(app: &AppHandle, q: Question) {
+    let surface = surface_now(app, false);
+    let id = CHECK_IN_SEQ.fetch_add(1, Ordering::SeqCst) + 1;
+    let fade_ms = q.fade_ms;
+    show_check_in(
+        app,
+        CheckIn {
+            id,
+            note_id: q.note_id,
+            kind: q.kind,
+            icon: q.icon,
+            title: q.title,
+            body: q.body,
+            until: None,
+            surface: surface.label(),
+            primary: q.primary,
+            secondary: q.secondary,
+            reason: String::new(),
+            about: Some(q.about),
+        },
+    );
+    let app = app.clone();
+    std::thread::spawn(move || {
+        std::thread::sleep(Duration::from_millis(fade_ms));
+        if check_in_lock().as_ref().is_some_and(|p| p.id == id) {
+            tracing::info!(id, "meeting guard: a question went unanswered; taken down");
+            withdraw_check_in_where(&app, |p| p.id == id);
+        }
+    });
+}
+
 
 /// The countdown or check-in that's up.
 static CHECK_IN: Mutex<Option<CheckIn>> = Mutex::new(None);
@@ -1020,9 +1134,23 @@ fn show_check_in(app: &AppHandle, p: CheckIn) {
 }
 
 /// Take the countdown or check-in down (answered, moot, the recording
-/// stopped). Whether one was up.
+/// stopped). Whether one was up. The meeting's other questions ([`About`])
+/// aren't the quiet watch's to take down: they have their own answers.
 fn withdraw_check_in(app: &AppHandle) -> bool {
-    let Some(p) = check_in_lock().take() else {
+    withdraw_check_in_where(app, |p| p.about.is_none())
+}
+
+/// Take down whatever's up, if `which` says so. Whether it did.
+fn withdraw_check_in_where(app: &AppHandle, which: impl Fn(&CheckIn) -> bool) -> bool {
+    let taken = {
+        let mut guard = check_in_lock();
+        if guard.as_ref().is_some_and(&which) {
+            guard.take()
+        } else {
+            None
+        }
+    };
+    let Some(p) = taken else {
         return false;
     };
     emit_check_in(app, None);
@@ -1095,7 +1223,7 @@ fn quiet_tick(app: &AppHandle, gen: u64) {
             tracing::info!(note_id, quiet_ms, "meeting guard: the meeting went quiet; stopping");
             withdraw_check_in(app);
             GEN.fetch_add(1, Ordering::SeqCst);
-            stop_and_summarise(app, Some(note_id));
+            stop_automatically(app, note_id);
             notice_on(app, surface, Notice::stopped_quiet(t.quiet, note_id));
         }
         QuietStep::Ask(kind) => {
@@ -1115,14 +1243,18 @@ fn quiet_tick(app: &AppHandle, gen: u64) {
 /// one that's gone does nothing): "keep" (Keep going / Keep recording, or
 /// its ✕) or "stop" (Stop now / Stop and summarise).
 pub fn check_in_answer(app: &AppHandle, id: u64, answer: &str) -> Result<(), String> {
-    let note_id = {
+    let (note_id, about) = {
         let guard = check_in_lock();
         match guard.as_ref() {
-            Some(p) if p.id == id => p.note_id,
+            Some(p) if p.id == id => (p.note_id, p.about.clone()),
             _ => return Ok(()), // answered already, on another surface
         }
     };
     tracing::info!(note_id, choice = answer, "meeting guard: check-in answered");
+    if let Some(about) = about {
+        withdraw_check_in_where(app, |p| p.id == id);
+        return answer_question(app, note_id, &about, answer);
+    }
     match answer {
         "keep" => {
             if let Some(w) = watch_lock().as_mut() {
@@ -1137,6 +1269,27 @@ pub fn check_in_answer(app: &AppHandle, id: u64, answer: &str) -> Result<(), Str
             Ok(())
         }
         other => Err(format!("Unknown answer: {other}")),
+    }
+}
+
+/// An answer to one of the meeting's other questions ([`About`]); "keep"
+/// (or ✕) leaves things as they are.
+fn answer_question(app: &AppHandle, note_id: u64, about: &About, answer: &str) -> Result<(), String> {
+    match (about, answer) {
+        (_, "keep") => Ok(()),
+        (About::Mic { id, name }, "use") => crate::meetings::meeting::use_mic(id, name),
+        (About::Asleep, "resume") => {
+            crate::meetings::commands::meeting_start(app.clone(), app.state::<crate::AppState>(), note_id).map(|_| ())
+        }
+        (About::Asleep, "summarise") => {
+            crate::meetings::meeting_end::start_summary(app, note_id);
+            Ok(())
+        }
+        (About::AutoStart { app: call_app }, "yes") => {
+            crate::calls::meeting_detect::set_auto_start(call_app, true);
+            Ok(())
+        }
+        (_, other) => Err(format!("Unknown answer: {other}")),
     }
 }
 
@@ -1450,9 +1603,9 @@ mod native {
              </actions><audio silent=\"true\"/></toast>",
             esc(&title),
             esc(&body),
-            esc(p.primary.label),
+            esc(&p.primary.label),
             p.primary.id,
-            esc(p.secondary.label),
+            esc(&p.secondary.label),
             p.secondary.id,
             note = p.note_id,
             id = p.id,
@@ -1472,8 +1625,8 @@ mod native {
                 icon: "timer",
                 title: p.reason.clone(),
                 body: "Yap will stop recording and write your action plan.".into(),
-                primary: Some(crate::bar::CardAction::new(arg(p.primary.id), p.primary.label)),
-                secondary: Some(crate::bar::CardAction::new(arg(p.secondary.id), p.secondary.label)),
+                primary: Some(crate::bar::CardAction::new(arg(p.primary.id), p.primary.label.clone())),
+                secondary: Some(crate::bar::CardAction::new(arg(p.secondary.id), p.secondary.label.clone())),
                 countdown: Some(crate::bar::Countdown {
                     done: Some("Ending notes…".into()),
                     headline: true,
@@ -1483,11 +1636,11 @@ mod native {
             },
             None => crate::bar::Card {
                 id: CHECKIN.into(),
-                icon: "timer",
+                icon: p.icon,
                 title: p.title.clone(),
                 body: p.body.clone(),
-                primary: Some(crate::bar::CardAction::new(arg(p.primary.id), p.primary.label)),
-                secondary: Some(crate::bar::CardAction::new(arg(p.secondary.id), p.secondary.label)),
+                primary: Some(crate::bar::CardAction::new(arg(p.primary.id), p.primary.label.clone())),
+                secondary: Some(crate::bar::CardAction::new(arg(p.secondary.id), p.secondary.label.clone())),
                 close_action: Some(arg("keep")),
                 ..Default::default()
             },
@@ -1929,7 +2082,7 @@ mod tests {
         let p = CheckIn::countdown(3, 7, START + 30 * SEC, START, 10 * MIN, Surface::Bar);
         assert_eq!(p.title, "Ending notes in 30 s…");
         assert_eq!(p.body, "Nobody has spoken for 10 minutes. Yap will stop recording and write your action plan.");
-        assert_eq!((p.primary.label, p.secondary.label), ("Keep going", "Stop now"));
+        assert_eq!((p.primary.label.as_ref(), p.secondary.label.as_ref()), ("Keep going", "Stop now"));
         let v = serde_json::to_value(&p).unwrap();
         assert_eq!(v["noteId"], 7);
         assert_eq!(v["until"], START + 30 * SEC);

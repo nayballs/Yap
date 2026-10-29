@@ -691,6 +691,10 @@ pub fn run() {
             #[cfg(debug_assertions)]
             calls::meeting_guard::e2e_meeting_checkins,
             #[cfg(debug_assertions)]
+            calls::call_audio::e2e_call_audio,
+            #[cfg(debug_assertions)]
+            meetings::sleep::e2e_sleep,
+            #[cfg(debug_assertions)]
             calendar::calendar_e2e_opened,
             #[cfg(debug_assertions)]
             shell::commands::e2e_opened_urls,
@@ -1239,6 +1243,10 @@ pub fn run() {
             // and keeping meeting windows out of screen shares.
             calls::meeting_guard::init(&handle);
             calls::capture::init(&handle);
+            // The call's own audio while it's recorded (its microphone,
+            // muted or not), and the PC going to sleep mid-meeting.
+            calls::call_audio::init(&handle);
+            meetings::sleep::init(&handle);
 
             // Other apps' sound a crash left silenced mid-dictation comes back.
             dictation::mute::recover();

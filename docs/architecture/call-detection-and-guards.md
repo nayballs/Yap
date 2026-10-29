@@ -105,6 +105,83 @@ Noticing a call and offering to take notes, the call apps' own icons, the guard 
   `LastUsedTimeStart`, nothing else. Lock rule: never touch windows/WinRT
   while holding its state lock (window getters wait on the main thread). See
   [`docs/meetings.md`](../meetings.md).
+  **Smarter about the call itself** (2026-10-29, Wispr Flow's Notetaker by
+  behaviour): **sure about the ending** — a recorded call 15 s off the mic
+  gets a second opinion before anything stops (`on_edges` → `still_on`, read
+  before the lock: `call_audio::still_on`, the app still playing sound or a
+  window still showing the meeting); still on → **"Stop taking notes?"**
+  (`PromptKind::Unsure`, "Teams let go of your microphone, but the call
+  still looks open", Stop and summarise / Keep recording) instead of the
+  ending, with "Stop and summarise automatically" too (`at_call_end`'s
+  `sure`, pure, unit-tested); while it's up, `tick` asks again every 2 s and
+  turns it into the usual ending (or the automatic stop) once the call is
+  gone. **Carried on after an automatic stop**: Yap's own stop of a call's
+  notes (the call ended with "Stop automatically", or the PC slept —
+  `on_wake`, from the wake) leaves `auto_stopped` (note, app, when); the
+  same app's call within **2 minutes** (`RESUME_MS`, `resumes`) records into
+  the same note (`OnStart::Resume` → `resume_into`: waits for the last chunk,
+  `meeting_start`, "Back on your Teams call · Yap carried on taking notes in
+  the same note"), no prompt; if it can't, the call is asked about as any.
+  `on_wake` also forgets the calls (the sleep reset the apps' microphones):
+  a call still on starts again from the next scans. **Another call while
+  one records** (`OnStart::Switch`, pure `on_start`): an asked-about app's
+  call while another app's recorded call's notes record → **"Switch to
+  Zoom?"** (`PromptKind::Switch`, Switch / Keep recording, fades after 30 s
+  as Keep recording; `switch_due`, shown by `tick`), unless the calendar's
+  switch card asks (`calendar::on_call_started` returns whether it did);
+  Switch → `switch_to`: `meeting_end::end` (the action plan as ever), waits
+  for the last chunk (≤ 60 s), then "Record notes" on the new call. A
+  recording started by hand is the person's: no switch. The snapshot's
+  prompt carries its `answers` (`[accept, decline]`) for the window.
+  **"Start notes automatically for Teams calls?"** once
+  (`meeting_detect/auto_offer.rs`): every "Record notes" counts a meeting for
+  its app (`<data>/call_apps.json`, `{recorded, offered}`); the end of a
+  call's recording the person started by a click and stopped by hand
+  (`on_recording_finished`, from `meeting_end`: not a pause, not Yap's own
+  stop, not "Started by mistake?"), the third or later of that app's, with
+  Yap asking about calls as pop-ups and that app not starting by itself
+  already → asked where the check-ins go (`meeting_guard::ask`, kind
+  `autostart`, Start automatically / No thanks), once ever per app (pure
+  `should_offer`, unit-tested); yes → `set_auto_start`: the app into
+  `config.meeting_auto_start_apps` (the countdown for its calls only, its
+  next call not taken for a rejoin; Settings → Meetings → Ask about calls
+  in → "Start notes automatically" turns it off). Debug-only
+  `meeting_detect_simulate`'s `recorded` sets an app's count. `call_for(note)`
+  / `CallInfo` hand `call_audio.rs` the call a recording is of;
+  `window_shows_call` (a browser's meeting tab in front, Zoom's "Zoom
+  Meeting" window: `CALL_WINDOWS`; Teams' windows all say "Microsoft
+  Teams", so its sound decides).
+- **`calls/call_audio.rs`** — **the call's own audio while it's recorded**
+  (2026-10-29): Windows' audio sessions per device (`IAudioSessionManager2`
+  on every active capture endpoint, `IAudioEndpointVolume::GetMute`, the
+  process's exe from `procs::exe_names`; Yap's own and system sounds left
+  out). A thread per recording (`yap-meeting-state`; every 5 s, 300 ms in a
+  test run), never under a state lock. **Which microphone the call uses**
+  (`call_mic`, pure: the one device with an active session of the call's
+  exes — its own, a helper "ms-teams_modulehost.exe", or the browser a
+  meeting tab is in; a software device (enumerator ROOT: Krisp, NVIDIA
+  Broadcast) or two at once: none) against the one "You" records from
+  (`meeting::mic_in_use`; its id looked up by name when it was opened as
+  Windows' default) → **"Teams is using Contoso H2 but Yap is using
+  Northwind Audio"** once per call and pair (`Said`), where the check-ins go
+  (kind `mic`), **Use Contoso H2** (`meeting::use_mic`: "You" moves to it for
+  this meeting, the gap silence, the order untouched; a device that won't
+  open leaves "You" where it was, "Couldn't switch microphones") / Not now.
+  **Muted in the call**, read only while "You" has heard nothing for 20 s:
+  the call's microphone muted in Windows, or the call window's mute button
+  through UI Automation (`speakers/call_ui.rs` `win::button_names`: one
+  cached FindAll of the buttons' names, nothing invoked; `mute_from_buttons`:
+  "Unmute (Ctrl+Shift+M)" in Teams, "Unmute my audio" in Zoom, "Turn on
+  microphone" in Meet; English, a window that isn't minimised, Meet's tab
+  in front) → `muted_in_call`, which keeps `meeting.rs`'s "Yap can't hear
+  your mic" quiet (asked again once unmuted). The sessions can't tell mute:
+  Teams, Zoom and Meet keep the mic open while you're muted. `still_on`:
+  the call app still plays (an active output session) or a window still
+  shows the call (`meeting_detect::window_shows_call`). Logs: whether and
+  counts, never device or window names above debug. Debug-only
+  `e2e_call_audio {mic, muted, stillOn}` stands in for Windows. Unit-tested
+  (the exes matched, the call's mic, a mismatch by id or name, once per
+  pair, the mute buttons, the question's words); e2e `call-smarts.spec.js`.
 - **`calls/app_icons.rs`** — the call apps' **own icons as installed on this PC**
   (`meeting_app_icons` → `{appId: data URL}`, off the main thread) for
   Settings' "Ask about calls in" list and the bar's call card
@@ -129,7 +206,18 @@ Noticing a call and offering to take notes, the call apps' own icons, the guard 
   installed apps: debug-only `YAP_E2E_APP_ICONS` names a folder of stand-in
   `<app>.png`s. An `#[ignore]`d unit test (`this_machine`, `YAP_ICONS_OUT`)
   runs the real thing read-only and writes the cache somewhere to look at.
-- **`calls/meeting_guard.rs`** — guard rails around a meeting recording (Phase 8,
+- **`calls/meeting_guard.rs`** — (since 2026-10-29 also **the meeting's other
+  questions**: `ask(Question)` puts one where the check-ins go —
+  `yap-meeting-checkin` with its `kind` and `icon`, a bar card, a Windows
+  notification — with two answers (`Answer`, a label that may name a
+  device) and what it's `About` (`Mic`, `Asleep`, `AutoStart`), answered by
+  `answer_question` ("keep", and the ✕, leaves things as they are), taken
+  down after its `fade_ms`; the quiet watch never takes them down, a new
+  recording does (but the auto-start offer), a stop takes the mic one; and
+  `stop_automatically`: Yap's own stops — the length limit, a quiet
+  meeting, a call that ended, a full disk — through
+  `meeting_end::end_automatically`, so call detection tells them from the
+  person's) guard rails around a meeting recording (Phase 8,
   Wispr Flow's Notetaker settings) + their notices. **Maximum recording
   length** (`config.meeting_max_minutes`: 60/120/180/240, 0 = no limit,
   default **120**, as Wispr): a watcher thread per recording (follows

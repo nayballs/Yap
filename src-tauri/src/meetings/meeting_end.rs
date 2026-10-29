@@ -49,6 +49,12 @@ const STEPS: u8 = 3;
 
 /// The next stop is a pause, not the end of the meeting.
 static PAUSED: AtomicBool = AtomicBool::new(false);
+/// The next stop is Yap's own (the length limit, the meeting going quiet,
+/// the call ending with "Stop and summarise automatically", the PC going to
+/// sleep), not the person's: call detection never offers auto-start after
+/// one, and may carry the meeting on when its call comes back
+/// (`meeting_detect::on_recording_finished`).
+static AUTOMATIC: AtomicBool = AtomicBool::new(false);
 /// The window the next stop came from (for where "Started by mistake?" shows).
 static ORIGIN: Mutex<Option<String>> = Mutex::new(None);
 /// The note whose recording the last `yap-meeting-state` started (0 = none).
@@ -107,6 +113,7 @@ fn on_state(app: &AppHandle, payload: &str) {
             return;
         }
         PAUSED.store(false, Ordering::SeqCst);
+        AUTOMATIC.store(false, Ordering::SeqCst);
         *ORIGIN.lock().unwrap_or_else(|p| p.into_inner()) = None;
         // Resuming makes an earlier summary's progress or error moot, and
         // answers "Started by mistake?".
@@ -120,9 +127,13 @@ fn on_state(app: &AppHandle, payload: &str) {
         return;
     }
     let paused = PAUSED.swap(false, Ordering::SeqCst);
+    let automatic = AUTOMATIC.swap(false, Ordering::SeqCst);
     let origin = ORIGIN.lock().unwrap_or_else(|p| p.into_inner()).take();
     let app = app.clone();
-    std::thread::spawn(move || finished(&app, note_id, paused, origin.as_deref()));
+    std::thread::spawn(move || {
+        let mistake = finished(&app, note_id, paused, origin.as_deref());
+        crate::calls::meeting_detect::on_recording_finished(&app, note_id, paused, automatic, mistake);
+    });
 }
 
 /// Whether a meeting with `words` of speech and `typed` notes was most likely
@@ -150,10 +161,11 @@ fn surface(app: &AppHandle, origin: Option<&str>) -> Option<&'static str> {
     order.into_iter().find(|label| on_screen(label))
 }
 
-/// A recording of `note_id` just finished (its last chunk is in).
-fn finished(app: &AppHandle, note_id: u64, paused: bool, origin: Option<&str>) {
+/// A recording of `note_id` just finished (its last chunk is in). Whether
+/// it asked "Started by mistake?".
+fn finished(app: &AppHandle, note_id: u64, paused: bool, origin: Option<&str>) -> bool {
     let Some(note) = crate::notes::get(note_id) else {
-        return; // deleted meanwhile
+        return false; // deleted meanwhile
     };
     // Where this recording stopped: the notepad's paused divider.
     match crate::notes::add_break(note_id) {
@@ -166,7 +178,7 @@ fn finished(app: &AppHandle, note_id: u64, paused: bool, origin: Option<&str>) {
     if paused {
         tracing::info!(note_id, "Meeting paused");
         crate::meetings::meeting_assist::maybe_title(app, note_id, true);
-        return;
+        return false;
     }
     drop(note);
     // The refined transcript (`meeting_refine.rs`, "Which comes first"):
@@ -175,7 +187,7 @@ fn finished(app: &AppHandle, note_id: u64, paused: bool, origin: Option<&str>) {
     let plan = crate::meetings::meeting_refine::plan(note_id);
     if let Some(p) = plan.as_ref().filter(|p| p.first) {
         if crate::meetings::meeting_refine::start(app, note_id, p, origin.map(str::to_string)) {
-            return;
+            return false;
         }
     }
     let mistake = end_steps(app, note_id, origin);
@@ -185,6 +197,7 @@ fn finished(app: &AppHandle, note_id: u64, paused: bool, origin: Option<&str>) {
         }
         None => crate::meetings::meeting_audio::release(app, note_id),
     }
+    mistake
 }
 
 /// The end of a meeting from its transcript as it stands: "Started by
@@ -223,7 +236,9 @@ pub fn end_steps(app: &AppHandle, note_id: u64, origin: Option<&str>) -> bool {
 /// its stop mark, "Started by mistake?" or the AI title and the action plan.
 pub fn recovered(app: &AppHandle, note_id: u64) {
     let app = app.clone();
-    std::thread::spawn(move || finished(&app, note_id, false, None));
+    std::thread::spawn(move || {
+        finished(&app, note_id, false, None);
+    });
 }
 
 /// "Started by mistake?" as a card on the Yap bar: Keep (or its ✕, or a
@@ -279,12 +294,25 @@ pub fn end(_app: &AppHandle, origin: Option<&str>) -> Result<(), String> {
     })
 }
 
+/// [`end`], as Yap's own stop rather than the person's (see
+/// [`AUTOMATIC`]): the length limit, a quiet meeting, a call that ended.
+pub fn end_automatically(app: &AppHandle) -> Result<(), String> {
+    AUTOMATIC.store(true, Ordering::SeqCst);
+    end(app, None).inspect_err(|_| AUTOMATIC.store(false, Ordering::SeqCst))
+}
+
 /// Pause the meeting: stop recording without writing the action plan
 /// (Resume carries on in the same note).
 pub fn pause() -> Result<(), String> {
     tracing::info!("Meeting pause asked for");
     PAUSED.store(true, Ordering::SeqCst);
     crate::meetings::meeting::stop().inspect_err(|_| PAUSED.store(false, Ordering::SeqCst))
+}
+
+/// [`pause`], as Yap's own (the PC going to sleep: `meetings/sleep.rs`).
+pub fn pause_automatically() -> Result<(), String> {
+    AUTOMATIC.store(true, Ordering::SeqCst);
+    pause().inspect_err(|_| AUTOMATIC.store(false, Ordering::SeqCst))
 }
 
 /// Errors that mean "set up an AI model first", not a failure.

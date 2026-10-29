@@ -1457,31 +1457,33 @@ pub fn claims_call(app_id: &str) -> bool {
 
 /// A call started (after call detection's lock is released). Recording an
 /// earlier meeting's notes while this call belongs to the next meeting:
-/// offer to switch notes (back-to-back meetings).
-pub fn on_call_started(app_id: &str) {
+/// offer to switch notes (back-to-back meetings). Whether it did (call
+/// detection's own "Switch to …?" then stays quiet).
+pub fn on_call_started(app_id: &str) -> bool {
     if lock_started().is_none() {
-        return;
+        return false;
     }
-    let Some(recording) = crate::meetings::meeting::recording_note() else { return };
+    let Some(recording) = crate::meetings::meeting::recording_note() else { return false };
     let recording_key = crate::notes::get(recording).and_then(|n| n.event).map(|e| e.key);
     let mut s = lock();
     let now = now_secs();
-    let Some(next) = model::event_at(&s.store.events, now, Some(app_id)).cloned() else { return };
+    let Some(next) = model::event_at(&s.store.events, now, Some(app_id)).cloned() else { return false };
     if recording_key.as_deref() == Some(next.key.as_str()) {
-        return; // the same meeting: a rejoin
+        return false; // the same meeting: a rejoin
     }
     if let Some(previous) = recording_key.as_deref().and_then(|k| s.store.events.iter().find(|e| e.key == k)) {
         if previous.start >= next.start {
-            return; // only ever forward, to the next meeting
+            return false; // only ever forward, to the next meeting
         }
     }
     if s.store.answered.contains_key(&model::answer_key(&next)) {
-        return;
+        return false;
     }
     tracing::info!(app = app_id, "calendar: a call during the next meeting; offering to switch notes");
     s.switch_to = Some(next.key);
     drop(s);
     wake();
+    true
 }
 
 // ---- the reminder card ------------------------------------------------------------------------
