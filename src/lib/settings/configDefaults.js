@@ -52,6 +52,9 @@ export const FIELD_DEFAULTS = {
   snipSaveDir: '',
   streamingPartials: true,
   historyEnabled: true,
+  // Keep history: 'always' | 'day' (24 hours) | 'never' ('' = never chosen:
+  // always); 'never' also turns historyEnabled off (dictation/history/keep.rs).
+  historyKeep: '',
   meetingDetection: true,
   meetingAutoStart: false,
   meetingDetectApps: {},
