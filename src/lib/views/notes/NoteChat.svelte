@@ -5,13 +5,20 @@
   // Questions to ask while it records, Follow-up email and Gaps and risks
   // after; "What did I miss?" stays the notepad's: it knows what you have
   // seen), ▶ Read aloud and the model under each answer; the bar's mic
-  // dictates the question, and at its right the action picker.
+  // dictates the question, and at its right the action picker. On a
+  // meeting note, "/" lists the Skills that run on one meeting
+  // (chat/skills.rs, meeting_assist.rs `meeting_skill`); their answers, and
+  // Make me sound smart's, cite the meeting's lines (a pill opens the line).
   import { invoke } from '@tauri-apps/api/core';
   import { renderMarkdown } from '../../core/markdown.js';
   import { nextModel, modelLine, whereItRuns } from '../../core/aiModel.js';
   import { messageItems } from '../../core/itemMenus.js';
   import { MEETING_HELPERS, meetingHelpers } from '../../core/notepadText.js';
   import { pastChatItems } from '../../core/noteChat.js';
+  import { asked as skillAsked, withoutCites } from '../../core/skills.js';
+  import { askReplaceSummary } from '../../core/noteEdits.js';
+  import { SkillPicker } from '../../stores/skills.svelte.js';
+  import SkillMenu from '../../components/SkillMenu.svelte';
   import { speech, readAloud } from '../../stores/speech.svelte.js';
   import { openContextMenu, menuKey } from '../../ui/contextMenu.svelte.js';
   import { toast } from '../../ui/toast.svelte.js';
@@ -20,9 +27,37 @@
   /** `notes`: the view's state; `onopensettings(section)`: ControlPanel's Settings. */
   let { notes, onopensettings = null } = $props();
 
+  // "/" on a meeting note: the Skills that run on one meeting.
+  const picker = new SkillPicker('meeting');
+  const isMeeting = $derived(notes.selected?.noteType === 'meeting');
+  $effect(() => picker.update(isMeeting ? notes.chatInput : ''));
+  function onAskKeydown(e) {
+    const picked = picker.key(e);
+    if (picked) {
+      if (picked.skill) pickSkill(picked.skill, picked.run);
+      return;
+    }
+    if (e.key === 'Enter' && !e.isComposing) askNote();
+  }
+  function pickSkill(skill, run) {
+    if (run) {
+      notes.chatInput = '';
+      runSkill(skill, '');
+    } else {
+      notes.chatInput = `/${skill.command} `;
+      askEl?.focus();
+    }
+  }
+
   async function askNote() {
     const q = notes.chatInput.trim();
     if (!q || !notes.selected || notes.asking) return;
+    // "/decisions …" on a meeting note: a Skill on that meeting.
+    const run = isMeeting ? picker.parse(q) : null;
+    if (run) {
+      notes.chatInput = '';
+      return runSkill(run.skill, run.words);
+    }
     notes.chatInput = '';
     notes.flushSave();
     // The kept thread's earlier turns go from Rust, sized to the model (its
@@ -57,30 +92,95 @@
       ? meetingHelpers(notes.selected, notes.recordingThisNote).filter((k) => k !== 'catchUp')
       : []
   );
-  async function askHelper(kind) {
+  function askHelper(kind) {
+    if (kind === 'longer') return makeLonger();
+    return runAssist(MEETING_HELPERS[kind].label, (id) => invoke('meeting_assist', { noteId: id, kind }));
+  }
+  /** A Skill on this meeting, with the person's words. */
+  function runSkill(skill, words) {
+    return runAssist(skillAsked(skill, words), (id) => invoke('meeting_skill', { noteId: id, command: skill.command, words: words || null }));
+  }
+  /** "Make notes longer": the summary rewritten in more detail, Undo in the toast (an edited one asked first). */
+  function makeLonger() {
+    if (!notes.selected || notes.asking) return;
+    if (notes.selected.summaryEditedMs) askReplaceSummary({ run: () => longer(true) });
+    else longer(false);
+  }
+  async function longer(replace) {
     if (!notes.selected || notes.asking) return;
     const id = notes.selected.id;
+    const label = MEETING_HELPERS.longer.label;
     notes.flushSave();
-    notes.chatThread = [...notes.chatThread, { role: 'user', text: MEETING_HELPERS[kind].label }];
+    notes.chatThread = [...notes.chatThread, { role: 'user', text: label }];
     notes.asking = true;
     try {
-      const [r, model] = await Promise.all([invoke('meeting_assist', { noteId: id, kind }), nextModel('notes')]);
+      const [r, model] = await Promise.all([invoke('meeting_longer', { noteId: id, replace, origin: 'longer' }), nextModel('notes')]);
       if (notes.selected?.id !== id) return;
-      // "Too little to go on" comes from Yap, not a model.
-      const reply = { role: 'assistant', text: r.answer, plain: !!r.plain, copy: true, model: r.tooLittle ? null : model, id: notes.turnId() };
+      const reply = { role: 'assistant', text: 'Your notes are longer now, with more detail from the meeting. They are on the Summary tab.', model, id: notes.turnId() };
       notes.chatThread = [...notes.chatThread, reply];
-      await notes.keepChat(id, [{ role: 'user', text: MEETING_HELPERS[kind].label }, reply]);
+      if (notes.selected.enhancedContent) notes.tab = 'enhanced';
+      toast({
+        title: 'Notes made longer',
+        description: 'Yap rewrote the summary in more detail from the meeting.',
+        action: {
+          label: 'Undo',
+          onClick: () =>
+            invoke('note_summary_put_back', { id, before: r.previous, origin: 'longer' }).catch((e) =>
+              toast({ title: "Couldn't put the summary back", description: String(e), variant: 'destructive' })
+            ),
+        },
+      });
+      await notes.keepChat(id, [{ role: 'user', text: label }, reply]);
     } catch (e) {
       if (notes.selected?.id !== id) return;
       notes.chatThread = notes.chatThread.slice(0, -1);
-      const msg = String(e);
-      const setup = /No AI model configured|API key/i.test(msg) && onopensettings;
-      toast({
-        title: "Couldn't answer",
-        description: msg,
-        variant: 'destructive',
-        ...(setup ? { action: { label: 'Open Language Models', onClick: () => onopensettings('cleanup') } } : {}),
-      });
+      failed(e);
+    } finally {
+      notes.asking = false;
+    }
+  }
+  /** A cited line of the meeting (a pill in an answer), opened here. */
+  function clickAnswer(e, turn) {
+    const a = e.target instanceof Element ? e.target.closest('a.md-passage') : null;
+    if (!a) return;
+    e.preventDefault();
+    const s = (turn.sources || []).find((x) => x.n === Number(a.textContent));
+    if (!s || s.note !== notes.selected?.id) return;
+    if (s.field === 'summary') notes.tab = 'enhanced';
+    else if (s.field === 'content') notes.tab = 'raw';
+    else {
+      const lines = notes.selected.transcript || [];
+      const at = lines[s.line]?.ts === s.ts || !s.ts ? s.line : lines.findIndex((x) => x.ts === s.ts);
+      if (at >= 0) notes.showLine(at);
+    }
+  }
+  function failed(e) {
+    const msg = String(e);
+    const setup = /No AI model configured|API key/i.test(msg) && onopensettings;
+    toast({
+      title: "Couldn't answer",
+      description: msg,
+      variant: 'destructive',
+      ...(setup ? { action: { label: 'Open Language Models', onClick: () => onopensettings('cleanup') } } : {}),
+    });
+  }
+  async function runAssist(question, call) {
+    if (!notes.selected || notes.asking) return;
+    const id = notes.selected.id;
+    notes.flushSave();
+    notes.chatThread = [...notes.chatThread, { role: 'user', text: question }];
+    notes.asking = true;
+    try {
+      const [r, model] = await Promise.all([call(id), nextModel('notes')]);
+      if (notes.selected?.id !== id) return;
+      // "Too little to go on" comes from Yap, not a model.
+      const reply = { role: 'assistant', text: r.answer, plain: !!r.plain, copy: true, model: r.tooLittle ? null : model, id: notes.turnId(), sources: r.sources || [] };
+      notes.chatThread = [...notes.chatThread, reply];
+      await notes.keepChat(id, [{ role: 'user', text: question }, reply]);
+    } catch (e) {
+      if (notes.selected?.id !== id) return;
+      notes.chatThread = notes.chatThread.slice(0, -1);
+      failed(e);
     } finally {
       notes.asking = false;
     }
@@ -97,7 +197,8 @@
 
   async function copyTurn(turn, i) {
     try {
-      await navigator.clipboard.writeText(turn.text);
+      // An answer citing the meeting copies without its "[2]"s.
+      await navigator.clipboard.writeText(turn.sources?.length ? withoutCites(turn.text) : turn.text);
       copiedTurn = i;
       setTimeout(() => copiedTurn === i && (copiedTurn = -1), 1200);
     } catch {
@@ -154,8 +255,10 @@
           <!-- An email: shown exactly as it copies. -->
           <div class="cbody plain">{turn.text}</div>
         {:else if turn.role === 'assistant'}
-          <!-- eslint-disable-next-line svelte/no-at-html-tags — renderMarkdown sanitises its output -->
-          <div class="cbody">{@html renderMarkdown(turn.text)}</div>
+          <!-- renderMarkdown sanitises its output; a cited line's "[2]" is a
+               pill that opens it (Make me sound smart, a Skill). -->
+          <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
+          <div class="cbody" onclick={(e) => clickAnswer(e, turn)}>{@html renderMarkdown(turn.text, turn.sources?.length ? { sources: turn.sources } : {})}</div>
         {:else}
           <p class="cbody">{turn.text}</p>
         {/if}
@@ -213,13 +316,21 @@
   >
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="2" width="6" height="12" rx="3" /><path d="M5 10v1a7 7 0 0 0 14 0v-1" /><path d="M12 18v4" /></svg>
   </button>
+  {#if isMeeting}
+    <!-- "/": the Skills that run on one meeting. -->
+    <SkillMenu {picker} onpick={pickSkill} />
+  {/if}
   <input
     class="askinput"
     bind:this={askEl}
     bind:value={notes.chatInput}
     placeholder="Ask anything…"
+    title={isMeeting ? 'Type / for Skills' : undefined}
     aria-busy={notes.asking}
-    onkeydown={(e) => e.key === 'Enter' && !e.isComposing && askNote()}
+    aria-autocomplete={isMeeting ? 'list' : undefined}
+    aria-controls={picker.open ? 'skill-list' : undefined}
+    aria-activedescendant={picker.open ? `skill-opt-${picker.active}` : undefined}
+    onkeydown={onAskKeydown}
   />
   <!-- Not `disabled` while asking: that would throw the caret out of
        the box (askNote ignores Enter until the answer is in). -->
@@ -397,7 +508,35 @@
   }
 
   /* the bottom "Ask anything…" bar */
+  /* A cited line's pill in an answer (opens the line). */
+  .cbody :global(.md-cites) {
+    display: inline-flex;
+    gap: 2px;
+    margin-left: 2px;
+    vertical-align: 1px;
+  }
+  .cbody :global(a.md-cite) {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 15px;
+    height: 15px;
+    padding: 0 4px;
+    box-sizing: border-box;
+    border: 1px solid var(--yap-border-subtle);
+    border-radius: var(--yap-r-full);
+    background: var(--yap-s1);
+    color: var(--yap-muted);
+    font-size: 9.5px;
+    font-weight: 650;
+    line-height: 1;
+    text-decoration: none;
+  }
+  .cbody :global(a.md-cite:hover) {
+    color: var(--yap-primary);
+  }
   .askbar {
+    position: relative;
     flex: 0 0 auto;
     display: flex;
     align-items: center;

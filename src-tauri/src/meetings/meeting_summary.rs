@@ -47,9 +47,11 @@
 //! Here: the budgets, running the digests and preparing the final call.
 //! Its parts: `digest` (one digest: which stretch, the prompt, the parse,
 //! the checks), `action_plan` (the final call's input and the checks on the
-//! plan) and `helpers` (the notepad's helpers' inputs).
+//! plan), `helpers` (the notepad's helpers' inputs) and `chips` (the newer
+//! chips' and a Skill's: cited passages of the meeting, longer notes).
 
 mod action_plan;
+pub mod chips;
 mod digest;
 mod helpers;
 pub mod language;

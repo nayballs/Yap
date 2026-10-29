@@ -1431,6 +1431,22 @@ pub fn plain_text(b: &Brief) -> String {
     out
 }
 
+/// The brief as context for another prompt ("Make me sound smart"): as
+/// [`plain_text`], without its citations — that prompt numbers its own
+/// passages, and a brief's "[2]" would read as one of them.
+pub fn plain(b: &Brief) -> String {
+    let mut out = String::new();
+    for p in &b.parts {
+        out.push_str(&format!("{}\n", p.title));
+        for l in &p.lines {
+            let who = l.who.as_deref().map(|w| format!("{w}: ")).unwrap_or_default();
+            let due = l.due.as_deref().map(|d| format!(" (due: {d})")).unwrap_or_default();
+            out.push_str(&format!("- {who}{}{due}\n", l.text));
+        }
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

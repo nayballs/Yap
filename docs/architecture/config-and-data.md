@@ -414,6 +414,13 @@
   through `saving.rs`). A file of its own, not new fields in notes.json, so an
   older Yap sharing the data folder (it drops notes.json fields it doesn't
   know when it saves) never loses them. A note's go with it.
+- Skills: `%APPDATA%/yap/skills.json` (2026-10-29) — the person's own Skills
+  (`{skills: [{id, name, command, description, instructions, runsOn,
+  basedOn, createdMs, updatedMs}]}`, ≤ 50; Yap's own are in code, never
+  stored) (`chat/skills.rs`, through `saving.rs` as "your Skills"; a file
+  that doesn't read is set aside). A file of its own rather than notes.json's
+  actions: an older Yap never opens it (it has no Skills), so nothing it
+  saves can drop or turn a Skill into an action.
 - Chat screenshots: `%APPDATA%/yap/chat-images/` — `img_<16 hex>.png` for each
   screenshot a question carries (Snip to Chat, `snip/images.rs`); `chats.json`
   keeps only its id, size, bytes and source. Deleted with its conversation, after
@@ -490,7 +497,12 @@
 - Hints: `%APPDATA%/yap/hints.json` — how often each push-to-talk coaching hint
   showed (`tap`, `longHold`, `chord` — "Hold only {key}" —, `longDictation`
   — "Try meeting notes", once ever), when the last did, and whether
-  double-tap has been used (`dictation/coaching.rs`).
+  double-tap has been used (`dictation/coaching.rs`); since 2026-10-29 the
+  notepad's first-meeting coach marks too (`notepadNotes`,
+  `notepadCatchUp`: `meetings/coach_marks.rs`). An older Yap reads the file
+  and drops those two fields when it next saves a hint, which is harmless:
+  the marks only ever show in a first meeting, and once a meeting has talk
+  in it no later one is a first.
 - Quieted apps: `%APPDATA%/yap/quieted_apps.json` — only while a dictation
   has other apps silenced (each session's id, exe and level before), so a
   Yap that crashed mid-dictation brings them back at its next start
@@ -561,7 +573,7 @@
   taken under it, written after, `saving::Ordered`: one write at a time,
   never an older snapshot over a newer one); meeting audio's own `.json`
   files go through a `Saver` of their own (`Saver::write_each`: a store in
-  several files, unsaved while any failed); `tasks.json` has one; the
+  several files, unsaved while any failed); `tasks.json` and `skills.json` have one; the
   summary an action writes (`note_enhance`, the action plan at a meeting's
   end) and `calendar_add_link` / `calendar_disconnect` check their save and
   return the failure (the page treats the change as made, with Try again;

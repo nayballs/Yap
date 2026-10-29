@@ -253,6 +253,28 @@ and result), the numbers in `summary.json` (`models[].transforms`).
 `eval::transforms`' unit tests check the file reads and every transform in
 it is one Yap has (≥ 3 cases per built-in), and the judge.
 
+### Meeting chips and Skills (`--chips`)
+
+```bash
+yap.exe eval --chips --model local:<4b.gguf> --ngl 999
+```
+
+Each case in `evals/chips/cases.json` is a fictional meeting (title,
+attendees, typed notes, Yap's summary, `[side, words]` lines) and what's
+asked of it: `smart` (the notepad's Make me sound smart), `skill` (a
+built-in Skill's command and the person's `words` with it) or `longer`
+(Make notes longer). Each goes through the app's own inputs and checks
+(`meeting_summary/chips.rs`: the numbered passages, `checked`,
+`clean_longer`, the action plan's checks) on the meeting's reply cap and
+temperature, and is judged as the app shows it: `contains_any` (it's
+about what was said), `not_contains` (a made-up place, sum or claim),
+`cites` (at least one real passage, and not marked as tied to none),
+`max_bullets`; longer notes must be a fifth longer and keep every task.
+Made-up citation numbers and tasks the model dropped are counted, though
+Yap fixes both. `chips.md` in the run folder, `summary.json`
+(`models[].chips`). `eval::chips`' unit tests check the file reads, each
+kind has ≥ 2 cases and every request fits an 8k model with its reply.
+
 ### Screenshot questions (`--vision`)
 
 ```bash
