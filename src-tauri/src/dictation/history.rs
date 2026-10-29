@@ -5,9 +5,10 @@
 //! foreground app. It's **local-only** — nothing leaves the machine — and can be
 //! disabled (`history_enabled`) or cleared from Settings.
 //!
-//! From the same table we derive a small stats dashboard (words dictated, time
-//! saved vs typing, a daily streak, and a 30-day activity series). Days use the
-//! same UTC day-number trick as `usage.rs`, so no date crate is needed.
+//! The stats (Home, Insights) are counted apart, in `stats.rs`, so they
+//! outlast the history; how long the history is kept is `history/keep.rs`.
+
+pub mod keep;
 
 use std::path::PathBuf;
 use std::sync::Mutex;
@@ -18,12 +19,8 @@ use serde_json::{json, Value};
 
 /// Cap the on-disk history so the file can't grow without bound.
 const MAX_ENTRIES: usize = 2_000;
-/// Average typing speed (words/min) used for the "time saved" estimate.
-const TYPING_WPM: f64 = 40.0;
-/// Average speaking speed (words/min) used for the "time saved" estimate.
-const SPEAKING_WPM: f64 = 150.0;
-/// How many days of activity the dashboard chart shows.
-const ACTIVITY_DAYS: u64 = 30;
+/// Speaking speed (words a minute) assumed for a dictation not timed.
+const SPEAKING_WPM: f64 = crate::dictation::stats::SPEAKING_WPM;
 
 /// One recorded dictation.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -59,6 +56,11 @@ pub struct HistoryEntry {
     /// What went wrong, in a few words, for those.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
+    /// How long it was spoken for: its audio's length in seconds (since
+    /// 2026-10-29; words a minute, `stats.rs`). An older Yap drops it when
+    /// it saves history: the stats have it already.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub secs: Option<f32>,
 }
 
 /// A dictation that never got transcribed.
@@ -72,7 +74,7 @@ pub const CANCELLED: &str = "cancelled";
 
 impl HistoryEntry {
     /// Never transcribed: failed, or cancelled.
-    fn failed(&self) -> bool {
+    pub fn failed(&self) -> bool {
         matches!(self.status.as_deref(), Some(FAILED | CANCELLED))
     }
 }
@@ -85,10 +87,6 @@ fn now_secs() -> u64 {
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_secs())
         .unwrap_or(0)
-}
-
-fn day_of(ts: u64) -> u64 {
-    ts / 86_400
 }
 
 fn history_path() -> PathBuf {
@@ -163,7 +161,7 @@ pub fn record_with(
     status: Option<&str>,
     error: Option<&str>,
 ) {
-    record_dictation(Dictation { raw, text, said: None, model, app, audio, status, error });
+    record_dictation(Dictation { raw, text, said: None, model, app, audio, status, error, secs: None });
 }
 
 /// One dictation for [`record_dictation`].
@@ -177,6 +175,8 @@ pub struct Dictation<'a> {
     pub audio: Option<&'a str>,
     pub status: Option<&'a str>,
     pub error: Option<&'a str>,
+    /// Its audio's length ([`HistoryEntry::secs`]).
+    pub secs: Option<f32>,
 }
 
 /// Record a dictation; returns its timestamp (its id beside its text), or
@@ -196,6 +196,7 @@ pub fn record_dictation(d: Dictation<'_>) -> Option<u64> {
         audio: d.audio.map(str::to_string),
         status: d.status.map(str::to_string),
         error: d.error.map(str::to_string),
+        secs: d.secs.filter(|s| s.is_finite() && *s > 0.0).map(|s| (s * 10.0).round() / 10.0),
     });
     Some(ts)
 }
@@ -221,6 +222,7 @@ pub fn record_failed(ts: Option<u64>, model: &str, app: &str, audio: &str, error
         audio: Some(audio.to_string()),
         status: Some(FAILED.to_string()),
         error: Some(error.to_string()),
+        secs: None,
     });
 }
 
@@ -237,6 +239,7 @@ pub fn record_cancelled(model: &str, app: &str, audio: &str) {
         audio: Some(audio.to_string()),
         status: Some(CANCELLED.to_string()),
         error: Some("You cancelled it".to_string()),
+        secs: None,
     });
 }
 
@@ -397,10 +400,11 @@ pub fn latest_dictation_raw() -> Option<String> {
         .map(|e| if e.raw.trim().is_empty() { e.text.clone() } else { e.raw.clone() })
 }
 
-/// How long each of the latest `limit` dictations was spoken for (seconds),
-/// estimated from its words at [`SPEAKING_WPM`], newest first — uploads and
-/// dictations that never transcribed aside (`stt_speed.rs`: how this person's
-/// dictations weigh the speed check's lengths).
+/// How long each of the latest `limit` dictations was spoken for (seconds):
+/// its audio's length, or (from before Yap kept it) estimated from its words
+/// at [`SPEAKING_WPM`], newest first — uploads and dictations that never
+/// transcribed aside (`stt_speed.rs`: how this person's dictations weigh the
+/// speed check's lengths).
 pub fn recent_dictation_secs(limit: usize) -> Vec<f32> {
     let mut guard = match STATE.lock() {
         Ok(g) => g,
@@ -411,8 +415,12 @@ pub fn recent_dictation_secs(limit: usize) -> Vec<f32> {
         .iter()
         .rev()
         .filter(|e| is_dictation_app(&e.app) && !e.failed())
-        .map(|e| if e.raw.trim().is_empty() { &e.text } else { &e.raw })
-        .map(|t| t.split_whitespace().count() as f32 * 60.0 / SPEAKING_WPM as f32)
+        .map(|e| {
+            e.secs.unwrap_or_else(|| {
+                let t = if e.raw.trim().is_empty() { &e.text } else { &e.raw };
+                t.split_whitespace().count() as f32 * 60.0 / SPEAKING_WPM as f32
+            })
+        })
         .filter(|secs| *secs > 0.0)
         .take(limit)
         .collect()
@@ -505,70 +513,43 @@ pub fn clear() {
     crate::dictation::recent_audio::clear();
 }
 
-/// Derived dashboard stats (camelCase JSON for the Settings panel).
-pub fn stats() -> Value {
-    let mut guard = match STATE.lock() {
-        Ok(g) => g,
-        Err(poisoned) => poisoned.into_inner(),
-    };
-    let all = guard.get_or_insert_with(load_from_disk);
-    // A dictation that never got transcribed isn't one in the stats.
-    let entries: Vec<&HistoryEntry> = all.iter().filter(|e| !e.failed()).collect();
+/// The dictations newer than `since` (unix seconds) the stats count
+/// (`stats.rs`): transcribed, with text, not an Upload's. Oldest first.
+pub fn counted_since(since: u64) -> Vec<HistoryEntry> {
+    let mut guard = STATE.lock().unwrap_or_else(|p| p.into_inner());
+    let entries = guard.get_or_insert_with(load_from_disk);
+    entries
+        .iter()
+        .filter(|e| e.ts > since && !e.failed() && is_dictation_app(&e.app) && !e.text.trim().is_empty())
+        .cloned()
+        .collect()
+}
 
-    let today = day_of(now_secs());
-    let total = entries.len() as u64;
-    let mut total_words: u64 = 0;
-    let mut today_words: u64 = 0;
-    let mut today_count: u64 = 0;
+/// How many dictations history keeps (transcribed ones), and how many of
+/// them are from before `cutoff` (unix seconds): Settings → Privacy & data.
+pub fn counts(cutoff: u64) -> (usize, usize) {
+    let mut guard = STATE.lock().unwrap_or_else(|p| p.into_inner());
+    let entries = guard.get_or_insert_with(load_from_disk);
+    entries.iter().filter(|e| !e.failed()).fold((0, 0), |(all, older), e| (all + 1, older + usize::from(e.ts < cutoff)))
+}
 
-    // Words per day-number, for the streak + activity series.
-    use std::collections::HashMap;
-    let mut by_day: HashMap<u64, u64> = HashMap::new();
-
-    for e in entries.iter() {
-        let w = word_count(&e.text) as u64;
-        total_words += w;
-        let d = day_of(e.ts);
-        *by_day.entry(d).or_insert(0) += w;
-        if d == today {
-            today_words += w;
-            today_count += 1;
+/// Every entry from before `cutoff` (unix seconds) deleted, with its audio
+/// (kept or not): "Keep history: 24 hours" (`keep.rs`). Returns how many.
+pub fn forget_before(cutoff: u64) -> usize {
+    let gone: Vec<HistoryEntry> = {
+        let mut guard = STATE.lock().unwrap_or_else(|p| p.into_inner());
+        let entries = guard.get_or_insert_with(load_from_disk);
+        let (old, kept): (Vec<HistoryEntry>, Vec<HistoryEntry>) = std::mem::take(entries).into_iter().partition(|e| e.ts < cutoff);
+        *entries = kept;
+        if !old.is_empty() {
+            save_to_disk(entries);
         }
-    }
-
-    // Streak: consecutive days with activity, counting back from today (or
-    // yesterday, so the streak survives a day you haven't dictated *yet*).
-    let mut streak: u64 = 0;
-    let mut cursor = if by_day.contains_key(&today) {
-        today
-    } else {
-        today.saturating_sub(1)
+        old
     };
-    while by_day.contains_key(&cursor) {
-        streak += 1;
-        if cursor == 0 {
-            break;
-        }
-        cursor -= 1;
+    for id in gone.iter().filter_map(|e| e.audio.as_deref()) {
+        crate::dictation::recent_audio::discard(id);
     }
-
-    // Activity series: the last ACTIVITY_DAYS days, oldest→newest.
-    let start = today.saturating_sub(ACTIVITY_DAYS - 1);
-    let activity: Vec<Value> = (start..=today)
-        .map(|d| json!({ "day": d, "words": by_day.get(&d).copied().unwrap_or(0) }))
-        .collect();
-
-    let time_saved_minutes =
-        (total_words as f64) * (1.0 / TYPING_WPM - 1.0 / SPEAKING_WPM);
-
-    json!({
-        "totalTranscriptions": total,
-        "totalWords": total_words,
-        "timeSavedMinutes": time_saved_minutes.max(0.0),
-        "today": { "transcriptions": today_count, "words": today_words },
-        "streakDays": streak,
-        "activity": activity,
-    })
+    gone.len()
 }
 
 #[cfg(test)]
@@ -579,13 +560,6 @@ mod tests {
     fn word_count_counts_whitespace_separated() {
         assert_eq!(word_count("hello there  friend"), 3);
         assert_eq!(word_count("   "), 0);
-    }
-
-    #[test]
-    fn day_of_buckets_by_utc_day() {
-        assert_eq!(day_of(0), 0);
-        assert_eq!(day_of(86_399), 0);
-        assert_eq!(day_of(86_400), 1);
     }
 
     /// (In unit tests the history lives in memory only.)
@@ -641,10 +615,13 @@ mod tests {
             audio: None,
             status: None,
             error: None,
+            secs: Some(2.04),
         })
         .expect("recorded");
         let e = find(ts, "Send it to Sam.").expect("found by its time and text");
         assert_eq!(e.said.as_deref(), Some("um send it to sam"));
+        // How long it was said for, to a tenth of a second.
+        assert_eq!(e.secs, Some(2.0));
         // Listed for Home.
         let listed = list(50);
         let item = listed.as_array().unwrap().iter().find(|i| i["text"] == "Send it to Sam.").unwrap();
@@ -653,6 +630,6 @@ mod tests {
         assert_eq!(said_beside(Some("Same. "), "Same."), None);
         assert_eq!(said_beside(Some("  "), "Same."), None);
         // Nothing to record.
-        assert!(record_dictation(Dictation { raw: "", text: " ", said: None, model: "", app: "", audio: None, status: None, error: None }).is_none());
+        assert!(record_dictation(Dictation { raw: "", text: " ", said: None, model: "", app: "", audio: None, status: None, error: None, secs: None }).is_none());
     }
 }

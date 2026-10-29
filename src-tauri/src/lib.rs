@@ -270,6 +270,10 @@ pub fn run() {
             dictation::commands::delete_history_entry,
             dictation::commands::get_stats,
             dictation::commands::home_snapshot,
+            dictation::stats::welcome_back_dismiss,
+            dictation::stats::share::insights_card_copy,
+            dictation::stats::share::insights_card_save,
+            dictation::history::keep::history_counts,
             pasting::text_injector::paste_last_transcript,
             pasting::as_said::as_said_swap,
             pasting::as_said::as_said_paste_entry,
@@ -628,6 +632,8 @@ pub fn run() {
             #[cfg(debug_assertions)]
             dictation::coaching::e2e_coaching_reset,
             #[cfg(debug_assertions)]
+            dictation::stats::e2e_stats_set,
+            #[cfg(debug_assertions)]
             ai::local_llm::e2e_local_llm_serving,
             #[cfg(debug_assertions)]
             ai::local_llm::e2e_local_llm_restarts,
@@ -812,6 +818,9 @@ pub fn run() {
             // Windows' microphones, read and watched (mics.rs): which one
             // dictation and meetings use, and a new one plugged in.
             dictation::mics::start(&handle);
+            // The stats (Home, Insights) loaded, history they haven't
+            // counted counted, before any dictation (stats.rs).
+            dictation::stats::init();
             // Start the dictation pipeline (audio capture + STT engine). It
             // runs without a microphone too (see `Pipeline::start`).
             let pipeline = dictation::pipeline::Pipeline::start(handle.clone(), cfg.clone());
@@ -824,6 +833,9 @@ pub fn run() {
             // Recent dictations' audio past its time goes (recent_audio.rs),
             // and one Yap stopped transcribing (a crash) is listed as failed.
             dictation::recent_audio::init(&handle);
+            // "Keep history: 24 hours": older dictations go, now and hourly
+            // (history/keep.rs).
+            dictation::history::keep::init(&handle);
             // Meeting audio past its days goes, and what a crash left of a
             // meeting is offered to transcribe (meeting_audio.rs).
             meetings::meeting_audio::init(&handle);

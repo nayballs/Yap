@@ -500,6 +500,9 @@ struct Shared {
     /// The transcribing dictation's audio, kept a day to run it again
     /// (`recent_audio.rs`): taken by its history entry, else dropped.
     audio_id: Mutex<Option<String>>,
+    /// The transcribing dictation's audio length in seconds: its speaking
+    /// time, for words a minute (`stats.rs`); taken with its history entry.
+    audio_secs: Mutex<Option<f32>>,
     /// The dictation ended because its microphone was disconnected
     /// (`unplugged.rs`): its paste goes to its own window or the clipboard,
     /// never another, and the person is told once, by what became of it.
@@ -719,6 +722,7 @@ impl Pipeline {
             kept_seq: AtomicU64::new(0),
             undoing: AtomicBool::new(false),
             audio_id: Mutex::new(None),
+            audio_secs: Mutex::new(None),
             unplugged: Mutex::new(None),
             skip_cleanup: tokio::sync::Notify::new(),
             capped: AtomicBool::new(false),
