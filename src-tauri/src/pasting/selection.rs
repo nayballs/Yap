@@ -341,11 +341,16 @@ enum Reading {
 struct Session {
     id: u64,
     reading: Reading,
+    /// The text around the cursor is read for this dictation (smart
+    /// spacing on, not edit mode or a terminal): read afresh where the
+    /// person moves to ([`follow_focus`]).
+    read_wanted: bool,
 }
 
 static SESSION: Mutex<Session> = Mutex::new(Session {
     id: 0,
     reading: Reading::Off,
+    read_wanted: false,
 });
 static NEXT_SESSION: AtomicU64 = AtomicU64::new(1);
 
@@ -366,6 +371,7 @@ pub fn begin_dictation(target_hwnd: Option<isize>, read: bool) {
         let mut s = session();
         s.id = id;
         s.reading = if hwnd.is_some() { Reading::Pending } else { Reading::Off };
+        s.read_wanted = hwnd.is_some();
     }
     let Some(hwnd) = hwnd else {
         return;
@@ -676,6 +682,184 @@ pub fn focus_editable(target_hwnd: Option<isize>) -> Editable {
         let _ = pid;
         Editable::Unknown
     }
+}
+
+// ---- The text box the dictation started in ----
+
+/// Where the focus is as a dictation is pasted, against the element it
+/// started on (the keeper's look, [`keep_focus`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FocusNow {
+    /// The same element.
+    Same,
+    /// Another element in the same app that takes text.
+    OtherBox,
+    /// Something in the same app that never takes text — a toolbar
+    /// button, a list, a page with no box focused ([`editable`]'s plain no).
+    NoBox,
+    /// Can't tell (UI Automation can't see it, a timeout).
+    Unknown,
+    /// Another app.
+    Elsewhere,
+}
+
+/// What's done about the focus before the paste.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Refocus {
+    /// Nothing: it's still there, it's in another app (the window's own
+    /// rules apply), or it can't be told.
+    Stay,
+    /// The person moved to another text box: the paste goes there.
+    Follow,
+    /// It wandered off to something that takes no text: put back on the
+    /// text box the dictation started in.
+    PutBack,
+    /// It should have been put back, but the box was gone, disabled or
+    /// off screen, or wouldn't take the focus.
+    CouldNot,
+}
+
+impl Refocus {
+    pub fn name(self) -> &'static str {
+        match self {
+            Refocus::Stay => "stay",
+            Refocus::Follow => "follow",
+            Refocus::PutBack => "putBack",
+            Refocus::CouldNot => "couldNot",
+        }
+    }
+}
+
+/// What to do about where the focus is now (`now`), for a dictation that
+/// started in a text box or not (`started_in_text`). Another text box →
+/// follow it (the person clicked there on purpose; its text is read
+/// afresh); something that takes no text, after starting in a box → put
+/// it back; anything else → leave it. Pure.
+pub fn refocus(started_in_text: bool, now: FocusNow) -> Refocus {
+    match now {
+        FocusNow::OtherBox => Refocus::Follow,
+        FocusNow::NoBox if started_in_text => Refocus::PutBack,
+        _ => Refocus::Stay,
+    }
+}
+
+/// How long a dictation's keeper waits for its paste (a dictation stops at
+/// 15 minutes, then it's transcribed).
+#[cfg_attr(not(windows), allow(dead_code))]
+const KEEP_FOR: std::time::Duration = std::time::Duration::from_secs(20 * 60);
+/// How long the paste waits for the keeper's answer.
+const ASK_WITHIN: std::time::Duration = std::time::Duration::from_millis(900);
+
+/// What the paste asks the keeper.
+#[cfg_attr(not(windows), allow(dead_code))]
+pub(crate) enum Ask {
+    /// At the dictation's delivery: did the person move to another text
+    /// box? (Then that's the dictation's box now.)
+    Follow(std::sync::mpsc::Sender<Refocus>),
+    /// Just before the paste keys: put the focus back if it wandered off.
+    Settle(std::sync::mpsc::Sender<Refocus>),
+}
+
+/// The thread holding the element a dictation started on (COM: it lives
+/// and dies there).
+struct Keeper {
+    target: isize,
+    since: std::time::Instant,
+    asks: std::sync::mpsc::Sender<Ask>,
+}
+
+static KEEPER: Mutex<Option<Keeper>> = Mutex::new(None);
+
+fn keeper() -> std::sync::MutexGuard<'static, Option<Keeper>> {
+    KEEPER.lock().unwrap_or_else(|p| p.into_inner())
+}
+
+/// A dictation that's pasted started recording into `target_hwnd`: the
+/// element with the focus there is kept (on a thread of its own, held as
+/// UI Automation's element, cheap: one look now), so the paste can put
+/// the focus back on it ([`restore_focus`]) or follow the person to
+/// another box ([`follow_focus`]). The previous dictation's goes. Never
+/// in a test run; robot mode only a window the test opened.
+pub fn keep_focus(target_hwnd: Option<isize>) {
+    let mut kept = keeper();
+    *kept = None;
+    let Some(hwnd) = target_hwnd.filter(|&h| crate::shell::realtest::permits(Some(h))) else {
+        return;
+    };
+    #[cfg(windows)]
+    {
+        let Some(pid) = crate::pasting::text_injector::window_process(hwnd) else { return };
+        let (asks, answers) = std::sync::mpsc::channel();
+        let spawned = std::thread::Builder::new()
+            .name("focus-keeper".into())
+            .spawn(move || uia::keep(pid, answers));
+        if spawned.is_ok() {
+            *kept = Some(Keeper { target: hwnd, since: std::time::Instant::now(), asks });
+        }
+    }
+    #[cfg(not(windows))]
+    let _ = hwnd;
+}
+
+/// Ask the keeper `ask` and wait (at most [`ASK_WITHIN`]) for its answer.
+fn ask_keeper(asks: &std::sync::mpsc::Sender<Ask>, ask: impl FnOnce(std::sync::mpsc::Sender<Refocus>) -> Ask) -> Option<Refocus> {
+    let (tx, rx) = std::sync::mpsc::channel();
+    asks.send(ask(tx)).ok()?;
+    rx.recv_timeout(ASK_WITHIN).ok()
+}
+
+/// At a dictation's delivery, before AI cleanup and the fit: the person
+/// moved to another text box in the dictation's window while talking (or
+/// while it was transcribed) — the paste goes there, and the text around
+/// its cursor is read afresh, for smart spacing and cleanup's context (when
+/// it's read at all). A look at the focus, nothing changed in the app.
+pub fn follow_focus() {
+    let Some((asks, target)) = keeper().as_ref().map(|k| (k.asks.clone(), k.target)) else {
+        return;
+    };
+    match ask_keeper(&asks, Ask::Follow) {
+        Some(Refocus::Follow) => {
+            tracing::info!("The focus moved to another text box in the dictation's window: the paste goes there");
+            let wanted = session().read_wanted;
+            if wanted {
+                let ctx = read_context(Some(target));
+                let mut s = session();
+                // A read of the box before still running: never over this one.
+                s.id = NEXT_SESSION.fetch_add(1, Ordering::SeqCst);
+                s.reading = Reading::Done(ctx);
+            }
+        }
+        other => tracing::debug!(?other, "The focus at the dictation's delivery"),
+    }
+}
+
+/// Just before a dictation's paste keys (its window back in front): the
+/// focus wandered off the text box the dictation started in to something
+/// in the same window that takes no text (a click on a toolbar, a list) →
+/// put back on it. Another text box → left there (the person moved on
+/// purpose). Another app → left (the window rules come first). Once per
+/// dictation: its paste takes the keeper; `None` when there's none for
+/// `target_hwnd` (not a dictation's paste, a test run, nothing kept).
+pub fn restore_focus(target_hwnd: Option<isize>) -> Option<Refocus> {
+    let kept = {
+        let mut k = keeper();
+        let ours = k
+            .as_ref()
+            .is_some_and(|kp| Some(kp.target) == target_hwnd && kp.since.elapsed() < KEEP_FOR);
+        if ours {
+            k.take()
+        } else {
+            None
+        }
+    }?;
+    let did = ask_keeper(&kept.asks, Ask::Settle)?;
+    match did {
+        Refocus::PutBack => tracing::info!("The focus had wandered off the dictation's text box in its window: put back"),
+        Refocus::CouldNot => tracing::info!("The focus had wandered off the dictation's text box, and it couldn't be put back"),
+        Refocus::Follow => tracing::debug!("The focus moved to another text box after the dictation was fitted"),
+        Refocus::Stay => {}
+    }
+    Some(did)
 }
 
 // ---- Did the paste land? ----
@@ -1088,23 +1272,116 @@ pub(crate) mod uia {
         let automation = automation(super::CHECK_TIMEOUT_MS)?;
         unsafe {
             let focused = automation.GetFocusedElement().ok()?;
-            let walker = automation.ControlViewWalker().ok();
-            let mut chain = Vec::new();
-            let mut e = focused;
-            loop {
-                let facts = focus_facts_of(&e);
-                let stop = chain.first().is_some_and(|f: &super::FocusFacts| f.pid != facts.pid);
-                chain.push(facts);
-                if stop || chain.len() > super::PARENT_LEVELS {
-                    break;
+            Some(facts_chain(&automation, &focused))
+        }
+    }
+
+    /// `focused` and up to [`super::PARENT_LEVELS`] parents, as
+    /// [`super::editable`] reads them.
+    unsafe fn facts_chain(automation: &IUIAutomation, focused: &IUIAutomationElement) -> Vec<super::FocusFacts> {
+        let walker = automation.ControlViewWalker().ok();
+        let mut chain = Vec::new();
+        let mut e = focused.clone();
+        loop {
+            let facts = focus_facts_of(&e);
+            let stop = chain.first().is_some_and(|f: &super::FocusFacts| f.pid != facts.pid);
+            chain.push(facts);
+            if stop || chain.len() > super::PARENT_LEVELS {
+                break;
+            }
+            match walker.as_ref().and_then(|w| w.GetParentElement(&e).ok()) {
+                Some(parent) => e = parent,
+                None => break,
+            }
+        }
+        chain
+    }
+
+    /// The keeper ([`super::keep_focus`]): the element with the focus now,
+    /// if it's in process `pid`, held until the paste asks — at the
+    /// delivery whether the person moved to another text box (then that one
+    /// is held), at the paste keys whether to put the focus back — or for
+    /// [`super::KEEP_FOR`] at most.
+    pub fn keep(pid: u32, asks: std::sync::mpsc::Receiver<super::Ask>) {
+        use super::{refocus, Ask, Editable, Refocus};
+        let Some(_com) = Com::init() else { return };
+        let Some(automation) = automation(super::CHECK_TIMEOUT_MS) else { return };
+        unsafe {
+            let Ok(start) = automation.GetFocusedElement() else { return };
+            if start.CurrentProcessId().map(|p| p as u32).ok() != Some(pid) {
+                tracing::debug!("The focus isn't in the dictation's app: no text box kept");
+                return;
+            }
+            let mut kept = start;
+            let mut in_text = super::editable(&facts_chain(&automation, &kept), pid) == Editable::Yes;
+            tracing::debug!(in_text, "The element the dictation started on, kept");
+            while let Ok(ask) = asks.recv_timeout(super::KEEP_FOR) {
+                let (reply, settle) = match ask {
+                    Ask::Follow(reply) => (reply, false),
+                    Ask::Settle(reply) => (reply, true),
+                };
+                let (now, focused) = look(&automation, &kept, pid);
+                let mut did = refocus(in_text, now);
+                tracing::debug!(?now, ?did, settle, "Where the focus is, against where the dictation started");
+                match did {
+                    Refocus::Follow => {
+                        if let Some(f) = focused {
+                            kept = f;
+                            in_text = true;
+                        }
+                    }
+                    // Only at the paste: at the delivery it may yet come back.
+                    Refocus::PutBack if !settle => did = Refocus::Stay,
+                    Refocus::PutBack => {
+                        if !put_back(&automation, &kept) {
+                            did = Refocus::CouldNot;
+                        }
+                    }
+                    Refocus::Stay | Refocus::CouldNot => {}
                 }
-                match walker.as_ref().and_then(|w| w.GetParentElement(&e).ok()) {
-                    Some(parent) => e = parent,
-                    None => break,
+                let _ = reply.send(did);
+                if settle {
+                    return;
                 }
             }
-            Some(chain)
         }
+    }
+
+    /// Where the focus is now against `kept` (in process `pid`), and the
+    /// focused element when it's another text box.
+    unsafe fn look(
+        automation: &IUIAutomation,
+        kept: &IUIAutomationElement,
+        pid: u32,
+    ) -> (super::FocusNow, Option<IUIAutomationElement>) {
+        use super::{Editable, FocusNow};
+        let Ok(focused) = automation.GetFocusedElement() else { return (FocusNow::Unknown, None) };
+        if focused.CurrentProcessId().map(|p| p as u32).ok() != Some(pid) {
+            return (FocusNow::Elsewhere, None);
+        }
+        if automation.CompareElements(kept, &focused).is_ok_and(|same| same.as_bool()) {
+            return (FocusNow::Same, None);
+        }
+        match super::editable(&facts_chain(automation, &focused), pid) {
+            Editable::Yes => (FocusNow::OtherBox, Some(focused)),
+            Editable::No => (FocusNow::NoBox, None),
+            Editable::Unknown => (FocusNow::Unknown, None),
+        }
+    }
+
+    /// The focus onto `kept`, if it's still there, enabled and on screen;
+    /// `true` once UI Automation says it has it.
+    unsafe fn put_back(automation: &IUIAutomation, kept: &IUIAutomationElement) -> bool {
+        if !kept.CurrentIsEnabled().is_ok_and(|b| b.as_bool()) || kept.CurrentIsOffscreen().is_ok_and(|b| b.as_bool()) {
+            return false;
+        }
+        if kept.SetFocus().is_err() {
+            return false;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(30));
+        automation
+            .GetFocusedElement()
+            .is_ok_and(|f| automation.CompareElements(kept, &f).is_ok_and(|same| same.as_bool()))
     }
 
     unsafe fn focus_facts_of(e: &IUIAutomationElement) -> super::FocusFacts {
@@ -1907,6 +2184,43 @@ mod focus_tests {
         // A field in another process above a button doesn't count.
         let other = FocusFacts { pid: 9, value: true, ..el(UIA_EDIT, "Win32") };
         assert_eq!(editable(&[el(UIA_BUTTON, "Win32"), other], 7), Editable::No);
+    }
+}
+
+/// Where the focus goes back to before a dictation's paste.
+#[cfg(test)]
+mod refocus_tests {
+    use super::*;
+
+    #[test]
+    fn a_click_on_something_that_takes_no_text_is_undone_for_the_paste() {
+        assert_eq!(refocus(true, FocusNow::NoBox), Refocus::PutBack);
+        // Started on a button: there's no box to go back to.
+        assert_eq!(refocus(false, FocusNow::NoBox), Refocus::Stay);
+    }
+
+    #[test]
+    fn another_text_box_is_where_the_person_wants_it() {
+        assert_eq!(refocus(true, FocusNow::OtherBox), Refocus::Follow);
+        assert_eq!(refocus(false, FocusNow::OtherBox), Refocus::Follow);
+    }
+
+    #[test]
+    fn still_there_another_app_or_no_telling_leaves_the_focus_alone() {
+        for started_in_text in [true, false] {
+            for now in [FocusNow::Same, FocusNow::Unknown, FocusNow::Elsewhere] {
+                assert_eq!(refocus(started_in_text, now), Refocus::Stay, "{started_in_text} {now:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn without_a_keeper_nothing_is_asked() {
+        // No such window: nothing kept, so the paste asks nothing and never waits.
+        keep_focus(Some(1));
+        assert_eq!(restore_focus(Some(1)), None);
+        assert_eq!(restore_focus(None), None);
+        follow_focus();
     }
 }
 

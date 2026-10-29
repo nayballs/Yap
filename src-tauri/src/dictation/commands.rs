@@ -178,7 +178,7 @@ pub async fn e2e_dictation(state: State<'_, AppState>, text: String) -> Result<c
         let guard = state.pipeline.lock().map_err(|_| "the pipeline lock is poisoned")?;
         guard.as_ref().ok_or("no pipeline")?.robot()
     };
-    robot.dictate_text(text).await
+    robot.dictate_text(text, None).await
 }
 
 /// Debug-only, test mode: the rewrite shortcut with `text` as what was

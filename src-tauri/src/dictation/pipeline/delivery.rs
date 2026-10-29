@@ -69,6 +69,12 @@ impl Shared {
             h => Some(h),
         };
         let target_app = crate::pasting::text_injector::app_name_for(target_hwnd);
+        // The person moved to another text box in that window while
+        // talking: the paste goes there, the text around its cursor read
+        // afresh for the fit and cleanup (`selection::follow_focus`).
+        if !self.to_chat.load(Ordering::SeqCst) && !self.to_note.load(Ordering::SeqCst) {
+            let _ = tokio::task::spawn_blocking(crate::pasting::selection::follow_focus).await;
+        }
         // …and what kind of app it is, for the style (`cleanup_styles`).
         let style_target = crate::ai::cleanup_styles::Target::of_window(target_hwnd, target_app.as_deref(), self.read_kind());
 

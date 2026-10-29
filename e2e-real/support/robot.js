@@ -29,11 +29,13 @@ import {
   startChatPage,
   startEditorPage,
   startEditorTerminal,
+  startElectronPage,
   startMediaPage,
   startMintty,
   startNotepad,
   startPage,
   startReadingPage,
+  startVsCode,
 } from './targets.js';
 
 export { expect };
@@ -118,6 +120,29 @@ export class Robot {
 
   clipboard(action, text) {
     return this.yap.invoke('realtest_clipboard', { action, text });
+  }
+
+  /**
+   * The last paste's read (pasting/read_check.rs): `{ offered, reader,
+   * sure, readMs, refused, late, lateTarget, verdict, restored, refocus }` —
+   * who read the text off the clipboard ("target", "unknown", "other",
+   * "yap"), when after the keys, what Yap made of it, where the focus went.
+   */
+  lastPaste() {
+    return this.clipboard('lastPaste');
+  }
+
+  /**
+   * A dictation into `target` that takes `pauseMs` between its start and
+   * its paste, with `move()` run meanwhile (the person clicking elsewhere
+   * while they talk). Returns what went to the paste.
+   */
+  async dictateMoving(target, text, move, { pauseMs = 1_500 } = {}) {
+    await target.focus();
+    const going = this.yap.invoke('realtest_dictate_text', { text, hwnd: target.hwnd, pauseMs });
+    await sleep(Math.min(500, pauseMs / 3));
+    await move();
+    return going;
   }
 
   /**
@@ -244,6 +269,16 @@ export class Robot {
   /** Notepad on an empty temp file. */
   async notepad() {
     return this.track(await startNotepad({ nonce: this.nonce, dir: path.join(this.dir, `notepad-${this.targets.length}`) }));
+  }
+
+  /** A tiny Electron app of the test's own with a text box (`electronExe()` must find a runtime). */
+  async electron() {
+    return this.track(await startElectronPage({ nonce: this.nonce, dir: path.join(this.dir, `electron-${this.targets.length}`) }));
+  }
+
+  /** VS Code on an empty file, a throwaway profile (`vscodeExe()` must find it). */
+  async vscode() {
+    return this.track(await startVsCode({ nonce: this.nonce, dir: path.join(this.dir, `vscode-${this.targets.length}`) }));
   }
 
   async closeTargets() {

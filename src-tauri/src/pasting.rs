@@ -10,6 +10,7 @@ pub mod as_said;
 pub mod elevated;
 pub mod last;
 pub mod modifiers;
+pub mod read_check;
 pub mod selection;
 pub mod slices;
 pub mod smart_insert;

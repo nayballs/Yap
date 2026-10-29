@@ -79,12 +79,18 @@ Putting a dictation into the app you're in: the clipboard paste and the submit k
   editor takes a paste through a hidden input it empties again (Google Docs,
   Ace, xterm.js), so "unchanged" means nothing there; length + selection, not
   the text — any paste changes one (a selection replaced by the same words
-  moves the caret). The clipboard restore still waits its 500 ms from the
+  moves the caret). Everywhere else (web pages, Electron apps, code
+  editors, terminals) **the clipboard read says** (`pasting/read_check.rs`,
+  below): the text goes on the clipboard *promised* and the app's read of
+  it is the proof; nothing read it in time → `Delivery::LeftOnClipboard
+  (Left::NotRead)`. The clipboard restore is timed by that read, not the
   keys. `#[ignore]`d `private_clipboard_round_trip` runs
   the real clipboard code on a private window station (never the person's clipboard).
   **When it can't be pasted** (2026-10-25): `inject_text` returns
-  `Delivery::LeftOnClipboard(Left)` — `Elevated` (above), `KeysBlocked`
-  or `NoTextBox` — the text on the clipboard, and the caller says it
+  `Delivery::LeftOnClipboard(Left)` — `Elevated` (above), `KeysBlocked`,
+  `NoTextBox` or `NotRead` (2026-10-29: no app read the text off the
+  clipboard in time; "Couldn't paste · it's copied, press Ctrl+V", "The app
+  didn't take the paste…") — the text on the clipboard, and the caller says it
   **once** with `Left::alert()` (kind "pasteBlocked", through
   `notices/alert.rs`; history keeps the dictation "not pasted" with
   `Left::not_pasted()`; the robot's report says `leftWhy`). **Did Windows
@@ -116,8 +122,14 @@ Putting a dictation into the app you're in: the clipboard paste and the submit k
   (the robot, 2026-10-25). **Long pastes in slices** (`pasting/slices.rs`,
   below): `inject_text_sync` pastes a long text into Claude Code, Codex or
   anything in Windows Terminal slice by slice, each put on the clipboard and
-  pasted `slices::PACE_MS` (250 ms) after the last; a slice that can't go
-  leaves the rest of the text on the clipboard (`KeysBlocked`). **Edit
+  pasted once the terminal has read the one before (2026-10-29), and at
+  least `slices::PACE_MS` (250 ms) after it; a slice that can't go leaves
+  the rest of the text on the clipboard (`KeysBlocked`), one not read in
+  time leaves it from that slice on (`NotRead`). **The text box itself**
+  (2026-10-29): after re-focusing the window, `selection::restore_focus`
+  puts the focus back on the element the dictation started in when it
+  wandered off within the window to something that takes no text
+  (`selection.rs`, below). **Edit
   mode's Ctrl+C** (`copy_selection`, `selection_via_copy`; Trouble said once
   through `notices/alert.rs`, kind "clipboardBusy"): everything on the
   clipboard is kept first, **every format byte for byte**
@@ -135,6 +147,107 @@ Putting a dictation into the app you're in: the clipboard paste and the submit k
   "Your clipboard couldn't be put back" (`NotRestored`: it holds the
   selection). Test mode never presses Ctrl+C; robot mode only when its spec
   asks (`realtest_copy_selection`).
+- **`pasting/read_check.rs`** — **did the app read the paste?** (2026-10-29;
+  Wispr Flow's delayed clipboard rendering, by behaviour). `Offer::put`:
+  the dictation goes on the clipboard *promised* —
+  `SetClipboardData(CF_UNICODETEXT, NULL)` from Yap's own clipboard window
+  (a message-only window on its thread, "clipboard-owner", made once:
+  `owner()`) — with the privacy formats written at once (a careful clipboard
+  manager sees them without asking for the text); checked by the sequence
+  number and retried like a plain write; `None` (no window, a busy
+  clipboard) → `clip::put_text_verified` as before, and no read to go by.
+  Windows sends the window `WM_RENDERFORMAT` the moment an app reads the
+  text, and `on_render` decides:
+  **who read it** (`classify`, pure): the window that has the clipboard
+  open (`GetOpenClipboardWindow`) and its process, against `targets_of
+  (receiver)` — the target window and the window with the focus in its
+  thread, their processes, every child window's process (a WebView2 app's
+  browser process — new Outlook, Teams —, a UWP app inside
+  ApplicationFrameHost's frame), and the same program by name (not a
+  generic host: python, java, node, cmd, PowerShell, AutoHotkey,
+  msedgewebview2…) → `Target`; Yap's own process → `Yap`; anyone else →
+  `Other`; no window at all → `Unknown` (Windows Terminal reads on a
+  thread of its own with `OpenClipboard(NULL)`, and so does Edge's
+  browser process — the robot, 2026-10-29; with no target known,
+  everyone but Yap). Yap's own reads open the clipboard with no window
+  too: they're told apart by Yap holding the clipboard open then
+  (`clip::yap_holds_it`, one opener at a time) and kept out of the
+  report. **Who gets it** (`answer`, pure): the target and Yap
+  always; before the paste keys nobody else — a reader then isn't pasting
+  (a clipboard manager reacting to the change; Win+V history and cloud
+  sync honour the privacy formats and never ask) and gets nothing, the
+  text stays promised (Windows asks again on the next read: the target's
+  still shows), counted as `refused`; from the keys on (`keys_going`,
+  set just before them) everyone, so a wrong guess never breaks a paste;
+  a remote desktop or VM (`text_injector::syncs_clipboard`, written plain)
+  is open to all from the start (its sync may read from a process of its
+  own). **What it says** (`seen`, pure, on the first read that got the
+  text): the target's after the keys → `Target { sure }` (before them only
+  a remote desktop's sync counts: that's how its paste gets there — a
+  browser looking at the clipboard first isn't the paste); one nobody can
+  name after the keys → `Target { sure: false }`; anything else → `Taken`
+  (the text is no longer only promised: no telling); none → `Nothing`.
+  **The verdict** (`combine`, pure, in `inject_text_sync`): a Win32 edit
+  control's own check (`PasteCheck`) first — changed → pasted, unchanged
+  for a second → typed, as before; else the target's read, named by its
+  window → pasted (even where UI Automation said no text box: it took it
+  somewhere); "Select a text box first" before and after the keys →
+  `NoTextBox` (looked at again 250 ms after the keys unless the target,
+  named, read it by then) — a nameless read never overrides it: Edge's
+  browser reads the clipboard on any Ctrl+V, a button focused or a page
+  that swallows the key (the robot, 2026-10-29), so in Edge the read says
+  the keys arrived, not that the page took them; then a nameless read →
+  pasted; `Taken` → pasted; nothing within `Timing::read_within` →
+  `NotRead`: the text stays (promised) on the clipboard, the person's own
+  isn't put back, "Couldn't paste · it's copied, press Ctrl+V". **How
+  long** (`timing(exe)`, pure; Wispr Flow's figures): read within 1 s,
+  the clipboard back 0.5 s after the read; Outlook (both), Word and
+  WhatsApp 3 s and 3 s; a remote viewer (`syncs_clipboard`, rdcman) 3 s
+  and 5 s. **The restore** (`end_for_restore`): only while the clipboard
+  is still Yap's (`GetClipboardOwner`; someone who copied since keeps
+  theirs — `WM_DESTROYCLIPBOARD` ends the promise), `restore_after` from
+  the target's read (from the keys when it was `Taken`, or there's no
+  promise); due within `WAIT_FOR_RESTORE_MS` (600 ms) it's waited for (the
+  submit key still goes after it, as before), later — a slow app's — in
+  the background (`restore_later`, the window's timer), and a paste before
+  then takes that snapshot over (`take_pending`: the person's clipboard,
+  not the last dictation). "Restore clipboard" off → the text written out
+  (`leave(0)`). **A late read** (`leave(LATE_MS)`, 5 s): with no read in
+  time nothing is put back, so an app reading late gets the dictation,
+  never the old clipboard; the promise is kept 5 s more and a read then is
+  noted (`Report::late`, "The paste was read late…" in the log), then the
+  text is written out so it outlasts Yap (`WM_RENDERALLFORMATS` writes it
+  out too). Watching the field for the old clipboard instead was
+  rejected: the old clipboard can be anything (an image, files, words
+  already in the field) and only some fields can be read. **Terminals**:
+  no edit-control check or UI Automation there, so the read is the check —
+  Windows Terminal's nameless read after the keys counts, mintty and
+  conhost (its own Edit → Paste, posted after `keys_going`) open with
+  their windows; long pastes wait for each slice's read. **Reliability**:
+  a reader is named only by the window it opened the clipboard with —
+  Win32 controls, OLE/WinRT readers (OLE's clipboard window in their
+  process), Chromium/Electron (its clipboard window in the browser
+  process), Java and conhost do; an app opening it with none is
+  `Unknown`, counted only after the keys (a clipboard manager reading
+  without a window right then would be taken for the target — it reads
+  when the clipboard changes, before the keys, and is refused there). The
+  log says the reader's kind, the ms after the keys and how many reads
+  were refused, never the text. Test mode never touches the clipboard
+  (`e2e_paste_fails "notRead"` stands in); robot mode's "notRead" refuses
+  every app's read until the paste is judged; `realtest_clipboard
+  "lastPaste"` reports the last paste (`Report`: reader, sure, readMs,
+  refused, late, verdict, restored, refocus). Unit-tested (each decision,
+  the timings); `#[ignore]`d `private_clipboard_promise_round_trip` runs
+  the real window on a private window station and desktop (a manager's
+  read refused twice, the target's counted, a nameless one, another app's
+  after the keys, ANSI text made from the promise, nobody, a late read, a
+  copy before the restore, a background restore, a remote desktop's);
+  robot: `paste-read.real.js` (the pad, a stand-in clipboard manager —
+  a program of its own name: one sharing the target's counts as it —
+  before and after the keys, an Edge textarea, Notepad, Windows Terminal,
+  conhost, Claude Code's stand-in in slices, an Electron app and VS Code
+  when present), `paste-late.real.js` (the pad's slow box: read at 0.7 s,
+  at 2 s, never).
 - **`pasting/as_said.rs`** — **"Use what I said"** (2026-10-22; Windows' fluid
   dictation's Revert, TypeWhisper's Restore Raw Transcript): right after a
   dictation AI cleanup changed, swap what Yap pasted for the words as said
@@ -395,7 +508,34 @@ Putting a dictation into the app you're in: the clipboard paste and the submit k
   item, a link…) or on read-only text (a web page with no box focused, a
   mail being read); else **Unknown** (a pane, a custom control, Java, Qt,
   the focus in another app, a timeout). Test mode never reads; robot mode
-  only the test's windows. **`PasteCheck`** (for
+  only the test's windows. **The exact text box** (2026-10-29; Wispr
+  Flow's element-level refocus, by behaviour): `keep_focus(target)` (from
+  `capture_target`, for a dictation that's pasted — a rewrite too) starts
+  a "focus-keeper" thread holding UI Automation's element with the focus
+  in the target's process (one look; COM objects stay on their thread;
+  the previous dictation's goes) and whether it takes text (`editable`).
+  At the delivery, before AI cleanup and the fit, `follow_focus()` asks
+  it where the focus is now (`look`: `CompareElements`, then `editable`
+  of the new one → `FocusNow` Same / OtherBox / NoBox / Unknown /
+  Elsewhere); `refocus(started_in_text, now)` (pure, unit-tested):
+  another text box → **Follow** — that's the dictation's box now, and the
+  text around its cursor is read afresh (`read_context`, when smart
+  spacing reads it at all; a read of the old box still running never
+  lands over it) for smart spacing and cleanup's context; something that
+  takes no text after starting in a box → **PutBack**, but only at the
+  paste; anything else → **Stay**. At the paste (`restore_focus(target)`,
+  `inject_text_sync` after `focus_window`, once: the paste takes the
+  keeper; only a keeper for that window, ≤ 20 min old): PutBack → the
+  element, if it's still there, enabled and on screen, gets
+  `SetFocus()` and must then have the focus (`CouldNot` otherwise: the
+  paste goes on, "Select a text box first" can still say so); another box
+  now → left there. Another app → left: the window rules come first
+  (today's: the dictation's window is brought back). Each answer waited
+  for ≤ 0.9 s (200 ms UIA timeouts). Logged without content; the robot's
+  report says `refocus`. Robot: `paste-refocus.real.js` (`dictateMoving`:
+  `realtest_dictate_text { pauseMs }` with the focus moved meanwhile — a
+  button, another box fitted to its own text, nothing, an Edge page's
+  button, another window). **`PasteCheck`** (for
   `text_injector`'s verify-after-paste): the focused control of the target's
   thread (`GetGUIThreadInfo`), same process, an `edit_class` control without
   `ES_PASSWORD`/`ES_READONLY`; its state = `WM_GETTEXTLENGTH` + `EM_GETSEL`

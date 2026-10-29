@@ -94,8 +94,9 @@ impl Robot {
     /// `text` as if the STT had just heard it: the window in front becomes
     /// the target and the text around its cursor is read, as at a
     /// recording's start (waiting for that read, as a few seconds of talk
-    /// would), then the dictation's own steps from cleanup to the paste.
-    pub(crate) async fn dictate_text(&self, text: String) -> Result<Delivered, String> {
+    /// would), then the dictation's own steps from cleanup to the paste —
+    /// `pause_ms` after the start, when given (the test moves the focus).
+    pub(crate) async fn dictate_text(&self, text: String, pause_ms: Option<u64>) -> Result<Delivered, String> {
         let shared = &self.0;
         let Some(busy) = self.take_busy() else {
             return Err(Self::BUSY.into());
@@ -103,6 +104,9 @@ impl Robot {
         shared.capture_target(false);
         crate::pasting::selection::wait_for_context(Duration::from_millis(1_500));
         crate::dictionary::screen_terms::wait_for_terms(Duration::from_millis(3_000));
+        if let Some(ms) = pause_ms {
+            tokio::time::sleep(Duration::from_millis(ms.min(30_000))).await;
+        }
         let _ = shared.app.emit("yap-state", "processing");
         tracing::info!(len = text.len(), "e2e: robot dictation from a transcript");
         let report = shared.deliver(text).await;
@@ -138,7 +142,7 @@ impl Robot {
     /// `dictation::commands::e2e_chat_dictation`.)
     pub(crate) async fn dictate_to_chat(&self, text: String) -> Result<Delivered, String> {
         arm_chat_dictation(true);
-        let out = self.dictate_text(text).await;
+        let out = self.dictate_text(text, None).await;
         arm_chat_dictation(false);
         out
     }
@@ -148,7 +152,7 @@ impl Robot {
     /// (Test mode's `quick_note::e2e_quick_note_dictation`.)
     pub(crate) async fn dictate_to_quick_note(&self, text: String) -> Result<Delivered, String> {
         crate::notes::quick_note::arm(true);
-        let out = self.dictate_text(text).await;
+        let out = self.dictate_text(text, None).await;
         crate::notes::quick_note::arm(false);
         out
     }

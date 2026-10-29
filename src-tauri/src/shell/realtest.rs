@@ -631,17 +631,19 @@ pub mod commands {
     /// around its cursor read at the "start", AI cleanup, the dictionary,
     /// "press enter", snippets, fitting to the kind of app and the cursor,
     /// the paste (guarded), the submit key, history. Returns what went to
-    /// the paste.
+    /// the paste. `pause_ms`: that long between the "start" and the rest,
+    /// as a person talking (the test may move the focus meanwhile).
     #[tauri::command]
     pub async fn realtest_dictate_text(
         state: State<'_, AppState>,
         text: String,
         hwnd: Option<i64>,
+        pause_ms: Option<u64>,
     ) -> Result<Delivered, String> {
         only_robot()?;
         in_front(hwnd)?;
         let robot = robot_of(&state)?;
-        robot.dictate_text(text).await
+        robot.dictate_text(text, pause_ms).await
     }
 
     /// The rewrite shortcut with `text` as the spoken instruction, in the

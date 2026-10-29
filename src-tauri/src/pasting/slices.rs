@@ -40,7 +40,9 @@ pub const WINDOWS_TERMINAL: Limits = Limits { chars: 4_000, breaks: usize::MAX }
 
 /// The pause between two slices: the terminal has read the clipboard
 /// (Windows Terminal and conhost do within a few milliseconds) and the CLI
-/// has taken the paste before the next slice goes on the clipboard.
+/// has taken the paste before the next slice goes on the clipboard. At
+/// least this, and never before the terminal has read the slice before
+/// (`read_check.rs`, 2026-10-29: `text_injector` waits for that read).
 pub const PACE_MS: u64 = 250;
 
 /// The limits a paste into `kind` keeps to, if any (the kind as read,
