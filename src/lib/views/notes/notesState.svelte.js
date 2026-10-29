@@ -631,6 +631,7 @@ export function createNotesState() {
     if (r && !undo) {
       toast({
         kind: 'done',
+        chip: 'Notes',
         title: r.field === 'summary' ? 'Summary restored' : 'Version restored',
         description: 'The text it replaced is in Version history.',
         action: r.previous != null ? { label: 'Undo', onClick: () => restoreVersion(r.previous, { undo: true }) } : null,
@@ -669,7 +670,7 @@ export function createNotesState() {
     try {
       const r = await invoke('note_transform', { id, transform: t.id, field, selection, origin: LABEL });
       if (r.outcome === 'unchanged') {
-        toast({ kind: 'done', title: `${t.name}: no changes needed`, description: 'The AI gave back the same text.' });
+        toast({ kind: 'done', chip: 'Notes', title: `${t.name}: no changes needed`, description: 'The AI gave back the same text.' });
         return;
       }
       if (r.outcome === 'moved') {
@@ -693,6 +694,7 @@ export function createNotesState() {
       refreshList();
       toast({
         kind: 'done',
+        chip: 'Notes',
         title: `${r.name} ✓`,
         description:
           field === 'summary' ? 'The summary is yours now: Yap asks before writing it again.' : 'Undo, or find it in Version history.',

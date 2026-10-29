@@ -190,7 +190,7 @@
                 </span>
                 <span class="imeta">
                   <span class="ifield" class:summary={x.field === 'summary'}>{fieldLabel(x)}</span>
-                  · {span(x)}{#if restoredFrom(x)} · {restoredFrom(x)}{/if}
+                  · {span(x)}{restoredFrom(x) ? ` · ${restoredFrom(x)}` : ''}
                 </span>
               </button>
             {/each}
