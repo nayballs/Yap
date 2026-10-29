@@ -127,9 +127,17 @@
     folder = tab.folder;
     dirty = false;
     saveState = tab.id == null ? 'new' : 'saved';
-    // Its tab in view, when there are more than fit.
-    tick().then(() => document.querySelector('.tab.on')?.scrollIntoView?.({ block: 'nearest', inline: 'nearest' }));
   }
+
+  // The tab in front in view, whole, when there are more than fit (again
+  // as its name grows).
+  $effect(() => {
+    void activeKey;
+    void title;
+    tick().then(() =>
+      requestAnimationFrame(() => document.querySelector('.tab.on')?.scrollIntoView?.({ block: 'nearest', inline: 'nearest' }))
+    );
+  });
 
   /** What's in front, saved (its words kept in its tab). */
   function leave() {
@@ -722,7 +730,7 @@
   .tab.on {
     flex-shrink: 0;
     min-width: 96px;
-    max-width: 170px;
+    max-width: 160px;
     background: var(--yap-paper-s2);
   }
   .tablabel {
