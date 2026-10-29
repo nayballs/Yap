@@ -135,9 +135,17 @@
     />
   </Row>
   <Row setting="notify-milestones">
-    <Toggle bind:checked={cfg.notifyMilestones} label="Milestones" desc="Your dictation milestones. At most two a day" />
+    <Toggle
+      bind:checked={cfg.notifyMilestones}
+      label="Milestones"
+      desc="When you pass a milestone, in words dictated or days in a row. At most two a day"
+    />
   </Row>
   <Row setting="notify-news">
-    <Toggle bind:checked={cfg.notifyNews} label="News" desc="What's new after Yap updates" />
+    <Toggle
+      bind:checked={cfg.notifyNews}
+      label="News"
+      desc="What's new once Yap has updated itself, with its release notes a click away"
+    />
   </Row>
 </Group>
