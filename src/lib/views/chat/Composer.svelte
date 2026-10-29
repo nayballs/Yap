@@ -26,6 +26,7 @@
   import { tooLongLine } from './chatBudget.js';
   import ModelChip from './ModelChip.svelte';
   import ContextRing from './ContextRing.svelte';
+  import ThinkButton from './ThinkButton.svelte';
 
   /**
    * `chat`: the view's state; `onopensettings(section)`: ControlPanel's
@@ -351,6 +352,8 @@
          throws the caret out of it, and you'd have to click back in to
          type the next message. `send()` ignores Enter until the answer is
          in, so you can type ahead. -->
+    <!-- Think it through (chat/think.rs): this question only. -->
+    <ThinkButton {chat} />
     <button class="micbtn" title="Dictate your message" aria-label="Dictate your message" onclick={micChat}>
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="2" width="6" height="12" rx="3" /><path d="M5 10v1a7 7 0 0 0 14 0v-1" /><path d="M12 18v4" /></svg>
     </button>

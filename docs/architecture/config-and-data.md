@@ -199,6 +199,13 @@
   Windows voice from tts_voice to tts_windows_voice and "windows" (never a
   choice before) to "kokoro"), the Voice Assistant's assistant_hotkey (""
   = unbound, the default) + assistant_answer_card (true) +
+  assistant_screen ("Let the Voice Assistant see the window in front when
+  you ask about it", true) + assistant_screen_cloud ("With cloud models
+  too", false) + assistant_screen_asked (the one ask about the cloud shown,
+  false) — 2026-10-29, `chat/assistant/screen.rs`; new fields only: an
+  older Yap sharing the folder drops them on its save, so the first comes
+  back on (an older Yap never takes the window anyway), the cloud one off
+  and the ask may come once more — no `migrate_once` step +
   (assistant_stop_on_pause, "Stop listening when I pause", removed
   2026-10-25: an older Yap still reads it, default on), Read aloud's read_hotkey ("" = unbound, the
   default; `voice/read_aloud.rs`: the selection in any app read aloud, its speed
@@ -446,7 +453,13 @@
   its next save, so it shows in the list again). An answer may keep
   `tokens` (`{prompt, answer, perSecond?}`, 2026-10-25: its last model
   call's counts, for Chat's context ring); an older Yap's save drops it,
-  and the ring estimates instead. A long conversation (or Ask thread) may
+  and the ring estimates instead. An answer thought through (Chat's Think,
+  2026-10-29, `chat/think.rs`) keeps `thinking` (`{text?, ms}`: the model's
+  thinking when it sent it, and how long); a source may be `screen: true`
+  (the window's text the Voice Assistant read on this PC); a question's
+  screenshot may have `source: "window"` (the window in front). New fields
+  only: an older Yap's save drops `thinking` (the answer stays) and
+  `screen` (the chip then opens nothing). A long conversation (or Ask thread) may
   keep `summary` (2026-10-25, `chat/compact.rs`: `{text, upto, after,
   model?, ts}` — what its messages before `upto` said, the count when it
   was written, the model that wrote it), written only when there is one.

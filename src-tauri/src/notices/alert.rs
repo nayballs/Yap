@@ -40,6 +40,10 @@ pub const SHOW_OLD_SETTINGS: &str = "showOldSettings";
 /// (the microphones' order, `mics.rs`).
 pub const OPEN_MIC_ORDER: &str = "openMicOrder";
 
+/// **Allow**: the Voice Assistant may send the window in front to a cloud
+/// model too (`chat/assistant/screen.rs`, asked once).
+pub const ALLOW_SCREEN_CLOUD: &str = "assistantScreenCloud";
+
 /// An alert's one button.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub struct Action {
@@ -63,7 +67,9 @@ pub struct Alert {
     /// disconnected) | "micSwitched" (`mics/offer.rs`: "Using … for
     /// dictation") | "dictationCapped" (`cap.rs`: stopped at its length
     /// limit) | "aiModelFailed" (`local_llm/on_demand.rs`: the on-device AI
-    /// model didn't start, a dictation went as said) | "lastTranscript" (`last.rs`: "Copied your last dictation",
+    /// model didn't start, a dictation went as said) | "assistantScreen"
+    /// (`chat/assistant/screen.rs`: the window in front wasn't sent to a
+    /// cloud model, asked once) | "lastTranscript" (`last.rs`: "Copied your last dictation",
     /// shown with [`confirm`]):
     /// the bar card's id, the Windows notification's tag (a newer one
     /// replaces it) and its rule in `notice.rs`.
@@ -233,6 +239,7 @@ pub fn act(app: &AppHandle, action: &str) {
         }
         SHOW_OLD_SETTINGS => crate::config::show_old_file(app),
         SHOW_SNIP => crate::snip::copy_save::show_saved(app),
+        ALLOW_SCREEN_CLOUD => crate::chat::assistant::screen::allow_cloud(),
         crate::shell::saving::RETRY => crate::shell::saving::retry_soon(app),
         "" => {}
         other => tracing::debug!("alert: no such action {other}"),

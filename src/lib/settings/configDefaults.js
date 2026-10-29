@@ -152,6 +152,11 @@ export const FIELD_DEFAULTS = {
   assistantHotkey: '',
   readHotkey: '',
   assistantAnswerCard: true,
+  // The Voice Assistant sees the window in front when you ask about it
+  // (chat/assistant/screen.rs): on for a model on this PC, off for the cloud.
+  assistantScreen: true,
+  assistantScreenCloud: false,
+  assistantScreenAsked: false,
   spokenLength: '1m',
   openApps: true,
   appsBlocked: [],

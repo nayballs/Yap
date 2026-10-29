@@ -896,6 +896,34 @@ idle free, the download from Hugging Face), the processor fallback on a
 small card, the Voice Assistant asking about a screenshot on the on-device
 model.
 
+**The Voice Assistant sees the window in front** (2026-10-29,
+[chat-and-assistant.md](./chat-and-assistant.md), `chat/assistant/screen.rs`):
+a spoken question about the screen ("what's this error?") takes a
+screenshot of the window that was in front when the shortcut was pressed,
+by snip's capture with every Yap window left out; rules in the person's
+languages decide, Chat's model a lone "this"; on a model on this PC by
+default, a cloud model only with "With cloud models too" (asked once); a
+model that can't read images gets the window's text (Windows' OCR), named in
+the sources; the receipts say "Voice Assistant + the window in front".
+**Tested**: unit (the rules in seven languages, the person's languages, the
+yes/no request, where it may go), e2e (`e2e/assistant-screen.spec.js`, fake
+monitors and window), and on the real Qwen3.5-4B (the yes/no request: 14 of
+16 right, median 180 ms; `eval --vision --vision-path window`, model-evals.md).
+**Not yet tried**: in the dev build with a real microphone and real windows
+(the capture of a real window, its HDR, a window moved over it while asking),
+a real cloud model (Groq, Claude) on a real screenshot.
+
+**Think it through** (2026-10-29, chat-and-assistant.md `chat/think.rs`):
+Chat's Think button, one question — the on-device Qwen3.5 thinks to a
+1,500-token budget for that request alone (llamafile keeps `--reasoning
+off`: measured by hand on 0.10.6, no restart), cloud models that reason at
+high effort; "Thinking…" with the thinking folded, then "Thought for 6 s"
+above the answer. **Tested**: unit (each provider's fields, the task-local,
+the stream), e2e (`e2e/chat-think.spec.js`), and on the real 4B by hand and
+through `eval --vision --think`. **Not yet tried**: a real cloud model's
+reasoning (OpenAI, Gemini, Claude, OpenRouter: fields from their docs), the
+dev build.
+
 **Meeting search and Ask across meetings** (2026-10-25,
 [search.md](./search.md)): every meeting and note cut into passages and read
 by EmbeddingGemma-300M on Yap's own llamafile (downloaded on demand from

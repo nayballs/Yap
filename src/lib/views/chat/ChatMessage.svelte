@@ -15,6 +15,7 @@
   import { closePartial, settle } from '../../core/streaming.js';
   import { menuKey, openContextMenu } from '../../ui/contextMenu.svelte.js';
   import { chatImageUrl, removedLine, sizeLine, imageItems, splitScreenText } from './chatImages.js';
+  import { thoughtLabel } from './chatThink.svelte.js';
 
   /**
    * `m`: the message; `last`: the thread's last; `sources`: what its
@@ -88,10 +89,30 @@
     {/if}
   </div>
 {/if}
+{#if m.role === 'assistant' && !(m.streaming && !m.text) && (m.thinking || m.liveThinking)}
+  <!-- Thought through (Think, chat/think.rs): the thinking, folded above
+       the answer; only the time when the model doesn't send it back. -->
+  {@const thought = (m.thinking?.text ?? m.liveThinking ?? '').trim()}
+  {#if thought}
+    <details class="thought" data-testid="chat-thought">
+      <summary>{m.streaming ? 'Thought it through' : thoughtLabel(m.thinking?.ms)}</summary>
+      <div class="thoughttext">{thought}</div>
+    </details>
+  {:else}
+    <p class="thoughtline" data-testid="chat-thought">{thoughtLabel(m.thinking?.ms)}</p>
+  {/if}
+{/if}
 {#if m.role === 'assistant' && m.streaming && !m.text}
   <!-- Tools run, or a dictation is being waited out, before the first words. -->
   <div class="cbubble assistant" aria-busy="true">
     <p class="cbody thinking">{m.waiting ? 'Waiting for your dictation to finish…' : 'Thinking…'}</p>
+    {#if m.liveThinking}
+      <!-- Its thinking as it comes (Think), folded. -->
+      <details class="thought live" data-testid="chat-thinking">
+        <summary>Show its thinking</summary>
+        <div class="thoughttext">{m.liveThinking}</div>
+      </details>
+    {/if}
   </div>
 {:else}
 <!-- Focusable for its menu from the keyboard (the ContextMenu key, Shift+F10). -->
@@ -170,7 +191,14 @@
   <div class="sources" role="group" aria-label={sourcesLabel}>
     <span class="srclabel">{sourcesLabel}</span>
     {#each m.sources as s (s.n)}
-      {#if isPassage(s)}
+      {#if s.screen}
+        <!-- The window in front's text, read on this PC (the Voice
+             Assistant to a model that can't read images): nothing to open. -->
+        <span class="srcchip screen" data-testid="chat-screen-source" title="Yap read the window's text on this PC and sent it with the question">
+          <span class="srcn" aria-hidden="true">{s.n}</span>
+          <span class="srctitle">{s.title}</span>
+        </span>
+      {:else if isPassage(s)}
         <button
           class="srcchip passage"
           class:meeting={!!s.event}
@@ -645,6 +673,49 @@
     color: var(--yap-fg);
     font-family: ui-monospace, Consolas, monospace;
     font-size: 11px;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+  }
+  /* The window's text, read on this PC: a source with nothing to open. */
+  .srcchip.screen {
+    cursor: default;
+  }
+  .srcchip.screen:hover {
+    border-color: var(--yap-border-subtle);
+    background: var(--yap-s1);
+  }
+  /* Thought through (Think): the thinking, folded above the answer. */
+  .thought,
+  .thoughtline {
+    align-self: flex-start;
+    max-width: 78%;
+    margin: 0;
+    font-size: 11.5px;
+    color: var(--yap-muted);
+  }
+  .thought summary {
+    cursor: pointer;
+    width: fit-content;
+  }
+  .thought summary:focus-visible {
+    outline: 2px solid var(--yap-primary-line);
+    outline-offset: 1px;
+    border-radius: var(--yap-r-sm, 6px);
+  }
+  .thought.live {
+    max-width: none;
+    margin-top: 4px;
+  }
+  .thoughttext {
+    max-height: 220px;
+    overflow: auto;
+    margin: 6px 0 2px;
+    padding: 6px 10px;
+    border-left: 2px solid var(--yap-border);
+    color: var(--yap-muted);
+    font-family: var(--yap-font-reading);
+    font-size: calc(11.5px * var(--yap-reading-scale));
+    line-height: 1.5;
     white-space: pre-wrap;
     overflow-wrap: anywhere;
   }

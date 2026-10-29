@@ -98,6 +98,25 @@
       hint="Off: just the voice, with ■ on the bar to stop it. An answer Yap couldn't read aloud still shows."
     />
   </Row>
+  <!-- It sees the window in front (chat/assistant/screen.rs): only for a
+       question about the screen; the cloud only when allowed. -->
+  <Row setting="assistant-screen">
+    <Toggle
+      bind:checked={cfg.assistantScreen}
+      label="Let the Voice Assistant see the window in front when you ask about it"
+      desc="Ask “What's this error?” or “Summarise this page” and Yap takes a screenshot of the window you were in, never its own windows"
+      hint="Only when the question is about your screen. The screenshot shows with the question in Chat and is kept as Chat's screenshots are. A model that can't read pictures gets the window's text, read on this PC."
+    />
+  </Row>
+  <Row setting="assistant-screen-cloud">
+    <Toggle
+      bind:checked={cfg.assistantScreenCloud}
+      label="With cloud models too"
+      desc="Off, the screenshot only goes to a model on this PC. On, it goes to the cloud provider Chat's model runs on too"
+      hint="Network connections in Privacy & data lists each one as “Voice Assistant + the window in front”."
+      disabled={!cfg.assistantScreen}
+    />
+  </Row>
 </Group>
 <!-- Read aloud, anywhere (voice/read_aloud.rs): any selected text, in
      the voice below, with the reading card on the Yap bar. -->

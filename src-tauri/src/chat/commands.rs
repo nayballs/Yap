@@ -94,6 +94,11 @@ pub fn chat_rename(id: u64, title: String) -> Result<String, String> {
 /// PC by Windows' OCR (`snip::ocr`), goes after the question in place of
 /// the pictures (any model takes it); the screenshots stay with the
 /// question, marked so. The reply's `question` is the question as saved.
+///
+/// `think`: Chat's Think button — this one question thought through
+/// (`chat/think.rs`): the model's thinking streams as `{kind: "thinking",
+/// text}`, and the reply's `thinking` (`{text, ms}`) is kept with the
+/// answer.
 #[allow(clippy::too_many_arguments)]
 #[tauri::command]
 pub async fn chat_send(
@@ -106,6 +111,7 @@ pub async fn chat_send(
     turn_id: Option<String>,
     images: Option<Vec<String>>,
     as_text: Option<bool>,
+    think: Option<bool>,
 ) -> Result<serde_json::Value, String> {
     // The screenshots it sends leave Chat's box (`snip/waiting.rs`); a
     // question that fails before its answer gives them back, as the page
@@ -113,7 +119,21 @@ pub async fn chat_send(
     // stopped: those are kept as asked).
     let image_ids = images.unwrap_or_default();
     let taken = if image_ids.is_empty() { Vec::new() } else { crate::snip::waiting::sent(&app, &image_ids) };
-    let out = send_turn(&app, conversation_id, text, scope, voice, on_stream, turn_id, image_ids, as_text).await;
+    let send = send_turn(&app, conversation_id, text, scope, voice, on_stream, turn_id, image_ids, as_text);
+    let (out, thought) = crate::chat::think::with(think.unwrap_or(false), send).await;
+    // Thought through: its thinking kept with the answer, and on the reply.
+    let out = match (out, thought) {
+        (Ok(mut reply), Some(thought)) => {
+            let at = (reply["conversationId"].as_u64(), reply["messageId"].as_str().and_then(|id| id.rsplit(':').next()?.parse::<usize>().ok()));
+            if let (Some(conv), Some(index)) = at {
+                tracing::info!(chars = thought.text.chars().count(), ms = thought.ms, "Chat: an answer thought through");
+                crate::chat::chats::set_thinking(conv, index, thought.clone());
+            }
+            reply["thinking"] = serde_json::to_value(&thought).unwrap_or_default();
+            Ok(reply)
+        }
+        (out, _) => out,
+    };
     if let Err(e) = &out {
         if !e.contains(crate::chat::stream::SUPERSEDED) && !e.contains(crate::chat::stream::STOPPED) {
             crate::snip::waiting::put_back(&app, conversation_id, taken);

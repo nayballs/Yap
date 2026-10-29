@@ -462,6 +462,17 @@ async fn answer_turn(
     // context block is and About you without its clock — or, the context
     // staying in the system prompt, the whole block with it.
     system.push_str(&ending(in_message, &profile, &about, &memory_you));
+    // What came with the question from the screen (the Voice Assistant's
+    // look at the window in front, `assistant/screen.rs`): what the picture
+    // or its text is, or why there's none.
+    if let Some(note) = crate::snip::turn::note() {
+        if in_message {
+            context.push(note);
+        } else {
+            system.push_str("\n\n");
+            system.push_str(&note);
+        }
+    }
     // Asked out loud: a tool model with the web starts with the answer; one
     // read aloud whole — the Voice Assistant, or a question dictated into
     // Chat with spoken replies on (a web answer is said short anyway,
@@ -768,6 +779,9 @@ async fn answer_turn(
     } else if let Some(note) = restored_note {
         reply = format!("{}\n\n{note}", reply.trim_end());
     }
+    // A source of the turn's own (the window's text, read on this PC):
+    // named after the answer's.
+    let sources = crate::snip::turn::with_source(sources);
     // The last model call's tokens: the conversation's context use (a
     // stopped answer's call never finished, so it has none to say).
     let tokens = if stopped { None } else { crate::ai::usage::last_call().as_ref().and_then(crate::chat::chats::MessageTokens::of) };
