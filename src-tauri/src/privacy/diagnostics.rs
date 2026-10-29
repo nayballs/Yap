@@ -327,7 +327,7 @@ static EMAIL: once_cell::sync::Lazy<regex::Regex> =
     once_cell::sync::Lazy::new(|| regex::Regex::new(r"[A-Za-z0-9._%+\-]+@[A-Za-z0-9\-]+(\.[A-Za-z0-9\-]+)*\.[A-Za-z]{2,}").unwrap());
 static LINK: once_cell::sync::Lazy<regex::Regex> =
     once_cell::sync::Lazy::new(|| regex::Regex::new(r#"(?i)\b(https?|wss?|webcal)://([^/\s"'<>?#]+)([^\s"'<>]*)"#).unwrap());
-static PREFIXED_KEY: once_cell::sync::Lazy<regex::Regex> = once_cell::sync::Lazy::new(|| {
+pub(crate) static PREFIXED_KEY: once_cell::sync::Lazy<regex::Regex> = once_cell::sync::Lazy::new(|| {
     regex::Regex::new(r"(?i)\b(sk[-_][A-Za-z0-9_\-]{8,}|gsk_[A-Za-z0-9]{8,}|AIza[0-9A-Za-z_\-]{10,}|xai-[A-Za-z0-9]{8,}|tvly-[A-Za-z0-9_\-]{8,}|bearer\s+[A-Za-z0-9._\-]{8,})").unwrap()
 });
 static LONG_TOKEN: once_cell::sync::Lazy<regex::Regex> =
@@ -862,6 +862,14 @@ pub async fn diagnostics_save(app: AppHandle, window: tauri::WebviewWindow) -> R
 }
 
 async fn pick_path(app: &AppHandle, window: tauri::WebviewWindow, name: &str) -> Result<Option<PathBuf>, String> {
+    pick_zip_path(app, window, name, "Save the diagnostic file").await
+}
+
+/// Windows' Save dialog for a .zip named `name`, parented to `window`, on a
+/// blocking thread; the path, or `None` when cancelled. A test run never
+/// opens it: it names the path first ([`e2e_save_path`]). Also Download
+/// your data's (`export.rs`).
+pub(crate) async fn pick_zip_path(app: &AppHandle, window: tauri::WebviewWindow, name: &str, title: &str) -> Result<Option<PathBuf>, String> {
     #[cfg(debug_assertions)]
     if crate::shell::e2e::active() {
         // A test run never opens Windows' dialog: it names the path first.
@@ -877,7 +885,7 @@ async fn pick_path(app: &AppHandle, window: tauri::WebviewWindow, name: &str) ->
         .dialog()
         .file()
         .set_parent(&window)
-        .set_title("Save the diagnostic file")
+        .set_title(title)
         .set_file_name(name)
         .add_filter("Zip archive", &["zip"]);
     let picked = tauri::async_runtime::spawn_blocking(move || dialog.blocking_save_file()).await.map_err(|e| e.to_string())?;

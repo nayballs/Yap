@@ -1870,6 +1870,21 @@ fn briefs_changed() {
     lock().briefs_dirty = true;
 }
 
+/// Reset app (`privacy/reset.rs`): every pre-meeting brief gone (they
+/// quote notes and memory); the calendars and their meetings stay, and a
+/// due brief is made again from what's left. File I/O only under the lock.
+pub fn forget_briefs() -> usize {
+    let mut s = lock();
+    if !s.started || s.store.briefs.is_empty() {
+        return 0;
+    }
+    let gone = s.store.briefs.len();
+    s.store.briefs.clear();
+    s.briefs_dirty = true;
+    save_store(&s.store);
+    gone
+}
+
 /// Briefs of meetings long over go, and the oldest past [`BRIEF_MAX`].
 fn prune_briefs(store: &mut Store, now: i64) {
     store.briefs.retain(|_, b| b.start > now - BRIEF_KEEP);

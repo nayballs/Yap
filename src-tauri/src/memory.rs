@@ -173,6 +173,24 @@ pub fn items() -> Vec<Item> {
     with_store(|s| s.items.clone())
 }
 
+/// Reset app (`privacy/reset.rs`): everything remembered, what the passes
+/// read and what waited for one, gone — and Undo's copies of them, so
+/// nothing can bring them back. How many items went.
+pub fn reset() -> usize {
+    let gone = with_store(|s| {
+        let gone = s.items.len();
+        *s = Store { version: s.version, next_id: s.next_id, ..Store::default() };
+        save_to_disk(s);
+        gone
+    });
+    if let Ok(mut u) = UNDO.lock() {
+        u.clear();
+    }
+    clear_caches();
+    emit_changed();
+    gone
+}
+
 // ---- app handle, events ------------------------------------------------------------------------
 
 static APP: OnceLock<AppHandle> = OnceLock::new();
