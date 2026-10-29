@@ -1163,6 +1163,73 @@ fn default_output_name() -> String {
         .unwrap_or_else(|| "unknown".to_string())
 }
 
+// ---- The meeting's microphone, as call detection sees it ----
+//
+// `calls/call_audio.rs` compares the microphone "You" records from with the
+// one the call app uses ("Teams is using Contoso H2 but Yap is using
+// Northwind Audio"), and "Use Contoso H2" moves "You" to it for this
+// meeting. The capture thread (or the test player) says which one it has
+// open ([`mic_in_use`]) and takes a move asked for ([`use_mic`]) on its next
+// turn; the gap is silence, as for any device change.
+
+/// The microphone "You" records from now: (endpoint id — empty when it was
+/// opened as Windows' default without a list —, name).
+static MIC: Mutex<Option<(String, String)>> = Mutex::new(None);
+/// A microphone the person asked "You" to move to (endpoint id, name).
+static MIC_ASKED: Mutex<Option<(String, String)>> = Mutex::new(None);
+
+fn note_mic(mic: Option<(String, String)>) {
+    *MIC.lock().unwrap_or_else(|p| p.into_inner()) = mic;
+}
+
+/// The microphone "You" records from while a meeting records: (endpoint
+/// id, empty when unknown; name).
+pub fn mic_in_use() -> Option<(String, String)> {
+    MIC.lock().unwrap_or_else(|p| p.into_inner()).clone()
+}
+
+/// "Use Contoso H2": move "You" to this microphone (endpoint `id`, `name`)
+/// for the rest of this recording. The person's order is left as it is.
+pub fn use_mic(id: &str, name: &str) -> Result<(), String> {
+    if recording_note().is_none() {
+        return Err("No meeting is being recorded".to_string());
+    }
+    tracing::info!("Meeting: moving \"You\" to the call's microphone, as asked");
+    *MIC_ASKED.lock().unwrap_or_else(|p| p.into_inner()) = Some((id.to_string(), name.to_string()));
+    Ok(())
+}
+
+/// The move asked for, if any (the capture thread's turn).
+pub(crate) fn take_mic_asked() -> Option<(String, String)> {
+    MIC_ASKED.lock().unwrap_or_else(|p| p.into_inner()).take()
+}
+
+/// The meeting's capture says which microphone "You" records from now
+/// (the test player, as the real capture does).
+#[cfg(debug_assertions)]
+pub(crate) fn set_mic_in_use(id: &str, name: &str) {
+    note_mic(Some((id.to_string(), name.to_string())));
+}
+
+/// The test player stopped: no microphone, nothing asked for.
+#[cfg(debug_assertions)]
+pub(crate) fn clear_mic_in_use() {
+    note_mic(None);
+    take_mic_asked();
+}
+
+/// How long "You" has heard nothing above the silence gate (ms of meeting
+/// audio), while a meeting records: the call's mute state is read only
+/// then (`call_audio.rs`).
+pub fn you_quiet_ms() -> Option<u64> {
+    let you = {
+        let guard = slot();
+        Arc::clone(&guard.session()?.you)
+    };
+    let l = you.lock().ok()?.levels();
+    Some(l.end.saturating_sub(l.heard) * 1000 / RATE as u64)
+}
+
 /// "Your microphone was disconnected" mid-meeting, where the person is
 /// looking (`meeting_guard::notice`, off this thread); `next`: the one
 /// "You" moved to (empty: none left).
@@ -1189,6 +1256,48 @@ struct MicFollower {
 }
 
 impl MicFollower {
+    /// "Use Contoso H2" (`use_mic`): "You" moves to that microphone, the
+    /// gap silence. A device that won't open leaves "You" where it was.
+    fn asked(&mut self, app: &AppHandle, mic: &mut Option<cpal::Stream>, buf: &AudioBuf, sys: &AudioBuf, overflow: &Arc<AtomicBool>) {
+        use crate::dictation::mics::{Endpoint, Target};
+        let Some((id, name)) = take_mic_asked() else { return };
+        if self.at.as_ref().is_some_and(|ep| ep.id == id) {
+            return;
+        }
+        let ep = crate::dictation::mics::present()
+            .and_then(|l| l.into_iter().find(|e| e.id == id))
+            .unwrap_or(Endpoint { id: id.clone(), name: name.clone(), ..Default::default() });
+        drop(mic.take());
+        keep_in_step(buf, sys);
+        let opened = build_capture_stream(Arc::clone(buf), Arc::clone(overflow), Some(&Target::Mic(ep.clone())), Some(Arc::clone(&self.stopped)))
+            .and_then(|(s, n)| s.play().map(|_| (s, n)).map_err(|e| e.to_string()));
+        match opened {
+            Ok((stream, opened_name)) => {
+                tracing::info!("Meeting: \"You\" moved to the call's microphone");
+                *mic = Some(stream);
+                note_mic(Some((ep.id.clone(), opened_name)));
+                self.at = Some(ep);
+            }
+            Err(e) => {
+                tracing::warn!("Meeting: couldn't move to the call's microphone: {e}");
+                // Back where it was (the order again if that fails too).
+                let target = self.at.clone().map_or(Target::Default, Target::Mic);
+                match build_capture_stream(Arc::clone(buf), Arc::clone(overflow), Some(&target), Some(Arc::clone(&self.stopped)))
+                    .and_then(|(s, _)| s.play().map(|_| s).map_err(|e| e.to_string()))
+                {
+                    Ok(s) => *mic = Some(s),
+                    Err(_) => self.stopped.store(true, Ordering::SeqCst),
+                }
+                warn(
+                    app,
+                    "Couldn't switch microphones",
+                    format!("Yap couldn't open {}, so it's still recording you with the one it had.", crate::dictation::mics::short_name(&name)),
+                    Some("dictation#microphone"),
+                );
+            }
+        }
+    }
+
     fn look(&mut self, app: &AppHandle, mic: &mut Option<cpal::Stream>, buf: &AudioBuf, sys: &AudioBuf, overflow: &Arc<AtomicBool>) {
         use crate::dictation::mics::{self, Target};
         let stopped = self.stopped.swap(false, Ordering::SeqCst);
@@ -1233,6 +1342,7 @@ impl MicFollower {
         match open_mic(buf, overflow, &self.stopped, &self.away) {
             Ok((stream, ep, name)) => {
                 *mic = Some(stream);
+                note_mic(Some((ep.as_ref().map(|e| e.id.clone()).unwrap_or_default(), name.clone())));
                 self.at = ep;
                 if let Ok(mut b) = buf.lock() {
                     b.mic_changed(&name);
@@ -1277,7 +1387,8 @@ fn spawn_device_capture(
                 seen: crate::dictation::mics::generation(),
             };
             let mut mic = match open_mic(&mic_buf, &overflow, &follow.stopped, &[]) {
-                Ok((stream, ep, _)) => {
+                Ok((stream, ep, name)) => {
+                    note_mic(Some((ep.as_ref().map(|e| e.id.clone()).unwrap_or_default(), name)));
                     follow.at = ep;
                     Some(stream)
                 }
@@ -1300,6 +1411,7 @@ fn spawn_device_capture(
             while !stop.load(Ordering::SeqCst) {
                 std::thread::sleep(Duration::from_millis(200));
                 keep_in_step(&mic_buf, &sys_buf);
+                follow.asked(&app, &mut mic, &mic_buf, &sys_buf, &overflow);
                 follow.look(&app, &mut mic, &mic_buf, &sys_buf, &overflow);
                 if polled.elapsed() < OUTPUT_POLL {
                     continue;
@@ -1326,6 +1438,8 @@ fn spawn_device_capture(
             }
             drop(mic);
             drop(sys);
+            note_mic(None);
+            take_mic_asked();
             tracing::info!("Meeting capture streams stopped");
         })
         .map_err(|e| format!("Failed to spawn capture thread: {e}"))?;
@@ -1824,6 +1938,15 @@ struct QuietWatch {
 }
 
 impl QuietWatch {
+    /// Not said after all (the person is muted in the call): the stretch may
+    /// be said later.
+    fn unwarn(&mut self, side: Side) {
+        match side {
+            Side::You => self.you.warned = false,
+            Side::Them => self.them.warned = false,
+        }
+    }
+
     /// The side to warn about now, if any: once per quiet stretch.
     fn check(&mut self, you: Levels, them: Levels, t: QuietTimings) -> Option<Side> {
         let now = you.end.max(them.end);
@@ -1888,6 +2011,12 @@ fn watch_quiet(app: &AppHandle, note_id: u64, watch: &mut QuietWatch, you: &Audi
     let Some(side) = watch.check(levels(you), levels(them), t) else {
         return;
     };
+    // Muted in the call (`call_audio.rs`): of course "You" is quiet. Asked
+    // again on a later turn, so a mic still silent once unmuted is said.
+    if side == Side::You && crate::calls::call_audio::muted_in_call() {
+        watch.unwarn(Side::You);
+        return;
+    }
     let call = crate::calls::meeting_detect::latest_call().map(|(_, name)| name);
     let message = quiet_message(side, t.quiet, call.as_deref());
     tracing::info!(note_id, ?side, "Meeting: one side was quiet while the other talked; telling the person");

@@ -79,6 +79,23 @@
     cfg.meetingDetectApps = { ...(cfg.meetingDetectApps || {}), [id]: on };
   }
   const asking = $derived(meetingDetect.apps.filter(asks));
+
+  // Apps whose calls start notes by themselves (`meetingAutoStartApps`: the
+  // person said yes to "Start notes automatically for Teams calls?",
+  // calls/meeting_detect.rs). One switched off here stays listed until the page
+  // closes, so its row doesn't vanish under the pointer.
+  let autoSeen = $state([]);
+  $effect(() => {
+    for (const id of cfg.meetingAutoStartApps || []) if (!autoSeen.includes(id)) autoSeen.push(id);
+  });
+  const autoApps = $derived(meetingDetect.apps.filter((a) => autoSeen.includes(a.id)));
+  function autoOn(app) {
+    return (cfg.meetingAutoStartApps || []).includes(app.id);
+  }
+  function setAuto(id, on) {
+    const rest = (cfg.meetingAutoStartApps || []).filter((a) => a !== id);
+    cfg.meetingAutoStartApps = on ? [...rest, id] : rest;
+  }
   const appsValue = $derived(
     meetingDetect.apps.length ? `${asking.length} of ${meetingDetect.apps.length} apps` : ''
   );
@@ -184,6 +201,23 @@
       {/each}
     </div>
   </Group>
+  {#if autoApps.length}
+    <Group title="Start notes automatically" id="settings-call-apps-auto">
+      <div class="applist" role="group" aria-label="Start notes automatically in">
+        {#each autoApps as app (app.id)}
+          <div class="approw">
+            <CallAppIcon app={app.id} disabled={!cfg.meetingDetection} />
+            <Toggle
+              bind:checked={() => autoOn(app), (on) => setAuto(app.id, on)}
+              label={app.label}
+              desc="After a 10-second countdown you can cancel"
+              disabled={!cfg.meetingDetection}
+            />
+          </div>
+        {/each}
+      </div>
+    </Group>
+  {/if}
   {#if !cfg.meetingDetection}
     <p class="set-note">Call detection is off, so Yap doesn't ask about any of them.</p>
   {/if}

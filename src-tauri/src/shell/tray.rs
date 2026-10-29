@@ -10,6 +10,10 @@
 //!   tooltip — Windows Update's own "restart required" idiom.
 //! - **Calls** (meeting_detect.rs): while a detected call is live and nothing
 //!   records, "Record this Teams call" sits at the top of the idle menu.
+//! - **The next meeting** (calendar.rs): "Next: Weekly sync in 12 min" at
+//!   the top of the idle menu and in the tooltip; a click opens its note, or
+//!   takes notes once it's on. Its countdown changes the item's text in place
+//!   (no rebuild); the calendar's scheduler refreshes it on its own turns.
 //! - **Copy last dictation** (last.rs): the latest dictation on the
 //!   clipboard, for a paste that went astray. (Paste last transcript and its
 //!   "as said" twin left the tray on 2026-10-25: three ways to reuse one
@@ -65,10 +69,19 @@ fn version_label() -> String {
 }
 
 fn tooltip() -> String {
-    match crate::updates::tray_note() {
+    let mut tip = match crate::updates::tray_note() {
         Some(note) => format!("{} · {}", version_label(), note),
         None => version_label(),
+    };
+    // "Next: Weekly sync in 12 min" (calendar.rs), on a line of its own.
+    if let Some(next) = crate::calendar::tray_tooltip() {
+        tip = format!("{tip}\n{next}");
     }
+    // Windows shows a notification-area tooltip's first 127 characters.
+    if tip.chars().count() > 127 {
+        tip = tip.chars().take(126).collect::<String>() + "\u{2026}";
+    }
+    tip
 }
 
 /// Build the Yap "pac" tray icon (open-mouth circle + sound waves on a
@@ -227,6 +240,10 @@ fn build_menu(app: &AppHandle, state: &str) -> tauri::Result<Menu<Wry>> {
     let call = crate::calls::meeting_detect::tray_item()
         .map(|(id, label)| MenuItem::with_id(app, id, label, true, None::<&str>))
         .transpose()?;
+    // The next meeting on the calendar ("Next: Weekly sync in 12 min").
+    let next = crate::calendar::tray_item()
+        .map(|(id, label)| MenuItem::with_id(app, id, label, true, None::<&str>))
+        .transpose()?;
     let update = crate::updates::tray_item()
         .map(|(id, label, enabled)| MenuItem::with_id(app, id, label, enabled, None::<&str>))
         .transpose()?;
@@ -261,10 +278,13 @@ fn build_menu(app: &AppHandle, state: &str) -> tauri::Result<Menu<Wry>> {
     if let Some(call) = &call {
         items.push(call);
     }
+    if let Some(next) = &next {
+        items.push(next);
+    }
     if let Some(update) = &update {
         items.push(update);
     }
-    if call.is_some() || update.is_some() {
+    if call.is_some() || next.is_some() || update.is_some() {
         items.push(&sep_models);
     }
     let sep_paste = sep()?;
@@ -353,6 +373,12 @@ fn on_menu_event(app: &AppHandle, id: &str) {
                 crate::dictation::transforms::run_soon(app, id, crate::dictation::transforms::Origin::Tray);
             }
         }
+        // The next meeting's note, or notes on it (calendar.rs), off the
+        // main thread: starting the recorder blocks for a moment.
+        crate::calendar::TRAY_ID => {
+            let app = app.clone();
+            std::thread::spawn(move || crate::calendar::on_tray_next(&app));
+        }
         other if other.starts_with("meeting_record:") => {
             // Off the main thread: starting the recorder blocks for a moment
             // and looks at the main window.
@@ -381,8 +407,9 @@ fn on_menu_event(app: &AppHandle, id: &str) {
 }
 
 /// Test mode only: the idle menu's items as it's built now (id, text; the
-/// submenus and separators left out) — with `click`, that item chosen
-/// instead, as a click on it does (a test run's tray is never clicked).
+/// submenus and separators left out), and last `("tooltip", the tooltip)` —
+/// with `click`, that item chosen instead, as a click on it does (a test
+/// run's tray is never clicked).
 #[cfg(debug_assertions)]
 #[tauri::command]
 pub fn e2e_tray(app: AppHandle, click: Option<String>) -> Result<Vec<(String, String)>, String> {
@@ -395,13 +422,15 @@ pub fn e2e_tray(app: AppHandle, click: Option<String>) -> Result<Vec<(String, St
     }
     let menu = build_menu(&app, "idle").map_err(|e| e.to_string())?;
     let items = menu.items().map_err(|e| e.to_string())?;
-    Ok(items
+    let mut out: Vec<(String, String)> = items
         .iter()
         .filter_map(|item| match item {
             tauri::menu::MenuItemKind::MenuItem(m) => Some((m.id().as_ref().to_string(), m.text().ok()?)),
             _ => None,
         })
-        .collect())
+        .collect();
+    out.push(("tooltip".to_string(), tooltip()));
+    Ok(out)
 }
 
 /// The active model + installed set + update and call items + whether
@@ -420,14 +449,18 @@ fn idle_menu_key() -> String {
     let call = crate::calls::meeting_detect::tray_item()
         .map(|(id, label)| format!("{id}:{label}"))
         .unwrap_or_default();
+    // Whether there's a next meeting: its countdown changes the item's text
+    // in place (`apply`), never the menu.
+    let next = crate::calendar::tray_item().is_some();
     let cfg = config::load();
     let transforms: Vec<String> = crate::dictation::transforms::list(&cfg).iter().map(|t| format!("{}={}", t.id, t.name())).collect();
     format!(
-        "{}|{}|{}|{}|{}|{}|{}",
+        "{}|{}|{}|{}|{}|{}|{}|{}",
         cfg.model_size,
         installed.join(","),
         update,
         call,
+        next,
         crate::pasting::text_injector::has_last_transcript(),
         crate::voice::read_aloud::active(),
         transforms.join(",")
@@ -561,6 +594,16 @@ fn apply(app: &AppHandle, guard: &mut Option<MenuCache>, state: &str) {
                 cache.idle = menu;
                 cache.idle_key = key;
                 cache.showing_recording = true; // force reinstall below
+            }
+        }
+    }
+
+    // The next meeting's countdown ("in 12 min" → "in 11 min"): the item's
+    // text, in place.
+    if let Some((id, label)) = crate::calendar::tray_item() {
+        if let Some(item) = cache.idle.get(&id).and_then(|k| k.as_menuitem().cloned()) {
+            if item.text().ok().as_deref() != Some(label.as_str()) {
+                let _ = item.set_text(label);
             }
         }
     }

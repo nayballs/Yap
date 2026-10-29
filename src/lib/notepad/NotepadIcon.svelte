@@ -23,6 +23,7 @@
   {:else if name === 'copy'}<rect x="8.5" y="8.5" width="11" height="11" rx="2.5" /><path d="M15.5 8.5V6.5a2 2 0 0 0-2-2h-7a2 2 0 0 0-2 2v7a2 2 0 0 0 2 2h2" />
   {:else if name === 'x'}<path d="M7 7l10 10M17 7L7 17" />
   {:else if name === 'pause'}<rect x="7" y="5" width="3.2" height="14" rx="1" /><rect x="13.8" y="5" width="3.2" height="14" rx="1" />
+  {:else if name === 'moon'}<path d="M19.5 14.5A7.5 7.5 0 0 1 9.5 4.5a7.5 7.5 0 1 0 10 10z" />
   {:else if name === 'mic'}<rect x="9" y="3" width="6" height="11" rx="3" /><path d="M5.5 11a6.5 6.5 0 0 0 13 0" /><path d="M12 17.5V21" />
   {:else if name === 'plus'}<path d="M12 5v14M5 12h14" />
   {:else if name === 'markdown'}<path d="M14 3.5H7a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8.5z" /><path d="M14 3.5v5h5" /><path d="M9 13.5h6M9 17h4" />

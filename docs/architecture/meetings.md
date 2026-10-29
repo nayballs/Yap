@@ -62,7 +62,15 @@ The meeting recorder and its audio kept on disk, rolling digests and the action 
   `warn`, button Update settings → Dictation → Microphone) or **Retry**
   (none was left: the order again with every change). A microphone that
   merely arrives mid-meeting is left for dictation; the meeting keeps its
-  own. The marker isn't talk (`is_talk`), so digests, the action plan and
+  own. **The meeting's microphone, for call detection** (2026-10-29):
+  the capture thread (and the test player) says which one "You" records
+  from (`mic_in_use`: endpoint id, empty when opened as Windows' default,
+  and name) and takes a move asked for on its next turn (`use_mic`, the
+  mismatch question's **Use Contoso H2**: `MicFollower::asked`, the gap
+  silence, no marker — the person chose it; a device that won't open
+  reopens the one it had and says "Couldn't switch microphones");
+  `you_quiet_ms` (how long "You" has heard nothing) is when
+  `calls/call_audio.rs` reads the call's mute state. The marker isn't talk (`is_talk`), so digests, the action plan and
   the Ask context skip it; Transcribe again keeps it where it was
   (`redo.rs`); the views draw "Your mic was disconnected · now Northwind
   Audio" (`notepadText.js` `transcriptItems` kind `mic`). The test player
@@ -77,7 +85,9 @@ The meeting recorder and its audio kept on disk, rolling digests and the action 
   → General"), in one place (`warn` → `meeting_guard::notice`: the main
   window while it's focused, else the Yap bar, else a Windows notification;
   "Transcription is falling behind" the same way); a dictation counts as the
-  mic heard, not as talk. `activity()` (the recording's note, its audio
+  mic heard, not as talk. Muted in the call (`call_audio::muted_in_call`,
+  2026-10-29): "Yap can't hear your mic" isn't said (`QuietWatch::unwarn`,
+  so a mic still silent once unmuted is). `activity()` (the recording's note, its audio
   clock in ms — captured audio, standing still while none arrives — and a
   talk counter: both sides' talk samples plus talk segments ingested) is
   what `meeting_guard`'s quiet-meeting watch reads each second; the
@@ -289,6 +299,36 @@ The meeting recorder and its audio kept on disk, rolling digests and the action 
   only held, a day; the disk queue against the buffer with a dictation; inserting
   recovered lines); e2e `meeting-audio-kept.spec.js` and
   `meeting-crash.spec.js` (a killed test instance, restarted).
+- **`meetings/sleep.rs`** — **the PC going to sleep mid-meeting** (2026-10-29,
+  Wispr Flow's sleep marker): until then a recording went on across a sleep,
+  its audio clock standing still and every line after the wake dated by it
+  (minutes early). Windows' suspend notification
+  (`PowerRegisterSuspendResumeNotification`, a callback, no window;
+  `powrprof` raw-dylib) → `suspending`: a recording pauses cleanly
+  (`meeting_end::pause_automatically`: last chunk in, audio closed, a stop
+  mark, no summary). The wake (`PBT_APMRESUMEAUTOMATIC`) → `woke`:
+  `meeting_detect::on_wake` (calls learnt again; the call back on the mic
+  within 2 minutes carries on in the same note), then, once the paused
+  recording's last chunk is in, **"Your PC was asleep for 12 min"** in the
+  transcript (`TranscriptSegment::asleep_marker`: `source` "you", no text,
+  `ts` when it slept — or the paused recording's last line, if a clock that
+  ran ahead dated it later, `marker_ts` — and `asleepMs`; put in by time,
+  `notes::insert_transcript`: after the paused recording, before a later
+  one) and, unless it's recording again, **"Your PC was asleep"** where the
+  check-ins go (`meeting_guard::ask`, kind `asleep`, **Resume** →
+  `meeting_start` on the note / **Summarise** → its action plan; gone after
+  10 min). Events `yap-meeting-transcript {noteId}` (the Notes view reloads
+  the open note) and `yap-notes-changed`. The marker isn't talk (`is_talk`),
+  Transcribe again keeps it (`redo.rs`), Markdown export says "_Your PC was
+  asleep for 12 min._", line edits skip it (`transcript_edits.rs`); the views
+  draw it as a divider (`notepadText.js` `transcriptItems` kind `asleep`,
+  `asleepWords`, standing for the paused divider beside it). **Network loss**
+  mid-meeting needs no line: speech is transcribed on this PC, so the
+  transcript has no gap; a cloud model's digests fail and retry after a
+  couple of minutes, caught up before the summary, and a summary written
+  offline fails with Retry. Test mode registers nothing: `e2e_sleep
+  {asleepMs}`. Unit-tested (`span_words`, `marker_ts`, the line's place in
+  `notes.rs`); e2e `call-smarts.spec.js`.
 - **`meetings/meeting_refine.rs`** — **the refined transcript, by itself** when a
   meeting ends (2026-10-24, Wispr Flow's "refined transcript"): the meeting
   transcribed again in the background from its audio on disk, through the
@@ -433,7 +473,12 @@ The meeting recorder and its audio kept on disk, rolling digests and the action 
   `replace`, so no model call and nothing written: `notes/note_edits.rs`). Commands
   `meeting_end(origin)`, `meeting_pause`, `meeting_summarise`,
   `meeting_summary_status`, `meeting_discard`, `meeting_delete`; Rust callers
-  use `end()` / `pause()`. The job first asks the meeting's AI who each
+  use `end()` / `pause()`, and Yap's own stops `end_automatically()` (the
+  length limit, a quiet meeting, a call that ended, a full disk:
+  `meeting_guard::stop_automatically`) / `pause_automatically()` (the PC
+  going to sleep), marked `AUTOMATIC`; every finished recording goes to
+  `meeting_detect::on_recording_finished` (paused, automatic, "Started by
+  mistake?" asked): the auto-start offer, 2026-10-29. The job first asks the meeting's AI who each
   voice still unnamed is (`speakers::naming::ask_model`, "Suggest who's
   speaking" on, a model that can call tools; best-effort), so the plan
   reads the names. **"Your summary is ready"** (2026-10-25, Wispr Flow's

@@ -10,6 +10,8 @@
   import NoteTranscript from './NoteTranscript.svelte';
   import NoteChat from './NoteChat.svelte';
   import MeetingTasks from '../../components/MeetingTasks.svelte';
+  import { openContextMenu, menuKey } from '../../ui/contextMenu.svelte.js';
+  import { selectionMenu } from './noteMenus.js';
 
   /** `notes`: the view's state; `onopensettings(section)`: ControlPanel's Settings. */
   let { notes, onopensettings = null } = $props();
@@ -17,6 +19,18 @@
   const hasSummary = $derived(!!(notes.selected?.enhancedContent || notes.summaryEditing));
   // A meeting note has a Tasks tab (the summary's tasks and the ones added).
   const isMeeting = $derived(notes.selected?.noteType === 'meeting' || !!notes.selected?.transcript?.length);
+  // A transform on My thoughts runs: the box waits (notes/transform.rs).
+  const transformingNotes = $derived(
+    notes.transforming?.noteId === notes.selected?.id && notes.transforming?.field === 'notes'
+  );
+
+  // A right-click (or the ContextMenu key, Shift+F10) on text selected in
+  // My thoughts: the transforms, Cut, Copy, Select all (noteMenus.js). With
+  // nothing selected, the box's own menu (spelling, Paste).
+  function onRawContextMenu(e) {
+    const items = selectionMenu(notes, e.currentTarget, { field: 'notes', openSettings: onopensettings });
+    if (items) openContextMenu(e, items, { label: 'Selected text', row: e.currentTarget });
+  }
 </script>
 
 <section class="editor">
@@ -42,7 +56,7 @@
 
     <!-- Meta chip row (OpenWhispr NoteEditor header): date · attendees ·
          folder, with export at the right. -->
-    <NoteMeta {notes} />
+    <NoteMeta {notes} {onopensettings} />
 
     {#if hasSummary || isMeeting}
       <div class="tabs">
@@ -101,6 +115,13 @@
       </div>
     {/if}
 
+    {#if notes.transforming?.noteId === notes.selected.id}
+      <!-- A saved transform on the note (notes/transform.rs). -->
+      <p class="runline" aria-live="polite">
+        <span class="spin"></span>
+        {notes.transforming.name}…
+      </p>
+    {/if}
     {#if notes.runningAction?.noteId === notes.selected.id || notes.jobRunning}
       <p class="runline" aria-live="polite">
         <span class="spin"></span>
@@ -135,7 +156,7 @@
     {#if notes.tab === 'tasks' && isMeeting}
       <MeetingTasks noteId={notes.selected.id} look="app" />
     {:else if notes.tab === 'enhanced' && (notes.selected.enhancedContent || notes.summaryEditing)}
-      <NoteSummary {notes} />
+      <NoteSummary {notes} {onopensettings} />
     {:else}
       <textarea
         class="raw"
@@ -145,7 +166,11 @@
           ? 'Take rough notes while Yap listens — they get woven into the minutes…'
           : 'Start writing…'}
         bind:value={notes.selected.content}
-        oninput={() => notes.queueSave('content')}
+        readonly={transformingNotes}
+        aria-busy={transformingNotes}
+        oninput={(e) => notes.queueSave('content', e)}
+        oncontextmenu={onRawContextMenu}
+        onkeydown={(e) => menuKey(e, onRawContextMenu)}
       ></textarea>
     {/if}
 

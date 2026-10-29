@@ -525,7 +525,9 @@ fn run(name: &str, args: &Value) -> Value {
                     Err(e) => return e,
                 },
             };
-            match crate::notes::update(id, title, content, folder, None) {
+            // A version of its own in the note's history: Chat's (notes/versions.rs).
+            let chat = crate::notes::versions::How::new(crate::notes::versions::kind::CHAT);
+            match crate::notes::versions::by(chat, || crate::notes::update(id, title, content, folder, None)) {
                 Ok(_) => tool_result(true, json!({ "id": id }), "Updated note".to_string()),
                 Err(e) => tool_result(false, Value::Null, format!("Failed to update note: {e}")),
             }
@@ -776,11 +778,14 @@ fn edit_note(args: &Value) -> Value {
             CHIP.to_string(),
         );
     };
-    let outcome = crate::notes::modify(id, |note| {
-        let title = note.title.clone();
-        let edit = note_text::apply_edit(note, field, old, new);
-        let changed = edit.as_ref().is_ok_and(|e| e.changed);
-        Ok(((edit, title, note.title.clone()), changed))
+    let chat = crate::notes::versions::How::new(crate::notes::versions::kind::CHAT);
+    let outcome = crate::notes::versions::by(chat, || {
+        crate::notes::modify(id, |note| {
+            let title = note.title.clone();
+            let edit = note_text::apply_edit(note, field, old, new);
+            let changed = edit.as_ref().is_ok_and(|e| e.changed);
+            Ok(((edit, title, note.title.clone()), changed))
+        })
     });
     match outcome {
         Err(e) => tool_result(false, Value::Null, e),

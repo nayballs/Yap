@@ -980,6 +980,13 @@ pub struct YapConfig {
     /// Off by default: nothing records without a click.
     #[serde(default)]
     pub meeting_auto_start: bool,
+    /// Call apps whose calls start notes by themselves after the countdown,
+    /// whatever `meeting_auto_start` says (app ids): the person said yes to
+    /// "Start notes automatically for Teams calls?", asked once after a few
+    /// meetings recorded from it (`meeting_detect.rs`). New in 2026-10-29:
+    /// an older Yap drops it on its next save, and those calls ask again.
+    #[serde(default)]
+    pub meeting_auto_start_apps: Vec<String>,
     /// Which call apps it asks about (Settings → Meetings, or "Don't
     /// ask for Discord" on a prompt): app id → the person's choice. An app
     /// without an entry uses its default in `meeting_detect::APPS` (work apps
@@ -1372,6 +1379,7 @@ impl Default for YapConfig {
             meeting_call_names: false,
             meeting_detection: true,
             meeting_auto_start: false,
+            meeting_auto_start_apps: Vec::new(),
             meeting_detect_apps: std::collections::BTreeMap::new(),
             meeting_detect_style: default_meeting_detect_style(),
             meeting_hide_from_capture: true,

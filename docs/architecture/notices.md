@@ -18,7 +18,10 @@ How loud Yap may be: the notice policy (one place, one at a time, held while dic
   bar's card, else a Windows notification, with Open note) — (`window_view`: test runs say for
   themselves whether the window counts as focused, `e2e_focus`). **Rules per
   kind** (`rule`: a bar card's id / a notification's tag): priority (Prompt —
-  call, calendar, meeting-limit, meeting-checkin — > Alert — micBlocked,
+  call (also "Stop taking notes?" and "Switch to Zoom?", 2026-10-29),
+  calendar, meeting-limit, meeting-checkin (also the meeting's other
+  questions: the call on another mic, "Your PC was asleep", "Start notes
+  automatically for Teams calls?"; `meeting_guard::ask`) — > Alert — micBlocked,
   pasteBlocked (an admin app, keys Windows didn't take, "Select a text box
   first": `pasting/text_injector.rs` `Left`, one per failed paste),
   clipboardBusy (edit mode's Ctrl+C left the clipboard alone or couldn't

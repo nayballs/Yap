@@ -9,7 +9,8 @@
 //!   (`dictation/stats.rs`: a row a day, numbers and app names);
 //! - `notes/*.md` and `meetings/*.md` — each note and meeting as Markdown
 //!   (`notes::commands::export_markdown`, what "Save as .md" writes), and
-//!   `notes/notes.json`, the whole store (folders and actions too);
+//!   `notes/notes.json`, the whole store (folders and actions too), and
+//!   `notes/versions.json`, each note's earlier versions (`notes/versions.rs`);
 //! - `tasks.json`, `skills.json` (the person's own Skills), `chats/chats.json` with each chat as Markdown, and
 //!   `memory/` — Memory's own export (`memory::export`) and `memory.json`;
 //! - `dictionary/dictionary.csv` — corrections and snippets, the CSV the
@@ -331,6 +332,8 @@ pub struct Inputs {
     pub notes: Vec<crate::notes::Note>,
     /// notes.json as it is (folders and actions too).
     pub notes_json: String,
+    /// Each note's version history (`notes::versions::export_all`).
+    pub note_versions: Vec<Value>,
     pub chats: Vec<crate::chat::chats::Conversation>,
     pub tasks: Value,
     /// skills.json: the person's own Skills (chat/skills.rs).
@@ -351,7 +354,8 @@ What's in it\n\
 dictation-stats.json is your stats in Home and Insights: a row a day, numbers and the apps you dictated into, \
 never what you said.\n\
 - notes/ and meetings/: each note and meeting as Markdown (its summary, your notes and the transcript). \
-notes/notes.json is all of them as Yap keeps them, with your folders and actions.\n\
+notes/notes.json is all of them as Yap keeps them, with your folders and actions; \
+notes/versions.json, each note's earlier versions (Version history), newest first.\n\
 - chats/: each chat as Markdown, and chats.json.\n\
 - tasks.json: the tasks you added and the ones you archived.\n\
 - skills.json: the Skills you made (your own instructions, run with /name).\n\
@@ -394,6 +398,7 @@ screenshots/: Chat's screenshots (PNG).\n"
         files.push((name, crate::notes::commands::export_markdown(n).into_bytes()));
     }
     files.push(("notes/notes.json".into(), i.notes_json.clone().into_bytes()));
+    files.push(("notes/versions.json".into(), pretty(&i.note_versions)));
 
     // Chats.
     let mut chats: Vec<&crate::chat::chats::Conversation> = i.chats.iter().collect();
@@ -620,6 +625,7 @@ fn inputs(audio: bool) -> Inputs {
         stats: crate::dictation::stats::snapshot(),
         notes: crate::notes::all(),
         notes_json: crate::notes::store_json(),
+        note_versions: crate::notes::versions::export_all(),
         chats: crate::chat::chats::with_all(|c| c.to_vec()),
         tasks: serde_json::to_value(crate::notes::task_store::snapshot()).unwrap_or(Value::Null),
         skills: serde_json::to_value(crate::chat::skills::own()).unwrap_or(Value::Null),
@@ -853,6 +859,7 @@ mod tests {
             stats: json!({ "days": [{ "date": "2026-10-29", "words": 2, "dictations": 1 }] }),
             notes: vec![note.clone(), meeting],
             notes_json: "{\"notes\":[]}".into(),
+            note_versions: vec![json!({ "note": 7, "title": "Allotment: plans?", "versions": [{ "n": 1, "kind": "typed", "text": "Leeks" }] })],
             chats: vec![],
             tasks: json!({ "tasks": [], "archived": [] }),
             skills: json!({ "skills": [{ "id": "s1", "name": "Budget numbers", "command": "budget-numbers", "instructions": "List every amount said.", "runsOn": "meeting" }] }),
@@ -879,6 +886,7 @@ mod tests {
             "history/history.json",
             "history/dictation-stats.json",
             "notes/notes.json",
+            "notes/versions.json",
             "chats/chats.json",
             "tasks.json",
             "skills.json",

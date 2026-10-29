@@ -8,7 +8,9 @@
 //     syncing, google: { available, waiting },
 //     card: { id, kind: 'remind'|'switch', key, title, start, end, with,
 //             serviceLabel, hasLink, brief } | null,
-//     nudge: { afterMeeting }, maxConnections, briefs }
+//     nudge: { afterMeeting }, maxConnections, briefs,
+//     busy: [{ start, end }] }   (busy time of your own in the next day:
+//                                the Meetings view's free gaps leave it out)
 //
 // The card ("Design review · In 1 min") shows as a sticky toast that counts
 // down: Join & take notes / Start notes / Snooze; ✕ or Esc dismisses it. A
@@ -42,6 +44,7 @@ export const calendar = $state({
   nudge: { afterMeeting: false },
   maxConnections: 8,
   briefs: true,
+  busy: [],
 });
 
 /**

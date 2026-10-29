@@ -221,8 +221,8 @@ pub fn rebuild_with_cuts(old: &[TranscriptSegment], old_breaks: &[usize], redone
     let mut replaced = 0;
     for seg in old {
         // (Markers the audio can't give again stay: a dictation, the mic
-        // disconnected.)
-        match recording_of(redone, seg.ts).filter(|_| !seg.dictated && seg.mic.is_none()) {
+        // disconnected, the PC asleep.)
+        match recording_of(redone, seg.ts).filter(|_| !seg.dictated && seg.mic.is_none() && seg.asleep_ms.is_none()) {
             // A line the person edited (or split: two edited lines) stays as
             // they wrote it: no new line takes its place
             // (`notes/transcript_edits.rs`).
@@ -272,7 +272,7 @@ pub fn rebuild_with_cuts(old: &[TranscriptSegment], old_breaks: &[usize], redone
         .filter(|&&b| b > 0 && b <= old.len())
         .map(|&b| {
             let before = &old[b - 1];
-            let upto = match recording_of(redone, before.ts).filter(|_| !before.dictated && before.mic.is_none()) {
+            let upto = match recording_of(redone, before.ts).filter(|_| !before.dictated && before.mic.is_none() && before.asleep_ms.is_none()) {
                 Some(i) => redone[i].end_ms / 1000,
                 None => before.ts,
             };

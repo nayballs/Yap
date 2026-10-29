@@ -120,6 +120,8 @@ function unzip(file) {
 const group = (main) => settingsDialog(main).getByRole('group', { name: 'Your data' });
 
 test('Download your data: everything in one .zip, the audio with the tick box, no key anywhere', async ({ yap, main, shot }, testInfo) => {
+  // A note's earlier version (notes/versions.rs): in notes/versions.json.
+  await yap.invoke('note_update', { id: 101, content: 'Leeks by the shed, beans by the fence, peas by the gate.' });
   await openSettings(main, 'Privacy & data');
   const g = group(main);
   await g.scrollIntoViewIfNeeded();
@@ -144,6 +146,7 @@ test('Download your data: everything in one .zip, the audio with the tick box, n
     'history/history.json',
     'history/dictation-stats.json',
     'notes/notes.json',
+    'notes/versions.json',
     'chats/chats.json',
     'tasks.json',
     'memory/People.md',
@@ -156,6 +159,11 @@ test('Download your data: everything in one .zip, the audio with the tick box, n
     expect(names, want).toContain(want);
   }
   expect(names.some((n) => /^notes\/.* Allotment plans\.md$/.test(n))).toBe(true);
+  const versions = JSON.parse(files['notes/versions.json'].toString('utf8'));
+  expect(versions.find((v) => v.note === 101)?.versions.map((x) => x.text)).toEqual([
+    'Leeks by the shed, beans by the fence, peas by the gate.',
+    'Leeks by the shed, beans by the fence.',
+  ]);
   expect(names.some((n) => /^meetings\/.* Weekly sync\.md$/.test(n))).toBe(true);
   expect(names.some((n) => /^chats\/.* Leek soil\.md$/.test(n))).toBe(true);
   expect(names.filter((n) => n.startsWith('audio/dictations/'))).toHaveLength(1);
@@ -207,6 +215,9 @@ test('Download your data: a big one shows its progress, and Cancel leaves nothin
 });
 
 test('Reset app: names what goes, clears it everywhere, keeps the settings; no restart', async ({ yap, main, shot }, testInfo) => {
+  // A pin and a note's history (notes/pins.rs, notes/versions.rs): they go too.
+  await yap.invoke('note_pin', { id: 101, pinned: true });
+  await yap.invoke('note_update', { id: 101, content: 'Leeks by the shed, beans by the fence, onions too.' });
   // Before: the dictation is on Home.
   await openView(main, 'Home');
   await expect(main.getByText('Pick up the leeks from Example Lane.').first()).toBeVisible();
@@ -219,7 +230,7 @@ test('Reset app: names what goes, clears it everywhere, keeps the settings; no r
   await expect(dialog).toContainText('Clear everything and keep your settings?');
   const goes = dialog.getByRole('list', { name: 'What goes' });
   await expect(goes).toContainText('Your dictation history, and the last day of dictation audio · 1 dictation');
-  await expect(goes).toContainText('Every note and meeting, with their audio (your folders and actions stay) · 1 note, 1 meeting');
+  await expect(goes).toContainText('Every note and meeting, with their audio, earlier versions and pins (your folders and actions stay) · 1 note, 1 meeting');
   await expect(goes).toContainText('Every chat, with its screenshots · 1 chat');
   await expect(goes).toContainText('What Yap remembers about you · 1 thing');
   await expect(goes).toContainText('Your tasks · 1 task');
@@ -256,6 +267,9 @@ test('Reset app: names what goes, clears it everywhere, keeps the settings; no r
   for (const dir of ['meeting-audio', 'recent-audio', 'search-index']) {
     expect(fs.existsSync(path.join(data, dir)), dir).toBe(false);
   }
+  await expectStore(yap, 'note_pins.json', (s) => s.pins.length === 0);
+  const versionsDir = path.join(data, 'note-versions');
+  expect(fs.existsSync(versionsDir) ? fs.readdirSync(versionsDir) : []).toEqual([]);
   const shots = path.join(data, 'chat-images');
   expect(fs.existsSync(shots) ? fs.readdirSync(shots).filter((f) => f.endsWith('.png')) : []).toEqual([]);
 

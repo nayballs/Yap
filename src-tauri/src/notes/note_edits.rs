@@ -277,9 +277,12 @@ pub struct Restored {
 /// [`note_summary_update`] with `previous`.
 #[tauri::command]
 pub fn note_summary_restore(app: AppHandle, id: u64, origin: Option<String>) -> Result<Restored, String> {
-    let restored = crate::notes::modify(id, |note| match restore_ai_summary(note) {
-        Some(previous) => Ok((Restored { state: SummaryState::of(note), previous }, true)),
-        None => Err("There's no summary of Yap's to go back to".to_string()),
+    use crate::notes::versions::{by, kind, How};
+    let restored = by(How::named(kind::RESTORED, "Yap's summary"), || {
+        crate::notes::modify(id, |note| match restore_ai_summary(note) {
+            Some(previous) => Ok((Restored { state: SummaryState::of(note), previous }, true)),
+            None => Err("There's no summary of Yap's to go back to".to_string()),
+        })
     })?;
     tracing::info!(note_id = id, len = restored.state.enhanced_content.len(), "Summary: back to Yap's");
     summary_changed(&app, id, origin.as_deref().unwrap_or(""));
@@ -360,9 +363,12 @@ pub fn note_summary_rate(
 /// Edit a note's summary (its markdown, from the Summary tab's editor).
 #[tauri::command]
 pub fn note_summary_update(app: AppHandle, id: u64, text: String, origin: Option<String>) -> Result<SummaryState, String> {
-    let state = crate::notes::modify(id, |note| {
-        let changed = apply_summary_edit(note, &text, now_ms());
-        Ok((SummaryState::of(note), changed))
+    use crate::notes::versions::{by, kind, How};
+    let state = by(How::new(kind::TYPED), || {
+        crate::notes::modify(id, |note| {
+            let changed = apply_summary_edit(note, &text, now_ms());
+            Ok((SummaryState::of(note), changed))
+        })
     })?;
     tracing::info!(note_id = id, edited = state.summary_edited_ms != 0, len = state.enhanced_content.len(), "Summary edited");
     summary_changed(&app, id, origin.as_deref().unwrap_or(""));

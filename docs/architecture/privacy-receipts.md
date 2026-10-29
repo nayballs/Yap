@@ -223,8 +223,9 @@ uploaded…", **Open a GitHub issue**, Show in folder, Done.
   names — kept when history isn't); each note as `notes/<date> <title>.md` and each
   meeting as `meetings/<date> <title>.md` (`notes::commands::export_markdown`,
   what "Save as .md" writes; `integrations::mcp::is_meeting` tells them apart;
-  names made safe and unique, `file_stem`), and `notes/notes.json` (the whole
-  store, folders and actions too); each chat as `chats/<date> <title>.md`
+  names made safe and unique, `file_stem`), `notes/notes.json` (the whole
+  store, folders and actions too) and `notes/versions.json` (each note's
+  earlier versions, newest first: `notes::versions::export_all`); each chat as `chats/<date> <title>.md`
   (who and when, the model) and `chats/chats.json`; `tasks.json`;
   `skills.json` (the person's own Skills, `chat/skills.rs`); `memory/`
   — Memory's own export's Markdown (`memory::export::files`, About you on
@@ -276,8 +277,9 @@ uploaded…", **Open a GitHub issue**, Show in folder, Done.
 
 - **What goes** (`GOES`, the dialog's words and each one's files): the
   dictation history and the day of dictation audio (`history.json`,
-  `recent-audio/`); every note and meeting with their audio (`notes.json`'s
-  notes — the folders and actions stay —, `meeting-audio/`); every chat with
+  `recent-audio/`); every note and meeting with their audio, earlier
+  versions and pins (`notes.json`'s notes — the folders and actions stay —,
+  `meeting-audio/`, `note-versions/`, `note_pins.json`); every chat with
   its screenshots (`chats.json`, `chat-images/`, the ones waiting in Chat's
   box); memory (`memory.json`, and what the passes had read or were waiting
   to read); tasks (`tasks.json`); the search index (`search-index/`); usage
