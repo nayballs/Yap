@@ -70,7 +70,7 @@
       return;
     }
     error = '';
-    typingWpm = Math.max(1, Math.round(right / 5 / minutes));
+    typingWpm = Math.min(250, Math.max(1, Math.round(right / 5 / minutes)));
     accuracy = Math.round((right / Math.max(typed.length, 1)) * 100);
     if (spokenWpm) {
       speakingWpm = Math.round(spokenWpm);
@@ -87,7 +87,7 @@
 
   async function save() {
     try {
-      await invoke('guide_typing', { wpm: Math.min(typingWpm, 250), speaking: speakingWpm ? Math.min(speakingWpm, 400) : null });
+      await invoke('guide_typing', { wpm: typingWpm, speaking: speakingWpm || null });
     } catch (e) {
       error = String(e);
     }
@@ -130,7 +130,7 @@
     const minutes = (recEnd - recStart) / 60_000;
     recStart = 0;
     if (minutes <= 0.02) return;
-    speakingWpm = Math.max(1, Math.round(words / minutes));
+    speakingWpm = Math.min(400, Math.max(1, Math.round(words / minutes)));
     await save();
     phase = 'done';
     ondone?.({ typingWpm, speakingWpm });

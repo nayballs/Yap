@@ -70,15 +70,15 @@ fn ever_dictated() -> bool {
 /// The pointers due now, for the bar's status. Never with the bar's lock
 /// held (it reads hints.json and, once, the history).
 pub fn status() -> Option<Due> {
+    if crate::notices::notice::tips_off() || !crate::notices::kinds::on("bar-pointer") {
+        return None;
+    }
     #[cfg(debug_assertions)]
     if crate::shell::e2e::active() {
         if !E2E_ON.load(Ordering::SeqCst) {
             return None;
         }
         return due_from(&crate::dictation::coaching::record(), false, HOLD.load(Ordering::SeqCst));
-    }
-    if crate::notices::notice::tips_off() || !crate::notices::kinds::on("bar-pointer") {
-        return None;
     }
     let rec = crate::dictation::coaching::record();
     if rec.dictated {

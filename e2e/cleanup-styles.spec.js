@@ -248,6 +248,8 @@ test('onboarding: with no graphics card for the on-device model, cleanup in the 
   await dialog.getByRole('button', { name: /Show setup guide again/ }).click();
   await expect(onboarding.getByRole('heading', { level: 1, name: 'Welcome to Yap' })).toBeVisible();
   await onboarding.getByRole('button', { name: "I'll choose later" }).click();
+  // Languages, then the microphone.
+  await onboarding.getByRole('button', { name: 'Continue →' }).click();
   await onboarding.getByRole('button', { name: 'Continue →' }).click();
   await expect(onboarding.getByRole('heading', { level: 1, name: 'Make it sound polished' })).toBeVisible();
   const cloud = onboarding.locator('.mode-card[data-recommended="yes"]');

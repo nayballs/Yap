@@ -28,6 +28,8 @@ test('a 4-thread PC without a graphics card: speech on the processor, cloud clea
   await shot(onboarding, '01-model-step-processor');
 
   await onboarding.getByRole('button', { name: "I'll choose later" }).click();
+  // Languages, then the microphone.
+  await onboarding.getByRole('button', { name: 'Continue →' }).click();
   await onboarding.getByRole('button', { name: 'Continue →' }).click();
   await expect(onboarding.getByRole('heading', { level: 1, name: 'Make it sound polished' })).toBeVisible();
   // The cloud card is picked, and says why; the private one isn't "Recommended".
