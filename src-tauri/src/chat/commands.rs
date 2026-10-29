@@ -96,6 +96,11 @@ pub fn chat_rename(id: u64, title: String) -> Result<String, String> {
 /// question, marked so. The reply's `question` is the question as saved.
 /// `skill`: a Skill's command (`/decisions`, a one-tap prompt's), run
 /// across the meetings (`chat/skills.rs`).
+///
+/// `think`: Chat's Think button — this one question thought through
+/// (`chat/think.rs`): the model's thinking streams as `{kind: "thinking",
+/// text}`, and the reply's `thinking` (`{text, ms}`) is kept with the
+/// answer.
 #[allow(clippy::too_many_arguments)]
 #[tauri::command]
 pub async fn chat_send(
@@ -109,6 +114,7 @@ pub async fn chat_send(
     images: Option<Vec<String>>,
     as_text: Option<bool>,
     skill: Option<String>,
+    think: Option<bool>,
 ) -> Result<serde_json::Value, String> {
     // A Skill (`/decisions`, a one-tap prompt): asked across the meetings,
     // its own passages and instructions (chat/skills.rs).
@@ -122,7 +128,21 @@ pub async fn chat_send(
     // stopped: those are kept as asked).
     let image_ids = images.unwrap_or_default();
     let taken = if image_ids.is_empty() { Vec::new() } else { crate::snip::waiting::sent(&app, &image_ids) };
-    let out = crate::chat::skills::with(skill_turn, send_turn(&app, conversation_id, text, scope, voice, on_stream, turn_id, image_ids, as_text)).await;
+    let send = crate::chat::skills::with(skill_turn, send_turn(&app, conversation_id, text, scope, voice, on_stream, turn_id, image_ids, as_text));
+    let (out, thought) = crate::chat::think::with(think.unwrap_or(false), send).await;
+    // Thought through: its thinking kept with the answer, and on the reply.
+    let out = match (out, thought) {
+        (Ok(mut reply), Some(thought)) => {
+            let at = (reply["conversationId"].as_u64(), reply["messageId"].as_str().and_then(|id| id.rsplit(':').next()?.parse::<usize>().ok()));
+            if let (Some(conv), Some(index)) = at {
+                tracing::info!(chars = thought.text.chars().count(), ms = thought.ms, "Chat: an answer thought through");
+                crate::chat::chats::set_thinking(conv, index, thought.clone());
+            }
+            reply["thinking"] = serde_json::to_value(&thought).unwrap_or_default();
+            Ok(reply)
+        }
+        (out, _) => out,
+    };
     if let Err(e) = &out {
         if !e.contains(crate::chat::stream::SUPERSEDED) && !e.contains(crate::chat::stream::STOPPED) {
             crate::snip::waiting::put_back(&app, conversation_id, taken);

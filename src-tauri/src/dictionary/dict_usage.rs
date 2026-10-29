@@ -91,6 +91,24 @@ pub fn used_in(dict: &[DictionaryEntry], text: &str) -> Vec<String> {
     used
 }
 
+/// How many dictionary words `text` has spelled the dictionary's way that
+/// what was `heard` didn't (the words [`used_in`] finds, each once): the
+/// dictionary's fixes in one dictation, for Insights (`dictation/stats.rs`).
+/// A word heard right by itself isn't a fix; one heard in other capitals is.
+pub fn fixed_in(dict: &[DictionaryEntry], heard: &str, text: &str) -> u64 {
+    let used = used_in(dict, text);
+    used.iter()
+        .filter(|k| {
+            // The spelling as the dictionary writes it, exactly, in what was heard.
+            let spelled = dict.iter().filter(|e| !e.snippet && key(e) == **k).any(|e| {
+                let to = e.to.trim();
+                crate::config::term_regex(to).is_some_and(|re| re.find_iter(heard).any(|m| m.as_str() == to))
+            });
+            !spelled
+        })
+        .count() as u64
+}
+
 /// Count one more use of each word in `words`, at `now`.
 fn bump(usage: &mut Usage, words: &[String], now: u64) {
     for w in words {
@@ -235,6 +253,23 @@ mod tests {
         assert_eq!(starred["starred"], true);
         let back: DictionaryEntry = serde_json::from_value(serde_json::json!({ "from": "a", "to": "B" })).unwrap();
         assert!(!back.starred && back.fuzzy && !back.snippet);
+    }
+
+    #[test]
+    fn a_fix_is_a_dictionary_word_written_its_way_that_was_heard_otherwise() {
+        let dict = vec![
+            entry("cuber netties", "Kubernetes"),
+            entry("github", "GitHub"),
+            entry("", "Priya"),
+            DictionaryEntry { snippet: true, ..entry("my address", "1 Example Road") },
+        ];
+        // Heard wrong, or in other capitals: fixed.
+        assert_eq!(fixed_in(&dict, "deploy cuber netties to github", "Deploy Kubernetes to GitHub."), 2);
+        // Heard right by itself: not a fix.
+        assert_eq!(fixed_in(&dict, "ask Priya", "Ask Priya."), 0);
+        // Twice in one dictation: one fix. A snippet is never one.
+        assert_eq!(fixed_in(&dict, "github and github", "GitHub and GitHub, 1 Example Road"), 1);
+        assert_eq!(fixed_in(&[], "a", "b"), 0);
     }
 
     #[test]

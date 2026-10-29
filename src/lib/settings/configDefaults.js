@@ -58,6 +58,9 @@ export const FIELD_DEFAULTS = {
   snipSaveDir: '',
   streamingPartials: true,
   historyEnabled: true,
+  // Keep history: 'always' | 'day' (24 hours) | 'never' ('' = never chosen:
+  // always); 'never' also turns historyEnabled off (dictation/history/keep.rs).
+  historyKeep: '',
   meetingDetection: true,
   meetingAutoStart: false,
   meetingDetectApps: {},
@@ -160,6 +163,11 @@ export const FIELD_DEFAULTS = {
   assistantHotkey: '',
   readHotkey: '',
   assistantAnswerCard: true,
+  // The Voice Assistant sees the window in front when you ask about it
+  // (chat/assistant/screen.rs): on for a model on this PC, off for the cloud.
+  assistantScreen: true,
+  assistantScreenCloud: false,
+  assistantScreenAsked: false,
   spokenLength: '1m',
   openApps: true,
   appsBlocked: [],

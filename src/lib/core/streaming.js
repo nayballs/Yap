@@ -57,9 +57,12 @@ export function streamCall(cmd, args, onEvent) {
   return { promise, stop, supersede, turnId };
 }
 
-/** A streamed answer's state before anything came. */
+/**
+ * A streamed answer's state before anything came. `thinking`: a question
+ * asked to think it through (chat/think.rs), its thinking so far.
+ */
 export function liveAnswer() {
-  return { text: '', chips: [], doing: null, sources: [], web: false, waiting: false, started: false };
+  return { text: '', chips: [], doing: null, sources: [], web: false, waiting: false, started: false, thinking: '' };
 }
 
 /**
@@ -89,6 +92,10 @@ export function applyEvent(state, ev) {
       break;
     case 'waiting':
       s.waiting = !!ev.waiting;
+      break;
+    case 'thinking':
+      // Its thinking so far, whole (shown folded, apart from the answer).
+      s.thinking = ev.text ?? '';
       break;
     default:
       break;

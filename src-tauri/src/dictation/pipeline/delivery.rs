@@ -560,9 +560,10 @@ impl Shared {
                 .map(|c| (c.history_enabled, c.model_size.clone()))
                 .unwrap_or((false, String::new()));
             let audio = self.audio_id.lock().ok().and_then(|mut a| a.take());
+            // How long it was spoken for (words a minute).
+            let secs = self.audio_secs.lock().ok().and_then(|mut s| s.take());
+            let app_name = crate::pasting::text_injector::app_name_for(target).unwrap_or_default();
             if history_enabled {
-                let app_name =
-                    crate::pasting::text_injector::app_name_for(target).unwrap_or_default();
                 // With its words as said when cleanup changed them (Home's
                 // "AI edited · N changes" and "Paste what I said").
                 let ts = crate::dictation::history::record_dictation(crate::dictation::history::Dictation {
@@ -574,6 +575,7 @@ impl Shared {
                     audio: audio.as_deref(),
                     status: not_pasted.map(|_| crate::dictation::history::NOT_PASTED),
                     error: not_pasted,
+                    secs,
                 });
                 // The last paste is this entry (Home can swap it there).
                 if let Some(ts) = ts {
@@ -593,6 +595,11 @@ impl Shared {
             } else if let Some(id) = audio {
                 crate::dictation::recent_audio::discard(&id);
             }
+            // The stats (Home, Insights), whether or not history keeps it.
+            crate::dictation::stats::dictated(
+                &self.app,
+                crate::dictation::stats::Counted { raw: &raw, text: corrected.trim(), said: said.as_deref(), app: &app_name, secs, dict: &dict, at: None },
+            );
         } else if voice_enter {
             // Only "press enter" was said: nothing to paste
             // (which would have refocused the dictation's
@@ -642,14 +649,16 @@ impl Shared {
                 .read()
                 .map(|c| (c.history_enabled, c.model_size.clone()))
                 .unwrap_or((false, String::new()));
+            let secs = self.audio_secs.lock().ok().and_then(|mut s| s.take());
             if history_enabled {
                 let audio = self.audio_id.lock().ok().and_then(|mut a| a.take());
-                crate::dictation::history::record_with(&raw, &text, &model, "yap.exe", audio.as_deref(), None, None);
+                self.record_in_yap(&raw, &text, &model, audio.as_deref(), secs);
                 if let Some(id) = audio {
                     crate::dictation::recent_audio::finished(&id);
                 }
                 let _ = self.app.emit("yap-history-changed", ());
             }
+            self.count_in_yap(&raw, &text, secs);
         }
         let report = Delivered {
             text,
@@ -682,8 +691,9 @@ impl Shared {
                 .map(|c| (c.history_enabled, c.model_size.clone()))
                 .unwrap_or((false, String::new()));
             let audio = self.audio_id.lock().ok().and_then(|mut a| a.take());
+            let secs = self.audio_secs.lock().ok().and_then(|mut s| s.take());
             if history_enabled {
-                crate::dictation::history::record_with(&raw, &text, &model, "yap.exe", audio.as_deref(), None, None);
+                self.record_in_yap(&raw, &text, &model, audio.as_deref(), secs);
                 if let Some(id) = audio {
                     crate::dictation::recent_audio::finished(&id);
                 }
@@ -691,6 +701,7 @@ impl Shared {
             } else if let Some(id) = audio {
                 crate::dictation::recent_audio::discard(&id);
             }
+            self.count_in_yap(&raw, &text, secs);
         }
         let report = Delivered {
             text,
@@ -756,6 +767,9 @@ impl Shared {
     /// The dictation never got transcribed (no model, the model failed):
     /// listed in history as failed with its audio, so it can be run again.
     pub(super) fn list_failed(&self, why: &str) {
+        if let Ok(mut s) = self.audio_secs.lock() {
+            *s = None;
+        }
         let Some(id) = self.audio_id.lock().ok().and_then(|mut a| a.take()) else {
             return;
         };
@@ -784,5 +798,34 @@ impl Shared {
         if let Some(id) = self.audio_id.lock().ok().and_then(|mut a| a.take()) {
             crate::dictation::recent_audio::discard(&id);
         }
+        // Its length too: the next dictation's is its own.
+        if let Ok(mut s) = self.audio_secs.lock() {
+            *s = None;
+        }
+    }
+
+    /// A dictation into one of Yap's own windows (Chat's box, the quick
+    /// note) in history, with how long it was spoken for.
+    fn record_in_yap(&self, raw: &str, text: &str, model: &str, audio: Option<&str>, secs: Option<f32>) {
+        crate::dictation::history::record_dictation(crate::dictation::history::Dictation {
+            raw,
+            text,
+            said: None,
+            model,
+            app: "yap.exe",
+            audio,
+            status: None,
+            error: None,
+            secs,
+        });
+    }
+
+    /// …and in the stats (Home, Insights), whether or not history keeps it.
+    fn count_in_yap(&self, raw: &str, text: &str, secs: Option<f32>) {
+        let dict = self.config.read().map(|c| c.dictionary.clone()).unwrap_or_default();
+        crate::dictation::stats::dictated(
+            &self.app,
+            crate::dictation::stats::Counted { raw, text, said: None, app: "yap.exe", secs, dict: &dict, at: None },
+        );
     }
 }

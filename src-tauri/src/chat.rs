@@ -11,5 +11,6 @@ pub mod note_chats;
 pub mod note_text;
 pub mod skills;
 pub mod stream;
+pub mod think;
 pub mod tools;
 pub mod turn;

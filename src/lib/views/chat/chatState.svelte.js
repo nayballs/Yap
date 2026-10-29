@@ -19,6 +19,7 @@ import { waitingShots, followWaitingShots, removeWaiting, clearWaiting } from '.
 import { questionTokens, isTooLong } from './chatBudget.js';
 import { fmtContext } from '../../core/aiUsage.js';
 import { SkillPicker } from '../../stores/skills.svelte.js';
+import { think, takeThink } from './chatThink.svelte.js';
 
 // The sources an answer's citations point at: its own, else — a follow-up
 // that cites "[1]" from an earlier answer without searching again ("the
@@ -745,6 +746,8 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
     // Out of the box (Rust takes them with the question, chat_send).
     waitingShots.list = [];
     byVoice = false;
+    // Think it through (chat/think.rs): this question only.
+    const thinkIt = takeThink();
     // The next question: the last answer stops talking.
     stopReading();
     // This send's question and bubble carry its `turn`, and are found by
@@ -781,7 +784,7 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
       let ai = mine('assistant');
       if (ai < 0) {
         // Not yet (or no longer: another conversation opened meanwhile).
-        if (made || (!live.started && !live.waiting)) return;
+        if (made || (!live.started && !live.waiting && !live.thinking)) return;
         messages = [...messages, { role: 'assistant', streaming: true, text: '', tools: [], id: null, turn }];
         ai = messages.length - 1;
         made = true;
@@ -793,6 +796,7 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
       m.doing = live.doing;
       m.liveSources = live.sources;
       m.waiting = live.waiting;
+      m.liveThinking = live.thinking;
       followThread();
     };
     const call = streamCall(
@@ -805,6 +809,7 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
         images: shots.length ? shots.map((s) => s.id) : null,
         asText: asText && shots.length ? true : null,
         skill,
+        think: thinkIt || null,
       },
       onEvent
     );
@@ -830,6 +835,7 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
         id: res.messageId ?? null,
         stopped: !!res.stopped,
         tokens: res.tokens ?? null,
+        thinking: res.thinking ?? null,
         revisedFrom: streamed != null && streamed.trim() !== '' && streamed.trim() !== String(res.reply).trim() ? fromHeight : 0,
       };
       // The question as saved: with its screenshots' text when it went as text.
@@ -865,6 +871,7 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
       }
       messages = messages.slice(0, qi);
       input = text; // give the message back
+      if (thinkIt) think.on = true; // …thought through, as it was asked
       // …and its screenshots (Rust puts them back too, yap-chat-waiting).
       waitingShots.list = shots;
       byVoice = voice;

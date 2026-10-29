@@ -111,7 +111,9 @@ Screenshot questions (vision.rs; instead of the scenarios; vision.md):
   --vision                 each case in evals/vision/cases.json (--only picks them by name or kind)
                            through Chat's own turn: the screenshot as a picture (a local model's
                            server gets its projector, --mmproj) and as its text (Windows' OCR)
-  --vision-path <p>        picture | text: one way
+  --vision-path <p>        picture | text: one way; window: the Voice Assistant's look at the
+                           window in front (the picture, the line saying what it is, asked out loud)
+  --think                  each screenshot question thought through (Chat's Think, think.rs)
 Meeting summaries (summaries.rs; instead of the scenarios; summaries.md):
   --summaries              each meeting in evals/summaries/cases.json (--only picks them by name or
                            language) through the action plan's own call, before (the earlier layout,
@@ -312,12 +314,17 @@ fn parse(argv: Vec<String>) -> Result<Args, String> {
                 let p = value()?;
                 a.vision = true;
                 a.vision_path = Some(
-                    super::vision::PATHS
+                    super::vision::ALL_PATHS
                         .iter()
                         .copied()
                         .find(|x| *x == p)
-                        .ok_or_else(|| format!("--vision-path {}, not {p}", super::vision::PATHS.join("|")))?,
+                        .ok_or_else(|| format!("--vision-path {}, not {p}", super::vision::ALL_PATHS.join("|")))?,
                 );
+            }
+            // Screenshot questions thought through (Chat's Think).
+            "--think" => {
+                a.vision = true;
+                super::vision::THINK.store(true, std::sync::atomic::Ordering::SeqCst);
             }
             "--languages" => a.languages = true,
             "--languages-phase" => {

@@ -5,6 +5,8 @@
 //!
 //! In it ([`text_files`], pure):
 //! - `history/history.json` and `history/dictations.csv` — every dictation;
+//!   `history/dictation-stats.json` — the stats Home and Insights show
+//!   (`dictation/stats.rs`: a row a day, numbers and app names);
 //! - `notes/*.md` and `meetings/*.md` — each note and meeting as Markdown
 //!   (`notes::commands::export_markdown`, what "Save as .md" writes), and
 //!   `notes/notes.json`, the whole store (folders and actions too);
@@ -324,6 +326,8 @@ pub struct Inputs {
     /// When it was made ("2026-10-29 14:05", this PC's time).
     pub made: String,
     pub history: Vec<crate::dictation::history::HistoryEntry>,
+    /// dictation_stats.json as it is (`stats::snapshot`).
+    pub stats: Value,
     pub notes: Vec<crate::notes::Note>,
     /// notes.json as it is (folders and actions too).
     pub notes_json: String,
@@ -343,7 +347,9 @@ pub struct Inputs {
 
 const README: &str = "Your data from Yap, made on {made}. You saved this file yourself: Yap never uploaded it.\n\n\
 What's in it\n\
-- history/: every dictation Yap kept. dictations.csv opens in Excel; history.json is the same, in full.\n\
+- history/: every dictation Yap kept. dictations.csv opens in Excel; history.json is the same, in full. \
+dictation-stats.json is your stats in Home and Insights: a row a day, numbers and the apps you dictated into, \
+never what you said.\n\
 - notes/ and meetings/: each note and meeting as Markdown (its summary, your notes and the transcript). \
 notes/notes.json is all of them as Yap keeps them, with your folders and actions.\n\
 - chats/: each chat as Markdown, and chats.json.\n\
@@ -374,6 +380,7 @@ screenshots/: Chat's screenshots (PNG).\n"
     // History.
     files.push(("history/dictations.csv".into(), history_csv(&i.history, when).into_bytes()));
     files.push(("history/history.json".into(), pretty(&i.history)));
+    files.push(("history/dictation-stats.json".into(), pretty(&i.stats)));
 
     // Notes and meetings.
     let mut taken = std::collections::HashSet::new();
@@ -610,6 +617,7 @@ fn inputs(audio: bool) -> Inputs {
     Inputs {
         made: chrono::Local::now().format("%Y-%m-%d %H:%M").to_string(),
         history: crate::dictation::history::all(),
+        stats: crate::dictation::stats::snapshot(),
         notes: crate::notes::all(),
         notes_json: crate::notes::store_json(),
         chats: crate::chat::chats::with_all(|c| c.to_vec()),
@@ -840,7 +848,9 @@ mod tests {
                 audio: None,
                 status: None,
                 error: None,
+                secs: Some(1.2),
             }],
+            stats: json!({ "days": [{ "date": "2026-10-29", "words": 2, "dictations": 1 }] }),
             notes: vec![note.clone(), meeting],
             notes_json: "{\"notes\":[]}".into(),
             chats: vec![],
@@ -867,6 +877,7 @@ mod tests {
             "README.txt",
             "history/dictations.csv",
             "history/history.json",
+            "history/dictation-stats.json",
             "notes/notes.json",
             "chats/chats.json",
             "tasks.json",
@@ -974,6 +985,7 @@ mod tests {
             audio: None,
             status: Some(crate::dictation::history::NOT_PASTED.into()),
             error: Some("The window was gone".into()),
+            secs: None,
         };
         let csv = history_csv(&[e], &when);
         let lines: Vec<&str> = csv.trim_start_matches('\u{feff}').split("\r\n").collect();

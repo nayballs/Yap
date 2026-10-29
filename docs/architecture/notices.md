@@ -43,7 +43,10 @@ How loud Yap may be: the notice policy (one place, one at a time, held while dic
   dictation, dropped unseen after a minute; snippet-saved 10 s),
   language-nudge ("You spoke French · Add it to My
   languages?", `dictation/languages/nudge.rs`, which rate-limits it itself:
-  held over a dictation, dropped unseen after a minute)), held
+  held over a dictation, dropped unseen after a minute), milestone
+  ("You've dictated 1,000 words", `dictation/milestones.rs`, once each:
+  held over a dictation and a meeting, "Show tips" turns it off, dropped
+  unseen after a minute)), held
   while dictating (+ `SETTLE_MS` 1.5 s, and while onboarding is on screen)
   or a meeting records, a cooldown for the same text (micBlocked and
   meeting-notice 10 min), how long it may wait unseen (tips 10 s, a word

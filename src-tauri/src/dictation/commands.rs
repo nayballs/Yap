@@ -457,11 +457,12 @@ pub fn delete_history_entry(app: AppHandle, ts: u64, text: String) -> Result<(),
     Ok(crate::dictation::history::saved()?)
 }
 
-/// Derived stats for the dashboard: totals, today, time saved, streak, and a
-/// 30-day activity series. See `history::stats`.
+/// Home's and Insights' numbers: totals, today, words a minute, time saved,
+/// the streaks, fixes, apps and a 30-day activity series — kept apart from
+/// history, so they outlast it. See `stats.rs`.
 #[tauri::command]
 pub fn get_stats() -> serde_json::Value {
-    crate::dictation::history::stats()
+    crate::dictation::stats::summary()
 }
 
 /// Everything Home needs to draw itself, in one round trip and off the
@@ -476,9 +477,12 @@ pub async fn home_snapshot(limit: Option<usize>) -> Result<serde_json::Value, St
         let cfg = config::load();
         serde_json::json!({
             "history": crate::dictation::history::list(limit.unwrap_or(200)),
-            "stats": crate::dictation::history::stats(),
+            "stats": crate::dictation::stats::summary(),
+            // Welcome back, after 14 days without a dictation (`stats.rs`).
+            "welcome": crate::dictation::stats::welcome(),
             "config": {
                 "historyEnabled": cfg.history_enabled,
+                "historyKeep": crate::dictation::history::keep::of(&cfg),
                 "postProcessEnabled": cfg.post_process_enabled,
                 "modelSize": cfg.model_size,
                 "hotkey": cfg.hotkey,

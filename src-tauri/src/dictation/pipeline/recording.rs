@@ -647,7 +647,11 @@ impl Shared {
             Goes::QuickNote => tracing::info!("Dictation: into the quick note"),
             // Said before the "recording" state, so the capsule's first
             // frame is the assistant's.
-            Goes::Assistant => crate::chat::assistant::listening(&self.app),
+            // (And the window in front, should the question be about it.)
+            Goes::Assistant => {
+                crate::chat::assistant::screen::window_in_front(hwnd);
+                crate::chat::assistant::listening(&self.app);
+            }
             Goes::Paste => {}
         }
         // And what kind of app it is (a terminal, a chat app…): its process,
