@@ -80,6 +80,57 @@ mic, the checklist, the sheet, the daily caps) and e2e-tested
 Bluetooth headset (made-up ones in the tests), the typing test and the
 pointers by a person, What's new with a real update's notes.
 
+**Meeting chips, Skills and one-tap prompts** (2026-10-29, Wispr Flow's
+Notetaker; [meetings.md](./meetings.md), [chat-and-assistant.md](./chat-and-assistant.md#skills-and-one-tap-prompts-2026-10-29)):
+the notepad's Ask sheet (and the Notes view's Ask bar) offers **Make me
+sound smart** while a meeting records — one or two things to say, built
+on the latest talk, the brief and the invite, each citing the line it
+builds on (a pill opens it) — and **Make notes longer** after it (the
+summary written out in more detail, every task kept, Undo); **Skills**,
+saved instructions run with "/" — built-ins (/followup-email, /decisions,
+/risks, /coach, /todos, /weekly-recap) copyable as your own, your own made
+in Settings → Skills (`skills.json`) — on the meeting in its Ask box, or
+across the meetings in Chat and the Meetings view's Ask bar with their own
+passages (open tasks, a week, the latest meeting's talk) and Ask across
+meetings' citations and checks; Chat's and the Meetings view's one-tap
+prompts (Coach me, List my open to-dos, Write a weekly recap); the first
+recorded meeting's two coach marks (once each, `hints.json`); a meeting's
+past chat renamed from Past chats. Unit-tested (the passages, the checks,
+longer notes and their Undo, every Skill rule and gathering, the coach
+marks), e2e-tested with the fake model (`meeting-chips.spec.js`,
+`coach-marks.spec.js`, `notepad.spec.js`'s chips) and the prompts measured
+on the on-device Qwen3.5-4B (`yap.exe eval --chips`,
+[model-evals.md](../model-evals.md#meeting-chips-and-skills-29-oct-2026)). Not
+tried yet: a real meeting (what's worth saying, live), a cloud model on
+these prompts (no paid calls tonight), a Skill's answer read aloud by the
+Voice Assistant (it doesn't run Skills).
+
+**Home's and Insights' stats, kept apart from history** (2026-10-29,
+[dictation.md](./dictation.md), [frontend.md](./frontend.md#views)):
+a content-free row a day in `dictation_stats.json`, written for every
+dictation whether or not history keeps it, so clearing history or keeping
+it 24 hours keeps Insights; the history already there is counted once, and
+what an older Yap saves since. Insights shows **words a minute** over
+speaking time (each new history entry keeps its audio's length; older
+ones are left out of the speed), time saved at that speed and how it's
+worked out, **week streaks** (now and longest, the PC's own weeks), the
+words AI cleanup changed and the dictionary's fixes, this month against
+the same days of last month, and **Share** (the numbers as a picture,
+copied or saved). **Milestones** ("You've dictated 1,000 words", once each)
+go through the notice policy. Privacy & data's history switch is **Keep
+dictation history: always / 24 hours / never** (24 hours asks first, then
+sweeps hourly). Home has a **meetings card** (upcoming from the calendar,
+the latest meeting notes, See all) and **Welcome back** after 14 days
+away, with the shortcut and one new thing. Unit-tested (the weeks across
+their edges and a year's end, the month spans, words a minute, the
+counting and catching up, milestones, welcome back, the 24-hour sweep,
+the cleanup diff's twin, the dictionary's fixes) and e2e-tested
+(`insights-stats.spec.js`, `home-meetings.spec.js`, `history-keep.spec.js`).
+Not tried yet: the measured speed on real dictations (it includes the
+pre-roll and the pause before the stop), a week streak across a real week
+start on a PC whose week starts on Sunday, and the share picture pasted
+into a real chat app.
+
 **Your data, and the microphone's quality** (2026-10-29,
 [privacy-receipts.md](./privacy-receipts.md), [dictation.md](./dictation.md)):
 Settings → Privacy & data → **Download your data** saves one .zip (history
@@ -961,6 +1012,34 @@ idle free, the download from Hugging Face), the processor fallback on a
 small card, the Voice Assistant asking about a screenshot on the on-device
 model.
 
+**The Voice Assistant sees the window in front** (2026-10-29,
+[chat-and-assistant.md](./chat-and-assistant.md), `chat/assistant/screen.rs`):
+a spoken question about the screen ("what's this error?") takes a
+screenshot of the window that was in front when the shortcut was pressed,
+by snip's capture with every Yap window left out; rules in the person's
+languages decide, Chat's model a lone "this"; on a model on this PC by
+default, a cloud model only with "With cloud models too" (asked once); a
+model that can't read images gets the window's text (Windows' OCR), named in
+the sources; the receipts say "Voice Assistant + the window in front".
+**Tested**: unit (the rules in seven languages, the person's languages, the
+yes/no request, where it may go), e2e (`e2e/assistant-screen.spec.js`, fake
+monitors and window), and on the real Qwen3.5-4B (the yes/no request: 14 of
+16 right, median 180 ms; `eval --vision --vision-path window`, model-evals.md).
+**Not yet tried**: in the dev build with a real microphone and real windows
+(the capture of a real window, its HDR, a window moved over it while asking),
+a real cloud model (Groq, Claude) on a real screenshot.
+
+**Think it through** (2026-10-29, chat-and-assistant.md `chat/think.rs`):
+Chat's Think button, one question — the on-device Qwen3.5 thinks to a
+1,500-token budget for that request alone (llamafile keeps `--reasoning
+off`: measured by hand on 0.10.6, no restart), cloud models that reason at
+high effort; "Thinking…" with the thinking folded, then "Thought for 6 s"
+above the answer. **Tested**: unit (each provider's fields, the task-local,
+the stream), e2e (`e2e/chat-think.spec.js`), and on the real 4B by hand and
+through `eval --vision --think`. **Not yet tried**: a real cloud model's
+reasoning (OpenAI, Gemini, Claude, OpenRouter: fields from their docs), the
+dev build.
+
 **Meeting search and Ask across meetings** (2026-10-25,
 [search.md](./search.md)): every meeting and note cut into passages and read
 by EmbeddingGemma-300M on Yap's own llamafile (downloaded on demand from
@@ -1070,6 +1149,8 @@ snippets with several spoken phrases; verify-after-paste beyond Win32 edit
 controls (a web or code editor's hidden input can't say whether a paste
 landed); a JetBrains IDE's or Visual Studio's terminal, and a browser's
 (vscode.dev, Codespaces), still count as the editor;
+Skills don't run from the Voice Assistant, and a meeting's past chat
+can't be renamed from the Notes view (the notepad's Past chats only);
 Authenticode signing (blocked on SignPath approval); audio-history export;
 numbers from a real laptop (the smaller-PC numbers are an emulation on the
 test desktop; a hybrid laptop's DirectML on its card is untried), and

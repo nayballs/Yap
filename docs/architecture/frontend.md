@@ -404,11 +404,49 @@ Flow's dark mode of 19 Oct 2026), for every Yap window.
   of words out and/or in is one change; the cleaned text's line breaks
   kept. The row's menu gets Paste / Copy what I said instead of Copy raw
   transcript there.
+  **The rail and the cards around the feed** (2026-10-29): the stats card's
+  numbers come from `dictation/stats.rs` (they outlast clearing history:
+  "N dictations, counted on this PC · See Insights"); under it
+  **`home/MeetingsCard.svelte`** — "Meetings" with See all (→ Meetings):
+  with a calendar connected, Upcoming / Past tabs (arrow keys between
+  them; Upcoming first when something's coming), three each — a meeting to
+  come opens its note made ahead (`eventAction(ev, 'open')`), a past one its
+  note in Notes (`onopennote`); its notes from `calendar_meeting_notes`
+  after Home's own data (`home/homeMeetings.svelte.js`, again on
+  `yap-notes-changed`). Hidden for someone with no calendar and no
+  meeting notes. Over the feed, **`home/WelcomeBack.svelte`** — after 14
+  days without a dictation (`home_snapshot`'s `welcome`): "Welcome back",
+  the gap in words ("3 weeks", "a month"), the shortcut as keycaps and one
+  new thing (`core/whatsNew.js` `WHATS_NEW`, newest first, dated: the
+  newest after the last dictation is "New", else the newest is "Worth a
+  try"; add a line when a feature lands), its button opening Settings or a
+  view; ✕ or the button answers it (`welcome_back_dismiss`, once per gap).
+  Keep history 24 hours (`historyKeep` 'day'): a quiet notice over the
+  feed, and Keep its audio isn't offered (it goes with its entry). Deleting
+  a dictation says the stats still count it. Home re-pulls on
+  `yap-history-changed` and `yap-stats-changed`, once for the two.
 - **`insights/InsightsView.svelte`** = the stats
-  dashboard promoted out of Settings→History (serif hero number, stat grid,
-  30-day amber heatmap, top-apps-by-words bars from `get_history`, grouped by
-  `appLabel`); Settings → Privacy & data's History group keeps only the
-  enable toggle + clear (the list itself is Home's feed). Then, since
+  dashboard (serif hero number, stat grid, 30-day amber heatmap, top-apps
+  bars grouped by `appLabel`), all from `get_stats` (`dictation/stats.rs`,
+  2026-10-29: counted on this PC, numbers only, kept when history is
+  cleared): the hero says since when and the time saved, with how it's
+  worked out under it ("You talk at 120 words a minute, timed over 14
+  dictations; most people type about 40", or the assumed rates until a few
+  are timed); six cards — words today, **words a minute** ("–" until
+  measured), day streak, **week streak · longest N**, dictations, words per
+  dictation —; **Fixes** — the words AI cleanup changed, the words the
+  dictionary fixed, fixes this month "up 12% on this time last month";
+  then the 30 days by the PC's own dates. **Share** (top right): a menu —
+  Copy as a picture / Save as a picture… — of a card drawn on a canvas in
+  the theme's colours (`insights/shareCard.js`, 1200 × 630: the numbers
+  only, never a word said or an app), copied or saved through Rust
+  (`dictation/stats/share.rs`, the PNG as the call's body).
+  Settings → Privacy & data's History group has **Keep dictation history**
+  (Always / 24 hours / Never, `PrivacyPage.svelte`: "24 hours" asks first
+  when some would go, with the count, `history_counts`; the select is set
+  back meanwhile) and Clear history (the list itself is Home's feed);
+  "You've dictated 1,000 words" is `notices/milestones.js` (a tip toast
+  with See Insights; `yap-open-insights` from the bar card's). Then, since
   2026-10-25, **`insights/AiUsageCard.svelte` — AI usage** (the AI usage
   tracker, [ai-models.md](./ai-models.md) `ai/usage.rs`; shown once any
   call is counted, in Insights' own chunk): "Counted on this PC from each AI
@@ -430,9 +468,10 @@ Flow's dark mode of 19 Oct 2026), for every Yap window.
   view once drawn. Words and formats: `core/aiUsage.js` (shared with Chat's
   context ring, [chat-and-assistant.md](./chat-and-assistant.md#the-context-ring-2026-10-25)).
 - **`insights/TypingCard.svelte` — Typing and speaking** (2026-10-29): the
-  typing test's numbers (`guide_status`: typed and spoken words a minute,
-  and how much faster speaking is) above AI usage, or "Take the typing
-  test"; the test itself (`components/TypingTest.svelte`) opens in the card.
+  typing test's number (`guide_status`) beside the speaking speed over your
+  dictations (`get_stats`' `wpm`), else the test's line read aloud, and how
+  much faster speaking is, above AI usage, or "Take the typing test"; the
+  test itself (`components/TypingTest.svelte`) opens in the card.
 - **`UploadView.svelte`** = local audio-**file** transcription (drop/browse →
   Symphonia decode → chunked transcription on the warm engine with progress +
   cancel — see `dictation/media.rs`); its line names the model ("transcribes with
@@ -576,8 +615,10 @@ Flow's dark mode of 19 Oct 2026), for every Yap window.
   type a short passage — the clock from the first key, Enter or Done to
   stop, the characters typed right ÷ 5 a minute —, then say it with the
   dictation shortcut, timed from the dictation's own `yap-state` and
-  counted from its transcript; both speeds and how much faster speaking
-  is; only the numbers kept, `guide_typing`; Finish works either way). With no microphone the mic step says so. **Finish** opens
+  counted from its transcript — or, once Yap has timed a few dictations,
+  the speaking speed over them (`get_stats`' `wpm`, `dictation/stats.rs`),
+  and no line to say; both speeds and how much faster speaking is; only
+  the numbers kept, `guide_typing`; Finish works either way). With no microphone the mic step says so. **Finish** opens
   Yap's main window on Home (`open_settings`), so setup doesn't end on an
   empty screen. **By hardware** (2026-10-24, `hardware_advice`,
   ai-models.md `ai/hardware.rs`): the model step says where speech runs ("on

@@ -26,6 +26,7 @@
   import { initCalendar, closeConnectDialog } from '../stores/calendar.svelte.js';
   import { initWordSuggestions } from '../notices/wordSuggestions.js';
   import { initSnippetSuggestions } from '../notices/snippetSuggestions.js';
+  import { initMilestones } from '../notices/milestones.js';
   import { initLanguageNudge } from '../notices/languageNudge.js';
   import { initAlerts } from '../notices/alerts.js';
   import { initMicOffers } from '../notices/micOffer.js';
@@ -107,6 +108,14 @@
   // "Type that often? Save it as a snippet" (dictionary/snippet_offer.rs
   // via snippetSuggestions.js), with Open Dictionary once saved.
   initSnippetSuggestions({
+    showView: (view) => {
+      settingsOpen = false;
+      activeView = view;
+    },
+  });
+  // "You've dictated 1,000 words" (dictation/milestones.rs via milestones.js),
+  // with See Insights.
+  initMilestones({
     showView: (view) => {
       settingsOpen = false;
       activeView = view;
@@ -475,7 +484,7 @@
          as they are now. -->
     {#key dataGeneration}
     {#if activeView === 'home'}
-      <HomeView onopensettings={openSettings} onnavigate={(v) => (activeView = v)} />
+      <HomeView onopensettings={openSettings} onnavigate={(v) => (activeView = v)} onopennote={openNoteAt} />
     {:else if activeView === 'insights'}
       {#await import('./insights/InsightsView.svelte') then { default: InsightsView }}
         <InsightsView focus={insightsFocus} onfocused={() => (insightsFocus = null)} />

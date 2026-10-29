@@ -160,6 +160,9 @@ pub fn rule(kind: &str) -> Rule {
         // The Voice Assistant has no AI model, or its model failed: right
         // after its own question.
         "assistantNoModel" | "assistantFailed" => alert,
+        // "Let the Voice Assistant see the window in front?" (a question
+        // about the screen met a cloud model; asked once): right after it.
+        "assistantScreen" => alert,
         // "The on-device AI model didn't start" (local_llm/on_demand.rs): a
         // dictation went without its cleanup — once, and not again within
         // ten minutes.
@@ -200,6 +203,10 @@ pub fn rule(kind: &str) -> Rule {
         // after a dictation, never over one; dropped unseen after a minute.
         "language-nudge" => Rule { max_wait_ms: Some(MIN), ..tip },
         "language-added" => Rule { max_wait_ms: Some(10_000), ..info },
+        // "You've dictated 1,000 words" (dictation/milestones.rs, once each):
+        // after a dictation, never during a meeting; a tip "Show tips"
+        // switches off; gone if unseen a minute.
+        "milestone" => Rule { hold_meeting: true, tip: true, max_wait_ms: Some(MIN), ..tip },
         // "Contoso H2 connected · Use it for dictation?" (mics/offer.rs,
         // rate-limited there): after a dictation, gone if unseen a minute.
         "micOffer" => info,

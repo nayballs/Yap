@@ -2,7 +2,8 @@
 //! gestures, the microphone and its level meter, speech-to-text and which
 //! device runs it, "Taking longer than usual…", the length limit, Upload's
 //! decoding, the chimes, other apps' sound while you talk, history and a
-//! day of dictation audio, saved transforms, My languages.
+//! day of dictation audio, the stats that outlast it and word milestones,
+//! saved transforms, My languages.
 //! How it works: docs/architecture/dictation.md.
 
 pub mod agent_detect;
@@ -27,12 +28,14 @@ pub mod mic_quiz;
 pub mod mic_tips;
 pub mod mics;
 pub mod mic_watch;
+pub mod milestones;
 pub mod mute;
 pub mod partials;
 pub mod pipeline;
 pub mod recent_audio;
 pub mod slow;
 pub mod sound;
+pub mod stats;
 pub mod stt;
 pub mod stt_speed;
 pub mod tips;

@@ -93,6 +93,10 @@ Pre-meeting briefs:
   --brief                  instead of the scenarios: write the brief of each meeting in
                            evals/briefs/*.json (--only picks them) through calendar/brief.rs, and
                            score the model's reply as written and the brief as shown; brief.md
+Meeting chips and Skills (meeting_summary/chips.rs; instead of the scenarios; chips.md):
+  --chips                  each case in evals/chips/cases.json (--only picks them by name or kind:
+                           smart, skill, longer) as the notepad sends it: cited, not made up,
+                           longer notes keeping every task
 Saved transforms (transforms.rs; instead of the scenarios; transforms.md):
   --transforms             each case in evals/transforms/cases.json (--only picks them by name or
                            transform) through llm::transform: names and numbers kept, no answer,
@@ -107,7 +111,9 @@ Screenshot questions (vision.rs; instead of the scenarios; vision.md):
   --vision                 each case in evals/vision/cases.json (--only picks them by name or kind)
                            through Chat's own turn: the screenshot as a picture (a local model's
                            server gets its projector, --mmproj) and as its text (Windows' OCR)
-  --vision-path <p>        picture | text: one way
+  --vision-path <p>        picture | text: one way; window: the Voice Assistant's look at the
+                           window in front (the picture, the line saying what it is, asked out loud)
+  --think                  each screenshot question thought through (Chat's Think, think.rs)
 Meeting summaries (summaries.rs; instead of the scenarios; summaries.md):
   --summaries              each meeting in evals/summaries/cases.json (--only picks them by name or
                            language) through the action plan's own call, before (the earlier layout,
@@ -187,6 +193,7 @@ struct Args {
     strength_phase: Option<&'static str>,
     strength_quick: bool,
     brief: bool,
+    chips: bool,
     transforms: bool,
     vision: bool,
     vision_path: Option<&'static str>,
@@ -300,18 +307,24 @@ fn parse(argv: Vec<String>) -> Result<Args, String> {
             }
             "--strength-quick" => a.strength_quick = true,
             "--brief" => a.brief = true,
+            "--chips" => a.chips = true,
             "--transforms" => a.transforms = true,
             "--vision" => a.vision = true,
             "--vision-path" => {
                 let p = value()?;
                 a.vision = true;
                 a.vision_path = Some(
-                    super::vision::PATHS
+                    super::vision::ALL_PATHS
                         .iter()
                         .copied()
                         .find(|x| *x == p)
-                        .ok_or_else(|| format!("--vision-path {}, not {p}", super::vision::PATHS.join("|")))?,
+                        .ok_or_else(|| format!("--vision-path {}, not {p}", super::vision::ALL_PATHS.join("|")))?,
                 );
+            }
+            // Screenshot questions thought through (Chat's Think).
+            "--think" => {
+                a.vision = true;
+                super::vision::THINK.store(true, std::sync::atomic::Ordering::SeqCst);
             }
             "--languages" => a.languages = true,
             "--languages-phase" => {
@@ -398,6 +411,7 @@ pub fn main(argv: Vec<String>) -> i32 {
         || args.strength
         || args.speakers
         || args.brief
+        || args.chips
         || args.transforms
         || args.vision
         || args.languages
@@ -1483,6 +1497,19 @@ async fn run_all(args: &Args, run_dir: &Path, keys: &HashMap<String, String>, sc
         Vec::new()
     };
     let mut transform_results: Vec<(String, Value)> = Vec::new();
+    let chip_cases = if args.chips {
+        let path = scenarios_dir(args).join("..").join("chips").join("cases.json");
+        match super::chips::load(&path, &args.only) {
+            Ok(c) => c,
+            Err(e) => {
+                eprintln!("{e}");
+                return 2;
+            }
+        }
+    } else {
+        Vec::new()
+    };
+    let mut chip_results: Vec<(String, Value)> = Vec::new();
     let vision_cases = if args.vision {
         let path = scenarios_dir(args).join("..").join("vision").join("cases.json");
         match super::vision::load(&path, &args.only) {
@@ -1745,6 +1772,18 @@ async fn run_all(args: &Args, run_dir: &Path, keys: &HashMap<String, String>, sc
             }
             transform_results.push((m.label.clone(), transforms_result.clone()));
         }
+        let mut chips_result = Value::Null;
+        if !chip_cases.is_empty() {
+            record::set_config(Some(crate::config::YapConfig::default()));
+            record::set_tools_forced(None);
+            let ep = super::cleanup::Endpoint { base_url: &m.base_url, key: &m.key, model: &m.model, provider: &m.provider };
+            println!("  meeting chips and Skills, {} cases …", chip_cases.len());
+            chips_result = super::chips::run(&chip_cases, &ep, args.repeat).await;
+            if chips_result["passed"] != chips_result["cases"] {
+                failed = true;
+            }
+            chip_results.push((m.label.clone(), chips_result.clone()));
+        }
         let mut vision_result = Value::Null;
         if let Some(c) = &vision_cases {
             record::set_config(Some(super::vision::settings(&m.provider, &m.base_url, &m.key, &m.model)));
@@ -1827,6 +1866,7 @@ async fn run_all(args: &Args, run_dir: &Path, keys: &HashMap<String, String>, sc
             "bench": bench_result,
             "brief": brief_result,
             "transforms": transforms_result,
+            "chips": chips_result,
             "vision": vision_result,
             "languages": languages_result,
             "summaries": summaries_result,
@@ -1917,6 +1957,22 @@ async fn run_all(args: &Args, run_dir: &Path, keys: &HashMap<String, String>, sc
             println!(
                 "\n{label}: {}/{} briefs pass; the model wrote {} lines: {} uncited, {} not in their sources, {} with the wrong owner, {} saying an open task was done or a question settled, {} never-say words; {} kept",
                 r["passed"], r["scenarios"], r["claims"], r["uncited"], r["ungrounded"], r["swapped"], r["done"], r["planted"], r["kept"]
+            );
+        }
+    }
+    if !chip_results.is_empty() {
+        let md = record::redact(&super::chips::markdown(&chip_results));
+        let _ = std::fs::write(run_dir.join("chips.md"), &md);
+        for (label, r) in &chip_results {
+            println!(
+                "\n{label}: {}/{} chip cases pass ({}); {} made-up citations and {} dropped tasks fixed by Yap; median {:.1} s; {} tokens",
+                r["passed"],
+                r["cases"],
+                r["by_kind"].as_object().map(|o| o.iter().map(|(k, v)| format!("{k} {}", v.as_str().unwrap_or(""))).collect::<Vec<_>>().join(", ")).unwrap_or_default(),
+                r["made_up_citations"],
+                r["tasks_dropped"],
+                r["median_ms"].as_f64().unwrap_or(0.0) / 1000.0,
+                r["tokens"]
             );
         }
     }

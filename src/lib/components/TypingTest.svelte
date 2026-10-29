@@ -9,7 +9,8 @@
   //
   //   hotkey, mode   the dictation shortcut and how it works
   //   listen         the event subscription (onboarding's raw bridge)
-  //   spokenWpm      a speaking speed Yap already knows: the spoken part is
+  //   spokenWpm      a speaking speed Yap already knows (dictation/stats.rs,
+  //                  over the person's own dictations): the spoken part is
   //                  skipped
   //   ondone({ typingWpm, speakingWpm })
   import { invoke } from '@tauri-apps/api/core';
@@ -216,7 +217,7 @@
       {#if speakingWpm}
         <div class="stat">
           <span class="num" data-testid="speaking-wpm">{speakingWpm}</span>
-          <span class="lbl">words a minute spoken</span>
+          <span class="lbl">{spokenWpm ? 'words a minute spoken, over your dictations' : 'words a minute spoken'}</span>
         </div>
       {/if}
     </div>

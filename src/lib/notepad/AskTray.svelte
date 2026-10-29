@@ -17,11 +17,21 @@
   // copied, read aloud and rated (kept on this PC only). The thread is kept
   // with the meeting (chat/note_chats.rs, core/noteChat.js): it's there again
   // when the note opens, here or in Notes, each turn saved as it's shown;
-  // New chat starts another, and Past chats reopens an earlier one.
+  // New chat starts another, Past chats reopens an earlier one (and renames
+  // the one shown). Since 2026-10-29: Make me sound smart while recording
+  // and Make notes longer after (meeting_assist.rs), and Skills — "/" lists
+  // them (stores/skills.svelte.js), each run on this meeting — whose answers
+  // cite the meeting's lines: a pill opens the line (`onsource`).
   import { tick, onMount } from 'svelte';
+  import { invoke } from '@tauri-apps/api/core';
   import { listen } from '@tauri-apps/api/event';
   import { renderMarkdown } from '../core/markdown.js';
-  import { loadNoteChat, openNoteChat, keepTurn, keptMessage, threadMessages, pastChatItems } from '../core/noteChat.js';
+  import { loadNoteChat, openNoteChat, keepTurn, keptMessage, threadMessages, pastChatItems, renameNoteChat } from '../core/noteChat.js';
+  import { asked as skillAsked, withoutCites } from '../core/skills.js';
+  import { askReplaceSummary } from '../core/noteEdits.js';
+  import { SkillPicker } from '../stores/skills.svelte.js';
+  import SkillMenu from '../components/SkillMenu.svelte';
+  import { toast } from '../ui/toast.svelte.js';
   import { showSaveError } from '../notices/saveErrors.js';
   import { nextModel, modelLine, whereItRuns } from '../core/aiModel.js';
   import { messageItems } from '../core/itemMenus.js';
@@ -37,7 +47,8 @@
    * it, another note); `transcriptShown`: the Transcript tab is up, at its
    * newest line; `windowShown`: the notepad is on screen; `meetingRecording`
    * / `stopping`: any meeting recording, and this one stopping;
-   * `onstop()` / `onresume()`: the round button.
+   * `onstop()` / `onresume()`: the round button; `onsource(s)`: a cited
+   * line of the meeting opened; `onshowsummary()`: the Summary tab up.
    */
   let {
     note,
@@ -49,7 +60,12 @@
     windowShown,
     onstop,
     onresume,
+    onsource = null,
+    onshowsummary = null,
   } = $props();
+
+  // "/" lists the Skills that run on one meeting (chat/skills.rs).
+  const picker = new SkillPicker('meeting');
 
   const lineCount = $derived((note?.transcript || []).length);
   $effect(() => {
@@ -74,6 +90,7 @@
   let askEl = $state(null);
   let threadEl = $state(null);
   let askSeq = 0;
+  $effect(() => picker.update(askInput));
 
   function openAsk() {
     if (open) return;
@@ -141,15 +158,49 @@
       showSaveError(e);
     }
   }
-  /** Past chats: the note's threads, the one shown ticked. */
+  /** Past chats: the note's threads, the one shown ticked (and renamed). */
   function pastChats(e) {
     const id = note?.id;
     if (id == null) return;
     openContextMenu(
       e,
-      pastChatItems(threads, threadId, (conv) => loadThread(id, conv)),
+      pastChatItems(threads, threadId, (conv) => loadThread(id, conv), (conv) => startRename(conv)),
       { label: 'Past chats' }
     );
+  }
+
+  // Renaming the thread shown (Past chats → Rename this chat…): its name in
+  // a box in the sheet's head; Enter saves, Esc cancels.
+  let renaming = $state(null); // { id, title }
+  let renameEl = $state(null);
+  function startRename(conv) {
+    const t = threads.find((x) => x.id === conv);
+    if (!t) return;
+    renaming = { id: conv, title: t.title };
+    tick().then(() => renameEl?.select());
+  }
+  async function finishRename(save) {
+    const r = renaming;
+    renaming = null;
+    if (!save || !r || !note) return;
+    const title = r.title.trim();
+    if (!title || title === threads.find((x) => x.id === r.id)?.title) return;
+    try {
+      await renameNoteChat(note.id, r.id, title, LABEL);
+      threads = (await loadNoteChat(note.id)).threads || threads;
+    } catch (e) {
+      toast({ title: "Couldn't rename the chat", description: String(e), variant: 'destructive' });
+    }
+  }
+  function onRenameKeydown(e) {
+    if (e.key === 'Enter' && !e.isComposing) {
+      e.preventDefault();
+      finishRename(true);
+    } else if (e.key === 'Escape') {
+      e.preventDefault();
+      e.stopPropagation();
+      finishRename(false);
+    }
   }
   onMount(() => {
     let un = null;
@@ -190,11 +241,103 @@
   /** A one-tap helper (a chip): "What did I miss?", or one of meeting_assist's. */
   function runHelper(kind) {
     if (kind === 'catchUp') return ask(null);
+    if (kind === 'longer') return makeLonger();
     if (!note || askBusy) return;
     const id = note.id;
     return converse(MEETING_HELPERS[kind].label, MEETING_HELPERS[kind].busy, (onEvent) =>
       streamCall('meeting_assist', { noteId: id, kind }, onEvent)
     );
+  }
+
+  /** A Skill on this meeting (`/decisions`, the person's own), with their words. */
+  function runSkill(skill, words = '') {
+    if (!note || askBusy) return;
+    const id = note.id;
+    return converse(skillAsked(skill, words), `Running /${skill.command}…`, (onEvent) =>
+      streamCall('meeting_skill', { noteId: id, command: skill.command, words: words || null }, onEvent)
+    );
+  }
+  /** A Skill from the "/" menu: run now, or put in the box to add words. */
+  function pickSkill(skill, run) {
+    if (run) {
+      askInput = '';
+      fitAsk();
+      runSkill(skill);
+    } else {
+      askInput = `/${skill.command} `;
+      fitAsk();
+      askEl?.focus();
+    }
+  }
+
+  /**
+   * "Make notes longer" (meeting_assist.rs `meeting_longer`): Yap's summary
+   * written again in more detail; the Summary tab shows it, and the toast's
+   * Undo puts the one before back (notes/note_edits.rs). An edited summary
+   * goes only when the person says so.
+   */
+  function makeLonger() {
+    if (!note || askBusy) return;
+    if (note.summaryEditedMs) {
+      askReplaceSummary({ run: () => longer(true) });
+      return;
+    }
+    return longer(false);
+  }
+  async function longer(replace) {
+    if (!note || askBusy) return;
+    const id = note.id;
+    const label = MEETING_HELPERS.longer.label;
+    openAsk();
+    askSetup = null;
+    askThread = [...askThread, { id: `${Date.now()}-${++askSeq}`, role: 'user', text: label }];
+    askBusy = true;
+    askBusyText = MEETING_HELPERS.longer.busy;
+    scrollThread();
+    try {
+      // (Every window, this one too, takes the new summary from
+      // `yap-note-changed`: its origin isn't this window's.)
+      const [r, model] = await Promise.all([invoke('meeting_longer', { noteId: id, replace, origin: 'longer' }), nextModel('notes')]);
+      if (note?.id !== id) return;
+      const answer = {
+        id: `${Date.now()}-${++askSeq}`,
+        role: 'assistant',
+        text: 'Your notes are longer now, with more detail from the meeting. They are on the Summary tab.',
+        model,
+      };
+      askThread = [...askThread, answer];
+      onshowsummary?.();
+      toast({
+        title: 'Notes made longer',
+        description: 'Yap rewrote the summary in more detail from the meeting.',
+        action: {
+          label: 'Undo',
+          onClick: () =>
+            invoke('note_summary_put_back', { id, before: r.previous, origin: 'longer' }).catch((e) =>
+              toast({ title: "Couldn't put the summary back", description: String(e), variant: 'destructive' })
+            ),
+        },
+      });
+      await keep(id, [{ role: 'user', text: label }, answer]);
+    } catch (e) {
+      if (note?.id !== id) return;
+      const msg = String(e);
+      if (/No AI model configured|API key/i.test(msg)) askSetup = msg;
+      else askThread = [...askThread, { id: `${Date.now()}-${++askSeq}`, role: 'assistant', text: `I couldn't make the notes longer: ${msg}`, error: true }];
+    } finally {
+      askBusy = false;
+      scrollThread();
+    }
+  }
+
+  /** A pill in an answer ("[2]"): that line of the meeting. */
+  function clickAnswer(e, m) {
+    const a = e.target instanceof Element ? e.target.closest('a.md-passage') : null;
+    if (!a) return;
+    e.preventDefault();
+    const n = Number(a.textContent);
+    const s = (m.sources || []).find((x) => x.n === n);
+    if (s) onsource?.(s);
   }
 
   /**
@@ -250,6 +393,8 @@
         plain: !!r.plain,
         model,
         stopped: !!r.stopped,
+        // The meeting's lines it cites (Make me sound smart, a Skill).
+        sources: r.sources || [],
         revisedFrom: streamed && streamed.trim() !== String(r.answer).trim() ? from : 0,
       };
       askThread = aid ? askThread.map((x) => (x.id === aid ? answer : x)) : [...askThread, answer];
@@ -293,9 +438,18 @@
     if (!q || askBusy) return;
     askInput = '';
     fitAsk();
-    ask(q);
+    // "/decisions what about the budget?": a Skill on this meeting.
+    const run = picker.parse(q);
+    if (run) runSkill(run.skill, run.words);
+    else ask(q);
   }
   function onAskKeydown(e) {
+    // The "/" menu takes its keys first (↑ ↓, Enter runs, Tab fills, Esc).
+    const picked = picker.key(e);
+    if (picked) {
+      if (picked.skill) pickSkill(picked.skill, picked.run);
+      return;
+    }
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       sendTyped();
@@ -337,7 +491,8 @@
   }
   let copiedAnswer = $state(null);
   async function copyAnswer(answer) {
-    if (await copyToClipboard(answer.text)) {
+    // An answer citing the meeting copies without its "[2]"s.
+    if (await copyToClipboard(answer.sources?.length ? withoutCites(answer.text) : answer.text)) {
       copiedAnswer = answer.id;
       setTimeout(() => copiedAnswer === answer.id && (copiedAnswer = null), 1200);
     }
@@ -383,6 +538,18 @@
       <div class="sheethead">
         <!-- The grab handle: a mouse target; the − button is the accessible one. -->
         <button class="handle" aria-hidden="true" tabindex="-1" onclick={close}><span></span></button>
+        {#if renaming}
+          <!-- Past chats → Rename this chat…: Enter saves, Esc cancels, leaving saves. -->
+          <input
+            class="rename"
+            aria-label="Chat name"
+            maxlength="80"
+            bind:this={renameEl}
+            bind:value={renaming.title}
+            onkeydown={onRenameKeydown}
+            onblur={() => finishRename(true)}
+          />
+        {/if}
         <div class="sheetbtns">
           {#if threads.length > 1 || (threads.length === 1 && threads[0].id !== threadId)}
             <button class="sbtn" aria-label="Past chats" data-tip="Past chats" data-more onclick={pastChats}><Icon name="clock" /></button>
@@ -396,11 +563,12 @@
           <p class="threadhint">
             Ask anything about this meeting. Yap answers from the transcript and your notes.
             {#if recordingThis}
-              What did I miss? catches you up on what was said since you last looked, and Questions to ask
-              suggests what to ask next.
+              What did I miss? catches you up on what was said since you last looked, Questions to ask
+              suggests what to ask next, and Make me sound smart offers something worth saying now.
             {:else if helpers.length}
               Follow-up email drafts a recap to send, and Gaps and risks finds what the meeting left open.
             {/if}
+            Type / for Skills: saved instructions, like /decisions.
           </p>
         {/if}
         {#each askThread as m (m.id)}
@@ -429,8 +597,12 @@
                 <div class="mabody plain">{m.text}</div>
               {:else}
                 <!-- renderMarkdown passes no raw HTML and sanitises its output;
-                     while it's written, half-written markdown is closed off. -->
-                <div class="mabody" class:err={m.error} class:quiet={m.quiet}>{@html renderMarkdown(m.streaming ? closePartial(m.text) : m.text)}</div>
+                     while it's written, half-written markdown is closed off.
+                     Its "[2]"s are pills that open the meeting's line. -->
+                <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
+                <div class="mabody" class:err={m.error} class:quiet={m.quiet} onclick={(e) => clickAnswer(e, m)}>
+                  {@html renderMarkdown(m.streaming ? closePartial(m.text) : m.text, m.sources?.length ? { sources: m.sources } : {})}
+                </div>
               {/if}
               {#if !m.streaming && !m.error && !m.quiet}
                 <div class="mabtns">
@@ -488,10 +660,15 @@
       </span>
     </button>
     <div class="ask" class:focus={askFocused}>
+      <!-- "/": the Skills that run on this meeting. -->
+      <SkillMenu {picker} look="paper" onpick={pickSkill} />
       <textarea
         rows="1"
-        placeholder="Ask anything"
+        placeholder={open ? 'Ask anything, or type / for Skills' : 'Ask anything'}
         aria-label="Ask anything"
+        aria-autocomplete="list"
+        aria-controls={picker.open ? 'skill-list' : undefined}
+        aria-activedescendant={picker.open ? `skill-opt-${picker.active}` : undefined}
         bind:this={askEl}
         bind:value={askInput}
         onfocus={() => {
@@ -589,6 +766,56 @@
     justify-content: flex-end;
     gap: 2px;
     margin-top: 2px;
+  }
+  /* Renaming the chat shown: its name, in the head, left of the buttons. */
+  .sheethead {
+    position: relative;
+  }
+  .rename {
+    position: absolute;
+    left: 16px;
+    right: 110px;
+    top: 16px;
+    height: 28px;
+    box-sizing: border-box;
+    padding: 0 8px;
+    border: 1px solid var(--yap-paper-text-2);
+    border-radius: 6px;
+    background: var(--yap-paper-card);
+    color: var(--yap-paper-ink);
+    font: inherit;
+    font-size: 14px;
+    outline: none;
+    box-shadow: 0 0 0 3px var(--yap-paper-ring);
+  }
+  /* An answer's citations: small numbered pills that open the meeting's line. */
+  .mabody :global(.md-cites) {
+    display: inline-flex;
+    gap: 2px;
+    margin-left: 2px;
+    vertical-align: 1px;
+  }
+  .mabody :global(a.md-cite) {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 16px;
+    height: 16px;
+    padding: 0 4px;
+    box-sizing: border-box;
+    border: 1px solid var(--yap-paper-s2-strong);
+    border-radius: 999px;
+    background: var(--yap-paper-s1);
+    color: var(--yap-paper-text-2);
+    font-family: inherit;
+    font-size: 10px;
+    font-weight: 650;
+    line-height: 1;
+    text-decoration: none;
+  }
+  .mabody :global(a.md-cite:hover) {
+    color: var(--yap-paper-ink);
+    border-color: var(--yap-paper-text-2);
   }
   .sbtn {
     position: relative;
@@ -851,6 +1078,7 @@
     display: none;
   }
   .ask {
+    position: relative;
     flex: 1 1 auto;
     min-width: 0;
     min-height: 48px;

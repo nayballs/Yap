@@ -42,7 +42,7 @@ builds and runs out of the checkout: `YAP_EVAL_TARGET_DIR=<builds>/evals`, `--ou
 | `--strength`, `--strength-phase before\|after`, `--strength-quick` | Run the cleanup strength, formatting and text-before-the-cursor cases in `evals/cleanup/strength.json` instead of the scenarios ("Cleanup strength…" below): each before (Medium, as until 25 Oct 2026) and after. |
 | `--brief` | Write the pre-meeting brief of each meeting in `evals/briefs/*.json` instead of the scenarios (below; `--only` picks them, `--repeat` repeats them). |
 | `--transforms` | Run the saved transforms' cases in `evals/transforms/cases.json` instead of the scenarios ("Saved transforms" below; `--only` picks them by name or transform, `--repeat` repeats them). |
-| `--vision`, `--vision-path picture\|text` | Ask the screenshot questions in `evals/vision/cases.json` instead of the scenarios ("Screenshot questions" below): each as a picture and as its text (Windows' OCR), through Chat's own turn; a local model's server gets its projector. |
+| `--vision`, `--vision-path picture\|text\|window`, `--think` | Ask the screenshot questions in `evals/vision/cases.json` instead of the scenarios ("Screenshot questions" below): each as a picture and as its text (Windows' OCR), through Chat's own turn; a local model's server gets its projector. `window`: as the Voice Assistant sends the window in front (the line saying what it is, asked out loud); `--think`: each thought through (Chat's Think). |
 | `--languages`, `--languages-phase before\|after` | Run My languages' cases in `evals/languages/cases.json` instead of the scenarios ("My languages" below): cleanup of French, Spanish and German dictations before and after the language line, and a language shortcut's translation. |
 | `--summaries`, `--summaries-phase before\|after` | Write the action plan of each meeting in `evals/summaries/cases.json` instead of the scenarios ("Meeting summaries" below): before (the earlier layout, no language line) and after, judged on the language, tasks under their owners, the headings, the recap and the decisions' reasons. |
 | `--search`, `--embed <gguf>`, `--embed-ngl <n>` | Meeting search instead of the scenarios: recall@k for keyword, meaning and hybrid search over `evals/search/meetings.json`, then each `--model`'s Ask across meetings answers checked for citations of the right lines ("Meeting search" below). The embedding model: `--embed` (else the installed app's, read-only, else downloaded into `--models-dir`), on the card unless `--embed-ngl 0`. |
@@ -252,6 +252,28 @@ a result Yap had to strip a preamble from is counted (`stripped`). About
 and result), the numbers in `summary.json` (`models[].transforms`).
 `eval::transforms`' unit tests check the file reads and every transform in
 it is one Yap has (≥ 3 cases per built-in), and the judge.
+
+### Meeting chips and Skills (`--chips`)
+
+```bash
+yap.exe eval --chips --model local:<4b.gguf> --ngl 999
+```
+
+Each case in `evals/chips/cases.json` is a fictional meeting (title,
+attendees, typed notes, Yap's summary, `[side, words]` lines) and what's
+asked of it: `smart` (the notepad's Make me sound smart), `skill` (a
+built-in Skill's command and the person's `words` with it) or `longer`
+(Make notes longer). Each goes through the app's own inputs and checks
+(`meeting_summary/chips.rs`: the numbered passages, `checked`,
+`clean_longer`, the action plan's checks) on the meeting's reply cap and
+temperature, and is judged as the app shows it: `contains_any` (it's
+about what was said), `not_contains` (a made-up place, sum or claim),
+`cites` (at least one real passage, and not marked as tied to none),
+`max_bullets`; longer notes must be a fifth longer and keep every task.
+Made-up citation numbers and tasks the model dropped are counted, though
+Yap fixes both. `chips.md` in the run folder, `summary.json`
+(`models[].chips`). `eval::chips`' unit tests check the file reads, each
+kind has ≥ 2 cases and every request fits an 8k model with its reply.
 
 ### Screenshot questions (`--vision`)
 
@@ -2484,3 +2506,70 @@ included), and right where it hasn't: a layout, a chart, a switch. 5 of the 22 p
 answers first called `search_notes` (Chat's tools) and so sent the picture twice (the tool
 loop re-sends the question): 6.7–13.8k prompt tokens, still 1.1–1.6 s. Both ways stay on this
 PC; OCR stays the way for every model that can't read images.
+
+## Meeting chips and Skills (29 Oct 2026)
+
+`yap.exe eval --chips` (above) on the on-device default, Qwen3.5-4B Q4_K_M, on this PC's
+graphics card (`--ngl 999`, 8K context, MTP on), each of the 9 cases in
+`evals/chips/cases.json` twice. No cloud model was run (no paid calls); the cloud providers
+get the same messages.
+
+| Run | Passed | Smart | Skill | Longer | Fixed by Yap | Median |
+|---|---|---|---|---|---|---|
+| First prompts | 7/9 | 2/3 | 3/4 | 2/2 (but see below) | 1 made-up citation | 0.6 s |
+| Final | **18/18** | 6/6 | 8/8 | 4/4 | 1 made-up citation | 1.0 s |
+
+What the first run showed, and what changed:
+
+- **One passage, a wrong number**: over a short meeting (one passage) the 4B cited "[3]";
+  Yap took it out and the answer was marked as tied to no moment. With one passage any
+  number can only be that one: `chips::checked` puts it right.
+- **A Skill's instructions in the system prompt** were half ignored: "/decisions about the
+  dates only" over a meeting that agreed Lisbon and May got "No decisions were made". The
+  instructions (and the person's words) now come last, after the meeting's passages
+  (`meeting_assist::skill_messages`): 8/8.
+- **Make notes longer** with the notes first and the meeting after: the 4B copied the whole
+  input back (headings, transcript) and wrote only a recap — a "pass" the judge then learnt
+  to catch (an echoed meeting, a lost heading). The meeting now comes first in `<meeting>`
+  tags, the notes last in `<notes>` tags, and a last line asks for them about twice as long,
+  never unchanged (once, the 4B sent them back as they were); `clean_longer` keeps what's in
+  `<notes>` when a reply echoes them. 4/4, every task and heading kept, no echo. Its
+  details are drawn from the meeting, though a 4B can still hang one on the wrong person
+  ("Alice requested…" for what You asked): the summary is the person's to read over, and
+  Undo is one click.
+
+Make me sound smart's answers stayed one or two short, specific lines tied to the latest
+talk ("Since the venue needs the final headcount before confirming the menu, can we get
+that number approved by Thursday…"), never a made-up number or name in the 6 runs.
+
+## The Voice Assistant's window, and Think (29 Oct 2026)
+
+Qwen3.5-4B Q4_K_M with its projector on llamafile 0.10.6 with the sidecar's arguments
+(`--reasoning off`, MTP), on an RTX 5070 Ti shared with other builds.
+
+**The window in front** (`--vision --vision-path window`: the screenshot as the Voice
+Assistant sends it, with `assistant/screen.rs`'s line saying what it is, asked out loud —
+scope "assistant", short spoken answers): **11/11**, 0.9–2.4 s, ~3,250–3,450 prompt tokens.
+Run folder `20261029-180637-qwen-qwen3.5-4b-q4-k-m`.
+
+**A lone "this"**: the yes/no request (`screen::ASK_PROMPT`, `ask_messages`, 4 tokens,
+temperature 0), sent by hand to the same server with exactly that prompt and message:
+**14 of 16** right, median 180 ms, slowest 0.5 s. Ten without an earlier answer ("Is this
+right?", "How do I fix this?", "What does that error mean?", "¿Esto funciona?"…) should be
+yes: 9 were ("Est-ce que ça marche ?" was a no). Six after an answer they're about ("Is this
+right?" after "The capital of Australia is Canberra.") should be no: 5 were ("Can you move
+this one to Friday?" after a calendar answer was a yes).
+
+**Think, per request** (by hand, then `--vision --think`): with `--reasoning off` on the
+server, `chat_template_kwargs: {"enable_thinking": true}` makes one request think and the
+next answers as before (0.1 s, no thinking): no restart. Uncapped, the 4B thought for 4,096
+tokens about "A bat and a ball cost $1.10…" and never answered (`finish_reason: "length"`);
+`thinking_budget_tokens: 300` answered it in 1.1 s; 1,500 took ~1,350 tokens (5.3 s) on a
+logic puzzle and 200 on "the capital of Australia" (0.8 s), MTP drafting throughout (~250
+tokens/s). Forced to stop at the budget, the answer began "</think>" unless
+`reasoning_budget_message` was set (a per-request field too). `reasoning_effort` did
+nothing; `reasoning_budget_tokens` didn't cap it (the thinking spilt into the answer). With
+tools offered it thought briefly, then called the tool. Through Chat's own turn (`--think`,
+five screenshot questions with the picture): **5/5**, 357–835 characters of thinking each,
+2.5–4.6 s (8.7 s for the first, with the projector's first image), no "</think>" in any
+answer. Run folder `20261029-181226-qwen-qwen3.5-4b-q4-k-m`.

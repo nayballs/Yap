@@ -1,15 +1,18 @@
 <script>
-  // Insights' "Typing and speaking" (2026-10-29): the typing test's numbers
-  // (shell/guide.rs: your typing speed and the line read aloud, words a
-  // minute, as the first-run setup or this card last took them) side by
-  // side, and the test itself here (components/TypingTest.svelte), taken
-  // again or for the first time. Only the numbers are kept.
+  // Insights' "Typing and speaking" (2026-10-29): the typing test's number
+  // (shell/guide.rs: your typing speed, words a minute, as the first-run
+  // setup or this card last took it) beside your speaking speed — over your
+  // own dictations once Yap has timed a few (dictation/stats.rs `wpm`), else
+  // the test's line read aloud — and the test itself here
+  // (components/TypingTest.svelte), taken again or for the first time. Only
+  // the numbers are kept.
   import { invoke } from '@tauri-apps/api/core';
   import { onMount } from 'svelte';
   import TypingTest from '../../components/TypingTest.svelte';
 
   let guide = $state(null);
   let cfg = $state(null);
+  let measured = $state(null);
   let testing = $state(false);
 
   async function read() {
@@ -17,6 +20,11 @@
       guide = await invoke('guide_status');
     } catch {
       guide = null;
+    }
+    try {
+      measured = (await invoke('get_stats'))?.wpm ?? null;
+    } catch {
+      measured = null;
     }
   }
 
@@ -28,7 +36,7 @@
   });
 
   const typing = $derived(guide?.typingWpm ?? null);
-  const speaking = $derived(guide?.speakingWpm ?? null);
+  const speaking = $derived(measured ?? guide?.speakingWpm ?? null);
   const times = $derived(typing && speaking ? speaking / typing : null);
 </script>
 
@@ -39,6 +47,7 @@
       <TypingTest
         hotkey={cfg?.hotkey ?? ''}
         mode={cfg?.recordingMode ?? 'toggle'}
+        spokenWpm={measured}
         ondone={() => read()}
       />
       <button type="button" class="link" onclick={() => (testing = false)}>Close the test</button>
@@ -52,7 +61,7 @@
       {#if speaking}
         <div class="stat">
           <span class="num">{speaking}</span>
-          <span class="lbl">words a minute spoken</span>
+          <span class="lbl">{measured ? 'words a minute spoken, over your dictations' : 'words a minute spoken'}</span>
         </div>
       {/if}
       <div class="say">

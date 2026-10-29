@@ -10,6 +10,9 @@
   // "AI edited · N changes" (`said` beside `text`, lib/core/wordDiff.js) — and
   // opens into what changed, with **Paste what I said** (pasting/as_said.rs: swapped
   // in its app right after the dictation, else copied).
+  // The stats rail's numbers outlast the history (dictation/stats.rs); under
+  // it, the meetings coming up and the latest meeting notes (MeetingsCard),
+  // and over the feed, once per return after 14 days away, Welcome back.
   import { invoke } from '@tauri-apps/api/core';
   import { listen } from '@tauri-apps/api/event';
   import { onMount, tick } from 'svelte';
@@ -23,8 +26,12 @@
   import { MODELS } from '../../core/speechModels.js';
   import { attention } from '../../stores/attention.svelte.js';
   import { wordDiff } from '../../core/wordDiff.js';
+  import { calendar } from '../../stores/calendar.svelte.js';
+  import WelcomeBack from './WelcomeBack.svelte';
+  import MeetingsCard from './MeetingsCard.svelte';
+  import { homeMeetings, loadPastMeetings } from './homeMeetings.svelte.js';
 
-  let { onopensettings = null, onnavigate = null } = $props();
+  let { onopensettings = null, onnavigate = null, onopennote = null } = $props();
   // Settings' live "needs attention" items: no speech model yet means the
   // hotkey can't do anything, so the empty feed says that first.
   const noSpeechModel = $derived(attention.items.some((i) => i.section === 'models'));
@@ -32,6 +39,12 @@
   let entries = $state([]);
   let stats = $state(null);
   let historyEnabled = $state(true);
+  // Keep history: 'always' | 'day' | 'never' (dictation/history/keep.rs).
+  let historyKeep = $state('always');
+  // Welcome back ({ since, days, back }), when it's due (dictation/stats.rs).
+  let welcome = $state(null);
+  // The meetings card: for someone with a calendar or a meeting noted.
+  const meetingsShown = $derived(calendar.connections.length > 0 || homeMeetings.past.length > 0);
   let hotkeyLabel = $state('F9');
   let editHotkeyLabel = $state('');
   let assistantHotkeyLabel = $state('');
@@ -115,9 +128,11 @@
     }
     entries = snap?.history || [];
     stats = snap?.stats ?? null;
+    welcome = snap?.welcome ?? null;
     const cfg = snap?.config;
     if (cfg) {
       historyEnabled = cfg.historyEnabled !== false;
+      historyKeep = cfg.historyKeep || 'always';
       cleanupEnabled = cfg.postProcessEnabled === true;
       activeModel = cfg.modelSize || '';
       if (cfg.hotkey) hotkeyLabel = formatHotkeySpec(cfg.hotkey);
@@ -131,15 +146,30 @@
     if (!tipBrowsed && stats && (stats.totalTranscriptions ?? 0) === 0) tipIndex = FIRST_TIP;
   }
 
+  // Both events come after a dictation: one re-pull for the two.
+  let refreshQueued = false;
+  function refreshSoon() {
+    if (refreshQueued) return;
+    refreshQueued = true;
+    setTimeout(() => {
+      refreshQueued = false;
+      refresh();
+    }, 60);
+  }
+
   onMount(() => {
-    refresh();
+    // The meeting notes once Home's own data is in (MeetingsCard).
+    refresh().then(loadPastMeetings);
     // History changed (a dictation or upload saved, an entry deleted, all
     // cleared) → re-pull. Not `yap-transcript`: a dictation emits that before
-    // it pastes and saves, so a re-pull on it could miss the new entry.
-    let un;
-    listen('yap-history-changed', () => refresh()).then((u) => (un = u));
+    // it pastes and saves, so a re-pull on it could miss the new entry. The
+    // stats changed (a dictation counted, history kept or not) → the same.
+    const uns = [];
+    listen('yap-history-changed', refreshSoon).then((u) => uns.push(u));
+    listen('yap-stats-changed', refreshSoon).then((u) => uns.push(u));
+    listen('yap-notes-changed', () => loadPastMeetings()).then((u) => uns.push(u));
     return () => {
-      un && un();
+      uns.forEach((u) => u && u());
       stopPlaying();
     };
   });
@@ -322,7 +352,7 @@
     askConfirm({
       title: 'Delete this dictation?',
       body: e.text
-        ? `“${preview}” leaves your history and stats.${e.audio ? ' Its audio goes too.' : ''} The text you dictated stays where Yap typed it.`
+        ? `“${preview}” leaves your history.${e.audio ? ' Its audio goes too.' : ''} Your stats still count it, and the text you dictated stays where Yap typed it.`
         : 'It leaves your history, and its audio goes too.',
       run: () => remove(e),
       returnFocus: rowEls[rowKey(e)],
@@ -391,7 +421,8 @@
           : null,
         e.audio ? { label: playing === rowKey(e) ? 'Stop playing' : 'Play', icon: playing === rowKey(e) ? 'stop' : 'play', onselect: () => play(e) } : null,
         e.audio ? { label: 'Save audio…', icon: 'download', onselect: () => saveAudio(e) } : null,
-        e.audio
+        // (Not while history keeps 24 hours: it goes with its entry.)
+        e.audio && historyKeep !== 'day'
           ? e.keep
             ? { label: "Don't keep its audio", onselect: () => setKeep(e, false) }
             : { label: 'Keep its audio', onselect: () => setKeep(e, true) }
@@ -433,6 +464,9 @@
 
     <div class="cols">
       <div class="feed">
+        {#if welcome}
+          <WelcomeBack {welcome} {hotkeyLabel} {onopensettings} {onnavigate} ondismiss={() => (welcome = null)} />
+        {/if}
         <div class="hero">
           <div class="herotext">
             {#if tipIndex === 0}
@@ -514,8 +548,13 @@
 
         {#if !historyEnabled}
           <div class="notice">
-            History is turned off, so new dictations won't appear here.
+            History is turned off, so new dictations won't appear here. Your stats still count them.
             <button class="link" onclick={() => onopensettings?.('privacy#history')}>Turn it on in Settings → Privacy & data</button>
+          </div>
+        {:else if historyKeep === 'day'}
+          <div class="notice">
+            History keeps the last 24 hours: each dictation goes a day after you say it.
+            <button class="link" onclick={() => onopensettings?.('privacy#history')}>Change it in Settings → Privacy & data</button>
           </div>
         {/if}
 
@@ -629,7 +668,7 @@
                           <button class="retry" disabled={!!running} onclick={() => rerun(e)}>
                             {running === rowKey(e) ? 'Running…' : e.status === 'cancelled' ? 'Transcribe' : 'Run again'}
                           </button>
-                          {#if e.status === 'cancelled'}
+                          {#if e.status === 'cancelled' && historyKeep !== 'day'}
                             <button class="retry" aria-pressed={!!e.keep} onclick={() => setKeep(e, !e.keep)} title={e.keep ? 'Kept until you delete it: let it go after a day' : 'Keep its audio past the day'}>
                               {e.keep ? 'Kept' : 'Keep'}
                             </button>
@@ -676,8 +715,9 @@
         {/if}
       </div>
 
-      {#if stats && (stats.totalTranscriptions ?? 0) > 0}
+      {#if (stats && (stats.totalTranscriptions ?? 0) > 0) || meetingsShown}
         <aside class="rail">
+          {#if stats && (stats.totalTranscriptions ?? 0) > 0}
           <div class="statcard">
             <div class="stat">
               <span class="n">{fmtNum(stats.totalWords)}</span>
@@ -698,9 +738,14 @@
             <div class="statrule"></div>
             <p class="statfoot">
               {fmtNum(stats.totalTranscriptions)}
-              {stats.totalTranscriptions === 1 ? 'dictation' : 'dictations'}, stored on this PC.
+              {stats.totalTranscriptions === 1 ? 'dictation' : 'dictations'}, counted on this PC.
+              <button class="link" onclick={() => onnavigate?.('insights')}>See Insights</button>
             </p>
           </div>
+          {/if}
+          {#if meetingsShown}
+            <MeetingsCard {onnavigate} {onopennote} />
+          {/if}
         </aside>
       {/if}
     </div>
@@ -1243,6 +1288,9 @@
     flex: 0 0 232px;
     position: sticky;
     top: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
   }
   .statcard {
     display: flex;

@@ -18,6 +18,8 @@ import { DEFAULT_PROMPT, MAX_SHOTS, visionRefused, pastedImage, keepPasted } fro
 import { waitingShots, followWaitingShots, removeWaiting, clearWaiting } from './chatShots.svelte.js';
 import { questionTokens, isTooLong } from './chatBudget.js';
 import { fmtContext } from '../../core/aiUsage.js';
+import { SkillPicker } from '../../stores/skills.svelte.js';
+import { think, takeThink } from './chatThink.svelte.js';
 
 // The sources an answer's citations point at: its own, else — a follow-up
 // that cites "[1]" from an earlier answer without searching again ("the
@@ -445,6 +447,35 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
     scope = 'meetings';
   }
 
+  // ---- Skills (chat/skills.rs): "/" in the box, and the one-tap prompts ----
+  // A Skill is asked across the meetings, its passages cited, wherever it's
+  // run; a plain chat with messages stays a plain chat.
+  const skills = new SkillPicker('meetings');
+  $effect(() => skills.update(input));
+  /** The "/" menu's keys, before the box's own (true: the menu took it). */
+  function skillKey(e) {
+    const picked = skills.key(e);
+    if (picked?.skill) pickSkill(picked.skill, picked.run);
+    return !!picked;
+  }
+  /** A Skill from the "/" menu: run now, or put in the box to add words. */
+  function pickSkill(skill, run) {
+    input = `/${skill.command}${run ? '' : ' '}`;
+    if (run) send();
+    else inputEl?.focus();
+  }
+  /**
+   * A one-tap prompt (Coach me, List my open to-dos, Write a weekly recap):
+   * its question, sent at once as its Skill. On an empty chat it's asked
+   * across the meetings from then on.
+   */
+  function runPrompt(skill) {
+    if (sending || !skill?.question) return;
+    if (!messages.length) scope = 'meetings';
+    input = skill.question;
+    send({ skill: skill.command });
+  }
+
   /**
    * A passage an answer cites (its pill, its row under the answer): its
    * meeting or note opened in Notes at the line it came from.
@@ -707,10 +738,16 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
     }
     tooLong = '';
     const voice = byVoice;
+    // "/decisions last week" (or a one-tap prompt): a Skill, asked across
+    // the meetings (chat/skills.rs).
+    const skill = opts?.skill ?? skills.parse(text)?.skill?.command ?? null;
+    if (skill && !messages.length && !scope) scope = 'meetings';
     input = '';
     // Out of the box (Rust takes them with the question, chat_send).
     waitingShots.list = [];
     byVoice = false;
+    // Think it through (chat/think.rs): this question only.
+    const thinkIt = takeThink();
     // The next question: the last answer stops talking.
     stopReading();
     // This send's question and bubble carry its `turn`, and are found by
@@ -747,7 +784,7 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
       let ai = mine('assistant');
       if (ai < 0) {
         // Not yet (or no longer: another conversation opened meanwhile).
-        if (made || (!live.started && !live.waiting)) return;
+        if (made || (!live.started && !live.waiting && !live.thinking)) return;
         messages = [...messages, { role: 'assistant', streaming: true, text: '', tools: [], id: null, turn }];
         ai = messages.length - 1;
         made = true;
@@ -759,6 +796,7 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
       m.doing = live.doing;
       m.liveSources = live.sources;
       m.waiting = live.waiting;
+      m.liveThinking = live.thinking;
       followThread();
     };
     const call = streamCall(
@@ -770,6 +808,8 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
         voice,
         images: shots.length ? shots.map((s) => s.id) : null,
         asText: asText && shots.length ? true : null,
+        skill,
+        think: thinkIt || null,
       },
       onEvent
     );
@@ -795,6 +835,7 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
         id: res.messageId ?? null,
         stopped: !!res.stopped,
         tokens: res.tokens ?? null,
+        thinking: res.thinking ?? null,
         revisedFrom: streamed != null && streamed.trim() !== '' && streamed.trim() !== String(res.reply).trim() ? fromHeight : 0,
       };
       // The question as saved: with its screenshots' text when it went as text.
@@ -830,6 +871,7 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
       }
       messages = messages.slice(0, qi);
       input = text; // give the message back
+      if (thinkIt) think.on = true; // …thought through, as it was asked
       // …and its screenshots (Rust puts them back too, yap-chat-waiting).
       waitingShots.list = shots;
       byVoice = voice;
@@ -999,6 +1041,10 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
     reloadActive,
     newChat,
     askAcrossMeetings,
+    skills,
+    skillKey,
+    pickSkill,
+    runPrompt,
     openSource,
     reportView,
     followAssistantStream,

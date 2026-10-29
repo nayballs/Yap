@@ -1,0 +1,139 @@
+[
+  {
+    "name": "smart-budget-timing",
+    "kind": "smart",
+    "title": "Q3 budget review",
+    "attendees": ["Alice Moreno"],
+    "lines": [
+      ["you", "Thanks for joining, Alice. Today I want to go through the Q3 budget line by line, starting with travel and the offsite."],
+      ["them", "Sure. Travel is up twelve percent, mostly flights for the offsite, and the venue deposit landed in this quarter instead of the next one."],
+      ["you", "So the budget is fine overall, it is the timing. Can you send the revised budget to finance by Friday?"],
+      ["them", "Yes, I will send it by Friday. I will also flag the deposit so nobody panics when they read the totals."],
+      ["you", "Then the only open item is catering for the offsite, which nobody owns yet."],
+      ["them", "Right, and the venue wants the final headcount for both days before they confirm the menu."]
+    ],
+    "expect": { "contains_any": ["catering", "headcount", "deposit", "finance", "venue", "budget"], "not_contains": ["million", "thousand pounds"], "cites": true, "max_bullets": 2 }
+  },
+  {
+    "name": "smart-hiring",
+    "kind": "smart",
+    "title": "Support hiring",
+    "attendees": ["Priya Shah", "Tom Okafor"],
+    "lines": [
+      ["them", "We have two strong candidates for the support role, but only budget for one until January."],
+      ["you", "What separates them?"],
+      ["them", "One has five years in support but no German, the other speaks German but is new to the job."],
+      ["them", "Half of our tickets this quarter came from customers in Germany and Austria."],
+      ["you", "Okay. When do we have to tell them?"],
+      ["them", "The recruiter wants an answer by Monday, otherwise the first candidate takes another offer."]
+    ],
+    "expect": { "contains_any": ["German", "Monday", "tickets", "candidate", "budget"], "not_contains": ["salary of", "three candidates"], "cites": true, "max_bullets": 2 }
+  },
+  {
+    "name": "smart-agenda-early",
+    "kind": "smart",
+    "title": "Website relaunch kick-off",
+    "attendees": ["Lena Fischer"],
+    "typed": "Agenda: launch date, who writes the copy, the budget for photos",
+    "lines": [
+      ["you", "Hi Lena, thanks for making time. Shall we start with the launch date?"],
+      ["them", "Sure. Marketing would like the first week of March, but the copy isn't started yet."],
+      ["you", "Who was going to write the copy?"],
+      ["them", "We never decided. It was either us or the agency."]
+    ],
+    "expect": { "contains_any": ["copy", "agency", "March", "launch"], "not_contains": ["April", "the agency agreed"], "cites": true, "max_bullets": 2 }
+  },
+  {
+    "name": "skill-decisions",
+    "kind": "skill",
+    "skill": "decisions",
+    "title": "Offsite planning",
+    "attendees": ["Alice Moreno", "Ben Carter"],
+    "summary": "## Recap\nThe team planned the spring offsite.\n\n## Action plan\n### Ben Carter\n- [ ] Book the hotel (due: next Friday)\n\n## Decisions\n- Hold the offsite in Lisbon\n- Move it to the second week of May",
+    "lines": [
+      ["you", "So where do we land on the city? Berlin was the other option."],
+      ["them", "Lisbon. Flights are cheaper for most of the team and the venue has space for everyone."],
+      ["you", "Agreed, Lisbon it is. And the dates?"],
+      ["them", "April clashes with the product launch, so let us move it to the second week of May."],
+      ["you", "Fine by me. Ben, can you book the hotel by next Friday?"],
+      ["them", "Yes, I will book it by next Friday."]
+    ],
+    "expect": { "contains_any": ["Lisbon"], "not_contains": ["Berlin was chosen", "June"], "cites": true }
+  },
+  {
+    "name": "skill-risks-supplier",
+    "kind": "skill",
+    "skill": "risks",
+    "title": "Supplier review",
+    "attendees": ["Priya Shah"],
+    "lines": [
+      ["them", "The new packaging supplier is ten percent cheaper, which is why we liked them."],
+      ["them", "But their warehouse had a fire last year and they never told us whether their insurance covers our stock."],
+      ["you", "That worries me. What happens to our orders if it happens again?"],
+      ["them", "Nobody has checked. We also only have one supplier for the lids, so if they are late the whole line stops."],
+      ["you", "Okay, let us not sign anything until we know about the insurance."]
+    ],
+    "expect": { "contains_any": ["insurance", "lids", "fire", "supplier"], "not_contains": ["lawsuit", "bankrupt"], "cites": true }
+  },
+  {
+    "name": "skill-decisions-with-words",
+    "kind": "skill",
+    "skill": "decisions",
+    "words": "about the dates only",
+    "title": "Offsite planning",
+    "attendees": ["Alice Moreno"],
+    "lines": [
+      ["you", "Lisbon then, we agreed on the city last week."],
+      ["them", "And for the dates, April clashes with the launch, so the second week of May."],
+      ["you", "Second week of May, agreed. I will tell the team."]
+    ],
+    "expect": { "contains_any": ["May"], "not_contains": ["June"], "cites": true }
+  },
+  {
+    "name": "skill-coach-me",
+    "kind": "skill",
+    "skill": "coach",
+    "title": "Design review",
+    "attendees": ["Sam Lee"],
+    "lines": [
+      ["you", "So yeah I think the new design is kind of fine, maybe, we could maybe change some things at some point."],
+      ["them", "Which things? I need to know what to change before Thursday."],
+      ["you", "Just, you know, the colours and stuff. Let us see how it goes."],
+      ["them", "Okay, and who signs it off?"],
+      ["you", "Not sure. Someone from marketing probably."]
+    ],
+    "expect": { "contains_any": ["Thursday", "sign", "specific", "clear", "owner", "vague"], "not_contains": ["you shouted"], "cites": true }
+  },
+  {
+    "name": "longer-offsite-plan",
+    "kind": "longer",
+    "title": "Q3 budget review",
+    "attendees": ["Alice Moreno"],
+    "summary": "## Recap\nThe Q3 budget is fine overall; the timing of the venue deposit makes it look worse.\n\n## Action plan\n### Alice Moreno\n- [ ] Send the revised budget to finance (due: Friday)\n\n## Decisions\n- Flag the deposit in the budget\n\n## Unassigned\n- [ ] Own catering for the offsite",
+    "lines": [
+      ["you", "Thanks for joining, Alice. Today I want to go through the Q3 budget line by line, starting with travel and the offsite."],
+      ["them", "Sure. Travel is up twelve percent, mostly flights for the offsite, and the venue deposit landed in this quarter instead of the next one."],
+      ["you", "So the budget is fine overall, it is the timing. Can you send the revised budget to finance by Friday?"],
+      ["them", "Yes, I will send it by Friday. I will also flag the deposit so nobody panics when they read the totals."],
+      ["you", "Then the only open item is catering for the offsite, which nobody owns yet."],
+      ["them", "Right, and the venue wants the final headcount for both days before they confirm the menu."]
+    ],
+    "expect": { "contains_any": ["twelve percent", "headcount", "flights"], "not_contains": ["million"] }
+  },
+  {
+    "name": "longer-hiring-plan",
+    "kind": "longer",
+    "title": "Support hiring",
+    "attendees": ["Priya Shah"],
+    "summary": "## Recap\nTwo candidates for one support role.\n\n## Action plan\n### You\n- [ ] Tell the recruiter the decision (due: Monday)\n\n## Decisions\n- Hire the German-speaking candidate",
+    "lines": [
+      ["them", "We have two strong candidates for the support role, but only budget for one until January."],
+      ["them", "One has five years in support but no German, the other speaks German but is new to the job."],
+      ["them", "Half of our tickets this quarter came from customers in Germany and Austria."],
+      ["you", "Then the German speaker. We can train the support side, we can't train the language in time."],
+      ["them", "The recruiter wants an answer by Monday."],
+      ["you", "I will tell the recruiter by Monday."]
+    ],
+    "expect": { "contains_any": ["Austria", "half", "train", "January"], "not_contains": ["salary"] }
+  }
+]

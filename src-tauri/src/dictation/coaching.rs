@@ -71,6 +71,11 @@ pub struct Record {
     /// A dictation has finished at least once: no first-use pointers.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub dictated: bool,
+    /// Times the notepad's first-meeting coach marks showed
+    /// (`meetings/coach_marks.rs`): "Take notes here"…
+    pub notepad_notes: u32,
+    /// …and "Try What did I miss?".
+    pub notepad_catch_up: u32,
 }
 
 /// How many times `hint` shows at most: the meeting-notes suggestion once,

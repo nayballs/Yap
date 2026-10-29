@@ -46,7 +46,10 @@ How loud Yap may be: the notice policy (one place, one at a time, held while dic
   dictation, dropped unseen after a minute; snippet-saved 10 s),
   language-nudge ("You spoke French · Add it to My
   languages?", `dictation/languages/nudge.rs`, which rate-limits it itself:
-  held over a dictation, dropped unseen after a minute)), held
+  held over a dictation, dropped unseen after a minute), milestone
+  ("You've dictated 1,000 words", `dictation/milestones.rs`, once each:
+  held over a dictation and a meeting, "Show tips" turns it off, dropped
+  unseen after a minute)), held
   while dictating (+ `SETTLE_MS` 1.5 s, and while onboarding is on screen)
   or a meeting records, a cooldown for the same text (micBlocked and
   meeting-notice 10 min), how long it may wait unseen (tips 10 s, a word
@@ -65,8 +68,8 @@ How loud Yap may be: the notice policy (one place, one at a time, held while dic
 - **`notices/kinds.rs`** — **kinds of notice, each with a switch and a
   cap** (2026-10-29; Wispr Flow's notification categories, by behaviour):
   the nice-to-know notices fall into four kinds — **suggestions**
-  (word-suggestion, snippet-suggestion, language-nudge), **milestones** (any
-  kind starting "milestone"), **feature tips** (hint, micTip, featureTip,
+  (word-suggestion, snippet-suggestion, language-nudge), **milestones**
+  (`dictation/milestones.rs`'s "milestone", and any kind starting so), **feature tips** (hint, micTip, featureTip,
   the bar's first-use pointers) and **news** (the "Updated to …" note after
   an update) — each switched off on its own in Settings → General →
   Notifications (`notify_suggestions`, `notify_milestones`,
@@ -76,8 +79,8 @@ How loud Yap may be: the notice policy (one place, one at a time, held while dic
   a restart starts the day afresh). Through the one policy: a module about
   to show one asks **`notice::place_tip(app, kind)`** — its place, or
   Nowhere when its kind is off or used up today, counted when it goes
-  somewhere (coaching, mic tips, feature tips, learn, the snippet offer,
-  the language nudge) — and the page asks `notice_allow` for its own
+  somewhere (coaching, mic tips, feature tips, word milestones, learn, the
+  snippet offer, the language nudge) — and the page asks `notice_allow` for its own
   ("Updated to …"). Questions, alerts and notices have no kind and are
   never capped. A test run counts the caps only once a spec asks
   (`e2e_notice_caps`; `e2e_notice_reset` turns them off again). Pure parts

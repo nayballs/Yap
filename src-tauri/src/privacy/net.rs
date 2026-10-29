@@ -71,6 +71,10 @@ pub enum Feature {
     Commands,
     Chat,
     Assistant,
+    /// A Voice Assistant question that took the window in front with it
+    /// (its picture, or its text read on this PC: `chat/assistant/screen.rs`):
+    /// its own label, so the list shows when the screen went.
+    AssistantScreen,
     Notes,
     Meetings,
     Brief,
@@ -83,7 +87,7 @@ impl Feature {
             Feature::Dictation | Feature::DictationContext => "Dictation",
             Feature::Commands => "Commands",
             Feature::Chat => "Chat",
-            Feature::Assistant => "Voice Assistant",
+            Feature::Assistant | Feature::AssistantScreen => "Voice Assistant",
             Feature::Notes => "Notes",
             Feature::Meetings => "Meetings",
             Feature::Brief => "Calendar",
@@ -98,6 +102,7 @@ impl Feature {
             Feature::Commands => "Commands",
             Feature::Chat => "Chat",
             Feature::Assistant => "Voice Assistant",
+            Feature::AssistantScreen => "Voice Assistant + the window in front",
             Feature::Notes => "Notes",
             Feature::Meetings => "Meeting notes",
             Feature::Brief => "Meeting brief",
@@ -1035,6 +1040,10 @@ mod tests {
         let d = Purpose::Ai("something the person typed".into()).describe(None);
         assert_eq!(d.label, "AI model · AI provider");
         assert_eq!(Purpose::WebSearch("Exa").describe(Some(Feature::Assistant)).feature, "Voice Assistant");
+        // A Voice Assistant question that took the window in front says so.
+        let d = Purpose::Ai("groq".into()).describe(Some(Feature::AssistantScreen));
+        assert_eq!((d.label.as_str(), d.feature), ("Voice Assistant + the window in front · Groq", "Voice Assistant"));
+        assert_eq!(Purpose::WebSearch("Exa").describe(Some(Feature::AssistantScreen)).feature, "Voice Assistant");
         assert_eq!(Purpose::Download(Download::SpeechModel).describe(None).label, "Speech model download");
         assert_eq!(Purpose::ModelList("OpenRouter".into()).describe(None).label, "Model list · OpenRouter");
     }

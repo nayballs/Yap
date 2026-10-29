@@ -214,10 +214,13 @@ test('the typing test: typed, then said, both speeds shown and only the numbers 
   await expectStore(yap, 'onboarding.json', (g) => g.typingWpm === typed && g.speakingWpm == null);
   await shot(ob, '09-typing-speak');
 
-  // Said with the dictation shortcut (the stub's transcript counts its words).
-  await pressHotkey(ob);
-  await ob.waitForTimeout(1_500);
-  await pressHotkey(ob);
+  // Said with the dictation shortcut (the stub's transcript counts its words),
+  // unless Yap has already timed a few dictations (dictation/stats.rs).
+  if ((await yap.invoke('get_stats')).wpm == null) {
+    await pressHotkey(ob);
+    await ob.waitForTimeout(1_500);
+    await pressHotkey(ob);
+  }
   await expect(tt).toHaveAttribute('data-phase', 'done', { timeout: 15_000 });
   const spoken = Number(await tt.getByTestId('speaking-wpm').innerText());
   expect(spoken).toBeGreaterThan(0);
