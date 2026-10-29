@@ -3,8 +3,9 @@
   // and its old "Hey Flow"): the AI does what you say and types the result
   // where you are. Not the Voice Assistant, which answers out loud. Say its
   // name (AgentNameField.svelte), Rewrite selected text (the rewrite
-  // shortcut; pasting/as_said.rs), Transforms (TransformsSettings.svelte) and a link
-  // to its model and prompt in Language Models.
+  // shortcut; pasting/as_said.rs), Transforms (TransformsSettings.svelte),
+  // Writing samples (WritingSamples.svelte) and a link to its model and
+  // prompt in Language Models.
   //
   //   cfg:  Settings' config $state (auto-save does the saving).
   //   goto: opens another Settings page.
@@ -15,6 +16,7 @@
   import AgentNameField from './AgentNameField.svelte';
   import SettingsHotkey from './SettingsHotkey.svelte';
   import TransformsSettings from './TransformsSettings.svelte';
+  import WritingSamples from './WritingSamples.svelte';
   import PageExplain from './PageExplain.svelte';
   import { scopeModelLabel } from './scopes.js';
   import { localLlm } from './localLlm.svelte.js';
@@ -73,6 +75,15 @@
   id="settings-transforms"
 >
   <TransformsSettings {cfg} />
+</Group>
+<!-- Writing samples (ai/writing_samples.rs): your own writing, so rewrites
+     sound like you. Here, beside the rewrites that use them most. -->
+<Group
+  title="Writing samples"
+  desc="Paste a few things you wrote yourself, so the rewrite shortcut, Commands and transforms like Polish and Shorter sound like you. Tag each with the kind of app it suits."
+  id="settings-writing-samples"
+>
+  <WritingSamples />
 </Group>
 <Group title="Model and prompt" id="settings-commands-model">
   <LinkRow

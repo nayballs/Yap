@@ -134,8 +134,9 @@ The language-model side: the OpenAI-compatible client and its prompts, the on-de
   "My languages". A language shortcut that translates sends the dictation
   to `transform` instead, with `languages::translate_instruction`.
   Records token/request usage (best-effort). Also carries
-  `EDIT_BASE_PROMPT` (edit/rewrite mode's guardrails),
-  `TRANSFORM_BASE_PROMPT` + `transform_messages` / `transform` (**saved
+  `EDIT_BASE_PROMPT` (edit/rewrite mode's guardrails; `rewrite_messages` /
+  `rewrite_with_samples`),
+  `TRANSFORM_BASE_PROMPT` + `transform_messages_with` / `transform` (**saved
   transforms**, `dictation/transforms.rs`, 2026-10-24: the text between `<text>`
   tags is something to transform, never a message to answer or carry out;
   keep names, numbers, dates, amounts, emails, links and code as written,
@@ -144,7 +145,14 @@ The language-model side: the OpenAI-compatible client and its prompts, the on-de
   the text; temperature 0.2; on the Commands scope's model,
   `pipeline::commands_model`, never with the Commands prompt, which may
   answer questions; measured on the 4B and Groq's gpt-oss-20b in
-  docs/model-evals.md "Saved transforms"), `NOTE_BASE_PROMPT` +
+  docs/model-evals.md "Saved transforms"); **the person's writing samples**
+  (`ai/writing_samples.rs`, below) go at the end of the system prompt of a
+  transform (`transform_with_samples`) and a rewrite (`rewrite_with_samples`:
+  after the Commands body, before the selection); cleanup's
+  (`cleanup_with_samples` / `cleanup_messages_full`) is for the model
+  evaluations only — a dictation never sends them — and `None` is byte for
+  byte the request before them (`llm::tests::the_cleanup_request_without_samples_is_byte_for_byte_as_before`
+  pins cleanup's by its SHA-256), `NOTE_BASE_PROMPT` +
   `MEETING_NOTE_BASE_PROMPT` + `NOTE_DEFAULT_FRAGMENT` (note enhancement's
   guardrails/action fragment), `ACTION_PLAN_BASE_PROMPT` +
   `ACTION_PLAN_DEFAULT_FRAGMENT` (the Action Plan: never invent owners/dates)
@@ -314,7 +322,9 @@ The language-model side: the OpenAI-compatible client and its prompts, the on-de
   rewords (`Strength::tone`: Formal, Casual, Very casual write as Natural;
   the kind's line stays). Light and High measured in docs/model-evals.md
   "Cleanup strength and formatting"; `YAP_EVAL_STRENGTH_LINES` tries other
-  wordings in a run. "Use what I said" unchanged. Unit-tested.
+  wordings in a run. "Use what I said" unchanged. The person's writing
+  samples never go with a cleanup, High included (`ai/writing_samples.rs`,
+  below: measured, they changed nothing). Unit-tested.
 - **`ai/cleanup_format.rs`** — **smart formatting** (2026-10-25): a spoken
   list becomes a list, an email's greeting and sign-off go on lines of
   their own, a sentence that only mentions numbers stays a sentence.
@@ -361,6 +371,50 @@ The language-model side: the OpenAI-compatible client and its prompts, the on-de
   has its row. Measured: 4B 18/24 → 21/24, 1.5B 10/16 → 12/16 on the cursor
   cases. Test mode: debug-only `e2e_cursor_before {text}` stands in for the
   read. Unit-tested.
+- **`ai/writing_samples.rs`** — **writing samples** (2026-10-29; Wispr
+  Flow's "make it sound like you", by behaviour; Settings → Commands →
+  Writing samples, `settings/WritingSamples.svelte`): a few things the person
+  wrote, each tagged with the kind of app it suits (`Kind`: any app, Email,
+  Chat — work and personal —, Documents), so rewrites sound like them.
+  **Why on the Commands page**, not with Styles by app: the rewrites are what
+  use them most (the rewrite shortcut, Commands by name, the transforms), and
+  they work with cleanup off; Styles by app is cleanup's, shown only with it
+  on. **What uses them**: the rewrite shortcut and Commands by name
+  (`for_rewrite`, `pipeline/rewrite.rs`), the transforms that reword
+  (`transform_uses`: Polish, Shorter and the person's own — never Fix
+  grammar only, Translate or Make it a prompt) and a transform on every
+  dictation (`transforms::run_on_dictation_in`); never a language
+  shortcut's translation, an AI prompt or a terminal (`kind_for`: no
+  samples). **Never AI cleanup**, High included: on the on-device 4B they
+  changed none of ten High cleanups (cleanup keeps the words said, and the
+  kind of app's tone wins, whatever the wording — the tone's sentence left
+  out, 1 of 10), for ~160 more prompt tokens a dictation; `Plan::samples`
+  stays for the evaluations to measure again (docs/model-evals.md
+  "Writing samples"). **Which**: those tagged for the kind of app
+  (`cleanup_styles::category` of the window), then the untagged ones, in the
+  person's order (`pick`), each cut at a sentence to `SENT_PER_SAMPLE` (600
+  characters), all under a **budget** (`budget_for`): `BUDGET_LOCAL` (800
+  characters, ~200 tokens) for a model on this PC or the home network
+  (`net::place_of_url`), `BUDGET_CLOUD` (2,000, ~500) for a cloud one —
+  measured in docs/model-evals.md "Writing samples". **How they're sent**
+  (`block`): one part at the end of the system prompt — "How the user
+  writes…", each sample in `<example>` tags, then what to do with them (their
+  words, sentence length, punctuation, greetings and sign-offs; never their
+  facts, names or sentences; the task's own instructions first) — the stable
+  prefix a server caches: the same for every call into one kind of app, a
+  dictation's transcript and a selection always after it. None, and every
+  prompt is byte for byte as before (`with_block`). **The file**:
+  `writing_samples.json` (`Store`: the samples; unknown fields kept), read
+  once, saved by `writing_samples_set` (tidied: trimmed, ≤ 12,
+  each ≤ 1,500 characters, ids made; a failed save is the command's error,
+  `saving.rs`); `writing_samples_get` for the page. **Privacy**: they leave
+  this PC only inside a call to a cloud model, and the network receipts say
+  so (`net::Feature::CommandsSamples` "Commands + your writing samples";
+  a transform on every dictation's `DictationSamples` "Transform + your
+  writing samples"); never logged
+  (counts and lengths at `debug`). Reset app keeps them, Download your data
+  has them. Unit-tested; e2e `writing-samples.spec.js`; the model
+  evaluations' `--samples`.
 - **`ai/local_llm.rs`** — the on-device AI cleanup sidecar: runs **Mozilla llamafile**
   (llama.cpp, single-file OpenAI-compatible server) as a hidden child process on a
   free localhost port, serving **Qwen2.5-1.5B-Instruct** (Q4_K_M GGUF) when no
@@ -1082,7 +1136,10 @@ logged: `npm run eval -- --model groq:openai/gpt-oss-20b --keys-from-yap`,
 `--model local:installed` (Yap's llamafile on the CPU; `--ngl 999` on the GPU),
 `--only`, `--tools on`, `--raw evals/raw/groq-browser-search.json`, and
 `--cleanup` (dictation cleanup latency per model), `--styles` and `--strength`
-(cleanup strength, formatting and the text before the cursor, before and after).
+(cleanup strength, formatting and the text before the cursor, before and after),
+`--samples` (writing samples: the voice, the facts and what they cost, without
+and with) and `--hinglish` (Hindi in Latin letters: Yap's rules alone, cleanup
+from Devanagari and from the rules' Latin).
 Nothing launches, no window, the
 installed app's data and `%APPDATA%\yap` are never written (keys are read from
 its config.json read-only). Builds a debug stub into `$YAP_EVAL_TARGET_DIR`;

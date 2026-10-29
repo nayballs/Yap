@@ -85,6 +85,7 @@ const COPY: &[&str] = &[
     "autostart",
     "audioFeedbackVolume",
     "selectedLanguage",
+    "hinglish",
     "translateToEnglish",
     "modelUnloadTimeout",
     "overlayPosition",

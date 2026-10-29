@@ -283,7 +283,11 @@ there can move margins: compare a page before and after.
   shortcut and Delete, at most four, "Add a language shortcut"; a note when
   one translates (the model it uses, Use what I said); "Tell me when I speak
   a language I didn't pick" (`languageNudge`, `language-nudge`; its line says
-  only Whisper models can tell).
+  only Whisper models can tell). With Hindi among them (2026-10-29), **"Write
+  in Latin letters (Hinglish)"** (`hinglish`, `#hinglish`, off; in
+  `MyLanguages.svelte` itself, so onboarding's language step shows it too):
+  its line gives an example, its ⓘ which speech model hears Hindi (yours, or
+  "only Whisper models do (Whisper Large v3 Turbo is the one to pick)").
   **Microphone and sound** (`#settings-microphone`): Microphone — since
   2026-10-25 an **order** (`settings/MicOrder.svelte`, `micOrder`,
   `dictation/mics.rs`): numbered rows, each "In use" / "Connected" / "Not
@@ -414,7 +418,20 @@ there can move margins: compare a page before and after.
   email / … / Everywhere else (`autoTransformKind`, greyed while None) —, a
   line saying what runs where ("Polish runs after cleanup on each dictation
   in email, never in a terminal"), an ⓘ (one more AI call a dictation, Use
-  what I said puts back your words); deleting that transform clears it. **Model and prompt**: a link row with the model in use →
+  what I said puts back your words); deleting that transform clears it. **Writing samples**
+  (`#settings-writing-samples`, `settings/WritingSamples.svelte`,
+  `ai/writing_samples.rs`; 2026-10-29): "Paste a few things you wrote
+  yourself, so the rewrite shortcut, Commands and transforms like Polish and
+  Shorter sound like you." A row per sample (`[data-sample=<id>]`): its first
+  two lines, a "Kind of app it suits" Select (Any app / Email / Chat /
+  Documents), Edit (the row becomes a form: the text ≤ 1,500 characters with
+  a count, the kind; Esc cancels, Ctrl+Enter saves) and Delete (Yap's
+  confirm dialog); **Add a writing sample** (`writing-sample-add`) opens the
+  same form; at 12, a line says that's the most. A line says they stay on
+  this PC and how much a rewrite carries (about 200 tokens to a model on this
+  PC, 500 to a cloud one), never with Fix grammar only, Translate or Make it
+  a prompt, and never with AI cleanup. Not config.json: the page reads `writing_samples_get` and saves each change
+  itself (`writing_samples_set`; a failed save is `saveErrors.js`' toast). **Model and prompt**: a link row with the model in use →
   Language Models → Commands (its line: with "Answer to its name" off, the
   rewrite shortcut and transforms use the cleanup model).
 - **Voice Assistant** (`voice`): "Ask Yap something by voice and hear the

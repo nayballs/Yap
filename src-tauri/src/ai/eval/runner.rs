@@ -107,6 +107,14 @@ My languages (languages.rs; instead of the scenarios; languages.md):
                            after the language line (in its language, names kept), and a language
                            shortcut's translation (in the target language, nothing answered)
   --languages-phase <p>    before | after: one cleanup phase (a cloud model's tokens)
+  --hinglish               each case in evals/hinglish/cases.json: Hindi as Whisper writes it, spelt
+                           out by Yap's rules alone, then cleaned from Devanagari and from the rules'
+                           Latin letters (hinglish.md)
+Writing samples (writing_samples.rs; instead of the scenarios; samples.md):
+  --samples                each case in evals/samples/cases.json (a transform, a rewrite, cleanup at
+                           High) without and with a made-up person's samples: their voice, the facts
+                           kept, nothing taken from the samples, the time and tokens they cost
+  --samples-phase <p>      without | with: one phase
 Screenshot questions (vision.rs; instead of the scenarios; vision.md):
   --vision                 each case in evals/vision/cases.json (--only picks them by name or kind)
                            through Chat's own turn: the screenshot as a picture (a local model's
@@ -199,6 +207,9 @@ struct Args {
     vision_path: Option<&'static str>,
     languages: bool,
     languages_phase: Option<&'static str>,
+    hinglish: bool,
+    samples: bool,
+    samples_phase: Option<&'static str>,
     summaries: bool,
     summaries_phase: Option<&'static str>,
     search: bool,
@@ -337,6 +348,19 @@ fn parse(argv: Vec<String>) -> Result<Args, String> {
                         .ok_or_else(|| format!("--languages-phase {}, not {p}", super::languages::PHASES.join("|")))?,
                 );
             }
+            "--hinglish" => a.hinglish = true,
+            "--samples" => a.samples = true,
+            "--samples-phase" => {
+                let p = value()?;
+                a.samples = true;
+                a.samples_phase = Some(
+                    super::samples::PHASES
+                        .iter()
+                        .copied()
+                        .find(|x| *x == p)
+                        .ok_or_else(|| format!("--samples-phase {}, not {p}", super::samples::PHASES.join("|")))?,
+                );
+            }
             "--summaries" => a.summaries = true,
             "--summaries-phase" => {
                 let p = value()?;
@@ -415,6 +439,8 @@ pub fn main(argv: Vec<String>) -> i32 {
         || args.transforms
         || args.vision
         || args.languages
+        || args.hinglish
+        || args.samples
         || args.summaries
         || args.search
         || args.bench.is_some())
@@ -1537,6 +1563,32 @@ async fn run_all(args: &Args, run_dir: &Path, keys: &HashMap<String, String>, sc
         Vec::new()
     };
     let mut language_results: Vec<(String, Value)> = Vec::new();
+    let hinglish_cases = if args.hinglish {
+        let path = scenarios_dir(args).join("..").join("hinglish").join("cases.json");
+        match super::hinglish::load(&path, &args.only) {
+            Ok(c) => c,
+            Err(e) => {
+                eprintln!("{e}");
+                return 2;
+            }
+        }
+    } else {
+        Vec::new()
+    };
+    let mut hinglish_results: Vec<(String, Value)> = Vec::new();
+    let sample_bench = if args.samples {
+        let path = scenarios_dir(args).join("..").join("samples").join("cases.json");
+        match super::samples::load(&path, &args.only) {
+            Ok(b) => Some(b),
+            Err(e) => {
+                eprintln!("{e}");
+                return 2;
+            }
+        }
+    } else {
+        None
+    };
+    let mut sample_results: Vec<(String, Value)> = Vec::new();
     let summary_cases = if args.summaries {
         let path = scenarios_dir(args).join("..").join("summaries").join("cases.json");
         match super::summaries::load(&path, &args.only) {
@@ -1811,6 +1863,28 @@ async fn run_all(args: &Args, run_dir: &Path, keys: &HashMap<String, String>, sc
             languages_result = super::languages::run(&language_cases, &ep, args.repeat, &phases).await;
             language_results.push((m.label.clone(), languages_result.clone()));
         }
+        let mut hinglish_result = Value::Null;
+        if !hinglish_cases.is_empty() {
+            record::set_config(Some(crate::config::YapConfig::default()));
+            record::set_tools_forced(None);
+            let ep = super::cleanup::Endpoint { base_url: &m.base_url, key: &m.key, model: &m.model, provider: &m.provider };
+            println!("  Hinglish, {} cases …", hinglish_cases.len());
+            hinglish_result = super::hinglish::run(&hinglish_cases, &ep, args.repeat, super::hinglish::PHASES).await;
+            hinglish_results.push((m.label.clone(), hinglish_result.clone()));
+        }
+        let mut samples_result = Value::Null;
+        if let Some(b) = &sample_bench {
+            record::set_config(Some(crate::config::YapConfig::default()));
+            record::set_tools_forced(None);
+            let ep = super::cleanup::Endpoint { base_url: &m.base_url, key: &m.key, model: &m.model, provider: &m.provider };
+            let phases: Vec<&'static str> = match args.samples_phase {
+                Some(p) => vec![p],
+                None => super::samples::PHASES.to_vec(),
+            };
+            println!("  writing samples, {} cases …", b.cases.len());
+            samples_result = super::samples::run(b, &ep, args.repeat, &phases).await;
+            sample_results.push((m.label.clone(), samples_result.clone()));
+        }
         let mut summaries_result = Value::Null;
         if !summary_cases.is_empty() {
             record::set_config(Some(crate::config::YapConfig::default()));
@@ -1870,6 +1944,8 @@ async fn run_all(args: &Args, run_dir: &Path, keys: &HashMap<String, String>, sc
             "chips": chips_result,
             "vision": vision_result,
             "languages": languages_result,
+            "hinglish": hinglish_result,
+            "samples": samples_result,
             "summaries": summaries_result,
             "search": search_result,
         });
@@ -2010,6 +2086,16 @@ async fn run_all(args: &Args, run_dir: &Path, keys: &HashMap<String, String>, sc
                 r["tokens"]
             );
         }
+    }
+    if !hinglish_results.is_empty() {
+        let md = record::redact(&super::hinglish::markdown(&hinglish_results));
+        let _ = std::fs::write(run_dir.join("hinglish.md"), &md);
+        println!("\n{}", md.split("\n## ").next().unwrap_or(""));
+    }
+    if !sample_results.is_empty() {
+        let md = record::redact(&super::samples::markdown(&sample_results));
+        let _ = std::fs::write(run_dir.join("samples.md"), &md);
+        println!("\n{}", md.split("\n## ").next().unwrap_or(""));
     }
     if !summary_results.is_empty() {
         let md = record::redact(&super::summaries::markdown(&summary_results));

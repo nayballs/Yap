@@ -70,7 +70,10 @@
   as spoken —, `hotkey` an input-hook spec; a key that would fire with one of
   the ten fixed shortcuts or an earlier one is left unbound,
   `languages::assign`), `language_nudge` ("Tell me when I speak a language I
-  didn't pick", on; no `migrate_once` step), mic_order (Settings → Dictation →
+  didn't pick", on; no `migrate_once` step), `hinglish` ("Write in Latin
+  letters (Hinglish)", 2026-10-29, `languages/hinglish.rs`: off; it acts only
+  with Hindi among `my_languages`; an older Yap drops it on a save, and Hindi
+  is then written in Devanagari again — nothing else is lost), mic_order (Settings → Dictation →
   Microphone, 2026-10-25, `dictation/mics.rs`: `[{id, name}]` — the Core
   Audio endpoint id, else the name — in the person's order; the first one
   connected is used, then Windows' default; empty, the default, is Windows'
@@ -634,6 +637,17 @@
   phrases typed right after a dictation in the last week — fingerprints of
   their words and when, never the text (dictated phrases are counted from
   `history.json`).
+- Writing samples: `%APPDATA%/yap/writing_samples.json` (2026-10-29,
+  `ai/writing_samples.rs`, Settings → Commands → Writing samples) —
+  `{samples: [{id, text, kind, addedMs}]}`: things the person wrote, so
+  rewrites sound like them (`kind`: "" any app, "email", "chat",
+  "documents"; at most 12, each at most 1,500 characters). The person's own text: a file of its
+  own, never config.json, so an older Yap never reads or writes it (it simply
+  rewrites without them); fields a newer Yap adds are kept when this one
+  saves. An unreadable one is set aside, never written over. Never logged
+  (counts only). Sent only inside a rewrite or a rewording transform, to the
+  model that call uses (never with AI cleanup). Reset app keeps it (like the dictionary); Download your data
+  has it (`writing_samples.json`).
 - Language nudges: `%APPDATA%/yap/language_nudges.json` — when Yap last
   offered to add a language to My languages, and per language your "Not now"
   count and "Don't ask about it" (`dictation/languages/nudge.rs`). Codes only.
@@ -745,7 +759,8 @@
   saved transforms with no shortcuts (`transforms`; Translate to Spanish),
   no languages picked and no language shortcuts (`my_languages`,
   `language_shortcuts`; the main shortcut on Auto) with the language nudge
-  on (`language_nudge`),
+  on (`language_nudge`) and Hindi in Devanagari (`hinglish` off), no writing
+  samples (`writing_samples.json` absent),
   live transcription preview **on**
   (`streaming_partials`), AI cleanup **off** (turned on locally, the model
   recommended for this PC: Qwen3.5 4B on a graphics card with ≥ 5.5 GiB of its

@@ -279,6 +279,12 @@ pub struct YapConfig {
     /// only Whisper models say which language they heard). On by default.
     #[serde(default = "default_true")]
     pub language_nudge: bool,
+    /// "Write in Latin letters (Hinglish)" (My languages, with Hindi among
+    /// them; `languages/hinglish.rs`): Hindi dictations come out in Latin
+    /// letters. Off by default; an older Yap drops it on a save, and Hindi
+    /// is then written in Devanagari again.
+    #[serde(default)]
+    pub hinglish: bool,
     /// The **Voice Assistant** shortcut (Settings → Voice Assistant,
     /// `assistant.rs`): from any app, ask Yap's Chat something out loud and
     /// hear the answer; it never types into the app you're in. Empty =
@@ -1285,6 +1291,7 @@ impl Default for YapConfig {
             my_languages: Vec::new(),
             language_shortcuts: Vec::new(),
             language_nudge: true,
+            hinglish: false,
             assistant_hotkey: String::new(),
             read_hotkey: String::new(),
             as_said_hotkey: String::new(),

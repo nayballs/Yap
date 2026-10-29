@@ -85,6 +85,28 @@ labels of Cursor's and Windsurf's chat boxes, how fast their tabs and file
 trees read; Visual Studio's tabs and editor (not installed here); the
 spoken forms with real speech.
 
+**Writing samples and Hinglish** (2026-10-29, [ai-models.md](./ai-models.md),
+[dictation.md](./dictation.md)): Settings → Commands → **Writing samples**
+keeps a few things you wrote (tagged Email, Chat, Documents or any app) in
+`writing_samples.json`, and the rewrite shortcut, Commands by name, Polish,
+Shorter and your own transforms carry the ones for the app you're in at the
+end of their system prompt, capped (about 200 tokens to a model on this PC,
+500 to a cloud one); never Fix grammar only, Translate, Make it a prompt or
+AI cleanup (measured at High: no help). On the on-device Qwen3.5-4B, rewrites
+sounded like the made-up writer 12 of 12 times with them (0 of 12 without),
+transforms 4 of 15, nothing taken from the samples in 84 calls; 2 chat
+replies wrote a name in lower case like the writer's chats. With Hindi among
+**My languages**, "Write in Latin letters (Hinglish)" spells Whisper's
+Devanagari out on this PC (Yap's own table) before cleanup, which then tidies
+it as Hinglish: 30 of 30 on the 4B (cleanup given the Devanagari itself: 25
+of 30, Devanagari left 14 times), Yap's rules alone 9 of 10; the bundled
+Qwen2.5-1.5B translated it into English, so a cleanup that loses the words
+gives way to Yap's spelling-out (27 of 30). Unit- and
+e2e-tested (`writing-samples.spec.js`, `hinglish.spec.js`; the cleanup request
+without samples pinned byte for byte). Not tried yet: a real Hindi dictation
+through Whisper (the cases are what Whisper writes, typed in), a cloud model
+with samples (no paid calls), samples a real person wrote.
+
 **Meeting chips, Skills and one-tap prompts** (2026-10-29, Wispr Flow's
 Notetaker; [meetings.md](./meetings.md), [chat-and-assistant.md](./chat-and-assistant.md#skills-and-one-tap-prompts-2026-10-29)):
 the notepad's Ask sheet (and the Notes view's Ask bar) offers **Make me

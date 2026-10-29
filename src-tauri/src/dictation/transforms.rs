@@ -365,17 +365,42 @@ pub fn for_dictation(cfg: &YapConfig, kind: crate::ai::cleanup_styles::Category,
 /// scope's model, as a dictation's AI call: the result, or why not (no
 /// model set up, the AI failed or wrote nothing) — the caller pastes `text`
 /// then. The log says which transform and lengths, never the text.
+// Kept for callers without a kind of app (a note's transform): the
+// pipeline's own goes through `run_on_dictation_in`.
+#[allow(dead_code)]
 pub async fn run_on_dictation(cfg: &YapConfig, t: &Transform, text: &str) -> Result<String, String> {
+    run_on_dictation_in(cfg, t, text, None).await
+}
+
+/// [`run_on_dictation`] for a dictation into `category` (its kind of app):
+/// a transform that rewords takes the person's writing samples for it
+/// (`ai/writing_samples.rs`); `None`, or no samples: as ever.
+pub async fn run_on_dictation_in(
+    cfg: &YapConfig,
+    t: &Transform,
+    text: &str,
+    category: Option<crate::ai::cleanup_styles::Category>,
+) -> Result<String, String> {
     let m = crate::dictation::pipeline::commands_model(cfg);
     let keyed = crate::ai::ai_model::KEYED_PROVIDERS.contains(&m.provider.as_str());
     if m.base_url.is_empty() || (keyed && m.api_key.is_empty()) {
         return Err("no AI model is set up".into());
     }
+    let samples = category.and_then(|c| crate::ai::writing_samples::for_transform(t, c, &m.base_url));
     let asked = crate::privacy::net::within(
-        crate::privacy::net::Feature::Dictation,
+        crate::privacy::net::Feature::dictation(samples.is_some()),
         crate::ai::usage::within(
             crate::ai::usage::Feature::Transforms,
-            crate::ai::llm::transform(&t.instruction(), text, &m.base_url, &m.api_key, &m.model, &m.provider, m.disable_thinking),
+            crate::ai::llm::transform_with_samples(
+                &t.instruction(),
+                text,
+                samples.as_deref(),
+                &m.base_url,
+                &m.api_key,
+                &m.model,
+                &m.provider,
+                m.disable_thinking,
+            ),
         ),
     )
     .await?;
@@ -612,12 +637,37 @@ pub fn run(app: &AppHandle, cfg: &YapConfig, t: &Transform, origin: Origin, stan
         return r.ended("failed", Some("no API key".into()));
     }
 
+    // The person's writing samples for the kind of app it's in, for a
+    // transform that rewords (Polish, Shorter, their own): the receipts say
+    // they went.
+    let category = crate::ai::cleanup_styles::category(
+        cfg,
+        &crate::ai::cleanup_styles::Target::of_window(target, crate::pasting::text_injector::app_name_for(target).as_deref(), kind),
+    );
+    let samples = crate::ai::writing_samples::for_transform(t, category, &m.base_url);
     let _ = app.emit(EVENT, serde_json::json!({ "name": name, "phase": "running" }));
     let _ = app.emit("yap-state", "processing");
-    let asked = tauri::async_runtime::block_on(crate::ai::usage::within(
+    let instruction = t.instruction();
+    let call = crate::ai::usage::within(
         crate::ai::usage::Feature::Transforms,
-        crate::ai::llm::transform(&t.instruction(), &r.input, &m.base_url, &m.api_key, &m.model, &m.provider, m.disable_thinking),
-    ));
+        crate::ai::llm::transform_with_samples(
+            &instruction,
+            &r.input,
+            samples.as_deref(),
+            &m.base_url,
+            &m.api_key,
+            &m.model,
+            &m.provider,
+            m.disable_thinking,
+        ),
+    );
+    let asked = tauri::async_runtime::block_on(async {
+        if samples.is_some() {
+            crate::privacy::net::within(crate::privacy::net::Feature::CommandsSamples, call).await
+        } else {
+            call.await
+        }
+    });
     let out = match asked {
         Ok(out) => clean_output(&out),
         Err(e) => {

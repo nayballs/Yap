@@ -6,7 +6,8 @@
 //! pre-meeting briefs, which quote notes and memory). What stays
 //! ([`STAYS`]): config.json — every setting, the dictionary and snippets —,
 //! the person's own Skills (skills.json: setup, like folders and actions),
-//! the downloaded models, the account's sign-in, the calendars, and Yap's
+//! the writing samples (set up on purpose, like the dictionary), the
+//! downloaded models, the account's sign-in, the calendars, and Yap's
 //! own bookkeeping (tips shown, answers to offers, caches, the log).
 //!
 //! Each store is emptied **through its own module, under its own lock**
@@ -68,6 +69,8 @@ pub const GOES: &[Part] = &[
 pub const STAYS: &[Part] = &[
     // Skills and meeting folder rules are setup, like folders and actions: they stay.
     Part { id: "settings", label: "Your settings, dictionary and snippets, and your Skills", files: &["config.json", "dictionary_usage.json", "skills.json", "meeting_folders.json"] },
+    // Set up on purpose, like the dictionary (Settings → Commands).
+    Part { id: "samples", label: "Your writing samples", files: &["writing_samples.json"] },
     Part { id: "models", label: "Downloaded speech, AI and voice models", files: &["models/", "llm/"] },
     Part { id: "account", label: "Your account sign-in, and your calendars", files: &["calendar.json"] },
     Part {

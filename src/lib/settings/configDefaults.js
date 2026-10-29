@@ -117,6 +117,8 @@ export const FIELD_DEFAULTS = {
   myLanguages: [],
   languageShortcuts: [],
   languageNudge: true,
+  // Hindi in Latin letters (dictation/languages/hinglish.rs), off.
+  hinglish: false,
   modelUnloadTimeout: 'never',
   outputDevice: null,
   overlayPosition: 'bottom',

@@ -825,11 +825,16 @@ pub struct Plan {
     /// Lay out a spoken list or an email's frame (`cleanup_format.rs`) —
     /// always, but for a model evaluation's "before".
     pub formatting: bool,
+    /// The person's writing samples for the system prompt's end
+    /// (`writing_samples::block`). Always `None` for a dictation — measured,
+    /// they didn't help cleanup (`writing_samples.rs`) — set only by the
+    /// model evaluations (`--samples`), to measure it again.
+    pub samples: Option<String>,
 }
 
 impl Plan {
     fn new(body: String, endpoint: Option<(String, String, String, String)>, style: Option<Style>, cfg: &YapConfig) -> Plan {
-        Plan { body, endpoint, style, strength: Strength::configured(cfg), formatting: true }
+        Plan { body, endpoint, style, strength: Strength::configured(cfg), formatting: true, samples: None }
     }
 
     /// The style as it's written at the plan's strength (at Light, no tone
@@ -918,7 +923,7 @@ pub async fn clean(
     let ours = before_transcript(style_line.as_deref(), strength_line.as_deref());
     let ours = before_transcript(ours.as_deref(), format_line.as_deref());
     let before = before_transcript(ours.as_deref(), names);
-    let out = crate::ai::llm::cleanup_with_names(
+    let out = crate::ai::llm::cleanup_with_samples(
         text,
         base_url,
         api_key,
@@ -927,6 +932,7 @@ pub async fn clean(
         &plan.body,
         spelling,
         before.as_deref(),
+        plan.samples.as_deref(),
         dictionary,
         disable_thinking,
     )

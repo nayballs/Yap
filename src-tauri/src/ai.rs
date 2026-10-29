@@ -20,3 +20,4 @@ pub mod llm;
 pub mod local_llm;
 pub mod model_catalog;
 pub mod usage;
+pub mod writing_samples;
