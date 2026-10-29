@@ -66,8 +66,8 @@ pub const GOES: &[Part] = &[
 
 /// What a reset keeps, as the dialog names it, and its files.
 pub const STAYS: &[Part] = &[
-    // Skills are setup, like folders and actions: they stay.
-    Part { id: "settings", label: "Your settings, dictionary and snippets, and your Skills", files: &["config.json", "dictionary_usage.json", "skills.json"] },
+    // Skills and meeting folder rules are setup, like folders and actions: they stay.
+    Part { id: "settings", label: "Your settings, dictionary and snippets, and your Skills", files: &["config.json", "dictionary_usage.json", "skills.json", "meeting_folders.json"] },
     Part { id: "models", label: "Downloaded speech, AI and voice models", files: &["models/", "llm/"] },
     Part { id: "account", label: "Your account sign-in, and your calendars", files: &["calendar.json"] },
     Part {

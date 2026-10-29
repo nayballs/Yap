@@ -768,7 +768,16 @@ Recurrence and time zones (incl. Windows zone names) unit-tested; e2e-tested
 against a local iCal server and a local fake of Google. Google needs the
 OAuth client set up in Google Cloud + the two repository secrets
 ([`docs/calendar.md`](../calendar.md)); not yet tried against a real
-calendar. **Calendar tools in Chat** (2026-10-25, `chat/tools/calendar.rs`):
+calendar. **Day to day** (2026-10-29): the next meeting in the tray ("Next:
+Weekly sync in 12 min", a click opening its note or taking notes),
+recurring meetings' notes filed in a folder ("Always file Weekly sync
+in…", `meeting_folders.json`), a call matched to its meeting by the join
+code its window shows (Meet's tab title; Zoom's and Teams' meetings in a
+browser's address bar; the Teams app and today's Zoom app show none), and
+the Meetings view's free time between meetings and "Done for today";
+unit-tested and e2e-tested (the tray through its test hook, a simulated
+Meet call with a stand-in window), not yet with the real tray, real call
+windows or a real calendar. **Calendar tools in Chat** (2026-10-25, `chat/tools/calendar.rs`):
 "what's on tomorrow?", "when's my next meeting with Sam?", "am I free at 3
 on Friday?" from the calendar Yap keeps (busy time of your own included),
 the meetings cited and opened from the answer, spoken whole by the Voice
@@ -1162,7 +1171,9 @@ real-engine-tested on test meetings, not yet on a real one); a fixed line can't 
 or deleted, an edited summary has no "back to Yap's" (only Replace), and a
 task's "Said at" is the line sharing most of its words (a guess: none when
 no line shares enough);
-the calendar has no one-click Outlook (Microsoft Graph); the pre-meeting
+the calendar has no one-click Outlook (Microsoft Graph: it needs a Microsoft
+Entra app registration, [`docs/calendar.md`](../calendar.md) says what it
+would take), and no join codes for Webex, Slack or GoTo calls; the pre-meeting
 brief (2026-10-22: unit-, e2e- and model-evaluated, not yet seen before a
 real meeting) checks the AI's lines word by word, so a mix-up of two things
 its notes both say can pass (no "In short" from a small on-device model for

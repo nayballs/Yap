@@ -1184,6 +1184,14 @@ fn on_edges(app: &AppHandle, edges: Vec<Edge>) {
         return;
     }
     let view = window_view(app);
+    // The calendar reads each new call's join code from its windows (Meet's
+    // tab title, a meeting's address in a browser) before the lock below:
+    // it touches windows, and `claims_call` then matches by it.
+    for edge in &edges {
+        if let Edge::Started { app: id, .. } = edge {
+            crate::calendar::read_call_code(id);
+        }
+    }
     // A call Yap records ended by the mic: is it still on by a second
     // signal? (Read before the lock: Windows' audio sessions, its windows.)
     let recording = crate::meetings::meeting::recording_note().is_some();
