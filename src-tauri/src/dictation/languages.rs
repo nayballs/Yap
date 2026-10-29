@@ -37,10 +37,16 @@
 //!   prompt the server caches), and the region's spelling line
 //!   (`about_you`) is for English only ([`cleanup_spelling`]).
 //! - **The nudge** ([`nudge`]): Whisper sure of a language you didn't pick.
+//! - **Hinglish** ([`hinglish`], 2026-10-29): Hindi among My languages and
+//!   "Write in Latin letters (Hinglish)" on (`config.hinglish`): Whisper's
+//!   Devanagari spelt out in Latin letters on this PC before cleanup
+//!   ([`hinglish_text`]), cleanup told to keep it so ([`language_line_with`]),
+//!   and anything still in Devanagari after it spelt out too.
 //!
 //! The log says codes, probabilities and lengths, never the text.
 
 pub mod catalog;
+pub mod hinglish;
 pub mod nudge;
 
 use std::sync::Mutex;
@@ -287,8 +293,27 @@ pub fn spoken_language(cfg: &YapConfig) -> Option<String> {
 /// one-shots' language), else — My languages holding another than English
 /// — the languages it may be in.
 pub fn language_line(known: Option<&str>, mine: &[String]) -> Option<String> {
+    language_line_with(known, mine, false)
+}
+
+/// What the language line says of Hindi written as Hinglish.
+const HINGLISH_LINE: &str = "This transcript is in Hindi, often mixed with English: write the cleaned text in Latin letters, \
+the way Hinglish is typed (hai, nahi, kya, accha), English words in their English spelling, never translating it and never \
+writing Devanagari.";
+
+/// [`language_line`], with `hinglish` (Hindi among `mine` and "Write in
+/// Latin letters (Hinglish)" on): Hindi is to be written in Latin letters,
+/// English words kept English. Without it, exactly [`language_line`]'s. Pure.
+pub fn language_line_with(known: Option<&str>, mine: &[String], hinglish: bool) -> Option<String> {
+    let hinglish = hinglish && mine.iter().any(|c| c == "hi");
     match known {
         Some("en") => None,
+        Some("hi") if hinglish => Some(HINGLISH_LINE.to_string()),
+        None if hinglish => Some(format!(
+            "This transcript may be in {}: keep it in the language it is in, never translating it; write Hindi in Latin \
+             letters, the way Hinglish is typed (hai, nahi, kya), never in Devanagari.",
+            catalog::names_joined(mine, "or")
+        )),
         Some(code) => {
             let n = catalog::name(code);
             let fillers = catalog::fillers(code).map(|f| format!(", and leave out its filler words ({f})")).unwrap_or_default();
@@ -362,10 +387,43 @@ pub fn tidy_cleaned(text: &str, cfg: &YapConfig) -> String {
 /// screen, `screen_terms::cleanup_line`): the lines cleanup gets just before
 /// the transcript, after the style's.
 pub fn with_language_line(names: Option<String>, cfg: &YapConfig) -> Option<String> {
-    let line = language_line(spoken_language(cfg).as_deref(), &my_languages(cfg));
+    let line = language_line_with(spoken_language(cfg).as_deref(), &my_languages(cfg), cfg.hinglish);
     match (line, names) {
         (Some(l), Some(n)) => Some(format!("{l}\n\n{n}")),
         (l, n) => l.or(n),
+    }
+}
+
+// ---- Hinglish ------------------------------------------------------------------------
+
+/// Hindi among My languages and "Write in Latin letters (Hinglish)" on.
+pub fn hinglish_on(cfg: &YapConfig) -> bool {
+    cfg.hinglish && my_languages(cfg).iter().any(|c| c == "hi")
+}
+
+/// Whether a dictation in `spoken` (`None`: not known) has its Devanagari
+/// written as Hinglish: [`hinglish_on`], and it's in Hindi (or English, or
+/// not known) — not Marathi or Nepali, which share the script. Pure.
+fn writes_hinglish_in(cfg: &YapConfig, spoken: Option<&str>) -> bool {
+    hinglish_on(cfg) && spoken.is_none_or(|c| c == "hi" || c == "en")
+}
+
+/// This dictation's `text` with its Devanagari in Latin letters
+/// ([`hinglish::to_latin`]) when it's written as Hinglish
+/// (`writes_hinglish_in`, the language this dictation is in); else
+/// unchanged.
+pub fn hinglish_text(text: &str, cfg: &YapConfig) -> String {
+    hinglish_text_in(text, cfg, spoken_language(cfg).as_deref())
+}
+
+/// [`hinglish_text`] for a dictation known to be in `spoken` (pure).
+fn hinglish_text_in(text: &str, cfg: &YapConfig, spoken: Option<&str>) -> String {
+    if hinglish::has_devanagari(text) && writes_hinglish_in(cfg, spoken) {
+        let out = hinglish::to_latin(text);
+        tracing::info!(chars = out.chars().count(), "Dictation: Hindi in Latin letters (Hinglish)");
+        out
+    } else {
+        text.to_string()
     }
 }
 
@@ -423,14 +481,21 @@ pub async fn translate_dictation(app: &AppHandle, raw: &str, cfg: &YapConfig) ->
         return Some(raw.to_string());
     }
     let started = std::time::Instant::now();
+    // Into Hindi, for someone who writes it as Hinglish: in Latin letters.
+    let hinglish = to == "hi" && hinglish_on(cfg);
+    let mut instruction = translate_instruction(from.as_deref(), to);
+    if hinglish {
+        instruction.push_str(" Write the Hindi in Latin letters, the way Hinglish is typed (hai, nahi, kya), never in Devanagari.");
+    }
     let asked = crate::privacy::net::within(
         crate::privacy::net::Feature::Dictation,
         crate::ai::usage::within(
             crate::ai::usage::Feature::Translation,
-            crate::ai::llm::transform(&translate_instruction(from.as_deref(), to), raw, &m.base_url, &m.api_key, &m.model, &m.provider, m.disable_thinking),
+            crate::ai::llm::transform(&instruction, raw, &m.base_url, &m.api_key, &m.model, &m.provider, m.disable_thinking),
         ),
     )
     .await;
+    let asked = asked.map(|out| if hinglish { hinglish::to_latin(&out) } else { out });
     match asked.map(|out| crate::dictation::transforms::clean_output(&out)) {
         Ok(out) if !out.trim().is_empty() => {
             tracing::info!(to, chars = out.chars().count(), ms = started.elapsed().as_millis() as u64, "Translate on a shortcut: translated");
@@ -825,6 +890,49 @@ mod tests {
         );
         assert_eq!(language_line(None, &v(&["en"])), None);
         assert_eq!(language_line(None, &[]), None);
+    }
+
+    #[test]
+    fn hinglish_tells_cleanup_latin_letters_and_changes_nothing_when_off() {
+        let mine = v(&["en", "hi"]);
+        // On: Hindi heard, or not known with Hindi among mine.
+        let heard = language_line_with(Some("hi"), &mine, true).unwrap();
+        assert!(heard.contains("Latin letters") && heard.contains("never writing Devanagari") && heard.contains("English words"));
+        let maybe = language_line_with(None, &mine, true).unwrap();
+        assert!(maybe.starts_with("This transcript may be in English or Hindi") && maybe.contains("Latin letters"));
+        // English: no line, Hinglish or not.
+        assert_eq!(language_line_with(Some("en"), &mine, true), None);
+        // Off, or Hindi not among mine: exactly the line before Hinglish.
+        for (known, mine) in [(Some("hi"), v(&["en", "hi"])), (None, v(&["en", "hi"])), (Some("fr"), v(&["en", "fr"])), (None, v(&["en"]))] {
+            assert_eq!(language_line_with(known, &mine, false), language_line(known, &mine));
+        }
+        assert_eq!(language_line_with(None, &v(&["en", "fr"]), true), language_line(None, &v(&["en", "fr"])));
+        assert_eq!(
+            language_line(Some("hi"), &mine).as_deref(),
+            Some("This transcript is in Hindi: write the cleaned text in Hindi, never translating it.")
+        );
+    }
+
+    #[test]
+    fn hinglish_spells_out_a_hindi_dictation_only_when_asked() {
+        let text = "कल की मीटिंग तीन बजे है।";
+        let mut cfg = YapConfig { my_languages: v(&["en", "hi"]), hinglish: true, ..Default::default() };
+        assert!(hinglish_on(&cfg) && writes_hinglish_in(&cfg, None) && writes_hinglish_in(&cfg, Some("hi")));
+        assert_eq!(hinglish_text_in(text, &cfg, Some("hi")), "Kal ki meeting teen baje hai.");
+        assert_eq!(hinglish_text_in(text, &cfg, None), "Kal ki meeting teen baje hai.");
+        // Latin text: as it was.
+        assert_eq!(hinglish_text_in("See you at 3", &cfg, Some("hi")), "See you at 3");
+        // Heard as Marathi or Nepali (the same script): left alone.
+        assert_eq!(hinglish_text_in(text, &cfg, Some("mr")), text);
+        // Off, or no Hindi among My languages: Devanagari stays.
+        cfg.hinglish = false;
+        assert_eq!(hinglish_text_in(text, &cfg, Some("hi")), text);
+        let cfg = YapConfig { my_languages: v(&["en", "mr"]), hinglish: true, ..Default::default() };
+        assert!(!hinglish_on(&cfg));
+        assert_eq!(hinglish_text_in(text, &cfg, None), text);
+        // A new config: off.
+        let fresh: YapConfig = serde_json::from_str("{}").unwrap();
+        assert!(!fresh.hinglish);
     }
 
     #[test]

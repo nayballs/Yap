@@ -411,7 +411,9 @@ impl Shared {
         drop(lease);
         self.touch_activity();
         let said = result.map_err(|e| format!("The transcription failed: {e}"))?;
-        let raw = crate::dictation::languages::rerun_heard(said).trim().to_string();
+        let raw = crate::dictation::languages::rerun_heard(said);
+        // Hindi written as Hinglish, as a dictation has it (languages.rs).
+        let raw = crate::dictation::languages::hinglish_text(raw.trim(), &cfg);
         if raw.is_empty() {
             return Err("Nothing was heard in it".into());
         }

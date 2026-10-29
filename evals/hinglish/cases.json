@@ -1,0 +1,92 @@
+[
+  {
+    "name": "h-meeting",
+    "app": "personalChat",
+    "text": "कल की मीटिंग तीन बजे है।",
+    "reference": "Kal ki meeting teen baje hai.",
+    "english": ["meeting"],
+    "hindi": ["kal", "ki", "baje", "hai"],
+    "translated": ["tomorrow", "o'clock", "is"]
+  },
+  {
+    "name": "h-deadline",
+    "app": "workChat",
+    "text": "मुझे लगता है कि हमें प्रोजेक्ट की डेडलाइन आगे बढ़ानी चाहिए।",
+    "reference": "Mujhe lagta hai ki hamein project ki deadline aage badhani chahiye.",
+    "english": ["project", "deadline"],
+    "hindi": ["mujhe", "lagta", "hai", "ki", "chahiye"],
+    "translated": ["think", "should", "extend"]
+  },
+  {
+    "name": "h-report",
+    "app": "workChat",
+    "text": "क्या तुमने रिपोर्ट भेज दी?",
+    "reference": "Kya tumne report bhej di?",
+    "english": ["report"],
+    "hindi": ["kya", "tumne", "bhej"],
+    "translated": ["did", "send", "sent"]
+  },
+  {
+    "name": "h-office",
+    "app": "personalChat",
+    "text": "आज ऑफ़िस में बहुत काम है, मैं लेट हो जाऊँगा।",
+    "reference": "Aaj office mein bahut kaam hai, main late ho jaunga.",
+    "english": ["office", "late"],
+    "hindi": ["aaj", "mein", "bahut", "kaam", "hai"],
+    "translated": ["today", "work", "will"]
+  },
+  {
+    "name": "h-call-latin",
+    "app": "personalChat",
+    "text": "मैं Priya को call करूँगा, फिर email भेज दूँगा।",
+    "reference": "Main Priya ko call karunga, phir email bhej dunga.",
+    "english": ["call", "email"],
+    "hindi": ["main", "ko", "phir", "bhej"],
+    "translated": ["will", "then", "send"]
+  },
+  {
+    "name": "h-weekend",
+    "app": "personalChat",
+    "text": "इस वीकेंड हम लोग पिकनिक पर जा रहे हैं।",
+    "reference": "Is weekend hum log picnic par ja rahe hain.",
+    "english": ["weekend", "picnic"],
+    "hindi": ["hum", "log", "par", "rahe", "hain"],
+    "translated": ["we", "are", "going", "this"]
+  },
+  {
+    "name": "h-free",
+    "app": "workChat",
+    "text": "तुम कब तक फ्री हो? मुझे दो मिनट बात करनी है।",
+    "reference": "Tum kab tak free ho? Mujhe do minute baat karni hai.",
+    "english": ["free", "minute"],
+    "hindi": ["tum", "kab", "mujhe", "baat", "hai"],
+    "translated": ["when", "until", "talk", "need"]
+  },
+  {
+    "name": "h-thanks",
+    "app": "personalChat",
+    "text": "थैंक्यू सो मच, कल फिर मिलते हैं।",
+    "reference": "Thank you so much, kal phir milte hain.",
+    "english": ["thank", "you"],
+    "hindi": ["kal", "phir", "milte", "hain"],
+    "translated": ["tomorrow", "again", "meet"]
+  },
+  {
+    "name": "h-link-time",
+    "app": "workChat",
+    "text": "मीटिंग ३:३० बजे शुरू होगी, लिंक मैंने भेज दिया है।",
+    "reference": "Meeting 3:30 baje shuru hogi, link maine bhej diya hai.",
+    "english": ["meeting", "link"],
+    "hindi": ["baje", "shuru", "hogi", "diya", "hai"],
+    "translated": ["start", "will", "sent"]
+  },
+  {
+    "name": "h-sorry",
+    "app": "personalChat",
+    "text": "सॉरी यार, आज नहीं आ पाऊँगा।",
+    "reference": "Sorry yaar, aaj nahi aa paunga.",
+    "english": ["sorry"],
+    "hindi": ["yaar", "aaj", "nahi"],
+    "translated": ["today", "can't", "come"]
+  }
+]

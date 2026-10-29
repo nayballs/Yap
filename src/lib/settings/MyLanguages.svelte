@@ -13,7 +13,9 @@
   //   translated into another by the AI, checked against every other
   //   shortcut (`validateLanguageHotkey`), its live binding paused while a key
   //   is picked;
-  // - "Tell me when I speak a language I didn't pick" (Whisper models only).
+  // - "Tell me when I speak a language I didn't pick" (Whisper models only);
+  // - with Hindi among them, "Write in Latin letters (Hinglish)"
+  //   (`cfg.hinglish`; languages/hinglish.rs), and which model hears Hindi.
   //
   //   cfg:  Settings' config $state (auto-save does the saving).
   //   goto: opens another Settings page ("models").
@@ -197,6 +199,17 @@
     tick().then(() => addEl?.focus?.({ preventScroll: true }));
   }
 
+  // Hindi in Latin letters (dictation/languages/hinglish.rs): offered with
+  // Hindi among yours. Only Whisper models hear Hindi; say which.
+  const hindi = $derived(mine.includes('hi'));
+  const hindiModel = $derived.by(() => {
+    if (!model) return '';
+    if (model.covers?.includes('hi')) {
+      return `${model.name} hears Hindi. With AI cleanup on, it tidies the Hinglish; with it off, Yap spells it out itself.`;
+    }
+    return `${model.name}, your speech model, doesn't hear Hindi: only Whisper models do (Whisper Large v3 Turbo is the one to pick).`;
+  });
+
   // The model a translation goes to: Commands', else cleanup's.
   const translating = $derived(shortcuts.some((s) => s.translateTo));
   const nudgeDesc = $derived(
@@ -310,6 +323,16 @@
 
     <Row label={`Main shortcut (${hotkeyName})`} desc={autoDesc} setting="main-language">
       <Select bind:value={cfg.selectedLanguage} options={mainOptions} ariaLabel="Main shortcut's language" />
+    </Row>
+  {/if}
+
+  {#if hindi}
+    <Row setting="hinglish">
+      <Toggle
+        bind:checked={cfg.hinglish}
+        label="Write in Latin letters (Hinglish)"
+        desc={`Hindi comes out the way it's typed in chats, like “kal ki meeting teen baje hai”, English words left in English. ${hindiModel}`}
+      />
     </Row>
   {/if}
 
