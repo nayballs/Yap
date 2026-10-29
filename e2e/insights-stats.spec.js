@@ -30,7 +30,16 @@ const HISTORY = [
 const test = base.extend({
   yapOptions: [
     async ({}, use) => {
-      await use({ name: 'insights-stats', data: { 'history.json': HISTORY } });
+      await use({
+        name: 'insights-stats',
+        data: { 'history.json': HISTORY },
+        prepare: (dataDir) => {
+          // The model "installed", for Transcribe (the stub engine never reads it).
+          const model = path.join(dataDir, 'models', 'parakeet-tdt-0.6b-v3-int8');
+          fs.mkdirSync(model, { recursive: true });
+          fs.writeFileSync(path.join(model, 'encoder-model.int8.onnx'), 'stand-in');
+        },
+      });
     },
     { scope: 'worker' },
   ],
@@ -134,6 +143,17 @@ test('a dictation counts with how long it was said for, kept in history or not',
   expect(yap.readJson('history.json').length).toBe(kept);
   await expect(card(main, 'dictations').locator('.num')).toHaveText('2');
   await setConfig(yap, main, { historyEnabled: true, historyKeep: 'always' });
+});
+
+test('a cancelled dictation counts once it is transcribed, with its speaking time', async ({ yap }) => {
+  await yap.invoke('e2e_stats_set', { store: { days: [] } });
+  expect(await yap.invoke('e2e_dictate_audio', { seconds: 1.5, cancel: true })).toBeNull();
+  await expectStore(yap, 'history.json', (h) => h.at(-1)?.status === 'cancelled');
+  // Cancelled: never transcribed, not counted.
+  expect(stats(yap).days).toEqual([]);
+  const e = yap.readJson('history.json').at(-1);
+  await yap.invoke('history_rerun', { ts: e.ts, audio: e.audio, model: null });
+  await expectStore(yap, 'dictation_stats.json', (s) => s.days.length === 1 && s.days[0].dictations === 1 && s.days[0].timed === 1 && s.days[0].speakingSecs >= 1.4);
 });
 
 test('"You\'ve dictated 100 words": said once, with See Insights', async ({ yap, main, shot }) => {

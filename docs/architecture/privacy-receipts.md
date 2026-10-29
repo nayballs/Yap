@@ -214,7 +214,9 @@ uploaded…", **Open a GitHub issue**, Show in folder, Done.
   what the page shows, saved or not): `README.txt` (what's in it, what's
   left out, that nothing was uploaded); `history/dictations.csv` (When — this
   PC's time —, App, Words, Text, As said, Heard, Status, Model: `history_csv`)
-  and `history/history.json`; each note as `notes/<date> <title>.md` and each
+  and `history/history.json`, and `history/dictation-stats.json` (the stats
+  Home and Insights show, `dictation/stats.rs`: a row a day, numbers and app
+  names — kept when history isn't); each note as `notes/<date> <title>.md` and each
   meeting as `meetings/<date> <title>.md` (`notes::commands::export_markdown`,
   what "Save as .md" writes; `integrations::mcp::is_meeting` tells them apart;
   names made safe and unique, `file_stem`), and `notes/notes.json` (the whole
@@ -274,7 +276,10 @@ uploaded…", **Open a GitHub issue**, Show in folder, Done.
   its screenshots (`chats.json`, `chat-images/`, the ones waiting in Chat's
   box); memory (`memory.json`, and what the passes had read or were waiting
   to read); tasks (`tasks.json`); the search index (`search-index/`); usage
-  stats (`ai_usage.json`, `groq_usage.json` — Groq's request cap kept); the
+  stats (`dictation_stats.json` — Home's and Insights' numbers, which
+  outlast clearing history but not a reset: a fresh start, and they name
+  the apps dictated into; Keep history's copy in it stays —, `ai_usage.json`,
+  `groq_usage.json` — Groq's request cap kept); the
   pre-meeting briefs (they quote notes and memory; `calendar.json`'s
   `briefs`). Set-aside copies of those stores (`<name>.corrupt-…`) go too.
 - **What stays** (`STAYS`): config.json (every setting, the dictionary and

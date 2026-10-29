@@ -55,6 +55,32 @@ tables, method and how anyone can run it and send theirs:
 
 ## What works
 
+**Home's and Insights' stats, kept apart from history** (2026-10-29,
+[dictation.md](./dictation.md), [frontend.md](./frontend.md#views)):
+a content-free row a day in `dictation_stats.json`, written for every
+dictation whether or not history keeps it, so clearing history or keeping
+it 24 hours keeps Insights; the history already there is counted once, and
+what an older Yap saves since. Insights shows **words a minute** over
+speaking time (each new history entry keeps its audio's length; older
+ones are left out of the speed), time saved at that speed and how it's
+worked out, **week streaks** (now and longest, the PC's own weeks), the
+words AI cleanup changed and the dictionary's fixes, this month against
+the same days of last month, and **Share** (the numbers as a picture,
+copied or saved). **Milestones** ("You've dictated 1,000 words", once each)
+go through the notice policy. Privacy & data's history switch is **Keep
+dictation history: always / 24 hours / never** (24 hours asks first, then
+sweeps hourly). Home has a **meetings card** (upcoming from the calendar,
+the latest meeting notes, See all) and **Welcome back** after 14 days
+away, with the shortcut and one new thing. Unit-tested (the weeks across
+their edges and a year's end, the month spans, words a minute, the
+counting and catching up, milestones, welcome back, the 24-hour sweep,
+the cleanup diff's twin, the dictionary's fixes) and e2e-tested
+(`insights-stats.spec.js`, `home-meetings.spec.js`, `history-keep.spec.js`).
+Not tried yet: the measured speed on real dictations (it includes the
+pre-roll and the pause before the stop), a week streak across a real week
+start on a PC whose week starts on Sunday, and the share picture pasted
+into a real chat app.
+
 **Your data, and the microphone's quality** (2026-10-29,
 [privacy-receipts.md](./privacy-receipts.md), [dictation.md](./dictation.md)):
 Settings → Privacy & data → **Download your data** saves one .zip (history

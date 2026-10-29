@@ -379,11 +379,49 @@ Flow's dark mode of 19 Oct 2026), for every Yap window.
   of words out and/or in is one change; the cleaned text's line breaks
   kept. The row's menu gets Paste / Copy what I said instead of Copy raw
   transcript there.
+  **The rail and the cards around the feed** (2026-10-29): the stats card's
+  numbers come from `dictation/stats.rs` (they outlast clearing history:
+  "N dictations, counted on this PC · See Insights"); under it
+  **`home/MeetingsCard.svelte`** — "Meetings" with See all (→ Meetings):
+  with a calendar connected, Upcoming / Past tabs (arrow keys between
+  them; Upcoming first when something's coming), three each — a meeting to
+  come opens its note made ahead (`eventAction(ev, 'open')`), a past one its
+  note in Notes (`onopennote`); its notes from `calendar_meeting_notes`
+  after Home's own data (`home/homeMeetings.svelte.js`, again on
+  `yap-notes-changed`). Hidden for someone with no calendar and no
+  meeting notes. Over the feed, **`home/WelcomeBack.svelte`** — after 14
+  days without a dictation (`home_snapshot`'s `welcome`): "Welcome back",
+  the gap in words ("3 weeks", "a month"), the shortcut as keycaps and one
+  new thing (`core/whatsNew.js` `WHATS_NEW`, newest first, dated: the
+  newest after the last dictation is "New", else the newest is "Worth a
+  try"; add a line when a feature lands), its button opening Settings or a
+  view; ✕ or the button answers it (`welcome_back_dismiss`, once per gap).
+  Keep history 24 hours (`historyKeep` 'day'): a quiet notice over the
+  feed, and Keep its audio isn't offered (it goes with its entry). Deleting
+  a dictation says the stats still count it. Home re-pulls on
+  `yap-history-changed` and `yap-stats-changed`, once for the two.
 - **`insights/InsightsView.svelte`** = the stats
-  dashboard promoted out of Settings→History (serif hero number, stat grid,
-  30-day amber heatmap, top-apps-by-words bars from `get_history`, grouped by
-  `appLabel`); Settings → Privacy & data's History group keeps only the
-  enable toggle + clear (the list itself is Home's feed). Then, since
+  dashboard (serif hero number, stat grid, 30-day amber heatmap, top-apps
+  bars grouped by `appLabel`), all from `get_stats` (`dictation/stats.rs`,
+  2026-10-29: counted on this PC, numbers only, kept when history is
+  cleared): the hero says since when and the time saved, with how it's
+  worked out under it ("You talk at 120 words a minute, timed over 14
+  dictations; most people type about 40", or the assumed rates until a few
+  are timed); six cards — words today, **words a minute** ("–" until
+  measured), day streak, **week streak · longest N**, dictations, words per
+  dictation —; **Fixes** — the words AI cleanup changed, the words the
+  dictionary fixed, fixes this month "up 12% on this time last month";
+  then the 30 days by the PC's own dates. **Share** (top right): a menu —
+  Copy as a picture / Save as a picture… — of a card drawn on a canvas in
+  the theme's colours (`insights/shareCard.js`, 1200 × 630: the numbers
+  only, never a word said or an app), copied or saved through Rust
+  (`dictation/stats/share.rs`, the PNG as the call's body).
+  Settings → Privacy & data's History group has **Keep dictation history**
+  (Always / 24 hours / Never, `PrivacyPage.svelte`: "24 hours" asks first
+  when some would go, with the count, `history_counts`; the select is set
+  back meanwhile) and Clear history (the list itself is Home's feed);
+  "You've dictated 1,000 words" is `notices/milestones.js` (a tip toast
+  with See Insights; `yap-open-insights` from the bar card's). Then, since
   2026-10-25, **`insights/AiUsageCard.svelte` — AI usage** (the AI usage
   tracker, [ai-models.md](./ai-models.md) `ai/usage.rs`; shown once any
   call is counted, in Insights' own chunk): "Counted on this PC from each AI
