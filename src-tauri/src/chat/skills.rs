@@ -259,6 +259,11 @@ pub fn all() -> Vec<Skill> {
     out
 }
 
+/// The person's own Skills, as skills.json holds them (Download your data).
+pub fn own() -> SkillStore {
+    with_store(|s| s.clone())
+}
+
 /// The Skill run with `/command` (any case; with or without its slash).
 pub fn by_command(command: &str) -> Option<Skill> {
     let c = command.trim().trim_start_matches('/').to_lowercase();

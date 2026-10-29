@@ -67,6 +67,9 @@ pub struct Endpoint {
     /// changer's), which comes and goes with its app: never offered.
     #[serde(rename = "virtual")]
     pub is_virtual: bool,
+    /// The laptop's own microphone ([`is_built_in`]): with its lid closed
+    /// it goes last (`lid.rs`).
+    pub built_in: bool,
 }
 
 /// Where a stream opens.
@@ -119,7 +122,13 @@ pub fn rank_of(order: &[MicChoice], ep: &Endpoint, present: &[Endpoint]) -> Opti
 /// lost that Windows still lists for a moment (left out, so a default that
 /// was unplugged isn't opened again while Windows picks another). `present`
 /// `None`: Windows' list couldn't be read — its default, whatever it is.
+/// With the laptop's lid closed, its own microphone goes last ([`lid_rule`]).
 pub fn candidates(order: &[MicChoice], present: Option<&[Endpoint]>, away: &[String]) -> Vec<Target> {
+    candidates_with(order, present, away, crate::dictation::lid::closed())
+}
+
+/// [`candidates`] with the lid's state given (`lid_closed`). Pure.
+pub fn candidates_with(order: &[MicChoice], present: Option<&[Endpoint]>, away: &[String], lid_closed: bool) -> Vec<Target> {
     let Some(present) = present else {
         return vec![Target::Default];
     };
@@ -140,7 +149,63 @@ pub fn candidates(order: &[MicChoice], present: Option<&[Endpoint]>, away: &[Str
     if let Some(e) = present.iter().filter(usable).find(|e| e.default).or_else(|| left.next()) {
         push(e, &mut out);
     }
-    out
+    if lid_closed {
+        lid_rule(out, present, away)
+    } else {
+        out
+    }
+}
+
+/// **The lid closed** (`lid.rs`): a laptop's own microphone hears nothing
+/// useful, so it goes last — after the rest of the order and Windows'
+/// default, and when that's all there was, after any other microphone
+/// that's connected (not a software one). Still tried last: some laptops
+/// keep theirs outside the lid. Pure.
+pub fn lid_rule(targets: Vec<Target>, present: &[Endpoint], away: &[String]) -> Vec<Target> {
+    let (inside, mut rest): (Vec<Target>, Vec<Target>) = targets.into_iter().partition(|t| t.endpoint().is_some_and(|e| e.built_in));
+    if inside.is_empty() {
+        return rest;
+    }
+    if rest.is_empty() {
+        for e in present.iter().filter(|e| !e.built_in && !e.is_virtual && !away.contains(&e.id)) {
+            rest.push(Target::Mic(e.clone()));
+        }
+    }
+    rest.extend(inside);
+    rest
+}
+
+/// A laptop's own microphone, from what Windows says of it: not on USB,
+/// Bluetooth or a software device, and a microphone array (its jack
+/// subtype, the usual built-in kind) or named as built in. A plain
+/// "Microphone (Realtek Audio)" on a desktop's jack isn't. Pure.
+pub fn is_built_in(enumerator: &str, jack_subtype: &str, name: &str) -> bool {
+    let en = enumerator.trim().to_ascii_uppercase();
+    if en == "USB" || en.starts_with("BTH") || en == "ROOT" {
+        return false;
+    }
+    let jack = jack_subtype.trim().to_ascii_lowercase();
+    // KSNODETYPE_MICROPHONE_ARRAY, KSNODETYPE_PROCESSING_MICROPHONE_ARRAY.
+    if jack == "{dff21be5-f70f-11d0-b917-00a0c9223196}" || jack == "{dff21be6-f70f-11d0-b917-00a0c9223196}" {
+        return true;
+    }
+    let n = name.to_lowercase();
+    ["microphone array", "internal mic", "built-in mic", "builtin mic", "integrated mic", "digital microphone"]
+        .iter()
+        .any(|w| n.contains(w))
+}
+
+/// The lid opened or closed (`lid.rs`): the dictation's mic and a meeting
+/// look again (a warm stream on the built-in one moves), as when Windows'
+/// list changes.
+pub(crate) fn lid_changed() {
+    GENERATION.fetch_add(1, Ordering::SeqCst);
+    for f in LISTENERS.lock().unwrap_or_else(|p| p.into_inner()).iter() {
+        f();
+    }
+    if let Some(app) = APP.get() {
+        let _ = app.emit(EVENT_CHANGED, ());
+    }
 }
 
 /// The microphone a dictation starting now would use.
@@ -364,6 +429,7 @@ fn read_windows() -> Option<Vec<Endpoint>> {
                 .map(|f| Endpoint {
                     bluetooth: crate::dictation::mic::is_bluetooth(&f.enumerator, &f.path, &f.name),
                     is_virtual: f.enumerator.trim().eq_ignore_ascii_case("ROOT"),
+                    built_in: is_built_in(&f.enumerator, &f.jack, &f.name),
                     id: f.id,
                     name: f.name,
                     default: f.default,
@@ -409,6 +475,12 @@ pub(crate) mod win {
         fmtid: GUID::from_u128(0x1da5d803_d492_4edd_8c23_e0c0ffee7f0e),
         pid: 0,
     };
+    /// PKEY_AudioEndpoint_JackSubType: the KSNODETYPE of its jack (a
+    /// microphone array is a laptop's own).
+    const JACK_SUBTYPE: PROPERTYKEY = PROPERTYKEY {
+        fmtid: GUID::from_u128(0x1da5d803_d492_4edd_8c23_e0c0ffee7f0e),
+        pid: 8,
+    };
 
     /// What Windows says about a capture endpoint.
     #[derive(Debug, Default, Clone)]
@@ -418,6 +490,8 @@ pub(crate) mod win {
         pub enumerator: String,
         pub path: String,
         pub form_factor: Option<u32>,
+        /// Its jack subtype, a GUID in braces ("" unknown).
+        pub jack: String,
         pub default: bool,
     }
 
@@ -490,6 +564,7 @@ pub(crate) mod win {
                 enumerator: read(&ENUMERATOR_NAME).0.unwrap_or_default(),
                 path: read(&DEVICE_PATH).0.unwrap_or_default(),
                 form_factor: read(&FORM_FACTOR).1,
+                jack: read(&JACK_SUBTYPE).0.unwrap_or_default(),
                 default: false,
             })
         }
@@ -789,6 +864,42 @@ mod tests {
         assert_eq!(short_name("Headset (Contoso Buds Hands-Free AG Audio)"), "Contoso Buds");
         assert_eq!(short_name("Northwind Stereo Microphone"), "Northwind Stereo Microphone");
         assert_eq!(short_name(""), "Your microphone");
+    }
+
+    /// The laptop's lid closed: its own mic (Windows' default here) goes
+    /// last; the next in the order is used.
+    #[test]
+    fn with_the_lid_closed_the_built_in_mic_goes_last() {
+        let mut all = desk();
+        all[0].built_in = true;
+        // The built-in one first in the order: the USB mic takes its place.
+        let order = vec![pick("built-in", ""), pick("usb", "")];
+        assert_eq!(ids_of(&candidates_with(&order, Some(&all), &[], false)), vec!["built-in", "usb"]);
+        assert_eq!(ids_of(&candidates_with(&order, Some(&all), &[], true)), vec!["usb", "built-in"]);
+        // No order, Windows' default the built-in one: any other connected
+        // mic comes first.
+        assert_eq!(ids_of(&candidates_with(&[], Some(&all), &[], true)), vec!["usb", "headset", "built-in"]);
+        // A software mic isn't one to fall back on.
+        let mut soft = vec![all[0].clone(), Endpoint { is_virtual: true, ..ep("virtual", "Microphone (Contoso Streaming)") }];
+        assert_eq!(ids_of(&candidates_with(&[], Some(&soft), &[], true)), vec!["built-in"]);
+        // The laptop alone: its own mic after all (the person is told).
+        soft.truncate(1);
+        assert_eq!(ids_of(&candidates_with(&[], Some(&soft), &[], true)), vec!["built-in"]);
+        // Lid open, or no lid at all (a desktop): nothing changes.
+        assert_eq!(ids_of(&candidates_with(&[], Some(&all), &[], false)), vec!["built-in"]);
+    }
+
+    #[test]
+    fn the_built_in_mic_is_known_by_its_jack_or_its_name() {
+        const ARRAY: &str = "{DFF21BE5-F70F-11D0-B917-00A0C9223196}";
+        assert!(is_built_in("HDAUDIO", ARRAY, "Microphone (Northwind Audio)"));
+        assert!(is_built_in("INTELAUDIO", "", "Microphone Array (Northwind Smart Sound for Digital Microphones)"));
+        assert!(is_built_in("", "", "Internal Microphone (Northwind)"));
+        // A desktop's jack, a USB or Bluetooth mic, a software one: no.
+        assert!(!is_built_in("HDAUDIO", "{DFF21BE1-F70F-11D0-B917-00A0C9223196}", "Microphone (Northwind Audio)"));
+        assert!(!is_built_in("USB", ARRAY, "Microphone Array (Fabrikam Webcam)"));
+        assert!(!is_built_in("BTHENUM", "", "Headset (Contoso Buds)"));
+        assert!(!is_built_in("ROOT", "", "Microphone Array (Contoso Streaming)"));
     }
 
     #[test]

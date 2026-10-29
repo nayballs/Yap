@@ -1,10 +1,13 @@
-# Network receipts and Report a problem
+# Network receipts, Report a problem, your data
 
 Two trust features (2026-10-24): **Network connections**, a list of every
 connection Yap made and why (`privacy/net.rs`, Settings → Privacy & data), and
 **Report a problem**, a diagnostic file the person checks before saving it
-(`privacy/diagnostics.rs`, Settings → About). Logging's own rules (no user content at
-`info` and above) are in [app-shell.md](./app-shell.md) (Logging).
+(`privacy/diagnostics.rs`, Settings → About). And two for the person's data
+(2026-10-29, Settings → Privacy & data → Your data): **Download your data**
+(`privacy/export.rs`) and **Reset app** (`privacy/reset.rs`). Logging's own
+rules (no user content at `info` and above) are in
+[app-shell.md](./app-shell.md) (Logging).
 
 [Architecture index](./README.md) · [CLAUDE.md](../../CLAUDE.md)
 
@@ -205,7 +208,141 @@ tabs over a scrollable, focusable `<pre>` —, **Save…**, Cancel, the file's
 name and size) → **Saved Yap diagnostics 2026-10-24.zip**: "Nothing was
 uploaded…", **Open a GitHub issue**, Show in folder, Done.
 
+## `privacy/export.rs` — Download your data
+
+- **The file** (`text_files`, pure; each store read as it is in memory, so
+  what the page shows, saved or not): `README.txt` (what's in it, what's
+  left out, that nothing was uploaded); `history/dictations.csv` (When — this
+  PC's time —, App, Words, Text, As said, Heard, Status, Model: `history_csv`)
+  and `history/history.json`; each note as `notes/<date> <title>.md` and each
+  meeting as `meetings/<date> <title>.md` (`notes::commands::export_markdown`,
+  what "Save as .md" writes; `integrations::mcp::is_meeting` tells them apart;
+  names made safe and unique, `file_stem`), and `notes/notes.json` (the whole
+  store, folders and actions too); each chat as `chats/<date> <title>.md`
+  (who and when, the model) and `chats/chats.json`; `tasks.json`;
+  `skills.json` (the person's own Skills, `chat/skills.rs`); `memory/`
+  — Memory's own export's Markdown (`memory::export::files`, About you on
+  You.md) and `memory.json`; `dictionary/dictionary.csv` — the CSV the
+  Dictionary's Export… writes (`dictionary_csv`: Heard, Written, Kind,
+  Near-misses, Starred, a byte-order mark and Windows line ends; the rows
+  writing one word together, as the view groups them; Import… reads it back);
+  `settings.json`.
+- **Settings without secrets** (`settings_export`, pure, over config.json as
+  `YapConfig` serialises), three ways: by name — `SECRET_FIELDS` (`ppApiKey`,
+  `ppApiKeys`, `apiKey`, `apiKeys`, `webSearchKeys`, `ttsCloudKeys`, at any
+  depth: each Language Models scope's, each cleanup profile's) and any name
+  with apikey, token, secret, password, session, credential, cookie or bearer
+  in it, or ending in "key"/"keys" bar the keyboard's (`*Hotkey(s)`,
+  `autoSubmitKey`); by look — any value the diagnostics' key shapes match
+  (`sk-`, `gsk_`, `AIza`…) is left out whatever its field; and links lose
+  their user name, password, query and fragment (a key can ride in one).
+  What was taken out is named under `leftOut` (names only). A lint-style test
+  (`every_setting_named_like_a_secret_is_left_out`) walks every field of a
+  seeded config: a name with key, token, secret, password or session in it
+  is either left out or a keyboard key, so a new one has to be decided
+  there; `the_file_holds_every_store_and_no_secret` seeds fake keys in every
+  secret field (and one pasted into the agent's name) and finds none in any
+  file. The account session and the calendars' tokens are in Windows'
+  Credential Manager, which the export never reads.
+- **The audio** (only with the tick box, which says its size:
+  `data_export_summary`): `audio/meetings/<date> <title>/*.flac` (each
+  meeting's, `meeting-audio/`), `audio/dictations/<when>.wav` (the day of
+  dictation audio and what Home's Keep holds, `recent-audio/`),
+  `screenshots/*.png` (Chat's, `chat-images/`) — `disk_files`, stored as they
+  are (they're compressed already); the text Deflated.
+- **Written to disk as it goes** (`write_zip`: a big one is gigabytes),
+  beside the file picked as `<name>.partial`, renamed when done; progress
+  `yap-data-export {done, total}` (bytes, every 200 ms); **Cancel**
+  (`data_export_cancel`) stops it and deletes the partial file. One at a
+  time. A file gone since it was listed is left out. Zip64 for a file over
+  4 GiB.
+- **Commands**: `data_export_summary` (counts and the audio's size),
+  `data_export_save {audio}` (Windows' Save dialog — `diagnostics::pick_zip_path`,
+  Report a problem's, a test run's `e2e_save_path` instead — then the file;
+  `{path, cancelled, bytes}`), `data_export_cancel`, `data_export_reveal`
+  (Show in folder; not in test mode); debug-only `e2e_export_pace {ms}` (a
+  pause after each MB, so a test can press Cancel). The log says counts and
+  bytes only.
+
+## `privacy/reset.rs` — Reset app
+
+"Clear everything and keep my settings".
+
+- **What goes** (`GOES`, the dialog's words and each one's files): the
+  dictation history and the day of dictation audio (`history.json`,
+  `recent-audio/`); every note and meeting with their audio (`notes.json`'s
+  notes — the folders and actions stay —, `meeting-audio/`); every chat with
+  its screenshots (`chats.json`, `chat-images/`, the ones waiting in Chat's
+  box); memory (`memory.json`, and what the passes had read or were waiting
+  to read); tasks (`tasks.json`); the search index (`search-index/`); usage
+  stats (`ai_usage.json`, `groq_usage.json` — Groq's request cap kept); the
+  pre-meeting briefs (they quote notes and memory; `calendar.json`'s
+  `briefs`). Set-aside copies of those stores (`<name>.corrupt-…`) go too.
+- **What stays** (`STAYS`): config.json (every setting, the dictionary and
+  snippets, the keys) and `dictionary_usage.json`; the person's own Skills
+  (`skills.json`: setup, like folders and actions); the models (`models/`,
+  `llm/`); the account's sign-in and the calendars (Credential Manager,
+  `calendar.json`'s connections and meetings); Yap's own records — tips
+  shown (`hints.json`, `mic_tips.json`), answers to its offers
+  (`notices.json`, `word_suggestions.json`, `snippet_suggestions.json`,
+  `language_nudges.json`), the network receipts, caches, the log.
+- **Every file the docs name is decided**: a unit test reads this folder's
+  `config-and-data.md`, takes every `%APPDATA%/yap/…` and `<data>/…` it names
+  and fails on one in neither list — a store added later has to be put in one
+  (and the dialog's words with it).
+- **Each store is emptied through its own module, under its own lock**
+  (`history::clear`, `notes::reset`, `chats::reset`, `memory::reset` — its
+  Undo batches dropped —, `task_store::reset`, `search::index::forget`,
+  `ai::usage::store::reset` — what this Yap had counted but not written too
+  —, `groq::reset`, `calendar::forget_briefs`, `meeting_audio::clear`,
+  `snip::chat_images_delete_all`), so no copy held in memory writes the old
+  data back with a later save; a save that fails is said (`saving.rs`, Try
+  again) and the store stays empty in memory.
+- **No restart**: every window lets go of each note (`yap-note-deleted`: the
+  notepad hides, the quick note starts fresh), the stores' own events go
+  out (`yap-history-changed`, `yap-notes-changed`, `yap-tasks-changed`,
+  `yap-memory-changed`, `yap-chat-images-deleted`), then `yap-data-reset`:
+  the main window shows its views afresh (`{#key}` in ControlPanel), the
+  briefs' cache empties (`stores/calendar.svelte.js`). `Done.restart` is
+  there for the page, never set so far.
+- **Refused while a dictation or a meeting records** ("Finish the dictation
+  first.", "Stop the meeting first: Yap is recording it."): what they'd save
+  next would come back. Another Yap running on the same data folder (the
+  installed nightly beside Yap - Dev) still holds its own copies in memory:
+  quit it first.
+- **Commands**: `data_reset_plan` (what goes with counts — "1 note, 1
+  meeting" —, what stays, why it can't run now), `data_reset` (counts only,
+  in the log too).
+
+## Settings → Privacy & data → Your data
+
+`settings/YourData.svelte` (its own chunk, loaded with the page), the last
+group on Privacy & data: **Download your data** (anchor `download-data`, in
+the search index): its row, then the tick box "Include audio and
+screenshots · 1.2 GB" (none kept: off and greyed); Download… → Windows' Save
+dialog → the progress (`ui/DownloadProgress.svelte`: "Saving your data…
+42 %", the bytes, **Cancel**) → **Saved Yap data 2026-10-29.zip**, its size,
+"Nothing was uploaded", Show in folder, Done. **Reset app** (anchor
+`reset-app`): Reset app… → Yap's confirm dialog (`ui/ConfirmDialog.svelte`,
+which now takes `children`): "Clear everything and keep your settings?",
+what goes, each with its count, what stays, **Download your data first**
+(closes it and starts the download), Cancel / **Reset app** (red) → "Yap is
+reset · Your settings, dictionary and models are as they were. No restart
+needed." A dictation or meeting going on: said in a toast, no dialog.
+
 ## e2e
+
+`e2e/your-data.spec.js` (seeded history, a note, a meeting, a chat, a task,
+memory, a dictionary, fake keys, made-up audio and a screenshot): the tick
+box says the audio's size; Download… writes the zip through
+`e2e_save_path`, every store in it (the dictation in the CSV, the meeting's
+line in its Markdown, the dictionary's CSV as the view writes it, settings
+naming what was left out), the audio and the screenshot, no key anywhere in
+the file's bytes; a slowed one shows its progress and Cancel leaves no file;
+Reset app's dialog lists what goes with counts and what stays, Download your
+data first saves the file, the reset empties every store on disk, keeps
+config.json (keys, dictionary, About you), Home and Notes show it at once,
+and the next note and dictation are all that's saved after.
 
 `e2e/network-receipts.spec.js`: two fake AI servers, one aliased to
 api.groq.com — a Chat answer from each shows as "Chat · Groq" (Internet,

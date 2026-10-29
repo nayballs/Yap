@@ -644,6 +644,22 @@ pub fn delete(id: u64) {
     delete_many(&[id]);
 }
 
+/// Reset app (`privacy/reset.rs`): every conversation gone, archived ones
+/// and meetings' Ask threads too, in one write. (Their screenshots go with
+/// Chat's folder there.) How many went.
+pub fn reset() -> usize {
+    let gone = with_store(|s| {
+        let gone = s.conversations.len();
+        s.conversations.clear();
+        save_to_disk(s);
+        gone
+    });
+    if gone > 0 {
+        crate::search::removed();
+    }
+    gone
+}
+
 /// Delete several conversations in one write (the Chat list's multi-select
 /// and "Delete all chats…"). Returns how many were there to delete; ids
 /// already gone are skipped.

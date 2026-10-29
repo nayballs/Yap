@@ -111,9 +111,12 @@
     const unNet = listen('yap-connections', loadNet);
     // A dictation saved, an entry deleted from Home, all cleared (dictation/history.rs).
     const un = listen('yap-history-changed', loadCount);
+    // Reset app (privacy/reset.rs): the screenshots went too.
+    const unReset = listen('yap-data-reset', loadShots);
     return () => {
       un.then((f) => f());
       unNet.then((f) => f());
+      unReset.then((f) => f());
     };
   });
   async function loadAudio() {
@@ -515,6 +518,12 @@
     {/snippet}
   </Row>
 </Group>
+
+<!-- Download your data, Reset app (privacy/export.rs, reset.rs): a chunk of
+     its own, so the main window's stays small. -->
+{#await import('./YourData.svelte') then { default: YourData }}
+  <YourData />
+{/await}
 {/if}
 
 <style>

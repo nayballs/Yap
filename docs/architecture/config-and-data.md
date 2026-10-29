@@ -420,7 +420,9 @@
   stored) (`chat/skills.rs`, through `saving.rs` as "your Skills"; a file
   that doesn't read is set aside). A file of its own rather than notes.json's
   actions: an older Yap never opens it (it has no Skills), so nothing it
-  saves can drop or turn a Skill into an action.
+  saves can drop or turn a Skill into an action. Reset app keeps it (setup,
+  like folders and actions: `privacy/reset.rs` STAYS); Download your data
+  includes it (`skills.json` in the zip).
 - Chat screenshots: `%APPDATA%/yap/chat-images/` — `img_<16 hex>.png` for each
   screenshot a question carries (Snip to Chat, `snip/images.rs`); `chats.json`
   keeps only its id, size, bytes and source. Deleted with its conversation, after
@@ -503,6 +505,12 @@
   and drops those two fields when it next saves a hint, which is harmless:
   the marks only ever show in a first meeting, and once a meeting has talk
   in it no later one is a first.
+- Mic tips: `%APPDATA%/yap/mic_tips.json` (2026-10-29,
+  `dictation/mic_tips.rs`) — how often each mic-quality tip ("Yap didn't
+  hear you clearly": quiet, noisy, clipped, a Bluetooth headset in its call
+  profile) showed and when, and when the last did: `{quiet: {shown, lastAt},
+  …, lastShownAt}`. Counts only. A file of its own: an older Yap never reads
+  or writes it. Safe to delete (each tip may show again).
 - Quieted apps: `%APPDATA%/yap/quieted_apps.json` — only while a dictation
   has other apps silenced (each session's id, exe and level before), so a
   Yap that crashed mid-dictation brings them back at its next start
@@ -529,6 +537,17 @@
   (`memory.rs`). Changed only as changes (Undo in the app); cleared from
   Settings → Memory, exported there as a .zip of Markdown. Sent with questions
   to the AI model the person uses, never to Yap.
+- **Download your data and Reset app** (2026-10-29, Settings → Privacy &
+  data → Your data; [privacy-receipts.md](./privacy-receipts.md)): one .zip
+  of the history, notes and meetings, chats, tasks, memory, the dictionary
+  and settings without keys (the audio and screenshots with a tick box),
+  never uploaded; and "Clear everything and keep my settings": the history
+  and its audio, notes and meetings with theirs, chats and screenshots,
+  memory, tasks, the search index, the usage counts and the pre-meeting
+  briefs go; config.json, `dictionary_usage.json`, the models, the account
+  and calendars, and Yap's own records stay. **Every file this page names
+  is in one list or the other** (`privacy/reset.rs` `GOES` / `STAYS`; a unit
+  test reads this page): a new store put here has to be decided there too.
 - All of the above (plus config) write atomically and quarantine a corrupt file
   on load rather than crashing (`config::atomic_write`/`quarantine_corrupt`;
   config.json its own way, above). Each write has a temp file of its own
