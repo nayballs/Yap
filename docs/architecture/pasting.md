@@ -401,6 +401,104 @@ Putting a dictation into the app you're in: the clipboard paste and the submit k
   Paste); Claude Code's stand-in gets slices of ≤ 800 / ≤ 2 breaks, all of
   it, no Enter. VS Code's terminal isn't installed here (unmeasured: only
   the CLI's limits apply there).
+- **`pasting/stacked.rs`** — **stacked messages** (2026-10-29; Wispr
+  Flow's, by behaviour, on a spoken separator; `config.stacked_messages`,
+  **off** by default — a message can't be taken back, and the phrase is
+  one to know). In a chat app (`app_kind`'s Messaging as read, or
+  cleanup's Work chat / Personal chat by process or tab title), "new
+  message" or "next message" said **as a sentence or clause of its own**
+  ("Hi Sam. New message. Are you free?", "…, new message, …") cuts the
+  dictation into messages (`split`, pure: never inside a sentence — "a new
+  message from Sam", "New message from Sam: hi" (a word that carries the
+  sentence on), "hi sam new message" with no punctuation; empty parts
+  dropped, the comma or dash that tied a part to it off, a lower-case first
+  word capitalised). **Only where it's sent anyway** (`decide`):
+  auto-submit on, or "press enter" said (`app_kind::submit_key` gives a
+  key) → `Stacked::Send` — each message fitted (`text_injector::
+  prepare_messages`: the first to the cursor's text, the rest to the empty
+  box a send leaves, a chat's short message without its full stop) and
+  pasted and sent in turn (`compose.rs`); not sent → `Lines`, one paste,
+  the messages on lines of their own; not a chat app or nothing said →
+  as it is. **Wispr's trigger** (read in its shipped code): every sentence
+  of a personal-chat dictation a message, shown in its scratchpad for a
+  click to send; Yap has no such window, so it never guesses where a
+  message ends — an AI splitting would send a half-thought now and then,
+  and the on-device model can't be relied on for it. AI cleanup that took
+  the separators out (or rewrote them): the **words as said** are split
+  instead (corrections and snippets, no cleanup), so the messages asked
+  for still go. **Undo**: a sent message can't be taken back by Yap (it's
+  in the chat); "Use what I said" and rewriting the last dictation don't
+  apply (as after any dictation a submit key sent); a cancelled
+  dictation's Undo runs it again as a new one, into its own window or
+  onto the clipboard (strict, as ever).
+- **`pasting/mentions.rs`** — **@mentions** (2026-10-29; Wispr Flow's Slack
+  tagging, by behaviour; `config.chat_mentions`, on; needs `screen_names`):
+  "at <a name on screen>" (`find`, pure: a clause's start — the text's
+  start, punctuation, a line break, "hey", "thanks", "thank you", "cc",
+  "and"… before "at" —, the longest name on screen said, never followed by
+  "'s": "see you at Rochelle's", "lunch at Zizzi" stay), or "@Name" as AI
+  cleanup may write it. The names: the screen's names and full names
+  (`people`: not the app's own). **What each app does** (their help pages,
+  2026): **Slack** and **Discord** pick from their "@" list with Tab (as
+  Enter — but Enter sends when the list has closed): "@Sam" typed
+  (`text_injector::type_text`, keystrokes: a paste doesn't open the list
+  everywhere), and Tab only once UI Automation shows the list's highlighted
+  entry is that person (`selection::picked_option`: the screen reader's
+  focus on a list item, from `aria-activedescendant`; `option_is`: every
+  word said a whole word of it — "Sam" isn't "Samantha"), within 1.2 s;
+  else no key and "@Sam" stays as text. **Teams, Google Chat, Mattermost,
+  Rocket.Chat, Zulip, Element**: their lists take Enter (Teams' Tab isn't
+  documented), so plain "@Sam" in the one paste. **WhatsApp, Telegram,
+  Messenger, Signal** and other personal chats: nothing changes. By
+  process, or a browser's tab title (`which`).
+- **`pasting/file_tags.rs`** — **file tagging** (2026-10-29; Wispr Flow's
+  for Cursor/Windsurf, by behaviour; `config.file_tags`, on; needs
+  `screen_names`): the dictation's code names (`dictionary/screen_terms/
+  code.rs`, [dictionary.md](./dictionary.md)) give the files on screen and
+  where the focus is. **Cursor** and **Windsurf**'s AI chat box: "@" + the
+  name typed, Tab once the list shows that file; **VS Code**'s chat (Copilot
+  Chat): "#" + the name ("@" is for its chat participants); **Claude Code**
+  and **Codex** in a terminal: "@" + the path the screen showed
+  ("@src/services/userService.ts"; a file shown with several paths or none
+  keeps its name) written into the one paste — both read a file named so
+  on send. Never in the code editor, a plain shell or Visual Studio /
+  JetBrains (`tagging`). `find` (pure): a file's whole name as a word of
+  its own (not inside a path), optionally after "@", "tag" or a
+  clause-starting "at" (taken off); its stem alone only after one of
+  those, and only when one file has it.
+- **`pasting/compose.rs`** — **a dictation in steps** (2026-10-29): stacked
+  messages, a picked mention, a picked file — `plan` (pure: each message's
+  `Piece`s, `Text` to paste and `Pick { typed, said }`; the text it reads
+  as, for history) and `run`, on `text_injector`'s public paste
+  (`inject_text`, verified and private; `strict` after the first piece:
+  into its window or nowhere), typing (`type_text`), keys
+  (`press_step_key`: Tab, Backspace) and `press_submit`. **The whole text
+  is ready first** (cleaned, corrected, fitted). **It stops at the first
+  doubt**: before each message after the first the box must have emptied
+  (`selection::read_context`: the last one was sent) and the window be in
+  front; a paste, the typing or a key Windows didn't take ends it too.
+  What's left goes on the clipboard privately and one alert says how far
+  it got ("Sent 1 of 3 messages · the rest is copied", `stopped_alert`,
+  kind "pasteBlocked"). After a picked mention the app's own space goes
+  before a comma or a full stop (one Backspace, only when the field's text
+  before the caret ends with a space). The log has counts and steps, never
+  words. A plan of one plain paste goes the ordinary way (`in_steps`),
+  so a dictation that needs no steps pastes exactly as before. Test mode
+  pastes, types and presses nothing and reports the steps
+  (`Delivered.steps`); `e2e_chat_target` (debug) stages the window: its
+  process and title, the text on screen, the focus's labels, and whether
+  an app's list shows the one typed.
+- **`pasting/send_key.rs`** — **the Send shortcut** (2026-10-29; Wispr
+  Flow's bindable "Press Enter"; `config.send_hotkey`, Settings →
+  Shortcuts, unbound by default; `input_hook.rs`'s eleventh binding, its
+  press only): once its keys are up, the send key in the window in front —
+  `auto_submit_key` (Enter, Ctrl+Enter, Shift+Enter), Enter in a terminal
+  (`app_kind::submit_key`). Never Enter itself (`is_enter`: the hook hears
+  Yap's own keys; first or "+ Add another", refused in Settings and left
+  unbound by `input_hook`), never another shortcut's key. An app running
+  as administrator: said once. No in-page fallback, as Paste last has none.
+  Test mode presses nothing ("e2e: not pressing the send key"; debug
+  `e2e_shortcut { name: "send" }`).
 - **`pasting/elevated.rs`** — apps running as administrator: Windows (UIPI) drops keys
   sent to a higher integrity level, and `SendInput` doesn't say so. The target's
   level is compared with Yap's (`OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION)`
@@ -496,7 +594,12 @@ Putting a dictation into the app you're in: the clipboard paste and the submit k
   never waits: still reading → no context. Kept in memory for that dictation only;
   logged as lengths, never text. **`focused_element(pid)`** (for `app_kind`):
   the focused element's ClassName and Name in one round trip (a UIA cache
-  request, 100 ms timeout), only if it's in `pid`. **`focus_editable(target)`**
+  request, 100 ms timeout), only if it's in `pid`. **`picked_option(pid)`**
+  (for `compose.rs`, 2026-10-29): the same round trip's name when the focus
+  a screen reader sees is a list's entry (a list item, menu item, data item
+  or tree item: an app's "@" list's highlighted entry, which Chromium reports
+  as the focus through `aria-activedescendant` while the keyboard stays in
+  the box). **`focus_editable(target)`**
   (for the paste, 2026-10-25): the focused element and up to 3 parents
   (`FocusFacts`: control type, framework, TextPattern / ValuePattern and
   whether read-only, the legacy read-only bit; 200 ms) → `editable` (pure,

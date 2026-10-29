@@ -282,6 +282,7 @@ pub fn run() {
             dictation::commands::configure_paste_last_hotkey,
             dictation::commands::configure_copy_last_hotkey,
             dictation::commands::configure_quick_note_hotkey,
+            dictation::commands::configure_send_hotkey,
             dictation::commands::configure_more_hotkeys,
             #[cfg(debug_assertions)]
             dictation::commands::e2e_hotkey_bindings,
@@ -756,6 +757,8 @@ pub fn run() {
             #[cfg(debug_assertions)]
             ai::cleanup_styles::e2e_style_app,
             #[cfg(debug_assertions)]
+            pasting::compose::e2e_chat_target,
+            #[cfg(debug_assertions)]
             ai::cleanup_context::e2e_cursor_before,
             #[cfg(debug_assertions)]
             shell::realtest::commands::realtest_dictate_wav,
@@ -845,6 +848,8 @@ pub fn run() {
             dictation::input_hook::configure_copy_last_from(&cfg);
             // Quick note (notes/quick_note.rs; unbound by default, never a clash).
             dictation::input_hook::configure_quick_note_from(&cfg);
+            // Send (pasting/send_key.rs; unbound by default, never Enter).
+            dictation::input_hook::configure_send_from(&cfg);
             // More shortcuts for each ("+ Add another"; giving way to all of these).
             dictation::input_hook::configure_more_from(&cfg);
             // Language shortcuts (My languages, languages.rs; none by
@@ -1069,6 +1074,10 @@ pub fn run() {
             handle.listen("quick-note-key-released", move |event| {
                 notes::quick_note::key::on_key(&quick_note_up_handle, false, event.payload().parse::<u64>().ok());
             });
+            // Send (pasting/send_key.rs): the send key in the window in
+            // front, once the shortcut's keys are up.
+            let send_handle = handle.clone();
+            handle.listen("send-key-pressed", move |_| pasting::send_key::press_soon(&send_handle));
             snip::init(&handle);
 
             // A saved transform's shortcut (transforms.rs): its slot, run on

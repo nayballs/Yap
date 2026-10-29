@@ -34,7 +34,16 @@
 //!      the transcript seems to contain ([`ScreenTerms::cleanup_line`]) —
 //!      the only part that can leave the PC (with the transcript, to a cloud
 //!      cleanup provider); the screen's text never does.
+//! 4. **In an editor or a terminal** (2026-10-29, `code.rs`): the same text
+//!    gives the dictation's file names and code symbols, written as the
+//!    code has them when said aloud ("user service dot ts" →
+//!    `userService.ts`), and where the focus is (the editor, its AI chat
+//!    box, its terminal) for file tagging (`pasting/file_tags.rs`). An
+//!    editor's tabs and file tree are asked for in one more time-boxed call.
+//!    In a chat app, the people's names on screen are what "at Sam"
+//!    mentions (`pasting/mentions.rs`).
 
+pub mod code;
 mod extract;
 
 pub use extract::{Kind, Term};
@@ -78,6 +87,9 @@ pub struct ScreenTerms {
     phrases: Vec<DictionaryEntry>,
     /// Single terms that may be near-miss targets.
     words: Vec<DictionaryEntry>,
+    /// In an editor or a terminal: its file names and symbols, and where
+    /// the focus is (`code.rs`).
+    pub code: Option<code::CodeNames>,
 }
 
 fn entry(to: &str) -> DictionaryEntry {
@@ -125,7 +137,7 @@ impl ScreenTerms {
                 }
             }
         }
-        ScreenTerms { terms, phrases, words }
+        ScreenTerms { terms, phrases, words, code: None }
     }
 
     /// For the Whisper prompt: the most frequent terms that aren't already
@@ -176,7 +188,24 @@ impl ScreenTerms {
     /// AI cleanup's line ("Spell these names as written: Zentrix, Siobhan
     /// Ní Bhriain."), or `None` when the transcript seems to hold none.
     pub fn cleanup_line(&self, transcript: &str, keep: &dyn Fn(&str) -> bool) -> Option<String> {
-        let terms = self.in_transcript(transcript, keep);
+        // Code names said aloud first ("user service dot ts" → userService.ts):
+        // matched word for word, they're the surest.
+        let mut terms: Vec<String> = self
+            .code
+            .as_ref()
+            .map(|c| c.said_in(transcript, CLEANUP_TERMS))
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|t| !keep(&crate::dictionary::fuzzy::ngram_key(t)))
+            .collect();
+        for t in self.in_transcript(transcript, keep) {
+            if terms.len() >= CLEANUP_TERMS {
+                break;
+            }
+            if !terms.iter().any(|x| x.eq_ignore_ascii_case(t)) {
+                terms.push(t.to_string());
+            }
+        }
         (!terms.is_empty()).then(|| format!("Spell these names as written: {}.", terms.join(", ")))
     }
 }
@@ -345,7 +374,23 @@ pub fn correct(text: &str, screen: Option<&ScreenTerms>, cfg: &YapConfig) -> Str
     let Some(screen) = screen else {
         return text.to_string();
     };
-    if !cfg.screen_names || !cfg.dictionary_fuzzy {
+    if !cfg.screen_names {
+        return text.to_string();
+    }
+    // In an editor or a terminal: file names and symbols said aloud, as the
+    // code writes them (`code.rs`; a letter off only with "Catch near-misses").
+    let respelled;
+    let text = match &screen.code {
+        Some(code) => {
+            respelled = code.respell(text, cfg.dictionary_fuzzy);
+            if respelled != text {
+                tracing::debug!("Wrote a file or code name said aloud as the code has it");
+            }
+            respelled.as_str()
+        }
+        None => text,
+    };
+    if !cfg.dictionary_fuzzy {
         return text.to_string();
     }
     if screen.phrases.is_empty() && screen.words.is_empty() {
@@ -408,6 +453,13 @@ pub fn begin_dictation(target_hwnd: Option<isize>, read: bool) {
         let mut s = session();
         s.id = id;
         s.reading = if hwnd.is_some() { Reading::Pending } else { Reading::Off };
+        // A test run reads no window: what a spec staged stands in for it.
+        #[cfg(debug_assertions)]
+        if hwnd.is_none() && read && crate::shell::e2e::active() && !crate::shell::realtest::on() {
+            if let Some(staged) = TEST_SCREEN.lock().unwrap_or_else(|p| p.into_inner()).clone() {
+                s.reading = Reading::Done(Some(staged));
+            }
+        }
     }
     let Some(hwnd) = hwnd else {
         return;
@@ -460,6 +512,25 @@ pub fn forget() {
     s.reading = Reading::Off;
 }
 
+/// Test mode's stand-in for a window's text ([`stage_for_test`]).
+#[cfg(debug_assertions)]
+static TEST_SCREEN: Mutex<Option<Arc<ScreenTerms>>> = Mutex::new(None);
+
+/// Test mode only (`compose::e2e_chat_target`): from now on every dictation
+/// "reads" `text` as its window's (in code app `code`, the focus labelled
+/// `focus`), its names and code names found as a real read's are; `None`:
+/// nothing (as before).
+#[cfg(debug_assertions)]
+pub fn stage_for_test(text: Option<&str>, code_app: Option<code::App>, focus: Option<code::Labels>) {
+    let staged = text.map(|t| {
+        let ordinary = crate::dictionary::learn::Ordinary::new();
+        let is_word = |w: &str| ordinary.is(w);
+        let read = WindowText { text: t.to_string(), focus, ..WindowText::default() };
+        Arc::new(terms_of(&read, code_app, &is_word, ordinary.has_spell_checker()))
+    });
+    *TEST_SCREEN.lock().unwrap_or_else(|p| p.into_inner()) = staged;
+}
+
 /// Robot mode: wait (at most `max`) for the read [`begin_dictation`]
 /// started, as the seconds of a spoken dictation would.
 #[cfg(debug_assertions)]
@@ -493,24 +564,52 @@ fn read_terms(hwnd: isize) -> Option<ScreenTerms> {
         tracing::debug!("A password manager's window: not reading its names");
         return None;
     }
-    let read = read_window(hwnd, pid, started + READ_BUDGET)?;
+    // An editor or a terminal: its code names too (`code.rs`), and an
+    // editor's tabs and file tree asked for.
+    let code_app = code::app_of(exe, crate::pasting::app_kind::of_window(Some(hwnd)));
+    let read = read_window(hwnd, pid, started + READ_BUDGET, code_app.is_some_and(code::App::is_editor))?;
     let read_ms = started.elapsed().as_millis() as u64;
     let ordinary = crate::dictionary::learn::Ordinary::new();
     let spell_checker = ordinary.has_spell_checker();
     let is_word = |w: &str| ordinary.is(w);
-    let terms = extract::extract(&read.text, &is_word, spell_checker);
-    let screen = ScreenTerms::new(terms, &is_word, spell_checker);
+    let screen = terms_of(&read, code_app, &is_word, spell_checker);
     tracing::debug!(
         read_ms,
         ms = started.elapsed().as_millis() as u64,
         chars = read.text.chars().count(),
         document = read.document,
         elements = read.elements,
+        items = read.items,
         terms = screen.terms.len(),
         targets = screen.phrases.len() + screen.words.len(),
         "Read the names on screen"
     );
+    if let Some(c) = &screen.code {
+        tracing::debug!(
+            app = c.app.name(),
+            focus = ?c.focus,
+            files = c.files.len(),
+            symbols = c.symbols.len(),
+            "Code names on screen"
+        );
+    }
     Some(screen)
+}
+
+/// The names in a window's text as read (`read`), and in a code app its
+/// code names with where the focus is. Pure but for `is_word`.
+fn terms_of(read: &WindowText, code_app: Option<code::App>, is_word: &dyn Fn(&str) -> bool, spell_checker: bool) -> ScreenTerms {
+    let terms = extract::extract(&read.text, is_word, spell_checker);
+    let mut screen = ScreenTerms::new(terms, is_word, spell_checker);
+    screen.code = code_app.map(|app| {
+        let focus = match &read.focus {
+            Some(labels) => code::focus_of(app, labels),
+            None if matches!(app, code::App::Terminal(_)) => code::Focus::Terminal,
+            None => code::Focus::Other,
+        };
+        code::CodeNames::new(app, focus, &read.text, is_word)
+    });
+    screen
 }
 
 /// A window's visible text, as read.
@@ -521,6 +620,10 @@ pub struct WindowText {
     pub document: usize,
     /// Text elements read besides it.
     pub elements: usize,
+    /// An editor's tabs and tree items read (`code.rs`).
+    pub items: usize,
+    /// The focused element's labels (never logged).
+    pub focus: Option<code::Labels>,
 }
 
 impl WindowText {
@@ -545,15 +648,16 @@ impl WindowText {
     }
 }
 
-/// Read `hwnd`'s visible text over UI Automation, until `until` at most.
-fn read_window(hwnd: isize, pid: u32, until: Instant) -> Option<WindowText> {
+/// Read `hwnd`'s visible text over UI Automation, until `until` at most
+/// (`editor`: a code editor's, whose tabs and file tree are asked for too).
+fn read_window(hwnd: isize, pid: u32, until: Instant, editor: bool) -> Option<WindowText> {
     #[cfg(windows)]
     {
-        uia::read(hwnd, pid, until)
+        uia::read(hwnd, pid, until, editor)
     }
     #[cfg(not(windows))]
     {
-        let _ = (hwnd, pid, until);
+        let _ = (hwnd, pid, until, editor);
         None
     }
 }
@@ -565,11 +669,13 @@ mod uia {
 
     use windows::core::Interface;
     use windows::Win32::Foundation::HWND;
+    use windows::Win32::System::Variant::{VARIANT, VT_I4};
     use windows::Win32::UI::Accessibility::{
         IUIAutomation, IUIAutomationCacheRequest, IUIAutomationElement, IUIAutomationTextPattern,
         TextPatternRangeEndpoint_End, TextPatternRangeEndpoint_Start, TextUnit_Character, TreeScope_Children,
-        TreeScope_Element, UIA_ButtonControlTypeId, UIA_ControlTypePropertyId, UIA_DataItemControlTypeId,
-        UIA_DocumentControlTypeId, UIA_EditControlTypeId, UIA_HeaderItemControlTypeId, UIA_HyperlinkControlTypeId,
+        TreeScope_Descendants, TreeScope_Element, UIA_AutomationIdPropertyId, UIA_ButtonControlTypeId,
+        UIA_ClassNamePropertyId, UIA_ControlTypePropertyId, UIA_DataItemControlTypeId, UIA_DocumentControlTypeId,
+        UIA_EditControlTypeId, UIA_HeaderItemControlTypeId, UIA_HelpTextPropertyId, UIA_HyperlinkControlTypeId,
         UIA_IsOffscreenPropertyId, UIA_IsPasswordPropertyId, UIA_IsTextPatternAvailablePropertyId,
         UIA_ListItemControlTypeId, UIA_NamePropertyId, UIA_ProcessIdPropertyId, UIA_TabItemControlTypeId,
         UIA_TextControlTypeId, UIA_TextPatternId, UIA_TitleBarControlTypeId, UIA_TreeItemControlTypeId,
@@ -596,6 +702,8 @@ mod uia {
     const WALK_ELEMENTS: usize = 2_500;
     /// Text of a document or a text box other than the focused one, at most.
     const OTHER_DOCUMENT_CHARS: usize = 2_000;
+    /// An editor's tabs and tree items read, at most.
+    const ITEMS: usize = 400;
 
     /// See [`super::read_window`]: the window's title; the document the
     /// focus is in — its visible ranges, or around the focus for a web page
@@ -603,7 +711,7 @@ mod uia {
     /// on a long page, while reading around the focus takes milliseconds
     /// whatever the page's size); then a bounded walk over the window's
     /// visible elements. All of process `pid`, never a password box.
-    pub fn read(hwnd: isize, pid: u32, until: Instant) -> Option<WindowText> {
+    pub fn read(hwnd: isize, pid: u32, until: Instant, editor: bool) -> Option<WindowText> {
         let _com = Com::init()?;
         let automation = automation(super::CALL_TIMEOUT_MS)?;
         let mut out = WindowText::default();
@@ -614,6 +722,12 @@ mod uia {
             }
             if let Ok(name) = root.CurrentName() {
                 out.push(&name.to_string());
+            }
+            out.focus = focus_labels(&automation, pid);
+            // A code editor's open files (its tabs) and file tree, in one
+            // call: a walk from the window's top may not get that deep.
+            if editor && Instant::now() < until {
+                out.items = named_items(&automation, &root, pid, &mut out);
             }
             let browser = root.CurrentClassName().map(|c| c.to_string().starts_with("Chrome_WidgetWin")).unwrap_or(false);
             let mut web_page = browser;
@@ -633,6 +747,71 @@ mod uia {
             }
         }
         Some(out)
+    }
+
+    /// The focused element's labels, if it's in `pid`'s process and not a
+    /// password box (`code::focus_of`: the editor, its AI chat box or its
+    /// terminal). One round trip.
+    unsafe fn focus_labels(automation: &IUIAutomation, pid: u32) -> Option<super::code::Labels> {
+        let cache = automation.CreateCacheRequest().ok()?;
+        for p in [
+            UIA_ProcessIdPropertyId,
+            UIA_IsPasswordPropertyId,
+            UIA_ClassNamePropertyId,
+            UIA_NamePropertyId,
+            UIA_HelpTextPropertyId,
+            UIA_AutomationIdPropertyId,
+        ] {
+            cache.AddProperty(p).ok()?;
+        }
+        let e = automation.GetFocusedElementBuildCache(&cache).ok()?;
+        if e.CachedProcessId().ok()? as u32 != pid || e.CachedIsPassword().map(|b| b.as_bool()).unwrap_or(true) {
+            return None;
+        }
+        let s = |v: windows::core::Result<windows::core::BSTR>| v.map(|b| b.to_string()).unwrap_or_default();
+        Some(super::code::Labels {
+            class: s(e.CachedClassName()),
+            name: s(e.CachedName()),
+            help: s(e.CachedHelpText()),
+            id: s(e.CachedAutomationId()),
+        })
+    }
+
+    /// The names of a window's tabs and tree items on screen (an editor's
+    /// open files and file tree), in one `FindAllBuildCache` — time-boxed
+    /// like every call ([`super::CALL_TIMEOUT_MS`]); nothing when it runs
+    /// out. At most [`ITEMS`]. The items read.
+    unsafe fn named_items(automation: &IUIAutomation, root: &IUIAutomationElement, pid: u32, out: &mut WindowText) -> usize {
+        let Ok(cache) = automation.CreateCacheRequest() else { return 0 };
+        for p in [UIA_NamePropertyId, UIA_ProcessIdPropertyId, UIA_IsOffscreenPropertyId] {
+            if cache.AddProperty(p).is_err() {
+                return 0;
+            }
+        }
+        // A control type as the VARIANT a condition compares (VT_I4).
+        let kind = |t: UIA_CONTROLTYPE_ID| {
+            let mut v = VARIANT::default();
+            (*v.Anonymous.Anonymous).vt = VT_I4;
+            (*v.Anonymous.Anonymous).Anonymous.lVal = t.0;
+            automation.CreatePropertyCondition(UIA_ControlTypePropertyId, &v).ok()
+        };
+        let (Some(tab), Some(tree)) = (kind(UIA_TabItemControlTypeId), kind(UIA_TreeItemControlTypeId)) else { return 0 };
+        let Ok(condition) = automation.CreateOrCondition(&tab, &tree) else { return 0 };
+        let Ok(found) = root.FindAllBuildCache(TreeScope_Descendants, &condition, &cache) else {
+            tracing::debug!("An editor's tabs and file tree didn't come in time");
+            return 0;
+        };
+        let mut read = 0;
+        for i in 0..found.Length().unwrap_or(0).min(ITEMS as i32) {
+            let Ok(e) = found.GetElement(i) else { continue };
+            if e.CachedProcessId().map(|p| p as u32) != Ok(pid) || e.CachedIsOffscreen().map(|b| b.as_bool()).unwrap_or(true) {
+                continue;
+            }
+            if out.push(&e.CachedName().map(|b| b.to_string()).unwrap_or_default()) > 0 {
+                read += 1;
+            }
+        }
+        read
     }
 
     /// The outermost element with a TextPattern above (or at) the focus, in
@@ -981,6 +1160,19 @@ mod tests {
         assert_eq!(crate::dictation::pipeline::as_said_text(heard, &off, Some(&s)), heard);
     }
 
+    /// A full name on screen never swallows the everyday word said after
+    /// its first name ("Priyanka can you…" isn't "Priyanka Raman you…"; the
+    /// robot's chat stand-in, 2026-10-29). Its last name heard a little
+    /// wrong is still spelled as shown.
+    #[test]
+    fn a_full_name_never_takes_the_word_after_a_first_name() {
+        let s = screen("Members: Priyanka Raman, Rochelle Okafor");
+        let keep = |_: &str| false;
+        assert_eq!(s.correct("Priyanka can you check the build?", &keep, &words), "Priyanka can you check the build?");
+        assert_eq!(s.correct("Rochelle can you look?", &keep, &words), "Rochelle can you look?");
+        assert_eq!(s.correct("Ask Priyanka Ramen about it.", &keep, &words), "Ask Priyanka Raman about it.");
+    }
+
     #[test]
     fn an_email_keeps_its_lines() {
         // The robot's Gmail page (2026-10-24): any term on screen and an
@@ -1053,6 +1245,29 @@ mod tests {
         assert!(s.in_transcript("ping at zentrix dev about it", &none).contains(&"@zentrix_dev"));
         assert!(s.in_transcript("ping at zentrix underscore dev", &none).contains(&"@zentrix_dev"));
         assert!(!s.in_transcript("ping the zentrix dev team", &none).contains(&"@zentrix_dev"));
+    }
+
+    /// An editor's window: its file names and symbols said aloud are
+    /// written as the code has them (the setting on), and cleanup is told
+    /// them first.
+    #[test]
+    fn an_editors_code_names_said_aloud() {
+        let screen = "userService.ts - Yap - Visual Studio Code\nuserService.ts, preview\n\
+            export function getUserById(id) { return MAX_RETRY_COUNT; }";
+        let read = WindowText { text: screen.into(), ..WindowText::default() };
+        let s = terms_of(&read, Some(code::App::VsCode), &words, true);
+        let c = s.code.as_ref().expect("code names");
+        assert_eq!(c.focus, code::Focus::Other);
+        assert!(c.files.iter().any(|f| f.name == "userService.ts"));
+        let cfg = crate::config::YapConfig::default();
+        assert_eq!(correct("call get user by id in user service dot ts", Some(&s), &cfg), "call getUserById in userService.ts");
+        // Off: as said.
+        let off = crate::config::YapConfig { screen_names: false, ..cfg };
+        assert_eq!(correct("call get user by id", Some(&s), &off), "call get user by id");
+        let line = s.cleanup_line("fix user service dot ts", &|_| false).unwrap();
+        assert!(line.starts_with("Spell these names as written: userService.ts"), "{line}");
+        // Not a code app: no code names.
+        assert!(terms_of(&read, None, &words, true).code.is_none());
     }
 
     #[test]
@@ -1233,7 +1448,7 @@ mod tests {
         for run in 0..runs {
             let started = Instant::now();
             let pid = crate::pasting::text_injector::window_process(hwnd).expect("a window");
-            let read = read_window(hwnd, pid, started + READ_BUDGET);
+            let read = read_window(hwnd, pid, started + READ_BUDGET, false);
             let read_ms = started.elapsed().as_millis();
             let Some(read) = read else {
                 println!("run {run}: nothing read in {read_ms} ms");

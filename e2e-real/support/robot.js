@@ -178,11 +178,12 @@ export class Robot {
   /**
    * The stand-in for Claude Code in a new Windows Terminal window (`title`:
    * another title, with the nonce — "Yap robot raw <nonce>" is a plain
-   * program, no coding CLI).
+   * program, no coding CLI; `banner`: what it shows on screen before, as a
+   * file it read: "Read(src/a.ts)").
    */
-  async claudeCode(label = 'cli', { title } = {}) {
+  async claudeCode(label = 'cli', { title, banner } = {}) {
     return this.track(
-      await startFakeClaudeCode({ nonce: this.nonce, cwd: path.join(this.dir, `${label}-${this.targets.length}`), title }),
+      await startFakeClaudeCode({ nonce: this.nonce, cwd: path.join(this.dir, `${label}-${this.targets.length}`), title, banner }),
     );
   }
 

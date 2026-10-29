@@ -6,7 +6,7 @@
   //   cfg:    Settings' config $state (auto-save does the saving).
   //   target: 'hotkey' | 'editHotkey' | 'meetingHotkey' | 'assistantHotkey' |
   //           'readHotkey' | 'asSaidHotkey' | 'snipHotkey' |
-  //           'pasteLastHotkey' | 'copyLastHotkey' | 'quickNoteHotkey'.
+  //           'pasteLastHotkey' | 'copyLastHotkey' | 'quickNoteHotkey' | 'sendHotkey'.
   //   more:   also the action's more shortcuts (`moreHotkeys`, Settings →
   //           Shortcuts), each with ✕, and "+ Add another" (at most
   //           MORE_SHORTCUTS) — one key or mouse button more for the same

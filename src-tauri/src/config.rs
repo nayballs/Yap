@@ -317,6 +317,14 @@ pub struct YapConfig {
     /// the folder drops it on its next save: unbound again, nothing else.
     #[serde(default)]
     pub quick_note_hotkey: String,
+    /// **Send** (Settings → Shortcuts, `pasting/send_key.rs`, 2026-10-29): an
+    /// extra key or mouse button that presses the send key in the window in
+    /// front — Enter, or `auto_submit_key` as auto-submit would (Enter in a
+    /// terminal). Empty = unbound (the default); never Enter itself, never a
+    /// key another shortcut has. An older Yap sharing the folder drops it on
+    /// its next save: unbound again, nothing else.
+    #[serde(default)]
+    pub send_hotkey: String,
     /// **More shortcuts for one action** (Settings → Shortcuts, "+ Add
     /// another"; `input_hook.rs`, 2026-10-25): up to `input_hook::MORE` more
     /// keys or mouse buttons per action, keyed by its first shortcut's
@@ -490,6 +498,30 @@ pub struct YapConfig {
     /// paragraph pastes without its final full stop.
     #[serde(default = "default_true")]
     pub chat_no_full_stop: bool,
+    /// "Send several messages: say “new message”" (Settings → Dictation →
+    /// Typing into apps, `pasting/stacked.rs`, 2026-10-29): in a chat app, a
+    /// dictation that's sent anyway (auto-submit, or "press enter" said) and
+    /// has "new message" said as a sentence of its own goes as several
+    /// messages, each pasted and sent in turn; one that isn't sent gets its
+    /// parts on lines of their own. Off by default: a message can't be taken
+    /// back. An older Yap drops it on its next save: off again.
+    #[serde(default)]
+    pub stacked_messages: bool,
+    /// "Turn “at Sam” into a mention" (`pasting/mentions.rs`, 2026-10-29): in
+    /// Slack and Discord "at <a name on screen>" is typed as "@Sam" and
+    /// picked from the app's list with Tab (only when the list shows that
+    /// person); in Teams, Google Chat and other team chats it's written
+    /// "@Sam". Needs `screen_names`. On by default; an older Yap drops it:
+    /// on again.
+    #[serde(default = "default_true")]
+    pub chat_mentions: bool,
+    /// "Tag files in AI chat boxes" (`pasting/file_tags.rs`, 2026-10-29): in
+    /// Cursor's, Windsurf's and VS Code's AI chat box a file's name said
+    /// aloud is typed "@file" ("#file" in VS Code) and picked from the
+    /// list; in Claude Code and Codex it's written "@path". Needs
+    /// `screen_names`. On by default; an older Yap drops it: on again.
+    #[serde(default = "default_true")]
+    pub file_tags: bool,
     /// After injecting text, simulate pressing Enter (auto-submit).
     #[serde(default)]
     pub auto_submit: bool,
@@ -1259,6 +1291,7 @@ impl Default for YapConfig {
             paste_last_hotkey: String::new(),
             copy_last_hotkey: String::new(),
             quick_note_hotkey: String::new(),
+            send_hotkey: String::new(),
             more_hotkeys: Default::default(),
             triple_tap_meeting: false,
             as_said_offer: false,
@@ -1288,6 +1321,9 @@ impl Default for YapConfig {
             smart_spacing: true,
             screen_names: true,
             chat_no_full_stop: true,
+            stacked_messages: false,
+            chat_mentions: true,
+            file_tags: true,
             auto_submit: false,
             voice_enter: true,
             terminal_mode: true,

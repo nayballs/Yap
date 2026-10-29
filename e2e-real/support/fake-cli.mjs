@@ -6,6 +6,7 @@
 // ("✳ <nonce>", Claude Code's idle title) comes from Windows Terminal's
 // --title.
 import fs from 'node:fs';
+import path from 'node:path';
 
 const log = process.argv[2];
 const write = (entry) => fs.appendFileSync(log, `${JSON.stringify(entry)}\n`);
@@ -14,7 +15,12 @@ const write = (entry) => fs.appendFileSync(log, `${JSON.stringify(entry)}\n`);
 if (process.argv[3]) process.title = process.argv[3];
 
 process.stdout.write('\x1b[?2004h'); // bracketed paste on, as Claude Code does
-process.stdout.write('Yap robot: a stand-in for a coding CLI. It runs nothing; it shows what arrives.\r\n> ');
+process.stdout.write('Yap robot: a stand-in for a coding CLI. It runs nothing; it shows what arrives.\r\n');
+// What a coding CLI showed on screen before ("Read(src/a.ts)"…): banner.txt
+// beside the log, when the test wrote one.
+const banner = path.join(path.dirname(log), 'banner.txt');
+if (fs.existsSync(banner)) process.stdout.write(`${fs.readFileSync(banner, 'utf8').replace(/\r?\n/g, '\r\n')}\r\n`);
+process.stdout.write('> ');
 if (process.stdin.isTTY) process.stdin.setRawMode(true);
 process.stdin.setEncoding('utf8');
 process.stdin.resume();

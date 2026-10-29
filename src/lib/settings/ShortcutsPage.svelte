@@ -1,6 +1,6 @@
 <script>
   // Settings → Shortcuts (2026-10-22 review; OpenWhispr's Hotkeys page): the
-  // ten global shortcuts together (dictation/input_hook.rs), each in Yap's keycaps,
+  // eleven global shortcuts together (dictation/input_hook.rs), each in Yap's keycaps,
   // with a clash said where it happens, and "+ Add another" for more keys
   // for the same action (Wispr Flow's, 2026-10-25: `moreHotkeys`). Their own
   // pages show the first one too (Dictation, Commands, Voice Assistant,
@@ -79,6 +79,16 @@
     setting="shortcut-copy-last"
   >
     <SettingsHotkey {cfg} target="copyLastHotkey" clearable more />
+  </Row>
+  <!-- Send (pasting/send_key.rs): the send key where you're typing, from
+       another key or a mouse button. Never Enter itself. -->
+  <Row
+    label="Send"
+    desc="Press Enter where you're typing, from another key or a mouse's side button"
+    hint="It presses the send key Yap uses after a dictation (Enter, Ctrl + Enter or Shift + Enter: Dictation → Send key), and Enter in a terminal."
+    setting="shortcut-send"
+  >
+    <SettingsHotkey {cfg} target="sendHotkey" clearable more />
   </Row>
   <Row
     label="Quick note"

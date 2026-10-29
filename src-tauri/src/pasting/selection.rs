@@ -533,6 +533,26 @@ pub fn focused_element(pid: u32) -> Option<(String, String)> {
     }
 }
 
+/// The highlighted entry of an app's suggestion list, if the focus (as a
+/// screen reader sees it) is on one in process `pid`: its name. An app's
+/// "@" list moves the screen reader's focus to the entry it would insert
+/// (`aria-activedescendant`, which Chromium reports as the focus) while the
+/// keyboard stays in the box (`compose.rs` checks it's the one said before
+/// pressing Tab). One round trip, cut short (`PROBE_TIMEOUT_MS`); `None`
+/// when the focus is on anything else or it can't say. The caller checks
+/// `realtest::permits` first.
+pub fn picked_option(pid: u32) -> Option<String> {
+    #[cfg(windows)]
+    {
+        uia::picked_option(pid)
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = pid;
+        None
+    }
+}
+
 // ---- Does anything that takes text have the focus? ----
 
 /// Whether what has the focus takes text ([`focus_editable`]).
@@ -1043,9 +1063,10 @@ pub(crate) mod uia {
         IUIAutomationLegacyIAccessiblePattern, IUIAutomationTextPattern, IUIAutomationTextPattern2,
         IUIAutomationTextRange, IUIAutomationValuePattern, TextPatternRangeEndpoint_End,
         TextPatternRangeEndpoint_Start, TextUnit_Character, UIA_ClassNamePropertyId, UIA_ComboBoxControlTypeId,
-        UIA_DocumentControlTypeId, UIA_EditControlTypeId, UIA_IsReadOnlyAttributeId,
-        UIA_LegacyIAccessiblePatternId, UIA_NamePropertyId, UIA_ProcessIdPropertyId, UIA_TextPattern2Id,
-        UIA_TextPatternId, UIA_ValuePatternId,
+        UIA_ControlTypePropertyId, UIA_DataItemControlTypeId, UIA_DocumentControlTypeId, UIA_EditControlTypeId,
+        UIA_IsReadOnlyAttributeId, UIA_LegacyIAccessiblePatternId, UIA_ListItemControlTypeId,
+        UIA_MenuItemControlTypeId, UIA_NamePropertyId, UIA_ProcessIdPropertyId, UIA_TextPattern2Id,
+        UIA_TextPatternId, UIA_TreeItemControlTypeId, UIA_ValuePatternId,
     };
 
     use super::{FieldWindow, Offers, SELECTION_CHARS, SELECTION_ENDS};
@@ -1262,6 +1283,29 @@ pub(crate) mod uia {
             let class = element.CachedClassName().map(|b| b.to_string()).unwrap_or_default();
             let name = element.CachedName().map(|b| b.to_string()).unwrap_or_default();
             Some((class, name))
+        }
+    }
+
+    /// The focused element's name when it's a list's entry (a list item,
+    /// a menu item, a data item, a tree item) in process `pid`: an app's
+    /// "@" list's highlighted entry. One round trip (a cache request), at
+    /// most [`super::PROBE_TIMEOUT_MS`].
+    pub fn picked_option(pid: u32) -> Option<String> {
+        let _com = Com::init()?;
+        let automation = automation(super::PROBE_TIMEOUT_MS)?;
+        unsafe {
+            let cache = automation.CreateCacheRequest().ok()?;
+            for property in [UIA_ProcessIdPropertyId, UIA_ControlTypePropertyId, UIA_NamePropertyId] {
+                cache.AddProperty(property).ok()?;
+            }
+            let element = automation.GetFocusedElementBuildCache(&cache).ok()?;
+            if element.CachedProcessId().ok()? as u32 != pid {
+                return None;
+            }
+            let kind = element.CachedControlType().ok()?;
+            let entry = [UIA_ListItemControlTypeId, UIA_MenuItemControlTypeId, UIA_DataItemControlTypeId, UIA_TreeItemControlTypeId]
+                .contains(&kind);
+            entry.then(|| element.CachedName().map(|b| b.to_string()).unwrap_or_default()).filter(|n| !n.trim().is_empty())
         }
     }
 

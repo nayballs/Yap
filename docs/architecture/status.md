@@ -55,6 +55,36 @@ tables, method and how anyone can run it and send theirs:
 
 ## What works
 
+**Chat apps and code editors** (2026-10-29, [pasting.md](./pasting.md),
+[dictionary.md](./dictionary.md)): **stacked messages** ("new message"
+said as a sentence of its own in a chat app, and the dictation sent anyway:
+each message pasted and sent in turn, stopping with the rest copied when
+one doesn't send; off by default), **@mentions** ("at Sam" with Sam on
+screen: typed and picked with Tab in Slack and Discord only when their list
+shows Sam, plain "@Sam" in Teams, Google Chat and the like), **code names**
+in editors and terminals ("user service dot ts" → userService.ts, "get user
+by id" → getUserById, from the tabs, file tree, title and the code a screen
+reader sees), **file tags** in Cursor's, Windsurf's and VS Code's AI chat
+("@file" / "#file" picked with Tab) and Claude Code / Codex ("@path"), and a
+**Send** shortcut (Enter, or the send key set, from another key or a mouse
+button). Unit-tested (the splitting, mentions and file matching, the
+spoken forms, the focus, the binding, an older Yap's save) and e2e-tested
+(`e2e/chat-editors.spec.js`: the settings in light and dark, the steps a
+test run takes in a stand-in Slack, Teams, WhatsApp, VS Code, Cursor and
+Claude Code, the Send shortcut) and robot-tested, 8 of 8
+(`e2e-real/chat-messages.real.js`, `editor-files.real.js`: stand-in pages
+with an "@" list in Edge — stacked messages sent and stopped, a mention
+picked with the app's space before a comma taken back, plain @Name where
+the list doesn't say what it highlights, a file tagged in the chat box and
+not in the editor —, the stand-in Claude Code's "@path", the Send
+shortcut in the test pad). **Not yet tried**: a
+real Slack, Discord, Teams, Cursor, Windsurf or VS Code — whether their "@"
+lists tell UI Automation which entry is highlighted (Yap presses no Tab
+until it sees it, so where they don't the mention stays plain text), the
+labels of Cursor's and Windsurf's chat boxes, how fast their tabs and file
+trees read; Visual Studio's tabs and editor (not installed here); the
+spoken forms with real speech.
+
 **Meeting chips, Skills and one-tap prompts** (2026-10-29, Wispr Flow's
 Notetaker; [meetings.md](./meetings.md), [chat-and-assistant.md](./chat-and-assistant.md#skills-and-one-tap-prompts-2026-10-29)):
 the notepad's Ask sheet (and the Notes view's Ask bar) offers **Make me
