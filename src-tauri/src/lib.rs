@@ -614,6 +614,10 @@ pub fn run() {
             #[cfg(debug_assertions)]
             dictation::mics::e2e_mic_unplug,
             #[cfg(debug_assertions)]
+            dictation::mic_tips::e2e_mic_tips,
+            #[cfg(debug_assertions)]
+            dictation::lid::e2e_lid,
+            #[cfg(debug_assertions)]
             pasting::elevated::e2e_paste_elevated,
             #[cfg(debug_assertions)]
             pasting::text_injector::e2e_paste_fails,
@@ -812,6 +816,8 @@ pub fn run() {
             // Windows' microphones, read and watched (mics.rs): which one
             // dictation and meetings use, and a new one plugged in.
             dictation::mics::start(&handle);
+            // The laptop's lid (lid.rs): closed, its own mic goes last.
+            dictation::lid::start(&handle);
             // Start the dictation pipeline (audio capture + STT engine). It
             // runs without a microphone too (see `Pipeline::start`).
             let pipeline = dictation::pipeline::Pipeline::start(handle.clone(), cfg.clone());

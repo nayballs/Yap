@@ -491,6 +491,12 @@
   showed (`tap`, `longHold`, `chord` — "Hold only {key}" —, `longDictation`
   — "Try meeting notes", once ever), when the last did, and whether
   double-tap has been used (`dictation/coaching.rs`).
+- Mic tips: `%APPDATA%/yap/mic_tips.json` (2026-10-29,
+  `dictation/mic_tips.rs`) — how often each mic-quality tip ("Yap didn't
+  hear you clearly": quiet, noisy, clipped, a Bluetooth headset in its call
+  profile) showed and when, and when the last did: `{quiet: {shown, lastAt},
+  …, lastShownAt}`. Counts only. A file of its own: an older Yap never reads
+  or writes it. Safe to delete (each tip may show again).
 - Quieted apps: `%APPDATA%/yap/quieted_apps.json` — only while a dictation
   has other apps silenced (each session's id, exe and level before), so a
   Yap that crashed mid-dictation brings them back at its next start

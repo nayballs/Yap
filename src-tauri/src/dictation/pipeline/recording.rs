@@ -1043,6 +1043,8 @@ impl Shared {
             return;
         }
         let _ = self.app.emit("yap-state", "processing");
+        // The microphone it used, before the stop chime lets go of it.
+        let mic = self.mic.current();
         self.stop_chime_then_restore(quiet_token);
         let audio = self
             .buffer
@@ -1050,6 +1052,10 @@ impl Shared {
             .map(|mut b| std::mem::take(&mut *b))
             .unwrap_or_default();
         tracing::info!(samples = audio.len(), "Recording stopped, transcribing");
+        // "Yap didn't hear you clearly" (`mic_tips.rs`): judged now, said
+        // once the dictation is done, rarely.
+        let order = self.config.read().map(|c| c.mic_order.clone()).unwrap_or_default();
+        crate::dictation::mic_tips::after_dictation(&self.app, &audio, mic, order);
         // A dictation of ten minutes: meeting notes would have gone on past
         // the limit and summarised (a quiet tip, once ever; not for a
         // rewrite's instruction or a question).
