@@ -476,12 +476,18 @@ Putting a dictation into the app you're in: the clipboard paste and the submit k
   into its window or nowhere), typing (`type_text`), keys
   (`press_step_key`: Tab, Backspace) and `press_submit`. **The whole text
   is ready first** (cleaned, corrected, fitted). **It stops at the first
-  doubt**: before each message after the first the box must have emptied
-  (`selection::read_context`: the last one was sent) and the window be in
-  front; a paste, the typing or a key Windows didn't take ends it too.
-  What's left goes on the clipboard privately and one alert says how far
-  it got ("Sent 1 of 3 messages · the rest is copied", `stopped_alert`,
-  kind "pasteBlocked"). After a picked mention the app's own space goes
+  doubt**: before each message after the first the window must be in
+  front and its box have emptied (`selection::read_context`: the last one
+  was sent; read once the window is in front — with another app there
+  nothing can be read, which would pass for empty), and each send key
+  goes only with the window in front (another that came up meanwhile
+  would take the Enter); a paste, the typing or a key Windows didn't take
+  ends it too. What's left goes on the clipboard privately and one alert
+  says how far it got ("Sent 1 of 3 messages · the rest is copied",
+  `stopped_alert`, kind "pasteBlocked"). The first paste not going in at
+  all (no text box, not read, an app running as administrator…) is said
+  as for any paste, with the whole dictation on the clipboard, not just
+  its first piece. After a picked mention the app's own space goes
   before a comma or a full stop (one Backspace, only when the field's text
   before the caret ends with a space). The log has counts and steps, never
   words. A plan of one plain paste goes the ordinary way (`in_steps`),
