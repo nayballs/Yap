@@ -73,11 +73,21 @@
 //                                 key — stuck, no finger on it — only while
 //                                 the test's window (`owner`: the nonce, or
 //                                 pid:<n>) is in front; let go always
+//   yaprobot clipreader <ms> <delay>   a careless clipboard manager's
+//                                 stand-in, for `ms`: at each clipboard
+//                                 change, `delay` ms later, it opens the
+//                                 clipboard with its own window and reads
+//                                 the text, whatever the privacy formats
+//                                 say. Prints {"listening":true} when ready,
+//                                 then what each read got: whether there was
+//                                 text and its length — never the text
 //
 // The test pad also has a button ("button": a focus that takes no text)
 // and holds the clipboard open on request (`holdClipboard {ms}`, or
 // `holdAfterCopy {ms}`: once its own next Ctrl+C has copied), as a busy
-// clipboard manager would.
+// clipboard manager would. And a box that's no edit control ("slow"):
+// Ctrl+V there reads the clipboard `slowPaste {ms}` later (an app slow to
+// take a paste), or never (ms < 0).
 //
 // Every command prints one JSON object. Nothing here reads or prints the
 // title or text of a window the test didn't open.
@@ -219,6 +229,7 @@ static class Program {
                 case "framerect": Print(FrameRect(new IntPtr(long.Parse(args[1])))); return 0;
                 case "keystate": Print(KeyState()); return 0;
                 case "modkey": Print(ModKey(new IntPtr(long.Parse(args[1])), args[2], args[3], args[4])); return 0;
+                case "clipreader": return ClipReader.Run(int.Parse(args[1]), int.Parse(args[2]));
                 default: throw new ArgumentException("unknown command " + args[0]);
             }
         } catch (Exception e) {
@@ -792,6 +803,7 @@ class TestPad : Form {
     readonly PadBox password;
     readonly PadBox nopaste;
     readonly Button button;
+    readonly SlowBox slow;
     readonly List<object> pastes = new List<object>();
     // The clipboard held open (a busy clipboard manager's stand-in).
     System.Windows.Forms.Timer holding;
@@ -841,8 +853,10 @@ class TestPad : Form {
         // A button: a focus that takes no text ("Select a text box first").
         button = new Button { Name = "button", Text = "A button",
             Location = new System.Drawing.Point(10, 424), Size = new System.Drawing.Size(140, 30) };
+        // A box that's no edit control and takes a paste late (`slowPaste`).
+        slow = new SlowBox { Name = "slow", Location = new System.Drawing.Point(160, 424), Size = new System.Drawing.Size(390, 30) };
         ClientSize = new System.Drawing.Size(560, 464);
-        foreach (Control c in new Control[] { box, rich, password, nopaste, button }) {
+        foreach (Control c in new Control[] { box, rich, password, nopaste, button, slow }) {
             c.Font = new System.Drawing.Font("Segoe UI", 11f);
             Controls.Add(c);
         }
@@ -939,6 +953,7 @@ class TestPad : Form {
             case "password": return password;
             case "nopaste": return nopaste;
             case "button": return button;
+            case "slow": return slow;
             default: throw new ArgumentException("no field " + name);
         }
     }
@@ -953,8 +968,14 @@ class TestPad : Form {
                 break;
             }
             case "set": {
-                var field = (TextBoxBase)Field(req);
                 object t, c;
+                if (Field(req) == slow) {
+                    slow.Contents = req.TryGetValue("text", out t) && t != null ? (string)t : "";
+                    ActiveControl = slow;
+                    slow.Focus();
+                    break;
+                }
+                var field = (TextBoxBase)Field(req);
                 string text = req.TryGetValue("text", out t) && t != null ? (string)t : "";
                 field.Text = text;
                 int caret = req.TryGetValue("caret", out c) && c != null ? Convert.ToInt32(c) : field.TextLength;
@@ -977,9 +998,20 @@ class TestPad : Form {
                 break;
             }
             case "get": {
+                if (Field(req) == slow) {
+                    reply["text"] = slow.Contents;
+                    reply["caret"] = slow.Contents.Length;
+                    break;
+                }
                 var field = (TextBoxBase)Field(req);
                 reply["text"] = field.Text;
                 reply["caret"] = field.SelectionStart;
+                break;
+            }
+            case "slowPaste": {
+                // The slow box's Ctrl+V reads the clipboard `ms` later; never
+                // when `ms` < 0.
+                slow.DelayMs = Convert.ToInt32(req["ms"]);
                 break;
             }
             case "pastes": {
@@ -1039,5 +1071,137 @@ class PadRich : RichTextBox {
     protected override bool ProcessCmdKey(ref Message msg, Keys keyData) {
         if (keyData == (Keys.Control | Keys.V) && Pasting != null) Pasting(Name);
         return base.ProcessCmdKey(ref msg, keyData);
+    }
+}
+
+/// The test pad's box that's no edit control (UI Automation sees a pane):
+/// Ctrl+V reads the clipboard `DelayMs` later and adds what it got (an app
+/// slow to take a paste), or never reads it (`DelayMs` < 0).
+class SlowBox : Control {
+    public int DelayMs;
+    string contents = "";
+    public string Contents {
+        get { return contents; }
+        set { contents = value ?? ""; Invalidate(); }
+    }
+
+    public SlowBox() {
+        SetStyle(ControlStyles.Selectable | ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint, true);
+        TabStop = true;
+        BackColor = System.Drawing.Color.White;
+    }
+
+    protected override void OnMouseDown(MouseEventArgs e) {
+        Focus();
+        base.OnMouseDown(e);
+    }
+
+    protected override void OnGotFocus(EventArgs e) { Invalidate(); base.OnGotFocus(e); }
+    protected override void OnLostFocus(EventArgs e) { Invalidate(); base.OnLostFocus(e); }
+
+    protected override void OnPaint(PaintEventArgs e) {
+        e.Graphics.DrawRectangle(Focused ? System.Drawing.Pens.SteelBlue : System.Drawing.Pens.Gray, 0, 0, Width - 1, Height - 1);
+        TextRenderer.DrawText(e.Graphics, contents.Length > 0 ? contents : "(slow box)", Font, new System.Drawing.Point(4, 5),
+            contents.Length > 0 ? System.Drawing.Color.Black : System.Drawing.Color.Gray);
+    }
+
+    protected override bool ProcessCmdKey(ref Message msg, Keys keyData) {
+        if (keyData == (Keys.Control | Keys.V)) {
+            if (DelayMs >= 0) {
+                var later = new System.Windows.Forms.Timer { Interval = Math.Max(1, DelayMs) };
+                later.Tick += delegate {
+                    later.Stop();
+                    later.Dispose();
+                    // The clipboard's text as it is now (OLE, as most apps read it).
+                    string text = null;
+                    try { if (Clipboard.ContainsText()) text = Clipboard.GetText(); } catch (Exception) { }
+                    if (!string.IsNullOrEmpty(text)) Contents = contents + text;
+                };
+                later.Start();
+            }
+            return true;
+        }
+        return base.ProcessCmdKey(ref msg, keyData);
+    }
+}
+
+/// `yaprobot clipreader <ms> <delay>`: a careless clipboard manager's
+/// stand-in (it reads whatever the privacy formats say), for `ms`. Prints
+/// {"listening":true} once listening, then {"updates":n,"reads":[…]} —
+/// whether each read got text, and its length; never the text.
+class ClipReader : NativeWindow {
+    [DllImport("user32.dll")] static extern bool AddClipboardFormatListener(IntPtr h);
+    [DllImport("user32.dll")] static extern bool RemoveClipboardFormatListener(IntPtr h);
+    [DllImport("user32.dll")] static extern bool OpenClipboard(IntPtr owner);
+    [DllImport("user32.dll")] static extern bool CloseClipboard();
+    [DllImport("user32.dll")] static extern IntPtr GetClipboardData(uint format);
+    [DllImport("kernel32.dll")] static extern IntPtr GlobalLock(IntPtr h);
+    [DllImport("kernel32.dll")] static extern bool GlobalUnlock(IntPtr h);
+    const int WM_CLIPBOARDUPDATE = 0x031D;
+
+    readonly int delay;
+    readonly List<object> reads = new List<object>();
+    int updates;
+
+    ClipReader(int delay) { this.delay = delay; }
+
+    public static int Run(int ms, int delay) {
+        var r = new ClipReader(delay);
+        // A message-only window (HWND_MESSAGE), its own.
+        r.CreateHandle(new CreateParams { Parent = new IntPtr(-3) });
+        if (!AddClipboardFormatListener(r.Handle)) {
+            Console.Out.WriteLine(new JavaScriptSerializer().Serialize(new Dictionary<string, object> { { "error", "couldn't listen to the clipboard" } }));
+            return 1;
+        }
+        var stop = new System.Windows.Forms.Timer { Interval = Math.Max(1, ms) };
+        stop.Tick += delegate { stop.Stop(); Application.ExitThread(); };
+        stop.Start();
+        Console.Out.WriteLine("{\"listening\":true}");
+        Console.Out.Flush();
+        Application.Run();
+        RemoveClipboardFormatListener(r.Handle);
+        Console.Out.WriteLine(new JavaScriptSerializer().Serialize(new Dictionary<string, object> {
+            { "updates", r.updates }, { "reads", r.reads } }));
+        Console.Out.Flush();
+        r.DestroyHandle();
+        return 0;
+    }
+
+    protected override void WndProc(ref Message m) {
+        if (m.Msg == WM_CLIPBOARDUPDATE) {
+            updates++;
+            if (delay <= 0) {
+                Read();
+            } else {
+                var later = new System.Windows.Forms.Timer { Interval = delay };
+                later.Tick += delegate { later.Stop(); later.Dispose(); Read(); };
+                later.Start();
+            }
+        }
+        base.WndProc(ref m);
+    }
+
+    void Read() {
+        bool open = false;
+        for (int i = 0; i < 20 && !open; i++) {
+            open = OpenClipboard(Handle);
+            if (!open) Thread.Sleep(10);
+        }
+        if (!open) {
+            reads.Add(new Dictionary<string, object> { { "open", false } });
+            return;
+        }
+        IntPtr h = GetClipboardData(13);
+        int len = 0;
+        if (h != IntPtr.Zero) {
+            IntPtr p = GlobalLock(h);
+            if (p != IntPtr.Zero) {
+                string s = Marshal.PtrToStringUni(p);
+                len = s == null ? 0 : s.Length;
+                GlobalUnlock(h);
+            }
+        }
+        CloseClipboard();
+        reads.Add(new Dictionary<string, object> { { "open", true }, { "got", h != IntPtr.Zero }, { "len", len } });
     }
 }

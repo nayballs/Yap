@@ -701,6 +701,9 @@ impl Shared {
         // nor for the assistant, which pastes nothing.
         let smart = !edit && !assistant && smart_spacing && !in_terminal;
         crate::pasting::selection::begin_dictation((hwnd != 0).then_some(hwnd), smart);
+        // The text box itself, for a paste: if the focus wanders off it
+        // within the window, the paste puts it back (`selection::keep_focus`).
+        crate::pasting::selection::keep_focus((hwnd != 0 && goes == Goes::Paste).then_some(hwnd));
         // "Spell names the way they're written on screen": the window's
         // visible text, read in the background for its names
         // (`screen_terms.rs`) — for a dictation that's pasted, not a rewrite.

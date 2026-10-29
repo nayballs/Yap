@@ -1,9 +1,10 @@
 // A paste that can't land (pasting/text_injector.rs `Left`): Windows didn't
-// take the paste keys (SendInput put in fewer events than asked), or
-// nothing that takes text had the focus (pasting/selection.rs
-// `focus_editable`). Either way the text stays on the clipboard and Yap
-// says so once, through the notice policy: "Couldn't paste · it's copied,
-// press Ctrl+V" / "Select a text box first". A test run pastes nothing and
+// take the paste keys (SendInput put in fewer events than asked), nothing
+// that takes text had the focus (pasting/selection.rs `focus_editable`), or
+// no app read the text off the clipboard (pasting/read_check.rs). Either
+// way the text stays on the clipboard and Yap says so once, through the
+// notice policy: "Couldn't paste · it's copied, press Ctrl+V" / "Select a
+// text box first". A test run pastes nothing and
 // touches no clipboard: `e2e_paste_fails` makes every paste fail that way
 // (the real keys, focus and clipboard are the robot's:
 // e2e-real/paste-safety.real.js). Also `e2e_held_keys`, the robot's say on
@@ -60,6 +61,27 @@ test('nothing that takes text had the focus: "Select a text box first", the text
   expect(ok.leftOnClipboard).toBe(false);
   await main.waitForTimeout(500);
   await expect(main.getByRole('status')).toHaveCount(0);
+});
+
+// The clipboard-read check (pasting/read_check.rs): the keys went, but no
+// app read the text off the clipboard within a second. The robot's
+// e2e-real/paste-read.real.js and paste-late.real.js do it for real.
+test("no app read the paste: on the clipboard, \"Couldn't paste\", kept in history as not pasted", async ({ yap, main, shot }) => {
+  await yap.invoke('e2e_paste_fails', { why: 'notRead' });
+  const r = await yap.invoke('e2e_dictation', { text: 'move the stand-up to ten' });
+  expect(r.leftOnClipboard).toBe(true);
+  expect(r.leftWhy).toBe('notRead');
+  expect(r.submit).toBeNull();
+  const t = toast(main, "Couldn't paste · it's copied, press Ctrl+V");
+  await expect(t).toHaveCount(1);
+  await expect(t).toContainText("The app didn't take the paste");
+  await shot(main, '03-not-read');
+  await main.waitForTimeout(800);
+  await expect(main.getByRole('status')).toHaveCount(1);
+  await expectStore(yap, 'history.json', (h) =>
+    h.some((e) => e.status === 'notPasted' && /the app didn't read the paste/.test(e.error || '')),
+  );
+  await closeToasts(main);
 });
 
 test('the test hooks refuse what they don’t know', async ({ yap }) => {

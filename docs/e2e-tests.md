@@ -497,13 +497,21 @@ No microphone or hotkey: debug-only commands drive the real pipeline.
   `realtest_refusals`, `realtest_copy_selection { hwnd }` (edit mode's
   Ctrl+C trick in the window in front: `{ text, trouble }`), and
   `realtest_clipboard { action: save | restore |
-  setText | setRich | setImage | check | fingerprint }` (`check` compares
-  and `fingerprint` hashes each format, they never hand the clipboard's
-  contents out). The test pad also has a button (a focus that takes no
-  text) and holds the clipboard open on request (`holdClipboard`,
-  `holdAfterCopy`: a busy clipboard manager's stand-in); `yaprobot
-  keystate` / `modkey` read and press modifier keys (pressing only while
-  the test's window is in front; always let go after).
+  setText | setRich | setImage | check | fingerprint | lastPaste }`
+  (`check` compares and `fingerprint` hashes each format, they never hand
+  the clipboard's contents out; `lastPaste`, `robot.lastPaste()`: who read
+  the last paste off the clipboard and what Yap made of it,
+  `pasting/read_check.rs`). The test pad also has a button (a focus that
+  takes no text), a "slow" box that's no edit control and reads a paste
+  `slowPaste(ms)` late (or never), and holds the clipboard open on request
+  (`holdClipboard`, `holdAfterCopy`: a busy clipboard manager's stand-in);
+  `yaprobot clipreader` (`startClipReader`) is a careless clipboard
+  manager's stand-in that reads every change from a process of its own;
+  `yaprobot keystate` / `modkey` read and press modifier keys (pressing
+  only while the test's window is in front; always let go after).
+  `realtest_dictate_text { pauseMs }` (`robot.dictateMoving`) waits that
+  long between the dictation's start and its paste, for the test to move
+  the focus meanwhile.
 
 ### What's covered
 
@@ -518,6 +526,9 @@ No microphone or hotkey: debug-only commands drive the real pipeline.
 | `transforms.real.js` | the test pad, Edge pages (a text box, a contenteditable chat box), Windows Terminal | a saved transform's shortcut (`realtest_transform`, the fake model transforming by instruction): Polish on words selected in the pad (its own selection), only they replaced, then the bar's Undo (`bar_action "transform-undo"`) putting them back · Polish over the selection in the Edge box and the contenteditable (TextPattern) · Translate (French) with nothing selected right after a dictation: the dictation translated in place, the model given it; typed after it since: refused, the model not asked · a terminal: refused, its window's lines exactly as before (nothing typed or sent), "Transforms don't work in a terminal". Styles by app off here (a terminal's Command style would lower-case the dictation at its prompt; `cleanup-styles.real.js` has the styles) |
 | `languages.real.js` | the test pad; the engines build with Whisper large-v3 (skipped without either) | My languages = French only: English speech (Windows' TTS) heard as English (p 1.00), told French, the nudge offered; English added: written in English, no nudge; Whisper's detection timed in the log · a language shortcut fixed to English (`e2e_language_stage`): English, no detection asked |
 | `long-paste.real.js` | Windows Terminal, a classic console window (conhost), the stand-in CLI in each | Claude Code's stand-in in Windows Terminal: a list and ~2,400 characters in slices of ≤ 800 characters and ≤ 2 line breaks, each its own bracketed paste, all of it in order, nothing sent · in conhost: pasted with the console's own Edit → Paste (Ctrl+V reaches a raw keyboard program there as ^V), one line, in slices, no ^V or Enter · 1,000 to 64,000 characters into a plain program in each (`test-results/real/long-paste.json`): whole in both (Windows Terminal in slices of ≤ 4,000: its 5 KiB large-paste warning held 16,019 characters back entirely) |
+| `paste-read.real.js` | the test pad, a stand-in clipboard manager, Edge pages, Notepad (skipped while it's open), Windows Terminal, conhost, Claude Code's stand-in; an Electron app (`YAP_ROBOT_ELECTRON` or the `electron` package) and VS Code when present | the clipboard-read check (`pasting/read_check.rs`): the pad's box, an Edge textarea, Notepad, Electron and VS Code read the paste as the target (`lastPaste().reader` "target"), Windows Terminal and conhost as the target or a reader with no window ("unknown"), each slice of a long paste read before the next; your clipboard back after the read · a clipboard manager reading as the text goes on gets nothing (refused), one reading after the keys gets it and doesn't count · a page swallowing Ctrl+V: not read, copied, "Couldn't paste" once · robot mode's "notRead" stand-in: an edit control typed into as before, a web page's box left copied |
+| `paste-late.real.js` | the test pad's slow box | a paste read 0.7 s after the keys gets the dictation (not the old clipboard) and yours comes back after; read at 2 s: "Couldn't paste" at a second, the late read still gets the dictation (noted as late), it stays copied; never read: copied, said once |
+| `paste-refocus.real.js` | the test pad, Edge pages | the focus moved while you talk (`dictateMoving`): to the pad's button → put back in the box for the paste; to another text box → pasted there, fitted to its own text; nothing moved → as ever; a page's button → back in its textarea; another window → back to the dictation's window and box, as before |
 | `paste-safety.real.js` | the test pad (its text boxes and a button), an Edge page | a modifier down before the paste (`yaprobot modkey`: an injected key, down as far as Windows knows, no finger on it): a stuck Alt let go before Ctrl+V (pasted, not typed) and up after; a held Alt (`e2e_held_keys`: no hook in a test run) let go for the keys and down again after; a stuck Shift let go before the text is typed into the box that ignores Ctrl+V (no capitals) · nothing that takes text has the focus — the pad's button, a page's button, a page with nothing focused —: nothing pasted, the text on the clipboard (privately), "Select a text box first" once; a page's text box pasted as ever · keys refused (`e2e_paste_fails` "keysBlocked": every `SendInput` counts as refused): the pad unchanged, the text copied, "Couldn't paste · it's copied, press Ctrl+V" once, the next dictation pastes · edit mode's Ctrl+C (`realtest_copy_selection`) with text as a word processor copies it on the clipboard (`realtest_clipboard setRich`, compared by `fingerprint`: each format's hash): the pad holding the clipboard 0.4 s → waited for, the selection read, every format back exactly; 3 s → left alone, nothing pressed, "Couldn't read your selection"; held 0.6 s right after its own copy → waited out; 4.5 s → "Your clipboard couldn't be put back" |
 | `terminal.real.js` | Windows Terminal | a PowerShell prompt: a list dictated as one line ("List the files: the logs; the notes.") and nothing run · "press enter" running a harmless `Echo` (its output read back) · a stand-in for Claude Code (Claude Code's idle title "✳ …", bracketed paste, runs nothing, logs what arrives): the line breaks kept in one bracketed paste, nothing sent; "press enter" sending it · auto-submit: Enter in the coding CLI, never at the shell prompt · "Safer pasting into terminals" off: just another app |
 | `gitbash.real.js` | Git Bash's mintty (skipped without Git for Windows), running a raw reader that logs every byte (`stty raw`; runs nothing) | pasted with Shift+Insert (Ctrl+V would arrive as ^V): a list as one line, nothing sent · "press enter": the text then Enter · "Safer pasting into terminals" off: fitted as any app, still Shift+Insert |

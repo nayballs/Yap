@@ -12,6 +12,7 @@
 import { spawn, execFileSync } from 'node:child_process';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
+import { createRequire } from 'node:module';
 import path from 'node:path';
 import readline from 'node:readline';
 import { fileURLToPath } from 'node:url';
@@ -218,6 +219,10 @@ export async function startTestPad(label) {
     async clipboardHeld() {
       return (await call({ cmd: 'clipboardHeld' })).held;
     },
+    /** The slow box's Ctrl+V reads the clipboard `ms` later (never when `ms` < 0). */
+    async slowPaste(ms) {
+      await call({ cmd: 'slowPaste', ms });
+    },
     /** Play a WAV on a loop from the pad's own process (its own audio session). */
     async play(file) {
       await call({ cmd: 'play', path: file });
@@ -404,6 +409,43 @@ async function launchConsoleCli({ nonce, cwd, title, timeout }) {
     focus: () => focus(win.hwnd),
     received: () => cliReceived(log),
     close: () => cleanup(win.hwnd),
+  };
+}
+
+/**
+ * A careless clipboard manager's stand-in (`yaprobot clipreader`), for
+ * `ms`: at each clipboard change, `delay` ms later, it opens the clipboard
+ * with a window of its own process and reads the text, whatever the
+ * privacy formats say. `result()` (once it's done): `{ updates, reads:
+ * [{ open, got, len }] }` — never the text.
+ */
+export async function startClipReader({ ms = 6_000, delay = 0 } = {}) {
+  compileHelper();
+  const child = spawn(HELPER, ['clipreader', String(ms), String(delay)], { stdio: ['ignore', 'pipe', 'inherit'], windowsHide: true });
+  const lines = readline.createInterface({ input: child.stdout });
+  const seen = [];
+  let ready;
+  const listening = new Promise((r) => (ready = r));
+  lines.on('line', (l) => {
+    seen.push(l);
+    if (/"listening"|"error"/.test(l)) ready();
+  });
+  const exited = new Promise((r) => child.once('exit', r));
+  await Promise.race([listening, sleep(10_000)]);
+  if (seen.some((l) => /"error"/.test(l))) throw new Error(`The clipboard reader couldn't start: ${seen.join(' ')}`);
+  return {
+    async result() {
+      await Promise.race([exited, sleep(ms + 10_000)]);
+      const last = seen.filter((l) => /"updates"/.test(l)).pop();
+      return last ? JSON.parse(last) : null;
+    },
+    stop() {
+      try {
+        child.kill();
+      } catch {
+        /* gone */
+      }
+    },
   };
 }
 
@@ -851,6 +893,161 @@ export async function startNotepad({ nonce, dir }) {
         /* fall through to WM_CLOSE */
       }
       if (findWindows(nonce).some((w) => w.hwnd === win.hwnd)) helper('close', win.hwnd, nonce);
+    },
+  };
+}
+
+// ---- Electron and VS Code (when this PC has them) ----
+
+/**
+ * An Electron runtime: `YAP_ROBOT_ELECTRON` (an electron.exe), else the
+ * `electron` package if it's installed (`npm i --no-save electron`).
+ * `null` when there's none: the Electron specs skip.
+ */
+export function electronExe() {
+  const env = process.env.YAP_ROBOT_ELECTRON;
+  if (env && fs.existsSync(env)) return env;
+  try {
+    const exe = createRequire(import.meta.url)('electron');
+    return typeof exe === 'string' && fs.existsSync(exe) ? exe : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * A tiny Electron app of the test's own (its own throwaway profile): a
+ * window titled "Yap robot electron - <nonce>" with a text box `#box`,
+ * focused, read over the DevTools protocol like `startPage`'s.
+ */
+export async function startElectronPage({ nonce, dir }) {
+  const exe = electronExe();
+  if (!exe) throw new Error('No Electron runtime (set YAP_ROBOT_ELECTRON or install the electron package)');
+  fs.mkdirSync(dir, { recursive: true });
+  const title = `Yap robot electron - ${nonce}`;
+  fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ name: 'yap-robot-electron', main: 'main.js' }));
+  fs.writeFileSync(
+    path.join(dir, 'page.html'),
+    `<!doctype html><meta charset="utf-8"><title>${title}</title>
+<style>body{font:15px Segoe UI,sans-serif;margin:16px}textarea{width:100%;height:160px;font:inherit}</style>
+<textarea id="box" aria-label="Message" autofocus></textarea>
+<script>document.getElementById('box').focus();</script>`,
+  );
+  fs.writeFileSync(
+    path.join(dir, 'main.js'),
+    `const { app, BrowserWindow } = require('electron');
+app.whenReady().then(() => {
+  const w = new BrowserWindow({ width: 640, height: 420, x: 140, y: 160, title: ${JSON.stringify(title)} });
+  w.loadFile('page.html');
+});
+app.on('window-all-closed', () => app.quit());
+`,
+  );
+  const port = 20_000 + crypto.randomInt(20_000);
+  const profile = path.join(dir, 'profile');
+  const child = spawn(exe, [dir, `--user-data-dir=${profile}`, `--remote-debugging-port=${port}`], {
+    stdio: 'ignore',
+    detached: true,
+    windowsHide: false,
+  });
+  child.unref();
+  const win = await waitForWindow(nonce, (w) => w.title.startsWith(title), { what: 'Electron window' });
+  let browser = null;
+  const deadline = Date.now() + 15_000;
+  while (!browser && Date.now() < deadline) {
+    browser = await chromium.connectOverCDP(`http://127.0.0.1:${port}`).catch(() => null);
+    if (!browser) await sleep(250);
+  }
+  if (!browser) throw new Error("Couldn't reach the Electron app over CDP");
+  const tab = browser
+    .contexts()
+    .flatMap((c) => c.pages())
+    .find((p) => p.url().startsWith('file:'));
+  if (!tab) throw new Error("Couldn't find the Electron app's page over CDP");
+  try {
+    windowText(win.hwnd);
+  } catch {
+    /* nothing to read yet is fine */
+  }
+  await sleep(500);
+  return {
+    hwnd: win.hwnd,
+    pid: win.pid,
+    focus: () => focus(win.hwnd),
+    evaluate: (fn, arg) => tab.evaluate(fn, arg),
+    value: () => tab.evaluate(() => document.getElementById('box').value),
+    async set(text) {
+      await tab.evaluate((t) => {
+        const box = document.getElementById('box');
+        box.focus();
+        box.value = t;
+        box.setSelectionRange(t.length, t.length);
+      }, text);
+      await sleep(300);
+    },
+    async close() {
+      await browser.close().catch(() => {});
+      for (const pid of processesWith(profile, [path.basename(exe)])) killTree(pid);
+    },
+  };
+}
+
+/** VS Code's Code.exe (`YAP_ROBOT_VSCODE`, else where its installers put it), or `null`. */
+export function vscodeExe() {
+  const candidates = [
+    process.env.YAP_ROBOT_VSCODE,
+    path.join(process.env.LOCALAPPDATA || '', 'Programs', 'Microsoft VS Code', 'Code.exe'),
+    path.join(process.env.ProgramFiles || 'C:\\Program Files', 'Microsoft VS Code', 'Code.exe'),
+  ].filter(Boolean);
+  return candidates.find((p) => fs.existsSync(p)) ?? null;
+}
+
+/**
+ * VS Code on an empty file named after the nonce, with a throwaway profile
+ * and extensions folder (none of your settings, extensions or recent
+ * files). `text()` saves it (Ctrl+S, only while it's in front) and reads
+ * the file.
+ */
+export async function startVsCode({ nonce, dir }) {
+  const exe = vscodeExe();
+  if (!exe) throw new Error('VS Code is not installed');
+  fs.mkdirSync(dir, { recursive: true });
+  const file = path.join(dir, `${nonce}.txt`);
+  fs.writeFileSync(file, '');
+  const profile = path.join(dir, 'vscode-profile');
+  const child = spawn(
+    exe,
+    [
+      `--user-data-dir=${profile}`,
+      `--extensions-dir=${path.join(dir, 'vscode-extensions')}`,
+      '--new-window',
+      '--disable-workspace-trust',
+      '--skip-welcome',
+      '--skip-release-notes',
+      '--disable-extensions',
+      file,
+    ],
+    { stdio: 'ignore', detached: true, windowsHide: false },
+  );
+  child.unref();
+  const win = await waitForWindow(nonce, (w) => w.title.includes(nonce), { what: 'VS Code window', timeout: 40_000 });
+  // Its editor up and focused.
+  await sleep(2_500);
+  return {
+    hwnd: win.hwnd,
+    file,
+    focus: () => focus(win.hwnd),
+    async text() {
+      await focus(win.hwnd);
+      const r = helper('keys', win.hwnd, nonce, 'ctrl+s');
+      if (!r.ok) throw new Error(`Couldn't save in VS Code: ${r.error}`);
+      await sleep(600);
+      return fs.readFileSync(file, 'utf8');
+    },
+    async close() {
+      if (findWindows(nonce).some((w) => w.hwnd === win.hwnd)) helper('close', win.hwnd, nonce);
+      await sleep(1_000);
+      for (const pid of processesWith(profile, ['Code.exe'])) killTree(pid);
     },
   };
 }

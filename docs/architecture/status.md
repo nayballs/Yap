@@ -719,10 +719,32 @@ Visual Studio or JetBrains IDE (neither installed; JetBrains' terminal
 can't be told from its editor — Swing shows UI Automation nothing), the
 real Claude Code / Codex (their limits read from their own code, a
 stand-in pasted into), a real secure desktop refusing keys (a test
-stand-in refuses them). Not done: spotting a late paste that read the old
-clipboard (it needs the field read before and after every paste, only
-where UI Automation can; the clipboard filled only when the app reads it
-is the real fix — the roadmap's "a paste that knows it worked").
+stand-in refuses them).
+**A paste that knows it worked** (2026-10-29, `pasting/read_check.rs`):
+the dictation goes on the clipboard promised (delayed rendering from a
+window of Yap's own), so an app's read of it is the proof — in web pages,
+Electron apps, code editors and terminals too; a read by another app
+(a clipboard manager) is refused before the keys and never counted; not
+read within a second (3 s for Outlook, Word, WhatsApp and remote
+desktops) → left on the clipboard, "Couldn't paste · it's copied, press
+Ctrl+V"; the person's clipboard comes back half a second after the read
+(not the keys), never when nothing read it, so an app reading late gets
+the dictation, not the old clipboard (that read noted as late). And
+**the exact text box**: the element a dictation started in is kept, the
+focus put back on it at the paste if a click moved it to something that
+takes no text in the same window, or followed to another text box (its
+text read afresh for the fit and cleanup). Unit-tested (every decision,
+the timings, the refocus choice), the real promise on a private window
+station and desktop (`--ignored`: refusals, the target's read, a nameless
+reader, ANSI text made from the promise, nobody, a late read, a copy
+before the restore, a background restore, a remote desktop's), e2e
+(`paste-failures.spec.js`: the notice, once, history). Robot specs written
+and not yet run (`paste-read.real.js`, `paste-late.real.js`,
+`paste-refocus.real.js`: the pad, a stand-in clipboard manager, Edge,
+Notepad, Windows Terminal, conhost, Claude Code's stand-in in slices, the
+pad's slow box, moving the focus mid-dictation; an Electron app and VS
+Code skip unless present — neither is here). Not tried: real Outlook,
+Word, a remote desktop, Discord/Slack's focus-moving paste.
 **Names as written on screen** (`dictionary/screen_terms.rs`, 2026-10-22;
 [dictionary.md](./dictionary.md)): the target window's visible text read
 over UI Automation at record start (in the background, never waited for),
@@ -996,9 +1018,9 @@ that reason);
 a true streaming model for the partial pass (spike-gated
 Stage 2 — see `ROADMAP.md` Phase 1);
 rich-text snippets (bold, links, lists pasted as HTML beside plain text);
-snippets with several spoken phrases; verify-after-paste beyond Win32 edit
-controls (a web or code editor's hidden input can't say whether a paste
-landed); a JetBrains IDE's or Visual Studio's terminal, and a browser's
+snippets with several spoken phrases; the clipboard-read check run by the
+robot (written 2026-10-29, not yet run) and in real slow apps (Outlook,
+Word, a remote desktop); a JetBrains IDE's or Visual Studio's terminal, and a browser's
 (vscode.dev, Codespaces), still count as the editor;
 Authenticode signing (blocked on SignPath approval); audio-history export;
 numbers from a real laptop (the smaller-PC numbers are an emulation on the

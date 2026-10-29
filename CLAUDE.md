@@ -126,12 +126,13 @@ One folder per area (an area's `<area>.rs` lists its modules); a big module's pa
 
 **Pasting** — [pasting.md](./docs/architecture/pasting.md)
 - `pasting/text_injector.rs` — private, verified clipboard paste with each app's paste keys (a console's own Paste), every `SendInput` checked, a lost paste typed, "Select a text box first", left on the clipboard and said once when it can't land, submit key, re-focus, edit mode's Ctrl+C keeping every clipboard format, Paste last transcript (and as said).
+- `pasting/read_check.rs` — did the app read the paste: the text promised on the clipboard (delayed rendering, Yap's own clipboard window), who read it (the target's processes, not a clipboard manager's: refused before the keys), not read in a second → "Couldn't paste" (`Left::NotRead`), the person's clipboard back after the read (later for slow apps), a late read gets the dictation.
 - `pasting/as_said.rs` — the last paste: "Use what I said" swaps a cleaned paste for the words as said (shortcut, bar, tray, Home's Paste what I said), and the rewrite shortcut with nothing selected rewrites the last dictation (≤ 1 min, still ending at the cursor; Settings → Commands can turn it off) — only where it can select exactly what it pasted; else copied or refused.
 - `pasting/last.rs` — Paste last / Copy last transcript on their own shortcuts (unbound by default): the paste once the keys are up, the copy kept out of Win+V history, a quiet "Copied".
 - `pasting/elevated.rs` — apps running as administrator: the text is left on the clipboard.
 - `pasting/modifiers.rs` — stuck Alt/Win/Shift/Ctrl let go before Yap's keys, held ones pressed again in the same `SendInput` (the hook says which are held).
 - `pasting/slices.rs` — long pastes in slices: under Claude Code's / Codex's blob limits and Windows Terminal's 5 KiB warning.
-- `pasting/selection.rs` — UI Automation reads: text around the cursor, edit-mode selection, read aloud's selection (read-only text too), post-paste watch; did a paste land; does what has the focus take text.
+- `pasting/selection.rs` — UI Automation reads: text around the cursor, edit-mode selection, read aloud's selection (read-only text too), post-paste watch; did a paste land; does what has the focus take text; the dictation's text box kept, the focus put back on it or followed to another box (`keep_focus`).
 - `pasting/smart_insert.rs` — fits a dictation to the text around the cursor (case, spaces, full stop).
 - `pasting/app_kind.rs` — terminal (which one, its paste keys; an editor's, a browser's or Visual Studio's terminal) / coding CLI / chat app / other, and what each changes.
 
