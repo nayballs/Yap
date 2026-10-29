@@ -1002,11 +1002,11 @@
     padding: 0;
     scrollbar-width: none;
   }
-  /* 13 pages, the search and the account in 600 px of window: every icon
-     on screen without scrolling the rail. */
+  /* 14 pages, the search and the account in 600 px of window: every icon
+     on screen without scrolling the rail (27 px each since Skills, 28 before). */
   .shell.rail .navitem {
     width: 38px;
-    height: 28px;
+    height: 27px;
     padding: 0;
     justify-content: center;
   }
