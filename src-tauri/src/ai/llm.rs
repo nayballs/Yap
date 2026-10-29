@@ -1955,9 +1955,9 @@ mod tests {
 
     /// With no writing samples (and no Hinglish), a dictation's cleanup
     /// request is byte for byte what it was before them: its JSON for fixed
-    /// inputs, pinned by its SHA-256. Taken when writing samples came
-    /// (29 Oct 2026), whose only change on this path is
-    /// `writing_samples::with_block(system, None)`, which is `system` itself.
+    /// inputs, pinned by its SHA-256 — the same as main's before writing
+    /// samples (8e63de6, 29 Oct 2026: this test run on that tree through
+    /// `cleanup_messages_with_names` gave these two hashes).
     #[test]
     fn the_cleanup_request_without_samples_is_byte_for_byte_as_before() {
         use sha2::{Digest, Sha256};
