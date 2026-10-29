@@ -46,6 +46,20 @@ pub fn kill(pid: u32) -> bool {
     imp::kill(pid)
 }
 
+/// The live process `pid`'s exe, its full path (the quick note's Send
+/// button draws its icon, `notes/quick_note/send.rs`).
+pub fn image_path(pid: u32) -> Option<String> {
+    #[cfg(windows)]
+    {
+        imp::live_image_path(pid)
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = pid;
+        None
+    }
+}
+
 /// Every running process's exe file name, lowercased, by process id (one
 /// snapshot: what "Silence other apps" checks audio sessions against).
 #[cfg(windows)]

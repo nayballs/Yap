@@ -481,25 +481,35 @@ pub async fn e2e_dictate_audio(
     robot.dictate_audio(samples, cancel.unwrap_or(false)).await
 }
 
-/// Test mode only: a press-only shortcut as the input hook sends it (a
-/// test run has no hook: it must never see the developer's keys) —
-/// `name` "paste-last" or "copy-last" (`pasting/last.rs`), or "quick-note"
-/// (`notes/quick_note.rs`).
+/// Test mode only: a shortcut as the input hook sends it (a test run has no
+/// hook: it must never see the developer's keys) — `name` "paste-last" or
+/// "copy-last" (`pasting/last.rs`), or "quick-note" (`notes/quick_note.rs`,
+/// whose hold dictates). `phase`: "press" or "release" alone (a hold is a
+/// press, a wait, a release); none: a tap, both at once.
 #[cfg(debug_assertions)]
 #[tauri::command]
-pub fn e2e_shortcut(app: AppHandle, name: String) -> Result<(), String> {
+pub fn e2e_shortcut(app: AppHandle, name: String, phase: Option<String>) -> Result<(), String> {
     use tauri::Emitter;
     if !active() {
         return Err("Only in e2e test mode".to_string());
     }
-    let event = match name.as_str() {
-        "paste-last" => "paste-last-key-pressed",
-        "copy-last" => "copy-last-key-pressed",
-        "quick-note" => "quick-note-key-pressed",
+    let (pressed, released) = match name.as_str() {
+        "paste-last" => ("paste-last-key-pressed", "paste-last-key-released"),
+        "copy-last" => ("copy-last-key-pressed", "copy-last-key-released"),
+        "quick-note" => ("quick-note-key-pressed", "quick-note-key-released"),
         other => return Err(format!("No such shortcut: {other}")),
     };
-    tracing::info!(event, "e2e: a shortcut pressed");
-    app.emit(event, crate::dictation::gesture::now_ms()).map_err(|e| e.to_string())
+    let events: &[&str] = match phase.as_deref() {
+        Some("press") => &[pressed],
+        Some("release") => &[released],
+        None => &[pressed, released],
+        Some(other) => return Err(format!("No such phase: {other}")),
+    };
+    for event in events {
+        tracing::info!(event, "e2e: a shortcut moved");
+        app.emit(event, crate::dictation::gesture::now_ms()).map_err(|e| e.to_string())?;
+    }
+    Ok(())
 }
 
 /// Test mode only: "Taking longer than usual…" sooner and on cue

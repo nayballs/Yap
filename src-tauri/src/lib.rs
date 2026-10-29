@@ -488,6 +488,11 @@ pub fn run() {
             notes::quick_note::quick_note_save,
             notes::quick_note::quick_note_new,
             notes::quick_note::quick_note_dictate,
+            notes::quick_note::quick_note_bar_button,
+            notes::quick_note::key::quick_note_key,
+            notes::quick_note::tabs::quick_note_tabs,
+            notes::quick_note::send::quick_note_send_target,
+            notes::quick_note::send::quick_note_send,
             calls::meeting_guard::meeting_shortcut,
             calls::meeting_guard::meeting_keep_going,
             calls::meeting_guard::meeting_limit_status,
@@ -522,6 +527,8 @@ pub fn run() {
             bar::bar_pointer_left,
             bar::bar_action,
             bar::bar_card_action,
+            bar::menu::bar_menu,
+            bar::menu::bar_use_mic,
             dictionary::learn::word_suggestion_respond,
             dictionary::learn::summary_word_offer,
             dictionary::snippet_offer::snippet_suggestion_respond,
@@ -683,6 +690,10 @@ pub fn run() {
             dictation::commands::e2e_chat_dictation,
             #[cfg(debug_assertions)]
             notes::quick_note::e2e_quick_note_dictation,
+            #[cfg(debug_assertions)]
+            notes::quick_note::send::e2e_quick_note_before,
+            #[cfg(debug_assertions)]
+            notes::quick_note::send::e2e_quick_note_sent,
             #[cfg(debug_assertions)]
             shell::tray::e2e_tray,
             #[cfg(debug_assertions)]
@@ -1016,10 +1027,16 @@ pub fn run() {
             handle.listen("paste-last-key-pressed", move |_| pasting::last::paste_soon(&paste_last_handle));
             let copy_last_handle = handle.clone();
             handle.listen("copy-last-key-pressed", move |_| pasting::last::copy_soon(&copy_last_handle));
-            // Quick note (notes/quick_note.rs): up on the main thread, or
-            // away while it's in front.
+            // Quick note (notes/quick_note/key.rs): a tap opens it, or puts
+            // it away while it's in front; a hold dictates into it.
             let quick_note_handle = handle.clone();
-            handle.listen("quick-note-key-pressed", move |_| notes::quick_note::toggle_soon(&quick_note_handle));
+            handle.listen("quick-note-key-pressed", move |event| {
+                notes::quick_note::key::on_key(&quick_note_handle, true, event.payload().parse::<u64>().ok());
+            });
+            let quick_note_up_handle = handle.clone();
+            handle.listen("quick-note-key-released", move |event| {
+                notes::quick_note::key::on_key(&quick_note_up_handle, false, event.payload().parse::<u64>().ok());
+            });
             snip::init(&handle);
 
             // A saved transform's shortcut (transforms.rs): its slot, run on

@@ -19,7 +19,7 @@
   unbound, the default; never a clash — `input_hook::configure_paste_last_from`
   / `configure_copy_last_from` leave one another shortcut has unbound;
   `pasting/last.rs`), quick_note_hotkey (`quickNoteHotkey`, 2026-10-28: the
-  **Quick note** window from any app, Settings → Shortcuts; "" = unbound,
+  **Quick note** window from any app — held, a dictation into it —, Settings → Shortcuts; "" = unbound,
   the default; never a clash — `input_hook::configure_quick_note_from`
   gives way to all nine older shortcuts; `notes/quick_note.rs`. An older Yap
   sharing the folder drops it, and its `moreHotkeys` entry, on its next
@@ -175,7 +175,11 @@
   bar_hide_fullscreen (true) + bar_theme ("app" — Match app, the theme of
   Yap's windows — | "light" | "dark", app) +
   bar_dictation_buttons (the capsule's ✕ / ✓: "off" | "hover" | "always",
-  off), General → Appearance (`src/lib/core/appearance.js`, every window):
+  off) + bar_quick_note (`barQuickNote`, 2026-10-29: the quick note's button
+  on the open bar, off; switched on from the quick note's empty page —
+  `quick_note_bar_button` — or Settings → General → Yap bar. An older Yap
+  sharing the folder drops it on its next save: the button goes until it's
+  switched on again, nothing else), General → Appearance (`src/lib/core/appearance.js`, every window):
   theme ("system" — Windows' app mode, followed live — | "light" | "dark",
   system; `shell/theme.rs` gives the opaque windows' webviews its background) +
   reading_font ("default" Figtree | "sans" Geist | "serif" Literata |
@@ -514,6 +518,14 @@
   showed (`tap`, `longHold`, `chord` — "Hold only {key}" —, `longDictation`
   — "Try meeting notes", once ever), when the last did, and whether
   double-tap has been used (`dictation/coaching.rs`).
+- Quick note tabs: `%APPDATA%/yap/quick_note_tabs.json` (2026-10-29) —
+  `{tabs: [note ids, in order], active: id | null}`, the quick notes open
+  as tabs in the quick note's window (`notes/quick_note/tabs.rs`): read at
+  the first open, written after every change the page makes (at most 20,
+  ids only — the notes are in notes.json). A file of its own, so an older
+  Yap never reads or saves it; deleting it closes the tabs and loses
+  nothing else. Reset app clears it with the notes (`tabs::reset`). The quick note's "Not now" on its offer of the bar button
+  is that window's `localStorage` (`yap.quickNote.barOfferDismissed`).
 - Mic tips: `%APPDATA%/yap/mic_tips.json` (2026-10-29,
   `dictation/mic_tips.rs`) — how often each mic-quality tip ("Yap didn't
   hear you clearly": quiet, noisy, clipped, a Bluetooth headset in its call
@@ -597,7 +609,7 @@
   again for that store until a save of it worked. The local API and the
   chat's note tools answer an AI app or model with the failure too, so
   neither says it saved. Caches (`model_catalog.json`, `stt_speed.json`,
-  `updates.json`, `hints.json`, `quieted_apps.json`) are only logged. The
+  `updates.json`, `hints.json`, `quieted_apps.json`, `quick_note_tabs.json`) are only logged. The
   log names the store and the error's kind, never what it holds.
   **Since 2026-10-25**: notes.json is written **off its lock** (a snapshot
   taken under it, written after, `saving::Ordered`: one write at a time,

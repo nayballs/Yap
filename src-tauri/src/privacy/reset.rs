@@ -44,7 +44,7 @@ pub const GOES: &[Part] = &[
     Part {
         id: "notes",
         label: "Every note and meeting, with their audio, earlier versions and pins (your folders and actions stay)",
-        files: &["notes.json", "meeting-audio/", "note-versions/", "note_pins.json"],
+        files: &["notes.json", "meeting-audio/", "quick_note_tabs.json", "note-versions/", "note_pins.json"],
     },
     Part { id: "chats", label: "Every chat, with its screenshots", files: &["chats.json", "chat-images/"] },
     Part { id: "memory", label: "What Yap remembers about you", files: &["memory.json"] },
@@ -199,6 +199,8 @@ fn run(app: &AppHandle) -> Result<Done, String> {
     // Notes and meetings: every window lets go of each.
     let ids = crate::notes::reset();
     done.notes = ids.len();
+    // The quick note's open tabs were those notes.
+    crate::notes::quick_note::tabs::reset();
     // Their version history and pins (notes/versions.rs, notes/pins.rs).
     crate::notes::versions::reset();
     crate::notes::pins::reset();

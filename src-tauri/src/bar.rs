@@ -56,6 +56,7 @@
 //! region (exercising the same hit-test and click-through code) and fakes a
 //! fullscreen app, and [`bar_debug`] reports the window's real ex-styles.
 
+pub mod menu;
 pub mod overlay;
 
 use std::collections::HashMap;
@@ -364,6 +365,10 @@ struct State {
     read_hotkey: Option<String>,
     /// The Snip to Chat shortcut, for ✂'s tooltip.
     snip_hotkey: Option<String>,
+    /// The quick-note button (`bar_quick_note`, off by default) and its
+    /// shortcut, for its tooltip.
+    quick_note: bool,
+    quick_note_hotkey: Option<String>,
     /// "Hide the bar for 1 hour" until (unix ms), 0 = not hidden.
     hidden_until: u64,
     dictation: Dictation,
@@ -419,6 +424,8 @@ impl Default for State {
             meeting_hotkey: None,
             read_hotkey: None,
             snip_hotkey: None,
+            quick_note: false,
+            quick_note_hotkey: None,
             hidden_until: 0,
             dictation: Dictation::Idle,
             assistant: crate::chat::assistant::Phase::Idle,
@@ -580,6 +587,10 @@ pub struct Status {
     read_hotkey: Option<String>,
     /// The Snip to Chat shortcut spec, if one is set, for the ✂ tooltip.
     snip_hotkey: Option<String>,
+    /// The quick-note button is on the open bar (`bar_quick_note`)…
+    quick_note: bool,
+    /// …and its shortcut spec, if one is set, for its tooltip.
+    quick_note_hotkey: Option<String>,
     /// `meeting::state()`: `{ recording, noteId, elapsedSecs }`.
     meeting: serde_json::Value,
     /// A live call ◉ would record ("Record this Teams call").
@@ -615,6 +626,8 @@ pub fn status() -> Status {
         meeting_hotkey: s.meeting_hotkey.clone(),
         read_hotkey: s.read_hotkey.clone(),
         snip_hotkey: s.snip_hotkey.clone(),
+        quick_note: s.quick_note,
+        quick_note_hotkey: s.quick_note_hotkey.clone(),
         meeting,
         call,
         assistant: s.assistant,
@@ -1075,6 +1088,7 @@ fn read_config(s: &mut State, cfg: &crate::config::YapConfig) -> bool {
         .filter(|h| !h.is_empty());
     let read_hotkey = Some(cfg.read_hotkey.clone()).filter(|h| !h.trim().is_empty());
     let snip_hotkey = Some(cfg.snip_hotkey.clone()).filter(|h| !h.trim().is_empty());
+    let quick_note_hotkey = Some(cfg.quick_note_hotkey.clone()).filter(|h| !h.trim().is_empty());
     let theme = theme_from_config(&cfg.bar_theme);
     let dictation_buttons = dictation_buttons_from_config(&cfg.bar_dictation_buttons);
     let changed = s.enabled != cfg.bar_enabled
@@ -1085,7 +1099,9 @@ fn read_config(s: &mut State, cfg: &crate::config::YapConfig) -> bool {
         || s.hotkey != cfg.hotkey
         || s.meeting_hotkey != meeting_hotkey
         || s.read_hotkey != read_hotkey
-        || s.snip_hotkey != snip_hotkey;
+        || s.snip_hotkey != snip_hotkey
+        || s.quick_note != cfg.bar_quick_note
+        || s.quick_note_hotkey != quick_note_hotkey;
     s.replace |= s.edge != edge;
     s.enabled = cfg.bar_enabled;
     s.hide_fullscreen = cfg.bar_hide_fullscreen;
@@ -1096,6 +1112,8 @@ fn read_config(s: &mut State, cfg: &crate::config::YapConfig) -> bool {
     s.meeting_hotkey = meeting_hotkey;
     s.read_hotkey = read_hotkey;
     s.snip_hotkey = snip_hotkey;
+    s.quick_note = cfg.bar_quick_note;
+    s.quick_note_hotkey = quick_note_hotkey;
     changed
 }
 
@@ -1440,6 +1458,24 @@ fn act(app: &AppHandle, action: &str) -> Result<(), String> {
         // ✂: Snip to Chat (snip.rs). The bar never took the focus, so the
         // app you're in is the one a cancel goes back to.
         "snip" => crate::snip::start(app, crate::snip::Origin::Bar),
+        // The quick-note button (`bar_quick_note`): the quick note up, or
+        // away while it's in front, as a tap of its shortcut. The bar never
+        // took the focus, so the app you're in is the one Send goes to.
+        "quick-note" => {
+            give_focus_back();
+            crate::notes::quick_note::toggle_soon(app);
+        }
+        // The ^ menu's Paste last transcript (`bar/menu.rs`): into the app
+        // you're in, as its shortcut does.
+        "paste-last" => {
+            give_focus_back();
+            crate::pasting::last::paste_soon(app);
+        }
+        // The ^ menu's languages: a dictation in one, as its shortcut starts.
+        other if other.starts_with("dictate-in:") => {
+            give_focus_back();
+            menu::dictate_in(app, &other["dictate-in:".len()..])?;
+        }
         // ■ on the recording pill: end the meeting, which writes the action
         // plan in Rust (or asks "Started by mistake?").
         "stop-meeting" => crate::meetings::meeting_end::end(app, Some(overlay::LABEL))?,
@@ -1517,8 +1553,9 @@ pub fn bar_pointer_left(app: AppHandle) {
 
 /// A bar button or menu item: "dictate" | "dictation-stop" |
 /// "dictation-cancel" | "dictation-undo" | "as-said" | "transform-undo" | "meeting" |
-/// "stop-meeting" | "read-aloud" | "read-stop" | "open-note" | "new-note" |
-/// "open" | "settings" | "hide" | "show" | "off".
+/// "stop-meeting" | "read-aloud" | "read-stop" | "snip" | "quick-note" |
+/// "paste-last" | "dictate-in:<language shortcut id>" | "open-note" |
+/// "new-note" | "open" | "settings" | "hide" | "show" | "off".
 #[tauri::command]
 pub async fn bar_action(app: AppHandle, action: String) -> Result<(), String> {
     tauri::async_runtime::spawn_blocking(move || act(&app, &action))

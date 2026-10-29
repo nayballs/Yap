@@ -7,7 +7,8 @@
   //             in a 60 × 20 hit wrapper;
   //   hover     it opens into 🎤 Dictate, ◉ Meeting notes, 🔊 Read aloud (the
   //             selection in the app you're in; ■ while reading), ✂ Snip to
-  //             Chat (snip.rs) and a ^ menu, with a tooltip naming each
+  //             Chat (snip.rs), the quick note's button when it's switched
+  //             on (bar_quick_note) and a ^ menu, with a tooltip naming each
   //             button's shortcut;
   //   dictating the dictation overlay (waveform, live text, Transcribing…,
   //             the error) in the pill's place, with ✕ / ✓ while it records
@@ -60,6 +61,9 @@
     meetingHotkey: null,
     readHotkey: null,
     snipHotkey: null,
+    // The quick-note button (`bar_quick_note`, off by default) and its shortcut.
+    quickNote: false,
+    quickNoteHotkey: null,
     meeting: { recording: false },
     call: null,
     cards: [],
@@ -185,6 +189,7 @@
     notes: { label: bar.call ?? 'New note', keys: keys(bar.meetingHotkey) },
     read: { label: reading.phase === 'reading' || reading.phase === 'paused' ? 'Stop reading' : 'Read aloud', keys: keys(bar.readHotkey) },
     snip: { label: 'Snip to Chat', keys: keys(bar.snipHotkey) },
+    quicknote: { label: 'Quick note', keys: keys(bar.quickNoteHotkey) },
     open: { label: 'Open notes', keys: '' },
     stop: { label: 'Stop and summarise', keys: keys(bar.meetingHotkey) },
   });
@@ -227,11 +232,37 @@
   const readAloud = () => act(readingNow ? 'read-stop' : 'read-aloud');
   // ✂: Snip to Chat (snip.rs) — drag a box over any screen, into Chat.
   const snip = () => act('snip');
+  // The quick note (notes/quick_note.rs), when its button is on: up, or away
+  // while it's in front. The bar never takes the focus, so Send goes to the
+  // app you're in.
+  const quickNote = () => act('quick-note');
   const stopMeeting = () => act('stop-meeting');
   const openMeeting = () => act('open-note');
   function menuItem(action) {
     menuOpen = false;
     act(action);
+  }
+  // The menu's extras (bar/menu.rs), read as it opens: the microphones in
+  // the order Yap tries them (the one in use first), Paste last transcript,
+  // the language shortcuts' languages.
+  let extras = $state(null);
+  let micsOpen = $state(false);
+  const micInUse = $derived(extras?.mics?.find((m) => m.inUse) ?? null);
+  $effect(() => {
+    if (!menuOpen) {
+      micsOpen = false;
+      return;
+    }
+    invoke('bar_menu')
+      .then((x) => (extras = x))
+      .catch(() => (extras = null));
+  });
+  function useMic(m) {
+    menuOpen = false;
+    if (m.inUse) return;
+    invoke('bar_use_mic', { id: m.id }).catch((e) =>
+      invoke('frontend_log', { msg: `bar: picking a microphone failed: ${e}` }).catch(() => {})
+    );
   }
   function cardAction(card, action) {
     invoke('bar_card_action', { id: card.id, action }).catch((e) =>
@@ -397,7 +428,7 @@
         onpointerenter={() => (domHover = true)}
         onpointerleave={() => (domHover = false)}
       >
-        <div class="pill" class:open={expanded} aria-label="Yap bar">
+        <div class="pill" class:open={expanded} class:wide={bar.quickNote} aria-label="Yap bar">
           <button
             class="btn mic"
             aria-label="Dictate"
@@ -445,6 +476,18 @@
           >
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="6" cy="6" r="3" /><circle cx="6" cy="18" r="3" /><path d="M20 4 8.1 15.9" /><path d="M14.5 14.5 20 20" /><path d="M8.1 8.1 12 12" /></svg>
           </button>
+          {#if bar.quickNote}
+            <button
+              class="btn qnote"
+              aria-label="Quick note"
+              tabindex={expanded ? 0 : -1}
+              onclick={quickNote}
+              onpointerenter={(e) => hoverTip('quicknote', e)}
+              onpointerleave={() => hoverTip(null)}
+            >
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 3.5H7a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8.5z" /><path d="M14 3.5v5h5" /><path d="M9 13h6M9 16.5h4" /></svg>
+            </button>
+          {/if}
           <button
             class="btn more"
             class:on={menuOpen}
@@ -469,7 +512,41 @@
           <div class="menu" data-region="menu" role="menu" transition:fade={{ duration: motionMs(120) }}>
             <button role="menuitem" onclick={() => menuItem('open')}>Open Yap</button>
             <button role="menuitem" onclick={() => menuItem('new-note')}>New meeting note</button>
+            {#if extras?.pasteLast}
+              <button role="menuitem" onclick={() => menuItem('paste-last')}>Paste last transcript</button>
+            {/if}
             <button role="menuitem" onclick={() => menuItem('settings')}>Settings</button>
+            {#if micInUse || extras?.languages?.length}
+              <span class="rule" aria-hidden="true"></span>
+            {/if}
+            {#if micInUse}
+              <button
+                role="menuitem"
+                class="mic-in-use"
+                aria-haspopup="true"
+                aria-expanded={micsOpen}
+                title="The microphone Yap dictates with"
+                onclick={() => (micsOpen = !micsOpen)}
+              >
+                <span class="mname">Microphone: {micInUse.name}</span>
+                {#if extras.mics.length > 1}
+                  <svg class="chev" class:up={micsOpen} viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6" /></svg>
+                {/if}
+              </button>
+              {#if micsOpen && extras.mics.length > 1}
+                <div class="mics" role="group" aria-label="Microphones">
+                  {#each extras.mics as m (m.id)}
+                    <button role="menuitemradio" aria-checked={m.inUse} class="mic-row" onclick={() => useMic(m)}>
+                      <span class="tick" aria-hidden="true">{m.inUse ? '✓' : ''}</span>
+                      <span class="mname">{m.name}</span>
+                    </button>
+                  {/each}
+                </div>
+              {/if}
+            {/if}
+            {#each extras?.languages ?? [] as l (l.id)}
+              <button role="menuitem" onclick={() => menuItem(`dictate-in:${l.id}`)}>Dictate in {l.name}</button>
+            {/each}
             <span class="rule" aria-hidden="true"></span>
             <button role="menuitem" onclick={() => menuItem('hide')}>Hide the bar for 1 hour</button>
             <button role="menuitem" onclick={() => menuItem('off')}>Turn off the bar</button>
@@ -613,6 +690,10 @@
     border-color: var(--bar-border);
     transition: all 0.16s cubic-bezier(0.05, 0.6, 0.4, 0.95);
   }
+  /* The quick-note button switched on (bar_quick_note): 34 more. */
+  .pill.open.wide {
+    width: 230px;
+  }
   .btn {
     position: relative;
     display: inline-flex;
@@ -725,6 +806,10 @@
     display: flex;
     flex-direction: column;
     min-width: 214px;
+    max-width: 300px;
+    /* The window is 560 tall: a long list of microphones scrolls. */
+    max-height: 440px;
+    overflow-y: auto;
     padding: 6px;
     border-radius: 12px;
     background: var(--bar-surface);
@@ -752,9 +837,46 @@
     color: var(--bar-text);
   }
   .rule {
+    flex: 0 0 auto;
     height: 1px;
     margin: 5px 8px;
     background: var(--bar-border);
+  }
+  /* The microphone in use, opening the list of the others. */
+  .menu .mic-in-use,
+  .menu .mic-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .mname {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+  .chev {
+    flex: 0 0 auto;
+    width: 14px;
+    height: 14px;
+    transition: transform 160ms ease;
+  }
+  .chev.up {
+    transform: rotate(180deg);
+  }
+  .mics {
+    display: flex;
+    flex-direction: column;
+  }
+  .menu .mic-row {
+    padding: 6px 12px 6px 14px;
+    font-size: 13px;
+  }
+  .tick {
+    flex: 0 0 auto;
+    width: 14px;
+    color: var(--bar-text);
   }
 
   /* ---- the meeting recording pill: 69 × 30, black, a 2 px ring in Yap's
