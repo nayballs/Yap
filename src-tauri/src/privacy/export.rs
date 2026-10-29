@@ -8,7 +8,7 @@
 //! - `notes/*.md` and `meetings/*.md` — each note and meeting as Markdown
 //!   (`notes::commands::export_markdown`, what "Save as .md" writes), and
 //!   `notes/notes.json`, the whole store (folders and actions too);
-//! - `tasks.json`, `chats/chats.json` with each chat as Markdown, and
+//! - `tasks.json`, `skills.json` (the person's own Skills), `chats/chats.json` with each chat as Markdown, and
 //!   `memory/` — Memory's own export (`memory::export`) and `memory.json`;
 //! - `dictionary/dictionary.csv` — corrections and snippets, the CSV the
 //!   Dictionary view's Export… writes ([`dictionary_csv`]);
@@ -329,6 +329,8 @@ pub struct Inputs {
     pub notes_json: String,
     pub chats: Vec<crate::chat::chats::Conversation>,
     pub tasks: Value,
+    /// skills.json: the person's own Skills (chat/skills.rs).
+    pub skills: Value,
     pub memory: Vec<crate::memory::ops::Item>,
     /// About you's lines for Memory's You.md.
     pub about: Vec<(&'static str, String)>,
@@ -346,6 +348,7 @@ What's in it\n\
 notes/notes.json is all of them as Yap keeps them, with your folders and actions.\n\
 - chats/: each chat as Markdown, and chats.json.\n\
 - tasks.json: the tasks you added and the ones you archived.\n\
+- skills.json: the Skills you made (your own instructions, run with /name).\n\
 - memory/: what Yap remembers about you, as Markdown, and memory.json.\n\
 - dictionary/dictionary.csv: your corrections and snippets, as the Dictionary's Export writes them \
 (Import reads it back).\n\
@@ -396,8 +399,9 @@ screenshots/: Chat's screenshots (PNG).\n"
     }
     files.push(("chats/chats.json".into(), pretty(&json!({ "conversations": i.chats }))));
 
-    // Tasks, memory.
+    // Tasks, your Skills, memory.
     files.push(("tasks.json".into(), pretty(&i.tasks)));
+    files.push(("skills.json".into(), pretty(&i.skills)));
     for (name, text) in crate::memory::export::files(&i.memory, &i.about) {
         files.push((format!("memory/{name}"), text.into_bytes()));
     }
@@ -610,6 +614,7 @@ fn inputs(audio: bool) -> Inputs {
         notes_json: crate::notes::store_json(),
         chats: crate::chat::chats::with_all(|c| c.to_vec()),
         tasks: serde_json::to_value(crate::notes::task_store::snapshot()).unwrap_or(Value::Null),
+        skills: serde_json::to_value(crate::chat::skills::own()).unwrap_or(Value::Null),
         memory: crate::memory::items(),
         about,
         dictionary: cfg.dictionary.clone(),
@@ -840,6 +845,7 @@ mod tests {
             notes_json: "{\"notes\":[]}".into(),
             chats: vec![],
             tasks: json!({ "tasks": [], "archived": [] }),
+            skills: json!({ "skills": [{ "id": "s1", "name": "Budget numbers", "command": "budget-numbers", "instructions": "List every amount said.", "runsOn": "meeting" }] }),
             memory: vec![],
             about: vec![("Name", "Robin Example".into())],
             dictionary: cfg.dictionary.clone(),
@@ -864,6 +870,7 @@ mod tests {
             "notes/notes.json",
             "chats/chats.json",
             "tasks.json",
+            "skills.json",
             "memory/You.md",
             "memory/memory.json",
             "dictionary/dictionary.csv",

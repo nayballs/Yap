@@ -145,6 +145,16 @@
   // at the line, SpeakerMenu.svelte) — not for a line from the speakers —
   // and Edit line.
   let lineEls = $state({});
+  // A line an answer cited (TranscriptView `jumpTo`): scrolled to the middle
+  // and lit for a moment.
+  $effect(() => {
+    const i = view.lit;
+    const el = i == null ? null : lineEls[i];
+    if (!el) return;
+    tick().then(() => el.closest('.row')?.scrollIntoView({ block: 'center' }));
+    const t = setTimeout(() => view.lit === i && (view.lit = null), 2500);
+    return () => clearTimeout(t);
+  });
   function lineMenu(e, item, line) {
     openContextMenu(
       e,
@@ -222,6 +232,8 @@
             <!-- svelte-ignore a11y_no_static_element_interactions -->
             <div
               class="row"
+              class:lit={view.lit === line.i}
+              data-line={line.i}
               class:playable={canPlay(note.id, note.transcript?.[line.i])}
               class:menuopen={view.speakerMenu?.key === `l${line.i}` || menuOpenFor(lineEls[line.i])}
               oncontextmenu={(e) => lineMenu(e, item, line)}
@@ -406,6 +418,11 @@
   .row {
     position: relative;
     padding-right: 50px;
+  }
+  /* A line an answer cited, lit a moment as it's opened. */
+  .row.lit .bubble {
+    box-shadow: 0 0 0 3px var(--yap-paper-ring);
+    transition: box-shadow 0.3s;
   }
   .bubble {
     width: fit-content;

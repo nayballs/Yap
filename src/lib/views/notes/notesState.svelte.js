@@ -1017,5 +1017,6 @@ export function createNotesState() {
     exportNote,
     turnId,
     openRequested,
+    showLine,
   };
 }

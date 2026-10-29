@@ -144,6 +144,11 @@ export const SETTINGS_INDEX = [
   { page: 'memory', section: 'Import, export and clear', label: 'Export memory', desc: 'A .zip of Markdown, a file per section', keywords: 'memory export download backup markdown zip', anchor: 'memory-export' },
   { page: 'memory', section: 'Import, export and clear', label: 'Clear all memory', desc: 'Forget everything Yap remembers', keywords: 'memory clear delete forget erase reset wipe', anchor: 'memory-clear' },
 
+  // Skills (SkillsPage.svelte, chat/skills.rs)
+  { page: 'skills', section: "Yap's Skills", label: "Yap's Skills", desc: '/decisions, /risks, /coach and more: open one, or save a copy', keywords: 'skills slash commands saved prompts instructions decisions risks follow-up email coach todos weekly recap', anchor: 'skills-builtin' },
+  { page: 'skills', section: 'Your Skills', label: 'Your Skills', desc: 'Saved instructions you run with /name', keywords: 'skills slash commands saved prompts instructions custom my own templates', anchor: 'skills-yours' },
+  { page: 'skills', section: 'Your Skills', label: 'New Skill', desc: 'A name, a /command and what it should do', keywords: 'skills create new add slash command prompt template', anchor: 'skills-add' },
+
   // ---- Speech-to-Text ----
   { page: 'models', section: 'Speech model', label: 'Speech model', desc: 'The model that turns your voice into text', keywords: 'speech to text transcription model parakeet whisper canary moonshine download', anchor: 'stt-model' },
   { page: 'models', section: 'Speakers in meetings', label: 'Speaker models', desc: 'For telling speakers apart in meetings', keywords: 'diarization speakers model', anchor: 'speakers' },

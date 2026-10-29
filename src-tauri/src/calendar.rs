@@ -2437,6 +2437,18 @@ pub async fn calendar_brief_for_note(app: AppHandle, note_id: u64) -> Result<Opt
         .map_err(|e| e.to_string())
 }
 
+/// The kept brief of the meeting note `note_id` was made for, as plain
+/// lines for a helper's context (the notepad's "Make me sound smart"):
+/// never made here. `None` with briefs off, or without one.
+pub fn brief_lines_for_note(note_id: u64) -> Option<String> {
+    if !crate::config::load().meeting_brief {
+        return None;
+    }
+    let key = crate::notes::event_of(note_id)?.key;
+    let kept = lock().store.briefs.get(&key).cloned()?;
+    Some(brief::plain(&kept)).filter(|t| !t.trim().is_empty())
+}
+
 /// A brief's citation `n` opened (any window): its note in the main window's
 /// Notes, Settings → Memory, or — the invite — the meeting's own note (made
 /// ahead if need be).

@@ -206,7 +206,16 @@ The AI Chat surface (conversations, the tool-calling loop and its note tools) an
   `with_thread` lays them into the notepad's one-off request). A kept turn
   (`note_chat_add`) looks for a summary in the background with the model
   that window asks (`compact::after_thread_turn`: the notepad's Note
-  Formatting model, else Chat's). Logs: ids and counts.
+  Formatting model, else Chat's). Logs: ids and counts. Since 2026-10-29: a
+  kept answer keeps the meeting's lines it cites (`NewMessage::sources` →
+  the message's `sources`, Chat's own field, which an older Yap keeps
+  too), so its pills open the line when the thread reopens; and
+  `note_chat_rename(noteId, conversationId, title, origin)` (`rename`:
+  this note's thread only, Chat's `clean_title`) names one from Past chats
+  (`yap-note-chat` with `renamed`).
+- **`chat/skills.rs`** — **Skills** (2026-10-29; Wispr Flow's Skills): saved
+  instructions run with `/name`. See
+  [Skills and one-tap prompts](#skills-and-one-tap-prompts-2026-10-29).
 - **`chat/budget.rs`** — **a chat sized to its model** (2026-10-25): the
   context of the model a call goes to (`context_window`, shared with the
   ring), the budget (`budget`), the token counter (`Counter`, `estimate`),
@@ -898,6 +907,87 @@ screenshots and their prompts, +, the box, the mic, Send / ■, `ModelChip`).
   screenshot" (`snip_start {origin: "chat"}`).
   Search by meaning — local embeddings, Ask across meetings with cited
   passages — is [search.md](./search.md) (2026-10-25; ROADMAP step 3).
+
+## Skills and one-tap prompts (2026-10-29)
+
+Wispr Flow's Notetaker has one-tap prompts in its hub (Coach me, List
+recent to-dos, Write a weekly recap) and **Skills**: saved instructions run
+with `/command` in a meeting's chat or across meetings, the built-ins
+copyable. Yap's, in `chat/skills.rs`:
+
+- **A Skill**: a name, a `/command` (2–32 lowercase letters and digits,
+  single hyphens; not a built-in's, not another of yours: `command_problem`),
+  a line on what it's for, the instructions (≤ 4,000 characters) and where
+  it runs (`runsOn`: `meeting` — a meeting's Ask box, on that meeting —,
+  `meetings` — Chat and Ask across meetings, on all of them — or `both`).
+  **Built in** (`builtins`, in code, never stored): /followup-email (one
+  meeting), /decisions, /risks, /coach (both), /todos, /weekly-recap
+  (across). **Your own** in `skills.json` (`SkillStore`, `Saver` "your
+  Skills", a corrupt file set aside; ≤ 50): `skill_save` (new, a change, or
+  a copy of a built-in: `basedOn`; what only a built-in carries — `gather`,
+  `query`, `chip`, `question` — never comes with a copy), `skill_delete`,
+  `skills_list` (built-ins first); `yap-skills-changed` to every window.
+- **Not the Actions engine** (`notes.rs` `Action`, ActionManager): an
+  action rewrites the note's summary under the note guardrails; a Skill
+  answers in a chat and never changes the note, and has a command and a
+  scope. And actions live in notes.json, which an older Yap rewrites
+  without the fields it doesn't know: a Skill stored there would come back
+  in its action picker as an action that writes over the summary. So
+  Skills have their own file, which an older Yap never opens.
+- **On one meeting**: `meeting_assist::meeting_skill` ([meetings.md](./meetings.md)):
+  fixed guardrails, the meeting as numbered passages, then the
+  instructions last, the answer cited and checked as Ask across meetings'
+  are.
+- **Across the meetings, in Chat**: `chat_send`'s `skill` (its command)
+  → `skills::turn_for` (`Err` for one that runs on one meeting) → the turn
+  runs under `skills::with` (a task-local, as the screenshots' `snip::turn`
+  is, so `chat_turn`'s signature and its other callers stay as they were);
+  `chat_turn` reads `skills::current()`: the turn is asked across the
+  meetings whatever the conversation's scope (a new chat keeps that scope;
+  one about something else stays so), no web or calendar tools, and its
+  passages come from `skills::find`: **`tasks`** (/todos: every open task
+  that's the person's — "You", or one they added — then the ones nobody
+  took on, newest meeting first, each a passage that opens the moment it
+  was said, else the summary's line; tasks added with no meeting aren't
+  numbered), **`you`** (/coach: the latest meeting's talk, the passages
+  where the person talks most, in order), **`week`** (/weekly-recap: each
+  meeting of the week the words name, this one by default, in order — its
+  summary's first passages, else the start of its talk; ≤ 14), else **a
+  search** (`ask::find`) for the words typed with it, else the Skill's own
+  `query`, else "my last meeting". After Ask across meetings' own lines the
+  system prompt adds `llm::SKILL_ACROSS_LEAD` and the Skill's name, command
+  and instructions; the chip says "Ran /todos · 2 open tasks". The answer's
+  checks, sources and pills are Ask across meetings' ([search.md](./search.md)).
+  No model: the passages themselves (`passages_turn`, the Skill's own).
+- **The `/` menu** (`components/SkillMenu.svelte`, `stores/skills.svelte.js`
+  `SkillPicker(where)`, `core/skills.js`): in the notepad's Ask box and
+  the Notes view's Ask bar on a meeting note (`meeting`), Chat's composer
+  and the Meetings view's Ask bar (`meetings`): typing "/" at the start
+  lists the Skills that run there, the command typed so far first, Yap's
+  before yours (`matchSkills`); ↑ ↓, Enter runs the highlighted one, Tab
+  puts it in the box to add words, Esc closes it; the box's
+  `aria-activedescendant` follows the highlight. A sent "/command words"
+  runs it (`splitCommand`, `skillFor`); in Chat the question is saved as
+  typed.
+- **One-tap prompts**: the built-ins with a `chip` — **Coach me**, **List
+  my open to-dos**, **Write a weekly recap** — on Chat's empty thread
+  ("Try asking", then "Or type / for Skills…") and over the Meetings view's
+  Ask bar; a tap sends the Skill's `question` as that Skill (`runPrompt` /
+  `chatRequest {skill}`), an empty chat asked across the meetings from then
+  on. The Meetings view's cycling example questions stay, in its box.
+- **Settings → Assistant → Skills** (`settings/SkillsPage.svelte`): Yap's
+  (Open shows the instructions; **Save a copy** opens the form as yours,
+  "Based on Yap's /decisions", command `my-decisions`), then yours (Edit,
+  Delete behind Yap's confirm dialog), **New Skill** (the command follows
+  the name until you type one; why it can't be one said as you type; Runs
+  on: One meeting / Across meetings / Both). Saved at once to skills.json,
+  not through Settings' auto-saved config.
+- **Tests**: unit (`chat/skills.rs`: the built-ins, commands, save / copy /
+  delete, an older file, each gathering; `meeting_summary/chips.rs`:
+  passages, checks), e2e `meeting-chips.spec.js` (the menu, Enter / Tab /
+  Esc, the built-ins and your own, Settings, Chat's prompts and "/", the
+  Meetings view); prompts measured with `yap.exe eval --chips`
+  ([model-evals.md](../model-evals.md#meeting-chips-and-skills-29-oct-2026)).
 
 ## The context ring (2026-10-25)
 

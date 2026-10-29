@@ -369,6 +369,13 @@ roadmap, "Meeting notes you can fix" and "Tasks").
   person's ticks (`carry_ticks`), Yap's again; `previous` is the person's
   version, which the window's toast's **Undo** saves back through
   `note_summary_update`. Words edited back to Yap's own make it Yap's again.
+  **A rewrite's Undo** (2026-10-29, "Make notes longer",
+  `meetings/meeting_assist.rs`): `SummaryBefore` (the words, Yap's version,
+  the person's mark and `summary_ts`) is taken before the rewrite goes
+  through `write_summary`, and `note_summary_put_back(id, before, origin)`
+  (`put_back`, pure) puts it back with the tasks ticked since still ticked.
+  Note version history, when it lands, takes this place: the summary
+  before a rewrite kept as a version, Undo restoring it.
   **Rating it** (`note_summary_rate(id, rating: up|down|null, why, origin)`,
   `apply_rating`, pure): 👍 / 👎 and, with a 👎, a "What was wrong?" note
   (one paragraph, ≤ 500 characters); the same again is no change, `null`
@@ -523,7 +530,13 @@ dates). [frontend.md](./frontend.md#the-folder-layout-2026-10-24).
   meeting note the **one-tap helper chips** over it (`meetingHelpers` from
   `notepadText.js`: Questions to ask while it records, Follow-up email and
   Gaps and risks after → `meeting_assist`, answered in the thread with a
-  Copy button; no AI → a toast with Open Language Models); live
+  Copy button; no AI → a toast with Open Language Models; since 2026-10-29
+  Make me sound smart while it records and Make notes longer once there's
+  a summary — asked first over an edited one, Undo in its toast —, "/" for
+  the Skills that run on one meeting (`meeting_skill`; the placeholder
+  stays "Ask anything…", its tooltip says "Type / for Skills"), and an
+  answer's cited lines as pills that open the line here (`showLine`) or
+  the Summary / My thoughts tab: [meetings.md](./meetings.md#frontend)); live
   **meeting transcript bubbles** under their speaker's name, once per run of
   one voice (`transcriptItems`; the name opens the speaker menu, below; follow
   the newest line; ▶ beside a bubble on hover, and Play this line in its

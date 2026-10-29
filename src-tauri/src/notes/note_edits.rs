@@ -421,6 +421,71 @@ pub fn write_summary(id: u64, text: &str, at_hash: &str, read_ms: u64, heard_to:
     })
 }
 
+// ---- A summary rewritten, and its Undo (2026-10-29) -------------------------------------
+//
+// "Make notes longer" (`meeting_assist::meeting_longer`) writes Yap's summary
+// again through `write_summary`; what was there before goes back with the
+// window's Undo (`note_summary_put_back`): its words, Yap's own version
+// beside them, and whether they were the person's — the ticks made since
+// carried over. (When note version history lands, the summary before a
+// rewrite is a version of its own, and Undo restores that version.)
+
+/// A note's summary as it was before Yap rewrote it.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SummaryBefore {
+    pub enhanced_content: String,
+    #[serde(default)]
+    pub summary_ai: String,
+    #[serde(default)]
+    pub summary_edited_ms: u64,
+    #[serde(default)]
+    pub summary_ts: u64,
+}
+
+impl SummaryBefore {
+    pub fn of(note: &Note) -> Self {
+        SummaryBefore {
+            enhanced_content: note.enhanced_content.clone(),
+            summary_ai: note.summary_ai.clone(),
+            summary_edited_ms: note.summary_edited_ms,
+            summary_ts: note.summary_ts,
+        }
+    }
+}
+
+/// A note's summary state now (every window's copy follows it).
+pub fn state_of(note: &Note) -> SummaryState {
+    SummaryState::of(note)
+}
+
+/// The summary before a rewrite put back (pure): its words with the tasks
+/// ticked since still ticked (`tasks::carry_ticks`), Yap's version and the
+/// person's mark as they were. Returns whether anything changed.
+pub fn put_back(note: &mut Note, before: &SummaryBefore) -> bool {
+    let text = crate::notes::tasks::carry_ticks(&note.enhanced_content, &before.enhanced_content);
+    let changed = text != note.enhanced_content || before.summary_ai != note.summary_ai || before.summary_edited_ms != note.summary_edited_ms;
+    note.enhanced_content = text;
+    note.summary_ai = before.summary_ai.clone();
+    note.summary_edited_ms = before.summary_edited_ms;
+    note.summary_ts = before.summary_ts;
+    changed
+}
+
+/// Undo a rewrite of the summary ("Make notes longer"'s toast): the summary
+/// as it was ([`SummaryBefore`]); every window follows.
+#[tauri::command]
+pub fn note_summary_put_back(app: AppHandle, id: u64, before: SummaryBefore, origin: Option<String>) -> Result<SummaryState, String> {
+    let state = crate::notes::modify(id, |note| {
+        let changed = put_back(note, &before);
+        Ok((SummaryState::of(note), changed))
+    })?;
+    tracing::info!(note_id = id, len = state.enhanced_content.len(), "Summary: put back as it was");
+    summary_changed(&app, id, origin.as_deref().unwrap_or(""));
+    crate::notes::saved()?;
+    Ok(state)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -669,5 +734,41 @@ mod tests {
         assert_eq!(v["summaryRating"], json!({ "up": false, "why": "Too long", "ms": 2 }));
         write_summary(id, "Summary two.", "h", 3_000, 0, false).unwrap();
         assert!(crate::notes::get(id).unwrap().summary_rating.is_none());
+    }
+
+    #[test]
+    fn a_rewritten_summary_goes_back_as_it_was_with_the_ticks_made_since() {
+        let id = crate::notes::create("Sync", "notes", "manual", "").id;
+        let yaps = "## Recap
+The launch.
+
+## Action plan
+### You
+- [ ] send the quote
+- [ ] book the room";
+        write_summary(id, yaps, "h1", 50_000, 0, false).unwrap();
+        let before = SummaryBefore::of(&crate::notes::get(id).unwrap());
+        // "Make notes longer" writes it again; the person ticks a task in it.
+        let longer = "## Recap
+The launch, with the venue and the budget.
+
+## Action plan
+### You
+- [ ] send the quote
+- [ ] book the room";
+        write_summary(id, longer, "h1", 60_000, 0, false).unwrap();
+        crate::notes::modify(id, |n| Ok(((), apply_summary_edit(n, &longer.replace("- [ ] book", "- [x] book"), 61_000)))).unwrap();
+        let mut n = crate::notes::get(id).unwrap();
+        assert_eq!(n.summary_ai, longer);
+        // Undo: the words before, Yap's own as before, the tick kept.
+        assert!(put_back(&mut n, &before));
+        assert!(n.enhanced_content.starts_with("## Recap
+The launch.
+"));
+        assert!(n.enhanced_content.contains("- [x] book the room"));
+        assert_eq!((n.summary_ai.as_str(), n.summary_edited_ms), (yaps, 0));
+        assert!(!can_restore(&n), "Yap's own again, ticks aside");
+        // Again: nothing changes.
+        assert!(!put_back(&mut n, &before));
     }
 }

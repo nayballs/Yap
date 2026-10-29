@@ -223,7 +223,9 @@ async fn answer_turn(
     // (`chats::Conversation::scope`). A scope the caller names wins.
     let kept_scope = conversation_id.map(crate::chat::chats::scope_of).unwrap_or_default();
     let scope: Option<&str> = scope.or((!kept_scope.is_empty()).then_some(kept_scope.as_str()));
-    let meetings = scope == Some("meetings");
+    // A Skill (chat/skills.rs) is asked across the meetings, wherever it's run.
+    let skill = crate::chat::skills::current();
+    let meetings = scope == Some("meetings") || skill.is_some();
     let cfg = config::load();
     if let Some(plan) = crate::apps::plan_for(&text, &cfg, conversation_id).await {
         return app_turn(conversation_id, &text, by_voice, asked, plan, stop).await;
@@ -259,10 +261,10 @@ async fn answer_turn(
     let in_message = tools_supported;
     // "Look things up on the web" (web.rs). Not for the Meetings view's Ask
     // bar: that's about the meetings.
-    let web_on = cfg.web_search && scope != Some("meetings");
+    let web_on = cfg.web_search && !meetings;
     // The calendar (chat/tools/calendar.rs): a tool while one is connected
     // (not across the meetings, whose passages are numbered on their own).
-    let calendar_on = scope != Some("meetings") && crate::calendar::connected();
+    let calendar_on = !meetings && crate::calendar::connected();
     let calendar_log = crate::chat::tools::calendar::Log::default();
     // About you (about_you.rs): where the person is, their money and units,
     // name and note — last in the system prompt, below; their clock in the
@@ -306,7 +308,8 @@ async fn answer_turn(
     }
     // Conversation bookkeeping (create on first message, OpenWhispr-style).
     let conv = turn_conversation(conversation_id, &text);
-    if meetings && conv.scope.is_empty() {
+    // (A Skill run in a chat that's about something else leaves it so.)
+    if meetings && conv.scope.is_empty() && (skill.is_none() || conv.messages.is_empty()) {
         crate::chat::chats::set_scope(conv.id, "meetings");
     }
     // The model answers this one: Yap's own question about apps has lapsed.
@@ -403,15 +406,27 @@ async fn answer_turn(
     let mut search_chip = None;
     let mut asked_across = None;
     if meetings {
-        let found = Box::pin(crate::search::ask::find(&text, crate::search::ask::ASK_PASSAGES)).await;
+        // A Skill reads its own passages (the open tasks, a week of
+        // meetings…) and adds its instructions (chat/skills.rs).
+        let found = match &skill {
+            Some(s) => Box::pin(crate::chat::skills::find(s)).await,
+            None => Box::pin(crate::search::ask::find(&text, crate::search::ask::ASK_PASSAGES)).await,
+        };
         passages = crate::search::ask::sources(&found);
-        let chip = crate::search::ask::chip(&found);
+        let chip = match &skill {
+            Some(s) => crate::chat::skills::chip(s, &found),
+            None => crate::search::ask::chip(&found),
+        };
         if let Some(w) = watcher {
             w.send(crate::chat::stream::Event::Chips { chips: vec![chip.clone()], sources: passages.clone(), web: false });
         }
         search_chip = Some(chip);
         system.push_str("\n\n");
         system.push_str(&crate::search::ask::instructions(in_message));
+        if let Some(s) = &skill {
+            system.push_str("\n\n");
+            system.push_str(&crate::chat::skills::system_block(s));
+        }
         let block = crate::search::ask::context(&found);
         asked_across = Some(found);
         if in_message {
@@ -437,7 +452,7 @@ async fn answer_turn(
         .flatten()
         .unzip();
     // Asked about the calendar with none connected: say so, not guess.
-    let calendar_missing = (!calendar_on && scope != Some("meetings") && crate::chat::tools::calendar::asks_about_calendar(&text))
+    let calendar_missing = (!calendar_on && !meetings && crate::chat::tools::calendar::asks_about_calendar(&text))
         .then(|| crate::chat::tools::calendar::NOT_CONNECTED_NOTE.to_string());
     for block in memory_here.into_iter().chain(past_chats).chain(calendar_block).chain(calendar_missing) {
         if in_message {
@@ -1231,10 +1246,18 @@ async fn passages_turn(
     let user_index = crate::chat::chats::append(conv.id, "user", text, &[], None, by_voice)?;
     stop.answers(conv.id);
     asked(conv.id, user_index);
-    let found = crate::search::ask::find(text, crate::search::ask::ASK_PASSAGES).await;
+    // A Skill: its own passages (chat/skills.rs).
+    let skill = crate::chat::skills::current();
+    let found = match &skill {
+        Some(s) => crate::chat::skills::find(s).await,
+        None => crate::search::ask::find(text, crate::search::ask::ASK_PASSAGES).await,
+    };
     let reply = crate::search::ask::passages_answer(&found);
     let sources = crate::search::ask::sources(&found);
-    let tools_used = vec![crate::search::ask::chip(&found)];
+    let tools_used = vec![match &skill {
+        Some(s) => crate::chat::skills::chip(s, &found),
+        None => crate::search::ask::chip(&found),
+    }];
     let index = crate::chat::chats::append_message(conv.id, "assistant", &reply, &tools_used, None, false, &sources, false, None)?;
     Ok(ChatTurn { conversation_id: conv.id, user_index, index, reply, tools_used, model: None, sources, stopped: false, tokens: None })
 }
