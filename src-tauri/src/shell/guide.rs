@@ -15,7 +15,12 @@
 //!   all done.
 //!
 //! A reset (`privacy/reset.rs`) keeps it with Yap's own bookkeeping.
+//!
+//! Test mode shows the checklist only once a spec asks (`e2e_guide_reset`),
+//! so its "Record your first meeting" never stands beside the Record button
+//! another spec means.
 
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 
 use serde::{Deserialize, Serialize};
@@ -70,6 +75,9 @@ pub struct Checklist {
 pub fn checklist(calendar: bool, meeting: bool, mcp: bool, dismissed: bool) -> Checklist {
     Checklist { calendar, meeting, mcp, dismissed, shown: !dismissed && !(calendar && meeting && mcp) }
 }
+
+/// Test mode: the checklist shown (`e2e_guide_reset` turns it on).
+static IN_TESTS: AtomicBool = AtomicBool::new(false);
 
 // ---- onboarding.json ----------------------------------------------------------------------------
 
@@ -178,7 +186,9 @@ pub async fn meeting_setup_status() -> Checklist {
         let calendar = crate::calendar::connected();
         let meeting = crate::notes::all().iter().any(|n| n.note_type == "meeting");
         let mcp = crate::integrations::mcp_clients::added_anywhere();
-        checklist(calendar, meeting, mcp, record().checklist_dismissed)
+        let mut list = checklist(calendar, meeting, mcp, record().checklist_dismissed);
+        list.shown &= !crate::shell::e2e::active() || IN_TESTS.load(Ordering::Relaxed);
+        list
     })
     .await
     .unwrap_or_default()
@@ -198,6 +208,7 @@ pub fn e2e_guide_reset() -> Result<(), String> {
     if !crate::shell::e2e::active() {
         return Err("Only in e2e test mode".to_string());
     }
+    IN_TESTS.store(true, Ordering::Relaxed);
     update(|r| *r = Record::default());
     Ok(())
 }

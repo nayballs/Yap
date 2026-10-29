@@ -82,7 +82,8 @@ test('Settings search finds it by what it does', async ({ main }) => {
   const search = settingsDialog(main).getByRole('searchbox', { name: 'Search settings' });
   await search.fill('bluetooth');
   const found = settingsDialog(main).getByRole('listbox', { name: 'Settings found' });
-  await expect(found.getByRole('option').first()).toContainText('Keep the microphone ready');
+  // (The Mic quiz answers "bluetooth" too: it rates a headset's mic.)
+  await expect(found.getByRole('option').filter({ hasText: 'Keep the microphone ready' })).toBeVisible();
   await search.fill('');
   await closeSettings(main);
 });

@@ -347,7 +347,8 @@ test('Meetings: a past meeting and one from the calendar; a calendar connection'
   const budget = past.getByRole('listitem').filter({ hasText: 'Budget review' });
   await expect(budget).toBeVisible();
 
-  // A past meeting: Open, Generate summary (it has none), Copy as Markdown,
+  // A past meeting: Open, Generate summary (it has none), File this meeting
+  // in ▸ (calendar.md, folder rules), Copy as Markdown,
   // Find speakers (the engine again over its audio), Delete….
   // (Its audio is kept: Export audio… once the view knows, meetings/meeting_audio/export.rs.)
   await expect(async () => {
@@ -355,7 +356,7 @@ test('Meetings: a past meeting and one from the calendar; a calendar connection'
     await budget.click({ button: 'right' });
     await expect(menu(main)).toHaveAccessibleName('Meeting note Budget review');
     await expect(allItems(main)).toHaveText(
-      ['Open', 'Generate summary', 'Copy as Markdown', 'Find speakers', 'Export audio…', 'Export each side…', 'Delete…'],
+      ['Open', 'Generate summary', 'File this meeting in', 'Copy as Markdown', 'Find speakers', 'Export audio…', 'Export each side…', 'Delete…'],
       { timeout: 1_000 }
     );
   }).toPass({ timeout: 10_000 });
