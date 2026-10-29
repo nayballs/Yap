@@ -878,6 +878,65 @@ to **Run again** from Home.
   overlay's line; logged when capture starts. Test mode reads no registry:
   debug-only `e2e_mic_privacy { blocked }` stands in; an `#[ignore]`d
   `mic_privacy_this_machine` prints this PC's switches.
+- **`dictation/mic_tips.rs`** — **mic-quality tips** (2026-10-29; Wispr Flow's
+  "didn't hear you clearly" and AirPods advice, by behaviour). As a
+  dictation stops (`stop_and_transcribe`; every kind: a rewrite's
+  instruction and a question too) its audio is measured (`measure`, pure:
+  20 ms frames' dBFS — the voice the 90th percentile, the room the 10th —
+  and the share of samples at full scale) and judged (`trouble`, pure, the
+  worst first): **clipped** (≥ 0.1 % at ≥ 0.98), **quiet** (the voice under
+  −42 dBFS), **noisy** (the voice < 12 dB above a room louder than −50
+  dBFS); under 2 s, or no voice at all (the dead-mic watchdog's), never.
+  The microphone it used comes from the mic's thread before the stop chime
+  lets it go (`Mic::current`: its name, endpoint, Bluetooth and **its own
+  sample rate**, `Running.rate`). One tip (`pick`, pure): a Bluetooth headset
+  in hands-free mode (`hands_free`: Bluetooth at 8 or 16 kHz — HFP; an LE
+  Audio mic at 48 kHz isn't) with another mic connected → "Bluetooth headsets
+  sound worse while their mic is on: try the PC's mic" (or the other mic's
+  name; `other_mic`: not Bluetooth or a software device, the laptop's own
+  first, then the order), with **Microphones** — after any dictation on
+  one, its signal weak or not; clipped → "…turn its level down in Windows'
+  sound settings"; quiet → "Move closer to the microphone, or turn its level
+  up…", both with **Sound settings** (`alert::OPEN_SOUND_SETTINGS`,
+  `ms-settings:sound`); noisy → the other mic ("Try Fabrikam USB Mic: put it
+  first in Microphones") or "Move closer… or somewhere quieter". Title "Yap
+  didn't hear you clearly". **Rarely** (`eligible`, pure): one mic tip a
+  day, each kind at most 3 times and not twice in a week (`mic_tips.json`);
+  shown once the dictation is done (`notice::moment`, within a minute), in
+  one place (`notice::place`: the main window's toast, `yap-mic-tip` →
+  `lib/notices/micTips.js`, kind `tip`; else a Yap bar card `micTip`,
+  never a Windows notification); "Show tips" off, none; notice kind
+  `micTip` is a tip held over dictations and meetings, the same words not
+  twice in a day. The log: the levels and the trouble (numbers only). Test
+  mode judges nothing until `e2e_mic_tips { on }` (which also forgets the
+  counts and returns the last judgement); made-up Bluetooth mics open at
+  16 kHz. Unit tests (`mic_tips::tests`: synthetic speech in syllables over
+  a room's hiss — clear, a whisper, far, a loud room, clipped; the tips;
+  the rate limits), e2e `mic-tips.spec.js`, robot `e2e-real/mic-tips.real.js`
+  (Windows' voice as recorded, 32 dB quieter, under a hiss, 12 dB past full
+  scale; not run yet).
+- **`dictation/lid.rs`** — **the laptop's lid** (2026-10-29; Wispr Flow's
+  clamshell rule, by behaviour). Windows says when the lid opens or closes
+  (`PowerSettingRegisterNotification(GUID_LIDSWITCH_STATE_CHANGE)` with a
+  callback, no window; its state once when Yap starts watching); a desktop
+  has no lid and is never told it's closed. Closed: the laptop's own
+  microphone (`mics::is_built_in`, pure: not USB, Bluetooth or a software
+  device, and a microphone array by its jack subtype —
+  `PKEY_AudioEndpoint_JackSubType` KSNODETYPE_MICROPHONE_ARRAY or
+  PROCESSING_MICROPHONE_ARRAY — or named "Microphone Array", "Internal
+  Microphone"…; `Endpoint.built_in`) goes last (`mics::lid_rule`, in
+  `candidates`, so dictation, a meeting and "in use" all follow it): the
+  next in the order, else Windows' default, else any other connected one
+  (not a software one), the built-in one still tried last. A change is told
+  as Windows' list changes are (`mics::lid_changed`: a warm stream on it
+  closes, never mid-dictation). When the built-in one is all there is, a
+  dictation opening it says "Your laptop's lid is closed, so its microphone
+  can't hear you · Open the lid, or plug in a microphone and put it first in
+  Microphones" (`alert.rs` kind `lidClosed`, **Microphones**), once per
+  closing. Test mode reads no lid: debug-only `e2e_lid { closed }` (`null`:
+  no lid). Unit tests (`lid::tests`, `mics::tests`: the order with the lid
+  closed, the built-in mic told apart), e2e `mic-tips.spec.js`. Not tried
+  on a real laptop yet (this PC is a desktop).
 - **`dictation/stt.rs`** — `SttEngine` trait + a real `transcribe-rs` engine (`#[cfg(feature =
   "engines")]`) and a stub (default build). Holds the **14-model registry**
   (`ModelDescriptor`: id/filename/url/sha256/is_directory/engine_type), resolves

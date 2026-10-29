@@ -3,7 +3,8 @@
   // the meeting notepad's confirm dialog (Wispr's: a scrim, a card scaling
   // in, pill buttons, the action in red), for the main window. Cancel has
   // the focus; Esc, the scrim and Cancel close it; Tab stays inside; the
-  // focus goes back where it was (or to `returnFocus`).
+  // focus goes back where it was (or to `returnFocus`). `children`: more
+  // under the body (Reset app's lists of what goes and what stays).
   import { tick } from 'svelte';
 
   let {
@@ -16,6 +17,7 @@
     busy = false,
     returnFocus = null,
     onconfirm = null,
+    children = null,
   } = $props();
 
   const uid = Math.random().toString(36).slice(2, 8);
@@ -77,6 +79,7 @@
       <div>
         <h2 id="confirm-title-{uid}">{title}</h2>
         {#if body}<p id="confirm-body-{uid}">{body}</p>{/if}
+        {@render children?.()}
       </div>
       <div class="btns">
         <button type="button" class="btn" data-cancel onclick={close} disabled={busy}>Cancel</button>
@@ -109,6 +112,8 @@
     display: flex;
     flex-direction: column;
     gap: 28px;
+    max-height: calc(100vh - 32px);
+    overflow-y: auto;
     width: min(380px, 100%);
     box-sizing: border-box;
     padding: 24px;

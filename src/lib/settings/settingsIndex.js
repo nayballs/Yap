@@ -195,6 +195,8 @@ export const SETTINGS_INDEX = [
   { page: 'privacy', section: 'Logs and data', label: 'Debug logging', desc: 'More detail in the log, for a bug report', keywords: 'debug logs diagnostics bug report troubleshooting', anchor: 'debug-logging', toggle: 'debugLogging' },
   { page: 'privacy', section: 'Logs and data', label: 'Log file', desc: 'Open the logs folder', keywords: 'logs folder', anchor: 'logs' },
   { page: 'privacy', section: 'Logs and data', label: 'Data folder', desc: 'Where Yap keeps settings, notes and models', keywords: 'appdata data folder files portable config', anchor: 'data-folder' },
+  { page: 'privacy', section: 'Your data', label: 'Download your data', desc: 'Everything Yap keeps about you, in one .zip', keywords: 'export download backup takeout archive zip copy data history notes meetings chats memory dictionary settings gdpr', anchor: 'download-data' },
+  { page: 'privacy', section: 'Your data', label: 'Reset app', desc: 'Clear everything and keep your settings', keywords: 'reset start fresh clear erase wipe delete everything all data factory clean', anchor: 'reset-app' },
 
   // ---- About ----
   { page: 'about', section: 'Updates', label: 'Updates', desc: 'Check for updates, release notes', keywords: 'update version check release notes', anchor: 'updates' },

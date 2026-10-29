@@ -124,6 +124,17 @@ pub fn for_open(remembered: &[u64], quick: &[(u64, u64)], picked: Option<u64>, n
     (open, close)
 }
 
+/// Reset app (`privacy/reset.rs`): the notes are gone, so no tab is
+/// remembered and the window starts a new note.
+pub fn reset() {
+    let mut guard = TABS.lock().unwrap_or_else(|p| p.into_inner());
+    *guard = Some(Tabs::default());
+    let _ = std::fs::remove_file(path());
+    SAVER.nothing_to_save();
+    drop(guard);
+    super::set_current(super::Current::New);
+}
+
 /// The page's tabs changed: the open notes in order (`ids`, notes written
 /// so far) and the one in front (`active`; none: a new note). The window
 /// opens on that one next time (`quick_note::Current`).
