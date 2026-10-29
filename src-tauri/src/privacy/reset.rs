@@ -4,6 +4,7 @@
 //! Yap remembers, tasks, the search index and the usage counts (and the
 //! pre-meeting briefs, which quote notes and memory). What stays
 //! ([`STAYS`]): config.json — every setting, the dictionary and snippets —,
+//! the person's own Skills (skills.json: setup, like folders and actions),
 //! the downloaded models, the account's sign-in, the calendars, and Yap's
 //! own bookkeeping (tips shown, answers to offers, caches, the log).
 //!
@@ -52,7 +53,8 @@ pub const GOES: &[Part] = &[
 
 /// What a reset keeps, as the dialog names it, and its files.
 pub const STAYS: &[Part] = &[
-    Part { id: "settings", label: "Your settings, dictionary and snippets", files: &["config.json", "dictionary_usage.json"] },
+    // Skills are setup, like folders and actions: they stay.
+    Part { id: "settings", label: "Your settings, dictionary and snippets, and your Skills", files: &["config.json", "dictionary_usage.json", "skills.json"] },
     Part { id: "models", label: "Downloaded speech, AI and voice models", files: &["models/", "llm/"] },
     Part { id: "account", label: "Your account sign-in, and your calendars", files: &["calendar.json"] },
     Part {

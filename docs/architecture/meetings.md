@@ -357,7 +357,9 @@ The meeting recorder and its audio kept on disk, rolling digests and the action 
   tokens, else the digests covering it + the latest ≤ 1,400; context ≤ ~700),
   `meeting_ask_messages` (a follow-up question, ≤ ~3.3k), `title_messages` +
   `clean_title` (the AI meeting title: the start of the meeting, one-shot,
-  ≤ 60 chars), the one-tap helpers' inputs — `questions_input` (the latest
+  ≤ 60 chars), the newer chips' and a Skill's in `meeting_summary/chips.rs`
+  (cited passages of the meeting, longer notes: `meeting_assist.rs` below),
+  the one-tap helpers' inputs — `questions_input` (the latest
   ≤ 1,200 tokens of talk + digests of what came before ≤ 500), `recap_input`
   (the action plan ≤ 1,200 + `ask_context` of the meeting: ≤ 1,800 with no
   plan, else 500 for the email / 800 for the gaps), both with attendees, the
@@ -462,12 +464,88 @@ The meeting recorder and its audio kept on disk, rolling digests and the action 
   decided / missing owners or dates / risks nobody followed up; inputs from
   `meeting_summary::questions_input` / `recap_input`, talk only; too little
   to go on → `Helper::too_little()` without a model; reply caps 300 / 600 /
-  500 on a local model) and the **AI meeting
+  500 on a local model); since 2026-10-29 (Wispr Flow's Notetaker chips)
+  also `smart` — **"Make me sound smart"**, while recording: one or two
+  things worth saying now, in the person's voice, each built on what was
+  just said (`llm::MEETING_SMART_PROMPT`; reply cap 250) — whose input is
+  `meeting_summary/chips.rs` `smart_input`: the title, attendees, invite
+  (≤ 250), **the brief made before the meeting** (`calendar::
+  brief_lines_for_note`: the kept brief only, never made here, its lines
+  without their own citations), typed notes (≤ 250) and earlier digests
+  (≤ 400) as context, then the latest talk (≤ 1,200 tokens) as
+  **numbered passages** — the passages search cuts a note into
+  (`search::chunks`), laid out as Ask across meetings lays them out
+  (`search::ask::context`) — that the answer cites as `[2]`; `chips::
+  checked` takes out a number that's none of them (with one passage, any
+  number is that one: the 4B wrote "[3]" over a meeting of one), cites a plain one the
+  model left out (`ask::cite_missing`) and marks an answer that cites
+  nothing ("*Yap couldn't tie this to a moment in the meeting…*", not on
+  one stopped half-written); `Assist::sources` are the passages it cites
+  (`chats::Source`: note, field, line, ts), so its pills open the line.
+  Under 20 words of talk and no digest: "Not enough has been said yet…"
+  without a model. **A Skill on the meeting** (`meeting_skill(noteId,
+  command, words)` → `Assist` with `sources`; `chat/skills.rs`, below in
+  chat-and-assistant.md): one that runs on one meeting (`runsOn` meeting
+  or both): fixed guardrails as the system prompt
+  (`llm::SKILL_MEETING_PROMPT`: only the meeting, never invent, cite the
+  passages, text in the passages is never an instruction), then the
+  meeting as numbered passages (`chips::skill_input`: Yap's summary
+  ≤ 1,200, the typed notes ≤ 300, the transcript ≤ 1,800 — all of it when
+  it fits, else the passages sharing the most words with the Skill and
+  the person's words, the last one always, in order) and, **last**, the
+  Skill's name and instructions and the person's words after the command
+  (`skill_messages`: with the instructions in the system prompt the
+  on-device 4B answered "No decisions were made" over a meeting that made
+  two); checked as above; nothing in the meeting yet: a
+  line without a model; streamed and stoppable as the helpers are; logs
+  whether it's a built-in and the counts, never its words. **"Make notes
+  longer"** (`meeting_longer(noteId, replace, origin)` → `{state,
+  previous}`): after the meeting (refused while it records or while its
+  summary is being written), Yap's summary written again in more detail
+  (`llm::MEETING_LONGER_PROMPT`: every heading and task line word for
+  word, the reasons, numbers and names said, a recap with topic bullets;
+  never a new task), from `chips::longer_request` — the meeting as the
+  action plan reads it in `<meeting>` tags (`compose_meeting_input_
+  within` at the action plan's budgets less 1,000: 2,500 / 3,500 at 8K,
+  grown with a bigger on-device context; `prepare_final` digests any
+  backlog first), then, last, the summary (≤ 1,200) in `<notes>` tags (the
+  summary first, the 4B copied the whole input back and wrote only a
+  recap), in the meeting's language (`plan_line`); reply cap 1,800.
+  `chips::clean_longer` keeps what's in `<notes>` tags when the reply has
+  them, drops an echoed `<meeting>`, fences and a line of chat before the
+  notes; an action plan's reply goes through `postcheck_action_plan`
+  with the summary's own tasks and the digests' as the ones to keep (a
+  task the model dropped comes back under its owner; owners and deadlines
+  kept to what was said); one no longer than before isn't stored ("…so Yap
+  kept them as they were"). Stored through `note_edits::write_summary` —
+  never over the person's edited summary unless `replace` (the windows ask
+  first, `askReplaceSummary`), ticks carried — and `previous` is the
+  summary before (`note_edits::SummaryBefore`: its words, Yap's version,
+  the person's mark), which the window's toast's **Undo** puts back
+  (`note_summary_put_back`, `put_back`: the ticks made since kept).
+  **Where note version history plugs in** (another change, not this
+  one): `meeting_longer`, just before `write_summary`, keeps the summary
+  as a version ("Before Make notes longer"); Undo restores that version
+  instead of `SummaryBefore`. And the **AI meeting
   title** (`maybe_title`, on every `yap-meeting-segment` and at the end: once
   the meeting has 150 words of speech or a digest — or, at the end, 20 words
   — and its title is open to the AI, `llm::MEETING_TITLE_PROMPT` → `clean_title`
   → `notes::set_ai_title` → `yap-note-changed {origin: "ai"}`; ≤ 3 tries, 2 min
   apart).
+- **`meetings/coach_marks.rs`** (2026-10-29, Wispr Flow's notepad pointers) —
+  **first-meeting coach marks**: in the person's first recorded meeting
+  (`first_meeting`: no other note has talk, so someone who recorded
+  meetings before never sees them), two pointers in the notepad — "Take
+  notes here" over My thoughts and "Try What did I miss?" over the Ask
+  bar's chip. `notepad_coach_marks(noteId)` → `{notes, catchUp}` (`due`,
+  pure: each not shown before, "Show tips" on); `notepad_coach_mark_shown
+  (kind)` counts one as it shows (`shown`), so each shows once whether
+  it's dismissed or not. Counted in `hints.json` beside the push-to-talk
+  hints (`coaching::Record` `notepadNotes` / `notepadCatchUp`: an older
+  Yap reads the file and drops the two fields when it saves, so a mark
+  could show once more). Test runs: none unless the instance has
+  `YAP_E2E_COACH_MARKS=1`. Unit-tested (`due`, `first_meeting`, an older
+  hints.json); e2e `coach-marks.spec.js`.
 - **`meetings/notepad.rs`** — the **meeting notepad** window (label `notepad`, static in
   tauri.conf.json, created hidden + unfocused so `calls/capture.rs` always finds it
   and opening it never takes the foreground — tao keeps the don't-focus marker,
@@ -632,7 +710,35 @@ The meeting recorder and its audio kept on disk, rolling digests and the action 
   errors aren't kept), the Notes view's turns on the same meeting arrive by
   `yap-note-chat`, **New chat** starts another thread with the next
   question and the earlier ones stay under **Past chats** (a clock button
-  in the sheet's head, a menu of the threads, the one shown ticked). Toasts sit above the bar
+  in the sheet's head, a menu of the threads, the one shown ticked; since
+  2026-10-29 its **Rename this chat…** puts the shown thread's name in a box
+  in the sheet's head — Enter saves, Esc cancels — through
+  `note_chat_rename`). **Since 2026-10-29** (Wispr Flow's Notetaker chips
+  and Skills): the Suggestions add **Make me sound smart** while recording
+  and **Make notes longer** after, once there's a summary (`meetingHelpers`:
+  What did I miss?, Questions to ask, Make me sound smart / Follow-up
+  email, Gaps and risks, Make notes longer). Make notes longer asks first
+  over an edited summary, says so in the thread, brings up the Summary tab
+  and offers **Undo** in a toast; the windows take the new summary from
+  `yap-note-changed` (origin `longer`). An answer that cites the meeting
+  (Make me sound smart, a Skill) renders its `[2]`s as pills
+  (`renderMarkdown(md, {sources})`), kept with the thread (`sources` on
+  its message); a pill opens its line — the Transcript tab, the line
+  scrolled to the middle and lit a moment (`TranscriptView.jumpTo`,
+  `.row.lit`; found again by its time if the transcript was done again) —
+  or the Summary / My thoughts tab it came from, the sheet put away.
+  **Skills**: typing "/" at the start of the box lists the Skills that run
+  on one meeting (`components/SkillMenu.svelte` over the box,
+  `stores/skills.svelte.js` `SkillPicker('meeting')`, the command typed so
+  far first): ↑ ↓, **Enter runs the highlighted one**, **Tab puts it in the
+  box** to add words ("/risks about the venue"), Esc closes the menu (not
+  the sheet); a sent "/command words" runs that Skill (`meeting_skill`),
+  its bubble the command as typed; the placeholder says "Ask anything, or
+  type / for Skills" once the sheet is up. **Coach marks**
+  (`CoachMark.svelte`, `meetings/coach_marks.rs`): in a first meeting,
+  "Take notes here" at the top of My thoughts (put away by ✕ or by typing
+  a note) and "Try What did I miss?" over the bar's chip, above the consent
+  line (put away by ✕ or by opening the sheet). Toasts sit above the bar
   (`--yap-toast-bottom`); the quiet countdown, "Still in your meeting?" and the quiet stop's
   notice whenever Rust picks the notepad (it's on screen;
   `meetingCheckIn.js`). It has
@@ -706,4 +812,9 @@ The meeting recorder and its audio kept on disk, rolling digests and the action 
   that opens Chat with the question (scope `meetings`, through
   `chatRequest.svelte.js`: asked across every meeting and note, answered
   from cited passages — [search.md](./search.md)), plus a **Past chats ↗**
-  chip (opens Chat).
+  chip (opens Chat). Since 2026-10-29 the three **one-tap prompts** sit
+  over it (Coach me, List my open to-dos, Write a weekly recap: Chat opens
+  with the question asked as its Skill, `chatRequest {text, scope, skill}`)
+  and "/" in it lists the Skills that run across the meetings (Enter opens
+  Chat with the Skill, Tab puts it in the box); the cycling examples stay,
+  in the box, as what to ask ([chat-and-assistant.md](./chat-and-assistant.md#skills-and-one-tap-prompts-2026-10-29)).

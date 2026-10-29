@@ -385,18 +385,22 @@ export const MEETING_HELPERS = {
   questions: { label: 'Questions to ask', busy: 'Thinking of questions…' },
   followUpEmail: { label: 'Follow-up email', busy: 'Drafting the email…' },
   blindSpots: { label: 'Gaps and risks', busy: 'Looking for loose ends…' },
+  smart: { label: 'Make me sound smart', busy: 'Thinking of something sharp…' },
+  longer: { label: 'Make notes longer', busy: 'Writing the notes out in more detail…' },
 };
 
 /**
- * Which helpers a meeting note offers: while it records, catching up and
- * questions to ask; after it, the follow-up email and the gaps, once there's
- * something to go on (talk, typed notes or a summary).
+ * Which helpers a meeting note offers: while it records, catching up,
+ * questions to ask and something sharp to say; after it, the follow-up
+ * email and the gaps, once there's something to go on (talk, typed notes
+ * or a summary), and longer notes once there's a summary.
  */
 export function meetingHelpers(note, recording) {
   if (!note) return [];
-  if (recording) return ['catchUp', 'questions'];
+  if (recording) return ['catchUp', 'questions', 'smart'];
   const material = spoken(note.transcript).length || note.content?.trim() || note.enhancedContent?.trim();
-  return material ? ['followUpEmail', 'blindSpots'] : [];
+  if (!material) return [];
+  return note.enhancedContent?.trim() ? ['followUpEmail', 'blindSpots', 'longer'] : ['followUpEmail', 'blindSpots'];
 }
 
 // ---- fixing notes by hand (noteEdits.js, src-tauri/src/notes/note_edits.rs, notes/tasks.rs) ----

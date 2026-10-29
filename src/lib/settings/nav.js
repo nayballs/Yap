@@ -19,12 +19,14 @@ export const NAV_GROUPS = [
   {
     // Commands make the AI *do* something and type it where you are; the
     // Voice Assistant answers out loud; Memory is what both (and Chat) know
-    // about you (memory.rs, MemorySection.svelte).
+    // about you (memory.rs, MemorySection.svelte); Skills are saved
+    // instructions run with /name in Chat and a meeting's Ask (chat/skills.rs).
     label: 'Assistant',
     items: [
       { id: 'commands', label: 'Commands' },
       { id: 'voice', label: 'Voice Assistant' },
       { id: 'memory', label: 'Memory' },
+      { id: 'skills', label: 'Skills' },
     ],
   },
   {

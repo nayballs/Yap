@@ -59,6 +59,11 @@ pub struct Record {
     /// Double-tap has locked a recording at least once: no more hints
     /// about it (the tap and long-hold ones).
     pub hands_free_used: bool,
+    /// Times the notepad's first-meeting coach marks showed
+    /// (`meetings/coach_marks.rs`): "Take notes here"…
+    pub notepad_notes: u32,
+    /// …and "Try What did I miss?".
+    pub notepad_catch_up: u32,
 }
 
 /// How many times `hint` shows at most: the meeting-notes suggestion once,
@@ -176,13 +181,13 @@ fn loaded(slot: &mut Option<Record>) -> &mut Record {
     })
 }
 
-fn record() -> Record {
+pub(crate) fn record() -> Record {
     loaded(&mut RECORD.lock().unwrap_or_else(|p| p.into_inner())).clone()
 }
 
 /// Change the record and save it, under the one lock (a hint shown and
 /// double-tap used at once both stick).
-fn update_record(f: impl FnOnce(Record) -> Record) {
+pub(crate) fn update_record(f: impl FnOnce(Record) -> Record) {
     let mut guard = RECORD.lock().unwrap_or_else(|p| p.into_inner());
     let rec = f(loaded(&mut guard).clone());
     let _ = SAVER.write_json(&record_path(), &rec, true);

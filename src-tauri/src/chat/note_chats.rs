@@ -65,6 +65,11 @@ pub struct NewMessage {
     pub stopped: bool,
     #[serde(default)]
     pub model: Option<ChatModel>,
+    /// The meeting's passages an answer cites ("Make me sound smart", a
+    /// Skill): its pills open the meeting at the line again when the thread
+    /// reopens. (Chat's own field: an older Yap keeps it too.)
+    #[serde(default)]
+    pub sources: Vec<crate::chat::chats::Source>,
 }
 
 fn thread(c: &Conversation) -> Thread {
@@ -108,6 +113,7 @@ pub fn add(note: u64, conversation: Option<u64>, messages: &[NewMessage]) -> Res
                 model: m.model.clone().filter(|_| role == "assistant"),
                 stopped: m.stopped && role == "assistant",
                 plain: m.plain && role == "assistant",
+                sources: if role == "assistant" { m.sources.clone() } else { Vec::new() },
                 ..Default::default()
             },
         )?;
@@ -246,12 +252,48 @@ pub fn note_chat_add(
     Ok(id)
 }
 
+/// Rename note `note`'s thread `conversation` (Past chats → Rename): never
+/// another note's or a Chat conversation. Returns the stored title.
+pub fn rename(note: u64, conversation: u64, title: &str) -> Result<String, String> {
+    chats::get(conversation).filter(|c| c.note == Some(note)).ok_or_else(|| "That chat isn't there any more".to_string())?;
+    chats::rename(conversation, title)
+}
+
+/// Rename one of note `noteId`'s threads (Past chats); every window showing
+/// the note follows (`yap-note-chat`).
+#[tauri::command]
+pub fn note_chat_rename(app: AppHandle, note_id: u64, conversation_id: u64, title: String, origin: Option<String>) -> Result<String, String> {
+    let stored = rename(note_id, conversation_id, &title)?;
+    tracing::info!(note_id, conversation = conversation_id, "Note chat: a thread renamed");
+    let _ = app.emit(EVENT, serde_json::json!({ "noteId": note_id, "conversationId": conversation_id, "origin": origin.unwrap_or_default(), "renamed": true }));
+    chats::saved().map_err(|e| e.to_string())?;
+    Ok(stored)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     fn said(role: &str, text: &str) -> NewMessage {
-        NewMessage { role: role.into(), text: text.into(), plain: false, stopped: false, model: None }
+        NewMessage { role: role.into(), text: text.into(), plain: false, stopped: false, model: None, sources: Vec::new() }
+    }
+
+    #[test]
+    fn a_threads_cited_passages_stay_with_it_and_it_can_be_renamed() {
+        let note = crate::notes::create("Supplier call", "", "meeting", "").id;
+        let other = crate::notes::create("Standup", "", "meeting", "").id;
+        let source = crate::chat::chats::Source { n: 2, title: "Supplier call".into(), note: Some(note), field: "transcript".into(), line: Some(4), ..Default::default() };
+        let answer = NewMessage { sources: vec![source.clone()], ..said("assistant", "- Ask about the deposit [2].") };
+        let asked = NewMessage { sources: vec![source.clone()], ..said("user", "Make me sound smart") };
+        let id = add(note, None, &[asked, answer]).unwrap();
+        let conv = chats::get(id).unwrap();
+        assert!(conv.messages[0].sources.is_empty(), "a question cites nothing");
+        assert_eq!(conv.messages[1].sources, vec![source]);
+        // Renamed from Past chats: its own note's only.
+        assert_eq!(rename(note, id, "  Deposit   ideas ").unwrap(), "Deposit ideas");
+        assert_eq!(of_note(note).threads[0].title, "Deposit ideas");
+        assert!(rename(other, id, "Mine now").is_err());
+        assert!(rename(note, id, "   ").is_err());
     }
 
     #[test]

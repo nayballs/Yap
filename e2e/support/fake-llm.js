@@ -270,6 +270,15 @@ const BRIEF = 'You write a short brief for someone about to go into a meeting';
 // "- " lines from the messages it's given (each "User: …" line's first
 // words) unless a spec scripts it (`reply('chatSummary', fn)`).
 const CHAT_SUMMARY = 'You keep the notes of a long chat';
+// The notepad's newer chips and Skills (meetings/meeting_assist.rs, ai/llm.rs):
+// "Make me sound smart" (SMART), a Skill run on one meeting (SKILL, its
+// name in the system prompt) and "Make notes longer" (LONGER). The first
+// two cite the numbered passages they're given — and one made-up number,
+// which Yap must take out; LONGER writes the notes out again with more
+// detail and leaves out one task, which Yap must put back.
+const SMART = 'You help someone say something sharp in a meeting';
+const SKILL = 'You carry out a Skill';
+const LONGER = "You rewrite a meeting's notes in more detail";
 
 const KINDS = [
   [DIGEST, 'digest'],
@@ -287,7 +296,54 @@ const KINDS = [
   [SPEAKER_NAME, 'speakerName'],
   [BRIEF, 'brief'],
   [CHAT_SUMMARY, 'chatSummary'],
+  [SMART, 'smart'],
+  [SKILL, 'skill'],
+  [LONGER, 'longer'],
 ];
+
+/** The numbers of the `<passage n="…">` blocks a request gives (search/ask.rs's layout). */
+export function passageNumbers(user) {
+  return [...String(user).matchAll(/<passage n="(\d+)"/g)].map((m) => Number(m[1]));
+}
+
+/** "Make me sound smart": two things to say, citing the latest passage (and a number that's none). */
+function smartReply(user) {
+  const n = passageNumbers(user);
+  if (!n.length) return 'Not enough has been said yet.';
+  const out = [`- Ask whether finance needs the revised budget before Friday [${n.at(-1)}].`];
+  if (/catering/i.test(user)) out.push('- Offer to own catering for the offsite, so it has an owner [99].');
+  return out.join('\n');
+}
+
+/** A Skill on one meeting: its name (after the meeting), then a point citing the first and the last passage. */
+function skillReply(user) {
+  const name = /The Skill to carry out on this meeting: (.+?) \(\//.exec(user)?.[1] ?? 'Skill';
+  const n = passageNumbers(user);
+  const words = /^The user's own words with it: (.*)$/m.exec(user)?.[1];
+  const out = [`### ${name}`, `- The deposit landed this quarter, which made the budget look worse [${n[0] ?? 1}].`];
+  if (n.length > 1) out.push(`- Alice sends the revised budget by Friday [${n.at(-1)}].`);
+  if (words) out.push(`- You asked about: ${words}.`);
+  return out.join('\n');
+}
+
+/** "Make notes longer": the notes again, a detail under each bullet, one task left out. */
+function longerReply(user) {
+  const notes = (/<notes>\n([\s\S]*?)\n<\/notes>/.exec(user)?.[1] ?? '').trim();
+  const out = [];
+  let dropped = false;
+  for (const [i, line] of notes.split('\n').entries()) {
+    if (!dropped && /^- \[ \] /.test(line) && /badges/i.test(line)) {
+      dropped = true; // Yap must put it back
+      continue;
+    }
+    out.push(line);
+    // The recap (its heading, or the notes' opening line) gets a sentence.
+    if (/^## Recap/i.test(line) || (i === 0 && !line.startsWith('#'))) {
+      out.push('Travel is up twelve percent, mostly flights for the offsite, and the venue deposit landed early.');
+    } else if (/^- (?!\[)/.test(line)) out.push('  - More detail: said while going through the Q3 budget line by line.');
+  }
+  return `Here are the longer notes:\n\n${out.join('\n')}`;
+}
 
 /** A long chat's summary: the notes so far, and a line for each question it's given. */
 function chatSummaryReply(user) {
@@ -731,8 +787,12 @@ export async function startFakeLlm() {
         speakerName: () => '{"quote": "", "name": "unknown"}',
         brief: () => 'Nothing to add.',
         chatSummary: chatSummaryReply,
+        smart: smartReply,
+        skill: skillReply,
+        longer: longerReply,
       };
-      const content = (replies.get(kind) ?? answer[kind] ?? (() => 'OK'))(user);
+      // (The system prompt too: a Skill's name is in it.)
+      const content = (replies.get(kind) ?? answer[kind] ?? (() => 'OK'))(user, system);
       await answerWith({ role: 'assistant', content }, 'stop', paces.get(kind) ?? {});
     });
   });
