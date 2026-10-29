@@ -483,7 +483,7 @@ pub async fn e2e_dictate_audio(
 
 /// Test mode only: a shortcut as the input hook sends it (a test run has no
 /// hook: it must never see the developer's keys) — `name` "paste-last" or
-/// "copy-last" (`pasting/last.rs`), or "quick-note" (`notes/quick_note.rs`,
+/// "copy-last" (`pasting/last.rs`), "send" (`pasting/send_key.rs`), or "quick-note" (`notes/quick_note.rs`,
 /// whose hold dictates). `phase`: "press" or "release" alone (a hold is a
 /// press, a wait, a release); none: a tap, both at once.
 #[cfg(debug_assertions)]
