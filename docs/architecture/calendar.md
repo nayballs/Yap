@@ -113,7 +113,7 @@ Connecting Google Calendar or an iCal link, sync, parsing, the reminder card, pr
   keeps its code: today's occurrence); else time and service as before, but
   never a meeting whose codes of that kind don't include it (an ad-hoc Zoom
   during a Zoom meeting isn't it; a Teams id and thread aren't compared).
-  `event_at` = no code. Used by `claims_call`, `on_call_started` and
+  No code: time and service alone. Used by `claims_call`, `on_call_started` and
   `on_meeting_started` (whose "resuming an older meeting" check reaches as far
   as the code's window). Not read: the Teams app's windows (titled with the
   meeting's name), today's Zoom app ("Zoom Meeting"), Webex, Slack and the

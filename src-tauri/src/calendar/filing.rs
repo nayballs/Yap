@@ -222,6 +222,12 @@ pub fn meeting_file(app: AppHandle, note_id: u64, folder: String, series: bool) 
         return Err("Pick a folder".to_string());
     }
     let note = crate::notes::get(note_id).ok_or("Note not found")?;
+    // A series asked for is checked before anything moves.
+    let series_id = if series {
+        Some(series_of_note(&note).ok_or("This meeting doesn't repeat: file it on its own instead.")?)
+    } else {
+        None
+    };
     let folder = crate::notes::find_folder(&folder).unwrap_or_else(|| {
         crate::notes::folder_create(&folder);
         folder.clone()
@@ -232,8 +238,7 @@ pub fn meeting_file(app: AppHandle, note_id: u64, folder: String, series: bool) 
     }
     let mut others = 0;
     let mut title = String::new();
-    if series {
-        let id = series_of_note(&note).ok_or("This meeting doesn't repeat: file it on its own instead.")?;
+    if let Some(id) = series_id {
         title = note.event.as_ref().map(|e| e.title.clone()).filter(|t| !t.trim().is_empty()).unwrap_or_else(|| note.title.clone());
         let rule = Rule { folder: folder.clone(), title: title.clone(), created_ts: now_secs() };
         with_rules(|r| {

@@ -386,27 +386,22 @@ pub fn is_current(e: &Event, now: i64) -> bool {
     e.start - EARLY_SECS <= now && now < e.end.max(e.start + 60)
 }
 
-/// The event a recording or a call at `now` belongs to: one that's on or
-/// about to start, on `service` when a call's app is known (events with no
-/// join link fit any call), the one starting nearest `now` (back-to-back
-/// meetings: at 14:58 a recording is for the 15:00 one, not the 14:30 one).
-pub fn event_at<'a>(events: &'a [Event], now: i64, service: Option<&str>) -> Option<&'a Event> {
-    event_for_call(events, now, service, None)
-}
-
 /// A call's join code finds its event from this long before the start…
 pub const CODE_EARLY_SECS: i64 = 30 * 60;
 /// …until this long after the end (a meeting running over).
 pub const CODE_LATE_SECS: i64 = 30 * 60;
 
-/// The event a call at `now` belongs to, when its window showed join code
-/// `code` (`codes.rs`): **the code beats time and service** — the event with
-/// that code from [`CODE_EARLY_SECS`] before it starts until
-/// [`CODE_LATE_SECS`] after it ends, the one starting nearest `now` (a
-/// recurring meeting keeps its code every week); else [`event_at`]'s match
-/// by time and service, but never a meeting whose own code of that kind is
-/// another one (an ad-hoc Zoom call during a Zoom meeting isn't it). No
-/// code: time and service alone.
+/// The event a recording or a call at `now` belongs to. When the call's
+/// window showed join code `code` (`codes.rs`), **the code beats time and
+/// service**: the event with that code from [`CODE_EARLY_SECS`] before it
+/// starts until [`CODE_LATE_SECS`] after it ends, the one starting nearest
+/// `now` (a recurring meeting keeps its code every week). Else by time and
+/// service: one that's on or about to start, on `service` when a call's
+/// app is known (events with no join link fit any call), the one starting
+/// nearest `now` (back-to-back meetings: at 14:58 a recording is for the
+/// 15:00 one, not the 14:30 one) — but never a meeting whose own codes of
+/// that kind don't include the call's (an ad-hoc Zoom call during a Zoom
+/// meeting isn't it).
 pub fn event_for_call<'a>(events: &'a [Event], now: i64, service: Option<&str>, code: Option<&str>) -> Option<&'a Event> {
     if let Some(found) = code.and_then(|c| event_by_code(events, now, c)) {
         return Some(found);
@@ -568,11 +563,11 @@ mod tests {
         let sync = coded("sync", now - 300, now + 1_500, "zoom", &["zoom:111222333"]);
         let interview = coded("interview", now - 120, now + 1_680, "zoom", &["zoom:444555666"]);
         let events = [sync.clone(), interview];
-        assert_eq!(event_at(&events, now, Some("zoom")).unwrap().key, "interview"); // nearest start
+        assert_eq!(event_for_call(&events, now, Some("zoom"), None).unwrap().key, "interview"); // nearest start
         assert_eq!(event_for_call(&events, now, Some("zoom"), Some("zoom:111222333")).unwrap().key, "sync");
         // Joined 25 minutes early, or 20 minutes over: still found by its code…
         let later = [coded("standup", now + 1_500, now + 2_400, "meet", &["meet:abc-defg-hij"])];
-        assert!(event_at(&later, now, Some("meet")).is_none());
+        assert!(event_for_call(&later, now, Some("meet"), None).is_none());
         assert_eq!(event_for_call(&later, now, Some("meet"), Some("meet:abc-defg-hij")).unwrap().key, "standup");
         let over = [coded("review", now - 3_000, now - 1_200, "meet", &["meet:abc-defg-hij"])];
         assert_eq!(event_for_call(&over, now, None, Some("meet:abc-defg-hij")).unwrap().key, "review");
@@ -785,16 +780,16 @@ mod tests {
         let standup = event("standup", now - 1_740, now + 60, Some("teams")); // 14:30–15:00, now 14:59
         let planning = event("planning", now + 60, now + 1_860, Some("teams")); // 15:00
         let events = [standup, planning];
-        assert_eq!(event_at(&events, now, None).unwrap().key, "planning");
-        assert_eq!(event_at(&events, now, Some("teams")).unwrap().key, "planning");
+        assert_eq!(event_for_call(&events, now, None, None).unwrap().key, "planning");
+        assert_eq!(event_for_call(&events, now, Some("teams"), None).unwrap().key, "planning");
         // A Zoom call doesn't belong to Teams meetings…
-        assert!(event_at(&events, now, Some("zoom")).is_none());
+        assert!(event_for_call(&events, now, Some("zoom"), None).is_none());
         // …but a meeting without a link takes any call.
         let lunch = [event("lunch", now - 600, now + 600, None)];
-        assert_eq!(event_at(&lunch, now, Some("zoom")).unwrap().key, "lunch");
+        assert_eq!(event_for_call(&lunch, now, Some("zoom"), None).unwrap().key, "lunch");
         // Too early (more than 10 minutes before) or over: nothing.
-        assert!(event_at(&[event("later", now + 700, now + 2_000, None)], now, None).is_none());
-        assert!(event_at(&[event("done", now - 2_000, now - 1, None)], now, None).is_none());
+        assert!(event_for_call(&[event("later", now + 700, now + 2_000, None)], now, None, None).is_none());
+        assert!(event_for_call(&[event("done", now - 2_000, now - 1, None)], now, None, None).is_none());
     }
 
     #[test]

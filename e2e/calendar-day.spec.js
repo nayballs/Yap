@@ -315,8 +315,8 @@ test('"Done for today": today\'s meetings, their open tasks and the ones without
   await expect(done.getByRole('listitem').filter({ hasText: 'Supplier call' })).toContainText('No notes');
   await shot(main, '05-done-for-today');
 
-  // A task ticked here is ticked in the note's summary.
-  await tasks.getByRole('checkbox').first().check();
+  // A task ticked here is ticked in the note's summary (and leaves the list).
+  await tasks.getByRole('checkbox').first().click();
   await expect(tasks.getByRole('checkbox')).toHaveCount(1);
   await expectStore(yap, 'notes.json', (s) =>
     s.notes.find((n) => n.id === pricing)?.enhancedContent.includes('- [x] Send Priya the revised pricing table')
