@@ -376,6 +376,7 @@ the **latest stable** toolchain — keep local Rust current (`rustup update`).
 `.github/workflows/e2e.yml` runs the e2e suite on the same triggers.
 
 **Tests:**
+- **Say in bold whether the maintainer can use the PC** whenever a big run starts or ends: **Hands off the keyboard (about N min)** for robot tests, which take the keyboard and focus; **You can use the PC** for the UI suite, builds and agent batches, adding that it may feel slower. Repeat it when it changes, and say plainly when it's all clear.
 - `npm run test:app` — the end-to-end UI suite: Playwright drives a real stub debug build over CDP (~35 min for all 530+; one spec in seconds), leaving named screenshots in `test-results/app/screenshots/`; its windows sit behind yours. Guide: [`docs/e2e-tests.md`](./docs/e2e-tests.md).
 - `npm run test:real` — real-app robot tests: a robot-mode Yap pastes into real windows the harness opens (`--engines` build: real STT). ⚠ **It takes the keyboard focus for ~2 min** (local only, not CI): say so before running it while the maintainer is at the PC. Guide: [`docs/e2e-tests.md`](./docs/e2e-tests.md) "Real-app robot tests".
 - `npm run privacy:scan` / `npm run test:privacy` — the privacy guard over the whole tree, and its own tests ([build-and-test.md](./docs/architecture/build-and-test.md#the-privacy-guard-scriptsprivacy-guardmjs)).
