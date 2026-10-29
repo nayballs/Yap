@@ -86,6 +86,8 @@ export const FIELD_DEFAULTS = {
   barHideFullscreen: true,
   barTheme: 'app',
   barDictationButtons: 'off',
+  // The quick note's button on the bar (notes/quick_note.rs; off).
+  barQuickNote: false,
   // General → Appearance (AppearanceSettings.svelte, lib/core/appearance.js).
   theme: 'system',
   readingFont: 'default',

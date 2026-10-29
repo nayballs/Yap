@@ -356,6 +356,12 @@ fn render(source: &Source) -> Option<Vec<u8>> {
     }
 }
 
+/// Any exe's own icon as a data URL, drawn as the call apps' are (the quick
+/// note's Send button, `notes/quick_note/send.rs`). Nothing cached here.
+pub(crate) fn exe_icon_url(exe: &Path) -> Option<String> {
+    exe_png(exe).map(|png| data_url(&png))
+}
+
 #[cfg(windows)]
 fn exe_png(exe: &Path) -> Option<Vec<u8>> {
     let (width, height, rgba) = win::exe_icon(exe, ICON_PX)?;

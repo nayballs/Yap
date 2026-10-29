@@ -135,8 +135,10 @@ The AI Notepad: the notes store, folders, the Actions engine, notes you can fix 
 
 A small window on its own shortcut, to jot or dictate a note from any app
 and find it later in Notes (Wispr Flow's Scratchpad, adapted: local, no
-sync, no tabs, one note at a time; 2026-10-28). The page is
-`src/lib/quicknote/QuickNote.svelte` (+ `quickNote.js`, its pure helpers).
+sync; 2026-10-28; tabs, the hold, Send and the bar's button 2026-10-29). The
+page is `src/lib/quicknote/QuickNote.svelte` (+ `quickNote.js`, its pure
+helpers); its parts in Rust are `quick_note/key.rs` (the shortcut's tap and
+hold), `tabs.rs` and `send.rs`.
 
 - **The window** — `quick-note` in tauri.conf.json: 420×380 (min 300×220),
   undecorated (its header is the drag region), always on top while it's
@@ -156,14 +158,40 @@ sync, no tabs, one note at a time; 2026-10-28). The page is
   (kept inside the screen, `window::fit_rect`).
 - **Opening it** — the **Quick note** shortcut (Settings → Shortcuts,
   `quickNoteHotkey`, unbound by default; the tenth fixed binding in
-  `dictation/input_hook.rs`, its press only, `quick-note-key-pressed` →
-  `toggle_soon`, on the main thread), the tray's **New quick note**
-  (always a new note), and **Quick note** in the Notes view's tools
-  (`quick_note_open`). `toggle`: away when it's the window in front
-  (`in_front`: Windows' foreground window is its handle; a test run never
-  has the focus, so there it's "shown"), else up and focused. From one of
-  Yap's own windows the hook never fires: the main window's, the notepad's
-  and the quick note's own in-page fallbacks call `quick_note_toggle`.
+  `dictation/input_hook.rs`, its press and release, `quick-note-key-pressed`
+  / `-released` → `key::on_key`), the tray's **New quick note** (always a
+  new note), **Quick note** in the Notes view's tools (`quick_note_open`),
+  and the Yap bar's button when it's on (below). From one of Yap's own
+  windows the hook never fires: the main window's, the notepad's and the
+  quick note's own in-page fallbacks send the key's press and release
+  (`quick_note_key {pressed}`) to the same place.
+- **Tap or hold** (`quick_note/key.rs`, Wispr's `SCRATCHPAD_PTT_DELAY_MS`
+  by behaviour; 2026-10-29). `Key` is pure: a press while the window isn't
+  in front (`in_front`: Windows' foreground window is its handle; a test
+  run never has the focus, so there it's "shown") brings it up at once
+  (`open_soon`, the main thread) and waits `HOLD_MS`; let go sooner, it
+  was a **tap** — the window stays up — or, pressed while it was in front,
+  a tap that puts it away (on the key-up, so a hold there doesn't hide it).
+  Still down at `HOLD_MS` it's a **hold**: `Pipeline::start_for_quick_note`
+  starts a push-to-talk dictation armed for the note (`quick_note::arm` →
+  `Goes::QuickNote`, `yap-dictation-held`), and the key-up stops it
+  (`stop_session`, only that recording). `HOLD_MS` is 300 ms, push-to-talk's
+  own tap line (`gesture::TAP_MAX_MS`: a press let go sooner is a tap
+  everywhere in Yap), a little quicker than Wispr's 350 ms; the dictation
+  never starts on the press, so a tap plays no chime. A dictation already
+  under way (recording or transcribing): the hold only opens the window. The
+  key is one of the input hook's **hold keys** (`HOLDS`): another key joining
+  it under `gesture::CHORD_MS` was a shortcut sharing it — no dictation, or
+  the one it started dropped silently (`Key::chord`); a key-up the hook lost
+  leaves the dictation hands-free until the next press (`Key::key_lost`,
+  `yap-dictation-locked`). The machine is locked while a step is acted on,
+  so a key event and the hold's tick take turns. The quick note takes the
+  focus on the press, so its page usually hears the release: a release
+  heard by a page also lets go of the hook's own record of the key
+  (`input_hook::quick_note_key_up`), or the next press from another app
+  would look like the key repeating. No double-tap (Wispr's hands-free):
+  a quick second tap closes the window, as a toggle should; hands-free into
+  the note is its mic button, or the dictation key with it in front.
 - **What it opens on** — `pick` (pure): the note it was on, or — the first
   open since Yap started — the newest quick note, **if it changed less than
   a day ago** (`RESUME_SECS`); else a new note. Coming back within the day
@@ -172,9 +200,28 @@ sync, no tabs, one note at a time; 2026-10-28). The page is
   endless note. "New note" (+, Ctrl+N) and the tray start one whenever.
   Rust remembers the window's note (`Current`: Unset / New / Note) and says
   what to show with `yap-quick-note-open {noteId, title, titleAuto,
-  content, folder, fresh}`; the page saves what it has before it switches,
-  keeps a new note being written, and calls `quick_note_new` itself for a
-  `fresh` open (so a save on its way can't take the new note's place).
+  content, folder, fresh, tabs, close}`; the page saves what it has before
+  it switches, keeps a new note being written, and starts a `fresh` one
+  itself (so a save on its way can't take the new note's place).
+- **Tabs** (`quick_note/tabs.rs`, 2026-10-29): several quick notes open at
+  once. The page keeps them — **+** or Ctrl+T (Ctrl+N) a new one (the blank
+  tab there, if any), **×** or Ctrl+W to close (the note stays in Notes;
+  the last one closed leaves a new note), a click or Ctrl+Tab /
+  Ctrl+Shift+Tab (Ctrl+PgDn / PgUp) to switch — and after every change
+  tells Rust the open notes in order and the one in front
+  (`quick_note_tabs {ids, active}`, after any save on its way; it sets
+  `Current`), which remembers them in `quick_note_tabs.json` (its own file,
+  a quiet saver; ≤ 20, ids only; [config-and-data.md](./config-and-data.md)).
+  What it opens on is the rule above — the tab in front is "the note it was
+  on"; the picked note gets a tab if it had none. As the window comes up
+  (and the page loads, `quick_note_state`) `tabs::for_open` (pure) keeps
+  the remembered tabs whose notes are quick notes changed within a day (or
+  the picked one) and closes the rest (`close`): a tab left alone a day is
+  done, as a note was before tabs. Only the tab in front can hold unsaved
+  words (switching saves first); saves go to the tab they were typed in.
+  Notes deleting a note closes its tab behind; the one in front lets go of
+  it, as before. The tab strip is the header (its empty part still drags the
+  window); the tab in front's name is the title (`.title`).
 - **Saved as ordinary notes** — the page saves 400 ms after the last
   keystroke, one save at a time (`quick_note_save {id, content}`), and on
   the way out (Esc, hidden, another note). `save`: nothing is made until
@@ -223,8 +270,34 @@ sync, no tabs, one note at a time; 2026-10-28). The page is
   like any dictation ("yap.exe"). **Undo** of a cancelled one (the bar's
   "Dictation cancelled · Undo") lands in the note too: `to_note` lives
   through the cancel, as the Chat box's `to_chat` does.
-- **Keys** — Esc puts it away (what's typed is saved), Ctrl+N a new note;
-  the buttons (New note, Open in Notes, Close, the mic) are in the tab
+- **Send to {app}** (`quick_note/send.rs`, Wispr's "Send in {app}";
+  2026-10-29): `open` remembers the window in front before it shows
+  (`send::remember_before`: `text_injector::app_window`, as Paste last
+  finds it — the tray's open too; never one of Yap's own, so opened from
+  Yap there's no button). The footer's **Send to Slack** shows the app's
+  name (`core/appNames.js` from its process name) and its exe's own icon
+  (`calls/app_icons.rs` `exe_icon_url`, drawn once per exe;
+  `quick_note_send_target`), disabled while the note is empty. Clicking it
+  (`quick_note_send {text}`: the selection if it has words, else the note,
+  `sendText`) saves, hides the window and pastes by the ordinary path —
+  `text_injector::inject_text(…, strict)`: back into that window or
+  nowhere, its own paste keys, the paste checked; a paste that can't land
+  is left on the clipboard and said once (`Left::alert`), a window that's
+  gone too ("Your note is copied: press Ctrl+V"). Nothing in
+  `text_injector`'s internals changed. Test mode pastes nothing: a spec
+  stages the app (`e2e_quick_note_before`) and reads what went
+  (`e2e_quick_note_sent`).
+- **The Yap bar's button** (`bar_quick_note`, off; Wispr's "Add to Flow
+  Bar"; 2026-10-29): on the empty page (no words in the note in front, the
+  bar on, the button off) a slim offer, "Open it from the Yap bar too"
+  with **Add to the Yap bar** (`quick_note_bar_button {on}` →
+  `settings::change_config`, `yap-bar-changed {quickNote}` for Settings'
+  copy) and ✕ Not now (that window's `localStorage`). Also Settings →
+  General → Yap bar → Quick note button. The bar's side:
+  [yap-bar.md](./yap-bar.md).
+- **Keys** — Esc puts it away (what's typed is saved), Ctrl+T or Ctrl+N a
+  new tab, Ctrl+W closes one, Ctrl+Tab switches; the buttons (the tabs and
+  their ×, New note, Open in Notes, Close, the mic, Send) are in the tab
   order. **Open in Notes**: the main window's Notes view on the note
   (`yap-meeting-open-note`, as the notepad's back button), and the window
   steps aside. The in-page fallback: the Quick note shortcut (away), the
@@ -233,13 +306,19 @@ sync, no tabs, one note at a time; 2026-10-28). The page is
 - **Commands** — `quick_note_toggle`, `quick_note_open {fresh?}`,
   `quick_note_hide`, `quick_note_state` (the page loading), `quick_note_save
   {id, content}` → `{noteId, title, titleAuto, folder, removed, unsaved?}`,
-  `quick_note_new`, `quick_note_dictate`; debug-only
-  `e2e_quick_note_dictation {text}` (its mic hearing a transcript), with
-  `e2e_shortcut {name: 'quick-note'}` and the tray's `e2e_tray {click?}`
-  (`shell/tray.rs`). Tests: unit tests in `quick_note.rs` (titles, blank,
-  `pick`, `corner`, an older Yap's save, made and emptied) and
-  `pipeline.rs` (`Goes::QuickNote`), `input_hook.rs` (the binding);
-  `e2e/quick-note.spec.js`.
+  `quick_note_new`, `quick_note_dictate`, `quick_note_key {pressed}`,
+  `quick_note_tabs {ids, active}`, `quick_note_send_target`,
+  `quick_note_send {text}`, `quick_note_bar_button {on}`; debug-only
+  `e2e_quick_note_dictation {text}` (its mic hearing a transcript),
+  `e2e_quick_note_before {app}` / `e2e_quick_note_sent`, with
+  `e2e_shortcut {name: 'quick-note', phase?}` (a tap; 'press' / 'release'
+  alone: a hold) and the tray's `e2e_tray {click?}` (`shell/tray.rs`).
+  Tests: unit tests in `quick_note.rs` (titles, blank, `pick`, `corner`, an
+  older Yap's save, made and emptied), `key.rs` (tap, hold, chord, a lost
+  key-up), `tabs.rs` (what closes, tidy, the file) and `pipeline.rs`
+  (`Goes::QuickNote`), `input_hook.rs` (the binding);
+  `e2e/quick-note.spec.js` (a made-up microphone, `YAP_E2E_MICS`, records
+  the hold).
 
 ## Notes you can fix (`notes/note_edits.rs`, `notes/tasks.rs`)
 

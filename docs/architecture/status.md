@@ -92,6 +92,25 @@ Not tried yet on the maintainer's PC: the global shortcut from another app
 (the focus it takes, where it comes up on two monitors), and a real
 dictation's Ctrl+Z (a test run never has the focus, where the text goes in
 by hand).
+**Since 2026-10-29, level with Wispr Flow's Scratchpad**
+([notes.md](./notes.md#the-quick-note-notesquick_noters)): a tap of the
+shortcut opens or hides it, a **hold** (past 300 ms, push-to-talk's tap line)
+opens it and dictates into the note until the key comes up
+(`quick_note/key.rs`); several notes open as **tabs** (+, ×, Ctrl+T, Ctrl+W,
+Ctrl+Tab), remembered across restarts in `quick_note_tabs.json`, a tab left
+alone a day closing as the window comes up; **Send to {app}** with the
+app's own icon pastes the note, or its selection, into the app it came up
+over, by the ordinary paste; an opt-in **quick-note button on the Yap bar**
+(its empty page offers it; Settings → Yap bar). The bar's **^ menu** gained
+the microphone in use with a picker in the order Yap tries them, Paste last
+transcript and the language shortcuts' languages (`bar/menu.rs`).
+Unit-tested (the tap and hold, chords and a lost key-up; the tabs' rules and
+file; the menu's microphones) and e2e-tested (`quick-note.spec.js`: the hold
+by the test shortcut and through a Yap window's page, tabs and a restart,
+Send with a stand-in app, the bar button; `bar-menu.spec.js`). Not tried
+yet on the maintainer's PC: holding the real shortcut in another app (the
+release lands in the quick note, which took the focus), and Send's real
+paste into another app (a test run pastes nothing; no robot test yet).
 
 **Long chats, sized to the model** (2026-10-25,
 [chat-and-assistant.md](./chat-and-assistant.md#long-chats-sized-to-the-model-2026-10-25)):
