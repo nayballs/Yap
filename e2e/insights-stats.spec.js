@@ -152,6 +152,8 @@ test('a cancelled dictation counts once it is transcribed, with its speaking tim
   // Cancelled: never transcribed, not counted.
   expect(stats(yap).days).toEqual([]);
   const e = yap.readJson('history.json').at(-1);
+  // Its audio is written on a thread of its own.
+  await expect.poll(() => fs.existsSync(path.join(yap.dataDir, 'recent-audio', `${e.audio}.wav`))).toBe(true);
   await yap.invoke('history_rerun', { ts: e.ts, audio: e.audio, model: null });
   await expectStore(yap, 'dictation_stats.json', (s) => s.days.length === 1 && s.days[0].dictations === 1 && s.days[0].timed === 1 && s.days[0].speakingSecs >= 1.4);
 });
