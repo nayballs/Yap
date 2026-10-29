@@ -34,6 +34,18 @@ the clipboard](#every-snip-on-the-clipboard-2026-10-25), [The screenshots
 waiting in the box](#the-screenshots-waiting-in-the-box-snipwaitingrs-2026-10-25),
 [After saying "snip"](#after-saying-snip-yap-listens-for-the-question-2026-10-25).
 
+**The Voice Assistant sees the window in front (2026-10-29)**: a spoken
+question about the screen takes the window that was in front when its
+shortcut was pressed, by snip's own capture — the window's visible frame
+(`pick::window_frame`, as Space picks one) cut from every monitor captured
+at once (`cut_frames`), every Yap window left out (`capture::for_snip`) —
+kept as a chat screenshot (`keep_as`, source "window"), and on to the model
+as a snip goes (`turn::prepare`, the on-device projector), or as its text
+read on this PC (`ocr`). How it decides and where it may go:
+[chat-and-assistant.md](./chat-and-assistant.md) (`chat/assistant/screen.rs`).
+A test run takes it from the fake monitors and the first fake window
+(`e2e_snip {start: false}`, `take_fake`), never the real screen.
+
 [Architecture index](./README.md) · [CLAUDE.md](../../CLAUDE.md)
 
 ## How it works
@@ -787,6 +799,10 @@ doesn't show it (a screenshot never goes there).
   screenshot reader…" line in Chat while the model restarts with it (the
   usual "Still working…" after 8 s says so for now); not yet tried by hand
   in the dev build (the e2e suite drives a stand-in sidecar).
+- The Voice Assistant's window in front (2026-10-29): what's on screen in
+  the window's frame when the question ends, as Space picks it — a window
+  moved over it meanwhile is in it; not yet a capture of the window alone
+  (WGC `CreateForWindow`). Not yet tried by hand with a real microphone.
 - Snips in the Voice Assistant: done 2026-10-25 (a waiting screenshot goes
   with a spoken question; after saying "snip" Yap listens). Not yet tried
   by hand with a real microphone: the start chime after the snip, either

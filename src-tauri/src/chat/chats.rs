@@ -60,6 +60,12 @@ pub struct ChatMessage {
     /// estimates).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tokens: Option<MessageTokens>,
+    /// An answer thought through (Chat's Think, `chat/think.rs`): how long
+    /// the model thought, and its thinking when it sent it — folded above
+    /// the answer. Never sent back to a model. An older Yap's save drops it
+    /// (the answer stays).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub thinking: Option<crate::chat::think::Thought>,
 }
 
 /// What an answer's last model call took: the prompt (everything the model
@@ -154,6 +160,12 @@ pub struct Source {
     /// invite (`calendar_event` "open"); `site` says when it is.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub event: Option<String>,
+    /// The text of the window in front, read on this PC and sent in its
+    /// picture's place (the Voice Assistant to a model that can't read
+    /// images, `chat/assistant/screen.rs`): nothing to open. An older Yap
+    /// drops it and shows a chip that opens nothing.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub screen: bool,
 }
 
 fn is_zero(n: &u64) -> bool {
@@ -534,6 +546,18 @@ pub fn set_scope(id: u64, scope: &str) {
     });
 }
 
+/// Keep an answer's thinking with it (Chat's Think, `chat/think.rs`):
+/// conversation `id`'s message `index`, when it's an answer.
+pub fn set_thinking(id: u64, index: usize, thought: crate::chat::think::Thought) {
+    with_store(|s| {
+        let Some(m) = s.conversations.iter_mut().find(|c| c.id == id).and_then(|c| c.messages.get_mut(index)) else { return };
+        if m.role == "assistant" {
+            m.thinking = Some(thought);
+            save_to_disk(s);
+        }
+    });
+}
+
 /// A conversation's scope ("" when it has none, or isn't there).
 pub fn scope_of(id: u64) -> String {
     with_store(|s| s.conversations.iter().find(|c| c.id == id).map(|c| c.scope.clone()).unwrap_or_default())
@@ -615,6 +639,7 @@ pub fn append_message(
             images: Vec::new(),
             plain: false,
             tokens,
+            thinking: None,
         });
         conv.updated_ts = now_secs();
         // Asked again in an archived chat: it's back in the list.
@@ -1286,6 +1311,7 @@ mod tests {
             images: vec![],
             plain: false,
             tokens: None,
+            thinking: None,
         };
         let messages = vec![
             msg("user", vec![]),

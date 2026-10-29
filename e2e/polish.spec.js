@@ -105,7 +105,7 @@ test("the hidden windows' webviews keep less in memory", async ({ yap }) => {
 
 test('Home and Insights in plain words, Upload names its model', async ({ main, shot }) => {
   // One dictation, not "1 dictations"; the app by its name.
-  await expect(main.locator('.statfoot')).toHaveText('1 dictation, stored on this PC.');
+  await expect(main.locator('.statfoot')).toContainText('1 dictation, counted on this PC.');
   await openView(main, 'Insights');
   await expect(main.locator('.appname').first()).toHaveText('Teams');
   await expect(main.locator('.card').filter({ hasText: /^1\s*dictation$/ })).toHaveCount(1);
@@ -317,8 +317,11 @@ test("what needs doing is counted once, on the title bar's bell", async ({ main,
 });
 
 test('Home with no speech model yet says so first, and leads to the download', async ({ yap, main, shot }) => {
-  // Last: it clears the seeded history. (The stub build has no model.)
+  // Last: it clears the seeded history, and the stats (they outlast
+  // history: dictation/stats.rs), so it's someone who hasn't dictated yet.
+  // (The stub build has no model.)
   await yap.invoke('clear_history');
+  await yap.invoke('e2e_stats_set', {});
   await openView(main, 'Insights');
   await openView(main, 'Home');
   await expect(main.getByRole('heading', { level: 2, name: 'One step left: a speech model' })).toBeVisible();

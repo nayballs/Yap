@@ -528,8 +528,24 @@ pub async fn history_rerun(app: AppHandle, ts: u64, audio: String, model: Option
         let guard = state.pipeline.lock().map_err(|_| "The dictation pipeline isn't available")?;
         guard.as_ref().ok_or("The dictation pipeline isn't running")?.rerunner()
     };
+    let secs = samples.len() as f32 / SAMPLE_RATE as f32;
     let crate::dictation::pipeline::Reran { raw, text, said, model } = rerun.run(samples, model, &entry.app).await?;
     crate::dictation::history::rerun_result(&audio, &raw, &text, said.as_deref(), &model);
+    // One never transcribed (failed, cancelled) counts now, on the day it
+    // was said (`stats.rs`); one run again was counted already.
+    if entry.failed() {
+        let dict = crate::config::load().dictionary;
+        let counted = crate::dictation::stats::Counted {
+            raw: &raw,
+            text: &text,
+            said: said.as_deref(),
+            app: &entry.app,
+            secs: Some(secs),
+            dict: &dict,
+            at: Some(entry.ts),
+        };
+        crate::dictation::stats::dictated(&app, counted);
+    }
     tracing::info!(chars = text.chars().count(), model = %model, "Ran a dictation again");
     let _ = app.emit("yap-history-changed", ());
     Ok(serde_json::json!({ "text": text, "model": model, "modelName": crate::dictation::stt::model_name(&model) }))

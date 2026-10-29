@@ -206,7 +206,16 @@ The AI Chat surface (conversations, the tool-calling loop and its note tools) an
   `with_thread` lays them into the notepad's one-off request). A kept turn
   (`note_chat_add`) looks for a summary in the background with the model
   that window asks (`compact::after_thread_turn`: the notepad's Note
-  Formatting model, else Chat's). Logs: ids and counts.
+  Formatting model, else Chat's). Logs: ids and counts. Since 2026-10-29: a
+  kept answer keeps the meeting's lines it cites (`NewMessage::sources` →
+  the message's `sources`, Chat's own field, which an older Yap keeps
+  too), so its pills open the line when the thread reopens; and
+  `note_chat_rename(noteId, conversationId, title, origin)` (`rename`:
+  this note's thread only, Chat's `clean_title`) names one from Past chats
+  (`yap-note-chat` with `renamed`).
+- **`chat/skills.rs`** — **Skills** (2026-10-29; Wispr Flow's Skills): saved
+  instructions run with `/name`. See
+  [Skills and one-tap prompts](#skills-and-one-tap-prompts-2026-10-29).
 - **`chat/budget.rs`** — **a chat sized to its model** (2026-10-25): the
   context of the model a call goes to (`context_window`, shared with the
   ring), the budget (`budget`), the token counter (`Counter`, `estimate`),
@@ -470,7 +479,9 @@ The AI Chat surface (conversations, the tool-calling loop and its note tools) an
   answer so far; "" takes it back), `tool {name, doing}`, `chips {chips,
   sources, web}` (after each tool and each of Yap's own searches: the chips
   so far and the web sources found, so a "[1]" is a pill while it's
-  written), `waiting {waiting}`; `chat_send` adds `turn {conversationId,
+  written), `waiting {waiting}`, `thinking {text}` (a question asked to
+  think it through, `chat/think.rs`: the thinking so far, apart from the
+  answer); `chat_send` adds `turn {conversationId,
   userMessageId}` once the question is saved. The command's own reply is
   still the **checked** answer (`chats::checked_answer` and the price
   fixes), which the page puts in place of what streamed. **The channel**:
@@ -531,6 +542,49 @@ The AI Chat surface (conversations, the tool-calling loop and its note tools) an
   arguments and Groq's mid-stream refusal asked again). Model evaluations
   stream like the Chat view (`YAP_EVAL_STREAM=off`: whole) and measure the
   first words (`first_words_ms`).
+- **`chat/think.rs`** — **Think it through** (2026-10-29): Chat's **Think**
+  button (`views/chat/ThinkButton.svelte`, beside the mic; `chatThink.svelte.js`)
+  asks **one question** with the model thinking before it answers, then goes
+  off again; it shows only for a model that can (`chat_think_info {can,
+  place}`, asked again when Chat's model changes). `chat_send(think: true)`
+  runs the turn inside a task-local (`think::with`), and **only Chat's own
+  requests read it** (`llm::ChatRequest::chat`: `extra_for`): cleanup,
+  Commands, the meeting notes, memory, a summary and the Voice Assistant
+  never think. **On this PC** the sidecar keeps `--reasoning off`
+  (`local_llm::server_args`), and one request still thinks **without a
+  restart** — measured on llamafile 0.10.6 with Qwen3.5-4B (Q4_K_M, MTP,
+  `--reasoning off`, 29 Oct 2026): `chat_template_kwargs: {"enable_thinking":
+  true}` turns it on for that request alone (the next request without it
+  answered in 0.1 s as before); `thinking_budget_tokens` caps it (uncapped,
+  the 4B thought for 4,096 tokens about a bat and a ball and never answered;
+  capped at 300 it answered in 1.1 s; at 1,500 a logic puzzle took ~1,350
+  tokens, 5.3 s, MTP drafting throughout); `reasoning_budget_message` is the
+  line it gets when the budget runs out (without it the answer began
+  "</think>"; `think::tidy` drops one anyway). `reasoning_effort` changes
+  nothing there and `reasoning_budget_tokens` didn't cap it. So: 1,500
+  tokens (`ON_DEVICE_BUDGET`), the answer's cap raised by as much, only for
+  Qwen3.5 (`on_device_thinks`; not the 1.5B, nor Qwen3's 2507 instruct). **In
+  the cloud** (`request_extra`): OpenAI's reasoning models and Groq's
+  gpt-oss `reasoning_effort: "high"`, Gemini 2.5 and later the same (its
+  OpenAI-compatible endpoint maps it to a thinking budget), OpenRouter's
+  `reasoning: {effort: "high"}` (its list's `thinks`, else the families),
+  Claude adaptive thinking with `output_config: {effort: "high"}` (Anthropic's
+  compatible endpoint takes `thinking` and ignores `reasoning_effort`; Claude 5
+  thinks by default anyway), a 4,096-token budget on a Claude before 4.6. A
+  thinking request waits up to 150 s (`think::TIMEOUT`); the GPT-6 rule
+  (tools only with reasoning off) still asks again with `"none"`. **What
+  shows**: the thinking comes apart from the answer (`reasoning_content`,
+  or Groq's and OpenRouter's `reasoning`; `stream::Assembler` keeps it out
+  of the message, `llm::post_chat_request` hands it to `think::heard`), as
+  `{kind: "thinking", text}` events (each step's after the turn's earlier
+  ones, `think::so_far`): "Thinking…" with "Show its thinking" folded under
+  it, then "Thought for 6 s" folded above the answer (`ChatMessage.svelte`
+  `.thought`). Kept with the answer (`ChatMessage.thinking` = `Thought {text,
+  ms}`, `chats::set_thinking`; the reply's `thinking`), never sent back to a
+  model; an older Yap's save drops it, the answer stays. Anthropic's and
+  OpenAI's compatible endpoints never send the thinking: only the time
+  shows. Unit-tested (each provider's fields, the turn's task-local, a
+  stray end tag, the stream's thinking); e2e `chat-think.spec.js`.
 - **`chat/assistant.rs`** — the **Voice Assistant** (2026-10-18; Settings →
   Voice Assistant): ask Yap's Chat out loud from any app with its own
   shortcut (`assistant_hotkey`, unbound by default) and hear the answer;
@@ -667,6 +721,62 @@ The AI Chat surface (conversations, the tool-calling loop and its note tools) an
   key joins it and its release ends it (`gesture::State::Joinable`); Esc in
   Chat (`assistantListening`) or ✕ cancel it; never while the assistant is
   off (`is_off`). Test runs stage its transcript (`e2e_snip_question`).
+- **`chat/assistant/screen.rs`** — **the Voice Assistant sees the window in
+  front** (2026-10-29): a spoken question about the screen ("what's this
+  error?", "summarise this page", "what does this chart say?") takes a
+  screenshot of the window that was in front when the shortcut was pressed
+  (`window_in_front`, from `pipeline::capture_target`), and the model answers
+  from it. **Never for every question**: cheap rules first (`about_in`,
+  pure, in the person's own languages — My languages' codes, English always:
+  Dutch "dit" is French for "said"): phrases that point at the screen ("on
+  my screen", "what's this?", "qu'est-ce que c'est", "was ist das?",
+  "summarise this") and a demonstrative before a screen word ("this
+  error", "cette page", "dieser Fehler") say **yes**; "this" alone, or
+  "that error", is a **maybe**; anything else **no** ("this weekend" isn't
+  the screen). A maybe is the model's call (`model_says`: one short request
+  to Chat's own model, `ASK_PROMPT`, with its last answer, so "is this
+  right?" after an answer is about the answer; 4 tokens on this PC, gpt-oss
+  at low effort; anything but a clear yes is a no). On the real Qwen3.5-4B
+  (29 Oct 2026): 14 of 16 such questions right, median 180 ms, slowest 0.5 s.
+  **What's taken** (`capture`): the window's visible frame
+  (`snip::pick::window_frame`: DWM's frame; not one of Yap's own, minimised,
+  cloaked or gone), cut from every monitor captured at once as a snip is
+  (`snip::cut_frames`, HDR right), every Yap window left out for the moment
+  (`calls::capture::for_snip`: the bar's capsule too; meeting windows as the
+  meeting setting wants — and the assistant is off during meetings anyway),
+  saved as a chat screenshot (`snip::keep_as`, source "window"): it shows on
+  the question in Chat and is kept as Chat's screenshots are. **Where it
+  goes** (`allowed`, `leaves_pc`: the cloud providers always leave the PC,
+  any other server unless it's on this PC): "Let the Voice Assistant see the
+  window in front when you ask about it" (`assistant_screen`, on) for a
+  model on this PC; a cloud model only with "With cloud models too"
+  (`assistant_screen_cloud`, off). The first time a question about the
+  screen meets a cloud model the alert asks once (`ask_once`, kind
+  `assistantScreen`, **Allow** = `alert::ALLOW_SCREEN_CLOUD`;
+  `assistant_screen_asked`), and the model is told it can't see the screen
+  (`not_sent_note`), so it says so rather than guess; a maybe isn't asked
+  about when nothing could go. **With it**: the picture through the typed
+  path's steps (`turn::prepare`; the on-device model loads its projector
+  first, `vision::ensure`) and a line in the question's context saying what
+  it is (`PICTURE_NOTE`, `snip::turn::TurnImages.note`, read by `chat_turn`);
+  a model that can't read images (`vision::reads_images` false, or the
+  projector won't load, or the picture couldn't be fitted) gets the window's
+  text, read on this PC (`snip::ocr::question_with_text`, the screenshot
+  marked `asText`, `TEXT_NOTE`), and the answer names it in its sources
+  (`text_source`: `Source.screen`, "The window's text, read on this PC", a
+  chip that opens nothing; `snip::turn::with_source`); no window or no text:
+  `NO_WINDOW_NOTE`. A server that turns the window's picture down makes that
+  model a "no" (`vision::refused`). Not beside screenshots already waiting
+  in Chat's box (they're what it's about), nor when Yap opens an app. The
+  capsule says "Looking at the window…" meanwhile (`yap-assistant {about:
+  "window"}` while thinking). **Network receipts**: the turn runs as
+  `net::Feature::AssistantScreen` — "Voice Assistant + the window in front ·
+  Groq". Logs: the rule's verdict, sizes and timings, never the question or
+  the screen. Unit-tested (every rule in seven languages, the person's
+  languages, the yes/no request and reply, where it may go); e2e
+  `assistant-screen.spec.js` (fake monitors and a fake window in front
+  through `e2e_snip {start: false}`, `snip::take_fake`: never the real
+  screen).
 
 ## The Chat view
 
@@ -727,7 +837,9 @@ screenshots and their prompts, +, the box, the mic, Send / ■, `ModelChip`).
   carry a globe, a refused action (the safety rule) a shield. The composer (2026-10-20, after Claude
   Code's: one row — **+** (a "Chat options" popover: the Voice replies switch,
   the voice volume slider, Voice settings…), the message box (aria-label
-  "Message"), the mic, and Send only once there's text; an amber dot on the +
+  "Message"), **Think** for a model that can think on request (2026-10-29,
+  `ThinkButton.svelte`: the next question only, `chat/think.rs` above; apart
+  from the prompt chips and Skills), the mic, and Send only once there's text; an amber dot on the +
   while voice replies are on; under the box on the left, quiet, the **model
   chip** (its `quiet` look; never inside +: always in view) — `ModelChip.svelte`, names in `aiModel.js` from
   `ppModels.js` + `providerIcons.js`) shows the model the next message goes
@@ -898,6 +1010,87 @@ screenshots and their prompts, +, the box, the mic, Send / ■, `ModelChip`).
   screenshot" (`snip_start {origin: "chat"}`).
   Search by meaning — local embeddings, Ask across meetings with cited
   passages — is [search.md](./search.md) (2026-10-25; ROADMAP step 3).
+
+## Skills and one-tap prompts (2026-10-29)
+
+Wispr Flow's Notetaker has one-tap prompts in its hub (Coach me, List
+recent to-dos, Write a weekly recap) and **Skills**: saved instructions run
+with `/command` in a meeting's chat or across meetings, the built-ins
+copyable. Yap's, in `chat/skills.rs`:
+
+- **A Skill**: a name, a `/command` (2–32 lowercase letters and digits,
+  single hyphens; not a built-in's, not another of yours: `command_problem`),
+  a line on what it's for, the instructions (≤ 4,000 characters) and where
+  it runs (`runsOn`: `meeting` — a meeting's Ask box, on that meeting —,
+  `meetings` — Chat and Ask across meetings, on all of them — or `both`).
+  **Built in** (`builtins`, in code, never stored): /followup-email (one
+  meeting), /decisions, /risks, /coach (both), /todos, /weekly-recap
+  (across). **Your own** in `skills.json` (`SkillStore`, `Saver` "your
+  Skills", a corrupt file set aside; ≤ 50): `skill_save` (new, a change, or
+  a copy of a built-in: `basedOn`; what only a built-in carries — `gather`,
+  `query`, `chip`, `question` — never comes with a copy), `skill_delete`,
+  `skills_list` (built-ins first); `yap-skills-changed` to every window.
+- **Not the Actions engine** (`notes.rs` `Action`, ActionManager): an
+  action rewrites the note's summary under the note guardrails; a Skill
+  answers in a chat and never changes the note, and has a command and a
+  scope. And actions live in notes.json, which an older Yap rewrites
+  without the fields it doesn't know: a Skill stored there would come back
+  in its action picker as an action that writes over the summary. So
+  Skills have their own file, which an older Yap never opens.
+- **On one meeting**: `meeting_assist::meeting_skill` ([meetings.md](./meetings.md)):
+  fixed guardrails, the meeting as numbered passages, then the
+  instructions last, the answer cited and checked as Ask across meetings'
+  are.
+- **Across the meetings, in Chat**: `chat_send`'s `skill` (its command)
+  → `skills::turn_for` (`Err` for one that runs on one meeting) → the turn
+  runs under `skills::with` (a task-local, as the screenshots' `snip::turn`
+  is, so `chat_turn`'s signature and its other callers stay as they were);
+  `chat_turn` reads `skills::current()`: the turn is asked across the
+  meetings whatever the conversation's scope (a new chat keeps that scope;
+  one about something else stays so), no web or calendar tools, and its
+  passages come from `skills::find`: **`tasks`** (/todos: every open task
+  that's the person's — "You", or one they added — then the ones nobody
+  took on, newest meeting first, each a passage that opens the moment it
+  was said, else the summary's line; tasks added with no meeting aren't
+  numbered), **`you`** (/coach: the latest meeting's talk, the passages
+  where the person talks most, in order), **`week`** (/weekly-recap: each
+  meeting of the week the words name, this one by default, in order — its
+  summary's first passages, else the start of its talk; ≤ 14), else **a
+  search** (`ask::find`) for the words typed with it, else the Skill's own
+  `query`, else "my last meeting". After Ask across meetings' own lines the
+  system prompt adds `llm::SKILL_ACROSS_LEAD` and the Skill's name, command
+  and instructions; the chip says "Ran /todos · 2 open tasks". The answer's
+  checks, sources and pills are Ask across meetings' ([search.md](./search.md)).
+  No model: the passages themselves (`passages_turn`, the Skill's own).
+- **The `/` menu** (`components/SkillMenu.svelte`, `stores/skills.svelte.js`
+  `SkillPicker(where)`, `core/skills.js`): in the notepad's Ask box and
+  the Notes view's Ask bar on a meeting note (`meeting`), Chat's composer
+  and the Meetings view's Ask bar (`meetings`): typing "/" at the start
+  lists the Skills that run there, the command typed so far first, Yap's
+  before yours (`matchSkills`); ↑ ↓, Enter runs the highlighted one, Tab
+  puts it in the box to add words, Esc closes it; the box's
+  `aria-activedescendant` follows the highlight. A sent "/command words"
+  runs it (`splitCommand`, `skillFor`); in Chat the question is saved as
+  typed.
+- **One-tap prompts**: the built-ins with a `chip` — **Coach me**, **List
+  my open to-dos**, **Write a weekly recap** — on Chat's empty thread
+  ("Try asking", then "Or type / for Skills…") and over the Meetings view's
+  Ask bar; a tap sends the Skill's `question` as that Skill (`runPrompt` /
+  `chatRequest {skill}`), an empty chat asked across the meetings from then
+  on. The Meetings view's cycling example questions stay, in its box.
+- **Settings → Assistant → Skills** (`settings/SkillsPage.svelte`): Yap's
+  (Open shows the instructions; **Save a copy** opens the form as yours,
+  "Based on Yap's /decisions", command `my-decisions`), then yours (Edit,
+  Delete behind Yap's confirm dialog), **New Skill** (the command follows
+  the name until you type one; why it can't be one said as you type; Runs
+  on: One meeting / Across meetings / Both). Saved at once to skills.json,
+  not through Settings' auto-saved config.
+- **Tests**: unit (`chat/skills.rs`: the built-ins, commands, save / copy /
+  delete, an older file, each gathering; `meeting_summary/chips.rs`:
+  passages, checks), e2e `meeting-chips.spec.js` (the menu, Enter / Tab /
+  Esc, the built-ins and your own, Settings, Chat's prompts and "/", the
+  Meetings view); prompts measured with `yap.exe eval --chips`
+  ([model-evals.md](../model-evals.md#meeting-chips-and-skills-29-oct-2026)).
 
 ## The context ring (2026-10-25)
 

@@ -177,6 +177,10 @@ impl Shared {
                 *a = id;
             }
         }
+        // How long it was spoken for (words a minute, `stats.rs`).
+        if let Ok(mut s) = self.audio_secs.lock() {
+            *s = Some(audio.len() as f32 / super::TARGET_SAMPLE_RATE as f32);
+        }
 
         // Started before the model finished loading (`Pipeline::start` loads
         // it in the background): wait for it — the bar says "Loading the

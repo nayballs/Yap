@@ -1,9 +1,11 @@
 //! **Reset app** (Settings → Privacy & data): "Clear everything and keep my
 //! settings". What goes ([`GOES`]): the dictation history and its audio,
 //! notes and meetings with their audio, chats and their screenshots, what
-//! Yap remembers, tasks, the search index and the usage counts (and the
+//! Yap remembers, tasks, the search index and the usage counts — AI usage,
+//! Groq's meter and the dictation stats Home and Insights show (and the
 //! pre-meeting briefs, which quote notes and memory). What stays
 //! ([`STAYS`]): config.json — every setting, the dictionary and snippets —,
+//! the person's own Skills (skills.json: setup, like folders and actions),
 //! the writing samples (set up on purpose, like the dictionary), the
 //! downloaded models, the account's sign-in, the calendars, and Yap's
 //! own bookkeeping (tips shown, answers to offers, caches, the log).
@@ -47,13 +49,22 @@ pub const GOES: &[Part] = &[
     Part { id: "memory", label: "What Yap remembers about you", files: &["memory.json"] },
     Part { id: "tasks", label: "Your tasks", files: &["tasks.json"] },
     Part { id: "search", label: "The search index", files: &["search-index/"] },
-    Part { id: "usage", label: "Usage stats: AI usage and Groq's meter", files: &["ai_usage.json", "groq_usage.json"] },
+    // The dictation stats (dictation/stats.rs) go with the other usage counts:
+    // they outlast clearing history on purpose, but a reset is a fresh start,
+    // and they name the apps dictated into. ("Keep history"'s copy in them
+    // stays: config.json has the choice.)
+    Part {
+        id: "usage",
+        label: "Usage stats: your dictation stats, AI usage and Groq's meter",
+        files: &["dictation_stats.json", "ai_usage.json", "groq_usage.json"],
+    },
     Part { id: "briefs", label: "Pre-meeting briefs (your calendars stay connected)", files: &["(calendar.json)"] },
 ];
 
 /// What a reset keeps, as the dialog names it, and its files.
 pub const STAYS: &[Part] = &[
-    Part { id: "settings", label: "Your settings, dictionary and snippets", files: &["config.json", "dictionary_usage.json"] },
+    // Skills are setup, like folders and actions: they stay.
+    Part { id: "settings", label: "Your settings, dictionary and snippets, and your Skills", files: &["config.json", "dictionary_usage.json", "skills.json"] },
     // Set up on purpose, like the dictionary (Settings → Commands).
     Part { id: "samples", label: "Your writing samples", files: &["writing_samples.json"] },
     Part { id: "models", label: "Downloaded speech, AI and voice models", files: &["models/", "llm/"] },
@@ -82,7 +93,7 @@ pub const STAYS: &[Part] = &[
 
 /// The stores whose set-aside copies (`<stem>.corrupt-…`, `config::set_aside`)
 /// go with them: they hold the same content.
-const SET_ASIDE: &[&str] = &["history", "notes", "chats", "memory", "tasks", "ai_usage", "groq_usage"];
+const SET_ASIDE: &[&str] = &["history", "notes", "chats", "memory", "tasks", "dictation_stats", "ai_usage", "groq_usage"];
 
 /// Whether `file` (a name in the data folder) is a set-aside copy of a
 /// store that goes. Pure.
@@ -216,6 +227,7 @@ fn run(app: &AppHandle) -> Result<Done, String> {
     done.tasks = crate::notes::task_store::reset();
     crate::search::index::forget()?;
     crate::search::index::emit(app);
+    crate::dictation::stats::clear();
     crate::ai::usage::store::reset();
     crate::ai::usage::groq::reset();
     done.briefs = crate::calendar::forget_briefs();
@@ -228,7 +240,7 @@ fn run(app: &AppHandle) -> Result<Done, String> {
         }
     }
     // Every window: the stores' own events, then the reset's.
-    for event in ["yap-history-changed", "yap-notes-changed", "yap-tasks-changed"] {
+    for event in ["yap-history-changed", crate::dictation::stats::EVENT, "yap-notes-changed", "yap-tasks-changed"] {
         let _ = app.emit(event, ());
     }
     let _ = app.emit(EVENT, &done);
@@ -293,7 +305,7 @@ mod tests {
     #[test]
     fn what_goes_is_what_was_asked_and_settings_stay() {
         let goes: Vec<&str> = GOES.iter().flat_map(|p| p.files.iter().copied()).collect();
-        for f in ["history.json", "recent-audio/", "notes.json", "meeting-audio/", "chats.json", "chat-images/", "memory.json", "tasks.json", "search-index/", "ai_usage.json"] {
+        for f in ["history.json", "recent-audio/", "notes.json", "meeting-audio/", "chats.json", "chat-images/", "memory.json", "tasks.json", "search-index/", "dictation_stats.json", "ai_usage.json"] {
             assert!(goes.contains(&f), "{f} goes");
         }
         let stays: Vec<&str> = STAYS.iter().flat_map(|p| p.files.iter().copied()).collect();

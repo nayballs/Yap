@@ -4,6 +4,7 @@
 //! recording has left.
 //! How it works: docs/architecture/meetings.md.
 
+pub mod coach_marks;
 pub mod commands;
 pub mod disk_watch;
 pub mod meeting;

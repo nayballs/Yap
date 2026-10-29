@@ -117,6 +117,8 @@ export const SETTINGS_INDEX = [
   // ---- Voice Assistant ----
   { page: 'voice', section: 'Assistant shortcut', label: 'Assistant shortcut', desc: 'Ask out loud from any app', keywords: 'shortcut hotkey assistant voice ask', anchor: 'assistant-shortcut' },
   { page: 'voice', section: 'Assistant shortcut', label: 'Show the answer on the Yap bar', desc: 'Your question and its answer above the bar', keywords: 'answer card bar', anchor: 'answer-card', toggle: 'assistantAnswerCard' },
+  { page: 'voice', section: 'Assistant shortcut', label: 'Let the Voice Assistant see the window in front when you ask about it', desc: '“What\'s this error?” takes a screenshot of the window you were in', keywords: 'screen screenshot window see look vision error page chart assistant', anchor: 'assistant-screen', toggle: 'assistantScreen' },
+  { page: 'voice', section: 'Assistant shortcut', label: 'With cloud models too', desc: 'The window in front goes to a cloud model too', keywords: 'screen screenshot window cloud privacy upload assistant', anchor: 'assistant-screen-cloud', toggle: 'assistantScreenCloud' },
   { page: 'voice', section: 'Read aloud', label: 'Read aloud shortcut', desc: 'Select text in any app and hear it, word by word on the Yap bar', keywords: 'read aloud shortcut hotkey selection speak text to speech tts dyslexia reading karaoke', anchor: 'read-shortcut' },
   { page: 'voice', section: 'Opening apps', label: 'Let Yap open apps when you ask', desc: '“Open Spotify”', keywords: 'open apps launch start programs', anchor: 'open-apps', toggle: 'openApps' },
   { page: 'voice', section: 'Opening apps', label: 'Nicknames', desc: 'Say a nickname, and Yap opens that app', keywords: 'open apps alias nickname', anchor: 'app-nicknames' },
@@ -145,6 +147,11 @@ export const SETTINGS_INDEX = [
   { page: 'memory', section: 'Import, export and clear', label: 'Import memory from other AI providers', desc: 'What ChatGPT, Claude or Gemini remembers', keywords: 'memory import chatgpt claude gemini bring in', anchor: 'memory-import' },
   { page: 'memory', section: 'Import, export and clear', label: 'Export memory', desc: 'A .zip of Markdown, a file per section', keywords: 'memory export download backup markdown zip', anchor: 'memory-export' },
   { page: 'memory', section: 'Import, export and clear', label: 'Clear all memory', desc: 'Forget everything Yap remembers', keywords: 'memory clear delete forget erase reset wipe', anchor: 'memory-clear' },
+
+  // Skills (SkillsPage.svelte, chat/skills.rs)
+  { page: 'skills', section: "Yap's Skills", label: "Yap's Skills", desc: '/decisions, /risks, /coach and more: open one, or save a copy', keywords: 'skills slash commands saved prompts instructions decisions risks follow-up email coach todos weekly recap', anchor: 'skills-builtin' },
+  { page: 'skills', section: 'Your Skills', label: 'Your Skills', desc: 'Saved instructions you run with /name', keywords: 'skills slash commands saved prompts instructions custom my own templates', anchor: 'skills-yours' },
+  { page: 'skills', section: 'Your Skills', label: 'New Skill', desc: 'A name, a /command and what it should do', keywords: 'skills create new add slash command prompt template', anchor: 'skills-add' },
 
   // ---- Speech-to-Text ----
   { page: 'models', section: 'Speech model', label: 'Speech model', desc: 'The model that turns your voice into text', keywords: 'speech to text transcription model parakeet whisper canary moonshine download', anchor: 'stt-model' },
@@ -182,8 +189,8 @@ export const SETTINGS_INDEX = [
   { page: 'privacy', section: 'What leaves this PC', label: 'What leaves this PC', desc: 'Feature by feature, as Yap is set up', keywords: 'privacy cloud data sent private', anchor: 'leaves' },
   { page: 'privacy', section: 'What leaves this PC', label: 'Send the text before the cursor to cleanup', desc: 'A sentence or two, to a cleanup model off this PC', keywords: 'cursor context text before field sentence cleanup cloud privacy send', anchor: 'cursor-context', toggle: 'cursorContextCloud' },
   { page: 'privacy', section: 'Network connections', label: 'Network connections', desc: 'Every connection Yap made in the last 7 days, and why', keywords: 'network connections receipts internet traffic hosts cloud sent received requests online offline', anchor: 'connections' },
-  { page: 'privacy', section: 'History', label: 'Keep dictation history', desc: 'Kept only on this PC', keywords: 'history dictations saved stats', anchor: 'history', toggle: 'historyEnabled' },
-  { page: 'privacy', section: 'History', label: 'Clear history', desc: 'Removes every saved dictation', keywords: 'delete erase history', anchor: 'clear-history' },
+  { page: 'privacy', section: 'History', label: 'Keep dictation history', desc: 'Always, for 24 hours, or never', keywords: 'history dictations saved stats keep retention delete 24 hours day never auto-delete', anchor: 'history' },
+  { page: 'privacy', section: 'History', label: 'Clear history', desc: 'Removes every saved dictation; your stats stay', keywords: 'delete erase history', anchor: 'clear-history' },
   { page: 'privacy', section: 'History', label: 'Keep recent dictation audio', desc: 'A day of it, to run a dictation again', keywords: 'audio recordings voice run again retry lost failed recent', anchor: 'recent-audio', toggle: 'keepRecentAudio' },
   { page: 'privacy', section: 'History', label: 'Clear recent audio', desc: 'Deletes the kept dictation audio', keywords: 'delete erase audio recordings voice', anchor: 'clear-recent-audio' },
   { page: 'privacy', section: 'Meetings', label: 'Delete meeting transcripts after', desc: 'Keeps their notes, summaries and tasks', keywords: 'retention delete transcripts meetings days 30 90 365 privacy audio old automatically', anchor: 'meeting-transcripts' },

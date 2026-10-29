@@ -272,6 +272,10 @@ pub fn run() {
             dictation::commands::delete_history_entry,
             dictation::commands::get_stats,
             dictation::commands::home_snapshot,
+            dictation::stats::welcome_back_dismiss,
+            dictation::stats::share::insights_card_copy,
+            dictation::stats::share::insights_card_save,
+            dictation::history::keep::history_counts,
             pasting::text_injector::paste_last_transcript,
             pasting::as_said::as_said_swap,
             pasting::as_said::as_said_paste_entry,
@@ -376,6 +380,7 @@ pub fn run() {
             chat::commands::chats_archived,
             chat::commands::chat_archive,
             chat::commands::chat_send,
+            chat::think::chat_think_info,
             chat::stream::stream_stop,
             ai::ai_model::ai_model_status,
             ai::ai_model::chat_set_model,
@@ -457,10 +462,19 @@ pub fn run() {
             meetings::meeting_audio::meeting_job_cancel,
             meetings::meeting_assist::meeting_catch_up,
             meetings::meeting_assist::meeting_assist,
+            meetings::meeting_assist::meeting_skill,
+            meetings::meeting_assist::meeting_longer,
+            meetings::coach_marks::notepad_coach_marks,
+            meetings::coach_marks::notepad_coach_mark_shown,
+            chat::skills::skills_list,
+            chat::skills::skill_save,
+            chat::skills::skill_delete,
             chat::note_chats::note_chat,
             chat::note_chats::note_chat_open,
             chat::note_chats::note_chat_add,
+            chat::note_chats::note_chat_rename,
             notes::note_edits::note_summary_restore,
+            notes::note_edits::note_summary_put_back,
             notes::note_edits::note_summary_rate,
             speakers::speaker_rename,
             speakers::speaker_rename_lines,
@@ -648,6 +662,8 @@ pub fn run() {
             shell::theme::e2e_webview_background,
             #[cfg(debug_assertions)]
             dictation::coaching::e2e_coaching_reset,
+            #[cfg(debug_assertions)]
+            dictation::stats::e2e_stats_set,
             #[cfg(debug_assertions)]
             ai::local_llm::e2e_local_llm_serving,
             #[cfg(debug_assertions)]
@@ -839,6 +855,9 @@ pub fn run() {
             dictation::mics::start(&handle);
             // The laptop's lid (lid.rs): closed, its own mic goes last.
             dictation::lid::start(&handle);
+            // The stats (Home, Insights) loaded, history they haven't
+            // counted counted, before any dictation (stats.rs).
+            dictation::stats::init();
             // Start the dictation pipeline (audio capture + STT engine). It
             // runs without a microphone too (see `Pipeline::start`).
             let pipeline = dictation::pipeline::Pipeline::start(handle.clone(), cfg.clone());
@@ -851,6 +870,9 @@ pub fn run() {
             // Recent dictations' audio past its time goes (recent_audio.rs),
             // and one Yap stopped transcribing (a crash) is listed as failed.
             dictation::recent_audio::init(&handle);
+            // "Keep history: 24 hours": older dictations go, now and hourly
+            // (history/keep.rs).
+            dictation::history::keep::init(&handle);
             // Meeting audio past its days goes, and what a crash left of a
             // meeting is offered to transcribe (meeting_audio.rs).
             meetings::meeting_audio::init(&handle);

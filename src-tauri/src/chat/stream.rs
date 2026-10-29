@@ -22,7 +22,10 @@
 //!   tool call (→ a chip, the text never shown) or about a sentence of
 //!   answer ([`releases`]); a search that must come first shows none of
 //!   its text, only its call ([`ChipsOnly`]); reasoning blocks are hidden
-//!   when the scope says so; the text goes out at most every [`MIN_GAP`].
+//!   when the scope says so; the text goes out at most every [`MIN_GAP`];
+//!   a question asked to think it through (`think.rs`) shows its thinking
+//!   apart from the answer ([`Event::Thinking`]: `reasoning_content`, or
+//!   `reasoning`, deltas).
 //! - **The watcher** ([`Sink`]): the Chat view's channel (`chat_send`), the
 //!   notepad's, the Voice Assistant (speaks sentence by sentence), a model
 //!   evaluation (times the first words). [`Watch`] keeps what was shown, for
@@ -75,6 +78,9 @@ pub enum Event {
     Chips { chips: Vec<String>, sources: Vec<Source>, web: bool },
     /// A model on this PC stepped aside for a dictation (`true`), or goes on.
     Waiting { waiting: bool },
+    /// The model's thinking so far, whole (a question asked to think it
+    /// through, `think.rs`): shown folded, apart from the answer.
+    Thinking { text: String },
 }
 
 /// Who watches a stream.
@@ -230,30 +236,75 @@ pub struct Step<'a> {
     released: bool,
     tool_called: bool,
     last_sent: Option<Instant>,
+    /// Its thinking (a question asked to think it through), and when it
+    /// was last sent; `thought_sent`: all of it has been.
+    thinking: String,
+    thinking_at: Option<Instant>,
+    thought_sent: bool,
 }
 
 impl<'a> Step<'a> {
     pub fn new(sink: &'a dyn Sink, tools_offered: bool, disable_thinking: bool) -> Step<'a> {
-        Step { sink, tools_offered, disable_thinking, raw: String::new(), shown: None, released: false, tool_called: false, last_sent: None }
+        Step {
+            sink,
+            tools_offered,
+            disable_thinking,
+            raw: String::new(),
+            shown: None,
+            released: false,
+            tool_called: false,
+            last_sent: None,
+            thinking: String::new(),
+            thinking_at: None,
+            thought_sent: true,
+        }
     }
 
-    /// The text as shown: reasoning out (when the scope says so), gpt-oss's
-    /// "【1】" citations as Yap's "[1]".
+    /// The text as shown: reasoning out (when the scope says so — and a
+    /// thinking budget's end tag, always), gpt-oss's "【1】" citations as
+    /// Yap's "[1]".
     fn visible(&self) -> String {
-        let t = if self.disable_thinking { without_thinking(&self.raw) } else { self.raw.clone() };
+        let t = if self.disable_thinking { without_thinking(&self.raw) } else { crate::chat::think::tidy(&self.raw) };
         crate::web::bracket_citations(t.trim())
+    }
+
+    /// The thinking so far to the page (at most every [`MIN_GAP`], unless
+    /// `force`).
+    fn send_thinking(&mut self, force: bool) {
+        if self.thought_sent || (!force && self.thinking_at.is_some_and(|t| t.elapsed() < MIN_GAP)) {
+            return;
+        }
+        self.thinking_at = Some(Instant::now());
+        self.thought_sent = true;
+        // After the turn's earlier steps' (a tool loop thinks at each).
+        let before = crate::chat::think::so_far();
+        let text = match (before.is_empty(), self.thinking.trim()) {
+            (true, now) => now.to_string(),
+            (false, "") => before,
+            (false, now) => format!("{before}\n\n{now}"),
+        };
+        self.sink.send(Event::Thinking { text });
     }
 
     pub fn on(&mut self, d: Delta<'_>) {
         match d {
+            Delta::Reasoning(s) => {
+                crate::chat::think::tick();
+                self.thinking.push_str(s);
+                self.thought_sent = false;
+                self.send_thinking(false);
+            }
             Delta::Content(s) => {
                 if self.tool_called {
                     return;
                 }
+                // The thinking's end, whole, before the answer's first words.
+                self.send_thinking(true);
                 self.raw.push_str(s);
                 self.send_text(false);
             }
             Delta::ToolCall(name) => {
+                self.send_thinking(true);
                 if !self.tool_called {
                     self.tool_called = true;
                     // Text shown before the call wasn't the answer.
@@ -274,6 +325,8 @@ impl<'a> Step<'a> {
         self.raw.clear();
         self.released = false;
         self.tool_called = false;
+        self.thinking.clear();
+        self.thought_sent = true;
     }
 
     fn send_text(&mut self, force: bool) {
@@ -723,6 +776,8 @@ pub enum Piece {
     Content(String),
     /// A tool call began (its name).
     Call(String),
+    /// More of the model's thinking, apart from the answer.
+    Reasoning(String),
 }
 
 /// `chat.completion.chunk`s → the whole assistant message, as
@@ -730,6 +785,9 @@ pub enum Piece {
 #[derive(Debug, Default)]
 pub struct Assembler {
     content: String,
+    /// The thinking it sent apart (`reasoning_content`: llama.cpp; or
+    /// `reasoning`: Groq, OpenRouter) — never part of the message.
+    reasoning: String,
     calls: Vec<PartialCall>,
     finish: Option<String>,
     usage: Value,
@@ -839,6 +897,12 @@ impl Assembler {
         for choice in v["choices"].as_array().into_iter().flatten() {
             // A server that sends `message` in its chunks, not `delta`.
             let delta = if choice["delta"].is_object() { &choice["delta"] } else { &choice["message"] };
+            // Thinking, apart from the answer (a question asked to think it
+            // through).
+            if let Some(r) = delta["reasoning_content"].as_str().or_else(|| delta["reasoning"].as_str()).filter(|r| !r.is_empty()) {
+                self.reasoning.push_str(r);
+                out.push(Piece::Reasoning(r.to_string()));
+            }
             if let Some(s) = delta["content"].as_str() {
                 if !s.is_empty() && !self.looped {
                     self.content.push_str(s);
@@ -929,6 +993,11 @@ impl Assembler {
     /// Chunks read so far.
     pub fn chunks(&self) -> usize {
         self.chunks
+    }
+
+    /// The thinking it sent apart from the answer ("" when none).
+    pub fn reasoning(&self) -> &str {
+        &self.reasoning
     }
 
     /// The assistant message, as a non-streamed answer has it: content
@@ -1040,6 +1109,45 @@ mod tests {
         assert_eq!(msg["content"].as_str().unwrap(), format!("Here is what I found.\n{BLOCK}"));
         // Anything after it is ignored.
         assert!(asm.push(&chunk("more")).unwrap().is_empty());
+    }
+
+    #[test]
+    fn thinking_sent_apart_is_never_the_answer() {
+        // llama.cpp's `reasoning_content`, then the answer; Groq's and
+        // OpenRouter's `reasoning`.
+        let mut asm = Assembler::default();
+        let think = |s: &str| json!({ "choices": [{ "delta": { "reasoning_content": s } }] }).to_string();
+        let say = |s: &str| json!({ "choices": [{ "delta": { "content": s } }] }).to_string();
+        assert_eq!(asm.push(&think("The ball is x. ")).unwrap(), vec![Piece::Reasoning("The ball is x. ".into())]);
+        asm.push(&think("x + x + 1 = 1.10")).unwrap();
+        asm.push(&say("The ball costs 5 cents.")).unwrap();
+        asm.push(&json!({ "choices": [{ "delta": {}, "finish_reason": "stop" }] }).to_string()).unwrap();
+        let msg = asm.message().unwrap();
+        assert_eq!(msg["content"], "The ball costs 5 cents.");
+        assert!(msg.get("reasoning_content").is_none());
+        assert_eq!(asm.reasoning(), "The ball is x. x + x + 1 = 1.10");
+        let mut groq = Assembler::default();
+        let pieces = groq.push(&json!({ "choices": [{ "delta": { "reasoning": "Hmm." } }] }).to_string()).unwrap();
+        assert_eq!(pieces, vec![Piece::Reasoning("Hmm.".into())]);
+
+        // A step shows it as thinking, then the answer — and a thinking
+        // budget's end tag, should it slip in, never.
+        let log = Log::default();
+        let mut s = Step::new(&log, false, false);
+        s.on(Delta::Reasoning("First, "));
+        s.on(Delta::Reasoning("the ball."));
+        s.on(Delta::Content("</think>\n\nThe ball costs 5 cents."));
+        s.end(true);
+        let events = log.0.lock().unwrap().clone();
+        let thinking: Vec<&str> = events.iter().filter_map(|e| if let Event::Thinking { text } = e { Some(text.as_str()) } else { None }).collect();
+        assert_eq!(thinking.last(), Some(&"First, the ball."));
+        assert_eq!(log.texts().last().map(String::as_str), Some("The ball costs 5 cents."));
+        let first_text = events.iter().position(|e| matches!(e, Event::Text { .. })).unwrap();
+        let last_thought = events.iter().rposition(|e| matches!(e, Event::Thinking { .. })).unwrap();
+        assert!(last_thought < first_text, "the thinking, whole, before the answer");
+        assert!(events.iter().any(|e| matches!(e, Event::Thinking { .. })));
+        // On the page's wire.
+        assert_eq!(serde_json::to_value(Event::Thinking { text: "x".into() }).unwrap(), json!({ "kind": "thinking", "text": "x" }));
     }
 
     /// Every event a sink got.

@@ -29,6 +29,9 @@
   import { copyText } from '../core/itemMenus.js';
   import { noteMarkdown } from '../core/notepadText.js';
   import { meetingAudio, refreshAudio, exportAudio, initMeetingAudio, findSpeakers, runningJob, jobLine, cancelJob } from '../stores/meetingAudio.svelte.js';
+  import { skills, SkillPicker } from '../stores/skills.svelte.js';
+  import { promptChips } from '../core/skills.js';
+  import SkillMenu from '../components/SkillMenu.svelte';
 
   // `onnavigate(view)` switches the main window's view; `onopensettings(section)`;
   // `onopennote({id, line, ts, field})` opens a moment of a meeting or note
@@ -58,6 +61,13 @@
   ];
   let askText = $state('');
   let askIndex = $state(0);
+  // The one-tap prompts over the Ask bar, and "/" for Skills (chat/skills.rs):
+  // both open Chat with the question asked across the meetings. (The
+  // examples above still cycle in the box: they show what to ask.)
+  const prompts = $derived(promptChips(skills.list));
+  const picker = new SkillPicker('meetings');
+  $effect(() => picker.update(askText));
+  let askEl = $state(null);
 
   const connected = $derived(calendar.connections.length > 0);
   const dayKey = (secs) => new Date(secs * 1000).toDateString();
@@ -324,8 +334,30 @@
     e?.preventDefault();
     const text = askText.trim() || ASK_EXAMPLES[askIndex];
     askText = '';
-    chatRequest.pending = { text, scope: 'meetings' };
+    // "/decisions last week": that Skill, across the meetings.
+    const run = picker.parse(text);
+    chatRequest.pending = { text, scope: 'meetings', ...(run ? { skill: run.skill.command } : {}) };
     onnavigate('chat');
+  }
+  /** A one-tap prompt: its question, asked in Chat as its Skill. */
+  function askPrompt(skill) {
+    chatRequest.pending = { text: skill.question, scope: 'meetings', skill: skill.command };
+    onnavigate('chat');
+  }
+  /** The "/" menu: Enter runs the Skill in Chat, Tab puts it in the box. */
+  function pickSkill(skill, run) {
+    if (run) {
+      askText = '';
+      chatRequest.pending = { text: `/${skill.command}`, scope: 'meetings', skill: skill.command };
+      onnavigate('chat');
+    } else {
+      askText = `/${skill.command} `;
+      askEl?.focus();
+    }
+  }
+  function onAskKeydown(e) {
+    const picked = picker.key(e);
+    if (picked?.skill) pickSkill(picked.skill, picked.run);
   }
 
   /** "Today, 6 Oct", "Yesterday, 5 Oct", "Sat, 3 Oct" (a past note's day). */
@@ -637,11 +669,32 @@
     </div>
   </div>
 
+  <!-- One-tap prompts over the Ask bar (chat/skills.rs): each opens Chat
+       with its question asked across the meetings. -->
+  {#if prompts.length}
+    <div class="askprompts" role="group" aria-label="Try asking">
+      {#each prompts as p (p.id)}
+        <button type="button" class="askprompt" onclick={() => askPrompt(p)}>{p.chip}</button>
+      {/each}
+    </div>
+  {/if}
   <!-- Wispr's Ask bar: example questions cycle in the placeholder; the
-       question opens in Chat, grounded in your meeting notes. -->
+       question opens in Chat, grounded in your meeting notes; "/" lists
+       the Skills that run across the meetings. -->
   <form class="askbar" onsubmit={ask}>
+    <SkillMenu {picker} onpick={pickSkill} />
     <svg class="askicon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9z" /><path d="M19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8z" /></svg>
-    <input placeholder={ASK_EXAMPLES[askIndex]} aria-label="Ask about your meetings" bind:value={askText} />
+    <input
+      placeholder={ASK_EXAMPLES[askIndex]}
+      aria-label="Ask about your meetings"
+      title="Type / for Skills"
+      aria-autocomplete="list"
+      aria-controls={picker.open ? 'skill-list' : undefined}
+      aria-activedescendant={picker.open ? `skill-opt-${picker.active}` : undefined}
+      bind:this={askEl}
+      bind:value={askText}
+      onkeydown={onAskKeydown}
+    />
     <button type="button" class="pastchats" onclick={() => onnavigate('chat')}>
       Past chats
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 17 17 7M8 7h9v9" /></svg>
@@ -1349,7 +1402,42 @@
   }
 
   /* The Ask bar, docked to the bottom of the view (Wispr's hub). */
+  /* The one-tap prompts, just over the Ask bar. */
+  .askprompts {
+    flex: 0 0 auto;
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 6px;
+    margin: 0 auto 8px;
+    width: min(780px, calc(100% - 48px));
+  }
+  .askprompt {
+    height: 26px;
+    padding: 0 11px;
+    border: 1px solid var(--yap-border-subtle);
+    border-radius: var(--yap-r-full);
+    background: var(--yap-s1);
+    color: var(--yap-fg-80);
+    font: inherit;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    transition:
+      background 0.15s,
+      border-color 0.15s;
+  }
+  .askprompt:hover {
+    background: var(--yap-s2);
+    border-color: var(--yap-border-hover);
+    color: var(--yap-fg);
+  }
+  .askprompt:focus-visible {
+    outline: 2px solid var(--yap-focus-ring);
+    outline-offset: 2px;
+  }
   .askbar {
+    position: relative;
     flex: 0 0 auto;
     display: flex;
     align-items: center;

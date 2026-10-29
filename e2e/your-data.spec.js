@@ -142,6 +142,7 @@ test('Download your data: everything in one .zip, the audio with the tick box, n
     'README.txt',
     'history/dictations.csv',
     'history/history.json',
+    'history/dictation-stats.json',
     'notes/notes.json',
     'chats/chats.json',
     'tasks.json',
@@ -250,6 +251,8 @@ test('Reset app: names what goes, clears it everywhere, keeps the settings; no r
   await expectStore(yap, 'config.json', (c) => c.ppApiKey === GROQ_KEY && c.webSearchKeys.exa === EXA_KEY && c.dictionary.length === 2 && c.aboutName === 'Robin Example');
   const data = yap.dataDir;
   expect(fs.existsSync(path.join(data, 'history.json'))).toBe(false);
+  // The dictation stats go with the other usage stats (dictation/stats.rs).
+  await expectStore(yap, 'dictation_stats.json', (s) => s.days.length === 0);
   for (const dir of ['meeting-audio', 'recent-audio', 'search-index']) {
     expect(fs.existsSync(path.join(data, dir)), dir).toBe(false);
   }
@@ -270,4 +273,5 @@ test('Reset app: names what goes, clears it everywhere, keeps the settings; no r
   await expectStore(yap, 'notes.json', (s) => s.notes.length === 1 && s.notes[0].title === 'Fresh start');
   await yap.invoke('e2e_dictate_audio', { seconds: 1 });
   await expectStore(yap, 'history.json', (h) => h.length === 1 && !JSON.stringify(h).includes('leeks'));
+  await expectStore(yap, 'dictation_stats.json', (s) => s.days.reduce((n, d) => n + d.dictations, 0) === 1);
 });

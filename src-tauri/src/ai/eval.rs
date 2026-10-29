@@ -28,6 +28,8 @@ use serde_json::Value;
 #[cfg(debug_assertions)]
 mod brief;
 #[cfg(debug_assertions)]
+mod chips;
+#[cfg(debug_assertions)]
 mod cleanup;
 #[cfg(debug_assertions)]
 mod languages;

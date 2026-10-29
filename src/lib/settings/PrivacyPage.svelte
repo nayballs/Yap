@@ -50,6 +50,52 @@
   let portable = $state(false);
   let logInfo = $state(null); // { dir, file } from log_info
   let historyCount = $state(null);
+  // Dictations older than a day ("Keep history: 24 hours" deletes them; it asks first).
+  let olderThanDay = $state(0);
+  // Keep history (dictation/history/keep.rs): 'always' | 'day' | 'never', from
+  // historyEnabled (what an older Yap reads) and historyKeep.
+  const keepOf = (c) => (c.historyEnabled === false ? 'never' : c.historyKeep === 'day' ? 'day' : 'always');
+  const KEEP_HISTORY = [
+    { value: 'always', label: 'Always' },
+    { value: 'day', label: '24 hours' },
+    { value: 'never', label: 'Never' },
+  ];
+  // What the select shows: the choice saved (set back while "24 hours" asks first).
+  let keepShown = $state('always');
+  $effect(() => {
+    keepShown = keepOf(cfg);
+  });
+  const keepDesc = $derived(
+    keepShown === 'day'
+      ? 'Dictations older than 24 hours are deleted, with their audio'
+      : keepShown === 'never'
+        ? "New dictations aren't kept. Home shows nothing new"
+        : 'Your dictations, kept only on this PC. They show in Home'
+  );
+  function applyKeep(v) {
+    cfg.historyEnabled = v !== 'never';
+    cfg.historyKeep = v;
+  }
+  /** Keep history changed: "24 hours" asks first when it deletes some now. */
+  function chooseKeep(v, e) {
+    const was = keepOf(cfg);
+    if (v === was) return;
+    if (v !== 'day' || !olderThanDay) return applyKeep(v);
+    keepShown = was;
+    const n = olderThanDay;
+    askConfirm({
+      title: 'Keep history for 24 hours?',
+      body: `${n.toLocaleString()} ${n === 1 ? 'dictation is' : 'dictations are'} older than a day: ${n === 1 ? 'it goes' : 'they go'} now, with ${n === 1 ? 'its' : 'their'} audio. From now on, each goes a day after you say it. Your stats in Insights stay. This can't be undone.`,
+      confirmLabel: 'Keep 24 hours',
+      busyLabel: 'Deleting…',
+      returnFocus: e?.target ?? null,
+      run: () => {
+        applyKeep('day');
+        // The sweep runs as the setting saves; the count follows it.
+        setTimeout(loadCount, 1500);
+      },
+    });
+  }
   // Recent dictation audio (dictation/recent_audio.rs): { count, bytes }.
   let audio = $state(null);
   // Chat's screenshots (Snip to Chat, snip/images.rs): { count, bytes, folder }.
@@ -129,8 +175,9 @@
   async function loadCount() {
     loadAudio();
     try {
-      const s = await invoke('get_stats');
-      historyCount = typeof s?.totalTranscriptions === 'number' ? s.totalTranscriptions : null;
+      const c = await invoke('history_counts');
+      historyCount = typeof c?.entries === 'number' ? c.entries : null;
+      olderThanDay = c?.olderThanDay || 0;
     } catch {
       historyCount = null;
     }
@@ -293,7 +340,7 @@
     const btn = e?.currentTarget;
     askConfirm({
       title: 'Clear your dictation history?',
-      body: 'Every saved dictation goes from this PC, with the stats in Insights. This can’t be undone.',
+      body: 'Every saved dictation goes from this PC, with its audio. Your stats in Home and Insights stay: they’re numbers only, never what you said. This can’t be undone.',
       confirmLabel: 'Clear history',
       busyLabel: 'Clearing…',
       returnFocus: btn,
@@ -419,12 +466,13 @@
 </Group>
 
 <Group title="History" id="settings-history">
-  <Row setting="history">
-    <Toggle
-      bind:checked={cfg.historyEnabled}
-      label="Keep dictation history"
-      desc="Your dictations, kept only on this PC. They show in Home and Insights"
-    />
+  <Row
+    label="Keep dictation history"
+    desc={keepDesc}
+    hint="Your stats in Home and Insights are kept either way: words, times and the apps you dictate into, never what you said. Turning history off keeps what's there until you clear it."
+    setting="history"
+  >
+    <Select bind:value={keepShown} options={KEEP_HISTORY} ariaLabel="Keep dictation history" onchange={chooseKeep} />
   </Row>
   <Row
     label="Clear history"

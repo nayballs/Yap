@@ -27,8 +27,17 @@ use serde_json::{json, Value};
 
 use super::record;
 
-/// The two ways a screenshot goes.
+/// The two ways a screenshot goes (a run's default).
 pub const PATHS: [&str; 2] = ["picture", "text"];
+
+/// …and the Voice Assistant's look at the window in front
+/// (`chat/assistant/screen.rs`, `--vision-path window`): the picture with
+/// the line saying what it is, asked out loud (scope "assistant", short
+/// spoken answers).
+pub const ALL_PATHS: [&str; 3] = ["picture", "text", "window"];
+
+/// `--think`: each question thought through (Chat's Think, `chat/think.rs`).
+pub static THINK: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -154,14 +163,23 @@ async fn ask(c: &Case, png: &[u8], path: &str, ep: &Endpoint<'_>) -> (Result<Str
             let (q, images) = crate::snip::ocr::question_with_text(&ids, &c.question).await?;
             (q, crate::snip::turn::TurnImages { images, ..Default::default() })
         } else {
-            (c.question.clone(), crate::snip::turn::prepare(&ids, ep.provider, ep.base_url).await?)
+            let mut prepared = crate::snip::turn::prepare(&ids, ep.provider, ep.base_url).await?;
+            if path == "window" {
+                prepared.note = Some(crate::chat::assistant::screen::PICTURE_NOTE.into());
+            }
+            (c.question.clone(), prepared)
         };
+        let (scope, by_voice) = if path == "window" { (Some("assistant"), true) } else { (None, false) };
         let turn = crate::snip::turn::with(
             turn_images,
-            Box::pin(crate::chat::turn::chat_turn(None, None, &question, None, false, |_, _| {}, None, None)),
-        )
-        .await?;
-        Ok::<String, String>(turn.reply)
+            Box::pin(crate::chat::turn::chat_turn(None, None, &question, scope, by_voice, |_, _| {}, None, None)),
+        );
+        let thinking = THINK.load(std::sync::atomic::Ordering::SeqCst);
+        let (turn, thought) = crate::chat::think::with(thinking, turn).await;
+        if let Some(t) = thought {
+            println!("    thought {} characters, {:.1} s", t.text.chars().count(), t.ms as f64 / 1000.0);
+        }
+        Ok::<String, String>(turn?.reply)
     };
     record::begin_turn();
     let out = asked.await;
