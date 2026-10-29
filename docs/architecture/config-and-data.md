@@ -164,7 +164,12 @@
   override per app), call detection:
   meeting_detection + meeting_detect_style ("popup"|"quiet") +
   meeting_detect_apps (app id → bool overrides of `meeting_detect::APPS`'
-  defaults) + meeting_auto_start (the opt-in 10-second countdown, off),
+  defaults) + meeting_auto_start (the opt-in 10-second countdown, off) +
+  meeting_auto_start_apps (2026-10-29: app ids whose calls count down
+  and start notes by themselves, whatever meeting_auto_start says — a yes
+  to "Start notes automatically for Teams calls?", asked once,
+  `calls/meeting_detect.rs`; empty by default; an older Yap drops it on its
+  save and those calls ask again),
   meeting guard rails: meeting_hide_from_capture (true),
   meeting_max_minutes (120; 0 = no limit), meeting_call_end ("ask"|"stop"),
   meeting_end_when_quiet ("End notes when the meeting goes quiet", true),
@@ -432,7 +437,10 @@
   `summaryAi` (Yap's own summary, for "Back to Yap's summary") and
   `summaryRating` (`{up, why, ms}`, the person's 👍 / 👎 — never sent); an
   older Yap on the same data drops both when it saves, never the person's
-  summary (`enhancedContent`). The built-in Action Plan's `prompt` moves on
+  summary (`enhancedContent`). Since 2026-10-29 a meeting transcript may
+  hold "Your PC was asleep for 12 min" (a line with `asleepMs`, no text,
+  `meetings/sleep.rs`); an older Yap's save drops the field, leaving an
+  empty "You" line (shown as an empty bubble there; nothing else lost). The built-in Action Plan's `prompt` moves on
   to the recap-and-reasons layout once, when it's still an earlier default
   word for word (`notes::seed_missing_builtins`: no field renamed or
   removed).
@@ -491,6 +499,13 @@
   showed (`tap`, `longHold`, `chord` — "Hold only {key}" —, `longDictation`
   — "Try meeting notes", once ever), when the last did, and whether
   double-tap has been used (`dictation/coaching.rs`).
+- Call apps: `%APPDATA%/yap/call_apps.json` (2026-10-29,
+  `calls/meeting_detect/auto_offer.rs`) — how many meetings were recorded
+  from each call app's calls and the apps already asked "Start notes
+  automatically for Teams calls?": `{recorded: {teams: 3}, offered:
+  ["teams"]}`. Counts only. A file of its own: an older Yap never reads or
+  writes it. Safe to delete (the counting starts again; an app may be asked
+  again). Reset app keeps it (an answer to an offer).
 - Mic tips: `%APPDATA%/yap/mic_tips.json` (2026-10-29,
   `dictation/mic_tips.rs`) — how often each mic-quality tip ("Yap didn't
   hear you clearly": quiet, noisy, clipped, a Bluetooth headset in its call

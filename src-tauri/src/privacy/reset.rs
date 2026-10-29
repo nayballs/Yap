@@ -61,6 +61,7 @@ pub const STAYS: &[Part] = &[
         files: &[
             "hints.json",
             "mic_tips.json",
+            "call_apps.json",
             "notices.json",
             "word_suggestions.json",
             "snippet_suggestions.json",

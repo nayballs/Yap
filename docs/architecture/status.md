@@ -190,6 +190,36 @@ its notes.json shape). Unit- and e2e-tested (`notes-edit`, `tasks`,
 exported hour-long meeting opened in other apps, the Save dialog itself
 (test runs name the file), retention over a real year of meetings.
 
+**Smarter about the call itself** (2026-10-29,
+[call-detection-and-guards.md](./call-detection-and-guards.md),
+[meetings.md](./meetings.md)): **"Teams is using Contoso H2 but Yap is using
+Northwind Audio"** (Windows' audio sessions per microphone; once per call
+and pair; **Use Contoso H2** for this meeting; never a software mic or a
+closed laptop's own); **muted in the call**, "Yap can't hear your mic"
+stays quiet (the call's mute button through UI Automation, or its mic
+muted in Windows; read only while "You" is quiet); **the PC asleep**
+mid-meeting: paused cleanly, "Your PC was asleep for 12 min" in the
+transcript in its place, Resume / Summarise on wake; **"Switch to Zoom?"**
+when another app's call starts while one records; **"Stop taking notes?"**
+instead of an ending when the call still looks on (it still plays, its tab
+is still there), and the same app's call back within 2 minutes of Yap's
+own stop carried on in the same note; **"Start notes automatically for
+Teams calls?"** once, after the third meeting of an app's calls stopped by
+hand. Network loss mid-meeting leaves no gap (speech is transcribed on
+this PC); nothing to mark. Unit-tested (the call's mic, a mismatch once per
+pair, the mute buttons, the line's place, the 2-minute window, the switch
+and the ending's rules, the offer's rule) and e2e-tested with stand-ins
+for Windows (`call-smarts.spec.js`: `e2e_call_audio`, `e2e_sleep`,
+`meeting_detect_simulate`). **Not yet tried with a real call**: which
+process holds Teams' (new Teams), Zoom's and Meet's audio session, and
+whether they keep it active while muted; the mute buttons' real names and
+whether Chromium exposes Meet's in a background or minimised window (and
+Teams' new client at all); whether Teams and Zoom keep an output session
+active after a call ends (it would make every ending "Stop taking notes?");
+a real sleep and wake, Modern Standby among them (does Windows send the
+suspend notification, and in time to stop the streams); "Use" opening the
+call's device by its name.
+
 **Trust: network receipts and Report a problem** (2026-10-24,
 [privacy-receipts.md](./privacy-receipts.md)): every request Yap makes goes
 through `privacy/net.rs` (a unit test fails on any that doesn't), recorded by host,

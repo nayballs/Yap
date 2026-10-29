@@ -81,6 +81,11 @@ test.afterEach(async ({ yap }) => {
   for (const c of (await status(yap)).calls) await simulate(yap, c.app, false);
   await yap.invoke('e2e_call_audio', { call: null });
   await yap.invoke('e2e_meeting_quiet', {});
+  // The notepad's toasts too ("Started by mistake?" from a test's silent
+  // meeting), and the pointer off them: one it rests on stays up and keeps
+  // the next waiting (ui/noticePolicy.js).
+  for (const page of [yap.notepad, yap.main]) await page.mouse.move(1, 1);
+  await closeToasts(yap.notepad);
 });
 
 test('the call on another microphone: asked once per pair, and "Use" moves "You" to it', async ({ yap, main, shot }) => {
@@ -252,6 +257,10 @@ test('a call that ends but still looks on asks "Stop taking notes?"; back within
     await yap.invoke('e2e_call_audio', { call: { stillOn: false } });
     await expect.poll(() => recording(yap), { timeout: 20_000 }).toBe(false);
     await expect(unsure).toHaveCount(0);
+    await expect(toast(main, 'Google Meet call ended')).toBeVisible();
+    // (Read: out of the way, as the pointer that clicked Record notes would
+    // keep it up.)
+    await closeToasts(main);
 
     // Meet back on the mic within 2 minutes (a dropped connection): the
     // same note records again, no prompt.
@@ -260,9 +269,7 @@ test('a call that ends but still looks on asks "Stop taking notes?"; back within
     await simulate(yap, 'meet', true);
     await expect.poll(() => meeting(yap), { timeout: 20_000 }).toMatchObject({ recording: true, noteId });
     await expect.poll(() => logCount(yap, carried)).toBe(before + 1);
-    // Said once the notices before it ("Google Meet call ended", its
-    // summary's) have had their turn: one at a time (ui/noticePolicy.js).
-    await expect(toast(main, 'Back on your Google Meet call')).toBeVisible({ timeout: 30_000 });
+    await expect(toast(main, 'Back on your Google Meet call')).toBeVisible({ timeout: 15_000 });
     await expect(toast(main, 'Google Meet call detected')).toHaveCount(0);
   } finally {
     await setConfig(yap, main, { meetingCallEnd: 'ask' });

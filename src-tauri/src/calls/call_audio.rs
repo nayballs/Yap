@@ -99,6 +99,13 @@ pub fn mismatch(call: &SessionUse, yap: &(String, String)) -> bool {
     !yap.1.is_empty() && yap.1 != call.name
 }
 
+/// Worth saying? A mismatch ([`mismatch`]), unless the call's microphone is
+/// a closed laptop's own (`closed_built_in`): Yap passed it over on
+/// purpose, it hears nothing useful with the lid shut (`dictation/lid.rs`).
+pub fn worth_saying(call: &SessionUse, yap: &(String, String), closed_built_in: bool) -> bool {
+    mismatch(call, yap) && !closed_built_in
+}
+
 /// The mismatches said so far: once per call and pair of microphones.
 #[derive(Debug, Default)]
 pub struct Said {
@@ -214,7 +221,9 @@ fn watch(app: AppHandle, note_id: u64, gen: u64) {
         let mic = sessions.as_deref().and_then(|s| call_mic(s, &call.exes)).cloned();
         // A different microphone: said once per call and pair.
         if let (Some(theirs), Some(ours)) = (mic.as_ref(), yap_mic()) {
-            let different = mismatch(theirs, &ours);
+            let closed_built_in = crate::dictation::lid::closed()
+                && crate::dictation::mics::present().is_some_and(|l| l.iter().any(|e| e.id == theirs.id && e.built_in));
+            let different = worth_saying(theirs, &ours, closed_built_in);
             let ours_key = if ours.0.is_empty() { ours.1.clone() } else { ours.0.clone() };
             if different && SAID.lock().unwrap_or_else(|p| p.into_inner()).first(call.id, &theirs.id, &ours_key) {
                 tracing::info!(note_id, app = call.app, "call audio: the call uses another microphone; asking");
@@ -516,6 +525,12 @@ mod tests {
         assert!(mismatch(&call, &(String::new(), "Microphone (laptop)".into())));
         // Nothing to compare: nothing said.
         assert!(!mismatch(&call, &(String::new(), String::new())));
+        // The call on a closed laptop's own mic, which Yap passed over on
+        // purpose: not worth saying.
+        let ours = ("headset".to_string(), "Headset Microphone (Contoso H2)".to_string());
+        let laptop = use_of("laptop", "ms-teams.exe", true);
+        assert!(worth_saying(&laptop, &ours, false));
+        assert!(!worth_saying(&laptop, &ours, true));
     }
 
     #[test]
