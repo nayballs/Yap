@@ -136,6 +136,8 @@ impl Shared {
                 crate::ai::cleanup_styles::category(&cfg, &style_target),
                 crate::ai::cleanup_styles::Category::WorkChat | crate::ai::cleanup_styles::Category::PersonalChat
             );
+        // What Yap did by itself, for the feature tips (`tips.rs`).
+        let seen = crate::dictation::tips::Seen::of(&raw, &cleaned, &cfg.dictionary, style);
         let mut delivered = self
             .deliver_text(
                 raw,
@@ -151,6 +153,12 @@ impl Shared {
             )
             .await;
         delivered.style = style.map(crate::ai::cleanup_styles::Style::describe);
+        // A first dictation ends the bar's first-use pointers; a feature tip
+        // once it's pasted.
+        crate::bar::pointer::dictated();
+        if !delivered.text.is_empty() && !delivered.left_on_clipboard && delivered.error.is_none() {
+            crate::dictation::tips::after_dictation(&self.app, seen);
+        }
         delivered
     }
 

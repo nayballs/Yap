@@ -18,6 +18,7 @@
   import LinkRow from '../ui/LinkRow.svelte';
   import SettingsHotkey from './SettingsHotkey.svelte';
   import MicOrder from './MicOrder.svelte';
+  import Button from '../ui/Button.svelte';
   import { fillHotkey, isCopilotKey } from '../core/hotkeys.js';
   import { PROVIDER_DESTINATIONS } from '../core/providers.js';
 
@@ -55,6 +56,15 @@
     const to = PROVIDER_DESTINATIONS[cfg.ppProvider] || cfg.ppProvider;
     return `Names in the window come out spelled as shown. The ones a dictation seems to contain go to ${to} with it, for cleanup`;
   });
+
+  // The mic quiz (dictation/mic_quiz.rs; the Help menu's Microphone help
+  // lands here): loaded when asked for. A microphone picked goes first in
+  // the order (the auto-save saves it; dictation/mic.rs uses it next time).
+  let quizOpen = $state(false);
+  function putFirst(id, mic) {
+    const rest = (cfg.micOrder || []).filter((c) => c.id !== id && (!mic?.name || c.name !== mic.name));
+    cfg.micOrder = [{ id, name: mic?.name || '' }, ...rest];
+  }
 
   const dict = $derived.by(() => {
     const list = Array.isArray(cfg.dictionary) ? cfg.dictionary : [];
@@ -114,6 +124,20 @@
     stack
   >
     <MicOrder {cfg} />
+  </Row>
+  <Row
+    label="Mic quiz"
+    desc="Read a line once: Yap listens on every microphone together and says which hears you best"
+    setting="mic-quiz"
+    stack
+  >
+    {#if quizOpen}
+      {#await import('../components/MicQuiz.svelte') then { default: MicQuiz }}
+        <MicQuiz compact order={cfg.micOrder || []} onuse={putFirst} />
+      {/await}
+    {:else}
+      <Button variant="secondary" size="sm" onclick={() => (quizOpen = true)}>Find my best microphone</Button>
+    {/if}
   </Row>
   <!-- The mic opens when you dictate and closes after (dictation/mic.rs); this keeps
        it open the whole time, as Yap used to. -->

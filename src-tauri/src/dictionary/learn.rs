@@ -1431,7 +1431,7 @@ fn offer(app: &AppHandle, words: Vec<Suggestion>, ignore_gap: bool) -> bool {
     let (title, body, never) = prompt_text_with(&words, &crate::config::load().dictionary);
     // One place (`notice.rs`): the main window while the person is looking
     // at it, else the Yap bar (else the window, on screen after all).
-    let place = crate::notices::notice::place(app, false);
+    let place = crate::notices::notice::place_tip(app, "word-suggestion");
     if place == crate::notices::notice::Place::Nowhere {
         tracing::debug!("learn: nowhere to show the suggestion");
         return false;

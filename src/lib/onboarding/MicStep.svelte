@@ -2,8 +2,11 @@
   // Setup's microphone check: the device (switched live: picked, it goes
   // first in the microphones' order, dictation/mics.rs) and a scrolling level
   // meter (`set_mic_test`'s idle levels, `yap-amp`); with no microphone, it
-  // says so.
+  // says so. Under it the mic quiz (components/MicQuiz.svelte): read a line
+  // once, every microphone listens, the best is marked — picked, it goes
+  // first here too.
   import StepHeader from './StepHeader.svelte';
+  import MicQuiz from '../components/MicQuiz.svelte';
   import { findMic } from '../core/mics.js';
 
   /** `setup`: onboarding's state (setupState.svelte.js). */
@@ -43,17 +46,21 @@
       No microphone found. Plug one in or connect a headset, and it shows up here.
       Yap still transcribes audio files without one (Upload).
     </p>
+  {:else}
+    <MicQuiz onuse={(id) => setup.applyMic(id)} current={picked} listen={setup.listen} />
   {/if}
 </div>
 
 <style>
   .mic-box {
     flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
     display: flex;
     flex-direction: column;
     align-items: center;
-    justify-content: center;
-    gap: 18px;
+    gap: 14px;
+    padding: 2px 4px;
   }
   .mic-pick {
     background: var(--yap-s2);
@@ -69,7 +76,8 @@
     display: flex;
     align-items: center;
     gap: 3px;
-    height: 64px;
+    flex: 0 0 auto;
+    height: 52px;
     width: 100%;
     max-width: 420px;
   }

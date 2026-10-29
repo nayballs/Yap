@@ -124,7 +124,7 @@ pub fn celebrate(app: &AppHandle, step: u64, minutes_saved: f64) {
             return;
         }
         let (title, body) = text(step, minutes_saved);
-        let place = crate::notices::notice::place(&app, false);
+        let place = crate::notices::notice::place_tip(&app, CARD);
         let shown = match place {
             crate::notices::notice::Place::Window => app.emit(EVENT, Moment { words: step, title, body }).is_ok(),
             crate::notices::notice::Place::Bar => {

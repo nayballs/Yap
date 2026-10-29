@@ -233,6 +233,19 @@ pub fn run() {
             dictation::commands::list_output_devices,
             dictation::commands::set_mic_test,
             dictation::mics::list_mics,
+            // Getting started (2026-10-29): the mic quiz, the bar's first-use
+            // pointers, the setup's record and the meeting notes checklist,
+            // the Help menu's shortcut sheet.
+            dictation::mic_quiz::mic_quiz_run,
+            dictation::mic_quiz::mic_quiz_cancel,
+            bar::pointer::bar_pointer_shown,
+            shell::guide::guide_status,
+            shell::guide::guide_calendar_step,
+            shell::guide::guide_typing,
+            shell::guide::meeting_setup_status,
+            shell::guide::meeting_setup_dismiss,
+            shell::help::shortcut_sheet,
+            notices::kinds::notice_allow,
             dictation::mics::offer::mic_offer_respond,
             shell::logging::frontend_log,
             dictation::commands::model_language_info,
@@ -673,6 +686,16 @@ pub fn run() {
             shell::theme::e2e_webview_background,
             #[cfg(debug_assertions)]
             dictation::coaching::e2e_coaching_reset,
+            #[cfg(debug_assertions)]
+            dictation::tips::e2e_feature_tips,
+            #[cfg(debug_assertions)]
+            bar::pointer::e2e_bar_pointer,
+            #[cfg(debug_assertions)]
+            dictation::mic_quiz::e2e_mic_quiz,
+            #[cfg(debug_assertions)]
+            shell::guide::e2e_guide_reset,
+            #[cfg(debug_assertions)]
+            notices::kinds::e2e_notice_caps,
             #[cfg(debug_assertions)]
             dictation::stats::e2e_stats_set,
             #[cfg(debug_assertions)]

@@ -255,7 +255,12 @@ there can move margins: compare a page before and after.
   Light / Dark, `barTheme`, default `app`; its line says what each means),
   Position (`overlayPosition`). The search finds Theme for "dark mode"
   (`settingsIndex.js`), Colours for "bar dark".
-  **Notifications** (`#settings-notifications`): "Show tips" (`showTips`).
+  **Notifications** (`#settings-notifications`): "Show tips" (`showTips`),
+  then one switch per kind of nice-to-know notice (2026-10-29,
+  `notices/kinds.rs`, each at most a few a day): Suggestions
+  (`notifySuggestions`), Feature tips (`notifyFeatureTips`, off with Show
+  tips), Milestones (`notifyMilestones`), News (`notifyNews`: "Updated to
+  …" after an update).
 - **Dictation** (`settings/DictationPage.svelte`): **Start and stop**
   (`#settings-hotkey`): Hotkey (`hotkey`), Recording mode (Toggle /
   Push-to-talk; in push-to-talk its line says how double-tap goes hands-free),
@@ -300,7 +305,11 @@ there can move margins: compare a page before and after.
   connected entry gets its endpoint id on the first edit (one migrated by
   name). Used from the next dictation (`mic.rs`). The first-run setup's
   mic check (`onboarding/MicStep.svelte`) picks one the same way: first in
-  the order ("System default" empties it). "Chime when recording starts and stops" (the
+  the order ("System default" empties it). **Mic quiz** (`mic-quiz`,
+  2026-10-29; the Help menu's Microphone help lands here): "Find my best
+  microphone" loads `components/MicQuiz.svelte` (`dictation/mic_quiz.rs`),
+  whose "Use this one" puts a microphone first in Settings' copy of the
+  order (the auto-save saves it). "Chime when recording starts and stops" (the
   volume slider and the switch on one row: `audioFeedbackVolume`,
   `soundEnabled`), "Chime plays on" (`outputDevice`), "Silence other apps while
   you dictate" (`quietOtherApps`; ⓘ: calls are never silenced), "Pause music

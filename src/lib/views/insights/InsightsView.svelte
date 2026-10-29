@@ -17,6 +17,7 @@
   import { openContextMenu } from '../../ui/contextMenu.svelte.js';
   import { toast } from '../../ui/toast.svelte.js';
   import AiUsageCard from './AiUsageCard.svelte';
+  import TypingCard from './TypingCard.svelte';
   import { statsCardPng } from './shareCard.js';
 
   let { focus = null, onfocused = null } = $props();
@@ -274,6 +275,9 @@
         <p>Dictate a few things and your stats will show up here.</p>
       </div>
     {/if}
+
+    <!-- Your typing speed against your speaking speed (the typing test). -->
+    <TypingCard />
 
     <!-- AI usage: shown once any AI call has been counted (or asked for). -->
     <AiUsageCard {focus} {onfocused} ready={loaded} />

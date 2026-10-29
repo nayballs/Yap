@@ -165,6 +165,8 @@ test('onboarding picks the 4B for this PC', async ({ yap, main, shot }) => {
   await dialog.getByRole('button', { name: /Show setup guide again/ }).click();
   await expect(onboarding.getByRole('heading', { level: 1, name: 'Welcome to Yap' })).toBeVisible();
   await onboarding.getByRole('button', { name: "I'll choose later" }).click();
+  // Languages, then the microphone.
+  await onboarding.getByRole('button', { name: 'Continue →' }).click();
   await onboarding.getByRole('button', { name: 'Continue →' }).click();
   // Cleanup is on already (this instance's config): the picker behind it.
   await onboarding.getByRole('button', { name: /Choose a different model or provider/ }).click();

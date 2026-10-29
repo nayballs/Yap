@@ -446,6 +446,19 @@ pub struct YapConfig {
     /// default.
     #[serde(default = "default_true")]
     pub show_tips: bool,
+    /// Settings → General → Notifications, each kind of nice-to-know notice
+    /// on its own (`notices/kinds.rs`), on by default: suggestions (words,
+    /// snippets, languages), milestones, feature tips and news (what's new
+    /// after an update). An older Yap drops them when it saves config.json:
+    /// one switched off comes back on.
+    #[serde(default = "default_true")]
+    pub notify_suggestions: bool,
+    #[serde(default = "default_true")]
+    pub notify_milestones: bool,
+    #[serde(default = "default_true")]
+    pub notify_feature_tips: bool,
+    #[serde(default = "default_true")]
+    pub notify_news: bool,
 
     /// Recording mode: "toggle" (press to start, press again to stop) or
     /// "pushToTalk" (hold to record, release to stop).
@@ -1320,6 +1333,10 @@ impl Default for YapConfig {
             dictionary_fuzzy: true,
             learn_words: true,
             show_tips: true,
+            notify_suggestions: true,
+            notify_milestones: true,
+            notify_feature_tips: true,
+            notify_news: true,
             recording_mode: default_recording_mode(),
             quiet_other_apps: false,
             pause_media: false,

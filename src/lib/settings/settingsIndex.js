@@ -32,6 +32,10 @@ export const SETTINGS_INDEX = [
   { page: 'general', section: 'Yap bar', label: 'Colours', desc: "The Yap bar's look: match Yap, light or dark", keywords: 'bar theme dark light colors match app', anchor: 'bar-colours' },
   { page: 'general', section: 'Yap bar', label: 'Position', desc: 'Where the bar and the dictation overlay sit', keywords: 'bar overlay top bottom placement', anchor: 'bar-position' },
   { page: 'general', section: 'Notifications', label: 'Show tips', desc: "Short tips, like push-to-talk's double-tap", keywords: 'tips hints coaching notifications nudge', anchor: 'tips', toggle: 'showTips' },
+  { page: 'general', section: 'Notifications', label: 'Suggestions', desc: 'Words and snippets to save, languages to add', keywords: 'notifications suggestions words snippets languages nudge', anchor: 'notify-suggestions', toggle: 'notifySuggestions' },
+  { page: 'general', section: 'Notifications', label: 'Feature tips', desc: 'What Yap just did for you, the first time', keywords: 'notifications tips features self-correction list email', anchor: 'notify-feature-tips', toggle: 'notifyFeatureTips' },
+  { page: 'general', section: 'Notifications', label: 'Milestones', desc: 'Your dictation milestones', keywords: 'notifications milestones achievements', anchor: 'notify-milestones', toggle: 'notifyMilestones' },
+  { page: 'general', section: 'Notifications', label: 'News', desc: "What's new after Yap updates", keywords: "notifications news what's new updates release notes", anchor: 'notify-news', toggle: 'notifyNews' },
 
   // ---- Dictation ----
   { page: 'dictation', section: 'Start and stop', label: 'Hotkey', desc: 'Press it in any app to start and stop dictating', keywords: 'shortcut key keyboard f9 dictation start stop copilot key', anchor: 'hotkey' },
@@ -44,6 +48,7 @@ export const SETTINGS_INDEX = [
   { page: 'dictation', section: 'My languages', label: 'Write in Latin letters (Hinglish)', desc: 'Hindi typed the way it is in chats', keywords: 'hindi hinglish latin roman romanised romanized devanagari script transliterate india', anchor: 'hinglish', fallback: 'my-languages', toggle: 'hinglish' },
   { page: 'dictation', section: 'My languages', label: "Tell me when I speak a language I didn't pick", desc: 'Yap offers to add it', keywords: 'language nudge detect different language suggestion', anchor: 'language-nudge', fallback: 'my-languages', toggle: 'languageNudge' },
   { page: 'dictation', section: 'Microphone and sound', label: 'Microphone', desc: "Yap uses the first one that's connected", keywords: 'mic microphones input device audio headset order rank ranked priority usb plugged unplugged switch', anchor: 'microphone' },
+  { page: 'dictation', section: 'Microphone and sound', label: 'Mic quiz', desc: 'Find which microphone hears you best', keywords: 'mic quiz test best microphone quality noise level bluetooth headset compare which help', anchor: 'mic-quiz' },
   { page: 'dictation', section: 'Microphone and sound', label: 'Keep the microphone ready', desc: 'Dictation starts instantly and catches your first word', keywords: 'mic microphone always open on in use privacy indicator bluetooth headset call quality hfp instant start first word pre-roll', anchor: 'keep-mic-ready', toggle: 'keepMicReady' },
   { page: 'dictation', section: 'Microphone and sound', label: 'Chime when recording starts and stops', desc: 'A sound, and its volume', keywords: 'sound cue beep volume chime audio feedback', anchor: 'chime', toggle: 'soundEnabled' },
   { page: 'dictation', section: 'Microphone and sound', label: 'Chime plays on', desc: 'The speakers or headset for the chime', keywords: 'output device speakers headset audio', anchor: 'chime-output' },

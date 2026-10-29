@@ -3,6 +3,7 @@
 //! How it works: docs/architecture/notices.md.
 
 pub mod alert;
+pub mod kinds;
 pub mod notice;
 #[cfg(windows)]
 pub mod win_toast;

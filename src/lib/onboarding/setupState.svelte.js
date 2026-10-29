@@ -14,8 +14,19 @@ import { cancelDownload, downloadLine, fromEvent, isCancelled } from '../core/do
 export const flog = (m) => invoke('frontend_log', { msg: '[onboarding] ' + m }).catch(() => {});
 
 // ---- Stepped flow (superwhisper-style guided onboarding) ----
-// 0 model → 1 mic check → 2 AI cleanup (the wedge) → 3 tray → 4 try it
-export const STEPS = ['Model', 'Microphone', 'AI cleanup', 'Tray', 'Try it'];
+// model → languages → mic check (and quiz) → AI cleanup (the wedge) →
+// calendar (for meeting notes; never again once answered) → tray → try it
+// → typing speed (optional). `steps` is this showing's list.
+export const ALL_STEPS = [
+  { id: 'model', label: 'Model' },
+  { id: 'languages', label: 'Languages' },
+  { id: 'mic', label: 'Microphone' },
+  { id: 'cleanup', label: 'AI cleanup' },
+  { id: 'calendar', label: 'Calendar' },
+  { id: 'tray', label: 'Tray' },
+  { id: 'try', label: 'Try it' },
+  { id: 'typing', label: 'Typing speed' },
+];
 
 // The recommended default (Parakeet V3) — powers the one-click quick-start so a
 // brand-new user can go from install → dictating without hunting through the list.
@@ -42,6 +53,26 @@ const SHORT_LIST = 2;
 /** Onboarding's state. Call it while the window's page is made (its effects belong to it). */
 export function createSetupState() {
   let step = $state(0);
+  // The calendar step shows until it's answered (connected or skipped) or a
+  // calendar is connected another way (shell/guide.rs), decided once per
+  // showing so it stays put while the person goes back and forth.
+  let calendarStep = $state(true);
+  const steps = $derived(ALL_STEPS.filter((s) => s.id !== 'calendar' || calendarStep));
+  const stepId = $derived(steps[step]?.id ?? 'model');
+  const isLast = $derived(step >= steps.length - 1);
+  // The typing test's last result (words a minute), if taken.
+  let typingWpm = $state(null);
+  /** Which steps to show, asked as the window is shown (a reload: from the start). */
+  async function readGuide() {
+    try {
+      const g = await invoke('guide_status');
+      // Never moves the steps under someone part way through.
+      if (step === 0) calendarStep = !!g?.calendarStepDue;
+      typingWpm = g?.typingWpm ?? null;
+    } catch {
+      // stub / best-effort: the step stays
+    }
+  }
 
   // Full config (loaded once; mutated by steps; persisted via save_config).
   let cfg = $state(null);
@@ -151,7 +182,7 @@ export function createSetupState() {
   // level meter streaming forever.
   let pageVisible = $state(!document.hidden);
   $effect(() => {
-    invoke('set_mic_test', { on: step === 1 && pageVisible }).catch(() => {});
+    invoke('set_mic_test', { on: stepId === 'mic' && pageVisible }).catch(() => {});
   });
 
   // What suits this PC (ai/hardware.rs `hardware_advice`, from yap.exe bench's
@@ -294,7 +325,7 @@ export function createSetupState() {
   // deaf to events after a hide/re-show cycle (root cause under
   // investigation); history is backend truth and always works.
   $effect(() => {
-    if (step !== STEPS.length - 1) return;
+    if (stepId !== 'try') return;
     tryText = '';
     gotTranscript = false;
     const enteredAt = Math.floor(Date.now() / 1000) - 2; // small clock slack
@@ -359,7 +390,25 @@ export function createSetupState() {
 
   function next() {
     if (!cfg) return; // config still loading — steps 1+ bind into it
-    if (step < STEPS.length - 1) step += 1;
+    if (step < steps.length - 1) step += 1;
+  }
+
+  // ---- Languages ----
+  /** My languages picked here (`myLanguages`), saved as they change. */
+  async function setLanguages(codes) {
+    if (!cfg) return;
+    patchCfg({ myLanguages: [...new Set(codes)] });
+    // The main shortcut fixed to a language no longer picked goes back to Auto.
+    if (cfg.selectedLanguage && cfg.selectedLanguage !== 'auto' && !codes.includes(cfg.selectedLanguage)) {
+      patchCfg({ selectedLanguage: 'auto' });
+    }
+    await persistCfg();
+  }
+
+  // ---- Calendar ----
+  /** The calendar step answered: never shown again (shell/guide.rs). */
+  function answerCalendar(state) {
+    return invoke('guide_calendar_step', { state }).catch(() => {});
   }
   function back() {
     if (step > 0) step -= 1;
@@ -437,8 +486,8 @@ export function createSetupState() {
       // (when it does win the race) can't double-write. (Plus the history poll
       // above as belt-and-braces.)
       rawListen('yap-transcript', (e) => {
-        flog(`event yap-transcript (step=${step}): ${String((e && e.payload) || '').length} chars`);
-        if (step === STEPS.length - 1) {
+        flog(`event yap-transcript (step=${stepId}): ${String((e && e.payload) || '').length} chars`);
+        if (stepId === 'try') {
           const t = (e.payload || '').trim();
           if (t) {
             // Always re-show + flash: dictating the SAME phrase twice must
@@ -458,6 +507,18 @@ export function createSetupState() {
   return {
     get step() { return step; },
     set step(v) { step = v; },
+    get steps() { return steps; },
+    get stepId() { return stepId; },
+    get isLast() { return isLast; },
+    get typingWpm() { return typingWpm; },
+    set typingWpm(v) { typingWpm = v; },
+    readGuide,
+    setLanguages,
+    answerCalendar,
+    /** listen() for this window's components (the raw bridge: see rawListen). */
+    listen: rawListen,
+    patchCfg,
+    persistCfg,
     get cfg() { return cfg; },
     get installed() { return installed; },
     get active() { return active; },

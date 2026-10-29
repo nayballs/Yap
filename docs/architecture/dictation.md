@@ -456,7 +456,34 @@ to **Run again** from Home.
   toast if it's on screen; neither → nothing shown, nothing counted (never a
   Windows notification). "Show tips" off (`show_tips`) → none. Texts say
   `{key}`; the page names the hotkey (`fillHotkey` in `lib/core/hotkeys.js`; the
-  card's `hotkey` field). Not for the edit hotkey.
+  card's `hotkey` field). Not for the edit hotkey. hints.json also keeps the
+  feature tips' and the bar's first-use pointers' counts (`tips.rs`,
+  `bar/pointer.rs`: `record` / `update_record`, one lock), and a hint goes
+  through `notice::place_tip` ("hint": Feature tips' switch and daily cap,
+  `notices/kinds.rs`).
+- **`dictation/tips.rs`** — **feature tips** (2026-10-29; Wispr Flow's
+  "self-correction caught", "listed", "email formatted", by behaviour): the
+  first time a dictation shows off something Yap did by itself, one short
+  tip, once each, ever. `Seen::of(raw, cleaned, dictionary, style)` (pure,
+  in `deliver` before the paste): AI cleanup caught a **self-correction**
+  (`self_correction`: "no wait", "I mean", "sorry", "scratch that", "make
+  that", "or rather"… after two words or more with more after them in the
+  transcript, gone from the cleaned text with at least one more word),
+  laid out a **spoken list** (`laid_out_list`: `cleanup_format::list_cue`
+  and two list lines or more), **framed an email** (`framed_email`: the
+  Email kind, `email_frame`, one line in, several out); a **snippet**
+  expanded or a **dictionary** word was fixed (`apply_snippets` /
+  `apply_dictionary` changing the cleaned text). `due` (pure): the first in
+  `ORDER` not shown before, never within 10 minutes of another. After a
+  paste that landed (`after_dictation`, a thread of its own: it waits out
+  the dictation), through `notice::place_tip` ("featureTip"): the main
+  window's toast (`yap-feature-tip` → `lib/notices/featureTips.js`, chip
+  Tip; a snippet's or the dictionary's with Open Dictionary) or a Yap bar
+  card, never a Windows notification; counted when shown, in hints.json's
+  `features`. "Show tips" or Feature tips off: none. The log says the kind,
+  never the words. Test mode notices nothing unless a spec asks
+  (`e2e_feature_tips`, which forgets those shown). Unit tests; e2e
+  `feature-tips.spec.js`.
 - **`dictation/input_hook.rs`** — low-level Windows keyboard + mouse hooks; specs `kb:VKEY`,
   `kb:ctrl+shift+VKEY` (modifier combo; `win` is a modifier too, e.g. the
   meeting shortcut `kb:alt+win+77` = Win+Alt+M), `kb:165` (single right-side modifier, e.g.
@@ -905,6 +932,28 @@ to **Run again** from Home.
   a change), `YAP_E2E_MICS` (made-up ones from the start; `[]`: none). The
   log says counts at `info`, names only at `debug`. Unit tests
   (`mics::tests`, `offer::tests`), e2e `mics.spec.js`.
+- **`dictation/mic_quiz.rs`** — **the mic quiz** (2026-10-29; Wispr Flow's,
+  by behaviour): which of your microphones hears you best? The person reads
+  one line, and Yap listens on every connected microphone **together** for
+  6 s (`mic_quiz_run`, a thread of its own: a cpal stream per endpoint, in
+  shared mode beside whatever else has it, downmixed to 16 kHz; none kept),
+  sending each one's live level on the bar's scale (`yap-mic-quiz`,
+  `meter::Floor`). Then each is measured as the mic tips measure a
+  dictation (`mic_tips::measure`: the voice, the room, the clipped share)
+  and judged (`judge`, pure: clear / quiet / noisy / too loud / nothing
+  heard, a score = how far the voice stands over the room less what's
+  wrong; a **Bluetooth headset in its call profile** — `mic_tips::hands_free`
+  — scores 15 less and gets its honest note: "Bluetooth headsets sound
+  worse while their mic is on: Windows switches them to call quality"); the
+  **best** (`best`, pure) is the highest score that heard you, the earlier
+  in the order on a tie. `to_listen` (pure): the connected ones in the order
+  Yap tries them, a software microphone only when it's in the person's
+  order, six at most. One quiz at a time; `mic_quiz_cancel`. The page
+  (`components/MicQuiz.svelte`: the setup's mic step, Settings → Dictation
+  → Microphone → Mic quiz) puts the one picked first in the order. The log
+  says counts and verdicts, never names at `info`. Test mode: made-up
+  microphones (`mics::fake`) sound as `e2e_mic_quiz` says (voice and room
+  peaks per id). Unit tests; e2e `onboarding-steps.spec.js`, `help.spec.js`.
 - **`dictation/mic_watch.rs`** — the dictation's dead-mic watchdog, pure: `MicTally`
   (lock-free, fed by the audio callback), `DeadMicWatch::poll(elapsed, samples,
   heard)` → Wait / Reopen / Report / Recovered / Fine, the messages (the full one

@@ -569,7 +569,7 @@ fn consider(app: &AppHandle, text: String, typed: bool) {
 /// Ask about `f`: a toast in the main window while it's on screen, else a
 /// Yap bar card. `true` if shown.
 fn offer(app: &AppHandle, f: &Found, dict: &[DictionaryEntry]) -> bool {
-    let place = crate::notices::notice::place(app, false);
+    let place = crate::notices::notice::place_tip(app, "snippet-suggestion");
     if place == crate::notices::notice::Place::Nowhere {
         tracing::debug!("Snippet offer: nowhere to show it");
         return false;

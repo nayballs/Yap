@@ -12,15 +12,15 @@ kind, a folder each:
 
 | Folder | What's in it |
 |---|---|
-| `views/` | The main window: `ControlPanel.svelte` (sidebar, title bar, the Settings modal, toasts) and its views. A view with parts of its own has a folder: `home/` (`HomeView`, `homeData.js`), `chat/`, `notes/`, `integrations/` (`IntegrationsView`, `CalendarLinkCard`, `McpLinkCard`), `dictionary/` (`DictionaryView`, `ImportPreview`, `dictionaryList.js`, `dictionaryFile.js`), `insights/` (`InsightsView`, `AiUsageCard`; 2026-10-25); the rest are one file (`UploadView`, `MeetingsView`, `TasksView`) |
+| `views/` | The main window: `ControlPanel.svelte` (sidebar, title bar, the Settings modal, toasts) and its views; `help/` the title bar's Help (`HelpMenu`, `ShortcutSheet`, `WhatsNew`) and `MeetingSetup.svelte` the sidebar's "Set up meeting notes". A view with parts of its own has a folder: `home/` (`HomeView`, `homeData.js`), `chat/`, `notes/`, `integrations/` (`IntegrationsView`, `CalendarLinkCard`, `McpLinkCard`), `dictionary/` (`DictionaryView`, `ImportPreview`, `dictionaryList.js`, `dictionaryFile.js`), `insights/` (`InsightsView`, `AiUsageCard`; 2026-10-25); the rest are one file (`UploadView`, `MeetingsView`, `TasksView`) |
 | `settings/` | The Settings modal: `Settings.svelte`, its pages and every part only Settings uses (the module map: [frontend-settings.md](./frontend-settings.md#the-module-map-split-2026-10-24)) |
 | `notepad/` | The meeting notepad window, and its split-screen preview (`SplitPreview.svelte`) |
 | `quicknote/` | The quick-note window (2026-10-28, `notes/quick_note.rs`): `QuickNote.svelte` (the note, saved as typed one save at a time; New note, Open in Notes, Esc; a dictation at the cursor; the in-page hotkeys) and `quickNote.js` (pure: where a dictation goes, the status line). Its icons are the notepad's `NotepadIcon` |
 | `onboarding/` | The first-run window |
 | `bar/` | The Yap bar window: `Overlay.svelte` (its page) and its cards |
-| `components/` | What more than one window or view draws: `BriefView`, `SpeakerMenu`, `SpeakerCard`, `MeetingJob`, `FailedChunk`, `CallAppIcon`, `CalendarMark`, `LocalContext`, `ConnectCalendarDialog` |
+| `components/` | What more than one window or view draws: `BriefView`, `SpeakerMenu`, `SpeakerCard`, `MeetingJob`, `FailedChunk`, `CallAppIcon`, `CalendarMark`, `LocalContext`, `ConnectCalendarDialog` (the main window's and the setup's calendar step), `MicQuiz` (the setup's mic step, Settings → Dictation), `TypingTest` (the setup's last step, Insights) |
 | `stores/` | App-wide reactive stores (`*.svelte.js`): `account`, `attention`, `calendar`, `callAppIcons`, `chatRequest`, `meetingAudio`, `meetingDetect`, `meetingSummary`, `memory`, `modelCatalog`, `modelStore`, `speech`, `updates`, `upload` |
-| `notices/` | Rust's events turned into toasts: `alerts`, `cleanupOffer`, `meetingCheckIn`, `meetingGuard`, `saveErrors`, `wordSuggestions` |
+| `notices/` | Rust's events turned into toasts: `alerts`, `cleanupOffer`, `featureTips`, `meetingCheckIn`, `meetingGuard`, `saveErrors`, `wordSuggestions` |
 | `core/` | Helpers and catalogues with no Svelte state of their own: `markdown`, `streaming`, `hotkeys`, `providers`, `providerIcons`, `ppModels`, `speechModels` (the speech-to-text catalogue; `models.js` until 2026-10-24), `modelCatalog`, `localContext`, `aiModel`, `aiErrors`, `aiUsage` (the AI usage tracker in words: token counts, costs, the context ring's colour and label, the features' names), `notepadText`, `noteEdits`, `itemMenus`, `wordDiff`, `appNames`, `appearance`, `brief`, `connections`, `externalLinks`, `ipcShared`, `findWords` (a search's words found again where its result opens: marked with the CSS Custom Highlight API, selected in a text box) |
 | `ui/` | The primitives: rows, switches, selects, buttons, the right-click menu and confirm dialog, toasts |
 
@@ -47,7 +47,7 @@ selector weighing what its scoped original did, so the same rule wins.
 | `notepad/` | `Notepad.svelte` — the window: the note shown and the meeting, kept in step with Rust's events and the other windows; the in-page hotkeys; the layout. `NotepadHeader` (back, ⋯, split screen, Share, window buttons), `NotepadTitle`, `NotepadTabs`, `ThoughtsTab`, `TranscriptTab` + `TranscriptLog` (the timer box, search and copy; the lines), `SummaryTab`, `GenerateSummary` (or the summary's error with Retry), `ConsentLine`, `AskTray` (Stop / Resume, the Ask sheet), `DeleteMeetingDialog`, `NotepadIcon`. What outlasts a tab switch (each tab's body is made again on every switch): `transcriptView.svelte.js`, `summaryEditor.svelte.js`, `consentMessage.svelte.js`; `actions.js` the window's label, copying, Yap's main window; `notepad.css` |
 | `views/notes/` | `NotesView.svelte` (the view, its events, the note a call or Tasks asks to open) with `notesState.svelte.js` (the notes and folders, the open note saved as it's typed and kept in step, the recorder, actions, the summary edited in place, the transcript's view, the note's chat); `NoteList` (folders, notes, their menus) with `NoteSearch` (every note by words and meaning, loaded the first time a search is typed), `NoteEditor` (title, tabs, what's being written, the raw note) with `NoteMeta` (the chip row), `NoteSummary`, `NoteTranscript`, `NoteChat` and `ActionPicker`; `ActionManager`; `noteFormat.js` |
 | `views/chat/` | `ChatView.svelte` (the view, its events and keys, the screenshot viewer) with `chatState.svelte.js` (conversations, sending and the streamed answer, the Voice Assistant's questions, Snip to Chat, spoken replies, picking several); `ConversationList` (+ `chatLibrary.svelte.js` and `ChatLibraryList`, loaded when shown: the sidebar's search and the archive), `ChatThread` + `ChatMessage` (tool chips, the bubble, sources, ▶ and the model), `Composer` (screenshots, +, the box, ■ Stop, the model chip); `ModelChip`, `ChatModelPicker`, `ProviderMark`, `chatModels.svelte.js`, `chatImages.js`, `chatShots.svelte.js` |
-| `onboarding/` | `Onboarding.svelte` (the dots, the step shown, the footer, the in-page hotkey) with `setupState.svelte.js` (every step's state, the config this window changed, its raw event subscriptions); `StepHeader`, `ModelStep` (+ `ModelCard`), `MicStep`, `CleanupStep`, `TrayStep`, `TryStep`; `cleanupProviders.js` |
+| `onboarding/` | `Onboarding.svelte` (the dots, the step shown, the footer, the in-page hotkey, the "Connect your calendar" dialog) with `setupState.svelte.js` (every step's state and this showing's steps, `steps` / `stepId`, the config this window changed, its raw event subscriptions, `listen` for its components); `StepHeader`, `ModelStep` (+ `ModelCard`), `LanguageStep`, `MicStep`, `CleanupStep`, `CalendarStep`, `TrayStep`, `TryStep`, `TypingStep`; `cleanupProviders.js` |
 
 One look kept on purpose: a tool's own chip in Chat ("Found "beta" on 2
 lines…") is a full-width row 30 px tall — ChatView's New chat row rule
@@ -151,6 +151,31 @@ itself (`.toolchip.tool`).
   close still routes through hide-on-close; double-click on the drag region
   toggles maximize (Tauri built-in). Trade-off: the native snap-layout flyout
   on hover-over-maximize is gone (Win+arrows still snap).
+- **Help (2026-10-29, `lib/views/help/`)** — a "?" in the title bar
+  beside the bell (`HelpMenu.svelte`, the bell's look and tooltip; a
+  `menu` with ↑/↓/Home/End, Esc or a click outside closes it and the focus
+  goes back to "?"): **Keyboard shortcuts** (also **Ctrl+/** anywhere in
+  the main window, again to close: `ShortcutSheet.svelte`, loaded on first
+  use — every global shortcut from `shortcut_sheet`, shell/help.rs, in the
+  input hook's order, named here with what it does — Dictate's line
+  following the recording mode — or by the hook's own name for one this
+  page doesn't know yet, its keys as amber keycaps, more keys beside it,
+  "Not set"; then the transforms' and the language shortcuts' keys and the
+  keys inside Yap's window; "Change them in Settings" → Shortcuts; a
+  dialog: Esc, ✕, the scrim), **Microphone help** (Settings → Dictation at
+  the mic quiz, `dictation#mic-quiz`), **Languages** (`dictation#languages`),
+  **Report a problem** (`about#report`), **What's new** (`WhatsNew.svelte`:
+  the release notes Yap has here — an update's, `updates.notes` — rendered;
+  without any, the release page on GitHub) and **GitHub**. `help.spec.js`.
+- **"Set up meeting notes" (2026-10-29, `lib/views/MeetingSetup.svelte`)**
+  — a small card in the sidebar above Settings (Wispr Flow's "Set up
+  Notetaker", by behaviour): Connect a calendar (the dialog, over
+  Meetings), Record your first meeting ("or try one now": Meetings, whose
+  Take notes starts one), Add Yap to an AI app (Settings → AI apps (MCP)),
+  each ticked by itself (`meeting_setup_status`, asked again as the view
+  changes, a calendar connects, a meeting ends or the window comes back to
+  the front) with a three-step bar; ✕ dismisses it for good; all done, it
+  goes; under 700 px of window it's left out. `meeting-setup.spec.js`.
 - **`lib/views/ControlPanel.svelte`** — the **main window** (window label is still
   `settings`, historic): an OpenWhispr-style control panel — slim sidebar
   (**Home / Insights / Chat / Notes / Meetings / Tasks / Upload / Dictionary / Integrations**) + **Settings as a modal
@@ -442,6 +467,11 @@ Flow's dark mode of 19 Oct 2026), for every Yap window.
   ring's See all, through ControlPanel's `insightsFocus`) scrolls it into
   view once drawn. Words and formats: `core/aiUsage.js` (shared with Chat's
   context ring, [chat-and-assistant.md](./chat-and-assistant.md#the-context-ring-2026-10-25)).
+- **`insights/TypingCard.svelte` — Typing and speaking** (2026-10-29): the
+  typing test's number (`guide_status`) beside the speaking speed over your
+  dictations (`get_stats`' `wpm`), else the test's line read aloud, and how
+  much faster speaking is, above AI usage, or "Take the typing test"; the
+  test itself (`components/TypingTest.svelte`) opens in the card.
 - **`UploadView.svelte`** = local audio-**file** transcription (drop/browse →
   Symphonia decode → chunked transcription on the warm engine with progress +
   cancel — see `dictation/media.rs`); its line names the model ("transcribes with
@@ -535,16 +565,28 @@ Flow's dark mode of 19 Oct 2026), for every Yap window.
 - **`lib/onboarding/Onboarding.svelte`** — first-run **guided setup** (its
   parts, 2026-10-24: `setupState.svelte.js` holds every step's state across
   the steps, the config fields this window changed and its raw event
-  subscriptions; `StepHeader`, `ModelStep`, `MicStep`, `CleanupStep`,
-  `TrayStep`, `TryStep`; `cleanupProviders.js` the brands and cloud
-  providers) (5 steps): model picker
+  subscriptions; `StepHeader`, `ModelStep`, `LanguageStep`, `MicStep`,
+  `CleanupStep`, `CalendarStep`, `TrayStep`, `TryStep`, `TypingStep`;
+  `cleanupProviders.js` the brands and cloud providers) (eight steps since
+  2026-10-29, the calendar's only until it's answered: model → languages →
+  mic → AI cleanup → calendar → tray → try it → typing speed): model picker
   (**two of the 14 shown**: Parakeet V3, recommended, and the best other pick
   for the PC's language — Parakeet V2 where `navigator.language` is English,
   else Whisper Large v3 Turbo; the rest behind "More models (12)", as the AI
   cleanup step does, so the Download button shows without scrolling; a model
   already installed or being set up further down keeps the list open) →
+  **languages** (2026-10-29, `LanguageStep`: "I only speak English" saves
+  `myLanguages` ["en"] and moves on in one click; else the PC's language
+  and the common ones as chips — `aria-pressed`, saved as they're picked —
+  and a search for the rest; with a speech model in use, what it makes of
+  them, `my_languages_status`, and when it misses one the model that covers
+  them all with Download / Use it, `setup.choose`) →
   mic check (live level meter via `set_mic_test` idle-amp mode — the bar's
-  perceptual levels, `dictation/meter.rs`, "Hearing you" above 0.3 — + live device switch)
+  perceptual levels, `dictation/meter.rs`, "Hearing you" above 0.3 — + live device switch;
+  under it the **mic quiz**, `components/MicQuiz.svelte`: read the line,
+  every connected mic listens at once with its own level, each one's
+  verdict, the best marked, a Bluetooth headset's note, "Use this one"
+  puts it first in the order — `dictation/mic_quiz.rs`)
   → one-click **local AI cleanup** install (the model recommended for this PC
   first and picked: Qwen3.5 4B with a graphics card that can run it, "Your
   <card> runs Qwen3.5 4B quickly…", else Qwen2.5 1.5B; then Qwen2.5 1.5B as
@@ -558,12 +600,25 @@ Flow's dark mode of 19 Oct 2026), for every Yap window.
   goes to the provider you pick" (`data-privacy="cloud"`); nothing is on
   until the person enables one — "Maybe later" leaves cleanup off. Once on,
   the step says what it does where (Styles by app: Email · formal, chats ·
-  casual, AI prompts · word for word…; `ai/cleanup_styles.rs`) → the tray (the Yap bar, click the icon to open Yap,
+  casual, AI prompts · word for word…; `ai/cleanup_styles.rs`) → the
+  **calendar** for meeting notes (2026-10-29, `CalendarStep`: what a calendar
+  gives, Connect calendar opening the main window's own
+  `ConnectCalendarDialog` over the setup, the snapshot asked every 1.5 s
+  while the step is up; connected — "Calendar connected · N meetings coming
+  up" — or **Skip for now**, it never shows again: `shell/guide.rs`) → the tray (the Yap bar, click the icon to open Yap,
   right-click to paste the last dictation; the footer pinned at the bottom
   of every step) → "try it here" live dictation test with **Settings' own
   shortcut picker** (`ui/HotkeyInput.svelte` + `validateHotkey`: combos,
   chords, mouse buttons, the Copilot key; the old recorder kept only the
-  bare key; in push-to-talk it says "Hold …, then let go"). With no microphone the mic step says so. **Finish** opens
+  bare key; in push-to-talk it says "Hold …, then let go") → the optional
+  **typing test** (2026-10-29, `TypingStep` + `components/TypingTest.svelte`:
+  type a short passage — the clock from the first key, Enter or Done to
+  stop, the characters typed right ÷ 5 a minute —, then say it with the
+  dictation shortcut, timed from the dictation's own `yap-state` and
+  counted from its transcript — or, once Yap has timed a few dictations,
+  the speaking speed over them (`get_stats`' `wpm`, `dictation/stats.rs`),
+  and no line to say; both speeds and how much faster speaking is; only
+  the numbers kept, `guide_typing`; Finish works either way). With no microphone the mic step says so. **Finish** opens
   Yap's main window on Home (`open_settings`), so setup doesn't end on an
   empty screen. **By hardware** (2026-10-24, `hardware_advice`,
   ai-models.md `ai/hardware.rs`): the model step says where speech runs ("on

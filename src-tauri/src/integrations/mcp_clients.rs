@@ -818,6 +818,15 @@ async fn blocking<T: Send + 'static>(
         .map_err(|e| e.to_string())?
 }
 
+/// Yap is in at least one AI app's config, added or since moved (the "Set
+/// up meeting notes" checklist, `shell/guide.rs`). Blocking: it reads files.
+pub fn added_anywhere() -> bool {
+    let (Ok(b), Ok(exe)) = (bases(), exe()) else { return false };
+    overview_in(&b, &exe)["clients"]
+        .as_array()
+        .is_some_and(|rows| rows.iter().any(|r| matches!(r["status"].as_str(), Some("added" | "outdated"))))
+}
+
 /// Settings → MCP: Yap's command, a JSON snippet, and one row per app.
 #[tauri::command]
 pub async fn mcp_clients_status() -> Result<Value, String> {

@@ -19,6 +19,11 @@
   //             "Speaking…" with ■) and its answer a card;
   //   meeting   a 69 × 30 recording pill at half opacity (5 bars, the stop
   //             circle) that shows its timer when hovered;
+  //   pointer   for someone who has never dictated, a small first-use
+  //             pointer above the pill ("Click a text box, then press F9"),
+  //             then above the first dictation ("Talk, then press F9
+  //             again"), once each (bar/pointer.rs); not a region, never
+  //             with a card up;
   //   cards     26 px above the pill: Yap's notices while its window isn't
   //             focused, one at a time (notices/notice.rs picks it; the rest wait);
   //             the reading card (voice/read_aloud.rs) nearest the pill while Yap
@@ -75,6 +80,8 @@
     theme: null,
     // The dictation capsule's ✕ / ✓: 'off' (the default) | 'hover' | 'always'.
     dictationButtons: 'off',
+    // The first-use pointers still due (bar/pointer.rs): { idle, recording, hold } | null.
+    firstUse: null,
   });
   // The --bar-* colours (app.css): `data-bar-theme`, Match app resolved with
   // the theme of Yap's windows (lib/core/appearance.js, which also follows it as
@@ -147,6 +154,61 @@
   });
   $effect(() => {
     if (mode !== 'idle') menuOpen = false;
+  });
+
+  // ---- first-use pointers (bar/pointer.rs) ----
+  // Each shows once: Rust says which are due, this tells it one showed
+  // (counted, so it never comes back) and keeps it up for this time — the
+  // idle one up to 45 s or until a dictation starts, the recording one for
+  // the first dictation. A dictation over, neither again.
+  const POINTER_MS = 45_000;
+  let idleLatched = $state(false);
+  let idleOver = $state(false);
+  let recLatched = $state(false);
+  let dictatedHere = $state(false);
+  let idleTimer = null;
+  const pointerKey = $derived(keys(bar.hotkey) || 'your dictation shortcut');
+  const pointerKind = $derived.by(() => {
+    if (cards.length || reading.active || dictatedHere) return null;
+    if (mode === 'idle' && bar.shown && !expanded && !idleOver && (idleLatched || bar.firstUse?.idle)) return 'idle';
+    if (mode === 'dictation' && dictation.state === 'recording' && dictation.assistant === 'idle' && (recLatched || bar.firstUse?.recording)) {
+      return 'recording';
+    }
+    return null;
+  });
+  const pointerText = $derived.by(() => {
+    const hold = !!bar.firstUse?.hold;
+    if (pointerKind === 'idle') return hold ? `Click a text box, then hold ${pointerKey} and talk` : `Click a text box, then press ${pointerKey}`;
+    if (pointerKind === 'recording') return hold ? `Talk, then let go of ${pointerKey} to paste` : `Talk, then press ${pointerKey} again to paste`;
+    return '';
+  });
+  $effect(() => {
+    const kind = pointerKind;
+    untrack(() => {
+      if (kind === 'idle' && !idleLatched) {
+        idleLatched = true;
+        invoke('bar_pointer_shown', { kind: 'idle' }).catch(() => {});
+        clearTimeout(idleTimer);
+        idleTimer = setTimeout(() => (idleOver = true), POINTER_MS);
+      } else if (kind === 'recording' && !recLatched) {
+        recLatched = true;
+        idleOver = true;
+        invoke('bar_pointer_shown', { kind: 'recording' }).catch(() => {});
+      }
+    });
+  });
+  // A dictation recorded and over: no pointer again (Rust counts it too).
+  let sawRecording = false;
+  $effect(() => {
+    const st = dictation.state;
+    untrack(() => {
+      if (st === 'recording') {
+        sawRecording = true;
+        idleOver = true;
+      } else if (sawRecording && (st === 'idle' || st === 'processing')) {
+        dictatedHere = true;
+      }
+    });
   });
 
   // ---- the meeting timer ----
@@ -348,6 +410,12 @@
 
 <div class="stage" class:top={bar.edge === 'top'} class:pop={popping} onpointermove={onStageMove} role="presentation">
   <div class="cards" style={`${bar.edge === 'top' ? 'top' : 'bottom'}:${8 + Math.max(dockH, 20) + 20}px`}>
+    {#if pointerText}
+      <!-- First-use pointer (bar/pointer.rs): words only, click-through. -->
+      <div class="pointer" data-testid="bar-pointer" data-kind={pointerKind} role="note" transition:fade={{ duration: motionMs(160) }}>
+        {pointerText}
+      </div>
+    {/if}
     {#if reading.active}
       <!-- Reading aloud: nearest the pill, a notice above it. -->
       <div class="cardwrap" in:fade={{ duration: motionMs(120) }} out:fade={{ duration: motionMs(120) }}>
@@ -597,6 +665,40 @@
   }
   .stage.top .cards {
     flex-direction: column;
+  }
+  /* The first-use pointer: the tooltip's ink, a little larger, an arrow to
+     the pill. No shadow, no backdrop-filter (a transparent window). */
+  .pointer {
+    position: relative;
+    margin-bottom: -10px;
+    padding: 8px 14px;
+    border-radius: 10px;
+    background: var(--bar-tooltip);
+    color: var(--bar-tooltip-text);
+    font-size: 13px;
+    font-weight: 600;
+    line-height: 18px;
+    white-space: nowrap;
+    pointer-events: none;
+  }
+  .pointer::after {
+    content: '';
+    position: absolute;
+    left: 50%;
+    top: 100%;
+    margin-left: -6px;
+    border: 6px solid transparent;
+    border-top-color: var(--bar-tooltip);
+  }
+  .stage.top .pointer {
+    margin: 0 0 0 0;
+    margin-top: -10px;
+  }
+  .stage.top .pointer::after {
+    top: auto;
+    bottom: 100%;
+    border-top-color: transparent;
+    border-bottom-color: var(--bar-tooltip);
   }
   .cardwrap {
     position: relative;

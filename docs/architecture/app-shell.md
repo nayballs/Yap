@@ -216,6 +216,28 @@ re-exported by the module, except `local_llm`'s, which callers name
   window's `WindowEvent::ThemeChanged`. Debug-only `e2e_webview_background`
   reads a webview's DefaultBackgroundColor back (`theme.spec.js`). The pages
   themselves: [frontend.md](./frontend.md#the-dark-theme-2026-10-22).
+- **`shell/guide.rs`** — **getting started** (2026-10-29): what the
+  first-run setup and the main window's "Set up meeting notes" checklist
+  remember, in `<data>/onboarding.json` (its own file: an older Yap never
+  touches it) — the setup's calendar step answered (`guide_calendar_step`:
+  "connected" | "skipped"; `calendar_step_due`, pure, is false once
+  answered or with a calendar connected), the typing test's numbers
+  (`guide_typing {wpm, speaking}`: words a minute, at most 250 typed and
+  400 spoken; nothing typed or said), the checklist dismissed
+  (`meeting_setup_dismiss`). `meeting_setup_status` (off the window's
+  thread): a calendar connected (`calendar::connected`), a meeting note
+  (`note_type` "meeting"), Yap in an AI app's config
+  (`mcp_clients::added_anywhere`: added or since moved), dismissed, and
+  `shown` (`checklist`, pure: not dismissed, not all done). Debug-only
+  `e2e_guide_reset`. Unit tests; e2e `onboarding-steps.spec.js`,
+  `meeting-setup.spec.js`.
+- **`shell/help.rs`** — **the Help menu's shortcut sheet** (2026-10-29):
+  `shortcut_sheet` → every global binding as set now, read from the input
+  hook's own list (`input_hook::FIXED_KEYS` / `FIXED_NAMES`, each action's
+  first shortcut and its more), so a binding added there shows up by
+  itself; then the saved transforms' and the language shortcuts' keys, and
+  the recording mode. `sheet` is pure and unit-tested; the page is
+  `lib/views/help/ShortcutSheet.svelte` (frontend.md).
 - **`shell/portable.rs`** — portable-mode detection (a `portable` marker next to the exe
   redirects data to `<exe>/Data`).
 - **`shell/download.rs`** — **one download helper for every big

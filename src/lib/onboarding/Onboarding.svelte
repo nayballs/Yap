@@ -1,20 +1,27 @@
 <script>
-  // First-run guided setup (superwhisper-style), five steps: the speech
-  // model (ModelStep), the microphone (MicStep), AI cleanup (CleanupStep),
-  // the tray (TrayStep) and "try it" (TryStep), with progress dots on top
-  // and the footer — Back / I'll choose later, and each step's main button —
-  // pinned at the bottom. Its state lives in setupState.svelte.js; this
-  // window lives as long as Yap (hidden between showings), so it re-reads
-  // the config and re-subscribes each time it's shown again.
+  // First-run guided setup (superwhisper-style): the speech model
+  // (ModelStep), the languages you speak (LanguageStep), the microphone and
+  // its quiz (MicStep), AI cleanup (CleanupStep), a calendar for meeting
+  // notes (CalendarStep: until it's answered), the tray (TrayStep), "try it"
+  // (TryStep) and an optional typing test (TypingStep), with progress dots
+  // on top and the footer — Back / I'll choose later, and each step's main
+  // button — pinned at the bottom. Its state lives in setupState.svelte.js;
+  // this window lives as long as Yap (hidden between showings), so it
+  // re-reads the config and re-subscribes each time it's shown again.
   import { invoke } from '@tauri-apps/api/core';
   import { onMount } from 'svelte';
   import { hotkeyMatchesKeydown, hotkeyMatchesKeyup } from '../core/hotkeys.js';
-  import { createSetupState, flog, STEPS, recommended } from './setupState.svelte.js';
+  import { createSetupState, flog, recommended } from './setupState.svelte.js';
   import ModelStep from './ModelStep.svelte';
+  import LanguageStep from './LanguageStep.svelte';
   import MicStep from './MicStep.svelte';
   import CleanupStep from './CleanupStep.svelte';
+  import CalendarStep from './CalendarStep.svelte';
   import TrayStep from './TrayStep.svelte';
   import TryStep from './TryStep.svelte';
+  import TypingStep from './TypingStep.svelte';
+  import ConnectCalendarDialog from '../components/ConnectCalendarDialog.svelte';
+  import { calendar } from '../stores/calendar.svelte.js';
 
   const setup = createSetupState();
 
@@ -46,6 +53,7 @@
     window.addEventListener('keydown', onFallbackKeyDown, true);
     window.addEventListener('keyup', onFallbackKeyUp, true);
     setup.refresh().then(setup.refreshLlm);
+    setup.readGuide();
     invoke('hardware_advice')
       .then((a) => {
         setup.advice = a;
@@ -89,28 +97,36 @@
 <main>
   <!-- Progress dots -->
   <nav class="dots" aria-label="Setup progress">
-    {#each STEPS as s, i}
+    {#each setup.steps as s, i (s.id)}
       <button
         class="dot"
         class:done={i < setup.step}
         class:current={i === setup.step}
-        title={s}
+        title={s.label}
+        data-step={s.id}
         onclick={() => (i < setup.step ? (setup.step = i) : null)}
-        aria-label={`Step ${i + 1}: ${s}`}
+        aria-label={`Step ${i + 1}: ${s.label}`}
+        aria-current={i === setup.step ? 'step' : undefined}
       ></button>
     {/each}
   </nav>
 
-  {#if setup.step === 0}
+  {#if setup.stepId === 'model'}
     <ModelStep {setup} />
-  {:else if setup.step === 1}
+  {:else if setup.stepId === 'languages'}
+    <LanguageStep {setup} />
+  {:else if setup.stepId === 'mic'}
     <MicStep {setup} />
-  {:else if setup.step === 2}
+  {:else if setup.stepId === 'cleanup'}
     <CleanupStep {setup} />
-  {:else if setup.step === 3}
+  {:else if setup.stepId === 'calendar'}
+    <CalendarStep {setup} />
+  {:else if setup.stepId === 'tray'}
     <TrayStep />
-  {:else}
+  {:else if setup.stepId === 'try'}
     <TryStep {setup} />
+  {:else}
+    <TypingStep {setup} />
   {/if}
 
   {#if setup.error}
@@ -124,7 +140,7 @@
       <button class="skip" onclick={setup.next} disabled={!setup.cfg}>I'll choose later</button>
     {/if}
 
-    {#if setup.step === 0}
+    {#if setup.stepId === 'model'}
       <button class="start" onclick={setup.quickStart} disabled={!!setup.busyId || !setup.cfg}>
         {#if setup.busyId === recommended.id && setup.percent >= 100}
           <!-- Downloaded: checked, unpacked and loaded (~5–8 s), not "100%". -->
@@ -139,19 +155,34 @@
           Download {recommended.name} & continue
         {/if}
       </button>
-    {:else if setup.step === 2 && !setup.cleanupEnabled}
+    {:else if setup.stepId === 'cleanup' && !setup.cleanupEnabled}
       <button class="start ghost" onclick={setup.next} disabled={setup.llmInstalling}>
         {setup.llmInstalling ? 'Downloading…' : 'Maybe later'}
       </button>
-    {:else if setup.step === STEPS.length - 1}
+    {:else if setup.stepId === 'calendar' && !calendar.connections.length}
+      <!-- Skipped: the step never comes back (shell/guide.rs). -->
+      <button
+        class="start ghost"
+        onclick={() => {
+          setup.answerCalendar('skipped');
+          setup.next();
+        }}
+      >
+        Skip for now
+      </button>
+    {:else if setup.isLast}
       <button class="start" onclick={setup.finish}>
-        {setup.gotTranscript ? 'Finish 🎉' : 'Finish'}
+        {setup.gotTranscript || setup.typingWpm ? 'Finish 🎉' : 'Finish'}
       </button>
     {:else}
       <button class="start" onclick={setup.next} disabled={!setup.cfg}>Continue →</button>
     {/if}
   </footer>
 </main>
+
+<!-- "Connect your calendar" (the calendar step's Connect calendar): the
+     main window's dialog, here over the setup. -->
+<ConnectCalendarDialog />
 
 <style>
   :global(body) {

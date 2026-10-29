@@ -34,6 +34,8 @@
   import { initUpload } from '../stores/upload.svelte.js';
   import { initMemory } from '../stores/memory.svelte.js';
   import { initCleanupOffer } from '../notices/cleanupOffer.js';
+  import { initFeatureTips } from '../notices/featureTips.js';
+  import { openConnectDialog } from '../stores/calendar.svelte.js';
   import ConnectCalendarDialog from '../components/ConnectCalendarDialog.svelte';
   // Every view is in this window's one chunk (~590 KB): loading the views
   // other than Home on demand was measured on 2026-10-22 and changed nothing
@@ -141,7 +143,19 @@
   // "You spoke French · Add it to My languages?" after a dictation Whisper
   // heard in a language you didn't pick (dictation/languages/nudge.rs via languageNudge.js).
   initLanguageNudge({ openSettings: (section) => openSettings(section) });
+  // "Yap caught your correction", "Yap made that a list"… once each
+  // (dictation/tips.rs via featureTips.js).
+  initFeatureTips({
+    showView: (view) => {
+      settingsOpen = false;
+      activeView = view;
+    },
+  });
   let bellOpen = $state(false);
+  // Help (views/help/): its menu, the shortcut sheet (Ctrl+/ too) and What's new.
+  let helpOpen = $state(false);
+  let sheetOpen = $state(false);
+  let whatsNewOpen = $state(false);
 
   // Sidebar nav (Wispr order: Home, Insights, then the work surfaces).
   const NAV = [
@@ -195,8 +209,21 @@
   }
 
   function onOverlayKeydown(e) {
+    // Ctrl+/ anywhere in the window: the shortcut sheet (again: closed).
+    if (e.key === '/' && (e.ctrlKey || e.metaKey) && !e.altKey && !e.repeat) {
+      e.preventDefault();
+      helpOpen = false;
+      sheetOpen = !sheetOpen;
+      return;
+    }
     // Esc closes a right-click menu or the confirm dialog first (ui/contextMenu.svelte.js).
     if (e.key === 'Escape' && (e.defaultPrevented || menuOrDialogOpen())) return;
+    if (e.key === 'Escape' && helpOpen) {
+      helpOpen = false;
+      e.stopPropagation();
+      document.querySelector('.helpwrap .help')?.focus();
+      return;
+    }
     if (e.key === 'Escape' && bellOpen) {
       bellOpen = false;
       e.stopPropagation();
@@ -211,6 +238,7 @@
   // Close the notifications dropdown on any click outside its wrapper.
   function onWindowClick(e) {
     if (bellOpen && !e.target.closest?.('.bellwrap')) bellOpen = false;
+    if (helpOpen && !e.target.closest?.('.helpwrap')) helpOpen = false;
   }
 
   // Backend errors that aren't a dictation's (a call that couldn't be
@@ -319,6 +347,15 @@
       <span class="brandname" data-tauri-drag-region>Yap</span>
     </div>
     <div class="winbtns">
+      <!-- Help (views/help/, its own chunk: the main one stays under Vite's 700 kB). -->
+      {#await import('./help/HelpMenu.svelte') then { default: HelpMenu }}
+        <HelpMenu
+          bind:open={helpOpen}
+          onshortcuts={() => (sheetOpen = true)}
+          onsettings={(section) => openSettings(section)}
+          onwhatsnew={() => (whatsNewOpen = true)}
+        />
+      {/await}
       <div class="bellwrap">
         <button
           class="winbtn bell"
@@ -388,6 +425,24 @@
     </div>
 
     <div class="spacer"></div>
+
+    <!-- "Set up meeting notes" until it's done or dismissed (shell/guide.rs;
+         its own chunk). -->
+    {#await import('./MeetingSetup.svelte') then { default: MeetingSetup }}
+      <MeetingSetup
+        view={activeView}
+        onconnect={() => {
+          settingsOpen = false;
+          activeView = 'meetings';
+          openConnectDialog();
+        }}
+        onmeetings={() => {
+          settingsOpen = false;
+          activeView = 'meetings';
+        }}
+        onmcp={() => openSettings('mcp')}
+      />
+    {/await}
 
     <div class="bottom">
       <button class="navitem" onclick={() => openSettings()}>
@@ -481,6 +536,24 @@
 </div>
 
 <ToastHost />
+
+<!-- Help's shortcut sheet and What's new (each loads on first use). -->
+{#if sheetOpen}
+  {#await import('./help/ShortcutSheet.svelte') then { default: ShortcutSheet }}
+    <ShortcutSheet
+      onclose={() => (sheetOpen = false)}
+      onopensettings={(section) => {
+        sheetOpen = false;
+        openSettings(section);
+      }}
+    />
+  {/await}
+{/if}
+{#if whatsNewOpen}
+  {#await import('./help/WhatsNew.svelte') then { default: WhatsNew }}
+    <WhatsNew onclose={() => (whatsNewOpen = false)} />
+  {/await}
+{/if}
 
 <!-- "Connect your calendar" (calendar.svelte.js `openConnectDialog`): every
      Connect calendar button outside Settings opens it. -->

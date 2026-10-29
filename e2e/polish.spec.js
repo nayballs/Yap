@@ -207,6 +207,8 @@ test('onboarding: the main button in view, the tray step, the shortcut picker, e
   await expect(cards.locator('h3').first()).toHaveText('Parakeet V3');
   await expect(ob.getByRole('button', { name: /^More models/ })).toHaveCount(0);
   await ob.getByRole('button', { name: "I'll choose later" }).click();
+  // Languages, then the microphone.
+  await ob.getByRole('button', { name: 'Continue →' }).click();
   await ob.getByRole('button', { name: 'Continue →' }).click();
 
   // AI cleanup: the model for this PC and one more, the rest behind "More
@@ -223,6 +225,9 @@ test('onboarding: the main button in view, the tray step, the shortcut picker, e
   await ob.getByRole('button', { name: `More models (${total - 2})` }).click();
   await expect(ob.locator('.llm-row')).toHaveCount(total);
   await ob.getByRole('button', { name: 'Maybe later' }).click();
+  // The calendar step, until it's answered (shell/guide.rs).
+  const skipCalendar = ob.getByRole('button', { name: 'Skip for now' });
+  if (await skipCalendar.isVisible()) await skipCalendar.click();
 
   // The tray step: today's Yap (the Yap bar, open Yap), the footer at the bottom.
   await expect(ob.getByRole('heading', { level: 1, name: 'Yap lives in your tray' })).toBeVisible();
@@ -247,7 +252,10 @@ test('onboarding: the main button in view, the tray step, the shortcut picker, e
   await expect(picker.locator('kbd')).toHaveText(['Ctrl', 'Shift', 'Y']);
   await expect(ob.locator('header .sub')).toContainText('Ctrl + Shift + Y');
 
-  // Finish: Yap's window comes up (it was hidden: Yap lives in the tray).
+  // Finish (after the optional typing test): Yap's window comes up (it was
+  // hidden: Yap lives in the tray).
+  await ob.getByRole('button', { name: 'Continue →' }).click();
+  await expect(ob.getByRole('heading', { level: 1, name: 'How fast do you type?' })).toBeVisible();
   await yap.invoke('plugin:window|close', { label: 'settings' }); // close = hide
   await expect.poll(() => yap.invoke('plugin:window|is_visible', { label: 'settings' })).toBe(false);
   await ob.getByRole('button', { name: /^Finish/ }).click();

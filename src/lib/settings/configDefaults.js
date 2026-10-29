@@ -9,6 +9,11 @@ import { PP_DEFAULT_BODY } from './cleanupPresets.js';
 
 export const FIELD_DEFAULTS = {
   recordingMode: 'toggle',
+  // Settings → General → Notifications: each kind on its own (notices/kinds.rs).
+  notifySuggestions: true,
+  notifyMilestones: true,
+  notifyFeatureTips: true,
+  notifyNews: true,
   quietOtherApps: false,
   pauseMedia: false,
   keepMicReady: false,

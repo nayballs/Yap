@@ -215,6 +215,10 @@ pub fn rule(kind: &str) -> Rule {
         "micSwitched" => Rule { cooldown_ms: 10 * MIN, ..info },
         // "Contoso H2 disconnected": about the dictation that just ended.
         "micLost" => alert,
+        // "Yap caught your correction", "Yap made that a list"…
+        // (dictation/tips.rs, once each): after a dictation, never during
+        // one or a meeting; a tip, dropped unseen after a minute.
+        "featureTip" => Rule { hold_meeting: true, tip: true, max_wait_ms: Some(MIN), ..tip },
         // "Yap didn't hear you clearly" (dictation/mic_tips.rs, rare there):
         // after a dictation, never during one or a meeting; a tip.
         "micTip" => Rule { hold_meeting: true, tip: true, cooldown_ms: 24 * 60 * MIN, ..tip },
@@ -432,6 +436,21 @@ pub fn place(app: &AppHandle, notification: bool) -> Place {
     place_for(focused, visible, crate::bar::cards_available(), notification && notifications_allowed())
 }
 
+/// Where a nice-to-know notice of `kind` goes now (a tip or a suggestion:
+/// never a Windows notification), or Nowhere when its kind is switched off
+/// or has shown as often as a day takes (`kinds.rs`; counted when it goes
+/// somewhere). Window getters: never with a lock held.
+pub fn place_tip(app: &AppHandle, kind: &str) -> Place {
+    if !crate::notices::kinds::on(kind) {
+        return Place::Nowhere;
+    }
+    match place(app, false) {
+        Place::Nowhere => Place::Nowhere,
+        p if crate::notices::kinds::take(kind) => p,
+        _ => Place::Nowhere,
+    }
+}
+
 // ---- the moment, kept current from the app's events -------------------------------------------
 
 static DICTATING: AtomicBool = AtomicBool::new(false);
@@ -467,9 +486,11 @@ pub fn on_onboarding(shown: bool) {
     ONBOARDING.store(shown, Ordering::SeqCst);
 }
 
-/// Settings were loaded or saved: `show_tips`.
+/// Settings were loaded or saved: `show_tips`, and each kind's switch
+/// (`kinds.rs`).
 pub fn sync(cfg: &crate::config::YapConfig) {
     NO_TIPS.store(!cfg.show_tips, Ordering::SeqCst);
+    crate::notices::kinds::sync(cfg);
 }
 
 /// Tips are switched off (Settings → General → Notifications).
@@ -683,6 +704,7 @@ pub fn e2e_notice_reset() -> Result<(), String> {
     }
     *LEDGER.lock().unwrap_or_else(|p| p.into_inner()) = None;
     with_call_fatigue(|_| (Fatigue::default(), ()));
+    crate::notices::kinds::e2e_reset();
     TEST_FOCUS.store(0, Ordering::SeqCst);
     Ok(())
 }

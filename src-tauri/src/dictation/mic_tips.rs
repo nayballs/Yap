@@ -407,7 +407,7 @@ fn offer(app: &AppHandle, tip: Tip) {
         tracing::debug!(kind = ?tip.kind, "Mic tips: not now");
         return;
     }
-    let place = crate::notices::notice::place(app, false);
+    let place = crate::notices::notice::place_tip(app, KIND);
     let shown_now = match place {
         crate::notices::notice::Place::Window => app.emit(EVENT, &tip).is_ok(),
         crate::notices::notice::Place::Bar => {
