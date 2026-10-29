@@ -103,15 +103,22 @@ function announce() {
     updates.updatedFrom = null;
     invoke('update_ack_updated').catch(() => {});
     const url = releaseUrlFor(updates.currentVersion);
-    toast({
-      kind: 'info',
-      title: `Updated to ${updates.currentVersion}`,
-      description: 'Yap restarted on the new version.',
-      variant: 'success',
-      chip: 'Updated',
-      duration: 6000,
-      action: { label: "What's new", onClick: () => openExternalLink(url) },
-    });
+    // News (Settings → General → Notifications, notices/kinds.rs): its switch
+    // and its one a day.
+    invoke('notice_allow', { kind: 'news' })
+      .catch(() => true)
+      .then((ok) => {
+        if (!ok) return;
+        toast({
+          kind: 'info',
+          title: `Updated to ${updates.currentVersion}`,
+          description: 'Yap restarted on the new version.',
+          variant: 'success',
+          chip: 'Updated',
+          duration: 6000,
+          action: { label: "What's new", onClick: () => openExternalLink(url) },
+        });
+      });
   }
   const a = updates.announce;
   if (a) {

@@ -248,7 +248,7 @@ pub fn consider(app: &AppHandle, heard: &Heard, secs: f32, mine: &[String], on: 
 /// Ask about `code`: a toast in the main window while it's on screen, else
 /// a Yap bar card. `true` if shown.
 pub fn offer(app: &AppHandle, code: &str, picked: &str) -> bool {
-    let place = crate::notices::notice::place(app, false);
+    let place = crate::notices::notice::place_tip(app, "language-nudge");
     if place == crate::notices::notice::Place::Nowhere {
         tracing::debug!("Language nudge: nowhere to show it");
         return false;

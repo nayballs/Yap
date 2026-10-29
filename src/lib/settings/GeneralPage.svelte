@@ -108,7 +108,8 @@
 </Group>
 
 <!-- Yap's notice policy (notices/notice.rs): one notice at a time, held while you
-     dictate. Tips are the one kind you can switch off. -->
+     dictate. Tips, and each kind of nice-to-know notice (notices/kinds.rs,
+     each at most a few a day), can be switched off. -->
 <Group title="Notifications" id="settings-notifications">
   <Row setting="tips">
     <Toggle
@@ -117,5 +118,26 @@
       desc="Short tips, like push-to-talk's double-tap, and the nudge to connect your calendar"
       hint="Questions, alerts and errors always show. Yap shows one at a time, and holds them back while you dictate."
     />
+  </Row>
+  <Row setting="notify-suggestions">
+    <Toggle
+      bind:checked={cfg.notifySuggestions}
+      label="Suggestions"
+      desc="Words and snippets to save, languages to add. At most three a day"
+    />
+  </Row>
+  <Row setting="notify-feature-tips">
+    <Toggle
+      bind:checked={cfg.notifyFeatureTips}
+      label="Feature tips"
+      desc="What Yap just did for you, the first time it does it. At most three a day"
+      disabled={!cfg.showTips}
+    />
+  </Row>
+  <Row setting="notify-milestones">
+    <Toggle bind:checked={cfg.notifyMilestones} label="Milestones" desc="Your dictation milestones. At most two a day" />
+  </Row>
+  <Row setting="notify-news">
+    <Toggle bind:checked={cfg.notifyNews} label="News" desc="What's new after Yap updates" />
   </Row>
 </Group>

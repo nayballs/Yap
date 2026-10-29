@@ -59,6 +59,18 @@ pub struct Record {
     /// Double-tap has locked a recording at least once: no more hints
     /// about it (the tap and long-hold ones).
     pub hands_free_used: bool,
+    /// Feature tips shown (`tips.rs`): each kind's when (unix ms), once
+    /// each. An older Yap drops this when it saves a hint: a tip may then
+    /// show once more.
+    #[serde(skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub features: std::collections::BTreeMap<String, u64>,
+    /// The Yap bar's first-use pointers shown (`bar/pointer.rs`): each
+    /// kind's when (unix ms).
+    #[serde(skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub pointers: std::collections::BTreeMap<String, u64>,
+    /// A dictation has finished at least once: no first-use pointers.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub dictated: bool,
 }
 
 /// How many times `hint` shows at most: the meeting-notes suggestion once,
@@ -176,13 +188,15 @@ fn loaded(slot: &mut Option<Record>) -> &mut Record {
     })
 }
 
-fn record() -> Record {
+/// hints.json as it is now (feature tips and the bar's pointers keep their
+/// counts here too).
+pub(crate) fn record() -> Record {
     loaded(&mut RECORD.lock().unwrap_or_else(|p| p.into_inner())).clone()
 }
 
 /// Change the record and save it, under the one lock (a hint shown and
 /// double-tap used at once both stick).
-fn update_record(f: impl FnOnce(Record) -> Record) {
+pub(crate) fn update_record(f: impl FnOnce(Record) -> Record) {
     let mut guard = RECORD.lock().unwrap_or_else(|p| p.into_inner());
     let rec = f(loaded(&mut guard).clone());
     let _ = SAVER.write_json(&record_path(), &rec, true);
@@ -224,7 +238,7 @@ pub fn offer(app: &AppHandle, hint: Hint, hotkey: &str) {
     }
     // One place (`notice.rs`): the main window while the person is looking
     // at it, else the Yap bar; never a Windows notification for a tip.
-    let place = crate::notices::notice::place(app, false);
+    let place = crate::notices::notice::place_tip(app, "hint");
     let in_window = place == crate::notices::notice::Place::Window;
     let shown_now = if in_window {
         let kind = match hint {

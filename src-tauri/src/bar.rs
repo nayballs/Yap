@@ -58,6 +58,7 @@
 
 pub mod menu;
 pub mod overlay;
+pub mod pointer;
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -605,12 +606,16 @@ pub struct Status {
     cards: Vec<Card>,
     /// …and the ids of those waiting their turn.
     waiting: Vec<String>,
+    /// The first-use pointers still due (`bar/pointer.rs`), for someone
+    /// who has never dictated.
+    first_use: Option<pointer::Due>,
 }
 
 pub fn status() -> Status {
     // Other modules' state first: never with this module's lock held.
     let meeting = crate::meetings::meeting::state();
     let call = crate::calls::meeting_detect::tray_item().map(|(_, label)| label);
+    let first_use = pointer::status();
     let now = now_ms();
     let s = lock();
     Status {
@@ -639,11 +644,18 @@ pub fn status() -> Status {
             .filter(|c| s.front.as_deref() != Some(c.id.as_str()))
             .map(|c| c.id.clone())
             .collect(),
+        first_use,
     }
 }
 
 fn emit(app: &AppHandle) {
     let _ = app.emit(EVENT, status());
+}
+
+/// Send the page the bar's status again (the first-use pointers changed).
+#[cfg_attr(not(debug_assertions), allow(dead_code))]
+pub(crate) fn refresh(app: &AppHandle) {
+    emit(app);
 }
 
 // ---- the window ----------------------------------------------------------------------
@@ -1080,6 +1092,7 @@ fn dictation_buttons_from_config(value: &str) -> &'static str {
 }
 
 fn read_config(s: &mut State, cfg: &crate::config::YapConfig) -> bool {
+    pointer::sync(cfg);
     let edge = Edge::from_config(&cfg.overlay_position);
     // Read loosely: the meeting-notes shortcut may not exist in this build.
     let meeting_hotkey = serde_json::to_value(cfg)
