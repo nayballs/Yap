@@ -177,6 +177,8 @@ function followBriefs() {
     const b = e.payload;
     if (b?.key) briefs.byKey[b.key] = b;
   });
+  // Reset app (privacy/reset.rs): the briefs went; asked for again when shown.
+  listen('yap-data-reset', () => (briefs.byKey = {}));
 }
 
 /** Meeting `key`'s brief (kept, or made now; `refresh`: made again). */

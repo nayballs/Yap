@@ -135,7 +135,13 @@
   Privacy & data, off: a sentence or two before the cursor to a cleanup
   model off this PC; one on this PC gets it whenever `smart_spacing` reads
   it; `ai/cleanup_context.rs`), streaming_partials,
-  history_enabled, update_checks_enabled, dictionary_fuzzy, learn_words
+  history_enabled + history_keep (2026-10-29, "Keep dictation history",
+  Privacy & data: "always", "day" = 24 hours, "never" = history_enabled
+  off; "" = never chosen, so always — the default, no `migrate_once` step
+  as no saved value changes; an older Yap reads only history_enabled and
+  drops history_keep on its save: a copy kept in
+  `<data>/dictation_stats.json` brings "day" back at the next start while
+  history is still on; `dictation/history/keep.rs`), update_checks_enabled, dictionary_fuzzy, learn_words
   ("Suggest words from your corrections", default on, `dictionary/learn.rs`),
   show_tips ("Show tips", default on: coaching hints and nudges;
   `notices/notice.rs`), the meeting
@@ -424,7 +430,19 @@
   (Windows' OCR, `snip/ocr.rs`) keeps it marked `asText`. A snip copied or
   saved from the overlay keeps nothing here; a save goes where the Save
   dialog says, in the folder used last (`snip_save_dir`).
-- History: `%APPDATA%/yap/history.json` (local-only; cleared from Settings → Privacy & data → History).
+- History: `%APPDATA%/yap/history.json` (local-only; cleared from Settings → Privacy & data → History,
+  kept always, 24 hours or not at all). Since 2026-10-29 a new entry has `secs`, how long it was
+  spoken for (its audio's length); an older Yap drops it when it saves history, which only leaves
+  that entry untimed: the stats below have it already.
+- Dictation stats: `%APPDATA%/yap/dictation_stats.json` (2026-10-29, `dictation/stats.rs`) — what
+  Home and Insights show, kept whether or not history is: a row a day (`date`, the PC's own;
+  `words`, `dictations`, `timed` / `timedWords` / `speakingSecs` for words a minute, `apps` —
+  words per app's exe name —, `cleanupWords`, `dictionaryFixes`), `countedTo` (history up to there
+  is counted: the first start counts the history already there, a later one what an older Yap
+  saved since), `milestone` (the word milestone said last), `returned` / `welcomed` (Home's
+  welcome back), `historyKeep` (a copy of the setting). Numbers, dates and app names only, never a
+  word said. Clearing history keeps it; Reset app clears it with the other usage stats; Download
+  your data has it as `history/dictation-stats.json`. An older Yap never reads or writes it.
 - Notes: `%APPDATA%/yap/notes.json` — the AI Notepad store (folders, actions,
   participants, meeting transcripts; a meeting's speaker map, with its
   name cards and the "may be one voice / two people" offers and answers:
@@ -491,6 +509,12 @@
   showed (`tap`, `longHold`, `chord` — "Hold only {key}" —, `longDictation`
   — "Try meeting notes", once ever), when the last did, and whether
   double-tap has been used (`dictation/coaching.rs`).
+- Mic tips: `%APPDATA%/yap/mic_tips.json` (2026-10-29,
+  `dictation/mic_tips.rs`) — how often each mic-quality tip ("Yap didn't
+  hear you clearly": quiet, noisy, clipped, a Bluetooth headset in its call
+  profile) showed and when, and when the last did: `{quiet: {shown, lastAt},
+  …, lastShownAt}`. Counts only. A file of its own: an older Yap never reads
+  or writes it. Safe to delete (each tip may show again).
 - Quieted apps: `%APPDATA%/yap/quieted_apps.json` — only while a dictation
   has other apps silenced (each session's id, exe and level before), so a
   Yap that crashed mid-dictation brings them back at its next start
@@ -517,6 +541,17 @@
   (`memory.rs`). Changed only as changes (Undo in the app); cleared from
   Settings → Memory, exported there as a .zip of Markdown. Sent with questions
   to the AI model the person uses, never to Yap.
+- **Download your data and Reset app** (2026-10-29, Settings → Privacy &
+  data → Your data; [privacy-receipts.md](./privacy-receipts.md)): one .zip
+  of the history, notes and meetings, chats, tasks, memory, the dictionary
+  and settings without keys (the audio and screenshots with a tick box),
+  never uploaded; and "Clear everything and keep my settings": the history
+  and its audio, notes and meetings with theirs, chats and screenshots,
+  memory, tasks, the search index, the usage counts and the pre-meeting
+  briefs go; config.json, `dictionary_usage.json`, the models, the account
+  and calendars, and Yap's own records stay. **Every file this page names
+  is in one list or the other** (`privacy/reset.rs` `GOES` / `STAYS`; a unit
+  test reads this page): a new store put here has to be decided there too.
 - All of the above (plus config) write atomically and quarantine a corrupt file
   on load rather than crashing (`config::atomic_write`/`quarantine_corrupt`;
   config.json its own way, above). Each write has a temp file of its own

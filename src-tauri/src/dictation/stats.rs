@@ -533,9 +533,14 @@ pub fn set_keep_choice(keep: &str) {
     });
 }
 
-/// Forget every number (a data reset): history there now counts as counted,
-/// so it isn't counted again.
-#[cfg_attr(not(debug_assertions), allow(dead_code))]
+/// The store as it is, for Download your data (`privacy/export.rs`).
+pub fn snapshot() -> Value {
+    with_store(|s| serde_json::to_value(&*s).unwrap_or(Value::Null))
+}
+
+/// Forget every number (Reset app, `privacy/reset.rs`): history there now
+/// counts as counted, so it isn't counted again; "Keep history"'s copy
+/// stays (config.json keeps the choice).
 pub fn clear() {
     let mut guard = STORE.lock().unwrap_or_else(|p| p.into_inner());
     let keep = guard.as_ref().map(|s| s.history_keep.clone()).unwrap_or_default();

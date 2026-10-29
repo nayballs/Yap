@@ -310,6 +310,12 @@ pub fn rerun_result(audio: &str, raw: &str, text: &str, said: Option<&str>, mode
     true
 }
 
+/// Every entry as kept, oldest first (Download your data, `privacy/export.rs`).
+pub fn all() -> Vec<HistoryEntry> {
+    let mut guard = STATE.lock().unwrap_or_else(|p| p.into_inner());
+    guard.get_or_insert_with(load_from_disk).clone()
+}
+
 /// Recent entries, newest first, capped at `limit`.
 pub fn list(limit: usize) -> Value {
     let mut guard = match STATE.lock() {

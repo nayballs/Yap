@@ -154,6 +154,27 @@ fn to_json(u: &GroqUsage) -> Value {
     })
 }
 
+/// Reset app (`privacy/reset.rs`): today's counts gone (the file too);
+/// Groq's daily request cap, learnt from its answers, is kept.
+pub fn reset() {
+    let mut guard = STATE.lock().unwrap_or_else(|p| p.into_inner());
+    let cap = guard.get_or_insert_with(load_from_disk).request_cap;
+    let usage = GroqUsage { day: today(), request_cap: cap, ..GroqUsage::default() };
+    if !cfg!(test) {
+        match std::fs::remove_file(usage_path()) {
+            Ok(()) => SAVER.nothing_to_save(),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => SAVER.nothing_to_save(),
+            Err(_) => save_to_disk(&usage),
+        }
+    }
+    let snap = to_json(&usage);
+    *guard = Some(usage);
+    drop(guard);
+    if let Some(app) = APP.get() {
+        let _ = app.emit("groq-usage", snap);
+    }
+}
+
 /// Read the current usage (after a same-day check so a new day reads as 0).
 pub fn snapshot() -> Value {
     let mut guard = match STATE.lock() {
