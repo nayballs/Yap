@@ -672,20 +672,37 @@ pub(crate) mod clip {
     /// so opening retries for ~0.3 s.
     struct Open;
 
+    /// Yap has the clipboard open (no window: `OpenClipboard(NULL)`). Only
+    /// one opener at a time, so a read of the promised paste meanwhile is
+    /// Yap's own (`read_check.rs` can't tell it by a window).
+    static YAP_HOLDS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+    /// Whether Yap itself has the clipboard open now.
+    pub fn yap_holds_it() -> bool {
+        YAP_HOLDS.load(std::sync::atomic::Ordering::SeqCst)
+    }
+
     impl Open {
         fn new() -> Option<Open> {
             for i in 0..8u64 {
                 if unsafe { OpenClipboard(None) }.is_ok() {
-                    return Some(Open);
+                    return Some(Open::held());
                 }
                 sleep(Duration::from_millis(5 + i * 10));
             }
             None
         }
+
+        /// The clipboard just opened: marked as Yap's until dropped.
+        fn held() -> Open {
+            YAP_HOLDS.store(true, std::sync::atomic::Ordering::SeqCst);
+            Open
+        }
     }
 
     impl Drop for Open {
         fn drop(&mut self) {
+            YAP_HOLDS.store(false, std::sync::atomic::Ordering::SeqCst);
             unsafe {
                 let _ = CloseClipboard();
             }
@@ -905,7 +922,7 @@ pub(crate) mod clip {
         let started = std::time::Instant::now();
         loop {
             if unsafe { OpenClipboard(None) }.is_ok() {
-                return Some(Open);
+                return Some(Open::held());
             }
             if started.elapsed() >= patience {
                 return None;
@@ -2472,17 +2489,15 @@ fn inject_text_sync(
         if !matches!(edit, Some(Landed::Yes | Landed::No)) {
             // Nothing took text before the keys: look again once the app
             // has had its moment (some move the focus to their message box
-            // on a paste) — unless it read the text meanwhile: it took it.
+            // on a paste) — unless the target, named by its window, read the
+            // text meanwhile: it took it. (A nameless read doesn't count
+            // here: Edge's browser reads on any Ctrl+V.)
             if focus_before == Editable::No {
                 let moment = pasted_at + Duration::from_millis(FOCUS_AGAIN_MS);
-                seen = match &offer {
-                    Some(o) => o.wait(moment),
-                    None => {
-                        std::thread::sleep(moment.saturating_duration_since(Instant::now()));
-                        Seen::Nothing
-                    }
-                };
-                if !matches!(seen, Seen::Target { .. }) {
+                seen = offer.as_ref().map_or(Seen::Nothing, |o| o.wait(moment));
+                if seen != (Seen::Target { sure: true }) {
+                    // (Its moment in full, whenever a read came.)
+                    std::thread::sleep(moment.saturating_duration_since(Instant::now()));
                     no_text_box = crate::pasting::selection::focus_editable(target_hwnd) == Editable::No;
                 }
             }

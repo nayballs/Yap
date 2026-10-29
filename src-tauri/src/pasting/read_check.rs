@@ -164,8 +164,10 @@ impl Verdict {
 ///   before).
 /// - `no_text_box`: UI Automation said plainly that nothing taking text had
 ///   the focus, before the keys and after them — "Select a text box first",
-///   unless the target read the text (Discord and Slack move the focus to
-///   their box on a paste: it took it).
+///   unless the target itself, named by its window, read the text (it took
+///   it somewhere). A read nobody can name never overrides it: Edge's
+///   browser reads the clipboard on Ctrl+V with no window even when
+///   nothing on the page takes text (the robot, 2026-10-29).
 pub fn combine(edit: Option<crate::pasting::selection::Landed>, seen: Seen, offered: bool, no_text_box: bool) -> Verdict {
     use crate::pasting::selection::Landed;
     match edit {
@@ -174,9 +176,9 @@ pub fn combine(edit: Option<crate::pasting::selection::Landed>, seen: Seen, offe
         Some(Landed::Unknown) | None => {}
     }
     match seen {
-        Seen::Target { .. } => Verdict::Pasted,
+        Seen::Target { sure: true } => Verdict::Pasted,
         _ if no_text_box => Verdict::NoTextBox,
-        Seen::Taken => Verdict::Pasted,
+        Seen::Target { sure: false } | Seen::Taken => Verdict::Pasted,
         Seen::Nothing if offered => Verdict::NotRead,
         Seen::Nothing => Verdict::Pasted,
     }
@@ -293,7 +295,8 @@ pub fn classify(targets: &Targets, opener: isize, pid: Option<u32>, exe: impl Fn
 pub struct Report {
     /// The text was promised (else written plainly: no read to go by).
     pub offered: bool,
-    /// The first read that got it, if any.
+    /// The first app's read that got it, if any (Yap's own look — the
+    /// robot's check, the next paste's snapshot — isn't reported).
     pub reader: Option<Reader>,
     /// That read was named (not taken for the target's).
     pub sure: bool,
@@ -582,7 +585,13 @@ mod win {
             let Some(live) = st.offer.as_mut().filter(|l| !l.gone && l.owner == window.0 as isize) else {
                 return;
             };
-            let reader = classify(&live.targets, opener.0 as isize, pid, || pid.and_then(exe_of));
+            // Yap's own reads open the clipboard with no window: told by
+            // Yap holding it open (one opener at a time).
+            let reader = if clip::yap_holds_it() {
+                Reader::Yap
+            } else {
+                classify(&live.targets, opener.0 as isize, pid, || pid.and_then(exe_of))
+            };
             let mut verdict = answer(reader, live.phase, live.open);
             if live.refuse_all && reader != Reader::Yap && live.phase != Phase::Left {
                 verdict = Answer::Refuse;
@@ -611,7 +620,9 @@ mod win {
             }
             _ => None,
         };
-        if let Some((keys_at, open)) = first {
+        // The report is about the apps' reads, not Yap's own look (the
+        // robot's check, the next paste's snapshot).
+        if let Some((keys_at, open)) = first.filter(|_| reader != Reader::Yap) {
             let said = seen(reader, phase, open);
             st.last.reader = Some(reader);
             st.last.sure = said == Seen::Target { sure: true };
@@ -805,8 +816,6 @@ mod win {
                 };
                 if unsafe { GetClipboardSequenceNumber() } != before {
                     debug!(attempt, private, "The dictation is promised on the clipboard");
-                    let mut st = state();
-                    st.last = Report { offered: true, ..Report::default() };
                     return Some(Offer { id, owner });
                 }
                 debug!(attempt, "The clipboard promise didn't take (sequence number unchanged)");
@@ -840,6 +849,10 @@ mod win {
                     st.next += 1;
                     st.late = None;
                     st.pending = None;
+                    // The report starts afresh here, before the clipboard
+                    // closes: a clipboard manager's read the moment it does
+                    // is this paste's.
+                    st.last = Report { offered: true, ..Report::default() };
                     st.offer = Some(Live {
                         id,
                         owner,
@@ -1086,8 +1099,12 @@ mod tests {
         assert_eq!(combine(None, Seen::Nothing, true, true), Verdict::NoTextBox);
         assert_eq!(combine(None, Seen::Taken, true, true), Verdict::NoTextBox);
         assert_eq!(combine(None, Seen::Nothing, false, true), Verdict::NoTextBox);
-        // Discord moves the focus to its box on a paste: it read the text.
+        // The target, named by its window, read it: it took it somewhere.
         assert_eq!(combine(None, Seen::Target { sure: true }, true, true), Verdict::Pasted);
+        // A nameless read doesn't say it landed in a box: Edge's browser
+        // reads on Ctrl+V with only a button focused.
+        assert_eq!(combine(None, Seen::Target { sure: false }, true, true), Verdict::NoTextBox);
+        assert_eq!(combine(None, Seen::Target { sure: false }, true, false), Verdict::Pasted);
     }
 
     /// The real promise on a clipboard of its own: the test process moves

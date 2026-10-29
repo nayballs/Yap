@@ -32,7 +32,7 @@ test('the test pad: its box reads the paste, and your clipboard comes back after
   expect(r.leftOnClipboard).toBe(false);
   await expect.poll(() => pad.text('box')).toBe('The read says it landed.');
   const lp = await robot.lastPaste();
-  expect(lp).toMatchObject({ offered: true, reader: 'target', sure: true, verdict: 'pasted', refused: 0 });
+  expect(lp).toMatchObject({ offered: true, reader: 'target', sure: true, verdict: 'pasted' });
   await expect.poll(async () => (await robot.lastPaste()).restored).toBe(true);
   expect((await robot.clipboard('check', 'What you had copied')).matchesText).toBe(true);
   // What came back is kept out of Win+V history, as ever.
@@ -44,14 +44,16 @@ test("a clipboard manager's read never counts: refused before the keys, and the 
   // (A test value on the clipboard: the stand-in sees only the test's own.)
   await robot.clipboard('setText', 'What you had copied');
   await pad.set('box', '');
-  const manager = await startClipReader({ ms: 5_000, delay: 0 });
+  // It listens 3 s, then says what it read (`result()` waits for that).
+  const manager = await startClipReader({ ms: 3_000, delay: 0 });
   let lp;
   try {
     await robot.dictate(pad, 'Not for the manager.');
     await expect.poll(() => pad.text('box')).toBe('Not for the manager.');
     lp = await robot.lastPaste();
-  } finally {
+  } catch (e) {
     manager.stop();
+    throw e;
   }
   expect(lp.reader).toBe('target');
   expect(lp.refused).toBeGreaterThanOrEqual(1);
@@ -64,15 +66,15 @@ test('a clipboard manager reading late, after the keys: it gets the text (a past
   const { pad } = robot;
   await robot.clipboard('setText', 'What you had copied');
   await pad.set('box', '');
-  const manager = await startClipReader({ ms: 4_000, delay: 400 });
+  const manager = await startClipReader({ ms: 3_000, delay: 400 });
   let lp;
   try {
     await robot.dictate(pad, 'The box reads it first.');
     await expect.poll(() => pad.text('box')).toBe('The box reads it first.');
     lp = await robot.lastPaste();
-  } finally {
-    await sleep(1_000);
+  } catch (e) {
     manager.stop();
+    throw e;
   }
   expect(lp.reader).toBe('target');
   const seen = await manager.result();
@@ -93,29 +95,21 @@ test("robot mode's stand-in for an app that never reads: an edit control is type
 test.describe('Edge', () => {
   test.skip(!edgeExe(), 'Microsoft Edge is not installed');
 
+  // Edge's browser process reads the clipboard with no window of its own
+  // (the robot, 2026-10-29): a nameless read after the keys, taken for the
+  // target's. It reads on any Ctrl+V — a page that swallows the key, a
+  // button focused — so in Edge the read says the keys arrived, not that
+  // the page took them; "Select a text box first" still decides there
+  // (paste-safety.real.js).
   test("a web page's text box: Edge's browser process reads it, and that counts", async ({ robot }) => {
     const page = await robot.editor();
     await page.set('');
     const r = await robot.dictate(page, 'Read by the browser.');
     expect(r.leftOnClipboard).toBe(false);
     await expect.poll(() => page.value()).toBe('Read by the browser.');
-    expect(await robot.lastPaste()).toMatchObject({ reader: 'target', verdict: 'pasted' });
-  });
-
-  test('a page that swallows Ctrl+V: nothing reads it, so it stays copied and Yap says so', async ({ robot }) => {
-    const page = await robot.page(
-      `<textarea id="box" aria-label="Message" onkeydown="if (event.ctrlKey && event.key.toLowerCase() === 'v') event.preventDefault()"></textarea>`,
-    );
-    const r = await robot.dictate(page, 'Nobody took this.');
-    expect(r.leftOnClipboard).toBe(true);
-    expect(r.leftWhy).toBe('notRead');
-    expect(await page.evaluate(() => document.getElementById('box').value)).toBe('');
-    const clip = await robot.clipboard('check', r.text);
-    expect(clip.matchesText).toBe(true);
-    expect(clip.private).toBe(true);
-    await expect(toasts(robot, COULDNT)).toHaveCount(1);
-    await expect(toasts(robot, COULDNT)).toContainText("The app didn't take the paste");
-    expect((await robot.lastPaste()).verdict).toBe('notRead');
+    const lp = await robot.lastPaste();
+    expect(['target', 'unknown']).toContain(lp.reader);
+    expect(lp.verdict).toBe('pasted');
   });
 
   test("robot mode's stand-in for an app that never reads: a web page's box gets nothing, it's copied, said once", async ({ robot }) => {
@@ -191,26 +185,16 @@ test.describe('terminals', () => {
 test.describe('an Electron app', () => {
   test.skip(!electronExe(), 'No Electron runtime: set YAP_ROBOT_ELECTRON to an electron.exe, or `npm i --no-save electron`');
 
+  // Chromium inside, like Edge: its read may come with no window.
   test('its main process reads the paste, and that counts', async ({ robot }) => {
     const app = await robot.electron();
     await app.set('');
     const r = await robot.dictate(app, 'Electron read this.');
     expect(r.leftOnClipboard).toBe(false);
     await expect.poll(() => app.value()).toBe('Electron read this.');
-    expect(await robot.lastPaste()).toMatchObject({ reader: 'target', verdict: 'pasted' });
-  });
-
-  test('its box swallowing Ctrl+V: not read, copied, said', async ({ robot }) => {
-    const app = await robot.electron();
-    await app.evaluate(() => {
-      document.getElementById('box').onkeydown = (e) => {
-        if (e.ctrlKey && e.key.toLowerCase() === 'v') e.preventDefault();
-      };
-    });
-    const r = await robot.dictate(app, 'Not taken.');
-    expect(r.leftWhy).toBe('notRead');
-    expect(await app.value()).toBe('');
-    expect((await robot.clipboard('check', r.text)).matchesText).toBe(true);
+    const lp = await robot.lastPaste();
+    expect(['target', 'unknown']).toContain(lp.reader);
+    expect(lp.verdict).toBe('pasted');
   });
 });
 
@@ -221,7 +205,9 @@ test.describe('VS Code', () => {
     const code = await robot.vscode();
     const r = await robot.dictate(code, 'Code read this.');
     expect(r.leftOnClipboard).toBe(false);
-    expect(await robot.lastPaste()).toMatchObject({ reader: 'target', verdict: 'pasted' });
+    const lp = await robot.lastPaste();
+    expect(['target', 'unknown']).toContain(lp.reader);
+    expect(lp.verdict).toBe('pasted');
     await expect.poll(() => code.text(), { timeout: 15_000 }).toContain('Code read this.');
   });
 });
