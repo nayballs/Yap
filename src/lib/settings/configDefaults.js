@@ -54,6 +54,7 @@ export const FIELD_DEFAULTS = {
   historyEnabled: true,
   meetingDetection: true,
   meetingAutoStart: false,
+  meetingAutoStartApps: [],
   meetingDetectApps: {},
   meetingDetectStyle: 'popup',
   meetingHideFromCapture: true,

@@ -204,6 +204,11 @@ pub fn spawn_meeting_audio(
             // (`e2e_mic_unplug`) — nothing until here, then the next one.
             let mic_of = || mics::present().and_then(|l| mics::in_use(&order, &l, &[]));
             let mut mic_at = mic_of();
+            let say_mic = |at: &Option<mics::Endpoint>| match at {
+                Some(e) => crate::meetings::meeting::set_mic_in_use(&e.id, &e.name),
+                None => crate::meetings::meeting::set_mic_in_use("", "Microphone (e2e)"),
+            };
+            say_mic(&mic_at);
             let mut mics_seen = mics::generation();
             let mut mic_gap: Option<usize> = None;
             let length = you.len().max(them.len());
@@ -240,9 +245,18 @@ pub fn spawn_meeting_audio(
                         mic_gap = Some(pos + SWITCH_GAP_SAMPLES);
                     }
                 }
+                // "Use Contoso H2" (`meeting::use_mic`): "You" moves to it.
+                if let Some((id, _)) = crate::meetings::meeting::take_mic_asked() {
+                    if let Some(e) = mics::present().and_then(|l| l.into_iter().find(|e| e.id == id)) {
+                        tracing::info!(secs, "e2e: \"You\" moves to the microphone asked for");
+                        mic_at = Some(e);
+                        say_mic(&mic_at);
+                    }
+                }
                 if mic_gap.is_some_and(|until| pos >= until) {
                     mic_gap = None;
                     mic_at = mic_of();
+                    say_mic(&mic_at);
                     let next = mic_at.as_ref().map(|e| e.name.clone()).unwrap_or_default();
                     crate::meetings::meeting::keep_in_step(&mic, &sys);
                     if let Ok(mut b) = mic.lock() {
@@ -285,6 +299,7 @@ pub fn spawn_meeting_audio(
             if dictating {
                 crate::dictation::pipeline::dictation_ended();
             }
+            crate::meetings::meeting::clear_mic_in_use();
             *script() = Script::default();
         })
         .map_err(|e| format!("Failed to spawn the e2e capture thread: {e}"))?;

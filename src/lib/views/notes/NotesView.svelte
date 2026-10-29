@@ -55,6 +55,11 @@
     // The local API bridge (Integrations) can create/update/delete notes from
     // outside the app — refresh the list so external edits show up live.
     listen('yap-notes-changed', () => notes.refreshList()).then((u) => unlisteners.push(u));
+    // A meeting's transcript changed outside a recording ("Your PC was
+    // asleep", meetings/sleep.rs): the open note as stored.
+    listen('yap-meeting-transcript', (e) => {
+      if (e.payload?.noteId === notes.selected?.id) notes.reloadSelected();
+    }).then((u) => unlisteners.push(u));
     // A recording made a note a meeting note and filed it in Meetings
     // (commands.rs `meeting_start` → notes::file_as_meeting).
     listen('yap-note-filed', (e) => notes.onNoteFiled(e.payload)).then((u) => unlisteners.push(u));

@@ -208,6 +208,7 @@ One folder per area (an area's `<area>.rs` lists its modules); a big module's pa
 - `meetings/meeting_refine.rs` — the refined transcript when a meeting ends: when it helps (failed chunks, a more accurate model for its language), always or never; summary first unless the transcript has holes; low priority, cancellable.
 - `meetings/meeting_assist.rs` — the notepad's AI: What did I miss?, one-tap helpers, the AI title.
 - `meetings/notepad.rs` — the meeting notepad window: docking, split screen and its preview.
+- `meetings/sleep.rs` — the PC asleep mid-meeting: paused cleanly on sleep, "Your PC was asleep for 12 min" in the transcript on wake, Resume / Summarise.
 
 **Speakers** — [speakers.md](./docs/architecture/speakers.md)
 - `speakers/diarize.rs` (+ `speakers/diarize/`) — the beta speaker engine: the `yap.exe diarize` child, its wire, models (+ voice matching's).
@@ -218,9 +219,10 @@ One folder per area (an area's `<area>.rs` lists its modules); a big module's pa
 - `speakers/call_ui.rs` — who the call app shows talking (experimental, off): UI Automation reads on the meeting's clock; `yap.exe call-dump`.
 
 **Call detection and guard rails** — [call-detection-and-guards.md](./docs/architecture/call-detection-and-guards.md)
-- `calls/meeting_detect.rs` — notices calls (mic consent store), prompts, per-app choice, fatigue, tray item.
+- `calls/meeting_detect.rs` — notices calls (mic consent store), prompts, per-app choice, fatigue, tray item; "Stop taking notes?" when an ending isn't sure, "Switch to Zoom?", a call back within 2 min of an automatic stop carried on; "Start notes automatically for Teams calls?" once (`meeting_detect/auto_offer.rs`).
+- `calls/call_audio.rs` — the recorded call's own audio: which mic it uses ("Teams is using X but Yap is using Y", Use X), muted in the call (its mute button, read only while "You" is quiet), still playing.
 - `calls/app_icons.rs` — the call apps' own installed icons, cached.
-- `calls/meeting_guard.rs` — length limit, quiet meetings, check-ins, the meeting shortcut, notices.
+- `calls/meeting_guard.rs` — length limit, quiet meetings, check-ins and the meeting's other questions (`ask`), the meeting shortcut, notices; Yap's own stops (`stop_automatically`).
 - `calls/capture.rs` — hides meeting windows from screen capture while recording; every Yap window out of a snip's capture.
 
 **Calendar** — [calendar.md](./docs/architecture/calendar.md) (guide: [`docs/calendar.md`](./docs/calendar.md))

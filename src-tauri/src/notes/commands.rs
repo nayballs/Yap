@@ -142,6 +142,10 @@ pub fn export_markdown(note: &crate::notes::Note) -> String {
                 out.push_str(&format!("_Couldn't transcribe {}–{}._\n\n", at(seg.start_ms), at(seg.end_ms)));
                 continue;
             }
+            if let Some(ms) = seg.asleep_ms {
+                out.push_str(&format!("_Your PC was asleep for {}._\n\n", crate::meetings::sleep::span_words(ms)));
+                continue;
+            }
             // Any other marker (a mic change) has no words to export.
             if !seg.is_talk() || seg.text.trim().is_empty() {
                 continue;

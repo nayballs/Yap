@@ -5,14 +5,16 @@
 //   { enabled, style: 'popup' | 'quiet',
 //     apps: [{ id, label, asks, asksByDefault }],
 //     calls: [{ id, app, label, noun, since, noteId }],
-//     prompt: { id, kind: 'start' | 'end', callId, app, title, body, accept,
-//               decline, never, noteId, inApp, quiet, fadeMs,
-//               autoStartAt } | null }
+//     prompt: { id, kind: 'start' | 'end' | 'unsure' | 'switch', callId,
+//               app, title, body, accept, decline, answers: [yes, no],
+//               never, noteId, inApp, quiet, fadeMs, autoStartAt } | null }
 // and shows the prompt as a sticky toast while `inApp` (Rust decides that:
 // WebView2 reports `visible` even for a hidden window, so the page can't;
 // quiet prompts stay out of the window). "Record notes" / "Not now" answer a
-// start prompt, "Stop and summarise" / "Keep recording" an end prompt; the
-// toast's ✕ counts as the quiet answer. A start prompt also offers `never`
+// start prompt, "Stop and summarise" / "Keep recording" an end prompt (and
+// "Stop taking notes?", when the call still looks on), "Switch" / "Keep
+// recording" another call starting while one records: `answers` says
+// which; the toast's ✕ counts as the quiet answer. A start prompt also offers `never`
 // ("Don't ask for Teams", a small link under the buttons) and, left alone,
 // fades after `fadeMs` (30 s, OpenWhispr's auto-dismiss) as "Not now" — or,
 // with `autoStartAt` (the opt-in "Start notes automatically"), counts down
@@ -79,8 +81,11 @@ function apply(s) {
   if (p && !shown) showPrompt(p);
 }
 
+// The toast's chip, by kind.
+const CHIP = { start: 'Call', end: 'Call ended', unsure: 'Call ended', switch: 'Call' };
+
 function showPrompt(p) {
-  const [yes, no] = p.kind === 'start' ? ['record', 'dismiss'] : ['stop', 'keep'];
+  const [yes, no] = p.answers ?? (p.kind === 'start' ? ['record', 'dismiss'] : ['stop', 'keep']);
   // `autoStartAt` (Settings → "Start notes automatically"): Rust starts the
   // notes when it runs out; the toast counts down and stays till then.
   const counting = p.autoStartAt != null;
@@ -88,7 +93,7 @@ function showPrompt(p) {
     kind: 'prompt',
     title: p.title,
     description: counting ? countdownText(p.autoStartAt) : p.body,
-    chip: p.kind === 'start' ? 'Call' : 'Call ended',
+    chip: CHIP[p.kind] ?? 'Call',
     icon: 'call',
     duration: counting ? 0 : (p.fadeMs ?? 0),
     action: { label: counting ? 'Start now' : p.accept, onClick: () => answer(p, yes) },

@@ -57,7 +57,7 @@ const who = speakerLabel;
 export function noteVoices(note) {
   const out = [];
   const add = (id) => !out.includes(id) && out.push(id);
-  for (const s of note?.transcript || []) if (!s.echo && !s.dictated && !s.failed && s.mic == null) add(speakerId(note.speakers, s));
+  for (const s of note?.transcript || []) if (!s.echo && !isMarker(s)) add(speakerId(note.speakers, s));
   const toldApart = !out.includes('them') && out.some((id) => id.startsWith('them-'));
   for (const id of Object.keys(note?.speakers || {})) {
     const v = speakerId(note.speakers, { speaker: id });
@@ -143,7 +143,7 @@ export function pendingSuggestions(note) {
 export function pendingFlags(note) {
   const onLines = new Set(
     (note?.transcript || [])
-      .filter((s) => !s.echo && !s.dictated && !s.failed && s.mic == null)
+      .filter((s) => !s.echo && !isMarker(s))
       .map((s) => speakerId(note.speakers, s))
   );
   const out = [];
@@ -213,7 +213,27 @@ export function suggestionWhy(note, card) {
 }
 
 /** Spoken lines worth sharing: no echo (the call through the speakers), no markers. */
-const spoken = (transcript) => (transcript || []).filter((s) => !s.echo && !s.dictated && !s.failed && s.mic == null);
+const spoken = (transcript) => (transcript || []).filter((s) => !s.echo && !isMarker(s));
+
+/**
+ * Not speech: a marker (a dictation, a stretch that couldn't be
+ * transcribed, the mic disconnected, the PC asleep).
+ */
+export function isMarker(s) {
+  return !!(s?.dictated || s?.failed || s?.mic != null || s?.asleepMs != null);
+}
+
+/**
+ * How long the PC slept, as the transcript says it ("12 min", "1 h 5 min",
+ * "40 s"): meetings/sleep.rs `span_words`, the same rounding.
+ */
+export function asleepWords(ms) {
+  if (ms < 60_000) return `${Math.max(1, Math.ceil(ms / 1000))} s`;
+  const minutes = Math.floor((ms + 30_000) / 60_000);
+  const [h, m] = [Math.floor(minutes / 60), minutes % 60];
+  if (!h) return `${m} min`;
+  return m ? `${h} h ${m} min` : `${h} h`;
+}
 
 /**
  * The note as Markdown, laid out as "Save as .md" writes it (commands.rs
@@ -277,7 +297,9 @@ export function mailtoUrl(note) {
  * 0:42–1:12" line where a chunk failed (a `failed` segment, meetings/meeting.rs; line
  * `i` of the transcript), and "Your mic was disconnected" where the
  * meeting's microphone went and "You" moved to the next one (a `mic`
- * segment: its name, or "" with none left). Echo lines only with `showEcho`. With a search
+ * segment: its name, or "" with none left), and "Your PC was asleep for 12 min" where a
+ * recording paused for the PC's sleep (an `asleepMs` segment, meetings/sleep.rs; it
+ * stands for the paused divider beside it). Echo lines only with `showEcho`. With a search
  * `query`, only the lines that match it, in their groups, without dividers.
  *   { kind: 'group', key, source ('you' | 'them': the user or someone else),
  *     speaker (the voice), label, guess, echo, lines: [{ text, i, edited,
@@ -285,6 +307,7 @@ export function mailtoUrl(note) {
  *     Yap heard)
  *   { kind: 'pause', key } | { kind: 'dictated', key } | { kind: 'failed', key, i }
  *   | { kind: 'mic', key, next } (`next`: the microphone's short name, or '')
+ *   | { kind: 'asleep', key, words } (`words`: "12 min")
  */
 export function transcriptItems(transcript, breaks = [], { showEcho = false, query = '', speakers = {} } = {}) {
   const q = query.trim().toLowerCase();
@@ -297,6 +320,14 @@ export function transcriptItems(transcript, breaks = [], { showEcho = false, que
       group = null;
     } else if (s.mic != null) {
       if (!q) items.push({ kind: 'mic', key: `m${i}`, next: s.mic ? shortMicName(s.mic) : '' });
+      group = null;
+    } else if (s.asleepMs != null) {
+      if (!q) {
+        // The recording paused for the sleep: this line says so, not a
+        // paused divider too.
+        if (items.at(-1)?.kind === 'pause') items.pop();
+        items.push({ kind: 'asleep', key: `z${i}`, words: asleepWords(s.asleepMs) });
+      }
       group = null;
     } else if (s.failed) {
       if (!q) items.push({ kind: 'failed', key: `f${i}`, i });
@@ -314,7 +345,7 @@ export function transcriptItems(transcript, breaks = [], { showEcho = false, que
         items.push(group);
       }
     }
-    if (stops.has(i + 1) && !q) {
+    if (stops.has(i + 1) && !q && s.asleepMs == null) {
       items.push({ kind: 'pause', key: `p${i + 1}` });
       group = null;
     }

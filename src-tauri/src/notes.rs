@@ -100,6 +100,13 @@ pub struct TranscriptSegment {
     /// summaries skip it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mic: Option<String>,
+    /// Not speech: a marker where the PC was asleep mid-meeting (`source`
+    /// "you", no `text`, `ts` when it went to sleep): for how long, in ms
+    /// (`meetings/sleep.rs`). The recording stopped there; the views show
+    /// "Your PC was asleep for 12 min"; summaries skip it. An older Yap
+    /// drops this field on its save, leaving an empty "You" line.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub asleep_ms: Option<u64>,
 }
 
 impl TranscriptSegment {
@@ -120,6 +127,16 @@ impl TranscriptSegment {
             source: "you".to_string(),
             ts,
             mic: Some(next.to_string()),
+            ..Default::default()
+        }
+    }
+
+    /// The marker for the PC asleep from `ts` (unix seconds) for `ms`.
+    pub fn asleep_marker(ts: u64, ms: u64) -> Self {
+        TranscriptSegment {
+            source: "you".to_string(),
+            ts,
+            asleep_ms: Some(ms),
             ..Default::default()
         }
     }
@@ -148,9 +165,10 @@ impl TranscriptSegment {
     }
 
     /// Talk the summaries read: neither echo nor a marker (a dictation, a
-    /// stretch that couldn't be transcribed, the mic disconnected).
+    /// stretch that couldn't be transcribed, the mic disconnected, the PC
+    /// asleep).
     pub fn is_talk(&self) -> bool {
-        !self.echo && !self.dictated && !self.failed && self.mic.is_none()
+        !self.echo && !self.dictated && !self.failed && self.mic.is_none() && self.asleep_ms.is_none()
     }
 }
 
@@ -1950,6 +1968,33 @@ mod tests {
         assert_eq!(note.breaks, [4, 6]);
         // The digest that read on from here covers them too (no gap).
         assert_eq!((note.digests[0].from_seg, note.digests[0].to_seg), (2, 6));
+    }
+
+    #[test]
+    fn the_pc_asleep_line_goes_after_the_paused_recording() {
+        let line = |ts: u64| TranscriptSegment { source: "them".into(), text: format!("at {ts}"), ts, ..Default::default() };
+        // Paused for the sleep at 25 (its stop mark after line 20): the line
+        // goes after it, the stop mark before it.
+        let mut note = store_with_note().notes.remove(0);
+        note.transcript = vec![line(10), line(20)];
+        note.breaks = vec![2];
+        insert_lines(&mut note, &[TranscriptSegment::asleep_marker(25, 720_000)]);
+        let ts: Vec<u64> = note.transcript.iter().map(|s| s.ts).collect();
+        assert_eq!(ts, [10, 20, 25]);
+        assert_eq!(note.transcript[2].asleep_ms, Some(720_000));
+        assert_eq!(note.breaks, [2]);
+        // Resumed already (lines from 800 on): between the two recordings.
+        let mut note = store_with_note().notes.remove(0);
+        note.transcript = vec![line(10), line(20), line(800)];
+        note.breaks = vec![2];
+        insert_lines(&mut note, &[TranscriptSegment::asleep_marker(25, 720_000)]);
+        let ts: Vec<u64> = note.transcript.iter().map(|s| s.ts).collect();
+        assert_eq!(ts, [10, 20, 25, 800]);
+        assert_eq!(note.breaks, [2, 3]);
+        // Not talk: summaries, digests and "Started by mistake?" skip it.
+        assert!(!note.transcript[2].is_talk());
+        let saved = serde_json::to_value(&note.transcript[2]).unwrap();
+        assert_eq!(saved, json!({ "source": "you", "text": "", "ts": 25, "asleepMs": 720_000 }));
     }
 
     #[test]
