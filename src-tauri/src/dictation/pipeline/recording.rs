@@ -653,6 +653,9 @@ impl Shared {
         // And what kind of app it is (a terminal, a chat app…): its process,
         // class and title only, for fitting the paste.
         let kind = crate::pasting::app_kind::of_window((hwnd != 0).then_some(hwnd));
+        // A test run's stand-in chat or editor (`compose::e2e_chat_target`).
+        #[cfg(debug_assertions)]
+        let kind = crate::pasting::compose::test_kind().unwrap_or(kind);
         if let Ok(mut k) = self.target_kind.lock() {
             *k = kind;
         }

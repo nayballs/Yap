@@ -25,7 +25,13 @@ command → snippets → fit to the
 kind of app (`pasting/app_kind.rs`: a terminal gets one line and no trailing space; a
 chat app's short message loses its full stop) and to the text around the
 cursor (smart spacing; where the field couldn't be read, append-space as
-before) → inject (Ctrl+V, or the terminal's own paste keys — Shift+Insert in
+before) — in a chat app with "new message" said and the dictation sent
+anyway, each message fitted on its own (stacked messages,
+`pasting/stacked.rs`, off by default) — → mentions and file tags
+(`pasting/mentions.rs`, `file_tags.rs`: "at Sam" in Slack typed and picked,
+a file in an AI chat box, "@path" in Claude Code; a dictation that needs
+several pastes goes in steps, `pasting/compose.rs`, its submit key after
+each message; one that needs none pastes as ever) → inject (Ctrl+V, or the terminal's own paste keys — Shift+Insert in
 Git Bash, Ctrl+Shift+V in Alacritty…; a paste a Win32 text box never got is
 typed instead, once; an app running as administrator takes no keys from Yap:
 the text is left on the clipboard and the person told, `pasting/elevated.rs`) →
@@ -455,7 +461,7 @@ to **Run again** from Home.
   (press = key down w/ required modifiers held, release = key up OR required
   modifier up; chords fire on completion; suppressed keys are excluded from the
   GetAsyncKeyState self-heal — the hook eats them before the key-state table
-  updates). Ten bindings: dictation, edit (`edit-key-*`, Commands' rewrite
+  updates). Eleven bindings: dictation, edit (`edit-key-*`, Commands' rewrite
   shortcut), the meeting
   shortcut (`meeting-key-*`, `configure_meeting`; only its press is used —
   `meeting_guard`) and the Voice Assistant's (`assistant-key-*`,
@@ -473,11 +479,15 @@ to **Run again** from Home.
   the press is used — `pasting/last.rs`, [pasting.md](./pasting.md)), then
   **Quick note** (2026-10-28; `quick-note-key-*`, `configure_quick_note`/`_from`,
   unbound by default, giving way to all nine older ones; its press only —
-  `notes/quick_note.rs` `toggle_soon`, [notes.md](./notes.md#the-quick-note-notesquick_noters)). Beside them, **up to 12
+  `notes/quick_note.rs` `toggle_soon`, [notes.md](./notes.md#the-quick-note-notesquick_noters)), then
+  **Send** (2026-10-29; `send-key-*`, `configure_send`/`_from`, unbound by
+  default, giving way to all ten older ones, never Enter — first or "+ Add
+  another", it would press itself again; its press only —
+  `pasting/send_key.rs` `press_soon`, [pasting.md](./pasting.md)). Beside them, **up to 12
   saved transforms' shortcuts** (`TRANSFORM_BINDINGS`, a slot each;
   `configure_transforms_from` at setup and every save,
   `transforms::assign` giving each transform with a key a slot in list
-  order unless it would fire with one of the ten or an earlier
+  order unless it would fire with one of the eleven or an earlier
   transform's — left unbound, logged; `configure_transform(id, spec)` is
   Settings' pause while a key is picked); a slot's press goes to the
   forwarder as `transform-key-N` and out as one `transform-key-pressed`
@@ -488,8 +498,8 @@ to **Run again** from Home.
   `languages::assign`; their press and release go out as one
   `language-key {slot, pressed, at}` event — `dictation/languages.rs`
   below). **More shortcuts for one action** (2026-10-25, Wispr Flow's "Add
-  another"): each of the ten fixed actions (`FIXED`, indexed by
-  `DICTATION`…`QUICK_NOTE`, with `FIXED_KEYS` / `FIXED_NAMES` /
+  another"): each of the eleven fixed actions (`FIXED`, indexed by
+  `DICTATION`…`SEND`, with `FIXED_KEYS` / `FIXED_NAMES` /
   `FIXED_EVENTS`) has its first shortcut (its old config field) and up to
   `MORE` (3) more (`MORE_BINDINGS`, `config.more_hotkeys`,
   `configure_more_from` at setup and every save; Settings' live pause
@@ -693,7 +703,7 @@ to **Run again** from Home.
   `LanguageShortcut { id, language (code | "auto"), translateTo, hotkey }`,
   at most `MAX_SHORTCUTS` 4): `input_hook.rs`'s four language slots
   (`configure_languages_from`; `assign`, pure: never a key that fires with
-  one of the ten fixed shortcuts (Paste last, Copy last and Quick note included) or an earlier one; **transforms give way
+  one of the eleven fixed shortcuts (Paste last, Copy last, Quick note and Send included) or an earlier one; **transforms give way
   to them**, `transforms::fixed_shortcuts`), press **and release** as
   `language-key {slot, pressed, at}` (`init` → `Pipeline::on_language_key`),
   plus the in-page fallback (`language_key`). A press records exactly as the

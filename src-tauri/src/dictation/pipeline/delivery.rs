@@ -14,6 +14,7 @@ use crate::config;
 #[cfg(debug_assertions)]
 use super::busy::CRASH_NEXT;
 use super::finish::{apply_corrections, as_said_text, finish_dictation_with};
+use super::steps::Steps;
 #[cfg(debug_assertions)]
 use super::LAST_DELIVERED;
 use super::{Delivered, Shared};
@@ -119,8 +120,26 @@ impl Shared {
             .then(|| self.config.read().ok().map(|c| as_said_text(&raw, &c, screen.as_deref())))
             .flatten()
             .filter(|s| !s.trim().is_empty() && *s != corrected);
+        // A chat app (Slack, WhatsApp…, desktop or by its tab's title, as
+        // cleanup's styles have them): where stacked messages go.
+        let chat = self.read_kind() == crate::pasting::app_kind::AppKind::Messaging
+            || matches!(
+                crate::ai::cleanup_styles::category(&cfg, &style_target),
+                crate::ai::cleanup_styles::Category::WorkChat | crate::ai::cleanup_styles::Category::PersonalChat
+            );
         let mut delivered = self
-            .deliver_text(raw, corrected, voice_enter, said, dict, append_space, auto_submit, auto_submit_key, restore_clipboard)
+            .deliver_text(
+                raw,
+                corrected,
+                voice_enter,
+                said,
+                dict,
+                append_space,
+                auto_submit,
+                auto_submit_key,
+                restore_clipboard,
+                Steps { chat, screen },
+            )
             .await;
         delivered.style = style.map(crate::ai::cleanup_styles::Style::describe);
         delivered
@@ -339,19 +358,22 @@ impl Shared {
 
     /// The rest of [`Shared::deliver`]: a finished dictation (`corrected`,
     /// and its words as said when cleanup changed them) to the Chat view's
-    /// box, or fitted and pasted, the submit key, history.
+    /// box, or fitted and pasted — in steps when it's several messages or
+    /// has a mention or a file to pick (`steps`, `pasting/compose.rs`) —,
+    /// the submit key, history.
     #[allow(clippy::too_many_arguments)]
     async fn deliver_text(
         self: &Arc<Self>,
         raw: String,
         mut corrected: String,
         voice_enter: bool,
-        said: Option<String>,
+        mut said: Option<String>,
         dict: Vec<config::DictionaryEntry>,
         append_space: bool,
         auto_submit: bool,
         auto_submit_key: String,
         restore_clipboard: bool,
+        steps: Steps,
     ) -> Delivered {
         // A question for the Chat view: its page puts the text in the box
         // (and sends it, hands-free or after "press enter"); nothing is
@@ -385,22 +407,26 @@ impl Shared {
             paste: read.paste_key().name().to_string(),
             ..Delivered::default()
         };
+        // Stacked messages (`stacked.rs`): "new message" said, in a chat app.
+        let messages = self.stacked(&mut corrected, &mut said, steps.chat, submit.is_some());
         if !corrected.is_empty() {
             // Fitted to the kind of app and the text around
             // the cursor (smart spacing), else the trailing
             // space as before — the words as said too, to the
-            // same place.
-            let said = match said {
-                Some(said) => {
+            // same place. Stacked messages each to their own box.
+            let (fitted, said) = match (&messages, said) {
+                (Some(m), _) => (crate::pasting::text_injector::prepare_messages(m, &dict, kind), None),
+                (None, Some(said)) => {
                     let (text, said) = crate::pasting::text_injector::prepare_dictation_as_said(&corrected, &said, append_space, &dict, kind);
-                    corrected = text;
-                    Some(said)
+                    (vec![text], Some(said))
                 }
-                None => {
-                    corrected = crate::pasting::text_injector::prepare_dictation(&corrected, append_space, &dict, kind);
-                    None
-                }
+                (None, None) => (vec![crate::pasting::text_injector::prepare_dictation(&corrected, append_space, &dict, kind)], None),
             };
+            // Mentions and file tags (`mentions.rs`, `file_tags.rs`): the
+            // pieces to paste, type and pick (`compose.rs`).
+            let place = self.compose_place(steps.screen.as_deref());
+            let (plan, text) = crate::pasting::compose::plan(&fitted, &place, submit.clone());
+            corrected = text;
             report.text = corrected.clone();
             report.as_said = said.clone();
             // Why the paste didn't land, for history (a failed paste is
@@ -420,15 +446,24 @@ impl Shared {
             // never into whatever has the focus now.
             let unplugged = self.unplugged();
             let capped = self.capped.load(Ordering::SeqCst);
-            match crate::pasting::text_injector::inject_text(
-                &corrected,
-                restore_clipboard,
-                target,
-                self.undoing.load(Ordering::SeqCst) || unplugged || capped,
-                read,
-            )
-            .await
-            {
+            let strict = self.undoing.load(Ordering::SeqCst) || unplugged || capped;
+            // Several messages, or a mention or a file to pick: in steps,
+            // the submit key after each message (`compose.rs`).
+            let in_steps = plan.in_steps();
+            let pasted = if in_steps {
+                let run = crate::pasting::compose::Run { target, restore_clipboard, strict, kind: read };
+                let outcome = crate::pasting::compose::run(&plan, run).await;
+                report.steps = outcome.steps;
+                if let Some(stopped) = &outcome.stopped {
+                    report.error = Some(format!("stopped after {} of {} messages ({})", stopped.sent, stopped.total, stopped.why.code()));
+                    report.left_on_clipboard = !stopped.rest.is_empty();
+                    crate::notices::alert::show_soon(&self.app, crate::pasting::compose::stopped_alert(stopped));
+                }
+                outcome.delivery
+            } else {
+                crate::pasting::text_injector::inject_text(&corrected, restore_clipboard, target, strict, read).await
+            };
+            match pasted {
                 // Not pasted (an app running as administrator, keys
                 // Windows didn't take, no text box with the focus): the
                 // text is on the clipboard, and the person is told once
@@ -468,9 +503,14 @@ impl Shared {
                     report.typed = delivery == crate::pasting::text_injector::Delivery::Typed;
                     // Its mic was unplugged: said, now it's in its window.
                     self.tell_unplugged(super::unplugged::Outcome::Pasted);
-                    // Once, whether auto-submit, the voice
-                    // command or both asked for it.
-                    if let Some(key) = &submit {
+                    if in_steps {
+                        // The plan pressed the submit key after each
+                        // message; a picked mention or file can't be
+                        // selected back exactly: nothing to swap or rewrite.
+                        crate::pasting::as_said::forget();
+                    } else if let Some(key) = &submit {
+                        // Once, whether auto-submit, the voice
+                        // command or both asked for it.
                         if let Err(e) = crate::pasting::text_injector::press_submit(key).await {
                             tracing::warn!("Auto-submit failed: {}", e);
                             report.error = Some(e);

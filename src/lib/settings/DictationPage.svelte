@@ -196,7 +196,7 @@
       bind:checked={cfg.screenNames}
       label="Spell names the way they're written on screen"
       desc={screenDesc}
-      hint="Yap reads the window's text on this PC as you start, for that dictation only, and never keeps it. The screen's text never leaves this PC."
+      hint="Yap reads the window's text on this PC as you start, for that dictation only, and never keeps it. The screen's text never leaves this PC. In an editor or a terminal, file names and code names too: “user service dot ts” comes out userService.ts."
     />
   </Row>
   <Row setting="chat-full-stop">
@@ -204,6 +204,40 @@
       bind:checked={cfg.chatNoFullStop}
       label="Leave the full stop off chat messages"
       desc="In Slack, Teams or WhatsApp, a short message ends without one"
+    />
+  </Row>
+  <!-- Several messages from one dictation (pasting/stacked.rs): only when it's
+       sent anyway, never a message the person didn't mean to send. -->
+  <Row setting="stacked-messages">
+    <Toggle
+      bind:checked={cfg.stackedMessages}
+      label="Send several messages: say “new message”"
+      desc="In a chat app, say “new message” between them and each goes as a message of its own"
+      hint="Only when the dictation is sent anyway: Press Enter after pasting is on, or you end with “press enter”. Otherwise the messages go in on lines of their own, for you to send. If one doesn't send, Yap stops and copies the rest."
+    />
+  </Row>
+  <!-- @mentions (pasting/mentions.rs) and file tags (pasting/file_tags.rs):
+       they use the names read for "Spell names the way they're written on screen". -->
+  <Row setting="chat-mentions">
+    <Toggle
+      bind:checked={cfg.chatMentions}
+      disabled={!cfg.screenNames}
+      label="Turn “at Sam” into a mention"
+      desc={cfg.screenNames
+        ? 'In Slack and Discord, “at Sam” picks Sam from the list when Sam’s name is on screen. In Teams and Google Chat it’s written @Sam'
+        : 'Needs “Spell names the way they’re written on screen”'}
+      hint="Yap types @Sam and presses Tab only when the app's list shows Sam. Otherwise @Sam stays as text."
+    />
+  </Row>
+  <Row setting="file-tags">
+    <Toggle
+      bind:checked={cfg.fileTags}
+      disabled={!cfg.screenNames}
+      label="Tag files in AI chat boxes"
+      desc={cfg.screenNames
+        ? 'Say a file’s name in Cursor, Windsurf or VS Code’s chat and Yap tags it, as @ would. In Claude Code and Codex it’s written @path'
+        : 'Needs “Spell names the way they’re written on screen”'}
+      hint="The names come from the editor's tabs and file tree, on this PC. Never in the code editor itself."
     />
   </Row>
   <Row setting="trailing-space">
@@ -251,7 +285,7 @@
       />
     </Row>
   {/if}
-  {#if cfg.autoSubmit || cfg.voiceEnter}
+  {#if cfg.autoSubmit || cfg.voiceEnter || cfg.stackedMessages || cfg.sendHotkey}
     <Row label="Send key" desc="The key Yap presses to send" setting="send-key">
       <Select bind:value={cfg.autoSubmitKey} options={SEND_KEYS} ariaLabel="Send key" />
     </Row>

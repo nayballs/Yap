@@ -1,7 +1,7 @@
 //! Unified input hook for the dictation, edit (Commands' rewrite), meeting,
 //! Voice Assistant, Read aloud, "Use what I said", Snip to Chat, Paste last
-//! transcript, Copy last transcript and Quick note key bindings (the last
-//! five act on their press only), up to `languages::MAX_SHORTCUTS` **language shortcuts**
+//! transcript, Copy last transcript, Quick note and Send key bindings (the last
+//! six act on their press only), up to `languages::MAX_SHORTCUTS` **language shortcuts**
 //! (My languages: a slot each, [`configure_languages_from`]; press and
 //! release, as `language-key` with the slot) and up to `transforms::MAX`
 //! **saved transforms**' shortcuts (a slot each, [`configure_transforms_from`];
@@ -32,7 +32,7 @@
 //! as neither saw another key in between.
 //!
 //! **Several shortcuts for one action** (2026-10-25, Wispr Flow's "Add
-//! another"): each of the ten fixed actions has its first shortcut (the
+//! another"): each of the eleven fixed actions has its first shortcut (the
 //! config's `hotkey`, `editHotkey`…, as ever) and up to [`MORE`] more
 //! (`moreHotkeys`, [`configure_more_from`]). They act as one key: the
 //! action's press goes out when the first of them goes down and its release
@@ -161,7 +161,7 @@ impl KeyBinding {
 
 // ---- Shared state ----
 
-/// The ten fixed actions, in the order they give way to each other: each
+/// The eleven fixed actions, in the order they give way to each other: each
 /// one's index into [`FIXED`], [`FIXED_KEYS`], [`FIXED_NAMES`] and
 /// [`FIXED_EVENTS`].
 pub(crate) const DICTATION: usize = 0;
@@ -184,8 +184,12 @@ const COPY_LAST: usize = 8;
 /// Quick note (`notes/quick_note.rs`): the quick-note window from any app,
 /// or away again while it's in front. Unbound by default; its press only.
 const QUICK_NOTE: usize = 9;
+/// Send (`pasting/send_key.rs`): the send key (Enter, or the submit key)
+/// in the window in front. Unbound by default, never Enter itself; its
+/// press only.
+const SEND: usize = 10;
 /// How many fixed actions there are.
-pub const FIXED_COUNT: usize = 10;
+pub const FIXED_COUNT: usize = 11;
 /// Each fixed action's config key — its first shortcut's field, as
 /// Settings and `moreHotkeys` name it.
 pub const FIXED_KEYS: [&str; FIXED_COUNT] = [
@@ -199,6 +203,7 @@ pub const FIXED_KEYS: [&str; FIXED_COUNT] = [
     "pasteLastHotkey",
     "copyLastHotkey",
     "quickNoteHotkey",
+    "sendHotkey",
 ];
 /// …its name in messages ("clashes with the dictation hotkey").
 pub const FIXED_NAMES: [&str; FIXED_COUNT] = [
@@ -212,6 +217,7 @@ pub const FIXED_NAMES: [&str; FIXED_COUNT] = [
     "Paste-last shortcut",
     "Copy-last shortcut",
     "Quick-note shortcut",
+    "Send shortcut",
 ];
 /// …and its events (pressed, released).
 const FIXED_EVENTS: [(&str, &str); FIXED_COUNT] = [
@@ -225,6 +231,7 @@ const FIXED_EVENTS: [(&str, &str); FIXED_COUNT] = [
     ("paste-last-key-pressed", "paste-last-key-released"),
     ("copy-last-key-pressed", "copy-last-key-released"),
     ("quick-note-key-pressed", "quick-note-key-released"),
+    ("send-key-pressed", "send-key-released"),
 ];
 /// The actions a key is held for (push-to-talk): a chord or a stuck key
 /// matters to them.
@@ -242,7 +249,7 @@ fn group(i: usize) -> impl Iterator<Item = &'static KeyBinding> {
 }
 /// Saved transforms' shortcuts (`transforms.rs`): a slot each, in the
 /// list's order (`transforms::assign`); only the press is used. Beside the
-/// ten fixed bindings, always giving way to them.
+/// eleven fixed bindings, always giving way to them.
 static TRANSFORM_BINDINGS: [KeyBinding; crate::dictation::transforms::MAX] = [const { KeyBinding::new() }; crate::dictation::transforms::MAX];
 /// Which transform each slot runs (its id). Read by the forwarder thread,
 /// never the hook callback.
@@ -265,7 +272,7 @@ const TRANSFORM_EVENTS: [(&str, &str); crate::dictation::transforms::MAX] = [
 ];
 /// Language shortcuts' keys (`languages.rs`, My languages): a slot each, in
 /// the list's order (`languages::assign`); press and release, as the
-/// dictation key's (push-to-talk holds them). Beside the ten fixed
+/// dictation key's (push-to-talk holds them). Beside the eleven fixed
 /// bindings, always giving way to them; saved transforms give way to these.
 static LANGUAGE_BINDINGS: [KeyBinding; crate::dictation::languages::MAX_SHORTCUTS] =
     [const { KeyBinding::new() }; crate::dictation::languages::MAX_SHORTCUTS];
@@ -381,6 +388,7 @@ pub fn first_spec(cfg: &crate::config::YapConfig, i: usize) -> &str {
         PASTE_LAST => &cfg.paste_last_hotkey,
         COPY_LAST => &cfg.copy_last_hotkey,
         QUICK_NOTE => &cfg.quick_note_hotkey,
+        SEND => &cfg.send_hotkey,
         _ => "",
     }
 }
@@ -398,6 +406,7 @@ fn set_first_spec(cfg: &mut crate::config::YapConfig, i: usize, spec: String) {
         PASTE_LAST => &mut cfg.paste_last_hotkey,
         COPY_LAST => &mut cfg.copy_last_hotkey,
         QUICK_NOTE => &mut cfg.quick_note_hotkey,
+        SEND => &mut cfg.send_hotkey,
         _ => return,
     };
     *field = spec;
@@ -405,7 +414,7 @@ fn set_first_spec(cfg: &mut crate::config::YapConfig, i: usize, spec: String) {
 
 /// `moreHotkeys` tidied at load (idempotent, so not a one-time migration:
 /// the first shortcut never moved, and a config from before has none): only
-/// the ten actions' keys, no blanks, no repeats of the action's own keys,
+/// the eleven actions' keys, no blanks, no repeats of the action's own keys,
 /// at most [`MORE`] each — and an action whose first shortcut was taken away
 /// by hand gets its next one moved up into it.
 pub fn tidy_more(cfg: &mut crate::config::YapConfig) {
@@ -492,6 +501,11 @@ pub fn configure_more_from(cfg: &crate::config::YapConfig) {
         if let Some(clash) = &slot.clash {
             tracing::warn!("Another {} clashes with {clash}: left unbound", FIXED_NAMES[slot.action]);
         }
+        // The Send shortcut is never Enter (it would press itself again).
+        if slot.action == SEND && crate::pasting::send_key::is_enter(&slot.spec) {
+            tracing::warn!("Another Send shortcut is Enter: left unbound");
+            continue;
+        }
         match parse_key_spec(&slot.spec) {
             Ok((kind, code, mods)) => {
                 MORE_BINDINGS[slot.action][slot.slot].configure(kind, code, mods);
@@ -510,6 +524,7 @@ pub fn configure_more(key: &str, specs: &[String]) -> Result<(), String> {
     let i = FIXED_KEYS.iter().position(|k| *k == key).ok_or_else(|| format!("No such shortcut: {key}"))?;
     for (slot, b) in MORE_BINDINGS[i].iter().enumerate() {
         let spec = specs.get(slot).map(|s| s.trim()).unwrap_or("");
+        let spec = if i == SEND && crate::pasting::send_key::is_enter(spec) { "" } else { spec };
         let (kind, code, mods) = parse_key_spec(spec)?;
         b.configure(kind, code, mods);
     }
@@ -754,6 +769,27 @@ pub fn configure_quick_note_from(cfg: &crate::config::YapConfig) {
     }
 }
 
+/// Parse a key spec string and configure the **Send** shortcut
+/// (`pasting/send_key.rs`). An empty spec unbinds it (the default); Enter
+/// is refused (it would press itself again).
+pub fn configure_send(key_spec: &str) -> Result<String, String> {
+    if crate::pasting::send_key::is_enter(key_spec) {
+        configure_fixed(SEND, "Send", "")?;
+        return Err("Enter sends already: pick another key".into());
+    }
+    configure_fixed(SEND, "Send", key_spec)
+}
+
+/// The Send shortcut from config, unless it's Enter or clashes with one of
+/// the ten before it (it gives way to them all).
+pub fn configure_send_from(cfg: &crate::config::YapConfig) {
+    let older: Vec<(&str, &str)> = (0..SEND).map(|i| (FIXED_NAMES[i], first_spec(cfg, i))).collect();
+    let spec = unless_clash("Send shortcut", cfg.send_hotkey.trim(), &older);
+    if let Err(e) = configure_send(spec) {
+        tracing::warn!("Failed to apply the Send shortcut: {}", e);
+    }
+}
+
 /// While a snip's overlay is up, Esc goes to it (`snip.rs`).
 pub fn snip_escape(on: bool) {
     SNIP_ESC.store(on, Ordering::SeqCst);
@@ -765,7 +801,7 @@ fn transform_ids() -> std::sync::MutexGuard<'static, Vec<String>> {
 
 /// The saved transforms' shortcuts from config (`transforms::assign`): a
 /// slot for each transform with a key, in list order; one whose key would
-/// fire with one of the ten fixed shortcuts, or an earlier transform's,
+/// fire with one of the eleven fixed shortcuts, or an earlier transform's,
 /// is left unbound and the log says why (Settings never saves one).
 pub fn configure_transforms_from(cfg: &crate::config::YapConfig) {
     let list = crate::dictation::transforms::list(cfg);
@@ -836,7 +872,7 @@ fn language_ids() -> std::sync::MutexGuard<'static, Vec<String>> {
 
 /// The language shortcuts' keys from config (`languages::assign`): a slot
 /// for each with a key, in list order; one whose key would fire with one of
-/// the ten fixed shortcuts (Paste last's, Copy last's and Quick note's), or an
+/// the eleven fixed shortcuts (Paste last's, Copy last's, Quick note's and Send's), or an
 /// earlier language shortcut's, is left unbound and the log says why
 /// (Settings never saves one).
 pub fn configure_languages_from(cfg: &crate::config::YapConfig) {
@@ -1566,7 +1602,7 @@ unsafe extern "system" fn low_level_keyboard_proc(
         }
 
         let mut suppress = false;
-        // The ten fixed actions, each with its first and more shortcuts.
+        // The eleven fixed actions, each with its first and more shortcuts.
         for (i, (pressed, released)) in FIXED_EVENTS.iter().enumerate() {
             for binding in group(i) {
                 suppress |= process_keyboard_event(binding, Some(i), pressed, released, vkey, is_keydown);
@@ -2146,6 +2182,47 @@ mod tests {
     /// shortcuts has (Copy last's included) is left to it, and language
     /// shortcuts and transforms give way to it. (The one test that sets its
     /// binding.)
+    /// Send: unbound until set; never Enter (it would press itself again),
+    /// first or more; a key one of the ten older shortcuts has is left to
+    /// it; language shortcuts and transforms give way to it. (The one test
+    /// that sets its binding.)
+    #[test]
+    fn the_send_shortcut_is_unbound_never_enter_and_gives_way_to_the_older_ten() {
+        let mut cfg = crate::config::YapConfig::default();
+        assert_eq!(cfg.send_hotkey, "");
+        assert_eq!(FIXED_KEYS[SEND], "sendHotkey");
+        assert_eq!(FIXED_EVENTS[SEND].0, "send-key-pressed");
+        configure_send_from(&cfg);
+        assert_eq!(FIXED[SEND].kind_code_mods().0, KEY_TYPE_NONE);
+        // Its own key (a mouse's side button): bound.
+        cfg.send_hotkey = "mouse:5".into();
+        configure_send_from(&cfg);
+        assert_eq!(FIXED[SEND].kind_code_mods().0, KEY_TYPE_MOUSE);
+        assert_eq!(first_spec(&cfg, SEND), "mouse:5");
+        // Enter, with or without a modifier: never.
+        for enter in ["kb:13", "kb:ctrl+13"] {
+            cfg.send_hotkey = enter.into();
+            configure_send_from(&cfg);
+            assert_eq!(FIXED[SEND].kind_code_mods().0, KEY_TYPE_NONE, "{enter}");
+        }
+        assert!(configure_send("kb:13").is_err());
+        // The quick note's key: left to it.
+        cfg.quick_note_hotkey = "kb:130".into();
+        cfg.send_hotkey = "kb:130".into();
+        configure_send_from(&cfg);
+        assert_eq!(FIXED[SEND].kind_code_mods().0, KEY_TYPE_NONE);
+        // More shortcuts for it are read and tidied as any action's.
+        cfg.quick_note_hotkey.clear();
+        cfg.more_hotkeys.insert("sendHotkey".into(), vec!["kb:129".into(), "kb:130".into()]);
+        tidy_more(&mut cfg);
+        assert_eq!(more_specs(&cfg, SEND), vec!["kb:129".to_string()], "its own key isn't another");
+        // Language shortcuts and transforms give way to it.
+        let fixed = crate::dictation::transforms::fixed_shortcuts(&cfg);
+        assert!(fixed.iter().any(|(name, spec)| *name == "Send shortcut" && spec == "kb:130"));
+        assert!(fixed.iter().any(|(name, spec)| *name == "Send shortcut" && spec == "kb:129"));
+        configure_send("").unwrap();
+    }
+
     #[test]
     fn the_quick_note_shortcut_is_unbound_and_gives_way_to_the_older_nine() {
         let mut cfg = crate::config::YapConfig::default();
@@ -2413,6 +2490,7 @@ mod tests {
             hotkey: "kb:121".into(),
             edit_hotkey: "mouse:5".into(),
             quick_note_hotkey: "kb:ctrl+alt+78".into(),
+            send_hotkey: "kb:129".into(),
             triple_tap_meeting: true,
             ..Default::default()
         };
@@ -2430,6 +2508,7 @@ mod tests {
         assert_eq!(firsts, want, "every first shortcut it knew survives an older Yap's save");
         // Quick note's, newer than it: unbound again (its default), nothing else.
         assert_eq!(back.quick_note_hotkey, "");
+        assert_eq!(back.send_hotkey, "");
         assert_eq!(back.hotkey, "kb:121");
         assert_eq!(back.meeting_hotkey, crate::config::YapConfig::default().meeting_hotkey);
         // What the older save drops: the more shortcuts and triple-tap.

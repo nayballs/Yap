@@ -26,6 +26,7 @@ mod rewrite;
 #[cfg(debug_assertions)]
 mod robot;
 mod slow;
+mod steps;
 mod transcribe;
 mod unplugged;
 
@@ -305,6 +306,10 @@ pub(crate) struct Delivered {
     /// The style AI cleanup wrote it in ("email/formal",
     /// `cleanup_styles.rs`), when it ran with one.
     pub style: Option<String>,
+    /// A dictation pasted in steps (stacked messages, a mention or a file
+    /// picked; `pasting/compose.rs`): each step as it went.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub steps: Vec<crate::pasting::compose::Step>,
 }
 
 /// How long a cancelled dictation's audio is kept for **Undo** ("Dictation

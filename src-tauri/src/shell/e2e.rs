@@ -496,6 +496,7 @@ pub fn e2e_shortcut(app: AppHandle, name: String) -> Result<(), String> {
         "paste-last" => "paste-last-key-pressed",
         "copy-last" => "copy-last-key-pressed",
         "quick-note" => "quick-note-key-pressed",
+        "send" => "send-key-pressed",
         other => return Err(format!("No such shortcut: {other}")),
     };
     tracing::info!(event, "e2e: a shortcut pressed");

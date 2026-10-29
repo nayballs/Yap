@@ -1,4 +1,4 @@
-// Settings' ten global shortcuts (dictation/input_hook.rs): which command applies
+// Settings' eleven global shortcuts (dictation/input_hook.rs): which command applies
 // each, their names for clash messages, and whether one is being picked
 // right now (Settings' in-page hotkey fallback stands down meanwhile, so
 // pressing the current hotkey to replace it doesn't start a dictation).
@@ -25,6 +25,7 @@ export const HOTKEY_CMD = {
   pasteLastHotkey: 'configure_paste_last_hotkey',
   copyLastHotkey: 'configure_copy_last_hotkey',
   quickNoteHotkey: 'configure_quick_note_hotkey',
+  sendHotkey: 'configure_send_hotkey',
 };
 
 export const HOTKEY_NAMES = {
@@ -38,6 +39,7 @@ export const HOTKEY_NAMES = {
   pasteLastHotkey: 'Paste-last shortcut',
   copyLastHotkey: 'Copy-last shortcut',
   quickNoteHotkey: 'Quick-note shortcut',
+  sendHotkey: 'Send shortcut',
 };
 
 /** True while any <SettingsHotkey> is capturing a new key. */
@@ -124,6 +126,10 @@ function clashMessage([name, other], spec) {
  */
 export function validateHotkey(cfg, target, spec) {
   if (!spec) return null;
+  // The Send shortcut presses Enter: Enter itself would press it again
+  // (pasting/send_key.rs `is_enter`).
+  const own = String(target).startsWith('more:') ? String(target).split(':')[1] : target;
+  if (own === 'sendHotkey' && /^kb:(?:.*\+)?13$/.test(String(spec).trim())) return 'Enter sends already: pick another key';
   const clash = otherShortcuts(cfg, target).find(([, other]) => hotkeysClash(other, spec));
   return clash ? clashMessage(clash, spec) : null;
 }

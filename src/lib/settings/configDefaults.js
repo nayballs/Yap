@@ -16,6 +16,10 @@ export const FIELD_DEFAULTS = {
   smartSpacing: true,
   screenNames: true,
   chatNoFullStop: true,
+  // Chat apps and AI chat boxes (pasting/stacked.rs, mentions.rs, file_tags.rs).
+  stackedMessages: false,
+  chatMentions: true,
+  fileTags: true,
   autoSubmit: false,
   voiceEnter: true,
   terminalMode: true,
@@ -37,6 +41,8 @@ export const FIELD_DEFAULTS = {
   copyLastHotkey: '',
   // Quick note (notes/quick_note.rs): unbound.
   quickNoteHotkey: '',
+  // Send (pasting/send_key.rs): unbound, never Enter.
+  sendHotkey: '',
   // More shortcuts per action ("+ Add another", dictation/input_hook.rs), by
   // the first one's key: { hotkey: ['mouse:4'] }.
   moreHotkeys: {},

@@ -55,6 +55,32 @@ tables, method and how anyone can run it and send theirs:
 
 ## What works
 
+**Chat apps and code editors** (2026-10-29, [pasting.md](./pasting.md),
+[dictionary.md](./dictionary.md)): **stacked messages** ("new message"
+said as a sentence of its own in a chat app, and the dictation sent anyway:
+each message pasted and sent in turn, stopping with the rest copied when
+one doesn't send; off by default), **@mentions** ("at Sam" with Sam on
+screen: typed and picked with Tab in Slack and Discord only when their list
+shows Sam, plain "@Sam" in Teams, Google Chat and the like), **code names**
+in editors and terminals ("user service dot ts" → userService.ts, "get user
+by id" → getUserById, from the tabs, file tree, title and the code a screen
+reader sees), **file tags** in Cursor's, Windsurf's and VS Code's AI chat
+("@file" / "#file" picked with Tab) and Claude Code / Codex ("@path"), and a
+**Send** shortcut (Enter, or the send key set, from another key or a mouse
+button). Unit-tested (the splitting, mentions and file matching, the
+spoken forms, the focus, the binding, an older Yap's save) and e2e-tested
+(`e2e/chat-editors.spec.js`: the settings in light and dark, the steps a
+test run takes in a stand-in Slack, Teams, WhatsApp, VS Code, Cursor and
+Claude Code, the Send shortcut). Robot specs written, **not yet run**
+(`e2e-real/chat-messages.real.js`, `editor-files.real.js`: stand-in pages
+with an "@" list in Edge, the stand-in Claude Code). **Not yet tried**: a
+real Slack, Discord, Teams, Cursor, Windsurf or VS Code — whether their "@"
+lists tell UI Automation which entry is highlighted (Yap presses no Tab
+until it sees it, so where they don't the mention stays plain text), the
+labels of Cursor's and Windsurf's chat boxes, how fast their tabs and file
+trees read; Visual Studio's tabs and editor (not installed here); the
+spoken forms with real speech.
+
 **The quick note** (2026-10-28, [notes.md](./notes.md#the-quick-note-notesquick_noters)):
 a small floating window on its own shortcut (Settings → Shortcuts, unbound
 by default), the tray's New quick note and the Notes view's Quick note, to

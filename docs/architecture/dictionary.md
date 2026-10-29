@@ -194,6 +194,52 @@ The correction dictionary: near-miss (fuzzy) matching, several ways one word is 
   spells. That line is all that can leave the PC (with the transcript, to
   a cloud cleanup provider; Settings and Privacy & data say so); the
   screen's text never does.
+  **Code names** (`dictionary/screen_terms/code.rs`, 2026-10-29; Wispr
+  Flow's IDE variable and file recognition, by behaviour, done locally): in
+  VS Code, Cursor, Windsurf and the editors built on VS Code, Zed, Visual
+  Studio, a JetBrains IDE (its title only: Swing shows UI Automation
+  nothing else) or a terminal (`app_of`), the same read gives that
+  dictation's **file names** (`name.ext` with a code, config or docs
+  extension, or a dot file; a terminal's paths kept as shown, "Read(src/
+  services/userService.ts)"; URLs, emails, versions and "e.g." left out)
+  and **symbols** (identifiers of two parts or more — camelCase,
+  PascalCase, snake_case, an acronym's run, digits apart — kept only with
+  three parts or a part that isn't an everyday word: `getUserById`,
+  `MAX_RETRY_COUNT`, `kubeConfig`, never `userName`, `forEach`), ≤ 100
+  and 150, the most frequent first (`extract`, pure). An editor's window
+  gets one more time-boxed call for its **tabs and tree items** (one
+  `FindAllBuildCache` of TabItem/TreeItem on screen, ≤ 400: a walk from the
+  window's top may not reach them), and every read now keeps the focused
+  element's **labels** (class, name, help text, automation id; never
+  logged) for `focus_of`: the code editor (Monaco's input, class
+  "inputarea", unless its label says chat), an **AI chat box** (VS Code's
+  "Chat Input", Cursor's "aislash-editor-input", Windsurf's Cascade, an
+  agent's or composer's box) or the integrated terminal (xterm.js's input).
+  **Spoken forms** (`CodeNames::respell`, run first in `screen_terms::
+  correct`, for every model, with "Spell names the way they're written on
+  screen"): the words said, in order, spelling a name's parts — joined or
+  apart ("userservice"), a part spelled out ("I D"), a digit as a number
+  word, a file's extension after "dot" or a dot in the text (or said as
+  "typescript", "markdown"…), "dot" between a stem's own dots
+  ("vite dot config dot ts") — never across a sentence's punctuation or a
+  line break; one part of ≥ 5 letters may be a letter off with "Catch
+  near-misses" on; the longest name first (the file over its class).
+  "user service dot ts" → `userService.ts`, "get user by id" →
+  `getUserById`. **AI cleanup** gets the names a transcript seems to say
+  first in its "Spell these names as written" line (`said_in`; ≤ 8 in
+  all). **The editor's own text** reaches UI Automation only with its
+  screen reader mode on (VS Code's "Screen Reader Optimized": Monaco
+  exposes a page of code around the cursor then, an empty box otherwise).
+  Yap doesn't ask for it: the mode makes the editor play sounds and change
+  a few of its ways for everyone who doesn't use a screen reader; without
+  it the tabs, file tree, title, breadcrumbs and an open Outline still
+  give file names and symbols. File tagging in AI chat boxes and coding
+  CLIs uses these names (`pasting/file_tags.rs`, [pasting.md](./pasting.md));
+  @mentions in team chats use the screen's people's names
+  (`pasting/mentions.rs`). Test mode reads no window: `stage_for_test`
+  (debug) stands in. Unit tests: `code.rs` (parts, extraction, spoken
+  forms, the focus, bounds), `screen_terms.rs`
+  (`an_editors_code_names_said_aloud`).
 - **`dictionary/dict_usage.rs`** — how much each dictionary word is used, for the Whisper
   prompt's order (Wispr Flow ranks its vocabulary the same way):
   `<data>/dictionary_usage.json`, word (lowercased `to`) → `{uses, lastUsed}`

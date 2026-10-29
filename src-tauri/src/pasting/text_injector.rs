@@ -609,6 +609,19 @@ mod platform {
         thread::sleep(Duration::from_millis(20));
         sent
     }
+
+    /// One key, as a keyboard sends it (`compose.rs`: Tab picks a mention or
+    /// a file from an app's list; Backspace takes the space it put after
+    /// it). `Err` when Windows didn't take it.
+    pub fn press_key(key: super::StepKey) -> Result<(), String> {
+        let vk: u16 = match key {
+            super::StepKey::Tab => 0x09,
+            super::StepKey::Backspace => 0x08,
+        };
+        let sent = send_keys(vec![make_key(vk, false), make_key(vk, true)], key.name());
+        thread::sleep(Duration::from_millis(20));
+        sent
+    }
 }
 
 /// The clipboard, through Win32 directly: arboard can't add the formats that
@@ -1559,6 +1572,75 @@ pub async fn press_submit(key: &str) -> Result<(), String> {
     .map_err(|e| format!("press_submit task panicked: {}", e))?
 }
 
+/// Type `text` as keystrokes (no clipboard) into the window in front, which
+/// must be `target` (`compose.rs`: "@Sam" typed so the app's list opens, as
+/// it does for a person typing; a paste doesn't open it everywhere). Test
+/// mode types nothing; robot mode only into the test's own window.
+pub async fn type_text(text: &str, target: Option<isize>) -> Result<(), String> {
+    if crate::shell::e2e::active() && !crate::shell::realtest::on() {
+        info!(len = text.len(), "e2e: not typing into another app");
+        return Ok(());
+    }
+    let text = text.to_string();
+    tokio::task::spawn_blocking(move || {
+        crate::shell::realtest::recheck_foreground(target, "type")?;
+        if target.is_some() && current_foreground() != target {
+            return Err("the dictation's window isn't in front".to_string());
+        }
+        if current_foreground().is_some_and(crate::pasting::elevated::target_blocked) {
+            return Err("Yap can't press keys in an app running as administrator".to_string());
+        }
+        #[cfg(target_os = "windows")]
+        platform::type_unicode(&text).map_err(|e| format!("Windows didn't take the typing: {e}"))?;
+        crate::shell::realtest::check_after(target, "typing");
+        #[cfg(not(target_os = "windows"))]
+        let _ = &text;
+        Ok(())
+    })
+    .await
+    .map_err(|e| format!("type_text task panicked: {e}"))?
+}
+
+/// A key `compose.rs` presses between its pastes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum StepKey {
+    /// Picks the highlighted entry of an app's "@" list.
+    Tab,
+    /// Takes back the space an app put after the mention it inserted,
+    /// before a comma or a full stop.
+    Backspace,
+}
+
+impl StepKey {
+    pub fn name(self) -> &'static str {
+        match self {
+            StepKey::Tab => "tab",
+            StepKey::Backspace => "backspace",
+        }
+    }
+}
+
+/// Press `key` in `target`, which must be in front. Test mode presses
+/// nothing; robot mode only in the test's own window.
+pub async fn press_step_key(key: StepKey, target: Option<isize>) -> Result<(), String> {
+    if crate::shell::e2e::active() && !crate::shell::realtest::on() {
+        info!(key = key.name(), "e2e: not pressing a key in another app");
+        return Ok(());
+    }
+    tokio::task::spawn_blocking(move || {
+        crate::shell::realtest::recheck_foreground(target, &format!("press {}", key.name()))?;
+        if target.is_some() && current_foreground() != target {
+            return Err("the dictation's window isn't in front".to_string());
+        }
+        #[cfg(target_os = "windows")]
+        platform::press_key(key).map_err(|e| format!("Windows didn't take the {} key: {e}", key.name()))?;
+        crate::shell::realtest::check_after(target, key.name());
+        Ok(())
+    })
+    .await
+    .map_err(|e| format!("press_step_key task panicked: {e}"))?
+}
+
 /// Handle of the current foreground window (as an `isize`, `None` if none).
 ///
 /// Call this at record-start and pass the result to [`inject_text`] so the paste
@@ -1863,6 +1945,23 @@ pub fn prepare_dictation_as_said(
         fit_for_paste(text, ctx.as_ref(), append_space, dictionary, kind),
         fit_for_paste(said, ctx.as_ref(), append_space, dictionary, kind),
     )
+}
+
+/// [`prepare_dictation`] for **stacked messages** (`stacked.rs`): each
+/// message as it should be pasted — the first fitted to the text around the
+/// cursor, the rest to the empty box a send leaves (a chat's short message
+/// without its full stop either way), none with a space after it. The
+/// whole dictation (its messages on lines of their own) is remembered for
+/// "Paste last transcript".
+pub fn prepare_messages(messages: &[String], dictionary: &[DictionaryEntry], kind: AppKind) -> Vec<String> {
+    *last_dictation() = Some(messages.join("\n"));
+    *last_said() = None;
+    let ctx = crate::pasting::selection::take_context();
+    messages
+        .iter()
+        .enumerate()
+        .map(|(i, m)| fit_for_paste(m, if i == 0 { ctx.as_ref() } else { None }, false, dictionary, kind).trim_end().to_string())
+        .collect()
 }
 
 /// What "Paste last transcript (as said)" would paste (before fitting):

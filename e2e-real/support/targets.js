@@ -313,10 +313,12 @@ export function startPowerShell({ nonce, cwd }) {
  * Code does, turns on bracketed paste and reads the keyboard raw. It runs
  * nothing: it logs what arrives (`received()`) and echoes it.
  */
-export async function startFakeClaudeCode({ nonce, cwd, title = `✳ ${nonce}` }) {
+export async function startFakeClaudeCode({ nonce, cwd, title = `✳ ${nonce}`, banner = '' }) {
   fs.mkdirSync(cwd, { recursive: true });
   const log = path.join(cwd, 'received.jsonl');
   fs.writeFileSync(log, '');
+  // `banner`: what the CLI showed before (a file it read), on its screen.
+  if (banner) fs.writeFileSync(path.join(cwd, 'banner.txt'), banner);
   const script = fileURLToPath(new URL('./fake-cli.mjs', import.meta.url));
   const term = await startTerminal({
     nonce,

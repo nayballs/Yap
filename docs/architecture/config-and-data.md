@@ -23,7 +23,12 @@
   the default; never a clash — `input_hook::configure_quick_note_from`
   gives way to all nine older shortcuts; `notes/quick_note.rs`. An older Yap
   sharing the folder drops it, and its `moreHotkeys` entry, on its next
-  save: unbound again, nothing else), more_hotkeys (`moreHotkeys`, 2026-10-25: **more
+  save: unbound again, nothing else), send_hotkey (`sendHotkey`,
+  2026-10-29: **Send**, the send key in the window in front from another
+  key or a mouse button, Settings → Shortcuts; "" = unbound, the default;
+  never Enter, never a clash — `input_hook::configure_send_from` gives way
+  to all ten older shortcuts; `pasting/send_key.rs`. An older Yap drops it,
+  and its `moreHotkeys` entry: unbound again, nothing else), more_hotkeys (`moreHotkeys`, 2026-10-25: **more
   shortcuts for one action**, Settings → Shortcuts' "+ Add another" — a map
   from an action's first shortcut's field ("hotkey", "editHotkey",
   "meetingHotkey", "assistantHotkey", "readHotkey", "asSaidHotkey",
@@ -92,7 +97,16 @@
   the text around the cursor", default on), screen_names ("Spell names the
   way they're written on screen", default on; `dictionary/screen_terms.rs`),
   chat_no_full_stop ("Leave the full
-  stop off chat messages", default on), auto_submit(+key),
+  stop off chat messages", default on), stacked_messages (`stackedMessages`,
+  2026-10-29: "Send several messages: say “new message”", **off** by
+  default — a message can't be taken back; `pasting/stacked.rs`),
+  chat_mentions (`chatMentions`, "Turn “at Sam” into a mention", on;
+  `pasting/mentions.rs`) and file_tags (`fileTags`, "Tag files in AI chat
+  boxes", on; `pasting/file_tags.rs`) — the last two use the names
+  `screen_names` reads; an older Yap sharing the folder drops all three on
+  its next save, and they read back as their defaults (off, on, on),
+  nothing else (`compose::tests::an_older_yaps_save_leaves_the_defaults`),
+  auto_submit(+key),
   voice_enter (the "press enter" voice command, default on), terminal_mode
   ("Safer pasting into terminals", default on; both `pasting/app_kind.rs`),
   restore_clipboard, autostart, model_unload_timeout, selected_language (the
