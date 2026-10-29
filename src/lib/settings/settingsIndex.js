@@ -28,6 +28,7 @@ export const SETTINGS_INDEX = [
   { page: 'general', section: 'Appearance', label: 'Motion', desc: 'Reduce sliding, fading and pulsing', keywords: 'animation reduced motion accessibility appearance', anchor: 'motion' },
   { page: 'general', section: 'Yap bar', label: 'Show the Yap bar', desc: 'A small pill above the taskbar', keywords: 'bar pill overlay taskbar flow bar', anchor: 'bar' },
   { page: 'general', section: 'Yap bar', label: 'Hide in fullscreen apps', desc: 'Games and presentations stay clear', keywords: 'bar games fullscreen presentation video', anchor: 'bar-fullscreen', toggle: 'barHideFullscreen' },
+  { page: 'general', section: 'Yap bar', label: 'Quick note button', desc: 'A button on the bar for the quick note', keywords: 'bar quick note scratchpad button jot', anchor: 'bar-quick-note', toggle: 'barQuickNote' },
   { page: 'general', section: 'Yap bar', label: 'Colours', desc: "The Yap bar's look: match Yap, light or dark", keywords: 'bar theme dark light colors match app', anchor: 'bar-colours' },
   { page: 'general', section: 'Yap bar', label: 'Position', desc: 'Where the bar and the dictation overlay sit', keywords: 'bar overlay top bottom placement', anchor: 'bar-position' },
   { page: 'general', section: 'Notifications', label: 'Show tips', desc: "Short tips, like push-to-talk's double-tap", keywords: 'tips hints coaching notifications nudge', anchor: 'tips', toggle: 'showTips' },
@@ -142,6 +143,11 @@ export const SETTINGS_INDEX = [
   { page: 'memory', section: 'Import, export and clear', label: 'Import memory from other AI providers', desc: 'What ChatGPT, Claude or Gemini remembers', keywords: 'memory import chatgpt claude gemini bring in', anchor: 'memory-import' },
   { page: 'memory', section: 'Import, export and clear', label: 'Export memory', desc: 'A .zip of Markdown, a file per section', keywords: 'memory export download backup markdown zip', anchor: 'memory-export' },
   { page: 'memory', section: 'Import, export and clear', label: 'Clear all memory', desc: 'Forget everything Yap remembers', keywords: 'memory clear delete forget erase reset wipe', anchor: 'memory-clear' },
+
+  // Skills (SkillsPage.svelte, chat/skills.rs)
+  { page: 'skills', section: "Yap's Skills", label: "Yap's Skills", desc: '/decisions, /risks, /coach and more: open one, or save a copy', keywords: 'skills slash commands saved prompts instructions decisions risks follow-up email coach todos weekly recap', anchor: 'skills-builtin' },
+  { page: 'skills', section: 'Your Skills', label: 'Your Skills', desc: 'Saved instructions you run with /name', keywords: 'skills slash commands saved prompts instructions custom my own templates', anchor: 'skills-yours' },
+  { page: 'skills', section: 'Your Skills', label: 'New Skill', desc: 'A name, a /command and what it should do', keywords: 'skills create new add slash command prompt template', anchor: 'skills-add' },
 
   // ---- Speech-to-Text ----
   { page: 'models', section: 'Speech model', label: 'Speech model', desc: 'The model that turns your voice into text', keywords: 'speech to text transcription model parakeet whisper canary moonshine download', anchor: 'stt-model' },

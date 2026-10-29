@@ -29,6 +29,8 @@ export function threadMessages(conversation, prefix = '') {
     plain: !!m.plain,
     stopped: !!m.stopped,
     model: m.model ?? null,
+    // The meeting's passages it cites (its pills open the moment).
+    sources: m.sources || [],
   }));
 }
 
@@ -38,8 +40,13 @@ export function keptMessage(m) {
   if (m.plain) out.plain = true;
   if (m.stopped) out.stopped = true;
   if (m.model) out.model = m.model;
+  if (m.role === 'assistant' && m.sources?.length) out.sources = m.sources;
   return out;
 }
+
+/** Rename one of a note's threads (Past chats → Rename this chat…); resolves to the title kept. */
+export const renameNoteChat = (noteId, conversationId, title, origin) =>
+  invoke('note_chat_rename', { noteId, conversationId, title, origin });
 
 /** "Today, 14:05" / "Mon 20 Oct, 09:12": when a thread was last added to. Pure. */
 export function threadWhen(updatedTs, now = Date.now()) {
@@ -53,11 +60,16 @@ export function threadWhen(updatedTs, now = Date.now()) {
  * The Past chats menu's items (ui/contextMenu.svelte.js): every thread of
  * the note, newest first, the one shown ticked; `open(id)` shows one.
  */
-export function pastChatItems(threads, shownId, open) {
-  return (threads || []).map((t) => ({
+export function pastChatItems(threads, shownId, open, rename = null) {
+  const items = (threads || []).map((t) => ({
     label: `${t.title} · ${threadWhen(t.updatedTs)}`,
     toggle: true,
     checked: t.id === shownId,
     onselect: () => open(t.id),
   }));
+  // The thread shown, renamed (`rename(id)`: the window asks for the name).
+  if (rename && shownId != null && (threads || []).some((t) => t.id === shownId)) {
+    items.push({ separator: true }, { label: 'Rename this chat…', icon: 'pencil', onselect: () => rename(shownId) });
+  }
+  return items;
 }

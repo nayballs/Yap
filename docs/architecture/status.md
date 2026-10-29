@@ -55,6 +55,31 @@ tables, method and how anyone can run it and send theirs:
 
 ## What works
 
+**Meeting chips, Skills and one-tap prompts** (2026-10-29, Wispr Flow's
+Notetaker; [meetings.md](./meetings.md), [chat-and-assistant.md](./chat-and-assistant.md#skills-and-one-tap-prompts-2026-10-29)):
+the notepad's Ask sheet (and the Notes view's Ask bar) offers **Make me
+sound smart** while a meeting records — one or two things to say, built
+on the latest talk, the brief and the invite, each citing the line it
+builds on (a pill opens it) — and **Make notes longer** after it (the
+summary written out in more detail, every task kept, Undo); **Skills**,
+saved instructions run with "/" — built-ins (/followup-email, /decisions,
+/risks, /coach, /todos, /weekly-recap) copyable as your own, your own made
+in Settings → Skills (`skills.json`) — on the meeting in its Ask box, or
+across the meetings in Chat and the Meetings view's Ask bar with their own
+passages (open tasks, a week, the latest meeting's talk) and Ask across
+meetings' citations and checks; Chat's and the Meetings view's one-tap
+prompts (Coach me, List my open to-dos, Write a weekly recap); the first
+recorded meeting's two coach marks (once each, `hints.json`); a meeting's
+past chat renamed from Past chats. Unit-tested (the passages, the checks,
+longer notes and their Undo, every Skill rule and gathering, the coach
+marks), e2e-tested with the fake model (`meeting-chips.spec.js`,
+`coach-marks.spec.js`, `notepad.spec.js`'s chips) and the prompts measured
+on the on-device Qwen3.5-4B (`yap.exe eval --chips`,
+[model-evals.md](../model-evals.md#meeting-chips-and-skills-29-oct-2026)). Not
+tried yet: a real meeting (what's worth saying, live), a cloud model on
+these prompts (no paid calls tonight), a Skill's answer read aloud by the
+Voice Assistant (it doesn't run Skills).
+
 **Your data, and the microphone's quality** (2026-10-29,
 [privacy-receipts.md](./privacy-receipts.md), [dictation.md](./dictation.md)):
 Settings → Privacy & data → **Download your data** saves one .zip (history
@@ -92,6 +117,25 @@ Not tried yet on the maintainer's PC: the global shortcut from another app
 (the focus it takes, where it comes up on two monitors), and a real
 dictation's Ctrl+Z (a test run never has the focus, where the text goes in
 by hand).
+**Since 2026-10-29, level with Wispr Flow's Scratchpad**
+([notes.md](./notes.md#the-quick-note-notesquick_noters)): a tap of the
+shortcut opens or hides it, a **hold** (past 300 ms, push-to-talk's tap line)
+opens it and dictates into the note until the key comes up
+(`quick_note/key.rs`); several notes open as **tabs** (+, ×, Ctrl+T, Ctrl+W,
+Ctrl+Tab), remembered across restarts in `quick_note_tabs.json`, a tab left
+alone a day closing as the window comes up; **Send to {app}** with the
+app's own icon pastes the note, or its selection, into the app it came up
+over, by the ordinary paste; an opt-in **quick-note button on the Yap bar**
+(its empty page offers it; Settings → Yap bar). The bar's **^ menu** gained
+the microphone in use with a picker in the order Yap tries them, Paste last
+transcript and the language shortcuts' languages (`bar/menu.rs`).
+Unit-tested (the tap and hold, chords and a lost key-up; the tabs' rules and
+file; the menu's microphones) and e2e-tested (`quick-note.spec.js`: the hold
+by the test shortcut and through a Yap window's page, tabs and a restart,
+Send with a stand-in app, the bar button; `bar-menu.spec.js`). Not tried
+yet on the maintainer's PC: holding the real shortcut in another app (the
+release lands in the quick note, which took the focus), and Send's real
+paste into another app (a test run pastes nothing; no robot test yet).
 
 **Long chats, sized to the model** (2026-10-25,
 [chat-and-assistant.md](./chat-and-assistant.md#long-chats-sized-to-the-model-2026-10-25)):
@@ -1048,6 +1092,8 @@ snippets with several spoken phrases; the clipboard-read check run by the
 robot (written 2026-10-29, not yet run) and in real slow apps (Outlook,
 Word, a remote desktop); a JetBrains IDE's or Visual Studio's terminal, and a browser's
 (vscode.dev, Codespaces), still count as the editor;
+Skills don't run from the Voice Assistant, and a meeting's past chat
+can't be renamed from the Notes view (the notepad's Past chats only);
 Authenticode signing (blocked on SignPath approval); audio-history export;
 numbers from a real laptop (the smaller-PC numbers are an emulation on the
 test desktop; a hybrid laptop's DirectML on its card is untried), and

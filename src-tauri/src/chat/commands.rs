@@ -94,6 +94,8 @@ pub fn chat_rename(id: u64, title: String) -> Result<String, String> {
 /// PC by Windows' OCR (`snip::ocr`), goes after the question in place of
 /// the pictures (any model takes it); the screenshots stay with the
 /// question, marked so. The reply's `question` is the question as saved.
+/// `skill`: a Skill's command (`/decisions`, a one-tap prompt's), run
+/// across the meetings (`chat/skills.rs`).
 #[allow(clippy::too_many_arguments)]
 #[tauri::command]
 pub async fn chat_send(
@@ -106,14 +108,21 @@ pub async fn chat_send(
     turn_id: Option<String>,
     images: Option<Vec<String>>,
     as_text: Option<bool>,
+    skill: Option<String>,
 ) -> Result<serde_json::Value, String> {
+    // A Skill (`/decisions`, a one-tap prompt): asked across the meetings,
+    // its own passages and instructions (chat/skills.rs).
+    let skill_turn = match skill.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+        Some(command) => Some(crate::chat::skills::turn_for(command, &text)?),
+        None => None,
+    };
     // The screenshots it sends leave Chat's box (`snip/waiting.rs`); a
     // question that fails before its answer gives them back, as the page
     // gives the question back (not one a newer question replaced, nor one
     // stopped: those are kept as asked).
     let image_ids = images.unwrap_or_default();
     let taken = if image_ids.is_empty() { Vec::new() } else { crate::snip::waiting::sent(&app, &image_ids) };
-    let out = send_turn(&app, conversation_id, text, scope, voice, on_stream, turn_id, image_ids, as_text).await;
+    let out = crate::chat::skills::with(skill_turn, send_turn(&app, conversation_id, text, scope, voice, on_stream, turn_id, image_ids, as_text)).await;
     if let Err(e) = &out {
         if !e.contains(crate::chat::stream::SUPERSEDED) && !e.contains(crate::chat::stream::STOPPED) {
             crate::snip::waiting::put_back(&app, conversation_id, taken);

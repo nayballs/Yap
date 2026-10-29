@@ -27,7 +27,9 @@ takes its meeting's name, attendees and invite ([The calendar](#the-calendar),
 | Hiding meeting windows from screen capture | `src-tauri/src/calls/capture.rs` |
 | Rolling digests, the final input, the checks; the notepad's catch-up, helper and title inputs | `src-tauri/src/meetings/meeting_summary.rs` |
 | The end of a meeting: pause or end, "Started by mistake?", the action plan job | `src-tauri/src/meetings/meeting_end.rs` |
-| "What did I miss?", the one-tap helpers (Questions to ask, Follow-up email, Gaps and risks), the AI meeting title | `src-tauri/src/meetings/meeting_assist.rs` |
+| "What did I miss?", the one-tap helpers (Questions to ask, Make me sound smart, Follow-up email, Gaps and risks, Make notes longer), a Skill on the meeting, the AI meeting title | `src-tauri/src/meetings/meeting_assist.rs` (inputs: `meeting_summary/chips.rs`) |
+| Skills (/name) and Chat's one-tap prompts | `src-tauri/src/chat/skills.rs` |
+| First-meeting coach marks in the notepad | `src-tauri/src/meetings/coach_marks.rs` |
 | The notepad window: docking, split screen | `src-tauri/src/meetings/notepad.rs` |
 | Who said what: the speaker map, names on lines, 1:1 calendar guesses, line times and splitting | `src-tauri/src/speakers.rs`, `src/lib/components/SpeakerMenu.svelte` |
 | Names for the voices: suggestions from what's said and the invite, the AI's checked answers, "It was me"; the cards | `src-tauri/src/speakers/naming.rs`, `src/lib/components/SpeakerCard.svelte` |
@@ -1073,6 +1075,14 @@ there's no AI model. The set follows the recording state
 | **Questions to ask** (`questions`) | recording | the latest talk (≤ 1,200), digests of what came before it (≤ 500), attendees, the invite (≤ 200), your typed notes (≤ 300) | 3–5 questions you could ask now, in your voice (`MEETING_QUESTIONS_PROMPT`; reply cap 300) |
 | **Follow-up email** (`followUpEmail`) | after | the action plan (or what another action wrote, ≤ 1,200) and ≤ 500 of the meeting, mostly how it ended; with no plan yet, ≤ 1,800 of the meeting (the transcript, or digests + the latest talk); title, attendees, invite, typed notes | a recap to send the attendees in plain text: "Subject: …", greeting, what it covered, decisions, next steps ("Me" for yours, "Unassigned"), deadlines only as said, "Thanks," + "[Your name]" (`MEETING_FOLLOW_UP_PROMPT`; reply cap 600) |
 | **Gaps and risks** (`blindSpots`) | after | the same, with ≤ 800 of the meeting beside the plan | Not decided / Missing owners or dates / Risks and open questions, ≤ 8 bullets, each tied to what was said (`MEETING_BLIND_SPOTS_PROMPT`; reply cap 500) |
+| **Make me sound smart** (`smart`, 2026-10-29) | recording | the latest talk as numbered passages (≤ 1,200), the title, attendees, invite and the brief made before the meeting (≤ 250 each), typed notes, earlier digests (≤ 400) | one or two things worth saying now, in your voice, each citing the line it builds on: a pill opens it (`MEETING_SMART_PROMPT`; reply cap 250) |
+| **Make notes longer** (`longer`, 2026-10-29) | after, with a summary | the meeting as the action plan reads it, then the summary (≤ 1,200) | the summary written again in more detail, every heading and task kept (a dropped task put back), Undo in the toast; an edited summary goes only when you say so (`MEETING_LONGER_PROMPT`; reply cap 1,800) |
+
+**Skills** (2026-10-29): type "/" in the Ask box for saved instructions —
+Yap's /followup-email, /decisions, /risks and /coach, or your own from
+Settings → Skills — run on this meeting, the answer citing its lines
+(`meeting_assist::meeting_skill`). Enter runs the one highlighted; Tab puts
+it in the box so you can add words ("/risks about the venue").
 
 Every call is at most ~3.4k tokens with its reply, and far less without an
 invite or long typed notes: well inside an 8k local model, and a single call

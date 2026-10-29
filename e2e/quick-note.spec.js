@@ -8,14 +8,26 @@
 // shortcut again while it's in front does too; "Open in Notes".
 //
 // A test run has no hook and never takes the focus: `e2e_shortcut
-// {name: 'quick-note'}` sends the shortcut's press as the hook would, the
-// tray is driven through the debug-only `e2e_tray`, and in a test run the
-// window counts as in front while it's shown (it takes a dictation then,
-// `quick_note::takes_dictation`). Dictations come from
-// `e2e_quick_note_dictation` (its mic, a transcript) and `e2e_dictate_audio`
-// (a real recording of a tone in the mic's place, the stub's text).
-import { test as base, expect, openView, openSettings, closeSettings, expectStore, setConfig, pressHotkey } from './support/fixtures.js';
-import { dictationPiece, withPiece, statusLine } from '../src/lib/quicknote/quickNote.js';
+// {name: 'quick-note'}` sends the shortcut's tap as the hook would (its
+// `phase` 'press' and 'release' alone: a hold), the tray is driven through
+// the debug-only `e2e_tray`, and in a test run the window counts as in front
+// while it's shown (it takes a dictation then, `quick_note::takes_dictation`).
+// Dictations come from `e2e_quick_note_dictation` (its mic, a transcript),
+// `e2e_dictate_audio` (a real recording of a tone in the mic's place, the
+// stub's text) and a made-up microphone (`YAP_E2E_MICS`: a quiet tone) for
+// the shortcut's hold.
+//
+// Since 2026-10-29 (quick_note/key.rs, tabs.rs, send.rs): holding the
+// shortcut dictates into the note until it comes up; several notes open as
+// tabs, remembered across restarts in quick_note_tabs.json; "Send to {app}"
+// pastes the note into the app it came up over (a stand-in app here,
+// `e2e_quick_note_before`; a test run pastes nothing, `e2e_quick_note_sent`
+// says what it would have); and a quick-note button on the Yap bar, offered
+// on the empty page and in Settings → Yap bar.
+import fs from 'node:fs';
+import { test as base, expect, openView, openSettings, closeSettings, expectStore, setConfig, pressHotkey, settingsDialog } from './support/fixtures.js';
+import { launchYap } from './support/yap.js';
+import { dictationPiece, withPiece, statusLine, tabLabel, nextTab, afterClose, sendText } from '../src/lib/quicknote/quickNote.js';
 
 const NOW = Math.floor(Date.now() / 1000);
 // Two quick notes from before: one from an hour ago (the one it opens on),
@@ -29,8 +41,14 @@ const SEED = {
   ],
 };
 
+// A made-up microphone (dictation/mics.rs): the shortcut's hold records a quiet tone.
+const MIC = { id: 'laptop', name: 'Microphone Array (Northwind Audio)' };
+
 const test = base.extend({
-  yapOptions: [{ name: 'quick-note', data: { 'notes.json': SEED } }, { scope: 'worker', option: true }],
+  yapOptions: [
+    { name: 'quick-note', data: { 'notes.json': SEED }, env: { YAP_E2E_MICS: JSON.stringify([MIC]) } },
+    { scope: 'worker', option: true },
+  ],
 });
 
 const visible = (yap) => yap.invoke('plugin:window|is_visible', { label: 'quick-note' });
@@ -109,7 +127,7 @@ test('the shortcut brings it up on the last quick note from today; Esc and the s
   // ✕ as well.
   await shortcut(yap);
   await expect.poll(() => visible(yap)).toBe(true);
-  await yap.quickNote.getByRole('button', { name: 'Close' }).click();
+  await yap.quickNote.getByRole('button', { name: 'Close', exact: true }).click();
   await expect.poll(() => visible(yap)).toBe(false);
   // Hidden, its webview keeps less in memory (shell/webview_memory.rs).
   await expect.poll(() => yap.invoke('e2e_webview_memory'), { timeout: 20_000 }).toMatchObject({ 'quick-note': 'low' });
@@ -346,4 +364,290 @@ test('light and dark: the paper and ink of the notepad, and the webview behind i
   await shot(yap.quickNote, '07-dark');
   await setConfig(yap, main, { theme: 'light' });
   await expect.poll(bg).toBe('rgb(250, 249, 246)');
+});
+
+// ---------------------------------------------------------------- 2026-10-29: hold, tabs, Send, the bar
+
+const logText = (yap) => fs.readFileSync(yap.logPath, 'utf8');
+const tabs = (yap) => yap.quickNote.getByRole('tablist', { name: 'Quick notes' }).getByRole('tab');
+const front = (yap) => yap.quickNote.getByRole('tab', { selected: true });
+const sendButton = (yap) => yap.quickNote.locator('.send');
+
+test('tabs, Send and the tap and hold, in pure terms', () => {
+  expect(tabLabel({ title: '  ' })).toBe('New quick note');
+  expect(tabLabel({ title: 'Errands' })).toBe('Errands');
+  // Ctrl+Tab round the ends, both ways.
+  expect(nextTab(3, 2, 1)).toBe(0);
+  expect(nextTab(3, 0, -1)).toBe(2);
+  expect(nextTab(1, 0, 1)).toBe(0);
+  expect(nextTab(0, 0, 1)).toBe(-1);
+  // Closing: the tab that takes its place, else the one before.
+  expect(afterClose(3, 0)).toBe(0);
+  expect(afterClose(3, 2)).toBe(1);
+  expect(afterClose(2, 1)).toBe(0);
+  // Send: the selection if it has words, else the note.
+  expect(sendText('Running late, sorry', 0, 12)).toBe('Running late');
+  expect(sendText('Running late', 3, 3)).toBe('Running late');
+  expect(sendText('a   b', 1, 4)).toBe('a   b');
+  expect(sendText('', undefined, undefined)).toBe('');
+});
+
+test('holding the shortcut opens it and dictates into the note until the key comes up; a tap never records', async ({ yap, shot }) => {
+  // Every tap so far only opened or hid the window.
+  expect(logText(yap)).not.toContain('Quick note: the shortcut held');
+  await openIt(yap);
+  await yap.quickNote.getByRole('button', { name: 'New note' }).click();
+  await note(yap).pressSequentially('Shopping:');
+  await expectStore(yap, 'notes.json', (s) => s.notes.some((n) => n.content === 'Shopping:'));
+  const id = quickNotes(yap).find((n) => n.content === 'Shopping:').id;
+  await putAway(yap);
+
+  // Down: up it comes at once; held past the hold, the note's dictation records.
+  await yap.invoke('e2e_shortcut', { name: 'quick-note', phase: 'press' });
+  await expect.poll(() => visible(yap)).toBe(true);
+  await expect(note(yap)).toHaveValue('Shopping:');
+  await expect(yap.overlay.locator('.capsule')).toBeVisible();
+  await expect.poll(() => logText(yap)).toContain('Quick note: the shortcut held, dictating into the note');
+  await expect.poll(() => logText(yap)).toContain('Dictation: into the quick note');
+  await yap.quickNote.waitForTimeout(1_200);
+  await shot(yap.quickNote, '09-held-dictating');
+  // Up: it stops, and the words go into the note at its cursor — never
+  // pasted, and the window stays up.
+  await yap.invoke('e2e_shortcut', { name: 'quick-note', phase: 'release' });
+  await expect(note(yap)).toHaveValue(/^Shopping: .*STT stub/, { timeout: 15_000 });
+  await expectStore(yap, 'notes.json', (s) => /STT stub/.test(byIdIn(s, id)?.content || ''));
+  expect(await visible(yap)).toBe(true);
+  await expect(yap.overlay.locator('.capsule')).toBeHidden({ timeout: 15_000 });
+
+  // A tap while it's in front puts it away, with nothing recorded.
+  const held = logText(yap).split('Quick note: the shortcut held').length;
+  await shortcut(yap);
+  await expect.poll(() => visible(yap)).toBe(false);
+  await yap.quickNote.waitForTimeout(500);
+  expect(logText(yap).split('Quick note: the shortcut held').length).toBe(held);
+});
+
+test('held in one of Yap\'s own windows: the quick note takes the focus, and its page hears the key come up', async ({ yap, main }) => {
+  await setConfig(yap, main, { quickNoteHotkey: 'kb:132' }); // F21
+  try {
+    await openIt(yap);
+    await yap.quickNote.getByRole('button', { name: 'New note' }).click();
+    await note(yap).pressSequentially('From the main window:');
+    await expectStore(yap, 'notes.json', (s) => s.notes.some((n) => n.content === 'From the main window:'));
+    await putAway(yap);
+    const key = { key: 'F21', code: 'F21', windowsVirtualKeyCode: 132, nativeVirtualKeyCode: 132 };
+    // Down in the main window (its in-page fallback)…
+    const down = await main.context().newCDPSession(main);
+    await down.send('Input.dispatchKeyEvent', { type: 'rawKeyDown', ...key });
+    await down.detach();
+    await expect.poll(() => visible(yap)).toBe(true);
+    await expect(yap.overlay.locator('.capsule')).toBeVisible();
+    await yap.quickNote.waitForTimeout(1_000);
+    // …up in the quick note, which took the focus meanwhile.
+    const up = await yap.quickNote.context().newCDPSession(yap.quickNote);
+    await up.send('Input.dispatchKeyEvent', { type: 'keyUp', ...key });
+    await up.detach();
+    await expect(note(yap)).toHaveValue(/^From the main window: .*STT stub/, { timeout: 15_000 });
+    expect(await visible(yap)).toBe(true);
+    await expect(yap.overlay.locator('.capsule')).toBeHidden({ timeout: 15_000 });
+  } finally {
+    await setConfig(yap, main, { quickNoteHotkey: '' });
+  }
+});
+
+test('tabs: new, switch and close with the buttons and Ctrl+T, Ctrl+Tab and Ctrl+W; the open notes remembered', async ({ yap, shot }) => {
+  await openIt(yap);
+  await yap.quickNote.getByRole('button', { name: 'New note' }).click();
+  await note(yap).pressSequentially('Pack the tent');
+  // Ctrl+T: another, at once (a blank tab there is used again rather than a second one).
+  await note(yap).press('Control+t');
+  await expect(note(yap)).toHaveValue('');
+  await expect(front(yap)).toHaveText('New quick note');
+  await note(yap).pressSequentially('Book the campsite');
+  await expectStore(yap, 'notes.json', (s) => ['Pack the tent', 'Book the campsite'].every((t) => s.notes.some((n) => n.content === t)));
+  const tent = quickNotes(yap).find((n) => n.content === 'Pack the tent').id;
+  const site = quickNotes(yap).find((n) => n.content === 'Book the campsite').id;
+  await expect(front(yap)).toHaveText('Book the campsite');
+  await expect(tabs(yap).filter({ hasText: 'Pack the tent' })).toHaveCount(1);
+  // Rust remembers the open notes, in order, the one in front last.
+  await expectStore(yap, 'quick_note_tabs.json', (t) => t.active === site && t.tabs.indexOf(tent) >= 0 && t.tabs.indexOf(tent) < t.tabs.indexOf(site));
+  await shot(yap.quickNote, '10-tabs');
+
+  // Ctrl+Shift+Tab: the one before; Ctrl+Tab: back.
+  await note(yap).press('Control+Shift+Tab');
+  await expect(front(yap)).toHaveText('Pack the tent');
+  await expect(note(yap)).toHaveValue('Pack the tent');
+  await note(yap).press('Control+Tab');
+  await expect(note(yap)).toHaveValue('Book the campsite');
+  // A click on a tab.
+  await tabs(yap).filter({ hasText: 'Pack the tent' }).click();
+  await expect(note(yap)).toHaveValue('Pack the tent');
+  await note(yap).press('End');
+  await note(yap).pressSequentially(' and the stove');
+  await expectStore(yap, 'notes.json', (s) => byIdIn(s, tent)?.content === 'Pack the tent and the stove');
+  await expectStore(yap, 'quick_note_tabs.json', (t) => t.active === tent);
+  // Put away and opened again: on the tab in front (today's rule).
+  await putAway(yap);
+  await shortcut(yap);
+  await expect.poll(() => visible(yap)).toBe(true);
+  await expect(note(yap)).toHaveValue('Pack the tent and the stove');
+
+  // × on a tab behind: it closes; its note stays in Notes.
+  await yap.quickNote.getByRole('button', { name: 'Close Book the campsite' }).click();
+  await expect(tabs(yap).filter({ hasText: 'Book the campsite' })).toHaveCount(0);
+  await expect(note(yap)).toHaveValue('Pack the tent and the stove');
+  expect(byId(yap, site)?.content).toBe('Book the campsite');
+  await expectStore(yap, 'quick_note_tabs.json', (t) => !t.tabs.includes(site));
+  // Ctrl+W: the tab in front closes, the next one comes to the front.
+  const left = await tabs(yap).count();
+  await note(yap).press('Control+w');
+  await expect(tabs(yap)).toHaveCount(left - 1);
+  await expect(tabs(yap).filter({ hasText: 'Pack the tent' })).toHaveCount(0);
+  expect(byId(yap, tent)?.content).toBe('Pack the tent and the stove');
+  await expectStore(yap, 'quick_note_tabs.json', (t) => !t.tabs.includes(tent));
+  // Closing every tab leaves a new note.
+  while ((await tabs(yap).count()) > 1) await note(yap).press('Control+w');
+  await note(yap).press('Control+w');
+  await expect(tabs(yap)).toHaveCount(1);
+  await expect(front(yap)).toHaveText('New quick note');
+  await expect(note(yap)).toHaveValue('');
+});
+
+test('Send to the app it came up over: the note, or its selection, pasted there; it steps aside', async ({ yap, shot }) => {
+  await putAway(yap);
+  // A stand-in for the app in front (a test run reads and pastes into no real window).
+  await yap.invoke('e2e_quick_note_before', { app: 'slack.exe' });
+  try {
+    await shortcut(yap);
+    await expect.poll(() => visible(yap)).toBe(true);
+    await yap.quickNote.getByRole('button', { name: 'New note' }).click();
+    const send = yap.quickNote.getByRole('button', { name: 'Send to Slack' });
+    await expect(send).toBeVisible();
+    await expect(send).toBeDisabled(); // nothing to send yet
+    await note(yap).pressSequentially('Running ten minutes late, start without me');
+    await expect(send).toBeEnabled();
+    await shot(yap.quickNote, '11-send-to-slack');
+    await send.click();
+    await expect.poll(() => visible(yap)).toBe(false);
+    expect(await yap.invoke('e2e_quick_note_sent')).toMatchObject({ text: 'Running ten minutes late, start without me', app: 'slack.exe', standIn: true });
+    // The note is kept as typed.
+    await expectStore(yap, 'notes.json', (s) => s.notes.some((n) => n.content === 'Running ten minutes late, start without me'));
+
+    // Opened again on it: only what's selected goes.
+    await shortcut(yap);
+    await expect.poll(() => visible(yap)).toBe(true);
+    await expect(note(yap)).toHaveValue('Running ten minutes late, start without me');
+    await note(yap).evaluate((el) => {
+      el.focus();
+      el.setSelectionRange(0, 24); // "Running ten minutes late"
+    });
+    await send.click();
+    await expect.poll(() => visible(yap)).toBe(false);
+    expect(await yap.invoke('e2e_quick_note_sent')).toMatchObject({ text: 'Running ten minutes late' });
+
+    // Opened from Yap itself (nothing else in front): no app to send to.
+    await yap.invoke('e2e_quick_note_before', { app: null });
+    await shortcut(yap);
+    await expect.poll(() => visible(yap)).toBe(true);
+    await expect(sendButton(yap)).toHaveCount(0);
+  } finally {
+    await yap.invoke('e2e_quick_note_before', { app: null });
+  }
+});
+
+test('a quick-note button on the Yap bar: off by default, offered on the empty page, switched in Settings too', async ({ yap, main, shot }) => {
+  expect(yap.readConfig().barQuickNote ?? false).toBe(false);
+  await openIt(yap);
+  await yap.quickNote.getByRole('button', { name: 'New note' }).click();
+  // The empty page offers it.
+  const add = yap.quickNote.getByRole('button', { name: 'Add to the Yap bar' });
+  await expect(add).toBeVisible();
+  await shot(yap.quickNote, '12-offer-the-bar-button');
+  // Typing: the offer steps aside.
+  await note(yap).pressSequentially('x');
+  await expect(add).toHaveCount(0);
+  await note(yap).press('Backspace');
+  await expect(add).toBeVisible();
+  await add.click();
+  await expectStore(yap, 'config.json', (c) => c.barQuickNote === true);
+  await expect(add).toHaveCount(0);
+
+  // On the open bar: its button, with a tooltip; the pill is wider for it.
+  const bar = yap.overlay;
+  await yap.invoke('bar_simulate', { pointer: 'pill' });
+  try {
+    const button = bar.getByRole('button', { name: 'Quick note' });
+    await expect(button).toBeVisible();
+    await expect.poll(() => bar.locator('.pill.open').evaluate((el) => el.getBoundingClientRect().width)).toBe(230);
+    await button.hover();
+    await expect(bar.getByRole('tooltip')).toHaveText(/Quick note/);
+    await bar.waitForTimeout(300);
+    await shot(bar, '13-bar-quick-note-button');
+    // In front: it puts the quick note away; again: up it comes.
+    await button.click();
+    await expect.poll(() => visible(yap)).toBe(false);
+    await button.click();
+    await expect.poll(() => visible(yap)).toBe(true);
+  } finally {
+    await yap.invoke('bar_simulate', { pointer: 'away' });
+  }
+
+  // Settings → General → Yap bar shows it on, and switches it off.
+  await openSettings(main, 'General');
+  const toggle = settingsDialog(main).getByRole('group', { name: 'Yap bar' }).getByRole('button', { name: 'Quick note button', exact: true });
+  await expect(toggle).toHaveAttribute('aria-pressed', 'true');
+  await toggle.click();
+  await expectStore(yap, 'config.json', (c) => c.barQuickNote === false);
+  await closeSettings(main);
+  await yap.invoke('bar_simulate', { pointer: 'pill' });
+  try {
+    await expect(bar.getByRole('button', { name: 'More' })).toBeVisible();
+    await expect(bar.getByRole('button', { name: 'Quick note' })).toHaveCount(0);
+  } finally {
+    await yap.invoke('bar_simulate', { pointer: 'away' });
+  }
+});
+
+test('the open tabs are remembered across a restart; a tab left alone a day closes', async ({ shot }) => {
+  test.setTimeout(150_000);
+  const seed = {
+    folders: ['Personal', 'Quick notes'],
+    notes: [
+      { id: 11, title: 'Old idea', titleAuto: true, content: 'Old idea', folder: 'Quick notes', source: 'quick', noteType: 'personal', createdTs: NOW - 4 * 86_400, updatedTs: NOW - 4 * 86_400 },
+      { id: 12, title: 'Call the vet', titleAuto: true, content: 'Call the vet', folder: 'Quick notes', source: 'quick', noteType: 'personal', createdTs: NOW - 7_200, updatedTs: NOW - 7_200 },
+      { id: 13, title: 'Gift ideas', titleAuto: true, content: 'Gift ideas', folder: 'Quick notes', source: 'quick', noteType: 'personal', createdTs: NOW - 600, updatedTs: NOW - 600 },
+    ],
+  };
+  const options = { name: 'quick-note-tabs', data: { 'notes.json': seed, 'quick_note_tabs.json': { tabs: [11, 12, 13], active: 13 } } };
+  const first = await launchYap(options);
+  let second = null;
+  try {
+    const page = first.quickNote;
+    const openTabs = page.getByRole('tablist', { name: 'Quick notes' }).getByRole('tab');
+    await first.invoke('e2e_shortcut', { name: 'quick-note' });
+    await expect.poll(() => first.invoke('plugin:window|is_visible', { label: 'quick-note' })).toBe(true);
+    // The two from today, on the newest; the one left alone four days closed (it's in Notes).
+    await expect(openTabs).toHaveText(['Call the vet', 'Gift ideas']);
+    await expect(page.getByRole('tab', { selected: true })).toHaveText('Gift ideas');
+    await expect(page.getByRole('textbox', { name: 'Quick note' })).toHaveValue('Gift ideas');
+    await expectStore(first, 'quick_note_tabs.json', (t) => JSON.stringify(t.tabs) === '[12,13]' && t.active === 13);
+    expect(first.readJson('notes.json').notes.some((n) => n.id === 11)).toBe(true);
+    await shot(page, '14-tabs-after-a-start');
+    // Call the vet in front, then a restart.
+    await openTabs.filter({ hasText: 'Call the vet' }).click();
+    await expectStore(first, 'quick_note_tabs.json', (t) => t.active === 12);
+    await first.stop();
+
+    second = await launchYap({ ...options, data: {}, restart: true });
+    const page2 = second.quickNote;
+    await second.invoke('e2e_shortcut', { name: 'quick-note' });
+    await expect.poll(() => second.invoke('plugin:window|is_visible', { label: 'quick-note' })).toBe(true);
+    // The same tabs; the first open since the start is on the newest quick
+    // note within a day, as ever.
+    await expect(page2.getByRole('tablist', { name: 'Quick notes' }).getByRole('tab')).toHaveText(['Call the vet', 'Gift ideas']);
+    await expect(page2.getByRole('tab', { selected: true })).toHaveText('Gift ideas');
+  } finally {
+    await first.stop();
+    await second?.stop();
+  }
 });

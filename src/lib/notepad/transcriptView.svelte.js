@@ -47,6 +47,14 @@ export class TranscriptView {
     this.query = '';
   }
 
+  /** The line an answer cited: scrolled to and lit a moment (TranscriptLog). */
+  lit = $state(null);
+  jumpTo(i) {
+    this.closeSearch();
+    this.followLog = false;
+    this.lit = i;
+  }
+
   toggleSpeakerMenu(key, voice, lines, start = 'menu') {
     this.speakerMenu = this.speakerMenu?.key === key ? null : { key, voice, lines, start };
   }

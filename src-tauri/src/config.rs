@@ -561,6 +561,12 @@ pub struct YapConfig {
     /// push-to-talk key is held. `bar.rs` carries it to the bar page.
     #[serde(default = "default_bar_dictation_buttons")]
     pub bar_dictation_buttons: String,
+    /// A quick-note button on the open bar (Wispr Flow's "Add to Flow Bar";
+    /// off by default): switched on from the quick note's empty page or
+    /// Settings → Yap bar. An older Yap saving config.json drops it: the
+    /// button goes until it's switched on again, nothing else.
+    #[serde(default)]
+    pub bar_quick_note: bool,
     /// Settings → General → Appearance → Theme, for every Yap window:
     /// "system" (the default: Windows' app mode, Settings → Personalisation →
     /// Colours, followed live), "light" or "dark". Every page sets
@@ -1267,6 +1273,7 @@ impl Default for YapConfig {
             bar_hide_fullscreen: true,
             bar_theme: default_bar_theme(),
             bar_dictation_buttons: default_bar_dictation_buttons(),
+            bar_quick_note: false,
             theme: default_theme(),
             reading_font: default_reading_font(),
             reading_size: default_reading_size(),

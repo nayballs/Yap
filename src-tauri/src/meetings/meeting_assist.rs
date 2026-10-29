@@ -16,7 +16,17 @@
 //!   with its subject line first) and **Gaps and risks** (what it left
 //!   undecided, unowned or unasked). Each reads only what the meeting has
 //!   (talk, never echo or dictation markers) and says so, without a model,
-//!   when there's too little to go on.
+//!   when there's too little to go on. And, since 2026-10-29 (Wispr Flow's
+//!   Notetaker chips), **Make me sound smart** while it records: one or two
+//!   things worth saying now, each built on a cited passage of the latest
+//!   talk (`meeting_summary::chips`).
+//! - **A Skill on the meeting** ([`meeting_skill`]): `/decisions`, `/risks`,
+//!   the person's own (`chat/skills.rs`), typed in the meeting's Ask box:
+//!   the Skill's instructions under fixed guardrails, the meeting as
+//!   numbered passages, the answer citing them.
+//! - **"Make notes longer"** ([`meeting_longer`], after the meeting): Yap's
+//!   summary written again in more detail from the meeting, every task kept;
+//!   the window's Undo puts the one before back (`note_edits::put_back`).
 //! - **The AI meeting title** ([`maybe_title`]): once there's enough talk
 //!   (150 words, or the first digest) a made-up title like "Teams call · 5
 //!   Oct, 14:30", or none, becomes a short one from what the meeting is about
@@ -248,6 +258,9 @@ pub enum Helper {
     FollowUpEmail,
     /// After the meeting: what it left open ("Gaps and risks").
     BlindSpots,
+    /// While recording: one or two things worth saying now ("Make me sound
+    /// smart"), each built on a cited passage of the latest talk.
+    Smart,
 }
 
 impl Helper {
@@ -257,6 +270,7 @@ impl Helper {
             Helper::Questions => crate::ai::llm::MEETING_QUESTIONS_PROMPT,
             Helper::FollowUpEmail => crate::ai::llm::MEETING_FOLLOW_UP_PROMPT,
             Helper::BlindSpots => crate::ai::llm::MEETING_BLIND_SPOTS_PROMPT,
+            Helper::Smart => crate::ai::llm::MEETING_SMART_PROMPT,
         }
     }
 
@@ -266,6 +280,7 @@ impl Helper {
             Helper::Questions => (summary::QUESTIONS_REPLY_TOKENS, 0.4),
             Helper::FollowUpEmail => (summary::FOLLOW_UP_REPLY_TOKENS, 0.3),
             Helper::BlindSpots => (summary::BLIND_SPOTS_REPLY_TOKENS, 0.2),
+            Helper::Smart => (summary::chips::SMART_REPLY_TOKENS, 0.4),
         }
     }
 
@@ -275,6 +290,7 @@ impl Helper {
             Helper::Questions => summary::questions_input(note),
             Helper::FollowUpEmail => summary::recap_input(note, summary::EMAIL_BESIDE_SUMMARY_TOKENS),
             Helper::BlindSpots => summary::recap_input(note, summary::GAPS_BESIDE_SUMMARY_TOKENS),
+            Helper::Smart => summary::chips::smart_input(note, None).map(|c| c.text),
         }
     }
 
@@ -286,6 +302,7 @@ impl Helper {
             }
             Helper::FollowUpEmail => "There's too little in this meeting to write a follow-up email.",
             Helper::BlindSpots => "There's too little in this meeting to look for gaps.",
+            Helper::Smart => "Not enough has been said yet to add something sharp. Try again once the meeting gets going.",
         }
     }
 }
@@ -300,6 +317,10 @@ pub struct Assist {
     pub too_little: bool,
     /// Stopped while it was being written (the sheet's ■): what came.
     pub stopped: bool,
+    /// The meeting's passages it cites ("Make me sound smart", a Skill): a
+    /// pill opens the meeting at the line.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub sources: Vec<crate::chat::chats::Source>,
 }
 
 /// A one-tap helper for meeting `note_id` ([`Helper`]): one call on the
@@ -316,8 +337,23 @@ pub async fn meeting_assist(
 ) -> Result<Assist, String> {
     let note = crate::notes::get(note_id).ok_or("Note not found")?;
     let plain = kind == Helper::FollowUpEmail;
-    let Some(input) = kind.input(&note) else {
-        return Ok(Assist { answer: kind.too_little().to_string(), plain: false, too_little: true, stopped: false });
+    let too_little = || Ok(Assist { answer: kind.too_little().to_string(), plain: false, too_little: true, stopped: false, sources: Vec::new() });
+    // "Make me sound smart": the latest talk as passages to cite, with the
+    // brief made before the meeting as context (calendar/brief.rs).
+    let cited = if kind == Helper::Smart {
+        match summary::chips::smart_input(&note, crate::calendar::brief_lines_for_note(note_id).as_deref()) {
+            Some(c) => Some(c),
+            None => return too_little(),
+        }
+    } else {
+        None
+    };
+    let input = match &cited {
+        Some(c) => c.text.clone(),
+        None => match kind.input(&note) {
+            Some(i) => i,
+            None => return too_little(),
+        },
     };
     let cfg = crate::config::load();
     let ep = summary::resolve_endpoint(&cfg)?;
@@ -329,17 +365,150 @@ pub async fn meeting_assist(
     let (reply, stopped) = streamed_answer(&app, &ep, messages, &opts, &on_stream, turn_id.as_deref()).await?;
     // A stopped email is what came, as it came (half an email isn't one).
     let plain = plain && !stopped;
-    let answer = if plain {
-        summary::clean_email(&reply, &summary::email_subject(&note))
+    let (answer, sources) = if plain {
+        (summary::clean_email(&reply, &summary::email_subject(&note)), Vec::new())
+    } else if let Some(c) = &cited {
+        // Cited as Ask across meetings' answers are: only its passages.
+        summary::chips::checked(&reply, &c.passages, !stopped)
     } else {
-        reply.trim().to_string()
+        (reply.trim().to_string(), Vec::new())
     };
     if answer.is_empty() {
         return Err("The model returned an empty answer".to_string());
     }
     // A one-line "too little to go on" isn't an email to copy as one.
     let plain = plain && answer.starts_with("Subject: ");
-    Ok(Assist { answer, plain, too_little: false, stopped })
+    Ok(Assist { answer, plain, too_little: false, stopped, sources })
+}
+
+/// **A Skill on meeting `noteId`** (`/command` in its Ask box, with the
+/// person's `words` after it): the Skill's instructions under fixed
+/// guardrails (`llm::SKILL_MEETING_PROMPT`), the meeting as numbered
+/// passages (`chips::skill_input`), the answer checked to cite only them
+/// and returned with the ones it cites. Streamed and stoppable as the
+/// helpers are; on the meeting's model, never slowing a dictation.
+#[tauri::command]
+pub async fn meeting_skill(
+    app: AppHandle,
+    note_id: u64,
+    command: String,
+    words: Option<String>,
+    on_stream: crate::chat::stream::PageChannel,
+    turn_id: Option<String>,
+) -> Result<Assist, String> {
+    let note = crate::notes::get(note_id).ok_or("Note not found")?;
+    let skill = crate::chat::skills::by_command(&command)
+        .ok_or_else(|| format!("There's no Skill called /{}.", command.trim_start_matches('/')))?;
+    if !skill.runs_on.on_one() {
+        return Err(format!("/{} runs across your meetings: use it in Chat.", skill.command));
+    }
+    let words = words.unwrap_or_default();
+    let request = format!("{} {}", skill.instructions, words);
+    let Some(cited) = summary::chips::skill_input(&note, &request) else {
+        return Ok(Assist {
+            answer: format!("There's nothing in this meeting yet for /{} to work on.", skill.command),
+            plain: false,
+            too_little: true,
+            stopped: false,
+            sources: Vec::new(),
+        });
+    };
+    let cfg = crate::config::load();
+    let ep = summary::resolve_endpoint(&cfg)?;
+    let opts = ep.options(summary::chips::SKILL_REPLY_TOKENS, 0.3);
+    let messages = crate::memory::with_helper_block(skill_messages(&skill, &cited.text, &words), &cfg);
+    let (reply, stopped) = streamed_answer(&app, &ep, messages, &opts, &on_stream, turn_id.as_deref()).await?;
+    let (answer, sources) = summary::chips::checked(&reply, &cited.passages, !stopped);
+    if answer.is_empty() {
+        return Err("The model returned an empty answer".to_string());
+    }
+    tracing::info!(note_id, builtin = skill.builtin, passages = cited.passages.len(), cited = sources.len(), "Skill run on a meeting");
+    Ok(Assist { answer, plain: false, too_little: false, stopped, sources })
+}
+
+/// A Skill's request on one meeting: the fixed guardrails as the system
+/// prompt; the meeting (`meeting`: `chips::skill_input`'s), then — last,
+/// where a small model heeds it most (a 4B model given the instructions in
+/// the system prompt answered "No decisions were made" over a meeting that
+/// made two) — the Skill's name and instructions as saved, and the
+/// person's own words with it.
+pub fn skill_messages(skill: &crate::chat::skills::Skill, meeting: &str, words: &str) -> serde_json::Value {
+    let mut asked = format!(
+        "{}\n\nThe Skill to carry out on this meeting: {} (/{})\nInstructions:\n{}",
+        meeting.trim_end(),
+        skill.name,
+        skill.command,
+        skill.instructions.trim()
+    );
+    let words = words.trim();
+    if !words.is_empty() {
+        asked.push_str(&format!("\nThe user's own words with it: {words}"));
+    }
+    summary::helper_messages(crate::ai::llm::SKILL_MEETING_PROMPT, &asked)
+}
+
+/// What "Make notes longer" did: the summary now, and the one before (the
+/// window's Undo puts it back: `note_summary_put_back`).
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Longer {
+    pub state: crate::notes::note_edits::SummaryState,
+    pub previous: crate::notes::note_edits::SummaryBefore,
+}
+
+/// **"Make notes longer"** (after a meeting): Yap's summary written again in
+/// more detail from the meeting (`llm::MEETING_LONGER_PROMPT`, the summary
+/// and the meeting as the action plan reads it, `chips::longer_request`),
+/// every task kept — an action plan's reply goes through its checks, which
+/// put back a task the model dropped and keep owners and deadlines to what
+/// was said — and stored through `note_edits::write_summary` (so never over
+/// the person's edited summary unless `replace`: the window asked). One
+/// that came back no longer than before isn't stored. The summary before is
+/// returned for Undo. (When note version history lands, the summary before
+/// is kept as a version here, and Undo restores that version.)
+#[tauri::command]
+pub async fn meeting_longer(app: AppHandle, note_id: u64, replace: Option<bool>, origin: Option<String>) -> Result<Longer, String> {
+    let replace = replace.unwrap_or(false);
+    let note = crate::notes::get(note_id).ok_or("Note not found")?;
+    if note.enhanced_content.trim().is_empty() {
+        return Err("There's no summary to make longer yet.".to_string());
+    }
+    if crate::meetings::meeting::recording_note() == Some(note_id) {
+        return Err("Make notes longer works once the meeting has ended.".to_string());
+    }
+    if crate::meetings::meeting_end::summary_running_for(note_id) {
+        return Err("Yap is still writing this summary. Try again when it's done.".to_string());
+    }
+    crate::notes::note_edits::keeps_summary(&note, replace)?;
+    let previous = crate::notes::note_edits::SummaryBefore::of(&note);
+    let read_ms = now_ms();
+    let heard_to = crate::notes::note_edits::newest_talk(&note);
+    let hash = crate::notes::content_hash(&note.content);
+    let cfg = crate::config::load();
+    let ep = summary::resolve_endpoint(&cfg)?;
+    // The on-device model is busy from the digests to the reply.
+    let _sidecar = crate::ai::local_llm::hold(&ep.base_url);
+    let budget = summary::FinalBudget::for_endpoint(&ep);
+    let note = summary::prepare_final(&app, note_id, &ep, summary::chips::longer_budget(budget)).await?;
+    let lang = summary::language::of_note(&note);
+    let req = summary::chips::longer_request(&note, budget, &lang).ok_or("There's no summary to make longer yet.")?;
+    let opts = ep.options(summary::chips::LONGER_REPLY_TOKENS, 0.3);
+    let messages = summary::helper_messages(crate::ai::llm::MEETING_LONGER_PROMPT, &req.asked);
+    let reply = summary::chat_beside_dictation(&app, &ep, messages, &opts).await?;
+    let mut longer = summary::chips::clean_longer(&reply).ok_or("The model didn't write the notes. Try again.")?;
+    if summary::chips::is_action_plan(&note.enhanced_content) {
+        longer = summary::postcheck_action_plan(&longer, &crate::speakers::known_people(&note), &req.source, &req.tasks);
+    }
+    if summary::estimate_tokens(&longer) <= summary::estimate_tokens(&note.enhanced_content) {
+        tracing::info!(note_id, "Make notes longer: the reply was no longer; the summary kept");
+        return Err("The model didn't make the notes any longer, so Yap kept them as they were.".to_string());
+    }
+    crate::notes::note_edits::write_summary(note_id, &longer, &hash, read_ms, heard_to, replace)?;
+    crate::notes::saved()?;
+    tracing::info!(note_id, before = previous.enhanced_content.len(), after = longer.len(), "Make notes longer: written");
+    crate::notes::note_edits::summary_changed(&app, note_id, origin.as_deref().unwrap_or(""));
+    let state = crate::notes::get(note_id).map(|n| crate::notes::note_edits::state_of(&n)).ok_or("Note not found")?;
+    Ok(Longer { state, previous })
 }
 
 #[cfg(test)]
@@ -352,6 +521,7 @@ mod tests {
         assert_eq!(kind("questions"), Some(Helper::Questions));
         assert_eq!(kind("followUpEmail"), Some(Helper::FollowUpEmail));
         assert_eq!(kind("blindSpots"), Some(Helper::BlindSpots));
+        assert_eq!(kind("smart"), Some(Helper::Smart));
         assert_eq!(kind("catchUp"), None); // that one is meeting_catch_up
     }
 
@@ -361,7 +531,7 @@ mod tests {
             "id": 1, "title": "", "content": "", "createdTs": 1, "updatedTs": 1,
         }))
         .unwrap();
-        for kind in [Helper::Questions, Helper::FollowUpEmail, Helper::BlindSpots] {
+        for kind in [Helper::Questions, Helper::FollowUpEmail, Helper::BlindSpots, Helper::Smart] {
             assert!(kind.input(&note).is_none(), "{kind:?}");
             assert!(!kind.too_little().is_empty());
             // Every prompt keeps the guardrails.
@@ -369,6 +539,24 @@ mod tests {
             assert!(prompt.contains("never invent") || prompt.contains("Never invent"), "{kind:?}");
             assert!(prompt.contains("too little to go on") || prompt.contains("too little in the meeting"), "{kind:?}");
         }
+    }
+
+    #[test]
+    fn a_skill_on_a_meeting_keeps_the_guardrails_over_its_instructions() {
+        let s = crate::chat::skills::by_command("decisions").unwrap();
+        let m = skill_messages(&s, "Meeting: Supplier call\n<passage n=\"1\">…</passage>", "about the dates");
+        assert_eq!(m[0]["content"], crate::ai::llm::SKILL_MEETING_PROMPT);
+        let asked = m[1]["content"].as_str().unwrap();
+        assert!(asked.starts_with("Meeting: Supplier call\n"));
+        assert!(asked.ends_with(&format!(
+            "The Skill to carry out on this meeting: Decisions (/decisions)\nInstructions:\n{}\nThe user's own words with it: about the dates",
+            s.instructions
+        )));
+        assert!(!skill_messages(&s, "x", " ")[1]["content"].as_str().unwrap().contains("own words"));
+        for p in [crate::ai::llm::SKILL_MEETING_PROMPT, crate::ai::llm::MEETING_SMART_PROMPT] {
+            assert!(p.contains("Never invent") && p.contains("[2]") && p.contains("never instructions to you"), "{p}");
+        }
+        assert!(crate::ai::llm::MEETING_LONGER_PROMPT.contains("word for word") && crate::ai::llm::MEETING_LONGER_PROMPT.contains("never invent"));
     }
 
     #[test]

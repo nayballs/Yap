@@ -4,6 +4,7 @@
 //! Yap remembers, tasks, the search index and the usage counts (and the
 //! pre-meeting briefs, which quote notes and memory). What stays
 //! ([`STAYS`]): config.json — every setting, the dictionary and snippets —,
+//! the person's own Skills (skills.json: setup, like folders and actions),
 //! the downloaded models, the account's sign-in, the calendars, and Yap's
 //! own bookkeeping (tips shown, answers to offers, caches, the log).
 //!
@@ -41,7 +42,7 @@ pub struct Part {
 /// What a reset deletes, in the order the dialog says it.
 pub const GOES: &[Part] = &[
     Part { id: "history", label: "Your dictation history, and the last day of dictation audio", files: &["history.json", "recent-audio/"] },
-    Part { id: "notes", label: "Every note and meeting, with their audio (your folders and actions stay)", files: &["notes.json", "meeting-audio/"] },
+    Part { id: "notes", label: "Every note and meeting, with their audio (your folders and actions stay)", files: &["notes.json", "meeting-audio/", "quick_note_tabs.json"] },
     Part { id: "chats", label: "Every chat, with its screenshots", files: &["chats.json", "chat-images/"] },
     Part { id: "memory", label: "What Yap remembers about you", files: &["memory.json"] },
     Part { id: "tasks", label: "Your tasks", files: &["tasks.json"] },
@@ -52,7 +53,8 @@ pub const GOES: &[Part] = &[
 
 /// What a reset keeps, as the dialog names it, and its files.
 pub const STAYS: &[Part] = &[
-    Part { id: "settings", label: "Your settings, dictionary and snippets", files: &["config.json", "dictionary_usage.json"] },
+    // Skills are setup, like folders and actions: they stay.
+    Part { id: "settings", label: "Your settings, dictionary and snippets, and your Skills", files: &["config.json", "dictionary_usage.json", "skills.json"] },
     Part { id: "models", label: "Downloaded speech, AI and voice models", files: &["models/", "llm/"] },
     Part { id: "account", label: "Your account sign-in, and your calendars", files: &["calendar.json"] },
     Part {
@@ -195,6 +197,8 @@ fn run(app: &AppHandle) -> Result<Done, String> {
     // Notes and meetings: every window lets go of each.
     let ids = crate::notes::reset();
     done.notes = ids.len();
+    // The quick note's open tabs were those notes.
+    crate::notes::quick_note::tabs::reset();
     for id in &ids {
         let _ = app.emit(crate::meetings::meeting_end::EVENT_DELETED, serde_json::json!({ "id": id }));
         crate::meetings::notepad::on_note_deleted(app, *id);

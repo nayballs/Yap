@@ -24,6 +24,7 @@
   import { modelName, providerName } from '../../core/aiModel.js';
   import { chatImageUrl, SNIP_PROMPTS, sizeLine, imageItems } from './chatImages.js';
   import { tooLongLine } from './chatBudget.js';
+  import SkillMenu from '../../components/SkillMenu.svelte';
   import ModelChip from './ModelChip.svelte';
   import ContextRing from './ContextRing.svelte';
 
@@ -329,14 +330,19 @@
         </div>
       {/if}
     </div>
+    <!-- "/": Skills, run across the meetings (chat/skills.rs). -->
+    <SkillMenu picker={chat.skills} onpick={chat.pickSkill} />
     <input
       class="msginput"
       bind:this={chat.inputEl}
       bind:value={chat.input}
-      placeholder={chat.attached.length ? 'Ask about this screenshot…' : 'Ask about your notes, or anything else'}
+      placeholder={chat.attached.length ? 'Ask about this screenshot…' : 'Ask about your notes, or type / for Skills'}
       aria-label="Message"
       aria-busy={chat.sending}
-      onkeydown={(e) => e.key === 'Enter' && !e.isComposing && chat.send()}
+      aria-autocomplete="list"
+      aria-controls={chat.skills.open ? 'skill-list' : undefined}
+      aria-activedescendant={chat.skills.open ? `skill-opt-${chat.skills.active}` : undefined}
+      onkeydown={(e) => chat.skillKey(e) || (e.key === 'Enter' && !e.isComposing && chat.send())}
       onpaste={chat.pasteImage}
       oninput={() => {
         if (!chat.input.trim()) {
@@ -414,6 +420,7 @@
     gap: 4px;
   }
   .inputbar {
+    position: relative;
     display: flex;
     align-items: center;
     gap: 6px;
