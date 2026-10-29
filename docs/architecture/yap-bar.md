@@ -136,6 +136,19 @@ The always-there pill above the taskbar: the `overlay` window's Rust side (regio
   "dictate-in:<id>"` → `menu::dictate_in`: `languages::arm` around the
   bar's own toggle, as its shortcut's press). The menu scrolls past 440 px
   (the window is 560 tall). `e2e/bar-menu.spec.js` (made-up microphones).
+- **`bar/pointer.rs`** — **first-use pointers** (2026-10-29; Wispr Flow's,
+  by behaviour): for someone who has never dictated, a small pointer over
+  the idle pill — "Click a text box, then press F9" ("…then hold F9 and
+  talk" in push-to-talk: `sync` reads `recording_mode`) — and over the first
+  dictation's capsule, "Talk, then press F9 again to paste" ("…then let go
+  of F9 to paste"). Each shows once; both are gone after the first
+  dictation (`dictated`, called by `deliver`; any dictation already in the
+  history counts, read once). `status` → `Status.firstUse` (`{idle,
+  recording, hold}` or null; none with "Show tips" or Feature tips off);
+  the page calls `bar_pointer_shown {kind}` as it shows one, counted in
+  hints.json's `pointers` (`coaching::update_record`). Test mode shows none
+  unless a spec asks (`e2e_bar_pointer`, as for someone who has never
+  dictated). Unit tests; e2e `bar-pointer.spec.js`.
 - **`bar/overlay.rs`** — the bar window's Win32 side + its pure, unit-tested maths:
   `place` (work-area placement), `fullscreen_on` (None / Borderless /
   Exclusive), `region_at` (hit-testing with slack), `enforced_ex_style`, and
@@ -175,6 +188,15 @@ The always-there pill above the taskbar: the `overlay` window's Rust side (regio
   recording red (`#e5645e`; Wispr's is emerald), radius 22.5, half opacity
   until hovered; 5 2×18 bars in the scheme's amber (Wispr's staggered timing), then the 19 px
   stop circle with its 8×8 square; hovered, it widens to show the timer.
+  **The first-use pointer** (`bar/pointer.rs`, `bar.firstUse`): in the
+  cards' place, never with a card or the reading card up, a small ink
+  bubble with an arrow to the pill (the tooltips' `--bar-tooltip` colours,
+  13 / 600, no shadow, no backdrop-filter), words only — not a region, so
+  the bar stays click-through round it (`data-testid="bar-pointer"`,
+  `data-kind`). The idle one shows while the bar is idle, on screen and
+  closed, for up to 45 s or until a dictation starts; the recording one
+  while the first dictation records; each latched once shown (Rust told,
+  `bar_pointer_shown`), and neither again once a dictation has recorded.
   `bar/DictationCapsule.svelte` (the dictation overlay — waveform in Yap
   amber, live partials word-paced by `bar/dictation.svelte.js` — the line
   glides left as it grows, and one a word or so shorter keeps its place

@@ -38,7 +38,10 @@ How loud Yap may be: the notice policy (one place, one at a time, held while dic
   language-added ("French is in My languages", 10 s) — > Tip — hint,
   micTip ("Yap didn't hear you clearly", `dictation/mic_tips.rs`, which
   rate-limits it itself — one a day —: held over a dictation and a meeting,
-  "Show tips" turns it off), word-suggestion, snippet-suggestion ("Type that often? Save it as a
+  "Show tips" turns it off), featureTip ("Yap caught your correction", "Yap
+  made that a list"…, `dictation/tips.rs`, once each: held over a dictation
+  and a meeting, dropped unseen after a minute, "Show tips" turns it off),
+  word-suggestion, snippet-suggestion ("Type that often? Save it as a
   snippet", `dictionary/snippet_offer.rs`, one a day there; held over a
   dictation, dropped unseen after a minute; snippet-saved 10 s),
   language-nudge ("You spoke French · Add it to My
@@ -59,6 +62,26 @@ How loud Yap may be: the notice policy (one place, one at a time, held while dic
   fixture runs it before every test), `e2e_focus {focused}` and `e2e_notice
   {surface: bar|window, kind, title, body, level, timeoutMs, dictating}`
   (a notice through the real policy, or a pretend dictation's `yap-state`).
+- **`notices/kinds.rs`** — **kinds of notice, each with a switch and a
+  cap** (2026-10-29; Wispr Flow's notification categories, by behaviour):
+  the nice-to-know notices fall into four kinds — **suggestions**
+  (word-suggestion, snippet-suggestion, language-nudge), **milestones** (any
+  kind starting "milestone"), **feature tips** (hint, micTip, featureTip,
+  the bar's first-use pointers) and **news** (the "Updated to …" note after
+  an update) — each switched off on its own in Settings → General →
+  Notifications (`notify_suggestions`, `notify_milestones`,
+  `notify_feature_tips`, `notify_news`, synced with `show_tips`; "Show
+  tips" still mutes every tip), and each shown at most `cap` times a day
+  (suggestions 3, milestones 2, feature tips 3, news 1; counted in memory,
+  a restart starts the day afresh). Through the one policy: a module about
+  to show one asks **`notice::place_tip(app, kind)`** — its place, or
+  Nowhere when its kind is off or used up today, counted when it goes
+  somewhere (coaching, mic tips, feature tips, learn, the snippet offer,
+  the language nudge) — and the page asks `notice_allow` for its own
+  ("Updated to …"). Questions, alerts and notices have no kind and are
+  never capped. A test run counts the caps only once a spec asks
+  (`e2e_notice_caps`; `e2e_notice_reset` turns them off again). Pure parts
+  unit-tested.
 - **The offer of AI cleanup** (`cleanup_styles::offer`, `lib/notices/cleanupOffer.js`,
   2026-10-24): one tip, ever, in the main window — to someone with cleanup
   off on a PC the on-device model fits, after five dictations — asked of

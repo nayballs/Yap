@@ -138,7 +138,11 @@
   history_enabled, update_checks_enabled, dictionary_fuzzy, learn_words
   ("Suggest words from your corrections", default on, `dictionary/learn.rs`),
   show_tips ("Show tips", default on: coaching hints and nudges;
-  `notices/notice.rs`), the meeting
+  `notices/notice.rs`) + notify_suggestions / notify_milestones /
+  notify_feature_tips / notify_news (2026-10-29, Settings → General →
+  Notifications, each default on: one kind of nice-to-know notice each,
+  `notices/kinds.rs`; an older Yap drops them when it saves, so one switched
+  off comes back on — harmless, a few tips more), the meeting
   notepad: meeting_open_notepad (default on) + meeting_split_screen (default
   off) + meeting_live_transcript (default on) + meeting_consent_message (the
   notepad's "Copy consent message" text; empty = the default), meeting
@@ -494,7 +498,23 @@
 - Hints: `%APPDATA%/yap/hints.json` — how often each push-to-talk coaching hint
   showed (`tap`, `longHold`, `chord` — "Hold only {key}" —, `longDictation`
   — "Try meeting notes", once ever), when the last did, and whether
-  double-tap has been used (`dictation/coaching.rs`).
+  double-tap has been used (`dictation/coaching.rs`). Since 2026-10-29 also
+  the feature tips shown (`features`: kind → when, once each,
+  `dictation/tips.rs`), the Yap bar's first-use pointers shown (`pointers`:
+  "idle" / "recording" → when, `bar/pointer.rs`) and whether a dictation has
+  ever finished (`dictated`). An older Yap keeps the file's own counts but
+  drops these three when it next saves a hint: a feature tip or a pointer
+  may then show once more (the pointers never once a dictation is in the
+  history).
+- Getting started: `%APPDATA%/yap/onboarding.json` (2026-10-29,
+  `shell/guide.rs`) — the first-run setup's calendar step answered
+  (`calendarStep`: "connected" | "skipped"; never shown again either way),
+  the typing test's numbers (`typingWpm`, `speakingWpm`, `typingAt`: words a
+  minute, nothing typed or said), and the "Set up meeting notes" checklist
+  dismissed (`checklistDismissed`). A file of its own: an older Yap never
+  reads or writes it. Safe to delete (the calendar step and the checklist
+  come back, the typing test is forgotten). Reset app keeps it with Yap's
+  own records.
 - Quick note tabs: `%APPDATA%/yap/quick_note_tabs.json` (2026-10-29) —
   `{tabs: [note ids, in order], active: id | null}`, the quick notes open
   as tabs in the quick note's window (`notes/quick_note/tabs.rs`): read at
@@ -584,7 +604,7 @@
   again for that store until a save of it worked. The local API and the
   chat's note tools answer an AI app or model with the failure too, so
   neither says it saved. Caches (`model_catalog.json`, `stt_speed.json`,
-  `updates.json`, `hints.json`, `quieted_apps.json`, `quick_note_tabs.json`) are only logged. The
+  `updates.json`, `hints.json`, `onboarding.json`, `quieted_apps.json`, `quick_note_tabs.json`) are only logged. The
   log names the store and the error's kind, never what it holds.
   **Since 2026-10-25**: notes.json is written **off its lock** (a snapshot
   taken under it, written after, `saving::Ordered`: one write at a time,

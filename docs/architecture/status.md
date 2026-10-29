@@ -55,6 +55,31 @@ tables, method and how anyone can run it and send theirs:
 
 ## What works
 
+**Getting started and getting help** (2026-10-29, [frontend.md](./frontend.md),
+[dictation.md](./dictation.md), [notices.md](./notices.md), [yap-bar.md](./yap-bar.md)):
+the first-run setup has eight steps — the speech model, **the languages you
+speak** (English only in one click; a model that covers them offered), the
+microphone with **the mic quiz** (every connected mic listens to one line at
+once, each judged, a Bluetooth headset's honest note, the best put first),
+AI cleanup, **a calendar for meeting notes** (never again once connected or
+skipped), the tray, try it, and **an optional typing test** (typed, then
+said; only the two speeds kept, also on Insights). The first time Yap catches
+a self-correction, lays out a list, frames an email, expands a snippet or
+fixes a word from the dictionary, one **feature tip** says so, once each;
+someone who has never dictated gets **first-use pointers** on the Yap bar.
+The title bar's **Help** has a keyboard shortcut sheet (Ctrl+/, every binding
+as set now), Microphone help, Languages, Report a problem, What's new and
+GitHub; the sidebar's **"Set up meeting notes"** ticks itself (calendar, a
+first meeting, an AI app) until done or dismissed; Settings → Notifications
+switches each kind of tip (suggestions, milestones, feature tips, news),
+each capped a day. Unit-tested (the self-correction, list and email
+detection, once each, the pointers' record, the quiz's verdicts and best
+mic, the checklist, the sheet, the daily caps) and e2e-tested
+(`onboarding-steps`, `help`, `meeting-setup`, `bar-pointer`,
+`feature-tips`). Not tried yet: the quiz on real microphones and a real
+Bluetooth headset (made-up ones in the tests), the typing test and the
+pointers by a person, What's new with a real update's notes.
+
 **Your data, and the microphone's quality** (2026-10-29,
 [privacy-receipts.md](./privacy-receipts.md), [dictation.md](./dictation.md)):
 Settings → Privacy & data → **Download your data** saves one .zip (history
