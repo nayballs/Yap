@@ -652,6 +652,50 @@ pub fn forget(id: u64) {
     });
 }
 
+/// Reset app (`privacy/reset.rs`): every note's history goes, in memory and
+/// on disk (each file in `note-versions/`, and any set aside there). Returns
+/// how many files went.
+pub fn reset() -> usize {
+    super::with_store(|s| {
+        s.versions.files.clear();
+        let Some(dir) = dir() else { return 0 };
+        // Snapshots still to be written go too: each file's deletion comes after them.
+        let queued: Vec<PathBuf> = with_queue(|q| q.files.keys().chain(q.failed.keys()).cloned().collect());
+        with_queue(|q| q.failed.clear());
+        let mut n = 0;
+        for e in std::fs::read_dir(&dir).into_iter().flatten().flatten() {
+            let p = e.path();
+            if !p.is_file() {
+                continue;
+            }
+            if p.extension().is_some_and(|x| x == "json") {
+                queue(p, None);
+                n += 1;
+            } else {
+                // A file set aside (`<id>.json.corrupt-…`): the same content.
+                let _ = std::fs::remove_file(&p);
+            }
+        }
+        for p in queued {
+            queue(p, None);
+        }
+        n
+    })
+}
+
+/// Every note's history for Download your data (`privacy/export.rs`):
+/// `{note, title, versions}` per note that has one, its versions newest
+/// first.
+pub fn export_all() -> Vec<serde_json::Value> {
+    super::all()
+        .iter()
+        .filter_map(|n| {
+            let versions = list(n.id).ok().filter(|v| !v.is_empty())?;
+            Some(serde_json::json!({ "note": n.id, "title": n.title, "versions": versions }))
+        })
+        .collect()
+}
+
 /// A meeting's transcript went after its days (`retention.rs`): its
 /// summary's earlier versions go too (see the module notes). The summary
 /// as it is now stays in the note.
@@ -838,6 +882,22 @@ mod tests {
         let again = super::super::create("Other", "", "manual", "").id;
         assert_eq!(again, id);
         assert!(list(again).unwrap().is_empty());
+        TEST_DIR.with(|t| *t.borrow_mut() = None);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn reset_app_takes_every_notes_history() {
+        let dir = scratch("reset");
+        let id = super::super::create("Plans", "", "manual", "").id;
+        super::super::update(id, None, Some("Paint the shed".into()), None, None).unwrap();
+        let file = dir.join(format!("{id}.json"));
+        assert!(file.exists());
+        let set_aside = dir.join("9.json.corrupt-1790000000");
+        std::fs::write(&set_aside, "{").unwrap();
+        assert_eq!(reset(), 1);
+        assert!(!file.exists() && !set_aside.exists());
+        assert!(list(id).unwrap().is_empty(), "nothing in memory either");
         TEST_DIR.with(|t| *t.borrow_mut() = None);
         let _ = std::fs::remove_dir_all(&dir);
     }

@@ -426,13 +426,16 @@
   transcript ("Delete meeting transcripts after"). Never sent anywhere.
   Files of their own, not notes.json fields: an older Yap never opens them
   (its notes have no history there; an edit it makes shows here as an
-  "earlier" version), and notes.json stays the size it was. A data export
-  or reset takes the folder with notes.json.
+  "earlier" version), and notes.json stays the size it was. Download your
+  data puts every note's history in `notes/versions.json`; Reset app
+  deletes the folder's files with the notes (`versions::reset`).
 - Pinned notes: `%APPDATA%/yap/note_pins.json` — `{pins: [{id, created,
   ms}]}` (2026-10-29, `notes/pins.rs`): the notes pinned in Notes, each by
   its id and `createdTs`. A file of its own, so an older Yap saving
   notes.json never drops a pin (it lists the notes unpinned and never opens
-  the file). A note's pin goes with it. Through `saving.rs` ("your pinned
+  the file). A note's pin goes with it, and every pin with Reset app
+  (`pins::reset`); not in Download your data (a pin is a place in a list,
+  not something the person wrote). Through `saving.rs` ("your pinned
   notes").
 - Chat screenshots: `%APPDATA%/yap/chat-images/` — `img_<16 hex>.png` for each
   screenshot a question carries (Snip to Chat, `snip/images.rs`); `chats.json`
@@ -511,6 +514,12 @@
   showed (`tap`, `longHold`, `chord` — "Hold only {key}" —, `longDictation`
   — "Try meeting notes", once ever), when the last did, and whether
   double-tap has been used (`dictation/coaching.rs`).
+- Mic tips: `%APPDATA%/yap/mic_tips.json` (2026-10-29,
+  `dictation/mic_tips.rs`) — how often each mic-quality tip ("Yap didn't
+  hear you clearly": quiet, noisy, clipped, a Bluetooth headset in its call
+  profile) showed and when, and when the last did: `{quiet: {shown, lastAt},
+  …, lastShownAt}`. Counts only. A file of its own: an older Yap never reads
+  or writes it. Safe to delete (each tip may show again).
 - Quieted apps: `%APPDATA%/yap/quieted_apps.json` — only while a dictation
   has other apps silenced (each session's id, exe and level before), so a
   Yap that crashed mid-dictation brings them back at its next start
@@ -537,6 +546,19 @@
   (`memory.rs`). Changed only as changes (Undo in the app); cleared from
   Settings → Memory, exported there as a .zip of Markdown. Sent with questions
   to the AI model the person uses, never to Yap.
+- **Download your data and Reset app** (2026-10-29, Settings → Privacy &
+  data → Your data; [privacy-receipts.md](./privacy-receipts.md)): one .zip
+  of the history, notes and meetings (and each note's earlier versions),
+  chats, tasks, memory, the dictionary and settings without keys (the audio
+  and screenshots with a tick box),
+  never uploaded; and "Clear everything and keep my settings": the history
+  and its audio, notes and meetings with theirs (and their versions and
+  pins), chats and screenshots,
+  memory, tasks, the search index, the usage counts and the pre-meeting
+  briefs go; config.json, `dictionary_usage.json`, the models, the account
+  and calendars, and Yap's own records stay. **Every file this page names
+  is in one list or the other** (`privacy/reset.rs` `GOES` / `STAYS`; a unit
+  test reads this page): a new store put here has to be decided there too.
 - All of the above (plus config) write atomically and quarantine a corrupt file
   on load rather than crashing (`config::atomic_write`/`quarantine_corrupt`;
   config.json its own way, above). Each write has a temp file of its own

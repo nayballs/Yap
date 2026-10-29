@@ -995,11 +995,10 @@ pub fn with_all<R>(f: impl FnOnce(&[Note]) -> R) -> R {
     with_notes(|notes| f(notes))
 }
 
-/// The store as notes.json holds it (a unit test reads it as an older Yap
-/// would).
-#[cfg(test)]
+/// The store as notes.json holds it (Download your data, `privacy/export.rs`;
+/// a unit test reads it as an older Yap would).
 pub fn store_json() -> String {
-    with_store(|s| serde_json::to_string(s).unwrap())
+    with_store(|s| serde_json::to_string(s).unwrap_or_default())
 }
 
 /// A unit test: this thread's store read again from `json`, as a start
@@ -1466,6 +1465,19 @@ pub fn delete(id: u64) {
         save_to_disk(store);
     });
     forget_extras(id);
+}
+
+/// Reset app (`privacy/reset.rs`): every note and meeting gone in one
+/// write; the folders and actions (the person's own setup) stay. Returns
+/// the ids that went: the caller lets every window go of them, and clears
+/// what went with them (tasks, chats, audio, the index) store by store.
+pub fn reset() -> Vec<u64> {
+    with_store(|store| {
+        let ids: Vec<u64> = store.notes.iter().map(|n| n.id).collect();
+        store.notes.clear();
+        save_to_disk(store);
+        ids
+    })
 }
 
 /// [`modify`], then the note taken away for good when `gone` says so of it

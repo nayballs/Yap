@@ -147,6 +147,16 @@ pub fn forget(id: u64) {
     });
 }
 
+/// Reset app (`privacy/reset.rs`): every pin goes. Returns how many.
+pub fn reset() -> usize {
+    with_store(|s| {
+        let n = s.pins.len();
+        s.pins.clear();
+        save(s);
+        n
+    })
+}
+
 /// The notes list (`notes::list`, newest-updated first), each item marked
 /// `pinned` and the pinned ones first, each part in the order it had
 /// (pure). A pin counts only for the note it was made on (its id and
