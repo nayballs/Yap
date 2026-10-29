@@ -414,6 +414,26 @@
   through `saving.rs`). A file of its own, not new fields in notes.json, so an
   older Yap sharing the data folder (it drops notes.json fields it doesn't
   know when it saves) never loses them. A note's go with it.
+- Note versions: `%APPDATA%/yap/note-versions/<note id>.json` — each note's
+  version history (2026-10-29, `notes/versions.rs`): `{note, created, next,
+  versions: [{n, field: "notes" | "summary", kind, label?, from?, sinceMs,
+  ms, text}]}`, the last 50 texts of its My thoughts and summary, each with
+  how it came (typed, dictated, summary, action, transform, chat, restored,
+  edited, earlier). Through `saving.rs` ("your notes' history"; a file that
+  doesn't read set aside). `created` is the note's `createdTs`: a file left
+  by a note an older Yap deleted is ignored by a new note given its id.
+  Deleted with its note; a meeting's summary versions go with its
+  transcript ("Delete meeting transcripts after"). Never sent anywhere.
+  Files of their own, not notes.json fields: an older Yap never opens them
+  (its notes have no history there; an edit it makes shows here as an
+  "earlier" version), and notes.json stays the size it was. A data export
+  or reset takes the folder with notes.json.
+- Pinned notes: `%APPDATA%/yap/note_pins.json` — `{pins: [{id, created,
+  ms}]}` (2026-10-29, `notes/pins.rs`): the notes pinned in Notes, each by
+  its id and `createdTs`. A file of its own, so an older Yap saving
+  notes.json never drops a pin (it lists the notes unpinned and never opens
+  the file). A note's pin goes with it. Through `saving.rs` ("your pinned
+  notes").
 - Chat screenshots: `%APPDATA%/yap/chat-images/` — `img_<16 hex>.png` for each
   screenshot a question carries (Snip to Chat, `snip/images.rs`); `chats.json`
   keeps only its id, size, bytes and source. Deleted with its conversation, after

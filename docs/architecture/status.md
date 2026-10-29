@@ -55,6 +55,26 @@ tables, method and how anyone can run it and send theirs:
 
 ## What works
 
+**Pinned notes, version history, transforms in notes** (2026-10-29,
+[notes.md](./notes.md#pins-version-history-and-transforms-notespinsrs-notesversionsrs-notestransformrs)):
+pin a note from its menu, its ⋯ or its row, and it comes first in Notes and
+its folder (`note_pins.json`). Every note keeps its last 50 versions of My
+thoughts and the summary (`note-versions/`), each marked how it came —
+typed, dictated, Yap's summary, an Action, a transform, Chat, restored —
+one kind's saves folded for ten minutes; Version history shows them with the
+changes marked, and Restore (or the toast's Undo) brings one back as a
+version of its own; a meeting's summary versions go with its transcript.
+The saved transforms (Polish, Shorter, Fix grammar only, Translate, Make it
+a prompt, your own) run on the selection or the whole of My thoughts or the
+summary, from the note's ⋯ or a right-click, on the Commands model (on this
+PC or the cloud), the result in place with Undo. Unit-tested (folding, the
+50, deletion with the note, the pinned order, restore, retention, offsets)
+and e2e-tested (`notes-history.spec.js`: pins, history, restore and Undo, a
+transform on the fake model, light and dark). Not yet tried: a real
+dictation into a note marked "Dictated", the on-device model running a
+transform in a note, and the meeting notepad and quick note (they can call
+`note_transform`; not wired yet).
+
 **The quick note** (2026-10-28, [notes.md](./notes.md#the-quick-note-notesquick_noters)):
 a small floating window on its own shortcut (Settings → Shortcuts, unbound
 by default), the tray's New quick note and the Notes view's Quick note, to

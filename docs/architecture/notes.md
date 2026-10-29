@@ -1,6 +1,6 @@
 # Notes
 
-The AI Notepad: the notes store, folders, the Actions engine, notes you can fix (a line's words, the summary, tasks), the quick-note window, and the Notes and Tasks views. Meeting notes' recording and summaries are [meetings.md](./meetings.md).
+The AI Notepad: the notes store, folders, the Actions engine, notes you can fix (a line's words, the summary, tasks), pinned notes, each note's version history, the saved transforms on a note, the quick-note window, and the Notes and Tasks views. Meeting notes' recording and summaries are [meetings.md](./meetings.md).
 
 [Architecture index](./README.md) · [CLAUDE.md](../../CLAUDE.md)
 
@@ -241,6 +241,102 @@ sync, no tabs, one note at a time; 2026-10-28). The page is
   `pipeline.rs` (`Goes::QuickNote`), `input_hook.rs` (the binding);
   `e2e/quick-note.spec.js`.
 
+## Pins, version history and transforms (`notes/pins.rs`, `notes/versions.rs`, `notes/transform.rs`)
+
+2026-10-29 (Wispr Flow's Scratchpad has pins and a version history, and
+transforms in its notes; ideas ported, not code). The Notes view's side is
+under "The Notes view".
+
+- **`notes/pins.rs`** — **pinned notes**: `note_pin(id, pinned)` (the
+  note's menu, its ⋯, the pin on its row) → `yap-notes-changed`;
+  `notes_list` gives them first (`pins::arrange` → `order`, pure: the
+  pinned ones, then the rest, each part newest-updated first as
+  `notes::list` gave it; each item marked `pinned`; `list` now carries
+  `createdTs`). **Stored apart**, in `note_pins.json` (`{pins: [{id,
+  created, ms}]}`), never notes.json: the installed nightly beside a dev
+  build rewrites notes.json without fields it doesn't know, so a pin there
+  would come and go. A pin names the note's id and `createdTs`: one left by
+  a note an older Yap deleted never passes to a new note given its id
+  (`created_ts` only changes as a calendar note is made, before it could be
+  pinned: `calendar::note_for`). Deleted with the note (`forget_extras` →
+  `pins::forget`). Saved through `saving.rs` ("your pinned notes").
+- **`notes/versions.rs`** — **each note's version history**: My thoughts
+  (`content`) and the summary (`enhanced_content`), each version marked how
+  it came — `typed`, `dictated`, `summary` (Yap's: the action plan,
+  Update), `action` (an Action, by name), `transform` (by name), `chat`
+  (Chat's note tools), `restored` (from version n, or "Yap's summary"),
+  `edited` (another way: the local API, a speaker named in the summary) and
+  `earlier` (what the note said before its first version, or a change Yap
+  didn't see). **Recorded where notes change**: `notes::modify`,
+  `modify_quietly`, `modify_or_remove`, `update` and `set_enhanced` take
+  the two texts before (`Before`) and call `versions::noted` after, under
+  the store's lock, so versions follow the changes in order whoever made
+  them. How: the thread says (`versions::by(How, f)`: `note_update` with
+  `how` "dictated", else typed; `note_summary_update` typed; `run_enhance`
+  summary or action; `note_summary_restore`; Chat's `update_note` and
+  `edit_note`; transforms; restores), else the entry point's fallback
+  (`edited`; `typed` for `modify_or_remove`, the quick note's saves). A
+  change of ticks alone is no version (`tasks::same_but_ticks`). **Folding**
+  (`apply`, pure): a save of the same field, kind (typed, dictated, edited)
+  and name as the newest version, within 10 minutes of that version's first
+  save (`FOLD_MS`), becomes it (`sinceMs`..`ms`); Yap's writing, a
+  transform, Chat and a restore never fold. **50 kept** per note (`KEEP`),
+  the oldest going first; a number (`n`) is never given twice (`next`).
+  **Stored** in `note-versions/<id>.json` (`{note, created, next,
+  versions}`): loaded when the note first changes or its history opens, the
+  notes used last kept in memory (`Cache`, in the store, `serde(skip)`),
+  written once the store's lock is let go, the newest snapshot per file and
+  never an older one over it (`write_pending`; a failed write kept and
+  written with the next, "your notes' history"); a file whose `created`
+  isn't the note's is another note's, and ignored. **Restore**
+  (`note_version_restore(id, n, origin)` → `{field, text, previous}`): the
+  text back in its field — a summary with today's ticks carried
+  (`carry_ticks`), Yap's again if it's `summary_ai`, else the person's
+  (`apply_summary_edit`) — as a `restored` version; `previous`
+  (`undo_target`: the field's version before the newest) is what the
+  toast's Undo restores. `note_versions(id)` lists them newest first, the
+  newest of each field `current` when it's what the note holds. Deleted
+  with the note (`forget_extras` → `versions::forget`: memory and file).
+  **Transcript retention** (`retention.rs`): when a meeting's transcript
+  goes after its days, its **summary's** earlier versions go too
+  (`drop_summaries`) — Yap's writing from what was said, like the rolling
+  digests that go with it; My thoughts' versions stay, as My thoughts does;
+  the summary as it is stays in the note.
+  **For other parts of Yap** (meeting chat chips, Skills): a change through
+  `notes::modify` or `note_edits::write_summary` is recorded already; wrap it
+  in `versions::by(How::named(kind::ACTION, "Make it longer"), || …)` to
+  name it, and undo it with `versions::restore(id, n)`, `n` from
+  `versions::undo_target(id, Field::Summary)`.
+- **`notes/transform.rs`** — **the saved transforms on a note**
+  (`dictation/transforms.rs`, Settings → Commands → Transforms):
+  `note_transforms` → `[{id, name}]`; `note_transform(id, transform, field:
+  "notes" | "summary", selection?: {start, end, text} (UTF-16 offsets, as a
+  text box gives them), origin)` → `{name, outcome: replaced | unchanged |
+  moved, text, start, end, result, previous}`. The Commands scope's model
+  (`pipeline::commands_model`: on this PC — the call wakes it — or a cloud
+  provider), `llm::TRANSFORM_BASE_PROMPT` with the transform's instruction,
+  `clean_output` (net: Notes; usage: Transforms); no model or no key said
+  plainly. In place under the store's lock (`put_in_place`, pure: over the
+  selection if it still holds the text, else the one place it is now, its
+  spaces kept; the whole text only while it's what was sent; else `moved`:
+  nothing replaced, the result handed back to copy), as a `transform`
+  version, so Version history or Undo (`previous`) takes it back. A summary
+  transformed is the person's (`apply_summary_edit`). Every window follows
+  (`yap-note-changed`; the caller shows the result itself). **The meeting
+  notepad's My thoughts and the quick note** can reuse it as it is: call
+  `note_transform` with their note's id, `field` "notes" and their box's
+  selection, show the returned `text` with `start`..`end` selected, and
+  offer Undo with `note_version_restore(previous)`; `views/notes/
+  noteMenus.js` (`transformItem`, `selectionMenu`) builds the menus over any
+  state with `transforms`, `transforming` and `runTransform`.
+- **An older Yap on the same data** never opens `note-versions/` or
+  `note_pins.json`: its notes list unpinned, with no history, and its saves
+  of notes.json change neither. An edit it makes shows here as an `earlier`
+  version at the next change. Unit-tested (folding, the ten minutes, the
+  50, a tick, `earlier`, restore and Undo, deletion with the note on disk,
+  a stale file, retention, the pinned order, a pin deleted with its note,
+  UTF-16 offsets, `put_in_place`); `e2e/notes-history.spec.js`.
+
 ## Notes you can fix (`notes/note_edits.rs`, `notes/tasks.rs`)
 
 Guide: [`docs/meetings.md`](../meetings.md#fixing-the-notes) (Wispr Flow's
@@ -365,6 +461,31 @@ menus), `NoteEditor` (title, tabs, the run line, the raw note) with
 `NoteTranscript` (the transcript box) and `NoteChat` (the thread, helpers,
 the Ask bar) with `ActionPicker`; `ActionManager`; `noteFormat.js` (titles,
 dates). [frontend.md](./frontend.md#the-folder-layout-2026-10-24).
+
+- **Pins, history, transforms** (2026-10-29; `noteMenus.js` builds the
+  items): a note's row in the list has a **pin** (shown on hover, lit when
+  pinned; a pin mark before a pinned note's title), **Pin / Unpin** in its
+  menu after Move to ▸, and **Version history…** after Export…. The open
+  note's **⋯** (after Export in the chip row, `NoteMeta`): Pin, **Transform
+  ▸** ("Transform selection" while text is selected in My thoughts — the ⋯
+  never takes the focus from the box —, else "Transform note", or
+  "Transform summary" on the Summary tab; the transforms, then Manage
+  transforms… → Settings → Commands), Version history…, Copy as Markdown,
+  Export…. **A right-click (or Shift+F10) on text selected** in My thoughts
+  or the summary's edit box: Transform selection ▸, Cut, Copy, Select all
+  (the box's own commands, so Ctrl+Z undoes them); with nothing selected,
+  the box's own menu (spelling, Paste). While a transform runs its box is
+  read-only with "Polish…" over it; done: the result in place and
+  selected, "Polish ✓ · Undo"; no model: "Polish didn't work" with Open
+  Language Models. **Version history** (`VersionHistory.svelte`): the
+  versions newest first (how, My thoughts or Summary, when — a folded one
+  "14:02–14:09" —, Current), ↑ ↓ through them; the preview marks **What it
+  changed** (against the version before) or **Compared with now** (what a
+  restore takes out and puts back), word by word with capitals and
+  punctuation (`wordDiff(a, b, {exact: true})`); **Restore this version**
+  closes it, and the toast's Undo restores the one before. A dictation
+  pasted into My thoughts saves with `how: 'dictated'` (a paste within 15 s
+  of `yap-transcript`).
 
 - **`NotesView.svelte`** = the AI Notepad (OpenWhispr
   sidebar port: **New note / Quick note / Search notes / Actions** rows —

@@ -230,9 +230,11 @@ test('a note row: Move to, Copy as Markdown, Delete…; a recording meeting stop
   await expect(menu(main).getByRole('menuitem')).toHaveText([
     'Rename',
     'Move to',
+    'Pin',
     'Read aloud',
     'Copy as Markdown',
     'Export…',
+    'Version history…',
     'Delete…',
   ]);
   // Move to ▸: the folders, this one ticked.

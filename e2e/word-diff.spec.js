@@ -28,6 +28,15 @@ test('words swapped: what was said struck, what the AI wrote marked, each run on
   expect(added.changes).toBe(1);
 });
 
+test('exact: capitals and punctuation are changes too (a note version, as "Fix grammar only" makes them)', () => {
+  const d = wordDiff('send it now', 'Send it now.', { exact: true });
+  expect(show(d)).toBe('[-send-] {+Send+} it [-now-] {+now.+}');
+  expect(d.changes).toBe(2);
+  expect(wordDiff('Send it now.', 'Send it now.', { exact: true }).changes).toBe(0);
+  // Not exact (Home's AI edits): no change.
+  expect(wordDiff('send it now', 'Send it now.').changes).toBe(0);
+});
+
 test('capitals and punctuation alone are no change', () => {
   for (const [said, cleaned] of [
     ['send it now', 'Send it now.'],

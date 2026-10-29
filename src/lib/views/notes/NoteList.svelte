@@ -2,15 +2,17 @@
   // The Notes view's list pane (OpenWhispr's sidebar): New note, Quick
   // note (the quick-note window, notes/quick_note.rs), Search notes,
   // Actions; the folders (renamed in place, their right-click and ⋯
-  // menus: Rename, Delete…); the active folder's notes, newest first, each
-  // with its menu (Rename, Move to ▸, Read aloud, Copy as Markdown,
-  // Export…, Transcribe again…, Delete…). Every delete asks first.
+  // menus: Rename, Delete…); the active folder's notes, pinned ones first
+  // (notes/pins.rs, a pin on the row), then newest first, each with its menu
+  // (Rename, Move to ▸, Pin, Read aloud, Copy as Markdown, Export…, Version
+  // history…, Transcribe again…, Delete…). Every delete asks first.
   import { invoke } from '@tauri-apps/api/core';
   import { toast } from '../../ui/toast.svelte.js';
   import { openContextMenu, menuKey, menuOpenFor, askConfirm, devInspect } from '../../ui/contextMenu.svelte.js';
   import { showSaveError } from '../../notices/saveErrors.js';
   import { refreshAudio, cantTranscribeAgain, askTranscribeAgain, cantFindSpeakers, findSpeakers, cantExportAudio, exportAudio } from '../../stores/meetingAudio.svelte.js';
   import { displayTitle, relTime, dateOf } from './noteFormat.js';
+  import { pinItem, historyItem } from './noteMenus.js';
 
   /** `notes`: the view's state (notesState.svelte.js). */
   let { notes } = $props();
@@ -187,12 +189,16 @@
             onselect: () => notes.moveToFolder(f, n.id),
           })),
         },
+        // First in its folder (notes/pins.rs).
+        pinItem(notes, n.id),
         { separator: true },
         notes.readingNote(n.id)
           ? { label: 'Stop reading', icon: 'stop', onselect: () => notes.readNote(n.id) }
           : { label: 'Read aloud', icon: 'play', onselect: () => notes.readNote(n.id) },
         { label: 'Copy as Markdown', icon: 'copy', onselect: () => notes.copyNoteMarkdown(n.id) },
         { label: 'Export…', icon: 'download', onselect: () => notes.exportNote(n.id) },
+        // Its earlier versions (notes/versions.rs).
+        historyItem(notes, n.id, itemEls[n.id]),
         // A meeting kept on disk (meetings/meeting_audio.rs): on the speech model in use now.
         ...(n.noteType === 'meeting'
           ? [
@@ -396,6 +402,7 @@
         >
           <div class="itembody">
             <p class="ititle">
+              {#if n.pinned}<svg class="pinmark" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" aria-label="Pinned" role="img"><path d="M12 17v5" fill="none" /><path d="M9 3h6l-1 6 4 4v2H6v-2l4-4z" /></svg>{/if}
               <span class="ittext">{displayTitle(n)}</span>
               {#if n.stale}<span class="staledot" title="Your notes changed since this summary"></span>{/if}
               <span class="reltime">{relTime(n.updatedTs)}</span>
@@ -405,6 +412,20 @@
               {#if n.hasEnhanced}<span class="enhtag">summary</span>{:else}{dateOf(n.updatedTs)}{/if}
             </p>
           </div>
+          <!-- Pin it first in its folder (notes/pins.rs), or take the pin out. -->
+          <button
+            class="more pin"
+            class:pinned={n.pinned}
+            title={n.pinned ? 'Unpin' : 'Pin to the top'}
+            aria-label={n.pinned ? `Unpin ${displayTitle(n)}` : `Pin ${displayTitle(n)}`}
+            aria-pressed={!!n.pinned}
+            onclick={(e) => {
+              e.stopPropagation();
+              notes.setPinned(n.id, !n.pinned);
+            }}
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 17v5" /><path d="M9 3h6l-1 6 4 4v2H6v-2l4-4z" /></svg>
+          </button>
           <button
             class="more"
             title="More"
@@ -689,6 +710,16 @@
   }
   .item.menuopen {
     background: var(--yap-s2);
+  }
+  /* A pinned note: a pin before its title (and the row's pin button lit). */
+  .pinmark {
+    flex: 0 0 auto;
+    width: 11px;
+    height: 11px;
+    color: var(--yap-primary);
+  }
+  .more.pin.pinned {
+    color: var(--yap-primary);
   }
   .item.active.menuopen {
     background: var(--yap-primary-wash);
