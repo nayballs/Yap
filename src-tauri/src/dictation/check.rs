@@ -482,6 +482,7 @@ mod tests {
             audio: audio.map(str::to_string),
             status: status.map(str::to_string),
             error: None,
+            secs: None,
         }
     }
 

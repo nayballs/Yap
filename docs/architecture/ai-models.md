@@ -184,7 +184,7 @@ The language-model side: the OpenAI-compatible client and its prompts, the on-de
   s."), not as a raw `HTTP 429` body. A 400 about the temperature is asked
   again without one; a 400 about reasoning on a call with tools (OpenAI's
   GPT-6 take tools on Chat Completions only with reasoning off) again with
-  `reasoning_effort: "none"`, once each. **A strict chat format**
+  `reasoning_effort: "none"`, once each (also over Think's `"high"`, `chat/think.rs`). **A strict chat format**
   (2026-10-27, `format_refused`: llama.cpp's HTTP 400 "Unable to generate
   parser for this template", the template's `raise_exception(` in it —
   Gemma 2's "Conversation roles must alternate") is asked again with the
@@ -383,7 +383,9 @@ The language-model side: the OpenAI-compatible client and its prompts, the on-de
   curated entry's `default` = the bundled file, `needs_gpu` = only recommended
   with a card. **One server set-up** for the sidecar and the evaluations
   (`server_args`): `-ngl 999 -c <context>`, **`--reasoning off`** (no thinking for
-  any model: Qwen3.5 loops and times out with it on), **`--cache-ram 0`**
+  any model: Qwen3.5 loops and times out with it on; Chat's **Think** turns it on for one
+  request, without a restart: `chat_template_kwargs` and a 1,500-token
+  `thinking_budget_tokens`, chat-and-assistant.md `chat/think.rs`), **`--cache-ram 0`**
   (llama.cpp's host prompt cache off: with it on, a dictation's cleanup right
   after a Chat turn took 1.3–1.4 s instead of 0.13 s on the 1.5B — the slow
   copy back of the saved prompt — and a 4B server peaked at 6.7 GB on the

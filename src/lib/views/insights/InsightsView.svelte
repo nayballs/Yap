@@ -1,20 +1,27 @@
 <script>
-  // Insights — the stats dashboard promoted out of Settings → History into its
-  // own surface (Wispr "Insights"): serif hero number, stat grid, the 30-day
-  // activity heatmap, and where you dictate most (top apps from history).
-  // Then AI usage (AiUsageCard: every AI call's tokens, by model and
-  // feature, counted on this PC); `focus` 'ai-usage' brings it into view
-  // (Chat's context ring's "See all").
+  // Insights — the stats dashboard (Wispr "Insights"), counted on this PC in
+  // dictation_stats.json (dictation/stats.rs): numbers only, kept when history
+  // is cleared, kept 24 hours or turned off. The serif hero number with the
+  // time saved and how it's worked out (this person's own words a minute
+  // once Yap has timed a few dictations), a stat grid (today, speed, the day
+  // and week streaks…), the fixes (AI cleanup's, the dictionary's, this
+  // month against the same days of last month), the 30-day activity and
+  // where you dictate most; Share makes a picture of the numbers
+  // (shareCard.js). Then AI usage (AiUsageCard: every AI call's tokens,
+  // by model and feature, counted on this PC); `focus` 'ai-usage' brings it
+  // into view (Chat's context ring's "See all").
   import { invoke } from '@tauri-apps/api/core';
   import { listen } from '@tauri-apps/api/event';
   import { onMount } from 'svelte';
   import { appLabel } from '../../core/appNames.js';
+  import { openContextMenu } from '../../ui/contextMenu.svelte.js';
+  import { toast } from '../../ui/toast.svelte.js';
   import AiUsageCard from './AiUsageCard.svelte';
+  import { statsCardPng } from './shareCard.js';
 
   let { focus = null, onfocused = null } = $props();
 
   let stats = $state(null);
-  let entries = $state([]);
   // The stats are in (the AI usage card comes into view after them).
   let loaded = $state(false);
 
@@ -24,20 +31,26 @@
     } catch {
       stats = null;
     }
-    try {
-      entries = (await invoke('get_history', { limit: 500 })) || [];
-    } catch {
-      entries = [];
-    }
     loaded = true;
   }
 
   onMount(() => {
     refresh();
-    // After the history write (see HomeView): `yap-transcript` comes first.
-    let un;
-    listen('yap-history-changed', () => refresh()).then((u) => (un = u));
-    return () => un && un();
+    // A dictation counted (`yap-stats-changed`, history kept or not), or
+    // history changed: re-pull, once for the two.
+    let queued = false;
+    const soon = () => {
+      if (queued) return;
+      queued = true;
+      setTimeout(() => {
+        queued = false;
+        refresh();
+      }, 60);
+    };
+    const uns = [];
+    listen('yap-stats-changed', soon).then((u) => uns.push(u));
+    listen('yap-history-changed', soon).then((u) => uns.push(u));
+    return () => uns.forEach((u) => u && u());
   });
 
   function fmtNum(n) {
@@ -56,14 +69,10 @@
     const t = words / Math.max(1, max);
     return t > 0.75 ? 4 : t > 0.5 ? 3 : t > 0.25 ? 2 : 1;
   }
-  // Day-numbers are UTC (unix secs / 86400, same trick as the backend).
-  function activityDayLabel(day) {
-    return new Date((day || 0) * 86400000).toLocaleDateString(undefined, {
-      timeZone: 'UTC',
-      weekday: 'short',
-      month: 'short',
-      day: 'numeric',
-    });
+  /** A day as the stats write it ("2026-10-29"), on the PC's calendar. */
+  const dayOf = (date) => new Date(`${date}T12:00:00`);
+  function activityDayLabel(date) {
+    return dayOf(date).toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
   }
 
   const avgWords = $derived.by(() => {
@@ -72,14 +81,66 @@
     return Math.round((stats?.totalWords ?? 0) / t);
   });
 
-  // Where you dictate most: words summed per focused app, top 5.
+  // Since when: "October 2026".
+  const since = $derived(stats?.since ? dayOf(stats.since).toLocaleDateString(undefined, { month: 'long', year: 'numeric' }) : '');
+
+  // How "time saved" is worked out, in a sentence.
+  const how = $derived.by(() => {
+    const t = stats?.timeSaved;
+    if (!t) return '';
+    if (t.measured) {
+      const n = stats.timedDictations ?? 0;
+      return `You talk at ${fmtNum(t.speakingWpm)} words a minute, timed over ${fmtNum(n)} ${n === 1 ? 'dictation' : 'dictations'}; most people type about ${t.typingWpm}.`;
+    }
+    return `Worked out at ${t.speakingWpm} words a minute for talking and ${t.typingWpm} for typing, until Yap has timed a few of your dictations.`;
+  });
+
+  // This month's fixes against the same days of last month.
+  const change = $derived.by(() => {
+    const p = stats?.fixes?.changePct;
+    if (p == null) return 'nothing to compare yet';
+    if (p === 0) return 'the same as this time last month';
+    return `${p > 0 ? 'up' : 'down'} ${Math.abs(p)}% on this time last month`;
+  });
+
+  // ---- Share: the numbers as a picture (shareCard.js; dictation/stats/share.rs) ----
+  let sharing = $state(false);
+  async function shareAs(how) {
+    if (sharing) return;
+    sharing = true;
+    try {
+      const png = await statsCardPng(stats);
+      if (how === 'copy') {
+        await invoke('insights_card_copy', png);
+        toast({ title: 'Copied your stats as a picture', description: 'Numbers only. Paste it anywhere.', variant: 'success', chip: 'Insights' });
+      } else if (await invoke('insights_card_save', png)) {
+        toast({ title: 'Saved your stats as a picture', variant: 'success', chip: 'Insights' });
+      }
+    } catch (err) {
+      toast({ title: "Couldn't make the picture", description: String(err), variant: 'destructive' });
+    } finally {
+      sharing = false;
+    }
+  }
+  function shareMenu(e) {
+    openContextMenu(
+      e,
+      [
+        { label: 'Copy as a picture', icon: 'copy', onselect: () => shareAs('copy') },
+        { label: 'Save as a picture…', icon: 'download', onselect: () => shareAs('save') },
+      ],
+      { label: 'Share' }
+    );
+  }
+
+  // Where you dictate most: words per app (by the app's own name:
+  // "ms-teams.exe" and "Teams.exe" are one Teams), top 5.
   const topApps = $derived.by(() => {
     const byApp = new Map();
-    for (const e of entries) {
-      // By the app's own name: "ms-teams.exe" and "Teams.exe" are one Teams.
-      const app = appLabel(e.app);
+    for (const a of stats?.topApps || []) {
+      const app = appLabel(a.app);
       if (!app) continue;
-      byApp.set(app, (byApp.get(app) || 0) + (e.words || 0));
+      byApp.set(app, (byApp.get(app) || 0) + (a.words || 0));
     }
     return [...byApp.entries()]
       .map(([app, words]) => ({ app, words }))
@@ -91,17 +152,27 @@
 <div class="insights">
   <div class="wrap">
     <div class="head">
-      <h1>Insights</h1>
-      <p>How you dictate — computed from your local history, nothing leaves this PC.</p>
+      <div class="titlerow">
+        <h1>Insights</h1>
+        {#if stats && (stats.totalTranscriptions ?? 0) > 0}
+          <!-- Your numbers as a picture: never a word you said. -->
+          <button class="share" data-more disabled={sharing} onclick={shareMenu} aria-haspopup="menu" title="Share your stats as a picture">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12v7a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-7" /><path d="M16 6l-4-4-4 4" /><path d="M12 2v13" /></svg>
+            {sharing ? 'Making it…' : 'Share'}
+          </button>
+        {/if}
+      </div>
+      <p>How you dictate, counted on this PC. Numbers only, never what you said; they stay when you clear your history.</p>
     </div>
 
     {#if stats && (stats.totalTranscriptions ?? 0) > 0}
       <div class="heroCard">
         <div class="heroNum">{fmtNum(stats.totalWords)}</div>
         <div class="heroLbl">
-          words dictated all-time — about <strong>{fmtMinutes(stats.timeSavedMinutes)}</strong>
-          saved vs typing (you speak ~150 wpm, most people type ~40)
+          words dictated{since ? ` since ${since}` : ''}, about <strong>{fmtMinutes(stats.timeSaved?.minutes ?? stats.timeSavedMinutes)}</strong>
+          saved compared with typing.
         </div>
+        <p class="how">{how}</p>
       </div>
 
       <div class="grid">
@@ -109,9 +180,17 @@
           <div class="num">{fmtNum(stats.today?.words)}</div>
           <div class="lbl">words today</div>
         </div>
+        <div class="card" title={stats.wpm == null ? 'Measured once Yap has timed a few of your dictations' : 'Over the time you spent talking'}>
+          <div class="num">{stats.wpm == null ? '–' : fmtNum(stats.wpm)}</div>
+          <div class="lbl">words a minute</div>
+        </div>
         <div class="card">
           <div class="num">{fmtNum(stats.streakDays)}</div>
           <div class="lbl">day streak</div>
+        </div>
+        <div class="card">
+          <div class="num">{fmtNum(stats.weekStreak)}</div>
+          <div class="lbl">week streak · longest {fmtNum(stats.longestWeekStreak)}</div>
         </div>
         <div class="card">
           <div class="num">{fmtNum(stats.totalTranscriptions)}</div>
@@ -123,18 +202,38 @@
         </div>
       </div>
 
+      {#if stats.fixes}
+        <div class="section">
+          <h2>Fixes</h2>
+          <div class="grid">
+            <div class="card">
+              <div class="num">{fmtNum(stats.fixes.cleanupWords)}</div>
+              <div class="lbl">words AI cleanup changed</div>
+            </div>
+            <div class="card">
+              <div class="num">{fmtNum(stats.fixes.dictionaryFixes)}</div>
+              <div class="lbl">words your dictionary fixed</div>
+            </div>
+            <div class="card">
+              <div class="num">{fmtNum(stats.fixes.thisMonth)}</div>
+              <div class="lbl">fixes this month, {change}</div>
+            </div>
+          </div>
+        </div>
+      {/if}
+
       {#if stats.activity?.length}
         {@const maxW = Math.max(1, ...stats.activity.map((d) => d.words))}
-        {@const todayDay = stats.activity[stats.activity.length - 1]?.day}
+        {@const todayDate = stats.activity[stats.activity.length - 1]?.date}
         <div class="section">
           <h2>Last 30 days</h2>
           <div class="activity">
-            {#each stats.activity as d}
+            {#each stats.activity as d (d.date)}
               <span
                 class="acell"
-                class:today={d.day === todayDay}
+                class:today={d.date === todayDate}
                 data-level={activityLevel(d.words, maxW)}
-                title="{activityDayLabel(d.day)} · {d.words} {d.words === 1 ? 'word' : 'words'}"
+                title="{activityDayLabel(d.date)} · {d.words} {d.words === 1 ? 'word' : 'words'}"
               ></span>
             {/each}
           </div>
@@ -210,6 +309,37 @@
     font-size: 13px;
     color: var(--yap-muted);
   }
+  .titlerow {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+  }
+  .share {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 12px;
+    border: 1px solid var(--yap-border);
+    border-radius: var(--yap-r);
+    background: var(--yap-s2);
+    font: inherit;
+    font-size: 12.5px;
+    font-weight: 600;
+    color: var(--yap-fg);
+    cursor: pointer;
+  }
+  .share:hover:not(:disabled) {
+    border-color: var(--yap-border-hover);
+  }
+  .share:disabled {
+    opacity: 0.6;
+    cursor: default;
+  }
+  .share svg {
+    width: 15px;
+    height: 15px;
+  }
 
   .heroCard {
     padding: 26px 28px;
@@ -234,12 +364,22 @@
     color: var(--yap-muted);
     max-width: 52ch;
   }
+  .how {
+    margin: 8px 0 0;
+    font-size: 12px;
+    line-height: 1.55;
+    color: var(--yap-muted-70);
+    max-width: 60ch;
+  }
 
   .grid {
     display: grid;
-    grid-template-columns: repeat(4, 1fr);
+    grid-template-columns: repeat(3, 1fr);
     gap: 12px;
     margin-bottom: 26px;
+  }
+  .section .grid {
+    margin-bottom: 0;
   }
   .card {
     padding: 16px 18px;

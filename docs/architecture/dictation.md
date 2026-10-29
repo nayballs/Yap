@@ -1233,13 +1233,74 @@ to **Run again** from Home.
   land — `record_with`; `cancelled`: the person cancelled it, kept with its
   audio — `record_cancelled`, taken back out by Undo, `forget_audio`) and
   `error`; `rerun_result` (Run again, Home's Transcribe) fixes it up. The
-  list says `keep` for one whose audio is kept past its day.
+  list says `keep` for one whose audio is kept past its day. Since
+  2026-10-29 a new entry has **`secs`**, how long it was spoken for (its
+  audio's length, `run_stt` → `Shared::audio_secs`; words a minute, and
+  `recent_dictation_secs` uses it before its estimate from the words; an
+  older Yap's save drops it, which only leaves the entry untimed).
   Failed entries don't count in the stats nor as the last dictation to paste;
   unit tests keep it in memory. Best-effort,
-  gated by `history_enabled`. Derives the stats dashboard (words, time-saved vs
-  typing, day streak, 30-day activity) without a date crate (UTC day-numbers like
-  `ai/usage.rs`). Powers `get_history`/`clear_history`/`get_stats`. Every change
+  gated by `history_enabled`. The stats are no longer derived from it
+  (`stats.rs`, below): it hands them what they haven't counted
+  (`counted_since`). Powers `get_history`/`clear_history`. Every change
   (a dictation or upload saved, an entry deleted from Home or the local API,
   all cleared) emits **`yap-history-changed`** after the write, which Home and
   Insights re-pull on. Not `yap-transcript`: a dictation emits that before it
   pastes and saves, so a re-pull on it could miss the new entry.
+- **`dictation/history/keep.rs`** — **Keep dictation history: always / 24
+  hours / never** (2026-10-29, Wispr Flow's choice; Settings → Privacy &
+  data, a select where the switch was). Two fields: `history_enabled` (off =
+  never, what an older Yap reads) and `history_keep` ("always" | "day" |
+  "never"; "" = never chosen: always, the default — no `migrate_once`).
+  **24 hours** (`sweep`): entries older than a day go with their audio,
+  kept or not (`history::forget_before`; Home hides Keep then), at start,
+  hourly and the moment it's chosen (`on_config_saved`; the page asks first
+  when some would go, with the count, `history_counts`). **Never** keeps no
+  new dictation and leaves what's there, as the switch did. The stats stay
+  whichever. An older Yap's save drops `history_keep`, and an older Yap
+  never sweeps: the choice is copied into `dictation_stats.json`
+  (`set_keep_choice`, at every change and sweep) and `restore` brings "day"
+  back at the next start when config.json lost it with history still on.
+- **`dictation/stats.rs`** (+ `stats/`: `days.rs`, `word_diff.rs`,
+  `share.rs`) — **the stats that outlast history** (2026-10-29, after
+  Wispr Flow's Insights): `<data>/dictation_stats.json`, a row a day
+  (the PC's own date) with numbers only — words, dictations, the timed
+  ones' words and seconds, words per app (exe names), the words AI cleanup
+  changed (`word_diff.rs`: `core/wordDiff.js`'s twin, the larger of the
+  words out and in for each change) and the dictionary's fixes
+  (`dict_usage::fixed_in`: a dictionary word written its way that was
+  heard otherwise). `dictated` counts every dictation delivered — pasted
+  or not, into Chat or the quick note — **whether or not history keeps
+  it**, and a failed or cancelled one when Run again / Transcribe gets its
+  words (on the day it was said); never an Upload, a Command or the Voice
+  Assistant. The first start counts the history already there, and any
+  start what an older Yap saved since (`countedTo`; `init` runs before the
+  pipeline, so nothing counts twice); milestones passed that way are
+  marked, never said. `summary` (`get_stats`, `home_snapshot`): totals,
+  today, the day streak, **week streaks** (now and longest; the week from
+  Windows' first day of the week, `days::first_weekday`), the 30 days'
+  activity by date, **words a minute** over speaking time once 3
+  dictations and 30 s are timed (`measured_wpm`; the untimed are left
+  out), **time saved** at that speed (else the assumed 150) against
+  typing at 40, the fixes with this month so far against the same days of
+  last month as a %, the top apps and the next milestone. Also kept here:
+  the word milestone said last, **welcome back** (`welcome`: 14 days
+  without a dictation, shown while away or for 2 days after the return,
+  once per gap — `welcome_back_dismiss`), and Keep history's copy. Emits
+  **`yap-stats-changed`** after each count (Home and Insights re-pull:
+  history may be off). `clear` is Reset app's (`privacy/reset.rs`: it goes
+  with the usage stats); Download your data has it. `share.rs`: Insights'
+  **Share** — the page draws the numbers on a canvas (`shareCard.js`, never a
+  word said or an app) and hands the PNG in the call's body: Copy as Snip
+  copies (`snip/copy_save.rs`, out of Win+V history), Save… asks with
+  Windows' dialog ("Yap stats 2026-10-29.png"; a test run writes
+  `e2e-insights-card.png` in the data folder). Debug-only `e2e_stats_set`.
+- **`dictation/milestones.rs`** — **word milestones** (2026-10-29):
+  "You've dictated 1,000 words" at 100, 500, 1,000, 2,000 and 5,000 words,
+  every 5,000 to 50,000, every 25,000 to 250,000, then 300,000 and every
+  100,000 (`next_after`); once each (the highest said is kept with the
+  stats). Through the notice policy (kind `milestone`: a tip "Show tips"
+  switches off, after the dictation, never in a meeting, gone unseen after
+  a minute): the main window's toast (`yap-milestone`,
+  `notices/milestones.js`) or a bar card, both with See Insights. Its own
+  module, apart from `coaching.rs`.

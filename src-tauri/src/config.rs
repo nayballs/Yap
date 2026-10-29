@@ -777,6 +777,24 @@ pub struct YapConfig {
     /// lost (`assistant::card_on_bar`). On by default.
     #[serde(default = "default_true")]
     pub assistant_answer_card: bool,
+    /// "Let the Voice Assistant see the window in front when you ask about
+    /// it" (Settings → Voice Assistant; `chat/assistant/screen.rs`): a
+    /// spoken question about the screen ("what's this error?") takes a
+    /// screenshot of the window that was in front when the shortcut was
+    /// pressed, every Yap window left out. On by default, for a model on
+    /// this PC: the picture never leaves it. An older Yap drops the field on
+    /// its save and it's on again (an older Yap never takes the window).
+    #[serde(default = "default_true")]
+    pub assistant_screen: bool,
+    /// "…with cloud models too": the screenshot (or its text) goes to the
+    /// cloud provider Chat's model is on. Off by default; asked once, the
+    /// first time a question about the screen meets a cloud model
+    /// (`assistant_screen_asked`). An older Yap drops it: off again.
+    #[serde(default)]
+    pub assistant_screen_cloud: bool,
+    /// The one ask about the cloud has been shown.
+    #[serde(default)]
+    pub assistant_screen_asked: bool,
     /// "Read aloud" (Settings → Voice Assistant → Spoken replies): how much
     /// of an answer Yap reads out by itself — the assistant shortcut's and
     /// Chat's voice replies — "short" (a sentence or two), "30s", "1m" (the
@@ -868,6 +886,12 @@ pub struct YapConfig {
     /// only on this machine; can be cleared from Settings. On by default.
     #[serde(default = "default_true")]
     pub history_enabled: bool,
+    /// "Keep history" (Settings → Privacy & data): "always", "day" (24
+    /// hours) or "never" (which also turns `history_enabled` off: what an
+    /// older Yap reads). "" = never chosen: always. An older Yap's save
+    /// drops it; `dictation/history/keep.rs` brings "day" back.
+    #[serde(default)]
+    pub history_keep: String,
 
     /// Run the local API bridge (Integrations): a token-authenticated loopback
     /// HTTP server exposing notes/folders/history to CLIs and coding agents
@@ -1310,6 +1334,9 @@ impl Default for YapConfig {
             speak_when: default_speak_when(),
             talk_back_hands_free: true,
             assistant_answer_card: true,
+            assistant_screen: true,
+            assistant_screen_cloud: false,
+            assistant_screen_asked: false,
             spoken_length: default_spoken_length(),
             open_apps: true,
             apps_blocked: Vec::new(),
@@ -1328,6 +1355,7 @@ impl Default for YapConfig {
             tts_cloud: std::collections::HashMap::new(),
             streaming_partials: true,
             history_enabled: true,
+            history_keep: String::new(),
             bridge_enabled: true,
             mcp_allow_writes: false,
             meeting_open_notepad: true,

@@ -135,7 +135,13 @@
   Privacy & data, off: a sentence or two before the cursor to a cleanup
   model off this PC; one on this PC gets it whenever `smart_spacing` reads
   it; `ai/cleanup_context.rs`), streaming_partials,
-  history_enabled, update_checks_enabled, dictionary_fuzzy, learn_words
+  history_enabled + history_keep (2026-10-29, "Keep dictation history",
+  Privacy & data: "always", "day" = 24 hours, "never" = history_enabled
+  off; "" = never chosen, so always — the default, no `migrate_once` step
+  as no saved value changes; an older Yap reads only history_enabled and
+  drops history_keep on its save: a copy kept in
+  `<data>/dictation_stats.json` brings "day" back at the next start while
+  history is still on; `dictation/history/keep.rs`), update_checks_enabled, dictionary_fuzzy, learn_words
   ("Suggest words from your corrections", default on, `dictionary/learn.rs`),
   show_tips ("Show tips", default on: coaching hints and nudges;
   `notices/notice.rs`), the meeting
@@ -203,6 +209,13 @@
   Windows voice from tts_voice to tts_windows_voice and "windows" (never a
   choice before) to "kokoro"), the Voice Assistant's assistant_hotkey (""
   = unbound, the default) + assistant_answer_card (true) +
+  assistant_screen ("Let the Voice Assistant see the window in front when
+  you ask about it", true) + assistant_screen_cloud ("With cloud models
+  too", false) + assistant_screen_asked (the one ask about the cloud shown,
+  false) — 2026-10-29, `chat/assistant/screen.rs`; new fields only: an
+  older Yap sharing the folder drops them on its save, so the first comes
+  back on (an older Yap never takes the window anyway), the cloud one off
+  and the ask may come once more — no `migrate_once` step +
   (assistant_stop_on_pause, "Stop listening when I pause", removed
   2026-10-25: an older Yap still reads it, default on), Read aloud's read_hotkey ("" = unbound, the
   default; `voice/read_aloud.rs`: the selection in any app read aloud, its speed
@@ -437,7 +450,19 @@
   (Windows' OCR, `snip/ocr.rs`) keeps it marked `asText`. A snip copied or
   saved from the overlay keeps nothing here; a save goes where the Save
   dialog says, in the folder used last (`snip_save_dir`).
-- History: `%APPDATA%/yap/history.json` (local-only; cleared from Settings → Privacy & data → History).
+- History: `%APPDATA%/yap/history.json` (local-only; cleared from Settings → Privacy & data → History,
+  kept always, 24 hours or not at all). Since 2026-10-29 a new entry has `secs`, how long it was
+  spoken for (its audio's length); an older Yap drops it when it saves history, which only leaves
+  that entry untimed: the stats below have it already.
+- Dictation stats: `%APPDATA%/yap/dictation_stats.json` (2026-10-29, `dictation/stats.rs`) — what
+  Home and Insights show, kept whether or not history is: a row a day (`date`, the PC's own;
+  `words`, `dictations`, `timed` / `timedWords` / `speakingSecs` for words a minute, `apps` —
+  words per app's exe name —, `cleanupWords`, `dictionaryFixes`), `countedTo` (history up to there
+  is counted: the first start counts the history already there, a later one what an older Yap
+  saved since), `milestone` (the word milestone said last), `returned` / `welcomed` (Home's
+  welcome back), `historyKeep` (a copy of the setting). Numbers, dates and app names only, never a
+  word said. Clearing history keeps it; Reset app clears it with the other usage stats; Download
+  your data has it as `history/dictation-stats.json`. An older Yap never reads or writes it.
 - Notes: `%APPDATA%/yap/notes.json` — the AI Notepad store (folders, actions,
   participants, meeting transcripts; a meeting's speaker map, with its
   name cards and the "may be one voice / two people" offers and answers:
@@ -459,7 +484,13 @@
   its next save, so it shows in the list again). An answer may keep
   `tokens` (`{prompt, answer, perSecond?}`, 2026-10-25: its last model
   call's counts, for Chat's context ring); an older Yap's save drops it,
-  and the ring estimates instead. A long conversation (or Ask thread) may
+  and the ring estimates instead. An answer thought through (Chat's Think,
+  2026-10-29, `chat/think.rs`) keeps `thinking` (`{text?, ms}`: the model's
+  thinking when it sent it, and how long); a source may be `screen: true`
+  (the window's text the Voice Assistant read on this PC); a question's
+  screenshot may have `source: "window"` (the window in front). New fields
+  only: an older Yap's save drops `thinking` (the answer stays) and
+  `screen` (the chip then opens nothing). A long conversation (or Ask thread) may
   keep `summary` (2026-10-25, `chat/compact.rs`: `{text, upto, after,
   model?, ts}` — what its messages before `upto` said, the count when it
   was written, the model that wrote it), written only when there is one.

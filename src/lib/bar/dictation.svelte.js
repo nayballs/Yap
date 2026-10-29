@@ -55,7 +55,9 @@ export const dictation = $state({
   // the assistant's ("Ask Yap…", "Thinking…", "Speaking…" with ■).
   assistant: 'idle',
   // What the question is about: 'screenshot' after a spoken "snip" (snip.rs:
-  // "Ask about this screenshot…"), else ''.
+  // "Ask about this screenshot…"); 'window' while the window in front is
+  // taken and read (chat/assistant/screen.rs: "Looking at the window…");
+  // else ''.
   askAbout: '',
   // A saved transform (dictation/transforms.rs, `yap-transform`): its name, and
   // 'running' ("Polish…" while the AI works), 'done' ("Polish ✓ · Undo" for
