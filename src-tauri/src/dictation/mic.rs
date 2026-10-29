@@ -251,6 +251,9 @@ pub(crate) struct State {
     last: Mutex<Option<OpenTiming>>,
     /// The running stream's device (its name), if one runs.
     device: Mutex<Option<String>>,
+    /// The running stream's microphone as the tips need it (`mic_tips.rs`):
+    /// its name, endpoint, Bluetooth, its own sample rate.
+    current: Mutex<Option<crate::dictation::mic_tips::MicInfo>>,
 }
 
 /// A snapshot of [`State`] (the test suites' `e2e_mic_status`; debug builds).
@@ -412,6 +415,11 @@ impl Mic {
         self.state.open.load(Ordering::SeqCst)
     }
 
+    /// The microphone a stream is running on now, if one is.
+    pub fn current(&self) -> Option<crate::dictation::mic_tips::MicInfo> {
+        self.state.current.lock().ok().and_then(|c| c.clone())
+    }
+
     #[cfg(debug_assertions)]
     pub fn status(&self) -> Status {
         let s = &self.state;
@@ -446,6 +454,9 @@ struct Running {
     /// without a list to name it).
     endpoint: Option<String>,
     bluetooth: bool,
+    /// The device's own sample rate (Hz): a Bluetooth headset's 8 or 16 kHz
+    /// is its call profile (`mic_tips::hands_free`).
+    rate: u32,
     /// Numbers the streams, so a stale "stopped" is ignored.
     serial: u64,
 }
@@ -695,6 +706,10 @@ impl Owner {
                         tracing::info!(rank, "Microphone: opened one further down the order");
                     }
                     self.running(running);
+                    // The laptop's own mic with its lid closed (`lid.rs`).
+                    if self.holds.dictation {
+                        crate::dictation::lid::tell_if_built_in(Some(target));
+                    }
                     break;
                 }
                 Err(e) => {
@@ -722,6 +737,14 @@ impl Owner {
         if let Ok(mut d) = self.state.device.lock() {
             *d = Some(running.device.clone());
         }
+        if let Ok(mut c) = self.state.current.lock() {
+            *c = Some(crate::dictation::mic_tips::MicInfo {
+                name: running.device.clone(),
+                endpoint: running.endpoint.clone(),
+                bluetooth: running.bluetooth,
+                rate: running.rate,
+            });
+        }
         if let Some(sink) = self.sink.upgrade() {
             sink.opened(&running.device);
         }
@@ -738,6 +761,9 @@ impl Owner {
             self.state.closes.fetch_add(1, Ordering::SeqCst);
             if let Ok(mut d) = self.state.device.lock() {
                 *d = None;
+            }
+            if let Ok(mut c) = self.state.current.lock() {
+                *c = None;
             }
             tracing::info!(device = %device, "Microphone closed: {}", why);
         }
@@ -837,6 +863,7 @@ impl Owner {
             device: dev_name,
             endpoint: target.endpoint().map(|e| e.id.clone()),
             bluetooth,
+            rate: native_rate,
             serial,
         })
     }
@@ -856,6 +883,8 @@ impl Owner {
             device: ep.name.clone(),
             endpoint: Some(ep.id.clone()),
             bluetooth: ep.bluetooth,
+            // A made-up headset is in its call profile, as a real one is.
+            rate: if ep.bluetooth { 16_000 } else { 48_000 },
             serial,
         }
     }
