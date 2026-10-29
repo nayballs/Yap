@@ -577,7 +577,9 @@ The AI Chat surface (conversations, the tool-calling loop and its note tools) an
   or Groq's and OpenRouter's `reasoning`; `stream::Assembler` keeps it out
   of the message, `llm::post_chat_request` hands it to `think::heard`), as
   `{kind: "thinking", text}` events (each step's after the turn's earlier
-  ones, `think::so_far`): "Thinking…" with "Show its thinking" folded under
+  ones, `think::so_far`; only in a turn thinking it through: Groq's gpt-oss
+  sends its reasoning unasked, and any other question shows none of it, as
+  before Think): "Thinking…" with "Show its thinking" folded under
   it, then "Thought for 6 s" folded above the answer (`ChatMessage.svelte`
   `.thought`). Kept with the answer (`ChatMessage.thinking` = `Thought {text,
   ms}`, `chats::set_thinking`; the reply's `thinking`), never sent back to a
