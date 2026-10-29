@@ -216,8 +216,10 @@ Putting a dictation into the app you're in: the clipboard paste and the submit k
   time nothing is put back, so an app reading late gets the dictation,
   never the old clipboard; the promise is kept 5 s more and a read then is
   noted (`Report::late`, "The paste was read late…" in the log), then the
-  text is written out so it outlasts Yap (`WM_RENDERALLFORMATS` writes it
-  out too). Watching the field for the old clipboard instead was
+  text is written out so it outlasts Yap. Yap quitting meanwhile writes it
+  out first (`write_out_now`, from `shutdown_cleanup`: Windows sends no
+  `WM_RENDERALLFORMATS` to a window whose thread is ending, so the text
+  would go with Yap — the `#[ignore]`d round trip shows both). Watching the field for the old clipboard instead was
   rejected: the old clipboard can be anything (an image, files, words
   already in the field) and only some fields can be read. **Terminals**:
   no edit-control check or UI Automation there, so the read is the check —
