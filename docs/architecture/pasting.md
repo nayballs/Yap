@@ -167,8 +167,12 @@ Putting a dictation into the app you're in: the clipboard paste and the submit k
   generic host: python, java, node, cmd, PowerShell, AutoHotkey,
   msedgewebview2…) → `Target`; Yap's own process → `Yap`; anyone else →
   `Other`; no window at all → `Unknown` (Windows Terminal reads on a
-  thread of its own with `OpenClipboard(NULL)`; with no target known,
-  everyone but Yap). **Who gets it** (`answer`, pure): the target and Yap
+  thread of its own with `OpenClipboard(NULL)`, and so does Edge's
+  browser process — the robot, 2026-10-29; with no target known,
+  everyone but Yap). Yap's own reads open the clipboard with no window
+  too: they're told apart by Yap holding the clipboard open then
+  (`clip::yap_holds_it`, one opener at a time) and kept out of the
+  report. **Who gets it** (`answer`, pure): the target and Yap
   always; before the paste keys nobody else — a reader then isn't pasting
   (a clipboard manager reacting to the change; Win+V history and cloud
   sync honour the privacy formats and never ask) and gets nothing, the
@@ -185,11 +189,15 @@ Putting a dictation into the app you're in: the clipboard paste and the submit k
   (the text is no longer only promised: no telling); none → `Nothing`.
   **The verdict** (`combine`, pure, in `inject_text_sync`): a Win32 edit
   control's own check (`PasteCheck`) first — changed → pasted, unchanged
-  for a second → typed, as before; else the target's read → pasted (even
-  where UI Automation said no text box: Discord and Slack move the focus
-  on a paste); "Select a text box first" before and after the keys →
-  `NoTextBox` (looked at 250 ms after the keys unless the target read it
-  by then); `Taken` → pasted; nothing within `Timing::read_within` →
+  for a second → typed, as before; else the target's read, named by its
+  window → pasted (even where UI Automation said no text box: it took it
+  somewhere); "Select a text box first" before and after the keys →
+  `NoTextBox` (looked at again 250 ms after the keys unless the target,
+  named, read it by then) — a nameless read never overrides it: Edge's
+  browser reads the clipboard on any Ctrl+V, a button focused or a page
+  that swallows the key (the robot, 2026-10-29), so in Edge the read says
+  the keys arrived, not that the page took them; then a nameless read →
+  pasted; `Taken` → pasted; nothing within `Timing::read_within` →
   `NotRead`: the text stays (promised) on the clipboard, the person's own
   isn't put back, "Couldn't paste · it's copied, press Ctrl+V". **How
   long** (`timing(exe)`, pure; Wispr Flow's figures): read within 1 s,
@@ -234,11 +242,12 @@ Putting a dictation into the app you're in: the clipboard paste and the submit k
   read refused twice, the target's counted, a nameless one, another app's
   after the keys, ANSI text made from the promise, nobody, a late read, a
   copy before the restore, a background restore, a remote desktop's);
-  robot: `paste-read.real.js` (the pad, a stand-in clipboard manager
-  before and after the keys, an Edge textarea and one that swallows
-  Ctrl+V, Notepad, Windows Terminal, conhost, Claude Code's stand-in in
-  slices, an Electron app and VS Code when present), `paste-late.real.js`
-  (the pad's slow box: read at 0.7 s, at 2 s, never).
+  robot: `paste-read.real.js` (the pad, a stand-in clipboard manager —
+  a program of its own name: one sharing the target's counts as it —
+  before and after the keys, an Edge textarea, Notepad, Windows Terminal,
+  conhost, Claude Code's stand-in in slices, an Electron app and VS Code
+  when present), `paste-late.real.js` (the pad's slow box: read at 0.7 s,
+  at 2 s, never).
 - **`pasting/as_said.rs`** — **"Use what I said"** (2026-10-22; Windows' fluid
   dictation's Revert, TypeWhisper's Restore Raw Transcript): right after a
   dictation AI cleanup changed, swap what Yap pasted for the words as said

@@ -421,7 +421,11 @@ async function launchConsoleCli({ nonce, cwd, title, timeout }) {
  */
 export async function startClipReader({ ms = 6_000, delay = 0 } = {}) {
   compileHelper();
-  const child = spawn(HELPER, ['clipreader', String(ms), String(delay)], { stdio: ['ignore', 'pipe', 'inherit'], windowsHide: true });
+  // A program of its own name: the test pad is yaprobot.exe too, and Yap
+  // takes a reader of the target's own program for the target.
+  const exe = path.join(path.dirname(HELPER), 'yap-clip-reader.exe');
+  if (!fs.existsSync(exe) || fs.statSync(exe).mtimeMs < fs.statSync(HELPER).mtimeMs) fs.copyFileSync(HELPER, exe);
+  const child = spawn(exe, ['clipreader', String(ms), String(delay)], { stdio: ['ignore', 'pipe', 'inherit'], windowsHide: true });
   const lines = readline.createInterface({ input: child.stdout });
   const seen = [];
   let ready;

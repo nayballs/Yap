@@ -803,12 +803,17 @@ the timings, the refocus choice), the real promise on a private window
 station and desktop (`--ignored`: refusals, the target's read, a nameless
 reader, ANSI text made from the promise, nobody, a late read, a copy
 before the restore, a background restore, a remote desktop's), e2e
-(`paste-failures.spec.js`: the notice, once, history). Robot specs written
-and not yet run (`paste-read.real.js`, `paste-late.real.js`,
-`paste-refocus.real.js`: the pad, a stand-in clipboard manager, Edge,
-Notepad, Windows Terminal, conhost, Claude Code's stand-in in slices, the
-pad's slow box, moving the focus mid-dictation; an Electron app and VS
-Code skip unless present — neither is here). Not tried: real Outlook,
+(`paste-failures.spec.js`: the notice, once, history) and robot-tested
+(`paste-read.real.js`: the pad, a stand-in clipboard manager before and
+after the keys, Edge, Windows Terminal, conhost, Claude Code's stand-in in
+slices; `paste-late.real.js`: the pad's slow box at 0.7 s, 2 s, never;
+`paste-refocus.real.js`: a button, another box, an Edge page's button,
+another window; and `paste-safety`, `testpad`, `long-paste` again). The
+robot found Edge's browser reading the clipboard with no window on any
+Ctrl+V — a button focused, a page swallowing the key — so a nameless read
+never overrides "Select a text box first", and in Edge the read can't
+tell a page that ignored the paste. Not run: Notepad (open on this PC),
+an Electron app and VS Code (neither here). Not tried: real Outlook,
 Word, a remote desktop, Discord/Slack's focus-moving paste.
 **Names as written on screen** (`dictionary/screen_terms.rs`, 2026-10-22;
 [dictionary.md](./dictionary.md)): the target window's visible text read
@@ -1088,9 +1093,9 @@ that reason);
 a true streaming model for the partial pass (spike-gated
 Stage 2 — see `ROADMAP.md` Phase 1);
 rich-text snippets (bold, links, lists pasted as HTML beside plain text);
-snippets with several spoken phrases; the clipboard-read check run by the
-robot (written 2026-10-29, not yet run) and in real slow apps (Outlook,
-Word, a remote desktop); a JetBrains IDE's or Visual Studio's terminal, and a browser's
+snippets with several spoken phrases; the clipboard-read check in Notepad,
+Electron, VS Code and real slow apps (Outlook, Word, a remote desktop), and
+a page in Edge that ignores the paste (Edge reads the clipboard anyway); a JetBrains IDE's or Visual Studio's terminal, and a browser's
 (vscode.dev, Codespaces), still count as the editor;
 Skills don't run from the Voice Assistant, and a meeting's past chat
 can't be renamed from the Notes view (the notepad's Past chats only);
