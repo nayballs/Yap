@@ -55,6 +55,27 @@ tables, method and how anyone can run it and send theirs:
 
 ## What works
 
+**Your data, and the microphone's quality** (2026-10-29,
+[privacy-receipts.md](./privacy-receipts.md), [dictation.md](./dictation.md)):
+Settings → Privacy & data → **Download your data** saves one .zip (history
+as CSV and JSON, notes and meetings as Markdown, chats, tasks, memory, the
+Dictionary's CSV, settings with every key, token and password left out; the
+audio and screenshots with a tick box that says their size) through the Save
+dialog, with progress and Cancel, never uploaded; **Reset app** clears the
+history, notes and meetings, chats, memory, tasks, the search index and the
+usage counts, keeps the settings, dictionary, models and account, names it
+all first (with Download your data first) and needs no restart.
+After a dictation with a weak signal (quiet, noisy, clipped), or on a
+Bluetooth headset in hands-free mode, one tip, rarely ("Yap didn't hear you
+clearly"); with a laptop's lid closed its own microphone gives way to the
+next one, or Yap says why it can't hear. Unit-tested (the zip, no secret in
+it, the reset's lists against config-and-data.md, the signal on synthetic
+speech, the lid's order) and e2e-tested (`your-data.spec.js`,
+`mic-tips.spec.js`). Not tried yet: a real laptop's lid (this PC is a
+desktop), a real Bluetooth headset, the thresholds on the robot's real
+speech (`e2e-real/mic-tips.real.js`, written, not run), a reset of a big
+real data folder.
+
 **The quick note** (2026-10-28, [notes.md](./notes.md#the-quick-note-notesquick_noters)):
 a small floating window on its own shortcut (Settings → Shortcuts, unbound
 by default), the tray's New quick note and the Notes view's Quick note, to
@@ -1007,7 +1028,12 @@ WASAPI loopback + a real LLM's action plan, a headset plugged in mid-call, a
 hotkey dictation mid-call, the mic unplugged mid-call) still wants one
 hands-on pass; the microphones' order and the unplug handling have only
 met made-up devices in tests (a real headset's plug, unplug and Bluetooth
-wake-up are the maintainer's to try); the refine after
+wake-up are the maintainer's to try), and so have the mic tips and the
+lid (the tips' thresholds are set on synthetic speech; a laptop's built-in
+mic is told apart by its jack subtype or name, so a plain "Microphone
+(Realtek Audio)" inside a lid isn't caught); a reset can't reach a second
+Yap running on the same data folder (it keeps its own copy in memory: quit
+it first); the refine after
 a meeting judges models by the leaderboard's figures and the meeting's
 language by Settings or Windows (not measured, not detected), and lowers
 only its calling thread's priority; meeting audio can't be exported

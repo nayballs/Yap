@@ -39,6 +39,11 @@ pub const SHOW_OLD_SETTINGS: &str = "showOldSettings";
 /// **Change** / **Microphones**: Yap's Settings → Dictation → Microphone
 /// (the microphones' order, `mics.rs`).
 pub const OPEN_MIC_ORDER: &str = "openMicOrder";
+/// **Sound settings**: Windows Settings → Sound, where a microphone's level
+/// is (`mic_tips.rs`).
+pub const OPEN_SOUND_SETTINGS: &str = "openSoundSettings";
+/// Windows Settings → System → Sound.
+const SOUND_SETTINGS_URI: &str = "ms-settings:sound";
 
 /// **Allow**: the Voice Assistant may send the window in front to a cloud
 /// model too (`chat/assistant/screen.rs`, asked once).
@@ -219,6 +224,7 @@ pub fn snip_saved(app: &AppHandle, name: &str) {
 pub fn act(app: &AppHandle, action: &str) {
     match action {
         OPEN_MIC_SETTINGS => open_uri(app, crate::dictation::mic_privacy::SETTINGS_URI),
+        OPEN_SOUND_SETTINGS => open_uri(app, SOUND_SETTINGS_URI),
         STOP_ASKING_CALLS => crate::calls::meeting_detect::set_detection(app, false),
         crate::meetings::meeting_audio::RECOVER_ACTION => crate::meetings::meeting_audio::recover_all(app),
         crate::dictation::cap::RECOVER => crate::dictation::cap::recover(app),

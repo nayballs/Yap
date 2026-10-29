@@ -116,6 +116,17 @@ pub fn snapshot() -> TaskStore {
     with_store(|s| s.clone())
 }
 
+/// Reset app (`privacy/reset.rs`): every task added and every archive mark
+/// gone. How many tasks went.
+pub fn reset() -> usize {
+    with_store(|s| {
+        let gone = s.tasks.len();
+        *s = TaskStore::default();
+        save(s);
+        gone
+    })
+}
+
 /// Change the store under its lock: `f` returns its result and whether it
 /// changed anything (then it's saved). An error changes nothing.
 pub fn modify<R>(f: impl FnOnce(&mut TaskStore) -> Result<(R, bool), String>) -> Result<R, String> {

@@ -211,6 +211,12 @@ pub fn rule(kind: &str) -> Rule {
         "micSwitched" => Rule { cooldown_ms: 10 * MIN, ..info },
         // "Contoso H2 disconnected": about the dictation that just ended.
         "micLost" => alert,
+        // "Yap didn't hear you clearly" (dictation/mic_tips.rs, rare there):
+        // after a dictation, never during one or a meeting; a tip.
+        "micTip" => Rule { hold_meeting: true, tip: true, cooldown_ms: 24 * 60 * MIN, ..tip },
+        // "Your laptop's lid is closed…" (dictation/lid.rs): about the
+        // dictation starting now; not twice in ten minutes.
+        "lidClosed" => Rule { cooldown_ms: 10 * MIN, ..alert },
         _ => info,
     }
 }
