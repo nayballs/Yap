@@ -35,6 +35,18 @@
 //! the next meeting while recording the last one offers to switch
 //! ([`on_call_started`]).
 //!
+//! **Join codes** (`codes.rs`, `call_windows.rs`): a call's window says
+//! which meeting it is (a Meet tab's code, Zoom's or Teams' meeting in a
+//! browser's address), read once as the call starts ([`read_call_code`]);
+//! a code match beats time and service (`model::event_for_call`).
+//!
+//! **Day to day**: the next meeting in the tray's menu and tooltip
+//! ([`tray_item`], "Next: Weekly sync in 12 min"; kept current by the
+//! scheduler's own turns, no extra wake-ups), recurring meetings' notes
+//! filed in a folder of their own ([`filing`]), and the Meetings view's
+//! end of the day ([`calendar_day`]: today's meetings, their open tasks,
+//! the ones without notes).
+//!
 //! **Briefs** ("Prepare a brief before meetings", `meeting_brief`, on): from
 //! [`BRIEF_AHEAD`] before a meeting, what to know going in — last time with
 //! these people, their open items, what memory knows, the invite's agenda,
@@ -44,6 +56,9 @@
 //! the Meetings view and in the meeting's notepad.
 
 pub(crate) mod brief;
+mod call_windows;
+mod codes;
+pub(crate) mod filing;
 mod google;
 mod ics;
 mod links;
@@ -335,6 +350,16 @@ pub struct Snapshot {
     max_connections: u8,
     /// "Prepare a brief before meetings" is on.
     briefs: bool,
+    /// Busy time of your own in the next day, times only (no titles): the
+    /// Meetings view's "45 min free" between meetings leaves it out.
+    busy: Vec<BusyView>,
+}
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct BusyView {
+    start: i64,
+    end: i64,
 }
 
 #[derive(Clone, Serialize)]
@@ -471,6 +496,13 @@ fn snapshot_of(s: &Runtime, notes: &HashMap<String, u64>, now: i64, briefs: bool
         },
         max_connections: vault::SLOTS,
         briefs,
+        busy: s
+            .store
+            .busy
+            .iter()
+            .filter(|b| b.end > now && b.start < now + 86_400)
+            .map(|b| BusyView { start: b.start, end: b.end })
+            .collect(),
     }
 }
 
@@ -613,6 +645,7 @@ async fn scheduler(app: AppHandle) {
         }
         tick_card(&app);
         tick_briefs(&app);
+        tick_tray(&app);
         let wait = next_wake(now_secs());
         tokio::select! {
             _ = WAKE.notified() => {}
@@ -1215,8 +1248,12 @@ fn note_for(event: &Event, ahead: bool) -> Result<(u64, bool), String> {
     if let Some(id) = crate::notes::find_by_event(&event.key) {
         return Ok((id, false));
     }
-    crate::notes::folder_create("Meetings");
-    let note = crate::notes::create(&event.display_title(), "", "calendar", "Meetings");
+    // Its series' folder ("Always file Weekly sync in Design"), else Meetings.
+    let folder = filing::folder_for(&event.key).unwrap_or_else(|| {
+        crate::notes::folder_create(crate::notes::MEETINGS);
+        crate::notes::MEETINGS.to_string()
+    });
+    let note = crate::notes::create(&event.display_title(), "", "calendar", &folder);
     let date = ahead.then_some(event.start.max(0) as u64);
     crate::notes::link_event(note.id, note_event(event), None, &attendees_of(event), date)?;
     Ok((note.id, true))
@@ -1398,19 +1435,28 @@ pub fn on_meeting_started(app: &AppHandle, note_id: u64) {
         .iter()
         .filter_map(|c| c.get("app").and_then(Value::as_str).map(str::to_string))
         .collect();
-    let event = {
+    // …and its join code, read from its window as it started.
+    let codes: Vec<Option<String>> = calls.iter().map(|app_id| call_code(app_id)).collect();
+    let (event, by_code) = {
         let s = lock();
-        calls
+        let found = calls
             .iter()
+            .zip(&codes)
             .rev()
-            .find_map(|app_id| model::event_at(&s.store.events, now, Some(app_id)))
-            .or_else(|| model::event_at(&s.store.events, now, None))
-            .cloned()
+            .find_map(|(app_id, code)| model::event_for_call(&s.store.events, now, Some(app_id), code.as_deref()))
+            // Any meeting on now — but still never one whose code the call
+            // showed is another's.
+            .or_else(|| model::event_for_call(&s.store.events, now, None, codes.iter().rev().flatten().next().map(String::as_str)))
+            .cloned();
+        let by_code = found.as_ref().is_some_and(|e| codes.iter().flatten().any(|c| e.codes.contains(c)));
+        (found, by_code)
     };
     let Some(event) = event else { return };
-    // Resuming an older meeting's notes isn't this meeting.
+    // Resuming an older meeting's notes isn't this meeting (a code match
+    // reaches further either side).
     if let Some(first) = note.transcript.first().map(|s| s.ts as i64) {
-        if first < event.start - model::EARLY_SECS || first > event.end {
+        let (early, late) = if by_code { (model::CODE_EARLY_SECS, model::CODE_LATE_SECS) } else { (model::EARLY_SECS, 0) };
+        if first < event.start - early || first > event.end + late {
             return;
         }
     }
@@ -1423,7 +1469,9 @@ pub fn on_meeting_started(app: &AppHandle, note_id: u64) {
         return;
     }
     answer(&event);
-    tracing::info!(note_id, "calendar: a recording started during a meeting; note tied to it");
+    tracing::info!(note_id, by_code, "calendar: a recording started during a meeting; note tied to it");
+    // Its series' folder, when there's a rule for it.
+    filing::file_linked(note_id, &event.key);
     // Every window showing the note (the notepad, Notes) follows.
     crate::notes::commands::note_changed(app, note_id, "calendar");
     let _ = app.emit("yap-notes-changed", ());
@@ -1435,9 +1483,10 @@ pub fn on_meeting_started(app: &AppHandle, note_id: u64) {
 /// call belongs to a meeting whose card is up or was answered: the calendar
 /// asked already. A snoozed card comes back instead.
 pub fn claims_call(app_id: &str) -> bool {
+    let code = call_code(app_id);
     let Some(mut s) = lock_started() else { return false };
     let now = now_secs();
-    let Some(event) = model::event_at(&s.store.events, now, Some(app_id)).cloned() else {
+    let Some(event) = model::event_for_call(&s.store.events, now, Some(app_id), code.as_deref()).cloned() else {
         return false;
     };
     let key = model::answer_key(&event);
@@ -1457,31 +1506,284 @@ pub fn claims_call(app_id: &str) -> bool {
 
 /// A call started (after call detection's lock is released). Recording an
 /// earlier meeting's notes while this call belongs to the next meeting:
-/// offer to switch notes (back-to-back meetings).
-pub fn on_call_started(app_id: &str) {
+/// offer to switch notes (back-to-back meetings). Whether it did (call
+/// detection's own "Switch to …?" then stays quiet).
+pub fn on_call_started(app_id: &str) -> bool {
     if lock_started().is_none() {
-        return;
+        return false;
     }
-    let Some(recording) = crate::meetings::meeting::recording_note() else { return };
+    let Some(recording) = crate::meetings::meeting::recording_note() else { return false };
     let recording_key = crate::notes::get(recording).and_then(|n| n.event).map(|e| e.key);
+    let code = call_code(app_id);
     let mut s = lock();
     let now = now_secs();
-    let Some(next) = model::event_at(&s.store.events, now, Some(app_id)).cloned() else { return };
+    let Some(next) = model::event_for_call(&s.store.events, now, Some(app_id), code.as_deref()).cloned() else { return false };
     if recording_key.as_deref() == Some(next.key.as_str()) {
-        return; // the same meeting: a rejoin
+        return false; // the same meeting: a rejoin
     }
     if let Some(previous) = recording_key.as_deref().and_then(|k| s.store.events.iter().find(|e| e.key == k)) {
         if previous.start >= next.start {
-            return; // only ever forward, to the next meeting
+            return false; // only ever forward, to the next meeting
         }
     }
     if s.store.answered.contains_key(&model::answer_key(&next)) {
-        return;
+        return false;
     }
     tracing::info!(app = app_id, "calendar: a call during the next meeting; offering to switch notes");
     s.switch_to = Some(next.key);
     drop(s);
     wake();
+    true
+}
+
+// ---- join codes ---------------------------------------------------------------------------------
+
+/// Join codes read from calls' windows as each started ([`read_call_code`]),
+/// by call app: (code, when read). Its own small lock: [`claims_call`] reads
+/// it under call detection's.
+static CALL_CODES: LazyLock<Mutex<HashMap<String, (String, i64)>>> = LazyLock::new(Default::default);
+/// A code read this long ago is another call's.
+const CALL_CODE_KEEP: i64 = 6 * 3600;
+
+/// A call of `app_id` started (call detection, before it takes its own
+/// lock): read its join code from its windows (`call_windows.rs`) for the
+/// matching that follows ([`claims_call`], [`on_call_started`],
+/// [`on_meeting_started`]). Only while some meeting kept has a code to
+/// match. Touches windows and UI Automation: never under a lock, never on
+/// the main thread.
+pub fn read_call_code(app_id: &str) {
+    let wanted = lock_started().is_some_and(|s| s.store.events.iter().any(|e| e.codes.iter().any(|c| codes::matches_app(c, app_id))));
+    let code = if wanted { call_windows::read(app_id) } else { None };
+    let mut kept = CALL_CODES.lock().unwrap_or_else(|p| p.into_inner());
+    match code {
+        Some(code) => {
+            kept.insert(app_id.to_string(), (code, now_secs()));
+        }
+        None => {
+            kept.remove(app_id);
+        }
+    }
+}
+
+/// The join code `app_id`'s call showed as it started, if any.
+fn call_code(app_id: &str) -> Option<String> {
+    let kept = CALL_CODES.lock().unwrap_or_else(|p| p.into_inner());
+    kept.get(app_id).filter(|(_, at)| now_secs() - at < CALL_CODE_KEEP).map(|(code, _)| code.clone())
+}
+
+/// Test runs: call app `appId`'s window shows `title` (and, in a browser,
+/// `address`); none takes it away. Read as the next simulated call starts.
+#[cfg(debug_assertions)]
+#[tauri::command]
+pub fn calendar_e2e_call_window(app_id: String, title: Option<String>, address: Option<String>) -> Result<(), String> {
+    if !crate::shell::e2e::active() {
+        return Err("Only in e2e test mode".to_string());
+    }
+    let shown = (title.is_some() || address.is_some()).then(|| (title.unwrap_or_default(), address.unwrap_or_default()));
+    call_windows::e2e_set(&app_id, shown);
+    Ok(())
+}
+
+// ---- the next meeting in the tray --------------------------------------------------------------
+
+/// The tray menu item's id.
+pub const TRAY_ID: &str = "calendar_next";
+
+/// What the tray says about the next meeting.
+#[derive(Debug, Clone, PartialEq)]
+struct TrayNext {
+    key: String,
+    /// The menu item: "Next: Weekly sync in 12 min", "Now: Design review ·
+    /// Take notes".
+    label: String,
+    /// The tooltip's line: the label without what a click does.
+    tip: String,
+    /// A click starts notes on it (it's on, or about to be, and nothing
+    /// records); otherwise a click opens its note.
+    starts: bool,
+}
+
+/// "Weekly sync", cut at `max` characters with "…".
+fn short(title: &str, max: usize) -> String {
+    if title.chars().count() <= max {
+        return title.to_string();
+    }
+    let cut: String = title.chars().take(max - 1).collect();
+    format!("{}\u{2026}", cut.trim_end())
+}
+
+/// The tray's line for meeting `e` at `now` (pure; local times in `tz`):
+/// "Next: Weekly sync in 12 min" (an hour away at most), "… at 14:30"
+/// (later today), "… tomorrow at 09:00", "… on Thu at 09:00"; "Now: Design
+/// review" once it's on; "· Take notes" while a click starts notes (from
+/// [`model::EARLY_SECS`] before the start, nothing recording); "·
+/// Recording" on the meeting being recorded.
+fn tray_line<Tz: chrono::TimeZone>(e: &Event, now: i64, recording_this: bool, recording_any: bool, tz: &Tz) -> TrayNext
+where
+    Tz::Offset: std::fmt::Display,
+{
+    let title = short(&e.display_title(), 40);
+    let at = |t: i64| tz.timestamp_opt(t, 0).single();
+    let tip = if e.start <= now {
+        format!("Now: {title}")
+    } else {
+        let diff = e.start - now;
+        let when = match (at(now), at(e.start)) {
+            _ if diff < 3_600 => format!("in {} min", ((diff + 30) / 60).max(1)),
+            (Some(n), Some(s)) if n.date_naive() == s.date_naive() => format!("at {}", s.format("%H:%M")),
+            (Some(n), Some(s)) if n.date_naive().succ_opt() == Some(s.date_naive()) => format!("tomorrow at {}", s.format("%H:%M")),
+            (_, Some(s)) => format!("on {} at {}", s.format("%a"), s.format("%H:%M")),
+            _ => format!("in {} h", diff / 3_600),
+        };
+        format!("Next: {title} {when}")
+    };
+    let starts = !recording_any && model::is_current(e, now);
+    let label = if recording_this {
+        format!("{tip} \u{b7} Recording")
+    } else if starts {
+        format!("{tip} \u{b7} Take notes")
+    } else {
+        tip.clone()
+    };
+    TrayNext { key: e.key.clone(), label, tip, starts }
+}
+
+/// The next meeting as the tray shows it now (`None`: no calendar, or
+/// nothing in the next 7 days). Takes the notes store's and the recorder's
+/// locks, then the calendar's: never under one of them.
+fn tray_next(now: i64) -> Option<TrayNext> {
+    let recording = crate::meetings::meeting::recording_note();
+    let recording_key = recording.and_then(crate::notes::event_of).map(|e| e.key);
+    let event = {
+        let s = lock_started()?;
+        if s.store.connections.is_empty() {
+            return None;
+        }
+        model::next_meeting(&s.store.events, now, recording_key.as_deref())?.clone()
+    };
+    let this = recording_key.as_deref() == Some(event.key.as_str());
+    Some(tray_line(&event, now, this, recording.is_some(), &chrono::Local))
+}
+
+/// The tray menu's next meeting: ([`TRAY_ID`], "Next: Weekly sync in 12
+/// min"), right under the version line (`shell/tray.rs`).
+pub fn tray_item() -> Option<(String, String)> {
+    tray_next(now_secs()).map(|n| (TRAY_ID.to_string(), n.label))
+}
+
+/// The tray tooltip's line about the next meeting.
+pub fn tray_tooltip() -> Option<String> {
+    tray_next(now_secs()).map(|n| n.tip)
+}
+
+/// The line the tray was last given; a change refreshes it.
+static TRAY_LAST: Mutex<Option<String>> = Mutex::new(None);
+
+/// Each scheduler turn (at least every [`MAX_SLEEP`] seconds, which it
+/// does anyway: no extra wake-ups): the tray follows the countdown, a sync,
+/// a recording starting or stopping.
+fn tick_tray(app: &AppHandle) {
+    let label = tray_next(now_secs()).map(|n| n.label);
+    let mut last = TRAY_LAST.lock().unwrap_or_else(|p| p.into_inner());
+    if *last != label {
+        *last = label;
+        drop(last);
+        crate::shell::tray::refresh(app);
+    }
+}
+
+/// The tray's next meeting clicked: notes on it when it's on (or about to
+/// be) and nothing records, else its note opens in the main window (made
+/// ahead of the meeting if need be; the one recording, if it's this one's).
+/// Blocking: off the main thread.
+pub fn on_tray_next(app: &AppHandle) {
+    let Some(next) = tray_next(now_secs()) else { return };
+    tracing::info!(starts = next.starts, "calendar: the tray's next meeting clicked");
+    let result = if next.starts { start_event(app, &next.key, false).map(|_| ()) } else { open_event_note(app, &next.key) };
+    emit(app);
+    if let Err(e) = result {
+        let _ = crate::shell::window::show_settings(app);
+        let _ = app.emit("yap-error", format!("Couldn't open the meeting's note. {e}"));
+    }
+}
+
+/// Meeting `key`'s note in the main window's Notes: the one recording it,
+/// else the one made for it (made now, ahead of the meeting if it's still
+/// to come).
+fn open_event_note(app: &AppHandle, key: &str) -> Result<(), String> {
+    let event = event_by_key(key)?;
+    let recording = crate::meetings::meeting::recording_note().filter(|r| crate::notes::find_by_event(key) == Some(*r));
+    let note_id = match recording {
+        Some(id) => id,
+        None => {
+            let (id, made) = note_for(&event, event.start > now_secs())?;
+            if made {
+                let _ = app.emit("yap-notes-changed", ());
+            }
+            id
+        }
+    };
+    crate::shell::window::show_settings(app)?;
+    let _ = app.emit(EVENT_OPEN, json!({ "noteId": note_id, "stop": false }));
+    Ok(())
+}
+
+// ---- the end of the day -------------------------------------------------------------------------
+
+/// The Meetings view's "Done for today" (after today's last meeting):
+/// today's meetings (local day) that have ended, earliest first, each with
+/// its note (`noteId`, `hasNotes`: anything typed, said or summarised) and
+/// its open tasks (the summary's and those added, not done or archived).
+/// `pending`: meetings still to come today (the view waits for none).
+#[tauri::command]
+pub fn calendar_day() -> Value {
+    use chrono::TimeZone;
+    let now = now_secs();
+    let (today, tomorrow) = {
+        let local = chrono::Local.timestamp_opt(now, 0).single().map(|t| t.date_naive());
+        let midnight = |d: chrono::NaiveDate| {
+            d.and_hms_opt(0, 0, 0).and_then(|t| chrono::Local.from_local_datetime(&t).earliest()).map(|t| t.timestamp())
+        };
+        match local {
+            Some(d) => (midnight(d).unwrap_or(now - 86_400), d.succ_opt().and_then(midnight).unwrap_or(now + 86_400)),
+            None => (now - 86_400, now + 86_400),
+        }
+    };
+    let events: Vec<Event> = match lock_started() {
+        Some(s) => s.store.events.iter().filter(|e| e.start >= today && e.start < tomorrow).cloned().collect(),
+        None => Vec::new(),
+    };
+    let pending = events.iter().filter(|e| e.end > now).count();
+    let store = crate::notes::task_store::snapshot();
+    let mut done: Vec<&Event> = events.iter().filter(|e| e.end <= now).collect();
+    done.sort_by_key(|e| (e.start, e.key.clone()));
+    let meetings: Vec<Value> = done
+        .iter()
+        .map(|e| {
+            let note = crate::notes::find_by_event(&e.key).and_then(crate::notes::get);
+            let has_notes = note.as_ref().is_some_and(|n| {
+                !n.content.trim().is_empty() || !n.enhanced_content.trim().is_empty() || n.transcript.iter().any(|s| !s.echo)
+            });
+            let tasks: Vec<Value> = note
+                .as_ref()
+                .map(|n| crate::notes::tasks::note_tasks(n, &store).tasks)
+                .unwrap_or_default()
+                .into_iter()
+                .filter(|t| !t.task.done && !t.archived)
+                .map(|t| serde_json::to_value(t).unwrap_or(Value::Null))
+                .collect();
+            json!({
+                "key": e.key,
+                "title": e.display_title(),
+                "start": e.start,
+                "end": e.end,
+                "noteId": note.as_ref().map(|n| n.id),
+                "hasNotes": has_notes,
+                "tasks": tasks,
+            })
+        })
+        .collect();
+    json!({ "meetings": meetings, "pending": pending })
 }
 
 // ---- the reminder card ------------------------------------------------------------------------
@@ -2228,6 +2530,9 @@ pub fn calendar_meeting_notes(query: Option<String>) -> Vec<Value> {
                 // Something to summarise ("Generate summary").
                 "hasTalk": n.transcript.iter().any(|s| !s.echo),
                 "recording": recording == Some(n.id),
+                // Its folder, its series' name and that series' folder rule
+                // (the menu's "File this meeting in…", "Always file…").
+                "filing": filing::view_of(&n),
             });
             (when, value)
         })
@@ -2485,6 +2790,37 @@ mod tests {
         assert_eq!(upcoming_count(&events, "1", now), 2);
         assert_eq!(upcoming_count(&events, "2", now), 1);
         assert_eq!(upcoming_count(&events, "3", now), 0);
+    }
+
+    #[test]
+    fn the_trays_next_meeting_line() {
+        let now = 1_791_187_200; // Mon 5 Oct 2026, 08:00 UTC
+        let ev = |start: i64, end: i64| -> Event {
+            serde_json::from_value(json!({ "key": "1:w", "connection": "1", "title": "Weekly sync", "start": start, "end": end })).unwrap()
+        };
+        let line = |e: &Event, this: bool, any: bool| tray_line(e, now, this, any, &chrono::Utc);
+        // A countdown within the hour; a click opens its note.
+        let next = line(&ev(now + 720, now + 2_520), false, false);
+        assert_eq!((next.label.as_str(), next.tip.as_str(), next.starts), ("Next: Weekly sync in 12 min", "Next: Weekly sync in 12 min", false));
+        // From 10 minutes before, a click starts notes.
+        let soon = line(&ev(now + 240, now + 2_040), false, false);
+        assert_eq!((soon.label.as_str(), soon.tip.as_str(), soon.starts), ("Next: Weekly sync in 4 min \u{b7} Take notes", "Next: Weekly sync in 4 min", true));
+        // Later today, tomorrow, later in the week.
+        assert_eq!(line(&ev(now + 23_400, now + 25_200), false, false).label, "Next: Weekly sync at 14:30");
+        assert_eq!(line(&ev(now + 90_000, now + 91_800), false, false).label, "Next: Weekly sync tomorrow at 09:00");
+        assert_eq!(line(&ev(now + 176_400, now + 178_200), false, false).label, "Next: Weekly sync on Wed at 09:00");
+        // On now: take notes, unless another meeting records; the one
+        // recording says so.
+        let on = ev(now - 60, now + 1_740);
+        assert_eq!(line(&on, false, false).label, "Now: Weekly sync \u{b7} Take notes");
+        let busy = line(&on, false, true);
+        assert_eq!((busy.label.as_str(), busy.starts), ("Now: Weekly sync", false));
+        let this = line(&on, true, true);
+        assert_eq!((this.label.as_str(), this.tip.as_str(), this.starts), ("Now: Weekly sync \u{b7} Recording", "Now: Weekly sync", false));
+        // A long name is cut.
+        let mut long = ev(now + 720, now + 2_520);
+        long.title = "Quarterly business review with the regional leadership team".into();
+        assert_eq!(line(&long, false, false).label, "Next: Quarterly business review with the regi\u{2026} in 12 min");
     }
 
     #[test]

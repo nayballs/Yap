@@ -104,6 +104,9 @@ pub fn sweep(app: Option<&AppHandle>) -> usize {
         });
         if stripped == Ok(true) {
             crate::meetings::meeting_audio::drop_audio(id);
+            // The summary's earlier versions too (notes/versions.rs): Yap's
+            // writing from what was said, like the digests. My thoughts' stay.
+            crate::notes::versions::drop_summaries(id);
             done.push(id);
         }
     }

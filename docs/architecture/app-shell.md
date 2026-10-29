@@ -167,7 +167,13 @@ re-exported by the module, except `local_llm`'s, which callers name
   and "· Update X ready" in the tooltip (`tray::refresh`, driven by updates.rs).
   A live call Yap asks about, while nothing records, puts **"Record this Teams
   call"** above it (`meeting_detect::tray_item`; the click runs
-  `on_tray_record` on a worker thread). **"Copy last dictation"** sits above
+  `on_tray_record` on a worker thread). The calendar's **next meeting**
+  ("Next: Weekly sync in 12 min", "Now: Design review · Take notes";
+  `calendar::tray_item`, [calendar.md](./calendar.md#day-to-day-2026-10-29))
+  sits there too, and on the tooltip's second line; only whether there is
+  one is in the menu's key, and its countdown sets the item's text in place
+  (`apply`), so the menu isn't rebuilt each minute; the click runs
+  `calendar::on_tray_next` on a worker thread. **"Copy last dictation"** sits above
   the model submenu (greyed out until there's a dictation; onto the
   clipboard, out of Win+V history, `pasting/last.rs`; "Paste last
   transcript" and "… (as said)" left the tray on 2026-10-25 — three ways to
@@ -178,8 +184,8 @@ re-exported by the module, except `local_llm`'s, which callers name
   change (the reading card coming or going refreshes it); all tray work runs
   on the main thread. After Snip to Chat, **"New quick note"** (2026-10-28:
   the quick-note window on a new note, `notes/quick_note.rs`). Debug-only
-  `e2e_tray {click?}` lists the idle menu's items, or chooses one (a test
-  run's tray is never clicked).
+  `e2e_tray {click?}` lists the idle menu's items and, last, `["tooltip",
+  …]`, or chooses one (a test run's tray is never clicked).
 - **`shell/context_menu.rs`** — no browser context menu in Yap's windows: each
   webview's `ContextMenuRequested` (WebView2, via `webview2-com`) keeps only
   the editing commands, or shows nothing (pure `keep`, unit-tested on the

@@ -84,6 +84,85 @@ Connecting Google Calendar or an iCal link, sync, parsing, the reminder card, pr
   Lock rule: never hold its state lock while touching windows, the network,
   notes or call detection.
 
+## Day to day (2026-10-29)
+
+- **Join codes** (`calendar/codes.rs`, pure, unit-tested;
+  `calendar/call_windows.rs`): a code is `<kind>:<value>` — `meet:abc-defg-hij`,
+  `zoom:81234567890` (9–11 digits), `teams:19:meeting_…@thread.v2` (the
+  meetup-join link's thread), `teamsid:<digits>` (Teams' short
+  `/meet/<id>` links and an invite's "Meeting ID"). `model::finish` keeps an
+  event's codes (`Event.codes`: its join link, location, conference data
+  and description; a "Meeting ID" number is the join link's service's, else
+  Zoom's at 9–11 digits and Teams' at 12+); an older Yap saving
+  calendar.json drops them until the next sync. A call's code:
+  `meeting_detect::on_edges` calls `read_call_code(app)` for each new call
+  **before it takes its own lock** (it touches windows), only while some
+  kept meeting has a code of that app's; `call_windows::read` looks at the
+  visible windows once (Yap's own skipped: their titles would ask the main
+  thread) — the call app's own (`exe_is`: an older Zoom's "Meeting ID: …")
+  and browsers whose title shows the meeting (`title_shows`: Meet's "Meet -
+  abc-defg-hij"), then a meeting tab's address bar through UI Automation
+  (`address_of`: a bounded breadth-first look at the toolbars for the first
+  text box whose value reads like an address, never into the page, ≤ 1.5 s;
+  Zoom's web client `app.zoom.us/wc/<id>`, Teams on the web's meetup-join).
+  Kept by app for 6 h (`CALL_CODES`, its own small lock so `claims_call`
+  can read it under call detection's). `model::event_for_call(events, now,
+  service, code)`: **the code beats time and service** — the event with that
+  code from 30 min before its start to 30 min after its end
+  (`CODE_EARLY_SECS`/`CODE_LATE_SECS`), nearest start (a recurring meeting
+  keeps its code: today's occurrence); else time and service as before, but
+  never a meeting whose codes of that kind don't include it (an ad-hoc Zoom
+  during a Zoom meeting isn't it; a Teams id and thread aren't compared).
+  No code: time and service alone. Used by `claims_call`, `on_call_started` and
+  `on_meeting_started` (whose "resuming an older meeting" check reaches as far
+  as the code's window). Not read: the Teams app's windows (titled with the
+  meeting's name), today's Zoom app ("Zoom Meeting"), Webex, Slack and the
+  rest (no code kinds), a meeting tab that isn't the browser's active one.
+  Logs the kind of code, never a code or a title. Debug-only
+  `calendar_e2e_call_window(appId, title?, address?)`: what a call app's
+  window "shows" in a test run.
+- **The next meeting in the tray**: `model::next_meeting(events, now,
+  recording)` — the meeting being recorded while it's on; else one starting
+  within 10 min; else one on now (the one that started last); else the next
+  to start; never one that's over (all-day and declined events never get
+  this far). `tray_line` (pure over a `TimeZone`): "Next: Weekly sync in 12
+  min" (within the hour), "… at 14:30", "… tomorrow at 09:00", "… on Thu at
+  09:00", "Now: Design review"; "· Take notes" when a click starts notes
+  (on, or from 10 min before, nothing recording); "· Recording" on the one
+  recording; the tooltip's line is the same without them. `tray_item()` /
+  `tray_tooltip()` (`shell/tray.rs`: under the version line; the tooltip's
+  second line), `tick_tray` on every scheduler turn (≤ 30 s: no extra
+  wake-ups) refreshes the tray only when the line changed, and the tray sets
+  the item's text in place (its presence alone is in the idle menu's key, so
+  the countdown never rebuilds the menu). `on_tray_next` (off the main
+  thread): `start_event` when it starts notes, else `open_event_note` (the
+  note recording it, else `note_for`, ahead of the meeting) in the main
+  window's Notes. `e2e_tray` lists it and the tooltip.
+- **Folder rules** (`calendar/filing.rs`): "Always file {series} in…" from a
+  past meeting note's menu in the Meetings view; the series is
+  `brief::series_of(key)` (an iCal UID with its RRULE; Google's
+  `recurringEventId`, which its occurrences' ids start with), without the
+  connection. `meeting_folders.json` `{rules: {<series>: {folder, title,
+  createdTs}}}` (own file, `SAVER` "meetingFolders"; an older Yap never
+  reads it). `meeting_file(noteId, folder, series)` moves the note (made if
+  need be; `notes::update`, so `folder_chosen`) and with `series` keeps the
+  rule and returns how many earlier notes of the series aren't there
+  (`others_outside`); `meeting_file_past(noteId)` moves them (the page asks
+  first); `meeting_unfile(noteId)` drops the rule. New notes: `note_for`
+  makes them in the rule's folder (`folder_for`, when it still exists);
+  `on_meeting_started` files a note it ties to a meeting (`file_linked`) when
+  `may_file` (where Yap put it: Meetings or Personal, never `folder_chosen`).
+  `notes_folder_rename`/`_delete` call `folder_renamed`/`folder_deleted`.
+  `calendar_meeting_notes` gives each note's `filing: {folder, series,
+  rule}`.
+- **The day view**: the snapshot's `busy` (busy time of your own in the next
+  day, times only); the Meetings view shows "45 min free" between today's
+  rows (≥ 15 min, after every earlier row ends and from now, busy time taken
+  out). `calendar_day()` → `{meetings, pending}`: today's (local day)
+  meetings that have ended, each with `noteId`, `hasNotes` (typed, said or
+  summarised) and its open tasks (`notes::tasks::note_tasks`: not done, not
+  archived); "Done for today" shows once nothing's left today (`pending` 0).
+
 ## Pre-meeting briefs
 
 - **`calendar/brief.rs`** (pure, unit-tested, run as is by `yap.exe eval

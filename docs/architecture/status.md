@@ -131,6 +131,26 @@ pre-roll and the pause before the stop), a week streak across a real week
 start on a PC whose week starts on Sunday, and the share picture pasted
 into a real chat app.
 
+**Pinned notes, version history, transforms in notes** (2026-10-29,
+[notes.md](./notes.md#pins-version-history-and-transforms-notespinsrs-notesversionsrs-notestransformrs)):
+pin a note from its menu, its ⋯ or its row, and it comes first in Notes and
+its folder (`note_pins.json`). Every note keeps its last 50 versions of My
+thoughts and the summary (`note-versions/`), each marked how it came —
+typed, dictated, Yap's summary, an Action, a transform, Chat, restored —
+one kind's saves folded for ten minutes; Version history shows them with the
+changes marked, and Restore (or the toast's Undo) brings one back as a
+version of its own; a meeting's summary versions go with its transcript.
+The saved transforms (Polish, Shorter, Fix grammar only, Translate, Make it
+a prompt, your own) run on the selection or the whole of My thoughts or the
+summary, from the note's ⋯ or a right-click, on the Commands model (on this
+PC or the cloud), the result in place with Undo. Unit-tested (folding, the
+50, deletion with the note, the pinned order, restore, retention, offsets)
+and e2e-tested (`notes-history.spec.js`: pins, history, restore and Undo, a
+transform on the fake model, light and dark). Not yet tried: a real
+dictation into a note marked "Dictated", the on-device model running a
+transform in a note, and the meeting notepad and quick note (they can call
+`note_transform`; not wired yet).
+
 **Your data, and the microphone's quality** (2026-10-29,
 [privacy-receipts.md](./privacy-receipts.md), [dictation.md](./dictation.md)):
 Settings → Privacy & data → **Download your data** saves one .zip (history
@@ -284,6 +304,36 @@ its notes.json shape). Unit- and e2e-tested (`notes-edit`, `tasks`,
 `meeting-audio.real.js`). **Not yet tried**: a real disk filling up, an
 exported hour-long meeting opened in other apps, the Save dialog itself
 (test runs name the file), retention over a real year of meetings.
+
+**Smarter about the call itself** (2026-10-29,
+[call-detection-and-guards.md](./call-detection-and-guards.md),
+[meetings.md](./meetings.md)): **"Teams is using Contoso H2 but Yap is using
+Northwind Audio"** (Windows' audio sessions per microphone; once per call
+and pair; **Use Contoso H2** for this meeting; never a software mic or a
+closed laptop's own); **muted in the call**, "Yap can't hear your mic"
+stays quiet (the call's mute button through UI Automation, or its mic
+muted in Windows; read only while "You" is quiet); **the PC asleep**
+mid-meeting: paused cleanly, "Your PC was asleep for 12 min" in the
+transcript in its place, Resume / Summarise on wake; **"Switch to Zoom?"**
+when another app's call starts while one records; **"Stop taking notes?"**
+instead of an ending when the call still looks on (it still plays, its tab
+is still there), and the same app's call back within 2 minutes of Yap's
+own stop carried on in the same note; **"Start notes automatically for
+Teams calls?"** once, after the third meeting of an app's calls stopped by
+hand. Network loss mid-meeting leaves no gap (speech is transcribed on
+this PC); nothing to mark. Unit-tested (the call's mic, a mismatch once per
+pair, the mute buttons, the line's place, the 2-minute window, the switch
+and the ending's rules, the offer's rule) and e2e-tested with stand-ins
+for Windows (`call-smarts.spec.js`: `e2e_call_audio`, `e2e_sleep`,
+`meeting_detect_simulate`). **Not yet tried with a real call**: which
+process holds Teams' (new Teams), Zoom's and Meet's audio session, and
+whether they keep it active while muted; the mute buttons' real names and
+whether Chromium exposes Meet's in a background or minimised window (and
+Teams' new client at all); whether Teams and Zoom keep an output session
+active after a call ends (it would make every ending "Stop taking notes?");
+a real sleep and wake, Modern Standby among them (does Windows send the
+suspend notification, and in time to stop the streams); "Use" opening the
+call's device by its name.
 
 **Trust: network receipts and Report a problem** (2026-10-24,
 [privacy-receipts.md](./privacy-receipts.md)): every request Yap makes goes
@@ -743,7 +793,16 @@ Recurrence and time zones (incl. Windows zone names) unit-tested; e2e-tested
 against a local iCal server and a local fake of Google. Google needs the
 OAuth client set up in Google Cloud + the two repository secrets
 ([`docs/calendar.md`](../calendar.md)); not yet tried against a real
-calendar. **Calendar tools in Chat** (2026-10-25, `chat/tools/calendar.rs`):
+calendar. **Day to day** (2026-10-29): the next meeting in the tray ("Next:
+Weekly sync in 12 min", a click opening its note or taking notes),
+recurring meetings' notes filed in a folder ("Always file Weekly sync
+in…", `meeting_folders.json`), a call matched to its meeting by the join
+code its window shows (Meet's tab title; Zoom's and Teams' meetings in a
+browser's address bar; the Teams app and today's Zoom app show none), and
+the Meetings view's free time between meetings and "Done for today";
+unit-tested and e2e-tested (the tray through its test hook, a simulated
+Meet call with a stand-in window), not yet with the real tray, real call
+windows or a real calendar. **Calendar tools in Chat** (2026-10-25, `chat/tools/calendar.rs`):
 "what's on tomorrow?", "when's my next meeting with Sam?", "am I free at 3
 on Friday?" from the calendar Yap keeps (busy time of your own included),
 the meetings cited and opened from the answer, spoken whole by the Voice
@@ -1137,7 +1196,9 @@ real-engine-tested on test meetings, not yet on a real one); a fixed line can't 
 or deleted, an edited summary has no "back to Yap's" (only Replace), and a
 task's "Said at" is the line sharing most of its words (a guess: none when
 no line shares enough);
-the calendar has no one-click Outlook (Microsoft Graph); the pre-meeting
+the calendar has no one-click Outlook (Microsoft Graph: it needs a Microsoft
+Entra app registration, [`docs/calendar.md`](../calendar.md) says what it
+would take), and no join codes for Webex, Slack or GoTo calls; the pre-meeting
 brief (2026-10-22: unit-, e2e- and model-evaluated, not yet seen before a
 real meeting) checks the AI's lines word by word, so a mix-up of two things
 its notes both say can pass (no "In short" from a small on-device model for

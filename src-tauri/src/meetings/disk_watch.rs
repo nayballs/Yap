@@ -143,7 +143,7 @@ fn watch(app: AppHandle, gen: u64, note_id: u64) {
             Step::Stop => {
                 tracing::warn!(note_id, free_mb = free / MB, "Disk watch: the drive is full; stopping the recording");
                 GEN.fetch_add(1, Ordering::SeqCst);
-                crate::calls::meeting_guard::stop_and_summarise(&app, Some(note_id));
+                crate::calls::meeting_guard::stop_automatically(&app, note_id);
                 crate::calls::meeting_guard::notice(&app, &notice_stopped(note_id));
                 return;
             }

@@ -9,6 +9,10 @@
 // The words it took out or put in are. A token that is only punctuation
 // ("-", "—") is never a change: one taken out isn't shown, one put in reads
 // as the cleaned text around it.
+//
+// `{ exact: true }` (a note's Version history, views/notes/VersionHistory):
+// every token as written — a capital or a comma changed is a change too, as
+// "Fix grammar only" makes them.
 
 /** A word as compared: lower case, letters, digits and apostrophes. */
 export function wordKey(token) {
@@ -20,11 +24,11 @@ export function wordKey(token) {
 }
 
 /** `text` as tokens: { text, key, sep } (sep: the whitespace before it). */
-function tokens(text) {
+function tokens(text, exact = false) {
   const out = [];
   const re = /(\s*)(\S+)/g;
   let m;
-  while ((m = re.exec(String(text ?? '')))) out.push({ text: m[2], key: wordKey(m[2]), sep: m[1] });
+  while ((m = re.exec(String(text ?? '')))) out.push({ text: m[2], key: exact ? m[2] : wordKey(m[2]), sep: m[1] });
   return out;
 }
 
@@ -78,9 +82,9 @@ const spaceOf = (sep) => (sep.includes('\n') ? sep.replace(/[^\n]/g, '') : ' ');
  * taken out before the ones put in; `changes` — how many places the AI
  * changed words (a run of words out and/or in is one).
  */
-export function wordDiff(said, cleaned) {
-  const a = tokens(said);
-  const b = tokens(cleaned);
+export function wordDiff(said, cleaned, { exact = false } = {}) {
+  const a = tokens(said, exact);
+  const b = tokens(cleaned, exact);
   // The same start and end first: most of a dictation is.
   let start = 0;
   while (start < a.length && start < b.length && a[start].key === b[start].key) start++;
