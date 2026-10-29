@@ -301,6 +301,31 @@ fn write_pending(always: bool) {
     }
 }
 
+/// Reset app (`privacy/reset.rs`): every count gone — the file and what
+/// this Yap added since its last write, so the thread's next write starts
+/// from nothing.
+pub fn reset() {
+    let _one = WRITING.lock().unwrap_or_else(|p| p.into_inner());
+    let mut s = lock();
+    s.base = Store { version: 1, days: BTreeMap::new() };
+    s.pending = Store { version: 1, days: BTreeMap::new() };
+    if let Some(path) = FILE_PATH.get() {
+        match std::fs::remove_file(path) {
+            Ok(()) => SAVER.nothing_to_save(),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => SAVER.nothing_to_save(),
+            // Held by another program: an empty file over it (or said).
+            Err(_) => {
+                let _ = SAVER.write_json(path, &s.base, false);
+            }
+        }
+        s.seen = modified(path);
+    }
+    drop(s);
+    if let Some(app) = APP.get() {
+        let _ = app.emit(EVENT, ());
+    }
+}
+
 /// `from` less what `written` holds (the pending counts a write took):
 /// a row left with no calls goes. Pure.
 fn subtract(from: &mut Store, written: &Store) {

@@ -26,7 +26,9 @@ How loud Yap may be: the notice policy (one place, one at a time, held while dic
   dropped), saveFailed ("Couldn't save your dictation history", `shell/saving.rs`:
   held over a dictation, never dropped, the same words not twice in 10 min),
   assistantNoModel, micLost ("Contoso H2 disconnected", the dictation's mic
-  unplugged: `dictation/pipeline/unplugged.rs`), meetingRecovery ("Yap
+  unplugged: `dictation/pipeline/unplugged.rs`), lidClosed ("Your laptop's lid
+  is closed, so its microphone can't hear you", `dictation/lid.rs`, once per
+  closing there, the same words not twice in 10 min), meetingRecovery ("Yap
   closed during a meeting", held while dictating or recording, waiting as
   long as it takes; `meetings/meeting_audio.rs`), and the Voice Assistant's
   answer `assistant` (never held, never stale) — > Info — micOffer ("Contoso
@@ -34,7 +36,9 @@ How loud Yap may be: the notice policy (one place, one at a time, held while dic
   rate-limits it itself and never asks during a dictation), micSwitched
   ("Using Contoso H2 for dictation", the same words not twice in 10 min),
   language-added ("French is in My languages", 10 s) — > Tip — hint,
-  word-suggestion, snippet-suggestion ("Type that often? Save it as a
+  micTip ("Yap didn't hear you clearly", `dictation/mic_tips.rs`, which
+  rate-limits it itself — one a day —: held over a dictation and a meeting,
+  "Show tips" turns it off), word-suggestion, snippet-suggestion ("Type that often? Save it as a
   snippet", `dictionary/snippet_offer.rs`, one a day there; held over a
   dictation, dropped unseen after a minute; snippet-saved 10 s),
   language-nudge ("You spoke French · Add it to My

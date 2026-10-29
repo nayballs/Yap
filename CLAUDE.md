@@ -112,6 +112,8 @@ One folder per area (an area's `<area>.rs` lists its modules); a big module's pa
 - `dictation/mics.rs` (+ `mics/`) — the microphones' order (endpoint ids, then Windows' default), Windows' list watched (`IMMNotificationClient`), "X connected · Use it for dictation?" / "Using X" (`offer.rs`); `pipeline/unplugged.rs` ends a dictation whose mic was unplugged, its words kept.
 - `dictation/mic_watch.rs` — dead-mic watchdog: reopen the stream, then "No sound from <mic>".
 - `dictation/mic_privacy.rs` — reads Windows' microphone privacy switches; names the one blocking Yap.
+- `dictation/mic_tips.rs` — mic-quality tips: a dictation's signal judged (quiet, noisy, clipped) and a Bluetooth headset in hands-free mode (8/16 kHz) → "Yap didn't hear you clearly" with one tip and one button; one a day, each kind ≤ 3 (`mic_tips.json`), a tip ("Show tips").
+- `dictation/lid.rs` — the laptop's lid (`GUID_LIDSWITCH_STATE_CHANGE`): closed, its own mic (`mics::is_built_in`) goes last in the order; all there is → "Your laptop's lid is closed…" with Microphones.
 - `dictation/stt.rs` — `SttEngine` over transcribe-rs, the 14-model registry, download + verify, word times; each engine loads on a `Device` (graphics card or processor).
 - `dictation/stt_speed.rs` — the speech engine's device on this PC: a one-time background benchmark per model and PC at three dictation lengths (new driver, new download → again); everyday lengths (3 and 11 s) decide: the graphics card unless the processor takes ≥ 20 % less time at both; Settings' "Runs on" says what it chose and why.
 - `dictation/slow.rs` — "Taking longer than usual…": this PC's usual transcription (stt_speed's timings, recent dictations) and cleanup (by model, local or cloud) times; 2.5× + 1 s, never before 4 s; the bar's Skip cleanup.
@@ -246,6 +248,8 @@ One folder per area (an area's `<area>.rs` lists its modules); a big module's pa
 **Network receipts, Report a problem** — [privacy-receipts.md](./docs/architecture/privacy-receipts.md)
 - `privacy/net.rs` — every request through one place (`.send_for(Purpose)`, the feature from `net::within`): host, purpose, status, bytes, never content; on this PC / your network / internet; `connections.json` (7 days, folded per 10 min); the updater, the Local API and the account picture by hand.
 - `privacy/diagnostics.rs` — Report a problem: a .zip shown before it's saved (system, an allow-listed settings summary, connections, errors, 3 days of `info`+ logs scrubbed); Save dialog, never uploaded; GitHub's new-issue page.
+- `privacy/export.rs` — Download your data: one .zip (history CSV + JSON, notes and meetings as Markdown, chats, tasks, memory, the Dictionary's CSV, settings without secrets; audio and screenshots with a tick box), written to disk with progress and Cancel; Save dialog, never uploaded.
+- `privacy/reset.rs` — Reset app: "Clear everything and keep my settings", each store emptied under its own lock (memory too, Undo's copies gone), every window told, no restart; refused mid-dictation or meeting; a test holds every file config-and-data.md names to GOES or STAYS.
 
 **Updates** — [updates-and-release.md](./docs/architecture/updates-and-release.md)
 - `updates.rs` — background update checks and downloads, announcements, safe install.
@@ -285,7 +289,7 @@ One folder per area (an area's `<area>.rs` lists its modules); a big module's pa
 - `components/ConnectCalendarDialog.svelte` — "Connect your calendar" ([calendar.md](./docs/architecture/calendar.md)).
 - `views/integrations/IntegrationsView.svelte` — local API and MCP cards ([integrations.md](./docs/architecture/integrations.md)).
 - `bar/Overlay.svelte` + `bar/` — the Yap bar's page (🎤 ◉ 🔊 ✂ ^), the reading card `bar/ReadingCard.svelte` ([yap-bar.md](./docs/architecture/yap-bar.md)).
-- `settings/ConnectionsView.svelte` (Privacy & data → Network connections) + `settings/ReportProblem.svelte` (About) — [privacy-receipts.md](./docs/architecture/privacy-receipts.md); `core/connections.js` notes the account picture.
+- `settings/ConnectionsView.svelte` (Privacy & data → Network connections) + `settings/ReportProblem.svelte` (About) + `settings/YourData.svelte` (Privacy & data → Download your data, Reset app) — [privacy-receipts.md](./docs/architecture/privacy-receipts.md); `core/connections.js` notes the account picture; `notices/micTips.js` the mic tips' toast.
 - `settings/` — Settings, always mounted in the modal: `Settings.svelte` is the shell (the nav by scope with search, `settingsIndex.js`; old links via `nav.js` aliases; which page shows), every page a component (`*Page.svelte`; Language Models with `LocalModels` / `SmartRouting` / `UsageToday`), the config copy and its sync `configSync.svelte.js` (+ `configDefaults.js`, `configMerge.js`, `adoptions.svelte.js`, `dictionarySync.svelte.js`), `localLlm.svelte.js` / `languageModels.svelte.js` / `scopes.js` the state that outlives a page, `hotkeyFallback.svelte.js` the in-page keys, and every part only Settings uses; `core/providers.js` the providers, keys and their names, one row style in `ui/` ([frontend-settings.md](./docs/architecture/frontend-settings.md#the-module-map-split-2026-10-24)); `AboutYouSettings.svelte` General → Language and region + About you, `RegionSpelling.svelte` Dictation Cleanup's spelling switch, `CleanupStyles.svelte` + `cleanupStyles.js` its Styles by app (tones, examples, apps), `TransformsSettings.svelte` Commands → Transforms, `MyLanguages.svelte` + `languages.svelte.js` Dictation → My languages, `MeetingSearchSettings.svelte` Privacy & data → Search by meaning ([search.md](./docs/architecture/search.md)).
 - `settings/MemorySection.svelte` + `stores/memory.svelte.js` — Settings → Assistant → Memory and the "Yap remembered…" toast ([memory.md](./docs/architecture/memory.md)).
 - `settings/AccountSection.svelte` — Settings → Account ([accounts.md](./docs/architecture/accounts.md)).
@@ -421,7 +425,7 @@ Installer, channels and notes: [updates-and-release.md](./docs/architecture/upda
 Everything lives in `%APPDATA%/yap/` (portable: `<exe>/Data/`): `config.json`,
 `models/` (speech; `diarization/`, `tts/`, `search/`), `llm/` (on-device GGUFs; `vision/` their projectors), `history.json`,
 `notes.json`, `tasks.json` (tasks the person added or archived), `chats.json`, `calendar.json`, `updates.json`, `model_catalog.json`,
-`groq_usage.json`, `ai_usage.json` (every AI call's tokens, 90 days, counts only), `dictionary_usage.json`, `hints.json`, `word_suggestions.json`, `snippet_suggestions.json`,
+`groq_usage.json`, `ai_usage.json` (every AI call's tokens, 90 days, counts only), `dictionary_usage.json`, `hints.json`, `mic_tips.json` (the mic tips shown), `word_suggestions.json`, `snippet_suggestions.json`,
 `language_nudges.json` (the "You spoke French" answers), `notices.json`, `memory.json` (what Yap remembers about you), `chat-images/` (Chat's screenshots, Snip to Chat), `connections.json` (a week of network receipts: hosts and purposes, never content), `quieted_apps.json`
 (only mid-dictation), `stt_speed.json` (each model's device timings),
 `recent-audio/` (a day of dictation audio), `meeting-audio/` (each meeting's audio as
