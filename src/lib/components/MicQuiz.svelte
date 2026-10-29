@@ -135,7 +135,7 @@
             <span class="name">{shortMicName(m.name)}</span>
             {#if m.id === best}<span class="badge best">Best</span>{/if}
             {#if m.bluetooth}<span class="badge">Bluetooth</span>{/if}
-            {#if m.id === inUse}<span class="badge use">In use</span>{/if}
+            {#if m.id === inUse}<span class="badge inuse">In use</span>{/if}
             {#if phase === 'done'}
               <span class="q">{QUALITY[m.quality] ?? ''}</span>
             {/if}

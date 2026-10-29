@@ -127,7 +127,7 @@
                   <span class="label">{r.label}</span>
                   {#if r.desc}<span class="desc">{r.desc}</span>{/if}
                 </div>
-                <div class="how">
+                <div class="keyset">
                   {#if r.specs.length}
                     {#each r.specs as spec, i (spec + i)}
                       {#if i > 0}<span class="or">or</span>{/if}
@@ -149,7 +149,7 @@
               {#each sheet.transforms as t (t.key)}
                 <li data-shortcut={t.key}>
                   <div class="what"><span class="label">{t.name}</span></div>
-                  <div class="how">{@render keycaps(t.specs[0])}</div>
+                  <div class="keyset">{@render keycaps(t.specs[0])}</div>
                 </li>
               {/each}
             </ul>
@@ -163,7 +163,7 @@
               {#each sheet.languages as l (l.key)}
                 <li data-shortcut={l.key}>
                   <div class="what"><span class="label">Dictate in {l.name}</span></div>
-                  <div class="how">{@render keycaps(l.specs[0])}</div>
+                  <div class="keyset">{@render keycaps(l.specs[0])}</div>
                 </li>
               {/each}
             </ul>
@@ -176,7 +176,7 @@
             {#each IN_APP as a (a.label)}
               <li>
                 <div class="what"><span class="label">{a.label}</span></div>
-                <div class="how">
+                <div class="keyset">
                   <span class="keys">{#each a.keys as k (k)}<kbd>{k}</kbd>{/each}</span>
                 </div>
               </li>
@@ -290,7 +290,7 @@
     font-size: 12.5px;
     color: var(--yap-muted);
   }
-  .how {
+  .keyset {
     display: flex;
     align-items: center;
     flex-wrap: wrap;

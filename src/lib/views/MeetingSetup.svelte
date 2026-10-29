@@ -81,7 +81,7 @@
     <ul>
       {#each items as item (item.id)}
         <li>
-          <button type="button" class="item" class:done={item.done} data-item={item.id} aria-pressed={item.done} disabled={item.done} onclick={() => item.run?.()}>
+          <button type="button" class="ms-item" class:done={item.done} data-item={item.id} aria-pressed={item.done} disabled={item.done} onclick={() => item.run?.()}>
             <span class="tick" aria-hidden="true">
               {#if item.done}
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M6 12.5l4 4 8-9" /></svg>
@@ -157,7 +157,7 @@
     margin: 0;
     padding: 0;
   }
-  .item {
+  .ms-item {
     display: flex;
     align-items: flex-start;
     gap: 8px;
@@ -171,10 +171,10 @@
     text-align: left;
     cursor: pointer;
   }
-  .item:hover:not(:disabled) {
+  .ms-item:hover:not(:disabled) {
     background: var(--yap-raised-soft);
   }
-  .item:disabled {
+  .ms-item:disabled {
     cursor: default;
   }
   .tick {
@@ -188,7 +188,7 @@
     border: 1.5px solid var(--yap-switch-edge, var(--yap-border));
     border-radius: 50%;
   }
-  .item.done .tick {
+  .ms-item.done .tick {
     border-color: var(--yap-ink);
     background: var(--yap-ink);
     color: var(--yap-ink-fg);
@@ -207,7 +207,7 @@
     font-weight: 560;
     line-height: 1.3;
   }
-  .item.done .label {
+  .ms-item.done .label {
     color: var(--yap-muted);
     text-decoration: line-through;
   }

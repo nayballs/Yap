@@ -40,7 +40,7 @@
   const times = $derived(typing && speaking ? speaking / typing : null);
 </script>
 
-<div class="section typing" data-testid="typing-card">
+<div class="typingcard" data-testid="typing-card">
   <h2>Typing and speaking</h2>
   {#if testing}
     <div class="box">
@@ -82,7 +82,7 @@
 </div>
 
 <style>
-  .typing {
+  .typingcard {
     margin-bottom: 26px;
   }
   h2 {

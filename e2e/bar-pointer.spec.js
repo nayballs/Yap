@@ -9,6 +9,13 @@ import { test, expect, expectStore, pressHotkey, setConfig } from './support/fix
 
 const pointer = (bar) => bar.getByTestId('bar-pointer');
 
+/** The bar's page reloaded, as Yap starts, and listening again before Rust says anything. */
+async function reloadBar(bar) {
+  await bar.reload();
+  await expect(bar.getByLabel('Yap bar')).toBeVisible();
+  await bar.waitForTimeout(400);
+}
+
 test.afterEach(async ({ yap }) => {
   await yap.invoke('e2e_bar_pointer', { on: false }).catch(() => {});
 });
@@ -18,7 +25,7 @@ test('a first-use pointer over the idle pill, then over the first dictation, the
   // A made-up microphone: its tone, never the PC's own.
   await yap.invoke('e2e_mics', { devices: [{ id: 'usb', name: 'Microphone (Fabrikam USB Mic)', default: true }] });
   // Reloaded, as Yap starts: nothing shown yet this run.
-  await bar.reload();
+  await reloadBar(bar);
   const due = await yap.invoke('e2e_bar_pointer', { on: true });
   expect(due).toMatchObject({ idle: true, recording: true, hold: false });
   await expect(pointer(bar)).toHaveText('Click a text box, then press F24');
@@ -54,7 +61,7 @@ test('in push-to-talk it says hold, and a pointer already shown never shows agai
   const before = (await yap.invoke('get_config')).recordingMode;
   await setConfig(yap, main, { recordingMode: 'pushToTalk' });
   try {
-    await bar.reload();
+    await reloadBar(bar);
     await yap.invoke('e2e_bar_pointer', { on: true });
     await expect(pointer(bar)).toHaveText('Click a text box, then hold F24 and talk');
     await expectStore(yap, 'hints.json', (h) => !!h.pointers?.idle);
@@ -72,7 +79,7 @@ test('with tips off, no pointer', async ({ yap, main }) => {
   const bar = yap.overlay;
   await setConfig(yap, main, { showTips: false });
   try {
-    await bar.reload();
+    await reloadBar(bar);
     await yap.invoke('e2e_bar_pointer', { on: true });
     await bar.waitForTimeout(800);
     await expect(pointer(bar)).toHaveCount(0);
