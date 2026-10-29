@@ -71,11 +71,12 @@ test('Settings → Dictation: several messages, mentions and file tags (light an
   await shot(main, '01-settings-light');
 
   // Both need the names on screen.
-  await dialog.locator('[data-setting="screen-names"]').getByRole('button').click();
+  const screenNames = dialog.locator('[data-setting="screen-names"]').getByRole('button', { name: "Spell names the way they're written on screen" });
+  await screenNames.click();
   await expectStore(yap, 'config.json', (c) => c.screenNames === false);
   await expect(switchOf(mentions, 'Turn “at Sam” into a mention')).toBeDisabled();
   await expect(mentions).toContainText('Needs “Spell names the way they’re written on screen”');
-  await dialog.locator('[data-setting="screen-names"]').getByRole('button').click();
+  await screenNames.click();
   await expectStore(yap, 'config.json', (c) => c.screenNames === true);
 
   await setConfig(yap, main, { theme: 'dark' });
