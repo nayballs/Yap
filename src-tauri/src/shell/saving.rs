@@ -645,11 +645,16 @@ impl Saver {
     }
 
     /// Whether a write of `json` to `path` is refused (a file that couldn't
-    /// be read); kept for quitting if so.
+    /// be read); kept for quitting if so — a change's save, not quitting's
+    /// own try (every change saves, so the last is all there is; nothing
+    /// changed, nothing kept).
     fn refused(&'static self, path: &Path, json: &str) -> bool {
+        let quitting = QUITTING.load(Ordering::SeqCst);
         with_unread(|list| match list.iter_mut().find(|u| std::ptr::eq(u.saver, self) && u.path == path) {
             Some(u) => {
-                u.refused = Some(json.to_string());
+                if !quitting {
+                    u.refused = Some(json.to_string());
+                }
                 true
             }
             None => false,
@@ -760,9 +765,18 @@ fn reread_all() -> usize {
         }
         savers
     });
+    // Reading again in the background says nothing: a store's `save_now`
+    // ends with its check, which counts as said, so what wasn't said yet
+    // is left to the notice.
+    let told: Vec<(&'static Saver, bool)> = with_failed(|list| list.iter().map(|f| (f.saver, f.told)).collect());
     for saver in savers {
         let _ = (saver.save_now)();
     }
+    with_failed(|list| {
+        for f in list.iter_mut() {
+            f.told = told.iter().find(|(s, _)| std::ptr::eq(*s, f.saver)).is_some_and(|(_, was)| *was);
+        }
+    });
     with_unread(|list| list.len())
 }
 
@@ -904,12 +918,17 @@ pub fn retry_all() -> Result<(), SaveError> {
     first.map_or(Ok(()), Err)
 }
 
+/// Quitting ([`flush`]): its own tries are never what's kept beside a file
+/// Yap couldn't read.
+static QUITTING: AtomicBool = AtomicBool::new(false);
+
 /// Quitting: one more try for anything unsaved (the log says how it went);
 /// a store whose file still can't be read keeps what it held beside it.
 pub fn flush() {
     if with_failed(|list| list.is_empty()) {
         return;
     }
+    QUITTING.store(true, Ordering::SeqCst);
     match retry_all() {
         Ok(()) => tracing::info!("saves: everything unsaved is saved now"),
         Err(e) => tracing::warn!(reason = ?e.reason, "saves: some changes couldn't be saved before quitting"),
@@ -1534,6 +1553,25 @@ mod tests {
         assert!(!SHELF.unread(&path) && !SHELF.unsaved());
         let on_disk: Shelf = SHELF.load(&path);
         assert_eq!(on_disk.items.iter().map(|i| i.text.as_str()).collect::<Vec<_>>(), ["jam", "honey"]);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The background reads (each store's own save, which ends with its
+    /// check) never count as telling the person: the notice still says it.
+    #[test]
+    fn reading_again_in_the_background_leaves_the_notice_to_say_it() {
+        fn check_only() -> Result<(), SaveError> {
+            BACKGROUND.check()
+        }
+        static BACKGROUND: Saver = Saver::new("test-read-background", "your shelf", check_only);
+        let dir = scratch("read-background");
+        let path = dir.join("shelf.json");
+        shelf_on_disk(&path, &[item(1, "jam")]);
+        stage_read_failures("test-read-background", u32::MAX);
+        let _: Shelf = BACKGROUND.load(&path);
+        assert_eq!(reread_all(), 1);
+        assert_eq!(untold_alert().map(|a| a.title), Some("Yap couldn't read your shelf".to_string()));
+        stage_read_failures("test-read-background", 0);
         let _ = std::fs::remove_dir_all(&dir);
     }
 
