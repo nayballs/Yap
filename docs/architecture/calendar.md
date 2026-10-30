@@ -14,11 +14,17 @@ Connecting Google Calendar or an iCal link, sync, parsing, the reminder card, pr
   + `calendar.events.owned.readonly` only; the client id/secret baked in from
   `YAP_GOOGLE_CALENDAR_CLIENT_ID`/`_SECRET` by `option_env!` — none = no
   Google: "Google sign-in is in the installed Yap. In this build, use a
-  private iCal link…"; the token is revoked on Disconnect) or any private iCal link
+  private iCal link…"; the token is revoked on Disconnect, and a grant Yap
+  doesn't keep — the events box unticked, or any failure after Google
+  granted it — is revoked at once, unless an account already connected may
+  be the same one: Google ends all of an account's tokens together) or any private iCal link
   ("Outlook Calendar" = a guided publish-your-calendar ICS flow; "Other
   calendar"; HTTPS only, `webcal://` → https). Secrets (refresh token, link)
   in Credential Manager (`calendar/vault.rs`: `yap-calendar-<n>.com.yap.dictation`,
-  Local persistence; test mode: `calendar-secrets.e2e.json`); `calendar.json`
+  Local persistence; test mode: `calendar-secrets.e2e.json`; saved outside
+  the state lock, the slot held meanwhile — `Reserved`, from a link's first
+  fetch until it's listed — so a link and a Google sign-in finishing at once
+  never share one); `calendar.json`
   keeps connections' names, meetings from 12 h back to 7 days ahead, reminder
   answers (2 days) and the nudge. **Sync** (a tokio scheduler waking ≤ 30 s;
   a wall-clock jump = the PC slept → sync now): every 12 min, on wake, on
@@ -26,7 +32,8 @@ Connecting Google Calendar or an iCal link, sync, parsing, the reminder card, pr
   `invalid_grant` → "Connect again". **Parsing** (`calendar/ics.rs`, Yap's own,
   lenient: byte-wise unfolding, RFC 6868, bad lines skipped) + recurrence via
   `rrule` on wall-clock time then the event's zone (EXDATE/RDATE/
-  RECURRENCE-ID overrides); **zones** (`calendar/tz.rs`): IANA (`chrono-tz`) →
+  RECURRENCE-ID overrides; DTSTART always an occurrence and one of COUNT's,
+  RFC 5545 §3.8.5.3; a DURATION past a century, or past i64, is none); **zones** (`calendar/tz.rs`): IANA (`chrono-tz`) →
   Windows names (CLDR table) → the feed's VTIMEZONE → "(UTC±hh:mm)" → floating;
   RFC 5545 gap/overlap rules. **Filters** (`calendar/model.rs`, Wispr's): a
   meeting has another invitee (not a room, not declined) or a join link; no
@@ -210,7 +217,10 @@ Connecting Google Calendar or an iCal link, sync, parsing, the reminder card, pr
   notes and memory outside the lock) returns the kept brief when its
   fingerprint matches, else stores Yap's part at once (`writing` while a
   summary is due) and spawns `write_brief` (one at a time,
-  `brief_job`/`brief_waiting`; a failure waits `BRIEF_RETRY`); `BriefAi::of`
+  `brief_job`/`brief_waiting`; a failure waits `BRIEF_RETRY`). Reset app
+  (`forget_briefs`) moves `briefs_epoch` on: a brief made or written from
+  the notes and memory before it is never kept (`store_brief` refuses it;
+  made again from what's left). `BriefAi::of`
   = the meeting's endpoint (`meeting_summary::resolve_endpoint`), or why
   not (no model, the on-device model stopped — never started for a brief —,
   too small). `tick_briefs` (each scheduler turn): meetings from

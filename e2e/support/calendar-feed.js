@@ -1,7 +1,8 @@
 // A local stand-in for a calendar's private iCal address (calendar.rs):
 // serves an ICS feed the spec builds at test time, relative to now, under a
 // secret-looking path, and records every fetch. `set(ics)` swaps the feed
-// (a calendar that changed); any other path is a 404 (a link that was reset).
+// (a calendar that changed), `delay(ms)` answers late (a slow calendar);
+// any other path is a 404 (a link that was reset).
 // Plain HTTP on 127.0.0.1, which Yap accepts for this PC's own servers only.
 import crypto from 'node:crypto';
 import http from 'node:http';
@@ -74,16 +75,21 @@ export function calendarFile(name, events) {
 
 export async function startCalendarFeed() {
   let body = calendarFile('Calendar', []);
+  let wait = 0;
   const requests = [];
   const path = `/calendar/ical/private-${crypto.randomBytes(8).toString('hex')}/basic.ics`;
   const server = http.createServer((req, res) => {
     requests.push(req.url);
-    if (req.url === path) {
-      res.writeHead(200, { 'content-type': 'text/calendar; charset=utf-8' });
-      res.end(body);
-    } else {
-      res.writeHead(404).end();
-    }
+    const answer = () => {
+      if (req.url === path) {
+        res.writeHead(200, { 'content-type': 'text/calendar; charset=utf-8' });
+        res.end(body);
+      } else {
+        res.writeHead(404).end();
+      }
+    };
+    if (wait > 0) setTimeout(answer, wait);
+    else answer();
   });
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
   const base = `http://127.0.0.1:${server.address().port}`;
@@ -93,6 +99,8 @@ export async function startCalendarFeed() {
     /** An address that's gone (404). */
     missing: `${base}/calendar/ical/private-reset/basic.ics`,
     set: (ics) => (body = ics),
+    /** Answer every fetch `ms` late (0: at once): a slow calendar. */
+    delay: (ms) => (wait = ms),
     requests,
     close: () => new Promise((resolve) => server.close(resolve)),
   };

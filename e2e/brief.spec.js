@@ -355,3 +355,40 @@ test('Settings → Meetings: "Prepare a brief before meetings", on by default, a
   await expectStore(yap, 'config.json', (c) => c.meetingBrief === true);
   await closeSettings(main);
 });
+
+// Last: it clears the seeded notes and memory.
+test('Reset app while a brief is being written: what it wrote from the old notes and memory is never kept', async ({
+  yap,
+  main,
+  calFeed,
+  fakeLlm,
+}) => {
+  test.setTimeout(120_000);
+  await connected(yap, calFeed);
+  const key = (await status(yap)).events.find((e) => e.title === TITLE).key;
+  const kept = () => yap.readJson('calendar.json')?.briefs?.[key];
+  const calls = briefCalls(fakeLlm).length;
+  fakeLlm.delay('brief', 6_000);
+  try {
+    // Made again: its summary is on its way from the model…
+    await yap.invoke('calendar_brief', { key, refresh: true });
+    await expect.poll(() => briefCalls(fakeLlm).length).toBe(calls + 1);
+    const asked = Date.now();
+    // …when everything is cleared.
+    await yap.invoke('data_reset');
+    expect(yap.readJson('notes.json')?.notes ?? []).toEqual([]);
+    // Once the model has answered, the brief kept is made from what's left
+    // (the invite): nothing from the notes or memory the reset cleared.
+    await expect.poll(() => kept()?.writing === false, { timeout: 45_000 }).toBe(true);
+    const answered = asked + 6_000 + 1_500 - Date.now();
+    if (answered > 0) await main.waitForTimeout(answered);
+    const brief = kept();
+    expect(brief.sources.map((s) => s.kind)).toEqual(['invite']);
+    const text = JSON.stringify(brief);
+    expect(text).not.toContain('revised pricing table');
+    expect(text).not.toContain('Product lead at Acme');
+    expect(text).not.toContain('free tier');
+  } finally {
+    fakeLlm.delay('brief', 0);
+  }
+});

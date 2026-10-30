@@ -114,18 +114,27 @@ export async function startFakeGoogle({ clientId, clientSecret, account = 'teste
     get lastAuth() {
       return lastAuth;
     },
-    /** "Allow" on the consent page: where Google sends the browser next. */
-    approve(authUrl) {
+    /**
+     * "Allow" on the consent page: where Google sends the browser next.
+     * `scope`: what was granted, when the person unticked a box (default:
+     * everything Yap asked for).
+     */
+    approve(authUrl, { scope } = {}) {
       const u = new URL(authUrl);
       const p = Object.fromEntries(u.searchParams);
       lastAuth = p;
+      const granted = scope ?? p.scope;
       const code = `4/e2e-${crypto.randomBytes(6).toString('hex')}`;
-      codes.set(code, { challenge: p.code_challenge, redirectUri: p.redirect_uri, scope: p.scope });
+      codes.set(code, { challenge: p.code_challenge, redirectUri: p.redirect_uri, scope: granted });
       const back = new URL(p.redirect_uri);
       back.searchParams.set('state', p.state);
       back.searchParams.set('code', code);
-      back.searchParams.set('scope', p.scope);
+      back.searchParams.set('scope', granted);
       return back.toString();
+    },
+    /** Refresh tokens Google has issued and not revoked. */
+    get live() {
+      return [...refresh];
     },
     /** "Cancel" on the consent page. */
     deny(authUrl) {
