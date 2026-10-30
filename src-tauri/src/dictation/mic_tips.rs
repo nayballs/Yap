@@ -393,7 +393,12 @@ pub fn after_dictation(app: &AppHandle, audio: &[f32], mic: Option<MicInfo>, ord
         while crate::notices::notice::moment().dictating && started.elapsed() < std::time::Duration::from_secs(60) {
             std::thread::sleep(std::time::Duration::from_millis(250));
         }
-        let present = crate::dictation::mics::present().unwrap_or_default();
+        let mut present = crate::dictation::mics::present().unwrap_or_default();
+        // The laptop's lid closed: its own mic can't hear, so it's never the
+        // one to try (`lid.rs`).
+        if crate::dictation::lid::closed() {
+            present.retain(|e| !e.built_in);
+        }
         let other = other_mic(&present, &order, mic.as_ref().and_then(|m| m.endpoint.as_deref()));
         let Some(tip) = pick(trouble, mic.as_ref(), other.as_ref()) else { return };
         offer(&app, tip);
