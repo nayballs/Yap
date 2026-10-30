@@ -17,6 +17,7 @@
   import Segmented from '../ui/Segmented.svelte';
   import ConfirmDialog from '../ui/ConfirmDialog.svelte';
   import { toast } from '../ui/toast.svelte.js';
+  import { showSaveError } from '../notices/saveErrors.js';
   import { skills, initSkills, refreshSkills } from '../stores/skills.svelte.js';
   import { commandFromName, commandProblem, runsOnLabel } from '../core/skills.js';
 
@@ -93,7 +94,15 @@
       await refreshSkills();
       toast({ title: `Saved /${saved.command}`, description: saved.runsOn === 'meetings' ? 'Run it in Chat or Ask across meetings.' : "Run it in a meeting's Ask box." });
     } catch (e) {
-      toast({ title: "Couldn't save the Skill", description: String(e), variant: 'destructive' });
+      // Made, but not on disk yet (a full disk): Yap keeps it and says so
+      // with Try again; the form closes as for a save. Left open, Save again
+      // found the Skill already there ("You already have a Skill with /…").
+      if (showSaveError(e)) {
+        draft = null;
+        await refreshSkills();
+      } else {
+        toast({ title: "Couldn't save the Skill", description: String(e), variant: 'destructive' });
+      }
     } finally {
       saving = false;
     }

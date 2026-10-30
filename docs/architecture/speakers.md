@@ -327,11 +327,17 @@ Telling the call side's voices apart (the beta speaker engine, a child process) 
   overlap with the old labels, else by sound for a named old voice left
   over, else new numbers on from the note's highest), every call line
   labelled again (`relabel`: split where the speaker changes; a line the
-  person assigned keeps its speaker; one they edited is never split, it
-  takes the voice heard most over it; a line near no voice stays as it
-  was), map entries of numbers no line uses dropped (never a name the
-  person gave), "Them"'s 1:1 guess settled, names suggested again, then
-  the flags looked for. Cancelled or failed: nothing changes. Test mode:
+  person assigned keeps its speaker, and so does a line of a told-apart
+  voice they put elsewhere — merged into a named person by "Rename
+  everywhere", "It was me", or merged into Them (`put_elsewhere`; until
+  2026-10-30 those lines became a new "Speaker N" and the merge went with
+  the voice); one they edited is never split, it takes the voice heard
+  most over it; a line near no voice stays as it was), map entries of
+  numbers no line uses dropped (never a name the person gave), "Them"'s
+  1:1 guess settled, names suggested again, then the flags looked for.
+  Cancelled or failed: nothing changes — nor when the meeting was resumed
+  while the engine ran (the recording numbers its own voices from the note
+  as it started: the job ends "recording again", to run once it ends). Test mode:
   `e2e_find_speakers {noteId, recordings: [[{startMs, endMs, speaker}]],
   paceMs}` is the next run's result (consumed by it), paced so its
   progress and Cancel can be seen. Logs: counts and times.

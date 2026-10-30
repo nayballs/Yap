@@ -1144,6 +1144,15 @@ pub fn link_event(
     })
 }
 
+/// Whether note `id` is still the note made at `created_ts` (its `createdTs`
+/// when a job read it). Note ids come round again (a new note takes the
+/// highest id plus one), so a job that read a note and then waited on a
+/// model — a summary, an Action, Make notes longer, a refine — never writes
+/// into a new note that got the id of one deleted meanwhile.
+pub fn still_the_note(id: u64, created_ts: u64) -> bool {
+    with_notes(|notes| notes.iter().any(|n| n.id == id && n.created_ts == created_ts))
+}
+
 /// The calendar meeting note `id` belongs to, if any (without cloning the
 /// note: the guard rails ask once a second while a meeting records).
 pub fn event_of(id: u64) -> Option<NoteEvent> {
@@ -1563,6 +1572,9 @@ fn forget_extras(id: u64) {
     // (chat/note_chats.rs) and its vectors in the search index
     // (search/index.rs).
     crate::meetings::meeting_audio::forget(id);
+    // Its summary job, retired (its run never writes into a new note given
+    // the id: `still_the_note`).
+    crate::meetings::meeting_end::forget(id);
     crate::chat::chats::delete_for_note(id);
     crate::search::removed();
     // Its version history and its pin (notes/versions.rs, notes/pins.rs).
@@ -1654,6 +1666,22 @@ mod tests {
         assert_eq!(on_disk.actions.len(), default_actions().len(), "the built-ins once");
         TEST_PATH.with(|p| *p.borrow_mut() = None);
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Note ids come round again: a job that read the newest note, then
+    /// waited on a model while it was deleted and a note made, sees the new
+    /// one is another note (`still_the_note`) and never writes there.
+    #[test]
+    fn a_new_note_given_a_deleted_ones_id_is_another_note() {
+        with_store(|s| *s = store_with_note());
+        let old = get(1).unwrap();
+        assert!(still_the_note(1, old.created_ts));
+        delete(1);
+        assert!(!still_the_note(1, old.created_ts), "gone");
+        let new = create("Lunch plans", "", "manual", "");
+        assert_eq!(new.id, 1, "the id comes round again");
+        assert!(!still_the_note(1, old.created_ts));
+        assert!(still_the_note(1, new.created_ts));
     }
 
     #[test]

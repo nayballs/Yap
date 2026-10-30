@@ -249,11 +249,17 @@
     if (saveTimer === null) return;
     clearTimeout(saveTimer);
     saveTimer = null;
+    const typed = dirty;
+    // Never left set for the next note (this one deleted meanwhile).
+    dirty = { title: false, content: false };
     if (!note) return;
     const args = { id: note.id, origin: LABEL };
-    if (dirty.title) args.title = note.title;
-    if (dirty.content) args.content = note.content;
-    dirty = { title: false, content: false };
+    if (typed.title) args.title = note.title;
+    if (typed.content) args.content = note.content;
+    // A reload already out reads the note from before this save: it keeps
+    // these fields as typed (`changing`), not the older words it brings.
+    if (typed.title) changing('title');
+    if (typed.content) changing('content');
     // A failed save keeps the edit in memory and says so, with Try again.
     invoke('note_update', args).catch((e) => showSaveError(e));
   }

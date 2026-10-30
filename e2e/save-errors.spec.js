@@ -8,7 +8,7 @@
 //   (saveErrors.js); the note stays as typed, and Try again writes it.
 // - A save that fails by itself (history after a dictation): one notice
 //   through the notice policy, however many fail, with Try again.
-import { test, expect, expectStore, openView } from './support/fixtures.js';
+import { test, expect, expectStore, openView, openSettings, closeSettings } from './support/fixtures.js';
 
 test.use({ yapOptions: { name: 'save-errors' } });
 
@@ -67,5 +67,34 @@ test('history that fails to save after dictations is said once, with Try again',
     );
   } finally {
     await yap.invoke('e2e_fail_saves', { store: 'history', count: 0 });
+  }
+});
+
+// A Skill saved on a full disk is made (Yap keeps it): until 2026-10-30 the
+// form stayed open with an error, and Save again said "You already have a
+// Skill with /garden-jobs".
+test('a Skill that couldn’t be saved is kept, its form closes, and Try again saves it', async ({ yap, main, shot }) => {
+  const dialog = await openSettings(main, 'Skills');
+  await dialog.getByRole('button', { name: 'New Skill' }).click();
+  const form = dialog.getByRole('group', { name: 'New Skill' });
+  await form.getByRole('textbox', { name: 'Skill name' }).fill('Garden jobs');
+  await expect(form.getByRole('textbox', { name: 'Skill command' })).toHaveValue('garden-jobs');
+  await form.getByRole('textbox', { name: 'Skill instructions' }).fill('List every job in the garden that was mentioned, and when.');
+  await yap.invoke('e2e_fail_saves', { store: 'skills', count: 1 });
+  try {
+    await form.getByRole('button', { name: 'Save Skill' }).click();
+    const toast = toastsWith(main, "Couldn't save your Skills");
+    await expect(toast).toBeVisible();
+    await expect(form).toHaveCount(0);
+    await expect(dialog.locator('[data-skill="garden-jobs"]')).toBeVisible();
+    expect(JSON.stringify(yap.readJson('skills.json') ?? {})).not.toContain('garden-jobs');
+    await expect(toastsWith(main, 'You already have a Skill')).toHaveCount(0);
+    await shot(main, '04-skill-not-saved');
+    await toast.getByRole('button', { name: 'Try again' }).click();
+    await expect(toastsWith(main, 'Saved')).toBeVisible();
+    await expectStore(yap, 'skills.json', (s) => s.skills?.some((k) => k.command === 'garden-jobs'));
+  } finally {
+    await yap.invoke('e2e_fail_saves', { store: 'skills', count: 0 });
+    await closeSettings(main);
   }
 });

@@ -335,6 +335,14 @@ pub fn summary_running_for(note_id: u64) -> bool {
     jobs().get(&note_id).is_some_and(|j| j.state == "running")
 }
 
+/// Note `note_id` was deleted, however (`notes::delete`): its summary job
+/// is retired. Note ids come round again, and a new note given the id never
+/// shows the old one's "Step 2 of 3" or error, nor waits on it (a line's
+/// delete, a refine, the transcript's days).
+pub fn forget(note_id: u64) {
+    jobs().remove(&note_id);
+}
+
 fn publish(app: &AppHandle, summary: Summary) {
     jobs().insert(summary.note_id, summary.clone());
     let _ = app.emit(EVENT_SUMMARY, summary);
@@ -469,6 +477,11 @@ async fn write_action_plan(app: &AppHandle, note_id: u64, replace: bool, step: i
     if crate::config::load().meeting_speaker_names {
         crate::speakers::naming::ask_model(app, note_id).await;
     }
+    // Deleted while the model named the voices, its id given to a new note:
+    // never that note's summary (`notes::still_the_note`).
+    if !crate::notes::still_the_note(note_id, note.created_ts) {
+        return Err("Note not found".to_string());
+    }
     let actions = crate::notes::actions();
     let action = actions
         .iter()
@@ -567,6 +580,20 @@ pub async fn meeting_delete(app: AppHandle, note_id: u64) -> Result<(), String> 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A meeting deleted however (the local API's delete, the Notes view's)
+    /// while its summary is written: its job goes with it, so a new note
+    /// given its id never shows "Step 2 of 3", nor waits on it.
+    #[test]
+    fn a_deleted_meetings_summary_job_goes_with_it() {
+        let id = 424_242;
+        crate::notes::load_json_for_test(&format!(r#"{{"notes":[{{"id":{id},"title":"Weekly sync","content":"","createdTs":1,"updatedTs":1}}]}}"#));
+        jobs().insert(id, Summary { note_id: id, run: 1, state: "running", step: 2, steps: STEPS, error: None });
+        assert!(summary_running_for(id));
+        crate::meetings::meeting::delete_note(id).unwrap();
+        assert!(!summary_running_for(id));
+        assert!(jobs().get(&id).is_none());
+    }
 
     #[test]
     fn a_handful_of_words_with_nothing_typed_is_a_mistake() {

@@ -731,12 +731,14 @@ async fn sync_all(app: &AppHandle) {
         if let Err(e) = &result {
             tracing::info!(connection = %conn.id, kind = %conn.kind, "calendar: sync failed: {}", e.message);
         }
-        results.push((conn.id.clone(), result));
+        results.push((conn.id.clone(), conn.added_ts, result));
     }
     {
         let mut s = lock();
-        for (id, result) in results {
-            let Some(conn) = s.store.connections.iter_mut().find(|c| c.id == id) else { continue };
+        for (id, added_ts, result) in results {
+            // The calendar fetched, not another connected into its slot
+            // since (its meetings would show under the new one).
+            let Some(conn) = s.store.connections.iter_mut().find(|c| c.id == id && c.added_ts == added_ts) else { continue };
             match result {
                 Ok(fetched) => {
                     conn.synced_ts = now;
@@ -758,7 +760,7 @@ async fn sync_all(app: &AppHandle) {
         s.store.answered.retain(|_, at| *at > now - ANSWER_KEEP);
         s.syncing = false;
         // A calendar connected while this sync ran gets its own straight away.
-        let added = s.store.connections.iter().any(|c| !connections.iter().any(|o| o.id == c.id));
+        let added = s.store.connections.iter().any(|c| !connections.iter().any(|o| o.id == c.id && o.added_ts == c.added_ts));
         s.next_sync = if added { now_secs() } else { now_secs() + SYNC_EVERY };
         save_store(&s.store);
         tracing::info!(events = s.store.events.len(), "calendar: synced");
@@ -1213,12 +1215,17 @@ pub async fn calendar_disconnect(app: AppHandle, id: String) -> Result<(), Strin
         save_store(&s.store);
         conn
     };
-    if conn.kind == "google" {
-        if let Some(secret) = vault::load(&id).and_then(|s| serde_json::from_str::<GoogleSecret>(&s).ok()) {
-            google::revoke(&secret.refresh_token).await;
-        }
-    }
+    // Its secret goes before Google is told: the slot is free already, and a
+    // calendar connected into it while the revoke waits on Google (up to its
+    // timeout) saves its own secret there, which a delete after the wait
+    // took (the 2026-10-23 review).
+    let secret = (conn.kind == "google")
+        .then(|| vault::load(&id).and_then(|s| serde_json::from_str::<GoogleSecret>(&s).ok()))
+        .flatten();
     vault::delete(&id);
+    if let Some(secret) = secret {
+        google::revoke(&secret.refresh_token).await;
+    }
     tracing::info!(connection = %id, kind = %conn.kind, "calendar: disconnected");
     emit(&app);
     wake();
@@ -2140,7 +2147,22 @@ pub async fn respond(app: &AppHandle, id: u64, action: &str) -> Result<Option<u6
     let card = {
         let mut s = lock();
         match s.card.take() {
-            Some(card) if card.id == id => card,
+            Some(card) if card.id == id => {
+                // Answered under the same lock as the card's taken: the
+                // scheduler's tick (every 5 s while a card is up) never
+                // finds it due again while the card is withdrawn below.
+                let key = model::answer_key(&card.event);
+                match action {
+                    "snooze" => {
+                        s.snoozed.insert(key, now_secs() + SNOOZE_SECS);
+                    }
+                    "dismiss" | "join" | "start" => {
+                        s.store.answered.insert(key, now_secs());
+                    }
+                    _ => {}
+                }
+                card
+            }
             other => {
                 // Answered already, on the other surface.
                 s.card = other;
@@ -2395,12 +2417,19 @@ async fn write_brief(app: AppHandle, facts: brief::Facts, ep: crate::meetings::m
     };
     tracing::debug!("calendar: brief:\n{}", brief::plain_text(&b));
     store_brief(&app, &b);
-    let next = {
-        let mut s = lock();
-        s.brief_job = None;
-        (!s.brief_waiting.is_empty()).then(|| s.brief_waiting.remove(0))
-    };
-    if let Some(next) = next {
+    lock().brief_job = None;
+    // The next waiting, until one starts a summary of its own (it goes on
+    // from there): one that needs none, or can't be made any more, starts
+    // nothing, and those after it waited for ever, "writing" (a waiting
+    // brief is busy to `prepare_brief`, so the scheduler never retried it).
+    loop {
+        let next = {
+            let mut s = lock();
+            if s.brief_job.is_some() || s.brief_waiting.is_empty() {
+                break;
+            }
+            s.brief_waiting.remove(0)
+        };
         let handle = app.clone();
         let _ = tauri::async_runtime::spawn_blocking(move || prepare_brief(&handle, &next, false)).await;
     }

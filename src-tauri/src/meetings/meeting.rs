@@ -1180,19 +1180,45 @@ fn default_output_name() -> String {
 // turn; the gap is silence, as for any device change.
 
 /// The microphone "You" records from now: (endpoint id — empty when it was
-/// opened as Windows' default without a list —, name).
-static MIC: Mutex<Option<(String, String)>> = Mutex::new(None);
+/// opened as Windows' default without a list —, name), and the number of
+/// the capture thread that said so ([`new_capture`]).
+static MIC: Mutex<(u64, Option<(String, String)>)> = Mutex::new((0, None));
 /// A microphone the person asked "You" to move to (endpoint id, name).
 static MIC_ASKED: Mutex<Option<(String, String)>> = Mutex::new(None);
+/// Each recording's capture thread has a number, higher than the last. A
+/// stop frees the recorder's slot once the last chunk is in, while the old
+/// thread may still be in its 200 ms sleep: a recording started straight
+/// after (Switch to Zoom?, a resume) opens its mic first, and the old
+/// thread's end must never clear what the new one noted.
+static CAPTURES: AtomicU64 = AtomicU64::new(0);
 
-fn note_mic(mic: Option<(String, String)>) {
-    *MIC.lock().unwrap_or_else(|p| p.into_inner()) = mic;
+/// A capture thread starts: its number. Nothing is noted, and nothing is
+/// asked of it yet (a move asked of the last recording is let go).
+pub(crate) fn new_capture() -> u64 {
+    let capture = CAPTURES.fetch_add(1, Ordering::SeqCst) + 1;
+    note_mic(capture, None);
+    take_mic_asked();
+    capture
+}
+
+/// Capture thread `capture` says which mic "You" is on — unless a newer
+/// one has spoken since.
+fn note_mic(capture: u64, mic: Option<(String, String)>) {
+    let mut m = MIC.lock().unwrap_or_else(|p| p.into_inner());
+    if capture >= m.0 {
+        *m = (capture, mic);
+    }
+}
+
+/// Capture thread `capture` stopped: no mic, unless a newer one is up.
+fn capture_ended(capture: u64) {
+    note_mic(capture, None);
 }
 
 /// The microphone "You" records from while a meeting records: (endpoint
 /// id, empty when unknown; name).
 pub fn mic_in_use() -> Option<(String, String)> {
-    MIC.lock().unwrap_or_else(|p| p.into_inner()).clone()
+    MIC.lock().unwrap_or_else(|p| p.into_inner()).1.clone()
 }
 
 /// "Use Contoso H2": move "You" to this microphone (endpoint `id`, `name`)
@@ -1211,18 +1237,19 @@ pub(crate) fn take_mic_asked() -> Option<(String, String)> {
     MIC_ASKED.lock().unwrap_or_else(|p| p.into_inner()).take()
 }
 
-/// The meeting's capture says which microphone "You" records from now
-/// (the test player, as the real capture does).
+/// The meeting's capture (`capture`, from [`new_capture`]) says which
+/// microphone "You" records from now (the test player, as the real capture
+/// does).
 #[cfg(debug_assertions)]
-pub(crate) fn set_mic_in_use(id: &str, name: &str) {
-    note_mic(Some((id.to_string(), name.to_string())));
+pub(crate) fn set_mic_in_use(capture: u64, id: &str, name: &str) {
+    note_mic(capture, Some((id.to_string(), name.to_string())));
 }
 
-/// The test player stopped: no microphone, nothing asked for.
+/// The test player `capture` stopped: no microphone (unless a newer one
+/// is up).
 #[cfg(debug_assertions)]
-pub(crate) fn clear_mic_in_use() {
-    note_mic(None);
-    take_mic_asked();
+pub(crate) fn clear_mic_in_use(capture: u64) {
+    capture_ended(capture);
 }
 
 /// How long "You" has heard nothing above the silence gate (ms of meeting
@@ -1253,6 +1280,8 @@ pub(crate) fn tell_mic_changed(app: &AppHandle, next: &str) {
 /// moved (see "Following the microphone"): reopened, moved to the next one
 /// (a marker and a notice), or left. On the capture thread.
 struct MicFollower {
+    /// Its capture thread's number ([`new_capture`]).
+    capture: u64,
     stopped: Arc<AtomicBool>,
     /// The device it's on (`None`: Windows' default without a list, or none).
     at: Option<crate::dictation::mics::Endpoint>,
@@ -1282,7 +1311,7 @@ impl MicFollower {
             Ok((stream, opened_name)) => {
                 tracing::info!("Meeting: \"You\" moved to the call's microphone");
                 *mic = Some(stream);
-                note_mic(Some((ep.id.clone(), opened_name)));
+                note_mic(self.capture, Some((ep.id.clone(), opened_name)));
                 self.at = Some(ep);
             }
             Err(e) => {
@@ -1349,7 +1378,7 @@ impl MicFollower {
         match open_mic(buf, overflow, &self.stopped, &self.away) {
             Ok((stream, ep, name)) => {
                 *mic = Some(stream);
-                note_mic(Some((ep.as_ref().map(|e| e.id.clone()).unwrap_or_default(), name.clone())));
+                note_mic(self.capture, Some((ep.as_ref().map(|e| e.id.clone()).unwrap_or_default(), name.clone())));
                 self.at = ep;
                 if let Ok(mut b) = buf.lock() {
                     b.mic_changed(&name);
@@ -1388,6 +1417,7 @@ fn spawn_device_capture(
         .name("meeting-capture".into())
         .spawn(move || {
             let mut follow = MicFollower {
+                capture: new_capture(),
                 stopped: Arc::new(AtomicBool::new(false)),
                 at: None,
                 away: Vec::new(),
@@ -1395,7 +1425,7 @@ fn spawn_device_capture(
             };
             let mut mic = match open_mic(&mic_buf, &overflow, &follow.stopped, &[]) {
                 Ok((stream, ep, name)) => {
-                    note_mic(Some((ep.as_ref().map(|e| e.id.clone()).unwrap_or_default(), name)));
+                    note_mic(follow.capture, Some((ep.as_ref().map(|e| e.id.clone()).unwrap_or_default(), name)));
                     follow.at = ep;
                     Some(stream)
                 }
@@ -1409,6 +1439,7 @@ fn spawn_device_capture(
             let mut sys = match open_loopback(&sys_buf, &overflow) {
                 Ok(s) => Some(s),
                 Err(e) => {
+                    capture_ended(follow.capture);
                     let _ = ready_tx.send(Err(e));
                     return;
                 }
@@ -1445,8 +1476,7 @@ fn spawn_device_capture(
             }
             drop(mic);
             drop(sys);
-            note_mic(None);
-            take_mic_asked();
+            capture_ended(follow.capture);
             tracing::info!("Meeting capture streams stopped");
         })
         .map_err(|e| format!("Failed to spawn capture thread: {e}"))?;
@@ -2135,9 +2165,6 @@ pub fn start(app: AppHandle, engine_slot: EngineSlot, note_id: u64) -> Result<()
         }
         return Err(e);
     }
-    // This recording's lines (from here on) get the engine's voices
-    // (speakers::labels).
-    crate::speakers::labels::begin(note_id, diarizer.as_ref().map(|d| d.id()));
 
     let started_ms = now_ms();
     if let Some(r) = &recorder {
@@ -2152,6 +2179,11 @@ pub fn start(app: AppHandle, engine_slot: EngineSlot, note_id: u64) -> Result<()
     };
     claim.record(session);
     ACTIVE_NOTE.store(note_id, Ordering::SeqCst);
+    // This recording's lines (from here on: the worker below makes them)
+    // get the engine's voices (speakers::labels). Once it says it records:
+    // the call app's reader (`call_ui.rs`) reads only while it does, and
+    // started before, it looked, saw nothing recording yet and stopped.
+    crate::speakers::labels::begin(note_id, diarizer.as_ref().map(|d| d.id()));
     let _ = app.emit("yap-meeting-state", state());
     tracing::info!(note_id, "Meeting recording started");
 
@@ -2586,6 +2618,30 @@ mod tests {
         *slot() = Slot::Free;
         assert!(delete_note(note.id).is_ok());
         assert!(crate::notes::get(note.id).is_none());
+    }
+
+    /// The slot frees once a recording's last chunk is in, while its capture
+    /// thread may still be asleep: a recording started straight after opens
+    /// its mic first, and the old thread's end (until 2026-10-30, it cleared
+    /// the mic and any "Use this mic" asked) leaves the new one's alone.
+    #[test]
+    fn an_old_capture_ending_late_leaves_the_next_recordings_mic() {
+        let _turn = SLOT_TESTS.lock().unwrap_or_else(|p| p.into_inner());
+        let mic = |id: &str, name: &str| Some((id.to_string(), name.to_string()));
+        let old = new_capture();
+        note_mic(old, mic("a", "Headset"));
+        let new = new_capture();
+        assert_eq!(mic_in_use(), None, "a new recording starts with none noted");
+        note_mic(new, mic("b", "Desk mic"));
+        *MIC_ASKED.lock().unwrap() = Some(("c".into(), "Contoso H2".into()));
+        // The old thread wakes, reopens and ends.
+        note_mic(old, mic("a", "Headset"));
+        capture_ended(old);
+        assert_eq!(mic_in_use(), mic("b", "Desk mic"));
+        assert_eq!(take_mic_asked(), Some(("c".into(), "Contoso H2".into())), "still the new one's to take");
+        // The new one ends: none.
+        capture_ended(new);
+        assert_eq!(mic_in_use(), None);
     }
 
     // ---- failed chunks ----

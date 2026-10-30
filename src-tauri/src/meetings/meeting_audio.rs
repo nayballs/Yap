@@ -1825,6 +1825,17 @@ pub fn e2e_meeting_recovery_offer(app: AppHandle) -> Result<usize, String> {
 mod tests {
     use super::*;
 
+    /// The files waiting to be saved ([`unsaved`]) and their saver's state
+    /// are one for the whole process: each save writes every waiting file,
+    /// whichever test's it is, and a save that works clears the saver's
+    /// failure. Tests that save a recording's files take turns, or one's
+    /// save writes (or clears) another's staged failure.
+    static SAVES: Mutex<()> = Mutex::new(());
+
+    fn saves() -> std::sync::MutexGuard<'static, ()> {
+        SAVES.lock().unwrap_or_else(|p| p.into_inner())
+    }
+
     fn k(note_id: u64, recording: u64, days_ago: u64, bytes: u64) -> Kept {
         let now = 100 * 86_400_000;
         Kept { note_id, recording, started_ms: now - days_ago * 86_400_000, bytes, live: false, orphan: false, held: false }
@@ -1882,6 +1893,7 @@ mod tests {
 
     #[test]
     fn a_recording_is_written_as_it_comes_and_found_after_a_crash() {
+        let _turn = saves();
         let _ = std::fs::remove_dir_all(root());
         let note_id = 42;
         let recording = new_id();
@@ -2014,6 +2026,7 @@ mod tests {
     /// and made again from the audio, never offered as a crash's.
     #[test]
     fn a_recordings_notes_are_saved_safely_and_a_torn_one_is_made_again() {
+        let _turn = saves();
         let _ = std::fs::remove_dir_all(root());
         let (note_id, recording) = (51, new_id());
         std::fs::create_dir_all(note_dir(note_id)).unwrap();
@@ -2059,6 +2072,7 @@ mod tests {
     /// Yap never reads cuts.json), and goes with the last recording.
     #[test]
     fn a_deleted_lines_place_is_kept_with_the_audio() {
+        let _turn = saves();
         let _ = std::fs::remove_dir_all(root());
         let (note_id, recording) = (61, new_id());
         let cut = Cut { source: "them".into(), ts: 100, start_ms: 2_000, end_ms: 5_000 };

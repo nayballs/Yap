@@ -435,6 +435,31 @@ aiTest.describe('with the fake AI', () => {
     await expect(summary.locator('.sumedited')).toHaveCount(0);
     await shot(pad, '11-replaced-ticks-kept');
   });
+
+  // Until 2026-10-30 New note kept the summary editor open: its save, still
+  // due, went to the new note (the words left the note they were typed in).
+  test('a summary being edited in Notes stays with its note when New note opens another', async ({ yap, main, shot }) => {
+    const note = await yap.invoke('note_create', { title: 'Supplier review', folder: 'Personal' });
+    await yap.invoke('note_summary_update', { id: note.id, text: '## Summary\nThe quote is fine.', origin: 'e2e' });
+    await openView(main, 'Notes');
+    await main.locator('.folder').filter({ hasText: 'Personal' }).click();
+    await main.locator('.item').filter({ hasText: 'Supplier review' }).click();
+    await main.locator('.tabs .tab').filter({ hasText: 'Summary' }).click();
+    await main.getByRole('button', { name: 'Edit summary' }).click();
+    const editor = main.getByRole('textbox', { name: 'Edit the summary (Markdown)' });
+    await editor.fill('## Summary\nThe quote is fine, signed off on Friday.');
+    // At once: the save waits 600 ms after the last key.
+    await main.locator('.tools .tool').filter({ hasText: 'New note' }).click();
+    await expect(editor).toHaveCount(0);
+    await expectStore(yap, 'notes.json', (s) => s.notes.find((n) => n.id === note.id)?.enhancedContent?.includes('signed off on Friday'));
+    await main.waitForTimeout(1_000);
+    const all = yap.readJson('notes.json').notes;
+    const fresh = all.reduce((a, n) => (n.id > a.id ? n : a));
+    expect(fresh.id).not.toBe(note.id);
+    expect(fresh.enhancedContent || '').toBe('');
+    expect(fresh.summaryEditedMs || 0).toBe(0);
+    await shot(main, '12-new-note-after-a-summary-edit');
+  });
 });
 
 /** The main window's current sidebar view. */

@@ -13,7 +13,7 @@
   import { tick } from 'svelte';
   import { toast } from '../ui/toast.svelte.js';
   import { openContextMenu, menuKey, menuOpenFor } from '../ui/contextMenu.svelte.js';
-  import { bubbleShape, highlightParts, withLineEdit, splitWordAt, canRevert } from '../core/notepadText.js';
+  import { bubbleShape, highlightParts, withLineEdit, splitWordAt, canRevert, lineRef } from '../core/notepadText.js';
   import { editLine, revertLine, deleteLine, splitLine } from '../core/noteEdits.js';
   import { meetingAudio, canPlay, playLine } from '../stores/meetingAudio.svelte.js';
   import SpeakerMenu from '../components/SpeakerMenu.svelte';
@@ -68,7 +68,9 @@
   async function startEditLine(line, split = false) {
     if (!note || view.searchQuery) return;
     view.speakerMenu = null;
-    view.editingLine = { i: line.i, text: note.transcript?.[line.i]?.text ?? line.text, split };
+    // `ref`: which line this is, saved whatever moves it meanwhile (the
+    // voice separation splitting a line before it, the other window).
+    view.editingLine = { i: line.i, text: note.transcript?.[line.i]?.text ?? line.text, split, ref: lineRef(note.transcript, line.i) };
     await tick();
     lineEditEl?.focus();
     if (!split) lineEditEl?.select();
@@ -108,7 +110,7 @@
     lineSaving = true;
     const id = note.id;
     try {
-      const r = await editLine(id, note.transcript, edit.i, edit.text, LABEL);
+      const r = await editLine(id, note.transcript, edit.i, edit.text, LABEL, edit.ref);
       if (note?.id === id && r?.changed) {
         changing('transcript');
         const t = withLineEdit(note.transcript, { index: r.index, line: r.line });
