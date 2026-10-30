@@ -493,7 +493,20 @@ The AI Chat surface (conversations, the tool-calling loop and its note tools) an
   section in order; a line or two in the chat ("It's open on the right."),
   never the content; a question or change about a document from this chat
   changes it with edit_note. About 380 tokens with the two schemas
-  (`a_tool_step_stays_light`: 2,620 now). **The Voice Assistant**: the same
+  (`a_tool_step_stays_light`: 2,620 now). **Kept on course** (tuned on the
+  on-device Qwen3.5-4B, `--documents`): a question that asks for something
+  to keep (`asks_for_document`: "make me a … build / plan / guide / packing
+  list", "plan a …", "step-by-step", "compare … and …"; never "what's the
+  plan for tomorrow?") tells a model on this PC so in its context
+  (`ASKS_NOTE`) — on the rule alone it answered a guide and a trip plan in
+  the chat; the last section's result asks for one short sentence, no
+  summary (it wrote 84 and 121 words under "It's open beside the chat");
+  an answer with this turn's document half written is sent back once or
+  twice to finish it (`Turn::unfinished`, `finish_note`, `FINISH_NUDGES`;
+  the text it showed is taken back); and `create_document` again for this
+  turn's document (same title) gives back the one there is
+  (`Turn::made_already`, no chip) — it once made two in one step and filled
+  one. **The Voice Assistant**: the same
   tools and system prompt (its cache), and in its question's context
   `SPOKEN_NOTE` — a document only when one is asked for, or a long build,
   plan or guide, then one sentence saying it's in Chat. A spoken "build me
