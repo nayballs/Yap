@@ -593,7 +593,7 @@ impl Shared {
         // Live partials: spawn a worker that re-transcribes a bounded sliding
         // window of the buffer while recording (cost independent of recording
         // length — see `partials::PartialSession`).
-        self.maybe_start_streaming();
+        self.maybe_start_streaming(session);
         self.spawn_mic_watch(session);
         tracing::info!("Recording started");
     }
