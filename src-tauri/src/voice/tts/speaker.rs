@@ -918,11 +918,17 @@ mod tests {
                 .collect()
         }
         fn wait_quiet(&self) {
-            let start = Instant::now();
-            while self.speaker.state().speaking {
-                assert!(start.elapsed() < Duration::from_secs(5), "still speaking");
-                std::thread::sleep(Duration::from_millis(5));
-            }
+            wait_for("it to stop speaking", || !self.speaker.state().speaking);
+        }
+    }
+
+    /// Wait (up to 5 s) until `done`: a test under load waits on what it
+    /// checks, never on a fixed sleep.
+    fn wait_for(what: &str, mut done: impl FnMut() -> bool) {
+        let start = Instant::now();
+        while !done() {
+            assert!(start.elapsed() < Duration::from_secs(5), "waited for {what}");
+            std::thread::sleep(Duration::from_millis(5));
         }
     }
 
@@ -960,11 +966,15 @@ mod tests {
     #[test]
     fn a_new_answer_replaces_the_one_being_read() {
         let r = rig();
-        r.speaker.speak(r.job("a", &["A one.", "A two.", "A three."], 30, None), sim_opener()).unwrap();
-        std::thread::sleep(Duration::from_millis(40));
+        // 300 ms a sentence: "A three." is ~600 ms after "A one.", so B
+        // starts well before it however loaded the machine is.
+        r.speaker.speak(r.job("a", &["A one.", "A two.", "A three."], 300, None), sim_opener()).unwrap();
+        wait_for("A's first sentence", || !r.said.lock().unwrap().is_empty());
         r.speaker.speak(r.job("b", &["B one."], 1, None), sim_opener()).unwrap();
         r.wait_quiet();
-        std::thread::sleep(Duration::from_millis(100));
+        // Long enough for A's worker to finish the sentence it was making:
+        // it says nothing more on the way out.
+        std::thread::sleep(Duration::from_millis(350));
         assert_eq!(r.events(), vec![ev(true, "a"), ev(false, "a"), ev(true, "b"), ev(false, "b")]);
         let said = r.said.lock().unwrap().clone();
         assert!(said.contains(&"B one.".to_string()));
@@ -1119,23 +1129,26 @@ mod tests {
         let r = rig();
         let track = Track::new((0..6).map(|_| "Read these four words.".to_string()).collect());
         let play = Arc::new(SimPlayback::default());
+        // A second a sentence on the stand-in.
         r.speaker.speak(read_job(&track, 0, Arc::new(StandIn), 1.0), sim(&play)).unwrap();
-        std::thread::sleep(Duration::from_millis(300));
+        wait_for("the first sentence to play", || r.speaker.position().is_some());
         assert!(r.speaker.pause());
         let held = r.speaker.position().unwrap();
+        // The worker makes the one after the sentence held, and no more.
+        let ahead = (held.0 + 2).min(track.len());
+        wait_for("the sentence ahead", || track.made_count() >= ahead);
         let made = track.made_count();
+        assert_eq!(made, ahead);
         std::thread::sleep(Duration::from_millis(400));
         // Held: the same place, nothing more made, still "speaking".
         assert_eq!(r.speaker.position().unwrap(), held);
         assert_eq!(track.made_count(), made);
         assert!(r.speaker.state().speaking);
         assert!(r.speaker.resume());
-        std::thread::sleep(Duration::from_millis(300));
-        let now = r.speaker.position().unwrap();
-        assert!(now > held, "{now:?} after {held:?}");
+        wait_for("it to go on", || r.speaker.position().is_some_and(|now| now > held));
         // Starting from a later sentence: tagged from there.
         r.speaker.speak(read_job(&track, 4, Arc::new(StandIn), 1.0), sim(&Arc::new(SimPlayback::default()))).unwrap();
-        std::thread::sleep(Duration::from_millis(50));
+        wait_for("the later sentence to play", || r.speaker.position().is_some());
         assert_eq!(r.speaker.position().map(|p| p.0), Some(4));
         r.speaker.stop();
     }

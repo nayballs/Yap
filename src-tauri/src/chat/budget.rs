@@ -178,10 +178,16 @@ async fn there(root: &str) -> bool {
     let Some((host, port)) = reqwest::Url::parse(root).ok().and_then(|u| Some((u.host_str()?.trim_matches(['[', ']']).to_string(), u.port_or_known_default()?))) else {
         return true;
     };
+    // Only this PC's own addresses are probed (no receipt for them): a name
+    // that resolves anywhere else is left to the request itself, which goes
+    // through the network receipts.
     let addrs: Vec<std::net::SocketAddr> = match tokio::net::lookup_host((host.as_str(), port)).await {
-        Ok(a) => a.collect(),
+        Ok(a) => a.filter(|a| a.ip().is_loopback()).collect(),
         Err(_) => return true,
     };
+    if addrs.is_empty() {
+        return true;
+    }
     for addr in addrs {
         if matches!(tokio::time::timeout(LOCAL_CONNECT, tokio::net::TcpStream::connect(addr)).await, Ok(Ok(_))) {
             return true;
@@ -1076,6 +1082,11 @@ mod tests {
         let again = std::time::Instant::now();
         assert!(!there(&root).await);
         assert!(again.elapsed() < Duration::from_millis(50));
+        // Only this PC is probed: an address elsewhere (TEST-NET-1) is never
+        // connected to here, unrecorded; the request itself goes with a receipt.
+        let elsewhere = "http://192.0.2.1:9";
+        assert!(there(elsewhere).await);
+        assert!(!is_down(elsewhere));
     }
 
     #[tokio::test]

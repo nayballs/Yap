@@ -457,7 +457,13 @@ The language-model side: the OpenAI-compatible client and its prompts, the on-de
   where the f16 cache fits; never on the processor. **On the processor,
   two slots with a cache each** (`Plan.per_slot`, `per_slot_caches`,
   2026-10-25: `-np 2 --no-kv-unified`, `-c` twice the context so each slot
-  has all of it; no card, 0.10.6+): with llama.cpp's one cache shared by 4
+  has all of it; no card, 0.10.6+; and `--checkpoint-min-step 0`,
+  `CHECKPOINT_MIN_STEP_PER_SLOT`, 2026-10-30: llama.cpp's default 8,192
+  erased the checkpoint at an earlier request's last message once a prompt
+  passed ~516 tokens, so a slot's next request re-read all but ~130 tokens —
+  a Shorter transform's prompt 4.9 → 1.6 s, a cleanup after an identical
+  dictation 11.3 → 0.6 s on Qwen3.5-4B; not on a card, where a long chat's
+  first load took 1.2 → 3.4 s with it): with llama.cpp's one cache shared by 4
   slots a dictation's cleanup right after a long Chat turn ran 2.0–2.6×
   slower (its attention over the chat's cells; once its prompt cleared for
   the room) — now 1.0–1.1×, for the KV once more (the 1.5B +224 MiB at 8K;

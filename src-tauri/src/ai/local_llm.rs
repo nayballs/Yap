@@ -136,6 +136,20 @@ pub const CACHE_RAM_MIB: u32 = 0;
 /// step the latest, so 4 a slot measured the same (cleanup 0.32–0.36 s).
 pub const CTX_CHECKPOINTS: u32 = 4;
 
+/// The fewest tokens between two of a slot's **checkpoints** on the
+/// processor (`--checkpoint-min-step`): 0. llama.cpp's default (8,192)
+/// erases every earlier request's checkpoint within that many tokens of the
+/// one it keeps, keeping the lowest: past ~516 tokens that's the one 516
+/// tokens before the end (~130 for a 640-token prompt), so the one at the
+/// last message's start (the whole system prompt) went, and the next request
+/// in the slot read all but ~130 tokens again. Measured on 0.10.6 with
+/// Qwen3.5-4B on the processor: a Shorter transform after a repeat 4.9 s →
+/// 1.6 s of prompt (130 → 491 tokens reused), a cleanup after an identical
+/// dictation 11.3 s → 0.6 s; ordinary cleanups the same. Not on a card: there
+/// the miss costs ~0.15 s, and a long chat's first load took 1.2 s → 3.4 s
+/// with it (every message a checkpoint).
+pub const CHECKPOINT_MIN_STEP_PER_SLOT: u32 = 0;
+
 /// How a server runs a model beyond its context: the runtime's version (the
 /// arguments it understands) and whether MTP drafting is on.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -185,7 +199,13 @@ pub fn server_args(model: &Path, port: u16, ngl: u32, ctx: u32, plan: Plan) -> V
     let total = if per_slot { ctx.saturating_mul(crate::ai::gguf::PER_SLOT_SLOTS as u32) } else { ctx };
     let mut args = base_args(model, port, ngl, total);
     if per_slot {
-        args.extend(["-np".to_string(), crate::ai::gguf::PER_SLOT_SLOTS.to_string(), "--no-kv-unified".to_string()]);
+        args.extend([
+            "-np".to_string(),
+            crate::ai::gguf::PER_SLOT_SLOTS.to_string(),
+            "--no-kv-unified".to_string(),
+            "--checkpoint-min-step".to_string(),
+            CHECKPOINT_MIN_STEP_PER_SLOT.to_string(),
+        ]);
     }
     if plan.server().mtp {
         args.extend(["--spec-type".to_string(), "draft-mtp".to_string()]);
@@ -1972,6 +1992,11 @@ mod tests {
         assert_eq!(after("-c"), Some("16384"));
         assert_eq!(after("-np"), Some("2"));
         assert!(args.iter().any(|a| a == "--no-kv-unified"));
+        // Every request's checkpoint at its last message kept: the next
+        // request in the slot reads only what's new, past 512 tokens too.
+        assert_eq!(after("--checkpoint-min-step"), Some("0"));
+        let card = server_args(Path::new("m.gguf"), 5000, 999, 8_192, Plan { per_slot: false, ..p });
+        assert!(!card.iter().any(|a| a == "--checkpoint-min-step"), "a graphics card keeps llama.cpp's default");
         assert_eq!(server_args(Path::new("m.gguf"), 5000, 0, 8_192, Plan { runtime: OLD, ..p }), base_args(Path::new("m.gguf"), 5000, 0, 8_192));
         // What a slot gets is the context the server reports: no restart loop
         // over "16384 isn't 8192".
