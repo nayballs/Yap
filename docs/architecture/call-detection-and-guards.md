@@ -126,7 +126,13 @@ Noticing a call and offering to take notes, the call apps' own icons, the guard 
   same app's call within **2 minutes** (`RESUME_MS`, `resumes`) records into
   the same note (`OnStart::Resume` → `resume_into`: waits for the last chunk,
   `meeting_start`, "Back on your Teams call · Yap carried on taking notes in
-  the same note"), no prompt; if it can't, the call is asked about as any.
+  the same note"), no prompt; if it can't, the call is asked about as any —
+  and so is one the calendar says is another meeting
+  (`calendar::call_is_another_meeting`, pure `model::another_meeting`: the
+  next of two back to back on the same app, by join code or time, or the
+  note's meeting over more than 30 min ago, as after a night asleep).
+  Answering "Your PC was asleep" (Resume or Summarise) forgets the note
+  (`forget_auto_stop`): a summarised meeting is never reopened by itself.
   `on_wake` also forgets the calls (the sleep reset the apps' microphones):
   a call still on starts again from the next scans. **Another call while
   one records** (`OnStart::Switch`, pure `on_start`): an asked-about app's

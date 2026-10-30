@@ -602,6 +602,12 @@ pub fn to_latin(text: &str) -> String {
                 i += 1;
             }
             let word: String = chars[start..i].iter().collect();
+            // Joiners with no Devanagari among them (an emoji's ZWJ
+            // sequence, a ZWNJ in another script): as they were.
+            if !word.chars().any(is_devanagari) {
+                out.push_str(&word);
+                continue;
+            }
             let mut latin = word_to_latin(&word);
             if sentence_start {
                 latin = capitalised(&latin);
@@ -777,5 +783,26 @@ mod tests {
         assert_eq!(to_latin("ok तो कल मिलते हैं"), "ok to kal milte hain");
         assert!(!has_devanagari(&to_latin("ॐ शांति ःः ऽ")));
         assert_eq!(to_latin(""), "");
+    }
+
+    #[test]
+    fn odd_unicode_never_panics_and_what_isnt_hindi_stays_as_it_was() {
+        // An emoji made with joiners (a family) beside Hindi keeps them; so
+        // does a ZWNJ between Latin letters.
+        let family = "\u{1F468}\u{200D}\u{1F469}\u{200D}\u{1F467}";
+        assert_eq!(to_latin(&format!("कल {family} आना")), format!("Kal {family} aana"));
+        assert_eq!(to_latin("ठीक है, a\u{200C}b"), "Theek hai, a\u{200C}b");
+        // Every Devanagari character, alone and beside the signs, joiners,
+        // a Latin combining accent and an emoji, in any order: no panic, and
+        // no Devanagari left.
+        let others = ['\u{094D}', '\u{093C}', '\u{0902}', '\u{0901}', '\u{0903}', '\u{200C}', '\u{200D}', '\u{0301}', '\u{1F44D}', 'a', ' '];
+        for c in '\u{0900}'..='\u{097F}' {
+            for o in others {
+                for s in [format!("{c}"), format!("{c}{o}"), format!("{o}{c}"), format!("{o}{c}{o}{c}"), format!("क{o}{c}")] {
+                    let out = to_latin(&s);
+                    assert!(!has_devanagari(&out), "{:?} → {out:?}", s.escape_unicode().to_string());
+                }
+            }
+        }
     }
 }

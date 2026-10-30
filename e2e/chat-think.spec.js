@@ -97,11 +97,25 @@ test('Think: one question thought through, its thinking folded above the answer 
     s.conversations.some((c) => c.messages.some((m) => m.role === 'assistant' && m.text === 'The ball costs 5p.' && m.thinking?.text?.includes('so the ball is 5p')))
   );
 
-  // The next question: no thinking asked for, and the earlier thinking never sent.
+  // The next question: no thinking asked for, and the earlier thinking never
+  // sent. gpt-oss sends its reasoning anyway, unasked (Groq does): none of
+  // it shows — no "Show its thinking", no fold over this answer, ever.
+  await main.evaluate(() => {
+    window.__sawThinking = false;
+    window.__thinkingWatch?.disconnect();
+    window.__thinkingWatch = new MutationObserver(() => {
+      if (document.querySelector('[data-testid="chat-thinking"]') || document.querySelectorAll('[data-testid="chat-thought"]').length > 1) {
+        window.__sawThinking = true;
+      }
+    });
+    window.__thinkingWatch.observe(document.body, { subtree: true, childList: true, characterData: true });
+  });
   const next = fakeLlm.requests.length;
-  fakeLlm.scriptChat([{ content: 'Yes.' }]);
+  fakeLlm.scriptChat([{ reasoning: 'They want the sum checked again: 5p and £1.05 make £1.10, so yes.', content: 'Yes.', stream: { gapMs: 120 } }]);
   await send(main, 'Are you sure?');
   await expect(thread(main)).toContainText('Yes.');
+  expect(await main.evaluate(() => window.__sawThinking)).toBe(false);
+  await main.evaluate(() => window.__thinkingWatch?.disconnect());
   const plain = fakeLlm.requests.slice(next).find((r) => r.user?.includes('Are you sure?'));
   expect(plain.think.reasoningEffort).toBeNull();
   expect(JSON.stringify(plain.messages)).not.toContain('so the ball is 5p');

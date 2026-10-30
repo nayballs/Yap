@@ -1504,6 +1504,27 @@ pub fn claims_call(app_id: &str) -> bool {
     claimed
 }
 
+/// Call detection, about to carry a call of `app_id` on in note `note_id`
+/// (it came back soon after Yap stopped that note's recording by itself, or
+/// the PC slept): whether the calendar says the call is another meeting
+/// (`model::another_meeting`: the next of two back to back on the same app,
+/// or the note's meeting long over). Then it's asked about instead. Reads
+/// the notes: never under call detection's lock.
+pub fn call_is_another_meeting(app_id: &str, note_id: u64) -> bool {
+    let Some(linked) = crate::notes::event_of(note_id) else { return false };
+    let code = call_code(app_id);
+    let now = now_secs();
+    let end = linked.end as i64;
+    let another = match lock_started() {
+        Some(s) => model::another_meeting(&s.store.events, now, Some(app_id), code.as_deref(), &linked.key, end),
+        None => model::another_meeting(&[], now, Some(app_id), code.as_deref(), &linked.key, end),
+    };
+    if another {
+        tracing::info!(app = app_id, note_id, "calendar: the call that came back is another meeting");
+    }
+    another
+}
+
 /// A call started (after call detection's lock is released). Recording an
 /// earlier meeting's notes while this call belongs to the next meeting:
 /// offer to switch notes (back-to-back meetings). Whether it did (call

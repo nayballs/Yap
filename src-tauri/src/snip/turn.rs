@@ -182,8 +182,15 @@ pub const NOT_SENT_AGAIN: &str = "(An earlier screenshot, not sent again.)";
 pub const REMOVED: &str = "(A screenshot was here; it was removed.)";
 
 /// Which earlier images are sent again: the newest `budget` of those still
-/// there (message index, image index), newest first. Pure.
-pub fn resend_plan(earlier: &[ChatMessage], budget: usize, exists: &dyn Fn(&str) -> bool) -> Vec<(usize, usize)> {
+/// there (message index, image index), newest first — never one `held`
+/// back (a screenshot of the window in front where the window itself may
+/// not go now: [`with_history_images`]). Pure.
+pub fn resend_plan(
+    earlier: &[ChatMessage],
+    budget: usize,
+    exists: &dyn Fn(&str) -> bool,
+    held: &dyn Fn(&ChatImage) -> bool,
+) -> Vec<(usize, usize)> {
     let mut out = Vec::new();
     for (mi, m) in earlier.iter().enumerate().rev() {
         if m.role != "user" {
@@ -193,7 +200,7 @@ pub fn resend_plan(earlier: &[ChatMessage], budget: usize, exists: &dyn Fn(&str)
             if out.len() >= budget {
                 return out;
             }
-            if exists(&img.id) {
+            if exists(&img.id) && !held(img) {
                 out.push((mi, ii));
             }
         }
@@ -214,20 +221,21 @@ pub fn history_budget(provider: &str, on_this_pc: bool, current: usize) -> usize
 /// The history's user messages (`messages`, as `chats::history_messages` or
 /// the plain history built them from `earlier`, in the same order) with
 /// their screenshots: the newest few sent again ([`resend_plan`]), the
-/// rest said in a line. `fitted`: an image id → its data URL for this
-/// provider (`None`: it couldn't be read).
+/// rest — and every one `held` back — said in a line. `fitted`: an image
+/// id → its data URL for this provider (`None`: it couldn't be read).
 pub fn history_images(
     messages: &mut [Value],
     earlier: &[ChatMessage],
     provider: &str,
     budget: usize,
     exists: &dyn Fn(&str) -> bool,
+    held: &dyn Fn(&ChatImage) -> bool,
     fitted: &dyn Fn(&str) -> Option<String>,
 ) {
     if !earlier.iter().any(|m| !m.images.is_empty()) {
         return;
     }
-    let plan = resend_plan(earlier, budget, exists);
+    let plan = resend_plan(earlier, budget, exists, held);
     let user_values: Vec<usize> = messages.iter().enumerate().filter(|(_, m)| m["role"] == "user").map(|(i, _)| i).collect();
     let user_messages: Vec<usize> = earlier.iter().enumerate().filter(|(_, m)| m.role == "user").map(|(i, _)| i).collect();
     for (vi, mi) in user_values.into_iter().zip(user_messages) {
@@ -262,6 +270,11 @@ pub fn history_images(
 /// `base_url`: the copies fitted off the async runtime (they're usually
 /// made already). A model known not to read images (`vision.rs`: switched
 /// to after a question with a screenshot) gets none again, each one a line.
+/// A screenshot of the window in front (the Voice Assistant's, source
+/// "window") goes again only where the window itself may go now
+/// (`assistant::screen::window_may_go`): taken for a model on this PC, it
+/// never follows a later question to a cloud model without "…with cloud
+/// models too".
 pub async fn with_history_images(messages: &mut [Value], earlier: &[ChatMessage], provider: &str, model: &str, base_url: &str) {
     if !earlier.iter().any(|m| !m.images.is_empty()) {
         return;
@@ -272,7 +285,10 @@ pub async fn with_history_images(messages: &mut [Value], earlier: &[ChatMessage]
     let fit = super::images::fit_for(provider, here);
     let cap = fit.cap_for(images().len() + budget);
     let exists = |id: &str| super::images::exists(id);
-    let wanted: Vec<String> = resend_plan(earlier, budget, &exists).into_iter().map(|(mi, ii)| earlier[mi].images[ii].id.clone()).collect();
+    let window_ok = crate::chat::assistant::screen::window_may_go(&crate::config::load(), provider, base_url);
+    let held = |img: &ChatImage| img.source == "window" && !window_ok;
+    let wanted: Vec<String> =
+        resend_plan(earlier, budget, &exists, &held).into_iter().map(|(mi, ii)| earlier[mi].images[ii].id.clone()).collect();
     let made: Vec<(String, String, usize)> = tauri::async_runtime::spawn_blocking(move || {
         wanted
             .into_iter()
@@ -283,7 +299,7 @@ pub async fn with_history_images(messages: &mut [Value], earlier: &[ChatMessage]
     .unwrap_or_default();
     // Within what the provider takes in one request, with the question's own.
     let fitted = within_room(made, fit.request_bytes.saturating_sub(current_bytes()));
-    history_images(messages, earlier, provider, budget, &exists, &|id| fitted.get(id).cloned());
+    history_images(messages, earlier, provider, budget, &exists, &held, &|id| fitted.get(id).cloned());
 }
 
 /// What `chat::commands::chat_send` needs before a turn with screenshots: the
@@ -418,13 +434,14 @@ mod tests {
             said("assistant", "ok", &[]),
         ];
         let exists = |id: &str| id != "img_gone";
+        let none_held = |_: &ChatImage| false;
         // Three: d, c, b (newest first); a is said in a line; the removed one too.
-        assert_eq!(resend_plan(&earlier, 3, &exists), vec![(4, 0), (2, 0), (0, 1)]);
+        assert_eq!(resend_plan(&earlier, 3, &exists, &none_held), vec![(4, 0), (2, 0), (0, 1)]);
         let mut messages: Vec<Value> =
             earlier.iter().map(|m| json!({ "role": m.role, "content": m.text })).collect();
         // A replayed web search between them (assistant + tool) changes nothing.
         messages.insert(1, json!({ "role": "tool", "content": "{}" }));
-        history_images(&mut messages, &earlier, "anthropic", 3, &exists, &|id| Some(format!("data:{id}")));
+        history_images(&mut messages, &earlier, "anthropic", 3, &exists, &none_held, &|id| Some(format!("data:{id}")));
         let first = &messages[0]["content"];
         assert_eq!(first[0]["image_url"]["url"], "data:img_b");
         assert!(text_of(first).unwrap().ends_with(NOT_SENT_AGAIN), "{first}");
@@ -438,6 +455,45 @@ mod tests {
         assert_eq!(history_budget("anthropic", false, 1), 3);
         assert_eq!(history_budget("groq", false, 4), 0);
         assert_eq!(history_budget("custom", true, 1), 0);
+    }
+
+    /// The Voice Assistant took the window in front for a model on this PC;
+    /// Chat's model is a cloud one by the follow-up: the window's
+    /// screenshot isn't sent again unless the window itself may go there.
+    #[test]
+    fn a_window_in_fronts_screenshot_goes_again_only_where_the_window_may_go() {
+        let window = ChatImage { source: "window".into(), ..img("img_w") };
+        let earlier = vec![
+            said("user", "first", &["img_a"]),
+            said("assistant", "ok", &[]),
+            ChatMessage { role: "user".into(), text: "what's this error?".into(), images: vec![window], ..Default::default() },
+            said("assistant", "ok", &[]),
+        ];
+        let exists = |_: &str| true;
+        let held = |i: &ChatImage| i.source == "window";
+        // Held back: never planned, and it takes no place from an older snip.
+        assert_eq!(resend_plan(&earlier, 1, &exists, &held), vec![(0, 0)]);
+        let plain = || -> Vec<Value> { earlier.iter().map(|m| json!({ "role": m.role, "content": m.text })).collect() };
+        let mut messages = plain();
+        history_images(&mut messages, &earlier, "anthropic", 3, &exists, &held, &|id| Some(format!("data:{id}")));
+        assert_eq!(messages[2]["content"], json!(format!("what's this error?\n\n{NOT_SENT_AGAIN}")));
+        assert_eq!(messages[0]["content"][0]["image_url"]["url"], "data:img_a");
+        assert!(!Value::Array(messages).to_string().contains("data:img_w"));
+        // Where it may go: as any other screenshot.
+        let mut messages = plain();
+        history_images(&mut messages, &earlier, "anthropic", 3, &exists, &|_| false, &|id| Some(format!("data:{id}")));
+        assert_eq!(messages[2]["content"][0]["image_url"]["url"], "data:img_w");
+
+        // The rule: the window's own (screen.rs `allowed`).
+        use crate::chat::assistant::screen::window_may_go;
+        let mut cfg = crate::config::YapConfig { assistant_screen: true, assistant_screen_cloud: false, ..Default::default() };
+        assert!(window_may_go(&cfg, "ondevice", "http://127.0.0.1:8080/v1"));
+        assert!(!window_may_go(&cfg, "anthropic", "https://api.anthropic.com/v1"));
+        assert!(!window_may_go(&cfg, "custom", "http://192.168.1.20:8080/v1"));
+        cfg.assistant_screen_cloud = true;
+        assert!(window_may_go(&cfg, "anthropic", "https://api.anthropic.com/v1"));
+        cfg.assistant_screen = false;
+        assert!(!window_may_go(&cfg, "anthropic", "https://api.anthropic.com/v1"));
     }
 
     #[test]
