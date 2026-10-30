@@ -57,15 +57,37 @@ const KEY_MAX: usize = 60;
 const INTENT_MAX: usize = 140;
 
 /// What Chat's system prompt says about documents, with the note tools'
-/// instructions (`tools::TOOL_INSTRUCTIONS`): when to make one, the outline
-/// first, a line or two in the chat, and later questions changing it. Kept
-/// short: every step of a tool turn sends it.
-pub const INSTRUCTIONS: &str = "For an answer to keep or come back to (a build, a plan, a guide, a comparison, a long table), make a document: create_document with the title and all its sections first (one per part, usually 2 to 6), then write_section for each, in order. In the chat say only one short line (\"It's open on the right.\"): no summary, never the content. A question or change about a document from this chat: change it with edit_note (read_note first).";
+/// instructions (`tools::TOOL_INSTRUCTIONS`): when to make one (at once,
+/// never offered: the on-device 4B wrote a build in the chat and asked
+/// "Would you like me to create a document?", 30 Oct 2026), how it reads
+/// (a summary, short bullets, tables, after Claude's own documents), a line
+/// or two in the chat, and later questions changing it — or a new one for
+/// an option picked (never `create_note`: Claude Haiku 5.5 made an empty
+/// one for "Let's do option A"). Kept short: every step of a tool turn
+/// sends it.
+pub const INSTRUCTIONS: &str = "Something to keep (a build, a plan, a guide, a comparison, a long table) goes straight into a document, never the chat, never asked first: create_document (title, a one- or two-sentence summary, every section: one per part, usually 2 to 6), then write_section each, in order. Short bullets, a markdown table for anything with rows, **bold** lead-ins; a game build: race and origin, character creation, skills, a level-by-level table, gear, tips. In the chat say only one short line (\"It's open on the right.\"): no summary, never the content. A change to a document from this chat, or more depth: rewrite_section (a whole section; a new heading adds one) or edit_note (a few words). An option picked: a new document. Never create_note for these.";
 
-/// Added to a question asked out loud (the Voice Assistant) when the
-/// model calls tools: no document unless one is asked for, and then a
-/// sentence saying where it is (the person is in another app).
+/// Added to a question asked out loud (the Voice Assistant, with Chat not
+/// in front) when the model calls tools: no document unless one is asked
+/// for, and then a sentence saying where it is (the person is in another
+/// app).
 pub const SPOKEN_NOTE: &str = "This was asked out loud: answer in speech. Make a document only when they ask for one, or for a long build, plan or guide; then say in one short sentence that it's in Chat.";
+
+/// [`SPOKEN_NOTE`] for a Voice Assistant question asked with Chat in front
+/// (`assistant::asked_in_chat`): the person is looking at Chat, so the line
+/// points at the panel, as a typed question's does. "It's in Chat." to
+/// someone reading Chat was the maintainer's first try (30 Oct 2026).
+pub const SPOKEN_IN_CHAT_NOTE: &str = "This was asked out loud: answer in speech. Make a document only when they ask for one, or for a long build, plan or guide; then say in one short sentence that it's open on the right.";
+
+/// The out-loud line for the Voice Assistant's question: `in_chat`, asked
+/// with Chat in front.
+pub fn spoken_note(in_chat: bool) -> &'static str {
+    if in_chat {
+        SPOKEN_IN_CHAT_NOTE
+    } else {
+        SPOKEN_NOTE
+    }
+}
 
 // ---- the placeholder ------------------------------------------------------------------
 
@@ -114,9 +136,17 @@ fn same_key(a: &str, b: &str) -> bool {
     clean(a, KEY_MAX).to_lowercase() == clean(b, KEY_MAX).to_lowercase()
 }
 
-/// A new document's body: its title, then each section's placeholder. Pure.
-pub fn skeleton(title: &str, sections: &[(String, String)]) -> String {
+/// A new document's body: its title, its summary (a sentence or two, when
+/// given), then each section's placeholder. Pure.
+pub fn skeleton(title: &str, summary: &str, sections: &[(String, String)]) -> String {
     let mut out = format!("# {}\n", title.trim());
+    // A summary is a paragraph: no heading or placeholder of its own.
+    let summary: Vec<&str> = summary.lines().map(str::trim).filter(|l| !l.is_empty() && heading(l).is_none() && parse_placeholder(l).is_none()).collect();
+    if !summary.is_empty() {
+        out.push('\n');
+        out.push_str(&summary.join("\n"));
+        out.push('\n');
+    }
     for (key, intent) in sections {
         out.push('\n');
         out.push_str(&placeholder(key, intent));
@@ -203,6 +233,106 @@ pub fn fill_section(content: &str, key: &str, markdown: &str) -> Result<Filled, 
     let mut out: Vec<String> = lines.iter().map(|l| l.to_string()).collect();
     out[at] = block;
     Ok(Filled { content: out.join("\n"), line: at + 1, key: own })
+}
+
+// ---- rewriting a section (rewrite_section) -------------------------------------------
+
+/// Why a section wasn't rewritten ([`rewrite_section`]).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RewriteError {
+    /// The person changed it since the model last saw it (or wrote it
+    /// themselves): theirs stays until the model has read it.
+    Changed,
+    /// The model saw it and it's gone: the person removed it.
+    Removed,
+    /// The model has no picture of the document to check against.
+    Unseen,
+    /// Nothing to write.
+    Empty,
+}
+
+/// Section `key`'s lines in `lines`, `[start, end)`: its `##` heading to the
+/// next heading of level 1 or 2, or a placeholder, or the end (blank lines
+/// at its end left out). Its `###` sub-headings are its own. Pure.
+fn section_range(lines: &[&str], key: &str) -> Option<(usize, usize)> {
+    let start = lines.iter().position(|l| heading(l).is_some_and(|(level, words)| level == 2 && same_key(words, key)))?;
+    let next = lines[start + 1..].iter().position(|l| heading(l).is_some_and(|(level, _)| level <= 2) || parse_placeholder(l).is_some());
+    let mut end = next.map_or(lines.len(), |p| start + 1 + p);
+    while end > start + 1 && lines[end - 1].trim().is_empty() {
+        end -= 1;
+    }
+    Some((start, end))
+}
+
+/// Two copies of a section say the same (line endings and trailing spaces
+/// aside).
+fn same_lines(a: &[&str], b: &[&str]) -> bool {
+    let tidy = |l: &&str| l.trim_end().to_string();
+    a.iter().map(tidy).eq(b.iter().map(tidy))
+}
+
+/// A section rewritten ([`rewrite_section`]): the document now, the line
+/// its heading is on (1 = the first), its key, and whether it's new.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Rewritten {
+    pub content: String,
+    pub line: usize,
+    pub key: String,
+    pub added: bool,
+}
+
+/// **`content` with section `key` rewritten as `markdown`** (its `##`
+/// heading and everything under it, [`section_block`]) — or, a heading the
+/// document never had, a new section at its end. `picture`: the model's
+/// own picture of the document ([`saw`]). The person's words win: a section
+/// that isn't what the model last saw (the person changed it, or wrote it)
+/// is refused until the model reads it again, and one the model saw that's
+/// gone was removed by the person — never brought back. A section still to
+/// be written is filled as `write_section` would. Pure.
+pub fn rewrite_section(content: &str, picture: Option<&str>, key: &str, markdown: &str) -> Result<Rewritten, RewriteError> {
+    if markdown.trim().is_empty() {
+        return Err(RewriteError::Empty);
+    }
+    if content.lines().any(|l| parse_placeholder(l).is_some_and(|(k, _)| same_key(&k, key))) {
+        return fill_section(content, key, markdown)
+            .map(|f| Rewritten { content: f.content, line: f.line, key: f.key, added: false })
+            .map_err(|_| RewriteError::Empty);
+    }
+    let Some(picture) = picture else { return Err(RewriteError::Unseen) };
+    let lines: Vec<&str> = content.split('\n').collect();
+    let seen: Vec<&str> = picture.split('\n').collect();
+    match (section_range(&lines, key), section_range(&seen, key)) {
+        (Some((s, e)), Some((ps, pe))) => {
+            if !same_lines(&lines[s..e], &seen[ps..pe]) {
+                return Err(RewriteError::Changed);
+            }
+            // The heading as the document spells it, unless the model wrote its own.
+            let own = heading(lines[s]).map(|(_, w)| w.to_string()).unwrap_or_else(|| clean(key, KEY_MAX));
+            let block = section_block(&own, markdown);
+            let key = block_key(&block, &own);
+            let block = if lines[s].ends_with('\r') { block.replace('\n', "\r\n") + "\r" } else { block };
+            let mut out: Vec<String> = lines[..s].iter().map(|l| l.to_string()).collect();
+            out.push(block);
+            out.extend(lines[e..].iter().map(|l| l.to_string()));
+            Ok(Rewritten { content: out.join("\n"), line: s + 1, key, added: false })
+        }
+        // The person wrote this section: theirs.
+        (Some(_), None) => Err(RewriteError::Changed),
+        (None, Some(_)) => Err(RewriteError::Removed),
+        (None, None) => {
+            let block = section_block(key, markdown);
+            let key = block_key(&block, key);
+            let kept = content.trim_end_matches(['\n', '\r']);
+            let line = kept.split('\n').count() + 2;
+            Ok(Rewritten { content: format!("{kept}\n\n{block}\n"), line, key, added: true })
+        }
+    }
+}
+
+/// A section block's heading words ([`section_block`] always starts with
+/// one); `or` if not.
+fn block_key(block: &str, or: &str) -> String {
+    heading(block.lines().next().unwrap_or("")).map(|(_, w)| w.to_string()).unwrap_or_else(|| clean(or, KEY_MAX))
 }
 
 // ---- three-way merge (the panel's saves) --------------------------------------------
@@ -479,6 +609,12 @@ pub fn after_call(name: &str, args: &Value, result: &Value) {
             let mine = saw(id).and_then(|s| fill_section(&s, key, &md).ok().map(|f| f.content));
             seen(id, &mine.unwrap_or(note.content));
         }
+        "rewrite_section" => {
+            let key = section_key_arg(args);
+            let md = section_text(args);
+            let mine = saw(id).and_then(|s| rewrite_section(&s, Some(&s), &key, &md).ok().map(|r| r.content));
+            seen(id, &mine.unwrap_or(note.content));
+        }
         "edit_note" if result["data"]["field"] == json!("content") && result["data"]["changed"] == json!(true) => {
             let (old, new) = (args["old_text"].as_str().unwrap_or(""), args["new_text"].as_str().unwrap_or(""));
             let mine = saw(id).filter(|s| !old.is_empty() && s.matches(old).count() == 1).map(|s| s.replacen(old, new, 1));
@@ -552,8 +688,28 @@ impl Turn {
         tracing::info!(note_id = note.id, "Chat: create_document again for this turn's document; the one there is goes back");
         Some(tool_result(
             true,
-            json!({ "id": note.id, "title": note.title, "sections": left, "already": true, "next": next_step(&left) }),
+            json!({ "id": note.id, "title": note.title, "sections": left, "already": true, "next": next_for(&note.content) }),
             String::new(),
+        ))
+    }
+
+    /// `rewrite_section` on a note that isn't one of this chat's documents:
+    /// refused, with what to do instead. It runs after the web too (a build
+    /// is researched first), so it only ever changes a document of this
+    /// conversation, never another note. `None`: go ahead.
+    pub fn refuses(&self, name: &str, args: &Value) -> Option<Value> {
+        if name != "rewrite_section" {
+            return None;
+        }
+        let id = arg_u64(args, &["note_id", "id"])?;
+        if self.known.lock().unwrap_or_else(|p| p.into_inner()).contains(&id) {
+            return None;
+        }
+        tracing::info!(note_id = id, "Chat: rewrite_section on a note that isn't this chat's document; refused");
+        Some(tool_error(
+            format!("Note {id} isn't a document of this chat: rewrite_section only changes those (the documents listed in the context). For another note, use edit_note."),
+            json!({ "id": id }),
+            "Didn't rewrite a note that isn't this chat's document".to_string(),
         ))
     }
 
@@ -576,7 +732,8 @@ impl Turn {
     pub fn noticed(&self, name: &str, id: u64) -> Option<DocRef> {
         let mut known = self.known.lock().unwrap_or_else(|p| p.into_inner());
         let ours = match name {
-            "create_document" | "write_section" => true,
+            // (rewrite_section ran only on one of this chat's: `refuses`.)
+            "create_document" | "write_section" | "rewrite_section" => true,
             "edit_note" | "update_note" => known.contains(&id),
             _ => false,
         };
@@ -611,7 +768,7 @@ impl Turn {
 /// saw it — then the model has seen that. At most the newest 3. `None`:
 /// the conversation has none.
 pub fn context(docs: &[DocRef]) -> Option<String> {
-    let mut lines = vec!["Documents in this chat, open beside it (change them with edit_note; write_section only fills a section still to be written):".to_string()];
+    let mut lines = vec!["Documents in this chat, open beside it (change one there: rewrite_section for a whole section or a new one, edit_note for a few words; write_section only fills a section still to be written):".to_string()];
     let mut changed = Vec::new();
     for d in docs.iter().take(3) {
         let Some(note) = crate::notes::get(d.id) else { continue };
@@ -643,18 +800,20 @@ pub fn context(docs: &[DocRef]) -> Option<String> {
 
 // ---- the tools ------------------------------------------------------------------------
 
-/// The two tools' schemas (offered with the note tools: `notes::definitions`).
+/// The three tools' schemas (offered with the note tools:
+/// `notes::definitions`).
 pub fn definitions() -> Vec<Value> {
     vec![
         json!({
             "type": "function",
             "function": {
                 "name": "create_document",
-                "description": "Start a document shown beside the chat: its title and sections in order. Then write_section each.",
+                "description": "Start a document shown beside the chat (a build, a plan, a guide, an option picked): title, short summary, sections in order. Then write_section each.",
                 "parameters": {
                     "type": "object",
                     "properties": {
                         "title": { "type": "string" },
+                        "summary": { "type": "string", "description": "1-2 sentences: what it is, the main pick; cite web results as [1]" },
                         "sections": {
                             "type": "array",
                             "items": {
@@ -676,7 +835,7 @@ pub fn definitions() -> Vec<Value> {
             "type": "function",
             "function": {
                 "name": "write_section",
-                "description": "Write one section of a document, in markdown (lists, tables), under its heading. Once each; edit_note changes it later.",
+                "description": "Write one section of a document under its heading, in markdown. Once each; rewrite_section changes it later.",
                 "parameters": {
                     "type": "object",
                     "properties": {
@@ -685,6 +844,23 @@ pub fn definitions() -> Vec<Value> {
                         "markdown": { "type": "string" }
                     },
                     "required": ["note_id", "key", "markdown"],
+                    "additionalProperties": false
+                }
+            }
+        }),
+        json!({
+            "type": "function",
+            "function": {
+                "name": "rewrite_section",
+                "description": "Rewrite a whole section of this chat's document by its heading (a new heading adds one). Refused if the user changed it since you saw it: read_note, then retry.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "note_id": { "type": "number" },
+                        "heading": { "type": "string", "description": "As in the document" },
+                        "markdown": { "type": "string" }
+                    },
+                    "required": ["note_id", "heading", "markdown"],
                     "additionalProperties": false
                 }
             }
@@ -705,6 +881,12 @@ fn quoted(title: &str) -> String {
 /// `write_section`'s text, under the names small models give it.
 fn section_text(args: &Value) -> String {
     ["markdown", "content", "text", "body"].iter().find_map(|k| args[*k].as_str()).unwrap_or("").to_string()
+}
+
+/// `rewrite_section`'s heading (or `write_section`'s key), under the names
+/// models give it, cleaned as a key.
+fn section_key_arg(args: &Value) -> String {
+    clean(["heading", "key", "section", "title"].iter().find_map(|k| args[*k].as_str()).unwrap_or(""), KEY_MAX)
 }
 
 /// The sections `create_document` was given: `[{key, intent}]` (or plain
@@ -757,21 +939,44 @@ fn arg_u64(args: &Value, keys: &[&str]) -> Option<u64> {
     })
 }
 
-/// Run `create_document` or `write_section` (`notes::execute` hands them
-/// here).
+/// The tools this file runs (`notes::execute` hands them here).
+pub const TOOL_NAMES: &[&str] = &["create_document", "write_section", "rewrite_section"];
+
+/// Run `create_document`, `write_section` or `rewrite_section`.
 pub fn execute(name: &str, args: &Value) -> Value {
     match name {
         "create_document" => create(args),
         "write_section" => write(args),
+        "rewrite_section" => rewrite(args),
         other => tool_result(false, Value::Null, format!("Unknown tool: {other}")),
     }
 }
 
-/// What a result tells the model to do next, by what's left.
-fn next_step(left: &[String]) -> String {
-    match left.first() {
-        Some(k) => format!("Now call write_section for \"{k}\"."),
+/// What a result tells the model to do next, by what's left of `content`:
+/// the first section still to write — with a word to make it a table when
+/// it has rows ([`table_hint`]) — else wrap up.
+fn next_for(content: &str) -> String {
+    match content.lines().find_map(parse_placeholder) {
+        Some((key, intent)) => format!("Now call write_section for \"{key}\".{}", table_hint(&key, &intent)),
         None => FINISHED.to_string(),
+    }
+}
+
+/// A section whose key or intent has rows — per level, day by day, costs,
+/// a comparison, attributes — gets a word to write it as a table. On the
+/// rule alone the 4B wrote 2 tables in 9 builds and plans, all bullets
+/// (30 Oct 2026). Pure.
+fn table_hint(key: &str, intent: &str) -> &'static str {
+    static ROWS: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
+        regex::Regex::new(
+            r"(?i)\b(levels?|level[- ]by[- ]level|levell?ing|progression|per (level|day|item|person)|day[- ]by[- ]day|schedule|timetable|costs?|prices?|budget|compar\w*|vs\.?|versus|stats|attributes|options|table)\b",
+        )
+        .expect("static regex")
+    });
+    if ROWS.is_match(&format!("{key} {intent}")) {
+        " Write it as a markdown table, a row each."
+    } else {
+        ""
     }
 }
 
@@ -804,7 +1009,7 @@ pub const FINISH_NUDGES: usize = 2;
 pub fn asks_for_document(question: &str) -> bool {
     static MAKE: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
         regex::Regex::new(
-            r"(?i)\b(make|write|give|create|draft|put together|build|prepare|plan)\s+(me\s+|us\s+)?(up\s+)?(a|an|my|our|the)\b[^.?!]{0,80}?\b(build|plan|guide|itinerary|checklist|packing list|shopping list|to-do list|comparison|schedule|routine|timetable|report|outline|walkthrough|tutorial|budget)s?\b",
+            r"(?i)\b(make|write|give|create|draft|put together|build|prepare|plan|look up|find|search for|recommend|suggest)\s+(me\s+|us\s+)?(up\s+)?(a|an|my|our|the)\b[^.?!]{0,80}?\b(build|plan|guide|itinerary|checklist|packing list|shopping list|to-do list|comparison|schedule|routine|timetable|report|outline|walkthrough|tutorial|budget)s?\b",
         )
         .expect("static regex")
     });
@@ -823,8 +1028,105 @@ pub fn asks_for_document(question: &str) -> bool {
 }
 
 /// The line a question that asks for something to keep gets
-/// ([`asks_for_document`]), in its context.
-pub const ASKS_NOTE: &str = "This asks for something to keep: write it as a document (create_document with every section first, then write_section for each), and answer in one short sentence.";
+/// ([`asks_for_document`]), in its context: now, never an answer in the
+/// chat with an offer to make one (the 4B's "Would you like me to create a
+/// more detailed document?", 30 Oct 2026).
+pub const ASKS_NOTE: &str = "This asks for something to keep: make it a document now (create_document with a short summary and every section, then write_section for each, a markdown table for anything with rows), not an answer in the chat and not an offer to make one. Then answer in one short sentence: \"It's open on the right.\"";
+
+/// Does `question` change a document already open in the chat, or ask for
+/// more depth on part of it ("change it so it goes from level one to max",
+/// "add a head torch to the extras", "go deeper on day two")? A change word,
+/// and either a word pointing back at it or no ask for a new one
+/// ([`asks_for_document`]). Pure.
+pub fn changes_document(question: &str) -> bool {
+    static CHANGE: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
+        regex::Regex::new(
+            r"(?i)\b(change|edit|update|rework|redo|rewrite|revise|expand|extend|add|remove|drop|swap|replace|adjust|tweak|fix|go deeper|deeper|more detail|more depth|in depth|break (it|this|that) down|turn (it|this|that) into|make (it|this|that))\b",
+        )
+        .expect("static regex")
+    });
+    static BACK: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
+        regex::Regex::new(r"(?i)\b(it|this|that|them|the (build|plan|guide|document|doc|list|markdown|file|table|section|itinerary|schedule|routine|comparison|outline))\b")
+            .expect("static regex")
+    });
+    let q = question.trim();
+    CHANGE.is_match(q) && (BACK.is_match(q) || !asks_for_document(q))
+}
+
+/// Does `question` pick one of a document's options ("Let's do option A.",
+/// "I'll go with the second one")? Pure.
+pub fn picks_option(question: &str) -> bool {
+    static PICK: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
+        regex::Regex::new(
+            r"(?i)\b(let'?s|i'?ll|we'?ll|i'?d|i want|go with|going with|do|pick|choose|take|use|prefer|like)\b[^.?!]{0,40}?\b(option|choice|version|route|path)\s+([a-d]|[1-4]|one|two|three|four)\b|^\s*(option|choice)\s+([a-d]|[1-4])\b|\b(go|going|i'?ll go|let'?s go) with the (first|second|third|last) (one|option)\b",
+        )
+        .expect("static regex")
+    });
+    PICK.is_match(question.trim())
+}
+
+/// **What a model on this PC is told about this question and documents**
+/// (in its context, `turn.rs`; `docs`: this chat's, newest first): an
+/// option picked from the open document → a new document for it (the
+/// options stay as they were: worth keeping, and the pick needs an outline
+/// of its own); a change, or more depth on part of it → that document
+/// reworked (`rewrite_section`, `edit_note`), never the chat; else, asked
+/// for something to keep → [`ASKS_NOTE`]. Left to the rule, the 4B wrote a
+/// changed build in the chat and offered a document, and for "Let's do
+/// option A" edited the options or copied them to the clipboard (30 Oct
+/// 2026). `None`: nothing to say.
+pub fn steer(question: &str, docs: &[DocRef]) -> Option<String> {
+    if let Some(d) = docs.first() {
+        let title = crate::notes::get(d.id).map(|n| n.title).filter(|t| !t.trim().is_empty()).unwrap_or_else(|| d.title.clone());
+        if picks_option(question) {
+            return Some(format!(
+                "This picks one of the options in \"{title}\" (note_id {}): make a new document for that pick (create_document with a summary and every section, then write_section for each), built out in full; \"{title}\" stays as it is. Then answer in one short sentence.",
+                d.id
+            ));
+        }
+        if changes_document(question) {
+            return Some(format!(
+                "This changes \"{title}\" (note_id {}), open beside the chat: rework it there, not in the chat and not as an offer — rewrite_section for each section that changes (a new heading adds a section), edit_note for a few words. Then answer in one short sentence.",
+                d.id
+            ));
+        }
+    }
+    asks_for_document(question).then(|| ASKS_NOTE.to_string())
+}
+
+/// **A document's `[1]` citations as links to their web pages**
+/// (`[site](address)`): a note has no Sources row under it, so its
+/// citations go to the pages themselves. `sources`: the turn's web sources
+/// (number, label, address); a number it doesn't know stays as written, and
+/// a markdown link's own text ("[1](https://…)") isn't a citation. Pure.
+pub fn link_citations(markdown: &str, sources: &[(usize, String, String)]) -> String {
+    static RUN: std::sync::LazyLock<regex::Regex> =
+        std::sync::LazyLock::new(|| regex::Regex::new(r"(?:\[\d{1,2}(?:\s*[,–-]\s*\d{1,2})*\])+").expect("static regex"));
+    if sources.is_empty() || !markdown.contains('[') {
+        return markdown.to_string();
+    }
+    let mut out = String::with_capacity(markdown.len());
+    let mut last = 0;
+    for m in RUN.find_iter(markdown) {
+        if markdown[m.end()..].starts_with('(') {
+            continue;
+        }
+        let nums = crate::web::citations(m.as_str());
+        let found: Vec<&(usize, String, String)> = nums.iter().filter_map(|n| sources.iter().find(|s| s.0 == *n)).collect();
+        if found.is_empty() || found.len() != nums.len() {
+            continue;
+        }
+        let links: Vec<String> = found
+            .iter()
+            .map(|(_, label, url)| format!("[{}]({})", label.replace(['[', ']'], ""), url.replace(['(', ')', ' '], "")))
+            .collect();
+        out.push_str(&markdown[last..m.start()]);
+        out.push_str(&format!("({})", links.join(", ")));
+        last = m.end();
+    }
+    out.push_str(&markdown[last..]);
+    out
+}
 
 fn create(args: &Value) -> Value {
     const CHIP: &str = "Couldn't start a document";
@@ -844,7 +1146,8 @@ fn create(args: &Value) -> Value {
         crate::notes::folder_create(FOLDER);
         FOLDER.to_string()
     });
-    let body = skeleton(&title, &sections);
+    let summary = args["summary"].as_str().unwrap_or("").trim().to_string();
+    let body = skeleton(&title, &summary, &sections);
     let note = crate::notes::create(&title, "", "chat", &folder);
     // The outline is Chat's first version of it (Undo goes back to it).
     let chat = versions::How::new(versions::kind::CHAT);
@@ -858,10 +1161,10 @@ fn create(args: &Value) -> Value {
         return tool_error(e.clone(), Value::Null, format!("{CHIP}: {e}"));
     }
     let keys: Vec<String> = sections.iter().map(|(k, _)| k.clone()).collect();
-    tracing::info!(note_id = note.id, sections = keys.len(), "Chat: a document started");
+    tracing::info!(note_id = note.id, sections = keys.len(), summary = !summary.is_empty(), "Chat: a document started");
     tool_result(
         true,
-        json!({ "id": note.id, "title": title, "folder": folder, "sections": keys, "next": next_step(&keys) }),
+        json!({ "id": note.id, "title": title, "folder": folder, "sections": keys, "next": next_for(&body) }),
         format!("Started {} ({} section{})", quoted(&title), keys.len(), if keys.len() == 1 { "" } else { "s" }),
     )
 }
@@ -885,18 +1188,18 @@ fn write(args: &Value) -> Value {
             Ok(filled) => {
                 note.content = filled.content;
                 let left = pending_keys(&note.content);
-                Ok((Ok((filled.line, filled.key, left, note.title.clone())), true))
+                Ok((Ok((filled.line, filled.key, left, next_for(&note.content), note.title.clone())), true))
             }
             Err(e) => Ok((Err((e, pending_keys(&note.content), note.title.clone())), false)),
         })
     });
     match outcome {
         Err(e) => tool_result(false, Value::Null, e),
-        Ok(Ok((line, key, left, title))) => {
+        Ok(Ok((line, key, left, next, title))) => {
             tracing::info!(note_id = id, left = left.len(), chars = markdown.chars().count(), "Chat: a document's section written");
             tool_result(
                 true,
-                json!({ "id": id, "key": key, "changed": true, "line": line, "left": left, "next": next_step(&left) }),
+                json!({ "id": id, "key": key, "changed": true, "line": line, "left": left, "next": next }),
                 format!("Wrote \"{}\" in {}", clip(&key, 30), quoted(&title)),
             )
         }
@@ -922,24 +1225,94 @@ fn write(args: &Value) -> Value {
     }
 }
 
+fn rewrite(args: &Value) -> Value {
+    const CHIP: &str = "Couldn't rewrite a section";
+    let Some(id) = arg_u64(args, &["note_id", "id"]) else {
+        return tool_error("note_id is required: the document's id.".to_string(), Value::Null, CHIP.to_string());
+    };
+    let key = section_key_arg(args);
+    if key.is_empty() {
+        return tool_error("heading is required: the section's heading, as in the document.".to_string(), json!({ "id": id }), CHIP.to_string());
+    }
+    // Only a document Chat made (the turn checks it's this chat's too).
+    match crate::notes::get(id) {
+        Some(n) if n.source == "chat" => {}
+        Some(_) => {
+            return tool_error(
+                format!("Note {id} isn't a document Chat made: rewrite_section only changes those. Use edit_note."),
+                json!({ "id": id }),
+                CHIP.to_string(),
+            )
+        }
+        None => return tool_error(format!("No note {id}."), Value::Null, CHIP.to_string()),
+    }
+    let markdown = section_text(args);
+    let picture = saw(id);
+    let chat = versions::How::new(versions::kind::CHAT);
+    let outcome = versions::by(chat, || {
+        crate::notes::modify(id, |note| match rewrite_section(&note.content, picture.as_deref(), &key, &markdown) {
+            Ok(r) => {
+                note.content = r.content;
+                Ok((Ok((r.line, r.key, r.added, note.title.clone())), true))
+            }
+            Err(e) => Ok((Err((e, note.title.clone())), false)),
+        })
+    });
+    match outcome {
+        Err(e) => tool_result(false, Value::Null, e),
+        Ok(Ok((line, key, added, title))) => {
+            tracing::info!(note_id = id, added, chars = markdown.chars().count(), "Chat: a document's section rewritten");
+            let display = if added {
+                format!("Added \"{}\" to {}", clip(&key, 30), quoted(&title))
+            } else {
+                format!("Rewrote \"{}\" in {}", clip(&key, 30), quoted(&title))
+            };
+            tool_result(
+                true,
+                json!({ "id": id, "key": key, "changed": true, "added": added, "line": line, "next": "Rewrite any other section the change touches, then answer in one short sentence: nothing from the document." }),
+                display,
+            )
+        }
+        Ok(Err((why, title))) => {
+            tracing::info!(note_id = id, why = ?why, "Chat: a document's section not rewritten");
+            let (error, chip) = match why {
+                RewriteError::Changed => (
+                    format!("The user changed \"{key}\" in \"{title}\" since you last saw it, so nothing was rewritten: read_note first, then rewrite it keeping their changes."),
+                    format!("Didn't rewrite \"{}\": changed in {} since Chat saw it", clip(&key, 30), quoted(&title)),
+                ),
+                RewriteError::Unseen => (
+                    format!("You haven't read \"{title}\" yet, so nothing was rewritten: read_note first, then rewrite the section."),
+                    format!("Didn't rewrite \"{}\" in {}: not read yet", clip(&key, 30), quoted(&title)),
+                ),
+                RewriteError::Removed => (
+                    format!("The user removed \"{key}\" from \"{title}\", so nothing was written. Don't add it back."),
+                    format!("Didn't rewrite \"{}\": it's no longer in {}", clip(&key, 30), quoted(&title)),
+                ),
+                RewriteError::Empty => ("markdown is empty: write the whole section.".to_string(), format!("Couldn't rewrite \"{}\"", clip(&key, 30))),
+            };
+            tool_error(error, json!({ "id": id, "key": key }), chip)
+        }
+    }
+}
+
 /// A turn's chips with a section's written chip folded into the one before
 /// it for the same document ("Wrote 3 sections in "Build""): a document's
 /// sections are one thing done, not a column of chips. Pure.
 pub fn push_chip(chips: &mut Vec<String>, chip: String) {
     static ONE: std::sync::LazyLock<regex::Regex> =
-        std::sync::LazyLock::new(|| regex::Regex::new(r#"^Wrote "[^"]*" in (".*")$"#).expect("static regex"));
+        std::sync::LazyLock::new(|| regex::Regex::new(r#"^(Wrote|Rewrote) "[^"]*" in (".*")$"#).expect("static regex"));
     static MANY: std::sync::LazyLock<regex::Regex> =
-        std::sync::LazyLock::new(|| regex::Regex::new(r#"^Wrote (\d+) sections in (".*")$"#).expect("static regex"));
+        std::sync::LazyLock::new(|| regex::Regex::new(r#"^(Wrote|Rewrote) (\d+) sections in (".*")$"#).expect("static regex"));
     if let (Some(new), Some(last)) = (ONE.captures(&chip), chips.last()) {
-        let doc = new[1].to_string();
+        let (verb, doc) = (new[1].to_string(), new[2].to_string());
         let count = match (ONE.captures(last), MANY.captures(last)) {
-            (Some(c), _) if c[1] == *doc => Some(2),
-            (_, Some(c)) if c[2] == *doc => c[1].parse::<usize>().ok().map(|n| n + 1),
+            (Some(c), _) if c[1] == *verb && c[2] == *doc => Some(2),
+            (_, Some(c)) if c[1] == *verb && c[3] == *doc => c[2].parse::<usize>().ok().map(|n| n + 1),
             _ => None,
         };
         if let Some(n) = count {
             if let Some(last) = chips.last_mut() {
-                *last = format!("Wrote {n} sections in {doc}");
+                *last = format!("{verb} {n} sections in {doc}");
             }
             return;
         }
@@ -1026,16 +1399,17 @@ pub fn partial_number(json: &str, field: &str) -> Option<u64> {
     (!digits.is_empty() && !after.is_ascii_digit() && after != '.').then(|| digits.parse().ok()).flatten()
 }
 
-/// A `write_section` call's arguments so far, as the panel shows them:
-/// `(note_id, key, the section so far)`, once the note and the key are
-/// whole. Pure.
+/// A `write_section` or `rewrite_section` call's arguments so far, as the
+/// panel shows them: `(note_id, key, the section so far)`, once the note
+/// and the key (`heading`) are whole. Pure.
 pub fn live_section(args_so_far: &str) -> Option<(u64, String, String)> {
     let id = partial_number(args_so_far, "note_id").or_else(|| partial_number(args_so_far, "id"))?;
     // The key whole: its closing quote has come.
-    let key = partial_string(args_so_far, "key")?;
+    let field = ["key", "heading"].into_iter().find(|f| partial_string(args_so_far, f).is_some())?;
+    let key = partial_string(args_so_far, field)?;
     let key_done = {
-        let needle = "\"key\"";
-        args_so_far.find(needle).is_some_and(|at| {
+        let needle = format!("\"{field}\"");
+        args_so_far.find(&needle).is_some_and(|at| {
             let rest = &args_so_far[at + needle.len()..];
             rest.trim_start().strip_prefix(':').map(str::trim_start).and_then(|r| r.strip_prefix('"')).is_some_and(|v| {
                 let mut esc = false;
@@ -1108,7 +1482,7 @@ mod tests {
 
     #[test]
     fn the_skeleton_is_the_title_and_a_placeholder_per_section() {
-        let body = skeleton("Lone wolf build", &sections(&[("Gear", "what to wear"), ("Skills", "which and when")]));
+        let body = skeleton("Lone wolf build", "", &sections(&[("Gear", "what to wear"), ("Skills", "which and when")]));
         assert_eq!(
             body,
             "# Lone wolf build\n\n<!-- yap:section Gear | what to wear -->\n\n<!-- yap:section Skills | which and when -->\n"
@@ -1119,7 +1493,7 @@ mod tests {
 
     #[test]
     fn a_section_fills_its_placeholder_and_nothing_else() {
-        let body = skeleton("Trip", &sections(&[("Days", "day by day"), ("Costs", "what it costs")]));
+        let body = skeleton("Trip", "", &sections(&[("Days", "day by day"), ("Costs", "what it costs")]));
         let f = fill_section(&body, "days", "- Day 1: arrive\n- Day 2: walk").unwrap();
         assert_eq!(f.line, 3);
         assert_eq!(f.content, "# Trip\n\n## Days\n\n- Day 1: arrive\n- Day 2: walk\n\n<!-- yap:section Costs | what it costs -->\n");
@@ -1139,7 +1513,7 @@ mod tests {
 
     #[test]
     fn write_section_refuses_a_placeholder_the_person_removed_or_changed() {
-        let body = skeleton("Plan", &sections(&[("Gear", "kit"), ("Route", "the way")]));
+        let body = skeleton("Plan", "", &sections(&[("Gear", "kit"), ("Route", "the way")]));
         // Deleted: gone, never brought back.
         let deleted = body.replace("<!-- yap:section Gear | kit -->\n", "");
         assert_eq!(fill_section(&deleted, "Gear", "Boots"), Err(SectionError::Gone));
@@ -1202,7 +1576,7 @@ mod tests {
 
     #[test]
     fn the_person_s_edit_is_merged_over_chat_s_writing() {
-        let base = skeleton("Plan", &sections(&[("Gear", "kit"), ("Route", "the way")]));
+        let base = skeleton("Plan", "", &sections(&[("Gear", "kit"), ("Route", "the way")]));
         // Chat wrote Gear meanwhile; the person added a line at the end and
         // fixed the title.
         let theirs = fill_section(&base, "Gear", "Boots.").unwrap().content;
@@ -1319,8 +1693,14 @@ mod tests {
             "Can you put together a meal plan for next week?",
             "Give me a beginner's workout routine for three days a week",
             "What's a good lone wolf build for a ranger in a fantasy game?",
+            // Asked as the maintainer did, a search first.
+            "Can you look up a Pillars of Eternity build? I want a cipher, so find me the best one and put it in the chat.",
+            "Find me a good beginner workout routine",
         ] {
             assert!(asks_for_document(q), "{q}");
+        }
+        for q in ["Find my keys in the notes", "Look up the weather in Leeds"] {
+            assert!(!asks_for_document(q), "{q}");
         }
         for q in [
             "What time is it in Tokyo?",
@@ -1396,5 +1776,192 @@ mod tests {
             live_section(r#"{"note_id": 3, "key": "The \"markdown\": guide", "markdown": "Body"}"#),
             Some((3, "The \"markdown\": guide".into(), "Body".into()))
         );
+        // A rewrite_section's heading streams the same way.
+        assert_eq!(live_section(r#"{"note_id": 4, "heading": "Gear", "markdown": "Bo"#), Some((4, "Gear".into(), "Bo".into())));
+    }
+
+    #[test]
+    fn a_summary_goes_under_the_title_as_a_paragraph() {
+        let body = skeleton("Cipher build", "The Soul Blade is the pick.\n## Not a heading\n", &sections(&[("Gear", "")]));
+        assert_eq!(body, "# Cipher build\n\nThe Soul Blade is the pick.\n\n<!-- yap:section Gear -->\n");
+        let made = execute("create_document", &json!({ "title": "Build", "summary": "Two lines at most.", "sections": ["A"] }));
+        let id = made["data"]["id"].as_u64().unwrap();
+        assert!(crate::notes::get(id).unwrap().content.starts_with("# Build\n\nTwo lines at most.\n\n<!-- yap:section A -->"));
+    }
+
+    #[test]
+    fn a_section_is_rewritten_only_while_it_is_what_the_model_saw() {
+        let doc = "# Build\n\nThe pick.\n\n## Gear\n\n- Rings\n\n### Early\n\n- A staff\n\n## Skills\n\n- Shadow\n";
+        // Rewritten whole, its ### part with it, the next section kept.
+        let r = rewrite_section(doc, Some(doc), "gear", "| Level | Item |\n|---|---|\n| 1 | Staff |").unwrap();
+        assert_eq!(r.content, "# Build\n\nThe pick.\n\n## Gear\n\n| Level | Item |\n|---|---|\n| 1 | Staff |\n\n## Skills\n\n- Shadow\n");
+        assert_eq!((r.line, r.key.as_str(), r.added), (5, "Gear", false));
+        // Its own heading renames it.
+        let r = rewrite_section(doc, Some(doc), "Skills", "## Skills by level\n\n- 1: Shadow").unwrap();
+        assert!(r.content.ends_with("## Skills by level\n\n- 1: Shadow\n"), "{}", r.content);
+        assert_eq!(r.key, "Skills by level");
+        // A heading it never had: a new section at the end.
+        let r = rewrite_section(doc, Some(doc), "Level by level", "| Level | Pick |\n|---|---|").unwrap();
+        assert!(r.added);
+        assert!(r.content.ends_with("- Shadow\n\n## Level by level\n\n| Level | Pick |\n|---|---|\n"), "{}", r.content);
+        // The person changed Gear since: refused, theirs stays.
+        let theirs = doc.replace("- Rings", "- Rings, and my own cloak");
+        assert_eq!(rewrite_section(&theirs, Some(doc), "Gear", "x"), Err(RewriteError::Changed));
+        // …another section still rewrites.
+        assert!(rewrite_section(&theirs, Some(doc), "Skills", "- Stealth").is_ok());
+        // The person removed Skills: never brought back.
+        let removed = doc.replace("## Skills\n\n- Shadow\n", "");
+        assert_eq!(rewrite_section(&removed, Some(doc), "Skills", "x"), Err(RewriteError::Removed));
+        // A section the person wrote themselves is theirs.
+        let added = format!("{doc}\n## My notes\n\nMine.\n");
+        assert_eq!(rewrite_section(&added, Some(doc), "My notes", "x"), Err(RewriteError::Changed));
+        // No picture of it: read it first. Nothing to write: refused.
+        assert_eq!(rewrite_section(doc, None, "Gear", "x"), Err(RewriteError::Unseen));
+        assert_eq!(rewrite_section(doc, Some(doc), "Gear", " \n"), Err(RewriteError::Empty));
+        // A section still to be written is filled.
+        let outline = skeleton("Plan", "", &sections(&[("Days", "")]));
+        let r = rewrite_section(&outline, None, "Days", "- Day 1").unwrap();
+        assert!(pending_keys(&r.content).is_empty() && r.content.contains("## Days\n\n- Day 1"), "{}", r.content);
+    }
+
+    #[test]
+    fn the_rewrite_tool_keeps_the_person_s_edits_until_the_model_reads_them() {
+        let made = execute("create_document", &json!({ "title": "Cipher", "sections": ["Gear", "Powers"] }));
+        let id = made["data"]["id"].as_u64().unwrap();
+        after_call("create_document", &json!({}), &made);
+        for (key, md) in [("Gear", "- Arquebus"), ("Powers", "- Mind Wave")] {
+            let args = json!({ "note_id": id, "key": key, "markdown": md });
+            let r = execute("write_section", &args);
+            after_call("write_section", &args, &r);
+        }
+        let args = json!({ "note_id": id, "heading": "Powers", "markdown": "| Level | Power |\n|---|---|\n| 1 | Mind Wave |" });
+        let r = execute("rewrite_section", &args);
+        assert_eq!(r["success"], json!(true), "{r}");
+        assert_eq!(r["displayText"], json!("Rewrote \"Powers\" in \"Cipher\""));
+        assert_eq!(changed_note_of(&r), Some(id));
+        after_call("rewrite_section", &args, &r);
+        let v = versions::list(id).unwrap();
+        assert_eq!(v[0].version.kind, versions::kind::CHAT);
+        // The person changes Gear in the panel: a rewrite of it is refused…
+        let now = crate::notes::get(id).unwrap().content.replace("- Arquebus", "- Arquebus, then a pistol");
+        crate::notes::update(id, None, Some(now.clone()), None, None).unwrap();
+        let args = json!({ "note_id": id, "heading": "Gear", "markdown": "- Sword" });
+        let r = execute("rewrite_section", &args);
+        assert_eq!(r["success"], json!(false));
+        assert!(r["error"].as_str().unwrap().contains("read_note first"), "{r}");
+        assert_eq!(crate::notes::get(id).unwrap().content, now);
+        // …until the model has read it.
+        let read = json!({ "success": true, "data": { "id": id, "field": "content", "from": 1, "more": false } });
+        after_call("read_note", &json!({ "note_id": id }), &read);
+        assert_eq!(execute("rewrite_section", &args)["success"], json!(true));
+        // A new heading adds a section; a note Chat didn't make is refused.
+        let r = execute("rewrite_section", &json!({ "note_id": id, "heading": "Tips", "markdown": "- Rest before bosses" }));
+        assert_eq!(r["displayText"], json!("Added \"Tips\" to \"Cipher\""));
+        let mine = crate::notes::create("Shopping", "## Gear\n\n- milk", "manual", "").id;
+        let r = execute("rewrite_section", &json!({ "note_id": mine, "heading": "Gear", "markdown": "x" }));
+        assert!(r["error"].as_str().unwrap().contains("isn't a document Chat made"), "{r}");
+    }
+
+    fn changed_note_of(result: &Value) -> Option<u64> {
+        (result["success"] == json!(true) && result["data"]["changed"] == json!(true)).then(|| result["data"]["id"].as_u64()).flatten()
+    }
+
+    #[test]
+    fn a_turn_rewrites_only_this_chat_s_documents() {
+        let made = execute("create_document", &json!({ "title": "Doc", "sections": ["A"] }));
+        let id = made["data"]["id"].as_u64().unwrap();
+        let other = execute("create_document", &json!({ "title": "Another chat's", "sections": ["A"] }));
+        let other = other["data"]["id"].as_u64().unwrap();
+        let turn = Turn::new(&[DocRef { id, title: "Doc".into() }]);
+        assert!(turn.refuses("rewrite_section", &json!({ "note_id": id, "heading": "A" })).is_none());
+        let r = turn.refuses("rewrite_section", &json!({ "note_id": other, "heading": "A" })).unwrap();
+        assert!(r["error"].as_str().unwrap().contains("isn't a document of this chat"), "{r}");
+        assert!(turn.refuses("write_section", &json!({ "note_id": other })).is_none());
+        // One this turn made is the chat's.
+        let new = execute("create_document", &json!({ "title": "New", "sections": ["A"] }));
+        let new = new["data"]["id"].as_u64().unwrap();
+        turn.noticed("create_document", new);
+        assert!(turn.refuses("rewrite_section", &json!({ "note_id": new, "heading": "A" })).is_none());
+        assert!(turn.noticed("rewrite_section", id).is_some());
+    }
+
+    #[test]
+    fn a_question_about_the_open_document_is_told_apart() {
+        for q in [
+            "Can you change it so it goes from level one to max level, step by step?",
+            "Can you do a level one to max level and edit it so I can do a build step-by-step?",
+            "Add a head torch to the extras.",
+            "Go deeper on day two: hour by hour, with where to eat.",
+            "Swap the staff for a wand",
+            "Make it a two-handed build instead",
+        ] {
+            assert!(changes_document(q), "{q}");
+        }
+        for q in ["What time is it in Tokyo?", "Make me a packing list for a weekend in the hills", "Thanks!", "Let's do option A."] {
+            assert!(!changes_document(q), "{q}");
+        }
+        for q in ["Let's do option A.", "OK, I'll go with option B please", "Option 2", "I'll take choice one", "Let's go with the second one"] {
+            assert!(picks_option(q), "{q}");
+        }
+        for q in ["What are my options?", "Give me two options for a build", "an option and another", "Add option A's gear"] {
+            assert!(!picks_option(q), "{q}");
+        }
+        // With a document open: a pick → a new one, a change → that one.
+        let made = execute("create_document", &json!({ "title": "Summoner options", "sections": ["Option A", "Option B"] }));
+        let id = made["data"]["id"].as_u64().unwrap();
+        let docs = [DocRef { id, title: "Summoner options".into() }];
+        let pick = steer("Let's do option A.", &docs).unwrap();
+        assert!(pick.contains("new document for that pick") && pick.contains("\"Summoner options\" stays as it is"), "{pick}");
+        let change = steer("Can you change it so it goes from level one to max level?", &docs).unwrap();
+        assert!(change.contains(&format!("note_id {id}")) && change.contains("rewrite_section"), "{change}");
+        assert_eq!(steer("Make me a packing list for a weekend of camping in the hills.", &docs).as_deref(), Some(ASKS_NOTE));
+        assert_eq!(steer("Thanks!", &docs), None);
+        // Without one: only an ask for something to keep.
+        assert_eq!(steer("Let's do option A.", &[]), None);
+        assert_eq!(steer("Plan a three-day trip to Porto, day by day.", &[]).as_deref(), Some(ASKS_NOTE));
+    }
+
+    #[test]
+    fn a_document_s_citations_link_to_their_pages() {
+        let sources = vec![(1, "rpgbuilds.example".to_string(), "https://rpgbuilds.example/cipher".to_string()), (2, "loot.example".to_string(), "https://loot.example/gear".to_string())];
+        assert_eq!(
+            link_citations("The Soul Blade is the pick [1]. Gear [1][2].", &sources),
+            "The Soul Blade is the pick ([rpgbuilds.example](https://rpgbuilds.example/cipher)). Gear ([rpgbuilds.example](https://rpgbuilds.example/cipher), [loot.example](https://loot.example/gear))."
+        );
+        assert_eq!(link_citations("| 1 | Staff [2, 1] |", &sources), "| 1 | Staff ([loot.example](https://loot.example/gear), [rpgbuilds.example](https://rpgbuilds.example/cipher)) |");
+        // An unknown number, a link's own text, no sources: as written.
+        assert_eq!(link_citations("Seen [3].", &sources), "Seen [3].");
+        assert_eq!(link_citations("[1](https://a.example)", &sources), "[1](https://a.example)");
+        assert_eq!(link_citations("Pick [1].", &[]), "Pick [1].");
+    }
+
+    #[test]
+    fn the_voice_assistant_s_line_points_where_the_person_is_looking() {
+        assert!(spoken_note(false).ends_with("that it's in Chat."));
+        assert!(spoken_note(true).ends_with("that it's open on the right."));
+        assert!(SPOKEN_NOTE.starts_with("This was asked out loud") && SPOKEN_IN_CHAT_NOTE.starts_with("This was asked out loud"));
+    }
+
+    #[test]
+    fn a_section_with_rows_is_asked_for_as_a_table() {
+        let body = skeleton("Cipher", "", &sections(&[("Levelling", "which power at each level"), ("Tips", "how to play it")]));
+        assert_eq!(next_for(&body), "Now call write_section for \"Levelling\". Write it as a markdown table, a row each.");
+        let f = fill_section(&body, "Levelling", "| 1 | Mind Wave |").unwrap();
+        assert_eq!(next_for(&f.content), "Now call write_section for \"Tips\".");
+        for (k, i) in [("Costs", ""), ("Day by day", ""), ("Attributes", "the stats"), ("The two", "compared side by side")] {
+            assert!(!table_hint(k, i).is_empty(), "{k} {i}");
+        }
+        for (k, i) in [("Gear", "what to wear"), ("Day 1", "the old town"), ("Story", "")] {
+            assert!(table_hint(k, i).is_empty(), "{k} {i}");
+        }
+    }
+
+    #[test]
+    fn rewritten_sections_fold_into_one_chip() {
+        let mut chips = vec![];
+        push_chip(&mut chips, "Rewrote \"Gear\" in \"Build\"".into());
+        push_chip(&mut chips, "Rewrote \"Skills\" in \"Build\"".into());
+        push_chip(&mut chips, "Wrote \"Tips\" in \"Build\"".into());
+        assert_eq!(chips, ["Rewrote 2 sections in \"Build\"", "Wrote \"Tips\" in \"Build\""]);
     }
 }

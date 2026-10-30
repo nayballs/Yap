@@ -101,7 +101,7 @@ pub enum Event {
 
 /// Tool calls whose arguments the page sees as they come: a document's
 /// section, written into the panel while it streams (`documents.rs`).
-pub const LIVE_ARGS: &[&str] = &["write_section"];
+pub const LIVE_ARGS: &[&str] = &["write_section", "rewrite_section"];
 
 /// Who watches a stream.
 pub trait Sink: Send + Sync {
@@ -123,7 +123,7 @@ pub fn doing(name: &str) -> &'static str {
         "remember" | "forget" => "Updating Yap's memory…",
         "search_chats" => "Searching your chats…",
         "create_document" => "Starting a document…",
-        "write_section" => "Writing the document…",
+        "write_section" | "rewrite_section" => "Writing the document…",
         _ => "Working…",
     }
 }
@@ -288,7 +288,7 @@ impl<'a> Step<'a> {
         }
     }
 
-    /// A `write_section` call's arguments so far: the section as written
+    /// A `write_section` (or `rewrite_section`) call's arguments so far: the section as written
     /// so far to the page (the panel), at most every [`MIN_GAP`].
     fn send_section(&mut self, so_far: &str) {
         if self.section_at.is_some_and(|t| t.elapsed() < MIN_GAP) {
@@ -365,7 +365,7 @@ impl<'a> Step<'a> {
                 self.sink.send(Event::Tool { name: name.to_string(), doing: doing(name).to_string() });
             }
             Delta::ToolArgs { name, so_far } => {
-                if name == "write_section" {
+                if LIVE_ARGS.contains(&name) {
                     self.send_section(so_far);
                 }
             }

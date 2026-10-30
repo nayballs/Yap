@@ -109,7 +109,7 @@ pub const TOOL_INSTRUCTIONS: &[&str] = &[
     "Use get_note to fetch a note by ID (the current note's ID if the context gives one, else find it with search_notes first), and read_note to read a long one a page at a time.",
     "Use search_in_note to find the exact words in a note before you quote them or change them.",
     "To change part of a note (fix a word, add or remove a line, tick off a task, rename it), first find the text with search_in_note or read_note, then call edit_note with old_text copied exactly from the note, without the line numbers, and new_text with your change. Keep old_text short, but long enough to appear only once. If edit_note finds no match or more than one, follow its error and retry; never rewrite the whole note to change part of it.",
-    "Use create_note when the user asks you to create, write, or draft a new note. Leave folder empty (the note goes to Personal) unless the user named a folder or the content clearly fits a folder that already exists: then call list_folders first and pass that folder's name, tolerant of case, plurals and typos. Never make up a folder: only when the user asks for a new folder, pass its name with new_folder set to true.",
+    "Use create_note when the user asks you to create, write, or draft a new note, with its text (a build, a plan or a guide to keep is a document instead). Leave folder empty (the note goes to Personal) unless the user named a folder or the content clearly fits a folder that already exists: then call list_folders first and pass that folder's name, tolerant of case, plurals and typos. Never make up a folder: only when the user asks for a new folder, pass its name with new_folder set to true.",
     "Use update_note only to move a note to an existing folder (list_folders first), or to rewrite a whole note when the user explicitly asks for that; for any smaller change, use edit_note.",
     "Use copy_to_clipboard when the user asks you to copy something to their clipboard.",
     // Documents beside the chat (documents.rs): when to make one, outline first.
@@ -173,11 +173,13 @@ pub struct CalendarTurn<'a> {
 
 /// The tools that act (open an app, write or change a note, the
 /// clipboard, memory): refused for the rest of a turn once web content is
-/// in it. A document's two (`create_document`, `write_section`) aren't:
-/// a build is researched on the web first, and they're the answer's own
-/// words — a new note in Chat documents, sections filled where the
-/// outline left room — never a change to something the person wrote
-/// (`edit_note` on a document stays refused after the web).
+/// in it. A document's three (`create_document`, `write_section`,
+/// `rewrite_section`) aren't: a build is researched on the web first, and
+/// they're the answer's own words — a new note in Chat documents, sections
+/// filled where the outline left room, a section of this chat's own
+/// document rewritten only while it's what the model last saw — never a
+/// change to something the person wrote (`edit_note` on a document stays
+/// refused after the web; `documents::Turn::refuses`, `rewrite_section`).
 pub const ACTION_TOOLS: &[&str] = &["open_app", "create_note", "update_note", "edit_note", "copy_to_clipboard", "remember", "forget"];
 
 /// **The safety rule**: after web content came into this turn (`web_seen`),
@@ -565,7 +567,10 @@ mod tests {
     /// Was 750 + 2,129 = 2,879 before the 2026-10-18 trim (now about 560 +
     /// 1,624). Documents beside the chat (2026-10-30, `documents.rs`) add
     /// about 380: their two schemas and one instruction line, trimmed
-    /// (2,692 as first written, 2,580 after). `--nocapture` prints it.
+    /// (2,692 as first written, 2,580 after); their third tool
+    /// (`rewrite_section`), the summary and the firmer rule (never asked
+    /// about first, tables, a new document for an option picked) about 280
+    /// more (2,898, trimmed from 3,050). `--nocapture` prints it.
     #[test]
     fn a_tool_step_stays_light() {
         let est = crate::meetings::meeting_summary::estimate_tokens;
@@ -578,7 +583,7 @@ mod tests {
         tools.as_array_mut().unwrap().extend(app_definitions().as_array().unwrap().iter().cloned());
         let (s, t) = (est(&system), est(&tools.to_string()));
         println!("one tool step sends: system {s} + tools {t} = {} tokens", s + t);
-        assert!(s + t <= 2_620, "{} tokens", s + t);
+        assert!(s + t <= 2_900, "{} tokens", s + t);
     }
 
     /// A document's tools are the answer's own writing, not actions: a build
@@ -588,6 +593,7 @@ mod tests {
     fn a_document_can_be_written_after_reading_the_web() {
         assert!(refused_after_web("create_document", true).is_none());
         assert!(refused_after_web("write_section", true).is_none());
+        assert!(refused_after_web("rewrite_section", true).is_none());
         assert!(refused_after_web("edit_note", true).is_some());
     }
 }
