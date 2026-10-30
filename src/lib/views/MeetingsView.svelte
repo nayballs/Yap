@@ -569,18 +569,20 @@
         shortcut = keys && keys !== 'None' ? keys : '';
       })
       .catch(() => {});
-    const uns = [];
-    listen('yap-meeting-state', (e) => {
-      meeting = e.payload || { recording: false };
-      refreshPast();
-    }).then((u) => uns.push(u));
-    listen('yap-notes-changed', () => {
-      refreshPast();
-      refreshFolders();
-      refreshDay();
-    }).then((u) => uns.push(u));
-    // A task ticked elsewhere leaves the wrap-up's list.
-    listen('yap-tasks-changed', () => refreshDay()).then((u) => uns.push(u));
+    // (Kept as promises: one still registering when the view goes is let go too.)
+    const uns = [
+      listen('yap-meeting-state', (e) => {
+        meeting = e.payload || { recording: false };
+        refreshPast();
+      }),
+      listen('yap-notes-changed', () => {
+        refreshPast();
+        refreshFolders();
+        refreshDay();
+      }),
+      // A task ticked elsewhere leaves the wrap-up's list.
+      listen('yap-tasks-changed', () => refreshDay()),
+    ];
     const tick = setInterval(() => (now = Date.now() / 1000), 15_000);
     const cycle = setInterval(() => {
       if (!askText) askIndex = (askIndex + 1) % ASK_EXAMPLES.length;
@@ -589,7 +591,7 @@
       clearInterval(tick);
       clearInterval(cycle);
       clearTimeout(queryTimer);
-      uns.forEach((u) => u && u());
+      uns.forEach((u) => u.then((f) => f()).catch(() => {}));
     };
   });
 </script>

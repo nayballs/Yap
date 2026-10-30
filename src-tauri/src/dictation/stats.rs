@@ -261,6 +261,18 @@ impl Store {
         crossed
     }
 
+    /// A dictation that failed (or was cancelled), run again and counted now
+    /// on the day it was said (`at`, unix seconds). History up to it counts
+    /// as counted, or the next start's [`catch_up`](Self::catch_up) would
+    /// count its entry — transcribed now — a second time.
+    pub fn count_late(&mut self, at: u64, t: &Tally) {
+        if t.words == 0 {
+            return;
+        }
+        self.add(days::local_date(at), t);
+        self.counted_to = self.counted_to.max(at);
+    }
+
     /// History entries this file hasn't counted (all of them the first
     /// time; then those an older Yap saved): counted by the day they were
     /// said, the milestones they pass marked passed without a word.
@@ -490,7 +502,7 @@ pub fn dictated(app: &AppHandle, c: Counted<'_>) {
             None => s.count_now(days::today(), &t, now),
             // Run again on one that failed: on the day it was said.
             Some(at) => {
-                s.add(days::local_date(at), &t);
+                s.count_late(at, &t);
                 None
             }
         };
@@ -718,6 +730,25 @@ mod tests {
         assert_eq!(s.catch_up(&[e1.clone()], &[]), 0);
         assert_eq!(s.catch_up(&[e1, entry(ts + 90, "Four five", "code.exe")], &[]), 1);
         assert_eq!(s.total_words(), 125);
+    }
+
+    /// A cancelled (or failed) dictation, the newest in history, transcribed
+    /// from Home: counted once then, and not again by the next start's
+    /// catch-up, which finds its entry transcribed.
+    #[test]
+    fn a_dictation_run_again_is_counted_once_across_a_restart() {
+        let mut s = Store::default();
+        let ts = 1_790_000_000;
+        s.count_now(days::local_date(ts), &tally(4, Some(2.0), "notepad.exe"), ts);
+        // Cancelled a minute later (never counted), then Transcribe on Home.
+        let mut cancelled = entry(ts + 60, "Five six seven eight nine", "notepad.exe");
+        s.count_late(cancelled.ts, &tally(5, Some(3.0), "notepad.exe"));
+        assert_eq!(s.total_words(), 9);
+        // The next start: history now holds it transcribed.
+        cancelled.status = None;
+        assert_eq!(s.catch_up(&[entry(ts, "One two three four", "notepad.exe"), cancelled], &[]), 0);
+        assert_eq!(s.total_words(), 9, "counted once");
+        assert_eq!(s.days.iter().map(|d| d.dictations).sum::<u64>(), 2);
     }
 
     #[test]

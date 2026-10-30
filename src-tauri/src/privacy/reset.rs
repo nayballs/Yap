@@ -242,7 +242,10 @@ fn run(app: &AppHandle) -> Result<Done, String> {
     done.screenshots = crate::snip::chat_images_delete_all(app.clone());
     done.memory = crate::memory::reset();
     done.tasks = crate::notes::task_store::reset();
-    crate::search::index::forget()?;
+    // The index's folder held (an antivirus, the indexer at work): said
+    // once the rest is done — the stats, the set-aside copies and every
+    // window's events never wait on it.
+    let index = crate::search::index::forget();
     crate::search::index::emit(app);
     crate::dictation::stats::clear();
     crate::ai::usage::store::reset();
@@ -269,6 +272,10 @@ fn run(app: &AppHandle) -> Result<Done, String> {
     crate::chat::chats::saved()?;
     crate::memory::saved()?;
     crate::notes::task_store::saved()?;
+    if let Err(e) = index {
+        tracing::warn!("Reset app: the search index's folder wasn't deleted ({e})");
+        return Err(e);
+    }
     Ok(done)
 }
 

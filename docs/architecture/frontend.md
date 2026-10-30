@@ -523,7 +523,12 @@ Flow's dark mode of 19 Oct 2026), for every Yap window.
   Chat's model picker (`ChatModelPicker.svelte`, ~24 KB) and the context
   ring's panel (`ContextPanel.svelte`, ~7 KB) load the first time they
   open: the context ring took the chunk to 704 KB, and with them out it's
-  681 KB.
+  681 KB. By 2026-10-30 it was 746 KB again, so Settings' two biggest
+  pages, each on a page of its own and rarely opened, load when their page
+  first shows (`{#await import(…)}` in Settings.svelte): Memory
+  (`MemorySection.svelte`, ~23 KB) and Account (`AccountSection.svelte`,
+  ~27 KB): 698 KB. (Neither shares a class with `settings.css` whose tie a
+  chunk's CSS order would decide: frontend-settings.md, "CSS order".)
 - **Home's first paint** (2026-10-24): Home's data comes in **one call
   asked first** — `home_snapshot` (`dictation/commands.rs`, async: off the window's
   thread; the history page, the stats, the settings Home shows, the

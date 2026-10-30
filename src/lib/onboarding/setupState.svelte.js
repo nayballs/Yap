@@ -155,6 +155,14 @@ export function createSetupState() {
 
   // ---- Step 1: mic check ----
   let devices = $state([]);
+  /** Windows' microphones, read again as one comes or goes (`yap-mics-changed`). */
+  async function refreshMics() {
+    try {
+      devices = (await invoke('list_mics')) || [];
+    } catch {
+      /* keep the last */
+    }
+  }
   let bars = $state(Array(36).fill(0)); // scrolling level meter
   let micHeard = $state(false); // any signal above the floor yet?
 
@@ -164,7 +172,18 @@ export function createSetupState() {
   async function applyMic(id) {
     if (!cfg) return;
     try {
-      const m = devices.find((d) => d.id === id);
+      let m = devices.find((d) => d.id === id);
+      if (id && !m) {
+        // One connected since the setup opened (the mic quiz reads the list
+        // afresh): read it again, and never empty the order for a microphone
+        // that isn't in it.
+        devices = (await invoke('list_mics')) || [];
+        m = devices.find((d) => d.id === id);
+        if (!m) {
+          error = "That microphone isn't connected any more.";
+          return;
+        }
+      }
       const rest = (cfg.micOrder || []).filter((c) => c.id !== id && (!m || c.name !== m.name));
       cfgPatch.micOrder = m ? [{ id: m.id, name: m.name }, ...rest] : [];
       cfg.micOrder = cfgPatch.micOrder;
@@ -456,7 +475,7 @@ export function createSetupState() {
         // best-effort teardown
       }
     }
-    flog('registerListeners: registering 5 raw listeners');
+    flog('registerListeners: registering 6 raw listeners');
     unsubs = [
       rawListen('stt-download-progress', (e) => {
         if (e.payload && e.payload.modelSize === busyId) {
@@ -479,6 +498,8 @@ export function createSetupState() {
       rawListen('yap-state', (e) => {
         tryState = e.payload || 'idle';
       }),
+      // A microphone plugged in or out (dictation/mics.rs): the mic step's list follows.
+      rawListen('yap-mics-changed', () => refreshMics()),
       // The try-box fills from this EVENT, not from the OS-level paste: pasting
       // into our own webview races the clipboard restore (WebView2 handles
       // Ctrl+V asynchronously), so the injected text can vanish. The event is
@@ -581,6 +602,7 @@ export function createSetupState() {
     choose,
     quickStart,
     applyMic,
+    refreshMics,
     onCloudProviderChange,
     refreshLlm,
     enableLocalCleanup,

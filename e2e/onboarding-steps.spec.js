@@ -123,6 +123,46 @@ test('the mic step: the quiz listens on every microphone at once, marks the best
   }
 });
 
+// The setup's list of microphones used to be read as it opened and never
+// again, so one plugged in while it showed ("Plug one in or connect a
+// headset, and it shows up here") never did.
+test('the mic step lists a microphone plugged in while it shows', async ({ yap }) => {
+  const ob = await openSetup(yap);
+  await ob.getByRole('button', { name: "I'll choose later" }).click();
+  await continueBtn(ob).click();
+  await expect(ob.getByRole('heading', { level: 1, name: "Let's check your microphone" })).toBeVisible();
+  const options = ob.getByRole('combobox', { name: 'Microphone' }).locator('option');
+  await expect(options).toHaveText(['System default', MICS[0].name]);
+  await yap.invoke('e2e_mic_plug', { device: { id: MICS[2].id, name: MICS[2].name } });
+  await expect(options).toHaveText(['System default', MICS[0].name, MICS[2].name]);
+  await yap.invoke('e2e_mic_unplug', { id: MICS[0].id });
+  await expect(options).toHaveText(['System default', MICS[2].name]);
+});
+
+test('the mic step: a microphone connected after the setup opened, picked in the quiz, goes first', async ({ yap }) => {
+  // The laptop's array clear, the USB mic in a noisy room.
+  await yap.invoke('e2e_mic_quiz', { profiles: { usb: [0.05, 0.06], array: [0.25, 0.001] } });
+  try {
+    const ob = await openSetup(yap);
+    await ob.getByRole('button', { name: "I'll choose later" }).click();
+    await continueBtn(ob).click();
+    await expect(ob.getByRole('heading', { level: 1, name: "Let's check your microphone" })).toBeVisible();
+    // Plugged in now: the quiz reads the list afresh (the step's own list
+    // follows too, the test above).
+    await yap.invoke('e2e_mics', { devices: [MICS[0], MICS[2]] });
+    const quiz = ob.getByTestId('mic-quiz');
+    await quiz.getByRole('button', { name: 'Start the mic quiz' }).click();
+    await expect(quiz).toHaveAttribute('data-phase', 'done', { timeout: 15_000 });
+    await quiz.locator('[data-mic="e2e-array"]').getByRole('button', { name: 'Use this one' }).click();
+    // First in the order, never the order emptied.
+    await expectStore(yap, 'config.json', (c) => c.micOrder?.[0]?.id === 'e2e-array');
+    await expect(quiz.locator('.ok')).toContainText('Northwind Audio is first in your microphones now');
+  } finally {
+    const cfg = await yap.invoke('get_config');
+    await yap.invoke('save_config', { cfg: { ...cfg, micOrder: [] } });
+  }
+});
+
 test('the calendar step: skipped, it never shows again', async ({ yap, shot }) => {
   const ob = await openSetup(yap);
   await ob.locator('nav.dots .dot').first().waitFor();

@@ -113,6 +113,36 @@ test('two keys for dictation: either starts it and either stops it', async ({ ya
   await expect(capsule(yap)).toBeHidden({ timeout: 15_000 });
 });
 
+/** Right Alt (VK_RMENU) going down or up, as a keyboard sends it. */
+async function rightAlt(page, type) {
+  const cdp = await page.context().newCDPSession(page);
+  try {
+    const ev = { key: 'Alt', code: 'AltRight', windowsVirtualKeyCode: 18, nativeVirtualKeyCode: 165, location: 2 };
+    await cdp.send('Input.dispatchKeyEvent', { type, ...ev, modifiers: type === 'keyUp' ? 0 : 1 });
+  } finally {
+    await cdp.detach().catch(() => {});
+  }
+}
+
+// The quick note's shortcut has a hold of its own (notes/quick_note/key.rs):
+// a key coming up that ends it — Alt, in Ctrl+Alt+Q — used to stop there,
+// so push-to-talk on Right Alt never heard its key let go and kept
+// recording. Each hears its own release now.
+test("push-to-talk on Right Alt stops when it's let go, beside a quick note shortcut with Alt in it", async ({ yap, main }) => {
+  await setConfig(yap, main, { recordingMode: 'pushToTalk', hotkey: 'kb:165', quickNoteHotkey: 'kb:ctrl+alt+81' });
+  try {
+    const before = (yap.readJson('history.json') || []).length;
+    await rightAlt(main, 'rawKeyDown');
+    await expect(capsule(yap)).toBeVisible();
+    await main.waitForTimeout(1_200);
+    await rightAlt(main, 'keyUp');
+    await expectStore(yap, 'history.json', (h) => h.length === before + 1 && JSON.stringify(h).includes('STT stub'));
+    await expect(capsule(yap)).toBeHidden({ timeout: 15_000 });
+  } finally {
+    await setConfig(yap, main, { hotkey: 'kb:135', quickNoteHotkey: '' });
+  }
+});
+
 test('Settings → Dictation: push-to-talk offers triple-tap for meeting notes, off by default', async ({ yap, main, shot }) => {
   const dialog = await openSettings(main, 'Dictation');
   await expect(dialog.locator('[data-setting="triple-tap-meeting"]')).toHaveCount(0);

@@ -9,10 +9,8 @@
   import { loadCatalog } from '../stores/modelCatalog.svelte.js';
   import { attention, attentionCount, followAttention } from '../stores/attention.svelte.js';
   import { refreshLocalLlm, listenLocalProgress, followLocalLlm } from './localLlm.svelte.js';
-  import AccountSection from './AccountSection.svelte';
   import ConnectorsSection from './ConnectorsSection.svelte';
   import McpSection from './McpSection.svelte';
-  import MemorySection from './MemorySection.svelte';
   import SkillsPage from './SkillsPage.svelte';
   import { account, displayName, initAccount, initials } from '../stores/account.svelte.js';
   // Last before settings.css: the CSS order (LanguageModelsPage.svelte says why).
@@ -583,7 +581,13 @@
               <h1>Memory</h1>
               <p>What Yap remembers about you, so its AI answers you better. See, change or clear any of it.</p>
             </div>
-            <MemorySection {cfg} {goto} />
+            <!-- Memory and Account: the two biggest pages, each in its own
+                 chunk (as the Help menu is), so the main window's stays
+                 under Vite's 700 kB. Neither uses settings.css's classes
+                 in a way its order decides (frontend-settings.md). -->
+            {#await import('./MemorySection.svelte') then { default: MemorySection }}
+              <MemorySection {cfg} {goto} />
+            {/await}
           {:else if section === 'skills'}
             <SkillsPage />
           {:else if section === 'models'}
@@ -612,7 +616,9 @@
               <p>Optional. Yap works fully offline without one; sign in only for the extras that need it.</p>
             </div>
             <div data-setting="account">
-              <AccountSection />
+              {#await import('./AccountSection.svelte') then { default: AccountSection }}
+                <AccountSection />
+              {/await}
             </div>
           {/if}
         </div>

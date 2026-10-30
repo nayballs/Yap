@@ -241,12 +241,22 @@ re-exported by the module, except `local_llm`'s, which callers name
   `e2e_guide_reset`. Unit tests; e2e `onboarding-steps.spec.js`,
   `meeting-setup.spec.js`.
 - **`shell/help.rs`** — **the Help menu's shortcut sheet** (2026-10-29):
-  `shortcut_sheet` → every global binding as set now, read from the input
-  hook's own list (`input_hook::FIXED_KEYS` / `FIXED_NAMES`, each action's
-  first shortcut and its more), so a binding added there shows up by
-  itself; then the saved transforms' and the language shortcuts' keys, and
-  the recording mode. `sheet` is pure and unit-tested; the page is
+  `shortcut_sheet` → every global binding as the hook binds it, read from
+  the input hook's own list (`input_hook::FIXED_KEYS` / `FIXED_NAMES`, each
+  action's first shortcut and its more: `bound_first` / `bound_more`, so a
+  key left unbound — clashing with an older shortcut's, Send on Enter — is
+  "Not set"), so a binding added there shows up by itself; then the saved
+  transforms' and the language shortcuts' keys (their own slots,
+  `transforms::assign` / `languages::assign`), and the recording mode. `sheet` is pure and unit-tested; the page is
   `lib/views/help/ShortcutSheet.svelte` (frontend.md).
+- **`shell/com.rs`** — COM's multithreaded apartment kept up for as long as
+  Yap runs (2026-10-29): `keep_mta` (`CoIncrementMTAUsage`, never given back),
+  first thing in `run`, and before any test in a test run (a `.CRT$XCU`
+  initialiser). Notifications and other WinRT objects are used from threads
+  without COM of their own (the implicit MTA); when the last thread that had
+  joined the MTA left it (a UI Automation read), Windows took it down under
+  them — an access violation in the notification tests now and then, or
+  "Cannot create a WinRT object during host MTA shutdown".
 - **`shell/portable.rs`** — portable-mode detection (a `portable` marker next to the exe
   redirects data to `<exe>/Data`).
 - **`shell/download.rs`** — **one download helper for every big
