@@ -21,7 +21,11 @@
 //! cap would be passed — Groq takes 3 in all), each older one becomes a
 //! line, "(An earlier screenshot, not sent again.)", and one past "Keep
 //! chat screenshots", "(A screenshot was here; it was removed.)". A model on
-//! this PC gets only the newest.
+//! this PC gets only the newest. A model Yap didn't know couldn't read
+//! images that turns them down (Chat switched to it after a question with a
+//! screenshot) is learned to be a "no" there and then, and the step is
+//! asked again with each said in that line ([`without_images`],
+//! `chat/tools/agent.rs`); from then on it gets none.
 
 use serde_json::{json, Value};
 
@@ -181,6 +185,24 @@ pub const NOT_SENT_AGAIN: &str = "(An earlier screenshot, not sent again.)";
 /// An earlier image whose file is gone.
 pub const REMOVED: &str = "(A screenshot was here; it was removed.)";
 
+/// The earlier screenshots in a request's `messages` taken out, each
+/// message's said in a line as one not sent again: for a model that turned
+/// them down (`chat/tools/agent.rs`). Whether there were any. Pure.
+pub fn without_images(messages: &mut [Value]) -> bool {
+    let mut any = false;
+    for m in messages.iter_mut().filter(|m| m["role"] == "user") {
+        let Some(parts) = m["content"].as_array() else { continue };
+        if !parts.iter().any(|p| p["type"] == "image_url") {
+            continue;
+        }
+        let text = text_of(&m["content"]).unwrap_or_default();
+        let text = if text.ends_with(NOT_SENT_AGAIN) { text } else { format!("{text}\n\n{NOT_SENT_AGAIN}") };
+        m["content"] = json!(text.trim());
+        any = true;
+    }
+    any
+}
+
 /// Which earlier images are sent again: the newest `budget` of those still
 /// there (message index, image index), newest first — never one `held`
 /// back (a screenshot of the window in front where the window itself may
@@ -269,7 +291,8 @@ pub fn history_images(
 /// [`history_images`] for a Chat turn to `model` on `provider` at
 /// `base_url`: the copies fitted off the async runtime (they're usually
 /// made already). A model known not to read images (`vision.rs`: switched
-/// to after a question with a screenshot) gets none again, each one a line.
+/// to after a question with a screenshot, or one that turned these down
+/// before: [`without_images`]) gets none again, each one a line.
 /// A screenshot of the window in front (the Voice Assistant's, source
 /// "window") goes again only where the window itself may go now
 /// (`assistant::screen::window_may_go`): taken for a model on this PC, it
@@ -455,6 +478,15 @@ mod tests {
         assert_eq!(history_budget("anthropic", false, 1), 3);
         assert_eq!(history_budget("groq", false, 4), 0);
         assert_eq!(history_budget("custom", true, 1), 0);
+        // Turned down by the model: every one taken out, each message's said
+        // in one line (not twice where it had one already).
+        assert!(without_images(&mut messages));
+        assert!(!has_images(&json!({ "messages": messages })));
+        assert_eq!(messages[0]["content"], format!("first\n\n{NOT_SENT_AGAIN}"));
+        assert_eq!(messages[3]["content"], format!("second\n\n{NOT_SENT_AGAIN}"));
+        assert_eq!(messages[5]["content"], format!("third\n\n{REMOVED}\n\n{NOT_SENT_AGAIN}"));
+        assert_eq!(messages[2]["content"], "ok");
+        assert!(!without_images(&mut messages), "none left");
     }
 
     /// The Voice Assistant took the window in front for a model on this PC;
