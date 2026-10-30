@@ -586,6 +586,8 @@ async fn tool_loop(
                 refusal
             } else if let Some(r) = crate::ai::eval::intercept_tool(name, &args) {
                 r // a model evaluation records what would leave Yap (the clipboard)
+            } else if let Some(r) = extra.docs.and_then(|d| d.made_already(name, &args)) {
+                r // this turn's document, asked for again: the one there is
             } else if let (Some(turn), true) = (web.as_deref_mut(), crate::web::TOOL_NAMES.contains(&name)) {
                 turn.execute(name, &args).await
             } else if extra.memory && MEMORY_TOOL_NAMES.contains(&name) {
@@ -647,7 +649,9 @@ async fn tool_loop(
                     }
                 }
             }
-            if let Some(d) = result["displayText"].as_str() {
+            // (A call with nothing to say — this turn's document asked for
+            // again — has no chip.)
+            if let Some(d) = result["displayText"].as_str().filter(|d| !d.is_empty()) {
                 // A document's sections, one chip ("Wrote 4 sections in …").
                 crate::chat::documents::push_chip(&mut tools_used, d.to_string());
             }

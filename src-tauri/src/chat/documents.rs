@@ -60,7 +60,7 @@ const INTENT_MAX: usize = 140;
 /// instructions (`tools::TOOL_INSTRUCTIONS`): when to make one, the outline
 /// first, a line or two in the chat, and later questions changing it. Kept
 /// short: every step of a tool turn sends it.
-pub const INSTRUCTIONS: &str = "For an answer to keep or come back to (a build, a plan, a guide, a comparison, a long table), make a document: create_document with the title and all its sections first, then write_section for each, in order. In the chat say only one short line (\"It's open on the right.\"): no summary, never the content. A question or change about a document from this chat: change it with edit_note (read_note first).";
+pub const INSTRUCTIONS: &str = "For an answer to keep or come back to (a build, a plan, a guide, a comparison, a long table), make a document: create_document with the title and all its sections first (one per part, usually 2 to 6), then write_section for each, in order. In the chat say only one short line (\"It's open on the right.\"): no summary, never the content. A question or change about a document from this chat: change it with edit_note (read_note first).";
 
 /// Added to a question asked out loud (the Voice Assistant) when the
 /// model calls tools: no document unless one is asked for, and then a
@@ -534,6 +534,27 @@ pub struct Turn {
 impl Turn {
     pub fn new(known: &[DocRef]) -> Turn {
         Turn { known: Mutex::new(known.iter().map(|d| d.id).collect()), ..Default::default() }
+    }
+
+    /// A `create_document` for a document this turn already made (the same
+    /// title): not made twice — the result is the one there is, its
+    /// sections still to write. Qwen3.5-4B called `create_document` twice
+    /// in one step, then filled one and left the other's four placeholders
+    /// (30 Oct 2026). `None`: go ahead.
+    pub fn made_already(&self, name: &str, args: &Value) -> Option<Value> {
+        if name != "create_document" {
+            return None;
+        }
+        let title = clean(args["title"].as_str().unwrap_or(""), 120);
+        let made = self.made.lock().unwrap_or_else(|p| p.into_inner()).clone();
+        let note = made.into_iter().filter_map(crate::notes::get).find(|n| !title.is_empty() && n.title.eq_ignore_ascii_case(&title))?;
+        let left = pending_keys(&note.content);
+        tracing::info!(note_id = note.id, "Chat: create_document again for this turn's document; the one there is goes back");
+        Some(tool_result(
+            true,
+            json!({ "id": note.id, "title": note.title, "sections": left, "already": true, "next": next_step(&left) }),
+            String::new(),
+        ))
     }
 
     /// The documents this turn made that still have sections to write:
@@ -1329,6 +1350,12 @@ mod tests {
         assert!(note.contains("still has sections to write: \"Pick\". Call write_section for each now"), "{note}");
         execute("write_section", &json!({ "note_id": id, "key": "Pick", "markdown": "B." }));
         assert_eq!(turn.unfinished(), None);
+        // The same document asked for again this turn: the one there is.
+        let again = turn.made_already("create_document", &json!({ "title": "comparison", "sections": ["Table", "Pick"] })).unwrap();
+        assert_eq!((again["data"]["id"].as_u64(), again["data"]["already"].as_bool()), (Some(id), Some(true)));
+        assert_eq!(again["displayText"], json!(""));
+        assert!(turn.made_already("create_document", &json!({ "title": "Another", "sections": ["A"] })).is_none());
+        assert!(turn.made_already("write_section", &json!({ "title": "Comparison" })).is_none());
         // One only changed this turn (not made) isn't the turn's to finish.
         let older = execute("create_document", &json!({ "title": "Older", "sections": ["A"] }));
         let older = older["data"]["id"].as_u64().unwrap();
