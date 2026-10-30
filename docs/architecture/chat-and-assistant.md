@@ -522,14 +522,36 @@ The AI Chat surface (conversations, the tool-calling loop and its note tools) an
   table, gear and tips; a line in the chat ("It's open on the right."),
   never the content; a change to a document from this chat, or more depth,
   goes in it (`rewrite_section`, `edit_note`); an option picked from one
-  is a new document; never `create_note` for any of these. **`create_note`
+  is a new document; never `create_note` for any of these. **A document is
+  a note** (30 Oct 2026): Claude Haiku 5.5, asked to "put it into the notes
+  or the Markdown file", made one and said "I can't write to your notes or a
+  Markdown file from here". The model is told where it's kept — the rule
+  ("A document is a Markdown note, saved in Notes under Chat documents."),
+  `create_document`'s description ("shown beside the chat, saved in
+  Notes"), its result's `saved` (`SAVED`: "Saved as a Markdown
+  note in Notes, in the Chat documents folder: the user can open it there,
+  or export it as a .md file (Export as Markdown)." — the Notes view's
+  per-note Export as Markdown), the last section's `next` ("asked for it in
+  their notes or a file: "It's open on the right, and saved in your Notes
+  under Chat documents.""), and the next question's documents line ("open
+  beside it and saved in Notes (Chat documents) as Markdown notes").
+  **`create_note`
   refuses an empty note** (a tool error saying to use `create_document`):
   Claude Haiku 5.5 answered "Let's do option A" with `read_note` and an
   empty `create_note` in Personal, then asked the person to delete it.
-  About 660 tokens with the three schemas (`a_tool_step_stays_light`:
-  2,898 now, trimmed from 3,050). **Kept on course** (tuned on the
-  on-device Qwen3.5-4B, `--documents`): a model on this PC is told in its
-  context what the question means for documents (`steer`): **an option
+  About 700 tokens with the three schemas (`a_tool_step_stays_light`:
+  2,922 now: 2,898 before a document was said to be a note in Notes,
+  trimmed from 3,050). **Kept on course** (tuned on the
+  on-device Qwen3.5-4B, `--documents`): the model is told in its
+  context what the question means for documents (`steer`) — a model on
+  this PC in full, **a cloud model in one short line** (`brief`, 30 Oct
+  2026: Claude Haiku 5.5 answered "Could you find a mage build instead…?"
+  in the chat, ending "Want me to build a level-by-level plan for it?", and
+  made the document only after "Yes, please."; "This asks for something to
+  keep: make the document now, not an answer in the chat or an offer to
+  make one.", `ASKS_BRIEF`, and the pick's and the change's own line with
+  the document's `note_id`), always in the question's context, never the
+  system prompt, so the prompt cache stays whole: **an option
   picked** from the open one (`picks_option`: "Let's do option A", "I'll
   go with the second one") → a new document for the pick, built out in
   full, the options left as they are — worth keeping, and the pick needs
@@ -559,9 +581,11 @@ The AI Chat surface (conversations, the tool-calling loop and its note tools) an
   tools and system prompt (its cache), and in its question's context
   `SPOKEN_NOTE` — a document only when one is asked for, or a long build,
   plan or guide, then one sentence saying it's in Chat. **Asked with Chat
-  in front** (Yap's main window focused when the shortcut was pressed:
-  Chat comes up there with the question; `assistant::asked_in_chat`, a
-  task-local the assistant sets around its turn) the line points at the
+  in view** (Yap's main window in front when the shortcut was pressed —
+  Chat comes up there with the question — or on screen beside the app in
+  front showing Chat: `assistant::answer_in_view`, below;
+  `assistant::asked_in_chat`, a task-local the assistant sets around its
+  turn) the line points at the
   panel instead, "It's open on the right." (`SPOKEN_IN_CHAT_NOTE`,
   `spoken_note`): the maintainer asked by the assistant's shortcut while
   reading Chat and heard "It's in Chat." A spoken "build me
@@ -821,14 +845,39 @@ The AI Chat surface (conversations, the tool-calling loop and its note tools) an
   "Speak replies" / "When to speak" say), except when a meeting or call
   started while the answer was coming, or a dictation did → shown only; a
   newer question or ■ (the generation) → not said at all (it's in Chat).
-  While the main window isn't in front (`notice::place` = Bar) a card
+  **Unless the answer is in view in Chat**, a card on the Yap bar
   (`style: "answer"`, id `assistant`: the question, the answer's markdown
   ≤ 1,200 chars, a note "Not read aloud during a meeting", Open in Chat;
   ✕ / Esc = `stop`) — **"Show the answer on the Yap bar"**
   (`assistant_answer_card`, on) decides it for a spoken answer; one not
   read aloud always shows (`card_on_bar`, pure), also when the voice
   fails —, shown before the voice starts; it goes when the
-  voice ends (`on_tts_state`), or after `read_ms` when shown only. **A web
+  voice ends (`on_tts_state`), or after `read_ms` when shown only. **In
+  view** (`answer_in_view(seen, viewing, conversation)`, pure, 30 Oct
+  2026): the main window in front (`notice::window_seen` = `Front`: Chat
+  comes up there with the question), or on screen beside the app in front
+  (`Beside`: another monitor, at least half of it uncovered) with the Chat
+  view on the question's conversation (or a new chat, which follows it);
+  minimised, hidden, behind another app (`No`) or on another view, the
+  card. The card is for someone who can't see Chat: the maintainer asked
+  out loud with Chat maximised and the answer streaming in front of him,
+  and the card still came up — Windows' real state now, never the page's
+  `document.visibilityState` (WebView2 says "visible" while hidden), nor
+  tao's `is_focused` (the webview's keyboard focus). Decided as the answer
+  comes, not when it was asked: someone who switches to another app before
+  it comes gets the card (`speak_ready`; the whole answer's
+  `finish_streamed` shows one then if none went up while it was said and
+  Chat is out of view now). A note on an answer not read aloud ("Not read
+  aloud during a meeting") goes with its card: with Chat in view, the
+  answer's there and no voice says it either. **The assistant's alerts**
+  ("The Voice Assistant couldn't answer", "Pick an AI model…", "The Voice
+  Assistant is off during meetings", "can't read images") keep the notice
+  policy's one place (`notice::place`: the window's toast while it's in
+  front, else the bar): they ask for something (Open settings), and Chat
+  beside another app doesn't show them. E2e: `voice-assistant.spec.js`
+  ("the answer's card shows only when Chat isn't in view…": beside on that
+  chat none; behind, on another view, or left before the answer came, the
+  card; `e2e_focus {focused: false, beside: true}`). **A web
   answer** (`turn.sources`, `web.rs`): the model is told a spoken question
   wants the answer first. **Any other spoken answer** is asked for short
   (`SPOKEN_ANSWER_NOTE`, last in Chat's system prompt for the Voice

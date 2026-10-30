@@ -297,7 +297,13 @@ you change it so it goes from level one to max level, step by step?" and "Go dee
 two" must **change it** (`changed`: an `edit_note`, `update_note`, `write_section` or
 `rewrite_section` that went through on a document the turn didn't make) and make no other;
 "Let's do option A." after a document of two options must make a **new document** for the
-pick, and never call `create_note`. **How it reads**: `table` (the documents made or changed
+pick, and never call `create_note`. "Could you find a mage build instead? Something with fire
+and summons." after a build (`documents-another-build`, the maintainer's words to Claude Haiku
+5.5) must make the new document at once, never an answer with an offer (a warning on "Want me
+to…"); "…put it in my notes as a Markdown file" (`documents-saved-in-notes`) must make the
+document and never say it can't write to the notes or a file, and "Is that saved in my notes?"
+after it must say it's in Notes, make no note and no second document (a warning without "Chat
+documents"). **How it reads**: `table` (the documents made or changed
 hold a markdown table) and `summary` (a line of text under the title, before the first
 section) — checks on the looked-up build and the level-by-level change, warnings on the game
 build. `summary.md` gets a "Documents beside the chat" table per model: made when asked,
@@ -2806,5 +2812,48 @@ maintainer's OK: `npm run eval -- --documents --model anthropic:claude-haiku-5-5
 --keys-from-yap --repeat 2` (12 scenarios, 16 turns a repeat: about 700k tokens, as the
 4B's run took two-thirds of 1,065k; prompt caching makes most of them cheap reads), or only
 the four new ones with `--only build-looked-up,change-build,pick-option,go-deeper` (about
-400k). The context lines (`steer`) are only for a model on this PC, so it measures the rule
-and the tools alone.
+400k). (Since the evening's fixes, below, a cloud model gets the context lines too, one short
+line each.)
+
+### A document is a note, and cloud models nudged too (30 Oct 2026, late)
+
+What the maintainer saw on Claude Haiku 5.5: asked to "…put it into the notes or the Markdown
+file", it made the document and said "I can't write to your notes or a Markdown file from
+here"; and "Could you find a mage build instead…?" after a build was answered in the chat,
+ending "Want me to build a level-by-level plan for it?", the document made only after "Yes,
+please.". The fixes (chat-and-assistant.md, `chat/documents.rs`): the model is told a document
+is a Markdown note in Notes, under Chat documents — a sentence in the rule, `create_document`'s
+description, its result's `saved` (with Notes' Export as Markdown), the last section's line
+and the next question's documents line —, and `steer`'s lines reach a cloud model as one
+short line each in the question's context (`brief`; never the system prompt, so the prompt
+cache stays whole). Two new scenarios: `documents-another-build` (the mage build, asked his
+way) and `documents-saved-in-notes` (asked for in the notes as a Markdown file, then "Is that
+saved in my notes?"). The same 4B and arguments, all 14 scenarios, `--repeat 3`:
+
+| Run | Passed | Made when asked | Outline first | Every section written | Chat line (mean / most words) | Made when not wanted | Changed when asked | A table | A summary |
+|---|---|---|---|---|---|---|---|---|---|
+| before (`d211776`) | 41/42 | 39/39 | 39/39 | 39/39 | 5 / 5 | 0/21 | 9/9 | 12/12 | 12/12 |
+| after, 1 | 39/42 | 38/39 | 38/38 | 38/38 | 6 / 13 | 0/21 | 8/9 | 12/12 | 11/12 |
+| after, 2 | 40/42 | 39/39 | 39/39 | 39/39 | 6 / 13 | 0/21 | 9/9 | 11/12 | 12/12 |
+
+The new scenarios pass 6/6 in every run, before too: the 4B already had `steer`'s full line
+for "find a mage build", and never said it couldn't save. After, asked "Is that saved in my
+notes?", it answered "Yes, it's already saved in your notes as "Weekend Camping Packing List"
+in the Chat documents folder. It's formatted as a Markdown file…" (3 of 3); asked for it in
+the notes in the first place, it still said only "It's open on the right." (a warning); once
+it took the longer line unasked ("…, and saved in your Notes under Chat documents.", 13
+words). The failures are the 4B's own wobbles, before as after: the options document of
+`documents-pick-option` outlined as one section (after: twice in run 1; with the very prompt
+of before, 2 in 5 on a rerun, and 1 in 5 on before's own build), a comparison outlined as one
+section once, a build without its table once, `edit_note` refused six times running once, and
+a long turn over the 8K context (once before, once on a rerun after). Tried and dropped: the
+sentence at the rule's end, after "Never create_note for these" (the options document as one
+section 4 times in 5). A tool step weighs 2,922 tokens (was 2,898). Run folders
+`20261030-213512…`, `20261030-215450…` (after), `20261030-220558…` (before) and the reruns
+(kept outside the repo).
+
+**Claude Haiku 5.5, for the maintainer to run** (credits): `npm run eval -- --documents --model
+anthropic:claude-haiku-5-5 --keys-from-yap --repeat 2` (14 scenarios, 20 turns a repeat: about
+850k tokens, mostly cheap cached reads), or the ones it got wrong and their neighbours with
+`--only another-build,saved-in-notes,pick-option,change-build,go-deeper,build-looked-up`
+(about 450k).
