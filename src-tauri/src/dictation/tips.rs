@@ -293,7 +293,8 @@ fn offer(app: &AppHandle, feature: Feature) {
         }
         _ => false,
     };
-    if shown {
+    // Not shown after all: the day's count back.
+    if crate::notices::notice::tip_shown(KIND, place, shown) {
         tracing::info!(kind = feature.key(), window = place == crate::notices::notice::Place::Window, "Feature tips: shown");
         crate::dictation::coaching::update_record(|mut r| {
             r.features.insert(feature.key().to_string(), now);

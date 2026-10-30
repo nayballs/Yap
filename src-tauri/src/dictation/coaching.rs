@@ -269,6 +269,8 @@ pub fn offer(app: &AppHandle, hint: Hint, hotkey: &str) {
     } else {
         false
     };
+    // Not shown after all: the day's count back.
+    let shown_now = crate::notices::notice::tip_shown(CARD, place, shown_now);
     if shown_now {
         tracing::info!(?hint, in_window, "coaching: hint shown");
         update_record(|r| shown(r, hint, now));

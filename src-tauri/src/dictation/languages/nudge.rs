@@ -281,6 +281,8 @@ pub fn offer(app: &AppHandle, code: &str, picked: &str) -> bool {
             }),
         )
     };
+    // Not shown after all: the day's count back.
+    let shown = crate::notices::notice::tip_shown(CARD, place, shown);
     if shown {
         tracing::info!(language = %code, in_window, "Language nudge: offered");
         let now = now_ms();

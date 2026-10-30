@@ -439,7 +439,8 @@ fn offer(app: &AppHandle, tip: Tip) {
         }
         _ => false,
     };
-    if shown_now {
+    // Not shown after all: the day's count back.
+    if crate::notices::notice::tip_shown(KIND, place, shown_now) {
         tracing::info!(kind = ?tip.kind, window = place == crate::notices::notice::Place::Window, "Mic tips: shown");
         update_record(|r| shown(r, tip.kind, now));
     } else {

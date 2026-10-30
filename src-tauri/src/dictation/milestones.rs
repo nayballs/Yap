@@ -161,6 +161,8 @@ pub fn celebrate(app: &AppHandle, step: u64, before: u64, minutes_saved: f64) {
             }
             _ => false,
         };
+        // Not shown after all: the day's count back.
+        let shown = crate::notices::notice::tip_shown(CARD, place, shown);
         tracing::info!(step, shown, ?place, "Milestone passed");
     });
 }

@@ -1225,26 +1225,42 @@ pub fn card_on_screen(id: &str) -> bool {
 /// again within its cooldown is dropped (`true`: it was said). `false` when
 /// the bar is off or hidden: the caller falls back to a Windows
 /// notification.
+///
+/// A card of a kind with a daily cap (`notices/kinds.rs`: a tip, a
+/// suggestion, a milestone) only ever comes through `notice::place_tip`,
+/// which counted it: one that never shows — dropped for its cooldown,
+/// replaced while it still waited, or dropped unseen ([`repick`]) — gives
+/// its count back (`kinds::give_back`).
 pub fn show_card(app: &AppHandle, card: Card, on_action: OnAction) -> bool {
     if !cards_available() {
         return false;
     }
     if !crate::notices::notice::admit(&card.id, &card.title, &card.body) {
+        crate::notices::kinds::give_back(&card.id);
         return true;
     }
     tracing::info!(card = %card.id, seen = cards_seen(), "bar: card");
-    {
+    let replaced_unseen = {
         let mut s = lock();
         let now = now_ms();
         let id = card.id.clone();
-        match s.cards.iter_mut().find(|c| c.id == id) {
-            Some(c) => *c = card,
+        let replaced_unseen = match s.cards.iter_mut().find(|c| c.id == id) {
+            Some(c) => {
+                *c = card;
+                // The one it replaces never showed.
+                s.queued.get(&id).is_some_and(|q| !q.1)
+            }
             None => {
                 s.cards.push(card);
                 s.queued.insert(id.clone(), (now, false));
+                false
             }
-        }
-        s.handlers.insert(id, on_action);
+        };
+        s.handlers.insert(id.clone(), on_action);
+        replaced_unseen.then_some(id)
+    };
+    if let Some(id) = replaced_unseen {
+        crate::notices::kinds::give_back(&id);
     }
     if !repick(app) {
         // The card on screen changed in place (or a waiting one did).
@@ -1260,10 +1276,11 @@ pub fn show_card(app: &AppHandle, card: Card, on_action: OnAction) -> bool {
 
 /// Which card shows now (`notice::pick`); `true` if that changed (the page
 /// has been told then). Cards that waited too long unseen are dropped, their
-/// handlers told as if they had faded (`expire_action`).
+/// handlers told as if they had faded (`expire_action`), and a capped kind's
+/// count given back (`kinds::give_back`).
 fn repick(app: &AppHandle) -> bool {
     let moment = crate::notices::notice::moment();
-    let (changed, stale) = {
+    let (changed, stale, unseen) = {
         let mut s = lock();
         let m = crate::notices::notice::Moment {
             meeting: s.meeting || moment.meeting,
@@ -1284,12 +1301,14 @@ fn repick(app: &AppHandle) -> bool {
         let pick = crate::notices::notice::pick(&list, current, pinned, &m);
         let front = pick.front.map(|i| ids[i].clone());
         let mut stale = Vec::new();
+        let mut unseen = Vec::new();
         for i in pick.stale {
             let id = &ids[i];
             let expire = s.cards.iter().find(|c| &c.id == id).and_then(|c| c.expire_action.clone());
             if let Some(handler) = s.remove_card(id) {
                 tracing::info!(card = %id, "bar: waited too long unseen; dropped");
                 stale.push((handler, expire));
+                unseen.push(id.clone());
             }
         }
         let changed = front != s.front || !stale.is_empty();
@@ -1306,10 +1325,13 @@ fn repick(app: &AppHandle) -> bool {
             }
         }
         s.front = front;
-        (changed, stale)
+        (changed, stale, unseen)
     };
     if changed {
         after_cards_changed(app);
+    }
+    for id in unseen {
+        crate::notices::kinds::give_back(&id);
     }
     for (handler, expire) in stale {
         if let (Some(handler), Some(action)) = (handler, expire) {

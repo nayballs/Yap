@@ -610,6 +610,8 @@ fn offer(app: &AppHandle, f: &Found, dict: &[DictionaryEntry]) -> bool {
             }),
         )
     };
+    // Not shown after all: the day's count back.
+    let shown = crate::notices::notice::tip_shown(CARD, place, shown);
     if shown {
         tracing::info!(kind = f.phrase.kind.name(), times = f.times, len = f.phrase.text.len(), in_window, "Snippet offer: offered");
         let now = now_ms();

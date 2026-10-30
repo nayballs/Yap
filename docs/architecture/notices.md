@@ -86,7 +86,13 @@ How loud Yap may be: the notice policy (one place, one at a time, held while dic
   Nowhere when its kind is off or used up today, counted when it goes
   somewhere (coaching, mic tips, feature tips, word milestones, learn, the
   snippet offer, the language nudge) — and the page asks `notice_allow` for its own
-  ("Updated to …"). Questions, alerts and notices have no kind and are
+  ("Updated to …"). Counted only if it shows (2026-10-30): one that
+  doesn't after all gives its count back (`kinds::give_back`) — its
+  window's event failed or the bar couldn't take the card (each caller's
+  `notice::tip_shown`), or the bar took the card and never showed it
+  (`bar.rs`: dropped for its cooldown, replaced while it still waited, or
+  dropped unseen). A card of a capped kind only ever comes through
+  `place_tip`. Unit test `kinds::tests`, e2e `feature-tips.spec.js`. Questions, alerts and notices have no kind and are
   never capped. A test run counts the caps only once a spec asks
   (`e2e_notice_caps`; `e2e_notice_reset` turns them off again). Pure parts
   unit-tested.

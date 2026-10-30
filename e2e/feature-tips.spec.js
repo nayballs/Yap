@@ -151,6 +151,49 @@ test('during a meeting: no tip and nothing counted; it shows after the meeting',
   await expect(tip(main, 'Fixed from your dictionary')).toBeVisible();
 });
 
+// notices/kinds.rs + bar.rs (review 2026-10-30): a tip is one of the day's
+// three only once it shows. A bar card that waited unseen (a game in
+// exclusive fullscreen) and was replaced by the next tip never showed: its
+// count goes back, and the day still has room for two more.
+test('a tip card replaced before it was ever seen is not one of the day\'s three', async ({ yap, main }) => {
+  const card = (title) => yap.overlay.getByRole('status').filter({ hasText: title });
+  const waiting = () => yap.invoke('bar_status').then((s) => s.cards.map((c) => c.title));
+  await yap.invoke('e2e_notice_caps', { on: true });
+  await inAnotherApp(yap);
+  await yap.invoke('bar_simulate', { fullscreen: 'exclusive' });
+  try {
+    await dictate(yap, 'notepad.exe', 'notes.txt - Notepad', 'parse the jaison file');
+    await expect.poll(waiting).toContain('Fixed from your dictionary');
+    // The next tip while that one waits, unseen: in its place.
+    await yap.invoke('e2e_feature_tips', { on: true });
+    await dictate(yap, 'notepad.exe', 'notes.txt - Notepad', 'thanks again my sign off');
+    await expect.poll(waiting).toContain('Your snippet expanded');
+    expect(await waiting()).not.toContain('Fixed from your dictionary');
+    // The game over: it shows (one of today's three).
+    await yap.invoke('bar_simulate', { fullscreen: 'none' });
+    await expect(card('Your snippet expanded')).toBeVisible();
+    await yap.invoke('bar_card_action', { id: 'featureTip', action: '' });
+    await expect(card('Your snippet expanded')).toHaveCount(0);
+
+    // Back in Yap: two more today, then no more.
+    await yap.invoke('e2e_focus', { focused: true });
+    for (let n = 0; n < 2; n++) {
+      await yap.invoke('e2e_feature_tips', { on: true });
+      await dictate(yap, 'notepad.exe', 'notes.txt - Notepad', 'parse the jaison file');
+      await expect(tip(main, 'Fixed from your dictionary')).toBeVisible();
+      await closeToasts(main);
+    }
+    await yap.invoke('e2e_feature_tips', { on: true });
+    await dictate(yap, 'notepad.exe', 'notes.txt - Notepad', 'parse the jaison file');
+    await main.waitForTimeout(2_500);
+    await expect(tip(main, 'Fixed from your dictionary')).toHaveCount(0);
+  } finally {
+    await yap.invoke('bar_simulate', { fullscreen: 'none' }).catch(() => {});
+    await yap.invoke('e2e_focus', { focused: true }).catch(() => {});
+    await yap.invoke('e2e_notice_caps', { on: false });
+  }
+});
+
 test('at most three feature tips a day, once the caps count', async ({ yap, main }) => {
   await yap.invoke('e2e_notice_caps', { on: true });
   try {
