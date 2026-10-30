@@ -142,6 +142,10 @@ pub fn run_dictation_check() -> i32 {
 }
 
 pub fn run() {
+    // COM's multithreaded apartment, up until Yap exits: a thread using a
+    // notification or another WinRT object without COM of its own must
+    // never see it taken down under it (shell/com.rs).
+    shell::com::keep_mta();
     // Decide portable-vs-installed once, before anything reads the data dir
     // (the file log lives under it).
     shell::portable::init();
