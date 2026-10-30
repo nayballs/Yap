@@ -67,7 +67,12 @@ own `.offnote` / `.tools` margins have always lost to `.set-note`'s, and
 cleanup's `.set-note.offnote` wins. So `LanguageModelsPage.svelte`
 imports its shared components, then `settings.css`, then its own parts,
 and `Settings.svelte` imports it just before `settings.css`. A change
-there can move margins: compare a page before and after.
+there can move margins: compare a page before and after. Memory
+(`MemorySection.svelte`) and Account (`AccountSection.svelte`) load in
+chunks of their own, so their CSS comes after `settings.css` (2026-10-30,
+the main window's chunk back under 700 KB): safe while their own rules
+never tie with its classes (they use only `.set-note` / `.set-link`, and
+style neither).
 
 - **Its copy of the config, in step with config.json** (2026-10-23).
   Settings reads the config once, at mount, and auto-saves 400 ms after any
