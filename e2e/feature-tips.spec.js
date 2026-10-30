@@ -32,6 +32,9 @@ const test = base.extend({
           ppBaseUrl: fakeLlm.base,
           ppModel: 'fake-cleanup',
           ppApiKey: '',
+          // No "You've dictated 100 words" toast holding the window's one
+          // notice while a test waits for its tip (insights-stats.spec.js has them).
+          notifyMilestones: false,
           dictionary: [
             { from: 'jaison', to: 'JSON', fuzzy: false, snippet: false },
             { from: 'my sign off', to: 'Speak soon,\nRobin', fuzzy: true, snippet: true },
