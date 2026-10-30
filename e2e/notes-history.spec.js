@@ -199,6 +199,49 @@ test('Version history: what was there, typing and an Action, newest first; chang
   await expect.poll(() => versionsOf(yap, n.id)).toBeNull();
 });
 
+test("a toast's Undo goes to its own note, whichever is open; a history whose note went stays shut", async ({ yap, main, fakeLlm }) => {
+  await setConfig(yap, main, { postProcessEnabled: true, ppProvider: 'custom', ppBaseUrl: fakeLlm.base, ppModel: 'fake-cleanup', ppApiKey: '' });
+  fakeLlm.reply('transform', () => 'The memo, tidied.');
+  const memo = await yap.invoke('note_create', { title: 'Draft memo', content: 'so um the memo' });
+  const list = await yap.invoke('note_create', { title: 'Shopping list', content: 'milk' });
+  // The list has a history of its own: its version 1 says "milk".
+  await yap.invoke('note_update', { id: list.id, content: 'milk and eggs' });
+  await openView(main, 'Notes');
+  await folderRow(main, 'Personal').click();
+  await noteRow(main, 'Draft memo').click();
+  await expect(raw(main)).toHaveValue('so um the memo');
+
+  // A slow model: the list is opened while the memo's Polish runs.
+  fakeLlm.delay('transform', 1500);
+  try {
+    await main.getByRole('button', { name: 'More for this note' }).click();
+    await menu(main).getByRole('menuitem', { name: 'Transform note' }).hover();
+    await main.getByRole('menu', { name: 'Transform note' }).getByRole('menuitem', { name: 'Polish' }).click();
+    await noteRow(main, 'Shopping list').click();
+    await expect(raw(main)).toHaveValue('milk and eggs');
+    await expectStore(yap, 'notes.json', (s) => noteIn(s, memo.id)?.content === 'The memo, tidied.');
+  } finally {
+    fakeLlm.delay('transform', 0);
+  }
+  // Its toast's Undo: the memo as it was; the list, open now, untouched.
+  await toastWith(main, 'Polish ✓').getByRole('button', { name: 'Undo' }).click();
+  await expectStore(yap, 'notes.json', (s) => noteIn(s, memo.id)?.content === 'so um the memo');
+  expect(noteIn(yap.readJson('notes.json'), list.id)?.content).toBe('milk and eggs');
+  await expect(raw(main)).toHaveValue('milk and eggs');
+  await closeToasts(main);
+
+  // The list's Version history up, and the list deleted from elsewhere: the
+  // dialog goes, and doesn't come back over the next note opened.
+  await main.getByRole('button', { name: 'More for this note' }).click();
+  await menu(main).getByRole('menuitem', { name: 'Version history…' }).click();
+  await expect(history(main)).toBeVisible();
+  await yap.invoke('note_delete', { id: list.id });
+  await expect(history(main)).toHaveCount(0);
+  await noteRow(main, 'Draft memo').click();
+  await expect(raw(main)).toHaveValue('so um the memo');
+  await expect(history(main)).toHaveCount(0);
+});
+
 const LINE = 'so basically we should like ship it on friday';
 const POLISHED = 'We should ship it on Friday.';
 const SHORT = 'Agenda: ship Friday. Thanks!';

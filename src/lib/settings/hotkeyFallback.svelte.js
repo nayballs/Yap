@@ -89,10 +89,13 @@ export function followHotkeyFallback(getCfg) {
   function onKeyUp(e) {
     if (hotkeyCapture.on) return;
     const cfg = getCfg();
+    // The quick note's key has a hold of its own (quick_note/key.rs); the
+    // others below share the dictation's. A key coming up can end both (a
+    // modifier in each): each hears it, or push-to-talk keeps recording
+    // after its key is let go.
     if (upOn(e, cfg, 'quickNoteHotkey')) {
       e.preventDefault();
       invoke('quick_note_key', { pressed: false }).catch(() => {});
-      return;
     }
     if (upOn(e, cfg, 'assistantHotkey')) {
       e.preventDefault();

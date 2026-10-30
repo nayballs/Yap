@@ -8,7 +8,8 @@
 //!   `PowerRegisterSuspendResumeNotification`, a callback, no window): a
 //!   meeting recording is paused cleanly (`meeting_end::pause_automatically`:
 //!   the last chunk transcribed, the audio closed, a stop mark, no
-//!   summary).
+//!   summary). One already stopping (Stop pressed, then the lid shut)
+//!   finishes as asked: no line, no question.
 //! - **On wake**: the transcript gets a line "Your PC was asleep for 12
 //!   min" (`TranscriptSegment::asleep_marker`) in its place on the
 //!   meeting's clock — after the paused recording's last line, before
@@ -91,6 +92,15 @@ pub fn suspending() {
     let Some(note_id) = crate::meetings::meeting::recording_note() else {
         return;
     };
+    // Already ending or pausing (Stop and summarise, then the lid shut at
+    // once): its last chunk is on its way, and it finishes as asked. Paused
+    // here instead, an ended meeting got no summary, a "Your PC was asleep"
+    // line and Resume, and its call's app back on the mic after the wake
+    // carried on in it.
+    if crate::meetings::meeting::stopping() {
+        tracing::info!(note_id, "Sleep: the PC is going to sleep as a meeting's notes finish; left to finish as asked");
+        return;
+    }
     tracing::info!(note_id, "Sleep: the PC is going to sleep mid-meeting; pausing the notes");
     *SLEPT.lock().unwrap_or_else(|p| p.into_inner()) = Some(Slept { note_id, at_ms: now_ms() });
     if let Err(e) = crate::meetings::meeting_end::pause_automatically() {

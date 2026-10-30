@@ -519,7 +519,17 @@ impl Owner {
                 self.warm_until = None;
                 match &self.stream {
                     // Warm: the recording has the pre-roll and the stream.
-                    Some(s) => tracing::info!(bluetooth = s.bluetooth, "Microphone: already open (warm)"),
+                    Some(s) => {
+                        tracing::info!(bluetooth = s.bluetooth, "Microphone: already open (warm)");
+                        // The laptop's own mic with its lid closed (`lid.rs`):
+                        // said as when it opens for this dictation (a stream
+                        // kept warm, or ready, never moves off it when it's
+                        // all there is).
+                        if crate::dictation::lid::closed() {
+                            let open = s.endpoint.as_ref().and_then(|id| mics::present()?.into_iter().find(|e| &e.id == id));
+                            crate::dictation::lid::tell_if_built_in(open.map(Target::Mic).as_ref());
+                        }
+                    }
                     None => self.open(asked),
                 }
             }

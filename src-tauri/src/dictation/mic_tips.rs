@@ -393,7 +393,12 @@ pub fn after_dictation(app: &AppHandle, audio: &[f32], mic: Option<MicInfo>, ord
         while crate::notices::notice::moment().dictating && started.elapsed() < std::time::Duration::from_secs(60) {
             std::thread::sleep(std::time::Duration::from_millis(250));
         }
-        let present = crate::dictation::mics::present().unwrap_or_default();
+        let mut present = crate::dictation::mics::present().unwrap_or_default();
+        // The laptop's lid closed: its own mic can't hear, so it's never the
+        // one to try (`lid.rs`).
+        if crate::dictation::lid::closed() {
+            present.retain(|e| !e.built_in);
+        }
         let other = other_mic(&present, &order, mic.as_ref().and_then(|m| m.endpoint.as_deref()));
         let Some(tip) = pick(trouble, mic.as_ref(), other.as_ref()) else { return };
         offer(&app, tip);
@@ -406,6 +411,13 @@ pub fn after_dictation(app: &AppHandle, audio: &[f32], mic: Option<MicInfo>, ord
 fn offer(app: &AppHandle, tip: Tip) {
     let now = crate::notices::notice::now_ms();
     if crate::notices::notice::tips_off() {
+        return;
+    }
+    // Never over a meeting (the main window's toast doesn't wait one out,
+    // and a bar card would wait unseen and be dropped): not shown, not
+    // counted.
+    if crate::notices::notice::moment().meeting {
+        tracing::debug!(kind = ?tip.kind, "Mic tips: a meeting is recording; not now");
         return;
     }
     let rec = loaded(&mut RECORD.lock().unwrap_or_else(|p| p.into_inner())).clone();

@@ -70,6 +70,24 @@ test("a message that doesn't send stops it: nothing more is sent, the rest is on
   }
 });
 
+test("the first message not taken: nothing sent, the whole dictation on the clipboard", async ({ robot }) => {
+  const chat = await slack(robot);
+  await robot.configure({ stackedMessages: true, autoSubmit: true });
+  // No app reads the paste (as an app that ignores Ctrl+V).
+  await robot.yap.invoke('e2e_paste_fails', { why: 'notRead' });
+  try {
+    const r = await robot.dictate(chat, 'Hi Rochelle. New message. Are you free at three?');
+    expect(r.leftOnClipboard).toBe(true);
+    expect(r.leftWhy).toBe('notRead');
+    expect(await chat.sent()).toEqual([]);
+    // Both messages, not the first alone ("…it's copied, press Ctrl+V").
+    expect((await robot.clipboard('check', 'Hi Rochelle\nAre you free at three?')).matchesText).toBe(true);
+  } finally {
+    await robot.yap.invoke('e2e_paste_fails', { why: null });
+    await robot.configure({ stackedMessages: false, autoSubmit: false });
+  }
+});
+
 test('"at Rochelle": typed, picked from the list with Tab, the text after it in place', async ({ robot }) => {
   const chat = await slack(robot);
   const r = await robot.dictate(chat, 'At Rochelle, can you check the build?');

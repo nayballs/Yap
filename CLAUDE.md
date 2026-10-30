@@ -282,6 +282,7 @@ One folder per area (an area's `<area>.rs` lists its modules); a big module's pa
 - `shell/tray.rs` — tray icon and menu (models, Paste / Copy last transcript, Read selection aloud, Snip to Chat, New quick note, Record this call, the next meeting, updates).
 - `shell/context_menu.rs` — WebView2's context menu cut to editing commands (Inspect: debug + Shift).
 - `shell/procs.rs` — process lineage; the kill-on-close job so helpers never outlive Yap.
+- `shell/com.rs` — COM's multithreaded apartment kept up for as long as Yap runs (and a test run), so WinRT objects on threads without COM of their own never see it taken down.
 - `shell/download.rs` — every big download (models, Kokoro, the speaker and search engines): resume, speed and time left, Cancel (`download_cancel`), no half file left.
 - `shell/webview_memory.rs` — hidden windows' webviews get WebView2's low memory target; back to normal on screen.
 - `shell/theme.rs` — the theme on the Rust side: the opaque windows' webview backgrounds (no white flash), onboarding's title bar, Windows' app mode (frontend.md).

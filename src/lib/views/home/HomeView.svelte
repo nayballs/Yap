@@ -164,12 +164,14 @@
     // cleared) → re-pull. Not `yap-transcript`: a dictation emits that before
     // it pastes and saves, so a re-pull on it could miss the new entry. The
     // stats changed (a dictation counted, history kept or not) → the same.
-    const uns = [];
-    listen('yap-history-changed', refreshSoon).then((u) => uns.push(u));
-    listen('yap-stats-changed', refreshSoon).then((u) => uns.push(u));
-    listen('yap-notes-changed', () => loadPastMeetings()).then((u) => uns.push(u));
+    // (Kept as promises: one still registering when Home goes is let go too.)
+    const uns = [
+      listen('yap-history-changed', refreshSoon),
+      listen('yap-stats-changed', refreshSoon),
+      listen('yap-notes-changed', () => loadPastMeetings()),
+    ];
     return () => {
-      uns.forEach((u) => u && u());
+      uns.forEach((u) => u.then((f) => f()).catch(() => {}));
       stopPlaying();
     };
   });
@@ -242,7 +244,12 @@
     }
   }
 
+  // Counts every Play and stop: audio still being read when another Play
+  // (or a stop, or leaving Home) came is dropped, never left playing with
+  // no way to stop it.
+  let playSeq = 0;
   function stopPlaying() {
+    playSeq += 1;
     if (player) {
       player.pause();
       URL.revokeObjectURL(player.src);
@@ -257,8 +264,10 @@
     const again = playing === key;
     stopPlaying();
     if (again) return;
+    const mine = playSeq;
     try {
       const bytes = await invoke('recent_audio_wav', { id: e.audio });
+      if (mine !== playSeq) return;
       const url = URL.createObjectURL(new Blob([bytes], { type: 'audio/wav' }));
       const a = new Audio(url);
       a.onended = () => player === a && stopPlaying();
@@ -266,6 +275,7 @@
       playing = key;
       await a.play();
     } catch (err) {
+      if (mine !== playSeq) return;
       stopPlaying();
       toast({ title: "Couldn't play it", description: String(err), variant: 'destructive' });
     }

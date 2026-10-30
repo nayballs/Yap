@@ -95,6 +95,15 @@ test("a Bluetooth headset in hands-free mode: try the PC's mic, with Microphones
   await closeSettings(main);
 });
 
+test("a Bluetooth headset with the lid closed: never told to try the laptop's own mic", async ({ yap, main }) => {
+  await setUp(yap, main, [LAPTOP, BUDS], [BUDS]);
+  await yap.invoke('e2e_lid', { closed: true });
+  await yap.invoke('e2e_dictate_audio', { seconds: 3, amplitude: 0.3 });
+  expect((await yap.invoke('e2e_mic_status')).last.device).toBe(BUDS.name);
+  await main.waitForTimeout(2_500);
+  await expect(toast(main, /try the PC's mic/i)).toHaveCount(0);
+});
+
 test("the lid closed: the laptop's own mic gives way to the next one, and comes back when it opens", async ({ yap, main }) => {
   await setUp(yap, main, [LAPTOP, USB], [LAPTOP, USB]);
   await yap.invoke('e2e_lid', { closed: true });
@@ -122,4 +131,19 @@ test("the lid closed and the laptop's mic all there is: said once, with Micropho
   await yap.invoke('e2e_dictate_audio', { seconds: 1 });
   await main.waitForTimeout(1_500);
   await expect(alert).toHaveCount(0);
+});
+
+test("the lid closed while the laptop's mic is kept ready: said at the next dictation too", async ({ yap, main }) => {
+  await setUp(yap, main, [LAPTOP], []);
+  await setConfig(yap, main, { keepMicReady: true });
+  try {
+    // Open before the lid closes, and never moved off it (it's all there is).
+    await expect.poll(async () => (await yap.invoke('e2e_mic_status')).open, { timeout: 5_000 }).toBe(true);
+    await yap.invoke('e2e_lid', { closed: true });
+    await yap.invoke('e2e_dictate_audio', { seconds: 1 });
+    expect((await yap.invoke('e2e_mic_status')).last.device).toBe(LAPTOP.name);
+    await expect(toast(main, "Your laptop's lid is closed, so its microphone can't hear you")).toBeVisible({ timeout: 10_000 });
+  } finally {
+    await setConfig(yap, main, { keepMicReady: false });
+  }
 });
