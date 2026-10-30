@@ -1758,12 +1758,10 @@ async fn post_chat_request(
         if message.is_null() {
             return Err("response missing choices[0].message".to_string());
         }
-        // Its thinking, for a question asked to think it through.
-        let reasoning = crate::chat::think::reasoning_of(&message);
-        crate::chat::think::heard(reasoning);
         // Someone watching a whole answer hears it all at once: its
         // thinking, its tool calls (so its text is never taken for the
         // answer), then its text.
+        let reasoning = crate::chat::think::reasoning_of(&message);
         if let Some(on) = on.as_deref_mut() {
             if !reasoning.is_empty() {
                 on(Delta::Reasoning(reasoning));
@@ -1777,6 +1775,11 @@ async fn post_chat_request(
                 on(Delta::Content(text));
             }
         }
+        // Its thinking, for a question asked to think it through — after the
+        // watcher heard it, as a streamed answer's is: the watcher shows the
+        // turn's earlier thinking (`think::so_far`) before this request's,
+        // so heard first it showed twice.
+        crate::chat::think::heard(reasoning);
         return Ok(message);
     }
 }

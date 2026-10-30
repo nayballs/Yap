@@ -577,7 +577,9 @@ The AI Chat surface (conversations, the tool-calling loop and its note tools) an
   or Groq's and OpenRouter's `reasoning`; `stream::Assembler` keeps it out
   of the message, `llm::post_chat_request` hands it to `think::heard`), as
   `{kind: "thinking", text}` events (each step's after the turn's earlier
-  ones, `think::so_far`): "Thinking…" with "Show its thinking" folded under
+  ones, `think::so_far`; only in a turn thinking it through: Groq's gpt-oss
+  sends its reasoning unasked, and any other question shows none of it, as
+  before Think): "Thinking…" with "Show its thinking" folded under
   it, then "Thought for 6 s" folded above the answer (`ChatMessage.svelte`
   `.thought`). Kept with the answer (`ChatMessage.thinking` = `Thought {text,
   ms}`, `chats::set_thinking`; the reply's `thinking`), never sent back to a
@@ -745,7 +747,10 @@ The AI Chat surface (conversations, the tool-calling loop and its note tools) an
   (`calls::capture::for_snip`: the bar's capsule too; meeting windows as the
   meeting setting wants — and the assistant is off during meetings anyway),
   saved as a chat screenshot (`snip::keep_as`, source "window"): it shows on
-  the question in Chat and is kept as Chat's screenshots are. **Where it
+  the question in Chat and is kept as Chat's screenshots are — sent again
+  with a later question only where the window itself may go now
+  (`window_may_go`: Chat's model switched to a cloud one, it's a line, not
+  a picture, without "With cloud models too"). **Where it
   goes** (`allowed`, `leaves_pc`: the cloud providers always leave the PC,
   any other server unless it's on this PC): "Let the Voice Assistant see the
   window in front when you ask about it" (`assistant_screen`, on) for a
@@ -1052,8 +1057,10 @@ copyable. Yap's, in `chat/skills.rs`:
   that's the person's — "You", or one they added — then the ones nobody
   took on, newest meeting first, each a passage that opens the moment it
   was said, else the summary's line; tasks added with no meeting aren't
-  numbered), **`you`** (/coach: the latest meeting's talk, the passages
-  where the person talks most, in order), **`week`** (/weekly-recap: each
+  numbered), **`you`** (/coach: the talk of the meeting the words name —
+  its title as whole words, or its day: "/coach the budget review",
+  "/coach yesterday" — else the latest meeting's; the passages where the
+  person talks most, in order), **`week`** (/weekly-recap: each
   meeting of the week the words name, this one by default, in order — its
   summary's first passages, else the start of its talk; ≤ 14), else **a
   search** (`ask::find`) for the words typed with it, else the Skill's own
