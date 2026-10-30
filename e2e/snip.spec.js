@@ -765,6 +765,31 @@ test('a picture pasted into the box or image files dropped on Chat go in as scre
   });
   await expect(attachments(main)).toContainText('30 × 20');
   await clearBox(main);
+
+  // Text that brings a picture of itself (Excel's cells, PowerPoint's
+  // text): the text pastes, no screenshot. A picture copied in Firefox
+  // (its address as the text): still the picture.
+  const paste = (text) =>
+    box(main).evaluate(async (el, text) => {
+      const c = document.createElement('canvas');
+      c.width = 50;
+      c.height = 10;
+      c.getContext('2d').fillRect(0, 0, 50, 10);
+      const blob = await new Promise((r) => c.toBlob(r, 'image/png'));
+      const dt = new DataTransfer();
+      dt.setData('text/plain', text);
+      dt.items.add(new File([blob], 'image.png', { type: 'image/png' }));
+      const ev = new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true });
+      el.dispatchEvent(ev);
+      return ev.defaultPrevented;
+    }, text);
+  await box(main).click();
+  expect(await paste('Q3 totals\t1,204\r\nQ4 totals\t1,388\r\n')).toBe(false);
+  await main.waitForTimeout(500);
+  await expect(attachments(main)).toBeHidden();
+  expect(await paste('https://example.com/chart.png')).toBe(true);
+  await expect(attachments(main)).toContainText('50 × 10');
+  await clearBox(main);
 });
 
 test("a model that can't read images: \"Send its text instead\", read on this PC", async ({ yap, main, fakeLlm, shot }) => {
