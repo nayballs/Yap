@@ -59,6 +59,8 @@ pub struct AppState {
 /// Windows the installer step force-exits Yap (`std::process::exit`) without
 /// ever reaching the Exit handler (see `updates::build_updater`).
 pub(crate) fn shutdown_cleanup() {
+    // Windows' lid callbacks (lid.rs): none while the app goes.
+    dictation::lid::stop();
     voice::tts::stop();
     ai::local_llm::shutdown();
     // Meeting search's model (search/embedder.rs) on the same engine.
@@ -71,6 +73,10 @@ pub(crate) fn shutdown_cleanup() {
     ai::usage::store::flush();
     // A store whose last save failed (saving.rs): one more try.
     shell::saving::flush();
+    // A dictation still only promised on the clipboard (read_check.rs):
+    // written out, so it outlasts Yap.
+    #[cfg(windows)]
+    pasting::read_check::write_out_now();
 }
 
 /// `yap.exe mcp` (main.rs): serve MCP to an AI app over stdin/stdout until it
@@ -140,6 +146,10 @@ pub fn run_dictation_check() -> i32 {
 }
 
 pub fn run() {
+    // COM's multithreaded apartment, up until Yap exits: a thread using a
+    // notification or another WinRT object without COM of its own must
+    // never see it taken down under it (shell/com.rs).
+    shell::com::keep_mta();
     // Decide portable-vs-installed once, before anything reads the data dir
     // (the file log lives under it).
     shell::portable::init();
@@ -1206,6 +1216,11 @@ pub fn run() {
                             let _ = w.hide();
                             if !main {
                                 notices::notice::on_onboarding(false);
+                                // The bar's first-use pointers may show now.
+                                bar::refresh(w.app_handle());
+                                // A mic quiz there stops listening on every
+                                // microphone (mic_quiz.rs): nobody sees it.
+                                dictation::mic_quiz::mic_quiz_cancel();
                                 // Its mic check's level meter holds the mic
                                 // open (mic.rs); the page can't tell it's
                                 // hidden (WebView2 says it's still visible).
