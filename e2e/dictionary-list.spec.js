@@ -332,6 +332,34 @@ test('export: CSV that Import reads back the same, text with words alone and pai
   expect(exportName('txt', new Date(2026, 9, 5))).toBe('Yap dictionary 2026-10-05.txt');
 });
 
+test('export: a cell a spreadsheet would run as a formula starts with an apostrophe, and Import takes it off', () => {
+  const entries = [
+    s('my number', '+44 7700 900123'),
+    c('zentrix dev', '@zentrix_dev'),
+    s('total', '=SUM(A1:A2)'),
+    s('list', '- one\n- two'),
+    c('minus', '-5 degrees'),
+    // Already an apostrophe: before a formula's character, another one;
+    // anywhere else, left as it is.
+    c('kept', "'=kept"),
+    c('tis', "'Tis"),
+  ];
+  const csv = toCsv(entries);
+  const rows = csv.replace(/^﻿/, '').split('\r\n').slice(1, -1);
+  // No cell (quoted or not) starts with = + - @.
+  for (const row of rows) {
+    for (const cell of row.split(',')) expect(cell.replace(/^"/, '')).not.toMatch(/^[=+\-@]/);
+  }
+  expect(csv).toContain("my number,'+44 7700 900123,snippet,,\r\n");
+  expect(csv).toContain("zentrix dev,'@zentrix_dev,correction,yes,\r\n");
+  expect(csv).toContain(`list,"'- one\n- two",snippet,,\r\n`);
+  expect(csv).toContain("kept,''=kept,correction,yes,\r\n");
+  expect(csv).toContain("tis,'Tis,correction,yes,\r\n");
+  const back = parseDictionaryFile(csv, exportName('csv'));
+  expect(back.skipped).toEqual([]);
+  expect(importChanges(planImport(back.rows, [])).add).toEqual(entries);
+});
+
 // ---- One entry, several ways it's heard (dictionary/variants.rs) ----
 
 test("every way a word is heard: listed, searched, kept clean", () => {

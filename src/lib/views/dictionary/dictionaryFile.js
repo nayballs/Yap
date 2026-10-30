@@ -180,6 +180,9 @@ function entryFrom({ line, from, to, kind, fuzzy, starred, source }) {
   return { row: { line, from: heard, to: written, snippet, fuzzy: yesNo(fuzzy, true), starred: yesNo(starred, false) } };
 }
 
+/** A cell Export… kept from running as a formula ("'+44…"): its apostrophe off. */
+const unformula = (s) => (/^'+[=+\-@\t\r\n]/.test(s) ? s.slice(1) : s);
+
 function fromCsv(text, name) {
   const ext = (String(name).match(/\.([^.\\/]+)$/)?.[1] ?? '').toLowerCase();
   const first = tidy(text)
@@ -202,7 +205,7 @@ function fromCsv(text, name) {
       body = records.slice(1);
     }
   }
-  const cell = (cells, i) => (i >= 0 ? (cells[i] ?? '') : '');
+  const cell = (cells, i) => unformula(i >= 0 ? (cells[i] ?? '') : '');
   // The record as the file had it (empty cells at its end aside), to say why it's left out.
   const sourceOf = (cells) => {
     const used = [...cells];
@@ -436,8 +439,15 @@ export function undoImport(list, { added = [], respelled = [], extended = [] }) 
 
 // ---- Export ----
 
+// A cell a spreadsheet would run as a formula (=, +, -, @, a tab or a line
+// break first: "+44 7700 900123" is #NAME?, "=HYPERLINK(…)" runs): an
+// apostrophe first, which Excel takes as "text" and Import… takes off again
+// (`unformula`). One already there before such a character gets another.
+const FORMULA_START = /^'*[=+\-@\t\r\n]/;
+
 const csvCell = (v) => {
-  const s = String(v ?? '');
+  let s = String(v ?? '');
+  if (FORMULA_START.test(s)) s = `'${s}`;
   return /[",;\t\r\n]|^\s|\s$/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 };
 
