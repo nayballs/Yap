@@ -383,6 +383,7 @@ pub fn place_for(focused: bool, visible: bool, bar: bool, notification: bool) ->
 /// [`FOCUS_BESIDE`] (in another app, Yap's window on screen beside it).
 static TEST_FOCUS: AtomicU8 = AtomicU8::new(FOCUS_YAP);
 const FOCUS_YAP: u8 = 0;
+#[cfg(debug_assertions)]
 const FOCUS_AWAY: u8 = 1;
 const FOCUS_BESIDE: u8 = 2;
 
