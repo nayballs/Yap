@@ -451,6 +451,17 @@ pub fn place_tip(app: &AppHandle, kind: &str) -> Place {
     }
 }
 
+/// What became of a tip [`place_tip`] placed at `place`: `shown` false (its
+/// window's event failed, or the bar couldn't take its card) gives its
+/// count back (`kinds::give_back`); a card the bar takes and then drops
+/// unseen gives it back there (`bar.rs`). Returns `shown`.
+pub fn tip_shown(kind: &str, place: Place, shown: bool) -> bool {
+    if !shown && place != Place::Nowhere {
+        crate::notices::kinds::give_back(kind);
+    }
+    shown
+}
+
 // ---- the moment, kept current from the app's events -------------------------------------------
 
 static DICTATING: AtomicBool = AtomicBool::new(false);

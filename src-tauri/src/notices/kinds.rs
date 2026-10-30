@@ -11,7 +11,8 @@
 //!
 //! Through the one notice policy: a module about to show one asks
 //! `notice::place_tip` (its place, or Nowhere when its kind is off or used
-//! up today — counted when it isn't), and the page asks [`notice_allow`]
+//! up today — counted when it isn't, and the count given back if it never
+//! shows after all: [`give_back`]), and the page asks [`notice_allow`]
 //! for its own (the "Updated to …" note). Questions, alerts and notices
 //! have no kind and are never capped. Pure parts unit-tested. A test run
 //! counts nothing unless a spec asks (`e2e_notice_caps`): the suite shows
@@ -86,6 +87,15 @@ impl Caps {
         self.counts[c.index()] += 1;
         self
     }
+
+    /// The counts after one of `c` counted on `day` never showed after all
+    /// (another day's count has nothing of it to give back). Pure.
+    pub fn given_back(mut self, c: Category, day: i64) -> Caps {
+        if self.day == day {
+            self.counts[c.index()] = self.counts[c.index()].saturating_sub(1);
+        }
+        self
+    }
 }
 
 /// The categories switched off (a bit each, `Category::index`).
@@ -133,6 +143,21 @@ pub fn take(kind: &str) -> bool {
     }
     *caps = caps.counted(c, day);
     true
+}
+
+/// `kind`, counted by [`take`], never showed after all: its window's event
+/// failed, the bar couldn't take its card, or the bar dropped the card
+/// unseen (`bar.rs`). Its count goes back, so it never spends the day's cap
+/// (review 2026-10-30: it did, and the next tip of its kind waited a day).
+pub fn give_back(kind: &str) {
+    let Some(c) = category(kind) else { return };
+    #[cfg(debug_assertions)]
+    if crate::shell::e2e::active() && !E2E_CAPS.load(Ordering::SeqCst) {
+        return;
+    }
+    let mut caps = CAPS.lock().unwrap_or_else(|p| p.into_inner());
+    *caps = caps.given_back(c, today());
+    tracing::debug!(kind, "notice: not shown after all; not counted");
 }
 
 /// The page's own notice of `kind` (the "Updated to …" note is "news"):
@@ -200,5 +225,25 @@ mod tests {
         // News: once a day.
         let news = Caps::default().counted(Category::News, 5);
         assert!(!news.admits(Category::News, 5));
+    }
+
+    /// A tip counted but never shown (its card dropped unseen) gives its
+    /// count back: the day's three tips are three seen (review 2026-10-30).
+    #[test]
+    fn a_tip_that_never_showed_gives_its_count_back() {
+        let tips = Category::FeatureTips;
+        let mut caps = Caps::default();
+        for _ in 0..cap(tips) {
+            caps = caps.counted(tips, 100);
+        }
+        assert!(!caps.admits(tips, 100));
+        // The last one's card was dropped unseen.
+        caps = caps.given_back(tips, 100);
+        assert!(caps.admits(tips, 100));
+        assert_eq!(caps.counts, [0, 0, 2, 0]);
+        // Never below none, never another kind's, never another day's.
+        assert_eq!(Caps::default().given_back(tips, 100).counts, [0; 4]);
+        assert_eq!(caps.given_back(Category::Suggestions, 100).counts, [0, 0, 2, 0]);
+        assert_eq!(caps.given_back(tips, 101).counts, [0, 0, 2, 0]);
     }
 }

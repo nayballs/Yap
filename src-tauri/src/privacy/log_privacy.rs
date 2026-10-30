@@ -21,7 +21,10 @@ mod tests {
     /// Variable and field names that hold what a person dictated, typed or
     /// was told. (Not `title`: card and notice titles are Yap's own words.)
     /// (And a screenshot's pixels or its data URL: Snip to Chat logs sizes.)
-    const CONTENT: &str = "text|transcript|raw|raw_text|corrected|cleaned|cleaned_text|final_text|content|contents|answer|reply|question|query|prompt|said|heard|spoken|clipboard|clip_text|about|about_me|note_text|fact|facts|selection|before|after|partial|partials|utterance|dictation|message_text|user_text|body_text|bgra|rgba|pixels|png|data_url|url_data";
+    /// And a microphone's or a headset's name: a Bluetooth one's can carry
+    /// its owner's ("Sam's AirPods"). Mic modules log Bluetooth or not, the
+    /// rate, the place in the order; the name at debug.
+    const CONTENT: &str = "text|transcript|raw|raw_text|corrected|cleaned|cleaned_text|final_text|content|contents|answer|reply|question|query|prompt|said|heard|spoken|clipboard|clip_text|about|about_me|note_text|fact|facts|selection|before|after|partial|partials|utterance|dictation|message_text|user_text|body_text|bgra|rgba|pixels|png|data_url|url_data|device|dev_name|device_name|mic_name";
 
     fn rust_files(dir: &Path, out: &mut Vec<PathBuf>) {
         for entry in std::fs::read_dir(dir).unwrap().flatten() {
@@ -99,6 +102,8 @@ mod tests {
             r#"tracing::error!(?answer, "no answer")"#,
             r#"tracing::info!("search: {}", &query)"#,
             r#"tracing::info!(about = %cfg.about_me, "About you")"#,
+            r#"tracing::info!(device = %dev_name, native_rate, "Microphone opened")"#,
+            r#"tracing::info!(device = %t.device, bluetooth = t.bluetooth, "Microphone: live")"#,
         ] {
             assert!(content_in(bad).is_some(), "{bad}");
         }
@@ -109,6 +114,7 @@ mod tests {
             r#"tracing::info!(card = %id, action, "bar: card answered")"#,
             r#"tracing::info!(note_id, title = %warning.title, "meeting guard: length warning")"#,
             r#"tracing::info!("alert: {}", alert.title)"#,
+            r#"tracing::info!(native_rate, bluetooth, built_in, "Microphone opened")"#,
         ] {
             assert_eq!(content_in(ok), None, "{ok}");
         }

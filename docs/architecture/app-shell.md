@@ -308,11 +308,14 @@ re-exported by the module, except `local_llm`'s, which callers name
   log file + copy path + open folder). **No user content at `info` and
   above** (since 2026-10-22): no transcripts or cleaned text, chat messages or
   answers, memory items, notes, meeting lines, About you, calendar titles,
-  search queries or clipboard contents — only lengths, counts, ids and
-  outcomes (`Transcript chars=42`). The text may go to `debug!` (Debug
+  search queries or clipboard contents, nor a microphone's or a headset's
+  name (a Bluetooth one's can carry its owner's, "Sam's AirPods"; since
+  2026-10-30) — only lengths, counts, ids and outcomes (`Transcript
+  chars=42`). The text may go to `debug!` (Debug
   logging, whose hint says so), never an API key or a token at any level.
   `privacy/log_privacy.rs` is a lint-style test that fails on an `info!`/`warn!`/
-  `error!` formatting a content-named variable (`text = %…`, `{answer}`); the
+  `error!` formatting a content-named variable (`text = %…`, `{answer}`,
+  `device = %…`); the
   webviews' `frontend_log` lines follow the same rule.
 - **`privacy/net.rs`** / **`privacy/diagnostics.rs`** — the network receipts (every request
   goes out through `net::Recorded::send_for`; `net::init` in setup names

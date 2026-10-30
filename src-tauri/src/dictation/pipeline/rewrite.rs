@@ -71,8 +71,9 @@ pub(crate) struct Rewritten {
     /// The AI's text; empty when it never got that far.
     pub text: String,
     /// "replaced" / "copied" / "testMode" (the last dictation's), "pasted"
-    /// (a selection's or new text), "refused" (nothing pasted), "nothing"
-    /// (nothing said or written), "failed" (the AI).
+    /// (a selection's or new text; "copied" when it was left on the
+    /// clipboard instead), "refused" (nothing pasted), "nothing" (nothing
+    /// said or written), "failed" (the AI).
     pub outcome: String,
     /// Why it wasn't replaced or pasted.
     pub why: Option<String>,
@@ -299,24 +300,36 @@ impl Shared {
                 tracing::info!(chars = out.chars().count(), "Rewrite");
                 tracing::debug!(text = %out, "Rewrite text");
                 let _ = self.app.emit("yap-transcript", out.clone());
-                let strict = self.undoing.load(Ordering::SeqCst);
+                // As a dictation's paste: an Undo, or a Command whose mic was
+                // disconnected or which stopped at its length limit, goes
+                // into its own window or onto the clipboard, never into
+                // whatever has the focus now (review 2026-10-30).
+                let strict = self.own_window_only();
                 let read = self.read_kind();
                 match crate::pasting::text_injector::inject_text(&out, restore_clipboard, target, strict, read).await {
                     // The last paste now: "now shorter", with nothing
                     // selected, rewrites it.
                     Ok(crate::pasting::text_injector::Delivery::Pasted | crate::pasting::text_injector::Delivery::Typed) => {
                         crate::pasting::as_said::remember(target, read, &out, None, restore_clipboard);
+                        self.tell_unplugged(super::unplugged::Outcome::Pasted);
                         report_rewrite(false, &out, "pasted", None);
                     }
-                    // Not pasted (an app running as administrator…): on the clipboard.
+                    // Not pasted (an app running as administrator…): on the
+                    // clipboard, said once (the mic's alert says it, if that went).
                     Ok(crate::pasting::text_injector::Delivery::LeftOnClipboard(left)) => {
                         crate::pasting::as_said::forget();
-                        crate::notices::alert::show_soon(&self.app, left.alert());
+                        if !self.tell_unplugged(super::unplugged::Outcome::OnClipboard) {
+                            crate::notices::alert::show_soon(&self.app, left.alert());
+                        }
+                        report_rewrite(false, &out, "copied", Some(left.code().to_string()));
                     }
-                    // An Undo whose window is gone: on the clipboard.
+                    // Its window is gone (or won't come to the front): on the clipboard.
                     Ok(crate::pasting::text_injector::Delivery::WindowGone) => {
                         crate::pasting::as_said::forget();
-                        crate::notices::alert::show_soon(&self.app, undo_window_gone());
+                        if !self.tell_unplugged(super::unplugged::Outcome::OnClipboard) {
+                            crate::notices::alert::show_soon(&self.app, undo_window_gone());
+                        }
+                        report_rewrite(false, &out, "copied", Some("its window was gone".into()));
                     }
                     Err(e) => {
                         crate::pasting::as_said::forget();
@@ -328,7 +341,10 @@ impl Shared {
             Err(e) => {
                 // Don't fall back to typing the raw instruction — that would paste
                 // "make this a list" into the doc. Surface an error instead.
-                tracing::warn!("Rewrite failed: {}", e);
+                // Its kind at warn; the error itself (a server's can quote
+                // what the model wrote) at debug only.
+                tracing::warn!(error = %crate::ai::llm::error_kind(&e), "Rewrite failed");
+                tracing::debug!("Rewrite failed: {e}");
                 report_rewrite(last.is_some(), "", "failed", Some(e.clone()));
                 let _ = self.app.emit(
                     DICTATION_ERROR,

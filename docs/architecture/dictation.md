@@ -49,7 +49,11 @@ the command and snippets;
 key). Cleanup is
 best-effort — any error/timeout falls back to the raw transcript, so dictation
 never blocks; so does an answer that left out most of what was said
-(`cleanup_styles::lost_the_dictation`, ai-models.md). It keeps the person's **English spelling** ("Write in my
+(`cleanup_styles::lost_the_dictation`, ai-models.md). The log says its
+kind at `warn` (`llm::error_kind`: timed out, HTTP 500, parse failed…)
+and the error itself only at `debug`: a server's can quote what the model
+wrote (llama.cpp's "Failed to parse input at pos N: …"); a rewrite's and a
+transform's alike (2026-10-30). It keeps the person's **English spelling** ("Write in my
 region's spelling", on, Settings → Language Models → Dictation Cleanup;
 the region is About you's; 2026-10-21): a UK user's
 "color" comes out "colour", a US user's "colour" "color" — one line in
@@ -366,8 +370,10 @@ to **Run again** from Home.
   as a stop would (`stop_and_transcribe`: stop chime, other apps back) and
   what it heard is transcribed and kept like any dictation (history, its
   audio a day in `recent_audio`), pasted **only into the window it was
-  for** (`unplugged` set → `inject_text`'s strict paste, as Undo's: a window
-  gone leaves it on the clipboard, and
+  for** (`unplugged` set → `inject_text`'s strict paste, as Undo's —
+  `Shared::own_window_only`, a Command's or rewrite's paste as well since
+  2026-10-30 (`rewrite.rs`), which used to go into whatever was in front: a
+  window gone leaves it on the clipboard, and
   Home lists it as "Didn't paste · Your microphone was disconnected and its
   window was gone", with Copy and Run again); nothing heard → it ends at once
   (`end_now`, shared with `end_without_mic`), the bar saying "<mic> was
@@ -854,7 +860,9 @@ to **Run again** from Home.
   or that it failed. `Status` (debug-only `e2e_mic_status`): open, live,
   Bluetooth, opens/closes and the last open's timing (`OpenTiming`: build,
   first audio, live, in ms from asking) — the log says the same at `info`
-  ("Microphone: live … first_audio_ms"). **Measured on this PC**
+  ("Microphone: live … first_audio_ms"; opened and closed with Bluetooth or
+  not, the rate, built in or not — the mic's name only at `debug`, as a
+  Bluetooth headset's can carry its owner's). **Measured on this PC**
   (2026-10-22; the `--ignored` `open_latency_this_pc`, five cold opens
   each): USB mics (a Razer Seiren Mini, a USB audio adapter) build in
   4–8 ms, their first audio arrives 38–47 ms after asking and starts
@@ -1210,7 +1218,9 @@ to **Run again** from Home.
   transcription, cleanup, the paste **back into its own window or onto the
   clipboard** (`inject_text`'s `strict`, as Undo's: nobody pressed
   anything, so never into whatever is in front now; Undo's own "window
-  gone" alert gives way). `deliver_text` then calls `stopped`: an alert
+  gone" alert gives way). A Command or a rewrite stopped at the limit
+  pastes its AI text by the same rule (`own_window_only`, since
+  2026-10-30; e2e `dictation-polish.spec.js`). `deliver_text` then calls `stopped`: an alert
   ("Dictation stopped at 15 minutes", kind `dictationCapped`: never held,
   never dropped) saying it's pasted, or that it couldn't be, with
   **Recover text** (`RECOVER` → `recover`: that dictation's text onto the
@@ -1352,7 +1362,11 @@ to **Run again** from Home.
   unit tests keep it in memory. Best-effort,
   gated by `history_enabled`. The stats are no longer derived from it
   (`stats.rs`, below): it hands them what they haven't counted
-  (`counted_since`). Powers `get_history`/`clear_history`. Every change
+  (`counted_since`). Powers `get_history`/`clear_history`, and Home's
+  `delete_history_entry`, which finds the entry by its audio's id when Home
+  lists one (two failed or cancelled dictations in the same second share
+  their time and empty text), else by time and text (`position_of`, pure;
+  since 2026-10-30), its audio deleted with it. Every change
   (a dictation or upload saved, an entry deleted from Home or the local API,
   all cleared) emits **`yap-history-changed`** after the write, which Home and
   Insights re-pull on. Not `yap-transcript`: a dictation emits that before it

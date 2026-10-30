@@ -35,6 +35,15 @@ pub(super) fn undo_window_gone() -> crate::notices::alert::Alert {
 }
 
 impl Shared {
+    /// This dictation's paste goes into its own window or onto the
+    /// clipboard, never into whatever has the focus now: an Undo, or one
+    /// that ended with nobody pressing anything — its mic disconnected
+    /// (`unplugged.rs`) or its length limit reached (`cap.rs`). A
+    /// dictation's paste and a Command's or rewrite's (`rewrite.rs`) alike.
+    pub(super) fn own_window_only(&self) -> bool {
+        self.undoing.load(Ordering::SeqCst) || self.unplugged() || self.capped.load(Ordering::SeqCst)
+    }
+
     /// Is this dictation (or Voice Assistant question) "snip" as a whole
     /// ("Say 'snip' to take a screenshot", `snip::is_snip_phrase`)?
     fn snip_said(&self, transcript: &str) -> bool {
@@ -377,7 +386,10 @@ impl Shared {
                         (c, plan.written_style(), false)
                     }
                     Err(e) => {
-                        tracing::warn!("AI cleanup failed, using raw: {}", e);
+                        // Its kind at warn; the error itself (a server's can
+                        // quote what the model wrote) at debug only.
+                        tracing::warn!(error = %crate::ai::llm::error_kind(&e), "AI cleanup failed, using raw");
+                        tracing::debug!("AI cleanup failed: {e}");
                         (raw.to_string(), None, false)
                     }
                 }
@@ -476,7 +488,7 @@ impl Shared {
             // never into whatever has the focus now.
             let unplugged = self.unplugged();
             let capped = self.capped.load(Ordering::SeqCst);
-            let strict = self.undoing.load(Ordering::SeqCst) || unplugged || capped;
+            let strict = self.own_window_only();
             // Several messages, or a mention or a file to pick: in steps,
             // the submit key after each message (`compose.rs`).
             let in_steps = plan.in_steps();

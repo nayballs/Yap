@@ -809,7 +809,9 @@ impl Shared {
                                 }
                                 None => {
                                     let silent = shared.mic_silent();
-                                    tracing::warn!("Dictation mic: {}", silent.message);
+                                    // Its message names the mic: that at debug only.
+                                    tracing::warn!("Dictation mic: No sound from it");
+                                    tracing::debug!("Dictation mic: {}", silent.message);
                                     // The overlay says so in the waveform's place (the
                                     // recording carries on), and only there.
                                     let _ = shared.app.emit("yap-mic-silent", Some(&silent));

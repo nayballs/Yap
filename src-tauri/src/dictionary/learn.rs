@@ -1498,6 +1498,8 @@ fn offer(app: &AppHandle, words: Vec<Suggestion>, ignore_gap: bool) -> bool {
             }),
         )
     };
+    // Not shown after all: the day's count back.
+    let shown = crate::notices::notice::tip_shown(CARD, place, shown);
     if shown {
         tracing::info!(count = words.len(), in_window, "learn: offered words for the dictionary");
         update_record(|mut r| {

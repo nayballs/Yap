@@ -247,11 +247,11 @@ impl Shared {
         // so (the blocking call can't be cancelled without losing the words,
         // so it's only said). Taken back the moment it's done.
         let audio_ms = audio.len() as u64 * 1000 / super::TARGET_SAMPLE_RATE as u64;
-        let (model, device) = lease
+        let (model, runs_on) = lease
             .engine()
             .map(|e| (e.model().to_string(), e.device()))
             .unwrap_or_else(|| (String::new(), stt::Device::Gpu));
-        let (after_ms, usual_ms) = crate::dictation::slow::stt_slow_after(&model, device, audio_ms);
+        let (after_ms, usual_ms) = crate::dictation::slow::stt_slow_after(&model, runs_on, audio_ms);
         let watch = super::slow::SlowWatch::start(
             &self.app,
             crate::dictation::slow::Notice { stage: crate::dictation::slow::Stage::Transcribing, skip: false },
@@ -280,11 +280,11 @@ impl Shared {
         .await;
 
         if watch.finish() {
-            tracing::info!(model = %model, ?device, audio_ms, usual_ms = ?usual_ms, "Transcription took longer than usual");
+            tracing::info!(model = %model, ?runs_on, audio_ms, usual_ms = ?usual_ms, "Transcription took longer than usual");
         }
         let outcome = outcome.map(|(lease, result, took_ms)| {
             if result.is_ok() {
-                crate::dictation::slow::record_stt(&crate::dictation::slow::stt_key(&model, device), audio_ms, took_ms);
+                crate::dictation::slow::record_stt(&crate::dictation::slow::stt_key(&model, runs_on), audio_ms, took_ms);
             }
             (lease, result)
         });
