@@ -721,12 +721,14 @@ async fn sync_all(app: &AppHandle) {
         if let Err(e) = &result {
             tracing::info!(connection = %conn.id, kind = %conn.kind, "calendar: sync failed: {}", e.message);
         }
-        results.push((conn.id.clone(), result));
+        results.push((conn.id.clone(), conn.added_ts, result));
     }
     {
         let mut s = lock();
-        for (id, result) in results {
-            let Some(conn) = s.store.connections.iter_mut().find(|c| c.id == id) else { continue };
+        for (id, added_ts, result) in results {
+            // The calendar fetched, not another connected into its slot
+            // since (its meetings would show under the new one).
+            let Some(conn) = s.store.connections.iter_mut().find(|c| c.id == id && c.added_ts == added_ts) else { continue };
             match result {
                 Ok(fetched) => {
                     conn.synced_ts = now;
@@ -748,7 +750,7 @@ async fn sync_all(app: &AppHandle) {
         s.store.answered.retain(|_, at| *at > now - ANSWER_KEEP);
         s.syncing = false;
         // A calendar connected while this sync ran gets its own straight away.
-        let added = s.store.connections.iter().any(|c| !connections.iter().any(|o| o.id == c.id));
+        let added = s.store.connections.iter().any(|c| !connections.iter().any(|o| o.id == c.id && o.added_ts == c.added_ts));
         s.next_sync = if added { now_secs() } else { now_secs() + SYNC_EVERY };
         save_store(&s.store);
         tracing::info!(events = s.store.events.len(), "calendar: synced");
@@ -1194,12 +1196,17 @@ pub async fn calendar_disconnect(app: AppHandle, id: String) -> Result<(), Strin
         save_store(&s.store);
         conn
     };
-    if conn.kind == "google" {
-        if let Some(secret) = vault::load(&id).and_then(|s| serde_json::from_str::<GoogleSecret>(&s).ok()) {
-            google::revoke(&secret.refresh_token).await;
-        }
-    }
+    // Its secret goes before Google is told: the slot is free already, and a
+    // calendar connected into it while the revoke waits on Google (up to its
+    // timeout) saves its own secret there, which a delete after the wait
+    // took (the 2026-10-23 review).
+    let secret = (conn.kind == "google")
+        .then(|| vault::load(&id).and_then(|s| serde_json::from_str::<GoogleSecret>(&s).ok()))
+        .flatten();
     vault::delete(&id);
+    if let Some(secret) = secret {
+        google::revoke(&secret.refresh_token).await;
+    }
     tracing::info!(connection = %id, kind = %conn.kind, "calendar: disconnected");
     emit(&app);
     wake();

@@ -224,7 +224,11 @@ pub fn series_of(key: &str) -> Option<String> {
     }
     if let Some((base, when)) = rest.rsplit_once('_') {
         let digits = |s: &str| !s.is_empty() && s.chars().all(|c| c.is_ascii_digit());
+        // (Sliced by bytes: only ASCII is a date. A one-off event's key is
+        // its UID, whoever sent the invite chose it: "x_1234567é1234567"
+        // is 16 bytes, and slicing it at 8 panicked.)
         let stamp = match when.len() {
+            _ if !when.is_ascii() => false,
             8 => digits(when),
             16 => digits(&when[..8]) && &when[8..9] == "T" && digits(&when[9..15]) && when.ends_with('Z'),
             _ => false,
@@ -1516,6 +1520,11 @@ mod tests {
         assert_eq!(series_of("1:roadmap_e2e"), None);
         assert_eq!(series_of("nokey"), None);
         assert_eq!(series_of("2:x:12"), None);
+        // A UID with letters past ASCII where a date would be (16 and 8
+        // bytes): a one-off, never a panic.
+        assert_eq!(series_of("2:x_1234567é1234567"), None);
+        assert_eq!(series_of("2:x_123é4567"), None);
+        assert_eq!(series_of("2:x_é"), None);
     }
 
     #[test]
