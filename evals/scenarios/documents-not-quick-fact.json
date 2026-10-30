@@ -1,0 +1,12 @@
+{
+  "name": "documents-not-quick-fact",
+  "description": "Documents beside the chat: a fact is answered in the chat, never as a document.",
+  "tags": ["documents"],
+  "apps": "standard",
+  "turns": [
+    {
+      "user": "How many tablespoons are in a cup?",
+      "expect": { "document": { "made": false }, "tools_not_called": ["create_document", "write_section"], "answer_contains_any": ["16", "sixteen"] }
+    }
+  ]
+}

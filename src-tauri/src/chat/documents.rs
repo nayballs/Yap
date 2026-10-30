@@ -60,7 +60,7 @@ const INTENT_MAX: usize = 140;
 /// instructions (`tools::TOOL_INSTRUCTIONS`): when to make one, the outline
 /// first, a line or two in the chat, and later questions changing it. Kept
 /// short: every step of a tool turn sends it.
-pub const INSTRUCTIONS: &str = "For an answer to keep or come back to (a build, a plan, a guide, a comparison, a long table), make a document: create_document with the title and all its sections first, then write_section for each, in order. In the chat say only a line or two (\"It's open on the right.\"), never the content. A question or change about a document from this chat: change it with edit_note (read_note first).";
+pub const INSTRUCTIONS: &str = "For an answer to keep or come back to (a build, a plan, a guide, a comparison, a long table), make a document: create_document with the title and all its sections first, then write_section for each, in order. In the chat say only one short line (\"It's open on the right.\"): no summary, never the content. A question or change about a document from this chat: change it with edit_note (read_note first).";
 
 /// Added to a question asked out loud (the Voice Assistant) when the
 /// model calls tools: no document unless one is asked for, and then a
@@ -527,11 +527,25 @@ pub fn of_conversation(messages: &[crate::chat::chats::ChatMessage]) -> Vec<DocR
 pub struct Turn {
     known: Mutex<Vec<u64>>,
     touched: Mutex<Vec<DocRef>>,
+    /// The ones this turn made (`create_document`).
+    made: Mutex<Vec<u64>>,
 }
 
 impl Turn {
     pub fn new(known: &[DocRef]) -> Turn {
-        Turn { known: Mutex::new(known.iter().map(|d| d.id).collect()), touched: Mutex::new(Vec::new()) }
+        Turn { known: Mutex::new(known.iter().map(|d| d.id).collect()), ..Default::default() }
+    }
+
+    /// The documents this turn made that still have sections to write:
+    /// `(title, keys)` of the first one (the loop asks the model to finish
+    /// it before it answers, `agent.rs`).
+    pub fn unfinished(&self) -> Option<(u64, String, Vec<String>)> {
+        let made = self.made.lock().unwrap_or_else(|p| p.into_inner()).clone();
+        made.into_iter().find_map(|id| {
+            let n = crate::notes::get(id)?;
+            let left = pending_keys(&n.content);
+            (!left.is_empty()).then_some((id, n.title, left))
+        })
     }
 
     /// Note `id` changed by tool `name`: a document of this chat? (Made by
@@ -550,6 +564,9 @@ impl Turn {
         }
         if !known.contains(&id) {
             known.push(id);
+        }
+        if name == "create_document" {
+            self.made.lock().unwrap_or_else(|p| p.into_inner()).push(id);
         }
         let title = crate::notes::get(id).map(|n| n.title).unwrap_or_default();
         let doc = DocRef { id, title };
@@ -733,9 +750,60 @@ pub fn execute(name: &str, args: &Value) -> Value {
 fn next_step(left: &[String]) -> String {
     match left.first() {
         Some(k) => format!("Now call write_section for \"{k}\"."),
-        None => "Every section is written. Tell the user in a line or two that it's open beside the chat; don't repeat it there.".to_string(),
+        None => FINISHED.to_string(),
     }
 }
+
+/// The last section written: what the answer is now (small models wrote a
+/// summary of the document under "It's open beside the chat", 84 and 121
+/// words, Qwen3.5-4B, 30 Oct 2026).
+const FINISHED: &str = "Every section is written. Now answer in one short sentence, like \"It's open on the right.\": no summary, nothing from the document (the user reads it there).";
+
+/// What the loop tells the model when it answered with sections of the
+/// document it made still to write (`agent.rs`, at most [`FINISH_NUDGES`]
+/// times a turn): finish first. Qwen3.5-4B wrote a comparison's table and
+/// answered with its recommendation still a placeholder (30 Oct 2026).
+pub fn finish_note(title: &str, left: &[String]) -> String {
+    let keys = left.iter().map(|k| format!("\"{k}\"")).collect::<Vec<_>>().join(", ");
+    format!(
+        "(A note from Yap, not the user.) The document \"{title}\" still has sections to write: {keys}. Call write_section for each now, then answer in one short sentence."
+    )
+}
+
+/// How many times a turn asks the model to finish its document.
+pub const FINISH_NUDGES: usize = 2;
+
+/// Does `question` ask for something to keep — a build, a plan, a guide,
+/// an itinerary, a comparison, a list to come back to? Words a person uses
+/// for one (English), never a question about what they have ("what's the
+/// plan for tomorrow?"). For a model on this PC, a line in its context
+/// then says to make a document (`ASKS_NOTE`): left to the system prompt's
+/// rule, Qwen3.5-4B answered a repotting guide and a Lisbon plan in the
+/// chat, 440 and 121 words (30 Oct 2026). Pure.
+pub fn asks_for_document(question: &str) -> bool {
+    static MAKE: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
+        regex::Regex::new(
+            r"(?i)\b(make|write|give|create|draft|put together|build|prepare|plan)\s+(me\s+|us\s+)?(up\s+)?(a|an|my|our|the)\b[^.?!]{0,80}?\b(build|plan|guide|itinerary|checklist|packing list|shopping list|to-do list|comparison|schedule|routine|timetable|report|outline|walkthrough|tutorial|budget)s?\b",
+        )
+        .expect("static regex")
+    });
+    static PLAN: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
+        regex::Regex::new(r"(?i)^\s*(please\s+|can you\s+|could you\s+)?plan\s+(a|an|my|our|the|me)\b").expect("static regex")
+    });
+    static OTHER: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
+        regex::Regex::new(r"(?i)\bstep[- ]by[- ]step\b|^\s*(please\s+)?compare\b[^?]{0,160}\b(and|with|vs\.?|versus)\b|\b(a|an)\s+[^.?!]{0,40}\bbuild\s+for\b")
+            .expect("static regex")
+    });
+    let q = question.trim();
+    if q.is_empty() || q.split_whitespace().count() < 4 {
+        return false;
+    }
+    MAKE.is_match(q) || PLAN.is_match(q) || OTHER.is_match(q)
+}
+
+/// The line a question that asks for something to keep gets
+/// ([`asks_for_document`]), in its context.
+pub const ASKS_NOTE: &str = "This asks for something to keep: write it as a document (create_document with every section first, then write_section for each), and answer in one short sentence.";
 
 fn create(args: &Value) -> Value {
     const CHIP: &str = "Couldn't start a document";
@@ -1217,6 +1285,56 @@ mod tests {
         let turn2 = Turn::new(&[DocRef { id, title: "Doc".into() }]);
         assert!(turn2.noticed("edit_note", id).is_some());
         assert_eq!(turn.touched(), [DocRef { id, title: "Doc".into() }]);
+    }
+
+    #[test]
+    fn something_to_keep_is_told_apart_from_a_quick_question() {
+        for q in [
+            "Make me a Divinity: Original Sin 2 lone wolf build for a ranger: gear, skills, talents and how to level it.",
+            "Plan a three-day trip to Lisbon for two of us in May, day by day, with where to eat and a rough budget.",
+            "Compare the Kindle Paperwhite, the Kobo Clara and the PocketBook Era for reading in bed: a table of the differences.",
+            "Write me a step-by-step guide to repotting a fiddle-leaf fig, with what I'll need.",
+            "Make me a packing list for a weekend of camping in the hills: clothes, kitchen, sleeping and extras.",
+            "Can you put together a meal plan for next week?",
+            "Give me a beginner's workout routine for three days a week",
+            "What's a good lone wolf build for a ranger in a fantasy game?",
+        ] {
+            assert!(asks_for_document(q), "{q}");
+        }
+        for q in [
+            "What time is it in Tokyo?",
+            "How many tablespoons are in a cup?",
+            "Give me three synonyms for happy.",
+            "What's the plan for tomorrow?",
+            "Is this a good build?",
+            "Add a head torch to the extras.",
+            "Make a note that I called Sam about the venue",
+            "Write a reply to Sam saying I'm running late",
+            "Give me a list of three synonyms for sad",
+            "plan",
+        ] {
+            assert!(!asks_for_document(q), "{q}");
+        }
+    }
+
+    #[test]
+    fn a_turn_knows_the_document_it_left_unfinished() {
+        let turn = Turn::new(&[]);
+        let made = execute("create_document", &json!({ "title": "Comparison", "sections": ["Table", "Pick"] }));
+        let id = made["data"]["id"].as_u64().unwrap();
+        turn.noticed("create_document", id);
+        execute("write_section", &json!({ "note_id": id, "key": "Table", "markdown": "| a | b |" }));
+        assert_eq!(turn.unfinished(), Some((id, "Comparison".into(), vec!["Pick".into()])));
+        let note = finish_note("Comparison", &["Pick".into()]);
+        assert!(note.contains("still has sections to write: \"Pick\". Call write_section for each now"), "{note}");
+        execute("write_section", &json!({ "note_id": id, "key": "Pick", "markdown": "B." }));
+        assert_eq!(turn.unfinished(), None);
+        // One only changed this turn (not made) isn't the turn's to finish.
+        let older = execute("create_document", &json!({ "title": "Older", "sections": ["A"] }));
+        let older = older["data"]["id"].as_u64().unwrap();
+        let turn = Turn::new(&[DocRef { id: older, title: "Older".into() }]);
+        turn.noticed("edit_note", older);
+        assert_eq!(turn.unfinished(), None);
     }
 
     #[test]

@@ -1,0 +1,16 @@
+{
+  "name": "documents-follow-up-edits",
+  "description": "Documents beside the chat: a question about the document made in this chat changes it (edit_note), and no second document is made.",
+  "tags": ["documents"],
+  "apps": "standard",
+  "turns": [
+    {
+      "user": "Make me a packing list for a weekend of camping in the hills: clothes, kitchen, sleeping and extras.",
+      "expect": { "document": { "made": true, "outline_first": true, "filled": true, "min_sections": 3 } }
+    },
+    {
+      "user": "Add a head torch to the extras.",
+      "expect": { "document": { "made": false }, "tools_called": [{ "name": ["edit_note", "update_note"] }], "max_words": 60 }
+    }
+  ]
+}

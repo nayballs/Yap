@@ -1,0 +1,12 @@
+{
+  "name": "documents-not-short-advice",
+  "description": "Documents beside the chat: a short everyday ask stays in the chat.",
+  "tags": ["documents"],
+  "apps": "standard",
+  "turns": [
+    {
+      "user": "Give me three synonyms for happy.",
+      "expect": { "document": { "made": false }, "tools_not_called": ["create_document", "write_section"] }
+    }
+  ]
+}

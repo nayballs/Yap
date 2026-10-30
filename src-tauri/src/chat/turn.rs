@@ -517,6 +517,12 @@ async fn answer_turn(
     if scope == Some("assistant") && tools_supported {
         context.push(crate::chat::documents::SPOKEN_NOTE.to_string());
     }
+    // Something to keep asked of a model on this PC: a document, it's told
+    // here too (the system prompt's rule alone, the 4B answered a guide and
+    // a trip plan in the chat).
+    if tools_supported && !meetings && crate::ai::ai_model::runs_here(&provider, &base_url) && crate::chat::documents::asks_for_document(&text) {
+        context.push(crate::chat::documents::ASKS_NOTE.to_string());
+    }
     let spoken = by_voice && (scope == Some("assistant") || cfg.speak_replies);
     if spoken && !(tools_supported && web_on) {
         if in_message {

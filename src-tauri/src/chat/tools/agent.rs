@@ -415,6 +415,8 @@ async fn tool_loop(
     let own: Vec<&str> = own.iter().map(String::as_str).collect();
 
     let mut rejected = 0u32;
+    // Times the model was asked to finish a document it made (documents.rs).
+    let mut finish_nudges = 0usize;
     for _step in 0..MAX_TOOL_STEPS {
         let forced = must_search;
         let mut req = crate::ai::llm::ChatRequest::chat(
@@ -511,6 +513,22 @@ async fn tool_loop(
             };
             if content.is_empty() {
                 return Err("The model returned an empty answer".to_string());
+            }
+            // A document this turn made still has sections to write
+            // (documents.rs): the model finishes it before it answers.
+            if let Some((_, title, left)) = extra.docs.and_then(crate::chat::documents::Turn::unfinished) {
+                if finish_nudges < crate::chat::documents::FINISH_NUDGES {
+                    finish_nudges += 1;
+                    tracing::info!(left = left.len(), "Chat: the document isn't finished; the model is asked to write the rest");
+                    crate::ai::eval::post_fix("finish_document");
+                    // What it wrote wasn't the answer yet.
+                    if let Some(live) = live {
+                        live.sink.send(crate::chat::stream::Event::Text { text: String::new() });
+                    }
+                    messages.push(json!({ "role": "assistant", "content": content }));
+                    messages.push(json!({ "role": "user", "content": crate::chat::documents::finish_note(&title, &left) }));
+                    continue;
+                }
             }
             return Ok((content, tools_used));
         }
@@ -1514,6 +1532,49 @@ mod tests {
         let versions = crate::notes::versions::list(1).unwrap();
         assert_eq!(versions.len(), 3);
         assert!(versions.iter().all(|v| v.version.kind == crate::notes::versions::kind::CHAT));
+    }
+
+    /// A model that answers with its document half written is asked to
+    /// finish it first (documents.rs `finish_note`), and its answer is the
+    /// one after.
+    #[tokio::test]
+    async fn a_document_left_half_written_is_finished_before_the_answer() {
+        let whole = |m: Value| Reply::Json(200, json!({ "choices": [{ "index": 0, "message": m, "finish_reason": "stop" }] }));
+        let calls = |name: &str, args: Value| {
+            whole(json!({ "role": "assistant", "content": null, "tool_calls": [{ "id": "c", "type": "function", "function": { "name": name, "arguments": args.to_string() } }] }))
+        };
+        let fake = fake_streamer(vec![
+            calls("create_document", json!({ "title": "E-readers", "sections": ["Table", "Pick"] })),
+            calls("write_section", json!({ "note_id": 1, "key": "Table", "markdown": "| Model | Light |\n|---|---|\n| A | warm |" })),
+            whole(json!({ "role": "assistant", "content": "Done! Get the A." })),
+            calls("write_section", json!({ "note_id": 1, "key": "Pick", "markdown": "Get the A." })),
+            whole(json!({ "role": "assistant", "content": "It's open on the right." })),
+        ]);
+        let docs = crate::chat::documents::Turn::new(&[]);
+        let (reply, _) = tool_loop(
+            "You are helpful.",
+            &[],
+            "Compare these e-readers",
+            &[],
+            &format!("{}/v1", fake.base),
+            "",
+            "fake-chat",
+            "custom",
+            false,
+            false,
+            &|_| {},
+            None,
+            FirstStep::Model,
+            Extra { docs: Some(&docs), ..Default::default() },
+            None,
+        )
+        .await
+        .expect("an answer");
+        assert_eq!(reply, "It's open on the right.");
+        assert!(crate::chat::documents::pending_keys(&crate::notes::get(1).unwrap().content).is_empty());
+        let requests = fake.requests.lock().unwrap().clone();
+        let told = requests[3].1["messages"].as_array().unwrap().last().unwrap()["content"].as_str().unwrap().to_string();
+        assert!(told.contains("The document \"E-readers\" still has sections to write: \"Pick\""), "{told}");
     }
 
     /// A must-search turn, streamed to `seen` (a model on this PC, the web
