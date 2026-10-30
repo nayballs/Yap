@@ -408,6 +408,13 @@ fn offer(app: &AppHandle, tip: Tip) {
     if crate::notices::notice::tips_off() {
         return;
     }
+    // Never over a meeting (the main window's toast doesn't wait one out,
+    // and a bar card would wait unseen and be dropped): not shown, not
+    // counted.
+    if crate::notices::notice::moment().meeting {
+        tracing::debug!(kind = ?tip.kind, "Mic tips: a meeting is recording; not now");
+        return;
+    }
     let rec = loaded(&mut RECORD.lock().unwrap_or_else(|p| p.into_inner())).clone();
     if !eligible(&rec, tip.kind, now) {
         tracing::debug!(kind = ?tip.kind, "Mic tips: not now");
