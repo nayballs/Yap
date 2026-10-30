@@ -212,17 +212,12 @@ fn path() -> std::path::PathBuf {
     crate::config::data_dir().join("skills.json")
 }
 
+/// skills.json as it loads (`saving::Saver::load`): set aside if it isn't
+/// Skills; one Yap couldn't read is never written over until it reads (read
+/// again in [`with_store`], the Skills made meanwhile kept).
 #[cfg(not(test))]
 fn load() -> SkillStore {
-    let path = path();
-    match std::fs::read_to_string(&path) {
-        Ok(s) => serde_json::from_str(&s).unwrap_or_else(|_| {
-            tracing::error!("skills.json failed to parse; set aside");
-            crate::config::quarantine_corrupt(&path);
-            SkillStore::default()
-        }),
-        Err(_) => SkillStore::default(),
-    }
+    SAVER.load(&path())
 }
 
 #[cfg(not(test))]
@@ -236,7 +231,11 @@ fn save(store: &SkillStore) {
 #[cfg(not(test))]
 fn with_store<R>(f: impl FnOnce(&mut SkillStore) -> R) -> R {
     let mut guard = STATE.lock().unwrap_or_else(|p| p.into_inner());
-    f(guard.get_or_insert_with(load))
+    let store = guard.get_or_insert_with(load);
+    if SAVER.any_unread() && SAVER.refresh(&path(), store) {
+        save(store);
+    }
+    f(store)
 }
 
 #[cfg(test)]

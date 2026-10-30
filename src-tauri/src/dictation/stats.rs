@@ -455,17 +455,10 @@ fn load() -> Store {
         return Store::default();
     }
     let path = path();
-    let mut store = match std::fs::read_to_string(&path) {
-        Ok(s) => match serde_json::from_str::<Store>(&s) {
-            Ok(store) => store,
-            Err(e) => {
-                tracing::error!("{FILE} failed to parse: {e}");
-                crate::config::quarantine_corrupt(&path);
-                Store::default()
-            }
-        },
-        Err(_) => Store::default(),
-    };
+    // Set aside if it isn't the stats; one Yap couldn't read leaves them
+    // empty here, never written over until it reads (`with_store`: what
+    // was counted meanwhile kept with it, the larger of each count).
+    let mut store: Store = SAVER.load(&path);
     let first = !path.is_file();
     let entries = crate::dictation::history::counted_since(store.counted_to);
     let dict = crate::config::load().dictionary;
@@ -486,8 +479,9 @@ fn save(store: &Store) {
 
 /// Write the stats again (Try again).
 fn save_now() -> Result<(), crate::shell::saving::SaveError> {
-    if let Some(store) = STORE.lock().unwrap_or_else(|p| p.into_inner()).as_ref() {
-        save(store);
+    let loaded = STORE.lock().unwrap_or_else(|p| p.into_inner()).is_some();
+    if loaded {
+        with_store(|s| save(s));
     }
     SAVER.check()
 }
@@ -495,6 +489,9 @@ fn save_now() -> Result<(), crate::shell::saving::SaveError> {
 fn with_store<R>(f: impl FnOnce(&mut Store) -> R) -> R {
     let mut guard = STORE.lock().unwrap_or_else(|p| p.into_inner());
     let store = guard.get_or_insert_with(load);
+    if !cfg!(test) && SAVER.any_unread() && SAVER.refresh(&path(), store) {
+        save(store);
+    }
     f(store)
 }
 

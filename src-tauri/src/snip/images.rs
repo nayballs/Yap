@@ -257,6 +257,11 @@ pub fn keep_days(setting: u32) -> u32 {
 
 /// [`sweep_in`] the images folder, against every conversation's images.
 pub fn sweep(keep_days: u32) -> usize {
+    // chats.json Yap couldn't read: no conversation names any of them yet,
+    // so nothing is swept until it reads.
+    if crate::chat::chats::unread() {
+        return 0;
+    }
     let keep_days = self::keep_days(keep_days);
     // A conversation's, or one still waiting in Chat's box (a snip left
     // unsent for over a day while Yap ran on: never swept from under it).

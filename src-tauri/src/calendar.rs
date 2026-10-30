@@ -190,16 +190,14 @@ fn store_path() -> std::path::PathBuf {
     crate::config::data_dir().join("calendar.json")
 }
 
+/// calendar.json as it loads (`saving::Saver::load`): a file that isn't the
+/// calendar is set aside; one Yap couldn't read leaves no calendars
+/// connected in memory, never written over until it reads ([`save_now`]
+/// reads it again: the background reads and Try again), and nothing can be
+/// connected meanwhile ([`UNREAD`]: a new connection would take a slot, and
+/// its secret, one in the file has).
 fn load_store() -> Store {
-    let path = store_path();
-    match std::fs::read_to_string(&path) {
-        Ok(s) => serde_json::from_str(&s).unwrap_or_else(|e| {
-            tracing::error!("calendar.json failed to parse: {e}");
-            crate::config::quarantine_corrupt(&path);
-            Store::default()
-        }),
-        Err(_) => Store::default(),
-    }
+    SAVER.load(&store_path())
 }
 
 /// calendar.json's saves (`saving.rs`): a failed one keeps the calendar in
@@ -215,13 +213,25 @@ pub fn saved() -> Result<(), crate::shell::saving::SaveError> {
 }
 
 /// Write the store again (Try again). Only once `init` loaded it: never an
-/// empty one over calendar.json.
+/// empty one over calendar.json. A file that couldn't be read is read again
+/// first, and once it reads its calendars and what changed meanwhile are
+/// kept together, and synced at once.
 fn save_now() -> Result<(), crate::shell::saving::SaveError> {
-    if let Some(s) = lock_started() {
+    if let Some(mut s) = lock_started() {
+        if SAVER.any_unread() && SAVER.refresh(&store_path(), &mut s.store) {
+            for b in s.store.briefs.values_mut() {
+                b.writing = false;
+            }
+            s.next_sync = now_secs();
+            wake();
+        }
         save_store(&s.store);
     }
     saved()
 }
+
+/// Connecting a calendar while calendar.json couldn't be read.
+const UNREAD: &str = "Yap couldn't read your calendar settings just now (another program may be using the file). Try again in a moment.";
 
 fn save_store(store: &Store) {
     let _ = SAVER.write_json(&store_path(), store, false);
@@ -969,6 +979,9 @@ fn open_link(app: &AppHandle, link: &str) -> Result<(), String> {
 /// `yap-calendar-error`).
 #[tauri::command]
 pub async fn calendar_connect_google(app: AppHandle) -> Result<(), String> {
+    if SAVER.any_unread() {
+        return Err(UNREAD.into());
+    }
     let client = google::client().ok_or(NO_GOOGLE)?;
     let sign_in = google::begin(&client)?;
     let attempt = {
@@ -1090,6 +1103,9 @@ async fn connect_google(
     let secret = serde_json::to_string(&GoogleSecret { refresh_token: refresh, client_id: client.id.clone(), scope: tokens.scope.clone() })
         .map_err(|e| e.to_string())?;
     let now = now_secs();
+    if SAVER.any_unread() {
+        return Err(UNREAD.into());
+    }
     let id = {
         let mut s = lock();
         // The same account again: it takes over its old slot.
@@ -1123,6 +1139,9 @@ async fn connect_google(
 #[tauri::command]
 pub async fn calendar_add_link(app: AppHandle, link: String, kind: Option<String>) -> Result<Value, String> {
     let link = normalize_link(&link)?;
+    if SAVER.any_unread() {
+        return Err(UNREAD.into());
+    }
     let kind = if kind.as_deref() == Some("outlook") { "outlook" } else { "ics" };
     let (id, already) = {
         let s = lock();

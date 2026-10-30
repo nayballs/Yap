@@ -661,20 +661,7 @@ fn store_path() -> std::path::PathBuf {
 /// write in one step) and return what `f` returns.
 pub fn with_call_fatigue<T>(f: impl FnOnce(Fatigue) -> (Fatigue, T)) -> T {
     let mut guard = STORE.lock().unwrap_or_else(|p| p.into_inner());
-    let store = guard.get_or_insert_with(|| {
-        if cfg!(test) {
-            return Store::default();
-        }
-        let path = store_path();
-        match std::fs::read_to_string(&path) {
-            Ok(text) => serde_json::from_str(&text).unwrap_or_else(|e| {
-                tracing::warn!("notices.json unreadable ({e}); starting afresh");
-                crate::config::quarantine_corrupt(&path);
-                Store::default()
-            }),
-            Err(_) => Store::default(),
-        }
-    });
+    let store = loaded(&mut guard);
     let (next, out) = f(store.calls.clone());
     if next != store.calls {
         store.calls = next;
@@ -691,10 +678,22 @@ pub static SAVER: crate::shell::saving::Saver = crate::shell::saving::Saver::new
 
 /// Write the counts again (Try again).
 fn save_now() -> Result<(), crate::shell::saving::SaveError> {
-    if let Some(store) = STORE.lock().unwrap_or_else(|p| p.into_inner()).as_ref() {
-        let _ = SAVER.write_json(&store_path(), store, true);
+    let mut guard = STORE.lock().unwrap_or_else(|p| p.into_inner());
+    if guard.is_some() {
+        let _ = SAVER.write_json(&store_path(), &*loaded(&mut guard), true);
     }
+    drop(guard);
     SAVER.check()
+}
+
+/// notices.json, read the first time (`saving::Saver::loaded`: set aside if
+/// it isn't the counts; one Yap couldn't read is never written over, and
+/// read again here until it reads). Unit tests never touch the data folder.
+fn loaded(slot: &mut Option<Store>) -> &mut Store {
+    if cfg!(test) {
+        return slot.get_or_insert_with(Store::default);
+    }
+    SAVER.loaded(slot, &store_path(), true)
 }
 
 // ---- test mode --------------------------------------------------------------------------------

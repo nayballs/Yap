@@ -291,7 +291,7 @@ One folder per area (an area's `<area>.rs` lists its modules); a big module's pa
 - Commands: each module's own, else its area's `commands.rs` (dictation, notes, chat, ai, meetings) (app-shell.md).
 - `shell/window.rs` / `settings.rs` / `autostart.rs` / `logging.rs` / `commands.rs` — the main window and onboarding (DWM-cloaked first show); config saved and applied; launch at sign-in; the log; links, portable.
 - `config.rs` — `YapConfig`, load/save (one at a time; `update` in one step; an unreadable file set aside, the person told), migrations, dictionary helpers (config-and-data.md).
-- `shell/saving.rs` — every JSON store's writes: a failed one keeps the data in memory, retried with the next save, said once ("Couldn't save your note: the disk is full." as a command's error with Try again, else one notice) (config-and-data.md).
+- `shell/saving.rs` — every JSON store's writes: a failed one keeps the data in memory, retried with the next save, said once ("Couldn't save your note: the disk is full." as a command's error with Try again, else one notice); and its reads: a file it couldn't read (held by another program…) is never written over, read again later and merged with what was added (`Saver::read`/`load`/`loaded`, `merge_json`) (config-and-data.md).
 - `shell/e2e.rs` / `shell/realtest.rs` — test mode, and robot mode's real pastes into the test's own windows.
 - `privacy/log_privacy.rs` — a test: no user content in the log at `info` and above (app-shell.md, Logging).
 
@@ -460,7 +460,8 @@ store writes atomically and quarantines a corrupt file instead of crashing —
 config.json too: set aside, never saved over, the person told; its saves one at a time
 (`config::update`; [config-and-data.md](./docs/architecture/config-and-data.md)). A write
 that fails (a full disk, a file another program holds) keeps the data in memory, is
-retried with the next save and is said once, with Try again (`shell/saving.rs`); temp files a
+retried with the next save and is said once, with Try again (`shell/saving.rs`); a store file
+Yap couldn't read is never written over, read again and merged (the same place); temp files a
 crash mid-write left are swept at start-up (Yap's own names only). Secrets
 never go in files: the account session and calendar tokens live in Windows Credential
 Manager. The local API's discovery file is `~/.yap/cli-bridge.json`.

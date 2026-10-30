@@ -50,23 +50,18 @@ fn now_secs() -> u64 {
         .unwrap_or(0)
 }
 
+/// The counts in `path` (`saving::Saver::load`): set aside if they aren't
+/// counts; a file Yap couldn't read is never written over until it reads.
+#[cfg(test)]
 fn load(path: &std::path::Path) -> Usage {
-    match std::fs::read_to_string(path) {
-        Ok(s) => match serde_json::from_str(&s) {
-            Ok(u) => u,
-            Err(e) => {
-                tracing::warn!("dictionary_usage.json unreadable: {}", e);
-                crate::config::quarantine_corrupt(path);
-                Usage::new()
-            }
-        },
-        Err(_) => Usage::new(),
-    }
+    SAVER.load(path)
 }
 
+/// Run `f` on the counts, read the first time (and read again while the
+/// file couldn't be: `saving::Saver::loaded`).
 fn with_store<R>(f: impl FnOnce(&mut Usage) -> R) -> Option<R> {
     let mut guard = STORE.lock().ok()?;
-    let store = guard.get_or_insert_with(|| load(&path()));
+    let store = SAVER.loaded(&mut guard, &path(), true);
     Some(f(store))
 }
 
@@ -141,9 +136,10 @@ pub static SAVER: crate::shell::saving::Saver = crate::shell::saving::Saver::new
 
 /// Write the counts again (Try again).
 fn save_now() -> Result<(), crate::shell::saving::SaveError> {
-    if let Ok(guard) = STORE.lock() {
-        if let Some(usage) = guard.as_ref() {
-            let _ = SAVER.write_json(&path(), usage, true);
+    if let Ok(mut guard) = STORE.lock() {
+        if guard.is_some() {
+            let usage = SAVER.loaded(&mut guard, &path(), true);
+            let _ = SAVER.write_json(&path(), &*usage, true);
         }
     }
     SAVER.check()

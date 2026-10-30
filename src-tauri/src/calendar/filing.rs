@@ -70,17 +70,12 @@ fn path() -> std::path::PathBuf {
     crate::config::data_dir().join("meeting_folders.json")
 }
 
+/// meeting_folders.json as it loads (`saving::Saver::load`): set aside if
+/// it isn't the rules; one Yap couldn't read is never written over until it
+/// reads (read again in [`with_rules`], the rules made meanwhile kept).
 #[cfg(not(test))]
 fn load() -> Rules {
-    let path = path();
-    match std::fs::read_to_string(&path) {
-        Ok(s) => serde_json::from_str(&s).unwrap_or_else(|_| {
-            tracing::error!("meeting_folders.json failed to parse; set aside");
-            crate::config::quarantine_corrupt(&path);
-            Rules::default()
-        }),
-        Err(_) => Rules::default(),
-    }
+    SAVER.load(&path())
 }
 
 #[cfg(not(test))]
@@ -94,7 +89,11 @@ fn save(rules: &Rules) {
 #[cfg(not(test))]
 fn with_rules<R>(f: impl FnOnce(&mut Rules) -> R) -> R {
     let mut guard = STATE.lock().unwrap_or_else(|p| p.into_inner());
-    f(guard.get_or_insert_with(load))
+    let rules = guard.get_or_insert_with(load);
+    if SAVER.any_unread() && SAVER.refresh(&path(), rules) {
+        save(rules);
+    }
+    f(rules)
 }
 
 #[cfg(test)]

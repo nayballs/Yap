@@ -319,7 +319,11 @@ shell waiting for it.
   `dictation/cap.rs`), `e2e_crash_next_dictation` (the
   next dictation panics in its paste step: `pipeline::Busy`), `e2e_fail_saves
   { store, count }` (a store's next saves fail as a full disk would:
-  `shell/saving.rs`), `e2e_upload_pace { ms }` (each Upload chunk held that long,
+  `shell/saving.rs`), `e2e_fail_reads { store, count }` and
+  `YAP_E2E_FAIL_READS` (a store's reads fail as another program holding its
+  file would, from launch with the variable; 0 clears them and reads every
+  such file again: config-and-data.md, "A file Yap couldn't read"),
+  `e2e_upload_pace { ms }` (each Upload chunk held that long,
   so the job is still going when a spec comes back), `YAP_MIC_WARM_MS` (the mic's
   warm window, short) and `YAP_E2E_MODEL_LOAD_MS` (the startup model load,
   slowed down), `e2e_learn_correction` (an

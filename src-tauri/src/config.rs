@@ -1714,7 +1714,7 @@ fn rename_patiently(from: &Path, to: &Path) -> std::io::Result<()> {
 
 /// Another program has the file open (Windows: access denied, a sharing or
 /// lock violation).
-fn held(e: &std::io::Error) -> bool {
+pub(crate) fn held(e: &std::io::Error) -> bool {
     e.kind() == std::io::ErrorKind::PermissionDenied || matches!(e.raw_os_error(), Some(32 | 33))
 }
 
@@ -1821,15 +1821,28 @@ pub fn sweep_temp_files() {
 
 /// Move an unparseable store file aside (`<name>.corrupt-<unix-secs>`) so it
 /// is NEVER overwritten by a fresh default — the data stays recoverable.
-pub(crate) fn quarantine_corrupt(path: &Path) {
+/// Whether it was (a store that couldn't set it aside must not write over
+/// it: `saving::Saver::read` treats it as a file it couldn't read).
+pub(crate) fn quarantine_corrupt(path: &Path) -> bool {
     match set_aside(path) {
-        Ok(backup) => tracing::error!(
-            "Unparseable store {:?} quarantined to {:?} — starting fresh, data preserved",
-            path,
-            backup
-        ),
-        Err(e) => tracing::error!("Failed to quarantine corrupt store {:?}: {}", path, e),
+        Ok(backup) => {
+            tracing::error!(
+                file = %file_name(path),
+                aside = %file_name(&backup),
+                "A store's file couldn't be read as one: set aside, starting fresh, the data kept"
+            );
+            true
+        }
+        Err(e) => {
+            tracing::error!(file = %file_name(path), kind = ?e.kind(), "A store's file couldn't be read as one, nor set aside ({e})");
+            false
+        }
     }
+}
+
+/// A path's file name, for the log (never the folder: the user's name).
+fn file_name(path: &Path) -> String {
+    path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default()
 }
 
 // ---- config.json: read, repaired, saved one at a time ------------------------
@@ -1915,7 +1928,7 @@ pub fn peek(dir: &Path) -> Option<YapConfig> {
 }
 
 /// `bytes` without the byte-order mark Notepad puts first.
-fn without_bom(bytes: &[u8]) -> &[u8] {
+pub(crate) fn without_bom(bytes: &[u8]) -> &[u8] {
     bytes.strip_prefix(b"\xEF\xBB\xBF").unwrap_or(bytes)
 }
 

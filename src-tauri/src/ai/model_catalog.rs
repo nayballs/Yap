@@ -223,28 +223,14 @@ fn path() -> std::path::PathBuf {
     crate::config::data_dir().join("model_catalog.json")
 }
 
-#[cfg(not(test))]
-fn load_file() -> Catalog {
-    let p = path();
-    match std::fs::read_to_string(&p) {
-        Ok(s) => match serde_json::from_str(&s) {
-            Ok(c) => c,
-            Err(e) => {
-                tracing::warn!("model_catalog.json unreadable: {}", e);
-                crate::config::quarantine_corrupt(&p);
-                Catalog::default()
-            }
-        },
-        Err(_) => Catalog::default(),
-    }
-}
-
-/// Run `f` on the store (loaded on first use). Unit tests get an empty one
+/// Run `f` on the store (loaded on first use, `saving::Saver::loaded`: set
+/// aside if it isn't the lists; a file Yap couldn't read is never written
+/// over, and read again here until it reads). Unit tests get an empty one
 /// per thread and never touch the disk.
 #[cfg(not(test))]
 fn with_store<R>(f: impl FnOnce(&mut Catalog) -> R) -> Option<R> {
     let mut guard = STORE.lock().ok()?;
-    let store = guard.get_or_insert_with(load_file);
+    let store = SAVER.loaded(&mut guard, &path(), true);
     Some(f(store))
 }
 

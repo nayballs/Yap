@@ -652,6 +652,8 @@ pub fn run() {
             #[cfg(debug_assertions)]
             shell::e2e::e2e_fail_saves,
             #[cfg(debug_assertions)]
+            shell::e2e::e2e_fail_reads,
+            #[cfg(debug_assertions)]
             shell::e2e::e2e_upload_pace,
             #[cfg(debug_assertions)]
             #[cfg(debug_assertions)]

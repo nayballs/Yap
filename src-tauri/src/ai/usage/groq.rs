@@ -92,19 +92,34 @@ fn usage_path() -> PathBuf {
     crate::config::data_dir().join("groq_usage.json")
 }
 
+/// groq_usage.json as it loads (`saving::Saver::load`: set aside if it
+/// isn't the counts; one Yap couldn't read is never written over until it
+/// reads, [`loaded`]). A unit test never touches the real one.
 fn load_from_disk() -> GroqUsage {
-    let path = usage_path();
-    match std::fs::read_to_string(&path) {
-        Ok(s) => serde_json::from_str(&s).unwrap_or_else(|_| {
-            // Set aside, never saved over (like every store; a unit test
-            // never moves the real one).
-            if !cfg!(test) {
-                crate::config::quarantine_corrupt(&path);
-            }
-            GroqUsage::default()
-        }),
-        Err(_) => GroqUsage::default(),
+    if cfg!(test) {
+        return GroqUsage::default();
     }
+    SAVER.load(&usage_path())
+}
+
+/// The counts, read the first time; while the file couldn't be read, read
+/// again and, once it reads, kept together with today's counts made
+/// meanwhile (the same day: the larger of each; another day: the later).
+fn loaded(slot: &mut Option<GroqUsage>) -> &mut GroqUsage {
+    let usage = slot.get_or_insert_with(load_from_disk);
+    if !cfg!(test) && SAVER.any_unread() {
+        if let Some(disk) = SAVER.reread::<GroqUsage>(&usage_path(), crate::shell::saving::json) {
+            let cap = usage.request_cap.max(disk.request_cap);
+            match disk.day.cmp(&usage.day) {
+                std::cmp::Ordering::Equal => crate::shell::saving::merge_json(usage, disk),
+                std::cmp::Ordering::Greater => *usage = disk,
+                std::cmp::Ordering::Less => {}
+            }
+            usage.request_cap = cap;
+            save_to_disk(usage);
+        }
+    }
+    usage
 }
 
 /// groq_usage.json's saves (`saving.rs`): a failed one keeps the counts in
@@ -113,9 +128,11 @@ pub static SAVER: crate::shell::saving::Saver = crate::shell::saving::Saver::new
 
 /// Write the counts again (Try again).
 fn save_now() -> Result<(), crate::shell::saving::SaveError> {
-    if let Some(usage) = STATE.lock().unwrap_or_else(|p| p.into_inner()).as_ref() {
-        save_to_disk(usage);
+    let mut guard = STATE.lock().unwrap_or_else(|p| p.into_inner());
+    if guard.is_some() {
+        save_to_disk(loaded(&mut guard));
     }
+    drop(guard);
     SAVER.check()
 }
 
@@ -158,7 +175,7 @@ fn to_json(u: &GroqUsage) -> Value {
 /// Groq's daily request cap, learnt from its answers, is kept.
 pub fn reset() {
     let mut guard = STATE.lock().unwrap_or_else(|p| p.into_inner());
-    let cap = guard.get_or_insert_with(load_from_disk).request_cap;
+    let cap = loaded(&mut guard).request_cap;
     let usage = GroqUsage { day: today(), request_cap: cap, ..GroqUsage::default() };
     if !cfg!(test) {
         match std::fs::remove_file(usage_path()) {
@@ -181,7 +198,7 @@ pub fn snapshot() -> Value {
         Ok(g) => g,
         Err(poisoned) => poisoned.into_inner(),
     };
-    let usage = guard.get_or_insert_with(load_from_disk);
+    let usage = loaded(&mut guard);
     roll_over(usage);
     to_json(usage)
 }
@@ -205,7 +222,7 @@ pub fn record(
             Ok(g) => g,
             Err(poisoned) => poisoned.into_inner(),
         };
-        let usage = guard.get_or_insert_with(load_from_disk);
+        let usage = loaded(&mut guard);
         roll_over(usage);
 
         // Per-provider bucket: what THIS provider did today.

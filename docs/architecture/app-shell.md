@@ -99,7 +99,16 @@ The full stack list, the app's entry and plumbing (`lib.rs`, the tray, context m
   write that fails keeps its data in memory, is retried with the next save
   and is said once, with Try again (`shell/saving.rs`; `saving::init` in setup,
   `saving::flush` in `shutdown_cleanup`); setup sweeps the temp files a
-  crash mid-write left (`config::sweep_temp_files`, its own thread).
+  crash mid-write left (`config::sweep_temp_files`, its own thread). Every
+  store **reads** through `saving.rs` too (`Saver::read` / `load` /
+  `loaded`, 2026-10-30): no file → empty; not the store's shape → set
+  aside; **a file Yap couldn't read** (another program holding it, Windows
+  refusing, a cloud file offline) → the store works in memory but never
+  writes over it, said once ("Yap couldn't read your notes", Try again), read
+  again in the background and on use, and once it reads, its contents and
+  what was added meanwhile kept together (`saving::merge_json`) —
+  [config-and-data.md](./config-and-data.md#a-file-yap-couldnt-read).
+  `saving::init` says a store that couldn't be read before the app was up.
 
 ## Modules
 

@@ -273,25 +273,25 @@ fn chats_path() -> PathBuf {
     crate::config::data_dir().join("chats.json")
 }
 
+/// chats.json as it loads (`saving::Saver::load`): a file that isn't chats
+/// is set aside; one Yap couldn't read leaves the chats empty in memory,
+/// never written over until it reads (read again in [`with_store`], the
+/// chats added meanwhile kept with it).
 #[cfg(not(test))]
 fn load_from_disk() -> Store {
-    let path = chats_path();
-    match std::fs::read_to_string(&path) {
-        Ok(s) => match serde_json::from_str(&s) {
-            Ok(store) => store,
-            Err(e) => {
-                tracing::error!("chats.json failed to parse: {}", e);
-                crate::config::quarantine_corrupt(&path);
-                Store::default()
-            }
-        },
-        Err(_) => Store::default(),
-    }
+    SAVER.load(&chats_path())
 }
 
 /// chats.json's saves (`saving.rs`): a failed one keeps the chats in
 /// memory, is tried again with the next save, and is said once.
-pub static SAVER: crate::shell::saving::Saver = crate::shell::saving::Saver::new("chats", "your chat", save_now);
+pub static SAVER: crate::shell::saving::Saver =
+    crate::shell::saving::Saver::new("chats", "your chat", save_now).reads_as("your chats");
+
+/// Whether chats.json couldn't be read (the screenshots no chat names wait
+/// to be swept until it reads).
+pub fn unread() -> bool {
+    SAVER.any_unread()
+}
 
 /// `Ok` when every chat is on disk; else why not (the caller says it).
 pub fn saved() -> Result<(), crate::shell::saving::SaveError> {
@@ -318,6 +318,9 @@ fn with_store<R>(f: impl FnOnce(&mut Store) -> R) -> R {
         Err(poisoned) => poisoned.into_inner(),
     };
     let store = guard.get_or_insert_with(load_from_disk);
+    if SAVER.any_unread() && SAVER.refresh(&chats_path(), store) {
+        save_to_disk(store);
+    }
     f(store)
 }
 
@@ -481,7 +484,7 @@ pub fn create_for_note(note: u64, title: &str) -> Conversation {
 
 fn create_with(title: &str, note: Option<u64>) -> Conversation {
     with_store(|s| {
-        let id = s.conversations.iter().map(|c| c.id).max().unwrap_or(0) + 1;
+        let id = SAVER.next_id(s.conversations.iter().map(|c| c.id).max().unwrap_or(0));
         let now = now_secs();
         let conv = Conversation {
             id,

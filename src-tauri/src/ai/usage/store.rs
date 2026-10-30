@@ -208,18 +208,11 @@ fn modified(path: &Path) -> Option<SystemTime> {
     std::fs::metadata(path).and_then(|m| m.modified()).ok()
 }
 
+/// The file (`saving::Saver::load`): set aside if it isn't the counts; one
+/// Yap couldn't read is never written over until it reads
+/// ([`write_pending`] reads it again, the counts kept pending meanwhile).
 fn read(path: &Path) -> Store {
-    match std::fs::read_to_string(path) {
-        Ok(text) => match serde_json::from_str::<Store>(&text) {
-            Ok(store) => store,
-            Err(_) => {
-                // Set aside, never written over (like every store).
-                crate::config::quarantine_corrupt(path);
-                Store::default()
-            }
-        },
-        Err(_) => Store::default(),
-    }
+    SAVER.load(path)
 }
 
 fn lock() -> std::sync::MutexGuard<'static, State> {
@@ -277,9 +270,19 @@ fn write_pending(always: bool) {
         }
         (s.base.clone(), s.pending.clone(), s.seen)
     };
-    // Another Yap wrote the file since: its counts are the base now.
-    let on_disk = modified(path);
-    let base = if on_disk != seen { read(path) } else { base };
+    let base = if SAVER.unread(path) {
+        // A file that couldn't be read: its counts are the base once it
+        // reads; till then nothing's written (the counts stay pending).
+        match SAVER.reread(path, crate::shell::saving::json) {
+            Some(disk) => disk,
+            None => return,
+        }
+    } else if modified(path) != seen {
+        // Another Yap wrote the file since: its counts are the base now.
+        read(path)
+    } else {
+        base
+    };
     let mut next = base;
     next.merge(&pending);
     next.trim(today());

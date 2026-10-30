@@ -585,7 +585,7 @@ pub fn task_add(app: tauri::AppHandle, text: String, note_id: Option<u64>) -> Re
     }
     let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0);
     let task = super::task_store::modify(|s| {
-        let id = s.tasks.iter().map(|t| t.id).max().unwrap_or(0) + 1;
+        let id = super::task_store::SAVER.next_id(s.tasks.iter().map(|t| t.id).max().unwrap_or(0));
         let task = OwnTask { id, text, done: false, note_id, created_ms: now, archived: false };
         s.tasks.push(task.clone());
         Ok((task, true))

@@ -314,6 +314,15 @@ fn queue(path: PathBuf, json: String, needs: PathBuf) {
 /// Write every waiting file; the ones that failed stay waiting.
 fn write_waiting(waiting: &mut std::collections::BTreeMap<PathBuf, Pending>) -> Result<(), crate::shell::saving::SaveError> {
     waiting.retain(|_, p| p.needs.exists());
+    // A cuts.json Yap couldn't read ([`cuts`]): read again, and once it
+    // reads, its places and the ones kept since written together.
+    for (path, p) in waiting.iter_mut().filter(|(path, _)| SAVER.unread(path)) {
+        if let Some(disk) = SAVER.reread::<Vec<Cut>>(path, crate::shell::saving::json) {
+            let mut mem: Vec<Cut> = serde_json::from_str(&p.json).unwrap_or_default();
+            crate::shell::saving::merge_json(&mut mem, disk);
+            p.json = serde_json::to_string_pretty(&mem).unwrap_or_default();
+        }
+    }
     let files: Vec<(PathBuf, String)> = waiting.iter().map(|(path, p)| (path.clone(), p.json.clone())).collect();
     let (failed, result) = SAVER.write_each(&files);
     let failed: BTreeSet<PathBuf> = failed.into_iter().map(|i| files[i].0.clone()).collect();
@@ -324,9 +333,16 @@ fn write_waiting(waiting: &mut std::collections::BTreeMap<PathBuf, Pending>) -> 
     result
 }
 
-/// Try again: every file that couldn't be saved.
+/// Try again: every file that couldn't be saved (a cuts.json Yap couldn't
+/// read read again first; one with nothing waiting is only read — [`cuts`]
+/// reads it afresh).
 fn save_unsaved() -> Result<(), crate::shell::saving::SaveError> {
-    write_waiting(&mut unsaved())?;
+    let mut waiting = unsaved();
+    for path in SAVER.unread_paths().into_iter().filter(|p| !waiting.contains_key(p)) {
+        let _ = SAVER.reread::<Vec<Cut>>(&path, crate::shell::saving::json);
+    }
+    write_waiting(&mut waiting)?;
+    drop(waiting);
     SAVER.check()
 }
 
@@ -353,12 +369,17 @@ fn cuts_path(note_id: u64) -> PathBuf {
     note_dir(note_id).join("cuts.json")
 }
 
-/// The lines deleted from note `note_id`'s meeting (its audio kept).
+/// The lines deleted from note `note_id`'s meeting (its audio kept): the
+/// ones waiting to be written, else the file (`saving::Saver::read`: set
+/// aside if it isn't cuts; one Yap couldn't read is never written over
+/// until it reads, [`write_waiting`]).
 pub fn cuts(note_id: u64) -> Vec<Cut> {
     let path = cuts_path(note_id);
     let waiting = unsaved().get(&path).map(|p| p.json.clone());
-    let json = waiting.or_else(|| std::fs::read_to_string(&path).ok());
-    json.and_then(|j| serde_json::from_str(&j).ok()).unwrap_or_default()
+    match waiting {
+        Some(json) => serde_json::from_str(&json).unwrap_or_default(),
+        None => SAVER.read(&path, crate::shell::saving::json).store(),
+    }
 }
 
 /// Keep (`on`) or forget a deleted line's place. Nothing to keep for a
@@ -727,8 +748,10 @@ fn recording_ids(note_id: u64) -> BTreeSet<u64> {
 fn kept_all() -> Vec<Kept> {
     let notes: BTreeSet<u64> = crate::notes::all().iter().map(|n| n.id).collect();
     // No notes at all (a store that couldn't be read is set aside, never
-    // lost): no audio counts as a deleted note's.
-    let known = |id: u64| notes.is_empty() || notes.contains(&id);
+    // lost), or notes.json Yap couldn't read (the notes in memory are only
+    // those made since): no audio counts as a deleted note's.
+    let unread = crate::notes::unread();
+    let known = |id: u64| unread || notes.is_empty() || notes.contains(&id);
     let mut out = Vec::new();
     for note_id in notes_with_audio() {
         for recording in recording_ids(note_id) {

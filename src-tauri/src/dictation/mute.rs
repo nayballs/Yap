@@ -261,7 +261,7 @@ pub fn after_start_chime(token: u64) {
     }
     s.quieted.extend(quieted);
     s.paused.extend(paused);
-    write_down(&s);
+    write_down(&mut s);
 }
 
 /// The dictation ended (stopped or cancelled): its token, for
@@ -359,27 +359,36 @@ fn leftovers_path() -> std::path::PathBuf {
     crate::config::data_dir().join("quieted_apps.json")
 }
 
+/// A crash's leftovers (`saving::Saver::load`: set aside if they aren't;
+/// a file Yap couldn't read is never written over nor deleted until it
+/// reads, [`write_down`]). A unit test never touches the real one.
 fn load_leftovers() -> Vec<Quieted> {
-    let path = leftovers_path();
-    let Ok(s) = std::fs::read_to_string(&path) else {
+    if cfg!(test) {
         return Vec::new();
-    };
-    serde_json::from_str(&s).unwrap_or_else(|_| {
-        // Set aside, never saved over (like every store; a unit test never
-        // moves the real one).
-        if !cfg!(test) {
-            crate::config::quarantine_corrupt(&path);
-        }
-        Vec::new()
-    })
+    }
+    SAVER.load(&leftovers_path())
 }
 
 /// Write what's down now, the leftovers and the live dictation's (the file
-/// goes once nothing is).
-fn write_down(s: &State) {
+/// goes once nothing is). A file that couldn't be read is read again first:
+/// its leftovers join these (brought back after the next dictation).
+fn write_down(s: &mut State) {
     let path = leftovers_path();
+    if !cfg!(test) && SAVER.any_unread() {
+        if let Some(disk) = SAVER.reread::<Vec<Quieted>>(&path, crate::shell::saving::json) {
+            for q in disk {
+                if !s.leftovers.contains(&q) && !s.quieted.contains(&q) {
+                    s.leftovers.push(q);
+                }
+            }
+        }
+    }
     let all: Vec<&Quieted> = s.leftovers.iter().chain(s.quieted.iter()).collect();
     if all.is_empty() {
+        // Never deleted while Yap couldn't read it.
+        if SAVER.unread(&path) {
+            return;
+        }
         let _ = std::fs::remove_file(path);
         // Nothing left to keep: nothing unsaved either.
         SAVER.nothing_to_save();
@@ -394,7 +403,7 @@ pub static SAVER: crate::shell::saving::Saver = crate::shell::saving::Saver::qui
 
 /// Write it again (Try again).
 fn save_now() -> Result<(), crate::shell::saving::SaveError> {
-    write_down(&state());
+    write_down(&mut state());
     SAVER.check()
 }
 
@@ -411,7 +420,7 @@ fn retry_leftovers(leftovers: Vec<Quieted>) {
     }
     let mut s = state();
     s.leftovers = left;
-    write_down(&s);
+    write_down(&mut s);
 }
 
 /// At start: what a crash left quiet comes back (off the main thread).
