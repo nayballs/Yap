@@ -133,7 +133,9 @@ The language-model side: the OpenAI-compatible client and its prompts, the on-de
   translate", but the one-shots are English: measured in docs/model-evals.md
   "My languages". A language shortcut that translates sends the dictation
   to `transform` instead, with `languages::translate_instruction`.
-  Records token/request usage (best-effort). Also carries
+  Records token/request usage (best-effort). `error_kind` (pure) gives a
+  failed call's error in a few words for the log at `warn` (its kind,
+  never its detail, which can quote the model's words). Also carries
   `EDIT_BASE_PROMPT` (edit/rewrite mode's guardrails; `rewrite_messages` /
   `rewrite_with_samples`),
   `TRANSFORM_BASE_PROMPT` + `transform_messages_with` / `transform` (**saved

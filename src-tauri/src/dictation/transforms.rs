@@ -671,7 +671,10 @@ pub fn run(app: &AppHandle, cfg: &YapConfig, t: &Transform, origin: Origin, stan
     let out = match asked {
         Ok(out) => clean_output(&out),
         Err(e) => {
-            tracing::warn!(transform = %kind_of(t), "Transform failed: {e}");
+            // Its kind at warn; the error itself (a server's can quote what
+            // the model wrote) at debug only.
+            tracing::warn!(transform = %kind_of(t), error = %crate::ai::llm::error_kind(&e), "Transform failed");
+            tracing::debug!("Transform failed: {e}");
             failed(app, format!("{name} failed via {} — check its key in Language Models", m.provider));
             return r.ended("failed", Some(e));
         }

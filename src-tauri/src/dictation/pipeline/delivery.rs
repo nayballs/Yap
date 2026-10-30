@@ -386,7 +386,10 @@ impl Shared {
                         (c, plan.written_style(), false)
                     }
                     Err(e) => {
-                        tracing::warn!("AI cleanup failed, using raw: {}", e);
+                        // Its kind at warn; the error itself (a server's can
+                        // quote what the model wrote) at debug only.
+                        tracing::warn!(error = %crate::ai::llm::error_kind(&e), "AI cleanup failed, using raw");
+                        tracing::debug!("AI cleanup failed: {e}");
                         (raw.to_string(), None, false)
                     }
                 }

@@ -49,7 +49,11 @@ the command and snippets;
 key). Cleanup is
 best-effort — any error/timeout falls back to the raw transcript, so dictation
 never blocks; so does an answer that left out most of what was said
-(`cleanup_styles::lost_the_dictation`, ai-models.md). It keeps the person's **English spelling** ("Write in my
+(`cleanup_styles::lost_the_dictation`, ai-models.md). The log says its
+kind at `warn` (`llm::error_kind`: timed out, HTTP 500, parse failed…)
+and the error itself only at `debug`: a server's can quote what the model
+wrote (llama.cpp's "Failed to parse input at pos N: …"); a rewrite's and a
+transform's alike (2026-10-30). It keeps the person's **English spelling** ("Write in my
 region's spelling", on, Settings → Language Models → Dictation Cleanup;
 the region is About you's; 2026-10-21): a UK user's
 "color" comes out "colour", a US user's "colour" "color" — one line in

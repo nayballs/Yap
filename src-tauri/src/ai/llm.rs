@@ -1286,6 +1286,46 @@ pub(crate) const CONTEXT_EXCEEDED: &str = "The request is longer than the model'
 /// the limit.
 pub(crate) const TOO_MUCH_A_MINUTE: &str = "The request is more than the plan sends in a minute: ";
 
+/// A call's error in a few words for the log at `warn`: its kind (timed
+/// out, HTTP 500, parse failed…), never its detail. A server's answer can
+/// quote what the model wrote — llama.cpp's "Failed to parse input at pos
+/// 47: …" is the cleaned dictation itself — so the whole error goes to
+/// `debug` only. Pure.
+pub(crate) fn error_kind(error: &str) -> String {
+    let e = error.trim();
+    let lower = e.to_ascii_lowercase();
+    if let Some(rest) = e.strip_prefix("HTTP ") {
+        let status: String = rest.chars().take_while(char::is_ascii_digit).collect();
+        if !status.is_empty() {
+            return format!("HTTP {status}");
+        }
+    }
+    let kind = if e.starts_with(TOOL_CALL_REJECTED) {
+        "the model's tool call refused"
+    } else if e.starts_with(CONTEXT_EXCEEDED) {
+        "too long for the model's context"
+    } else if e.starts_with(TOO_MUCH_A_MINUTE) {
+        "more than the plan's tokens a minute"
+    } else if lower.contains("is limiting how much yap can ask") {
+        "rate limited"
+    } else if lower.contains("timed out") || lower.contains("timeout") {
+        "timed out"
+    } else if lower.starts_with("request failed") || lower.starts_with("the connection dropped") {
+        "request failed"
+    } else if lower.starts_with("failed to parse") {
+        "parse failed"
+    } else if lower.starts_with("response missing") || lower.contains("empty answer") {
+        "no answer"
+    } else if lower.starts_with("the answer left out") {
+        "the answer lost the dictation"
+    } else if lower.starts_with("the provider sent an error") || lower.starts_with("it ended early") {
+        "the stream broke off"
+    } else {
+        "other"
+    };
+    kind.to_string()
+}
+
 /// Is a provider's refusal "too long for the model's context"? Each says it
 /// its own way:
 /// - llama.cpp (the on-device model, self-hosted ones):
@@ -2197,6 +2237,35 @@ mod tests {
         let e = format!("{TOOL_CALL_REJECTED}{why}");
         assert_eq!(rejected_tool_call(&e), Some(why.as_str()));
         assert_eq!(rejected_tool_call("HTTP 400: nope"), None);
+    }
+
+    /// The log's `warn` line for a failed call (review 2026-10-30): a
+    /// cleanup llama.cpp couldn't parse quoted the cleaned dictation in its
+    /// error, and "AI cleanup failed, using raw: {e}" logged it.
+    #[test]
+    fn a_failed_call_is_logged_by_its_kind_never_its_detail() {
+        let said = "Send the invoice to Priya by Friday";
+        let llama = format!(r#"{{"error":{{"code":500,"message":"Failed to parse input at pos 12: {said}","type":"server_error"}}}}"#);
+        let rejected = format!("{TOOL_CALL_REJECTED}{}", tool_call_rejection(500, &llama).unwrap());
+        assert!(rejected.contains(said), "the error itself carries the model's words");
+        for (error, kind) in [
+            (rejected.clone(), "the model's tool call refused"),
+            (format!("HTTP 500: {llama}"), "HTTP 500"),
+            (r#"HTTP 401: {"error":{"message":"Invalid API Key"}}"#.to_string(), "HTTP 401"),
+            ("request failed: error sending request: operation timed out".to_string(), "timed out"),
+            ("request failed: error sending request: connection refused".to_string(), "request failed"),
+            (format!("failed to parse response: expected value at line 1 ({said})"), "parse failed"),
+            ("response missing choices[0].message.content".to_string(), "no answer"),
+            ("the answer left out most of the dictation (4 chars back)".to_string(), "the answer lost the dictation"),
+            (format!("{CONTEXT_EXCEEDED} (HTTP 400)"), "too long for the model's context"),
+            (rate_limited_error("groq", None), "rate limited"),
+            (format!("the provider sent an error mid-way: {said}"), "the stream broke off"),
+            (said.to_string(), "other"),
+        ] {
+            let k = error_kind(&error);
+            assert_eq!(k, kind, "{error}");
+            assert!(!k.contains("Priya"), "{k}");
+        }
     }
 
     #[test]

@@ -341,7 +341,10 @@ impl Shared {
             Err(e) => {
                 // Don't fall back to typing the raw instruction — that would paste
                 // "make this a list" into the doc. Surface an error instead.
-                tracing::warn!("Rewrite failed: {}", e);
+                // Its kind at warn; the error itself (a server's can quote
+                // what the model wrote) at debug only.
+                tracing::warn!(error = %crate::ai::llm::error_kind(&e), "Rewrite failed");
+                tracing::debug!("Rewrite failed: {e}");
                 report_rewrite(last.is_some(), "", "failed", Some(e.clone()));
                 let _ = self.app.emit(
                     DICTATION_ERROR,

@@ -199,7 +199,10 @@ pub async fn note_transform(
     let out = match asked {
         Ok(out) => transforms::clean_output(&out),
         Err(e) => {
-            tracing::warn!(transform = kind_of(&t), "A transform in a note failed: {e}");
+            // Its kind at warn; the error itself (a server's can quote what
+            // the model wrote) at debug only.
+            tracing::warn!(transform = kind_of(&t), error = %crate::ai::llm::error_kind(&e), "A transform in a note failed");
+            tracing::debug!("A transform in a note failed: {e}");
             return Err(format!("{name} didn't work: {e}"));
         }
     };
