@@ -1174,6 +1174,20 @@ mod tests {
     }
 
     #[test]
+    fn a_one_word_term_heard_as_two_is_still_fixed() {
+        // The rule above refused this too ("base" is an everyday word, the
+        // term doesn't end with a word near it): a one-word term is fixed
+        // when it ends with that very word.
+        let s = screen("Built on Supabase. Members: Priyanka Raman");
+        let keep = |_: &str| false;
+        assert_eq!(s.correct("Store it in Suppa base tonight.", &keep, &words), "Store it in Supabase tonight.");
+        // A first name cut short before an everyday word: still as said.
+        let s = screen("Built on Supabase. Members: Priyanka");
+        assert_eq!(s.correct("Priyan can you check?", &keep, &words), "Priyan can you check?");
+        assert_eq!(s.correct("Priyanka can you check the build?", &keep, &words), "Priyanka can you check the build?");
+    }
+
+    #[test]
     fn an_email_keeps_its_lines() {
         // The robot's Gmail page (2026-10-24): any term on screen and an
         // email's greeting lost its own line ("Hi Sam, Thank you…").

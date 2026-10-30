@@ -195,11 +195,13 @@ fn first_word_adds_nothing(run: &[&str], replacement: &str, dist: usize, candida
 
 /// Preserves the case pattern of the original word when applying a replacement
 /// (all-caps stays all-caps, leading capital stays capitalized; a canonical
-/// mixed-case replacement like "JSON" is never down-cased).
+/// mixed-case replacement like "JSON" is never down-cased). A lone capital
+/// ("I phone", "X code") isn't all-caps, and a replacement with capitals
+/// of its own ("iPhone", "eBay") keeps them as written.
 fn preserve_case_pattern(original: &str, replacement: &str) -> String {
-    if original.chars().all(|c| c.is_uppercase()) {
+    if original.chars().count() > 1 && original.chars().all(|c| c.is_uppercase()) {
         replacement.to_uppercase()
-    } else if original.chars().next().is_some_and(|c| c.is_uppercase()) {
+    } else if original.chars().next().is_some_and(|c| c.is_uppercase()) && !replacement.chars().any(char::is_uppercase) {
         let mut chars: Vec<char> = replacement.chars().collect();
         if let Some(first) = chars.get_mut(0) {
             *first = first.to_uppercase().next().unwrap_or(*first);
@@ -273,11 +275,17 @@ pub fn apply_screen(
         }
         // A run ending with an everyday word the name doesn't end with
         // ("Priyanka can" with "Priyanka Raman" on screen, in "Priyanka can
-        // you check?"): the word was said, not the name (2026-10-29).
+        // you check?"): the word was said, not the name (2026-10-29). A
+        // one-word term heard as two ("Suppa base" for Supabase) only when
+        // the term ends with that very word, of three letters or more.
         if let [_, .., last] = run {
             let last = build_ngram(std::slice::from_ref(last));
-            let name_last = replacement.split_whitespace().last().map(letters_key).unwrap_or_default();
-            if is_word(&last) && levenshtein(&last, &name_last) > 1 {
+            let name: Vec<&str> = replacement.split_whitespace().collect();
+            let theirs = match name.as_slice() {
+                [one] => last.chars().count() >= 3 && letters_key(one).ends_with(&last),
+                _ => name.last().is_some_and(|w| levenshtein(&last, &letters_key(w)) <= 1),
+            };
+            if is_word(&last) && !theirs {
                 return false;
             }
         }
@@ -694,6 +702,21 @@ mod tests {
     fn ngram_preserves_case() {
         let dict = vec![entry("", "ChargeBee")];
         assert!(apply_fuzzy("CHARGE B is great", &dict).contains("CHARGEBEE"));
+    }
+
+    #[test]
+    fn a_lone_capital_or_a_sentences_first_letter_keeps_a_terms_own_case() {
+        let dict = vec![entry("", "iPhone"), entry("", "eBay"), entry("", "kubectl")];
+        // "I" alone isn't a word in capitals: "my IPHONE died" before.
+        assert_eq!(apply_fuzzy("my I phone died", &dict), "my iPhone died");
+        // A sentence's first letter: the term's own capitals stay as written
+        // ("IPhone", "EBay" before).
+        assert_eq!(apply_fuzzy("Iphone is fine", &dict), "iPhone is fine");
+        assert_eq!(apply_fuzzy("E bay sold it", &dict), "eBay sold it");
+        // A term in lower case still starts a sentence with a capital, and
+        // a word shouted in capitals stays so.
+        assert_eq!(apply_fuzzy("Kube ctl works", &dict), "Kubectl works");
+        assert_eq!(apply_fuzzy("CHARGE B is great", &[entry("", "ChargeBee")]), "CHARGEBEE is great");
     }
 
     #[test]
