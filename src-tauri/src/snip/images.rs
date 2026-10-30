@@ -258,7 +258,10 @@ pub fn keep_days(setting: u32) -> u32 {
 /// [`sweep_in`] the images folder, against every conversation's images.
 pub fn sweep(keep_days: u32) -> usize {
     let keep_days = self::keep_days(keep_days);
-    let referenced = crate::chat::chats::image_ids();
+    // A conversation's, or one still waiting in Chat's box (a snip left
+    // unsent for over a day while Yap ran on: never swept from under it).
+    let mut referenced = crate::chat::chats::image_ids();
+    referenced.extend(super::waiting::now().images.into_iter().map(|i| i.id));
     let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
     let gone = sweep_in(&dir(), &referenced, keep_days, now);
     if gone > 0 {
