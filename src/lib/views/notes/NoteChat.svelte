@@ -71,15 +71,22 @@
     try {
       const [answer, model] = await Promise.all([invoke('note_ask', { id, question: q, history, conversationId }), nextModel('chat')]);
       const reply = { role: 'assistant', text: answer, model, id: notes.turnId() };
-      notes.chatThread = [...notes.chatThread, reply];
-      // Kept with the note (chat/note_chats.rs): here and in the notepad next time.
-      await notes.keepChat(id, [{ role: 'user', text: q }, reply]);
+      // Shown only on the note it was asked of: another note may be open now.
+      if (notes.selected?.id === id) notes.chatThread = [...notes.chatThread, reply];
+      // Kept with that note, in the thread it was asked in (chat/note_chats.rs):
+      // here and in the notepad next time.
+      await notes.keepChat(id, [{ role: 'user', text: q }, reply], conversationId);
     } catch (e) {
-      notes.chatThread = notes.chatThread.slice(0, -1);
-      notes.chatInput = q; // give the question back
+      if (notes.selected?.id === id) {
+        notes.chatThread = notes.chatThread.slice(0, -1);
+        notes.chatInput = q; // give the question back
+      }
       toast({ title: "Couldn't answer", description: String(e), variant: 'destructive' });
     } finally {
       notes.asking = false;
+      // Another note opened while this was answered: its own thread, which
+      // waited for the answer (`loadChat` never loads under a question).
+      if (notes.selected && notes.selected.id !== id) notes.loadChat(notes.selected.id);
     }
   }
 

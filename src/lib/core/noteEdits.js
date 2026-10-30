@@ -26,10 +26,12 @@ export const SUMMARY_KEPT = "Your edited summary was kept: Yap didn't write over
 /**
  * Save line `i`'s new words. Resolves to `{ index, line, changed }` (the
  * line as stored); a dictionary offer, when the edit fixed a misheard word,
- * shows as this window's toast. Throws with Rust's reason.
+ * shows as this window's toast. Throws with Rust's reason. `ref`: the line
+ * as it was when its editing began (`lineRef`) — lines split or deleted
+ * before it meanwhile move it, and its place now is another line's.
  */
-export async function editLine(noteId, transcript, i, text, origin) {
-  const r = await invoke('transcript_line_edit', { noteId, line: lineRef(transcript, i), text, origin });
+export async function editLine(noteId, transcript, i, text, origin, ref = null) {
+  const r = await invoke('transcript_line_edit', { noteId, line: ref ?? lineRef(transcript, i), text, origin });
   if (r?.offer) askWordSuggestion(r.offer);
   return r;
 }

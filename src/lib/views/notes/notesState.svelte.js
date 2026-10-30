@@ -423,12 +423,24 @@ export function createNotesState() {
 
   async function newNote() {
     flushSave();
+    // The note open now lets go of its summary editor and its line being
+    // edited first, as `select` does: a save still due would read
+    // `selected` once it's the new note (and wrote the old summary there).
+    finishSummaryEdit();
+    editingLine = null;
     try {
       const note = await invoke('note_create', { folder: activeFolder });
       await refreshList();
       selected = note;
       tab = 'raw';
+      transcriptView = 'live';
+      showEcho = false;
       error = null;
+      // A new note has no Ask thread: never the last note's.
+      chatThread = [];
+      chatConvId = null;
+      chatThreads = [];
+      chatInput = '';
     } catch (e) {
       if (!showSaveError(e)) {
         error = String(e);
@@ -544,13 +556,20 @@ export function createNotesState() {
     if (saveTimer === null) return; // nothing typed since the last save
     clearTimeout(saveTimer);
     saveTimer = null;
-    if (!selected) return;
-    const args = { id: selected.id, origin: LABEL };
-    if (dirty.title) args.title = selected.title;
-    if (dirty.content) args.content = selected.content;
-    if (dirty.content && dictated) args.how = 'dictated';
+    const typed = dirty;
+    const how = dictated ? 'dictated' : null;
+    // Never left set for the next note (this one deleted meanwhile).
     dirty = { title: false, content: false };
     dictated = false;
+    if (!selected) return;
+    const args = { id: selected.id, origin: LABEL };
+    if (typed.title) args.title = selected.title;
+    if (typed.content) args.content = selected.content;
+    if (typed.content && how) args.how = how;
+    // A reload already out reads the note from before this save: it keeps
+    // these fields as typed (`changing`), not the older words it brings.
+    if (typed.title) changing('title');
+    if (typed.content) changing('content');
     // A failed save keeps the edit in memory and says so, with Try again.
     invoke('note_update', args)
       .then(refreshList)
@@ -1033,10 +1052,11 @@ export function createNotesState() {
       /* none kept */
     }
   }
-  /** Keep a turn as shown in the note's thread. */
-  async function keepChat(id, messages) {
+  /** Keep a turn as shown in note `id`'s thread (`conversation`: the one it
+   *  was asked in, when another note may be open by now). */
+  async function keepChat(id, messages, conversation = chatConvId) {
     try {
-      const conv = await keepTurn(id, chatConvId, messages.map(keptMessage), LABEL);
+      const conv = await keepTurn(id, conversation, messages.map(keptMessage), LABEL);
       if (selected?.id !== id) return;
       chatConvId = conv;
       chatThreads = (await loadNoteChat(id)).threads || chatThreads;
