@@ -377,25 +377,82 @@ pub fn place_for(focused: bool, visible: bool, bar: bool, notification: bool) ->
     }
 }
 
-/// A test run's stand-in for "the main window has the focus" (a test run
-/// never focuses windows): 0 = while it's on screen (the default: the person
-/// is looking at Yap), 1 = never (they're in another app).
-static TEST_FOCUS: AtomicU8 = AtomicU8::new(0);
+/// A test run's stand-in for where the person is (a test run never focuses
+/// windows): [`FOCUS_YAP`] (the default: looking at Yap's window while it's
+/// on screen), [`FOCUS_AWAY`] (in another app, Yap's window behind it) or
+/// [`FOCUS_BESIDE`] (in another app, Yap's window on screen beside it).
+static TEST_FOCUS: AtomicU8 = AtomicU8::new(FOCUS_YAP);
+const FOCUS_YAP: u8 = 0;
+const FOCUS_AWAY: u8 = 1;
+const FOCUS_BESIDE: u8 = 2;
 
-/// The main window: (on screen, focused). Window getters wait on the main
-/// thread: never call this with a lock held.
+/// How much of the main window must be uncovered to count as seen beside
+/// the app in front ([`Seen::Beside`]).
+const SEEN_SHARE: f64 = 0.5;
+
+/// How the person sees Yap's main window now ([`window_seen`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Seen {
+    /// Hidden, minimised, or mostly behind other windows.
+    No,
+    /// On screen and mostly uncovered while another app is in front: on
+    /// another monitor, or beside it.
+    Beside,
+    /// The window in front: the person is in it.
+    Front,
+}
+
+/// Is `w` the window in front (a test run: as `e2e_focus` says, while it's
+/// on screen)? Window getters: never with a lock held.
+fn in_front(w: &tauri::WebviewWindow) -> bool {
+    if crate::shell::e2e::active() {
+        TEST_FOCUS.load(Ordering::SeqCst) == FOCUS_YAP
+    } else {
+        crate::shell::window::in_front(w)
+    }
+}
+
+fn on_screen(w: &tauri::WebviewWindow) -> bool {
+    w.is_visible().unwrap_or(false) && !w.is_minimized().unwrap_or(false)
+}
+
+/// The main window: (on screen, focused) — focused meaning it's the window
+/// in front (`shell::window::in_front`: Windows' foreground window, not the
+/// webview's keyboard focus). Window getters wait on the main thread: never
+/// call this with a lock held.
 pub fn window_view(app: &AppHandle) -> (bool, bool) {
     app.get_webview_window("settings")
         .map(|w| {
-            let visible = w.is_visible().unwrap_or(false) && !w.is_minimized().unwrap_or(false);
-            let focused = if crate::shell::e2e::active() {
-                TEST_FOCUS.load(Ordering::SeqCst) == 0
-            } else {
-                w.is_focused().unwrap_or(false)
-            };
-            (visible, visible && focused)
+            let visible = on_screen(&w);
+            (visible, visible && in_front(&w))
         })
         .unwrap_or((false, false))
+}
+
+/// How the main window is seen now: in front, on screen beside the app in
+/// front (at least half of it uncovered: `shell::window::in_view`), or not
+/// at all (hidden, minimised, behind other windows). What the Voice
+/// Assistant asks before it puts its answer on the Yap bar. Window getters:
+/// never with a lock held.
+pub fn window_seen(app: &AppHandle) -> Seen {
+    let Some(w) = app.get_webview_window("settings") else { return Seen::No };
+    if !on_screen(&w) {
+        return Seen::No;
+    }
+    if crate::shell::e2e::active() {
+        return match TEST_FOCUS.load(Ordering::SeqCst) {
+            FOCUS_YAP => Seen::Front,
+            FOCUS_BESIDE => Seen::Beside,
+            _ => Seen::No,
+        };
+    }
+    if crate::shell::window::in_front(&w) {
+        Seen::Front
+    } else if crate::shell::window::in_view(&w) >= SEEN_SHARE {
+        Seen::Beside
+    } else {
+        Seen::No
+    }
 }
 
 /// A Yap window has the focus: the main window or the meeting notepad (a
@@ -406,15 +463,7 @@ pub fn yap_in_front(app: &AppHandle) -> bool {
     if window_view(app).1 {
         return true;
     }
-    app.get_webview_window("notepad").is_some_and(|w| {
-        let visible = w.is_visible().unwrap_or(false) && !w.is_minimized().unwrap_or(false);
-        let focused = if crate::shell::e2e::active() {
-            TEST_FOCUS.load(Ordering::SeqCst) == 0
-        } else {
-            w.is_focused().unwrap_or(false)
-        };
-        visible && focused
-    })
+    app.get_webview_window("notepad").is_some_and(|w| on_screen(&w) && in_front(&w))
 }
 
 /// Whether Yap may post Windows notifications at all (not portable, not a
@@ -721,20 +770,26 @@ pub fn e2e_notice_reset() -> Result<(), String> {
     *LEDGER.lock().unwrap_or_else(|p| p.into_inner()) = None;
     with_call_fatigue(|_| (Fatigue::default(), ()));
     crate::notices::kinds::e2e_reset();
-    TEST_FOCUS.store(0, Ordering::SeqCst);
+    TEST_FOCUS.store(FOCUS_YAP, Ordering::SeqCst);
     Ok(())
 }
 
 /// Test mode only: whether the person counts as looking at the main window
 /// while it's on screen (`focused`, the default) or as being in another app
-/// (`false`: notices go to the Yap bar).
+/// (`false`: notices go to the Yap bar) — with Yap's window behind it, or
+/// (`beside`) on screen beside it, uncovered ([`window_seen`]).
 #[cfg(debug_assertions)]
 #[tauri::command]
-pub fn e2e_focus(app: AppHandle, focused: bool) -> Result<(), String> {
+pub fn e2e_focus(app: AppHandle, focused: bool, beside: Option<bool>) -> Result<(), String> {
     if !crate::shell::e2e::active() {
         return Err("Only in e2e test mode".to_string());
     }
-    TEST_FOCUS.store(if focused { 0 } else { 1 }, Ordering::SeqCst);
+    let to = match (focused, beside.unwrap_or(false)) {
+        (true, _) => FOCUS_YAP,
+        (false, true) => FOCUS_BESIDE,
+        (false, false) => FOCUS_AWAY,
+    };
+    TEST_FOCUS.store(to, Ordering::SeqCst);
     // As the real focus change does: a call prompt moves into the window,
     // and the calendar looks again at once (its card follows you either
     // way).
