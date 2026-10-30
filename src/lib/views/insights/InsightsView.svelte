@@ -48,10 +48,9 @@
         refresh();
       }, 60);
     };
-    const uns = [];
-    listen('yap-stats-changed', soon).then((u) => uns.push(u));
-    listen('yap-history-changed', soon).then((u) => uns.push(u));
-    return () => uns.forEach((u) => u && u());
+    // (Kept as promises: one still registering when the view goes is let go too.)
+    const uns = [listen('yap-stats-changed', soon), listen('yap-history-changed', soon)];
+    return () => uns.forEach((u) => u.then((f) => f()).catch(() => {}));
   });
 
   function fmtNum(n) {
