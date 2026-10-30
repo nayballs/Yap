@@ -627,7 +627,10 @@ Putting a dictation into the app you're in: the clipboard paste and the submit k
   the focus in another app, a timeout). Test mode never reads; robot mode
   only the test's windows. **The exact text box** (2026-10-29; Wispr
   Flow's element-level refocus, by behaviour): `keep_focus(target)` (from
-  `capture_target`, for a dictation that's pasted — a rewrite too) starts
+  `capture_target`, for a dictation that's pasted — not edit mode's rewrite
+  since 30 Oct: in a web editor the focus put back after a click on the
+  page put the caret at the editor's start and the rewrite went in beside
+  the words it should replace, robot-tested) starts
   a "focus-keeper" thread holding UI Automation's element with the focus
   in the target's process (one look; COM objects stay on their thread;
   the previous dictation's goes) and whether it takes text (`editable`).

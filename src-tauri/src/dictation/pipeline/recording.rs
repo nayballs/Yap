@@ -710,7 +710,12 @@ impl Shared {
         crate::pasting::selection::begin_dictation((hwnd != 0).then_some(hwnd), smart);
         // The text box itself, for a paste: if the focus wanders off it
         // within the window, the paste puts it back (`selection::keep_focus`).
-        crate::pasting::selection::keep_focus((hwnd != 0 && goes == Goes::Paste).then_some(hwnd));
+        // Not for edit mode's rewrite: in a web editor, the focus put back
+        // after a click on the page brings the caret back at the editor's
+        // start, not the selection, and the rewrite went in there beside the
+        // words it should replace (robot-tested, 30 Oct). Left alone, a
+        // rewrite whose selection was clicked away from is copied instead.
+        crate::pasting::selection::keep_focus((hwnd != 0 && goes == Goes::Paste && !edit).then_some(hwnd));
         // "Spell names the way they're written on screen": the window's
         // visible text, read in the background for its names
         // (`screen_terms.rs`) — for a dictation that's pasted, not a rewrite.
