@@ -230,12 +230,16 @@ pub fn plan(note_id: u64) -> Option<Plan> {
 /// however it ends. `false`: it couldn't start (and nothing follows).
 pub fn start(app: &AppHandle, note_id: u64, plan: &Plan, origin: Option<String>) -> bool {
     let (first, reason) = (plan.first, plan.reason);
+    // Which note (`notes::still_the_note`): deleted meanwhile (the refine is
+    // cancelled then) and its id given to a new note, the end-of-meeting
+    // steps never run on that one ("Started by mistake?" with Discard).
+    let created = crate::notes::get(note_id).map(|n| n.created_ts);
     let started = crate::meetings::meeting_audio::start_refine(app, note_id, &plan.model, first, move |app, result| {
         tracing::info!(note_id, ?reason, ok = result.is_ok(), "Meeting refine: ended");
         let app = app.clone();
         // (Window queries wait on the main thread: not from this task.)
         std::thread::spawn(move || {
-            if first {
+            if first && created.is_some_and(|c| crate::notes::still_the_note(note_id, c)) {
                 crate::meetings::meeting_end::end_steps(&app, note_id, origin.as_deref());
             }
             crate::meetings::meeting_audio::release(&app, note_id);

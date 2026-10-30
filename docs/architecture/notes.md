@@ -136,7 +136,12 @@ The AI Notepad: the notes store, folders, the Actions engine, notes you can fix 
   `modify_or_remove(id, f, gone)` (2026-10-28) is `modify` and then the
   note taken away under the same lock when `gone` says so of it as changed
   (the quick note emptied, below); a note taken away either way loses its
-  added tasks, audio, Ask threads and vectors (`forget_extras`).
+  added tasks, audio, summary job, Ask threads and vectors (`forget_extras`).
+  Note ids come round again (a new note takes the highest plus one), so a
+  job that reads a note and then waits on a model — the action plan, an
+  Action, Make notes longer, the steps after a refine — checks
+  `still_the_note(id, created_ts)` before it writes (2026-10-30: a meeting
+  deleted while its summary was written had it land in the next new note).
 
 ## The quick note (`notes/quick_note.rs`)
 

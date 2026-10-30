@@ -330,6 +330,9 @@ pub(crate) async fn run_enhance(
 ) -> Result<String, String> {
     step(1);
     let note = crate::notes::get(id).ok_or("Note not found")?;
+    // Which note this is (`notes::still_the_note`): deleted meanwhile, its id
+    // given to a new note, the run never reads or writes that one.
+    let created = note.created_ts;
     crate::notes::note_edits::keeps_summary(&note, replace)?;
     // When this run read the note: an edit to the summary after it wins.
     let read_ms = std::time::SystemTime::now()
@@ -364,6 +367,9 @@ pub(crate) async fn run_enhance(
         // A bigger on-device context reads more of the meeting raw.
         let budget = crate::meetings::meeting_summary::FinalBudget::for_endpoint(&ep);
         let note = crate::meetings::meeting_summary::prepare_final(app, id, &ep, budget).await?;
+        if note.created_ts != created {
+            return Err("Note not found".to_string());
+        }
         // In the language the meeting was held in (meeting_summary/language.rs).
         let lang = crate::meetings::meeting_summary::language::of_note(&note);
         let (asked, input) = crate::meetings::meeting_summary::final_request(&note, budget, &lang, action_plan);
@@ -410,6 +416,9 @@ pub(crate) async fn run_enhance(
         Some(name) if !action_plan => crate::notes::versions::How::named(crate::notes::versions::kind::ACTION, &name),
         _ => crate::notes::versions::How::new(crate::notes::versions::kind::SUMMARY),
     };
+    if !crate::notes::still_the_note(id, created) {
+        return Err("Note not found".to_string());
+    }
     crate::notes::versions::by(how, || {
         crate::notes::note_edits::write_summary(id, &enhanced, &hash, read_ms, heard_to, replace)
     })?;
