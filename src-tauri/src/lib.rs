@@ -1206,6 +1206,8 @@ pub fn run() {
                             let _ = w.hide();
                             if !main {
                                 notices::notice::on_onboarding(false);
+                                // The bar's first-use pointers may show now.
+                                bar::refresh(w.app_handle());
                                 // Its mic check's level meter holds the mic
                                 // open (mic.rs); the page can't tell it's
                                 // hidden (WebView2 says it's still visible).
