@@ -428,7 +428,10 @@ Putting a dictation into the app you're in: the clipboard paste and the submit k
   and the on-device model can't be relied on for it. AI cleanup that took
   the separators out (or rewrote them): the **words as said** are split
   instead (corrections and snippets, no cleanup), so the messages asked
-  for still go. **Undo**: a sent message can't be taken back by Yap (it's
+  for still go — never for a dictation a language shortcut translated or
+  a transform on every dictation rewrote (`Steps::rewritten`): its words
+  as said are another text, in another language perhaps, so only its own
+  separators count. **Undo**: a sent message can't be taken back by Yap (it's
   in the chat); "Use what I said" and rewriting the last dictation don't
   apply (as after any dictation a submit key sent); a cancelled
   dictation's Undo runs it again as a new one, into its own window or

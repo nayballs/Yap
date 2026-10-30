@@ -15,6 +15,10 @@ use crate::pasting::stacked::{self, Stacked};
 pub(super) struct Steps {
     pub chat: bool,
     pub screen: Option<Arc<ScreenTerms>>,
+    /// The text is a translation (a language shortcut's) or a transform's,
+    /// not only cleaned up: its words as said are another text, never
+    /// split in its place.
+    pub rewritten: bool,
 }
 
 impl Shared {
@@ -22,13 +26,16 @@ impl Shared {
     /// "new message" said in a chat app's dictation. Sent anyway (`sends`):
     /// the messages, each to be pasted and sent. Not sent: `corrected` with
     /// the messages on lines of their own (and no words as said to swap it
-    /// for). `None`: one message, as ever.
-    pub(super) fn stacked(&self, corrected: &mut String, said: &mut Option<String>, chat: bool, sends: bool) -> Option<Vec<String>> {
+    /// for). `None`: one message, as ever. `rewritten` ([`Steps::rewritten`]):
+    /// the separators come from the text itself only — a translation's words
+    /// as said are in another language.
+    pub(super) fn stacked(&self, corrected: &mut String, said: &mut Option<String>, chat: bool, sends: bool, rewritten: bool) -> Option<Vec<String>> {
         let on = self.config.read().map(|c| c.stacked_messages).unwrap_or(false);
         if !on || corrected.trim().is_empty() {
             return None;
         }
-        match stacked::decide(corrected, said.as_deref(), chat, sends) {
+        let said_text = said.as_deref().filter(|_| !rewritten);
+        match stacked::decide(corrected, said_text, chat, sends) {
             Stacked::AsIs => None,
             Stacked::Lines(text) => {
                 tracing::info!(lines = text.lines().count(), "Stacked messages: not sent, so on lines of their own");
