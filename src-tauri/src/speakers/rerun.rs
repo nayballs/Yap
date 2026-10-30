@@ -99,6 +99,13 @@ fn run(app: &AppHandle, note_id: u64, metas: &[Meta], job: &SideJob) -> Result<(
     if job.cancelled() {
         return Err(meeting_audio::CANCELLED.to_string());
     }
+    // Resumed while the engine ran: the recording numbers its own voices
+    // from the note as it started, and counts its lines from there, so
+    // labels put on under it would give two people one number and its
+    // voices to the earlier lines. Nothing changes; it can run again after.
+    if crate::meetings::meeting::recording_note() == Some(note_id) {
+        return Err("The meeting is recording again. Find speakers once it ends.".to_string());
+    }
     (job.progress)(RUN_SHARE as u8);
     let found = apply(app, note_id, metas, &per_recording)?;
     (job.progress)(95);
@@ -205,6 +212,19 @@ pub fn recording_of(metas: &[Meta], ts: u64) -> Option<usize> {
 /// A call line Find speakers may label: talk, placed, not the person's.
 fn eligible(seg: &TranscriptSegment) -> bool {
     seg.source == THEM && seg.is_talk() && !seg.speaker_locked && !seg.text.trim().is_empty() && seg.start_ms.is_some() && seg.end_ms.is_some()
+}
+
+/// A line of a told-apart voice the person said is someone else: merged
+/// into a person ("Rename everywhere" to a name another line already has),
+/// "It was me", or "Them" (everyone on the call). Its lines are the
+/// person's, as a line they renamed is: the run never gives them a new
+/// number (until 2026-10-30 it did, and the voice's merge went with its
+/// last line). A voice merged into another told-apart one is still the
+/// run's to map.
+fn put_elsewhere(map: &crate::speakers::Speakers, seg: &TranscriptSegment) -> bool {
+    let raw = seg.speaker_id();
+    let to = resolve(map, raw);
+    raw.starts_with(SEPARATED_PREFIX) && to != raw && !to.starts_with(SEPARATED_PREFIX)
 }
 
 fn overlap(a: (u64, u64), b: (u64, u64)) -> u64 {
@@ -343,7 +363,7 @@ pub fn relabel(note: &mut Note, turns: &[Vec<Turn>], rec_of: impl Fn(&Transcript
     let mut i = 0;
     while i < note.transcript.len() {
         let seg = &note.transcript[i];
-        let Some(r) = eligible(seg).then(|| rec_of(seg)).flatten() else {
+        let Some(r) = (eligible(seg) && !put_elsewhere(&note.speakers, seg)).then(|| rec_of(seg)).flatten() else {
             i += 1;
             continue;
         };
@@ -631,6 +651,43 @@ mod tests {
         let before = shown(&n);
         assert_eq!(relabel(&mut n, &[vec![turn(0, 100_000, "them-9")]], |_| None), Relabelled::default());
         assert_eq!(shown(&n), before);
+    }
+
+    /// A told-apart voice the person put elsewhere — renamed everywhere to a
+    /// name a line already had (merged into that person), "It was me", or
+    /// merged into Them — keeps its lines through a run again: until
+    /// 2026-10-30 they became a new "Speaker N", and the merge went with the
+    /// voice once no line had it.
+    #[test]
+    fn a_run_again_keeps_a_voice_the_person_put_elsewhere() {
+        let mut n = note(vec![
+            line("Morning all the numbers are in", 0),
+            line("Revenue is up and costs are flat", 5_000),
+            line("I can take that one", 12_000),
+            line("Lunch is at noon", 16_000),
+            line("Thanks everyone", 20_000),
+        ]);
+        for (s, v) in n.transcript.iter_mut().zip(["them-1", "them-2", "them-3", "them-4", "them-5"]) {
+            s.speaker = v.into();
+        }
+        // Sam named on one line (a person), then Speaker 2 renamed
+        // everywhere to Sam: merged into that person.
+        rename_lines(&mut n, &[0], "Sam").unwrap();
+        rename(&mut n, "them-2", "Sam").unwrap();
+        // Speaker 3 was the person; Speaker 4 is everyone else on the call.
+        crate::speakers::naming::is_me(&mut n, "them-3").unwrap();
+        crate::speakers::merge(&mut n, "them-4", THEM).unwrap();
+        let before = shown(&n);
+        assert_eq!(before[1], "Sam: Revenue is up and costs are flat");
+        // The engine hears one new voice over all of it.
+        let turns = vec![vec![turn(0, 25_000, "them-7")]];
+        let out = relabel(&mut n, &turns, |_| Some(0));
+        prune_voices(&mut n);
+        let after = shown(&n);
+        assert_eq!(after[..4], before[..4], "the person's say stays");
+        assert_eq!(out, Relabelled { lines: 1, added: 0 }, "only the line nobody placed");
+        assert_eq!(after[4], "Speaker 7: Thanks everyone");
+        assert_eq!(resolve(&n.speakers, "them-2"), resolve(&n.speakers, "p-1"), "the merge is kept");
     }
 
     #[test]
