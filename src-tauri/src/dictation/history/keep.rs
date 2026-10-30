@@ -169,6 +169,9 @@ mod tests {
         // One from two days ago (a failed one is dated when it was said).
         history::record_failed(Some(now - 2 * DAY_SECS), "m", "notepad.exe", "t-keep-old", "x");
         assert!(history::find_audio(now - 2 * DAY_SECS, "t-keep-old").is_some());
+        // Settings' question counts it: the sweep deletes it too.
+        let (_, older) = history::counts(cutoff(DAY, now).unwrap());
+        assert!(older >= 1, "a failed dictation older than a day is counted");
         let gone = history::forget_before(cutoff(DAY, now).unwrap());
         assert!(gone >= 1);
         assert!(history::find_audio(now - 2 * DAY_SECS, "t-keep-old").is_none(), "older than a day: gone");

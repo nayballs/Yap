@@ -531,12 +531,16 @@ pub fn counted_since(since: u64) -> Vec<HistoryEntry> {
         .collect()
 }
 
-/// How many dictations history keeps (transcribed ones), and how many of
-/// them are from before `cutoff` (unix seconds): Settings → Privacy & data.
+/// How many dictations history keeps (transcribed ones), and how many
+/// entries are from before `cutoff` (unix seconds) — failed and cancelled
+/// ones too, as [`forget_before`] deletes them all: Settings → Privacy &
+/// data ("24 hours" asks first about those).
 pub fn counts(cutoff: u64) -> (usize, usize) {
     let mut guard = STATE.lock().unwrap_or_else(|p| p.into_inner());
     let entries = guard.get_or_insert_with(load_from_disk);
-    entries.iter().filter(|e| !e.failed()).fold((0, 0), |(all, older), e| (all + 1, older + usize::from(e.ts < cutoff)))
+    entries
+        .iter()
+        .fold((0, 0), |(all, older), e| (all + usize::from(!e.failed()), older + usize::from(e.ts < cutoff)))
 }
 
 /// Every entry from before `cutoff` (unix seconds) deleted, with its audio

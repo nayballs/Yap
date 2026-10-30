@@ -229,6 +229,43 @@ test('■ stops the answer: the stream closes, what came stays, checked and mark
   await expect(thread(main)).not.toContainText('Never shown.');
 });
 
+// Another chat opened while an answer is written (a click in the list): the
+// answer goes to its own conversation, and the chat shown stays as it is —
+// it used to be swapped back to the asking chat's id with the other one's
+// messages cut short and this answer under them.
+test('another chat opened mid-answer stays as it is; the answer lands in its own', async ({ yap, main, fakeLlm }) => {
+  const GARDEN = "What's the plan for the garden?";
+  const LUNCH = "What's the plan for the team lunch?";
+  await freshChat(main);
+  fakeLlm.scriptChat([{ content: 'Weed the beds first, then plant the bulbs along the fence.' }]);
+  await send(main, GARDEN);
+  await expect(thread(main)).toContainText('plant the bulbs');
+
+  await freshChat(main);
+  fakeLlm.scriptChat([
+    {
+      content: 'Book the long table for twelve. Order the vegetarian platters early, and Sam brings the cake at the end.',
+      stream: { gapMs: 200 },
+    },
+  ]);
+  await send(main, LUNCH);
+  await expect(streamingBubble(main)).toContainText('Book the long table');
+  await main.locator('.conv').filter({ hasText: GARDEN }).click();
+  await expect(thread(main)).toContainText('plant the bulbs');
+
+  // The answer done and saved: the garden chat still shows, whole.
+  await expectStore(yap, 'chats.json', (s) => s.conversations.find((c) => c.title === LUNCH)?.messages.length === 2);
+  await main.waitForTimeout(500);
+  await expect(thread(main).locator('.cbubble')).toHaveCount(2);
+  await expect(thread(main)).toContainText('plant the bulbs');
+  await expect(thread(main)).not.toContainText('long table');
+  await expect(main.locator('.conv.active')).toContainText(GARDEN);
+
+  // The lunch's chat has its answer.
+  await main.locator('.conv').filter({ hasText: LUNCH }).click();
+  await expect(thread(main).locator('.cbubble.assistant').last()).toContainText('Sam brings the cake');
+});
+
 test('a provider error mid-stream: asked again whole, the streamed text replaced', async ({ main, fakeLlm }) => {
   await freshChat(main);
   fakeLlm.scriptChat([

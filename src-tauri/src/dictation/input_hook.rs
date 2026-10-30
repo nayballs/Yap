@@ -807,6 +807,39 @@ pub fn configure_send_from(cfg: &crate::config::YapConfig) {
     }
 }
 
+/// Fixed action `i`'s first shortcut as the hook binds it, "" when it's
+/// left unbound (what the `configure_*_from` above do): from the
+/// assistant's on, each gives way to every one before it (a hand-edited
+/// config.json, or a key someone had before a newer action's default took
+/// it), and Send is never Enter. The Help menu's shortcut sheet
+/// (`shell/help.rs`). Pure.
+pub fn bound_first(cfg: &crate::config::YapConfig, i: usize) -> String {
+    let spec = first_spec(cfg, i).trim();
+    let unbound = spec.is_empty()
+        || (i == SEND && crate::pasting::send_key::is_enter(spec))
+        || (i >= ASSISTANT && (0..i).any(|j| clashes(spec, first_spec(cfg, j))));
+    if unbound {
+        String::new()
+    } else {
+        spec.to_string()
+    }
+}
+
+/// Each fixed action's more shortcuts as the hook binds them
+/// ([`configure_more_from`]: [`assign_more`], and never Enter for Send),
+/// those left unbound left out. Pure.
+pub fn bound_more(cfg: &crate::config::YapConfig) -> Vec<Vec<String>> {
+    let firsts: Vec<(&str, &str)> = (0..FIXED_COUNT).map(|i| (FIXED_NAMES[i], first_spec(cfg, i))).collect();
+    let more: Vec<Vec<String>> = (0..FIXED_COUNT).map(|i| more_specs(cfg, i)).collect();
+    let mut out = vec![Vec::new(); FIXED_COUNT];
+    for slot in assign_more(&firsts, &more) {
+        if !slot.spec.is_empty() && !(slot.action == SEND && crate::pasting::send_key::is_enter(&slot.spec)) {
+            out[slot.action].push(slot.spec);
+        }
+    }
+    out
+}
+
 /// While a snip's overlay is up, Esc goes to it (`snip.rs`).
 pub fn snip_escape(on: bool) {
     SNIP_ESC.store(on, Ordering::SeqCst);

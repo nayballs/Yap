@@ -343,6 +343,12 @@ test('after a sleep, Summarise on "Your PC was asleep" ends those notes: the cal
   const carried = 'meeting detect: the call came back; carrying on in the same note';
   const before = logCount(yap, carried);
   const noteId = await recordCall(yap, main, 'zoom', 'Zoom call');
+  // Something said before the sleep, so Summarise has a meeting to write up
+  // (a recording that heard nothing yet gets "Nothing to summarise yet", a
+  // notice that would hold the call's prompt back while the pointer rests
+  // on it: how much the player got in first is down to timing).
+  const words = 'the supplier confirmed the new delivery dates and Sam will update the shared plan before the next review';
+  await yap.invoke('e2e_meeting_feed', { segments: [{ source: 'them', text: words, ts: Math.floor(Date.now() / 1000) }] });
   await yap.invoke('e2e_sleep', { asleepMs: 3 * 60_000 });
   // The sleep dropped the call: Zoom off the mic until the person rejoins.
   await simulate(yap, 'zoom', false);
@@ -352,6 +358,9 @@ test('after a sleep, Summarise on "Your PC was asleep" ends those notes: the cal
   await expect.poll(() => yap.invoke('meeting_summary_status', { noteId }), { timeout: 15_000 }).not.toBeNull();
   // Zoom back on the mic within 2 minutes of waking: the person said these
   // notes are done, so it's a call to ask about, never carried on in them.
+  // (The pointer off the toasts: one it rests on stays up and keeps the
+  // next waiting, ui/noticePolicy.js.)
+  await main.mouse.move(1, 1);
   await simulate(yap, 'zoom', true);
   await expect(toast(main, 'Zoom call detected')).toBeVisible({ timeout: 10_000 });
   expect(await recording(yap)).toBe(false);

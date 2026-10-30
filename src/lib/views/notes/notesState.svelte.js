@@ -599,15 +599,18 @@ export function createNotesState() {
     setTimeout(() => back?.focus?.({ preventScroll: true }), 0);
   }
   /**
-   * Bring version `n` of the open note back (Restore, and Undo after a
-   * transform or a restore): a version itself, so Undo works on it too.
+   * Bring version `n` of note `id` (the open note unless said) back
+   * (Restore, and Undo after a transform or a restore): a version itself,
+   * so Undo works on it too. A toast's Undo names its note: another may be
+   * open by the time it's clicked (version numbers are each note's own).
    * Returns what Rust did, or null.
    */
-  async function restoreVersion(n, { undo = false } = {}) {
-    if (!selected || n == null) return null;
-    const id = selected.id;
-    flushSave();
-    finishSummaryEdit();
+  async function restoreVersion(n, { undo = false, id = selected?.id } = {}) {
+    if (id == null || n == null) return null;
+    if (selected?.id === id) {
+      flushSave();
+      finishSummaryEdit();
+    }
     let r = null;
     try {
       r = await invoke('note_version_restore', { id, n, origin: LABEL });
@@ -634,7 +637,7 @@ export function createNotesState() {
         chip: 'Notes',
         title: r.field === 'summary' ? 'Summary restored' : 'Version restored',
         description: 'The text it replaced is in Version history.',
-        action: r.previous != null ? { label: 'Undo', onClick: () => restoreVersion(r.previous, { undo: true }) } : null,
+        action: r.previous != null ? { label: 'Undo', onClick: () => restoreVersion(r.previous, { undo: true, id }) } : null,
       });
     }
     return r;
@@ -698,7 +701,7 @@ export function createNotesState() {
         title: `${r.name} ✓`,
         description:
           field === 'summary' ? 'The summary is yours now: Yap asks before writing it again.' : 'Undo, or find it in Version history.',
-        action: r.previous != null ? { label: 'Undo', onClick: () => restoreVersion(r.previous, { undo: true }) } : null,
+        action: r.previous != null ? { label: 'Undo', onClick: () => restoreVersion(r.previous, { undo: true, id }) } : null,
       });
     } catch (e) {
       const msg = String(e);

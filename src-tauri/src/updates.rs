@@ -842,14 +842,9 @@ pub fn request_install(app: &AppHandle) -> Result<(), String> {
             return Err("There's no update ready to install.".into());
         }
     }
-    let refused = match busy_reason(app) {
-        Some(Busy::Meeting) => {
-            "Yap is recording a meeting. Stop the recording first, then restart to update."
-        }
-        Some(Busy::ModelDownload) => {
-            "A speech model is still downloading. Restart to update once it's done."
-        }
-        Some(Busy::Dictation) => {
+    let refused = match busy_reason(app).map(|busy| (busy, refusal(busy))) {
+        Some((_, Some(refused))) => refused,
+        Some((_, None)) => {
             {
                 let mut s = lock();
                 s.deferred = true;
@@ -868,6 +863,16 @@ pub fn request_install(app: &AppHandle) -> Result<(), String> {
         changed(app);
     }
     Err(refused.into())
+}
+
+/// Why a restart can't happen while Yap is `busy` (said to the person), or
+/// `None`: a dictation, which it waits for instead (`deferred`).
+fn refusal(busy: Busy) -> Option<&'static str> {
+    match busy {
+        Busy::Meeting => Some("Yap is recording a meeting. Stop the recording first, then restart to update."),
+        Busy::ModelDownload => Some("A speech model is still downloading. Restart to update once it's done."),
+        Busy::Dictation => None,
+    }
 }
 
 /// A download the user asked for (a metered connection's "Download and
@@ -914,6 +919,29 @@ fn begin_install(app: &AppHandle) {
     tauri::async_runtime::spawn(async move {
         // Let the toast and tray say "Restarting…" before the window goes.
         tokio::time::sleep(Duration::from_millis(700)).await;
+        // A dictation or a meeting started meanwhile (the key pressed just
+        // after "Restart to update", or a moment after the dictation it
+        // waited for): it isn't cut off. The restart waits for it again, as
+        // when asked mid-dictation, or is refused with the reason.
+        if let Some(busy) = busy_reason(&app) {
+            tracing::info!(?busy, "updates: Yap got busy just before restarting — not now");
+            match refusal(busy) {
+                None => {
+                    {
+                        let mut s = lock();
+                        s.phase = Phase::Ready;
+                        s.payload = Some(bytes);
+                        s.deferred = true;
+                    }
+                    changed(&app);
+                }
+                Some(refused) => {
+                    fail_install(&app, Some(bytes), refused);
+                    let _ = app.emit(EVENT_BLOCKED, refused);
+                }
+            }
+            return;
+        }
         update_record(|r| {
             r.restart_from = current_version().to_string();
             r.restart_at = now();
