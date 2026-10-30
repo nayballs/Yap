@@ -88,6 +88,18 @@ impl std::fmt::Display for SttError {
 
 impl std::error::Error for SttError {}
 
+impl SttError {
+    /// The engine itself failed while transcribing (its runtime's error: a
+    /// graphics card lost after sleep or a driver reset, its own lock
+    /// poisoned by an earlier panic). It fails the same way next time, so it
+    /// isn't given back to the warm slot: the next taker loads a fresh one
+    /// (`pipeline::Lease::after_transcribing`). Audio it can't take isn't
+    /// the engine's fault.
+    pub fn engine_broken(&self) -> bool {
+        matches!(self, SttError::TranscriptionError(_))
+    }
+}
+
 // ── Model Registry ──────────────────────────────────────────────────
 
 /// Which transcribe-rs engine a model runs on. Whisper models run on
