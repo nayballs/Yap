@@ -624,7 +624,11 @@ doesn't show it (a screenshot never goes there).
   the history window are sent again (fewer within the provider's cap: Groq
   takes 3 a request in all), each older one becomes "(An earlier
   screenshot, not sent again.)", a removed one "(A screenshot was here; it
-  was removed.)". None to a model on this PC.
+  was removed.)". None to a model on this PC. A screenshot of the window in
+  front (the Voice Assistant's, source "window") goes again only where the
+  window itself may go now (`assistant::screen::window_may_go`): one taken
+  for a model on this PC is a line, never a picture, to a cloud model
+  without "…with cloud models too" (2026-10-29).
 - **Sizes per provider** (`images::fit_for`, 2026-10-25, after Groq
   answered 413 "Request Entity Too Large" to a question re-sending three
   2,000 px game screenshots): each copy at most the provider's long edge and
