@@ -375,16 +375,17 @@ handing the maintainer a checklist.
 npm run test:real                         # build the test app (stub), then run
 npx playwright test -c e2e-real           # only run, against the last build
 npx playwright test -c e2e-real terminal  # one spec
+YAP_ROBOT_FORCE=1 npx playwright test -c e2e-real terminal  # the person at the PC said "now"
 npm run test:real:build -- --engines      # the real-STT build for stt.real.js
 npx playwright show-report test-results/real/report
 ```
 
 > ⚠ **It takes the keyboard focus** for about two minutes (the suite says
-> so when it starts): windows open, come to the front and close. Don't type
-> or click meanwhile — a key pressed into a robot window can spoil a test,
-> and a click elsewhere makes Yap refuse the paste (the harness tries a
-> refused paste again, twice). The window that was in front gets the focus
-> back at the end. It needs a desktop session, so it doesn't run on CI.
+> so when it starts): windows open, come to the front and close. So it
+> **starts only once the PC has been idle 10 minutes**, and **any key, click
+> or mouse move of yours stops it** at once (the hands-off guard, below).
+> The window that was in front gets the focus back at the end. It needs a
+> desktop session, so it doesn't run on CI.
 
 The stub build is the UI suite's own (robot mode is part of every debug
 build). `--engines` builds the real STT (whisper on Vulkan, ONNX on DirectML;
@@ -398,6 +399,84 @@ V3, **copied read-only** from `%APPDATA%\yap\models\parakeet-tdt-0.6b-v3-int8`
 hard-linked into the robot's portable data dir. Nothing else in
 `%APPDATA%\yap` is read. Without the build or the model the spec is skipped,
 and says why.
+
+### Hands off: the idle check and the input watcher
+
+The robot drives the real keyboard, mouse and focus, so it never runs
+while someone is using the PC — whoever starts it, at whatever hour, with
+nobody having to judge the time (`support/guard.js`, `support/inputwatch.cs`
+in `yaprobot.exe`). The global setup starts the guard before anything else,
+and the `robot` fixture refuses to start, and each test to run, unless its
+watcher is up (`assertWatched`: a spec run under another config takes
+nothing either).
+
+- **The idle check.** A run starts only once the PC has had none of the
+  person's input for **10 minutes** (`YAP_ROBOT_IDLE_MIN`, in minutes).
+  Windows' idle time (`GetLastInputInfo`, `yaprobot idle`) counts the
+  robot's own injected input too, so a run that ends cleanly leaves its end
+  behind (`%TEMP%\yap-robot-last-watch.json`: the last input's tick as its
+  watch ended, and when the person's input was last seen). If no input at
+  all has come since, the next run — from any checkout on the PC — counts
+  from the person's last input, not the robot's: back-to-back runs don't
+  wait 10 minutes for nothing. Otherwise it refuses at once, touching no
+  key, pointer or window, and no test runs:
+
+  ```
+  Error: The PC is in use (last input 12 s ago): robot tests wait until it's been idle 10 min. Set YAP_ROBOT_FORCE=1 only when the person at the PC says so.
+  ```
+
+  **`YAP_ROBOT_FORCE=1`** skips the idle check, only when the person at the
+  PC says "run them now". It never turns off the watcher.
+- **The input watcher.** `yaprobot watch <runner pid> <lock> <note>` hooks
+  the keyboard and mouse (`WH_KEYBOARD_LL`, `WH_MOUSE_LL`) from just before
+  the idle check — so nothing slips between — and is armed once the run goes
+  ahead (a refused run is never "stopped"). The person's own input is what
+  lacks the injected flags (`LLKHF_INJECTED`, `LLMHF_INJECTED`): the
+  robot's `SendInput` and Yap's pastes carry them, and the robot's pointer
+  moves (`SetCursorPos`: `snipdrag`, `barclick`, `rightclick`) never reach
+  the hooks at all (measured, 2026-10-30). **Any key, mouse button or
+  wheel, or the pointer moved more than 10 px** — net, within one burst of
+  movement (moves under 0.5 s apart; physical pixels) — ends the run, any
+  since the hooks went in too. Why 10 px: a knocked desk or a mouse on a
+  vibrating surface jitters the pointer a pixel or three back and forth,
+  which nets to almost nothing, while a hand on the mouse moves it tens of
+  pixels in a fraction of a second. The hooks only read the event, pass it
+  on (`CallNextHookEx`) and return, on a thread that does nothing else, at
+  the highest priority: the person's input is never swallowed or held. The
+  stopping happens on another thread.
+- **What a stop does.** The Playwright runner's whole process tree is
+  killed — what `taskkill /T /F` does: the workers, the test Yap, Edge, the
+  test pads, the consoles — read whole before anything is killed (Node
+  takes a process's non-detached children with it, and a later walk would
+  lose the detached ones). The watcher is started detached so it outlives
+  the runner, deletes the robot lock (below), writes one line saying why to
+  **`test-results/real/stopped-by-input.txt`**, prints it, and quits:
+
+  ```
+  Robot tests stopped at 21:14:03: someone moved the mouse (26 px) at the PC. The run was ended (14 processes) and the robot lock removed. Run them again only once the PC has been idle; YAP_ROBOT_FORCE=1 only when the person at the PC says so.
+  ```
+
+  The watcher never outlives the run: it quits when the runner's process
+  ends (however it ends), or when the global teardown stops it.
+- **When it stops a run,** the person is back: don't start again — not with
+  `YAP_ROBOT_FORCE=1` either — until they say so; the idle check otherwise
+  decides. A Windows Terminal window may be left open (`wt.exe` hands its
+  windows to Windows Terminal, out of the runner's tree): close it, it's
+  titled with the run's `yaprobot-…` nonce. Nothing else needs cleaning up.
+- **The robot lock** stays as it is: agents sharing the PC take
+  `.yap-robot-lock` in the folder holding the Yap checkout (for a worktree,
+  its main checkout's; `YAP_ROBOT_LOCK` names another file) before a run,
+  atomically — `( set -o noclobber; echo <who> > <folder>/.yap-robot-lock )`
+  — and delete it after. The guard doesn't take it; a stop deletes it, and
+  the next run is held by the idle check instead.
+
+`yaprobot watchtest` checks the watcher without stopping anything: its
+judge on made-up events (keys and clicks with and without the injected
+flags, a knocked desk's jitter, a hand's move, a burst that pauses), then the
+real hooks on injected 1 px moves there and back (no key, click or wheel is
+sent; the pointer is put back exactly): each seen, flagged injected, never
+counted. `yaprobot watchtest 10000` then listens for 10 s and says what of
+your own input it saw and what would have stopped a run.
 
 ### The guard: only the robot's own windows
 
@@ -605,7 +684,8 @@ list for that spec's Yap. A real VS Code isn't driven.
 debug logging on: what kind of app each dictation went into, how much text
 around the cursor was read, as lengths — and its `app/Data/`, and the test
 windows' temp folders under `targets/`), `screenshots/`, `cache/` (TTS
-speech, the model copy) and `bin/yaprobot.exe`.
+speech, the model copy), `bin/yaprobot.exe` and, after a run the person's
+input stopped, `stopped-by-input.txt`.
 
 ### Adding a robot test
 

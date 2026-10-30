@@ -81,6 +81,10 @@
 //                                 say. Prints {"listening":true} when ready,
 //                                 then what each read got: whether there was
 //                                 text and its length — never the text
+//   yaprobot idle | watch … | watchtest   the hands-off guard: how long the
+//                                 PC has been idle, and the input watcher
+//                                 that ends a run on the person's own input
+//                                 (inputwatch.cs, compiled in with this file)
 //
 // The test pad also has a button ("button": a focus that takes no text)
 // and holds the clipboard open on request (`holdClipboard {ms}`, or
@@ -230,6 +234,9 @@ static class Program {
                 case "keystate": Print(KeyState()); return 0;
                 case "modkey": Print(ModKey(new IntPtr(long.Parse(args[1])), args[2], args[3], args[4])); return 0;
                 case "clipreader": return ClipReader.Run(int.Parse(args[1]), int.Parse(args[2]));
+                case "idle": Print(Watcher.Idle()); return 0;
+                case "watch": return Watcher.Run(uint.Parse(args[1]), args[2], args[3]);
+                case "watchtest": return Watcher.SelfTest(args.Length > 1 ? int.Parse(args[1]) : 0);
                 default: throw new ArgumentException("unknown command " + args[0]);
             }
         } catch (Exception e) {
