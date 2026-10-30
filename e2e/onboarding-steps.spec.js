@@ -123,6 +123,22 @@ test('the mic step: the quiz listens on every microphone at once, marks the best
   }
 });
 
+// The setup's list of microphones used to be read as it opened and never
+// again, so one plugged in while it showed ("Plug one in or connect a
+// headset, and it shows up here") never did.
+test('the mic step lists a microphone plugged in while it shows', async ({ yap }) => {
+  const ob = await openSetup(yap);
+  await ob.getByRole('button', { name: "I'll choose later" }).click();
+  await continueBtn(ob).click();
+  await expect(ob.getByRole('heading', { level: 1, name: "Let's check your microphone" })).toBeVisible();
+  const options = ob.getByRole('combobox', { name: 'Microphone' }).locator('option');
+  await expect(options).toHaveText(['System default', MICS[0].name]);
+  await yap.invoke('e2e_mic_plug', { device: { id: MICS[2].id, name: MICS[2].name } });
+  await expect(options).toHaveText(['System default', MICS[0].name, MICS[2].name]);
+  await yap.invoke('e2e_mic_unplug', { id: MICS[0].id });
+  await expect(options).toHaveText(['System default', MICS[2].name]);
+});
+
 test('the calendar step: skipped, it never shows again', async ({ yap, shot }) => {
   const ob = await openSetup(yap);
   await ob.locator('nav.dots .dot').first().waitFor();
