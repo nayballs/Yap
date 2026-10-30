@@ -257,6 +257,11 @@ pub fn keep_days(setting: u32) -> u32 {
 
 /// [`sweep_in`] the images folder, against every conversation's images.
 pub fn sweep(keep_days: u32) -> usize {
+    // chats.json Yap couldn't read: no conversation names any of them yet,
+    // so nothing is swept until it reads.
+    if crate::chat::chats::unread() {
+        return 0;
+    }
     let keep_days = self::keep_days(keep_days);
     let referenced = crate::chat::chats::image_ids();
     let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);

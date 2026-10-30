@@ -239,6 +239,11 @@ fn sweep(library: &Library) {
     if !dir().join(super::store::FILE).is_file() {
         return;
     }
+    // A store Yap couldn't read holds only what was added since: its
+    // passages aren't gone, only not read yet.
+    if crate::notes::unread() || crate::chat::chats::unread() || crate::memory::unread() {
+        return;
+    }
     let keep: HashSet<Key> = library.passages().map(|p| p.key).collect();
     let dead = with_store(|s| s.dead_share(&keep));
     if dead > 0.0 {

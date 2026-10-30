@@ -614,6 +614,23 @@ pub fn e2e_fail_saves(store: String, count: u32) -> Result<(), String> {
     Ok(())
 }
 
+/// Test mode only: the next `count` reads of a store's file (`store`: its
+/// id, "notes", "history"…) fail as if another program held it
+/// (`saving.rs`; `YAP_E2E_FAIL_READS` stages them from the start, before
+/// the stores load). `count` 0: none, and every file Yap couldn't read is
+/// read again now (as the background reads would, a little later). Returns
+/// how many still can't be.
+#[cfg(debug_assertions)]
+#[tauri::command]
+pub fn e2e_fail_reads(store: String, count: u32) -> Result<usize, String> {
+    if !active() {
+        return Err("Only in e2e test mode".to_string());
+    }
+    tracing::info!(store = %store, count, "e2e: reads of this store fail on purpose");
+    crate::shell::saving::stage_read_failures(&store, count);
+    Ok(if count == 0 { crate::shell::saving::reread_now() } else { 0 })
+}
+
 /// Test mode only: hand the meeting being recorded transcript segments, as
 /// if its recorder had just transcribed them (`{ source, text, ts }`; `ts`
 /// in unix seconds, so a test can stage hours of meeting at once). They're

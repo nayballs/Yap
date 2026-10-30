@@ -41,17 +41,16 @@ fn path() -> std::path::PathBuf {
     crate::config::data_dir().join("quick_note_tabs.json")
 }
 
+/// The tabs, read the first time (`saving::Saver::load`: set aside if it
+/// isn't tabs; one Yap couldn't read is never written over, and read again
+/// here until it reads).
 fn loaded(slot: &mut Option<Tabs>) -> &mut Tabs {
-    slot.get_or_insert_with(|| {
-        let path = path();
-        match std::fs::read_to_string(&path) {
-            Ok(s) => serde_json::from_str(&s).unwrap_or_else(|_| {
-                crate::config::quarantine_corrupt(&path);
-                Tabs::default()
-            }),
-            Err(_) => Tabs::default(),
-        }
-    })
+    let tabs = slot.get_or_insert_with(|| SAVER.load(&path()));
+    if SAVER.any_unread() && SAVER.refresh(&path(), tabs) {
+        *tabs = tidy(std::mem::take(tabs));
+        let _ = SAVER.write_json(&path(), &*tabs, true);
+    }
+    tabs
 }
 
 /// The tabs remembered now.
@@ -66,9 +65,11 @@ pub static SAVER: crate::shell::saving::Saver =
     crate::shell::saving::Saver::quiet("quickNoteTabs", "your open quick notes", save_now);
 
 fn save_now() -> Result<(), crate::shell::saving::SaveError> {
-    if let Some(t) = TABS.lock().unwrap_or_else(|p| p.into_inner()).as_ref() {
-        let _ = SAVER.write_json(&path(), t, true);
+    let mut guard = TABS.lock().unwrap_or_else(|p| p.into_inner());
+    if guard.is_some() {
+        let _ = SAVER.write_json(&path(), &*loaded(&mut guard), true);
     }
+    drop(guard);
     SAVER.check()
 }
 

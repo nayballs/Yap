@@ -751,20 +751,24 @@ fn lock() -> std::sync::MutexGuard<'static, State> {
     s
 }
 
+/// The file (`saving::Saver::load`): set aside if it isn't receipts; one
+/// Yap couldn't read is never written over until it reads ([`flush`] reads
+/// it again, the receipts kept since joining it).
 fn read(path: &std::path::Path) -> Store {
-    match std::fs::read_to_string(path) {
-        Ok(text) => match serde_json::from_str::<Store>(&text) {
-            Ok(mut store) => {
-                store.version = 1;
-                store
-            }
-            Err(_) => {
-                crate::config::quarantine_corrupt(path);
-                Store { version: 1, entries: Vec::new() }
-            }
-        },
-        Err(_) => Store { version: 1, entries: Vec::new() },
-    }
+    let mut store: Store = SAVER.load(path);
+    store.version = 1;
+    store
+}
+
+/// connections.json's saves (`saving.rs`): a week of receipts, so a failed
+/// save is only logged, and tried again with the next.
+pub static SAVER: crate::shell::saving::Saver =
+    crate::shell::saving::Saver::quiet("connections", "your network receipts", save_now);
+
+fn save_now() -> Result<(), crate::shell::saving::SaveError> {
+    lock().dirty = true;
+    flush();
+    SAVER.check()
 }
 
 /// Into the store (and, a few seconds later, the file).
@@ -793,6 +797,19 @@ pub fn flush() {
     let Some(path) = FILE_PATH.get() else { return };
     let text = {
         let mut s = lock();
+        if SAVER.any_unread() {
+            if let Some(disk) = SAVER.reread::<Store>(path, crate::shell::saving::json) {
+                // The file reads again: its receipts and the ones kept since.
+                for e in disk.entries {
+                    if !s.store.entries.contains(&e) {
+                        s.store.entries.push(e);
+                    }
+                }
+                s.store.entries.sort_by_key(|e| e.at);
+                s.store.roll(now());
+                s.dirty = true;
+            }
+        }
         if !s.dirty {
             return;
         }
@@ -802,8 +819,8 @@ pub fn flush() {
             Err(_) => return,
         }
     };
-    if let Err(e) = crate::config::atomic_write(path, &text) {
-        tracing::warn!(error = %e, "connections: couldn't save the store");
+    if SAVER.write(path, &text).is_err() {
+        // Kept, and written with the next (saving.rs logs why).
         lock().dirty = true;
         return;
     }

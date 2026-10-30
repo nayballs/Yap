@@ -493,36 +493,54 @@ fn notes_path() -> PathBuf {
 
 #[cfg(not(test))]
 fn load_from_disk() -> Store {
-    let path = notes_path();
-    let mut store = match std::fs::read_to_string(&path) {
-        // Current shape first; fall back to the v1 bare-array format. A file
-        // that exists but parses as NEITHER is quarantined (renamed aside),
-        // never overwritten — see config::quarantine_corrupt.
-        Ok(s) => match serde_json::from_str::<Store>(&s).or_else(|_| {
-            serde_json::from_str::<Vec<Note>>(&s).map(|notes| Store {
-                notes,
-                ..Store::default()
-            })
-        }) {
-            Ok(store) => store,
-            Err(e) => {
-                tracing::error!("notes.json failed to parse: {}", e);
-                crate::config::quarantine_corrupt(&path);
-                Store::default()
-            }
-        },
-        Err(_) => Store::default(),
-    };
+    load_at(&notes_path())
+}
+
+/// notes.json's shape: the store, else the v1 bare list of notes.
+fn parse(s: &str) -> Option<Store> {
+    serde_json::from_str::<Store>(s)
+        .ok()
+        .or_else(|| serde_json::from_str::<Vec<Note>>(s).ok().map(|notes| Store { notes, ..Store::default() }))
+}
+
+/// The store from `path` (`saving::Saver::read`): a file that isn't notes
+/// is set aside; one Yap couldn't read leaves the store empty in memory and
+/// is never written over until it reads ([`refresh_at`]).
+fn load_at(path: &std::path::Path) -> Store {
+    let mut store = SAVER.read(path, parse).store();
     if seed_missing_builtins(&mut store) {
         save_to_disk(&store);
     }
     store
 }
 
+/// A store whose file couldn't be read: read again and, once it reads, its
+/// notes and what was added meanwhile kept together (`saving::merge_json`).
+/// `true`: merged — save it.
+fn refresh_at(store: &mut Store, path: &std::path::Path) -> bool {
+    if !SAVER.any_unread() {
+        return false;
+    }
+    let versions = std::mem::take(&mut store.versions);
+    let merged = SAVER.refresh_with(path, store, parse);
+    store.versions = versions;
+    if merged {
+        seed_missing_builtins(store);
+    }
+    merged
+}
+
+/// Whether notes.json couldn't be read (a sweep of what no note names —
+/// meeting audio, search's vectors — waits).
+pub fn unread() -> bool {
+    SAVER.any_unread()
+}
+
 /// notes.json's saves (`saving.rs`): a failed one keeps the notes in
 /// memory, is tried again with the next save, and is said once — by the
 /// command that hit it ([`saved`]) or the notice.
-pub static SAVER: crate::shell::saving::Saver = crate::shell::saving::Saver::new("notes", "your note", save_now);
+pub static SAVER: crate::shell::saving::Saver =
+    crate::shell::saving::Saver::new("notes", "your note", save_now).reads_as("your notes");
 
 /// `Ok` when every note is on disk; else why not (the caller says it).
 pub fn saved() -> Result<(), crate::shell::saving::SaveError> {
@@ -607,6 +625,9 @@ fn with_store<R>(f: impl FnOnce(&mut Store) -> R) -> R {
             Err(poisoned) => poisoned.into_inner(),
         };
         let store = guard.get_or_insert_with(load_from_disk);
+        if refresh_at(store, &notes_path()) {
+            save_to_disk(store);
+        }
         f(store)
     };
     write_pending();
@@ -668,7 +689,7 @@ pub fn action_create(name: &str, description: &str, prompt: &str) -> Result<Acti
         return Err("An action needs a name and a prompt".to_string());
     }
     with_store(|s| {
-        let id = s.actions.iter().map(|a| a.id).max().unwrap_or(0) + 1;
+        let id = SAVER.next_id(s.actions.iter().map(|a| a.id).max().unwrap_or(0));
         let action = Action {
             id,
             name: name.to_string(),
@@ -1043,7 +1064,7 @@ pub fn stamp() -> u64 {
 
 pub fn create(title: &str, content: &str, source: &str, folder: &str) -> Note {
     with_store(|store| {
-        let id = store.notes.iter().map(|n| n.id).max().unwrap_or(0) + 1;
+        let id = SAVER.next_id(store.notes.iter().map(|n| n.id).max().unwrap_or(0));
         let now = now_secs();
         let folder = if folder.trim().is_empty() {
             default_folder()
@@ -1582,6 +1603,55 @@ mod tests {
         assert!(on_disk.contains("milk, eggs") && on_disk.contains("post office"));
         // Try again with nothing to redo.
         assert!(save_now().is_ok());
+        TEST_PATH.with(|p| *p.borrow_mut() = None);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// notes.json held by another program when Yap loads it (review
+    /// 2026-10-30: the empty store, its folders seeded, used to be saved
+    /// over every note): the notes start empty in memory, a note made
+    /// meanwhile gets an id the file can't have and is never written over
+    /// the file, and once it reads both are kept — the built-in actions
+    /// once, the person's folder too.
+    #[cfg(windows)]
+    #[test]
+    fn notes_yap_couldnt_read_are_never_written_over_and_kept_with_new_ones() {
+        use crate::shell::saving::{reread_due, Reason};
+        use std::os::windows::fs::OpenOptionsExt;
+        let dir = std::env::temp_dir().join(format!("yap-notes-unread-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("notes.json");
+        let mut before = Store::default();
+        before.folders.push("Garden".into());
+        before.notes.push(serde_json::from_value(json!({ "id": 1, "title": "Allotment plan", "content": "Broad beans in March", "createdTs": 1, "updatedTs": 1 })).unwrap());
+        let text = serde_json::to_string(&before).unwrap();
+        std::fs::write(&path, &text).unwrap();
+        TEST_PATH.with(|p| *p.borrow_mut() = Some(path.clone()));
+
+        let held = std::fs::OpenOptions::new().read(true).share_mode(0).open(&path).unwrap();
+        TEST_STORE.with(|s| *s.borrow_mut() = load_at(&path));
+        assert!(unread() && all().is_empty());
+        let made = create("Seed potatoes", "Earlies by the shed", "manual", "");
+        assert!(made.id > 1_000_000_000, "an id the file can't have: {}", made.id);
+        let e = saved().unwrap_err();
+        assert_eq!(e.reason, Reason::Unread);
+        assert!(e.to_string().starts_with("Couldn't save your note: Yap couldn't read the file"), "{e}");
+        drop(held);
+        // Free now, and still never written over until it's read.
+        create("Compost", "Turn it weekly", "manual", "");
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), text, "the file as it was");
+
+        // It reads (the background read's turn): kept together and saved.
+        reread_due();
+        assert!(TEST_STORE.with(|s| refresh_at(&mut s.borrow_mut(), &path)));
+        assert!(!unread());
+        save_now().unwrap();
+        let on_disk: Store = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        let titles: Vec<&str> = on_disk.notes.iter().map(|n| n.title.as_str()).collect();
+        assert_eq!(titles, ["Allotment plan", "Seed potatoes", "Compost"]);
+        assert!(on_disk.folders.iter().any(|f| f == "Garden"));
+        assert_eq!(on_disk.actions.len(), default_actions().len(), "the built-ins once");
         TEST_PATH.with(|p| *p.borrow_mut() = None);
         let _ = std::fs::remove_dir_all(&dir);
     }

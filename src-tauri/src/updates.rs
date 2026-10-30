@@ -352,20 +352,12 @@ fn record_path() -> std::path::PathBuf {
     crate::config::data_dir().join("updates.json")
 }
 
+/// updates.json, read the first time (`saving::Saver::loaded`: set aside if
+/// it isn't the record; one Yap couldn't read is never written over, and
+/// read again here until it reads).
 fn record() -> Record {
     let mut guard = RECORD.lock().unwrap_or_else(|p| p.into_inner());
-    guard
-        .get_or_insert_with(|| {
-            let path = record_path();
-            match std::fs::read_to_string(&path) {
-                Ok(s) => serde_json::from_str(&s).unwrap_or_else(|_| {
-                    crate::config::quarantine_corrupt(&path);
-                    Record::default()
-                }),
-                Err(_) => Record::default(),
-            }
-        })
-        .clone()
+    SAVER.loaded(&mut guard, &record_path(), true).clone()
 }
 
 fn update_record(f: impl FnOnce(&mut Record)) {
@@ -382,8 +374,8 @@ pub static SAVER: crate::shell::saving::Saver = crate::shell::saving::Saver::qui
 
 /// Write the record again (Try again).
 fn save_now() -> Result<(), crate::shell::saving::SaveError> {
-    let rec = RECORD.lock().unwrap_or_else(|p| p.into_inner()).clone();
-    if let Some(rec) = rec {
+    let read = RECORD.lock().unwrap_or_else(|p| p.into_inner()).is_some();
+    if let Some(rec) = read.then(record) {
         let _ = SAVER.write_json(&record_path(), &rec, true);
     }
     SAVER.check()

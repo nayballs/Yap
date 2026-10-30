@@ -67,20 +67,7 @@ fn path() -> std::path::PathBuf {
 /// step) and return what `f` returns.
 pub fn with_counts<T>(f: impl FnOnce(&mut Counts) -> T) -> T {
     let mut guard = STORE.lock().unwrap_or_else(|p| p.into_inner());
-    let counts = guard.get_or_insert_with(|| {
-        if cfg!(test) {
-            return Counts::default();
-        }
-        let path = path();
-        match std::fs::read_to_string(&path) {
-            Ok(text) => serde_json::from_str(&text).unwrap_or_else(|e| {
-                tracing::warn!("call_apps.json unreadable ({e}); starting afresh");
-                crate::config::quarantine_corrupt(&path);
-                Counts::default()
-            }),
-            Err(_) => Counts::default(),
-        }
-    });
+    let counts = loaded(&mut guard);
     let before = counts.clone();
     let out = f(counts);
     if *counts != before && !cfg!(test) {
@@ -110,10 +97,22 @@ pub fn take_offer(app: &str, m: Moment) -> bool {
 pub static SAVER: crate::shell::saving::Saver = crate::shell::saving::Saver::quiet("call-apps", "your call apps' meeting counts", save_now);
 
 fn save_now() -> Result<(), crate::shell::saving::SaveError> {
-    if let Some(c) = STORE.lock().unwrap_or_else(|p| p.into_inner()).as_ref() {
-        let _ = SAVER.write_json(&path(), c, true);
+    let mut guard = STORE.lock().unwrap_or_else(|p| p.into_inner());
+    if guard.is_some() {
+        let _ = SAVER.write_json(&path(), &*loaded(&mut guard), true);
     }
+    drop(guard);
     SAVER.check()
+}
+
+/// call_apps.json, read the first time (`saving::Saver::loaded`: set aside
+/// if it isn't the counts; one Yap couldn't read is never written over, and
+/// read again here until it reads). Unit tests never touch the data folder.
+fn loaded(slot: &mut Option<Counts>) -> &mut Counts {
+    if cfg!(test) {
+        return slot.get_or_insert_with(Counts::default);
+    }
+    SAVER.loaded(slot, &path(), true)
 }
 
 #[cfg(test)]

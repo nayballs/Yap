@@ -87,20 +87,14 @@ fn path() -> std::path::PathBuf {
     crate::config::data_dir().join("onboarding.json")
 }
 
+/// onboarding.json, read the first time (`saving::Saver::loaded`: set aside
+/// if it isn't the record; one Yap couldn't read is never written over, and
+/// read again here until it reads). Unit tests never touch the data folder.
 fn loaded(slot: &mut Option<Record>) -> &mut Record {
-    slot.get_or_insert_with(|| {
-        if cfg!(test) {
-            return Record::default();
-        }
-        let path = path();
-        match std::fs::read_to_string(&path) {
-            Ok(s) => serde_json::from_str(&s).unwrap_or_else(|_| {
-                crate::config::quarantine_corrupt(&path);
-                Record::default()
-            }),
-            Err(_) => Record::default(),
-        }
-    })
+    if cfg!(test) {
+        return slot.get_or_insert_with(Record::default);
+    }
+    SAVER.loaded(slot, &path(), true)
 }
 
 /// onboarding.json as it is now.
@@ -122,9 +116,11 @@ fn update(f: impl FnOnce(&mut Record)) {
 pub static SAVER: crate::shell::saving::Saver = crate::shell::saving::Saver::quiet("onboarding", "your setup's progress", save_now);
 
 fn save_now() -> Result<(), crate::shell::saving::SaveError> {
-    if let Some(rec) = RECORD.lock().unwrap_or_else(|p| p.into_inner()).as_ref() {
-        let _ = SAVER.write_json(&path(), rec, true);
+    let mut guard = RECORD.lock().unwrap_or_else(|p| p.into_inner());
+    if guard.is_some() {
+        let _ = SAVER.write_json(&path(), &*loaded(&mut guard), true);
     }
+    drop(guard);
     SAVER.check()
 }
 

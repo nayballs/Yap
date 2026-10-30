@@ -97,18 +97,10 @@ fn load_from_disk() -> Store {
     if crate::ai::eval::active() {
         return Store::default();
     }
-    let path = memory_path();
-    match std::fs::read_to_string(&path) {
-        Ok(s) => match serde_json::from_str(&s) {
-            Ok(store) => store,
-            Err(e) => {
-                tracing::error!("memory.json failed to parse: {}", e);
-                crate::config::quarantine_corrupt(&path);
-                Store::default()
-            }
-        },
-        Err(_) => Store::default(),
-    }
+    // A file that isn't memory is set aside; one Yap couldn't read leaves
+    // memory empty here, never written over until it reads (read again in
+    // `with_store`, what was learned meanwhile kept with it).
+    SAVER.load(&memory_path())
 }
 
 /// memory.json's saves (`saving.rs`): a failed one keeps what Yap
@@ -118,6 +110,12 @@ pub static SAVER: crate::shell::saving::Saver = crate::shell::saving::Saver::new
 /// `Ok` when all of it is on disk; else why not (the caller says it).
 pub fn saved() -> Result<(), crate::shell::saving::SaveError> {
     SAVER.check()
+}
+
+/// Whether memory.json couldn't be read (search's vectors of what it holds
+/// aren't dropped meanwhile).
+pub fn unread() -> bool {
+    SAVER.any_unread()
 }
 
 /// Write the whole store again (Try again).
@@ -142,6 +140,14 @@ fn with_store<R>(f: impl FnOnce(&mut Store) -> R) -> R {
         Err(poisoned) => poisoned.into_inner(),
     };
     let store = guard.get_or_insert_with(load_from_disk);
+    if SAVER.any_unread() {
+        if SAVER.refresh(&memory_path(), store) {
+            save_to_disk(store);
+            clear_caches();
+        }
+        // While it couldn't be read, new items' ids start past the file's.
+        store.next_id = store.next_id.max(SAVER.id_floor());
+    }
     f(store)
 }
 

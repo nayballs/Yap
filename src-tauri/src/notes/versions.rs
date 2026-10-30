@@ -322,7 +322,59 @@ impl Cache {
                 }
             }
         }
-        &mut self.files[0]
+        let file = &mut self.files[0];
+        refresh(file);
+        file
+    }
+
+    /// Every history here whose file couldn't be read, read again
+    /// ([`refresh`]). Their paths, read or not.
+    fn refresh_unread(&mut self) -> Vec<PathBuf> {
+        let mut seen = Vec::new();
+        for file in &mut self.files {
+            if let Some(path) = path(file.note).filter(|p| SAVER.unread(p)) {
+                refresh(file);
+                seen.push(path);
+            }
+        }
+        seen
+    }
+}
+
+/// A history whose file couldn't be read when it loaded (`load`: none in
+/// memory, the file never written over): read again and, once it reads, its
+/// versions and the ones made meanwhile kept together ([`take_in`]) and
+/// queued to be written.
+fn refresh(file: &mut File) {
+    let Some(path) = path(file.note).filter(|p| SAVER.unread(p)) else { return };
+    let Some(disk) = SAVER.reread(&path, crate::shell::saving::json::<File>) else { return };
+    if disk.note == file.note && disk.created == file.created {
+        take_in(file, disk);
+    }
+    queue_file(file);
+}
+
+/// `disk`'s versions, then the ones `file` has (made while it couldn't be
+/// read), numbered on from the file's — a restore's `from` following — and
+/// one that only repeats the file's newest of its field left out; the last
+/// [`KEEP`] kept (pure).
+pub fn take_in(file: &mut File, disk: File) {
+    let made = std::mem::replace(file, disk);
+    let mut renumbered: HashMap<u64, u64> = HashMap::new();
+    for mut v in made.versions {
+        let newest = file.versions.iter().rev().find(|d| d.field == v.field);
+        if newest.is_some_and(|d| d.text == v.text) {
+            if let Some(d) = newest {
+                renumbered.insert(v.n, d.n);
+            }
+            continue;
+        }
+        let old = v.n;
+        v.from = v.from.and_then(|f| renumbered.get(&f).copied());
+        push(file, v);
+        if let Some(last) = file.versions.last() {
+            renumbered.insert(old, last.n);
+        }
     }
 }
 
@@ -434,23 +486,20 @@ fn load(id: u64, created: u64) -> File {
             .map(|(_, json)| json.clone())
             .or_else(|| q.failed.get(&path).map(|(_, json)| Some(json.clone())))
     });
-    let json = match queued {
+    let file = match queued {
         Some(None) => return File::new(id, created),
-        Some(Some(json)) => json,
-        None => match std::fs::read_to_string(&path) {
-            Ok(s) => s,
-            Err(_) => return File::new(id, created),
+        Some(Some(json)) => serde_json::from_str::<File>(&json).ok(),
+        // Set aside if it isn't a history; one Yap couldn't read starts
+        // empty here and is never written over until it reads ([`refresh`]).
+        None => match SAVER.read(&path, crate::shell::saving::json::<File>) {
+            crate::shell::saving::Found::Read(file) => Some(file),
+            _ => None,
         },
     };
-    match serde_json::from_str::<File>(&json) {
+    match file {
         // Another note's (one deleted by an older Yap, its id given again): not this one's.
-        Ok(file) if file.note == id && file.created == created => file,
-        Ok(_) => File::new(id, created),
-        Err(e) => {
-            tracing::error!(note_id = id, "a note's history failed to parse ({e}); set aside");
-            crate::config::quarantine_corrupt(&path);
-            File::new(id, created)
-        }
+        Some(file) if file.note == id && file.created == created => file,
+        _ => File::new(id, created),
     }
 }
 
@@ -556,9 +605,23 @@ fn write(retry: bool) -> Result<(), crate::shell::saving::SaveError> {
     result
 }
 
-/// Try again (`saving.rs`): what couldn't be written, written now.
+/// Try again (`saving.rs`): what couldn't be written, written now — the
+/// files Yap couldn't read read again first (the histories in memory merged
+/// with theirs; the others only read, nothing of them in memory).
 fn save_now() -> Result<(), crate::shell::saving::SaveError> {
-    write(true)
+    if SAVER.any_unread() {
+        let cached = super::with_store(|s| s.versions.refresh_unread());
+        for path in SAVER.unread_paths().into_iter().filter(|p| !cached.contains(p)) {
+            let _ = SAVER.reread(&path, crate::shell::saving::json::<File>);
+        }
+    }
+    let written = write(true);
+    if written.is_err() && !SAVER.any_unread() && with_queue(|q| q.failed.is_empty() && q.files.is_empty()) {
+        // Only files read again, nothing left to write.
+        SAVER.nothing_to_save();
+        return Ok(());
+    }
+    written
 }
 
 // ---- reading, restoring, forgetting ---------------------------------------------------
@@ -751,6 +814,30 @@ mod tests {
 
     fn texts(file: &File) -> Vec<(String, String)> {
         file.versions.iter().map(|v| (v.kind.clone(), v.text.clone())).collect()
+    }
+
+    fn version(n: u64, kind: &str, from: Option<u64>, text: &str) -> Version {
+        Version { n, field: Field::Notes, kind: kind.into(), label: String::new(), from, since_ms: n, ms: n, text: text.into() }
+    }
+
+    /// A history Yap couldn't read when the note was changed: the file's
+    /// versions, then the ones made meanwhile, numbered on from the file's
+    /// (a restore's `from` following), the "earlier" one that only repeats
+    /// the file's newest left out.
+    #[test]
+    fn a_history_read_late_keeps_the_files_versions_and_the_new_ones() {
+        let mut disk = File::new(7, 70);
+        push(&mut disk, version(0, kind::TYPED, None, "Plan the beds"));
+        push(&mut disk, version(0, kind::TYPED, None, "Plan the beds and paths"));
+        let mut made = File::new(7, 70);
+        push(&mut made, version(0, kind::EARLIER, None, "Plan the beds and paths"));
+        push(&mut made, version(0, kind::TYPED, None, "Plan the beds, paths and a pond"));
+        push(&mut made, version(0, kind::RESTORED, Some(1), "Plan the beds and paths"));
+        take_in(&mut made, disk);
+        let got: Vec<(u64, &str, Option<u64>)> = made.versions.iter().map(|v| (v.n, v.kind.as_str(), v.from)).collect();
+        assert_eq!(got, [(1, kind::TYPED, None), (2, kind::TYPED, None), (3, kind::TYPED, None), (4, kind::RESTORED, Some(2))]);
+        assert_eq!(made.next, 5);
+        assert_eq!(made.versions[2].text, "Plan the beds, paths and a pond");
     }
 
     #[test]

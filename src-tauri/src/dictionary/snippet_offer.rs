@@ -329,20 +329,15 @@ fn record_path() -> std::path::PathBuf {
     crate::config::data_dir().join("snippet_suggestions.json")
 }
 
+/// The record, read the first time (`saving::Saver::loaded`: set aside if
+/// it isn't one; one Yap couldn't read is never written over, and read
+/// again here until it reads, what changed meanwhile kept with it). Unit
+/// tests never touch the data folder.
 fn loaded(slot: &mut Option<Record>) -> &mut Record {
-    slot.get_or_insert_with(|| {
-        if cfg!(test) {
-            return Record::default();
-        }
-        let path = record_path();
-        match std::fs::read_to_string(&path) {
-            Ok(s) => serde_json::from_str(&s).unwrap_or_else(|_| {
-                crate::config::quarantine_corrupt(&path);
-                Record::default()
-            }),
-            Err(_) => Record::default(),
-        }
-    })
+    if cfg!(test) {
+        return slot.get_or_insert_with(Record::default);
+    }
+    SAVER.loaded(slot, &record_path(), true)
 }
 
 fn record() -> Record {
@@ -364,9 +359,11 @@ pub static SAVER: crate::shell::saving::Saver =
     crate::shell::saving::Saver::quiet("snippetSuggestions", "your snippet suggestion choices", save_now);
 
 fn save_now() -> Result<(), crate::shell::saving::SaveError> {
-    if let Some(rec) = RECORD.lock().unwrap_or_else(|p| p.into_inner()).as_ref() {
-        let _ = SAVER.write_json(&record_path(), rec, true);
+    let mut guard = RECORD.lock().unwrap_or_else(|p| p.into_inner());
+    if guard.is_some() {
+        let _ = SAVER.write_json(&record_path(), &*loaded(&mut guard), true);
     }
+    drop(guard);
     SAVER.check()
 }
 

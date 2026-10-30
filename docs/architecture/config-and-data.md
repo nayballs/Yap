@@ -693,7 +693,10 @@
   test reads this page): a new store put here has to be decided there too.
 - All of the above (plus config) write atomically and quarantine a corrupt file
   on load rather than crashing (`config::atomic_write`/`quarantine_corrupt`;
-  config.json its own way, above). Each write has a temp file of its own
+  config.json its own way, above), and **never write over a file they
+  couldn't read** (another program holding it, Windows refusing, a cloud
+  file offline): see [A file Yap couldn't read](#a-file-yap-couldnt-read)
+  below. Each write has a temp file of its own
   (`<name>.<pid>-<n>.tmp`, renamed over the file, tried again for ~100 ms
   while another program holds it): until 2026-10-23 every write of a file
   shared `<name>.tmp`, so two at once could rename a half-written file into
@@ -729,7 +732,8 @@
   again for that store until a save of it worked. The local API and the
   chat's note tools answer an AI app or model with the failure too, so
   neither says it saved. Caches (`model_catalog.json`, `stt_speed.json`,
-  `updates.json`, `hints.json`, `onboarding.json`, `quieted_apps.json`, `quick_note_tabs.json`) are only logged. The
+  `updates.json`, `hints.json`, `onboarding.json`, `quieted_apps.json`, `quick_note_tabs.json`,
+  `connections.json` — written through `saving.rs` since 2026-10-30) are only logged. The
   log names the store and the error's kind, never what it holds.
   **Since 2026-10-25**: notes.json is written **off its lock** (a snapshot
   taken under it, written after, `saving::Ordered`: one write at a time,
@@ -819,3 +823,97 @@
   by itself, `talk_back_hands_free`) in **Kokoro's af_bella** at 1× once
   Kokoro is downloaded (`tts_engine` "kokoro"), Windows' default voice
   until then.
+
+## A file Yap couldn't read
+
+(2026-10-30, `shell/saving.rs`.) Until then every store took **any** read
+error at load, not only a missing file, as "no file": another program holding
+`notes.json` (an antivirus, a backup tool, a sync client), a OneDrive file
+offline in portable mode, Windows refusing. The store started empty and its
+next save wrote that over the real file — notes saved straight away (it seeds
+its folders), so every note was gone. config.json was already safe (above);
+now every store is.
+
+**How a store reads** (`Saver::read` → `Found`; `Saver::load` for most,
+`Saver::loaded` for a store kept in an `Option` slot):
+
+- **no file**: empty, as before;
+- **not the store's shape** — torn, not JSON, **not UTF-8**: set aside as
+  `<name>.corrupt-<secs>` (`config::quarantine_corrupt`, kept as it was) and
+  the store starts empty. A UTF-8 byte-order mark (Notepad) is read past;
+- **a file Yap couldn't read** — tried again for ~200 ms while another
+  program holds it — or one not the store's shape that couldn't be set
+  aside: the store **starts empty in memory and keeps working there**, but
+  every write of that file is refused (`Reason::Unread`: "Couldn't save your
+  note: Yap couldn't read the file (another program may be using it), so
+  nothing was changed.") — **never written over**, never deleted. It's said
+  **once**, through the failed-save notice: "Yap couldn't read your notes" /
+  "Another program may be using the file. Nothing was changed, and Yap won't
+  save over it: it'll try again in a moment, keeping anything new until
+  then.", with **Try again** (said by `saving::init` if it happened before
+  the app was up). A cache's is only logged.
+
+**Read again, then kept together.** The file is read again in the
+background — 2 s, 5 s, 15 s, 30 s, then every minute, until it reads
+(`reread_later`: each store's own `save_now`, which reads first) — whenever
+the store is used (at most every 2 s, `REREAD_GAP`), and at once by Try
+again and on quitting. Once it reads, what's in it and what was added in
+memory meanwhile are put together and saved (`saving::merge_json`, pure and
+tested: the store's empty default is the base, so nothing in the file is
+lost — lists keep the file's items and add memory's new ones, matched by
+`id`, else `key`, else equal; a number changed on both sides takes the
+larger, as counts and times want; anything else changed on both, memory's).
+While a store couldn't be read, **new items' ids start past the time it was
+found so** (`Saver::next_id` / `id_floor`: notes, actions, chats, tasks,
+memory items), so nothing made meanwhile shares an id — or a note's audio
+folder, version file or pin — with anything in the file. Quitting with the
+file still unread keeps what the store last tried to save **beside** it as
+`<name>.unsaved-<secs>.json` (`saving::flush`; never the file itself); Reset
+app deletes those of the stores it clears, like the set-aside copies.
+
+**What each store does** (all through `saving.rs`):
+
+- notes.json, chats.json, memory.json, tasks.json, skills.json,
+  meeting_folders.json, note_pins.json, writing_samples.json, history.json
+  (kept in time order), dictation_stats.json (each count the larger),
+  dictionary_usage.json, word_suggestions.json, snippet_suggestions.json,
+  language_nudges.json, notices.json, hints.json, mic_tips.json,
+  onboarding.json, call_apps.json, updates.json, stt_speed.json,
+  model_catalog.json, quick_note_tabs.json: as above, merged with
+  `merge_json`, read again on use and by their `save_now`;
+- calendar.json: as above, read again by its `save_now` (the background reads
+  and Try again), synced at once when it reads; **connecting a calendar is
+  refused meanwhile** ("Yap couldn't read your calendar settings just
+  now…"): a new connection would take a slot, and its secret in Credential
+  Manager, that one in the file has;
+- groq_usage.json: the same day merged, else the later day's counts;
+- ai_usage.json: nothing written until it reads; this Yap's counts stay
+  pending and are added to the file then, as they are to another Yap's;
+- connections.json: a quiet `Saver` of its own now; the receipts kept since
+  join the file's when it reads;
+- quieted_apps.json: never written over **nor deleted**; a crash's leftovers
+  read late join this session's and come back after the next dictation;
+- note-versions/: per file — a history it couldn't read starts empty for that
+  note, is never written over, and once it reads its versions come first and
+  the ones made meanwhile follow, numbered on from them (`versions::take_in`);
+- a meeting's `cuts.json`: never written over; the places deleted meanwhile
+  join the file's once it reads. A recording's own `.json` that can't be
+  read leaves the recording unlisted and is never written (as before).
+
+**What waits for a store that couldn't be read.** Anything that deletes what
+a store no longer names: meeting audio of "deleted" notes
+(`meeting_audio::kept_all`, `notes::unread`), chat screenshots no
+conversation names (`snip::images::sweep`, `chats::unread`), search by
+meaning's vectors of gone passages (`search::index::sweep`). **Reset app and
+Download your data are refused** meanwhile (`saving::unread_store`): Reset
+can't clear what it hasn't read (it would come back once read), and the
+download would miss it.
+
+Not covered: config.json (its own way, above), the app icons' and search
+index's caches (rebuilt from their sources), `call_speakers.json` (read
+only). Tests: `saving.rs` (no file, set aside, held open, Try again,
+quitting, the merge), `notes.rs` and `dictation/history.rs` (a file held
+open at load never written over, then kept with what was added),
+`versions::take_in`, and `e2e/unread-stores.spec.js` (`YAP_E2E_FAIL_READS`
+stages reads that fail from launch, `e2e_fail_reads { store, count }` stages
+or clears them — 0 also reads every such file again at once).

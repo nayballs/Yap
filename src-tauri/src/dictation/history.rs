@@ -98,18 +98,39 @@ fn load_from_disk() -> Vec<HistoryEntry> {
     if cfg!(test) {
         return Vec::new();
     }
-    let path = history_path();
-    match std::fs::read_to_string(&path) {
-        Ok(s) => match serde_json::from_str(&s) {
-            Ok(entries) => entries,
-            Err(e) => {
-                tracing::error!("history.json failed to parse: {}", e);
-                crate::config::quarantine_corrupt(&path);
-                Vec::new()
-            }
-        },
-        Err(_) => Vec::new(),
+    load_at(&history_path())
+}
+
+/// The history in `path` (`saving::Saver::load`): a file that isn't history
+/// is set aside; one Yap couldn't read leaves it empty in memory, never
+/// written over until it reads ([`refresh_at`]).
+fn load_at(path: &std::path::Path) -> Vec<HistoryEntry> {
+    SAVER.load(path)
+}
+
+/// History whose file couldn't be read: read again and, once it reads, its
+/// entries and the dictations recorded meanwhile kept together, in time
+/// order (`saving::merge_json`). `true`: merged — save it.
+fn refresh_at(entries: &mut Vec<HistoryEntry>, path: &std::path::Path) -> bool {
+    if !SAVER.any_unread() || !SAVER.refresh(path, entries) {
+        return false;
     }
+    entries.sort_by_key(|e| e.ts);
+    if entries.len() > MAX_ENTRIES {
+        let drop = entries.len() - MAX_ENTRIES;
+        entries.drain(0..drop);
+    }
+    true
+}
+
+/// The history, read from disk the first time (and read again while its
+/// file couldn't be: [`refresh_at`], saved once merged).
+fn loaded(slot: &mut Option<Vec<HistoryEntry>>) -> &mut Vec<HistoryEntry> {
+    let entries = slot.get_or_insert_with(load_from_disk);
+    if !cfg!(test) && refresh_at(entries, &history_path()) {
+        save_to_disk(entries);
+    }
+    entries
 }
 
 /// history.json's saves (`saving.rs`): a failed one keeps the history in
@@ -127,7 +148,7 @@ pub fn saved() -> Result<(), crate::shell::saving::SaveError> {
 fn save_now() -> Result<(), crate::shell::saving::SaveError> {
     {
         let mut guard = STATE.lock().unwrap_or_else(|p| p.into_inner());
-        let entries = guard.get_or_insert_with(load_from_disk);
+        let entries = loaded(&mut guard);
         save_to_disk(entries);
     }
     saved()
@@ -251,7 +272,7 @@ pub fn forget_audio(audio: &str) -> bool {
         Ok(g) => g,
         Err(poisoned) => poisoned.into_inner(),
     };
-    let entries = guard.get_or_insert_with(load_from_disk);
+    let entries = loaded(&mut guard);
     let Some(pos) = entries.iter().position(|e| e.audio.as_deref() == Some(audio)) else {
         return false;
     };
@@ -265,7 +286,7 @@ fn push(entry: HistoryEntry) {
         Ok(g) => g,
         Err(poisoned) => poisoned.into_inner(),
     };
-    let entries = guard.get_or_insert_with(load_from_disk);
+    let entries = loaded(&mut guard);
     // Kept in time order (a failed one from before a crash is dated when it
     // was recorded).
     let at = entries.iter().rposition(|e| e.ts <= entry.ts).map_or(0, |i| i + 1);
@@ -284,7 +305,7 @@ pub fn find_audio(ts: u64, audio: &str) -> Option<HistoryEntry> {
         Ok(g) => g,
         Err(poisoned) => poisoned.into_inner(),
     };
-    let entries = guard.get_or_insert_with(load_from_disk);
+    let entries = loaded(&mut guard);
     entries.iter().find(|e| e.ts == ts && e.audio.as_deref() == Some(audio)).cloned()
 }
 
@@ -296,7 +317,7 @@ pub fn rerun_result(audio: &str, raw: &str, text: &str, said: Option<&str>, mode
         Ok(g) => g,
         Err(poisoned) => poisoned.into_inner(),
     };
-    let entries = guard.get_or_insert_with(load_from_disk);
+    let entries = loaded(&mut guard);
     let Some(e) = entries.iter_mut().find(|e| e.audio.as_deref() == Some(audio)) else {
         return false;
     };
@@ -313,7 +334,7 @@ pub fn rerun_result(audio: &str, raw: &str, text: &str, said: Option<&str>, mode
 /// Every entry as kept, oldest first (Download your data, `privacy/export.rs`).
 pub fn all() -> Vec<HistoryEntry> {
     let mut guard = STATE.lock().unwrap_or_else(|p| p.into_inner());
-    guard.get_or_insert_with(load_from_disk).clone()
+    loaded(&mut guard).clone()
 }
 
 /// Recent entries, newest first, capped at `limit`.
@@ -322,7 +343,7 @@ pub fn list(limit: usize) -> Value {
         Ok(g) => g,
         Err(poisoned) => poisoned.into_inner(),
     };
-    let entries = guard.get_or_insert_with(load_from_disk);
+    let entries = loaded(&mut guard);
     let items: Vec<Value> = entries
         .iter()
         .rev()
@@ -367,7 +388,7 @@ pub fn latest_dictation() -> Option<String> {
         Ok(g) => g,
         Err(poisoned) => poisoned.into_inner(),
     };
-    let entries = guard.get_or_insert_with(load_from_disk);
+    let entries = loaded(&mut guard);
     entries
         .iter()
         .rev()
@@ -383,7 +404,7 @@ pub fn dictation_texts_since(since: u64) -> Vec<(u64, String)> {
         Ok(g) => g,
         Err(poisoned) => poisoned.into_inner(),
     };
-    let entries = guard.get_or_insert_with(load_from_disk);
+    let entries = loaded(&mut guard);
     entries
         .iter()
         .filter(|e| e.ts >= since && !e.failed() && is_dictation_app(&e.app) && !e.text.trim().is_empty())
@@ -398,7 +419,7 @@ pub fn latest_dictation_raw() -> Option<String> {
         Ok(g) => g,
         Err(poisoned) => poisoned.into_inner(),
     };
-    let entries = guard.get_or_insert_with(load_from_disk);
+    let entries = loaded(&mut guard);
     entries
         .iter()
         .rev()
@@ -416,7 +437,7 @@ pub fn recent_dictation_secs(limit: usize) -> Vec<f32> {
         Ok(g) => g,
         Err(poisoned) => poisoned.into_inner(),
     };
-    let entries = guard.get_or_insert_with(load_from_disk);
+    let entries = loaded(&mut guard);
     entries
         .iter()
         .rev()
@@ -442,7 +463,7 @@ pub fn find(ts: u64, text: &str) -> Option<HistoryEntry> {
         Ok(g) => g,
         Err(poisoned) => poisoned.into_inner(),
     };
-    let entries = guard.get_or_insert_with(load_from_disk);
+    let entries = loaded(&mut guard);
     entries.iter().rev().find(|e| e.ts == ts && e.text == text).cloned()
 }
 
@@ -453,7 +474,7 @@ pub fn get_by_ts(ts: u64) -> Option<HistoryEntry> {
         Ok(g) => g,
         Err(poisoned) => poisoned.into_inner(),
     };
-    let entries = guard.get_or_insert_with(load_from_disk);
+    let entries = loaded(&mut guard);
     entries.iter().find(|e| e.ts == ts).cloned()
 }
 
@@ -465,7 +486,7 @@ pub fn delete_by_ts(ts: u64) -> bool {
         Ok(g) => g,
         Err(poisoned) => poisoned.into_inner(),
     };
-    let entries = guard.get_or_insert_with(load_from_disk);
+    let entries = loaded(&mut guard);
     if let Some(pos) = entries.iter().position(|e| e.ts == ts) {
         let gone = entries.remove(pos);
         save_to_disk(entries);
@@ -487,7 +508,7 @@ pub fn delete(ts: u64, text: &str) {
         Ok(g) => g,
         Err(poisoned) => poisoned.into_inner(),
     };
-    let entries = guard.get_or_insert_with(load_from_disk);
+    let entries = loaded(&mut guard);
     if let Some(pos) = entries.iter().position(|e| e.ts == ts && e.text == text) {
         let gone = entries.remove(pos);
         save_to_disk(entries);
@@ -523,7 +544,7 @@ pub fn clear() {
 /// (`stats.rs`): transcribed, with text, not an Upload's. Oldest first.
 pub fn counted_since(since: u64) -> Vec<HistoryEntry> {
     let mut guard = STATE.lock().unwrap_or_else(|p| p.into_inner());
-    let entries = guard.get_or_insert_with(load_from_disk);
+    let entries = loaded(&mut guard);
     entries
         .iter()
         .filter(|e| e.ts > since && !e.failed() && is_dictation_app(&e.app) && !e.text.trim().is_empty())
@@ -535,7 +556,7 @@ pub fn counted_since(since: u64) -> Vec<HistoryEntry> {
 /// them are from before `cutoff` (unix seconds): Settings → Privacy & data.
 pub fn counts(cutoff: u64) -> (usize, usize) {
     let mut guard = STATE.lock().unwrap_or_else(|p| p.into_inner());
-    let entries = guard.get_or_insert_with(load_from_disk);
+    let entries = loaded(&mut guard);
     entries.iter().filter(|e| !e.failed()).fold((0, 0), |(all, older), e| (all + 1, older + usize::from(e.ts < cutoff)))
 }
 
@@ -544,7 +565,7 @@ pub fn counts(cutoff: u64) -> (usize, usize) {
 pub fn forget_before(cutoff: u64) -> usize {
     let gone: Vec<HistoryEntry> = {
         let mut guard = STATE.lock().unwrap_or_else(|p| p.into_inner());
-        let entries = guard.get_or_insert_with(load_from_disk);
+        let entries = loaded(&mut guard);
         let (old, kept): (Vec<HistoryEntry>, Vec<HistoryEntry>) = std::mem::take(entries).into_iter().partition(|e| e.ts < cutoff);
         *entries = kept;
         if !old.is_empty() {
@@ -561,6 +582,72 @@ pub fn forget_before(cutoff: u64) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn entry(ts: u64, text: &str) -> HistoryEntry {
+        HistoryEntry {
+            ts,
+            raw: text.into(),
+            text: text.into(),
+            said: None,
+            model: "parakeet".into(),
+            app: "notepad.exe".into(),
+            audio: None,
+            status: None,
+            error: None,
+            secs: None,
+        }
+    }
+
+    /// history.json held by another program when Yap loads it (review
+    /// 2026-10-30: the next dictation used to save a history of one over
+    /// all of it): the dictations made meanwhile are kept in memory, the
+    /// file is never written over, and once it reads both are kept, in time
+    /// order.
+    #[cfg(windows)]
+    #[test]
+    fn history_yap_couldnt_read_is_never_written_over_and_kept_with_new_dictations() {
+        use crate::shell::saving::{reread_due, Reason};
+        use std::os::windows::fs::OpenOptionsExt;
+        let dir = std::env::temp_dir().join(format!("yap-history-unread-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("history.json");
+        let text = serde_json::to_string(&[entry(100, "Order more compost"), entry(300, "Net the brassicas")]).unwrap();
+        std::fs::write(&path, &text).unwrap();
+
+        let held = std::fs::OpenOptions::new().read(true).share_mode(0).open(&path).unwrap();
+        let mut entries = load_at(&path);
+        assert!(entries.is_empty() && SAVER.unread(&path));
+        entries.push(entry(200, "Water the tomatoes tonight"));
+        let e = SAVER.write_json(&path, &entries, false).unwrap_err();
+        assert_eq!(e.reason, Reason::Unread);
+        drop(held);
+        assert!(SAVER.write_json(&path, &entries, false).is_err());
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), text, "the file as it was");
+
+        reread_due();
+        assert!(refresh_at(&mut entries, &path));
+        let texts: Vec<&str> = entries.iter().map(|e| e.text.as_str()).collect();
+        assert_eq!(texts, ["Order more compost", "Water the tomatoes tonight", "Net the brassicas"]);
+        SAVER.write_json(&path, &entries, false).unwrap();
+        assert!(SAVER.check().is_ok());
+        assert_eq!(load_at(&path).len(), 3);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A history file that isn't one is set aside, never written over.
+    #[test]
+    fn a_history_file_that_isnt_one_is_set_aside() {
+        let dir = std::env::temp_dir().join(format!("yap-history-torn-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("history.json");
+        std::fs::write(&path, "[{\"ts\": 1, \"te").unwrap();
+        assert!(load_at(&path).is_empty());
+        assert!(!path.exists() && !SAVER.unread(&path));
+        assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 1, "kept beside, as it was");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     #[test]
     fn word_count_counts_whitespace_separated() {

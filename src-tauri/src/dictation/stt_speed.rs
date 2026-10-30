@@ -448,20 +448,15 @@ fn store_path() -> PathBuf {
 
 const STORE_FILE: &str = "stt_speed.json";
 
-fn load_store() -> Store {
-    // Unit tests never read or write the real data folder.
+/// The timings, read the first time (`saving::Saver::loaded`: set aside if
+/// they aren't timings — measured again; a file Yap couldn't read is never
+/// written over, and read again here until it reads). Unit tests never read
+/// or write the real data folder.
+fn loaded(slot: &mut Option<Store>) -> &mut Store {
     if cfg!(test) {
-        return Store::default();
+        return slot.get_or_insert_with(Store::default);
     }
-    let path = store_path();
-    match std::fs::read_to_string(&path) {
-        Ok(s) => serde_json::from_str(&s).unwrap_or_else(|e| {
-            tracing::warn!("stt_speed.json failed to parse ({e}); measuring again");
-            crate::config::quarantine_corrupt(&path);
-            Store::default()
-        }),
-        Err(_) => Store::default(),
-    }
+    SAVER.loaded(slot, &store_path(), true)
 }
 
 fn save_store(store: &Store) {
@@ -477,9 +472,11 @@ pub static SAVER: crate::shell::saving::Saver = crate::shell::saving::Saver::qui
 
 /// Write the timings again (Try again).
 fn save_now() -> Result<(), crate::shell::saving::SaveError> {
-    if let Some(store) = lock().store.as_ref() {
-        save_store(store);
+    let mut s = lock();
+    if s.store.is_some() {
+        save_store(loaded(&mut s.store));
     }
+    drop(s);
     SAVER.check()
 }
 
@@ -500,7 +497,7 @@ fn stored(model_id: &str) -> Option<Measured> {
     let model_print = stt::model_fingerprint(&crate::config::data_dir(), model_id)?;
     let pc = pc_print();
     let mut s = lock();
-    let store = s.store.get_or_insert_with(load_store);
+    let store = loaded(&mut s.store);
     store.models.get(model_id).filter(|m| fits(m, &model_print, &pc)).cloned()
 }
 
@@ -1037,7 +1034,7 @@ fn run_measured(app: &AppHandle, data_dir: &Path, model_id: &str, model_print: &
     };
     {
         let mut s = lock();
-        let store = s.store.get_or_insert_with(load_store);
+        let store = loaded(&mut s.store);
         store.models.insert(model_id.to_string(), measured.clone());
         save_store(store);
     }

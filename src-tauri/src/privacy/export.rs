@@ -686,6 +686,13 @@ pub struct Saved {
 /// screenshots. Nothing (`path` none) when the dialog was cancelled.
 #[tauri::command]
 pub async fn data_export_save(app: AppHandle, window: tauri::WebviewWindow, audio: bool) -> Result<Saved, String> {
+    // A store whose file Yap couldn't read holds only what was added since:
+    // the download would miss the rest.
+    if let Some(whole) = crate::shell::saving::unread_store() {
+        return Err(format!(
+            "Yap couldn't read {whole} just now (another program may be using the file), so the download would miss them. Try again in a moment."
+        ));
+    }
     if RUNNING.swap(true, Ordering::SeqCst) {
         return Err("Your data is being saved already.".into());
     }

@@ -282,23 +282,23 @@ fn path() -> std::path::PathBuf {
     crate::config::data_dir().join("writing_samples.json")
 }
 
-/// The file, read the first time.
+/// The file, read the first time (and read again while it couldn't be:
+/// the samples added meanwhile kept with it, and saved).
 fn loaded(slot: &mut Option<Store>) -> &mut Store {
-    slot.get_or_insert_with(read_file)
+    let store = slot.get_or_insert_with(read_file);
+    #[cfg(not(test))]
+    if SAVER.any_unread() && SAVER.refresh(&path(), store) {
+        let _ = write(store);
+    }
+    store
 }
 
-/// writing_samples.json as it is on disk (none, or unreadable — set aside,
-/// never written over: no samples).
+/// writing_samples.json as it is on disk (none, or not samples — set
+/// aside: no samples; one Yap couldn't read: none in memory, the file never
+/// written over until it reads, `saving::Saver::load`).
 #[cfg(not(test))]
 fn read_file() -> Store {
-    let path = path();
-    match std::fs::read_to_string(&path) {
-        Ok(s) => serde_json::from_str(&s).unwrap_or_else(|_| {
-            crate::config::quarantine_corrupt(&path);
-            Store::default()
-        }),
-        Err(_) => Store::default(),
-    }
+    SAVER.load(&path())
 }
 
 /// A unit test never touches the disk.
@@ -320,9 +320,11 @@ pub static SAVER: crate::shell::saving::Saver =
 
 #[cfg_attr(test, allow(dead_code))]
 fn save_now() -> Result<(), crate::shell::saving::SaveError> {
-    if let Some(s) = STORE.lock().unwrap_or_else(|p| p.into_inner()).as_ref() {
-        write(s)?;
+    let mut guard = STORE.lock().unwrap_or_else(|p| p.into_inner());
+    if guard.is_some() {
+        write(loaded(&mut guard))?;
     }
+    drop(guard);
     SAVER.check()
 }
 

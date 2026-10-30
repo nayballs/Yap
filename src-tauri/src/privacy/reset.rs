@@ -97,14 +97,17 @@ pub const STAYS: &[Part] = &[
     },
 ];
 
-/// The stores whose set-aside copies (`<stem>.corrupt-…`, `config::set_aside`)
-/// go with them: they hold the same content.
+/// The stores whose set-aside copies (`<stem>.corrupt-…`, `config::set_aside`;
+/// `<stem>.unsaved-…`, what a store kept beside a file it couldn't read at
+/// quit, `saving::flush`) go with them: they hold the same content.
 const SET_ASIDE: &[&str] = &["history", "notes", "note_pins", "chats", "memory", "tasks", "dictation_stats", "ai_usage", "groq_usage"];
 
 /// Whether `file` (a name in the data folder) is a set-aside copy of a
 /// store that goes. Pure.
 pub fn set_aside_copy(file: &str) -> bool {
-    SET_ASIDE.iter().any(|stem| file.strip_prefix(stem).and_then(|r| r.strip_prefix(".corrupt")).is_some())
+    SET_ASIDE.iter().any(|stem| {
+        file.strip_prefix(stem).and_then(|r| r.strip_prefix(".corrupt").or_else(|| r.strip_prefix(".unsaved-"))).is_some()
+    })
 }
 
 /// The dialog's lists.
@@ -154,7 +157,12 @@ fn busy(app: &AppHandle) -> Option<String> {
         .try_state::<crate::AppState>()
         .and_then(|s| s.pipeline.lock().ok().map(|p| p.as_ref().is_some_and(|p| p.is_busy())))
         .unwrap_or(false);
-    blocked(dictating, crate::meetings::meeting::is_recording())
+    blocked(dictating, crate::meetings::meeting::is_recording()).or_else(|| {
+        // A store whose file Yap couldn't read: what's in it isn't in
+        // memory, so it can't be cleared (and would come back once read).
+        crate::shell::saving::unread_store()
+            .map(|whole| format!("Yap couldn't read {whole} just now (another program may be using the file). Try again in a moment."))
+    })
 }
 
 /// Settings' dialog: what goes (with counts), what stays, and whether it
