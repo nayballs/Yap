@@ -464,7 +464,9 @@ The correction dictionary: near-miss (fuzzy) matching, several ways one word is 
     correction spelling that word), and its toast has Undo (`undoImport`).
   - **Export…** — everything (the bar's Export…) or the selection (the
     selection's): **CSV** (snippets, stars and ≈ kept; a BOM so Excel
-    reads it as UTF-8; Import… reads it back the same) or **text**
+    reads it as UTF-8; a cell starting with `=`, `+`, `-`, `@`, a tab or a
+    line break gets an apostrophe first, so a spreadsheet never runs it as
+    a formula, and Import… takes it off; Import… reads it back the same) or **text**
     (`heard → written` a line, corrections only: "Snippets need CSV" says
     how many were left out). A word heard several ways is a row (a line) a
     way, the written word on each.

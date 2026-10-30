@@ -329,7 +329,10 @@ global hook never sees keys while a Yap window has the focus.
   shot).
 - **Pasted or dropped** (`snip/attach.rs`, phase 2): Ctrl+V of a picture in
   the message box (WebView2's paste event carries it as a PNG file; its
-  bytes go to `chat_image_paste` as the call's raw body, never base64), or
+  bytes go to `chat_image_paste` as the call's raw body, never base64; not
+  when the paste has text too — Excel's cells, PowerPoint's text bring a
+  picture of themselves: the text pastes — unless that text is only an
+  address, as Firefox's copied picture has: `pastedImage`), or
   image files dropped on Chat (Tauri's drag-drop event, its paths to
   `chat_image_drop`; the box says "Drop pictures to ask about them" while
   they're dragged over). Only pictures (PNG, JPEG, GIF, BMP, WebP, TIFF,
