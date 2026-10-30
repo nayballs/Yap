@@ -1672,18 +1672,25 @@ fn follow_an_older_builds_mic(cfg: &mut YapConfig) {
 /// (`<name>.<pid>-<n>.tmp`): two writes of one file at once shared
 /// `<name>.tmp` until 2026-10-23, so one could rename the other's half-written
 /// file into place. The rename is tried again for a moment while another
-/// program (an antivirus, a backup tool) holds the target.
+/// program (an antivirus, a backup tool) holds the target. The temp file's
+/// bytes reach the disk before the rename (2026-10-29): NTFS can write the
+/// rename to its journal before the data, so a power cut or a blue screen
+/// moments after a save left the store renamed into place but full of
+/// zeros — set aside as corrupt, everything in it gone with the old file.
 pub(crate) fn atomic_write(path: &Path, contents: &str) -> std::io::Result<()> {
     atomic_write_bytes(path, contents.as_bytes())
 }
 
 /// [`atomic_write`] for bytes.
 pub(crate) fn atomic_write_bytes(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+    use std::io::Write;
     static SEQ: AtomicU64 = AtomicU64::new(0);
     let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| "yap".into());
     let n = SEQ.fetch_add(1, Ordering::Relaxed);
     let tmp = path.with_file_name(format!("{name}.{}-{n}.tmp", std::process::id()));
-    let written = std::fs::write(&tmp, bytes).and_then(|()| rename_patiently(&tmp, path));
+    let written = std::fs::File::create(&tmp)
+        .and_then(|mut file| file.write_all(bytes).and_then(|()| file.sync_all()))
+        .and_then(|()| rename_patiently(&tmp, path));
     if written.is_err() {
         let _ = std::fs::remove_file(&tmp);
     }
