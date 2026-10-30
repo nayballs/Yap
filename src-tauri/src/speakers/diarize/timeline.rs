@@ -133,6 +133,11 @@ impl Runs {
         });
     }
 
+    /// The engine process fed now (the last one started), if any.
+    pub fn last_stream(&self) -> Option<u32> {
+        self.runs.last().map(|r| r.stream)
+    }
+
     /// Its latest list (times from its own first sample).
     pub fn update(&mut self, stream: u32, segments: Vec<RawSegment>, labelled_ms: u64) {
         if let Some(run) = self.runs.iter_mut().find(|r| r.stream == stream) {

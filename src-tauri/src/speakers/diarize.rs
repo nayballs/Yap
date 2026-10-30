@@ -44,8 +44,8 @@ use std::io::{BufRead, BufReader, BufWriter, Write};
 use std::process::{Child, ChildStdin, Command, Stdio};
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
-use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::sync::{Arc, Mutex, MutexGuard};
+use std::time::{Duration, Instant};
 
 use tauri::{AppHandle, Emitter};
 
@@ -65,6 +65,15 @@ pub fn run_child() -> i32 {
 pub const MAX_RESTARTS: u32 = 2;
 /// How long `finish` waits for the final labels (normally well under 1 s).
 const FINISH_TIMEOUT: Duration = Duration::from_secs(20);
+/// An engine ended for taking too long: how long its reader gets for what
+/// it had already sent (the pipe empties in moments once it's gone).
+const DRAIN: Duration = Duration::from_secs(2);
+/// An engine that sent its final labels: how long it gets to exit by itself
+/// before it's ended (a runtime stuck on its way out never holds `finish`).
+const EXIT_GRACE: Duration = Duration::from_secs(2);
+/// How long Cancel gives the engine to stop before it's ended: a write to a
+/// hung engine (not reading, its pipe full) never returns by itself.
+const CANCEL_GRACE: Duration = Duration::from_secs(2);
 /// Audio queued for a stuck engine beyond this (5 min) is sent as silence:
 /// the clock stays right, memory stays bounded.
 const QUEUE_CAP: usize = 5 * 60 * 16_000;
@@ -127,6 +136,44 @@ fn forward_stderr(child: &mut Child) {
                 }
             }
         });
+    }
+}
+
+/// The engine process now running, which another thread can end: a write
+/// to a hung engine (not reading, its pipe full) never returns, so the
+/// thread feeding it can't, and Cancel or a finish that ran out of time
+/// ends it from outside (the write then fails).
+#[derive(Clone, Default)]
+struct Engine(Arc<Mutex<Option<Child>>>);
+
+impl Engine {
+    fn slot(&self) -> MutexGuard<'_, Option<Child>> {
+        self.0.lock().unwrap_or_else(|p| p.into_inner())
+    }
+
+    fn set(&self, child: Child) {
+        *self.slot() = Some(child);
+    }
+
+    /// End it now (it stays in the slot: whoever runs it waits for it).
+    fn kill(&self) {
+        if let Some(child) = self.slot().as_mut() {
+            let _ = child.kill();
+        }
+    }
+
+    /// Done with it: `grace` to exit by itself, then ended; waited for.
+    fn reap(&self, grace: Duration) {
+        let Some(mut child) = self.slot().take() else { return };
+        let until = Instant::now() + grace;
+        while Instant::now() < until {
+            match child.try_wait() {
+                Ok(None) => std::thread::sleep(Duration::from_millis(20)),
+                _ => return,
+            }
+        }
+        let _ = child.kill();
+        let _ = child.wait();
     }
 }
 
@@ -227,9 +274,27 @@ struct State {
     audio_ms: u64,
     restarts: u32,
     error: Option<String>,
+    /// The engine running now sent its final list.
+    final_seen: bool,
+    /// The final timeline went out: nothing more is published.
+    closed: bool,
 }
 
 impl State {
+    /// The recording's final timeline, once (the feeder's; or `finish`'s,
+    /// when it stopped waiting for a stuck engine): every label the engine
+    /// sent, and `why` if its final list never came (the lines past its
+    /// labels stay "Them"). `None` once it went out.
+    fn close(&mut self, why: &str) -> Option<Timeline> {
+        if std::mem::replace(&mut self.closed, true) {
+            return None;
+        }
+        if !self.final_seen && self.error.is_none() {
+            self.error = Some(why.to_string());
+        }
+        Some(self.timeline(true))
+    }
+
     fn timeline(&self, done: bool) -> Timeline {
         let (segments, labelled_ms, gaps) = self.runs.merged();
         Timeline {
@@ -256,6 +321,9 @@ pub struct Session {
     done_rx: Receiver<Timeline>,
     cancel: Arc<AtomicBool>,
     finished: bool,
+    /// What the engine sent so far (shared with the feeder).
+    state: Arc<Mutex<State>>,
+    engine: Engine,
 }
 
 impl Session {
@@ -292,10 +360,14 @@ impl Session {
             audio_ms: 0,
             restarts: 0,
             error: None,
+            final_seen: false,
+            closed: false,
         }));
+        let engine = Engine::default();
         let feeder = Feeder {
             files,
-            state,
+            state: Arc::clone(&state),
+            engine: engine.clone(),
             rx,
             queued: Arc::clone(&queued),
             cancel: Arc::clone(&cancel),
@@ -320,6 +392,8 @@ impl Session {
             done_rx,
             cancel,
             finished: false,
+            state,
+            engine,
         })
     }
 
@@ -340,37 +414,70 @@ impl Session {
     /// timeline to the handlers and return it. Blocks (≤ ~20 s, normally
     /// well under one); call it off the async runtime. The recording's
     /// [`Tee`]s must be gone or idle by now: audio sent after this is lost.
-    pub fn finish(mut self) -> Option<Timeline> {
+    pub fn finish(self) -> Option<Timeline> {
+        self.finish_within(FINISH_TIMEOUT + Duration::from_secs(5))
+    }
+
+    /// [`finish`](Self::finish), waiting at most `wait` for the feeder.
+    fn finish_within(mut self, wait: Duration) -> Option<Timeline> {
         self.finished = true;
         if let Some(tx) = self.tx.take() {
             let _ = tx.send(Feed::End);
         }
-        match self.done_rx.recv_timeout(FINISH_TIMEOUT + Duration::from_secs(5)) {
-            Ok(tl) => Some(tl),
-            Err(_) => {
-                tracing::warn!(note_id = self.note_id, "Diarization: no final labels in time");
-                timeline(self.note_id)
+        if let Ok(tl) = self.done_rx.recv_timeout(wait) {
+            return Some(tl);
+        }
+        // The engine is stuck (hung, still on a backlog, or on its way out
+        // after its final list): it's stopped, and the labels it already
+        // sent are the recording's final ones. (The feeder's own, later,
+        // would find the recording ended and be dropped.)
+        self.cancel.store(true, Ordering::SeqCst);
+        self.engine.kill();
+        let closed = self
+            .state
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .close("The speaker engine didn't finish in time, so the end of the meeting has no speakers.");
+        match closed {
+            Some(tl) => {
+                tracing::warn!(
+                    note_id = self.note_id,
+                    labelled_s = tl.labelled_ms / 1000,
+                    audio_s = tl.audio_ms / 1000,
+                    lost = tl.error.is_some(),
+                    "Diarization: no final labels in time; the ones it sent are kept"
+                );
+                publish(&tl);
+                Some(tl)
             }
+            // The feeder closed it a moment ago: its timeline is on its way.
+            None => self.done_rx.recv_timeout(Duration::from_secs(5)).ok().or_else(|| timeline(self.note_id)),
         }
     }
 }
 
 impl Drop for Session {
     /// Dropped without `finish` (the recording failed to start): stop the
-    /// engine, tell nobody.
+    /// engine, tell nobody. One that doesn't stop (hung, its feeder stuck
+    /// writing to it) is ended after [`CANCEL_GRACE`].
     fn drop(&mut self) {
         if !self.finished {
             self.cancel.store(true, Ordering::SeqCst);
             if let Some(tx) = self.tx.take() {
                 let _ = tx.send(Feed::End);
             }
+            let engine = self.engine.clone();
+            let _ = std::thread::Builder::new().name("diarize-cancel".into()).spawn(move || {
+                std::thread::sleep(CANCEL_GRACE);
+                engine.kill();
+            });
         }
     }
 }
 
-/// One `yap.exe diarize` process of a session.
+/// One `yap.exe diarize` process of a session (the process itself is in
+/// the feeder's [`Engine`]).
 struct Running {
-    child: Child,
     stdin: BufWriter<ChildStdin>,
     stream: u32,
     /// Its stdout reader says when it's done (true: it sent the final list).
@@ -382,6 +489,7 @@ struct Running {
 struct Feeder {
     files: EngineFiles,
     state: Arc<Mutex<State>>,
+    engine: Engine,
     rx: Receiver<Feed>,
     queued: Arc<AtomicUsize>,
     cancel: Arc<AtomicBool>,
@@ -409,7 +517,12 @@ impl Feeder {
             let _ = child.kill();
             return None;
         };
-        self.lock().runs.begin(stream, offset_ms);
+        self.engine.set(child);
+        {
+            let mut s = self.lock();
+            s.runs.begin(stream, offset_ms);
+            s.final_seen = false;
+        }
         tracing::info!(note_id, stream, offset_ms, engine = self.files.name, "Diarization: engine started");
         let (ended_tx, ended) = mpsc::channel();
         let state = Arc::clone(&self.state);
@@ -418,7 +531,6 @@ impl Feeder {
             let _ = ended_tx.send(saw_final);
         });
         Some(Running {
-            child,
             stdin: BufWriter::with_capacity(1 << 16, stdin),
             stream,
             ended,
@@ -426,10 +538,14 @@ impl Feeder {
     }
 
     /// The engine died: start the next one at `sent` samples, if allowed.
+    /// None once cancelled (or `finish` gave up on it): that's why it died.
     fn restart(&self, dead: Running, sent: u64) -> Option<Running> {
-        let Running { mut child, stream, .. } = dead;
-        let _ = child.kill();
-        let _ = child.wait();
+        let stream = dead.stream;
+        drop(dead);
+        self.engine.reap(Duration::ZERO);
+        if self.cancel.load(Ordering::SeqCst) {
+            return None;
+        }
         let restarts = {
             let mut s = self.lock();
             s.restarts += 1;
@@ -501,10 +617,8 @@ impl Feeder {
         }
 
         if self.cancel.load(Ordering::SeqCst) {
-            if let Some(mut r) = running {
-                let _ = r.child.kill();
-                let _ = r.child.wait();
-            }
+            drop(running);
+            self.engine.reap(Duration::ZERO);
             tracing::info!("Diarization: cancelled");
             return;
         }
@@ -512,26 +626,24 @@ impl Feeder {
         // The recording stopped: close stdin, wait for the final list.
         self.lock().audio_ms = sent * 1000 / 16_000;
         if let Some(r) = running {
-            let Running { mut child, stdin, ended, .. } = r;
+            let Running { stdin, ended, .. } = r;
             drop(stdin);
-            let saw_final = match ended.recv_timeout(FINISH_TIMEOUT) {
-                Ok(saw) => saw,
+            match ended.recv_timeout(FINISH_TIMEOUT) {
+                Ok(_) | Err(RecvTimeoutError::Disconnected) => {}
                 Err(RecvTimeoutError::Timeout) => {
                     tracing::warn!("Diarization: the engine didn't finish in time");
-                    let _ = child.kill();
-                    false
-                }
-                Err(RecvTimeoutError::Disconnected) => false,
-            };
-            let _ = child.wait();
-            if !saw_final {
-                let mut s = self.lock();
-                if s.error.is_none() {
-                    s.error = Some("The speaker engine stopped before labelling the end of the meeting.".into());
+                    // Ended; what it had already sent is still read (its
+                    // final list too, if that was on its way).
+                    self.engine.kill();
+                    let _ = ended.recv_timeout(DRAIN);
                 }
             }
+            self.engine.reap(EXIT_GRACE);
         }
-        let tl = self.lock().timeline(true);
+        // Closed already: `finish` stopped waiting and published what had come.
+        let Some(tl) = self.lock().close("The speaker engine stopped before labelling the end of the meeting.") else {
+            return;
+        };
         let voices = tl.voices().len();
         tracing::info!(
             note_id = tl.note_id,
@@ -551,6 +663,8 @@ impl Feeder {
 /// update. True when it sent its final list.
 fn read_messages(stdout: impl std::io::Read, stream: u32, state: &Mutex<State>) -> bool {
     let lock = || state.lock().unwrap_or_else(|p| p.into_inner());
+    // An engine already replaced by a restart speaks for nothing now.
+    let current = |s: &State| s.runs.last_stream().is_none_or(|last| last == stream);
     for line in BufReader::new(stdout).lines().map_while(Result::ok) {
         match protocol::parse_line(&line) {
             Some(Message::Ready { protocol: p, speakers, load_ms, runtime, .. }) => {
@@ -559,23 +673,38 @@ fn read_messages(stdout: impl std::io::Read, stream: u32, state: &Mutex<State>) 
                     lock().error = Some("The speaker engine doesn't match this Yap.".into());
                     return false;
                 }
+                // A restart that works: the stop before it is behind it
+                // (what it missed is in `gaps`), not an engine that failed.
+                let mut s = lock();
+                if current(&s) {
+                    s.error = None;
+                }
+                drop(s);
                 tracing::info!(stream, speakers, load_ms, runtime = %runtime, "Diarization: engine ready");
             }
             Some(Message::Segments { is_final, segments, labelled_ms, audio_ms, compute_ms, .. }) => {
                 let tl = {
                     let mut s = lock();
                     s.runs.update(stream, segments, labelled_ms);
-                    (!is_final).then(|| s.timeline(false))
+                    if is_final && current(&s) {
+                        s.final_seen = true;
+                    }
+                    (!is_final && !s.closed).then(|| s.timeline(false))
                 };
                 tracing::debug!(stream, labelled_ms, audio_ms, compute_ms, is_final, "Diarization: labels");
-                match tl {
-                    Some(tl) => publish(&tl),
-                    None => return true,
+                if is_final {
+                    return true;
+                }
+                if let Some(tl) = tl {
+                    publish(&tl);
                 }
             }
             Some(Message::Error { message }) => {
                 tracing::warn!(stream, "Diarization: engine error: {message}");
-                lock().error = Some(message);
+                let mut s = lock();
+                if current(&s) {
+                    s.error = Some(message);
+                }
             }
             None => {}
         }
@@ -615,11 +744,11 @@ impl Drop for InUse {
 /// threads, so an hour in ~1.5 min), and its final segments on that one
 /// clock, voices numbered by first appearance (stream 0). `progress` gets
 /// the samples sent so far; `cancelled` stops it (the child killed:
-/// `Err(cancelled_as)`).
+/// `Err(cancelled_as)`), a hung one too, after [`CANCEL_GRACE`].
 pub fn run_saved(
     next: impl FnMut() -> Option<Piece>,
     progress: &dyn Fn(u64),
-    cancelled: &dyn Fn() -> bool,
+    cancelled: &(dyn Fn() -> bool + Sync),
     cancelled_as: &str,
 ) -> Result<Vec<Segment>, String> {
     let cfg = crate::config::load();
@@ -630,19 +759,57 @@ pub fn run_saved(
 /// [`run_saved`] on these engine files.
 pub(crate) fn run_saved_on(
     files: &EngineFiles,
-    mut next: impl FnMut() -> Option<Piece>,
+    next: impl FnMut() -> Option<Piece>,
     progress: &dyn Fn(u64),
-    cancelled: &dyn Fn() -> bool,
+    cancelled: &(dyn Fn() -> bool + Sync),
     cancelled_as: &str,
 ) -> Result<Vec<Segment>, String> {
     let _in_use = InUse::new();
-    let started = std::time::Instant::now();
     let mut child = spawn(files, 0)?;
     forward_stderr(&mut child);
+    run_saved_child(child, next, progress, cancelled, cancelled_as)
+}
+
+/// Runs `f`, ending `engine` when Cancel (`cancelled`) goes unanswered for
+/// [`CANCEL_GRACE`]: `f` writes to the engine, and a write to a hung one
+/// never returns, so `f` itself can't see Cancel.
+fn ended_on_cancel<T>(engine: &Engine, cancelled: &(dyn Fn() -> bool + Sync), f: impl FnOnce() -> T) -> T {
+    let (done_tx, done_rx) = mpsc::channel::<()>();
+    std::thread::scope(|scope| {
+        scope.spawn(move || loop {
+            match done_rx.recv_timeout(Duration::from_millis(100)) {
+                Err(RecvTimeoutError::Timeout) if cancelled() => {
+                    if let Err(RecvTimeoutError::Timeout) = done_rx.recv_timeout(CANCEL_GRACE) {
+                        tracing::warn!("Diarization: the engine didn't stop for Cancel; ending it");
+                        engine.kill();
+                    }
+                    return;
+                }
+                Err(RecvTimeoutError::Timeout) => {}
+                _ => return,
+            }
+        });
+        let out = f();
+        drop(done_tx);
+        out
+    })
+}
+
+/// [`run_saved_on`] with its engine started.
+fn run_saved_child(
+    mut child: Child,
+    mut next: impl FnMut() -> Option<Piece>,
+    progress: &dyn Fn(u64),
+    cancelled: &(dyn Fn() -> bool + Sync),
+    cancelled_as: &str,
+) -> Result<Vec<Segment>, String> {
+    let started = std::time::Instant::now();
     let (Some(stdin), Some(stdout)) = (child.stdin.take(), child.stdout.take()) else {
         let _ = child.kill();
         return Err("couldn't talk to the speaker engine".to_string());
     };
+    let engine = Engine::default();
+    engine.set(child);
     let (done_tx, done_rx) = mpsc::channel::<Result<Vec<protocol::RawSegment>, String>>();
     let _ = std::thread::Builder::new().name("diarize-read".into()).spawn(move || {
         let mut error = None;
@@ -661,16 +828,12 @@ pub(crate) fn run_saved_on(
         }
         let _ = done_tx.send(Err(error.unwrap_or_else(|| "The speaker engine stopped before it finished".to_string())));
     });
-    let stop = |mut child: Child| {
-        let _ = child.kill();
-        let _ = child.wait();
-    };
+    let stop = || engine.reap(Duration::ZERO);
     let mut stdin = BufWriter::with_capacity(1 << 16, stdin);
     let mut sent: u64 = 0;
-    loop {
+    ended_on_cancel(&engine, cancelled, || loop {
         if cancelled() {
-            stop(child);
-            return Err(cancelled_as.to_string());
+            return;
         }
         let wrote = match next() {
             Some(Piece::Audio(a)) => {
@@ -681,12 +844,16 @@ pub(crate) fn run_saved_on(
                 sent += n as u64;
                 protocol::write_silence(&mut stdin, n)
             }
-            None => break,
+            None => return,
         };
         if wrote.and_then(|_| stdin.flush()).is_err() {
-            break; // the child died: its reader says why
+            return; // the child died (or Cancel ended it): its reader says why
         }
         progress(sent);
+    });
+    if cancelled() {
+        stop();
+        return Err(cancelled_as.to_string());
     }
     drop(stdin);
     // The tail, labelled at the end (normally well under a second).
@@ -695,7 +862,7 @@ pub(crate) fn run_saved_on(
         match done_rx.recv_timeout(Duration::from_millis(200)) {
             Ok(r) => break r,
             Err(RecvTimeoutError::Timeout) if cancelled() => {
-                stop(child);
+                stop();
                 return Err(cancelled_as.to_string());
             }
             Err(RecvTimeoutError::Timeout) if waited.elapsed() > FINISH_TIMEOUT * 3 => {
@@ -705,7 +872,7 @@ pub(crate) fn run_saved_on(
             Err(RecvTimeoutError::Disconnected) => break Err("The speaker engine stopped before it finished".to_string()),
         }
     };
-    stop(child);
+    stop();
     let segments: Vec<Segment> = result?
         .into_iter()
         .map(|s| Segment { start_ms: s.start_ms, end_ms: s.end_ms, speaker: s.speaker, stream: 0 })
@@ -1008,7 +1175,155 @@ mod tests {
             audio_ms: 0,
             restarts: 0,
             error: None,
+            final_seen: false,
+            closed: false,
         })
+    }
+
+    const READY: &str = r#"{"type":"ready","protocol":1,"speakers":8,"frame_ms":10.0,"runtime":"0.2.0","load_ms":900}"#;
+
+    #[test]
+    fn a_restart_that_works_clears_the_engine_error() {
+        let st = state();
+        st.lock().unwrap().runs.begin(0, 0);
+        let crashed = r#"{"type":"error","message":"ggml assert"}"#;
+        assert!(!read_messages(crashed.as_bytes(), 0, &st));
+        assert!(st.lock().unwrap().error.is_some());
+        // Started again at 40 s: it loads, labels, and finishes.
+        {
+            let mut s = st.lock().unwrap();
+            s.restarts = 1;
+            s.runs.begin(1, 40_000);
+        }
+        let lines = [
+            READY,
+            r#"{"type":"segments","final":true,"audio_ms":20000,"labelled_ms":20000,"compute_ms":400,"segments":[{"start_ms":0,"end_ms":15000,"speaker":1}]}"#,
+        ]
+        .join("\n");
+        assert!(read_messages(lines.as_bytes(), 1, &st));
+        // The first engine's late word changes nothing now.
+        assert!(!read_messages(crashed.as_bytes(), 0, &st));
+        let mut s = st.lock().unwrap();
+        s.audio_ms = 60_000;
+        let tl = s.close("unused").expect("the final timeline");
+        assert_eq!(tl.error, None, "the restart worked");
+        assert_eq!(tl.labelled_ms, 60_000, "labels settled to the end");
+        assert_eq!(tl.restarts, 1);
+        assert_eq!(tl.gaps, vec![[0, 40_000]], "what the first engine missed is a gap");
+    }
+
+    /// A session whose feeder never answers (stuck on its engine), with
+    /// `lines` already read from that engine.
+    fn stuck_session(note_id: u64, lines: &str, audio_ms: u64) -> (Session, Arc<Mutex<State>>, Sender<Timeline>) {
+        let st = Arc::new(state());
+        {
+            let mut s = st.lock().unwrap();
+            s.note_id = note_id;
+            s.runs.begin(0, 0);
+        }
+        read_messages(lines.as_bytes(), 0, &st);
+        st.lock().unwrap().audio_ms = audio_ms;
+        let (feeder_tx, done_rx) = mpsc::channel();
+        let session = Session {
+            note_id,
+            id: 1,
+            tx: None,
+            queued: Arc::new(AtomicUsize::new(0)),
+            done_rx,
+            cancel: Arc::new(AtomicBool::new(false)),
+            finished: false,
+            state: Arc::clone(&st),
+            engine: Engine::default(),
+        };
+        (session, st, feeder_tx)
+    }
+
+    #[test]
+    fn a_finish_that_runs_out_of_time_keeps_what_the_engine_sent() {
+        // Its final list came, then it hung on its way out.
+        let done = [
+            READY,
+            r#"{"type":"segments","final":true,"audio_ms":41000,"labelled_ms":41000,"compute_ms":900,"segments":[{"start_ms":0,"end_ms":12000,"speaker":1},{"start_ms":12500,"end_ms":40000,"speaker":2}]}"#,
+        ]
+        .join("\n");
+        let (session, st, _feeder) = stuck_session(9_101, &done, 41_000);
+        let cancel = Arc::clone(&session.cancel);
+        let tl = session.finish_within(Duration::from_millis(50)).expect("a timeline");
+        assert!(tl.done, "final");
+        assert_eq!(tl.segments.len(), 2, "every label it sent");
+        assert_eq!(tl.labelled_ms, 41_000);
+        assert_eq!(tl.error, None, "nothing was lost");
+        assert!(cancel.load(Ordering::SeqCst), "the stuck engine is stopped");
+        // The feeder, unstuck later, publishes nothing more.
+        assert!(st.lock().unwrap().close("late").is_none());
+
+        // Only live labels came: kept, and the rest said to be lost.
+        let live = [
+            READY,
+            r#"{"type":"segments","final":false,"audio_ms":35000,"labelled_ms":30400,"compute_ms":700,"segments":[{"start_ms":0,"end_ms":12000,"speaker":1}]}"#,
+        ]
+        .join("\n");
+        let (session, _, _feeder) = stuck_session(9_102, &live, 60_000);
+        let tl = session.finish_within(Duration::from_millis(50)).expect("a timeline");
+        assert!(tl.done);
+        assert_eq!(tl.segments.len(), 1);
+        assert_eq!(tl.labelled_ms, 30_400, "labelled as far as it got");
+        assert!(tl.error.as_deref().is_some_and(|e| e.contains("didn't finish in time")));
+    }
+
+    /// Stands in for an engine that hangs: it never reads its input, so a
+    /// write blocks once the pipe is full.
+    #[cfg(windows)]
+    fn hung_engine() -> Child {
+        use std::os::windows::process::CommandExt;
+        Command::new("ping")
+            .args(["-n", "60", "127.0.0.1"])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .creation_flags(0x0800_0000) // CREATE_NO_WINDOW
+            .spawn()
+            .expect("ping starts")
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn cancel_ends_a_hung_engine_in_a_bounded_time() {
+        let cancel = Arc::new(AtomicBool::new(false));
+        let set = Arc::clone(&cancel);
+        std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(300));
+            set.store(true, Ordering::SeqCst);
+        });
+        let started = Instant::now();
+        let result = run_saved_child(
+            hung_engine(),
+            || Some(Piece::Audio(vec![0.0; 16_000])),
+            &|_| {},
+            &|| cancel.load(Ordering::SeqCst),
+            "cancelled",
+        );
+        assert_eq!(result, Err("cancelled".to_string()));
+        assert!(started.elapsed() < CANCEL_GRACE + Duration::from_secs(5), "took {:?}", started.elapsed());
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn a_cancelled_session_ends_its_hung_engine() {
+        let (session, _, _feeder) = stuck_session(9_103, "", 0);
+        let engine = session.engine.clone();
+        engine.set(hung_engine());
+        drop(session);
+        let until = Instant::now() + CANCEL_GRACE + Duration::from_secs(5);
+        loop {
+            if let Some(child) = engine.slot().as_mut() {
+                if child.try_wait().is_ok_and(|exit| exit.is_some()) {
+                    break;
+                }
+            }
+            assert!(Instant::now() < until, "the hung engine still runs");
+            std::thread::sleep(Duration::from_millis(50));
+        }
     }
 
     #[test]
