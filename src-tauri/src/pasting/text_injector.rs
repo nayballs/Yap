@@ -2402,6 +2402,9 @@ fn inject_text_sync(
 ) -> Result<Delivery, String> {
     let key = kind.paste_key();
     info!(len = text.len(), keys = key.name(), "Injecting text via clipboard paste");
+    // A field the correction watch is reading changes by Yap's hand now
+    // (a swap, a rewrite, a transform): never learned as the person's fix.
+    crate::dictionary::learn::yap_pastes();
 
     // Small delay to let focus settle after voice recording stops.
     std::thread::sleep(std::time::Duration::from_millis(50));
