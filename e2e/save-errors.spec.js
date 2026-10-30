@@ -128,3 +128,77 @@ test('a dictionary word that couldn’t be saved says so, stays in the list, and
     await yap.invoke('e2e_fail_saves', { store: 'config', count: 0 });
   }
 });
+
+// Settings auto-saves config.json, and until 2026-10-30 a failed save was
+// swallowed: a switch flipped on a full disk looked saved and was back as it
+// was at the next start. Now the change stays in Settings, a toast says so
+// (one, however many saves fail), Try again saves it, and so does the next
+// change once saves work, which takes the toast down
+// (settings/configSync.svelte.js `autoSave`).
+const pressed = async (toggle) => (await toggle.getAttribute('aria-pressed')) === 'true';
+
+test('a setting that couldn’t be saved says so once, stays changed, and Try again saves it', async ({ yap, main, shot }) => {
+  const dialog = await openSettings(main, 'Dictation');
+  const offer = dialog.getByRole('button', { name: 'Offer what you said after AI cleanup' });
+  const preview = dialog.getByRole('button', { name: 'Live preview on the Yap bar' });
+  const was = await pressed(offer);
+  const previewWas = await pressed(preview);
+  await yap.invoke('e2e_fail_saves', { store: 'config', count: 100 });
+  try {
+    await offer.click();
+    const toast = toastsWith(main, "Couldn't save your settings");
+    await expect(toast).toBeVisible();
+    await expect(toast).toContainText('The disk is full. Yap is keeping your changes and will try again with the next one.');
+    await shot(main, '06-setting-not-saved');
+    // Shown changed in Settings, not on disk.
+    await expect(offer).toHaveAttribute('aria-pressed', String(!was));
+    expect(!!yap.readConfig().asSaidOffer).toBe(was);
+    // Another change that fails too: still one toast, and nothing saves
+    // again by itself.
+    await preview.click();
+    await expect(preview).toHaveAttribute('aria-pressed', String(!previewWas));
+    await main.waitForTimeout(2_500);
+    await expect(toastsWith(main, "Couldn't save your settings")).toHaveCount(1);
+    expect([!!yap.readConfig().asSaidOffer, !!yap.readConfig().streamingPartials]).toEqual([was, previewWas]);
+
+    await yap.invoke('e2e_fail_saves', { store: 'config', count: 0 });
+    await toast.getByRole('button', { name: 'Try again' }).click();
+    await expect(toastsWith(main, 'Saved')).toBeVisible();
+    await expectStore(yap, 'config.json', (c) => !!c.asSaidOffer === !was && !!c.streamingPartials === !previewWas);
+    await expect(offer).toHaveAttribute('aria-pressed', String(!was));
+  } finally {
+    await yap.invoke('e2e_fail_saves', { store: 'config', count: 0 });
+  }
+  // Back as they were.
+  await offer.click();
+  await preview.click();
+  await expectStore(yap, 'config.json', (c) => !!c.asSaidOffer === was && !!c.streamingPartials === previewWas);
+  await closeSettings(main);
+});
+
+test('a setting that couldn’t be saved is saved with the next change, and its toast goes', async ({ yap, main, shot }) => {
+  const dialog = await openSettings(main, 'Dictation');
+  const offer = dialog.getByRole('button', { name: 'Offer what you said after AI cleanup' });
+  const preview = dialog.getByRole('button', { name: 'Live preview on the Yap bar' });
+  const was = await pressed(offer);
+  const previewWas = await pressed(preview);
+  await yap.invoke('e2e_fail_saves', { store: 'config', count: 100 });
+  try {
+    await offer.click();
+    await expect(toastsWith(main, "Couldn't save your settings")).toBeVisible();
+    expect(!!yap.readConfig().asSaidOffer).toBe(was);
+
+    // Saves work again; the person changes something else.
+    await yap.invoke('e2e_fail_saves', { store: 'config', count: 0 });
+    await preview.click();
+    await expectStore(yap, 'config.json', (c) => !!c.asSaidOffer === !was && !!c.streamingPartials === !previewWas);
+    await expect(toastsWith(main, "Couldn't save your settings")).toHaveCount(0);
+    await shot(main, '07-setting-saved-with-next-change');
+  } finally {
+    await yap.invoke('e2e_fail_saves', { store: 'config', count: 0 });
+  }
+  await offer.click();
+  await preview.click();
+  await expectStore(yap, 'config.json', (c) => !!c.asSaidOffer === was && !!c.streamingPartials === previewWas);
+  await closeSettings(main);
+});

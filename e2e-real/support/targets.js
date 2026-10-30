@@ -23,7 +23,8 @@ export const OUT = path.join(REPO, 'test-results', 'real');
 export const RUNS = path.join(OUT, 'runs');
 export const CACHE = path.join(OUT, 'cache');
 const BIN = path.join(OUT, 'bin');
-const HELPER_SRC = fileURLToPath(new URL('./yaprobot.cs', import.meta.url));
+// The helper's sources: its commands, and the hands-off guard's (guard.js).
+const HELPER_SRCS = ['./yaprobot.cs', './inputwatch.cs'].map((f) => fileURLToPath(new URL(f, import.meta.url)));
 export const HELPER = path.join(BIN, 'yaprobot.exe');
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -36,7 +37,8 @@ export function makeNonce() {
 /** Compile yaprobot.exe with the .NET Framework's C# compiler (every Windows has one). */
 export function compileHelper() {
   const fresh =
-    fs.existsSync(HELPER) && fs.statSync(HELPER).mtimeMs >= fs.statSync(HELPER_SRC).mtimeMs;
+    fs.existsSync(HELPER) &&
+    HELPER_SRCS.every((src) => fs.statSync(HELPER).mtimeMs >= fs.statSync(src).mtimeMs);
   if (fresh) return HELPER;
   const fw = path.join(process.env.WINDIR || 'C:\\Windows', 'Microsoft.NET', 'Framework64', 'v4.0.30319');
   const csc = path.join(fw, 'csc.exe');
@@ -56,7 +58,7 @@ export function compileHelper() {
         wpf('UIAutomationClient.dll'),
         wpf('UIAutomationTypes.dll'),
         wpf('WindowsBase.dll'),
-        HELPER_SRC,
+        ...HELPER_SRCS,
       ],
       { encoding: 'utf8', windowsHide: true },
     );

@@ -247,7 +247,10 @@ import('./DocPanel.svelte')}`), its state and the pill don't.
   next one." + **Try again** (`saves_retry`: "Saved", or "Still couldn't
   save…"); false for any other error, the caller's own. Used by the Notes
   view and the notepad (note edits, folders, delete), Actions, Chat (delete,
-  rename), Home (a dictation's delete), Clear history and Memory), and the **update toast**
+  rename), Home (a dictation's delete), Clear history and Memory; config.json's
+  savers pass their own save as `retry` — the Dictionary view and Settings'
+  auto-save, whose next save that works takes its toast down with
+  `clearSaveError(e, { retry })`), and the **update toast**
   (`updates.svelte.js` — the shared update store started by ControlPanel:
   sticky "Yap X is ready" + Restart to update / Later / What's new, then
   Downloading… / Restarting Yap… in place; "Updated to X" after the

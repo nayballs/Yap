@@ -10,12 +10,15 @@
 //   first use and close with it.
 // - A spec that needs Yap started differently sets `robotOptions`:
 //   `test.use({ robotOptions: { name, config, exe, prepare } })`.
+// - Neither starts, nor does a test, unless the input watcher is up
+//   (support/guard.js: the global setup starts it once the PC is idle).
 import { execFileSync } from 'node:child_process';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { test as base, expect } from '@playwright/test';
 import { launchYap, EXE } from '../../e2e/support/yap.js';
+import { assertWatched } from './guard.js';
 import {
   RUNS,
   OUT,
@@ -295,6 +298,7 @@ export const test = base.extend({
 
   robot: [
     async ({ robotOptions }, use, workerInfo) => {
+      assertWatched();
       compileHelper();
       const nonce = makeNonce();
       const name = `${robotOptions.name}-w${workerInfo.workerIndex}`;
@@ -341,6 +345,7 @@ export const test = base.extend({
   // test fails, naming the process that took the focus.
   afterEachRobot: [
     async ({ robot }, use) => {
+      assertWatched();
       await clearToasts(robot.yap.main);
       const seen = (await robot.yap.invoke('realtest_refusals')).length;
       await use();
