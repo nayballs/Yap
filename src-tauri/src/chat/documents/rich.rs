@@ -281,6 +281,52 @@ pub fn rev_seen(id: u64, content: &str) -> u64 {
     rev
 }
 
+// ---- the blocks Chat's own edits replaced -----------------------------------------------
+
+/// Per document, the ids Chat's own edits replaced or deleted, and what
+/// stands for each now (none: deleted): an op naming one again (the same
+/// edit sent twice — the 4B did, 31 Oct 2026) is told it's done already,
+/// never "there's no such block". The newest few, in memory.
+#[cfg(not(test))]
+static RETIRED: std::sync::Mutex<Option<HashMap<u64, Vec<(String, Vec<String>)>>>> = std::sync::Mutex::new(None);
+
+#[cfg(not(test))]
+fn with_retired<R>(f: impl FnOnce(&mut HashMap<u64, Vec<(String, Vec<String>)>>) -> R) -> R {
+    let mut g = RETIRED.lock().unwrap_or_else(|p| p.into_inner());
+    f(g.get_or_insert_with(HashMap::new))
+}
+
+#[cfg(test)]
+thread_local! {
+    static RETIRED_TEST: std::cell::RefCell<HashMap<u64, Vec<(String, Vec<String>)>>> = std::cell::RefCell::new(HashMap::new());
+}
+
+#[cfg(test)]
+fn with_retired<R>(f: impl FnOnce(&mut HashMap<u64, Vec<(String, Vec<String>)>>) -> R) -> R {
+    RETIRED_TEST.with(|s| f(&mut s.borrow_mut()))
+}
+
+/// Ids kept per document.
+const RETIRED_KEPT: usize = 40;
+
+fn retire(id: u64, old: &str, now: Vec<String>) {
+    with_retired(|m| {
+        let list = m.entry(id).or_default();
+        list.retain(|(o, _)| o != old);
+        list.push((old.to_string(), now));
+        if list.len() > RETIRED_KEPT {
+            let extra = list.len() - RETIRED_KEPT;
+            list.drain(..extra);
+        }
+    });
+}
+
+/// What Chat's own edit put in place of block `old` of document `id`, if it
+/// replaced or deleted it.
+fn retired(id: u64, old: &str) -> Option<Vec<String>> {
+    with_retired(|m| m.get(&id).and_then(|l| l.iter().rev().find(|(o, _)| o == old.trim()).map(|(_, n)| n.clone())))
+}
+
 // ---- a document of Chat's -------------------------------------------------------------
 
 /// Note `note_id` of `args`, when it's a document Chat made; else the error
@@ -473,6 +519,18 @@ fn refusal(note: &crate::notes::Note, doc: &Doc, r: &blocks::Refused, ops: &[blo
             format!("Didn't change {t}: a block didn't match"),
             vec![blocks::view(doc, *at)],
         ),
+        // Your own edit changed it already (the same edit sent twice).
+        Why::Unknown(id) if retired(note.id, id).is_some() => {
+            let now: Vec<usize> = retired(note.id, id).unwrap_or_default().iter().filter_map(|x| doc.find(x)).collect();
+            (
+                format!(
+                    "Op {n} ({name}): your own earlier edit already {} block {id}, so it isn't there any more. {nothing} Don't make the same change again; read_document shows the document now.",
+                    if now.is_empty() { "removed" } else { "replaced" }
+                ),
+                format!("Didn't change {t}: done already"),
+                now.iter().map(|i| blocks::view(doc, *i)).collect(),
+            )
+        }
         Why::Unknown(id) => (
             format!("Op {n} ({name}): there's no block {id} in the document. {nothing} read_document gives the blocks' ids."),
             format!("Didn't change {t}: no such part"),
@@ -578,6 +636,14 @@ fn edit(args: &Value) -> Value {
             seen(id, &pic);
             let rev = versions::newest_notes(id).map_or(0, |(n, _)| n);
             remember_read(id, rev, &done.content);
+            // The blocks it replaced or deleted, and what stands for each now.
+            for (op, made) in ops.iter().zip(&done.made) {
+                match op {
+                    blocks::Op::Replace { id: old, .. } => retire(id, old.trim(), made.iter().map(|i| done.doc.ids[*i].id.clone()).collect()),
+                    blocks::Op::Delete { id: old, .. } => retire(id, old.trim(), Vec::new()),
+                    _ => {}
+                }
+            }
             let results: Vec<Value> = ops
                 .iter()
                 .zip(&done.made)
@@ -896,6 +962,12 @@ mod tests {
         assert_eq!(v.len(), before + 1);
         assert_eq!(v[0].version.kind, versions::kind::CHAT);
         assert_eq!(r["data"]["rev"].as_u64(), Some(v[0].version.n));
+        // The same edit sent again: done already, with the table as it is now.
+        let again = execute("edit_document", &args);
+        assert_eq!(again["success"], json!(false));
+        assert!(again["error"].as_str().unwrap().contains("your own earlier edit already replaced block"), "{again}");
+        assert_eq!(again["data"]["now"][0]["id"], json!(new_id));
+        assert_eq!(again["displayText"], json!("Didn't change \"Build\": done already"));
     }
 
     #[test]

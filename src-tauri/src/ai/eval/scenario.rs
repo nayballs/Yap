@@ -514,8 +514,8 @@ pub struct DocExpect {
     /// The outline had at least this many sections.
     pub min_sections: Option<usize>,
     /// A document already in the chat was changed this turn (`edit_note`,
-    /// `update_note`, `write_section` or `rewrite_section` went through on
-    /// one this turn didn't make).
+    /// `update_note`, `write_section`, `rewrite_section`, `edit_document` or
+    /// `restore_document` went through on one this turn didn't make).
     #[serde(default)]
     pub changed: bool,
     /// The documents made or changed this turn hold a markdown table.
