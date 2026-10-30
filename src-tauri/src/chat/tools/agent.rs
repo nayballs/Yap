@@ -6,7 +6,7 @@
 use serde_json::{json, Value};
 
 use super::memory::{asked_to_remember, memory_definitions, search_chats, MEMORY_TOOL_NAMES};
-use super::notes::{changed_note, definitions, execute};
+use super::notes::{changed_note, execute};
 use super::{app_definitions, refused_after_web, tool_error, tool_result, web_definitions, Extra, MAX_TOOL_STEPS};
 
 /// How many times a turn asks again after the provider rejected the
@@ -203,7 +203,8 @@ impl Room<'_> {
 /// and the apps', the web's, memory's and the calendar's when the turn has
 /// them. Also what Chat's budget measures (`turn.rs`).
 pub fn offered_tools(open_apps: bool, web: bool, extra: Extra<'_>) -> Value {
-    let mut tools = definitions();
+    // The note tools, with the documents' set this model gets.
+    let mut tools = super::notes::definitions_for(extra.doc_tools);
     if open_apps {
         if let (Some(all), Some(apps)) = (tools.as_array_mut(), app_definitions().as_array()) {
             all.extend(apps.iter().cloned());
@@ -595,6 +596,17 @@ async fn tool_loop(
                             let linked = crate::chat::documents::link_citations(text, &sources);
                             if linked != text {
                                 args[field] = json!(linked);
+                            }
+                        }
+                    }
+                    // edit_document's: each op's markdown.
+                    if let Some(ops) = args["ops"].as_array_mut() {
+                        for op in ops {
+                            if let Some(text) = op["markdown"].as_str() {
+                                let linked = crate::chat::documents::link_citations(text, &sources);
+                                if linked != text {
+                                    op["markdown"] = json!(linked);
+                                }
                             }
                         }
                     }

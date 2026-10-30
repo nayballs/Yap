@@ -147,6 +147,19 @@ pub fn tools_forced() -> Option<bool> {
     None
 }
 
+/// `--doc-tools rich|simple`: whether Chat's model gets the rich documents'
+/// tools (`Some(true)`) or the simple ones, whatever
+/// `documents::ToolSet::for_model` would say. `None` outside a run.
+pub fn doc_tools_forced() -> Option<bool> {
+    #[cfg(debug_assertions)]
+    {
+        if active() {
+            return record::doc_tools_forced();
+        }
+    }
+    None
+}
+
 /// 0: no local model in this run (or not known), 1: on the processor, 2: on
 /// the graphics card (`--ngl`).
 #[cfg(debug_assertions)]

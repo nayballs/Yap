@@ -72,6 +72,28 @@ pub struct ChatMessage {
     /// older Yap's save drops it: the pill goes, the note stays in Notes.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub documents: Vec<crate::chat::documents::DocRef>,
+    /// The passage of a document a question was asked about (the panel's
+    /// "Change this…" / "Ask about this", `documents::Selection`): its note
+    /// and words, the quote above the question, and the history the model
+    /// reads later ([`ChatMessage::sent_text`]). An older Yap's save drops
+    /// it: the question stays, without its quote.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub quote: Option<crate::chat::documents::Quote>,
+}
+
+impl ChatMessage {
+    /// The message as a model reads it in the history: its text, after the
+    /// passage a question was asked about (`quote`), so "Make this
+    /// shorter" still says what "this" was.
+    pub fn sent_text(&self) -> String {
+        match &self.quote {
+            Some(q) if self.role == "user" => {
+                let title = crate::notes::get(q.note_id).map(|n| n.title).filter(|t| !t.trim().is_empty()).unwrap_or_else(|| "a document".to_string());
+                format!("(About this passage of \"{title}\": \"{}\")\n\n{}", crate::chat::documents::blocks::clip(&q.text, 300), self.text)
+            }
+            _ => self.text.clone(),
+        }
+    }
 }
 
 /// What an answer's last model call took: the prompt (everything the model
@@ -582,6 +604,18 @@ pub fn set_documents(id: u64, index: usize, docs: &[crate::chat::documents::DocR
     });
 }
 
+/// Keep the passage a question was asked about with it (`documents::Quote`):
+/// conversation `id`'s message `index`, when it's a question.
+pub fn set_quote(id: u64, index: usize, quote: crate::chat::documents::Quote) {
+    with_store(|s| {
+        let Some(m) = s.conversations.iter_mut().find(|c| c.id == id).and_then(|c| c.messages.get_mut(index)) else { return };
+        if m.role == "user" {
+            m.quote = Some(quote);
+            save_to_disk(s);
+        }
+    });
+}
+
 /// A conversation's scope ("" when it has none, or isn't there).
 pub fn scope_of(id: u64) -> String {
     with_store(|s| s.conversations.iter().find(|c| c.id == id).map(|c| c.scope.clone()).unwrap_or_default())
@@ -665,6 +699,7 @@ pub fn append_message(
             tokens,
             thinking: None,
             documents: Vec::new(),
+            quote: None,
         });
         conv.updated_ts = now_secs();
         // Asked again in an archived chat: it's back in the list.
@@ -947,7 +982,7 @@ pub fn history_message(messages: &[ChatMessage], i: usize) -> Vec<Value> {
                 }).to_string(),
             }));
         }
-        out.push(json!({ "role": role, "content": m.text }));
+        out.push(json!({ "role": role, "content": m.sent_text() }));
     }
     out
 }
@@ -1338,6 +1373,7 @@ mod tests {
             tokens: None,
             thinking: None,
             documents: vec![],
+            quote: None,
         };
         let messages = vec![
             msg("user", vec![]),

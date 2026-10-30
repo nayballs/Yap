@@ -1,0 +1,29 @@
+{
+  "name": "documents-restore",
+  "description": "Documents beside the chat, a document's history (31 Oct 2026; the rich tools only, so not tagged documents: the simple set has no restore): a build, then its gear changed, then \"put the gear back how it was before that change\" — document_history and restore_document bring the earlier version back (itself a version), not a rewrite from memory, never a second document. Fictional game.",
+  "tags": ["documents-edits", "documents-rich"],
+  "apps": "standard",
+  "turns": [
+    {
+      "user": "Make me a build for a fictional knight in a game called Ashen Vale: attributes, gear and tips.",
+      "expect": { "document": { "made": true, "outline_first": true, "filled": true, "min_sections": 3 } }
+    },
+    {
+      "user": "Change the gear to a lantern shield and a hooked spear.",
+      "expect": {
+        "document": { "made": false, "changed": true, "contains": ["lantern shield"] },
+        "tools_not_called": ["create_note", "create_document"]
+      }
+    },
+    {
+      "user": "Actually, put the document back the way it was before that gear change.",
+      "expect": {
+        "document": { "made": false, "changed": true },
+        "tools_called": [{ "name": ["restore_document"] }],
+        "tools_not_called": ["create_note", "create_document"],
+        "max_words": 60
+      },
+      "soft": { "tools_called": [{ "name": ["document_history"] }] }
+    }
+  ]
+}

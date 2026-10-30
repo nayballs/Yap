@@ -1,0 +1,22 @@
+{
+  "name": "documents-table-row",
+  "description": "Documents beside the chat, a change by block (31 Oct 2026): a build with a level-by-level table, then \"Add a row for level 5\" adds the row to that table in the document (edit_document's replace of the whole table with the rich tools; rewrite_section with the simple ones), never the chat and never a second document. Fictional game and skills.",
+  "tags": ["documents", "documents-edits"],
+  "apps": "standard",
+  "turns": [
+    {
+      "user": "Make me a build for a fictional ranger in a game called Moss and Stone: attributes, gear, and a level-by-level table of skills for levels 1 to 4.",
+      "expect": { "document": { "made": true, "outline_first": true, "filled": true, "min_sections": 3 } },
+      "soft": { "document": { "made": true, "table": true } }
+    },
+    {
+      "user": "Add a row to the levels table for level 5: Thornwall, a skill that roots enemies in place.",
+      "expect": {
+        "document": { "made": false, "changed": true, "table": true, "contains": ["thornwall"] },
+        "tools_called": [{ "name": ["edit_document", "rewrite_section", "edit_note", "update_note"] }],
+        "tools_not_called": ["create_note", "create_document"],
+        "max_words": 60
+      }
+    }
+  ]
+}

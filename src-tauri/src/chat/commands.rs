@@ -101,6 +101,11 @@ pub fn chat_rename(id: u64, title: String) -> Result<String, String> {
 /// (`chat/think.rs`): the model's thinking streams as `{kind: "thinking",
 /// text}`, and the reply's `thinking` (`{text, ms}`) is kept with the
 /// answer.
+///
+/// `selection`: the passage of a document the question is about (the
+/// document panel's "Change this…" / "Ask about this": `{noteId, text,
+/// fromLine?, toLine?}`, `documents::Selection`) — the model is told which
+/// blocks it is, and the question keeps its quote.
 #[allow(clippy::too_many_arguments)]
 #[tauri::command]
 pub async fn chat_send(
@@ -115,6 +120,7 @@ pub async fn chat_send(
     as_text: Option<bool>,
     skill: Option<String>,
     think: Option<bool>,
+    selection: Option<crate::chat::documents::Selection>,
 ) -> Result<serde_json::Value, String> {
     // A Skill (`/decisions`, a one-tap prompt): asked across the meetings,
     // its own passages and instructions (chat/skills.rs).
@@ -128,7 +134,9 @@ pub async fn chat_send(
     // stopped: those are kept as asked).
     let image_ids = images.unwrap_or_default();
     let taken = if image_ids.is_empty() { Vec::new() } else { crate::snip::waiting::sent(&app, &image_ids) };
-    let send = crate::chat::skills::with(skill_turn, send_turn(&app, conversation_id, text, scope, voice, on_stream, turn_id, image_ids, as_text));
+    // A passage selected in the document panel ("Change this…", documents.rs).
+    let turn = send_turn(&app, conversation_id, text, scope, voice, on_stream, turn_id, image_ids, as_text);
+    let send = crate::chat::skills::with(skill_turn, crate::chat::documents::with_selection(selection, turn));
     let (out, thought) = crate::chat::think::with(think.unwrap_or(false), send).await;
     // Thought through: its thinking kept with the answer, and on the reply.
     let out = match (out, thought) {

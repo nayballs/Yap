@@ -1,0 +1,20 @@
+{
+  "name": "documents-move-section",
+  "description": "Documents beside the chat, a change by block (31 Oct 2026): a weekend plan of four sections in a given order, then \"Move the Costs section up, before Saturday\" moves that section (heading and text) in the document — edit_document's move with the rich tools — never the chat and never a second document. A fictional town.",
+  "tags": ["documents", "documents-edits"],
+  "apps": "standard",
+  "turns": [
+    {
+      "user": "Make me a plan for a weekend in Port Wenna, a fictional seaside town, with four sections in this order: Saturday, Sunday, Food, Costs.",
+      "expect": { "document": { "made": true, "outline_first": true, "filled": true, "min_sections": 4, "in_order": ["## saturday", "## sunday", "## food", "## costs"] } }
+    },
+    {
+      "user": "Move the Costs section up so it comes before Saturday.",
+      "expect": {
+        "document": { "made": false, "changed": true, "in_order": ["## costs", "## saturday", "## sunday", "## food"] },
+        "tools_not_called": ["create_note", "create_document"],
+        "max_words": 60
+      }
+    }
+  ]
+}

@@ -341,11 +341,45 @@ pub struct Turn {
     /// Asked by voice (default: the scenario's `voice`).
     #[serde(default)]
     pub voice: Option<bool>,
+    /// Asked about a passage selected in the document panel ("Change
+    /// this…", `documents::Selection`): these words, found in the newest
+    /// document of the conversation (their lines, as the panel sends them).
+    #[serde(default)]
+    pub selection: Option<String>,
     #[serde(default)]
     pub expect: Expect,
     /// Same checks, reported as warnings instead of failures.
     #[serde(default)]
     pub soft: Expect,
+}
+
+/// The selection a turn's `selection` words make in `docs` (the
+/// conversation's documents, newest first): the first document whose text
+/// holds them, and the lines they're on (0 = the first). `None`: no
+/// document holds them. "## Kitchen" selects that whole section (its
+/// heading to the next `#`/`##` heading), as a person dragging over it on
+/// the page would — the model's words aren't known before it writes them.
+pub fn selection_in(docs: &[crate::chat::documents::DocRef], words: &str) -> Option<crate::chat::documents::Selection> {
+    let words = words.trim();
+    let heading = words.strip_prefix("## ").map(str::trim).filter(|h| !h.is_empty());
+    for d in docs {
+        let Some(note) = crate::notes::get(d.id) else { continue };
+        if let Some(h) = heading {
+            let lines: Vec<&str> = note.content.split('\n').collect();
+            let Some(from) = lines.iter().position(|l| l.trim().strip_prefix("## ").is_some_and(|t| t.trim().eq_ignore_ascii_case(h))) else { continue };
+            let mut to = lines[from + 1..].iter().position(|l| l.starts_with("# ") || l.starts_with("## ")).map_or(lines.len(), |p| from + 1 + p);
+            while to > from + 1 && lines[to - 1].trim().is_empty() {
+                to -= 1;
+            }
+            let text = lines[from..to].join("\n");
+            return Some(crate::chat::documents::Selection { note_id: note.id, text, from_line: Some(from), to_line: Some(to - 1) });
+        }
+        let Some(at) = note.content.find(words) else { continue };
+        let from = note.content[..at].matches('\n').count();
+        let to = from + words.matches('\n').count();
+        return Some(crate::chat::documents::Selection { note_id: note.id, text: words.to_string(), from_line: Some(from), to_line: Some(to) });
+    }
+    None
 }
 
 /// What a turn (or, in `expect_end`, the whole scenario) must do. Every
@@ -491,6 +525,13 @@ pub struct DocExpect {
     /// under its title, before its first section.
     #[serde(default)]
     pub summary: bool,
+    /// The documents changed this turn (else the ones made) hold these
+    /// (case-insensitive): a row added, a word put in.
+    #[serde(default)]
+    pub contains: Vec<String>,
+    /// …and these in this order (a section moved: "## costs", "## saturday").
+    #[serde(default)]
+    pub in_order: Vec<String>,
 }
 
 /// What a turn did with documents, as `DocExpect` and `--documents`' table
@@ -554,8 +595,9 @@ pub fn doc_seen(o: &Observed) -> DocSeen {
         .flat_map(|n| crate::chat::documents::pending_keys(&n.content))
         .collect();
     let mut changed: Vec<u64> = Vec::new();
-    for c in calls.iter().filter(|c| c.success && ["edit_note", "update_note", "write_section", "rewrite_section"].contains(&c.name.as_str())) {
-        let edited = c.name != "edit_note" || c.result["data"]["changed"] == serde_json::json!(true);
+    let changers = ["edit_note", "update_note", "write_section", "rewrite_section", "edit_document", "restore_document"];
+    for c in calls.iter().filter(|c| c.success && changers.contains(&c.name.as_str())) {
+        let edited = !matches!(c.name.as_str(), "edit_note" | "edit_document" | "restore_document") || c.result["data"]["changed"] == serde_json::json!(true);
         if let Some(id) = c.result["data"]["id"].as_u64().filter(|id| edited && !made.contains(id) && !changed.contains(id)) {
             changed.push(id);
         }
@@ -564,6 +606,19 @@ pub fn doc_seen(o: &Observed) -> DocSeen {
     let table = texts.iter().any(|t| has_table(t));
     let summary = made.first().and_then(|id| crate::notes::get(*id)).is_some_and(|n| has_summary(&n.content));
     DocSeen { made, outline_first, sections, written, left, changed, table, summary }
+}
+
+/// `text` (lower-cased) holds each of `words` after the one before. Pure.
+fn in_order(text: &str, words: &[String]) -> bool {
+    let mut from = 0usize;
+    for w in words {
+        let w = w.to_lowercase();
+        match text[from..].find(&w) {
+            Some(at) => from += at + w.len(),
+            None => return false,
+        }
+    }
+    true
 }
 
 /// The reasons the turn's documents fail `d`.
@@ -592,6 +647,21 @@ fn document_faults(d: &DocExpect, o: &Observed) -> Vec<String> {
     }
     if d.summary && !seen.summary && !seen.made.is_empty() {
         fails.push("the document has no summary under its title".to_string());
+    }
+    // What the documents changed (else made) this turn say.
+    if !d.contains.is_empty() || !d.in_order.is_empty() {
+        let ids = if seen.changed.is_empty() { &seen.made } else { &seen.changed };
+        let texts: Vec<String> = ids.iter().filter_map(|id| crate::notes::get(*id)).map(|n| n.content.to_lowercase()).collect();
+        if !texts.is_empty() {
+            for want in &d.contains {
+                if !texts.iter().any(|t| t.contains(&want.to_lowercase())) {
+                    fails.push(format!("the document doesn't say \"{want}\""));
+                }
+            }
+            if !d.in_order.is_empty() && !texts.iter().any(|t| in_order(t, &d.in_order)) {
+                fails.push(format!("the document hasn't these in this order: {}", d.in_order.join(" → ")));
+            }
+        }
     }
     match (d.made, seen.made.is_empty()) {
         (true, true) => {
@@ -677,6 +747,9 @@ pub struct NoteExpect {
     pub contains: Vec<String>,
     #[serde(default)]
     pub not_contains: Vec<String>,
+    /// Its content holds these in this order (a section moved).
+    #[serde(default)]
+    pub in_order: Vec<String>,
 }
 
 /// What a turn did, as the checks see it.
@@ -1376,6 +1449,10 @@ pub fn check(e: &Expect, o: &Observed) -> Vec<String> {
                             fails.push(format!("\"{}\" still has \"{s}\": \"{}\"", n.title, clip(&n.content, 120)));
                         }
                     }
+                    // In this order (a section moved).
+                    if !want.in_order.is_empty() && !in_order(&content, &want.in_order) {
+                        fails.push(format!("\"{}\" hasn't these in this order: {}", n.title, want.in_order.join(" → ")));
+                    }
                 }
             }
         }
@@ -1828,5 +1905,38 @@ mod tests {
         assert_eq!(check(&expect(json!({ "made": false, "changed": true })), &idle), ["the open document wasn't changed; calls made: write_section (refused)"]);
         assert!(has_summary("# Build\n\nThe pick.\n\n## Gear") && !has_summary("# Build\n\n## Gear") && !has_summary("# Build\n\n<!-- yap:section Gear -->"));
         assert!(has_table("| a | b |\n| --- | :-: |\n| 1 | 2 |") && !has_table("| a | b |\nno rule"));
+    }
+
+    /// The rich tools' scenarios: what a changed document says and in what
+    /// order (a row added, a section moved), an edit_document that went
+    /// through as a change, and a turn's `selection` (a section, by its
+    /// heading, or words).
+    #[test]
+    fn a_document_check_reads_its_words_order_and_a_selection() {
+        let call = |name: &str, args: Value| {
+            let result = crate::chat::documents::execute(name, &args);
+            ToolCall { name: name.into(), args, success: result["success"] == json!(true), display: String::new(), result }
+        };
+        let expect = |v: Value| serde_json::from_value::<Expect>(json!({ "document": v })).unwrap();
+        let id = crate::notes::create("Weekend", "# Weekend\n\n## Saturday\n\nThe harbour.\n\n## Costs\n\nAbout 90.\n", "chat", "").id;
+        let read = crate::chat::documents::execute("read_document", &json!({ "note_id": id }));
+        let b: Vec<Value> = read["data"]["blocks"].as_array().unwrap().clone();
+        let mut moved = obs("Moved.");
+        moved.stats.tool_calls.push(call(
+            "edit_document",
+            json!({ "note_id": id, "ops": [{ "op": "move", "ids": [b[3]["id"], b[4]["id"]], "if_hashes": [b[3]["hash"], b[4]["hash"]], "before": b[1]["id"] }] }),
+        ));
+        assert!(check(&expect(json!({ "made": false, "changed": true, "in_order": ["## costs", "## saturday"], "contains": ["about 90"] })), &moved).is_empty());
+        assert_eq!(
+            check(&expect(json!({ "made": false, "changed": true, "in_order": ["## saturday", "## costs"], "contains": ["Thornwall"] })), &moved),
+            ["the document doesn't say \"Thornwall\"", "the document hasn't these in this order: ## saturday → ## costs"]
+        );
+        // A turn's selection: a section by its heading (heading to the next), or words.
+        let docs = [crate::chat::documents::DocRef { id, title: "Weekend".into() }];
+        let s = selection_in(&docs, "## Saturday").unwrap();
+        assert_eq!((s.text.as_str(), s.from_line, s.to_line), ("## Saturday\n\nThe harbour.", Some(6), Some(8)));
+        let w = selection_in(&docs, "About 90.").unwrap();
+        assert_eq!((w.from_line, w.to_line), (Some(4), Some(4)));
+        assert!(selection_in(&docs, "## Sunday").is_none() && selection_in(&docs, "nowhere").is_none());
     }
 }
