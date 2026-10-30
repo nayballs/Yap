@@ -570,7 +570,10 @@ mod tests {
     /// (2,692 as first written, 2,580 after); their third tool
     /// (`rewrite_section`), the summary and the firmer rule (never asked
     /// about first, tables, a new document for an option picked) about 280
-    /// more (2,898, trimmed from 3,050). `--nocapture` prints it.
+    /// more (2,898, trimmed from 3,050); that a document is a Markdown note
+    /// in Notes, in the rule and `create_document`'s description, 24 more
+    /// (2,922: Claude Haiku 5.5 said it couldn't put one in the notes).
+    /// `--nocapture` prints it.
     #[test]
     fn a_tool_step_stays_light() {
         let est = crate::meetings::meeting_summary::estimate_tokens;
@@ -583,7 +586,7 @@ mod tests {
         tools.as_array_mut().unwrap().extend(app_definitions().as_array().unwrap().iter().cloned());
         let (s, t) = (est(&system), est(&tools.to_string()));
         println!("one tool step sends: system {s} + tools {t} = {} tokens", s + t);
-        assert!(s + t <= 2_900, "{} tokens", s + t);
+        assert!(s + t <= 2_925, "{} tokens", s + t);
     }
 
     /// A document's tools are the answer's own writing, not actions: a build

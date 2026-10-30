@@ -1,0 +1,29 @@
+{
+  "name": "documents-saved-in-notes",
+  "description": "Documents beside the chat: asked for in the notes or a Markdown file, the document is made and the answer says where it is (a document is a Markdown note in Notes, Chat documents), never that it can't write to the notes or a file; asked again, the same, and no note made for it (Claude Haiku 5.5 made the document, then said it couldn't write to the notes or a Markdown file, 30 Oct 2026).",
+  "tags": ["documents"],
+  "apps": "standard",
+  "turns": [
+    {
+      "user": "Make me a packing list for a weekend of camping in the hills, and put it in my notes as a Markdown file so I can keep it.",
+      "expect": {
+        "document": { "made": true, "outline_first": true, "filled": true, "min_sections": 2 },
+        "tools_not_called": ["create_note"],
+        "answer_not_matches": "(?i)(can[’']?t|cannot|can not|unable to|not able to|no way to|don[’']?t have (access|a way))\\b[^.]{0,60}\\b(notes?|markdown|\\.md|file|save)",
+        "max_words": 60
+      },
+      "soft": { "answer_contains_any": ["notes"], "max_words": 30 }
+    },
+    {
+      "user": "Thanks. Is that saved in my notes? I'd like it as a Markdown file too.",
+      "expect": {
+        "document": { "made": false },
+        "tools_not_called": ["create_note"],
+        "answer_contains_any": ["notes"],
+        "answer_not_matches": "(?i)(can[’']?t|cannot|can not|unable to|not able to|no way to|don[’']?t have (access|a way))\\b[^.]{0,60}\\b(notes?|markdown|\\.md|file|save)",
+        "max_words": 60
+      },
+      "soft": { "answer_contains_any": ["chat documents"] }
+    }
+  ]
+}

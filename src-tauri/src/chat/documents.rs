@@ -63,9 +63,18 @@ const INTENT_MAX: usize = 140;
 /// (a summary, short bullets, tables, after Claude's own documents), a line
 /// or two in the chat, and later questions changing it — or a new one for
 /// an option picked (never `create_note`: Claude Haiku 5.5 made an empty
-/// one for "Let's do option A"). Kept short: every step of a tool turn
-/// sends it.
-pub const INSTRUCTIONS: &str = "Something to keep (a build, a plan, a guide, a comparison, a long table) goes straight into a document, never the chat, never asked first: create_document (title, a one- or two-sentence summary, every section: one per part, usually 2 to 6), then write_section each, in order. Short bullets, a markdown table for anything with rows, **bold** lead-ins; a game build: race and origin, character creation, skills, a level-by-level table, gear, tips. In the chat say only one short line (\"It's open on the right.\"): no summary, never the content. A change to a document from this chat, or more depth: rewrite_section (a whole section; a new heading adds one) or edit_note (a few words). An option picked: a new document. Never create_note for these.";
+/// one for "Let's do option A"). A document is a note, saved in Notes as
+/// Markdown: Claude Haiku 5.5, asked to "put it into the notes or the
+/// Markdown file", made one and said it couldn't write to their notes or a
+/// Markdown file (30 Oct 2026). Kept short: every step of a tool turn sends
+/// it.
+pub const INSTRUCTIONS: &str = "Something to keep (a build, a plan, a guide, a comparison, a long table) goes straight into a document, never the chat, never asked first: create_document (title, a one- or two-sentence summary, every section: one per part, usually 2 to 6), then write_section each, in order. Short bullets, a markdown table for anything with rows, **bold** lead-ins; a game build: race and origin, character creation, skills, a level-by-level table, gear, tips. In the chat say only one short line (\"It's open on the right.\"): no summary, never the content. A document is a Markdown note, saved in Notes under Chat documents. A change to a document from this chat, or more depth: rewrite_section (a whole section; a new heading adds one) or edit_note (a few words). An option picked: a new document. Never create_note for these.";
+
+/// Where a document is kept, in `create_document`'s result and the
+/// documents' line in a question's context: a question about notes or a
+/// Markdown file gets a true answer ("It's open on the right, and saved in
+/// your Notes under Chat documents."), never "I can't write to your notes".
+pub const SAVED: &str = "Saved as a Markdown note in Notes, in the Chat documents folder: the user can open it there, or export it as a .md file (Export as Markdown).";
 
 /// Added to a question asked out loud (the Voice Assistant, with Chat not
 /// in front) when the model calls tools: no document unless one is asked
@@ -768,7 +777,7 @@ impl Turn {
 /// saw it — then the model has seen that. At most the newest 3. `None`:
 /// the conversation has none.
 pub fn context(docs: &[DocRef]) -> Option<String> {
-    let mut lines = vec!["Documents in this chat, open beside it (change one there: rewrite_section for a whole section or a new one, edit_note for a few words; write_section only fills a section still to be written):".to_string()];
+    let mut lines = vec!["Documents in this chat, open beside it and saved in Notes (Chat documents) as Markdown notes (change one there: rewrite_section for a whole section or a new one, edit_note for a few words; write_section only fills a section still to be written):".to_string()];
     let mut changed = Vec::new();
     for d in docs.iter().take(3) {
         let Some(note) = crate::notes::get(d.id) else { continue };
@@ -808,7 +817,7 @@ pub fn definitions() -> Vec<Value> {
             "type": "function",
             "function": {
                 "name": "create_document",
-                "description": "Start a document shown beside the chat (a build, a plan, a guide, an option picked): title, short summary, sections in order. Then write_section each.",
+                "description": "Start a document shown beside the chat, saved in Notes (a build, a plan, a guide, an option picked): title, short summary, sections in order. Then write_section each.",
                 "parameters": {
                     "type": "object",
                     "properties": {
@@ -983,7 +992,7 @@ fn table_hint(key: &str, intent: &str) -> &'static str {
 /// The last section written: what the answer is now (small models wrote a
 /// summary of the document under "It's open beside the chat", 84 and 121
 /// words, Qwen3.5-4B, 30 Oct 2026).
-const FINISHED: &str = "Every section is written. Now answer in one short sentence, like \"It's open on the right.\": no summary, nothing from the document (the user reads it there).";
+const FINISHED: &str = "Every section is written. Now answer in one short sentence, like \"It's open on the right.\" (asked for it in their notes or a file: \"It's open on the right, and saved in your Notes under Chat documents.\"): no summary, nothing from the document (the user reads it there).";
 
 /// What the loop tells the model when it answered with sections of the
 /// document it made still to write (`agent.rs`, at most [`FINISH_NUDGES`]
@@ -1065,33 +1074,48 @@ pub fn picks_option(question: &str) -> bool {
     PICK.is_match(question.trim())
 }
 
-/// **What a model on this PC is told about this question and documents**
-/// (in its context, `turn.rs`; `docs`: this chat's, newest first): an
-/// option picked from the open document → a new document for it (the
-/// options stay as they were: worth keeping, and the pick needs an outline
-/// of its own); a change, or more depth on part of it → that document
-/// reworked (`rewrite_section`, `edit_note`), never the chat; else, asked
-/// for something to keep → [`ASKS_NOTE`]. Left to the rule, the 4B wrote a
-/// changed build in the chat and offered a document, and for "Let's do
-/// option A" edited the options or copied them to the clipboard (30 Oct
-/// 2026). `None`: nothing to say.
-pub fn steer(question: &str, docs: &[DocRef]) -> Option<String> {
+/// [`ASKS_NOTE`] in one short line, for a cloud model ([`steer`]'s
+/// `brief`).
+pub const ASKS_BRIEF: &str = "This asks for something to keep: make the document now, not an answer in the chat or an offer to make one.";
+
+/// **What the model is told about this question and documents** (in its
+/// context, `turn.rs`, never the system prompt: the prompt cache stays
+/// whole; `docs`: this chat's, newest first): an option picked from the
+/// open document → a new document for it (the options stay as they were:
+/// worth keeping, and the pick needs an outline of its own); a change, or
+/// more depth on part of it → that document reworked (`rewrite_section`,
+/// `edit_note`), never the chat; else, asked for something to keep →
+/// [`ASKS_NOTE`]. Left to the rule, the 4B wrote a changed build in the
+/// chat and offered a document, and for "Let's do option A" edited the
+/// options or copied them to the clipboard (30 Oct 2026). **A cloud model**
+/// (`brief`) gets the same nudge as one short line: Claude Haiku 5.5
+/// answered "Could you find a mage build instead…?" in the chat, ending
+/// "Want me to build a level-by-level plan for it?", and made the document
+/// only after "Yes, please." (30 Oct 2026). `None`: nothing to say.
+pub fn steer(question: &str, docs: &[DocRef], brief: bool) -> Option<String> {
     if let Some(d) = docs.first() {
         let title = crate::notes::get(d.id).map(|n| n.title).filter(|t| !t.trim().is_empty()).unwrap_or_else(|| d.title.clone());
+        let id = d.id;
         if picks_option(question) {
-            return Some(format!(
-                "This picks one of the options in \"{title}\" (note_id {}): make a new document for that pick (create_document with a summary and every section, then write_section for each), built out in full; \"{title}\" stays as it is. Then answer in one short sentence.",
-                d.id
-            ));
+            return Some(if brief {
+                format!("This picks an option in \"{title}\" (note_id {id}): make a new document for that pick, built out in full, not the chat.")
+            } else {
+                format!(
+                    "This picks one of the options in \"{title}\" (note_id {id}): make a new document for that pick (create_document with a summary and every section, then write_section for each), built out in full; \"{title}\" stays as it is. Then answer in one short sentence."
+                )
+            });
         }
         if changes_document(question) {
-            return Some(format!(
-                "This changes \"{title}\" (note_id {}), open beside the chat: rework it there, not in the chat and not as an offer — rewrite_section for each section that changes (a new heading adds a section), edit_note for a few words. Then answer in one short sentence.",
-                d.id
-            ));
+            return Some(if brief {
+                format!("This changes \"{title}\" (note_id {id}): rework it there (rewrite_section, edit_note), not in the chat.")
+            } else {
+                format!(
+                    "This changes \"{title}\" (note_id {id}), open beside the chat: rework it there, not in the chat and not as an offer — rewrite_section for each section that changes (a new heading adds a section), edit_note for a few words. Then answer in one short sentence."
+                )
+            });
         }
     }
-    asks_for_document(question).then(|| ASKS_NOTE.to_string())
+    asks_for_document(question).then(|| if brief { ASKS_BRIEF } else { ASKS_NOTE }.to_string())
 }
 
 /// **A document's `[1]` citations as links to their web pages**
@@ -1164,7 +1188,7 @@ fn create(args: &Value) -> Value {
     tracing::info!(note_id = note.id, sections = keys.len(), summary = !summary.is_empty(), "Chat: a document started");
     tool_result(
         true,
-        json!({ "id": note.id, "title": title, "folder": folder, "sections": keys, "next": next_for(&body) }),
+        json!({ "id": note.id, "title": title, "folder": folder, "saved": SAVED, "sections": keys, "next": next_for(&body) }),
         format!("Started {} ({} section{})", quoted(&title), keys.len(), if keys.len() == 1 { "" } else { "s" }),
     )
 }
@@ -1910,15 +1934,66 @@ mod tests {
         let made = execute("create_document", &json!({ "title": "Summoner options", "sections": ["Option A", "Option B"] }));
         let id = made["data"]["id"].as_u64().unwrap();
         let docs = [DocRef { id, title: "Summoner options".into() }];
-        let pick = steer("Let's do option A.", &docs).unwrap();
+        let pick = steer("Let's do option A.", &docs, false).unwrap();
         assert!(pick.contains("new document for that pick") && pick.contains("\"Summoner options\" stays as it is"), "{pick}");
-        let change = steer("Can you change it so it goes from level one to max level?", &docs).unwrap();
+        let change = steer("Can you change it so it goes from level one to max level?", &docs, false).unwrap();
         assert!(change.contains(&format!("note_id {id}")) && change.contains("rewrite_section"), "{change}");
-        assert_eq!(steer("Make me a packing list for a weekend of camping in the hills.", &docs).as_deref(), Some(ASKS_NOTE));
-        assert_eq!(steer("Thanks!", &docs), None);
+        assert_eq!(steer("Make me a packing list for a weekend of camping in the hills.", &docs, false).as_deref(), Some(ASKS_NOTE));
+        assert_eq!(steer("Thanks!", &docs, false), None);
         // Without one: only an ask for something to keep.
-        assert_eq!(steer("Let's do option A.", &[]), None);
-        assert_eq!(steer("Plan a three-day trip to Porto, day by day.", &[]).as_deref(), Some(ASKS_NOTE));
+        assert_eq!(steer("Let's do option A.", &[], false), None);
+        assert_eq!(steer("Plan a three-day trip to Porto, day by day.", &[], false).as_deref(), Some(ASKS_NOTE));
+    }
+
+    /// A cloud model gets the same nudge as one short line in the
+    /// question's context (Claude Haiku 5.5 answered "Could you find a mage
+    /// build instead…?" in the chat and offered a plan, 30 Oct 2026).
+    #[test]
+    fn a_cloud_model_is_nudged_in_one_short_line() {
+        let made = execute("create_document", &json!({ "title": "Two-handed fighter", "sections": ["Gear", "Skills"] }));
+        let id = made["data"]["id"].as_u64().unwrap();
+        let docs = [DocRef { id, title: "Two-handed fighter".into() }];
+        let words = |s: &str| s.split_whitespace().count();
+        // The maintainer's question: something to keep, now.
+        let mage = steer("Could you find a mage build instead? Something with fire and summons.", &docs, true).unwrap();
+        assert_eq!(mage, ASKS_BRIEF);
+        let pick = steer("Let's do option A.", &docs, true).unwrap();
+        assert!(pick.contains(&format!("note_id {id}")) && pick.contains("new document for that pick"), "{pick}");
+        let change = steer("Add a head torch to the gear.", &docs, true).unwrap();
+        assert!(change.contains(&format!("note_id {id}")) && change.contains("rewrite_section"), "{change}");
+        // One line each, well under the local model's.
+        for (short, long) in [
+            (mage.as_str(), ASKS_NOTE.to_string()),
+            (pick.as_str(), steer("Let's do option A.", &docs, false).unwrap()),
+            (change.as_str(), steer("Add a head torch to the gear.", &docs, false).unwrap()),
+        ] {
+            assert!(!short.contains('\n') && words(short) <= 24 && short.len() * 3 < long.len() * 2, "{short}");
+        }
+        // Nothing to say stays nothing.
+        assert_eq!(steer("What time is it in Tokyo?", &docs, true), None);
+        assert_eq!(steer("Let's do option A.", &[], true), None);
+    }
+
+    /// A document is a Markdown note in Notes (Chat documents), and the
+    /// model is told so where it meets the tools: a question about notes or a
+    /// Markdown file gets a true answer, never "I can't write to your notes"
+    /// (Claude Haiku 5.5, 30 Oct 2026).
+    #[test]
+    fn the_model_knows_a_document_is_a_note_in_notes() {
+        assert!(INSTRUCTIONS.contains("A document is a Markdown note, saved in Notes under Chat documents"), "{INSTRUCTIONS}");
+        let create = &definitions()[0]["function"];
+        assert_eq!(create["name"], json!("create_document"));
+        assert!(create["description"].as_str().unwrap().contains("shown beside the chat, saved in Notes"));
+        let made = execute("create_document", &json!({ "title": "Camping kit", "sections": ["Clothes"] }));
+        assert_eq!(made["data"]["saved"], json!(SAVED));
+        assert!(SAVED.contains("Notes") && SAVED.contains(FOLDER) && SAVED.contains(".md"), "{SAVED}");
+        let id = made["data"]["id"].as_u64().unwrap();
+        let c = context(&[DocRef { id, title: "Camping kit".into() }]).unwrap();
+        assert!(c.starts_with("Documents in this chat, open beside it and saved in Notes (Chat documents) as Markdown notes"), "{c}");
+        // The last section's result: the line for someone who asked for it
+        // in their notes.
+        let done = execute("write_section", &json!({ "note_id": id, "key": "Clothes", "markdown": "- A fleece" }));
+        assert!(done["data"]["next"].as_str().unwrap().contains("saved in your Notes under Chat documents"), "{done}");
     }
 
     #[test]
