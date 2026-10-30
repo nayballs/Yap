@@ -2849,8 +2849,9 @@ section once, a build without its table once, `edit_note` refused six times runn
 a long turn over the 8K context (once before, once on a rerun after). Tried and dropped: the
 sentence at the rule's end, after "Never create_note for these" (the options document as one
 section 4 times in 5). A tool step weighs 2,922 tokens (was 2,898). Run folders
-`20261030-213512…`, `20261030-215450…` (after), `20261030-220558…` (before) and the reruns
-(kept outside the repo).
+`20261030-213512-docs-4b-notes-after1`, `20261030-215450-docs-4b-notes-after2`,
+`20261030-220558-docs-4b-notes-before` and the reruns (`…-docs-4b-notes-rerun-after`,
+`-rerun-before`, `-rule-end`, `-no-rule`, `-before-prompt`; kept outside the repo).
 
 **Claude Haiku 5.5, for the maintainer to run** (credits): `npm run eval -- --documents --model
 anthropic:claude-haiku-5-5 --keys-from-yap --repeat 2` (14 scenarios, 20 turns a repeat: about
