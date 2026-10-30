@@ -103,6 +103,36 @@ test('a lone tap is thrown away, with a hint once', async ({ yap, main, shot }) 
   expect(dictations(yap)).toBe(before);
 });
 
+test('during a meeting a lone tap earns no hint and spends none; after it, the hint', async ({ yap, main }) => {
+  // The hint landed on the meeting or waited unseen on the bar and was
+  // dropped, yet counted as one of its three.
+  await needsMic(yap);
+  const lone = logCount(yap, LONE_TAP);
+  const recording = () => yap.invoke('meeting_state').then((s) => s.recording);
+  const note = await yap.invoke('note_create', { title: 'Weekly sync', folder: 'Meetings' });
+  await yap.invoke('meeting_start', { noteId: note.id });
+  try {
+    await expect.poll(recording).toBe(true);
+    await pressHotkey(main);
+    await expect.poll(() => logCount(yap, LONE_TAP), { timeout: 5_000 }).toBe(lone + 1);
+    await idle(yap);
+    await main.waitForTimeout(1_000);
+    await expect(main.getByRole('status').filter({ hasText: 'while you talk' })).toHaveCount(0);
+    expect(yap.readJson('hints.json')?.tap ?? 0).toBe(0);
+  } finally {
+    if (await recording()) {
+      await yap.invoke('meeting_pause');
+      await expect.poll(recording, { timeout: 20_000 }).toBe(false);
+    }
+  }
+  await pressHotkey(main);
+  await expect.poll(() => logCount(yap, LONE_TAP), { timeout: 5_000 }).toBe(lone + 2);
+  await idle(yap);
+  await expect(main.getByRole('status').filter({ hasText: 'Hold F24 while you talk' })).toBeVisible();
+  await expectStore(yap, 'hints.json', (h) => h.tap === 1);
+  await closeToasts(main);
+});
+
 test('a double-tap records hands-free until the next press', async ({ yap, main, shot }) => {
   await needsMic(yap);
   const before = dictations(yap);
