@@ -1,24 +1,33 @@
 // The document panel beside Chat's conversation (src-tauri/src/chat/documents.rs):
 // which document it shows, its text, the sections being written as they
-// stream (`section` events), the Edit box and its saves, expanded or split,
-// and the split's width (remembered).
+// stream (`section` events), its two views and the Source box's saves,
+// expanded or split, and the split's width (remembered).
 //
 // - A turn makes or changes a document: `document` events open the panel
 //   on it (`fromTurn`), `section` events fill a placeholder as the model
 //   writes it (`onSection`), and the note's own `yap-note-changed` brings
 //   the text as each section lands (`onNoteChanged`).
-// - The person's words win: the Edit box saves through `chat_document_save`
-//   with the text it started from (`base`), and Rust lays the person's edit
-//   over whatever Chat wrote meanwhile (documents.rs `merge3`). A save that
-//   comes back while more was typed keeps the newer typing and saves again
-//   from the text it was typed over.
-// - Undo: the newest change, when it's Chat's, goes back to the version
-//   before it (notes/versions.rs; itself a version, so it can be undone too).
+// - Two views (2026-10-31, after Claude Code's file view): **Preview**, the
+//   page to read, and **Source**, the markdown itself, coloured and
+//   editable — it took the Edit box's place (one raw view, not two). Each
+//   document's scroll is kept per view while Yap runs; a change Chat makes
+//   lands with its blocks marked a moment (`landed`).
+// - The person's words win: the Source box saves through
+//   `chat_document_save` with the text it started from (`base`), and Rust
+//   lays the person's edit over whatever Chat wrote meanwhile (documents.rs
+//   `merge3`). A save that comes back while more was typed keeps the newer
+//   typing and saves again from the text it was typed over.
+// - Undo: the newest change, when it's Chat's (its writing, or a restore it
+//   did), goes back to the version before it (notes/versions.rs; itself a
+//   version, so it can be undone too).
+// - Copy (the whole document as Markdown) and Export as Markdown (the Notes
+//   view's `note_export`).
 import { invoke } from '@tauri-apps/api/core';
 import { toast } from '../../ui/toast.svelte.js';
 import { showSaveError } from '../../notices/saveErrors.js';
 import { isPlaceholder, pendingSections } from '../../core/markdown.js';
 import { closePartial } from '../../core/streaming.js';
+import { copyText } from '../../core/itemMenus.js';
 
 /** The origin of the panel's saves (`yap-note-changed`): its own aren't news. */
 export const PANEL_ORIGIN = 'chat-panel';
@@ -37,6 +46,9 @@ export const THREAD_MIN = 340;
  * document; narrower, the list steps aside for it.
  */
 export const LIST_STAYS = 1240;
+
+/** Where each document was scrolled to, per view (`${id}:${view}` → px), while Yap runs. */
+const scrolls = new Map();
 
 function loadWidth() {
   try {
@@ -99,6 +111,31 @@ export function shownText(content, title, live = {}) {
 }
 
 /**
+ * How many of `content`'s lines come before the first line `shownText`
+ * shows (the title's, and the blank lines after it): a rendered block's
+ * `data-line` plus this is its line in the note (with nothing streaming).
+ * Pure.
+ */
+export function shownOffset(content, title) {
+  const lines = String(content || '').split('\n');
+  let at = 0;
+  const first = lines[0]?.trim() ?? '';
+  if (/^#\s+/.test(first) && first.replace(/^#\s+/, '').trim() === String(title || '').trim()) at = 1;
+  while (at < lines.length - 1 && lines[at] === '') at++;
+  return at;
+}
+
+/** A document's text to copy, as Markdown: its sections still to write left out. Pure. */
+export function copyableText(content) {
+  return String(content || '')
+    .split('\n')
+    .filter((l) => !isPlaceholder(l))
+    .join('\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
+/**
  * The panel's state. `onopennote({id})`: ControlPanel's Open in Notes, as
  * the view has it now.
  */
@@ -109,21 +146,27 @@ export function createDocPanel({ onopennote = () => null } = {}) {
   let content = $state('');
   let gone = $state(false);
   let expanded = $state(false);
-  let editing = $state(false);
+  // 'preview' (the page) or 'source' (the markdown, editable).
+  let view = $state('preview');
   let draft = $state('');
-  // The text the Edit box started from, or last took in.
+  // The text the Source box started from, or last took in.
   let base = '';
   let dirty = false;
   let saveTimer = null;
   let saving = null;
   // A turn is writing it now; the section on the way (its key, '' not
-  // known yet); each section's text as it streams.
+  // known yet); each section's text as it streams; 'writing' a section or
+  // 'editing' its blocks (edit_document, restore_document).
   let busy = $state(false);
   let writing = $state(null);
   let live = $state({});
+  let action = $state('writing');
   // The newest change is Chat's (Undo shows).
   let canUndo = $state(false);
   let width = $state(loadWidth());
+  // Counts the changes that landed from outside the panel (Chat's, Undo's):
+  // the page marks the blocks new since the one before.
+  let landed = $state(0);
 
   const pending = $derived(pendingSections(content));
   const shown = $derived(shownText(content, title, live));
@@ -143,7 +186,7 @@ export function createDocPanel({ onopennote = () => null } = {}) {
     }
   }
 
-  /** The document's text now (Rust's): shown, and the Edit box's too unless typing is waiting to be saved. */
+  /** The document's text now (Rust's): shown, and the Source box's too unless typing is waiting to be saved. */
   function take(text) {
     content = text;
     // The sections that have landed aren't live any more.
@@ -155,6 +198,11 @@ export function createDocPanel({ onopennote = () => null } = {}) {
     }
   }
 
+  /** A version Chat made: its writing, or a restore it did (`restore_document`). */
+  function chatsOwn(v) {
+    return v?.kind === 'chat' || (v?.kind === 'restored' && v?.label === 'Chat');
+  }
+
   async function refreshUndo() {
     const want = id;
     if (want == null) return;
@@ -162,7 +210,7 @@ export function createDocPanel({ onopennote = () => null } = {}) {
       const versions = (await invoke('note_versions', { id: want })) || [];
       if (id !== want) return;
       const notes = versions.filter((v) => v.field === 'notes');
-      canUndo = notes.length > 1 && notes[0].kind === 'chat';
+      canUndo = notes.length > 1 && chatsOwn(notes[0]);
     } catch {
       canUndo = false;
     }
@@ -179,7 +227,7 @@ export function createDocPanel({ onopennote = () => null } = {}) {
       draft = '';
       base = '';
       dirty = false;
-      editing = false;
+      view = 'preview';
       live = {};
       gone = false;
     }
@@ -197,16 +245,23 @@ export function createDocPanel({ onopennote = () => null } = {}) {
   function onSection(ev) {
     if (ev?.noteId == null) return;
     busy = true;
+    action = 'writing';
     if (!open || id !== ev.noteId) show(ev.noteId);
     writing = ev.key ?? '';
     live = { ...live, [ev.key]: ev.text ?? '' };
   }
 
-  /** A tool call began (`tool` event): a section is on its way. */
+  /** A tool call began (`tool` event): a section on its way, or an edit of its blocks. */
   function onTool(ev) {
-    if (open && (ev?.name === 'write_section' || ev?.name === 'rewrite_section')) {
+    if (!open) return;
+    if (ev?.name === 'write_section' || ev?.name === 'rewrite_section') {
       busy = true;
+      action = 'writing';
       writing = writing ?? '';
+    } else if (ev?.name === 'edit_document' || ev?.name === 'restore_document') {
+      busy = true;
+      action = 'editing';
+      writing = '';
     }
   }
 
@@ -215,6 +270,7 @@ export function createDocPanel({ onopennote = () => null } = {}) {
     if (!busy) return;
     busy = false;
     writing = null;
+    action = 'writing';
     live = {};
     if (open) load();
   }
@@ -223,7 +279,11 @@ export function createDocPanel({ onopennote = () => null } = {}) {
   function onNoteChanged(p) {
     if (!p || p.id !== id || p.origin === PANEL_ORIGIN) return;
     if (typeof p.title === 'string') title = p.title;
-    if (typeof p.content === 'string') take(p.content);
+    if (typeof p.content === 'string') {
+      // A change landed: its blocks marked a moment on the page.
+      if (p.content !== content) landed += 1;
+      take(p.content);
+    }
     refreshUndo();
   }
 
@@ -237,23 +297,59 @@ export function createDocPanel({ onopennote = () => null } = {}) {
     flushSave();
     open = false;
     expanded = false;
-    editing = false;
+    view = 'preview';
   }
 
-  function toggleEdit() {
-    if (editing) {
-      flushSave();
-      editing = false;
-      return;
-    }
-    if (!dirty) {
+  /** Preview (the page) or Source (the markdown, editable). */
+  function setView(v) {
+    const next = v === 'source' ? 'source' : 'preview';
+    if (next === view) return;
+    if (view === 'source') flushSave();
+    if (next === 'source' && !dirty) {
       draft = content;
       base = content;
     }
-    editing = true;
+    view = next;
   }
 
-  /** The Edit box changed. */
+  function toggleEdit() {
+    setView(view === 'source' ? 'preview' : 'source');
+  }
+
+  /** Where this document was scrolled to in view `v` (0: the top). */
+  function scrollFor(v = view) {
+    return id == null ? 0 : (scrolls.get(`${id}:${v}`) ?? 0);
+  }
+
+  /** Keep where it's scrolled to in view `v`. */
+  function keepScroll(top, v = view) {
+    if (id != null) scrolls.set(`${id}:${v}`, Math.max(0, Math.round(top)));
+  }
+
+  /** Copy the whole document as Markdown. */
+  async function copy() {
+    await flushSave();
+    return copyText(copyableText(content), 'Copied as Markdown');
+  }
+
+  /** Export as Markdown (the Notes view's: a .md file where you choose). */
+  async function exportMarkdown() {
+    if (id == null) return;
+    await flushSave();
+    const noteId = id;
+    try {
+      const { save } = await import('@tauri-apps/plugin-dialog');
+      const suggested = (title || 'document').replace(/[\\/:*?"<>|]/g, '-');
+      const path = await save({ defaultPath: `${suggested}.md`, filters: [{ name: 'Markdown', extensions: ['md'] }] });
+      if (!path) return;
+      await invoke('note_export', { id: noteId, path });
+      toast({ title: 'Document exported', description: path, variant: 'success' });
+    } catch (e) {
+      toast({ title: 'Export failed', description: String(e), variant: 'destructive' });
+    }
+  }
+
+  /** The Source box changed. */
   function input(text) {
     draft = text;
     dirty = true;
@@ -304,10 +400,11 @@ export function createDocPanel({ onopennote = () => null } = {}) {
     const noteId = id;
     try {
       const versions = ((await invoke('note_versions', { id: noteId })) || []).filter((v) => v.field === 'notes');
-      if (versions.length < 2 || versions[0].kind !== 'chat') return;
+      if (versions.length < 2 || !chatsOwn(versions[0])) return;
       const r = await invoke('note_version_restore', { id: noteId, n: versions[1].n, origin: PANEL_ORIGIN });
       if (id === noteId && r?.field === 'notes') {
         dirty = false;
+        landed += 1;
         take(r.text);
       }
       refreshUndo();
@@ -347,12 +444,15 @@ export function createDocPanel({ onopennote = () => null } = {}) {
     get gone() { return gone; },
     get expanded() { return expanded; },
     set expanded(v) { expanded = !!v; },
-    get editing() { return editing; },
+    get view() { return view; },
+    get editing() { return view === 'source'; },
     get draft() { return draft; },
     get busy() { return busy; },
     get writing() { return writing; },
+    get action() { return action; },
     get canUndo() { return canUndo; },
     get width() { return width; },
+    get landed() { return landed; },
     show,
     fromTurn,
     onSection,
@@ -361,7 +461,12 @@ export function createDocPanel({ onopennote = () => null } = {}) {
     onNoteChanged,
     onNoteDeleted,
     close,
+    setView,
     toggleEdit,
+    scrollFor,
+    keepScroll,
+    copy,
+    exportMarkdown,
     input,
     flushSave,
     undo,

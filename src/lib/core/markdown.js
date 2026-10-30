@@ -250,6 +250,23 @@ function textToken(state, content) {
   return t;
 }
 
+// A document's page (`renderMarkdown(…, {lines: true})`, the Chat document
+// panel): each top-level block says the source lines it came from
+// (`data-line="3-7"`, [start, end), 0 = the first), so a selection on the
+// page maps back to the markdown ("Change this…", chat/documents.rs).
+md.core.ruler.push('yap_lines', (state) => {
+  if (!state.env?.lines) return;
+  for (const t of state.tokens) {
+    if (t.level === 0 && t.map && t.nesting !== -1 && t.type !== 'inline') t.attrSet('data-line', `${t.map[0]}-${t.map[1]}`);
+  }
+});
+
+/** ` data-line="a-b"` for a block token that has one (the renderers below that write their own tags). */
+function lineAttr(token) {
+  const v = token?.attrGet?.('data-line');
+  return v && /^\d+-\d+$/.test(v) ? ` data-line="${v}"` : '';
+}
+
 // --- Rendering ------------------------------------------------------------
 
 const rules = md.renderer.rules;
@@ -276,7 +293,7 @@ rules.yap_cite = (tokens, idx) => {
 rules.yap_pending = (tokens, idx, _options, env) => {
   const { key, intent } = tokens[idx].meta;
   const label = env?.writing ? `Writing: ${key}…` : `${key}: not written yet`;
-  return `<p class="md-pending" title="${escapeHtml(intent)}">${escapeHtml(label)}</p>\n`;
+  return `<p class="md-pending"${lineAttr(tokens[idx])} title="${escapeHtml(intent)}">${escapeHtml(label)}</p>\n`;
 };
 
 rules.yap_task = (tokens, idx) => {
@@ -286,7 +303,7 @@ rules.yap_task = (tokens, idx) => {
 
 // Code: monospace, kept verbatim (escaped), no highlighting.
 rules.fence = rules.code_block = (tokens, idx) =>
-  `<pre class="md-code"><code>${escapeHtml(tokens[idx].content.replace(/\n$/, ''))}</code></pre>\n`;
+  `<pre class="md-code"${lineAttr(tokens[idx])}><code>${escapeHtml(tokens[idx].content.replace(/\n$/, ''))}</code></pre>\n`;
 
 // Tables: in a sideways-scrolling wrapper, alignment as classes, compact.
 const ALIGN = { center: ' class="c"', right: ' class="r"' };
@@ -294,7 +311,7 @@ const cell = (tag) => (tokens, idx) => {
   const align = /text-align:(\w+)/.exec(tokens[idx].attrGet('style') || '')?.[1];
   return `<${tag}${ALIGN[align] ?? ''}>`;
 };
-rules.table_open = () => '<div class="md-table"><table>';
+rules.table_open = (tokens, idx) => `<div class="md-table"${lineAttr(tokens[idx])}><table>`;
 rules.table_close = () => '</table></div>\n';
 rules.th_open = cell('th');
 rules.td_open = cell('td');
@@ -312,7 +329,7 @@ const PURIFY = {
     'ul', 'ol', 'li', 'h2', 'h3', 'h4', 'h5', 'blockquote', 'hr',
     'div', 'table', 'thead', 'tbody', 'tr', 'th', 'td',
   ],
-  ALLOWED_ATTR: ['class', 'href', 'title', 'aria-label', 'start', 'type', 'checked', 'disabled'],
+  ALLOWED_ATTR: ['class', 'href', 'title', 'aria-label', 'start', 'type', 'checked', 'disabled', 'data-line'],
   // (DOMPurify's own URI check stays: it tests every attribute's value, so a
   // web-and-mail-only pattern here would drop start="3"; `href` is held to
   // SAFE_URL in the hook below.)
@@ -343,6 +360,8 @@ function purify() {
       const passage = PASSAGE_HREF.test(href) && /(^|\s)md-passage(\s|$)/.test(node.getAttribute('class') || '');
       if (!passage && !SAFE_URL.test(href)) node.removeAttribute('href');
     }
+    // A block's source lines (`lines`): two numbers, nothing else.
+    if (node.hasAttribute('data-line') && !/^\d+-\d+$/.test(node.getAttribute('data-line'))) node.removeAttribute('data-line');
     if (node.hasAttribute('class')) {
       const kept = node.getAttribute('class').split(/\s+/).filter((c) => CLASSES.has(c));
       if (kept.length) node.setAttribute('class', kept.join(' '));
@@ -368,9 +387,11 @@ function purify() {
  * view maps each one to its line with `taskLines`).
  * `options.writing`: a document Chat is writing now — its sections still to
  * come say "Writing: Gear…" (else "Gear: not written yet").
+ * `options.lines`: each top-level block carries its source lines
+ * (`data-line="3-7"`): the document panel maps a selection back to them.
  */
 export function renderMarkdown(text, options = {}) {
-  const env = { web: webContext(options.sources), writing: !!options.writing };
+  const env = { web: webContext(options.sources), writing: !!options.writing, lines: !!options.lines };
   const html = md.render(bulletsToDashes(text || ''), env);
   tickable = !!options.tickable;
   try {

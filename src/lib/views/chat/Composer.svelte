@@ -266,6 +266,20 @@
       <button type="button" class="vlink" onclick={chat.shortenPaste}>Shorten what you pasted</button>
     </div>
   {/if}
+  {#if chat.quote}
+    <!-- A passage of the open document ("Ask about this", "Change this…"):
+         the question is about it, and the model is told which part it is. -->
+    <div class="quotebar" data-testid="chat-quote">
+      <svg class="quoteicon" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M9.5 6C6.5 7 5 9.4 5 12.5V18h5.5v-5.5H8c0-2 .8-3.3 2.5-4zm9 0c-3 1-4.5 3.4-4.5 6.5V18h5.5v-5.5H17c0-2 .8-3.3 2.5-4z" /></svg>
+      <span class="quotetext" title={chat.quote.text}>
+        <span class="quotefrom">{chat.quote.mode === 'change' ? 'Change in' : 'About'} {chat.quote.title || 'the document'}:</span>
+        {chat.quote.text}
+      </span>
+      <button type="button" class="quotex" aria-label="Remove the quoted passage" title="Remove" onclick={chat.clearQuote}>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><path d="M7 7l10 10M17 7 7 17" /></svg>
+      </button>
+    </div>
+  {/if}
   <div class="inputbar">
     <div class="pluswrap" bind:this={plusEl}>
       <button
@@ -337,7 +351,13 @@
       class="msginput"
       bind:this={chat.inputEl}
       bind:value={chat.input}
-      placeholder={chat.attached.length ? 'Ask about this screenshot…' : 'Ask about your notes, or type / for Skills'}
+      placeholder={chat.quote
+        ? chat.quote.mode === 'change'
+          ? 'How should it change?'
+          : 'Ask about this passage…'
+        : chat.attached.length
+          ? 'Ask about this screenshot…'
+          : 'Ask about your notes, or type / for Skills'}
       aria-label="Message"
       aria-busy={chat.sending}
       aria-autocomplete="list"
@@ -667,6 +687,67 @@
     align-items: center;
     flex-wrap: wrap;
     gap: 8px;
+  }
+  /* The passage a question is about (the document panel's selection). */
+  .quotebar {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    margin-bottom: 6px;
+    padding: 7px 6px 7px 10px;
+    border: 1px solid var(--yap-border-subtle);
+    border-left: 3px solid var(--yap-primary-line);
+    border-radius: 10px;
+    background: var(--yap-s1);
+    color: var(--yap-fg-80);
+    font-size: 12.5px;
+    line-height: 1.45;
+  }
+  .quoteicon {
+    flex: 0 0 auto;
+    width: 13px;
+    height: 13px;
+    margin-top: 2px;
+    color: var(--yap-primary);
+  }
+  .quotetext {
+    flex: 1 1 auto;
+    min-width: 0;
+    display: -webkit-box;
+    -webkit-line-clamp: 3;
+    line-clamp: 3;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    overflow-wrap: anywhere;
+  }
+  .quotefrom {
+    font-weight: 600;
+    color: var(--yap-fg);
+  }
+  .quotex {
+    flex: 0 0 auto;
+    width: 20px;
+    height: 20px;
+    display: grid;
+    place-items: center;
+    padding: 0;
+    border: none;
+    border-radius: 50%;
+    background: none;
+    color: var(--yap-muted);
+    cursor: pointer;
+  }
+  .quotex:hover {
+    background: var(--yap-s3, var(--yap-s2));
+    color: var(--yap-fg);
+  }
+  .quotex:focus-visible {
+    outline: 2px solid var(--yap-focus-ring);
+    outline-offset: 1px;
+  }
+  .quotex svg {
+    width: 11px;
+    height: 11px;
   }
   .shotchip {
     position: relative;

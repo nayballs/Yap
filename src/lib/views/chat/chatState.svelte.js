@@ -82,6 +82,10 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
     return null;
   }
   let input = $state('');
+  // A passage selected in the document panel ("Ask about this", "Change
+  // this…"): `{noteId, title, text, fromLine, toLine, mode}`, quoted over the
+  // box and sent with the next question (chat_send's `selection`).
+  let quote = $state(null);
   let sending = $state(false);
   // The ■ of the answer being written (streamCall's stop), and whether it
   // was pressed; and its "a newer question replaces it" (streamCall's
@@ -434,6 +438,7 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
       stopReading();
       // Another conversation: its documents are its own (their pills reopen them).
       doc.close();
+      quote = null;
       activeId = id;
       scope = conv.scope || null;
       summary = conv.summary ?? null;
@@ -462,12 +467,28 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
     }
   }
 
+  /**
+   * A passage selected in the document panel, asked about ("ask") or to be
+   * changed ("change"): quoted over the box, which takes the focus.
+   */
+  function setQuote(q) {
+    if (!q?.text?.trim() || q.noteId == null) return;
+    quote = { ...q, text: q.text.trim() };
+    setTimeout(() => inputEl?.focus(), 0);
+  }
+
+  function clearQuote() {
+    quote = null;
+    inputEl?.focus();
+  }
+
   // `keepShots`: a snip landing in a new chat (Rust has the box already).
   // `keepInput`: "New chat" under a message too long for this chat — the
   // message goes with it.
   function newChat(opts) {
     stopReading();
     doc.close();
+    quote = null;
     activeId = null;
     messages = [];
     summary = null;
@@ -791,6 +812,9 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
     const skill = opts?.skill ?? skills.parse(text)?.skill?.command ?? null;
     if (skill && !messages.length && !scope) scope = 'meetings';
     input = '';
+    // The passage it's about (the document panel), out of the box with it.
+    const about = skill ? null : quote;
+    quote = null;
     // Out of the box (Rust takes them with the question, chat_send).
     waitingShots.list = [];
     byVoice = false;
@@ -802,7 +826,7 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
     // it: a spoken question's bubble may come and go in between (one a
     // newer question replaced), moving them.
     const turn = ++sendSeq;
-    messages = [...messages, { role: 'user', text, voice, id: null, turn, images: shots }];
+    messages = [...messages, { role: 'user', text, voice, id: null, turn, images: shots, quote: about ? { noteId: about.noteId, text: about.text } : null }];
     const firstAt = messages.length - 1;
     const mine = (role) => messages.findIndex((m) => m.turn === turn && m.role === role);
     const questionAt = () => {
@@ -872,6 +896,7 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
         asText: asText && shots.length ? true : null,
         skill,
         think: thinkIt || null,
+        selection: about ? { noteId: about.noteId, text: about.text, fromLine: about.fromLine ?? null, toLine: about.toLine ?? null } : null,
       },
       onEvent
     );
@@ -943,6 +968,7 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
       }
       if (!elsewhere) messages = messages.slice(0, qi);
       input = text; // give the message back
+      quote = about; // …and the passage it was about
       if (thinkIt) think.on = true; // …thought through, as it was asked
       // …and its screenshots (Rust puts them back too, yap-chat-waiting).
       waitingShots.list = shots;
@@ -1043,6 +1069,9 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
     get messages() { return messages; },
     get input() { return input; },
     set input(v) { input = v; },
+    get quote() { return quote; },
+    setQuote,
+    clearQuote,
     get sending() { return sending; },
     get assistantAnswering() { return assistantAnswering; },
     set assistantPhase(v) { assistantPhase = v || 'idle'; },
