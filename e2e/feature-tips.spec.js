@@ -130,6 +130,27 @@ test('in another app the tip is a Yap bar card; Show tips or Feature tips off, n
   }
 });
 
+test('during a meeting: no tip and nothing counted; it shows after the meeting', async ({ yap, main }) => {
+  const recording = () => yap.invoke('meeting_state').then((s) => s.recording);
+  const note = await yap.invoke('note_create', { title: 'Weekly sync', folder: 'Meetings' });
+  await yap.invoke('meeting_start', { noteId: note.id });
+  try {
+    await expect.poll(recording).toBe(true);
+    await dictate(yap, 'notepad.exe', 'notes.txt - Notepad', 'parse the jaison file');
+    await main.waitForTimeout(2_500);
+    await expect(tip(main, 'Fixed from your dictionary')).toHaveCount(0);
+    expect(yap.readJson('hints.json').features?.dictionary).toBeUndefined();
+  } finally {
+    if (await recording()) {
+      await yap.invoke('meeting_pause');
+      await expect.poll(recording, { timeout: 20_000 }).toBe(false);
+    }
+  }
+  // Still due: the next dictation that shows it off, after the meeting.
+  await dictate(yap, 'notepad.exe', 'notes.txt - Notepad', 'parse the jaison file');
+  await expect(tip(main, 'Fixed from your dictionary')).toBeVisible();
+});
+
 test('at most three feature tips a day, once the caps count', async ({ yap, main }) => {
   await yap.invoke('e2e_notice_caps', { on: true });
   try {

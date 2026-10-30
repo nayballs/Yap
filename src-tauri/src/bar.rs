@@ -652,8 +652,8 @@ fn emit(app: &AppHandle) {
     let _ = app.emit(EVENT, status());
 }
 
-/// Send the page the bar's status again (the first-use pointers changed).
-#[cfg_attr(not(debug_assertions), allow(dead_code))]
+/// Send the page the bar's status again (the first-use pointers changed:
+/// the first-run setup came or went).
 pub(crate) fn refresh(app: &AppHandle) {
     emit(app);
 }

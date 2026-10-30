@@ -99,12 +99,27 @@ pub fn start(app: &AppHandle) {
     win::register();
 }
 
+/// Stop watching the lid (Yap shutting down, `shutdown_cleanup`): Windows
+/// calls back no more, so a lid closing as Yap exits never reaches a
+/// microphone list or an app going away.
+pub fn stop() {
+    #[cfg(windows)]
+    win::unregister();
+}
+
 #[cfg(windows)]
 mod win {
+    use std::sync::atomic::{AtomicIsize, Ordering};
+
     use windows::core::GUID;
     use windows::Win32::Foundation::HANDLE;
-    use windows::Win32::System::Power::{PowerSettingRegisterNotification, DEVICE_NOTIFY_SUBSCRIBE_PARAMETERS, POWERBROADCAST_SETTING};
+    use windows::Win32::System::Power::{
+        PowerSettingRegisterNotification, PowerSettingUnregisterNotification, DEVICE_NOTIFY_SUBSCRIBE_PARAMETERS, HPOWERNOTIFY, POWERBROADCAST_SETTING,
+    };
     use windows::Win32::UI::WindowsAndMessaging::{DEVICE_NOTIFY_CALLBACK, PBT_POWERSETTINGCHANGE};
+
+    /// The registration (0: none), for [`unregister`].
+    static REGISTERED: AtomicIsize = AtomicIsize::new(0);
 
     /// GUID_LIDSWITCH_STATE_CHANGE.
     const LID_SWITCH: GUID = GUID::from_u128(0xba3e0f4d_b817_4094_a2d1_d56379e6a0f3);
@@ -126,7 +141,9 @@ mod win {
     }
 
     pub(super) fn register() {
-        // Kept for as long as Yap runs (Windows calls back with it).
+        // Kept for as long as Yap runs (Windows calls back with it; never
+        // freed, even once unregistered: a callback already under way may
+        // still read it).
         let params: &'static mut DEVICE_NOTIFY_SUBSCRIBE_PARAMETERS =
             Box::leak(Box::new(DEVICE_NOTIFY_SUBSCRIBE_PARAMETERS { Callback: Some(on_power), Context: std::ptr::null_mut() }));
         let mut handle: *mut core::ffi::c_void = std::ptr::null_mut();
@@ -140,10 +157,21 @@ mod win {
             )
         };
         if r.is_ok() {
+            REGISTERED.store(handle as isize, Ordering::SeqCst);
             tracing::info!("Laptop lid: watching");
         } else {
             tracing::info!("Laptop lid: Windows won't say ({r:?})");
         }
+    }
+
+    pub(super) fn unregister() {
+        let handle = REGISTERED.swap(0, Ordering::SeqCst);
+        if handle == 0 {
+            return;
+        }
+        // SAFETY: the handle `register` got, unregistered once (swapped out).
+        let r = unsafe { PowerSettingUnregisterNotification(HPOWERNOTIFY(handle)) };
+        tracing::debug!("Laptop lid: stopped watching ({r:?})");
     }
 }
 

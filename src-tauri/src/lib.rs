@@ -59,6 +59,8 @@ pub struct AppState {
 /// Windows the installer step force-exits Yap (`std::process::exit`) without
 /// ever reaching the Exit handler (see `updates::build_updater`).
 pub(crate) fn shutdown_cleanup() {
+    // Windows' lid callbacks (lid.rs): none while the app goes.
+    dictation::lid::stop();
     voice::tts::stop();
     ai::local_llm::shutdown();
     // Meeting search's model (search/embedder.rs) on the same engine.
@@ -1206,6 +1208,11 @@ pub fn run() {
                             let _ = w.hide();
                             if !main {
                                 notices::notice::on_onboarding(false);
+                                // The bar's first-use pointers may show now.
+                                bar::refresh(w.app_handle());
+                                // A mic quiz there stops listening on every
+                                // microphone (mic_quiz.rs): nobody sees it.
+                                dictation::mic_quiz::mic_quiz_cancel();
                                 // Its mic check's level meter holds the mic
                                 // open (mic.rs); the page can't tell it's
                                 // hidden (WebView2 says it's still visible).
