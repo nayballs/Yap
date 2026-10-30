@@ -286,15 +286,23 @@ npm run eval -- --documents --model anthropic:claude-haiku-5-5 --keys-from-yap -
 
 The scenarios tagged `documents` (`evals/scenarios/documents-*.json`), through Chat's own turn
 like any scenario, each turn's documents checked by `expect.document` (`{made, outline_first,
-filled, min_sections}`, `scenario::doc_seen`: from the turn's calls and the notes afterwards):
-**made** only when it should be — a game build, a trip plan, a comparison with a table, a
-guide, a packing list (yes); the time in Tokyo, tablespoons in a cup, three synonyms (no) —,
-the **outline first** (`create_document` before any `write_section`), **every section
-written** (no placeholder left), and a **short chat line** (`max_words` 60, 30 as a warning).
-A follow-up ("Add a head torch to the extras.") must change the document (`edit_note` or
-`update_note`) and make no other. `summary.md` gets a "Documents beside the chat" table per
-model: made when asked, outline first, every section written, the chat line's mean and most
-words, made when not wanted.
+filled, min_sections, changed, table, summary}`, `scenario::doc_seen`: from the turn's calls
+and the notes afterwards): **made** only when it should be — a game build, a build looked up
+on a stand-in web ("find me the best one and put it in the chat"), a trip plan, a comparison
+with a table, a guide, a packing list (yes); the time in Tokyo, tablespoons in a cup, three
+synonyms (no) —, the **outline first** (`create_document` before any `write_section`),
+**every section written** (no placeholder left), and a **short chat line** (`max_words` 60,
+30 as a warning). Follow-ups with the document open: "Add a head torch to the extras.", "Can
+you change it so it goes from level one to max level, step by step?" and "Go deeper on day
+two" must **change it** (`changed`: an `edit_note`, `update_note`, `write_section` or
+`rewrite_section` that went through on a document the turn didn't make) and make no other;
+"Let's do option A." after a document of two options must make a **new document** for the
+pick, and never call `create_note`. **How it reads**: `table` (the documents made or changed
+hold a markdown table) and `summary` (a line of text under the title, before the first
+section) — checks on the looked-up build and the level-by-level change, warnings on the game
+build. `summary.md` gets a "Documents beside the chat" table per model: made when asked,
+outline first, every section written, the chat line's mean and most words, made when not
+wanted, changed when asked, a table, a summary (of the turns that check or warn on each).
 
 ### Screenshot questions (`--vision`)
 
@@ -2756,7 +2764,47 @@ the quick asks stay one call, 0.1–0.7 s, and never make one. The follow-up's e
 through `edit_note` every time (once after a refused exact match, then `read_note`). Run
 folders `20261030-190117-docs-4b-r1` … `20261030-191214-docs-4b-r4` (kept outside the repo).
 
+### After the maintainer's first try (30 Oct 2026, evening)
+
+What he saw, on the 4B and then on Claude Haiku 5.5 (asked through the Voice Assistant's
+shortcut while reading Chat): a looked-up build written in the chat, ending "Would you like
+me to create a more detailed document?"; "It's in Chat." under a document he was looking
+at; a change to the open build ("level one to max level, step by step") answered in the chat
+with an offer; Haiku answering "Let's do option A." with an empty `create_note`; and
+documents of small bold headings and bullets only. Four new scenarios (stand-in web for the
+two looked-up builds, fictional sites): `documents-build-looked-up` (his phrasing: "find me
+the best one and put it in the chat"), `documents-change-build`, `documents-pick-option`,
+`documents-go-deeper`; the new checks `changed`, `table` and `summary` (above). The same
+4B, the same arguments, `--repeat 3`:
+
+| Run | What changed | Passed | Made when asked | Outline first | Every section written | Chat line (mean / most words) | Made when not wanted | Changed when asked | A table | A summary |
+|---|---|---|---|---|---|---|---|---|---|---|
+| before (`6e1180b`) | — | 27/36 | 24/30 | 24/24 | 24/24 | 5 / 6 | 0/18 | 6/9 | 0/9 | 0/9 |
+| 1 | the firmer rule (never the chat, never asked first; tables, bold lead-ins, the build's parts; a change goes in the document, an option picked is a new one; never `create_note`); `create_document`'s summary; `rewrite_section`; `create_note` refuses an empty note; `steer` (an option picked, a change, something to keep) | 30/36 | 28/30 | 28/28 | 28/28 | 14 / 101 | 0/18 | 9/9 | 2/9 | 7/9 |
+| 2 | "one per part" and "say only one short line" back in the rule; a section with rows asked for as a table (`table_hint`); `asks_for_document` takes "look up / find … a build"; `ASKS_NOTE` names tables and the line | **36/36** | **30/30** | **30/30** | **30/30** | **5 / 5** | **0/18** | **9/9** | **9/9** | **9/9** |
+
+Before, the eight earlier scenarios passed 24/24 and the new ones 3/12: the looked-up build
+was written in the chat every time (126–171 words, after its search), "Let's do option A."
+edited the options, copied them to the clipboard or was answered in the chat, and "go deeper
+on day two" was answered in the chat every time (115–173 words; twice with no change to the
+document); "Changed when asked"
+counts the edits that went through (the level-by-level change once wrote nothing at all,
+six `write_section`s refused). After run 2: all 36; the change and "go deeper" went through
+`rewrite_section` in 7 of 9 (`edit_note` twice, for the head torch); every option picked
+made a new document of 4–6 sections, never `create_note`; each looked-up build had a
+summary and tables (attributes; powers by level). Leaving out "one per
+part" (run 1) let a document of two options be outlined as one section; leaving out "say
+only" let the line drift to "It's ready in your Chat documents folder." The documents are
+longer now (5–6 sections, tables): 1,065k tokens against 756k, mean turn 7.4 s against 3.5 s
+(run 2 shared the processor with a build; run 1, alone, 5.4 s). The quick asks stay one
+call and never make a document. A tool step weighs 2,898 tokens (was 2,620). Run folders
+`20261030-200313-docs-4b-before`, `20261030-202129-docs-4b-after1`,
+`20261030-203018-docs-4b-after2` (kept outside the repo).
+
 **Not run yet: a cloud model.** Claude Haiku 5.5 costs credits, so it waits for the
 maintainer's OK: `npm run eval -- --documents --model anthropic:claude-haiku-5-5
---keys-from-yap --repeat 2` (about 250k tokens, as the 4B's two-repeat run took; the
-context line `ASKS_NOTE` is only for a model on this PC, so it measures the rule alone).
+--keys-from-yap --repeat 2` (12 scenarios, 16 turns a repeat: about 700k tokens, as the
+4B's run took two-thirds of 1,065k; prompt caching makes most of them cheap reads), or only
+the four new ones with `--only build-looked-up,change-build,pick-option,go-deeper` (about
+400k). The context lines (`steer`) are only for a model on this PC, so it measures the rule
+and the tools alone.

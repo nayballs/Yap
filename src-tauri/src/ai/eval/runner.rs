@@ -1274,6 +1274,13 @@ async fn run_scenario(
                 "left": seen.left,
                 "words": o.words(),
                 "error": o.error.is_some(),
+                // Asked as a check or a warning (`soft`).
+                "change_expected": d.changed || turn.soft.document.as_ref().is_some_and(|s| s.changed),
+                "changed": !seen.changed.is_empty(),
+                "table_expected": d.table || turn.soft.document.as_ref().is_some_and(|s| s.table),
+                "table": seen.table,
+                "summary_expected": d.summary || turn.soft.document.as_ref().is_some_and(|s| s.summary),
+                "summary": seen.summary,
             });
         }
         j["fails"] = json!(f);
@@ -2382,8 +2389,17 @@ fn documents_table(rows: &[Value]) -> String {
         }
     }
     let mut md = String::from(
-        "| Model | Made when asked | Outline first | Every section written | Chat line (mean / most words) | Made when not wanted |\n|---|---|---|---|---|---|\n",
+        "| Model | Made when asked | Outline first | Every section written | Chat line (mean / most words) | Made when not wanted | Changed when asked | A table | A summary |\n|---|---|---|---|---|---|---|---|---|\n",
     );
+    // Of the turns a check asks it of: how many did.
+    let share = |mine: &[&Value], want: &str, got: &str| {
+        let asked: Vec<&&Value> = mine.iter().filter(|d| d[want] == json!(true)).collect();
+        if asked.is_empty() {
+            "—".to_string()
+        } else {
+            format!("{}/{}", asked.iter().filter(|d| d[got] == json!(true)).count(), asked.len())
+        }
+    };
     for m in &models {
         let mine: Vec<&Value> = turns.iter().filter(|(x, _)| x == m).map(|(_, d)| *d).collect();
         let should: Vec<&&Value> = mine.iter().filter(|d| d["expected"] == json!(true)).collect();
@@ -2395,13 +2411,16 @@ fn documents_table(rows: &[Value]) -> String {
         let mean = if words.is_empty() { "—".to_string() } else { format!("{:.0}", words.iter().sum::<u64>() as f64 / words.len() as f64) };
         let most = words.iter().max().map_or("—".to_string(), u64::to_string);
         md.push_str(&format!(
-            "| {m} | {}/{} | {first}/{} | {filled}/{} | {mean} / {most} | {}/{} |\n",
+            "| {m} | {}/{} | {first}/{} | {filled}/{} | {mean} / {most} | {}/{} | {} | {} | {} |\n",
             made.len(),
             should.len(),
             made.len(),
             made.len(),
             not.iter().filter(|d| d["made"] == json!(true)).count(),
             not.len(),
+            share(&mine, "change_expected", "changed"),
+            share(&mine, "table_expected", "table"),
+            share(&mine, "summary_expected", "summary"),
         ));
     }
     md
