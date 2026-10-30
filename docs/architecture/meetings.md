@@ -306,7 +306,9 @@ The meeting recorder and its audio kept on disk, rolling digests and the action 
   (`PowerRegisterSuspendResumeNotification`, a callback, no window;
   `powrprof` raw-dylib) → `suspending`: a recording pauses cleanly
   (`meeting_end::pause_automatically`: last chunk in, audio closed, a stop
-  mark, no summary). The wake (`PBT_APMRESUMEAUTOMATIC`) → `woke`:
+  mark, no summary) — unless it's already stopping (`meeting::stopping`:
+  Stop and summarise, then the lid shut at once), which finishes as asked,
+  with no line and no question. The wake (`PBT_APMRESUMEAUTOMATIC`) → `woke`:
   `meeting_detect::on_wake` (calls learnt again; the call back on the mic
   within 2 minutes carries on in the same note), then, once the paused
   recording's last chunk is in, **"Your PC was asleep for 12 min"** in the

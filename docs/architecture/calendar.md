@@ -115,7 +115,9 @@ Connecting Google Calendar or an iCal link, sync, parsing, the reminder card, pr
   during a Zoom meeting isn't it; a Teams id and thread aren't compared).
   No code: time and service alone. Used by `claims_call`, `on_call_started` and
   `on_meeting_started` (whose "resuming an older meeting" check reaches as far
-  as the code's window). Not read: the Teams app's windows (titled with the
+  as the code's window), and by `call_is_another_meeting` (call detection,
+  before carrying a call that came back on in a note: `model::another_meeting`,
+  another of the calendar's meetings or the note's own long over). Not read: the Teams app's windows (titled with the
   meeting's name), today's Zoom app ("Zoom Meeting"), Webex, Slack and the
   rest (no code kinds), a meeting tab that isn't the browser's active one.
   Logs the kind of code, never a code or a title. Debug-only

@@ -427,6 +427,17 @@ pub fn event_by_code<'a>(events: &'a [Event], now: i64, code: &str) -> Option<&'
         .min_by_key(|e| ((e.start - now).abs(), e.start))
 }
 
+/// Whether a call of `service` at `now` (its join code `code`) is another
+/// meeting than the one a note is tied to (`linked`: its key, and when it
+/// ends): the note's meeting ended over [`CODE_LATE_SECS`] ago, or the
+/// calendar puts the call in another of its meetings. Call detection
+/// carries a call that came back on in that note only when it isn't (two
+/// meetings back to back on one app; the next morning's first call after a
+/// night asleep). No meeting of the calendar's for the call: not another.
+pub fn another_meeting(events: &[Event], now: i64, service: Option<&str>, code: Option<&str>, linked_key: &str, linked_end: i64) -> bool {
+    now > linked_end + CODE_LATE_SECS || event_for_call(events, now, service, code).is_some_and(|e| e.key != linked_key)
+}
+
 /// `e` has codes of `code`'s kind, and `code` isn't one of them: it's
 /// another meeting on the same service.
 fn has_other_code(e: &Event, code: &str) -> bool {
@@ -589,6 +600,30 @@ mod tests {
             coded("w:2", now + 60, now + 1_860, "meet", &["meet:abc-defg-hij"]),
         ];
         assert_eq!(event_for_call(&weekly, now, Some("meet"), Some("meet:abc-defg-hij")).unwrap().key, "w:2");
+    }
+
+    #[test]
+    fn a_call_back_soon_after_is_another_meeting_when_the_calendar_says_so() {
+        let now = 10_000;
+        // Back to back on Teams: the stand-up ended a minute ago, the 1:1 is on.
+        let standup = event("standup", now - 1_860, now - 60, Some("teams"));
+        let one_on_one = event("one-on-one", now - 60, now + 1_740, Some("teams"));
+        let events = [standup.clone(), one_on_one];
+        assert!(another_meeting(&events, now, Some("teams"), None, "standup", standup.end));
+        // The stand-up still on (a dropped connection): the same meeting.
+        let running = event("standup", now - 1_740, now + 60, Some("teams"));
+        assert!(!another_meeting(std::slice::from_ref(&running), now, Some("teams"), None, "standup", running.end));
+        // Nothing on the calendar for the call: not another, as before.
+        assert!(!another_meeting(&[], now, Some("teams"), None, "standup", now - 60));
+        // A join code beats the time: the call shows the stand-up's code.
+        let coded_standup = coded("standup", now - 1_860, now - 60, "meet", &["meet:abc-defg-hij"]);
+        let next = coded("design", now - 60, now + 1_740, "meet", &["meet:kkk-llll-mmm"]);
+        let both = [coded_standup.clone(), next];
+        assert!(!another_meeting(&both, now, Some("meet"), Some("meet:abc-defg-hij"), "standup", coded_standup.end));
+        assert!(another_meeting(&both, now, Some("meet"), Some("meet:kkk-llll-mmm"), "standup", coded_standup.end));
+        // Yesterday's meeting, long over: another, whatever is on now.
+        assert!(another_meeting(&[], now + 16 * 3_600, Some("teams"), None, "standup", standup.end));
+        assert!(!another_meeting(&[], standup.end + CODE_LATE_SECS, Some("teams"), None, "standup", standup.end));
     }
 
     #[test]

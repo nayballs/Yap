@@ -753,6 +753,13 @@ pub fn recording_note() -> Option<u64> {
     }
 }
 
+/// Whether the recording going on was asked to stop already (an end or a
+/// pause on its way, its last chunk not in yet): the PC going to sleep
+/// leaves it to finish as asked (`sleep.rs`).
+pub fn stopping() -> bool {
+    slot().session().is_some_and(|s| s.stop.load(Ordering::SeqCst))
+}
+
 /// Session state for the UI: `{ recording, noteId, elapsedSecs }`.
 pub fn state() -> serde_json::Value {
     let guard = slot();
