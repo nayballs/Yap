@@ -2128,7 +2128,22 @@ pub async fn respond(app: &AppHandle, id: u64, action: &str) -> Result<Option<u6
     let card = {
         let mut s = lock();
         match s.card.take() {
-            Some(card) if card.id == id => card,
+            Some(card) if card.id == id => {
+                // Answered under the same lock as the card's taken: the
+                // scheduler's tick (every 5 s while a card is up) never
+                // finds it due again while the card is withdrawn below.
+                let key = model::answer_key(&card.event);
+                match action {
+                    "snooze" => {
+                        s.snoozed.insert(key, now_secs() + SNOOZE_SECS);
+                    }
+                    "dismiss" | "join" | "start" => {
+                        s.store.answered.insert(key, now_secs());
+                    }
+                    _ => {}
+                }
+                card
+            }
             other => {
                 // Answered already, on the other surface.
                 s.card = other;
