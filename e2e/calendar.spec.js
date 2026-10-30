@@ -615,7 +615,8 @@ test('Google Calendar in one click (a local fake of Google), read-only, then dis
   await main.getByRole('alertdialog', { name: 'Disconnect imogen@example.com?' }).getByRole('button', { name: 'Disconnect' }).click();
   await expect.poll(() => status(yap).then((s) => s.connections.length)).toBe(0);
   expect((await status(yap)).events).toEqual([]);
-  expect(Object.keys(yap.readJson('calendar-secrets.e2e.json'))).toEqual([]);
+  // (The connection goes from the list first, its secret a moment after.)
+  await expect.poll(() => Object.keys(yap.readJson('calendar-secrets.e2e.json'))).toEqual([]);
   await shot(main, '22-connectors-disconnected');
   await closeSettings(main);
   await openView(main, 'Meetings');
