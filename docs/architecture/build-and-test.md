@@ -165,9 +165,14 @@ naming the process). Silencing and pausing other apps follow the same rule
 (sessions of the test's processes, or of a process whose windows all carry
 the nonce; media titled with the nonce): your own music is never touched.
 ⚠ **It takes the keyboard focus for ~2 min** (runs locally
-only, not on CI): say so before running it while the maintainer is at the PC; another app
-grabbing the focus mid-run makes Yap refuse (the harness retries a refused paste
-twice). A gap it finds becomes a "known gap: …" test pinning today's result
+only, not on CI), so a **hands-off guard** (`e2e-real/support/guard.js`) holds it: it
+starts only once the PC has been idle 10 min (`YAP_ROBOT_IDLE_MIN`; `YAP_ROBOT_FORCE=1`
+only when the person at the PC says so), and an input watcher (`yaprobot watch`,
+low-level hooks: input without the injected flags is the person's) ends the run on
+any key, click, wheel or mouse move over 10 px, killing the runner's process tree,
+deleting the robot lock and saying why in `test-results/real/stopped-by-input.txt`.
+Another app grabbing the focus mid-run makes Yap refuse (the harness retries a
+refused paste twice). A gap it finds becomes a "known gap: …" test pinning today's result
 until it's fixed (none open now). Guide: [`docs/e2e-tests.md`](../e2e-tests.md) "Real-app robot tests".
 
 ## Your own dictations as a test set (`yap.exe dictation-check`)

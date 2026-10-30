@@ -50,8 +50,10 @@ npm run test:app                                            # the end-to-end sui
   seconds plus the build, with screenshots in `test-results/app/screenshots/`. Add or extend
   a spec in `e2e/` for anything you change in the UI. Guide: [docs/e2e-tests.md](./docs/e2e-tests.md).
 - **`npm run test:real`** pastes into real windows on your PC, so it takes the keyboard focus
-  for a couple of minutes. It only runs locally, never in CI. Worth it for changes to
-  pasting, the clipboard or the microphone.
+  for a couple of minutes. It waits until the PC has been idle 10 minutes
+  (`YAP_ROBOT_FORCE=1` starts it now) and stops the moment you touch the keyboard or mouse.
+  It only runs locally, never in CI. Worth it for changes to pasting, the clipboard or the
+  microphone.
 - **`npm run eval`** puts real AI models through Yap's Chat code. Use it before changing a
   prompt or a tool. Guide: [docs/model-evals.md](./docs/model-evals.md).
 
