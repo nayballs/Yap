@@ -389,6 +389,16 @@ pub fn allowed(on: bool, cloud_on: bool, leaves: bool) -> Allowed {
     }
 }
 
+/// May a screenshot of the window in front taken earlier (kept with its
+/// question in Chat, source "window") go to `provider` at `base_url` now,
+/// sent again with a later question (`snip::turn::with_history_images`)?
+/// Only where the window itself would go ([`allowed`]): one taken for a
+/// model on this PC never follows the conversation to a cloud model without
+/// "…with cloud models too". Pure.
+pub fn window_may_go(cfg: &crate::config::YapConfig, provider: &str, base_url: &str) -> bool {
+    allowed(cfg.assistant_screen, cfg.assistant_screen_cloud, leaves_pc(provider, base_url)) == Allowed::Yes
+}
+
 /// The alert's **Allow** (`alert::ALLOW_SCREEN_CLOUD`): "…with cloud models
 /// too" on (Settings shows it: config's save tells the windows).
 pub fn allow_cloud() {

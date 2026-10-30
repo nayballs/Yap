@@ -40,6 +40,7 @@
 //! a call outside it.
 
 use std::future::Future;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
@@ -164,14 +165,19 @@ struct Turn {
     text: Mutex<String>,
     first: Mutex<Option<Instant>>,
     last: Mutex<Option<Instant>>,
+    /// A request of the turn asked its model to think ([`extra_for`]): not
+    /// so when Yap answered by itself (an app opened, the passages with no
+    /// model) or the model can't think on request.
+    asked: AtomicBool,
 }
 
 tokio::task_local! {
     static TURN: Turn;
 }
 
-/// Run a Chat turn thinking it through (`on`), and say what it thought.
-/// Off: just the turn, as ever.
+/// Run a Chat turn thinking it through (`on`), and say what it thought —
+/// `None` when no request of it asked the model to think. Off: just the
+/// turn, as ever.
 pub async fn with<F: Future>(on: bool, f: F) -> (F::Output, Option<Thought>) {
     if !on {
         return (f.await, None);
@@ -179,6 +185,9 @@ pub async fn with<F: Future>(on: bool, f: F) -> (F::Output, Option<Thought>) {
     TURN.scope(Turn::default(), async {
         let out = f.await;
         let thought = TURN.with(|t| {
+            if !t.asked.load(Ordering::SeqCst) {
+                return None;
+            }
             let text = t.text.lock().unwrap_or_else(|p| p.into_inner()).trim().to_string();
             let first = *t.first.lock().unwrap_or_else(|p| p.into_inner());
             let last = *t.last.lock().unwrap_or_else(|p| p.into_inner());
@@ -186,9 +195,9 @@ pub async fn with<F: Future>(on: bool, f: F) -> (F::Output, Option<Thought>) {
                 (Some(a), Some(b)) => b.saturating_duration_since(a).as_millis() as u64,
                 _ => 0,
             };
-            Thought { text, ms }
+            Some(Thought { text, ms })
         });
-        (out, Some(thought))
+        (out, thought)
     })
     .await
 }
@@ -204,7 +213,11 @@ pub fn extra_for(provider: &str, model: &str) -> Option<Map<String, Value>> {
     if !wanted() {
         return None;
     }
-    request_extra(provider, model)
+    let extra = request_extra(provider, model);
+    if extra.is_some() {
+        let _ = TURN.try_with(|t| t.asked.store(true, Ordering::SeqCst));
+    }
+    extra
 }
 
 /// A piece of thinking came (a streamed request): the clock.
@@ -354,6 +367,14 @@ mod tests {
         let thought = thought.unwrap();
         assert_eq!(thought.text, "First, the ball.\n\nThen the bat.");
         assert!(!wanted(), "over with the turn");
+        // Asked to think, but no request did (Yap opened an app, a model
+        // that can't think on request): no "Thought it through" for it.
+        let ((), none) = with(true, async {
+            assert!(wanted());
+            assert!(extra_for("custom", "llama3").is_none());
+        })
+        .await;
+        assert!(none.is_none());
     }
 
     #[test]

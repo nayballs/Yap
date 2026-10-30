@@ -289,6 +289,12 @@ impl<'a> Step<'a> {
     pub fn on(&mut self, d: Delta<'_>) {
         match d {
             Delta::Reasoning(s) => {
+                // Only a question asked to think it through shows it: a model
+                // that sends its reasoning anyway (Groq's gpt-oss, a
+                // reasoning model on OpenRouter) shows none, as before Think.
+                if !crate::chat::think::wanted() {
+                    return;
+                }
                 crate::chat::think::tick();
                 self.thinking.push_str(s);
                 self.thought_sent = false;
@@ -1111,8 +1117,8 @@ mod tests {
         assert!(asm.push(&chunk("more")).unwrap().is_empty());
     }
 
-    #[test]
-    fn thinking_sent_apart_is_never_the_answer() {
+    #[tokio::test]
+    async fn thinking_sent_apart_is_never_the_answer() {
         // llama.cpp's `reasoning_content`, then the answer; Groq's and
         // OpenRouter's `reasoning`.
         let mut asm = Assembler::default();
@@ -1130,14 +1136,18 @@ mod tests {
         let pieces = groq.push(&json!({ "choices": [{ "delta": { "reasoning": "Hmm." } }] }).to_string()).unwrap();
         assert_eq!(pieces, vec![Piece::Reasoning("Hmm.".into())]);
 
-        // A step shows it as thinking, then the answer — and a thinking
-        // budget's end tag, should it slip in, never.
+        // A step of a question asked to think it through shows it as
+        // thinking, then the answer — and a thinking budget's end tag,
+        // should it slip in, never.
         let log = Log::default();
-        let mut s = Step::new(&log, false, false);
-        s.on(Delta::Reasoning("First, "));
-        s.on(Delta::Reasoning("the ball."));
-        s.on(Delta::Content("</think>\n\nThe ball costs 5 cents."));
-        s.end(true);
+        crate::chat::think::with(true, async {
+            let mut s = Step::new(&log, false, false);
+            s.on(Delta::Reasoning("First, "));
+            s.on(Delta::Reasoning("the ball."));
+            s.on(Delta::Content("</think>\n\nThe ball costs 5 cents."));
+            s.end(true);
+        })
+        .await;
         let events = log.0.lock().unwrap().clone();
         let thinking: Vec<&str> = events.iter().filter_map(|e| if let Event::Thinking { text } = e { Some(text.as_str()) } else { None }).collect();
         assert_eq!(thinking.last(), Some(&"First, the ball."));
@@ -1146,8 +1156,52 @@ mod tests {
         let last_thought = events.iter().rposition(|e| matches!(e, Event::Thinking { .. })).unwrap();
         assert!(last_thought < first_text, "the thinking, whole, before the answer");
         assert!(events.iter().any(|e| matches!(e, Event::Thinking { .. })));
+        // Any other question: a model that sends its reasoning anyway (Groq's
+        // gpt-oss does, unasked) shows none of it — only the answer.
+        let plain = Log::default();
+        let mut s = Step::new(&plain, false, false);
+        s.on(Delta::Reasoning("The user wants the weather."));
+        s.on(Delta::Content("It's sunny."));
+        s.end(true);
+        let events = plain.0.lock().unwrap().clone();
+        assert!(!events.iter().any(|e| matches!(e, Event::Thinking { .. })), "{events:?}");
+        assert_eq!(plain.texts().last().map(String::as_str), Some("It's sunny."));
         // On the page's wire.
         assert_eq!(serde_json::to_value(Event::Thinking { text: "x".into() }).unwrap(), json!({ "kind": "thinking", "text": "x" }));
+    }
+
+    /// A question asked to think it through, answered whole by a server
+    /// asked to stream (one that won't, or a broken stream asked again):
+    /// its thinking shows once, not twice.
+    #[tokio::test]
+    async fn a_whole_answers_thinking_shows_once() {
+        let server = tiny_http::Server::http("127.0.0.1:0").expect("a local port");
+        let port = server.server_addr().to_ip().expect("ip").port();
+        std::thread::spawn(move || {
+            if let Ok(mut req) = server.recv() {
+                let mut body = String::new();
+                let _ = std::io::Read::read_to_string(req.as_reader(), &mut body);
+                let message = json!({ "role": "assistant", "content": "The ball costs 5p.", "reasoning_content": "The bat costs a pound more." });
+                let reply = json!({ "choices": [{ "index": 0, "message": message, "finish_reason": "stop" }] });
+                let header = tiny_http::Header::from_bytes("content-type", "application/json").unwrap();
+                let _ = req.respond(tiny_http::Response::from_string(reply.to_string()).with_header(header));
+            }
+        });
+        let base = format!("http://127.0.0.1:{port}/v1");
+        let log = Log::default();
+        let (out, thought) = crate::chat::think::with(true, async {
+            let question = json!([{ "role": "user", "content": "How much is the ball?" }]);
+            let req = crate::ai::llm::ChatRequest::chat(&base, "", "openai/gpt-oss-20b", "groq", 0.5, question, None, None);
+            assert_eq!(req.extra["reasoning_effort"], "high");
+            call(Live { sink: &log, beside: None }, &req, false, false).await
+        })
+        .await;
+        assert_eq!(out.unwrap()["content"], "The ball costs 5p.");
+        let shown: Vec<String> =
+            log.0.lock().unwrap().iter().filter_map(|e| if let Event::Thinking { text } = e { Some(text.clone()) } else { None }).collect();
+        assert_eq!(shown, ["The bat costs a pound more."]);
+        assert_eq!(log.texts().last().map(String::as_str), Some("The ball costs 5p."));
+        assert_eq!(thought.unwrap().text, "The bat costs a pound more.");
     }
 
     /// Every event a sink got.
