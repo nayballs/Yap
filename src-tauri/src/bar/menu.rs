@@ -93,19 +93,26 @@ pub async fn bar_menu() -> Result<Extras, String> {
 
 /// A microphone picked in the menu: first in the order (and off "Not now"),
 /// so the next dictation uses it. Settings follows (`yap-config-saved`).
+/// Off the main thread (as `mic_offer_respond`): reading Windows' list,
+/// saving and applying the config take the pipeline's lock, which a
+/// shortcut's start holds while it reads the window in front.
 #[tauri::command]
-pub fn bar_use_mic(app: AppHandle, id: String) -> Result<(), String> {
+pub async fn bar_use_mic(app: AppHandle, id: String) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || use_mic(&app, &id)).await.map_err(|e| e.to_string())?
+}
+
+fn use_mic(app: &AppHandle, id: &str) -> Result<(), String> {
     let mic = mics::present()
         .unwrap_or_default()
         .into_iter()
         .find(|e| e.id == id)
         .ok_or("That microphone isn't connected any more")?;
-    crate::shell::settings::change_config(&app, |c| {
+    crate::shell::settings::change_config(app, |c| {
         mics::offer::put_first(&mut c.mic_order, &mut c.mic_not_now, &mic);
         Ok(())
     })?;
     tracing::info!("bar: a microphone picked from the menu, first in the order now");
-    let _ = tauri::Emitter::emit(&app, mics::EVENT_CHANGED, ());
+    let _ = tauri::Emitter::emit(app, mics::EVENT_CHANGED, ());
     Ok(())
 }
 
