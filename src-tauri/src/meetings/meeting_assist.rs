@@ -481,6 +481,7 @@ pub async fn meeting_longer(app: AppHandle, note_id: u64, replace: Option<bool>,
     }
     crate::notes::note_edits::keeps_summary(&note, replace)?;
     let previous = crate::notes::note_edits::SummaryBefore::of(&note);
+    let created = note.created_ts;
     let read_ms = now_ms();
     let heard_to = crate::notes::note_edits::newest_talk(&note);
     let hash = crate::notes::content_hash(&note.content);
@@ -503,12 +504,29 @@ pub async fn meeting_longer(app: AppHandle, note_id: u64, replace: Option<bool>,
         tracing::info!(note_id, "Make notes longer: the reply was no longer; the summary kept");
         return Err("The model didn't make the notes any longer, so Yap kept them as they were.".to_string());
     }
-    crate::notes::note_edits::write_summary(note_id, &longer, &hash, read_ms, heard_to, replace)?;
+    // Deleted meanwhile, its id given to a new note: never written there.
+    if !crate::notes::still_the_note(note_id, created) {
+        return Err("Note not found".to_string());
+    }
+    store_longer(note_id, &longer, &hash, read_ms, heard_to, replace)?;
     crate::notes::saved()?;
     tracing::info!(note_id, before = previous.enhanced_content.len(), after = longer.len(), "Make notes longer: written");
     crate::notes::note_edits::summary_changed(&app, note_id, origin.as_deref().unwrap_or(""));
     let state = crate::notes::get(note_id).map(|n| crate::notes::note_edits::state_of(&n)).ok_or("Note not found")?;
     Ok(Longer { state, previous })
+}
+
+/// What "Make notes longer" is called in a note's version history.
+const LONGER: &str = "Make notes longer";
+
+/// "Make notes longer"'s summary stored (`note_edits::write_summary`) as a
+/// version of its own, marked as the Action it is (`versions.rs`): never
+/// "Changed", never folded into an edit made just before.
+fn store_longer(note_id: u64, longer: &str, hash: &str, read_ms: u64, heard_to: u64, replace: bool) -> Result<(), String> {
+    use crate::notes::versions::{by, kind, How};
+    by(How::named(kind::ACTION, LONGER), || {
+        crate::notes::note_edits::write_summary(note_id, longer, hash, read_ms, heard_to, replace)
+    })
 }
 
 #[cfg(test)]
@@ -523,6 +541,27 @@ mod tests {
         assert_eq!(kind("blindSpots"), Some(Helper::BlindSpots));
         assert_eq!(kind("smart"), Some(Helper::Smart));
         assert_eq!(kind("catchUp"), None); // that one is meeting_catch_up
+    }
+
+    /// "Make notes longer" is a version of its own in the note's history,
+    /// marked as the Action it is: until 2026-10-30 it was "Changed", and
+    /// folded with an edit made just before it.
+    #[test]
+    fn make_notes_longer_is_a_version_of_its_own() {
+        use crate::notes::versions::{by, kind, list, How};
+        let id = crate::notes::create("Supplier call", "", "meeting", "Meetings").id;
+        by(How::new(kind::SUMMARY), || crate::notes::note_edits::write_summary(id, "## Action plan\n- [ ] Send the quote", "h", 1_000, 0, false)).unwrap();
+        crate::notes::modify(id, |n| {
+            n.enhanced_content.push_str("\n- [ ] Book the room");
+            Ok(((), true))
+        })
+        .unwrap();
+        store_longer(id, "## Action plan\n- [ ] Send the quote by Friday, as agreed\n- [ ] Book the room for Tuesday", "h", 2_000, 0, true).unwrap();
+        let versions = list(id).unwrap();
+        let newest = &versions[0].version;
+        assert_eq!((newest.kind.as_str(), newest.label.as_str()), ("action", "Make notes longer"));
+        assert!(newest.text.contains("by Friday"));
+        assert_eq!(versions[1].version.kind, "edited", "the edit before stays a version of its own");
     }
 
     #[test]
