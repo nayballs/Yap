@@ -617,7 +617,7 @@ pub fn restore(id: u64, n: u64) -> Result<Restored, String> {
         .ok_or("That version isn't kept any more")?;
     let now = now_ms();
     let how = How { kind: kind::RESTORED, label: String::new(), from: Some(n) };
-    let text = by(how, || {
+    let (text, changed) = by(how, || {
         super::modify(id, |note| {
             let changed = match v.field {
                 Field::Notes => {
@@ -634,11 +634,15 @@ pub fn restore(id: u64, n: u64) -> Result<Restored, String> {
                     super::note_edits::apply_summary_edit(note, &text, now)
                 }
             };
-            Ok((v.field.of(note).to_string(), changed))
+            Ok(((v.field.of(note).to_string(), changed), changed))
         })
     })?;
-    tracing::info!(note_id = id, n, field = ?v.field, kind = %v.kind, chars = text.chars().count(), "Note version restored");
-    Ok(Restored { field: v.field, text, previous: undo_target(id, v.field) })
+    tracing::info!(note_id = id, n, field = ?v.field, kind = %v.kind, chars = text.chars().count(), changed, "Note version restored");
+    // Nothing changed (an older version that says what the note says now):
+    // there's nothing to undo — the version before the newest isn't what
+    // the note had.
+    let previous = if changed { undo_target(id, v.field) } else { None };
+    Ok(Restored { field: v.field, text, previous })
 }
 
 /// Note `id` is gone: its history goes with it (in memory, and its file once
@@ -884,6 +888,30 @@ mod tests {
         assert!(list(again).unwrap().is_empty());
         TEST_DIR.with(|t| *t.borrow_mut() = None);
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// An older version that says what the note says now: restoring it
+    /// changes nothing, so there's no Undo — the version before the newest
+    /// is another text, which the note never had just before.
+    #[test]
+    fn restoring_a_version_with_the_text_the_note_has_now_offers_no_undo() {
+        let id = super::super::create("Errands", "", "manual", "").id;
+        let polish = How::named(kind::TRANSFORM, "Polish");
+        by(polish.clone(), || super::super::update(id, None, Some("Post the parcel".into()), None, None)).unwrap();
+        by(polish.clone(), || super::super::update(id, None, Some("Post the parcel today".into()), None, None)).unwrap();
+        by(polish, || super::super::update(id, None, Some("Post the parcel".into()), None, None)).unwrap();
+        let listed = list(id).unwrap();
+        let oldest = listed.last().unwrap();
+        assert_eq!((oldest.version.text.as_str(), oldest.current), ("Post the parcel", false));
+        let r = restore(id, oldest.version.n).unwrap();
+        assert_eq!(r.text, "Post the parcel");
+        assert_eq!(r.previous, None, "nothing changed: nothing to undo");
+        assert_eq!(list(id).unwrap().len(), listed.len(), "and no version for it");
+        // A restore that changes the note still offers Undo.
+        let middle = listed[1].version.n;
+        let r = restore(id, middle).unwrap();
+        assert_eq!(r.text, "Post the parcel today");
+        assert_eq!(r.previous, Some(listed[0].version.n));
     }
 
     #[test]
