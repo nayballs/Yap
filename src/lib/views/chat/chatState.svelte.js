@@ -761,6 +761,12 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
       const i = mine('user');
       return i >= 0 ? i : firstAt;
     };
+    // The conversation the question went to (a new chat's: from its `turn`
+    // event). Another one opened while the answer came (a click in the
+    // list, New chat): the one shown is left as it is — its messages are
+    // another conversation's, never this answer's place.
+    let sentTo = activeId;
+    const away = (conv) => mine('user') < 0 && (conv == null || activeId !== conv);
     let askedId = null;
     sending = true;
     stopping = false;
@@ -773,6 +779,7 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
       if (!alive) return;
       if (ev?.kind === 'turn') {
         askedId = ev.userMessageId ?? null;
+        if (ev.conversationId != null) sentTo = ev.conversationId;
         // A new conversation: it's in the list from the first question.
         if (activeId == null && ev.conversationId != null) {
           activeId = ev.conversationId;
@@ -818,6 +825,12 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
     try {
       const res = await call.promise;
       if (!alive) return;
+      if (away(res.conversationId)) {
+        // Saved in its own conversation (the list follows); shown there.
+        refreshList();
+        if (res.speak && res.messageId) speakReply(res.spokenText || res.reply, res.messageId);
+        return;
+      }
       activeId = res.conversationId;
       const qi = questionAt();
       const asked = messages[qi];
@@ -862,14 +875,16 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
         return;
       }
       const qi = questionAt();
+      // Another conversation shown now: its messages stay as they are.
+      const elsewhere = away(sentTo);
       if (stopping && String(e).includes(STOPPED)) {
         // Stopped before any of the answer came: the question stays.
-        messages = [...messages.slice(0, qi), { ...messages[qi], stopped: true }];
+        if (!elsewhere) messages = [...messages.slice(0, qi), { ...messages[qi], stopped: true }];
         refreshList();
         contextStamp += 1;
         return;
       }
-      messages = messages.slice(0, qi);
+      if (!elsewhere) messages = messages.slice(0, qi);
       input = text; // give the message back
       if (thinkIt) think.on = true; // …thought through, as it was asked
       // …and its screenshots (Rust puts them back too, yap-chat-waiting).
