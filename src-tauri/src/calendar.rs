@@ -2383,12 +2383,19 @@ async fn write_brief(app: AppHandle, facts: brief::Facts, ep: crate::meetings::m
     };
     tracing::debug!("calendar: brief:\n{}", brief::plain_text(&b));
     store_brief(&app, &b);
-    let next = {
-        let mut s = lock();
-        s.brief_job = None;
-        (!s.brief_waiting.is_empty()).then(|| s.brief_waiting.remove(0))
-    };
-    if let Some(next) = next {
+    lock().brief_job = None;
+    // The next waiting, until one starts a summary of its own (it goes on
+    // from there): one that needs none, or can't be made any more, starts
+    // nothing, and those after it waited for ever, "writing" (a waiting
+    // brief is busy to `prepare_brief`, so the scheduler never retried it).
+    loop {
+        let next = {
+            let mut s = lock();
+            if s.brief_job.is_some() || s.brief_waiting.is_empty() {
+                break;
+            }
+            s.brief_waiting.remove(0)
+        };
         let handle = app.clone();
         let _ = tauri::async_runtime::spawn_blocking(move || prepare_brief(&handle, &next, false)).await;
     }
