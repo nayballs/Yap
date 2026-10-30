@@ -192,6 +192,8 @@ pub fn spawn_meeting_audio(
     std::thread::Builder::new()
         .name("meeting-capture-e2e".into())
         .spawn(move || {
+            // Its number, as the real capture thread's (`meeting::new_capture`).
+            let capture = crate::meetings::meeting::new_capture();
             // 100 ms of audio per 100 ms tick, times the speed-up.
             let step = (1_600.0 * speed) as usize;
             let mut pos = 0;
@@ -205,8 +207,8 @@ pub fn spawn_meeting_audio(
             let mic_of = || mics::present().and_then(|l| mics::in_use(&order, &l, &[]));
             let mut mic_at = mic_of();
             let say_mic = |at: &Option<mics::Endpoint>| match at {
-                Some(e) => crate::meetings::meeting::set_mic_in_use(&e.id, &e.name),
-                None => crate::meetings::meeting::set_mic_in_use("", "Microphone (e2e)"),
+                Some(e) => crate::meetings::meeting::set_mic_in_use(capture, &e.id, &e.name),
+                None => crate::meetings::meeting::set_mic_in_use(capture, "", "Microphone (e2e)"),
             };
             say_mic(&mic_at);
             let mut mics_seen = mics::generation();
@@ -299,7 +301,7 @@ pub fn spawn_meeting_audio(
             if dictating {
                 crate::dictation::pipeline::dictation_ended();
             }
-            crate::meetings::meeting::clear_mic_in_use();
+            crate::meetings::meeting::clear_mic_in_use(capture);
             *script() = Script::default();
         })
         .map_err(|e| format!("Failed to spawn the e2e capture thread: {e}"))?;
