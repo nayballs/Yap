@@ -177,6 +177,34 @@ test('"You\'ve dictated 100 words": said once, with See Insights', async ({ yap,
   await expect(toastWith(main, 'You\'ve dictated')).toHaveCount(0);
 });
 
+test('a milestone passed during a meeting is said after it, never lost', async ({ yap, main }) => {
+  // It was marked said as it was counted, then landed on the meeting or
+  // waited unseen on the bar and was dropped: never said.
+  await yap.invoke('e2e_stats_set', { store: { days: [row(0, { words: 95, dictations: 5 })], milestone: 0 } });
+  await openView(main, 'Home');
+  const recording = () => yap.invoke('meeting_state').then((s) => s.recording);
+  const note = await yap.invoke('note_create', { title: 'Weekly sync', folder: 'Meetings' });
+  await yap.invoke('meeting_start', { noteId: note.id });
+  try {
+    await expect.poll(recording).toBe(true);
+    await yap.invoke('e2e_dictation', { text: 'one two three four five six seven eight nine ten' });
+    await expectStore(yap, 'dictation_stats.json', (s) => s.days[0].dictations === 6);
+    await main.waitForTimeout(3_000);
+    await expect(toastWith(main, "You've dictated")).toHaveCount(0);
+    await expectStore(yap, 'dictation_stats.json', (s) => s.milestone === 0);
+  } finally {
+    if (await recording()) {
+      await yap.invoke('meeting_pause');
+      await expect.poll(recording, { timeout: 20_000 }).toBe(false);
+    }
+  }
+  // The next dictation, after the meeting, says it.
+  await yap.invoke('e2e_dictation', { text: 'and after the meeting' });
+  await expect(toastWith(main, "You've dictated 100 words")).toBeVisible({ timeout: 10_000 });
+  await expectStore(yap, 'dictation_stats.json', (s) => s.milestone === 100);
+  await closeToasts(main);
+});
+
 test('Share: the numbers as a picture, copied or saved', async ({ yap, main, shot }) => {
   await yap.invoke('e2e_stats_set', {
     store: { days: [row(1, { words: 900, dictations: 30, timed: 30, timedWords: 900, speakingSecs: 420, cleanupWords: 40, dictionaryFixes: 6 }), row(0, { words: 340, dictations: 12 })], milestone: 1000 },
