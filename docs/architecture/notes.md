@@ -469,7 +469,9 @@ roadmap, "Meeting notes you can fix" and "Tasks").
   `meetings/meeting_assist.rs`): `SummaryBefore` (the words, Yap's version,
   the person's mark and `summary_ts`) is taken before the rewrite goes
   through `write_summary`, and `note_summary_put_back(id, before, origin)`
-  (`put_back`, pure) puts it back with the tasks ticked since still ticked.
+  (`put_back`, pure) puts it back with the tasks ticked since still ticked,
+  as a `restored` version (`put_back_summary`): never folded into the
+  rewrite's own version, so the rewrite stays in the history.
   Note version history, when it lands, takes this place: the summary
   before a rewrite kept as a version, Undo restoring it.
   **Rating it** (`note_summary_rate(id, rating: up|down|null, why, origin)`,
