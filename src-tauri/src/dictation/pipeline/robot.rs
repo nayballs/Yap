@@ -119,8 +119,9 @@ impl Robot {
     /// in front becomes the target and its selection is read, as at the
     /// key press — nothing selected right after a paste there, and that
     /// paste (the last dictation) is what's rewritten — then the AI and the
-    /// paste. Returns what it did.
-    pub(crate) async fn rewrite_text(&self, instruction: String) -> Result<Rewritten, String> {
+    /// paste — `pause_ms` after the key press, when given (the test moves
+    /// the focus). Returns what it did.
+    pub(crate) async fn rewrite_text(&self, instruction: String, pause_ms: Option<u64>) -> Result<Rewritten, String> {
         let shared = &self.0;
         let Some(busy) = self.take_busy() else {
             return Err(Self::BUSY.into());
@@ -129,6 +130,9 @@ impl Robot {
             *r = None;
         }
         shared.capture_target(true);
+        if let Some(ms) = pause_ms {
+            tokio::time::sleep(Duration::from_millis(ms.min(30_000))).await;
+        }
         let _ = shared.app.emit("yap-state", "processing");
         tracing::info!(len = instruction.len(), "e2e: robot rewrite from a transcript");
         shared.run_rewrite(instruction).await;

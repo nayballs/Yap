@@ -204,7 +204,7 @@ pub async fn e2e_rewrite(state: State<'_, AppState>, text: String) -> Result<cra
         let guard = state.pipeline.lock().map_err(|_| "the pipeline lock is poisoned")?;
         guard.as_ref().ok_or("no pipeline")?.robot()
     };
-    robot.rewrite_text(text).await
+    robot.rewrite_text(text, None).await
 }
 
 /// Debug-only, test mode: dictations and the rewrite shortcut go to a
