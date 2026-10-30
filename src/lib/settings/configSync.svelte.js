@@ -94,7 +94,9 @@ export function persist() {
       base = disk;
       return;
     }
-    await invoke('save_config', { cfg: next });
+    // With what it read: Rust puts these changes onto config.json as it is
+    // by then, so a change saved since this read stays (shell/settings.rs).
+    await invoke('save_config', { cfg: next, base: disk });
     base = copy(next);
     config.saved = true;
     setTimeout(() => (config.saved = false), 1200);

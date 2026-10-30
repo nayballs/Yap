@@ -60,7 +60,7 @@
     enabled = on;
     try {
       const fresh = await invoke('get_config');
-      await invoke('save_config', { cfg: { ...fresh, bridgeEnabled: on } });
+      await invoke('save_config', { cfg: { ...fresh, bridgeEnabled: on }, base: fresh });
       // Settings (always mounted) keeps its own copy: tell it, or its next
       // auto-save would switch the bridge back.
       window.dispatchEvent(new CustomEvent('yap-config-patched', { detail: { bridgeEnabled: on } }));

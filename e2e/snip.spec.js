@@ -792,6 +792,45 @@ test('a picture pasted into the box or image files dropped on Chat go in as scre
   await clearBox(main);
 });
 
+// Until 2026-10-30 a fifth picture pasted took the oldest's place without a
+// word; a drop said the box was full.
+test('a picture pasted with four waiting says the box is full, as a drop does, and none is taken out', async ({ yap, main }) => {
+  await clearBox(main);
+  await box(main).click();
+  const pastePicture = (w) =>
+    box(main).evaluate(async (el, w) => {
+      const c = document.createElement('canvas');
+      c.width = w;
+      c.height = 20;
+      c.getContext('2d').fillRect(0, 0, w, 20);
+      const blob = await new Promise((r) => c.toBlob(r, 'image/png'));
+      const dt = new DataTransfer();
+      dt.items.add(new File([blob], 'image.png', { type: 'image/png' }));
+      el.dispatchEvent(new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true }));
+    }, w);
+  for (const [i, w] of [31, 32, 33, 34].entries()) {
+    await pastePicture(w);
+    await expect(attachments(main).locator('.shotchip')).toHaveCount(i + 1);
+  }
+  const full = main.getByRole('status').filter({ hasText: 'A question carries 4 screenshots at most' });
+  await expect(full).toHaveCount(0);
+  await pastePicture(35);
+  await expect(full).toBeVisible();
+  await expect(full).toContainText('Remove one to add another.');
+  await expect(attachments(main).locator('.shotchip')).toHaveCount(4);
+  await expect(attachments(main)).toContainText('31 × 20');
+  await expect(attachments(main)).not.toContainText('35 × 20');
+  // A drop says the same.
+  const file = path.join(yap.dataDir, 'to-drop', 'one-more.png');
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, writePng(36, 20, [0x20, 0x60, 0xa0]));
+  await yap.invoke('e2e_drag_drop', { paths: [file] });
+  await expect(full.first()).toBeVisible();
+  await expect(attachments(main).locator('.shotchip')).toHaveCount(4);
+  await expect(attachments(main)).not.toContainText('36 × 20');
+  await clearBox(main);
+});
+
 test("a model that can't read images: \"Send its text instead\", read on this PC", async ({ yap, main, fakeLlm, shot }) => {
   await setConfig(yap, main, { llmScopes: { chat: groqChat(fakeLlm, 'openai/gpt-oss-20b') } });
   // The text Windows' OCR would read (its languages differ per PC).

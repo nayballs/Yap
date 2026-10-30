@@ -58,7 +58,15 @@
 //!   (estimated 865), +962 at 32K (985), +1,122 at 64K (1,145), +994 on
 //!   the 9B at 8K (1,014).
 //!
-//! On the processor (no card) the model is all of the tensors' data.
+//! On the processor (no card) the model is all of the tensors' data, and
+//! the **context checkpoints** count too ([`Shape::checkpoint_bytes`],
+//! 2026-10-30): a hybrid model's server keeps up to `--ctx-checkpoints` (4)
+//! a slot, each one slot's recurrent state as the header's `ssm.*` sizes
+//! give it — the 4B's 50.25 MiB, ×4 ×2 slots: +402 MiB on the processor,
+//! where `--checkpoint-min-step 0` fills them (`local_llm::server_args`).
+//! The server keeps them in the PC's memory, so a card's estimate leaves
+//! them out (they never take the card's room). A sliding-window model's
+//! (Gemma's) are its window's cache, not counted on their own.
 //! Sliding-window layers (Gemma) are counted at the full context: the
 //! estimate errs high there, never low. Not counted: the CUDA context
 //! itself (~230–250 MiB more in `nvidia-smi` than the log's buffers), which
@@ -113,6 +121,10 @@ pub struct Server {
 /// The slots a per-slot server keeps ([`Server::per_slot`]).
 pub const PER_SLOT_SLOTS: u64 = 2;
 
+/// The context checkpoints a slot keeps at most (the server's
+/// `--ctx-checkpoints`, `local_llm::CTX_CHECKPOINTS`).
+const CHECKPOINTS: u64 = crate::ai::local_llm::CTX_CHECKPOINTS as u64;
+
 /// What a q8_0 KV cache adds to the compute buffer per token of context
 /// (Qwen3.5-4B on 0.10.6: +80 MiB at 32K, +208 at 64K; this errs high).
 const Q8_COMPUTE_PER_TOKEN: u64 = 3_600;
@@ -159,6 +171,10 @@ pub struct Estimate {
     pub kv_mib: u64,
     pub state_mib: u64,
     pub compute_mib: u64,
+    /// The context checkpoints every slot keeps at most, in the PC's memory
+    /// ([`Shape::checkpoint_bytes`]): counted on the processor only (0 on
+    /// the card, whose memory they don't take).
+    pub checkpoint_mib: u64,
     /// MTP drafting's share (0 without it): included in the others' sum.
     pub mtp_mib: u64,
     pub total_mib: u64,
@@ -228,6 +244,17 @@ impl Shape {
         2 * self.feed_forward_length * UBATCH * 4 + self.embedding_length * UBATCH * 20 + COMPUTE_SLACK + ctx * COMPUTE_PER_TOKEN
     }
 
+    /// One **context checkpoint** of a hybrid model: what llama.cpp's server
+    /// copies out of a slot to resume its cache from later
+    /// (`llama_state_seq_get_size_ext(…, PARTIAL_ONLY)`: the recurrent part
+    /// of one sequence) — one slot's recurrent state, from the header's
+    /// `ssm.*` sizes as [`Self::state_bytes`] counts it (Qwen3.5-4B: 24
+    /// recurrent layers × 2.1 MiB, 50.25 MiB). 0 for a model without
+    /// recurrent layers, or whose header doesn't give their sizes.
+    pub fn checkpoint_bytes(&self) -> u64 {
+        self.state_bytes() / SLOTS
+    }
+
     /// Recurrent layers beside attention (Qwen3.5's Gated DeltaNet, Mamba
     /// hybrids): llama.cpp resumes such a model's cache only from a
     /// checkpoint.
@@ -290,13 +317,20 @@ pub fn estimate(shape: &Shape, file_bytes: u64, ctx: u64, on_card: bool, server:
     let compute = mib(shape.compute_bytes(ctx, server) + if server.kv_q8 { ctx * Q8_COMPUTE_PER_TOKEN } else { 0 });
     // MTP's share past the weights the model already counts.
     let mtp = if mtp_on { mib(shape.mtp_bytes(ctx).saturating_sub(shape.nextn_bytes)) } else { 0 };
+    // The context checkpoints (`--ctx-checkpoints`): up to that many a slot,
+    // kept in the PC's memory by the server — on the processor (where
+    // `--checkpoint-min-step 0` fills them) beside everything else; with a
+    // card, never on it.
+    let slots = if server.per_slot { PER_SLOT_SLOTS } else { SLOTS };
+    let checkpoints = if on_card { 0 } else { mib(shape.checkpoint_bytes() * CHECKPOINTS * slots) };
     Estimate {
         model_mib: model,
         kv_mib: kv,
         state_mib: state,
         compute_mib: compute,
+        checkpoint_mib: checkpoints,
         mtp_mib: mtp,
-        total_mib: model + kv + state + compute + mtp,
+        total_mib: model + kv + state + compute + checkpoints + mtp,
     }
 }
 
@@ -897,6 +931,32 @@ pub mod tests {
             assert!((log..=log + 10).contains(&e.total_mib), "{ctx}: {e:?}");
             assert_eq!(estimate(&q, QWEN25_1_5B_FILE, ctx, true, MTP), e);
         }
+    }
+
+    /// The processor's server keeps up to 4 context checkpoints a slot
+    /// (`--checkpoint-min-step 0` fills them, 2026-10-29), each one slot's
+    /// recurrent state: until 2026-10-30 the estimate left them out.
+    #[test]
+    fn the_processors_estimate_counts_the_context_checkpoints() {
+        let s = as_real(read_shape(Cursor::new(qwen35_4b(248_320).bytes())).unwrap(), 10_969_056);
+        // One slot's recurrent state, from the header: 24 recurrent layers ×
+        // (3 × 8,192 conv + 128 × 4,096 state) f32 = 50.25 MiB.
+        assert_eq!(s.checkpoint_bytes(), 24 * (3 * 8_192 + 128 * 4_096) * 4);
+        assert_eq!(s.checkpoint_bytes(), s.state_bytes() / SLOTS);
+        let per_slot = Server { current: true, mtp: false, kv_q8: false, per_slot: true };
+        let cpu = estimate(&s, QWEN35_4B_FILE, 8_192, false, per_slot);
+        // 4 a slot, 2 slots.
+        assert_eq!(cpu.checkpoint_mib, 402, "{cpu:?}");
+        assert_eq!(cpu.total_mib, cpu.model_mib + cpu.kv_mib + cpu.state_mib + cpu.compute_mib + 402);
+        // The older runtime's 4 shared slots: 4 a slot too.
+        assert_eq!(estimate(&s, QWEN35_4B_FILE, 8_192, false, OLD).checkpoint_mib, 804);
+        // On the card they're in the PC's memory, never the card's.
+        let card = estimate(&s, QWEN35_4B_FILE, 8_192, true, NEW);
+        assert_eq!(card.checkpoint_mib, 0);
+        // A model without recurrent layers keeps none.
+        let q = as_real(read_shape(Cursor::new(qwen25_1_5b(151_936).bytes())).unwrap(), 5_931_200);
+        assert_eq!(q.checkpoint_bytes(), 0);
+        assert_eq!(estimate(&q, QWEN25_1_5B_FILE, 8_192, false, per_slot).checkpoint_mib, 0);
     }
 
     #[test]
