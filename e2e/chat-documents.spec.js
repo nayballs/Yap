@@ -153,7 +153,17 @@ test('a document opens beside the chat, fills section by section, and its pill r
   const lastStep = fakeLlm.requests.filter((r) => r.tools.includes('write_section')).at(-1);
   const results = lastStep.messages.filter((m) => m.role === 'tool').map((m) => JSON.parse(m.content));
   expect(results.at(-1).data.next).toContain('Every section is written');
-  expect(lastStep.system).toContain('make a document: create_document with the title and all its sections first');
+  expect(lastStep.system).toContain('goes straight into a document, never the chat, never asked first');
+  // A page to read: the title big, the sections' rail; a click goes there.
+  await expect(docBody(main).locator('.docname')).toHaveText('Lone wolf ranger');
+  const rail = main.getByTestId('chat-doc-outline');
+  await rail.getByRole('button', { name: 'Sections' }).click();
+  await expect(rail.getByRole('listitem')).toHaveText(['Gear', 'Skills', 'Talents']);
+  await shot(main, '02b-sections-rail');
+  await rail.getByRole('button', { name: 'Talents' }).click();
+  await expect(rail.getByRole('list')).toHaveCount(0);
+  await expect(docBody(main).locator('h3').last()).toBeInViewport();
+  await expect(rail.getByRole('button', { name: 'Sections' })).toBeVisible();
   // The answer keeps it.
   await expectStore(yap, 'chats.json', (s) =>
     s.conversations.some((c) => c.messages.some((m) => m.role === 'assistant' && m.documents?.some((d) => d.id === doc.id && d.title === 'Lone wolf ranger')))
@@ -325,6 +335,62 @@ test('the panel closes, expands, moves its split from the keyboard and opens in 
   expect(n.folder).toBe('Chat documents');
 });
 
+// A change to the open document reworks it (documents.rs `rewrite_section`):
+// a section rewritten whole as it streams, a new one added at the end, the
+// model told what the question means for it (`steer`, a model on this PC);
+// the summary sits under the title.
+test('a change reworks the open document: a section rewritten whole, one added', async ({ yap, main, fakeLlm, shot }) => {
+  fakeLlm.scriptChat([
+    {
+      tools: [
+        {
+          name: 'create_document',
+          args: { title: 'Fictional cipher', summary: 'A careful, slow build for a fictional cipher.', sections: [{ key: 'Powers', intent: 'which' }, { key: 'Gear', intent: 'what' }] },
+        },
+      ],
+    },
+    { tools: [{ name: 'write_section', args: (r) => ({ note_id: madeDoc(r), key: 'Powers', markdown: '- Mind wave\n- Eyestrike' }) }] },
+    { tools: [{ name: 'write_section', args: (r) => ({ note_id: madeDoc(r), key: 'Gear', markdown: '- **Early:** a staff\n- **Late:** a pistol' }) }] },
+    { content: "It's open on the right." },
+  ]);
+  await freshChat(main);
+  await ask(main, 'Make me a build for a fictional cipher');
+  await expect(thread(main)).toContainText("It's open on the right.", { timeout: 20_000 });
+  await expect(docBody(main).locator('.docmd > p').first()).toHaveText('A careful, slow build for a fictional cipher.');
+  const doc = (await yap.invoke('notes_list')).find((n) => n.title === 'Fictional cipher');
+
+  const held = gate();
+  fakeLlm.scriptChat([
+    {
+      tools: [{ name: 'rewrite_section', args: { note_id: doc.id, heading: 'Powers', markdown: '| Level | Power |\n|---|---|\n| 1 | Mind wave |\n| 3 | Eyestrike |' } }],
+      gate: held.promise,
+      stream: { gapMs: 300 },
+    },
+    { tools: [{ name: 'rewrite_section', args: { note_id: doc.id, heading: 'Level by level', markdown: '| Level | Pick |\n|---|---|\n| 1 | Mind wave |' } }] },
+    { content: 'Done: the powers go level by level now.' },
+  ]);
+  await ask(main, 'Can you change it so the powers go level by level?');
+  held.open();
+  await expect(status(main)).toHaveText(/Writing: Powers…/);
+  await expect(thread(main)).toContainText('Done: the powers go level by level now.', { timeout: 20_000 });
+  await expect(docBody(main).locator('h3')).toHaveText(['Powers', 'Gear', 'Level by level']);
+  await expect(docBody(main).locator('table')).toHaveCount(2);
+  await expect(docBody(main)).not.toContainText('- Mind wave');
+  await expect(thread(main).locator('.toolchip').filter({ hasText: 'Fictional cipher' })).toHaveText([
+    'Started "Fictional cipher" (2 sections)',
+    'Wrote 2 sections in "Fictional cipher"',
+    'Rewrote "Powers" in "Fictional cipher"',
+    'Added "Level by level" to "Fictional cipher"',
+  ]);
+  await shot(main, '06-a-section-rewritten-and-one-added');
+  // The model was told: this changes the open document.
+  const step = fakeLlm.requests.find((r) => r.user.includes('powers go level by level'));
+  expect(step.user).toContain('This changes "Fictional cipher"');
+  expect(step.tools).toContain('rewrite_section');
+  const versions = await yap.invoke('note_versions', { id: doc.id });
+  expect(versions.filter((v) => v.field === 'notes').map((v) => v.kind).slice(0, 2)).toEqual(['chat', 'chat']);
+});
+
 // The Voice Assistant (chat/assistant.rs): a document only when one is asked
 // for out loud. Its question carries the spoken note; the document opens in
 // Chat, shown here, as it fills; the voice says one line. (Yap never brings
@@ -348,6 +414,20 @@ test('asked out loud for a plan: the document opens in Chat as it fills, and the
     .toContain("I've put the plan in Chat.");
   const asked = fakeLlm.requests.find((r) => r.tools.includes('create_document') && r.user.includes('fictional hill'));
   expect(asked.user).toContain('This was asked out loud: answer in speech. Make a document only when they ask for one');
+  // Asked with Chat in front (Yap's window has the focus): the line points
+  // at the panel, never "it's in Chat" to someone reading Chat.
+  expect(asked.user).toContain("say in one short sentence that it's open on the right.");
+  expect(asked.user).not.toContain("that it's in Chat");
   await yap.invoke('tts_stop');
+  // From another app (Yap's window not in front): "it's in Chat".
+  await yap.invoke('e2e_focus', { focused: false });
+  fakeLlm.scriptChat([{ content: 'You are welcome.' }]);
+  await yap.invoke('e2e_assistant_ask', { text: 'thanks for the fictional hike plan', listenMs: 0 });
+  await expect.poll(() => fakeLlm.requests.some((r) => r.user.includes('thanks for the fictional hike plan')), { timeout: 15_000 }).toBe(true);
+  const away = fakeLlm.requests.find((r) => r.user.includes('thanks for the fictional hike plan'));
+  expect(away.user).toContain("say in one short sentence that it's in Chat.");
+  await expect.poll(async () => (await yap.invoke('tts_e2e_spoken')).map((s) => s.text).join(' '), { timeout: 15_000 }).toContain('You are welcome.');
+  await yap.invoke('tts_stop');
+  await yap.invoke('e2e_focus', { focused: true });
   await setConfig(yap, main, { speakReplies: false });
 });

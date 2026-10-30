@@ -47,10 +47,36 @@ function loadWidth() {
   }
 }
 
+/** A section's text as it streams, under its own heading when it wrote one, else the key's. */
+function liveBlock(key, text) {
+  const own = /^#{1,2}\s+\S/.test(text.trimStart());
+  return own ? closePartial(text.trimStart().replace(/^#\s/, '## ')) : `## ${key}\n\n${closePartial(text)}`;
+}
+
+/**
+ * Section `key`'s lines in `lines`, `[start, end)`: its `##` heading to the
+ * next `#`/`##` heading or placeholder (blank lines at its end left out),
+ * as documents.rs `section_range` finds it; `null` if there's none.
+ */
+export function sectionRange(lines, key) {
+  const want = String(key).trim().replace(/\s+/g, ' ').toLowerCase();
+  const start = lines.findIndex((l) => {
+    const m = /^\s*##\s+(.*?)\s*$/.exec(l);
+    return !!m && m[1].replace(/#+$/, '').trim().replace(/\s+/g, ' ').toLowerCase() === want;
+  });
+  if (start < 0) return null;
+  let end = start + 1;
+  while (end < lines.length && !/^\s*#{1,2}\s+\S/.test(lines[end]) && !isPlaceholder(lines[end])) end++;
+  while (end > start + 1 && !lines[end - 1].trim()) end--;
+  return [start, end];
+}
+
 /**
  * A document's text as the panel shows it: without its first line when
- * that's the title (the header says it), and each section still being
- * written in its placeholder's place (`live`: key → its text so far). Pure.
+ * that's the title (the panel shows it), and each section being written in
+ * its place as it streams (`live`: key → its text so far) — a placeholder's
+ * place (`write_section`), the section it rewrites, or a new one at the end
+ * (`rewrite_section`). Pure.
  */
 export function shownText(content, title, live = {}) {
   let lines = String(content || '').split('\n');
@@ -58,16 +84,16 @@ export function shownText(content, title, live = {}) {
   if (/^#\s+/.test(first) && first.replace(/^#\s+/, '').trim() === String(title || '').trim()) {
     lines = lines.slice(1);
   }
-  const keys = Object.keys(live);
-  if (keys.length) {
-    lines = lines.map((line) => {
-      const key = keys.find((k) => isPlaceholder(line, k));
-      if (key == null) return line;
-      const text = live[key] ?? '';
-      // Its own heading when it wrote one; else the key's.
-      const own = /^#{1,2}\s+\S/.test(text.trimStart());
-      return own ? closePartial(text.trimStart().replace(/^#\s/, '## ')) : `## ${key}\n\n${closePartial(text)}`;
-    });
+  for (const key of Object.keys(live)) {
+    const block = liveBlock(key, live[key] ?? '');
+    const at = lines.findIndex((l) => isPlaceholder(l, key));
+    if (at >= 0) {
+      lines.splice(at, 1, block);
+      continue;
+    }
+    const range = sectionRange(lines, key);
+    if (range) lines.splice(range[0], range[1] - range[0], block);
+    else lines.push('', block);
   }
   return lines.join('\n').replace(/^\n+/, '');
 }
@@ -178,7 +204,7 @@ export function createDocPanel({ onopennote = () => null } = {}) {
 
   /** A tool call began (`tool` event): a section is on its way. */
   function onTool(ev) {
-    if (open && ev?.name === 'write_section') {
+    if (open && (ev?.name === 'write_section' || ev?.name === 'rewrite_section')) {
       busy = true;
       writing = writing ?? '';
     }
