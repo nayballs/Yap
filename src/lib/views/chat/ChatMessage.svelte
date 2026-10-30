@@ -38,7 +38,7 @@
   // The calendar's (chat/tools/calendar.rs).
   const CALENDAR_CHIP = /^(Checked your calendar|Found \d+ meetings? with|No meetings with|Free |Busy |No calendar connected|Couldn't read the (day|time) )/;
   // A document's (chat/documents.rs).
-  const DOC_CHIP = /^(Started "|Wrote (\d+ sections|"[^"]*") in "|Didn't write "|"[^"]*" is already written in "|Couldn't start a document)/;
+  const DOC_CHIP = /^(Started "|(Re)?[Ww]rote (\d+ sections|"[^"]*") in "|Added "[^"]*" to "|Didn't (re)?write "|"[^"]*" is already written in "|Couldn't (start a document|rewrite a section))/;
   const chipKind = (t) =>
     /: not after reading the web$/.test(t)
       ? 'guard'

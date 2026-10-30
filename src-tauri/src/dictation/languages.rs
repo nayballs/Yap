@@ -690,8 +690,10 @@ static STAND_IN: Mutex<Option<Vec<(String, f32)>>> = Mutex::new(None);
 #[cfg(debug_assertions)]
 static STAGED_HEARD: Mutex<Option<Heard>> = Mutex::new(None);
 
-/// The stub engine's detection, in a test run.
-#[cfg(debug_assertions)]
+/// The stub engine's detection, in a test run. Only the stub reads it
+/// (`stt.rs`' `StubEngine`, gated as this is): a real-speech debug build has
+/// no caller.
+#[cfg(all(debug_assertions, not(feature = "engines")))]
 pub fn stand_in_detection() -> Option<Vec<(String, f32)>> {
     if !crate::shell::e2e::active() {
         return None;

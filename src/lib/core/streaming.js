@@ -108,11 +108,15 @@ export function applyEvent(state, ev) {
  * - An open ``` fence is closed (the code shows as code while it comes).
  * - On the last line: a half-typed citation "[1" or link "[text](https://ex"
  *   is left out until it's whole; an odd ` or ** is closed.
+ * - A table's header row waits for its rule line ("|---|---|"), whole: until
+ *   then it would show as a line of pipes (a document's level-by-level
+ *   table, written as it streams, 2026-10-30).
  */
 export function closePartial(md) {
-  const text = md ?? '';
+  let text = md ?? '';
   const fences = (text.match(/^\s*(```|~~~)/gm) || []).length;
   if (fences % 2 === 1) return `${text}\n\`\`\``;
+  text = withoutUnruledTable(text);
   const nl = text.lastIndexOf('\n');
   const head = text.slice(0, nl + 1);
   let last = text.slice(nl + 1);
@@ -121,6 +125,23 @@ export function closePartial(md) {
   if ((last.match(/`/g) || []).length % 2 === 1) last = `${last.replace(/\s+$/, '')}\``;
   if ((last.match(/\*\*/g) || []).length % 2 === 1) last = `${last.replace(/\s+$/, '')}**`;
   return head + last;
+}
+
+/**
+ * `text` without a table that has only its header row so far, or a rule
+ * line still coming: the lines of pipes at its end left out until the rule
+ * is whole (as many cells as the header, ending in "|"). Pure.
+ */
+function withoutUnruledTable(text) {
+  const lines = text.split('\n');
+  let start = lines.length;
+  while (start > 0 && lines[start - 1].trimStart().startsWith('|')) start--;
+  const run = lines.slice(start);
+  if (!run.length || run.length > 2) return text;
+  const cells = (l) => (l.trim().match(/\|/g) || []).length;
+  const rule = run[1]?.trim() ?? '';
+  const ruled = run.length === 2 && /^\|[\s:|-]*-[\s:|-]*\|$/.test(rule) && cells(rule) === cells(run[0]);
+  return ruled ? text : lines.slice(0, start).join('\n');
 }
 
 

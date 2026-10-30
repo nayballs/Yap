@@ -111,7 +111,7 @@ fn note_definitions() -> Value {
             "type": "function",
             "function": {
                 "name": "create_note",
-                "description": "Create a note. Leave folder empty for Personal, or pass an existing folder's name (from list_folders). An unknown folder is refused unless new_folder is true, which only a user asking for a new folder allows.",
+                "description": "Create a note, with its text (a build or plan to keep: create_document). Leave folder empty for Personal, or pass an existing folder's name (from list_folders). An unknown folder is refused unless new_folder is true, which only a user asking for a new folder allows.",
                 "parameters": {
                     "type": "object",
                     "properties": {
@@ -382,7 +382,7 @@ pub fn changed_note(name: &str, result: &Value) -> Option<u64> {
     let id = result["data"]["id"].as_u64();
     match name {
         "create_note" | "update_note" | "create_document" => id,
-        "edit_note" | "write_section" if result["data"]["changed"] == json!(true) => id,
+        "edit_note" | "write_section" | "rewrite_section" if result["data"]["changed"] == json!(true) => id,
         _ => None,
     }
 }
@@ -483,7 +483,7 @@ fn run(name: &str, args: &Value) -> Value {
                 None => tool_result(false, Value::Null, format!("Note with ID {id} not found")),
             }
         }
-        "create_document" | "write_section" => crate::chat::documents::execute(name, args),
+        name if crate::chat::documents::TOOL_NAMES.contains(&name) => crate::chat::documents::execute(name, args),
         "search_in_note" => search_in_note(args),
         "read_note" => read_note(args),
         "edit_note" => edit_note(args),
@@ -491,8 +491,15 @@ fn run(name: &str, args: &Value) -> Value {
             let title = args["title"].as_str().unwrap_or("").trim();
             let content = args["content"].as_str().unwrap_or("");
             let folder = args["folder"].as_str().unwrap_or("").trim();
-            if title.is_empty() && content.trim().is_empty() {
-                return tool_result(false, Value::Null, "Failed to create note".to_string());
+            // An empty note is never made (Claude Haiku 5.5 made one for
+            // "Let's do option A" and then asked the person to delete it,
+            // 30 Oct 2026): the model is told what to do instead.
+            if content.trim().is_empty() {
+                return tool_error(
+                    "content is empty, so no note was made: a note needs its text. For a build, a plan, a guide or an option picked from a document, use create_document, then write_section for each section.".to_string(),
+                    Value::Null,
+                    format!("Didn't create {}: it had no text", chip_title(title)),
+                );
             }
             let chip = format!("Couldn't create {}", chip_title(title));
             let (folder, folder_created) = match note_folder(folder, args, &chip) {
@@ -1055,6 +1062,21 @@ mod tests {
         assert_eq!(got["data"]["content"], json!(PLAN));
         assert_eq!(got["data"]["enhanced"], json!("- Beta ships Friday"));
         assert!(got["data"].get("cut").is_none());
+    }
+
+    /// An empty note is never made: the model is told to write a document
+    /// instead (Claude Haiku 5.5's empty "Option A" note, 30 Oct 2026).
+    #[test]
+    fn an_empty_note_is_refused_with_what_to_do_instead() {
+        let before = crate::notes::all().len();
+        for args in [json!({ "title": "Option A build", "content": "" }), json!({ "title": "Option A build", "content": "  \n" }), json!({ "title": "Option A build" })] {
+            let r = call("create_note", args);
+            assert_eq!(r["success"], json!(false), "{r}");
+            assert!(r["error"].as_str().unwrap().contains("use create_document, then write_section"), "{r}");
+            assert_eq!(r["displayText"], json!("Didn't create \"Option A build\": it had no text"));
+            assert_eq!(changed_note("create_note", &r), None);
+        }
+        assert_eq!(crate::notes::all().len(), before);
     }
 
     #[test]

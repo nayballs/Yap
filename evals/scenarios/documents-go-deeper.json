@@ -1,0 +1,44 @@
+{
+  "name": "documents-go-deeper",
+  "description": "Documents beside the chat: with a trip plan open, \"go deeper on day two\" reworks that day in the same document: no second document, not in the chat.",
+  "tags": [
+    "documents"
+  ],
+  "apps": "standard",
+  "turns": [
+    {
+      "user": "Plan a three-day trip to Porto for two of us in June, day by day, with where to eat.",
+      "expect": {
+        "document": {
+          "made": true,
+          "outline_first": true,
+          "filled": true,
+          "min_sections": 3
+        }
+      }
+    },
+    {
+      "user": "Go deeper on day two: hour by hour, with where to eat.",
+      "expect": {
+        "document": {
+          "made": false,
+          "changed": true
+        },
+        "tools_called": [
+          {
+            "name": [
+              "edit_note",
+              "update_note",
+              "write_section",
+              "rewrite_section"
+            ]
+          }
+        ],
+        "tools_not_called": [
+          "create_note"
+        ],
+        "max_words": 60
+      }
+    }
+  ]
+}

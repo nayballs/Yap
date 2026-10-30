@@ -431,11 +431,13 @@ The AI Chat surface (conversations, the tool-calling loop and its note tools) an
   answer is something to keep — a game build, a plan, a guide, a comparison
   — Chat writes it as a document that opens in a panel to the right of the
   conversation, fills it section by section while you watch, and later
-  questions change it. **Two tools** beside the note tools, offered
-  wherever they are (`notes::definitions`, run by `notes::execute`):
-  `create_document(title, sections: [{key, intent}])` makes a note in the
+  questions change it. **Three tools** beside the note tools, offered
+  wherever they are (`notes::definitions`, run by `notes::execute`,
+  `documents::TOOL_NAMES`): `create_document(title, summary?, sections:
+  [{key, intent}])` makes a note in the
   **Chat documents** folder (made on first use; `source` "chat") whose body
-  is `# title` and one **placeholder line** per section — `<!-- yap:section
+  is `# title`, the summary (a sentence or two, a paragraph: `skeleton`)
+  and one **placeholder line** per section — `<!-- yap:section
   Gear | what to wear and where to find it -->`: an HTML comment nobody
   types by accident, which the renderer draws as a quiet line and any other
   markdown viewer hides; key and intent cleaned of `|`, `<`, `>`, `--` and
@@ -451,21 +453,41 @@ The AI Chat surface (conversations, the tool-calling loop and its note tools) an
   Yap wrote it; one the person deleted or typed into is **refused** — "the
   user removed or changed it… Don't write it again or add it back", chip
   `Didn't write "Costs": it's no longer in "Weekend…"` — and one written
-  already says to use edit_note. Later changes are `edit_note` (its exact
-  match already refuses changed text), `read_note`, `update_note`. **Every
+  already says to use rewrite_section. **Later changes** (2026-10-30):
+  `rewrite_section(note_id, heading, markdown)` replaces one `##` section
+  whole — its `###` parts with it, up to the next `#`/`##` heading or
+  placeholder (`section_range`) — or, a heading the document never had,
+  adds one at its end; the model's own `##` heading renames it. **The
+  person's words win here too** (`rewrite_section`, pure): the section must
+  be exactly what the model last saw (its picture, below); one the person
+  changed or wrote is refused ("read_note first, then rewrite it keeping
+  their changes"), one the model saw that's gone was removed ("Don't add it
+  back"), and a placeholder is filled as `write_section` would. Only a note
+  Chat made (`source` "chat"), and in a turn only one of this chat's
+  documents (`Turn::refuses`). Chips "Rewrote "Gear" in "…"" / "Added
+  "Tips" to "…"" (rewrites fold: "Rewrote 3 sections in …"). `edit_note`
+  (its exact match already refuses changed text) is for a few words,
+  `update_note` for the whole. **Every
   change is a version** (`versions::by` with `kind::CHAT`; the outline is
   Chat's first, so Undo goes back to it). The sections' chips fold into one
   (`push_chip`: "Wrote 3 sections in "Lone wolf ranger""). **Not action
   tools** (`tools::ACTION_TOOLS`): a build is researched on the web first,
   and these are the answer's own words — a new note, sections filled where
-  the outline left room; `edit_note` on a document stays refused after the
-  web. **Live**: a `write_section`'s arguments stream to the page
+  the outline left room, a section of this chat's own document rewritten
+  only while it's what the model saw; `edit_note` on a document stays
+  refused after the web. **Its sources, linked**: after a search, a
+  document's `[1]` citations (in the summary or a section) become links to
+  the pages themselves, `([site](address))` — a note has no Sources row
+  under it — before the call runs (`link_citations`, `agent.rs`); an
+  unknown number stays as written. **Live**: a `write_section`'s or a
+  `rewrite_section`'s arguments stream to the page
   (`stream::LIVE_ARGS`; the `Assembler`'s `Piece::Args` → `Delta::ToolArgs`
   → the step's `Event::Section {noteId, key, text}` at most every 50 ms,
-  `live_section` reading the JSON still coming — the id and key once whole,
-  the text so far with a half escape left out); a document made or changed
-  (`create_document`, `write_section`, or `edit_note`/`update_note` on one
-  of the conversation's) is `Event::Document {noteId, title}`
+  `live_section` reading the JSON still coming — the id and key (or
+  heading) once whole, the text so far with a half escape left out); a
+  document made or changed (`create_document`, `write_section`,
+  `rewrite_section`, or `edit_note`/`update_note` on one of the
+  conversation's) is `Event::Document {noteId, title}`
   (`tools::Extra::docs`, a `documents::Turn`), which opens the panel;
   answered whole, the panel follows when the call lands. **The turn keeps
   them**: `Turn::touched` → `ChatMessage.documents` (`[{id, title}]`, the
@@ -488,18 +510,45 @@ The AI Chat surface (conversations, the tool-calling loop and its note tools) an
   so a line typed under a section being written is kept), saved as typed
   (`kind::TYPED`, folding with their other typing). **The prompt rule**
   (`INSTRUCTIONS`, with `TOOL_INSTRUCTIONS`, the stable part of the system
-  prompt): for an answer to keep or come back to (a build, a plan, a guide,
-  a comparison, a long table) make a document, outline first, then each
-  section in order; a line or two in the chat ("It's open on the right."),
-  never the content; a question or change about a document from this chat
-  changes it with edit_note. About 380 tokens with the two schemas
-  (`a_tool_step_stays_light`: 2,620 now). **Kept on course** (tuned on the
-  on-device Qwen3.5-4B, `--documents`): a question that asks for something
+  prompt): something to keep (a build, a plan, a guide, a comparison, a
+  long table) goes straight into a document — **never the chat, never
+  asked about first** (the 4B wrote a build in the chat and ended "Would
+  you like me to create a more detailed document?", the maintainer's
+  first try) — the title, a one- or two-sentence summary and every
+  section, then each section in order; **how it reads**, after Claude's
+  own documents: short bullets, a markdown table for anything with rows
+  (per level, per item, side by side), **bold** lead-ins, and for a game
+  build race and origin, character creation, skills, a level-by-level
+  table, gear and tips; a line in the chat ("It's open on the right."),
+  never the content; a change to a document from this chat, or more depth,
+  goes in it (`rewrite_section`, `edit_note`); an option picked from one
+  is a new document; never `create_note` for any of these. **`create_note`
+  refuses an empty note** (a tool error saying to use `create_document`):
+  Claude Haiku 5.5 answered "Let's do option A" with `read_note` and an
+  empty `create_note` in Personal, then asked the person to delete it.
+  About 660 tokens with the three schemas (`a_tool_step_stays_light`:
+  2,898 now, trimmed from 3,050). **Kept on course** (tuned on the
+  on-device Qwen3.5-4B, `--documents`): a model on this PC is told in its
+  context what the question means for documents (`steer`): **an option
+  picked** from the open one (`picks_option`: "Let's do option A", "I'll
+  go with the second one") → a new document for the pick, built out in
+  full, the options left as they are — worth keeping, and the pick needs
+  an outline of its own (the 4B edited the options, or copied them to the
+  clipboard); **a change** to it or more depth on part of it
+  (`changes_document`: a change word — change, edit, add, swap, go deeper,
+  more detail… — and either "it"/"the build" or no ask for a new one) →
+  that document reworked, `rewrite_section` per section and `edit_note`
+  for a few words, not the chat (it answered "go deeper on day two" in
+  the chat, 115–173 words); else a question that asks for something
   to keep (`asks_for_document`: "make me a … build / plan / guide / packing
   list", "plan a …", "step-by-step", "compare … and …"; never "what's the
-  plan for tomorrow?") tells a model on this PC so in its context
-  (`ASKS_NOTE`) — on the rule alone it answered a guide and a trip plan in
-  the chat; the last section's result asks for one short sentence, no
+  plan for tomorrow?") → a document now, not an answer with an offer
+  (`ASKS_NOTE`; "look up / find … a build" counts: the maintainer's way of
+  asking) — on the rule alone it answered a guide and a trip plan in
+  the chat; a result's `next` asks for the section after as a table when
+  its key or intent has rows — levels, day by day, costs, a comparison,
+  attributes (`next_for`, `table_hint`: on the rule alone 2 tables in 9
+  builds, then 9 in 9); the last section's result asks for one short sentence, no
   summary (it wrote 84 and 121 words under "It's open beside the chat");
   an answer with this turn's document half written is sent back once or
   twice to finish it (`Turn::unfinished`, `finish_note`, `FINISH_NUDGES`;
@@ -509,11 +558,23 @@ The AI Chat surface (conversations, the tool-calling loop and its note tools) an
   one. **The Voice Assistant**: the same
   tools and system prompt (its cache), and in its question's context
   `SPOKEN_NOTE` — a document only when one is asked for, or a long build,
-  plan or guide, then one sentence saying it's in Chat. A spoken "build me
+  plan or guide, then one sentence saying it's in Chat. **Asked with Chat
+  in front** (Yap's main window focused when the shortcut was pressed:
+  Chat comes up there with the question; `assistant::asked_in_chat`, a
+  task-local the assistant sets around its turn) the line points at the
+  panel instead, "It's open on the right." (`SPOKEN_IN_CHAT_NOTE`,
+  `spoken_note`): the maintainer asked by the assistant's shortcut while
+  reading Chat and heard "It's in Chat." A spoken "build me
   a…" makes the document (too long to say, and asked to keep), the voice
   says the line, the bar's card has Open in Chat (which opens the panel on
   it), and Chat, when it's open, shows it filling; Yap never brings Chat up
   over the app you're in for it, as the assistant never takes the focus.
+  **A question dictated into Chat's box is a Chat question** (30 Oct
+  2026): what the model is told changes only when the answer is read
+  aloud — the Voice Assistant's, or one dictated into Chat with spoken
+  replies on (`turn.rs` `spoken`: the "asked out loud" lines, the small
+  model's web prompt, `grounded_prompt`); the question's `voice` flag alone
+  changes nothing.
   Logs: ids, counts, lengths. Unit-tested (placeholders, the tools,
   refusals, the merge, the diff, the model's picture, the live arguments,
   the loop end to end: `a_document_opens_fills_as_it_streams…`); e2e
@@ -903,10 +964,31 @@ the right of the conversation. **Opens** on the turn's `document` event
 (the outline at once: each section still to come a quiet "Writing: Gear…"
 line — `markdown.js`' `md-pending`, `renderMarkdown(md, {writing})` —
 never the placeholder's syntax), **fills** as `section` events stream a
-`write_section`'s text into its placeholder's place (`shownText`, half-
-written markdown closed off), and takes the note's text as each section
-lands (`yap-note-changed`, origin "chat"). Its header: the title (the
-body's own `# title` line left out), **Undo** when the newest change is
+`write_section`'s text into its placeholder's place, or a
+`rewrite_section`'s over the section it rewrites (a new one at the end;
+`shownText`, `sectionRange`; half-written markdown closed off), and takes
+the note's text as each section lands (`yap-note-changed`, origin
+"chat"). **A page to read** (2026-10-30, measured against Claude's own
+document view, none of its code or CSS): a reading-width column (68ch,
+centred when the panel is wide or expanded); the title large in EB
+Garamond (`--yap-font-display`, 27px × Text size) and each section's
+`##` (rendered as h3: `markdown.js` shifts headings a level down) in it
+too, 21px with 28px above — the serif scale, chosen over Claude's sans
+file view for Yap's paper look — `###` and below in the reading font
+(15px, then the body size, semibold); 15px between blocks; the summary
+under the title a touch larger, in the second ink; **bold** lead-ins in
+the ink; links in `--yap-link`; tables of filled cells, no rules (the
+header row `--yap-paper-s2`, the body `--yap-paper-s1`, 2px apart, 3px
+corners; a header row of empty cells hidden; a wide table scrolls inside
+itself); light and dark from the `--yap-paper-*` tokens. **The sections'
+rail** (after Claude's document outline): a document of three sections
+or more has a thin rail of ticks in its left margin, one per section, the
+one being read longer and in the accent; hovered or clicked ("Sections"),
+it lists them, and a click scrolls there (`data-testid="chat-doc-outline"`).
+The Notes view shows a document's text as its plain markdown in My
+thoughts' text box (no rendered view there yet). Its header: the title
+as a small label (the page has it large; the body's own `# title` line
+left out), **Undo** when the newest change is
 Chat's (back to the version before it: `note_version_restore`, itself a
 version), **Edit** / Done (a plain text box, monospace, saved 600 ms after
 typing through `chat_document_save {id, base, content}`: Rust lays the

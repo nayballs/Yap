@@ -94,6 +94,11 @@ test('half-written markdown is closed off so it renders as it will', () => {
   // Only the last line is still being written.
   expect(closePartial('**Done** here.\n- one **tw')).toBe('**Done** here.\n- one **tw**');
   expect(closePartial('')).toBe('');
+  // A table's header waits for its rule line, whole; then its rows come.
+  expect(closePartial('Levels:\n| Level | Power |')).toBe('Levels:');
+  expect(closePartial('Levels:\n| Level | Power |\n|---|--')).toBe('Levels:');
+  expect(closePartial('| Level | Power |\n|---|---|')).toBe('| Level | Power |\n|---|---|');
+  expect(closePartial('| Level | Power |\n| :-- | --: |\n| 1 | Mind')).toBe('| Level | Power |\n| :-- | --: |\n| 1 | Mind');
 });
 
 test("a stream's events make the bubble's state", () => {

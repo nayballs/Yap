@@ -580,6 +580,26 @@ async fn tool_loop(
                     }
                 }
             }
+            // A document's "[1]" citations: links to the pages themselves
+            // (a note has no Sources row), before it runs, so the model's
+            // picture of the document is what was written.
+            if crate::chat::documents::TOOL_NAMES.contains(&name) {
+                if let Some(turn) = web.as_deref().filter(|t| !t.sources.is_empty()) {
+                    let sources: Vec<(usize, String, String)> = turn
+                        .sources
+                        .iter()
+                        .map(|s| (s.n, if s.site.trim().is_empty() { s.title.clone() } else { s.site.clone() }, s.url.clone()))
+                        .collect();
+                    for field in ["summary", "markdown", "content", "text", "body"] {
+                        if let Some(text) = args[field].as_str() {
+                            let linked = crate::chat::documents::link_citations(text, &sources);
+                            if linked != text {
+                                args[field] = json!(linked);
+                            }
+                        }
+                    }
+                }
+            }
             let ran_with = args.clone();
             let web_seen = web.as_deref().is_some_and(crate::web::Turn::seen);
             let mut result = if let Some(refusal) = refused_after_web(name, web_seen) {
@@ -588,6 +608,8 @@ async fn tool_loop(
                 r // a model evaluation records what would leave Yap (the clipboard)
             } else if let Some(r) = extra.docs.and_then(|d| d.made_already(name, &args)) {
                 r // this turn's document, asked for again: the one there is
+            } else if let Some(r) = extra.docs.and_then(|d| d.refuses(name, &args)) {
+                r // a section rewritten only in this chat's own documents
             } else if let (Some(turn), true) = (web.as_deref_mut(), crate::web::TOOL_NAMES.contains(&name)) {
                 turn.execute(name, &args).await
             } else if extra.memory && MEMORY_TOOL_NAMES.contains(&name) {

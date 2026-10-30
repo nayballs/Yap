@@ -1,6 +1,6 @@
 {
   "name": "documents-follow-up-edits",
-  "description": "Documents beside the chat: a question about the document made in this chat changes it (edit_note), and no second document is made.",
+  "description": "Documents beside the chat: a question about the document made in this chat changes it (edit_note or rewrite_section, a change that went through), and no second document is made.",
   "tags": ["documents"],
   "apps": "standard",
   "turns": [
@@ -10,7 +10,7 @@
     },
     {
       "user": "Add a head torch to the extras.",
-      "expect": { "document": { "made": false }, "tools_called": [{ "name": ["edit_note", "update_note"] }], "max_words": 60 }
+      "expect": { "document": { "made": false, "changed": true }, "tools_called": [{ "name": ["edit_note", "update_note", "rewrite_section"] }], "max_words": 60 }
     }
   ]
 }

@@ -1,0 +1,74 @@
+{
+  "name": "documents-change-build",
+  "description": "Documents beside the chat: with the build open, \"change it so it goes from level one to max level, step by step\" reworks that document: not in the chat, no offer to make one, no second document. The 4B answered in the chat and asked \"Would you like me to create a document?\" (30 Oct 2026). Stand-in web.",
+  "tags": [
+    "documents",
+    "web"
+  ],
+  "web": {
+    "mode": "standin",
+    "results": [
+      {
+        "title": "Best Cipher build for Pillars of Eternity (2026 guide)",
+        "url": "https://rpgbuilds.example/poe-cipher-best",
+        "published": "2026-06-02",
+        "text": "The Soul Blade cipher is the strongest all-round pick. Race: Moon Godlike for the healing pulse, or Death Godlike for damage. Attributes: Might 18, Constitution 10, Dexterity 16, Perception 15, Intellect 16, Resolve 3. Powers: Mind Wave at level 1, Eyestrike at 3, Mental Binding at 5, Amplified Wave at 9, Disintegration at 11, Ectopsychic Echo at 13, Death Ring at 15. Talents: Weapon Focus Ruffian, Biting Whip, Two-Handed Style. Gear: an arquebus early, the Lightning Strikes pistol later."
+      },
+      {
+        "title": "Cipher levelling guide, 1 to 16",
+        "url": "https://partyplanner.example/cipher-levels",
+        "published": "2026-05-11",
+        "text": "Level by level: 1 Mind Wave, 2 Weapon Focus Ruffian, 3 Eyestrike, 4 Biting Whip, 5 Mental Binding, 6 Arms Bearer, 7 Puppet Master, 8 Two-Handed Style, 9 Amplified Wave, 10 Savage Attack, 11 Disintegration, 12 Gunner, 13 Ectopsychic Echo, 14 Marksman, 15 Death Ring, 16 Vulnerable Attack. Keep Focus high with fast weapons early."
+      },
+      {
+        "title": "Cipher gear and tips",
+        "url": "https://loot.example/cipher-gear",
+        "published": "2026-04-20",
+        "text": "Best gear: Lightning Strikes (pistol, Act 2), Vision of the Spine (helmet), Cloak of Greater Deflection. Tips: open fights with Mind Wave, keep Mental Binding for big enemies, stand behind a tank, rest before boss fights to refill Focus."
+      }
+    ],
+    "pages": {
+      "https://rpgbuilds.example/poe-cipher-best": "<!doctype html><html><head><title>Best Cipher build for Pillars of Eternity (2026 guide)</title></head><body><article><h1>Best Cipher build for Pillars of Eternity (2026 guide)</h1><p>The Soul Blade cipher is the strongest all-round pick. Race: Moon Godlike for the healing pulse, or Death Godlike for damage. Attributes: Might 18, Constitution 10, Dexterity 16, Perception 15, Intellect 16, Resolve 3. Powers: Mind Wave at level 1, Eyestrike at 3, Mental Binding at 5, Amplified Wave at 9, Disintegration at 11, Ectopsychic Echo at 13, Death Ring at 15. Talents: Weapon Focus Ruffian, Biting Whip, Two-Handed Style. Gear: an arquebus early, the Lightning Strikes pistol later.</p></article></body></html>",
+      "https://partyplanner.example/cipher-levels": "<!doctype html><html><head><title>Cipher levelling guide, 1 to 16</title></head><body><article><h1>Cipher levelling guide, 1 to 16</h1><p>Level by level: 1 Mind Wave, 2 Weapon Focus Ruffian, 3 Eyestrike, 4 Biting Whip, 5 Mental Binding, 6 Arms Bearer, 7 Puppet Master, 8 Two-Handed Style, 9 Amplified Wave, 10 Savage Attack, 11 Disintegration, 12 Gunner, 13 Ectopsychic Echo, 14 Marksman, 15 Death Ring, 16 Vulnerable Attack. Keep Focus high with fast weapons early.</p></article></body></html>",
+      "https://loot.example/cipher-gear": "<!doctype html><html><head><title>Cipher gear and tips</title></head><body><article><h1>Cipher gear and tips</h1><p>Best gear: Lightning Strikes (pistol, Act 2), Vision of the Spine (helmet), Cloak of Greater Deflection. Tips: open fights with Mind Wave, keep Mental Binding for big enemies, stand behind a tank, rest before boss fights to refill Focus.</p></article></body></html>"
+    }
+  },
+  "apps": "standard",
+  "turns": [
+    {
+      "user": "Make me a Pillars of Eternity cipher build: attributes, powers, talents and gear.",
+      "expect": {
+        "document": {
+          "made": true,
+          "outline_first": true,
+          "filled": true,
+          "min_sections": 3
+        }
+      }
+    },
+    {
+      "user": "Can you change it so it goes from level one to max level, step by step?",
+      "expect": {
+        "document": {
+          "made": false,
+          "changed": true,
+          "table": true
+        },
+        "tools_called": [
+          {
+            "name": [
+              "edit_note",
+              "update_note",
+              "write_section",
+              "rewrite_section"
+            ]
+          }
+        ],
+        "tools_not_called": [
+          "create_note"
+        ],
+        "max_words": 60
+      }
+    }
+  ]
+}

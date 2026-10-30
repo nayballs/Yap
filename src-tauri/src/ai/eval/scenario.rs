@@ -479,6 +479,18 @@ pub struct DocExpect {
     pub filled: bool,
     /// The outline had at least this many sections.
     pub min_sections: Option<usize>,
+    /// A document already in the chat was changed this turn (`edit_note`,
+    /// `update_note`, `write_section` or `rewrite_section` went through on
+    /// one this turn didn't make).
+    #[serde(default)]
+    pub changed: bool,
+    /// The documents made or changed this turn hold a markdown table.
+    #[serde(default)]
+    pub table: bool,
+    /// The document made this turn starts with a summary: a line of text
+    /// under its title, before its first section.
+    #[serde(default)]
+    pub summary: bool,
 }
 
 /// What a turn did with documents, as `DocExpect` and `--documents`' table
@@ -495,6 +507,31 @@ pub struct DocSeen {
     pub written: usize,
     /// What's still to write in the documents made (their keys).
     pub left: Vec<String>,
+    /// Documents this turn didn't make that it changed (their note ids).
+    pub changed: Vec<u64>,
+    /// A document made or changed this turn holds a markdown table.
+    pub table: bool,
+    /// The first document made this turn starts with a summary line.
+    pub summary: bool,
+}
+
+/// `content` holds a markdown table: a row of cells, then its rule line
+/// ("|---|---|"). Pure.
+pub fn has_table(content: &str) -> bool {
+    let lines: Vec<&str> = content.lines().map(str::trim).collect();
+    lines.windows(2).any(|w| {
+        w[0].starts_with('|') && w[0].matches('|').count() >= 2 && w[1].contains("---") && w[1].chars().all(|c| matches!(c, '|' | '-' | ':' | ' '))
+    })
+}
+
+/// `content` starts with a summary: under its `# title`, a line of text
+/// before any heading or section still to write. Pure.
+pub fn has_summary(content: &str) -> bool {
+    let mut lines = content.lines().map(str::trim).filter(|l| !l.is_empty());
+    if !lines.next().is_some_and(|l| l.starts_with("# ")) {
+        return false;
+    }
+    lines.next().is_some_and(|l| !l.starts_with('#') && crate::chat::documents::parse_placeholder(l).is_none())
 }
 
 /// The turn's documents, from its tool calls and the notes afterwards.
@@ -516,7 +553,17 @@ pub fn doc_seen(o: &Observed) -> DocSeen {
         .filter_map(|id| crate::notes::get(*id))
         .flat_map(|n| crate::chat::documents::pending_keys(&n.content))
         .collect();
-    DocSeen { made, outline_first, sections, written, left }
+    let mut changed: Vec<u64> = Vec::new();
+    for c in calls.iter().filter(|c| c.success && ["edit_note", "update_note", "write_section", "rewrite_section"].contains(&c.name.as_str())) {
+        let edited = c.name != "edit_note" || c.result["data"]["changed"] == serde_json::json!(true);
+        if let Some(id) = c.result["data"]["id"].as_u64().filter(|id| edited && !made.contains(id) && !changed.contains(id)) {
+            changed.push(id);
+        }
+    }
+    let texts: Vec<String> = made.iter().chain(&changed).filter_map(|id| crate::notes::get(*id)).map(|n| n.content).collect();
+    let table = texts.iter().any(|t| has_table(t));
+    let summary = made.first().and_then(|id| crate::notes::get(*id)).is_some_and(|n| has_summary(&n.content));
+    DocSeen { made, outline_first, sections, written, left, changed, table, summary }
 }
 
 /// The reasons the turn's documents fail `d`.
@@ -531,6 +578,21 @@ fn document_faults(d: &DocExpect, o: &Observed) -> Vec<String> {
             .join(", ")
     };
     let mut fails = Vec::new();
+    // A change to a document already there (checked whether or not one was made).
+    if d.changed && seen.changed.is_empty() {
+        let calls: Vec<String> =
+            o.stats.tool_calls.iter().map(|c| format!("{}{}", c.name, if c.success { "" } else { " (refused)" })).collect();
+        fails.push(format!(
+            "the open document wasn't changed; calls made: {}",
+            if calls.is_empty() { "none".to_string() } else { calls.join(", ") }
+        ));
+    }
+    if d.table && !seen.table && !(seen.made.is_empty() && seen.changed.is_empty()) {
+        fails.push("the document has no table".to_string());
+    }
+    if d.summary && !seen.summary && !seen.made.is_empty() {
+        fails.push("the document has no summary under its title".to_string());
+    }
     match (d.made, seen.made.is_empty()) {
         (true, true) => {
             let made: Vec<&str> = o.stats.tool_calls.iter().map(|c| c.name.as_str()).collect();
@@ -1736,5 +1798,35 @@ mod tests {
         o.stats.tool_calls.push(call("write_section", json!({ "note_id": 999, "key": "Gear", "markdown": "x" })));
         assert!(check(&expect(json!({ "made": true })), &o)[0].starts_with("no document was made (expected one); calls made: write_section"));
         assert!(check(&expect(json!({ "made": false })), &o).is_empty());
+    }
+
+    /// A change to the open document, a table, a summary under the title.
+    #[test]
+    fn a_document_check_sees_a_change_a_table_and_a_summary() {
+        let call = |name: &str, args: Value| {
+            let result = crate::chat::documents::execute(name, &args);
+            ToolCall { name: name.into(), args, success: result["success"] == json!(true), display: String::new(), result }
+        };
+        let expect = |v: Value| serde_json::from_value::<Expect>(json!({ "document": v })).unwrap();
+        let made = call("create_document", json!({ "title": "Build", "summary": "The Soul Blade.", "sections": ["Levels"] }));
+        let id = made.result["data"]["id"].as_u64().unwrap();
+        let mut o = obs("It's open on the right.");
+        o.stats.tool_calls.push(made);
+        o.stats.tool_calls.push(call("write_section", json!({ "note_id": id, "key": "Levels", "markdown": "- 1: Mind Wave" })));
+        let want = expect(json!({ "made": true, "summary": true, "table": true }));
+        assert_eq!(check(&want, &o), ["the document has no table"]);
+        // Next turn: the level list becomes a table in the same document.
+        let mut next = obs("Done.");
+        crate::chat::documents::seen(id, &crate::notes::get(id).unwrap().content);
+        next.stats.tool_calls.push(call("rewrite_section", json!({ "note_id": id, "heading": "Levels", "markdown": "| Level | Power |\n|---|---|\n| 1 | Mind Wave |" })));
+        assert!(check(&expect(json!({ "made": false, "changed": true, "table": true })), &next).is_empty());
+        let seen = doc_seen(&next);
+        assert_eq!((seen.changed, seen.table), (vec![id], true));
+        // Nothing changed: said, with what was called.
+        let mut idle = obs("Here's the new build: …");
+        idle.stats.tool_calls.push(call("write_section", json!({ "note_id": id, "key": "Levels", "markdown": "x" })));
+        assert_eq!(check(&expect(json!({ "made": false, "changed": true })), &idle), ["the open document wasn't changed; calls made: write_section (refused)"]);
+        assert!(has_summary("# Build\n\nThe pick.\n\n## Gear") && !has_summary("# Build\n\n## Gear") && !has_summary("# Build\n\n<!-- yap:section Gear -->"));
+        assert!(has_table("| a | b |\n| --- | :-: |\n| 1 | 2 |") && !has_table("| a | b |\nno rule"));
     }
 }

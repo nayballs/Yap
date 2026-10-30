@@ -503,27 +503,37 @@ async fn answer_turn(
             system.push_str(&note);
         }
     }
-    // Asked out loud: a tool model with the web starts with the answer; one
-    // read aloud whole — the Voice Assistant, or a question dictated into
-    // Chat with spoken replies on (a web answer is said short anyway,
-    // `assistant::spoken_answer`) — answers short. Last in the context,
-    // just before the question, where small models heed it.
-    if by_voice && tools_supported && web_on {
+    // **Answered out loud**: the Voice Assistant's question, or one dictated
+    // into Chat with spoken replies on. A question only dictated into Chat
+    // is a Chat question, answered as a typed one (30 Oct 2026): its answer
+    // is read, not heard.
+    let spoken = by_voice && (scope == Some("assistant") || cfg.speak_replies);
+    // A tool model with the web starts with the answer; one read aloud
+    // whole answers short (a web answer is said short anyway,
+    // `assistant::spoken_answer`). Last in the context, just before the
+    // question, where small models heed it.
+    if spoken && tools_supported && web_on {
         context.push("This question was asked out loud: start your answer with the answer itself, in one or two short sentences, then any details.".to_string());
     }
-    // The Voice Assistant: a document only when one is asked for (then a
-    // sentence saying it's in Chat). The rule itself stays in the system
-    // prompt, the same for every turn (the model's cache).
+    // The Voice Assistant: a document only when one is asked for, then a
+    // sentence saying where it is — "it's in Chat", or, asked with Chat in
+    // front, "it's open on the right" (`assistant::asked_in_chat`). The
+    // rule itself stays in the system prompt, the same for every turn (the
+    // model's cache).
     if scope == Some("assistant") && tools_supported {
-        context.push(crate::chat::documents::SPOKEN_NOTE.to_string());
+        context.push(crate::chat::documents::spoken_note(crate::chat::assistant::asked_in_chat()).to_string());
     }
-    // Something to keep asked of a model on this PC: a document, it's told
-    // here too (the system prompt's rule alone, the 4B answered a guide and
-    // a trip plan in the chat).
-    if tools_supported && !meetings && crate::ai::ai_model::runs_here(&provider, &base_url) && crate::chat::documents::asks_for_document(&text) {
-        context.push(crate::chat::documents::ASKS_NOTE.to_string());
+    // A model on this PC is told what this question means for documents
+    // (documents.rs `steer`): an option picked → a new document; a change
+    // to the open one → that document reworked; something to keep → a
+    // document now. The system prompt's rule alone, the 4B answered a guide
+    // and a trip plan in the chat, a changed build in the chat with an
+    // offer, and "Let's do option A" by copying the options.
+    if tools_supported && !meetings && crate::ai::ai_model::runs_here(&provider, &base_url) {
+        if let Some(note) = crate::chat::documents::steer(&text, &chat_docs) {
+            context.push(note);
+        }
     }
-    let spoken = by_voice && (scope == Some("assistant") || cfg.speak_replies);
     if spoken && !(tools_supported && web_on) {
         if in_message {
             context.push(crate::chat::assistant::SPOKEN_ANSWER_NOTE.to_string());
@@ -704,7 +714,7 @@ async fn answer_turn(
             &text,
             endpoint,
             web_on,
-            by_voice,
+            spoken,
             live,
             Some(stop),
             watch.as_ref(),
@@ -1064,7 +1074,7 @@ async fn small_model_answer(
     text: &str,
     (base_url, api_key, model, provider, disable_thinking): (&str, &str, &str, &str, bool),
     web_on: bool,
-    by_voice: bool,
+    spoken: bool,
     live: Option<crate::chat::stream::Live<'_>>,
     stop: Option<&crate::chat::stream::Stoppable>,
     watch: Option<&crate::chat::stream::Watch<'_>>,
@@ -1101,7 +1111,7 @@ async fn small_model_answer(
                 let units = crate::ai::about_you::units::TheirUnits::for_question(settings.units, text);
                 let unit_lines = units.notes(&block);
                 let block = units.convert(&block).unwrap_or(block);
-                system = crate::web::grounded_prompt(persona, &block, &crate::web::today(), by_voice);
+                system = crate::web::grounded_prompt(persona, &block, &crate::web::today(), spoken);
                 pages.push(block);
                 system.push(' ');
                 let zone = crate::ai::about_you::profile(cfg).region.time_zone_label;

@@ -389,6 +389,22 @@ pub fn chat_viewing() -> Viewing {
     view()
 }
 
+tokio::task_local! {
+    /// The Voice Assistant's question running here was asked with Yap's
+    /// main window in front: Chat comes up there with it, and a document
+    /// opens beside it where the person is looking.
+    static IN_CHAT: bool;
+}
+
+/// Was the Voice Assistant's question this turn answers asked with Chat in
+/// front? Then its document's line points at the panel ("It's open on the
+/// right.", `documents::spoken_note`), not at Chat ("It's in Chat." to
+/// someone reading Chat, the maintainer's first try, 30 Oct 2026). `false`
+/// outside one.
+pub fn asked_in_chat() -> bool {
+    IN_CHAT.try_with(|b| *b).unwrap_or(false)
+}
+
 fn now_secs() -> u64 {
     SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)
 }
@@ -919,6 +935,8 @@ async fn answer(app: AppHandle, generation: u64, since: u64, question: String) {
             Some(&stoppable),
         ),
     );
+    // Asked with the main window in front: Chat shows it (`asked_in_chat`).
+    let turn = IN_CHAT.scope(focused, turn);
     // Its AI calls and searches are the Voice Assistant's in the network
     // receipts (net.rs), though they run Chat's code — and say so when the
     // window in front went with them.

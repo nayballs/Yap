@@ -7,7 +7,7 @@
     {
       "user": "Make me a Divinity: Original Sin 2 lone wolf build for a ranger: gear, skills, talents and how to level it.",
       "expect": { "document": { "made": true, "outline_first": true, "filled": true, "min_sections": 3 }, "max_words": 60, "no_false_claims": true },
-      "soft": { "max_words": 30 }
+      "soft": { "max_words": 30, "document": { "made": true, "table": true, "summary": true } }
     }
   ]
 }
