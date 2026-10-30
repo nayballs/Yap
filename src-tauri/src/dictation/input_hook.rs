@@ -1395,7 +1395,7 @@ fn handle_binding_event(
             binding.chorded.store(false, Ordering::Relaxed);
             if !others_down() {
                 if let Some(tx) = EVENT_TX.get() {
-                    info!("Input hook: queueing {}", event_pressed);
+                    trace!("Input hook: queueing {}", event_pressed);
                     let _ = tx.send((event_pressed, now));
                 }
             }
@@ -1407,7 +1407,7 @@ fn handle_binding_event(
     } else if binding.active.swap(false, Ordering::Relaxed) {
         if !others_down() {
             if let Some(tx) = EVENT_TX.get() {
-                info!("Input hook: queueing {}", event_released);
+                trace!("Input hook: queueing {}", event_released);
                 let _ = tx.send((event_released, now));
             }
         }
@@ -1552,7 +1552,7 @@ fn note_new_key(vkey: u32, scan: u32, now: u64) {
             && !b.chorded.swap(true, Ordering::Relaxed)
         {
             if let Some(tx) = EVENT_TX.get() {
-                info!("Input hook: a hold-to-talk press grew into a chord");
+                trace!("Input hook: a hold-to-talk press grew into a chord");
                 let _ = tx.send((CHORD, now));
             }
         }
