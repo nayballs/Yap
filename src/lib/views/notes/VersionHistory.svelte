@@ -34,6 +34,13 @@
     return compare === 'now' ? wordDiff(nowText, v.text, { exact: true }) : wordDiff(prev?.text ?? '', v.text, { exact: true });
   });
 
+  // The note went while its history was up (deleted from another window,
+  // the quick note emptied, Reset app): closed for good, never opening by
+  // itself over the next note picked.
+  $effect(() => {
+    if (notes.historyOpen && !notes.selected) close();
+  });
+
   let loadedFor = null;
   $effect(() => {
     const id = open ? notes.selected.id : null;
