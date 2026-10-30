@@ -83,7 +83,7 @@ fn press(app: &AppHandle) -> Result<String, String> {
         return Err("the app runs as administrator".into());
     }
     let key = key_for(crate::pasting::app_kind::of_window(target), &configured);
-    tauri::async_runtime::block_on(text_injector::press_submit(&key))?;
+    tauri::async_runtime::block_on(text_injector::press_submit(&key, target))?;
     Ok(key)
 }
 

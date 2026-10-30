@@ -5,7 +5,10 @@ Putting a dictation into the app you're in: the clipboard paste and the submit k
 [Architecture index](./README.md) · [CLAUDE.md](../../CLAUDE.md)
 
 - **`pasting/text_injector.rs`** — clipboard paste (+ optional clipboard restore) and
-  `press_submit` (Enter / Ctrl+Enter / Shift+Enter) via `SendInput`. **An app
+  `press_submit` (Enter / Ctrl+Enter / Shift+Enter) via `SendInput`, only
+  while the dictation's window is still in front (`submit_goes`, pure: a
+  dialog that came up over it after the paste never gets the Enter; the
+  dictation's `error` says so). **An app
   running as administrator** (`pasting/elevated.rs`, checked first — the paste's target,
   "Paste last transcript"'s, the submit key's window) gets no keys: the text is
   left on the clipboard (`leave_on_clipboard`, as privately as a paste) and
