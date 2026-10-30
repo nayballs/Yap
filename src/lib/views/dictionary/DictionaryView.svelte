@@ -42,6 +42,7 @@
   import Toggle from '../../ui/Toggle.svelte';
   import { openContextMenu, menuKey, askConfirm, menuOrDialogOpen } from '../../ui/contextMenu.svelte.js';
   import { toast } from '../../ui/toast.svelte.js';
+  import { showSaveError } from '../../notices/saveErrors.js';
   import {
     SORTS,
     sortOrDefault,
@@ -340,22 +341,40 @@
     pending = false;
     clearTimeout(saveTimer);
     try {
-      const fresh = await invoke('get_config');
-      const cleaned = clean(dict);
-      lastExternal = JSON.stringify(cleaned);
+      await save();
+    } catch (e) {
+      // Not saved (a full disk…): the list here keeps it, the next change
+      // saves it too, and Try again saves it now (saveErrors.js).
+      if (!showSaveError(e, { retry: save })) {
+        toast({ title: "Couldn't save the dictionary", description: String(e), variant: 'destructive' });
+      }
+    }
+  }
+
+  /** The list, ≈ and "Suggest words" onto config.json as it is now; throws when it couldn't be saved. */
+  async function save() {
+    const fresh = await invoke('get_config');
+    const cleaned = clean(dict);
+    const before = lastExternal;
+    lastExternal = JSON.stringify(cleaned);
+    try {
       await invoke('save_config', {
         cfg: { ...fresh, dictionary: cleaned, dictionaryFuzzy: fuzzy, learnWords },
+        base: fresh,
       });
-      // The always-mounted Settings component keeps its own full-cfg copy and
-      // auto-saves it wholesale — the event must carry EVERY dictionary field
-      // we own (entries, fuzzy, learnWords), or Settings' next save reverts
-      // the missing one.
-      window.dispatchEvent(
-        new CustomEvent('yap-dictionary-changed', { detail: { entries: cleaned, fuzzy, learnWords } })
-      );
-    } catch {
-      /* best-effort */
+    } catch (e) {
+      // Not saved: Settings' rows as they were are still nothing new here
+      // (never put back over this list's edit).
+      lastExternal = before;
+      throw e;
     }
+    // The always-mounted Settings component keeps its own full-cfg copy and
+    // auto-saves it wholesale — the event must carry EVERY dictionary field
+    // we own (entries, fuzzy, learnWords), or Settings' next save reverts
+    // the missing one.
+    window.dispatchEvent(
+      new CustomEvent('yap-dictionary-changed', { detail: { entries: cleaned, fuzzy, learnWords } })
+    );
   }
 
   /**
@@ -369,7 +388,7 @@
       } else {
         const cfg = await invoke('get_config');
         const entries = clean(change(groupRows(Array.isArray(cfg?.dictionary) ? cfg.dictionary : [])));
-        await invoke('save_config', { cfg: { ...cfg, dictionary: entries } });
+        await invoke('save_config', { cfg: { ...cfg, dictionary: entries }, base: cfg });
         window.dispatchEvent(
           new CustomEvent('yap-dictionary-changed', {
             detail: { entries, fuzzy: cfg.dictionaryFuzzy ?? true, learnWords: cfg.learnWords ?? true },

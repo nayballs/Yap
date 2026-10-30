@@ -471,7 +471,12 @@ The language-model side: the OpenAI-compatible client and its prompts, the on-de
   the room) — now 1.0–1.1×, for the KV once more (the 1.5B +224 MiB at 8K;
   model-evals.md "The processor tier"). `log_facts` reads `n_ctx_seq`, the
   context a request has, so the context view and the restart rule see 8K,
-  not 16K; `gguf::estimate` counts the second cache (`Server.per_slot`).
+  not 16K; `gguf::estimate` counts the second cache (`Server.per_slot`)
+  and, on the processor, the context checkpoints (2026-10-30,
+  `Shape::checkpoint_bytes`: up to 4 a slot, each one slot's recurrent state
+  from the header's `ssm.*` sizes — the 4B's 50.25 MiB, +402 MiB for two
+  slots; the server keeps them in the PC's memory, so a card's estimate
+  leaves them out).
   **Qwen3.5-9B** was
   measured again for 16 GB cards and isn't offered: no better than the 4B
   (model-evals.md "Qwen3.5-9B against the 4B"). **The runtime** (2026-10-22): **llamafile 0.10.6**

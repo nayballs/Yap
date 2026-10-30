@@ -818,3 +818,56 @@ test('the dialog connects Google (a local fake): it waits for the browser, Cance
   expect((await status(yap)).connections.map((c) => c.label)).toEqual(['tester@example.com']);
   await disconnectAll(yap);
 });
+
+test('a Google grant with the events box unticked connects nothing, and Google is told to forget it', async ({ yap, main, google }) => {
+  await disconnectAll(yap);
+  const revoked = google.revoked.length;
+  const links = (await opened(yap)).length;
+  await yap.invoke('calendar_connect_google');
+  // Only the calendar list allowed on the consent page.
+  const back = await fetch(
+    google.approve(await nextAuthUrl(yap, links), { scope: 'https://www.googleapis.com/auth/calendar.calendarlist.readonly' }),
+  );
+  expect(await back.text()).toContain('leave that box ticked');
+  // The grant Yap won't use goes, so Yap isn't left in the account's apps.
+  await expect.poll(() => google.revoked.length).toBe(revoked + 1);
+  expect(google.revoked.at(-1)).toMatch(/^1\/\/e2e-refresh-/);
+  expect(google.live).not.toContain(google.revoked.at(-1));
+  expect((await status(yap)).connections).toEqual([]);
+  await closeToasts(main);
+});
+
+test('a link on its first fetch and a Google sign-in finishing meanwhile take a slot each, each with its own secret', async ({
+  yap,
+  main,
+  google,
+  feed,
+}) => {
+  await disconnectAll(yap);
+  // A slow calendar: the link is still on its first fetch…
+  feed.delay(4_000);
+  const fetches = feed.requests.length;
+  const adding = yap.invoke('calendar_add_link', { link: feed.url, kind: 'ics' });
+  await expect.poll(() => feed.requests.length).toBeGreaterThan(fetches);
+  // …when Google's sign-in finishes.
+  const links = (await opened(yap)).length;
+  await yap.invoke('calendar_connect_google');
+  const back = await fetch(google.approve(await nextAuthUrl(yap, links)));
+  expect(back.status).toBe(200);
+  await expect.poll(() => status(yap).then((s) => s.connections.map((c) => c.kind))).toContain('google');
+  feed.delay(0);
+  await adding;
+  const connections = (await status(yap)).connections;
+  expect(connections).toHaveLength(2);
+  const viaGoogle = connections.find((c) => c.kind === 'google');
+  const viaLink = connections.find((c) => c.kind === 'ics');
+  expect(viaGoogle.id).not.toBe(viaLink.id);
+  const secrets = yap.readJson('calendar-secrets.e2e.json');
+  expect(secrets[viaLink.id]).toBe(feed.url);
+  expect(secrets[viaGoogle.id]).toContain('e2e-refresh');
+  // And the Google calendar still syncs, on its own secret.
+  await yap.invoke('calendar_sync');
+  expect((await status(yap)).connections.find((c) => c.kind === 'google').error).toBeNull();
+  await closeToasts(main);
+  await disconnectAll(yap);
+});

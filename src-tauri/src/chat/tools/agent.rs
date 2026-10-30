@@ -465,6 +465,23 @@ async fn tool_loop(
             // tell it once and ask again, then answer without tools — never
             // an error for the person.
             Err(e) => {
+                // A model Yap didn't know couldn't read images (switched to
+                // after a question with a screenshot) turned the earlier
+                // ones down: a "no" from now on, as for a question's own
+                // (`snip::vision::refused`), and asked again with each said
+                // in a line instead. A question with screenshots of its own
+                // is chat::commands' to say.
+                if crate::snip::vision::is_image_refusal(&e)
+                    && crate::snip::turn::images().is_empty()
+                    && crate::snip::turn::without_images(&mut messages)
+                {
+                    tracing::info!(provider, "Chat: the model refused the earlier screenshots; asking again without them");
+                    crate::snip::vision::refused(provider, model);
+                    if let Some(live) = live {
+                        live.sink.send(crate::chat::stream::Event::Text { text: String::new() });
+                    }
+                    continue;
+                }
                 let Some(why) = crate::ai::llm::rejected_tool_call(&e) else {
                     return Err(e);
                 };
@@ -1015,6 +1032,51 @@ mod tests {
         // The last call: no tools, told to answer.
         assert!(requests[2].1.get("tools").is_none());
         assert_eq!(requests[2].1["messages"].as_array().unwrap().last().unwrap()["content"], ANSWER_NOW_NOTE);
+    }
+
+    /// Chat switched to a text-only model Yap knows nothing about, after a
+    /// question with a screenshot: its server turns the earlier screenshot
+    /// down. Until 2026-10-30 every follow-up failed so, and the refusal was
+    /// never learned (only a question's own screenshots taught it).
+    #[tokio::test]
+    async fn earlier_screenshots_a_model_turns_down_go_as_a_line_from_then_on() {
+        use crate::snip::turn::{part, NOT_SENT_AGAIN};
+        let model = "text-only-example-7b";
+        assert_eq!(crate::snip::vision::reads_images("groq", model), None, "nothing says");
+        let fake = fake_model(vec![
+            (400, json!({ "error": { "message": "image input is not supported for this model" } })),
+            (200, json!({ "role": "assistant", "content": "It's a bar chart of the quarter's sales." })),
+        ]);
+        let history = [
+            json!({ "role": "user", "content": [part("data:image/png;base64,AAAA", "groq"), { "type": "text", "text": "What's this?" }] }),
+            json!({ "role": "assistant", "content": "A chart." }),
+        ];
+        let (reply, _) = run_tool_loop(
+            "You are helpful.",
+            &history,
+            "What does it show?",
+            &[],
+            &format!("{}/v1", fake.base),
+            "gsk-fake",
+            model,
+            "groq",
+            false,
+            false,
+            &|_| {},
+            None,
+            FirstStep::Model,
+        )
+        .await
+        .expect("an answer, not the 400");
+        assert_eq!(reply, "It's a bar chart of the quarter's sales.");
+        let requests = fake.requests.lock().unwrap().clone();
+        assert_eq!(requests.len(), 2);
+        assert!(crate::snip::turn::has_images(&requests[0].1));
+        // Asked again without it: the earlier question says so in a line.
+        assert!(!crate::snip::turn::has_images(&requests[1].1));
+        assert_eq!(requests[1].1["messages"][1]["content"], format!("What's this?\n\n{NOT_SENT_AGAIN}"));
+        // Learned: the next follow-up's history leaves it out from the start.
+        assert_eq!(crate::snip::vision::reads_images("groq", model), Some(false));
     }
 
     #[tokio::test]

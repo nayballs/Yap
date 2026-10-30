@@ -240,7 +240,10 @@ itself (`.toolchip.tool`).
   next one." + **Try again** (`saves_retry`: "Saved", or "Still couldn't
   save…"); false for any other error, the caller's own. Used by the Notes
   view and the notepad (note edits, folders, delete), Actions, Chat (delete,
-  rename), Home (a dictation's delete), Clear history and Memory), and the **update toast**
+  rename), Home (a dictation's delete), Clear history and Memory; config.json's
+  savers pass their own save as `retry` — the Dictionary view and Settings'
+  auto-save, whose next save that works takes its toast down with
+  `clearSaveError(e, { retry })`), and the **update toast**
   (`updates.svelte.js` — the shared update store started by ControlPanel:
   sticky "Yap X is ready" + Restart to update / Later / What's new, then
   Downloading… / Restarting Yap… in place; "Updated to X" after the
@@ -505,7 +508,8 @@ Flow's dark mode of 19 Oct 2026), for every Yap window.
   added that week took the chunk to 735 KB, past `chunkSizeWarningLimit`
   700 in vite.config.js; then 683 KB. The afternoon's batch took it to
   705 KB, so Meetings loads on first use too, fetched as soon as the window
-  is idle (`requestIdleCallback`) so opening it doesn't wait: 683 KB again. Not for start-up speed — measured
+  is idle (`requestIdleCallback`) so opening it doesn't wait: 683 KB again
+  (698 kB by 2026-10-30, just under the limit). Not for start-up speed — measured
   2026-10-22, when it stayed one chunk (~590 KB): loading the seven views other than
   Home on demand (with an idle-time preload, the old view kept until the
   new one's code was in) cut its initial script 904 → 711 KB and its heap

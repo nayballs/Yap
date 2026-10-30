@@ -285,11 +285,21 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
     const file = pastedImage(e);
     if (!file) return;
     e.preventDefault();
+    // The box full: said, as for a drop (never the oldest dropped for it).
+    if (waitingShots.list.length >= MAX_SHOTS) {
+      boxFull();
+      return;
+    }
     try {
       await attachPictures([await keepPasted(file)]);
     } catch (err) {
       toast({ title: "Couldn't paste the picture", description: String(err), variant: 'destructive' });
     }
+  }
+
+  /** A picture pasted or dropped with the box full: said, nothing taken out. */
+  function boxFull() {
+    toast({ title: `A question carries ${MAX_SHOTS} screenshots at most`, description: 'Remove one to add another.', chip: 'Chat' });
   }
 
   /** Files dropped on Chat (Windows' drag and drop): the pictures among them go in the box. */
@@ -298,7 +308,7 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
     if (!paths?.length) return;
     const room = MAX_SHOTS - waitingShots.list.length;
     if (room <= 0) {
-      toast({ title: `A question carries ${MAX_SHOTS} screenshots at most`, description: 'Remove one to add another.', chip: 'Chat' });
+      boxFull();
       return;
     }
     try {

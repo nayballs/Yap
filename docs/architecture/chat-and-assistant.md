@@ -142,7 +142,10 @@ The AI Chat surface (conversations, the tool-calling loop and its note tools) an
   text; the text first for OpenRouter), the newest 3 earlier screenshots in
   the history window go again, older ones as a line (every one a line to a
   model known not to read images); a server's refusal becomes
-  `vision::COULDNT_READ` (that model a "no" this session).
+  `vision::COULDNT_READ` (that model a "no" this session). A refusal of the
+  earlier ones alone, on a follow-up, makes the model a "no" too and the
+  step goes again with them as lines (`snip::turn::without_images` in the
+  tool loop, 2026-10-30).
   `chat_send(images, asText: true)` ("Send its text instead", 2026-10-25):
   the screenshots' text, read on this PC by Windows' OCR (`snip::ocr`), goes
   after the question instead of the pictures, which stay with it marked

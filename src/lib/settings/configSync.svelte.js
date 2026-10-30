@@ -14,7 +14,10 @@
 // config.json as it is now (`merge3`), so a setting saved elsewhere since
 // stays — and nothing is written when this copy has nothing to add. An
 // edit being made is never undone: a setting changed both here and there
-// keeps this copy's. One at a time (`inTurn`).
+// keeps this copy's. One at a time (`inTurn`). A save that fails (a full
+// disk…) is said with Try again (`autoSave`, saveErrors.js); the change
+// stays in this copy, and the next save that works saves it and takes the
+// toast down (`settled`).
 //
 // Settings is mounted once, in the main window, for the window's life: one
 // copy per window, so the state is this module's. Pages get `cfg` as a
@@ -24,6 +27,8 @@ import { listen } from '@tauri-apps/api/event';
 import { onMount } from 'svelte';
 import { merge3, same, copy, fill } from './configMerge.js';
 import { FIELD_DEFAULTS, cleanConfig } from './configDefaults.js';
+import { showSaveError, clearSaveError } from '../notices/saveErrors.js';
+import { toast } from '../ui/toast.svelte.js';
 
 /**
  * `cfg`: the copy (null until read). `loaded`: set up (the auto-save and the
@@ -92,12 +97,41 @@ export function persist() {
     adopt(mine, next);
     if (same(next, disk)) {
       base = disk;
+      settled();
       return;
     }
-    await invoke('save_config', { cfg: next });
+    // With what it read: Rust puts these changes onto config.json as it is
+    // by then, so a change saved since this read stays (shell/settings.rs).
+    await invoke('save_config', { cfg: next, base: disk });
     base = copy(next);
+    settled();
     config.saved = true;
     setTimeout(() => (config.saved = false), 1200);
+  });
+}
+
+// A failed auto-save (a full disk, config.json held by another program):
+// the error it said, while this copy holds a change config.json hasn't got.
+// Rust keeps nothing (config.rs `save_at`): the change stays here, the next
+// save (another change, a page's own, Try again) saves it with the rest.
+let unsaved = null;
+
+/** This copy and config.json agree again: the failed save's toast goes. */
+function settled() {
+  if (!unsaved) return;
+  clearSaveError(unsaved, { retry: persist });
+  unsaved = null;
+}
+
+/**
+ * The auto-save: `persist`, and a save that failed said with Try again
+ * (saveErrors.js: one card, however many saves fail in a row; Try again
+ * runs `persist` once, never this, so nothing re-saves by itself).
+ */
+function autoSave() {
+  persist().catch((e) => {
+    if (showSaveError(e, { retry: persist })) unsaved = e;
+    else toast({ title: "Couldn't save your settings", description: String(e), variant: 'destructive' });
   });
 }
 
@@ -113,6 +147,7 @@ export function syncConfig({ onAdopted = () => {} } = {}) {
   config.saved = false;
   base = null;
   pristine = null;
+  unsaved = null;
   adopted = onAdopted;
 
   onMount(() => {
@@ -134,6 +169,6 @@ export function syncConfig({ onAdopted = () => {} } = {}) {
       return;
     }
     clearTimeout(saveTimer);
-    saveTimer = setTimeout(persist, 400);
+    saveTimer = setTimeout(autoSave, 400);
   });
 }
