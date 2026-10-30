@@ -100,15 +100,20 @@
     const previousPrompt = prompt;
     const previousPreset = preset;
     prompt = editedPrompt;
-    await onpersist?.();
     try {
+      await onpersist?.();
       testResult = await invoke(testCommand, { text: testText });
     } catch (e) {
       testResult = `Test failed: ${e}`;
     } finally {
       prompt = previousPrompt;
       if (hasPresets) preset = previousPreset;
-      await onpersist?.();
+      // A save that fails says so itself (Settings' toast); the button never stays busy.
+      try {
+        await onpersist?.();
+      } catch {
+        // said already
+      }
       testRunning = false;
       ontested?.();
     }
