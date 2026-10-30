@@ -1916,8 +1916,17 @@ fn resume_into(app: &AppHandle, note_id: u64, call_id: u64) {
     while crate::meetings::meeting::is_recording() && std::time::Instant::now() < until {
         std::thread::sleep(Duration::from_millis(200));
     }
-    let started = crate::meetings::commands::meeting_start(app.clone(), app.state::<crate::AppState>(), note_id);
+    // Still on (gone meanwhile: nothing to carry on), and the same meeting:
+    // the calendar may know it's the next of two back to back on this app
+    // (or the note's meeting is long over), which is asked about instead.
     let call_app = lock().calls.iter().find(|c| c.id == call_id).map(|c| c.app);
+    let started = match call_app {
+        None => Err("the call ended".to_string()),
+        Some(a) if crate::calendar::call_is_another_meeting(a.id, note_id) => {
+            Err("the calendar says it's another meeting".to_string())
+        }
+        Some(_) => crate::meetings::commands::meeting_start(app.clone(), app.state::<crate::AppState>(), note_id),
+    };
     match (started, call_app) {
         (Ok(_), Some(call_app)) => {
             lock().recorded = Some(Recorded { note_id, app: call_app, clicked: false });
@@ -2044,6 +2053,17 @@ pub fn on_wake(app: &AppHandle, paused: Option<u64>) {
     tracing::info!(paused = paused.is_some(), "meeting detect: the PC woke; looking at the calls again");
     run(app, todo);
     wake();
+}
+
+/// The person answered "Your PC was asleep" about note `note_id` (Resume or
+/// Summarise, `meeting_guard`): theirs to decide now, so its call's app back
+/// on the mic soon after isn't carried on in it by itself (a summarised
+/// meeting reopened, the person's answer undone).
+pub fn forget_auto_stop(note_id: u64) {
+    let mut s = lock();
+    if s.auto_stopped.is_some_and(|a| a.note_id == note_id) {
+        s.auto_stopped = None;
+    }
 }
 
 /// The call a recording is of: the one its notes are for, or one it

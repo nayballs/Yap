@@ -466,7 +466,10 @@ const GATHER_PASSAGES: usize = 14;
 pub async fn find(turn: &SkillTurn) -> Found {
     let found = match turn.skill.gather.as_str() {
         "tasks" => tasks_found(&crate::notes::all(), &crate::notes::task_store::snapshot()),
-        "you" => latest_you(&crate::notes::all()),
+        "you" => {
+            let now = crate::ai::eval::now().with_timezone(&chrono::Local);
+            latest_you(&crate::notes::all(), &turn.words, &now)
+        }
         "week" => {
             let now = crate::ai::eval::now().with_timezone(&chrono::Local);
             week(&crate::notes::all(), &query_of(turn), &now)
@@ -502,10 +505,49 @@ fn meetings_by_time(notes: &[crate::notes::Note]) -> Vec<&crate::notes::Note> {
     m
 }
 
-/// "you": the latest meeting's talk, the passages where the person talks
-/// most first (at most [`GATHER_PASSAGES`]), back in the order said.
-fn latest_you(notes: &[crate::notes::Note]) -> Found {
-    let Some(note) = meetings_by_time(notes).into_iter().next() else { return Found::default() };
+/// Lowercase words, single spaces, no punctuation ("Budget review!" →
+/// "budget review").
+fn plain_words(s: &str) -> String {
+    s.to_lowercase().split(|c: char| !c.is_alphanumeric()).filter(|w| !w.is_empty()).collect::<Vec<_>>().join(" ")
+}
+
+/// The meeting a Skill's `words` name ("/coach the budget review", "/coach
+/// yesterday"): the newest whose title they hold, as whole words, within
+/// the dates they name; else the newest within those dates. `None`: they
+/// name none ("/coach be blunt": the latest meeting, then). `meetings`:
+/// newest first.
+fn named<'a, Tz: chrono::TimeZone>(meetings: &[&'a crate::notes::Note], words: &str, now: &chrono::DateTime<Tz>) -> Option<&'a crate::notes::Note>
+where
+    Tz::Offset: std::fmt::Display,
+{
+    if words.trim().is_empty() {
+        return None;
+    }
+    let dated = crate::search::dates::parse(words, now);
+    let within: Vec<&crate::notes::Note> =
+        meetings.iter().copied().filter(|n| dated.range.as_ref().is_none_or(|r| r.holds(chunks::note_time(n)))).collect();
+    let said = format!(" {} ", plain_words(words));
+    within
+        .iter()
+        .copied()
+        .find(|n| {
+            let title = plain_words(&n.title);
+            title.chars().count() >= 3 && said.contains(&format!(" {title} "))
+        })
+        .or_else(|| dated.range.as_ref().and(within.first().copied()))
+}
+
+/// "you": the talk of the meeting the words name ([`named`]), else the
+/// latest meeting's — the passages where the person talks most first (at
+/// most [`GATHER_PASSAGES`]), back in the order said. (Until 2026-10-29's
+/// review it was always the latest: "/coach the budget review" coached
+/// whatever meeting came last.)
+fn latest_you<Tz: chrono::TimeZone>(notes: &[crate::notes::Note], words: &str, now: &chrono::DateTime<Tz>) -> Found
+where
+    Tz::Offset: std::fmt::Display,
+{
+    let meetings = meetings_by_time(notes);
+    let Some(note) = named(&meetings, words, now).or_else(|| meetings.first().copied()) else { return Found::default() };
     let talk: Vec<chunks::Chunk> = chunks::chunk_note(note).into_iter().filter(|c| c.field == Field::Transcript).collect();
     let mine = |c: &chunks::Chunk| c.lines.iter().filter(|l| l.speaker == "You").map(|l| l.text.split_whitespace().count()).sum::<usize>();
     let mut order: Vec<usize> = (0..talk.len()).collect();
@@ -773,10 +815,37 @@ mod tests {
     fn coach_me_reads_the_latest_meeting_where_you_talk() {
         let old = meeting(1, "Old sync", 1_000, "", &[("you", "Old words from long ago in another meeting entirely.")]);
         let new = meeting(2, "Budget review", 9_000, "", &[("you", "I think we should cut the second shift, and I'll write it up."), ("them", "Fine by me.")]);
-        let found = latest_you(&[old, new]);
+        let now = chrono::Utc::now();
+        let found = latest_you(&[old, new], "", &now);
         assert_eq!(found.latest.as_deref(), Some("Budget review"));
         assert!(found.passages.iter().all(|p| p.note == 2));
         assert!(found.passages[0].text.contains("You: I think we should cut the second shift"));
+    }
+
+    #[test]
+    fn coach_me_on_the_meeting_the_words_name() {
+        use chrono::TimeZone;
+        let now = chrono::Utc.with_ymd_and_hms(2026, 10, 29, 12, 0, 0).unwrap(); // a Thursday
+        let tue = chrono::Utc.with_ymd_and_hms(2026, 10, 27, 10, 0, 0).unwrap().timestamp() as u64;
+        let wed = chrono::Utc.with_ymd_and_hms(2026, 10, 28, 15, 0, 0).unwrap().timestamp() as u64;
+        let thu = chrono::Utc.with_ymd_and_hms(2026, 10, 29, 9, 0, 0).unwrap().timestamp() as u64;
+        let notes = [
+            meeting(1, "Budget review", tue, "", &[("you", "I'll take the budget numbers to finance myself.")]),
+            meeting(2, "Daily standup", wed, "", &[("you", "Yesterday I fixed the export, today the release notes.")]),
+            meeting(3, "Supplier call", thu, "", &[("you", "Can you send the revised quote by Friday?")]),
+        ];
+        let on = |words: &str| latest_you(&notes, words, &now).passages.first().map(|p| p.note);
+        // Its title, as said with the command (any case, punctuation aside).
+        assert_eq!(on("the Budget Review, please"), Some(1));
+        // The day it was on.
+        assert_eq!(on("yesterday's"), Some(2));
+        // Words that name no meeting are how to coach, not which meeting:
+        // the latest, as before.
+        assert_eq!(on("be blunt about my questions"), Some(3));
+        assert_eq!(on(""), Some(3));
+        // A title only as part of another word isn't it.
+        assert_eq!(on("my budget reviews in general"), Some(3));
+        assert_eq!(latest_you(&notes, "the budget review", &now).latest.as_deref(), Some("Budget review"));
     }
 
     #[test]

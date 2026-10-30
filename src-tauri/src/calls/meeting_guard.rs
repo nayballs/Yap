@@ -1279,9 +1279,12 @@ fn answer_question(app: &AppHandle, note_id: u64, about: &About, answer: &str) -
         (_, "keep") => Ok(()),
         (About::Mic { id, name }, "use") => crate::meetings::meeting::use_mic(id, name),
         (About::Asleep, "resume") => {
+            crate::calls::meeting_detect::forget_auto_stop(note_id);
             crate::meetings::commands::meeting_start(app.clone(), app.state::<crate::AppState>(), note_id).map(|_| ())
         }
         (About::Asleep, "summarise") => {
+            // Done with these notes: the call back on the mic is a new one.
+            crate::calls::meeting_detect::forget_auto_stop(note_id);
             crate::meetings::meeting_end::start_summary(app, note_id);
             Ok(())
         }
