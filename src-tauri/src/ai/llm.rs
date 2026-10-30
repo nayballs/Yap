@@ -985,6 +985,9 @@ pub(crate) enum Delta<'a> {
     Content(&'a str),
     /// The model began a tool call (its name).
     ToolCall(&'a str),
+    /// A tool call's arguments so far, whole — only for the calls the page
+    /// watches being written (`stream::LIVE_ARGS`: a document's section).
+    ToolArgs { name: &'a str, so_far: &'a str },
     /// More of its thinking, sent apart from the answer (a Chat question
     /// asked to think it through, `chat/think.rs`).
     Reasoning(&'a str),
@@ -1189,6 +1192,7 @@ async fn read_stream(mut resp: reqwest::Response, on: OnDelta<'_>) -> Result<cra
                         crate::chat::stream::Piece::Content(s) => on(Delta::Content(&s)),
                         crate::chat::stream::Piece::Call(name) => on(Delta::ToolCall(&name)),
                         crate::chat::stream::Piece::Reasoning(s) => on(Delta::Reasoning(&s)),
+                        crate::chat::stream::Piece::Args { name, so_far } => on(Delta::ToolArgs { name: &name, so_far: &so_far }),
                     }
                 }
                 Ok(())

@@ -616,11 +616,22 @@ async fn tool_loop(
             }
             tracing::info!(tool = %name, success = %result["success"], "Chat tool call");
             crate::ai::eval::tool_called(name, &ran_with, &result);
+            // What the model has now seen of a document (documents.rs): the
+            // next question hears what the person changed since.
+            crate::chat::documents::after_call(name, &ran_with, &result);
             if let Some(id) = changed_note(name, &result) {
                 on_change(id);
+                // A document of this chat made or changed: the panel shows
+                // it at once, and the answer keeps it (its pill).
+                if let Some(doc) = extra.docs.and_then(|d| d.noticed(name, id)) {
+                    if let Some(live) = live {
+                        live.sink.send(crate::chat::stream::Event::Document { note_id: doc.id, title: doc.title });
+                    }
+                }
             }
             if let Some(d) = result["displayText"].as_str() {
-                tools_used.push(d.to_string());
+                // A document's sections, one chip ("Wrote 4 sections in …").
+                crate::chat::documents::push_chip(&mut tools_used, d.to_string());
             }
             report(live, &tools_used, web.as_deref(), extra.calendar.map(|c| c.log));
             // Within what the request has left (a long page read on an 8K
@@ -1437,6 +1448,72 @@ mod tests {
         assert_eq!(call["id"], "call_1");
         assert_eq!(serde_json::from_str::<Value>(call["function"]["arguments"].as_str().unwrap()).unwrap(), json!({ "query": "kitchen budget" }));
         assert_eq!(messages.last().unwrap()["role"], "tool");
+    }
+
+    /// Documents beside the chat (documents.rs), through the real loop: the
+    /// outline opens the panel (`Event::Document`), a section shows as its
+    /// arguments stream (`Event::Section`) and lands in its placeholder, the
+    /// sections' chips fold into one, and the turn keeps the document for
+    /// the answer's pill.
+    #[tokio::test]
+    async fn a_document_opens_fills_as_it_streams_and_is_kept_for_the_answer() {
+        let call = |id: &str, name: &str, args: &str| {
+            delta(json!({ "tool_calls": [{ "index": 0, "id": id, "type": "function", "function": { "name": name, "arguments": args } }] }))
+        };
+        let more = |args: &str| delta(json!({ "tool_calls": [{ "index": 0, "function": { "arguments": args } }] }));
+        let outline = r#"{"title": "Lone wolf build", "sections": [{"key": "Gear", "intent": "what to wear"}, {"key": "Skills", "intent": "which"}]}"#;
+        let fake = fake_streamer(vec![
+            Reply::Sse(vec![call("c1", "create_document", outline), finish("tool_calls"), "[DONE]".into()]),
+            Reply::Sse(vec![
+                call("c2", "write_section", ""),
+                more(r#"{"note_id": 1, "key": "Gear", "#),
+                more(r#""markdown": "- Two rings"#),
+                more(r#"\n- A staff"}"#),
+                finish("tool_calls"),
+                "[DONE]".into(),
+            ]),
+            Reply::Sse(vec![call("c3", "write_section", r#"{"note_id": 1, "key": "Skills", "markdown": "Shadow."}"#), finish("tool_calls"), "[DONE]".into()]),
+            streamed_answer(&["It's open ", "on the right."]),
+        ]);
+        let seen = Seen::default();
+        let docs = crate::chat::documents::Turn::new(&[]);
+        let (reply, chips) = tool_loop(
+            "You are helpful.",
+            &[],
+            "Build me a lone wolf build",
+            &[],
+            &format!("{}/v1", fake.base),
+            "",
+            "fake-chat",
+            "custom",
+            false,
+            false,
+            &|_| {},
+            None,
+            FirstStep::Model,
+            Extra { docs: Some(&docs), ..Default::default() },
+            Some(crate::chat::stream::Live { sink: &seen, beside: None }),
+        )
+        .await
+        .expect("an answer");
+        assert_eq!(reply, "It's open on the right.");
+        assert_eq!(chips, ["Started \"Lone wolf build\" (2 sections)", "Wrote 2 sections in \"Lone wolf build\""]);
+        let note = crate::notes::get(1).expect("the document");
+        assert_eq!(note.title, "Lone wolf build");
+        assert_eq!(note.content, "# Lone wolf build\n\n## Gear\n\n- Two rings\n- A staff\n\n## Skills\n\nShadow.\n");
+        use crate::chat::stream::Event;
+        let events = seen.events();
+        // The panel opened on the outline, before any section came.
+        let opened = events.iter().position(|e| matches!(e, Event::Document { note_id: 1, .. })).expect("the document shown");
+        let live = events.iter().position(|e| matches!(e, Event::Section { note_id: 1, key, .. } if key == "Gear")).expect("the section as it came");
+        assert!(opened < live, "{events:?}");
+        assert!(events.iter().any(|e| matches!(e, Event::Section { text, .. } if text.starts_with("- Two rings"))), "{events:?}");
+        // The answer keeps it, once.
+        assert_eq!(docs.touched(), [crate::chat::documents::DocRef { id: 1, title: "Lone wolf build".into() }]);
+        // Every change a version, marked Chat (Undo works on each).
+        let versions = crate::notes::versions::list(1).unwrap();
+        assert_eq!(versions.len(), 3);
+        assert!(versions.iter().all(|v| v.version.kind == crate::notes::versions::kind::CHAT));
     }
 
     /// A must-search turn, streamed to `seen` (a model on this PC, the web

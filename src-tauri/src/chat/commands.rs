@@ -254,5 +254,7 @@ async fn send_turn(
         "stopped": turn.stopped,
         "question": text,
         "tokens": turn.tokens,
+        // The documents it made or changed (documents.rs): their pills.
+        "documents": turn.documents,
     }))
 }

@@ -7,6 +7,7 @@ pub mod budget;
 pub mod chats;
 pub mod commands;
 pub mod compact;
+pub mod documents;
 pub mod note_chats;
 pub mod note_text;
 pub mod skills;

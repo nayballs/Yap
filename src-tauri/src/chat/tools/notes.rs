@@ -10,8 +10,18 @@ use crate::chat::note_text::{self, Field};
 use super::{tool_error, tool_result, GET_NOTE_TOKENS, MAX_CONTENT_LENGTH};
 
 /// The OpenAI `tools` array (OpenWhispr's schemas near-verbatim from their
-/// tool files; `search_in_note`, `read_note` and `edit_note` are Yap's).
+/// tool files; `search_in_note`, `read_note` and `edit_note` are Yap's),
+/// with a document's two (`documents.rs`: `create_document`,
+/// `write_section`) after them.
 pub fn definitions() -> Value {
+    let mut all = note_definitions();
+    if let Some(list) = all.as_array_mut() {
+        list.extend(crate::chat::documents::definitions());
+    }
+    all
+}
+
+fn note_definitions() -> Value {
     json!([
         {
             "type": "function",
@@ -371,8 +381,8 @@ pub fn changed_note(name: &str, result: &Value) -> Option<u64> {
     }
     let id = result["data"]["id"].as_u64();
     match name {
-        "create_note" | "update_note" => id,
-        "edit_note" if result["data"]["changed"] == json!(true) => id,
+        "create_note" | "update_note" | "create_document" => id,
+        "edit_note" | "write_section" if result["data"]["changed"] == json!(true) => id,
         _ => None,
     }
 }
@@ -473,6 +483,7 @@ fn run(name: &str, args: &Value) -> Value {
                 None => tool_result(false, Value::Null, format!("Note with ID {id} not found")),
             }
         }
+        "create_document" | "write_section" => crate::chat::documents::execute(name, args),
         "search_in_note" => search_in_note(args),
         "read_note" => read_note(args),
         "edit_note" => edit_note(args),
