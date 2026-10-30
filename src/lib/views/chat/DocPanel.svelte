@@ -16,7 +16,7 @@
   import { highlightMarkdown } from '../../core/markdownSource.js';
   import { openContextMenu } from '../../ui/contextMenu.svelte.js';
   import SummaryFind from '../../components/SummaryFind.svelte';
-  import { shownOffset } from './chatDoc.svelte.js';
+  import { shownOffset, copyDocument, exportDocument } from './docTools.js';
 
   /**
    * `doc`: the panel's state; `cover`: over the conversation (expanded, or a
@@ -110,9 +110,11 @@
   $effect(() => {
     void doc.id;
     const v = doc.view;
+    // (Read now: the page's first scroll event would record the top.)
+    const top = doc.scrollFor(v);
     tick().then(() => {
       const el = v === 'source' ? srcEl : bodyEl;
-      if (el) el.scrollTop = doc.scrollFor(v);
+      if (el) el.scrollTop = top;
     });
   });
 
@@ -165,8 +167,8 @@
       [
         { label: 'Find in the document', onselect: openFind },
         { separator: true },
-        { label: 'Copy as Markdown', icon: 'copy', onselect: () => doc.copy(), disabled: doc.gone },
-        { label: 'Export as Markdown…', icon: 'download', onselect: () => doc.exportMarkdown(), disabled: doc.gone },
+        { label: 'Copy as Markdown', icon: 'copy', onselect: () => copyDocument(doc), disabled: doc.gone },
+        { label: 'Export as Markdown…', icon: 'download', onselect: () => exportDocument(doc), disabled: doc.gone },
         { separator: true },
         { label: 'Open in Notes', icon: 'open', onselect: () => doc.openInNotes(), disabled: doc.gone },
       ],

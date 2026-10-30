@@ -21,13 +21,12 @@
 //   did), goes back to the version before it (notes/versions.rs; itself a
 //   version, so it can be undone too).
 // - Copy (the whole document as Markdown) and Export as Markdown (the Notes
-//   view's `note_export`).
+//   view's `note_export`): `docTools.js`, in the panel's own chunk.
 import { invoke } from '@tauri-apps/api/core';
 import { toast } from '../../ui/toast.svelte.js';
 import { showSaveError } from '../../notices/saveErrors.js';
 import { isPlaceholder, pendingSections } from '../../core/markdown.js';
 import { closePartial } from '../../core/streaming.js';
-import { copyText } from '../../core/itemMenus.js';
 
 /** The origin of the panel's saves (`yap-note-changed`): its own aren't news. */
 export const PANEL_ORIGIN = 'chat-panel';
@@ -108,31 +107,6 @@ export function shownText(content, title, live = {}) {
     else lines.push('', block);
   }
   return lines.join('\n').replace(/^\n+/, '');
-}
-
-/**
- * How many of `content`'s lines come before the first line `shownText`
- * shows (the title's, and the blank lines after it): a rendered block's
- * `data-line` plus this is its line in the note (with nothing streaming).
- * Pure.
- */
-export function shownOffset(content, title) {
-  const lines = String(content || '').split('\n');
-  let at = 0;
-  const first = lines[0]?.trim() ?? '';
-  if (/^#\s+/.test(first) && first.replace(/^#\s+/, '').trim() === String(title || '').trim()) at = 1;
-  while (at < lines.length - 1 && lines[at] === '') at++;
-  return at;
-}
-
-/** A document's text to copy, as Markdown: its sections still to write left out. Pure. */
-export function copyableText(content) {
-  return String(content || '')
-    .split('\n')
-    .filter((l) => !isPlaceholder(l))
-    .join('\n')
-    .replace(/\n{3,}/g, '\n\n')
-    .trim();
 }
 
 /**
@@ -326,29 +300,6 @@ export function createDocPanel({ onopennote = () => null } = {}) {
     if (id != null) scrolls.set(`${id}:${v}`, Math.max(0, Math.round(top)));
   }
 
-  /** Copy the whole document as Markdown. */
-  async function copy() {
-    await flushSave();
-    return copyText(copyableText(content), 'Copied as Markdown');
-  }
-
-  /** Export as Markdown (the Notes view's: a .md file where you choose). */
-  async function exportMarkdown() {
-    if (id == null) return;
-    await flushSave();
-    const noteId = id;
-    try {
-      const { save } = await import('@tauri-apps/plugin-dialog');
-      const suggested = (title || 'document').replace(/[\\/:*?"<>|]/g, '-');
-      const path = await save({ defaultPath: `${suggested}.md`, filters: [{ name: 'Markdown', extensions: ['md'] }] });
-      if (!path) return;
-      await invoke('note_export', { id: noteId, path });
-      toast({ title: 'Document exported', description: path, variant: 'success' });
-    } catch (e) {
-      toast({ title: 'Export failed', description: String(e), variant: 'destructive' });
-    }
-  }
-
   /** The Source box changed. */
   function input(text) {
     draft = text;
@@ -465,8 +416,6 @@ export function createDocPanel({ onopennote = () => null } = {}) {
     toggleEdit,
     scrollFor,
     keepScroll,
-    copy,
-    exportMarkdown,
     input,
     flushSave,
     undo,
