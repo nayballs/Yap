@@ -62,9 +62,7 @@
         if (a?.cleanup === 'cloud' && !setup.cleanupEnabled) setup.cleanupMode = 'cloud';
       })
       .catch(() => {});
-    invoke('list_mics')
-      .then((d) => (setup.devices = d || []))
-      .catch(() => {});
+    setup.refreshMics();
     const onVis = () => {
       setup.pageVisible = !document.hidden;
       flog('visibilitychange: hidden=' + document.hidden);
