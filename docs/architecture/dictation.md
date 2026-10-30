@@ -1373,7 +1373,8 @@ to **Run again** from Home.
   heard otherwise). `dictated` counts every dictation delivered — pasted
   or not, into Chat or the quick note — **whether or not history keeps
   it**, and a failed or cancelled one when Run again / Transcribe gets its
-  words (on the day it was said); never an Upload, a Command or the Voice
+  words (on the day it was said, `count_late`: `countedTo` moves past it,
+  so the next start's catch-up doesn't count it again); never an Upload, a Command or the Voice
   Assistant. The first start counts the history already there, and any
   start what an older Yap saved since (`countedTo`; `init` runs before the
   pipeline, so nothing counts twice); milestones passed that way are
