@@ -11,7 +11,9 @@ use super::{tool_error, tool_result, GET_NOTE_TOKENS, MAX_CONTENT_LENGTH};
 
 /// The OpenAI `tools` array (OpenWhispr's schemas near-verbatim from their
 /// tool files; `search_in_note`, `read_note` and `edit_note` are Yap's),
-/// with the documents' simple set after them (`documents.rs`).
+/// with the documents' simple set after them (`documents.rs`). (The
+/// evaluations' and the tests'; a turn offers `definitions_for` its set.)
+#[cfg(any(test, debug_assertions))]
 pub fn definitions() -> Value {
     definitions_for(crate::chat::documents::ToolSet::Simple)
 }

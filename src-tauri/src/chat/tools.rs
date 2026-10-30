@@ -626,9 +626,9 @@ mod tests {
 
     /// The rich documents' set (`documents::rich`): every tool it offers is
     /// named in its instructions and run, `rewrite_section` isn't offered,
-    /// and a tool step stays light — about 2,940 + what the rich tools add
-    /// over the simple set's (their four schemas and their longer line, less
-    /// `rewrite_section`). `--nocapture` prints it.
+    /// and a tool step stays light: 3,525 tokens (the simple set's 2,922, plus
+    /// the four schemas and the longer line, less `rewrite_section`; 31 Oct
+    /// 2026). `--nocapture` prints it.
     #[test]
     fn the_rich_document_tools_are_named_and_stay_light() {
         use crate::chat::documents::ToolSet;
