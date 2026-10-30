@@ -318,7 +318,7 @@ pub struct Report {
 }
 
 #[cfg(windows)]
-pub use win::{take_pending, targets_of, Offer};
+pub use win::{take_pending, targets_of, write_out_now, Offer};
 
 #[cfg(windows)]
 pub(crate) use win::note;
@@ -327,7 +327,7 @@ pub(crate) use win::note;
 pub(crate) use win::report;
 
 #[cfg(all(windows, test))]
-pub(crate) use win::start_owner;
+pub(crate) use win::{start_owner, write_out_at};
 
 #[cfg(windows)]
 mod win {
@@ -345,9 +345,9 @@ mod win {
     use windows::Win32::System::Memory::{GlobalAlloc, GlobalLock, GlobalUnlock, GMEM_MOVEABLE};
     use windows::Win32::UI::WindowsAndMessaging::{
         CreateWindowExW, DefWindowProcW, DispatchMessageW, EnumChildWindows, GetGUIThreadInfo, GetMessageW,
-        GetWindowThreadProcessId, KillTimer, PostMessageW, RegisterClassExW, SetTimer, GUITHREADINFO, HWND_MESSAGE, MSG,
-        WINDOW_EX_STYLE, WINDOW_STYLE, WM_APP, WM_DESTROYCLIPBOARD, WM_RENDERALLFORMATS, WM_RENDERFORMAT, WM_TIMER,
-        WNDCLASSEXW,
+        GetWindowThreadProcessId, KillTimer, PostMessageW, RegisterClassExW, SendMessageTimeoutW, SetTimer, GUITHREADINFO,
+        HWND_MESSAGE, MSG, SMTO_ABORTIFHUNG, WINDOW_EX_STYLE, WINDOW_STYLE, WM_APP, WM_DESTROYCLIPBOARD,
+        WM_RENDERALLFORMATS, WM_RENDERFORMAT, WM_TIMER, WNDCLASSEXW,
     };
 
     use super::{answer, classify, seen, Answer, Phase, Reader, Report, Seen, Targets};
@@ -358,6 +358,8 @@ mod win {
     const WM_LEAVE: u32 = WM_APP + 0x31;
     /// …and: put the person's clipboard back after `lparam` ms.
     const WM_RESTORE_LATER: u32 = WM_APP + 0x32;
+    /// Yap is quitting: write the text out now ([`write_out_now`]).
+    const WM_WRITE_OUT: u32 = WM_APP + 0x33;
     const LATE_TIMER: usize = 1;
     const RESTORE_TIMER: usize = 2;
     /// At most this many child windows are looked at for their processes.
@@ -423,11 +425,37 @@ mod win {
         STATE.lock().unwrap_or_else(|p| p.into_inner())
     }
 
+    /// Yap's clipboard window, once made.
+    static OWNER: OnceLock<Option<isize>> = OnceLock::new();
+
     /// Yap's clipboard window, made once on a thread of its own (`None`
     /// when Windows wouldn't make it: pastes then go as before).
     pub fn owner() -> Option<isize> {
-        static OWNER: OnceLock<Option<isize>> = OnceLock::new();
         *OWNER.get_or_init(|| start(None))
+    }
+
+    /// Yap is quitting: a dictation still only promised on the clipboard
+    /// (left there moments ago, its late wait not over; a paste cut short)
+    /// is written out now, so it outlasts Yap. Windows asks nothing of a
+    /// window whose thread is ending, so `WM_RENDERALLFORMATS` never comes
+    /// when the process exits: without this the text would go with it. At
+    /// most a second; nothing when no paste ever made the window.
+    pub fn write_out_now() {
+        if let Some(Some(owner)) = OWNER.get().copied() {
+            write_out_at(owner);
+        }
+    }
+
+    /// [`write_out_now`] for the clipboard window `owner`, on its own
+    /// thread (the window writes it out), waited for.
+    pub(crate) fn write_out_at(owner: isize) {
+        let mut result = 0usize;
+        let sent = unsafe {
+            SendMessageTimeoutW(hwnd(owner), WM_WRITE_OUT, WPARAM(0), LPARAM(0), SMTO_ABORTIFHUNG, 1_000, Some(&mut result))
+        };
+        if sent.0 == 0 {
+            debug!("Yap's clipboard window didn't answer to write the dictation out");
+        }
     }
 
     /// Tests: a clipboard window of their own, on `desktop`.
@@ -504,9 +532,11 @@ mod win {
                 on_render(window, wparam.0 as u32);
                 LRESULT(0)
             }
-            // The window is going (Yap quitting): the text written out, so
-            // a dictation left on the clipboard outlasts it.
-            WM_RENDERALLFORMATS => {
+            // The window is going: the text written out, so a dictation
+            // left on the clipboard outlasts it. (Yap quitting never sends
+            // it — the thread ends first — so `shutdown_cleanup` asks with
+            // WM_WRITE_OUT.)
+            WM_RENDERALLFORMATS | WM_WRITE_OUT => {
                 write_out(window, None);
                 LRESULT(0)
             }
@@ -1123,10 +1153,12 @@ mod tests {
         use std::time::Instant;
 
         use windows::core::w;
-        use windows::Win32::Foundation::{HGLOBAL, HWND};
+        use windows::Win32::Foundation::{HGLOBAL, HWND, LPARAM, WPARAM};
         use windows::Win32::System::DataExchange::{CloseClipboard, GetClipboardData, OpenClipboard};
         use windows::Win32::System::Memory::{GlobalLock, GlobalSize, GlobalUnlock};
-        use windows::Win32::UI::WindowsAndMessaging::{CreateWindowExW, HWND_MESSAGE, WINDOW_EX_STYLE, WINDOW_STYLE};
+        use windows::Win32::UI::WindowsAndMessaging::{
+            CreateWindowExW, PostMessageW, HWND_MESSAGE, WINDOW_EX_STYLE, WINDOW_STYLE, WM_QUIT,
+        };
 
         use crate::pasting::text_injector::clip;
 
@@ -1318,6 +1350,29 @@ mod tests {
             assert!(clip::privacy_formats().iter().all(|(_, b)| b.is_none()), "plain");
             assert_eq!(read(other).as_deref(), Some("Remote"));
             assert_eq!(offer.seen(), Seen::Taken);
+
+            // 10. Yap quitting while a paste nobody read is still promised
+            // (its late wait not over): the clipboard window's thread ends
+            // and Windows asks it nothing then — the text goes with it…
+            let quit = |o: isize| {
+                let _ = PostMessageW(Some(HWND(o as *mut c_void)), WM_QUIT, WPARAM(0), LPARAM(0));
+                std::thread::sleep(Duration::from_millis(300));
+            };
+            let gone = super::start_owner(desktop).expect("a second clipboard window");
+            let offer = Offer::put_with(gone, "Lost with Yap", true, targets.clone(), false).expect("promised");
+            offer.keys_going();
+            offer.leave(Duration::from_secs(5));
+            quit(gone);
+            assert_eq!(read(other), None, "a promise outlives no window: Yap must write it out as it quits");
+            // …unless it's written out first (`shutdown_cleanup`).
+            let kept = super::start_owner(desktop).expect("a third clipboard window");
+            let offer = Offer::put_with(kept, "Outlasts Yap", true, targets.clone(), false).expect("promised");
+            offer.keys_going();
+            offer.leave(Duration::from_secs(5));
+            super::write_out_at(kept);
+            quit(kept);
+            assert_eq!(read(other).as_deref(), Some("Outlasts Yap"));
+            assert!(offer.first_read().is_none(), "written out, not read off a promise");
         });
         let result = run.join();
         assert!(result.is_ok(), "the promise's round trip failed (see above)");

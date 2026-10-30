@@ -384,8 +384,9 @@ under "The Notes view".
   text back in its field — a summary with today's ticks carried
   (`carry_ticks`), Yap's again if it's `summary_ai`, else the person's
   (`apply_summary_edit`) — as a `restored` version; `previous`
-  (`undo_target`: the field's version before the newest) is what the
-  toast's Undo restores. `note_versions(id)` lists them newest first, the
+  (`undo_target`: the field's version before the newest; none when the
+  restore changed nothing) is what the toast's Undo restores — in the
+  note it was for, whichever note is open when it's clicked. `note_versions(id)` lists them newest first, the
   newest of each field `current` when it's what the note holds. Deleted
   with the note (`forget_extras` → `versions::forget`: memory and file).
   **Transcript retention** (`retention.rs`): when a meeting's transcript
@@ -474,7 +475,9 @@ roadmap, "Meeting notes you can fix" and "Tasks").
   `meetings/meeting_assist.rs`): `SummaryBefore` (the words, Yap's version,
   the person's mark and `summary_ts`) is taken before the rewrite goes
   through `write_summary`, and `note_summary_put_back(id, before, origin)`
-  (`put_back`, pure) puts it back with the tasks ticked since still ticked.
+  (`put_back`, pure) puts it back with the tasks ticked since still ticked,
+  as a `restored` version (`put_back_summary`): never folded into the
+  rewrite's own version, so the rewrite stays in the history.
   Note version history, when it lands, takes this place: the summary
   before a rewrite kept as a version, Undo restoring it.
   **Rating it** (`note_summary_rate(id, rating: up|down|null, why, origin)`,
@@ -581,7 +584,9 @@ dates). [frontend.md](./frontend.md#the-folder-layout-2026-10-24).
   changed** (against the version before) or **Compared with now** (what a
   restore takes out and puts back), word by word with capitals and
   punctuation (`wordDiff(a, b, {exact: true})`); **Restore this version**
-  closes it, and the toast's Undo restores the one before. A dictation
+  closes it, and the toast's Undo restores the one before (a toast's Undo
+  names its note: another may be open by then). The note deleted while
+  it's up (another window, Reset app): it closes, for good. A dictation
   pasted into My thoughts saves with `how: 'dictated'` (a paste within 15 s
   of `yap-transcript`).
 

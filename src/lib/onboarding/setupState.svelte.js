@@ -164,7 +164,18 @@ export function createSetupState() {
   async function applyMic(id) {
     if (!cfg) return;
     try {
-      const m = devices.find((d) => d.id === id);
+      let m = devices.find((d) => d.id === id);
+      if (id && !m) {
+        // One connected since the setup opened (the mic quiz reads the list
+        // afresh): read it again, and never empty the order for a microphone
+        // that isn't in it.
+        devices = (await invoke('list_mics')) || [];
+        m = devices.find((d) => d.id === id);
+        if (!m) {
+          error = "That microphone isn't connected any more.";
+          return;
+        }
+      }
       const rest = (cfg.micOrder || []).filter((c) => c.id !== id && (!m || c.name !== m.name));
       cfgPatch.micOrder = m ? [{ id: m.id, name: m.name }, ...rest] : [];
       cfg.micOrder = cfgPatch.micOrder;

@@ -35,28 +35,40 @@ pub struct Sheet {
     pub languages: Vec<Binding>,
 }
 
-/// Every binding in `cfg`, in the hook's order. Pure.
+/// Every binding in `cfg`, in the hook's order, as the hook binds it: a key
+/// it leaves unbound (one that clashes with an older shortcut's, Send on
+/// Enter, a transform or language shortcut that can't run) isn't on the
+/// sheet. Pure.
 pub fn sheet(cfg: &crate::config::YapConfig) -> Sheet {
+    let more = input_hook::bound_more(cfg);
     let fixed = input_hook::FIXED_KEYS
         .iter()
         .enumerate()
         .map(|(i, key)| {
-            let first = input_hook::first_spec(cfg, i).trim().to_string();
-            let specs = std::iter::once(first).chain(input_hook::more_specs(cfg, i)).filter(|s| !s.is_empty()).collect();
+            let specs = std::iter::once(input_hook::bound_first(cfg, i))
+                .chain(more[i].iter().cloned())
+                .filter(|s| !s.is_empty())
+                .collect();
             Binding { key: (*key).to_string(), name: input_hook::FIXED_NAMES[i].to_string(), specs }
         })
         .collect();
-    let transforms = cfg
-        .transforms
-        .iter()
-        .filter(|t| !t.hotkey.trim().is_empty())
-        .map(|t| Binding { key: t.id.clone(), name: t.name(), specs: vec![t.hotkey.trim().to_string()] })
+    // The transforms' and the language shortcuts' slots, as
+    // `input_hook::configure_transforms_from` / `configure_languages_from`.
+    let list = crate::dictation::transforms::list(cfg);
+    let given = crate::dictation::transforms::fixed_shortcuts(cfg);
+    let given: Vec<(&str, &str)> = given.iter().map(|(name, spec)| (*name, spec.as_str())).collect();
+    let transforms = crate::dictation::transforms::assign(&given, &list)
+        .into_iter()
+        .filter(|slot| !slot.spec.is_empty())
+        .filter_map(|slot| list.iter().find(|t| t.id == slot.id).map(|t| Binding { key: t.id.clone(), name: t.name(), specs: vec![slot.spec] }))
         .collect();
-    let languages = cfg
-        .language_shortcuts
-        .iter()
-        .filter(|l| !l.hotkey.trim().is_empty())
-        .map(|l| Binding { key: l.id.clone(), name: l.name(), specs: vec![l.hotkey.trim().to_string()] })
+    let shortcuts = crate::dictation::languages::shortcuts(cfg);
+    let given = crate::dictation::transforms::action_shortcuts(cfg);
+    let given: Vec<(&str, &str)> = given.iter().map(|(name, spec)| (*name, spec.as_str())).collect();
+    let languages = crate::dictation::languages::assign(&given, &shortcuts)
+        .into_iter()
+        .filter(|slot| !slot.spec.is_empty())
+        .filter_map(|slot| shortcuts.iter().find(|l| l.id == slot.id).map(|l| Binding { key: l.id.clone(), name: l.name(), specs: vec![slot.spec] }))
         .collect();
     Sheet { mode: cfg.recording_mode.clone(), fixed, transforms, languages }
 }
@@ -84,6 +96,31 @@ mod tests {
         let snip = s.fixed.iter().find(|b| b.key == "snipHotkey").unwrap();
         assert!(snip.specs.is_empty(), "unbound");
         assert_eq!(s.mode, cfg.recording_mode);
+    }
+
+    #[test]
+    fn a_key_the_hook_leaves_unbound_is_not_on_the_sheet() {
+        // The assistant on Win+Alt+S from before snips: the snip's default
+        // gives way to it; Send is never Enter.
+        let mut cfg = crate::config::YapConfig {
+            assistant_hotkey: "kb:alt+win+83".into(),
+            snip_hotkey: "kb:alt+win+83".into(),
+            send_hotkey: "kb:13".into(),
+            ..Default::default()
+        };
+        // A more shortcut on the dictation key is left out; the other stays.
+        cfg.more_hotkeys.insert("readHotkey".into(), vec![cfg.hotkey.clone(), "mouse:5".into()]);
+        let s = sheet(&cfg);
+        let of = |key: &str| s.fixed.iter().find(|b| b.key == key).unwrap().specs.clone();
+        assert_eq!(of("assistantHotkey"), ["kb:alt+win+83"]);
+        assert!(of("snipHotkey").is_empty(), "the hook leaves it unbound");
+        assert!(of("sendHotkey").is_empty());
+        assert_eq!(of("readHotkey"), ["mouse:5"]);
+        // A transform on the dictation key isn't bound either.
+        let mut polish = cfg.transforms.first().cloned().unwrap_or_default();
+        polish.hotkey = cfg.hotkey.clone();
+        cfg.transforms = vec![polish];
+        assert!(sheet(&cfg).transforms.is_empty());
     }
 
     #[test]

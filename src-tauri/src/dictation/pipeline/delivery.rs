@@ -108,7 +108,9 @@ impl Shared {
         // A language shortcut that translates (My languages, languages.rs):
         // the AI translates it in cleanup's place; the words as said stay
         // one "Use what I said" away.
-        let (cleaned, style) = match crate::dictation::languages::translate_dictation(&self.app, &raw, &cfg).await {
+        let translation = crate::dictation::languages::translate_dictation(&self.app, &raw, &cfg).await;
+        let translated = translation.is_some();
+        let (cleaned, style) = match translation {
             Some(translated) => (translated, None),
             None => self.clean_up(&raw, &style_target, screen.as_deref(), true).await,
         };
@@ -131,11 +133,17 @@ impl Shared {
             .filter(|s| !s.trim().is_empty() && *s != corrected);
         // A chat app (Slack, WhatsApp…, desktop or by its tab's title, as
         // cleanup's styles have them): where stacked messages go.
+        let category = crate::ai::cleanup_styles::category(&cfg, &style_target);
         let chat = self.read_kind() == crate::pasting::app_kind::AppKind::Messaging
             || matches!(
-                crate::ai::cleanup_styles::category(&cfg, &style_target),
+                category,
                 crate::ai::cleanup_styles::Category::WorkChat | crate::ai::cleanup_styles::Category::PersonalChat
             );
+        // Translated, or a transform on every dictation rewrote it: its words
+        // as said aren't this text (another language, perhaps), so stacked
+        // messages never split them in its place.
+        let rewritten = translated
+            || crate::dictation::transforms::for_dictation(&cfg, category, style_target.is_terminal()).is_some();
         // What Yap did by itself, for the feature tips (`tips.rs`).
         let seen = crate::dictation::tips::Seen::of(&raw, &cleaned, &cfg.dictionary, style);
         let mut delivered = self
@@ -149,7 +157,7 @@ impl Shared {
                 auto_submit,
                 auto_submit_key,
                 restore_clipboard,
-                Steps { chat, screen },
+                Steps { chat, screen, rewritten },
             )
             .await;
         delivered.style = style.map(crate::ai::cleanup_styles::Style::describe);
@@ -430,7 +438,7 @@ impl Shared {
             ..Delivered::default()
         };
         // Stacked messages (`stacked.rs`): "new message" said, in a chat app.
-        let messages = self.stacked(&mut corrected, &mut said, steps.chat, submit.is_some());
+        let messages = self.stacked(&mut corrected, &mut said, steps.chat, submit.is_some(), steps.rewritten);
         if !corrected.is_empty() {
             // Fitted to the kind of app and the text around
             // the cursor (smart spacing), else the trailing

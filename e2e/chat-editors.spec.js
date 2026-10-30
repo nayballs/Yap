@@ -14,6 +14,7 @@
 // (e2e-real/chat-editors.real.js).
 import fs from 'node:fs';
 import { test as base, expect, openSettings, closeSettings, expectStore, setConfig } from './support/fixtures.js';
+import { startFakeLlm, cleanupTranscript, transformText, transformInstruction } from './support/fake-llm.js';
 
 const test = base.extend({
   yapOptions: [async ({}, use) => use({ name: 'chat-editors' }), { scope: 'worker' }],
@@ -138,6 +139,37 @@ test('Stacked messages: each pasted and sent in a chat app that sends anyway; on
   expect(r.text).toContain('New message');
   // The log has counts, never the words.
   expect(log(yap)).not.toContain('Are you free');
+});
+
+test('Stacked messages: a translated dictation is never sent as its words as said', async ({ yap, main }) => {
+  // A language shortcut into Spanish (the fake AI translates; the
+  // separator doesn't survive translation).
+  const SPANISH = 'Hola Rochelle. ¿Estás libre a las tres?';
+  const llm = await startFakeLlm();
+  llm.reply('cleanup', (user) => cleanupTranscript(user));
+  llm.reply('transform', (user) => (/into Spanish/.test(transformInstruction(user)) ? SPANISH : transformText(user)));
+  await target(yap, { exe: 'slack.exe', screen: SLACK_SCREEN });
+  await setConfig(yap, main, {
+    stackedMessages: true,
+    autoSubmit: true,
+    postProcessEnabled: true,
+    ppProvider: 'custom',
+    ppBaseUrl: llm.base,
+    ppModel: 'fake-cleanup',
+    ppApiKey: '',
+    languageShortcuts: [{ id: 'l-es', language: 'en', translateTo: 'es', hotkey: 'kb:133' }],
+  });
+  try {
+    await yap.invoke('e2e_language_stage', { shortcut: 'l-es', heard: null });
+    const r = await yap.invoke('e2e_dictation', { text: 'Hi Rochelle. New message. Are you free at three?' });
+    // The Spanish, one message — not the English messages as said.
+    expect(r.text.trim()).toBe(SPANISH);
+    expect(r.steps ?? []).toEqual([]);
+  } finally {
+    await yap.invoke('e2e_language_stage', { shortcut: null, heard: null });
+    await setConfig(yap, main, { postProcessEnabled: false, ppBaseUrl: '', languageShortcuts: [] });
+    await llm.close();
+  }
 });
 
 test('@mentions: typed and picked from Slack’s list when it shows the person; plain @Name in Teams; nothing in WhatsApp', async ({ yap, main }) => {

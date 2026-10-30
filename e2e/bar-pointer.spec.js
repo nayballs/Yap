@@ -75,6 +75,22 @@ test('in push-to-talk it says hold, and a pointer already shown never shows agai
   }
 });
 
+test('while the first-run setup is on screen, no pointer; it shows once the setup is done', async ({ yap }) => {
+  const bar = yap.overlay;
+  await reloadBar(bar);
+  await yap.invoke('open_onboarding');
+  try {
+    await yap.invoke('e2e_bar_pointer', { on: true });
+    await bar.waitForTimeout(800);
+    await expect(pointer(bar)).toHaveCount(0);
+    // Not spent there either.
+    expect(yap.readJson('hints.json')?.pointers?.idle).toBeUndefined();
+  } finally {
+    await yap.invoke('close_onboarding');
+  }
+  await expect(pointer(bar)).toHaveText('Click a text box, then press F24');
+});
+
 test('with tips off, no pointer', async ({ yap, main }) => {
   const bar = yap.overlay;
   await setConfig(yap, main, { showTips: false });

@@ -258,6 +258,13 @@ fn offer(app: &AppHandle, feature: Feature) {
     if crate::notices::notice::tips_off() {
         return;
     }
+    // Never over a meeting (the main window's toast doesn't wait one out,
+    // and a bar card would wait unseen and be dropped): not shown, not
+    // counted, so it comes again after a later dictation.
+    if crate::notices::notice::moment().meeting {
+        tracing::debug!(kind = feature.key(), "Feature tips: a meeting is recording; not now");
+        return;
+    }
     let now = crate::notices::notice::now_ms();
     let seen = Seen {
         self_correction: feature == Feature::SelfCorrection,

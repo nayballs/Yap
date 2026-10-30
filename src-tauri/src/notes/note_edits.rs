@@ -478,14 +478,25 @@ pub fn put_back(note: &mut Note, before: &SummaryBefore) -> bool {
     changed
 }
 
+/// [`put_back`] on note `id` in the store, as a restore in its version
+/// history: a version of its own, never folded into the rewrite it undoes
+/// (the rewrite is "edited", which folds), so the rewrite stays in the
+/// history.
+fn put_back_summary(id: u64, before: &SummaryBefore) -> Result<SummaryState, String> {
+    use crate::notes::versions::{by, kind, How};
+    by(How::new(kind::RESTORED), || {
+        crate::notes::modify(id, |note| {
+            let changed = put_back(note, before);
+            Ok((SummaryState::of(note), changed))
+        })
+    })
+}
+
 /// Undo a rewrite of the summary ("Make notes longer"'s toast): the summary
 /// as it was ([`SummaryBefore`]); every window follows.
 #[tauri::command]
 pub fn note_summary_put_back(app: AppHandle, id: u64, before: SummaryBefore, origin: Option<String>) -> Result<SummaryState, String> {
-    let state = crate::notes::modify(id, |note| {
-        let changed = put_back(note, &before);
-        Ok((SummaryState::of(note), changed))
-    })?;
+    let state = put_back_summary(id, &before)?;
     tracing::info!(note_id = id, len = state.enhanced_content.len(), "Summary: put back as it was");
     summary_changed(&app, id, origin.as_deref().unwrap_or(""));
     crate::notes::saved()?;
@@ -776,5 +787,27 @@ The launch.
         assert!(!can_restore(&n), "Yap's own again, ticks aside");
         // Again: nothing changes.
         assert!(!put_back(&mut n, &before));
+    }
+
+    /// "Make notes longer" is an edit of Yap's ("edited", which folds); its
+    /// Undo is a restore, so it never folds into the rewrite and the longer
+    /// summary stays in the version history.
+    #[test]
+    fn undoing_a_rewritten_summary_keeps_the_rewrite_in_its_history() {
+        use crate::notes::versions::{by, kind, list, Field, How};
+        let id = crate::notes::create("Sync", "notes", "manual", "").id;
+        by(How::new(kind::SUMMARY), || write_summary(id, "## Recap\nThe launch.", "h1", 50_000, 0, false)).unwrap();
+        let before = SummaryBefore::of(&crate::notes::get(id).unwrap());
+        write_summary(id, "## Recap\nThe launch, the venue and the budget.", "h1", 60_000, 0, false).unwrap();
+        put_back_summary(id, &before).unwrap();
+        assert_eq!(crate::notes::get(id).unwrap().enhanced_content, "## Recap\nThe launch.");
+        let kept: Vec<(String, String)> = list(id)
+            .unwrap()
+            .into_iter()
+            .filter(|l| l.version.field == Field::Summary)
+            .map(|l| (l.version.kind, l.version.text))
+            .collect();
+        assert!(kept.iter().any(|(_, t)| t.contains("the venue")), "the longer one is kept: {kept:?}");
+        assert_eq!(kept[0], ("restored".to_string(), "## Recap\nThe launch.".to_string()));
     }
 }
