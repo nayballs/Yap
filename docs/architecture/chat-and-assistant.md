@@ -426,6 +426,99 @@ The AI Chat surface (conversations, the tool-calling loop and its note tools) an
   `chat-calendar.spec.js` (a local iCal feed, the fake AI's tool call, the
   chip, the pills, the note opened, the voice); model evaluations
   `calendar-*` (model-evals.md "Calendar tools").
+- **`chat/documents.rs`** — **documents beside the chat** (2026-10-30,
+  phase 1; the idea after Claude's own app, nothing of its code): when the
+  answer is something to keep — a game build, a plan, a guide, a comparison
+  — Chat writes it as a document that opens in a panel to the right of the
+  conversation, fills it section by section while you watch, and later
+  questions change it. **Two tools** beside the note tools, offered
+  wherever they are (`notes::definitions`, run by `notes::execute`):
+  `create_document(title, sections: [{key, intent}])` makes a note in the
+  **Chat documents** folder (made on first use; `source` "chat") whose body
+  is `# title` and one **placeholder line** per section — `<!-- yap:section
+  Gear | what to wear and where to find it -->`: an HTML comment nobody
+  types by accident, which the renderer draws as a quiet line and any other
+  markdown viewer hides; key and intent cleaned of `|`, `<`, `>`, `--` and
+  line breaks (`placeholder`, `parse_placeholder`; ≤ 12 sections, each key
+  once, plain strings taken as keys) — and returns the note id, the keys
+  and `next` ("Now call write_section for "Gear"."); `write_section(note_id,
+  key, markdown)` puts `## heading` and the body in that placeholder's
+  place (`fill_section`: the outline's own spelling of the key; the
+  model's first `#`/`##` heading is the section's; placeholder lines it
+  copied are dropped), `left` and `next` say what's still to write ("Every
+  section is written. Tell the user in a line or two…"). **Never over the
+  person's words**: it only replaces its own placeholder line, exactly as
+  Yap wrote it; one the person deleted or typed into is **refused** — "the
+  user removed or changed it… Don't write it again or add it back", chip
+  `Didn't write "Costs": it's no longer in "Weekend…"` — and one written
+  already says to use edit_note. Later changes are `edit_note` (its exact
+  match already refuses changed text), `read_note`, `update_note`. **Every
+  change is a version** (`versions::by` with `kind::CHAT`; the outline is
+  Chat's first, so Undo goes back to it). The sections' chips fold into one
+  (`push_chip`: "Wrote 3 sections in "Lone wolf ranger""). **Not action
+  tools** (`tools::ACTION_TOOLS`): a build is researched on the web first,
+  and these are the answer's own words — a new note, sections filled where
+  the outline left room; `edit_note` on a document stays refused after the
+  web. **Live**: a `write_section`'s arguments stream to the page
+  (`stream::LIVE_ARGS`; the `Assembler`'s `Piece::Args` → `Delta::ToolArgs`
+  → the step's `Event::Section {noteId, key, text}` at most every 50 ms,
+  `live_section` reading the JSON still coming — the id and key once whole,
+  the text so far with a half escape left out); a document made or changed
+  (`create_document`, `write_section`, or `edit_note`/`update_note` on one
+  of the conversation's) is `Event::Document {noteId, title}`
+  (`tools::Extra::docs`, a `documents::Turn`), which opens the panel;
+  answered whole, the panel follows when the call lands. **The turn keeps
+  them**: `Turn::touched` → `ChatMessage.documents` (`[{id, title}]`, the
+  title when written; `chats::set_documents`) and `chat_send`'s
+  `documents` — the pill under the answer. An older Yap's save drops the
+  field: the pill goes, the note stays in Notes. **What the person changed
+  since the model last saw a document** (`context`, in the next question's
+  `<context>` for a model that calls tools): "Documents in this chat…" with
+  each one's `note_id` and the sections still to write (the newest 3), and
+  for each the person changed, a short diff ("- took out: "…"" / "+ put
+  in: "…"", ≤ 10 lines of ≤ 160 characters, then how many more: `changes`)
+  — against **the model's own picture** of it (`saw`/`seen`: kept as its
+  calls go, `after_call` — what it wrote, its edits replayed, a whole
+  `read_note`/`get_note`; in memory, after a restart the newest Chat
+  version). Told once: then it has seen it. **The panel's saves**:
+  `chat_document_save(id, base, content, origin)` — the person's edit laid
+  over the newer text (`merge3`, line by line: what one side changed kept,
+  two insertions at one place both, the person's first; where both changed
+  the same lines the person's words win; changes side by side never clash,
+  so a line typed under a section being written is kept), saved as typed
+  (`kind::TYPED`, folding with their other typing). **The prompt rule**
+  (`INSTRUCTIONS`, with `TOOL_INSTRUCTIONS`, the stable part of the system
+  prompt): for an answer to keep or come back to (a build, a plan, a guide,
+  a comparison, a long table) make a document, outline first, then each
+  section in order; a line or two in the chat ("It's open on the right."),
+  never the content; a question or change about a document from this chat
+  changes it with edit_note. About 380 tokens with the two schemas
+  (`a_tool_step_stays_light`: 2,620 now). **Kept on course** (tuned on the
+  on-device Qwen3.5-4B, `--documents`): a question that asks for something
+  to keep (`asks_for_document`: "make me a … build / plan / guide / packing
+  list", "plan a …", "step-by-step", "compare … and …"; never "what's the
+  plan for tomorrow?") tells a model on this PC so in its context
+  (`ASKS_NOTE`) — on the rule alone it answered a guide and a trip plan in
+  the chat; the last section's result asks for one short sentence, no
+  summary (it wrote 84 and 121 words under "It's open beside the chat");
+  an answer with this turn's document half written is sent back once or
+  twice to finish it (`Turn::unfinished`, `finish_note`, `FINISH_NUDGES`;
+  the text it showed is taken back); and `create_document` again for this
+  turn's document (same title) gives back the one there is
+  (`Turn::made_already`, no chip) — it once made two in one step and filled
+  one. **The Voice Assistant**: the same
+  tools and system prompt (its cache), and in its question's context
+  `SPOKEN_NOTE` — a document only when one is asked for, or a long build,
+  plan or guide, then one sentence saying it's in Chat. A spoken "build me
+  a…" makes the document (too long to say, and asked to keep), the voice
+  says the line, the bar's card has Open in Chat (which opens the panel on
+  it), and Chat, when it's open, shows it filling; Yap never brings Chat up
+  over the app you're in for it, as the assistant never takes the focus.
+  Logs: ids, counts, lengths. Unit-tested (placeholders, the tools,
+  refusals, the merge, the diff, the model's picture, the live arguments,
+  the loop end to end: `a_document_opens_fills_as_it_streams…`); e2e
+  `chat-documents.spec.js`; model evaluations `--documents`
+  ([model-evals.md](../model-evals.md#documents-beside-the-chat-30-oct-2026)).
 - **`chat/stream.rs`** — **streaming answers** (2026-10-22): every model call
   of a Chat turn — each step of the tool loop, a small model's plain
   answer, the loop's last no-tools call — the notepad's Ask sheet and the
@@ -484,7 +577,8 @@ The AI Chat surface (conversations, the tool-calling loop and its note tools) an
   so far and the web sources found, so a "[1]" is a pill while it's
   written), `waiting {waiting}`, `thinking {text}` (a question asked to
   think it through, `chat/think.rs`: the thinking so far, apart from the
-  answer); `chat_send` adds `turn {conversationId,
+  answer), `document {noteId, title}` and `section {noteId, key, text}`
+  (documents beside the chat, `chat/documents.rs` above); `chat_send` adds `turn {conversationId,
   userMessageId}` once the question is saved. The command's own reply is
   still the **checked** answer (`chats::checked_answer` and the price
   fixes), which the page puts in place of what streamed. **The channel**:
@@ -802,6 +896,44 @@ empty state, "Thinking…") with `ChatMessage` (tool chips, the bubble,
 Stopped, Sources, ▶ and the model under an answer) and `Composer` (the
 screenshots and their prompts, +, the box, the mic, Send / ■, `ModelChip`).
 [frontend.md](./frontend.md#the-folder-layout-2026-10-24).
+
+**The document panel** (2026-10-30, `DocPanel.svelte` + `chatDoc.svelte.js`;
+`chat/documents.rs` above): a document a turn makes or changes opens to
+the right of the conversation. **Opens** on the turn's `document` event
+(the outline at once: each section still to come a quiet "Writing: Gear…"
+line — `markdown.js`' `md-pending`, `renderMarkdown(md, {writing})` —
+never the placeholder's syntax), **fills** as `section` events stream a
+`write_section`'s text into its placeholder's place (`shownText`, half-
+written markdown closed off), and takes the note's text as each section
+lands (`yap-note-changed`, origin "chat"). Its header: the title (the
+body's own `# title` line left out), **Undo** when the newest change is
+Chat's (back to the version before it: `note_version_restore`, itself a
+version), **Edit** / Done (a plain text box, monospace, saved 600 ms after
+typing through `chat_document_save {id, base, content}`: Rust lays the
+person's edit over whatever Chat wrote meanwhile, `documents::merge3`; a
+save that comes back while more was typed keeps the newer typing and saves
+again from what it was typed over; the box follows Chat's writing while
+nothing is waiting to be saved, the caret kept), **expand** (covers the
+whole of Chat; Esc or the button puts it back), **Open in Notes**
+(`openNoteAt`, the note's notes) and ✕. A status line under it: "Writing:
+Gear…" while a section streams (a pulsing dot, still under reduced motion),
+else "2 sections not written yet" for a document Chat stopped short of
+finishing. **The split** (`role="separator"`): dragged, or ←/→ (Shift:
+further), Home/End on its handle; at least 320 px, the thread keeps 340;
+its width remembered in this window's `localStorage` (`yapChatDocWidth`).
+**Room**: the conversation list steps aside while a document is open
+unless Chat is 1,240 px wide or more (a "Show your chats" button at the
+thread's top left brings it back until the document closes); a window too
+narrow for the panel beside the thread has it cover the conversation (✕
+goes back). **Under the answer**, a pill per document it made or changed
+("Lone wolf ranger · Open", `ChatMessage.svelte` `.docpill`; while it's
+written, from the `document` events); a click opens it beside the chat.
+Opening another conversation or a new chat closes the panel; the pills
+bring a document back, after a restart too (`ChatMessage.documents`).
+Tool chips for a document carry a document mark. Its own chunk, loaded
+the first time a document opens (the main window's stays near 710 kB).
+E2e: `chat-documents.spec.js` (the fake model's scripted calls; a step's
+`gate` holds it mid-turn while the spec types).
 
 - **`ChatView.svelte`** = the
   AI Chat surface (OpenWhispr `chat/ChatView.tsx` port): conversation sidebar

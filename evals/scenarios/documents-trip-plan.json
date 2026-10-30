@@ -1,0 +1,13 @@
+{
+  "name": "documents-trip-plan",
+  "description": "Documents beside the chat: a trip plan is a plan to come back to. A document, outline first, every section written, a short chat line.",
+  "tags": ["documents"],
+  "apps": "standard",
+  "turns": [
+    {
+      "user": "Plan a three-day trip to Lisbon for two of us in May, day by day, with where to eat and a rough budget.",
+      "expect": { "document": { "made": true, "outline_first": true, "filled": true, "min_sections": 3 }, "max_words": 60, "no_false_claims": true },
+      "soft": { "max_words": 30 }
+    }
+  ]
+}

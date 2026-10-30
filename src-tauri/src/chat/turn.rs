@@ -126,6 +126,8 @@ pub(crate) struct ChatTurn {
     /// Its last model call's tokens (`usage::last_call`), kept with the
     /// answer: Chat's context ring.
     pub tokens: Option<crate::chat::chats::MessageTokens>,
+    /// The documents it made or changed (`documents.rs`): its pills.
+    pub documents: Vec<crate::chat::documents::DocRef>,
 }
 
 impl ChatTurn {
@@ -287,6 +289,7 @@ async fn answer_turn(
         conversation: conversation_id,
         calendar: calendar_on.then_some(crate::chat::tools::CalendarTurn { log: &calendar_log, zone: crate::chat::tools::calendar::Zone::of(None), now: 0 }),
         room: None,
+        docs: None,
     };
     let schemas = if tools_supported {
         counter.count(&crate::chat::tools::offered_tools(cfg.open_apps, web_on, extra_flags).to_string()).await
@@ -355,9 +358,15 @@ async fn answer_turn(
                 sources: Vec::new(),
                 stopped: false,
                 tokens: None,
+                documents: Vec::new(),
             });
         }
     }
+    // The documents of this chat (documents.rs): which there are, and what
+    // the person changed since the model last saw them, for a model that
+    // can change them; the ones this turn makes or changes, for its pills.
+    let chat_docs = crate::chat::documents::of_conversation(&conv.messages);
+    let doc_turn = crate::chat::documents::Turn::new(&chat_docs);
     // Memory (memory.rs): the "You" part in the system prompt with About
     // you (stable from turn to turn), what this question is about with it.
     let memory_you = crate::memory::you_block();
@@ -454,6 +463,12 @@ async fn answer_turn(
     // Asked about the calendar with none connected: say so, not guess.
     let calendar_missing = (!calendar_on && !meetings && crate::chat::tools::calendar::asks_about_calendar(&text))
         .then(|| crate::chat::tools::calendar::NOT_CONNECTED_NOTE.to_string());
+    // This chat's documents, for a model that changes them (documents.rs).
+    if tools_supported {
+        if let Some(block) = crate::chat::documents::context(&chat_docs) {
+            context.push(block);
+        }
+    }
     for block in memory_here.into_iter().chain(past_chats).chain(calendar_block).chain(calendar_missing) {
         if in_message {
             context.push(block);
@@ -495,6 +510,18 @@ async fn answer_turn(
     // just before the question, where small models heed it.
     if by_voice && tools_supported && web_on {
         context.push("This question was asked out loud: start your answer with the answer itself, in one or two short sentences, then any details.".to_string());
+    }
+    // The Voice Assistant: a document only when one is asked for (then a
+    // sentence saying it's in Chat). The rule itself stays in the system
+    // prompt, the same for every turn (the model's cache).
+    if scope == Some("assistant") && tools_supported {
+        context.push(crate::chat::documents::SPOKEN_NOTE.to_string());
+    }
+    // Something to keep asked of a model on this PC: a document, it's told
+    // here too (the system prompt's rule alone, the 4B answered a guide and
+    // a trip plan in the chat).
+    if tools_supported && !meetings && crate::ai::ai_model::runs_here(&provider, &base_url) && crate::chat::documents::asks_for_document(&text) {
+        context.push(crate::chat::documents::ASKS_NOTE.to_string());
     }
     let spoken = by_voice && (scope == Some("assistant") || cfg.speak_replies);
     if spoken && !(tools_supported && web_on) {
@@ -617,6 +644,7 @@ async fn answer_turn(
             calendar: calendar_on.then_some(crate::chat::tools::CalendarTurn { log: &calendar_log, zone: calendar_zone, now: now.timestamp() }),
             // Each tool result within what the request has left.
             room: (mode != crate::chat::budget::Mode::Messages).then_some(budget.request),
+            docs: Some(&doc_turn),
         };
         let looped = crate::chat::tools::run_tool_loop_with(
             &system,
@@ -811,6 +839,9 @@ async fn answer_turn(
         stopped,
         tokens,
     )?;
+    // The documents it made or changed: its pills, and this chat's from now on.
+    let documents = doc_turn.touched();
+    crate::chat::chats::set_documents(conv.id, index, &documents);
     // Read for lasting facts once the chat goes quiet ("Learn from my chats").
     crate::memory::learn::after_turn(conv.id);
     // Filling the room? The older messages summarised in the background
@@ -826,7 +857,7 @@ async fn answer_turn(
     };
     let look = crate::chat::compact::Look { kind, room: next_room(budget.history), context: context_size, ring, replay };
     crate::chat::compact::after_answer(app, conv.id, ep, look).await;
-    Ok(ChatTurn { conversation_id: conv.id, user_index, index, reply, tools_used, model: Some(answered_by), sources, stopped, tokens })
+    Ok(ChatTurn { conversation_id: conv.id, user_index, index, reply, tools_used, model: Some(answered_by), sources, stopped, tokens, documents })
 }
 
 /// The history's room for the next question: the budget less a typical
@@ -987,6 +1018,7 @@ pub async fn chat_limits() -> Limits {
         conversation: None,
         calendar: calendar_on.then_some(crate::chat::tools::CalendarTurn { log: &log, zone: crate::chat::tools::calendar::Zone::of(None), now: 0 }),
         room: None,
+        docs: None,
     };
     let schemas = if tools_supported { counter.count(&crate::chat::tools::offered_tools(cfg.open_apps, web_on, extra).to_string()).await } else { 0 };
     let fixed = counter.count(&stable).await + schemas;
@@ -1273,7 +1305,7 @@ async fn passages_turn(
         None => crate::search::ask::chip(&found),
     }];
     let index = crate::chat::chats::append_message(conv.id, "assistant", &reply, &tools_used, None, false, &sources, false, None)?;
-    Ok(ChatTurn { conversation_id: conv.id, user_index, index, reply, tools_used, model: None, sources, stopped: false, tokens: None })
+    Ok(ChatTurn { conversation_id: conv.id, user_index, index, reply, tools_used, model: None, sources, stopped: false, tokens: None, documents: Vec::new() })
 }
 
 /// A turn Yap answers itself (`apps.rs`): the request saved like any
@@ -1310,5 +1342,6 @@ async fn app_turn(
         sources: Vec::new(),
         stopped: false,
         tokens: None,
+        documents: Vec::new(),
     })
 }

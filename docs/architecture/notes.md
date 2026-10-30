@@ -332,6 +332,27 @@ hold), `tabs.rs` and `send.rs`.
   `e2e/quick-note.spec.js` (a made-up microphone, `YAP_E2E_MICS`, records
   the hold).
 
+## Chat's documents (`chat/documents.rs`, 2026-10-30)
+
+An answer to keep (a build, a plan, a guide, a comparison) is written by
+Chat as a **document**: an ordinary note, `source` "chat", in the **Chat
+documents** folder (made the first time one is; renamed or deleted like any
+folder of the person's), its title the note's and its body `# title` then
+the sections. While it's written, each section still to come is a
+placeholder line (`<!-- yap:section Gear | what to wear -->`), drawn as a
+quiet line by the renderer (below); a document Chat stopped short of
+finishing keeps its placeholders, shown in Notes as "Gear: not written
+yet". **Every change is a version** marked Chat (`versions::by` with
+`kind::CHAT`): the outline is the first, each section one more, so Undo
+(the Chat panel's, or Version history's Restore) goes back a section at a
+time. The person's typing in Chat's panel is saved as typed
+(`chat_document_save`: merged with Chat's writing, their words winning;
+see [chat-and-assistant.md](./chat-and-assistant.md)). Which conversation a
+document belongs to is kept on the chat's answers (`ChatMessage.documents`),
+never in notes.json, so an older Yap's save of notes.json drops nothing.
+Deleting the note: the pill in the chat opens a panel that says "This
+document was deleted."
+
 ## Pins, version history and transforms (`notes/pins.rs`, `notes/versions.rs`, `notes/transform.rs`)
 
 2026-10-29 (Wispr Flow's Scratchpad has pins and a version history, and
@@ -757,7 +778,16 @@ dates). [frontend.md](./frontend.md#the-folder-layout-2026-10-24).
   code` (no highlighting), a fence an answer cut off still shows;
   `blockquote.md-quote` and `hr.md-rule`; single line breaks kept
   (`breaks: true`); "• " lines are bullets; a change of bullet mark ("- " then
-  "* ") doesn't end a list; an ordered list keeps its start (`start="3"`).
+  "* ") doesn't end a list; an ordered list keeps its start (`start="3"`);
+  **a document's section still to be written** (Chat's documents beside the
+  chat, 2026-10-30, `chat/documents.rs`): its placeholder line, `<!--
+  yap:section Gear | what to wear -->` on a line of its own, is
+  `p.md-pending` — "Writing: Gear…" while Chat writes the document
+  (`options.writing`, the Chat panel), else "Gear: not written yet" (Notes),
+  the intent as its `title`; never the comment's raw text (with `html:
+  false` markdown-it would show it). `pendingSections(md)` and
+  `isPlaceholder(line, key)` read them for the panel. Its style is
+  app.css' (a dashed rule, quiet italic, the text's own colour).
   **Lists stay tight**: models write "1. …\n\n2. …", a CommonMark "loose"
   list whose items would each be a spaced-out paragraph (and until
   2026-10-21 showed "1." on every item): an item holding one paragraph

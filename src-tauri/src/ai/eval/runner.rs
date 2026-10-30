@@ -41,6 +41,9 @@ Scenarios:
   --no-web                 skip the web scenarios (needs_web / web): live ones ask the real
                            search service (the run's Exa/Tavily key) or Wikipedia and game wikis
   --repeat <n>             run each scenario n times     --list   list the scenarios
+  --documents              documents beside the chat (chat/documents.rs): the scenarios tagged
+                           documents — made only when asked for, outline first, every section
+                           written, a short chat line — and their table in summary.md
 Running:
   --tools on|off           treat the model as able (or not) to call tools (default: Yap's rule)
   --tokens-per-minute <n>  pacing budget (default 8000 for Groq, its free plan; none otherwise)
@@ -319,6 +322,9 @@ fn parse(argv: Vec<String>) -> Result<Args, String> {
             "--strength-quick" => a.strength_quick = true,
             "--brief" => a.brief = true,
             "--chips" => a.chips = true,
+            // Documents beside the chat (chat/documents.rs): its scenarios,
+            // and their table in summary.md.
+            "--documents" => a.tags.push("documents".to_string()),
             "--transforms" => a.transforms = true,
             "--vision" => a.vision = true,
             "--vision-path" => {
@@ -1256,6 +1262,20 @@ async fn run_scenario(
             j["first_words_ms"] = json!(t);
         }
         j["paced_ms"] = json!(o.stats.pacing_wait_ms);
+        // Documents beside the chat (`--documents`): what it did, for the table.
+        if let Some(d) = turn.expect.document.as_ref().or(turn.soft.document.as_ref()) {
+            let seen = scenario::doc_seen(&o);
+            j["document"] = json!({
+                "expected": d.made,
+                "made": !seen.made.is_empty(),
+                "outline_first": seen.outline_first,
+                "sections": seen.sections,
+                "written": seen.written,
+                "left": seen.left,
+                "words": o.words(),
+                "error": o.error.is_some(),
+            });
+        }
         j["fails"] = json!(f);
         j["warnings"] = json!(w);
         record::write("turn_end", j.clone());
@@ -2340,6 +2360,53 @@ fn memory_table(rows: &[Value]) -> String {
     md
 }
 
+/// Documents beside the chat (`--documents`, `chat/documents.rs`) per model:
+/// of the turns that should make one, how many did, with the outline first
+/// and every section written, and their chat line's words; of the turns
+/// that shouldn't, how many made one anyway. "" when no turn checks one.
+fn documents_table(rows: &[Value]) -> String {
+    let turns: Vec<(String, &Value)> = rows
+        .iter()
+        .flat_map(|r| {
+            let m = r["model"].as_str().unwrap_or("").to_string();
+            r["turn_details"].as_array().into_iter().flatten().filter_map(move |t| t.get("document").map(|d| (m.clone(), d)))
+        })
+        .collect();
+    if turns.is_empty() {
+        return String::new();
+    }
+    let mut models: Vec<String> = Vec::new();
+    for (m, _) in &turns {
+        if !models.contains(m) {
+            models.push(m.clone());
+        }
+    }
+    let mut md = String::from(
+        "| Model | Made when asked | Outline first | Every section written | Chat line (mean / most words) | Made when not wanted |\n|---|---|---|---|---|---|\n",
+    );
+    for m in &models {
+        let mine: Vec<&Value> = turns.iter().filter(|(x, _)| x == m).map(|(_, d)| *d).collect();
+        let should: Vec<&&Value> = mine.iter().filter(|d| d["expected"] == json!(true)).collect();
+        let not: Vec<&&Value> = mine.iter().filter(|d| d["expected"] == json!(false)).collect();
+        let made: Vec<&&&Value> = should.iter().filter(|d| d["made"] == json!(true)).collect();
+        let first = made.iter().filter(|d| d["outline_first"] == json!(true)).count();
+        let filled = made.iter().filter(|d| d["left"].as_array().is_some_and(Vec::is_empty) && d["written"].as_u64().unwrap_or(0) > 0).count();
+        let words: Vec<u64> = made.iter().filter(|d| d["error"] != json!(true)).filter_map(|d| d["words"].as_u64()).collect();
+        let mean = if words.is_empty() { "—".to_string() } else { format!("{:.0}", words.iter().sum::<u64>() as f64 / words.len() as f64) };
+        let most = words.iter().max().map_or("—".to_string(), u64::to_string);
+        md.push_str(&format!(
+            "| {m} | {}/{} | {first}/{} | {filled}/{} | {mean} / {most} | {}/{} |\n",
+            made.len(),
+            should.len(),
+            made.len(),
+            made.len(),
+            not.iter().filter(|d| d["made"] == json!(true)).count(),
+            not.len(),
+        ));
+    }
+    md
+}
+
 fn markdown(summary: &Value, rows: &[Value], models: &[Value], totals: &[Value]) -> String {
     let mut md = format!(
         "# Model eval {}\n\nCommit `{}` · {} → {}\n\n",
@@ -2355,6 +2422,12 @@ fn markdown(summary: &Value, rows: &[Value], models: &[Value], totals: &[Value])
     if !mem.is_empty() {
         md.push_str("## Memory: precision and recall\n\n");
         md.push_str(&mem);
+        md.push('\n');
+    }
+    let docs = documents_table(rows);
+    if !docs.is_empty() {
+        md.push_str("## Documents beside the chat\n\n");
+        md.push_str(&docs);
         md.push('\n');
     }
     for m in models {

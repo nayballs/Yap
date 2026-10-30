@@ -20,6 +20,7 @@ import { questionTokens, isTooLong } from './chatBudget.js';
 import { fmtContext } from '../../core/aiUsage.js';
 import { SkillPicker } from '../../stores/skills.svelte.js';
 import { think, takeThink } from './chatThink.svelte.js';
+import { createDocPanel } from './chatDoc.svelte.js';
 
 // The sources an answer's citations point at: its own, else — a follow-up
 // that cites "[1]" from an earlier answer without searching again ("the
@@ -41,6 +42,33 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
   let conversations = $state([]);
   let activeId = $state(null);
   let messages = $state([]); // { role, text, tools?, model?, voice?, id }
+  // The document beside the conversation (chat/documents.rs, chatDoc.svelte.js).
+  const doc = createDocPanel({ onopennote });
+
+  /**
+   * A turn's document events (`document`: made or changed, the panel shows
+   * it; `section`: one being written) and its tool calls, for the panel;
+   * `m`: the answer's bubble, which gets the document's pill as it comes.
+   * True when the event was the panel's alone.
+   */
+  function docEvent(ev, m) {
+    if (ev?.kind === 'document') {
+      doc.fromTurn(ev);
+      if (m) {
+        const have = m.liveDocs || [];
+        m.liveDocs = have.some((d) => d.id === ev.noteId)
+          ? have.map((d) => (d.id === ev.noteId ? { id: ev.noteId, title: ev.title } : d))
+          : [...have, { id: ev.noteId, title: ev.title }];
+      }
+      return true;
+    }
+    if (ev?.kind === 'section') {
+      doc.onSection(ev);
+      return true;
+    }
+    if (ev?.kind === 'tool') doc.onTool(ev);
+    return false;
+  }
 
   function citedSources(i) {
     // Still being written: the sources found so far.
@@ -404,6 +432,8 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
     try {
       const conv = await invoke('chat_get', { id });
       stopReading();
+      // Another conversation: its documents are its own (their pills reopen them).
+      doc.close();
       activeId = id;
       scope = conv.scope || null;
       summary = conv.summary ?? null;
@@ -437,6 +467,7 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
   // message goes with it.
   function newChat(opts) {
     stopReading();
+    doc.close();
     activeId = null;
     messages = [];
     summary = null;
@@ -537,6 +568,9 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
   function followAssistantStream(p) {
     const id = p?.conversationId;
     if (id == null || id !== activeId || assistantPending !== id || !followed(p)) return;
+    // A document asked for out loud: the panel shows it filling.
+    const spoken = spokenAt();
+    if (docEvent(p.event, spoken >= 0 ? messages[spoken] : null)) return;
     assistantLive = applyEvent(assistantLive, p.event);
     let at = spokenAt();
     if (at < 0) {
@@ -565,6 +599,7 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
       if (!followed(p)) return;
       assistantPending = null;
       assistantTurn = null;
+      doc.turnEnded();
     }
     if (p?.phase === 'superseded') {
       // No answer was saved for it: its bubble goes, its question stays.
@@ -594,6 +629,9 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
       refreshList();
       scrollThread();
       contextStamp += 1;
+      // The bar's Open in Chat on an answer that made a document: it opens too.
+      const made = p?.phase === 'open' ? messages.at(-1)?.documents?.at(-1) : null;
+      if (made) doc.show(made.id, { title: made.title });
     } catch {
       /* deleted meanwhile */
     }
@@ -797,6 +835,13 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
         }
         return;
       }
+      // A document of this turn (the panel), while this chat is the one shown.
+      if (ev?.kind === 'document' || ev?.kind === 'section' || ev?.kind === 'tool') {
+        if (mine('user') >= 0) {
+          const at = mine('assistant');
+          if (docEvent(ev, at >= 0 ? messages[at] : null)) return;
+        } else if (ev.kind !== 'tool') return;
+      }
       live = applyEvent(live, ev);
       let ai = mine('assistant');
       if (ai < 0) {
@@ -859,6 +904,8 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
         stopped: !!res.stopped,
         tokens: res.tokens ?? null,
         thinking: res.thinking ?? null,
+        // The documents it made or changed (chat/documents.rs): their pills.
+        documents: res.documents || [],
         revisedFrom: streamed != null && streamed.trim() !== '' && streamed.trim() !== String(res.reply).trim() ? fromHeight : 0,
       };
       // The question as saved: with its screenshots' text when it went as text.
@@ -934,6 +981,8 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
           : {}),
       });
     } finally {
+      // Nothing is being written into the document any more.
+      doc.turnEnded();
       sending = false;
       stopping = false;
       stopAnswerCall = null;
@@ -980,12 +1029,14 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
     invoke('chat_input_focus', { focused }).catch(() => {});
   }
 
-  /** Leaving Chat: nothing answers into this view any more. */
+  /** Leaving Chat: nothing answers into this view any more (what's typed in the document is saved). */
   function close() {
     alive = false;
+    doc.flushSave();
   }
 
   return {
+    get doc() { return doc; },
     get conversations() { return conversations; },
     set conversations(v) { conversations = v; },
     get activeId() { return activeId; },

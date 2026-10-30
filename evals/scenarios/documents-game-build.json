@@ -1,0 +1,13 @@
+{
+  "name": "documents-game-build",
+  "description": "Documents beside the chat: a game build is something to keep. A document with its outline first, every section written, and a line or two in the chat.",
+  "tags": ["documents"],
+  "apps": "standard",
+  "turns": [
+    {
+      "user": "Make me a Divinity: Original Sin 2 lone wolf build for a ranger: gear, skills, talents and how to level it.",
+      "expect": { "document": { "made": true, "outline_first": true, "filled": true, "min_sections": 3 }, "max_words": 60, "no_false_claims": true },
+      "soft": { "max_words": 30 }
+    }
+  ]
+}

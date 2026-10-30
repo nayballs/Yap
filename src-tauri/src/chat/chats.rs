@@ -66,6 +66,12 @@ pub struct ChatMessage {
     /// (the answer stays).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub thinking: Option<crate::chat::think::Thought>,
+    /// The documents an answer made or changed (Chat's documents beside the
+    /// chat, `documents.rs`): each note's id and its title then, the
+    /// "📄 title · Open" pill under it. Only written when there are some. An
+    /// older Yap's save drops it: the pill goes, the note stays in Notes.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub documents: Vec<crate::chat::documents::DocRef>,
 }
 
 /// What an answer's last model call took: the prompt (everything the model
@@ -561,6 +567,21 @@ pub fn set_thinking(id: u64, index: usize, thought: crate::chat::think::Thought)
     });
 }
 
+/// Keep the documents an answer made or changed with it (`documents.rs`):
+/// conversation `id`'s message `index`, when it's an answer.
+pub fn set_documents(id: u64, index: usize, docs: &[crate::chat::documents::DocRef]) {
+    if docs.is_empty() {
+        return;
+    }
+    with_store(|s| {
+        let Some(m) = s.conversations.iter_mut().find(|c| c.id == id).and_then(|c| c.messages.get_mut(index)) else { return };
+        if m.role == "assistant" {
+            m.documents = docs.to_vec();
+            save_to_disk(s);
+        }
+    });
+}
+
 /// A conversation's scope ("" when it has none, or isn't there).
 pub fn scope_of(id: u64) -> String {
     with_store(|s| s.conversations.iter().find(|c| c.id == id).map(|c| c.scope.clone()).unwrap_or_default())
@@ -643,6 +664,7 @@ pub fn append_message(
             plain: false,
             tokens,
             thinking: None,
+            documents: Vec::new(),
         });
         conv.updated_ts = now_secs();
         // Asked again in an archived chat: it's back in the list.
@@ -1315,6 +1337,7 @@ mod tests {
             plain: false,
             tokens: None,
             thinking: None,
+            documents: vec![],
         };
         let messages = vec![
             msg("user", vec![]),

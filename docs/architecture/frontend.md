@@ -46,13 +46,20 @@ selector weighing what its scoped original did, so the same rule wins.
 |---|---|
 | `notepad/` | `Notepad.svelte` — the window: the note shown and the meeting, kept in step with Rust's events and the other windows; the in-page hotkeys; the layout. `NotepadHeader` (back, ⋯, split screen, Share, window buttons), `NotepadTitle`, `NotepadTabs`, `ThoughtsTab`, `TranscriptTab` + `TranscriptLog` (the timer box, search and copy; the lines), `SummaryTab`, `GenerateSummary` (or the summary's error with Retry), `ConsentLine`, `AskTray` (Stop / Resume, the Ask sheet), `DeleteMeetingDialog`, `NotepadIcon`. What outlasts a tab switch (each tab's body is made again on every switch): `transcriptView.svelte.js`, `summaryEditor.svelte.js`, `consentMessage.svelte.js`; `actions.js` the window's label, copying, Yap's main window; `notepad.css` |
 | `views/notes/` | `NotesView.svelte` (the view, its events, the note a call or Tasks asks to open) with `notesState.svelte.js` (the notes and folders, the open note saved as it's typed and kept in step, the recorder, actions, the summary edited in place, the transcript's view, the note's chat); `NoteList` (folders, notes, their menus) with `NoteSearch` (every note by words and meaning, loaded the first time a search is typed), `NoteEditor` (title, tabs, what's being written, the raw note) with `NoteMeta` (the chip row), `NoteSummary`, `NoteTranscript`, `NoteChat` and `ActionPicker`; `ActionManager`; `noteFormat.js` |
-| `views/chat/` | `ChatView.svelte` (the view, its events and keys, the screenshot viewer) with `chatState.svelte.js` (conversations, sending and the streamed answer, the Voice Assistant's questions, Snip to Chat, spoken replies, picking several); `ConversationList` (+ `chatLibrary.svelte.js` and `ChatLibraryList`, loaded when shown: the sidebar's search and the archive), `ChatThread` + `ChatMessage` (tool chips, the bubble, sources, ▶ and the model), `Composer` (screenshots, +, the box, ■ Stop, the model chip); `ModelChip`, `ChatModelPicker`, `ProviderMark`, `chatModels.svelte.js`, `chatImages.js`, `chatShots.svelte.js` |
+| `views/chat/` | `ChatView.svelte` (the view, its events and keys, the screenshot viewer) with `chatState.svelte.js` (conversations, sending and the streamed answer, the Voice Assistant's questions, Snip to Chat, spoken replies, picking several); `ConversationList` (+ `chatLibrary.svelte.js` and `ChatLibraryList`, loaded when shown: the sidebar's search and the archive), `ChatThread` + `ChatMessage` (tool chips, the bubble, sources, ▶ and the model), `Composer` (screenshots, +, the box, ■ Stop, the model chip); `ModelChip`, `ChatModelPicker`, `ProviderMark`, `chatModels.svelte.js`, `chatImages.js`, `chatShots.svelte.js`; the document beside the chat (2026-10-30): `DocPanel.svelte` (its own chunk, loaded the first time a document opens: the title, Undo, Edit, expand, Open in Notes, ✕, the rendered document or its text box) with `chatDoc.svelte.js` (made by `chatState`: the document shown, the sections streaming in, the Edit box's merged saves, the split's width), the split and the room in `ChatView`, the pill in `ChatMessage` |
 | `onboarding/` | `Onboarding.svelte` (the dots, the step shown, the footer, the in-page hotkey, the "Connect your calendar" dialog) with `setupState.svelte.js` (every step's state and this showing's steps, `steps` / `stepId`, the config this window changed, its raw event subscriptions, `listen` for its components); `StepHeader`, `ModelStep` (+ `ModelCard`), `LanguageStep`, `MicStep`, `CleanupStep`, `CalendarStep`, `TrayStep`, `TryStep`, `TypingStep`; `cleanupProviders.js` |
 
 One look kept on purpose: a tool's own chip in Chat ("Found "beta" on 2
 lines…") is a full-width row 30 px tall — ChatView's New chat row rule
 (`.tool`) used to reach it too — and `ChatMessage.svelte` now says so
-itself (`.toolchip.tool`).
+itself (`.toolchip.tool`). A document's chips ("Started "Build" (3
+sections)", "Wrote 3 sections in …") are the compact kind, with a document
+mark (`.toolchip.doc`).
+
+**The main window's chunk** is held near 710 kB (`vite.config.js`'
+`chunkSizeWarningLimit`, 700 until Chat's documents on 2026-10-30 took it
+to 708): the document panel itself loads on demand (`{#await
+import('./DocPanel.svelte')}`), its state and the pill don't.
 
 ## Look and the main window
 

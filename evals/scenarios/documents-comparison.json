@@ -1,0 +1,13 @@
+{
+  "name": "documents-comparison",
+  "description": "Documents beside the chat: a comparison with a table longer than a screen. A document, outline first, every section written.",
+  "tags": ["documents"],
+  "apps": "standard",
+  "turns": [
+    {
+      "user": "Compare the Kindle Paperwhite, the Kobo Clara and the PocketBook Era for reading in bed: a table of the differences, then which one I should get.",
+      "expect": { "document": { "made": true, "outline_first": true, "filled": true, "min_sections": 2 }, "max_words": 60, "no_false_claims": true },
+      "soft": { "max_words": 30 }
+    }
+  ]
+}

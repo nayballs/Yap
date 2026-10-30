@@ -81,7 +81,27 @@ pub enum Event {
     /// The model's thinking so far, whole (a question asked to think it
     /// through, `think.rs`): shown folded, apart from the answer.
     Thinking { text: String },
+    /// A document of this chat was made or changed (`documents.rs`): the
+    /// panel beside the chat shows it, as it is now.
+    Document {
+        #[serde(rename = "noteId")]
+        note_id: u64,
+        title: String,
+    },
+    /// A document's section as it's written (a `write_section` call's
+    /// arguments so far, [`LIVE_ARGS`]): the panel shows it in its
+    /// placeholder's place until the call lands.
+    Section {
+        #[serde(rename = "noteId")]
+        note_id: u64,
+        key: String,
+        text: String,
+    },
 }
+
+/// Tool calls whose arguments the page sees as they come: a document's
+/// section, written into the panel while it streams (`documents.rs`).
+pub const LIVE_ARGS: &[&str] = &["write_section"];
 
 /// Who watches a stream.
 pub trait Sink: Send + Sync {
@@ -102,6 +122,8 @@ pub fn doing(name: &str) -> &'static str {
         "open_app" | "list_apps" => "Looking for the app…",
         "remember" | "forget" => "Updating Yap's memory…",
         "search_chats" => "Searching your chats…",
+        "create_document" => "Starting a document…",
+        "write_section" => "Writing the document…",
         _ => "Working…",
     }
 }
@@ -241,6 +263,10 @@ pub struct Step<'a> {
     thinking: String,
     thinking_at: Option<Instant>,
     thought_sent: bool,
+    /// A document's section being written: when it last went to the page,
+    /// and what (`Event::Section`, at most every [`MIN_GAP`]).
+    section_at: Option<Instant>,
+    section_sent: String,
 }
 
 impl<'a> Step<'a> {
@@ -257,7 +283,24 @@ impl<'a> Step<'a> {
             thinking: String::new(),
             thinking_at: None,
             thought_sent: true,
+            section_at: None,
+            section_sent: String::new(),
         }
+    }
+
+    /// A `write_section` call's arguments so far: the section as written
+    /// so far to the page (the panel), at most every [`MIN_GAP`].
+    fn send_section(&mut self, so_far: &str) {
+        if self.section_at.is_some_and(|t| t.elapsed() < MIN_GAP) {
+            return;
+        }
+        let Some((note_id, key, text)) = crate::chat::documents::live_section(so_far) else { return };
+        if text == self.section_sent {
+            return;
+        }
+        self.section_at = Some(Instant::now());
+        self.section_sent = text.clone();
+        self.sink.send(Event::Section { note_id, key, text });
     }
 
     /// The text as shown: reasoning out (when the scope says so — and a
@@ -321,6 +364,11 @@ impl<'a> Step<'a> {
                 }
                 self.sink.send(Event::Tool { name: name.to_string(), doing: doing(name).to_string() });
             }
+            Delta::ToolArgs { name, so_far } => {
+                if name == "write_section" {
+                    self.send_section(so_far);
+                }
+            }
             Delta::Restart => self.restart(),
         }
     }
@@ -333,6 +381,8 @@ impl<'a> Step<'a> {
         self.tool_called = false;
         self.thinking.clear();
         self.thought_sent = true;
+        self.section_at = None;
+        self.section_sent.clear();
     }
 
     fn send_text(&mut self, force: bool) {
@@ -784,6 +834,9 @@ pub enum Piece {
     Call(String),
     /// More of the model's thinking, apart from the answer.
     Reasoning(String),
+    /// A [`LIVE_ARGS`] call's arguments so far, whole (a document's
+    /// section as it's written).
+    Args { name: String, so_far: String },
 }
 
 /// `chat.completion.chunk`s → the whole assistant message, as
@@ -941,14 +994,25 @@ impl Assembler {
                         call.name = name.to_string();
                     }
                 }
-                match &tc["function"]["arguments"] {
-                    Value::String(s) => call.arguments.push_str(s),
-                    obj @ Value::Object(_) => call.object = Some(obj.clone()),
-                    _ => {}
-                }
+                let more = match &tc["function"]["arguments"] {
+                    Value::String(s) => {
+                        call.arguments.push_str(s);
+                        !s.is_empty()
+                    }
+                    obj @ Value::Object(_) => {
+                        call.object = Some(obj.clone());
+                        true
+                    }
+                    _ => false,
+                };
                 if !call.announced && !call.name.is_empty() {
                     call.announced = true;
                     out.push(Piece::Call(call.name.clone()));
+                }
+                // A document's section: the page sees it as it's written.
+                if more && LIVE_ARGS.contains(&call.name.as_str()) {
+                    let so_far = call.object.as_ref().map_or_else(|| call.arguments.clone(), Value::to_string);
+                    out.push(Piece::Args { name: call.name.clone(), so_far });
                 }
             }
             if let Some(f) = choice["finish_reason"].as_str() {

@@ -69,6 +69,44 @@ md.block.ruler.before(
   { alt: ['blockquote'] }
 );
 
+// A document's section still to be written (Chat's documents beside the
+// chat, src-tauri/src/chat/documents.rs): its placeholder line, an HTML
+// comment the person never types by accident, drawn as a quiet line —
+// "Writing: Gear…" while Chat writes the document (`options.writing`),
+// else "Gear: not written yet" — never as the raw syntax.
+const PENDING = /^<!--\s*yap:section\s+([^|]*?)\s*(?:\|\s*(.*?))?\s*-->\s*$/;
+md.block.ruler.before(
+  'paragraph',
+  'yap_pending',
+  (state, line, _end, silent) => {
+    const text = state.src.slice(state.bMarks[line] + state.tShift[line], state.eMarks[line]);
+    const m = PENDING.exec(text);
+    if (!m || !m[1].trim()) return false;
+    if (silent) return true;
+    const t = state.push('yap_pending', '', 0);
+    t.meta = { key: m[1].trim(), intent: (m[2] || '').trim() };
+    t.map = [line, line + 1];
+    state.line = line + 1;
+    return true;
+  },
+  { alt: ['paragraph'] }
+);
+
+/** A document's sections still to be written, by key, in order (their placeholders). */
+export function pendingSections(text) {
+  return String(text || '')
+    .split('\n')
+    .map((l) => PENDING.exec(l.trim()))
+    .filter((m) => m && m[1].trim())
+    .map((m) => ({ key: m[1].trim(), intent: (m[2] || '').trim() }));
+}
+
+/** `line` is a document's placeholder (for `key`, when given). */
+export function isPlaceholder(line, key = null) {
+  const m = PENDING.exec(String(line || '').trim());
+  return !!m && !!m[1].trim() && (key == null || m[1].trim().toLowerCase() === String(key).trim().toLowerCase());
+}
+
 // Block markup: headings a level down, classes for quotes and rules.
 md.core.ruler.push('yap_blocks', (state) => {
   for (const t of state.tokens) {
@@ -235,6 +273,12 @@ rules.yap_cite = (tokens, idx) => {
   return `<span class="md-cites">${pills.join('')}</span>`;
 };
 
+rules.yap_pending = (tokens, idx, _options, env) => {
+  const { key, intent } = tokens[idx].meta;
+  const label = env?.writing ? `Writing: ${key}…` : `${key}: not written yet`;
+  return `<p class="md-pending" title="${escapeHtml(intent)}">${escapeHtml(label)}</p>\n`;
+};
+
 rules.yap_task = (tokens, idx) => {
   const { checked, label } = tokens[idx].meta;
   return `<input type="checkbox" disabled${checked ? ' checked' : ''} aria-label="${escapeHtml(label || 'Task')}"> `;
@@ -275,7 +319,7 @@ const PURIFY = {
   ALLOW_DATA_ATTR: false,
   ALLOW_ARIA_ATTR: false,
 };
-const CLASSES = new Set(['md-link', 'md-cite', 'md-cites', 'md-passage', 'md-code', 'md-table', 'md-quote', 'md-rule', 'md-loose', 'task', 'c', 'r']);
+const CLASSES = new Set(['md-link', 'md-cite', 'md-cites', 'md-passage', 'md-code', 'md-table', 'md-quote', 'md-rule', 'md-loose', 'md-pending', 'task', 'c', 'r']);
 // The one in-page address: a passage pill's (rendered by yap_cite only).
 const PASSAGE_HREF = /^#passage-\d{1,2}$/;
 // Which elements may carry which of the narrower attributes.
@@ -322,9 +366,11 @@ function purify() {
  * citations become pills, and only the sources' links stay links.
  * `options.tickable`: task checkboxes you can tick (a note's summary; the
  * view maps each one to its line with `taskLines`).
+ * `options.writing`: a document Chat is writing now — its sections still to
+ * come say "Writing: Gear…" (else "Gear: not written yet").
  */
 export function renderMarkdown(text, options = {}) {
-  const env = { web: webContext(options.sources) };
+  const env = { web: webContext(options.sources), writing: !!options.writing };
   const html = md.render(bulletsToDashes(text || ''), env);
   tickable = !!options.tickable;
   try {

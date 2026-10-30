@@ -514,6 +514,15 @@ hr.md-rule {
   border: none;
   border-top: 1px solid color-mix(in srgb, currentColor 18%, transparent);
 }
+/* A document's section still to be written (Chat's documents, markdown.js):
+   a quiet line in its place, never the placeholder's raw syntax. */
+.md-pending {
+  margin: 10px 0;
+  padding: 6px 10px;
+  border-left: 2px dashed color-mix(in srgb, currentColor 25%, transparent);
+  color: color-mix(in srgb, currentColor 55%, transparent);
+  font-style: italic;
+}
 /* A list item with several paragraphs (markdown.js renders the usual one
    paragraph per item without a <p>): no extra space above its first or
    below its last, whatever the view's own paragraph margins. */

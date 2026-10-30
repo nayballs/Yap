@@ -107,6 +107,7 @@
         onmenu={(e) => messageMenu(e, m)}
         onread={() => chat.readAloud(m)}
         onsource={(s) => chat.openSource(s)}
+        ondoc={(d) => chat.doc.show(d.id, { title: d.title })}
       />
     {/each}
     {#if (chat.sending || (chat.assistantPending != null && chat.assistantPending === chat.activeId)) && !chat.streaming}

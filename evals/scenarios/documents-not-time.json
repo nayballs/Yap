@@ -1,0 +1,12 @@
+{
+  "name": "documents-not-time",
+  "description": "Documents beside the chat: a quick question is answered in the chat, never as a document.",
+  "tags": ["documents"],
+  "apps": "standard",
+  "turns": [
+    {
+      "user": "What time is it in Tokyo?",
+      "expect": { "document": { "made": false }, "tools_not_called": ["create_document", "write_section"], "max_words": 60 }
+    }
+  ]
+}

@@ -23,16 +23,32 @@
    * aloud; `keepDays`: how long screenshots are kept; `onview(id)` opens a
    * screenshot large, `onmenu(e)` its right-click menu, `onread()` ▶,
    * `onsource(s)` opens a passage of the person's meetings at its line (an
-   * answer asked across meetings: search/ask.rs).
+   * answer asked across meetings: search/ask.rs); `ondoc(d)` opens a
+   * document it made or changed in the panel beside the chat
+   * (chat/documents.rs).
    */
-  let { m, last, sources, reading, keepDays, onview, onmenu, onread, onsource = null } = $props();
+  let { m, last, sources, reading, keepDays, onview, onmenu, onread, onsource = null, ondoc = null } = $props();
+
+  // The documents it made or changed: saved with it, or (while it's
+  // written) as they come.
+  const docs = $derived(m.role === 'assistant' ? (m.documents?.length ? m.documents : m.liveDocs || []) : []);
 
   // A chip about the web (web.rs) or the safety rule (chat/tools.rs).
   const WEB_CHIP = /^(Searched the web|Couldn't search the web|Didn't search for|Read [^"]|Couldn't read [^"]|Didn't read |Answered from )/;
   // The calendar's (chat/tools/calendar.rs).
   const CALENDAR_CHIP = /^(Checked your calendar|Found \d+ meetings? with|No meetings with|Free |Busy |No calendar connected|Couldn't read the (day|time) )/;
+  // A document's (chat/documents.rs).
+  const DOC_CHIP = /^(Started "|Wrote (\d+ sections|"[^"]*") in "|Didn't write "|"[^"]*" is already written in "|Couldn't start a document)/;
   const chipKind = (t) =>
-    /: not after reading the web$/.test(t) ? 'guard' : WEB_CHIP.test(t) ? 'web' : CALENDAR_CHIP.test(t) ? 'calendar' : 'tool';
+    /: not after reading the web$/.test(t)
+      ? 'guard'
+      : WEB_CHIP.test(t)
+        ? 'web'
+        : CALENDAR_CHIP.test(t)
+          ? 'calendar'
+          : DOC_CHIP.test(t)
+            ? 'doc'
+            : 'tool';
 
   // A question whose screenshot went as its text (snip/ocr.rs): its own
   // words, and the text read from the picture, folded under them.
@@ -77,6 +93,8 @@
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9" /><path d="M3 12h18" /><path d="M12 3a14 14 0 0 1 0 18a14 14 0 0 1 0-18z" /></svg>
         {:else if kind === 'calendar'}
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3.5" y="5" width="17" height="15" rx="2.5" /><path d="M3.5 10h17" /><path d="M8 3v4M16 3v4" /></svg>
+        {:else if kind === 'doc'}
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z" /><path d="M14 3v5h5" /></svg>
         {:else if kind === 'guard'}
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3 4.5 6v5.5c0 4.6 3.1 8.2 7.5 9.5 4.4-1.3 7.5-4.9 7.5-9.5V6z" /><path d="m9 12 2 2 4-4" /></svg>
         {:else}
@@ -224,6 +242,18 @@
           {#if s.site && s.site !== s.title}<span class="srcsite">{s.site}</span>{/if}
         </button>
       {/if}
+    {/each}
+  </div>
+{/if}
+{#if docs.length}
+  <!-- The documents it made or changed: each opens beside the chat. -->
+  <div class="docpills" role="group" aria-label="Documents">
+    {#each docs as d (d.id)}
+      <button type="button" class="docpill" data-testid="chat-doc-pill" onclick={() => ondoc?.(d)} aria-label={`Open the document ${d.title || 'Untitled document'}`}>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z" /><path d="M14 3v5h5" /><path d="M9 13h6M9 17h4" /></svg>
+        <span class="doctitle">{d.title || 'Untitled document'}</span>
+        <span class="docopen" aria-hidden="true">· Open</span>
+      </button>
     {/each}
   </div>
 {/if}
@@ -420,6 +450,54 @@
   .cbubble.assistant :global(a.md-cite:hover) {
     color: var(--yap-primary);
     border-color: color-mix(in srgb, var(--yap-primary) 45%, var(--yap-border-subtle));
+  }
+  /* A document's pill under the answer that made or changed it. */
+  .docpills {
+    align-self: flex-start;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    max-width: 78%;
+  }
+  .docpill {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    max-width: 340px;
+    height: 32px;
+    padding: 0 12px 0 10px;
+    border: 1px solid var(--yap-border-subtle);
+    border-radius: var(--yap-r);
+    background: var(--yap-s1);
+    color: var(--yap-fg);
+    font: inherit;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  .docpill:hover {
+    border-color: var(--yap-border-hover);
+    background: var(--yap-s2);
+  }
+  .docpill:focus-visible {
+    outline: 2px solid var(--yap-primary-line);
+    outline-offset: 1px;
+  }
+  .docpill svg {
+    flex: 0 0 auto;
+    width: 15px;
+    height: 15px;
+    color: var(--yap-primary);
+  }
+  .docpill .doctitle {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .docopen {
+    flex: 0 0 auto;
+    color: var(--yap-primary);
   }
   /* The Sources row under a web answer. */
   .sources {

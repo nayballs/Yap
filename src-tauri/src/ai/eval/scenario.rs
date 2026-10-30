@@ -459,6 +459,106 @@ pub struct Expect {
     /// these (case-insensitive); anything else is a **false memory**. `[]`:
     /// nothing may be gained.
     pub memory_allowed: Option<Vec<String>>,
+    /// Documents beside the chat (`chat/documents.rs`): whether the turn
+    /// made one, and how (`--documents`).
+    pub document: Option<DocExpect>,
+}
+
+/// What a turn did with documents (`Expect::document`).
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DocExpect {
+    /// A document was made (`create_document` went through) — or, false,
+    /// none was.
+    pub made: bool,
+    /// Its outline came first: `create_document` before any `write_section`.
+    #[serde(default)]
+    pub outline_first: bool,
+    /// Every section it outlined was written: no placeholder left.
+    #[serde(default)]
+    pub filled: bool,
+    /// The outline had at least this many sections.
+    pub min_sections: Option<usize>,
+}
+
+/// What a turn did with documents, as `DocExpect` and `--documents`' table
+/// read it.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct DocSeen {
+    /// The documents made (their note ids).
+    pub made: Vec<u64>,
+    /// `create_document` came before any `write_section` (and was called).
+    pub outline_first: bool,
+    /// The first outline's sections.
+    pub sections: usize,
+    /// Sections written (`write_section` that went through).
+    pub written: usize,
+    /// What's still to write in the documents made (their keys).
+    pub left: Vec<String>,
+}
+
+/// The turn's documents, from its tool calls and the notes afterwards.
+pub fn doc_seen(o: &Observed) -> DocSeen {
+    let calls = &o.stats.tool_calls;
+    let creates: Vec<&super::record::ToolCall> = calls.iter().filter(|c| c.name == "create_document" && c.success).collect();
+    let made: Vec<u64> = creates.iter().filter_map(|c| c.result["data"]["id"].as_u64()).collect();
+    let first_create = calls.iter().position(|c| c.name == "create_document");
+    let first_write = calls.iter().position(|c| c.name == "write_section");
+    let outline_first = match (first_create, first_write) {
+        (Some(c), Some(w)) => c < w,
+        (Some(_), None) => true,
+        _ => false,
+    };
+    let sections = creates.first().and_then(|c| c.result["data"]["sections"].as_array().map(Vec::len)).unwrap_or(0);
+    let written = calls.iter().filter(|c| c.name == "write_section" && c.success).count();
+    let left = made
+        .iter()
+        .filter_map(|id| crate::notes::get(*id))
+        .flat_map(|n| crate::chat::documents::pending_keys(&n.content))
+        .collect();
+    DocSeen { made, outline_first, sections, written, left }
+}
+
+/// The reasons the turn's documents fail `d`.
+fn document_faults(d: &DocExpect, o: &Observed) -> Vec<String> {
+    let seen = doc_seen(o);
+    let titles = || {
+        seen.made
+            .iter()
+            .filter_map(|id| crate::notes::get(*id))
+            .map(|n| format!("\"{}\"", n.title))
+            .collect::<Vec<_>>()
+            .join(", ")
+    };
+    let mut fails = Vec::new();
+    match (d.made, seen.made.is_empty()) {
+        (true, true) => {
+            let made: Vec<&str> = o.stats.tool_calls.iter().map(|c| c.name.as_str()).collect();
+            fails.push(format!(
+                "no document was made (expected one); calls made: {}",
+                if made.is_empty() { "none".to_string() } else { made.join(", ") }
+            ));
+            return fails;
+        }
+        (false, false) => {
+            fails.push(format!("made a document (none expected): {}", titles()));
+            return fails;
+        }
+        (false, true) => return fails,
+        (true, false) => {}
+    }
+    if d.outline_first && !seen.outline_first {
+        fails.push("a section was written before the outline (create_document)".to_string());
+    }
+    if let Some(n) = d.min_sections {
+        if seen.sections < n {
+            fails.push(format!("the outline had {} sections (expected at least {n})", seen.sections));
+        }
+    }
+    if d.filled && !seen.left.is_empty() {
+        fails.push(format!("{} section{} left unwritten: {}", seen.left.len(), if seen.left.len() == 1 { "" } else { "s" }, seen.left.join(", ")));
+    }
+    fails
 }
 
 /// Something memory holds afterwards: an item whose name, summary or facts
@@ -1273,6 +1373,9 @@ pub fn check(e: &Expect, o: &Observed) -> Vec<String> {
             fails.push(format!("false memory: \"{t}\""));
         }
     }
+    if let Some(d) = &e.document {
+        fails.extend(document_faults(d, o));
+    }
     fails
 }
 
@@ -1603,5 +1706,35 @@ mod tests {
         assert_eq!(check(&e, &o).len(), 3, "{:?}", check(&e, &o));
         // A typo in a scenario is an error, not a silently skipped check.
         assert!(serde_json::from_value::<Expect>(json!({ "opend": ["x"] })).is_err());
+    }
+
+    /// `--documents`' check: made or not, the outline first, every section
+    /// written (from the turn's calls and the note afterwards).
+    #[test]
+    fn a_document_check_says_what_went_wrong() {
+        let call = |name: &str, args: Value| {
+            let result = crate::chat::documents::execute(name, &args);
+            ToolCall { name: name.into(), args, success: result["success"] == json!(true), display: String::new(), result }
+        };
+        let expect = |v: Value| serde_json::from_value::<Expect>(json!({ "document": v })).unwrap();
+        let made = call("create_document", json!({ "title": "Build", "sections": ["Gear", "Skills", "Talents"] }));
+        let id = made.result["data"]["id"].as_u64().unwrap();
+        let mut o = obs("It's open on the right.");
+        o.stats.tool_calls.push(made);
+        o.stats.tool_calls.push(call("write_section", json!({ "note_id": id, "key": "Gear", "markdown": "Rings." })));
+        let want = expect(json!({ "made": true, "outline_first": true, "filled": true, "min_sections": 4 }));
+        assert_eq!(check(&want, &o), ["the outline had 3 sections (expected at least 4)", "2 sections left unwritten: Skills, Talents"]);
+        for key in ["Skills", "Talents"] {
+            o.stats.tool_calls.push(call("write_section", json!({ "note_id": id, "key": key, "markdown": "x" })));
+        }
+        assert!(check(&expect(json!({ "made": true, "outline_first": true, "filled": true })), &o).is_empty());
+        assert_eq!(check(&expect(json!({ "made": false })), &o), ["made a document (none expected): \"Build\""]);
+        let seen = doc_seen(&o);
+        assert_eq!((seen.sections, seen.written, seen.outline_first), (3, 3, true));
+        // A section before any outline; none made.
+        let mut o = obs("Here it is.");
+        o.stats.tool_calls.push(call("write_section", json!({ "note_id": 999, "key": "Gear", "markdown": "x" })));
+        assert!(check(&expect(json!({ "made": true })), &o)[0].starts_with("no document was made (expected one); calls made: write_section"));
+        assert!(check(&expect(json!({ "made": false })), &o).is_empty());
     }
 }

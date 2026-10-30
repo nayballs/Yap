@@ -112,6 +112,8 @@ pub const TOOL_INSTRUCTIONS: &[&str] = &[
     "Use create_note when the user asks you to create, write, or draft a new note. Leave folder empty (the note goes to Personal) unless the user named a folder or the content clearly fits a folder that already exists: then call list_folders first and pass that folder's name, tolerant of case, plurals and typos. Never make up a folder: only when the user asks for a new folder, pass its name with new_folder set to true.",
     "Use update_note only to move a note to an existing folder (list_folders first), or to rewrite a whole note when the user explicitly asks for that; for any smaller change, use edit_note.",
     "Use copy_to_clipboard when the user asks you to copy something to their clipboard.",
+    // Documents beside the chat (documents.rs): when to make one, outline first.
+    crate::chat::documents::INSTRUCTIONS,
 ];
 
 /// Added to [`TOOL_INSTRUCTIONS`] while Yap may open apps (`apps.rs`).
@@ -153,6 +155,10 @@ pub struct Extra<'a> {
     /// (`budget::Budget::request`): each tool result is trimmed to what's
     /// left (`budget::fit_result`). `None`: no limit.
     pub room: Option<u64>,
+    /// The conversation's documents and the ones this turn makes or changes
+    /// (`documents.rs`): each made or changed one goes to the page as it
+    /// happens (`stream::Event::Document`) and is kept with the answer.
+    pub docs: Option<&'a crate::chat::documents::Turn>,
 }
 
 /// The calendar tool in a turn ([`calendar::run`]).
@@ -167,7 +173,11 @@ pub struct CalendarTurn<'a> {
 
 /// The tools that act (open an app, write or change a note, the
 /// clipboard, memory): refused for the rest of a turn once web content is
-/// in it.
+/// in it. A document's two (`create_document`, `write_section`) aren't:
+/// a build is researched on the web first, and they're the answer's own
+/// words — a new note in Chat documents, sections filled where the
+/// outline left room — never a change to something the person wrote
+/// (`edit_note` on a document stays refused after the web).
 pub const ACTION_TOOLS: &[&str] = &["open_app", "create_note", "update_note", "edit_note", "copy_to_clipboard", "remember", "forget"];
 
 /// **The safety rule**: after web content came into this turn (`web_seen`),
@@ -553,7 +563,9 @@ mod tests {
     /// the instructions and the tools' schemas (Groq's free plan allows 8,000
     /// tokens a minute, and "open X" through the model takes 2–3 steps).
     /// Was 750 + 2,129 = 2,879 before the 2026-10-18 trim (now about 560 +
-    /// 1,624). `--nocapture` prints it.
+    /// 1,624). Documents beside the chat (2026-10-30, `documents.rs`) add
+    /// about 380: their two schemas and one instruction line, trimmed
+    /// (2,692 as first written, 2,580 after). `--nocapture` prints it.
     #[test]
     fn a_tool_step_stays_light() {
         let est = crate::meetings::meeting_summary::estimate_tokens;
@@ -566,7 +578,16 @@ mod tests {
         tools.as_array_mut().unwrap().extend(app_definitions().as_array().unwrap().iter().cloned());
         let (s, t) = (est(&system), est(&tools.to_string()));
         println!("one tool step sends: system {s} + tools {t} = {} tokens", s + t);
-        assert!(s + t <= 2_250, "{} tokens", s + t);
+        assert!(s + t <= 2_620, "{} tokens", s + t);
     }
 
+    /// A document's tools are the answer's own writing, not actions: a build
+    /// researched on the web is written afterwards. Changing a document the
+    /// person may have edited (`edit_note`) still isn't, after the web.
+    #[test]
+    fn a_document_can_be_written_after_reading_the_web() {
+        assert!(refused_after_web("create_document", true).is_none());
+        assert!(refused_after_web("write_section", true).is_none());
+        assert!(refused_after_web("edit_note", true).is_some());
+    }
 }

@@ -277,6 +277,25 @@ Yap fixes both. `chips.md` in the run folder, `summary.json`
 (`models[].chips`). `eval::chips`' unit tests check the file reads, each
 kind has ≥ 2 cases and every request fits an 8k model with its reply.
 
+### Documents beside the chat (`--documents`)
+
+```bash
+yap.exe eval --documents --model local:<Qwen_Qwen3.5-4B-Q4_K_M.gguf> --ngl 999 --repeat 3
+npm run eval -- --documents --model anthropic:claude-haiku-5-5 --keys-from-yap --repeat 2
+```
+
+The scenarios tagged `documents` (`evals/scenarios/documents-*.json`), through Chat's own turn
+like any scenario, each turn's documents checked by `expect.document` (`{made, outline_first,
+filled, min_sections}`, `scenario::doc_seen`: from the turn's calls and the notes afterwards):
+**made** only when it should be — a game build, a trip plan, a comparison with a table, a
+guide, a packing list (yes); the time in Tokyo, tablespoons in a cup, three synonyms (no) —,
+the **outline first** (`create_document` before any `write_section`), **every section
+written** (no placeholder left), and a **short chat line** (`max_words` 60, 30 as a warning).
+A follow-up ("Add a head torch to the extras.") must change the document (`edit_note` or
+`update_note`) and make no other. `summary.md` gets a "Documents beside the chat" table per
+model: made when asked, outline first, every section written, the chat line's mean and most
+words, made when not wanted.
+
 ### Screenshot questions (`--vision`)
 
 ```bash
@@ -2708,3 +2727,36 @@ tools offered it thought briefly, then called the tool. Through Chat's own turn 
 five screenshot questions with the picture): **5/5**, 357–835 characters of thinking each,
 2.5–4.6 s (8.7 s for the first, with the projector's first image), no "</think>" in any
 answer. Run folder `20261029-181226-qwen-qwen3.5-4b-q4-k-m`.
+
+## Documents beside the chat (30 Oct 2026)
+
+`yap.exe eval --documents` (`chat/documents.rs`, chat-and-assistant.md): eight scenarios — a
+game build, a trip plan, a comparison with a table, a guide, a packing list then "Add a head
+torch to the extras." (which must change it), and three quick asks that mustn't make a
+document (the time in Tokyo, tablespoons in a cup, three synonyms) — on the on-device
+Qwen3.5-4B Q4_K_M (llamafile 0.10.6, the sidecar's arguments, MTP, `--ngl 999` on this PC's
+graphics card), `--repeat 3` (2 for the first). Tuned run by run:
+
+| Run | What changed | Passed | Made when asked | Outline first | Every section written | Chat line (mean / most words) | Made when not wanted |
+|---|---|---|---|---|---|---|---|
+| 1 | the rule in the system prompt, the tools | 11/16 | 8/10 | 8/8 | 7/8 | 36 / 84 | 0/8 |
+| 2 | a model on this PC told in its context when a question asks for something to keep (`ASKS_NOTE`); the last section's result asks for one short sentence; a half-written document sent back to be finished | 21/24 | 15/15 | 15/15 | 15/15 | 5 / 5 | 0/12 |
+| 3 | the outline: "one per part, usually 2 to 6" | 23/24 | 15/15 | 15/15 | 14/15 | 6 / 12 | 0/12 |
+| 4 | `create_document` twice in one turn gives back the one there is | **23/24** | **15/15** | **15/15** | **15/15** | **6 / 11** | **0/12** |
+
+What each fix was for: on the rule alone the 4B answered a repotting guide (440 words) and a
+Lisbon plan (121 words) in the chat, and under "It's open beside the chat." it wrote a summary
+of the document (84 words); it once answered with a comparison's recommendation still a
+placeholder (the finish note: used twice in run 3, not at all in run 4); in run 3 it called
+`create_document` twice in one step, filled one and left the other's four sections — the
+next question then edited the empty one. The one failure left (run 4): a comparison outlined
+as one section, its table and recommendation inside it under a sub-heading (the scenario asks
+for two; the document is whole). Mean turn 3.6–4.0 s; a document of four sections ~5–7 s;
+the quick asks stay one call, 0.1–0.7 s, and never make one. The follow-up's edits went
+through `edit_note` every time (once after a refused exact match, then `read_note`). Run
+folders `20261030-190117-docs-4b-r1` … `20261030-191214-docs-4b-r4` (kept outside the repo).
+
+**Not run yet: a cloud model.** Claude Haiku 5.5 costs credits, so it waits for the
+maintainer's OK: `npm run eval -- --documents --model anthropic:claude-haiku-5-5
+--keys-from-yap --repeat 2` (about 250k tokens, as the 4B's two-repeat run took; the
+context line `ASKS_NOTE` is only for a model on this PC, so it measures the rule alone).

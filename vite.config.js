@@ -10,11 +10,12 @@ export default defineConfig({
     strictPort: true,
   },
   build: {
-    // The main window's chunk (ControlPanel) is just under 700 kB (698 kB on
-    // 2026-10-30), on purpose: loading its views on
+    // The main window's chunk (ControlPanel) is just under 710 kB (708 kB on
+    // 2026-10-30, with Chat's documents: their panel loads on demand, its
+    // state and the pill don't), on purpose: loading its views on
     // demand was measured (2026-10-22) and Home came up no sooner — V8
     // compiles code when it first runs, and the load's time is its IPC
     // calls (docs/architecture/frontend.md, "One chunk per window").
-    chunkSizeWarningLimit: 700,
+    chunkSizeWarningLimit: 710,
   },
 });

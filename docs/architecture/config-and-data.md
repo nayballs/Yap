@@ -572,7 +572,19 @@
   **A cache**: the messages all stay; an older Yap sharing the folder drops
   the field on its next save (harmless — the next long turn writes it
   again), and a summary covering more messages than there are is never
-  used (`Conversation::usable_summary`).
+  used (`Conversation::usable_summary`). An answer that made or changed a
+  **document beside the chat** (2026-10-30, `chat/documents.rs`) keeps
+  `documents` (`[{id, title}]`: the note and its title when written; the
+  pill under the answer, and which documents the conversation has for the
+  next question's context), written only when there are some. **New field
+  only**: an older Yap's save drops it — the pill goes and the model is no
+  longer told the chat's documents, while the document itself stays an
+  ordinary note in Notes (folder "Chat documents", `source` "chat"). Nothing
+  about documents goes in notes.json beyond the note itself; what the model
+  last saw of each is kept in memory (after a restart, the newest Chat
+  version in `note-versions/`).
+- The Chat document panel's width: the main window's `localStorage`
+  (`yapChatDocWidth`, px), a convenience of that window, never config.json.
 - Model lists: `%APPDATA%/yap/model_catalog.json` — each keyed AI provider's
   chat models as it last listed them (id, name, created, context, tools,
   first seen), when, and why the last check failed (`ai/model_catalog.rs`).

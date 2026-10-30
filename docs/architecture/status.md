@@ -1178,6 +1178,32 @@ through `eval --vision --think`. **Not yet tried**: a real cloud model's
 reasoning (OpenAI, Gemini, Claude, OpenRouter: fields from their docs), the
 dev build.
 
+**Documents beside the chat, phase 1** (2026-10-30, chat-and-assistant.md
+`chat/documents.rs`): an answer to keep — a build, a plan, a guide, a
+comparison — is written as a document that opens in a panel to the right
+of Chat's conversation: the outline at once, each section filling as the
+model writes it, a pill under the answer that reopens it (after a restart
+too), later questions changing it with `edit_note`. The person can edit it
+in the panel while Chat writes (their words win: merged in Rust); a
+section they removed is never brought back; the next question tells the
+model what they changed. Undo of Chat's change, expand, Open in Notes, a
+remembered split, light and dark. The Voice Assistant makes one only when
+asked, says a line, and Chat shows it filling. **Tested**: unit (the
+placeholders, the tools and their refusals, the merge, the diff, the
+model's picture of a document, the streamed arguments, the loop end to
+end), e2e (`e2e/chat-documents.spec.js`, 5 tests: the panel and its pill,
+an edit kept while Chat writes, Undo, close / expand / the split / Open in
+Notes, the Voice Assistant; light and dark screenshots), and the model
+evaluations' `--documents` on the on-device Qwen3.5-4B (model-evals.md
+"Documents beside the chat": 23/24 after tuning — every one of 15 asks
+made a document, outline first, every section written, a chat line of 6
+words on average; none of 12 quick asks made one). **Not yet tried**: a cloud model's run (the
+Haiku command is ready, it costs credits), the dev build by hand, a narrow
+window by hand (the panel covering the conversation is in the code, not in
+a spec), dictating into the panel's Edit box. **Phase 2** (not done): a rich
+editor (tables, checklists; one editor with Notes), "Ask about this" /
+"Change this" on selected words, tabs for sources, export and copy.
+
 **Meeting search and Ask across meetings** (2026-10-25,
 [search.md](./search.md)): every meeting and note cut into passages and read
 by EmbeddingGemma-300M on Yap's own llamafile (downloaded on demand from

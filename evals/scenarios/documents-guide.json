@@ -1,0 +1,13 @@
+{
+  "name": "documents-guide",
+  "description": "Documents beside the chat: a step-by-step guide to keep. A document, outline first, every section written.",
+  "tags": ["documents"],
+  "apps": "standard",
+  "turns": [
+    {
+      "user": "Write me a step-by-step guide to repotting a fiddle-leaf fig, with what I'll need and how to look after it afterwards.",
+      "expect": { "document": { "made": true, "outline_first": true, "filled": true, "min_sections": 3 }, "max_words": 60, "no_false_claims": true },
+      "soft": { "max_words": 30 }
+    }
+  ]
+}
