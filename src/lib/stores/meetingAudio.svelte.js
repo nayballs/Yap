@@ -330,9 +330,14 @@ export function canPlay(noteId, seg) {
 }
 
 let player = null;
+// Counts every ▶ and stop: a clip still being fetched when another ▶ (or
+// a stop) came is dropped, never left playing beside it with no way to
+// stop it.
+let playSeq = 0;
 
 /** Stop the line playing. */
 export function stopLine() {
+  playSeq += 1;
   if (player) {
     player.pause();
     URL.revokeObjectURL(player.src);
@@ -355,14 +360,17 @@ export async function playVoice(noteId, voice) {
   const again = meetingAudio.playing === key;
   stopLine();
   if (again) return;
+  const mine = playSeq;
   try {
     const bytes = await invoke('speaker_clip', { noteId, speaker: voice });
+    if (mine !== playSeq) return;
     const a = new Audio(URL.createObjectURL(new Blob([bytes], { type: 'audio/wav' })));
     a.onended = () => player === a && stopLine();
     player = a;
     meetingAudio.playing = key;
     await a.play();
   } catch (e) {
+    if (mine !== playSeq) return;
     stopLine();
     toast({ title: "Couldn't play their voice", description: String(e), variant: 'destructive' });
   }
@@ -374,14 +382,17 @@ export async function playLine(noteId, i, seg) {
   const again = meetingAudio.playing === key;
   stopLine();
   if (again) return;
+  const mine = playSeq;
   try {
     const bytes = await invoke('meeting_audio_clip', { noteId, ts: seg.ts, startMs: seg.startMs, endMs: seg.endMs });
+    if (mine !== playSeq) return;
     const a = new Audio(URL.createObjectURL(new Blob([bytes], { type: 'audio/wav' })));
     a.onended = () => player === a && stopLine();
     player = a;
     meetingAudio.playing = key;
     await a.play();
   } catch (e) {
+    if (mine !== playSeq) return;
     stopLine();
     toast({ title: "Couldn't play it", description: String(e), variant: 'destructive' });
   }

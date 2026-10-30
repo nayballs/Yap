@@ -123,6 +123,22 @@ test('the mic step: the quiz listens on every microphone at once, marks the best
   }
 });
 
+// The setup's list of microphones used to be read as it opened and never
+// again, so one plugged in while it showed ("Plug one in or connect a
+// headset, and it shows up here") never did.
+test('the mic step lists a microphone plugged in while it shows', async ({ yap }) => {
+  const ob = await openSetup(yap);
+  await ob.getByRole('button', { name: "I'll choose later" }).click();
+  await continueBtn(ob).click();
+  await expect(ob.getByRole('heading', { level: 1, name: "Let's check your microphone" })).toBeVisible();
+  const options = ob.getByRole('combobox', { name: 'Microphone' }).locator('option');
+  await expect(options).toHaveText(['System default', MICS[0].name]);
+  await yap.invoke('e2e_mic_plug', { device: { id: MICS[2].id, name: MICS[2].name } });
+  await expect(options).toHaveText(['System default', MICS[0].name, MICS[2].name]);
+  await yap.invoke('e2e_mic_unplug', { id: MICS[0].id });
+  await expect(options).toHaveText(['System default', MICS[2].name]);
+});
+
 test('the mic step: a microphone connected after the setup opened, picked in the quiz, goes first', async ({ yap }) => {
   // The laptop's array clear, the USB mic in a noisy room.
   await yap.invoke('e2e_mic_quiz', { profiles: { usb: [0.05, 0.06], array: [0.25, 0.001] } });
@@ -131,8 +147,8 @@ test('the mic step: a microphone connected after the setup opened, picked in the
     await ob.getByRole('button', { name: "I'll choose later" }).click();
     await continueBtn(ob).click();
     await expect(ob.getByRole('heading', { level: 1, name: "Let's check your microphone" })).toBeVisible();
-    // Plugged in now: the quiz reads the list afresh, the step's own list
-    // was read as the setup opened.
+    // Plugged in now: the quiz reads the list afresh (the step's own list
+    // follows too, the test above).
     await yap.invoke('e2e_mics', { devices: [MICS[0], MICS[2]] });
     const quiz = ob.getByTestId('mic-quiz');
     await quiz.getByRole('button', { name: 'Start the mic quiz' }).click();

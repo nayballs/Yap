@@ -536,10 +536,14 @@
   function onKeyUp(e) {
     if (!cfg) return;
     const lang = languageShortcuts(cfg).find((s) => hotkeyMatchesKeyup(e, s.hotkey));
+    // Its own key has a hold of its own (quick_note/key.rs), the others
+    // share the dictation's: a key up ending both (a modifier in each) goes
+    // to both, or push-to-talk keeps recording.
     if (actionMatchesKeyup(e, cfg, 'quickNoteHotkey')) {
       e.preventDefault();
       invoke('quick_note_key', { pressed: false }).catch(() => {});
-    } else if (actionMatchesKeyup(e, cfg, 'assistantHotkey')) {
+    }
+    if (actionMatchesKeyup(e, cfg, 'assistantHotkey')) {
       e.preventDefault();
       invoke('assistant_key', { pressed: false }).catch(() => {});
     } else if (lang) {
