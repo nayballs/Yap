@@ -85,10 +85,18 @@
   // (Windows' OCR on this PC, snip/ocr.rs: the text folds under the
   // question in its bubble).
   //
+  // Documents beside the chat (chat/documents.rs, 2026-10-30): an answer to
+  // keep (a build, a plan, a guide) is written as a document that opens in
+  // a panel on the right (DocPanel, chatDoc.svelte.js) and fills section by
+  // section; a pill under the answer reopens it. The split between the
+  // conversation and the panel is dragged (or moved with the arrow keys on
+  // its handle) and remembered; with no room beside the conversation (a
+  // narrow window) the panel covers it, ✕ going back.
+  //
   // This file is the view: it makes its state (chatState.svelte.js), follows
   // Rust's events while Chat is open, takes the keys, and lays out the
   // conversation list (ConversationList) beside the thread (ChatThread,
-  // ChatMessage) and the composer (Composer).
+  // ChatMessage) and the composer (Composer), and the document panel.
   import { invoke } from '@tauri-apps/api/core';
   import { listen } from '@tauri-apps/api/event';
   import { getCurrentWebview } from '@tauri-apps/api/webview';
@@ -100,6 +108,7 @@
   import ConversationList from './ConversationList.svelte';
   import ChatThread from './ChatThread.svelte';
   import Composer from './Composer.svelte';
+  import { MIN_WIDTH, THREAD_MIN, LIST_STAYS } from './chatDoc.svelte.js';
 
   // Opens a Settings section (ControlPanel's openSettings): the chip's
   // "Language model settings…". `onopennote({id, line, ts, field})`: a
@@ -108,8 +117,82 @@
   let { onopensettings = null, onopennote = null, onopenusage = null } = $props();
 
   const chat = createChatState({ onopensettings: () => onopensettings, onopennote: () => onopennote });
+  const doc = chat.doc;
+
+  // Chat's own width: too narrow for the document beside the conversation,
+  // it covers it instead.
+  let chatEl = $state(null);
+  let chatWidth = $state(0);
+  // The conversation list's own width (a long title widens it). While a
+  // document is open beside the chat, the list steps aside unless Chat is
+  // wide: the conversation on the left, the document on the right (New
+  // chat is Ctrl+N; ✕ brings the list back).
+  let listWidth = $state(224);
+  let listWanted = $state(false);
+  const listAside = $derived(doc.open && !doc.expanded && chatWidth < LIST_STAYS && !listWanted);
+  // Asked back while one document was open: until it closes.
+  $effect(() => {
+    if (!doc.open) listWanted = false;
+  });
+  // The most the panel may take: the list (when it shows) and the thread keep theirs.
+  const room = $derived(chatWidth - (listAside ? 0 : listWidth) - THREAD_MIN);
+  const narrow = $derived(chatWidth > 0 && chatWidth - THREAD_MIN < MIN_WIDTH);
+  const cover = $derived(doc.open && (narrow || doc.expanded));
+  const maxWidth = $derived(Math.max(MIN_WIDTH, room));
+  // Its width now: the remembered one, within what there's room for.
+  const shownWidth = $derived(Math.min(doc.width, maxWidth));
+  $effect(() => {
+    const el = chatEl;
+    if (!el || typeof ResizeObserver === 'undefined') return;
+    const list = el.querySelector('.convs');
+    const measure = () => {
+      chatWidth = el.clientWidth;
+      // (Not while it's stepped aside: it keeps its last width.)
+      const w = list?.getBoundingClientRect().width;
+      if (w) listWidth = w;
+    };
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    if (list) ro.observe(list);
+    measure();
+    return () => ro.disconnect();
+  });
+
+  // The split's handle: dragged, or the arrow keys on it.
+  let dragging = false;
+  function splitDown(e) {
+    if (e.button !== 0) return;
+    dragging = true;
+    e.currentTarget.setPointerCapture?.(e.pointerId);
+    e.preventDefault();
+  }
+  function splitMove(e) {
+    if (!dragging || !chatEl) return;
+    const right = chatEl.getBoundingClientRect().right;
+    doc.setWidth(right - e.clientX, maxWidth);
+  }
+  function splitUp() {
+    if (!dragging) return;
+    dragging = false;
+    doc.keepWidth();
+  }
+  function splitKey(e) {
+    const step = e.shiftKey ? 80 : 24;
+    if (e.key === 'ArrowLeft') doc.setWidth(shownWidth + step, maxWidth);
+    else if (e.key === 'ArrowRight') doc.setWidth(shownWidth - step, maxWidth);
+    else if (e.key === 'Home') doc.setWidth(maxWidth, maxWidth);
+    else if (e.key === 'End') doc.setWidth(MIN_WIDTH, maxWidth);
+    else return;
+    e.preventDefault();
+    doc.keepWidth();
+  }
 
   function onKeydown(e) {
+    // The document covering the conversation (expanded): Esc puts it back beside it.
+    if (e.key === 'Escape' && doc.open && doc.expanded && !narrow && !e.defaultPrevented) {
+      doc.expanded = false;
+      return;
+    }
     if (e.key === 'Escape' && chat.viewing) {
       chat.viewing = null;
       return;
@@ -173,6 +256,10 @@
       // A long chat's older messages were summarised (chat/compact.rs).
       listen('yap-chat-summary', (e) => chat.onSummary(e.payload)),
       listen('yap-chat-images-deleted', chat.reloadActive),
+      // The document beside the chat, changed in another window or by Chat's
+      // tools (its sections landing), or deleted.
+      listen('yap-note-changed', (e) => doc.onNoteChanged(e.payload)),
+      listen('yap-note-deleted', (e) => doc.onNoteDeleted(e.payload)),
       listen('yap-chat-dictation', (e) => chat.onChatDictation(e.payload)),
       // A question asked with the assistant shortcut, live (and its card's
       // "Open in Chat").
@@ -249,15 +336,50 @@
 
 <svelte:window onkeydown={onKeydown} onpaste={onPaste} />
 
-<div class="chat">
-  <!-- Conversation sidebar -->
-  <ConversationList {chat} />
+<div class="chat" bind:this={chatEl}>
+  <!-- Conversation sidebar (out of reach while the document covers it) -->
+  <div class="listslot" class:aside={listAside} inert={cover || listAside || undefined}>
+    <ConversationList {chat} />
+  </div>
 
   <!-- Thread -->
-  <section class="thread">
+  <section class="thread" class:withbtn={listAside} inert={cover || undefined}>
+    {#if listAside}
+      <!-- The list stepped aside for the document: back with one click. -->
+      <button type="button" class="showchats" onclick={() => (listWanted = true)} aria-label="Show your chats" title="Show your chats">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2" /><path d="M9 4v16" /></svg>
+      </button>
+    {/if}
     <ChatThread {chat} {onopensettings} />
     <Composer {chat} {onopensettings} {onopenusage} />
   </section>
+
+  {#if doc.open}
+    {#if !cover}
+      <!-- The split: drag it, or the arrow keys (Shift: further). -->
+      <div
+        class="split"
+        role="separator"
+        aria-orientation="vertical"
+        aria-label="Resize the document"
+        aria-valuenow={shownWidth}
+        aria-valuemin={MIN_WIDTH}
+        aria-valuemax={maxWidth}
+        tabindex="0"
+        onpointerdown={splitDown}
+        onpointermove={splitMove}
+        onpointerup={splitUp}
+        onpointercancel={splitUp}
+        onkeydown={splitKey}
+      ></div>
+    {/if}
+    <div class="docslot" class:cover style={cover ? undefined : `width: ${shownWidth}px`}>
+      <!-- Its own chunk, loaded the first time a document opens. -->
+      {#await import('./DocPanel.svelte') then { default: DocPanel }}
+        <DocPanel {doc} {cover} {narrow} />
+      {/await}
+    </div>
+  {/if}
 </div>
 
 {#if chat.viewing}
@@ -274,17 +396,96 @@
 
 <style>
   .chat {
+    position: relative;
     flex: 1 1 auto;
     display: flex;
     min-height: 0;
   }
+  .listslot.aside {
+    display: none;
+  }
+  .listslot {
+    display: contents;
+  }
+  /* The document beside the conversation, its width the split's. */
+  .docslot {
+    flex: 0 0 auto;
+    display: flex;
+    min-height: 0;
+  }
+  .docslot > :global(.docpanel) {
+    flex: 1 1 auto;
+  }
+  .docslot.cover {
+    position: absolute;
+    inset: 0;
+    z-index: 5;
+  }
+  .split {
+    flex: 0 0 6px;
+    margin: 0 -3px;
+    position: relative;
+    z-index: 2;
+    cursor: col-resize;
+    touch-action: none;
+  }
+  .split::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 2px;
+    width: 2px;
+    background: transparent;
+    transition: background 0.15s;
+  }
+  .split:hover::after,
+  .split:focus-visible::after {
+    background: var(--yap-primary-line);
+  }
+  .split:focus-visible {
+    outline: none;
+  }
   .thread {
+    position: relative;
     flex: 1 1 auto;
     display: flex;
     flex-direction: column;
     min-width: 0;
     min-height: 0;
     padding: 16px 20px;
+  }
+  .thread.withbtn {
+    padding-left: 44px;
+  }
+  .showchats {
+    position: absolute;
+    top: 10px;
+    left: 8px;
+    z-index: 3;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    padding: 0;
+    border: 1px solid var(--yap-border-subtle);
+    border-radius: var(--yap-r);
+    background: var(--yap-s1);
+    color: var(--yap-muted);
+    cursor: pointer;
+  }
+  .showchats:hover {
+    color: var(--yap-fg);
+    border-color: var(--yap-border-hover);
+  }
+  .showchats:focus-visible {
+    outline: 2px solid var(--yap-focus-ring);
+    outline-offset: 1px;
+  }
+  .showchats svg {
+    width: 15px;
+    height: 15px;
   }
   .shotview {
     position: fixed;

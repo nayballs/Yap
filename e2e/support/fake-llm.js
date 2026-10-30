@@ -17,7 +17,9 @@
 // and error states. For the AI Chat's tool loop (src-tauri/src/chat/tools.rs) a
 // spec scripts the model call by call (`scriptChat`): each chat call that
 // offers tools takes the next step, a tool call or an answer, and the
-// request record keeps the messages (the tool results Yap sent back).
+// request record keeps the messages (the tool results Yap sent back). A
+// step with a `gate` (a promise) waits for it before it answers: the spec
+// acts mid-turn (chat-documents.spec.js edits a document Chat is writing).
 //
 // It also answers the providers' own web searches (src-tauri/src/web/
 // native.rs), the sub-call Yap makes for a `web_search` with "The AI's own
@@ -781,15 +783,24 @@ export async function startFakeLlm() {
           ? {
               role: 'assistant',
               content: step.preamble ?? null,
+              // `args` may be a function of the request (an id a tool gave
+              // earlier in the turn: a document's, say).
               tool_calls: step.tools.map(({ name, args }) => ({
                 id: `call_${++callIds}`,
                 type: 'function',
-                function: { name, arguments: JSON.stringify(args) },
+                function: { name, arguments: JSON.stringify(typeof args === 'function' ? args(record) : args) },
               })),
             }
           : { role: 'assistant', content: step.content };
         // A step that thinks first (`reasoning`), as llama.cpp sends it apart.
         if (step.reasoning) message.reasoning_content = step.reasoning;
+        // A step held until the spec lets it go (`gate`: a promise), so the
+        // spec can act while the model is mid-turn (a person editing a
+        // document Chat is writing).
+        if (step.gate) {
+          record.gated = true;
+          await step.gate;
+        }
         await answerWith(message, step.tools ? 'tool_calls' : 'stop', step.stream ?? paces.get(kind) ?? {}, step.counts ?? usages.get(kind) ?? null);
         return;
       }
