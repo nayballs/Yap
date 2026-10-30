@@ -476,7 +476,8 @@ to **Run again** from Home.
   `apply_dictionary` changing the cleaned text). `due` (pure): the first in
   `ORDER` not shown before, never within 10 minutes of another. After a
   paste that landed (`after_dictation`, a thread of its own: it waits out
-  the dictation), through `notice::place_tip` ("featureTip"): the main
+  the dictation; none offered, nor counted, while a meeting records), through
+  `notice::place_tip` ("featureTip"): the main
   window's toast (`yap-feature-tip` → `lib/notices/featureTips.js`, chip
   Tip; a snippet's or the dictionary's with Open Dictionary) or a Yap bar
   card, never a Windows notification; counted when shown, in hints.json's
@@ -948,7 +949,8 @@ to **Run again** from Home.
   **best** (`best`, pure) is the highest score that heard you, the earlier
   in the order on a tie. `to_listen` (pure): the connected ones in the order
   Yap tries them, a software microphone only when it's in the person's
-  order, six at most. One quiz at a time; `mic_quiz_cancel`. The page
+  order, six at most. One quiz at a time; `mic_quiz_cancel` (also when the
+  setup window is closed mid-quiz, lib.rs). The page
   (`components/MicQuiz.svelte`: the setup's mic step, Settings → Dictation
   → Microphone → Mic quiz) puts the one picked first in the order. The log
   says counts and verdicts, never names at `info`. Test mode: made-up
@@ -995,7 +997,8 @@ to **Run again** from Home.
   Audio mic at 48 kHz isn't) with another mic connected → "Bluetooth headsets
   sound worse while their mic is on: try the PC's mic" (or the other mic's
   name; `other_mic`: not Bluetooth or a software device, the laptop's own
-  first, then the order), with **Microphones** — after any dictation on
+  first — never with its lid closed (`lid.rs`) —, then the order), with
+  **Microphones** — after any dictation on
   one, its signal weak or not; clipped → "…turn its level down in Windows'
   sound settings"; quiet → "Move closer to the microphone, or turn its level
   up…", both with **Sound settings** (`alert::OPEN_SOUND_SETTINGS`,
@@ -1006,9 +1009,9 @@ to **Run again** from Home.
   shown once the dictation is done (`notice::moment`, within a minute), in
   one place (`notice::place`: the main window's toast, `yap-mic-tip` →
   `lib/notices/micTips.js`, kind `tip`; else a Yap bar card `micTip`,
-  never a Windows notification); "Show tips" off, none; notice kind
-  `micTip` is a tip held over dictations and meetings, the same words not
-  twice in a day. The log: the levels and the trouble (numbers only). Test
+  never a Windows notification); "Show tips" off, none; while a meeting
+  records, none offered or counted; notice kind `micTip` is a tip held over
+  dictations and meetings, the same words not twice in a day. The log: the levels and the trouble (numbers only). Test
   mode judges nothing until `e2e_mic_tips { on }` (which also forgets the
   counts and returns the last judgement); made-up Bluetooth mics open at
   16 kHz. Unit tests (`mic_tips::tests`: synthetic speech in syllables over
@@ -1031,10 +1034,12 @@ to **Run again** from Home.
   (not a software one), the built-in one still tried last. A change is told
   as Windows' list changes are (`mics::lid_changed`: a warm stream on it
   closes, never mid-dictation). When the built-in one is all there is, a
-  dictation opening it says "Your laptop's lid is closed, so its microphone
+  dictation opening it — or starting on it already open, warm or kept
+  ready — says "Your laptop's lid is closed, so its microphone
   can't hear you · Open the lid, or plug in a microphone and put it first in
   Microphones" (`alert.rs` kind `lidClosed`, **Microphones**), once per
-  closing. Test mode reads no lid: debug-only `e2e_lid { closed }` (`null`:
+  closing. The registration is let go in `shutdown_cleanup` (`lid::stop`).
+  Test mode reads no lid: debug-only `e2e_lid { closed }` (`null`:
   no lid). Unit tests (`lid::tests`, `mics::tests`: the order with the lid
   closed, the built-in mic told apart), e2e `mic-tips.spec.js`. Not tried
   on a real laptop yet (this PC is a desktop).

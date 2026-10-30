@@ -144,7 +144,9 @@ The always-there pill above the taskbar: the `overlay` window's Rust side (regio
   of F9 to paste"). Each shows once; both are gone after the first
   dictation (`dictated`, called by `deliver`; any dictation already in the
   history counts, read once). `status` → `Status.firstUse` (`{idle,
-  recording, hold}` or null; none with "Show tips" or Feature tips off);
+  recording, hold}` or null; none with "Show tips" or Feature tips off,
+  nor while the first-run setup is on screen — `notice::onboarding_up`, the
+  bar told again as it shows and goes —, as tips wait it out);
   the page calls `bar_pointer_shown {kind}` as it shows one, counted in
   hints.json's `pointers` (`coaching::update_record`). Test mode shows none
   unless a spec asks (`e2e_bar_pointer`, as for someone who has never
