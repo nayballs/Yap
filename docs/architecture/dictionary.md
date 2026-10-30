@@ -281,13 +281,19 @@ The correction dictionary: near-miss (fuzzy) matching, several ways one word is 
   box, not read-only) and reads it **whole** (≤ 15,000 chars, the caret in
   it), finds the pasted text right after the paste (the occurrence at the
   caret) and remembers ~24 chars either side of it (`Anchors`, with an
-  8-char fallback when those were edited), then every 700 ms (reads ≥ 400 ms
+  8-char fallback when those were edited; a right neighbour that was the
+  rest of the field — a space or a line break after a paste at its end,
+  which the paste has too — ends the span where the field's end still is),
+  then every 700 ms (reads ≥ 400 ms
   apart) for **60 s** finds the span between them again — **focused or
   not** (no end on a focus/app change: a fix often follows a glance
   elsewhere). Each read's span within the **drift gate** (`within_drift`:
   char Levenshtein, lowercased, ≤ `0.4/(len/30+1)+0.2` of the paste's
   length) becomes the **last good edit**. It ends (`End`, named in the
-  debug log: `time_up`, `next_dictation` (`pipeline::dictation_state`),
+  debug log: `time_up`, `next_dictation` (`pipeline::dictation_state`, or
+  any paste of Yap's — "Use what I said", a transform, a rewrite, Paste
+  last transcript: `yap_pastes`, from `text_injector` — so Yap's own text
+  is never judged as the person's fix),
   `field_emptied` (a chat message sent), `region_emptied` (the dictation
   deleted), `region_gone` (its neighbours deleted), `anchor_mismatch`,
   `enter_pressed` (a line break added right after it), `unreadable` (3
@@ -458,7 +464,9 @@ The correction dictionary: near-miss (fuzzy) matching, several ways one word is 
     correction spelling that word), and its toast has Undo (`undoImport`).
   - **Export…** — everything (the bar's Export…) or the selection (the
     selection's): **CSV** (snippets, stars and ≈ kept; a BOM so Excel
-    reads it as UTF-8; Import… reads it back the same) or **text**
+    reads it as UTF-8; a cell starting with `=`, `+`, `-`, `@`, a tab or a
+    line break gets an apostrophe first, so a spreadsheet never runs it as
+    a formula, and Import… takes it off; Import… reads it back the same) or **text**
     (`heard → written` a line, corrections only: "Snippets need CSV" says
     how many were left out). A word heard several ways is a row (a line) a
     way, the written word on each.

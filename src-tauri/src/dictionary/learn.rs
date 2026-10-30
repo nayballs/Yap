@@ -793,6 +793,8 @@ pub(crate) struct Anchors {
     /// The paste began at the very start of the field / ended at its end.
     at_start: bool,
     at_end: bool,
+    /// `right` is everything after the paste, to the field's end.
+    right_is_tail: bool,
     /// The pasted text's length, in characters.
     chars: usize,
     /// It begins a sentence.
@@ -819,6 +821,7 @@ impl Anchors {
             right: head(&w.text[end..], ANCHOR_CHARS).to_string(),
             at_start: start == 0 && w.from_start,
             at_end: end == w.text.len() && w.to_end,
+            right_is_tail: w.to_end && w.text[end..].chars().count() <= ANCHOR_CHARS,
             chars: pasted.chars().count(),
             starts_sentence: before_starts_sentence(before),
         })
@@ -867,10 +870,18 @@ impl Anchors {
         } else {
             w.text.match_indices(left).map(|(i, m)| i + m.len()).collect()
         };
+        // The right neighbour was the whole rest of the field (a space or a
+        // line break after a paste at its end, which the paste has too):
+        // the span ends where the field's end still is, not at its first
+        // space or line break.
+        let tail = (self.right_is_tail && right.len() == self.right.len() && w.to_end && w.text.ends_with(right))
+            .then(|| w.text.len() - right.len());
         let mut best: Option<(usize, usize, usize)> = None; // (start, end, off by)
         for s in starts {
             let end = if right.is_empty() {
                 (self.at_end && w.to_end).then_some(w.text.len())
+            } else if let Some(e) = tail.filter(|&e| e >= s) {
+                Some(e)
             } else {
                 w.text[s..].find(right).map(|i| s + i)
             };
@@ -1108,6 +1119,21 @@ impl Watch {
 /// Each paste's watch has a number; a newer one ends the older.
 static WATCHES: AtomicU64 = AtomicU64::new(0);
 
+/// Yap is pasting into an app again (`text_injector`): "Use what I said",
+/// a rewrite or a transform of the last dictation, a transform's result
+/// over a selection, Paste last transcript… none of which starts a
+/// recording. A field being watched changes by Yap's hand now, not the
+/// person's: its watch ends with what it saw before (never a word Yap or
+/// its AI wrote offered as the person's correction).
+pub fn yap_pastes() {
+    WATCHES.fetch_add(1, Ordering::SeqCst);
+}
+
+/// Watch `gen` is still the current one (no paste of Yap's since).
+fn current_watch(gen: u64) -> bool {
+    WATCHES.load(Ordering::SeqCst) == gen
+}
+
 /// A dictation's text `pasted` (as pasted, fitted to the cursor) just went
 /// into `target`: watch that field for a while for corrections, on a thread
 /// of its own (see the module docs). `enabled`: `learn_words`. Never in a
@@ -1136,7 +1162,7 @@ pub fn after_paste(app: &AppHandle, pasted: &str, target: Option<isize>, enabled
 }
 
 fn watch(app: &AppHandle, pasted: &str, hwnd: isize, gen: u64, dictations: u64) {
-    let superseded = || WATCHES.load(Ordering::SeqCst) != gen || crate::dictation::pipeline::dictation_state().0 != dictations;
+    let superseded = || !current_watch(gen) || crate::dictation::pipeline::dictation_state().0 != dictations;
     // Let the paste land.
     std::thread::sleep(Duration::from_millis(350));
     let Some(field) = crate::pasting::selection::WatchedField::open(hwnd) else {
@@ -2252,6 +2278,62 @@ mod tests {
         // Not in the field as pasted, or not read: no watch at all.
         assert!(matches!(staged_watch(PASTED, &[Some("Other text".into())]), Err(End::NotFound)));
         assert!(matches!(staged_watch(PASTED, &[None]), Err(End::Unreadable)));
+    }
+
+    #[test]
+    fn a_paste_at_the_end_followed_by_a_space_or_a_line_break_is_found_whole() {
+        // The field ends with a space (or a line break) after the paste:
+        // that's the right neighbour, and the paste has spaces of its own.
+        let (edited, _, _) = staged_watch(
+            PASTED,
+            &[
+                Some(format!("Notes. {PASTED} ")),
+                Some("Notes. Deploy it to Kubernetes. ".into()),
+                Some(String::new()),
+            ],
+        )
+        .expect("started");
+        assert_eq!(edited.as_deref(), Some("Deploy it to Kubernetes."));
+        // Two lines pasted at the end of a document (its last paragraph
+        // mark after them).
+        let pasted = "Deploy it to cube and eighties.\nThen tell Sam.";
+        let (edited, _, _) = staged_watch(
+            pasted,
+            &[
+                Some(format!("Notes:\n{pasted}\n")),
+                Some("Notes:\nDeploy it to Kubernetes.\nThen tell Sam.\n".into()),
+                Some(String::new()),
+            ],
+        )
+        .expect("started");
+        assert_eq!(edited.as_deref(), Some("Deploy it to Kubernetes.\nThen tell Sam."));
+        // A word added: the whole span still.
+        let (edited, _, _) = staged_watch(
+            PASTED,
+            &[
+                Some(format!("Notes. {PASTED} ")),
+                Some("Notes. Deploy it to Kubernetes now. ".into()),
+                Some(String::new()),
+            ],
+        )
+        .expect("started");
+        assert_eq!(edited.as_deref(), Some("Deploy it to Kubernetes now."));
+    }
+
+    #[test]
+    fn a_paste_of_yaps_ends_the_watch_with_what_it_saw_before() {
+        // "Use what I said", a transform or a rewrite replaces the paste
+        // without a recording: the watch on that field ends there.
+        let gen = WATCHES.fetch_add(1, Ordering::SeqCst) + 1;
+        assert!(current_watch(gen));
+        yap_pastes();
+        assert!(!current_watch(gen));
+        // …judging only the person's fix before it, never Yap's text after.
+        let mut w = Watch::start(&whole_field(&fixed(PASTED)), PASTED).expect("started");
+        assert_eq!(w.step(POLL, false, || Some(whole_field(&fixed("Deploy it to Kubernetes.")))), None);
+        let yaps = || Some(whole_field(&fixed("Please deploy it to Kubernetes clusters.")));
+        assert_eq!(w.step(POLL * 2, !current_watch(gen), yaps), Some(End::NextDictation));
+        assert_eq!(w.last_good(), Some("Deploy it to Kubernetes."));
     }
 
     #[test]

@@ -456,7 +456,7 @@ pub async fn run(plan: &Plan, r: Run) -> Outcome {
             if !front(r.target).await {
                 return stop(Why::Window, mi + 1, 0, sent, steps);
             }
-            if let Err(e) = text_injector::press_submit(key).await {
+            if let Err(e) = text_injector::press_submit(key, r.target).await {
                 tracing::warn!("The send key didn't go: {e}");
                 return stop(Why::Keys, mi + 1, 0, sent, steps);
             }

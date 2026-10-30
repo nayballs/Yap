@@ -1599,9 +1599,18 @@ pub fn e2e_paste_fails(why: Option<String>) -> Result<(), String> {
     Ok(())
 }
 
-/// Simulate the auto-submit keystroke in the focused window. `key` is one of
-/// "enter", "ctrlEnter", or "shiftEnter".
-pub async fn press_submit(key: &str) -> Result<(), String> {
+/// Whether the submit key may go now: into `target` only while it's the
+/// window in front (`front`) — a dialog that popped up over it after the
+/// paste, or another window the person went to, never gets the Enter.
+/// `None` (no window of its own: the window in front) goes. Pure.
+pub(crate) fn submit_goes(target: Option<isize>, front: Option<isize>) -> bool {
+    target.is_none() || front == target
+}
+
+/// Simulate the auto-submit keystroke in `target` (the dictation's window;
+/// `None`: the window in front), only while it's in front. `key` is one
+/// of "enter", "ctrlEnter", or "shiftEnter".
+pub async fn press_submit(key: &str, target: Option<isize>) -> Result<(), String> {
     if crate::shell::e2e::active() && !crate::shell::realtest::on() {
         info!("e2e: not pressing {} in another app", key);
         return Ok(());
@@ -1610,7 +1619,14 @@ pub async fn press_submit(key: &str) -> Result<(), String> {
     tokio::task::spawn_blocking(move || {
         // Robot mode: only in a window the test opened, checked right
         // before the key goes out (always fine in a normal run).
-        crate::shell::realtest::recheck_foreground(None, &format!("press {key}"))?;
+        crate::shell::realtest::recheck_foreground(target, &format!("press {key}"))?;
+        // The window the text went into, still in front: else the key
+        // would land in whatever came up over it (a dialog's default
+        // button, another app).
+        if !submit_goes(target, current_foreground()) {
+            info!(key, "Not pressing the key: the dictation's window isn't in front any more");
+            return Err("the dictation's window isn't in front".to_string());
+        }
         // An app running as administrator would drop the key anyway.
         if current_foreground().is_some_and(crate::pasting::elevated::target_blocked) {
             info!(key, "Not pressing the key: the app runs as administrator");
@@ -1618,7 +1634,7 @@ pub async fn press_submit(key: &str) -> Result<(), String> {
         }
         #[cfg(target_os = "windows")]
         platform::press_submit(&key).map_err(|e| format!("Windows didn't take the {key} key: {e}"))?;
-        crate::shell::realtest::check_after(None, &format!("{key} key"));
+        crate::shell::realtest::check_after(target, &format!("{key} key"));
         #[cfg(not(target_os = "windows"))]
         {
             let _ = &key;
@@ -2386,6 +2402,9 @@ fn inject_text_sync(
 ) -> Result<Delivery, String> {
     let key = kind.paste_key();
     info!(len = text.len(), keys = key.name(), "Injecting text via clipboard paste");
+    // A field the correction watch is reading changes by Yap's hand now
+    // (a swap, a rewrite, a transform): never learned as the person's fix.
+    crate::dictionary::learn::yap_pastes();
 
     // Small delay to let focus settle after voice recording stops.
     std::thread::sleep(std::time::Duration::from_millis(50));
@@ -2744,6 +2763,21 @@ mod tests {
         ];
         assert_eq!(pick_paste_window(&windows, own), Some(8));
         assert_eq!(pick_paste_window(&windows[..7], own), None);
+    }
+
+    #[test]
+    fn the_submit_key_goes_only_into_the_dictations_window() {
+        // Still in front: it goes.
+        assert!(submit_goes(Some(0x1234), Some(0x1234)));
+        // A dialog that popped up over it after the paste, or another
+        // window: never there.
+        assert!(!submit_goes(Some(0x1234), Some(0x5678)));
+        // Nothing in front (Yap's own window has it): not the dictation's.
+        assert!(!submit_goes(Some(0x1234), None));
+        // No window of its own (the Send shortcut's "window in front"
+        // when Yap's own had it): as before.
+        assert!(submit_goes(None, Some(0x5678)));
+        assert!(submit_goes(None, None));
     }
 
     #[test]

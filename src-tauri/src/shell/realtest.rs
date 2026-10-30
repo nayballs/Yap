@@ -651,17 +651,20 @@ pub mod commands {
     /// (UI Automation; no Ctrl+C in robot mode) — none, right after a
     /// dictation there, and that dictation is rewritten in place
     /// (`as_said.rs`) — then the AI (the cleanup model, unless Commands has
-    /// its own) and the paste. Returns what it did.
+    /// its own) and the paste. Returns what it did. `pause_ms`: that long
+    /// between the key press and the rest, as a person talking (the test
+    /// may move the focus meanwhile).
     #[tauri::command]
     pub async fn realtest_rewrite_text(
         state: State<'_, AppState>,
         text: String,
         hwnd: Option<i64>,
+        pause_ms: Option<u64>,
     ) -> Result<crate::dictation::pipeline::Rewritten, String> {
         only_robot()?;
         in_front(hwnd)?;
         let robot = robot_of(&state)?;
-        robot.rewrite_text(text).await
+        robot.rewrite_text(text, pause_ms).await
     }
 
     /// Saved transform `id` as its shortcut runs it, in the window in front

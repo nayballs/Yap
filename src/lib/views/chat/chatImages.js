@@ -67,8 +67,17 @@ export function imageItems(img, { onview = null } = {}) {
   ];
 }
 
-/** The picture a paste event carries, if it has one (an image copied in any app). */
+/**
+ * The picture a paste event carries, if it has one (an image copied in any
+ * app). Not when it carries text too: Excel's cells, PowerPoint's or
+ * OneNote's text put a picture of themselves on the clipboard beside the
+ * words, and WebView2 hands that over as a PNG — the text pastes as ever.
+ * (A picture copied in Firefox brings its own address as the text: still
+ * the picture.)
+ */
 export function pastedImage(e) {
+  const text = e?.clipboardData?.getData?.('text/plain')?.trim() ?? '';
+  if (text && !/^(\S+:\/\/|data:)\S*$/.test(text)) return null;
   const items = [...(e?.clipboardData?.items ?? [])];
   const item = items.find((i) => i.kind === 'file' && i.type.startsWith('image/'));
   return item?.getAsFile() ?? null;

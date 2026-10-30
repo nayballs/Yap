@@ -541,7 +541,7 @@ impl Shared {
                     } else if let Some(key) = &submit {
                         // Once, whether auto-submit, the voice
                         // command or both asked for it.
-                        if let Err(e) = crate::pasting::text_injector::press_submit(key).await {
+                        if let Err(e) = crate::pasting::text_injector::press_submit(key, target).await {
                             tracing::warn!("Auto-submit failed: {}", e);
                             report.error = Some(e);
                         }
@@ -641,7 +641,7 @@ impl Shared {
             };
             let key = submit.as_deref().unwrap_or(&auto_submit_key);
             if target.is_none() || crate::pasting::text_injector::current_foreground() == target {
-                if let Err(e) = crate::pasting::text_injector::press_submit(key).await {
+                if let Err(e) = crate::pasting::text_injector::press_submit(key, target).await {
                     tracing::warn!("Voice command submit failed: {}", e);
                     report.error = Some(e);
                 }

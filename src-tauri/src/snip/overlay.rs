@@ -650,15 +650,22 @@ mod win {
         let pad_y = super::super::geom::scaled(6.0, scale);
         unsafe {
             let f = font(px);
-            // Measure on a scratch DC.
-            let probe = Dib::new(1, 1)?;
+            // Measure on a scratch DC. (No DIB, no pill: the font goes
+            // either way.)
+            let Some(probe) = Dib::new(1, 1) else {
+                let _ = DeleteObject(f.into());
+                return None;
+            };
             let old_font = SelectObject(probe.dc, f.into());
             let mut size = SIZE::default();
             let _ = GetTextExtentPoint32W(probe.dc, &wide, &mut size);
             SelectObject(probe.dc, old_font);
             drop(probe);
             let (w, h) = (size.cx + 2 * pad_x, size.cy + 2 * pad_y);
-            let dib = Dib::new(w, h)?;
+            let Some(dib) = Dib::new(w, h) else {
+                let _ = DeleteObject(f.into());
+                return None;
+            };
             // Opaque ink, then the text on it.
             let (r, g, b) = colours::LABEL;
             let pixels = std::slice::from_raw_parts_mut(dib.bits, (w * h * 4) as usize);

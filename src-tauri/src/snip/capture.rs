@@ -576,6 +576,13 @@ pub(crate) mod win {
             })
         };
         if force != Force::Gdi {
+            // A device lost since (a driver update or reset, a dock or an
+            // eGPU unplugged) is made again, not used dead for every snip
+            // after (GDI, an HDR screen washed out, until Yap restarts).
+            if gpu_slot.as_ref().is_some_and(|g| unsafe { g.device.GetDeviceRemovedReason() }.is_err()) {
+                tracing::warn!("snip: the Direct3D device was lost; making a new one");
+                *gpu_slot = None;
+            }
             if gpu_slot.is_none() {
                 let t = Instant::now();
                 *gpu_slot = gpu().map_err(|e| tracing::warn!("snip: no Direct3D device ({e})")).ok();

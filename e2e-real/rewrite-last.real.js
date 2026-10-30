@@ -212,3 +212,43 @@ test('a terminal: never rewritten in place — new text written at its prompt, a
   expect(out).toMatchObject({ last: false, outcome: 'pasted', text: WRITTEN });
   await expect.poll(() => lines().at(-1)).toBe(`PS> ${CLEANED}${WRITTEN}`);
 });
+
+// A selection's rewrite while the focus wanders (pasting/selection.rs
+// `keep_focus` / `restore_focus`, 2026-10-29): a click on the page's own
+// text while you talk moves the selection out of a web editor and the
+// focus off it. Putting the focus back on a contenteditable puts its caret
+// at its start in Chromium (the selection isn't in it any more), so the
+// rewrite must replace the words selected, or leave the editor alone —
+// never go in beside them.
+test("a web editor's selection, the page clicked while you talk: replaced, or left alone", async ({ robot }) => {
+  test.skip(!edgeExe(), 'Microsoft Edge is not installed');
+  const BEFORE = 'Please send the report by Friday.';
+  const page = await robot.page(
+    `<p id="note">A note on the page.</p><div id="box" contenteditable="true" role="textbox" aria-multiline="true" aria-label="Message"><p>${BEFORE}</p></div><button id="send">Send</button>`,
+  );
+  // "send the report by Friday" selected in the editor, the focus in it.
+  await page.focus();
+  await page.evaluate(() => {
+    const box = document.getElementById('box');
+    box.focus();
+    const t = box.querySelector('p').firstChild;
+    const r = document.createRange();
+    r.setStart(t, 7);
+    r.setEnd(t, 32);
+    const s = getSelection();
+    s.removeAllRanges();
+    s.addRange(r);
+  });
+  const going = robot.yap.invoke('realtest_rewrite_text', { text: 'make it more formal', hwnd: page.hwnd, pauseMs: 1_500 });
+  await sleep(500);
+  // A click on the page's text: the selection goes there, the focus off the editor.
+  await page.evaluate(() => {
+    getSelection().collapse(document.getElementById('note').firstChild, 3);
+    document.activeElement?.blur();
+  });
+  const out = await going;
+  expect(out.last).toBe(false);
+  await sleep(1_000);
+  const text = await page.evaluate(() => document.getElementById('box').innerText.trim());
+  expect([`Please ${FORMAL}.`, BEFORE]).toContain(text);
+});

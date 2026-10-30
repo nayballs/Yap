@@ -63,6 +63,42 @@ test.describe('a web page', () => {
     expect((await robot.lastPaste()).refocus).toBe('putBack');
   });
 
+  // The submit key (text_injector.rs `press_submit`, `submit_goes`): a
+  // window that comes up over the dictation's after the paste — a dialog,
+  // a popup — never gets the Enter meant for the message box.
+  test('a window that comes up after the paste never gets the submit key', async ({ robot }) => {
+    const page = await robot.page(`<textarea id="box" aria-label="Message"></textarea>
+<script>
+  window.enters = 0;
+  window.popupEnters = 0;
+  const box = document.getElementById('box');
+  box.addEventListener('keydown', (e) => { if (e.key === 'Enter') window.enters++; });
+  // The paste opens a popup, which takes the front (a paste is a key press:
+  // the page may open one).
+  box.addEventListener('input', () => {
+    if (window.pop) return;
+    window.pop = window.open('', 'pop', 'popup,width=320,height=200,left=200,top=200');
+    window.pop.document.write('<title>Popup</title><input id="p" autofocus>');
+    window.pop.document.addEventListener('keydown', (e) => { if (e.key === 'Enter') window.popupEnters++; });
+    window.pop.focus();
+  });
+</script>`);
+    await robot.configure({ autoSubmit: true });
+    try {
+      await page.focus();
+      const r = await robot.yap.invoke('realtest_dictate_text', { text: 'Ready when you are.', hwnd: page.hwnd });
+      expect(r.leftOnClipboard).toBe(false);
+      await expect.poll(() => page.evaluate(() => document.getElementById('box').value)).toBe(r.text);
+      // The key went nowhere: not into the popup, not into the box behind it.
+      expect(r.error).toMatch(/isn't in front|lost the focus|the test didn't open it/);
+      expect(await page.evaluate(() => window.popupEnters)).toBe(0);
+      expect(await page.evaluate(() => window.enters)).toBe(0);
+    } finally {
+      await page.evaluate(() => window.pop?.close()).catch(() => {});
+      await robot.configure({ autoSubmit: false });
+    }
+  });
+
   test('another window while you talk: the dictation goes back to its own window and box, as before', async ({ robot }) => {
     const { pad } = robot;
     const page = await robot.editor();
