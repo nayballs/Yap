@@ -84,7 +84,7 @@
       // Saved straight away (Settings' copy may already say "on" if it was
       // switched off elsewhere), then mirrored so its auto-save agrees.
       const fresh = await invoke('get_config');
-      await invoke('save_config', { cfg: { ...fresh, bridgeEnabled: true } });
+      await invoke('save_config', { cfg: { ...fresh, bridgeEnabled: true }, base: fresh });
       cfg.bridgeEnabled = true;
       for (let i = 0; i < 20 && !bridge.running; i++) {
         await refreshBridge();

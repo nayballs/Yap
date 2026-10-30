@@ -90,7 +90,11 @@ style neither).
   and not here is adopted into the copy (`adoptSaved`; a provider adopted
   sets the Language Models tab's mode, scopes remount their tabs); the
   **auto-save** (`persist`) reads config.json, puts this copy's changes onto
-  it, adopts the rest, and writes nothing when the copy has nothing to add.
+  it, adopts the rest, and writes nothing when the copy has nothing to add;
+  `save_config` gets what it read as `base`, and Rust merges the changes
+  onto config.json as it is by then, under the save lock (2026-10-30,
+  config-and-data.md): a change Rust saved in the milliseconds between is
+  kept.
   A setting the person changes while a merge is under way is never
   overwritten (`adopt` skips it). The older one-off adoptions
   (`yap-config-patched`, `yap-chat-model-changed`, `yap-dictionary-learned`,

@@ -2100,6 +2100,50 @@ pub fn try_update(change: impl FnOnce(&mut YapConfig) -> Result<(), String>) -> 
     Ok(cfg)
 }
 
+/// A page's save (`mine`: the config it read, `base`, with its changes)
+/// put onto config.json as it is now (`now`), for [`update`]: what the page
+/// changed comes from it, the rest from `now` — so a change Rust saved
+/// between the page's `get_config` and its `save_config` (the bar's mic
+/// pick, an offer's answer, a migration) stays. A JSON three-way merge, as
+/// the page's own (`settings/configMerge.js` `merge3`): objects merge key by
+/// key (one provider's key here, another's there); a setting changed on
+/// both sides keeps the page's, the edit being made. Pure.
+pub fn merge_saved(base: &YapConfig, mine: &YapConfig, now: &YapConfig) -> YapConfig {
+    // Compared as config.json keeps them: one dictionary row per way a word
+    // is heard (`also_heard` isn't serialised).
+    let value = |c: &YapConfig| {
+        let rows = YapConfig { dictionary: crate::dictionary::variants::rows(&c.dictionary), ..c.clone() };
+        serde_json::to_value(rows).ok()
+    };
+    let (Some(b), Some(m), Some(n)) = (value(base), value(mine), value(now)) else {
+        return mine.clone();
+    };
+    merge3(Some(&b), Some(&m), Some(&n))
+        .and_then(|v| serde_json::from_value(v).ok())
+        .unwrap_or_else(|| mine.clone())
+}
+
+/// [`merge_saved`]'s three-way merge of JSON values (`None`: not there).
+fn merge3(base: Option<&serde_json::Value>, mine: Option<&serde_json::Value>, theirs: Option<&serde_json::Value>) -> Option<serde_json::Value> {
+    use serde_json::Value;
+    if mine == base {
+        return theirs.cloned();
+    }
+    if theirs == base || mine == theirs {
+        return mine.cloned();
+    }
+    if let (Some(Value::Object(m)), Some(Value::Object(t))) = (mine, theirs) {
+        let b = base.and_then(Value::as_object);
+        let keys: std::collections::BTreeSet<&String> = m.keys().chain(t.keys()).collect();
+        let out = keys
+            .into_iter()
+            .filter_map(|k| merge3(b.and_then(|b| b.get(k)), m.get(k), t.get(k)).map(|v| (k.clone(), v)))
+            .collect();
+        return Some(Value::Object(out));
+    }
+    mine.cloned()
+}
+
 /// Apply `change` to a copy of `cfg`, kept only if it worked: whether
 /// anything changed.
 fn try_changed(cfg: &mut YapConfig, change: impl FnOnce(&mut YapConfig) -> Result<(), String>) -> Result<bool, String> {
@@ -2135,11 +2179,23 @@ fn update_at(path: &Path, change: impl FnOnce(&mut YapConfig)) -> Result<YapConf
     Ok(cfg)
 }
 
-/// `cfg` saved to `path` (see [`save`]).
+/// `cfg` saved to `path` (see [`save`]). A save that fails says so as every
+/// store's does (`shell/saving.rs`): "Couldn't save your settings: the disk
+/// is full." — the page shows it with Try again (`notices/saveErrors.js`).
+/// Nothing is kept here: the page that saved holds the change, and saves it
+/// again.
 fn save_at(path: &Path, cfg: &YapConfig) -> Result<(), String> {
+    use crate::shell::saving::{Reason, SaveError};
+    let failed = |reason| String::from(SaveError { what: "your settings", reason, whole: "your settings" });
     let _saves = lock_saves();
     if UNREAD.lock().unwrap_or_else(|p| p.into_inner()).iter().any(|p| p == path) {
-        return Err("Yap couldn't open config.json when it last read it, so it won't save over it".into());
+        // Yap couldn't open config.json when it last read it: never saved over.
+        return Err(failed(Reason::Unread));
+    }
+    // A test run's full disk (`e2e_fail_saves` with "config").
+    #[cfg(debug_assertions)]
+    if crate::shell::saving::staged_failure("config") {
+        return Err(failed(Reason::DiskFull));
     }
     // Anything this build saves has been through `load`'s migrations already,
     // so stamp the current version even if the caller's copy lost the field —
@@ -2157,16 +2213,16 @@ fn save_at(path: &Path, cfg: &YapConfig) -> Result<(), String> {
         input_device: cfg.mic_order.first().map(|m| m.name.clone()),
         ..cfg.clone()
     };
-    write_at(path, &cfg)
+    write_at(path, &cfg).map_err(|e| failed(Reason::at(&e, path)))
 }
 
 /// `cfg` written to `path` as it is (atomically).
-fn write_at(path: &Path, cfg: &YapConfig) -> Result<(), String> {
+fn write_at(path: &Path, cfg: &YapConfig) -> std::io::Result<()> {
     if let Some(dir) = path.parent() {
-        std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+        std::fs::create_dir_all(dir)?;
     }
-    let json = serde_json::to_string_pretty(cfg).map_err(|e| e.to_string())?;
-    atomic_write(path, &json).map_err(|e| e.to_string())
+    let json = serde_json::to_string_pretty(cfg).map_err(std::io::Error::other)?;
+    atomic_write(path, &json)
 }
 
 // ---- Telling the person -------------------------------------------------------
@@ -2745,6 +2801,80 @@ mod tests {
             }
         });
         assert_eq!(load_at(&path).cfg.dictionary.len(), 80);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A page's save (`save_config` with the config it read): put onto
+    /// config.json as it is now, under the save lock. Until 2026-10-30 it
+    /// saved the page's whole copy, so a change Rust saved between the
+    /// page's `get_config` and its `save_config` (the bar's mic pick, a
+    /// provider's key) was put back.
+    #[test]
+    fn a_pages_save_keeps_what_rust_saved_since_it_read_the_config() {
+        let dir = scratch("page-save");
+        let path = dir.join("config.json");
+        let mut first = YapConfig::default();
+        first.pp_api_keys.insert("groq".into(), "gsk-example".into());
+        first.dictionary = vec![entry("jason", "JSON")];
+        save_at(&path, &first).unwrap();
+        // The page reads it, and changes the hotkey, the dictionary and one key.
+        let base = load_at(&path).cfg;
+        let mut mine = base.clone();
+        mine.hotkey = "kb:121".into();
+        mine.dictionary.push(entry("tory", "Tauri"));
+        mine.pp_api_keys.insert("groq".into(), "gsk-new".into());
+        // Meanwhile Rust saves a mic pick, another provider's key, and
+        // "learn words" off.
+        update_at(&path, |c| {
+            c.mic_order = vec![crate::dictation::mics::MicChoice { id: "{0.0.1}".into(), name: "Desk mic".into() }];
+            c.pp_api_keys.insert("openai".into(), "sk-example".into());
+            c.learn_words = false;
+        })
+        .unwrap();
+        // The page's save.
+        update_at(&path, |c| *c = merge_saved(&base, &mine, c)).unwrap();
+        let saved = load_at(&path).cfg;
+        // The page's changes…
+        assert_eq!(saved.hotkey, "kb:121");
+        assert_eq!(saved.dictionary.iter().map(|e| e.from.as_str()).collect::<Vec<_>>(), ["jason", "tory"]);
+        assert_eq!(saved.pp_api_keys.get("groq").map(String::as_str), Some("gsk-new"));
+        // …and Rust's, to settings the page didn't touch.
+        assert_eq!(saved.mic_order.first().map(|m| m.name.as_str()), Some("Desk mic"));
+        assert_eq!(saved.input_device.as_deref(), Some("Desk mic"));
+        assert_eq!(saved.pp_api_keys.get("openai").map(String::as_str), Some("sk-example"));
+        assert!(!saved.learn_words);
+        // A setting changed on both sides keeps the page's (the edit being made).
+        let base = saved.clone();
+        let mine = YapConfig { learn_words: true, ..base.clone() };
+        update_at(&path, |c| c.learn_words = false).unwrap();
+        update_at(&path, |c| *c = merge_saved(&base, &mine, c)).unwrap();
+        assert!(load_at(&path).cfg.learn_words);
+        // Nothing changed on the page: config.json as it is.
+        let now = YapConfig { hotkey: "kb:122".into(), ..base.clone() };
+        assert_eq!(merge_saved(&base, &base, &now).hotkey, "kb:122");
+        // A word heard several ways (`also_heard`, in memory only) is never lost.
+        let heard = DictionaryEntry { also_heard: vec!["tori".into()], ..entry("tory", "Tauri") };
+        let mine = YapConfig { dictionary: vec![heard], ..base.clone() };
+        let rows: Vec<String> = merge_saved(&base, &mine, &base).dictionary.into_iter().map(|e| e.from).collect();
+        assert_eq!(rows, ["tory", "tori"]);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A save that fails says so as every store's does (`shell/saving.rs`):
+    /// the page knows it by "Couldn't save " and shows Try again.
+    #[test]
+    fn a_failed_save_says_what_and_why_and_writes_nothing() {
+        let dir = scratch("failed-save");
+        let path = dir.join("config.json");
+        save_at(&path, &YapConfig::default()).unwrap();
+        let before = std::fs::read(&path).unwrap();
+        crate::shell::saving::stage_failures("config", 1);
+        let cfg = YapConfig { hotkey: "kb:121".into(), ..YapConfig::default() };
+        assert_eq!(save_at(&path, &cfg).unwrap_err(), "Couldn't save your settings: the disk is full.");
+        assert_eq!(std::fs::read(&path).unwrap(), before);
+        // The next save writes it.
+        save_at(&path, &cfg).unwrap();
+        assert_eq!(load_at(&path).cfg.hotkey, "kb:121");
         let _ = std::fs::remove_dir_all(&dir);
     }
 

@@ -320,7 +320,19 @@
   and key (`ai/ai_model.rs`), the voice's volume and Speak replies (`voice/tts.rs`),
   Read aloud's speed (`voice/read_aloud.rs`) and the on-device context
   (`ai/local_llm.rs`), which until 2026-10-24 loaded, changed and saved on
-  their own (a lint-style test keeps them so).
+  their own (a lint-style test keeps them so). A page's **`save_config`**
+  goes through it too (2026-10-30): the page sends the config it read
+  (`base`, from `get_config`) with its changed copy, and
+  `config::merge_saved` puts what the page changed onto config.json as it
+  is then (a JSON three-way merge as the page's own `merge3`: objects key by
+  key, a setting changed on both sides keeps the page's), so a change Rust
+  saved between the page's read and its save (the bar's mic pick, an
+  offer's answer, a migration) is never put back. Without `base` (an e2e
+  test's `save_config`) the copy is saved as it is. A save that fails says
+  so as every store's does (`shell/saving.rs`'s words): "Couldn't save your
+  settings: the disk is full." — nothing kept in Rust: the page that saved
+  holds the change and its Try again saves it again (`saveErrors.js`
+  `retry`; the Dictionary view). `e2e_fail_saves` with "config" stages one.
   Every save then emits **`yap-config-saved`** to every window (`init`
   registers the app; Settings' copy adopts what changed,
   [frontend-settings.md](./frontend-settings.md); the theme follows). A unit

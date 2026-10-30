@@ -1092,8 +1092,9 @@ pub fn stage_failures(id: &str, count: u32) {
 }
 
 /// Whether this write of store `id` fails (one staged failure used up).
+/// config.json's saves ask too, as "config" (`config::save_at`).
 #[cfg(debug_assertions)]
-fn staged_failure(id: &str) -> bool {
+pub(crate) fn staged_failure(id: &str) -> bool {
     with_staged(|staged| use_one(staged, id))
 }
 

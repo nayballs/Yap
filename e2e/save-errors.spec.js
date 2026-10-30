@@ -98,3 +98,33 @@ test('a Skill that couldn’t be saved is kept, its form closes, and Try again s
     await closeSettings(main);
   }
 });
+
+// The Dictionary view saves config.json itself, and until 2026-10-30 a
+// failed save was swallowed (code reviews 2026-10-23 and 2026-10-30): a word
+// added on a full disk looked saved and was gone at the next start.
+test('a dictionary word that couldn’t be saved says so, stays in the list, and Try again saves it', async ({ yap, main, shot }) => {
+  await openView(main, 'Dictionary');
+  const corrections = main.getByRole('region', { name: 'Corrections' });
+  // Every save of config.json fails until it's let go (an edit saves more
+  // than once while it's typed).
+  await yap.invoke('e2e_fail_saves', { store: 'config', count: 100 });
+  try {
+    await corrections.getByRole('button', { name: '+ Add correction' }).click();
+    await corrections.getByRole('textbox', { name: 'Heard' }).last().fill('fern dale');
+    await corrections.getByRole('textbox', { name: 'Replace with' }).last().fill('Ferndale');
+    const toast = toastsWith(main, "Couldn't save your settings");
+    await expect(toast).toBeVisible();
+    await expect(toast).toContainText('The disk is full. Yap is keeping your changes and will try again with the next one.');
+    await shot(main, '05-dictionary-not-saved');
+    // In the list, not on disk.
+    await expect(corrections.getByRole('textbox', { name: 'Replace with' }).last()).toHaveValue('Ferndale');
+    expect(JSON.stringify(yap.readJson('config.json')?.dictionary ?? [])).not.toContain('Ferndale');
+
+    await yap.invoke('e2e_fail_saves', { store: 'config', count: 0 });
+    await toast.getByRole('button', { name: 'Try again' }).click();
+    await expect(toastsWith(main, 'Saved')).toBeVisible();
+    await expectStore(yap, 'config.json', (c) => (c.dictionary ?? []).some((e) => e.from === 'fern dale' && e.to === 'Ferndale'));
+  } finally {
+    await yap.invoke('e2e_fail_saves', { store: 'config', count: 0 });
+  }
+});

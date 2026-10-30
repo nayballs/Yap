@@ -385,7 +385,12 @@ The correction dictionary: near-miss (fuzzy) matching, several ways one word is 
   flag — drop it and an auto-save
   turns snippets into corrections. Settings → Dictation → Typing into apps has "Say
   “press enter” to send" (`voiceEnter`) under Auto-submit; the key picker
-  shows when either is on.
+  shows when either is on. The view saves half a second after an edit,
+  onto config.json as it is then (`save_config` with `base`); a save that
+  fails (a full disk) is said with Try again (`notices/saveErrors.js`,
+  "Couldn't save your settings: the disk is full.", 2026-10-30; it was
+  swallowed until then): the list keeps the edit, the next change saves it
+  too, and Try again saves it now.
 - **One correction, several ways it's heard** (2026-10-25, `variants.rs`):
   "+" beside "Heard" (and "Add another way it's heard" in the row's menu)
   adds a box under it, "Also heard as", each with its ×; the list shows

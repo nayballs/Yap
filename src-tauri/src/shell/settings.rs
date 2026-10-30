@@ -14,18 +14,24 @@ pub fn get_config() -> YapConfig {
 }
 
 /// Save config, re-apply the hotkey, and push it into the running pipeline.
+///
+/// `base`: the config the page read (`get_config`) and changed into `cfg`.
+/// With it, the page's changes are put onto config.json as it is now, in
+/// one step under the save lock (`config::merge_saved` in
+/// `config::try_update`): a change Rust saved in between (the bar's mic
+/// pick, an offer's answer, a migration) stays. Without it (an older
+/// page), `cfg` is saved as it is.
 #[tauri::command]
-pub fn save_config(
-    app: AppHandle,
-    state: State<'_, AppState>,
-    cfg: YapConfig,
-) -> Result<(), String> {
-    let prev = config::load();
-    // "Runs on" is what's chosen; the old GPU switch follows it (as saved).
-    let mut cfg = cfg;
-    cfg.use_gpu = cfg.stt_device != "cpu";
-    config::save(&cfg)?;
-    apply_config(&app, state, &prev, cfg);
+pub fn save_config(app: AppHandle, cfg: YapConfig, base: Option<YapConfig>) -> Result<(), String> {
+    change_config(&app, |now| {
+        *now = match &base {
+            Some(base) => config::merge_saved(base, &cfg, now),
+            None => cfg,
+        };
+        // "Runs on" is what's chosen; the old GPU switch follows it (as saved).
+        now.use_gpu = now.stt_device != "cpu";
+        Ok(())
+    })?;
     Ok(())
 }
 
