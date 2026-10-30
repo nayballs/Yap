@@ -30,7 +30,7 @@ store.
 
 | Module | What it holds |
 |---|---|
-| `settings/configSync.svelte.js` | The config copy (`config.cfg`, `loaded`, the "Saved ✓" pulse), `base` / `pristine`, `inTurn`, `adopt` / `adoptSaved` on `yap-config-saved`, `persist`, the 400 ms auto-save (`syncConfig`, with an `onAdopted(keys)` hook) |
+| `settings/configSync.svelte.js` | The config copy (`config.cfg`, `loaded`, the "Saved ✓" pulse), `base` / `pristine`, `inTurn`, `adopt` / `adoptSaved` on `yap-config-saved`, `persist`, the 400 ms auto-save (`syncConfig`, with an `onAdopted(keys)` hook; `autoSave` says a failed save with Try again) |
 | `settings/configDefaults.js` | `FIELD_DEFAULTS` (a new setting's default goes here) and `cleanConfig(cfg)`, the saved payload (was `buildClean`) |
 | `settings/configMerge.js` | The pure part: `merge3`, `fill`, `same`, `copy` |
 | `settings/adoptions.svelte.js` | `followOutsideChanges`: the one-off adoptions (`yap-config-patched`, `yap-provider-key-saved`, a call app's choice, the on-device context and state, the Chat chip's scope, spoken replies' switch / volume / speed, the consent message, the bar turned off) |
@@ -95,6 +95,19 @@ style neither).
   onto config.json as it is by then, under the save lock (2026-10-30,
   config-and-data.md): a change Rust saved in the milliseconds between is
   kept.
+  **A save that fails** (a full disk, config.json held by another
+  program; 2026-10-30, until then swallowed, and the change was gone at
+  the next start) is said as every store's is: "Couldn't save your
+  settings: the disk is full." with **Try again** (`autoSave` →
+  `notices/saveErrors.js`, its `retry` this copy's `persist`). Rust keeps
+  nothing for config.json, so the change stays in this copy (`base` isn't
+  moved): Try again saves it, and so does the next save that works (the
+  person changes something else), which takes the toast down
+  (`settled` → `clearSaveError`; only that toast, never one another
+  failure has taken over since). A burst of failed saves is one card (the
+  toasts' `save-failed` key); a failure changes nothing in the copy, so
+  nothing saves again by itself. A page that awaits `persist` itself
+  (the on-device model's switch) still gets the error to say its own way.
   A setting the person changes while a merge is under way is never
   overwritten (`adopt` skips it). The older one-off adoptions
   (`yap-config-patched`, `yap-chat-model-changed`, `yap-dictionary-learned`,
@@ -102,7 +115,10 @@ style neither).
   `dictionarySync.svelte.js`) still run; they and this agree. The copy and
   the merge are `settings/configSync.svelte.js`. e2e:
   `speech-models.spec.js` (a model switched on the Speech-to-Text page, then
-  as the tray does, survives a switch flipped in Settings).
+  as the tray does, survives a switch flipped in Settings);
+  `save-errors.spec.js` (a switch flipped while saves fail: one toast, the
+  switch still shown changed, Try again saves it; or the next change does,
+  and the toast goes).
 
 - **The nav** (`settings/nav.js` `NAV_GROUPS`, Claude-style scopes, sentence
   case): a **search box** on top ("Search settings", Ctrl F); then General ·

@@ -12,15 +12,45 @@
 // config.json's saves say so the same way ("Couldn't save your settings:
 // the disk is full.", config.rs `save_at`), but Rust keeps nothing: the page
 // that saved holds the change, and passes its own save as `retry` — Try
-// again runs it (the Dictionary view).
+// again runs it (the Dictionary view, Settings' auto-save). A page whose
+// next save of it worked takes the toast down (`clearSaveError`).
 import { invoke } from '@tauri-apps/api/core';
-import { toast } from '../ui/toast.svelte.js';
+import { toast, dismiss, isToastLive } from '../ui/toast.svelte.js';
 
 const START = "Couldn't save ";
+
+/**
+ * The failed-save toast last shown: what it's about ("Couldn't save your
+ * settings") and whose Try again it runs (`retry`). One card for every
+ * store (the same key), so a later failure takes it over.
+ */
+let shown = null;
 
 /** Whether `e` is a failed save (the change is kept in memory). */
 export function isSaveError(e) {
   return String(e ?? '').startsWith(START);
+}
+
+/** "Couldn't save your settings: the disk is full." → its two halves. */
+function parts(e) {
+  const message = String(e ?? '');
+  const cut = message.indexOf(': ');
+  return {
+    what: cut > 0 ? message.slice(0, cut) : message.replace(/\.$/, ''),
+    why: cut > 0 ? message.slice(cut + 2) : '',
+  };
+}
+
+/**
+ * A later save of what `e` failed to save worked (`retry`: the page's own
+ * save it was shown with): its toast goes, if it's still up and still that
+ * save's — one another failure has taken over since stays.
+ */
+export function clearSaveError(e, { retry = null } = {}) {
+  const { what } = parts(e);
+  if (!shown || shown.what !== what || shown.retry !== retry) return;
+  if (isToastLive(shown.id)) dismiss(shown.id);
+  shown = null;
 }
 
 /**
@@ -30,12 +60,9 @@ export function isSaveError(e) {
  * Rust didn't keep: config.json's).
  */
 export function showSaveError(e, { onSaved = null, again = false, retry: save = null } = {}) {
-  const message = String(e ?? '');
-  if (!message.startsWith(START)) return false;
-  const cut = message.indexOf(': ');
-  const what = cut > 0 ? message.slice(0, cut) : message.replace(/\.$/, '');
-  const why = cut > 0 ? message.slice(cut + 2) : '';
-  toast({
+  if (!isSaveError(e)) return false;
+  const { what, why } = parts(e);
+  const id = toast({
     kind: 'error',
     key: 'save-failed',
     chip: 'Saving',
@@ -45,6 +72,7 @@ export function showSaveError(e, { onSaved = null, again = false, retry: save = 
     duration: 20_000,
     action: { label: 'Try again', onClick: () => retry(onSaved, save) },
   });
+  shown = { id, what, retry: save };
   return true;
 }
 

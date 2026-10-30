@@ -332,7 +332,9 @@
   so as every store's does (`shell/saving.rs`'s words): "Couldn't save your
   settings: the disk is full." — nothing kept in Rust: the page that saved
   holds the change and its Try again saves it again (`saveErrors.js`
-  `retry`; the Dictionary view). `e2e_fail_saves` with "config" stages one.
+  `retry`; the Dictionary view, and Settings' auto-save, whose next save
+  that works also takes the toast down: frontend-settings.md).
+  `e2e_fail_saves` with "config" stages one.
   Every save then emits **`yap-config-saved`** to every window (`init`
   registers the app; Settings' copy adopts what changed,
   [frontend-settings.md](./frontend-settings.md); the theme follows). A unit
