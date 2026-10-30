@@ -10,11 +10,13 @@
 //! - **Planned first** ([`plan`], pure): the whole dictation is ready —
 //!   cleaned up, corrected, fitted — before the first message goes.
 //! - **Stops at the first doubt**, never sends on regardless: before each
-//!   message after the first, the chat box must have emptied (the last one
-//!   was sent: `selection::read_context`) and the window still be in front;
-//!   a paste, a key or the typing Windows didn't take ends it too. What's
-//!   left goes on the clipboard (privately) and the person is told which
-//!   message it stopped at ([`stopped_alert`]).
+//!   message after the first, the window must still be in front and its
+//!   chat box have emptied (the last one was sent:
+//!   `selection::read_context`), and every send key goes only with the
+//!   window in front; a paste, a key or the typing Windows didn't take ends
+//!   it too. What's left goes on the clipboard (privately) and the person is
+//!   told which message it stopped at ([`stopped_alert`]). A first paste
+//!   that doesn't go in at all leaves the whole dictation there.
 //! - **A key only on a sure sign**: Tab goes only when UI Automation shows
 //!   the app's list highlighting the person or file said
 //!   (`selection::picked_option`, `mentions::option_is`); else the typed
@@ -368,14 +370,16 @@ pub async fn run(plan: &Plan, r: Run) -> Outcome {
     };
     for (mi, pieces) in plan.messages.iter().enumerate() {
         if mi > 0 {
-            // The last message was sent (its box emptied), and the window
-            // is still the one it was for.
+            // The window is still the one it was for (its box is the one
+            // read: with another app in front nothing can be read, which
+            // would pass for empty), and the last message was sent (its box
+            // emptied).
+            if !front(r.target).await {
+                return stop(Why::Window, mi, 0, sent, steps);
+            }
             if !box_emptied(r.target).await {
                 // The last message's key didn't send it: it's still there.
                 return stop(Why::NotSent, mi, 0, sent.saturating_sub(1), steps);
-            }
-            if !front(r.target).await {
-                return stop(Why::Window, mi, 0, sent, steps);
             }
         }
         let mut picked = false;
@@ -407,7 +411,17 @@ pub async fn run(plan: &Plan, r: Run) -> Outcome {
                     let strict = r.strict || !first;
                     match text_injector::inject_text(&t, r.restore_clipboard, r.target, strict, r.kind).await {
                         Ok(Delivery::Pasted | Delivery::Typed) => steps.push(Step { paste: Some(t), ..Step::default() }),
-                        Ok(d) if first => return Outcome { delivery: Ok(d), steps, stopped: None },
+                        Ok(d) if first => {
+                            // Nothing went in, and the paste left only its own
+                            // piece on the clipboard: the whole dictation goes
+                            // there, as the notice the caller shows says — not
+                            // the first message alone.
+                            let all = rest(plan, 0, 0);
+                            if all != t.trim() && !test_run() && !text_injector::copy_privately(&all) {
+                                tracing::warn!("The whole dictation couldn't be put on the clipboard");
+                            }
+                            return Outcome { delivery: Ok(d), steps, stopped: None };
+                        }
                         Err(e) if first => return Outcome { delivery: Err(e), steps, stopped: None },
                         Ok(Delivery::WindowGone) => return stop(Why::Window, mi, pi, sent, steps),
                         _ => return stop(Why::Keys, mi, pi, sent, steps),
@@ -436,6 +450,12 @@ pub async fn run(plan: &Plan, r: Run) -> Outcome {
             }
         }
         if let Some(key) = &plan.send {
+            // The send key goes to the window in front: only the chat's.
+            // (Another window that came up meanwhile — a dialog, a call —
+            // would take the Enter.)
+            if !front(r.target).await {
+                return stop(Why::Window, mi + 1, 0, sent, steps);
+            }
             if let Err(e) = text_injector::press_submit(key).await {
                 tracing::warn!("The send key didn't go: {e}");
                 return stop(Why::Keys, mi + 1, 0, sent, steps);

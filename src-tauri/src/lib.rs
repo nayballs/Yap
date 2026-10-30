@@ -73,6 +73,10 @@ pub(crate) fn shutdown_cleanup() {
     ai::usage::store::flush();
     // A store whose last save failed (saving.rs): one more try.
     shell::saving::flush();
+    // A dictation still only promised on the clipboard (read_check.rs):
+    // written out, so it outlasts Yap.
+    #[cfg(windows)]
+    pasting::read_check::write_out_now();
 }
 
 /// `yap.exe mcp` (main.rs): serve MCP to an AI app over stdin/stdout until it

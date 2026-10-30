@@ -216,8 +216,10 @@ Putting a dictation into the app you're in: the clipboard paste and the submit k
   time nothing is put back, so an app reading late gets the dictation,
   never the old clipboard; the promise is kept 5 s more and a read then is
   noted (`Report::late`, "The paste was read late…" in the log), then the
-  text is written out so it outlasts Yap (`WM_RENDERALLFORMATS` writes it
-  out too). Watching the field for the old clipboard instead was
+  text is written out so it outlasts Yap. Yap quitting meanwhile writes it
+  out first (`write_out_now`, from `shutdown_cleanup`: Windows sends no
+  `WM_RENDERALLFORMATS` to a window whose thread is ending, so the text
+  would go with Yap — the `#[ignore]`d round trip shows both). Watching the field for the old clipboard instead was
   rejected: the old clipboard can be anything (an image, files, words
   already in the field) and only some fields can be read. **Terminals**:
   no edit-control check or UI Automation there, so the read is the check —
@@ -426,7 +428,10 @@ Putting a dictation into the app you're in: the clipboard paste and the submit k
   and the on-device model can't be relied on for it. AI cleanup that took
   the separators out (or rewrote them): the **words as said** are split
   instead (corrections and snippets, no cleanup), so the messages asked
-  for still go. **Undo**: a sent message can't be taken back by Yap (it's
+  for still go — never for a dictation a language shortcut translated or
+  a transform on every dictation rewrote (`Steps::rewritten`): its words
+  as said are another text, in another language perhaps, so only its own
+  separators count. **Undo**: a sent message can't be taken back by Yap (it's
   in the chat); "Use what I said" and rewriting the last dictation don't
   apply (as after any dictation a submit key sent); a cancelled
   dictation's Undo runs it again as a new one, into its own window or
@@ -474,12 +479,18 @@ Putting a dictation into the app you're in: the clipboard paste and the submit k
   into its window or nowhere), typing (`type_text`), keys
   (`press_step_key`: Tab, Backspace) and `press_submit`. **The whole text
   is ready first** (cleaned, corrected, fitted). **It stops at the first
-  doubt**: before each message after the first the box must have emptied
-  (`selection::read_context`: the last one was sent) and the window be in
-  front; a paste, the typing or a key Windows didn't take ends it too.
-  What's left goes on the clipboard privately and one alert says how far
-  it got ("Sent 1 of 3 messages · the rest is copied", `stopped_alert`,
-  kind "pasteBlocked"). After a picked mention the app's own space goes
+  doubt**: before each message after the first the window must be in
+  front and its box have emptied (`selection::read_context`: the last one
+  was sent; read once the window is in front — with another app there
+  nothing can be read, which would pass for empty), and each send key
+  goes only with the window in front (another that came up meanwhile
+  would take the Enter); a paste, the typing or a key Windows didn't take
+  ends it too. What's left goes on the clipboard privately and one alert
+  says how far it got ("Sent 1 of 3 messages · the rest is copied",
+  `stopped_alert`, kind "pasteBlocked"). The first paste not going in at
+  all (no text box, not read, an app running as administrator…) is said
+  as for any paste, with the whole dictation on the clipboard, not just
+  its first piece. After a picked mention the app's own space goes
   before a comma or a full stop (one Backspace, only when the field's text
   before the caret ends with a space). The log has counts and steps, never
   words. A plan of one plain paste goes the ordinary way (`in_steps`),
