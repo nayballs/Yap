@@ -854,7 +854,9 @@ to **Run again** from Home.
   or that it failed. `Status` (debug-only `e2e_mic_status`): open, live,
   Bluetooth, opens/closes and the last open's timing (`OpenTiming`: build,
   first audio, live, in ms from asking) — the log says the same at `info`
-  ("Microphone: live … first_audio_ms"). **Measured on this PC**
+  ("Microphone: live … first_audio_ms"; opened and closed with Bluetooth or
+  not, the rate, built in or not — the mic's name only at `debug`, as a
+  Bluetooth headset's can carry its owner's). **Measured on this PC**
   (2026-10-22; the `--ignored` `open_latency_this_pc`, five cold opens
   each): USB mics (a Razer Seiren Mini, a USB audio adapter) build in
   4–8 ms, their first audio arrives 38–47 ms after asking and starts

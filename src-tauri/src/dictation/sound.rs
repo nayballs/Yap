@@ -77,7 +77,9 @@ pub(crate) fn open_output(device: Option<&str>) -> Option<(rodio::OutputStream, 
                 if let Ok(pair) = rodio::OutputStream::try_from_device(&dev) {
                     return Some(pair);
                 }
-                tracing::warn!(device = name, "Failed to open chime output device; using default");
+                // Its name at debug only: a headset's can carry its owner's.
+                tracing::warn!("Failed to open chime output device; using default");
+                tracing::debug!(device = name, "Chime output device that wouldn't open");
             }
         }
     }

@@ -1080,13 +1080,9 @@ fn build_capture_stream(
     let native_rate = default_config.sample_rate().0;
     let channels = default_config.channels();
     let name = device.name().unwrap_or_else(|_| "unknown".into());
-    tracing::info!(
-        device = %name,
-        native_rate,
-        channels,
-        loopback,
-        "Meeting capture stream"
-    );
+    // The device's name at debug only: a headset's can carry its owner's.
+    tracing::info!(native_rate, channels, loopback, "Meeting capture stream");
+    tracing::debug!(device = %name, loopback, "Meeting capture stream's device");
 
     let stream_config = cpal::StreamConfig {
         channels,

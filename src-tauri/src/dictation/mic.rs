@@ -763,7 +763,7 @@ impl Owner {
 
     fn close(&mut self, why: &str) {
         if let Some(running) = self.stream.take() {
-            let device = running.device.clone();
+            let (device, bluetooth) = (running.device.clone(), running.bluetooth);
             drop(running);
             self.state.open.store(false, Ordering::SeqCst);
             self.state.live.store(false, Ordering::SeqCst);
@@ -775,7 +775,10 @@ impl Owner {
             if let Ok(mut c) = self.state.current.lock() {
                 *c = None;
             }
-            tracing::info!(device = %device, "Microphone closed: {}", why);
+            // Its name only at debug: a Bluetooth headset's can carry its
+            // owner's ("Sam's AirPods").
+            tracing::info!(bluetooth, "Microphone closed: {}", why);
+            tracing::debug!(device = %device, "Microphone closed");
         }
     }
 
@@ -794,7 +797,11 @@ impl Owner {
                 .input_devices()
                 .map_err(|e| format!("Failed to enumerate input devices: {}", e))?
                 .find(|d| d.name().map(|n| n == ep.name).unwrap_or(false))
-                .ok_or_else(|| format!("Input device not found: {}", ep.name))?,
+                .ok_or_else(|| {
+                    // The error goes to the log at warn: the name stays out.
+                    tracing::debug!(device = %ep.name, "Microphone: no input device by that name");
+                    "Input device not found".to_string()
+                })?,
             Target::Default => host
                 .default_input_device()
                 .ok_or_else(|| "No default input device available".to_string())?,
@@ -867,7 +874,9 @@ impl Owner {
                 t.open_ms = open_ms;
             }
         }
-        tracing::info!(device = %dev_name, native_rate, channels, bluetooth, open_ms, "Microphone opened");
+        let built_in = target.endpoint().is_some_and(|e| e.built_in);
+        tracing::info!(native_rate, channels, bluetooth, built_in, open_ms, "Microphone opened");
+        tracing::debug!(device = %dev_name, "Microphone opened");
         Ok(Running {
             _source: Source::Cpal(stream),
             device: dev_name,
@@ -939,7 +948,6 @@ impl Feed {
                     if let Some(t) = last.as_mut() {
                         t.live_ms = Some(ms);
                         tracing::info!(
-                            device = %t.device,
                             bluetooth = t.bluetooth,
                             open_ms = t.open_ms,
                             first_audio_ms = t.first_audio_ms,
