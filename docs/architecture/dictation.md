@@ -1354,7 +1354,11 @@ to **Run again** from Home.
   unit tests keep it in memory. Best-effort,
   gated by `history_enabled`. The stats are no longer derived from it
   (`stats.rs`, below): it hands them what they haven't counted
-  (`counted_since`). Powers `get_history`/`clear_history`. Every change
+  (`counted_since`). Powers `get_history`/`clear_history`, and Home's
+  `delete_history_entry`, which finds the entry by its audio's id when Home
+  lists one (two failed or cancelled dictations in the same second share
+  their time and empty text), else by time and text (`position_of`, pure;
+  since 2026-10-30), its audio deleted with it. Every change
   (a dictation or upload saved, an entry deleted from Home or the local API,
   all cleared) emits **`yap-history-changed`** after the write, which Home and
   Insights re-pull on. Not `yap-transcript`: a dictation emits that before it

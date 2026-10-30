@@ -457,7 +457,7 @@ fn is_dictation_app(app: &str) -> bool {
     app.trim().is_empty() || app.trim().to_ascii_lowercase().ends_with(".exe")
 }
 
-/// The entry Home lists at `ts` with `text` (the pair it deletes by, too).
+/// The entry Home lists at `ts` with `text`.
 pub fn find(ts: u64, text: &str) -> Option<HistoryEntry> {
     let mut guard = match STATE.lock() {
         Ok(g) => g,
@@ -500,16 +500,33 @@ pub fn delete_by_ts(ts: u64) -> bool {
     }
 }
 
-/// Delete one entry, matched by timestamp + final text (the pair is unique
-/// enough for a per-item delete from the Home feed; first match wins).
-pub fn delete(ts: u64, text: &str) {
+/// Where the entry Home lists at `ts` with `text` and `audio` (its audio's
+/// id, while it's kept: `listed`) is. By its audio when it has one: two
+/// failed or cancelled dictations in the same second both have no text, and
+/// the first match took the other one, its audio with it (review
+/// 2026-10-30). Else by time and text, never one whose audio Home lists
+/// (that row has its own id) — unless that's all there is (a caller that
+/// doesn't send the audio). Pure.
+fn position_of(entries: &[HistoryEntry], ts: u64, text: &str, audio: Option<&str>, listed: impl Fn(&str) -> bool) -> Option<usize> {
+    match audio {
+        Some(id) => entries.iter().position(|e| e.ts == ts && e.audio.as_deref() == Some(id)),
+        None => entries
+            .iter()
+            .position(|e| e.ts == ts && e.text == text && !e.audio.as_deref().is_some_and(&listed))
+            .or_else(|| entries.iter().position(|e| e.ts == ts && e.text == text)),
+    }
+}
+
+/// Delete one entry, the Home feed's: matched by its audio when Home lists
+/// it with one, else by timestamp + final text ([`position_of`]).
+pub fn delete(ts: u64, text: &str, audio: Option<&str>) {
     crate::pasting::text_injector::forget_last_transcript();
     let mut guard = match STATE.lock() {
         Ok(g) => g,
         Err(poisoned) => poisoned.into_inner(),
     };
     let entries = loaded(&mut guard);
-    if let Some(pos) = entries.iter().position(|e| e.ts == ts && e.text == text) {
+    if let Some(pos) = position_of(entries, ts, text, audio, crate::dictation::recent_audio::has) {
         let gone = entries.remove(pos);
         save_to_disk(entries);
         // Its audio goes with it.
@@ -682,6 +699,41 @@ mod tests {
         assert_eq!((fixed.status, fixed.text.as_str(), fixed.model.as_str()), (None, "The plan is ready.", "large"));
         assert_eq!(fixed.said.as_deref(), Some("um the plan is ready"));
         assert!(!rerun_result("t-gone", "x", "x", None, "large"));
+    }
+
+    /// Two dictations that failed in the same second both have no text:
+    /// deleting one from Home deletes that one, never the other (review
+    /// 2026-10-30: the first match went, and its kept audio with it).
+    /// (In unit tests the history lives in memory only.)
+    #[test]
+    fn deleting_one_of_two_failed_dictations_from_the_same_second_deletes_that_one() {
+        // An hour ahead: no other test's entry, and never one the
+        // "24 hours" sweep's test deletes.
+        let ts = now_secs() + 3_600;
+        record_failed(Some(ts), "parakeet-tdt-0.6b-v3", "notepad.exe", "t-same-a", "The transcription failed");
+        record_failed(Some(ts), "parakeet-tdt-0.6b-v3", "notepad.exe", "t-same-b", "The transcription failed");
+        delete(ts, "", Some("t-same-b"));
+        assert!(find_audio(ts, "t-same-a").is_some(), "the other one stays");
+        assert!(find_audio(ts, "t-same-b").is_none(), "this one goes");
+        delete(ts, "", Some("t-same-a"));
+        assert!(find_audio(ts, "t-same-a").is_none());
+    }
+
+    #[test]
+    fn an_entry_is_found_by_its_audio_else_by_its_time_and_text() {
+        let failed = |audio: &str| HistoryEntry { audio: Some(audio.into()), status: Some(FAILED.into()), ..entry(500, "") };
+        let entries = vec![failed("t-one"), failed("t-two"), entry(500, "Sent.")];
+        let all = |_: &str| true;
+        assert_eq!(position_of(&entries, 500, "", Some("t-two"), all), Some(1));
+        assert_eq!(position_of(&entries, 500, "", Some("t-one"), all), Some(0));
+        assert_eq!(position_of(&entries, 500, "", Some("t-gone"), all), None);
+        assert_eq!(position_of(&entries, 500, "Sent.", None, all), Some(2));
+        // No audio sent: Home listed the row without one (its day is over),
+        // so not the one whose audio Home still lists.
+        assert_eq!(position_of(&entries, 500, "", None, |id: &str| id == "t-one"), Some(1));
+        // Only rows with their audio listed: a caller that doesn't send it.
+        assert_eq!(position_of(&entries, 500, "", None, all), Some(0));
+        assert_eq!(position_of(&entries, 501, "", None, all), None);
     }
 
     #[test]

@@ -338,7 +338,9 @@
 
   async function remove(e) {
     try {
-      await invoke('delete_history_entry', { ts: e.ts, text: e.text });
+      // By its audio when it has one: two failed dictations in one second
+      // share their time and (no) words.
+      await invoke('delete_history_entry', { ts: e.ts, text: e.text, audio: e.audio ?? null });
     } catch (err) {
       // Deleted but not saved yet: Yap says so, with Try again.
       if (!showSaveError(err)) toast({ title: "Couldn't delete the dictation", description: String(err), variant: 'destructive' });

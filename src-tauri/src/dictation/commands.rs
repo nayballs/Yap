@@ -447,12 +447,13 @@ pub fn clear_history(app: AppHandle) -> Result<(), String> {
     Ok(crate::dictation::history::saved()?)
 }
 
-/// Delete one history entry (matched by timestamp + final text) — the per-item
-/// trash button in the Home feed. A save that failed is the error.
+/// Delete one history entry (matched by its audio's id when Home lists one,
+/// else by timestamp + final text) — the per-item trash button in the Home
+/// feed. A save that failed is the error.
 #[tauri::command]
-pub fn delete_history_entry(app: AppHandle, ts: u64, text: String) -> Result<(), String> {
+pub fn delete_history_entry(app: AppHandle, ts: u64, text: String, audio: Option<String>) -> Result<(), String> {
     use tauri::Emitter;
-    crate::dictation::history::delete(ts, &text);
+    crate::dictation::history::delete(ts, &text, audio.as_deref());
     let _ = app.emit("yap-history-changed", ());
     Ok(crate::dictation::history::saved()?)
 }
