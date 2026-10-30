@@ -28,10 +28,11 @@
 //! 3. **Speaking**: the answer is read aloud whatever "When to speak" says
 //!    (that's the shortcut's point), in the chosen voice — never while a
 //!    meeting records (its recorder would hear it) and not when a dictation
-//!    started while it was thinking ([`reply`]). While the main window isn't
-//!    the one in front (`notice::place`), a quiet card on the Yap bar shows
-//!    the answer too; it goes when the voice ends, on ■ (the capsule), ✕ or
-//!    Esc. Pressing the shortcut again asks a follow-up in the same
+//!    started while it was thinking ([`reply`]). Unless the answer is in
+//!    view in Chat — the main window in front, or on screen beside the app
+//!    in front showing the conversation ([`answer_in_view`]) — a quiet card
+//!    on the Yap bar shows the answer too; it goes when the voice ends, on ■
+//!    (the capsule), ✕ or Esc. Pressing the shortcut again asks a follow-up in the same
 //!    conversation. As much of the answer is said as "How much to read
 //!    aloud" says ([`SpokenLength`]: a sentence or two, about 30 seconds, a
 //!    minute — the default — or 2 minutes, or all of it), citation markers
@@ -202,12 +203,36 @@ pub fn reply(voice_on: bool, meeting: bool, interrupted: bool) -> Reply {
     }
 }
 
-/// Does the answer get its card on the Yap bar? As the person chose
-/// ("Show the answer on the Yap bar", `assistant_answer_card`) while it's
-/// read aloud; always when it isn't (`spoken` false: a meeting, a
-/// dictation started, the voice failed), or the answer would be lost. Pure.
-pub fn card_on_bar(show_answer_card: bool, spoken: bool) -> bool {
-    show_answer_card || !spoken
+/// **Is the answer already in front of the person, in Chat?** Yap's main
+/// window in front (Chat comes up there with the question), or on screen
+/// beside the app in front — another monitor, mostly uncovered — with Chat
+/// showing the question's `conversation` (or a new chat, which follows the
+/// question to its new conversation). Minimised, hidden, behind another
+/// app or on another view: no. The card on the Yap bar is for someone who
+/// can't see Chat (30 Oct 2026: it came up over Chat, maximised, with the
+/// answer streaming in front of the maintainer). `seen` is the window's
+/// real state, from Rust (`notice::window_seen`); `viewing`, what the Chat
+/// view says it shows. Pure.
+pub fn answer_in_view(seen: crate::notices::notice::Seen, viewing: Viewing, conversation: Option<u64>) -> bool {
+    use crate::notices::notice::Seen;
+    match seen {
+        Seen::Front => true,
+        Seen::Beside => match viewing {
+            Viewing::Conversation(id) => conversation == Some(id),
+            Viewing::New => true,
+            Viewing::Closed => false,
+        },
+        Seen::No => false,
+    }
+}
+
+/// Does the answer get its card on the Yap bar? Never while it's in view in
+/// Chat ([`answer_in_view`]); else as the person chose ("Show the answer on
+/// the Yap bar", `assistant_answer_card`) while it's read aloud, and always
+/// when it isn't (`spoken` false: a meeting, a dictation started, the
+/// voice failed), or the answer would be lost. Pure.
+pub fn card_on_bar(show_answer_card: bool, spoken: bool, in_view: bool) -> bool {
+    !in_view && (show_answer_card || !spoken)
 }
 
 /// **How much of an answer Yap reads out by itself** — "Read aloud" in
@@ -397,12 +422,20 @@ tokio::task_local! {
 }
 
 /// Was the Voice Assistant's question this turn answers asked with Chat in
-/// front? Then its document's line points at the panel ("It's open on the
-/// right.", `documents::spoken_note`), not at Chat ("It's in Chat." to
-/// someone reading Chat, the maintainer's first try, 30 Oct 2026). `false`
-/// outside one.
+/// view ([`answer_in_view`] when it was asked: the main window in front, or
+/// beside the app in front showing Chat)? Then its document's line points
+/// at the panel ("It's open on the right.", `documents::spoken_note`), not
+/// at Chat ("It's in Chat." to someone reading Chat, the maintainer's first
+/// try, 30 Oct 2026). `false` outside one.
 pub fn asked_in_chat() -> bool {
     IN_CHAT.try_with(|b| *b).unwrap_or(false)
+}
+
+/// Is question `conversation`'s answer in view in Chat now
+/// ([`answer_in_view`] on the window's real state)? Window getters: never
+/// with a lock held.
+fn answer_seen(app: &AppHandle, conversation: Option<u64>) -> bool {
+    answer_in_view(crate::notices::notice::window_seen(app), view(), conversation)
 }
 
 fn now_secs() -> u64 {
@@ -717,8 +750,10 @@ impl Streamed {
             snapshot(&s)
         };
         emit(&self.app, ev);
-        let on_bar = crate::notices::notice::place(&self.app, false) == crate::notices::notice::Place::Bar;
-        if on_bar && card_on_bar(self.show_card, true) {
+        // The card, unless the answer is in view in Chat: decided now, as
+        // the answer comes (the person may have left Yap since asking).
+        let conversation = self.lock().conversation;
+        if crate::bar::cards_available() && card_on_bar(self.show_card, true, answer_seen(&self.app, conversation)) {
             let shown = crate::voice::tts::brief(text, STREAM_SAY);
             let carded = show_card(&self.app, &self.question, &shown, true, None);
             self.lock().carded = carded;
@@ -883,10 +918,13 @@ async fn answer(app: AppHandle, generation: u64, since: u64, question: String) {
             shots = look.images;
         }
     }
-    tracing::info!(?viewing, ?choice, shots = shots.images.len(), window = took_window, "Voice Assistant: asking Chat");
-    // The person is looking at Yap's main window: Chat comes up there with
-    // the question (and no card on the bar).
-    let (_, focused) = crate::notices::notice::window_view(&app);
+    // The person is in Yap's main window: Chat comes up there with the
+    // question. In front, or beside the app in front showing Chat: the
+    // answer is in view there (a document's line points at the panel).
+    let seen = crate::notices::notice::window_seen(&app);
+    let focused = seen == crate::notices::notice::Seen::Front;
+    let in_chat = answer_in_view(seen, viewing, conversation_id);
+    tracing::info!(?viewing, ?choice, ?seen, shots = shots.images.len(), window = took_window, "Voice Assistant: asking Chat");
     let asked_app = app.clone();
     let asked_text = question.clone();
     // The answer as it's written: the Chat view follows it, the voice
@@ -935,8 +973,8 @@ async fn answer(app: AppHandle, generation: u64, since: u64, question: String) {
             Some(&stoppable),
         ),
     );
-    // Asked with the main window in front: Chat shows it (`asked_in_chat`).
-    let turn = IN_CHAT.scope(focused, turn);
+    // Asked with Chat in view: it shows the answer (`asked_in_chat`).
+    let turn = IN_CHAT.scope(in_chat, turn);
     // Its AI calls and searches are the Voice Assistant's in the network
     // receipts (net.rs), though they run Chat's code — and say so when the
     // window in front went with them.
@@ -1083,10 +1121,12 @@ async fn answer(app: AppHandle, generation: u64, since: u64, question: String) {
     let sources_note = sources_note(web_sources(&turn));
     let note = note.or(sources_note.as_deref());
     // The card first (the voice may be short), then the voice. With "Show
-    // the answer on the Yap bar" off, a spoken answer has no card.
-    let on_bar = crate::notices::notice::place(&app, false) == crate::notices::notice::Place::Bar;
+    // the answer on the Yap bar" off, a spoken answer has no card; with the
+    // answer in view in Chat, none at all.
+    let on_bar = crate::bar::cards_available();
+    let in_view = answer_seen(&app, Some(turn.conversation_id));
     let mut carded = on_bar
-        && card_on_bar(cfg.assistant_answer_card, how == Reply::Speak)
+        && card_on_bar(cfg.assistant_answer_card, how == Reply::Speak, in_view)
         && show_card(&app, &question, &shown, how == Reply::Speak, note);
     if how == Reply::Speak {
         if let Err(e) = crate::voice::tts::speak(&said, Some(message_id.clone())) {
@@ -1112,14 +1152,14 @@ async fn answer(app: AppHandle, generation: u64, since: u64, question: String) {
                     c.timeout_ms = Some(ms);
                     c.status = Some(why);
                 });
-            } else if on_bar {
+            } else if on_bar && !in_view {
                 // The card was left out for the voice, and there's no voice:
                 // show the answer after all.
                 carded = show_card(&app, &question, &shown, false, Some(why.as_str()));
             }
         }
     }
-    tracing::info!(spoken = how == Reply::Speak, carded, meeting, interrupted, "Voice Assistant: answered");
+    tracing::info!(spoken = how == Reply::Speak, carded, in_view, meeting, interrupted, "Voice Assistant: answered");
 }
 
 /// The end of an answer the voice began while it was written ([`Streamed`]):
@@ -1201,13 +1241,14 @@ fn finish_streamed(
                 c.timeout_ms = timeout;
             }
         });
-    } else {
-        let on_bar = crate::notices::notice::place(app, false) == crate::notices::notice::Place::Bar;
-        if on_bar && card_on_bar(cfg.assistant_answer_card, how == Reply::Speak) {
-            show_card(app, question, &shown, how == Reply::Speak, note);
-        }
+    } else if crate::bar::cards_available()
+        && card_on_bar(cfg.assistant_answer_card, how == Reply::Speak, answer_seen(app, Some(turn.conversation_id)))
+    {
+        // No card while it was said (Chat was in view, or the voice only):
+        // one now if the person has left Chat since, or it isn't read aloud.
+        show_card(app, question, &shown, how == Reply::Speak, note);
     }
-    tracing::info!(spoken = how == Reply::Speak, streamed = true, meeting, interrupted, "Voice Assistant: answered");
+    tracing::info!(spoken = how == Reply::Speak, streamed = true, carded, meeting, interrupted, "Voice Assistant: answered");
 }
 
 /// The answer on the Yap bar: the question over the answer (markdown, cut
@@ -1408,12 +1449,39 @@ mod tests {
     #[test]
     fn the_answer_card_is_a_choice_only_while_the_answer_is_spoken() {
         // Read aloud: as the person chose.
-        assert!(card_on_bar(true, true));
-        assert!(!card_on_bar(false, true));
+        assert!(card_on_bar(true, true, false));
+        assert!(!card_on_bar(false, true, false));
         // Not read aloud (a meeting, a dictation started, the voice failed):
         // always shown, or the answer would be lost.
-        assert!(card_on_bar(true, false));
-        assert!(card_on_bar(false, false));
+        assert!(card_on_bar(true, false, false));
+        assert!(card_on_bar(false, false, false));
+        // In view in Chat: never, read aloud or not.
+        for (choice, spoken) in [(true, true), (false, true), (true, false), (false, false)] {
+            assert!(!card_on_bar(choice, spoken, true));
+        }
+    }
+
+    #[test]
+    fn the_card_is_for_someone_who_cant_see_chat() {
+        use crate::notices::notice::Seen;
+        let chat = Viewing::Conversation(7);
+        // Yap's window in front (Chat comes up there with the question),
+        // maximised or not, on any view.
+        for viewing in [chat, Viewing::New, Viewing::Closed] {
+            assert!(answer_in_view(Seen::Front, viewing, Some(7)));
+        }
+        // Beside the app in front (another monitor), showing that
+        // conversation, or a new chat that follows the question: in view.
+        assert!(answer_in_view(Seen::Beside, chat, Some(7)));
+        assert!(answer_in_view(Seen::Beside, Viewing::New, None));
+        // …another conversation, or another view: not.
+        assert!(!answer_in_view(Seen::Beside, chat, Some(8)));
+        assert!(!answer_in_view(Seen::Beside, Viewing::Closed, Some(7)));
+        // Minimised, hidden or behind another app: the card, whatever Chat
+        // shows.
+        for viewing in [chat, Viewing::New, Viewing::Closed] {
+            assert!(!answer_in_view(Seen::No, viewing, Some(7)));
+        }
     }
 
     #[test]

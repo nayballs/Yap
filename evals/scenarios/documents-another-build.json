@@ -1,0 +1,25 @@
+{
+  "name": "documents-another-build",
+  "description": "Documents beside the chat: a build made, then another one asked for as the maintainer did (\"Could you find a mage build instead…?\"). A document for it at once, outline first, every section written: never an answer in the chat ending with an offer to write one (Claude Haiku 5.5 explained the build and asked \"Want me to build a level-by-level plan for it?\", 30 Oct 2026).",
+  "tags": ["documents"],
+  "apps": "standard",
+  "turns": [
+    {
+      "user": "Make me a Divinity: Original Sin 2 build for a two-handed fighter: gear, skills, talents and how to level it.",
+      "expect": { "document": { "made": true, "outline_first": true, "filled": true, "min_sections": 3 } }
+    },
+    {
+      "user": "Could you find a mage build instead? Something with fire and summons.",
+      "expect": {
+        "document": { "made": true, "outline_first": true, "filled": true, "min_sections": 3 },
+        "tools_not_called": ["create_note"],
+        "max_words": 60
+      },
+      "soft": {
+        "max_words": 30,
+        "answer_not_matches": "(?i)\\b(want me to|would you like me to|shall i|should i)\\b",
+        "document": { "made": true, "table": true, "summary": true }
+      }
+    }
+  ]
+}

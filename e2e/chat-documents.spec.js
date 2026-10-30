@@ -191,6 +191,39 @@ test('a document opens beside the chat, fills section by section, and its pill r
   await expect.poll(() => main.evaluate(() => document.documentElement.dataset.yapTheme)).toBe('light');
 });
 
+// A document is a note (30 Oct 2026: Claude Haiku 5.5 made one, then said it
+// couldn't write to the person's notes or a Markdown file): the model is told
+// where it's kept — in the rule, create_document's result and the next
+// question's context — and it is there, in Notes under Chat documents.
+test('a document is a Markdown note in Notes, and the model is told so', async ({ yap, main, fakeLlm }) => {
+  fakeLlm.scriptChat([
+    { tools: [{ name: 'create_document', args: { title: 'Fictional camping kit', sections: [{ key: 'Clothes', intent: 'what to wear' }] } }] },
+    { tools: [{ name: 'write_section', args: (r) => ({ note_id: madeDoc(r), key: 'Clothes', markdown: '- A fleece\n- Spare socks' }) }] },
+    { content: "It's open on the right, and saved in your Notes under Chat documents." },
+  ]);
+  await freshChat(main);
+  await ask(main, 'Make me a camping kit list and put it in my notes as a Markdown file');
+  await expect(thread(main)).toContainText('saved in your Notes under Chat documents', { timeout: 20_000 });
+  const steps = fakeLlm.requests.filter((r) => r.user.includes('camping kit list'));
+  // The rule, in the system prompt (the same every turn).
+  expect(steps[0].system).toContain('A document is a Markdown note, saved in Notes under Chat documents');
+  // create_document's result says where it's kept, and the last section's
+  // the line for someone who asked for it in their notes.
+  const results = steps.at(-1).messages.filter((m) => m.role === 'tool').map((m) => JSON.parse(m.content));
+  expect(results.find((r) => Array.isArray(r?.data?.sections)).data.saved).toBe(
+    'Saved as a Markdown note in Notes, in the Chat documents folder: the user can open it there, or export it as a .md file (Export as Markdown).'
+  );
+  expect(results.at(-1).data.next).toContain("\"It's open on the right, and saved in your Notes under Chat documents.\"");
+  // It is there.
+  await expectStore(yap, 'notes.json', (s) => noteNamed(s, 'Fictional camping kit')?.folder === 'Chat documents');
+  // The next question about it: the chat's documents, saved in Notes as Markdown.
+  fakeLlm.scriptChat([{ content: 'Yes: it is in Notes, under Chat documents.' }]);
+  await ask(main, 'Is the fictional kit list saved in my notes?');
+  await expect(thread(main)).toContainText('Yes: it is in Notes, under Chat documents.');
+  const next = fakeLlm.requests.find((r) => r.user.includes('Is the fictional kit list saved in my notes?'));
+  expect(next.user).toContain('Documents in this chat, open beside it and saved in Notes (Chat documents) as Markdown notes');
+});
+
 test("the person's edits win: typed while Chat writes they stay, a section they removed isn't brought back", async ({ yap, main, fakeLlm, shot }) => {
   // Food is held until the person has typed (it lands while their typing
   // waits to be saved, or just after); Costs until their edit is saved.

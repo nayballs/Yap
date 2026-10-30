@@ -10,7 +10,8 @@
 //   `e2e_assistant_ask`: the shortcut's own steps, a transcript in the mic's
 //   place): the bar's capsule ("Ask Yap…", "Thinking…", "Speaking…" with ■),
 //   the answer read aloud whatever "When to speak" says, a card on the bar
-//   while the main window isn't in front, the conversation in Chat
+//   unless Chat is in view (the main window in front, or beside the app in
+//   front on that conversation), the conversation in Chat
 //   continued; a press while it speaks cuts it off (barge-in); during a
 //   meeting the answer is shown, never spoken; no AI model → Open settings.
 // - The Chat view's Voice replies toggle (the same setting as Settings'
@@ -351,6 +352,64 @@ test('asked while Yap is in front: Chat comes up with the question and the answe
   await shot(main, '24-asked-in-front-of-yap');
   await yap.invoke('tts_stop');
   await expect(capsule(yap)).toHaveCount(0);
+});
+
+// The card is for someone who can't see Chat (30 Oct 2026: it came up on the
+// bar over Chat, maximised, with the answer streaming in front of the
+// maintainer). Rust decides on the window's real state as the answer comes
+// (notice::window_seen; a test run says where the person is with e2e_focus).
+test("the answer's card shows only when Chat isn't in view: beside the app in front on that chat, none", async ({
+  yap,
+  main,
+  fakeLlm,
+}) => {
+  await setConfig(yap, main, { speakReplies: true });
+  await freshChat(main);
+  fakeLlm.scriptChat([{ content: 'The fictional launch party is on Friday.' }]);
+  await send(main, 'When is the fictional launch party?');
+  await expect(thread(main)).toContainText('The fictional launch party is on Friday.');
+  const said = async () => (await spoken(yap)).map((s) => s.text).join(' ');
+
+  // In another app, Yap's window on screen beside it (another monitor),
+  // Chat on this conversation: the answer streams in there, the voice says
+  // it, and no card.
+  await yap.invoke('e2e_focus', { focused: false, beside: true });
+  fakeLlm.scriptChat([{ content: 'It starts at ten, in the big room.' }]);
+  await ask(yap, 'what time does the fictional party start');
+  await expect(thread(main)).toContainText('It starts at ten, in the big room.');
+  await expect.poll(said, { timeout: 15_000 }).toContain('It starts at ten');
+  await main.waitForTimeout(500);
+  await expect(answerCard(yap)).toHaveCount(0);
+  await yap.invoke('tts_stop');
+
+  // Behind the app in front: the card.
+  await inAnotherApp(yap);
+  fakeLlm.scriptChat([{ content: 'Sam has the slides.' }]);
+  await ask(yap, 'who has the fictional slides');
+  await expect(answerCard(yap)).toContainText('Sam has the slides.', { timeout: 15_000 });
+  await yap.invoke('tts_stop');
+  await expect(answerCard(yap)).toHaveCount(0);
+
+  // Beside, but on another view: Chat isn't showing it, so the card.
+  await openView(main, 'Home');
+  await yap.invoke('e2e_focus', { focused: false, beside: true });
+  fakeLlm.scriptChat([{ content: 'The room is on the second floor.' }]);
+  await ask(yap, 'where is the fictional big room');
+  await expect(answerCard(yap)).toContainText('The room is on the second floor.', { timeout: 15_000 });
+  await yap.invoke('tts_stop');
+  await expect(answerCard(yap)).toHaveCount(0);
+
+  // Asked in Yap, then off to another app before the answer came: the card
+  // (decided as the answer comes, not when it was asked).
+  await yap.invoke('e2e_focus', { focused: true });
+  fakeLlm.delay('other', 1500);
+  fakeLlm.scriptChat([{ content: 'Bring a coat, it gets cold.' }]);
+  await ask(yap, 'what should I bring to the fictional party');
+  await expect(thread(main).locator('.cbubble.user').last()).toContainText('what should I bring to the fictional party');
+  await inAnotherApp(yap);
+  fakeLlm.delay('other', 0);
+  await expect(answerCard(yap)).toContainText('Bring a coat, it gets cold.', { timeout: 15_000 });
+  await yap.invoke('tts_stop');
 });
 
 // A spoken answer being written into the open chat has Chat's own ■ too

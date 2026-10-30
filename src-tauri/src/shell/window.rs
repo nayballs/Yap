@@ -110,6 +110,138 @@ pub fn behind_in_test_runs(w: &tauri::WebviewWindow) {
     }
 }
 
+/// **The person is in `w`**: it's Windows' foreground window (or owns the
+/// one in front: a Save dialog it opened). Not `is_focused`: that's tao's
+/// record of the window's own keyboard focus, and wry hands the keyboard
+/// focus to WebView2's child window, so it can say no while the person
+/// types in Chat (30 Oct 2026: the Voice Assistant's card came up over
+/// Chat in front of the maintainer).
+pub fn in_front(w: &tauri::WebviewWindow) -> bool {
+    #[cfg(windows)]
+    if let Ok(hwnd) = w.hwnd() {
+        use windows::Win32::UI::WindowsAndMessaging::{GetAncestor, GetForegroundWindow, GA_ROOTOWNER};
+        let fg = unsafe { GetForegroundWindow() };
+        if fg.0.is_null() {
+            return false;
+        }
+        return fg.0 == hwnd.0 || unsafe { GetAncestor(fg, GA_ROOTOWNER) }.0 == hwnd.0;
+    }
+    w.is_focused().unwrap_or(false)
+}
+
+/// A rectangle on the desktop, `(left, top, right, bottom)` in physical
+/// pixels.
+pub(crate) type Bounds = (i32, i32, i32, i32);
+
+/// How much of `target` the windows above it leave in view, 0 to 1: the
+/// part none of `above` covers (each clipped to it, overlaps counted once).
+/// Pure.
+pub(crate) fn uncovered_share(target: Bounds, above: &[Bounds]) -> f64 {
+    let (l, t, r, b) = target;
+    if r <= l || b <= t {
+        return 0.0;
+    }
+    let over: Vec<Bounds> = above
+        .iter()
+        .map(|&(al, at, ar, ab)| (al.max(l), at.max(t), ar.min(r), ab.min(b)))
+        .filter(|&(cl, ct, cr, cb)| cr > cl && cb > ct)
+        .collect();
+    let mut xs: Vec<i32> = vec![l, r];
+    let mut ys: Vec<i32> = vec![t, b];
+    for &(cl, ct, cr, cb) in &over {
+        xs.extend([cl, cr]);
+        ys.extend([ct, cb]);
+    }
+    xs.sort_unstable();
+    xs.dedup();
+    ys.sort_unstable();
+    ys.dedup();
+    let mut covered: i64 = 0;
+    for x in xs.windows(2) {
+        for y in ys.windows(2) {
+            if over.iter().any(|&(cl, ct, cr, cb)| cl <= x[0] && x[0] < cr && ct <= y[0] && y[0] < cb) {
+                covered += i64::from(x[1] - x[0]) * i64::from(y[1] - y[0]);
+            }
+        }
+    }
+    let area = i64::from(r - l) * i64::from(b - t);
+    1.0 - covered as f64 / area as f64
+}
+
+/// How much of `w` is in view, 0 to 1: none while it's hidden, minimised or
+/// cloaked (another virtual desktop), else what the windows above it leave
+/// uncovered ([`uncovered_share`]) — every visible, uncloaked, unminimised
+/// window higher in Windows' z-order, except click-through ones (overlays)
+/// and the Yap bar. Never with a lock held (window getters).
+pub fn in_view(w: &tauri::WebviewWindow) -> f64 {
+    #[cfg(windows)]
+    {
+        let Ok(hwnd) = w.hwnd() else { return 0.0 };
+        z::in_view(hwnd.0 as isize, crate::bar::overlay::win::bar_hwnd().map_or(0, |h| h as isize))
+    }
+    #[cfg(not(windows))]
+    {
+        f64::from(u8::from(w.is_visible().unwrap_or(false) && !w.is_minimized().unwrap_or(false)))
+    }
+}
+
+#[cfg(windows)]
+mod z {
+    use windows::Win32::Foundation::{HWND, RECT};
+    use windows::Win32::Graphics::Dwm::{DwmGetWindowAttribute, DWMWA_CLOAKED, DWMWA_EXTENDED_FRAME_BOUNDS};
+    use windows::Win32::UI::WindowsAndMessaging::{
+        GetWindow, GetWindowLongPtrW, GetWindowRect, IsIconic, IsWindowVisible, GWL_EXSTYLE, GW_HWNDPREV, WS_EX_TRANSPARENT,
+    };
+
+    /// The most windows above it looked at (a desktop rarely has more).
+    const MOST: usize = 400;
+
+    fn cloaked(hwnd: HWND) -> bool {
+        let mut v: u32 = 0;
+        unsafe { DwmGetWindowAttribute(hwnd, DWMWA_CLOAKED, &mut v as *mut u32 as *mut _, 4) }.is_ok() && v != 0
+    }
+
+    /// Its frame as drawn (without the invisible resize borders).
+    fn frame(hwnd: HWND) -> Option<super::Bounds> {
+        let mut r = RECT::default();
+        let ok = unsafe { DwmGetWindowAttribute(hwnd, DWMWA_EXTENDED_FRAME_BOUNDS, &mut r as *mut RECT as *mut _, std::mem::size_of::<RECT>() as u32) }
+            .is_ok()
+            || unsafe { GetWindowRect(hwnd, &mut r) }.is_ok();
+        ok.then_some((r.left, r.top, r.right, r.bottom))
+    }
+
+    fn drawn(hwnd: HWND) -> bool {
+        unsafe { IsWindowVisible(hwnd) }.as_bool() && !unsafe { IsIconic(hwnd) }.as_bool() && !cloaked(hwnd)
+    }
+
+    pub fn in_view(target: isize, bar: isize) -> f64 {
+        let target = HWND(target as *mut _);
+        if !drawn(target) {
+            return 0.0;
+        }
+        let Some(bounds) = frame(target) else { return 0.0 };
+        let mut above = Vec::new();
+        let mut h = target;
+        for _ in 0..MOST {
+            match unsafe { GetWindow(h, GW_HWNDPREV) } {
+                Ok(prev) if !prev.0.is_null() => h = prev,
+                _ => break,
+            }
+            if h.0 as isize == bar || !drawn(h) {
+                continue;
+            }
+            let ex = unsafe { GetWindowLongPtrW(h, GWL_EXSTYLE) } as u32;
+            if ex & WS_EX_TRANSPARENT.0 != 0 {
+                continue;
+            }
+            if let Some(b) = frame(h) {
+                above.push(b);
+            }
+        }
+        super::uncovered_share(bounds, &above)
+    }
+}
+
 /// `set_focus`, except in e2e test runs: when Windows won't hand a background
 /// process the foreground, tao falls back to pressing Alt in whichever app has
 /// focus — the developer's, while the suite runs beside them.
@@ -240,7 +372,24 @@ pub(crate) fn init_hidden_webview(window: &tauri::WebviewWindow) {
 
 #[cfg(test)]
 mod tests {
-    use super::fit_rect;
+    use super::{fit_rect, uncovered_share};
+
+    #[test]
+    fn how_much_of_a_window_the_ones_above_it_leave_in_view() {
+        let chat = (0, 0, 1000, 800);
+        // Nothing above it, or only on another monitor: all of it.
+        assert_eq!(uncovered_share(chat, &[]), 1.0);
+        assert_eq!(uncovered_share(chat, &[(2560, 0, 5120, 1400)]), 1.0);
+        // A maximised app over it on the same monitor: none.
+        assert_eq!(uncovered_share(chat, &[(-8, -8, 2568, 1400)]), 0.0);
+        // A small window over a corner: most of it.
+        assert_eq!(uncovered_share(chat, &[(500, 400, 1000, 800)]), 0.75);
+        // Two overlapping windows are counted once.
+        assert_eq!(uncovered_share(chat, &[(0, 0, 500, 800), (250, 0, 500, 800)]), 0.5);
+        assert_eq!(uncovered_share(chat, &[(0, 0, 600, 800), (400, 0, 1000, 800)]), 0.0);
+        // A window with no size shows nothing.
+        assert_eq!(uncovered_share((10, 10, 10, 50), &[]), 0.0);
+    }
 
     #[test]
     fn the_main_window_fits_a_small_screen() {

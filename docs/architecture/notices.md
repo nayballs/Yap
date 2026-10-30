@@ -16,7 +16,19 @@ How loud Yap may be: the notice policy (one place, one at a time, held while dic
   ready"** (`meetings/meeting_end.rs`: only when `yap_in_front` says no Yap
   window — the main window or the notepad — has the focus; then the Yap
   bar's card, else a Windows notification, with Open note) — (`window_view`: test runs say for
-  themselves whether the window counts as focused, `e2e_focus`). **Rules per
+  themselves whether the window counts as focused, `e2e_focus`). **Focused
+  means in front** (30 Oct 2026, `shell::window::in_front`): Windows'
+  foreground window is it, or owns the one in front (a Save dialog) — not
+  tao's `is_focused`, its record of the window's own keyboard focus, which
+  wry hands to WebView2's child window, so it could say no while the person
+  typed in Chat. **`window_seen`** says how the main window is seen: `Front`,
+  `Beside` (on screen, at least half of it uncovered — `shell::window::in_view`:
+  every visible, uncloaked, unminimised window higher in Windows' z-order
+  but click-through ones and the Yap bar, `uncovered_share` pure — while
+  another app is in front: another monitor) or `No` (hidden, minimised,
+  behind other windows); the Voice Assistant's answer card asks it
+  (chat-and-assistant.md). A test run says which with `e2e_focus {focused,
+  beside}`. **Rules per
   kind** (`rule`: a bar card's id / a notification's tag): priority (Prompt —
   call (also "Stop taking notes?" and "Switch to Zoom?", 2026-10-29),
   calendar, meeting-limit, meeting-checkin (also the meeting's other

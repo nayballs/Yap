@@ -523,14 +523,18 @@ async fn answer_turn(
     if scope == Some("assistant") && tools_supported {
         context.push(crate::chat::documents::spoken_note(crate::chat::assistant::asked_in_chat()).to_string());
     }
-    // A model on this PC is told what this question means for documents
+    // The model is told what this question means for documents
     // (documents.rs `steer`): an option picked → a new document; a change
     // to the open one → that document reworked; something to keep → a
     // document now. The system prompt's rule alone, the 4B answered a guide
     // and a trip plan in the chat, a changed build in the chat with an
-    // offer, and "Let's do option A" by copying the options.
-    if tools_supported && !meetings && crate::ai::ai_model::runs_here(&provider, &base_url) {
-        if let Some(note) = crate::chat::documents::steer(&text, &chat_docs) {
+    // offer, and "Let's do option A" by copying the options; Claude Haiku
+    // 5.5 explained a build in the chat and offered to write it. A cloud
+    // model's line is one short sentence (`brief`); in the context, never
+    // the system prompt, so its prompt cache stays whole.
+    if tools_supported && !meetings {
+        let brief = !crate::ai::ai_model::runs_here(&provider, &base_url);
+        if let Some(note) = crate::chat::documents::steer(&text, &chat_docs, brief) {
             context.push(note);
         }
     }

@@ -97,7 +97,10 @@ The always-there pill above the taskbar: the `overlay` window's Rust side (regio
   meeting, as a call card), `coaching` (push-to-talk tips), `learn` (a word
   to add to the dictionary), `alert` (a paste into an admin app, Windows'
   microphone privacy), `assistant` (the Voice Assistant's answer, style
-  "answer"; Esc stops its voice). The bar also follows `yap-assistant`
+  "answer"; Esc stops its voice; only while the answer isn't in view in
+  Chat — the main window in front, or on screen beside the app in front
+  showing that conversation, `assistant::answer_in_view` on
+  `notice::window_seen`, since 30 Oct 2026). The bar also follows `yap-assistant`
   (`State.assistant`, in `Status.assistant`): the window shows while a
   question is asked, answered or read aloud, bar on or off, and ■ on the
   capsule is `bar_action "assistant-stop"`. **The reading card**
