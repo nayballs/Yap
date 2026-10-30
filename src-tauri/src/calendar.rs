@@ -285,6 +285,8 @@ struct Runtime {
     google_waiting: bool,
     /// Access tokens by connection: (token, expires at).
     access: HashMap<String, (String, i64)>,
+    /// Slots held by connections on their way in ([`Reserved`]).
+    reserved: Vec<String>,
     card: Option<Card>,
     /// Snoozed reminders: until when (unix seconds).
     snoozed: HashMap<String, i64>,
@@ -302,6 +304,9 @@ struct Runtime {
     brief_retry: HashMap<String, i64>,
     /// Notes, memory or settings changed: the due briefs may be stale.
     briefs_dirty: bool,
+    /// Resets so far ([`forget_briefs`]): a brief made from the notes and
+    /// memory before one is never kept after it.
+    briefs_epoch: u64,
     /// "Prepare a brief before meetings" as the pages last heard it.
     briefs_on: Option<bool>,
 }
@@ -951,9 +956,41 @@ async fn access_token(conn: &Connection, client: &google::Client, secret: &Googl
     Ok(tokens.access)
 }
 
-/// A free connection slot.
+/// A free connection slot: no connection's, and not held by one on its way in.
 fn free_slot(s: &Runtime) -> Option<String> {
-    (1..=vault::SLOTS).map(|n| n.to_string()).find(|id| !s.store.connections.iter().any(|c| c.id == *id))
+    (1..=vault::SLOTS)
+        .map(|n| n.to_string())
+        .find(|id| !s.store.connections.iter().any(|c| c.id == *id) && !s.reserved.contains(id))
+}
+
+/// A slot held for a connection on its way in, from choosing it until the
+/// connection is listed: its secret is saved there in between (outside the
+/// lock, and a link's after its first fetch), and a calendar connected
+/// meanwhile must never pick it too, or one connection's secret would be
+/// the other's. Let go when dropped — never under the lock (it takes it).
+struct Reserved(String);
+
+impl Reserved {
+    /// A free slot, held.
+    fn free(s: &mut Runtime) -> Option<Reserved> {
+        let id = free_slot(s)?;
+        Some(Reserved::hold(s, id))
+    }
+
+    /// Slot `id` (a connection's own, connected again), held.
+    fn hold(s: &mut Runtime, id: String) -> Reserved {
+        s.reserved.push(id.clone());
+        Reserved(id)
+    }
+}
+
+impl Drop for Reserved {
+    fn drop(&mut self) {
+        let mut s = lock();
+        if let Some(i) = s.reserved.iter().position(|r| *r == self.0) {
+            s.reserved.remove(i);
+        }
+    }
 }
 
 /// How many of connection `id`'s meetings are on now or in the next 7 days
@@ -1094,26 +1131,61 @@ async fn connect_google(
             google::Failure::Offline => "Couldn't reach Google to finish connecting. Try again.".to_string(),
             _ => "Google didn't accept the sign-in. Try connecting again.".to_string(),
         })?;
+    let mut account = None;
+    let result = keep_google(client, &tokens, &mut account).await;
+    if result.is_err() {
+        // Not connected: the grant Google just made goes too (a box left
+        // unticked, say), or Yap stays in the account's list of apps with
+        // access. Not when an account already connected may be this one:
+        // Google ends every token of an account's grant at once.
+        let shared = lock()
+            .store
+            .connections
+            .iter()
+            .any(|c| c.kind == "google" && account.as_deref().is_none_or(|a: &str| c.label.eq_ignore_ascii_case(a)));
+        if !shared {
+            google::revoke(tokens.refresh.as_deref().unwrap_or(&tokens.access)).await;
+            tracing::info!("calendar: a Google grant Yap didn't keep was let go");
+        }
+    }
+    result
+}
+
+/// The rest of [`connect_google`] once Google granted access: the grant
+/// checked, the account read (into `account`, the connection's label), the
+/// connection made.
+async fn keep_google(client: &google::Client, tokens: &google::Tokens, account: &mut Option<String>) -> Result<(String, String), String> {
     if !tokens.can_read_events() {
         return Err("Yap needs to see the events on your calendars. Connect again and leave that box ticked.".into());
     }
     let refresh = tokens.refresh.clone().ok_or("Google didn't give Yap lasting access. Try connecting again.")?;
-    let (account, _) = google::calendars(&tokens.access, tokens.can_list_calendars())
+    let (found, _) = google::calendars(&tokens.access, tokens.can_list_calendars())
         .await
         .map_err(|f| f.message())?;
-    let label = if account.is_empty() { "Google Calendar".to_string() } else { account };
+    let label = if found.is_empty() { "Google Calendar".to_string() } else { found };
+    *account = Some(label.clone());
     let secret = serde_json::to_string(&GoogleSecret { refresh_token: refresh, client_id: client.id.clone(), scope: tokens.scope.clone() })
         .map_err(|e| e.to_string())?;
     let now = now_secs();
     if SAVER.any_unread() {
         return Err(UNREAD.into());
     }
-    let id = {
+    // Its slot, held while the secret is saved: Credential Manager is
+    // Windows', never touched under the lock.
+    let slot = {
         let mut s = lock();
         // The same account again: it takes over its old slot.
         let existing = s.store.connections.iter().find(|c| c.kind == "google" && c.label.eq_ignore_ascii_case(&label)).map(|c| c.id.clone());
-        let id = existing.or_else(|| free_slot(&s)).ok_or(TOO_MANY)?;
-        vault::save(&id, &secret)?;
+        match existing {
+            Some(id) => Some(Reserved::hold(&mut s, id)),
+            None => Reserved::free(&mut s),
+        }
+    }
+    .ok_or(TOO_MANY)?;
+    vault::save(&slot.0, &secret)?;
+    let id = {
+        let id = slot.0.clone();
+        let mut s = lock();
         s.access.insert(id.clone(), (tokens.access.clone(), now + tokens.expires_in));
         s.store.connections.retain(|c| c.id != id);
         s.store.connections.push(Connection {
@@ -1130,6 +1202,7 @@ async fn connect_google(
         save_store(&s.store);
         id
     };
+    drop(slot); // listed now: it's the connection's
     tracing::info!(connection = %id, "calendar: Google Calendar connected");
     Ok((id, label))
 }
@@ -1145,20 +1218,23 @@ pub async fn calendar_add_link(app: AppHandle, link: String, kind: Option<String
         return Err(UNREAD.into());
     }
     let kind = if kind.as_deref() == Some("outlook") { "outlook" } else { "ics" };
-    let (id, already) = {
-        let s = lock();
+    // Its slot, held from here until it's listed: the first fetch takes a
+    // while, and a Google sign-in finishing meanwhile mustn't pick it too.
+    let (slot, already) = {
+        let mut s = lock();
         let ids: Vec<String> = s.store.connections.iter().filter(|c| c.kind != "google").map(|c| c.id.clone()).collect();
-        (free_slot(&s), ids)
+        (Reserved::free(&mut s), ids)
     };
     if already.iter().any(|other| vault::load(other).as_deref() == Some(link.as_str())) {
         return Err("That calendar is already connected.".into());
     }
-    let id = id.ok_or(TOO_MANY)?;
+    let slot = slot.ok_or(TOO_MANY)?;
+    let id = slot.0.clone();
     let bytes = fetch_feed(&link).await?;
     let now = now_secs();
     let (from, to) = (now - LOOK_BACK, now + LOOK_AHEAD + 3600);
-    let slot = id.clone();
-    let (fetched, name) = tauri::async_runtime::spawn_blocking(move || events_from_feed(&slot, &bytes, from, to))
+    let conn = id.clone();
+    let (fetched, name) = tauri::async_runtime::spawn_blocking(move || events_from_feed(&conn, &bytes, from, to))
         .await
         .map_err(|e| e.to_string())??;
     vault::save(&id, &link)?;
@@ -1190,6 +1266,7 @@ pub async fn calendar_add_link(app: AppHandle, link: String, kind: Option<String
         save_store(&s.store);
         upcoming_count(&s.store.events, &id, now)
     };
+    drop(slot); // listed now: it's the connection's
     tracing::info!(connection = %id, kind, meetings, "calendar: calendar link added");
     let connected = json!({ "kind": kind, "label": label, "meetings": meetings });
     let _ = app.emit(EVENT_CONNECTED, connected.clone());
@@ -2234,9 +2311,13 @@ fn briefs_changed() {
 
 /// Reset app (`privacy/reset.rs`): every pre-meeting brief gone (they
 /// quote notes and memory); the calendars and their meetings stay, and a
-/// due brief is made again from what's left. File I/O only under the lock.
+/// due brief is made again from what's left. A brief being made or written
+/// now (from the notes and memory just cleared) is never kept. File I/O
+/// only under the lock.
 pub fn forget_briefs() -> usize {
     let mut s = lock();
+    s.briefs_epoch += 1;
+    s.brief_retry.clear();
     if !s.started || s.store.briefs.is_empty() {
         return 0;
     }
@@ -2309,10 +2390,15 @@ fn card_brief(key: &str) -> Option<Value> {
 
 /// Keep `b` and show it: the `yap-meeting-brief` event (the Meetings view,
 /// the notepad), the snapshot (the in-app card) and, when its meeting's card
-/// is on the Yap bar, the card there.
-fn store_brief(app: &AppHandle, b: &brief::Brief) {
+/// is on the Yap bar, the card there. Not when Reset app ran since it was
+/// made from the notes and memory (`epoch`: [`Runtime::briefs_epoch`] then):
+/// it would quote what the reset cleared. False then.
+fn store_brief(app: &AppHandle, b: &brief::Brief, epoch: u64) -> bool {
     let on_bar = {
         let mut s = lock();
+        if s.briefs_epoch != epoch {
+            return false;
+        }
         s.store.briefs.insert(b.key.clone(), b.clone());
         prune_briefs(&mut s.store, now_secs());
         save_store(&s.store);
@@ -2324,6 +2410,7 @@ fn store_brief(app: &AppHandle, b: &brief::Brief) {
         let value = serde_json::to_value(b).ok();
         crate::bar::update_card(app, BAR_CARD, |c| c.brief = value);
     }
+    true
 }
 
 /// The brief for meeting `key`: the one kept, when nothing it's made from
@@ -2339,6 +2426,7 @@ fn prepare_brief(app: &AppHandle, key: &str, force: bool) -> Result<brief::Brief
     }
     let meeting = brief_meeting(&event_by_key(key)?);
     let now = now_secs();
+    let epoch = lock().briefs_epoch;
     let facts = brief::gather(&meeting, &crate::notes::all(), &crate::memory::items(), now);
     let ai = BriefAi::of(&cfg);
     let fingerprint = facts.fingerprint(&ai.label());
@@ -2379,17 +2467,30 @@ fn prepare_brief(app: &AppHandle, key: &str, force: bool) -> Result<brief::Brief
         "calendar: brief made"
     );
     tracing::debug!("calendar: brief:\n{}", brief::plain_text(&b));
-    store_brief(app, &b);
+    if !store_brief(app, &b, epoch) {
+        // Reset app ran while it was made: made again from what's left.
+        if start {
+            lock().brief_job = None;
+        }
+        return prepare_brief(app, key, force);
+    }
     if let (true, BriefAi::Model(ep)) = (start, ai) {
         let app = app.clone();
-        tauri::async_runtime::spawn(async move { write_brief(app, facts, ep, fingerprint).await });
+        tauri::async_runtime::spawn(async move { write_brief(app, facts, ep, fingerprint, epoch).await });
     }
     Ok(b)
 }
 
 /// Write `facts`' "In short" on the meeting's model (beside any dictation),
-/// keep the finished brief, then start the next one waiting.
-async fn write_brief(app: AppHandle, facts: brief::Facts, ep: crate::meetings::meeting_summary::Endpoint, fingerprint: String) {
+/// keep the finished brief (unless Reset app ran since `epoch`), then start
+/// the next one waiting.
+async fn write_brief(
+    app: AppHandle,
+    facts: brief::Facts,
+    ep: crate::meetings::meeting_summary::Endpoint,
+    fingerprint: String,
+    epoch: u64,
+) {
     let key = facts.meeting.key.clone();
     let started = std::time::Instant::now();
     let result = brief::write(Some(&app), &facts, &ep).await;
@@ -2410,14 +2511,24 @@ async fn write_brief(app: AppHandle, facts: brief::Facts, ep: crate::meetings::m
         }
         Err(e) => {
             tracing::info!("calendar: brief's summary not written ({e})");
-            lock().brief_retry.insert(key.clone(), now + BRIEF_RETRY);
+            let mut s = lock();
+            if s.briefs_epoch == epoch {
+                s.brief_retry.insert(key.clone(), now + BRIEF_RETRY);
+            }
+            drop(s);
             // The plain brief, made again when asked for or after the wait.
             brief::assemble(&facts, vec![], false, "The AI couldn't write a summary this time, so this is the plain brief.", now)
         }
     };
     tracing::debug!("calendar: brief:\n{}", brief::plain_text(&b));
-    store_brief(&app, &b);
+    let kept = store_brief(&app, &b, epoch);
     lock().brief_job = None;
+    if !kept {
+        // Written from the notes and memory Reset app cleared: dropped, and
+        // the due briefs made again from what's left.
+        tracing::info!("calendar: a brief written before Reset app wasn't kept");
+        wake();
+    }
     // The next waiting, until one starts a summary of its own (it goes on
     // from there): one that needs none, or can't be made any more, starts
     // nothing, and those after it waited for ever, "writing" (a waiting
@@ -2838,6 +2949,30 @@ mod tests {
         assert_eq!(bar.secondary.as_ref().map(|a| a.id.as_str()), None);
         assert_eq!(when_text(now + 150, now), "In 3 min");
         assert_eq!(when_text(now - 30, now), "Started just now");
+    }
+
+    #[test]
+    fn a_slot_on_its_way_in_is_never_picked_twice() {
+        let mut s = Runtime::default();
+        s.store.connections.push(Connection {
+            id: "1".into(),
+            kind: "ics".into(),
+            label: "Calendar".into(),
+            detail: String::new(),
+            added_ts: 0,
+            synced_ts: 0,
+            error: None,
+            reconnect: false,
+        });
+        // A link still on its first fetch holds slot 2: a Google sign-in
+        // finishing meanwhile gets 3, never the link's.
+        let link = Reserved::free(&mut s).expect("a slot");
+        let google = Reserved::free(&mut s).expect("another slot");
+        assert_eq!((link.0.as_str(), google.0.as_str()), ("2", "3"));
+        // Every slot taken or held: none.
+        let held: Vec<Reserved> = std::iter::from_fn(|| Reserved::free(&mut s)).collect();
+        assert_eq!(held.len(), vault::SLOTS as usize - 3);
+        assert!(free_slot(&s).is_none());
     }
 
     #[test]

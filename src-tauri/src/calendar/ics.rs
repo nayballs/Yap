@@ -264,7 +264,12 @@ pub fn parse_date_time(v: &str) -> Option<(NaiveDateTime, bool)> {
     Some((date.and_time(NaiveTime::from_hms_opt(n(0)?, n(2)?, seconds)?), utc))
 }
 
-/// An RFC 5545 DURATION (`PT1H30M`, `P1D`, `P2W`, `-PT15M`) in seconds.
+/// The longest DURATION read (a century): no event lasts longer, and the
+/// window's sums with it stay in range.
+const MAX_DURATION: i64 = 100 * 366 * 86_400;
+
+/// An RFC 5545 DURATION (`PT1H30M`, `P1D`, `P2W`, `-PT15M`) in seconds;
+/// `None` past [`MAX_DURATION`].
 pub fn parse_duration(v: &str) -> Option<i64> {
     let v = v.trim();
     let (sign, v) = match v.strip_prefix('-') {
@@ -287,7 +292,7 @@ pub fn parse_duration(v: &str) -> Option<i64> {
         }
         let n: i64 = rest[..digits].parse().ok()?;
         let unit = rest[digits..].chars().next()?.to_ascii_uppercase();
-        total += n * match (unit, in_time) {
+        let seconds = match (unit, in_time) {
             ('W', false) => 7 * 86_400,
             ('D', false) => 86_400,
             ('H', true) => 3_600,
@@ -295,6 +300,7 @@ pub fn parse_duration(v: &str) -> Option<i64> {
             ('S', true) => 1,
             _ => return None,
         };
+        total = n.checked_mul(seconds).and_then(|s| total.checked_add(s)).filter(|t| *t <= MAX_DURATION)?;
         any = true;
         rest = &rest[digits + 1..];
     }
@@ -354,7 +360,8 @@ pub fn rule_until(rule: &str) -> Option<&str> {
 const MAX_ITERATIONS: usize = 100_000;
 
 /// The occurrences of `rule` from `start`, on wall-clock time: those in
-/// `[from, stop)`, at most `max`. `until` is the rule's UNTIL already turned
+/// `[from, stop)`, at most `max` — `start` always among them, and counted
+/// in a COUNT, whether or not the rule matches it. `until` is the rule's UNTIL already turned
 /// into wall-clock time by the caller (it knows the zone); `None` reads the
 /// rule's own UNTIL as wall-clock time (VTIMEZONE observances, where the
 /// difference never matters for the years Yap looks at). Nothing for a rule
@@ -397,16 +404,26 @@ pub fn expand_floating(
     let Ok(valid) = parsed.validate(dt_start) else {
         return Vec::new();
     };
+    let mut own_count = valid.get_count();
     let set = RRuleSet::new(dt_start).rrule(valid).limit();
     let mut out = Vec::new();
     for (n, occurrence) in (&set).into_iter().enumerate() {
         let at = occurrence.naive_utc();
-        if at >= stop || out.len() >= max || n >= MAX_ITERATIONS {
+        // DTSTART is the first occurrence and one of COUNT's even when the
+        // rule doesn't match it (RFC 5545 §3.8.5.3): the rule then has one
+        // fewer of its own.
+        if n == 0 && at != start {
+            own_count = own_count.map(|c| c.saturating_sub(1));
+        }
+        if at >= stop || out.len() >= max || n >= MAX_ITERATIONS || own_count.is_some_and(|c| n >= c as usize) {
             break;
         }
         if at >= from {
             out.push(at);
         }
+    }
+    if from <= start && start < stop && out.len() < max && out.first() != Some(&start) {
+        out.insert(0, start);
     }
     out
 }
@@ -667,6 +684,44 @@ mod tests {
         assert_eq!(parse_duration("-PT15M"), Some(-900));
         assert_eq!(parse_duration("PT"), None);
         assert_eq!(parse_duration("1H"), None);
+        // Past what i64 holds, or any event lasts: none (it used to
+        // overflow, a panic in a debug build).
+        assert_eq!(parse_duration("P9999999999999999W"), None);
+        assert_eq!(parse_duration("P1WT9223372036854775807S"), None);
+        assert_eq!(parse_duration("PT9223372036854775807S"), None);
+        assert_eq!(parse_duration("P36500D"), Some(36_500 * 86_400));
+    }
+
+    #[test]
+    fn an_endless_duration_is_survived() {
+        let cal = feed(
+            "BEGIN:VEVENT\r\nUID:d\r\nSUMMARY:Forever\r\nDTSTART:20261005T080000Z\r\n\
+             DURATION:PT9223372036854775807S\r\nRRULE:FREQ=DAILY;COUNT=2\r\nEND:VEVENT\r\n",
+        );
+        let got = starts(&cal, utc(2026, 10, 1, 0, 0), utc(2026, 10, 31, 0, 0));
+        assert_eq!(got.len(), 2);
+    }
+
+    #[test]
+    fn count_counts_a_dtstart_the_rule_doesnt_match() {
+        // Monday 5 October, on a Tuesday-and-Thursday rule: the Monday, then
+        // two of the rule's own (RFC 5545 §3.8.5.3) — not three more.
+        let cal = feed(
+            "BEGIN:VEVENT\r\nUID:t\r\nSUMMARY:Standup\r\nDTSTART:20261005T090000Z\r\nDURATION:PT15M\r\n\
+             RRULE:FREQ=WEEKLY;BYDAY=TU,TH;COUNT=3\r\nEND:VEVENT\r\n",
+        );
+        let got = starts(&cal, utc(2026, 10, 1, 0, 0), utc(2026, 10, 31, 0, 0));
+        assert_eq!(got.iter().map(|(_, s)| *s).collect::<Vec<_>>(), [
+            utc(2026, 10, 5, 9, 0),
+            utc(2026, 10, 6, 9, 0),
+            utc(2026, 10, 8, 9, 0),
+        ]);
+        // COUNT=1: the DTSTART alone.
+        let one = feed(
+            "BEGIN:VEVENT\r\nUID:o\r\nSUMMARY:Once\r\nDTSTART:20261005T090000Z\r\nDURATION:PT15M\r\n\
+             RRULE:FREQ=WEEKLY;BYDAY=TU;COUNT=1\r\nEND:VEVENT\r\n",
+        );
+        assert_eq!(starts(&one, utc(2026, 10, 1, 0, 0), utc(2026, 10, 31, 0, 0)).len(), 1);
     }
 
     const WEEKLY: &str = "BEGIN:VEVENT\r\nUID:weekly@yap\r\nSUMMARY:Weekly sync\r\n\

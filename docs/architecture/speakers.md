@@ -29,16 +29,22 @@ Telling the call side's voices apart (the beta speaker engine, a child process) 
   first appearance, stable — `timeline::SpeakerOrder`) every 5 s of audio
   once labels moved on, then `final: true`; or `error {message}`. stderr →
   the log at debug. **Yap side**: `Session::for_meeting(note_id)` (config +
-  installed) → `tee()` → `finish()` (≤ ~20 s, normally < 1 s; dropped
-  unfinished = cancelled, nobody told). A feeding thread batches the tee's
+  installed) → `tee()` → `finish()` (≤ ~25 s, normally < 1 s: an engine
+  still stuck then — hung, on a backlog, or on its way out — is ended and
+  the labels it sent are the final ones, `error` set only when its final
+  list never came; dropped unfinished = cancelled, nobody told, a hung
+  engine ended after 2 s). A feeding thread batches the tee's
   frames into the child's stdin; a child that dies is started again
   (`MAX_RESTARTS` 2) at its place on the clock as a new `stream` (a voice is
-  `(stream, speaker)`; the gap is in `gaps`); past 5 min of queued audio the
+  `(stream, speaker)`; the gap is in `gaps`; once the new one is ready the
+  earlier one's error is gone, and a replaced engine's late words count for
+  nothing); past 5 min of queued audio the
   tee sends silence (memory bounded, clock right). **Over saved audio**
   (`run_saved`, Find speakers, `rerun.rs`): the same child with no live
   updates, fed `Piece`s as fast as it takes them (the pipe is the pace),
   its final segments on the one stream's clock; cancelled = the child
-  killed; counted as a model in use. Measuring only: `--gpu`,
+  killed (a hung one, whose pipe blocks the writes, 2 s after Cancel);
+  counted as a model in use. Measuring only: `--gpu`,
   `--chunk-frames`, `--right-context-frames` (the child's defaults are
   what Yap runs: the processor, the preset as it is); a debug build's
   `YAP_DIARIZE_EXE` names the child for unit tests. **The API for the speaker
