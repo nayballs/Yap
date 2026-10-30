@@ -396,7 +396,7 @@ export function createSetupState() {
     try {
       const fresh = await invoke('get_config');
       cfg = { ...fresh, ...cfgPatch };
-      await invoke('save_config', { cfg });
+      await invoke('save_config', { cfg, base: fresh });
     } catch (e) {
       error = `Couldn't save settings: ${e}`;
     }

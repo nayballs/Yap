@@ -337,7 +337,10 @@ global hook never sees keys while a Yap window has the focus.
   `chat_image_drop`; the box says "Drop pictures to ask about them" while
   they're dragged over). Only pictures (PNG, JPEG, GIF, BMP, WebP, TIFF,
   HEIC with Windows' codec), ≤ 50 MB a file, ≤ 100 MP, as many as the
-  question has room for (4); the rest are left with a line saying so. Each
+  question has room for (4); the rest are left with a line saying so. With
+  4 waiting, a paste or a drop says "A question carries 4 screenshots at
+  most" and adds nothing (until 2026-10-30 a paste took the oldest's place
+  without a word). Each
   is decoded — PNG here, anything else by **Windows' own codecs**
   (`Windows.Graphics.Imaging.BitmapDecoder`: EXIF rotation and colour
   profile applied; no image crate) — its see-through pixels laid on white,
@@ -504,7 +507,12 @@ question and its screenshot back in the box.
 
 **Earlier screenshots** never go again to a model known not to read
 images (switched to after a question with one): each is a line
-(`turn::with_history_images` with the model).
+(`turn::with_history_images` with the model). One Yap knows nothing about
+that turns them down on a follow-up (a question without screenshots of
+its own) is learned to be a "no" there and then (`vision::refused`), and
+the step is asked again with each said in that line
+(`turn::without_images`, `chat/tools/agent.rs`, 2026-10-30): until then
+every follow-up to it failed, and the refusal was never learned.
 
 ## The on-device model reads screenshots (phase 3, 2026-10-28)
 
