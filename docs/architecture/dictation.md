@@ -366,8 +366,10 @@ to **Run again** from Home.
   as a stop would (`stop_and_transcribe`: stop chime, other apps back) and
   what it heard is transcribed and kept like any dictation (history, its
   audio a day in `recent_audio`), pasted **only into the window it was
-  for** (`unplugged` set → `inject_text`'s strict paste, as Undo's: a window
-  gone leaves it on the clipboard, and
+  for** (`unplugged` set → `inject_text`'s strict paste, as Undo's —
+  `Shared::own_window_only`, a Command's or rewrite's paste as well since
+  2026-10-30 (`rewrite.rs`), which used to go into whatever was in front: a
+  window gone leaves it on the clipboard, and
   Home lists it as "Didn't paste · Your microphone was disconnected and its
   window was gone", with Copy and Run again); nothing heard → it ends at once
   (`end_now`, shared with `end_without_mic`), the bar saying "<mic> was
@@ -1212,7 +1214,9 @@ to **Run again** from Home.
   transcription, cleanup, the paste **back into its own window or onto the
   clipboard** (`inject_text`'s `strict`, as Undo's: nobody pressed
   anything, so never into whatever is in front now; Undo's own "window
-  gone" alert gives way). `deliver_text` then calls `stopped`: an alert
+  gone" alert gives way). A Command or a rewrite stopped at the limit
+  pastes its AI text by the same rule (`own_window_only`, since
+  2026-10-30; e2e `dictation-polish.spec.js`). `deliver_text` then calls `stopped`: an alert
   ("Dictation stopped at 15 minutes", kind `dictationCapped`: never held,
   never dropped) saying it's pasted, or that it couldn't be, with
   **Recover text** (`RECOVER` → `recover`: that dictation's text onto the

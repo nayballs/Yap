@@ -264,6 +264,44 @@ test('the length limit: warned a moment before, stopped at it, nothing lost — 
   }
 });
 
+// dictation/pipeline/rewrite.rs (review 2026-10-30): a Command that stops by
+// itself — its length limit, its mic unplugged — goes into the window it
+// started in or onto the clipboard, as a dictation does; it used to paste
+// into whatever had the focus. The stub transcribes "[STT stub: received …",
+// so a Command named "stub" hears its name; its window is a stand-in no
+// window has (`e2e_target_window`): gone by the paste.
+test('a Command stopped at the length limit with its window gone: copied, never pasted into another', async ({ yap, main }) => {
+  const llm = await startFakeLlm();
+  llm.reply('rewrite', () => 'Thanks for your help.');
+  const { agentName, llmScopes } = await yap.invoke('get_config');
+  await setConfig(yap, main, {
+    streamingPartials: false,
+    agentName: 'stub',
+    llmScopes: { voiceAgent: { enabled: true, provider: 'custom', baseUrl: llm.base, model: 'fake-commands' } },
+  });
+  await yap.invoke('e2e_target_window', { on: true });
+  await yap.invoke('e2e_dictation_cap', { limitMs: 2_000, warnMs: 1_000 });
+  try {
+    const mark = log(yap).length;
+    // Five seconds of talk: stopped at two, by itself. A Command pastes
+    // no dictation of its own.
+    expect(await yap.invoke('e2e_dictate_audio', { seconds: 5 })).toBeNull();
+    const said = log(yap).slice(mark);
+    expect(said).toContain('Dictation: reached its length limit, stopping and transcribing');
+    expect(said).toContain("Agent's name heard");
+    expect(llm.requests.filter((r) => r.kind === 'rewrite')).toHaveLength(1);
+    // Its window gone: on the clipboard, and said so.
+    expect(said).toContain("e2e: the dictation's window is gone; not pasting the text");
+    expect(said).not.toContain('e2e: not pasting the text');
+    await expect(main.getByRole('status').filter({ hasText: 'Your text is copied: press Ctrl+V' })).toBeVisible();
+    await closeToasts(main);
+  } finally {
+    await yap.invoke('e2e_target_window', { on: false });
+    await setConfig(yap, main, { streamingPartials: true, agentName, llmScopes });
+    await llm.close();
+  }
+});
+
 test('the level meter moves for a whisper, and a shout never reaches the top', async ({ yap, main, shot }) => {
   const capsule = yap.overlay.locator('.capsule');
   // The waveform, not the live words, in the capsule.
