@@ -50,8 +50,9 @@
   let portable = $state(false);
   let logInfo = $state(null); // { dir, file } from log_info
   let historyCount = $state(null);
-  // Dictations older than a day ("Keep history: 24 hours" deletes them; it asks first).
-  let olderThanDay = $state(0);
+  // Dictations older than a day ("Keep history: 24 hours" deletes them; it
+  // asks first). null: not counted yet.
+  let olderThanDay = $state(null);
   // Keep history (dictation/history/keep.rs): 'always' | 'day' | 'never', from
   // historyEnabled (what an older Yap reads) and historyKeep.
   const keepOf = (c) => (c.historyEnabled === false ? 'never' : c.historyKeep === 'day' ? 'day' : 'always');
@@ -77,15 +78,22 @@
     cfg.historyKeep = v;
   }
   /** Keep history changed: "24 hours" asks first when it deletes some now. */
-  function chooseKeep(v, e) {
+  async function chooseKeep(v, e) {
     const was = keepOf(cfg);
     if (v === was) return;
-    if (v !== 'day' || !olderThanDay) return applyKeep(v);
+    if (v !== 'day') return applyKeep(v);
     keepShown = was;
+    // Picked before the count came (the page just opened): counted first.
+    if (olderThanDay == null) await loadCount();
+    if (olderThanDay === 0) return applyKeep(v);
     const n = olderThanDay;
     askConfirm({
       title: 'Keep history for 24 hours?',
-      body: `${n.toLocaleString()} ${n === 1 ? 'dictation is' : 'dictations are'} older than a day: ${n === 1 ? 'it goes' : 'they go'} now, with ${n === 1 ? 'its' : 'their'} audio. From now on, each goes a day after you say it. Your stats in Insights stay. This can't be undone.`,
+      body: `${
+        n == null
+          ? 'Dictations older than a day go now'
+          : `${n.toLocaleString()} ${n === 1 ? 'dictation is' : 'dictations are'} older than a day: ${n === 1 ? 'it goes' : 'they go'} now`
+      }, with ${n === 1 ? 'its' : 'their'} audio. From now on, each goes a day after you say it. Your stats in Insights stay. This can't be undone.`,
       confirmLabel: 'Keep 24 hours',
       busyLabel: 'Deleting…',
       returnFocus: e?.target ?? null,
