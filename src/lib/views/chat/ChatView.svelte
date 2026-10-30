@@ -125,8 +125,8 @@
   let chatWidth = $state(0);
   // The conversation list's own width (a long title widens it). While a
   // document is open beside the chat, the list steps aside unless Chat is
-  // wide: the conversation on the left, the document on the right (New
-  // chat is Ctrl+N; ✕ brings the list back).
+  // wide: the conversation on the left, the document on the right ("Show
+  // your chats" over the thread brings it back; so does ✕).
   let listWidth = $state(224);
   let listWanted = $state(false);
   const listAside = $derived(doc.open && !doc.expanded && chatWidth < LIST_STAYS && !listWanted);
