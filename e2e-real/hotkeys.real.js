@@ -56,7 +56,7 @@ test('a second key for dictation: either key starts it and either stops it', asy
   await sleep(1_500);
   await robot.hookKeys(`d:${F24},w:60,u:${F24}`);
   await expect.poll(() => pad.text('box'), { timeout: 20_000 }).toContain('STT stub');
-  expect(robot.logSince(mark)).toContain('Input hook: queueing dictation-key-pressed');
+  expect(robot.logSince(mark)).toContain('Input hook: emitting dictation-key-pressed');
   await idle(robot);
 
   // …and the other way round. The keys themselves never reach the pad.

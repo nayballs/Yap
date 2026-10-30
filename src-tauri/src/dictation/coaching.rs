@@ -237,6 +237,13 @@ pub fn offer(app: &AppHandle, hint: Hint, hotkey: &str) {
         tracing::debug!(?hint, "coaching: not now");
         return;
     }
+    // Never over a meeting: the main window's toast would land on it, and a
+    // bar card would wait unseen and be dropped — yet count as one of the
+    // hint's three. Not shown, not counted: a later one comes.
+    if crate::notices::notice::moment().meeting {
+        tracing::debug!(?hint, "coaching: a meeting is recording; not now");
+        return;
+    }
     let (title, mut body) = text(hint);
     if hint == Hint::LongDictation && hotkey.trim().is_empty() {
         body = LONG_DICTATION_NO_KEY;

@@ -451,10 +451,12 @@ to **Run again** from Home.
   once double-tap has been used; counts in `<data>/hints.json` (not config.json:
   Settings' auto-saved copy would write old counts back). Surface (one
   place, `notice::place`): a Tip toast in the main window while it's focused
-  (`yap-hint`), else a Yap bar card (icon `tip`; it waits out a dictation or
-  a meeting and is dropped if it can't show within 10 s), else the window's
+  (`yap-hint`), else a Yap bar card (icon `tip`; it waits out a dictation
+  and is dropped if it can't show within 10 s), else the window's
   toast if it's on screen; neither → nothing shown, nothing counted (never a
-  Windows notification). "Show tips" off (`show_tips`) → none. Texts say
+  Windows notification). While a meeting records none is offered or counted
+  (2026-10-30: the card waited unseen and was dropped, yet counted as one
+  of the three). "Show tips" off (`show_tips`) → none. Texts say
   `{key}`; the page names the hotkey (`fillHotkey` in `lib/core/hotkeys.js`; the
   card's `hotkey` field). Not for the edit hotkey. hints.json also keeps the
   feature tips' and the bar's first-use pointers' counts (`tips.rs`,
@@ -1278,7 +1280,9 @@ to **Run again** from Home.
   `transcribe_file` command.
 - **`dictation/sound.rs`** — start/stop chimes (volume + output-device aware); each
   takes an optional `Played` callback, run on the chime's thread once it has
-  played (or at once when it can't): how `dictation/mute.rs` goes after the start
+  played (or at once when it can't; 3 s at most, `wait_played`: an output that
+  went mid-chime is never drained again, and the stop chime's mic release
+  waited for ever): how `dictation/mute.rs` goes after the start
   chime and comes back after the stop chime. `open_output` (the configured
   output device, else the default) is shared with `voice/tts.rs`.
 - **`dictation/mute.rs`** — **other apps' sound while you dictate** (2026-10-17; it
@@ -1409,5 +1413,8 @@ to **Run again** from Home.
   stats). Through the notice policy (kind `milestone`: a tip "Show tips"
   switches off, after the dictation, never in a meeting, gone unseen after
   a minute): the main window's toast (`yap-milestone`,
-  `notices/milestones.js`) or a bar card, both with See Insights. Its own
+  `notices/milestones.js`) or a bar card, both with See Insights. One
+  passed while a meeting records isn't said then and is marked unsaid again
+  (`stats::milestone_unsaid`, 2026-10-30): the next dictation after the
+  meeting says it — it used to be marked said, then dropped unseen. Its own
   module, apart from `coaching.rs`.

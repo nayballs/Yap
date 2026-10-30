@@ -261,6 +261,18 @@ impl Store {
         crossed
     }
 
+    /// Milestone `step` couldn't be said after all (a meeting records): no
+    /// longer marked said — back to `before`, what was said until then — so
+    /// the next dictation passes it again and says it. Nothing when a newer
+    /// one was marked meanwhile. Whether it changed.
+    pub fn unsay(&mut self, step: u64, before: u64) -> bool {
+        if self.milestone != step || before >= step {
+            return false;
+        }
+        self.milestone = before;
+        true
+    }
+
     /// A dictation that failed (or was cancelled), run again and counted now
     /// on the day it was said (`at`, unix seconds). History up to it counts
     /// as counted, or the next start's [`catch_up`](Self::catch_up) would
@@ -501,6 +513,7 @@ pub fn dictated(app: &AppHandle, c: Counted<'_>) {
     }
     let now = now_secs();
     let crossed = with_store(|s| {
+        let before = s.milestone;
         let crossed = match c.at {
             None => s.count_now(days::today(), &t, now),
             // Run again on one that failed: on the day it was said.
@@ -510,14 +523,25 @@ pub fn dictated(app: &AppHandle, c: Counted<'_>) {
             }
         };
         save(s);
-        crossed.map(|step| (step, s.minutes_saved()))
+        crossed.map(|step| (step, before, s.minutes_saved()))
     });
     tracing::debug!(words = t.words, timed = t.secs.is_some(), "Dictation stats: counted");
     // Home and Insights re-pull (history off, nothing else says so).
     let _ = app.emit(EVENT, ());
-    if let Some((step, minutes)) = crossed {
-        crate::dictation::milestones::celebrate(app, step, minutes);
+    if let Some((step, before, minutes)) = crossed {
+        crate::dictation::milestones::celebrate(app, step, before, minutes);
     }
+}
+
+/// Milestone `step` wasn't said after all (a meeting records): marked
+/// unsaid again, back to `before`, so the next dictation says it
+/// (`milestones::celebrate`).
+pub fn milestone_unsaid(step: u64, before: u64) {
+    with_store(|s| {
+        if s.unsay(step, before) {
+            save(s);
+        }
+    });
 }
 
 /// Home's and Insights' numbers.
@@ -765,6 +789,25 @@ mod tests {
         assert_eq!(s.count_now(today, &tally(900, None, "a.exe"), 40), Some(1_000), "past 500 and 1,000: the higher");
         assert_eq!(s.milestone, 1_000);
         assert_eq!(s.count_now(today, &tally(0, None, "a.exe"), 50), None);
+    }
+
+    /// A milestone passed during a meeting was marked said as it was
+    /// counted, then waited unseen on the bar and was dropped (or showed
+    /// over the meeting): never said. Unsaid, the next dictation says it.
+    #[test]
+    fn a_milestone_that_could_not_be_said_is_said_by_the_next_dictation() {
+        let mut s = Store::default();
+        let today = d("2026-10-29");
+        assert_eq!(s.count_now(today, &tally(60, None, "a.exe"), 10), None);
+        assert_eq!(s.count_now(today, &tally(50, None, "a.exe"), 20), Some(100));
+        // A meeting records: not said.
+        assert!(s.unsay(100, 0));
+        assert_eq!(s.milestone, 0);
+        assert_eq!(s.count_now(today, &tally(5, None, "a.exe"), 30), Some(100), "the next dictation passes it again");
+        // A newer one marked meanwhile stays.
+        assert_eq!(s.count_now(today, &tally(900, None, "a.exe"), 40), Some(1_000));
+        assert!(!s.unsay(100, 0));
+        assert_eq!(s.milestone, 1_000);
     }
 
     #[test]

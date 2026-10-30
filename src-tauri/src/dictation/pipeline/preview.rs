@@ -15,9 +15,9 @@ use super::engine::model_loading;
 use super::Shared;
 
 impl Shared {
-    /// If streaming partials are enabled, spawn the worker thread for this
-    /// recording session (it exits on its own when `recording` flips false).
-    pub(super) fn maybe_start_streaming(self: &Arc<Self>) {
+    /// If streaming partials are enabled, spawn the worker thread for
+    /// recording `session` (it exits on its own when that recording ends).
+    pub(super) fn maybe_start_streaming(self: &Arc<Self>, session: u64) {
         let enabled = self
             .config
             .read()
@@ -28,12 +28,20 @@ impl Shared {
         }
         let (language, translate) = self.language_settings();
         let shared = Arc::clone(self);
-        std::thread::spawn(move || stream_partials(shared, language, translate));
+        std::thread::spawn(move || stream_partials(shared, session, language, translate));
+    }
+
+    /// Recording `session` is still the one recording.
+    fn still_recording(&self, session: u64) -> bool {
+        self.recording.load(Ordering::SeqCst) && self.rec_session.load(Ordering::SeqCst) == session
     }
 }
 
-/// Streaming-partials worker. Runs on its own thread for one recording session
-/// and exits when `recording` flips false.
+/// Streaming-partials worker. Runs on its own thread for one recording
+/// session and exits when that recording ends — not merely when `recording`
+/// flips false: a cancel and a new press within one of its ticks used to
+/// leave it running into the new recording beside the new one's worker,
+/// showing the old dictation's words in the new one's preview.
 ///
 /// Each tick it transcribes only a bounded **sliding window** of the buffer
 /// (`partials::PartialSession`): audio older than the window is frozen as
@@ -41,7 +49,7 @@ impl Shared {
 /// never blocks the authoritative final pass: it grabs the engine with
 /// `try_lock` and skips the tick if the engine is busy or absent (taken by a
 /// meeting chunk; the final pass only takes it after `recording` flips false).
-fn stream_partials(shared: Arc<Shared>, language: Option<String>, translate: bool) {
+fn stream_partials(shared: Arc<Shared>, recording: u64, language: Option<String>, translate: bool) {
     const BASE_INTERVAL: Duration = Duration::from_millis(500);
     const MAX_INTERVAL: Duration = Duration::from_secs(3);
     // Don't bother until the window has at least ~0.5 s of audio (avoids
@@ -68,7 +76,7 @@ fn stream_partials(shared: Arc<Shared>, language: Option<String>, translate: boo
     let mut interval = BASE_INTERVAL;
     loop {
         std::thread::sleep(interval);
-        if !shared.recording.load(Ordering::SeqCst) {
+        if !shared.still_recording(recording) {
             break;
         }
 
@@ -104,7 +112,7 @@ fn stream_partials(shared: Arc<Shared>, language: Option<String>, translate: boo
             };
             match guard.as_ref() {
                 Some(engine) => {
-                    if !shared.recording.load(Ordering::SeqCst) {
+                    if !shared.still_recording(recording) {
                         break;
                     }
                     // On an advance, both halves are transcribed under one
@@ -162,7 +170,7 @@ fn stream_partials(shared: Arc<Shared>, language: Option<String>, translate: boo
         if !display.is_empty() && display != last_emitted {
             // Recording may have stopped while we were transcribing — don't emit
             // a stale partial over the authoritative final transcript.
-            if !shared.recording.load(Ordering::SeqCst) {
+            if !shared.still_recording(recording) {
                 break;
             }
             last_emitted = display.clone();
@@ -177,6 +185,13 @@ fn stream_partials(shared: Arc<Shared>, language: Option<String>, translate: boo
 fn ensure_partial_engine(shared: &Arc<Shared>) {
     // The startup load will put it there (the final pass waits for it).
     if model_loading() {
+        return;
+    }
+    // Out with a meeting's chunk (or being loaded by another taker): it comes
+    // back in a moment. Loading here would put a second copy of the model on
+    // the graphics card — what `EngineCell` lends the engine in turns to
+    // avoid — and the worker polls for it meanwhile anyway.
+    if shared.engine.is_out() {
         return;
     }
     let empty = shared

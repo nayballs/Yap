@@ -106,8 +106,9 @@ struct Moment {
 }
 
 /// Say a milestone passed: once the dictation is over, in one place, on a
-/// thread of its own.
-pub fn celebrate(app: &AppHandle, step: u64, minutes_saved: f64) {
+/// thread of its own. `before`: the milestone said until this one, should
+/// it have to wait for a later dictation.
+pub fn celebrate(app: &AppHandle, step: u64, before: u64, minutes_saved: f64) {
     let app = app.clone();
     let _ = std::thread::Builder::new().name("milestone".into()).spawn(move || {
         // Never over a dictation (the one that passed it is still pasting).
@@ -121,6 +122,15 @@ pub fn celebrate(app: &AppHandle, step: u64, minutes_saved: f64) {
         }
         if crate::notices::notice::tips_off() {
             tracing::info!(step, "Milestone passed; tips are switched off");
+            return;
+        }
+        // Never over a meeting: the main window's toast would land on it, and
+        // a bar card would wait unseen and be dropped — yet it was marked
+        // said, so it never came. Unsaid, the next dictation after the
+        // meeting says it.
+        if crate::notices::notice::moment().meeting {
+            tracing::info!(step, "Milestone passed during a meeting; said after it");
+            crate::dictation::stats::milestone_unsaid(step, before);
             return;
         }
         let (title, body) = text(step, minutes_saved);

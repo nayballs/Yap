@@ -108,6 +108,13 @@ impl EngineCell {
     fn out(&self) -> usize {
         *self.out.lock().unwrap()
     }
+
+    /// A taker has the engine out (a meeting's chunk transcribing with it)
+    /// or is loading one: an empty slot isn't "unloaded" then, it comes
+    /// back.
+    pub(crate) fn is_out(&self) -> bool {
+        *self.out.lock().unwrap_or_else(|p| p.into_inner()) > 0
+    }
 }
 
 /// The engine taken out of its slot ([`EngineCell::take`]); back when dropped.
@@ -131,6 +138,19 @@ impl Lease {
     /// fresh one (a graphics card lost after sleep, a driver reset).
     pub(crate) fn discard(&mut self) {
         self.engine = None;
+    }
+
+    /// A transcription on this lease's engine ended with `result`: an engine
+    /// that broke (`SttError::engine_broken`) is discarded, so it isn't
+    /// given back to fail every dictation after it until Yap restarts (the
+    /// warm engine is never unloaded by default).
+    pub(crate) fn after_transcribing<T>(&mut self, result: &Result<T, crate::dictation::stt::SttError>) {
+        if let Err(e) = result {
+            if e.engine_broken() {
+                tracing::warn!("Speech engine: it failed; the next transcription loads it afresh");
+                self.discard();
+            }
+        }
     }
 }
 
@@ -258,6 +278,23 @@ mod tests {
         assert_eq!(slot.out(), 0);
     }
 
+    /// The live preview warm-loads the model into an empty slot (after an
+    /// idle unload) — but an empty slot whose engine a meeting's chunk has
+    /// out isn't unloaded: it says so (`is_out`), so no second copy is
+    /// loaded beside it.
+    #[cfg(not(feature = "engines"))]
+    #[test]
+    fn an_engine_out_with_a_meeting_chunk_is_not_unloaded() {
+        let slot = EngineSlot::default();
+        assert!(!slot.is_out(), "nothing out: an empty slot is unloaded");
+        *slot.lock().unwrap() = Some(engine());
+        let chunk = slot.take(Duration::ZERO);
+        assert!(slot.lock().unwrap().is_none() && slot.is_out(), "empty, but out");
+        drop(chunk);
+        assert!(!slot.is_out());
+        assert!(slot.lock().unwrap().is_some());
+    }
+
     /// Nobody has it (unloaded when idle): the first taker loads it for
     /// everyone — the others wait for that load, then share it.
     #[cfg(not(feature = "engines"))]
@@ -293,6 +330,36 @@ mod tests {
         assert!(!got, "nothing to share: it loads its own");
         assert!(waited < Duration::from_secs(2), "woken by the failed load, not the timeout");
         assert_eq!(slot.out(), 0);
+    }
+
+    /// A dictation whose transcription failed in the engine (its runtime's
+    /// error: a graphics card lost after a sleep, a driver reset) gave that
+    /// engine back: every dictation after it failed too ("Transcription
+    /// failed — check your model") until Yap restarted, since the warm
+    /// engine is never unloaded by default. Now it's dropped and the next
+    /// one loads afresh; audio the engine can't take, or a good result,
+    /// leaves it warm.
+    #[cfg(not(feature = "engines"))]
+    #[test]
+    fn an_engine_that_broke_mid_transcription_is_never_given_back() {
+        use crate::dictation::stt::SttError;
+        let slot = EngineSlot::default();
+        *slot.lock().unwrap() = Some(engine());
+        let mut lease = slot.take(Duration::ZERO);
+        lease.after_transcribing::<String>(&Err(SttError::TranscriptionError("device removed".into())));
+        drop(lease);
+        assert!(slot.lock().unwrap().is_none(), "the broken engine is gone: the next taker loads a fresh one");
+        assert_eq!(slot.out(), 0);
+        // Too short to transcribe, or transcribed: still the warm engine.
+        *slot.lock().unwrap() = Some(engine());
+        let mut lease = slot.take(Duration::ZERO);
+        lease.after_transcribing::<String>(&Err(SttError::InvalidAudio("too short".into())));
+        drop(lease);
+        let mut lease = slot.take(Duration::ZERO);
+        assert!(lease.engine().is_some(), "kept warm");
+        lease.after_transcribing(&Ok::<_, SttError>("Hello.".to_string()));
+        drop(lease);
+        assert!(slot.lock().unwrap().is_some());
     }
 
     /// An engine that failed (or whose transcription panicked) isn't given

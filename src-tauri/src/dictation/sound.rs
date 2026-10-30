@@ -6,6 +6,7 @@
 //! attack ramp and an exponential fade-out — no hard edges, no clicks.
 
 use std::thread;
+use std::time::{Duration, Instant};
 
 const SAMPLE_RATE: u32 = 44_100;
 // OpenWhispr dictationCues.js constants, verbatim.
@@ -83,6 +84,27 @@ pub(crate) fn open_output(device: Option<&str>) -> Option<(rodio::OutputStream, 
     rodio::OutputStream::try_default().ok()
 }
 
+/// The longest a chime is waited for: it lasts a quarter of a second, so
+/// past this its output has stopped taking audio.
+const PLAY_LIMIT: Duration = Duration::from_secs(3);
+
+/// Wait until `sink` has played what it holds, or `limit` at most. An
+/// output device that goes while a chime plays (headphones unplugged, a
+/// Bluetooth headset switched off with its mic, mid-dictation) stops its
+/// stream, and nothing drains the sink again: rodio's `sleep_until_end`
+/// waited for ever then, and what runs after the stop chime — the
+/// dictation's mic let go, the other apps' sound back — never did.
+fn wait_played(sink: &rodio::Sink, limit: Duration) {
+    let started = Instant::now();
+    while !sink.empty() {
+        if started.elapsed() >= limit {
+            tracing::warn!("Chime: its output stopped taking audio; going on without it");
+            return;
+        }
+        thread::sleep(Duration::from_millis(10));
+    }
+}
+
 fn play_cue(notes: &'static [f32], volume: f32, device: Option<&str>, played: Option<Played>) {
     let peak = MAX_GAIN * volume.clamp(0.0, 1.0);
     if peak <= 0.0 && played.is_none() {
@@ -90,8 +112,9 @@ fn play_cue(notes: &'static [f32], volume: f32, device: Option<&str>, played: Op
     }
     let device = device.map(str::to_string);
     // Play on a detached thread; OutputStream must stay alive until the
-    // sink drains, and sleep_until_end() blocks. `played` runs after it
-    // (and after a chime that couldn't play), on the same thread.
+    // sink drains ([`wait_played`] blocks, for a moment at most). `played`
+    // runs after it (and after a chime that couldn't play), on the same
+    // thread.
     thread::spawn(move || {
         use rodio::buffer::SamplesBuffer;
         use rodio::Sink;
@@ -101,7 +124,7 @@ fn play_cue(notes: &'static [f32], volume: f32, device: Option<&str>, played: Op
                 if let Ok(sink) = Sink::try_new(&handle) {
                     let samples = render_cue(notes, peak);
                     sink.append(SamplesBuffer::new(1, SAMPLE_RATE, samples));
-                    sink.sleep_until_end();
+                    wait_played(&sink, PLAY_LIMIT);
                 }
             }
         }
@@ -109,4 +132,37 @@ fn play_cue(notes: &'static [f32], volume: f32, device: Option<&str>, played: Op
             f();
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rodio::buffer::SamplesBuffer;
+
+    /// The chime's output stopped taking audio (its device unplugged while
+    /// it played): nothing drains the sink again. `sleep_until_end` waited
+    /// for ever, so the stop chime's `played` — the mic let go, the other
+    /// apps' sound back — never ran. Now the wait gives up.
+    #[test]
+    fn a_chime_whose_output_stopped_is_waited_for_a_moment_only() {
+        // A sink nothing plays from: its output gone.
+        let (sink, _stopped_output) = rodio::Sink::new_idle();
+        sink.append(SamplesBuffer::new(1, SAMPLE_RATE, render_cue(&STOP_NOTES, MAX_GAIN)));
+        let (tx, rx) = std::sync::mpsc::channel();
+        thread::spawn(move || {
+            wait_played(&sink, Duration::from_millis(300));
+            let _ = tx.send(());
+        });
+        assert!(rx.recv_timeout(Duration::from_secs(5)).is_ok(), "the wait gave up");
+
+        // An output that plays it: done as soon as it has.
+        let (sink, mut output) = rodio::Sink::new_idle();
+        sink.append(SamplesBuffer::new(1, SAMPLE_RATE, render_cue(&START_NOTES, MAX_GAIN)));
+        let player = thread::spawn(move || while output.next().is_some() {});
+        let started = Instant::now();
+        wait_played(&sink, Duration::from_secs(10));
+        assert!(started.elapsed() < Duration::from_secs(5), "played, not timed out");
+        drop(sink);
+        let _ = player.join();
+    }
 }

@@ -91,16 +91,19 @@ impl Shared {
             })
             .await;
             match outcome {
-                Ok((lease, Ok(text))) => {
+                Ok((mut lease, result)) => {
+                    // An engine that broke isn't given back.
+                    lease.after_transcribing(&result);
                     drop(lease);
-                    let t = text.trim().to_string();
-                    if !t.is_empty() {
-                        pieces.push(t);
+                    match result {
+                        Ok(text) => {
+                            let t = text.trim().to_string();
+                            if !t.is_empty() {
+                                pieces.push(t);
+                            }
+                        }
+                        Err(err) => return emit_err(format!("Transcription failed: {err}")),
                     }
-                }
-                Ok((lease, Err(err))) => {
-                    drop(lease);
-                    return emit_err(format!("Transcription failed: {err}"));
                 }
                 Err(e) => return emit_err(format!("Transcription task failed: {e}")),
             }
@@ -299,11 +302,12 @@ impl Shared {
         // words AI cleanup changed (`as_said.rs`).
         let mut offer: Option<u64> = None;
         match outcome {
-            Ok((lease, transcription)) => {
+            Ok((mut lease, transcription)) => {
                 // The (warm) engine back for next time, now — not after the
                 // cleanup below — unless a model switch (`set_engine`)
                 // installed a newer one meanwhile: then that stays
-                // (`EngineCell::give_back`).
+                // (`EngineCell::give_back`). One that broke isn't given back.
+                lease.after_transcribing(&transcription);
                 drop(lease);
                 match transcription {
                     // A question for the Voice Assistant: corrected, then
@@ -403,7 +407,7 @@ impl Shared {
         let spoken = crate::dictation::languages::plan(&cfg, None);
         let prompt = if stt::is_whisper_model(&model_id) { self.dictionary_prompt() } else { None };
         tracing::info!(samples = audio.len(), model = %model_id, warm, "Running a dictation again");
-        let (lease, result) = tokio::task::spawn_blocking(move || {
+        let (mut lease, result) = tokio::task::spawn_blocking(move || {
             let r = match lease.engine() {
                 Some(engine) => engine.transcribe_spoken(&audio, &spoken, translate, prompt.as_deref()),
                 None => Err(SttError::NotReady),
@@ -412,6 +416,7 @@ impl Shared {
         })
         .await
         .map_err(|e| format!("The transcription crashed: {e}"))?;
+        lease.after_transcribing(&result);
         drop(lease);
         self.touch_activity();
         let said = result.map_err(|e| format!("The transcription failed: {e}"))?;
