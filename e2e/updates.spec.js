@@ -87,3 +87,32 @@ test('a manual check finds the update, shows it in About only, and a debug build
   await shot(main, '02-install-refused-in-debug');
   await closeSettings(main);
 });
+
+// "Restart to update" waits a moment so the toast and tray can say
+// "Restarting…". A meeting started in that moment (or a dictation) went
+// down with the restart until 2026-10-29: it now stops the restart, with
+// the reason, and the update stays ready.
+test('a meeting started just as Yap restarts to update stops the restart', async ({ yap, main, shot }) => {
+  const dialog = await openSettings(main, 'About');
+  const updatesGroup = dialog.getByRole('group', { name: 'Updates' });
+  if ((await yap.invoke('update_status')).status !== 'ready') {
+    await updatesGroup.getByRole('button', { name: 'Check for updates', exact: true }).click();
+  }
+  const restart = updatesGroup.getByRole('button', { name: 'Restart to update' });
+  await expect(restart).toBeVisible({ timeout: 30_000 });
+  const note = await yap.invoke('note_create', { title: 'Supplier call', folder: 'Meetings' });
+  try {
+    await restart.click();
+    await yap.invoke('meeting_start', { noteId: note.id });
+    await expect(updatesGroup.getByText('Yap is recording a meeting. Stop the recording first', { exact: false })).toBeVisible({
+      timeout: 15_000,
+    });
+    await expect(updatesGroup.getByText("the installer wasn't run", { exact: false })).toHaveCount(0);
+    expect(await yap.invoke('update_status')).toMatchObject({ status: 'ready', version: VERSION });
+    await shot(main, '03-restart-stopped-by-a-meeting');
+  } finally {
+    await yap.invoke('meeting_pause').catch(() => {});
+    await expect.poll(async () => (await yap.invoke('meeting_state')).recording, { timeout: 20_000 }).toBe(false);
+  }
+  await closeSettings(main);
+});

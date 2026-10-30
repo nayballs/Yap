@@ -237,10 +237,12 @@ mod tests {
         assert!(chunk.engine().is_some());
         assert!(slot.lock().unwrap().is_none(), "out of the slot while it transcribes");
         let (tx, rx) = std::sync::mpsc::channel();
+        // Timed from here, not from inside the thread: under load the thread
+        // can start late, and its own clock then showed less than the wait.
+        let started = Instant::now();
         let dictation = {
             let slot = Arc::clone(&slot);
             std::thread::spawn(move || {
-                let started = Instant::now();
                 let lease = slot.take(Duration::from_secs(5));
                 tx.send(()).unwrap();
                 (lease.engine().is_some(), started.elapsed())

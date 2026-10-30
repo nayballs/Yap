@@ -1672,18 +1672,25 @@ fn follow_an_older_builds_mic(cfg: &mut YapConfig) {
 /// (`<name>.<pid>-<n>.tmp`): two writes of one file at once shared
 /// `<name>.tmp` until 2026-10-23, so one could rename the other's half-written
 /// file into place. The rename is tried again for a moment while another
-/// program (an antivirus, a backup tool) holds the target.
+/// program (an antivirus, a backup tool) holds the target. The temp file's
+/// bytes reach the disk before the rename (2026-10-29): NTFS can write the
+/// rename to its journal before the data, so a power cut or a blue screen
+/// moments after a save left the store renamed into place but full of
+/// zeros — set aside as corrupt, everything in it gone with the old file.
 pub(crate) fn atomic_write(path: &Path, contents: &str) -> std::io::Result<()> {
     atomic_write_bytes(path, contents.as_bytes())
 }
 
 /// [`atomic_write`] for bytes.
 pub(crate) fn atomic_write_bytes(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+    use std::io::Write;
     static SEQ: AtomicU64 = AtomicU64::new(0);
     let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| "yap".into());
     let n = SEQ.fetch_add(1, Ordering::Relaxed);
     let tmp = path.with_file_name(format!("{name}.{}-{n}.tmp", std::process::id()));
-    let written = std::fs::write(&tmp, bytes).and_then(|()| rename_patiently(&tmp, path));
+    let written = std::fs::File::create(&tmp)
+        .and_then(|mut file| file.write_all(bytes).and_then(|()| file.sync_all()))
+        .and_then(|()| rename_patiently(&tmp, path));
     if written.is_err() {
         let _ = std::fs::remove_file(&tmp);
     }
@@ -2618,9 +2625,14 @@ mod tests {
         let path = dir.join("config.json");
         save_at(&path, &YapConfig::default()).unwrap();
         let problems = std::sync::Mutex::new(Vec::<String>::new());
+        // Windows refusing a rename or a read for a while (an antivirus
+        // scanning the new file: in the temp folder on C:, under load, for
+        // 10 s and more, no process holding either file) is a save refused
+        // and the file left whole — not a tear (`held`).
+        let (written, refused) = (AtomicU64::new(0), AtomicU64::new(0));
         std::thread::scope(|s| {
             for t in 0..8usize {
-                let (path, problems) = (&path, &problems);
+                let (path, problems, written, refused) = (&path, &problems, &written, &refused);
                 s.spawn(move || {
                     // Each thread's config is a different size: a torn
                     // write shows as a file that doesn't parse.
@@ -2630,12 +2642,25 @@ mod tests {
                         ..YapConfig::default()
                     };
                     for _ in 0..40 {
-                        if let Err(e) = save_at(path, &cfg) {
-                            problems.lock().unwrap().push(format!("save: {e}"));
+                        match save_at(path, &cfg) {
+                            Ok(()) => {
+                                written.fetch_add(1, Ordering::Relaxed);
+                            }
+                            Err(e) if ["(os error 5)", "(os error 32)", "(os error 33)"].iter().any(|code| e.ends_with(code)) => {
+                                refused.fetch_add(1, Ordering::Relaxed);
+                            }
+                            Err(e) => problems.lock().unwrap().push(format!("save: {e}")),
                         }
-                        let read = std::fs::read(path).map_err(|e| e.to_string());
-                        if let Err(e) = read.and_then(|b| serde_json::from_slice::<YapConfig>(&b).map_err(|e| e.to_string())) {
-                            problems.lock().unwrap().push(format!("read: {e}"));
+                        match std::fs::read(path) {
+                            Ok(bytes) => {
+                                if let Err(e) = serde_json::from_slice::<YapConfig>(&bytes) {
+                                    problems.lock().unwrap().push(format!("read: {e}"));
+                                }
+                            }
+                            Err(e) if held(&e) => {
+                                refused.fetch_add(1, Ordering::Relaxed);
+                            }
+                            Err(e) => problems.lock().unwrap().push(format!("read: {e}")),
                         }
                     }
                 });
@@ -2643,8 +2668,13 @@ mod tests {
         });
         let problems = problems.into_inner().unwrap();
         assert!(problems.is_empty(), "{} problems, first: {:?}", problems.len(), problems.first());
-        // Nothing left beside it (no temp file).
-        assert_eq!(others(&dir), Vec::<String>::new());
+        assert!(written.into_inner() > 0, "saves went through");
+        // Nothing left beside it (no temp file) — unless Windows refused a
+        // save, when it may have refused its temp file's removal too (the
+        // start-up sweep takes those).
+        if refused.into_inner() == 0 {
+            assert_eq!(others(&dir), Vec::<String>::new());
+        }
         let _ = std::fs::remove_dir_all(&dir);
     }
 

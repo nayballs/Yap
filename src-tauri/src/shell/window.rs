@@ -141,8 +141,10 @@ pub fn show_onboarding(app: &AppHandle) -> Result<(), String> {
     let _ = w.show();
     focus(&w);
     behind_in_test_runs(&w);
-    // Tips and notices wait while the first-run setup is on screen.
+    // Tips and notices wait while the first-run setup is on screen (the
+    // bar's first-use pointers too: it's told).
     crate::notices::notice::on_onboarding(true);
+    crate::bar::refresh(app);
     let _ = w.eval("window.location.reload()");
     // Compositor nudge: a 1px resize round-trip forces DWM to recomposite the
     // webview surface, un-sticking any stale frame.
@@ -166,6 +168,8 @@ pub fn close_onboarding(app: AppHandle) {
         let _ = w.hide();
     }
     crate::notices::notice::on_onboarding(false);
+    // The bar's first-use pointers may show now (`bar/pointer.rs`).
+    crate::bar::refresh(&app);
 }
 
 /// What the window-state plugin remembers for the main window (see `run`).

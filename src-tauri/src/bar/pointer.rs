@@ -73,6 +73,12 @@ pub fn status() -> Option<Due> {
     if crate::notices::notice::tips_off() || !crate::notices::kinds::on("bar-pointer") {
         return None;
     }
+    // A feature tip: it waits out the first-run setup, as tips do (no
+    // speech model yet, and shown there it would be spent before it's of
+    // use). The bar is told again as the setup goes (`shell/window.rs`).
+    if crate::notices::notice::onboarding_up() {
+        return None;
+    }
     #[cfg(debug_assertions)]
     if crate::shell::e2e::active() {
         if !E2E_ON.load(Ordering::SeqCst) {

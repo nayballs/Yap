@@ -212,8 +212,11 @@ pub fn find(text: &str, names: &[String]) -> Vec<Found> {
     let mut i = 0usize;
     while i < ws.len() {
         let w = &text[ws[i].0..ws[i].1];
-        // "@Sam": written so already (AI cleanup may have).
-        let at_sign = text[..ws[i].0].ends_with('@');
+        // "@Sam": written so already (AI cleanup may have) — never the "@"
+        // of an email address ("sam@example.com" with Example on screen).
+        let at_sign = text[..ws[i].0]
+            .strip_suffix('@')
+            .is_some_and(|head| !head.ends_with(|c: char| c.is_alphanumeric() || matches!(c, '.' | '_' | '-' | '+')));
         let (name_from, start) = if at_sign {
             (i, ws[i].0 - 1)
         } else if w.eq_ignore_ascii_case("at") && i + 1 < ws.len() && &text[ws[i].1..ws[i + 1].0] == " " && starts_clause(text, &ws, i) {
@@ -320,6 +323,17 @@ mod tests {
             assert_eq!(mentions(text, &on_screen), text, "{text}");
         }
         assert!(find("At Sam, hi", &[]).is_empty());
+    }
+
+    #[test]
+    fn an_email_address_is_never_a_mention() {
+        // The workspace's name on screen, and the same company's email domain.
+        let on_screen = ["Example", "Sam"];
+        for text in ["Email sam@example.com today", "It's first.last@Example.co.uk.", "Write to sam_b@example.org"] {
+            assert_eq!(mentions(text, &on_screen), text, "{text}");
+        }
+        // "@Sam" after a space or a bracket is still one.
+        assert_eq!(mentions("cc (@sam) and @example", &on_screen), "cc (@Sam) and @Example");
     }
 
     #[test]

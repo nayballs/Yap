@@ -486,6 +486,12 @@ pub fn on_onboarding(shown: bool) {
     ONBOARDING.store(shown, Ordering::SeqCst);
 }
 
+/// The first-run setup is on screen (the bar's first-use pointers wait it
+/// out, `bar/pointer.rs`). Lock-free.
+pub fn onboarding_up() -> bool {
+    ONBOARDING.load(Ordering::SeqCst)
+}
+
 /// Settings were loaded or saved: `show_tips`, and each kind's switch
 /// (`kinds.rs`).
 pub fn sync(cfg: &crate::config::YapConfig) {

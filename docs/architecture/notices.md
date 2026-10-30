@@ -41,9 +41,11 @@ How loud Yap may be: the notice policy (one place, one at a time, held while dic
   language-added ("French is in My languages", 10 s) — > Tip — hint,
   micTip ("Yap didn't hear you clearly", `dictation/mic_tips.rs`, which
   rate-limits it itself — one a day —: held over a dictation and a meeting,
-  "Show tips" turns it off), featureTip ("Yap caught your correction", "Yap
-  made that a list"…, `dictation/tips.rs`, once each: held over a dictation
-  and a meeting, dropped unseen after a minute, "Show tips" turns it off),
+  and not even offered (nor counted) while one records, "Show tips" turns
+  it off), featureTip ("Yap caught your correction", "Yap made that a
+  list"…, `dictation/tips.rs`, once each: held over a dictation and a
+  meeting, not offered or counted while one records, dropped unseen after
+  a minute, "Show tips" turns it off),
   word-suggestion, snippet-suggestion ("Type that often? Save it as a
   snippet", `dictionary/snippet_offer.rs`, one a day there; held over a
   dictation, dropped unseen after a minute; snippet-saved 10 s),
