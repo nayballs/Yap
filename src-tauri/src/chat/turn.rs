@@ -590,24 +590,15 @@ async fn answer_turn(
     // **A strong model writing a document** (2026-10-31, as the Claude app
     // writes one): it may research deeper — how far is sized to the
     // model's request (`web::Reach::deep`), said in the context with the
-    // web on — and it thinks first (`think::auto_on`: only inside Chat's
-    // own turn; the Think button shows lit). Claude Opus 5.5, held to 3
-    // searches and none of its thinking, wrote a level-by-level guide of
-    // "Level 1", "Endgame" and "Reference only" rows.
+    // web on. Claude Opus 5.5, held to 3 searches, wrote a level-by-level
+    // guide of "Level 1", "Endgame" and "Reference only" rows. How hard it
+    // thinks is its effort, as on every question (`ai/effort.rs`).
     let writes_doc = strong && !meetings && crate::chat::documents::writes_document(&text, &chat_docs, selection.is_some());
     let deep_reach = crate::web::Reach::deep(Some(
         crate::chat::budget::budget(context_size, context_known, 0, kind, true, crate::chat::budget::request_cap(&provider, &model)).request,
     ));
-    if writes_doc {
-        if web_on {
-            context.push(crate::chat::documents::research_note(deep_reach));
-        }
-        if crate::chat::think::can_think(&provider, &model) && crate::chat::think::auto_on() {
-            tracing::info!(provider, "Chat: a strong model's document; it thinks it through first");
-            if let Some(w) = watcher {
-                w.send(crate::chat::stream::Event::Think { auto: true });
-            }
-        }
+    if writes_doc && web_on {
+        context.push(crate::chat::documents::research_note(deep_reach));
     }
     if spoken && !(tools_supported && web_on) {
         if in_message {

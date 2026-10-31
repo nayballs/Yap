@@ -873,19 +873,18 @@ The AI Chat surface (conversations, the tool-calling loop and its note tools) an
 - **`chat/think.rs`** — **Think it through** (2026-10-29): Chat's **Think**
   button (`views/chat/ThinkButton.svelte`, beside the mic; `chatThink.svelte.js`)
   asks **one question** with the model thinking before it answers, then goes
-  off again; it shows only for a model that can (`chat_think_info {can,
-  place}`, asked again when Chat's model changes). **On by itself for a
-  strong model's document** (2026-10-31, `think::auto_on`): every Chat turn
-  runs inside the task-local (`think::scoped`, off unless pressed), and a
-  turn where a strong model writes a document (`documents::writes_document`)
-  switches it on — high effort, adaptive thinking for Claude — and tells
-  the page (`{kind: "think", auto: true}`: the button shows lit, `think.auto`,
-  until the answer is in). Never the Voice Assistant (no scoped turn around
-  it), never the on-device model (not a strong one). `chat_send(think: true)`
-  runs the turn with it on from the start, and **only Chat's own
-  requests read it** (`llm::ChatRequest::chat`: `extra_for`): cleanup,
-  Commands, the meeting notes, memory, a summary and the Voice Assistant
-  never think. **On this PC** the sidecar keeps `--reasoning off`
+  off again. **Only the model on this PC** since 31 Oct 2026
+  (`chat_think_info {can, place}`, asked again when Chat's model changes): a
+  cloud model's thinking is its **effort**, chosen per model in the model
+  picker (`ai/effort.rs`, ai-models.md), so the button is hidden for it.
+  Until then a strong cloud model writing a document turned Think on by
+  itself at high effort (`think::auto_on`, the button lit); that's gone —
+  its effort covers it. Every Chat turn runs inside the task-local
+  (`think::scoped`, Think off unless pressed). `chat_send(think: true)`
+  runs the turn with it on from the start, and **only Chat's own requests
+  read it** (`llm::ChatRequest::chat`: `extra_for`): cleanup, Commands, the
+  meeting notes, memory, a summary and the Voice Assistant never think on
+  this PC. **On this PC** the sidecar keeps `--reasoning off`
   (`local_llm::server_args`), and one request still thinks **without a
   restart** — measured on llamafile 0.10.6 with Qwen3.5-4B (Q4_K_M, MTP,
   `--reasoning off`, 29 Oct 2026): `chat_template_kwargs: {"enable_thinking":
@@ -899,32 +898,29 @@ The AI Chat surface (conversations, the tool-calling loop and its note tools) an
   nothing there and `reasoning_budget_tokens` didn't cap it. So: 1,500
   tokens (`ON_DEVICE_BUDGET`), the answer's cap raised by as much, only for
   Qwen3.5 (`on_device_thinks`; not the 1.5B, nor Qwen3's 2507 instruct). **In
-  the cloud** (`request_extra`): OpenAI's reasoning models and Groq's
-  gpt-oss `reasoning_effort: "high"`, Gemini 2.5 and later the same (its
-  OpenAI-compatible endpoint maps it to a thinking budget), OpenRouter's
-  `reasoning: {effort: "high"}` (its list's `thinks`, else the families),
-  Claude adaptive thinking with `output_config: {effort: "high"}` — sent on
-  Anthropic's Messages API since 31 Oct 2026 (`llm/anthropic.rs`, every
-  strong Claude's Chat step, its thinking's summary shown: `display:
-  "summarized"`): Anthropic's docs now say its OpenAI-compatible endpoint
-  answers `{type: "adaptive"}` with HTTP 400 and never returns the thinking
-  — and a 4,096-token budget on a Claude before 4.6. A
-  thinking request waits up to 150 s (`think::TIMEOUT`); the GPT-6 rule
-  (tools only with reasoning off) still asks again with `"none"`. **What
+  the cloud** every question goes at its model's effort (`effort::apply`
+  from `ChatRequest::chat`), and the turn hears it did (`think::reasoned`):
+  what the model thought shows as Think's does. A thinking request waits up
+  to 150 s (`think::TIMEOUT`; 300 s at effort xhigh or max); the GPT-6 rule
+  (tools only with reasoning off) sends `"none"` with tools. **What
   shows**: the thinking comes apart from the answer (`reasoning_content`,
-  or Groq's and OpenRouter's `reasoning`; `stream::Assembler` keeps it out
-  of the message, `llm::post_chat_request` hands it to `think::heard`), as
-  `{kind: "thinking", text}` events (each step's after the turn's earlier
-  ones, `think::so_far`; only in a turn thinking it through: Groq's gpt-oss
-  sends its reasoning unasked, and any other question shows none of it, as
-  before Think): "Thinking…" with "Show its thinking" folded under
-  it, then "Thought for 6 s" folded above the answer (`ChatMessage.svelte`
-  `.thought`). Kept with the answer (`ChatMessage.thinking` = `Thought {text,
-  ms}`, `chats::set_thinking`; the reply's `thinking`), never sent back to a
-  model; an older Yap's save drops it, the answer stays. Anthropic's and
-  OpenAI's compatible endpoints never send the thinking: only the time
-  shows. Unit-tested (each provider's fields, the turn's task-local, a
-  stray end tag, the stream's thinking); e2e `chat-think.spec.js`.
+  or Groq's and OpenRouter's `reasoning`, Claude's summarised thinking on
+  the Messages API; `stream::Assembler` keeps it out of the message,
+  `llm::post_chat_request` hands it to `think::heard`), as `{kind:
+  "thinking", text}` events (each step's after the turn's earlier ones,
+  `think::so_far`; only in a turn thinking it through or at an effort,
+  `think::shows`: a model that sends its reasoning anyway outside one — the
+  Voice Assistant — shows none): "Thinking…" with "Show its thinking"
+  folded under it, then "Thought for 6 s" folded above the answer
+  (`ChatMessage.svelte` `.thought`). Kept with the answer
+  (`ChatMessage.thinking` = `Thought {text, ms}`, `chats::set_thinking`;
+  the reply's `thinking`), never sent back to a model; an older Yap's save
+  drops it, the answer stays. A cloud model that sends no thinking back
+  (OpenAI, Gemini's compatible endpoint) gets no fold. Unit-tested (the
+  on-device fields, a cloud model's turn, a stray end tag, the stream's
+  thinking); e2e `chat-think.spec.js` (Think on this PC, a cloud model's
+  reasoning at its effort) and `chat-effort.spec.js` (Think hidden for a
+  cloud model).
 - **`chat/assistant.rs`** — the **Voice Assistant** (2026-10-18; Settings →
   Voice Assistant): ask Yap's Chat out loud from any app with its own
   shortcut (`assistant_hotkey`, unbound by default) and hear the answer;
@@ -1210,15 +1206,19 @@ for the on-device model and small ones, which make things up more readily:
   not a footnote (Yap's markdown has none). The checks against made-up
   sources stay: an answer's unsourced `[n]` goes, a document's `[n]` becomes
   a link only to a page the turn found (`documents::link_citations`).
-- **Think first** (`think::auto_on`, above): the turn thinks before it
-  writes — high effort, adaptive for Claude — the Think button lit for it.
+- **At its effort**: the turn thinks as every question to that model does,
+  at the effort chosen for it in the model picker (`ai/effort.rs`; adaptive
+  thinking for Claude, its summary folded above the answer). Until 31 Oct
+  2026 Yap turned Think on by itself here, at high effort (`think::auto_on`,
+  gone): pick High or Extra for a model whose default is medium (Opus 5.5,
+  Haiku 5.5) to keep that depth.
 
 Measured by `yap.exe eval --guides` (docs/model-evals.md, "Guides"): every
 level, the parts asked for, own suggestions marked, citations real, the
 document changed after the web. e2e: `chat-documents-research.spec.js` (an
 edit after the web for a strong model, refused for a 4B-sized one, an app
 still refused, the cap a document's turn only, Claude's own search in its
-request with Think on).
+request at the effort chosen for it, no Think button).
 
 ## The Chat view
 
@@ -1401,14 +1401,17 @@ and its Undo, Preview / Source, find, copy, light and dark).
   carry a globe, a refused action (the safety rule) a shield. The composer (2026-10-20, after Claude
   Code's: one row — **+** (a "Chat options" popover: the Voice replies switch,
   the voice volume slider, Voice settings…), the message box (aria-label
-  "Message"), **Think** for a model that can think on request (2026-10-29,
+  "Message"), **Think** for the model on this PC (2026-10-29,
   `ThinkButton.svelte`: the next question only, `chat/think.rs` above; apart
-  from the prompt chips and Skills), the mic, and Send only once there's text; an amber dot on the +
+  from the prompt chips and Skills; a cloud model has its effort in the
+  picker instead, since 2026-10-31), the mic, and Send only once there's text; an amber dot on the +
   while voice replies are on; under the box on the left, quiet, the **model
   chip** (its `quiet` look; never inside +: always in view) — `ModelChip.svelte`, names in `aiModel.js` from
   `ppModels.js` + `providerIcons.js`) shows the model the next message goes
-  to — the provider's mark (`ProviderMark.svelte`), "GPT-OSS 20B · Groq" /
-  "Qwen3.5 4B · On this PC", "· no note tools" for a local model under 4B,
+  to — the provider's mark (`ProviderMark.svelte`), "GPT-OSS 20B Medium ·
+  Groq" (a cloud model's **effort** after its name, as the Claude Code app
+  shows "Opus 5.5 Extra": the one chosen, else its default; "· Fast" with
+  fast mode; `core/effort.js`) / "Qwen3.5 4B · On this PC", "· no note tools" for a local model under 4B,
   where it runs in its tooltip (and, on the on-device model, "Context: 8K
   tokens": `ai_model_status.context`), "No AI model" when nothing is set up;
   bottom right of the same row, **the context ring** ([below](#the-context-ring-2026-10-25)). The
@@ -1492,7 +1495,23 @@ and its Undo, Preview / Source, find, copy, light and dark).
   closes and gives the focus back to the chip; amber focus rings; the
   window's in-page hotkey fallbacks run first (capture phase). Monochrome
   marks (OpenAI, Anthropic, xAI, OpenRouter — Simple Icons' CC0 glyph) are
-  CSS masks in `currentColor`, Claude's in its brand colour. Settings →
+  CSS masks in `currentColor`, Claude's in its brand colour. **Effort**
+  (2026-10-31, the Claude Code app's "Effort ▸ Extra" and "Fast mode"):
+  under the panes, for the model in use, "Effort · Claude Opus 5.5" and
+  the levels it takes as a segmented choice (Low, Medium, High, Extra,
+  Max — only its own; "Default" first when its default isn't a level, as
+  GPT-5.4 Mini's isn't), the one in effect selected and a line on what it
+  does ("Extra: thinks longer, for hard problems."; "The model's default."
+  on its default) — `chat_set_effort` keeps it for that model alone
+  (ai-models.md `ai/effort.rs`), the chip follows at once, the picker stays
+  open; and **Fast mode** for Claude Opus 5.5 (a switch, "Faster answers
+  from Claude Opus 5.5, at twice the price per token. Off unless you switch
+  it on.", `chat_set_fast`). None of it for a model without a reasoning
+  control or the one on this PC (its Think button). The picker keeps its
+  provider rail rather than Claude Code's short menu: Yap's models come
+  from five providers and this PC. Settings → Language Models → Chat has
+  the same Effort choice for the Chat model ("How hard it thinks", kept in
+  its config copy's `chatEffort`). Settings →
   Language Models keeps its own pickers. Each answer
   shows its model quietly under it, as do the Notes view's Ask bar and the
   notepad's Ask sheet (`nextModel(scope)` fetched beside the call; none for

@@ -217,7 +217,7 @@ test('the context ring: the chat’s share of the model’s context, its panel, 
   const picker = main.getByRole('dialog', { name: 'Switch the Chat model' });
   await chip(main).click();
   await picker.locator('.pane').getByRole('button', { name: /^GPT-OSS 120B/ }).click();
-  await expect(chip(main)).toHaveText('GPT-OSS 120B · Groq');
+  await expect(chip(main)).toHaveText('GPT-OSS 120B Medium · Groq');
   await expect(ring(main)).toHaveAttribute('data-percent', '3');
   await expect(ring(main).getByRole('button', { name: '3% of context used' })).toBeVisible();
 
@@ -225,7 +225,7 @@ test('the context ring: the chat’s share of the model’s context, its panel, 
   if (await picker.isVisible()) await main.keyboard.press('Escape');
   await chip(main).click();
   await picker.locator('.pane').getByRole('button', { name: /^GPT-OSS 20B/ }).click();
-  await expect(chip(main)).toHaveText('GPT-OSS 20B · Groq');
+  await expect(chip(main)).toHaveText('GPT-OSS 20B Medium · Groq');
   await expect(ring(main)).toHaveAttribute('data-percent', '90');
   if (await picker.isVisible()) await main.keyboard.press('Escape');
   await ring(main).getByRole('button').click();

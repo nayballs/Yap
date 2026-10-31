@@ -129,7 +129,7 @@ pub fn handles_rich(provider: &str, model: &str) -> bool {
 ///   off after it);
 /// - a turn that writes a document researches deeper (`web::Reach::deep`:
 ///   up to 10 searches and as many page reads as the model's context
-///   holds) and thinks first (`think::auto_on`);
+///   holds), at the model's effort (`ai/effort.rs`);
 /// - a guide or plan is completed from the model's own knowledge where its
 ///   sources run out, marked so ([`INSTRUCTIONS`], `tools::web_tool_instructions`).
 ///

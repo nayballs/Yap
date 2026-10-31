@@ -23,9 +23,9 @@
 //!   answer ([`releases`]); a search that must come first shows none of
 //!   its text, only its call ([`ChipsOnly`]); reasoning blocks are hidden
 //!   when the scope says so; the text goes out at most every [`MIN_GAP`];
-//!   a question asked to think it through (`think.rs`) shows its thinking
-//!   apart from the answer ([`Event::Thinking`]: `reasoning_content`, or
-//!   `reasoning`, deltas).
+//!   a question asked to think it through, or at a cloud model's effort
+//!   (`think.rs`, `ai/effort.rs`), shows its thinking apart from the answer
+//!   ([`Event::Thinking`]: `reasoning_content`, or `reasoning`, deltas).
 //! - **The watcher** ([`Sink`]): the Chat view's channel (`chat_send`), the
 //!   notepad's, the Voice Assistant (speaks sentence by sentence), a model
 //!   evaluation (times the first words). [`Watch`] keeps what was shown, for
@@ -79,12 +79,9 @@ pub enum Event {
     /// A model on this PC stepped aside for a dictation (`true`), or goes on.
     Waiting { waiting: bool },
     /// The model's thinking so far, whole (a question asked to think it
-    /// through, `think.rs`): shown folded, apart from the answer.
+    /// through, or at a cloud model's effort, `think.rs`): shown folded,
+    /// apart from the answer.
     Thinking { text: String },
-    /// Yap turned Think on for this turn itself (`think::auto_on`: a strong
-    /// model writing a document): the page lights the Think button until
-    /// the answer is in.
-    Think { auto: bool },
     /// A document of this chat was made or changed (`documents.rs`): the
     /// panel beside the chat shows it, as it is now.
     Document {
@@ -336,10 +333,11 @@ impl<'a> Step<'a> {
     pub fn on(&mut self, d: Delta<'_>) {
         match d {
             Delta::Reasoning(s) => {
-                // Only a question asked to think it through shows it: a model
-                // that sends its reasoning anyway (Groq's gpt-oss, a
-                // reasoning model on OpenRouter) shows none, as before Think.
-                if !crate::chat::think::wanted() {
+                // Only a question asked to think it through, or at a cloud
+                // model's effort, shows it: a model that sends its reasoning
+                // anyway outside one (a Groq model asked by the Voice
+                // Assistant) shows none.
+                if !crate::chat::think::shows() {
                     return;
                 }
                 crate::chat::think::tick();
@@ -1237,8 +1235,9 @@ mod tests {
         let last_thought = events.iter().rposition(|e| matches!(e, Event::Thinking { .. })).unwrap();
         assert!(last_thought < first_text, "the thinking, whole, before the answer");
         assert!(events.iter().any(|e| matches!(e, Event::Thinking { .. })));
-        // Any other question: a model that sends its reasoning anyway (Groq's
-        // gpt-oss does, unasked) shows none of it — only the answer.
+        // Outside a turn that thinks (the Voice Assistant): a model that sends
+        // its reasoning anyway (Groq's gpt-oss does) shows none of it — only
+        // the answer.
         let plain = Log::default();
         let mut s = Step::new(&plain, false, false);
         s.on(Delta::Reasoning("The user wants the weather."));
@@ -1251,9 +1250,9 @@ mod tests {
         assert_eq!(serde_json::to_value(Event::Thinking { text: "x".into() }).unwrap(), json!({ "kind": "thinking", "text": "x" }));
     }
 
-    /// A question asked to think it through, answered whole by a server
-    /// asked to stream (one that won't, or a broken stream asked again):
-    /// its thinking shows once, not twice.
+    /// A question at its model's effort, answered whole by a server asked to
+    /// stream (one that won't, or a broken stream asked again): its thinking
+    /// shows once, not twice.
     #[tokio::test]
     async fn a_whole_answers_thinking_shows_once() {
         let server = tiny_http::Server::http("127.0.0.1:0").expect("a local port");
@@ -1270,13 +1269,15 @@ mod tests {
         });
         let base = format!("http://127.0.0.1:{port}/v1");
         let log = Log::default();
-        let (out, thought) = crate::chat::think::with(true, async {
+        crate::ai::effort::set_for_test("groq", "openai/gpt-oss-20b", Some(crate::ai::effort::Level::High), false);
+        let (out, thought) = crate::chat::think::scoped(false, async {
             let question = json!([{ "role": "user", "content": "How much is the ball?" }]);
             let req = crate::ai::llm::ChatRequest::chat(&base, "", "openai/gpt-oss-20b", "groq", 0.5, question, None, None);
-            assert_eq!(req.extra["reasoning_effort"], "high");
+            assert_eq!(req.extra["reasoning_effort"], "high", "the effort chosen for it");
             call(Live { sink: &log, beside: None }, &req, false, false).await
         })
         .await;
+        crate::ai::effort::set_for_test("groq", "openai/gpt-oss-20b", None, false);
         assert_eq!(out.unwrap()["content"], "The ball costs 5p.");
         let shown: Vec<String> =
             log.0.lock().unwrap().iter().filter_map(|e| if let Event::Thinking { text } = e { Some(text.clone()) } else { None }).collect();

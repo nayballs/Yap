@@ -355,8 +355,9 @@ every link is to a page the scenario's web gave (this turn's or an earlier turn'
 reads, `web_urls`), and no `[n]` is left with nothing behind it (`made_up_citations`);
 **`after_web`** — the document changed after the web was read this turn
 (`changed_after_web`). `summary.md` gets a "Guides" table per model (each check's passes,
-and how many turns were thought through: Think comes on by itself for a strong model's
-document, `think::auto_on`, and a typed turn runs as `chat_send` runs it). `--guides` pushes
+and how many turns were thought through: a cloud model's turn goes at its effort,
+`ai/effort.rs` — the eval's config's `chat_effort`, else the model's default —, and a typed
+turn runs as `chat_send` runs it). `--guides` pushes
 the tag; `--only` picks the scenarios (`--no-web` would skip the stand-in one too).
 
 ### Screenshot questions (`--vision`)

@@ -16,13 +16,50 @@
   import Row from '../ui/Row.svelte';
   import Group from '../ui/Group.svelte';
   import LinkRow from '../ui/LinkRow.svelte';
+  import Segmented from '../ui/Segmented.svelte';
+  import { invoke } from '@tauri-apps/api/core';
   import { SCOPE_PROVIDER_LABELS } from '../core/providers.js';
+  import { effortNow, effortOptions, effortHint, EFFORT_NOTE } from '../core/effort.js';
 
   let { scope, cfg = null, defaultPrompt = '' } = $props();
 
   const enabled = $derived(scope.enabled);
   const providerLabel = $derived(SCOPE_PROVIDER_LABELS[scope.provider] || scope.provider);
   const modelLabel = $derived(scope.provider === 'ondevice' ? 'The on-device model' : scope.model);
+
+  // **Effort** (ai/effort.rs): the levels this model takes, asked of Rust
+  // (one table there); the choice kept in this copy's `chatEffort`, under
+  // the model's key, as Chat's model picker keeps it (the auto-save saves
+  // it, and a choice made in the picker comes back through
+  // `yap-config-saved`). None for a model with no reasoning control, nor
+  // the on-device one (its Think button is in Chat).
+  let effortCaps = $state(null);
+  $effect(() => {
+    const provider = scope.provider;
+    const model = (scope.model || '').trim();
+    let live = true;
+    if (!enabled || !provider || provider === 'ondevice' || !model) {
+      effortCaps = null;
+      return;
+    }
+    invoke('effort_info', { provider, model })
+      .then((i) => live && (effortCaps = i ?? null))
+      .catch(() => live && (effortCaps = null));
+    return () => (live = false);
+  });
+  const effortKey = $derived(`${scope.provider}:${(scope.model || '').trim()}`);
+  const effort = $derived.by(() => {
+    if (!effortCaps) return null;
+    const saved = cfg?.chatEffort?.[effortKey];
+    return { ...effortCaps, chosen: effortCaps.levels.includes(saved) ? saved : null };
+  });
+  function setEffort(level) {
+    if (!cfg) return;
+    const next = { ...(cfg.chatEffort || {}) };
+    if (level) next[effortKey] = level;
+    else delete next[effortKey];
+    cfg.chatEffort = next;
+  }
 
   // Its voice, shortcut and spoken replies are on the Voice Assistant page.
   function openVoiceAssistant() {
@@ -54,6 +91,18 @@
         smaller ones answer from a plain search of them. Switch models from the chip under the chat box too.
       </p>
     </Group>
+
+    {#if effort && cfg}
+      {#snippet effortDesc()}
+        <span data-testid="settings-effort-hint">{effortHint(effort)}</span> Kept for this model, in Chat, the Ask bars and the
+        Voice Assistant.
+      {/snippet}
+      <Group title="Effort" id="settings-scope-effort" desc={EFFORT_NOTE}>
+        <Row label="How hard it thinks" setting="scope-effort" desc={effortDesc}>
+          <Segmented bind:value={() => effortNow(effort), setEffort} options={effortOptions(effort)} label="Effort" />
+        </Row>
+      </Group>
+    {/if}
 
     <Group title="System prompt" id="settings-scope-prompt" desc="How the assistant answers" bare>
       <PromptStudio bind:prompt={scope.prompt} defaultBody={defaultPrompt} {providerLabel} {modelLabel} />

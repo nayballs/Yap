@@ -250,6 +250,14 @@
   (`AppNickname {say, app, name}`), the web (`web.rs`): web_search (false) +
   web_search_native (true: cloud models use their provider's own search) +
   web_search_service ("exa" | "tavily") + web_search_keys (service → key),
+  each model's effort (`ai/effort.rs`, 2026-10-31, Chat's model picker and
+  Language Models → Chat): chat_effort (`"<provider>:<model>"` → "low" |
+  "medium" | "high" | "xhigh" | "max"; a model missing from it runs at its
+  provider's default) + fast_mode (Claude Opus 5.5's fast mode, false: twice
+  the price) — new fields only: nothing saved before meant anything else
+  (Think was one question at a time, never saved), so no `migrate_once`
+  step; an older Yap sharing the folder drops them on its save (each model
+  back to its default, fast mode off),
   About you (`ai/about_you.rs`, Settings → General): about_name + about_me (≤
   300 characters; told to the AI model with each question, never to Yap) +
   region_country (ISO; "" = Automatic, Windows' home location: the
