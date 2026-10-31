@@ -12,13 +12,15 @@
   import { STILL_WORKING_S } from './chatState.svelte.js';
   import { SUMMARY_DIVIDER } from './chatBudget.js';
   import { skills } from '../../stores/skills.svelte.js';
+  import { calendar } from '../../stores/calendar.svelte.js';
   import { promptChips } from '../../core/skills.js';
   import ChatMessage from './ChatMessage.svelte';
   import ActivityLine from './ActivityLine.svelte';
 
-  // The one-tap prompts (chat/skills.rs: Coach me, List my open to-dos,
-  // Write a weekly recap), each asked across the meetings.
-  const prompts = $derived(promptChips(skills.list));
+  // The one-tap prompts (chat/skills.rs: the first three of Prepare for my
+  // next meeting — with a calendar —, Write my stand-up, List my open
+  // to-dos, What did we decide?), each asked across the meetings.
+  const prompts = $derived(promptChips(skills.list, { calendar: calendar.connections.length > 0 }));
 
   // The answer's words have begun (a slow start's hint goes).
   const answering = $derived(chat.messages.some((m) => m.streaming && m.text));
@@ -80,7 +82,7 @@
           <button class="prompt" disabled={chat.sending} onclick={() => chat.runPrompt(p)}>{p.chip}</button>
         {/each}
       </div>
-      <p class="asknote">Or type / for Skills, like /decisions or /risks.</p>
+      <p class="asknote">Or type / for Skills, like /standup or /decisions.</p>
     {/if}
     {#if !chat.chatReady}
       <!-- Before a first question fails: what Chat needs. -->

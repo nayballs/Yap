@@ -529,6 +529,7 @@ pub fn run() {
             chat::skills::skills_list,
             chat::skills::skill_save,
             chat::skills::skill_delete,
+            chat::skills::skill_show,
             chat::note_chats::note_chat,
             chat::note_chats::note_chat_open,
             chat::note_chats::note_chat_add,

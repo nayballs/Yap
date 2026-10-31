@@ -72,7 +72,7 @@
   // The one-tap prompts over the Ask bar, and "/" for Skills (chat/skills.rs):
   // both open Chat with the question asked across the meetings. (The
   // examples above still cycle in the box: they show what to ask.)
-  const prompts = $derived(promptChips(skills.list));
+  const prompts = $derived(promptChips(skills.list, { calendar: calendar.connections.length > 0 }));
   const picker = new SkillPicker('meetings');
   $effect(() => picker.update(askText));
   let askEl = $state(null);

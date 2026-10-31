@@ -172,9 +172,11 @@ export const SETTINGS_INDEX = [
   { page: 'memory', section: 'Import, export and clear', label: 'Clear all memory', desc: 'Forget everything Yap remembers', keywords: 'memory clear delete forget erase reset wipe', anchor: 'memory-clear' },
 
   // Skills (SkillsPage.svelte, chat/skills.rs)
-  { page: 'skills', section: "Yap's Skills", label: "Yap's Skills", desc: '/decisions, /risks, /coach and more: open one, or save a copy', keywords: 'skills slash commands saved prompts instructions decisions risks follow-up email coach todos weekly recap', anchor: 'skills-builtin' },
   { page: 'skills', section: 'Your Skills', label: 'Your Skills', desc: 'Saved instructions you run with /name', keywords: 'skills slash commands saved prompts instructions custom my own templates', anchor: 'skills-yours' },
   { page: 'skills', section: 'Your Skills', label: 'New Skill', desc: 'A name, a /command and what it should do', keywords: 'skills create new add slash command prompt template', anchor: 'skills-add' },
+  { page: 'skills', section: "Yap's Skills", label: "Yap's Skills", desc: '/prep, /standup, /todos and more: open one, or save a copy', keywords: 'skills slash commands saved prompts instructions decisions follow-up email todos stand-up standup prep summary', anchor: 'skills-builtin' },
+  { page: 'skills', section: 'More Skills', label: 'More Skills', desc: '/tickets, /risks, /coach and more, one switch away', keywords: 'skills more extra tickets prd product requirements risks coach weekly recap decision log open questions one-to-one project update', anchor: 'skills-more' },
+  { page: 'skills', section: 'More Skills', label: 'Show in the / menu', desc: "Each Skill's switch: in the / menu and one-tap prompts, or not", keywords: 'skills slash menu show hide switch turn on off add remove list', anchor: 'skills-more' },
 
   // ---- Speech-to-Text ----
   { page: 'models', section: 'Speech model', label: 'Speech model', desc: 'The model that turns your voice into text', keywords: 'speech to text transcription model parakeet whisper canary moonshine download', anchor: 'stt-model' },

@@ -2,8 +2,15 @@
 // chatModels.svelte.js, ModelChip.svelte; src-tauri/src/ai/ai_model.rs):
 // - the chip names the model (the provider's mark, "· Groq"); the picker
 //   opens on its provider, the rail lists Recent, every cloud provider with
-//   a dot (connected or not), and On this PC; the rows are the live + curated
-//   list Settings shows, with "New";
+//   a dot (connected or not), and On this PC; a cloud provider's rows are
+//   its Latest (the newest of each family: core/latestModels.js) and "More
+//   models (N)", the older ones in place below it, newest first (with "New");
+// - Claude with a stand-in list of eleven: its four latest, More models (7);
+//   the keyboard reaching More models (aria-expanded); an older one picked
+//   (the effort strip follows it), opened again with More models open;
+//   closed by hand, the one in use stays on show under it; search finds an
+//   older one with it closed; remembered while Yap runs; light and dark
+//   pictures;
 // - a provider without a key connects right there: the key saved where
 //   Settings keeps it (and Settings' copy keeps it), its live list asked at
 //   once, its models pickable, the key only ever shown masked;
@@ -57,11 +64,30 @@ const GROQ_LIST = [
 ];
 /** As Anthropic's /v1/models lists one. */
 const claudeModel = (id, display_name, created_at) => ({ id, type: 'model', display_name, created_at, max_input_tokens: 200000 });
+// A stand-in Anthropic list: the four latest, seven older (dated snapshots
+// among them, and one Yap's own list doesn't have).
 const ANTHROPIC_LIST = [
-  claudeModel('claude-haiku-4-5-20251001', 'Claude Haiku 4.5', '2025-10-01T00:00:00Z'),
-  claudeModel('claude-sonnet-5-5', 'Claude Sonnet 5.5', '2026-08-01T00:00:00Z'),
   claudeModel('claude-opus-5-5', 'Claude Opus 5.5', '2026-08-01T00:00:00Z'),
-  claudeModel('claude-nova-6', 'Claude Nova 6', new Date().toISOString()),
+  claudeModel('claude-fable-5-1', 'Claude Fable 5.1', '2026-09-15T00:00:00Z'),
+  claudeModel('claude-sonnet-5-5', 'Claude Sonnet 5.5', '2026-08-01T00:00:00Z'),
+  claudeModel('claude-haiku-5-5', 'Claude Haiku 5.5', '2026-08-20T00:00:00Z'),
+  claudeModel('claude-opus-4-8', 'Claude Opus 4.8', '2026-05-01T00:00:00Z'),
+  claudeModel('claude-opus-4-7', 'Claude Opus 4.7', '2026-03-01T00:00:00Z'),
+  claudeModel('claude-sonnet-4-6', 'Claude Sonnet 4.6', '2026-01-15T00:00:00Z'),
+  claudeModel('claude-opus-4-6', 'Claude Opus 4.6', '2026-01-10T00:00:00Z'),
+  claudeModel('claude-opus-4-5-20251101', 'Claude Opus 4.5', '2025-11-01T00:00:00Z'),
+  claudeModel('claude-haiku-4-5-20251001', 'Claude Haiku 4.5', '2025-10-01T00:00:00Z'),
+  claudeModel('claude-sonnet-4-5-20250929', 'Claude Sonnet 4.5', '2025-09-29T00:00:00Z'),
+];
+const CLAUDE_LATEST = ['Claude Opus 5.5', 'Claude Fable 5.1', 'Claude Sonnet 5.5', 'Claude Haiku 5.5'];
+const CLAUDE_OLDER = [
+  'Claude Opus 4.8',
+  'Claude Opus 4.7',
+  'Claude Sonnet 4.6',
+  'Claude Opus 4.6',
+  'Claude Opus 4.5',
+  'Claude Haiku 4.5',
+  'Claude Sonnet 4.5',
 ];
 
 /** The placeholder engine + bundled 1.5B in <data>/llm (installed, never run). */
@@ -127,6 +153,25 @@ const chip = (main) => main.locator('.modelchip .chip');
 const picker = (main) => main.getByRole('dialog', { name: 'Switch the Chat model' });
 const pane = (main) => picker(main).locator('.pane');
 const tab = (main, name) => picker(main).getByRole('tab', { name: new RegExp(`^${name}`) });
+const latest = (main) => pane(main).getByRole('group', { name: 'Latest' });
+const moreButton = (main) => pane(main).getByRole('button', { name: /^More models \(\d+\)$/ });
+const older = (main, short) => pane(main).getByRole('group', { name: `More ${short} models` });
+
+/** The selected provider's More models open or closed, whatever it was. */
+async function setMore(main, open) {
+  const b = moreButton(main);
+  if ((await b.getAttribute('aria-expanded')) !== String(open)) await b.click();
+  await expect(b).toHaveAttribute('aria-expanded', String(open));
+}
+
+/** General → Appearance → Theme (System, Light or Dark), saved. */
+async function pickTheme(yap, main, label) {
+  const dialog = await openSettings(main, 'General');
+  const theme = dialog.getByRole('group', { name: 'Appearance' }).getByRole('tablist', { name: 'Theme' });
+  await theme.getByRole('tab', { name: label, exact: true }).click();
+  await expectStore(yap, 'config.json', (c) => c.theme === label.toLowerCase(), `the theme ${label} to be saved`);
+  await closeSettings(main);
+}
 
 async function openPicker(main) {
   await openView(main, 'Chat');
@@ -162,20 +207,30 @@ test('the chip opens a provider rail on its provider, with the rows Settings sho
   await expect(head).toContainText('Groq');
   await expect(head).toContainText('Connected · checked just now');
   await expect(head.locator('.keymask')).toHaveText('e2e…-key');
-  // Curated first, then what Groq added since (New); each with its family's mark.
-  const rows = pane(main).locator('.mrow');
-  await expect(rows.locator('.nm')).toHaveText(['GPT-OSS 20B', 'GPT-OSS 120B', 'Qwen3.8 27B', 'Brainy 9']);
-  await expect(rows.nth(0)).toHaveAttribute('aria-pressed', 'true');
-  await expect(rows.nth(1)).toHaveAttribute('aria-pressed', 'false');
-  await expect(rows.nth(3).locator('.tag.new')).toHaveText('New');
-  await expect(rows.nth(0).locator('.mark')).toHaveAttribute('data-icon', 'openai-oss');
-  await expect(rows.nth(2).locator('.mark')).toHaveAttribute('data-icon', 'qwen');
-  await expect(rows.nth(3).locator('.mark')).toHaveAttribute('data-icon', 'groq');
+  // Latest: Groq's biggest and smallest GPT-OSS, each with its family's mark.
+  const rows = latest(main).locator('.mrow');
+  await expect(rows.locator('.nm')).toHaveText(['GPT-OSS 120B', 'GPT-OSS 20B']);
+  await expect(rows.nth(1)).toHaveAttribute('aria-pressed', 'true');
+  await expect(rows.nth(0)).toHaveAttribute('aria-pressed', 'false');
+  await expect(rows.nth(1).locator('.mark')).toHaveAttribute('data-icon', 'openai-oss');
   // The context Groq's own list gives (131,072 tokens), as info.
-  await expect(rows.nth(0).locator('.ds')).toHaveText(/ · 128K context$/);
-  await expect(rows.nth(3).locator('.ds')).toHaveText('128K context');
+  await expect(rows.nth(1).locator('.ds')).toHaveText(/ · 128K context$/);
+  // More models: closed (the model in use is a latest one); open, the rest
+  // in place below it, newest first: what Groq added since (New) on top.
+  await expect(moreButton(main)).toHaveText('More models (2)');
+  await expect(moreButton(main)).toHaveAttribute('aria-expanded', 'false');
+  await expect(pane(main).locator('.mrow .nm')).toHaveText(['GPT-OSS 120B', 'GPT-OSS 20B']);
+  await setMore(main, true);
+  const more = older(main, 'Groq').locator('.mrow');
+  await expect(more.locator('.nm')).toHaveText(['Brainy 9', 'Qwen3.8 27B']);
+  await expect(more.nth(0).locator('.tag.new')).toHaveText('New');
+  await expect(more.nth(0).locator('.mark')).toHaveAttribute('data-icon', 'groq');
+  await expect(more.nth(1).locator('.mark')).toHaveAttribute('data-icon', 'qwen');
+  await expect(more.nth(0).locator('.ds')).toHaveText('128K context');
   await expect(pop).toContainText('Changes the model for Chat only. Dictation cleanup stays as it is.');
   await shot(main, '01-picker-groq');
+  await setMore(main, false);
+  await expect(older(main, 'Groq')).toHaveCount(0);
 
   // Another provider on the rail: one without a key shows how to connect it.
   await tab(main, 'Gemini').click();
@@ -219,9 +274,12 @@ test('a provider without a key connects right in the picker', async ({ yap, main
   await expect(head).toContainText('Not set up');
   const box = pop.locator('.connect');
   await expect(box).toContainText('Connect Claude');
-  // Its curated models, greyed until there's a key.
+  // Its curated models, greyed until there's a key: the four latest, the
+  // older six under More models.
   const locked = pane(main).locator('.mrow.locked');
-  await expect(locked).toHaveCount(10);
+  await expect(locked).toHaveCount(4);
+  await expect(latest(main).locator('.nm')).toHaveText(CLAUDE_LATEST);
+  await expect(moreButton(main)).toHaveText('More models (6)');
   await expect(locked.first().locator('.tag.key')).toHaveText('Add key');
   await expect(locked.first().locator('.mark')).toHaveAttribute('data-icon', 'claude');
   await shot(main, '02-picker-connect-claude');
@@ -241,10 +299,10 @@ test('a provider without a key connects right in the picker', async ({ yap, main
   expect(asked.headers['x-api-key']).toBe(ANTHROPIC_KEY);
 
   // Its live models, pickable; the key masked, never in full.
-  await expect(pane(main).locator('.mrow .nm')).toHaveText(['Claude Haiku 4.5', 'Claude Sonnet 5.5', 'Claude Opus 5.5', 'Claude Nova 6']);
-  await expect(pane(main).locator('.mrow.locked')).toHaveCount(0);
-  await expect(pane(main).locator('.mrow').nth(3).locator('.tag.new')).toHaveText('New');
   await expect(head).toContainText('Connected · checked just now');
+  await expect(latest(main).locator('.nm')).toHaveText(CLAUDE_LATEST);
+  await expect(moreButton(main)).toHaveText('More models (7)');
+  await expect(pane(main).locator('.mrow.locked')).toHaveCount(0);
   await expect(head.locator('.keymask')).toHaveText('sk-…7890');
   await expect(tab(main, 'Claude')).toHaveText('Claude, connected');
   expect(await pop.innerHTML()).not.toContain(ANTHROPIC_KEY);
@@ -268,6 +326,114 @@ test('a provider without a key connects right in the picker', async ({ yap, main
   await expectStore(yap, 'config.json', (c) => c.meetingLiveTranscript === was);
   await closeSettings(main);
   await backToGroq(yap, main, fakeLlm);
+});
+
+test('Claude: Latest has the four newest, More models the older ones, which can be picked and searched', async ({ yap, main, fakeLlm, shot }) => {
+  // Anthropic connected (as the test above leaves it, or here when this runs alone).
+  const cfg = await yap.invoke('get_config');
+  if (cfg.ppApiKeys?.anthropic !== ANTHROPIC_KEY) await setConfig(yap, main, { ppApiKeys: { ...cfg.ppApiKeys, anthropic: ANTHROPIC_KEY } });
+  await backToGroq(yap, main, fakeLlm);
+  const effort = picker(main).getByTestId('chat-effort');
+  const levels = effort.getByRole('tab');
+  try {
+    await pickTheme(yap, main, 'Light');
+    const pop = await openPicker(main);
+    await tab(main, 'Claude').click();
+    await expect(pop.locator('.phead')).toContainText('Connected · checked');
+
+    // Latest: the newest Opus, Fable, Sonnet and Haiku; More models (7) closed under it.
+    await expect(latest(main).locator('.nm')).toHaveText(CLAUDE_LATEST);
+    await expect(latest(main).locator('.mrow .mark').first()).toHaveAttribute('data-icon', 'claude');
+    await expect(moreButton(main)).toHaveText('More models (7)');
+    await setMore(main, false);
+    await expect(pane(main).locator('.mrow')).toHaveCount(4);
+    await shot(main, '10-picker-latest-light');
+
+    // The keyboard: ↓ from the last of Latest to More models, Enter opens
+    // it in place (announced: aria-expanded), ↓ on into the older ones.
+    await latest(main).getByRole('button', { name: /^Claude Haiku 5\.5/ }).focus();
+    await main.keyboard.press('ArrowDown');
+    await expect(moreButton(main)).toBeFocused();
+    await main.keyboard.press('Enter');
+    await expect(moreButton(main)).toHaveAttribute('aria-expanded', 'true');
+    await expect(moreButton(main)).toHaveAttribute('aria-controls', 'chat-model-more-anthropic');
+    // The older ones, newest first, in the rows' own style (marks, tags).
+    const more = older(main, 'Claude');
+    await expect(more.locator('.nm')).toHaveText(CLAUDE_OLDER);
+    await expect(more.locator('.mrow').first().locator('.mark')).toHaveAttribute('data-icon', 'claude');
+    await expect(more.locator('.mrow').first().locator('.tag.img')).toHaveText('Reads images');
+    await main.keyboard.press('ArrowDown');
+    await expect(more.getByRole('button', { name: /^Claude Opus 4\.8/ })).toBeFocused();
+    await main.keyboard.press('ArrowUp');
+    await expect(moreButton(main)).toBeFocused();
+    await shot(main, '11-picker-more-models-light');
+
+    // Pick an older one: Chat uses it; the effort strip follows it.
+    await more.getByRole('button', { name: /^Claude Opus 4\.6/ }).click();
+    await expect(pop).toBeHidden();
+    await expect(chip(main)).toHaveText('Claude Opus 4.6 High · Anthropic');
+    await expectStore(yap, 'config.json', (c) => c.llmScopes.chat.provider === 'anthropic' && c.llmScopes.chat.model === 'claude-opus-4-6');
+
+    // Opened again: on Claude, More models open, the one in use ✓ where it is.
+    await pickTheme(yap, main, 'Dark');
+    await chip(main).click();
+    await expect(tab(main, 'Claude')).toHaveAttribute('aria-selected', 'true');
+    await expect(moreButton(main)).toHaveAttribute('aria-expanded', 'true');
+    const inUse = older(main, 'Claude').getByRole('button', { name: /^Claude Opus 4\.6/ });
+    await expect(inUse).toHaveAttribute('aria-pressed', 'true');
+    await expect(inUse).toBeFocused();
+    await expect(effort).toContainText('Claude Opus 4.6');
+    await expect(levels).toHaveText(['Low', 'Medium', 'High', 'Max']);
+    await expect(levels.filter({ hasText: 'High' })).toHaveAttribute('aria-selected', 'true');
+    await expect(effort.getByRole('button', { name: 'Fast mode' })).toHaveCount(0);
+    await shot(main, '12-picker-more-models-dark');
+
+    // Closed by hand: the one in use stays on show under it, ✓; search still
+    // finds every older one, and leaves More models as it was.
+    await setMore(main, false);
+    await expect(older(main, 'Claude')).toHaveCount(0);
+    await expect(pane(main).locator('.mrow .nm')).toHaveText([...CLAUDE_LATEST, 'Claude Opus 4.6']);
+    await expect(pane(main).getByRole('button', { name: /^Claude Opus 4\.6/ })).toHaveAttribute('aria-pressed', 'true');
+    await expect(moreButton(main)).toHaveText('More models (7)');
+    await shot(main, '13-picker-latest-dark');
+    const search = picker(main).getByRole('searchbox', { name: 'Search models and providers' });
+    await search.fill('opus 4.7');
+    await expect(pane(main).getByRole('group').locator('.gh')).toHaveText(['Claude']);
+    await expect(pane(main).locator('.mrow .nm')).toHaveText(['Claude Opus 4.7']);
+    await search.fill('claude sonnet');
+    await expect(pane(main).getByRole('group', { name: 'Claude' }).locator('.nm')).toHaveText(['Claude Sonnet 5.5', 'Claude Sonnet 4.6', 'Claude Sonnet 4.5']);
+    await picker(main).getByRole('button', { name: 'Clear the search' }).click();
+    await expect(moreButton(main)).toHaveAttribute('aria-expanded', 'false');
+    // Picked from the search: More models open next time, where it is.
+    await search.fill('opus 4.7');
+    await search.press('Enter');
+    await expect(picker(main)).toBeHidden();
+    await expect(chip(main)).toHaveText('Claude Opus 4.7 High · Anthropic');
+    await chip(main).click();
+    await expect(moreButton(main)).toHaveAttribute('aria-expanded', 'true');
+    await expect(older(main, 'Claude').getByRole('button', { name: /^Claude Opus 4\.7/ })).toHaveAttribute('aria-pressed', 'true');
+    await expect(levels).toHaveText(['Low', 'Medium', 'High', 'Extra', 'Max']);
+
+    // A latest one: the strip follows again (Fast mode is Opus 5.5's), and
+    // More models stays as it was left, while Yap runs.
+    await latest(main).getByRole('button', { name: /^Claude Opus 5\.5/ }).click();
+    await expect(chip(main)).toHaveText('Claude Opus 5.5 Medium · Anthropic');
+    await chip(main).click();
+    await expect(latest(main).getByRole('button', { name: /^Claude Opus 5\.5/ })).toHaveAttribute('aria-pressed', 'true');
+    await expect(levels).toHaveText(['Low', 'Medium', 'High', 'Extra', 'Max']);
+    await expect(effort.getByRole('button', { name: 'Fast mode' })).toHaveAttribute('aria-pressed', 'false');
+    await expect(moreButton(main)).toHaveAttribute('aria-expanded', 'true');
+    await setMore(main, false);
+    await main.keyboard.press('Escape');
+    await chip(main).click();
+    await expect(moreButton(main)).toHaveAttribute('aria-expanded', 'false');
+    await main.keyboard.press('Escape');
+    await expect(picker(main)).toBeHidden();
+  } finally {
+    if (await picker(main).isVisible()) await main.keyboard.press('Escape');
+    await pickTheme(yap, main, 'System');
+    await backToGroq(yap, main, fakeLlm);
+  }
 });
 
 test('search looks through every provider and this PC', async ({ yap, main, fakeLlm, shot }) => {
@@ -461,7 +627,11 @@ test('an installed model uninstalls from its right-click menu, never the one in 
 
 test('the keyboard: arrows through the rail and the models, Ctrl+K, Enter, Esc', async ({ yap, main, fakeLlm }) => {
   await backToGroq(yap, main, fakeLlm);
-  await openView(main, 'Chat');
+  // Groq's More models closed (an earlier test may have left it open).
+  await openPicker(main);
+  await setMore(main, false);
+  await main.keyboard.press('Escape');
+  await expect(picker(main)).toBeHidden();
   await chip(main).focus();
   await main.keyboard.press('Enter');
   await expect(picker(main)).toBeVisible();
@@ -469,7 +639,22 @@ test('the keyboard: arrows through the rail and the models, Ctrl+K, Enter, Esc',
   // The current model has the focus, with the amber ring.
   await expect(row('GPT-OSS 20B')).toBeFocused();
   await expect(row('GPT-OSS 20B')).toHaveCSS('outline-style', 'solid');
+  // ↓ to More models (a stop of its own, with the ring), Space opens it, ↓
+  // into the older ones; Space again closes it.
   await main.keyboard.press('ArrowDown');
+  await expect(moreButton(main)).toBeFocused();
+  await expect(moreButton(main)).toHaveCSS('outline-style', 'solid');
+  await main.keyboard.press('Space');
+  await expect(moreButton(main)).toHaveAttribute('aria-expanded', 'true');
+  await main.keyboard.press('ArrowDown');
+  await expect(row('Brainy 9')).toBeFocused();
+  await main.keyboard.press('ArrowUp');
+  await main.keyboard.press('Space');
+  await expect(moreButton(main)).toHaveAttribute('aria-expanded', 'false');
+  await expect(row('Brainy 9')).toHaveCount(0);
+  await main.keyboard.press('ArrowUp');
+  await expect(row('GPT-OSS 20B')).toBeFocused();
+  await main.keyboard.press('ArrowUp');
   await expect(row('GPT-OSS 120B')).toBeFocused();
   // ← to the rail; ↑/↓ switch providers as they go; → back to the models.
   await main.keyboard.press('ArrowLeft');

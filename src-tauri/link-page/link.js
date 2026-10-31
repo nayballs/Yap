@@ -12,9 +12,10 @@
 // quiet), the mic resampled to
 // 16 kHz Int16 in an AudioWorklet (mic-worklet.js, dsp.js), the spoken answer
 // as one stream (resampled here frame after frame, played from a jitter
-// buffer in player-worklet.js), "Clearer sound in a headset" (the mic closed
-// while Yap talks), Stop and barge-in, the conversation, the step Yap is on
-// and its time, the model chip, Sound details, reconnects with backoff,
+// buffer in player-worklet.js), "Clearer sound in a headset" (on by default:
+// the mic closed while Yap talks), opening the mic a timed step at a time
+// (never a silent "Wait…"), Stop and barge-in, the conversation, the step Yap
+// is on and its time, the model chip, Sound details, reconnects with backoff,
 // keep-alive pings and a screen wake lock.
 //
 // No service worker: on an origin whose certificate Chrome only accepted
@@ -49,6 +50,11 @@ const HOLD_MS = 350; // a press this long is a hold: release sends
 const NO_SPEECH_MS = 10000; // hands-free: nothing said this long → cancelled
 const MIC_WARM_MS = 15000; // the mic kept open after a turn, for a follow-up
 const MIC_LIVE_MS = 3000; // the longest a new mic's wait for sound (a headset switching to its call link)
+// Opening the mic never waits silently: each step has a time limit (doOpenMic).
+const QUERY_MS = 1000; // the permission's state, where the browser says
+const MODULE_MS = 5000; // an AudioWorklet module loading
+const PERMISSION_MS = 6000; // getUserMedia: then how to allow the mic is said (and it waits on)
+const RESUME_MS = 3000; // the phone's sound starting, once Talk is let go
 const PING_MS = 15000;
 const PONG_WAIT_MS = 8000;
 const KEEP_TURNS = 6;
@@ -138,8 +144,10 @@ const S = {
   handsFree: load(KEY.handsFree) === true,
   // Hands-free's wait before sending: short | normal | long (WAITS).
   wait: waitChoice(load(KEY.wait)),
-  // "Clearer sound in a headset": the mic closed while Yap talks.
-  clearer: load(KEY.clearer) === true,
+  // "Clearer sound in a headset": the mic closed while Yap talks. On unless
+  // the person turned it off: with the mic open a headset stays in its call
+  // mode, which crackles.
+  clearer: load(KEY.clearer) !== false,
   tick: 0,
   stopTimer: 0,
   gen: 0,
@@ -196,6 +204,7 @@ const el = {
   soundGaps: $('sound-gaps'),
   soundMic: $('sound-mic'),
   soundMicNow: $('sound-mic-now'),
+  soundMicStep: $('sound-mic-step'),
   soundBrowser: $('sound-browser'),
   mic: $('mic'),
   micHint: $('mic-hint'),
@@ -687,7 +696,26 @@ const mic = {
   opening: null,
   closeTimer: 0,
   deviceId: '',
+  // Each opening is a run, numbered: one given up (Cancel, a step out of
+  // time) has a number that's no longer `attempt`, and its late results go.
+  attempt: 0,
+  // The last run, for Sound details: {attempt, started, name (the step), at
+  // (since), state: now | open | failed | cancelled, ms (its last step's
+  // time), total, waiting (past PERMISSION_MS at the permission)}.
+  run: null,
 };
+
+/** An Error with a name micError() knows. */
+const named = (name) => Object.assign(new Error(name), { name });
+
+/** `promise`, or after `ms` an Error named `name` (the promise carries on, unwatched). */
+function within(promise, ms, name) {
+  let timer;
+  const late = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(named(name)), ms);
+  });
+  return Promise.race([promise, late]).finally(() => clearTimeout(timer));
+}
 
 function audioContext() {
   if (!mic.ctx) {
@@ -697,33 +725,68 @@ function audioContext() {
   return mic.ctx;
 }
 
-/** The page's AudioWorklet modules, each loaded once (again after a failure). */
-const modules = {};
-function worklet(ctx, file) {
-  if (!ctx.audioWorklet) return Promise.reject(Object.assign(new Error('worklet'), { name: 'NoWorklet' }));
-  if (!modules[file]) {
-    modules[file] = ctx.audioWorklet.addModule(new URL(file, import.meta.url).href).catch((err) => {
-      modules[file] = null;
-      throw err;
-    });
-  }
-  return modules[file];
+/**
+ * A touch's press isn't yet a gesture that lets a page start its sound (its
+ * release is): the sound is asked to start again on each of these, so a
+ * first Talk's AudioContext doesn't wait on a press that didn't count.
+ */
+function wakeSound() {
+  if (mic.ctx && mic.ctx.state === 'suspended') mic.ctx.resume().catch(() => {});
+}
+for (const type of ['pointerup', 'touchend', 'click', 'keydown']) {
+  document.addEventListener(type, wakeSound, { capture: true, passive: true });
 }
 
 /**
- * Resolves once the mic's track is live and sending sound: a Bluetooth
+ * The page's AudioWorklet modules, each loaded once per context (again after
+ * a failure), **one at a time**: the mic's and the player's at once on one
+ * context is a suspect for a load that never finishes (Firefox). Each has
+ * MODULE_MS from its turn; then it fails as `WorkletSlow`.
+ */
+const worklets = new WeakMap(); // context → {chain, files: {file: Promise}}
+function worklet(ctx, file) {
+  if (!ctx.audioWorklet) return Promise.reject(named('NoWorklet'));
+  let w = worklets.get(ctx);
+  if (!w) worklets.set(ctx, (w = { chain: Promise.resolve(), files: {} }));
+  if (!w.files[file]) {
+    const url = new URL(file, import.meta.url).href;
+    const load = w.chain.then(() => within(ctx.audioWorklet.addModule(url), MODULE_MS, 'WorkletSlow'));
+    // The next module waits for this one, loaded or not.
+    w.chain = load.catch(() => {});
+    w.files[file] = load.catch((err) => {
+      w.files[file] = null;
+      throw err;
+    });
+  }
+  return w.files[file];
+}
+
+/**
+ * The sound set up afresh on the next Talk (after a module that never
+ * loaded): a new AudioContext, its modules loaded again, the player too.
+ */
+function resetAudio() {
+  closeMic();
+  player.reset();
+  const ctx = mic.ctx;
+  mic.ctx = null;
+  if (ctx) ctx.close().catch(() => {});
+}
+
+/**
+ * Resolves true once the mic's track is live and sending sound: a Bluetooth
  * headset takes a moment to switch to its call link (longer after it was
  * playing music), and what it says meanwhile isn't the person. At most
- * MIC_LIVE_MS; then it goes ahead anyway.
+ * MIC_LIVE_MS; then false, and it goes ahead anyway.
  */
 function whenLive(track) {
-  if (!track || track.readyState !== 'live' || !track.muted) return Promise.resolve();
+  if (!track || track.readyState !== 'live' || !track.muted) return Promise.resolve(true);
   return new Promise((resolve) => {
-    const done = () => {
+    const done = (e) => {
       clearTimeout(timer);
       track.removeEventListener('unmute', done);
       track.removeEventListener('ended', done);
-      resolve();
+      resolve(!!e);
     };
     const timer = setTimeout(done, MIC_LIVE_MS);
     track.addEventListener('unmute', done);
@@ -731,46 +794,159 @@ function whenLive(track) {
   });
 }
 
+/**
+ * Resolves once the phone's sound runs. While Talk is held this waits on (a
+ * touch's press may not count as a gesture until it's let go: wakeSound),
+ * then RESUME_MS at most; then `AudioStart`.
+ */
+function soundStarted(ctx) {
+  if (ctx.state === 'running') return Promise.resolve();
+  // Asked again now the mic is open: Firefox lets a page that records start its sound.
+  ctx.resume().catch(() => {});
+  return new Promise((resolve, reject) => {
+    let since = performance.now();
+    const timer = setInterval(() => {
+      if (ctx.state === 'running') {
+        clearInterval(timer);
+        resolve();
+      } else if (ctx.state === 'closed') {
+        clearInterval(timer);
+        reject(named('AudioStart'));
+      } else if (press) since = performance.now();
+      else if (performance.now() - since >= RESUME_MS) {
+        clearInterval(timer);
+        reject(named('AudioStart'));
+      }
+    }, 50);
+  });
+}
+
+/** The microphone permission where the browser says ('granted' | 'denied' | 'prompt'), else ''. */
+async function permissionState() {
+  try {
+    if (!navigator.permissions || !navigator.permissions.query) return '';
+    const status = await within(navigator.permissions.query({ name: 'microphone' }), QUERY_MS, 'Slow');
+    return (status && status.state) || '';
+  } catch {
+    return ''; // Firefox may not know 'microphone' here
+  }
+}
+
+const PERMISSION_WAIT =
+  'Waiting for the microphone permission. Tap the icon left of the address bar → Microphone → Allow, then tap Talk again.';
+const PERMISSION_BLOCKED =
+  'The microphone is blocked for this page. Tap the icon left of the address bar → Microphone → Allow, then tap Talk again.';
+
+/** Opening the mic is waiting on the permission (past PERMISSION_MS): Talk tries afresh. */
+const waitingPermission = () => !!(mic.opening && mic.run && mic.run.waiting);
+
 function chosenMic() {
   const c = load(KEY.mic);
   return c && c.id ? c : null;
 }
 
-/** Opens the mic (once at a time: a second call waits for the first). */
+/** Opens the mic (once at a time: a second call waits for the first, unless it was given up). */
 function openMic() {
   clearTimeout(mic.closeTimer);
-  if (!mic.opening) mic.opening = doOpenMic().finally(() => (mic.opening = null));
-  return mic.opening;
+  if (mic.opening) return mic.opening;
+  const want = chosenMic();
+  if (mic.stream && mic.stream.active && mic.deviceId === (want ? want.id : '')) return Promise.resolve();
+  const now = performance.now();
+  const run = { attempt: ++mic.attempt, started: now, name: '', at: now, state: 'now', ms: 0, total: 0, waiting: false };
+  mic.run = run;
+  let giveUp;
+  const given = new Promise((_, reject) => (giveUp = reject));
+  run.giveUp = () => giveUp(named('Abandoned'));
+  const end = (state) => {
+    if (run.state !== 'now') return;
+    const t = performance.now();
+    run.state = state;
+    run.ms = t - run.at;
+    run.total = t - run.started;
+  };
+  const p = Promise.race([doOpenMic(run), given]).then(
+    () => end('open'),
+    (err) => {
+      end(err && err.name === 'Abandoned' ? 'cancelled' : 'failed');
+      // A module that never loaded: the next Talk sets the sound up afresh.
+      if (err && err.name === 'WorkletSlow' && run.attempt === mic.attempt) resetAudio();
+      throw err;
+    },
+  );
+  mic.opening = p;
+  p.catch(() => {}).finally(() => {
+    if (mic.opening === p) mic.opening = null;
+    renderSound();
+  });
+  return p;
 }
 
-async function doOpenMic() {
+/** The opening under way given up (Cancel, or stuck at the permission): what it gets later is let go. */
+function giveUpOpening() {
+  const run = mic.run;
+  if (!mic.opening || !run) return;
+  mic.attempt++;
+  mic.opening = null;
+  run.giveUp();
+}
+
+/** Each step of opening the mic: what Sound details says, and where a given-up run stops. */
+function step(run, name) {
+  if (run.attempt !== mic.attempt) throw named('Abandoned');
+  run.name = name;
+  run.at = performance.now();
+  renderSound();
+}
+
+const STEP_WORDS = {
+  check: 'Checking the permission',
+  recorder: 'Loading the recorder',
+  player: 'Loading the player',
+  permission: 'Asking for the microphone',
+  sound: "Starting the phone's sound",
+  live: 'Waiting for sound from the mic',
+};
+
+/**
+ * Opening the mic, a step at a time, each with a time limit and a reason on
+ * screen when it runs out: the permission's state (QUERY_MS), the recorder's
+ * and the player's modules (MODULE_MS each, one after the other),
+ * getUserMedia (after PERMISSION_MS, how to allow the mic, waiting on until
+ * Cancel), the phone's sound (RESUME_MS once Talk is let go), sound from the
+ * mic (MIC_LIVE_MS, then it goes ahead).
+ */
+async function doOpenMic(run) {
   const want = chosenMic();
-  if (mic.stream && mic.stream.active && mic.deviceId === (want ? want.id : '')) return;
   closeMic();
-  if (!window.isSecureContext || !navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-    throw Object.assign(new Error('insecure'), { name: 'Insecure' });
-  }
+  step(run, 'check');
+  if (!window.isSecureContext || !navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) throw named('Insecure');
   const ctx = audioContext();
-  if (ctx.state !== 'running') await ctx.resume().catch(() => {});
-  if (!ctx.audioWorklet) throw Object.assign(new Error('worklet'), { name: 'NoWorklet' });
-  // The answer's player loads beside it, ready for the answer.
-  player.prepare();
+  if (!ctx.audioWorklet) throw named('NoWorklet');
+  // Asked to start in Talk's own press; waited for once the mic is open (below).
+  if (ctx.state !== 'running') ctx.resume().catch(() => {});
+  // Blocked already: said at once, where the browser can tell.
+  const blocked = (await permissionState()) === 'denied';
+
+  // The recorder, then the answer's player, ready for the answer.
+  step(run, 'recorder');
   try {
     await worklet(ctx, 'mic-worklet.js');
-  } catch {
-    throw Object.assign(new Error('worklet load'), { name: 'WorkletLoad' });
-  }
-  const audio = { echoCancellation: true, noiseSuppression: true, autoGainControl: true };
-  let stream;
-  try {
-    stream = await navigator.mediaDevices.getUserMedia({
-      audio: want ? { ...audio, deviceId: { exact: want.id } } : audio,
-    });
   } catch (err) {
-    if (!want || (err.name !== 'OverconstrainedError' && err.name !== 'NotFoundError')) throw err;
-    // The chosen mic isn't here (the headset's off): the phone's own.
-    stream = await navigator.mediaDevices.getUserMedia({ audio });
-    S.note = `${want.label || 'The chosen microphone'} isn't connected, so this uses the phone's own.`;
+    throw err && err.name === 'WorkletSlow' ? err : named('WorkletLoad');
+  }
+  step(run, 'player');
+  await player.prepare();
+  if (player.slow) throw named('WorkletSlow');
+
+  step(run, 'permission');
+  const stream = await askForMic(run, want, blocked);
+  try {
+    step(run, 'sound');
+    await soundStarted(ctx);
+    step(run, 'live');
+  } catch (err) {
+    for (const t of stream.getTracks()) t.stop();
+    throw err;
   }
   const track = stream.getAudioTracks()[0];
   mic.stream = stream;
@@ -795,10 +971,59 @@ async function doOpenMic() {
   listMics();
   // Nothing counts until the mic really sends sound (Talk says "Opening the
   // microphone…" meanwhile).
-  await whenLive(track);
-  if (mic.stream !== stream) throw Object.assign(new Error('closed'), { name: 'MicClosed' });
+  const live = await whenLive(track);
+  if (mic.stream !== stream) throw named('MicClosed');
+  if (!live && run.attempt === mic.attempt) {
+    S.note = "The microphone hasn't sent any sound yet (a headset switching over?). Yap is listening anyway.";
+  }
   player.noteMic();
   renderSound();
+}
+
+/**
+ * getUserMedia, the chosen mic or else the phone's own. Past PERMISSION_MS
+ * (at once when the browser says the mic is blocked) the page says how to
+ * allow it and waits on: answering the prompt late still works, Talk tries
+ * afresh, Cancel gives up.
+ */
+async function askForMic(run, want, blocked) {
+  const timer = setTimeout(
+    () => {
+      if (run.attempt !== mic.attempt) return;
+      run.waiting = true;
+      if (S.local === 'opening') S.error = blocked ? PERMISSION_BLOCKED : PERMISSION_WAIT;
+      render();
+    },
+    blocked ? 0 : PERMISSION_MS,
+  );
+  const audio = { echoCancellation: true, noiseSuppression: true, autoGainControl: true };
+  let stream;
+  let fellBack = false;
+  try {
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({
+        audio: want ? { ...audio, deviceId: { exact: want.id } } : audio,
+      });
+    } catch (err) {
+      if (!want || (err.name !== 'OverconstrainedError' && err.name !== 'NotFoundError')) throw err;
+      // The chosen mic isn't here (the headset's off): the phone's own.
+      stream = await navigator.mediaDevices.getUserMedia({ audio });
+      fellBack = true;
+    }
+  } finally {
+    clearTimeout(timer);
+  }
+  if (run.attempt !== mic.attempt) {
+    // Given up meanwhile: this mic goes straight back.
+    for (const t of stream.getTracks()) t.stop();
+    throw named('Abandoned');
+  }
+  if (run.waiting) {
+    run.waiting = false;
+    if (S.error === PERMISSION_WAIT || S.error === PERMISSION_BLOCKED) S.error = '';
+  }
+  if (fellBack) S.note = `${want.label || 'The chosen microphone'} isn't connected, so this uses the phone's own.`;
+  return stream;
 }
 
 function closeMic() {
@@ -832,7 +1057,7 @@ function closeMic() {
  * answer a Bluetooth headset stays in one call link (SCO), and a follow-up
  * starts at once. Then it closes, so the headset goes back to its music link.
  *
- * With "Clearer sound in a headset" on, the mic closes as soon as the
+ * With "Clearer sound in a headset" on (the default), the mic closes as soon as the
  * question is sent (so the headset has the time Yap spends working it out to
  * switch to its music link, A2DP, before the answer starts) and, in any
  * case, when the answer starts (`speak_start`); it opens again on Talk, or
@@ -867,7 +1092,11 @@ function micError(err) {
   switch (err && err.name) {
     case 'NotAllowedError':
     case 'SecurityError':
-      return "Chrome isn't letting Yap use the microphone. Tap the icon beside the address, open Permissions, allow the microphone, then try again.";
+      return PERMISSION_BLOCKED;
+    case 'WorkletSlow':
+      return "The audio setup didn't finish: reload the page, then try again.";
+    case 'AudioStart':
+      return "The phone's sound didn't start. Tap Talk again, or reload the page.";
     case 'NotFoundError':
       return 'No microphone found on this phone.';
     case 'NotReadableError':
@@ -895,7 +1124,7 @@ async function listMics() {
     return;
   }
   const mics = all.filter((d) => d.kind === 'audioinput' && d.deviceId && d.deviceId !== 'default');
-  const named = mics.some((d) => d.label);
+  const hasNames = mics.some((d) => d.label);
   let chosen = chosenMic();
   // Device ids can change; the same name is the same mic.
   if (chosen && !mics.some((d) => d.deviceId === chosen.id)) {
@@ -912,8 +1141,8 @@ async function listMics() {
   }
   el.mic.replaceChildren(...opts);
   el.mic.value = chosen ? chosen.id : '';
-  el.micHint.textContent = named
-    ? 'Pick your headset here once it’s connected.'
+  el.micHint.textContent = hasNames
+    ?'Pick your headset here once it’s connected.'
     : 'Names show once you’ve allowed the microphone.';
 }
 
@@ -991,6 +1220,9 @@ async function beginTalk() {
     markCancelled();
     S.ignoreOldAt = performance.now();
   }
+  // An opening stuck at the permission: Talk tries afresh (the person may
+  // have allowed it from the address bar meanwhile).
+  if (waitingPermission()) giveUpOpening();
   S.local = 'opening';
   const gen = ++S.gen;
   render();
@@ -999,7 +1231,7 @@ async function beginTalk() {
   } catch (err) {
     if (S.local === 'opening' && gen === S.gen) {
       S.local = 'idle';
-      S.error = micError(err);
+      if (err && err.name !== 'Abandoned') S.error = micError(err);
       render();
     }
     return;
@@ -1037,10 +1269,20 @@ async function beginTalk() {
   render();
 }
 
+/** Talk pressed again while the mic opens: a tap that tries afresh when it's stuck at the permission. */
+function restartTalk() {
+  giveUpOpening();
+  S.local = 'idle';
+  beginTalk();
+}
+
 function stopTalk() {
   if (S.local === 'opening') {
     S.local = 'idle';
-    if (S.holdRelease) S.note = 'The microphone took a moment to open. Hold Talk a little longer, or tap it to talk.';
+    // Stuck at the permission: given up (its message stays, saying what to do).
+    if (waitingPermission()) giveUpOpening();
+    else if (S.holdRelease) S.note = 'The microphone took a moment to open. Hold Talk a little longer, or tap it to talk.';
+    syncTicker();
     render();
     return;
   }
@@ -1069,6 +1311,11 @@ function finishStop() {
 function cancelTalk() {
   if (busyListening() || S.local === 'stopping') {
     const sent = S.local !== 'opening';
+    if (!sent) {
+      // The mic was still opening: that's given up too, whatever step it was on.
+      giveUpOpening();
+      if (S.error === PERMISSION_WAIT || S.error === PERMISSION_BLOCKED) S.error = '';
+    }
     endLocalQuestion();
     if (sent) {
       send({ type: 'cancel' });
@@ -1158,6 +1405,7 @@ const player = {
   loading: null,
   waiting: [], // messages for the worklet before it's loaded
   broken: false,
+  slow: false, // its module never loaded (MODULE_MS)
   rs: null,
   accepting: false,
   ending: false,
@@ -1173,12 +1421,18 @@ const player = {
     return this.accepting && (this.stats.state === 'playing' || this.stats.state === 'starved');
   },
 
-  /** Loads the worklet and makes its node, once, ahead of the first answer. */
+  /**
+   * Loads the worklet and makes its node, once, ahead of the first answer.
+   * Resolves when that's done or has failed (`broken`; `slow` when the
+   * module never loaded), never rejects.
+   */
   prepare() {
-    if (this.node || this.loading || this.broken) return;
+    if (this.node || this.broken) return Promise.resolve();
+    if (this.loading) return this.loading;
     const ctx = audioContext();
-    this.loading = worklet(ctx, 'player-worklet.js')
+    const p = worklet(ctx, 'player-worklet.js')
       .then(() => {
+        if (mic.ctx !== ctx) return; // the sound was set up afresh since
         const node = new AudioWorkletNode(ctx, 'yap-player', { numberOfOutputs: 1, outputChannelCount: [1] });
         node.port.onmessage = (e) => this.report(e.data || {});
         node.onprocessorerror = () => this.fail();
@@ -1187,10 +1441,33 @@ const player = {
         for (const [msg, transfer] of this.waiting) node.port.postMessage(msg, transfer);
         this.waiting = [];
       })
-      .catch(() => this.fail())
+      .catch((err) => {
+        if (mic.ctx !== ctx) return;
+        this.slow = !!err && err.name === 'WorkletSlow';
+        this.fail();
+      })
       .finally(() => {
-        this.loading = null;
+        if (this.loading === p) this.loading = null;
       });
+    this.loading = p;
+    return p;
+  },
+  /** Back to before it was loaded (the sound set up afresh): nothing playing, nothing waiting. */
+  reset() {
+    this.stopAll();
+    if (this.node) {
+      this.node.port.onmessage = null;
+      try {
+        this.node.disconnect();
+      } catch {
+        /* gone */
+      }
+    }
+    this.node = null;
+    this.loading = null;
+    this.waiting = [];
+    this.broken = false;
+    this.slow = false;
   },
   /** The worklet couldn't load (or broke): nothing plays, nothing waits for it. */
   fail() {
@@ -1388,7 +1665,9 @@ function render() {
   el.talkBtn.setAttribute('aria-pressed', String(listening || now === 'opening'));
   el.talkLabel.textContent =
     now === 'opening'
-      ? 'Wait…'
+      ? waitingPermission()
+        ? 'Talk' // the message says "tap Talk again": it tries afresh
+        : 'Wait…'
       : listening
         ? S.holdRelease
           ? 'Release to send'
@@ -1465,7 +1744,21 @@ function renderSound() {
             : '—';
   }
   el.soundMicNow.textContent = mic.stream ? 'Open' : 'Closed';
+  el.soundMicStep.textContent = micStepLine();
   el.soundBrowser.textContent = browserLine();
+}
+
+const took = (ms) => (ms < 1000 ? `${num(ms)} ms` : `${(ms / 1000).toFixed(1)} s`);
+
+/** Where opening the mic got to, and how long that step took: a stuck step reads off the screen. */
+function micStepLine() {
+  const r = mic.run;
+  if (!r || !r.name) return 'Not opened yet';
+  const what = STEP_WORDS[r.name] || 'Opening the microphone';
+  if (r.state === 'now') return `${what}… ${took(performance.now() - r.at)} so far`;
+  if (r.state === 'open') return `${what}: ${took(r.ms)} (open after ${took(r.total)})`;
+  if (r.state === 'cancelled') return `${what}: cancelled after ${took(r.ms)}`;
+  return `${what}: stopped after ${took(r.ms)}`;
 }
 
 /** Times on screen tick while Yap listens or works. */
@@ -1540,6 +1833,17 @@ async function keepAwake() {
 let press = null;
 let lastPointer = 0; // the last press or release, so its click isn't a second one
 
+/**
+ * When an input really happened: its timeStamp, so a tap stays a tap when
+ * the page was busy as it came (its release handled late); now, when the
+ * browser's stamp isn't on the page's clock.
+ */
+function eventTime(e) {
+  const now = performance.now();
+  const t = e && e.timeStamp;
+  return typeof t === 'number' && t > 0 && t <= now + 1 && now - t < 10_000 ? t : now;
+}
+
 el.talkBtn.addEventListener('pointerdown', (e) => {
   if (e.button !== 0 || el.talkBtn.disabled) return;
   e.preventDefault();
@@ -1550,12 +1854,13 @@ el.talkBtn.addEventListener('pointerdown', (e) => {
     /* fine without */
   }
   if (busyListening()) {
-    // The second tap of tap-to-talk: send.
-    press = { t: lastPointer, handled: true };
-    stopTalk();
+    // The second tap of tap-to-talk: send (or, stuck at the permission, try afresh).
+    press = { t: eventTime(e), handled: true };
+    if (S.local === 'opening' && waitingPermission()) restartTalk();
+    else stopTalk();
     return;
   }
-  press = { t: lastPointer, handled: false };
+  press = { t: eventTime(e), handled: false };
   S.holdRelease = false;
   // After a moment it's a hold: the label says so.
   press.timer = setTimeout(() => {
@@ -1565,9 +1870,13 @@ el.talkBtn.addEventListener('pointerdown', (e) => {
     }
   }, HOLD_MS);
   beginTalk();
+  // A hold counts from when the press was handled: setting the sound up can
+  // keep the page busy (Firefox's new AudioContext: 0.1–0.4 s), and a finger
+  // lifted meanwhile is a tap.
+  press.t = Math.max(press.t, performance.now());
 });
 
-function release() {
+function release(e) {
   lastPointer = performance.now();
   if (!press) return;
   const p = press;
@@ -1575,7 +1884,7 @@ function release() {
   clearTimeout(p.timer);
   if (p.handled) return;
   // A hold: letting go sends. A tap: Yap listens until the next tap.
-  if (performance.now() - p.t >= HOLD_MS && busyListening()) {
+  if (eventTime(e) - p.t >= HOLD_MS && busyListening()) {
     S.holdRelease = true;
     stopTalk();
   }
@@ -1588,7 +1897,8 @@ el.talkBtn.addEventListener('contextmenu', (e) => e.preventDefault());
 // The keyboard, a switch or a screen reader: a click with no press before it.
 el.talkBtn.addEventListener('click', (e) => {
   if (e.detail !== 0 && performance.now() - lastPointer < 1000) return;
-  if (busyListening()) stopTalk();
+  if (S.local === 'opening' && waitingPermission()) restartTalk();
+  else if (busyListening()) stopTalk();
   else beginTalk();
 });
 
@@ -1695,6 +2005,10 @@ window.__yapLink = {
       contextRate: mic.ctx ? mic.ctx.sampleRate : 0,
       contextState: mic.ctx ? mic.ctx.state : '',
       micOpen: !!mic.stream,
+      // Opening the mic: the step it's on (or ended on), its state and time.
+      micStep: mic.run
+        ? { name: mic.run.name, state: mic.run.state, ms: mic.run.ms, total: mic.run.total, waiting: mic.run.waiting }
+        : null,
       player: {
         // speak_start's rate, and the page's view: an answer playing or to come.
         rate: player.rate,
