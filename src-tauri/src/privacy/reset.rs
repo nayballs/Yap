@@ -732,6 +732,8 @@ fn clear_stores(c: &Choice, done: &mut Done) -> Gone {
             for id in &gone.notes {
                 crate::meetings::meeting_end::forget(*id);
             }
+            // The meetings' companies the folder rules kept (the rules stay).
+            crate::calendar::filing::forget_notes();
         }
         Cut::Part => {
             let meetings = c.has(Kind::Meetings);

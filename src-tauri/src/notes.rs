@@ -1676,6 +1676,8 @@ pub fn forget_own(ids: &[u64]) {
     for &id in ids {
         crate::meetings::meeting_end::forget(id);
         versions::forget(id);
+        // Its attendees' companies, kept for the folder rules by company.
+        crate::calendar::filing::forget_note(id);
     }
     pins::forget_many(ids);
 }
