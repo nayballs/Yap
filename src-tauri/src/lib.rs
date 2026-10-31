@@ -228,8 +228,12 @@ pub fn run() {
             pipeline: Mutex::new(None),
         })
         // Chat's screenshots, by id only (Snip to Chat, snip.rs):
-        // yapsnip://localhost/img/<id> (http://yapsnip.localhost/… in WebView2).
-        .register_uri_scheme_protocol("yapsnip", |_ctx, request| snip::serve(&request))
+        // yapsnip://localhost/img/<id> (http://yapsnip.localhost/… in WebView2),
+        // `?w=&h=` a thumbnail (snip/thumbs.rs). Answered off the main thread:
+        // a big PNG's read, or a thumbnail being made, never holds up the windows.
+        .register_asynchronous_uri_scheme_protocol("yapsnip", |_ctx, request, responder| {
+            tauri::async_runtime::spawn_blocking(move || responder.respond(snip::serve(&request)));
+        })
         .invoke_handler(tauri::generate_handler![
             dictation::commands::toggle_recording,
             dictation::commands::dictation_key,

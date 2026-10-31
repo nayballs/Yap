@@ -5,6 +5,7 @@
   // to start says why), or — no messages yet — what Chat is for, what it
   // needs if no AI model is set up, and the Voice Assistant's shortcut (or
   // how to set one).
+  import { untrack } from 'svelte';
   import { formatHotkeySpec } from '../../core/hotkeys.js';
   import { messageItems } from '../../core/itemMenus.js';
   import { openContextMenu } from '../../ui/contextMenu.svelte.js';
@@ -31,6 +32,22 @@
 
   /** `chat`: the view's state; `onopensettings(section)`: ControlPanel's Settings. */
   let { chat, onopensettings = null } = $props();
+
+  // The width a question's screenshots may take: a bubble's (78 % of the
+  // thread). Settled a moment after a resize, so a window being dragged
+  // wider doesn't ask Rust for a thumbnail at every pixel (they're drawn at
+  // exactly their device pixels: chatImages.js `sentPlaced`).
+  let msgsWidth = $state(0);
+  let room = $state(0);
+  $effect(() => {
+    const next = msgsWidth > 0 ? Math.floor((msgsWidth - 4) * 0.78) : 0;
+    if (!untrack(() => room) || !next) {
+      room = next;
+      return;
+    }
+    const t = setTimeout(() => (room = next), 250);
+    return () => clearTimeout(t);
+  });
 
   function messageMenu(e, m) {
     const reading = !!m.id && chat.speakingId === m.id;
@@ -90,7 +107,7 @@
       Asking across your meetings and notes
     </p>
   {/if}
-  <div class="msgs" bind:this={chat.threadEl}>
+  <div class="msgs" bind:this={chat.threadEl} bind:clientWidth={msgsWidth}>
     {#each chat.messages as m, i (i)}
       {#if chat.summary && i === chat.summary.upto}
         <!-- A long chat's older messages, summarised (chat/compact.rs): the
@@ -108,7 +125,8 @@
         sources={chat.citedSources(i)}
         reading={m.role === 'assistant' && !!m.id && chat.speakingId === m.id}
         keepDays={chat.keepDays}
-        onview={(id) => (chat.viewing = id)}
+        {room}
+        onview={(img) => (chat.viewing = img)}
         onmenu={(e) => messageMenu(e, m)}
         onread={() => chat.readAloud(m)}
         onsource={(s) => chat.openSource(s)}

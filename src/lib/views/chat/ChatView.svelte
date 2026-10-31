@@ -107,10 +107,10 @@
   import { chatRequest } from '../../stores/chatRequest.svelte.js';
   import { openContextMenu } from '../../ui/contextMenu.svelte.js';
   import { createChatState } from './chatState.svelte.js';
-  import { chatImageUrl, imageItems } from './chatImages.js';
   import ConversationList from './ConversationList.svelte';
   import ChatThread from './ChatThread.svelte';
   import Composer from './Composer.svelte';
+  import ShotViewer from './ShotViewer.svelte';
   import { MIN_WIDTH, THREAD_MIN, LIST_STAYS } from './chatDoc.svelte.js';
 
   // Opens a Settings section (ControlPanel's openSettings): the chip's
@@ -389,15 +389,9 @@
 </div>
 
 {#if chat.viewing}
-  <!-- A screenshot opened large: a click or Esc closes it. -->
-  <!-- Its right-click menu copies or saves it. -->
-  <div class="shotview" role="dialog" aria-label="Screenshot" aria-modal="true" tabindex="-1" onclick={() => (chat.viewing = null)} onkeydown={(e) => e.key === 'Escape' && (chat.viewing = null)}>
-    <img
-      src={chatImageUrl(chat.viewing)}
-      alt="Screenshot"
-      oncontextmenu={(e) => openContextMenu(e, imageItems({ id: chat.viewing }), { label: 'Screenshot' })}
-    />
-  </div>
+  <!-- A screenshot opened large: a click or Esc closes it; its right-click
+       menu copies or saves it. -->
+  <ShotViewer img={chat.viewing} onclose={() => (chat.viewing = null)} />
 {/if}
 
 <style>
@@ -492,22 +486,5 @@
   .showchats svg {
     width: 15px;
     height: 15px;
-  }
-  .shotview {
-    position: fixed;
-    inset: 0;
-    z-index: 60;
-    display: grid;
-    place-items: center;
-    padding: 32px;
-    background: var(--yap-scrim);
-    cursor: zoom-out;
-  }
-  .shotview img {
-    max-width: 100%;
-    max-height: 100%;
-    border-radius: var(--yap-r);
-    box-shadow: var(--yap-shadow-modal);
-    background: var(--yap-s1);
   }
 </style>

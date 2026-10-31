@@ -13,6 +13,34 @@ import { listen } from '@tauri-apps/api/event';
 
 export const waitingShots = $state({ list: [], copied: null });
 
+/**
+ * The screen's device pixels per CSS pixel, followed (the window moved to a
+ * monitor with another scaling): Chat's screenshots are drawn at exactly
+ * their device pixels (chatImages.js `placed`).
+ */
+export const screenPixels = $state({ ratio: typeof window === 'undefined' ? 1 : window.devicePixelRatio || 1 });
+
+let followingRatio = false;
+let ratioQuery = null;
+
+function readRatio() {
+  const r = window.devicePixelRatio || 1;
+  if (r === screenPixels.ratio && ratioQuery) return;
+  screenPixels.ratio = r;
+  ratioQuery?.removeEventListener('change', readRatio);
+  ratioQuery = window.matchMedia?.(`(resolution: ${r}dppx)`) ?? null;
+  ratioQuery?.addEventListener('change', readRatio);
+}
+
+/** Follow the pixel ratio (once per window). */
+export function followPixelRatio() {
+  if (followingRatio || typeof window === 'undefined') return;
+  followingRatio = true;
+  readRatio();
+  // A resize can come with a new ratio too (DevTools' emulation, the zoom).
+  window.addEventListener('resize', readRatio);
+}
+
 let following = false;
 let copiedTimer = null;
 

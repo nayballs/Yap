@@ -546,7 +546,11 @@
   PNGs, `snip/attach.rs`); a question whose screenshot went as its text
   (Windows' OCR, `snip/ocr.rs`) keeps it marked `asText`. A snip copied or
   saved from the overlay keeps nothing here; a save goes where the Save
-  dialog says, in the folder used last (`snip_save_dir`).
+  dialog says, in the folder used last (`snip_save_dir`). Beside them,
+  `chat-images/thumbs/<id>-<w>x<h>.png` (2026-10-31, `snip/thumbs.rs`): each
+  screenshot's thumbnails at the device pixels Chat draws it at, a few sizes
+  each, deleted with it (and by the sweep once it's gone); not in Download
+  your data, not in Settings' count.
 - History: `%APPDATA%/yap/history.json` (local-only; cleared from Settings → Privacy & data → History,
   kept always, 24 hours or not at all). Since 2026-10-29 a new entry has `secs`, how long it was
   spoken for (its audio's length); an older Yap drops it when it saves history, which only leaves
