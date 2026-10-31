@@ -16,7 +16,7 @@
 // Nothing leaves the PC: every provider is the local fake
 // (support/fake-llm.js) through the debug-only YAP_MODELS_STANDIN, with
 // test keys.
-import { test as base, expect, openView, openSettings, closeSettings, expectStore, setConfig } from './support/fixtures.js';
+import { test as base, expect, openView, openSettings, closeSettings, expectStore, setConfig, openModelPicker } from './support/fixtures.js';
 import { startFakeLlm } from './support/fake-llm.js';
 
 const TEST_KEY = 'e2e-fake-key';
@@ -124,9 +124,7 @@ async function languageModels(main, tab) {
 test('the Chat picker shows a model Groq added as New and hides one it dropped', async ({ yap, main, fakeLlm, shot }) => {
   await openView(main, 'Chat');
   await expect(chip(main)).toHaveText('GPT-OSS 20B Medium · Groq');
-  await chip(main).click();
-  const pop = popover(main);
-  await expect(pop).toBeVisible();
+  const pop = await openModelPicker(main);
   // Curated first (GPT-OSS 120B gone), then what Groq added since; the
   // older one it lists behind "Show 1 more", as in Settings.
   await expect(pop.locator('.pane .mrow .nm')).toHaveText(['GPT-OSS 20B', 'Qwen3.8 27B', 'Brainy 9']);
@@ -187,8 +185,14 @@ test('a saved model the provider no longer offers says so, and stays selectable'
   await setConfig(yap, main, { llmScopes: { ...(await yap.invoke('get_config')).llmScopes, chat: groqChat(fakeLlm, 'openai/gpt-oss-120b') } });
   await openView(main, 'Chat');
   await expect(chip(main)).toHaveText('GPT-OSS 120B Medium · Groq · no longer offered');
+  // The menu: still the model in use, ticked, and it says so.
   await chip(main).click();
-  const pop = popover(main);
+  const inUse = main.getByRole('menu', { name: 'Chat model' }).getByRole('menuitemradio', { name: /^GPT-OSS 120B/ });
+  await expect(inUse).toHaveAttribute('aria-checked', 'true');
+  await expect(inUse.locator('.warn')).toHaveText('no longer offered');
+  await main.keyboard.press('Escape');
+  // The full picker: the line, the row kept and selected.
+  const pop = await openModelPicker(main);
   await expect(pop.getByRole('alert')).toHaveText('Groq no longer offers GPT-OSS 120B. Pick another model.');
   const gone = chatRow(pop, 'GPT-OSS 120B');
   await expect(gone).toHaveAttribute('aria-pressed', 'true');

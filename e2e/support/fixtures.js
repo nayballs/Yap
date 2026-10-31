@@ -190,6 +190,22 @@ export function connectDialog(main) {
   return main.getByRole('dialog', { name: /calendar/i });
 }
 
+/**
+ * Chat's full model picker, the provider rail ("Switch the Chat model"):
+ * the model chip's short menu, then "Add a provider or download a model…"
+ * (with no AI model the chip opens the rail at once). Returns the rail.
+ */
+export async function openModelPicker(main) {
+  await openView(main, 'Chat');
+  await main.locator('.modelchip .chip').click();
+  const picker = main.getByRole('dialog', { name: 'Switch the Chat model' });
+  const menu = main.getByRole('menu', { name: 'Chat model' });
+  await expect(picker.or(menu)).toBeVisible();
+  if (await menu.isVisible()) await menu.getByRole('menuitem', { name: 'Add a provider or download a model…' }).click();
+  await expect(picker).toBeVisible();
+  return picker;
+}
+
 /** Back to a known state between tests: no dialog or toasts, Settings closed, Home showing. */
 export async function resetUi(main) {
   const dialog = connectDialog(main);

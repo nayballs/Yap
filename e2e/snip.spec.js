@@ -61,7 +61,7 @@
 //   `e2e_snip_question`) and sends both; not during a call, nor after Esc.
 import fs from 'node:fs';
 import path from 'node:path';
-import { test as base, expect, openView, openSettings, closeSettings, expectStore, setConfig, sidebar } from './support/fixtures.js';
+import { test as base, expect, openView, openSettings, closeSettings, expectStore, setConfig, sidebar, openModelPicker } from './support/fixtures.js';
 import { startFakeLlm } from './support/fake-llm.js';
 import { readPng, readDataUrl, worstError, writePng, pixel, near } from './support/png.js';
 
@@ -890,10 +890,7 @@ test("a model that can't read images: \"Send its text instead\", read on this PC
 });
 
 test('"Reads images" in the Chat model picker and in Settings\' Chat models', async ({ main, shot }) => {
-  await openView(main, 'Chat');
-  await main.locator('.modelchip .chip').click();
-  const pop = main.getByRole('dialog', { name: 'Switch the Chat model' });
-  await expect(pop).toBeVisible();
+  const pop = await openModelPicker(main);
   await pop.getByRole('tab', { name: /^Groq/ }).click();
   const row = (name) => pop.locator('.pane .mrow', { has: main.locator('.nm', { hasText: new RegExp(`^${name}$`) }) });
   await expect(row('Qwen3.8 27B').locator('.tag.img')).toHaveText('Reads images');

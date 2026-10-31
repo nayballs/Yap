@@ -1688,7 +1688,7 @@ and its Undo, Preview / Source, find, copy, light and dark).
   "Message"), **Think** for the model on this PC (2026-10-29,
   `ThinkButton.svelte`: the next question only, `chat/think.rs` above; apart
   from the prompt chips and Skills; a cloud model has its effort in the
-  picker instead, since 2026-10-31), the mic, and Send only once there's text; an amber dot on the +
+  model menu instead, since 2026-10-31), the mic, and Send only once there's text; an amber dot on the +
   while voice replies are on; under the box on the left, quiet, the **model
   chip** (its `quiet` look; never inside +: always in view) — `ModelChip.svelte`, names in `aiModel.js` from
   `ppModels.js` + `providerIcons.js`) shows the model the next message goes
@@ -1699,8 +1699,82 @@ and its Undo, Preview / Source, find, copy, light and dark).
   where it runs in its tooltip (and, on the on-device model, "Context: 8K
   tokens": `ai_model_status.context`), "No AI model" when nothing is set up;
   bottom right of the same row, **the context ring** ([below](#the-context-ring-2026-10-25)). The
-  chip opens **the Chat model picker** (`ChatModelPicker.svelte`, its own
-  chunk loaded the first time it opens since 2026-10-25, data in
+  chip opens **the model menu** first (`ChatModelMenu.svelte`, 2026-10-31,
+  after the Claude Code app's "Opus 5.5 ✓, Fable 5.1 2, Sonnet 5.5 3, Haiku
+  5.5 4, Effort ▸ Extra, More models ▸, Fast mode"; its own chunk, loaded
+  the first time it opens; `aria-haspopup="menu"`, `aria-expanded`): a
+  compact menu just above the chip, left-aligned with it, in the warm
+  theme's menu look (`--yap-s2`, the menu shadow, 30 px items, the amber
+  focus ring; light and dark from the tokens). Its rows: **the main
+  models** (`role="menuitemradio"`), each its name, its provider quietly
+  ("Anthropic", "Groq", "On this PC", a server's host) and its number key
+  (1–7 while the menu is open, `aria-keyshortcuts`), the ✓ in place of
+  the number on the one in use — **the rule** is `core/mainModels.js`'s
+  alone (pure, e2e `main-models.spec.js`): from each provider with a key
+  (`ai_model_status.keyed`), the newest model of each of its families —
+  Anthropic's Opus, Fable, Sonnet and Haiku; OpenAI's flagship (by
+  generation, then tier: Astra over Sol over Terra over a plain id, then
+  the point release) and small model (Luna over Mini over Nano); Gemini's
+  flagship (Pro, or a named tier like Argon) and Flash (a release over a
+  preview); Groq's biggest and smallest GPT-OSS; through OpenRouter, the
+  same families of a lab whose own key isn't there (anthropic/…, openai/…,
+  google/…); a connected provider with none of these, its first model as
+  Yap lists it —, read from the ids (a dated snapshot counts as its alias)
+  then the provider's dates, over the models the pickers already list
+  (`cloudRows`: the curated list merged with the provider's live one,
+  `model_catalog.rs`), so a new Opus a provider lists takes its family's
+  place without a Yap update and a retired id is never offered (the live
+  list drops it first); never one being retired or no longer offered; then
+  the on-device model Yap runs, when it's installed ("On this PC"); then
+  the model in use, always, even an older one, last so the others keep
+  their numbers; at most seven, past that each provider keeps its first
+  families in turn (Opus, Sonnet, Haiku, Fable; a flagship before a small
+  model), the model in use kept. The menu's providers go Anthropic,
+  OpenAI, Gemini, Groq, OpenRouter (`MENU_ORDER`: the strongest chat
+  models first). Then **Effort ▸ <level>** (`menuitem`, `aria-haspopup`;
+  hidden for a model without a reasoning control and the one on this PC,
+  whose Think button covers it): a submenu with only the levels the model
+  in use takes (`effort.js` `effortOptions`, "Default" first where its
+  default isn't a level), the one in effect ticked, a line under them on
+  what the level in focus (or under the pointer) does, the one in effect
+  when the submenu opens ("Extra: thinks longer, for hard problems.");
+  picking one keeps it for that model (`chat_set_effort`), closes the menu
+  and the chip says it at once. **More models ▸**: every other model of
+  the connected providers, this PC's other installed models and
+  self-hosted servers on it (their lists asked as the submenu opens),
+  then a server elsewhere by its host, grouped (a quiet heading each),
+  newest first in each (by the provider's dates when every model in the
+  group has one, else by the version in the id), "New" on a new one, ≤ 40
+  a group then "And N more: search to narrow it down.", and a search at
+  its top past ten models (typing on a model searches); at most 440 px
+  tall, its list scrolling, and its box kept where and as big as it opened
+  while a search narrows it (nothing moves under the caret). **Fast mode**
+  (Claude Opus 5.5 only, `typeof effort.fast === 'boolean'`): a quiet
+  "Fast mode" heading and "Enable fast mode / Faster answers, at twice the
+  price per token" with a switch (`menuitemcheckbox`, `chat_set_fast`; the
+  menu stays open). Last, **Add a provider or download a model…**: the
+  full picker below, the provider rail, which keeps connecting a key, the
+  on-device downloads and uninstall, search across everything and
+  "Language model settings…". A submenu is a flyout beside the menu (on
+  the right, else the left; its bottom level with its item's, opening
+  upwards as Claude Code's does from a menu at the window's foot; kept in
+  the window as its lists arrive), or a section opening under its item
+  when the window has room for neither. The pointer on a submenu's item
+  opens it, on another item closes it; a click opens it with the focus in
+  it. Keyboard: the model in use has the focus when it opens; ↑/↓ (round),
+  Home/End, Enter; → (or Enter) into a submenu — Effort's level in effect,
+  More's search or first model — and ← or Esc back to its item; 1–7 pick a
+  main model; Esc or Tab closes and gives the focus back to the chip. A
+  pick is `chat_set_model` (the Chat scope only) and goes in Recent, as
+  the rail's does. With **no AI model** the chip opens the rail at once
+  (connecting one is there), as does Chat's "Choose another model…" /
+  "Connect one…" for a screenshot (`ModelChip.openPicker`). The chip only
+  needs `chatModelState.svelte.js` (the on-device status and Recent); the
+  rows (`chatModels.svelte.js`) load with the menu or the rail, so the main
+  window's chunk stays under Vite's 725 kB limit.
+
+  **The full picker** (`ChatModelPicker.svelte`, "Switch the Chat model",
+  its own chunk loaded the first time it opens since 2026-10-25, data in
   `chatModels.svelte.js`; the maintainer's "Concept A, provider rail",
   2026-10-19): a popover above the composer (`data-model-picker-above`;
   560 px, its rail a strip across the top below 520) — **search** across
@@ -1780,22 +1854,11 @@ and its Undo, Preview / Source, find, copy, light and dark).
   window's in-page hotkey fallbacks run first (capture phase). Monochrome
   marks (OpenAI, Anthropic, xAI, OpenRouter — Simple Icons' CC0 glyph) are
   CSS masks in `currentColor`, Claude's in its brand colour. **Effort**
-  (2026-10-31, the Claude Code app's "Effort ▸ Extra" and "Fast mode"):
-  under the panes, for the model in use, "Effort · Claude Opus 5.5" and
-  the levels it takes as a segmented choice (Low, Medium, High, Extra,
-  Max — only its own; "Default" first when its default isn't a level, as
-  GPT-5.4 Mini's isn't), the one in effect selected and a line on what it
-  does ("Extra: thinks longer, for hard problems."; "The model's default."
-  on its default) — `chat_set_effort` keeps it for that model alone
-  (ai-models.md `ai/effort.rs`), the chip follows at once, the picker stays
-  open; and **Fast mode** for Claude Opus 5.5 (a switch, "Faster answers
-  from Claude Opus 5.5, at twice the price per token. Off unless you switch
-  it on.", `chat_set_fast`). None of it for a model without a reasoning
-  control or the one on this PC (its Think button). The picker keeps its
-  provider rail rather than Claude Code's short menu: Yap's models come
-  from five providers and this PC. Settings → Language Models → Chat has
-  the same Effort choice for the Chat model ("How hard it thinks", kept in
-  its config copy's `chatEffort`). Settings →
+  and **Fast mode** (2026-10-31) are the model menu's (above; under the
+  rail's panes until the menu came the same day); `chat_set_effort` keeps
+  a level for that model alone (ai-models.md `ai/effort.rs`). Settings →
+  Language Models → Chat has the same Effort choice for the Chat model
+  ("How hard it thinks", kept in its config copy's `chatEffort`). Settings →
   Language Models keeps its own pickers. Each answer
   shows its model quietly under it, as do the Notes view's Ask bar and the
   notepad's Ask sheet (`nextModel(scope)` fetched beside the call; none for

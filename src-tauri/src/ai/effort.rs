@@ -1,5 +1,5 @@
 //! **Effort** (2026-10-31): how hard a cloud model reasons before it
-//! answers, chosen per model in Chat's model picker as in the Claude Code
+//! answers, chosen per model in Chat's model menu (Effort ▸) as in the Claude Code
 //! app ("Opus 5.5 Extra"), remembered per model (`YapConfig::chat_effort`),
 //! and sent wherever that model answers a question: Chat, the Voice
 //! Assistant, the Notes view's Ask bar and a meeting's Ask (the notepad's
@@ -60,7 +60,7 @@ pub enum Level {
     Low,
     Medium,
     High,
-    /// "Extra" in the picker.
+    /// "Extra" in the menu.
     Xhigh,
     Max,
 }
@@ -383,7 +383,7 @@ pub(crate) fn apply(req: &mut ChatRequest) -> bool {
 
 // ---- the page ---------------------------------------------------------------------
 
-/// What the picker (and Settings) shows for a model.
+/// What the model menu (and Settings) shows for a model.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Info {
@@ -430,7 +430,7 @@ pub fn effort_info(provider: String, model: String) -> Option<Info> {
     info(&crate::config::load(), &provider, &model)
 }
 
-/// The picker's (and Settings') Effort: `level` kept for `model`, saved as
+/// The model menu's (and Settings') Effort: `level` kept for `model`, saved as
 /// Settings saves; the Chat model's status back (the chip shows it).
 #[tauri::command]
 pub fn chat_set_effort(
@@ -444,7 +444,7 @@ pub fn chat_set_effort(
     Ok(crate::ai::ai_model::status(&cfg, crate::ai::ai_model::Scope::Chat, &crate::ai::ai_model::OnDevice::here(&cfg)))
 }
 
-/// The picker's Fast mode (Claude Opus 5.5).
+/// The model menu's Fast mode (Claude Opus 5.5).
 #[tauri::command]
 pub fn chat_set_fast(app: tauri::AppHandle, on: bool) -> Result<crate::ai::ai_model::Status, String> {
     let cfg = crate::shell::settings::change_config(&app, |cfg| {

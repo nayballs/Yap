@@ -17,7 +17,7 @@
 // AI on 127.0.0.1 (YAP_E2E_LOCAL_LLM) that records the image parts.
 import fs from 'node:fs';
 import path from 'node:path';
-import { test as base, expect, openView, openSettings, closeSettings, expectStore, sidebar } from './support/fixtures.js';
+import { test as base, expect, openView, openSettings, closeSettings, expectStore, sidebar, openModelPicker } from './support/fixtures.js';
 import { startFakeLlm } from './support/fake-llm.js';
 import { installStandInModel, startFakeLocalModels } from './support/local-llm.js';
 import { RUNS } from './support/yap.js';
@@ -167,10 +167,7 @@ test('Settings: the switch, Remove and the download; off, Chat says so with "Tur
   // Downloaded by the first test (or here, when this one runs alone).
   if (!(await yap.invoke('local_llm_status')).vision?.installed) await yap.invoke('local_vision_install');
   // The Chat model picker: the 4B "Reads images" on this PC now.
-  await openView(main, 'Chat');
-  await main.locator('.modelchip .chip').click();
-  const pop = main.getByRole('dialog', { name: 'Switch the Chat model' });
-  await expect(pop).toBeVisible();
+  const pop = await openModelPicker(main);
   await pop.getByRole('tab', { name: /^On this PC/ }).click();
   const pickerRow = pop.locator('.pane .mrow', { has: main.locator('.nm', { hasText: /^Qwen3\.5 4B$/ }) });
   await expect(pickerRow.locator('.tag.img')).toHaveText('Reads images');
