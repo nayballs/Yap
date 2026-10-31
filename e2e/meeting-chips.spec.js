@@ -383,7 +383,9 @@ test('Chat: one-tap prompts and "/" ask across the meetings with their own passa
   expect(sent).toContain('Book the room');
   expect(sent).not.toContain('Check the totals'); // someone else's
   // (The earlier tests' meetings have open tasks too.)
-  await expect(main.locator('.toolchip').filter({ hasText: /Ran \/todos · \d+ open tasks/ })).toBeVisible();
+  // (The answer's steps, folded under it: chat/activity.rs.)
+  await expect(main.locator('.toolchip').filter({ hasText: /Ran \/todos · \d+ open tasks/ })).toBeAttached();
+  await expect(main.getByTestId('chat-steps').last().locator('summary')).toContainText('Ran a skill');
   await shot(main, '31-open-to-dos');
 
   // "/" in Chat lists what runs across the meetings.

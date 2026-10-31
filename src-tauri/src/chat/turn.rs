@@ -451,6 +451,10 @@ async fn answer_turn(
     let mut search_chip = None;
     let mut asked_across = None;
     if meetings {
+        // The page's line: "Searching your meetings" (or "Running /todos").
+        if let Some(w) = watcher {
+            crate::chat::activity::tell(w, crate::chat::activity::searching_meetings(skill.as_ref().map(|s| s.skill.command.as_str())));
+        }
         // A Skill reads its own passages (the open tasks, a week of
         // meetings…) and adds its instructions (chat/skills.rs).
         let found = match &skill {
@@ -1204,6 +1208,7 @@ async fn small_model_answer(
         let query = crate::web::local_query(&query, text, settings.local.as_ref()).unwrap_or(query);
         let endpoints = crate::web::Endpoints::current();
         if let Some(live) = live {
+            crate::chat::activity::tell(live.sink, crate::chat::activity::of_call("web_search", &serde_json::json!({ "query": query })));
             live.sink.send(crate::chat::stream::Event::Tool { name: "web_search".into(), doing: crate::chat::stream::doing("web_search").into() });
         }
         match crate::web::search(&settings, &endpoints, &query, text).await {

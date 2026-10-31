@@ -2,6 +2,7 @@
 //! note tools, streamed answers, and asking out loud from any app.
 //! How it works: docs/architecture/chat-and-assistant.md.
 
+pub mod activity;
 pub mod assistant;
 pub mod budget;
 pub mod chats;
