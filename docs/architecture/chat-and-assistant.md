@@ -1539,7 +1539,9 @@ flowing in (`doc.streaming` false: no turn writing, no section still
 flowing in); while Chat writes, the page is drawn as stage 1 draws it and
 the toolbar waits ("Chat is writing…", its buttons off) — typing while
 Chat writes goes in Source, merged as before. **The editor**
-(`docEditor.js`, TipTap 3 on ProseMirror, MIT; its own chunk, imported
+(`components/richtext/richEditor.js` — shared with notes' pages the same
+day, [notes.md](./notes.md#notes-as-pages-you-can-format-componentsrichtext-2026-10-31);
+until then `views/chat/docEditor.js` —, TipTap 3 on ProseMirror, MIT; its own chunk, imported
 the first time it's wanted — the panel opens on the drawn page and swaps
 the editor in, ~130 kB gzipped on top of the panel's 10): its root is the
 page's own `.docmd` (`element: {mount}`), so it reads exactly as the page
@@ -1555,7 +1557,7 @@ merged lists, `breaks`) would need porting to it; TipTap is the
 ProseMirror layer Claude's documents use, its nodes and commands came
 ready (lists and their keys, tables from prosemirror-tables, input rules
 like "## "), and the markdown in and out is Yap's (below). **The note
-stays markdown, exactly** (`docMarkdown.js`): `readMarkdown` reads it with
+stays markdown, exactly** (`richMarkdown.js`, with `richSchema.js`): `readMarkdown` reads it with
 markdown.js' own markdown-it (`markdownTokens`: Yap's rules and all) and
 each block keeps the lines it came from (`md`) and the lines before it
 (`before`): the document's blocks, every list item (its lines without
@@ -1585,7 +1587,7 @@ another window) is `load`ed by replacing only the blocks that differ
 caret kept, its blocks washed a moment as the page marks them (a wash
 the page showed as the turn ended carries on in the editor). Ctrl+Z /
 Ctrl+Y are the editor's own (the person's typing); the header's Undo is
-still Chat's whole last turn. **The toolbar** (`DocToolbar.svelte`, a
+still Chat's whole last turn. **The toolbar** (`RichToolbar.svelte`, a
 `role="toolbar"` row under the header in Preview, 28 px buttons, the ones
 on at the caret pressed): **text style** (Paragraph, Heading 1–3 — `#`,
 `##`, `###` — a menu with the current one ticked), **code** (Ctrl+E),
@@ -1595,7 +1597,10 @@ below, a column to the right, delete the row, the column, the table),
 its box ticks with a click or Ctrl+Enter) and **+** (Divider — the caret
 then on a line of its own under it —, Quote, Bulleted list, Numbered
 list, Code block); TipTap's keys too (Ctrl+B / I, Ctrl+Alt+1–6, "## ",
-"- ", "1. ", "> ", "```"). **No image button**: markdown.js draws no
+"- ", "1. ", "> ", "```"), and "[ ] " (or "[x] ") at the start of a
+bulleted item or a paragraph of its own makes a checklist item (since notes'
+pages, 2026-10-31). A paste of plain text goes in as its words (several
+lines read as markdown: notes.md, "Notes as pages you can format"). **No image button**: markdown.js draws no
 images (a model's would make Yap fetch an address), and the person's own
 pictures would need a store beside the note (`note-images/`, a URL scheme
 to draw them, Export and Copy as Markdown carrying them) — not a toolbar
@@ -1606,8 +1611,8 @@ Ctrl+click opens it. **Find, "Ask about this" / "Change this…", the
 sections' rail and the scroll** work on the editor as on the page (a
 selection's lines from `selectionLines`, what's typed saved first). Not
 yet: typing on the page while Chat writes (it would need the editor to
-take Chat's streaming sections as it takes a landed change), an input
-rule for "[ ] ", column alignment from the toolbar, pasted pictures.
+take Chat's streaming sections as it takes a landed change), column
+alignment from the toolbar, pasted pictures.
 Unit-tested without the app (`doc-markdown.spec.js`: the round trip,
 every block's kind, a change touching only its block, escapes, new
 blocks); e2e `chat-documents-editor.spec.js` (a word, a cell, an item typed

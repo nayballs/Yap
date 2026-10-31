@@ -1,6 +1,6 @@
 # Notes
 
-The AI Notepad: the notes store, folders, the Actions engine, notes you can fix (a line's words, the summary, tasks), pinned notes, each note's version history, the saved transforms on a note, the quick-note window, and the Notes and Tasks views. Meeting notes' recording and summaries are [meetings.md](./meetings.md).
+The AI Notepad: the notes store, folders, the Actions engine, notes you can fix (a line's words, the summary, tasks), pinned notes, each note's version history, the saved transforms on a note, the quick-note window, notes as pages you can format (the rich text editor, kept markdown), and the Notes and Tasks views. Meeting notes' recording and summaries are [meetings.md](./meetings.md).
 
 [Architecture index](./README.md) · [CLAUDE.md](../../CLAUDE.md)
 
@@ -150,7 +150,9 @@ and find it later in Notes (Wispr Flow's Scratchpad, adapted: local, no
 sync; 2026-10-28; tabs, the hold, Send and the bar's button 2026-10-29). The
 page is `src/lib/quicknote/QuickNote.svelte` (+ `quickNote.js`, its pure
 helpers); its parts in Rust are `quick_note/key.rs` (the shortcut's tap and
-hold), `tabs.rs` and `send.rs`.
+hold), `tabs.rs` and `send.rs`. Since 2026-10-31 the note is a page you can
+format, kept markdown (below, "Notes as pages you can format"): the toolbar
+under the tabs, a dictation at the caret as plain text.
 
 - **The window** — `quick-note` in tauri.conf.json: 420×380 (min 300×220),
   undecorated (its header is the drag region), always on top while it's
@@ -276,9 +278,12 @@ hold), `tabs.rs` and `send.rs`.
   — nothing pasted, no key pressed, never into the app behind it nor into
   Yap's own window by the clipboard — and the page puts it at the cursor
   (`dictationPiece`: a space before it when it would touch a word, after
-  it before a word; a new line after it when "press enter" was said) with
-  `execCommand('insertText')`, so **Ctrl+Z takes it back out** in one step
-  (by hand, and saved, when the window hasn't the focus). Kept in history
+  it before a word; a new line after it when "press enter" was said) as
+  plain text, its own step in the editor's undo (`insertPlain`; at the end
+  of the note when the page hasn't the keyboard), so **Ctrl+Z takes it back
+  out** in one step; the plain box that stands in while the page loads uses
+  `execCommand('insertText')` (by hand, and saved, when the window hasn't the
+  focus). Kept in history
   like any dictation ("yap.exe"). **Undo** of a cancelled one (the bar's
   "Dictation cancelled · Undo") lands in the note too: `to_note` lives
   through the cancel, as the Chat box's `to_chat` does.
@@ -591,6 +596,115 @@ roadmap, "Meeting notes you can fix" and "Tasks").
   (markdown.js); the tick shows at once (`withTaskMark`) and is put back if
   Rust refuses. `TasksView.svelte` — below.
 
+## Notes as pages you can format (`components/richtext/`, 2026-10-31)
+
+The Wispr checklist's "Rich text in notes": the editor Chat's documents got
+the same day ([chat-and-assistant.md](./chat-and-assistant.md), the document
+panel) is shared, and three places edit notes on it: **My thoughts in the
+Notes view**, **the meeting notepad's My thoughts** and **the quick note**.
+The note is stored as markdown, exactly as before — a change rewrites only
+the lines of the block it's in, everything else character for character — so
+an older Yap reads and saves it as it always has, and Rust, the summary, the
+local API and search see the same text.
+
+- **The parts** (`src/lib/components/richtext/`): `richEditor.js` (TipTap 3 on
+  ProseMirror: the note in by the blocks that differ, the toolbar's commands,
+  a selection's lines and its stretch of the text, words at the caret),
+  `richMarkdown.js` (markdown in and out exactly; `sourceMap`; `plainSlice`),
+  `richSchema.js` (the nodes and marks, each knowing how it was written;
+  "[ ] " or "[x] " typed at the start of a bulleted item or a paragraph of its
+  own makes a checklist item), `RichToolbar.svelte` (text style, code, table,
+  checklist, + insert; the paper's colours or the app's, `look`; a snippet at
+  its right) — Chat's document panel uses all four — and `RichNote.svelte` (a
+  note's page: the toolbar over it, Ctrl+F, a placeholder, read-only while a
+  transform runs, Preview / Source where asked) with its loader
+  `richtext.svelte.js`.
+- **Loaded on demand.** RichNote and the editor are chunks of their own
+  (`RichNote` 5 kB with `RichToolbar` 6 kB; `richEditor` 435 kB, 135 kB gzipped,
+  shared with Chat's panel), imported the first time a window shows a note to
+  edit: the Notes view with a note open, the notepad with its meeting, the
+  quick note once its window is made and idle (and as it comes up). Until
+  then, and if it can't load, the note's plain box stands in
+  (`data-rich-fallback`, saving as before); the caret in it carries over to
+  the page (`takeHandoff`). The Yap bar's and the main window's first paint
+  never carry the editor (frontend.md, the main window's chunk).
+- **Where it is.** Notes' My thoughts (`NoteEditor`: the app's colours, the
+  reading size; **Preview / Source** at the toolbar's right, remembered in the
+  window's `yapNoteView`); the notepad's My thoughts tab (`ThoughtsTab`: the
+  paper's colours, the toolbar over the page); the quick note (`QuickNote`:
+  the toolbar under its tabs; the window got the right-click menu host the
+  toolbar's menus need, `App.svelte`). One editor per note (`{#key}`), so each
+  has its own undo history.
+- **Saving.** Every change goes out as markdown (`onchange(md, {paste})`) and
+  is saved as the box's typing was: 600 ms after the last change in Notes and
+  the notepad, 400 ms in the quick note. Version history's kinds as before
+  (notes/versions.rs): a paste within 15 s of a dictation (`yap-transcript`) is
+  "Dictated", any other change "Typed". Another window's change, a transform, a
+  restore, Chat's edit come in by the blocks that differ (`load`), the caret
+  kept, never in the page's own undo history.
+- **The page answers as its text box did** (`textbox`): its element has
+  `value` (the markdown), `selectionStart` / `selectionEnd` (the selection as
+  offsets in it), `setSelectionRange`, `select()` and `readOnly`. So the
+  selection's right-click and Shift+F10 menu (Transform selection ▸, Cut,
+  Copy, Select all: `noteMenus.js`), the ⋯'s "Transform selection",
+  notes/transform.rs (its selection is the markdown's UTF-16 offsets, checked
+  against the text there), the result selected after it, a search's words
+  selected at the match (`findWords.js` `selectWords`), Read aloud's
+  selection and the quick note's Send (the selection, else the note, as
+  markdown) work as they did. A right-click on words selected on the page
+  opens the page's own menu, not the native one (`contextMenu.svelte.js`
+  `nativeTarget`).
+- **Where the words are** (`richMarkdown.js` `sourceMap`): each character of
+  the page with its offset in the markdown — found block by block, a
+  character at a time from the one before, past each line's block markup (a
+  quote's ">", a list's marker and box, a heading's "#") and escapes, never
+  past its block's lines. A selection is from its first character's offset to
+  just past its last's (markup inside it goes with it: "this **loud"); a caret
+  is just after the character before it in its line, else before the one
+  after; and back again (`sourcePositions`).
+- **Dictation into a note.** Yap's paste (its Ctrl+V of a dictation) goes in
+  at the caret as plain text (`plainSlice`, the editor's
+  `clipboardTextParser`): one line as its words, whatever they look like
+  (markup escaped where it's written: "\# not a heading"); several read as
+  the markdown the box would have held — a spoken list the cleanup laid out
+  a list, a blank line a paragraph, any other line break a line break —, the
+  first and last lines joining the words either side. The quick note's own
+  dictation (`yap-quick-note-dictation`) goes the same way at its caret
+  (`insertPlain`, spaced by `dictationPiece`; at the end when the page hasn't
+  the keyboard), its own step in the undo history (`closeHistory` before and
+  after: Ctrl+Z takes it back out); "press enter" makes a new line (a
+  paragraph). The notepad's "Take notes here" coach mark goes when typing
+  starts, as before.
+- **Typing.** Enter a new paragraph (a blank line between, in the markdown),
+  Shift+Enter a line break (one "\n", as the box kept them); markdown typed as
+  the page reads it ("## ", "- ", "1. ", "> ", "```", "[ ] "); a checklist
+  item's box ticks with a click or Ctrl+Enter (`- [x]` in place, its line
+  only). Ctrl+F finds in the page (SummaryFind); in the quick note Esc closes
+  Find or a menu first, then the window. The windows' in-page hotkey
+  fallbacks listen on `window` in the capture phase, before the page's keys.
+- **Source** (the Notes view): the markdown in a plain box, saved as typed,
+  the selection carried across the switch; the toolbar off ("Formatting is
+  in Preview"). What the editor can't hold as such (a list item that starts
+  with a heading…) is a raw block on the page — drawn as the page draws it,
+  kept exactly, read-only ("Edit this part in Source"; in the notepad and the
+  quick note "…in Notes, in Source").
+- **Not done**: the summary's Edit box (still its markdown), pictures,
+  column alignment from the toolbar.
+- **Tests**: `note-markdown.spec.js` (no app: summaries with tasks and My
+  thoughts as typed in the box read and written back exactly; a tick, a word
+  and Enter changing only their lines; pasted text; the source map: every
+  character found, a selection and a caret both ways) and
+  `doc-markdown.spec.js` share a harness (`e2e/support/richtext.js`); e2e
+  `notes-rich-text.spec.js` (Notes: typed and formatted as exact markdown —
+  "## ", "[ ] ", Code, Text style, Ctrl+Z —, a box ticked, a typed version in
+  Version history; Preview / Source, remembered, a raw block; a dictation's
+  paste at the caret, a spoken list a list, a dictated version; the notepad
+  typed and formatted while a test meeting records, synced with Notes both
+  ways), `quick-note.spec.js` (formatting, a box ticked, a dictation at the
+  caret undone in one step, Find's and a menu's Esc), and the notes,
+  notepad, history and transform specs on the page (`e2e/support/notePage.js`:
+  `noteText`, `expectText`, `selectText`, `pageIn`).
+
 ## The Notes view
 
 `src/lib/views/notes/` (split 2026-10-24): `NotesView.svelte` is the view —
@@ -599,7 +713,9 @@ as it's typed and kept in step with the notepad, the recorder, the actions,
 the summary edited in place, the transcript's view and the note's chat),
 follows Rust's events while Notes is open, and opens the note a call or the
 Tasks view asks for. Its parts: `NoteList` (tools, folders, notes and their
-menus), `NoteEditor` (title, tabs, the run line, the raw note) with
+menus), `NoteEditor` (title, tabs, the run line, My thoughts — a page you can
+format since 2026-10-31, `components/richtext/RichNote`, with Preview / Source:
+"Notes as pages you can format" above) with
 `NoteMeta` (the chip row), `NoteSummary` (rendered, ticked, edited),
 `NoteTranscript` (the transcript box) and `NoteChat` (the thread, helpers,
 the Ask bar) with `ActionPicker`; `ActionManager`; `noteFormat.js` (titles,
