@@ -146,6 +146,17 @@
       <p class="set-note warn" role="alert">{status.error}</p>
     </Row>
   {/if}
+  {#if cfg.linkEnabled && status?.public}
+    <!-- A network Windows calls Public (link/lan.rs): phones are refused there. -->
+    <Row
+      label="Windows treats this network as Public"
+      desc="So Yap won't take phones on it. At home, make it Private: in Windows' network settings, open your Wi-Fi or Ethernet network's properties and choose Private network"
+      hint="Public is for cafés and hotels, where other people's devices are on the same network. Windows' firewall also asks about private networks only."
+      setting="link-public"
+    >
+      <Button variant="secondary" size="sm" onclick={() => invoke('link_network_settings').catch(() => {})}>Open network settings</Button>
+    </Row>
+  {/if}
 </Group>
 
 {#if cfg.linkEnabled && status?.running}

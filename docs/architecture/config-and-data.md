@@ -203,7 +203,9 @@
   meeting_hotkey (`kb:alt+win+77`), meeting_reminder (the calendar's card:
   "15s" | "1min" | "2min" | "never"), meeting_brief ("Prepare a brief before
   meetings", true; `calendar/brief.rs`), bridge_enabled, mcp_allow_writes (AI apps
-  may save notes over MCP; default off), the Yap bar: bar_enabled (true) +
+  may save notes over MCP; default off), link_enabled (Settings → Phone's "Use
+  Yap from your phone (on your home Wi-Fi)": Yap Link's HTTPS server on port
+  51443, `link.rs`; default off), the Yap bar: bar_enabled (true) +
   bar_hide_fullscreen (true) + bar_theme ("app" — Match app, the theme of
   Yap's windows — | "light" | "dark", app) +
   bar_dictation_buttons (the capsule's ✕ / ✓: "off" | "hover" | "always",
@@ -522,6 +524,19 @@
   (`pins::reset`); not in Download your data (a pin is a place in a list,
   not something the person wrote). Through `saving.rs` ("your pinned
   notes").
+- Paired phones (Yap Link): `%APPDATA%/yap/link_devices.json` — `{devices:
+  [{id, name, secretHash, paired, lastSeen}]}` (2026-10-31, `link/devices.rs`):
+  each phone paired in Settings → Phone, with the SHA-256 of its secret, never
+  the secret (only the phone keeps that); times in unix ms; at most 20 (pairing
+  one more forgets the one used longest ago). Remove takes a phone out and cuts
+  it off. Kept by Reset app, like an account sign-in; not in Download your
+  data. Through `saving.rs` ("your paired phones").
+- Yap Link's certificate: `%APPDATA%/yap/link/` — `cert.der` and `key.der`
+  (the self-signed ECDSA P-256 certificate the phone's page is served on, and
+  its private key; `link/cert.rs`) and `cert.json` (the addresses and names it's
+  for, its last day). Made once; made again when the QR's address isn't one it
+  names, or a month before its two years end (the phone then warns once more).
+  Kept by Reset app.
 - Chat screenshots: `%APPDATA%/yap/chat-images/` — `img_<16 hex>.png` for each
   screenshot a question carries (Snip to Chat, `snip/images.rs`); `chats.json`
   keeps only its id, size, bytes and source. Deleted with its conversation, after

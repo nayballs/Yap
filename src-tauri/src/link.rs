@@ -326,13 +326,29 @@ pub struct Status {
     pub error: Option<String>,
     pub pc: String,
     pub addresses: Vec<AddressView>,
+    /// The network of the QR's address is one Windows marks Public (`None`:
+    /// Windows didn't say): phones are refused there until it's Private.
+    pub public: Option<bool>,
     pub phones: Vec<PhoneView>,
     pub asks: Vec<AskView>,
 }
 
-/// Settings → Phone: on or off, listening where, the paired phones.
+/// Settings → Phone: on or off, listening where, the paired phones. (Off
+/// the main thread: Windows' network lists are COM.)
 #[tauri::command]
-pub fn link_status() -> Status {
+pub async fn link_status() -> Status {
+    tokio::task::spawn_blocking(status).await.unwrap_or_else(|_| status_without_networks())
+}
+
+fn status() -> Status {
+    let mut s = status_without_networks();
+    let addresses = lan::addresses();
+    s.public = addresses.first().and_then(|a| lan::public_network(a.ip));
+    s.addresses = addresses.into_iter().map(|a| AddressView { ip: a.ip.to_string(), adapter: a.adapter }).collect();
+    s
+}
+
+fn status_without_networks() -> Status {
     let cfg = crate::config::load();
     let (running, port, hub) = {
         let r = locked(&RUNNING);
@@ -345,13 +361,22 @@ pub fn link_status() -> Status {
         port,
         error: locked(&ERROR).clone(),
         pc: lan::pc_name(),
-        addresses: lan::addresses().into_iter().map(|a| AddressView { ip: a.ip.to_string(), adapter: a.adapter }).collect(),
+        addresses: Vec::new(),
+        public: None,
         phones: devices::list()
             .into_iter()
             .map(|d| PhoneView { connected: connected.contains(&d.id), id: d.id, name: d.name, paired: d.paired, last_seen: d.last_seen })
             .collect(),
         asks: hub.map(|h| h.asks()).unwrap_or_default(),
     }
+}
+
+/// Windows' network settings, where a network is made Private (Settings →
+/// Phone's warning on a Public one).
+#[tauri::command]
+pub fn link_network_settings(app: AppHandle) -> Result<(), String> {
+    use tauri_plugin_opener::OpenerExt;
+    app.opener().open_url("ms-settings:network-status", None::<&str>).map_err(|e| format!("Couldn't open Windows' network settings: {e}"))
 }
 
 /// The pairing link: its address, and its QR code.

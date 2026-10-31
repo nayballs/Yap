@@ -92,7 +92,14 @@ person sees what their choices send where. It never says "nothing leaves".
   has its own HTTP client, reqwest 0.13, so the host is its endpoint's and
   the size latest.json's —, "Update download" with the bytes the updater
   counted), `integrations/bridge.rs` ("Local API · apps on this PC": each answer to an app
-  on this PC, `net::local_api`, and the startup probe of a stale bridge file)
+  on this PC, `net::local_api`, and the startup probe of a stale bridge file),
+  **Yap Link** ("Yap Link · your phone", `Purpose::Phone`, kind "phone",
+  `net::phone`: each phone connection, **inbound** — the page's files on one
+  connection, each conversation on its socket — its host the phone's address,
+  so *your network* (a test's loopback: this PC), with its status (200, 101,
+  403…) and bytes; [link.md](./link.md); the AI calls of a question asked
+  from the phone run as `Feature::AssistantPhone`, "Voice Assistant from your
+  phone · Groq")
   and the page's one connection, the **account picture** (`<img>` from the
   sign-in provider in AccountSection, ControlPanel and Settings: `onload` →
   `connections_note {purpose: "account-picture", url}`, once per picture per
