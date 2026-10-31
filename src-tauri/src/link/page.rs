@@ -87,7 +87,7 @@ mod tests {
         let (html, kind) = file("/").unwrap();
         assert_eq!(kind, "text/html; charset=utf-8");
         assert!(String::from_utf8_lossy(html).contains("link.js"), "the page itself, not the stand-in");
-        for f in ["link.js", "dsp.js", "mic-worklet.js"] {
+        for f in ["link.js", "dsp.js", "mic-worklet.js", "player-worklet.js"] {
             assert_eq!(file(&format!("/{f}")).map(|(_, k)| k), Some("text/javascript; charset=utf-8"), "{f}");
         }
         assert_eq!(file("/manifest.webmanifest").map(|(_, k)| k), Some("application/manifest+json"));

@@ -71,7 +71,10 @@ A frame is at most a second of audio (32,005 bytes); a text frame at most 16 KiB
 
 A model's `id` is `provider|model` (`groq|openai/gpt-oss-20b`, `ondevice|`), a
 self-hosted or custom server's `provider|model|address`. Only an id `ready`
-listed can be picked.
+listed can be picked. Its `label` is the name and where it runs ("GPT OSS 20B ·
+Groq", "llama3 · localhost:11434"), except the on-device model's, which is its
+name alone ("Qwen3.5 4B"): the page's own "On this PC" tag (from `onThisPc`)
+says where, once.
 
 **Rules.** One question at a time per phone. A `start` while Yap thinks or
 speaks abandons that question first (an interrupt, then a start). `cancel` and
@@ -180,6 +183,41 @@ frame). The voice: with "Speak replies" on, the one Settings picked
 the phone, in Yap's own voice — Kokoro if downloaded, else Windows voices
 (`tts::phone_voicing`; never a cloud voice not switched on).
 
+**On the phone** (the page's side, `src-tauri/link-page/`; details in its
+README): the down frames play as **one stream**. Each frame is resampled from
+24 kHz to the phone's output rate as it comes, in one windowed-sinc filter
+carried on from frame to frame (`dsp.js` `Resampler`), and played by an
+AudioWorklet (`player-worklet.js`) from a **jitter buffer** (`dsp.js`
+`Playout`): the sound starts once **250 ms** is waiting (or `speak_end` came);
+if it runs dry, the last 5 ms fade out, an underrun is counted, and it waits for
+**150 ms** more before fading back in; Stop and barge-in are a 5 ms fade;
+`speak_end` plays out what's left. (Before 31 Oct each frame was its own Web
+Audio clip, resampled on its own: a click at every join, a hard gap when one
+was late — a crackle heard in Bluetooth headsets.)
+
+**"Clearer sound in a headset"** (the page's switch under Hands-free, off by
+default, kept in the phone's storage): while the page holds the mic, a classic
+Bluetooth headset stays in its call link (HFP/SCO: narrowband, with
+packet-loss artefacts that sound like crackles). With it on, the page lets the
+mic go as soon as the question is sent and, in any case, at `speak_start`, so
+the headset can play the answer over its music link (A2DP); the mic opens again
+on Talk, or, with hands-free on, once the answer has played out. A new mic's
+frames count only once its track is live and unmuted (at most 3 s), while the
+headset switches back. You can't talk over Yap by voice then; Stop still
+works. **Sound details** at the bottom of the page (the sample rate, the
+latencies, the last answer's start delay and buffer, its gaps, whether the mic
+was open while it played, the browser) tells a stream that ran dry on the
+phone from the headset's own crackle.
+
+**Hands-free** ends a question after the person's chosen wait — **Short (1 s) ·
+Normal (1.5 s, the default) · Long (2.5 s)** — of quiet (`dsp.js`
+`EnergyVad`): speech starts 12 dB over the room's noise (and over −45 dB), then
+carries on while the level stays 6 dB over the noise and over −52 dB
+(hysteresis: a soft last word isn't quiet), the noise for that hold being at
+least the room's typical level before speech began (a fluttering noise can't
+hold it open). None of this changes the protocol: the PC still gets `start`,
+up frames and `stop`.
+
 `interrupt` (or a `start`) **abandons** the question: no longer current (its
 queued frames dropped), its answer's stream stopped (what was written stays in
 Chat, as after ■), its voice stopped (`tts::stop` when it's still the one
@@ -231,8 +269,8 @@ on the PC while the answer comes stops the voice, as it stops the PC's.
   certificate's names and that it loads into rustls (`cert.rs`); request
   parsing, the Origin and Host rules, RFC 6455's accept key (`server.rs`); the
   page's files and policy (`page.rs`); the phone's voice frames, its end,
-  interrupt and taken-back words (`voice.rs`); the model list and wire ids
-  (`models.rs`).
+  interrupt and taken-back words (`voice.rs`); the model list and wire ids,
+  the on-device model named once (`models.rs`).
 - **E2E** `e2e/link.spec.js`: a test run listens on a free port of 127.0.0.1
   (`YAP_E2E_LINK_PORT=0`, the port in `link_status`); a headless Chromium
   (Playwright's, else Edge) with a fake microphone opens the real page over
@@ -242,4 +280,9 @@ on the PC while the answer comes stops the voice, as it stops the PC's.
   kHz (test mode's stand-in voice), the conversation in `chats.json`, the
   receipts, Remove cutting the phone off; a replayed link, a wrong secret, Deny
   and another site's page refused.
-- The page on its own: `npm run test:link` (`e2e-link/`, the PC mocked).
+- The page on its own: `npm run test:link` (`e2e-link/`, the PC mocked): the
+  sound maths in Node (the resampler both ways, the jitter buffer, the voice
+  detector), then the page in a headless Chromium — among the rest, the answer's
+  stream (starting at ~250 ms, a late frame faded and counted, Stop's fade),
+  Clearer sound releasing and reopening the mic, the hands-free wait, Sound
+  details.

@@ -35,8 +35,15 @@ pub fn parse_id(id: &str) -> Option<(String, String, Option<String>)> {
     (!provider.is_empty()).then(|| (provider.to_string(), model.to_string(), base))
 }
 
+/// A model's name and where it runs: "GPT OSS 20B · Groq".
 fn label(name: &str, place: &str) -> String {
     format!("{name} · {place}")
+}
+
+/// The on-device model, by its name alone: the phone's own "On this PC" tag
+/// (from `onThisPc`) says where, so the label doesn't say it twice.
+fn on_device_model(on_device: &OnDevice) -> Model {
+    Model { id: id_of(PROVIDER_ONDEVICE, "", None), label: on_device.name.clone(), on_this_pc: true }
 }
 
 /// Chat's model now, and every model it can use (the current one first).
@@ -56,7 +63,7 @@ fn listed_with(cfg: &YapConfig, on_device: &OnDevice) -> (Option<Model>, Vec<Mod
     // The one in use.
     let current = status.model.as_ref().map(|m| {
         if m.provider == PROVIDER_ONDEVICE {
-            Model { id: id_of(PROVIDER_ONDEVICE, "", None), label: label(&on_device.name, "On this PC"), on_this_pc: true }
+            on_device_model(on_device)
         } else if matches!(m.provider.as_str(), "local" | "custom") {
             let base = cfg.llm_scopes.get("chat").map(|s| s.base_url.clone()).unwrap_or_default();
             Model { id: id_of(&m.provider, &m.id, Some(&base)), label: label(&m.id, &status.host), on_this_pc: m.on_this_pc }
@@ -73,7 +80,7 @@ fn listed_with(cfg: &YapConfig, on_device: &OnDevice) -> (Option<Model>, Vec<Mod
         push(c.clone());
     }
     if on_device.installed {
-        push(Model { id: id_of(PROVIDER_ONDEVICE, "", None), label: label(&on_device.name, "On this PC"), on_this_pc: true });
+        push(on_device_model(on_device));
     }
     for provider in ai_model::keyed_providers(cfg) {
         let Some(list) = crate::ai::model_catalog::models_of(provider) else { continue };
@@ -145,9 +152,27 @@ mod tests {
         // No model at all: none, and nothing to pick.
         let (nothing, list) = listed_with(&YapConfig::default(), &none);
         assert!(nothing.is_none() || list.iter().any(|m| Some(&m.id) == nothing.as_ref().map(|n| &n.id)));
-        // The on-device model, installed: offered, on this PC.
+        // The on-device model, installed: offered, on this PC, by its name
+        // alone (the phone's tag says "On this PC"), the cloud ones with
+        // their provider.
         let qwen = OnDevice { installed: true, name: "Qwen3.5 4B".into(), id: "Qwen_Qwen3.5-4B-Q4_K_M".into(), context: 32_768 };
-        let (_, list) = listed_with(&cfg, &qwen);
-        assert!(list.iter().any(|m| m.id == "ondevice|" && m.on_this_pc && m.label == "Qwen3.5 4B · On this PC"), "{list:?}");
+        let (current, list) = listed_with(&cfg, &qwen);
+        assert!(list.iter().any(|m| m.id == "ondevice|" && m.on_this_pc && m.label == "Qwen3.5 4B"), "{list:?}");
+        assert!(list.iter().all(|m| !m.label.contains("On this PC")), "{list:?}");
+        assert!(current.unwrap().label.ends_with("· Groq"));
+    }
+
+    #[test]
+    fn chat_on_the_on_device_model_is_named_once() {
+        let mut cfg = YapConfig::default();
+        cfg.llm_scopes.insert(
+            "chat".into(),
+            crate::config::LlmScope { enabled: true, provider: PROVIDER_ONDEVICE.into(), ..Default::default() },
+        );
+        let qwen = OnDevice { installed: true, name: "Qwen3.5 4B".into(), id: "Qwen_Qwen3.5-4B-Q4_K_M".into(), context: 32_768 };
+        let (current, list) = listed_with(&cfg, &qwen);
+        let current = current.expect("the on-device model in use");
+        assert_eq!(current, Model { id: "ondevice|".into(), label: "Qwen3.5 4B".into(), on_this_pc: true });
+        assert_eq!(list.iter().filter(|m| m.id == "ondevice|").count(), 1, "listed once: {list:?}");
     }
 }

@@ -34,15 +34,23 @@ for (const scheme of ['light', 'dark']) {
       await ready(page, pc);
       await page.screenshot({ path: `${DIR}/ready-${scheme}.png` });
 
-      // No sideways scroll, and the controls are thumb-sized.
+      // No sideways scroll, and the controls are thumb-sized (the wait
+      // choice and Sound details too, shown for the check).
+      await page.getByText('Hands-free').click();
+      await page.getByText('Sound details').click();
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
       const small = await page.evaluate(() =>
-        [...document.querySelectorAll('button:not([hidden]), select, .switch')]
+        [...document.querySelectorAll('button:not([hidden]), select, .switch, .seg label, summary')]
           .filter((e) => e.offsetParent)
-          .map((e) => [e.id || e.className, e.getBoundingClientRect().height])
+          .map((e) => [e.id || e.className || e.tagName, e.getBoundingClientRect().height])
           .filter(([, h]) => h < 48),
       );
       expect(small).toEqual([]);
+      expect(await page.locator('.seg label').count()).toBe(3);
+      await page.getByTestId('wait').scrollIntoViewIfNeeded();
+      await page.screenshot({ path: `${DIR}/options-${scheme}.png`, fullPage: true });
+      await page.getByText('Hands-free').click();
+      await page.getByText('Sound details').click();
 
       await page.getByTestId('talk').click();
       await expect(page.getByTestId('talk-time')).toHaveText('0:01', { timeout: 4000 });
@@ -74,6 +82,12 @@ for (const scheme of ['light', 'dark']) {
       await page.keyboard.press('Escape');
       await expect(page.getByTestId('models')).toBeHidden();
       await page.screenshot({ path: `${DIR}/error-${scheme}.png` });
+
+      // Sound details after that answer.
+      await page.getByText('Sound details').click();
+      await expect(page.getByTestId('sound-start')).toContainText('started');
+      await page.getByTestId('sound').scrollIntoViewIfNeeded();
+      await page.screenshot({ path: `${DIR}/sound-details-${scheme}.png`, fullPage: true });
     });
   });
 }

@@ -6,11 +6,13 @@
 //
 // What it does: pairing (the QR's #pair=<token>, the 4-digit code, the device
 // kept in localStorage), Talk (tap or hold; hands-free ends by itself after
-// ~0.8 s of quiet), the mic resampled to 16 kHz Int16 in an AudioWorklet
-// (mic-worklet.js, dsp.js), the spoken answer played back to back with Web
-// Audio, Stop and barge-in, the conversation, the step Yap is on and its
-// time, the model chip, reconnects with backoff, keep-alive pings and a
-// screen wake lock.
+// the wait chosen — 1 s, 1.5 s or 2.5 s — of quiet), the mic resampled to
+// 16 kHz Int16 in an AudioWorklet (mic-worklet.js, dsp.js), the spoken answer
+// as one stream (resampled here frame after frame, played from a jitter
+// buffer in player-worklet.js), "Clearer sound in a headset" (the mic closed
+// while Yap talks), Stop and barge-in, the conversation, the step Yap is on
+// and its time, the model chip, Sound details, reconnects with backoff,
+// keep-alive pings and a screen wake lock.
 //
 // No service worker: on an origin whose certificate Chrome only accepted
 // after a warning, registration fails ("An SSL certificate error occurred
@@ -23,7 +25,18 @@
 // Media Session handlers only fire for media that plays (phone-remote design,
 // §4.5). So it isn't faked here: it's the native app's job (§6.2).
 
-import { FRAME_SAMPLES, LINK_RATE, EnergyVad, fromInt16, elapsed, clock, toDb } from './dsp.js';
+import {
+  FRAME_SAMPLES,
+  LINK_RATE,
+  DOWN_RATE,
+  WAITS,
+  EnergyVad,
+  Resampler,
+  fromInt16,
+  elapsed,
+  clock,
+  toDb,
+} from './dsp.js';
 
 const KIND_UP = 0x01;
 const KIND_DOWN = 0x02;
@@ -31,9 +44,9 @@ const MAX_FRAMES = (120 * LINK_RATE) / FRAME_SAMPLES; // a question: 2 minutes a
 const HOLD_MS = 350; // a press this long is a hold: release sends
 const NO_SPEECH_MS = 10000; // hands-free: nothing said this long → cancelled
 const MIC_WARM_MS = 15000; // the mic kept open after a turn, for a follow-up
+const MIC_LIVE_MS = 3000; // the longest a new mic's wait for sound (a headset switching to its call link)
 const PING_MS = 15000;
 const PONG_WAIT_MS = 8000;
-const LEAD_S = 0.12; // the first sound of an answer starts this far ahead
 const KEEP_TURNS = 6;
 
 const KEY = {
@@ -41,6 +54,8 @@ const KEY = {
   pc: 'yap.link.pc',
   mic: 'yap.link.mic',
   handsFree: 'yap.link.handsFree',
+  wait: 'yap.link.wait',
+  clearer: 'yap.link.clearer',
 };
 
 // ------------------------------------------------------------------ storage
@@ -63,6 +78,11 @@ function save(key, value) {
 }
 
 // ------------------------------------------------------------------- state
+
+/** One of WAITS' names: what's stored, or Normal. */
+function waitChoice(w) {
+  return typeof w === 'string' && Object.prototype.hasOwnProperty.call(WAITS, w) ? w : 'normal';
+}
 
 const fragment = new URLSearchParams(location.hash.slice(1));
 const storedDevice = load(KEY.device);
@@ -101,12 +121,18 @@ const S = {
   error: '',
   note: '',
   handsFree: load(KEY.handsFree) === true,
+  // Hands-free's wait before sending: short | normal | long (WAITS).
+  wait: waitChoice(load(KEY.wait)),
+  // "Clearer sound in a headset": the mic closed while Yap talks.
+  clearer: load(KEY.clearer) === true,
   tick: 0,
   stopTimer: 0,
   gen: 0,
 };
 
-const vad = new EnergyVad({ frameMs: (FRAME_SAMPLES / LINK_RATE) * 1000, endMs: 800 });
+const FRAME_MS = (FRAME_SAMPLES / LINK_RATE) * 1000;
+// Made afresh for each question, with the wait chosen then.
+let vad = new EnergyVad({ frameMs: FRAME_MS, endMs: WAITS[S.wait] });
 
 const ignoringOld = () => S.ignoreOldAt > 0 && performance.now() - S.ignoreOldAt < 1500;
 
@@ -138,6 +164,16 @@ const el = {
   stopBtn: $('stop-btn'),
   cancelBtn: $('cancel-btn'),
   handsFree: $('handsfree'),
+  wait: $('wait'),
+  clearer: $('clearer'),
+  sound: $('sound'),
+  soundRate: $('sound-rate'),
+  soundLatency: $('sound-latency'),
+  soundStart: $('sound-start'),
+  soundGaps: $('sound-gaps'),
+  soundMic: $('sound-mic'),
+  soundMicNow: $('sound-mic-now'),
+  soundBrowser: $('sound-browser'),
   mic: $('mic'),
   micHint: $('mic-hint'),
   modelBtn: $('model'),
@@ -216,6 +252,21 @@ function deviceName() {
             ? 'Safari'
             : 'Browser';
   return `${os} · ${browser}`;
+}
+
+/** "Firefox 131 on Android", for Sound details. */
+function browserLine() {
+  const ua = navigator.userAgent;
+  const [os, browser] = deviceName().split(' · ');
+  const version = {
+    Firefox: /(?:Firefox|FxiOS)\/(\d+)/,
+    Edge: /Edg(?:A|iOS)?\/(\d+)/,
+    'Samsung Internet': /SamsungBrowser\/(\d+)/,
+    Chrome: /(?:Chrome|CriOS)\/(\d+)/,
+    Safari: /Version\/(\d+)/,
+  }[browser];
+  const v = version && ua.match(version);
+  return `${browser}${v ? ` ${v[1]}` : ''} on ${os === 'Phone' ? 'a phone' : os}`;
 }
 
 function send(msg) {
@@ -398,7 +449,9 @@ function onText(text) {
       break;
     }
     case 'speak_start':
-      player.begin(Number(m.rate) || 24000);
+      player.begin(Number(m.rate) || DOWN_RATE);
+      // Clearer sound: the headset's call link let go, for its music one.
+      if (S.clearer && S.local === 'idle') closeMic();
       break;
     case 'speak_end':
       player.end();
@@ -511,7 +564,6 @@ const mic = {
   stream: null,
   source: null,
   node: null,
-  moduleReady: null,
   opening: null,
   closeTimer: 0,
   deviceId: '',
@@ -523,6 +575,40 @@ function audioContext() {
     mic.ctx = new AC({ latencyHint: 'interactive' });
   }
   return mic.ctx;
+}
+
+/** The page's AudioWorklet modules, each loaded once (again after a failure). */
+const modules = {};
+function worklet(ctx, file) {
+  if (!ctx.audioWorklet) return Promise.reject(Object.assign(new Error('worklet'), { name: 'NoWorklet' }));
+  if (!modules[file]) {
+    modules[file] = ctx.audioWorklet.addModule(new URL(file, import.meta.url).href).catch((err) => {
+      modules[file] = null;
+      throw err;
+    });
+  }
+  return modules[file];
+}
+
+/**
+ * Resolves once the mic's track is live and sending sound: a Bluetooth
+ * headset takes a moment to switch to its call link (longer after it was
+ * playing music), and what it says meanwhile isn't the person. At most
+ * MIC_LIVE_MS; then it goes ahead anyway.
+ */
+function whenLive(track) {
+  if (!track || track.readyState !== 'live' || !track.muted) return Promise.resolve();
+  return new Promise((resolve) => {
+    const done = () => {
+      clearTimeout(timer);
+      track.removeEventListener('unmute', done);
+      track.removeEventListener('ended', done);
+      resolve();
+    };
+    const timer = setTimeout(done, MIC_LIVE_MS);
+    track.addEventListener('unmute', done);
+    track.addEventListener('ended', done);
+  });
 }
 
 function chosenMic() {
@@ -547,14 +633,10 @@ async function doOpenMic() {
   const ctx = audioContext();
   if (ctx.state !== 'running') await ctx.resume().catch(() => {});
   if (!ctx.audioWorklet) throw Object.assign(new Error('worklet'), { name: 'NoWorklet' });
-  if (!mic.moduleReady) {
-    mic.moduleReady = ctx.audioWorklet.addModule(new URL('mic-worklet.js', import.meta.url).href).catch((err) => {
-      mic.moduleReady = null;
-      throw err;
-    });
-  }
+  // The answer's player loads beside it, ready for the answer.
+  player.prepare();
   try {
-    await mic.moduleReady;
+    await worklet(ctx, 'mic-worklet.js');
   } catch {
     throw Object.assign(new Error('worklet load'), { name: 'WorkletLoad' });
   }
@@ -591,6 +673,12 @@ async function doOpenMic() {
   }
   // Names show once the mic's allowed.
   listMics();
+  // Nothing counts until the mic really sends sound (Talk says "Opening the
+  // microphone…" meanwhile).
+  await whenLive(track);
+  if (mic.stream !== stream) throw Object.assign(new Error('closed'), { name: 'MicClosed' });
+  player.noteMic();
+  renderSound();
 }
 
 function closeMic() {
@@ -610,15 +698,42 @@ function closeMic() {
       /* gone */
     }
   }
+  const was = !!mic.stream;
   if (mic.stream) for (const t of mic.stream.getTracks()) t.stop();
   mic.stream = mic.source = mic.node = null;
+  if (was) {
+    player.noteMic();
+    renderSound();
+  }
 }
 
 /**
  * The mic stays open a little after a turn: from Talk to the end of the
  * answer a Bluetooth headset stays in one call link (SCO), and a follow-up
  * starts at once. Then it closes, so the headset goes back to its music link.
+ *
+ * With "Clearer sound in a headset" on, the mic closes as soon as the
+ * question is sent (so the headset has the time Yap spends working it out to
+ * switch to its music link, A2DP, before the answer starts) and, in any
+ * case, when the answer starts (`speak_start`); it opens again on Talk, or
+ * once the answer has played out when hands-free is on (then kept warm as
+ * above).
  */
+function afterQuestionSent() {
+  if (S.clearer) closeMic();
+  else armMicClose();
+}
+
+/** The answer has played out (or was stopped): the mic's next move. */
+function afterAnswer() {
+  if (S.clearer && S.handsFree && S.local === 'idle' && !mic.stream) {
+    // Back to the call link, ready for a follow-up (warm, then closed).
+    openMic()
+      .then(armMicClose)
+      .catch(() => {});
+  } else armMicClose();
+}
+
 function armMicClose() {
   clearTimeout(mic.closeTimer);
   if (!mic.stream) return;
@@ -644,6 +759,8 @@ function micError(err) {
       return "This browser can't record here. Open the page in Chrome.";
     case 'WorkletLoad':
       return "Couldn't load the page's recorder from your PC. Reload the page and try again.";
+    case 'MicClosed':
+      return 'The microphone closed while it was opening. Try again.';
     default:
       return "Couldn't open the microphone. Try again.";
   }
@@ -692,7 +809,7 @@ function onMicMessage(e) {
       if (S.handsFree) {
         const said = vad.push(d.level || 0);
         if (said === 'end') stopTalk();
-        else if (!vad.heard && S.frames * 20 >= NO_SPEECH_MS) {
+        else if (!vad.heard && S.frames * FRAME_MS >= NO_SPEECH_MS) {
           cancelTalk();
           S.note = "Didn't hear anything. Tap Talk to try again.";
           render();
@@ -772,7 +889,7 @@ async function beginTalk() {
   S.pcListening = false;
   S.step = '';
   S.workSince = 0;
-  vad.reset();
+  vad = new EnergyVad({ frameMs: FRAME_MS, endMs: WAITS[S.wait] });
   resetMeter();
   send({ type: 'start', mode: 'ask' });
   mic.node.port.postMessage({ cmd: 'start' });
@@ -806,7 +923,7 @@ function finishStop() {
   S.local = 'idle';
   if (S.phase === 'idle' || S.phase === 'listening') S.phase = 'transcribing';
   S.workSince = performance.now();
-  armMicClose();
+  afterQuestionSent();
   syncTicker();
   render();
 }
@@ -870,76 +987,168 @@ function endLocalQuestion() {
 
 // ------------------------------------------------------------ the answer
 
+const idleStats = () => ({
+  state: 'idle',
+  queued: 0,
+  played: 0,
+  buffered: 0,
+  underruns: 0,
+  startDelayMs: null,
+  startBufferedMs: null,
+  gapMs: 0,
+  maxStep: 0,
+});
+
+/**
+ * Yap's voice, as one stream. Each down frame (24 kHz Int16) is resampled to
+ * the context's rate as it comes, in one filter carried on from frame to
+ * frame (never a clip at a time, which clicked at every join), and posted to
+ * the player worklet (player-worklet.js), which plays it from a jitter buffer
+ * (dsp.js `Playout`): the sound starts once 250 ms is waiting, a late frame
+ * fades out and back in (an underrun, counted) instead of a hard gap, Stop is
+ * a 5 ms fade. `active` from speak_start until the end has played out, or
+ * Stop.
+ */
 const player = {
-  rate: 24000,
-  next: 0,
-  sources: new Set(),
+  rate: DOWN_RATE, // speak_start's
+  id: 0, // this answer's, on every message to and from the worklet
+  node: null,
+  loading: null,
+  waiting: [], // messages for the worklet before it's loaded
+  broken: false,
+  rs: null,
   accepting: false,
   ending: false,
-  scheduled: [], // [{at, dur}] since speak_start, for the tests
-  underruns: 0,
+  queued: 0, // seconds of the answer received
+  stats: idleStats(), // the worklet's last report
+  level: 0, // the loudest sample it played since the report before
+  last: null, // the last answer, for Sound details
   get active() {
-    return this.sources.size > 0 || (this.accepting && !this.ending);
+    return this.accepting;
   },
+  /** While the answer is being played (not before its sound starts). */
+  get sounding() {
+    return this.accepting && (this.stats.state === 'playing' || this.stats.state === 'starved');
+  },
+
+  /** Loads the worklet and makes its node, once, ahead of the first answer. */
+  prepare() {
+    if (this.node || this.loading || this.broken) return;
+    const ctx = audioContext();
+    this.loading = worklet(ctx, 'player-worklet.js')
+      .then(() => {
+        const node = new AudioWorkletNode(ctx, 'yap-player', { numberOfOutputs: 1, outputChannelCount: [1] });
+        node.port.onmessage = (e) => this.report(e.data || {});
+        node.onprocessorerror = () => this.fail();
+        node.connect(ctx.destination);
+        this.node = node;
+        for (const [msg, transfer] of this.waiting) node.port.postMessage(msg, transfer);
+        this.waiting = [];
+      })
+      .catch(() => this.fail())
+      .finally(() => {
+        this.loading = null;
+      });
+  },
+  /** The worklet couldn't load (or broke): nothing plays, nothing waits for it. */
+  fail() {
+    this.broken = true;
+    this.waiting = [];
+    if (this.node) {
+      this.node.port.onmessage = null;
+      try {
+        this.node.disconnect();
+      } catch {
+        /* gone */
+      }
+      this.node = null;
+    }
+    if (this.accepting) {
+      S.note = "Couldn't play Yap's voice on this phone. Reload the page, then ask again.";
+      if (this.ending) this.finished();
+      else render();
+    }
+  },
+  post(msg, transfer = []) {
+    if (this.node) this.node.port.postMessage(msg, transfer);
+    else if (!this.broken) {
+      this.waiting.push([msg, transfer]);
+      this.prepare();
+    }
+  },
+
   begin(rate) {
     this.stopAll();
-    this.rate = rate;
-    this.accepting = true;
-    this.ending = false;
-    this.next = 0;
-    this.scheduled = [];
-    this.underruns = 0;
     const ctx = audioContext();
     if (ctx.state !== 'running') ctx.resume().catch(() => {});
+    this.rate = rate;
+    this.id++;
+    this.accepting = true;
+    this.ending = false;
+    this.queued = 0;
+    this.level = 0;
+    this.rs = new Resampler(rate, ctx.sampleRate);
+    this.stats = { ...idleStats(), state: 'buffering' };
+    this.last = { startDelayMs: null, startBufferedMs: null, underruns: 0, played: 0, micOpen: false, micClosed: false };
+    this.post({ cmd: 'begin', id: this.id });
+    if (this.broken) this.fail();
   },
   push(samples) {
-    if (!this.accepting || !samples.length) return;
-    const ctx = audioContext();
-    const buf = ctx.createBuffer(1, samples.length, this.rate);
-    buf.getChannelData(0).set(fromInt16(samples));
-    const src = ctx.createBufferSource();
-    src.buffer = buf;
-    src.connect(ctx.destination);
-    const now = ctx.currentTime;
-    let at = this.next;
-    if (at < now + 0.01) {
-      // The first sound, or the PC fell behind: a little ahead of now.
-      if (this.next) this.underruns++;
-      at = now + (this.next ? 0.03 : LEAD_S);
-    }
-    src.start(at);
-    this.next = at + buf.duration;
-    this.scheduled.push({ at, dur: buf.duration });
-    this.sources.add(src);
-    src.onended = () => {
-      this.sources.delete(src);
-      if (!this.sources.size && this.ending) this.finished();
-    };
+    if (!this.accepting || this.ending || !samples.length) return;
+    this.queued += samples.length / this.rate;
+    this.send(this.rs.process(fromInt16(samples)));
   },
+  send(out) {
+    if (!out.length) return;
+    const copy = new Float32Array(out); // the resampler reuses its buffer
+    this.post({ cmd: 'push', id: this.id, samples: copy.buffer }, [copy.buffer]);
+  },
+  /** No more frames: the filter's last samples, then what's waiting plays out. */
   end() {
+    if (!this.accepting || this.ending) return;
     this.ending = true;
-    if (!this.sources.size) this.finished();
+    this.send(this.rs.flush());
+    this.post({ cmd: 'end', id: this.id });
+    if (this.broken) this.finished();
   },
+  /** A report from the worklet. */
+  report(d) {
+    if (d.id !== this.id || !d.stats) return; // an answer since replaced
+    this.stats = d.stats;
+    this.level = d.level || 0;
+    const L = this.last;
+    if (L) {
+      if (d.stats.startDelayMs != null) {
+        L.startDelayMs = d.stats.startDelayMs;
+        L.startBufferedMs = d.stats.startBufferedMs;
+      }
+      L.underruns = d.stats.underruns;
+      L.played = d.stats.played;
+    }
+    this.noteMic();
+    if (Array.isArray(d.events) && d.events.includes('done')) this.finished();
+    else renderSound();
+  },
+  /** While the answer plays: the mic open (the headset in its call link) or not. */
+  noteMic() {
+    const L = this.last;
+    if (!L || !this.sounding) return;
+    if (mic.stream) L.micOpen = true;
+    else L.micClosed = true;
+  },
+  /** The end has played out. */
   finished() {
+    if (!this.accepting) return;
     this.accepting = false;
     this.ending = false;
-    armMicClose();
+    afterAnswer();
     render();
   },
+  /** Silent at once (a 5 ms fade in the worklet); what's left is dropped. */
   stopAll() {
-    for (const s of this.sources) {
-      s.onended = null;
-      try {
-        s.stop();
-      } catch {
-        /* not started */
-      }
-      s.disconnect();
-    }
-    this.sources.clear();
+    if (this.accepting) this.post({ cmd: 'stop', id: this.id });
     this.accepting = false;
     this.ending = false;
-    this.next = 0;
   },
 };
 
@@ -1042,6 +1251,50 @@ function render() {
   el.stopBtn.hidden = now !== 'speaking';
   el.cancelBtn.hidden = !(listening || now === 'opening' || now === 'working');
   el.handsFree.checked = S.handsFree;
+  el.wait.hidden = !S.handsFree;
+  for (const r of el.wait.querySelectorAll('input[name=wait]')) r.checked = r.value === S.wait;
+  el.clearer.checked = S.clearer;
+  renderSound();
+}
+
+const num = (n) => Math.round(n).toLocaleString('en-GB');
+const msOf = (s) => `${num(s * 1000)} ms`;
+
+/** Sound details: how the last answer played, to tell a stream that ran dry from the headset's own crackle. */
+function renderSound() {
+  if (!el.sound.open) return;
+  const ctx = mic.ctx;
+  el.soundRate.textContent = ctx ? `${num(ctx.sampleRate)} Hz` : 'Shown once you’ve asked something';
+  const lat = [];
+  if (ctx && typeof ctx.baseLatency === 'number') lat.push(`Base ${msOf(ctx.baseLatency)}`);
+  if (ctx && typeof ctx.outputLatency === 'number' && ctx.outputLatency > 0) lat.push(`Output ${msOf(ctx.outputLatency)}`);
+  el.soundLatency.textContent = !ctx ? '—' : lat.length ? lat.join(' · ') : 'Not given by this browser';
+
+  const L = player.last;
+  if (!L) {
+    el.soundStart.textContent = 'No answer yet';
+    el.soundGaps.textContent = '—';
+    el.soundMic.textContent = '—';
+  } else {
+    el.soundStart.textContent =
+      L.startDelayMs == null
+        ? player.accepting
+          ? 'Waiting for its sound…'
+          : 'No sound came'
+        : `${L.played.toFixed(1)} s played; started after ${num(L.startDelayMs)} ms, with ${num(L.startBufferedMs)} ms buffered`;
+    el.soundGaps.textContent =
+      L.underruns === 0 ? 'None' : `${L.underruns} (the sound ran dry and paused)`;
+    el.soundMic.textContent =
+      L.micOpen && L.micClosed
+        ? 'Open for part of it'
+        : L.micOpen
+          ? 'Open (the headset in call mode)'
+          : L.micClosed
+            ? 'Closed'
+            : '—';
+  }
+  el.soundMicNow.textContent = mic.stream ? 'Open' : 'Closed';
+  el.soundBrowser.textContent = browserLine();
 }
 
 /** Times on screen tick while Yap listens or works. */
@@ -1178,7 +1431,24 @@ el.retry.addEventListener('click', () => {
 el.handsFree.addEventListener('change', () => {
   S.handsFree = el.handsFree.checked;
   save(KEY.handsFree, S.handsFree);
+  render();
 });
+el.wait.addEventListener('change', (e) => {
+  if (e.target.name !== 'wait') return;
+  S.wait = waitChoice(e.target.value);
+  save(KEY.wait, S.wait);
+  // Listening now: the question being asked waits this long too.
+  if (S.local === 'listening') vad.endFrames = Math.round(WAITS[S.wait] / FRAME_MS);
+  render();
+});
+el.clearer.addEventListener('change', () => {
+  S.clearer = el.clearer.checked;
+  save(KEY.clearer, S.clearer);
+  // On while Yap talks: the mic goes now, so the headset can switch.
+  if (S.clearer && S.local === 'idle' && player.active) closeMic();
+  render();
+});
+el.sound.addEventListener('toggle', renderSound);
 el.mic.addEventListener('change', () => {
   const opt = el.mic.selectedOptions[0];
   save(KEY.mic, el.mic.value ? { id: el.mic.value, label: opt ? opt.textContent : '' } : null);
@@ -1213,9 +1483,10 @@ window.addEventListener('online', reconnectNow);
 // ------------------------------------------------------------- the tests'
 
 // Read-only, for e2e-link/: what the page is doing and what the player has
-// scheduled. Nothing in it is a secret or changes anything.
+// queued and played. Nothing in it is a secret or changes anything.
 window.__yapLink = {
   snapshot() {
+    const p = player.stats;
     return {
       local: S.local,
       phase: S.phase,
@@ -1226,16 +1497,34 @@ window.__yapLink = {
       frames: S.frames,
       retries: S.retries,
       handsFree: S.handsFree,
+      wait: S.wait,
+      waitMs: WAITS[S.wait],
+      clearer: S.clearer,
       wakeLock: !!wakeLock && !wakeLock.released,
       contextRate: mic.ctx ? mic.ctx.sampleRate : 0,
       contextState: mic.ctx ? mic.ctx.state : '',
       micOpen: !!mic.stream,
       player: {
+        // speak_start's rate, and the page's view: an answer playing or to come.
         rate: player.rate,
         active: player.active,
-        playing: player.sources.size,
-        scheduled: player.scheduled.slice(),
-        underruns: player.underruns,
+        // Seconds of the answer received (at its own rate).
+        queued: player.queued,
+        // The worklet's last report: idle | buffering | playing | starved |
+        // stopping; seconds played and waiting; gaps; how it started; the
+        // largest jump between two samples played (a hard cut shows here);
+        // the loudest sample played since the report before.
+        state: p.state,
+        played: p.played,
+        buffered: p.buffered,
+        underruns: p.underruns,
+        startDelayMs: p.startDelayMs,
+        startBufferedMs: p.startBufferedMs,
+        gapMs: p.gapMs,
+        maxStep: p.maxStep,
+        level: player.level,
+        loaded: !!player.node,
+        last: player.last ? { ...player.last } : null,
       },
     };
   },
