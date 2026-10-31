@@ -9,7 +9,7 @@
 //   feature — and Groq's "Usage today" meter in Settings still counts them.
 // - The ring under Chat's message box shows the conversation's last answer
 //   (prompt + answer) against the Chat model's context from Groq's model
-//   list (a small 4K context on the stand-in GPT-OSS 20B): "39% of context
+//   list (a small 8K context on the stand-in GPT-OSS 20B): "39% of context
 //   used" on hover; its panel's rows (context, the last answer and its
 //   speed, today's and the week's use by model); past 80 % the quiet line
 //   with New chat; a model switch in the picker changes the denominator;
@@ -42,7 +42,7 @@ const test = base.extend({
     async ({}, use) => {
       const fake = await startFakeLlm();
       // A small context on the stand-in GPT-OSS 20B, so a chat fills it.
-      fake.listModels('groq', [groqModel('openai/gpt-oss-20b', 'GPT OSS 20B', 4096), groqModel('openai/gpt-oss-120b', 'GPT OSS 120B', 131072)]);
+      fake.listModels('groq', [groqModel('openai/gpt-oss-20b', 'GPT OSS 20B', 8192), groqModel('openai/gpt-oss-120b', 'GPT OSS 120B', 131072)]);
       await use(fake);
       await fake.close();
     },
@@ -158,15 +158,16 @@ test('a cleanup and a chat answer are counted: Insights → AI usage, and Groq�
 });
 
 test('the context ring: the chat’s share of the model’s context, its panel, a model switch and New chat', async ({ yap, main, fakeLlm, shot }) => {
-  // Groq's list (through the stand-in): GPT-OSS 20B with a 4K context.
+  // Groq's list (through the stand-in): GPT-OSS 20B with an 8K context (4K
+  // until 31 Oct 2026: Chat's own prompt and tools no longer leave room in 4K).
   await yap.invoke('llm_models', { provider: 'groq', scope: 'chat', force: true });
   await openView(main, 'Chat');
   await main.locator('.convs').getByRole('button', { name: 'New chat', exact: true }).click();
   await expect(ring(main)).toHaveCount(0);
 
-  // An answer: 1,200 prompt + 400 answer tokens of 4,096 = 39 %, written at
+  // An answer: 2,400 prompt + 800 answer tokens of 8,192 = 39 %, written at
   // 120 tokens a second (llama.cpp's timings).
-  fakeLlm.usage('other', counts(1_200, 400, { prompt_n: 1_200, prompt_ms: 600, predicted_n: 400, predicted_ms: 3_333.3, predicted_per_second: 120 }));
+  fakeLlm.usage('other', counts(2_400, 800, { prompt_n: 2_400, prompt_ms: 1_200, predicted_n: 800, predicted_ms: 6_666.7, predicted_per_second: 120 }));
   await send(main, 'When is the launch?');
   await expect(lastAnswer(main)).toContainText('OK');
   await expect(ring(main)).toHaveAttribute('data-percent', '39');
@@ -180,9 +181,9 @@ test('the context ring: the chat’s share of the model’s context, its panel, 
   await button.click();
   const p = panel(main);
   await expect(p).toBeVisible();
-  await expect(p.getByTestId('context-used')).toHaveText('1.6K of 4K tokens');
+  await expect(p.getByTestId('context-used')).toHaveText('3.2K of 8K tokens');
   await expect(p.getByRole('meter', { name: 'Context used' })).toHaveAttribute('aria-valuenow', '39');
-  await expect(p.getByTestId('context-last-answer')).toHaveText('400 tokens · 120 tokens/s');
+  await expect(p.getByTestId('context-last-answer')).toHaveText('800 tokens · 120 tokens/s');
   await expect(p.getByTestId('context-long')).toHaveCount(0);
   await expect(p.getByTestId('usage-today')).toContainText('GPT-OSS 20B');
   await expect(p.getByTestId('usage-today')).toContainText('· Groq');
@@ -194,8 +195,8 @@ test('the context ring: the chat’s share of the model’s context, its panel, 
   await expect(p).toBeHidden();
   await expect(button).toBeFocused();
 
-  // Past 80 %: 3,500 + 200 of 4,096 = 90 %, warmer, and the quiet line.
-  fakeLlm.usage('other', counts(3_500, 200));
+  // Past 80 %: 7,000 + 400 of 8,192 = 90 %, warmer, and the quiet line.
+  fakeLlm.usage('other', counts(7_000, 400));
   await send(main, 'And the week after?');
   await expect(ring(main)).toHaveAttribute('data-percent', '90');
   await ring(main).getByRole('button').click();
@@ -213,13 +214,13 @@ test('the context ring: the chat’s share of the model’s context, its panel, 
   await main.keyboard.press('Escape');
   await pickTheme(main, yap, 'System');
 
-  // A switch in the picker to GPT-OSS 120B (128K): the same chat is 3 %.
+  // A switch in the picker to GPT-OSS 120B (128K): the same chat is 6 %.
   const picker = main.getByRole('dialog', { name: 'Switch the Chat model' });
   await chip(main).click();
   await picker.locator('.pane').getByRole('button', { name: /^GPT-OSS 120B/ }).click();
   await expect(chip(main)).toHaveText('GPT-OSS 120B Medium · Groq');
-  await expect(ring(main)).toHaveAttribute('data-percent', '3');
-  await expect(ring(main).getByRole('button', { name: '3% of context used' })).toBeVisible();
+  await expect(ring(main)).toHaveAttribute('data-percent', '6');
+  await expect(ring(main).getByRole('button', { name: '6% of context used' })).toBeVisible();
 
   // Back on the 20B it's 90 % again; the line's New chat starts afresh: no ring.
   if (await picker.isVisible()) await main.keyboard.press('Escape');
@@ -233,8 +234,8 @@ test('the context ring: the chat’s share of the model’s context, its panel, 
   await expect(ring(main)).toHaveCount(0);
   await expect(main.locator('.cbubble')).toHaveCount(0);
 
-  // The new chat's first answer: 2,600 + 21 of 4,096 = 64 %.
-  fakeLlm.usage('other', counts(2_600, 21));
+  // The new chat's first answer: 5,200 + 42 of 8,192 = 64 %.
+  fakeLlm.usage('other', counts(5_200, 42));
   await send(main, 'Who is coming?');
   await expect(lastAnswer(main)).toContainText('OK');
   await expect(ring(main)).toHaveAttribute('data-percent', '64');
