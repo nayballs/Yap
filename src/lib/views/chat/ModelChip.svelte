@@ -10,22 +10,20 @@
   // ("Claude Opus 5.5 Extra", core/effort.js; ai/effort.rs), and "Fast" when
   // fast mode is on.
   //
-  // Click → ChatModelMenu.svelte, the short menu (as the Claude Code app's):
-  // the main models with their number keys, Effort ▸, More models ▸, Fast
-  // mode, and "Add a provider or download a model…", which opens
-  // ChatModelPicker.svelte, "Switch the Chat model": a provider rail with
-  // every provider's models, connecting a provider in place, and On this
-  // PC (Yap's on-device models, downloaded right there, and self-hosted
-  // servers). Both change the Chat scope only (chat_set_model, saved like
-  // Settings saves; Settings adopts it from `yap-chat-model-changed`). With
-  // no AI set up the rail opens straight away: connecting one is there.
+  // Click → ChatModelPicker.svelte, "Switch the Chat model": a provider
+  // rail with every provider's models, connecting a provider in place, and
+  // On this PC (Yap's on-device models, downloaded right there, and
+  // self-hosted servers). It changes the Chat scope only (chat_set_model,
+  // saved like Settings saves; Settings adopts it from
+  // `yap-chat-model-changed`). With no AI set up it opens too: connecting
+  // one is right there.
   import { invoke } from '@tauri-apps/api/core';
   import { listen } from '@tauri-apps/api/event';
   import { onMount, tick } from 'svelte';
   import ProviderMark from './ProviderMark.svelte';
   import { modelName, providerName, modelIcon, whereItRuns, noLongerOffered } from '../../core/aiModel.js';
   import { loadCatalog } from '../../stores/modelCatalog.svelte.js';
-  import { refreshLocal, local, pushRecent } from './chatModelState.svelte.js';
+  import { refreshLocal, local, pushRecent } from './chatModels.svelte.js';
   import { chipContextLine } from '../../core/localContext.js';
   import { isKeyed } from '../../core/providers.js';
   import { menuOrDialogOpen } from '../../ui/contextMenu.svelte.js';
@@ -36,8 +34,7 @@
   let { onopensettings = null, quiet = false } = $props();
 
   let status = $state(null);
-  // '' | 'menu' (the short one) | 'rail' (the full picker).
-  let open = $state('');
+  let open = $state(false);
   let wrapEl = $state(null);
   let chipEl = $state(null);
 
@@ -87,7 +84,7 @@
     return { provider: model.provider, model: model.id, file: '', baseUrl: '' };
   }
 
-  async function onChip(rail = false) {
+  async function onChip() {
     if (open) {
       close(true);
       return;
@@ -97,17 +94,17 @@
     await Promise.all([refresh(), loadCatalog(), refreshLocal()]);
     const cur = currentEntry();
     if (cur && (cur.provider !== 'ondevice' || cur.file)) pushRecent(cur);
-    open = rail || !model ? 'rail' : 'menu';
+    open = true;
   }
 
   function close(focusChip) {
-    open = '';
+    open = false;
     if (focusChip) tick().then(() => chipEl?.focus());
   }
 
-  /** Open the full picker (Chat's "Choose another model…" for a screenshot). */
+  /** Open the picker (Chat's "Choose another model…" for a screenshot). */
   export function openPicker() {
-    if (!open) onChip(true);
+    if (!open) onChip();
   }
 
   // Outside the chip and its picker: closed. On pointerdown (the path is
@@ -139,10 +136,10 @@
       class:none={!model}
       bind:this={chipEl}
       aria-label={chipLabel}
-      aria-haspopup={model ? 'menu' : 'dialog'}
-      aria-expanded={!!open}
+      aria-haspopup="dialog"
+      aria-expanded={open}
       title={model ? `${whereItRuns(model, status.host)}${ctxLine ? `\n${ctxLine}` : ''}${status.tools ? '' : `\n${noToolsLine}`}${gone ? `\n${GONE}` : ''}` : status.error || ''}
-      onclick={() => onChip()}
+      onclick={onChip}
     >
       {#if model}
         <ProviderMark icon={modelIcon(model)} glyph={model.onThisPc ? 'pc' : 'spark'} size={14} />
@@ -161,10 +158,16 @@
   {/if}
 
   {#if open && status}
-    <!-- Each its own chunk, loaded the first time it opens (the main
-         window's stays under Vite's 725 kB limit). -->
-    {#await open === 'menu' ? import('./ChatModelMenu.svelte') : import('./ChatModelPicker.svelte') then { default: Popup }}
-      <Popup {status} anchor={chipEl} onclose={close} onstatus={(s) => (status = s)} {onopensettings} onrail={() => (open = 'rail')} />
+    <!-- Its own chunk, loaded the first time it opens (the main window's
+         stays under Vite's 700 kB warning, 2026-10-25). -->
+    {#await import('./ChatModelPicker.svelte') then { default: ChatModelPicker }}
+      <ChatModelPicker
+        {status}
+        anchor={chipEl}
+        onclose={close}
+        onstatus={(s) => (status = s)}
+        {onopensettings}
+      />
     {/await}
   {/if}
 </div>
