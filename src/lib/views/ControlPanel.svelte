@@ -32,6 +32,7 @@
   import { initMicOffers } from '../notices/micOffer.js';
   import { initMicTips } from '../notices/micTips.js';
   import { initUpload } from '../stores/upload.svelte.js';
+  import { transcriptImport, initTranscriptImport } from '../stores/transcriptImport.svelte.js';
   import { initMemory } from '../stores/memory.svelte.js';
   import { initCleanupOffer } from '../notices/cleanupOffer.js';
   import { initFeatureTips } from '../notices/featureTips.js';
@@ -134,6 +135,9 @@
   // the "Transcription complete" toast, whichever view is up — the view
   // unmounts when you leave it (or Chat opens by itself).
   initUpload();
+  // Import a transcript… (transcriptImport.svelte.js): "Open" on its toast
+  // opens the meeting in Notes.
+  initTranscriptImport({ openNote: (id) => openNoteAt({ id }) });
   // Memory (memory.rs via memory.svelte.js): "Yap remembered: your sister
   // is Rochelle" with Undo and Manage (→ Settings → Memory).
   initMemory({ openSettings: (section) => openSettings(section) });
@@ -564,6 +568,14 @@
 <!-- "Connect your calendar" (calendar.svelte.js `openConnectDialog`): every
      Connect calendar button outside Settings opens it. -->
 <ConnectCalendarDialog />
+
+<!-- "Import a transcript" (transcriptImport.svelte.js): Upload and the
+     Meetings view's ⋯ open it (loads on first use). -->
+{#if transcriptImport.open}
+  {#await import('../components/TranscriptImportDialog.svelte') then { default: TranscriptImportDialog }}
+    <TranscriptImportDialog />
+  {/await}
+{/if}
 
 <!-- Settings modal overlay. <Settings> is always mounted (see header comment);
      the backdrop just hides it. -->

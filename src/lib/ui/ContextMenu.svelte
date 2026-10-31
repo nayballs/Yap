@@ -12,7 +12,7 @@
   // `items`: { label, onselect, icon?, disabled?, danger?, checked?, toggle?
   // (a checkbox item rather than a choice), items? (a submenu) } |
   // { separator: true } | { note } (a quiet line, e.g. why the items above
-  // are off). Icons: pencil, trash, folder, copy, download, check, open,
+  // are off). Icons: pencil, trash, folder, copy, download, import, check, open,
   // play, stop, sparkle, join, record, person, sync, unlink, signout,
   // star, approx, use, archive, restore, undo, split, audio, pin, history,
   // cut.
@@ -243,6 +243,8 @@
       <rect x="8" y="2.5" width="8" height="4" rx="1" /><path d="M16 4.5h2a2 2 0 0 1 2 2V20a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6.5a2 2 0 0 1 2-2h2" />
     {:else if name === 'download'}
       <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><path d="M7 10l5 5 5-5" /><path d="M12 15V3" />
+    {:else if name === 'import'}
+      <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><path d="M14 2v6h6" /><path d="M12 18v-6M9 15l3 3 3-3" />
     {:else if name === 'check'}
       <path d="M4 12l5 5L20 6" />
     {:else if name === 'open'}

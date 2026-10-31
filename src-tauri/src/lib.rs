@@ -397,6 +397,11 @@ pub fn run() {
             privacy::reset::data_reset,
             meetings::commands::meeting_start,
             meetings::commands::meeting_state,
+            meetings::import::transcript_import_pick,
+            meetings::import::transcript_import_add,
+            meetings::import::transcript_import_forget,
+            meetings::import::transcript_import_clear,
+            meetings::import::transcript_import_run,
             notes::commands::note_export,
             notes::commands::note_ask,
             chat::commands::chats_list,
@@ -645,6 +650,8 @@ pub fn run() {
             meetings::meeting_audio::e2e_meeting_recovery_offer,
             #[cfg(debug_assertions)]
             meetings::disk_watch::e2e_disk_space,
+            #[cfg(debug_assertions)]
+            meetings::import::e2e_transcript_files,
             #[cfg(debug_assertions)]
             meetings::meeting_audio::export::e2e_audio_export_file,
             #[cfg(debug_assertions)]

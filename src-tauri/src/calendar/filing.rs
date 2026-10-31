@@ -123,6 +123,38 @@ pub fn folder_for(key: &str) -> Option<String> {
     crate::notes::find_folder(&folder)
 }
 
+/// The folder for a meeting called `title` with no calendar event (an
+/// imported transcript's, `meetings/import.rs`): the rule of a series by
+/// that name — the name it had when the rule was made, or its meetings'
+/// (`named`: each series' meetings' names) — when there's one and its
+/// folder is still there.
+pub fn folder_for_title(named: &[(String, String)], title: &str) -> Option<String> {
+    let title = title.trim();
+    if title.is_empty() {
+        return None;
+    }
+    let folder = with_rules(|r| rule_for_title(r, named, title))?;
+    crate::notes::find_folder(&folder)
+}
+
+/// [`folder_for_title`]'s rule. Pure.
+fn rule_for_title(r: &Rules, named: &[(String, String)], title: &str) -> Option<String> {
+    r.rules.iter().find_map(|(series, rule)| {
+        let same = rule.title.trim().eq_ignore_ascii_case(title)
+            || named.iter().any(|(s, name)| s == series && name.trim().eq_ignore_ascii_case(title));
+        same.then(|| rule.folder.clone())
+    })
+}
+
+/// Each series' meetings' names in `notes` (series id, the meeting's name),
+/// for [`folder_for_title`].
+pub fn series_names(notes: &[Note]) -> Vec<(String, String)> {
+    notes
+        .iter()
+        .filter_map(|n| Some((series_of_note(n)?, n.event.as_ref()?.title.clone())))
+        .collect()
+}
+
 /// Whether a rule may move `note` into `folder`: it isn't there already,
 /// and it sits where Yap put it (Meetings, or Personal before a recording
 /// filed it) — never one the person moved (`folder_chosen`) or put in a
@@ -315,6 +347,21 @@ mod tests {
             service: String::new(),
         });
         n
+    }
+
+    #[test]
+    fn an_imported_meeting_finds_its_series_rule_by_name() {
+        let mut r = Rules::default();
+        r.rules.insert("weekly@example.com".into(), Rule { folder: "Design".into(), title: "Weekly sync".into(), created_ts: 1 });
+        r.rules.insert("abc123".into(), Rule { folder: "Suppliers".into(), title: "Old name".into(), created_ts: 1 });
+        // By the rule's own name, any case.
+        assert_eq!(rule_for_title(&r, &[], "weekly SYNC").as_deref(), Some("Design"));
+        // By what the series' meetings are called now.
+        let notes = [note(1, "Meetings", Some("1:abc123_20261005T140000Z"), 1)];
+        let mut named = series_names(&notes);
+        named[0].1 = "Supplier call".into();
+        assert_eq!(rule_for_title(&r, &named, "Supplier call").as_deref(), Some("Suppliers"));
+        assert_eq!(rule_for_title(&r, &named, "Something else"), None);
     }
 
     #[test]

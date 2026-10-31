@@ -1,6 +1,6 @@
 # Meetings
 
-The meeting recorder and its audio kept on disk, rolling digests and the action plan, the end of a recording, the notepad's AI helpers, and the meeting notepad window, plus the Meetings view. The full behaviour guide is [`docs/meetings.md`](../meetings.md); telling voices apart is [speakers.md](./speakers.md); call detection and guard rails are [call-detection-and-guards.md](./call-detection-and-guards.md); the calendar is [calendar.md](./calendar.md).
+The meeting recorder and its audio kept on disk, rolling digests and the action plan, the end of a recording, the notepad's AI helpers, the meeting notepad window and meetings imported from other apps' transcript files, plus the Meetings view. The full behaviour guide is [`docs/meetings.md`](../meetings.md); telling voices apart is [speakers.md](./speakers.md); call detection and guard rails are [call-detection-and-guards.md](./call-detection-and-guards.md); the calendar is [calendar.md](./calendar.md).
 
 [Architecture index](./README.md) · [CLAUDE.md](../../CLAUDE.md)
 
@@ -624,6 +624,97 @@ The meeting recorder and its audio kept on disk, rolling digests and the action 
   `notepad_split`, `notepad_split_preview`, `notepad_consent_message` (saves
   `meeting_consent_message`, emits `yap-consent-message-changed` for Settings'
   config copy); `yap-notepad-visible` tells the page when Rust shows/hides it.
+- **`meetings/import.rs`** (+ `meetings/import/`: `parse.rs`, `cues.rs`,
+  `text.rs`, `docx.rs`, `dates.rs`, `build.rs`) — **Import a transcript…**
+  (2026-10-31, the roadmap's "Import from Granola, Otter and Teams/Zoom
+  transcript files"): a meeting another app transcribed becomes a meeting
+  note as a recorded one would. **Readers** (each pure, by the file's
+  contents first, its extension second: `parse::parse`):
+  `cues.rs` — WebVTT (Teams' `<v Speaker>` voice tags; Zoom's and Google
+  Meet's "Name: text" cue convention; ">> NAME:" and dialogue dashes;
+  plain captions) and SubRip (a lost blank line, `{\an8}`, `<i>`), and the
+  older Teams Word layout ("0:0:0.0 --> 0:0:4.60", the name on a line of
+  its own); `text.rs` — Otter's `.txt` and Teams' Word download ("Priya
+  Shah  0:01" blocks under a header: title, "October 5, 2026, 2:30PM", "32m
+  15s", Otter's SPEAKERS), Zoom's saved transcript ("[Priya Shah]
+  14:02:31", clock times: the first is the start, past midnight counted on),
+  Google Meet's transcript saved as text ("00:05:00" marks, "Name: text"
+  lines, its "(2026-10-05 14:30 GMT+01:00) - Transcript" title), Granola
+  (**assumed**, no published format: an optional "# Title", "Date:" and
+  "Attendees:" lines, Markdown notes — My thoughts — then the transcript,
+  after a "Transcript" heading when there is one, as "Me:" / "Them:" or
+  "**Name:**" lines, maybe "[00:01:02]" times), and any "Name: text"
+  lines; `docx.rs` — the `.docx` read as a zip (the `zip` crate already in
+  Yap) of XML with a few lines of tag scanning (`<w:p>`, `<w:t>`,
+  `<w:tab/>` but not tab stops, `<w:br/>`; no `delText`/`instrText`), no
+  Office automation; a password-protected or old `.doc` (an OLE file) says
+  so; `docProps/core.xml`'s date as a last resort. **Shared**
+  (`parse.rs`): bytes decoded as the dictionary's files are (UTF-8 with or
+  without its BOM, UTF-16, Windows-1252), CRLF/CR; times ("01:02:03.450",
+  "02:03.4", "0:0:3.120", "00:00:01,000", Otter's "75:12"); names
+  (`name_like`: one to six capitalised words, no sentence punctuation, not
+  a heading word like "Note"; `clean_name`: "Shah, Priya" turned round,
+  "PRIYA SHAH", "(Guest)" off); a name said at a line's start counts only
+  when the file uses it twice, it's "Me"/"Them", or most of the file's
+  lines are named that way ("Note: the room moved" stays text); `tidy`:
+  lines in order (overlapping speakers kept apart), "started
+  transcription" lines out, a rolling caption's repeated top line dropped,
+  a sentence one speaker's cues cut in two joined (≤ 1.5 s gap, ≤ 30 s,
+  no full stop between); lines with no times placed by their words (150 a
+  minute, `estimated`). **The date** (`dates.rs` + `import::start_of`):
+  the transcript's header, else the file's name (Zoom's
+  `GMT20261005-143012` in UTC, Teams' `-20261005_143012-`, `2026-10-05
+  14.30.12`, "5 October 2026"), else its folder's name (Zoom's local
+  recording folder), else the document's or the file's own date less the
+  meeting's length (said "check it"); a date with no time at midday or
+  Zoom's first clock time; English month names, never "05/10/2026".
+  **The note** (`build.rs`, `notes::create_meeting` in one save):
+  `note_type` "meeting", **`source` "import"** (`notes::IMPORTED`,
+  `is_imported`; a field every Yap since 2026-10 keeps, so nothing new
+  lives only in fields an older Yap's save drops), `created_ts` the
+  meeting's start, each line `source` "them" with voice "p-1", "p-2"… named
+  in the speaker map from the file (`NameSource::Platform`: the person may
+  rename, no guess replaces it), "You" for Granola's "Me" or the speaker
+  the person picks (About you's name, or the one person with its first
+  name, picked for them), "Speaker 2" (Otter's, Zoom's) as voice
+  "them-2" — told apart, unnamed, so the naming cards may suggest who —
+  and "Them" for a line nobody's named on; `start_ms`/`end_ms` on the
+  meeting's clock (no two of a side alike: how the windows find a line),
+  `ts` the start plus it; attendees: the file's list, then whoever spoke,
+  never you; Granola's notes as My thoughts. **Title**: the person's own,
+  else the file's meeting name (Teams' cleaned of "-20261005_143012-Meeting
+  Recording", Meet's of its date and "- Transcript", Granola's heading),
+  else "Teams call · 5 Oct, 14:30" with `title_auto` for the AI title
+  (`meeting_assist::maybe_title` at the end, as for meetings). **Folder**:
+  a recurring series' rule by that name (`filing::folder_for_title`: the
+  rule's own name or its meetings' names), else Meetings; then the
+  calendar's meeting at that time while the calendar still has it (12
+  hours back: `calendar::link_imported` → `model::event_during`, the one
+  overlapping most, by half the shorter) — its name over a made-up title,
+  its attendees and invite, its series' rule (`filing::file_linked`).
+  **Then** each imported meeting's AI title and **action-plan job**
+  (`meeting_end::start_summary`, in the meeting's language as for any
+  meeting), one meeting after another (a model on this PC isn't asked for
+  five at once). **No audio**: `meeting_audio::start_job` and
+  `speakers::rerun::start` refuse an imported note (`IMPORTED`, "This
+  meeting was imported from a transcript file, so Yap has no audio of it.")
+  and the windows offer no ▶, Transcribe again, Find speakers or Export
+  audio. **Flow**: `transcript_import_pick` (Windows' dialog in Rust,
+  several files; test mode `e2e_transcript_files`) or
+  `transcript_import_add(paths)` (a drop) reads each file (≤ 25 MB, ≤ 40,000
+  lines) and **stages** it here, answering with a **dry preview** (`Preview`:
+  format and its label, title, start and where from, length, lines, the
+  speakers found with their lines, which is you, notes, the transcript
+  days for the page's retention warning) or the reason it can't be read
+  ("Yap can't read .pdf files as transcripts…", "no lines with who spoke or
+  when", "password-protected"); `transcript_import_run([{id, start, me,
+  title}])` imports only staged files, never one the preview didn't read;
+  `transcript_import_forget` / `_clear`. `calendar_meeting_notes` says
+  `imported`. Logs: counts and formats, never a file's name or a word.
+  Unit-tested per format with fictional fixtures (names, overlapping
+  cues, multi-line cues, BOMs, CRLF, Windows-1252, times past an hour,
+  speaker tags missing, a midnight, the preview, the date's sources, the
+  series rule, the calendar match); e2e `transcript-import.spec.js`.
 
 ## Frontend
 
@@ -826,6 +917,32 @@ The meeting recorder and its audio kept on disk, rolling digests and the action 
   a dashed divider "⚠ Couldn't transcribe 0:42–1:12 · **Try again**"
   (`retryChunk`; off while it records — "After the meeting" —, while a job
   runs, or with no audio), its tooltip naming the side.
+- **`lib/components/TranscriptImportDialog.svelte`** + **`lib/stores/transcriptImport.svelte.js`**
+  — "Import a transcript" (2026-10-31; `meetings/import.rs`): the main
+  window mounts the dialog while it's open (its own chunk). Opened by
+  Upload's "Import a transcript…" (under the audio drop zone), transcript
+  files dropped on Upload (`isTranscriptFile`: .vtt, .srt, .txt, .docx,
+  .md — several at once; an audio file still goes to Upload), and the
+  Meetings view's header ⋯ (`moreMenu`). Empty: a drop zone ("Drop
+  transcript files here", a click is Choose files…) and where each app's
+  file comes from. Then a card per file (the dry preview): its name and
+  format, "2 speakers · 128 lines · 32 min" ("about" when the file has no
+  times), the speakers with their line counts ("(you)" marked), **Title**
+  (placeholder: the file's meeting name, else "Yap names it from what was
+  said"), **When** (a `datetime-local` from the preview, with where it came
+  from: "From the file's name", "From when the file was saved: check
+  it"), **You** (a select of the named speakers, About you's match picked;
+  "The file's “Me”" for Granola), "Its notes go in My thoughts.", and the
+  retention warning when "Delete meeting transcripts after" would take its
+  lines at once; a file it can't read shows "Couldn't read it." and why,
+  and stays out. Files dropped on the dialog join it; ✕ takes one out.
+  **Import N meetings** → `transcript_import_run`; the toast "2 meetings
+  imported · Their summaries are on their way" with **Open** (the first, in
+  Notes); a file that failed stays with why. Esc, ✕, the scrim and Cancel
+  close it (not mid-import), the focus kept inside and given back.
+  `meetingAudio.svelte.js` `isImported`: the notepad's ⋯, the Notes list's
+  menu and the Meetings view's row menu leave out Transcribe again, Find
+  speakers and Export audio; the Meetings view's row says **Imported**.
 - **`lib/notepad/SplitPreview.svelte`** — the split preview window's page (label
   `split-preview`, App.svelte routes it, transparent body): one glass
   rectangle inset 24 px (`rgba(255,255,255,.10)`, a 2 px
