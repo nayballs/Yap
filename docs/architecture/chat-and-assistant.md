@@ -1996,15 +1996,36 @@ copyable. Yap's, in `chat/skills.rs`:
   it runs (`runsOn`: `meeting` — a meeting's Ask box, on that meeting —,
   `meetings` — Chat and Ask across meetings, on all of them — or `both`).
   **Built in** (`builtins`, in code, never stored; 15 since 31 Oct 2026, the
-  `/` menu's order): /followup-email (one meeting), /summary-for,
-  /decisions, /decision-log, /risks, /open-questions, /tickets, /prd,
-  /coach, /todos, /standup, /prep, /one-to-one, /weekly-recap,
-  /project-update (the table below). **Your own** in `skills.json`
+  `/` menu's and Settings' order): **the core six** (`CORE`) —
+  /followup-email (one meeting), /prep, /standup, /todos, /decisions,
+  /summary-for — then **More Skills**: /decision-log, /open-questions,
+  /risks, /tickets, /prd, /coach, /one-to-one, /weekly-recap,
+  /project-update (the table below). Each one's description is one short
+  line in one voice, starting with a verb ("Get ready for your next
+  meeting", "Draft tickets for the work agreed"; a unit test holds them to
+  it). **Your own** in `skills.json`
   (`SkillStore`, `Saver` "your Skills", a corrupt file set aside; ≤ 50):
   `skill_save` (new, a change, or a copy of a built-in: `basedOn`; what only
   a built-in carries — `gather`, `query`, `chip`, `question`, `document`,
   `asks` — never comes with a copy), `skill_delete`, `skills_list`
-  (built-ins first); `yap-skills-changed` to every window.
+  (built-ins first, each a `Listed`: the Skill with `shown` and `core`);
+  `yap-skills-changed` to every window.
+- **Shown or not** (31 Oct 2026; the maintainer: fifteen in the `/` menu
+  and as prompts was too much, "the UX on these things needs to look very
+  good"): each Skill's **"Show in the / menu"** switch (`skill_show {id,
+  shown}` → `set_shown`, skills.json's `menu` by Skill id, only the ones
+  set). Not set: the core six and your own are in the menus
+  (`shown_by_default`), the other nine wait in Settings' More Skills. Only
+  the `/` menus and the one-tap prompts follow it: **a Skill switched off
+  still runs when its whole command is sent** (`/tickets the supplier
+  call`) — `by_command`, `turn_for`, `meeting_skill` and the boxes'
+  `SkillPicker.parse` (`skillFor`) find every Skill; the menu just doesn't
+  list it. **An existing install** (`config::migrate_once` v7, a config
+  from v5 on — Skills came on 29 Oct, when configs were at v5) keeps the
+  six that were built in then: `keep_the_first_six` sets /risks, /coach
+  and /weekly-recap on (a switch already set stays; Yap keeps no count of
+  the Skills run, only a chat's own words say one ran, so it keeps all
+  six). An older config, and a new install, get the core six.
 - **The built-ins** (instructions short and firm, ≤ 600 characters, for the
   on-device 4B as for a cloud model; the citing is the run's lead, never the
   Skill's: `SKILL_MEETING_PROMPT` on one meeting, `SKILL_ACROSS_LEAD` and Ask
@@ -2013,18 +2034,20 @@ copyable. Yap's, in `chat/skills.rs`:
 
   | Command | Runs on | Reads across the meetings (`gather`) |
   |---|---|---|
+  | **Core** | | |
   | /followup-email | one meeting | — |
-  | /summary-for *who* | both | `latest`: the meeting the words name, else the latest (the words say who it's for) |
+  | /prep | across | `prep`: the next meeting on the calendar (or the one the words match) as passage 1, the earlier meetings with its people (the brief's "last time", `calendar/brief.rs` `gather`) and the user's and their open tasks |
+  | /standup | across | `standup`: your own words since the last working day began (Friday's on a Monday), your open tasks, the rest of today's calendar |
+  | /todos | across | `tasks` |
   | /decisions | both | a search |
+  | /summary-for *who* | both | `latest`: the meeting the words name, else the latest (the words say who it's for) |
+  | **More Skills** | | |
   | /decision-log | across | `decisions`: each meeting's decisions over the last 4 weeks (or the dates named), oldest first; a topic named: only those |
-  | /risks | both | a search |
   | /open-questions | both | `questions`: where questions were asked (and what came next), and the summaries' open questions, over the last 7 days or the meeting named |
+  | /risks | both | a search |
   | /tickets | both | `meeting`: the meeting named, else a search for the words, else the latest — **a Chat document** |
   | /prd | both | `meeting` — **a Chat document** (Problem, Goals, Requirements, Out of scope, Open questions) |
   | /coach | both | `you` |
-  | /todos | across | `tasks` |
-  | /standup | across | `standup`: your own words since the last working day began (Friday's on a Monday), your open tasks, the rest of today's calendar |
-  | /prep | across | `prep`: the next meeting on the calendar (or the one the words match) as passage 1, the earlier meetings with its people (the brief's "last time", `calendar/brief.rs` `gather`) and the user's and their open tasks |
   | /one-to-one *who* | across | `person`: the same for a one-to-one, with the person named or the next one-to-one's |
   | /weekly-recap | across | `week` |
   | /project-update *project* | across | `topic`: a search for the words, oldest first (needs them: `asks`) |
@@ -2107,42 +2130,83 @@ copyable. Yap's, in `chat/skills.rs`:
   checks, sources and pills are Ask across meetings' ([search.md](./search.md)).
   No model: the passages themselves (`passages_turn`, the Skill's own).
 - **The `/` menu** (`components/SkillMenu.svelte`, `stores/skills.svelte.js`
-  `SkillPicker(where)`, `core/skills.js`): in the notepad's Ask box and
-  the Notes view's Ask bar on a meeting note (`meeting`), Chat's composer
-  and the Meetings view's Ask bar (`meetings`): typing "/" at the start
-  lists the Skills that run there, the command typed so far first, Yap's
-  before yours (`matchSkills`); ↑ ↓, Enter runs the highlighted one, Tab
-  puts it in the box to add words, Esc closes it; the box's
-  `aria-activedescendant` follows the highlight. A sent "/command words"
-  runs it (`splitCommand`, `skillFor`); in Chat the question is saved as
-  typed.
-- **One-tap prompts**: the built-ins with a `chip` — **Coach me**, **List
-  my open to-dos**, **Write a weekly recap** — on Chat's empty thread
-  ("Try asking", then "Or type / for Skills…") and over the Meetings view's
-  Ask bar; a tap sends the Skill's `question` as that Skill (`runPrompt` /
-  `chatRequest {skill}`), an empty chat asked across the meetings from then
-  on. The Meetings view's cycling example questions stay, in its box.
-- **Settings → Assistant → Skills** (`settings/SkillsPage.svelte`): Yap's
-  (Open shows the instructions; **Save a copy** opens the form as yours,
-  "Based on Yap's /decisions", command `my-decisions`), then yours (Edit,
-  Delete behind Yap's confirm dialog), **New Skill** (the command follows
+  `SkillPicker(where)`, `core/skills.js` `skillMenu`): in the notepad's Ask
+  box and the Notes view's Ask bar on a meeting note (`meeting`), Chat's
+  composer and the Meetings view's Ask bar (`meetings`): typing "/" at the
+  start lists the Skills **shown** that run there — just "/", in two groups
+  under their headings, **Your Skills** then **Yap's Skills** (a role
+  `group` each, named by its heading); a command begun, one list without
+  headings, the command typed in full first, then the ones starting with
+  it, then the ones holding it, Yap's before yours (`matchSkills`), a
+  "Yours" tag on your own; the whole command of one off the menu typed,
+  no menu, so Enter sends it as typed (never your /deal-risks for /risks). A row: the `/command` in a column of its own,
+  then its line (`menuLine`: the description, else the name). ↑ ↓ (round
+  the ends), Enter runs the highlighted one, Tab puts it in the box to add
+  words, Esc closes it; the box's `aria-activedescendant` follows the
+  highlight, which the pointer takes only when it moves (a row scrolled
+  under a still pointer never takes it back). The foot: the keys, and
+  **More Skills**, which opens Settings → Skills there (`openMoreSkills`:
+  the main window's own `openSettings`, else `open_settings` and
+  `yap-open-settings`). In the paper look in the notepad, the main
+  window's (Settings' menus': `--yap-s2`, `--yap-s3` for the highlight)
+  elsewhere; light and dark from the tokens. A sent "/command words" runs
+  it (`splitCommand`, `skillFor`, shown or not); in Chat the question is
+  saved as typed. Chat's empty thread says "Or type / for Skills, like
+  /standup or /decisions."
+- **One-tap prompts** (`promptChips`): the first three of the built-ins
+  shown with a `chip` — **Prepare for my next meeting** (/prep, only with a
+  calendar connected: without one it could only ask which meeting), **Write
+  my stand-up**, **List my open to-dos**, **What did we decide?** (/decisions
+  on the last meeting) — on Chat's empty thread ("Try asking") and over the
+  Meetings view's Ask bar; a tap sends the Skill's `question` as that Skill
+  (`runPrompt` / `chatRequest {skill}`), an empty chat asked across the
+  meetings from then on. A prompt's Skill switched off takes the prompt
+  with it. (Coach me and Write a weekly recap were prompts until 31 Oct
+  2026; their Skills are in More Skills now.) The Meetings view's cycling
+  example questions stay, in its box.
+- **Settings → Assistant → Skills** (`settings/SkillsPage.svelte`,
+  `core/skills.js` `skillGroups`), three groups, each Skill a row — its
+  `/command` and name, its line, and on the right its **"Show in the /
+  menu"** switch (`Toggle`, "Show /prep in the / menu"; at once,
+  `setShown`; an error reads the list again as Rust has it — a full disk
+  keeps the switch and says so with Try again, `showSaveError`): **Your Skills** first (Edit,
+  Delete behind Yap's confirm dialog, **New Skill**: the command follows
   the name until you type one; why it can't be one said as you type; Runs
-  on: One meeting / Across meetings / Both). Saved at once to skills.json,
-  not through Settings' auto-saved config.
-- **Tests**: unit (`chat/skills.rs`: the built-ins — commands, lengths,
-  kinds, which write a document or ask —, save / copy / delete, an older
-  file, each gathering over a fictional team's meetings and calendar
+  on: One meeting / Across meetings / Both), **Yap's Skills** (the core
+  six) and **More Skills** (the other nine, "Switch one on to add it to the
+  / menu. Off, it still runs when you type its whole name, like
+  /tickets."). One of Yap's opens (Open) to where it runs (`whereItRuns`;
+  "In Chat, it writes its answer as a document beside the chat" for /tickets
+  and /prd), its instructions and **Save a copy** (the form as yours,
+  "Based on Yap's /decisions", command `my-decisions`). A row keeps its
+  group when switched: nothing jumps under the pointer. Saved at once to
+  skills.json, not through Settings' auto-saved config. The search finds
+  Your Skills, New Skill, Yap's Skills, More Skills and "Show in the /
+  menu".
+- **Tests**: unit (`chat/skills.rs`: the built-ins — commands, the core
+  first, lengths, one voice, kinds, which write a document or ask, the
+  prompts —, the menus' defaults and switches (yours on, a deleted Skill's
+  switch gone), a Skill off the menu still run by its whole command, the
+  first six kept, save / copy / delete, an older file and the `menu`
+  field, each gathering over a fictional team's meetings and calendar
   (`gather`, pure: a search left to `find`), what Yap asks first, every
-  Skill's request within an 8k model; `documents.rs` `name_citations`;
-  `search/ask.rs` the `about` line and a calendar passage;
-  `meeting_summary/chips.rs`: passages, checks), e2e `meeting-chips.spec.js`
-  (the menu, Enter / Tab / Esc, the built-ins and your own, Settings, Chat's
-  prompts and "/", the Meetings view) and `skills.spec.js` (the new ones in
-  each menu, /open-questions on a meeting, /decision-log and /prd in Chat
-  — the document, its citations named —, /project-update asking, Settings'
-  list and a copy); prompts measured with `yap.exe eval --chips` and the
-  `skills` scenarios (`--tag skills`, a turn's `skill`)
-  ([model-evals.md](../model-evals.md#more-skills-31-oct-2026)).
+  Skill's request within an 8k model; `config.rs`: v7 keeps the six for a
+  config from v5 on, not for an older one or a new install, and never
+  again once saved; `documents.rs` `name_citations`; `search/ask.rs` the
+  `about` line and a calendar passage; `meeting_summary/chips.rs`:
+  passages, checks), e2e `meeting-chips.spec.js` (the menu, Enter / Tab /
+  Esc, the core and your own, one off the menu typed in full, Settings,
+  Chat's prompts and "/", the Meetings view), `skills.spec.js` (a new
+  install: the core six in each menu, ↑ ↓ and the box's
+  `aria-activedescendant`, /open-questions on a meeting and /decision-log
+  in Chat typed in full, /prd and /tickets in Chat — the document, its
+  citations named —, a switch putting /project-update in the menu and
+  taking it out, More Skills opening Settings, your own copy first in the
+  menu and its switch, screenshots light and dark of the menu and
+  Settings → Skills) and `skills-existing.spec.js` (a v6 config and one of
+  its own Skills: the six kept, their switches on); prompts measured with
+  `yap.exe eval --chips` and the `skills` scenarios (`--tag skills`, a
+  turn's `skill`) ([model-evals.md](../model-evals.md#more-skills-31-oct-2026)).
 
 ## The context ring (2026-10-25)
 

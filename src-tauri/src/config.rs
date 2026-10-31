@@ -1673,7 +1673,7 @@ fn migrate_retired_groq_models(cfg: &mut YapConfig) {
 
 /// Current config schema version (see [`YapConfig::config_version`]). Bump it
 /// together with a new step in [`migrate_once`].
-const CONFIG_VERSION: u32 = 6;
+const CONFIG_VERSION: u32 = 7;
 
 /// One-time migrations, keyed by `config_version`. Returns whether anything
 /// ran; [`load`] then saves the result so no step ever runs twice.
@@ -1741,6 +1741,15 @@ fn migrate_once(cfg: &mut YapConfig) -> bool {
         // start and stop chime in Classic — until they switch more on.
         cfg.sound_locked = false;
         cfg.sound_cancelled = false;
+    }
+    if cfg.config_version < 7 && cfg.config_version >= 5 {
+        // v7 (2026-10-31): the `/` menus list Yap's core six Skills, the
+        // other nine one switch away (`chat/skills.rs`). An install that
+        // may have had Skills (they came on 29 Oct, when configs were at
+        // v5) keeps the six it had — /risks, /coach and /weekly-recap with
+        // three of the core — in skills.json's `menu`. An older config never
+        // ran a Yap with Skills: it gets the core six, as a new install.
+        crate::chat::skills::keep_the_first_six();
     }
     cfg.config_version = CONFIG_VERSION;
     true
@@ -3451,6 +3460,36 @@ mod tests {
         assert_eq!(saved["soundPack"], "classic");
         assert_eq!(saved["soundLocked"], true);
         assert_eq!(saved["soundNotice"], false);
+    }
+
+    /// The core six Skills (2026-10-31, `chat/skills.rs`): an install that
+    /// may have had Skills (a config from v5 on) keeps the six that were
+    /// built in then in its `/` menus; an older one, and a new install, get
+    /// the core six. (Each test has a Skills store of its own.)
+    #[test]
+    fn an_install_that_had_skills_keeps_its_six_in_the_menus() {
+        use crate::chat::skills;
+        let shown = || skills::listed().into_iter().filter(|l| l.shown).map(|l| l.skill.command).collect::<Vec<_>>();
+        let core: Vec<String> = skills::CORE.iter().map(|c| c.to_string()).collect();
+        // A new install: no migration, the core six.
+        assert!(!migrate_once(&mut YapConfig::default()));
+        assert_eq!(shown(), core);
+        // A config from before Skills came: the core six too.
+        let mut older: YapConfig = serde_json::from_str(r#"{"configVersion":4}"#).unwrap();
+        assert!(migrate_once(&mut older));
+        assert_eq!(shown(), core);
+        // One that may have had them: /risks, /coach and /weekly-recap stay.
+        let mut cfg: YapConfig = serde_json::from_str(r#"{"configVersion":6}"#).unwrap();
+        assert!(migrate_once(&mut cfg));
+        assert_eq!(cfg.config_version, CONFIG_VERSION);
+        let mut kept = core.clone();
+        kept.extend(["risks", "coach", "weekly-recap"].map(String::from));
+        assert_eq!(shown(), kept);
+        // Saved at v7: it never runs again, so a Skill switched off stays off.
+        skills::set_shown("builtin:coach", false).unwrap();
+        let mut reloaded: YapConfig = serde_json::from_str(&serde_json::to_string(&cfg).unwrap()).unwrap();
+        assert!(!migrate_once(&mut reloaded));
+        assert!(!shown().contains(&"coach".to_string()));
     }
 
     #[test]
