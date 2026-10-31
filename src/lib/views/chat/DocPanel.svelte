@@ -122,7 +122,7 @@
 
   // ---- the page you can edit -----------------------------------------------------------
 
-  // Preview with nothing flowing in: the editor (`createDocEditor`, its
+  // Preview with nothing flowing in: the editor (`createRichEditor`, its
   // chunk loaded the first time it's wanted), on `doc.draft` — the text
   // Source edits too — saving through `doc.input`.
   const editing = $derived(doc.view === 'preview' && !doc.gone && !doc.streaming);

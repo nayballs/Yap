@@ -55,6 +55,9 @@ fn engine_ready(note_id: u64) -> bool {
 /// (`yap-meeting-redo`, kind `speakers`).
 pub fn start(app: &AppHandle, note_id: u64) -> Result<(), String> {
     let note = crate::notes::get(note_id).ok_or("Note not found")?;
+    if crate::notes::is_imported(&note) {
+        return Err(meeting_audio::IMPORTED.to_string());
+    }
     if crate::meetings::meeting::recording_note() == Some(note_id) {
         return Err("Stop the recording first".to_string());
     }

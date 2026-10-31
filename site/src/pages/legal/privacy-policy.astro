@@ -1,0 +1,56 @@
+---
+import Layout from '../../layouts/Layout.astro';
+import DraftNote from '../../components/DraftNote.astro';
+import { NAME, CURRENT_POLICY_URL } from '../../brand';
+---
+<Layout
+  title="Privacy policy"
+  description={`${NAME}’s privacy policy. A placeholder until the site’s own policy is written.`}
+  stickyCta={false}
+>
+  <article class="section">
+    <div class="wrap-narrow stack legal">
+      <h1>Privacy policy</h1>
+      <p class="tag">Placeholder</p>
+      <p class="lede">
+        This page will hold {NAME}’s privacy policy. Until it does, the policy that applies is the one for the optional
+        account service: <a href={CURRENT_POLICY_URL}>read the current privacy policy</a>.
+      </p>
+      <p>
+        In plain words, while you wait: {NAME} runs on your PC, has no telemetry, and sends nothing anywhere unless you
+        choose a feature that needs to. <a href="/privacy">Privacy and data</a> lists each of those features and what it
+        sends.
+      </p>
+
+      <h2>What the full policy will cover</h2>
+      <ul>
+        <li>Who is responsible for {NAME} and how to contact them</li>
+        <li>The app: what it stores on your PC, and what the features you switch on send, and to whom</li>
+        <li>The optional account: what it holds, why, for how long, and how to delete it</li>
+        <li>This website: no cookies, no analytics, and the server logs the host keeps</li>
+        <li>Your rights under UK and EU data protection law, and how to use them</li>
+        <li>How changes to the policy are announced</li>
+      </ul>
+
+      <DraftNote>
+        Waits on the name and the legal operator (plan §10.2): the policy names who runs {NAME}, and moves here from the
+        account service, whose URLs keep answering for installed builds. Terms of use go beside it at /legal/terms.
+      </DraftNote>
+    </div>
+  </article>
+</Layout>
+
+<style>
+  .legal h2 {
+    margin-top: 24px;
+    font-size: 1.5rem;
+  }
+  .legal ul {
+    display: grid;
+    gap: 6px;
+    color: var(--t-fg-80);
+  }
+  .legal .tag {
+    justify-self: start;
+  }
+</style>

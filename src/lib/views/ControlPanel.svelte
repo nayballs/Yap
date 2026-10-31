@@ -31,7 +31,9 @@
   import { initAlerts } from '../notices/alerts.js';
   import { initMicOffers } from '../notices/micOffer.js';
   import { initMicTips } from '../notices/micTips.js';
+  import { initCompanyFolders } from '../notices/companyFolders.js';
   import { initUpload } from '../stores/upload.svelte.js';
+  import { transcriptImport, initTranscriptImport } from '../stores/transcriptImport.svelte.js';
   import { initMemory } from '../stores/memory.svelte.js';
   import { initCleanupOffer } from '../notices/cleanupOffer.js';
   import { initFeatureTips } from '../notices/featureTips.js';
@@ -127,6 +129,9 @@
   initMicOffers();
   // "Yap didn't hear you clearly" with one tip (dictation/mic_tips.rs).
   initMicTips();
+  // "File every meeting with example.com in Clients?" after a meeting filed
+  // by hand (calendar/filing/companies.rs), with Undo after Yes.
+  initCompanyFolders();
   // Reset app (privacy/reset.rs): the views below are shown afresh.
   let dataGeneration = $state(0);
   listen('yap-data-reset', () => dataGeneration++);
@@ -134,6 +139,9 @@
   // the "Transcription complete" toast, whichever view is up — the view
   // unmounts when you leave it (or Chat opens by itself).
   initUpload();
+  // Import a transcript… (transcriptImport.svelte.js): "Open" on its toast
+  // opens the meeting in Notes.
+  initTranscriptImport({ openNote: (id) => openNoteAt({ id }) });
   // Memory (memory.rs via memory.svelte.js): "Yap remembered: your sister
   // is Rochelle" with Undo and Manage (→ Settings → Memory).
   initMemory({ openSettings: (section) => openSettings(section) });
@@ -564,6 +572,14 @@
 <!-- "Connect your calendar" (calendar.svelte.js `openConnectDialog`): every
      Connect calendar button outside Settings opens it. -->
 <ConnectCalendarDialog />
+
+<!-- "Import a transcript" (transcriptImport.svelte.js): Upload and the
+     Meetings view's ⋯ open it (loads on first use). -->
+{#if transcriptImport.open}
+  {#await import('../components/TranscriptImportDialog.svelte') then { default: TranscriptImportDialog }}
+    <TranscriptImportDialog />
+  {/await}
+{/if}
 
 <!-- Settings modal overlay. <Settings> is always mounted (see header comment);
      the backdrop just hides it. -->

@@ -147,11 +147,13 @@ pub fn now() -> Waiting {
 
 /// A snip landed in Chat ([`Waiting::land`]).
 pub fn landed(app: &AppHandle, conversation: Option<u64>, image: ChatImage) {
+    super::thumbs::prepare_tiles(app, std::slice::from_ref(&image));
     change(Some(app), |w| w.land(conversation, vec![image]));
 }
 
 /// Pictures pasted or dropped into the box.
 pub fn added(app: &AppHandle, images: Vec<ChatImage>) {
+    super::thumbs::prepare_tiles(app, &images);
     change(Some(app), |w| w.add(images));
 }
 

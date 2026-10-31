@@ -22,7 +22,8 @@
   import { openContextMenu } from '../../ui/contextMenu.svelte.js';
   import { formatHotkeySpec } from '../../core/hotkeys.js';
   import { modelName, providerName } from '../../core/aiModel.js';
-  import { chatImageUrl, SNIP_PROMPTS, sizeLine, imageItems } from './chatImages.js';
+  import { SNIP_PROMPTS, sizeLine, imageItems, tilePlaced, shown } from './chatImages.js';
+  import { screenPixels } from './chatShots.svelte.js';
   import { tooLongLine } from './chatBudget.js';
   import SkillMenu from '../../components/SkillMenu.svelte';
   import ModelChip from './ModelChip.svelte';
@@ -106,7 +107,7 @@
 
   /** A screenshot's right-click menu: Open, Copy image, Save image as…. */
   function shotMenu(e, img) {
-    openContextMenu(e, imageItems(img, { onview: (id) => (chat.viewing = id) }), { label: 'Screenshot' });
+    openContextMenu(e, imageItems(img, { onview: (i) => (chat.viewing = i) }), { label: 'Screenshot' });
   }
 
   /** + → "Take a screenshot": Yap's window leaves the shot (snip.rs). */
@@ -216,16 +217,31 @@
       {/if}
       <div class="shotrow">
         {#each chat.attached as img (img.id)}
-          <div class="shotchip">
+          <!-- A 120 px tile, as the Claude app's (chatImages.js `placed`): the
+               whole picture on a fill, at exactly its device pixels (Rust's
+               thumbnail, snip/thumbs.rs), the ring over its edge; the ✕ and
+               its size on hover. -->
+          {@const t = tilePlaced(img, screenPixels.ratio)}
+          <div class="shotchip shotframe" style:width="{t.frame.w}px" style:aspect-ratio="{t.frame.w} / {t.frame.h}">
             <button
               type="button"
               class="thumb"
               title="Open the screenshot (right-click to copy or save it)"
               aria-label={`Screenshot, ${sizeLine(img)}`}
-              onclick={() => (chat.viewing = img.id)}
+              onclick={() => (chat.viewing = img)}
               oncontextmenu={(e) => shotMenu(e, img)}
             >
-              <img src={chatImageUrl(img.id)} alt="" />
+              <img
+                src={t.src}
+                alt=""
+                draggable="false"
+                decoding="async"
+                use:shown
+                style:left={t.pic.x}
+                style:top={t.pic.y}
+                style:width={t.pic.w}
+                style:height={t.pic.h}
+              />
             </button>
             <span class="shotsize">{sizeLine(img)}</span>
             <button type="button" class="shotx" aria-label="Remove the screenshot" title="Remove" onclick={() => removeShot(img.id)}>
@@ -684,9 +700,11 @@
   }
   .shotrow {
     display: flex;
-    align-items: center;
+    align-items: flex-end;
     flex-wrap: wrap;
     gap: 8px;
+    /* Room for a tile's ✕, which sits out over its corner. */
+    padding: 8px 8px 0 0;
   }
   /* The passage a question is about (the document panel's selection). */
   .quotebar {
@@ -749,64 +767,99 @@
     width: 11px;
     height: 11px;
   }
+  /* A waiting screenshot's tile (the frame itself: app.css .shotframe). */
   .shotchip {
-    position: relative;
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    padding: 3px 26px 3px 3px;
-    border: 1px solid var(--yap-border-subtle);
-    border-radius: var(--yap-r-lg, 10px);
-    background: var(--yap-s2);
+    flex: 0 0 auto;
   }
   .thumb {
+    position: absolute;
+    inset: 0;
     display: block;
     padding: 0;
     border: none;
-    border-radius: var(--yap-r-sm, 6px);
+    border-radius: inherit;
     overflow: hidden;
-    background: var(--yap-s1);
+    background: none;
     cursor: zoom-in;
   }
-  .thumb img {
-    display: block;
-    height: 52px;
-    max-width: 120px;
-    object-fit: cover;
+  .thumb:focus-visible {
+    outline: none;
   }
+  .shotchip:has(.thumb:focus-visible) {
+    box-shadow: var(--yap-focus);
+  }
+  /* Its size, quiet, on hover (as the Claude app's badge sits). */
   .shotsize {
-    font-size: 10.5px;
+    position: absolute;
+    left: 6px;
+    bottom: 6px;
+    z-index: 2;
+    padding: 1px 6px;
+    border-radius: var(--yap-r-full);
+    background: var(--yap-s2);
+    box-shadow: inset 0 0 0 var(--yap-hairline) var(--yap-shot-ring);
     color: var(--yap-muted);
+    font-size: 10px;
     font-variant-numeric: tabular-nums;
     white-space: nowrap;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity var(--yap-dur);
   }
   .copiedline {
     margin-top: 6px;
     font-size: 11.5px;
     color: var(--yap-muted);
   }
+  /* ✕: a small round button out over the tile's corner, on hover or
+     keyboard focus (always on a touch screen), as the Claude app's. */
   .shotx {
     position: absolute;
-    top: 4px;
-    right: 4px;
-    width: 18px;
-    height: 18px;
+    top: -7px;
+    right: -7px;
+    z-index: 3;
+    width: 20px;
+    height: 20px;
     display: grid;
     place-items: center;
     padding: 0;
     border: none;
     border-radius: 50%;
-    background: none;
+    background: var(--yap-s2);
+    box-shadow: inset 0 0 0 var(--yap-hairline) var(--yap-shot-ring), var(--yap-shadow-sm);
     color: var(--yap-muted);
     cursor: pointer;
+    opacity: 0;
+    transition: opacity var(--yap-dur);
+  }
+  /* A bigger target than it looks. */
+  .shotx::before {
+    content: '';
+    position: absolute;
+    inset: -3px;
+    border-radius: 50%;
   }
   .shotx:hover {
-    background: var(--yap-s3, var(--yap-s1));
     color: var(--yap-fg);
   }
+  .shotx:focus-visible {
+    outline: 2px solid var(--yap-focus-ring);
+    outline-offset: 1px;
+  }
   .shotx svg {
-    width: 11px;
-    height: 11px;
+    width: 10px;
+    height: 10px;
+  }
+  .shotchip:hover .shotx,
+  .shotchip:focus-within .shotx,
+  .shotchip:hover .shotsize,
+  .shotchip:focus-within .shotsize {
+    opacity: 1;
+  }
+  @media (hover: none), (pointer: coarse) {
+    .shotx {
+      opacity: 1;
+    }
   }
   .prompts {
     display: flex;

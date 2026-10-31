@@ -668,6 +668,13 @@ pub fn unread_store() -> Option<&'static str> {
     with_unread(|list| list.iter().find(|u| u.saver.tells).map(|u| u.saver.whole))
 }
 
+/// The first of the stores `ids` names ([`Saver::id`]) whose file couldn't
+/// be read, as it's named ("your notes"): deleting a kind of data waits for
+/// the stores it changes (`privacy/reset.rs`), quiet ones too.
+pub fn unread_among(ids: &[&str]) -> Option<&'static str> {
+    with_unread(|list| list.iter().find(|u| ids.contains(&u.saver.id)).map(|u| u.saver.whole))
+}
+
 /// `T` with `disk` (a store's file, read at last) and what `mem` holds — it
 /// started empty (`T::default()`) when the file couldn't be read, and has
 /// what was added since — put together in `mem` ([`merge_values`]). Yap's

@@ -105,9 +105,11 @@ the PNG (`snip/attach.rs`).
   only the whole utterance), the page's commands (`snip_start {origin}`,
   `chat_images_usage`, `chat_images_prepare`), the `yapsnip` URI scheme
   (`serve`: a chat screenshot's PNG by id only, `http://yapsnip.localhost/<id>`
-  in WebView2, anything else a 404) and `init` (the capture device warmed 8 s
-  after launch when the shortcut is bound; the retention sweep 30 s after
-  launch and daily).
+  in WebView2, `?w=&h=` its thumbnail at that size, anything else a 404;
+  answered off the main thread since 2026-10-31, `lib.rs`
+  `register_asynchronous_uri_scheme_protocol`) and `init` (the capture device
+  warmed 8 s after launch when the shortcut is bound; the retention sweep
+  30 s after launch and daily).
 - **`snip/capture.rs`** — monitors (`EnumDisplayMonitors`, physical pixels,
   per-monitor DPI) and their HDR state from DisplayConfig
   (`QueryDisplayConfig` → each path's GDI source name, its advanced colour
@@ -145,6 +147,9 @@ the PNG (`snip/attach.rs`).
 - **`snip/ocr.rs`** — "Send its text instead": Windows' OCR (below).
 - **`snip/images.rs`** — the screenshots on disk and the copies models get
   (below).
+- **`snip/thumbs.rs`** — Chat's thumbnails at exactly the device pixels the
+  page draws a screenshot at, kept beside it and deleted with it (below,
+  "How a screenshot looks").
 - **`snip/turn.rs`** — a question's screenshots on their way to the model
   (below).
 - **`snip/vision.rs`** — which models read images, and the switch (below).
@@ -314,17 +319,17 @@ global hook never sees keys while a Yap window has the focus.
   open (`takeSnip`). **Which conversation**: the one Chat shows, when the
   main window was on screen on one at the snip (`assistant::chat_viewing`
   + `notice::window_view`); else a new chat.
-- The composer: the thumbnail (52 px high, its size, ✕), the three one-tap
-  prompts — **What's this?**, **Explain this error**, **Summarise** (each
+- The composer: the screenshot's 120 px tile (its size and ✕ on hover:
+  "How a screenshot looks", below), the three one-tap prompts — **What's this?**, **Explain this error**, **Summarise** (each
   sends at once, with the screenshot) — "Ask about this screenshot…" in the
   box, the caret there (dictating into it works: Chat's mic, or the hotkey's
   in-page fallback). **Enter on an empty box asks "What's this?"**. Up to 4
   screenshots a question (snipping again adds one). They wait while another
   view shows — Rust keeps them since 2026-10-25 (`snip/waiting.rs`, below),
   so a question asked out loud takes them too. Never sent by itself.
-- A question keeps its screenshots: a thumbnail in its bubble (click: large;
-  Esc closes), or "Screenshot removed after 30 days" (the setting's period)
-  once the sweep removed it (`chat_get` marks it `gone`).
+- A question keeps its screenshots: over its bubble, at their own pixels
+  (click: large; Esc closes), or "Screenshot removed after 30 days" (the
+  setting's period) once the sweep removed it (`chat_get` marks it `gone`).
 - + → "Take a screenshot" starts one from Chat (the main window leaves the
   shot).
 - **Pasted or dropped** (`snip/attach.rs`, phase 2): Ctrl+V of a picture in
@@ -350,6 +355,71 @@ global hook never sees keys while a Yap window has the focus.
 - **A screenshot's right-click menu** (in the box, in a question, opened
   large): Open, **Copy image**, **Save image as…** (`chat_image_copy`,
   `chat_image_save`: below).
+
+## How a screenshot looks (2026-10-31, after the Claude app's)
+
+The maintainer: the Claude Code app's screenshots "have this nice white
+tinge to them and they look really crisp". Measured in the Claude desktop
+app's own bundle (the private repo's `docs/claude-desktop-screenshots.md`
+has the teardown and the numbers) and ported, not copied:
+
+- **The frame** (app.css `.shotframe`, every screenshot in Chat: the box's
+  tile, a question's picture, the viewer): a fill (`--yap-shot-fill`: white;
+  `#12100d` in the dark, a step under the page) with a soft drop
+  (`--yap-shot-drop`), radius 10 px, the picture in it, and a **ring laid
+  over the picture's edge** — an `::after` with an inset box-shadow, not a
+  border round it — **one device pixel wide** (`--yap-hairline`: 1px, 0.8px
+  at 125 %, ⅔ px at 150 %, 0.5px at 200 %…; Claude's steps stop at 2x, 3x,
+  4x, so its ring is a 1.5-pixel blur at 150 %). Its colour
+  (`--yap-shot-ring`) is **white at 20 % in the dark theme** — Claude's
+  exact value, the "white tinge": the picture's outermost device pixels
+  lifted (on the fill, `#12100d` → `#41403d`) — and warm ink at 16 % in the
+  light; a little stronger on hover.
+- **The box's tile** (Composer.svelte): a 120 × 120 px square (Claude's
+  7.5rem) whatever the picture's shape, the whole picture contained in it
+  (never cropped; the old 52 px strip cropped it), the fill where it doesn't
+  reach. ✕ is a 20 px round button out over the top-right corner and the
+  size a quiet badge bottom-left, both shown on hover or keyboard focus (✕
+  always on a touch screen). Click: large; right-click: the menu.
+- **In a question** (ChatMessage.svelte): the pictures over its words, the
+  words in the bubble under them (Claude's user turn), right-aligned and
+  lined up at the foot. Each as wide as **its own pixels over the device
+  pixel ratio** — one image pixel per device pixel, so a snip comes back the
+  size it was on screen — at most 480 × 320 px, 240 wide each of several,
+  never wider than a bubble (78 % of the thread, settled 250 ms after a
+  resize) and never under a 120 px frame (a small snip sits on the fill).
+- **Opened large** (ShotViewer.svelte): a darker scrim
+  (`--yap-shot-scrim`), the whole picture 1:1 when it fits the window less
+  32 px all round, else as big as fits; the frame and the modal shadow.
+- **Crisp**: the browser never scales a picture. `chatImages.js` `placed`
+  works out, from the picture's size, the box and `devicePixelRatio`
+  (followed: `chatShots.svelte.js` `screenPixels`), the exact device pixels
+  it's drawn at, puts it there on whole device pixels (centred by whole
+  pixels, sized in % of its frame), and asks for that size:
+  `http://yapsnip.localhost/<id>?w=<px>&h=<px>`. **`snip/thumbs.rs`** makes
+  it — the stored PNG area-averaged (`images::shrink`: every source pixel
+  counts) to exactly that size — keeps it beside the image
+  (`chat-images/thumbs/<id>-<w>x<h>.png`, 6 sizes an image, the least used
+  going), and serves it; the picture's own size is the PNG itself. The
+  box's tile is made ahead as a snip, a paste or a drop lands
+  (`thumbs::prepare_tiles`, at the main window's scale); anything else the
+  first time it's asked for, one at a time. A size that isn't the picture's
+  shape, or bigger than it, gets the PNG. **Deleted with the image**: by id
+  (`images::delete`: a conversation deleted, Delete all), by the sweep
+  (`thumbs::sweep_in`: a thumbnail whose image is gone). Claude's app lets
+  Chromium scale the original into its box (`object-fit: contain`) and only
+  uses `srcset="… 2x"` on a 2x screen; on Windows' 125 % and 150 % that's a
+  rescale.
+- **Measured** (`e2e/chat-shots.spec.js` + `-150`: a made-up 1920 × 1080
+  screenshot of a dark editor, the drawn device pixels against its ideal
+  area-averaged copy at the same size; mean difference per channel / edge
+  contrast against the ideal's): before, at 100 % the tile 3.92 / 1.11
+  (aliased, and cropped), a question's picture 2.61 / 0.87 (soft), the
+  viewer 2.36 / 1.04; at 150 % 2.27 / 0.88, 2.79 / 0.96, 2.55 / 1.01. Now
+  **0 / 1.00 everywhere, at both scalings**: what's on screen is the ideal,
+  pixel for pixel. (CDP's emulated device scale factor lays a page out at
+  100 % and scales it, which no real screen does: the 150 % specs run
+  WebView2 at a real 1.5 with `--force-device-scale-factor`.)
 
 ## Copy and save (`snip/copy_save.rs`, phase 2)
 
@@ -667,7 +737,8 @@ doesn't show it (a screenshot never goes there).
   0 = forever; anything else counts as 30). The sweep (`images::sweep`, at
   launch and daily, and at once when the setting changes) deletes files past
   it, an image no conversation refers to (a snip never sent) after a day,
-  and leftover temp files.
+  and leftover temp files — and the thumbnails of every image gone
+  (`thumbs::sweep_in`; `images::delete` takes an image's with it).
 - **Settings → Privacy & data → Chat screenshots** (2026-10-25) says where
   they are — Yap's own folder, never Pictures (a snip goes elsewhere only
   when it's saved: Shift, Save image) — with **Open folder**
@@ -724,7 +795,11 @@ doesn't show it (a screenshot never goes there).
   made-up dialog's "Error 0x80070005: Access is denied." — it says so and
   passes on a PC with no OCR language), `snip/images.rs` (ids, PNG
   round trip, per-provider sizes, area averaging, fitting, the sweep and
-  retention, deleting with a conversation), `snip/turn.rs` (request shapes
+  retention, deleting with a conversation — its thumbnail too),
+  `snip/thumbs.rs` (contained, never enlarged, the tile at 100 / 125 / 150 /
+  200 %; only the picture's own shape and smaller; made at its size from
+  the whole picture, kept, deleted by id and by the sweep; six sizes an
+  image, the least used going), `snip.rs` `thumb_size` (the query), `snip/turn.rs` (request shapes
   per provider, only the question gets the images, the task-local,
   redaction, which earlier images go again), `snip/vision.rs` (family rules,
   the lists first, refusals, the switch), `snip/overlay.rs` (the dim, the
@@ -782,6 +857,24 @@ doesn't show it (a screenshot never goes there).
   dictation is going on; Settings' switch (off: Chat's "Turn it on"),
   Remove, the download there; the picker's "Reads images" on the 4B. The
   model evaluations (`yap.exe eval --vision`, model-evals.md).
+- **e2e, how they look** (2026-10-31, `e2e/chat-shots.spec.js` at 100 %,
+  `e2e/chat-shots-150.spec.js` at a real 150 %; the tests in
+  `e2e/support/chat-shots.js`, the measuring in `e2e/support/sharpness.js`;
+  4 each): the box's tile — a 120 px square, Rust's thumbnail at its device
+  pixels (120 × 68 / 180 × 101 for a 16:9 screen) drawn 1:1 and kept in
+  `thumbs/`, the ring's colour and width per theme read from `::after` and
+  from the screen's own pixels (the fill lifted on the top row only), ✕ and
+  the size on hover out over the corner, ✕ takes it out; a question's
+  pictures — a small snip at its own pixels, a screen as a thumbnail at its
+  device pixels within 480 × 320, two side by side within 240 each, lined up
+  at the foot; the menu on the tile (Copy image), a sent picture (Open) and
+  the viewer (Save image as…), the viewer 1:1 for a small picture and a
+  thumbnail at its device pixels for a screen; and the measuring above
+  (fails over a mean difference of 1). Named screenshots at the device's own
+  pixels, light and dark (`test-results/app/screenshots/chat-shots/`).
+  `snip.spec.js`: the tile's thumbnail at 120 × 60 for a 200 × 100 snip,
+  and a screenshot's thumbnails gone with it (the 7-day sweep, a deleted
+  conversation).
 - **Real-app robot** (`e2e-real/snip.real.js`): real monitors, a real drag
   (`yaprobot snipdrag`, only onto the robot's own overlay) over swatches on
   an Edge page on each monitor: every swatch within ±2, the overlay within

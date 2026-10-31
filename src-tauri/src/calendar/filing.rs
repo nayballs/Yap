@@ -22,6 +22,14 @@
 //! A folder renamed takes its rules along; a folder deleted drops them
 //! (`notes::commands`). Reset app keeps it, like the folders themselves.
 //! Logs ids and counts, never a title.
+//!
+//! **By company** ([`companies`], 2026-10-31): "Meetings with people from
+//! example.com go in Clients", from the invite's attendees' email domains,
+//! kept in the same file. **When rules disagree** ([`folder_for_meeting`]):
+//! a series rule beats a company rule, and the person's own move beats
+//! both ([`may_file`]).
+
+pub(crate) mod companies;
 
 use std::collections::BTreeMap;
 #[cfg(not(test))]
@@ -49,9 +57,19 @@ pub struct Rule {
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Rules {
-    /// Series id → its folder.
+    /// Series id → its folder; a company's rule under `company:<domain>`
+    /// ([`companies::rule_key`]), which an older Yap keeps.
     #[serde(default)]
     pub rules: BTreeMap<String, Rule>,
+    /// The company offers' answers, and when the last went up (an older
+    /// Yap saving the file drops them: an offer may come once more).
+    #[serde(default, skip_serializing_if = "companies::Offers::is_empty")]
+    pub company_offers: companies::Offers,
+    /// Meeting notes' companies, by note id (an older Yap saving the file
+    /// drops them: the past meetings are then found by the calendar's
+    /// invites alone).
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub note_domains: BTreeMap<String, companies::Seen>,
 }
 
 pub static SAVER: crate::shell::saving::Saver =
@@ -123,6 +141,38 @@ pub fn folder_for(key: &str) -> Option<String> {
     crate::notes::find_folder(&folder)
 }
 
+/// The folder for a meeting called `title` with no calendar event (an
+/// imported transcript's, `meetings/import.rs`): the rule of a series by
+/// that name — the name it had when the rule was made, or its meetings'
+/// (`named`: each series' meetings' names) — when there's one and its
+/// folder is still there.
+pub fn folder_for_title(named: &[(String, String)], title: &str) -> Option<String> {
+    let title = title.trim();
+    if title.is_empty() {
+        return None;
+    }
+    let folder = with_rules(|r| rule_for_title(r, named, title))?;
+    crate::notes::find_folder(&folder)
+}
+
+/// [`folder_for_title`]'s rule. Pure.
+fn rule_for_title(r: &Rules, named: &[(String, String)], title: &str) -> Option<String> {
+    r.rules.iter().find_map(|(series, rule)| {
+        let same = rule.title.trim().eq_ignore_ascii_case(title)
+            || named.iter().any(|(s, name)| s == series && name.trim().eq_ignore_ascii_case(title));
+        same.then(|| rule.folder.clone())
+    })
+}
+
+/// Each series' meetings' names in `notes` (series id, the meeting's name),
+/// for [`folder_for_title`].
+pub fn series_names(notes: &[Note]) -> Vec<(String, String)> {
+    notes
+        .iter()
+        .filter_map(|n| Some((series_of_note(n)?, n.event.as_ref()?.title.clone())))
+        .collect()
+}
+
 /// Whether a rule may move `note` into `folder`: it isn't there already,
 /// and it sits where Yap put it (Meetings, or Personal before a recording
 /// filed it) — never one the person moved (`folder_chosen`) or put in a
@@ -134,18 +184,82 @@ pub fn may_file(note: &Note, folder: &str) -> bool {
         && (here.is_empty() || here.eq_ignore_ascii_case(crate::notes::MEETINGS) || here.eq_ignore_ascii_case(crate::notes::PERSONAL))
 }
 
+/// Where a rule files a note: by its series, or by its company.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum By {
+    Series,
+    Company,
+}
+
+/// Which rule wins (pure): the series' over the company's. (The person's
+/// own move beats both: [`may_file`].)
+pub fn pick(series: Option<String>, company: Option<String>) -> Option<(String, By)> {
+    series.map(|f| (f, By::Series)).or_else(|| company.map(|f| (f, By::Company)))
+}
+
+/// The folder the note of the meeting with calendar key `key` and
+/// attendees `emails` goes to: its series' rule, else its company's
+/// ([`companies::folder_for`]), when the folder is still there.
+pub fn folder_for_meeting(key: &str, emails: &[String]) -> Option<String> {
+    folder_by(key, emails).map(|(f, _)| f)
+}
+
+fn folder_by(key: &str, emails: &[String]) -> Option<(String, By)> {
+    let series = folder_for(key);
+    // (The company's looked up only when it could win.)
+    let company = if series.is_some() { None } else { companies::folder_for(emails).map(|(_, f)| f) };
+    pick(series, company)
+}
+
 /// Note `note_id` was just tied to calendar meeting `key` (a recording
-/// started during it): into its series' folder when there's a rule and
-/// [`may_file`]. Returns the folder it went to.
-pub fn file_linked(note_id: u64, key: &str) -> Option<String> {
-    let folder = folder_for(key)?;
+/// started during it, or the calendar made it), its invite's attendees
+/// `emails`: their companies kept, and the note into its series' folder or
+/// its company's when there's a rule and [`may_file`]. Returns the folder
+/// it went to.
+pub fn file_linked(note_id: u64, key: &str, emails: &[String]) -> Option<String> {
+    companies::remember(note_id, emails);
+    let (folder, by) = folder_by(key, emails)?;
+    move_by_rule(note_id, folder, by)
+}
+
+/// An imported transcript's note (`note_id`, made already) with its
+/// attendees' email addresses (`emails`, "sam@example.com" or "Sam Lee
+/// <sam@example.com>"): their companies kept, and the note into its
+/// company's folder when there's a rule and it sits where Yap put it
+/// ([`may_file`]: Personal or Meetings, not a folder the import was told
+/// to use). Returns the folder it went to. Call it once the note is made,
+/// before telling the windows (it emits nothing itself); no network, no
+/// windows, fine on any thread.
+// The transcript import's hook: unused until the import lands and calls it.
+#[allow(dead_code)]
+pub fn file_imported<S: AsRef<str>>(note_id: u64, emails: &[S]) -> Option<String> {
+    let emails: Vec<String> = emails.iter().map(|e| e.as_ref().to_string()).collect();
+    companies::remember(note_id, &emails);
+    let (_, folder) = companies::folder_for(&emails)?;
+    move_by_rule(note_id, folder, By::Company)
+}
+
+fn move_by_rule(note_id: u64, folder: String, by: By) -> Option<String> {
     let note = crate::notes::get(note_id)?;
     if !may_file(&note, &folder) {
         return None;
     }
     crate::notes::update(note_id, None, None, Some(folder.clone()), None).ok()?;
-    tracing::info!(note_id, "calendar: a meeting note filed by its series' rule");
+    match by {
+        By::Series => tracing::info!(note_id, "calendar: a meeting note filed by its series' rule"),
+        By::Company => tracing::info!(note_id, "calendar: a meeting note filed by its company's rule"),
+    }
     Some(folder)
+}
+
+/// A note deleted: what the rules kept about it goes too.
+pub fn forget_note(note_id: u64) {
+    companies::forget_note(note_id);
+}
+
+/// Reset app: every note went (the rules stay).
+pub fn forget_notes() {
+    companies::forget_notes();
 }
 
 /// The other notes of series `series` (besides `except`) that aren't in
@@ -253,6 +367,10 @@ pub fn meeting_file(app: AppHandle, note_id: u64, folder: String, series: bool) 
     let changed: Vec<u64> = if moved { vec![note_id] } else { Vec::new() };
     notes_changed(&app, &changed);
     crate::notes::saved()?;
+    // Filed by hand: every meeting with its company there too? (Asked once.)
+    if moved && !series {
+        companies::after_move(&app, note_id, &folder);
+    }
     Ok(json!({ "moved": moved, "folder": folder, "series": title, "others": others }))
 }
 
@@ -318,6 +436,21 @@ mod tests {
     }
 
     #[test]
+    fn an_imported_meeting_finds_its_series_rule_by_name() {
+        let mut r = Rules::default();
+        r.rules.insert("weekly@example.com".into(), Rule { folder: "Design".into(), title: "Weekly sync".into(), created_ts: 1 });
+        r.rules.insert("abc123".into(), Rule { folder: "Suppliers".into(), title: "Old name".into(), created_ts: 1 });
+        // By the rule's own name, any case.
+        assert_eq!(rule_for_title(&r, &[], "weekly SYNC").as_deref(), Some("Design"));
+        // By what the series' meetings are called now.
+        let notes = [note(1, "Meetings", Some("1:abc123_20261005T140000Z"), 1)];
+        let mut named = series_names(&notes);
+        named[0].1 = "Supplier call".into();
+        assert_eq!(rule_for_title(&r, &named, "Supplier call").as_deref(), Some("Suppliers"));
+        assert_eq!(rule_for_title(&r, &named, "Something else"), None);
+    }
+
+    #[test]
     fn a_notes_series_is_its_calendar_series() {
         // iCal: the UID of a recurring occurrence; Google: the recurring
         // event's id before the original start; a one-off: none.
@@ -362,6 +495,41 @@ mod tests {
         // series, 5 a one-off, 6 no meeting).
         assert_eq!(others_outside(&notes, "abc", "Design", 1), [3]);
         assert_eq!(others_outside(&notes, "abc", "design", 3), [1]);
+    }
+
+    /// A series rule beats a company rule; the person's own move beats both.
+    #[test]
+    fn a_series_rule_beats_a_company_rule_and_your_move_beats_both() {
+        assert_eq!(pick(Some("Design".into()), Some("Clients".into())), Some(("Design".into(), By::Series)));
+        assert_eq!(pick(None, Some("Clients".into())), Some(("Clients".into(), By::Company)));
+        assert_eq!(pick(None, None), None);
+        // Through the rules and the notes store: a weekly sync with a client.
+        crate::notes::folder_create("Design");
+        crate::notes::folder_create("Clients");
+        with_rules(|r| {
+            r.rules.insert("weekly@example.com".into(), Rule { folder: "Design".into(), title: "Weekly sync".into(), created_ts: 1 });
+            r.rules.insert(companies::rule_key("example.com"), Rule { folder: "Clients".into(), title: "example.com".into(), created_ts: 1 });
+        });
+        let client = vec!["sam@example.com".to_string()];
+        assert_eq!(folder_for_meeting("1:weekly@example.com:1791800000", &client).as_deref(), Some("Design"));
+        assert_eq!(folder_for_meeting("1:kick-off@example.com", &client).as_deref(), Some("Clients"));
+        assert_eq!(folder_for_meeting("1:kick-off@example.com", &["jo@example.net".to_string()]), None);
+        // A recording tied to a one-off meeting with the client: filed.
+        let n = crate::notes::create("Kick-off", "", "meeting", crate::notes::MEETINGS);
+        assert_eq!(file_linked(n.id, "1:kick-off@example.com", &client).as_deref(), Some("Clients"));
+        assert_eq!(crate::notes::get(n.id).unwrap().folder, "Clients");
+        // One the person moved themselves stays where they put it.
+        let mine = crate::notes::create("Kick-off", "", "meeting", crate::notes::MEETINGS);
+        crate::notes::update(mine.id, None, None, Some(crate::notes::PERSONAL.into()), None).unwrap();
+        assert_eq!(file_linked(mine.id, "1:kick-off@example.com", &client), None);
+        assert_eq!(crate::notes::get(mine.id).unwrap().folder, crate::notes::PERSONAL);
+        // An imported transcript with the client's address: by its company.
+        let imported = crate::notes::create("Imported call", "", "upload", crate::notes::PERSONAL);
+        assert_eq!(file_imported(imported.id, &["Sam Lee <sam@example.com>"]).as_deref(), Some("Clients"));
+        // Imported into a folder of the person's own: left there.
+        let theirs = crate::notes::create("Imported call", "", "upload", "Design");
+        assert_eq!(file_imported(theirs.id, &client), None);
+        with_rules(|r| *r = Rules::default());
     }
 
     #[test]

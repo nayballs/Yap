@@ -409,7 +409,7 @@ export function renderMarkdown(text, options = {}) {
  * markdown-it's tokens for `text`, read exactly as `renderMarkdown` reads
  * it (Yap's rules and all): Chat's document editor builds its page from
  * them, each block keeping the lines it came from
- * (views/chat/docMarkdown.js).
+ * (components/richtext/richMarkdown.js).
  */
 export function markdownTokens(text) {
   return md.parse(bulletsToDashes(text || ''), {});

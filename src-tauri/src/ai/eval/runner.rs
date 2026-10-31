@@ -1013,13 +1013,16 @@ fn seed(s: &Scenario) -> Result<Option<u64>, String> {
             crate::notes::set_enhanced(note.id, &n.enhanced, &crate::notes::content_hash(&n.content))?;
         }
         if !n.transcript.is_empty() {
+            // Dated from the run's clock (`days_ago`): the lines' ts are
+            // seconds into the meeting.
+            let base = n.days_ago.map_or(0, |d| (crate::ai::eval::now().timestamp() - (d * 86_400.0) as i64).max(0) as u64);
             let lines: Vec<crate::notes::TranscriptSegment> = n
                 .transcript
                 .iter()
                 .map(|l| crate::notes::TranscriptSegment {
                     source: l.source.clone(),
                     text: l.text.clone(),
-                    ts: l.ts,
+                    ts: base + l.ts,
                     ..Default::default()
                 })
                 .collect();
@@ -1060,7 +1063,7 @@ fn seed_calendar(c: &scenario::SeedCalendar) -> Result<crate::calendar::Agenda, 
             organizer: String::new(),
             join_url: m.on.as_ref().map(|_| "https://meet.example/x".to_string()),
             service: m.on.clone(),
-            description: String::new(),
+            description: m.invite.clone(),
             tentative: m.maybe,
             codes: Vec::new(),
         });
@@ -1186,8 +1189,14 @@ async fn run_scenario(
                 record::write("selection", json!({ "found": found.is_some(), "chars": words.chars().count() }));
                 found
             });
+            // Run as a Skill (`skill`): across the meetings, its own passages
+            // and instructions, as `chat_send`'s `skill` runs it.
+            let skill = match turn.skill.as_deref().map(|c| crate::chat::skills::turn_for(c, &turn.user)).transpose() {
+                Ok(s) => s,
+                Err(e) => return error_row(m, &name, &format!("skill: {e}")),
+            };
             let asked = crate::chat::turn::chat_turn(None, conversation, &turn.user, scope, voice, |_, _| {}, watcher, None);
-            let asked = crate::chat::documents::with_selection(selection, asked);
+            let asked = crate::chat::skills::with(skill, crate::chat::documents::with_selection(selection, asked));
             if voice {
                 // The Voice Assistant's turn: never thought through by itself.
                 asked.await.map(Some)
@@ -2736,6 +2745,12 @@ mod tests {
         assert!(all.len() >= 12, "{} scenarios", all.len());
         for s in &all {
             assert!(!s.turns.is_empty(), "{} has no turns", s.name);
+            // A turn run as a Skill: one of Yap's that runs across the meetings.
+            for t in &s.turns {
+                if let Some(c) = &t.skill {
+                    crate::chat::skills::turn_for(c, &t.user).unwrap_or_else(|e| panic!("{}: {e}", s.name));
+                }
+            }
             if let Apps::Named(n) = &s.apps {
                 if n != "this_pc" {
                     let mut none = None;

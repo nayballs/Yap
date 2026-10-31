@@ -135,5 +135,73 @@
       ["you", "I will tell the recruiter by Monday."]
     ],
     "expect": { "contains_any": ["Austria", "half", "train", "January"], "not_contains": ["salary"] }
+  },
+  {
+    "name": "skill-summary-for-absent",
+    "kind": "skill",
+    "skill": "summary-for",
+    "words": "for Priya in support, who missed it",
+    "title": "Checkout redesign",
+    "attendees": ["Lena Fischer", "Tom Okafor"],
+    "summary": "## Recap\nThe new checkout moves the promo code field below the basket.\n\n## Action plan\n### Tom Okafor\n- [ ] Build the new checkout (due: next Friday)\n### You\n- [ ] Ask support to update the help page on promo codes\n\n## Decisions\n- Ship the new checkout to ten percent of customers first",
+    "lines": [
+      ["them", "The promo code box confuses people. A third of the support tickets about checkout are people who can't find it."],
+      ["you", "So we move it below the basket, where they look for it."],
+      ["them", "Agreed. I can build it by next Friday."],
+      ["you", "Let's ship it to ten percent of customers first and watch the tickets."],
+      ["them", "Then support needs to update the help page, it still shows the old box."],
+      ["you", "I'll ask the support team to do that."]
+    ],
+    "expect": { "contains_any": ["help page", "ten percent", "10%", "promo"], "not_contains": ["fifty percent", "Monday", "Lena Fischer will build", "Lena Fischer agreed", "Lena Fischer confirmed"], "cites": true }
+  },
+  {
+    "name": "skill-open-questions-pricing",
+    "kind": "skill",
+    "skill": "open-questions",
+    "title": "Pricing sync",
+    "attendees": ["Ana Ruiz"],
+    "lines": [
+      ["them", "Do we keep the free plan after the price change?"],
+      ["you", "Yes, the free plan stays, we agreed that last month."],
+      ["them", "Okay. What do we tell customers who signed up on the old annual price?"],
+      ["you", "Good question. I don't know yet."],
+      ["them", "And who updates the pricing page before the change goes live?"],
+      ["you", "Let's come back to that. Next, the launch email."],
+      ["them", "The launch email goes out on the fourth, that's fixed."]
+    ],
+    "expect": { "contains_all": ["annual", "pricing page"], "not_contains": ["free plan", "launch email"], "cites": true }
+  },
+  {
+    "name": "skill-tickets-triage",
+    "kind": "skill",
+    "skill": "tickets",
+    "title": "Bug triage",
+    "attendees": ["Ana Ruiz", "Sam Lee"],
+    "summary": "## Recap\nTwo bugs to fix this sprint; dark mode waits.\n\n## Action plan\n### Ana Ruiz\n- [ ] Fix the login button on Safari (due: Wednesday)\n\n## Unassigned\n- [ ] Fix the CSV export dropping the last row\n\n## Decisions\n- Dark mode is not for this sprint",
+    "lines": [
+      ["them", "The login button does nothing on Safari. About two hundred people a day hit it."],
+      ["them", "I can fix the Safari login by Wednesday."],
+      ["you", "Great. And the CSV export drops the last row, customers noticed."],
+      ["them", "Nobody's free for that one yet, but it should be a quick fix once someone picks it up. Done is when the export has every row."],
+      ["you", "What about dark mode in settings?"],
+      ["them", "Not this sprint. Let's leave it."]
+    ],
+    "expect": { "contains_all": ["Safari", "CSV"], "not_contains": ["dark mode", "Friday", "**Owner:** Sam Lee"], "cites": true }
+  },
+  {
+    "name": "skill-prd-offline",
+    "kind": "skill",
+    "skill": "prd",
+    "title": "Offline mode",
+    "attendees": ["Lena Fischer"],
+    "lines": [
+      ["them", "Our field engineers lose signal in basements and plant rooms, so they can't log a job until they're back outside."],
+      ["them", "They write it on paper and type it up later, and half the time the photos never make it in."],
+      ["you", "So the must-have is logging a job with no signal and syncing it when they're back online."],
+      ["them", "Yes. Photos too, ideally, but the job log comes first."],
+      ["you", "And editing other people's jobs offline is out, too risky with conflicts."],
+      ["them", "Agreed. What I don't know is how long the app should keep jobs that never sync."]
+    ],
+    "expect": { "contains_any": ["signal", "sync", "offline"], "not_contains": ["iPad", "two weeks"], "cites": true }
   }
 ]

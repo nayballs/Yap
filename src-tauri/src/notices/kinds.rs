@@ -47,7 +47,7 @@ impl Category {
 /// it has one. A milestone is any kind starting "milestone". Pure.
 pub fn category(kind: &str) -> Option<Category> {
     Some(match kind {
-        "word-suggestion" | "snippet-suggestion" | "language-nudge" => Category::Suggestions,
+        "word-suggestion" | "snippet-suggestion" | "language-nudge" | "company-folder" => Category::Suggestions,
         "hint" | "micTip" | "featureTip" | "bar-pointer" => Category::FeatureTips,
         "news" | "updated" => Category::News,
         k if k.starts_with("milestone") => Category::Milestones,
@@ -198,6 +198,7 @@ mod tests {
     fn every_nice_to_know_kind_has_a_category_and_the_rest_none() {
         assert_eq!(category("word-suggestion"), Some(Category::Suggestions));
         assert_eq!(category("language-nudge"), Some(Category::Suggestions));
+        assert_eq!(category("company-folder"), Some(Category::Suggestions));
         assert_eq!(category("hint"), Some(Category::FeatureTips));
         assert_eq!(category("featureTip"), Some(Category::FeatureTips));
         assert_eq!(category("milestone"), Some(Category::Milestones));

@@ -1,0 +1,58 @@
+{
+  "name": "skills-open-questions",
+  "description": "/open-questions across the week's meetings: the questions asked and never answered (the old annual price, who updates the pricing page, the van's insurance), not the ones answered (the free plan, the launch email's day).",
+  "tags": ["skills", "meetings"],
+  "apps": "standard",
+  "seed": {
+    "notes": [
+      {
+        "title": "Pricing sync",
+        "folder": "Meetings",
+        "meeting": true,
+        "days_ago": 2,
+        "participants": ["Ana Ruiz"],
+        "transcript": [
+          { "source": "them", "text": "Do we keep the free plan after the price change?", "ts": 0 },
+          { "source": "you", "text": "Yes, the free plan stays, we agreed that last month.", "ts": 10 },
+          { "source": "them", "text": "What do we tell customers who signed up on the old annual price?", "ts": 25 },
+          { "source": "you", "text": "Good question. I don't know yet.", "ts": 35 },
+          { "source": "them", "text": "And who updates the pricing page before the change goes live?", "ts": 50 },
+          { "source": "you", "text": "Let's come back to that. Next, the launch email.", "ts": 60 },
+          { "source": "them", "text": "When does the launch email go out?", "ts": 75 },
+          { "source": "you", "text": "On the fourth, that's fixed.", "ts": 82 }
+        ]
+      },
+      {
+        "title": "Delivery planning",
+        "folder": "Meetings",
+        "meeting": true,
+        "days_ago": 1,
+        "participants": ["Tom Reid"],
+        "transcript": [
+          { "source": "them", "text": "The new van arrives on Monday.", "ts": 0 },
+          { "source": "you", "text": "Is the van insured from day one, or do we need to sort that?", "ts": 12 },
+          { "source": "them", "text": "I'm honestly not sure, the dealer didn't say.", "ts": 22 },
+          { "source": "you", "text": "Okay. Who drives it on the first run?", "ts": 34 },
+          { "source": "them", "text": "Sam does the first run, that's agreed.", "ts": 41 }
+        ]
+      }
+    ]
+  },
+  "turns": [
+    {
+      "user": "/open-questions",
+      "skill": "open-questions",
+      "expect": {
+        "answer_contains_any": ["annual", "pricing page", "insur"],
+        "answer_not_contains": ["Yap couldn't tie"],
+        "min_sources": 1,
+        "tools_not_called": ["create_note", "update_note", "edit_note", "open_app"]
+      },
+      "soft": {
+        "answer_contains": ["pricing page"],
+        "answer_not_contains": ["free plan", "first run", "launch email"],
+        "max_words": 200
+      }
+    }
+  ]
+}

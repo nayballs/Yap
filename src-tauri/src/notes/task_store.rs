@@ -138,13 +138,21 @@ pub fn modify<R>(f: impl FnOnce(&mut TaskStore) -> Result<(R, bool), String>) ->
     })
 }
 
-/// Note `note_id` was deleted: its added tasks and archive marks go too
-/// (note ids come round again).
-pub fn forget_note(note_id: u64) {
-    let _ = modify(|s| {
+/// Notes `note_ids` were deleted: their added tasks and archive marks go
+/// too (note ids come round again), in one write.
+pub fn forget_notes(note_ids: &[u64]) {
+    forget_where(|note| note.is_some_and(|id| note_ids.contains(&id)));
+}
+
+/// Delete some of your data (`privacy/reset.rs`): the added tasks and the
+/// archive marks whose note `gone` says went (`None`: a task added with no
+/// note), in one write. How many tasks went.
+pub fn forget_where(gone: impl Fn(Option<u64>) -> bool) -> usize {
+    modify(|s| {
         let before = (s.tasks.len(), s.archived.len());
-        s.tasks.retain(|t| t.note_id != Some(note_id));
-        s.archived.retain(|a| a.note_id != note_id);
-        Ok(((), before != (s.tasks.len(), s.archived.len())))
-    });
+        s.tasks.retain(|t| !gone(t.note_id));
+        s.archived.retain(|a| !gone(Some(a.note_id)));
+        Ok((before.0 - s.tasks.len(), before != (s.tasks.len(), s.archived.len())))
+    })
+    .unwrap_or(0)
 }

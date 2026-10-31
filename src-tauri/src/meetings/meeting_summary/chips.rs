@@ -103,6 +103,7 @@ pub fn numbered(note: &Note, chosen: &[Chunk]) -> Vec<Passage> {
                 score: 0.0,
                 keyword: 0.0,
                 similarity: None,
+                event: None,
             })
         })
         .collect()
@@ -235,6 +236,18 @@ pub fn smart_input(note: &Note, brief: Option<&str>) -> Option<Cited> {
     Some(Cited { text: out, passages })
 }
 
+/// What a Skill reads of one meeting, at most (tokens): Yap's summary, the
+/// notes the person typed, the transcript.
+#[derive(Debug, Clone, Copy)]
+pub struct SkillBudget {
+    pub summary: usize,
+    pub notes: usize,
+    pub talk: usize,
+}
+
+/// A Skill run in the meeting's own Ask box.
+pub const SKILL_BUDGET: SkillBudget = SkillBudget { summary: SKILL_SUMMARY_TOKENS, notes: SKILL_NOTES_TOKENS, talk: SKILL_TALK_TOKENS };
+
 /// **A Skill on one meeting**: its title and date, the attendees, the
 /// invite, then numbered passages — Yap's summary (≤ 1,200), the notes the
 /// person typed (≤ 300) and the transcript ([`talk_for`], ≤ 1,800).
@@ -243,13 +256,19 @@ pub fn smart_input(note: &Note, brief: Option<&str>) -> Option<Cited> {
 /// itself goes after this: `meeting_assist::skill_messages`). `None`:
 /// nothing in the meeting yet.
 pub fn skill_input(note: &Note, request: &str) -> Option<Cited> {
+    skill_input_within(note, request, SKILL_BUDGET)
+}
+
+/// [`skill_input`] within `b` (a Skill run across the meetings in Chat that
+/// reads one of them reads less: Chat's own prompt and tools go with it).
+pub fn skill_input_within(note: &Note, request: &str, b: SkillBudget) -> Option<Cited> {
     let all = chunks::chunk_note(note);
     let of = |f: Field| all.iter().filter(|c| c.field == f).cloned().collect::<Vec<_>>();
-    let mut chosen = first_fitting(of(Field::Summary), SKILL_SUMMARY_TOKENS);
-    chosen.extend(first_fitting(of(Field::Content), SKILL_NOTES_TOKENS));
+    let mut chosen = first_fitting(of(Field::Summary), b.summary);
+    chosen.extend(first_fitting(of(Field::Content), b.notes));
     let talk_words = crate::notes::speech_words(&note.transcript);
     if talk_words > 0 {
-        chosen.extend(talk_for(note, request, SKILL_TALK_TOKENS));
+        chosen.extend(talk_for(note, request, b.talk));
     }
     if chosen.is_empty() {
         return None;
