@@ -39,7 +39,10 @@ The AI Notepad: the notes store, folders, the Actions engine, notes you can fix 
   `breaks` (the transcript's length at each stop — the notepad's paused
   dividers; `add_break`, never twice at one place or at 0),
   `note_type` ("personal" | "meeting"), `source` ("manual" | "upload" |
-  "meeting"), and `title_auto` (the title is one Yap made up — "Teams call ·
+  "meeting" | "calendar" | "chat" | "quick" | "import" — a meeting imported
+  from another app's transcript file, `meetings/import.rs`: no audio behind
+  its lines, so no ▶, Transcribe again or Find speakers; `is_imported`; made
+  whole in one save by `create_meeting`), and `title_auto` (the title is one Yap made up — "Teams call ·
   5 Oct, 14:30" — so the AI meeting title may replace it; cleared for good by
   a title edit, so a typed title is never overwritten: `set_ai_title` checks
   under the store lock). `note_update` takes an `origin` (the saving window's

@@ -1102,6 +1102,81 @@ pub fn create(title: &str, content: &str, source: &str, folder: &str) -> Note {
     })
 }
 
+/// A whole meeting note made at once (Import a transcript…,
+/// `meetings/import.rs`): its lines, voices and attendees already known.
+pub struct NewMeeting {
+    pub title: String,
+    /// The title is one Yap made up: the AI meeting title may replace it.
+    pub title_auto: bool,
+    /// My thoughts (a Granola export's notes).
+    pub content: String,
+    pub folder: String,
+    pub transcript: Vec<TranscriptSegment>,
+    pub participants: Vec<String>,
+    pub speakers: Speakers,
+    /// Where it came from (`Note::source`: "import").
+    pub source: String,
+    /// When the meeting was (unix seconds): the note's date.
+    pub created_ts: u64,
+}
+
+/// Make the meeting note `m` in one save. Its folder is made when it's
+/// missing (Meetings, before an older store had it).
+pub fn create_meeting(m: NewMeeting) -> Note {
+    with_store(|store| {
+        let id = SAVER.next_id(store.notes.iter().map(|n| n.id).max().unwrap_or(0));
+        let folder = match m.folder.trim() {
+            "" => MEETINGS.to_string(),
+            f => f.to_string(),
+        };
+        let folder = match folder_named(&store.folders, &folder) {
+            Some(i) => store.folders[i].clone(),
+            None => {
+                store.folders.push(folder.clone());
+                folder
+            }
+        };
+        let note = Note {
+            id,
+            title: m.title,
+            title_auto: m.title_auto,
+            content: m.content,
+            enhanced_content: String::new(),
+            enhanced_at_hash: String::new(),
+            summary_edited_ms: 0,
+            summary_ts: 0,
+            summary_ai: String::new(),
+            summary_rating: None,
+            note_type: "meeting".to_string(),
+            folder,
+            folder_chosen: false,
+            transcript: m.transcript,
+            participants: m.participants,
+            digests: Vec::new(),
+            breaks: Vec::new(),
+            source: m.source,
+            created_ts: m.created_ts,
+            updated_ts: now_secs(),
+            event: None,
+            speakers: m.speakers,
+            transcript_deleted_ts: 0,
+        };
+        store.notes.push(note.clone());
+        save_to_disk(store);
+        note
+    })
+}
+
+/// Where an imported meeting came from (`Note::source`): no audio behind
+/// its lines.
+pub const IMPORTED: &str = "import";
+
+/// A meeting imported from a transcript file: no audio to play, transcribe
+/// again or find speakers in.
+pub fn is_imported(note: &Note) -> bool {
+    note.source == IMPORTED
+}
+
 /// Tie meeting note `id` to a calendar event (`calendar.rs`): keep the event,
 /// take its `title` when given (the caller only passes one over a made-up
 /// title; the meeting's real name, so the AI title leaves it alone), add its

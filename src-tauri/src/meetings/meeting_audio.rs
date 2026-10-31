@@ -65,6 +65,9 @@ pub const DEFAULT_DAYS: u32 = 14;
 /// At most this much meeting audio in all (~150 hours of meetings): past it
 /// the oldest recordings go first, however recent.
 pub const MAX_BYTES: u64 = 10 * 1024 * 1024 * 1024;
+/// A meeting imported from a transcript file has no audio to work on
+/// (`meetings/import.rs`).
+pub const IMPORTED: &str = "This meeting was imported from a transcript file, so Yap has no audio of it.";
 /// How often the writer empties the queues…
 const WRITE_EVERY: Duration = Duration::from_millis(500);
 /// …and puts the files onto the disk itself (a power cut keeps them too).
@@ -1284,7 +1287,10 @@ fn warm_slot(app: &AppHandle) -> Option<crate::dictation::pipeline::EngineSlot> 
 /// Start transcribing note `note_id`'s audio in the background: the part a
 /// crash left ([`Kind::Recover`]) or all of it again ([`Kind::Again`]).
 pub fn start_job(app: &AppHandle, note_id: u64, kind: Kind) -> Result<(), String> {
-    crate::notes::get(note_id).ok_or("Note not found")?;
+    let note = crate::notes::get(note_id).ok_or("Note not found")?;
+    if crate::notes::is_imported(&note) {
+        return Err(IMPORTED.to_string());
+    }
     if crate::meetings::meeting::recording_note() == Some(note_id) {
         return Err("Stop the recording first".to_string());
     }

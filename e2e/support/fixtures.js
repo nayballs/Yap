@@ -206,12 +206,18 @@ export async function openModelPicker(main) {
   return picker;
 }
 
+/** The main window's "Import a transcript" dialog (TranscriptImportDialog.svelte). */
+export function importDialog(main) {
+  return main.getByRole('dialog', { name: 'Import a transcript' });
+}
+
 /** Back to a known state between tests: no dialog or toasts, Settings closed, Home showing. */
 export async function resetUi(main) {
-  const dialog = connectDialog(main);
-  if (await dialog.isVisible()) {
-    await dialog.getByRole('button', { name: 'Close', exact: true }).click();
-    await expect(dialog).toBeHidden();
+  for (const dialog of [connectDialog(main), importDialog(main)]) {
+    if (await dialog.isVisible()) {
+      await dialog.getByRole('button', { name: 'Close', exact: true }).click();
+      await expect(dialog).toBeHidden();
+    }
   }
   await closeToasts(main);
   await closeSettings(main);

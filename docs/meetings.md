@@ -40,6 +40,7 @@ takes its meeting's name, attendees and invite ([The calendar](#the-calendar),
 | The action run (`note_enhance` / `run_enhance`) | `src-tauri/src/notes/commands.rs` |
 | Fixing the notes: a line's words, the summary's, never written over unasked; tasks ticked and listed | `src-tauri/src/notes/note_edits.rs`, `src-tauri/src/notes/tasks.rs`, `src/lib/core/noteEdits.js`, `src/lib/views/TasksView.svelte` |
 | UI | `src/lib/NotesView.svelte`, `src/lib/Notepad.svelte`, `src/lib/stores/meetingSummary.svelte.js` |
+| Importing another app's transcript (Teams, Zoom, Meet, Otter, Granola) | `src-tauri/src/meetings/import.rs` (+ `import/`), `src/lib/components/TranscriptImportDialog.svelte`, `src/lib/stores/transcriptImport.svelte.js` |
 
 ## Recording
 
@@ -882,6 +883,53 @@ adding one never makes the summary yours, and Yap writing it again never
 loses one; a summary's tick stays its own `- [x]`. Added tasks go with
 their meeting's note.
 
+## Importing a transcript
+
+A meeting Yap didn't record, transcribed by another app, can still become a
+Yap meeting: **Import a transcript…** under Upload's audio drop zone, a
+transcript file dropped on Upload, or the Meetings view's **⋯** (the
+roadmap's "Import from Granola, Otter and Teams/Zoom transcript files";
+`src-tauri/src/meetings/import.rs`). Several files at once.
+
+| From | The file | What Yap reads |
+|---|---|---|
+| Microsoft Teams | the transcript's Download as `.vtt` | each cue's `<v Speaker>` voice tag, its times |
+| Microsoft Teams | the Download as `.docx` | the meeting's name, date and length at the top, then "Priya Shah   0:03" blocks (and the older "0:0:0.0 --> 0:0:4.60" layout); read as the zip of XML it is, never through Word |
+| Zoom | the recording's transcript (`.vtt`) | "Priya Shah: …" cues; the date from Zoom's `GMT20261005-143012` name, in UTC |
+| Zoom | a saved transcript (`.txt`) | "[Priya Shah] 14:02:31" blocks: clock times, so the first is when it started; the date from its folder's name |
+| Google Meet | the transcript document as `.txt` or `.docx`, or captions as `.vtt` | its "(2026-10-05 14:30 GMT+01:00) - Transcript" title, Attendees, "00:05:00" marks, "Priya Shah: …" lines |
+| Otter | Export as `.txt` (or `.docx`, `.srt`) | "Priya Shah  0:01" blocks, its header (title, "Mon, Oct 5, 2026 2:30PM • 32:15", SPEAKERS); "Speaker 1" stays a speaker to name later |
+| Granola | the note copied or exported as Markdown (`.md` / `.txt`) with its transcript | an optional "# Title", "Date:" and "Attendees:", the notes (they go in My thoughts), then "Me: …" / "Them: …" (or "**Name:** …") lines — **assumed** from its copy and export, as Granola publishes no format |
+| Anything else | `.srt`, `.vtt`, `.txt` | "Name: text" lines (a name the file uses at least twice, or the way most of its lines start), any times |
+
+Files are read as UTF-8 (with or without its byte-order mark), UTF-16 or
+Windows-1252, with any line endings. Before anything is made, the dialog
+shows **a dry preview** of each file: its format, the speakers found (with
+their lines), how many lines and how long ("about" when the file has no
+times and Yap places the lines by their words), **when** it was — from the
+transcript, the file's name or its folder's, else when the file was saved
+less the meeting's length, which it asks you to check — **which speaker is
+you** (picked for you when About you's name is one of them; Granola's "Me"
+is you) and a **title** of your own if you like. A file it can't read says
+why ("Yap can't read .pdf files as transcripts…", "no lines with who spoke
+or when", "password-protected") and stays out.
+
+Each file then becomes a meeting note as a recorded one would: lines with
+the speakers' names (each a named voice you can rename, merge or mark as
+you from the speaker menu; "Speaker 2" a voice the naming cards can name;
+a line nobody's named on is "Them"), on the meeting's clock and dated to
+it; its title — yours, else the file's meeting name, else the AI meeting
+title from the start of the meeting; its folder — a recurring series'
+folder rule by that name, else Meetings, and the calendar's meeting at that
+time if the calendar still has it (the last 12 hours: its name, attendees,
+invite and series' folder); then the usual action plan, in the meeting's
+language, one imported meeting after another. It's marked imported (the
+note's `source`, a field older Yaps keep): there's no audio, so no ▶ on a
+line, no Transcribe again, no Find speakers and no Export audio, and the
+Meetings view's row says **Imported**. With "Delete meeting transcripts
+after" set, the dialog warns when a meeting is older than that: its lines go
+within the hour, its summary and notes stay.
+
 ## The meeting notepad
 
 While a meeting records, its notes live in a slim window docked to the right
@@ -1343,6 +1391,26 @@ KeyTips) and Win the Start menu.
 
 ## How it's tested
 
+- **Importing a transcript** (`cargo test --lib -- meetings::import
+  an_imported`; e2e `transcript-import.spec.js`): each reader on small
+  fictional files — Teams' voice tags, CRLF and times past an hour, Zoom's
+  "Name:" cues with a byte-order mark, a name said once staying text,
+  dialogue dashes and ">> NAME:", SubRip with a lost blank line, tags and
+  Windows-1252, the older Teams layout, Otter's blocks and header, Zoom's
+  clock times across midnight, Google Meet's marks and title, Granola's
+  notes and Me/Them with no times, timestamps with no names, prose refused;
+  Word's runs, tabs, breaks and what isn't text, a password-protected
+  document; dates in names and header lines; rolling captions, cut
+  sentences and overlapping speakers; the note's voices (named, numbered,
+  you, them) and places; the preview, the date's sources, a series' rule by
+  name, the calendar's meeting by time. End to end: a Teams `.vtt` and a
+  Teams `.docx` picked together from the Meetings view's ⋯, their preview
+  (format, speakers, lines, length, the date, About you's name picked as
+  you), two meeting notes with named lines filed in Meetings, the fake
+  model's AI title and both action plans reading the names, no ▶ or
+  Transcribe again in Notes, **Imported** on the row and Rust refusing
+  Transcribe again; files dropped on Upload opening the dialog, an
+  unreadable one saying why and kept out.
 - **Fixing the notes** (`cargo test --lib -- note_edits tasks redo split_line`;
   e2e `notes-edit.spec.js`): a line's edit (what Yap heard kept, its place
   and voice untouched, back to Yap's on a revert, markers refused), the
@@ -1583,6 +1651,13 @@ KeyTips) and Win the Start menu.
 
 ## Limits and follow-ups
 
+- **Imported transcripts.** Untried with real exports: the readers follow
+  the formats as documented and seen (Teams' `.vtt` and `.docx`, Zoom's,
+  Meet's, Otter's), and Granola's is a guess (no published format). Dates
+  in other languages' month names, and slashed dates (05/10/2026), aren't
+  read: the dialog asks. Otter's and Google Meet's own JSON or PDF exports,
+  Fireflies and tl;dv aren't read. A calendar meeting is matched only while
+  the calendar keeps it (12 hours back).
 - **Meeting audio.** The refine after a meeting (since 2026-10-24) runs
   only with a more accurate model installed, failed chunks, or Always; a
   model's accuracy is the leaderboard's English figure (the specialists'

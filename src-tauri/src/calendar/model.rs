@@ -502,6 +502,23 @@ pub fn next_reminder_at(events: &[Event], now: i64, lead: i64, snoozed: &HashMap
     starts.chain(snoozes).min()
 }
 
+/// The meeting of `events` that a meeting from `start` to `end` (unix
+/// seconds) was — an imported transcript's (`meetings/import.rs`): the
+/// one it overlaps most, by at least half of the shorter of the two.
+pub fn event_during(events: &[Event], start: i64, end: i64) -> Option<&Event> {
+    let end = end.max(start + 60);
+    events
+        .iter()
+        .filter_map(|e| {
+            let e_end = e.end.max(e.start + 60);
+            let overlap = end.min(e_end) - start.max(e.start);
+            let shorter = (end - start).min(e_end - e.start);
+            (overlap > 0 && overlap * 2 >= shorter).then_some((overlap, e))
+        })
+        .max_by_key(|(overlap, e)| (*overlap, -e.start))
+        .map(|(_, e)| e)
+}
+
 /// A title that's only a placeholder, which a calendar title may replace:
 /// empty, or what Yap names a meeting note it starts by itself ("Teams call
 /// · 5 Oct, 14:30" from call detection, "Meeting · 5 Oct, 14:30" from the
@@ -565,6 +582,22 @@ mod tests {
 
     fn coded(key: &str, start: i64, end: i64, service: &str, codes: &[&str]) -> Event {
         Event { codes: codes.iter().map(|c| c.to_string()).collect(), ..event(key, start, end, Some(service)) }
+    }
+
+    #[test]
+    fn an_imported_meeting_finds_the_calendar_meeting_it_was() {
+        let standup = event("standup", 1_000, 1_900, None);
+        let review = event("review", 2_000, 5_600, None);
+        let events = [standup, review];
+        // 2:05 to 2:55 in an hour-long review.
+        assert_eq!(event_during(&events, 2_300, 5_300).unwrap().key, "review");
+        // Overlapping both, mostly the review.
+        assert_eq!(event_during(&events, 1_700, 3_000).unwrap().key, "review");
+        // A quick chat half in the standup was the standup…
+        assert_eq!(event_during(&events, 1_800, 1_999).unwrap().key, "standup");
+        // …one a quarter in each was neither, nor one after both.
+        assert!(event_during(&events, 1_850, 2_050).is_none());
+        assert!(event_during(&events, 6_000, 7_000).is_none());
     }
 
     #[test]

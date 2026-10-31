@@ -1581,6 +1581,34 @@ pub fn on_meeting_started(app: &AppHandle, note_id: u64) {
     emit(app);
 }
 
+/// A meeting imported from a transcript file (`meetings/import.rs`) is the
+/// calendar's meeting at its time, while the calendar still has it (the
+/// last [`LOOK_BACK`]): it takes that meeting's name over a made-up title,
+/// its attendees and invite, and its series' folder rule — as a recording
+/// started during it would. Whether it found one.
+pub fn link_imported(app: &AppHandle, note_id: u64) -> bool {
+    if lock_started().is_none() {
+        return false;
+    }
+    let Some(note) = crate::notes::get(note_id) else { return false };
+    let (Some(start), Some(end)) = (note.transcript.iter().map(|s| s.ts).min(), note.transcript.iter().map(|s| s.ts).max()) else {
+        return false;
+    };
+    let event = model::event_during(&lock().store.events, start as i64, end as i64).cloned();
+    let Some(event) = event else { return false };
+    let made_up = crate::notes::title_open_to_ai(&note) || model::is_placeholder_title(&note.title);
+    let title = made_up.then(|| event.display_title());
+    if let Err(e) = crate::notes::link_event(note_id, note_event(&event), title, &attendees_of(&event), None) {
+        tracing::warn!("calendar: couldn't tie an imported meeting to its meeting: {e}");
+        return false;
+    }
+    tracing::info!(note_id, "calendar: an imported meeting tied to its calendar meeting");
+    filing::file_linked(note_id, &event.key);
+    crate::notes::commands::note_changed(app, note_id, "calendar");
+    emit(app);
+    true
+}
+
 /// Call detection, about to ask "Teams call detected — Record notes?" (under
 /// its own lock: no windows, no other locks but this one). `true` when the
 /// call belongs to a meeting whose card is up or was answered: the calendar
@@ -2710,6 +2738,8 @@ pub fn calendar_meeting_notes(query: Option<String>) -> Vec<Value> {
                 // Something to summarise ("Generate summary").
                 "hasTalk": n.transcript.iter().any(|s| !s.echo),
                 "recording": recording == Some(n.id),
+                // From a transcript file (meetings/import.rs): no audio.
+                "imported": crate::notes::is_imported(&n),
                 // Its folder, its series' name and that series' folder rule
                 // (the menu's "File this meeting in…", "Always file…").
                 "filing": filing::view_of(&n),
