@@ -1,0 +1,691 @@
+/* Yap Link, the phone's page. Yap's warm theme: the `--yap-*` values are
+   copied from src/app.css (light, and the warm dark), since this page is
+   served on its own, with no build step and nothing fetched from elsewhere.
+   System fonts. */
+
+:root {
+  color-scheme: light dark;
+  --yap-bg: #f0ede7;
+  --yap-s1: #faf9f6;
+  --yap-s2: #ffffff;
+  --yap-s3: #f2efe9;
+  --yap-raised: #e8e4dc;
+  --yap-fg: #23211b;
+  --yap-fg-80: rgba(35, 33, 27, 0.82);
+  --yap-muted: #6e6a5f;
+  --yap-primary: #c2690a;
+  --yap-primary-fg: #ffffff;
+  --yap-primary-wash: rgba(226, 152, 42, 0.16);
+  --yap-primary-tint: rgba(226, 152, 42, 0.28);
+  --yap-ink: #26231c;
+  --yap-ink-hover: #3a3529;
+  --yap-ink-fg: #f7f5f0;
+  --yap-border: #dcd7cb;
+  --yap-border-subtle: #e7e3d9;
+  --yap-danger: #c23b32;
+  --yap-success-text: #17733e;
+  --yap-warning: #b07c10;
+  --yap-link: #a85a08;
+  --yap-switch-edge: #8c8679;
+  --yap-focus-ring: #c2690a;
+  --yap-scrim: rgba(45, 38, 25, 0.35);
+  --yap-shadow-sm: 0 1px 2px rgba(60, 50, 30, 0.07), 0 1px 1px rgba(60, 50, 30, 0.04);
+  --yap-shadow-menu: 0 12px 32px rgba(55, 45, 25, 0.16);
+  --yap-r: 8px;
+  --yap-r-lg: 11px;
+  --yap-r-xl: 14px;
+  --yap-r-full: 9999px;
+  --yap-dur: 150ms;
+
+  --font: system-ui, -apple-system, 'Segoe UI', Roboto, 'Noto Sans', 'Helvetica Neue', Arial, sans-serif;
+  --font-display: Georgia, 'Noto Serif', 'Palatino Linotype', 'Times New Roman', serif;
+  --gutter: 16px;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --yap-bg: #161410;
+    --yap-s1: #1c1a16;
+    --yap-s2: #24211c;
+    --yap-s3: #2b2722;
+    --yap-raised: #36312a;
+    --yap-fg: #f2efe8;
+    --yap-fg-80: rgba(242, 239, 232, 0.82);
+    --yap-muted: #a8a294;
+    --yap-primary: #e2982a;
+    --yap-primary-fg: #1f1c16;
+    --yap-primary-wash: rgba(226, 152, 42, 0.14);
+    --yap-primary-tint: rgba(226, 152, 42, 0.24);
+    --yap-ink: #ece8df;
+    --yap-ink-hover: #ffffff;
+    --yap-ink-fg: #1c1a16;
+    --yap-border: #3a352b;
+    --yap-border-subtle: #2e2a23;
+    --yap-danger: #e5645e;
+    --yap-success-text: #4cc985;
+    --yap-warning: #dca03c;
+    --yap-link: #f0b04a;
+    --yap-switch-edge: #8f887a;
+    --yap-focus-ring: #f0b04a;
+    --yap-scrim: rgba(6, 5, 3, 0.58);
+    --yap-shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.22);
+    --yap-shadow-menu: 0 10px 28px rgba(0, 0, 0, 0.32), 0 0 0 1px rgba(255, 255, 255, 0.04);
+  }
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+[hidden] {
+  display: none !important;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  background: var(--yap-bg);
+  color: var(--yap-fg);
+  font: 17px/1.45 var(--font);
+  -webkit-tap-highlight-color: transparent;
+  padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+}
+
+button,
+select,
+input {
+  font: inherit;
+  color: inherit;
+}
+
+:focus-visible {
+  outline: 2px solid var(--yap-focus-ring);
+  outline-offset: 3px;
+}
+
+/* ------------------------------------------------------------ header */
+
+.top {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px var(--gutter);
+  min-height: 64px;
+}
+.mark {
+  flex: 0 0 auto;
+  border-radius: 8px;
+}
+.who {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+.name {
+  font-weight: 650;
+  font-size: 17px;
+  line-height: 1.2;
+}
+.conn {
+  font-size: 13.5px;
+  color: var(--yap-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.conn::before {
+  content: '';
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  margin-right: 6px;
+  vertical-align: 1px;
+  background: var(--yap-warning);
+}
+.conn[data-state='on']::before {
+  background: var(--yap-success-text);
+}
+.conn[data-state='off']::before {
+  background: var(--yap-muted);
+}
+
+.chip {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 56%;
+  min-height: 48px;
+  display: inline-flex;
+  flex-direction: column;
+  align-items: flex-end;
+  justify-content: center;
+  gap: 1px;
+  padding: 6px 12px;
+  border: 1px solid var(--yap-border);
+  border-radius: var(--yap-r-lg);
+  background: var(--yap-s2);
+  box-shadow: var(--yap-shadow-sm);
+  cursor: pointer;
+  text-align: right;
+}
+.chip-label {
+  max-width: 100%;
+  font-size: 14.5px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.chip-where {
+  font-size: 12px;
+  color: var(--yap-link);
+  font-weight: 600;
+}
+
+main {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+/* ---------------------------------------------------------- pairing */
+
+.pair {
+  margin: 8px var(--gutter) var(--gutter);
+  padding: 24px 20px;
+  background: var(--yap-s2);
+  border-radius: var(--yap-r-xl);
+  box-shadow: var(--yap-shadow-sm);
+}
+.pair h1 {
+  margin: 0 0 12px;
+  font: 600 26px/1.2 var(--font-display);
+}
+.pair p {
+  margin: 0 0 12px;
+}
+.pair-say {
+  font-size: 19px;
+}
+.code {
+  margin: 8px 0 16px !important;
+  font: 700 clamp(56px, 22vw, 96px) / 1 var(--font);
+  letter-spacing: 0.14em;
+  font-variant-numeric: lining-nums tabular-nums;
+  color: var(--yap-fg);
+}
+.pair-why {
+  font-weight: 600;
+}
+.pair-wait {
+  color: var(--yap-muted);
+}
+
+/* ---------------------------------------------------------- talking */
+
+.talk {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+/* The conversation keeps one height, so Talk never moves under the thumb;
+   it scrolls inside. */
+.convo-box {
+  flex: 0 0 auto;
+  height: clamp(112px, 30dvh, 360px);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.empty {
+  margin: 8px var(--gutter);
+  color: var(--yap-muted);
+  font-size: 17px;
+}
+
+.convo {
+  list-style: none;
+  margin: 0;
+  padding: 4px var(--gutter) 8px;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.turn {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.turn p {
+  margin: 0;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+.q {
+  align-self: flex-end;
+  max-width: 86%;
+  padding: 9px 13px;
+  border-radius: var(--yap-r-xl) var(--yap-r-xl) 4px var(--yap-r-xl);
+  background: var(--yap-raised);
+  font-size: 17px;
+}
+.a {
+  align-self: flex-start;
+  max-width: 94%;
+  padding: 2px 2px;
+  font-size: 18px;
+  line-height: 1.5;
+  color: var(--yap-fg-80);
+}
+.a.final {
+  color: var(--yap-fg);
+}
+
+.now {
+  padding: 6px var(--gutter) 0;
+  min-height: 64px;
+}
+.now p {
+  margin: 0 0 6px;
+}
+.phase {
+  font-size: 22px;
+  font-weight: 650;
+  text-align: center;
+  min-height: 1.4em;
+}
+body[data-phase='listening'] .phase {
+  color: var(--yap-primary);
+}
+.step {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 8px;
+  font-size: 15px;
+  color: var(--yap-muted);
+  min-width: 0;
+}
+.step-line {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.step-time {
+  flex: 0 0 auto;
+  font-variant-numeric: tabular-nums;
+}
+.dots {
+  flex: 0 0 auto;
+  display: inline-flex;
+  gap: 3px;
+}
+.dots i {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--yap-primary);
+  opacity: 0.3;
+  animation: lit 1.2s ease-in-out infinite;
+}
+.dots i:nth-child(2) {
+  animation-delay: 0.2s;
+}
+.dots i:nth-child(3) {
+  animation-delay: 0.4s;
+}
+@keyframes lit {
+  0%,
+  100% {
+    opacity: 0.3;
+  }
+  40% {
+    opacity: 1;
+  }
+}
+.note {
+  text-align: center;
+  font-size: 15px;
+  color: var(--yap-muted);
+}
+.error {
+  padding: 10px 12px;
+  border-radius: var(--yap-r);
+  border: 1px solid var(--yap-danger);
+  color: var(--yap-danger);
+  background: var(--yap-s2);
+  font-size: 15.5px;
+}
+
+/* The Talk button, the meter over it, Stop / Cancel under it. */
+.controls {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 4px var(--gutter) 8px;
+}
+.meter {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  height: 36px;
+  width: min(100%, 240px);
+  visibility: hidden;
+}
+.meter[data-on='true'] {
+  visibility: visible;
+}
+.meter i {
+  flex: 1 1 0;
+  height: 100%;
+  border-radius: 2px;
+  background: var(--yap-primary);
+  transform: scaleY(0.08);
+  transform-origin: center;
+  transition: transform 60ms linear;
+}
+
+.talk-btn {
+  --size: clamp(148px, 46vw, 196px);
+  width: var(--size);
+  height: var(--size);
+  border-radius: 50%;
+  border: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  background: var(--yap-ink);
+  color: var(--yap-ink-fg);
+  box-shadow: var(--yap-shadow-menu);
+  cursor: pointer;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+  transition:
+    background var(--yap-dur),
+    transform var(--yap-dur),
+    box-shadow var(--yap-dur);
+}
+.talk-btn:active {
+  transform: scale(0.97);
+}
+.talk-btn:disabled {
+  opacity: 0.45;
+  cursor: default;
+  box-shadow: none;
+}
+.talk-btn[aria-pressed='true'] {
+  background: var(--yap-primary);
+  color: var(--yap-primary-fg);
+  box-shadow:
+    0 0 0 10px var(--yap-primary-wash),
+    var(--yap-shadow-menu);
+}
+.mic-icon {
+  width: 40px;
+  height: 40px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+}
+.mic-icon rect {
+  fill: currentColor;
+  stroke: none;
+}
+.talk-label {
+  font-size: 22px;
+  font-weight: 700;
+  line-height: 1.1;
+  text-align: center;
+  padding: 0 14px;
+}
+.talk-time {
+  font-size: 16px;
+  font-variant-numeric: tabular-nums;
+  min-height: 1.2em;
+  opacity: 0.9;
+}
+
+.secondary {
+  display: flex;
+  gap: 12px;
+  min-height: 48px;
+}
+.secondary-btn {
+  min-height: 48px;
+  min-width: 120px;
+  padding: 0 20px;
+  border-radius: var(--yap-r-full);
+  border: 1px solid var(--yap-border);
+  background: var(--yap-s2);
+  color: var(--yap-fg);
+  font-weight: 600;
+  font-size: 17px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+.secondary-btn svg {
+  width: 18px;
+  height: 18px;
+  fill: currentColor;
+}
+.secondary-btn.stop {
+  background: var(--yap-ink);
+  color: var(--yap-ink-fg);
+  border-color: var(--yap-ink);
+  min-width: 160px;
+}
+.keep-open {
+  margin: 0;
+  max-width: 30em;
+  text-align: center;
+  font-size: 14.5px;
+  color: var(--yap-muted);
+}
+
+/* Hands-free and the microphone. */
+.options {
+  margin: 4px var(--gutter) 16px;
+  padding: 8px 16px;
+  background: var(--yap-s2);
+  border-radius: var(--yap-r-xl);
+  box-shadow: var(--yap-shadow-sm);
+  display: flex;
+  flex-direction: column;
+}
+.switch {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  min-height: 56px;
+  cursor: pointer;
+}
+.switch input {
+  position: absolute;
+  opacity: 0;
+  width: 52px;
+  height: 32px;
+  margin: 0;
+  cursor: pointer;
+}
+.track {
+  flex: 0 0 auto;
+  position: relative;
+  width: 52px;
+  height: 32px;
+  border-radius: 16px;
+  border: 2px solid var(--yap-switch-edge);
+  background: var(--yap-raised);
+  transition: background var(--yap-dur), border-color var(--yap-dur);
+}
+.track::after {
+  content: '';
+  position: absolute;
+  top: 4px;
+  left: 4px;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--yap-switch-edge);
+  transition: transform var(--yap-dur), background var(--yap-dur);
+}
+.switch input:checked + .track {
+  background: var(--yap-primary);
+  border-color: var(--yap-primary);
+}
+.switch input:checked + .track::after {
+  transform: translateX(20px);
+  background: var(--yap-primary-fg);
+}
+.switch input:focus-visible + .track {
+  outline: 2px solid var(--yap-focus-ring);
+  outline-offset: 3px;
+}
+.switch-text {
+  display: flex;
+  flex-direction: column;
+}
+.switch-label,
+.field-label {
+  font-weight: 600;
+}
+.hint {
+  font-size: 14px;
+  color: var(--yap-muted);
+}
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 0 8px;
+  border-top: 1px solid var(--yap-border-subtle);
+}
+select {
+  min-height: 48px;
+  width: 100%;
+  padding: 0 12px;
+  border-radius: var(--yap-r);
+  border: 1px solid var(--yap-border);
+  background: var(--yap-s1);
+  font-size: 16px;
+}
+
+/* The model list: a sheet from the bottom. */
+.sheet {
+  width: 100%;
+  max-width: 520px;
+  margin: auto auto 0;
+  padding: 20px var(--gutter) calc(16px + env(safe-area-inset-bottom));
+  border: 0;
+  border-radius: var(--yap-r-xl) var(--yap-r-xl) 0 0;
+  background: var(--yap-s2);
+  color: var(--yap-fg);
+  box-shadow: var(--yap-shadow-menu);
+}
+.sheet::backdrop {
+  background: var(--yap-scrim);
+}
+.sheet h2 {
+  margin: 0 0 12px;
+  font-size: 19px;
+}
+.models-list {
+  list-style: none;
+  margin: 0 0 12px;
+  padding: 0;
+  max-height: 60vh;
+  overflow-y: auto;
+}
+.model-item {
+  width: 100%;
+  min-height: 56px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 12px;
+  border: 0;
+  border-radius: var(--yap-r);
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+.model-item:hover {
+  background: var(--yap-s3);
+}
+.model-item[aria-current='true'] {
+  background: var(--yap-primary-wash);
+}
+.model-item[aria-current='true'] .mname::after {
+  content: ' ✓';
+  color: var(--yap-link);
+}
+.mname {
+  font-weight: 600;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.mwhere {
+  flex: 0 0 auto;
+  font-size: 13.5px;
+  color: var(--yap-muted);
+}
+.sheet .secondary-btn {
+  width: 100%;
+}
+
+/* Wider screens (a tablet, the PC's browser): a column in the middle. */
+@media (min-width: 640px) {
+  body {
+    align-items: center;
+  }
+  .top,
+  main {
+    width: 100%;
+    max-width: 560px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    transition: none !important;
+    animation: none !important;
+  }
+  .dots i {
+    opacity: 0.8;
+  }
+  .talk-btn:active {
+    transform: none;
+  }
+}
