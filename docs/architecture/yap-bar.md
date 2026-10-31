@@ -209,7 +209,10 @@ The always-there pill above the taskbar: the `overlay` window's Rust side (regio
   for the page's whole life; a question to the **Voice Assistant**
   (`dictation.assistant`, `data-ask`) is its own variant: an amber edge and
   a ✦ for the dot, "Ask Yap…" + waveform (or the words) while it listens,
-  "Thinking…", then three bars + "Speaking…", with a ■ (`assistant-stop`,
+  "Thinking…" — or what the answer is doing once it says, as Chat's line
+  does ("Searching the web · …", "Reading …", cut with "…" at 260 px;
+  `dictation.askStep` from `yap-assistant-step`, chat/activity.rs; cleared
+  for the next question) —, then three bars + "Speaking…", with a ■ (`assistant-stop`,
   region "assistant") while it thinks or speaks; a small amber lock after the dot while push-to-
   talk's double-tap holds it hands-free; the dead-mic watchdog's "No sound
   from <device> — is it muted?" — or "Windows is blocking the microphone" — in
