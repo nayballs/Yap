@@ -8,11 +8,13 @@
 //   writes it (`onSection`), and the note's own `yap-note-changed` brings
 //   the text as each section lands (`onNoteChanged`).
 // - Two views (2026-10-31, after Claude Code's file view): **Preview**, the
-//   page to read, and **Source**, the markdown itself, coloured and
-//   editable — it took the Edit box's place (one raw view, not two). Each
+//   page to read — and, once nothing's flowing in, to edit (DocPanel's
+//   editor: its changes come through `input` as Source's do) — and
+//   **Source**, the markdown itself, coloured and editable — it took the
+//   Edit box's place (one raw view, not two). Each
 //   document's scroll is kept per view while Yap runs; a change Chat makes
 //   lands with its blocks marked a moment (`landed`).
-// - The person's words win: the Source box saves through
+// - The person's words win: the Source box (and the page's editor) saves through
 //   `chat_document_save` with the text it started from (`base`), and Rust
 //   lays the person's edit over whatever Chat wrote meanwhile (documents.rs
 //   `merge3`). A save that comes back while more was typed keeps the newer

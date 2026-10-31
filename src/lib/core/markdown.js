@@ -346,10 +346,13 @@ const PASSAGE_HREF = /^#passage-\d{1,2}$/;
 const ONLY_ON = { href: ['A'], 'aria-label': ['A', 'INPUT'], start: ['OL'], type: ['INPUT'], checked: ['INPUT'], disabled: ['INPUT'] };
 
 let purifier = null;
+let purifierWindow = null;
 // While a tickable render is sanitised (synchronously): its checkboxes stay enabled.
 let tickable = false;
 function purify() {
-  if (purifier) return purifier;
+  // (One per window: a test outside a page may bring a new one.)
+  if (purifier && purifierWindow === globalThis.window) return purifier;
+  purifierWindow = globalThis.window;
   const p = DOMPurify(globalThis.window);
   // Every Yap window has a DOM; without one (a test outside a page) nothing
   // is rendered unsanitised.
@@ -400,6 +403,16 @@ export function renderMarkdown(text, options = {}) {
   } finally {
     tickable = false;
   }
+}
+
+/**
+ * markdown-it's tokens for `text`, read exactly as `renderMarkdown` reads
+ * it (Yap's rules and all): Chat's document editor builds its page from
+ * them, each block keeping the lines it came from
+ * (views/chat/docMarkdown.js).
+ */
+export function markdownTokens(text) {
+  return md.parse(bulletsToDashes(text || ''), {});
 }
 
 /**
