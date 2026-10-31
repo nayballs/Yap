@@ -33,6 +33,8 @@
   const isSettings = label === 'settings';
   const isOnboarding = label === 'onboarding';
   const isNotepad = label === 'notepad';
+  // (The quick note's too, since its page has a toolbar with menus.)
+  const isQuickNote = label === 'quick-note';
 
   // The window's name on <html> (index.html's head script already put it
   // there before the first paint; this is the fallback). app.css gives the
@@ -51,7 +53,7 @@
   <View />
 {/await}
 
-{#if isSettings || isOnboarding || isNotepad}
+{#if isSettings || isOnboarding || isNotepad || isQuickNote}
   <!-- The window's one right-click menu and confirm dialog: every item with
        actions opens them (ui/contextMenu.svelte.js). -->
   <ContextMenuHost />

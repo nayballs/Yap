@@ -4,7 +4,9 @@
   // with copy (the summary edited in place: NoteSummary), what's being
   // written and what it needs, the meeting transcript (NoteTranscript) and
   // the note's own chat with the action picker (NoteChat). With no note
-  // open, OpenWhispr's empty state.
+  // open, OpenWhispr's empty state. My thoughts is a page you can format
+  // (components/richtext/RichNote: a toolbar, Preview / Source), the note
+  // kept markdown; its plain box until the page has loaded.
   import NoteMeta from './NoteMeta.svelte';
   import NoteSummary from './NoteSummary.svelte';
   import NoteTranscript from './NoteTranscript.svelte';
@@ -12,6 +14,7 @@
   import MeetingTasks from '../../components/MeetingTasks.svelte';
   import { openContextMenu, menuKey } from '../../ui/contextMenu.svelte.js';
   import { selectionMenu } from './noteMenus.js';
+  import { richtext, loadRichtext } from '../../components/richtext/richtext.svelte.js';
 
   /** `notes`: the view's state; `onopensettings(section)`: ControlPanel's Settings. */
   let { notes, onopensettings = null } = $props();
@@ -26,10 +29,27 @@
 
   // A right-click (or the ContextMenu key, Shift+F10) on text selected in
   // My thoughts: the transforms, Cut, Copy, Select all (noteMenus.js). With
-  // nothing selected, the box's own menu (spelling, Paste).
+  // nothing selected, the box's own menu (spelling, Paste). The page
+  // answers as its text box did (RichNote's `el`), so the same menu works.
   function onRawContextMenu(e) {
     const items = selectionMenu(notes, e.currentTarget, { field: 'notes', openSettings: onopensettings });
     if (items) openContextMenu(e, items, { label: 'Selected text', row: e.currentTarget });
+  }
+
+  const placeholder = $derived(
+    notes.recordingThisNote ? 'Take rough notes while Yap listens — they get woven into the minutes…' : 'Start writing…'
+  );
+
+  // My thoughts as a page: its editor loads the first time a note is open here.
+  $effect(() => {
+    if (notes.selected) loadRichtext();
+  });
+
+  /** Typed on the page (or its Source): saved as the box's typing is; a paste may be a dictation. */
+  function onRichChange(md, how) {
+    if (!notes.selected) return;
+    notes.selected.content = md;
+    notes.queueSave('content', how?.paste ? { inputType: 'insertFromPaste' } : null);
   }
 </script>
 
@@ -157,14 +177,36 @@
       <MeetingTasks noteId={notes.selected.id} look="app" />
     {:else if notes.tab === 'enhanced' && (notes.selected.enhancedContent || notes.summaryEditing)}
       <NoteSummary {notes} {onopensettings} />
+    {:else if richtext.Note}
+      <!-- My thoughts as a page (components/richtext: the toolbar, Preview /
+           Source), kept markdown. One editor per note (its own undo). -->
+      {@const Rich = richtext.Note}
+      {#key notes.selected.id}
+        <Rich
+          text={notes.selected.content}
+          onchange={onRichChange}
+          label="My thoughts"
+          {placeholder}
+          readonly={transformingNotes}
+          look="app"
+          canSource
+          sourceKey="yapNoteView"
+          bind:el={notes.rawEl}
+          oncontextmenu={onRawContextMenu}
+          onkeydown={(e) => menuKey(e, onRawContextMenu)}
+          --rich-size="calc(13px * var(--yap-reading-scale))"
+          --rich-leading="calc(1.7 * var(--yap-reading-leading))"
+          --rich-pad="10px 2px 16px"
+        />
+      {/key}
     {:else}
+      <!-- Until the page has loaded (or if it can't): the note's markdown, plain. -->
       <textarea
         class="raw"
         aria-label="My thoughts"
+        data-rich-fallback
         bind:this={notes.rawEl}
-        placeholder={notes.recordingThisNote
-          ? 'Take rough notes while Yap listens — they get woven into the minutes…'
-          : 'Start writing…'}
+        {placeholder}
         bind:value={notes.selected.content}
         readonly={transformingNotes}
         aria-busy={transformingNotes}

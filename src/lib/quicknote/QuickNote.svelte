@@ -1,11 +1,13 @@
 <script>
   // The quick note (window `quick-note`, notes/quick_note.rs): a small window
   // on its own shortcut to jot or dictate a note from any app, saved as you
-  // type as an ordinary note (the "Quick notes" folder in Notes). A plain
-  // text box; the title is the note's first words until you name it in
-  // Notes. A dictation while it's in front (or from its mic) lands at the
-  // cursor, never pasted (`yap-quick-note-dictation`): Ctrl+Z takes it back
-  // out in one step.
+  // type as an ordinary note (the "Quick notes" folder in Notes). A page you
+  // can format (components/richtext/RichNote: the toolbar under the tabs,
+  // Ctrl+F), the note kept markdown — its plain box until the page has
+  // loaded, which it does as the window is made; the title is the note's
+  // first words until you name it in Notes. A dictation while it's in front
+  // (or from its mic) lands at the cursor as plain text, never pasted
+  // (`yap-quick-note-dictation`): Ctrl+Z takes it back out in one step.
   //
   // Several quick notes open as **tabs** (quick_note/tabs.rs): + or Ctrl+T
   // (Ctrl+N) a new one, × or Ctrl+W to close, Ctrl+Tab to switch; Rust is
@@ -36,6 +38,8 @@
   import { appLabel } from '../core/appNames.js';
   import { readPageSelection } from '../stores/speech.svelte.js';
   import { languageShortcuts } from '../settings/languages.svelte.js';
+  import { menuOrDialogOpen } from '../ui/contextMenu.svelte.js';
+  import { richtext, loadRichtext } from '../components/richtext/richtext.svelte.js';
   import { dictationPiece, withPiece, statusLine, tabLabel, nextTab, afterClose, sendText } from './quickNote.js';
 
   /** This window's label: the `origin` of its saves. */
@@ -65,7 +69,10 @@
   let cfg = $state(null);
   // The dictation pipeline's state (`yap-state`), for the mic button.
   let pipeline = $state('idle');
+  // What takes the typing: the page (it answers as a text box does) or,
+  // until it's loaded, the plain box; `ed`: the page's editor.
   let box = $state(null);
+  let ed = $state.raw(null);
   // Where Send goes (`{ app: 'slack.exe', icon }`), or null.
   let sendTo = $state(null);
   let offerDismissed = $state(readDismissed());
@@ -83,6 +90,7 @@
   const canOpen = $derived(noteId != null || text.trim() !== '');
   const sendName = $derived(sendTo ? appLabel(sendTo.app) : '');
   const empty = $derived(text.trim() === '');
+  const placeholder = $derived(dictateKey ? `Jot something down, or press ${dictateKey} and talk.` : 'Jot something down.');
   const offerBar = $derived(!!cfg && cfg.barEnabled !== false && !cfg.barQuickNote && !offerDismissed && empty);
 
   function readDismissed() {
@@ -272,6 +280,10 @@
   /** The cursor into the note, at its end (a note opened). */
   async function focusEnd() {
     await tick();
+    if (ed) {
+      ed.focus('end');
+      return;
+    }
     if (!box) return;
     box.focus();
     const end = box.value.length;
@@ -279,10 +291,17 @@
     box.scrollTop = box.scrollHeight;
   }
 
+  /** Typed on the page: saved as the box's typing is. */
+  function onRichChange(md) {
+    text = md;
+    onInput();
+  }
+
   // Rust opened the window: on this note (its tab, or a new tab for it), a
   // new one ("New quick note", or nothing recent), and which remembered
   // tabs close now.
   function onOpen(p) {
+    loadRichtext();
     if (p?.fresh) {
       newTab();
     } else if (p?.noteId != null) {
@@ -382,8 +401,16 @@
   }
 
   // A dictation for the note (dictation/pipeline/delivery.rs `deliver_to_note`):
-  // at the cursor, as typing would put it, so Ctrl+Z takes it back out.
+  // at the cursor, as typing would put it, so Ctrl+Z takes it back out. On
+  // the page: as plain text at its caret (at the end when it hasn't the
+  // keyboard), one step in its undo.
   function onDictation(p) {
+    if (ed) {
+      const atEnd = !ed.focused;
+      ed.insertPlain((before, after) => dictationPiece(before, after, p?.text, !!p?.newline), { atEnd });
+      box?.focus();
+      return;
+    }
     const el = box;
     if (!el) return;
     const at = document.activeElement === el;
@@ -469,6 +496,8 @@
   function onKeyDown(e) {
     if (e.isComposing) return;
     if (e.key === 'Escape' && !e.repeat) {
+      // A menu of the toolbar's, or Find in the note, takes its own Esc.
+      if (menuOrDialogOpen() || e.target?.closest?.('.find')) return;
       e.preventDefault();
       close();
       return;
@@ -559,6 +588,9 @@
     // A new note at once, so typing can start before Rust answers.
     show(addTab(null));
     refreshConfig();
+    // The page (this window is a note's): loaded once the window's made and idle, or as it comes up.
+    const idle = window.requestIdleCallback ?? ((fn) => setTimeout(fn, 300));
+    idle(() => loadRichtext());
     invoke('quick_note_state').then(onState).catch(() => {});
     window.addEventListener('keydown', onKeyDown, true);
     window.addEventListener('keyup', onKeyUp, true);
@@ -627,15 +659,26 @@
     </div>
   </header>
 
-  <textarea
-    class="note"
-    bind:this={box}
-    bind:value={text}
-    oninput={onInput}
-    aria-label="Quick note"
-    placeholder={dictateKey ? `Jot something down, or press ${dictateKey} and talk.` : 'Jot something down.'}
-    spellcheck="true"
-  ></textarea>
+  {#if richtext.Note}
+    <!-- The note as a page (components/richtext), one editor per tab (its own undo). -->
+    {@const Rich = richtext.Note}
+    {#key activeKey}
+      <Rich
+        {text}
+        onchange={onRichChange}
+        label="Quick note"
+        {placeholder}
+        rawTitle="Edit this part in Notes, in Source"
+        bind:el={box}
+        bind:ed
+        --rich-size="calc(15px * var(--yap-reading-scale))"
+        --rich-leading="calc(1.55 * var(--yap-reading-leading))"
+        --rich-pad="8px 18px 12px"
+      />
+    {/key}
+  {:else}
+    <textarea class="note" data-rich-fallback bind:this={box} bind:value={text} oninput={onInput} aria-label="Quick note" {placeholder} spellcheck="true"></textarea>
+  {/if}
 
   {#if offerBar}
     <div class="offer" role="group" aria-label="The Yap bar">

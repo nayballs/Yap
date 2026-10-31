@@ -35,6 +35,7 @@
   import { actionMatchesKeydown, actionMatchesKeyup } from '../core/hotkeys.js';
   import { withLineSpeakers, withLineSplice, hasLine, withLineEdit } from '../core/notepadText.js';
   import { askReplaceSummary } from '../core/noteEdits.js';
+  import { loadRichtext } from '../components/richtext/richtext.svelte.js';
   import { LABEL } from './actions.js';
   import { TranscriptView } from './transcriptView.svelte.js';
   import { SummaryEditor } from './summaryEditor.svelte.js';
@@ -97,6 +98,10 @@
     audioFor = id;
     stopLine();
     if (id != null) refreshAudio(id);
+  });
+  // My thoughts' page (components/richtext): its editor loads with the first meeting shown.
+  $effect(() => {
+    if (note) loadRichtext();
   });
 
   // ---- loading and saving ----
