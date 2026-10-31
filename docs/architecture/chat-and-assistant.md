@@ -1772,7 +1772,8 @@ and its Undo, Preview / Source, find, copy, light and dark).
   560 px, its rail a strip across the top below 520) — **search** across
   the top ("Search models and providers", Ctrl+K, typing anywhere searches,
   Enter picks the first result) over every provider's models, connected or
-  not, and this PC's; a **rail** (`tablist`): Recent (the last 3 Chat models
+  not, older ones included whether More models is open or not (Latest
+  first), and this PC's; a **rail** (`tablist`): Recent (the last 3 Chat models
   used, this webview's localStorage `yapChatRecentModels`), Groq / Gemini /
   Claude (Anthropic) / OpenAI / OpenRouter with their marks and a dot
   (green = a key, hollow = not set up), Custom when a server elsewhere is
@@ -1780,13 +1781,40 @@ and its Undo, Preview / Source, find, copy, light and dark).
   the one the scope is set to). The **pane**: the provider's mark on a
   tile, its name, a status line from the live lists ("Connected · checked
   2 h ago", "Couldn't check: …", "Not set up"), the key masked + Change
-  key; the rows are exactly Settings' list (`modelCatalog.js`'s merge:
-  curated, then "New", the rest behind "Show N more"), each a button
+  key; the rows are the models Settings lists (`modelCatalog.js`'s merge
+  of Yap's curated list with the live one), split (2026-10-31, the
+  maintainer's design after the short menu was reverted) into **Latest** —
+  only the newest model of each of the provider's families
+  (`core/latestModels.js`, pure, unit-tested in `e2e/latest-models.spec.js`):
+  Anthropic's Opus, Fable, Sonnet, Haiku; OpenAI's flagship and small tier
+  (GPT-6 Astra, GPT-6 Luna); Gemini's flagship (Pro, or a named top tier
+  like Argon) and Flash; Groq's biggest and smallest GPT-OSS; OpenRouter's
+  the same families of the labs it carries (anthropic/…, openai/…,
+  google/…). "Newest" is read from the id (Opus 5.5 over 4.8, a dated
+  snapshot as its alias; OpenAI by generation, then tier — Astra over Sol
+  over Terra, Luna over Mini over Nano — then point release; Gemini a
+  release over a preview), then the provider's date, then Yap's order; the
+  families are names, never ids, so a new Opus in the live list takes the
+  place without a Yap update; a model being retired or no longer offered
+  never does — and under it **More models (N)**, a row-shaped button
+  (`aria-expanded`, `aria-controls`; a chevron where a row has its mark)
+  that opens in place below to every other model, newest first (the
+  provider's dates when every row has one, else the id's version), in the
+  same rows. It's closed unless the model in use is one of them; the
+  person's open or closed is kept per provider while Yap runs
+  (`chatModels.svelte.js` `moreIsOpen` / `setMoreOpen`, module state: no
+  file), and picking an older one (from it or a search) opens it next time.
+  The model in use always shows: ✓ where it is, and when More models is
+  closed by hand an older one stays on show under it (it never moves above,
+  so the button doesn't jump). A provider none of whose models is in a
+  family isn't split (Settings' list, its "more" behind More models). The
+  split is for the cloud providers only: On this PC and the servers keep
+  their lists. Each row is a button
   (`aria-pressed`) with a ✓ for the current one, the model family's mark
   (GPT-OSS → openai-oss.svg, Qwen, Gemma… `familyIcon`), a one-line
-  description and ≤ 2 tags (New, Recommended for this PC, In use, no note
-  tools, No longer offered — with "Groq no longer offers GPT-OSS 120B. Pick
-  another model." above). A provider **without a key** shows "Connect
+  description and ≤ 2 tags (New, Reads images, Recommended for this PC, In
+  use, no note tools, No longer offered — with "Groq no longer offers
+  GPT-OSS 120B. Pick another model." above). A provider **without a key** shows "Connect
   Claude" in place (paste a key · Save key · Get a key ↗ via
   `openExternalLink`; `chat_provider_key`), its curated models greyed with
   "Add key" until then (a click on one goes to the key field); once saved
@@ -1841,7 +1869,8 @@ and its Undo, Preview / Source, find, copy, light and dark).
   only. Dictation cleanup stays as it is." (or that Chat uses cleanup's
   model until one is picked) + **Language model settings…**
   (`cleanup#chat`). Keyboard: ↑/↓ through the rail (switching as it goes)
-  or the rows (roving tab stops), ←/→ or Tab between them, Enter picks, Esc
+  or the rows (roving tab stops; More models is one of them, Enter or
+  Space opens and closes it), ←/→ or Tab between them, Enter picks, Esc
   closes and gives the focus back to the chip; amber focus rings; the
   window's in-page hotkey fallbacks run first (capture phase). Monochrome
   marks (OpenAI, Anthropic, xAI, OpenRouter — Simple Icons' CC0 glyph) are
@@ -1858,8 +1887,10 @@ and its Undo, Preview / Source, find, copy, light and dark).
   from Claude Opus 5.5, at twice the price per token. Off unless you switch
   it on.", `chat_set_fast`). None of it for a model without a reasoning
   control or the one on this PC (its Think button). The picker keeps its
-  provider rail rather than Claude Code's short menu: Yap's models come
-  from five providers and this PC. Settings → Language Models → Chat has
+  provider rail rather than Claude Code's short menu (tried and reverted
+  on 2026-10-31: "no logos"): Yap's models come from five providers and
+  this PC; Latest above is that menu's "main models" idea inside the rail.
+  Settings → Language Models → Chat has
   the same Effort choice for the Chat model ("How hard it thinks", kept in
   its config copy's `chatEffort`). Settings →
   Language Models keeps its own pickers. Each answer

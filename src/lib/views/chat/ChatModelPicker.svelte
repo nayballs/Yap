@@ -3,9 +3,15 @@
   // (the maintainer's pick of the three concepts, 2026-10-19). Two panes: on the
   // left Recent, every cloud provider Yap supports (a green dot when it has
   // a key, hollow when not), Custom when a server elsewhere is set up, and
-  // On this PC; on the right that one's models, exactly as Settings lists
-  // them (chatModels.svelte.js over modelCatalog.js). Search across the top
-  // looks through all of them (Ctrl+K); a provider without a key connects
+  // On this PC; on the right that one's models (chatModels.svelte.js over
+  // modelCatalog.js): for a cloud provider **Latest**, the newest of each of
+  // its families (core/latestModels.js: Opus, Fable, Sonnet, Haiku…), and
+  // **More models (N)** under it, expanding in place to the older ones,
+  // newest first (open or closed as left while Yap runs, else open when the
+  // model in use is one of them; closed by hand, that one stays on show
+  // under it); On this PC and the servers as they are.
+  // Search across the top looks through all of them, older ones included
+  // (Ctrl+K); a provider without a key connects
   // in place (the key saved where Settings keeps it, then its live list
   // checked at once); On this PC downloads Yap's on-device models right in
   // their row, and an installed one uninstalls from its right-click menu
@@ -23,7 +29,8 @@
   // mode for Claude Opus 5.5 (off unless switched on: twice the price).
   //
   // Keyboard: ↑/↓ move through the rail (it switches as it goes) or the
-  // models, ←/→ (or Tab) between the two, Enter picks, typing searches,
+  // models (More models among them: Enter or Space opens and closes it),
+  // ←/→ (or Tab) between the two, Enter picks, typing searches,
   // Esc closes and gives the focus back to the chip. The window's in-page
   // hotkey fallbacks listen in the capture phase, before any of this.
   import { invoke } from '@tauri-apps/api/core';
@@ -60,6 +67,8 @@
     serverLine,
     serverRows,
     cloudRows,
+    moreIsOpen,
+    setMoreOpen,
     providerLine,
     recentRows,
     recentEntry,
@@ -88,7 +97,6 @@
 
   let sel = $state(startTab());
   let q = $state('');
-  let showMore = $state({});
   let busy = $state('');
   let navKey = $state('');
   let keyDraft = $state('');
@@ -129,6 +137,8 @@
     if (sel === 'custom') return { kind: 'custom', servers: remote };
     return { kind: 'cloud', provider: sel, ...cloudRows(sel, status) };
   });
+  // The selected provider's More models: open or not.
+  const moreOpen = $derived(view.kind === 'cloud' && view.older.length > 0 && moreIsOpen(view.provider, view.older));
   const firstPick = $derived(
     view.kind === 'search' ? view.groups.flatMap((g) => g.rows).find((r) => r.action === 'pick') : null
   );
@@ -172,7 +182,7 @@
   $effect(() => {
     void view;
     void navKey;
-    void showMore;
+    void moreOpen;
     tick().then(fixTabStops);
   });
 
@@ -293,6 +303,9 @@
         file: row.file || null,
       });
       pushRecent(recentEntry(row));
+      // An older one (from More models, or a search): its More models
+      // open next time, where it is.
+      if (row.older) setMoreOpen(row.provider, true);
       onstatus(s);
       if (row.kind === 'ondevice') refreshLocal();
       onclose(true);
@@ -645,24 +658,44 @@
         {:else if changingKey === view.provider}
           {@render connect(view.provider, true)}
         {/if}
-        {#if view.missing && view.rows.some((r) => r.current && r.model === view.missing.value)}
+        {#if view.missing && [...view.latest, ...view.older].some((r) => r.current && r.model === view.missing.value)}
           <p class="note warn" role="alert">{PROVIDER_LABELS[view.provider]} no longer offers {view.missing.label}. Pick another model.</p>
         {/if}
-        {#each view.rows as r (r.key)}{@render row(r)}{/each}
-        {#if view.connected && view.more.length > 0}
+        {#if view.split}
+          <!-- The newest of each family (core/latestModels.js). -->
+          <div class="group" role="group" aria-label="Latest">
+            <div class="gh">Latest</div>
+            {#each view.latest as r (r.key)}{@render row(r)}{/each}
+          </div>
+        {:else}
+          {#each view.latest as r (r.key)}{@render row(r)}{/each}
+        {/if}
+        {#if view.older.length > 0}
+          <!-- The older ones, in place below: open or closed as left while
+               Yap runs, else open when the model in use is one of them. -->
           <button
-            class="morebtn"
+            class="morerow"
             data-nav="more:{view.provider}"
-            aria-expanded={!!showMore[view.provider]}
+            aria-expanded={moreOpen}
+            aria-controls={moreOpen ? `chat-model-more-${view.provider}` : undefined}
             onfocus={() => (navKey = `more:${view.provider}`)}
-            onclick={() => (showMore = { ...showMore, [view.provider]: !showMore[view.provider] })}
+            onclick={() => setMoreOpen(view.provider, !moreOpen)}
           >
-            {showMore[view.provider]
-              ? `Show fewer ${info.short} models`
-              : `Show ${view.more.length} more ${info.short} ${view.more.length === 1 ? 'model' : 'models'}`}
+            <!-- The chevron where a row has its mark, the words where its name is. -->
+            <span class="chk" aria-hidden="true"></span>
+            <span class="chev" class:open={moreOpen} aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6" /></svg>
+            </span>
+            <span class="txt"><span class="mlabel">More models <span class="count">({view.older.length})</span></span></span>
           </button>
-          {#if showMore[view.provider]}
-            {#each view.more as r (r.key)}{@render row(r)}{/each}
+          {#if moreOpen}
+            <div class="group" role="group" id="chat-model-more-{view.provider}" aria-label="More {info.short} models">
+              {#each view.older as r (r.key)}{@render row(r)}{/each}
+            </div>
+          {:else}
+            <!-- Closed by hand: the model in use still on show, under it
+                 (never moved above it: More models stays put). -->
+            {#each view.older.filter((r) => r.current) as r (r.key)}{@render row(r)}{/each}
           {/if}
         {/if}
       {:else if view.kind === 'custom'}
@@ -788,6 +821,7 @@
     }
     .tab,
     .mrow,
+    .morerow,
     .btn {
       transition:
         background var(--yap-dur),
@@ -1002,8 +1036,9 @@
     font-weight: 600;
   }
 
-  /* model rows */
-  .mrow {
+  /* model rows (and More models, laid out as one) */
+  .mrow,
+  .morerow {
     display: grid;
     grid-template-columns: 16px 20px minmax(0, 1fr) auto;
     gap: 8px;
@@ -1019,7 +1054,8 @@
     cursor: pointer;
   }
   button.mrow:hover,
-  .mrow.menuopen {
+  .mrow.menuopen,
+  .morerow:hover {
     background: var(--yap-s3);
   }
   .mrow.on {
@@ -1228,18 +1264,41 @@
   .folder code {
     font-size: 11.5px;
   }
-  .morebtn {
-    align-self: flex-start;
-    margin: 4px 10px;
-    padding: 2px 0;
-    border: 0;
-    background: none;
-    color: var(--yap-primary);
-    font: inherit;
-    font-size: 12px;
-    cursor: pointer;
+  /* "More models (N)": a row of the list, quieter than a model's; its
+     chevron turns down when it's open. */
+  .morerow {
+    margin-top: 2px;
+    color: var(--yap-muted);
   }
-  .morebtn:hover,
+  .morerow:hover,
+  .morerow:focus-visible {
+    color: var(--yap-fg);
+  }
+  .mlabel {
+    font-weight: 500;
+  }
+  .morerow .count {
+    font-weight: 400;
+  }
+  .chev {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 20px;
+    height: 18px;
+  }
+  .chev svg {
+    width: 14px;
+    height: 14px;
+  }
+  .chev.open svg {
+    transform: rotate(90deg);
+  }
+  @media (prefers-reduced-motion: no-preference) {
+    .chev svg {
+      transition: transform var(--yap-dur);
+    }
+  }
   .linkbtn:hover,
   .footlink:hover {
     text-decoration: underline;
@@ -1408,8 +1467,8 @@
   /* focus: the amber ring */
   .tab:focus-visible,
   .mrow:focus-visible,
+  .morerow:focus-visible,
   .btn:focus-visible,
-  .morebtn:focus-visible,
   .linkbtn:focus-visible,
   .footlink:focus-visible,
   .prog:focus-visible {
