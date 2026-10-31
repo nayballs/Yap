@@ -50,7 +50,9 @@
   let pos = $state({ left: 12, bottom: 60, maxH: 480, ready: false });
   // The open submenu ('effort' | 'more' | ''), where it goes, what's typed.
   let sub = $state('');
-  let subPos = $state({ left: 0, top: 0, inline: false, ready: false });
+  // `minH`: More's height as it opened, kept while a search narrows it, so
+  // nothing moves under the pointer or the caret.
+  let subPos = $state({ left: 0, top: 0, inline: false, ready: false, minH: 0 });
   let q = $state('');
   // Effort: the level whose line shows (the focused or hovered one; '' its default; null the one in effect).
   let hintLevel = $state(null);
@@ -147,8 +149,7 @@
 
   /**
    * Beside the menu (right, else left), level with its item; else under its
-   * item. `keep`: where it is, if it still fits (a search narrowing More
-   * leaves its box where it was).
+   * item. `keep`: where it is, if it still fits (its lists arriving).
    */
   function placeSub(keep = false) {
     const trig = menuEl?.querySelector(`[data-sub="${sub}"]`);
@@ -159,17 +160,17 @@
     let left = box.right + 4;
     if (left + w > window.innerWidth - m) left = box.left - w - 4;
     if (left < m) {
-      subPos = { left: 0, top: 0, inline: true, ready: true };
+      subPos = { left: 0, top: 0, inline: true, ready: true, minH: 0 };
       return;
     }
-    const h = subEl && !subPos.inline ? subEl.offsetHeight : 0;
+    const h = subEl && !subPos.inline ? subEl.getBoundingClientRect().height : 0;
     // Its bottom by its item's, as Claude Code opens it upwards from a menu at the window's foot.
     const want = keep && subPos.ready ? subPos.top : trig.getBoundingClientRect().bottom + 5 - h;
     const top = Math.max(m, Math.min(want, window.innerHeight - m - h));
-    subPos = { left, top, inline: false, ready: !!h };
+    subPos = { left, top, inline: false, ready: !!h, minH: sub === 'more' && !keep ? h : subPos.minH };
   }
 
-  // The flyout's height changes (a search narrowing More): placed again.
+  // The flyout grows (More's lists arriving): kept in the window.
   $effect(() => {
     const el = subEl;
     if (!el || untrack(() => subPos.inline)) return;
@@ -194,7 +195,7 @@
       sub = which;
       q = '';
       hintLevel = null;
-      subPos = { left: 0, top: 0, inline: false, ready: false };
+      subPos = { left: 0, top: 0, inline: false, ready: false, minH: 0 };
       if (which === 'more') for (const s of servers) loadServer(s);
     }
     await tick();
@@ -464,7 +465,7 @@
     aria-label={sub === 'effort' ? 'Effort' : 'More models'}
     data-submenu={sub}
     data-testid={sub === 'effort' ? 'chat-effort' : 'chat-more-models'}
-    style={subPos.inline ? "" : `left: ${subPos.left}px; top: ${subPos.top}px`}
+    style={subPos.inline ? '' : `left: ${subPos.left}px; top: ${subPos.top}px; min-height: min(${subPos.minH}px, calc(100vh - 16px))`}
     onkeydown={onSubKey}
   >
     {#if sub === 'effort'}{@render effortMenu()}{:else}{@render moreMenu()}{/if}
@@ -608,8 +609,10 @@
   .mm.sub:not(.wide):not(.inline) {
     width: 232px;
   }
+  /* More: compact, its list scrolling past this height. */
   .mm.sub.wide {
     max-width: 320px;
+    max-height: min(440px, calc(100vh - 16px));
     padding-top: 0;
   }
   /* …or a section under its item, when the window is narrow */

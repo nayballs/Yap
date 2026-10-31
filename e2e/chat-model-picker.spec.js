@@ -400,8 +400,13 @@ test('every provider connected: seven at most, and More models has a search', as
     const search = more.getByRole('searchbox', { name: 'Search models' });
     await expect(search).toBeFocused();
     await expect(more.getByRole('group').locator('.ghead')).toHaveText(['Anthropic', 'OpenAI', 'Gemini', 'Groq']);
+    await more.evaluate((el) => Promise.all(el.getAnimations().map((a) => a.finished)));
+    const before = await more.boundingBox();
     await main.keyboard.type('luna');
     await expect(more.getByRole('group').locator('.ghead')).toHaveText(['OpenAI']);
+    // Narrowed, it stays where it was: nothing moves under the caret.
+    const after = await more.boundingBox();
+    expect([after.x, after.y, after.height]).toEqual([before.x, before.y, before.height]);
     await expect(more.getByRole('menuitemradio').locator('.nm')).toHaveText(['GPT-6 Luna', 'GPT-5.6 Luna']);
     await shot(main, '13-more-models-search');
     await main.keyboard.press('ArrowDown');

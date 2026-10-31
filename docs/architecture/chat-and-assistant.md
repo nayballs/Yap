@@ -1746,7 +1746,9 @@ and its Undo, Preview / Source, find, copy, light and dark).
   newest first in each (by the provider's dates when every model in the
   group has one, else by the version in the id), "New" on a new one, ≤ 40
   a group then "And N more: search to narrow it down.", and a search at
-  its top past ten models (typing on a model searches). **Fast mode**
+  its top past ten models (typing on a model searches); at most 440 px
+  tall, its list scrolling, and its box kept where and as big as it opened
+  while a search narrows it (nothing moves under the caret). **Fast mode**
   (Claude Opus 5.5 only, `typeof effort.fast === 'boolean'`): a quiet
   "Fast mode" heading and "Enable fast mode / Faster answers, at twice the
   price per token" with a switch (`menuitemcheckbox`, `chat_set_fast`; the
@@ -1755,8 +1757,8 @@ and its Undo, Preview / Source, find, copy, light and dark).
   on-device downloads and uninstall, search across everything and
   "Language model settings…". A submenu is a flyout beside the menu (on
   the right, else the left; its bottom level with its item's, opening
-  upwards as Claude Code's does from a menu at the window's foot; placed
-  again when its height changes), or a section opening under its item
+  upwards as Claude Code's does from a menu at the window's foot; kept in
+  the window as its lists arrive), or a section opening under its item
   when the window has room for neither. The pointer on a submenu's item
   opens it, on another item closes it; a click opens it with the focus in
   it. Keyboard: the model in use has the focus when it opens; ↑/↓ (round),
