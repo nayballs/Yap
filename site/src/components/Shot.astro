@@ -1,0 +1,28 @@
+---
+// A screenshot of the app, optimised at build (AVIF/WebP, sized), with a
+// caption. Today's come from the repo's README screenshots (light only,
+// captured with fictional data before the rename).
+import { Picture } from 'astro:assets';
+import type { ImageMetadata } from 'astro';
+interface Props {
+  src: ImageMetadata;
+  alt: string;
+  caption?: string;
+  widths?: number[];
+  sizes?: string;
+  eager?: boolean;
+}
+const { src, alt, caption, widths = [480, 800, 1200], sizes = '(min-width: 1100px) 560px, 100vw', eager = false } = Astro.props;
+---
+<figure class="shot">
+  <Picture
+    src={src}
+    alt={alt}
+    formats={['avif', 'webp']}
+    widths={widths}
+    sizes={sizes}
+    loading={eager ? 'eager' : 'lazy'}
+    decoding="async"
+  />
+  {caption && <figcaption>{caption}</figcaption>}
+</figure>

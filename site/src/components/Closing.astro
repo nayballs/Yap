@@ -1,0 +1,67 @@
+---
+// Every page ends the same way: the key, one line, the button.
+import { HOTKEY } from '../brand';
+import DownloadButton from './DownloadButton.astro';
+interface Props {
+  title?: string;
+  line?: string;
+}
+const { title = `Press ${HOTKEY}. Start talking.`, line = 'For Windows 10 and 11, 64-bit. Free, with no account.' } = Astro.props;
+---
+<section class="closing" aria-labelledby="closing-h">
+  <div class="wrap closing-in">
+    <span class="closing-key" aria-hidden="true">{HOTKEY}</span>
+    <div class="closing-copy">
+      <h2 id="closing-h">{title}</h2>
+      <p class="muted">{line}</p>
+    </div>
+    <DownloadButton size="lg" />
+  </div>
+</section>
+
+<style>
+  .closing {
+    padding-block: clamp(48px, 6vw, 80px);
+    background: var(--t-feature);
+    color: var(--t-feature-fg);
+    border-top: 1px solid var(--t-feature-edge);
+  }
+  .closing-in {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 24px 32px;
+  }
+  .closing-copy {
+    flex: 1 1 18rem;
+    display: grid;
+    gap: 6px;
+  }
+  .closing h2 {
+    color: var(--t-feature-fg);
+  }
+  .closing .muted {
+    color: color-mix(in srgb, var(--t-feature-fg) 72%, transparent);
+  }
+  .closing-key {
+    display: grid;
+    place-items: center;
+    width: 72px;
+    height: 68px;
+    border-radius: 16px;
+    border: 1.5px solid var(--t-key-border);
+    background: var(--t-key-bg);
+    color: var(--t-key-fg);
+    font-size: 1.5rem;
+    font-weight: 720;
+    box-shadow: 0 5px 0 var(--t-key-border);
+  }
+  .closing :global(.btn-primary) {
+    background: var(--t-feature-cta);
+    color: var(--t-feature-cta-fg);
+  }
+  .closing :global(.btn-primary:hover) {
+    background: var(--t-feature-cta-hover);
+    color: var(--t-feature-cta-fg);
+  }
+</style>

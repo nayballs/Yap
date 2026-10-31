@@ -1,0 +1,8 @@
+---
+// A shortcut drawn as physical keys, as the app draws them: "Win+Alt+S".
+interface Props {
+  combo: string;
+}
+const parts = Astro.props.combo.split('+').map((p) => p.trim());
+---
+<span class="keys">{parts.map((k, i) => (<>{i > 0 && <span class="plus" aria-hidden="true">+</span>}<kbd>{k}</kbd></>))}</span>
