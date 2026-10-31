@@ -566,6 +566,15 @@ pub struct DocExpect {
     /// a page, then a change to it that went through ([`changed_after_web`]).
     #[serde(default)]
     pub after_web: bool,
+    /// **The outline before the web** (2026-10-31): the new document's
+    /// `create_document` went through before the turn's first search or
+    /// page read that did ([`outlined_before_web`]).
+    #[serde(default)]
+    pub outline_before_web: bool,
+    /// **It read what it quotes**: a page was read this turn (`read_page`,
+    /// or a strong Claude's own web fetch, recorded as one).
+    #[serde(default)]
+    pub reads_pages: bool,
 }
 
 /// What a turn did with documents, as `DocExpect` and `--documents`' table
@@ -729,6 +738,18 @@ pub fn changed_after_web(calls: &[super::record::ToolCall]) -> bool {
     calls[web..].iter().any(|c| c.success && changers.contains(&c.name.as_str()) && c.result["data"]["changed"] != serde_json::json!(false))
 }
 
+/// A new document was outlined before the web: its `create_document` went
+/// through before any search or page read that did (none at all: yes). Pure.
+pub fn outlined_before_web(calls: &[super::record::ToolCall]) -> bool {
+    let made = calls.iter().position(|c| c.success && c.name == "create_document");
+    let web = calls.iter().position(|c| c.success && crate::web::TOOL_NAMES.contains(&c.name.as_str()));
+    match (made, web) {
+        (Some(m), Some(w)) => m < w,
+        (Some(_), None) => true,
+        (None, _) => false,
+    }
+}
+
 /// A guide's checks for the turn's documents (changed, else made): each
 /// asked for in `d` and its outcome, for the faults and `--guides`' table.
 pub fn guide_seen(d: &DocExpect, o: &Observed) -> Value {
@@ -760,6 +781,13 @@ pub fn guide_seen(d: &DocExpect, o: &Observed) -> Value {
     }
     if d.after_web {
         out.insert("after_web".into(), json!({ "ok": changed_after_web(&o.stats.tool_calls) }));
+    }
+    if d.outline_before_web {
+        out.insert("outline".into(), json!({ "ok": outlined_before_web(&o.stats.tool_calls) }));
+    }
+    if d.reads_pages {
+        let read = o.stats.tool_calls.iter().filter(|c| c.success && c.name == "read_page").count();
+        out.insert("read".into(), json!({ "ok": read > 0, "pages": read }));
     }
     Value::Object(out)
 }
@@ -871,6 +899,12 @@ fn document_faults(d: &DocExpect, o: &Observed) -> Vec<String> {
     if g["after_web"]["ok"] == json!(false) {
         let calls: Vec<String> = o.stats.tool_calls.iter().map(|c| format!("{}{}", c.name, if c.success { "" } else { " (refused)" })).collect();
         fails.push(format!("the document didn't change after the web was read; calls made: {}", if calls.is_empty() { "none".to_string() } else { calls.join(", ") }));
+    }
+    if g["outline"]["ok"] == json!(false) {
+        fails.push("the document wasn't outlined before the web was searched".to_string());
+    }
+    if g["read"]["ok"] == json!(false) {
+        fails.push("no page was read: its facts came from search results".to_string());
     }
     match (d.made, seen.made.is_empty()) {
         (true, true) => {
@@ -2202,6 +2236,30 @@ mod tests {
         let rest = "| Level | Skill |\n|---|---|\n| 5 | Tide Wall |\n| 6 | Undertow |\n\n*Levels 2–6: my suggestions, not from a source.*\n\n**Gear:** a coral staff.";
         crate::notes::update(id, None, Some(format!("{}\n\n{rest}\n", crate::notes::get(id).unwrap().content)), None, None).unwrap();
         assert!(check(&expect(want), &o).is_empty(), "{:?}", check(&expect(json!({ "made": true })), &o));
+        // Searched before its outline, and read no page (2026-10-31: the
+        // outline first, the facts from pages read).
+        let first = json!({ "made": true, "outline_before_web": true, "reads_pages": true });
+        assert_eq!(
+            check(&expect(first.clone()), &o),
+            ["the document wasn't outlined before the web was searched", "no page was read: its facts came from search results"]
+        );
+        // Outlined first, then searched and read: it passes.
+        let read = ToolCall {
+            name: "read_page".into(),
+            args: json!({ "url": "https://emberfall.example/wiki/Tidecaller" }),
+            success: true,
+            display: String::new(),
+            result: json!({ "success": true, "data": { "n": 1, "url": "https://emberfall.example/wiki/Tidecaller" } }),
+        };
+        let mut outlined = obs("It's open on the right.");
+        outlined.stats.tool_calls = o.stats.tool_calls[1..].to_vec();
+        outlined.stats.tool_calls.insert(1, web.clone());
+        outlined.stats.tool_calls.insert(2, read);
+        assert!(outlined_before_web(&outlined.stats.tool_calls));
+        assert!(check(&expect(first), &outlined).is_empty(), "{:?}", check(&expect(json!({ "made": true })), &outlined));
+        // A search refused before the outline doesn't count as the web.
+        let refused = ToolCall { success: false, ..web.clone() };
+        assert!(outlined_before_web(&[refused, o.stats.tool_calls[1].clone(), web.clone()]));
         // A change before the web, or none after it: not "after the web".
         let mut before = obs("Done.");
         before.stats.tool_calls.push(call("write_section", json!({ "note_id": id, "key": "Levels", "markdown": "x" })));

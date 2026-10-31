@@ -427,6 +427,9 @@ async fn tool_loop(
     let mut rejected = 0u32;
     // Times the model was asked to finish a document it made (documents.rs).
     let mut finish_nudges = 0usize;
+    // A new document's first step answered in words: asked once to outline
+    // it (`web::Turn::outline_first`).
+    let mut outline_nudged = false;
     for _step in 0..MAX_TOOL_STEPS {
         let forced = must_search;
         let mut req = crate::ai::llm::ChatRequest::chat(
@@ -540,6 +543,26 @@ async fn tool_loop(
             if content.is_empty() {
                 return Err("The model returned an empty answer".to_string());
             }
+            // A new document's first step, its web tools held back for the
+            // outline, answered in words ("I'll look this up first…"):
+            // asked once to make the outline; the web stays held for that
+            // one step more.
+            if web.as_deref().is_some_and(crate::web::Turn::outline_pending) {
+                if !outline_nudged {
+                    outline_nudged = true;
+                    tracing::info!(provider, "Chat: a new document's first step made no outline; the model is asked to make it");
+                    crate::ai::eval::post_fix("outline_first");
+                    if let Some(live) = live {
+                        live.sink.send(crate::chat::stream::Event::Text { text: String::new() });
+                    }
+                    messages.push(json!({ "role": "assistant", "content": content }));
+                    messages.push(json!({ "role": "user", "content": crate::chat::documents::OUTLINE_NOTE }));
+                    continue;
+                }
+                if let Some(turn) = web.as_deref_mut() {
+                    turn.outline_settled();
+                }
+            }
             // A document this turn made still has sections to write
             // (documents.rs): the model finishes it before it answers.
             if let Some((_, title, left)) = extra.docs.and_then(crate::chat::documents::Turn::unfinished) {
@@ -569,6 +592,11 @@ async fn tool_loop(
         messages.push(msg.clone());
         // This step only searched the notes, and found nothing.
         let mut notes_found_nothing = true;
+        // **A new document's outline before any search** (`web::Turn::
+        // outline_first`): this step's searches and page reads are refused,
+        // unless the step makes the outline too.
+        let hold_web = web.as_deref().is_some_and(crate::web::Turn::outline_pending)
+            && !tool_calls.iter().any(|c| c["function"]["name"] == "create_document");
         for call in &tool_calls {
             let id = call["id"].as_str().unwrap_or("");
             let name = call["function"]["name"].as_str().unwrap_or("");
@@ -607,8 +635,16 @@ async fn tool_loop(
             }
             // A document's "[1]" citations: links to the pages themselves
             // (a note has no Sources row), before it runs, so the model's
-            // picture of the document is what was written.
+            // picture of the document is what was written. The pages it
+            // cites (by number, or a link) are marked so first: the answer's
+            // Sources row shows them first.
             if crate::chat::documents::TOOL_NAMES.contains(&name) {
+                if let Some(turn) = web.as_deref_mut() {
+                    let ops = args["ops"].as_array().into_iter().flatten().filter_map(|op| op["markdown"].as_str());
+                    for text in ["summary", "markdown", "content", "text", "body"].iter().filter_map(|f| args[*f].as_str()).chain(ops) {
+                        turn.cited_in(text);
+                    }
+                }
                 if let Some(turn) = web.as_deref().filter(|t| !t.sources.is_empty()) {
                     let sources: Vec<(usize, String, String)> = turn
                         .sources
@@ -638,7 +674,11 @@ async fn tool_loop(
             }
             let ran_with = args.clone();
             let web_seen = web.as_deref().is_some_and(crate::web::Turn::seen);
-            let mut result = if let Some(refusal) = refused_after_web(name, web_seen, extra.strong) {
+            let mut result = if hold_web && crate::web::TOOL_NAMES.contains(&name) {
+                tracing::info!(tool = %name, "Chat: a new document's outline comes before any search; refused");
+                crate::ai::eval::post_fix("outline_first");
+                crate::chat::documents::outline_first_refusal()
+            } else if let Some(refusal) = refused_after_web(name, web_seen, extra.strong) {
                 refusal
             } else if let Some(r) = crate::ai::eval::intercept_tool(name, &args) {
                 r // a model evaluation records what would leave Yap (the clipboard)
@@ -728,6 +768,11 @@ async fn tool_loop(
                 "tool_call_id": id,
                 "content": content,
             }));
+        }
+        // A new document's first step is done (its outline made, or the
+        // refusal told): the web is the turn's from the next step.
+        if let Some(turn) = web.as_deref_mut() {
+            turn.outline_settled();
         }
         // A price question whose results only had another country's prices:
         // a model on this PC gets Yap's search for the local price straight
@@ -1058,6 +1103,63 @@ mod tests {
         assert_eq!(turn.reach().searches, crate::web::DEEP_SEARCHES);
         // Memory unchanged.
         assert!(crate::memory::items().is_empty());
+    }
+
+    /// **A new document's outline before any search** (2026-10-31): the
+    /// first step's search is refused (no chip) unless it makes the outline
+    /// too; a first step answered in words is asked once to make it; then
+    /// the web is the turn's, and the Sources keep every page, the ones the
+    /// document cites marked.
+    #[tokio::test]
+    async fn a_new_documents_outline_comes_before_the_search() {
+        let exa = json!({ "results": [
+            { "title": "Emberfall", "url": "https://emberfall.example/wiki/Tidecaller", "highlights": ["Rain Bolt at level 1."] },
+            { "title": "Emberfall", "url": "https://forum.example/t/1", "highlights": ["A thread."] },
+        ] });
+        let outline = json!({ "title": "Tidecaller guide", "sections": [{ "key": "Levels", "intent": "level by level" }] });
+        let fake = fake_server(
+            vec![
+                // Words first: asked once to make the outline.
+                json!({ "role": "assistant", "content": "I'll research this first." }),
+                // A search before the outline: refused.
+                calls(&[("web_search", json!({ "query": "Emberfall tidecaller" }))]),
+                calls(&[("create_document", outline)]),
+                calls(&[("web_search", json!({ "query": "Emberfall tidecaller levels" }))]),
+                calls(&[("write_section", json!({ "note_id": 1, "key": "Levels", "markdown": "| Level | Skill |\n|---|---|\n| 1 | Rain Bolt [1] |" }))]),
+                json!({ "role": "assistant", "content": "It's open on the right." }),
+            ],
+            exa,
+        );
+        let settings =
+            crate::web::Settings { service: crate::web::Service::Exa, key: "fake-key".into(), lang: "en".into(), native: None, country: None, local: None, units: None };
+        let endpoints = crate::web::Endpoints { exa: format!("{}/exa", fake.base), tavily: String::new(), standin: None, offline: false };
+        let question = "Make me a level-by-level Tidecaller guide for Emberfall";
+        let mut turn = crate::web::Turn::new(settings, endpoints, question, &[]).may_go_deep(crate::web::Reach::deep(Some(80_000))).outline_first();
+        turn.go_deep();
+        let docs = crate::chat::documents::Turn::new(&[]);
+        let extra = Extra { docs: Some(&docs), strong: true, ..Default::default() };
+        let (reply, chips) =
+            tool_loop("You are helpful.", &[], question, &[], &format!("{}/v1", fake.base), "", "fake-gpt-5", "custom", false, false, &|_| {}, Some(&mut turn), FirstStep::Model, extra, None)
+                .await
+                .expect("an answer");
+        assert_eq!(reply, "It's open on the right.");
+        // One search ran, after the outline; the refused one has no chip.
+        assert_eq!(chips.iter().filter(|c| c.starts_with("Searched the web")).count(), 1, "{chips:?}");
+        assert!(chips[0].starts_with("Started \"Tidecaller guide\""), "{chips:?}");
+        assert!(!turn.outline_pending());
+        let requests = fake.requests.lock().unwrap().clone();
+        let chat: Vec<&Value> = requests.iter().filter(|(u, _)| u.ends_with("/chat/completions")).map(|(_, b)| b).collect();
+        assert_eq!(chat.len(), 6);
+        // Asked once to make it, after the words.
+        let asked = chat[1]["messages"].as_array().unwrap().last().unwrap();
+        assert_eq!(asked["content"], json!(crate::chat::documents::OUTLINE_NOTE));
+        // The search before it went back refused, with what to do.
+        let refused = chat[2]["messages"].as_array().unwrap().iter().rev().find(|m| m["role"] == "tool").unwrap();
+        assert!(refused["content"].as_str().unwrap().contains("Outline first: call create_document now"), "{refused}");
+        assert_eq!(requests.iter().filter(|(u, _)| u.starts_with("/exa/search")).count(), 1, "searched once");
+        // Every page kept with the answer, the one the document cites marked.
+        let kept = turn.sources_for(&reply);
+        assert_eq!(kept.iter().map(|s| (s.n, s.cited)).collect::<Vec<_>>(), [(1, true), (2, false)]);
     }
 
     #[tokio::test]

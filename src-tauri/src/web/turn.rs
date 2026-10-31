@@ -39,17 +39,41 @@ impl Reach {
     /// what's left of the request, result by result (`agent::Room::fit`).
     /// Pure.
     pub fn deep(request: Option<u64>) -> Reach {
-        let reads = request.map_or(DEEP_READS, |r| ((r * 2 / 5) / PAGE_TOKENS as u64) as usize).clamp(MAX_READS, DEEP_READS);
+        Reach::deep_paged(request, PAGE_TOKENS)
+    }
+
+    /// [`Reach::deep`] for pages of `page` tokens each: a strong Claude's
+    /// own web fetch puts up to `native::FETCH_TOKENS` of a page in the
+    /// request (and Yap can't trim what Anthropic fetched), so its reads are
+    /// sized by that — Claude Haiku 5.5's 80K gets 4, Opus the full 10
+    /// (2026-10-31: a document's turn opens the pages its facts come from).
+    /// Pure.
+    pub fn deep_paged(request: Option<u64>, page: usize) -> Reach {
+        let reads = request.map_or(DEEP_READS, |r| ((r * 2 / 5) / page.max(1) as u64) as usize).clamp(MAX_READS, DEEP_READS);
         Reach { searches: DEEP_SEARCHES, reads }
     }
 }
 
-/// A web address, compared: scheme and host lowercased, no fragment, no
-/// trailing slash. Pure.
+/// A web address, compared: scheme and host lowercased, no "www.", no
+/// fragment, no tracking parameters (`utm_…`), no trailing slash (before
+/// its query too: "…/filedetails/?id=1" is "…/filedetails?id=1"). Pure.
 pub fn normal_url(url: &str) -> String {
     match Url::parse(url.trim()) {
         Ok(mut u) => {
             u.set_fragment(None);
+            if let Some(host) = u.host_str().and_then(|h| h.strip_prefix("www.")).map(str::to_string) {
+                let _ = u.set_host(Some(&host));
+            }
+            if u.query().is_some() {
+                let kept: Vec<(String, String)> = u.query_pairs().filter(|(k, _)| !k.starts_with("utm_")).map(|(k, v)| (k.into_owned(), v.into_owned())).collect();
+                if kept.is_empty() {
+                    u.set_query(None);
+                } else {
+                    u.query_pairs_mut().clear().extend_pairs(kept);
+                }
+            }
+            let path = u.path().trim_end_matches('/').to_string();
+            u.set_path(&path);
             let s = u.to_string();
             s.trim_end_matches('/').to_string()
         }
@@ -129,6 +153,14 @@ pub struct Turn {
     /// How far it may look once it writes a document (a strong model's
     /// turn, [`Turn::may_go_deep`]); `None`: never further.
     deep_reach: Option<Reach>,
+    /// **The outline comes first** ([`Turn::outline_first`]): a strong
+    /// model's turn that makes a new document looks nothing up until its
+    /// first step is done — Claude's own web tools stay out of that step's
+    /// request, Yap's are refused unless the step makes the outline too.
+    outline_first: bool,
+    /// A document cited this turn's pages ([`Turn::cited_in`]): the answer
+    /// keeps every source, the cited and opened ones marked.
+    documented: bool,
 }
 
 impl Turn {
@@ -156,6 +188,8 @@ impl Turn {
             reserved: 0,
             reach: Reach::USUAL,
             deep_reach: None,
+            outline_first: false,
+            documented: false,
         }
     }
 
@@ -166,15 +200,42 @@ impl Turn {
         self
     }
 
+    /// **A new document's turn: the outline first** (2026-10-31, as Claude
+    /// Docs does it: the title and a placeholder per section open in the
+    /// panel at once, then the research, then each section). Claude Opus
+    /// 5.5 researched for 1 min 44 s before its `create_document`, so the
+    /// panel opened after 1 min 52 s. Until the turn's first step is done
+    /// ([`Turn::outline_settled`]) nothing is looked up: Claude's own web
+    /// tools stay out of the request ([`Turn::server_tools`]), and the loop
+    /// refuses Yap's unless the step makes the outline too
+    /// (`documents::OUTLINE_FIRST`).
+    pub fn outline_first(mut self) -> Turn {
+        self.outline_first = true;
+        self
+    }
+
+    /// The outline is still to come ([`Turn::outline_first`]).
+    pub fn outline_pending(&self) -> bool {
+        self.outline_first
+    }
+
+    /// The first step is done (with its outline, or without: told once, the
+    /// model may look things up from now on).
+    pub fn outline_settled(&mut self) {
+        self.outline_first = false;
+    }
+
     /// **This turn writes a document**: it looks further from now on — the
     /// deeper [`Reach`], and the provider's own search opening more pages
-    /// and saying more (`native::NativeSearch::deep`). Only a turn that
+    /// and saying more (`native::NativeSearch::deep`; Claude's own web fetch
+    /// as many pages a step as the reach reads). Only a turn that
     /// [`Turn::may_go_deep`]; `true` when it went deeper now (once).
     pub fn go_deep(&mut self) -> bool {
         let Some(deep) = self.deep_reach.filter(|d| *d != self.reach) else { return false };
         self.reach = deep;
         if let Some(n) = self.settings.native.as_mut() {
             n.deep = true;
+            n.deep_fetches = Some(deep.reads as u32);
         }
         tracing::info!(searches = deep.searches, reads = deep.reads, "Web: a document's turn looks further");
         true
@@ -187,10 +248,12 @@ impl Turn {
 
     /// **Claude's own web tools for Chat's request**, when it searches there
     /// (`native::NativeSearch::in_chat`, `llm::anthropic`): its web search
-    /// and web fetch, deeper once the turn writes a document. `None`: Yap's
-    /// `web_search` and `read_page` are the turn's.
+    /// and web fetch, deeper once the turn writes a document — none while a
+    /// new document's outline is still to come ([`Turn::outline_first`]).
+    /// `None`: Yap's `web_search` and `read_page` are the turn's.
     pub fn server_tools(&self) -> Option<Vec<Value>> {
-        self.settings.native.as_ref().filter(|n| n.in_chat).map(native::NativeSearch::server_tools)
+        let n = self.settings.native.as_ref().filter(|n| n.in_chat)?;
+        Some(if self.outline_first { Vec::new() } else { n.server_tools() })
     }
 
     /// **What Claude's own web tools did in one reply** (`llm::anthropic`'s
@@ -238,7 +301,7 @@ impl Turn {
             }
             self.reads += 1;
             self.seen = true;
-            let n = self.number(f["title"].as_str().unwrap_or(""), url);
+            let n = self.opened(f["title"].as_str().unwrap_or(""), url);
             let chip = format!("Read {shown}");
             crate::ai::eval::tool_called("read_page", &json!({ "url": url }), &json!({ "success": true, "data": { "n": n, "url": url }, "displayText": chip }));
             chips.push(chip);
@@ -356,6 +419,43 @@ impl Turn {
         n
     }
 
+    /// **A page the turn opened and read**: its number ([`Turn::number`]),
+    /// marked opened, and titled with the page's own title — a search's
+    /// result is often titled with the site or the game ("Divinity: Original
+    /// Sin 2 · steamcommunity.com", for 30 different guides), the page
+    /// itself says what it is.
+    fn opened(&mut self, title: &str, url: &str) -> usize {
+        let n = self.number(title, url);
+        if let Some(s) = self.sources.iter_mut().find(|s| s.n == n) {
+            s.opened = true;
+            let title = tidy(title, 120);
+            if !title.is_empty() {
+                s.site = source_site(&title, &s.url);
+                s.title = title;
+            }
+        }
+        n
+    }
+
+    /// **What a document cites** (its text as the model wrote it, before
+    /// Yap links its `[n]`): those sources marked cited — by number, or by
+    /// a markdown link to their page (a strong Claude links a page itself).
+    /// The answer then keeps all the turn's sources, these first in its row
+    /// ([`Turn::sources_for`]).
+    pub fn cited_in(&mut self, text: &str) {
+        if text.trim().is_empty() {
+            return;
+        }
+        let numbers = citations(text);
+        let links: Vec<String> = links_in(text).iter().map(|u| normal_url(u)).collect();
+        for s in &mut self.sources {
+            if numbers.contains(&s.n) || (!s.url.is_empty() && links.contains(&normal_url(&s.url))) {
+                s.cited = true;
+            }
+        }
+        self.documented = true;
+    }
+
     /// Whether `read_page` may open `url`: a link from the person, or a
     /// result of a search in this turn (or a page already read).
     pub fn allowed(&self, url: &str) -> bool {
@@ -381,10 +481,11 @@ impl Turn {
         let q = tidy(&query, 60);
         let most = self.reach.searches;
         if self.searches >= most {
-            // A document's turn: write it now, the rest from the model's own
-            // knowledge (marked, as the documents rule says).
+            // A document's turn: write it now, from the pages it read — its
+            // own knowledge for advice only, a fact no page gave said to be
+            // unconfirmed (as the documents rule says).
             let then = if self.deep() {
-                "write the document from what you found, filling in the rest from your own knowledge (marked as your suggestions)"
+                "write the document from the pages you read: advice from your own knowledge is fine (marked as yours), but a requirement, level, number or location no page gave is written as not confirmed, never guessed"
             } else {
                 "answer from what you found, and say what's missing"
             };
@@ -480,7 +581,11 @@ impl Turn {
         let offset = args["offset"].as_u64().or_else(|| args["offset"].as_str().and_then(|s| s.trim().parse().ok())).unwrap_or(0) as usize;
         let most = self.reach.reads;
         if self.reads >= most {
-            let then = if self.deep() { "write the document from what you have" } else { "answer from what you have" };
+            let then = if self.deep() {
+                "write the document from the pages you read (a fact none of them gave: not confirmed, never guessed)"
+            } else {
+                "answer from what you have"
+            };
             return failed(format!("You've read {most} pages in this turn: {then}."), format!("Didn't read {shown}: {most} pages a turn"));
         }
         self.reads += 1;
@@ -488,7 +593,7 @@ impl Turn {
             Err(e) => failed(e.clone(), format!("Couldn't read {shown}: {}", short(&e))),
             Ok(page) => {
                 self.seen = true;
-                let n = self.number(&page.title, &url);
+                let n = self.opened(&page.title, &url);
                 let (part, next) = page_part(&page.text, offset, PAGE_TOKENS);
                 // Temperatures, speeds and distances in the person's units
                 // first (about_you.rs, about_you/units.rs).
@@ -517,11 +622,28 @@ impl Turn {
     }
 
     /// The sources to keep with the answer: those it cites (by number), or
-    /// every one when it cites none. After Google Search grounded the turn
-    /// (Gemini), every link it gave, the cited first, five at most: Google's
-    /// terms let a grounded result feed a follow-up answer when that answer
-    /// shows its links (up to 5).
+    /// every one when it cites none. **A document's turn** ([`Turn::cited_in`])
+    /// keeps every one — the answer is a line ("It's open on the right.")
+    /// and the document cites by link — those the document or the answer
+    /// cites marked `cited`, the pages read `opened`: the Sources row shows
+    /// them first, the rest behind "+N more" (2026-10-31: 46 sources under
+    /// one guide, most of them search results nobody opened). After Google
+    /// Search grounded the turn (Gemini), every link it gave, the cited
+    /// first, five at most: Google's terms let a grounded result feed a
+    /// follow-up answer when that answer shows its links (up to 5).
     pub fn sources_for(&self, reply: &str) -> Vec<Source> {
+        if self.documented && !self.grounded {
+            let cited = citations(reply);
+            return self
+                .sources
+                .iter()
+                .cloned()
+                .map(|mut s| {
+                    s.cited |= cited.contains(&s.n);
+                    s
+                })
+                .collect();
+        }
         if !self.grounded {
             return cited_sources(&self.sources, reply);
         }
@@ -746,7 +868,104 @@ mod tests {
         }
         let r = turn.execute("web_search", &search(99)).await;
         assert_eq!(r["displayText"], json!("Didn't search for \"Emberfall levels part 99\": 10 searches a turn"));
-        assert!(r["error"].as_str().unwrap().contains("filling in the rest from your own knowledge"), "{r}");
+        // Write it from the pages read: its own knowledge for advice, a
+        // fact no page gave not confirmed — never "fill in the rest".
+        let e = r["error"].as_str().unwrap();
+        assert!(e.contains("write the document from the pages you read") && e.contains("not confirmed, never guessed"), "{r}");
+        assert!(!e.contains("filling in the rest"), "{r}");
+    }
+
+    #[test]
+    fn claudes_page_reads_are_sized_to_what_its_request_holds() {
+        // Its own web fetch puts up to 8,000 tokens of a page in the request:
+        // Haiku's 80K holds 4, a 1M model 10, an 8K one the usual 3.
+        assert_eq!(Reach::deep_paged(Some(80_000), native::FETCH_TOKENS as usize).reads, 4);
+        assert_eq!(Reach::deep_paged(Some(990_000), native::FETCH_TOKENS as usize).reads, DEEP_READS);
+        assert_eq!(Reach::deep_paged(Some(8_000), native::FETCH_TOKENS as usize).reads, MAX_READS);
+        assert_eq!(Reach::deep_paged(Some(80_000), native::FETCH_TOKENS as usize).searches, DEEP_SEARCHES);
+        // Going deep, its fetches follow those reads; its searches stay at 10.
+        let mut n = native::NativeSearch::new(native::Provider::Anthropic, "claude-haiku-5-5", "https://api.anthropic.com/v1", "k");
+        n.in_chat = true;
+        let mut turn = Turn::new(Settings { native: Some(n), ..settings("") }, offline(), "Make me a guide", &[])
+            .may_go_deep(Reach::deep_paged(Some(80_000), native::FETCH_TOKENS as usize));
+        let tools = turn.server_tools().unwrap();
+        assert_eq!((tools[0]["max_uses"].clone(), tools[1]["max_uses"].clone()), (json!(native::SERVER_USES), json!(native::SERVER_USES)));
+        turn.go_deep();
+        let tools = turn.server_tools().unwrap();
+        assert_eq!(tools[0]["name"], "web_search");
+        assert_eq!(tools[0]["max_uses"], json!(native::DEEP_SERVER_USES));
+        assert_eq!(tools[1]["name"], "web_fetch");
+        assert_eq!(tools[1]["max_uses"], json!(4));
+    }
+
+    /// **A new document's outline first** (2026-10-31): Claude's own web
+    /// tools stay out of the turn's first request; once that step is done,
+    /// they're back.
+    #[test]
+    fn a_new_documents_outline_comes_before_any_search() {
+        let mut n = native::NativeSearch::new(native::Provider::Anthropic, "claude-opus-5-5", "https://api.anthropic.com/v1", "k");
+        n.in_chat = true;
+        let mut turn = Turn::new(Settings { native: Some(n), ..settings("") }, offline(), "Make me a Tidecaller guide", &[])
+            .may_go_deep(Reach::deep(None))
+            .outline_first();
+        turn.go_deep();
+        assert!(turn.outline_pending());
+        // Claude searches in Chat's request (Yap's tools aren't offered)…
+        assert!(turn.server_tools().is_some());
+        // …but not before the outline.
+        assert_eq!(turn.server_tools(), Some(Vec::new()));
+        turn.outline_settled();
+        assert!(!turn.outline_pending());
+        assert_eq!(turn.server_tools().unwrap()[0]["max_uses"], json!(native::DEEP_SERVER_USES));
+        // Every other turn: nothing held back.
+        let plain = Turn::new(settings("exa-key"), offline(), "Where is Gale?", &[]);
+        assert!(!plain.outline_pending());
+    }
+
+    /// **The Sources row's facts** (2026-10-31): a page read is marked
+    /// opened and takes the page's own title; what a document cites (by
+    /// number, or a link to the page) is marked cited, and a document's
+    /// answer keeps every source, so its row can show those first.
+    #[test]
+    fn a_documents_sources_mark_the_pages_read_and_cited() {
+        let mut turn = Turn::new(settings("exa-key"), offline(), "Make me a Tidecaller guide", &[]);
+        let generic = "Emberfall";
+        assert_eq!(turn.number(generic, "https://forum.example/t/101"), 1);
+        assert_eq!(turn.number(generic, "https://forum.example/t/102"), 2);
+        assert_eq!(turn.number("Tidecaller - Emberfall Wiki", "https://emberfall.example/wiki/Tidecaller"), 3);
+        assert_eq!(turn.number(generic, "https://forum.example/t/103"), 4);
+        // Read: the page's own title, marked opened (the same page, by address).
+        assert_eq!(turn.opened("Solo Tidecaller, levels 1 to 4", "https://www.forum.example/t/102/"), 2);
+        assert_eq!(turn.sources[1].title, "Solo Tidecaller, levels 1 to 4");
+        assert!(turn.sources[1].opened && !turn.sources[0].opened);
+        // A read with no title keeps the one it had.
+        turn.opened("", "https://emberfall.example/wiki/Tidecaller");
+        assert_eq!(turn.sources[2].title, "Tidecaller - Emberfall Wiki");
+        // An ordinary answer: the sources it cites, as before.
+        assert_eq!(turn.sources_for("Rain Bolt first [3].").iter().map(|s| s.n).collect::<Vec<_>>(), [3]);
+        // A document cites [2] and links the wiki page itself (Claude's way).
+        turn.cited_in("| 1 | Rain Bolt [2] |\n\nSee the [wiki](https://emberfall.example/wiki/Tidecaller).");
+        let kept = turn.sources_for("It's open on the right.");
+        assert_eq!(kept.len(), 4, "every source, for the row's +N more");
+        let flags: Vec<(usize, bool, bool)> = kept.iter().map(|s| (s.n, s.cited, s.opened)).collect();
+        assert_eq!(flags, [(1, false, false), (2, true, true), (3, true, true), (4, false, false)]);
+        // The answer's own citation counts as cited too.
+        assert!(turn.sources_for("It's open on the right [4].").iter().any(|s| s.n == 4 && s.cited));
+    }
+
+    #[test]
+    fn one_page_is_one_address_however_its_written() {
+        let same = [
+            "https://steamcommunity.example/sharedfiles/filedetails/?id=123",
+            "https://www.steamcommunity.example/sharedfiles/filedetails?id=123",
+            "https://steamcommunity.example/sharedfiles/filedetails?id=123&utm_source=openai",
+            "https://steamcommunity.example/sharedfiles/filedetails?id=123#comments",
+        ];
+        for u in same {
+            assert_eq!(normal_url(u), normal_url(same[0]), "{u}");
+        }
+        assert_ne!(normal_url("https://steamcommunity.example/sharedfiles/filedetails?id=124"), normal_url(same[0]));
+        assert_eq!(normal_url("https://bg3.wiki/wiki/Gale/"), "https://bg3.wiki/wiki/Gale");
     }
 
     #[test]

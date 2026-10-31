@@ -354,7 +354,14 @@ gear looked up and added. `expect.document` takes five more checks (`scenario::g
 every link is to a page the scenario's web gave (this turn's or an earlier turn's results and
 reads, `web_urls`), and no `[n]` is left with nothing behind it (`made_up_citations`);
 **`after_web`** — the document changed after the web was read this turn
-(`changed_after_web`). `summary.md` gets a "Guides" table per model (each check's passes,
+(`changed_after_web`); **`outline_before_web`** (2026-10-31) — the new document's
+`create_document` went through before the turn's first search or page read that did
+(`outlined_before_web`: a search refused before the outline doesn't count); **`reads_pages`**
+— a page was read this turn (`read_page`, or a strong Claude's own fetch, recorded as one),
+not only search results. `own_marked` also takes a fact said to be unconfirmed ("not
+confirmed", "couldn't find") as marked: the strong models' rule now says so where no page
+gave a requirement, level, number or location, its own knowledge only advising.
+`summary.md` gets a "Guides" table per model (each check's passes,
 and how many turns were thought through: Think comes on by itself for a strong model's
 document, `think::auto_on`, and a typed turn runs as `chat_send` runs it). `--guides` pushes
 the tag; `--only` picks the scenarios (`--no-web` would skip the stand-in one too).
@@ -3015,3 +3022,25 @@ as fetched pages (≤ 8,000 tokens each) ride along every later step: Haiku **�
 (its prompts over 100K cost five times as much), Opus **≈ $2–4**. Worth reading in them: the
 level table's rows, the italic line under it, whether it read pages (`read_page`, or "Read …"
 chips for Claude's own fetches), and the second turn's change after its search.
+
+**The outline first, facts from pages read** (31 Oct 2026, the evening; chat-and-assistant.md,
+"Strong models' documents"): the same Opus 5.5 guide in Yap took 2 min 47 s, its panel open
+after 1 min 52 s (6 searches and 1 page read before `create_document`), with about ten
+skills at levels they can't be had — taken from search snippets and a guide for another
+build, under the rule that filled in from its own knowledge. The rule now: the outline
+before any search (Claude's own web tools out of that step's request, Yap's refused until
+the outline's made), the facts from pages read, its own knowledge for advice only, a fact
+it couldn't find said to be unconfirmed, a source that fits the build and version.
+`--guides` gains `outline_before_web` and `reads_pages` (the two guide scenarios with the
+web). **Not run yet** (no offline model: every strong model is a paid cloud one), for the
+maintainer — the same commands as above, the stand-in pair first (it costs the least):
+
+```bash
+npm run eval -- --guides --only guide-levels,guide-rules-given --model anthropic:claude-haiku-5-5 --keys-from-yap --repeat 2
+npm run eval -- --guides --only guide-levels,guide-rules-given --model anthropic:claude-opus-5-5 --keys-from-yap --repeat 2
+npm run eval -- --guides --only guide-public-game --model anthropic:claude-opus-5-5 --keys-from-yap
+```
+
+Worth reading: the "Outlined before the web" and "Read pages" columns, the level table's
+cells no page gave (said "not confirmed", or guessed?), and how long the first turn took to
+its `create_document`.

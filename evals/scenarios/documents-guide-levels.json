@@ -1,6 +1,6 @@
 {
   "name": "documents-guide-levels",
-  "description": "A complete guide (31 Oct 2026): a detailed level-by-level guide for a made-up game's class, its pages giving the class's rules and a guide that stops at level 4. The document must cover every level from 1 to 12 (no \"endgame\" or \"reference only\" rows), name the parts asked for, mark what no page gave as the model's own suggestions, and cite only pages the web gave. Then \"look up where each piece of gear drops and add it\": the document must change after that search. Stand-in web, fictional sites.",
+  "description": "A complete guide (31 Oct 2026): a detailed level-by-level guide for a made-up game's class, its pages giving the class's rules and a guide that stops at level 4. The document must cover every level from 1 to 12 (no \"endgame\" or \"reference only\" rows), name the parts asked for, mark what no page gave as the model's own suggestions or as not confirmed, cite only pages the web gave, be outlined before the first search, and read pages rather than take facts from search results. Then \"look up where each piece of gear drops and add it\": the document must change after that search. Stand-in web, fictional sites.",
   "tags": [
     "documents-guide",
     "web"
@@ -75,7 +75,9 @@
           "levels": [1, 12],
           "parts": ["character creation", "civil", "gear"],
           "own_marked": true,
-          "citations_real": true
+          "citations_real": true,
+          "outline_before_web": true,
+          "reads_pages": true
         },
         "max_words": 60,
         "no_false_claims": true

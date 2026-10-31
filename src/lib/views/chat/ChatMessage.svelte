@@ -11,11 +11,11 @@
   // aloud, a question's Copy.
   import { renderMarkdown } from '../../core/markdown.js';
   import { modelLine, whereItRuns } from '../../core/aiModel.js';
-  import { openExternalLink } from '../../core/externalLinks.js';
   import { closePartial, settle } from '../../core/streaming.js';
   import { menuKey, openContextMenu } from '../../ui/contextMenu.svelte.js';
   import { chatImageUrl, removedLine, sizeLine, imageItems, splitScreenText } from './chatImages.js';
   import { thoughtLabel } from './chatThink.svelte.js';
+  import SourcesRow from './SourcesRow.svelte';
 
   /**
    * `m`: the message; `last`: the thread's last; `sources`: what its
@@ -65,13 +65,6 @@
     e.stopPropagation();
     openContextMenu(e, imageItems(img, { onview }), { label: 'Screenshot' });
   }
-
-  // A passage of the person's meetings and notes, or a meeting on their
-  // calendar (chat/tools/calendar.rs), not a web page.
-  const isPassage = (s) => (s?.note != null || !!s?.event) && !s?.url;
-  const fromMeetings = $derived((m.sources?.length ?? 0) > 0 && m.sources.every(isPassage));
-  const fromCalendar = $derived(fromMeetings && m.sources.every((s) => !!s.event));
-  const sourcesLabel = $derived(fromCalendar ? 'From your calendar' : fromMeetings ? 'From your meetings' : 'Sources');
 
   // A passage pill in the answer ("[2]"): opened in Yap at its line.
   function clickAnswer(e) {
@@ -214,41 +207,8 @@
   <p class="stoppednote">Stopped</p>
 {/if}
 {#if m.role === 'assistant' && m.sources?.length}
-  <!-- Where an answer came from: a web page opens in the browser; a passage
-       of the person's meetings opens its meeting at the line. -->
-  <div class="sources" role="group" aria-label={sourcesLabel}>
-    <span class="srclabel">{sourcesLabel}</span>
-    {#each m.sources as s (s.n)}
-      {#if s.screen}
-        <!-- The window in front's text, read on this PC (the Voice
-             Assistant to a model that can't read images): nothing to open. -->
-        <span class="srcchip screen" data-testid="chat-screen-source" title="Yap read the window's text on this PC and sent it with the question">
-          <span class="srcn" aria-hidden="true">{s.n}</span>
-          <span class="srctitle">{s.title}</span>
-        </span>
-      {:else if isPassage(s)}
-        <button
-          class="srcchip passage"
-          class:meeting={!!s.event}
-          data-testid={s.event ? 'chat-calendar-source' : undefined}
-          title={s.quote || s.title}
-          aria-label={`${s.event ? 'Meeting' : 'Passage'} ${s.n}: ${s.title}${s.site ? `, ${s.site}` : ''}. Opens ${s.event ? 'its notes' : 'it'}.`}
-          onclick={() => onsource?.(s)}
-        >
-          <span class="srcn" aria-hidden="true">{s.n}</span>
-          <span class="srctitle">{s.title}</span>
-          {#if s.site}<span class="srcsite">{s.site}</span>{/if}
-        </button>
-      {:else}
-        <button class="srcchip" title={s.url} onclick={() => openExternalLink(s.url)}>
-          <span class="srcn" aria-hidden="true">{s.n}</span>
-          <span class="srctitle">{s.title || s.site}</span>
-          <!-- (Google Search's links are titled with their site: once is enough.) -->
-          {#if s.site && s.site !== s.title}<span class="srcsite">{s.site}</span>{/if}
-        </button>
-      {/if}
-    {/each}
-  </div>
+  <!-- Where an answer came from (SourcesRow: a few, then "+N more"). -->
+  <SourcesRow {m} {onsource} />
 {/if}
 {#if docs.length}
   <!-- The documents it made or changed: each opens beside the chat. -->
@@ -520,68 +480,6 @@
     flex: 0 0 auto;
     color: var(--yap-primary);
   }
-  /* The Sources row under a web answer. */
-  .sources {
-    align-self: flex-start;
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: 4px;
-    max-width: 78%;
-    margin: -2px 0 0 2px;
-  }
-  .srclabel {
-    margin-right: 2px;
-    font-size: 10px;
-    font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
-    color: var(--yap-muted-55);
-  }
-  .srcchip {
-    display: inline-flex;
-    align-items: center;
-    gap: 5px;
-    max-width: 260px;
-    padding: 2px 8px 2px 3px;
-    border: 1px solid var(--yap-border-subtle);
-    border-radius: var(--yap-r-full);
-    background: var(--yap-s1);
-    color: var(--yap-fg);
-    font: inherit;
-    font-size: 10.5px;
-    cursor: pointer;
-  }
-  .srcchip:hover {
-    border-color: var(--yap-border-hover);
-    background: var(--yap-s2);
-  }
-  .srcchip:focus-visible {
-    outline: 2px solid var(--yap-primary-line);
-    outline-offset: 1px;
-  }
-  .srcn {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    min-width: 15px;
-    height: 15px;
-    border-radius: var(--yap-r-full);
-    background: var(--yap-s2);
-    color: var(--yap-muted);
-    font-size: 9.5px;
-    font-weight: 650;
-  }
-  .srctitle {
-    min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-  .srcsite {
-    flex: 0 0 auto;
-    color: var(--yap-muted-55);
-  }
   .cbubble.assistant :global(p) {
     margin: 4px 0;
   }
@@ -779,14 +677,6 @@
     font-size: 11px;
     white-space: pre-wrap;
     overflow-wrap: anywhere;
-  }
-  /* The window's text, read on this PC: a source with nothing to open. */
-  .srcchip.screen {
-    cursor: default;
-  }
-  .srcchip.screen:hover {
-    border-color: var(--yap-border-subtle);
-    background: var(--yap-s1);
   }
   /* Thought through (Think): the thinking, folded above the answer. */
   .thought,

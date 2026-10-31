@@ -401,6 +401,17 @@ async fn answer_turn(
     // can change them; the ones this turn makes or changes, for its pills.
     let chat_docs = crate::chat::documents::of_conversation(&conv.messages);
     let doc_turn = crate::chat::documents::Turn::new(&chat_docs);
+    // **A strong model writing a document** (2026-10-31, as the Claude app
+    // writes one): it may research deeper — how far is sized to the
+    // model's request (`web::Reach::deep`), said in the context with the
+    // web on — and it thinks first (`think::auto_on`: only inside Chat's
+    // own turn; the Think button shows lit). Claude Opus 5.5, held to 3
+    // searches and none of its thinking, wrote a level-by-level guide of
+    // "Level 1", "Endgame" and "Reference only" rows. **A new one is
+    // outlined first** (`web::Turn::outline_first`): nothing looked up
+    // before `create_document`, so the panel opens at once.
+    let writes_doc = strong && !meetings && crate::chat::documents::writes_document(&text, &chat_docs, selection.is_some());
+    let outline_first = writes_doc && web_on && crate::chat::documents::makes_new_document(&text, &chat_docs, selection.is_some());
     // Memory (memory.rs): the "You" part in the system prompt with About
     // you (stable from turn to turn), what this question is about with it.
     let memory_you = crate::memory::you_block();
@@ -436,8 +447,9 @@ async fn answer_turn(
     // A model on this PC asked something that needs the web: its first step
     // must be a search (left to decide, Qwen3.5-4B answered "the best RPG
     // games coming out in 2026" from memory, a tester's chat, 2026-10-21).
-    // Cloud models decide for themselves.
-    let first = if tools_supported && web_on && crate::ai::ai_model::runs_here(&provider, &base_url) && crate::web::needs_web(&text) {
+    // Cloud models decide for themselves. (Never before a new document's
+    // outline: that comes first.)
+    let first = if !outline_first && tools_supported && web_on && crate::ai::ai_model::runs_here(&provider, &base_url) && crate::web::needs_web(&text) {
         first_search(&text)
     } else {
         crate::chat::tools::FirstStep::Model
@@ -587,20 +599,21 @@ async fn answer_turn(
             context.push(note);
         }
     }
-    // **A strong model writing a document** (2026-10-31, as the Claude app
-    // writes one): it may research deeper — how far is sized to the
-    // model's request (`web::Reach::deep`), said in the context with the
-    // web on — and it thinks first (`think::auto_on`: only inside Chat's
-    // own turn; the Think button shows lit). Claude Opus 5.5, held to 3
-    // searches and none of its thinking, wrote a level-by-level guide of
-    // "Level 1", "Endgame" and "Reference only" rows.
-    let writes_doc = strong && !meetings && crate::chat::documents::writes_document(&text, &chat_docs, selection.is_some());
-    let deep_reach = crate::web::Reach::deep(Some(
-        crate::chat::budget::budget(context_size, context_known, 0, kind, true, crate::chat::budget::request_cap(&provider, &model)).request,
-    ));
+    // A strong model writing a document (`writes_doc`, above): how far it
+    // may look, and to read the pages its facts come from (and a new one's
+    // outline first). A strong Claude's own web fetch puts up to
+    // `FETCH_TOKENS` of a page in the request (Yap can't trim it): its reads
+    // are sized by that.
+    let request = crate::chat::budget::budget(context_size, context_known, 0, kind, true, crate::chat::budget::request_cap(&provider, &model)).request;
+    let deep_reach = if claude_in_chat {
+        crate::web::Reach::deep_paged(Some(request), crate::web::native::FETCH_TOKENS as usize)
+    } else {
+        crate::web::Reach::deep(Some(request))
+    };
     if writes_doc {
         if web_on {
-            context.push(crate::chat::documents::research_note(deep_reach));
+            let reader = if claude_in_chat { crate::chat::documents::Reader::WebFetch } else { crate::chat::documents::Reader::ReadPage };
+            context.push(crate::chat::documents::research_note(deep_reach, reader, outline_first));
         }
         if crate::chat::think::can_think(&provider, &model) && crate::chat::think::auto_on() {
             tracing::info!(provider, "Chat: a strong model's document; it thinks it through first");
@@ -721,6 +734,10 @@ async fn answer_turn(
                 turn = turn.may_go_deep(deep_reach);
                 if writes_doc {
                     turn.go_deep();
+                }
+                // A new document: the outline before anything's looked up.
+                if outline_first {
+                    turn = turn.outline_first();
                 }
             }
             turn
