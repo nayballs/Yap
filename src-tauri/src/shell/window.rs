@@ -42,6 +42,9 @@ pub fn show_settings(app: &AppHandle) -> Result<(), String> {
     let _ = w.show();
     focus(&w);
     behind_in_test_runs(&w);
+    // Files dragged in from Explorer (shell/file_drop.rs): not left to the
+    // Focused event either, for the same reason.
+    crate::shell::file_drop::watch(&w);
     // The window is on screen now: a pending update announcement moves into
     // it. Not left to the Focused event alone: Windows can refuse a
     // background app the foreground, and e2e test runs never take it.

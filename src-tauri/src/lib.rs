@@ -1338,9 +1338,19 @@ pub fn run() {
                             // moves into the window (one place: notice.rs).
                             calls::meeting_detect::on_main_window_focused(&focus_handle);
                             calendar::on_main_window_focused();
+                            // Files dragged in from Explorer: any input window
+                            // WebView2 made anew gets Yap's drop target.
+                            shell::file_drop::attach(&w);
                         }
                         _ => {}
                     });
+                }
+            }
+            // …and from the start: WebView2 makes those windows a moment
+            // after the webview (shell/file_drop.rs).
+            for label in shell::file_drop::WINDOWS {
+                if let Some(w) = app.get_webview_window(label) {
+                    shell::file_drop::watch(&w);
                 }
             }
 

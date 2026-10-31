@@ -214,6 +214,24 @@ re-exported by the module, except `local_llm`'s, which callers name
   Shift+right-click (`offers_inspect(debug, shift)`; Shift read with
   `GetKeyState`/`GetAsyncKeyState`, compiled out of release). See "Window
   config" below.
+- **`shell/file_drop.rs`** — files dragged in from Explorer (2026-10-31). wry
+  turns WebView2's own drops off and registers its drop target on the
+  webview's child windows once, as the webview is created; WebView2 makes its
+  input windows (`Chrome_WidgetWin_1`, `Chrome_RenderWidgetHostHWND`, in its
+  browser process: the ones under the pointer) a moment later, so Windows found
+  no drop target there and every real drop got the 🚫 cursor, in every build.
+  Yap registers its own `IDropTarget` on all of them (`watch` when the main
+  window is created or shown, again at 1, 4 and 10 s; `attach` on every focus,
+  for windows WebView2 makes anew; the ones it already has are skipped) and
+  sends the same `tauri://drag-enter` / `-over` / `-drop` / `-leave` events, so
+  `onDragDropEvent` in Upload, Chat and Import a transcript is unchanged.
+  Tests: a test run wins the race (Playwright attaching slows WebView2's start)
+  and `drop()` / `e2e_drag_drop` stand in for the drop, which is how nobody saw
+  it; `upload.spec.js` checks the drop target reaches WebView2's windows (the
+  log's `in_webview2`). A real drag needs real input: found and proved with a
+  drag from a window of our own onto a normal-mode copy (31 Oct; not in a suite).
+  Not fixable that way: Yap run as administrator still takes no drops from
+  Explorer (Windows blocks a drag into a higher-integrity window, UIPI).
 - **`shell/webview_memory.rs`** — hidden webviews keep less in memory (2026-10-22):
   a watcher thread reads each window's visibility every 3 s (`target`, pure:
   hidden or minimised → low) and gives an off-screen window's webview

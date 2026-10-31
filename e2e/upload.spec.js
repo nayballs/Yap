@@ -3,11 +3,14 @@
 // and result. The stub engine transcribes a chunk at once, so
 // `e2e_upload_pace` holds each chunk a moment: the job is still going when
 // the view comes back.
+import fs from 'node:fs';
 import path from 'node:path';
 import { test, expect, openView } from './support/fixtures.js';
 import { writeWav } from './support/wav.js';
 
 test.use({ yapOptions: { name: 'upload' } });
+
+const log = (yap) => fs.readFileSync(yap.logPath, 'utf8');
 
 /** Drop `file` on the Upload view, as Tauri reports a real drop. */
 async function drop(yap, main, file) {
@@ -19,6 +22,18 @@ async function drop(yap, main, file) {
     await expect(main.getByText(path.basename(file))).toBeVisible({ timeout: 1_000 });
   }).toPass();
 }
+
+// A file dragged in from Explorer (shell/file_drop.rs): Windows asks the
+// window under the pointer, one of WebView2's input windows, made a moment
+// after the webview; until 31 Oct only the webview's host had a drop target,
+// so every real drop got the 🚫 cursor. Playwright can't make a real drag
+// (`drop` above stands in for one), so this checks the drop target itself.
+test("files from Explorer: Yap's drop target sits on WebView2's input windows too", async ({ yap, main }) => {
+  await openView(main, 'Upload');
+  await expect
+    .poll(() => log(yap), { timeout: 15_000 })
+    .toMatch(/file drop: Yap's drop target on the webview window="settings" added=\d+ in_webview2=[1-9]/);
+});
 
 test('leaving Upload mid-job keeps its progress, Cancel and result', async ({ yap, main, shot }) => {
   // ~3 minutes of audio: three ~60 s chunks, each held 1.5 s.

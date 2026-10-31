@@ -299,6 +299,7 @@ One folder per area (an area's `<area>.rs` lists its modules); a big module's pa
 - `shell/procs.rs` — process lineage; the kill-on-close job so helpers never outlive Yap.
 - `shell/com.rs` — COM's multithreaded apartment kept up for as long as Yap runs (and a test run), so WinRT objects on threads without COM of their own never see it taken down.
 - `shell/download.rs` — every big download (models, Kokoro, the speaker and search engines): resume, speed and time left, Cancel (`download_cancel`), no half file left.
+- `shell/file_drop.rs` — files dragged in from Explorer: Yap's own drop target on every window of the main webview (WebView2's input windows too, made after wry registers its own), the same `tauri://drag-*` events.
 - `shell/webview_memory.rs` — hidden windows' webviews get WebView2's low memory target; back to normal on screen.
 - `shell/theme.rs` — the theme on the Rust side: the opaque windows' webview backgrounds (no white flash), onboarding's title bar, Windows' app mode (frontend.md).
 - `shell/portable.rs` — portable mode (a `portable` marker → `<exe>/Data`).

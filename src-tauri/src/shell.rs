@@ -7,6 +7,7 @@ pub mod bench;
 pub mod com;
 pub mod commands;
 pub mod download;
+pub mod file_drop;
 pub mod context_menu;
 pub mod e2e;
 pub mod guide;
