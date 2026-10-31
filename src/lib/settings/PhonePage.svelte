@@ -1,11 +1,12 @@
 <script>
   // Settings → Phone (Yap Link, src-tauri/src/link.rs): talk to Yap's AI
-  // from a phone on the home Wi-Fi. The switch (`linkEnabled`, auto-saved
-  // like every setting: the server starts and stops with it), Pair a phone
-  // (a QR code of the pairing link, the link with Copy, the one-time
-  // certificate warning said in one line), the paired phones with Remove,
-  // and what this preview can't do yet. Follows `yap-link-changed` live (a
-  // phone paired, connected, gone).
+  // from a phone on the home Wi-Fi, or dictate from it. The switch
+  // (`linkEnabled`, auto-saved like every setting: the server starts and
+  // stops with it), Pair a phone (a QR code of the pairing link, the link
+  // with Copy, the one-time certificate warning said in one line), the
+  // paired phones with "May type into this PC" (`link_set_typing`) and
+  // Remove, and what this preview can't do yet. Follows `yap-link-changed`
+  // live (a phone paired, connected, gone, its typing switched).
   //
   //   cfg:  Settings' config $state (auto-save does the saving).
   import { invoke } from '@tauri-apps/api/core';
@@ -94,6 +95,17 @@
     }
   }
 
+  // "May type into this PC": its Dictate to PC, or not (a connected phone
+  // hears at once).
+  async function setTyping(phone, on) {
+    try {
+      await invoke('link_set_typing', { id: phone.id, on });
+    } catch (e) {
+      toast({ title: "Couldn't change it", description: String(e?.message ?? e), variant: 'destructive' });
+    }
+    load();
+  }
+
   async function remove(phone) {
     try {
       await invoke('link_remove', { id: phone.id });
@@ -129,7 +141,7 @@
 
 <div class="page-h">
   <h1>Phone</h1>
-  <p>Talk to Yap's AI from your phone around the house: ask out loud, and hear the answer in your headset.</p>
+  <p>Talk to Yap's AI from your phone around the house: ask out loud and hear the answer in your headset, or dictate into this PC.</p>
 </div>
 
 <Group title="Your phone" id="settings-phone">
@@ -137,7 +149,7 @@
     <Toggle
       bind:checked={cfg.linkEnabled}
       label="Use Yap from your phone (on your home Wi-Fi)"
-      desc="Your phone opens Yap's page from this PC, and questions go to Chat's model, answered out loud on the phone"
+      desc="Your phone opens Yap's page from this PC: questions go to Chat's model, answered out loud on the phone, and dictations are typed here or copied on the phone"
       hint="Only phones on your home network, and only ones you've paired. The first time, Windows may ask whether Yap can use the network: choose Private networks."
     />
   </Row>
@@ -223,12 +235,23 @@
       <ul aria-label="Paired phones">
         {#each status.phones as p (p.id)}
           <li class="phone">
-            <span class="dot" class:on={p.connected} aria-hidden="true"></span>
-            <span class="who">
-              <span class="name">{p.name}</span>
-              <span class="meta">{phoneMeta(p)}</span>
-            </span>
-            <Button variant="ghost" size="sm" title="Remove {p.name}" onclick={() => remove(p)}>Remove</Button>
+            <div class="top">
+              <span class="dot" class:on={p.connected} aria-hidden="true"></span>
+              <span class="who">
+                <span class="name">{p.name}</span>
+                <span class="meta">{phoneMeta(p)}</span>
+              </span>
+              <Button variant="ghost" size="sm" title="Remove {p.name}" onclick={() => remove(p)}>Remove</Button>
+            </div>
+            <div class="perm" data-setting="link-typing">
+              <Toggle
+                checked={p.typeIntoPc}
+                label="May type into this PC"
+                desc="What you dictate on it with Dictate to PC is typed into the window in front here, as if you'd used Yap's shortcut. Off, it can still ask Yap and dictate to itself"
+                ariaLabel="May type into this PC: {p.name}"
+                onchange={(on) => setTyping(p, on)}
+              />
+            </div>
           </li>
         {/each}
       </ul>
@@ -243,6 +266,10 @@
     <li>Your phone and this PC need to be on the same Wi-Fi. Away from home, it doesn't connect.</li>
     <li>Keep the phone's screen on while you talk: Yap's page stops listening when the screen locks.</li>
     <li>The headset's own button doesn't start a question yet: press Talk on the screen.</li>
+    <li>
+      Dictate to PC types into the window that was in front here when you pressed Talk, with your AI cleanup, dictionary and snippets;
+      Yap's bar shows it while it listens. Dictate to phone copies the text on the phone. Both are in your dictation history.
+    </li>
     <li>Your questions and answers are in Chat on this PC, as the Voice Assistant's are. Nothing goes to any server for the connection itself.</li>
   </ul>
 </Group>
@@ -346,14 +373,19 @@
     padding: 0;
   }
   .phone {
-    display: flex;
-    gap: 12px;
-    align-items: center;
     padding: 10px 0;
     border-bottom: 1px solid var(--yap-border-subtle);
   }
   .phone:last-child {
     border-bottom: none;
+  }
+  .phone .top {
+    display: flex;
+    gap: 12px;
+    align-items: center;
+  }
+  .perm {
+    margin: 6px 0 0 20px;
   }
   .dot {
     flex: none;

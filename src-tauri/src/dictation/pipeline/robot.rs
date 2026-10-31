@@ -82,7 +82,13 @@ impl Robot {
     /// transcribes already), let go however it ends ([`Busy`]).
     fn take_busy(&self) -> Option<Busy<Shared>> {
         let shared = &self.0;
-        (!shared.recording.load(Ordering::SeqCst)).then(|| Busy::take(shared, Job::Dictation)).flatten()
+        let busy = (!shared.recording.load(Ordering::SeqCst)).then(|| Busy::take(shared, Job::Dictation)).flatten();
+        // This PC's own dictation (no recording starts here to say so: a
+        // phone's earlier one, `phone.rs`, isn't this one).
+        if busy.is_some() {
+            shared.from_phone.store(false, Ordering::SeqCst);
+        }
+        busy
     }
 
     /// The report of the latest dictation that went to the paste (an Undo's,

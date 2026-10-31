@@ -473,6 +473,7 @@ pub fn run() {
             link::link_pair_cancel,
             link::link_pair_answer,
             link::link_remove,
+            link::link_set_typing,
             link::link_network_settings,
             integrations::mcp_clients::mcp_clients_status,
             integrations::mcp_clients::mcp_client_add,

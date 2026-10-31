@@ -689,7 +689,7 @@
                       </p>
                     {/if}
                     <p class="meta">
-                      {#if e.app}{appName(e.app)} · {/if}{e.words}
+                      {#if e.app}{appName(e.app)} · {/if}{#if e.via === 'phone' && e.app !== 'phone'}from your phone · {/if}{e.words}
                       {e.words === 1 ? 'word' : 'words'}{#if e.model}
                         · {modelName(e.model)}{/if}
                     </p>

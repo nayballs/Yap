@@ -38,10 +38,20 @@ impl Shared {
     /// This dictation's paste goes into its own window or onto the
     /// clipboard, never into whatever has the focus now: an Undo, or one
     /// that ended with nobody pressing anything — its mic disconnected
-    /// (`unplugged.rs`) or its length limit reached (`cap.rs`). A
+    /// (`unplugged.rs`) or its length limit reached (`cap.rs`) — or a
+    /// phone's, whose person may be in another room (`phone.rs`). A
     /// dictation's paste and a Command's or rewrite's (`rewrite.rs`) alike.
     pub(super) fn own_window_only(&self) -> bool {
-        self.undoing.load(Ordering::SeqCst) || self.unplugged() || self.capped.load(Ordering::SeqCst)
+        self.undoing.load(Ordering::SeqCst)
+            || self.unplugged()
+            || self.capped.load(Ordering::SeqCst)
+            || self.from_phone.load(Ordering::SeqCst)
+    }
+
+    /// Who the dictation came from, for history: "phone" (Yap Link), or
+    /// this PC (`None`).
+    fn via(&self) -> Option<&'static str> {
+        self.from_phone.load(Ordering::SeqCst).then_some(crate::dictation::history::VIA_PHONE)
     }
 
     /// Is this dictation (or Voice Assistant question) "snip" as a whole
@@ -63,7 +73,8 @@ impl Shared {
         }
         // "Snip" (or "take a screenshot") as the whole dictation: Snip to
         // Chat instead of a paste (snip.rs). Nothing pasted, nothing kept.
-        if self.snip_said(text.trim()) {
+        // (Not from a phone: the box is dragged at this PC.)
+        if !self.from_phone.load(Ordering::SeqCst) && self.snip_said(text.trim()) {
             tracing::info!("Voice command: snip");
             self.to_chat.store(false, Ordering::SeqCst);
             self.to_note.store(false, Ordering::SeqCst);
@@ -82,7 +93,7 @@ impl Shared {
         // The person moved to another text box in that window while
         // talking: the paste goes there, the text around its cursor read
         // afresh for the fit and cleanup (`selection::follow_focus`).
-        if !self.to_chat.load(Ordering::SeqCst) && !self.to_note.load(Ordering::SeqCst) {
+        if !self.to_chat.load(Ordering::SeqCst) && !self.to_note.load(Ordering::SeqCst) && !self.to_phone.load(Ordering::SeqCst) {
             let _ = tokio::task::spawn_blocking(crate::pasting::selection::follow_focus).await;
         }
         // …and what kind of app it is, for the style (`cleanup_styles`).
@@ -180,6 +191,11 @@ impl Shared {
             )
             .await;
         delivered.style = style.map(crate::ai::cleanup_styles::Style::describe);
+        // The app it went into (a test run's stand-in app when no real
+        // window was read), for a phone's "Pasted into Notepad".
+        if delivered.app.is_empty() {
+            delivered.app = target_app.or_else(|| style_target.process().map(str::to_string)).unwrap_or_default();
+        }
         // A first dictation ends the bar's first-use pointers; a feature tip
         // once it's pasted.
         crate::bar::pointer::dictated();
@@ -427,6 +443,20 @@ impl Shared {
         restore_clipboard: bool,
         steps: Steps,
     ) -> Delivered {
+        // A phone's dictation the phone called off after it stopped talking
+        // (its Cancel, `phone.rs`): nothing goes anywhere.
+        if self.phone_called_off() {
+            tracing::info!("Dictation: the phone called it off; nothing pasted");
+            self.to_chat.store(false, Ordering::SeqCst);
+            self.to_note.store(false, Ordering::SeqCst);
+            self.to_phone.store(false, Ordering::SeqCst);
+            self.drop_kept_audio();
+            return Delivered { raw, error: Some("called off by the phone".into()), ..Delivered::default() };
+        }
+        // "Dictate to phone": the text goes back to it; nothing here.
+        if self.to_phone.swap(false, Ordering::SeqCst) {
+            return self.deliver_to_phone(raw, corrected);
+        }
         // A question for the Chat view: its page puts the text in the box
         // (and sends it, hands-free or after "press enter"); nothing is
         // pasted, no key pressed.
@@ -561,6 +591,7 @@ impl Shared {
                     }
                 }
                 Ok(delivery @ (crate::pasting::text_injector::Delivery::Pasted | crate::pasting::text_injector::Delivery::Typed)) => {
+                    report.pasted = true;
                     // The paste didn't land and the text was typed instead.
                     report.typed = delivery == crate::pasting::text_injector::Delivery::Typed;
                     // Its mic was unplugged: said, now it's in its window.
@@ -625,6 +656,7 @@ impl Shared {
             // How long it was spoken for (words a minute).
             let secs = self.audio_secs.lock().ok().and_then(|mut s| s.take());
             let app_name = crate::pasting::text_injector::app_name_for(target).unwrap_or_default();
+            report.app = app_name.clone();
             if history_enabled {
                 // With its words as said when cleanup changed them (Home's
                 // "AI edited · N changes" and "Paste what I said").
@@ -638,6 +670,7 @@ impl Shared {
                     status: not_pasted.map(|_| crate::dictation::history::NOT_PASTED),
                     error: not_pasted,
                     secs,
+                    via: self.via(),
                 });
                 // The last paste is this entry (Home can swap it there).
                 if let Some(ts) = ts {
@@ -723,10 +756,12 @@ impl Shared {
             self.count_in_yap(&raw, &text, secs);
         }
         let report = Delivered {
+            pasted: !text.is_empty(),
             text,
             raw,
             kind: "the Chat view".into(),
             submit: send.then(|| "enter".to_string()),
+            app: "yap.exe".into(),
             ..Delivered::default()
         };
         #[cfg(debug_assertions)]
@@ -766,10 +801,12 @@ impl Shared {
             self.count_in_yap(&raw, &text, secs);
         }
         let report = Delivered {
+            pasted: !text.is_empty(),
             text,
             raw,
             kind: "the quick note".into(),
             submit: said_enter.then(|| "enter".to_string()),
+            app: "yap.exe".into(),
             ..Delivered::default()
         };
         #[cfg(debug_assertions)]
@@ -876,25 +913,71 @@ impl Shared {
     /// A dictation into one of Yap's own windows (Chat's box, the quick
     /// note) in history, with how long it was spoken for.
     fn record_in_yap(&self, raw: &str, text: &str, model: &str, audio: Option<&str>, secs: Option<f32>) {
+        self.record_in(raw, text, model, "yap.exe", audio, secs);
+    }
+
+    /// …in `app` (Yap's own windows, or the phone's: `history::PHONE_APP`).
+    fn record_in(&self, raw: &str, text: &str, model: &str, app: &str, audio: Option<&str>, secs: Option<f32>) {
         crate::dictation::history::record_dictation(crate::dictation::history::Dictation {
             raw,
             text,
             said: None,
             model,
-            app: "yap.exe",
+            app,
             audio,
             status: None,
             error: None,
             secs,
+            via: self.via(),
         });
     }
 
     /// …and in the stats (Home, Insights), whether or not history keeps it.
     fn count_in_yap(&self, raw: &str, text: &str, secs: Option<f32>) {
+        self.count_in(raw, text, "yap.exe", secs);
+    }
+
+    fn count_in(&self, raw: &str, text: &str, app: &str, secs: Option<f32>) {
         let dict = self.config.read().map(|c| c.dictionary.clone()).unwrap_or_default();
         crate::dictation::stats::dictated(
             &self.app,
-            crate::dictation::stats::Counted { raw, text, said: None, app: "yap.exe", secs, dict: &dict, at: None },
+            crate::dictation::stats::Counted { raw, text, said: None, app, secs, dict: &dict, at: None },
         );
+    }
+
+    /// A phone's **Dictate to phone** (`to_phone`, Yap Link): the finished
+    /// text goes back to the phone (`phone.rs` tells it: the page copies
+    /// it there). Nothing is pasted or pressed on this PC. Kept in history
+    /// as the phone's (`history::PHONE_APP`), with its audio, and counted.
+    fn deliver_to_phone(&self, raw: String, text: String) -> Delivered {
+        let text = text.trim().to_string();
+        tracing::info!(len = text.len(), "Dictation: back to the phone");
+        let app = crate::dictation::history::PHONE_APP;
+        if !text.is_empty() {
+            let _ = self.app.emit("yap-transcript", text.clone());
+            let (history_enabled, model) = self
+                .config
+                .read()
+                .map(|c| (c.history_enabled, c.model_size.clone()))
+                .unwrap_or((false, String::new()));
+            let audio = self.audio_id.lock().ok().and_then(|mut a| a.take());
+            let secs = self.audio_secs.lock().ok().and_then(|mut s| s.take());
+            if history_enabled {
+                self.record_in(&raw, &text, &model, app, audio.as_deref(), secs);
+                if let Some(id) = audio {
+                    crate::dictation::recent_audio::finished(&id);
+                }
+                let _ = self.app.emit("yap-history-changed", ());
+            } else if let Some(id) = audio {
+                crate::dictation::recent_audio::discard(&id);
+            }
+            self.count_in(&raw, &text, app, secs);
+        }
+        let report = Delivered { text, raw, kind: "your phone".into(), app: app.into(), ..Delivered::default() };
+        #[cfg(debug_assertions)]
+        if let Ok(mut last) = LAST_DELIVERED.lock() {
+            *last = Some(report.clone());
+        }
+        report
     }
 }

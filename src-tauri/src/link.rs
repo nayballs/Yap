@@ -15,7 +15,11 @@
 //!   show, who may say hello, hellos per address;
 //! - `devices.rs` — paired phones (`link_devices.json`: only a hash of each
 //!   phone's secret);
-//! - `session.rs` — one phone's conversation, its questions one at a time;
+//! - `session.rs` — one phone's conversation, its questions (and
+//!   dictations) one at a time;
+//! - `dictate.rs` — dictation from the phone: to the PC (with the phone's
+//!   "May type into this PC") or back to the phone, through the pipeline's
+//!   own path (`pipeline::PhoneMic`);
 //! - `voice.rs` — Yap's voice rendered for the phone, never this PC's speakers;
 //! - `models.rs` — Chat's model, listed for and switched from the phone;
 //! - `lan.rs` — this PC's addresses, which peers may connect, Public networks;
@@ -28,6 +32,7 @@
 
 pub mod cert;
 pub mod devices;
+pub mod dictate;
 pub mod lan;
 pub mod models;
 pub mod page;
@@ -157,17 +162,30 @@ impl Hub {
         locked(&self.live).values().map(|l| l.device.clone()).collect()
     }
 
-    /// `ready`: this PC, Chat's model and the others.
-    pub fn ready(&self) -> Out {
+    /// `ready` for phone `device`: this PC, Chat's model and the others,
+    /// and whether it may type into this PC.
+    pub fn ready(&self, device: &str) -> Out {
         let (model, models) = models::listed(&crate::config::load());
-        Out::Ready { pc: lan::pc_name(), model, models }
+        Out::Ready { pc: lan::pc_name(), model, models, may_type: devices::may_type(device) }
     }
 
     /// Chat's model changed (here, in Chat, from a phone): every phone hears.
     fn broadcast_ready(&self) {
-        let ready = self.ready();
-        for l in locked(&self.live).values() {
-            say(&l.tx, ready.clone());
+        let phones: Vec<(String, Tx)> = locked(&self.live).values().map(|l| (l.device.clone(), l.tx.clone())).collect();
+        for (device, tx) in phones {
+            say(&tx, self.ready(&device));
+        }
+    }
+
+    /// Phone `device`'s permissions changed: it hears at once, if connected.
+    fn ready_again(&self, device: &str) {
+        let txs: Vec<Tx> = locked(&self.live).values().filter(|l| l.device == device).map(|l| l.tx.clone()).collect();
+        if txs.is_empty() {
+            return;
+        }
+        let ready = self.ready(device);
+        for tx in txs {
+            say(&tx, ready.clone());
         }
     }
 
@@ -317,6 +335,8 @@ pub struct PhoneView {
     pub paired: u64,
     pub last_seen: u64,
     pub connected: bool,
+    /// "May type into this PC" (its "Dictate to PC").
+    pub type_into_pc: bool,
 }
 
 /// Settings → Phone's state.
@@ -368,7 +388,14 @@ fn status_without_networks() -> Status {
         public: None,
         phones: devices::list()
             .into_iter()
-            .map(|d| PhoneView { connected: connected.contains(&d.id), id: d.id, name: d.name, paired: d.paired, last_seen: d.last_seen })
+            .map(|d| PhoneView {
+                connected: connected.contains(&d.id),
+                id: d.id,
+                name: d.name,
+                paired: d.paired,
+                last_seen: d.last_seen,
+                type_into_pc: d.type_into_pc,
+            })
             .collect(),
         asks: hub.map(|h| h.asks()).unwrap_or_default(),
     }
@@ -436,6 +463,23 @@ pub fn link_pair_cancel() {
 pub fn link_pair_answer(id: u64, allow: bool) -> bool {
     tracing::info!(allow, "Yap Link: the person answered a pairing");
     hub().is_some_and(|h| h.answer(id, allow))
+}
+
+/// Settings → Phone's **"May type into this PC"** for phone `id`: its
+/// "Dictate to PC" pastes into the window in front here, or is refused. A
+/// connected phone hears at once (`ready`'s `mayType`). `false`: it isn't
+/// paired.
+#[tauri::command]
+pub fn link_set_typing(app: AppHandle, id: String, on: bool) -> bool {
+    let done = devices::set_may_type(&id, on);
+    if done {
+        if let Some(h) = hub() {
+            h.ready_again(&id);
+        }
+        let _ = app.emit(CHANGED, ());
+    }
+    tracing::info!(on, done, "Yap Link: a phone's typing into this PC switched");
+    done
 }
 
 /// Forget a paired phone, and cut it off if it's connected.

@@ -164,6 +164,7 @@ mod tests {
             status: None,
             error: None,
             secs: None,
+            via: None,
         })
         .unwrap();
         // One from two days ago (a failed one is dated when it was said).

@@ -298,7 +298,8 @@ to **Run again** from Home.
   `on_key` (toggle / push-to-talk gestures; no coaching hints for it) with
   `ASSISTANT_ARMED` set for the press, so the recording it starts is the
   assistant's (`destination(edit, assistant, chat_armed, chat_focused,
-  own_window, note)` → `Goes::Paste | ChatBox | Assistant | QuickNote`, pure, in
+  own_window, note)` → `Goes::Paste | ChatBox | Assistant | QuickNote` (and
+  a phone's `Goes::Phone`, `destination_with_phone`), pure, in
   `capture_target`, which calls `assistant::listening` before "recording");
   `run_stt` hands its transcript, after `apply_corrections` only, to
   `assistant::heard` (`ask_assistant`): no cleanup, Command, paste or
@@ -472,6 +473,37 @@ to **Run again** from Home.
   paste AI cleanup changed the words of (`Delivered.offer`), then "idle"
   unless something came after. `deliver` is cleanup (`clean_up`, also Run
   again's) then `deliver_text`.
+- **`dictation/pipeline/phone.rs`** — **a phone as the microphone** (Yap
+  Link, 2026-10-31; [link.md](./link.md#dictation-from-the-phone)): a
+  paired phone's "Dictate to PC" / "Dictate to phone" is an ordinary
+  dictation whose audio comes over the network. `Pipeline::phone_mic` →
+  `PhoneMic`: `start(target, sink)` (refused while one records or is still
+  being transcribed, `busy_now`; under the gesture lock), `audio(session,
+  samples)` (into `take_audio`, as the mic's and the robot's WAV's), `stop`
+  (→ `stop_and_transcribe`), `cancel` (→ the bar's ✕'s `cancel(true)`: "to
+  PC" kept for Undo). `from_phone` marks the recording (and the dictation
+  kept for its Undo) as the phone's: **this PC's mic is never held** and its
+  audio is dropped meanwhile (`Sink::audio`), its failures and losses ignored,
+  no chimes, no quieting other apps, no mic tips or long-dictation tip,
+  `snip` and Commands by name skipped, and the paste goes back to its own
+  window or the clipboard (`own_window_only`). Everything else is the
+  shortcut's: `capture_target` (the window in front at the start, its kind,
+  the text around the cursor, the names on screen; `PHONE_ARMED` →
+  `destination_with_phone` → **`Goes::Phone`** for "Dictate to phone": no
+  window, `to_phone`), the meeting's dictation signal, `yap-state`
+  recording, partials, the `processing` guard, `run_stt` on the warm engine,
+  cleanup in the style of the app, the dictionary, snippets, smart insert,
+  the paste and its read check, history (`via: "phone"`; "Dictate to
+  phone" is `deliver_to_phone`: `app` "phone", nothing pasted), the stats.
+  This PC's shortcut, the bar's ✓ / ✕ and the length limit stop or cancel
+  it as any recording. The phone is told through `PhoneSink`
+  (`link/dictate.rs`): `Transcribing` at the stop, `Delivered(report)`
+  (`Delivered.app` / `.pasted`), `Failed(words)`, `Cancelled`; `PhoneEnd`,
+  held for the transcription, tells it however it ends; a phone that called
+  it off after its stop (`called_off`) gets nothing pasted (checked before
+  the paste). Test mode: `e2e_target_window {on, open}` — `open` keeps the
+  stand-in as a text box still there for a paste that must go back to its
+  own window (`stand_in_open`).
 - **`dictation/gesture.rs`** — push-to-talk's pure gesture state machine: key down/up and
   the clock in (`now_ms`, monotonic, also what the input hook stamps events
   with), Start / Stop / Discard / Lock + an optional hint + "tick me in N ms"
@@ -1650,7 +1682,11 @@ to **Run again** from Home.
   2026-10-29 a new entry has **`secs`**, how long it was spoken for (its
   audio's length, `run_stt` → `Shared::audio_secs`; words a minute, and
   `recent_dictation_secs` uses it before its estimate from the words; an
-  older Yap's save drops it, which only leaves the entry untimed).
+  older Yap's save drops it, which only leaves the entry untimed). Since
+  2026-10-31 a phone's dictation (Yap Link) has **`via: "phone"`** (Home:
+  "from your phone"; an older Yap reads the entry and drops only the mark
+  when it saves), and a "Dictate to phone" one the app **`phone`**
+  (`PHONE_APP`, "Your phone": no app here; kept by any Yap).
   Failed entries don't count in the stats nor as the last dictation to paste;
   unit tests keep it in memory. Best-effort,
   gated by `history_enabled`. The stats are no longer derived from it
