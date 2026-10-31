@@ -36,7 +36,14 @@
 //!   ([`language_line`], just before the transcript, never in the system
 //!   prompt the server caches), and the region's spelling line
 //!   (`about_you`) is for English only ([`cleanup_spelling`]).
-//! - **The nudge** ([`nudge`]): Whisper sure of a language you didn't pick.
+//! - **The nudge** ([`nudge`]): Whisper sure of a language you didn't pick;
+//!   for a model that doesn't say (Parakeet V3, SenseVoice, the English-only
+//!   ones), the language read from its text ([`text_id`], on this PC: only
+//!   when it's sure), offered the same way — an English-only model's as
+//!   "Parakeet V2 only knows English". Never with a fixed language.
+//! - **"Yap recognised French"** (`tips::language`): once, the first time a
+//!   dictation is sure to be in one of yours other than English, with two
+//!   or more picked ([`recognised`]).
 //! - **Hinglish** ([`hinglish`], 2026-10-29): Hindi among My languages and
 //!   "Write in Latin letters (Hinglish)" on (`config.hinglish`): Whisper's
 //!   Devanagari spelt out in Latin letters on this PC before cleanup
@@ -48,6 +55,7 @@
 pub mod catalog;
 pub mod hinglish;
 pub mod nudge;
+pub mod text_id;
 
 use std::sync::Mutex;
 
@@ -254,17 +262,60 @@ pub fn spoken(cfg: &YapConfig) -> Spoken {
     plan(cfg, shortcut_now(cfg).as_ref())
 }
 
-/// A dictation's transcription is in: what the model heard is kept for
-/// this dictation (its cleanup, its translation) and, if it's a language
-/// the person didn't pick, perhaps offered ([`nudge::consider`]). `secs`:
-/// its audio's length. Returns the text.
-pub fn heard(app: &AppHandle, said: Said, secs: f32, cfg: &YapConfig) -> String {
+/// A dictation's transcription by `model` is in: what the model heard is
+/// kept for this dictation (its cleanup, its translation) and, if it's a
+/// language the person didn't pick, perhaps offered ([`nudge::consider`]);
+/// a model that doesn't say has the language read from its text instead
+/// ([`read_language`], [`nudge::consider_text`]) — never with a fixed
+/// language. One of theirs recognised by itself: perhaps the one-time tip
+/// ([`recognised`]). `secs`: its audio's length. Returns the text.
+pub fn heard(app: &AppHandle, said: Said, secs: f32, cfg: &YapConfig, model: &str) -> String {
+    let mine = my_languages(cfg);
     if let Some(h) = &said.heard {
         tracing::info!(top = %h.top, p = format!("{:.2}", h.p), picked = %h.picked, "Dictation: the language heard");
-        nudge::consider(app, h, secs, &my_languages(cfg), cfg.language_nudge);
+        nudge::consider(app, h, secs, &mine, cfg.language_nudge);
+        let sure = h.top == h.picked && h.p >= nudge::MIN_P;
+        if recognised(&h.picked, sure, secs, &mine) {
+            crate::dictation::tips::language(app, &h.picked);
+        }
+    } else if !tells(model) && !matches!(spoken(cfg), Spoken::Fixed(_)) {
+        if let Some(g) = read_language(&said.text, model, &mine) {
+            tracing::info!(
+                language = g.code,
+                words = g.words,
+                hits = g.hits,
+                agrees = g.agrees,
+                "Dictation: the language read from the text"
+            );
+            nudge::consider_text(app, &g, secs, &mine, cfg.language_nudge, model);
+            // Not an English-only model's: it can't have written yours.
+            let others: Vec<String> = mine.iter().filter(|c| *c != g.code).cloned().collect();
+            let sure = !catalog::english_only(model) && text_id::sure(&g, &others).is_ok();
+            if recognised(g.code, sure, secs, &mine) {
+                crate::dictation::tips::language(app, g.code);
+            }
+        }
     }
     now().heard = said.heard;
     said.text
+}
+
+/// The language `text` from `model` is in, of what that model writes and
+/// `mine` (`text_id`); `None` for a model Yap doesn't read this way
+/// (Whisper says, Canary and Cohere are told). Pure.
+pub fn read_language(text: &str, model: &str, mine: &[String]) -> Option<text_id::Guess> {
+    let among = text_id::candidates(model, mine);
+    if among.is_empty() {
+        return None;
+    }
+    text_id::identify(text, &among)
+}
+
+/// Whether a dictation in `code` (`sure` of it, `secs` long) earns the
+/// one-time "Yap recognised French" (pure): one of `mine`, not English, two
+/// or more of them picked (there was a choice to make), long enough.
+pub fn recognised(code: &str, sure: bool, secs: f32, mine: &[String]) -> bool {
+    sure && code != "en" && mine.len() >= 2 && mine.iter().any(|c| c == code) && secs >= nudge::MIN_SECS
 }
 
 /// Home's Run again transcribed a kept dictation (as the main shortcut
@@ -689,6 +740,10 @@ static STAND_IN: Mutex<Option<Vec<(String, f32)>>> = Mutex::new(None);
 /// (`e2e_dictation`), as if Whisper had heard it.
 #[cfg(debug_assertions)]
 static STAGED_HEARD: Mutex<Option<Heard>> = Mutex::new(None);
+/// A test run's transcript from the stub engine, in place of its "[STT
+/// stub: …]" (`e2e_language_stage`'s `text`).
+#[cfg(debug_assertions)]
+static STUB_TEXT: Mutex<Option<String>> = Mutex::new(None);
 
 /// The stub engine's detection, in a test run. Only the stub reads it
 /// (`stt.rs`' `StubEngine`, gated as this is): a real-speech debug build has
@@ -701,15 +756,30 @@ pub fn stand_in_detection() -> Option<Vec<(String, f32)>> {
     STAND_IN.lock().unwrap_or_else(|p| p.into_inner()).clone()
 }
 
+/// The stub engine's transcript, in a test run (as `stand_in_detection`).
+#[cfg(all(debug_assertions, not(feature = "engines")))]
+pub fn stand_in_text() -> Option<String> {
+    if !crate::shell::e2e::active() {
+        return None;
+    }
+    STUB_TEXT.lock().unwrap_or_else(|p| p.into_inner()).clone()
+}
+
 /// Debug-only, test mode: the next dictation as if language shortcut
 /// `shortcut` started it (`null`: the main shortcut), and the stub engine's
 /// detection from now on (`heard`: `[[code, probability], …]`, the likeliest
 /// first; `null`: none, as every model but Whisper) — which a dictation
-/// without an STT (`e2e_dictation`) takes as heard. `fresh`: the nudge's
-/// answers and its last offer forgotten. Returns what's armed.
+/// without an STT (`e2e_dictation`) takes as heard — and its transcript
+/// (`text`; `null`: its "[STT stub: …]"). `fresh`: the nudge's answers and
+/// its last offer forgotten. Returns what's armed.
 #[cfg(debug_assertions)]
 #[tauri::command]
-pub fn e2e_language_stage(shortcut: Option<String>, heard: Option<Vec<(String, f32)>>, fresh: Option<bool>) -> Result<(), String> {
+pub fn e2e_language_stage(
+    shortcut: Option<String>,
+    heard: Option<Vec<(String, f32)>>,
+    text: Option<String>,
+    fresh: Option<bool>,
+) -> Result<(), String> {
     if !crate::shell::e2e::active() {
         return Err("e2e_language_stage is for test runs".into());
     }
@@ -720,28 +790,32 @@ pub fn e2e_language_stage(shortcut: Option<String>, heard: Option<Vec<(String, f
     });
     *STAGED_HEARD.lock().unwrap_or_else(|p| p.into_inner()) = staged;
     *STAND_IN.lock().unwrap_or_else(|p| p.into_inner()) = heard;
+    let staged_text = text.is_some();
+    *STUB_TEXT.lock().unwrap_or_else(|p| p.into_inner()) = text;
     if fresh.unwrap_or(false) {
         nudge::reset();
     }
-    tracing::info!(armed = shortcut.is_some(), "e2e: language staged");
+    tracing::info!(armed = shortcut.is_some(), staged_text, "e2e: language staged");
     Ok(())
 }
 
-/// Debug-only, test mode: a transcription is in, `secs` long, and the model
-/// heard `heard` (`[[code, probability], …]`, the likeliest first) — what a
-/// Whisper dictation hands on, without a microphone: what's kept for its
-/// cleanup and the nudge's decision ([`heard`]), for the main shortcut and
-/// the model in config. Returns what was heard (the language picked among
-/// My languages).
+/// Debug-only, test mode: a transcription is in, `secs` long — `text`, and
+/// the model heard `heard` (`[[code, probability], …]`, the likeliest
+/// first; `null`: it doesn't say, as every model but Whisper) — what a
+/// dictation hands on, without a microphone: what's kept for its cleanup,
+/// the nudge's decision and the one-time tip ([`heard`]), for the main
+/// shortcut and the model in config. Returns what was heard (the language
+/// picked among My languages).
 #[cfg(debug_assertions)]
 #[tauri::command]
-pub fn e2e_language_heard(app: AppHandle, heard: Vec<(String, f32)>, secs: f32) -> Result<Option<Heard>, String> {
+pub fn e2e_language_heard(app: AppHandle, heard: Option<Vec<(String, f32)>>, text: Option<String>, secs: f32) -> Result<Option<Heard>, String> {
     if !crate::shell::e2e::active() {
         return Err("e2e_language_heard is for test runs".into());
     }
     let cfg = crate::config::load();
-    let (_, h) = choose(&cfg.model_size, &plan(&cfg, None), Some(&heard));
-    let _ = self::heard(&app, Said { text: String::new(), heard: h.clone() }, secs, &cfg);
+    let (_, h) = choose(&cfg.model_size, &plan(&cfg, None), heard.as_deref());
+    let said = Said { text: text.unwrap_or_default(), heard: h.clone() };
+    let _ = self::heard(&app, said, secs, &cfg, &cfg.model_size);
     Ok(h)
 }
 
@@ -972,6 +1046,31 @@ mod tests {
         assert_eq!(drop_leading_filler("Euh.", &["fr"]), "Euh.");
         assert_eq!(drop_leading_filler("Euh, oui", &[]), "Euh, oui");
         assert_eq!(drop_leading_filler("", &["fr"]), "");
+    }
+
+    #[test]
+    fn a_model_that_doesnt_say_has_its_text_read_and_whisper_never() {
+        let en = v(&["en"]);
+        let fr = "Il faut acheter du lait, du pain et des œufs pour demain.";
+        assert_eq!(read_language(fr, "parakeet-tdt-0.6b-v3", &en).map(|g| g.code), Some("fr"));
+        assert_eq!(read_language(fr, "parakeet-tdt-0.6b-v2", &en).map(|g| g.code), Some("fr"));
+        assert_eq!(read_language("会議は三時です。明日の朝、歯医者に電話して。", "sense-voice-int8", &en).map(|g| g.code), Some("ja"));
+        // Whisper says what it heard; Canary and Cohere are told.
+        for model in ["large", "turbo", "canary-1b-v2", "cohere-int8"] {
+            assert_eq!(read_language(fr, model, &en), None, "{model}");
+        }
+    }
+
+    #[test]
+    fn the_one_time_tip_wants_one_of_several_languages_other_than_english() {
+        let mine = v(&["en", "fr"]);
+        assert!(recognised("fr", true, 4.0, &mine));
+        // Not sure, too short, English, not theirs, or only one picked.
+        assert!(!recognised("fr", false, 4.0, &mine));
+        assert!(!recognised("fr", true, 1.0, &mine));
+        assert!(!recognised("en", true, 4.0, &mine));
+        assert!(!recognised("de", true, 4.0, &mine));
+        assert!(!recognised("fr", true, 4.0, &v(&["fr"])));
     }
 
     #[test]

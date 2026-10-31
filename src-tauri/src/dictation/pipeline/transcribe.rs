@@ -292,7 +292,7 @@ impl Shared {
         // this dictation's cleanup, perhaps a nudge; the text goes on.
         let outcome = outcome.map(|(lease, result)| {
             let cfg = self.config.read().map(|c| c.clone()).unwrap_or_default();
-            (lease, result.map(|said| crate::dictation::languages::heard(&self.app, said, secs, &cfg)))
+            (lease, result.map(|said| crate::dictation::languages::heard(&self.app, said, secs, &cfg, &model)))
         });
 
         // Mark activity so the idle watcher counts from end-of-transcription.

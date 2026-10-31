@@ -8,8 +8,21 @@
 //!   (its own detection, `stt::Heard`), the dictation lasted at least
 //!   [`MIN_SECS`] (a second of speech is too little to tell), "Tell me when
 //!   I speak another language" on (`language_nudge`), and it's a language
-//!   Yap knows. Only Whisper says which language it heard: with any other
-//!   model there's nothing to go on, and Settings says so.
+//!   Yap knows.
+//! - **Models that don't say** (2026-10-31, [`text_verdict`]): Parakeet V3
+//!   and SenseVoice write the language they hear without saying which, so
+//!   Yap reads it from the text (`text_id`: function words and trigrams that
+//!   must agree, at least five words, the same limits after). An
+//!   English-only model (Parakeet V2, Moonshine…) writes another language as
+//!   English-ish words, so it's caught only when its text reads as that
+//!   language all the same; then the offer is **"Parakeet V2 only knows
+//!   English"** with the model to switch to ([`Kind::Model`]: Choose a model
+//!   puts the language in My languages and opens Settings there, where the
+//!   recommended model is named — Yap never switches it). Whisper's own
+//!   detection on the audio would catch more, but means loading a second
+//!   model (hundreds of MB, seconds of the processor) after every
+//!   dictation: not done. Canary and Cohere are told the language, so
+//!   adding one changes nothing for them: never offered.
 //! - **Rate-limited**: at most one offer per [`MIN_GAP_MS`]; "Not now"
 //!   twice for a language (or its ✕) and it isn't offered again, nor after
 //!   "Don't ask about French". The answers live in
@@ -38,6 +51,7 @@ use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter};
 
 use super::catalog;
+use super::text_id::{self, Guess};
 use crate::dictation::stt::Heard;
 
 /// The likeliest language must be at least this sure.
@@ -109,17 +123,52 @@ pub fn verdict(heard: &Heard, secs: f32, mine: &[String], on: bool, rec: &Record
         Err("one of the person's languages")
     } else if heard.p < MIN_P {
         Err("not sure enough")
-    } else if secs < MIN_SECS {
+    } else {
+        limits(&heard.top, secs, rec, now)
+    }
+}
+
+/// What every offer must pass after its evidence (pure): long enough, a
+/// language Yap knows, not turned down, not too soon after the last.
+fn limits(code: &str, secs: f32, rec: &Record, now: u64) -> Result<(), &'static str> {
+    if secs < MIN_SECS {
         Err("too short to tell")
-    } else if catalog::find(&heard.top).is_none() {
+    } else if catalog::find(code).is_none() {
         Err("a language Yap doesn't know")
-    } else if !allowed(rec, &heard.top) {
+    } else if !allowed(rec, code) {
         Err("turned down before")
     } else if !gap_ok(rec, now) {
         Err("too soon after the last one")
     } else {
         Ok(())
     }
+}
+
+/// Whether to offer the language read from a dictation's text (`g`,
+/// `text_id`) in a model that doesn't say which it heard (pure): `Ok`, or
+/// why not. `english_only`: the model knows English alone — then English is
+/// the person's too, and a language already among theirs is still worth
+/// saying (the model can't write it); else as [`verdict`], the text's own
+/// gate (`text_id::sure`) in Whisper's probability's place.
+pub fn text_verdict(g: &Guess, secs: f32, mine: &[String], on: bool, english_only: bool, rec: &Record, now: u64) -> Result<(), &'static str> {
+    let mut theirs = mine.to_vec();
+    if !on {
+        return Err("switched off");
+    } else if english_only {
+        if g.code == "en" {
+            return Err("one of the person's languages");
+        }
+        theirs.retain(|c| c != g.code);
+        if !theirs.iter().any(|c| c == "en") {
+            theirs.push("en".into());
+        }
+    } else if mine.is_empty() {
+        return Err("no languages picked");
+    } else if mine.iter().any(|c| c == g.code) {
+        return Err("one of the person's languages");
+    }
+    text_id::sure(g, &theirs)?;
+    limits(g.code, secs, rec, now)
 }
 
 /// The offer's words: title, body, the Add button, the "never" link.
@@ -131,6 +180,33 @@ pub fn prompt_text(top: &str, picked: &str) -> (String, String, String, String) 
         "Yap can then tell it apart from your other languages.".to_string()
     };
     (format!("You spoke {lang} · Add it to My languages?"), body, format!("Add {lang}"), format!("Don't ask about {lang}"))
+}
+
+/// The offer's words for a language read from the text of a model that
+/// wrote it without saying (Parakeet V3): it's in that language already, and
+/// My languages keeps AI cleanup in it.
+pub fn read_prompt_text(code: &str) -> (String, String, String, String) {
+    let lang = catalog::name(code);
+    (
+        format!("You spoke {lang} · Add it to My languages?"),
+        format!("Then AI cleanup keeps your {lang} dictations in {lang}."),
+        format!("Add {lang}"),
+        format!("Don't ask about {lang}"),
+    )
+}
+
+/// The offer's words for an English-only `model` that heard `code`:
+/// `recommended`, the model to switch to (its name, and whether it's
+/// installed). The button opens Settings; the model is never switched.
+pub fn model_prompt_text(code: &str, model: &str, recommended: Option<(&str, bool)>) -> (String, String, String, String) {
+    let lang = catalog::name(code);
+    let name = crate::dictation::stt::model_name(model);
+    let body = match recommended {
+        Some((rec, true)) => format!("You spoke {lang}. {rec}, which is installed, writes {lang} as you say it: switch to it in Settings."),
+        Some((rec, false)) => format!("You spoke {lang}. {rec} writes {lang} as you say it: switch to it in Settings."),
+        None => format!("You spoke {lang}. Parakeet V3 or Whisper writes it as you say it: switch in Settings."),
+    };
+    (format!("{name} only knows English"), body, "Choose a model".to_string(), format!("Don't ask about {lang}"))
 }
 
 // ---- language_nudges.json ------------------------------------------------------------
@@ -175,6 +251,35 @@ fn save_now() -> Result<(), crate::shell::saving::SaveError> {
 
 // ---- the offer -----------------------------------------------------------------------
 
+/// What an offer's button does.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum Kind {
+    /// Add the language to My languages.
+    Add,
+    /// The model knows English only: the language goes in My languages and
+    /// Settings opens there, at the model to switch to.
+    Model,
+}
+
+/// An offer to make: the language and its words ([`prompt_text`],
+/// [`read_prompt_text`], [`model_prompt_text`]).
+#[derive(Debug, Clone, PartialEq)]
+pub struct Offer {
+    pub code: String,
+    pub kind: Kind,
+    pub title: String,
+    pub body: String,
+    pub add: String,
+    pub never: String,
+}
+
+impl Offer {
+    fn new(code: &str, kind: Kind, (title, body, add, never): (String, String, String, String)) -> Offer {
+        Offer { code: code.to_string(), kind, title, body, add, never }
+    }
+}
+
 /// What the main window gets (`yap-language-nudge`).
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -183,6 +288,8 @@ pub struct Prompt {
     /// The language's code and name.
     pub code: String,
     pub language: String,
+    /// "add", or "model": Rust opens Settings itself after the answer.
+    pub kind: Kind,
     pub title: String,
     pub body: String,
     pub add: String,
@@ -193,6 +300,7 @@ pub struct Prompt {
 struct Pending {
     id: u64,
     code: String,
+    kind: Kind,
     on_bar: bool,
 }
 
@@ -213,17 +321,55 @@ fn now_ms() -> u64 {
 pub fn consider(app: &AppHandle, heard: &Heard, secs: f32, mine: &[String], on: bool) {
     let rec = record();
     if let Err(why) = verdict(heard, secs, mine, on, &rec, now_ms()) {
-        // Every dictation in one of yours is no news; another language is.
-        let code = heard.top.as_str();
-        if !on || mine.is_empty() || mine.iter().any(|m| m == code) {
-            tracing::debug!(language = %code, why, "Language nudge: not offered");
-        } else {
-            tracing::info!(language = %code, why, "Language nudge: not offered");
-        }
+        not_offered(&heard.top, why, mine, on);
         return;
     }
+    later(app, Offer::new(&heard.top, Kind::Add, prompt_text(&heard.top, &heard.picked)));
+}
+
+/// A dictation of `secs` seconds whose text, from `model` (one that doesn't
+/// say which language it heard), reads as `g` (`text_id`): offer the
+/// language if it's worth it ([`text_verdict`]) — "Add it to My
+/// languages?", or for an English-only model "Parakeet V2 only knows
+/// English" — once the dictation is over, on a thread of its own.
+pub fn consider_text(app: &AppHandle, g: &Guess, secs: f32, mine: &[String], on: bool, model: &str) {
+    let english_only = catalog::english_only(model);
+    let rec = record();
+    if let Err(why) = text_verdict(g, secs, mine, on, english_only, &rec, now_ms()) {
+        not_offered(g.code, why, mine, on);
+        return;
+    }
+    let offer = if english_only {
+        // The model for the person's languages and this one (an installed
+        // one first): Settings names it too.
+        let mut langs = mine.to_vec();
+        if !langs.iter().any(|c| c == g.code) {
+            langs.push(g.code.to_string());
+        }
+        let installed = crate::dictation::commands::installed_models();
+        let rec = catalog::recommend(&langs, &installed)
+            .map(|id| (crate::dictation::stt::model_name(id), installed.iter().any(|m| m == id)));
+        let rec = rec.as_ref().map(|(name, inst)| (name.as_str(), *inst));
+        Offer::new(g.code, Kind::Model, model_prompt_text(g.code, model, rec))
+    } else {
+        Offer::new(g.code, Kind::Add, read_prompt_text(g.code))
+    };
+    later(app, offer);
+}
+
+/// Logged: a language not offered, and why (the code, never the text).
+/// Every dictation in one of yours is no news; another language is.
+fn not_offered(code: &str, why: &str, mine: &[String], on: bool) {
+    if !on || mine.is_empty() || mine.iter().any(|m| m == code) || why == "one of the person's languages" {
+        tracing::debug!(language = %code, why, "Language nudge: not offered");
+    } else {
+        tracing::info!(language = %code, why, "Language nudge: not offered");
+    }
+}
+
+/// [`offer`] once no dictation runs (up to [`WAIT_MS`]), on its own thread.
+fn later(app: &AppHandle, offer_: Offer) {
     let app = app.clone();
-    let heard = heard.clone();
     let _ = std::thread::Builder::new().name("language-nudge".into()).spawn(move || {
         // Never over a dictation (the one that heard it is still pasting).
         let waited = std::time::Instant::now();
@@ -237,13 +383,13 @@ pub fn consider(app: &AppHandle, heard: &Heard, secs: f32, mine: &[String], on: 
         if !gap_ok(&record(), now_ms()) {
             return;
         }
-        offer(&app, &heard.top, &heard.picked);
+        offer(&app, offer_);
     });
 }
 
-/// Ask about `code`: a toast in the main window while it's on screen, else
-/// a Yap bar card. `true` if shown.
-pub fn offer(app: &AppHandle, code: &str, picked: &str) -> bool {
+/// Make `offer`: a toast in the main window while it's on screen, else a
+/// Yap bar card. `true` if shown.
+pub fn offer(app: &AppHandle, offer: Offer) -> bool {
     let place = crate::notices::notice::place_tip(app, "language-nudge");
     if place == crate::notices::notice::Place::Nowhere {
         tracing::debug!("Language nudge: nowhere to show it");
@@ -251,10 +397,11 @@ pub fn offer(app: &AppHandle, code: &str, picked: &str) -> bool {
     }
     let in_window = place == crate::notices::notice::Place::Window;
     let id = NEXT_ID.fetch_add(1, Ordering::SeqCst);
-    let (title, body, add, never) = prompt_text(code, picked);
-    *pending() = Some(Pending { id, code: code.to_string(), on_bar: !in_window });
+    let Offer { code, kind, title, body, add, never } = offer;
+    let code = code.as_str();
+    *pending() = Some(Pending { id, code: code.to_string(), kind, on_bar: !in_window });
     let shown = if in_window {
-        let prompt = Prompt { id, code: code.to_string(), language: catalog::name(code), title, body, add, never };
+        let prompt = Prompt { id, code: code.to_string(), language: catalog::name(code), kind, title, body, add, never };
         app.emit(EVENT, prompt).is_ok()
     } else {
         use crate::bar::{Card, CardAction};
@@ -284,7 +431,7 @@ pub fn offer(app: &AppHandle, code: &str, picked: &str) -> bool {
     // Not shown after all: the day's count back.
     let shown = crate::notices::notice::tip_shown(CARD, place, shown);
     if shown {
-        tracing::info!(language = %code, in_window, "Language nudge: offered");
+        tracing::info!(language = %code, in_window, ?kind, "Language nudge: offered");
         let now = now_ms();
         update_record(|mut r| {
             r.last_offered_at = now;
@@ -300,8 +447,8 @@ pub fn offer(app: &AppHandle, code: &str, picked: &str) -> bool {
 }
 
 /// An answer to offer `id`: "add" (`true` once the language is in My
-/// languages), "later" (Not now, or ✕), "never", "expire" / "" (left
-/// alone: nothing counted).
+/// languages; for [`Kind::Model`], Settings opens there too), "later" (Not
+/// now, or ✕), "never", "expire" / "" (left alone: nothing counted).
 pub fn respond(app: &AppHandle, id: u64, answer: &str) -> Result<bool, String> {
     let taken = {
         let mut p = pending();
@@ -319,16 +466,25 @@ pub fn respond(app: &AppHandle, id: u64, answer: &str) -> Result<bool, String> {
     match answer {
         "add" => {
             let code = open.code.clone();
-            crate::shell::settings::change_config(app, |c| {
-                let mut mine = super::my_languages(c);
-                if !mine.contains(&code) {
-                    mine.push(code.clone());
-                }
-                c.my_languages = mine;
-                Ok(())
-            })?;
-            tracing::info!(language = %open.code, "Language nudge: added to My languages");
-            if open.on_bar {
+            let mine = super::my_languages(&crate::config::load());
+            if !mine.contains(&code) {
+                crate::shell::settings::change_config(app, |c| {
+                    let mut mine = super::my_languages(c);
+                    if !mine.contains(&code) {
+                        mine.push(code.clone());
+                    }
+                    c.my_languages = mine;
+                    Ok(())
+                })?;
+                tracing::info!(language = %open.code, "Language nudge: added to My languages");
+            }
+            if open.kind == Kind::Model {
+                // Settings → Dictation → My languages: which model knows it.
+                use tauri::Emitter;
+                crate::shell::window::show_settings(app)?;
+                let _ = app.emit("yap-open-settings", "dictation#languages");
+                tracing::info!(language = %open.code, "Language nudge: Settings opened at the speech models");
+            } else if open.on_bar {
                 let card = crate::bar::Card {
                     id: CARD_ADDED.into(),
                     icon: "language",
@@ -426,6 +582,62 @@ mod tests {
         assert_eq!(body, "Yap wrote this dictation as English, one of your languages.");
         assert_eq!(add, "Add French");
         assert_eq!(never, "Don't ask about French");
+    }
+
+    fn guess(code: &'static str, words: usize, hits: usize, others: Vec<(&'static str, usize)>) -> Guess {
+        Guess { code, words, hits, others, agrees: true, by_script: false }
+    }
+
+    #[test]
+    fn a_language_read_from_the_text_passes_the_same_limits() {
+        let rec = Record::default();
+        let en = mine(&["en"]);
+        let fr = guess("fr", 9, 5, vec![("en", 1)]);
+        assert_eq!(text_verdict(&fr, 4.0, &en, true, false, &rec, 1), Ok(()));
+        // One of theirs; none picked; switched off.
+        assert_eq!(text_verdict(&fr, 4.0, &mine(&["en", "fr"]), true, false, &rec, 1), Err("one of the person's languages"));
+        assert_eq!(text_verdict(&fr, 4.0, &[], true, false, &rec, 1), Err("no languages picked"));
+        assert_eq!(text_verdict(&fr, 4.0, &en, false, false, &rec, 1), Err("switched off"));
+        // The text's own gate: too few words, or as many English ones.
+        assert_eq!(text_verdict(&guess("fr", 4, 4, vec![]), 4.0, &en, true, false, &rec, 1), Err("too short to tell"));
+        assert_eq!(text_verdict(&guess("fr", 9, 3, vec![("en", 3)]), 4.0, &en, true, false, &rec, 1), Err("not sure enough"));
+        // Whisper's limits, unchanged: two seconds, ten minutes apart, never
+        // one turned down.
+        assert_eq!(text_verdict(&fr, 1.5, &en, true, false, &rec, 1), Err("too short to tell"));
+        let t0 = 1_000_000;
+        let soon = Record { last_offered_at: t0, ..Default::default() };
+        assert_eq!(text_verdict(&fr, 4.0, &en, true, false, &soon, t0 + 60_000), Err("too soon after the last one"));
+        assert_eq!(text_verdict(&fr, 4.0, &en, true, false, &soon, t0 + MIN_GAP_MS), Ok(()));
+        let twice = answered(answered(Record::default(), "fr", "later"), "fr", "later");
+        assert_eq!(text_verdict(&fr, 4.0, &en, true, false, &twice, 1), Err("turned down before"));
+        // From the text itself: Parakeet V3's French offered, English with
+        // Swedish names never.
+        let among = text_id::candidates("parakeet-tdt-0.6b-v3", &en);
+        let g = text_id::identify("Je pense que la nouvelle version marche beaucoup mieux que l'ancienne.", &among).unwrap();
+        assert_eq!(text_verdict(&g, 4.0, &en, true, false, &rec, 1), Ok(()));
+        let g = text_id::identify("Ask Ingrid Johansson about the Göteborg office move.", &among).unwrap();
+        assert!(text_verdict(&g, 4.0, &en, true, false, &rec, 1).is_err(), "{g:?}");
+    }
+
+    #[test]
+    fn an_english_only_model_says_so_even_for_one_of_theirs() {
+        let rec = Record::default();
+        let fr = guess("fr", 9, 5, vec![("en", 1)]);
+        // French among theirs: Parakeet V2 still can't write it.
+        assert_eq!(text_verdict(&fr, 4.0, &mine(&["en", "fr"]), true, true, &rec, 1), Ok(()));
+        // Nothing picked: English is theirs all the same.
+        assert_eq!(text_verdict(&fr, 4.0, &[], true, true, &rec, 1), Ok(()));
+        assert_eq!(text_verdict(&guess("fr", 9, 3, vec![("en", 2)]), 4.0, &[], true, true, &rec, 1), Err("not sure enough"));
+        assert_eq!(text_verdict(&guess("en", 9, 5, vec![]), 4.0, &[], true, true, &rec, 1), Err("one of the person's languages"));
+        let (title, body, add, never) = model_prompt_text("fr", "parakeet-tdt-0.6b-v2", Some(("Parakeet V3", false)));
+        assert_eq!(title, "Parakeet V2 only knows English");
+        assert_eq!(body, "You spoke French. Parakeet V3 writes French as you say it: switch to it in Settings.");
+        assert_eq!((add.as_str(), never.as_str()), ("Choose a model", "Don't ask about French"));
+        assert!(model_prompt_text("fr", "parakeet-tdt-0.6b-v2", Some(("Whisper Large v3", true))).1.contains("which is installed"));
+        let (title, body, add, _) = read_prompt_text("de");
+        assert_eq!(title, "You spoke German · Add it to My languages?");
+        assert_eq!(body, "Then AI cleanup keeps your German dictations in German.");
+        assert_eq!(add, "Add German");
     }
 
     #[test]
