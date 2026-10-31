@@ -54,14 +54,6 @@ const Landed = Extension.create({
   },
 });
 
-/** The heading levels the text style menu offers (`#`, `##`, `###`). */
-export const STYLES = [
-  { id: 'paragraph', label: 'Paragraph' },
-  { id: 1, label: 'Heading 1' },
-  { id: 2, label: 'Heading 2' },
-  { id: 3, label: 'Heading 3' },
-];
-
 /**
  * The editor in `mount` (its root: the page's `.docmd`), on `text` (the
  * note's markdown, its title line `title` shown above the page).
