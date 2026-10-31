@@ -78,12 +78,14 @@ test('the chip names the chat model, switches it, and every answer keeps its own
   // Where it runs comes from the endpoint: this "Groq" is the local fake.
   await expect(chip(main)).toHaveAttribute('title', /^Runs on this PC \(127\.0\.0\.1:/);
 
-  // The picker, on Groq: its models (Yap's list: no live one in this run).
+  // The picker, on Groq: its latest models (Yap's list: no live one in
+  // this run), the other behind More models.
   await chip(main).click();
   const pop = popover(main);
   await expect(pop).toBeVisible();
   await expect(pop.getByRole('tab', { name: /^Groq/ })).toHaveAttribute('aria-selected', 'true');
-  await expect(models(main).locator('.nm')).toHaveText(['GPT-OSS 20B', 'GPT-OSS 120B', 'Qwen3.8 27B']);
+  await expect(models(main).locator('.nm')).toHaveText(['GPT-OSS 120B', 'GPT-OSS 20B']);
+  await expect(pop.getByRole('button', { name: 'More models (1)' })).toHaveAttribute('aria-expanded', 'false');
   await expect(pop.getByRole('button', { name: /^GPT-OSS 20B/ })).toHaveAttribute('aria-pressed', 'true');
   await shot(main, '02-popover');
 

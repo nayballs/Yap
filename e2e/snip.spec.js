@@ -916,8 +916,8 @@ test('"Reads images" in the Chat model picker and in Settings\' Chat models', as
   await expect(row('GPT-OSS 20B').locator('.tag.img')).toHaveCount(0);
   // Every Claude reads images, connected or not.
   await pop.getByRole('tab', { name: /^Claude/ }).click();
-  await expect(row('Claude Haiku 4.5').locator('.tag.img')).toHaveText('Reads images');
-  await expect(row('Claude Haiku 4.5').locator('.tag.key')).toHaveText('Add key');
+  await expect(row('Claude Haiku 5.5').locator('.tag.img')).toHaveText('Reads images');
+  await expect(row('Claude Haiku 5.5').locator('.tag.key')).toHaveText('Add key');
   await shot(main, '12-picker-reads-images');
   // Search "images": the models that read them.
   await pop.getByRole('searchbox').fill('reads images');
