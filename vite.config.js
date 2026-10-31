@@ -8,6 +8,10 @@ export default defineConfig({
   server: {
     port: 51437,
     strictPort: true,
+    // The website (site/) is its own Astro project: building it while Yap -
+    // Dev runs must never look like a change to the app (its tsconfig.json
+    // alone would make Vite reload every window).
+    watch: { ignored: ['**/site/**'] },
   },
   build: {
     // The main window's chunk (ControlPanel) is just under 725 kB (708 kB on
