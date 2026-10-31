@@ -263,6 +263,23 @@ mod tests {
         s.parse().unwrap()
     }
 
+    /// Windows' own lists on this PC (run by hand: `cargo test link::lan --
+    /// --ignored --nocapture`): its adapters' addresses and which networks
+    /// are Public, read without an error. Prints counts only.
+    #[test]
+    #[ignore = "reads this PC's networks"]
+    fn reads_this_pcs_networks() {
+        crate::shell::com::keep_mta();
+        let all = win::adapters();
+        let categories = win::public_adapters();
+        let reachable = reachable(all.clone());
+        println!("adapters' addresses: {}, reachable: {}, connected networks' adapters: {}", all.len(), reachable.len(), categories.len());
+        if let Some(best) = reachable.first() {
+            println!("the QR's address is on a network Windows marks Public: {:?}", public_network(best.ip));
+        }
+        assert!(!all.is_empty(), "loopback at least");
+    }
+
     #[test]
     fn only_peers_on_a_home_network_may_connect() {
         for ok in ["10.0.0.5", "10.255.255.255", "172.16.0.1", "172.31.9.9", "192.168.1.20", "169.254.3.4", "127.0.0.1", "127.8.8.8", "::1", "fd12:3456::1", "fc00::1", "fe80::1", "::ffff:192.168.1.5"] {

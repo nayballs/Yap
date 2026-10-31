@@ -1,7 +1,8 @@
 /// Yap Link's phone page (`src/link/page.rs`): every file under `link-page/`
 /// embedded in yap.exe, listed in `$OUT_DIR/link_page.rs` as
 /// `(path, bytes)` — the page's own files, whatever they are, with nothing
-/// read from disk at run time. Hidden files (`.…`) are left out.
+/// read from disk at run time. Hidden files (`.…`) and the folder's
+/// README.md (its notes, not the page) are left out.
 fn embed_link_page() {
     use std::path::{Path, PathBuf};
     fn walk(root: &Path, dir: &Path, out: &mut Vec<(String, PathBuf)>) {
@@ -9,7 +10,7 @@ fn embed_link_page() {
         for entry in entries.flatten() {
             let path = entry.path();
             let name = entry.file_name().to_string_lossy().into_owned();
-            if name.starts_with('.') {
+            if name.starts_with('.') || (dir == root && name.eq_ignore_ascii_case("README.md")) {
                 continue;
             }
             if path.is_dir() {

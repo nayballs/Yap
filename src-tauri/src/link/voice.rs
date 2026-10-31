@@ -219,6 +219,27 @@ mod tests {
     }
 
     #[test]
+    fn a_voice_taken_back_goes_back_to_thinking_and_one_never_heard_still_ends() {
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        let latest = Arc::new(std::sync::atomic::AtomicU64::new(1));
+        let answered = Arc::new(AtomicBool::new(false));
+        let (open, _play) = opener(tx.clone(), 1, Arc::clone(&latest), Arc::new(AtomicBool::new(false)), Arc::clone(&answered));
+        let opened = open().unwrap();
+        opened.play.append(Pcm { sample_rate: 24_000, channels: 1, samples: vec![0.0; 240] });
+        // Its words came before a tool call: stopped, the answer not in yet.
+        drop(opened.keep);
+        let (t, _) = texts(&mut rx);
+        assert_eq!(t.last().map(String::as_str), Some(r#"{"type":"state","phase":"thinking"}"#));
+        // A voice with nothing said (no audio came): no speak_end, but idle.
+        answered.store(true, Ordering::SeqCst);
+        let (open, _play) = opener(tx, 1, latest, Arc::new(AtomicBool::new(false)), answered);
+        drop(open().unwrap().keep);
+        let (t, a) = texts(&mut rx);
+        assert!(a.is_empty());
+        assert_eq!(t, [r#"{"type":"state","phase":"idle"}"#]);
+    }
+
+    #[test]
     fn an_interrupted_voice_sends_nothing_more_and_ends_once() {
         let (mut rx, play, latest, open) = rig();
         let opened = open().unwrap();

@@ -100,14 +100,14 @@ impl crate::chat::assistant::Phone for Turn {
     }
 
     fn step(&self, label: &str) {
-        say(&self.tx, Out::Step { label: label.to_string() });
+        self.tell(Out::Step { label: label.to_string() });
     }
 
     fn answer(&self, text: &str, done: bool) {
         if done {
             self.answered.store(true, Ordering::SeqCst);
         }
-        say(&self.tx, Out::Answer { text: text.to_string(), done });
+        self.tell(Out::Answer { text: text.to_string(), done });
     }
 
     fn voice(&self, message_id: &str) -> Result<Arc<crate::voice::tts::Feed>, String> {
@@ -126,7 +126,17 @@ impl crate::chat::assistant::Phone for Turn {
     }
 
     fn failed(&self, message: &str) {
-        say(&self.tx, Out::Error { message: message.to_string() });
+        self.tell(Out::Error { message: message.to_string() });
+    }
+}
+
+impl Turn {
+    /// Say `out` to the phone while this is its question: an abandoned
+    /// question's late news never reaches it.
+    fn tell(&self, out: Out) {
+        if crate::chat::assistant::Phone::current(self) {
+            say(&self.tx, out);
+        }
     }
 }
 
@@ -348,16 +358,19 @@ where
     }
 }
 
-/// Abandon the turn under way, if any (an interrupt, a new start, a cancel).
-fn abandon(tx: &Tx, asking: &mut Asking, then_idle: bool) {
+/// Abandon the question under way, if any (an interrupt, a new start, a
+/// cancel): one still being recorded is dropped, one being answered stops.
+fn abandon(latest: &AtomicU64, asking: &mut Asking) {
+    if asking.recording {
+        asking.recording = false;
+        asking.audio = Vec::new();
+        latest.fetch_add(1, Ordering::SeqCst);
+    }
     let Some(turn) = asking.turn.take() else { return };
     let was = crate::chat::assistant::Phone::current(turn.as_ref());
     turn.abandon();
     if was {
         tracing::info!("Yap Link: the phone interrupted its question");
-    }
-    if then_idle {
-        say(tx, Out::State { phase: Phase::Idle });
     }
 }
 
@@ -367,7 +380,7 @@ fn on_message(hub: &Arc<Hub>, tx: &Tx, session: u64, latest: &Arc<AtomicU64>, as
         In::Hello { .. } => say(tx, Out::Error { message: "Already connected.".into() }),
         In::Start { .. } => {
             // A start while it speaks (or thinks) is an interrupt, then a start.
-            abandon(tx, asking, false);
+            abandon(latest, asking);
             if crate::chat::assistant::is_off() {
                 say(tx, Out::Error { message: MEETING.into() });
                 say(tx, Out::State { phase: Phase::Idle });
@@ -384,30 +397,20 @@ fn on_message(hub: &Arc<Hub>, tx: &Tx, session: u64, latest: &Arc<AtomicU64>, as
                 finish_question(hub, tx, session, latest, asking);
             }
         }
-        In::Cancel => {
-            if asking.recording {
-                asking.recording = false;
-                asking.audio = Vec::new();
-                latest.fetch_add(1, Ordering::SeqCst);
-                say(tx, Out::State { phase: Phase::Idle });
-            } else {
-                abandon(tx, asking, true);
-            }
-        }
-        In::Interrupt => {
-            if asking.recording {
-                asking.recording = false;
-                asking.audio = Vec::new();
-                latest.fetch_add(1, Ordering::SeqCst);
-                say(tx, Out::State { phase: Phase::Idle });
-            }
-            abandon(tx, asking, true);
+        // Idle at once, whatever there was to drop: the page waits for it
+        // before it takes the next question's news.
+        In::Cancel | In::Interrupt => {
+            abandon(latest, asking);
+            say(tx, Out::State { phase: Phase::Idle });
         }
         In::SetModel { id } => {
-            // Every phone hears the new `ready` (Chat's model changed).
+            // A fresh `ready` either way: the page shows the pick at once and
+            // takes this as the truth (every other phone hears it too, from
+            // `yap-chat-model-changed`).
             if let Err(e) = crate::link::models::set(&hub.app, &id) {
                 say(tx, Out::Error { message: e });
             }
+            say(tx, hub.ready());
         }
     }
 }
@@ -445,7 +448,7 @@ fn finish_question(hub: &Arc<Hub>, tx: &Tx, session: u64, latest: &Arc<AtomicU64
 /// One question: transcribed, heard, answered (the Voice Assistant's path).
 async fn ask(app: tauri::AppHandle, turn: Arc<Turn>, audio: Vec<f32>) {
     use crate::chat::assistant::Phone;
-    say(&turn.tx, Out::State { phase: Phase::Transcribing });
+    turn.tell(Out::State { phase: Phase::Transcribing });
     let ear = {
         let state = app.state::<crate::AppState>();
         let guard = state.pipeline.lock().unwrap_or_else(|p| p.into_inner());
@@ -461,29 +464,29 @@ async fn ask(app: tauri::AppHandle, turn: Arc<Turn>, audio: Vec<f32>) {
     let question = match heard {
         Ok(q) if !q.trim().is_empty() => q,
         Ok(_) => {
-            say(&turn.tx, Out::Error { message: NOTHING_HEARD.into() });
-            say(&turn.tx, Out::State { phase: Phase::Idle });
+            turn.tell(Out::Error { message: NOTHING_HEARD.into() });
+            turn.tell(Out::State { phase: Phase::Idle });
             return;
         }
         Err(e) => {
             tracing::warn!("Yap Link: the phone's question wasn't transcribed ({e})");
-            say(&turn.tx, Out::Error { message: format!("Yap couldn't make out the question. {e}") });
-            say(&turn.tx, Out::State { phase: Phase::Idle });
+            turn.tell(Out::Error { message: format!("Yap couldn't make out the question. {e}") });
+            turn.tell(Out::State { phase: Phase::Idle });
             return;
         }
     };
-    say(&turn.tx, Out::Heard { text: question.clone() });
+    turn.tell(Out::Heard { text: question.clone() });
     if crate::chat::assistant::is_off() {
-        say(&turn.tx, Out::Error { message: MEETING.into() });
-        say(&turn.tx, Out::State { phase: Phase::Idle });
+        turn.tell(Out::Error { message: MEETING.into() });
+        turn.tell(Out::State { phase: Phase::Idle });
         return;
     }
-    say(&turn.tx, Out::State { phase: Phase::Thinking });
+    turn.tell(Out::State { phase: Phase::Thinking });
     let started = Instant::now();
     crate::chat::assistant::ask_from_phone(app, question, Arc::clone(&turn) as Arc<dyn Phone>).await;
     tracing::info!(ms = started.elapsed().as_millis() as u64, spoken = turn.voiced.load(Ordering::SeqCst), "Yap Link: the phone's question answered");
     // No voice (nothing to say, or it couldn't start): idle now; else its end says so.
-    if turn.current() && !turn.voiced.load(Ordering::SeqCst) {
-        say(&turn.tx, Out::State { phase: Phase::Idle });
+    if !turn.voiced.load(Ordering::SeqCst) {
+        turn.tell(Out::State { phase: Phase::Idle });
     }
 }
