@@ -63,7 +63,7 @@
 //   `e2e_snip_question`) and sends both; not during a call, nor after Esc.
 import fs from 'node:fs';
 import path from 'node:path';
-import { test as base, expect, openView, openSettings, closeSettings, expectStore, setConfig, sidebar, openModelPicker } from './support/fixtures.js';
+import { test as base, expect, openView, openSettings, closeSettings, expectStore, setConfig, sidebar } from './support/fixtures.js';
 import { startFakeLlm } from './support/fake-llm.js';
 import { readPng, readDataUrl, worstError, writePng, pixel, near } from './support/png.js';
 
@@ -906,15 +906,18 @@ test("a model that can't read images: \"Send its text instead\", read on this PC
 });
 
 test('"Reads images" in the Chat model picker and in Settings\' Chat models', async ({ main, shot }) => {
-  const pop = await openModelPicker(main);
+  await openView(main, 'Chat');
+  await main.locator('.modelchip .chip').click();
+  const pop = main.getByRole('dialog', { name: 'Switch the Chat model' });
+  await expect(pop).toBeVisible();
   await pop.getByRole('tab', { name: /^Groq/ }).click();
   const row = (name) => pop.locator('.pane .mrow', { has: main.locator('.nm', { hasText: new RegExp(`^${name}$`) }) });
   await expect(row('Qwen3.8 27B').locator('.tag.img')).toHaveText('Reads images');
   await expect(row('GPT-OSS 20B').locator('.tag.img')).toHaveCount(0);
   // Every Claude reads images, connected or not.
   await pop.getByRole('tab', { name: /^Claude/ }).click();
-  await expect(row('Claude Haiku 4.5').locator('.tag.img')).toHaveText('Reads images');
-  await expect(row('Claude Haiku 4.5').locator('.tag.key')).toHaveText('Add key');
+  await expect(row('Claude Haiku 5.5').locator('.tag.img')).toHaveText('Reads images');
+  await expect(row('Claude Haiku 5.5').locator('.tag.key')).toHaveText('Add key');
   await shot(main, '12-picker-reads-images');
   // Search "images": the models that read them.
   await pop.getByRole('searchbox').fill('reads images');

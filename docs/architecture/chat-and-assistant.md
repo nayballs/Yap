@@ -1767,7 +1767,7 @@ and its Undo, Preview / Source, find, copy, light and dark).
   "Message"), **Think** for the model on this PC (2026-10-29,
   `ThinkButton.svelte`: the next question only, `chat/think.rs` above; apart
   from the prompt chips and Skills; a cloud model has its effort in the
-  model menu instead, since 2026-10-31), the mic, and Send only once there's text; an amber dot on the +
+  picker instead, since 2026-10-31), the mic, and Send only once there's text; an amber dot on the +
   while voice replies are on; under the box on the left, quiet, the **model
   chip** (its `quiet` look; never inside +: always in view) — `ModelChip.svelte`, names in `aiModel.js` from
   `ppModels.js` + `providerIcons.js`) shows the model the next message goes
@@ -1778,88 +1778,15 @@ and its Undo, Preview / Source, find, copy, light and dark).
   where it runs in its tooltip (and, on the on-device model, "Context: 8K
   tokens": `ai_model_status.context`), "No AI model" when nothing is set up;
   bottom right of the same row, **the context ring** ([below](#the-context-ring-2026-10-25)). The
-  chip opens **the model menu** first (`ChatModelMenu.svelte`, 2026-10-31,
-  after the Claude Code app's "Opus 5.5 ✓, Fable 5.1 2, Sonnet 5.5 3, Haiku
-  5.5 4, Effort ▸ Extra, More models ▸, Fast mode"; its own chunk, loaded
-  the first time it opens; `aria-haspopup="menu"`, `aria-expanded`): a
-  compact menu just above the chip, left-aligned with it, in the warm
-  theme's menu look (`--yap-s2`, the menu shadow, 30 px items, the amber
-  focus ring; light and dark from the tokens). Its rows: **the main
-  models** (`role="menuitemradio"`), each its name, its provider quietly
-  ("Anthropic", "Groq", "On this PC", a server's host) and its number key
-  (1–7 while the menu is open, `aria-keyshortcuts`), the ✓ in place of
-  the number on the one in use — **the rule** is `core/mainModels.js`'s
-  alone (pure, e2e `main-models.spec.js`): from each provider with a key
-  (`ai_model_status.keyed`), the newest model of each of its families —
-  Anthropic's Opus, Fable, Sonnet and Haiku; OpenAI's flagship (by
-  generation, then tier: Astra over Sol over Terra over a plain id, then
-  the point release) and small model (Luna over Mini over Nano); Gemini's
-  flagship (Pro, or a named tier like Argon) and Flash (a release over a
-  preview); Groq's biggest and smallest GPT-OSS; through OpenRouter, the
-  same families of a lab whose own key isn't there (anthropic/…, openai/…,
-  google/…); a connected provider with none of these, its first model as
-  Yap lists it —, read from the ids (a dated snapshot counts as its alias)
-  then the provider's dates, over the models the pickers already list
-  (`cloudRows`: the curated list merged with the provider's live one,
-  `model_catalog.rs`), so a new Opus a provider lists takes its family's
-  place without a Yap update and a retired id is never offered (the live
-  list drops it first); never one being retired or no longer offered; then
-  the on-device model Yap runs, when it's installed ("On this PC"); then
-  the model in use, always, even an older one, last so the others keep
-  their numbers; at most seven, past that each provider keeps its first
-  families in turn (Opus, Sonnet, Haiku, Fable; a flagship before a small
-  model), the model in use kept. The menu's providers go Anthropic,
-  OpenAI, Gemini, Groq, OpenRouter (`MENU_ORDER`: the strongest chat
-  models first). Then **Effort ▸ <level>** (`menuitem`, `aria-haspopup`;
-  hidden for a model without a reasoning control and the one on this PC,
-  whose Think button covers it): a submenu with only the levels the model
-  in use takes (`effort.js` `effortOptions`, "Default" first where its
-  default isn't a level), the one in effect ticked, a line under them on
-  what the level in focus (or under the pointer) does, the one in effect
-  when the submenu opens ("Extra: thinks longer, for hard problems.");
-  picking one keeps it for that model (`chat_set_effort`), closes the menu
-  and the chip says it at once. **More models ▸**: every other model of
-  the connected providers, this PC's other installed models and
-  self-hosted servers on it (their lists asked as the submenu opens),
-  then a server elsewhere by its host, grouped (a quiet heading each),
-  newest first in each (by the provider's dates when every model in the
-  group has one, else by the version in the id), "New" on a new one, ≤ 40
-  a group then "And N more: search to narrow it down.", and a search at
-  its top past ten models (typing on a model searches); at most 440 px
-  tall, its list scrolling, and its box kept where and as big as it opened
-  while a search narrows it (nothing moves under the caret). **Fast mode**
-  (Claude Opus 5.5 only, `typeof effort.fast === 'boolean'`): a quiet
-  "Fast mode" heading and "Enable fast mode / Faster answers, at twice the
-  price per token" with a switch (`menuitemcheckbox`, `chat_set_fast`; the
-  menu stays open). Last, **Add a provider or download a model…**: the
-  full picker below, the provider rail, which keeps connecting a key, the
-  on-device downloads and uninstall, search across everything and
-  "Language model settings…". A submenu is a flyout beside the menu (on
-  the right, else the left; its bottom level with its item's, opening
-  upwards as Claude Code's does from a menu at the window's foot; kept in
-  the window as its lists arrive), or a section opening under its item
-  when the window has room for neither. The pointer on a submenu's item
-  opens it, on another item closes it; a click opens it with the focus in
-  it. Keyboard: the model in use has the focus when it opens; ↑/↓ (round),
-  Home/End, Enter; → (or Enter) into a submenu — Effort's level in effect,
-  More's search or first model — and ← or Esc back to its item; 1–7 pick a
-  main model; Esc or Tab closes and gives the focus back to the chip. A
-  pick is `chat_set_model` (the Chat scope only) and goes in Recent, as
-  the rail's does. With **no AI model** the chip opens the rail at once
-  (connecting one is there), as does Chat's "Choose another model…" /
-  "Connect one…" for a screenshot (`ModelChip.openPicker`). The chip only
-  needs `chatModelState.svelte.js` (the on-device status and Recent); the
-  rows (`chatModels.svelte.js`) load with the menu or the rail, so the main
-  window's chunk stays under Vite's 725 kB limit.
-
-  **The full picker** (`ChatModelPicker.svelte`, "Switch the Chat model",
-  its own chunk loaded the first time it opens since 2026-10-25, data in
+  chip opens **the Chat model picker** (`ChatModelPicker.svelte`, its own
+  chunk loaded the first time it opens since 2026-10-25, data in
   `chatModels.svelte.js`; the maintainer's "Concept A, provider rail",
   2026-10-19): a popover above the composer (`data-model-picker-above`;
   560 px, its rail a strip across the top below 520) — **search** across
   the top ("Search models and providers", Ctrl+K, typing anywhere searches,
   Enter picks the first result) over every provider's models, connected or
-  not, and this PC's; a **rail** (`tablist`): Recent (the last 3 Chat models
+  not, older ones included whether More models is open or not (Latest
+  first), and this PC's; a **rail** (`tablist`): Recent (the last 3 Chat models
   used, this webview's localStorage `yapChatRecentModels`), Groq / Gemini /
   Claude (Anthropic) / OpenAI / OpenRouter with their marks and a dot
   (green = a key, hollow = not set up), Custom when a server elsewhere is
@@ -1867,13 +1794,40 @@ and its Undo, Preview / Source, find, copy, light and dark).
   the one the scope is set to). The **pane**: the provider's mark on a
   tile, its name, a status line from the live lists ("Connected · checked
   2 h ago", "Couldn't check: …", "Not set up"), the key masked + Change
-  key; the rows are exactly Settings' list (`modelCatalog.js`'s merge:
-  curated, then "New", the rest behind "Show N more"), each a button
+  key; the rows are the models Settings lists (`modelCatalog.js`'s merge
+  of Yap's curated list with the live one), split (2026-10-31, the
+  maintainer's design after the short menu was reverted) into **Latest** —
+  only the newest model of each of the provider's families
+  (`core/latestModels.js`, pure, unit-tested in `e2e/latest-models.spec.js`):
+  Anthropic's Opus, Fable, Sonnet, Haiku; OpenAI's flagship and small tier
+  (GPT-6 Astra, GPT-6 Luna); Gemini's flagship (Pro, or a named top tier
+  like Argon) and Flash; Groq's biggest and smallest GPT-OSS; OpenRouter's
+  the same families of the labs it carries (anthropic/…, openai/…,
+  google/…). "Newest" is read from the id (Opus 5.5 over 4.8, a dated
+  snapshot as its alias; OpenAI by generation, then tier — Astra over Sol
+  over Terra, Luna over Mini over Nano — then point release; Gemini a
+  release over a preview), then the provider's date, then Yap's order; the
+  families are names, never ids, so a new Opus in the live list takes the
+  place without a Yap update; a model being retired or no longer offered
+  never does — and under it **More models (N)**, a row-shaped button
+  (`aria-expanded`, `aria-controls`; a chevron where a row has its mark)
+  that opens in place below to every other model, newest first (the
+  provider's dates when every row has one, else the id's version), in the
+  same rows. It's closed unless the model in use is one of them; the
+  person's open or closed is kept per provider while Yap runs
+  (`chatModels.svelte.js` `moreIsOpen` / `setMoreOpen`, module state: no
+  file), and picking an older one (from it or a search) opens it next time.
+  The model in use always shows: ✓ where it is, and when More models is
+  closed by hand an older one stays on show under it (it never moves above,
+  so the button doesn't jump). A provider none of whose models is in a
+  family isn't split (Settings' list, its "more" behind More models). The
+  split is for the cloud providers only: On this PC and the servers keep
+  their lists. Each row is a button
   (`aria-pressed`) with a ✓ for the current one, the model family's mark
   (GPT-OSS → openai-oss.svg, Qwen, Gemma… `familyIcon`), a one-line
-  description and ≤ 2 tags (New, Recommended for this PC, In use, no note
-  tools, No longer offered — with "Groq no longer offers GPT-OSS 120B. Pick
-  another model." above). A provider **without a key** shows "Connect
+  description and ≤ 2 tags (New, Reads images, Recommended for this PC, In
+  use, no note tools, No longer offered — with "Groq no longer offers
+  GPT-OSS 120B. Pick another model." above). A provider **without a key** shows "Connect
   Claude" in place (paste a key · Save key · Get a key ↗ via
   `openExternalLink`; `chat_provider_key`), its curated models greyed with
   "Add key" until then (a click on one goes to the key field); once saved
@@ -1928,16 +1882,30 @@ and its Undo, Preview / Source, find, copy, light and dark).
   only. Dictation cleanup stays as it is." (or that Chat uses cleanup's
   model until one is picked) + **Language model settings…**
   (`cleanup#chat`). Keyboard: ↑/↓ through the rail (switching as it goes)
-  or the rows (roving tab stops), ←/→ or Tab between them, Enter picks, Esc
+  or the rows (roving tab stops; More models is one of them, Enter or
+  Space opens and closes it), ←/→ or Tab between them, Enter picks, Esc
   closes and gives the focus back to the chip; amber focus rings; the
   window's in-page hotkey fallbacks run first (capture phase). Monochrome
   marks (OpenAI, Anthropic, xAI, OpenRouter — Simple Icons' CC0 glyph) are
   CSS masks in `currentColor`, Claude's in its brand colour. **Effort**
-  and **Fast mode** (2026-10-31) are the model menu's (above; under the
-  rail's panes until the menu came the same day); `chat_set_effort` keeps
-  a level for that model alone (ai-models.md `ai/effort.rs`). Settings →
-  Language Models → Chat has the same Effort choice for the Chat model
-  ("How hard it thinks", kept in its config copy's `chatEffort`). Settings →
+  (2026-10-31, the Claude Code app's "Effort ▸ Extra" and "Fast mode"):
+  under the panes, for the model in use, "Effort · Claude Opus 5.5" and
+  the levels it takes as a segmented choice (Low, Medium, High, Extra,
+  Max — only its own; "Default" first when its default isn't a level, as
+  GPT-5.4 Mini's isn't), the one in effect selected and a line on what it
+  does ("Extra: thinks longer, for hard problems."; "The model's default."
+  on its default) — `chat_set_effort` keeps it for that model alone
+  (ai-models.md `ai/effort.rs`), the chip follows at once, the picker stays
+  open; and **Fast mode** for Claude Opus 5.5 (a switch, "Faster answers
+  from Claude Opus 5.5, at twice the price per token. Off unless you switch
+  it on.", `chat_set_fast`). None of it for a model without a reasoning
+  control or the one on this PC (its Think button). The picker keeps its
+  provider rail rather than Claude Code's short menu (tried and reverted
+  on 2026-10-31: "no logos"): Yap's models come from five providers and
+  this PC; Latest above is that menu's "main models" idea inside the rail.
+  Settings → Language Models → Chat has
+  the same Effort choice for the Chat model ("How hard it thinks", kept in
+  its config copy's `chatEffort`). Settings →
   Language Models keeps its own pickers. Each answer
   shows its model quietly under it, as do the Notes view's Ask bar and the
   notepad's Ask sheet (`nextModel(scope)` fetched beside the call; none for
@@ -2041,15 +2009,36 @@ copyable. Yap's, in `chat/skills.rs`:
   it runs (`runsOn`: `meeting` — a meeting's Ask box, on that meeting —,
   `meetings` — Chat and Ask across meetings, on all of them — or `both`).
   **Built in** (`builtins`, in code, never stored; 15 since 31 Oct 2026, the
-  `/` menu's order): /followup-email (one meeting), /summary-for,
-  /decisions, /decision-log, /risks, /open-questions, /tickets, /prd,
-  /coach, /todos, /standup, /prep, /one-to-one, /weekly-recap,
-  /project-update (the table below). **Your own** in `skills.json`
+  `/` menu's and Settings' order): **the core six** (`CORE`) —
+  /followup-email (one meeting), /prep, /standup, /todos, /decisions,
+  /summary-for — then **More Skills**: /decision-log, /open-questions,
+  /risks, /tickets, /prd, /coach, /one-to-one, /weekly-recap,
+  /project-update (the table below). Each one's description is one short
+  line in one voice, starting with a verb ("Get ready for your next
+  meeting", "Draft tickets for the work agreed"; a unit test holds them to
+  it). **Your own** in `skills.json`
   (`SkillStore`, `Saver` "your Skills", a corrupt file set aside; ≤ 50):
   `skill_save` (new, a change, or a copy of a built-in: `basedOn`; what only
   a built-in carries — `gather`, `query`, `chip`, `question`, `document`,
   `asks` — never comes with a copy), `skill_delete`, `skills_list`
-  (built-ins first); `yap-skills-changed` to every window.
+  (built-ins first, each a `Listed`: the Skill with `shown` and `core`);
+  `yap-skills-changed` to every window.
+- **Shown or not** (31 Oct 2026; the maintainer: fifteen in the `/` menu
+  and as prompts was too much, "the UX on these things needs to look very
+  good"): each Skill's **"Show in the / menu"** switch (`skill_show {id,
+  shown}` → `set_shown`, skills.json's `menu` by Skill id, only the ones
+  set). Not set: the core six and your own are in the menus
+  (`shown_by_default`), the other nine wait in Settings' More Skills. Only
+  the `/` menus and the one-tap prompts follow it: **a Skill switched off
+  still runs when its whole command is sent** (`/tickets the supplier
+  call`) — `by_command`, `turn_for`, `meeting_skill` and the boxes'
+  `SkillPicker.parse` (`skillFor`) find every Skill; the menu just doesn't
+  list it. **An existing install** (`config::migrate_once` v7, a config
+  from v5 on — Skills came on 29 Oct, when configs were at v5) keeps the
+  six that were built in then: `keep_the_first_six` sets /risks, /coach
+  and /weekly-recap on (a switch already set stays; Yap keeps no count of
+  the Skills run, only a chat's own words say one ran, so it keeps all
+  six). An older config, and a new install, get the core six.
 - **The built-ins** (instructions short and firm, ≤ 600 characters, for the
   on-device 4B as for a cloud model; the citing is the run's lead, never the
   Skill's: `SKILL_MEETING_PROMPT` on one meeting, `SKILL_ACROSS_LEAD` and Ask
@@ -2058,18 +2047,20 @@ copyable. Yap's, in `chat/skills.rs`:
 
   | Command | Runs on | Reads across the meetings (`gather`) |
   |---|---|---|
+  | **Core** | | |
   | /followup-email | one meeting | — |
-  | /summary-for *who* | both | `latest`: the meeting the words name, else the latest (the words say who it's for) |
+  | /prep | across | `prep`: the next meeting on the calendar (or the one the words match) as passage 1, the earlier meetings with its people (the brief's "last time", `calendar/brief.rs` `gather`) and the user's and their open tasks |
+  | /standup | across | `standup`: your own words since the last working day began (Friday's on a Monday), your open tasks, the rest of today's calendar |
+  | /todos | across | `tasks` |
   | /decisions | both | a search |
+  | /summary-for *who* | both | `latest`: the meeting the words name, else the latest (the words say who it's for) |
+  | **More Skills** | | |
   | /decision-log | across | `decisions`: each meeting's decisions over the last 4 weeks (or the dates named), oldest first; a topic named: only those |
-  | /risks | both | a search |
   | /open-questions | both | `questions`: where questions were asked (and what came next), and the summaries' open questions, over the last 7 days or the meeting named |
+  | /risks | both | a search |
   | /tickets | both | `meeting`: the meeting named, else a search for the words, else the latest — **a Chat document** |
   | /prd | both | `meeting` — **a Chat document** (Problem, Goals, Requirements, Out of scope, Open questions) |
   | /coach | both | `you` |
-  | /todos | across | `tasks` |
-  | /standup | across | `standup`: your own words since the last working day began (Friday's on a Monday), your open tasks, the rest of today's calendar |
-  | /prep | across | `prep`: the next meeting on the calendar (or the one the words match) as passage 1, the earlier meetings with its people (the brief's "last time", `calendar/brief.rs` `gather`) and the user's and their open tasks |
   | /one-to-one *who* | across | `person`: the same for a one-to-one, with the person named or the next one-to-one's |
   | /weekly-recap | across | `week` |
   | /project-update *project* | across | `topic`: a search for the words, oldest first (needs them: `asks`) |
@@ -2152,42 +2143,83 @@ copyable. Yap's, in `chat/skills.rs`:
   checks, sources and pills are Ask across meetings' ([search.md](./search.md)).
   No model: the passages themselves (`passages_turn`, the Skill's own).
 - **The `/` menu** (`components/SkillMenu.svelte`, `stores/skills.svelte.js`
-  `SkillPicker(where)`, `core/skills.js`): in the notepad's Ask box and
-  the Notes view's Ask bar on a meeting note (`meeting`), Chat's composer
-  and the Meetings view's Ask bar (`meetings`): typing "/" at the start
-  lists the Skills that run there, the command typed so far first, Yap's
-  before yours (`matchSkills`); ↑ ↓, Enter runs the highlighted one, Tab
-  puts it in the box to add words, Esc closes it; the box's
-  `aria-activedescendant` follows the highlight. A sent "/command words"
-  runs it (`splitCommand`, `skillFor`); in Chat the question is saved as
-  typed.
-- **One-tap prompts**: the built-ins with a `chip` — **Coach me**, **List
-  my open to-dos**, **Write a weekly recap** — on Chat's empty thread
-  ("Try asking", then "Or type / for Skills…") and over the Meetings view's
-  Ask bar; a tap sends the Skill's `question` as that Skill (`runPrompt` /
-  `chatRequest {skill}`), an empty chat asked across the meetings from then
-  on. The Meetings view's cycling example questions stay, in its box.
-- **Settings → Assistant → Skills** (`settings/SkillsPage.svelte`): Yap's
-  (Open shows the instructions; **Save a copy** opens the form as yours,
-  "Based on Yap's /decisions", command `my-decisions`), then yours (Edit,
-  Delete behind Yap's confirm dialog), **New Skill** (the command follows
+  `SkillPicker(where)`, `core/skills.js` `skillMenu`): in the notepad's Ask
+  box and the Notes view's Ask bar on a meeting note (`meeting`), Chat's
+  composer and the Meetings view's Ask bar (`meetings`): typing "/" at the
+  start lists the Skills **shown** that run there — just "/", in two groups
+  under their headings, **Your Skills** then **Yap's Skills** (a role
+  `group` each, named by its heading); a command begun, one list without
+  headings, the command typed in full first, then the ones starting with
+  it, then the ones holding it, Yap's before yours (`matchSkills`), a
+  "Yours" tag on your own; the whole command of one off the menu typed,
+  no menu, so Enter sends it as typed (never your /deal-risks for /risks). A row: the `/command` in a column of its own,
+  then its line (`menuLine`: the description, else the name). ↑ ↓ (round
+  the ends), Enter runs the highlighted one, Tab puts it in the box to add
+  words, Esc closes it; the box's `aria-activedescendant` follows the
+  highlight, which the pointer takes only when it moves (a row scrolled
+  under a still pointer never takes it back). The foot: the keys, and
+  **More Skills**, which opens Settings → Skills there (`openMoreSkills`:
+  the main window's own `openSettings`, else `open_settings` and
+  `yap-open-settings`). In the paper look in the notepad, the main
+  window's (Settings' menus': `--yap-s2`, `--yap-s3` for the highlight)
+  elsewhere; light and dark from the tokens. A sent "/command words" runs
+  it (`splitCommand`, `skillFor`, shown or not); in Chat the question is
+  saved as typed. Chat's empty thread says "Or type / for Skills, like
+  /standup or /decisions."
+- **One-tap prompts** (`promptChips`): the first three of the built-ins
+  shown with a `chip` — **Prepare for my next meeting** (/prep, only with a
+  calendar connected: without one it could only ask which meeting), **Write
+  my stand-up**, **List my open to-dos**, **What did we decide?** (/decisions
+  on the last meeting) — on Chat's empty thread ("Try asking") and over the
+  Meetings view's Ask bar; a tap sends the Skill's `question` as that Skill
+  (`runPrompt` / `chatRequest {skill}`), an empty chat asked across the
+  meetings from then on. A prompt's Skill switched off takes the prompt
+  with it. (Coach me and Write a weekly recap were prompts until 31 Oct
+  2026; their Skills are in More Skills now.) The Meetings view's cycling
+  example questions stay, in its box.
+- **Settings → Assistant → Skills** (`settings/SkillsPage.svelte`,
+  `core/skills.js` `skillGroups`), three groups, each Skill a row — its
+  `/command` and name, its line, and on the right its **"Show in the /
+  menu"** switch (`Toggle`, "Show /prep in the / menu"; at once,
+  `setShown`; an error reads the list again as Rust has it — a full disk
+  keeps the switch and says so with Try again, `showSaveError`): **Your Skills** first (Edit,
+  Delete behind Yap's confirm dialog, **New Skill**: the command follows
   the name until you type one; why it can't be one said as you type; Runs
-  on: One meeting / Across meetings / Both). Saved at once to skills.json,
-  not through Settings' auto-saved config.
-- **Tests**: unit (`chat/skills.rs`: the built-ins — commands, lengths,
-  kinds, which write a document or ask —, save / copy / delete, an older
-  file, each gathering over a fictional team's meetings and calendar
+  on: One meeting / Across meetings / Both), **Yap's Skills** (the core
+  six) and **More Skills** (the other nine, "Switch one on to add it to the
+  / menu. Off, it still runs when you type its whole name, like
+  /tickets."). One of Yap's opens (Open) to where it runs (`whereItRuns`;
+  "In Chat, it writes its answer as a document beside the chat" for /tickets
+  and /prd), its instructions and **Save a copy** (the form as yours,
+  "Based on Yap's /decisions", command `my-decisions`). A row keeps its
+  group when switched: nothing jumps under the pointer. Saved at once to
+  skills.json, not through Settings' auto-saved config. The search finds
+  Your Skills, New Skill, Yap's Skills, More Skills and "Show in the /
+  menu".
+- **Tests**: unit (`chat/skills.rs`: the built-ins — commands, the core
+  first, lengths, one voice, kinds, which write a document or ask, the
+  prompts —, the menus' defaults and switches (yours on, a deleted Skill's
+  switch gone), a Skill off the menu still run by its whole command, the
+  first six kept, save / copy / delete, an older file and the `menu`
+  field, each gathering over a fictional team's meetings and calendar
   (`gather`, pure: a search left to `find`), what Yap asks first, every
-  Skill's request within an 8k model; `documents.rs` `name_citations`;
-  `search/ask.rs` the `about` line and a calendar passage;
-  `meeting_summary/chips.rs`: passages, checks), e2e `meeting-chips.spec.js`
-  (the menu, Enter / Tab / Esc, the built-ins and your own, Settings, Chat's
-  prompts and "/", the Meetings view) and `skills.spec.js` (the new ones in
-  each menu, /open-questions on a meeting, /decision-log and /prd in Chat
-  — the document, its citations named —, /project-update asking, Settings'
-  list and a copy); prompts measured with `yap.exe eval --chips` and the
-  `skills` scenarios (`--tag skills`, a turn's `skill`)
-  ([model-evals.md](../model-evals.md#more-skills-31-oct-2026)).
+  Skill's request within an 8k model; `config.rs`: v7 keeps the six for a
+  config from v5 on, not for an older one or a new install, and never
+  again once saved; `documents.rs` `name_citations`; `search/ask.rs` the
+  `about` line and a calendar passage; `meeting_summary/chips.rs`:
+  passages, checks), e2e `meeting-chips.spec.js` (the menu, Enter / Tab /
+  Esc, the core and your own, one off the menu typed in full, Settings,
+  Chat's prompts and "/", the Meetings view), `skills.spec.js` (a new
+  install: the core six in each menu, ↑ ↓ and the box's
+  `aria-activedescendant`, /open-questions on a meeting and /decision-log
+  in Chat typed in full, /prd and /tickets in Chat — the document, its
+  citations named —, a switch putting /project-update in the menu and
+  taking it out, More Skills opening Settings, your own copy first in the
+  menu and its switch, screenshots light and dark of the menu and
+  Settings → Skills) and `skills-existing.spec.js` (a v6 config and one of
+  its own Skills: the six kept, their switches on); prompts measured with
+  `yap.exe eval --chips` and the `skills` scenarios (`--tag skills`, a
+  turn's `skill`) ([model-evals.md](../model-evals.md#more-skills-31-oct-2026)).
 
 ## The context ring (2026-10-25)
 

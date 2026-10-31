@@ -537,13 +537,27 @@
   `noteDomains` (its notes went) and keeps the rest.
 - Skills: `%APPDATA%/yap/skills.json` (2026-10-29) — the person's own Skills
   (`{skills: [{id, name, command, description, instructions, runsOn,
-  basedOn, createdMs, updatedMs}]}`, ≤ 50; Yap's own are in code, never
-  stored) (`chat/skills.rs`, through `saving.rs` as "your Skills"; a file
-  that doesn't read is set aside). A file of its own rather than notes.json's
-  actions: an older Yap never opens it (it has no Skills), so nothing it
-  saves can drop or turn a Skill into an action. Reset app keeps it (setup,
-  like folders and actions: `privacy/reset.rs` STAYS); Download your data
-  includes it (`skills.json` in the zip).
+  basedOn, createdMs, updatedMs}], menu: {<skill id>: bool}}`, ≤ 50; Yap's
+  own are in code, never stored) (`chat/skills.rs`, through `saving.rs` as
+  "your Skills"; a file that doesn't read is set aside). **`menu`**
+  (2026-10-31): Settings → Skills' "Show in the / menu" switches, by Skill
+  id (`builtin:tickets`, `s1730…`) — only the ones set; a Skill not there
+  is as Yap has it: the core six (/followup-email, /prep, /standup, /todos,
+  /decisions, /summary-for) and the person's own in the `/` menus and the
+  one-tap prompts, the other nine not. Written at once by `skill_show` (not
+  Settings' auto-saved config); a deleted Skill's switch goes with it.
+  **`migrate_once` v7** (an existing config from v5 on, which may have run
+  a Yap with Skills) puts `builtin:risks`, `builtin:coach` and
+  `builtin:weekly-recap` there as `true`, so an install keeps the six that
+  were built in before the core six (Yap keeps no count of the Skills run);
+  an older config and a new install get the core six. An older Yap's save
+  of skills.json (only a Skill saved or deleted there) drops `menu`: the
+  menus are Yap's defaults again, nothing else lost. A file of its own
+  rather than notes.json's actions: a Yap from before Skills never opens
+  it, so nothing it saves can drop or turn a Skill into an action.
+  Reset app keeps it, switches and all (setup, like folders and actions:
+  `privacy/reset.rs` STAYS); Download your data includes it (`skills.json`
+  in the zip).
 - Note versions: `%APPDATA%/yap/note-versions/<note id>.json` — each note's
   version history (2026-10-29, `notes/versions.rs`): `{note, created, next,
   versions: [{n, field: "notes" | "summary", kind, label?, from?, turn?,

@@ -1,13 +1,17 @@
 <script>
   // Settings → Skills (chat/skills.rs; Wispr Flow's Skills): saved
   // instructions run by typing /name — in a meeting's Ask box on that
-  // meeting, or in Chat and Ask across meetings on the meetings. Yap's own
-  // first (open one to read its instructions; Save a copy makes it yours to
-  // change), then the person's own: made here (name, /command, a line on
-  // what it's for, the instructions, where it runs), changed in place,
-  // deleted behind Yap's confirm dialog. Saved in skills.json at once (not
-  // Settings' auto-saved config); every window's "/" menu follows
-  // (`yap-skills-changed`).
+  // meeting, or in Chat and Ask across meetings on the meetings. Three
+  // groups, each Skill with its "Show in the / menu" switch:
+  // - Your Skills: made here (name, /command, a line on what it's for, the
+  //   instructions, where it runs), changed in place, deleted behind Yap's
+  //   confirm dialog; in the menus unless switched off.
+  // - Yap's Skills: the core six, in the menus from the start.
+  // - More Skills: the other nine, off until switched on.
+  // Open one of Yap's to read its instructions; Save a copy makes it yours
+  // to change. A Skill switched off still runs when its whole command is
+  // typed. Saved in skills.json at once (not Settings' auto-saved config);
+  // every window's "/" menu follows (`yap-skills-changed`).
   import { tick } from 'svelte';
   import { invoke } from '@tauri-apps/api/core';
   import Group from '../ui/Group.svelte';
@@ -15,11 +19,12 @@
   import Textarea from '../ui/Textarea.svelte';
   import Button from '../ui/Button.svelte';
   import Segmented from '../ui/Segmented.svelte';
+  import Toggle from '../ui/Toggle.svelte';
   import ConfirmDialog from '../ui/ConfirmDialog.svelte';
   import { toast } from '../ui/toast.svelte.js';
   import { showSaveError } from '../notices/saveErrors.js';
-  import { skills, initSkills, refreshSkills } from '../stores/skills.svelte.js';
-  import { commandFromName, commandProblem, runsOnLabel, writesDocument } from '../core/skills.js';
+  import { skills, initSkills, refreshSkills, setShown } from '../stores/skills.svelte.js';
+  import { commandFromName, commandProblem, writesDocument, skillGroups, whereItRuns } from '../core/skills.js';
 
   initSkills();
 
@@ -30,10 +35,9 @@
     { value: 'both', label: 'Both' },
   ];
 
-  const builtins = $derived(skills.list.filter((s) => s.builtin));
-  const mine = $derived(skills.list.filter((s) => !s.builtin));
+  const groups = $derived(skillGroups(skills.list));
 
-  // A built-in opened to read its instructions.
+  // One of Yap's opened to read its instructions.
   let reading = $state(null);
   // The form: { id: an own Skill's id | null (new), basedOn, name, command,
   // description, instructions, runsOn, commandTouched }; null: none.
@@ -65,6 +69,7 @@
       commandTouched: !!base,
     };
     await tick();
+    formEl?.scrollIntoView({ block: 'nearest' });
     formEl?.querySelector('input')?.focus();
   }
   function closeForm() {
@@ -108,6 +113,15 @@
     }
   }
 
+  // "Show in the / menu": at once, saved behind it.
+  async function show(s, on) {
+    try {
+      await setShown(s.id, on);
+    } catch (e) {
+      if (!showSaveError(e)) toast({ title: `Couldn't change /${s.command}`, description: String(e), variant: 'destructive' });
+    }
+  }
+
   function askDelete(s) {
     deleting = s;
     confirmOpen = true;
@@ -142,56 +156,82 @@
   </p>
 </div>
 
-<Group title="Yap's Skills" desc="Open one to read its instructions. Save a copy to make it your own and change it." id="settings-skills-builtin">
-  <div class="list" data-setting="skills-builtin">
-    {#each builtins as s (s.id)}
-      <div class="skill" data-skill={s.command}>
-        <div class="lhs">
-          <span class="name"><span class="cmd">/{s.command}</span> {s.name}</span>
-          <span class="line">{s.description} · {runsOnLabel(s.runsOn)}{writesDocument(s) ? ' · a document in Chat' : ''}</span>
-          {#if reading === s.id}
-            <p class="instr" aria-label={`Instructions of /${s.command}`}>{s.instructions}</p>
-          {/if}
-        </div>
-        <div class="rhs">
-          <Button variant="secondary" size="sm" onclick={() => (reading = reading === s.id ? null : s.id)}>{reading === s.id ? 'Close' : 'Open'}</Button>
+<!-- A Skill's "Show in the / menu" switch. -->
+{#snippet menuSwitch(s)}
+  <span class="sw" title="Show in the / menu">
+    <Toggle checked={s.shown} ariaLabel={`Show /${s.command} in the / menu`} onchange={(on) => show(s, on)} />
+  </span>
+{/snippet}
+
+<!-- One of Yap's: what it does, Open for its instructions, its switch. -->
+{#snippet yaps(s)}
+  <div class="skill" class:open={reading === s.id} class:off={!s.shown} data-skill={s.command}>
+    <div class="lhs">
+      <span class="title"><span class="cmd">/{s.command}</span><span class="name">{s.name}</span></span>
+      <span class="line">{s.description}</span>
+    </div>
+    <div class="rhs">
+      <Button variant="ghost" size="sm" onclick={() => (reading = reading === s.id ? null : s.id)}>{reading === s.id ? 'Close' : 'Open'}</Button>
+      {@render menuSwitch(s)}
+    </div>
+    {#if reading === s.id}
+      <div class="detail">
+        <p class="where">{whereItRuns(s.runsOn)}{writesDocument(s) ? ' In Chat, it writes its answer as a document beside the chat.' : ''}</p>
+        <p class="instr" aria-label={`Instructions of /${s.command}`}>{s.instructions}</p>
+        <div class="dfoot">
+          <span class="dnote">Make it your own and change what it does.</span>
           <Button variant="secondary" size="sm" onclick={() => openForm(s, true)}>Save a copy</Button>
         </div>
       </div>
-    {/each}
+    {/if}
   </div>
-</Group>
+{/snippet}
 
-<Group title="Your Skills" id="settings-skills-yours">
+<Group title="Your Skills" desc="Your own instructions, in the / menu wherever they run." id="settings-skills-yours" bare>
   <div class="list" data-setting="skills-yours">
-    {#each mine as s (s.id)}
+    {#each groups.mine as s (s.id)}
       {#if draft?.id === s.id}
         {@render form()}
       {:else}
-        <div class="skill" data-skill={s.command}>
+        <div class="skill" class:off={!s.shown} data-skill={s.command}>
           <div class="lhs">
-            <span class="name"><span class="cmd">/{s.command}</span> {s.name}</span>
-            <span class="line">{s.description || s.instructions} · {runsOnLabel(s.runsOn)}</span>
+            <span class="title"><span class="cmd">/{s.command}</span><span class="name">{s.name}</span></span>
+            <span class="line clip">{s.description || s.instructions}</span>
           </div>
           <div class="rhs">
-            <Button variant="secondary" size="sm" onclick={() => openForm(s)}>Edit</Button>
+            <Button variant="ghost" size="sm" onclick={() => openForm(s)}>Edit</Button>
             <button class="tool del" title="Delete" aria-label={`Delete /${s.command}`} onclick={() => askDelete(s)}>
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 7h14M10 7V5h4v2M7 7l1 12h8l1-12" /></svg>
             </button>
+            {@render menuSwitch(s)}
           </div>
         </div>
       {/if}
     {:else}
-      {#if !draft}<p class="empty">Skills you make show up here.</p>{/if}
+      {#if !draft}<p class="empty">Skills you make show up here: your own instructions, run with a /command.</p>{/if}
     {/each}
     {#if draft && draft.id == null}
       {@render form()}
     {:else if !draft}
-      <button class="add" data-setting="skills-add" onclick={() => openForm()}>
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg>
-        New Skill
-      </button>
+      <div class="addrow">
+        <button class="add" data-setting="skills-add" onclick={() => openForm()}>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg>
+          New Skill
+        </button>
+      </div>
     {/if}
+  </div>
+</Group>
+
+<Group title="Yap's Skills" desc="In the / menu from the start. Open one to read its instructions, or save a copy to change it." id="settings-skills-builtin" bare>
+  <div class="list" data-setting="skills-builtin">
+    {#each groups.yaps as s (s.id)}{@render yaps(s)}{/each}
+  </div>
+</Group>
+
+<Group title="More Skills" desc="Switch one on to add it to the / menu. Off, it still runs when you type its whole name, like /tickets." id="settings-skills-more" bare>
+  <div class="list" data-setting="skills-more">
+    {#each groups.more as s (s.id)}{@render yaps(s)}{/each}
   </div>
 </Group>
 
@@ -214,7 +254,7 @@
     </label>
     <label class="field">
       <span>What it's for <em>(optional)</em></span>
-      <Input bind:value={draft.description} placeholder="One line on what it gives you" maxlength={160} ariaLabel="Skill description" />
+      <Input bind:value={draft.description} placeholder="One line on what it does, shown in the / menu" maxlength={160} ariaLabel="Skill description" />
     </label>
     <label class="field">
       <span>Instructions</span>
@@ -229,13 +269,7 @@
     <div class="field">
       <span>Runs on</span>
       <Segmented bind:value={draft.runsOn} options={RUNS_ON} label="Runs on" />
-      <p class="hint">
-        {draft.runsOn === 'meeting'
-          ? "In a meeting's Ask box, on that meeting."
-          : draft.runsOn === 'meetings'
-            ? 'In Chat and Ask across meetings, on all your meetings.'
-            : "In a meeting's Ask box, and in Chat across your meetings."}
-      </p>
+      <p class="hint">{whereItRuns(draft.runsOn)}</p>
     </div>
     {#if problem}<p class="problem" role="status">{problem}</p>{/if}
     <div class="actions">
@@ -257,51 +291,102 @@
   .list {
     display: flex;
     flex-direction: column;
+    border-top: 1px solid var(--yap-rule);
   }
   .skill {
     display: grid;
     grid-template-columns: minmax(0, 1fr) auto;
     align-items: center;
     column-gap: 20px;
-    padding: 12px 0;
+    min-height: 58px;
+    box-sizing: border-box;
+    padding: 11px 0;
     border-bottom: 1px solid var(--yap-rule);
   }
   .lhs {
     display: flex;
     flex-direction: column;
-    gap: 2px;
+    gap: 3px;
     min-width: 0;
   }
-  .name {
+  .title {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    min-width: 0;
     font-size: 13.5px;
-    font-weight: 560;
-    color: var(--yap-fg);
+    line-height: 1.4;
   }
   .cmd {
+    flex: 0 0 auto;
     font-weight: 680;
+    color: var(--yap-fg);
+  }
+  .name {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-weight: 500;
+    color: var(--yap-fg-62);
   }
   .line {
     font-size: 12.5px;
     line-height: 1.45;
     color: var(--yap-muted);
+  }
+  .line.clip {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
   }
-  .instr {
-    margin: 6px 0 0;
-    padding: 8px 10px;
-    border-radius: var(--yap-r);
-    background: var(--yap-s1);
-    font-size: 12.5px;
-    line-height: 1.5;
+  /* Off the menu: quieter, never greyed out (it still runs typed in full). */
+  .skill.off .cmd {
     color: var(--yap-fg-80);
-    white-space: pre-wrap;
   }
   .rhs {
     display: flex;
     align-items: center;
     gap: 6px;
+  }
+  .sw {
+    display: inline-flex;
+    margin-left: 6px;
+  }
+  .detail {
+    grid-column: 1 / -1;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-top: 10px;
+    padding: 12px 14px;
+    border-radius: var(--yap-r-lg);
+    background: var(--yap-s2);
+    border: 1px solid var(--yap-border-subtle);
+  }
+  .where {
+    margin: 0;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--yap-fg-80);
+  }
+  .instr {
+    margin: 0;
+    font-size: 12.5px;
+    line-height: 1.55;
+    color: var(--yap-fg-80);
+    white-space: pre-wrap;
+  }
+  .dfoot {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-top: 2px;
+  }
+  .dnote {
+    font-size: 12px;
+    color: var(--yap-muted);
   }
   .tool {
     display: inline-flex;
@@ -330,16 +415,19 @@
     box-shadow: var(--yap-focus);
   }
   .empty {
-    margin: 10px 0 0;
+    margin: 0;
+    padding: 14px 0 2px;
     font-size: 12.5px;
+    line-height: 1.5;
     color: var(--yap-muted);
   }
+  .addrow {
+    padding: 12px 0 2px;
+  }
   .add {
-    align-self: flex-start;
     display: inline-flex;
     align-items: center;
     gap: 6px;
-    margin-top: 10px;
     height: 30px;
     padding: 0 12px 0 9px;
     border: 1px solid var(--yap-border);
@@ -364,7 +452,7 @@
     display: flex;
     flex-direction: column;
     gap: 10px;
-    margin: 10px 0;
+    margin: 12px 0;
     padding: 14px;
     border: 1px solid var(--yap-border);
     border-radius: var(--yap-r-lg);
@@ -410,10 +498,14 @@
     justify-content: flex-end;
     gap: 8px;
   }
-  @media (max-width: 720px) {
-    .skill {
-      grid-template-columns: minmax(0, 1fr);
-      row-gap: 8px;
+  @media (max-width: 560px) {
+    .title {
+      flex-wrap: wrap;
+      row-gap: 0;
+    }
+    .dfoot {
+      flex-direction: column;
+      align-items: flex-start;
     }
   }
 </style>

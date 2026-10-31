@@ -6,20 +6,31 @@
 //! meetings, its passages found for the Skill — [`find`]). Every answer
 //! cites the passages it comes from, as Ask across meetings' do.
 //!
-//! - **Built in** ([`builtins`]): /followup-email, /decisions, /risks,
-//!   /coach, /todos, /weekly-recap, and since 31 Oct 2026 /summary-for,
-//!   /decision-log, /open-questions, /tickets, /prd, /standup, /prep,
-//!   /one-to-one, /project-update — in code, never stored; each can be
-//!   copied as the person's own and changed (`basedOn`). Three are Chat's
-//!   and Ask across meetings' one-tap prompts too (`chip`): Coach me, List
-//!   my open to-dos, Write a weekly recap. Each reads its own passages
-//!   across the meetings ([`find`], `gather`); /tickets and /prd run in
-//!   Chat write a Chat document ([`document_note`]); one with nothing to
-//!   run on is asked for it by Yap, no model called ([`ask_first`]).
+//! - **Built in** ([`builtins`]): 15, in code, never stored; each can be
+//!   copied as the person's own and changed (`basedOn`). **The core six**
+//!   ([`CORE`]: /followup-email, /prep, /standup, /todos, /decisions,
+//!   /summary-for) are in the `/` menus from the start; **the other nine**
+//!   (/decision-log, /open-questions, /risks, /tickets, /prd, /coach,
+//!   /one-to-one, /weekly-recap, /project-update) wait in Settings → Skills'
+//!   More Skills, one switch away (31 Oct 2026: fifteen made the menu long).
+//!   Four of the core are Chat's and Ask across meetings' one-tap prompts
+//!   too (`chip`: Prepare for my next meeting, Write my stand-up, List my
+//!   open to-dos, What did we decide?). Each reads its own passages across
+//!   the meetings ([`find`], `gather`); /tickets and /prd run in Chat write
+//!   a Chat document ([`document_note`]); one with nothing to run on is
+//!   asked for it by Yap, no model called ([`ask_first`]).
 //! - **Your own** (Settings → Skills): a name, a `/command` (lowercase
 //!   letters and digits, single hyphens; not a built-in's, not another of
 //!   yours), a line on what it's for, the instructions, and where it runs
-//!   (one meeting, across meetings, or both).
+//!   (one meeting, across meetings, or both). In the menus unless switched
+//!   off.
+//! - **Shown or not** ([`listed`], [`set_shown`]): the person's switches
+//!   ("Show in the / menu") in skills.json's `menu`, by Skill id; a Skill
+//!   with none is as Yap has it ([`shown_by_default`]). Only the `/` menus
+//!   and the one-tap prompts follow them: a Skill switched off still runs
+//!   when its whole command is typed (`/tickets`), as [`by_command`] finds
+//!   every Skill. An install from before the core six keeps the six that
+//!   were built in then ([`keep_the_first_six`], `config::migrate_once` v7).
 //!
 //! **Not the Actions engine** (`notes.rs` `Action`): an action rewrites the
 //! note's summary (`note_enhance` → `write_summary`, under the note
@@ -180,66 +191,39 @@ const PREP_NOTHING_COMING: &str = "There's no meeting coming up on your calendar
 /// …or no calendar connected.
 const PREP_NO_CALENDAR: &str = "Yap can't see your calendar, so name the meeting after the command, like /prep supplier call. (Connect your calendar in Settings → Connectors, and /prep finds the next one itself.)";
 
-/// Yap's own Skills, in the order the `/` menu lists them.
+/// **The core six**: the built-ins in the `/` menus and the one-tap prompts
+/// from the start (the maintainer, 31 Oct 2026: fifteen was too many to
+/// look through). The other nine are one switch away in Settings → Skills.
+pub const CORE: [&str; 6] = ["followup-email", "prep", "standup", "todos", "decisions", "summary-for"];
+
+/// The built-ins an install had before the core six (29 Oct 2026): the
+/// ones beyond the core it keeps in its menus ([`keep_the_first_six`]).
+const FIRST_SIX_BEYOND_CORE: [&str; 3] = ["risks", "coach", "weekly-recap"];
+
+/// Yap's own Skills, in the order the `/` menu and Settings list them: the
+/// core six first, then the nine in More Skills. Each description is one
+/// short line in the same voice — what it does, starting with a verb.
 pub fn builtins() -> Vec<Skill> {
     vec![
+        // ---- The core six ----
         builtin(
             "followup-email",
             "Follow-up email",
-            "A recap to send the attendees",
+            "Draft a follow-up email to the attendees",
             RunsOn::Meeting,
             "Write the follow-up email to send the other attendees. Start with a \"Subject: \" line, then a short greeting, one or two sentences on what the meeting covered, the decisions made, and who does what next (a deadline only when one was said). Sign off with \"[Your name]\". Keep it under 200 words.",
         ),
         Skill {
-            gather: "latest".into(),
-            ..builtin("summary-for", "Summary for someone", "A catch-up for someone who wasn't there", RunsOn::Both, SUMMARY_FOR)
-        },
-        builtin(
-            "decisions",
-            "Decisions",
-            "Every decision, who made it and why",
-            RunsOn::Both,
-            "List every decision that was made, one \"- \" bullet each: the decision, who made or agreed it, and why when a reason was given. Leave out anything that was only discussed. If nothing was decided, say so.",
-        ),
-        Skill {
-            gather: "decisions".into(),
-            query: "the last 4 weeks".into(),
-            ..builtin("decision-log", "Decision log", "Decisions across meetings, with dates and why", RunsOn::Meetings, DECISION_LOG)
-        },
-        builtin(
-            "risks",
-            "Risks",
-            "Risks, blockers and open questions",
-            RunsOn::Both,
-            "List the risks, blockers and open questions that came up, one \"- \" bullet each, the most serious first: what it is, who raised it, and what was agreed about it, if anything. Leave out anything that was settled.",
-        ),
-        Skill {
-            gather: "questions".into(),
-            query: "the last 7 days".into(),
-            ..builtin("open-questions", "Open questions", "What was asked and never answered", RunsOn::Both, OPEN_QUESTIONS)
+            gather: "prep".into(),
+            chip: "Prepare for my next meeting".into(),
+            question: "Prepare me for my next meeting.".into(),
+            ..builtin("prep", "Prepare me", "Get ready for your next meeting", RunsOn::Meetings, PREP)
         },
         Skill {
-            gather: "meeting".into(),
-            document: "one section, \"Tickets\", each ticket a \"### \" heading in it".into(),
-            ..builtin("tickets", "Draft tickets", "Tickets drafted from the work agreed", RunsOn::Both, TICKETS)
-        },
-        Skill {
-            gather: "meeting".into(),
-            document: "the sections Problem, Goals, Requirements, Out of scope and Open questions".into(),
-            ..builtin("prd", "Product requirements", "A short requirements draft from a discussion", RunsOn::Both, PRD)
-        },
-        Skill {
-            gather: "you".into(),
-            query: "my last meeting".into(),
-            chip: "Coach me".into(),
-            question: "Coach me on my last meeting: how did I come across, and what could I do better?".into(),
-            ..builtin(
-                "coach",
-                "Coach me",
-                "How you came across, and what to do better",
-                RunsOn::Both,
-                "Coach the user (\"You\") on how they came across in the meeting: two or three things they did well, then two or three specific things to do better next time (for example a vague ask, a decision left without an owner, talking over someone, a question they could have asked). Tie each point to a moment. Be kind, specific and brief.",
-            )
+            gather: "standup".into(),
+            chip: "Write my stand-up".into(),
+            question: "Write my stand-up update.".into(),
+            ..builtin("standup", "Stand-up", "Write your stand-up: done, next and blockers", RunsOn::Meetings, STANDUP)
         },
         Skill {
             gather: "tasks".into(),
@@ -248,23 +232,73 @@ pub fn builtins() -> Vec<Skill> {
             ..builtin(
                 "todos",
                 "My open to-dos",
-                "Your open tasks from every meeting",
+                "List your open tasks from every meeting",
                 RunsOn::Meetings,
                 "List the user's open to-dos, grouped by meeting, newest first: each task with its deadline when there is one. Then, under \"Nobody took these on\", any open tasks without an owner. Leave out tasks that are done or belong to someone else.",
             )
         },
-        Skill { gather: "standup".into(), ..builtin("standup", "Stand-up", "Your yesterday, today and blockers", RunsOn::Meetings, STANDUP) },
-        Skill { gather: "prep".into(), ..builtin("prep", "Prepare me", "Get ready for your next meeting", RunsOn::Meetings, PREP) },
-        Skill { gather: "person".into(), ..builtin("one-to-one", "One-to-one", "Talking points for a one-to-one", RunsOn::Meetings, ONE_TO_ONE) },
+        Skill {
+            chip: "What did we decide?".into(),
+            question: "What did we decide in my last meeting?".into(),
+            ..builtin(
+                "decisions",
+                "Decisions",
+                "List each decision, who made it and why",
+                RunsOn::Both,
+                "List every decision that was made, one \"- \" bullet each: the decision, who made or agreed it, and why when a reason was given. Leave out anything that was only discussed. If nothing was decided, say so.",
+            )
+        },
+        Skill {
+            gather: "latest".into(),
+            ..builtin("summary-for", "Summary for someone", "Sum up a meeting for someone who missed it", RunsOn::Both, SUMMARY_FOR)
+        },
+        // ---- More Skills: off until switched on ----
+        Skill {
+            gather: "decisions".into(),
+            query: "the last 4 weeks".into(),
+            ..builtin("decision-log", "Decision log", "Log decisions across meetings, with dates", RunsOn::Meetings, DECISION_LOG)
+        },
+        Skill {
+            gather: "questions".into(),
+            query: "the last 7 days".into(),
+            ..builtin("open-questions", "Open questions", "Find the questions nobody answered", RunsOn::Both, OPEN_QUESTIONS)
+        },
+        builtin(
+            "risks",
+            "Risks",
+            "List the risks and blockers that came up",
+            RunsOn::Both,
+            "List the risks, blockers and open questions that came up, one \"- \" bullet each, the most serious first: what it is, who raised it, and what was agreed about it, if anything. Leave out anything that was settled.",
+        ),
+        Skill {
+            gather: "meeting".into(),
+            document: "one section, \"Tickets\", each ticket a \"### \" heading in it".into(),
+            ..builtin("tickets", "Draft tickets", "Draft tickets for the work agreed", RunsOn::Both, TICKETS)
+        },
+        Skill {
+            gather: "meeting".into(),
+            document: "the sections Problem, Goals, Requirements, Out of scope and Open questions".into(),
+            ..builtin("prd", "Product requirements", "Draft product requirements from a discussion", RunsOn::Both, PRD)
+        },
+        Skill {
+            gather: "you".into(),
+            query: "my last meeting".into(),
+            ..builtin(
+                "coach",
+                "Coach me",
+                "See how you came across, and what to improve",
+                RunsOn::Both,
+                "Coach the user (\"You\") on how they came across in the meeting: two or three things they did well, then two or three specific things to do better next time (for example a vague ask, a decision left without an owner, talking over someone, a question they could have asked). Tie each point to a moment. Be kind, specific and brief.",
+            )
+        },
+        Skill { gather: "person".into(), ..builtin("one-to-one", "One-to-one", "Prepare talking points for a one-to-one", RunsOn::Meetings, ONE_TO_ONE) },
         Skill {
             gather: "week".into(),
             query: "this week".into(),
-            chip: "Write a weekly recap".into(),
-            question: "Write a recap of this week's meetings.".into(),
             ..builtin(
                 "weekly-recap",
                 "Weekly recap",
-                "The week's meetings in one recap",
+                "Recap the week's meetings in one place",
                 RunsOn::Meetings,
                 "Write a recap of the week's meetings: for each meeting, in the order they happened, its name and day, a line on what it was about, then its decisions and next steps as \"- \" bullets. End with the user's (\"You\") open to-dos. Keep it under 300 words.",
             )
@@ -272,17 +306,54 @@ pub fn builtins() -> Vec<Skill> {
         Skill {
             gather: "topic".into(),
             asks: "Which project? Add its name after the command, like /project-update website relaunch.".into(),
-            ..builtin("project-update", "Project update", "Where a project stands, from your meetings", RunsOn::Meetings, PROJECT_UPDATE)
+            ..builtin("project-update", "Project update", "Write a status update on a project", RunsOn::Meetings, PROJECT_UPDATE)
         },
     ]
 }
 
-/// What skills.json holds: the person's own Skills.
+/// What skills.json holds: the person's own Skills, and the `/` menu's
+/// switches.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SkillStore {
     #[serde(default)]
     pub skills: Vec<Skill>,
+    /// "Show in the / menu" as the person set it (and the six an older
+    /// install kept), by Skill id ("builtin:tickets", "s1730…"): one not
+    /// here is as Yap has it ([`shown_by_default`]). An older Yap's save
+    /// drops it (only a Skill saved or deleted there): the menus are then
+    /// Yap's defaults again, nothing lost but the switches.
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub menu: std::collections::BTreeMap<String, bool>,
+}
+
+/// A Skill as every window lists it (`skills_list`): the Skill, whether
+/// it's in the `/` menus and one-tap prompts now, and whether it's one of
+/// the core six (Settings' "Yap's Skills"; the rest of Yap's are "More
+/// Skills").
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Listed {
+    #[serde(flatten)]
+    pub skill: Skill,
+    pub shown: bool,
+    pub core: bool,
+}
+
+/// A core Skill (one of [`CORE`]).
+pub fn is_core(s: &Skill) -> bool {
+    s.builtin && CORE.contains(&s.command.as_str())
+}
+
+/// In the `/` menus before the person says otherwise: the core six and
+/// their own Skills.
+pub fn shown_by_default(s: &Skill) -> bool {
+    !s.builtin || is_core(s)
+}
+
+/// Whether `s` is in the menus, given the person's switches. Pure.
+fn shown_in(s: &Skill, menu: &std::collections::BTreeMap<String, bool>) -> bool {
+    menu.get(&s.id).copied().unwrap_or_else(|| shown_by_default(s))
 }
 
 /// skills.json's saves.
@@ -350,6 +421,50 @@ pub fn all() -> Vec<Skill> {
 /// The person's own Skills, as skills.json holds them (Download your data).
 pub fn own() -> SkillStore {
     with_store(|s| s.clone())
+}
+
+/// Every Skill as the windows list it ([`all`]'s order): whether each is in
+/// the `/` menus and one-tap prompts, and which are the core six.
+pub fn listed() -> Vec<Listed> {
+    let menu = with_store(|s| s.menu.clone());
+    all()
+        .into_iter()
+        .map(|skill| Listed { shown: shown_in(&skill, &menu), core: is_core(&skill), skill })
+        .collect()
+}
+
+/// "Show in the / menu" switched for the Skill `id` (a built-in's or one of
+/// the person's). Only the menus and the one-tap prompts follow it: typed
+/// in full, a Skill runs either way.
+pub fn set_shown(id: &str, shown: bool) -> Result<(), String> {
+    let builtin = builtins().iter().any(|b| b.id == id);
+    with_store(|st| {
+        if !builtin && !st.skills.iter().any(|k| k.id == id) {
+            return Err("That Skill isn't there any more".to_string());
+        }
+        st.menu.insert(id.to_string(), shown);
+        save(st);
+        Ok(())
+    })
+}
+
+/// **An install from before the core six** (`config::migrate_once` v7, on
+/// a config from 25 Oct 2026 or later: Skills came on the 29th) keeps the
+/// six Skills that were built in then in its menus — /risks, /coach and
+/// /weekly-recap with the core's three. Yap keeps no count of the Skills
+/// run (only a chat's own words say one ran), so it keeps them all. A
+/// switch the person already set stays as it is.
+pub fn keep_the_first_six() {
+    with_store(|st| {
+        let before = st.menu.len();
+        for c in FIRST_SIX_BEYOND_CORE {
+            st.menu.entry(format!("builtin:{c}")).or_insert(true);
+        }
+        if st.menu.len() != before {
+            save(st);
+        }
+    });
+    tracing::info!("Skills: an earlier install keeps the six it had in the / menu");
 }
 
 /// The Skill run with `/command` (any case; with or without its slash).
@@ -451,6 +566,7 @@ pub fn delete_skill(id: &str) -> Result<(), String> {
         if st.skills.len() == before {
             return Err("That Skill isn't there any more".to_string());
         }
+        st.menu.remove(id);
         save(st);
         Ok(())
     })
@@ -1462,10 +1578,23 @@ fn now_ms() -> u64 {
     std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0)
 }
 
-/// Every Skill: Yap's own, then the person's.
+/// Every Skill: Yap's own, then the person's — each with whether it's in
+/// the `/` menus (`shown`) and one of the core six (`core`).
 #[tauri::command]
-pub fn skills_list() -> Vec<Skill> {
-    all()
+pub fn skills_list() -> Vec<Listed> {
+    listed()
+}
+
+/// Settings → Skills' "Show in the / menu"; every window's menus follow
+/// (`yap-skills-changed`).
+#[tauri::command]
+pub fn skill_show(app: tauri::AppHandle, id: String, shown: bool) -> Result<(), String> {
+    use tauri::Emitter;
+    set_shown(&id, shown)?;
+    tracing::info!(id = %id, shown, "Skill shown in the / menu or not");
+    let _ = app.emit("yap-skills-changed", ());
+    SAVER.check().map_err(|e| e.to_string())?;
+    Ok(())
 }
 
 /// Save one of the person's Skills (new, a built-in's copy, or a change);
@@ -1501,29 +1630,38 @@ mod tests {
     }
 
     #[test]
-    fn the_builtins_have_good_commands_and_three_are_one_tap_prompts() {
+    fn the_builtins_have_good_commands_and_four_of_the_core_are_one_tap_prompts() {
         let b = builtins();
         let commands: Vec<&str> = b.iter().map(|s| s.command.as_str()).collect();
+        // The core six first, then More Skills.
         assert_eq!(
             commands,
             [
                 "followup-email",
-                "summary-for",
+                "prep",
+                "standup",
+                "todos",
                 "decisions",
+                "summary-for",
                 "decision-log",
-                "risks",
                 "open-questions",
+                "risks",
                 "tickets",
                 "prd",
                 "coach",
-                "todos",
-                "standup",
-                "prep",
                 "one-to-one",
                 "weekly-recap",
                 "project-update"
             ]
         );
+        assert_eq!(commands[..6], CORE);
+        // One line each in one voice: what it does, starting with a verb.
+        const VERBS: [&str; 10] = ["Draft", "Get", "Write", "List", "Sum", "Log", "Find", "See", "Prepare", "Recap"];
+        for s in &b {
+            let first = s.description.split_whitespace().next().unwrap_or("");
+            assert!(VERBS.contains(&first), "/{}: {}", s.command, s.description);
+            assert!(!s.description.ends_with('.'), "/{}", s.command);
+        }
         const KINDS: [&str; 12] = ["", "tasks", "you", "week", "latest", "meeting", "decisions", "questions", "topic", "standup", "prep", "person"];
         for s in &b {
             assert!(s.builtin && s.id == format!("builtin:{}", s.command));
@@ -1547,10 +1685,11 @@ mod tests {
         assert_eq!(asks, ["project-update"]);
         // On one meeting (its Ask box): these eight.
         let on_one: Vec<&str> = b.iter().filter(|s| s.runs_on.on_one()).map(|s| s.command.as_str()).collect();
-        assert_eq!(on_one, ["followup-email", "summary-for", "decisions", "risks", "open-questions", "tickets", "prd", "coach"]);
+        assert_eq!(on_one, ["followup-email", "decisions", "summary-for", "open-questions", "risks", "tickets", "prd", "coach"]);
+        // The one-tap prompts: four of the core, each run across the meetings.
         let chips: Vec<&str> = b.iter().filter(|s| !s.chip.is_empty()).map(|s| s.chip.as_str()).collect();
-        assert_eq!(chips, ["Coach me", "List my open to-dos", "Write a weekly recap"]);
-        assert!(b.iter().filter(|s| !s.chip.is_empty()).all(|s| s.runs_on.across() && !s.question.is_empty()));
+        assert_eq!(chips, ["Prepare for my next meeting", "Write my stand-up", "List my open to-dos", "What did we decide?"]);
+        assert!(b.iter().filter(|s| !s.chip.is_empty()).all(|s| is_core(s) && s.runs_on.across() && !s.question.is_empty()));
         assert!(!by_command("followup-email").unwrap().runs_on.across());
         assert_eq!(by_command("/Decisions").unwrap().name, "Decisions");
     }
@@ -1598,6 +1737,67 @@ mod tests {
         assert!(delete_skill(&saved.id).is_err());
     }
 
+    fn shown_commands() -> Vec<String> {
+        listed().into_iter().filter(|l| l.shown).map(|l| l.skill.command).collect()
+    }
+
+    #[test]
+    fn the_menus_list_the_core_six_and_your_own_and_the_other_nine_wait() {
+        // A new install: the core six, nothing else.
+        assert_eq!(shown_commands(), CORE);
+        let l = listed();
+        assert_eq!(l.iter().filter(|x| x.core).map(|x| x.skill.command.as_str()).collect::<Vec<_>>(), CORE);
+        assert_eq!(l.iter().filter(|x| !x.shown).count(), 9);
+        // As every window gets it: the Skill's own fields, and these two.
+        let v = serde_json::to_value(&l[1]).unwrap();
+        assert_eq!((v["command"].as_str(), v["shown"].as_bool(), v["core"].as_bool()), (Some("prep"), Some(true), Some(true)));
+        assert_eq!(serde_json::to_value(&l[9]).unwrap()["shown"], false);
+
+        // Your own: always in the menus to begin with, and off with its own switch.
+        let mine = save_skill(own("Budget numbers", "budget-numbers"), 1_000).unwrap();
+        assert!(shown_commands().contains(&"budget-numbers".to_string()));
+        set_shown(&mine.id, false).unwrap();
+        assert!(!shown_commands().contains(&"budget-numbers".to_string()));
+
+        // One of More Skills switched on: in the menus, after the core.
+        set_shown("builtin:tickets", true).unwrap();
+        // And one of the core switched off.
+        set_shown("builtin:summary-for", false).unwrap();
+        assert_eq!(shown_commands(), ["followup-email", "prep", "standup", "todos", "decisions", "tickets"]);
+        assert_eq!(super::own().menu.get("builtin:tickets"), Some(&true));
+        // A Skill that isn't there: refused.
+        assert!(set_shown("builtin:nope", true).is_err());
+        assert!(set_shown("s1", true).is_err());
+        // Deleted: its switch goes with it.
+        delete_skill(&mine.id).unwrap();
+        assert!(!super::own().menu.contains_key(&mine.id));
+    }
+
+    #[test]
+    fn a_skill_off_the_menu_still_runs_when_its_whole_command_is_typed() {
+        assert!(!listed().iter().any(|l| l.skill.command == "tickets" && l.shown));
+        // In Chat (across the meetings)…
+        let t = turn_for("tickets", "/tickets the supplier call").unwrap();
+        assert_eq!((t.skill.command.as_str(), t.words.as_str()), ("tickets", "the supplier call"));
+        assert!(turn_for("decision-log", "/decision-log").is_ok());
+        // …and on one meeting (meeting_assist::meeting_skill finds it the same way).
+        assert_eq!(by_command("/open-questions").unwrap().name, "Open questions");
+        // Switched off, a core one too.
+        set_shown("builtin:decisions", false).unwrap();
+        assert!(turn_for("decisions", "/decisions last week").is_ok());
+    }
+
+    #[test]
+    fn an_install_from_before_the_core_six_keeps_the_six_it_had() {
+        keep_the_first_six();
+        assert_eq!(shown_commands(), ["followup-email", "prep", "standup", "todos", "decisions", "summary-for", "risks", "coach", "weekly-recap"]);
+        // Never over a switch the person set; and only once in effect.
+        set_shown("builtin:coach", false).unwrap();
+        keep_the_first_six();
+        assert!(!shown_commands().contains(&"coach".to_string()));
+        assert_eq!(super::own().menu.len(), 3);
+    }
+
     #[test]
     fn an_older_yaps_view_of_skills_json() {
         // skills.json is Yap's alone; an older Yap never opens it. A newer
@@ -1605,6 +1805,11 @@ mod tests {
         let v = serde_json::json!({ "skills": [{ "id": "s1", "name": "Numbers", "command": "numbers", "instructions": "List them.", "runsOn": "meeting", "colour": "teal" }] });
         let store: SkillStore = serde_json::from_value(v).unwrap();
         assert_eq!(store.skills[0].runs_on, RunsOn::Meeting);
+        // A file from before the menu's switches: none set; none set, none written.
+        assert!(store.menu.is_empty());
+        assert!(serde_json::to_value(&store).unwrap().get("menu").is_none());
+        let switched = SkillStore { menu: [("builtin:tickets".to_string(), true)].into(), ..store };
+        assert_eq!(serde_json::to_value(&switched).unwrap()["menu"], serde_json::json!({ "builtin:tickets": true }));
     }
 
     #[test]
@@ -1615,7 +1820,9 @@ mod tests {
         assert_eq!(split_command("/ hello"), None);
         let coach = by_command("coach").unwrap();
         assert_eq!(words_of(&coach, "/coach the budget review"), "the budget review");
-        assert_eq!(words_of(&coach, &coach.question), "");
+        // A one-tap prompt's question is the Skill alone: /prep finds the next meeting itself.
+        let prep = by_command("prep").unwrap();
+        assert_eq!(words_of(&prep, &prep.question), "");
         let t = turn_for("coach", "/coach").unwrap();
         assert_eq!(query_of(&t), "my last meeting");
         assert!(system_block(&t).contains("Skill: Coach me (/coach)\nInstructions:\nCoach the user"));

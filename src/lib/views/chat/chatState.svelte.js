@@ -567,7 +567,7 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
     else inputEl?.focus();
   }
   /**
-   * A one-tap prompt (Coach me, List my open to-dos, Write a weekly recap):
+   * A one-tap prompt (Write my stand-up, List my open to-dos…):
    * its question, sent at once as its Skill. On an empty chat it's asked
    * across the meetings from then on.
    */

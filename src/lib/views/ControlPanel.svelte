@@ -35,6 +35,7 @@
   import { initUpload } from '../stores/upload.svelte.js';
   import { transcriptImport, initTranscriptImport } from '../stores/transcriptImport.svelte.js';
   import { initMemory } from '../stores/memory.svelte.js';
+  import { initSkills } from '../stores/skills.svelte.js';
   import { initCleanupOffer } from '../notices/cleanupOffer.js';
   import { initFeatureTips } from '../notices/featureTips.js';
   import { openConnectDialog } from '../stores/calendar.svelte.js';
@@ -145,6 +146,9 @@
   // Memory (memory.rs via memory.svelte.js): "Yap remembered: your sister
   // is Rochelle" with Undo and Manage (→ Settings → Memory).
   initMemory({ openSettings: (section) => openSettings(section) });
+  // Skills (chat/skills.rs via skills.svelte.js): the "/" menus' More
+  // Skills → Settings → Skills.
+  initSkills({ openSettings: (section) => openSettings(section) });
   // The one offer of AI cleanup, to someone with it off on a PC the
   // on-device model fits (ai/cleanup_styles.rs via cleanupOffer.js).
   initCleanupOffer({ openSettings: (section) => openSettings(section) });
