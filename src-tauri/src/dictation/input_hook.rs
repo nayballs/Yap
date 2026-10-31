@@ -15,6 +15,14 @@
 //! - Keyboard keys (including those sent by mouse side buttons via driver software)
 //! - Mouse extra buttons (XBUTTON1/2, middle)
 //!
+//! **Mouse buttons** ([`mouse_button`]): a bound one is swallowed both ways
+//! (a side button set to dictate no longer goes back in a browser); an
+//! unbound one goes on to the app as ever — the side buttons keep their Back
+//! and Forward — and the first unbound side button pressed offers their
+//! setup once (`side_buttons.rs`). While Settings' side-button setup listens
+//! ([`listen_side_buttons`]) a side button is heard for it and goes nowhere
+//! else.
+//!
 //! Configured keys are **suppressed** at the OS level (keyboard hooks only),
 //! preventing "44444" in text fields when holding a bound key. Push-to-talk is
 //! NOT a separate binding: the dictation key emits both press and release, and
@@ -190,7 +198,7 @@ const QUICK_NOTE: usize = 9;
 /// Send (`pasting/send_key.rs`): the send key (Enter, or the submit key)
 /// in the window in front. Unbound by default, never Enter itself; its
 /// press only.
-const SEND: usize = 10;
+pub(crate) const SEND: usize = 10;
 /// Ask about the selection (`chat/assistant/selected.rs`): a question about
 /// the text selected in the app in front, answered as the Voice
 /// Assistant's, never replacing it. Unbound by default; press and release
@@ -304,6 +312,21 @@ static SNIP_ESC: AtomicBool = AtomicBool::new(false);
 #[cfg(target_os = "windows")]
 const SNIP_ESCAPE: &str = "input-hook:snip-escape";
 
+/// Settings' side-button setup is listening (`side_buttons.rs`) until this
+/// moment (`gesture::now_ms`; 0: not): a side button is heard for it, and
+/// swallowed both ways, going to no shortcut and to no app (Back doesn't go
+/// back while the dialog asks for it). [`listen_side_buttons`].
+static SIDE_LISTEN_UNTIL: AtomicU64 = AtomicU64::new(0);
+/// The side-button tip isn't wanted any more (shown once, or the buttons
+/// are in use already): an unbound side button's press goes by unremarked.
+static SIDE_TIP_DONE: AtomicBool = AtomicBool::new(false);
+/// Not events: a side button heard for the setup (Back, Forward)…
+#[cfg(target_os = "windows")]
+const SIDE_HEARD: [&str; 2] = ["input-hook:side-heard-4", "input-hook:side-heard-5"];
+/// …and an unbound one pressed (the tip, once).
+#[cfg(target_os = "windows")]
+const SIDE_SEEN: [&str; 2] = ["input-hook:side-seen-4", "input-hook:side-seen-5"];
+
 /// Print Screen's virtual key: a shortcut may use it (Snip to Chat's "Use
 /// Print Screen"), and its press can be missing ([`process_keyboard_event`]).
 const VK_SNAPSHOT: u32 = 0x2C;
@@ -406,7 +429,7 @@ pub fn first_spec(cfg: &crate::config::YapConfig, i: usize) -> &str {
 }
 
 /// Set fixed action `i`'s first shortcut in `cfg`.
-fn set_first_spec(cfg: &mut crate::config::YapConfig, i: usize, spec: String) {
+pub(crate) fn set_first_spec(cfg: &mut crate::config::YapConfig, i: usize, spec: String) {
     let field = match i {
         DICTATION => &mut cfg.hotkey,
         EDIT => &mut cfg.edit_hotkey,
@@ -872,6 +895,21 @@ pub fn bound_more(cfg: &crate::config::YapConfig) -> Vec<Vec<String>> {
 /// While a snip's overlay is up, Esc goes to it (`snip.rs`).
 pub fn snip_escape(on: bool) {
     SNIP_ESC.store(on, Ordering::SeqCst);
+}
+
+/// Settings' side-button setup listens for `for_ms` more (0: it stops):
+/// meanwhile a side button pressed anywhere is heard for it
+/// (`side_buttons::heard`) and goes no further. Renewed while the dialog
+/// asks, so a window closed mid-question never leaves Back swallowed.
+pub fn listen_side_buttons(for_ms: u64) {
+    let until = if for_ms == 0 { 0 } else { crate::dictation::gesture::now_ms() + for_ms.min(120_000) };
+    SIDE_LISTEN_UNTIL.store(until, Ordering::SeqCst);
+}
+
+/// The side-button tip is done with (`true`: shown, or the buttons are in
+/// use), or wanted again (test mode forgetting it).
+pub fn side_tip_done(done: bool) {
+    SIDE_TIP_DONE.store(done, Ordering::SeqCst);
 }
 
 fn transform_ids() -> std::sync::MutexGuard<'static, Vec<String>> {
@@ -1739,33 +1777,93 @@ unsafe extern "system" fn low_level_mouse_proc(
         };
 
         if let Some(id) = button_id {
-            // The fixed actions' shortcuts (first and more), then the
-            // language shortcuts', then the saved transforms': the first
-            // binding on this button takes it, and the button is swallowed.
-            for (i, (pressed, released)) in FIXED_EVENTS.iter().enumerate() {
-                for binding in group(i) {
-                    if binding.matches_mouse(id) {
-                        handle_binding_event(binding, Some(i), pressed, released, is_press);
-                        return 1;
-                    }
-                }
-            }
-            for (binding, (pressed, released)) in LANGUAGE_BINDINGS.iter().zip(LANGUAGE_EVENTS) {
-                if binding.matches_mouse(id) {
-                    handle_binding_event(binding, None, pressed, released, is_press);
-                    return 1;
-                }
-            }
-            for (binding, (pressed, released)) in TRANSFORM_BINDINGS.iter().zip(TRANSFORM_EVENTS) {
-                if binding.matches_mouse(id) {
-                    handle_binding_event(binding, None, pressed, released, is_press);
-                    return 1;
-                }
+            if mouse_button(id, is_press, crate::dictation::gesture::now_ms()) {
+                return 1;
             }
         }
     }
 
     win32::CallNextHookEx(0, code, wparam, lparam)
+}
+
+/// One of the mouse buttons Yap can use (3 the middle one, 4 Back, 5
+/// Forward) going down or up: whether it's **swallowed**. The hook's
+/// callback, and test mode's stand-in ([`stand_in_mouse`]) — atomics and a
+/// channel send only.
+///
+/// - Settings' side-button setup listening ([`listen_side_buttons`]): a
+///   side button is heard for it (its press) and swallowed both ways —
+///   except the release of one a shortcut holds (push-to-talk), which goes
+///   to its shortcut.
+/// - Else the fixed actions' shortcuts (first and more), then the language
+///   shortcuts', then the saved transforms': the first binding on this
+///   button takes it, and the button is swallowed — so a side button set to
+///   dictate no longer goes back in a browser.
+/// - Else it isn't Yap's: it goes on to the app (Back goes back), and an
+///   unbound side button's press is noted, until the tip has had its turn
+///   (`side_buttons::seen`).
+#[cfg(target_os = "windows")]
+fn mouse_button(id: u32, is_press: bool, now: u64) -> bool {
+    let side = id == 4 || id == 5;
+    let held_by_a_shortcut = || group_all().any(|b| b.matches_mouse(id) && b.is_active());
+    if side && now < SIDE_LISTEN_UNTIL.load(Ordering::Relaxed) && (is_press || !held_by_a_shortcut()) {
+        if is_press {
+            if let Some(tx) = EVENT_TX.get() {
+                let _ = tx.send((SIDE_HEARD[(id - 4) as usize], now));
+            }
+        }
+        return true;
+    }
+    for (i, (pressed, released)) in FIXED_EVENTS.iter().enumerate() {
+        for binding in group(i) {
+            if binding.matches_mouse(id) {
+                handle_binding_event(binding, Some(i), pressed, released, is_press);
+                return true;
+            }
+        }
+    }
+    for (binding, (pressed, released)) in LANGUAGE_BINDINGS.iter().zip(LANGUAGE_EVENTS) {
+        if binding.matches_mouse(id) {
+            handle_binding_event(binding, None, pressed, released, is_press);
+            return true;
+        }
+    }
+    for (binding, (pressed, released)) in TRANSFORM_BINDINGS.iter().zip(TRANSFORM_EVENTS) {
+        if binding.matches_mouse(id) {
+            handle_binding_event(binding, None, pressed, released, is_press);
+            return true;
+        }
+    }
+    if side && is_press && !SIDE_TIP_DONE.load(Ordering::Relaxed) {
+        if let Some(tx) = EVENT_TX.get() {
+            let _ = tx.send((SIDE_SEEN[(id - 4) as usize], now));
+        }
+    }
+    false
+}
+
+/// Test mode's stand-in for a mouse button (debug builds; a test run has no
+/// hook: it must never see the developer's mouse): `id` going down or up
+/// through the hook's own [`mouse_button`], its events through the
+/// forwarder ([`start_stand_in`]). Whether a real hook would have
+/// swallowed it.
+#[cfg(debug_assertions)]
+pub fn stand_in_mouse(id: u32, is_press: bool) -> Result<bool, String> {
+    if !matches!(id, 3..=5) {
+        return Err(format!("Yap can't use mouse button {id}"));
+    }
+    #[cfg(target_os = "windows")]
+    {
+        if EVENT_TX.get().is_none() {
+            return Err("No input forwarder running".into());
+        }
+        Ok(mouse_button(id, is_press, crate::dictation::gesture::now_ms()))
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = is_press;
+        Err("Windows only".into())
+    }
 }
 
 // ---- The stuck-key sweep ----
@@ -1915,11 +2013,34 @@ pub fn start_input_hook(app_handle: AppHandle) {
         info!("Input hook: robot mode, only the robot's own keys");
         ROBOT_ONLY.store(true, Ordering::SeqCst);
     }
-    // Emit-forwarder: the hook callback queues event names here and this thread
-    // does the (potentially slow) `app.emit`, keeping the callback fast enough
-    // that Windows never times it out (see EVENT_TX).
+    start_forwarder(app_handle);
+    start_hook_thread();
+}
+
+/// Test mode (debug builds): no hook — a test run must never see the
+/// developer's keys or mouse — but the forwarder, so the stand-in for a
+/// mouse button ([`stand_in_mouse`]) goes the hook's own way.
+#[cfg(debug_assertions)]
+pub fn start_stand_in(app_handle: AppHandle) {
+    #[cfg(target_os = "windows")]
+    {
+        info!("Input hook: test mode, no hook; the stand-in's forwarder only");
+        start_forwarder(app_handle);
+    }
+    #[cfg(not(target_os = "windows"))]
+    let _ = app_handle;
+}
+
+/// The emit-forwarder: the hook callback queues event names here and this
+/// thread does the (potentially slow) `app.emit`, keeping the callback fast
+/// enough that Windows never times it out (see EVENT_TX).
+#[cfg(target_os = "windows")]
+fn start_forwarder(app_handle: AppHandle) {
     let (tx, rx) = std::sync::mpsc::channel::<(&'static str, u64)>();
-    EVENT_TX.set(tx).expect("Input hook event channel already set");
+    if EVENT_TX.set(tx).is_err() {
+        warn!("Input hook: the event forwarder runs already");
+        return;
+    }
     std::thread::Builder::new()
         .name("input-hook-emit".into())
         .spawn(move || {
@@ -1930,6 +2051,16 @@ pub fn start_input_hook(app_handle: AppHandle) {
                 }
                 if event == SNIP_ESCAPE {
                     crate::snip::cancel("escape");
+                    continue;
+                }
+                // A side button heard for Settings' setup, or an unbound
+                // one pressed (its tip, once): side_buttons.rs.
+                if let Some(i) = SIDE_HEARD.iter().position(|e| *e == event) {
+                    crate::dictation::side_buttons::heard(&app_handle, 4 + i as u32);
+                    continue;
+                }
+                if let Some(i) = SIDE_SEEN.iter().position(|e| *e == event) {
+                    crate::dictation::side_buttons::seen(&app_handle, 4 + i as u32);
                     continue;
                 }
                 // A hold-to-talk press grew into a chord (`at`: its press),
@@ -1972,7 +2103,12 @@ pub fn start_input_hook(app_handle: AppHandle) {
             }
         })
         .expect("Failed to spawn input hook emit thread");
+}
 
+/// The hook's own thread: both hooks installed, its message loop, the
+/// sweep and the 30 s re-hook.
+#[cfg(target_os = "windows")]
+fn start_hook_thread() {
     std::thread::Builder::new()
         .name("input-hook".into())
         .spawn(|| {

@@ -534,6 +534,34 @@ pub fn e2e_shortcut(app: AppHandle, name: String, phase: Option<String>) -> Resu
     Ok(())
 }
 
+/// Test mode only: a mouse button as the input hook hears it (a test run
+/// has no hook: it must never see the developer's mouse) — `button` 3 (the
+/// middle one), 4 (Back) or 5 (Forward), through the hook's own routing
+/// (`input_hook::stand_in_mouse`): a shortcut on it, the side-button
+/// setup's listening, or the tip for an unbound side button. `phase`:
+/// "press" or "release" alone (a hold is a press, a wait, a release); none:
+/// a click, both at once. Returns whether the real hook would have
+/// swallowed it (false: Back would go back as ever).
+#[cfg(debug_assertions)]
+#[tauri::command]
+pub fn e2e_mouse_button(button: u32, phase: Option<String>) -> Result<bool, String> {
+    if !active() {
+        return Err("Only in e2e test mode".to_string());
+    }
+    let moves: &[bool] = match phase.as_deref() {
+        Some("press") => &[true],
+        Some("release") => &[false],
+        None => &[true, false],
+        Some(other) => return Err(format!("No such phase: {other}")),
+    };
+    let mut swallowed = false;
+    for &pressed in moves {
+        tracing::info!(button, pressed, "e2e: a mouse button moved");
+        swallowed |= crate::dictation::input_hook::stand_in_mouse(button, pressed)?;
+    }
+    Ok(swallowed)
+}
+
 /// Test mode only: "Taking longer than usual…" sooner and on cue
 /// (`slow.rs`) — never before `floorMs` instead of 4 s (0: the real
 /// floor), the stub's transcription taking `sttMs` (0: at once), and this

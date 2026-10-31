@@ -153,7 +153,9 @@ export class Robot {
    * robot mode's hook acts only on keys marked as the robot's own
    * (dictation/input_hook.rs). `seq`: "d:135,w:300,u:135" — d/u a key
    * down/up, U a key-up marked for the hook to miss (one the lock screen
-   * took), w a wait in ms. The pad gets the keys the hook doesn't swallow.
+   * took), xd/xu a mouse side button down/up (1: XBUTTON1, Back; 2:
+   * XBUTTON2, Forward), w a wait in ms. The pad gets the keys the hook
+   * doesn't swallow.
    */
   async hookKeys(seq) {
     await this.pad.focus();

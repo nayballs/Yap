@@ -97,6 +97,7 @@ export const SETTINGS_INDEX = [
   { page: 'shortcuts', section: 'Global shortcuts', label: 'Quick note', desc: 'Jot or dictate a note from any app', keywords: 'shortcut shortcuts hotkey quick note notes scratchpad jot notepad capture', anchor: 'shortcut-quick-note' },
   { page: 'shortcuts', section: 'Global shortcuts', label: 'Meeting notes', desc: 'Take notes on a call, press again to stop', keywords: 'shortcut shortcuts hotkey meeting win alt m', anchor: 'shortcut-meeting' },
   { page: 'shortcuts', section: 'Global shortcuts', label: 'Snip to Chat', desc: 'Drag a box over any screen, into Chat', keywords: 'shortcut shortcuts hotkey snip snipping screenshot screen capture picture image win alt s', anchor: 'shortcut-snip' },
+  { page: 'shortcuts', section: 'Mouse', label: "Your mouse's side buttons", desc: 'Dictate with one and send with the other, set up in one step', keywords: 'mouse side buttons button back forward thumb xbutton set up setup dictate send enter push to talk hold', anchor: 'side-buttons' },
   { page: 'shortcuts', section: 'Global shortcuts', label: 'Copy every snip to the clipboard', desc: 'Paste a snip anywhere with Ctrl+V', keywords: 'snip screenshot clipboard copy paste ctrl+v snipping tool', anchor: 'snip-copy', toggle: 'snipCopy' },
 
   // ---- Meetings ----

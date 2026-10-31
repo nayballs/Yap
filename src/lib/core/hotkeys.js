@@ -251,6 +251,21 @@ export function actionHotkeys(cfg, key) {
   return [cfg?.[key], ...(Array.isArray(more) ? more : [])].filter((s) => typeof s === 'string' && s);
 }
 
+/// A page's mouse button (MouseEvent.button) as Yap numbers it
+/// (dictation/input_hook.rs): the middle one 3, Back 4, Forward 5.
+const PAGE_BUTTON = { 1: 3, 3: 4, 4: 5 };
+
+/// Does this mouse event's button belong to the binding? (In-window fallback.)
+export function hotkeyMatchesMouse(e, spec) {
+  const p = parseHotkeySpec(spec);
+  return p.kind === 'mouse' && PAGE_BUTTON[e.button] === p.button;
+}
+
+/// Is this mouse event's button one of the action's keys?
+export function actionMatchesMouse(e, cfg, key) {
+  return actionHotkeys(cfg, key).some((spec) => hotkeyMatchesMouse(e, spec));
+}
+
 /// Does this keydown press any of the action's keys?
 export function actionMatchesKeydown(e, cfg, key) {
   return actionHotkeys(cfg, key).some((spec) => hotkeyMatchesKeydown(e, spec));

@@ -320,6 +320,12 @@ pub fn run() {
             dictation::commands::configure_send_hotkey,
             dictation::commands::configure_ask_hotkey,
             dictation::commands::configure_more_hotkeys,
+            dictation::side_buttons::side_buttons_listen,
+            dictation::side_buttons::side_buttons_preview,
+            dictation::side_buttons::side_buttons_state,
+            dictation::side_buttons::side_buttons_apply,
+            dictation::side_buttons::side_buttons_undo,
+            dictation::side_buttons::side_buttons_remove,
             #[cfg(debug_assertions)]
             dictation::commands::e2e_hotkey_bindings,
             pasting::last::copy_last_transcript,
@@ -679,6 +685,8 @@ pub fn run() {
             #[cfg(debug_assertions)]
             shell::e2e::e2e_shortcut,
             #[cfg(debug_assertions)]
+            shell::e2e::e2e_mouse_button,
+            #[cfg(debug_assertions)]
             shell::e2e::e2e_dictation_timing,
             #[cfg(debug_assertions)]
             shell::e2e::e2e_dictation_cap,
@@ -901,6 +909,13 @@ pub fn run() {
             // Robot mode runs it, acting on the robot's own keys only.)
             if (!shell::e2e::active() || shell::realtest::on()) && !bench_child() {
                 dictation::input_hook::start_input_hook(handle.clone());
+            } else {
+                // A test run's stand-in for a mouse button goes the hook's
+                // own way (`e2e_mouse_button`): its forwarder, no hook.
+                #[cfg(debug_assertions)]
+                if shell::e2e::active() && !bench_child() {
+                    dictation::input_hook::start_stand_in(handle.clone());
+                }
             }
             if let Err(e) = dictation::input_hook::configure_dictation(&cfg.hotkey) {
                 tracing::warn!("Failed to configure hotkey: {}", e);
