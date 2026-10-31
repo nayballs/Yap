@@ -251,10 +251,10 @@ mod tests {
             serde_json::json!({"type":"paired","device":{"id":"d","secret":"s"}})
         );
         assert_eq!(j(Out::Denied { reason: "No".into() }), serde_json::json!({"type":"denied","reason":"No"}));
-        let m = Model { id: "ondevice|".into(), label: "Qwen · On this PC".into(), on_this_pc: true };
+        let m = Model { id: "ondevice|".into(), label: "Qwen".into(), on_this_pc: true };
         assert_eq!(
             j(Out::Ready { pc: "DESK".into(), model: Some(m.clone()), models: vec![m] }),
-            serde_json::json!({"type":"ready","pc":"DESK","model":{"id":"ondevice|","label":"Qwen · On this PC","onThisPc":true},"models":[{"id":"ondevice|","label":"Qwen · On this PC","onThisPc":true}]})
+            serde_json::json!({"type":"ready","pc":"DESK","model":{"id":"ondevice|","label":"Qwen","onThisPc":true},"models":[{"id":"ondevice|","label":"Qwen","onThisPc":true}]})
         );
         assert_eq!(j(Out::State { phase: Phase::Transcribing }), serde_json::json!({"type":"state","phase":"transcribing"}));
         assert_eq!(j(Out::Heard { text: "hi".into() }), serde_json::json!({"type":"heard","text":"hi"}));

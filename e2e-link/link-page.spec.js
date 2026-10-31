@@ -300,7 +300,7 @@ test.describe('talking', () => {
     await expect(page.getByTestId('error')).toBeHidden();
   });
 
-  test('the answer spoken: down frames scheduled back to back at speak_start\'s rate', async ({ page }) => {
+  test("the answer spoken: one stream at the phone's own rate, played out to the end", async ({ page }) => {
     const pc = await mockPc(page);
     await open(page);
     await ready(page, pc);
@@ -308,25 +308,31 @@ test.describe('talking', () => {
     pc.send({ type: 'state', phase: 'speaking' });
     pc.send({ type: 'speak_start', rate: 24000 });
     for (let i = 0; i < 6; i++) pc.sendBinary(downFrame(i, voice(24000, 100)));
-    await expect.poll(async () => (await snapshot(page)).player.scheduled.length).toBe(6);
+    await expect.poll(async () => (await snapshot(page)).player.queued).toBeCloseTo(0.6, 6);
+    // 600 ms waiting is past the 250 ms the buffer wants: it plays straight away.
+    await expect.poll(async () => (await snapshot(page)).player.state).toBe('playing');
     await expect(page.getByTestId('phase')).toHaveText('Speaking');
     await expect(page.getByTestId('stop')).toBeVisible();
-    const p = (await snapshot(page)).player;
+    let p = (await snapshot(page)).player;
     expect(p.rate).toBe(24000);
-    expect(p.underruns).toBe(0);
-    for (let i = 0; i < 6; i++) expect(p.scheduled[i].dur).toBeCloseTo(0.1, 6);
-    for (let i = 1; i < 6; i++) expect(p.scheduled[i].at).toBeCloseTo(p.scheduled[i - 1].at + p.scheduled[i - 1].dur, 9);
-    expect(p.playing).toBeGreaterThan(0);
+    expect(p.loaded).toBe(true);
+    expect(p.startBufferedMs).toBeGreaterThanOrEqual(250);
+    expect(p.startDelayMs).toBeLessThan(100);
     pc.send({ type: 'speak_end' });
     pc.send({ type: 'state', phase: 'idle' });
-    // 0.6 s of sound, then quiet.
+    // 0.6 s of sound, then quiet: all of it played, none of it missing.
     await expect.poll(async () => (await snapshot(page)).player.active, { timeout: 4000 }).toBe(false);
+    p = (await snapshot(page)).player;
+    expect(p.state).toBe('idle');
+    expect(p.played).toBeCloseTo(0.6, 3);
+    expect(p.underruns).toBe(0);
+    expect(p.maxStep).toBeLessThan(0.03);
     await expect(page.getByTestId('stop')).toBeHidden();
     await expect(page.getByTestId('phase')).toHaveText('Ready');
     expect((await snapshot(page)).contextState).toBe('running');
   });
 
-  test('Stop: interrupt sent, the answer silent at once, its late frames dropped', async ({ page }) => {
+  test('Stop: interrupt sent, the answer silent at once (a fade, not a cut), its late frames dropped', async ({ page }) => {
     const pc = await mockPc(page);
     await open(page);
     await ready(page, pc);
@@ -334,20 +340,31 @@ test.describe('talking', () => {
     pc.send({ type: 'state', phase: 'speaking' });
     pc.send({ type: 'speak_start', rate: 24000 });
     for (let i = 0; i < 20; i++) pc.sendBinary(downFrame(i, voice(24000, 100)));
-    await expect.poll(async () => (await snapshot(page)).player.playing).toBe(20);
+    await expect.poll(async () => (await snapshot(page)).player.queued).toBeCloseTo(2, 6);
+    await expect.poll(async () => (await snapshot(page)).player.played).toBeGreaterThan(0.2);
     await page.getByTestId('stop').click();
     await expect.poll(() => pc.of('interrupt').length).toBe(1);
     let p = (await snapshot(page)).player;
-    expect(p.playing).toBe(0);
     expect(p.active).toBe(false);
     await expect(page.getByTestId('stop')).toBeHidden();
+    // In the worklet: faded to silence, the rest thrown away.
+    await expect.poll(async () => (await snapshot(page)).player.state).toBe('idle');
+    await expect.poll(async () => (await snapshot(page)).player.level).toBe(0);
+    p = (await snapshot(page)).player;
+    expect(p.buffered).toBe(0);
+    expect(p.played).toBeLessThan(1.5);
+    expect(p.maxStep).toBeLessThan(0.03);
+    const played = p.played;
+    const queued = p.queued;
     // Already on the way when Stop was pressed.
     for (let i = 20; i < 24; i++) pc.sendBinary(downFrame(i, voice(24000, 100)));
     pc.send({ type: 'speak_end' });
     pc.send({ type: 'state', phase: 'idle' });
     await page.waitForTimeout(300);
     p = (await snapshot(page)).player;
-    expect(p.playing).toBe(0);
+    expect(p.queued).toBe(queued);
+    expect(p.played).toBe(played);
+    expect(p.active).toBe(false);
     await expect(page.getByTestId('phase')).toHaveText('Ready');
   });
 
@@ -365,7 +382,8 @@ test.describe('talking', () => {
     await expect.poll(() => pc.of('start').length).toBe(2);
     const types = pc.types().filter((t) => t !== 'ping');
     expect(types.slice(-2)).toEqual(['interrupt', 'start']);
-    expect((await snapshot(page)).player.playing).toBe(0);
+    expect((await snapshot(page)).player.active).toBe(false);
+    await expect.poll(async () => (await snapshot(page)).player.state).toBe('idle');
     await expect(page.getByTestId('phase')).toHaveText('Listening');
     pc.send({ type: 'state', phase: 'idle' }); // the interrupt's
     pc.send({ type: 'state', phase: 'listening' }); // the new question's
@@ -398,6 +416,8 @@ test.describe('talking', () => {
     const chip = page.getByTestId('model-chip');
     await expect(chip).toContainText('Qwen3.5 4B');
     await expect(chip).toContainText('On this PC');
+    // Said once: the PC's label is the name alone, the tag says where.
+    expect((await chip.textContent()).match(/On this PC/g)).toHaveLength(1);
     await chip.click();
     const sheet = page.getByTestId('models');
     await expect(sheet).toBeVisible();

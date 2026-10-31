@@ -94,6 +94,22 @@
               <span id="handsfree-hint" class="hint">Sends when you stop talking</span>
             </span>
           </label>
+          <fieldset id="wait" class="wait" data-testid="wait" hidden>
+            <legend class="field-label">Wait before sending</legend>
+            <div class="seg">
+              <label><input type="radio" name="wait" value="short" data-testid="wait-short" /><span>Short <small>1 s</small></span></label>
+              <label><input type="radio" name="wait" value="normal" data-testid="wait-normal" checked /><span>Normal <small>1.5 s</small></span></label>
+              <label><input type="radio" name="wait" value="long" data-testid="wait-long" /><span>Long <small>2.5 s</small></span></label>
+            </div>
+          </fieldset>
+          <label class="switch">
+            <input id="clearer" type="checkbox" role="switch" data-testid="clearer" aria-describedby="clearer-hint" />
+            <span class="track" aria-hidden="true"></span>
+            <span class="switch-text">
+              <span class="switch-label">Clearer sound in a headset</span>
+              <span id="clearer-hint" class="hint">Closes the mic while Yap talks, so the headset can use its music mode. You can't talk over Yap by voice; Stop still works.</span>
+            </span>
+          </label>
           <div class="field">
             <label for="mic" class="field-label">Microphone</label>
             <select id="mic" data-testid="mic" aria-describedby="mic-hint">
@@ -102,6 +118,27 @@
             <span id="mic-hint" class="hint">Names show once you’ve allowed the microphone.</span>
           </div>
         </div>
+
+        <!-- After a crackly answer: did the page's sound run dry, or was it the headset? -->
+        <details id="sound" class="sound" data-testid="sound">
+          <summary>Sound details</summary>
+          <dl>
+            <dt>Sample rate</dt>
+            <dd id="sound-rate" data-testid="sound-rate"></dd>
+            <dt>Latency</dt>
+            <dd id="sound-latency" data-testid="sound-latency"></dd>
+            <dt>Last answer</dt>
+            <dd id="sound-start" data-testid="sound-start"></dd>
+            <dt>Gaps in it</dt>
+            <dd id="sound-gaps" data-testid="sound-gaps"></dd>
+            <dt>Microphone while it played</dt>
+            <dd id="sound-mic" data-testid="sound-mic"></dd>
+            <dt>Microphone now</dt>
+            <dd id="sound-mic-now" data-testid="sound-mic-now"></dd>
+            <dt>Browser</dt>
+            <dd id="sound-browser" data-testid="sound-browser"></dd>
+          </dl>
+        </details>
       </section>
     </main>
 

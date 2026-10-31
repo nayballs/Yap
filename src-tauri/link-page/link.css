@@ -582,6 +582,123 @@ body[data-phase='listening'] .phase {
   font-size: 14px;
   color: var(--yap-muted);
 }
+.switch ~ .switch {
+  border-top: 1px solid var(--yap-border-subtle);
+  padding: 8px 0;
+}
+
+/* Hands-free's wait before sending: a segmented control, one tap. */
+.wait {
+  margin: 0;
+  padding: 2px 0 12px;
+  border: 0;
+  min-width: 0;
+}
+.wait legend {
+  padding: 0 0 6px;
+}
+.seg {
+  display: flex;
+  padding: 3px;
+  gap: 3px;
+  border-radius: var(--yap-r-lg);
+  background: var(--yap-s3);
+  border: 1px solid var(--yap-border-subtle);
+}
+.seg label {
+  position: relative;
+  flex: 1 1 0;
+  min-width: 0;
+  min-height: 48px;
+  display: flex;
+  cursor: pointer;
+}
+.seg input {
+  position: absolute;
+  opacity: 0;
+  inset: 0;
+  margin: 0;
+  cursor: pointer;
+}
+.seg span {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--yap-r);
+  font-weight: 600;
+  font-size: 15.5px;
+  line-height: 1.2;
+  color: var(--yap-fg-80);
+  transition: background var(--yap-dur), color var(--yap-dur);
+}
+.seg small {
+  font-weight: 500;
+  font-size: 13px;
+  color: var(--yap-muted);
+}
+.seg input:checked + span {
+  background: var(--yap-s2);
+  color: var(--yap-fg);
+  box-shadow: var(--yap-shadow-sm);
+}
+.seg input:checked + span small {
+  color: var(--yap-link);
+}
+.seg input:focus-visible + span {
+  outline: 2px solid var(--yap-focus-ring);
+  outline-offset: 1px;
+}
+
+/* Sound details: a disclosure at the bottom. */
+.sound {
+  margin: 0 var(--gutter) 24px;
+  color: var(--yap-muted);
+  font-size: 14.5px;
+}
+.sound summary {
+  min-height: 48px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  font-weight: 600;
+  list-style: none;
+}
+.sound summary::-webkit-details-marker {
+  display: none;
+}
+.sound summary::before {
+  content: '';
+  width: 7px;
+  height: 7px;
+  border-right: 2px solid currentColor;
+  border-bottom: 2px solid currentColor;
+  transform: rotate(-45deg);
+  transition: transform var(--yap-dur);
+}
+.sound[open] summary::before {
+  transform: rotate(45deg);
+}
+.sound dl {
+  margin: 0;
+  padding: 10px 16px;
+  background: var(--yap-s2);
+  border-radius: var(--yap-r-lg);
+  display: grid;
+  grid-template-columns: minmax(7em, auto) 1fr;
+  gap: 6px 14px;
+}
+.sound dt {
+  color: var(--yap-muted);
+}
+.sound dd {
+  margin: 0;
+  color: var(--yap-fg);
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
 .field {
   display: flex;
   flex-direction: column;
