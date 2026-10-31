@@ -41,6 +41,8 @@ export const NAV_GROUPS = [
     items: [
       { id: 'connectors', label: 'Connectors' },
       { id: 'mcp', label: 'AI apps (MCP)' },
+      // Yap Link (link.rs): Yap's AI from your phone on the home Wi-Fi.
+      { id: 'phone', label: 'Phone' },
     ],
   },
   {

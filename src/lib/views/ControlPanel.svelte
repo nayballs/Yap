@@ -537,6 +537,12 @@
 
 <ToastHost />
 
+<!-- "Allow ‘…’ to use Yap? Code 4821": a phone pairing (Yap Link, link.rs);
+     its own chunk, read at once (the questions waiting come from link_status). -->
+{#await import('../components/LinkPairPrompt.svelte') then { default: LinkPairPrompt }}
+  <LinkPairPrompt />
+{/await}
+
 <!-- Help's shortcut sheet and What's new (each loads on first use). -->
 {#if sheetOpen}
   {#await import('./help/ShortcutSheet.svelte') then { default: ShortcutSheet }}

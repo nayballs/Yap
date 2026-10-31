@@ -5,6 +5,8 @@
   // the focus; Esc, the scrim and Cancel close it; Tab stays inside; the
   // focus goes back where it was (or to `returnFocus`). `children`: more
   // under the body (Reset app's lists of what goes and what stays).
+  // `cancelLabel`: the other button's words ("Deny" for a phone asking to
+  // pair, link.rs).
   import { tick } from 'svelte';
 
   let {
@@ -12,6 +14,7 @@
     title = '',
     body = '',
     confirmLabel = 'Delete',
+    cancelLabel = 'Cancel',
     busyLabel = 'Deleting…',
     danger = true,
     busy = false,
@@ -82,7 +85,7 @@
         {@render children?.()}
       </div>
       <div class="btns">
-        <button type="button" class="btn" data-cancel onclick={close} disabled={busy}>Cancel</button>
+        <button type="button" class="btn" data-cancel onclick={close} disabled={busy}>{cancelLabel}</button>
         <button type="button" class="btn" class:danger onclick={() => onconfirm?.()} disabled={busy}>
           {busy ? busyLabel : confirmLabel}
         </button>
