@@ -144,6 +144,19 @@ test('a lone "this" is the model\'s call; a question about nothing on screen is 
     await ask(yap, 'How long do I boil an egg?');
     await expect.poll(() => fakeLlm.requests.slice(before).some((r) => userOf(r).includes('How long do I boil an egg?')), { timeout: 10_000 }).toBe(true);
     expect(fakeLlm.requests.slice(before).some((r) => r.kind === 'screenQuestion' || r.images?.length)).toBe(false);
+    await yap.invoke('assistant_stop');
+
+    // An ask for something to make: its "this" is the thing to make, never
+    // the screen — not asked about (it spent 2.9 s on it, 31 Oct 2026),
+    // even with the model ready to say yes.
+    await windowInFront(yap);
+    fakeLlm.reply('screenQuestion', () => 'Yes.');
+    before = fakeLlm.requests.length;
+    fakeLlm.scriptChat([{ content: "It's in Chat." }]);
+    const make = 'Can you build me this level by level, a solo mage for Emberfall, in a document?';
+    await ask(yap, make);
+    await expect.poll(() => fakeLlm.requests.slice(before).some((r) => userOf(r).includes('solo mage for Emberfall')), { timeout: 10_000 }).toBe(true);
+    expect(fakeLlm.requests.slice(before).some((r) => r.kind === 'screenQuestion' || r.images?.length)).toBe(false);
   } finally {
     fakeLlm.reply('screenQuestion', () => 'no');
     fakeLlm.delay('screenQuestion', 0);

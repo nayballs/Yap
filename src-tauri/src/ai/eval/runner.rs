@@ -2478,7 +2478,8 @@ fn documents_table(rows: &[Value]) -> String {
 
 /// Guides (`--guides`) per model: of the turns that ask each guide check,
 /// how many passed — every level, the parts asked for, its own suggestions
-/// marked, its citations real, changed after the web — and how many were
+/// marked, its citations real, changed after the web, outlined before the
+/// web, pages read (2026-10-31) — and how many were
 /// thought through. "" when no turn asks one.
 fn guides_table(rows: &[Value]) -> String {
     let turns: Vec<(String, &Value)> = rows
@@ -2498,7 +2499,9 @@ fn guides_table(rows: &[Value]) -> String {
             models.push(m.clone());
         }
     }
-    let mut md = String::from("| Model | Every level | The parts asked for | Own suggestions marked | Citations real | Changed after the web | Thought it through |\n|---|---|---|---|---|---|---|\n");
+    let mut md = String::from(
+        "| Model | Every level | The parts asked for | Own suggestions marked | Citations real | Changed after the web | Outlined before the web | Read pages | Thought it through |\n|---|---|---|---|---|---|---|---|---|\n",
+    );
     for m in &models {
         let mine: Vec<&Value> = turns.iter().filter(|(x, _)| x == m).map(|(_, d)| *d).collect();
         let share = |key: &str| {
@@ -2511,12 +2514,14 @@ fn guides_table(rows: &[Value]) -> String {
         };
         let thought = mine.iter().filter(|d| d["thought"].is_u64()).count();
         md.push_str(&format!(
-            "| {m} | {} | {} | {} | {} | {} | {thought}/{} |\n",
+            "| {m} | {} | {} | {} | {} | {} | {} | {} | {thought}/{} |\n",
             share("levels"),
             share("parts"),
             share("own"),
             share("citations"),
             share("after_web"),
+            share("outline"),
+            share("read"),
             mine.len()
         ));
     }

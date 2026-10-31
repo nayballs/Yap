@@ -194,6 +194,16 @@ pub struct Source {
     /// drops it and shows a chip that opens nothing.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub screen: bool,
+    /// A web page the turn opened and read (`read_page`, Claude's web
+    /// fetch), not only a search result: the Sources row shows it first
+    /// (2026-10-31). An older Yap drops it; the row then keeps its order.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub opened: bool,
+    /// A page the answer or the document it wrote cites (a document's
+    /// citations are links in it, never `[n]` in the answer): first in the
+    /// Sources row too. An older Yap drops it.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub cited: bool,
 }
 
 fn is_zero(n: &u64) -> bool {
