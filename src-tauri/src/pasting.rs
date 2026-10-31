@@ -4,7 +4,8 @@
 //! modifier keys around Yap's own, long pastes in slices, UI Automation
 //! reads of the field, smart spacing and the kind of app; in chat apps and
 //! AI chat boxes, stacked messages, @mentions and file tags pasted in
-//! steps, and the Send shortcut. How it works: docs/architecture/pasting.md.
+//! steps, and the Send shortcut; rich snippets' HTML beside the text. How
+//! it works: docs/architecture/pasting.md.
 
 pub mod app_kind;
 pub mod as_said;
@@ -15,6 +16,7 @@ pub mod last;
 pub mod mentions;
 pub mod modifiers;
 pub mod read_check;
+pub mod rich;
 pub mod selection;
 pub mod send_key;
 pub mod slices;

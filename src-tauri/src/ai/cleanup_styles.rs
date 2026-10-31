@@ -676,6 +676,11 @@ impl Target {
         self.kind.is_terminal()
     }
 
+    /// Its process name, lower case, without ".exe" ("" when unknown).
+    pub fn exe(&self) -> &str {
+        &self.exe
+    }
+
     /// The app of a history entry (Run again): its process only.
     pub fn of_app(process: &str) -> Target {
         Target::new(Some(process), "", AppKind::Other)

@@ -62,25 +62,29 @@ pub(crate) fn as_said_text(raw: &str, cfg: &YapConfig, screen: Option<&crate::di
 /// (A dictation goes through [`finish_dictation_with`]; a dictation run
 /// again from its kept audio comes here, its screen long gone.)
 pub(crate) fn finish_dictation(cleaned: &str, raw: &str, cfg: &YapConfig) -> (String, bool) {
-    finish_dictation_with(cleaned, raw, cfg, None)
+    let (text, enter, _) = finish_dictation_with(cleaned, raw, cfg, None);
+    (text, enter)
 }
 
 /// [`finish_dictation`] with the names on screen (`screen_terms`): after
 /// the corrections (the dictionary and memory have the final say), a name
 /// heard a little wrong is spelled as the screen shows it — before the
-/// voice command and snippets, whose text is never touched.
+/// voice command and snippets, whose text is never touched. Also returns
+/// the rich snippets it expanded (their markdown, in order), for the
+/// paste's HTML (`pasting/rich.rs`).
 pub(crate) fn finish_dictation_with(
     cleaned: &str,
     raw: &str,
     cfg: &YapConfig,
     screen: Option<&crate::dictionary::screen_terms::ScreenTerms>,
-) -> (String, bool) {
+) -> (String, bool, Vec<String>) {
     let corrected = crate::dictionary::screen_terms::correct(&apply_corrections(cleaned, cfg), screen, cfg);
     let (text, enter) = match cfg.voice_enter.then(|| take_voice_enter(&corrected, raw)).flatten() {
         Some(text) => (text, true),
         None => (corrected, false),
     };
-    (config::apply_snippets(&text, &cfg.dictionary), enter)
+    let (text, rich) = config::expand_snippets(&text, &cfg.dictionary);
+    (text, enter, rich)
 }
 
 /// The "press enter" voice command: a dictation that ENDS with "press enter"
@@ -214,6 +218,27 @@ mod tests {
             finish_dictation("Hi, press enter.", "hi press enter", &c),
             ("Hi, press enter.".to_string(), false)
         );
+    }
+
+    #[test]
+    fn a_rich_snippet_types_its_plain_text_and_says_it_was_used() {
+        let md = "Best wishes,\n**Robin**\n- [Book a call](https://example.com/book)";
+        let dict = vec![
+            DictionaryEntry { snippet: true, ..entry("my sign off", md, true) },
+            DictionaryEntry { snippet: true, ..entry("my address", "1 Long Lane\nLeeds", true) },
+        ];
+        let c = cfg("parakeet-tdt-0.6b-v3", true, dict);
+        let (text, enter, rich) = finish_dictation_with("Thanks for today. My sign off.", "x", &c, None);
+        assert_eq!(text, "Thanks for today. Best wishes,\nRobin\n• Book a call (https://example.com/book)");
+        assert!(!enter);
+        assert_eq!(rich, vec![md.to_string()]);
+        // A plain snippet: as ever, and nothing rich.
+        let (text, _, rich) = finish_dictation_with("It's at my address.", "x", &c, None);
+        assert_eq!(text, "It's at 1 Long Lane\nLeeds");
+        assert!(rich.is_empty());
+        // Said twice: twice.
+        let (_, _, rich) = finish_dictation_with("My sign off and my sign off", "x", &c, None);
+        assert_eq!(rich.len(), 2);
     }
 
     #[test]

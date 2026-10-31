@@ -36,10 +36,16 @@
   // a correction changes first, or is a dictionary word (`snippetWarnings`).
   // "Suggest snippets for text you use often" (dictionary/snippet_offer.rs)
   // lives in its own store, not config.json.
+  //
+  // Rich snippets (2026-10-31): a snippet's text may be formatted — bold,
+  // italic, links, lists — in Yap's markdown subset, kept as its text
+  // (richSnippet.js). Its box is SnippetText.svelte: a small formatting
+  // bar, the length, and a preview of how it pastes, formatted or plain.
   import { invoke } from '@tauri-apps/api/core';
   import { onMount, tick, untrack } from 'svelte';
   import { SvelteSet } from 'svelte/reactivity';
   import Toggle from '../../ui/Toggle.svelte';
+  import SnippetText from './SnippetText.svelte';
   import { openContextMenu, menuKey, askConfirm, menuOrDialogOpen } from '../../ui/contextMenu.svelte.js';
   import { toast } from '../../ui/toast.svelte.js';
   import { showSaveError } from '../../notices/saveErrors.js';
@@ -574,8 +580,6 @@
   function snippetRows(text) {
     return Math.min(8, Math.max(2, (text || '').split('\n').length));
   }
-  /** A snippet text's length, as a person counts characters (an emoji is one). */
-  const chars = (text) => [...String(text ?? '')].length;
 
   // ---- What's selected, together ----
   function setSelectedFuzzy(on) {
@@ -995,22 +999,16 @@
                     <input placeholder="e.g. my address" aria-label="Phrase you say" bind:value={entry.from} />
                   </div>
                   <span class="arrow">→</span>
-                  <textarea
-                    placeholder={'e.g. 12 Example Road\nAnytown ZZ1 1ZZ'}
-                    aria-label="Text Yap types"
-                    rows={snippetRows(entry.to)}
-                    maxlength={SNIPPET_MAX}
+                  <SnippetText
                     bind:value={entry.to}
-                  ></textarea>
+                    max={SNIPPET_MAX}
+                    rows={snippetRows(entry.to)}
+                    placeholder={'e.g. 12 Example Road\nAnytown ZZ1 1ZZ'}
+                    label={entry.from ? `the snippet “${entry.from}”` : 'this snippet'}
+                  />
                   <button class="rm" title="Remove" aria-label="Remove snippet" onclick={() => askRemove(entry)}>×</button>
                   {#if warnings.get(entry)}
                     <p class="snip-warn" role="note">{warnings.get(entry).text}</p>
-                  {/if}
-                  {#if entry.to}
-                    {@const n = chars(entry.to)}
-                    <span class="snip-count" class:full={n >= SNIPPET_MAX} title={`${n.toLocaleString()} of at most ${SNIPPET_MAX.toLocaleString()} characters`}>
-                      {n.toLocaleString()} {n === 1 ? 'character' : 'characters'}
-                    </span>
                   {/if}
                 </div>
               {/each}
@@ -1430,8 +1428,7 @@
     color: var(--yap-muted);
   }
   .dict-row input:not(.pick),
-  .snip-row input:not(.pick),
-  .snip-row textarea {
+  .snip-row input:not(.pick) {
     background: var(--yap-s1);
     border: 1px solid var(--yap-border);
     border-radius: 5px;
@@ -1443,8 +1440,7 @@
     box-sizing: border-box;
   }
   .dict-row input:not(.pick):focus,
-  .snip-row input:not(.pick):focus,
-  .snip-row textarea:focus {
+  .snip-row input:not(.pick):focus {
     outline: none;
     border-color: var(--yap-primary);
   }
@@ -1505,7 +1501,8 @@
     box-shadow: var(--yap-focus);
   }
 
-  /* A snippet's warning (under its phrase) and its length (under its text). */
+  /* A snippet's warning (under its phrase); its text, formatting bar,
+     length and preview (SnippetText.svelte) down the text's column. */
   .snip-warn {
     grid-column: 3;
     grid-row: 2;
@@ -1514,16 +1511,9 @@
     line-height: 1.4;
     color: var(--yap-warning);
   }
-  .snip-count {
+  .snip-row > :global(.snip-text) {
     grid-column: 5;
-    grid-row: 2;
-    justify-self: end;
-    font-size: 11px;
-    color: var(--yap-muted-55);
-    font-variant-numeric: tabular-nums;
-  }
-  .snip-count.full {
-    color: var(--yap-danger);
+    grid-row: 1 / span 2;
   }
 
   /* Snippets: the phrase reads as something said (a mic and a quote-ish
@@ -1577,11 +1567,6 @@
     border-radius: var(--yap-r-full);
     padding-left: 27px;
     background: var(--yap-s3);
-  }
-  .snip-row textarea {
-    resize: vertical;
-    line-height: 1.45;
-    min-height: 34px;
   }
 
   .fz {

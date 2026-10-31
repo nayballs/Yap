@@ -379,7 +379,8 @@ pub struct Found {
 /// Is `p` already a snippet's text, or inside one?
 fn a_snippet_already(p: &Phrase, dict: &[DictionaryEntry]) -> bool {
     dict.iter().filter(|e| e.snippet).any(|e| {
-        let k = key(&e.to);
+        // (A rich snippet as dictations have it: its plain text.)
+        let k = key(&e.typed());
         !k.is_empty() && (k == p.key || format!(" {k} ").contains(&format!(" {} ", p.key)))
     })
 }
