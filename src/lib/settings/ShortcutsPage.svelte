@@ -1,6 +1,6 @@
 <script>
   // Settings → Shortcuts (2026-10-22 review; OpenWhispr's Hotkeys page): the
-  // eleven global shortcuts together (dictation/input_hook.rs), each in Yap's keycaps,
+  // twelve global shortcuts together (dictation/input_hook.rs), each in Yap's keycaps,
   // with a clash said where it happens, and "+ Add another" for more keys
   // for the same action (Wispr Flow's, 2026-10-25: `moreHotkeys`). Their own
   // pages show the first one too (Dictation, Commands, Voice Assistant,
@@ -53,6 +53,16 @@
   </Row>
   <Row label="Ask the Voice Assistant" desc="Ask out loud from any app and hear the answer" setting="shortcut-assistant">
     <SettingsHotkey {cfg} target="assistantHotkey" clearable more />
+  </Row>
+  <!-- Ask about the selection (chat/assistant/selected.rs): a question about
+       the selected text, answered as the Voice Assistant's; never replaces it. -->
+  <Row
+    label="Ask about the selection"
+    desc="Select text in any app, press it and ask about it: Yap answers without changing the text"
+    hint="Works on text you can't edit too, like a web page. The answer is spoken when Speak replies is on, and kept in Chat with the text you selected."
+    setting="shortcut-ask"
+  >
+    <SettingsHotkey {cfg} target="askHotkey" clearable more />
   </Row>
   <Row
     label="Read aloud"

@@ -667,6 +667,20 @@ pub mod commands {
         robot.rewrite_text(text, pause_ms).await
     }
 
+    /// **Ask about the selection**'s shortcut with `text` as the question,
+    /// in the window in front (`hwnd`, when given, must be it): its
+    /// selection read as Read aloud reads it (UI Automation, read-only text
+    /// too; no Ctrl+C in robot mode) — none: "Select some text first" and
+    /// an error — then the question on the Voice Assistant's path. Nothing
+    /// is pasted or typed into the window.
+    #[tauri::command]
+    pub async fn realtest_ask_selection(state: State<'_, AppState>, text: String, hwnd: Option<i64>) -> Result<(), String> {
+        only_robot()?;
+        in_front(hwnd)?;
+        let robot = robot_of(&state)?;
+        robot.ask_about_selection(text, 0).await
+    }
+
     /// Saved transform `id` as its shortcut runs it, in the window in front
     /// (`hwnd`, when given, must be it): its selection read (UI Automation,
     /// an edit control's own; Ctrl+C never in test mode) — none, right after

@@ -163,6 +163,10 @@ pub fn rule(kind: &str) -> Rule {
         // "Let the Voice Assistant see the window in front?" (a question
         // about the screen met a cloud model; asked once): right after it.
         "assistantScreen" => alert,
+        // "Select some text first" (Ask about the selection pressed with
+        // nothing selected, chat/assistant/selected.rs): the answer to the
+        // press, at once.
+        "askNoSelection" => alert,
         // "The on-device AI model didn't start" (local_llm/on_demand.rs): a
         // dictation went without its cleanup — once, and not again within
         // ten minutes.

@@ -55,9 +55,10 @@ export const dictation = $state({
   // the assistant's ("Ask Yap…", "Thinking…", "Speaking…" with ■).
   assistant: 'idle',
   // What the question is about: 'screenshot' after a spoken "snip" (snip.rs:
-  // "Ask about this screenshot…"); 'window' while the window in front is
-  // taken and read (chat/assistant/screen.rs: "Looking at the window…");
-  // else ''.
+  // "Ask about this screenshot…"); 'selection' for Ask about the selection's
+  // shortcut (chat/assistant/selected.rs: "Ask about the selection…");
+  // 'window' while the window in front is taken and read
+  // (chat/assistant/screen.rs: "Looking at the window…"); else ''.
   askAbout: '',
   // What its answer is doing now, in "Thinking…"'s place (chat/activity.rs,
   // `yap-assistant-step`): "Searching the web · …", "Reading …"; '' until a

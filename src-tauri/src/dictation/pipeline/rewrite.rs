@@ -1,7 +1,9 @@
 //! The spoken words as an instruction to the AI: the rewrite shortcut
 //! (the selection, or the last dictation, rewritten in place) and
 //! Commands (a dictation that says the agent's name), through the
-//! Commands scope's model.
+//! Commands scope's model. Words about a selection that ask rather than
+//! edit are answered instead, on the Voice Assistant's path
+//! (`ask_or_edit.rs`, `run_rewrite`).
 
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
@@ -73,23 +75,45 @@ pub(crate) struct Rewritten {
     /// "replaced" / "copied" / "testMode" (the last dictation's), "pasted"
     /// (a selection's or new text; "copied" when it was left on the
     /// clipboard instead), "refused" (nothing pasted), "nothing" (nothing
-    /// said or written), "failed" (the AI).
+    /// said or written), "failed" (the AI), "answered" (a question about
+    /// the selection: asked on the Voice Assistant's path, nothing pasted).
     pub outcome: String,
     /// Why it wasn't replaced or pasted.
     pub why: Option<String>,
+    /// How the words about a selection were taken (`ask_or_edit`:
+    /// "rule:edit", "rule:ask", "model:replace", "model:answer",
+    /// "doubt:answer", "readOnly:answer"); empty: not decided (nothing
+    /// selected, or "Answer questions about the selected text" off).
+    pub decided: String,
 }
 
 #[cfg(debug_assertions)]
 pub(super) static LAST_REWRITE: Mutex<Option<Rewritten>> = Mutex::new(None);
 
+/// How the current rewrite's words were taken, for its report (debug
+/// builds only).
+#[cfg(debug_assertions)]
+static DECIDED: Mutex<String> = Mutex::new(String::new());
+
 /// Keep what the rewrite did for the robot (debug builds only).
 fn report_rewrite(last: bool, text: &str, outcome: &str, why: Option<String>) {
     #[cfg(debug_assertions)]
     if let Ok(mut r) = LAST_REWRITE.lock() {
-        *r = Some(Rewritten { last, text: text.to_string(), outcome: outcome.to_string(), why });
+        let decided = std::mem::take(&mut *DECIDED.lock().unwrap_or_else(|p| p.into_inner()));
+        *r = Some(Rewritten { last, text: text.to_string(), outcome: outcome.to_string(), why, decided });
     }
     #[cfg(not(debug_assertions))]
     let _ = (last, text, outcome, why);
+}
+
+/// How the current rewrite's words were taken (its report; debug builds).
+fn note_decided(label: &str) {
+    #[cfg(debug_assertions)]
+    {
+        *DECIDED.lock().unwrap_or_else(|p| p.into_inner()) = label.to_string();
+    }
+    #[cfg(not(debug_assertions))]
+    let _ = label;
 }
 
 impl Shared {
@@ -124,6 +148,14 @@ impl Shared {
     /// Uses the **Commands** scope's own provider/model/prompt when that scope is
     /// enabled + configured, otherwise the global AI-cleanup endpoint; either way it
     /// needs a base URL configured. Emits the final `yap-state` itself.
+    ///
+    /// **A question about the selection is answered instead** (2026-10-31,
+    /// `ask_or_edit.rs`; "Answer questions about the selected text", on):
+    /// with something selected, words that ask ("what does this mean?",
+    /// "summarise this") go to the Voice Assistant's path with the
+    /// selection as their quote (`assistant::ask_about`) and nothing is
+    /// pasted; only a clear edit replaces it, and read-only text never is.
+    /// Nothing selected: as ever.
     pub(super) async fn run_rewrite(self: &Arc<Self>, instruction: String) {
         // Take the selection captured when the edit hotkey was pressed.
         let selection = self
@@ -132,6 +164,7 @@ impl Shared {
             .ok()
             .and_then(|mut g| g.take())
             .unwrap_or_default();
+        let read_only = self.selection_read_only.swap(false, Ordering::SeqCst);
         // Nothing selected, right after a paste into this window: that paste
         // — the last dictation — is what the instruction is for.
         let last = self
@@ -140,7 +173,63 @@ impl Shared {
             .ok()
             .and_then(|mut g| g.take())
             .filter(|_| selection.trim().is_empty());
+        note_decided("");
+        let (on, langs, model) = self
+            .config
+            .read()
+            .map(|c| (c.ask_about_selection, crate::dictation::languages::my_languages(&c), commands_model(&c)))
+            .unwrap_or_else(|_| (true, Vec::new(), CommandsModel::default()));
+        if crate::dictation::ask_or_edit::route(on, &selection, last.is_some(), &instruction) == crate::dictation::ask_or_edit::Route::Decide {
+            let decision = match crate::dictation::ask_or_edit::settled(&instruction, &langs, read_only) {
+                Some(d) => d,
+                None => {
+                    let ep = crate::dictation::ask_or_edit::Endpoint {
+                        base_url: &model.base_url,
+                        api_key: &model.api_key,
+                        model: &model.model,
+                        provider: &model.provider,
+                    };
+                    crate::dictation::ask_or_edit::decide(&instruction, &selection, &langs, Some(ep)).await
+                }
+            };
+            tracing::info!(decided = decision.label(), read_only, "Rewrite shortcut on a selection: an edit or a question");
+            note_decided(decision.label());
+            if decision.choice == crate::dictation::ask_or_edit::Choice::Answer {
+                self.answer_about_selection(instruction, selection);
+                return;
+            }
+        }
         self.run_agent(instruction, selection, last).await
+    }
+
+    /// **The words about the selection were a question**: corrected (the
+    /// dictionary, as the Voice Assistant's question is), then asked on the
+    /// Voice Assistant's path with the selection and its app
+    /// (`assistant::ask_about`) — spoken when spoken replies are on, the
+    /// bar's card, kept in Chat with the selection as its quote. Nothing is
+    /// pasted: the selection, and the clipboard edit mode's Ctrl+C put back,
+    /// stay as they were.
+    fn answer_about_selection(self: &Arc<Self>, instruction: String, selection: String) {
+        let question = self
+            .config
+            .read()
+            .map(|c| super::apply_corrections(&instruction, &c))
+            .unwrap_or_else(|_| instruction.clone());
+        let target = match self.target_hwnd.load(Ordering::Relaxed) {
+            0 => None,
+            h => Some(h),
+        };
+        let app = crate::pasting::text_injector::app_name_for(target).unwrap_or_default();
+        // A test run's stand-in window has no process: it says so.
+        #[cfg(debug_assertions)]
+        let app = if target.is_some() && target == super::test_target() { "e2e-stand-in.exe".to_string() } else { app };
+        report_rewrite(false, "", "answered", None);
+        crate::chat::assistant::ask_about(
+            &self.app,
+            question.trim().to_string(),
+            crate::chat::assistant::selected::Selected { text: selection, app },
+        );
+        let _ = self.app.emit("yap-state", "idle");
     }
 
     /// Shared runner for **Commands**: apply `instruction` via the Commands

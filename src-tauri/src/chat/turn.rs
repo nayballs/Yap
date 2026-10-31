@@ -242,8 +242,14 @@ async fn answer_turn(
     let skill = crate::chat::skills::current();
     let meetings = scope == Some("meetings") || skill.is_some();
     let cfg = config::load();
-    if let Some(plan) = crate::apps::plan_for(&text, &cfg, conversation_id).await {
-        return app_turn(conversation_id, &text, by_voice, asked, plan, stop).await;
+    // Text selected in another app that this question is about
+    // (`assistant/selected.rs`): the selection is what it's about — never
+    // an app to open, nor a search forced first.
+    let about_selection = crate::chat::assistant::selected::current();
+    if about_selection.is_none() {
+        if let Some(plan) = crate::apps::plan_for(&text, &cfg, conversation_id).await {
+            return app_turn(conversation_id, &text, by_voice, asked, plan, stop).await;
+        }
     }
     let endpoint = match crate::ai::ai_model::wake_on_device(&cfg).await {
         Ok(_) => resolve_chat_endpoint(&cfg),
@@ -360,6 +366,9 @@ async fn answer_turn(
     let selection = crate::chat::documents::selection();
     if let Some(quote) = selection.as_ref().and_then(crate::chat::documents::Selection::quote) {
         crate::chat::chats::set_quote(conv.id, user_index, quote);
+    } else if let Some(quote) = about_selection.as_ref().and_then(crate::chat::assistant::selected::quote) {
+        // …or text selected in another app: its start and the app.
+        crate::chat::chats::set_quote(conv.id, user_index, quote);
     }
     // This turn answers the conversation now: one still answering there
     // ends, with nothing saved.
@@ -456,7 +465,13 @@ async fn answer_turn(
     // games coming out in 2026" from memory, a tester's chat, 2026-10-21).
     // Cloud models decide for themselves. (Never before a new document's
     // outline: that comes first.)
-    let first = if !outline_first && tools_supported && web_on && crate::ai::ai_model::runs_here(&provider, &base_url) && crate::web::needs_web(&text) {
+    let first = if !outline_first
+        && about_selection.is_none()
+        && tools_supported
+        && web_on
+        && crate::ai::ai_model::runs_here(&provider, &base_url)
+        && crate::web::needs_web(&text)
+    {
         first_search(&text)
     } else {
         crate::chat::tools::FirstStep::Model
@@ -596,6 +611,13 @@ async fn answer_turn(
     // — in place of `steer`'s line (the selection says where). A model
     // without tools hears what was selected.
     let selected = selection.as_ref().and_then(|s| crate::chat::documents::selection_note(s, tools_supported.then_some(doc_tools)));
+    // **Text selected in another app** (`assistant/selected.rs`): what was
+    // selected and where, as much as the model's context has room for.
+    let selected = selected.or_else(|| {
+        about_selection
+            .as_ref()
+            .map(|s| crate::chat::assistant::selected::context_note(s, crate::chat::assistant::selected::room(context_size)))
+    });
     if let Some(note) = &selected {
         if in_message {
             context.push(note.clone());

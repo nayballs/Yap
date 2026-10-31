@@ -28,7 +28,18 @@
   key or a mouse button, Settings → Shortcuts; "" = unbound, the default;
   never Enter, never a clash — `input_hook::configure_send_from` gives way
   to all ten older shortcuts; `pasting/send_key.rs`. An older Yap drops it,
-  and its `moreHotkeys` entry: unbound again, nothing else), more_hotkeys (`moreHotkeys`, 2026-10-25: **more
+  and its `moreHotkeys` entry: unbound again, nothing else), ask_hotkey
+  (`askHotkey`, 2026-10-31: **Ask about the selection**, a question about
+  the text selected in any app, answered as the Voice Assistant's and never
+  replacing it, Settings → Shortcuts and Commands; "" = unbound, the
+  default; never a clash — `input_hook::configure_ask_from` gives way to
+  all eleven older shortcuts; `chat/assistant/selected.rs`. An older Yap
+  drops it, and its `moreHotkeys` entry: unbound again, nothing else),
+  ask_about_selection (`askAboutSelection`, on, 2026-10-31: "Answer
+  questions about the selected text", Settings → Commands — the rewrite
+  shortcut's question about a selection answered instead of replacing it,
+  `dictation/ask_or_edit.rs`; off, it rewrites as before; an older Yap
+  drops it: on again), more_hotkeys (`moreHotkeys`, 2026-10-25: **more
   shortcuts for one action**, Settings → Shortcuts' "+ Add another" — a map
   from an action's first shortcut's field ("hotkey", "editHotkey",
   "meetingHotkey", "assistantHotkey", "readHotkey", "asSaidHotkey",

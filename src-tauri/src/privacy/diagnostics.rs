@@ -54,6 +54,8 @@ const COPY: &[&str] = &[
     "hotkey",
     "editHotkey",
     "rewriteLastDictation",
+    "askAboutSelection",
+    "askHotkey",
     "assistantHotkey",
     "readHotkey",
     "asSaidHotkey",

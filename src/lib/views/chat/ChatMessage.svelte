@@ -16,6 +16,7 @@
   import { menuKey, openContextMenu } from '../../ui/contextMenu.svelte.js';
   import { chatImageUrl, removedLine, sizeLine, imageItems, splitScreenText } from './chatImages.js';
   import { thoughtLabel } from './chatThink.svelte.js';
+  import { appLabel } from '../../core/appNames.js';
   import SourcesRow from './SourcesRow.svelte';
   import ChatSteps from './ChatSteps.svelte';
 
@@ -135,8 +136,11 @@
       </div>
     {/if}
     {#if m.quote?.text}
-      <!-- The passage of a document it was asked about (the panel's selection). -->
-      <blockquote class="quoted" data-testid="chat-quote-sent" title={m.quote.text}>{m.quote.text}</blockquote>
+      <!-- The passage of a document it was asked about (the panel's selection),
+           or text selected in another app (chat/assistant/selected.rs: no note,
+           its app named). -->
+      <!-- prettier-ignore -->
+      <blockquote class="quoted" data-testid="chat-quote-sent" title={m.quote.text}>{#if !m.quote.noteId}<span class="quotefrom" data-testid="chat-quote-from">{m.quote.app ? `Selected in ${appLabel(m.quote.app)}` : 'Selected text'}</span>{/if}{m.quote.text}</blockquote>
     {/if}
     <p class="cbody">
       {#if m.voice}
@@ -324,6 +328,13 @@
     overflow: hidden;
     overflow-wrap: anywhere;
     white-space: pre-line;
+  }
+  /* "Selected in Notepad": text from another app (chat/assistant/selected.rs). */
+  .quotefrom {
+    display: block;
+    font-size: 11.5px;
+    font-weight: 600;
+    color: var(--yap-fg-62);
   }
   /* A document's pill under the answer that made or changed it. */
   .docpills {

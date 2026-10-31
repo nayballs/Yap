@@ -788,10 +788,17 @@ impl Shared {
             .map(|c| apply_corrections(transcript, &c))
             .unwrap_or_else(|_| transcript.to_string());
         let question = question.trim().to_string();
+        // Ask about the selection's question (its shortcut read it at the
+        // press): about that text, never anything else.
+        let about = self.ask_selection.lock().ok().and_then(|mut g| g.take());
         if question.is_empty() {
             tracing::info!("Voice Assistant: nothing heard");
             crate::chat::assistant::nothing(&self.app);
             return false;
+        }
+        if let Some(about) = about {
+            crate::chat::assistant::ask_about(&self.app, question, about);
+            return true;
         }
         // "Snip" said as the whole question: a screenshot, not a question.
         if self.snip_said(&question) {

@@ -1,4 +1,4 @@
-// Settings' eleven global shortcuts (dictation/input_hook.rs): which command applies
+// Settings' twelve global shortcuts (dictation/input_hook.rs): which command applies
 // each, their names for clash messages, and whether one is being picked
 // right now (Settings' in-page hotkey fallback stands down meanwhile, so
 // pressing the current hotkey to replace it doesn't start a dictation).
@@ -26,6 +26,7 @@ export const HOTKEY_CMD = {
   copyLastHotkey: 'configure_copy_last_hotkey',
   quickNoteHotkey: 'configure_quick_note_hotkey',
   sendHotkey: 'configure_send_hotkey',
+  askHotkey: 'configure_ask_hotkey',
 };
 
 export const HOTKEY_NAMES = {
@@ -40,6 +41,7 @@ export const HOTKEY_NAMES = {
   copyLastHotkey: 'Copy-last shortcut',
   quickNoteHotkey: 'Quick-note shortcut',
   sendHotkey: 'Send shortcut',
+  askHotkey: 'Ask-about-selection shortcut',
 };
 
 /** True while any <SettingsHotkey> is capturing a new key. */
