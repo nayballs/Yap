@@ -5,17 +5,17 @@
 //   the latest talk, its pill opening the line in the transcript;
 // - Make notes longer after it: the summary written out in more detail, a
 //   task the model dropped put back, Undo;
-// - Skills: "/" in the notepad's Ask box lists the ones that run on one
-//   meeting (Enter runs one, Tab puts it in the box to add words), the
+// - Skills: "/" in the notepad's Ask box lists the core ones that run on
+//   one meeting (Enter runs one, Tab puts it in the box to add words), the
 //   person's own made in Settings → Skills, a copy of a built-in;
-// - Chat's one-tap prompts (Coach me, List my open to-dos, Write a weekly
-//   recap) and "/" in Chat and the Meetings view's Ask bar, asked across
-//   the meetings with their own passages;
+// - Chat's one-tap prompts (with no calendar: Write my stand-up, List my
+//   open to-dos, What did we decide?) and "/" in Chat and the Meetings
+//   view's Ask bar, asked across the meetings with their own passages;
 // - a meeting's past chat renamed.
 // The AI is the local fake (support/fake-llm.js), which records every
 // request. No audio device is opened: transcript lines are handed to the
 // recorder with `e2e_meeting_feed`.
-import { test as base, expect, openView, openSettings, closeSettings, closeToasts } from './support/fixtures.js';
+import { test as base, expect, openView, openSettings, closeSettings, closeToasts, setConfig } from './support/fixtures.js';
 import { startFakeLlm } from './support/fake-llm.js';
 import { newMeetingNote } from './support/meetings.js';
 import { meetingHelpers } from '../src/lib/core/notepadText.js';
@@ -238,14 +238,25 @@ test('Skills in the notepad: "/" lists them, Enter runs one, Tab adds words; you
   await say(yap, ...BUDGET_TALK);
   const sheet = askSheet(pad);
 
-  // "/": the Skills that run on one meeting (not the across-meetings ones).
+  // "/": the core Skills that run on one meeting (not the across-meetings ones).
   await askInput(pad).fill('/');
   const menu = skillMenu(pad);
-  await expect(menu.getByRole('option')).toHaveCount(8);
+  await expect(menu.getByRole('option')).toHaveCount(3);
   await expect(menu.getByRole('option').first()).toContainText('/followup-email');
   await expect(menu).not.toContainText('/todos');
   await expect(suggestions(pad)).toHaveCount(0); // the chips step aside while typing
   await shot(pad, '20-skill-menu');
+  // The paper look in dark too.
+  const themeOf = (page) => page.evaluate(() => document.documentElement.dataset.yapTheme);
+  await setConfig(yap, main, { theme: 'dark' });
+  try {
+    await expect.poll(() => themeOf(pad)).toBe('dark');
+    await expect(menu).toBeVisible();
+    await shot(pad, '20-skill-menu-dark');
+  } finally {
+    await setConfig(yap, main, { theme: 'light' });
+    await expect.poll(() => themeOf(pad)).toBe('light');
+  }
   // Narrowed as it's typed; Enter runs the one highlighted.
   await askInput(pad).fill('/dec');
   await expect(menu.getByRole('option')).toHaveCount(1);
@@ -261,14 +272,20 @@ test('Skills in the notepad: "/" lists them, Enter runs one, Tab adds words; you
   expect(run.user).toMatch(/The Skill to carry out on this meeting: Decisions \(\/decisions\)\nInstructions:\nList every decision[^\n]*$/);
   await shot(pad, '21-skill-answer');
   // Tab puts it in the box, to add words.
-  await askInput(pad).fill('/ri');
+  await askInput(pad).fill('/sum');
   await pad.keyboard.press('Tab');
-  await expect(askInput(pad)).toHaveValue('/risks ');
-  await askInput(pad).pressSequentially('about the venue');
+  await expect(askInput(pad)).toHaveValue('/summary-for ');
+  await askInput(pad).pressSequentially('the venue team');
   await pad.keyboard.press('Enter');
-  await expect(sheet.locator('.mq').last()).toHaveText('/risks about the venue');
-  await expect(sheet.locator('.ma').last()).toContainText('You asked about: about the venue');
-  expect(fakeLlm.requests.filter((r) => r.kind === 'skill').at(-1).user).toMatch(/\nThe user's own words with it: about the venue$/);
+  await expect(sheet.locator('.mq').last()).toHaveText('/summary-for the venue team');
+  await expect(sheet.locator('.ma').last()).toContainText('You asked about: the venue team');
+  expect(fakeLlm.requests.filter((r) => r.kind === 'skill').at(-1).user).toMatch(/\nThe user's own words with it: the venue team$/);
+  // One off the menu (/risks waits in More Skills): typed in full, it runs.
+  await askInput(pad).fill('/risks');
+  await expect(menu).toHaveCount(0);
+  await pad.keyboard.press('Enter');
+  await expect(sheet.locator('.mq').last()).toHaveText('/risks');
+  await expect(sheet.locator('.ma').last().getByRole('heading', { name: 'Risks' })).toBeVisible();
   // Esc closes the menu, not the sheet.
   await askInput(pad).fill('/');
   await expect(menu).toBeVisible();
@@ -302,7 +319,7 @@ test('Skills in the notepad: "/" lists them, Enter runs one, Tab adds words; you
   await form.getByRole('tab', { name: 'One meeting' }).click();
   await shot(main, '22-new-skill');
   await form.getByRole('button', { name: 'Save Skill' }).click();
-  await expect(dialog.locator('[data-skill="budget-numbers"]')).toContainText('One meeting');
+  await expect(dialog.getByRole('group', { name: 'Your Skills' }).locator('[data-skill="budget-numbers"]')).toContainText('List every amount of money');
   const stored = yap.readJson('skills.json');
   expect(stored.skills.map((s) => [s.command, s.runsOn, s.basedOn ?? ''])).toEqual([
     ['my-decisions', 'both', 'decisions'],
@@ -367,7 +384,8 @@ test('Chat: one-tap prompts and "/" ask across the meetings with their own passa
   await openView(main, 'Chat');
   await main.getByRole('button', { name: 'New chat' }).first().click();
   const prompts = main.getByRole('group', { name: 'Try asking' });
-  await expect(prompts.getByRole('button')).toHaveText(['Coach me', 'List my open to-dos', 'Write a weekly recap']);
+  // No calendar here: Prepare for my next meeting waits for one.
+  await expect(prompts.getByRole('button')).toHaveText(['Write my stand-up', 'List my open to-dos', 'What did we decide?']);
   await shot(main, '30-chat-prompts');
   const asked = fakeLlm.requests.length;
   await prompts.getByRole('button', { name: 'List my open to-dos' }).click();
@@ -392,9 +410,15 @@ test('Chat: one-tap prompts and "/" ask across the meetings with their own passa
   const box = main.getByRole('textbox', { name: 'Message' });
   await box.fill('/');
   const menu = skillMenu(main);
-  await expect(menu).toContainText('/weekly-recap');
+  await expect(menu).toContainText('/standup');
   await expect(menu).not.toContainText('/followup-email');
-  await box.fill('/weekly');
+  await box.fill('/stand');
+  await box.press('Enter');
+  await expect(main.locator('.cbubble.user').last()).toContainText('/standup');
+  await expect.poll(() => JSON.stringify(fakeLlm.requests.filter((r) => r.kind === 'other').at(-1)?.messages ?? '')).toContain('Skill: Stand-up (/standup)');
+  // /weekly-recap waits in More Skills: typed in full, it runs.
+  await box.fill('/weekly-recap');
+  await expect(menu).toHaveCount(0);
   await box.press('Enter');
   await expect(main.locator('.cbubble.user').last()).toContainText('/weekly-recap');
   await expect.poll(() => JSON.stringify(fakeLlm.requests.filter((r) => r.kind === 'other').at(-1)?.messages ?? '')).toContain('Skill: Weekly recap (/weekly-recap)');
@@ -402,11 +426,11 @@ test('Chat: one-tap prompts and "/" ask across the meetings with their own passa
   // The Meetings view: the same prompts over its Ask bar (its examples still cycle in the box).
   await openView(main, 'Meetings');
   const over = main.getByRole('group', { name: 'Try asking' });
-  await expect(over.getByRole('button')).toHaveText(['Coach me', 'List my open to-dos', 'Write a weekly recap']);
+  await expect(over.getByRole('button')).toHaveText(['Write my stand-up', 'List my open to-dos', 'What did we decide?']);
   await shot(main, '32-meetings-prompts');
-  await over.getByRole('button', { name: 'Coach me' }).click();
-  await expect(main.locator('.cbubble.user').last()).toContainText('Coach me on my last meeting');
+  await over.getByRole('button', { name: 'What did we decide?' }).click();
+  await expect(main.locator('.cbubble.user').last()).toContainText('What did we decide in my last meeting?');
   await expect
     .poll(() => JSON.stringify(fakeLlm.requests.filter((r) => r.kind === 'other').at(-1)?.messages ?? ''))
-    .toContain('Skill: Coach me (/coach)');
+    .toContain('Skill: Decisions (/decisions)');
 });
