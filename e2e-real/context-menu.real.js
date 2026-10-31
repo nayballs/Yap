@@ -62,7 +62,10 @@ test('a right-click: nothing on plain UI, only the edit menu in a text field; Sh
 
   // A text field: its menu comes up, with the edit commands only.
   await main.getByRole('button', { name: 'New note' }).first().click();
-  const raw = main.getByPlaceholder('Start writing…');
+  // My thoughts is a page you can format (components/richtext/); its Source is the plain text box.
+  await main.getByRole('group', { name: 'View' }).getByRole('button', { name: 'Source' }).click();
+  const raw = main.getByRole('textbox', { name: 'My thoughts' });
+  await expect(raw).toHaveJSProperty('tagName', 'TEXTAREA');
   await raw.fill('Some text to edit');
   before = (await menus()).menus;
   r = await rightClick(raw, () => [260, 70]);
