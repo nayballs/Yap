@@ -80,7 +80,7 @@ pub fn block(text: &str) -> String {
 /// `words`: the most it may write. Pure.
 pub fn prompt(words: u64) -> String {
     format!(
-        "You keep the notes of a long chat between a user and an AI assistant, so the chat can go on once its older messages are left out.\n\nYou get the notes so far and the next messages. Write the notes again, with what the new messages add.\n\nRules:\n- Keep every fact the user gave: names, numbers, amounts, dates, places, decisions and preferences. Copy them exactly.\n- Keep what the user asked for and what they were told, in a few words each, and anything still open.\n- Short lines starting with \"- \". No headings, no preamble, nothing else.\n- Only what the chat says: never add or guess anything.\n- Write in the language of the chat.\n- At most {words} words."
+        "You keep the notes of a long chat between a user and an AI assistant, so the chat can go on once its older messages are left out.\n\nYou get the notes so far and the next messages. Write the notes again, with what the new messages add.\n\nRules:\n- Keep every fact the user gave: names, numbers, amounts, dates, places, decisions and preferences. Copy them exactly.\n- Keep what the user asked for and what they were told, in a few words each, and anything still open.\n- When an Assistant line names an AI model, keep that name with what it did (\"- Claude Opus 5.5 wrote the plan\").\n- Short lines starting with \"- \". No headings, no preamble, nothing else.\n- Only what the chat says: never add or guess anything.\n- Write in the language of the chat.\n- At most {words} words."
     )
 }
 
@@ -94,10 +94,25 @@ pub fn target_tokens(room: u64) -> u64 {
     (room * 15 / 100).clamp(250, 1_500)
 }
 
+/// Did more than one model answer in `messages` (a switch in the picker)?
+/// Pure.
+pub fn models_switched(messages: &[ChatMessage]) -> bool {
+    let mut by = messages.iter().filter(|m| m.role == "assistant").filter_map(|m| m.model.as_ref()).map(|m| (&m.provider, &m.id));
+    by.next().is_some_and(|first| by.any(|m| m != first))
+}
+
 /// A message as the summariser reads it: who said it, and its text — a
-/// very long one (a paste) its start and end. Pure.
-pub fn line(m: &ChatMessage, max_chars: usize) -> String {
-    let who = if m.role == "assistant" { "Assistant" } else { "User" };
+/// very long one (a paste) its start and end. `named`: the chat switched
+/// models, so an answer carries the model that wrote it ("Assistant (Claude
+/// Opus 5.5)") and the notes keep who did what: written "Assistant:
+/// Created a … build", the 4B took a build Claude Opus wrote for its own
+/// (2026-10-31). Pure.
+pub fn line(m: &ChatMessage, max_chars: usize, named: bool) -> String {
+    let who = match (m.role == "assistant", m.model.as_ref().filter(|_| named)) {
+        (true, Some(by)) => format!("Assistant ({})", budget::model_label(&by.provider, &by.id, &by.name)),
+        (true, None) => "Assistant".to_string(),
+        (false, _) => "User".to_string(),
+    };
     let text = m.text.trim();
     let n = text.chars().count();
     if n <= max_chars {
@@ -314,7 +329,8 @@ async fn summarise_claimed(app: Option<&AppHandle>, conversation: u64, range: Ra
     let reading = most.saturating_sub(budget::estimate(&system) + max_reply + target_tokens(room)).max(800);
     // A paste longer than a third of that: its start and end.
     let max_chars = (reading as usize / 3) * 36 / 10;
-    let lines: Vec<String> = conv.messages[range.clone()].iter().map(|m| line(m, max_chars.max(400))).collect();
+    let named = models_switched(&conv.messages);
+    let lines: Vec<String> = conv.messages[range.clone()].iter().map(|m| line(m, max_chars.max(400), named)).collect();
     let mut notes: Option<String> = conv.usable_summary().map(|s| s.text.clone());
     let turns = TURNS.load(Ordering::SeqCst);
     let _sidecar = crate::ai::local_llm::hold(&ep.base_url);
@@ -431,7 +447,7 @@ mod tests {
 
     #[test]
     fn a_summary_is_extended_from_the_old_one_and_the_new_messages() {
-        let r = request(Some("- Budget £18,400\n- Marta Quill organises"), &[line(&said("user", "Book Friday's dinner"), 1_000)]);
+        let r = request(Some("- Budget £18,400\n- Marta Quill organises"), &[line(&said("user", "Book Friday's dinner"), 1_000, false)]);
         assert!(r.starts_with("Notes so far:\n- Budget £18,400\n- Marta Quill organises\n\nNext messages:\nUser: Book Friday's dinner"));
         assert!(request(None, &[]).contains("(none yet)"));
     }
@@ -439,12 +455,29 @@ mod tests {
     #[test]
     fn a_long_paste_is_read_by_its_start_and_end() {
         let text = format!("START {} END", "x".repeat(5_000));
-        let l = line(&said("user", &text), 1_000);
+        let l = line(&said("user", &text), 1_000, false);
         assert!(l.starts_with("User: START"));
         assert!(l.ends_with("END"));
         assert!(l.contains("characters left out"));
         assert!(l.chars().count() < 1_200);
-        assert_eq!(line(&said("assistant", " Hi "), 1_000), "Assistant: Hi");
+        assert_eq!(line(&said("assistant", " Hi "), 1_000, false), "Assistant: Hi");
+    }
+
+    #[test]
+    fn after_a_switch_the_notes_keep_which_model_wrote_an_answer() {
+        let qwen = ChatModel { provider: "ondevice".into(), id: "Qwen_Qwen3.5-4B-Q4_K_M".into(), name: "Qwen3.5 4B".into(), on_this_pc: true };
+        let opus = ChatModel { provider: "anthropic".into(), id: "claude-opus-5-5".into(), name: String::new(), on_this_pc: false };
+        let by = |m: &ChatModel, text: &str| ChatMessage { model: Some(m.clone()), ..said("assistant", text) };
+        let chat = vec![said("user", "Make me a build"), by(&opus, "Here's your build."), said("user", "Hey"), by(&qwen, "Hello!")];
+        assert!(models_switched(&chat));
+        assert!(!models_switched(&chat[..2]));
+        assert!(!models_switched(&[said("user", "Hi"), said("assistant", "Hello!")]));
+        assert_eq!(line(&chat[1], 1_000, true), "Assistant (Claude Opus 5.5): Here's your build.");
+        assert_eq!(line(&chat[3], 1_000, true), "Assistant (Qwen3.5 4B): Hello!");
+        // One model all along: no names (the model isn't told its own).
+        assert_eq!(line(&chat[1], 1_000, false), "Assistant: Here's your build.");
+        assert_eq!(line(&chat[0], 1_000, true), "User: Make me a build");
+        assert!(prompt(400).contains("When an Assistant line names an AI model, keep that name"));
     }
 
     #[test]

@@ -411,7 +411,12 @@ Chat's and the Voice Assistant's two ways of reaching outside Yap: looking thing
   answer just before, which asked a question naming that app
   (`consented`: "Would you like me to open Baldur's Gate 3?" → "Yes."; not
   "Are you struggling?"), so a note saying "open X" can't (chip `Didn't
-  open "X": you didn't ask to open an app`). `list_apps` takes a query
+  open "X": you didn't ask to open an app`). The refusal tells the model
+  what's true, not only what's refused (2026-10-31): Yap can open apps
+  whenever the person asks, so never say it can't, and just reply to their
+  latest message — told only "nothing was opened", Qwen3.5-4B answered a
+  "Hey" after an earlier open with "I can't open your games". The tool's
+  description says an earlier request was already done. `list_apps` takes a query
   and gives ≤ 15 names (`LIST_MAX`; no query: the count, 15, "pass a
   query" — 840 → 135 est. tokens on the test PC). **A model without
   tools** gets `NO_TOOLS_NOTE` (+ `NO_TOOLS_OPEN`: say "open" and the

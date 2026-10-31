@@ -691,6 +691,8 @@ isn't logged.
     }],
     "memory": [{ "section": "people", "title": "Rochelle", "summary": "Sister", "details": ["Lives in York"] }],
     "chats": [{ "title": "Trip to Lisbon", "messages": [{ "role": "user", "text": "…" }, { "role": "assistant", "text": "…" }] }],
+                                              // "continue": true — the turns go on in this chat; an answer's
+                                              // "model": "anthropic:claude-opus-5-5" — another model wrote it
     "calendar": {                             // a connected calendar for check_calendar (chat/tools/calendar.rs)
       "connected": true,                      // false: none connected (the tool isn't offered)
       "meetings": [{ "title": "Design review", "day": "tomorrow", "start": "10:00", "minutes": 60,

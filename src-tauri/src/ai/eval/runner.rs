@@ -958,8 +958,9 @@ fn resolve_apps(apps: &Apps, scenarios: &Path, run_dir: &Path, this_pc: &mut Opt
 }
 
 /// Put the scenario's notes and folders in the (fresh, in-memory) store,
-/// its memory and its earlier chats.
-fn seed(s: &Scenario) -> Result<(), String> {
+/// its memory and its earlier chats. Returns the chat the turns go on in,
+/// if one is marked `continue`.
+fn seed(s: &Scenario) -> Result<Option<u64>, String> {
     crate::notes::eval_reset();
     crate::memory::eval_reset();
     crate::chat::chats::eval_reset();
@@ -982,10 +983,19 @@ fn seed(s: &Scenario) -> Result<(), String> {
             return Err(format!("memory seed \"{}\" wasn't kept", m.title));
         }
     }
+    let mut go_on = None;
     for c in &s.seed.chats {
         let conv = crate::chat::chats::create(&c.title);
         for m in &c.messages {
-            crate::chat::chats::append(conv.id, &m.role, &m.text, &[], None, false)?;
+            // "anthropic:claude-opus-5-5": the model that wrote an answer.
+            let by = m.model.as_deref().map(|spec| {
+                let (provider, id) = spec.split_once(':').unwrap_or(("", spec));
+                crate::chat::chats::ChatModel { provider: provider.into(), id: id.into(), name: String::new(), on_this_pc: provider == "ondevice" }
+            });
+            crate::chat::chats::append(conv.id, &m.role, &m.text, &[], by, false)?;
+        }
+        if c.go_on {
+            go_on = Some(conv.id);
         }
     }
     for f in &s.seed.folders {
@@ -1016,7 +1026,7 @@ fn seed(s: &Scenario) -> Result<(), String> {
             crate::notes::append_transcript(note.id, &lines)?;
         }
     }
-    Ok(())
+    Ok(go_on)
 }
 
 /// A scenario's calendar as Chat's calendar tool will read it: each
@@ -1116,9 +1126,10 @@ async fn run_scenario(
     record::set_tools_forced(forced);
     record::set_doc_tools_forced(args.doc_tools);
     let tools = forced.unwrap_or(m.tools_rule);
-    if let Err(e) = seed(s) {
-        return error_row(m, &name, &format!("seed: {e}"));
-    }
+    let seeded = match seed(s) {
+        Ok(c) => c,
+        Err(e) => return error_row(m, &name, &format!("seed: {e}")),
+    };
     let _ = crate::apps::e2e_opened_apps(Some(true));
     record::write(
         "scenario_start",
@@ -1135,7 +1146,8 @@ async fn run_scenario(
         }),
     );
 
-    let mut conversation: Option<u64> = None;
+    // A seeded chat marked `continue`: the turns go on in it.
+    let mut conversation: Option<u64> = seeded;
     let mut seen: Vec<Observed> = Vec::new();
     let mut fails: Vec<String> = Vec::new();
     let mut warns: Vec<String> = Vec::new();
