@@ -190,7 +190,9 @@ tokio::task_local! {
 
 /// Run a Chat turn thinking it through (`on`), and say what it thought —
 /// `None` when no request of it asked the model to think. Off: just the
-/// turn, as ever (nothing can turn it on: [`scoped`] can).
+/// turn, as ever (nothing can turn it on: [`scoped`] can). The screenshot
+/// evaluations' way in (`eval/vision.rs`); Chat's own is [`scoped`].
+#[cfg(any(test, debug_assertions))]
 pub async fn with<F: Future>(on: bool, f: F) -> (F::Output, Option<Thought>) {
     if !on {
         return (f.await, None);
