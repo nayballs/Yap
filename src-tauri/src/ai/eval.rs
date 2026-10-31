@@ -57,6 +57,8 @@ mod standin;
 #[cfg(debug_assertions)]
 mod transforms;
 #[cfg(debug_assertions)]
+mod replies;
+#[cfg(debug_assertions)]
 mod vision;
 #[cfg(debug_assertions)]
 mod strength;

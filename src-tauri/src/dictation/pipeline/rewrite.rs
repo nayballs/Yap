@@ -85,6 +85,11 @@ pub(crate) struct Rewritten {
     /// "doubt:answer", "readOnly:answer"); empty: not decided (nothing
     /// selected, or "Answer questions about the selected text" off).
     pub decided: String,
+    /// How the window in front went with it (`command_screen::label`:
+    /// "rule:text", "model:text", "rule:picture", "rule:asked" — asked
+    /// first, nothing written —, "rule:withheld", "rule:off",
+    /// "rule:unread", "model:no"); empty: not needed.
+    pub screen: String,
 }
 
 #[cfg(debug_assertions)]
@@ -95,12 +100,18 @@ pub(super) static LAST_REWRITE: Mutex<Option<Rewritten>> = Mutex::new(None);
 #[cfg(debug_assertions)]
 static DECIDED: Mutex<String> = Mutex::new(String::new());
 
+/// How the window in front went with the current Command (its report;
+/// debug builds only).
+#[cfg(debug_assertions)]
+static SCREEN: Mutex<String> = Mutex::new(String::new());
+
 /// Keep what the rewrite did for the robot (debug builds only).
 fn report_rewrite(last: bool, text: &str, outcome: &str, why: Option<String>) {
     #[cfg(debug_assertions)]
     if let Ok(mut r) = LAST_REWRITE.lock() {
         let decided = std::mem::take(&mut *DECIDED.lock().unwrap_or_else(|p| p.into_inner()));
-        *r = Some(Rewritten { last, text: text.to_string(), outcome: outcome.to_string(), why, decided });
+        let screen = std::mem::take(&mut *SCREEN.lock().unwrap_or_else(|p| p.into_inner()));
+        *r = Some(Rewritten { last, text: text.to_string(), outcome: outcome.to_string(), why, decided, screen });
     }
     #[cfg(not(debug_assertions))]
     let _ = (last, text, outcome, why);
@@ -115,6 +126,32 @@ fn note_decided(label: &str) {
     #[cfg(not(debug_assertions))]
     let _ = label;
 }
+
+/// How the window in front went with the current Command (its report;
+/// debug builds).
+fn note_screen(label: &str) {
+    #[cfg(debug_assertions)]
+    {
+        *SCREEN.lock().unwrap_or_else(|p| p.into_inner()) = label.to_string();
+    }
+    #[cfg(not(debug_assertions))]
+    let _ = label;
+}
+
+/// What a Command takes of the window in front ([`Shared::look_for_command`]).
+enum Look {
+    /// The words alone (the label says why; "" when the screen wasn't
+    /// needed).
+    Without(String),
+    /// A cloud model met the first Command that needs the screen: asked
+    /// first, nothing written (`command_screen::ask_once`).
+    Asked,
+    /// The window's text or its picture.
+    With(crate::dictation::command_screen::Context, String),
+}
+
+/// Where the bar says "Reading the window…" (`yap-command-screen`).
+const READING: &str = "yap-command-screen";
 
 impl Shared {
     /// Is this dictation a **Command** (it says the agent's name; was "the
@@ -174,11 +211,23 @@ impl Shared {
             .and_then(|mut g| g.take())
             .filter(|_| selection.trim().is_empty());
         note_decided("");
-        let (on, langs, model) = self
+        note_screen("");
+        let (on, langs, model, screen_on) = self
             .config
             .read()
-            .map(|c| (c.ask_about_selection, crate::dictation::languages::my_languages(&c), commands_model(&c)))
-            .unwrap_or_else(|_| (true, Vec::new(), CommandsModel::default()));
+            .map(|c| (c.ask_about_selection, crate::dictation::languages::my_languages(&c), commands_model(&c), c.commands_screen))
+            .unwrap_or_else(|_| (true, Vec::new(), CommandsModel::default(), false));
+        // Right after a dictation, words that reply to what's on screen
+        // ("reply saying Thursday works", not "make the reply shorter"):
+        // new text, drafted from the window in front (`command_screen.rs`),
+        // the dictation left where it is.
+        let last = match last {
+            Some(_) if screen_on && crate::dictation::command_screen::replies_instead_of_rewriting(&instruction, &langs) => {
+                tracing::info!("Rewrite shortcut: a reply to what's on screen, not the last dictation's rewrite");
+                None
+            }
+            last => last,
+        };
         if crate::dictation::ask_or_edit::route(on, &selection, last.is_some(), &instruction) == crate::dictation::ask_or_edit::Route::Decide {
             let decision = match crate::dictation::ask_or_edit::settled(&instruction, &langs, read_only) {
                 Some(d) => d,
@@ -319,33 +368,91 @@ impl Shared {
             None => selection,
         };
 
-        // The person's writing samples for the kind of app it's going into
-        // (`ai/writing_samples.rs`; none in a terminal or an AI prompt).
-        let samples = {
+        // The kind of app it's going into, and the person's writing samples
+        // for it (`ai/writing_samples.rs`; none in a terminal or an AI
+        // prompt).
+        let category = {
             let app_name = crate::pasting::text_injector::app_name_for(target);
             let style_target = crate::ai::cleanup_styles::Target::of_window(target, app_name.as_deref(), self.read_kind());
-            self.config
-                .read()
-                .ok()
-                .map(|c| crate::ai::cleanup_styles::category(&c, &style_target))
-                .and_then(|category| crate::ai::writing_samples::for_rewrite(category, &base_url))
+            self.config.read().ok().map(|c| crate::ai::cleanup_styles::category(&c, &style_target))
+        };
+        let samples = category.and_then(|category| crate::ai::writing_samples::for_rewrite(category, &base_url));
+
+        // New text that replies to what's on screen: the window in front
+        // goes with it (`command_screen.rs`) — or, a cloud model never
+        // asked, nothing yet: asked first.
+        let look = if selection.trim().is_empty() && last.is_none() {
+            let ep = crate::dictation::ask_or_edit::Endpoint { base_url: &base_url, api_key: &api_key, model: &model, provider: &provider };
+            self.look_for_command(&instruction, target, &ep).await
+        } else {
+            Look::Without(String::new())
+        };
+        let screen = match look {
+            Look::Asked => {
+                note_screen(&crate::dictation::command_screen::label(false, "asked"));
+                report_rewrite(false, "", "asked", None);
+                let _ = self.app.emit("yap-state", "idle");
+                return;
+            }
+            Look::Without(label) => {
+                note_screen(&label);
+                None
+            }
+            Look::With(ctx, label) => {
+                note_screen(&label);
+                Some(ctx)
+            }
         };
 
         // Recorded as Commands' in the network receipts (net.rs), saying
-        // when the writing samples went too.
-        match crate::privacy::net::within(crate::privacy::net::Feature::commands(samples.is_some()), crate::ai::llm::rewrite_with_samples(
-            &instruction,
-            &selection,
-            samples.as_deref(),
-            &base_url,
-            &api_key,
-            &model,
-            &provider,
-            &body,
-            disable_thinking,
-        ))
-        .await
-        {
+        // when the window in front and the writing samples went too.
+        let asked = match &screen {
+            Some(ctx) => {
+                let (window, parts): (Option<&str>, &[serde_json::Value]) = match ctx {
+                    crate::dictation::command_screen::Context::Text(t) => (Some(t.as_str()), &[]),
+                    crate::dictation::command_screen::Context::Picture { parts, .. } => (None, parts.as_slice()),
+                };
+                let style = self
+                    .config
+                    .read()
+                    .ok()
+                    .and_then(|c| category.and_then(|cat| crate::ai::cleanup_styles::draft_line(&c, cat, &c.about_name)));
+                let draft = crate::ai::llm::ScreenDraft {
+                    instruction: &instruction,
+                    window,
+                    parts,
+                    samples: samples.as_deref(),
+                    body: &body,
+                    style: style.as_deref(),
+                };
+                let out = crate::privacy::net::within(
+                    crate::privacy::net::Feature::commands_screen(samples.is_some(), ctx.is_picture()),
+                    crate::ai::llm::draft_from_screen(&draft, &base_url, &api_key, &model, &provider, disable_thinking),
+                )
+                .await
+                .map(|text| crate::dictation::command_screen::clean_draft(&text));
+                crate::dictation::command_screen::forget(ctx);
+                out
+            }
+            None => {
+                crate::privacy::net::within(
+                    crate::privacy::net::Feature::commands(samples.is_some()),
+                    crate::ai::llm::rewrite_with_samples(
+                        &instruction,
+                        &selection,
+                        samples.as_deref(),
+                        &base_url,
+                        &api_key,
+                        &model,
+                        &provider,
+                        &body,
+                        disable_thinking,
+                    ),
+                )
+                .await
+            }
+        };
+        match asked {
             Ok(result) => {
                 let mut out = result.trim().to_string();
                 if out.is_empty() {
@@ -443,5 +550,113 @@ impl Shared {
                 self.say_failed();
             }
         }
+    }
+
+    /// **What a Command writing new text takes of the window in front**
+    /// (`command_screen.rs`): nothing unless its words reply to what's on
+    /// screen (the rule; a maybe, the model's yes); never in Yap's own
+    /// window or a terminal; then the settings' gate — a cloud model never
+    /// asked: asked first, nothing written — and the read, "Reading the
+    /// window…" on the bar meanwhile: its text, bounded, or, next to none
+    /// read, a screenshot for a model that reads images.
+    async fn look_for_command(self: &Arc<Self>, instruction: &str, target: Option<isize>, ep: &crate::dictation::ask_or_edit::Endpoint<'_>) -> Look {
+        use crate::dictation::command_screen as cs;
+        let langs = self.config.read().map(|c| crate::dictation::languages::my_languages(&c)).unwrap_or_default();
+        let need = cs::needs(instruction, &langs);
+        if need == cs::Need::No {
+            return Look::Without(String::new());
+        }
+        // The switches as config.json has them now: the ask and its Allow
+        // save them from Rust (`command_screen::ask_once`, `allow_cloud`),
+        // which the live config only hears of at Settings' next save.
+        let saved = crate::config::load();
+        let (on, cloud_on, asked) = (saved.commands_screen, saved.commands_screen_cloud, saved.commands_screen_asked);
+        // Yap's own window, or a terminal (its screen is the command line's):
+        // never.
+        let Some(hwnd) = target else {
+            return Look::Without(String::new());
+        };
+        if matches!(self.paste_kind(), AppKind::Terminal(_)) {
+            tracing::info!("Command: a terminal's window is never read");
+            return Look::Without(String::new());
+        }
+        let maybe = need == cs::Need::Maybe;
+        let leaves = crate::chat::assistant::screen::leaves_pc(ep.provider, ep.base_url);
+        let gate = cs::gate(on, cloud_on, asked, leaves);
+        tracing::info!(?need, ?gate, "Command: one that may need the window in front");
+        // (A maybe isn't worth asking about when it couldn't go.)
+        let quiet = |what: &str| Look::Without(if maybe { String::new() } else { cs::label(false, what) });
+        match gate {
+            cs::Gate::Off => return quiet("off"),
+            cs::Gate::NotToTheCloud => return quiet("withheld"),
+            cs::Gate::AskFirst if maybe => return quiet("withheld"),
+            cs::Gate::AskFirst => {
+                cs::ask_once(&self.app, ep.provider, instruction, hwnd);
+                return Look::Asked;
+            }
+            cs::Gate::Read => {}
+        }
+        if maybe && !cs::model_says(instruction, ep).await {
+            return Look::Without(cs::label(true, "no"));
+        }
+        let _ = self.app.emit(READING, true);
+        let t = std::time::Instant::now();
+        let read = tokio::task::spawn_blocking(move || cs::read(hwnd)).await.ok().flatten();
+        let max = if leaves { cs::MAX_CLOUD } else { cs::MAX_LOCAL };
+        let look = match read {
+            Some(w) if !w.little() => {
+                let text = cs::bounded(&w, max);
+                tracing::info!(read = w.chars(), chars = text.chars().count(), ms = t.elapsed().as_millis() as u64, "Command: read the window in front");
+                Look::With(cs::Context::Text(text), cs::label(maybe, "text"))
+            }
+            read => {
+                // Next to nothing read (an app UI Automation sees little
+                // of): a screenshot, for a model that reads images.
+                let picture = match crate::snip::vision::reads_images(ep.provider, ep.model) {
+                    Some(true) => cs::picture(&self.app, hwnd, ep.provider, ep.base_url).await,
+                    _ => None,
+                };
+                let text = read.as_ref().map(|w| cs::bounded(w, max)).unwrap_or_default();
+                match picture {
+                    Some(p) => {
+                        tracing::info!(ms = t.elapsed().as_millis() as u64, "Command: took the window in front (next to no text read)");
+                        Look::With(p, cs::label(maybe, "picture"))
+                    }
+                    // The title, at least: who and what.
+                    None if !text.is_empty() => Look::With(cs::Context::Text(text), cs::label(maybe, "text")),
+                    None => {
+                        tracing::info!(ms = t.elapsed().as_millis() as u64, "Command: nothing read from the window in front");
+                        Look::Without(cs::label(maybe, "unread"))
+                    }
+                }
+            }
+        };
+        let _ = self.app.emit(READING, false);
+        look
+    }
+
+    /// **A Command that asked first, allowed** (`command_screen::allow_cloud`):
+    /// written now, as if just said — when its window is still the one in
+    /// front and Yap isn't busy with a dictation; else nothing (logged).
+    pub(super) async fn command_again(self: &Arc<Self>, instruction: String, hwnd: isize) {
+        let front = crate::pasting::text_injector::current_foreground().unwrap_or(0);
+        #[cfg(debug_assertions)]
+        let front = super::test_target().unwrap_or(front);
+        if front != hwnd {
+            tracing::info!("Commands: allowed, but the Command's window isn't in front any more; not written");
+            return;
+        }
+        let busy = (!self.recording.load(Ordering::SeqCst))
+            .then(|| super::busy::Busy::take(self, super::busy::Job::Dictation))
+            .flatten();
+        let Some(busy) = busy else {
+            tracing::info!("Commands: allowed, but a dictation is under way; not written");
+            return;
+        };
+        tracing::info!("Commands: allowed; writing the Command that asked");
+        self.capture_target(false);
+        let _ = self.app.emit("yap-state", "processing");
+        self.run_agent(instruction, String::new(), None).await;
+        busy.done();
     }
 }

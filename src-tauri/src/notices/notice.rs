@@ -163,6 +163,10 @@ pub fn rule(kind: &str) -> Rule {
         // "Let the Voice Assistant see the window in front?" (a question
         // about the screen met a cloud model; asked once): right after it.
         "assistantScreen" => alert,
+        // "Let Commands read the window in front?" (a Command that replies
+        // to what's on screen met a cloud model; asked once, the Command
+        // waiting for Allow): right after it.
+        "commandsScreen" => alert,
         // "Select some text first" (Ask about the selection pressed with
         // nothing selected, chat/assistant/selected.rs): the answer to the
         // press, at once.

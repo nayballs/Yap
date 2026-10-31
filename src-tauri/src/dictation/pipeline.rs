@@ -1080,6 +1080,14 @@ impl Pipeline {
         Robot(Arc::clone(&self.shared))
     }
 
+    /// **A Command that asked first, allowed** (`command_screen::allow_cloud`):
+    /// written now, in the background — when its window (`hwnd`) is still
+    /// in front and no dictation is under way.
+    pub(crate) fn command_again(&self, instruction: String, hwnd: isize) {
+        let shared = Arc::clone(&self.shared);
+        tauri::async_runtime::spawn(async move { shared.command_again(instruction, hwnd).await });
+    }
+
     /// Home's Run again (`recent_audio::history_rerun`).
     pub(crate) fn rerunner(&self) -> Rerun {
         Rerun(Arc::clone(&self.shared))

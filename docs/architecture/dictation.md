@@ -249,6 +249,44 @@ to **Run again** from Home.
   a test run (`selection::capture_selection`, as every other read) — only
   the stand-in's staged one (`e2e_rewrite`'s `selection` / `readOnly`,
   `pipeline::set_test_selection`).
+  **A Command that replies to what's on screen reads the window in front**
+  (2026-10-31; Wispr Flow's Instruct Mode, by behaviour, on this PC;
+  `dictation/command_screen.rs`, below; Settings → Commands → Replies to
+  what's on screen, `config.commands_screen`, on): `run_agent` writing new
+  text (nothing selected, not the last dictation's rewrite) asks
+  `look_for_command` first — the words (`command_screen::needs`: yes for
+  "reply saying Thursday works", "answer her question", "summarise this
+  email into a reply"; a maybe for "tell her …", the Commands model's yes or
+  no without the screen; no for "write an email to Sam about the budget"),
+  never Yap's own window or a terminal, then the gate (`gate`: a model on
+  this PC, or a cloud one with "…with cloud models too"; a cloud model never
+  asked → **asked first**: `ask_once`, the alert "Let Commands read the
+  window in front?", `outcome` "asked", nothing sent or written, the Command
+  held a minute for **Allow** — `allow_cloud` → `Pipeline::command_again`
+  writes it then if its window is still in front; asked before and not
+  allowed → the words alone). The switches are read from config.json
+  (`config::load`): the ask and Allow save them from Rust. Then the read
+  ("Reading the window…" on the bar: `yap-command-screen`), off the async
+  thread: `command_screen::read` → `screen_terms::read_for_command`, the
+  box being written in never read, `bounded` to 3,000 characters (a model
+  on this PC) or 6,000 (cloud); next to nothing read and a model that reads
+  images (`snip::vision::reads_images`) → a screenshot of the window
+  (`assistant::screen::capture_window`, deleted once sent). The draft:
+  `llm::draft_from_screen` (`llm::SCREEN_RULES` after the Commands body and
+  the writing samples, `cleanup_styles::draft_line` — an email's greeting
+  and sign-off with About you's name, a chat's few sentences, the kind's
+  tone —, the window between `<window>` tags in the user's turn), then
+  `command_screen::clean_draft` (a subject line, quoted history, a "[Your
+  Name]" placeholder taken off), pasted as any Command's: the last paste
+  ("make it shorter" rewrites it), Undo and the receipts' "Commands + the
+  window's text". The rewrite shortcut right after a dictation: words that
+  reply to what's on screen and aren't an edit
+  (`command_screen::replies_instead_of_rewriting`) draft new text from the
+  window, the dictation left where it is ("make the reply shorter" still
+  rewrites it). Robot / test mode: `Robot::command_text` (`e2e_command`,
+  `realtest_command_text`: a Command by name from a transcript),
+  `e2e_window_text` (the stand-in window's text; never a real window in a
+  test run), `Rewritten.screen` ("rule:text", "model:no", "rule:asked"…).
   **A question about the selection is answered, not pasted over it**
   (2026-10-31; Wispr Flow's Command Mode / "Lens", by behaviour;
   `dictation/ask_or_edit.rs`, below; Settings → Commands → Ask about
@@ -810,6 +848,50 @@ to **Run again** from Home.
   the languages counted, the reply's parsing, the route); e2e
   `ask-selection.spec.js` (fake-llm's `askOrEdit` kind); robot
   `e2e-real/ask-selection.real.js` (written, not yet run).
+- **`dictation/command_screen.rs`** — **a Command that reads the window in
+  front** (2026-10-31; Wispr Flow's Instruct Mode, by behaviour, on this
+  PC; `pipeline/rewrite.rs` `look_for_command`, above). **In doubt, the
+  screen isn't read.** `needs` (pure): per language, a "yes" and a "maybe"
+  regex over the instruction (lower case, straight apostrophes), in the
+  person's own languages (My languages' codes, English always; none known:
+  all) — English, French, German, Spanish, Italian, Portuguese, Dutch.
+  Yes: words that reply ("reply", "respond", "write back", "a polite
+  response", "answer her …", "réponds", "antworte", "contesta", "rispondi",
+  "responde", "antwoord") or point at the screen ("this email", "her
+  question", "Sam's message", "the thread", "the latest message", "what she
+  asked", "on my screen", "decline the invite", "agree with what…"; their
+  equivalents per language). Maybe: a pronoun with nothing saying what
+  ("tell her", "let them know", "thank him", "say yes", "decline", "…about
+  this" at the end; "dis-lui", "sag ihr", "dile", "digli", "diz-lhe", "zeg
+  haar") → `model_says`: the Commands model (`ASK_PROMPT`, the instruction
+  only — never the screen; ≤ 8 s, on this PC 15 s; Chat's `says_yes`), any
+  error a no. No: anything else. `replies_instead_of_rewriting` (pure):
+  yes and not `ask_or_edit::rule`'s edit. `gate` (pure, on
+  `assistant::screen::allowed`): Read / AskFirst / NotToTheCloud / Off.
+  `Window` (title, `before` and `after` the box in its document, `quoted` —
+  a message quoted below the cursor when the box is the whole document,
+  `quoted_part`: "… wrote:" / "… schrieb …:" lines, "From:"/"Von:"/"De :"
+  headers, "-----Original Message-----", "> " — and `other`); `bounded`
+  (pure): the title, then within the budget shares (quoted half, before
+  three tenths — its end, nearest the box —, after and the rest a tenth),
+  what one leaves over to the next, the walk's lines already there dropped;
+  `MAX_LOCAL` 3,000, `MAX_CLOUD` 6,000, `LITTLE` 40 (less read: a
+  screenshot for a model that reads images, `picture` — a test run only
+  ever its fake monitors). `clean_draft` (pure): `transforms::clean_output`'s
+  preamble, `<window>` tags, a leading "Subject:"/"Re:" line, quoted history
+  after the reply, quotes round it all, a "[Your Name]"-style placeholder
+  line. `ask_once` / `allow_cloud` (the alert's kind "commandsScreen", its
+  icon "commands", `alert::ALLOW_COMMANDS_SCREEN_CLOUD`; `HELD` a minute).
+  The log: the decision (`need`, `gate`), counts and times, never the words
+  or the window. Measured on the on-device Qwen3.5-4B (model-evals.md
+  "Replies from the window in front": 42/42 with the window, 9/42 from the
+  words alone; 0.3 s on the card, ~10 s on the processor). Unit tests
+  (`command_screen::tests`: the rule in seven languages, the languages
+  counted, the last dictation's exception, the gate, the yes/no request,
+  quoted history found, the bounds, the prompt's size, the draft's
+  clean-up); e2e `command-screen.spec.js` (fake-llm's `commandScreen` kind,
+  `rewriteWindow`); robot `e2e-real/command-screen.real.js` (written, not
+  yet run).
 - **`dictation/languages.rs`** (+ `languages/catalog.rs`, `languages/nudge.rs`, `languages/text_id.rs`)
   — **My languages** (2026-10-25; Wispr Flow's languages and its "Speaking a
   different language?" nudge of 28 Sep, OpenWhispr's dual-language hotkeys

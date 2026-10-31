@@ -105,6 +105,14 @@ Meeting chips and Skills (meeting_summary/chips.rs; instead of the scenarios; ch
   --chips                  each case in evals/chips/cases.json (--only picks them by name or kind:
                            smart, skill, longer) as the notepad sends it: cited, not made up,
                            longer notes keeping every task
+Replies from the window in front (dictation/command_screen.rs; instead of the scenarios; replies.md):
+  --replies                each case in evals/replies/cases.json (--only picks them by name or kind:
+                           email, workChat, personalChat): a Command's draft from a made-up email or
+                           chat window, as the app sends it: the facts in it, the greeting, the
+                           conversation's language, nothing copied or quoted, nothing the mail says
+                           to do followed
+  --replies-phase <p>      without | with: one phase (without: the words alone, as before 31 Oct 2026)
+  --replies-body <b>       commands (the Commands scope's default prompt, the default) | none
 Saved transforms (transforms.rs; instead of the scenarios; transforms.md):
   --transforms             each case in evals/transforms/cases.json (--only picks them by name or
                            transform) through llm::transform: names and numbers kept, no answer,
@@ -213,6 +221,9 @@ struct Args {
     brief: bool,
     chips: bool,
     transforms: bool,
+    replies: bool,
+    replies_phase: Option<&'static str>,
+    replies_body: Option<&'static str>,
     vision: bool,
     vision_path: Option<&'static str>,
     languages: bool,
@@ -345,6 +356,29 @@ fn parse(argv: Vec<String>) -> Result<Args, String> {
             // citations real, a change after the web — their table too.
             "--guides" => a.tags.push("documents-guide".to_string()),
             "--transforms" => a.transforms = true,
+            "--replies" => a.replies = true,
+            "--replies-phase" => {
+                let p = value()?;
+                a.replies = true;
+                a.replies_phase = Some(
+                    super::replies::ALL_PHASES
+                        .iter()
+                        .copied()
+                        .find(|x| *x == p)
+                        .ok_or_else(|| format!("--replies-phase {}, not {p}", super::replies::ALL_PHASES.join("|")))?,
+                );
+            }
+            "--replies-body" => {
+                let b = value()?;
+                a.replies = true;
+                a.replies_body = Some(
+                    super::replies::ALL_BODIES
+                        .iter()
+                        .copied()
+                        .find(|x| *x == b)
+                        .ok_or_else(|| format!("--replies-body {}, not {b}", super::replies::ALL_BODIES.join("|")))?,
+                );
+            }
             "--vision" => a.vision = true,
             "--vision-path" => {
                 let p = value()?;
@@ -462,6 +496,7 @@ pub fn main(argv: Vec<String>) -> i32 {
         || args.brief
         || args.chips
         || args.transforms
+        || args.replies
         || args.vision
         || args.languages
         || args.hinglish
@@ -1622,6 +1657,30 @@ async fn run_all(args: &Args, run_dir: &Path, keys: &HashMap<String, String>, sc
         Vec::new()
     };
     let mut transform_results: Vec<(String, Value)> = Vec::new();
+    let (reply_cases, reply_body) = if args.replies {
+        let dir = scenarios_dir(args).join("..").join("replies");
+        let cases = match super::replies::load(&dir.join("cases.json"), &args.only) {
+            Ok(c) => c,
+            Err(e) => {
+                eprintln!("{e}");
+                return 2;
+            }
+        };
+        let body = match args.replies_body.unwrap_or("commands") {
+            "none" => String::new(),
+            _ => match super::replies::commands_body(&dir.join("commands-prompt.txt")) {
+                Ok(b) => b,
+                Err(e) => {
+                    eprintln!("{e}");
+                    return 2;
+                }
+            },
+        };
+        (cases, body)
+    } else {
+        (Vec::new(), String::new())
+    };
+    let mut reply_results: Vec<(String, Value)> = Vec::new();
     let chip_cases = if args.chips {
         let path = scenarios_dir(args).join("..").join("chips").join("cases.json");
         match super::chips::load(&path, &args.only) {
@@ -1923,6 +1982,22 @@ async fn run_all(args: &Args, run_dir: &Path, keys: &HashMap<String, String>, sc
             }
             transform_results.push((m.label.clone(), transforms_result.clone()));
         }
+        let mut replies_result = Value::Null;
+        if !reply_cases.is_empty() {
+            record::set_config(Some(crate::config::YapConfig::default()));
+            record::set_tools_forced(None);
+            let ep = super::replies::Endpoint { base_url: &m.base_url, key: &m.key, model: &m.model, provider: &m.provider };
+            let phases: Vec<&'static str> = match args.replies_phase {
+                Some(p) => vec![p],
+                None => super::replies::ALL_PHASES.to_vec(),
+            };
+            println!("  replies from the window in front, {} cases …", reply_cases.len());
+            replies_result = super::replies::run(&reply_cases, &ep, &phases, &reply_body, args.repeat).await;
+            if replies_result.get("with").is_some_and(|w| w["passed"] != w["cases"]) {
+                failed = true;
+            }
+            reply_results.push((m.label.clone(), replies_result.clone()));
+        }
         let mut chips_result = Value::Null;
         if !chip_cases.is_empty() {
             record::set_config(Some(crate::config::YapConfig::default()));
@@ -2039,6 +2114,7 @@ async fn run_all(args: &Args, run_dir: &Path, keys: &HashMap<String, String>, sc
             "bench": bench_result,
             "brief": brief_result,
             "transforms": transforms_result,
+            "replies": replies_result,
             "chips": chips_result,
             "vision": vision_result,
             "languages": languages_result,
@@ -2149,6 +2225,23 @@ async fn run_all(args: &Args, run_dir: &Path, keys: &HashMap<String, String>, sc
                 r["median_ms"].as_f64().unwrap_or(0.0) / 1000.0,
                 r["tokens"]
             );
+        }
+    }
+    if !reply_results.is_empty() {
+        let md = record::redact(&super::replies::markdown(&reply_results));
+        let _ = std::fs::write(run_dir.join("replies.md"), &md);
+        for (label, r) in &reply_results {
+            for (phase, p) in r.as_object().into_iter().flatten() {
+                println!(
+                    "\n{label} ({phase}): {}/{} replies pass; {} cleaned; median {:.1} s; {} prompt tokens, {} in all",
+                    p["passed"],
+                    p["cases"],
+                    p["cleaned"],
+                    p["median_ms"].as_f64().unwrap_or(0.0) / 1000.0,
+                    p["prompt_tokens"],
+                    p["tokens"]
+                );
+            }
         }
     }
     if !transform_results.is_empty() {

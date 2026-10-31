@@ -69,6 +69,10 @@ export const dictation = $state({
   // `offerMs`) or 'unchanged' ("No changes needed"); '' for a dictation.
   transform: '',
   transformPhase: '',
+  // A Command that replies to what's on screen is reading the window in
+  // front (dictation/command_screen.rs, `yap-command-screen`): "Reading the
+  // window…" while it works.
+  readingWindow: false,
   // "Taking longer than usual…" (dictation/slow.rs, `yap-slow`): `{stage,
   // skip}` while the transcription ('transcribing') or the AI cleanup
   // ('cleanup', with Skip cleanup: `skip`) runs well past this PC's usual
@@ -161,6 +165,7 @@ export function initDictation() {
     }
     if (state !== 'processing' && state !== 'processing-slow') {
       dictation.modelLoading = false;
+      dictation.readingWindow = false;
       clearTimeout(holdOnTimer);
       dictation.holdOn = false;
     }
@@ -193,6 +198,9 @@ export function initDictation() {
   // takes over after).
   listen('yap-assistant-step', (e) => {
     if (dictation.assistant === 'thinking') dictation.askStep = e.payload?.line || '';
+  });
+  listen('yap-command-screen', (e) => {
+    dictation.readingWindow = !!e.payload;
   });
   listen('yap-transform', (e) => {
     dictation.transform = e.payload?.name || '';

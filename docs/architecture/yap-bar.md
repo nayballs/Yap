@@ -235,7 +235,10 @@ The always-there pill above the taskbar: the `overlay` window's Rust side (regio
   button's style; `bar_action "skip-cleanup"`; the capsule a region
   meanwhile) when it's the cleanup; **"Hold on, still transcribing…"** for
   2.5 s after the dictation shortcut is pressed during a transcription
-  (`yap-dictation-busy`); and near the length limit (`dictation/cap.rs`,
+  (`yap-dictation-busy`); **"Reading the window…"** in place of
+  "Transcribing…" or the live words while a Command that replies to what's
+  on screen reads the window in front (`yap-command-screen` true / false,
+  `dictation/command_screen.rs`, 2026-10-31); and near the length limit (`dictation/cap.rs`,
   `yap-dictation-cap`) "1 minute left · it'll stop at 15 minutes" in the
   waveform's place for a few seconds, then an amber hairline (`--bar-wave`
   on `--bar-track`) running down the time left at the capsule's foot.

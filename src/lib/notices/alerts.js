@@ -28,11 +28,13 @@ import { toast } from '../ui/toast.svelte.js';
 
 // "assistant": the Voice Assistant has no AI model, or couldn't answer
 // (chat/assistant.rs), with Open settings → Language Models.
+// "commands": "Let Commands read the window in front?", with Allow
+// (dictation/command_screen.rs).
 // "notes": Yap closed during a meeting, with Transcribe it (meetings/meeting_audio.rs).
 // "snip": Snip to Chat couldn't start or save (snip.rs).
 // "save": a save that failed by itself, with Try again, and "Saved" after it
 // (shell/saving.rs; a command's failed save is saveErrors.js's toast).
-const CHIPS = { clipboard: 'Paste', mic: 'Microphone', call: 'Calls', assistant: 'Voice Assistant', notes: 'Meetings', settings: 'Settings', snip: 'Snip to Chat', save: 'Saving' };
+const CHIPS = { clipboard: 'Paste', mic: 'Microphone', call: 'Calls', assistant: 'Voice Assistant', commands: 'Commands', notes: 'Meetings', settings: 'Settings', snip: 'Snip to Chat', save: 'Saving' };
 
 let started = false;
 

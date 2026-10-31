@@ -265,6 +265,32 @@ fn eval_wording(key: &str) -> Option<String> {
     v.get(key).and_then(|x| x.as_str()).map(str::to_string)
 }
 
+/// **Where a Command's draft from the window in front goes**
+/// (`dictation/command_screen.rs`, `llm::SCREEN_RULES`' last line): an
+/// email's greeting and sign-off (`name`: the user's, About you; none, and
+/// never a placeholder), a chat's few sentences; then the kind's tone when
+/// "Match the style to the app" is on and it's one that restyles (formal,
+/// casual, very casual). `None`: nothing to say. Pure.
+pub fn draft_line(cfg: &YapConfig, c: Category, name: &str) -> Option<String> {
+    let name = name.split_whitespace().collect::<Vec<_>>().join(" ");
+    let kind = match c {
+        Category::Email if name.is_empty() => Some(
+            "It goes into an email, with no subject line: start with a short greeting to the person you're replying to, by their first name, and end with a sign-off word such as \"Best,\" with nothing after it: no name, never a placeholder like [Your Name]."
+                .to_string(),
+        ),
+        Category::Email => Some(format!(
+            "It goes into an email, with no subject line: start with a short greeting to the person you're replying to, by their first name, and end with a short sign-off and the user's name, {name}."
+        )),
+        Category::WorkChat | Category::PersonalChat => {
+            Some("It goes into a chat: a short message of one to three sentences, with no greeting line and no sign-off.".to_string())
+        }
+        _ => None,
+    };
+    let tone = styles_on(cfg).then(|| tone_of(cfg, c)).filter(|t| t.restyles()).and_then(Tone::rule);
+    let parts: Vec<String> = kind.into_iter().chain(tone.map(str::to_string)).collect();
+    (!parts.is_empty()).then(|| parts.join(" "))
+}
+
 /// The lines before the transcript: the style's, then the names on screen
 /// (`screen_terms::cleanup_line`), as one (`llm::with_names_line` puts it in
 /// place). Pure.
@@ -1453,5 +1479,25 @@ supplier is late scratch that the launch is on time";
         assert_eq!(kinds[0]["id"], "email");
         assert_eq!(kinds[4]["defaultTone"], "literal");
         assert!(kinds[6]["apps"].as_array().unwrap().is_empty());
+    }
+
+    #[test]
+    fn a_draft_from_the_window_is_told_where_it_goes_and_in_what_tone() {
+        let mut c = YapConfig::default();
+        ensure_profiles(&mut c);
+        c.cleanup_styles = Some(true);
+        let email = draft_line(&c, Category::Email, " Alex   Morgan ").unwrap();
+        assert!(email.contains("short greeting") && email.contains("the user's name, Alex Morgan."), "{email}");
+        assert!(email.contains("Tone: formal"), "{email}");
+        let anon = draft_line(&c, Category::Email, "  ").unwrap();
+        assert!(anon.contains("never a placeholder like [Your Name]"), "{anon}");
+        let chat = draft_line(&c, Category::WorkChat, "Alex").unwrap();
+        assert!(chat.contains("no sign-off") && chat.contains("Tone: casual"), "{chat}");
+        assert!(!chat.contains("Alex"));
+        // Everything else, in its natural tone: nothing to say.
+        assert_eq!(draft_line(&c, Category::Other, "Alex"), None);
+        // "Match the style to the app" off: where it goes, no tone.
+        c.cleanup_styles = Some(false);
+        assert!(!draft_line(&c, Category::Email, "Alex").unwrap().contains("Tone:"));
     }
 }

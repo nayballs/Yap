@@ -1227,7 +1227,20 @@ The AI Chat surface (conversations, the tool-calling loop and its note tools) an
   languages, the yes/no request and reply, where it may go); e2e
   `assistant-screen.spec.js` (fake monitors and a fake window in front
   through `e2e_snip {start: false}`, `snip::take_fake`: never the real
-  screen).
+  screen). **Commands use the same rule and capture** (2026-10-31,
+  `dictation/command_screen.rs`, [dictation.md](./dictation.md)): a Command
+  that replies to what's on screen ("Hey Jarvis, reply saying Thursday
+  works") gets the window's **text** over UI Automation, the box being
+  written in left out (`screen_terms::read_for_command`), with its own
+  switches beside this one's — "Let Commands read the window in front when
+  you ask for a reply" (`commands_screen`, on) and "With cloud models too"
+  (`commands_screen_cloud`, off), asked once (`commands_screen_asked`, kind
+  `commandsScreen`) — `allowed` and `leaves_pc` shared through
+  `command_screen::gate`. Only when next to no text could be read, and the
+  Commands model reads images, does it take the window's picture here
+  (`capture_window`, the same capture; deleted once sent, never a chat's).
+  Its maybe goes to the Commands model, its yes/no with
+  `says_yes`.
 - **`chat/assistant/selected.rs`** — a question about text selected in
   another app ([below](#questions-about-selected-text-2026-10-31)): the
   `Selected { text, app }` a turn is about (a task-local, `with` /

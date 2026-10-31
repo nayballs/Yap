@@ -266,6 +266,26 @@ pub struct YapConfig {
     /// the text. On by default; off, it rewrites as before.
     #[serde(default = "default_true")]
     pub ask_about_selection: bool,
+    /// **Let Commands read the window in front when you ask for a reply**
+    /// (Settings → Commands, `dictation/command_screen.rs`, 2026-10-31;
+    /// Wispr Flow's Instruct Mode, on this PC): a Command that replies to
+    /// what's on screen ("reply saying Thursday works", "answer her
+    /// question") gets the window's text, the box being written in left out.
+    /// On by default, for a model on this PC: the text never leaves it. An
+    /// older Yap drops the field on its save and it's on again (an older
+    /// Yap never reads the window for a Command).
+    #[serde(default = "default_true")]
+    pub commands_screen: bool,
+    /// "…with cloud models too": the window's text (or a screenshot of it)
+    /// goes to the cloud provider the Commands model is on. Off by default;
+    /// asked once, the first time a Command that needs the screen meets a
+    /// cloud model (`commands_screen_asked`). An older Yap drops it: off
+    /// again.
+    #[serde(default)]
+    pub commands_screen_cloud: bool,
+    /// The one ask about the cloud has been shown.
+    #[serde(default)]
+    pub commands_screen_asked: bool,
     /// **Saved transforms** (Settings → Commands → Transforms,
     /// `transforms.rs`): one-key rewrites of the selection or the last
     /// dictation, each with an optional shortcut, in the person's order. A
@@ -1379,6 +1399,9 @@ impl Default for YapConfig {
             edit_hotkey: String::new(),
             rewrite_last_dictation: true,
             ask_about_selection: true,
+            commands_screen: true,
+            commands_screen_cloud: false,
+            commands_screen_asked: false,
             transforms: crate::dictation::transforms::defaults(),
             auto_transform: String::new(),
             auto_transform_kind: String::new(),

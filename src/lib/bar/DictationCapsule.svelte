@@ -97,7 +97,9 @@
           ? 'Loading the AI model…'
           : dictation.slow
             ? 'Taking longer than usual…'
-            : 'Transcribing…'
+            : dictation.readingWindow
+              ? 'Reading the window…'
+              : 'Transcribing…'
   );
   // The push-to-talk key is down (not locked hands-free): no buttons.
   const keyHeld = $derived(dictation.held && !dictation.locked);
@@ -237,7 +239,7 @@
       <span class="txt soft" role="status">Starting the mic…</span>
     {:else if recording && dictation.capShow}
       <span class="txt soft" role="status">{dictation.capText}</span>
-    {:else if dictation.words.length && !dictation.slow && !dictation.holdOn}
+    {:else if dictation.words.length && !dictation.slow && !dictation.holdOn && !dictation.readingWindow}
       <div class="partial" bind:this={clipEl}>
         <span class="ptext" bind:this={textEl} style="transform: translateX({shift}px)">
           {#each dictation.words as w, i (i)}<span class="pw">{w}&nbsp;</span>{/each}

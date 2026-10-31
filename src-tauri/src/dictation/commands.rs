@@ -225,6 +225,25 @@ pub async fn e2e_rewrite(
     out
 }
 
+/// Debug-only, test mode: **a Command by name** with `text` as what was
+/// heard, in the window a dictation goes to (`e2e_target_window`'s
+/// stand-in): the agent's name in it, the Command's own path — the
+/// stand-in's text (`e2e_window_text`) read when its words reply to what's
+/// on screen, the AI, the paste (nothing is pasted in a test run). Returns
+/// what it did (`Err`: not a Command).
+#[cfg(debug_assertions)]
+#[tauri::command]
+pub async fn e2e_command(state: State<'_, AppState>, text: String) -> Result<crate::dictation::pipeline::Rewritten, String> {
+    if !crate::shell::e2e::active() || crate::shell::realtest::on() {
+        return Err("e2e_command is for test runs (not robot mode)".into());
+    }
+    let robot = {
+        let guard = state.pipeline.lock().map_err(|_| "the pipeline lock is poisoned")?;
+        guard.as_ref().ok_or("no pipeline")?.robot()
+    };
+    robot.command_text(text).await
+}
+
 /// Debug-only, test mode: **Ask about the selection**'s shortcut with
 /// `text` as the question, in the stand-in window (`e2e_target_window`)
 /// whose selection is `selection` (none: nothing selected — "Select some

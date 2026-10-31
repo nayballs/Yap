@@ -3,13 +3,15 @@
 //! device runs it, "Taking longer than usual…", the length limit, Upload's
 //! decoding, Yap's sounds (in packs), other apps' sound while you talk, history and a
 //! day of dictation audio, the stats that outlast it and word milestones,
-//! saved transforms, My languages, and whether the rewrite shortcut's words
-//! about a selection are an edit or a question (`ask_or_edit`).
+//! saved transforms, My languages, whether the rewrite shortcut's words
+//! about a selection are an edit or a question (`ask_or_edit`), and when a
+//! Command reads the window in front (`command_screen`).
 //! How it works: docs/architecture/dictation.md.
 
 pub mod agent_detect;
 pub mod ask_or_edit;
 pub mod cap;
+pub mod command_screen;
 /// `yap.exe dictation-check` (debug builds): the person's own dictations as
 /// a test set for speech-to-text and cleanup.
 #[cfg(debug_assertions)]

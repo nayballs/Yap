@@ -141,6 +141,33 @@ impl Robot {
         Ok(LAST_REWRITE.lock().ok().and_then(|mut r| r.take()).unwrap_or_default())
     }
 
+    /// **A Command by name** with `text` as what was heard: the window in
+    /// front becomes the target, as at a recording's start, then — the
+    /// agent's name in it (`wake_word_hit`: Commands on, set up) — the
+    /// Command's own path (`run_agent`: the window in front read when its
+    /// words reply to what's on screen, the AI, the paste). `Err` when it
+    /// isn't a Command. Returns what it did.
+    pub(crate) async fn command_text(&self, text: String) -> Result<Rewritten, String> {
+        let shared = &self.0;
+        let Some(busy) = self.take_busy() else {
+            return Err(Self::BUSY.into());
+        };
+        if let Ok(mut r) = LAST_REWRITE.lock() {
+            *r = None;
+        }
+        shared.capture_target(false);
+        let _ = shared.app.emit("yap-state", "processing");
+        if !shared.wake_word_hit(text.trim()) {
+            busy.done();
+            let _ = shared.app.emit("yap-state", "idle");
+            return Err("Not a Command: it doesn't say the agent's name, or Commands isn't on".into());
+        }
+        tracing::info!(len = text.len(), "e2e: a Command by name from a transcript");
+        shared.run_agent(text.trim().to_string(), String::new(), None).await;
+        busy.done();
+        Ok(LAST_REWRITE.lock().ok().and_then(|mut r| r.take()).unwrap_or_default())
+    }
+
     /// [`Robot::dictate_text`] as the Chat view's mic would start it: into
     /// the chat box (`yap-chat-dictation`), never pasted. (Test mode's
     /// `dictation::commands::e2e_chat_dictation`.)

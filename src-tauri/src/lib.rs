@@ -817,6 +817,12 @@ pub fn run() {
             #[cfg(debug_assertions)]
             dictation::commands::e2e_rewrite,
             #[cfg(debug_assertions)]
+            dictation::commands::e2e_command,
+            #[cfg(debug_assertions)]
+            dictation::command_screen::e2e_window_text,
+            #[cfg(debug_assertions)]
+            shell::realtest::commands::realtest_command_text,
+            #[cfg(debug_assertions)]
             dictation::commands::e2e_ask_selection,
             #[cfg(debug_assertions)]
             dictation::transforms::e2e_transform,

@@ -655,6 +655,14 @@ fn from_the_window(images: Vec<ChatImage>) -> Vec<ChatImage> {
     images.into_iter().map(|i| ChatImage { source: "window".into(), ..i }).collect()
 }
 
+/// The window `hwnd`, captured as the Voice Assistant takes it ([`capture`]):
+/// a Command that reads the window in front and got next to no text from
+/// it (`dictation/command_screen.rs`), for a model that reads images. Saved
+/// as a chat screenshot; the caller deletes it once sent. Blocking.
+pub(crate) fn capture_window(app: &AppHandle, hwnd: isize) -> Result<ChatImage, String> {
+    capture(app, hwnd)
+}
+
 /// **The window in front, captured** (blocking): its visible frame cut from
 /// every monitor captured at once, every Yap window left out; saved as a
 /// chat screenshot. A test run cuts the first of its fake windows from its
