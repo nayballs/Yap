@@ -491,10 +491,12 @@
   includes it (`skills.json` in the zip).
 - Note versions: `%APPDATA%/yap/note-versions/<note id>.json` — each note's
   version history (2026-10-29, `notes/versions.rs`): `{note, created, next,
-  versions: [{n, field: "notes" | "summary", kind, label?, from?, sinceMs,
-  ms, text}]}`, the last 50 texts of its My thoughts and summary, each with
-  how it came (typed, dictated, summary, action, transform, chat, restored,
-  edited, earlier). Through `saving.rs` ("your notes' history"; a file that
+  versions: [{n, field: "notes" | "summary", kind, label?, from?, turn?,
+  sinceMs, ms, text}]}`, the last 50 texts of its My thoughts and summary,
+  each with how it came (typed, dictated, summary, action, transform, chat,
+  restored, edited, earlier); `turn` (2026-10-31): the Chat turn that made
+  it, so a turn's versions undo together (an older Yap's save drops it:
+  each of those versions is then a turn of its own). Through `saving.rs` ("your notes' history"; a file that
   doesn't read set aside). `created` is the note's `createdTs`: a file left
   by a note an older Yap deleted is ignored by a new note given its id.
   Deleted with its note; a meeting's summary versions go with its

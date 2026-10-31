@@ -191,8 +191,11 @@ pub(crate) async fn chat_turn(
     stop: Option<&crate::chat::stream::Stoppable>,
 ) -> Result<ChatTurn, String> {
     // Boxed: a turn's future is big, and every caller's holds this one (a
-    // Chat turn inline overflowed the main thread's stack).
-    crate::ai::usage::tallied(Box::pin(answer_turn(app, conversation_id, text, scope, by_voice, asked, watcher, stop))).await
+    // Chat turn inline overflowed the main thread's stack). Its note changes
+    // are one change in their versions (`versions::in_turn`: the document
+    // panel's Undo takes the whole turn back).
+    let turn = Box::pin(answer_turn(app, conversation_id, text, scope, by_voice, asked, watcher, stop));
+    crate::ai::usage::tallied(crate::notes::versions::in_turn(turn)).await
 }
 
 /// [`chat_turn`], its last model call kept by `usage::tallied`.

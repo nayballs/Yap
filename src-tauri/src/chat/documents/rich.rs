@@ -972,6 +972,62 @@ mod tests {
         assert_eq!(again["displayText"], json!("Didn't change \"Build\": done already"));
     }
 
+    /// `edit_document` never brings a section's placeholder back nor makes
+    /// one up: not from markdown that copies one, not from the model's
+    /// picture of the outline, and a placeholder the person brought back
+    /// (Undo) stays the one there is. (The maintainer's "1 section not
+    /// written yet" after a table change, 31 Oct 2026: the panel's Undo had
+    /// brought it back, not the edit.)
+    #[test]
+    fn edit_document_never_brings_back_or_makes_up_a_placeholder() {
+        let placeholders = |id: u64| crate::notes::get(id).unwrap().content.lines().filter(|l| documents::parse_placeholder(l).is_some()).count();
+        let id = made_doc("Mage build", &[("Levels", "| Level | Pick |\n|---|---|\n| 20 | Frost |"), ("Tips", "- Rest often")]);
+        assert_eq!(placeholders(id), 0);
+        let read = execute("read_document", &json!({ "note_id": id }));
+        let table = block(&read, "table").clone();
+        // A replace whose markdown copies a placeholder line: none goes in.
+        let args = json!({ "note_id": id, "ops": [{ "op": "replace", "id": table["id"], "if_hash": table["hash"],
+            "markdown": "| Level | Pick |\n|---|---|\n| 21 | Frost |\n<!-- yap:section Tips | tips -->\n<!-- yap:section Extra -->" }] });
+        let r = execute("edit_document", &args);
+        assert_eq!(r["success"], json!(true), "{r}");
+        assert_eq!(placeholders(id), 0);
+        assert!(documents::pending_keys(&crate::notes::get(id).unwrap().content).is_empty());
+
+        // The model saw the outline (a placeholder) and the person wrote that
+        // section themselves: an edit elsewhere doesn't bring the outline's
+        // placeholder back.
+        let id = crate::notes::create("Swamp build", "", "chat", "").id;
+        let outline = "# Swamp build\n\n## Gear\n\n- Boots\n\n<!-- yap:section Tips | tips -->\n";
+        versions::by(versions::How::new(versions::kind::CHAT), || crate::notes::update(id, None, Some(outline.into()), None, None)).unwrap();
+        documents::after_call("update_note", &json!({ "note_id": id, "content": outline }), &json!({ "success": true, "data": { "id": id } }));
+        assert_eq!(saw(id).as_deref(), Some(outline));
+        crate::notes::update(id, None, Some(outline.replace("<!-- yap:section Tips | tips -->", "## Tips\n\nMy own tip.")), None, None).unwrap();
+        // (Its ids are its text's: the list as the model saw it.)
+        let d = Doc::of(outline);
+        let list = d.blocks.iter().position(|b| b.kind == blocks::Kind::List).map(|i| d.ids[i].clone()).unwrap();
+        let r = execute("edit_document", &json!({ "note_id": id, "ops": [{ "op": "replace", "id": list.id, "if_hash": list.hash, "markdown": "- Boots\n- A hat" }] }));
+        assert_eq!(r["success"], json!(true), "{r}");
+        let now = crate::notes::get(id).unwrap().content;
+        assert_eq!(placeholders(id), 0, "{now}");
+        assert!(now.contains("My own tip.") && now.contains("- A hat"), "{now}");
+
+        // A placeholder the person brought back (the panel's Undo) stays the
+        // one there is: the edit changes its table and adds none.
+        let id = made_doc("Ranger build", &[("Levels", "| Level | Pick |\n|---|---|\n| 20 | Quick step |"), ("Tips", "- Hide")]);
+        let read = execute("read_document", &json!({ "note_id": id }));
+        let table = block(&read, "table").clone();
+        // (Undo as it was: back one version, to before Tips was written.)
+        let before_tips = versions::list(id).unwrap().iter().filter(|l| l.version.field == versions::Field::Notes).nth(1).unwrap().version.n;
+        versions::restore(id, before_tips).unwrap();
+        assert_eq!(placeholders(id), 1);
+        let r = execute("edit_document", &json!({ "note_id": id, "ops": [{ "op": "replace", "id": table["id"], "if_hash": table["hash"], "markdown": "| Level | Pick |\n|---|---|\n| 21–22 | Quick step |" }] }));
+        assert_eq!(r["success"], json!(true), "{r}");
+        let now = crate::notes::get(id).unwrap().content;
+        assert!(now.contains("| 21–22 | Quick step |"), "{now}");
+        assert_eq!(placeholders(id), 1, "{now}");
+        assert_eq!(documents::pending_keys(&now), ["Tips"]);
+    }
+
     #[test]
     fn a_stale_edit_is_refused_with_the_block_as_it_stands_now() {
         let id = made_doc("Kit", &[("Clothes", "- A fleece\n- Spare socks"), ("Extras", "- A map")]);

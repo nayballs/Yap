@@ -12,8 +12,10 @@
 //   they're kept with Chat's sections (merged in Rust); a section whose
 //   placeholder they removed is refused, never brought back; the next
 //   question tells the model what they changed.
-// - Undo of a Chat edit; close, expand and Open in Notes; the split moved
-//   from the keyboard and remembered; light and dark screenshots.
+// - Undo of a Chat edit, the whole turn's (never back to a half-written
+//   document; none for a document the last turn made); close, expand and
+//   Open in Notes; the split moved from the keyboard and remembered; light
+//   and dark screenshots.
 // The model is a local fake (support/fake-llm.js) scripted call by call; a
 // step's `gate` holds it mid-turn while the spec edits.
 import { test as base, expect, openView, expectStore, setConfig } from './support/fixtures.js';
@@ -322,6 +324,69 @@ test("Undo takes back Chat's change to a document", async ({ yap, main, fakeLlm 
   const kinds = (await yap.invoke('note_versions', { id: doc.id })).filter((v) => v.field === 'notes').map((v) => v.kind);
   expect(kinds[0]).toBe('restored');
   await expect(panel(main).getByRole('button', { name: "Undo Chat's last change" })).toHaveCount(0);
+});
+
+// Undo is Chat's whole last turn (notes/versions.rs `in_turn`). A turn
+// writes a document a call at a time — its outline, then each section, each
+// a version — and Undo used to go back one call: after "Wrote 5 sections"
+// it brought the last section's placeholder back ("1 section not written
+// yet", the maintainer's document, 31 Oct 2026).
+test("Undo takes back Chat's whole turn, never half a document", async ({ yap, main, fakeLlm }) => {
+  const undo = () => panel(main).getByRole('button', { name: "Undo Chat's last change" });
+  fakeLlm.scriptChat([
+    {
+      tools: [
+        {
+          name: 'create_document',
+          args: { title: 'Mage build', sections: [{ key: 'Gear', intent: 'what to wear' }, { key: 'Levels', intent: 'level by level' }, { key: 'Tips', intent: 'tips' }] },
+        },
+      ],
+    },
+    { tools: [{ name: 'write_section', args: (r) => ({ note_id: madeDoc(r), key: 'Gear', markdown: '- A frost staff' }) }] },
+    { tools: [{ name: 'write_section', args: (r) => ({ note_id: madeDoc(r), key: 'Levels', markdown: '| Level | Pick |\n|---|---|\n| 20 | Frost nova |' }) }] },
+    { tools: [{ name: 'write_section', args: (r) => ({ note_id: madeDoc(r), key: 'Tips', markdown: '- Keep your distance' }) }] },
+    { content: "It's open on the right." },
+  ]);
+  await freshChat(main);
+  await ask(main, 'Make me a mage build');
+  await expect(thread(main)).toContainText("It's open on the right.", { timeout: 20_000 });
+  await expect(docBody(main)).toContainText('Keep your distance');
+  // The chips count what was written.
+  await expect(thread(main).locator('.toolchip').filter({ hasText: 'Mage build' })).toHaveText(['Started "Mage build" (3 sections)', 'Wrote 3 sections in "Mage build"']);
+  const doc = (await yap.invoke('notes_list')).find((n) => n.title === 'Mage build');
+  // Its outline and three sections: one turn's versions.
+  const made = (await yap.invoke('note_versions', { id: doc.id })).filter((v) => v.field === 'notes');
+  expect(made.map((v) => v.kind)).toEqual(['chat', 'chat', 'chat', 'chat']);
+  expect(made[0].turn).toBeGreaterThan(0);
+  expect(new Set(made.map((v) => v.turn)).size).toBe(1);
+  // That turn made the document: nothing of it before, so no Undo — never
+  // back to a half-written one.
+  await expect(undo()).toHaveCount(0);
+  await expect(status(main)).toHaveCount(0);
+
+  // A later turn rewrites two sections: one change, undone whole.
+  fakeLlm.scriptChat([
+    { tools: [{ name: 'rewrite_section', args: { note_id: doc.id, heading: 'Gear', markdown: '- A fire staff' } }] },
+    { tools: [{ name: 'rewrite_section', args: { note_id: doc.id, heading: 'Tips', markdown: '- Stand in the back row' } }] },
+    { content: 'Switched to fire.' },
+  ]);
+  await ask(main, 'Make it a fire mage instead');
+  await expect(thread(main)).toContainText('Switched to fire.', { timeout: 20_000 });
+  await expect(docBody(main)).toContainText('Stand in the back row');
+  const changed = (await yap.invoke('note_versions', { id: doc.id })).filter((v) => v.field === 'notes');
+  expect(changed[0].turn).toBe(changed[1].turn);
+  expect(changed[1].turn).not.toBe(made[0].turn);
+  await undo().click();
+  // Back as the first turn left it: every section written.
+  await expect(docBody(main)).toContainText('A frost staff');
+  await expect(docBody(main)).toContainText('Keep your distance');
+  await expect(docBody(main)).not.toContainText('A fire staff');
+  await expect(docBody(main)).not.toContainText('Stand in the back row');
+  await expect(status(main)).toHaveCount(0);
+  await expectStore(yap, 'notes.json', (s) => {
+    const c = noteNamed(s, 'Mage build')?.content ?? '';
+    return c.includes('- A frost staff') && c.includes('- Keep your distance') && !c.includes('yap:section') && !c.includes('fire staff');
+  });
 });
 
 test('the panel closes, expands, moves its split from the keyboard and opens in Notes', async ({ yap, main, fakeLlm, shot }) => {

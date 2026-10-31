@@ -91,7 +91,10 @@
   // section; a pill under the answer reopens it. The split between the
   // conversation and the panel is dragged (or moved with the arrow keys on
   // its handle) and remembered; with no room beside the conversation (a
-  // narrow window) the panel covers it, ✕ going back.
+  // narrow window) the panel covers it, ✕ going back. Words selected there
+  // ("Change this…") wait over the box as a quote, and the next question
+  // takes them however it comes: typed, dictated into the box, or asked out
+  // loud with Chat in view (Rust keeps a copy, `yap-chat-quote`).
   //
   // This file is the view: it makes its state (chatState.svelte.js), follows
   // Rust's events while Chat is open, takes the keys, and lays out the
@@ -261,6 +264,9 @@
       listen('yap-note-changed', (e) => doc.onNoteChanged(e.payload)),
       listen('yap-note-deleted', (e) => doc.onNoteDeleted(e.payload)),
       listen('yap-chat-dictation', (e) => chat.onChatDictation(e.payload)),
+      // The quote over the box, taken by a question asked out loud (or
+      // given back: no answer came).
+      listen('yap-chat-quote', (e) => chat.onQuote(e.payload)),
       // A question asked with the assistant shortcut, live (and its card's
       // "Open in Chat").
       listen('yap-assistant-turn', (e) => chat.followAssistant(e.payload)),

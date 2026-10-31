@@ -43,7 +43,8 @@
 //! - **A passage selected in the panel** ("Change this…", "Ask about
 //!   this"): the question carries it ([`Selection`], `chat_send`), and the
 //!   model is told which blocks it is ([`selection_note`]), so a change goes
-//!   to that part only.
+//!   to that part only. However the question comes — typed, dictated into
+//!   the box, or asked out loud with Chat in view ([`WaitingQuote`]).
 //!
 //! The log has ids, keys' counts and lengths: never a document's words.
 
@@ -1582,6 +1583,108 @@ pub fn selection() -> Option<Selection> {
     SELECTED.try_with(|s| s.clone()).ok().flatten()
 }
 
+/// **The passage quoted over Chat's box, waiting for a question**
+/// (2026-10-31), as the page has it: a typed question, or one dictated into
+/// the box (sent by "Talk back hands-free" or "press enter"), takes it with
+/// `chat_send`'s `selection`; Rust keeps a copy (`chat_quote_set`) so a
+/// question **asked out loud** takes it too ([`take_waiting_quote`]: the
+/// Voice Assistant, [`quote_goes`]). The maintainer selected a table row,
+/// chose "Change this…", then asked with the assistant's shortcut ("Make
+/// this level twenty-one to twenty-two only."): the question went without
+/// it — the model read the whole document to find the row — and the quote
+/// stayed over the box after the answer. In memory only.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WaitingQuote {
+    /// The conversation Chat shows it in (the document is one of its own).
+    #[serde(default)]
+    pub conversation_id: Option<u64>,
+    pub note_id: u64,
+    /// The document's title (the quote's "Change in …").
+    #[serde(default)]
+    pub title: String,
+    #[serde(default)]
+    pub text: String,
+    #[serde(default)]
+    pub from_line: Option<usize>,
+    #[serde(default)]
+    pub to_line: Option<usize>,
+    /// "ask" or "change" (how the box asks).
+    #[serde(default)]
+    pub mode: String,
+}
+
+impl WaitingQuote {
+    /// What the question carries ([`with_selection`]).
+    pub fn selection(&self) -> Selection {
+        Selection { note_id: self.note_id, text: self.text.clone(), from_line: self.from_line, to_line: self.to_line }
+    }
+}
+
+/// The page event: the quote over the box now (`{quote}`, `null`: none) —
+/// a spoken question took it, or gave it back (no answer came).
+pub const QUOTE_EVENT: &str = "yap-chat-quote";
+
+static WAITING_QUOTE: Mutex<Option<WaitingQuote>> = Mutex::new(None);
+
+/// **Does the quote waiting go with a spoken question?** Only when the
+/// person can see it — Chat in view as the question was asked (`in_view`:
+/// the main window in front, or beside showing the conversation,
+/// `assistant::answer_in_view`) — and the question goes to the
+/// conversation it's quoted in (its document is that chat's): asking
+/// "make this shorter" out loud while looking at the quote is asking about
+/// it, as a typed question would be. Asked from another app, the question
+/// is about something else, and the quote stays for the box. Pure.
+pub fn quote_goes(waiting: Option<&WaitingQuote>, in_view: bool, conversation: Option<u64>) -> bool {
+    in_view && waiting.is_some_and(|q| q.conversation_id.is_some() && q.conversation_id == conversation && !q.text.trim().is_empty())
+}
+
+/// The quote waiting, taken for a spoken question when it goes with it
+/// ([`quote_goes`]): the page's chip goes ([`QUOTE_EVENT`]).
+pub fn take_waiting_quote(app: &tauri::AppHandle, in_view: bool, conversation: Option<u64>) -> Option<WaitingQuote> {
+    use tauri::Emitter;
+    let taken = {
+        let mut w = WAITING_QUOTE.lock().unwrap_or_else(|p| p.into_inner());
+        if quote_goes(w.as_ref(), in_view, conversation) {
+            w.take()
+        } else {
+            None
+        }
+    };
+    if let Some(q) = &taken {
+        tracing::info!(note_id = q.note_id, chars = q.text.chars().count(), "Chat: a spoken question takes the quoted passage");
+        let _ = app.emit(QUOTE_EVENT, json!({ "quote": null }));
+    }
+    taken
+}
+
+/// A spoken question that took the quote got no answer: it's back over the
+/// box, unless another one is there now.
+pub fn put_back_quote(app: &tauri::AppHandle, quote: WaitingQuote) {
+    use tauri::Emitter;
+    {
+        let mut w = WAITING_QUOTE.lock().unwrap_or_else(|p| p.into_inner());
+        if w.is_some() {
+            return;
+        }
+        *w = Some(quote.clone());
+    }
+    let _ = app.emit(QUOTE_EVENT, json!({ "quote": quote }));
+}
+
+/// A typed or dictated question sent the quote (`chat_send`): not waiting
+/// any more.
+pub fn quote_sent() {
+    *WAITING_QUOTE.lock().unwrap_or_else(|p| p.into_inner()) = None;
+}
+
+/// The page's box now has this quote over it (`null`: none — sent, ✕,
+/// another conversation, Chat closed).
+#[tauri::command]
+pub fn chat_quote_set(quote: Option<WaitingQuote>) {
+    *WAITING_QUOTE.lock().unwrap_or_else(|p| p.into_inner()) = quote.filter(|q| !q.text.trim().is_empty());
+}
+
 /// The source text of a selection's blocks given to the model, at most.
 const SELECTED_CHARS: usize = 1_500;
 
@@ -2286,6 +2389,31 @@ mod tests {
         assert_eq!(sel.quote(), Some(Quote { note_id: id, text: "A stove\nTwo pans\nA kettle".into() }));
         assert_eq!(Selection { text: "  ".into(), ..sel.clone() }.quote(), None);
         assert!(selection_note(&Selection { note_id: 999_999, ..sel }, Some(ToolSet::Rich)).is_none());
+    }
+
+    /// The quote over Chat's box goes with a spoken question only when Chat
+    /// is in view and the question goes to the conversation it's quoted in;
+    /// the page's quote, as it sends it, is the question's selection.
+    #[test]
+    fn a_waiting_quote_goes_with_a_spoken_question_only_in_view_and_in_its_conversation() {
+        let q: WaitingQuote = serde_json::from_value(json!({
+            "conversationId": 4, "noteId": 9, "title": "Fox build", "text": "| 21 | Shadow step |", "fromLine": 12, "toLine": 12, "mode": "change"
+        }))
+        .unwrap();
+        assert_eq!(q.selection(), Selection { note_id: 9, text: "| 21 | Shadow step |".into(), from_line: Some(12), to_line: Some(12) });
+        assert!(quote_goes(Some(&q), true, Some(4)));
+        // Asked from another app: it stays in the box.
+        assert!(!quote_goes(Some(&q), false, Some(4)));
+        // Another conversation (or a new one): not its document.
+        assert!(!quote_goes(Some(&q), true, Some(5)));
+        assert!(!quote_goes(Some(&q), true, None));
+        assert!(!quote_goes(Some(&WaitingQuote { conversation_id: None, ..q.clone() }), true, None));
+        assert!(!quote_goes(Some(&WaitingQuote { text: " ".into(), ..q.clone() }), true, Some(4)));
+        assert!(!quote_goes(None, true, Some(4)));
+        // The page's quote without its lines (a section streaming in): words only.
+        let words: WaitingQuote = serde_json::from_value(json!({ "conversationId": 4, "noteId": 9, "text": "Shadow step" })).unwrap();
+        assert_eq!(words.selection().from_line, None);
+        assert_eq!(words.mode, "");
     }
 
     /// The rich tools that change a document run only on this chat's.

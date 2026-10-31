@@ -134,7 +134,11 @@ pub async fn chat_send(
     // stopped: those are kept as asked).
     let image_ids = images.unwrap_or_default();
     let taken = if image_ids.is_empty() { Vec::new() } else { crate::snip::waiting::sent(&app, &image_ids) };
-    // A passage selected in the document panel ("Change this…", documents.rs).
+    // A passage selected in the document panel ("Change this…", documents.rs):
+    // this question takes it, so a spoken one can't too.
+    if selection.is_some() {
+        crate::chat::documents::quote_sent();
+    }
     let turn = send_turn(&app, conversation_id, text, scope, voice, on_stream, turn_id, image_ids, as_text);
     let send = crate::chat::skills::with(skill_turn, crate::chat::documents::with_selection(selection, turn));
     let (out, thought) = crate::chat::think::with(think.unwrap_or(false), send).await;

@@ -405,6 +405,7 @@ pub fn run() {
             chat::commands::chat_archive,
             chat::commands::chat_send,
             chat::documents::chat_document_save,
+            chat::documents::chat_quote_set,
             chat::think::chat_think_info,
             chat::stream::stream_stop,
             ai::ai_model::ai_model_status,

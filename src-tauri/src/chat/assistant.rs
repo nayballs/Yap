@@ -77,6 +77,16 @@
 //! `listens_after`, `pipeline::listen_after_snip`): the capsule says "Ask
 //! about this screenshot…" ([`about_screenshot`]).
 //!
+//! **The passage quoted over Chat's box** (a document's "Change this…" /
+//! "Ask about this", 2026-10-31) goes with a spoken question as it does
+//! with a typed one — the model is told its blocks, the question keeps its
+//! quote, the box's quote goes — when Chat is in view as it's asked and
+//! the question goes to the conversation it's quoted in
+//! (`documents::quote_goes`): looking at the quote and saying "make this
+//! level 21 to 22 only" is asking about it. Asked from another app, it
+//! stays in the box. No answer: it's back over the box. Nor is the window
+//! in front looked at then: the passage is what it's about.
+//!
 //! **It sees the window in front** (2026-10-29, [`screen`]): a question
 //! about the screen ("what's this error?", "summarise this page") takes a
 //! screenshot of the window that was in front when the shortcut was
@@ -896,14 +906,26 @@ async fn answer(app: AppHandle, generation: u64, since: u64, question: String) {
             }
         }
     }
+    // The person is in Yap's main window: Chat comes up there with the
+    // question. In front, or beside the app in front showing Chat: the
+    // answer is in view there (a document's line points at the panel).
+    let seen = crate::notices::notice::window_seen(&app);
+    let focused = seen == crate::notices::notice::Seen::Front;
+    let in_chat = answer_in_view(seen, viewing, conversation_id);
+    // The passage quoted over Chat's box (a document's "Change this…"): it
+    // goes with a question asked with Chat in view, to the conversation it's
+    // quoted in, as a typed or dictated question takes it
+    // (`documents::quote_goes`); the box's quote goes.
+    let quote = if opens_an_app { None } else { crate::chat::documents::take_waiting_quote(&app, in_chat, conversation_id) };
     // A question about the screen (screen.rs): the window in front goes
     // with it — its picture, or its text read on this PC — or a line tells
     // the model why it can't see it. Not beside screenshots already waiting
-    // (they're what it's about), nor when Yap opens an app (no model).
+    // or a quoted passage (they're what it's about), nor when Yap opens an
+    // app (no model).
     let mut ask = question.clone();
     let mut window_picture: Option<(String, String)> = None;
     let mut took_window = false;
-    if let (false, Some((base_url, api_key, model, provider, _persona, _thinking))) = (shots_wait, &endpoint) {
+    if let (false, Some((base_url, api_key, model, provider, _persona, _thinking))) = (shots_wait || quote.is_some(), &endpoint) {
         let ep = screen::Endpoint { base_url, api_key, model, provider };
         let look_app = app.clone();
         let show = move |on: bool| looking(&look_app, generation, on);
@@ -918,13 +940,7 @@ async fn answer(app: AppHandle, generation: u64, since: u64, question: String) {
             shots = look.images;
         }
     }
-    // The person is in Yap's main window: Chat comes up there with the
-    // question. In front, or beside the app in front showing Chat: the
-    // answer is in view there (a document's line points at the panel).
-    let seen = crate::notices::notice::window_seen(&app);
-    let focused = seen == crate::notices::notice::Seen::Front;
-    let in_chat = answer_in_view(seen, viewing, conversation_id);
-    tracing::info!(?viewing, ?choice, ?seen, shots = shots.images.len(), window = took_window, "Voice Assistant: asking Chat");
+    tracing::info!(?viewing, ?choice, ?seen, shots = shots.images.len(), window = took_window, quoted = quote.is_some(), "Voice Assistant: asking Chat");
     let asked_app = app.clone();
     let asked_text = question.clone();
     // The answer as it's written: the Chat view follows it, the voice
@@ -973,6 +989,9 @@ async fn answer(app: AppHandle, generation: u64, since: u64, question: String) {
             Some(&stoppable),
         ),
     );
+    // The quoted passage it's about: the model is told its blocks, and the
+    // question keeps its quote (documents.rs).
+    let turn = crate::chat::documents::with_selection(quote.as_ref().map(crate::chat::documents::WaitingQuote::selection), turn);
     // Asked with Chat in view: it shows the answer (`asked_in_chat`).
     let turn = IN_CHAT.scope(in_chat, turn);
     // Its AI calls and searches are the Voice Assistant's in the network
@@ -1028,6 +1047,11 @@ async fn answer(app: AppHandle, generation: u64, since: u64, question: String) {
                 );
                 give_up(&app, generation);
                 return;
+            }
+            // The passage it was about back over the box, to ask again (as a
+            // typed question's is).
+            if let Some(q) = quote {
+                crate::chat::documents::put_back_quote(&app, q);
             }
             // Its screenshots back in the box, to ask again (as a typed
             // question's are); a server that turned the image down: that

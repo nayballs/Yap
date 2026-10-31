@@ -21,6 +21,15 @@
 //!   first version, or a change Yap didn't see (an older Yap's) — is kept
 //!   first as [`kind::EARLIER`]. [`KEEP`] versions per note, the oldest going
 //!   first.
+//! - **A Chat turn's versions are marked as one** ([`in_turn`], 2026-10-31):
+//!   Chat writes a document a tool call at a time — its outline, then each
+//!   section — and each call is a version, so the document panel's Undo
+//!   ("Chat's last change") went back one call: after "Wrote 5 sections" it
+//!   brought the last section's placeholder back ("1 section not written
+//!   yet", the maintainer's Claude Haiku 5.5 document). Every version a
+//!   turn makes carries its `turn` (a number new for each turn), and the
+//!   panel's Undo goes back past all of them. A version an older Yap wrote
+//!   has none: a turn of its own.
 //! - **Stored** in `note-versions/<id>.json` ([`File`]: the note's id and
 //!   `createdTs` with its versions), not in notes.json: an older Yap never
 //!   opens these files, and notes.json stays the size it was. A file whose
@@ -125,16 +134,19 @@ pub struct How {
     pub label: String,
     /// A restore: the version it brought back.
     pub from: Option<u64>,
+    /// The Chat turn making the change ([`in_turn`]; 0: none). Filled in
+    /// where the change is recorded ([`noted`]).
+    pub turn: u64,
 }
 
 impl How {
     pub fn new(kind: &'static str) -> Self {
-        How { kind, label: String::new(), from: None }
+        How { kind, label: String::new(), from: None, turn: 0 }
     }
 
     /// A kind with a name: a transform, an Action, Yap's summary restored.
     pub fn named(kind: &'static str, label: &str) -> Self {
-        How { kind, label: label.trim().chars().take(80).collect(), from: None }
+        How { kind, label: label.trim().chars().take(80).collect(), from: None, turn: 0 }
     }
 }
 
@@ -153,6 +165,10 @@ pub struct Version {
     /// A restore: the version it brought back.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub from: Option<u64>,
+    /// The Chat turn that made it ([`in_turn`]): its other versions are the
+    /// same change (the panel's Undo takes them back together). 0: none.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub turn: u64,
     /// Its first save and its last (saves folded into it), unix ms.
     pub since_ms: u64,
     pub ms: u64,
@@ -196,12 +212,13 @@ pub fn apply(file: &mut File, field: Field, how: &How, before: &str, after: &str
     let known = file.versions.iter().rev().find(|v| v.field == field).is_some_and(|v| same(&v.text, before));
     if !known && !before.trim().is_empty() {
         let at = before_ms.min(now);
-        push(file, Version { n: 0, field, kind: kind::EARLIER.into(), label: String::new(), from: None, since_ms: at, ms: at, text: before.to_string() });
+        push(file, Version { n: 0, field, kind: kind::EARLIER.into(), label: String::new(), from: None, turn: 0, since_ms: at, ms: at, text: before.to_string() });
     } else if let Some(last) = file.versions.last_mut() {
         if known
             && last.field == field
             && last.kind == how.kind
             && last.label == how.label
+            && last.turn == how.turn
             && folds(how.kind)
             && last.n > file.sealed
             && now.saturating_sub(last.since_ms) < FOLD_MS
@@ -219,12 +236,17 @@ pub fn apply(file: &mut File, field: Field, how: &How, before: &str, after: &str
             kind: how.kind.into(),
             label: how.label.clone(),
             from: how.from,
+            turn: how.turn,
             since_ms: now,
             ms: now,
             text: after.to_string(),
         },
     );
     true
+}
+
+fn is_zero(n: &u64) -> bool {
+    *n == 0
 }
 
 /// Add `v` as the newest version (numbered), the oldest going past [`KEEP`].
@@ -271,6 +293,38 @@ pub fn by<R>(how: How, f: impl FnOnce() -> R) -> R {
     }
     let _reset = Reset(HOW.with(|h| h.replace(Some(how))));
     f()
+}
+
+tokio::task_local! {
+    /// The Chat turn running here ([`in_turn`]).
+    static TURN: u64;
+}
+
+/// **Run `f`, a Chat turn** (`turn::chat_turn`): every version the note
+/// changes it makes carries one number, new for each turn (`Version::turn`),
+/// so they're one change — the document panel's Undo takes the whole turn
+/// back (its outline and every section, or all its edits), never part of it.
+pub async fn in_turn<F: std::future::Future>(f: F) -> F::Output {
+    TURN.scope(next_turn(now_ms()), f).await
+}
+
+/// A Chat turn's number: when it began (unix ms), and never one an earlier
+/// turn had (two may begin in one millisecond).
+fn next_turn(now: u64) -> u64 {
+    static LAST: AtomicU64 = AtomicU64::new(0);
+    let mut prev = LAST.load(Ordering::SeqCst);
+    loop {
+        let next = now.max(prev + 1);
+        match LAST.compare_exchange_weak(prev, next, Ordering::SeqCst, Ordering::SeqCst) {
+            Ok(_) => return next,
+            Err(p) => prev = p,
+        }
+    }
+}
+
+/// The Chat turn whose changes are being made now (0: none).
+fn turn_now() -> u64 {
+    TURN.try_with(|t| *t).unwrap_or(0)
 }
 
 // ---- recorded under the notes store's lock ------------------------------------------
@@ -391,7 +445,10 @@ pub(super) fn noted(store: &mut super::Store, at: usize, before: &Before, fallba
     if changed.is_empty() {
         return;
     }
-    let how = HOW.with(|h| h.borrow().clone()).unwrap_or_else(|| How::new(fallback));
+    let mut how = HOW.with(|h| h.borrow().clone()).unwrap_or_else(|| How::new(fallback));
+    if how.turn == 0 {
+        how.turn = turn_now();
+    }
     let now = now_ms();
     let file = store.versions.file(note);
     let mut any = false;
@@ -691,7 +748,7 @@ pub fn restore_by(id: u64, n: u64, label: &str) -> Result<Restored, String> {
         .ok_or("Note not found")?
         .ok_or("That version isn't kept any more")?;
     let now = now_ms();
-    let how = How { kind: kind::RESTORED, label: label.trim().chars().take(80).collect(), from: Some(n) };
+    let how = How { kind: kind::RESTORED, label: label.trim().chars().take(80).collect(), from: Some(n), turn: 0 };
     let (text, changed) = by(how, || {
         super::modify(id, |note| {
             let changed = match v.field {
@@ -860,7 +917,7 @@ mod tests {
     }
 
     fn version(n: u64, kind: &str, from: Option<u64>, text: &str) -> Version {
-        Version { n, field: Field::Notes, kind: kind.into(), label: String::new(), from, since_ms: n, ms: n, text: text.into() }
+        Version { n, field: Field::Notes, kind: kind.into(), label: String::new(), from, turn: 0, since_ms: n, ms: n, text: text.into() }
     }
 
     /// A history Yap couldn't read when the note was changed: the file's
@@ -935,6 +992,52 @@ mod tests {
         assert_eq!(r.text, "Boots");
         let newest = &list(id).unwrap()[0].version;
         assert_eq!((newest.kind.as_str(), newest.label.as_str(), newest.from), (kind::RESTORED, "Chat", Some(n)));
+    }
+
+    /// A Chat turn's versions carry its number (the panel's Undo takes them
+    /// back together); the next turn's another; a change outside a turn none.
+    #[tokio::test]
+    async fn a_chat_turn_marks_every_version_it_makes() {
+        let chat = || How::new(kind::CHAT);
+        let id = super::super::create("Plan", "", "chat", "").id;
+        in_turn(async {
+            by(chat(), || super::super::update(id, None, Some("# Plan\n\n<!-- yap:section Route -->".into()), None, None)).unwrap();
+            by(chat(), || super::super::update(id, None, Some("# Plan\n\n## Route\n\nNorth.".into()), None, None)).unwrap();
+        })
+        .await;
+        in_turn(async {
+            by(chat(), || super::super::update(id, None, Some("# Plan\n\n## Route\n\nSouth.".into()), None, None)).unwrap();
+        })
+        .await;
+        super::super::update(id, None, Some("# Plan\n\n## Route\n\nSouth, by the lake.".into()), None, None).unwrap();
+        let turns: Vec<u64> = list(id).unwrap().iter().rev().map(|l| l.version.turn).collect();
+        assert_eq!(turns.len(), 4);
+        assert!(turns[0] > 0 && turns[0] == turns[1], "the outline and its section: one turn");
+        assert!(turns[2] > turns[1], "the next turn: a number of its own");
+        assert_eq!(turns[3], 0, "typed outside a turn");
+        // Kept in the file; an older version without one reads as none.
+        let v = &list(id).unwrap()[1].version;
+        let json = serde_json::to_value(v).unwrap();
+        assert_eq!(json["turn"], serde_json::json!(turns[2]));
+        let older: Version = serde_json::from_value(serde_json::json!({ "n": 1, "field": "notes", "kind": "chat", "sinceMs": 1, "ms": 1, "text": "x" })).unwrap();
+        assert_eq!(older.turn, 0);
+        assert!(serde_json::to_value(&older).unwrap().get("turn").is_none());
+        // Numbers never repeat, though two turns begin in one millisecond.
+        assert!(next_turn(5) < next_turn(5));
+    }
+
+    /// The person's typing never folds into a version a turn made, nor a
+    /// turn's into theirs.
+    #[test]
+    fn a_save_folds_only_into_a_version_of_the_same_turn() {
+        let mut f = File::new(1, 1);
+        let mut edited = How::new(kind::EDITED);
+        edited.turn = 7;
+        apply(&mut f, Field::Notes, &edited, "", "One", 0, 0);
+        apply(&mut f, Field::Notes, &How::new(kind::EDITED), "One", "One two", 0, MIN);
+        assert_eq!(f.versions.len(), 2);
+        apply(&mut f, Field::Notes, &How::new(kind::EDITED), "One two", "One two three", 0, 2 * MIN);
+        assert_eq!(f.versions.len(), 2, "outside a turn it folds as before");
     }
 
     #[test]
@@ -1093,7 +1196,7 @@ mod tests {
             note: id,
             created: 1,
             next: 2,
-            versions: vec![Version { n: 1, field: Field::Notes, kind: "typed".into(), label: String::new(), from: None, since_ms: 1, ms: 1, text: "someone else's words".into() }],
+            versions: vec![Version { n: 1, field: Field::Notes, kind: "typed".into(), label: String::new(), from: None, turn: 0, since_ms: 1, ms: 1, text: "someone else's words".into() }],
             sealed: 0,
         };
         std::fs::write(dir.join(format!("{id}.json")), serde_json::to_string(&stale).unwrap()).unwrap();

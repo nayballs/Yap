@@ -405,7 +405,15 @@ under "The Notes view".
   (`apply`, pure): a save of the same field, kind (typed, dictated, edited)
   and name as the newest version, within 10 minutes of that version's first
   save (`FOLD_MS`), becomes it (`sinceMs`..`ms`); Yap's writing, a
-  transform, Chat and a restore never fold. **50 kept** per note (`KEEP`),
+  transform, Chat and a restore never fold. **A Chat turn's versions are
+  one change** (2026-10-31): `chat_turn` runs inside `versions::in_turn`, a
+  task-local number new for each turn (when it began, never repeated), and
+  `noted` puts it on every version the turn's changes make (`turn`; a save
+  folds only into a version of the same turn) — the Chat document panel's
+  Undo goes back past the whole turn, not one tool call (it used to bring a
+  section's placeholder back after "Wrote 5 sections";
+  [chat-and-assistant.md](./chat-and-assistant.md#the-chat-view)); a version
+  without one (an older Yap's) is a turn of its own. **50 kept** per note (`KEEP`),
   the oldest going first; a number (`n`) is never given twice (`next`).
   **Stored** in `note-versions/<id>.json` (`{note, created, next,
   versions}`): loaded when the note first changes or its history opens, the
