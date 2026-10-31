@@ -20,15 +20,15 @@
   // is drawn a piece at a time (`drawParts`): only the section being
   // written is drawn again as it grows.
   // **A page you can edit** (2026-10-31, stage 2): once nothing's flowing
-  // in, Preview is the page in an editor (docEditor.js, TipTap on
+  // in, Preview is the page in an editor (components/richtext/richEditor.js, TipTap on
   // ProseMirror, its own chunk loaded the first time it's shown; the page
-  // as drawn until then), with a toolbar over it (DocToolbar: text style,
+  // as drawn until then), with a toolbar over it (RichToolbar: text style,
   // code, table, checklist, + insert). The note stays markdown: a change
   // goes out as the markdown of the block it's in, the rest exactly as it
-  // was (docMarkdown.js), saved as Source's typing is. While Chat writes,
+  // was (richMarkdown.js), saved as Source's typing is. While Chat writes,
   // the page is drawn as before and the toolbar waits.
   import { tick, untrack } from 'svelte';
-  import DocToolbar from './DocToolbar.svelte';
+  import RichToolbar from '../../components/richtext/RichToolbar.svelte';
   import { renderMarkdown } from '../../core/markdown.js';
   import { highlightMarkdown } from '../../core/markdownSource.js';
   import { motionReduced } from '../../core/appearance.js';
@@ -122,7 +122,7 @@
 
   // ---- the page you can edit -----------------------------------------------------------
 
-  // Preview with nothing flowing in: the editor (`createDocEditor`, its
+  // Preview with nothing flowing in: the editor (`createRichEditor`, its
   // chunk loaded the first time it's wanted), on `doc.draft` — the text
   // Source edits too — saving through `doc.input`.
   const editing = $derived(doc.view === 'preview' && !doc.gone && !doc.streaming);
@@ -134,8 +134,8 @@
 
   $effect(() => {
     if (!editing || makeEditor) return;
-    import('./docEditor.js')
-      .then((m) => (makeEditor = m.createDocEditor))
+    import('../../components/richtext/richEditor.js')
+      .then((m) => (makeEditor = m.createRichEditor))
       .catch(() => {
         /* the page stays as drawn; Source still edits */
       });
@@ -561,7 +561,7 @@
     </div>
   </header>
   {#if !doc.gone && doc.view === 'preview'}
-    <DocToolbar {ed} state={tools} writing={doc.streaming} />
+    <RichToolbar {ed} state={tools} disabled={doc.streaming} why={doc.streaming ? 'Chat is writing the document' : ''} note={doc.streaming ? 'Chat is writing…' : ''} testid="chat-doc-toolbar" />
   {/if}
   {#if status}
     <p class="docstatus" class:live={doc.busy} data-testid="chat-doc-status" aria-live="polite">
@@ -645,7 +645,7 @@
         <article class="docpage" class:railed={outline.length >= RAIL_FROM} onclick={pageClick}>
           <h1 class="docname">{doc.title || 'Untitled document'}</h1>
           {#if editing && makeEditor}
-            <!-- The editor's root (docEditor.js): the page, editable. One
+            <!-- The editor's root (richEditor.js): the page, editable. One
                  per document (its own undo history). -->
             {#key doc.id}
               <div class="docmd docedit" bind:this={editEl}></div>

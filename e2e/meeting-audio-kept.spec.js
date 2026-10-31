@@ -87,7 +87,7 @@ test.afterEach(async ({ yap }) => {
 test('a meeting keeps its audio, plays a line, is transcribed again, and its audio goes with it', async ({ yap, main, shot }) => {
   meetingAudio({ seconds: 24, you: [[0, 1], [8, 13], [20, 24]], them: THEM_PAUSES });
   await newMeetingNote(main, 'Kept audio');
-  await main.getByPlaceholder('Start writing…').fill('Ask about the budget');
+  await main.getByRole('textbox', { name: 'My thoughts' }).fill('Ask about the budget');
   await recordAll(main, yap);
 
   // On disk: both sides as FLAC, and the recording's notes, ended and kept.

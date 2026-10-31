@@ -6,6 +6,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { test as base, expect, openView, openSettings, closeSettings, expectStore } from './support/fixtures.js';
+import { expectText } from './support/notePage.js';
 import { startMcp } from './support/mcp-client.js';
 import { RUNS } from './support/yap.js';
 
@@ -385,7 +386,7 @@ test('allowing writes adds create_note, and the saved note shows up in Notes', a
   await main.locator('.folder', { hasText: 'Ideas' }).click();
   await main.locator('.items .item', { hasText: 'Ideas from Claude' }).click();
   await expect(main.getByPlaceholder('Untitled Note')).toHaveValue('Ideas from Claude');
-  await expect(main.getByPlaceholder('Start writing…')).toHaveValue(/Try the riverside venue/);
+  await expectText(main.getByRole('textbox', { name: 'My thoughts' }), /Try the riverside venue/);
   await shot(main, '08-note-saved-by-an-ai-app');
 
   // Switched off again: the tool is gone and refuses.

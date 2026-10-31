@@ -2,12 +2,25 @@
   // My thoughts: the note's own text, synced with the Notes view both ways
   // (`yap-note-changed`, `origin` = the window's label). While the meeting
   // records, its pre-meeting brief (calendar/brief.rs) sits over it in one
-  // line that opens it on the Summary tab.
+  // line that opens it on the Summary tab. A page you can format
+  // (components/richtext/RichNote: the toolbar over it, Ctrl+F), the note
+  // kept markdown; its plain box until the page has loaded (Notepad.svelte
+  // loads it with the meeting).
   import { briefTeaser } from '../core/brief.js';
+  import { richtext } from '../components/richtext/richtext.svelte.js';
   import Icon from './NotepadIcon.svelte';
 
   /** `onsave()`: the text was typed; `onopenbrief()`: the brief, unfolded. */
   let { note = $bindable(), recordingThis, brief, briefLineGone = $bindable(), onsave, onopenbrief } = $props();
+
+  const placeholder = $derived(
+    recordingThis ? 'Jot down your own notes while Yap listens. They go into the summary.' : 'Your own notes on this meeting.'
+  );
+
+  function onRichChange(md) {
+    note.content = md;
+    onsave();
+  }
 </script>
 
 {#if brief && recordingThis && !briefLineGone}
@@ -21,15 +34,25 @@
     <button class="briefx" aria-label="Hide the brief's line" onclick={() => (briefLineGone = true)}><Icon name="x" /></button>
   </div>
 {/if}
-<textarea
-  class="thoughts"
-  aria-label="My thoughts"
-  placeholder={recordingThis
-    ? 'Jot down your own notes while Yap listens. They go into the summary.'
-    : 'Your own notes on this meeting.'}
-  bind:value={note.content}
-  oninput={onsave}
-></textarea>
+{#if richtext.Note}
+  {@const Rich = richtext.Note}
+  <div class="thoughtpage">
+    {#key note.id}
+      <Rich
+        text={note.content}
+        onchange={onRichChange}
+        label="My thoughts"
+        {placeholder}
+        rawTitle="Edit this part in Notes, in Source"
+        --rich-size="calc(15px * var(--yap-reading-scale))"
+        --rich-leading="calc(1.6 * var(--yap-reading-leading))"
+        --rich-pad="18px 12px 180px"
+      />
+    {/key}
+  </div>
+{:else}
+  <textarea class="thoughts" aria-label="My thoughts" data-rich-fallback {placeholder} bind:value={note.content} oninput={onsave}></textarea>
+{/if}
 
 <style>
   button {
@@ -102,6 +125,14 @@
   .briefx :global(svg) {
     width: 13px;
     height: 13px;
+  }
+  /* The page: its toolbar over it, the words below (RichNote). */
+  .thoughtpage {
+    flex: 1 1 auto;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    margin: 6px 20px 0;
   }
   .thoughts {
     flex: 1 1 auto;

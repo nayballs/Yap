@@ -243,7 +243,7 @@ test('a Chat answer read aloud shows the same card, and the shortcut in Yap read
   await yap.invoke('note_create', { title: 'Shortcut note', content: 'Select this sentence to hear it.' });
   await openView(main, 'Notes');
   await main.locator('.items .item').filter({ hasText: 'Shortcut note' }).click();
-  const editor = main.locator('textarea.raw');
+  const editor = main.getByRole('textbox', { name: 'My thoughts' });
   await editor.focus();
   await editor.evaluate((el) => el.setSelectionRange(0, el.value.length));
   await yap.invoke('tts_e2e_spoken', { clear: true });
