@@ -33,6 +33,7 @@ import {
   settingsDialog,
   pressHotkey,
 } from './support/fixtures.js';
+import { expectText, fillLines } from './support/notePage.js';
 import { startFakeLlm } from './support/fake-llm.js';
 import { newMeetingNote, meetingNote } from './support/meetings.js';
 import { startCalendarFeed, calendarFile, vevent } from './support/calendar-feed.js';
@@ -352,13 +353,13 @@ test('My thoughts sync with the Notes view both ways', async ({ yap, main, shot 
   // Typed in the notepad → the Notes view.
   const thoughts = pad.getByRole('textbox', { name: 'My thoughts' });
   await thoughts.fill('Ask Priya about the launch date');
-  const raw = main.locator('textarea.raw');
-  await expect(raw).toHaveValue('Ask Priya about the launch date');
+  const raw = main.getByRole('textbox', { name: 'My thoughts' });
+  await expectText(raw, 'Ask Priya about the launch date');
   await shot(pad, '05-thoughts-typed-in-notepad');
 
   // Typed in the Notes view → the notepad.
-  await raw.fill('Ask Priya about the launch date\nPress release needs legal review');
-  await expect(thoughts).toHaveValue('Ask Priya about the launch date\nPress release needs legal review');
+  await fillLines(raw, 'Ask Priya about the launch date\nPress release needs legal review');
+  await expectText(thoughts, 'Ask Priya about the launch date\nPress release needs legal review');
   await expectStore(yap, 'notes.json', (s) =>
     meetingNote(s, 'Sync check')?.content?.includes('legal review')
   );

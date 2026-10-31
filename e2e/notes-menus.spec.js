@@ -12,6 +12,7 @@
 // down to the editing commands: nothing on plain UI, Cut/Copy/Paste in a
 // text field (test mode records the menu and never puts one on screen).
 import { test, expect, openView, expectStore, closeToasts } from './support/fixtures.js';
+import { pageIn } from './support/notePage.js';
 
 // A folder's row: its name, then its count if it has notes ("Camping 2").
 const folderRow = (main, name) =>
@@ -387,7 +388,8 @@ test('WebView2’s own menu: nothing on plain UI, the edit commands in a text fi
   // A text field: the edit commands, nothing that navigates or prints.
   await openView(main, 'Notes');
   await main.getByRole('button', { name: 'New note' }).first().click();
-  const raw = main.getByPlaceholder('Start writing…');
+  const raw = main.getByRole('textbox', { name: 'My thoughts' });
+  await pageIn(raw);
   await raw.fill('Some text to edit');
   before = await seen();
   await raw.click({ button: 'right', position: { x: 300, y: 80 } });
