@@ -2,21 +2,41 @@
   // The document beside the conversation (chat/documents.rs, chatDoc.svelte.js):
   // its title, what's being written ("Writing: Gear…", "Editing…"), and two
   // views (2026-10-31, after Claude Code's own markdown file view, none of
-  // its code): **Preview**, the document as a page to read, and **Source**,
-  // its markdown coloured and editable — saved as you type, the person's
-  // words winning over Chat's writing (it took the old Edit box's place).
-  // Find in the document (Ctrl+F, either view), and in ⋯: Copy as Markdown,
+  // its code): **Preview**, the document as a page to read (and, below,
+  // to edit), and **Source**, its markdown coloured and editable — saved as
+  // you type, the person's words winning over Chat's writing (it took the
+  // old Edit box's place). Find in the document (Ctrl+F, either view), and in ⋯: Copy as Markdown,
   // Export as Markdown…, Open in Notes. Undo (Chat's last change), expand
   // to the whole of Chat, ✕. Select words on the page and a small popover
   // offers "Ask about this" and "Change this…": the question goes to Chat's
   // box with the passage quoted (`onquote`). A change Chat makes lands with
   // its blocks marked a moment; each document's scroll is kept per view.
-  import { tick } from 'svelte';
+  // **As Chat writes** (2026-10-31, after Claude's own documents): a
+  // section flows in line by line at a pace that follows how far behind it
+  // is (`revealed`, docStream.js `revealStep`, a frame at a time; motion
+  // reduced, as it comes), a small labelled caret at the end of its text
+  // ("Chat"), the page following it while it's in view; the sections still
+  // to write wait as grey lines, their name and what they'll say. The page
+  // is drawn a piece at a time (`drawParts`): only the section being
+  // written is drawn again as it grows.
+  // **A page you can edit** (2026-10-31, stage 2): once nothing's flowing
+  // in, Preview is the page in an editor (docEditor.js, TipTap on
+  // ProseMirror, its own chunk loaded the first time it's shown; the page
+  // as drawn until then), with a toolbar over it (DocToolbar: text style,
+  // code, table, checklist, + insert). The note stays markdown: a change
+  // goes out as the markdown of the block it's in, the rest exactly as it
+  // was (docMarkdown.js), saved as Source's typing is. While Chat writes,
+  // the page is drawn as before and the toolbar waits.
+  import { tick, untrack } from 'svelte';
+  import DocToolbar from './DocToolbar.svelte';
   import { renderMarkdown } from '../../core/markdown.js';
   import { highlightMarkdown } from '../../core/markdownSource.js';
+  import { motionReduced } from '../../core/appearance.js';
   import { openContextMenu } from '../../ui/contextMenu.svelte.js';
   import SummaryFind from '../../components/SummaryFind.svelte';
   import { shownOffset, copyDocument, exportDocument } from './docTools.js';
+  import { splitSections, drawParts, placeCaret } from './docPieces.js';
+  import { shownSegments, revealStep, revealCut, revealOn } from './docStream.js';
 
   /**
    * `doc`: the panel's state; `cover`: over the conversation (expanded, or a
@@ -36,6 +56,136 @@
 
   const reduced = () => matchMedia('(prefers-reduced-motion: reduce)').matches || document.documentElement.dataset.motion === 'reduced';
 
+  // ---- the flow: a section's text onto the page at its own pace ------------------------
+
+  // How much of each section on its way (`doc.live`) is shown: characters,
+  // a fraction kept.
+  let revealed = $state({});
+  // Each one's text as it was last time (what `revealed` counted in).
+  let was = {};
+  let frame = 0;
+  let timer = 0;
+  let last = 0;
+
+  $effect(() => {
+    const live = doc.live;
+    untrack(() => {
+      const instant = motionReduced();
+      revealed = Object.fromEntries(Object.entries(live).map(([k, t]) => [k, instant ? t.length : revealOn(revealed[k], t, was[k])]));
+      was = { ...live };
+      pace();
+    });
+  });
+  $effect(() => () => {
+    cancelAnimationFrame(frame);
+    clearTimeout(timer);
+  });
+
+  /** The next frame of the flow (a timer stands in when frames don't come: a hidden window). */
+  function pace() {
+    if (frame || timer) return;
+    if (!last) last = performance.now();
+    const run = () => {
+      cancelAnimationFrame(frame);
+      clearTimeout(timer);
+      frame = timer = 0;
+      flow();
+    };
+    frame = requestAnimationFrame(run);
+    timer = setTimeout(run, 150);
+  }
+
+  /** One frame: each section a little further on; one that landed, all shown, leaves. */
+  function flow() {
+    const now = performance.now();
+    const dt = now - last;
+    last = now;
+    const instant = motionReduced();
+    const next = {};
+    const done = [];
+    let more = false;
+    for (const [k, t] of Object.entries(doc.live)) {
+      next[k] = instant ? t.length : revealStep(revealed[k] ?? 0, t.length, dt);
+      if (next[k] < t.length) more = true;
+      else if (doc.isSettled(k)) done.push(k);
+    }
+    revealed = next;
+    for (const k of done) doc.release(k);
+    if (more) pace();
+    else last = 0;
+  }
+
+  // What the page shows: each live section as far as it has come.
+  const onPage = $derived(Object.fromEntries(Object.entries(doc.live).map(([k, t]) => [k, t.slice(0, revealCut(t, revealed[k] ?? 0))])));
+  const segments = $derived(shownSegments(doc.content, doc.title, onPage));
+  const shown = $derived(segments.map((s) => s.md).join('\n'));
+
+  // ---- the page you can edit -----------------------------------------------------------
+
+  // Preview with nothing flowing in: the editor (`createDocEditor`, its
+  // chunk loaded the first time it's wanted), on `doc.draft` — the text
+  // Source edits too — saving through `doc.input`.
+  const editing = $derived(doc.view === 'preview' && !doc.gone && !doc.streaming);
+  let makeEditor = $state(null);
+  let editEl = $state(null);
+  let ed = $state(null);
+  let tools = $state({});
+  let seenLanded = 0;
+
+  $effect(() => {
+    if (!editing || makeEditor) return;
+    import('./docEditor.js')
+      .then((m) => (makeEditor = m.createDocEditor))
+      .catch(() => {
+        /* the page stays as drawn; Source still edits */
+      });
+  });
+
+  $effect(() => {
+    const el = editEl;
+    const make = makeEditor;
+    if (!el || !make) return;
+    const ctl = untrack(() =>
+      make({
+        mount: el,
+        text: doc.draft,
+        title: doc.title,
+        onchange: (md) => doc.input(md),
+        onstate: (s) => (tools = s),
+      })
+    );
+    seenLanded = untrack(() => doc.landed);
+    // A change marked on the page a moment ago (Chat's turn just ended): still marked.
+    const left = 1700 - (performance.now() - washed.at);
+    if (left > 120 && washed.id === untrack(() => doc.id)) ctl.markBlocks(washed.idx, left);
+    ed = ctl;
+    return () => {
+      ctl.destroy();
+      if (ed === ctl) ed = null;
+      tools = {};
+    };
+  });
+
+  /** A click on the page under its last block: the caret at the end of the document. */
+  function pageClick(e) {
+    if (!ed || !editEl || editEl.contains(e.target)) return;
+    if (e.clientY < editEl.getBoundingClientRect().bottom) return;
+    ed.focus('end');
+  }
+
+  // It follows the document from outside (Chat's change merged in, Undo,
+  // another window): the blocks that changed are replaced, and a change
+  // that landed is marked.
+  $effect(() => {
+    const text = doc.draft;
+    const landed = doc.landed;
+    const title = doc.title;
+    const ctl = ed;
+    if (!ctl) return;
+    untrack(() => ctl.load(text, { title, mark: landed !== seenLanded }));
+    seenLanded = landed;
+  });
+
   // **The sections' rail** (after Claude's document outline, none of its
   // code): a document of three sections or more gets a thin rail of ticks
   // at its left, one per section, the one being read marked; hovered or
@@ -51,22 +201,28 @@
 
   $effect(() => {
     // Again whenever the document's text or view changes.
-    void doc.shown;
+    void shown;
     void doc.view;
     if (!bodyEl) {
       outline = [];
       return;
     }
     tick().then(() => {
-      outline = sections().map((h, i) => ({ i, text: h.textContent.trim() }));
-      onScroll();
+      const now = sections().map((h, i) => ({ i, text: h.textContent.trim() }));
+      // (Every frame while a section flows in: only a change is news.)
+      if (now.map((h) => h.text).join('\n') !== outline.map((h) => h.text).join('\n') || now.length !== outline.length) outline = now;
+      markCurrent();
     });
   });
 
-  /** The section being read: the last whose heading is near the top or above it. */
   function onScroll() {
     pop = null;
     if (bodyEl) doc.keepScroll(bodyEl.scrollTop, 'preview');
+    markCurrent();
+  }
+
+  /** The section being read: the last whose heading is near the top or above it. */
+  function markCurrent() {
     const hs = sections();
     if (!hs.length || !bodyEl) return;
     const top = bodyEl.getBoundingClientRect().top + 56;
@@ -198,12 +354,18 @@
   /** The selection on the page now, if it's in the document's text. */
   function selected() {
     const sel = window.getSelection?.();
-    if (!sel || sel.isCollapsed || !sel.rangeCount || !mdEl) return null;
+    if (!sel || sel.isCollapsed || !sel.rangeCount) return null;
     const range = sel.getRangeAt(0);
-    const page = mdEl.closest('.docpage');
+    const page = bodyEl?.querySelector('.docpage');
     if (!page?.contains(range.commonAncestorContainer)) return null;
     const text = sel.toString().replace(/\s+\n/g, '\n').trim();
     if (!text) return null;
+    // In the editor: the lines of the blocks it's in, as the editor writes them.
+    if (ed && editEl?.contains(range.commonAncestorContainer)) {
+      const at = ed.selectionLines();
+      return { range, text, fromLine: at?.fromLine ?? null, toLine: at?.toLine ?? null };
+    }
+    if (!mdEl) return null;
     // The markdown's lines (Rust maps them to blocks): the blocks the
     // selection starts and ends in. Not while a section streams in (the
     // page's lines aren't the note's then).
@@ -215,7 +377,7 @@
     if (a && b && a !== b && range.endOffset === 0) b = b.previousElementSibling?.matches('[data-line]') ? b.previousElementSibling : a;
     let fromLine = null;
     let toLine = null;
-    if (!doc.busy && (a || b)) {
+    if (!doc.streaming && (a || b)) {
       const off = shownOffset(doc.content, doc.title);
       const lines = (el) => el.getAttribute('data-line').split('-').map(Number);
       const start = lines(a ?? b);
@@ -265,43 +427,82 @@
     if (!p || doc.id == null) return;
     pop = null;
     window.getSelection?.()?.removeAllRanges();
+    // What's typed is saved first: the lines are the note's.
+    doc.flushSave();
     onquote?.({ noteId: doc.id, title: doc.title, text: p.text, fromLine: p.fromLine, toLine: p.toLine, mode });
   }
 
-  // ---- a change that landed, marked ---------------------------------------------------
+  // ---- the page, drawn a piece at a time; a change that landed, marked ----------------
 
-  // The page's blocks as they were last drawn (their HTML, lines aside), and
-  // which document and change that was: the blocks new since are marked.
-  let drawn = new Set();
+  // The page's pieces: each section being written its own, the rest cut at
+  // their sections (`splitSections`), each with its first line in the
+  // shown text (for `data-line`).
+  const parts = $derived.by(() => {
+    const out = [];
+    let line = 0;
+    for (const seg of segments) {
+      if (seg.live != null) out.push({ md: seg.md, live: seg.live, line });
+      else for (const s of splitSections(seg.md)) out.push({ md: s.md, live: null, line: line + s.line });
+      line += seg.md.split('\n').length;
+    }
+    return out;
+  });
+
+  // Each piece's HTML by its markdown (its lines counted from its own
+  // start; drawParts puts them on the page's): rendered once, not every
+  // frame a section flows in.
+  let rendered = new Map();
+  function partHtml(md, keep) {
+    let html = rendered.get(md);
+    if (html == null) html = renderMarkdown(md, { lines: true });
+    keep.set(md, html);
+    return html;
+  }
+
+  // Which document and change the page was last drawn for: the blocks new
+  // since a change landed (Chat's edit, Undo) are marked a moment.
   let drawnFor = null;
   let drawnLanded = 0;
-  const plainHtml = (el) => el.outerHTML.replace(/ data-(line|changed)="[^"]*"/g, '');
+  // The caret was in view: the page follows it as it writes.
+  let following = true;
+  // The blocks last marked (their places on the page) and when: the editor,
+  // taking the page's place as the turn ends, marks them on.
+  let washed = { at: 0, idx: [], id: null };
 
   $effect(() => {
-    void doc.shown;
-    const landed = doc.landed;
+    const el = mdEl;
+    const list = parts;
     const id = doc.id;
-    if (doc.view !== 'preview') return;
-    tick().then(() => {
-      if (!mdEl) return;
-      const els = [...mdEl.children];
-      if (drawnFor === id && landed !== drawnLanded && drawn.size) {
-        const fresh = els.filter((el) => !drawn.has(plainHtml(el)) && !el.classList.contains('md-pending'));
-        for (const el of fresh) {
-          el.setAttribute('data-changed', '');
-          setTimeout(() => el.removeAttribute('data-changed'), 1700);
-        }
-        // The first one, in view.
-        if (fresh[0] && bodyEl) {
-          const r = fresh[0].getBoundingClientRect();
-          const b = bodyEl.getBoundingClientRect();
-          if (r.bottom < b.top || r.top > b.bottom) fresh[0].scrollIntoView({ block: 'nearest', behavior: reduced() ? 'auto' : 'smooth' });
-        }
+    const landed = doc.landed;
+    if (!el) return;
+    const keep = new Map();
+    const html = list.map((p) => ({ html: partHtml(p.md, keep), live: p.live != null, line: p.line }));
+    rendered = keep;
+    const fresh = drawParts(el, html, { compare: drawnFor === id && landed !== drawnLanded }).filter((b) => !b.classList.contains('md-pending'));
+    if (drawnFor !== id) following = true;
+    drawnFor = id;
+    drawnLanded = landed;
+    for (const b of fresh) {
+      b.setAttribute('data-changed', '');
+      setTimeout(() => b.removeAttribute('data-changed'), 1700);
+    }
+    if (fresh.length) washed = { at: performance.now(), idx: fresh.map((b) => [...el.children].indexOf(b)), id };
+    const caret = placeCaret(el, 'Chat');
+    if (!bodyEl) return;
+    const area = bodyEl.getBoundingClientRect();
+    if (caret) {
+      // Follow the writing while it's in view; scrolled away, the page stays put.
+      let r = caret.getBoundingClientRect();
+      if (following && r.bottom > area.bottom - 28 && r.top < area.bottom + 160) {
+        bodyEl.scrollTop += r.bottom - (area.bottom - 28);
+        r = caret.getBoundingClientRect();
       }
-      drawn = new Set(els.map(plainHtml));
-      drawnFor = id;
-      drawnLanded = landed;
-    });
+      following = r.bottom > area.top && r.top < area.bottom;
+    } else if (fresh[0]) {
+      // A change that landed: its first block, in view.
+      const r = fresh[0].getBoundingClientRect();
+      if (r.bottom < area.top || r.top > area.bottom) fresh[0].scrollIntoView({ block: 'nearest', behavior: reduced() ? 'auto' : 'smooth' });
+    }
   });
 </script>
 
@@ -359,6 +560,9 @@
       </button>
     </div>
   </header>
+  {#if !doc.gone && doc.view === 'preview'}
+    <DocToolbar {ed} state={tools} writing={doc.streaming} />
+  {/if}
   {#if status}
     <p class="docstatus" class:live={doc.busy} data-testid="chat-doc-status" aria-live="polite">
       {#if doc.busy}<span class="dot" aria-hidden="true"></span>{/if}{status}
@@ -366,7 +570,7 @@
   {/if}
   {#if !doc.gone}
     <div class="docfind">
-      <SummaryFind bind:this={finder} bind:open={finding} root={findRoot} text={doc.view === 'source' ? doc.draft : doc.shown} look="paper" label="Find in the document" />
+      <SummaryFind bind:this={finder} bind:open={finding} root={findRoot} text={doc.view === 'source' || ed ? doc.draft : shown} look="paper" label="Find in the document" />
     </div>
   {/if}
   {#if doc.gone}
@@ -431,16 +635,25 @@
         class="docbody"
         role="document"
         tabindex="0"
-        aria-busy={doc.busy ? 'true' : undefined}
+        aria-busy={doc.streaming ? 'true' : undefined}
         bind:this={bodyEl}
         onscroll={onScroll}
         onpointerup={pageUp}
         onkeyup={pageKey}
       >
-        <article class="docpage" class:railed={outline.length >= RAIL_FROM}>
+        <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_noninteractive_element_interactions (a pointer's way to the end: the keyboard has Ctrl+End) -->
+        <article class="docpage" class:railed={outline.length >= RAIL_FROM} onclick={pageClick}>
           <h1 class="docname">{doc.title || 'Untitled document'}</h1>
-          <!-- eslint-disable-next-line svelte/no-at-html-tags — renderMarkdown sanitises its output -->
-          <div class="docmd" bind:this={mdEl}>{@html renderMarkdown(doc.shown, { writing: doc.busy, lines: true })}</div>
+          {#if editing && makeEditor}
+            <!-- The editor's root (docEditor.js): the page, editable. One
+                 per document (its own undo history). -->
+            {#key doc.id}
+              <div class="docmd docedit" bind:this={editEl}></div>
+            {/key}
+          {:else}
+            <!-- Drawn by `drawParts` (renderMarkdown's sanitised HTML, a piece at a time). -->
+            <div class="docmd" bind:this={mdEl}></div>
+          {/if}
         </article>
       </div>
       {#if pop}
@@ -680,6 +893,142 @@
   .docmd :global(li) {
     text-wrap: pretty;
   }
+  /* A section still to write: its name and what it will say, quiet and
+     bracketed, as Claude's documents show a section's intent while they
+     fill (the brackets drawn, never the text's). */
+  .docmd > :global(p.md-pending) {
+    margin: 0 0 calc(10px * var(--yap-reading-scale));
+    padding: 0;
+    border: none;
+    font-style: normal;
+    color: var(--yap-paper-date);
+  }
+  .docmd > :global(p.md-pending)::before {
+    content: '[';
+  }
+  .docmd > :global(p.md-pending)::after {
+    content: ']';
+  }
+  .docmd :global(.md-pending-key) {
+    font-weight: 600;
+  }
+  /* The writing caret: a thin bar in the accent at the end of the text
+     being written, its label ("Chat") a small tab over it — after Claude's
+     documents' labelled caret. Still (no blink): it moves as the text
+     flows in. */
+  .docmd :global(.doccaret) {
+    position: relative;
+    display: inline-block;
+    width: 2px;
+    height: 1.15em;
+    margin: 0 1px 0 2px;
+    vertical-align: -0.2em;
+    border-radius: 1px;
+    background: var(--yap-primary);
+    pointer-events: none;
+  }
+  /* **The editor**: the same page, typed into. ProseMirror's own needs
+     here (TipTap's sheet is left out: its colours aren't Yap's). */
+  .docedit {
+    position: relative;
+    min-height: 2.5em;
+    outline: none;
+    white-space: pre-wrap;
+    white-space: break-spaces;
+    word-wrap: break-word;
+    font-variant-ligatures: none;
+    caret-color: var(--yap-paper-ink);
+  }
+  .docedit :global([contenteditable='false']) {
+    white-space: normal;
+  }
+  .docedit :global(pre) {
+    white-space: pre-wrap;
+  }
+  .docedit :global(img.ProseMirror-separator) {
+    display: inline !important;
+    width: 0 !important;
+    height: 0 !important;
+    margin: 0 !important;
+    border: none !important;
+  }
+  .docedit:global(.ProseMirror-hideselection) :global(*::selection) {
+    background: transparent;
+  }
+  .docedit:global(.ProseMirror-hideselection) {
+    caret-color: transparent;
+  }
+  /* A block picked whole (a section still to write, a rule): ringed. */
+  .docedit :global(.ProseMirror-selectednode) {
+    outline: 2px solid var(--yap-focus-ring);
+    outline-offset: 3px;
+    border-radius: 3px;
+  }
+  /* Table cells picked together. */
+  .docedit :global(td.selectedCell),
+  .docedit :global(th.selectedCell) {
+    background: color-mix(in srgb, var(--yap-primary) 22%, var(--yap-paper-s1));
+  }
+  /* The caret between two blocks it can't sit in (a table, a rule). */
+  .docedit :global(.ProseMirror-gapcursor) {
+    display: none;
+    position: absolute;
+    margin: 0;
+    pointer-events: none;
+  }
+  .docedit :global(.ProseMirror-gapcursor)::after {
+    content: '';
+    display: block;
+    position: absolute;
+    top: -2px;
+    width: 20px;
+    border-top: 1px solid var(--yap-paper-ink);
+  }
+  .docedit:global(.ProseMirror-focused) :global(.ProseMirror-gapcursor) {
+    display: block;
+  }
+  :global(.docdrop) {
+    background: var(--yap-primary);
+  }
+  /* A list item's words: no room of their own; its parts a little apart. */
+  .docedit :global(li > .itembody > p) {
+    margin: 0;
+  }
+  .docedit :global(li > .itembody > * + *) {
+    margin-top: 0.35em;
+  }
+  .docedit :global(li.task[data-checked='true'] > .itembody) {
+    color: var(--yap-paper-muted);
+    text-decoration: line-through;
+    text-decoration-color: var(--yap-paper-faint);
+  }
+  /* Markdown the editor keeps whole (edited in Source): drawn as the page is. */
+  .docedit :global(.docraw > *) {
+    margin: 0 0 var(--doc-gap);
+  }
+  .docedit :global(.docraw > :last-child) {
+    margin-bottom: 0;
+  }
+  .docedit :global(p.md-pending) {
+    cursor: default;
+  }
+  .docmd :global(.doccaret)::after {
+    content: attr(data-who);
+    position: absolute;
+    bottom: calc(100% + 1px);
+    left: 0;
+    padding: 1px 5px;
+    border-radius: 4px 4px 4px 0;
+    background: var(--yap-primary);
+    color: var(--yap-primary-fg);
+    font-family: 'Figtree Variable', ui-sans-serif, system-ui, sans-serif;
+    font-size: 10px;
+    font-style: normal;
+    font-weight: 650;
+    line-height: 1.35;
+    letter-spacing: 0.01em;
+    white-space: nowrap;
+  }
   .docmd :global(h2),
   .docmd :global(h3) {
     font-family: var(--yap-font-display);
@@ -752,7 +1101,8 @@
     padding: 0.1em 0.35em;
     box-decoration-break: clone;
   }
-  .docmd :global(pre.md-code) {
+  /* (The page's code block is `pre.md-code`, the editor's a plain `pre`.) */
+  .docmd :global(pre) {
     padding: 10px 12px;
     border-radius: 6px;
     background: var(--yap-paper-s1);
@@ -767,27 +1117,52 @@
     border-left: 2px solid var(--yap-paper-s2-strong);
     color: var(--yap-paper-text-2);
   }
-  .docmd :global(hr.md-rule) {
+  .docmd :global(hr) {
+    height: 0;
     margin: calc(26px * var(--yap-reading-scale)) 0;
+    border: none;
     border-top: 1px solid var(--yap-paper-s2);
   }
+  /* Checklist items: the box where the bullet was (the page's is still,
+     the editor's ticks); a ticked one quieter, struck through. */
+  .docmd :global(li.task) {
+    position: relative;
+    list-style: none;
+  }
+  .docmd :global(li.task > input) {
+    position: absolute;
+    top: 0.34em;
+    left: -1.3em;
+    width: 0.92em;
+    height: 0.92em;
+    margin: 0;
+    accent-color: var(--yap-paper-ink);
+  }
+  .docmd :global(li.task > input:not([disabled])) {
+    cursor: pointer;
+  }
+  .docmd :global(li.task:has(> input:checked)) {
+    color: var(--yap-paper-muted);
+    text-decoration: line-through;
+    text-decoration-color: var(--yap-paper-faint);
+  }
   /* Tables: cells filled, no rules — the header row a shade stronger; a
-     wide table scrolls inside itself (`.md-table`), never the page. */
-  .docmd :global(.md-table) {
+     wide table scrolls inside itself (the page's `.md-table`, the editor's
+     `.tableWrapper`), never the page. */
+  .docmd :global(:is(.md-table, .tableWrapper)) {
     overflow-x: auto;
     overflow-y: hidden;
     scrollbar-width: thin;
   }
-  .docmd :global(.md-table table) {
-    width: 100%;
+  .docmd :global(:is(.md-table, .tableWrapper) table) {
+    width: 100% !important;
     border-collapse: separate;
     border-spacing: 2px;
     font-size: 0.93em;
     line-height: 1.5;
     font-variant-numeric: tabular-nums lining-nums;
   }
-  .docmd :global(.md-table th),
-  .docmd :global(.md-table td) {
+  .docmd :global(:is(.md-table, .tableWrapper) :is(th, td)) {
     min-width: 3em;
     padding: 6px 10px;
     border: none;
@@ -796,15 +1171,18 @@
     vertical-align: top;
     overflow-wrap: break-word;
   }
-  .docmd :global(.md-table th) {
+  .docmd :global(:is(.md-table, .tableWrapper) th) {
     background: var(--yap-paper-s2);
     font-weight: 600;
     color: var(--yap-paper-ink);
     vertical-align: bottom;
     text-wrap: balance;
   }
-  .docmd :global(.md-table td) {
+  .docmd :global(:is(.md-table, .tableWrapper) td) {
     background: var(--yap-paper-s1);
+  }
+  .docmd :global(.tableWrapper :is(th, td) > p) {
+    margin: 0;
   }
   /* A header row of empty cells (a table written without one) isn't shown. */
   .docmd :global(.md-table thead:not(:has(th:not(:empty)))) {

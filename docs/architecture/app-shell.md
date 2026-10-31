@@ -19,6 +19,12 @@ The full stack list, the app's entry and plumbing (`lib.rs`, the tray, context m
   (MIT) parses answers and notes, [`DOMPurify`](https://github.com/cure53/DOMPurify)
   3.4.17 (MPL-2.0 or Apache-2.0) sanitises the HTML; both pinned exact, used only by
   `lib/core/markdown.js` ([notes.md](./notes.md#the-markdown-renderer)).
+- **Rich editor:** [TipTap](https://github.com/ueberdosis/tiptap) 3.32.2 (MIT) on
+  ProseMirror (MIT), pinned exact (`@tiptap/core`, `@tiptap/pm` and the node,
+  mark, list, table and extensions packages): Chat's document page you can edit
+  (`views/chat/docEditor.js`, its own chunk; the markdown in and out is Yap's,
+  `docMarkdown.js`, over markdown.js' tokens —
+  [chat-and-assistant.md](./chat-and-assistant.md#the-chat-view)).
 - **Backend:** Rust (`src-tauri/src/`).
 - **Audio:** `cpal` (capture) + `rodio` (start/stop chime, spoken replies).
 - **Spoken replies:** **Kokoro-82M v1.0** (the default once downloaded:

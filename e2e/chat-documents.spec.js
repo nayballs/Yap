@@ -120,10 +120,15 @@ test('a document opens beside the chat, fills section by section, and its pill r
   await ask(main, QUESTION);
 
   // The outline, at once: the title, and each section still to come as a
-  // quiet line — never the placeholder's syntax.
+  // quiet grey line, its name and what it will say — never the
+  // placeholder's syntax.
   await expect(panel(main)).toBeVisible();
   await expect(panel(main).locator('.doctitle')).toHaveText('Lone wolf ranger');
-  await expect(docBody(main).locator('.md-pending')).toHaveText(['Writing: Gear…', 'Writing: Skills…', 'Writing: Talents…']);
+  await expect(docBody(main).locator('.md-pending')).toHaveText([
+    'Gear: what to wear and where to find it',
+    'Skills: which skills, and when',
+    'Talents: the talents to take',
+  ]);
   await expect(panel(main)).not.toContainText('yap:section');
   await shot(main, '01-outline-opens-beside-the-chat');
 
@@ -191,6 +196,116 @@ test('a document opens beside the chat, fills section by section, and its pill r
   await shot(main, '03-dark');
   await setConfig(yap, main, { theme: 'light' });
   await expect.poll(() => main.evaluate(() => document.documentElement.dataset.yapTheme)).toBe('light');
+});
+
+// Stream-in (2026-10-31, after Claude's own documents filling while you
+// watch): a section's text flows onto the page line by line however it
+// comes — here its arguments in three bursts 0.7 s apart — under a small
+// caret labelled "Chat"; the sections still to write wait as grey intent
+// lines; the page ends with the section exactly as saved. Motion reduced:
+// shown as it comes, in its bursts.
+const ROUTE = [
+  '- Leave the car park by the old gate',
+  '- Follow the beck up to the stone bridge',
+  '- Cross it and climb the east ridge to the cairn',
+  '- Lunch by the tarn, out of the wind',
+  '- Down the scree path, slowly',
+  '- Back along the lane to the village',
+].join('\n');
+
+/** Every frame from now on, how much of the Route section's list is on the page (its text's length). */
+async function watchRoute(main) {
+  await main.evaluate(() => {
+    window.__flow = [];
+    const tick = () => {
+      const h = [...document.querySelectorAll('.docmd > h3')].find((x) => x.textContent.startsWith('Route'));
+      const list = h?.nextElementSibling?.tagName === 'UL' ? h.nextElementSibling : null;
+      window.__flow.push(list ? list.textContent.replace(/\s+/g, '').length : 0);
+      if (window.__flow.length < 3000) requestAnimationFrame(tick);
+    };
+    requestAnimationFrame(tick);
+  });
+}
+
+/** The steps the Route list grew in, frame to frame. */
+async function routeSteps(main) {
+  const flow = await main.evaluate(() => window.__flow);
+  return flow.slice(1).map((n, i) => n - flow[i]).filter((d) => d > 0);
+}
+
+/** Script a fell walk whose Route section streams in three bursts (`gapMs` apart), held at `held`. */
+function scriptWalk(fakeLlm, title, held, gapMs = 700) {
+  fakeLlm.scriptChat([
+    { tools: [{ name: 'create_document', args: { title, sections: [{ key: 'Route', intent: 'the way, step by step' }, { key: 'Kit', intent: 'what to carry' }] } }] },
+    { tools: [{ name: 'write_section', args: (r) => ({ note_id: madeDoc(r), key: 'Route', markdown: ROUTE }) }], gate: held.promise, stream: { gapMs } },
+    { tools: [{ name: 'write_section', args: (r) => ({ note_id: madeDoc(r), key: 'Kit', markdown: '- Water\n- A map' }) }] },
+    { content: "It's open on the right." },
+  ]);
+}
+
+test('a section flows in line by line under a labelled caret, and ends exactly as saved', async ({ yap, main, fakeLlm, shot }) => {
+  const held = gate();
+  scriptWalk(fakeLlm, 'Fell walk', held);
+  await freshChat(main);
+  await ask(main, 'Plan me a fell walk');
+  // The outline: each section still to write a grey line, what it will say.
+  await expect(docBody(main).locator('.md-pending')).toHaveText(['Route: the way, step by step', 'Kit: what to carry']);
+  const pendingInk = await docBody(main).locator('.md-pending').first().evaluate((p) => getComputedStyle(p).color);
+  const bodyInk = await docBody(main).evaluate((b) => getComputedStyle(b).color);
+  expect(pendingInk).not.toBe(bodyInk);
+  await expect.poll(() => fakeLlm.requests.some((r) => r.gated)).toBe(true);
+  await watchRoute(main);
+  held.open();
+
+  // While it writes: a caret at the end of its text, labelled "Chat" (drawn
+  // by CSS: never in the text a find or a copy sees).
+  const caret = docBody(main).locator('.doccaret');
+  await expect(caret).toBeVisible();
+  await expect(caret).toHaveAttribute('data-who', 'Chat');
+  expect(await caret.evaluate((c) => getComputedStyle(c, '::after').content)).toBe('"Chat"');
+  expect(await docBody(main).locator('.docmd').evaluate((m) => m.textContent.includes('Chat'))).toBe(false);
+  await expect(docBody(main).locator('.md-pending')).toHaveText(['Kit: what to carry']);
+  await expect(status(main)).toHaveText(/Writing: Route…/);
+  await shot(main, '01c-a-section-flowing-in');
+
+  // It ends exactly as saved, the caret gone.
+  await expect(thread(main)).toContainText("It's open on the right.", { timeout: 20_000 });
+  const items = ROUTE.split('\n').map((l) => l.slice(2));
+  await expect(docBody(main).locator('h3')).toHaveText(['Route', 'Kit']);
+  await expect(docBody(main).locator('h3 + ul').first().locator('li')).toHaveText(items);
+  await expect(caret).toHaveCount(0);
+  await expect(docBody(main).locator('.md-pending')).toHaveCount(0);
+  await expect(status(main)).toHaveCount(0);
+  await expectStore(yap, 'notes.json', (s) => noteNamed(s, 'Fell walk')?.content.includes(`## Route\n\n${ROUTE}`));
+
+  // Line by line, not in its bursts: many small steps, none near a burst's size.
+  const steps = await routeSteps(main);
+  const total = items.join('').replace(/\s+/g, '').length;
+  expect(steps.reduce((a, b) => a + b, 0)).toBe(total);
+  expect(steps.length).toBeGreaterThan(20);
+  expect(Math.max(...steps)).toBeLessThan(total / 5);
+});
+
+test('motion reduced: a section shows as it comes, the caret still there', async ({ main, fakeLlm }) => {
+  await main.emulateMedia({ reducedMotion: 'reduce' });
+  try {
+    await expect.poll(() => main.evaluate(() => document.documentElement.dataset.motion)).toBe('reduced');
+    const held = gate();
+    scriptWalk(fakeLlm, 'Still fell walk', held, 900);
+    await freshChat(main);
+    await ask(main, 'Plan me a still fell walk');
+    await expect.poll(() => fakeLlm.requests.some((r) => r.gated)).toBe(true);
+    await watchRoute(main);
+    held.open();
+    await expect(docBody(main).locator('.doccaret')).toBeVisible();
+    await expect(thread(main)).toContainText("It's open on the right.", { timeout: 20_000 });
+    await expect(docBody(main).locator('h3 + ul').first().locator('li')).toHaveCount(6);
+    // In its bursts: a few steps, each a big one.
+    const steps = await routeSteps(main);
+    expect(steps.length).toBeLessThanOrEqual(4);
+  } finally {
+    await main.emulateMedia({ reducedMotion: 'no-preference' });
+  }
 });
 
 // A document is a note (30 Oct 2026: Claude Haiku 5.5 made one, then said it
