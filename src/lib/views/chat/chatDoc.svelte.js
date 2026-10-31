@@ -18,8 +18,9 @@
 //   `merge3`). A save that comes back while more was typed keeps the newer
 //   typing and saves again from the text it was typed over.
 // - Undo: the newest change, when it's Chat's (its writing, or a restore it
-//   did), goes back to the version before it (notes/versions.rs; itself a
-//   version, so it can be undone too).
+//   did), goes back to the version before Chat's last turn — every version
+//   that turn made (`undoTarget`) — never to half of it (notes/versions.rs;
+//   itself a version, so it can be undone too).
 // - Copy (the whole document as Markdown) and Export as Markdown (the Notes
 //   view's `note_export`): `docTools.js`, in the panel's own chunk.
 import { invoke } from '@tauri-apps/api/core';
@@ -56,6 +57,30 @@ function loadWidth() {
   } catch {
     return DEFAULT_WIDTH;
   }
+}
+
+/** A version Chat made: its writing, or a restore it did (`restore_document`). */
+function chatsOwn(v) {
+  return v?.kind === 'chat' || (v?.kind === 'restored' && v?.label === 'Chat');
+}
+
+/**
+ * What the panel's Undo goes back to (`versions`: the document's notes
+ * versions, newest first): the version before Chat's last turn. A turn
+ * writes a document a call at a time — its outline, then each section —
+ * and each is a version, all marked with the turn (`turn`,
+ * notes/versions.rs `in_turn`): going back one call brought the last
+ * section's placeholder back ("1 section not written yet", 31 Oct 2026).
+ * `null`: the newest change isn't Chat's, or that turn made the document
+ * (nothing of it before). A version without a turn (an older Yap's) is a
+ * turn of its own. Pure.
+ */
+export function undoTarget(versions) {
+  const newest = versions?.[0];
+  if (!chatsOwn(newest)) return null;
+  let i = 1;
+  if (newest.turn) while (i < versions.length && versions[i].turn === newest.turn) i++;
+  return versions[i] ?? null;
 }
 
 /** A section's text as it streams, under its own heading when it wrote one, else the key's. */
@@ -172,19 +197,18 @@ export function createDocPanel({ onopennote = () => null } = {}) {
     }
   }
 
-  /** A version Chat made: its writing, or a restore it did (`restore_document`). */
-  function chatsOwn(v) {
-    return v?.kind === 'chat' || (v?.kind === 'restored' && v?.label === 'Chat');
+  /** The document's notes versions, newest first. */
+  async function notesVersions(noteId) {
+    return ((await invoke('note_versions', { id: noteId })) || []).filter((v) => v.field === 'notes');
   }
 
   async function refreshUndo() {
     const want = id;
     if (want == null) return;
     try {
-      const versions = (await invoke('note_versions', { id: want })) || [];
+      const notes = await notesVersions(want);
       if (id !== want) return;
-      const notes = versions.filter((v) => v.field === 'notes');
-      canUndo = notes.length > 1 && chatsOwn(notes[0]);
+      canUndo = undoTarget(notes) != null;
     } catch {
       canUndo = false;
     }
@@ -344,15 +368,15 @@ export function createDocPanel({ onopennote = () => null } = {}) {
     return run;
   }
 
-  /** Undo: back to the version before Chat's newest change (itself a version). */
+  /** Undo: back to the version before Chat's last turn (itself a version). */
   async function undo() {
     if (id == null) return;
     await flushSave();
     const noteId = id;
     try {
-      const versions = ((await invoke('note_versions', { id: noteId })) || []).filter((v) => v.field === 'notes');
-      if (versions.length < 2 || !chatsOwn(versions[0])) return;
-      const r = await invoke('note_version_restore', { id: noteId, n: versions[1].n, origin: PANEL_ORIGIN });
+      const target = undoTarget(await notesVersions(noteId));
+      if (!target) return;
+      const r = await invoke('note_version_restore', { id: noteId, n: target.n, origin: PANEL_ORIGIN });
       if (id === noteId && r?.field === 'notes') {
         dirty = false;
         landed += 1;
