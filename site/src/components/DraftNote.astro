@@ -1,0 +1,14 @@
+---
+// A note for the maintainer, shown only while the site is a preview
+// (brand.ts SHOW_DRAFT_NOTES): an open decision, a claim to check before
+// launch, a visual still to capture. Gone from the public build.
+import { SHOW_DRAFT_NOTES } from '../brand';
+interface Props {
+  class?: string;
+}
+---
+{SHOW_DRAFT_NOTES && (
+  <aside class:list={['draft', Astro.props.class]} aria-label="Draft note">
+    <strong>Draft note:</strong> <slot />
+  </aside>
+)}
