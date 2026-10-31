@@ -638,6 +638,7 @@ pub fn open_setup(app: &AppHandle) {
 }
 
 /// Test mode: the tip wanted again (`tips::e2e_feature_tips`).
+#[cfg(debug_assertions)]
 pub fn forget_tip() {
     TIP_ASKED.store(0, Ordering::SeqCst);
     crate::dictation::input_hook::side_tip_done(false);
