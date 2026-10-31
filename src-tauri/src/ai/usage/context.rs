@@ -141,7 +141,8 @@ async fn fixed_of(cfg: &crate::config::YapConfig, target: &crate::ai::ai_model::
         .unwrap_or_else(|| "You are a helpful assistant. Answer concisely.".to_string());
     let calendar_on = crate::calendar::connected();
     let profile = crate::ai::about_you::profile(cfg);
-    let stable = crate::chat::turn::stable_prompt(cfg, &persona, target.tools, cfg.web_search, calendar_on, &profile, crate::ai::eval::now());
+    let doc_tools = crate::chat::documents::ToolSet::for_model(&target.provider, &target.model);
+    let stable = crate::chat::turn::stable_prompt(cfg, &persona, target.tools, doc_tools, cfg.web_search, calendar_on, &profile, crate::ai::eval::now());
     let log = crate::chat::tools::calendar::Log::default();
     let extra = crate::chat::tools::Extra {
         memory: true,
@@ -150,6 +151,7 @@ async fn fixed_of(cfg: &crate::config::YapConfig, target: &crate::ai::ai_model::
         calendar: calendar_on.then_some(crate::chat::tools::CalendarTurn { log: &log, zone: crate::chat::tools::calendar::Zone::of(None), now: 0 }),
         room: None,
         docs: None,
+        doc_tools,
     };
     let schemas = if target.tools { counter.count(&crate::chat::tools::offered_tools(cfg.open_apps, cfg.web_search, extra).to_string()).await } else { 0 };
     counter.count(&stable).await + schemas

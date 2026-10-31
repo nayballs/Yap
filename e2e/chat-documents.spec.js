@@ -255,10 +255,11 @@ test("the person's edits win: typed while Chat writes they stay, a section they 
   await expect(docBody(main)).toContainText('Saturday: the walls.');
   await expect.poll(() => fakeLlm.requests.some((r) => r.gated)).toBe(true);
 
-  // Mid-turn, the person edits the text: a line of their own, and the
-  // Costs section taken out. Chat's Food section lands meanwhile.
-  await panel(main).getByRole('button', { name: 'Edit' }).click();
-  const area = panel(main).getByRole('textbox', { name: 'Document text' });
+  // Mid-turn, the person edits the text (Source: its markdown): a line of
+  // their own, and the Costs section taken out. Chat's Food section lands
+  // meanwhile.
+  await panel(main).getByRole('button', { name: 'Source' }).click();
+  const area = panel(main).getByRole('textbox', { name: 'Document source (Markdown)' });
   await expect(area).toBeFocused();
   const now = await area.inputValue();
   expect(now).toContain('<!-- yap:section Costs');
@@ -360,8 +361,9 @@ test('the panel closes, expands, moves its split from the keyboard and opens in 
   await expect(panel(main)).toBeVisible();
   await expect(split).toHaveAttribute('aria-valuenow', String(before - 24));
 
-  // Open in Notes: the note itself, in Chat documents.
-  await panel(main).getByRole('button', { name: 'Open in Notes' }).click();
+  // Open in Notes (in ⋯): the note itself, in Chat documents.
+  await panel(main).getByRole('button', { name: 'More for the document' }).click();
+  await main.getByRole('menuitem', { name: 'Open in Notes' }).click();
   await expect(main.locator('textarea.raw')).toHaveValue(/## Beds\n\nBeans by the fence\./);
   await expect(main.locator('.items .item').filter({ hasText: 'Garden plan' })).toBeVisible();
   const n = (await yap.invoke('notes_list')).find((x) => x.title === 'Garden plan');

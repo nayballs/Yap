@@ -60,7 +60,8 @@
               "edit_note",
               "update_note",
               "write_section",
-              "rewrite_section"
+              "rewrite_section",
+              "edit_document"
             ]
           }
         ],

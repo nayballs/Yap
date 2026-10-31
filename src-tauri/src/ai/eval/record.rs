@@ -321,6 +321,18 @@ pub fn tools_forced() -> Option<bool> {
     *TOOLS.lock().unwrap_or_else(|p| p.into_inner())
 }
 
+/// `--doc-tools rich|simple`: the documents' tool set a run's model gets
+/// (`documents::ToolSet::for_model`), whatever Yap's rule would say.
+static DOC_TOOLS: Mutex<Option<bool>> = Mutex::new(None);
+
+pub fn set_doc_tools_forced(rich: Option<bool>) {
+    *DOC_TOOLS.lock().unwrap_or_else(|p| p.into_inner()) = rich;
+}
+
+pub fn doc_tools_forced() -> Option<bool> {
+    *DOC_TOOLS.lock().unwrap_or_else(|p| p.into_inner())
+}
+
 /// The clipboard tool: recorded, answered as the real one answers.
 pub fn intercept_tool(name: &str, args: &Value) -> Option<Value> {
     if name != "copy_to_clipboard" {

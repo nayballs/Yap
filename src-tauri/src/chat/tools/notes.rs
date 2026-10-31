@@ -11,12 +11,19 @@ use super::{tool_error, tool_result, GET_NOTE_TOKENS, MAX_CONTENT_LENGTH};
 
 /// The OpenAI `tools` array (OpenWhispr's schemas near-verbatim from their
 /// tool files; `search_in_note`, `read_note` and `edit_note` are Yap's),
-/// with a document's two (`documents.rs`: `create_document`,
-/// `write_section`) after them.
+/// with the documents' simple set after them (`documents.rs`). (The
+/// evaluations' and the tests'; a turn offers `definitions_for` its set.)
+#[cfg(any(test, debug_assertions))]
 pub fn definitions() -> Value {
+    definitions_for(crate::chat::documents::ToolSet::Simple)
+}
+
+/// [`definitions`] with the documents' tools of `set` (the rich set for the
+/// models that handle it: `documents::ToolSet::for_model`).
+pub fn definitions_for(set: crate::chat::documents::ToolSet) -> Value {
     let mut all = note_definitions();
     if let Some(list) = all.as_array_mut() {
-        list.extend(crate::chat::documents::definitions());
+        list.extend(crate::chat::documents::definitions(set));
     }
     all
 }
@@ -382,7 +389,7 @@ pub fn changed_note(name: &str, result: &Value) -> Option<u64> {
     let id = result["data"]["id"].as_u64();
     match name {
         "create_note" | "update_note" | "create_document" => id,
-        "edit_note" | "write_section" | "rewrite_section" if result["data"]["changed"] == json!(true) => id,
+        "edit_note" | "write_section" | "rewrite_section" | "edit_document" | "restore_document" if result["data"]["changed"] == json!(true) => id,
         _ => None,
     }
 }

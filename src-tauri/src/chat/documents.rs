@@ -33,7 +33,24 @@
 //!   which draw as a "📄 title · Open" pill. An older Yap's save drops that
 //!   field: the pill goes, the note stays in Notes (Chat documents).
 //!
+//! - **Two tool sets** (2026-10-31): the simple one above for the on-device
+//!   model and small ones; for the models that handle tools well (Claude,
+//!   GPT-5, Gemini, the large open models: [`rich::handles_rich`]) the rich
+//!   one ([`rich`]) — the document read as blocks with ids and hashes
+//!   (`read_document`, [`blocks`]), changed by block (`edit_document`: all or
+//!   none, the person's changed blocks refused), its history and a restore
+//!   — in place of `rewrite_section`. Both make a document outline first.
+//! - **A passage selected in the panel** ("Change this…", "Ask about
+//!   this"): the question carries it ([`Selection`], `chat_send`), and the
+//!   model is told which blocks it is ([`selection_note`]), so a change goes
+//!   to that part only.
+//!
 //! The log has ids, keys' counts and lengths: never a document's words.
+
+pub mod blocks;
+pub mod rich;
+
+pub use rich::ToolSet;
 
 use std::collections::HashMap;
 use std::sync::Mutex;
@@ -707,18 +724,19 @@ impl Turn {
     /// is researched first), so it only ever changes a document of this
     /// conversation, never another note. `None`: go ahead.
     pub fn refuses(&self, name: &str, args: &Value) -> Option<Value> {
-        if name != "rewrite_section" {
+        if !matches!(name, "rewrite_section" | "edit_document" | "restore_document") {
             return None;
         }
         let id = arg_u64(args, &["note_id", "id"])?;
         if self.known.lock().unwrap_or_else(|p| p.into_inner()).contains(&id) {
             return None;
         }
-        tracing::info!(note_id = id, "Chat: rewrite_section on a note that isn't this chat's document; refused");
+        tracing::info!(note_id = id, tool = name, "Chat: a document tool on a note that isn't this chat's document; refused");
+        let chip = if name == "rewrite_section" { "Didn't rewrite a note that isn't this chat's document" } else { "Didn't change a note that isn't this chat's document" };
         Some(tool_error(
-            format!("Note {id} isn't a document of this chat: rewrite_section only changes those (the documents listed in the context). For another note, use edit_note."),
+            format!("Note {id} isn't a document of this chat: {name} only changes those (the documents listed in the context). For another note, use edit_note."),
             json!({ "id": id }),
-            "Didn't rewrite a note that isn't this chat's document".to_string(),
+            chip.to_string(),
         ))
     }
 
@@ -741,8 +759,9 @@ impl Turn {
     pub fn noticed(&self, name: &str, id: u64) -> Option<DocRef> {
         let mut known = self.known.lock().unwrap_or_else(|p| p.into_inner());
         let ours = match name {
-            // (rewrite_section ran only on one of this chat's: `refuses`.)
-            "create_document" | "write_section" | "rewrite_section" => true,
+            // (rewrite_section, edit_document and restore_document ran only
+            // on one of this chat's: `refuses`.)
+            "create_document" | "write_section" | "rewrite_section" | "edit_document" | "restore_document" => true,
             "edit_note" | "update_note" => known.contains(&id),
             _ => false,
         };
@@ -776,17 +795,26 @@ impl Turn {
 /// `edit_note`) and what the person changed in each since the model last
 /// saw it — then the model has seen that. At most the newest 3. `None`:
 /// the conversation has none.
-pub fn context(docs: &[DocRef]) -> Option<String> {
-    let mut lines = vec!["Documents in this chat, open beside it and saved in Notes (Chat documents) as Markdown notes (change one there: rewrite_section for a whole section or a new one, edit_note for a few words; write_section only fills a section still to be written):".to_string()];
+pub fn context(docs: &[DocRef], set: ToolSet) -> Option<String> {
+    let how = match set {
+        ToolSet::Simple => "change one there: rewrite_section for a whole section or a new one, edit_note for a few words; write_section only fills a section still to be written",
+        ToolSet::Rich => "change one there: read_document (since a rev: only what changed after it), then edit_document; write_section only fills a section still to be written",
+    };
+    let mut lines = vec![format!("Documents in this chat, open beside it and saved in Notes (Chat documents) as Markdown notes ({how}):")];
     let mut changed = Vec::new();
     for d in docs.iter().take(3) {
         let Some(note) = crate::notes::get(d.id) else { continue };
         let pending = pending_keys(&note.content);
         let title = if note.title.trim().is_empty() { d.title.clone() } else { note.title.clone() };
+        // The rich set: the rev it's at now (sealed: `since` finds what changes after it).
+        let rev = match set {
+            ToolSet::Rich => format!(", rev {}", rich::rev_seen(d.id, &note.content)),
+            ToolSet::Simple => String::new(),
+        };
         lines.push(if pending.is_empty() {
-            format!("- \"{title}\" (note_id {})", d.id)
+            format!("- \"{title}\" (note_id {}{rev})", d.id)
         } else {
-            format!("- \"{title}\" (note_id {}; still to write: {})", d.id, pending.join(", "))
+            format!("- \"{title}\" (note_id {}{rev}; still to write: {})", d.id, pending.join(", "))
         });
         if let Some(before) = saw(d.id) {
             if let Some(diff) = changes(&before, &note.content) {
@@ -809,9 +837,30 @@ pub fn context(docs: &[DocRef]) -> Option<String> {
 
 // ---- the tools ------------------------------------------------------------------------
 
-/// The three tools' schemas (offered with the note tools:
-/// `notes::definitions`).
-pub fn definitions() -> Vec<Value> {
+/// What the system prompt says about documents for `set` ([`INSTRUCTIONS`],
+/// or the rich set's: [`rich::INSTRUCTIONS`]).
+pub fn instructions(set: ToolSet) -> &'static str {
+    match set {
+        ToolSet::Simple => INSTRUCTIONS,
+        ToolSet::Rich => rich::INSTRUCTIONS,
+    }
+}
+
+/// The tools `set` offers (with the note tools: `notes::definitions_for`):
+/// the simple set's three ([`simple_definitions`]), or `create_document`,
+/// `write_section` and the rich four ([`rich::definitions`]).
+pub fn definitions(set: ToolSet) -> Vec<Value> {
+    let mut all = simple_definitions();
+    if set == ToolSet::Rich {
+        all.retain(|d| d["function"]["name"] != "rewrite_section");
+        all.extend(rich::definitions());
+    }
+    all
+}
+
+/// The simple set's three schemas: `create_document`, `write_section`,
+/// `rewrite_section`.
+fn simple_definitions() -> Vec<Value> {
     vec![
         json!({
             "type": "function",
@@ -948,15 +997,19 @@ fn arg_u64(args: &Value, keys: &[&str]) -> Option<u64> {
     })
 }
 
-/// The tools this file runs (`notes::execute` hands them here).
-pub const TOOL_NAMES: &[&str] = &["create_document", "write_section", "rewrite_section"];
+/// The tools this file runs (`notes::execute` hands them here): both sets'
+/// — a model is offered one set ([`definitions`]); a name of the other set
+/// it calls anyway still runs, as safely.
+pub const TOOL_NAMES: &[&str] =
+    &["create_document", "write_section", "rewrite_section", "read_document", "edit_document", "document_history", "restore_document"];
 
-/// Run `create_document`, `write_section` or `rewrite_section`.
+/// Run one of [`TOOL_NAMES`].
 pub fn execute(name: &str, args: &Value) -> Value {
     match name {
         "create_document" => create(args),
         "write_section" => write(args),
         "rewrite_section" => rewrite(args),
+        name if rich::TOOL_NAMES.contains(&name) => rich::execute(name, args),
         other => tool_result(false, Value::Null, format!("Unknown tool: {other}")),
     }
 }
@@ -1074,6 +1127,20 @@ pub fn picks_option(question: &str) -> bool {
     PICK.is_match(question.trim())
 }
 
+/// Does `question` ask for an earlier version of the open document back
+/// ("put it back the way it was", "undo that change", "go back to the
+/// previous version")? With the rich tools that's `restore_document`, not a
+/// rewrite from memory. Pure.
+pub fn restores_version(question: &str) -> bool {
+    static BACK: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
+        regex::Regex::new(
+            r"(?i)\b(put (it|this|that|the [a-z]+) back|undo (it|this|that|the|your|those|these|my)\b|revert|roll (it |this |that )?back|go back to|back to (the|how|what) (it|way|version)|the way it was|as it was( before)?|(earlier|previous|older|last|original|first) version|restore)\b",
+        )
+        .expect("static regex")
+    });
+    BACK.is_match(question.trim())
+}
+
 /// [`ASKS_NOTE`] in one short line, for a cloud model ([`steer`]'s
 /// `brief`).
 pub const ASKS_BRIEF: &str = "This asks for something to keep: make the document now, not an answer in the chat or an offer to make one.";
@@ -1092,7 +1159,7 @@ pub const ASKS_BRIEF: &str = "This asks for something to keep: make the document
 /// answered "Could you find a mage build instead…?" in the chat, ending
 /// "Want me to build a level-by-level plan for it?", and made the document
 /// only after "Yes, please." (30 Oct 2026). `None`: nothing to say.
-pub fn steer(question: &str, docs: &[DocRef], brief: bool) -> Option<String> {
+pub fn steer(question: &str, docs: &[DocRef], brief: bool, set: ToolSet) -> Option<String> {
     if let Some(d) = docs.first() {
         let title = crate::notes::get(d.id).map(|n| n.title).filter(|t| !t.trim().is_empty()).unwrap_or_else(|| d.title.clone());
         let id = d.id;
@@ -1105,13 +1172,22 @@ pub fn steer(question: &str, docs: &[DocRef], brief: bool) -> Option<String> {
                 )
             });
         }
+        // An earlier version back (the rich set has its history and restore).
+        if set == ToolSet::Rich && restores_version(question) {
+            return Some(format!(
+                "This asks for an earlier version of \"{title}\" (note_id {id}) back: document_history, then restore_document with the version from before the change (not a rewrite from memory)."
+            ));
+        }
         if changes_document(question) {
-            return Some(if brief {
-                format!("This changes \"{title}\" (note_id {id}): rework it there (rewrite_section, edit_note), not in the chat.")
-            } else {
-                format!(
+            return Some(match (set, brief) {
+                (ToolSet::Rich, true) => format!("This changes \"{title}\" (note_id {id}): rework it there (read_document, then edit_document), not in the chat."),
+                (ToolSet::Rich, false) => format!(
+                    "This changes \"{title}\" (note_id {id}), open beside the chat: rework it there, not in the chat and not as an offer — read_document, then edit_document on the blocks that change (a table row: replace the whole table). Then answer in one short sentence."
+                ),
+                (ToolSet::Simple, true) => format!("This changes \"{title}\" (note_id {id}): rework it there (rewrite_section, edit_note), not in the chat."),
+                (ToolSet::Simple, false) => format!(
                     "This changes \"{title}\" (note_id {id}), open beside the chat: rework it there, not in the chat and not as an offer — rewrite_section for each section that changes (a new heading adds a section), edit_note for a few words. Then answer in one short sentence."
-                )
+                ),
             });
         }
     }
@@ -1452,6 +1528,111 @@ pub fn live_section(args_so_far: &str) -> Option<(u64, String, String)> {
     Some((id, clean(&key, KEY_MAX), text))
 }
 
+// ---- a passage selected in the panel ----------------------------------------------------
+
+/// A passage the person selected in the document panel and asked about
+/// ("Change this…", "Ask about this"; `chat_send`'s `selection`): the
+/// document, the words as selected, and the note's lines it covers (0 = the
+/// first; `None` when the page couldn't say).
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Selection {
+    pub note_id: u64,
+    #[serde(default)]
+    pub text: String,
+    #[serde(default)]
+    pub from_line: Option<usize>,
+    #[serde(default)]
+    pub to_line: Option<usize>,
+}
+
+/// The passage a question was asked about, kept with it
+/// (`ChatMessage::quote`): the quote above the question in Chat, and in the
+/// history the model reads later. An older Yap's save drops it: the
+/// question stays, without its quote.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Quote {
+    pub note_id: u64,
+    pub text: String,
+}
+
+/// The most of a selection kept with its question.
+const QUOTE_CHARS: usize = 600;
+
+impl Selection {
+    /// What's kept with the question.
+    pub fn quote(&self) -> Option<Quote> {
+        let text: String = self.text.trim().chars().take(QUOTE_CHARS).collect();
+        (!text.is_empty()).then_some(Quote { note_id: self.note_id, text })
+    }
+}
+
+tokio::task_local! {
+    static SELECTED: Option<Selection>;
+}
+
+/// Run `f` (a Chat turn) with the passage its question is about.
+pub async fn with_selection<F: std::future::Future>(selection: Option<Selection>, f: F) -> F::Output {
+    SELECTED.scope(selection, f).await
+}
+
+/// The passage this turn's question is about, if any.
+pub fn selection() -> Option<Selection> {
+    SELECTED.try_with(|s| s.clone()).ok().flatten()
+}
+
+/// The source text of a selection's blocks given to the model, at most.
+const SELECTED_CHARS: usize = 1_500;
+
+/// **What the model is told about a selected passage** (in the question's
+/// context): which document, the words selected, and the blocks they're in
+/// — for the rich set their ids and hashes (an `edit_document` straight
+/// on them), for the simple set their markdown to copy `edit_note`'s
+/// old_text from — and that a change goes there only; a model without
+/// tools (`set` `None`) the words alone. `None`: no such note, or nothing
+/// selected.
+pub fn selection_note(sel: &Selection, set: Option<ToolSet>) -> Option<String> {
+    let note = crate::notes::get(sel.note_id)?;
+    let words = clip(&sel.text, 400);
+    if words.is_empty() {
+        return None;
+    }
+    let doc = blocks::Doc::of(&note.content);
+    let lines = sel.from_line.zip(sel.to_line.or(sel.from_line));
+    let at = rich::selected_blocks(&doc, lines, &sel.text);
+    let title = if note.title.trim().is_empty() { "Untitled document".to_string() } else { note.title.clone() };
+    let mut source = String::new();
+    for i in &at {
+        let text = doc.blocks[*i].text.replace('\r', "");
+        if !source.is_empty() {
+            source.push_str("\n\n");
+        }
+        source.push_str(&text);
+        if source.chars().count() > SELECTED_CHARS {
+            source = format!("{}…", source.chars().take(SELECTED_CHARS).collect::<String>());
+            break;
+        }
+    }
+    tracing::info!(note_id = note.id, blocks = at.len(), chars = sel.text.chars().count(), set = set.map_or("none", ToolSet::name), "Chat: a question about a selected passage");
+    let head = format!("The user selected this passage in \"{title}\" (note_id {}) and asks about it: \"{words}\"", note.id);
+    Some(match (set, at.is_empty()) {
+        (None, _) => format!("The user selected this passage in the document \"{title}\" and asks about it: \"{words}\""),
+        (_, true) => format!("{head}. If the question asks for a change, change only that passage, nothing else."),
+        (Some(ToolSet::Rich), false) => {
+            let ids: Vec<String> = at.iter().map(|i| format!("{} (hash {})", doc.ids[*i].id, doc.ids[*i].hash)).collect();
+            format!(
+                "{head}. It's in block{} {} of the document:\n{source}\nIf the question asks for a change, change only those blocks (edit_document, replace with those if_hash), nothing else; else answer about that passage.",
+                if at.len() == 1 { "" } else { "s" },
+                ids.join(", ")
+            )
+        }
+        (Some(ToolSet::Simple), false) => format!(
+            "{head}. In the document's markdown it's:\n{source}\nIf the question asks for a change, change only that part (edit_note with old_text copied exactly from it, or rewrite_section for its whole section), nothing else; else answer about that passage."
+        ),
+    })
+}
+
 // ---- the panel's save -----------------------------------------------------------------
 
 /// The Chat panel's Edit box saved (`base`: the text it started from or
@@ -1659,21 +1840,21 @@ mod tests {
         after_call("write_section", &args, &wrote);
         let docs = vec![DocRef { id, title: "Build".into() }];
         // Nothing changed by the person: the list alone.
-        let c = context(&docs).unwrap();
+        let c = context(&docs, ToolSet::Simple).unwrap();
         assert!(c.contains("\"Build\" (note_id"), "{c}");
         assert!(!c.contains("the user changed it"), "{c}");
         // The person edits: the next question says what.
         let now = crate::notes::get(id).unwrap().content.replace("Two rings.", "Two rings and a cloak.");
         crate::notes::update(id, None, Some(now), None, None).unwrap();
-        let c = context(&docs).unwrap();
+        let c = context(&docs, ToolSet::Simple).unwrap();
         assert!(c.contains("Since you last saw \"Build\", the user changed it"), "{c}");
         assert!(c.contains("- took out: \"Two rings.\"\n+ put in: \"Two rings and a cloak.\""), "{c}");
         // Told once.
-        assert!(!context(&docs).unwrap().contains("the user changed it"));
+        assert!(!context(&docs, ToolSet::Simple).unwrap().contains("the user changed it"));
         // After a restart (nothing in memory): the newest Chat version is
         // what it saw.
         with_seen(|s| s.clear());
-        let c = context(&docs).unwrap();
+        let c = context(&docs, ToolSet::Simple).unwrap();
         assert!(c.contains("+ put in: \"Two rings and a cloak.\""), "{c}");
         // A section the person typed in while the model wrote another isn't
         // counted as the model's: it saw its own writing only.
@@ -1685,7 +1866,7 @@ mod tests {
         let args = json!({ "note_id": id2, "key": "A", "markdown": "Alpha." });
         let wrote = execute("write_section", &args);
         after_call("write_section", &args, &wrote);
-        let c = context(&[DocRef { id: id2, title: "Two".into() }]).unwrap();
+        let c = context(&[DocRef { id: id2, title: "Two".into() }], ToolSet::Simple).unwrap();
         assert!(c.contains("+ put in: \"# Two (mine)\""), "{c}");
         assert!(c.contains("still to write: B"), "{c}");
     }
@@ -1934,15 +2115,15 @@ mod tests {
         let made = execute("create_document", &json!({ "title": "Summoner options", "sections": ["Option A", "Option B"] }));
         let id = made["data"]["id"].as_u64().unwrap();
         let docs = [DocRef { id, title: "Summoner options".into() }];
-        let pick = steer("Let's do option A.", &docs, false).unwrap();
+        let pick = steer("Let's do option A.", &docs, false, ToolSet::Simple).unwrap();
         assert!(pick.contains("new document for that pick") && pick.contains("\"Summoner options\" stays as it is"), "{pick}");
-        let change = steer("Can you change it so it goes from level one to max level?", &docs, false).unwrap();
+        let change = steer("Can you change it so it goes from level one to max level?", &docs, false, ToolSet::Simple).unwrap();
         assert!(change.contains(&format!("note_id {id}")) && change.contains("rewrite_section"), "{change}");
-        assert_eq!(steer("Make me a packing list for a weekend of camping in the hills.", &docs, false).as_deref(), Some(ASKS_NOTE));
-        assert_eq!(steer("Thanks!", &docs, false), None);
+        assert_eq!(steer("Make me a packing list for a weekend of camping in the hills.", &docs, false, ToolSet::Simple).as_deref(), Some(ASKS_NOTE));
+        assert_eq!(steer("Thanks!", &docs, false, ToolSet::Simple), None);
         // Without one: only an ask for something to keep.
-        assert_eq!(steer("Let's do option A.", &[], false), None);
-        assert_eq!(steer("Plan a three-day trip to Porto, day by day.", &[], false).as_deref(), Some(ASKS_NOTE));
+        assert_eq!(steer("Let's do option A.", &[], false, ToolSet::Simple), None);
+        assert_eq!(steer("Plan a three-day trip to Porto, day by day.", &[], false, ToolSet::Simple).as_deref(), Some(ASKS_NOTE));
     }
 
     /// A cloud model gets the same nudge as one short line in the
@@ -1955,23 +2136,23 @@ mod tests {
         let docs = [DocRef { id, title: "Two-handed fighter".into() }];
         let words = |s: &str| s.split_whitespace().count();
         // The maintainer's question: something to keep, now.
-        let mage = steer("Could you find a mage build instead? Something with fire and summons.", &docs, true).unwrap();
+        let mage = steer("Could you find a mage build instead? Something with fire and summons.", &docs, true, ToolSet::Simple).unwrap();
         assert_eq!(mage, ASKS_BRIEF);
-        let pick = steer("Let's do option A.", &docs, true).unwrap();
+        let pick = steer("Let's do option A.", &docs, true, ToolSet::Simple).unwrap();
         assert!(pick.contains(&format!("note_id {id}")) && pick.contains("new document for that pick"), "{pick}");
-        let change = steer("Add a head torch to the gear.", &docs, true).unwrap();
+        let change = steer("Add a head torch to the gear.", &docs, true, ToolSet::Simple).unwrap();
         assert!(change.contains(&format!("note_id {id}")) && change.contains("rewrite_section"), "{change}");
         // One line each, well under the local model's.
         for (short, long) in [
             (mage.as_str(), ASKS_NOTE.to_string()),
-            (pick.as_str(), steer("Let's do option A.", &docs, false).unwrap()),
-            (change.as_str(), steer("Add a head torch to the gear.", &docs, false).unwrap()),
+            (pick.as_str(), steer("Let's do option A.", &docs, false, ToolSet::Simple).unwrap()),
+            (change.as_str(), steer("Add a head torch to the gear.", &docs, false, ToolSet::Simple).unwrap()),
         ] {
             assert!(!short.contains('\n') && words(short) <= 24 && short.len() * 3 < long.len() * 2, "{short}");
         }
         // Nothing to say stays nothing.
-        assert_eq!(steer("What time is it in Tokyo?", &docs, true), None);
-        assert_eq!(steer("Let's do option A.", &[], true), None);
+        assert_eq!(steer("What time is it in Tokyo?", &docs, true, ToolSet::Simple), None);
+        assert_eq!(steer("Let's do option A.", &[], true, ToolSet::Simple), None);
     }
 
     /// A document is a Markdown note in Notes (Chat documents), and the
@@ -1981,14 +2162,14 @@ mod tests {
     #[test]
     fn the_model_knows_a_document_is_a_note_in_notes() {
         assert!(INSTRUCTIONS.contains("A document is a Markdown note, saved in Notes under Chat documents"), "{INSTRUCTIONS}");
-        let create = &definitions()[0]["function"];
+        let create = &definitions(ToolSet::Simple)[0]["function"];
         assert_eq!(create["name"], json!("create_document"));
         assert!(create["description"].as_str().unwrap().contains("shown beside the chat, saved in Notes"));
         let made = execute("create_document", &json!({ "title": "Camping kit", "sections": ["Clothes"] }));
         assert_eq!(made["data"]["saved"], json!(SAVED));
         assert!(SAVED.contains("Notes") && SAVED.contains(FOLDER) && SAVED.contains(".md"), "{SAVED}");
         let id = made["data"]["id"].as_u64().unwrap();
-        let c = context(&[DocRef { id, title: "Camping kit".into() }]).unwrap();
+        let c = context(&[DocRef { id, title: "Camping kit".into() }], ToolSet::Simple).unwrap();
         assert!(c.starts_with("Documents in this chat, open beside it and saved in Notes (Chat documents) as Markdown notes"), "{c}");
         // The last section's result: the line for someone who asked for it
         // in their notes.
@@ -2038,5 +2219,85 @@ mod tests {
         push_chip(&mut chips, "Rewrote \"Skills\" in \"Build\"".into());
         push_chip(&mut chips, "Wrote \"Tips\" in \"Build\"".into());
         assert_eq!(chips, ["Rewrote 2 sections in \"Build\"", "Wrote \"Tips\" in \"Build\""]);
+    }
+
+    /// The rich set: its tools in place of rewrite_section, its rule, and
+    /// what the next question is told (the rev, how to change it, an
+    /// earlier version brought back).
+    #[test]
+    fn the_rich_set_is_offered_and_told_how_to_change_a_document() {
+        let names = |set| definitions(set).iter().map(|d| d["function"]["name"].as_str().unwrap().to_string()).collect::<Vec<_>>();
+        assert_eq!(names(ToolSet::Simple), ["create_document", "write_section", "rewrite_section"]);
+        assert_eq!(
+            names(ToolSet::Rich),
+            ["create_document", "write_section", "read_document", "edit_document", "document_history", "restore_document"]
+        );
+        assert_eq!(instructions(ToolSet::Simple), INSTRUCTIONS);
+        assert!(instructions(ToolSet::Rich).contains("read_document, then edit_document"));
+        assert!(!instructions(ToolSet::Rich).contains("rewrite_section"));
+        // Both keep the outline first and where a document is kept.
+        for set in [ToolSet::Simple, ToolSet::Rich] {
+            assert!(instructions(set).contains("create_document (title, a one- or two-sentence summary"));
+            assert!(instructions(set).contains("A document is a Markdown note, saved in Notes under Chat documents."));
+        }
+        let made = execute("create_document", &json!({ "title": "Build", "sections": [{ "key": "Gear", "intent": "kit" }] }));
+        let id = made["data"]["id"].as_u64().unwrap();
+        let docs = [DocRef { id, title: "Build".into() }];
+        let rich = context(&docs, ToolSet::Rich).unwrap();
+        assert!(rich.contains("read_document (since a rev"), "{rich}");
+        assert!(rich.contains(&format!("\"Build\" (note_id {id}, rev ")), "{rich}");
+        assert!(!context(&docs, ToolSet::Simple).unwrap().contains(", rev "));
+        let change = steer("Add a head torch to the gear.", &docs, true, ToolSet::Rich).unwrap();
+        assert!(change.contains("(read_document, then edit_document)"), "{change}");
+        let back = steer("Put it back the way it was before that change.", &docs, true, ToolSet::Rich).unwrap();
+        assert!(back.contains("document_history, then restore_document"), "{back}");
+        // The simple set has no restore: a change, as before.
+        assert!(steer("Put it back the way it was before that change.", &docs, true, ToolSet::Simple).unwrap().contains("rewrite_section"));
+        for q in ["Undo that change", "Can you revert it?", "Go back to the previous version", "restore the original version"] {
+            assert!(restores_version(q), "{q}");
+        }
+        for q in ["Add a head torch", "Put a torch in the extras", "What's the plan for Sunday?", "Move the costs back to the end"] {
+            assert!(!restores_version(q), "{q}");
+        }
+    }
+
+    /// A passage selected in the panel: the model is told the document, the
+    /// words, and the blocks they're in — ids and hashes for the rich set,
+    /// their markdown for the simple one; a model without tools the words.
+    #[test]
+    fn a_selected_passage_is_said_with_its_blocks() {
+        let id = crate::notes::create("Kit", "# Kit\n\nA short list.\n\n## Kitchen\n\n- A stove\n- Two pans\n- A kettle\n\n## Extras\n\n- A map\n", "chat", "").id;
+        let sel = Selection { note_id: id, text: "A stove\nTwo pans\nA kettle".into(), from_line: Some(6), to_line: Some(8) };
+        let doc = blocks::Doc::of(&crate::notes::get(id).unwrap().content);
+        let list = &doc.ids[3];
+        let rich = selection_note(&sel, Some(ToolSet::Rich)).unwrap();
+        assert!(rich.starts_with(&format!("The user selected this passage in \"Kit\" (note_id {id}) and asks about it: \"A stove Two pans A kettle\"")), "{rich}");
+        assert!(rich.contains(&format!("It's in block {} (hash {}) of the document:\n- A stove\n- Two pans\n- A kettle\n", list.id, list.hash)), "{rich}");
+        assert!(rich.contains("change only those blocks (edit_document"), "{rich}");
+        let simple = selection_note(&sel, Some(ToolSet::Simple)).unwrap();
+        assert!(simple.contains("In the document's markdown it's:\n- A stove\n- Two pans\n- A kettle\n"), "{simple}");
+        assert!(simple.contains("edit_note with old_text copied exactly"), "{simple}");
+        let plain = selection_note(&sel, None).unwrap();
+        assert_eq!(plain, "The user selected this passage in the document \"Kit\" and asks about it: \"A stove Two pans A kettle\"");
+        // No lines from the page: found by its words.
+        let by_words = Selection { from_line: None, to_line: None, ..sel.clone() };
+        assert!(selection_note(&by_words, Some(ToolSet::Rich)).unwrap().contains(&list.id));
+        // Kept with the question: its note and words, bounded.
+        assert_eq!(sel.quote(), Some(Quote { note_id: id, text: "A stove\nTwo pans\nA kettle".into() }));
+        assert_eq!(Selection { text: "  ".into(), ..sel.clone() }.quote(), None);
+        assert!(selection_note(&Selection { note_id: 999_999, ..sel }, Some(ToolSet::Rich)).is_none());
+    }
+
+    /// The rich tools that change a document run only on this chat's.
+    #[test]
+    fn a_turn_edits_only_this_chat_s_documents_with_the_rich_tools_too() {
+        let turn = Turn::new(&[DocRef { id: 7, title: "Ours".into() }]);
+        assert!(turn.refuses("edit_document", &json!({ "note_id": 7 })).is_none());
+        let r = turn.refuses("edit_document", &json!({ "note_id": 8 })).unwrap();
+        assert!(r["error"].as_str().unwrap().contains("edit_document only changes those"), "{r}");
+        assert!(turn.refuses("restore_document", &json!({ "note_id": 8 })).is_some());
+        // Reading isn't changing.
+        assert!(turn.refuses("read_document", &json!({ "note_id": 8 })).is_none());
+        assert!(turn.refuses("document_history", &json!({ "note_id": 8 })).is_none());
     }
 }

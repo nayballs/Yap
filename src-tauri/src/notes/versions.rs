@@ -172,6 +172,10 @@ pub struct File {
     pub next: u64,
     #[serde(default)]
     pub versions: Vec<Version>,
+    /// Versions up to this number take no more folded saves ([`seal`]: Chat
+    /// read the document at it). In memory only.
+    #[serde(skip)]
+    pub sealed: u64,
 }
 
 impl File {
@@ -199,6 +203,7 @@ pub fn apply(file: &mut File, field: Field, how: &How, before: &str, after: &str
             && last.kind == how.kind
             && last.label == how.label
             && folds(how.kind)
+            && last.n > file.sealed
             && now.saturating_sub(last.since_ms) < FOLD_MS
         {
             last.text = after.to_string();
@@ -675,11 +680,18 @@ pub struct Restored {
 
 /// Bring version `n` of note `id` back (see the module notes).
 pub fn restore(id: u64, n: u64) -> Result<Restored, String> {
+    restore_by(id, n, "")
+}
+
+/// [`restore`], the new version marked with who brought it back (`label`:
+/// "Chat" for `restore_document`, so the document panel's Undo knows it's
+/// Chat's change).
+pub fn restore_by(id: u64, n: u64, label: &str) -> Result<Restored, String> {
     let v = with_file(id, |file, _| file.versions.iter().find(|v| v.n == n).cloned())
         .ok_or("Note not found")?
         .ok_or("That version isn't kept any more")?;
     let now = now_ms();
-    let how = How { kind: kind::RESTORED, label: String::new(), from: Some(n) };
+    let how = How { kind: kind::RESTORED, label: label.trim().chars().take(80).collect(), from: Some(n) };
     let (text, changed) = by(how, || {
         super::modify(id, |note| {
             let changed = match v.field {
@@ -706,6 +718,33 @@ pub fn restore(id: u64, n: u64) -> Result<Restored, String> {
     // the note had.
     let previous = if changed { undo_target(id, v.field) } else { None };
     Ok(Restored { field: v.field, text, previous })
+}
+
+/// **Chat read note `id`'s notes as they are** (`read_document`, the rich
+/// document tools): the newest version of them is sealed — the person's
+/// typing from now on is a version of its own, not folded into the one
+/// Chat read — so a document's `rev` (that version's number) always names
+/// the text Chat saw, and `read_document(since)` finds what changed after
+/// it. Returns that number (0: no version yet). In memory: after a restart
+/// a version folds as before, and `since` falls back to its text then.
+pub fn seal(id: u64) -> u64 {
+    with_file(id, |file, _| {
+        let n = file.versions.iter().rev().find(|v| v.field == Field::Notes).map_or(0, |v| v.n);
+        file.sealed = file.sealed.max(n);
+        n
+    })
+    .unwrap_or(0)
+}
+
+/// The newest version of note `id`'s notes: its number and text (`None`:
+/// none yet).
+pub fn newest_notes(id: u64) -> Option<(u64, String)> {
+    with_file(id, |file, _| file.versions.iter().rev().find(|v| v.field == Field::Notes).map(|v| (v.n, v.text.clone()))).flatten()
+}
+
+/// Version `n` of note `id`, when it's of its notes and still kept.
+pub fn notes_version(id: u64, n: u64) -> Option<Version> {
+    with_file(id, |file, _| file.versions.iter().find(|v| v.n == n && v.field == Field::Notes).cloned()).flatten()
 }
 
 /// Note `id` is gone: its history goes with it (in memory, and its file once
@@ -871,6 +910,33 @@ mod tests {
         assert_eq!(f.versions.iter().map(|v| v.n).collect::<Vec<_>>(), [1, 2, 3, 4, 5, 6]);
     }
 
+    /// Chat read the document at a version (`seal`, `read_document`): the
+    /// person's typing after it is a version of its own, so the number Chat
+    /// was given always names the text it saw.
+    #[test]
+    fn typing_after_chat_read_a_version_never_folds_into_it() {
+        let mut f = File::new(1, 1);
+        apply(&mut f, Field::Notes, &typed(), "", "Buy", 0, 0);
+        f.sealed = 1;
+        apply(&mut f, Field::Notes, &typed(), "Buy", "Buy milk", 0, MIN);
+        apply(&mut f, Field::Notes, &typed(), "Buy milk", "Buy milk and eggs", 0, 2 * MIN);
+        assert_eq!(texts(&f), [("typed".into(), "Buy".into()), ("typed".into(), "Buy milk and eggs".into())]);
+        // In the store: sealed at the newest version of the notes.
+        let id = super::super::create("Kit", "", "chat", "").id;
+        assert_eq!(seal(id), 0);
+        super::super::update(id, None, Some("Boots".into()), None, None).unwrap();
+        let n = seal(id);
+        assert!(n > 0);
+        super::super::update(id, None, Some("Boots and a hat".into()), None, None).unwrap();
+        assert_eq!(notes_version(id, n).unwrap().text, "Boots");
+        assert_eq!(newest_notes(id).unwrap().1, "Boots and a hat");
+        // A restore marked as Chat's.
+        let r = restore_by(id, n, "Chat").unwrap();
+        assert_eq!(r.text, "Boots");
+        let newest = &list(id).unwrap()[0].version;
+        assert_eq!((newest.kind.as_str(), newest.label.as_str(), newest.from), (kind::RESTORED, "Chat", Some(n)));
+    }
+
     #[test]
     fn the_two_texts_keep_their_own_versions_and_a_tick_is_no_version() {
         let mut f = File::new(1, 1);
@@ -1028,6 +1094,7 @@ mod tests {
             created: 1,
             next: 2,
             versions: vec![Version { n: 1, field: Field::Notes, kind: "typed".into(), label: String::new(), from: None, since_ms: 1, ms: 1, text: "someone else's words".into() }],
+            sealed: 0,
         };
         std::fs::write(dir.join(format!("{id}.json")), serde_json::to_string(&stale).unwrap()).unwrap();
         assert!(list(id).unwrap().is_empty());

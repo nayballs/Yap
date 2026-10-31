@@ -1,0 +1,22 @@
+{
+  "name": "documents-change-selection",
+  "description": "Documents beside the chat, \"Change this…\" on a selection (31 Oct 2026): a packing list, then the person selects its Kitchen section in the panel and asks \"Make this shorter: three items at most.\" — that section changes in the document (edit_document on its blocks with the rich tools; rewrite_section or edit_note with the simple ones), the other sections stay, never the chat and never a second document. The turn's `selection` selects the section as a drag over it on the page would. Fictional hills.",
+  "tags": ["documents", "documents-edits"],
+  "apps": "standard",
+  "turns": [
+    {
+      "user": "Make me a packing list for a weekend of camping in the Hollow Hills, a fictional range, with sections for clothes, kitchen, sleeping and extras.",
+      "expect": { "document": { "made": true, "outline_first": true, "filled": true, "min_sections": 3 } }
+    },
+    {
+      "user": "Make this shorter: three items at most.",
+      "selection": "## Kitchen",
+      "expect": {
+        "document": { "made": false, "changed": true, "in_order": ["## clothes", "## kitchen", "## sleeping", "## extras"] },
+        "tools_called": [{ "name": ["edit_document", "rewrite_section", "edit_note", "update_note"] }],
+        "tools_not_called": ["create_note", "create_document"],
+        "max_words": 60
+      }
+    }
+  ]
+}

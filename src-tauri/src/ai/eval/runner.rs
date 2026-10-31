@@ -46,6 +46,8 @@ Scenarios:
                            written, a short chat line — and their table in summary.md
 Running:
   --tools on|off           treat the model as able (or not) to call tools (default: Yap's rule)
+  --doc-tools rich|simple  the documents' tool set the model gets (default: Yap's rule,
+                           documents::ToolSet::for_model: rich for Claude, GPT-5, Gemini…)
   --tokens-per-minute <n>  pacing budget (default 8000 for Groq, its free plan; none otherwise)
   --max-total-tokens <n>   stop starting scenarios for a model past this many tokens
   --timeout <secs>         per model call (default: Yap's own, 20 s for Chat)
@@ -176,6 +178,8 @@ struct Args {
     out: Option<PathBuf>,
     label: Option<String>,
     tools: Option<bool>,
+    /// `--doc-tools rich|simple` (documents.rs `ToolSet`).
+    doc_tools: Option<bool>,
     ngl: u32,
     ctx: u32,
     llamafile: Option<PathBuf>,
@@ -257,6 +261,14 @@ fn parse(argv: Vec<String>) -> Result<Args, String> {
                     "off" | "false" | "no" => Some(false),
                     "auto" => None,
                     other => return Err(format!("--tools on|off|auto, not {other}")),
+                }
+            }
+            "--doc-tools" => {
+                a.doc_tools = match value()?.as_str() {
+                    "rich" => Some(true),
+                    "simple" => Some(false),
+                    "auto" => None,
+                    other => return Err(format!("--doc-tools rich|simple|auto, not {other}")),
                 }
             }
             "--ngl" => a.ngl = num(value()?, &flag)? as u32,
@@ -1095,6 +1107,7 @@ async fn run_scenario(
         _ => args.tools,
     };
     record::set_tools_forced(forced);
+    record::set_doc_tools_forced(args.doc_tools);
     let tools = forced.unwrap_or(m.tools_rule);
     if let Err(e) = seed(s) {
         return error_row(m, &name, &format!("seed: {e}"));
@@ -1107,6 +1120,7 @@ async fn run_scenario(
             "file": s.file,
             "tools": tools,
             "tools_forced": forced,
+            "doc_tools": crate::chat::documents::ToolSet::for_model(&m.provider, &m.model).name(),
             "apps": apps.len(),
             "notes": crate::notes::all().len(),
             "folders": crate::notes::folders(),
@@ -1143,7 +1157,16 @@ async fn run_scenario(
             Ok(None)
         } else {
             let watcher = streamed.then_some(&watch as &dyn crate::chat::stream::Sink);
-            crate::chat::turn::chat_turn(None, conversation, &turn.user, scope, voice, |_, _| {}, watcher, None).await.map(Some)
+            // A passage selected in the document panel (`selection`): the
+            // words found in the conversation's newest document holding them.
+            let selection = turn.selection.as_deref().and_then(|words| {
+                let docs = conversation.and_then(crate::chat::chats::get).map(|c| crate::chat::documents::of_conversation(&c.messages)).unwrap_or_default();
+                let found = scenario::selection_in(&docs, words);
+                record::write("selection", json!({ "found": found.is_some(), "chars": words.chars().count() }));
+                found
+            });
+            let asked = crate::chat::turn::chat_turn(None, conversation, &turn.user, scope, voice, |_, _| {}, watcher, None);
+            crate::chat::documents::with_selection(selection, asked).await.map(Some)
         };
         let first_words = watch.at();
         // Memory's passes after the turn: what a quiet chat, "Tell Yap what

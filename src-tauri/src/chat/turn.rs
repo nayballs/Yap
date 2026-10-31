@@ -260,6 +260,9 @@ async fn answer_turn(
     // A summary being written on this PC steps aside for the question.
     crate::chat::compact::turn_started();
     let tools_supported = crate::chat::tools::supports_tools(&provider, &model);
+    // Which documents' tools (documents.rs): the rich set for the models that
+    // handle it, the simple one for the rest.
+    let doc_tools = crate::chat::documents::ToolSet::for_model(&provider, &model);
     let in_message = tools_supported;
     // "Look things up on the web" (web.rs). Not for the Meetings view's Ask
     // bar: that's about the meetings.
@@ -290,6 +293,7 @@ async fn answer_turn(
         calendar: calendar_on.then_some(crate::chat::tools::CalendarTurn { log: &calendar_log, zone: crate::chat::tools::calendar::Zone::of(None), now: 0 }),
         room: None,
         docs: None,
+        doc_tools,
     };
     let schemas = if tools_supported {
         counter.count(&crate::chat::tools::offered_tools(cfg.open_apps, web_on, extra_flags).to_string()).await
@@ -302,7 +306,7 @@ async fn answer_turn(
         + crate::chat::budget::IMAGE_TOKENS * crate::snip::turn::images().iter().filter(|i| !i.as_text).count() as u64;
     let rate_cap = crate::chat::budget::rate_cap(&provider);
     if mode != crate::chat::budget::Mode::Messages {
-        let stable = stable_prompt(&cfg, &persona, tools_supported, web_on, calendar_on, &profile, now);
+        let stable = stable_prompt(&cfg, &persona, tools_supported, doc_tools, web_on, calendar_on, &profile, now);
         let guess = crate::chat::budget::budget(context_size, context_known, counter.count(&stable).await + schemas, kind, tools_supported, rate_cap);
         if question_tokens > guess.history {
             tracing::info!(question_tokens, room = guess.history, context = context_size, "Chat: the question is too long for the model; not sent");
@@ -320,6 +324,12 @@ async fn answer_turn(
     // The question, with the screenshots it carries (Snip to Chat, the
     // turn's `snip::turn`): kept with it in chats.json as ids.
     let user_index = crate::chat::chats::append_question(conv.id, &text, by_voice, &crate::snip::turn::images())?;
+    // A passage selected in the document panel ("Change this…", documents.rs):
+    // kept with the question, its quote above it.
+    let selection = crate::chat::documents::selection();
+    if let Some(quote) = selection.as_ref().and_then(crate::chat::documents::Selection::quote) {
+        crate::chat::chats::set_quote(conv.id, user_index, quote);
+    }
     // This turn answers the conversation now: one still answering there
     // ends, with nothing saved.
     stop.answers(conv.id);
@@ -389,7 +399,7 @@ async fn answer_turn(
     let about = crate::ai::about_you::prompt_block(&profile, now);
     let calendar_zone = crate::chat::tools::calendar::Zone::of(profile.region.time_zone.as_deref());
     let mut system = persona.trim().to_string();
-    system.push_str(&instructions(&cfg, tools_supported, web_on, calendar_on, &profile));
+    system.push_str(&instructions(&cfg, tools_supported, doc_tools, web_on, calendar_on, &profile));
     // Where the line on earlier web answers goes for a model without tools
     // (it depends on the history sent, chosen below).
     let note_at = system.len();
@@ -465,7 +475,7 @@ async fn answer_turn(
         .then(|| crate::chat::tools::calendar::NOT_CONNECTED_NOTE.to_string());
     // This chat's documents, for a model that changes them (documents.rs).
     if tools_supported {
-        if let Some(block) = crate::chat::documents::context(&chat_docs) {
+        if let Some(block) = crate::chat::documents::context(&chat_docs, doc_tools) {
             context.push(block);
         }
     }
@@ -532,9 +542,22 @@ async fn answer_turn(
     // 5.5 explained a build in the chat and offered to write it. A cloud
     // model's line is one short sentence (`brief`); in the context, never
     // the system prompt, so its prompt cache stays whole.
-    if tools_supported && !meetings {
+    // **A passage selected in the panel** ("Change this…", "Ask about
+    // this"): which document and blocks, and that a change goes there only
+    // — in place of `steer`'s line (the selection says where). A model
+    // without tools hears what was selected.
+    let selected = selection.as_ref().and_then(|s| crate::chat::documents::selection_note(s, tools_supported.then_some(doc_tools)));
+    if let Some(note) = &selected {
+        if in_message {
+            context.push(note.clone());
+        } else {
+            system.push_str("\n\n");
+            system.push_str(note);
+        }
+    }
+    if tools_supported && !meetings && selected.is_none() {
         let brief = !crate::ai::ai_model::runs_here(&provider, &base_url);
-        if let Some(note) = crate::chat::documents::steer(&text, &chat_docs, brief) {
+        if let Some(note) = crate::chat::documents::steer(&text, &chat_docs, brief, doc_tools) {
             context.push(note);
         }
     }
@@ -611,7 +634,7 @@ async fn answer_turn(
             system.insert_str(note_at, &format!("\n\n{note}"));
         }
     }
-    let history: Vec<(String, String)> = earlier.iter().map(|m| (m.role.clone(), m.text.clone())).collect();
+    let history: Vec<(String, String)> = earlier.iter().map(|m| (m.role.clone(), m.sent_text())).collect();
 
     // Streamed to whoever watches: what was shown is kept (a Stop keeps
     // it), and a model on this PC steps aside for a new dictation.
@@ -659,6 +682,7 @@ async fn answer_turn(
             // Each tool result within what the request has left.
             room: (mode != crate::chat::budget::Mode::Messages).then_some(budget.request),
             docs: Some(&doc_turn),
+            doc_tools,
         };
         let looped = crate::chat::tools::run_tool_loop_with(
             &system,
@@ -884,11 +908,12 @@ pub(crate) fn next_room(history: u64) -> u64 {
 /// for a model that calls them (the web's, the apps', memory's, past
 /// chats', the calendar's as the turn offers them), else the plain notes
 /// for one that can't act. The same from turn to turn.
-fn instructions(cfg: &YapConfig, tools_supported: bool, web_on: bool, calendar_on: bool, profile: &crate::ai::about_you::Profile) -> String {
+fn instructions(cfg: &YapConfig, tools_supported: bool, doc_tools: crate::chat::documents::ToolSet, web_on: bool, calendar_on: bool, profile: &crate::ai::about_you::Profile) -> String {
     let mut s = String::new();
     if tools_supported {
         s.push_str("\n\nYou have access to tools. ");
-        s.push_str(&crate::chat::tools::TOOL_INSTRUCTIONS.join(" "));
+        // (The documents' line is the set's: documents.rs `ToolSet`.)
+        s.push_str(&crate::chat::tools::tool_instructions(doc_tools));
         if cfg.open_apps {
             s.push(' ');
             s.push_str(&crate::chat::tools::APP_TOOL_INSTRUCTIONS.join(" "));
@@ -956,10 +981,12 @@ fn ending(in_message: bool, profile: &crate::ai::about_you::Profile, about: &str
 /// persona, the instructions, the prompt's end, and (a model that calls
 /// tools) the clock in the question's context. What a question must fit
 /// beside (`chat_turn`'s check before it's sent, Chat's limits and ring).
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn stable_prompt(
     cfg: &YapConfig,
     persona: &str,
     tools_supported: bool,
+    doc_tools: crate::chat::documents::ToolSet,
     web_on: bool,
     calendar_on: bool,
     profile: &crate::ai::about_you::Profile,
@@ -967,7 +994,7 @@ pub(crate) fn stable_prompt(
 ) -> String {
     let about = crate::ai::about_you::prompt_block(profile, now);
     let mut s = persona.trim().to_string();
-    s.push_str(&instructions(cfg, tools_supported, web_on, calendar_on, profile));
+    s.push_str(&instructions(cfg, tools_supported, doc_tools, web_on, calendar_on, profile));
     s.push_str(&ending(tools_supported, profile, &about, &crate::memory::you_block()));
     if tools_supported {
         s.push_str("\n\n");
@@ -1019,12 +1046,13 @@ pub async fn chat_limits() -> Limits {
         return Limits::default();
     };
     let tools_supported = crate::chat::tools::supports_tools(&provider, &model);
+    let doc_tools = crate::chat::documents::ToolSet::for_model(&provider, &model);
     let web_on = cfg.web_search;
     let calendar_on = crate::calendar::connected();
     let counter = crate::chat::budget::Counter::for_call(&provider, &base_url);
     let (context, context_known) = crate::chat::budget::context_window(&cfg, &provider, &model, &base_url).await;
     let profile = crate::ai::about_you::profile(&cfg);
-    let stable = stable_prompt(&cfg, &persona, tools_supported, web_on, calendar_on, &profile, crate::ai::eval::now());
+    let stable = stable_prompt(&cfg, &persona, tools_supported, doc_tools, web_on, calendar_on, &profile, crate::ai::eval::now());
     let log = crate::chat::tools::calendar::Log::default();
     let extra = crate::chat::tools::Extra {
         memory: true,
@@ -1033,6 +1061,7 @@ pub async fn chat_limits() -> Limits {
         calendar: calendar_on.then_some(crate::chat::tools::CalendarTurn { log: &log, zone: crate::chat::tools::calendar::Zone::of(None), now: 0 }),
         room: None,
         docs: None,
+        doc_tools,
     };
     let schemas = if tools_supported { counter.count(&crate::chat::tools::offered_tools(cfg.open_apps, web_on, extra).to_string()).await } else { 0 };
     let fixed = counter.count(&stable).await + schemas;

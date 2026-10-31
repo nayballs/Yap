@@ -10,9 +10,10 @@
 
   /**
    * `root()`: the rendered summary's element; `text`: its markdown (a new
-   * one searches again); `look`: 'paper' (the notepad) | 'app' (Notes).
+   * one searches again); `look`: 'paper' (the notepad, Chat's document panel) | 'app' (Notes);
+   * `label`: what the box says ("Find in the document").
    */
-  let { root, text = '', look = 'paper', open = $bindable(false) } = $props();
+  let { root, text = '', look = 'paper', open = $bindable(false), label = 'Find in the summary' } = $props();
 
   let query = $state('');
   let hits = $state([]);
@@ -28,20 +29,43 @@
     inputEl?.select();
   }
 
+  /**
+   * Every match of `q` in the root's text, as ranges — across the text's
+   * pieces too ("**fast** build", or Chat's document Source view, whose
+   * colours cut the text into many spans).
+   */
   function find(q) {
     const el = root?.();
     const needle = q.trim().toLowerCase();
     const out = [];
     if (!el || !needle) return out;
+    const nodes = [];
+    let text = '';
     const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
     for (let n = walker.nextNode(); n; n = walker.nextNode()) {
-      const hay = n.nodeValue.toLowerCase();
-      for (let i = hay.indexOf(needle); i >= 0; i = hay.indexOf(needle, i + needle.length)) {
-        const r = new Range();
-        r.setStart(n, i);
-        r.setEnd(n, i + needle.length);
-        out.push(r);
+      nodes.push([n, text.length]);
+      text += n.nodeValue;
+    }
+    if (!nodes.length) return out;
+    // The text node a character is in, and where that node starts.
+    const at = (pos) => {
+      let lo = 0;
+      let hi = nodes.length - 1;
+      while (lo < hi) {
+        const mid = (lo + hi + 1) >> 1;
+        if (nodes[mid][1] <= pos) lo = mid;
+        else hi = mid - 1;
       }
+      return nodes[lo];
+    };
+    const hay = text.toLowerCase();
+    for (let i = hay.indexOf(needle); i >= 0; i = hay.indexOf(needle, i + needle.length)) {
+      const [sn, so] = at(i);
+      const [en, eo] = at(i + needle.length - 1);
+      const r = new Range();
+      r.setStart(sn, Math.min(i - so, sn.nodeValue.length));
+      r.setEnd(en, Math.min(i + needle.length - eo, en.nodeValue.length));
+      out.push(r);
     }
     return out;
   }
@@ -110,15 +134,15 @@
 </script>
 
 {#if open}
-  <div class="find {look}" role="search" aria-label="Find in the summary">
+  <div class="find {look}" role="search" aria-label={label}>
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="6" /><path d="M20 20l-4.5-4.5" /></svg>
     <input
       bind:this={inputEl}
       bind:value={query}
       oninput={() => search()}
       {onkeydown}
-      placeholder="Find in the summary"
-      aria-label="Find in the summary"
+      placeholder={label}
+      aria-label={label}
       spellcheck="false"
     />
     <span class="count" aria-live="polite">{query.trim() ? (hits.length ? `${at + 1} of ${hits.length}` : 'No matches') : ''}</span>

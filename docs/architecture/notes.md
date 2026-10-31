@@ -353,6 +353,19 @@ never in notes.json, so an older Yap's save of notes.json drops nothing.
 Deleting the note: the pill in the chat opens a panel that says "This
 document was deleted."
 
+**The rich tools** (2026-10-31, `chat/documents/rich.rs`, for the models
+that handle tools well): a document's **rev** is the number of the newest
+version of its notes, and Chat reading it **seals** that version
+(`versions::seal`: `File::sealed`, in memory) — the person's typing after
+it is a version of its own, never folded into the one Chat read — so
+`read_document(since: rev)` always compares with the text Chat saw (kept in
+memory per rev too, `rich::text_at`, for a version Yap didn't see change).
+`edit_document` is one `chat` version per call; `restore_document` brings a
+version back through `versions::restore_by(id, n, "Chat")`, a `restored`
+version labelled Chat (the Chat panel's Undo takes it back; Version
+history says "Restored"). The blocks themselves (`documents/blocks.rs`) are
+read from the markdown each time: nothing new is stored.
+
 ## Pins, version history and transforms (`notes/pins.rs`, `notes/versions.rs`, `notes/transform.rs`)
 
 2026-10-29 (Wispr Flow's Scratchpad has pins and a version history, and

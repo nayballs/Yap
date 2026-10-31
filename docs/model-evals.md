@@ -310,6 +310,26 @@ build. `summary.md` gets a "Documents beside the chat" table per model: made whe
 outline first, every section written, the chat line's mean and most words, made when not
 wanted, changed when asked, a table, a summary (of the turns that check or warn on each).
 
+**The rich document tools** (31 Oct 2026, `chat/documents/rich.rs`): which set a model gets
+is Yap's rule (`documents::ToolSet::for_model`: rich for Claude, GPT-5, Gemini and the large
+open models, simple for the on-device model) unless `--doc-tools rich|simple` says otherwise
+(each scenario's `scenario_start` records it). Four scenarios change a document by block,
+tagged `documents-edits`: `documents-table-row` (a row added to the level table:
+`contains`), `documents-move-section` (Costs moved before Saturday: `in_order`, which reads
+the headings' order), `documents-change-selection` (the Kitchen section selected in the
+panel, "Make this shorter": a turn's `selection` — words found in the conversation's newest
+document, or `"## Kitchen"` for that whole section, as a drag over it would select —
+goes with the question as the panel sends it) and `documents-restore` (the gear changed,
+then put back: `restore_document` called; tagged `documents-rich` and not `documents`, as
+the simple set has no restore). `expect.document` also takes `contains` and `in_order` (the
+documents changed this turn, else made). Both sets on the same model:
+
+```bash
+yap.exe eval --documents --doc-tools simple --model local:<gguf> --ngl 999 --repeat 3
+yap.exe eval --documents --tag documents-edits --doc-tools rich --model local:<gguf> --ngl 999 --repeat 3
+npm run eval -- --documents --tag documents-edits --model anthropic:claude-haiku-5-5 --keys-from-yap --repeat 2
+```
+
 ### Screenshot questions (`--vision`)
 
 ```bash
@@ -2858,3 +2878,54 @@ anthropic:claude-haiku-5-5 --keys-from-yap --repeat 2` (14 scenarios, 20 turns a
 850k tokens, mostly cheap cached reads), or the ones it got wrong and their neighbours with
 `--only another-build,saved-in-notes,pick-option,change-build,go-deeper,build-looked-up`
 (about 450k).
+
+## The rich document tools (31 Oct 2026)
+
+`chat/documents/rich.rs` (chat-and-assistant.md): the strong models read a document as blocks
+with ids and hashes and change it by block (`read_document`, `edit_document`,
+`document_history`, `restore_document`); the on-device model keeps the simple set unless the
+evaluations say otherwise. **Does the 4B hold up with the rich set?** The on-device Qwen3.5-4B
+Q4_K_M (llamafile 0.10.6, the sidecar's arguments, MTP, `--ngl 999` on this PC's graphics card),
+`--repeat 3`, the 14 earlier scenarios and the 3 new ones both sets can do
+(`documents-table-row`, `documents-move-section`, `documents-change-selection`), and with the
+rich set `documents-restore` too:
+
+| Set | Passed | The 14 earlier | The 3 new | Restore | Made when asked | Outline first | Every section written | Chat line (mean / most words) | Made when not wanted | Changed when asked | A table | A summary |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| simple (`--doc-tools simple`) | **44/51** | **37/42** | **7/9** | — | 48/48 | 48/48 | 48/48 | 7 / 46 | 0/30 | 17/18 | 16/18 | 12/12 |
+| rich (`--doc-tools rich`) | 40/54 | 32/42 | 6/9 | 2/3 | 49/51 | 49/49 | 47/49 | 7 / 48 | 0/36 | 21/24 | 15/18 | 11/12 |
+
+**The 4B keeps the simple set** (`rich::handles_rich` says no to any model on this PC). With the
+rich set it reads the whole document before every change, and the read is large: one
+level-by-level change went over the 8K context (the first rich run), and changes it got right
+with `rewrite_section` it got wrong by block — a `move` with the markdown in it and hashes for
+ids (`documents-move-section` 0/3; 1/3 with the simple set, by a whole rewrite), a read and no
+edit (twice), an answer of 130–142 words after a good edit ("go deeper", twice), a comparison
+outlined as one section three times. What it did well by block: every table row (3/3), every
+selected passage changed with the others kept (3/3), and two of three restores through
+`document_history` and `restore_document` (the third's failure was the turn before: its gear
+change left out the lantern shield). The simple set's failures are its known wobbles (a
+two-option document or a comparison outlined as one section, three times; a build without its
+table; one change written with `write_section` on a written section). The simple set's 37/42
+on the earlier 14 against 39–41/42 on 30 Oct is that wobble: its prompt, tools and context
+lines are unchanged (`tool_instructions(Simple)` is the old line, checked by a unit test).
+
+A first rich run (before the earlier change scenarios took `edit_document` as a change; 37/54)
+also showed the 4B sending the same edit twice: the second was told "there's no block t932cd"
+— true, its own edit had replaced it — so `edit_document` now remembers the blocks Chat's own
+edits replaced and says "your own earlier edit already replaced block … Don't make the same
+change again" (`rich::retire`). Run folders `20261030-232741-docs-4b-simple`,
+`20261030-233856-docs-4b-rich`, `20261030-235438-docs-4b-rich2` (kept outside the repo).
+
+**Claude Haiku 5.5, for the maintainer to run** (credits; it gets the rich set by Yap's rule):
+
+```bash
+npm run eval -- --documents --tag documents-edits --model anthropic:claude-haiku-5-5 --keys-from-yap --repeat 2
+```
+
+(18 scenarios, 29 turns a repeat: about 1.5M tokens as the 4B counts them, most of them cheap
+cached reads of the same system prompt and tools), or the four new ones alone with `--only
+table-row,move-section,change-selection,restore` (about 500k). Worth reading in it: whether
+every change goes through `read_document` then `edit_document` with the hashes read, a table
+row as a replace of the table, the move as one `move` op, and the restore through the
+history.

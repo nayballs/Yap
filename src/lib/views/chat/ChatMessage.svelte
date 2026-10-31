@@ -37,8 +37,9 @@
   const WEB_CHIP = /^(Searched the web|Couldn't search the web|Didn't search for|Read [^"]|Couldn't read [^"]|Didn't read |Answered from )/;
   // The calendar's (chat/tools/calendar.rs).
   const CALENDAR_CHIP = /^(Checked your calendar|Found \d+ meetings? with|No meetings with|Free |Busy |No calendar connected|Couldn't read the (day|time) )/;
-  // A document's (chat/documents.rs).
-  const DOC_CHIP = /^(Started "|(Re)?[Ww]rote (\d+ sections|"[^"]*") in "|Added "[^"]*" to "|Didn't (re)?write "|"[^"]*" is already written in "|Couldn't (start a document|rewrite a section))/;
+  // A document's (chat/documents.rs, and the rich tools': documents/rich.rs).
+  const DOC_CHIP =
+    /^(Started "|(Re)?[Ww]rote (\d+ sections|"[^"]*") in "|Added "[^"]*" to "|Didn't (re)?write "|"[^"]*" is already written in "|Couldn't (start a document|rewrite a section)|Read (the document|what changed in) "|Changed (a table in|a part of) "|Added to "|Took a part out of "|Moved a part of "|Made \d+ changes in "|Didn't (change|restore) "|Couldn't (change|restore) ("|a document)|Looked at the history of "|Restored version \d+ of "|"[^"]*" is already as version )/;
   const chipKind = (t) =>
     /: not after reading the web$/.test(t)
       ? 'guard'
@@ -186,6 +187,10 @@
           {/if}
         {/each}
       </div>
+    {/if}
+    {#if m.quote?.text}
+      <!-- The passage of a document it was asked about (the panel's selection). -->
+      <blockquote class="quoted" data-testid="chat-quote-sent" title={m.quote.text}>{m.quote.text}</blockquote>
     {/if}
     <p class="cbody">
       {#if m.voice}
@@ -450,6 +455,22 @@
   .cbubble.assistant :global(a.md-cite:hover) {
     color: var(--yap-primary);
     border-color: color-mix(in srgb, var(--yap-primary) 45%, var(--yap-border-subtle));
+  }
+  /* The passage a question was about, over it: quiet, three lines at most. */
+  .quoted {
+    margin: 0 0 6px;
+    padding: 2px 0 2px 9px;
+    border-left: 2px solid var(--yap-primary-line);
+    font-size: 12.5px;
+    line-height: 1.45;
+    color: var(--yap-muted);
+    display: -webkit-box;
+    -webkit-line-clamp: 3;
+    line-clamp: 3;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    overflow-wrap: anywhere;
+    white-space: pre-line;
   }
   /* A document's pill under the answer that made or changed it. */
   .docpills {

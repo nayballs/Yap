@@ -376,7 +376,7 @@
     <div class="docslot" class:cover style={cover ? undefined : `width: ${shownWidth}px`}>
       <!-- Its own chunk, loaded the first time a document opens. -->
       {#await import('./DocPanel.svelte') then { default: DocPanel }}
-        <DocPanel {doc} {cover} {narrow} />
+        <DocPanel {doc} {cover} {narrow} onquote={chat.setQuote} />
       {/await}
     </div>
   {/if}
