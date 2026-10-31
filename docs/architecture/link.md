@@ -176,10 +176,12 @@ at a time, a sentence made while the one before plays, a cloud voice's local
 stand-in) with its output on the phone (`link/voice.rs`'s `PhonePlayback`, an
 `Opener` in rodio's place): each sentence's PCM brought to mono 24 kHz (any
 engine's rate), sent as down frames of up to half a second between
-`speak_start` and `speak_end`. **Never played on this PC.** Its "speaking" lasts
+`speak_start` and `speak_end`. **Never played on this PC**, so it never turns the
+PC's other apps down (`voice/duck.rs` is the PC's speakers' only). Its "speaking" lasts
 as long as the phone's playback (the audio's length on a clock from its first
 frame). The voice: with "Speak replies" on, the one Settings picked
-(`tts::voicing`: Kokoro, Windows voices or ElevenLabs); with it off, still on
+(`tts::voicing`: Kokoro, Windows voices, ElevenLabs, or OpenAI, Gemini or Groq on
+the key Language Models has); with it off, still on
 the phone, in Yap's own voice — Kokoro if downloaded, else Windows voices
 (`tts::phone_voicing`; never a cloud voice not switched on).
 

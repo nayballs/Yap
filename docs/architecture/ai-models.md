@@ -1151,7 +1151,13 @@ The language-model side: the OpenAI-compatible client and its prompts, the on-de
   around the call (`usage::within`, the innermost wins: `transforms` —
   `dictation/transforms.rs`, the shortcut's and a dictation's —,
   `translation` — `dictation/languages.rs` —, `speakers` —
-  `speakers/naming.rs`); embeddings are `search`; unscoped `other`. **On
+  `speakers/naming.rs`); embeddings are `search`; a cloud voice's request
+  (spoken replies on OpenAI, Gemini or Groq, `voice/tts/hosted.rs` →
+  `record_speech`: the tokens OpenAI's and Gemini's streams end with, or
+  none for Groq's WAV, and the text's characters) is `voice` ("Spoken
+  replies"), priced by its tokens, else by the character where the voice
+  bills that way (`prices::char_cost_micros`: Groq's Orpheus, $22 a million);
+  unscoped `other`. **On
   this PC** as the receipts place it (`net::place_of_url`; a test run's
   stand-in aliased to a cloud host counts as that cloud). **Where it goes**:
   `usage/groq.rs` — Groq's "Usage today" meter, exactly as before
@@ -1178,7 +1184,9 @@ The language-model side: the OpenAI-compatible client and its prompts, the on-de
   (`PRICES_AS_OF`); a price for longer prompts (`upto`: Haiku 5.5 past
   100K, Gemini Pro past 200K, OpenAI's table to 272K) and one that changes
   on a date (`from`: Gemini 4 Argon on 1 Dec 2026, the 3.x Flashes on 1 Jan
-  2027) apply per call; a dated snapshot costs what its model does
+  2027) apply per call; spoken replies' cloud voices (checked 2026-10-31:
+  OpenAI's `gpt-4o-mini-tts` text $0.60 / audio $12, Gemini's 3.8 Flash TTS
+  $0.50 / $9 and Flash-Lite TTS $0.50 / $6, both doubling on 1 Jan 2027); a dated snapshot costs what its model does
   (`base_id`). The cost is worked out when a call is recorded (millionths
   of a dollar). Pages say it's an estimate: free plans cost nothing, cached
   prompts cost less. `usage/context.rs` — Chat's context ring

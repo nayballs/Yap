@@ -22,6 +22,7 @@
   import Row from '../ui/Row.svelte';
   import Select from '../ui/Select.svelte';
   import Input from '../ui/Input.svelte';
+  import CloudVoiceList from './CloudVoiceList.svelte';
   import { speech } from '../stores/speech.svelte.js';
   import { toast } from '../ui/toast.svelte.js';
   import { createExternalLinkHandler } from '../core/externalLinks.js';
@@ -216,34 +217,15 @@
       {#if gone}
         <span class="note">Your saved voice{choice.voiceName ? ` (${choice.voiceName})` : ''} isn't in this account any more: pick another.</span>
       {/if}
-      <div class="vlist" role="radiogroup" aria-label="ElevenLabs voice">
-        {#each groups as g (g.label)}
-          <div class="vgroup">{g.label}</div>
-          {#each g.voices as v (v.id)}
-            <div class="vrow" class:sel={v.id === voiceId}>
-              <button type="button" class="vpick" role="radio" aria-checked={v.id === voiceId} aria-label={v.name} onclick={() => pick(v)}>
-                <span class="dot" aria-hidden="true"></span>
-                <span class="vname">{v.name}</span>
-                {#if v.desc}<span class="vdesc">{v.desc}</span>{/if}
-              </button>
-              <button
-                type="button"
-                class="vplay"
-                class:on={playing === v.id}
-                aria-label={playing === v.id ? `Stop ${v.name}` : `Preview ${v.name}`}
-                title={playing === v.id ? 'Stop' : v.preview ? 'Play its sample' : 'Say a sample sentence (uses your characters)'}
-                onclick={() => preview(v)}
-              >
-                {#if playing === v.id}
-                  <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="5" y="5" width="14" height="14" rx="2.5" /></svg>
-                {:else}
-                  <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M7 4.9v14.2a1.2 1.2 0 0 0 1.8 1l11.6-7.1a1.2 1.2 0 0 0 0-2L8.8 3.9A1.2 1.2 0 0 0 7 4.9z" /></svg>
-                {/if}
-              </button>
-            </div>
-          {/each}
-        {/each}
-      </div>
+      <CloudVoiceList
+        label="ElevenLabs voice"
+        {groups}
+        selected={voiceId}
+        {playing}
+        onpick={pick}
+        onpreview={preview}
+        previewTitle={(v) => (v.preview ? 'Play its sample' : 'Say a sample sentence (uses your characters)')}
+      />
     </div>
   </Row>
 {/if}
@@ -353,107 +335,6 @@
   }
   .kstatus.good {
     color: var(--yap-fg-80, var(--yap-fg));
-  }
-  .vlist {
-    display: flex;
-    flex-direction: column;
-    max-height: 264px;
-    overflow-y: auto;
-    border: 1px solid var(--yap-border-subtle);
-    border-radius: var(--yap-r);
-    background: var(--yap-s1);
-  }
-  .vgroup {
-    position: sticky;
-    top: 0;
-    z-index: 1;
-    padding: 6px 12px 4px;
-    background: var(--yap-s1);
-    font-size: 10.5px;
-    font-weight: 650;
-    letter-spacing: 0.04em;
-    text-transform: uppercase;
-    color: var(--yap-muted-70, var(--yap-muted));
-  }
-  .vrow {
-    display: flex;
-    align-items: center;
-    gap: 4px;
-    padding-right: 6px;
-    border-top: 1px solid var(--yap-border-subtle);
-  }
-  .vgroup + .vrow {
-    border-top: none;
-  }
-  .vrow.sel {
-    background: var(--yap-raised-soft);
-  }
-  .vpick {
-    display: flex;
-    flex: 1;
-    align-items: baseline;
-    gap: 8px;
-    min-width: 0;
-    padding: 8px 12px;
-    border: none;
-    background: none;
-    font: inherit;
-    text-align: left;
-    color: var(--yap-fg);
-    cursor: pointer;
-  }
-  .vpick:focus-visible,
-  .vplay:focus-visible {
-    outline: none;
-    box-shadow: inset 0 0 0 2px var(--yap-focus-ring);
-  }
-  .dot {
-    flex: 0 0 auto;
-    width: 6px;
-    height: 6px;
-    border-radius: var(--yap-r-full);
-    background: var(--yap-raised);
-    transform: translateY(-1px);
-  }
-  .vrow.sel .dot {
-    background: var(--yap-ink);
-  }
-  .vname {
-    font-size: 12.5px;
-    font-weight: 600;
-    white-space: nowrap;
-  }
-  .vdesc {
-    overflow: hidden;
-    font-size: 11.5px;
-    color: var(--yap-muted);
-    white-space: nowrap;
-    text-overflow: ellipsis;
-  }
-  .vplay {
-    display: inline-flex;
-    flex: 0 0 auto;
-    align-items: center;
-    justify-content: center;
-    width: 28px;
-    height: 28px;
-    border: 1px solid transparent;
-    border-radius: var(--yap-r-full);
-    background: none;
-    color: var(--yap-muted);
-    cursor: pointer;
-  }
-  .vplay:hover {
-    border-color: var(--yap-border-hover);
-    color: var(--yap-fg);
-  }
-  .vplay.on {
-    color: var(--yap-link);
-    background: var(--yap-primary-wash);
-  }
-  .vplay svg {
-    width: 11px;
-    height: 11px;
   }
   .usage {
     display: flex;

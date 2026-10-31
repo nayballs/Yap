@@ -104,6 +104,17 @@ impl Row {
         }
     }
 
+    /// One cloud voice request's row ("Spoken replies"): its tokens priced
+    /// as a call's when the service said them, else its `chars` priced by
+    /// the character where the voice bills that way. Pure.
+    pub fn of_speech(provider: &str, model: &str, chars: u64, r: &Reported, day: &str) -> Row {
+        let mut row = Row::of_call(provider, model, false, Feature::Voice, r, day);
+        if row.cost_micros == 0 {
+            row.cost_micros = super::prices::char_cost_micros(provider, model, chars).unwrap_or(0);
+        }
+        row
+    }
+
     fn same_as(&self, o: &Row) -> bool {
         self.provider == o.provider && self.model == o.model && self.here == o.here && self.feature == o.feature
     }
@@ -229,6 +240,13 @@ fn lock() -> std::sync::MutexGuard<'static, State> {
 pub fn record(provider: &str, model: &str, here: bool, feature: Feature, r: &Reported) {
     let day = day_key(today());
     let row = Row::of_call(provider, model, here, feature, r, &day);
+    lock().pending.add(&day, &row);
+}
+
+/// One cloud voice request in (`usage::record_speech`).
+pub fn record_speech(provider: &str, model: &str, chars: u64, r: &Reported) {
+    let day = day_key(today());
+    let row = Row::of_speech(provider, model, chars, r, &day);
     lock().pending.add(&day, &row);
 }
 

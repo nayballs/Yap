@@ -25,7 +25,19 @@
   import { toast } from '../ui/toast.svelte.js';
   import { showSaveError } from '../notices/saveErrors.js';
   import { account } from '../stores/account.svelte.js';
-  import { PROVIDER_DESTINATIONS } from '../core/providers.js';
+  import { PROVIDER_DESTINATIONS, sharedKey } from '../core/providers.js';
+
+  // Where spoken replies' words go (voice/tts.rs `voicing`): ElevenLabs on
+  // its own key, or OpenAI, Gemini or Groq once Language Models has theirs;
+  // '' when the voice is made on this PC.
+  function voiceGoesTo() {
+    const p = cfg.ttsProvider;
+    if (p === 'elevenlabs') return (cfg.ttsCloudKeys ?? {}).elevenlabs ? 'ElevenLabs' : '';
+    if (!['openai', 'gemini', 'groq'].includes(p)) return '';
+    const chat = cfg.llmScopes?.chat;
+    const keyed = sharedKey(cfg, p) || (chat ? (chat.provider === p ? chat.apiKey : chat.apiKeys?.[p]) : '');
+    return keyed ? PROVIDER_DESTINATIONS[p] : '';
+  }
 
   let { cfg, goto = null, connections = $bindable(false) } = $props();
 
@@ -328,7 +340,7 @@
     },
     {
       what: 'Spoken replies',
-      where: cfg.ttsProvider === 'elevenlabs' ? 'The words Yap speaks go to ElevenLabs' : 'Made on this PC',
+      where: voiceGoesTo() ? `The words Yap speaks go to ${voiceGoesTo()}` : 'Made on this PC',
       page: 'voice#voice-provider',
     },
     {

@@ -256,6 +256,13 @@ fn chat_key(cfg: &YapConfig, provider: &str) -> String {
     cfg.provider_api_key(provider, &own)
 }
 
+/// The key Yap has for a cloud `provider` (Chat's own for it, else the one
+/// every scope shares): what its voices speak on (`tts/hosted.rs`). Empty
+/// when there's none — that provider isn't connected.
+pub fn provider_key(cfg: &YapConfig, provider: &str) -> String {
+    chat_key(cfg, provider).trim().to_string()
+}
+
 /// Cloud providers with a key, for the chip's switch.
 pub fn keyed_providers(cfg: &YapConfig) -> Vec<&'static str> {
     KEYED_PROVIDERS

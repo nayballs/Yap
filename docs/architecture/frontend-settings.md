@@ -52,7 +52,8 @@ store.
 Since 2026-10-24 `Settings.svelte` and every part only Settings uses sit in
 `src/lib/settings/` with the pages: `AboutYouSettings`, `AppearanceSettings`,
 `AccountSection`, `ConnectorsSection`, `McpSection`, `MemorySection`,
-`VoiceSettings`, `ElevenLabsSettings`, `WebSearchSettings`,
+`VoiceSettings`, `ElevenLabsSettings`, `HostedVoiceSettings`,
+`CloudVoiceList`, `WebSearchSettings`,
 `OpenAppsSettings`, `KokoroOffer` (+ `kokoro.svelte.js`), `AgentNameField`,
 the speech models' `ModelManager`, `ModelRow`, `SpeakerModels`,
 `SpeakersToggle` (+ `diarization.svelte.js`), and the Language Models tabs'
@@ -548,13 +549,24 @@ style neither).
   A sentence or two / About 30 seconds / About a minute / About 2 minutes /
   The whole answer; greyed out with Speak replies off), When to speak (`speakWhen`), Talk back hands-free
   (`talkBackHandsFree`). **Voice** (`VoiceSettings.svelte`): Speaks with (On
-  this PC / ElevenLabs → `ttsProvider`, `#settings-voice-provider`; with
-  ElevenLabs, its line and `ElevenLabsSettings.svelte`: the key, the voices
-  with ▶, the model, the month's characters), Engine (Kokoro / Windows voices
+  this PC / ElevenLabs, and OpenAI / Gemini / Groq once Language Models has
+  their key — this copy's keys, `sharedKey` or Chat's own, so a key just
+  pasted counts; a hint says so while none has one — → `ttsProvider`,
+  `#settings-voice-provider`; side by side up to three, a Select past
+  that; with a cloud voice, "The words Yap speaks are sent to …" and, for
+  ElevenLabs, `ElevenLabsSettings.svelte`: the key, the voices with ▶, the
+  model, the month's characters; for the others,
+  `HostedVoiceSettings.svelte`: which key it uses (masked), the voices
+  (`CloudVoiceList.svelte`, shared with ElevenLabs' list) each with ▶ —
+  "Say a sample sentence: a fraction of a penny on your OpenAI key" —, the
+  model, and what happens when it doesn't answer → `ttsCloud[provider]`),
+  Engine (Kokoro / Windows voices
   → `ttsEngine`), Kokoro's download row (`ModelRow`), Voice (Kokoro's 54 in
   accent × gender groups, or Windows' → `ttsVoice` / `ttsWindowsVoice`) with ▶
-  Preview, Speed (`ttsRate`) and Volume (`ttsVolume`, `tts_volume_set` live)
-  as inline sliders, and the credits behind a "Credits" disclosure. **Model**:
+  Preview, Speed (`ttsRate`; a cloud voice's limits said: ElevenLabs'
+  0.7–1.2×, Gemini's "near enough", Groq's one pace) and Volume (`ttsVolume`, `tts_volume_set` live)
+  as inline sliders, "Turn other apps down while Yap speaks"
+  (`duckOtherApps`, on; `voice/duck.rs`), and the credits behind a "Credits" disclosure. **Model**:
   a link row → Language Models → Chat & Voice Assistant.
   `yap-voice-replies` and `yap-voice-volume` (Chat's) are adopted.
 - **Memory** (`memory`, `MemorySection.svelte`, [memory.md](./memory.md#settings--memory)):

@@ -116,6 +116,8 @@ fn apply_config(app: &AppHandle, state: State<'_, AppState>, prev: &YapConfig, c
         crate::dictation::stt_speed::reload_if_needed(&app);
     }
     crate::voice::tts::set_volume(cfg.tts_volume);
+    // "Turn other apps down while Yap speaks" (voice/duck.rs).
+    crate::voice::duck::sync(&cfg);
     // Yap's sounds: the pack, the volume, each moment's switch (sound.rs).
     crate::dictation::sound::sync(&cfg);
     // The tray is reconciled on every save (always-on since the pill retired) —

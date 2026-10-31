@@ -536,7 +536,9 @@ static APP: OnceLock<tauri::AppHandle> = OnceLock::new();
 /// watcher unloads Kokoro once it's been idle for the speech model's unload
 /// time (10 minutes when that's "Never": it holds ~0.6 GB).
 pub fn init(app: &tauri::AppHandle) {
-    set_volume(crate::config::load().tts_volume);
+    let cfg = crate::config::load();
+    set_volume(cfg.tts_volume);
+    crate::voice::duck::sync(&cfg);
     let _ = APP.set(app.clone());
     let app = app.clone();
     let _ = SPEAKER.set(Speaker::new(
@@ -1406,6 +1408,49 @@ mod tests {
         let choice = elevenlabs::ElevenLabs::choice_fingerprint(KEY, "JBFqnCBsd6RMkjVDRZzb", "");
         assert!(cloud::with_health(|h| h.skipping(elevenlabs::ID, key, choice, Instant::now())));
         cloud::with_health(|h| h.worked(elevenlabs::ID, key));
+    }
+
+    #[test]
+    fn a_hosted_voice_streams_then_hands_over_to_the_local_voice_when_it_fails() {
+        use crate::voice::tts::hosted::Hosted;
+        let _one_at_a_time = serial();
+        let r = rig();
+        // OpenAI says the first sentence, then its quota's gone.
+        let events = {
+            use base64::Engine as _;
+            let b64 = base64::engine::general_purpose::STANDARD.encode(pcm_bytes(4_800));
+            format!("data: {{\"type\":\"speech.audio.delta\",\"audio\":\"{b64}\"}}\n\ndata: {{\"type\":\"speech.audio.done\",\"usage\":{{\"input_tokens\":5,\"output_tokens\":20,\"total_tokens\":25}}}}\n\n")
+        };
+        let s = stub(vec![
+            Reply::Body { content_type: "text/event-stream", body: events.into_bytes(), pieces: vec![100, 7] },
+            Reply::Error(429, r#"{"error":{"message":"You exceeded your current quota","type":"insufficient_quota","code":"insufficient_quota"}}"#.into()),
+        ]);
+        let local_said = Arc::new(Mutex::new(Vec::new()));
+        let told: Told = Arc::default();
+        let svc = crate::voice::tts::hosted::service("openai").unwrap();
+        let job = Job {
+            message_id: Some("a".into()),
+            sentences: vec!["First sentence works.".into(), "Then the quota is gone.".into(), "And one more.".into()],
+            engine: Arc::new(Hosted::new(svc, KEY, "", true).at(&s.base)),
+            voice: "cedar".into(),
+            rate: 1.0,
+            fallback: Some(fallback(&local_said, true, &told)),
+            track: None,
+            first: 0,
+            feed: None,
+        };
+        r.speaker.speak(job, sim_opener()).unwrap();
+        r.wait_quiet();
+        assert_eq!(s.requests.lock().unwrap().len(), 2);
+        assert_eq!(*local_said.lock().unwrap(), vec!["Then the quota is gone.", "And one more."]);
+        let told = told.lock().unwrap().clone();
+        assert_eq!(told.len(), 1);
+        assert_eq!(told[0].0, "OpenAI: quota used up");
+        // On record: the next answers skip OpenAI for a while.
+        let key = crate::voice::tts::cloud::stream::Key::new(KEY).fingerprint();
+        let choice = Hosted::choice_fingerprint(svc, KEY, "cedar", "");
+        assert!(cloud::with_health(|h| h.skipping("openai", key, choice, Instant::now())));
+        cloud::with_health(|h| h.worked("openai", key));
     }
 
     /// First audio — from `speak` to the first piece reaching the output —
