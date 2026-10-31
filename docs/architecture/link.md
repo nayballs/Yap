@@ -197,19 +197,40 @@ if it runs dry, the last 5 ms fade out, an underrun is counted, and it waits for
 Audio clip, resampled on its own: a click at every join, a hard gap when one
 was late — a crackle heard in Bluetooth headsets.)
 
-**"Clearer sound in a headset"** (the page's switch under Hands-free, off by
-default, kept in the phone's storage): while the page holds the mic, a classic
-Bluetooth headset stays in its call link (HFP/SCO: narrowband, with
-packet-loss artefacts that sound like crackles). With it on, the page lets the
-mic go as soon as the question is sent and, in any case, at `speak_start`, so
-the headset can play the answer over its music link (A2DP); the mic opens again
-on Talk, or, with hands-free on, once the answer has played out. A new mic's
-frames count only once its track is live and unmuted (at most 3 s), while the
-headset switches back. You can't talk over Yap by voice then; Stop still
-works. **Sound details** at the bottom of the page (the sample rate, the
-latencies, the last answer's start delay and buffer, its gaps, whether the mic
-was open while it played, the browser) tells a stream that ran dry on the
-phone from the headset's own crackle.
+**"Clearer sound in a headset"** (the page's switch under Hands-free, **on by
+default** since 31 Oct for anyone who hasn't chosen; a saved choice is kept in
+the phone's storage): while the page holds the mic, a classic Bluetooth
+headset stays in its call link (HFP/SCO: narrowband, with packet-loss
+artefacts that sound like crackles — heard in a real headset, and gone with
+this on). With it on, the page lets the mic go as soon as the question is sent
+and, in any case, at `speak_start`, so the headset can play the answer over
+its music link (A2DP); the mic opens again on Talk, or, with hands-free on,
+once the answer has played out. A new mic's frames count only once its track
+is live and unmuted (at most 3 s), while the headset switches back. The cost:
+you can't talk over Yap by voice (Talk while it speaks opens the mic afresh
+first); Stop still works. Off, the mic stays open through the answer and Talk
+while it speaks listens at once. **Sound details** at the bottom of the page
+(the sample rate, the latencies, the last answer's start delay and buffer, its
+gaps, whether the mic was open while it played, the step opening the mic is on
+or ended on and its time, the browser) tells a stream that ran dry on the
+phone from the headset's own crackle, and a stuck mic from a slow one.
+
+**Opening the mic never waits silently** (the page's `doOpenMic`; details in
+its README): every step has a time limit and a reason on screen when it runs
+out — the permission's state where the browser says (1 s), the recorder's and
+the player's AudioWorklet modules (loaded one at a time, never both
+`addModule`s at once on a context, a suspect in Firefox; 5 s each, then "The
+audio setup didn't finish…" and a fresh AudioContext on the next Talk),
+`getUserMedia` (after 6 s, or at once when the browser says it's blocked, how
+to allow the mic in the address bar, waiting on: a late answer still works,
+Talk tries afresh), the AudioContext starting (3 s once Talk is let go; asked
+again once the mic is open, which Firefox allows a recording page), and sound
+from the mic (3 s, then on anyway). Cancel works at any step and gives Talk
+back; a mic a given-up opening gets later is stopped at once. A tap is told
+from a hold by the release's own time stamp, counted from when the press was
+handled (Firefox's new AudioContext can keep the press busy 0.1–0.4 s), so a
+busy page doesn't turn a tap into a too-short hold. (31 Oct: a phone on Firefox once sat on "Opening the
+microphone… / Wait…" with nothing said.)
 
 **Hands-free** ends a question after the person's chosen wait — **Short (1 s) ·
 Normal (1.5 s, the default) · Long (2.5 s)** — of quiet (`dsp.js`
@@ -286,5 +307,9 @@ on the PC while the answer comes stops the voice, as it stops the PC's.
   sound maths in Node (the resampler both ways, the jitter buffer, the voice
   detector), then the page in a headless Chromium — among the rest, the answer's
   stream (starting at ~250 ms, a late frame faded and counted, Stop's fade),
-  Clearer sound releasing and reopening the mic, the hands-free wait, Sound
-  details.
+  Clearer sound (on by default, a saved choice kept, releasing and reopening
+  the mic, talking over Yap with it off and on), opening the mic's time limits
+  (a permission nobody answers, answered late, blocked; a module that never
+  loads; the sound never starting; Cancel at any step; `mic-open.spec.js`), the
+  hands-free wait, Sound details — and the same specs (bar hands-free and the
+  screenshots) in Playwright's own Firefox when it's installed.

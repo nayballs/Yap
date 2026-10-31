@@ -260,6 +260,58 @@ test.describe('talking', () => {
     expect((await snapshot(page)).local).toBe('idle');
   });
 
+  test('a tap stays a tap when the page is busy as it is let go', async ({ page }) => {
+    const pc = await mockPc(page);
+    await open(page);
+    await ready(page, pc);
+    // A finger down, lifted 50 ms later (the release stamped then), the page
+    // busy for 0.7 s before it handles that release. (Playwright's own input
+    // is only stamped once the page is free, so the touch is made here.)
+    await page.evaluate(async () => {
+      const b = document.querySelector('[data-testid=talk]');
+      const touch = { bubbles: true, cancelable: true, button: 0, pointerId: 7, pointerType: 'touch', isPrimary: true };
+      b.dispatchEvent(new PointerEvent('pointerdown', touch));
+      await new Promise((r) => setTimeout(r, 50));
+      const up = new PointerEvent('pointerup', touch);
+      const t = performance.now();
+      while (performance.now() - t < 700);
+      b.dispatchEvent(up);
+    });
+    // By when it happened, a tap: Yap listens until the next tap.
+    await expect(page.getByTestId('phase')).toHaveText('Listening');
+    await page.waitForTimeout(400);
+    expect(pc.of('stop')).toHaveLength(0);
+    await expect(page.getByTestId('note')).toBeHidden();
+    await page.getByTestId('talk').click();
+    await expect.poll(() => pc.of('stop').length).toBe(1);
+  });
+
+  test('a tap stays a tap when setting the sound up keeps the press busy (as Firefox can)', async ({ page }) => {
+    await page.addInitScript(() => {
+      // A new AudioContext that takes half a second, as Firefox's can.
+      const Real = window.AudioContext;
+      window.AudioContext = class extends Real {
+        constructor(o) {
+          const t = performance.now();
+          while (performance.now() - t < 500);
+          super(o);
+        }
+      };
+    });
+    const pc = await mockPc(page);
+    await open(page);
+    await ready(page, pc);
+    // (Chromium stamps the release when it's sent, Firefox once the page is
+    // free: either way, a tap.)
+    await page.getByTestId('talk').click();
+    await expect(page.getByTestId('phase')).toHaveText('Listening');
+    await page.waitForTimeout(400);
+    expect(pc.of('stop')).toHaveLength(0);
+    await expect(page.getByTestId('note')).toBeHidden();
+    await page.getByTestId('talk').click();
+    await expect.poll(() => pc.of('stop').length).toBe(1);
+  });
+
   test('what was heard, the step with its time, and the answer as it streams', async ({ page }) => {
     const pc = await mockPc(page);
     await open(page);
