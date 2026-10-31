@@ -405,8 +405,7 @@ pub async fn meeting_skill(
         return Err(format!("/{} runs across your meetings: use it in Chat.", skill.command));
     }
     let words = words.unwrap_or_default();
-    let request = format!("{} {}", skill.instructions, words);
-    let Some(cited) = summary::chips::skill_input(&note, &request) else {
+    let Some(cited) = skill_input_for(&skill, &note, &words) else {
         return Ok(Assist {
             answer: format!("There's nothing in this meeting yet for /{} to work on.", skill.command),
             plain: false,
@@ -420,12 +419,26 @@ pub async fn meeting_skill(
     let opts = ep.options(summary::chips::SKILL_REPLY_TOKENS, 0.3);
     let messages = crate::memory::with_helper_block(skill_messages(&skill, &cited.text, &words), &cfg);
     let (reply, stopped) = streamed_answer(&app, &ep, messages, &opts, &on_stream, turn_id.as_deref(), false).await?;
+    let reply = crate::chat::skills::tidy_answer(&skill, &reply);
     let (answer, sources) = summary::chips::checked(&reply, &cited.passages, !stopped);
     if answer.is_empty() {
         return Err("The model returned an empty answer".to_string());
     }
     tracing::info!(note_id, builtin = skill.builtin, passages = cited.passages.len(), cited = sources.len(), "Skill run on a meeting");
     Ok(Assist { answer, plain: false, too_little: false, stopped, sources })
+}
+
+/// What a Skill on one meeting reads of it: the meeting as numbered passages
+/// (`chips::skill_input`, the transcript's picked by the Skill's
+/// instructions and the person's `words`), and what the Skill's own aid adds
+/// after them (`skills::meeting_aid`: /open-questions' questions asked, in
+/// order). `None`: nothing in the meeting yet.
+pub fn skill_input_for(skill: &crate::chat::skills::Skill, note: &crate::notes::Note, words: &str) -> Option<summary::chips::Cited> {
+    let mut cited = summary::chips::skill_input(note, &format!("{} {}", skill.instructions, words))?;
+    if let Some(aid) = crate::chat::skills::meeting_aid(skill, note) {
+        cited.text = format!("{}\n\n{aid}", cited.text.trim_end());
+    }
+    Some(cited)
 }
 
 /// A Skill's request on one meeting: the fixed guardrails as the system

@@ -51,6 +51,19 @@ export function asked(skill, words = '') {
   return `/${skill.command}${words ? ` ${words}` : ''}`;
 }
 
+/**
+ * A Skill that needs words to run on (/project-update: which project; its
+ * `asks`): picked from the `/` menu, it goes in the box for them.
+ */
+export function needsWords(skill) {
+  return !!skill?.asks;
+}
+
+/** A built-in that writes a document when it runs in Chat (/tickets, /prd). */
+export function writesDocument(skill) {
+  return !!skill?.document;
+}
+
 /** The one-tap prompts (Chat, Ask across meetings): the built-ins with a chip. */
 export function promptChips(skills) {
   return (skills || []).filter((s) => s.builtin && s.chip && s.question);

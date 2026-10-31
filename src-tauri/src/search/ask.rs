@@ -92,6 +92,10 @@ pub struct Passage {
     pub score: f32,
     pub keyword: f32,
     pub similarity: Option<f32>,
+    /// A meeting on the calendar (a Skill's /prep: the one coming up), its
+    /// event key: its pill opens the meeting's note, or makes one from the
+    /// invite (`chats::Source::event`). `note` 0 when it has no note yet.
+    pub event: Option<String>,
 }
 
 /// What a search found.
@@ -106,6 +110,9 @@ pub struct Found {
     pub semantic: bool,
     /// The latest meetings, one line each (newest first).
     pub recent: Vec<String>,
+    /// What the passages are, in a line for the model (a Skill's gathering:
+    /// "The meeting to prepare for is …"), before them.
+    pub about: Option<String>,
 }
 
 fn when<Tz: TimeZone>(tz: &Tz, ts: u64) -> String
@@ -266,6 +273,7 @@ where
             score: r.score,
             keyword: r.keyword,
             similarity: r.similarity,
+            event: None,
         });
     }
     found
@@ -324,6 +332,10 @@ pub fn context(found: &Found) -> String {
     } else if let Some(r) = &found.range {
         out.push_str(&format!("The question is about {}: the passages are from then.\n\n", r.label));
     }
+    if let Some(a) = found.about.as_deref().map(str::trim).filter(|a| !a.is_empty()) {
+        out.push_str(a);
+        out.push_str("\n\n");
+    }
     if found.passages.is_empty() {
         out.push_str("No passage from their meetings or notes matches the question");
         if let Some(r) = &found.range {
@@ -335,6 +347,7 @@ pub fn context(found: &Found) -> String {
     out.push_str("Passages from their meetings and notes that may answer it (cite them by number):\n");
     for p in &found.passages {
         let from = match p.field {
+            _ if p.event.is_some() => "the calendar",
             Field::Transcript => "transcript",
             Field::Content => "their notes",
             Field::Summary => "the summary",
@@ -353,6 +366,13 @@ pub fn context(found: &Found) -> String {
     out.trim_end().to_string()
 }
 
+/// Each passage's meeting by name, for a document written from them (a
+/// note has no Sources row: `documents::name_citations`): "Supplier call,
+/// Tue 27 Oct". Pure.
+pub fn labels(found: &Found) -> Vec<(usize, String)> {
+    found.passages.iter().map(|p| (p.n, format!("{}, {}", p.title.trim(), short_when(&p.when)))).collect()
+}
+
 /// A short date for a source's line: "Sun 25 Oct".
 fn short_when(when: &str) -> String {
     // "Sun 25 Oct 2026, 10:12" → "Sun 25 Oct"
@@ -366,6 +386,24 @@ pub fn sources(found: &Found) -> Vec<Source> {
         .passages
         .iter()
         .map(|p| {
+            let quote: String = p.text.chars().take(280).collect();
+            let quote = if p.text.chars().count() > 280 { format!("{quote}…") } else { quote };
+            // A meeting on the calendar: its pill opens its note, or makes
+            // one from the invite (as Chat's calendar tool's do).
+            if let Some(key) = &p.event {
+                return Source {
+                    n: p.n,
+                    title: p.title.clone(),
+                    url: String::new(),
+                    site: p.when.clone(),
+                    note: (p.note != 0).then_some(p.note),
+                    field: "calendar".into(),
+                    ts: p.ts,
+                    quote,
+                    event: Some(key.clone()),
+                    ..Default::default()
+                };
+            }
             let mut site = short_when(&p.when);
             if let Some(a) = &p.at {
                 site.push_str(&format!(" · {a}"));
@@ -377,7 +415,6 @@ pub fn sources(found: &Found) -> Vec<Source> {
             } else {
                 site.push_str(" · notes");
             }
-            let quote: String = p.text.chars().take(280).collect();
             Source {
                 n: p.n,
                 title: p.title.clone(),
@@ -387,7 +424,7 @@ pub fn sources(found: &Found) -> Vec<Source> {
                 field: p.field.as_str().to_string(),
                 line: Some(p.line),
                 ts: p.ts,
-                quote: if p.text.chars().count() > 280 { format!("{quote}…") } else { quote },
+                quote,
                 ..Default::default()
             }
         })
@@ -713,6 +750,15 @@ mod tests {
         // Nothing found within the dates: said so.
         let none = search("the tulips yesterday", Mode::Hybrid);
         assert!(context(&none).ends_with("No passage from their meetings or notes matches the question (yesterday (Sat 24 Oct 2026))."), "{}", context(&none));
+        // A Skill's gathering says what its passages are, before them; a
+        // meeting on the calendar is from the calendar, and named as a
+        // document names it.
+        let mut skill = Found { passages: f.passages.clone(), about: Some("The passages are the decisions recorded in each of their meetings then.".into()), ..Default::default() };
+        skill.passages[0].event = Some("cal:1".into());
+        let c = context(&skill);
+        assert!(c.starts_with("The passages are the decisions recorded in each of their meetings then.\n\nPassages from their meetings"), "{c}");
+        assert!(c.contains("from=\"the calendar\""), "{c}");
+        assert_eq!(labels(&skill)[0], (1, "Launch review, Thu 22 Oct".to_string()));
     }
 
     #[test]
