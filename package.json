@@ -16,7 +16,8 @@
     "eval": "node scripts/eval.mjs",
     "hooks:install": "node scripts/install-hooks.mjs",
     "privacy:scan": "node scripts/privacy-guard.mjs --scan-tree",
-    "test:privacy": "node --test scripts/privacy-guard.test.mjs"
+    "test:privacy": "node --test scripts/privacy-guard.test.mjs",
+    "test:launcher": "node --test scripts/dev-launcher.test.mjs"
   },
   "dependencies": {
     "@fontsource-variable/eb-garamond": "^5.2.7",

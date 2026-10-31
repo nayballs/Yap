@@ -367,6 +367,8 @@ GPU policy: **universal, no CUDA** (Whisper → Vulkan, ONNX → DirectML); buil
 **Dev:** `scripts/dev.bat` (= `npm run tauri dev -- --features engines`, Vite on
 **:51437**, hot-reloads `src/`) behind the **"Yap - Dev"** desktop shortcut; the plain
 **"Yap"** shortcut is the *installed* app (nightly channel).
+It runs behind an animated launcher screen (`scripts/dev-launcher.mjs`: stages, a real build
+bar, L for the raw log, a log file; `YAP_DEV_PLAIN=1` for the old output; build-and-test.md).
 dev.bat first fast-forwards the checkout to `origin/main` (`scripts/dev-update.ps1`)
 and stops AI apps' `yap.exe mcp` helpers running from its exe.
 So merged work reaches the maintainer's dev build by pushing to main; never

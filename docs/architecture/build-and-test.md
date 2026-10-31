@@ -24,8 +24,9 @@ CUDA arch list. One small installer, GPU on every GPU.
 
 ### Run in dev (what we use)
 Use **`scripts/dev.bat`** ("yap.dev") — it runs `npm run tauri dev -- --features engines`
-(the **real** GPU pipeline; needs the Vulkan SDK installed). A commented line switches to the
-fast no-GPU stub for pure UI work. Dev hot-reloads the frontend on every edit (Vite on **:51437**).
+(the **real** GPU pipeline; needs the Vulkan SDK installed), or the fast no-GPU stub by itself
+when `VULKAN_SDK` isn't set. Dev hot-reloads the frontend on every edit (Vite on **:51437**).
+It runs behind the launcher's animated screen (below).
 A **"Yap - Dev"** desktop shortcut launches it; the plain **"Yap"** desktop shortcut is the
 *installed* app (it follows the nightly channel).
 **It always runs the latest main** (2026-10-17): before starting, dev.bat runs
@@ -40,6 +41,56 @@ It then stops any AI app's `yap.exe mcp` helper running from the dev build's own
 denied" (see `integrations/mcp_clients.rs`).
 So merged work reaches the maintainer's dev build by pushing to main; never fast-forward
 that checkout by hand while Yap - Dev runs.
+
+#### The launcher screen (`scripts/dev-launcher.mjs`, 2026-10-31)
+dev.bat runs both its steps through a Node launcher (plain Node, no dependencies) that
+replaces the wall of log lines with one animated screen, so a two-minute link never looks
+hung: the Yap mark in half blocks with 24-bit colour (the mouth yaps and the three arcs
+appear one after another while it works; calm when running, mouth shut on an error), the
+"Yap · dev" wordmark, the commit it runs and a waveform like the Yap bar's. Then the stages:
+- **Updating from GitHub**: dev-update.ps1's result (up to date / N new commits with their
+  titles / not updated and why, npm install). dev.bat's first pass runs the script with
+  `--update`, leaves the screen up and writes the result to `last-update.json`; the second
+  pass (after the re-exec) reads it back, matched by `YAP_DEV_RUN`. Without Node the first
+  pass runs dev-update.ps1 bare, as before.
+- **Starting Vite** → **Compiling Rust** with a real bar: cargo's own `Building [...] N/M`
+  (`CARGO_TERM_PROGRESS_WHEN=always`, which the Tauri CLI also sets) for the dependencies;
+  yap's own crate and the link of `yap.exe` (they sit at M-2/M and M-1/M for a minute or
+  more) move by time against the last build here, "Linking yap.exe · 0:35 of ~1:20". The
+  timings live in `timings.json`, per stub / engines build. → **Launching** → **Running**:
+  uptime, hot reloads (Vite's `hmr update`) and Rust rebuilds with their files, the app log's
+  warning and error counts. A Rust edit ("File … changed. Rebuilding application…") goes
+  back to the bar.
+- **Errors** (`error[E…]`, `could not compile`, a panic while building, npm / Tauri errors,
+  Vite's port taken, `yap.exe` locked with "Access is denied") stop the animation and show
+  the error lines in red with a hint; a rebuild clears them.
+
+Keys: **L** flips to the raw log (Up/Down, PgUp/PgDn, End), **O** opens the log file in
+Notepad, **Ctrl+C** stops Yap: `taskkill /T /F` of the whole tree, so `yap.exe` and Vite never
+linger (closing the window does the same). When the summary is printed the screen is put
+back, and dev.bat's "Press any key" follows. Every run's output (escape codes and progress
+redraws taken out, the update's output at the top, the launcher's own milestones marked
+`[launcher …]`) goes to `%LOCALAPPDATA%\com.yap.dictation\dev-launcher\logs\dev-<date>.log`,
+the newest 20 kept; `timings.json` and `last-update.json` sit beside `logs\`.
+
+**As administrator** ("Run as administrator", `whoami /groups` showing the High
+Mandatory Level) the screen shows a yellow notice: Windows (UIPI) then refuses drags from
+Explorer into Yap, and an elevated Yap pastes into elevated apps a normal install can't, which
+hides bugs. **R** stops the tree and starts dev.bat again through `explorer.exe`, which runs
+it as the signed-in user; the launcher exits with 75 and dev.bat closes the elevated window.
+`YAP_DEV_ALLOW_ADMIN=1` hides the notice.
+
+**`YAP_DEV_PLAIN=1`** (or output that isn't a console) passes everything straight through,
+as before the launcher; a bug in the screen itself falls back to the raw output without
+stopping Yap. Glyphs stay within WGL4 (half blocks, shades, `● ○ ■`, box lines) so conhost's
+Consolas draws them as well as Windows Terminal; Node writes UTF-16 to the console, so no
+code page change is needed. Testing it without running dev.bat: `npm run test:launcher`
+(`node --test`: the parsing, the stages, a Ctrl+C taking a child tree down);
+`--replay <recording.jsonl> [--speed N]` plays recorded output back with its timing
+(`--record <file>` saves one from a real run); `--headless 120x30` with
+`YAP_DEV_FRAMES=<dir>` writes each screen as plain text with no console; `--pretend-admin`
+shows the notice. `YAP_DEV_LAUNCHER_HOME` moves the logs and timings (replays default to
+the temp folder).
 
 ```bash
 # real GPU pipeline (default in dev.bat) — requires the Vulkan SDK

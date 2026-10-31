@@ -13,9 +13,13 @@ REM first (dev-update.ps1 says why when it skips: another branch, local
 REM edits, offline). The update can rewrite THIS file, and cmd reads a batch
 REM file line by line as it runs, so this block (parsed whole before it runs)
 REM starts the updated copy afresh instead of reading on in a changed file.
+REM The update shows on the launcher's screen (dev-launcher.mjs --update), which
+REM hands its result to the second pass by YAP_DEV_RUN; if Node can't run it,
+REM dev-update.ps1 runs bare as before.
 if not defined YAP_DEV_UPDATED (
   set YAP_DEV_UPDATED=1
-  powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0dev-update.ps1"
+  set YAP_DEV_RUN=%RANDOM%%RANDOM%
+  node "%~dp0dev-launcher.mjs" --update -- powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0dev-update.ps1" || powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0dev-update.ps1"
   "%~f0"
 )
 
@@ -41,6 +45,14 @@ echo   (Close this window to stop Yap.)
 echo ============================================================
 echo.
 
+REM tauri dev runs behind the launcher's screen (scripts/dev-launcher.mjs): the
+REM Yap mark, each stage, a real build bar, L for the raw log, build errors in
+REM red, a warning when this window runs as administrator (R restarts it
+REM without), and the whole output in a log file under
+REM %LOCALAPPDATA%\com.yap.dictation\dev-launcher\logs. Ctrl+C or closing the
+REM window stops Yap and every helper. YAP_DEV_PLAIN=1 passes the output
+REM straight through instead, as before the launcher.
+REM
 REM Runs the REAL multi-engine pipeline: Whisper on VULKAN (any GPU) + ONNX
 REM models on DirectML. Needs the Vulkan SDK installed (https://vulkan.lunarg.com)
 REM so the whisper-vulkan backend can build. The FIRST build is slow (compiles
@@ -49,15 +61,17 @@ REM Without the SDK the engines build panics ("Please install Vulkan SDK"), so
 REM fall back to the STUB automatically: UI + hot reload all work, transcription
 REM returns placeholder text.
 if defined VULKAN_SDK (
-  call npm run tauri dev -- --features engines
+  node "%~dp0dev-launcher.mjs" --bat "%~f0" -- npm run tauri dev -- --features engines
 ) else (
   echo   NOTE: Vulkan SDK not found ^(VULKAN_SDK is not set^) - running the
   echo   STUB build instead: full UI + hot reload, but NO real transcription.
   echo   For the real GPU pipeline install the SDK: winget install LunarG.VulkanSDK
   echo   ^(then reopen this window so the new environment is picked up^).
   echo.
-  call npm run tauri dev
+  node "%~dp0dev-launcher.mjs" --bat "%~f0" --stub -- npm run tauri dev
 )
+REM 75: R restarted Yap - Dev without administrator rights in a new window.
+if "%ERRORLEVEL%"=="75" exit /b 0
 
 echo.
 echo Yap Dev stopped. Press any key to close this window.
