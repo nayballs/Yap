@@ -5,7 +5,9 @@
   // name (AgentNameField.svelte), Rewrite selected text (the rewrite
   // shortcut; pasting/as_said.rs; a question about the selection answered
   // instead, dictation/ask_or_edit.rs, and Ask about the selection's own
-  // shortcut, chat/assistant/selected.rs), Transforms (TransformsSettings.svelte),
+  // shortcut, chat/assistant/selected.rs), Replies to what's on screen (a
+  // Command reading the window in front, dictation/command_screen.rs),
+  // Transforms (TransformsSettings.svelte),
   // Writing samples (WritingSamples.svelte) and a link to its model and
   // prompt in Language Models.
   //
@@ -67,6 +69,33 @@
       label="Rewrite your last dictation when nothing is selected"
       desc="Within a minute, in the same field"
       hint="Only while it's exactly as Yap typed it, with the cursor right after it; otherwise Yap says so and changes nothing."
+    />
+  </Row>
+</Group>
+<!-- A Command that replies to what's on screen reads the window in front
+     (dictation/command_screen.rs; Wispr Flow's Instruct Mode, on this PC):
+     its text, the box being written in left out. A model on this PC by
+     default; the cloud only when allowed (asked once). -->
+<Group
+  title="Replies to what's on screen"
+  desc="Ask for a reply and Yap drafts it from the email or chat in front of you, then types it where your cursor is."
+  id="settings-commands-screen"
+>
+  <Row setting="commands-screen">
+    <Toggle
+      bind:checked={cfg.commandsScreen}
+      label="Let Commands read the window in front when you ask for a reply"
+      desc={`Say "Hey ${wakeName}, reply saying Thursday works" or "answer her question", or use the rewrite shortcut with nothing selected`}
+      hint="Only when what you say replies to what's on screen. Yap reads the window's text, never the box you're typing in, never its own windows or a terminal, and keeps none of it. An app that shows Yap no text is sent as a screenshot to a model that reads pictures."
+    />
+  </Row>
+  <Row setting="commands-screen-cloud">
+    <Toggle
+      bind:checked={cfg.commandsScreenCloud}
+      label="With cloud models too"
+      desc="Off, the window's text only goes to a model on this PC. On, it goes to the cloud provider the Commands model runs on too"
+      hint="Network connections in Privacy & data lists each one as “Commands + the window's text”."
+      disabled={!cfg.commandsScreen}
     />
   </Row>
 </Group>

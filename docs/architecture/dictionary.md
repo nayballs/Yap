@@ -243,6 +243,18 @@ The correction dictionary: near-miss (fuzzy) matching, several ways one word is 
   (debug) stands in. Unit tests: `code.rs` (parts, extraction, spoken
   forms, the focus, bounds), `screen_terms.rs`
   (`an_editors_code_names_said_aloud`).
+  **A Command's look at the window** (`read_for_command`, 2026-10-31,
+  `dictation/command_screen.rs`, [dictation.md](./dictation.md)): the same
+  reader and refusals (the window's own process, never Yap's own, a
+  password box or a password manager; robot mode only the test's windows),
+  within 1.5 s, but the text rather than its terms, and **the box being
+  written in left out**: the focused document's text before and after the
+  focused box (`beside_the_box`: `RangeFromChild` of the box, its ends
+  moved 6,000 characters out — the thread above a chat's box, the mail an
+  inline reply sits under), or, the box the whole document (a reply in a
+  mail app), only a message quoted below the cursor (`below_the_cursor` +
+  `command_screen::quoted_part`); then the walk with `skip_focused` (the
+  focused box neither read nor named). Logged as counts (`debug`).
 - **`dictionary/dict_usage.rs`** — how much each dictionary word is used, for the Whisper
   prompt's order (Wispr Flow ranks its vocabulary the same way):
   `<data>/dictionary_usage.json`, word (lowercased `to`) → `{uses, lastUsed}`

@@ -39,7 +39,17 @@
   questions about the selected text", Settings → Commands — the rewrite
   shortcut's question about a selection answered instead of replacing it,
   `dictation/ask_or_edit.rs`; off, it rewrites as before; an older Yap
-  drops it: on again), more_hotkeys (`moreHotkeys`, 2026-10-25: **more
+  drops it: on again), commands_screen (`commandsScreen`, on, 2026-10-31:
+  "Let Commands read the window in front when you ask for a reply",
+  Settings → Commands → Replies to what's on screen,
+  `dictation/command_screen.rs`) + commands_screen_cloud
+  (`commandsScreenCloud`, "With cloud models too", off) +
+  commands_screen_asked (`commandsScreenAsked`, the one ask about the cloud
+  shown, false; set from Rust by the ask, the cloud one by its Allow, read
+  from the file by the next Command) — new fields only: an older Yap drops
+  them on its save, so the first comes back on (an older Yap never reads
+  the window for a Command), the cloud one off and the ask may come once
+  more — no `migrate_once` step, more_hotkeys (`moreHotkeys`, 2026-10-25: **more
   shortcuts for one action**, Settings → Shortcuts' "+ Add another" — a map
   from an action's first shortcut's field ("hotkey", "editHotkey",
   "meetingHotkey", "assistantHotkey", "readHotkey", "asSaidHotkey",

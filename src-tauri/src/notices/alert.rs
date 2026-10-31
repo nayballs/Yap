@@ -49,6 +49,11 @@ const SOUND_SETTINGS_URI: &str = "ms-settings:sound";
 /// model too (`chat/assistant/screen.rs`, asked once).
 pub const ALLOW_SCREEN_CLOUD: &str = "assistantScreenCloud";
 
+/// **Allow**: Commands may send the window in front to a cloud model too,
+/// and the Command that asked is written now (`dictation/command_screen.rs`,
+/// asked once).
+pub const ALLOW_COMMANDS_SCREEN_CLOUD: &str = "commandsScreenCloud";
+
 /// An alert's one button.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub struct Action {
@@ -74,12 +79,14 @@ pub struct Alert {
     /// limit) | "aiModelFailed" (`local_llm/on_demand.rs`: the on-device AI
     /// model didn't start, a dictation went as said) | "assistantScreen"
     /// (`chat/assistant/screen.rs`: the window in front wasn't sent to a
-    /// cloud model, asked once) | "lastTranscript" (`last.rs`: "Copied your last dictation",
+    /// cloud model, asked once) | "commandsScreen"
+    /// (`dictation/command_screen.rs`: a Command needs the window in front
+    /// and its model is a cloud one, asked once) | "lastTranscript" (`last.rs`: "Copied your last dictation",
     /// shown with [`confirm`]):
     /// the bar card's id, the Windows notification's tag (a newer one
     /// replaces it) and its rule in `notice.rs`.
     pub kind: &'static str,
-    /// The chip's glyph: "clipboard" | "mic" | "call" | "assistant" |
+    /// The chip's glyph: "clipboard" | "mic" | "call" | "assistant" | "commands" |
     /// "settings" | "save".
     pub icon: &'static str,
     pub title: String,
@@ -246,6 +253,7 @@ pub fn act(app: &AppHandle, action: &str) {
         SHOW_OLD_SETTINGS => crate::config::show_old_file(app),
         SHOW_SNIP => crate::snip::copy_save::show_saved(app),
         ALLOW_SCREEN_CLOUD => crate::chat::assistant::screen::allow_cloud(),
+        ALLOW_COMMANDS_SCREEN_CLOUD => crate::dictation::command_screen::allow_cloud(app),
         crate::shell::saving::RETRY => crate::shell::saving::retry_soon(app),
         "" => {}
         other => tracing::debug!("alert: no such action {other}"),

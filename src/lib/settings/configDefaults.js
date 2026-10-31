@@ -189,6 +189,11 @@ export const FIELD_DEFAULTS = {
   // A question said about the selection is answered, not pasted over it
   // (dictation/ask_or_edit.rs).
   askAboutSelection: true,
+  // A Command that replies to what's on screen reads the window in front
+  // (dictation/command_screen.rs): on for a model on this PC, off for the cloud.
+  commandsScreen: true,
+  commandsScreenCloud: false,
+  commandsScreenAsked: false,
   assistantHotkey: '',
   readHotkey: '',
   assistantAnswerCard: true,

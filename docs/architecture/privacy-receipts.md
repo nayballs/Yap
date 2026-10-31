@@ -67,7 +67,12 @@ person sees what their choices send where. It never says "nothing leaves".
   selected text · …" when a question was about text selected in another app
   (`Feature::AssistantSelection`, `chat/assistant/selected.rs`, 2026-10-31;
   the rewrite shortcut's "edit or question?" request to the Commands model
-  is "Commands · …"),
+  is "Commands · …"), "Commands + the window's text · …" when a Command
+  drafted from the window in front ("reply saying Thursday works":
+  `Feature::commands_screen(samples, picture)`, `dictation/command_screen.rs`,
+  2026-10-31 — "… + your writing samples" when they went too, "Commands +
+  the window in front · …" when it was a screenshot instead; its "does it
+  need the screen?" yes/no carries only the words, "Commands · …"),
   "Notes · …" (Enhance, a note's Ask), "Meeting notes · …"
   (meetings/meeting_summary.rs), "Meeting brief · …" (calendar/brief.rs, around the
   meeting helpers), "Memory · …" (memory/learn.rs); unscoped: "AI model · …".

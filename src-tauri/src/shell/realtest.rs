@@ -667,6 +667,23 @@ pub mod commands {
         robot.rewrite_text(text, pause_ms).await
     }
 
+    /// **A Command by name** with `text` as what was heard, in the window in
+    /// front (`hwnd`, when given, must be it): the window read over UI
+    /// Automation when its words reply to what's on screen (the box being
+    /// written in left out), the AI, the draft typed where the cursor is.
+    /// Returns what it did; `Err` when it isn't a Command.
+    #[tauri::command]
+    pub async fn realtest_command_text(
+        state: State<'_, AppState>,
+        text: String,
+        hwnd: Option<i64>,
+    ) -> Result<crate::dictation::pipeline::Rewritten, String> {
+        only_robot()?;
+        in_front(hwnd)?;
+        let robot = robot_of(&state)?;
+        robot.command_text(text).await
+    }
+
     /// **Ask about the selection**'s shortcut with `text` as the question,
     /// in the window in front (`hwnd`, when given, must be it): its
     /// selection read as Read aloud reads it (UI Automation, read-only text

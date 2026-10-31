@@ -74,6 +74,17 @@ pub enum Feature {
     Commands,
     /// A rewrite or a transform that carried the writing samples.
     CommandsSamples,
+    /// A Command that carried the window in front's text
+    /// (`dictation/command_screen.rs`): its own label, so the list shows
+    /// when the screen went…
+    CommandsScreen,
+    /// …with the writing samples too.
+    CommandsScreenSamples,
+    /// A Command that carried a screenshot of the window in front (next to
+    /// no text read, a model that reads images).
+    CommandsWindow,
+    /// …with the writing samples too.
+    CommandsWindowSamples,
     Chat,
     Assistant,
     /// A Voice Assistant question that took the window in front with it
@@ -113,10 +124,26 @@ impl Feature {
         }
     }
 
+    /// A Command that carried the window in front: its text, or
+    /// (`picture`) a screenshot of it; with or without the writing samples.
+    pub fn commands_screen(samples: bool, picture: bool) -> Feature {
+        match (picture, samples) {
+            (false, false) => Feature::CommandsScreen,
+            (false, true) => Feature::CommandsScreenSamples,
+            (true, false) => Feature::CommandsWindow,
+            (true, true) => Feature::CommandsWindowSamples,
+        }
+    }
+
     fn name(self) -> &'static str {
         match self {
             Feature::Dictation | Feature::DictationContext | Feature::DictationSamples => "Dictation",
-            Feature::Commands | Feature::CommandsSamples => "Commands",
+            Feature::Commands
+            | Feature::CommandsSamples
+            | Feature::CommandsScreen
+            | Feature::CommandsScreenSamples
+            | Feature::CommandsWindow
+            | Feature::CommandsWindowSamples => "Commands",
             Feature::Chat => "Chat",
             Feature::Assistant | Feature::AssistantScreen | Feature::AssistantPhone | Feature::AssistantSelection => "Voice Assistant",
             Feature::Notes => "Notes",
@@ -133,6 +160,10 @@ impl Feature {
             Feature::DictationSamples => "Transform + your writing samples",
             Feature::Commands => "Commands",
             Feature::CommandsSamples => "Commands + your writing samples",
+            Feature::CommandsScreen => "Commands + the window's text",
+            Feature::CommandsScreenSamples => "Commands + the window's text + your writing samples",
+            Feature::CommandsWindow => "Commands + the window in front",
+            Feature::CommandsWindowSamples => "Commands + the window in front + your writing samples",
             Feature::Chat => "Chat",
             Feature::Assistant => "Voice Assistant",
             Feature::AssistantScreen => "Voice Assistant + the window in front",

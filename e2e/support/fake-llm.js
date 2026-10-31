@@ -406,6 +406,14 @@ const SCREEN_QUESTION = 'You decide whether a question someone asked a voice ass
 // PROMPT): `{"action": "answer"}` unless a spec says otherwise
 // (`reply('askOrEdit', fn)`). Never takes a scripted chat step.
 const ASK_OR_EDIT = 'You decide what someone wants done with text they selected';
+// Does a Command need the window in front? (src-tauri/src/dictation/
+// command_screen.rs ASK_PROMPT, for a pronoun with nothing saying what:
+// "tell her Thursday works"): "no" unless a spec says otherwise
+// (`reply('commandScreen', fn)`). Never takes a scripted chat step. (A
+// Command's draft from the window is a 'rewrite': its system prompt starts
+// as the rewrite's, with "This instruction is about the window in front"
+// after it, and the window between <window> tags in the user's turn.)
+const COMMAND_SCREEN = 'You decide whether an instruction someone gave a writing assistant';
 
 const KINDS = [
   [DIGEST, 'digest'],
@@ -428,6 +436,7 @@ const KINDS = [
   [LONGER, 'longer'],
   [SCREEN_QUESTION, 'screenQuestion'],
   [ASK_OR_EDIT, 'askOrEdit'],
+  [COMMAND_SCREEN, 'commandScreen'],
 ];
 
 /** The numbers of the `<passage n="…">` blocks a request gives (search/ask.rs's layout). */
@@ -509,6 +518,11 @@ export function transformText(user) {
 /** A transform call's instruction (a request's `user`). */
 export function transformInstruction(user) {
   return /^INSTRUCTION: (.*)$/m.exec(user)?.[1] ?? '';
+}
+
+/** The window's text a Command's draft was given (a request's `user`); '' for none. */
+export function rewriteWindow(user) {
+  return /<window>\n([\s\S]*?)\n<\/window>/.exec(user)?.[1] ?? '';
 }
 
 /** A rewrite call's spoken instruction (a request's `user`). */
@@ -972,7 +986,10 @@ export async function startFakeLlm() {
       // The chat's tool loop, scripted: the next step's tool calls or answer.
       // A step without tools offered takes one too when it says `plain`
       // (a model's answer without tools, the loop's last call).
-      const step = kind !== 'screenQuestion' && kind !== 'askOrEdit' && (offered.length > 0 || chatScript[0]?.plain) ? chatScript.shift() : undefined;
+      const step =
+        kind !== 'screenQuestion' && kind !== 'askOrEdit' && kind !== 'commandScreen' && (offered.length > 0 || chatScript[0]?.plain)
+          ? chatScript.shift()
+          : undefined;
       if (step) {
         const message = step.tools
           ? {
@@ -1018,6 +1035,7 @@ export async function startFakeLlm() {
         longer: longerReply,
         screenQuestion: () => 'no',
         askOrEdit: () => '{"action": "answer"}',
+        commandScreen: () => 'no',
       };
       // (The system prompt too: a Skill's name is in it.)
       const content = (replies.get(kind) ?? answer[kind] ?? (() => 'OK'))(user, system);

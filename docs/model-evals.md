@@ -255,6 +255,40 @@ and result), the numbers in `summary.json` (`models[].transforms`).
 `eval::transforms`' unit tests check the file reads and every transform in
 it is one Yap has (≥ 3 cases per built-in), and the judge.
 
+### Replies from the window in front (`--replies`)
+
+```bash
+yap.exe eval --replies --repeat 3 --model local:<4b.gguf> --ngl 999
+yap.exe eval --replies --replies-phase with --replies-body none --model local:<4b.gguf> --ngl 0
+```
+
+A Command that reads the window in front (`dictation/command_screen.rs`, "Hey
+Jarvis, reply saying Thursday works") through the app's own call:
+`command_screen::bounded` (the window's text as the model gets it, the budget for
+where the model is), `cleanup_styles::draft_line` (an email's greeting and
+sign-off with the case's `user` name, a chat's few sentences, the kind's default
+tone), `llm::draft_from_screen` and `command_screen::clean_draft`. Each case in
+`evals/replies/cases.json` is a made-up window as Yap reads it (`window`: its
+`title`, the text `before` the box being written in, a message `quoted` below the
+cursor, its `other` text), the spoken `instruction`, its `kind` (`email`,
+`workChat`, `personalChat`) and what the draft must be (`expect`): `all_of` (one
+of each group: the facts the instruction and the window give), `not_contains`
+(an invented day, the window's own lines, a request hidden in the mail followed),
+`greets` (an email's first lines name the person replied to), `language` /
+`not_language` (the conversation's language, not the instruction's),
+`max_words`; and always no quoted history ("wrote:", "Subject:", "-----Original
+Message"), no "[Your Name]", no run of 16 words copied from the window. A draft
+Yap had to clean is counted (`cleaned`). **Phases** (`--replies-phase`): `with`
+(the Command now) and `without` (the same words alone, as a Command wrote until
+31 Oct 2026: `llm::rewrite_with_samples`, nothing selected). **The body**
+(`--replies-body`): `commands` (the default: the Commands scope's default prompt,
+`evals/replies/commands-prompt.txt`, a copy of `src/lib/settings/scopes.js`'s,
+named "Jarvis" — "Hey Jarvis, …" needs the scope on) or `none` (the rewrite
+shortcut on the cleanup endpoint). `replies.md` in the run folder (each case's
+rule verdict, window and draft); `models[].replies` in `summary.json`.
+`eval::replies`' unit tests check the file reads, every case's instruction is one
+the rule doesn't turn away, and the judge.
+
 ### Meeting chips and Skills (`--chips`)
 
 ```bash
@@ -3118,3 +3152,45 @@ What the runs showed, and what changed:
 - **/prd as a document** made all five sections in 9 of its 10 runs; once, one section.
 
 Run folders: `E:\yap-builds\skills\eval-runs\` (this PC; not kept).
+
+## Replies from the window in front (31 Oct 2026)
+
+A Command that drafts from the email or chat in front (`dictation/command_screen.rs`;
+Wispr Flow's Instruct Mode, on this PC), measured on the on-device Qwen3.5-4B-Q4_K_M
+(`--replies`, 14 made-up windows: Outlook- and webmail-like emails, Slack, Teams and
+WhatsApp threads, a compose window with the original quoted below the cursor, a French
+mail, a German and a Spanish chat, a mail that tells "any AI assistant" to do something
+else). Read only, on this PC; no paid model.
+
+| Run | Phase | Passed | Median (slowest) | Prompt tokens a case |
+|---|---|---|---|---|
+| card (`--ngl 999`), the Commands prompt, 3 runs each | with the window | **42/42** | 0.3 s (0.6 s) | ~790 |
+| the same | the words alone (as before) | 9/42 | 0.2 s | ~390 |
+| card, no Commands prompt (the rewrite shortcut on the cleanup model), 2 runs each | with the window | 28/28 | 0.3 s | ~500 |
+| processor only (`--ngl 0`), 3 cases | with the window | 3/3 | 9.8 s (12.6 s) | ~820 |
+
+- **From the words alone** a Command can't reply: no greeting to the person replied to
+  (every email), English to a French mail and a German chat ("Thursday works.",
+  "I will be ten minutes late."), no five in Spanish, and for "summarise this email into
+  a reply" an invented four-point letter to "[Recipient Name]". With the window it greets
+  the sender, answers in the conversation's language ("Jeudi à 14h me convient
+  parfaitement…", "Ich bin auf dem Weg, komm nur zehn Minuten zu spät."), confirms each
+  point the mail made, and never followed the mail's planted instruction (no
+  "PINEAPPLE", no password).
+- **The first prompt was 11/14.** It parroted a question back in Spanish ("¡Sí! ¿Te viene
+  bien a las cinco en la plaza?" for "reply yes, see you at five"): the rules now say never
+  to repeat the other person's words or question back (3/3 after). It signed an email
+  "[Your Name]" when the user's name isn't known, even told not to (3/3 runs still do):
+  `clean_draft` takes a placeholder line off, so the draft ends "Best,". The third was the
+  judge's: a confirmation restates a mail's facts in long runs, so "copied" is now 16 words
+  (quoted history is caught by its own marks).
+- **Subject lines**: the 4B starts 15 of 24 email drafts with "Subject: Re: …", even with
+  "no subject line" in the email's line; `clean_draft` takes a first "Subject:"/"Re:" line
+  off. It never quoted the earlier messages, even with the original quoted in a compose
+  window.
+- **Size and speed**: ~790 prompt tokens with the Commands prompt (the window bounded to
+  3,000 characters on this PC), a reply in 0.3 s on the card and ~10 s on the processor
+  alone — "Reading the window…" covers only the read; the draft then waits as any
+  Command's does.
+
+Run folders: `E:\yap-builds\instruct\eval-runs\` (this PC; not kept).

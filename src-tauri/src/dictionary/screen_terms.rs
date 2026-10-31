@@ -596,6 +596,55 @@ fn read_terms(hwnd: isize) -> Option<ScreenTerms> {
     Some(screen)
 }
 
+/// How long a Command's read of the window may take (`read_for_command`):
+/// the person is waiting for the draft, "Reading the window…" on the bar.
+const COMMAND_BUDGET: Duration = Duration::from_millis(1_500);
+
+/// **A Command's look at the window in front**
+/// (`dictation/command_screen.rs`): its title; the document the focus is
+/// in **without the box being written in** — the text before and after it
+/// (a chat's thread, the mail an inline reply sits under), or, when the
+/// box is the whole document (a reply being written in a mail app), the
+/// message quoted below the cursor; then the window's other visible text,
+/// the focused box never read. The same refusals as a dictation's read:
+/// only the window's own process, never Yap's own windows, a password box
+/// or a password manager; in robot mode only a window the test opened.
+/// Within [`COMMAND_BUDGET`], each call time-boxed. Logged as counts only.
+pub fn read_for_command(hwnd: isize) -> Option<crate::dictation::command_screen::Window> {
+    if !crate::shell::realtest::permits(Some(hwnd)) {
+        return None;
+    }
+    let started = Instant::now();
+    let pid = crate::pasting::text_injector::window_process(hwnd)?;
+    if pid == std::process::id() {
+        return None;
+    }
+    let exe = crate::pasting::text_injector::app_name_for(Some(hwnd)).unwrap_or_default().to_lowercase();
+    let exe = exe.trim_end_matches(".exe");
+    if NEVER_READ.iter().any(|p| exe.contains(p)) {
+        tracing::debug!("A password manager's window: not read for a Command");
+        return None;
+    }
+    #[cfg(windows)]
+    {
+        let w = uia::read_for_command(hwnd, pid, started + COMMAND_BUDGET)?;
+        tracing::debug!(
+            ms = started.elapsed().as_millis() as u64,
+            before = w.before.chars().count(),
+            after = w.after.chars().count(),
+            quoted = w.quoted.chars().count(),
+            other = w.other.chars().count(),
+            "Read the window for a Command"
+        );
+        Some(w)
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = (pid, started);
+        None
+    }
+}
+
 /// The names in a window's text as read (`read`), and in a code app its
 /// code names with where the focus is. Pure but for `is_word`.
 fn terms_of(read: &WindowText, code_app: Option<code::App>, is_word: &dyn Fn(&str) -> bool, spell_checker: bool) -> ScreenTerms {
@@ -679,7 +728,7 @@ mod uia {
         UIA_IsOffscreenPropertyId, UIA_IsPasswordPropertyId, UIA_IsTextPatternAvailablePropertyId,
         UIA_ListItemControlTypeId, UIA_NamePropertyId, UIA_ProcessIdPropertyId, UIA_TabItemControlTypeId,
         UIA_TextControlTypeId, UIA_TextPatternId, UIA_TitleBarControlTypeId, UIA_TreeItemControlTypeId,
-        UIA_ValueValuePropertyId, UIA_CONTROLTYPE_ID,
+        UIA_ValueValuePropertyId, UIA_CONTROLTYPE_ID, IUIAutomationTextRange,
     };
 
     use super::WindowText;
@@ -743,10 +792,110 @@ mod uia {
                 };
             }
             if Instant::now() < until && out.room() > 0 && !(web_page && out.document >= ENOUGH_OF_A_PAGE) {
-                out.elements = walk(&automation, &root, pid, web_page, &mut out, until);
+                out.elements = walk(&automation, &root, pid, web_page, false, &mut out, until);
             }
         }
         Some(out)
+    }
+
+    /// How far either side of the box being written in a Command reads.
+    const BESIDE_CHARS: usize = 6_000;
+    /// How far below the cursor a Command looks for a quoted message.
+    const BELOW_CHARS: usize = 8_000;
+
+    /// See [`super::read_for_command`]: the title; the focused document
+    /// without the focused box (the text either side of it), or — the box
+    /// the whole document — what's quoted below the cursor; then a walk
+    /// over the window's other text that never reads the focused box.
+    pub fn read_for_command(hwnd: isize, pid: u32, until: Instant) -> Option<crate::dictation::command_screen::Window> {
+        let _com = Com::init()?;
+        let automation = automation(super::CALL_TIMEOUT_MS)?;
+        let mut w = crate::dictation::command_screen::Window::default();
+        unsafe {
+            let root = automation.ElementFromHandle(HWND(hwnd as *mut core::ffi::c_void)).ok()?;
+            if root.CurrentProcessId().ok()? as u32 != pid {
+                return None;
+            }
+            w.title = root.CurrentName().map(|n| n.to_string()).unwrap_or_default();
+            let focused = automation.GetFocusedElement().ok().filter(|f| f.CurrentProcessId().map(|p| p as u32) == Ok(pid));
+            let browser = root.CurrentClassName().map(|c| c.to_string().starts_with("Chrome_WidgetWin")).unwrap_or(false);
+            let mut web_page = browser;
+            if let (Some(focused), Some((doc, pattern))) = (focused.as_ref(), focused_document(&automation, pid)) {
+                web_page |= doc.CurrentFrameworkId().is_ok_and(|f| f == "Chrome");
+                let is_box = automation.CompareElements(&doc, focused).is_ok_and(|b| b.as_bool());
+                if is_box {
+                    w.quoted = below_the_cursor(&pattern, until);
+                } else {
+                    let (before, after) = beside_the_box(&pattern, focused, until);
+                    w.before = before;
+                    w.after = after;
+                }
+            }
+            let enough = w.before.chars().count() + w.after.chars().count() >= ENOUGH_OF_A_PAGE;
+            if Instant::now() < until && !(web_page && enough) {
+                let mut out = WindowText::default();
+                walk(&automation, &root, pid, web_page, true, &mut out, until);
+                w.other = out.text;
+            }
+        }
+        Some(w)
+    }
+
+    /// The text before and after the box `focused` in the document
+    /// `pattern` (at most [`BESIDE_CHARS`] each way): the box's own text is
+    /// never read. Nothing when the document can't say where the box is.
+    unsafe fn beside_the_box(pattern: &IUIAutomationTextPattern, focused: &IUIAutomationElement, until: Instant) -> (String, String) {
+        let Ok(the_box) = pattern.RangeFromChild(focused) else {
+            return (String::new(), String::new());
+        };
+        let text_of = |range: &IUIAutomationTextRange| -> String {
+            if Instant::now() >= until {
+                return String::new();
+            }
+            range.GetText((BESIDE_CHARS + 500) as i32).map(|t| t.to_string()).unwrap_or_default()
+        };
+        let before = the_box
+            .Clone()
+            .ok()
+            .and_then(|r| {
+                r.MoveEndpointByRange(TextPatternRangeEndpoint_End, &the_box, TextPatternRangeEndpoint_Start).ok()?;
+                let _ = r.MoveEndpointByUnit(TextPatternRangeEndpoint_Start, TextUnit_Character, -(BESIDE_CHARS as i32));
+                Some(text_of(&r))
+            })
+            .unwrap_or_default();
+        let after = the_box
+            .Clone()
+            .ok()
+            .and_then(|r| {
+                r.MoveEndpointByRange(TextPatternRangeEndpoint_Start, &the_box, TextPatternRangeEndpoint_End).ok()?;
+                let _ = r.MoveEndpointByUnit(TextPatternRangeEndpoint_End, TextUnit_Character, BESIDE_CHARS as i32);
+                Some(text_of(&r))
+            })
+            .unwrap_or_default();
+        (before, after)
+    }
+
+    /// The box being written in is the whole document (a reply in a mail
+    /// app): below the cursor, only a message quoted in the reply
+    /// (`command_screen::quoted_part`) — the rest of a document is the
+    /// person's own.
+    unsafe fn below_the_cursor(pattern: &IUIAutomationTextPattern, until: Instant) -> String {
+        let caret = match pattern.GetSelection() {
+            Ok(ranges) if ranges.Length().unwrap_or(0) > 0 => ranges.GetElement(0).ok(),
+            _ => None,
+        };
+        let Some(caret) = caret else {
+            return String::new();
+        };
+        let Ok(below) = caret.Clone() else {
+            return String::new();
+        };
+        if Instant::now() >= until || below.MoveEndpointByRange(TextPatternRangeEndpoint_Start, &caret, TextPatternRangeEndpoint_End).is_err() {
+            return String::new();
+        }
+        let _ = below.MoveEndpointByUnit(TextPatternRangeEndpoint_End, TextUnit_Character, BELOW_CHARS as i32);
+        let text = below.GetText((BELOW_CHARS + 500) as i32).map(|t| t.to_string()).unwrap_or_default();
+        crate::dictation::command_screen::quoted_part(&text).map(str::to_string).unwrap_or_default()
     }
 
     /// The focused element's labels, if it's in `pid`'s process and not a
@@ -965,12 +1114,16 @@ mod uia {
     /// process's elements, are never read. A text box's or a document's text
     /// (not the focused one's, already read) is read up to
     /// [`OTHER_DOCUMENT_CHARS`]; a web page's (`web_page`) never — its text
-    /// came around the focus. The elements read.
+    /// came around the focus. `skip_focused`: the focused text box isn't
+    /// read at all, not even its name (a Command's look: it's where the
+    /// draft goes). The elements read.
+    #[allow(clippy::too_many_arguments)]
     unsafe fn walk(
         automation: &IUIAutomation,
         root: &IUIAutomationElement,
         pid: u32,
         web_page: bool,
+        skip_focused: bool,
         out: &mut WindowText,
         until: Instant,
     ) -> usize {
@@ -1002,15 +1155,18 @@ mod uia {
                 }
                 let kind = e.CachedControlType().unwrap_or_default();
                 let text_box = kind == UIA_EditControlTypeId || kind == UIA_DocumentControlTypeId;
+                let is_focused = text_box
+                    && (skip_focused || !web_page)
+                    && focused.as_ref().is_some_and(|f| automation.CompareElements(f, &e).is_ok_and(|b| b.as_bool()));
+                if skip_focused && is_focused {
+                    continue;
+                }
                 let mut got = 0;
                 if NAMED.contains(&kind) {
                     got += out.push(&e.CachedName().map(|b| b.to_string()).unwrap_or_default());
                 }
-                if text_box && !web_page {
-                    let is_focused = focused.as_ref().is_some_and(|f| automation.CompareElements(f, &e).is_ok_and(|b| b.as_bool()));
-                    if !is_focused {
-                        got += other_text(&e, out);
-                    }
+                if text_box && !web_page && !is_focused {
+                    got += other_text(&e, out);
                 }
                 if got > 0 {
                     read += 1;
@@ -1097,7 +1253,7 @@ mod uia {
             if steps.contains("walk") {
                 let before = ms();
                 let mut out = WindowText::default();
-                let n = walk(&automation, &root, pid as u32, false, &mut out, later());
+                let n = walk(&automation, &root, pid as u32, false, false, &mut out, later());
                 println!("  walk: {} ms, {n} elements read, {} chars", ms() - before, out.text.chars().count());
             }
         }

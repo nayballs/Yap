@@ -95,7 +95,12 @@ impl Feature {
         use crate::privacy::net::Feature as N;
         match f {
             N::Dictation | N::DictationContext | N::DictationSamples => Feature::Cleanup,
-            N::Commands | N::CommandsSamples => Feature::Commands,
+            N::Commands
+            | N::CommandsSamples
+            | N::CommandsScreen
+            | N::CommandsScreenSamples
+            | N::CommandsWindow
+            | N::CommandsWindowSamples => Feature::Commands,
             N::Chat => Feature::Chat,
             N::Assistant | N::AssistantScreen | N::AssistantPhone | N::AssistantSelection => Feature::Assistant,
             N::Notes => Feature::Notes,
