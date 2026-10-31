@@ -634,15 +634,18 @@ local API and search see the same text.
 - **Loaded on demand.** RichNote and the editor are chunks of their own
   (`RichNote` 5 kB with `RichToolbar` 6 kB; `richEditor` 435 kB, 135 kB gzipped,
   shared with Chat's panel), imported the first time a window shows a note to
-  edit: the Notes view with a note open, the notepad with its meeting, the
-  quick note once its window is made and idle (and as it comes up). Until
+  edit: the Notes view with a note open (its own `NoteThoughts` page, 2 kB,
+  through `loadPage`), the notepad with its meeting, the quick note once its
+  window is made and idle (and as it comes up; both `loadRichtext`). Until
   then, and if it can't load, the note's plain box stands in
   (`data-rich-fallback`, saving as before); the caret in it carries over to
   the page (`takeHandoff`). The Yap bar's and the main window's first paint
   never carry the editor (frontend.md, the main window's chunk).
-- **Where it is.** Notes' My thoughts (`NoteEditor`: the app's colours, the
-  reading size; **Preview / Source** at the toolbar's right, remembered in the
-  window's `yapNoteView`); the notepad's My thoughts tab (`ThoughtsTab`: the
+- **Where it is.** Notes' My thoughts (`views/notes/NoteThoughts.svelte` in
+  `NoteEditor`'s place for the box: the app's colours, the reading size; the
+  selection's menu and the saves as the box had them; **Preview / Source** at
+  the toolbar's right, remembered in the window's `yapNoteView`); the
+  notepad's My thoughts tab (`ThoughtsTab`: the
   paper's colours, the toolbar over the page); the quick note (`QuickNote`:
   the toolbar under its tabs; the window got the right-click menu host the
   toolbar's menus need, `App.svelte`). One editor per note (`{#key}`), so each
@@ -726,8 +729,8 @@ the summary edited in place, the transcript's view and the note's chat),
 follows Rust's events while Notes is open, and opens the note a call or the
 Tasks view asks for. Its parts: `NoteList` (tools, folders, notes and their
 menus), `NoteEditor` (title, tabs, the run line, My thoughts — a page you can
-format since 2026-10-31, `components/richtext/RichNote`, with Preview / Source:
-"Notes as pages you can format" above) with
+format since 2026-10-31, `NoteThoughts` on `components/richtext/RichNote`, with
+Preview / Source: "Notes as pages you can format" above) with
 `NoteMeta` (the chip row), `NoteSummary` (rendered, ticked, edited),
 `NoteTranscript` (the transcript box) and `NoteChat` (the thread, helpers,
 the Ask bar) with `ActionPicker`; `ActionManager`; `noteFormat.js` (titles,
