@@ -1825,6 +1825,10 @@ and its Undo, Preview / Source, find, copy, light and dark).
   the question with its mic, the line of what it's doing (`assistantPending`), the answer
   (Rust reads it aloud); ControlPanel brings Chat up for one asked while the
   window is in front (`show`) or "Open in Chat" (`chatRequest {assistant}`).
+  A quick answer's "answered" can arrive while the view is still opening for
+  the question (before it listens itself): when the conversation it reads for
+  "asked" already has the answer after the question, the wait ends there
+  (2026-10-31; before, it said "Thinking" with ■ for good).
   An empty chat says "Or press F8 in any app to ask out loud…", or offers
   **Set an assistant shortcut** (→ Settings `voice#assistant-shortcut`).
   **Streamed answers** (`chat/stream.rs`, `streaming.js`; 2026-10-22): `send`
