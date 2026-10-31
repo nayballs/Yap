@@ -158,6 +158,7 @@
       settingsOpen = false;
       activeView = view;
     },
+    openSettings: (section) => openSettings(section),
   });
   let bellOpen = $state(false);
   // Help (views/help/): its menu, the shortcut sheet (Ctrl+/ too) and What's new.

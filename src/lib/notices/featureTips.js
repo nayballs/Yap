@@ -9,16 +9,20 @@
 //
 // `yap-feature-tip` { kind, title, body }: a toast of kind "tip"
 // (ui/noticePolicy.js: held while a dictation runs, dropped if it waits too
-// long unseen); a snippet's or the dictionary's has Open Dictionary.
+// long unseen); a snippet's or the dictionary's has Open Dictionary, and the
+// side buttons' ("Use your mouse's side buttons?", dictation/side_buttons.rs)
+// Set up, opening Settings → Shortcuts' dialog.
 import { listen } from '@tauri-apps/api/event';
 import { toast } from '../ui/toast.svelte.js';
 
 let started = false;
 let showView = null;
+let openSettings = null;
 
-/** Show feature tips as toasts. Idempotent; the main window calls it with `showView`. */
+/** Show feature tips as toasts. Idempotent; the main window calls it with `showView` and `openSettings`. */
 export function initFeatureTips(opts = {}) {
   if (opts.showView) showView = opts.showView;
+  if (opts.openSettings) openSettings = opts.openSettings;
   if (started) return;
   started = true;
   listen('yap-feature-tip', (e) => showFeatureTip(e.payload));
@@ -28,6 +32,9 @@ export function initFeatureTips(opts = {}) {
 export function showFeatureTip(t) {
   if (!t?.title) return;
   const dictionary = t.kind === 'snippet' || t.kind === 'dictionary';
+  let action = null;
+  if (dictionary && showView) action = { label: 'Open Dictionary', onClick: () => showView('dictionary') };
+  else if (t.kind === 'sideButtons' && openSettings) action = { label: 'Set up', onClick: () => openSettings('shortcuts#side-buttons-setup') };
   toast({
     kind: 'tip',
     key: `feature-tip:${t.kind}`,
@@ -36,6 +43,6 @@ export function showFeatureTip(t) {
     chip: 'Tip',
     icon: dictionary ? 'dictionary' : t.kind === 'language' ? 'language' : undefined,
     duration: 12_000,
-    action: dictionary && showView ? { label: 'Open Dictionary', onClick: () => showView('dictionary') } : null,
+    action,
   });
 }

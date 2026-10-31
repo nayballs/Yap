@@ -35,7 +35,9 @@ store.
 | `settings/configMerge.js` | The pure part: `merge3`, `fill`, `same`, `copy` |
 | `settings/adoptions.svelte.js` | `followOutsideChanges`: the one-off adoptions (`yap-config-patched`, `yap-provider-key-saved`, a call app's choice, the on-device context and state, the Chat chip's scope, spoken replies' switch / volume / speed, the consent message, the bar turned off) |
 | `settings/dictionarySync.svelte.js` | `followDictionary`: the Dictionary view's list both ways, its echo guard, learned words |
-| `settings/hotkeyFallback.svelte.js` | `followHotkeyFallback`: the in-page keys (meeting, assistant, read aloud, snip, the language shortcuts, dictation, in that order) |
+| `settings/hotkeyFallback.svelte.js` | `followHotkeyFallback`: the in-page keys (meeting, assistant, read aloud, snip, the language shortcuts, dictation, in that order), and a mouse button on Dictate (a side button: mousedown / mouseup → `dictation_key`, `actionMatchesMouse`) |
+| `settings/sideButtons.svelte.js` | Your mouse's side buttons (dictation/side_buttons.rs): what they do now (`sideButtons.state`, `side_buttons_state`, read again on `yap-config-saved`: `followSideButtons`), `applySideButtons` / `undoSideButtons` / `removeSideButtons` (Settings' copy saved first, `persist`; Undo on the toasts) |
+| `settings/SideButtons.svelte` | The "Set up your mouse's side buttons" dialog (Shortcuts → Mouse) |
 | `settings/languages.svelte.js` | My languages' helpers: the language list read once (`loadLanguageCatalog`, `catalog`, `languageName`), `myLanguages(cfg)` (an old config's one language too), the language shortcuts (`languageShortcuts`, `shortcutName`, `newLanguageShortcut`, `MAX_LANGUAGE_SHORTCUTS`) |
 | `settings/MyLanguages.svelte` | Dictation → My languages: the search, the model coverage and recommendation, the main shortcut's language, the language shortcuts, the nudge's switch |
 | `lib/core/providers.js` | The providers in one place: ids, `BASE_URLS`, `KEYED_PROVIDERS`, `PP_PROVIDERS`, `PROVIDER_MODES`, `CLOUD_TABS`, `MODEL_HINTS`, `maskKey`, the four name sets each surface uses today (`PROVIDER_LABELS` short, `SCOPE_PROVIDER_LABELS` the scope tabs', `CLEANUP_PROVIDER_LABELS` cleanup's, `PROVIDER_DESTINATIONS` where the words go), and the key store's rules (`sharedKey`, `stashCleanupKey`, `creditCleanupKey`, `liftScopeKeys`, `adoptProviderKey`, `cleanupNeedsKey`) |
@@ -402,7 +404,37 @@ style neither).
   in-page fallback for Use what I said or Paste last: their paste is never
   in a Yap window; Copy last's has one, `copy_last_transcript`.) The
   search finds both new rows ("paste" now puts Paste last transcript first,
-  the Dictation rows after it).
+  the Dictation rows after it). Under them, **Mouse → Your mouse's side
+  buttons** (2026-10-31, `side-buttons`; `dictation/side_buttons.rs`,
+  [dictation.md](./dictation.md)): the row says what they do (the
+  summary, "Dictate with one and send with the other…" while neither is
+  set; its ⓘ the browser lines), with **Undo** (the last setup or removal,
+  while Rust has it), **Remove** (both off Dictate and Send) and **Set
+  up…** / **Change…** opening `SideButtons.svelte`: a dialog like Delete
+  some of your data… (Esc, the scrim, Cancel; Tab kept inside; the focus
+  back), "Step N of 3". **1** "Press the button you want for dictating":
+  two cards, Back ("The one nearer your wrist") and Forward, Back
+  chosen unless one is pressed (heard through the hook,
+  `side_buttons_listen` renewed every 20 s, `yap-side-button`; or the page's
+  own mousedown — the middle button is told it isn't one; the release kept
+  from going back) or clicked; "Heard ✓", then on by itself after a beat;
+  Skip, Next. **2** "Press the one for Send": the dictation's card
+  disabled ("Dictates"; pressing it says "Back dictates. Press the other
+  one, or Skip."); Previous, Skip, Next. **3** Rust's plan
+  (`side_buttons_preview`, again on every change): the summary in a box,
+  **Hold to talk / Press to start and stop** (a `Segmented`, the dictation's
+  mode as it is; with no dictation button, none), the mode note with the
+  key named (`fillHotkey`), **Swap them** · **Pick again**, the notes ("Forward
+  sends already.", "Forward is set to Copy last dictation.", no room, the
+  only key), **"Move Forward to Send (from Copy last dictation)"** when a
+  button another shortcut has would move (`take`), the browser lines, and
+  **Set up** (off when nothing changes) → `applySideButtons`: Settings' copy
+  saved first, Rust's one-step save, a "Side buttons set up" toast with
+  Undo. The in-page hotkey fallback stands down while it listens
+  (`hotkeyCapture.on`). Opened from the tip's Set up too:
+  `shortcuts#side-buttons-setup` → Settings' `sideButtons` → the page's
+  bindable `sideButtons` (the search's `side-buttons` only lands on the row).
+  e2e `side-buttons.spec.js`.
 - **Meetings** (`settings/MeetingsPage.svelte`, Wispr's Notetaker page and
   order): **Call detection** (`#settings-meetings`): "Detect calls and offer
   to take notes" (`meetingDetection`), **"Ask about calls in · 8 of 12 apps ›"**

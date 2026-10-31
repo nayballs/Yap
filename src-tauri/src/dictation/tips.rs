@@ -17,6 +17,11 @@
 //!   than English — Whisper heard it, or Yap read it from Parakeet V3's text
 //!   (`languages::heard`) — with two or more of them picked: once, ever, by
 //!   the same rules ([`language_due`]).
+//! - **"Use your mouse's side buttons?"** (2026-10-31; Wispr Flow's
+//!   offer, by behaviour; [`side_buttons`]): the first time Yap sees a side
+//!   button pressed that no shortcut has (`side_buttons::seen`, from the
+//!   input hook), once ever, by the same rules ([`side_buttons_due`]), with
+//!   Set up opening Settings → Shortcuts' dialog.
 //! - **Through the notice policy**, as a tip ("featureTip": "Show tips"
 //!   turns it off, never over a dictation or a meeting, dropped if unseen
 //!   a minute): after the paste, the main window's toast while the person
@@ -53,6 +58,9 @@ pub enum Feature {
     /// One of the person's languages recognised by itself ([`language`]);
     /// never in [`ORDER`]: it isn't something a paste shows off.
     Language,
+    /// A mouse's side button pressed, bound to nothing ([`side_buttons`]):
+    /// the offer to set them up. Never in [`ORDER`] either.
+    SideButtons,
 }
 
 /// Which tip goes first when a dictation shows off several.
@@ -67,6 +75,7 @@ impl Feature {
             Feature::Snippet => "snippet",
             Feature::Dictionary => "dictionary",
             Feature::Language => "language",
+            Feature::SideButtons => "sideButtons",
         }
     }
 
@@ -96,6 +105,10 @@ impl Feature {
             Feature::Language => (
                 "Yap recognised your language",
                 "It's one of your languages, so Yap noticed it by itself. Speak any of them, any time.",
+            ),
+            Feature::SideButtons => (
+                "Use your mouse's side buttons?",
+                "Dictate with one and send with the other, without reaching for the keyboard. Set them up in one step.",
             ),
         }
     }
@@ -212,7 +225,7 @@ impl Seen {
             Feature::Email => self.email,
             Feature::Snippet => self.snippet,
             Feature::Dictionary => self.dictionary,
-            Feature::Language => false,
+            Feature::Language | Feature::SideButtons => false,
         }
     }
 }
@@ -239,6 +252,12 @@ fn recent(shown: &std::collections::BTreeMap<String, u64>, now: u64) -> bool {
 /// under [`MIN_GAP_MS`] ago.
 pub fn language_due(shown: &std::collections::BTreeMap<String, u64>, now: u64) -> bool {
     !shown.contains_key(Feature::Language.key()) && !recent(shown, now)
+}
+
+/// Whether the side-button tip is due at `now` (pure): never shown, and no
+/// tip under [`MIN_GAP_MS`] ago.
+pub fn side_buttons_due(shown: &std::collections::BTreeMap<String, u64>, now: u64) -> bool {
+    !shown.contains_key(Feature::SideButtons.key()) && !recent(shown, now)
 }
 
 // ---- after a dictation --------------------------------------------------------------------------
@@ -346,23 +365,58 @@ pub fn language(app: &AppHandle, code: &str) {
     });
 }
 
+/// An unbound side button was pressed (`side_buttons::seen`): "Use your
+/// mouse's side buttons?", once ever ([`side_buttons_due`]), never over a
+/// dictation, the first-run setup or a meeting (not shown, not counted: a
+/// later press asks again). Off the input hook's forwarder: a thread of its
+/// own.
+pub fn side_buttons(app: &AppHandle) {
+    if !noticing() || crate::notices::notice::tips_off() {
+        return;
+    }
+    let moment = crate::notices::notice::moment();
+    if moment.dictating || moment.meeting {
+        tracing::debug!("Feature tips: the side buttons' tip waits for a quieter moment");
+        return;
+    }
+    let now = crate::notices::notice::now_ms();
+    if !side_buttons_due(&crate::dictation::coaching::record().features, now) {
+        return;
+    }
+    let app = app.clone();
+    let _ = std::thread::Builder::new().name("side-buttons-tip".into()).spawn(move || {
+        let (title, body) = Feature::SideButtons.text();
+        show(&app, Feature::SideButtons, title.to_string(), body.to_string(), now);
+    });
+}
+
 /// Show a tip: the main window's toast while the person looks at it, else a
 /// Yap bar card; nowhere else. Counted (hints.json's `features`) only when
-/// shown.
+/// shown. The side buttons' has Set up (Settings → Shortcuts' dialog).
 fn show(app: &AppHandle, feature: Feature, title: String, body: String, now: u64) {
     let place = crate::notices::notice::place_tip(app, KIND);
     let shown = match place {
         crate::notices::notice::Place::Window => app.emit(EVENT, Tip { kind: feature, title, body }).is_ok(),
         crate::notices::notice::Place::Bar => {
+            let set_up = feature == Feature::SideButtons;
             let card = crate::bar::Card {
                 id: KIND.into(),
                 icon: "tip",
                 title,
                 body,
+                primary: set_up.then(|| crate::bar::CardAction::new("set-up", "Set up")),
                 timeout_ms: Some(CARD_MS),
                 ..Default::default()
             };
-            crate::bar::show_card(app, card, Box::new(|_, _| {}))
+            crate::bar::show_card(
+                app,
+                card,
+                Box::new(|app, action| {
+                    if action == "set-up" {
+                        crate::dictation::side_buttons::open_setup(app);
+                    }
+                }),
+            )
         }
         _ => false,
     };
@@ -373,6 +427,9 @@ fn show(app: &AppHandle, feature: Feature, title: String, body: String, now: u64
             r.features.insert(feature.key().to_string(), now);
             r
         });
+        if feature == Feature::SideButtons {
+            crate::dictation::input_hook::side_tip_done(true);
+        }
     } else {
         tracing::debug!(kind = feature.key(), "Feature tips: nowhere to show it");
     }
@@ -391,6 +448,7 @@ pub fn e2e_feature_tips(on: bool) -> Result<(), String> {
         r.features.clear();
         r
     });
+    crate::dictation::side_buttons::forget_tip();
     Ok(())
 }
 
@@ -495,7 +553,7 @@ mod tests {
 
     #[test]
     fn every_tip_has_words() {
-        for f in ORDER.into_iter().chain([Feature::Language]) {
+        for f in ORDER.into_iter().chain([Feature::Language, Feature::SideButtons]) {
             let (title, body) = f.text();
             assert!(!title.is_empty() && body.len() > 30, "{f:?}");
         }
@@ -518,5 +576,21 @@ mod tests {
         assert_eq!(due(&Seen { email: true, ..Seen::default() }, &shown, T0 + MIN_GAP_MS + 1), None);
         // Never one a dictation's paste shows off.
         assert!(!ORDER.contains(&Feature::Language));
+    }
+
+    #[test]
+    fn the_side_buttons_tip_shows_once_and_keeps_its_distance_from_the_others() {
+        let mut shown = BTreeMap::new();
+        assert!(side_buttons_due(&shown, T0));
+        shown.insert("language".to_string(), T0);
+        assert!(!side_buttons_due(&shown, T0 + MIN_GAP_MS - 1));
+        assert!(side_buttons_due(&shown, T0 + MIN_GAP_MS));
+        shown.insert("sideButtons".to_string(), T0 + MIN_GAP_MS);
+        assert!(!side_buttons_due(&shown, T0 + 365 * 24 * 3_600_000));
+        assert!(!ORDER.contains(&Feature::SideButtons));
+        let (title, body) = Feature::SideButtons.text();
+        assert_eq!(title, "Use your mouse's side buttons?");
+        assert!(body.contains("Dictate with one and send with the other"), "{body}");
+        assert_eq!(serde_json::to_value(Feature::SideButtons).unwrap(), "sideButtons");
     }
 }

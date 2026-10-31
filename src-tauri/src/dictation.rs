@@ -3,7 +3,8 @@
 //! device runs it, "Taking longer than usual…", the length limit, Upload's
 //! decoding, Yap's sounds (in packs), other apps' sound while you talk, history and a
 //! day of dictation audio, the stats that outlast it and word milestones,
-//! saved transforms, My languages, and whether the rewrite shortcut's words
+//! saved transforms, My languages, the mouse's side buttons set up in one
+//! step (`side_buttons`), and whether the rewrite shortcut's words
 //! about a selection are an edit or a question (`ask_or_edit`).
 //! How it works: docs/architecture/dictation.md.
 
@@ -35,6 +36,7 @@ pub mod mute;
 pub mod partials;
 pub mod pipeline;
 pub mod recent_audio;
+pub mod side_buttons;
 pub mod slow;
 pub mod sound;
 pub mod stats;

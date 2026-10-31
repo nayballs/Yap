@@ -299,6 +299,7 @@
   let contentEl = $state(null);
   let meetingApps = $state(false); // Meetings → "Ask about calls in"'s list
   let privacyConnections = $state(false); // Privacy & data → Network connections
+  let sideButtons = $state(false); // Shortcuts → the side-button dialog (the tip's Set up)
   function goto(target) {
     const to = resolveTarget(target, SCOPE_TABS.map((t) => t.value));
     if (!to) return false;
@@ -309,6 +310,7 @@
     section = to.page;
     meetingApps = to.page === 'meetings' && to.anchor === 'call-apps-list';
     privacyConnections = to.page === 'privacy' && to.anchor === 'connections-list';
+    sideButtons = to.page === 'shortcuts' && to.anchor === 'side-buttons-setup';
     if (to.scope) lm.scope = to.scope;
     tick().then(() => {
       if (!to.anchor) {
@@ -572,7 +574,7 @@
           {:else if section === 'dictation'}
             <DictationPage {cfg} {outputs} {onshowview} {goto} />
           {:else if section === 'shortcuts'}
-            <ShortcutsPage {cfg} {goto} />
+            <ShortcutsPage {cfg} {goto} {open} bind:sideButtons />
           {:else if section === 'meetings'}
             <MeetingsPage {cfg} {goto} bind:apps={meetingApps} />
           {:else if section === 'commands'}

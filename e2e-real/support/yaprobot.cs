@@ -26,7 +26,9 @@
 //                                 marked as the robot's): "d:135,w:300,u:135"
 //                                 — d/u a key down/up, U a key-up marked for
 //                                 the hook to miss (a key-up the lock screen
-//                                 took), w a wait in ms — only while that
+//                                 took), xd/xu a mouse side button down/up
+//                                 (1: XBUTTON1, Back; 2: XBUTTON2, Forward),
+//                                 w a wait in ms — only while that
 //                                 window is in front and titled with the nonce
 //   yaprobot close <hwnd> <nonce> ask a window titled with the nonce to close
 //   yaprobot caret <hwnd> <nonce> what UI Automation reports around the caret
@@ -405,8 +407,16 @@ static class Program {
             string op = parts[0];
             int n = int.Parse(parts[1]);
             if (op == "w") { Thread.Sleep(n); continue; }
-            if (op != "d" && op != "u" && op != "U") return Obj("ok", false, "error", "unknown step " + step, "sent", sent);
+            if (op != "d" && op != "u" && op != "U" && op != "xd" && op != "xu") return Obj("ok", false, "error", "unknown step " + step, "sent", sent);
             if (Native.Root(Native.GetForegroundWindow()) != h) return Obj("ok", false, "error", "the test's window isn't in front", "sent", sent);
+            if (op == "xd" || op == "xu") {
+                // A side button (XBUTTON1 / XBUTTON2), marked as the robot's.
+                if (n != 1 && n != 2) return Obj("ok", false, "error", "no such side button " + step, "sent", sent);
+                var m = new Native.INPUT { type = 0 };
+                m.u.mi = new Native.MOUSEINPUT { mouseData = (uint)n, dwFlags = op == "xd" ? 0x0080u : 0x0100u, dwExtraInfo = new IntPtr(MARK) };
+                sent += (int)Native.SendInput(1, new[] { m }, Marshal.SizeOf(typeof(Native.INPUT)));
+                continue;
+            }
             var i = new Native.INPUT { type = 1 };
             i.u.ki = new Native.KEYBDINPUT { wVk = (ushort)n, dwFlags = op == "d" ? 0u : 2u, dwExtraInfo = new IntPtr(op == "U" ? UNHEARD : MARK) };
             sent += (int)Native.SendInput(1, new[] { i }, Marshal.SizeOf(typeof(Native.INPUT)));

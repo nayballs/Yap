@@ -12,11 +12,12 @@
 // Copy last, Quick note and the language shortcuts (My languages). Down and up go to
 // `dictation_key` / `assistant_key` / `ask_selection_key` / `language_key`, the hook's own paths:
 // the recording mode (and push-to-talk's tap / double-tap) is Rust's to
-// decide.
+// decide. A mouse button on Dictate (a side button) goes the same way.
 import { invoke } from '@tauri-apps/api/core';
 import {
   actionMatchesKeydown as downOn,
   actionMatchesKeyup as upOn,
+  actionMatchesMouse,
   hotkeyMatchesKeydown,
   hotkeyMatchesKeyup,
 } from '../core/hotkeys.js';
@@ -126,12 +127,31 @@ export function followHotkeyFallback(getCfg) {
     e.preventDefault();
     invoke('dictation_key', { pressed: false }).catch(() => {});
   }
+  // A mouse button on Dictate (a side button: Settings → Shortcuts' side
+  // buttons, dictation/side_buttons.rs), down and up as the key's, in case
+  // the hook doesn't hear it while this window has the focus as it doesn't
+  // hear keys. (When the hook hears it, it swallows it: the page never does.)
+  // Its release isn't let go back in the page either.
+  function onMouse(e) {
+    if (hotkeyCapture.on || !actionMatchesMouse(e, getCfg(), 'hotkey')) return;
+    e.preventDefault();
+    e.stopPropagation();
+    if (e.type === 'mousedown' || e.type === 'mouseup') {
+      invoke('dictation_key', { pressed: e.type === 'mousedown' }).catch(() => {});
+    }
+  }
   $effect(() => {
     window.addEventListener('keydown', onKeyDown, true);
     window.addEventListener('keyup', onKeyUp, true);
+    window.addEventListener('mousedown', onMouse, true);
+    window.addEventListener('mouseup', onMouse, true);
+    window.addEventListener('auxclick', onMouse, true);
     return () => {
       window.removeEventListener('keydown', onKeyDown, true);
       window.removeEventListener('keyup', onKeyUp, true);
+      window.removeEventListener('mousedown', onMouse, true);
+      window.removeEventListener('mouseup', onMouse, true);
+      window.removeEventListener('auxclick', onMouse, true);
     };
   });
 }

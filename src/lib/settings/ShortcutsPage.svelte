@@ -7,19 +7,44 @@
   // Meetings): the same setting. The saved transforms' shortcuts are a link
   // to Commands → Transforms.
   //
+  // Your mouse's side buttons (2026-10-31, dictation/side_buttons.rs): a
+  // row saying what they do, Set up… opening SideButtons.svelte (also from
+  // the tip, `shortcuts#side-buttons-setup` → `sideButtons`), Undo and
+  // Remove. (The search lands on the row, `side-buttons`, and opens nothing.)
+  //
   //   cfg:  Settings' config $state (auto-save does the saving).
   //   goto: opens another Settings page.
+  //   open: Settings is open (closed, the side-button dialog closes with it).
+  //   sideButtons: the side-button dialog asked for (bindable: Settings sets it).
   import Group from '../ui/Group.svelte';
   import Row from '../ui/Row.svelte';
   import LinkRow from '../ui/LinkRow.svelte';
   import Toggle from '../ui/Toggle.svelte';
   import SettingsHotkey from './SettingsHotkey.svelte';
+  import SideButtons from './SideButtons.svelte';
   import { validateHotkey } from './hotkeys.svelte.js';
   import { toast } from '../ui/toast.svelte.js';
   import { transformName } from './transforms.js';
   import { languageShortcuts, shortcutName } from './languages.svelte.js';
+  import { sideButtons as sb, followSideButtons, removeSideButtons, undoSideButtons } from './sideButtons.svelte.js';
 
-  let { cfg, goto = null } = $props();
+  let { cfg, goto = null, open = true, sideButtons = $bindable(false) } = $props();
+
+  followSideButtons();
+  let dialogOpen = $state(false);
+  let opener = $state(null);
+  const side = $derived(sb.state);
+  const sideSet = $derived(!!(side?.dictate || side?.send));
+  // Asked for from outside (the tip's Set up): open it once.
+  $effect(() => {
+    if (!sideButtons) return;
+    sideButtons = false;
+    dialogOpen = true;
+  });
+  // Settings closed (it stays mounted): the dialog goes, and stops listening.
+  $effect(() => {
+    if (!open) dialogOpen = false;
+  });
 
   // Language shortcuts (My languages, dictation/languages.rs) live with your
   // languages (Dictation): a link.
@@ -161,9 +186,82 @@
   />
 </Group>
 
-<p class="set-note">
+<p class="set-note shortcuts-note">
   Each can have up to three more keys or mouse buttons: "+ Add another" (F9 and a mouse's side button, say).
   Two shortcuts can't share a key, or fire on one press: Yap says which one has it.
   How the dictation hotkey records (toggle or push-to-talk) is in
   {#if goto}<button type="button" class="set-link" onclick={() => goto('dictation#recording-mode')}>Dictation</button>{:else}Dictation{/if}.
 </p>
+
+<!-- The mouse's side buttons in one step: Dictate on one, Send on the other. -->
+<Group title="Mouse" id="settings-mouse">
+  <Row
+    label="Your mouse's side buttons"
+    desc={side?.summary || 'Dictate with one and send with the other, from the hand on the mouse'}
+    hint={sideSet
+      ? (side?.browser ?? []).join(' ')
+      : 'Back and Forward keep going back and forward in other apps until you set them up.'}
+    setting="side-buttons"
+  >
+    <div class="side-ctl" id="settings-side-buttons-setup">
+      {#if side?.undo}
+        <button type="button" class="set-link" onclick={() => undoSideButtons()}>Undo</button>
+      {/if}
+      {#if sideSet}
+        <button type="button" class="set-link" onclick={() => removeSideButtons()}>Remove</button>
+      {/if}
+      <button
+        type="button"
+        class="side-open"
+        onclick={(e) => {
+          opener = e.currentTarget;
+          dialogOpen = true;
+        }}>{sideSet ? 'Change…' : 'Set up…'}</button
+      >
+    </div>
+  </Row>
+</Group>
+
+{#if dialogOpen}
+  <SideButtons
+    current={side}
+    hold={cfg.recordingMode === 'pushToTalk'}
+    returnFocus={opener}
+    onclose={() => (dialogOpen = false)}
+  />
+{/if}
+
+<style>
+  /* The global shortcuts' note, then the Mouse group under it. */
+  :global(.settings-shell) .shortcuts-note {
+    margin: -14px 0 30px;
+  }
+  .side-ctl {
+    display: inline-flex;
+    align-items: center;
+    gap: 12px;
+    font-size: 12.5px;
+  }
+  /* As a shortcut's "Set a shortcut" (ui/HotkeyInput.svelte). */
+  .side-open {
+    height: 30px;
+    padding: 0 12px;
+    border: 1px solid var(--yap-border);
+    border-radius: var(--yap-r);
+    background: var(--yap-s2);
+    box-shadow: var(--yap-shadow-sm);
+    color: var(--yap-fg-80);
+    font: inherit;
+    font-size: 12.5px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  .side-open:hover {
+    border-color: var(--yap-border-hover);
+    color: var(--yap-fg);
+  }
+  .side-open:focus-visible {
+    outline: none;
+    box-shadow: var(--yap-focus);
+  }
+</style>

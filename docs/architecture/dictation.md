@@ -547,7 +547,15 @@ to **Run again** from Home.
   against their other languages; never an English-only model's) —
   `Feature::Language` ("language" in hints.json's `features`), never in
   `ORDER`, once ever, 10 minutes from any other tip, the same thread and
-  places (`show`); e2e `languages.spec.js`.
+  places (`show`); e2e `languages.spec.js`. **"Use your mouse's side
+  buttons?"** (2026-10-31; `side_buttons`, `side_buttons_due`):
+  `side_buttons::seen` calls it the first time an unbound side button is
+  pressed — `Feature::SideButtons` ("sideButtons"), never in `ORDER`, once
+  ever, by the same rules, never over a dictation or a meeting; the toast's
+  and the bar card's **Set up** open Settings → Shortcuts' side-button
+  dialog (`featureTips.js`, `side_buttons::open_setup`); shown, the hook
+  stops noting side buttons (`input_hook::side_tip_done`). e2e
+  `side-buttons.spec.js`. See `dictation/side_buttons.rs` below.
 - **`dictation/input_hook.rs`** — low-level Windows keyboard + mouse hooks; specs `kb:VKEY`,
   `kb:ctrl+shift+VKEY` (modifier combo; `win` is a modifier too, e.g. the
   meeting shortcut `kb:alt+win+77` = Win+Alt+M), `kb:165` (single right-side modifier, e.g.
@@ -647,6 +655,25 @@ to **Run again** from Home.
   extra info is `ROBOT_MARK`; `UNHEARD_MARK` events pass by unheard (the
   robot's lost key-up); everything else passes untouched (the developer's
   keys are never seen). Debug-only `e2e_hotkey_bindings` (`binding_states`).
+  **Mouse buttons** (`mouse_button`, 2026-10-31 out of the callback: the
+  middle one is 3, XBUTTON1 Back 4, XBUTTON2 Forward 5): a button some
+  shortcut has (fixed, language, transform; first match wins) is
+  **swallowed both ways** — so a side button set to dictate no longer goes
+  back in a browser — and one no shortcut has goes on to the app
+  untouched, its Back and Forward kept. While Settings' side-button setup
+  listens (`listen_side_buttons(ms)`, `SIDE_LISTEN_UNTIL`: renewed by the
+  dialog, so a window closed mid-question never leaves Back swallowed for
+  long) a side button's press is heard for it (`SIDE_HEARD` →
+  `side_buttons::heard`) and both ways go nowhere else (only a held
+  shortcut's release still reaches its shortcut); an unbound side button's
+  press is noted (`SIDE_SEEN` → `side_buttons::seen`, the tip) until
+  `side_tip_done`. **Test mode's stand-in** (debug builds): a test run has no
+  hook, only the forwarder (`start_stand_in`, split from
+  `start_input_hook`'s `start_forwarder` / `start_hook_thread`), and
+  `e2e_mouse_button { button, phase }` (`shell/e2e.rs` →
+  `stand_in_mouse`) runs a button through `mouse_button` itself, saying
+  whether the hook would have swallowed it. The robot's `hookKeys` sends
+  real ones (`xd:1` / `xu:1`, marked, `e2e-real/support/yaprobot.cs`).
   **`clashes(a, b)`** (pure, unit-tested;
   `hotkeysClash` in `lib/core/hotkeys.js` is the same rule, Settings refuses with
   it): the same key however written, combos on one key nesting (Ctrl+Space
@@ -669,7 +696,9 @@ to **Run again** from Home.
   receives the hotkey (WebView2/Chromium front-runs the hook chain on focus) —
   so the Settings + onboarding pages catch the hotkey **in-page** (keydown and
   keyup → `dictation_key { pressed }`, the hook's own path into `on_key`, so
-  push-to-talk's gestures work there too; Settings and the notepad also catch the meeting shortcut →
+  push-to-talk's gestures work there too; Settings' also takes a mouse button on Dictate — a
+  side button, down and up the same way, `actionMatchesMouse`, 2026-10-31, in case the mouse hook
+  doesn't hear it there either (when it does it swallows it, and the page never sees it); Settings and the notepad also catch the meeting shortcut →
   `meeting_shortcut`, and the assistant shortcut → `assistant_key { pressed }`). Any new Yap window with focusable UI needs the
   same fallback. **The Copilot key** (new Windows 11 laptops; the keyboard
   sends Win + Shift + F23) is the combo `kb:shift+win+134` (`COPILOT_KEY` in
@@ -686,6 +715,71 @@ to **Run again** from Home.
   Copilot app). Many laptops send the key's press and release together, so
   holding it can't keep push-to-talk going: Settings → Dictation says so
   (double-tap for hands-free, or Toggle).
+- **`dictation/side_buttons.rs`** — **your mouse's side buttons in one step**
+  (2026-10-31; Wispr Flow's "Use your mouse's side buttons?", by
+  behaviour): Dictate on one, Send on the other. Settings → Shortcuts'
+  **"Set up your mouse's side buttons"** dialog (`settings/SideButtons.svelte`,
+  [frontend-settings.md](./frontend-settings.md)): **1** "Press the button
+  you want for dictating" (Back by default), **2** "Press the one for Send"
+  (the other), each heard through the hook while it asks
+  (`side_buttons_listen` → `input_hook::listen_side_buttons`, 30 s a time,
+  renewed; `heard` → `yap-side-button { button, name }`) or by the page
+  (its own mousedown, for a Yap window the hook may not hear; the middle
+  button is told it isn't one), Skip either; **3** what they'll do, from
+  **`plan`** (pure, `side_buttons_preview`): each button onto an action that
+  exists — Dictate (`hotkey`), Send (`sendHotkey`) — as **one more key**
+  (`moreHotkeys`) beside the person's keyboard shortcut, or the first
+  shortcut where the action has none (Send, unbound by default); a button
+  on another shortcut (a fixed action's, first or more; a language
+  shortcut's; a transform's) is **named** ("Forward is set to Copy last
+  dictation.", `Fate::Taken`) and **moved only when asked** (`take`, the
+  dialog's "Move Forward to Send" box; its old shortcut left without it, a
+  first one's next moving up) — between Dictate and Send themselves (a
+  **Swap**) without asking —; the dictation's only key never moves
+  (`Only`), an action with four keys has no room (`Full`), each said;
+  `clashes` decides what "on" means, so the hook's clash rules hold
+  (`bound_first` / `bound_more` bind exactly what's written).
+  **Push-to-talk or toggle** is `recording_mode`, every dictation key's:
+  "hold to dictate, double-tap for hands-free" (`gesture.rs`) or "press to
+  start and stop dictating", defaulting to the mode in use, and a change
+  says so for the other key (`mode_note`: "{key} changes too: …", named by
+  the page's `fillHotkey`). The **summary** (`summary`, pure): "Back: hold
+  to dictate, double-tap for hands-free · Forward: send". **The browser**
+  (`browser_lines`): the hook swallows a bound mouse button and leaves an
+  unbound one alone, so "Back won't go back in your browser while it's set
+  to dictate." / "…set to send.", and "Forward still goes forward in your
+  browser." for one left out. **Set up** (`side_buttons_apply`): the plan
+  made again on the config as saved and written in one step
+  (`shell::settings::change_config`: the hook's bindings applied, Settings'
+  copy takes it in on `yap-config-saved`), its shortcuts before and after
+  kept in memory (`LAST`). **Undo** (`side_buttons_undo`, `undo` pure): the
+  last setup or removal put back where nothing has changed it since (each
+  first shortcut, each list of more, the mode, each language shortcut's and
+  transform's key on its own). **Remove** (`side_buttons_remove`, `remove`
+  pure): both side buttons off Dictate and Send (Send's keyboard key moving
+  up; the dictation's only key stays), Undo-able. `side_buttons_state` /
+  `state_of`: what they do now, for the Shortcuts page's row. **The tip**
+  (`seen`, from the hook's `SIDE_SEEN`): an unbound side button pressed →
+  `tips::side_buttons` ("Use your mouse's side buttons?", `Feature::SideButtons`,
+  "sideButtons" in hints.json's `features`, never in `ORDER`, once ever, 10
+  minutes from any other tip, never over a dictation, the first-run setup
+  or a meeting — a later press asks again, no sooner than a minute), the
+  main window's toast or a bar card, each with **Set up** (`open_setup`:
+  the main window, `yap-open-settings` "shortcuts#side-buttons-setup",
+  which opens the dialog); never once a side button is on any shortcut
+  (`in_use`), and the hook stops saying (`side_tip_done`) once it has
+  shown or been set up. The log says which buttons and jobs, never more.
+  Unit tests (`side_buttons::tests`: extra keys beside F9, Send's first,
+  toggle and push-to-talk, swap, skip, both skipped, set up twice, taken /
+  moved from a fixed action, a transform, a language shortcut and another
+  action's more, four keys, the only key, Undo keeping later changes,
+  Remove, the state, the page's JSON; `tips`' once-ever), e2e
+  `side-buttons.spec.js` (the dialog with the hook's stand-in and the
+  page's own mouse event, the bindings saved, Undo, Remove, a taken
+  button moved when asked, Swap, Skip, the tip once and its Set up), robot
+  `e2e-real/side-buttons.real.js` (real XBUTTON events through the real
+  hook: heard while listening, a dictation in toggle and push-to-talk,
+  Enter in the test pad, nothing once removed; written, not yet run).
 - **`dictation/transforms.rs`** — **saved transforms** (2026-10-24; Wispr Flow's
   Transforms, OpenWhispr's translation hotkey, Murmure's numbered rewrites,
   by behaviour): one-key rewrites applied **without speaking**. The list
