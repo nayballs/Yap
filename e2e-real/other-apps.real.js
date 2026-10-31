@@ -67,10 +67,11 @@ test('Silence other apps: the test pad goes quiet after the start chime, then ba
   await expect.poll(() => padLevel(robot), { timeout: 10_000 }).toBeCloseTo(before, 3);
   expect((await robot.otherApps()).quieted).toEqual([]);
   const log = robot.logSince(mark);
-  expect(log).toContain('other apps: quieted');
-  expect(log).toContain('other apps: back to its level');
+  // The words of dictation/other_apps.rs's log, shared with Yap's voice since 31 Oct.
+  expect(log).toContain('other apps: turned down');
+  expect(log).toMatch(/other apps: level set.*back=true/);
   // The start chime first: the recording began before anything went quiet.
-  expect(log.indexOf('Recording started')).toBeLessThan(log.indexOf('other apps: quieted'));
+  expect(log.indexOf('Recording started')).toBeLessThan(log.indexOf('other apps: turned down'));
 });
 
 test('Pause music and videos: the test page pauses while you dictate, then plays again', async ({ robot }) => {
