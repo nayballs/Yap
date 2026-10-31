@@ -161,6 +161,10 @@ The AI Chat surface (conversations, the tool-calling loop and its note tools) an
   question goes into the box beside them and Chat comes up with its line
   (`assistant::cant_read`). After a spoken "snip" lands, Yap listens for the
   question by itself ([snip.md](./snip.md#after-saying-snip-yap-listens-for-the-question-2026-10-25)).
+  **The passage quoted over the box** (a document's "Change this…") is kept
+  in Rust the same way (`documents::WaitingQuote`, `chat_quote_set`), and a
+  Voice Assistant question asked with Chat in view, to the conversation it's
+  quoted in, takes it (`documents.rs` above).
   **The history** is sized to the model in tokens since 2026-10-25
   ([below](#long-chats-sized-to-the-model-2026-10-25): `chat/budget.rs`,
   `chat/compact.rs`); until then it was the last 19 messages
@@ -468,8 +472,11 @@ The AI Chat surface (conversations, the tool-calling loop and its note tools) an
   "Tips" to "…"" (rewrites fold: "Rewrote 3 sections in …"). `edit_note`
   (its exact match already refuses changed text) is for a few words,
   `update_note` for the whole. **Every
-  change is a version** (`versions::by` with `kind::CHAT`; the outline is
-  Chat's first, so Undo goes back to it). The sections' chips fold into one
+  change is a version** (`versions::by` with `kind::CHAT`), and **a turn's
+  versions are one change** (2026-10-31: `chat_turn` runs inside
+  `versions::in_turn`, so each version it makes carries the turn's number,
+  `Version::turn`): the panel's Undo goes back past all of them, never to
+  half a document (below). The sections' chips fold into one
   (`push_chip`: "Wrote 3 sections in "Lone wolf ranger""). **Not action
   tools** (`tools::ACTION_TOOLS`): a build is researched on the web first,
   and these are the answer's own words — a new note, sections filled where
@@ -706,13 +713,34 @@ The AI Chat surface (conversations, the tool-calling loop and its note tools) an
   characters; `chats::set_quote`), shown above it, and the history the
   model reads later says it (`ChatMessage::sent_text`: "(About this passage
   of "…": "…")"). An older Yap's save drops `quote`: the question stays,
-  without its quote. A tool step with the rich set weighs 3,525
+  without its quote. **However the question comes** (2026-10-31): typed,
+  or dictated into the box — the dictation shortcut with the box focused,
+  its mic, sent by "Talk back hands-free" or a spoken "press enter"
+  (`deliver_to_chat` → `yap-chat-dictation` → the page's `send`) — it takes
+  the quote and the chip goes, as a typed one does; and **asked out loud
+  with the Voice Assistant's shortcut** too: the page reports the quote
+  over its box (`chat_quote_set`, `documents::WaitingQuote`, in memory;
+  `chat_send` with a `selection` clears it), and a spoken question takes it
+  (`take_waiting_quote` → `with_selection` around its turn; `yap-chat-quote
+  {quote: null}` and the chip goes; no answer → `put_back_quote`, back over
+  the box) **when Chat is in view as it's asked and the question goes to
+  the conversation it's quoted in** (`quote_goes`, pure: `in_view` is
+  `assistant::answer_in_view`). Why: the person who selected a row, chose
+  "Change this…" and then says "make this level 21 to 22 only" is looking
+  at the quote and asking about it — the maintainer's try (31 Oct 2026,
+  Claude Haiku 5.5) went without it, the model read the whole document to
+  find the row, and the chip stayed over the box after the answer; asked
+  from another app, the question is about something else, the person
+  can't see the chip, and the quote stays for the box. With the quote, the
+  window in front isn't looked at either (the passage is what it's about:
+  no "is this about the screen?" call). A tool step with the rich set weighs 3,525
   tokens (`the_rich_document_tools_are_named_and_stay_light`). Unit-tested
   (`blocks`: the cut, ids staying put, what changed, every op, all or none,
   the person's change refused, a shifted id found; `rich`: the gating, a
   read, pages, `since`, a table row, a stale edit, a move and the title,
-  history and restore, a selection's blocks; `documents`: the sets, the
-  context, `steer`, the selection line, `refuses`); e2e
+  history and restore, a selection's blocks, `edit_document` never bringing
+  back or making up a placeholder; `documents`: the sets, the context,
+  `steer`, the selection line, `refuses`, when a waiting quote goes); e2e
   `chat-documents-rich.spec.js`; evaluations `--documents --tag
   documents-edits --doc-tools rich|simple`
   ([model-evals.md](../model-evals.md#the-rich-document-tools-31-oct-2026)).
@@ -1151,8 +1179,17 @@ thoughts' text box (no rendered view there yet). Its header: the title
 as a small label (the page has it large; the body's own `# title` line
 left out), **Undo** when the newest change is
 Chat's — its writing, or a restore it did (`kind` "restored", `label`
-"Chat") — (back to the version before it: `note_version_restore`, itself a
-version), **Preview / Source** (2026-10-31, below), **expand** (covers the
+"Chat") — back to the version before **Chat's last turn** (`undoTarget`:
+every version with the newest one's `turn`; `note_version_restore`, itself
+a version). A turn writes a document a call at a time — the outline, then
+each section, each a version — and Undo used to go back one call: after
+"Wrote 5 sections" it brought the last section's placeholder back ("1
+section not written yet" and "Tips and Caveats: not written yet", the
+maintainer's Claude Haiku 5.5 document, 31 Oct 2026; the log showed all 5
+written, then a restore of the version before the last one, then the next
+turn's table edit keeping the placeholder it found). A document the last
+turn made has nothing before it: no Undo (delete it in Notes). A version
+from an older Yap (no `turn`) is a turn of its own. **Preview / Source** (2026-10-31, below), **expand** (covers the
 whole of Chat; Esc or the button puts it back), **⋯** (Find in the
 document, Copy as Markdown, Export as Markdown…, Open in Notes) and ✕. A
 status line under it: "Writing: Gear…" while a section streams, "Editing…"
@@ -1191,7 +1228,9 @@ and is sent with the next question (`selection {noteId, text, fromLine,
 toLine}`: the lines from the page's `data-line`, `renderMarkdown(…, {lines:
 true})`, plus `shownOffset` for the title line; not while a section
 streams in, when Rust finds the blocks by the words), then shown above the
-question in the thread. **A change that lands** (Chat's edit, Undo) has
+question in the thread — typed, dictated into the box, or asked out loud
+with Chat in view (the page reports it, `chat_quote_set`, and follows
+`yap-chat-quote`; `chatState.svelte.js` `reportQuote` / `onQuote`). **A change that lands** (Chat's edit, Undo) has
 its blocks washed in the accent a moment (`data-changed`, 1.6 s; the wash
 held, no fade, under reduced motion) and the first scrolled into view if
 it's off screen (the blocks new since the last drawing, by their HTML).
@@ -1222,11 +1261,13 @@ bring a document back, after a restart too (`ChatMessage.documents`).
 Tool chips for a document carry a document mark. Its own chunk, loaded
 the first time a document opens (the main window's stays near 710 kB).
 E2e: `chat-documents.spec.js` (the fake model's scripted calls; a step's
-`gate` holds it mid-turn while the spec types) and
+`gate` holds it mid-turn while the spec types; Undo of a whole turn, none
+for a document the last turn made) and
 `chat-documents-rich.spec.js` (a fake named like a GPT-5 model gets the
 rich set: a table row added, a stale edit refused, "Change this…" from a
-selection, a restore and its Undo, Preview / Source, find, copy, light and
-dark).
+selection — typed, dictated with test mode's `e2e_chat_dictation`, asked
+out loud with `e2e_assistant_ask` in view and from another app — a restore
+and its Undo, Preview / Source, find, copy, light and dark).
 
 - **`ChatView.svelte`** = the
   AI Chat surface (OpenWhispr `chat/ChatView.tsx` port): conversation sidebar

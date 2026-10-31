@@ -11,7 +11,9 @@
 //   held its read) is refused with the block as it stands now; their words
 //   stay.
 // - "Change this…" on a selected passage: the question carries it (quoted
-//   over the box and above the question), and the model is told its block.
+//   over the box and above the question), and the model is told its block —
+//   typed, dictated into the box, or asked out loud with Chat in view (from
+//   another app the quote stays for the box).
 // - restore_document brings an earlier version back, marked Chat's: the
 //   panel's Undo takes it back.
 // - Preview / Source (the markdown coloured and editable), find (Ctrl+F),
@@ -268,6 +270,96 @@ test('"Change this…" on a selected passage: quoted, sent with the question, an
     s.conversations.some((c) => c.messages.some((m) => m.role === 'user' && m.text === 'Make it shorter' && m.quote?.noteId === doc.id && m.quote.text.startsWith('A quiet, fast')))
   );
   await shot(main, '04-the-passage-changed');
+});
+
+// However the question comes it takes the quote, as a typed one does:
+// dictated into the box (test mode's stand-in for the mic; "press enter"
+// said, so it's sent by itself), or asked out loud with Chat in view (the
+// Voice Assistant). The maintainer's try, 31 Oct 2026: a table row
+// selected, "Change this…", then the question said out loud — it went
+// without the quote, and the quote stayed over the box after the answer.
+
+/** "Change this…" on the table's level-2 row (a triple-click in its cell). */
+async function changeRow(main) {
+  await docBody(main).locator('td', { hasText: 'Hide in the reeds' }).click({ clickCount: 3 });
+  const pop = main.getByTestId('chat-doc-selection');
+  await expect(pop).toBeVisible();
+  await pop.getByRole('button', { name: 'Change this…' }).click();
+  await expect(main.getByTestId('chat-quote')).toContainText('Hide in the reeds');
+}
+
+/** The model's edit of the block it was told the selection is in. */
+const editSelected = (id, markdown) => ({
+  tools: [
+    {
+      name: 'edit_document',
+      args: (r) => {
+        const m = /blocks? ([a-z][0-9a-f]{5}(?:-\d+)?) \(hash ([0-9a-f]{8})\)/.exec(r.user);
+        return { note_id: id, ops: [{ op: 'replace', id: m[1], if_hash: m[2], markdown }] };
+      },
+    },
+  ],
+});
+
+const LEVELS_21 = '| Level | Pick |\n|---|---|\n| 1 | Quick step |\n| 21–22 | Hide in the reeds |';
+
+test('a question dictated into the box takes the quoted passage, and the quote goes', async ({ yap, main, fakeLlm }) => {
+  await makeBuild(main, fakeLlm, 'Heron build');
+  const doc = (await yap.invoke('notes_list')).find((n) => n.title === 'Heron build');
+  await changeRow(main);
+  fakeLlm.scriptChat([editSelected(doc.id, LEVELS_21), { content: 'Levels 21 to 22 now.' }]);
+  await yap.invoke('e2e_chat_dictation', { text: 'Make this level twenty-one to twenty-two only, press enter' });
+  await expect(thread(main)).toContainText('Levels 21 to 22 now.', { timeout: 20_000 });
+  // The chip went with the question, which keeps it.
+  await expect(main.getByTestId('chat-quote')).toHaveCount(0);
+  await expect(thread(main).locator('.cbubble.user').last()).toContainText('Make this level twenty-one to twenty-two only');
+  await expect(thread(main).getByTestId('chat-quote-sent').last()).toContainText('Hide in the reeds');
+  // The model was told the passage and its block (the table): no reading
+  // the whole document to find it.
+  const step = fakeLlm.requests.findLast((r) => r.user.includes('Make this level twenty-one'));
+  expect(step.user).toContain('The user selected this passage in "Heron build"');
+  expect(step.user).toMatch(/It's in block t[0-9a-f]{5} \(hash [0-9a-f]{8}\)/);
+  await expect(docBody(main).locator('table')).toContainText('21–22');
+  await expectStore(yap, 'chats.json', (s) =>
+    s.conversations.some((c) => c.messages.some((m) => m.role === 'user' && m.text.startsWith('Make this level twenty-one') && m.quote?.noteId === doc.id && m.quote.text.includes('Hide in the reeds')))
+  );
+});
+
+test('asked out loud with Chat in view, a question takes the quote too; from another app it stays', async ({ yap, main, fakeLlm }) => {
+  await makeBuild(main, fakeLlm, 'Otter build');
+  const doc = (await yap.invoke('notes_list')).find((n) => n.title === 'Otter build');
+  await changeRow(main);
+  const quote = main.getByTestId('chat-quote');
+
+  // From another app (Yap's window not in view): the question is about
+  // something else, and the quote stays for the box.
+  await yap.invoke('e2e_focus', { focused: false });
+  try {
+    fakeLlm.scriptChat([{ content: 'Sunny all week.' }]);
+    await yap.invoke('e2e_assistant_ask', { text: 'What is the weather like', listenMs: 0 });
+    await expect(thread(main)).toContainText('Sunny all week.', { timeout: 20_000 });
+  } finally {
+    await yap.invoke('e2e_focus', { focused: true });
+  }
+  const away = fakeLlm.requests.find((r) => r.user.includes('What is the weather like'));
+  expect(away.user).not.toContain('The user selected this passage');
+  await expect(quote).toContainText('Hide in the reeds');
+
+  // With Chat in front: it goes with the spoken question, and the chip goes.
+  fakeLlm.scriptChat([editSelected(doc.id, LEVELS_21), { content: 'Levels 21 to 22 now.' }]);
+  await yap.invoke('e2e_assistant_ask', { text: 'Make this level twenty-one to twenty-two only.', listenMs: 0 });
+  await expect(thread(main)).toContainText('Levels 21 to 22 now.', { timeout: 20_000 });
+  await expect(quote).toHaveCount(0);
+  await expect(thread(main).getByTestId('chat-quote-sent').last()).toContainText('Hide in the reeds');
+  const step = fakeLlm.requests.findLast((r) => r.user.includes('Make this level twenty-one'));
+  expect(step.user).toContain('The user selected this passage in "Otter build"');
+  expect(step.user).toMatch(/It's in block t[0-9a-f]{5} \(hash [0-9a-f]{8}\)/);
+  // (Nor was the window in front looked at: the passage is what it's about.)
+  expect(fakeLlm.requests.some((r) => r.kind === 'screenQuestion' && r.user.includes('Make this level twenty-one'))).toBe(false);
+  await expect(docBody(main).locator('table')).toContainText('21–22');
+  await expectStore(yap, 'chats.json', (s) =>
+    s.conversations.some((c) => c.messages.some((m) => m.role === 'user' && m.voice && m.text.startsWith('Make this level twenty-one') && m.quote?.noteId === doc.id))
+  );
 });
 
 test('restore_document brings an earlier version back, and Undo takes the restore back', async ({ yap, main, fakeLlm }) => {

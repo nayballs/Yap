@@ -482,6 +482,39 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
     inputEl?.focus();
   }
 
+  // The quote over the box, in Rust too (documents.rs `chat_quote_set`): a
+  // question asked out loud with Chat in view takes it as a typed or
+  // dictated one does (`send`), in the conversation it's quoted in.
+  function reportQuote(q, conversationId) {
+    const waiting = q
+      ? { conversationId, noteId: q.noteId, title: q.title || '', text: q.text, fromLine: q.fromLine ?? null, toLine: q.toLine ?? null, mode: q.mode || '' }
+      : null;
+    invoke('chat_quote_set', { quote: waiting }).catch(() => {});
+  }
+  $effect(() => {
+    const q = quote;
+    const conv = activeId;
+    untrack(() => {
+      if (alive) reportQuote(q, conv);
+    });
+  });
+
+  /**
+   * Rust took the quote for a question asked out loud (`yap-chat-quote`
+   * `{quote: null}`: the chip goes, the question shows it), or gave it back
+   * when no answer came.
+   */
+  function onQuote(p) {
+    const q = p?.quote;
+    if (!q) {
+      quote = null;
+      return;
+    }
+    if (!quote && q.conversationId != null && q.conversationId === activeId) {
+      quote = { noteId: q.noteId, title: q.title, text: q.text, fromLine: q.fromLine ?? null, toLine: q.toLine ?? null, mode: q.mode || 'ask' };
+    }
+  }
+
   // `keepShots`: a snip landing in a new chat (Rust has the box already).
   // `keepInput`: "New chat" under a message too long for this chat — the
   // message goes with it.
@@ -1059,6 +1092,8 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
   function close() {
     alive = false;
     doc.flushSave();
+    // The quote over the box goes with the view.
+    reportQuote(null);
   }
 
   return {
@@ -1072,6 +1107,7 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
     get quote() { return quote; },
     setQuote,
     clearQuote,
+    onQuote,
     get sending() { return sending; },
     get assistantAnswering() { return assistantAnswering; },
     set assistantPhase(v) { assistantPhase = v || 'idle'; },
