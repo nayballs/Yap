@@ -1,0 +1,164 @@
+---
+import '@fontsource-variable/figtree';
+import '@fontsource-variable/eb-garamond';
+import figtreeLatin from '@fontsource-variable/figtree/files/figtree-latin-wght-normal.woff2?url';
+import '../styles/tokens.css';
+import '../styles/global.css';
+
+import { NAME, SITE_URL, INDEXABLE, SHOW_DRAFT_NOTES } from '../brand';
+import Header from '../components/Header.astro';
+import Footer from '../components/Footer.astro';
+import DownloadButton from '../components/DownloadButton.astro';
+
+interface Props {
+  /** The page's own title; the name is added after it. Leave out on the home page. */
+  title?: string;
+  description: string;
+  /** Structured data (JSON-LD) for this page. */
+  jsonLd?: Record<string, unknown>;
+  /** The slim download bar at the foot of the screen on phones. */
+  stickyCta?: boolean;
+}
+
+const { title, description, jsonLd, stickyCta = true } = Astro.props;
+const fullTitle = title ? `${title} – ${NAME}` : `${NAME}: dictation and meeting notes that run on your PC`;
+const canonical = new URL(Astro.url.pathname, SITE_URL).href;
+---
+<!doctype html>
+<html lang="en-GB">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{fullTitle}</title>
+    <meta name="description" content={description} />
+    {!INDEXABLE && <meta name="robots" content="noindex, nofollow" />}
+    <link rel="canonical" href={canonical} />
+    <meta name="color-scheme" content="light dark" />
+    <meta name="theme-color" content="#f0ede7" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#161410" media="(prefers-color-scheme: dark)" />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="preload" href={figtreeLatin} as="font" type="font/woff2" crossorigin />
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content={NAME} />
+    <meta property="og:title" content={fullTitle} />
+    <meta property="og:description" content={description} />
+    <meta property="og:url" content={canonical} />
+    <meta name="twitter:card" content="summary" />
+    <script is:inline src="/theme.js"></script>
+    {jsonLd && <script type="application/ld+json" set:html={JSON.stringify(jsonLd)} />}
+  </head>
+  <body>
+    <a class="skip" href="#main">Skip to content</a>
+    {SHOW_DRAFT_NOTES && (
+      <p class="preview-strip">
+        Draft preview, not public and not indexed. The name <strong>{NAME}</strong> and the domain are placeholders; dashed notes are for the maintainer.
+      </p>
+    )}
+    <Header />
+    <main id="main" class="sheet">
+      <slot />
+    </main>
+    <Footer />
+    {stickyCta && (
+      <div class="mbar" data-mbar hidden>
+        <DownloadButton size="md" />
+      </div>
+    )}
+  </body>
+</html>
+
+<script>
+  // The download buttons follow the visitor's device (no request, no storage):
+  // Windows keeps the installer link; a Mac or Linux PC learns it's Windows-only
+  // for now; a phone gets the download page's link to open on a PC later.
+  type UAData = { platform?: string; mobile?: boolean };
+  const nav = navigator as Navigator & { userAgentData?: UAData };
+  const ua = navigator.userAgent;
+  const platform = nav.userAgentData?.platform ?? navigator.platform ?? '';
+  const phone = nav.userAgentData?.mobile ?? /Android|iPhone|iPad|iPod|Mobile/i.test(ua);
+  const windows = /win/i.test(platform) || /Windows NT/i.test(ua);
+  const os = phone ? 'phone' : windows ? 'windows' : 'other';
+  document.documentElement.dataset.os = os;
+
+  for (const a of document.querySelectorAll<HTMLAnchorElement>('a[data-dl="auto"]')) {
+    const label = a.querySelector<HTMLElement>('[data-dl-label]');
+    if (!label) continue;
+    if (os === 'other') {
+      label.textContent = 'Windows only for now';
+      a.href = '/download#other-platforms';
+    } else if (os === 'phone') {
+      label.textContent = 'Get it on your PC';
+      a.href = '/download';
+      a.addEventListener('click', async (e) => {
+        const url = new URL('/download', location.href).href;
+        if (navigator.share) {
+          e.preventDefault();
+          try {
+            await navigator.share({ title: document.title, url });
+          } catch {
+            /* the visitor closed the share sheet */
+          }
+        } else if (navigator.clipboard) {
+          e.preventDefault();
+          try {
+            await navigator.clipboard.writeText(url);
+            label.textContent = 'Link copied';
+            setTimeout(() => (label.textContent = 'Get it on your PC'), 2500);
+          } catch {
+            location.href = url;
+          }
+        }
+      });
+    }
+  }
+
+  // On phones, a slim download bar once the page's first button has scrolled away.
+  const bar = document.querySelector<HTMLElement>('[data-mbar]');
+  const first = document.querySelector('[data-dl-primary]');
+  if (bar) {
+    if (!first) {
+      // No button near the top: show the bar once the first screen has gone by.
+      const update = () => (bar.hidden = window.scrollY < window.innerHeight * 0.8);
+      addEventListener('scroll', update, { passive: true });
+      update();
+    } else {
+      new IntersectionObserver(([e]) => {
+        bar.hidden = e.isIntersecting || e.boundingClientRect.top > 0;
+      }).observe(first);
+    }
+  }
+</script>
+
+<style>
+  .preview-strip {
+    margin: 0;
+    max-width: none;
+    padding: 7px 16px;
+    text-align: center;
+    font-size: 0.8125rem;
+    color: var(--t-fg-80);
+    background: color-mix(in srgb, var(--t-warning) 12%, var(--t-bg));
+    border-bottom: 1px dashed var(--t-warning);
+  }
+  .mbar {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 40;
+    display: none;
+    justify-content: center;
+    padding: 10px 16px calc(10px + env(safe-area-inset-bottom));
+    background: color-mix(in srgb, var(--t-bg) 94%, transparent);
+    border-top: 1px solid var(--t-border);
+  }
+  .mbar :global(.dl),
+  .mbar :global(.btn) {
+    width: 100%;
+  }
+  @media (max-width: 760px) {
+    .mbar:not([hidden]) {
+      display: flex;
+    }
+  }
+</style>

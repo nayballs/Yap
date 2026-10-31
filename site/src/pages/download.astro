@@ -1,0 +1,264 @@
+---
+import Layout from '../layouts/Layout.astro';
+import DownloadButton from '../components/DownloadButton.astro';
+import Placeholder from '../components/Placeholder.astro';
+import Keys from '../components/Keys.astro';
+import Faq from '../components/Faq.astro';
+import DraftNote from '../components/DraftNote.astro';
+import {
+  NAME,
+  HOTKEY,
+  REPO,
+  DOWNLOAD_NIGHTLY,
+  LATEST_RELEASE_URL,
+  NIGHTLY_RELEASE_URL,
+  RELEASES_URL,
+  STABLE_INSTALLER,
+} from '../brand';
+import { faqFor } from '../data/faq';
+import { stableRelease, nightlyRelease } from '../lib/release';
+
+const stable = await stableRelease();
+const nightly = await nightlyRelease();
+
+const platforms = [
+  { name: 'Windows 10 and 11', status: 'Available', what: 'This page.' },
+  { name: 'Linux', status: 'Planned', what: 'After Windows is solid. No date yet.' },
+  { name: 'macOS', status: 'Planned', what: 'After Windows is solid. No date yet.' },
+  { name: 'Android', status: 'Being designed', what: `First as a remote: talk into your phone and your PC does the work. ${NAME} Link already does this at home, in the phone’s browser.` },
+  { name: 'iPhone', status: 'Later', what: 'After Android.' },
+];
+---
+<Layout
+  title="Download"
+  description={`Download ${NAME} for Windows 10 and 11: one installer, no account, no email. Version, size and SHA-256 checksum on the page.`}
+  stickyCta={false}
+>
+  <section class="dl-hero">
+    <div class="wrap split">
+      <div class="stack">
+        <h1>Download {NAME} for Windows</h1>
+        <p class="lede">One installer. No account, no email, nothing to sign up for. It sets itself up for your PC’s graphics card, or for none.</p>
+        <div class="btn-row mt-3">
+          <DownloadButton size="lg" fixed primary label={`Download ${NAME} for Windows`} />
+        </div>
+        <p class="os-note">You’re not on Windows right now. This installer is for a Windows 10 or 11 PC; see <a href="#other-platforms">other platforms</a>.</p>
+      </div>
+
+      <div class="card facts-card">
+        <h2 class="sr-only">About this download</h2>
+        <dl>
+          <div><dt>Version</dt><dd>{stable?.version ?? 'The latest stable release'}</dd></div>
+          {stable?.date && <div><dt>Released</dt><dd><time datetime={stable.dateIso}>{stable.date}</time></dd></div>}
+          {stable?.size && <div><dt>Size</dt><dd>{stable.size}</dd></div>}
+          <div><dt>File</dt><dd><code>{STABLE_INSTALLER}</code></dd></div>
+          {stable?.sha256 && (
+            <div class="sha">
+              <dt>SHA-256</dt>
+              <dd>
+                <code data-sha>{stable.sha256}</code>
+                <button class="btn btn-quiet btn-sm copy" type="button" data-copy={stable.sha256} hidden>Copy</button>
+              </dd>
+            </div>
+          )}
+          <div><dt>Built by</dt><dd>GitHub Actions, in public. <a href={LATEST_RELEASE_URL}>Release notes</a></dd></div>
+        </dl>
+        <p class="small muted mt-2">Check the file in PowerShell with <code>Get-FileHash {STABLE_INSTALLER}</code>, or its build with <code>gh attestation verify {STABLE_INSTALLER} --repo {REPO}</code>.</p>
+      </div>
+    </div>
+    <div class="wrap mt-4">
+      <DraftNote>
+        The stable release is v{stable?.version ?? '?'} ({stable?.date ?? 'date unknown'}); much of what this site describes (Chat documents, effort levels, {NAME} Link…) is only in the nightly so far. Cut a stable before launch. Build provenance and SHA256SUMS.txt start with releases after 25 Oct, so the attestation command won’t work on this one; the checksum shown is the one GitHub records. Store, winget and a VirusTotal link wait for their decisions (plan §3.5).
+      </DraftNote>
+    </div>
+  </section>
+
+  <section class="section ruled" aria-labelledby="nightly-h">
+    <div class="wrap split">
+      <div class="stack">
+        <h2 id="nightly-h">Want changes sooner?</h2>
+        <p class="lede">The nightly is built every day from the newest code. It updates itself daily, on its own channel, and now and then has a rough edge.</p>
+      </div>
+      <div class="card nightly">
+        <p><strong>Nightly</strong>{nightly?.version && <span class="muted"> {nightly.version}</span>}</p>
+        {(nightly?.date || nightly?.size) && (
+          <p class="small muted">{[nightly?.date && `Built ${nightly.date}`, nightly?.size].filter(Boolean).join(', ')}</p>
+        )}
+        <div class="btn-row mt-2">
+          <a class="btn btn-quiet" href={DOWNLOAD_NIGHTLY}>Download the nightly</a>
+          <a href={NIGHTLY_RELEASE_URL}>What’s in it</a>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="section ruled" aria-labelledby="first-h">
+    <div class="wrap">
+      <div class="section-head">
+        <h2 id="first-h">Your first dictation, in three steps</h2>
+      </div>
+      <ol class="first">
+        <li><span class="num">1</span><div><h3>Run the installer</h3><p>Choose a normal install, or a portable one that keeps everything in its own folder.</p></div></li>
+        <li><span class="num">2</span><div><h3>Pick a speech model</h3><p>Setup suggests the one that suits your PC and languages, and downloads it.</p></div></li>
+        <li><span class="num">3</span><div><h3>Press <Keys combo={HOTKEY} /> and talk</h3><p>Click into any text box first. Press again when you’re done.</p></div></li>
+      </ol>
+    </div>
+  </section>
+
+  <section class="section ruled" aria-labelledby="warn-h">
+    <div class="wrap split split-media">
+      <div class="stack">
+        <h2 id="warn-h">Why does Windows warn me?</h2>
+        <p class="lede">{NAME} isn’t code-signed yet, so the first time you run the installer, Windows SmartScreen shows “Windows protected your PC”.</p>
+        <ol class="warn-steps">
+          <li>Choose <strong>More info</strong>.</li>
+          <li>Check the publisher line says <em>Unknown publisher</em> and the file is <code>{STABLE_INSTALLER}</code>.</li>
+          <li>Choose <strong>Run anyway</strong>.</li>
+        </ol>
+        <p>If Smart App Control is on, Windows may not offer Run anyway. Signing is on its way and will remove this step.</p>
+      </div>
+      <Placeholder id="A13" title="SmartScreen, step by step" shows="“Windows protected your PC”, More info, Run anyway; and the Smart App Control dialog." format="PNG" ratio="wide" />
+    </div>
+  </section>
+
+  <section class="section ruled" aria-labelledby="req-h">
+    <div class="wrap split">
+      <div class="stack">
+        <h2 id="req-h">What you need</h2>
+      </div>
+      <div class="rows">
+        <div class="row"><h3>Windows</h3><p>Windows 10 or 11, 64-bit.</p></div>
+        <div class="row"><h3>Graphics</h3><p>Any graphics card, NVIDIA, AMD or Intel, or none: speech can run on the processor.</p></div>
+        <div class="row"><h3>Disk</h3><p>About 20 MB for the app, plus the speech model you pick (around 0.5 GB for the recommended one). An AI model on your PC, if you want one, is a few gigabytes more.</p></div>
+        <div class="row"><h3>A microphone</h3><p>Built in, USB or a headset. Setup has a short test that finds your best one.</p></div>
+      </div>
+    </div>
+    <div class="wrap mt-3">
+      <DraftNote>Confirm the oldest Windows 10 build it runs on, and Arm PCs under emulation, before naming either (plan §4.5).</DraftNote>
+    </div>
+  </section>
+
+  <section class="section ruled" id="other-platforms" aria-labelledby="plat-h">
+    <div class="wrap">
+      <div class="section-head">
+        <h2 id="plat-h">Other platforms</h2>
+        <p>Where each one stands. No dates, because we’d rather not guess.</p>
+      </div>
+      <div class="table-wrap">
+        <table class="table-stack">
+          <caption class="sr-only">Platforms and their status</caption>
+          <thead><tr><th scope="col">Platform</th><th scope="col">Status</th><th scope="col">What that means</th></tr></thead>
+          <tbody>
+            {platforms.map((p) => (
+              <tr>
+                <th scope="row">{p.name}</th>
+                <td data-label="Status"><span class:list={['tag', p.status === 'Available' && 'tag-amber']}>{p.status}</span></td>
+                <td data-label="What that means">{p.what}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <p class="mt-3 muted">Want to know when? Watch the project’s <a href={RELEASES_URL}>releases on GitHub</a>. There’s no mailing list.</p>
+    </div>
+  </section>
+
+  <Faq items={faqFor('download')} />
+</Layout>
+
+<script>
+  for (const b of document.querySelectorAll<HTMLButtonElement>('[data-copy]')) {
+    if (!navigator.clipboard) continue;
+    b.hidden = false;
+    b.addEventListener('click', async () => {
+      try {
+        await navigator.clipboard.writeText(b.dataset.copy ?? '');
+        b.textContent = 'Copied';
+      } catch {
+        b.textContent = 'Couldn’t copy';
+      }
+      setTimeout(() => (b.textContent = 'Copy'), 2000);
+    });
+  }
+</script>
+
+<style>
+  .dl-hero {
+    padding-block: clamp(48px, 7vw, 96px) clamp(32px, 4vw, 56px);
+  }
+  .os-note {
+    display: none;
+    font-size: 0.9375rem;
+    color: var(--t-muted);
+  }
+  :global([data-os='other']) .os-note,
+  :global([data-os='phone']) .os-note {
+    display: block;
+  }
+  .facts-card dl {
+    margin: 0;
+    display: grid;
+  }
+  .facts-card dl > div {
+    display: grid;
+    grid-template-columns: 7rem minmax(0, 1fr);
+    gap: 12px;
+    padding-block: 10px;
+    border-top: 1px solid var(--t-rule);
+  }
+  .facts-card dl > div:first-of-type {
+    border-top: 0;
+  }
+  .facts-card dt {
+    color: var(--t-muted);
+    font-size: 0.9375rem;
+  }
+  .facts-card dd {
+    margin: 0;
+    min-width: 0;
+  }
+  .sha dd {
+    display: grid;
+    gap: 8px;
+    justify-items: start;
+  }
+  .sha code {
+    font-size: 0.8125rem;
+    word-break: break-all;
+  }
+  .nightly {
+    display: grid;
+    gap: 4px;
+  }
+  .first {
+    list-style: none;
+    padding: 0;
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 24px;
+  }
+  .first li {
+    display: flex;
+    gap: 16px;
+  }
+  .first .num {
+    font-size: 2.6rem;
+    line-height: 0.9;
+    color: var(--t-link);
+  }
+  .first h3 {
+    margin-bottom: 6px;
+  }
+  .first p {
+    color: var(--t-fg-80);
+  }
+  @media (max-width: 860px) {
+    .first {
+      grid-template-columns: 1fr;
+    }
+  }
+  .warn-steps {
+    display: grid;
+    gap: 6px;
+  }
+</style>

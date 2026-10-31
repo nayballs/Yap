@@ -1,0 +1,28 @@
+---
+import { LEAVES } from '../data/leaves';
+interface Props {
+  short?: boolean;
+}
+const rows = Astro.props.short ? LEAVES.filter((r) => r.short) : LEAVES;
+---
+<div class="table-wrap">
+  <table class="table-stack">
+    <caption class="sr-only">What stays on your PC, and what goes online</caption>
+    <thead>
+      <tr>
+        <th scope="col">What</th>
+        <th scope="col">On your PC</th>
+        <th scope="col">What goes online</th>
+      </tr>
+    </thead>
+    <tbody>
+      {rows.map((r) => (
+        <tr>
+          <th scope="row">{r.what}</th>
+          <td data-label="On your PC">{r.where || '–'}</td>
+          <td data-label="Online">{r.online}</td>
+        </tr>
+      ))}
+    </tbody>
+  </table>
+</div>
