@@ -1663,7 +1663,8 @@ pub fn link_imported(app: &AppHandle, note_id: u64) -> bool {
         return false;
     }
     tracing::info!(note_id, "calendar: an imported meeting tied to its calendar meeting");
-    filing::file_linked(note_id, &event.key);
+    // Its series' folder rule, else its attendees' company's.
+    filing::file_linked(note_id, &event.key, &emails_of(&event));
     crate::notes::commands::note_changed(app, note_id, "calendar");
     emit(app);
     true
