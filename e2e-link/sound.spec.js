@@ -1,7 +1,7 @@
 // The answer's sound on the phone: one stream from a jitter buffer
-// (player-worklet.js, dsp.js `Playout`), "Clearer sound in a headset" (the
-// mic closed while Yap talks) and Sound details. Yap on the PC mocked; the
-// mic the looped 440 Hz tone.
+// (player-worklet.js, dsp.js `Playout`), "Clearer sound in a headset" (on by
+// default: the mic closed while Yap talks) and Sound details. Yap on the PC
+// mocked; the mic the looped 440 Hz tone.
 import { test, expect } from '@playwright/test';
 import { servePage, seedDevice, mockPc, open, ready, ask, snapshot, downFrame, voice } from './support/harness.js';
 
@@ -24,6 +24,19 @@ async function watchTracks(page) {
     live: () => page.evaluate(() => window.__tracks.filter((t) => t.readyState === 'live').length),
   };
 }
+
+/** "Clearer sound in a headset" as if the person had chosen it before (once: a later visit keeps what the page saved). */
+async function chooseClearer(page, on) {
+  await page.addInitScript((on) => {
+    if (!sessionStorage.getItem('seeded-clearer')) {
+      localStorage.setItem('yap.link.clearer', JSON.stringify(on));
+      sessionStorage.setItem('seeded-clearer', '1');
+    }
+  }, on);
+}
+
+const CLEARER_HINT =
+  "A headset's call mode can crackle, so this closes the mic while Yap talks and the headset uses its music mode. You can't talk over Yap by voice; Stop still works.";
 
 /** An answer: speak_start, `n` frames of `ms` each, speak_end, idle. */
 function speak(pc, n, ms = 100, end = true) {
@@ -116,14 +129,83 @@ test('a late frame: one underrun, faded out and back in, never a hard cut', asyn
   await expect(page.getByTestId('sound-gaps')).toHaveText('1 (the sound ran dry and paused)');
 });
 
+test('Clearer sound in a headset: on by default; a saved choice is kept', async ({ page }) => {
+  const pc = await mockPc(page);
+  await open(page);
+  await ready(page, pc);
+  // Nobody's chosen yet: on, and nothing saved until they do.
+  const sw = page.getByTestId('clearer');
+  await expect(sw).toBeChecked();
+  expect((await snapshot(page)).clearer).toBe(true);
+  expect(await page.evaluate(() => localStorage.getItem('yap.link.clearer'))).toBeNull();
+  await expect(page.getByText(CLEARER_HINT)).toBeVisible();
+
+  // Turned off: saved, and still off on the next visit.
+  await page.getByText('Clearer sound in a headset').click();
+  await expect(sw).not.toBeChecked();
+  expect(await page.evaluate(() => localStorage.getItem('yap.link.clearer'))).toBe('false');
+  await open(page);
+  await ready(page, pc);
+  await expect(page.getByTestId('clearer')).not.toBeChecked();
+  expect((await snapshot(page)).clearer).toBe(false);
+
+  // On again: saved as on.
+  await page.getByText('Clearer sound in a headset').click();
+  expect(await page.evaluate(() => localStorage.getItem('yap.link.clearer'))).toBe('true');
+  await open(page);
+  await ready(page, pc);
+  await expect(page.getByTestId('clearer')).toBeChecked();
+});
+
+test('Clearer sound off (a saved choice): talking over Yap uses the mic already open', async ({ page }) => {
+  await chooseClearer(page, false);
+  const tracks = await watchTracks(page);
+  const pc = await mockPc(page);
+  await open(page);
+  await ready(page, pc);
+  await expect(page.getByTestId('clearer')).not.toBeChecked();
+  await ask(page, pc);
+  speak(pc, 30, 100, false);
+  await expect.poll(async () => (await player(page)).state).toBe('playing');
+  // The mic open while Yap talks (the headset in call mode)…
+  expect(await tracks.live()).toBe(1);
+  const opened = await tracks.opened();
+  // …so Talk listens at once, on the same mic: interrupt, then start.
+  await page.getByTestId('talk').click();
+  await expect.poll(() => pc.of('start').length).toBe(2);
+  expect(pc.types().filter((t) => t !== 'ping').slice(-2)).toEqual(['interrupt', 'start']);
+  await expect(page.getByTestId('phase')).toHaveText('Listening');
+  expect(await tracks.opened()).toBe(opened);
+  expect(await tracks.live()).toBe(1);
+});
+
+test('Clearer sound on (the default): talking over Yap opens the mic afresh, then listens', async ({ page }) => {
+  const tracks = await watchTracks(page);
+  const pc = await mockPc(page);
+  await open(page);
+  await ready(page, pc);
+  await ask(page, pc);
+  speak(pc, 30, 100, false);
+  await expect.poll(async () => (await player(page)).state).toBe('playing');
+  expect(await tracks.live()).toBe(0);
+  const opened = await tracks.opened();
+  await page.getByTestId('talk').click();
+  await expect.poll(() => pc.of('start').length).toBe(2);
+  expect(pc.types().filter((t) => t !== 'ping').slice(-2)).toEqual(['interrupt', 'start']);
+  await expect(page.getByTestId('phase')).toHaveText('Listening');
+  expect(await tracks.opened()).toBe(opened + 1);
+  const frames = pc.frames.length;
+  await expect.poll(() => pc.frames.length - frames).toBeGreaterThan(10);
+});
+
 test('Clearer sound in a headset: the mic let go while Yap talks, open again after', async ({ page }) => {
+  await chooseClearer(page, false);
   const tracks = await watchTracks(page);
   const pc = await mockPc(page);
   await open(page);
   await ready(page, pc);
   const sw = page.getByTestId('clearer');
   await expect(sw).not.toBeChecked();
-  await expect(page.getByText("Closes the mic while Yap talks, so the headset can use its music mode. You can't talk over Yap by voice; Stop still works.")).toBeVisible();
 
   // Off: the mic stays open through the answer (the headset in call mode).
   await ask(page, pc);
@@ -184,17 +266,25 @@ test('Sound details: the rate, latency, the last answer, the mic and the browser
   await expect(page.getByTestId('sound-rate')).toHaveText('Shown once you’ve asked something');
   await expect(page.getByTestId('sound-start')).toHaveText('No answer yet');
   await expect(page.getByTestId('sound-mic-now')).toHaveText('Closed');
-  await expect(page.getByTestId('sound-browser')).toHaveText(/^(Chrome|Edge) \d+ on Windows$/);
+  await expect(page.getByTestId('sound-mic-step')).toHaveText('Not opened yet');
+  await expect(page.getByTestId('sound-browser')).toHaveText(/^(Chrome|Edge|Firefox) \d+ on Windows$/);
 
-  await ask(page, pc);
+  // While the mic opens, the step it's on; then the last one and the whole time.
+  await page.getByTestId('talk').click();
+  await expect(page.getByTestId('sound-mic-step')).toHaveText(/^Waiting for sound from the mic: \d+ ms \(open after [\d,.]+ (ms|s)\)$/);
+  await expect.poll(() => pc.frames.length).toBeGreaterThan(20);
+  await page.getByTestId('talk').click();
+  await expect.poll(() => pc.of('stop').length).toBe(1);
+  expect((await snapshot(page)).micStep).toMatchObject({ name: 'live', state: 'open' });
   speak(pc, 6, 100);
   await expect.poll(async () => (await player(page)).active, { timeout: 4000 }).toBe(false);
   await expect(page.getByTestId('sound-rate')).toHaveText(/^(44,100|48,000) Hz$/);
-  await expect(page.getByTestId('sound-latency')).toHaveText(/^Base \d+ ms( · Output \d+ ms)?$/);
+  await expect(page.getByTestId('sound-latency')).toHaveText(/^(Base \d+ ms( · Output \d+ ms)?|Output \d+ ms|Not given by this browser)$/);
   await expect(page.getByTestId('sound-start')).toHaveText(/^0\.6 s played; started after \d+ ms, with \d{3} ms buffered$/);
   await expect(page.getByTestId('sound-gaps')).toHaveText('None');
-  await expect(page.getByTestId('sound-mic')).toHaveText('Open (the headset in call mode)');
-  await expect(page.getByTestId('sound-mic-now')).toHaveText('Open');
+  // Clearer sound (on by default): the mic let go while it played.
+  await expect(page.getByTestId('sound-mic')).toHaveText('Closed');
+  await expect(page.getByTestId('sound-mic-now')).toHaveText('Closed');
   // Each row as a term and its value, for a screen reader too.
   const terms = await sound.locator('dt').allTextContents();
   expect(terms).toEqual([
@@ -204,6 +294,20 @@ test('Sound details: the rate, latency, the last answer, the mic and the browser
     'Gaps in it',
     'Microphone while it played',
     'Microphone now',
+    'Opening the microphone',
     'Browser',
   ]);
+});
+
+test('Sound details, the mic open while it played (Clearer sound off)', async ({ page }) => {
+  await chooseClearer(page, false);
+  const pc = await mockPc(page);
+  await open(page);
+  await ready(page, pc);
+  await page.getByText('Sound details').click();
+  await ask(page, pc);
+  speak(pc, 6, 100);
+  await expect.poll(async () => (await player(page)).active, { timeout: 4000 }).toBe(false);
+  await expect(page.getByTestId('sound-mic')).toHaveText('Open (the headset in call mode)');
+  await expect(page.getByTestId('sound-mic-now')).toHaveText('Open');
 });
