@@ -1,0 +1,49 @@
+---
+// The download button. Static HTML says "Download for Windows" and links the
+// stable installer. A small script (in the layout) adapts it to the visitor's
+// device: on a Mac or Linux PC it says "Windows only for now" and opens the
+// other-platforms table; on a phone it says "Get it on your PC" and shares or
+// copies the download page's link. `fixed` keeps the direct link everywhere
+// (the download page itself). `meta` adds version, size and "no account".
+import { DOWNLOAD_STABLE } from '../brand';
+import { stableRelease } from '../lib/release';
+
+interface Props {
+  size?: 'sm' | 'md' | 'lg';
+  meta?: boolean;
+  fixed?: boolean;
+  primary?: boolean;
+  label?: string;
+  quiet?: boolean;
+}
+const { size = 'md', meta = false, fixed = false, primary = false, label = 'Download for Windows', quiet = false } = Astro.props;
+const rel = meta ? await stableRelease() : null;
+const metaText = [rel?.version && `Version ${rel.version}`, rel?.size, 'no account needed'].filter(Boolean).join(', ');
+---
+<span class:list={['dl', { 'dl-block': meta }]}>
+  <a
+    class:list={['btn', quiet ? 'btn-quiet' : 'btn-primary', size === 'sm' && 'btn-sm', size === 'lg' && 'btn-lg']}
+    href={DOWNLOAD_STABLE}
+    data-dl={fixed ? 'fixed' : 'auto'}
+    data-dl-primary={primary ? '' : undefined}
+  >
+    <svg viewBox="0 0 20 20" aria-hidden="true" focusable="false"><path d="M10 3v9.2m0 0 3.6-3.6M10 12.2 6.4 8.6M4 15.5h12" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    <span data-dl-label>{label}</span>
+  </a>
+  {meta && <span class="dl-meta">{metaText.charAt(0).toUpperCase() + metaText.slice(1)}</span>}
+</span>
+
+<style>
+  .dl {
+    display: inline-flex;
+  }
+  .dl-block {
+    display: inline-grid;
+    gap: 10px;
+    justify-items: start;
+  }
+  .dl-meta {
+    font-size: 0.875rem;
+    color: var(--t-muted);
+  }
+</style>

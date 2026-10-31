@@ -1,0 +1,208 @@
+---
+import Layout from '../layouts/Layout.astro';
+import PageHero from '../components/PageHero.astro';
+import LeavesTable from '../components/LeavesTable.astro';
+import Placeholder from '../components/Placeholder.astro';
+import Faq from '../components/Faq.astro';
+import Closing from '../components/Closing.astro';
+import DraftNote from '../components/DraftNote.astro';
+import Keys from '../components/Keys.astro';
+import { NAME, HOTKEY, REPO, REPO_URL, SECURITY_REPORT_URL, SECURITY_POLICY_URL, STABLE_INSTALLER } from '../brand';
+import { faqFor } from '../data/faq';
+---
+<Layout
+  title="Privacy and data"
+  description={`How ${NAME} keeps your voice on your PC: what happens when you press the key, exactly what goes online and when, and how to check it yourself.`}
+>
+  <PageHero
+    title="Your voice doesn’t leave your PC"
+    lede="Not “encrypted and deleted later”: transcribed on your own hardware. Here’s exactly what does go online, when, and how to check it yourself."
+    cta={false}
+  />
+
+  <section class="section ruled" aria-labelledby="press-h">
+    <div class="wrap">
+      <div class="section-head">
+        <h2 id="press-h">What happens when you press <Keys combo={HOTKEY} /></h2>
+      </div>
+      <ol class="flow">
+        <li><span class="num">1</span><h3>The microphone opens</h3><p>Only now, and it closes a minute after you finish.</p></li>
+        <li><span class="num">2</span><h3>Your PC turns speech into text</h3><p>On your graphics card or processor. The audio isn’t sent anywhere.</p></li>
+        <li><span class="num">3</span><h3>Cleanup tidies it, if you want</h3><p>With the model on your PC, or the provider whose key you added.</p></li>
+        <li><span class="num">4</span><h3>It’s pasted, and your clipboard put back</h3><p>Kept out of Win+V history and the cloud clipboard.</p></li>
+      </ol>
+      <p class="mt-3 muted">Nothing in these four steps leaves your PC unless you chose a cloud model for step 3.</p>
+    </div>
+  </section>
+
+  <section class="section ruled" id="what-leaves" aria-labelledby="leaves-h">
+    <div class="wrap">
+      <div class="section-head">
+        <h2 id="leaves-h">What leaves your PC</h2>
+        <p>Everything {NAME} does, where it happens, and what goes online. The same list is in the app, under Settings → Privacy &amp; data.</p>
+      </div>
+      <LeavesTable />
+    </div>
+  </section>
+
+  <section class="section ruled" aria-labelledby="check-h">
+    <div class="wrap split">
+      <div>
+        <div class="section-head">
+          <h2 id="check-h">Check it yourself</h2>
+          <p>You shouldn’t have to take our word for it.</p>
+        </div>
+        <div class="rows">
+          <div class="row">
+            <h3>Every connection, listed</h3>
+            <p>Settings → Privacy &amp; data → Network connections shows each connection {NAME} made in the last week: when, to which host, and why. Never what was in it.</p>
+          </div>
+          <div class="row">
+            <h3>Turn the Wi-Fi off</h3>
+            <p>Dictation, cleanup with the model on your PC, and meeting notes keep working.</p>
+          </div>
+          <div class="row">
+            <h3>Read the code</h3>
+            <p>Every request in the app goes through one place in the source, which records it for that list. <a href={REPO_URL}>The code is on GitHub</a>.</p>
+          </div>
+          <div class="row">
+            <h3>Take your data with you</h3>
+            <p>Download your data makes one .zip of your history, notes, meetings, chats and settings, saved where you choose. Reset app clears it all and keeps your settings.</p>
+          </div>
+        </div>
+      </div>
+      <div class="stack">
+        <Placeholder id="A11" title="Network connections" shows="Settings → Privacy & data: a day’s connections, by purpose and host." format="PNG, light and dark" ratio="tall" />
+        <DraftNote>The Wi-Fi-off clip (A6) goes here too. Verify each “keeps working” feature with the Wi-Fi off before launch (plan §4.1).</DraftNote>
+      </div>
+    </div>
+  </section>
+
+  <section class="section ruled" aria-labelledby="tele-h">
+    <div class="wrap split">
+      <div class="stack">
+        <h2 id="tele-h">No telemetry</h2>
+        <p class="lede">No analytics, no usage tracking and no automatic crash reports. The account is optional, and a signed-out {NAME} never contacts the account service on its own.</p>
+      </div>
+      <div class="stack">
+        <p>When something goes wrong, <strong>Report a problem</strong> (Settings → About) makes a diagnostic file: the system, a summary of your settings and recent logs, with anything personal left out. You read it before you save it, and nothing is uploaded. You choose whether to attach it to an issue.</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="section ruled" aria-labelledby="access-h">
+    <div class="wrap">
+      <div class="section-head">
+        <h2 id="access-h">What {NAME} can reach on your PC, and why</h2>
+        <p>A dictation app needs some deep access to Windows. Here is all of it.</p>
+      </div>
+      <div class="rows">
+        <div class="row"><h3>Your keyboard and mouse</h3><p>A low-level hook watches for your shortcuts and nothing else is kept.</p></div>
+        <div class="row"><h3>The clipboard and key presses</h3><p>To paste: your text goes on the clipboard in a private format, the app’s paste keys are pressed, and your clipboard is put back.</p></div>
+        <div class="row"><h3>The text box you’re in</h3><p>Through Windows’ UI Automation: the text around your cursor (for spacing and capitals), the names on screen (for that dictation only), and, for a minute after a paste, whether you corrected a word, so it can suggest it for the dictionary. You can switch off the last two.</p></div>
+        <div class="row"><h3>The microphone</h3><p>Only while you dictate, ask or take meeting notes, and for a minute after.</p></div>
+        <div class="row"><h3>The sound your PC plays</h3><p>Only while you take meeting notes, so the other side of the call is in the transcript.</p></div>
+        <div class="row"><h3>The window in front</h3><p>When you snip a screenshot, or ask the Voice Assistant about your screen.</p></div>
+      </div>
+      <p class="mt-3 muted small">Some antivirus tools are wary of apps that hook the keyboard and press keys. If yours flags {NAME}, check the installer’s checksum against the release and add an exception.</p>
+    </div>
+  </section>
+
+  <section class="section ruled" aria-labelledby="site-h">
+    <div class="wrap split">
+      <div class="stack">
+        <h2 id="site-h">This website</h2>
+        <p class="lede">No cookies, no analytics, and nothing loaded from anyone else: the pages, fonts and pictures all come from this site.</p>
+      </div>
+      <ul class="ticks">
+        <li>No cookie banner, because there are no cookies</li>
+        <li>No tracking pixels, no third-party scripts, no embedded videos from elsewhere</li>
+        <li>Your theme choice, if you make one, is kept in your browser on this device only</li>
+        <li>A strict Content Security Policy that only allows this site’s own files</li>
+      </ul>
+    </div>
+  </section>
+
+  <section class="section ruled" aria-labelledby="sec-h">
+    <div class="wrap split">
+      <div class="stack">
+        <h2 id="sec-h">Security</h2>
+        <p class="lede">Found a vulnerability? Please <a href={SECURITY_REPORT_URL}>report it privately</a> on GitHub. You’ll hear back within a week. <a href={SECURITY_POLICY_URL}>The security policy</a> says what’s in scope.</p>
+      </div>
+      <div class="stack">
+        <p>Each new release lists the SHA-256 checksum of every file, and a build provenance signed by GitHub that says which workflow and commit built it. Check a download with:</p>
+        <p><code>gh attestation verify {STABLE_INSTALLER} --repo {REPO}</code></p>
+        <p>Updates are signed, and {NAME} checks the signature before it installs one.</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="section ruled" aria-labelledby="limits-h">
+    <div class="wrap">
+      <div class="section-head">
+        <h2 id="limits-h">The honest limits</h2>
+        <p>Some choices do send text elsewhere. They’re all off until you choose them.</p>
+      </div>
+      <ul class="limits">
+        <li>Choose a cloud AI model and that provider sees the text you send it.</li>
+        <li>ElevenLabs sees the text it reads aloud.</li>
+        <li>Web search sends your search to the search service.</li>
+        <li>Calendar sync reads from Google or your calendar’s host.</li>
+        <li>Speech models, voices and updates are downloaded from the internet.</li>
+      </ul>
+      <p class="mt-3"><a href="/legal/privacy-policy">The privacy policy</a></p>
+    </div>
+  </section>
+
+  <Faq items={faqFor('privacy')} />
+  <Closing />
+</Layout>
+
+<style>
+  .flow {
+    list-style: none;
+    padding: 0;
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 16px;
+    counter-reset: none;
+  }
+  .flow li {
+    position: relative;
+    display: grid;
+    gap: 8px;
+    align-content: start;
+    padding: 20px;
+    border-radius: 14px;
+    background: var(--t-s2);
+    border: 1px solid var(--t-border-subtle);
+  }
+  .flow .num {
+    font-size: 2rem;
+    line-height: 1;
+    color: var(--t-link);
+  }
+  .flow h3 {
+    font-size: 1.0625rem;
+  }
+  .flow p {
+    color: var(--t-fg-80);
+    font-size: 0.9375rem;
+  }
+  @media (max-width: 960px) {
+    .flow {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+  }
+  @media (max-width: 560px) {
+    .flow {
+      grid-template-columns: 1fr;
+    }
+  }
+  .limits {
+    display: grid;
+    gap: 8px;
+    color: var(--t-fg-80);
+    max-width: 60ch;
+  }
+</style>

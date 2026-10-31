@@ -1,0 +1,199 @@
+---
+import {
+  NAME,
+  FORMER_NAME,
+  RENAMED_ON,
+  REPO_URL,
+  RELEASES_URL,
+  SECURITY_POLICY_URL,
+  LICENSE_URL,
+  DOCS_URL,
+  ISSUES_URL,
+} from '../brand';
+import Mark from './Mark.astro';
+
+const columns = [
+  {
+    title: 'Product',
+    links: [
+      { href: '/dictation', label: 'Dictation' },
+      { href: '/meetings', label: 'Meetings' },
+      { href: '/assistant', label: 'Chat and the assistant' },
+      { href: '/download', label: 'Download' },
+      { href: '/pricing', label: 'Pricing' },
+      { href: RELEASES_URL, label: 'Release notes' },
+    ],
+  },
+  {
+    title: 'Trust',
+    links: [
+      { href: '/privacy', label: 'Privacy and data' },
+      { href: '/privacy#what-leaves', label: 'What leaves your PC' },
+      { href: SECURITY_POLICY_URL, label: 'Report a vulnerability' },
+      { href: REPO_URL, label: 'Source code' },
+      { href: LICENSE_URL, label: 'MIT licence' },
+    ],
+  },
+  {
+    title: 'Help',
+    links: [
+      { href: '/faq', label: 'Questions and answers' },
+      { href: DOCS_URL, label: 'How it works (docs)' },
+      { href: ISSUES_URL, label: 'Report a problem' },
+      { href: '/legal/privacy-policy', label: 'Privacy policy' },
+    ],
+  },
+];
+---
+<footer class="ftr">
+  <div class="wrap ftr-grid">
+    <div class="ftr-about">
+      <a class="ftr-brand" href="/"><Mark size={28} /><span>{NAME}</span></a>
+      <p>Dictation, meeting notes and a voice assistant for Windows that run on your own PC. Free and open source.</p>
+      <p class="ftr-promise">This site sets no cookies and loads nothing from anyone else.</p>
+      <div class="theme" role="group" aria-label="Colour theme" data-theme-switch hidden>
+        <button type="button" data-value="system">System</button>
+        <button type="button" data-value="light">Light</button>
+        <button type="button" data-value="dark">Dark</button>
+      </div>
+    </div>
+    {columns.map((c) => (
+      <nav aria-label={c.title}>
+        <h2>{c.title}</h2>
+        <ul>
+          {c.links.map((l) => <li><a href={l.href}>{l.label}</a></li>)}
+        </ul>
+      </nav>
+    ))}
+  </div>
+  <div class="wrap ftr-base">
+    <p>The code is free to read, build and change under the MIT licence.</p>
+    {FORMER_NAME && RENAMED_ON && <p>{NAME} was called {FORMER_NAME} until {RENAMED_ON}.</p>}
+  </div>
+</footer>
+
+<script>
+  // The footer's theme switch: System / Light / Dark, kept on this device.
+  const root = document.documentElement;
+  const box = document.querySelector<HTMLElement>('[data-theme-switch]');
+  if (box) {
+    const buttons = [...box.querySelectorAll<HTMLButtonElement>('button')];
+    const show = () => {
+      const now = root.getAttribute('data-theme') ?? 'system';
+      for (const b of buttons) b.setAttribute('aria-pressed', String(b.dataset.value === now));
+    };
+    for (const b of buttons) {
+      b.addEventListener('click', () => {
+        const v = b.dataset.value;
+        if (v === 'light' || v === 'dark') root.setAttribute('data-theme', v);
+        else root.removeAttribute('data-theme');
+        try {
+          if (v === 'light' || v === 'dark') localStorage.setItem('theme', v);
+          else localStorage.removeItem('theme');
+        } catch {
+          /* storage blocked: the choice lasts this page */
+        }
+        show();
+      });
+    }
+    box.hidden = false;
+    show();
+  }
+</script>
+
+<style>
+  .ftr {
+    padding-block: 56px 40px;
+    color: var(--t-fg-80);
+    font-size: 0.9375rem;
+  }
+  .ftr-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1.6fr) repeat(3, minmax(0, 1fr));
+    gap: 32px 40px;
+  }
+  .ftr-brand {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    color: var(--t-fg);
+    font-weight: 700;
+    font-size: 1.125rem;
+    text-decoration: none;
+    margin-bottom: 12px;
+  }
+  .ftr-about p {
+    max-width: 34ch;
+  }
+  .ftr-promise {
+    margin-top: 12px;
+    color: var(--t-fg);
+    font-weight: 600;
+  }
+  .ftr h2 {
+    font-size: 0.9375rem;
+    font-weight: 660;
+    letter-spacing: 0;
+    margin-bottom: 10px;
+  }
+  .ftr ul {
+    list-style: none;
+    padding: 0;
+    display: grid;
+    gap: 6px;
+  }
+  .ftr nav a {
+    color: var(--t-fg-80);
+    text-decoration: none;
+  }
+  .ftr nav a:hover {
+    color: var(--t-fg);
+    text-decoration: underline;
+  }
+  .ftr-base {
+    margin-top: 40px;
+    padding-top: 20px;
+    border-top: 1px solid var(--t-border);
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px 24px;
+    color: var(--t-muted);
+    font-size: 0.875rem;
+  }
+  .theme {
+    display: inline-flex;
+    margin-top: 18px;
+    padding: 3px;
+    gap: 2px;
+    border-radius: 10px;
+    border: 1px solid var(--t-border-subtle);
+    background: var(--t-s3);
+  }
+  .theme[hidden] {
+    display: none;
+  }
+  .theme button {
+    font: inherit;
+    font-size: 0.875rem;
+    font-weight: 600;
+    padding: 5px 12px;
+    border-radius: 8px;
+    border: 1px solid transparent;
+    background: none;
+    color: var(--t-fg-80);
+    cursor: pointer;
+  }
+  .theme button[aria-pressed='true'] {
+    background: var(--t-s2);
+    border-color: var(--t-border);
+    color: var(--t-fg);
+  }
+  @media (max-width: 860px) {
+    .ftr-grid {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+    .ftr-about {
+      grid-column: 1 / -1;
+    }
+  }
+</style>
