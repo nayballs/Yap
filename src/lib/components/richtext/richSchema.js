@@ -1,7 +1,9 @@
-// What Chat's document editor is made of (DocPanel's own chunk; TipTap on
-// ProseMirror, both MIT): the blocks and marks a document's markdown has,
-// each able to say where it came from so it goes back out as it came in
-// (docMarkdown.js). No Svelte state: the schema is built and tested alone.
+// What Yap's rich text editor is made of (TipTap on ProseMirror, both MIT),
+// shared by Chat's document panel and notes (Chat's documents first,
+// 2026-10-31; factored out for notes the same day): the blocks and marks a
+// note's markdown has, each able to say where it came from so it goes back
+// out as it came in (richMarkdown.js). No Svelte state: the schema is built
+// and tested alone.
 //
 // - TipTap's own nodes and marks for what markdown has — paragraphs,
 //   headings, quotes, lists, code, rules, tables, hard breaks, bold,
@@ -14,17 +16,19 @@
 //   - how each was written (a list's marker, a fence, a rule's `***`, a
 //     mark's `__`), so a block that's changed is written back the same way;
 //   - `checked` on a list item: a checklist item (`- [ ] `), its box ticked
-//     in place;
+//     in place; "[ ] " (or "[x] ") typed at the start of a bulleted item,
+//     or of a paragraph of its own, makes one;
 //   - `yapSection`: a section still to write (`<!-- yap:section … -->`),
 //     a grey line nobody types into (chat/documents.rs fills it);
 //   - `rawBlock`: anything else markdown can say that the editor can't edit
 //     as such (a list item that starts with a heading…): drawn as the page
-//     draws it, kept exactly, edited in Source;
+//     draws it, kept exactly, edited in Source (its tooltip: `rawTitle`);
 //   - a plain link mark (web and mail links only, as markdown.js).
 // - Headings are drawn a level down, as the page draws them (`#` → h2).
 // - No images (markdown.js renders none: no remote fetches) and no
 //   underline (markdown has none).
-import { Node, Mark, Extension, mergeAttributes, getSchema } from '@tiptap/core';
+import { Node, Mark, Extension, InputRule, mergeAttributes, getSchema } from '@tiptap/core';
+import { findWrapping } from '@tiptap/pm/transform';
 import Document from '@tiptap/extension-document';
 import Paragraph from '@tiptap/extension-paragraph';
 import Text from '@tiptap/extension-text';
@@ -39,10 +43,13 @@ import HorizontalRule from '@tiptap/extension-horizontal-rule';
 import HardBreak from '@tiptap/extension-hard-break';
 import { BulletList, OrderedList, ListItem, ListKeymap } from '@tiptap/extension-list';
 import { Table, TableRow, TableHeader, TableCell } from '@tiptap/extension-table';
-import { UndoRedo, Dropcursor, Gapcursor } from '@tiptap/extensions';
+import { UndoRedo, Dropcursor, Gapcursor, Placeholder } from '@tiptap/extensions';
 
 /** The blocks that can come back verbatim: their markdown as read, and the lines before them. */
 const SOURCED = ['paragraph', 'heading', 'blockquote', 'bulletList', 'orderedList', 'listItem', 'codeBlock', 'horizontalRule', 'table', 'tableRow', 'yapSection', 'rawBlock'];
+
+/** "[ ] " or "[x] " typed at the start of a line: a checklist item. */
+const TASK_TYPED = /^\s*\[([ xX]?)\]\s$/;
 
 /** A web or mail address: the only links a document keeps (as markdown.js). */
 export const SAFE_URL = /^(https?:\/\/|mailto:)/i;
@@ -134,6 +141,40 @@ const DocItem = ListItem.extend({
       },
     };
   },
+  // "[ ] " typed: a checklist item (markdown.js ticks bulleted ones only).
+  addInputRules() {
+    return [
+      new InputRule({
+        find: TASK_TYPED,
+        handler: ({ state, range, match }) => {
+          const checked = /x/i.test(match[1] || '');
+          const tr = state.tr;
+          const $from = tr.doc.resolve(range.from);
+          const item = $from.depth > 1 ? $from.node(-1) : null;
+          if (item?.type.name === this.name) {
+            // A bulleted item's own first line, not one that's a checklist item already.
+            if ($from.index(-1) !== 0 || item.attrs.checked != null || $from.node(-2)?.type.name !== 'bulletList') return null;
+            tr.delete(range.from, range.to).setNodeMarkup($from.before(-1), undefined, { ...item.attrs, checked });
+            return undefined;
+          }
+          // A paragraph of its own: a checklist of one item.
+          if ($from.depth !== 1 || $from.parent.type.name !== 'paragraph') return null;
+          tr.delete(range.from, range.to);
+          const block = tr.doc.resolve(range.from).blockRange();
+          const wrapping = block && findWrapping(block, this.editor.schema.nodes.bulletList);
+          if (!wrapping) return null;
+          tr.wrap(block, wrapping);
+          const $in = tr.selection.$from;
+          for (let d = $in.depth; d > 0; d--) {
+            if ($in.node(d).type.name !== this.name) continue;
+            tr.setNodeMarkup($in.before(d), undefined, { ...$in.node(d).attrs, checked });
+            break;
+          }
+          return undefined;
+        },
+      }),
+    ];
+  },
   addNodeView() {
     return ({ node, getPos, editor }) => {
       let current = node;
@@ -209,6 +250,7 @@ const RawBlock = Node.create({
   group: 'block',
   atom: true,
   selectable: true,
+  addOptions: () => ({ title: 'Edit this part in Source' }),
   parseHTML: () => [{ tag: 'div[data-yap-raw]', getAttrs: (el) => ({ md: el.getAttribute('data-md') || '' }) }],
   renderHTML: ({ node }) => ['div', { 'data-yap-raw': '', 'data-md': node.attrs.md ?? '', class: 'docraw' }],
   addNodeView() {
@@ -216,7 +258,7 @@ const RawBlock = Node.create({
       const dom = document.createElement('div');
       dom.className = 'docraw';
       dom.contentEditable = 'false';
-      dom.title = 'Edit this part in Source';
+      dom.title = this.options.title;
       dom.innerHTML = render(node.attrs.md ?? '');
       return { dom };
     };
@@ -237,8 +279,12 @@ const Link = Mark.create({
   renderHTML: ({ HTMLAttributes }) => ['a', mergeAttributes(HTMLAttributes, { class: 'md-link' }), 0],
 });
 
-/** The editor's extensions (`editing`: with its undo, its drop and gap cursors). */
-export function docExtensions({ editing = true } = {}) {
+/**
+ * The editor's extensions (`editing`: with its undo, its drop and gap
+ * cursors; `placeholder()`: what an empty one says; `rawTitle`: a raw
+ * block's tooltip, where it's edited).
+ */
+export function richExtensions({ editing = true, placeholder = null, rawTitle = null } = {}) {
   const base = [
     Document,
     Paragraph,
@@ -261,14 +307,17 @@ export function docExtensions({ editing = true } = {}) {
     DocHeader,
     DocCell,
     YapSection,
-    RawBlock,
+    rawTitle ? RawBlock.configure({ title: rawTitle }) : RawBlock,
     Link,
     Source,
   ];
-  return editing ? [...base, UndoRedo, Dropcursor.configure({ class: 'docdrop', color: false, width: 2 }), Gapcursor] : base;
+  if (!editing) return base;
+  const out = [...base, UndoRedo, Dropcursor.configure({ class: 'docdrop', color: false, width: 2 }), Gapcursor];
+  if (placeholder) out.push(Placeholder.configure({ placeholder, showOnlyWhenEditable: false }));
+  return out;
 }
 
-/** The schema alone (no editor): docMarkdown.js and its tests. */
-export function docSchema() {
-  return getSchema(docExtensions({ editing: false }));
+/** The schema alone (no editor): richMarkdown.js and its tests. */
+export function richSchema() {
+  return getSchema(richExtensions({ editing: false }));
 }

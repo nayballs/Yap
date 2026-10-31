@@ -1,12 +1,15 @@
 <script>
-  // The document's toolbar (2026-10-31; after Claude's own documents', none
-  // of its code): over the page while it's Preview, a row of small buttons —
-  // text style (Paragraph, Heading 1–3), code, a table (in a table: add or
-  // delete a row or column, delete it), a checklist, and + (a divider, a
-  // quote, a bulleted or numbered list, a code block). Each acts on the
-  // page's editor (docEditor.js `run`), which keeps the note markdown; the
-  // ones on at the caret are pressed. Off while Chat is writing (the page
-  // is being written) and before the editor has loaded.
+  // The rich text editor's toolbar (2026-10-31; after Claude's own
+  // documents', none of its code), over Chat's document page and a note's
+  // (RichNote): a row of small buttons — text style (Paragraph, Heading
+  // 1–3), code, a table (in a table: add or delete a row or column, delete
+  // it), a checklist, and + (a divider, a quote, a bulleted or numbered
+  // list, a code block). Each acts on the page's editor (richEditor.js
+  // `run`), which keeps the note markdown; the ones on at the caret are
+  // pressed. Off while the page can't be typed into (Chat writing the
+  // document, a transform running on the note, Source shown) and before
+  // the editor has loaded. `end`: what the row has at its right (a note's
+  // Preview / Source switch).
   //
   // No image button: markdown.js shows no images (a model's would make Yap
   // fetch an address), and a picture of the person's own would need a
@@ -15,13 +18,25 @@
   import { openContextMenu } from '../../ui/contextMenu.svelte.js';
 
   /**
-   * `ed`: the page's editor (null while it loads or Chat writes); `state`:
-   * what's on at its caret; `writing`: Chat is writing the document.
+   * `ed`: the page's editor (null while it loads or can't be typed into);
+   * `state`: what's on at its caret; `disabled`: off (`why`: its tooltip,
+   * `note`: said at its end, "Chat is writing…"); `label`: the row's name;
+   * `testid`; `look`: 'paper' (Chat's document, the notepad, the quick
+   * note) | 'app' (Notes); `end`: a snippet at the row's right.
    */
-  let { ed = null, state = {}, writing = false } = $props();
+  let {
+    ed = null,
+    state = {},
+    disabled = false,
+    why = '',
+    note = '',
+    label = 'Format the document',
+    testid = undefined,
+    look = 'paper',
+    end = undefined,
+  } = $props();
 
-  const off = $derived(!ed || writing);
-  const why = $derived(writing ? 'Chat is writing the document' : '');
+  const off = $derived(!ed || disabled);
 
   const STYLES = [
     { id: 'paragraph', label: 'Paragraph' },
@@ -32,9 +47,9 @@
   const styleName = $derived(STYLES.find((s) => s.id === state.style)?.label ?? (typeof state.style === 'number' ? `Heading ${state.style}` : 'Text style'));
 
   /** A menu under its button (it takes the focus, and gives it back if nothing's chosen). */
-  function menu(e, items, label) {
+  function menu(e, items, name) {
     const at = e.currentTarget;
-    openContextMenu({ type: 'keydown', currentTarget: at, preventDefault() {}, stopPropagation() {} }, items, { label, row: at });
+    openContextMenu({ type: 'keydown', currentTarget: at, preventDefault() {}, stopPropagation() {} }, items, { label: name, row: at });
   }
 
   function styleMenu(e) {
@@ -82,7 +97,7 @@
   const keep = (e) => e.preventDefault();
 </script>
 
-<div class="doctools" role="toolbar" aria-label="Format the document" data-testid="chat-doc-toolbar" title={why || undefined}>
+<div class="doctools" class:app={look === 'app'} role="toolbar" aria-label={label} data-testid={testid} title={why || undefined}>
   <button type="button" class="tool wide" disabled={off} aria-haspopup="menu" aria-label={`Text style: ${styleName}`} title="Text style" onmousedown={keep} onclick={styleMenu}>
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h10M8 6v13M14 11h7M17.5 11v8" /></svg>
     <svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m7 10 5 5 5-5" /></svg>
@@ -112,22 +127,34 @@
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg>
     <svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m7 10 5 5 5-5" /></svg>
   </button>
-  {#if writing}<span class="toolnote">Chat is writing…</span>{/if}
+  {#if note}<span class="toolnote">{note}</span>{/if}
+  {#if end}<span class="toolgrow"></span>{@render end()}{/if}
 </div>
 
 <style>
   /* A slim row over the page, its buttons the header's size, quiet until
      hovered or on (Claude's documents' toolbar, measured: 28px buttons,
-     a hairline under the row). */
+     a hairline under the row). Its colours: the paper's (Chat's document,
+     the notepad, the quick note), or the app's (Notes, `.app`). */
   .doctools {
+    --tool-ink: var(--yap-paper-ink);
+    --tool-muted: var(--yap-paper-muted);
+    --tool-hover: var(--yap-paper-s2);
+    --tool-rule: var(--yap-paper-rule);
     display: flex;
     align-items: center;
     gap: 2px;
     min-height: 36px;
     padding: 3px 12px;
-    border-bottom: 1px solid var(--yap-paper-rule);
+    border-bottom: 1px solid var(--tool-rule);
     overflow-x: auto;
     scrollbar-width: none;
+  }
+  .doctools.app {
+    --tool-ink: var(--yap-fg);
+    --tool-muted: var(--yap-muted);
+    --tool-hover: var(--yap-s2);
+    --tool-rule: var(--yap-border-subtle);
   }
   .tool {
     flex: 0 0 auto;
@@ -141,7 +168,7 @@
     border: 1px solid transparent;
     border-radius: var(--yap-r);
     background: none;
-    color: var(--yap-paper-muted);
+    color: var(--tool-muted);
     cursor: pointer;
   }
   .tool.wide {
@@ -157,12 +184,12 @@
     opacity: 0.8;
   }
   .tool:hover:not(:disabled) {
-    background: var(--yap-paper-s2);
-    color: var(--yap-paper-ink);
+    background: var(--tool-hover);
+    color: var(--tool-ink);
   }
   .tool[aria-pressed='true'] {
-    background: var(--yap-paper-s2);
-    color: var(--yap-paper-ink);
+    background: var(--tool-hover);
+    color: var(--tool-ink);
   }
   .tool:focus-visible {
     outline: 2px solid var(--yap-focus-ring);
@@ -177,12 +204,16 @@
     width: 1px;
     height: 16px;
     margin: 0 4px;
-    background: var(--yap-paper-s2);
+    background: var(--tool-hover);
   }
   .toolnote {
     margin-left: 8px;
     font-size: 11.5px;
-    color: var(--yap-paper-muted);
+    color: var(--tool-muted);
     white-space: nowrap;
+  }
+  .toolgrow {
+    flex: 1 1 auto;
+    min-width: 8px;
   }
 </style>
