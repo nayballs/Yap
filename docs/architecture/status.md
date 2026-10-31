@@ -551,9 +551,12 @@ reply's parsing, the route and the shortcut's binding unit-tested; Settings,
 the Help sheet, a question answered with its quote and nothing pasted, an
 edit still replaced, the model's choice and its doubt, read-only and the
 shortcut e2e-tested (`ask-selection.spec.js`, with stand-in selections); a
-robot test written (`ask-selection.real.js`: a real Edge box and a web
-page, the text and the clipboard checked unchanged), not yet run; not yet
-tried with a real voice, model or app. **Saved
+robot test (`ask-selection.real.js`: a real Edge box and a web page, the
+text and the clipboard checked unchanged) passing since 31 Oct — its first
+run found a web page's text, its focus on a block of the page, taken for a
+text box (fixed: the selected range's own `IsReadOnly` decides,
+`selection::selection_is_read_only`); not yet tried with a real voice,
+model or app, nor in Chrome itself. **Saved
 transforms** (2026-10-24, `dictation/transforms.rs`): one-key rewrites without
 speaking — Polish, Shorter, Fix grammar only, Translate to a language you
 pick, Make it a prompt, and your own — on the selection or (nothing

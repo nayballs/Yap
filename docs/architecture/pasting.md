@@ -538,10 +538,20 @@ Putting a dictation into the app you're in: the clipboard paste and the submit k
   mode** (`capture_selection(target, copy_fallback)`): the selected text
   (TextPattern, else the Ctrl+C trick — never in a terminal with terminal mode
   on, where Ctrl+C would interrupt the program), 2 s UIA timeouts; with
-  something captured and "Answer questions about the selected text" on, one
-  `focus_editable` look too (2026-10-31): read-only text (a web page, a mail
-  being read) is answered, never pasted over (`dictation/ask_or_edit.rs`
-  `settled`). **Read
+  something captured and "Answer questions about the selected text" on,
+  **is it read-only?** (`selection_read_only`, 2026-10-31): read-only text (a
+  web page, a mail being read) is answered, never pasted over
+  (`dictation/ask_or_edit.rs` `settled`). The selection as Read aloud finds
+  it (`uia::selection_facts_in`: the TextPattern of the focused element or
+  the first above it that has one) says it first — pure
+  `selection_is_read_only`: a selected range whose `IsReadOnly` is true →
+  read-only; one that says false → not (a text box, a contenteditable in a
+  read-only document); neither: the element holding the selection read-only
+  (its document range, ValuePattern or legacy state) → read-only; nothing
+  from the selection (Ctrl+C): `focus_editable`'s plain no only. The focus
+  check alone took text on an Edge page whose focus was on a `tabindex`
+  block of it (a group: unknown) for a text box, and pasted
+  (`ask-selection.real.js`, 31 Oct). **Read
   aloud** (`read_selected(target, copy_fallback)` → `Selected {text, via}`,
   for `voice/read_aloud.rs`, and Ask about the selection's press since
   2026-10-31, `pipeline::read_ask_selection`): the focus must be in the target's process and not a

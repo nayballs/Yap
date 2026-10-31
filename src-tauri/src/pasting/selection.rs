@@ -704,6 +704,77 @@ pub fn focus_editable(target_hwnd: Option<isize>) -> Editable {
     }
 }
 
+// ---- Is the selected text read-only? ----
+
+/// What UI Automation says about one selected range being read-only (its
+/// `UIA_IsReadOnlyAttributeId`, as a transform's selection read asks it).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RangeSays {
+    ReadOnly,
+    Editable,
+    /// It doesn't say (not supported, or a range over both).
+    Unknown,
+}
+
+/// The selection as Read aloud finds it ([`read_selected`]: the TextPattern
+/// of the focused element or the first one above it that has one — a web
+/// page's document when the focus is on a block of its text): what each
+/// selected range says, and whether the element holding it says it's
+/// read-only (its document range, its ValuePattern or its legacy state).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct SelectionFacts {
+    pub ranges: Vec<RangeSays>,
+    pub holder_read_only: bool,
+}
+
+/// **Is the selected text read-only** — nothing a paste could replace (a
+/// web page's ordinary text, a mail being read)? Pure. The selection's own
+/// ranges first: one that says read-only → yes; else one that says
+/// editable → no. Neither: the element holding the selection says
+/// read-only → yes. Nothing from the selection (no UI Automation, Ctrl+C):
+/// what has the focus (`focus` → [`focus_editable`]), yes only on a plain
+/// no. A focusable block of a page's text (a `tabindex` container, a
+/// "group") has no TextPattern of its own and the focus check can't tell,
+/// so it took an edit there for a text box (robot-tested, 31 Oct): the
+/// document's selection says what it is.
+pub fn selection_is_read_only(facts: Option<&SelectionFacts>, focus: impl FnOnce() -> Editable) -> bool {
+    if let Some(f) = facts {
+        if f.ranges.contains(&RangeSays::ReadOnly) {
+            return true;
+        }
+        if f.ranges.contains(&RangeSays::Editable) {
+            return false;
+        }
+        if f.holder_read_only {
+            return true;
+        }
+    }
+    focus() == Editable::No
+}
+
+/// Is the text selected in `target_hwnd`'s app read-only
+/// ([`selection_is_read_only`] on UI Automation's look at the selection,
+/// then the focus)? For the rewrite shortcut: a question or an edit about
+/// read-only text is answered, never pasted (`dictation/ask_or_edit.rs`).
+/// Test mode never reads (no); robot mode only a window the test opened.
+pub fn selection_read_only(target_hwnd: Option<isize>) -> bool {
+    let Some(hwnd) = target_hwnd else { return false };
+    if !crate::shell::realtest::permits(Some(hwnd)) {
+        return false;
+    }
+    let Some(pid) = crate::pasting::text_injector::window_process(hwnd) else { return false };
+    #[cfg(windows)]
+    let facts = uia::selection_facts_in(pid);
+    #[cfg(not(windows))]
+    let facts: Option<SelectionFacts> = {
+        let _ = pid;
+        None
+    };
+    let verdict = selection_is_read_only(facts.as_ref(), || focus_editable(target_hwnd));
+    tracing::debug!(?facts, verdict, "Is the selected text read-only?");
+    verdict
+}
+
 // ---- The text box the dictation started in ----
 
 /// Where the focus is as a dictation is pasted, against the element it
@@ -1185,6 +1256,51 @@ pub(crate) mod uia {
                     let text = text.trim();
                     // A document with nothing selected: nothing to read.
                     return (!text.is_empty()).then(|| text.to_string());
+                }
+                e = walker.GetParentElement(&e).ok()?;
+            }
+            None
+        }
+    }
+
+    /// The selection [`selection_in`] reads, in process `pid` (not a
+    /// password box), as [`super::selection_is_read_only`] reads it: each
+    /// selected range's `IsReadOnly`, and whether the element holding them
+    /// says it's read-only. `None`: no TextPattern selection found.
+    pub fn selection_facts_in(pid: u32) -> Option<super::SelectionFacts> {
+        use super::RangeSays;
+        let _com = Com::init()?;
+        unsafe {
+            let automation = automation(super::SELECTION_TIMEOUT_MS)?;
+            let focused = automation.GetFocusedElement().ok()?;
+            if focused.CurrentProcessId().ok()? as u32 != pid || focused.CurrentIsPassword().ok()?.as_bool() {
+                return None;
+            }
+            let walker = automation.ControlViewWalker().ok()?;
+            let mut e = focused;
+            for _ in 0..12 {
+                if e.CurrentProcessId().ok()? as u32 != pid {
+                    return None;
+                }
+                let pattern = e
+                    .GetCurrentPattern(UIA_TextPatternId)
+                    .ok()
+                    .and_then(|u| u.cast::<IUIAutomationTextPattern>().ok());
+                if let Some(pattern) = pattern {
+                    let selection = pattern.GetSelection().ok()?;
+                    let mut ranges = Vec::new();
+                    for i in 0..selection.Length().unwrap_or(0) {
+                        let Ok(range) = selection.GetElement(i) else { continue };
+                        let says = match range.GetAttributeValue(UIA_IsReadOnlyAttributeId).ok().and_then(|v| bool::try_from(&v).ok()) {
+                            Some(true) => RangeSays::ReadOnly,
+                            Some(false) => RangeSays::Editable,
+                            None => RangeSays::Unknown,
+                        };
+                        ranges.push(says);
+                    }
+                    let holder = focus_facts_of(&e);
+                    let holder_read_only = holder.text_read_only || holder.value_read_only || holder.legacy_read_only;
+                    return Some(super::SelectionFacts { ranges, holder_read_only });
                 }
                 e = walker.GetParentElement(&e).ok()?;
             }
@@ -2208,6 +2324,40 @@ mod focus_tests {
         // A read-only text box, by its legacy state alone.
         let viewer = FocusFacts { value: true, legacy_read_only: true, ..el(UIA_EDIT, "Win32") };
         assert_eq!(editable(&[viewer], 7), Editable::No);
+    }
+
+    /// The rewrite shortcut's "is the selected text read-only?": the
+    /// selection's own ranges first, then the element holding it, then the
+    /// focus — the robot's case (31 Oct): text selected on an Edge page whose
+    /// focus is on a `tabindex` block of it, which the focus check alone
+    /// can't tell from a text box.
+    #[test]
+    fn selected_text_is_read_only_by_its_own_ranges_first() {
+        use RangeSays::{Editable as E, ReadOnly as R, Unknown as U};
+        let never = || -> Editable { panic!("the focus isn't asked when the selection says") };
+        let facts = |ranges: &[RangeSays], holder: bool| SelectionFacts { ranges: ranges.to_vec(), holder_read_only: holder };
+        // An Edge page's paragraph: its range says read-only, whatever the focus is on.
+        assert!(selection_is_read_only(Some(&facts(&[R], true)), never));
+        assert!(selection_is_read_only(Some(&facts(&[R], false)), never));
+        // A text box (a textarea, a contenteditable inside a read-only
+        // document): its range says editable, though the document holding
+        // it may say read-only.
+        assert!(!selection_is_read_only(Some(&facts(&[E], true)), never));
+        assert!(!selection_is_read_only(Some(&facts(&[E], false)), never));
+        // Word's several selections, one in a locked part: read-only.
+        assert!(selection_is_read_only(Some(&facts(&[E, R], false)), never));
+        // The ranges don't say: the element holding them does…
+        assert!(selection_is_read_only(Some(&facts(&[U], true)), never));
+        assert!(selection_is_read_only(Some(&facts(&[], true)), never));
+        // …else the focus, read-only only on its plain no.
+        assert!(selection_is_read_only(Some(&facts(&[U], false)), || Editable::No));
+        assert!(!selection_is_read_only(Some(&facts(&[U], false)), || Editable::Unknown));
+        assert!(!selection_is_read_only(Some(&facts(&[U], false)), || Editable::Yes));
+        // No look at the selection at all (Ctrl+C, no UI Automation): the focus.
+        assert!(selection_is_read_only(None, || Editable::No));
+        assert!(!selection_is_read_only(None, || Editable::Unknown));
+        // The robot's page: the focus on a block of the page (a group: unknown), its range read-only.
+        assert!(selection_is_read_only(Some(&facts(&[R], true)), || Editable::Unknown));
     }
 
     #[test]
