@@ -13,6 +13,10 @@
   import { onMount } from 'svelte';
   import { MODELS } from '../core/speechModels.js';
   import { upload, chooseFile, failed, transcribe, cancel, reset } from '../stores/upload.svelte.js';
+  // A transcript another app made (Teams, Zoom, Meet, Otter, Granola) is
+  // imported as a meeting note instead (meetings/import.rs): its button
+  // under the drop zone, and transcript files dropped here go to its dialog.
+  import { transcriptImport, openTranscriptImport, isTranscriptFile } from '../stores/transcriptImport.svelte.js';
 
   // Matches dictation/media.rs (Symphonia features): no opus/webm yet.
   const SUPPORTED_EXTENSIONS = ['mp3', 'wav', 'm4a', 'aac', 'flac', 'ogg', 'oga'];
@@ -63,12 +67,23 @@
     // resolves still lets go of it.
     const dragDrop = getCurrentWebview().onDragDropEvent((event) => {
       const t = event.payload.type;
+      // The import dialog takes its own drops.
+      if (transcriptImport.open) {
+        isDragOver = false;
+        return;
+      }
       if (t === 'over' || t === 'enter') {
         isDragOver = true;
       } else if (t === 'leave') {
         isDragOver = false;
       } else if (t === 'drop') {
         isDragOver = false;
+        // Transcript files: imported as meetings, several at once.
+        const transcripts = (event.payload.paths || []).filter((p) => isTranscriptFile(p));
+        if (transcripts.length) {
+          openTranscriptImport(transcripts);
+          return;
+        }
         if (upload.state === 'transcribing') return;
         const path = (event.payload.paths || [])[0];
         if (!path) return;
@@ -173,6 +188,22 @@
         <p class="hint">Also saved to your Home feed.</p>
       {/if}
     {/if}
+
+    <!-- A meeting another app transcribed: imported as a meeting note. -->
+    <section class="importcard" aria-labelledby="up-import">
+      <span class="fileicon" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><path d="M14 2v6h6M9 13h6M9 17h4" /></svg>
+      </span>
+      <div class="importtext">
+        <!-- Not a heading: the page's one is the audio file's "Transcript". -->
+        <p class="importtitle" id="up-import">Have a transcript already?</p>
+        <p>
+          Import a meeting from Teams, Zoom, Google Meet, Otter or Granola (.vtt, .srt, .txt, .docx or .md). It becomes a
+          meeting note with its speakers and a summary.
+        </p>
+      </div>
+      <button class="secondary" onclick={() => openTranscriptImport()}>Import a transcript…</button>
+    </section>
   </div>
 </div>
 
@@ -433,5 +464,40 @@
     margin: 10px 0 0;
     font-size: 11px;
     color: var(--yap-muted-55);
+  }
+
+  .importcard {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-top: 22px;
+    padding: 14px;
+    border: 1px solid var(--yap-border-subtle);
+    border-radius: var(--yap-r-lg);
+    background: var(--yap-s2);
+  }
+  .importtext {
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+  .importtext p {
+    margin: 0;
+    font-size: 11.5px;
+    line-height: 1.5;
+    color: var(--yap-muted);
+  }
+  .importtext p.importtitle {
+    margin: 0 0 2px;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--yap-fg);
+  }
+  .importcard .secondary {
+    flex: 0 0 auto;
+  }
+  @media (max-width: 560px) {
+    .importcard {
+      flex-wrap: wrap;
+    }
   }
 </style>

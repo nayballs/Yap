@@ -196,6 +196,15 @@ export async function retryChunk(noteId, seg) {
   }
 }
 
+/**
+ * A meeting imported from a transcript file (meetings/import.rs, `source`
+ * "import"): Yap has no audio of it, so no ▶, Transcribe again, Find
+ * speakers or Export audio.
+ */
+export function isImported(note) {
+  return note?.source === 'import';
+}
+
 /** Why "Transcribe again" can't run on `note` now (null: it can). */
 export function cantTranscribeAgain(note, recordingThis) {
   const a = meetingAudio.byNote[note?.id];

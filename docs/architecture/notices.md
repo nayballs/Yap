@@ -61,7 +61,10 @@ How loud Yap may be: the notice policy (one place, one at a time, held while dic
   word-suggestion, snippet-suggestion ("Type that often? Save it as a
   snippet", `dictionary/snippet_offer.rs`, one a day there; held over a
   dictation, dropped unseen after a minute; snippet-saved 10 s),
-  language-nudge ("You spoke French · Add it to My
+  company-folder ("File every meeting with example.com in Clients?",
+  `calendar/filing/companies.rs`, one a day there, right after a meeting
+  filed by hand; held over a dictation, dropped unseen after a minute;
+  company-folder-filed 10 s), language-nudge ("You spoke French · Add it to My
   languages?", `dictation/languages/nudge.rs`, which rate-limits it itself:
   held over a dictation, dropped unseen after a minute), milestone
   ("You've dictated 1,000 words", `dictation/milestones.rs`, once each:
@@ -85,7 +88,7 @@ How loud Yap may be: the notice policy (one place, one at a time, held while dic
 - **`notices/kinds.rs`** — **kinds of notice, each with a switch and a
   cap** (2026-10-29; Wispr Flow's notification categories, by behaviour):
   the nice-to-know notices fall into four kinds — **suggestions**
-  (word-suggestion, snippet-suggestion, language-nudge), **milestones**
+  (word-suggestion, snippet-suggestion, language-nudge, company-folder), **milestones**
   (`dictation/milestones.rs`'s "milestone", and any kind starting so), **feature tips** (hint, micTip, featureTip,
   the bar's first-use pointers) and **news** (the "Updated to …" note after
   an update) — each switched off on its own in Settings → General →

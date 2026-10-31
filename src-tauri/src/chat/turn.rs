@@ -240,6 +240,11 @@ async fn answer_turn(
     let scope: Option<&str> = scope.or((!kept_scope.is_empty()).then_some(kept_scope.as_str()));
     // A Skill (chat/skills.rs) is asked across the meetings, wherever it's run.
     let skill = crate::chat::skills::current();
+    // One with nothing to run on (/project-update and no project named,
+    // /prep and nothing coming up): Yap asks for it itself, no model.
+    if let Some((s, said)) = skill.as_ref().and_then(|s| crate::chat::skills::ask_first(s).map(|a| (s, a))) {
+        return skill_asks_turn(conversation_id, &text, by_voice, asked, stop, &said, &s.skill.command);
+    }
     let meetings = scope == Some("meetings") || skill.is_some();
     let cfg = config::load();
     // Text selected in another app that this question is about
@@ -511,12 +516,20 @@ async fn answer_turn(
             system.push_str(&crate::chat::skills::system_block(s));
         }
         let block = crate::search::ask::context(&found);
+        // A document written from them names its passages' meetings in
+        // place of "[2]" (documents.rs `name_citations`).
+        doc_turn.cite_passages(crate::search::ask::labels(&found));
         asked_across = Some(found);
         if in_message {
             context.push(block);
         } else {
             system.push_str("\n\n");
             system.push_str(&block);
+        }
+        // A Skill that makes something to keep (/tickets, /prd): a document,
+        // for a model that can write one.
+        if let Some(note) = skill.as_ref().filter(|_| tools_supported).and_then(crate::chat::skills::document_note) {
+            context.push(note);
         }
     }
     let rag = if meetings { String::new() } else { rag_context(&text, in_message) };
@@ -894,6 +907,11 @@ async fn answer_turn(
     // happen, no "[1]" with nothing (or another question's pages) behind it
     // — asked across the meetings, a number that's none of this turn's
     // passages.
+    // A Skill's answer as it's shown (/open-questions: Yap's "Q4: " off).
+    let reply = match &skill {
+        Some(s) => crate::chat::skills::tidy_answer(&s.skill, &reply),
+        None => reply,
+    };
     let (mut reply, fixed) = if meetings {
         let (r, mut f) = crate::chat::chats::checked_answer(&reply, &text, looked, &[], &passages);
         let only_these: Vec<usize> = passages.iter().map(|s| s.n).collect();
@@ -923,14 +941,25 @@ async fn answer_turn(
                 reply = cited;
             }
         }
-        if crate::search::ask::needs_uncited_note(&reply, passages.len()) {
+        // A document written this turn (a Skill's /tickets, /prd): the
+        // answer is a line saying where it is, and the passages the
+        // document cites are its sources.
+        let in_docs = doc_turn.passages_cited();
+        let wrote_doc = !doc_turn.touched().is_empty();
+        if !wrote_doc && crate::search::ask::needs_uncited_note(&reply, passages.len()) {
             tracing::info!("Chat: the answer cited none of the passages; Yap says so under it");
             crate::ai::eval::post_fix("uncited_answer");
             reply = format!("{}\n\n{}", reply.trim_end(), crate::search::ask::UNCITED_NOTE);
         }
         let mut chips: Vec<String> = search_chip.into_iter().collect();
         chips.extend(tools_used);
-        (crate::search::ask::shown(&reply, &passages), chips)
+        let shown = if in_docs.is_empty() {
+            crate::search::ask::shown(&reply, &passages)
+        } else {
+            let cited = crate::search::ask::cited_numbers(&reply);
+            passages.iter().filter(|s| cited.contains(&s.n) || in_docs.contains(&s.n)).cloned().collect()
+        };
+        (shown, chips)
     } else {
         (sources, tools_used)
     };
@@ -1473,6 +1502,43 @@ async fn passages_turn(
     }];
     let index = crate::chat::chats::append_message(conv.id, "assistant", &reply, &tools_used, None, false, &sources, false, None)?;
     Ok(ChatTurn { conversation_id: conv.id, user_index, index, reply, tools_used, model: None, sources, stopped: false, tokens: None, documents: Vec::new() })
+}
+
+/// A Skill with nothing to run on (`skills::ask_first`: /project-update
+/// with no project named, /prep with nothing named or coming up): its
+/// question, said by Yap itself — no model, so none is named — the chat
+/// asked across the meetings from then on, as a Skill's is.
+fn skill_asks_turn(
+    conversation_id: Option<u64>,
+    text: &str,
+    by_voice: bool,
+    asked: impl FnOnce(u64, usize) + Send,
+    stop: &crate::chat::stream::Stoppable,
+    said: &str,
+    command: &str,
+) -> Result<ChatTurn, String> {
+    tracing::info!(command = %command, "Chat: a Skill with nothing to run on; Yap asks for it");
+    let conv = turn_conversation(conversation_id, text);
+    if conv.scope.is_empty() && conv.messages.is_empty() {
+        crate::chat::chats::set_scope(conv.id, "meetings");
+    }
+    let user_index = crate::chat::chats::append(conv.id, "user", text, &[], None, by_voice)?;
+    stop.answers(conv.id);
+    asked(conv.id, user_index);
+    let tools_used = vec![format!("Ran /{command}")];
+    let index = crate::chat::chats::append(conv.id, "assistant", said, &tools_used, None, false)?;
+    Ok(ChatTurn {
+        conversation_id: conv.id,
+        user_index,
+        index,
+        reply: said.to_string(),
+        tools_used,
+        model: None,
+        sources: Vec::new(),
+        stopped: false,
+        tokens: None,
+        documents: Vec::new(),
+    })
 }
 
 /// A turn Yap answers itself (`apps.rs`): the request saved like any

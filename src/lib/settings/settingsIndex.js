@@ -32,7 +32,7 @@ export const SETTINGS_INDEX = [
   { page: 'general', section: 'Yap bar', label: 'Colours', desc: "The Yap bar's look: match Yap, light or dark", keywords: 'bar theme dark light colors match app', anchor: 'bar-colours' },
   { page: 'general', section: 'Yap bar', label: 'Position', desc: 'Where the bar and the dictation overlay sit', keywords: 'bar overlay top bottom placement', anchor: 'bar-position' },
   { page: 'general', section: 'Notifications', label: 'Show tips', desc: "Short tips, like push-to-talk's double-tap", keywords: 'tips hints coaching notifications nudge', anchor: 'tips', toggle: 'showTips' },
-  { page: 'general', section: 'Notifications', label: 'Suggestions', desc: 'Words and snippets to save, languages to add', keywords: 'notifications suggestions words snippets languages nudge', anchor: 'notify-suggestions', toggle: 'notifySuggestions' },
+  { page: 'general', section: 'Notifications', label: 'Suggestions', desc: 'Words and snippets to save, languages to add, folders by company', keywords: 'notifications suggestions words snippets languages nudge folders company', anchor: 'notify-suggestions', toggle: 'notifySuggestions' },
   { page: 'general', section: 'Notifications', label: 'Feature tips', desc: 'What Yap just did for you, the first time', keywords: 'notifications tips features self-correction list email', anchor: 'notify-feature-tips', toggle: 'notifyFeatureTips' },
   { page: 'general', section: 'Notifications', label: 'Milestones', desc: 'Your dictation milestones', keywords: 'notifications milestones achievements', anchor: 'notify-milestones', toggle: 'notifyMilestones' },
   { page: 'general', section: 'Notifications', label: 'News', desc: "What's new after Yap updates", keywords: "notifications news what's new updates release notes", anchor: 'notify-news', toggle: 'notifyNews' },
@@ -121,6 +121,7 @@ export const SETTINGS_INDEX = [
   { page: 'meetings', section: 'Calendar', label: 'Remind me before scheduled meetings', desc: 'A card with Join & take notes', keywords: 'calendar reminder notify notification before meeting', anchor: 'meeting-reminder' },
   { page: 'meetings', section: 'Calendar', label: 'Prepare a brief before meetings', desc: 'Last time with these people, open items and the agenda', keywords: 'brief briefing prepare prep before meeting last time open items action items agenda calendar', anchor: 'meeting-brief', toggle: 'meetingBrief' },
   { page: 'meetings', section: 'Calendar', label: 'Calendars', desc: 'Meeting names and attendees', keywords: 'calendar google outlook ical connect', anchor: 'calendars' },
+  { page: 'meetings', section: 'Folders by company', label: 'Folders by company', desc: 'Meetings with people from a company go in its folder', keywords: 'folder folders company client clients domain email file filing rule rules meetings attendees organisation organization', anchor: 'company-folders' },
 
   // ---- Commands ----
   { page: 'commands', section: 'Say its name', label: 'Answer to its name in any dictation', desc: '"Hey Yap, …" and the AI does what you ask', keywords: 'commands wake word hey yap agent ai', anchor: 'wake-word' },
@@ -232,6 +233,7 @@ export const SETTINGS_INDEX = [
   { page: 'privacy', section: 'Logs and data', label: 'Log file', desc: 'Open the logs folder', keywords: 'logs folder', anchor: 'logs' },
   { page: 'privacy', section: 'Logs and data', label: 'Data folder', desc: 'Where Yap keeps settings, notes and models', keywords: 'appdata data folder files portable config', anchor: 'data-folder' },
   { page: 'privacy', section: 'Your data', label: 'Download your data', desc: 'Everything Yap keeps about you, in one .zip', keywords: 'export download backup takeout archive zip copy data history notes meetings chats memory dictionary settings gdpr', anchor: 'download-data' },
+  { page: 'privacy', section: 'Your data', label: 'Delete some of your data', desc: 'Pick what goes: history, meetings, chats, memory, logs…', keywords: 'delete remove erase clear some part kind history audio meetings notes chats screenshots memory stats suggestions usage receipts connections index logs', anchor: 'delete-some-data' },
   { page: 'privacy', section: 'Your data', label: 'Reset app', desc: 'Clear everything and keep your settings', keywords: 'reset start fresh clear erase wipe delete everything all data factory clean', anchor: 'reset-app' },
 
   // ---- About ----

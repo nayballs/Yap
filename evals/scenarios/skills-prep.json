@@ -1,0 +1,60 @@
+{
+  "name": "skills-prep",
+  "description": "/prep with a meeting with Priya coming up tomorrow: the meeting itself (from the calendar), what was decided and left open last time with her, her and your open tasks, things to raise. Nothing from the garden club meeting with someone else.",
+  "tags": ["skills", "meetings", "calendar"],
+  "apps": "standard",
+  "seed": {
+    "calendar": {
+      "meetings": [
+        { "title": "Supplier follow-up", "day": "tomorrow", "start": "10:00", "minutes": 30, "with": ["Priya Shah"], "invite": "Agenda: delivery dates, the revised quote" }
+      ]
+    },
+    "notes": [
+      {
+        "title": "Supplier call",
+        "folder": "Meetings",
+        "meeting": true,
+        "days_ago": 3,
+        "participants": ["Priya Shah"],
+        "enhanced": "## Recap\nThe packaging quote came in over budget.\n\n## Action plan\n### You\n- [ ] Draft the finance request (due: Wednesday)\n### Priya Shah\n- [ ] Send the revised quote (due: Friday)\n\n## Decisions\n- Ask finance for the extra budget, because the quote is final\n\n## Open questions\n- Can the supplier deliver before the launch?",
+        "transcript": [
+          { "source": "you", "text": "Priya, is the quote final now?", "ts": 0 },
+          { "source": "them", "text": "Yes, it is final at forty two thousand pounds, which is over what we planned.", "ts": 20 },
+          { "source": "you", "text": "Then I'll draft the finance request by Wednesday and we ask them for the extra budget.", "ts": 45 },
+          { "source": "them", "text": "I'll send you the revised quote by Friday. Can the supplier even deliver before the launch?", "ts": 70 },
+          { "source": "you", "text": "Nobody knows yet. We need to find out.", "ts": 95 }
+        ]
+      },
+      {
+        "title": "Garden club",
+        "folder": "Meetings",
+        "meeting": true,
+        "days_ago": 1,
+        "participants": ["Sam Lee"],
+        "enhanced": "## Recap\nThe club planned the spring bulb sale.\n\n## Decisions\n- Hold the bulb sale on the first Saturday of March",
+        "transcript": [
+          { "source": "them", "text": "Shall we hold the bulb sale on the first Saturday of March?", "ts": 0 },
+          { "source": "you", "text": "Yes, and I'll bring the trestle tables.", "ts": 15 }
+        ]
+      }
+    ]
+  },
+  "turns": [
+    {
+      "user": "/prep",
+      "skill": "prep",
+      "expect": {
+        "answer_contains_any": ["revised quote", "finance request"],
+        "answer_not_contains": ["bulb", "garden", "Sam Lee", "Yap couldn't tie"],
+        "min_sources": 1,
+        "tools_not_called": ["create_note", "update_note", "edit_note", "open_app", "create_document"]
+      },
+      "soft": {
+        "answer_contains": ["Supplier follow-up"],
+        "answer_contains_any": ["deliver before the launch", "deliver"],
+        "calendar_cited": ["Supplier follow-up"],
+        "max_words": 220
+      }
+    }
+  ]
+}

@@ -1102,6 +1102,81 @@ pub fn create(title: &str, content: &str, source: &str, folder: &str) -> Note {
     })
 }
 
+/// A whole meeting note made at once (Import a transcript…,
+/// `meetings/import.rs`): its lines, voices and attendees already known.
+pub struct NewMeeting {
+    pub title: String,
+    /// The title is one Yap made up: the AI meeting title may replace it.
+    pub title_auto: bool,
+    /// My thoughts (a Granola export's notes).
+    pub content: String,
+    pub folder: String,
+    pub transcript: Vec<TranscriptSegment>,
+    pub participants: Vec<String>,
+    pub speakers: Speakers,
+    /// Where it came from (`Note::source`: "import").
+    pub source: String,
+    /// When the meeting was (unix seconds): the note's date.
+    pub created_ts: u64,
+}
+
+/// Make the meeting note `m` in one save. Its folder is made when it's
+/// missing (Meetings, before an older store had it).
+pub fn create_meeting(m: NewMeeting) -> Note {
+    with_store(|store| {
+        let id = SAVER.next_id(store.notes.iter().map(|n| n.id).max().unwrap_or(0));
+        let folder = match m.folder.trim() {
+            "" => MEETINGS.to_string(),
+            f => f.to_string(),
+        };
+        let folder = match folder_named(&store.folders, &folder) {
+            Some(i) => store.folders[i].clone(),
+            None => {
+                store.folders.push(folder.clone());
+                folder
+            }
+        };
+        let note = Note {
+            id,
+            title: m.title,
+            title_auto: m.title_auto,
+            content: m.content,
+            enhanced_content: String::new(),
+            enhanced_at_hash: String::new(),
+            summary_edited_ms: 0,
+            summary_ts: 0,
+            summary_ai: String::new(),
+            summary_rating: None,
+            note_type: "meeting".to_string(),
+            folder,
+            folder_chosen: false,
+            transcript: m.transcript,
+            participants: m.participants,
+            digests: Vec::new(),
+            breaks: Vec::new(),
+            source: m.source,
+            created_ts: m.created_ts,
+            updated_ts: now_secs(),
+            event: None,
+            speakers: m.speakers,
+            transcript_deleted_ts: 0,
+        };
+        store.notes.push(note.clone());
+        save_to_disk(store);
+        note
+    })
+}
+
+/// Where an imported meeting came from (`Note::source`): no audio behind
+/// its lines.
+pub const IMPORTED: &str = "import";
+
+/// A meeting imported from a transcript file: no audio to play, transcribe
+/// again or find speakers in.
+pub fn is_imported(note: &Note) -> bool {
+    note.source == IMPORTED
+}
+
 /// Tie meeting note `id` to a calendar event (`calendar.rs`): keep the event,
 /// take its `title` when given (the caller only passes one over a made-up
 /// title; the meeting's real name, so the AI title leaves it alone), add its
@@ -1528,6 +1603,21 @@ pub fn reset() -> Vec<u64> {
     })
 }
 
+/// Delete some of your data (`privacy/reset.rs`): the notes `gone` picks
+/// (the meetings, or the other notes) taken away in one write; the folders
+/// and actions stay. Returns their ids: the caller clears what went with
+/// them store by store, as [`reset`]'s does.
+pub fn remove_where(gone: impl Fn(&Note) -> bool) -> Vec<u64> {
+    with_store(|store| {
+        let ids: Vec<u64> = store.notes.iter().filter(|n| gone(n)).map(|n| n.id).collect();
+        if !ids.is_empty() {
+            store.notes.retain(|n| !ids.contains(&n.id));
+            save_to_disk(store);
+        }
+        ids
+    })
+}
+
 /// [`modify`], then the note taken away for good when `gone` says so of it
 /// as changed, under the same lock: a quick note emptied (`quick_note.rs`:
 /// a blank note is never kept). `Ok(None)`: it went.
@@ -1567,19 +1657,29 @@ pub fn modify_or_remove<R>(
 fn forget_extras(id: u64) {
     // Tasks added in its Tasks tab, and its archive marks, go with it (note
     // ids come round again: tasks.json, task_store.rs).
-    task_store::forget_note(id);
+    task_store::forget_notes(&[id]);
     // Its meeting audio goes with it (meeting_audio.rs), its Ask threads
     // (chat/note_chats.rs) and its vectors in the search index
     // (search/index.rs).
     crate::meetings::meeting_audio::forget(id);
-    // Its summary job, retired (its run never writes into a new note given
-    // the id: `still_the_note`).
-    crate::meetings::meeting_end::forget(id);
-    crate::chat::chats::delete_for_note(id);
+    crate::chat::chats::delete_for_notes(&[id]);
     crate::search::removed();
-    // Its version history and its pin (notes/versions.rs, notes/pins.rs).
-    versions::forget(id);
-    pins::forget(id);
+    forget_own(&[id]);
+}
+
+/// What only the notes store keeps of deleted notes `ids`, outside its
+/// lock: each one's summary job, retired (its run never writes into a new
+/// note given the id: `still_the_note`), its version history and its pin
+/// (notes/versions.rs, notes/pins.rs). [`forget_extras`] and Delete some of
+/// your data (`privacy/reset.rs`, which clears the other stores its own way).
+pub fn forget_own(ids: &[u64]) {
+    for &id in ids {
+        crate::meetings::meeting_end::forget(id);
+        versions::forget(id);
+        // Its attendees' companies, kept for the folder rules by company.
+        crate::calendar::filing::forget_note(id);
+    }
+    pins::forget_many(ids);
 }
 
 #[cfg(test)]

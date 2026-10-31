@@ -1996,7 +1996,8 @@ and its Undo, Preview / Source, find, copy, light and dark).
   ahead), as before. **A snip** ([snip.md](./snip.md), 2026-10-23) lands in
   the box (`yap-snip`, or ControlPanel's `chatRequest {snip}`): the
   conversation Rust chose — the one open here when the window was on screen
-  on it, else a new chat —, the thumbnail and its size with ✕, the three
+  on it, else a new chat —, its 120 px tile (its size and ✕ on hover; how
+  a screenshot looks: snip.md, 2026-10-31), the three
   one-tap prompts (What's this? · Explain this error · Summarise), "Ask about
   this screenshot…", the caret there; Enter on an empty box asks "What's
   this?"; never sent by itself; it waits while another view shows
@@ -2021,13 +2022,83 @@ copyable. Yap's, in `chat/skills.rs`:
   a line on what it's for, the instructions (≤ 4,000 characters) and where
   it runs (`runsOn`: `meeting` — a meeting's Ask box, on that meeting —,
   `meetings` — Chat and Ask across meetings, on all of them — or `both`).
-  **Built in** (`builtins`, in code, never stored): /followup-email (one
-  meeting), /decisions, /risks, /coach (both), /todos, /weekly-recap
-  (across). **Your own** in `skills.json` (`SkillStore`, `Saver` "your
-  Skills", a corrupt file set aside; ≤ 50): `skill_save` (new, a change, or
-  a copy of a built-in: `basedOn`; what only a built-in carries — `gather`,
-  `query`, `chip`, `question` — never comes with a copy), `skill_delete`,
-  `skills_list` (built-ins first); `yap-skills-changed` to every window.
+  **Built in** (`builtins`, in code, never stored; 15 since 31 Oct 2026, the
+  `/` menu's order): /followup-email (one meeting), /summary-for,
+  /decisions, /decision-log, /risks, /open-questions, /tickets, /prd,
+  /coach, /todos, /standup, /prep, /one-to-one, /weekly-recap,
+  /project-update (the table below). **Your own** in `skills.json`
+  (`SkillStore`, `Saver` "your Skills", a corrupt file set aside; ≤ 50):
+  `skill_save` (new, a change, or a copy of a built-in: `basedOn`; what only
+  a built-in carries — `gather`, `query`, `chip`, `question`, `document`,
+  `asks` — never comes with a copy), `skill_delete`, `skills_list`
+  (built-ins first); `yap-skills-changed` to every window.
+- **The built-ins** (instructions short and firm, ≤ 600 characters, for the
+  on-device 4B as for a cloud model; the citing is the run's lead, never the
+  Skill's: `SKILL_MEETING_PROMPT` on one meeting, `SKILL_ACROSS_LEAD` and Ask
+  across meetings' lines in Chat). What each reads across the meetings is
+  its `gather` (below):
+
+  | Command | Runs on | Reads across the meetings (`gather`) |
+  |---|---|---|
+  | /followup-email | one meeting | — |
+  | /summary-for *who* | both | `latest`: the meeting the words name, else the latest (the words say who it's for) |
+  | /decisions | both | a search |
+  | /decision-log | across | `decisions`: each meeting's decisions over the last 4 weeks (or the dates named), oldest first; a topic named: only those |
+  | /risks | both | a search |
+  | /open-questions | both | `questions`: where questions were asked (and what came next), and the summaries' open questions, over the last 7 days or the meeting named |
+  | /tickets | both | `meeting`: the meeting named, else a search for the words, else the latest — **a Chat document** |
+  | /prd | both | `meeting` — **a Chat document** (Problem, Goals, Requirements, Out of scope, Open questions) |
+  | /coach | both | `you` |
+  | /todos | across | `tasks` |
+  | /standup | across | `standup`: your own words since the last working day began (Friday's on a Monday), your open tasks, the rest of today's calendar |
+  | /prep | across | `prep`: the next meeting on the calendar (or the one the words match) as passage 1, the earlier meetings with its people (the brief's "last time", `calendar/brief.rs` `gather`) and the user's and their open tasks |
+  | /one-to-one *who* | across | `person`: the same for a one-to-one, with the person named or the next one-to-one's |
+  | /weekly-recap | across | `week` |
+  | /project-update *project* | across | `topic`: a search for the words, oldest first (needs them: `asks`) |
+
+- **What a gathering says it is**: `ask::Found::about`, a line before the
+  passages ("The meeting to prepare for is \"Team planning\" on Thu 29 Oct,
+  15:00 with Priya Shah [1]. …", "The passages are from the meeting
+  \"Supplier call\" (Tue 27 Oct, with Priya Shah)."). A meeting on the
+  calendar is a passage too (`Passage::event`, its key): `from="the
+  calendar"`, and its pill opens the meeting's note or makes one from the
+  invite (`Source::event`, as Chat's calendar tool's). /coach on a meeting
+  named says that one, never "their latest" (31 Oct 2026).
+- **Nothing to run on** (`skills::ask_first`, before any model): /project-update
+  with no project (its `asks`: "Which project? Add its name after the
+  command…"), /prep with nothing named and nothing coming up (or no
+  calendar), /one-to-one with nobody named and no one-to-one coming up —
+  Yap's own answer (`turn::skill_asks_turn`), "Ran /project-update". The
+  `/` menu's Enter (and a click) puts a Skill with `asks` in the box for
+  its words, as Tab does (`core/skills.js` `needsWords`).
+- **Something to keep** (/tickets, /prd: `document`, how its sections go):
+  run in Chat by a model with tools, the question's context gets
+  `skills::document_note` — the document now (`create_document`, then
+  `write_section` each), its passages cited in it as `[1]`, one line in the
+  chat. Every turn asked across the meetings tells `documents::Turn` its
+  passages (`cite_passages`, `ask::labels`): a document's `[2]` becomes
+  "(Supplier call, Tue 27 Oct)" as it's written (`documents::name_citations`
+  in the tool loop, `agent.rs`; a number none of them has goes; every
+  passage from one meeting — /tickets on the latest — the citations go,
+  the document being that meeting's: "(Bug triage, Fri 30 Oct)" after every
+  line was noise), the passages it cites are the answer's sources, and an
+  answer that wrote a document gets no "couldn't tie this" note. /tickets'
+  document is one "Tickets" section, a `### ` heading a ticket (asked for a
+  section a ticket, the 4B made one section every time). On one meeting
+  (its Ask box) and on a model without tools they answer in the thread.
+- **On one meeting, an aid** (`skills::meeting_aid`: through
+  `meeting_assist::skill_input_for`, after the meeting's passages, in its
+  Ask box; in `Found::about` when a Chat run reads one meeting): Yap's own
+  list of what the Skill goes through. /open-questions: each question asked,
+  numbered (Q1, Q2…), in order, with what was said next, and the ones the
+  summary left open, to decide on one by one (told only to find the
+  unanswered ones, the on-device 4B listed the first and stopped; with the
+  questions alone, it still took "Let's come back to that." for an answer);
+  across the meetings the `questions` gathering adds the same list, meeting
+  by meeting (≤ 6 each); the "Q4:" the 4B copies onto its bullets comes off
+  (`skills::tidy_answer`, in `meeting_skill` and Chat's turn). /tickets: the open tasks the summary lists, with
+  owners and deadlines (without them, the 4B made a ticket of the dark mode
+  the meeting put off).
 - **Not the Actions engine** (`notes.rs` `Action`, ActionManager): an
   action rewrites the note's summary under the note guardrails; a Skill
   answers in a chat and never changes the note, and has a command and a
@@ -2085,12 +2156,20 @@ copyable. Yap's, in `chat/skills.rs`:
   the name until you type one; why it can't be one said as you type; Runs
   on: One meeting / Across meetings / Both). Saved at once to skills.json,
   not through Settings' auto-saved config.
-- **Tests**: unit (`chat/skills.rs`: the built-ins, commands, save / copy /
-  delete, an older file, each gathering; `meeting_summary/chips.rs`:
-  passages, checks), e2e `meeting-chips.spec.js` (the menu, Enter / Tab /
-  Esc, the built-ins and your own, Settings, Chat's prompts and "/", the
-  Meetings view); prompts measured with `yap.exe eval --chips`
-  ([model-evals.md](../model-evals.md#meeting-chips-and-skills-29-oct-2026)).
+- **Tests**: unit (`chat/skills.rs`: the built-ins — commands, lengths,
+  kinds, which write a document or ask —, save / copy / delete, an older
+  file, each gathering over a fictional team's meetings and calendar
+  (`gather`, pure: a search left to `find`), what Yap asks first, every
+  Skill's request within an 8k model; `documents.rs` `name_citations`;
+  `search/ask.rs` the `about` line and a calendar passage;
+  `meeting_summary/chips.rs`: passages, checks), e2e `meeting-chips.spec.js`
+  (the menu, Enter / Tab / Esc, the built-ins and your own, Settings, Chat's
+  prompts and "/", the Meetings view) and `skills.spec.js` (the new ones in
+  each menu, /open-questions on a meeting, /decision-log and /prd in Chat
+  — the document, its citations named —, /project-update asking, Settings'
+  list and a copy); prompts measured with `yap.exe eval --chips` and the
+  `skills` scenarios (`--tag skills`, a turn's `skill`)
+  ([model-evals.md](../model-evals.md#more-skills-31-oct-2026)).
 
 ## The context ring (2026-10-25)
 

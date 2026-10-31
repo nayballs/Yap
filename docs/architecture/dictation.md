@@ -1611,8 +1611,8 @@ to **Run again** from Home.
   without a dictation, shown while away or for 2 days after the return,
   once per gap — `welcome_back_dismiss`), and Keep history's copy. Emits
   **`yap-stats-changed`** after each count (Home and Insights re-pull:
-  history may be off). `clear` is Reset app's (`privacy/reset.rs`: it goes
-  with the usage stats); Download your data has it. `share.rs`: Insights'
+  history may be off). `clear` is the Dictation stats kind's (`privacy/reset.rs`:
+  Delete some of your data, and Reset app); Download your data has it. `share.rs`: Insights'
   **Share** — the page draws the numbers on a canvas (`shareCard.js`, never a
   word said or an app) and hands the PNG in the call's body: Copy as Snip
   copies (`snip/copy_save.rs`, out of Win+V history), Save… asks with

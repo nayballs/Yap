@@ -139,8 +139,11 @@ sound smart** while a meeting records — one or two things to say, built
 on the latest talk, the brief and the invite, each citing the line it
 builds on (a pill opens it) — and **Make notes longer** after it (the
 summary written out in more detail, every task kept, Undo); **Skills**,
-saved instructions run with "/" — built-ins (/followup-email, /decisions,
-/risks, /coach, /todos, /weekly-recap) copyable as your own, your own made
+saved instructions run with "/" — 15 built-ins (/followup-email, /decisions,
+/risks, /coach, /todos, /weekly-recap; since 31 Oct /summary-for,
+/decision-log, /open-questions, /tickets and /prd — a Chat document —,
+/standup, /prep and /one-to-one — the calendar's next meeting —,
+/project-update) copyable as your own, your own made
 in Settings → Skills (`skills.json`) — on the meeting in its Ask box, or
 across the meetings in Chat and the Meetings view's Ask bar with their own
 passages (open tasks, a week, the latest meeting's talk) and Ask across
@@ -150,9 +153,11 @@ recorded meeting's two coach marks (once each, `hints.json`); a meeting's
 past chat renamed from Past chats. Unit-tested (the passages, the checks,
 longer notes and their Undo, every Skill rule and gathering, the coach
 marks), e2e-tested with the fake model (`meeting-chips.spec.js`,
-`coach-marks.spec.js`, `notepad.spec.js`'s chips) and the prompts measured
-on the on-device Qwen3.5-4B (`yap.exe eval --chips`,
-[model-evals.md](../model-evals.md#meeting-chips-and-skills-29-oct-2026)). Not
+`skills.spec.js`, `coach-marks.spec.js`, `notepad.spec.js`'s chips) and the
+prompts measured on the on-device Qwen3.5-4B (`yap.exe eval --chips` and the
+`skills` scenarios,
+[model-evals.md](../model-evals.md#meeting-chips-and-skills-29-oct-2026),
+[More Skills](../model-evals.md#more-skills-31-oct-2026)). Not
 tried yet: a real meeting (what's worth saying, live), a cloud model on
 these prompts (no paid calls tonight), a Skill's answer read aloud by the
 Voice Assistant (it doesn't run Skills).
@@ -209,17 +214,20 @@ Settings → Privacy & data → **Download your data** saves one .zip (history
 as CSV and JSON, notes and meetings as Markdown, chats, tasks, memory, the
 Dictionary's CSV, settings with every key, token and password left out; the
 audio and screenshots with a tick box that says their size) through the Save
-dialog, with progress and Cancel, never uploaded; **Reset app** clears the
-history, notes and meetings, chats, memory, tasks, the search index and the
-usage counts, keeps the settings, dictionary, models and account, names it
-all first (with Download your data first) and needs no restart.
+dialog, with progress and Cancel, never uploaded; **Delete some of your
+data** (2026-10-31) deletes the kinds ticked — dictation history, its audio,
+stats, meetings, other notes, tasks, chats, memory, dictionary suggestions,
+AI usage, network receipts, the search index, logs —, each with its size or
+count, confirmed first; **Reset app** is every kind at once, keeps the
+settings, dictionary, models and account, names it all first (with Download
+your data first); neither needs a restart.
 After a dictation with a weak signal (quiet, noisy, clipped), or on a
 Bluetooth headset in hands-free mode, one tip, rarely ("Yap didn't hear you
 clearly"); with a laptop's lid closed its own microphone gives way to the
 next one, or Yap says why it can't hear. Unit-tested (the zip, no secret in
-it, the reset's lists against config-and-data.md, the signal on synthetic
-speech, the lid's order) and e2e-tested (`your-data.spec.js`,
-`mic-tips.spec.js`). Not tried yet: a real laptop's lid (this PC is a
+it, each kind of data against the files config-and-data.md names, the signal
+on synthetic speech, the lid's order) and e2e-tested (`your-data.spec.js`,
+`your-data-delete.spec.js`, `mic-tips.spec.js`). Not tried yet: a real laptop's lid (this PC is a
 desktop), a real Bluetooth headset, the thresholds on the robot's real
 speech (`e2e-real/mic-tips.real.js`, written, not run), a reset of a big
 real data folder.

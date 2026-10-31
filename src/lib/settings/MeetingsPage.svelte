@@ -2,8 +2,9 @@
   // Settings → Meetings (2026-10-22 review, out of General; Wispr Flow's
   // Notetaker page and its order): Call detection (calls/meeting_detect.rs), While
   // a meeting records (calls/meeting_guard.rs, calls/capture.rs, speakers/diarize.rs), Meeting
-  // audio (meetings/meeting_audio.rs), Notepad (meetings/notepad.rs) and Calendar
-  // (calendar.rs). The 12 call apps' switches live one level down, behind
+  // audio (meetings/meeting_audio.rs), Notepad (meetings/notepad.rs), Calendar
+  // (calendar.rs) and Folders by company (calendar/filing/companies.rs:
+  // CompanyFolders.svelte). The 12 call apps' switches live one level down, behind
   // "Ask about calls in · 8 of 12 apps ›".
   //
   //   cfg:  Settings' config $state (auto-save does the saving).
@@ -18,6 +19,7 @@
   import CallAppIcon from '../components/CallAppIcon.svelte';
   import SpeakersToggle from './SpeakersToggle.svelte';
   import SettingsHotkey from './SettingsHotkey.svelte';
+  import CompanyFolders from './CompanyFolders.svelte';
   import { meetingDetect } from '../stores/meetingDetect.svelte.js';
   import { calendar } from '../stores/calendar.svelte.js';
   import { formatHotkeySpec } from '../core/hotkeys.js';
@@ -401,6 +403,9 @@
       onclick={() => goto?.('connectors')}
     />
   </Group>
+
+  <!-- calendar/filing/companies.rs: "Meetings with example.com go in Clients". -->
+  <CompanyFolders />
 
   <p class="set-note consent-line">Recording a call? Let people know you're taking notes.</p>
 {/if}

@@ -269,7 +269,8 @@ built-in Skill's command and the person's `words` with it) or `longer`
 (`meeting_summary/chips.rs`: the numbered passages, `checked`,
 `clean_longer`, the action plan's checks) on the meeting's reply cap and
 temperature, and is judged as the app shows it: `contains_any` (it's
-about what was said), `not_contains` (a made-up place, sum or claim),
+about what was said), `contains_all` (every one: both unanswered
+questions), `not_contains` (a made-up place, sum or claim),
 `cites` (at least one real passage, and not marked as tied to none),
 `max_bullets`; longer notes must be a fifth longer and keep every task.
 Made-up citation numbers and tasks the model dropped are counted, though
@@ -695,7 +696,9 @@ isn't logged.
       "title": "Launch plan", "folder": "Work", "content": "…",
       "enhanced": "…",                        // the AI summary
       "meeting": true, "participants": ["Dave"],
-      "transcript": [{ "source": "them", "text": "…", "ts": 12 }]
+      "transcript": [{ "source": "them", "text": "…", "ts": 12 }],
+      "days_ago": 3                           // the meeting was 3 days before the run's clock, its lines'
+                                              // ts seconds into it (a Skill's dates: /standup, /decision-log)
     }],
     "memory": [{ "section": "people", "title": "Rochelle", "summary": "Sister", "details": ["Lives in York"] }],
     "chats": [{ "title": "Trip to Lisbon", "messages": [{ "role": "user", "text": "…" }, { "role": "assistant", "text": "…" }] }],
@@ -704,13 +707,15 @@ isn't logged.
     "calendar": {                             // a connected calendar for check_calendar (chat/tools/calendar.rs)
       "connected": true,                      // false: none connected (the tool isn't offered)
       "meetings": [{ "title": "Design review", "day": "tomorrow", "start": "10:00", "minutes": 60,
-                     "with": ["Tanay Kothari"], "on": "teams", "maybe": false }],   // day: as said ("friday"), or "+3"
+                     "with": ["Tanay Kothari"], "on": "teams", "maybe": false,       // day: as said ("friday"), or "+3"
+                     "invite": "Agenda: …" }],                                       // the invite's description
       "busy": [{ "title": "Dentist", "day": "thursday", "start": "15:00", "minutes": 60 }]   // nobody else on it
     }
   },
   "turns": [
     { "user": "open python", "expect": { … }, "soft": { … } },   // soft: warnings, not failures
     { "user": "the second one", "voice": false, "expect": { … } },
+    { "user": "/prep supplier call", "skill": "prep", "expect": { … } },   // run as a Skill, across the meetings (chat/skills.rs)
     { "user": "My sister Rochelle is visiting", "learn": true },   // then memory's pass reads the chat, as a quiet chat is read
     { "tell": "My dog's name is Beans" },                          // "Tell Yap what to change", applied as proposed (no chat turn)
     { "import": "- Prefers concise answers…" }                     // an import from another assistant, applied as proposed
@@ -3045,3 +3050,71 @@ npm run eval -- --guides --only guide-public-game --model anthropic:claude-opus-
 Worth reading: the "Outlined before the web" and "Read pages" columns, the level table's
 cells no page gave (said "not confirmed", or guessed?), and how long the first turn took to
 its `create_document`.
+
+## More Skills (31 Oct 2026)
+
+Nine built-ins added to the six (`chat/skills.rs`: /summary-for, /decision-log,
+/open-questions, /tickets, /prd, /standup, /prep, /one-to-one, /project-update), measured
+on the on-device default only, Qwen3.5-4B Q4_K_M on this PC's card (`--ngl 999`, 8K
+context, MTP on, the sidecar's arguments). No cloud model was run (no paid calls); the cloud
+providers get the same messages.
+
+- **On one meeting** (its Ask box: `yap.exe eval --chips --only skill-`): four new `skill`
+  cases in `evals/chips/cases.json` — a catch-up for someone who missed it, a pricing sync's
+  open questions (two put off, two answered), a bug triage's tickets (two agreed, dark mode
+  put off), an offline-mode discussion's requirements — beside the four from 29 Oct, through
+  `meeting_assist::skill_input_for` and `skill_messages` as the app sends them. The judge
+  gained `contains_all` (both unanswered questions, not one of them).
+- **Across the meetings** (Chat: `npm run eval -- --tag skills`): nine scenarios
+  (`evals/scenarios/skills-*.json`, a turn's `skill` runs it as Chat's `/` menu does, a seed
+  note's `days_ago` dates it from the run's clock, a calendar seed's `invite`), through
+  Chat's own turn: /prep with a meeting tomorrow (cited from the calendar, nothing from an
+  unrelated meeting), /decision-log over four meetings (the one 40 days ago left out),
+  /open-questions over a week, /project-update alone (Yap asks, no model) and with a project,
+  /standup, /one-to-one with nobody named (the calendar's next one-to-one), /summary-for,
+  /tickets and /prd as Chat documents (made, outline first, filled, no `[n]` left).
+
+| Round | One meeting (new cases) | Across the meetings | What changed before it |
+|---|---|---|---|
+| 1 | 7/8 (×2) | 16/18 (×2) | the first instructions |
+| 2 | 8/12 (×3) | 16/18, no warnings | stricter checks (both questions, owners); firmer /open-questions, /tickets, /summary-for; /standup's passages the user's own lines only |
+| 3 | 8/12 | 27/27 (×3) | /open-questions given the questions asked; /tickets' document one "Tickets" section (its check: the tickets in it, not a section each) |
+| 4 | 10/12 | 27/27 | each question with what was said next; /tickets given the summary's tasks and owners |
+| 5 | 10/12 | 26/27 | the questions numbered (Q1, Q2…), and listed across the meetings too |
+| 6 | open questions alone: 0/3 | open questions and /prd: 6/6 | "The Q numbers are Yap's: never write them." — the 4B wrote "Q4:" on its bullets anyway: the line went, and Yap takes them off itself (`skills::tidy_answer`). The prompts are round 5's. |
+
+The four older Skills' cases passed in every run. Each turn across the meetings
+is one model call of about 4,000 prompt tokens (0.5–1.9 s on the card); a document turn
+three to seven calls (13–34K tokens, 2–5 s).
+
+What the runs showed, and what changed:
+
+- **/open-questions on one meeting is the hardest**: told to list the questions nobody
+  answered, the 4B listed the first and stopped (3 runs of 3), and kept taking "Let's come
+  back to that." for an answer. Yap now hands it its own list (`skills::meeting_aid`): each
+  question asked, numbered, with what was said next, and the ones the summary left open, to
+  decide on one by one — at best 1 of 3 on that meeting (rounds 4 and 5; 0 of 3 in round 6):
+  the question it keeps missing is the one put off with "Let's come back to that." Across
+  the meetings the same list, meeting by meeting, stopped it listing answered questions
+  with their answers (3 warnings of 3 → none in 6 runs), and it found the put-off pricing
+  page question in 5 of the 6. It copies the list's "Q4:" onto its bullets: Yap takes them
+  off. Still the weakest
+  Skill on the 4B on one meeting: a person reads its list as a start.
+- **/tickets** made a ticket of the dark mode the meeting put off (1 of 2, then 1 of 3) and
+  gave one ticket the wrong owner; with the summary's open tasks and owners handed to it
+  (the work agreed, "nothing the meeting put off or turned down") it was 3/3 twice. As a
+  document it always made one section with a `### ` heading a ticket, never a section a
+  ticket however it was asked: that's now the layout asked for. Its citations, all of one
+  meeting, read "(Bug triage, Fri 30 Oct)" after every line: a document from one meeting now
+  leaves them out (`documents::name_citations`), one from several names each meeting.
+- **/standup** gave the user what Tom said he'd do ("I'm ordering the new laptops"): its
+  passages now hold the user's own lines only. **/summary-for** once hung the build on the
+  wrong person ("Lena Fischer agreed to build it"): "Name who does what only where the
+  passages name them (\"Them\" is no one's name)".
+- **/prep**, **/one-to-one**, **/decision-log**, **/project-update**: right from the first
+  run — the calendar's meeting first, last time's decisions and open question, the open tasks
+  of the user and the person coming, nothing from an unrelated meeting; /prep cited the
+  calendar meeting in 2 of 3 runs (Yap cites a meeting the answer names when it can).
+- **/prd as a document** made all five sections in 9 of its 10 runs; once, one section.
+
+Run folders: `E:\yap-builds\skills\eval-runs\` (this PC; not kept).

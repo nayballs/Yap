@@ -241,7 +241,7 @@ test('Skills in the notepad: "/" lists them, Enter runs one, Tab adds words; you
   // "/": the Skills that run on one meeting (not the across-meetings ones).
   await askInput(pad).fill('/');
   const menu = skillMenu(pad);
-  await expect(menu.getByRole('option')).toHaveCount(4);
+  await expect(menu.getByRole('option')).toHaveCount(8);
   await expect(menu.getByRole('option').first()).toContainText('/followup-email');
   await expect(menu).not.toContainText('/todos');
   await expect(suggestions(pad)).toHaveCount(0); // the chips step aside while typing

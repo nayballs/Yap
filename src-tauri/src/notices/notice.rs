@@ -203,6 +203,12 @@ pub fn rule(kind: &str) -> Rule {
         // one a day there): after a dictation, gone if unseen a minute.
         "snippet-suggestion" => Rule { max_wait_ms: Some(MIN), ..tip },
         "snippet-saved" => Rule { max_wait_ms: Some(10_000), ..info },
+        // "File every meeting with example.com in Clients?"
+        // (calendar/filing/companies.rs, one a day there): right after a
+        // meeting filed by hand; gone if unseen a minute. Its "Meetings with
+        // example.com go in Clients · Undo" after a Yes on the bar.
+        "company-folder" => Rule { max_wait_ms: Some(MIN), ..tip },
+        "company-folder-filed" => Rule { max_wait_ms: Some(10_000), ..info },
         // "You spoke French · Add it to My languages?" (dictation/languages/nudge.rs):
         // after a dictation, never over one; dropped unseen after a minute.
         "language-nudge" => Rule { max_wait_ms: Some(MIN), ..tip },
@@ -775,6 +781,8 @@ pub fn e2e_notice_reset() -> Result<(), String> {
     *LEDGER.lock().unwrap_or_else(|p| p.into_inner()) = None;
     with_call_fatigue(|_| (Fatigue::default(), ()));
     crate::notices::kinds::e2e_reset();
+    // The company folder offer's one a day (calendar/filing/companies.rs).
+    crate::calendar::filing::companies::e2e_reset();
     TEST_FOCUS.store(FOCUS_YAP, Ordering::SeqCst);
     Ok(())
 }

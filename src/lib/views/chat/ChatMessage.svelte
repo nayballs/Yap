@@ -14,7 +14,8 @@
   import { modelLine, whereItRuns } from '../../core/aiModel.js';
   import { closePartial, settle } from '../../core/streaming.js';
   import { menuKey, openContextMenu } from '../../ui/contextMenu.svelte.js';
-  import { chatImageUrl, removedLine, sizeLine, imageItems, splitScreenText } from './chatImages.js';
+  import { removedLine, sizeLine, imageItems, splitScreenText, sentPlaced, shown } from './chatImages.js';
+  import { screenPixels } from './chatShots.svelte.js';
   import { thoughtLabel } from './chatThink.svelte.js';
   import { appLabel } from '../../core/appNames.js';
   import SourcesRow from './SourcesRow.svelte';
@@ -23,14 +24,15 @@
   /**
    * `m`: the message; `last`: the thread's last; `sources`: what its
    * citations point at (chatState's `citedSources`); `reading`: being read
-   * aloud; `keepDays`: how long screenshots are kept; `onview(id)` opens a
-   * screenshot large, `onmenu(e)` its right-click menu, `onread()` ▶,
+   * aloud; `keepDays`: how long screenshots are kept; `room`: the width a
+   * question's screenshots may take (CSS px, the thread's); `onview(img)`
+   * opens a screenshot large, `onmenu(e)` its right-click menu, `onread()` ▶,
    * `onsource(s)` opens a passage of the person's meetings at its line (an
    * answer asked across meetings: search/ask.rs); `ondoc(d)` opens a
    * document it made or changed in the panel beside the chat
    * (chat/documents.rs).
    */
-  let { m, last, sources, reading, keepDays, onview, onmenu, onread, onsource = null, ondoc = null } = $props();
+  let { m, last, sources, reading, keepDays, room = 0, onview, onmenu, onread, onsource = null, ondoc = null } = $props();
 
   // The documents it made or changed: saved with it, or (while it's
   // written) as they come.
@@ -40,10 +42,9 @@
   // words, and the text read from the picture, folded under them.
   const said = $derived(m.role === 'user' ? splitScreenText(m.text) : { question: m.text, screenText: null });
 
-  /** A screenshot's width in the question: at most 320 × 240, its own
-   *  shape (the bubble fits it, rather than a full-size picture's width
-   *  pushing the bubble out with room to spare). */
-  const shotWidth = (img) => (img.w > 0 && img.h > 0 ? Math.round(Math.min(320, (240 * img.w) / img.h)) : 320);
+  // A question's own words, a quoted passage or the text read from its
+  // screenshot: the bubble (under its screenshots, as the Claude app has it).
+  const hasText = $derived(m.role === 'user' && (!m.images?.length || !!(said.question || m.quote?.text || said.screenText || m.voice)));
 
   /** A screenshot's right-click menu (its own: not the question's). */
   function shotMenu(e, img) {
@@ -90,6 +91,7 @@
 <!-- svelte-ignore a11y_no_noninteractive_tabindex, a11y_no_noninteractive_element_interactions -->
 <div
   class="cbubble {m.role}"
+  class:withshots={m.role === 'user' && m.images?.length > 0}
   class:reading
   class:streaming={m.streaming}
   role="article"
@@ -112,49 +114,68 @@
     {/if}
   {:else}
     {#if m.images?.length}
-      <!-- The screenshots it asked about (snip.rs); one past "Keep chat
+      <!-- The screenshots it asked about (snip.rs), over its words as the
+           Claude app has them: each at its own pixels when it fits (one per
+           device pixel), at most 480 × 320 (240 wide each of several), in the
+           screenshot frame (chatImages.js `sentPlaced`); one past "Keep chat
            screenshots" says so in its place. -->
       <div class="shots" role="group" aria-label="Screenshots">
         {#each m.images as img (img.id)}
           {#if img.gone}
             <span class="shot gone" data-testid="chat-shot-gone">{removedLine(keepDays)}</span>
           {:else}
-            <button
-              type="button"
-              class="shot"
-              class:astext={img.asText}
-              title={img.asText ? 'Sent as its text (read on this PC)' : 'Open the screenshot'}
-              aria-label={`Screenshot, ${sizeLine(img)}${img.asText ? ', sent as its text' : ''}`}
-              onclick={() => onview(img.id)}
-              oncontextmenu={(e) => shotMenu(e, img)}
-            >
-              <img src={chatImageUrl(img.id)} alt="" style={`aspect-ratio: ${img.w} / ${img.h}; width: ${shotWidth(img)}px`} />
+            {@const p = sentPlaced(img, screenPixels.ratio, room, m.images.length > 1)}
+            <div class="shotframe" class:astext={img.asText} style:width="{p.frame.w}px" style:aspect-ratio="{p.frame.w} / {p.frame.h}">
+              <button
+                type="button"
+                class="shot"
+                title={img.asText ? 'Sent as its text (read on this PC)' : 'Open the screenshot'}
+                aria-label={`Screenshot, ${sizeLine(img)}${img.asText ? ', sent as its text' : ''}`}
+                onclick={() => onview(img)}
+                oncontextmenu={(e) => shotMenu(e, img)}
+              >
+                <img
+                  src={p.src}
+                  alt=""
+                  draggable="false"
+                  decoding="async"
+                  use:shown
+                  style:left={p.pic.x}
+                  style:top={p.pic.y}
+                  style:width={p.pic.w}
+                  style:height={p.pic.h}
+                />
+              </button>
               {#if img.asText}<span class="astextnote">Sent as text</span>{/if}
-            </button>
+            </div>
           {/if}
         {/each}
       </div>
     {/if}
-    {#if m.quote?.text}
-      <!-- The passage of a document it was asked about (the panel's selection),
-           or text selected in another app (chat/assistant/selected.rs: no note,
-           its app named). -->
-      <!-- prettier-ignore -->
-      <blockquote class="quoted" data-testid="chat-quote-sent" title={m.quote.text}>{#if !m.quote.noteId}<span class="quotefrom" data-testid="chat-quote-from">{m.quote.app ? `Selected in ${appLabel(m.quote.app)}` : 'Selected text'}</span>{/if}{m.quote.text}</blockquote>
-    {/if}
-    <p class="cbody">
-      {#if m.voice}
-        <span class="viavoice" title="Asked by voice" aria-label="Asked by voice">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="2" width="6" height="12" rx="3" /><path d="M5 10v1a7 7 0 0 0 14 0v-1" /><path d="M12 18v4" /></svg>
-        </span>
-      {/if}{said.question}
-    </p>
-    {#if said.screenText}
-      <!-- What Windows read from the screenshot, sent in its place. -->
-      <details class="screentext" data-testid="chat-screen-text">
-        <summary>Text from the screenshot</summary>
-        <pre>{said.screenText}</pre>
-      </details>
+    {#if hasText}
+      <div class="utext">
+        {#if m.quote?.text}
+          <!-- The passage of a document it was asked about (the panel's selection),
+               or text selected in another app (chat/assistant/selected.rs: no note,
+               its app named). -->
+          <!-- prettier-ignore -->
+          <blockquote class="quoted" data-testid="chat-quote-sent" title={m.quote.text}>{#if !m.quote.noteId}<span class="quotefrom" data-testid="chat-quote-from">{m.quote.app ? `Selected in ${appLabel(m.quote.app)}` : 'Selected text'}</span>{/if}{m.quote.text}</blockquote>
+        {/if}
+        <p class="cbody">
+          {#if m.voice}
+            <span class="viavoice" title="Asked by voice" aria-label="Asked by voice">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="2" width="6" height="12" rx="3" /><path d="M5 10v1a7 7 0 0 0 14 0v-1" /><path d="M12 18v4" /></svg>
+            </span>
+          {/if}{said.question}
+        </p>
+        {#if said.screenText}
+          <!-- What Windows read from the screenshot, sent in its place. -->
+          <details class="screentext" data-testid="chat-screen-text">
+            <summary>Text from the screenshot</summary>
+            <pre>{said.screenText}</pre>
+          </details>
+        {/if}
+      </div>
     {/if}
   {/if}
 </div>
@@ -505,53 +526,69 @@
   }
 
   /* ---- Snip to Chat: the screenshots in a question ---- */
+  /* With screenshots, the question is a column: the pictures, then its
+     words in the bubble (the Claude app's user turn). */
+  .cbubble.user.withshots {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 6px;
+    padding: 0;
+    background: none;
+  }
+  .cbubble.user.withshots .utext {
+    max-width: 100%;
+    padding: 8px 12px;
+    border-radius: 12px;
+    background: var(--yap-primary-wash);
+  }
   .shots {
     display: flex;
     flex-wrap: wrap;
     justify-content: flex-end;
+    /* Each its own height (its frame's aspect-ratio), lined up at the foot. */
+    align-items: flex-end;
     gap: 6px;
-    margin-bottom: 6px;
-  }
-  .shot {
-    display: block;
     max-width: 100%;
+  }
+  /* The picture's button fills its frame (app.css .shotframe). */
+  .shot {
+    position: absolute;
+    inset: 0;
+    display: block;
     padding: 0;
-    border: 1px solid var(--yap-border-subtle);
-    border-radius: var(--yap-r);
+    border: none;
+    border-radius: inherit;
     overflow: hidden;
-    background: var(--yap-s1);
+    background: none;
     cursor: zoom-in;
   }
-  .shot img {
-    display: block;
-    max-width: 100%;
-    height: auto;
-    object-fit: contain;
-  }
   .shot:focus-visible {
-    outline: 2px solid var(--yap-focus-ring, var(--yap-primary-line));
-    outline-offset: 2px;
+    outline: none;
+  }
+  .shotframe:has(.shot:focus-visible) {
+    box-shadow: var(--yap-focus);
   }
   .shot.gone {
+    position: static;
     padding: 10px 14px;
+    border: 1px dashed var(--yap-border);
+    border-radius: 10px;
     font-family: var(--yap-font-ui, inherit);
     font-size: 11.5px;
     color: var(--yap-muted);
     background: var(--yap-s2);
-    border-style: dashed;
     cursor: default;
   }
   /* Sent as its text: the picture stays for you, quieter. */
-  .shot.astext {
-    position: relative;
-  }
-  .shot.astext img {
+  .shotframe.astext .shot {
     opacity: 0.75;
   }
   .astextnote {
     position: absolute;
     right: 6px;
     bottom: 6px;
+    z-index: 2;
     padding: 1px 7px;
     border-radius: var(--yap-r-full);
     background: var(--yap-s2);

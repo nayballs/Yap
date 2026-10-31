@@ -10,7 +10,7 @@
   import { toast } from '../../ui/toast.svelte.js';
   import { openContextMenu, menuKey, menuOpenFor, askConfirm, devInspect } from '../../ui/contextMenu.svelte.js';
   import { showSaveError } from '../../notices/saveErrors.js';
-  import { refreshAudio, cantTranscribeAgain, askTranscribeAgain, cantFindSpeakers, findSpeakers, cantExportAudio, exportAudio } from '../../stores/meetingAudio.svelte.js';
+  import { refreshAudio, cantTranscribeAgain, askTranscribeAgain, cantFindSpeakers, findSpeakers, cantExportAudio, exportAudio, isImported } from '../../stores/meetingAudio.svelte.js';
   import { displayTitle, relTime, dateOf } from './noteFormat.js';
   import { pinItem, historyItem } from './noteMenus.js';
 
@@ -200,7 +200,8 @@
         // Its earlier versions (notes/versions.rs).
         historyItem(notes, n.id, itemEls[n.id]),
         // A meeting kept on disk (meetings/meeting_audio.rs): on the speech model in use now.
-        ...(n.noteType === 'meeting'
+        // Not one imported from a transcript file: there's no audio.
+        ...(n.noteType === 'meeting' && !isImported(n)
           ? [
               {
                 label: 'Transcribe again…',

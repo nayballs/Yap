@@ -6,7 +6,7 @@
 // core/skills.js; the menu is components/SkillMenu.svelte.
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
-import { matchSkills, slashQuery, splitCommand, skillFor, promptChips } from '../core/skills.js';
+import { matchSkills, slashQuery, splitCommand, skillFor, promptChips, needsWords } from '../core/skills.js';
 
 /** `list`: every Skill (built-ins first); `loaded`: read at least once. */
 export const skills = $state({ list: [], loaded: false });
@@ -80,7 +80,10 @@ export class SkillPicker {
     }
     if ((e.key === 'Enter' && !e.shiftKey) || e.key === 'Tab') {
       e.preventDefault();
-      return { skill: this.items[Math.min(this.active, n - 1)], run: e.key === 'Enter' };
+      const skill = this.items[Math.min(this.active, n - 1)];
+      // One that needs words to run on (/project-update: which project):
+      // Enter puts it in the box for them, as Tab does.
+      return { skill, run: e.key === 'Enter' && !needsWords(skill) };
     }
     return null;
   }
