@@ -23,7 +23,6 @@ import {
   sidebar,
   expectStore,
   closeToasts,
-  openModelPicker,
 } from './support/fixtures.js';
 import { expectText } from './support/notePage.js';
 
@@ -619,7 +618,10 @@ test('more of Yap in dark: call apps, Language Models with cleanup on, the Chat 
   await closeSettings(main);
 
   // The Chat model picker and a right-click menu.
-  const picker = await openModelPicker(main);
+  await openView(main, 'Chat');
+  await main.locator('.modelchip .chip').click();
+  const picker = main.getByRole('dialog', { name: 'Switch the Chat model' });
+  await expect(picker).toBeVisible();
   await shot(main, 'chat-model-picker');
   await main.keyboard.press('Escape');
   await expect(picker).toBeHidden();
