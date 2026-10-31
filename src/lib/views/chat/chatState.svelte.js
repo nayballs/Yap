@@ -892,6 +892,13 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
         }
         return;
       }
+      // Yap turned Think on for this question (a strong model writing a
+      // document, chat/think.rs `auto_on`): the button shows lit until the
+      // answer is in.
+      if (ev?.kind === 'think') {
+        think.auto = !!ev.auto;
+        return;
+      }
       // A document of this turn (the panel), while this chat is the one shown.
       if (ev?.kind === 'document' || ev?.kind === 'section' || ev?.kind === 'tool') {
         if (mine('user') >= 0) {
@@ -1042,6 +1049,8 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
     } finally {
       // Nothing is being written into the document any more.
       doc.turnEnded();
+      // Think, lit by Yap for this question's document, goes off with it.
+      think.auto = false;
       sending = false;
       stopping = false;
       stopAnswerCall = null;

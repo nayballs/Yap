@@ -8,6 +8,12 @@ import { invoke } from '@tauri-apps/api/core';
 export const think = $state({
   /** The next question is thought through. */
   on: false,
+  /**
+   * Yap turned Think on for the question being answered (a strong cloud
+   * model writing a document, `think::auto_on`): the button shows lit
+   * until its answer is in.
+   */
+  auto: false,
   /** Chat's model can think it through (the button shows). */
   can: false,
   /** "here" (the model runs on this PC) | "cloud". */

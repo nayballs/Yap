@@ -120,12 +120,49 @@ pub fn handles_rich(provider: &str, model: &str) -> bool {
     RICH_FAMILIES.iter().any(|f| id.contains(f)) || REASONING.is_match(&id) || crate::chat::tools::estimate_model_size_b(model) >= RICH_MIN_PARAMS_B
 }
 
+/// **A strong model** (2026-10-31): the one place that says which of Chat's
+/// models Yap trusts as it trusts Claude in the Claude app — the models
+/// that get the rich tools ([`handles_rich`]: Claude, GPT-5, Gemini, the
+/// large open models; never one on this PC). For them, and only them:
+/// - reading the web doesn't stop the turn's note and document changes
+///   (`tools::refused_after_web`: only apps, the clipboard and memory stay
+///   off after it);
+/// - a turn that writes a document researches deeper (`web::Reach::deep`:
+///   up to 10 searches and as many page reads as the model's context
+///   holds) and thinks first (`think::auto_on`);
+/// - a guide or plan is completed from the model's own knowledge where its
+///   sources run out, marked so ([`INSTRUCTIONS`], `tools::web_tool_instructions`).
+///
+/// The on-device model and small ones keep the stricter rules: they make
+/// things up more readily (docs/model-evals.md). Not changed by an
+/// evaluation's `--doc-tools`. Pure.
+pub fn strong(provider: &str, model: &str) -> bool {
+    handles_rich(provider, model)
+}
+
 /// What Chat's system prompt says about documents with the rich set (in
 /// place of `documents::INSTRUCTIONS`): when to make one, outline first, how
 /// it reads — as the simple set's — and how to change one: read it, then
 /// edit its blocks by id and hash; a refusal means the person changed that
-/// block. Kept short: every step of a tool turn sends it.
-pub const INSTRUCTIONS: &str = "Something to keep (a build, a plan, a guide, a comparison, a long table) goes straight into a document, never the chat, never asked first: create_document (title, a one- or two-sentence summary, every section: one per part, usually 2 to 6), then write_section each, in order. Short bullets, a markdown table for anything with rows, **bold** lead-ins; a game build: race and origin, character creation, skills, a level-by-level table, gear, tips. In the chat say only one short line (\"It's open on the right.\"): no summary, never the content. A document is a Markdown note, saved in Notes under Chat documents. To change a document from this chat (a change, more depth, a selected passage): read_document, then edit_document with ops on its block ids, each replace, delete or move with the if_hash you read; a table row added or changed is a replace of the whole table. A refused op means the user changed that block: their words stay, build on them. document_history and restore_document bring back an earlier version when asked. An option picked: a new document. Never create_note for these.";
+/// block. **A complete guide** (2026-10-31): a level-by-level table has a row
+/// for every level asked for — Claude Opus 5.5 wrote one of "Level 1",
+/// "Endgame" and "Reference only" rows when its sources ran out — and what
+/// no source gave is the model's own suggestion, said so in one italic line
+/// under its table or section (not a column: the panel beside the chat is
+/// narrow, and the cited rows already carry their links; not a footnote:
+/// Yap's markdown has none). Kept short: every step of a tool turn sends it.
+pub const INSTRUCTIONS: &str = "Something to keep (a build, a plan, a guide, a comparison, a long table) goes straight into a document, never the chat, never asked first: create_document (title, a one- or two-sentence summary, every section: one per part, usually 2 to 6), then write_section each, in order. Short bullets, a markdown table for anything with rows, **bold** lead-ins; a game build: race and origin, character creation, skills, a level-by-level table, gear, tips. Make it complete: a level-by-level table has a row for every level asked for (never \"endgame\" or \"reference only\" rows in their place). Cite what came from the web [n]; where your sources run out, fill it in from your own knowledge and say so in one italic line under that table or section (\"*Levels 5–19: my suggestions, not from a source.*\"). In the chat say only one short line (\"It's open on the right.\"): no summary, never the content. A document is a Markdown note, saved in Notes under Chat documents. To change a document from this chat (a change, more depth, a selected passage): read_document, then edit_document with ops on its block ids, each replace, delete or move with the if_hash you read; a table row added or changed is a replace of the whole table. A refused op means the user changed that block: their words stay, build on them. document_history and restore_document bring back an earlier version when asked. An option picked: a new document. Never create_note for these.";
+
+/// The line under a table or section that says it's the model's own: what
+/// the rule asks for (`INSTRUCTIONS`), and what the evaluations look for.
+/// Pure.
+#[cfg(any(test, debug_assertions))] // the evaluations' guide checks; tests
+pub fn marks_own_knowledge(text: &str) -> bool {
+    static OWN: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
+        regex::Regex::new(r"(?i)not (?:from|in) (?:a|any|the|my) sources?|my (?:own )?suggestions?|from my own knowledge|no source (?:gave|covers|covered)").expect("static regex")
+    });
+    OWN.is_match(text)
+}
 
 /// The tools this file runs.
 pub const TOOL_NAMES: &[&str] = &["read_document", "edit_document", "document_history", "restore_document"];
@@ -879,6 +916,28 @@ mod tests {
         }
         assert_eq!(ToolSet::for_model("anthropic", "claude-haiku-5-5"), ToolSet::Rich);
         assert_eq!(ToolSet::for_model("ondevice", "Qwen_Qwen3.5-4B-Q4_K_M"), ToolSet::Simple);
+        // The strong models are the rich set's: one list.
+        assert!(strong("anthropic", "claude-opus-5-5") && strong("openai", "gpt-5.5") && strong("gemini", "gemini-3-pro"));
+        assert!(!strong("ondevice", "Qwen_Qwen3.5-4B-Q4_K_M") && !strong("custom", "qwen3.5-4b") && !strong("custom", "fake-chat"));
+    }
+
+    #[test]
+    fn a_complete_guide_and_its_own_suggestions_marked() {
+        // The rule asks for every level and the line under the table.
+        assert!(INSTRUCTIONS.contains("a row for every level asked for"));
+        assert!(INSTRUCTIONS.contains("my suggestions, not from a source"));
+        // The marks a model writes, read as such.
+        for line in [
+            "*Levels 5–19: my suggestions, not from a source.*",
+            "_Rows without a link are my own suggestions._",
+            "*Not from a source: the talents after level 8.*",
+            "Levels 9 to 20 come from my own knowledge.",
+        ] {
+            assert!(marks_own_knowledge(line), "{line}");
+        }
+        for line in ["| 5 | Fireball [1] |", "Sources: the wiki.", "A suggested route north."] {
+            assert!(!marks_own_knowledge(line), "{line}");
+        }
     }
 
     #[test]

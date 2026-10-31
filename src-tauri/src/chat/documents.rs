@@ -1142,6 +1142,34 @@ pub fn restores_version(question: &str) -> bool {
     BACK.is_match(question.trim())
 }
 
+/// **Does this question have the model write a document?** Something to
+/// keep ([`asks_for_document`]); with a document in the chat, a change to
+/// it or more depth on it ([`changes_document`]: "make it more detailed")
+/// or an option picked from it ([`picks_option`]) — not an earlier version
+/// back ([`restores_version`]: a restore writes nothing); or a change to a
+/// passage selected in the panel (`selected`). What makes a strong model's
+/// turn research deeper and think first (`turn.rs`). Pure.
+pub fn writes_document(question: &str, docs: &[DocRef], selected: bool) -> bool {
+    if asks_for_document(question) {
+        return true;
+    }
+    let changes = changes_document(question) && !restores_version(question);
+    (!docs.is_empty() && (changes || picks_option(question))) || (selected && changes)
+}
+
+/// What a strong model's document turn is told in its context, with the
+/// web on (`turn.rs`; the context, never the system prompt: the prompt
+/// cache stays whole): how far it may look this turn ([`crate::web::Reach`])
+/// and to read the best pages, then write the whole thing. Claude Opus 5.5,
+/// writing a level-by-level guide on 3 searches, read no page and said the
+/// levels between weren't covered by a source it found. Pure.
+pub fn research_note(reach: crate::web::Reach) -> String {
+    format!(
+        "This is a document to write: research it properly first — up to {} searches and {} page reads this turn (read_page the best pages in full) — then write it complete, every part and level asked for.",
+        reach.searches, reach.reads
+    )
+}
+
 /// [`ASKS_NOTE`] in one short line, for a cloud model ([`steer`]'s
 /// `brief`).
 pub const ASKS_BRIEF: &str = "This asks for something to keep: make the document now, not an answer in the chat or an offer to make one.";
@@ -2227,6 +2255,34 @@ mod tests {
         // Without one: only an ask for something to keep.
         assert_eq!(steer("Let's do option A.", &[], false, ToolSet::Simple), None);
         assert_eq!(steer("Plan a three-day trip to Porto, day by day.", &[], false, ToolSet::Simple).as_deref(), Some(ASKS_NOTE));
+    }
+
+    /// Which questions have the model write a document (a strong model's
+    /// turn then researches deeper and thinks first).
+    #[test]
+    fn a_question_that_writes_a_document_is_told_apart() {
+        let made = execute("create_document", &json!({ "title": "Emberfall guide", "sections": ["Levels"] }));
+        let docs = [DocRef { id: made["data"]["id"].as_u64().unwrap(), title: "Emberfall guide".into() }];
+        // Something to keep, with or without a document open.
+        for q in ["Make me a detailed level-by-level guide for a fire mage", "Plan a three-day trip to Porto, day by day."] {
+            assert!(writes_document(q, &[], false), "{q}");
+            assert!(writes_document(q, &docs, false), "{q}");
+        }
+        // With the guide open: more depth, a change, a pick.
+        for q in ["Make it more detailed", "Go deeper on the levels after ten", "Add the gear and where to get it", "Let's do option A."] {
+            assert!(writes_document(q, &docs, false), "{q}");
+            assert!(!writes_document(q, &[], false), "no document to change: {q}");
+        }
+        // A selected passage changed, even without the chat's documents.
+        assert!(writes_document("Make this shorter", &[], true));
+        // Not: a question, a thanks, an earlier version back.
+        for q in ["What does Ember Bolt do?", "Thanks!", "Put it back the way it was before that change."] {
+            assert!(!writes_document(q, &docs, false), "{q}");
+        }
+        assert!(!writes_document("What does this mean?", &[], true));
+        // How far it may look, said in the context.
+        let note = research_note(crate::web::Reach { searches: 10, reads: 8 });
+        assert!(note.contains("up to 10 searches and 8 page reads"), "{note}");
     }
 
     /// A cloud model gets the same nudge as one short line in the
