@@ -1,0 +1,202 @@
+---
+import Layout from '../layouts/Layout.astro';
+import PageHero from '../components/PageHero.astro';
+import DownloadButton from '../components/DownloadButton.astro';
+import Faq from '../components/Faq.astro';
+import Closing from '../components/Closing.astro';
+import DraftNote from '../components/DraftNote.astro';
+import { NAME, RELEASES_URL } from '../brand';
+import { faqFor } from '../data/faq';
+
+// The free-forever list (pricing-and-business §2.2), in four groups.
+const free = [
+  {
+    title: 'Dictation',
+    items: [
+      'Unlimited dictation, in any app',
+      'Every speech model, on your graphics card or processor',
+      'AI cleanup on your PC',
+      'The dictionary, snippets and transforms',
+      'History and stats, kept on your PC',
+    ],
+  },
+  {
+    title: 'AI on your terms',
+    items: [
+      'A model on your PC, one click to set up',
+      'Your own Ollama or LM Studio server',
+      'Your own key for Groq, OpenAI, Anthropic, Gemini or OpenRouter',
+      'Web search, when you switch it on',
+    ],
+  },
+  {
+    title: 'Meetings',
+    items: [
+      'Unlimited meeting notes, recorded on your PC',
+      'Summaries, action plans and tasks',
+      'Calendar reminders and briefs',
+      'Search and ask across every meeting',
+    ],
+  },
+  {
+    title: 'Assistant and the rest',
+    items: [
+      'The Voice Assistant and Chat, with documents',
+      'Spoken replies and Read aloud',
+      `${NAME} Link from your phone at home`,
+      'The MCP server and the local API',
+    ],
+  },
+];
+---
+<Layout
+  title="Pricing"
+  description={`${NAME} is free: no trial, no word limit, no meeting limit. Everything that runs on your PC stays free for good.`}
+>
+  <PageHero
+    title="Free. Not a trial, not a word limit."
+    lede="Everything that runs on your own PC is free, for good. No account needed."
+    cta={false}
+  />
+
+  <section class="section-tight" aria-labelledby="plans-h">
+    <h2 id="plans-h" class="sr-only">Plans</h2>
+    <div class="wrap plans">
+      <article class="card plan-free" aria-labelledby="free-h">
+        <header class="plan-head">
+          <div>
+            <h3 id="free-h">Free</h3>
+            <p class="muted">For everyone, for everything that runs on your PC.</p>
+          </div>
+          <p class="price"><span class="num">£0</span><span class="muted small">Also $0 and €0. There’s nothing to pay.</span></p>
+        </header>
+        <div class="free-groups">
+          {free.map((g) => (
+            <div>
+              <h4>{g.title}</h4>
+              <ul class="ticks">
+                {g.items.map((i) => <li>{i}</li>)}
+              </ul>
+            </div>
+          ))}
+        </div>
+        <div class="btn-row mt-4">
+          <DownloadButton size="lg" primary />
+        </div>
+      </article>
+
+      <article class="later" aria-labelledby="pro-h">
+        <p><span class="tag">Not available yet</span></p>
+        <h3 id="pro-h">Pro, later</h3>
+        <p>A paid plan may come one day, and if it does it will sell only things that run on servers: AI on our key with nothing to set up, and sync between your PCs, encrypted end to end.</p>
+        <ul class="promises">
+          <li><strong>Nothing on the Free list will ever move to Pro.</strong></li>
+          <li><strong>{NAME} will never stop working offline because of an account.</strong></li>
+        </ul>
+        <p class="muted small">No price yet, because there’s no plan yet. Watch the <a href={RELEASES_URL}>release notes</a> to hear first.</p>
+      </article>
+    </div>
+    <div class="wrap mt-3">
+      <DraftNote>
+        For the maintainer: the free-forever wording, whether to show this Pro card at all, and whether to name a price (the business doc proposes £7 a month). The plan’s “Interested?” link goes to GitHub Discussions, which isn’t switched on for the repo, so it points at the release notes for now (plan §3.6, decision 3).
+      </DraftNote>
+    </div>
+  </section>
+
+  <section class="section ruled" aria-labelledby="keys-h">
+    <div class="wrap grid grid-2">
+      <div class="stack">
+        <h2 id="keys-h">What your own key costs</h2>
+        <p>If you use a cloud AI provider, it bills you directly for what you use, at its own prices. Tidying up dictations uses very little, so for most people it’s small change. {NAME} shows each day’s usage, and an estimate of the cost, in Settings. The model on your PC costs nothing.</p>
+      </div>
+      <div class="stack">
+        <h2>Using it at work</h2>
+        <p>Go ahead. The MIT licence allows commercial use, and there are no seats to count or admin console to buy.</p>
+      </div>
+    </div>
+  </section>
+
+  <Faq items={faqFor('pricing')} />
+  <div class="wrap">
+    <DraftNote class="mb-draft">How {NAME} is funded, and whether to show a sponsor link, are the maintainer’s to answer here and on an About page (plan §3.6, §10.4).</DraftNote>
+  </div>
+  <Closing />
+</Layout>
+
+<style>
+  .plans {
+    display: grid;
+    grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
+    gap: 24px;
+    align-items: start;
+  }
+  @media (max-width: 960px) {
+    .plans {
+      grid-template-columns: 1fr;
+    }
+  }
+  .plan-free {
+    padding: clamp(24px, 3.5vw, 40px);
+  }
+  .plan-head {
+    display: grid;
+    gap: 18px;
+    padding-bottom: 24px;
+    margin-bottom: 24px;
+    border-bottom: 1px solid var(--t-rule);
+  }
+  .plan-head h3 {
+    font-size: 1.75rem;
+    letter-spacing: -0.02em;
+  }
+  .price {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 4px 16px;
+  }
+  .price .num {
+    font-size: 4rem;
+    line-height: 0.9;
+  }
+  .free-groups {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 28px 36px;
+  }
+  @media (max-width: 640px) {
+    .free-groups {
+      grid-template-columns: 1fr;
+    }
+  }
+  .free-groups h4 {
+    font-size: 1rem;
+    font-weight: 660;
+    margin-bottom: 10px;
+  }
+  .free-groups .ticks {
+    font-size: 0.98rem;
+    gap: 8px;
+  }
+  .later {
+    display: grid;
+    gap: 14px;
+    padding: clamp(22px, 3vw, 32px);
+    border-radius: 16px;
+    border: 1.5px dashed var(--t-border-hover);
+  }
+  .later h3 {
+    font-size: 1.375rem;
+  }
+  .later > p {
+    color: var(--t-fg-80);
+  }
+  .promises {
+    display: grid;
+    gap: 8px;
+    padding-left: 1.1em;
+  }
+  .mb-draft {
+    margin-bottom: 48px;
+  }
+</style>

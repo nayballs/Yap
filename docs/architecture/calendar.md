@@ -164,6 +164,64 @@ Connecting Google Calendar or an iCal link, sync, parsing, the reminder card, pr
   `notes_folder_rename`/`_delete` call `folder_renamed`/`folder_deleted`.
   `calendar_meeting_notes` gives each note's `filing: {folder, series,
   rule}`.
+- **Folder rules by company** (2026-10-31, `calendar/filing/companies.rs`;
+  Wispr Flow's "Sync meetings with example.com to Clients?"): "Meetings
+  with people from example.com go in Clients", from the invite's
+  attendees' email domains (`domain_of`: "Sam <sam@Example.com>" →
+  example.com) — free mail and shared domains left out (`SHARED`, the one
+  list: gmail.com, outlook.com, hotmail.com, icloud.com… + `FAMILIES`'
+  country domains, hotmail.fr, yahoo.co.uk; the calendars' own rooms), and
+  the person's own (`calendar::own_domains`: a connection's label when it's
+  an address, `Connection.own` — the domains of the addresses a sync's
+  drafts mark `is_self`, an older Yap's save drops them until the next sync
+  —, the Yap account's address, `auth::account_email`; a part of one too,
+  uk.example.org of example.org). A meeting with several companies goes by
+  the one with most people on it, then the first listed (`domains`).
+  **When rules disagree**: `filing::pick` — a series rule beats a company
+  rule; the person's own move beats both (`may_file`). **Applied**:
+  `note_for` makes the note in `folder_for_meeting(key, emails)` (the
+  series', else the company's, else Meetings) and keeps its companies
+  (`companies::remember`); `on_meeting_started` → `file_linked(noteId, key,
+  emails)` (keeps them, files when `may_file`); **an imported transcript**
+  with attendee emails → `filing::file_imported(noteId, emails)` (the
+  import's hook: keeps them, files by company when the note sits in
+  Personal or Meetings; emits nothing, no network, any thread). **The
+  offer** (`companies::after_move`, off the command's thread): a meeting
+  note filed by hand in a folder of the person's own (not Personal or
+  Meetings) — `meeting_file` with `series` false, `note_update` with a new
+  folder (the Notes view's Move to, the folder chip) — with a company on
+  its invite (kept, else the calendar's kept event: `attendee_emails`) →
+  "File every meeting with example.com in Clients? (3 past ones too)":
+  `may_offer` (no rule for it, not Never, not asked for this folder, none
+  shown in `OFFER_GAP_SECS` — a day; a company that may not be asked gives
+  way to the invite's next), `notice::place_tip(KIND)` ("company-folder", a
+  suggestion: `kinds.rs`' switch and cap) → the main window's
+  `yap-company-folder-offer {id, domain, folder, past, title, body}`
+  (`notices/companyFolders.js`: **Yes** / **Just this one** / a "Never for
+  example.com" link; ✕ = Just this one), else a bar card with the same
+  answers. `company_folder_respond(id, yes|one|never|expire)`: **Yes**
+  keeps the rule, then moves the past ones (`past_for`: with someone from
+  the company, sitting where Yap put them — `may_file` —, not of a series
+  with a rule of its own; `move_into` — filed, edit times kept) and
+  returns `{domain, folder, moved, undo}` → "Meetings with example.com go
+  in Clients · Moved 3 past meetings to Clients too." with **Undo**
+  (`company_folder_undo(undo)`: `put_back` each one still there as it was,
+  folder and `folder_chosen`, and the rule taken away); on the bar a card
+  with Undo. **Settings → Meetings → Folders by company**
+  (`settings/CompanyFolders.svelte`, anchor `company-folders`):
+  `company_folders()` → `[{domain, folder, createdTs}]`, Remove =
+  `company_folder_remove(domain)` (the notes stay); `yap-company-folders`
+  when they change. **Kept** in meeting_folders.json: a rule is a `rules`
+  entry under `company:<domain>` (an older Yap keeps it, renames or drops
+  it with its folder, never matches it); `companyOffers {lastTs, asked:
+  ["domain|folder"], never: [domain]}` and `noteDomains {<noteId>:
+  {createdTs, domains}}` (an id comes round again: matched with
+  `createdTs`) are fields an older Yap's save drops (an offer may come once
+  more; past meetings are then found by the calendar's kept invites). A
+  note deleted takes its companies (`notes::forget_extras` →
+  `filing::forget_note`), Reset app all of them (`forget_notes`; the rules
+  stay). No network call: only the calendar Yap synced. Logs counts and
+  ids, never a domain or a folder. E2e: `company-folders.spec.js`.
 - **The day view**: the snapshot's `busy` (busy time of your own in the next
   day, times only); the Meetings view shows "45 min free" between today's
   rows (≥ 15 min, after every earlier row ends and from now, busy time taken
@@ -217,8 +275,8 @@ Connecting Google Calendar or an iCal link, sync, parsing, the reminder card, pr
   notes and memory outside the lock) returns the kept brief when its
   fingerprint matches, else stores Yap's part at once (`writing` while a
   summary is due) and spawns `write_brief` (one at a time,
-  `brief_job`/`brief_waiting`; a failure waits `BRIEF_RETRY`). Reset app
-  (`forget_briefs`) moves `briefs_epoch` on: a brief made or written from
+  `brief_job`/`brief_waiting`; a failure waits `BRIEF_RETRY`). Deleting meetings,
+  notes or memory (`privacy/reset.rs`, Reset app too; `forget_briefs`) moves `briefs_epoch` on: a brief made or written from
   the notes and memory before it is never kept (`store_brief` refuses it;
   made again from what's left). `BriefAi::of`
   = the meeting's endpoint (`meeting_summary::resolve_endpoint`), or why

@@ -25,6 +25,14 @@ export const OUT = path.join(REPO, 'test-results', 'app');
 export const SCREENSHOTS = path.join(OUT, 'screenshots');
 export const RUNS = path.join(OUT, 'runs');
 
+/**
+ * WebView2's own arguments in a test run (a spec adding one, say
+ * `--force-device-scale-factor=1.5`, passes these and its own in `env`).
+ * Port 0: WebView2 picks a free port and writes it to DevToolsActivePort in
+ * the profile.
+ */
+export const WEBVIEW2_ARGS = '--remote-debugging-port=0 --disable-features=CalculateNativeWinOcclusion --disable-backgrounding-occluded-windows';
+
 /** Where `npm run test:app:build` puts the binary (see e2e/build.mjs). */
 export const TARGET_DIR =
   process.env.YAP_E2E_TARGET_DIR || path.join(REPO, 'src-tauri', 'target', 'e2e');
@@ -147,8 +155,7 @@ export async function launchYap({ name, config = {}, env = {}, data = {}, runsDi
     // runners are elevated, so e2e.yml sets the same flag as a machine policy.)
     // Test windows sit behind the developer's apps (shell/window.rs
     // `behind_in_test_runs`): with occlusion tracking off they still draw.
-    WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS:
-      '--remote-debugging-port=0 --disable-features=CalculateNativeWinOcclusion --disable-backgrounding-occluded-windows',
+    WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: WEBVIEW2_ARGS,
     NO_COLOR: '1',
     YAP_BRIDGE_FILE: bridgeFile,
     YAP_MCP_CLIENT_ROOT: path.join(runDir, 'ai-apps'),

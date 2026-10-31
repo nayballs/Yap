@@ -1,0 +1,218 @@
+---
+import Layout from '../layouts/Layout.astro';
+import PageHero from '../components/PageHero.astro';
+import Shot from '../components/Shot.astro';
+import Keys from '../components/Keys.astro';
+import Faq from '../components/Faq.astro';
+import Closing from '../components/Closing.astro';
+import DraftNote from '../components/DraftNote.astro';
+import { NAME, HOTKEY } from '../brand';
+import { faqFor } from '../data/faq';
+import homeShot from '../../../docs/screenshot-home.png';
+---
+<Layout
+  title="Dictation"
+  description={`Dictate into any Windows app. ${NAME} turns speech into text on your PC, tidies it with AI if you want, and pastes it where your cursor is: email, chat, editors and terminals.`}
+>
+  <PageHero
+    title="Talk into any Windows app"
+    lede={`Press ${HOTKEY}, say it the way you’d say it, and tidy text lands at your cursor: in email, chat, documents, your editor or a terminal. Speech turns into text on your own PC.`}
+  >
+    <Shot
+      slot="visual"
+      src={homeShot}
+      eager
+      alt={`${NAME}’s Home screen: a greeting that says to press F9, a card about AI cleanup, today’s dictations with their times, and totals for words, time saved and the day streak. The data is made up.`}
+      caption="A screenshot from October 2026, with made-up data. To be recaptured in light and dark."
+    />
+  </PageHero>
+
+  <section class="section ruled" aria-labelledby="keys-h">
+    <div class="wrap">
+      <div class="section-head">
+        <h2 id="keys-h">Start and stop the way that suits you</h2>
+      </div>
+      <div class="rows">
+        <div class="row">
+          <h3>Press, talk, press</h3>
+          <p>Press <Keys combo={HOTKEY} /> to start and again to stop. A chime marks each, and the bar above your taskbar shows a waveform while it listens.</p>
+        </div>
+        <div class="row">
+          <h3>Hold to talk</h3>
+          <p>Hold the key while you speak and let go when you’re done. Double-tap it to carry on hands-free.</p>
+        </div>
+        <div class="row">
+          <h3>Any shortcut</h3>
+          <p>A key, a combination or a mouse button, with up to three more for the same job.</p>
+        </div>
+        <div class="row">
+          <h3>See the words as they come</h3>
+          <p>The bar shows what it hears while you talk, so you know it’s keeping up.</p>
+        </div>
+        <div class="row">
+          <h3>Long dictations</h3>
+          <p>Up to 15 minutes in one go. The bar warns you at 14, and nothing you said is lost when it stops.</p>
+        </div>
+        <div class="row">
+          <h3>Quiet while you talk</h3>
+          <p>Optionally pause your music or mute other apps while you dictate, and put them back exactly as they were.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="section ruled" aria-labelledby="cleanup-h">
+    <div class="wrap split">
+      <div class="stack">
+        <h2 id="cleanup-h">Tidy text, in the style of the app</h2>
+        <p class="lede">
+          AI cleanup takes out the ums, fixes punctuation and grammar, and keeps the version you meant. It’s off until you
+          choose a model, and you decide how much it may change.
+        </p>
+        <p class="muted small">If cleanup is slow or fails, you get your words as you said them: a dictation never waits on the AI. The bar offers <strong>Skip cleanup</strong> when it’s taking longer than usual.</p>
+      </div>
+      <div class="rows">
+        <div class="row">
+          <h3>How much it changes</h3>
+          <p>Light, Medium or High.</p>
+        </div>
+        <div class="row">
+          <h3>Styles by app</h3>
+          <p>More formal in email, casual in chat apps, literal in AI prompts, exactly as said in a terminal. The app lists are yours to edit.</p>
+        </div>
+        <div class="row">
+          <h3>Lists and emails</h3>
+          <p>Say a list and it’s laid out as one. Say an email’s greeting and sign-off and they get lines of their own.</p>
+        </div>
+        <div class="row">
+          <h3>Use what I said</h3>
+          <p>One click on the bar, or its own shortcut, swaps the tidied text for your exact words.</p>
+        </div>
+        <div class="row">
+          <h3>Where it runs</h3>
+          <p>A model on your PC, your own Ollama or LM Studio server, or a cloud provider on your own key.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="section ruled" aria-labelledby="words-h">
+    <div class="wrap">
+      <div class="section-head">
+        <h2 id="words-h">Your names and jargon, spelled right</h2>
+        <p>Teach {NAME} a word once and it stays taught.</p>
+      </div>
+      <div class="grid grid-3">
+        <div class="col">
+          <h3>A dictionary</h3>
+          <p>Each word with the ways it gets misheard. Near misses are caught too. Import and export it as CSV or plain text.</p>
+        </div>
+        <div class="col">
+          <h3>It learns from your fixes</h3>
+          <p>Correct a word after a dictation and {NAME} offers to add it, so the same slip doesn’t happen twice.</p>
+        </div>
+        <div class="col">
+          <h3>Snippets</h3>
+          <p>Say a short phrase and get the text you type all the time: an address, a sign-off, a link. Type something often and {NAME} suggests it.</p>
+        </div>
+        <div class="col">
+          <h3>Names on screen</h3>
+          <p>{NAME} reads the names and terms in the window in front, for that dictation only, and spells them the way it does. You can switch it off.</p>
+        </div>
+        <div class="col">
+          <h3>Code, said aloud</h3>
+          <p>In an editor or a terminal, “user service dot ts” becomes <code>userService.ts</code> when that file is on screen.</p>
+        </div>
+        <div class="col">
+          <h3>Your languages</h3>
+          <p>Tell {NAME} the languages you speak; it picks a model that covers them and keeps cleanup in the language you used. A shortcut per language, or one that translates.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="section ruled" aria-labelledby="cmd-h">
+    <div class="wrap split">
+      <div class="stack">
+        <h2 id="cmd-h">Ask it to write for you</h2>
+        <p class="lede">Commands hand the writing to the AI: it types the result where your cursor is.</p>
+      </div>
+      <div class="rows">
+        <div class="row">
+          <h3>Say its name</h3>
+          <p>“{NAME}, reply that I’ll be there at six and ask if they need anything.” The reply is written and typed for you.</p>
+        </div>
+        <div class="row">
+          <h3>Rewrite a selection</h3>
+          <p>Select text, press the rewrite shortcut and say what to change: “make this shorter”, “turn it into bullet points”, “translate it into French”.</p>
+        </div>
+        <div class="row">
+          <h3>One-key transforms</h3>
+          <p>Polish, Shorter, Fix grammar only, Translate, Make it a prompt, or your own: on the selection or your last dictation, without saying anything.</p>
+        </div>
+        <div class="row">
+          <h3>In your own voice</h3>
+          <p>Give it a few samples of your writing and rewrites sound like you.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="section ruled" aria-labelledby="paste-h">
+    <div class="wrap">
+      <div class="section-head">
+        <h2 id="paste-h">Pasting that knows the app</h2>
+        <p>Every app takes text a little differently. {NAME} checks the paste landed, and says so when it couldn’t.</p>
+      </div>
+      <div class="rows">
+        <div class="row">
+          <h3>Terminals</h3>
+          <p>Windows Terminal, PowerShell and Command Prompt windows, PuTTY, mintty and your editor’s terminal each get their own paste keys. A command arrives as one tidy line.</p>
+        </div>
+        <div class="row">
+          <h3>Coding agents</h3>
+          <p>Claude Code and Codex keep your line breaks. Say a file’s name in Cursor’s, Windsurf’s or VS Code’s AI chat and it’s picked from the list; in Claude Code and Codex it becomes an @path.</p>
+        </div>
+        <div class="row">
+          <h3>Chat apps</h3>
+          <p>A short message loses its full stop. “At Sam” picks Sam in Slack or Discord when he’s on screen. Optionally, say “new message” to send several messages in one go.</p>
+        </div>
+        <div class="row">
+          <h3>Send without Enter</h3>
+          <p>An optional Send shortcut presses the app’s own send key when you’re done.</p>
+        </div>
+        <div class="row">
+          <h3>When it can’t paste</h3>
+          <p>Windows blocks pasting into apps running as administrator, and some boxes don’t take text. Then the text waits on your clipboard and {NAME} tells you once.</p>
+        </div>
+        <div class="row">
+          <h3>Your clipboard</h3>
+          <p>Put back after the paste. Nothing you dictate is kept in Win+V history or synced to the cloud clipboard.</p>
+        </div>
+      </div>
+      <DraftNote class="mt-3">The terminal loop (A4) and names on screen (A5) belong here as short recordings.</DraftNote>
+    </div>
+  </section>
+
+  <section class="section ruled" aria-labelledby="models-h">
+    <div class="wrap split">
+      <div class="stack">
+        <h2 id="models-h">Speech that runs on any PC</h2>
+        <p class="lede">
+          Fourteen speech models, Parakeet and Whisper among them, downloaded inside the app and checked before use.
+        </p>
+      </div>
+      <ul class="ticks">
+        <li>Any graphics card through Vulkan and DirectML: NVIDIA, AMD or Intel</li>
+        <li>Or the processor, when that’s quicker: {NAME} times both on your PC and says which it chose</li>
+        <li>No CUDA, and no Copilot+ PC needed</li>
+        <li>History kept on your PC for as long as you choose: always, a day, or not at all</li>
+        <li>Drop in an audio file and get its text, on your PC too</li>
+        <li>A day of recent dictations’ audio kept, so a failed one can be run again</li>
+      </ul>
+    </div>
+  </section>
+
+  <Faq items={faqFor('dictation')} />
+  <Closing />
+</Layout>

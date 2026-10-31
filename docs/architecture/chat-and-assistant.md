@@ -1935,7 +1935,8 @@ and its Undo, Preview / Source, find, copy, light and dark).
   ahead), as before. **A snip** ([snip.md](./snip.md), 2026-10-23) lands in
   the box (`yap-snip`, or ControlPanel's `chatRequest {snip}`): the
   conversation Rust chose — the one open here when the window was on screen
-  on it, else a new chat —, the thumbnail and its size with ✕, the three
+  on it, else a new chat —, its 120 px tile (its size and ✕ on hover; how
+  a screenshot looks: snip.md, 2026-10-31), the three
   one-tap prompts (What's this? · Explain this error · Summarise), "Ask about
   this screenshot…", the caret there; Enter on an empty box asks "What's
   this?"; never sent by itself; it waits while another view shows

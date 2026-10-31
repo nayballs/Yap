@@ -214,17 +214,20 @@ Settings → Privacy & data → **Download your data** saves one .zip (history
 as CSV and JSON, notes and meetings as Markdown, chats, tasks, memory, the
 Dictionary's CSV, settings with every key, token and password left out; the
 audio and screenshots with a tick box that says their size) through the Save
-dialog, with progress and Cancel, never uploaded; **Reset app** clears the
-history, notes and meetings, chats, memory, tasks, the search index and the
-usage counts, keeps the settings, dictionary, models and account, names it
-all first (with Download your data first) and needs no restart.
+dialog, with progress and Cancel, never uploaded; **Delete some of your
+data** (2026-10-31) deletes the kinds ticked — dictation history, its audio,
+stats, meetings, other notes, tasks, chats, memory, dictionary suggestions,
+AI usage, network receipts, the search index, logs —, each with its size or
+count, confirmed first; **Reset app** is every kind at once, keeps the
+settings, dictionary, models and account, names it all first (with Download
+your data first); neither needs a restart.
 After a dictation with a weak signal (quiet, noisy, clipped), or on a
 Bluetooth headset in hands-free mode, one tip, rarely ("Yap didn't hear you
 clearly"); with a laptop's lid closed its own microphone gives way to the
 next one, or Yap says why it can't hear. Unit-tested (the zip, no secret in
-it, the reset's lists against config-and-data.md, the signal on synthetic
-speech, the lid's order) and e2e-tested (`your-data.spec.js`,
-`mic-tips.spec.js`). Not tried yet: a real laptop's lid (this PC is a
+it, each kind of data against the files config-and-data.md names, the signal
+on synthetic speech, the lid's order) and e2e-tested (`your-data.spec.js`,
+`your-data-delete.spec.js`, `mic-tips.spec.js`). Not tried yet: a real laptop's lid (this PC is a
 desktop), a real Bluetooth headset, the thresholds on the robot's real
 speech (`e2e-real/mic-tips.real.js`, written, not run), a reset of a big
 real data folder.

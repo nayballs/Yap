@@ -6,7 +6,9 @@
 //! the bytes and where it came from (`chats::ChatImage`), never pixels —
 //! the store is rewritten whole on every message. A page shows one through
 //! the `yapsnip://` scheme by id only, never a path ([`path`] refuses
-//! anything that isn't an id).
+//! anything that isn't an id) — or a thumbnail of it at the device pixels
+//! it's drawn at, kept in `thumbs/` beside it and deleted with it
+//! ([`super::thumbs`]).
 //!
 //! **Kept**: with their conversation (deleting it deletes them), and for
 //! Settings → Privacy & data → "Keep chat screenshots" — 7, 30 (the
@@ -188,15 +190,18 @@ pub fn stored(id: &str) -> Option<crate::chat::chats::ChatImage> {
 }
 
 /// Delete images by id (a deleted conversation's, or all of them from
-/// Settings). Returns how many went.
+/// Settings), their thumbnails with them ([`super::thumbs`]). Returns how
+/// many images went.
 pub fn delete(ids: &[String]) -> usize {
     let mut gone = 0;
+    let dir = dir();
     for id in ids {
         if let Some(p) = path(id) {
             if std::fs::remove_file(&p).is_ok() {
                 gone += 1;
             }
         }
+        super::thumbs::remove_in(&dir, id);
         forget(id);
     }
     if gone > 0 {
@@ -215,8 +220,9 @@ pub fn sweep_verdict(referenced: bool, age_secs: u64, keep_days: u32) -> bool {
 
 /// Delete what's past its time in `dir`: images older than `keep_days`
 /// (0 = never), and images no conversation refers to after a day; leftover
-/// temp files too. `now` in unix seconds; a file's age is from when it
-/// was written. Returns how many went.
+/// temp files too, and the thumbnails of every image gone
+/// ([`super::thumbs::sweep_in`]). `now` in unix seconds; a file's age is
+/// from when it was written. Returns how many images (and temp files) went.
 pub fn sweep_in(dir: &Path, referenced: &HashSet<String>, keep_days: u32, now: u64) -> usize {
     let Ok(entries) = std::fs::read_dir(dir) else { return 0 };
     let mut gone = 0;
@@ -242,6 +248,7 @@ pub fn sweep_in(dir: &Path, referenced: &HashSet<String>, keep_days: u32, now: u
             forget(id);
         }
     }
+    super::thumbs::sweep_in(dir);
     gone
 }
 
@@ -628,8 +635,13 @@ mod tests {
         let saved = save(&encode_png(&checker(4, 4), 4, 4, true).unwrap(), 4, 4).unwrap();
         assert!(exists(&saved.id));
         assert_eq!(read(&saved.id).map(|b| b.len() as u64), Some(saved.bytes));
+        // Its thumbnail goes with it.
+        super::super::thumbs::get(&saved.id, 2, 2).unwrap();
+        let thumb = super::super::thumbs::file_in(&dir(), &saved.id, 2, 2).unwrap();
+        assert!(thumb.is_file());
         assert_eq!(delete(std::slice::from_ref(&saved.id)), 1);
         assert!(!exists(&saved.id));
+        assert!(!thumb.exists());
         assert_eq!(delete(&["../config".to_string()]), 0);
         let _ = std::fs::remove_dir_all(dir().parent().unwrap_or(&dir()));
     }

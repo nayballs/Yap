@@ -21,6 +21,7 @@ on the PC.
 | Join links | `src-tauri/src/calendar/links.rs` |
 | Join codes: an event's, and a call window's | `src-tauri/src/calendar/codes.rs`, `src-tauri/src/calendar/call_windows.rs` |
 | Folder rules for recurring meetings | `src-tauri/src/calendar/filing.rs` |
+| Folder rules by company | `src-tauri/src/calendar/filing/companies.rs`, `src/lib/notices/companyFolders.js`, `src/lib/settings/CompanyFolders.svelte` |
 | The next meeting in the tray | `calendar.rs` (`tray_item`), `src-tauri/src/shell/tray.rs` |
 | Credential Manager | `src-tauri/src/calendar/vault.rs` |
 | A note's meeting (`Note::event`, `link_event`) | `src-tauri/src/notes.rs` |
@@ -244,6 +245,21 @@ view), and **Not now** means never.
   it), so a calendar connected again keeps its rules. Rules live in
   `<data>/meeting_folders.json`: an older Yap sharing the data folder never
   reads it, so notes it makes go to Meetings and stay there.
+- **Folders by company**: file a meeting with people from another company
+  in a folder of your own by hand (**File this meeting in ▸**, or Notes'
+  **Move to**) and Yap asks once, "File every meeting with example.com in
+  Clients? (3 past ones too)": **Yes** (the past meetings with them go
+  there too, with **Undo**), **Just this one**, or **Never for
+  example.com**. The company is the attendees' email domain on the
+  calendar invite: never your own (your calendar's address, the addresses
+  it lists as you, your Yap account) and never free mail (gmail.com,
+  outlook.com, icloud.com and the like). From then on each new meeting
+  with them goes there as its note is made or a recording ties it to the
+  meeting — after a series' own rule, and never a note you moved yourself.
+  At most one such question a day; switch them off with Settings → General
+  → Notifications → Suggestions. Settings → Meetings → **Folders by
+  company** lists the rules, with **Remove**. Nothing is looked up online:
+  only the calendar Yap already synced.
 
 ### The next meeting in the tray
 
@@ -561,7 +577,13 @@ them at run time).
   its line (countdown, later today, tomorrow, later in the week, Take notes,
   Recording, a long name), and folder rules (series from keys, which notes a
   rule may move, earlier notes outside the folder, a folder renamed or
-  deleted). `e2e/calendar-day.spec.js`: the tray item and tooltip through
+  deleted; by company: domains, the free-mail list, your own domain left
+  out, a series rule over a company's and your move over both, the offer
+  once per company and folder and once a day, the past ones a Yes moves and
+  Undo). `e2e/company-folders.spec.js`: a meeting with a client filed by
+  hand gives the offer, Yes files the past ones (not one you moved), the
+  next meeting with them is made in the folder, Settings lists the rule and
+  Remove works, and Undo puts the past ones back. `e2e/calendar-day.spec.js`: the tray item and tooltip through
   `e2e_tray` (a click opening a note made ahead, then taking notes on a
   meeting a minute away), folder rules from the Meetings view's menu (a
   one-off filed, a series always filed with the earlier note moved when

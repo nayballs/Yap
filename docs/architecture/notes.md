@@ -39,7 +39,10 @@ The AI Notepad: the notes store, folders, the Actions engine, notes you can fix 
   `breaks` (the transcript's length at each stop — the notepad's paused
   dividers; `add_break`, never twice at one place or at 0),
   `note_type` ("personal" | "meeting"), `source` ("manual" | "upload" |
-  "meeting"), and `title_auto` (the title is one Yap made up — "Teams call ·
+  "meeting" | "calendar" | "chat" | "quick" | "import" — a meeting imported
+  from another app's transcript file, `meetings/import.rs`: no audio behind
+  its lines, so no ▶, Transcribe again or Find speakers; `is_imported`; made
+  whole in one save by `create_meeting`), and `title_auto` (the title is one Yap made up — "Teams call ·
   5 Oct, 14:30" — so the AI meeting title may replace it; cleared for good by
   a title edit, so a typed title is never overwritten: `set_ai_title` checks
   under the store lock). `note_update` takes an `origin` (the saving window's
@@ -108,7 +111,16 @@ The AI Notepad: the notes store, folders, the Actions engine, notes you can fix 
   this meeting in…" (one note, through `notes::update`, so `folder_chosen`)
   and "Always file Weekly sync in…" (every note of the calendar series: the
   earlier ones when asked, each new one as the calendar makes it or a
-  recording ties it to its meeting — never one the person moved). **Actions** (named
+  recording ties it to its meeting — never one the person moved). **By
+  company** (2026-10-31, `calendar/filing/companies.rs`): a meeting filed by
+  hand — the Meetings view's "File this meeting in…" or the Notes view's
+  Move to / folder chip (`note_update` with a new folder) — in a folder of
+  the person's own offers "File every meeting with example.com in
+  Clients? (3 past ones too)" once per company and folder, one a day
+  (Yes, with Undo / Just this one / Never for example.com); the rule files
+  each new meeting with someone from that company there, after a series
+  rule and never over the person's own move; Settings → Meetings → Folders
+  by company lists them, with Remove. **Actions** (named
   prompt fragments) are built-in protected set (seeded "Generate Notes",
   "Meeting Notes", "Action Items", "Action Plan") + user-created; `note_enhance`
   (`notes/commands.rs`) invokes the **Actions engine**: picks an action by id, runs the

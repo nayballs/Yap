@@ -418,7 +418,13 @@ style neither).
   live transcript" (`meetingLiveTranscript`), Meeting shortcut
   (`meetingHotkey`, clearable). **Calendar**: "Remind me before scheduled
   meetings" (Right before / 1 / 2 minutes / Never → `meetingReminder`) and a
-  Calendars link row to Connectors. Last, the consent line.
+  Calendars link row to Connectors. **Folders by company**
+  (`CompanyFolders.svelte`, `#settings-company-folders`, 2026-10-31;
+  [calendar.md](./calendar.md)): a row per company rule ("example.com ·
+  Meetings with people from example.com go in Clients") with Remove
+  (`company_folders`, `company_folder_remove`; kept current by
+  `yap-company-folders`), else "No company rules yet" and how one is made.
+  Last, the consent line.
 - **Commands** (`commands`): "Tell Yap's AI what to write, and it types the
   result where you are", with an example note (`role="note"`) linking to the
   Voice Assistant. **Say its name** (`#settings-wake-word`): "Answer to its

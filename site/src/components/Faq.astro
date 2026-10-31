@@ -1,0 +1,35 @@
+---
+// Questions and answers as plain disclosure widgets (keyboard and screen
+// reader friendly, no script). Styles: global.css, "questions and answers".
+import type { Faq } from '../data/faq';
+interface Props {
+  items: Faq[];
+  title?: string;
+  id?: string;
+  more?: boolean;
+}
+const { items, title = 'Questions', id = 'questions', more = true } = Astro.props;
+---
+<section class="section ruled" aria-labelledby={`${id}-h`}>
+  <div class="wrap faq-grid">
+    <div class="faq-head">
+      <h2 id={`${id}-h`}>{title}</h2>
+      {more && <p class="muted"><a href="/faq">All questions and answers</a></p>}
+    </div>
+    <div class="faq-list">
+      {items.map((f) => (
+        <details id={f.id}>
+          <summary>{f.q}</summary>
+          <div class="faq-a" set:html={f.a} />
+        </details>
+      ))}
+    </div>
+  </div>
+</section>
+
+<style>
+  .faq-head {
+    display: grid;
+    gap: 12px;
+  }
+</style>

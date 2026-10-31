@@ -15,7 +15,7 @@ import { aiError } from '../../core/aiErrors.js';
 import { streamCall, liveAnswer, applyEvent, streamingHeight, STOPPED, SUPERSEDED } from '../../core/streaming.js';
 import { speech, initSpeech, readAloud as speakText, speakReply, stopReading as stopSpeech } from '../../stores/speech.svelte.js';
 import { DEFAULT_PROMPT, MAX_SHOTS, visionRefused, pastedImage, keepPasted } from './chatImages.js';
-import { waitingShots, followWaitingShots, removeWaiting, clearWaiting } from './chatShots.svelte.js';
+import { waitingShots, followWaitingShots, removeWaiting, clearWaiting, followPixelRatio } from './chatShots.svelte.js';
 import { questionTokens, isTooLong } from './chatBudget.js';
 import { fmtContext } from '../../core/aiUsage.js';
 import { SkillPicker } from '../../stores/skills.svelte.js';
@@ -115,6 +115,8 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
   // Rust keeps them (snip/waiting.rs: a spoken question takes them too) and
   // this follows it, kept while another view shows (chatShots.svelte.js).
   followWaitingShots();
+  // The screen's pixel ratio: screenshots are drawn at their device pixels.
+  followPixelRatio();
   // Can the Chat model read them (ai_model_status): images true | false |
   // null (not known: it may try), the switch Rust suggests, the model.
   // `imagesLocal`: the on-device model's projector to download or switch on
@@ -122,7 +124,7 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
   let vision = $state({ images: null, imagesSwitch: null, imagesLocal: null, model: null });
   // "Keep chat screenshots" (config chatImageDays), for a removed one's line.
   let keepDays = $state(30);
-  // A screenshot opened large (its id), or null.
+  // A screenshot opened large ({ id, w, h }: ShotViewer.svelte), or null.
   let viewing = $state(null);
   // The snip shortcut, for the + menu's "Take a screenshot".
   let snipHotkey = $state('');
