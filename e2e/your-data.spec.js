@@ -228,15 +228,18 @@ test('Reset app: names what goes, clears it everywhere, keeps the settings; no r
   await g.getByRole('button', { name: 'Reset app…' }).click();
   const dialog = main.getByRole('alertdialog');
   await expect(dialog).toContainText('Clear everything and keep your settings?');
+  // Every kind there's something of (Delete some of your data's), each with how much.
   const goes = dialog.getByRole('list', { name: 'What goes' });
-  await expect(goes).toContainText('Your dictation history, and the last day of dictation audio · 1 dictation');
-  await expect(goes).toContainText('Every note and meeting, with their audio, earlier versions and pins (your folders and actions stay) · 1 note, 1 meeting');
-  await expect(goes).toContainText('Every chat, with its screenshots · 1 chat');
-  await expect(goes).toContainText('What Yap remembers about you · 1 thing');
-  await expect(goes).toContainText('Your tasks · 1 task');
-  await expect(goes).toContainText('The search index');
-  await expect(goes).toContainText('Usage stats');
-  await expect(dialog.getByRole('list', { name: 'What stays' })).toContainText('Your settings, dictionary and snippets');
+  await expect(goes).toContainText('Dictation history · 1 dictation');
+  await expect(goes).toContainText('Dictation audio · 1 recording · 3 KB');
+  await expect(goes).toContainText('Meetings · 1 meeting · 8 MB');
+  await expect(goes).toContainText('Other notes · 1 note');
+  await expect(goes).toContainText('Tasks you added · 1 task');
+  await expect(goes).toContainText('Chats · 1 chat, 1 screenshot');
+  await expect(goes).toContainText('What Yap remembers · 1 thing');
+  await expect(goes).toContainText('Dictation stats');
+  await expect(goes).toContainText('Logs');
+  await expect(dialog.getByRole('list', { name: 'What stays' })).toContainText('Your settings, dictionary, snippets and transforms');
   await shot(main, '03-reset-dialog');
 
   // "Download your data first": the dialog closes and the file is saved.
@@ -272,6 +275,9 @@ test('Reset app: names what goes, clears it everywhere, keeps the settings; no r
   expect(fs.existsSync(versionsDir) ? fs.readdirSync(versionsDir) : []).toEqual([]);
   const shots = path.join(data, 'chat-images');
   expect(fs.existsSync(shots) ? fs.readdirSync(shots).filter((f) => f.endsWith('.png')) : []).toEqual([]);
+  // The logs too (every kind goes): the one being written is emptied and carries on.
+  const logs = fs.readdirSync(path.join(data, 'logs'));
+  expect(logs.length).toBeLessThanOrEqual(1);
 
   // The views show it at once: no restart.
   await closeSettings(main);

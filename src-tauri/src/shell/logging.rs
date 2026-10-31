@@ -124,6 +124,42 @@ pub fn log_info() -> serde_json::Value {
     })
 }
 
+/// Delete some of your data's Logs (`privacy/reset.rs`): every log file
+/// goes but the one being written now (the newest), which is emptied — the
+/// log goes on into it, so Report a problem still has today's from here
+/// on. Returns how many files were deleted or emptied.
+pub fn clear() -> usize {
+    let dir = config::data_dir().join("logs");
+    let mut files: Vec<(std::path::PathBuf, std::time::SystemTime)> = std::fs::read_dir(&dir)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter(|e| e.path().is_file())
+        .map(|e| (e.path(), e.metadata().and_then(|m| m.modified()).unwrap_or(std::time::SystemTime::UNIX_EPOCH)))
+        .collect();
+    files.sort_by_key(|(_, at)| *at);
+    let newest = files.pop();
+    let mut n = 0;
+    for (path, _) in files {
+        // One still open (yesterday's, just rolled over) is emptied instead.
+        if std::fs::remove_file(&path).is_ok() || empty(&path) {
+            n += 1;
+        }
+    }
+    if let Some((path, _)) = newest {
+        if empty(&path) {
+            n += 1;
+        }
+    }
+    n
+}
+
+/// A log file cut to nothing (the log's own writer appends, so it carries
+/// on at the new end).
+fn empty(path: &std::path::Path) -> bool {
+    std::fs::OpenOptions::new().write(true).open(path).and_then(|f| f.set_len(0)).is_ok()
+}
+
 /// Open the logs folder in the system file manager.
 #[tauri::command]
 pub fn open_logs_folder() -> Result<(), String> {

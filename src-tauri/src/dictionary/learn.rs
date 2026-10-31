@@ -1350,6 +1350,29 @@ fn update_record(f: impl FnOnce(Record) -> Record) {
     *guard = Some(rec);
 }
 
+/// How many words Yap has offered and been answered on (Delete some of
+/// your data's count, `privacy/reset.rs`).
+pub fn offered() -> usize {
+    record().pairs.len()
+}
+
+/// Delete some of your data (`privacy/reset.rs`): every word offered, every
+/// answer and the words taken out of the dictionary, forgotten (the file
+/// goes, so a word may be offered again); the dictionary itself is
+/// config.json's and stays. A file another program holds gets an empty
+/// record over it (or the failure is said).
+pub fn forget_all() {
+    let mut guard = RECORD.lock().unwrap_or_else(|p| p.into_inner());
+    *guard = Some(Record::default());
+    match std::fs::remove_file(record_path()) {
+        Ok(()) => SAVER.nothing_to_save(),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => SAVER.nothing_to_save(),
+        Err(_) => {
+            let _ = SAVER.write_json(&record_path(), &Record::default(), true);
+        }
+    }
+}
+
 /// word_suggestions.json's saves (`saving.rs`): a failed one keeps the
 /// record in memory, is tried again with the next save, and is said once.
 pub static SAVER: crate::shell::saving::Saver = crate::shell::saving::Saver::new("wordSuggestions", "your word suggestion choices", save_now);

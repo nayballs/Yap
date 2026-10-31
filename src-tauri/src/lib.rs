@@ -395,6 +395,7 @@ pub fn run() {
             privacy::export::e2e_export_pace,
             privacy::reset::data_reset_plan,
             privacy::reset::data_reset,
+            privacy::reset::data_delete,
             meetings::commands::meeting_start,
             meetings::commands::meeting_state,
             notes::commands::note_export,

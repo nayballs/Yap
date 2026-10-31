@@ -217,8 +217,8 @@ Connecting Google Calendar or an iCal link, sync, parsing, the reminder card, pr
   notes and memory outside the lock) returns the kept brief when its
   fingerprint matches, else stores Yap's part at once (`writing` while a
   summary is due) and spawns `write_brief` (one at a time,
-  `brief_job`/`brief_waiting`; a failure waits `BRIEF_RETRY`). Reset app
-  (`forget_briefs`) moves `briefs_epoch` on: a brief made or written from
+  `brief_job`/`brief_waiting`; a failure waits `BRIEF_RETRY`). Deleting meetings,
+  notes or memory (`privacy/reset.rs`, Reset app too; `forget_briefs`) moves `briefs_epoch` on: a brief made or written from
   the notes and memory before it is never kept (`store_brief` refuses it;
   made again from what's left). `BriefAi::of`
   = the meeting's endpoint (`meeting_summary::resolve_endpoint`), or why

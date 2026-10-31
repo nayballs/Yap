@@ -621,7 +621,8 @@
   count, failures, the last status, bytes sent and received), ≤ 4,000
   entries (`privacy/net.rs`, [privacy-receipts.md](./privacy-receipts.md)). Never
   content or a key. Cleared from Settings → Privacy & data → Network
-  connections; safe to delete.
+  connections, and by Delete some of your data's Network receipts (and Reset
+  app); safe to delete.
 - Updates: `%APPDATA%/yap/updates.json` — which update was announced (and when),
   the last check time, and the restart marker (`updates.rs`).
 - Calendar: `%APPDATA%/yap/calendar.json` — connected calendars (name, kind,
@@ -700,14 +701,17 @@
   offered a word for the dictionary, per "heard→term" pair your "Not now"
   count and "Don't suggest this", and the words you removed from the
   dictionary (`removed`, never suggested again) (`dictionary/learn.rs`). Never the
-  field text it read.
+  field text it read. Delete some of your data's Dictionary suggestions (and
+  Reset app) deletes it (`learn::forget_all`): a word may be offered again.
 - Snippet suggestions: `%APPDATA%/yap/snippet_suggestions.json` — "Type
   that often? Save it as a snippet" (`dictionary/snippet_offer.rs`): whether
   it's off ("Don't suggest this again", or the Dictionary view's switch),
   when Yap last offered one, the phrases offered and answered, and the
   phrases typed right after a dictation in the last week — fingerprints of
   their words and when, never the text (dictated phrases are counted from
-  `history.json`).
+  `history.json`). Dictionary suggestions (Delete some of your data, Reset
+  app) forget the phrases, the answers and the last offer; the switch stays
+  (`snippet_offer::forget_noted`).
 - Writing samples: `%APPDATA%/yap/writing_samples.json` (2026-10-29,
   `ai/writing_samples.rs`, Settings → Commands → Writing samples) —
   `{samples: [{id, text, kind, addedMs}]}`: things the person wrote, so
@@ -729,19 +733,29 @@
   (`memory.rs`). Changed only as changes (Undo in the app); cleared from
   Settings → Memory, exported there as a .zip of Markdown. Sent with questions
   to the AI model the person uses, never to Yap.
-- **Download your data and Reset app** (2026-10-29, Settings → Privacy &
-  data → Your data; [privacy-receipts.md](./privacy-receipts.md)): one .zip
-  of the history, notes and meetings (and each note's earlier versions),
-  chats, tasks, memory, the dictionary and settings without keys (the audio
-  and screenshots with a tick box),
-  never uploaded; and "Clear everything and keep my settings": the history
-  and its audio, notes and meetings with theirs (and their versions and
-  pins), chats and screenshots,
-  memory, tasks, the search index, the usage counts and the pre-meeting
-  briefs go; config.json, `dictionary_usage.json`, the models, the account
-  and calendars, and Yap's own records stay. **Every file this page names
-  is in one list or the other** (`privacy/reset.rs` `GOES` / `STAYS`; a unit
-  test reads this page): a new store put here has to be decided there too.
+- **Download your data, Delete some of your data and Reset app**
+  (2026-10-29, by kind 2026-10-31; Settings → Privacy & data → Your data;
+  [privacy-receipts.md](./privacy-receipts.md)): one .zip of the history,
+  notes and meetings (and each note's earlier versions), chats, tasks,
+  memory, the dictionary and settings without keys (the audio and
+  screenshots with a tick box), never uploaded; a tick box per **kind** of
+  data — dictation history (and its audio), dictation audio, dictation
+  stats; meetings (their audio, summaries, tasks, Ask threads, versions),
+  other notes (quick notes and Chat's documents too; and the quick note's
+  tabs), tasks added on their own; chats (and screenshots), memory;
+  dictionary suggestions; AI usage counts, network receipts, the search
+  index, logs —, each deleted through its store's own module; and "Clear
+  everything and keep my settings": every kind at once. A store several
+  kinds share (notes.json, tasks.json, chats.json, note-versions/,
+  note_pins.json) goes whole only when they all go, else only their part;
+  memory forgets what it read of chats and meetings that went, the search
+  index drops their vectors, the pre-meeting briefs (calendar.json's
+  `briefs`) go with notes, meetings or memory. config.json,
+  `dictionary_usage.json`, Skills, meeting folder rules, writing samples,
+  the models, the account, calendars and paired phones, and Yap's own
+  records stay. **Every file this page names is changed by exactly the
+  kinds that own it, or stays** (`privacy/reset.rs` `KINDS` / `STAYS`; unit
+  tests read this page): a new store put here has to be decided there too.
 - All of the above (plus config) write atomically and quarantine a corrupt file
   on load rather than crashing (`config::atomic_write`/`quarantine_corrupt`;
   config.json its own way, above), and **never write over a file they
@@ -795,6 +809,12 @@
   end) and `calendar_add_link` / `calendar_disconnect` check their save and
   return the failure (the page treats the change as made, with Try again;
   the action plan's job ends done and the notice says it).
+- Logs: `%APPDATA%/yap/logs/` — `yap.log.<date>`, a file a day (UTC),
+  at `info` (Debug mode raises Yap's own lines to `debug`), never a word
+  dictated or a key (`shell/logging.rs`, `privacy/log_privacy.rs`). Report
+  a problem includes the last 3 days', scrubbed. Delete some of your data's
+  Logs (and Reset app) deletes them all but the one being written, which is
+  emptied and carries on (`logging::clear`).
 - App icons: `%APPDATA%/yap/icons/` — `<app>.png` per installed call app and
   `sources.json` (what each was made from); a cache, rebuilt whenever it's
   missing, stale or unreadable (`calls/app_icons.rs`).
@@ -956,9 +976,11 @@ a store no longer names: meeting audio of "deleted" notes
 (`meeting_audio::kept_all`, `notes::unread`), chat screenshots no
 conversation names (`snip::images::sweep`, `chats::unread`), search by
 meaning's vectors of gone passages (`search::index::sweep`). **Reset app and
-Download your data are refused** meanwhile (`saving::unread_store`): Reset
-can't clear what it hasn't read (it would come back once read), and the
-download would miss it.
+Download your data are refused** meanwhile (`saving::unread_store`,
+`saving::unread_among`): Reset can't clear what it hasn't read (it would come
+back once read), and the download would miss it. Delete some of your data
+refuses only the kinds whose stores couldn't be read (their tick boxes say
+so; the others can still go).
 
 Not covered: config.json (its own way, above), the app icons' and search
 index's caches (rebuilt from their sources), `call_speakers.json` (read
