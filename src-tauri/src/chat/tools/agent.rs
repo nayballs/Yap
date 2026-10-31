@@ -679,6 +679,29 @@ async fn tool_loop(
                         }
                     }
                 }
+                // Asked across the meetings (a Skill's /tickets, /prd): its
+                // passages' "[2]" as their meetings' names, noted for the
+                // answer's sources (`documents::name_citations`).
+                if let Some(d) = extra.docs {
+                    for field in ["summary", "markdown", "content", "text", "body"] {
+                        if let Some(text) = args[field].as_str() {
+                            let named = d.named(text);
+                            if named != text {
+                                args[field] = json!(named);
+                            }
+                        }
+                    }
+                    if let Some(ops) = args["ops"].as_array_mut() {
+                        for op in ops {
+                            if let Some(text) = op["markdown"].as_str() {
+                                let named = d.named(text);
+                                if named != text {
+                                    op["markdown"] = json!(named);
+                                }
+                            }
+                        }
+                    }
+                }
             }
             let ran_with = args.clone();
             // The page's line: what this call does, with what ("Searching the

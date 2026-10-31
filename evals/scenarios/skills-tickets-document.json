@@ -1,0 +1,41 @@
+{
+  "name": "skills-tickets-document",
+  "description": "/tickets in Chat, across the meetings: the latest meeting's agreed work drafted as tickets in a Chat document (a Tickets section, each ticket a ### heading in it, filled, no [n] left: the document is the one meeting's), a short line in the chat. Dark mode, put off, is no ticket.",
+  "tags": ["skills", "meetings", "documents"],
+  "apps": "standard",
+  "seed": {
+    "notes": [
+      {
+        "title": "Bug triage",
+        "folder": "Meetings",
+        "meeting": true,
+        "days_ago": 1,
+        "participants": ["Ana Ruiz", "Sam Lee"],
+        "enhanced": "## Recap\nTwo bugs to fix this sprint; dark mode waits.\n\n## Action plan\n### Ana Ruiz\n- [ ] Fix the login button on Safari (due: Wednesday)\n\n## Unassigned\n- [ ] Fix the CSV export dropping the last row\n\n## Decisions\n- Dark mode is not for this sprint",
+        "transcript": [
+          { "source": "them", "text": "The login button does nothing on Safari. About two hundred people a day hit it.", "ts": 0 },
+          { "source": "them", "text": "I can fix the Safari login by Wednesday.", "ts": 14 },
+          { "source": "you", "text": "Great. And the CSV export drops the last row, customers noticed.", "ts": 28 },
+          { "source": "them", "text": "Nobody's free for that one yet. Done is when the export has every row.", "ts": 40 },
+          { "source": "you", "text": "What about dark mode in settings?", "ts": 55 },
+          { "source": "them", "text": "Not this sprint. Let's leave it.", "ts": 62 }
+        ]
+      }
+    ]
+  },
+  "turns": [
+    {
+      "user": "/tickets",
+      "skill": "tickets",
+      "expect": {
+        "document": { "made": true, "outline_first": true, "filled": true, "min_sections": 1, "contains": ["Safari", "CSV"], "parts": ["safari", "csv"], "citations_real": true },
+        "answer_not_contains": ["Yap couldn't tie"],
+        "max_words": 60,
+        "tools_not_called": ["create_note", "open_app"]
+      },
+      "soft": {
+        "max_words": 30
+      }
+    }
+  ]
+}

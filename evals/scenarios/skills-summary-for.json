@@ -1,0 +1,52 @@
+{
+  "name": "skills-summary-for",
+  "description": "/summary-for Priya in support, who missed it: a catch-up on the latest meeting (the checkout redesign: the promo box moves, ten percent first, the help page support must update), not an earlier meeting's.",
+  "tags": ["skills", "meetings"],
+  "apps": "standard",
+  "seed": {
+    "notes": [
+      {
+        "title": "Office move",
+        "folder": "Meetings",
+        "meeting": true,
+        "days_ago": 6,
+        "participants": ["Tom Reid"],
+        "enhanced": "## Decisions\n- Move to the new office in January",
+        "transcript": [
+          { "source": "them", "text": "We move to the new office in January.", "ts": 0 }
+        ]
+      },
+      {
+        "title": "Checkout redesign",
+        "folder": "Meetings",
+        "meeting": true,
+        "days_ago": 1,
+        "participants": ["Lena Fischer", "Tom Okafor"],
+        "enhanced": "## Recap\nThe new checkout moves the promo code field below the basket.\n\n## Action plan\n### Tom Okafor\n- [ ] Build the new checkout (due: next Friday)\n### You\n- [ ] Ask support to update the help page on promo codes\n\n## Decisions\n- Ship the new checkout to ten percent of customers first",
+        "transcript": [
+          { "source": "them", "text": "The promo code box confuses people. A third of the support tickets about checkout are people who can't find it.", "ts": 0 },
+          { "source": "you", "text": "So we move it below the basket, where they look for it.", "ts": 18 },
+          { "source": "them", "text": "Agreed. I can build it by next Friday.", "ts": 30 },
+          { "source": "you", "text": "Let's ship it to ten percent of customers first and watch the tickets.", "ts": 42 },
+          { "source": "them", "text": "Then support needs to update the help page, it still shows the old box.", "ts": 58 }
+        ]
+      }
+    ]
+  },
+  "turns": [
+    {
+      "user": "/summary-for Priya in support, who missed it",
+      "skill": "summary-for",
+      "expect": {
+        "answer_contains_any": ["help page", "promo"],
+        "answer_not_contains": ["office", "January", "Yap couldn't tie"],
+        "min_sources": 1,
+        "tools_not_called": ["create_note", "update_note", "edit_note", "open_app", "create_document"]
+      },
+      "soft": {
+        "answer_contains_any": ["ten percent", "10%", "10 percent"],
+        "max_words": 200
+      }
+    }
+  ]
+}

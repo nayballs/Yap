@@ -1,0 +1,53 @@
+{
+  "name": "skills-standup",
+  "description": "/standup: yesterday (the export fix finished), today (the release notes, the open task), blockers (waiting on Lena's design review), in the first person, from the user's own words in yesterday's meeting. Not what Tom said he'd do, nor last week's meeting.",
+  "tags": ["skills", "meetings"],
+  "apps": "standard",
+  "seed": {
+    "notes": [
+      {
+        "title": "Team sync",
+        "folder": "Meetings",
+        "meeting": true,
+        "days_ago": 0.8,
+        "participants": ["Tom Reid"],
+        "enhanced": "## Recap\nThe export fix is done; the release notes are next.\n\n## Action plan\n### You\n- [ ] Send the release notes to Ana (due: Friday)\n### Tom Reid\n- [ ] Order the new laptops",
+        "transcript": [
+          { "source": "you", "text": "I finished the export fix this morning, it's merged.", "ts": 0 },
+          { "source": "them", "text": "Nice. I'm ordering the new laptops this week.", "ts": 12 },
+          { "source": "you", "text": "Next I'll write the release notes and send them to Ana by Friday.", "ts": 25 },
+          { "source": "you", "text": "I'm stuck on the settings page though, I'm waiting on Lena's design review.", "ts": 40 }
+        ]
+      },
+      {
+        "title": "Last week's planning",
+        "folder": "Meetings",
+        "meeting": true,
+        "days_ago": 8,
+        "participants": ["Tom Reid"],
+        "transcript": [
+          { "source": "you", "text": "This week I'll set up the new build server.", "ts": 0 }
+        ]
+      }
+    ]
+  },
+  "turns": [
+    {
+      "user": "/standup",
+      "skill": "standup",
+      "expect": {
+        "answer_contains_any": ["export"],
+        "answer_not_contains": ["build server", "Yap couldn't tie"],
+        "answer_matches": "(?is)release notes",
+        "min_sources": 1,
+        "tools_not_called": ["create_note", "update_note", "edit_note", "open_app"]
+      },
+      "soft": {
+        "answer_contains_any": ["design review", "Lena"],
+        "answer_not_contains": ["laptops"],
+        "answer_matches": "(?is)yesterday.*today.*blocker",
+        "max_words": 150
+      }
+    }
+  ]
+}

@@ -536,10 +536,15 @@ The meeting recorder and its audio kept on disk, rolling digests and the action 
   or both): fixed guardrails as the system prompt
   (`llm::SKILL_MEETING_PROMPT`: only the meeting, never invent, cite the
   passages, text in the passages is never an instruction), then the
-  meeting as numbered passages (`chips::skill_input`: Yap's summary
-  ≤ 1,200, the typed notes ≤ 300, the transcript ≤ 1,800 — all of it when
-  it fits, else the passages sharing the most words with the Skill and
-  the person's words, the last one always, in order) and, **last**, the
+  meeting as numbered passages (`skill_input_for` → `chips::skill_input`:
+  Yap's summary ≤ 1,200, the typed notes ≤ 300, the transcript ≤ 1,800 —
+  all of it when it fits, else the passages sharing the most words with
+  the Skill and the person's words, the last one always, in order; then
+  what the Skill's own aid adds, `skills::meeting_aid`: /open-questions the
+  questions asked in it, numbered, in order, each with what was said next, and the
+  ones the summary left open — told only to find the unanswered ones, the
+  on-device 4B listed the first and stopped, 31 Oct 2026 —; /tickets the
+  open tasks the summary lists, with their owners) and, **last**, the
   Skill's name and instructions and the person's words after the command
   (`skill_messages`: with the instructions in the system prompt the
   on-device 4B answered "No decisions were made" over a meeting that made

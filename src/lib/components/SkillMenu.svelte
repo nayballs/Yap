@@ -1,10 +1,11 @@
 <script>
   // A box's `/` menu (stores/skills.svelte.js `SkillPicker`): the Skills
-  // that run here, the command typed so far first; a click runs one, and
+  // that run here, the command typed so far first; a click runs one (one
+  // that needs words, /project-update, goes in the box for them), and
   // the keys stay in the box (↑ ↓, Enter runs it, Tab puts it in the box to
   // add words, Esc closes). Over the box: in the notepad's paper look, or
   // the main window's.
-  import { runsOnLabel } from '../core/skills.js';
+  import { runsOnLabel, needsWords } from '../core/skills.js';
 
   /** `picker`: the box's SkillPicker; `onpick(skill, run)`; `look`: 'paper' | 'app'. */
   let { picker, onpick, look = 'app' } = $props();
@@ -30,7 +31,7 @@
           class:active={i === picker.active}
           onmousedown={(e) => e.preventDefault()}
           onmouseenter={() => (picker.active = i)}
-          onclick={() => onpick(s, true)}
+          onclick={() => onpick(s, !needsWords(s))}
         >
           <span class="cmd">/{s.command}</span>
           <span class="what">

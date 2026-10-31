@@ -19,7 +19,7 @@
   import { toast } from '../ui/toast.svelte.js';
   import { showSaveError } from '../notices/saveErrors.js';
   import { skills, initSkills, refreshSkills } from '../stores/skills.svelte.js';
-  import { commandFromName, commandProblem, runsOnLabel } from '../core/skills.js';
+  import { commandFromName, commandProblem, runsOnLabel, writesDocument } from '../core/skills.js';
 
   initSkills();
 
@@ -148,7 +148,7 @@
       <div class="skill" data-skill={s.command}>
         <div class="lhs">
           <span class="name"><span class="cmd">/{s.command}</span> {s.name}</span>
-          <span class="line">{s.description} · {runsOnLabel(s.runsOn)}</span>
+          <span class="line">{s.description} · {runsOnLabel(s.runsOn)}{writesDocument(s) ? ' · a document in Chat' : ''}</span>
           {#if reading === s.id}
             <p class="instr" aria-label={`Instructions of /${s.command}`}>{s.instructions}</p>
           {/if}

@@ -139,8 +139,11 @@ sound smart** while a meeting records — one or two things to say, built
 on the latest talk, the brief and the invite, each citing the line it
 builds on (a pill opens it) — and **Make notes longer** after it (the
 summary written out in more detail, every task kept, Undo); **Skills**,
-saved instructions run with "/" — built-ins (/followup-email, /decisions,
-/risks, /coach, /todos, /weekly-recap) copyable as your own, your own made
+saved instructions run with "/" — 15 built-ins (/followup-email, /decisions,
+/risks, /coach, /todos, /weekly-recap; since 31 Oct /summary-for,
+/decision-log, /open-questions, /tickets and /prd — a Chat document —,
+/standup, /prep and /one-to-one — the calendar's next meeting —,
+/project-update) copyable as your own, your own made
 in Settings → Skills (`skills.json`) — on the meeting in its Ask box, or
 across the meetings in Chat and the Meetings view's Ask bar with their own
 passages (open tasks, a week, the latest meeting's talk) and Ask across
@@ -150,9 +153,11 @@ recorded meeting's two coach marks (once each, `hints.json`); a meeting's
 past chat renamed from Past chats. Unit-tested (the passages, the checks,
 longer notes and their Undo, every Skill rule and gathering, the coach
 marks), e2e-tested with the fake model (`meeting-chips.spec.js`,
-`coach-marks.spec.js`, `notepad.spec.js`'s chips) and the prompts measured
-on the on-device Qwen3.5-4B (`yap.exe eval --chips`,
-[model-evals.md](../model-evals.md#meeting-chips-and-skills-29-oct-2026)). Not
+`skills.spec.js`, `coach-marks.spec.js`, `notepad.spec.js`'s chips) and the
+prompts measured on the on-device Qwen3.5-4B (`yap.exe eval --chips` and the
+`skills` scenarios,
+[model-evals.md](../model-evals.md#meeting-chips-and-skills-29-oct-2026),
+[More Skills](../model-evals.md#more-skills-31-oct-2026)). Not
 tried yet: a real meeting (what's worth saying, live), a cloud model on
 these prompts (no paid calls tonight), a Skill's answer read aloud by the
 Voice Assistant (it doesn't run Skills).

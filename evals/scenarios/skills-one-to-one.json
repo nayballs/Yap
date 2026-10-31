@@ -1,0 +1,68 @@
+{
+  "name": "skills-one-to-one",
+  "description": "/one-to-one with nobody named: the next one-to-one on the calendar (with Priya tomorrow); talking points from the meetings with her (the revised quote she owes, her wish to grow into a team lead), nothing from Tom's budget meeting.",
+  "tags": ["skills", "meetings", "calendar"],
+  "apps": "standard",
+  "seed": {
+    "calendar": {
+      "meetings": [
+        { "title": "Team planning", "day": "tomorrow", "start": "15:00", "minutes": 60, "with": ["Priya Shah", "Tom Reid"] },
+        { "title": "Catch-up with Priya", "day": "tomorrow", "start": "11:00", "minutes": 30, "with": ["Priya Shah"] }
+      ]
+    },
+    "notes": [
+      {
+        "title": "Supplier call",
+        "folder": "Meetings",
+        "meeting": true,
+        "days_ago": 4,
+        "participants": ["Priya Shah"],
+        "enhanced": "## Recap\nThe packaging quote came in over budget.\n\n## Action plan\n### Priya Shah\n- [ ] Send the revised quote (due: Friday)",
+        "transcript": [
+          { "source": "you", "text": "Priya, can you get the supplier to revise the quote?", "ts": 0 },
+          { "source": "them", "text": "Yes, I'll send the revised quote by Friday.", "ts": 12 }
+        ]
+      },
+      {
+        "title": "Career chat",
+        "folder": "Meetings",
+        "meeting": true,
+        "days_ago": 12,
+        "participants": ["Priya Shah"],
+        "enhanced": "## Recap\nPriya would like to grow into a team lead role next year.\n\n## Decisions\n- Priya leads the supplier project as a first step",
+        "transcript": [
+          { "source": "them", "text": "I'd like to grow into a team lead role next year.", "ts": 0 },
+          { "source": "you", "text": "Then lead the supplier project as a first step, and we'll review it in the spring.", "ts": 15 }
+        ]
+      },
+      {
+        "title": "Budget review",
+        "folder": "Meetings",
+        "meeting": true,
+        "days_ago": 2,
+        "participants": ["Tom Reid"],
+        "enhanced": "## Decisions\n- Cut the second shift from December",
+        "transcript": [
+          { "source": "them", "text": "We cut the second shift from December.", "ts": 0 }
+        ]
+      }
+    ]
+  },
+  "turns": [
+    {
+      "user": "/one-to-one",
+      "skill": "one-to-one",
+      "expect": {
+        "answer_contains_any": ["revised quote", "team lead"],
+        "answer_not_contains": ["second shift", "Yap couldn't tie"],
+        "min_sources": 1,
+        "tools_not_called": ["create_note", "update_note", "edit_note", "open_app"]
+      },
+      "soft": {
+        "answer_contains": ["team lead"],
+        "answer_contains_any": ["revised"],
+        "max_words": 220
+      }
+    }
+  ]
+}

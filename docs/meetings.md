@@ -1127,10 +1127,14 @@ there's no AI model. The set follows the recording state
 | **Make notes longer** (`longer`, 2026-10-29) | after, with a summary | the meeting as the action plan reads it, then the summary (≤ 1,200) | the summary written again in more detail, every heading and task kept (a dropped task put back), Undo in the toast; an edited summary goes only when you say so (`MEETING_LONGER_PROMPT`; reply cap 1,800) |
 
 **Skills** (2026-10-29): type "/" in the Ask box for saved instructions —
-Yap's /followup-email, /decisions, /risks and /coach, or your own from
-Settings → Skills — run on this meeting, the answer citing its lines
-(`meeting_assist::meeting_skill`). Enter runs the one highlighted; Tab puts
-it in the box so you can add words ("/risks about the venue").
+Yap's /followup-email, /summary-for, /decisions, /risks, /open-questions,
+/tickets, /prd and /coach, or your own from Settings → Skills — run on this
+meeting, the answer citing its lines (`meeting_assist::meeting_skill`).
+Enter runs the one highlighted; Tab puts it in the box so you can add words
+("/risks about the venue", "/summary-for Priya in support"). In Chat,
+across your meetings, there are also /decision-log, /standup, /prep,
+/one-to-one, /todos, /weekly-recap and /project-update, and /tickets and
+/prd write a document beside the chat.
 
 Every call is at most ~3.4k tokens with its reply, and far less without an
 invite or long typed notes: well inside an 8k local model, and a single call
