@@ -4,7 +4,7 @@
   // type as an ordinary note (the "Quick notes" folder in Notes). A page you
   // can format (components/richtext/RichNote: the toolbar under the tabs,
   // Ctrl+F), the note kept markdown — its plain box until the page has
-  // loaded, which it does as the window is made; the title is the note's
+  // loaded, the first time the window comes up; the title is the note's
   // first words until you name it in Notes. A dictation while it's in front
   // (or from its mic) lands at the cursor as plain text, never pasted
   // (`yap-quick-note-dictation`): Ctrl+Z takes it back out in one step.
@@ -301,6 +301,8 @@
   // new one ("New quick note", or nothing recent), and which remembered
   // tabs close now.
   function onOpen(p) {
+    // The page: loaded the first time the window comes up (never with Yap's
+    // start: the window is made hidden, and many never open it).
     loadRichtext();
     if (p?.fresh) {
       newTab();
@@ -588,9 +590,6 @@
     // A new note at once, so typing can start before Rust answers.
     show(addTab(null));
     refreshConfig();
-    // The page (this window is a note's): loaded once the window's made and idle, or as it comes up.
-    const idle = window.requestIdleCallback ?? ((fn) => setTimeout(fn, 300));
-    idle(() => loadRichtext());
     invoke('quick_note_state').then(onState).catch(() => {});
     window.addEventListener('keydown', onKeyDown, true);
     window.addEventListener('keyup', onKeyUp, true);
@@ -602,6 +601,7 @@
     on('yap-quick-note-open', onOpen);
     on('yap-quick-note-visible', (shown) => {
       if (shown) {
+        loadRichtext();
         refreshConfig();
         refreshSendTarget();
       } else {

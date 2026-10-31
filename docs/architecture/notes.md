@@ -635,8 +635,9 @@ local API and search see the same text.
   (`RichNote` 5 kB with `RichToolbar` 6 kB; `richEditor` 435 kB, 135 kB gzipped,
   shared with Chat's panel), imported the first time a window shows a note to
   edit: the Notes view with a note open (its own `NoteThoughts` page, 2 kB,
-  through `loadPage`), the notepad with its meeting, the quick note once its
-  window is made and idle (and as it comes up; both `loadRichtext`). Until
+  through `loadPage`), the notepad with its meeting, the quick note the first
+  time it comes up (both `loadRichtext`; never with Yap's start, though both
+  windows are made then, hidden). Until
   then, and if it can't load, the note's plain box stands in
   (`data-rich-fallback`, saving as before); the caret in it carries over to
   the page (`takeHandoff`). The Yap bar's and the main window's first paint
