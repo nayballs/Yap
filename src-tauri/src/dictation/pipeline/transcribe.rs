@@ -159,6 +159,9 @@ impl Shared {
         // A dictation stopped at its length limit is this one only, however
         // it ends (`cap.rs`).
         let _capped = ClearCapped(Arc::clone(&self));
+        // A phone's dictation (Yap Link): its phone hears how it ended,
+        // however it ends (`phone.rs`).
+        let _phone = super::phone::PhoneEnd(Arc::clone(&self));
         if audio.is_empty() {
             if self.assistant.swap(false, Ordering::SeqCst) {
                 crate::chat::assistant::nothing(&self.app);
@@ -203,6 +206,7 @@ impl Shared {
             Err(e) => {
                 tracing::warn!("Dictation: the speech engine couldn't be taken: {}", e);
                 self.list_failed("The speech engine wasn't available");
+                self.phone_failed(super::phone::NO_ENGINE);
                 let _ = self.app.emit("yap-state", "idle");
                 return;
             }
@@ -231,6 +235,7 @@ impl Shared {
                         }
                         // Listed with its audio: run it again once a model is in.
                         self.list_failed("No speech model was ready");
+                        self.phone_failed(super::phone::NO_MODEL);
                         let _ = self.app.emit("yap-state", "needs-model");
                         return;
                     }
@@ -333,10 +338,13 @@ impl Shared {
                     // the output. Agent unreachable / no match → normal cleanup.
                     // (Not a question for the Chat view: that already goes to
                     // the AI, name or no name. Nor the quick note's: a
-                    // Command pastes, and the note takes text, never a paste.)
+                    // Command pastes, and the note takes text, never a paste.
+                    // Nor a phone's: its words are typed as said, and it's
+                    // told what was typed, `phone.rs`.)
                     Ok(text)
                         if !self.to_chat.load(Ordering::SeqCst)
                             && !self.to_note.load(Ordering::SeqCst)
+                            && !self.from_phone.load(Ordering::SeqCst)
                             && self.wake_word_hit(text.trim()) =>
                     {
                         tracing::info!("Agent's name heard — running the dictation as a Command");
@@ -345,13 +353,17 @@ impl Shared {
                         return;
                     }
                     Ok(text) => {
-                        offer = self.deliver(text).await.offer;
+                        let report = self.deliver(text).await;
+                        offer = report.offer;
+                        // The phone that dictated it hears what became of it.
+                        self.phone_delivered(report);
                     }
                     Err(e) => {
                         tracing::error!("Transcription failed: {}", e);
                         error_msg = Some("Transcription failed — check your model");
                         // Listed with its audio: run it again (another model?).
                         self.list_failed("The transcription failed");
+                        self.phone_failed(super::phone::STT_FAILED);
                     }
                 }
             }
@@ -359,6 +371,7 @@ impl Shared {
                 tracing::error!("STT task panicked: {}", e);
                 error_msg = Some("Transcription crashed — try another model");
                 self.list_failed("The transcription crashed");
+                self.phone_failed(super::phone::STT_FAILED);
             }
         }
 

@@ -14,12 +14,14 @@
 //! (the corrections, "press enter", snippets), `preview` (the live text),
 //! `engine` (the warm engine everyone shares), `busy` (the `processing`
 //! flag), `unplugged` (the mic disconnected mid-dictation), `slow` ("Taking
-//! longer than usual…" and Skip cleanup) and, in debug builds, `robot`.
+//! longer than usual…" and Skip cleanup), `phone` (a phone as the
+//! microphone, Yap Link) and, in debug builds, `robot`.
 
 mod busy;
 mod delivery;
 mod engine;
 mod finish;
+mod phone;
 mod preview;
 mod recording;
 mod rewrite;
@@ -50,6 +52,7 @@ use engine::set_model_loading;
 pub(crate) use busy::crash_next_dictation;
 pub(crate) use engine::{lease_engine, EngineCell, EngineSlot};
 pub(crate) use finish::{apply_corrections, as_said_text};
+pub(crate) use phone::{PhoneBusy, PhoneMic, PhoneNews, PhoneSink, PhoneTarget};
 pub(crate) use rewrite::commands_model;
 #[cfg(debug_assertions)]
 pub(crate) use rewrite::Rewritten;
@@ -182,6 +185,10 @@ static ASSISTANT_ARMED: AtomicBool = AtomicBool::new(false);
 /// assistant's, about `Shared::ask_selection`); cleared right after the press.
 static ASK_ARMED: AtomicBool = AtomicBool::new(false);
 
+/// A phone's "Dictate to phone" is starting the next recording (`phone.rs`;
+/// taken by it, never left for another one): [`Goes::Phone`].
+static PHONE_ARMED: AtomicBool = AtomicBool::new(false);
+
 /// Where a recording starting now goes. Pure.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Goes {
@@ -195,6 +202,9 @@ pub(crate) enum Goes {
     /// Into the quick note at its cursor (`notes/quick_note.rs`): its window
     /// in front, or its mic button. Never pasted.
     QuickNote,
+    /// Back to the phone that dictated it (Yap Link's "Dictate to phone",
+    /// `phone.rs`): never pasted on this PC, kept in history.
+    Phone,
 }
 
 /// The edit hotkey's recording is always a rewrite; the assistant shortcut's
@@ -215,6 +225,17 @@ pub(crate) fn destination(edit: bool, assistant: bool, chat_armed: bool, chat_fo
         Goes::ChatBox
     } else {
         Goes::Paste
+    }
+}
+
+/// [`destination`], for a recording a phone may have started (Yap Link):
+/// its "Dictate to phone" goes back to it whatever is in front here; its
+/// "Dictate to PC" goes where this PC's own dictation would. Pure.
+pub(crate) fn destination_with_phone(to_phone: bool, edit: bool, assistant: bool, chat_armed: bool, chat_focused: bool, own_window: bool, note: bool) -> Goes {
+    if to_phone && !edit {
+        Goes::Phone
+    } else {
+        destination(edit, assistant, chat_armed, chat_focused, own_window, note)
     }
 }
 
@@ -250,6 +271,36 @@ const TEST_STAND_IN: isize = 0x7E57_0001;
 #[cfg(debug_assertions)]
 pub(crate) fn set_test_target(on: bool) {
     TEST_TARGET.store(if on { TEST_STAND_IN } else { 0 }, Ordering::SeqCst);
+    if !on {
+        TEST_TARGET_OPEN.store(false, Ordering::SeqCst);
+    }
+}
+
+/// Test mode only (`e2e_target_window`'s `open`): the stand-in is a text box
+/// the test keeps open, so a paste that must go back to its own window
+/// (`own_window_only`: a phone's dictation, an Undo) finds it there. Off,
+/// it's gone by the paste (no window has its handle).
+#[cfg(debug_assertions)]
+static TEST_TARGET_OPEN: AtomicBool = AtomicBool::new(false);
+
+#[cfg(debug_assertions)]
+pub(crate) fn set_test_target_open(open: bool) {
+    TEST_TARGET_OPEN.store(open, Ordering::SeqCst);
+}
+
+/// `hwnd` is a test run's stand-in window kept open (never in release
+/// builds, nor for a real window): `text_injector`'s strict paste takes it
+/// as still there.
+pub(crate) fn stand_in_open(hwnd: isize) -> bool {
+    #[cfg(debug_assertions)]
+    {
+        test_target() == Some(hwnd) && TEST_TARGET_OPEN.load(Ordering::SeqCst)
+    }
+    #[cfg(not(debug_assertions))]
+    {
+        let _ = hwnd;
+        false
+    }
 }
 
 /// The stand-in window, in a plain test run (never robot mode).
@@ -336,6 +387,11 @@ pub(crate) struct Delivered {
     /// The HTML fragment that went with the text (a rich snippet in it, an
     /// app that takes HTML: `pasting/rich.rs`), if any.
     pub html: Option<String>,
+    /// The app it went into: its process ("notepad.exe"; "" when unknown),
+    /// for a phone's "Pasted into Notepad" (Yap Link).
+    pub app: String,
+    /// It landed in that app (pasted or typed), whatever came after it.
+    pub pasted: bool,
 }
 
 /// How long a cancelled dictation's audio is kept for **Undo** ("Dictation
@@ -555,6 +611,17 @@ struct Shared {
     /// (`cap.rs`): its paste goes back to its own window or onto the
     /// clipboard (as an Undo's), and an alert offers Recover text.
     capped: AtomicBool,
+    /// The recording (or the dictation kept for its Undo) is a **phone's**
+    /// (Yap Link, `phone.rs`): its audio came over the network, this PC's
+    /// microphone is left alone (its audio dropped meanwhile), no chimes.
+    /// Set when a phone starts one, cleared when this PC does.
+    from_phone: AtomicBool,
+    /// The current dictation goes back to the phone ("Dictate to phone",
+    /// [`Goes::Phone`], at record start): never pasted.
+    to_phone: AtomicBool,
+    /// The phone dictating now, told what became of it (taken when it's
+    /// told how it ended).
+    phone: Mutex<Option<phone::PhoneJob>>,
 }
 
 /// Current wall-clock time in milliseconds since the Unix epoch.
@@ -760,6 +827,9 @@ impl Pipeline {
             unplugged: Mutex::new(None),
             skip_cleanup: tokio::sync::Notify::new(),
             capped: AtomicBool::new(false),
+            from_phone: AtomicBool::new(false),
+            to_phone: AtomicBool::new(false),
+            phone: Mutex::new(None),
         });
 
         spawn_idle_watcher(&shared);
@@ -1102,6 +1172,11 @@ impl Pipeline {
     pub(crate) fn phone_ear(&self) -> PhoneEar {
         PhoneEar(Arc::clone(&self.shared))
     }
+
+    /// Yap Link's dictations: a phone as the microphone (`phone.rs`).
+    pub(crate) fn phone_mic(&self) -> PhoneMic {
+        PhoneMic(Arc::clone(&self.shared))
+    }
 }
 
 /// **A question a phone heard** (Yap Link), transcribed on the warm engine
@@ -1253,6 +1328,17 @@ mod tests {
         assert_eq!(destination(false, false, true, false, true, true), Goes::ChatBox);
         assert_eq!(destination(false, true, false, false, true, true), Goes::Assistant);
         assert_eq!(destination(true, false, false, false, true, true), Goes::Paste);
+    }
+
+    #[test]
+    fn a_phones_dictation_to_itself_never_goes_anywhere_on_the_pc() {
+        // Whatever is in front here: the chat box focused, the quick note.
+        assert_eq!(destination_with_phone(true, false, false, false, true, true, true), Goes::Phone);
+        assert_eq!(destination_with_phone(true, false, false, false, false, false, false), Goes::Phone);
+        // To the PC: where this PC's own dictation would go.
+        assert_eq!(destination_with_phone(false, false, false, false, false, false, false), Goes::Paste);
+        assert_eq!(destination_with_phone(false, false, false, false, true, true, false), Goes::ChatBox);
+        assert_eq!(destination_with_phone(false, false, false, false, false, true, true), Goes::QuickNote);
     }
 
     #[test]

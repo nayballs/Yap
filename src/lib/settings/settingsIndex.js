@@ -215,9 +215,10 @@ export const SETTINGS_INDEX = [
   { page: 'mcp', section: 'All other apps', label: 'Command and JSON for other apps', desc: 'For any app that runs local MCP servers', keywords: 'mcp json command copy paste other apps', anchor: 'mcp-other' },
 
   // ---- Phone (Yap Link, link.rs) ----
-  { page: 'phone', section: 'Your phone', label: 'Use Yap from your phone (on your home Wi-Fi)', desc: 'Ask out loud on your phone and hear the answer', keywords: 'phone mobile android iphone headset bluetooth link remote wifi wi-fi voice assistant', anchor: 'link-enabled', toggle: 'linkEnabled' },
+  { page: 'phone', section: 'Your phone', label: 'Use Yap from your phone (on your home Wi-Fi)', desc: 'Ask out loud on your phone and hear the answer, or dictate from it', keywords: 'phone mobile android iphone headset bluetooth link remote wifi wi-fi voice assistant dictate dictation wireless microphone', anchor: 'link-enabled', toggle: 'linkEnabled' },
   { page: 'phone', section: 'Pair a phone', label: 'Pair a phone', desc: 'A code to scan with your phone', keywords: 'pair pairing qr code scan phone link connect', anchor: 'link-pair', fallback: 'link-enabled' },
   { page: 'phone', section: 'Paired phones', label: 'Paired phones', desc: 'Your phones, and Remove', keywords: 'phones devices remove unpair revoke forget', anchor: 'link-phones' },
+  { page: 'phone', section: 'Paired phones', label: 'May type into this PC', desc: "A phone's dictations typed into the window in front here", keywords: 'phone dictate dictation type typing permission allow keyboard wireless', anchor: 'link-typing', fallback: 'link-phones' },
 
   // ---- Privacy & data ----
   { page: 'privacy', section: 'What leaves this PC', label: 'What leaves this PC', desc: 'Feature by feature, as Yap is set up', keywords: 'privacy cloud data sent private', anchor: 'leaves' },

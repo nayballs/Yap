@@ -13,6 +13,15 @@
 //! once (frames not yet sent are dropped), and it's back to idle — or
 //! listening. Off during meetings, as the Voice Assistant is: `error`.
 //!
+//! Or a **dictation** (`start {mode: "dictate", target}`, `dictate.rs`):
+//! the phone is the microphone of an ordinary dictation on this PC
+//! (`pipeline::PhoneMic`): listening (its up frames into the pipeline) →
+//! `stop` → transcribing → `heard` (and `pasted`, to the PC) → idle.
+//! `cancel` calls it off: still recording, it's cancelled on the PC (kept
+//! there for Undo); being typed, nothing is pasted. Refused (`error`)
+//! without the phone's "May type into this PC" (to the PC), during a
+//! meeting, or beside a dictation under way on the PC.
+//!
 //! Logs: phases, lengths and timings; never a question, an answer or audio.
 
 use std::net::SocketAddr;
@@ -25,6 +34,8 @@ use tauri::{Emitter, Manager};
 use tokio_tungstenite::tungstenite::protocol::{Role, WebSocketConfig};
 use tokio_tungstenite::tungstenite::Message;
 
+use crate::dictation::pipeline::{PhoneMic, PhoneSink, PhoneTarget};
+use crate::link::dictate::{self, Dictating, Talk};
 use crate::link::pairing::{self, Verdict};
 use crate::link::voice::{self, say, Tx, Wire};
 use crate::link::wire::{self, DeviceCreds, In, Out, Phase};
@@ -147,6 +158,16 @@ struct Asking {
     audio: Vec<f32>,
     turn: Option<Arc<Turn>>,
     started: Option<Instant>,
+    /// The phone's dictation (recording, or being typed on the PC), and the
+    /// pipeline's way in for it.
+    dictation: Option<(Arc<Dictating>, PhoneMic)>,
+}
+
+impl Asking {
+    /// The dictation still recording, if one is: the phone's frames are its.
+    fn dictating(&self) -> Option<&(Arc<Dictating>, PhoneMic)> {
+        self.dictation.as_ref().filter(|(d, _)| d.listening())
+    }
 }
 
 /// **Run the conversation** on a socket that has just been upgraded (`part`:
@@ -227,7 +248,7 @@ where
     devices::seen(&device_id, &name);
     let kill = Arc::new(tokio::sync::Notify::new());
     hub.connected(session, Live { device: device_id.clone(), tx: tx.clone(), kill: Arc::clone(&kill) });
-    say(&tx, hub.ready());
+    say(&tx, hub.ready(&device_id));
     say(&tx, Out::State { phase: Phase::Idle });
     tracing::info!(session, "Yap Link: a phone connected");
 
@@ -249,7 +270,7 @@ where
             Message::Text(t) => {
                 received += t.len() as u64;
                 match wire::parse(t.as_str()) {
-                    Ok(m) => on_message(&hub, &tx, session, &latest, &mut asking, m),
+                    Ok(m) => on_message(&hub, &tx, session, &device_id, &latest, &mut asking, m),
                     Err(e) => say(&tx, Out::Error { message: e }),
                 }
             }
@@ -261,9 +282,18 @@ where
             _ => {}
         }
     }
-    // The phone left (or was removed): its question goes with it.
+    // The phone left (or was removed): its question goes with it; a
+    // dictation it was still talking into is cancelled on the PC (kept there
+    // for Undo), one being typed finishes.
     if let Some(turn) = asking.turn.take() {
         turn.abandon();
+    }
+    if let Some((d, mic)) = asking.dictation.take() {
+        if d.listening() {
+            d.call_off();
+            mic.cancel(d.session());
+            tracing::info!(session, "Yap Link: the phone left mid-dictation; cancelled on the PC");
+        }
     }
     hub.disconnected(session);
     let _ = tx.send(Wire::Close);
@@ -374,13 +404,84 @@ fn abandon(latest: &AtomicU64, asking: &mut Asking) {
     }
 }
 
-fn on_message(hub: &Arc<Hub>, tx: &Tx, session: u64, latest: &Arc<AtomicU64>, asking: &mut Asking, m: In) {
+/// Call off the phone's dictation, if there is one: still recording, it's
+/// cancelled on the PC (kept there a moment for Undo); being typed, nothing
+/// is pasted. Its late news never reaches the phone.
+fn call_off_dictation(asking: &mut Asking) {
+    let Some((d, mic)) = asking.dictation.take() else { return };
+    let recording = d.listening();
+    d.call_off();
+    if recording {
+        mic.cancel(d.session());
+    }
+    tracing::info!(recording, "Yap Link: the phone called its dictation off");
+}
+
+/// A dictation still recording when the phone starts another talk: called
+/// off (one being typed carries on, and is told about while it's current).
+fn end_listening_dictation(asking: &mut Asking) {
+    if asking.dictating().is_some() {
+        call_off_dictation(asking);
+    }
+}
+
+/// The pipeline's way in for a phone's dictation, if the pipeline runs.
+fn phone_mic(hub: &Hub) -> Option<PhoneMic> {
+    let state = hub.app.state::<crate::AppState>();
+    let guard = state.pipeline.lock().unwrap_or_else(|p| p.into_inner());
+    guard.as_ref().map(|p| p.phone_mic())
+}
+
+/// **A dictation starts** (`start {mode: "dictate"}`): refused in words
+/// (`dictate::refusal`) — "Dictate to PC" without this phone's permission,
+/// during a meeting, beside a dictation on the PC — else recording, the
+/// phone's frames going into it.
+fn start_dictation(hub: &Arc<Hub>, tx: &Tx, device: &str, latest: &Arc<AtomicU64>, asking: &mut Asking, to: PhoneTarget) {
+    let refuse = |why: &str| {
+        say(tx, Out::Error { message: why.to_string() });
+        say(tx, Out::State { phase: Phase::Idle });
+    };
+    let Some(mic) = phone_mic(hub) else { return refuse(dictate::NO_SPEECH) };
+    let may_type = devices::may_type(device);
+    if let Some(why) = dictate::refusal(to, may_type, crate::meetings::meeting::is_recording(), mic.busy()) {
+        tracing::info!(to = dictate::target_name(to), may_type, "Yap Link: a dictation from the phone refused");
+        return refuse(why);
+    }
+    // Its own talk: an older one's news is dropped from here.
+    let id = latest.fetch_add(1, Ordering::SeqCst) + 1;
+    let d = Dictating::new(id, Arc::clone(latest), tx.clone(), to);
+    match mic.start(to, Arc::clone(&d) as Arc<dyn PhoneSink>) {
+        Ok(rec) => {
+            d.session.store(rec, Ordering::SeqCst);
+            asking.dictation = Some((d, mic));
+            tracing::info!(to = dictate::target_name(to), "Yap Link: a dictation from the phone");
+            say(tx, Out::State { phase: Phase::Listening });
+        }
+        // A dictation started on the PC in between.
+        Err(busy) => refuse(dictate::refusal(to, true, false, Some(busy)).unwrap_or(dictate::FINISHING)),
+    }
+}
+
+fn on_message(hub: &Arc<Hub>, tx: &Tx, session: u64, device: &str, latest: &Arc<AtomicU64>, asking: &mut Asking, m: In) {
     match m {
         In::Ping => say(tx, Out::Pong),
         In::Hello { .. } => say(tx, Out::Error { message: "Already connected.".into() }),
-        In::Start { .. } => {
-            // A start while it speaks (or thinks) is an interrupt, then a start.
+        In::Start { mode, target } => {
+            // A start while it speaks (or thinks) is an interrupt, then a
+            // start; a dictation still being said is called off.
             abandon(latest, asking);
+            end_listening_dictation(asking);
+            let talk = match dictate::talk(&mode, &target) {
+                Ok(t) => t,
+                Err(e) => {
+                    say(tx, Out::Error { message: e.into() });
+                    say(tx, Out::State { phase: Phase::Idle });
+                    return;
+                }
+            };
+            if let Talk::Dictate(to) = talk {
+                return start_dictation(hub, tx, device, latest, asking, to);
+            }
             if crate::chat::assistant::is_off() {
                 say(tx, Out::Error { message: MEETING.into() });
                 say(tx, Out::State { phase: Phase::Idle });
@@ -393,13 +494,22 @@ fn on_message(hub: &Arc<Hub>, tx: &Tx, session: u64, latest: &Arc<AtomicU64>, as
             say(tx, Out::State { phase: Phase::Listening });
         }
         In::Stop => {
-            if asking.recording {
+            if let Some((d, mic)) = asking.dictating() {
+                // Transcribed and typed, as the shortcut's second press does.
+                mic.stop(d.session());
+            } else if asking.recording {
                 finish_question(hub, tx, session, latest, asking);
             }
         }
         // Idle at once, whatever there was to drop: the page waits for it
-        // before it takes the next question's news.
-        In::Cancel | In::Interrupt => {
+        // before it takes the next question's news. (A cancel calls a
+        // dictation off; an interrupt is about an answer.)
+        In::Cancel => {
+            abandon(latest, asking);
+            call_off_dictation(asking);
+            say(tx, Out::State { phase: Phase::Idle });
+        }
+        In::Interrupt => {
             abandon(latest, asking);
             say(tx, Out::State { phase: Phase::Idle });
         }
@@ -410,12 +520,22 @@ fn on_message(hub: &Arc<Hub>, tx: &Tx, session: u64, latest: &Arc<AtomicU64>, as
             if let Err(e) = crate::link::models::set(&hub.app, &id) {
                 say(tx, Out::Error { message: e });
             }
-            say(tx, hub.ready());
+            say(tx, hub.ready(device));
         }
     }
 }
 
 fn on_audio(hub: &Arc<Hub>, tx: &Tx, session: u64, latest: &Arc<AtomicU64>, asking: &mut Asking, bytes: &[u8]) {
+    // A dictation: its frames go into the pipeline's recording.
+    if let Some((d, mic)) = asking.dictating() {
+        if let Ok(frame) = wire::decode(bytes) {
+            if frame.kind == wire::UP {
+                let samples: Vec<f32> = wire::to_f32(&frame.samples).collect();
+                mic.audio(d.session(), &samples);
+            }
+        }
+        return;
+    }
     if !asking.recording {
         return;
     }
@@ -475,7 +595,7 @@ async fn ask(app: tauri::AppHandle, turn: Arc<Turn>, audio: Vec<f32>) {
             return;
         }
     };
-    turn.tell(Out::Heard { text: question.clone() });
+    turn.tell(Out::Heard { text: question.clone(), to: None });
     if crate::chat::assistant::is_off() {
         turn.tell(Out::Error { message: MEETING.into() });
         turn.tell(Out::State { phase: Phase::Idle });

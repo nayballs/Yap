@@ -5,8 +5,11 @@
 // keeps to it exactly.
 //
 // What it does: pairing (the QR's #pair=<token>, the 4-digit code, the device
-// kept in localStorage), Talk (tap or hold; hands-free ends by itself after
-// the wait chosen — 1 s, 1.5 s or 2.5 s — of quiet), the mic resampled to
+// kept in localStorage), what Talk does (Ask Yap · Dictate to PC · Dictate to
+// phone, remembered: a dictation is typed into the PC's window in front, or
+// comes back here and is copied, its result under Talk), Talk (tap or hold;
+// hands-free ends by itself after the wait chosen — 1 s, 1.5 s or 2.5 s — of
+// quiet), the mic resampled to
 // 16 kHz Int16 in an AudioWorklet (mic-worklet.js, dsp.js), the spoken answer
 // as one stream (resampled here frame after frame, played from a jitter
 // buffer in player-worklet.js), "Clearer sound in a headset" (on by default:
@@ -42,6 +45,7 @@ import {
 const KIND_UP = 0x01;
 const KIND_DOWN = 0x02;
 const MAX_FRAMES = (120 * LINK_RATE) / FRAME_SAMPLES; // a question: 2 minutes at most
+const MAX_DICTATE_FRAMES = (15 * 60 * LINK_RATE) / FRAME_SAMPLES; // a dictation: 15 minutes, the PC's own limit
 const HOLD_MS = 350; // a press this long is a hold: release sends
 const NO_SPEECH_MS = 10000; // hands-free: nothing said this long → cancelled
 const MIC_WARM_MS = 15000; // the mic kept open after a turn, for a follow-up
@@ -56,6 +60,7 @@ const PONG_WAIT_MS = 8000;
 const KEEP_TURNS = 6;
 
 const KEY = {
+  mode: 'yap.link.mode',
   device: 'yap.link.device',
   pc: 'yap.link.pc',
   mic: 'yap.link.mic',
@@ -88,6 +93,16 @@ function save(key, value) {
 /** One of WAITS' names: what's stored, or Normal. */
 function waitChoice(w) {
   return typeof w === 'string' && Object.prototype.hasOwnProperty.call(WAITS, w) ? w : 'normal';
+}
+
+/**
+ * What Talk does: ask (the Voice Assistant), pc (dictate: typed into the
+ * window in front on the PC) or phone (dictate: the text comes back here and
+ * is copied). What's stored, or Ask.
+ */
+const MODES = ['ask', 'pc', 'phone'];
+function modeChoice(m) {
+  return MODES.includes(m) ? m : 'ask';
 }
 
 const fragment = new URLSearchParams(location.hash.slice(1));
@@ -136,6 +151,14 @@ const S = {
   tick: 0,
   stopTimer: 0,
   gen: 0,
+  // What Talk does (remembered), and what the talk under way is: ask | pc | phone.
+  mode: modeChoice(load(KEY.mode)),
+  talkMode: 'ask',
+  // The PC lets this phone type into it ("May type into this PC").
+  mayType: true,
+  // The last dictation's result, under Talk: {to, text, status, app, reason}.
+  // status: typing (heard, the paste to come) | pasted | failed | copying | copied | copy (copy it by hand).
+  result: null,
 };
 
 const FRAME_MS = (FRAME_SAMPLES / LINK_RATE) * 1000;
@@ -190,6 +213,12 @@ const el = {
   modelWhere: $('model-where'),
   models: $('models'),
   modelsList: $('models-list'),
+  mode: $('mode'),
+  modeHint: $('mode-hint'),
+  result: $('result'),
+  resultLine: $('result-line'),
+  resultText: $('result-text'),
+  copyBtn: $('copy-btn'),
 };
 
 const BARS = 28;
@@ -352,12 +381,12 @@ function dropped(ws) {
     S.step = '';
     // A question that never got heard goes; one with words stays, ended.
     const t = currentTurn(false);
-    if (t && !t.q && !t.a) S.turns.pop();
+    if (S.talkMode === 'ask' && t && !t.q && !t.a) S.turns.pop();
     else if (t) t.final = true;
     renderConvo();
     if (wasReady) {
       S.error = listening
-        ? `Lost the connection to ${pcName()} while listening. Ask again once it's back.`
+        ? `Lost the connection to ${pcName()} while listening. ${S.talkMode === 'ask' ? 'Ask' : 'Dictate'} again once it's back.`
         : `Lost the connection to ${pcName()}.`;
     }
   }
@@ -396,7 +425,7 @@ function onText(text) {
     return;
   }
   if (!m || typeof m.type !== 'string') return;
-  if (ignoringOld() && ['heard', 'step', 'answer', 'speak_start', 'speak_end'].includes(m.type)) return;
+  if (ignoringOld() && ['heard', 'pasted', 'step', 'answer', 'speak_start', 'speak_end'].includes(m.type)) return;
   switch (m.type) {
     case 'pair_wait':
       S.pairCode = String(m.code ?? '');
@@ -434,14 +463,22 @@ function onText(text) {
       }
       if (m.model) S.model = m.model;
       if (Array.isArray(m.models)) S.models = m.models;
+      S.mayType = m.mayType !== false;
       if (S.error.startsWith('Lost the connection')) S.error = '';
       break;
     case 'state':
       onState(String(m.phase || 'idle'));
       break;
     case 'heard':
-      currentTurn(true).q = String(m.text ?? '');
-      renderConvo();
+      // A dictation's text (`to`: where it went), or a question's.
+      if (m.to === 'pc' || m.to === 'phone') onDictated(m.to, String(m.text ?? ''));
+      else {
+        currentTurn(true).q = String(m.text ?? '');
+        renderConvo();
+      }
+      break;
+    case 'pasted':
+      onPasted(m);
       break;
     case 'step':
       S.step = String(m.label ?? '');
@@ -468,7 +505,12 @@ function onText(text) {
     case 'error':
       S.error = String(m.message || 'Something went wrong on the PC.');
       S.step = '';
-      if (S.local !== 'idle') endLocalQuestion();
+      // Refused while listening (a meeting, typing off, a dictation under
+      // way): this page stops, and the mic is let go in a while.
+      if (S.local !== 'idle') {
+        endLocalQuestion();
+        armMicClose();
+      }
       break;
     case 'pong':
       break;
@@ -490,6 +532,13 @@ function onState(phase) {
     if (S.local === 'listening') S.pcListening = true;
   } else if (phase === 'transcribing' || phase === 'thinking') {
     if (!S.workSince) S.workSince = performance.now();
+    // A dictation the PC stopped itself (its shortcut, the bar's ✓, its
+    // limit) while this page still listened.
+    if (S.talkMode !== 'ask' && S.local === 'listening' && S.pcListening) {
+      endLocalQuestion();
+      S.note = 'Stopped on your PC.';
+      afterQuestionSent();
+    }
   } else if (phase === 'speaking') {
     S.step = '';
   } else if (phase === 'idle') {
@@ -507,6 +556,63 @@ function onBinary(buf) {
   const f = readFrame(buf);
   if (!f || f.kind !== KIND_DOWN || ignoringOld()) return;
   player.push(f.samples);
+}
+
+// ------------------------------------------------------------ the dictation
+
+/** A dictation's text, as the PC pasted it (to: pc) or for this phone (to: phone). */
+function onDictated(to, text) {
+  S.step = '';
+  S.result = { to, text, status: to === 'phone' ? 'copying' : 'typing', app: '', reason: '' };
+  if (to === 'phone') copyResult();
+}
+
+/** Where a dictation to the PC went: `{ok, app}`, or `{ok: false, reason}`. */
+function onPasted(m) {
+  const r = S.result && S.result.to === 'pc' ? S.result : (S.result = { to: 'pc', text: '', status: 'typing', app: '', reason: '' });
+  r.status = m.ok ? 'pasted' : 'failed';
+  r.app = typeof m.app === 'string' ? m.app : '';
+  r.reason = typeof m.reason === 'string' ? m.reason : '';
+}
+
+/**
+ * Copies the result's text to this phone's clipboard. Right after the tap
+ * that sent it, the browser allows it; later (hands-free, no tap), it may
+ * not: then Copy does it by hand.
+ */
+async function copyResult() {
+  const r = S.result;
+  if (!r || r.to !== 'phone' || !r.text) return;
+  let ok = false;
+  try {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      await navigator.clipboard.writeText(r.text);
+      ok = true;
+    }
+  } catch {
+    ok = false;
+  }
+  if (S.result !== r) return;
+  r.status = ok ? 'copied' : 'copy';
+  render();
+}
+
+/** The line over a dictation's text. */
+function resultLine(r) {
+  switch (r.status) {
+    case 'typing':
+      return `Typing it on ${pcName()}…`;
+    case 'pasted':
+      return r.app ? `Pasted into ${r.app}` : `Pasted on ${pcName()}`;
+    case 'failed':
+      return r.reason || `Couldn't paste it on ${pcName()}`;
+    case 'copying':
+      return 'Copying…';
+    case 'copied':
+      return 'Copied';
+    default:
+      return 'Ready to copy';
+  }
 }
 
 function clearFragment() {
@@ -562,8 +668,22 @@ function renderConvo() {
     frag.appendChild(li);
   }
   el.convo.replaceChildren(frag);
-  el.empty.hidden = S.turns.length > 0;
+  renderEmpty();
   el.convo.scrollTop = el.convo.scrollHeight;
+}
+
+const EMPTY = {
+  ask: 'Ask Yap anything: tap Talk, or hold it while you speak.',
+  pc: 'Dictate: tap Talk, or hold it while you speak. Yap types it into the window in front on your PC.',
+  phone: 'Dictate: tap Talk, or hold it while you speak. Yap writes it out and copies it on this phone.',
+};
+
+/** The conversation is Ask's; dictating, the box says what Talk does. */
+function renderEmpty() {
+  const asking = S.mode === 'ask';
+  el.convo.hidden = !asking;
+  el.empty.textContent = EMPTY[S.mode];
+  el.empty.hidden = asking && S.turns.length > 0;
 }
 
 // --------------------------------------------------------------- the mic
@@ -1045,9 +1165,12 @@ function onMicMessage(e) {
           return;
         }
       }
-      if (S.frames >= MAX_FRAMES) {
+      const asking = S.talkMode === 'ask';
+      if (S.frames >= (asking ? MAX_FRAMES : MAX_DICTATE_FRAMES)) {
         stopTalk();
-        S.note = "Sent at 2 minutes: that's the longest a question can be.";
+        S.note = asking
+          ? "Sent at 2 minutes: that's the longest a question can be."
+          : "Sent at 15 minutes: that's the longest a dictation can be.";
         render();
       }
     }
@@ -1080,11 +1203,19 @@ async function beginTalk() {
     return;
   }
   if (S.local !== 'idle') return;
+  // Dictate to PC without the PC's say-so: said here, nothing recorded.
+  if (S.mode === 'pc' && !S.mayType) {
+    S.error = 'Typing into your PC is off for this phone. In Yap on the PC, turn it on in Settings → Phone.';
+    render();
+    return;
+  }
   keepAwake();
   const now = phaseNow();
-  // Barge-in: the answer stops at once, then Yap listens.
+  // Barge-in: the answer stops at once, then Yap listens. A question being
+  // worked out is called off; a dictation being typed carries on (the PC
+  // says if it's still busy with it).
   if (now === 'speaking') interrupt();
-  else if (now === 'working') {
+  else if (now === 'working' && S.talkMode === 'ask') {
     send({ type: 'cancel' });
     markCancelled();
     S.ignoreOldAt = performance.now();
@@ -1123,10 +1254,16 @@ async function beginTalk() {
   S.workSince = 0;
   vad = new EnergyVad({ frameMs: FRAME_MS, endMs: WAITS[S.wait] });
   resetMeter();
-  send({ type: 'start', mode: 'ask' });
+  // A question, or a dictation (to the PC, or back here).
+  S.talkMode = S.mode;
+  if (S.talkMode === 'ask') send({ type: 'start', mode: 'ask' });
+  else {
+    send({ type: 'start', mode: 'dictate', target: S.talkMode });
+    S.result = null;
+  }
   mic.node.port.postMessage({ cmd: 'start' });
   S.local = 'listening';
-  currentTurn(true);
+  if (S.talkMode === 'ask') currentTurn(true);
   renderConvo();
   syncTicker();
   render();
@@ -1185,11 +1322,16 @@ function cancelTalk() {
       S.ignoreOldAt = performance.now();
     }
     const t = currentTurn(false);
-    if (t && !t.q && !t.a && !t.final) S.turns.pop();
+    if (S.talkMode === 'ask' && t && !t.q && !t.a && !t.final) S.turns.pop();
     S.phase = 'idle';
   } else if (phaseNow() === 'working') {
     send({ type: 'cancel' });
-    markCancelled();
+    // A question is marked cancelled; a dictation being typed is called off.
+    if (S.talkMode === 'ask') markCancelled();
+    else {
+      S.result = null;
+      S.note = 'Cancelled.';
+    }
     S.ignoreOldAt = performance.now();
     S.phase = 'idle';
     S.step = '';
@@ -1451,6 +1593,12 @@ const PHASE_WORDS = {
   idle: 'Ready',
 };
 
+/** What the phase says, for the talk under way (a dictation's work is typing). */
+function phaseWords(now) {
+  if (now !== 'working' || S.talkMode === 'ask') return PHASE_WORDS[now];
+  return S.talkMode === 'pc' ? `Typing it on ${pcName()}` : 'Writing it out';
+}
+
 function connLine() {
   if (S.ready) return `Connected to ${pcName()}`;
   if (S.denied || (!S.device && !S.pairToken)) return 'Not paired';
@@ -1478,8 +1626,9 @@ function render() {
     el.retry.hidden = !(S.denied && S.device);
   }
 
-  // The model chip.
-  if (S.model && S.ready) {
+  // The model chip: it's Ask's (a dictation's cleanup is the PC's own setting).
+  document.body.dataset.mode = S.mode;
+  if (S.model && S.ready && S.mode === 'ask') {
     el.modelBtn.hidden = false;
     el.modelLabel.textContent = S.model.label || S.model.id || 'Model';
     el.modelWhere.textContent = S.model.onThisPc ? 'On this PC' : '';
@@ -1492,11 +1641,12 @@ function render() {
 
   const now = phaseNow();
   document.body.dataset.phase = now;
-  el.phase.textContent = PHASE_WORDS[now];
+  el.phase.textContent = phaseWords(now);
+  renderMode(now);
 
   // The step Yap is on, as Chat's activity line shows it, until the answer's in.
   const turn = currentTurn(false);
-  const working = now === 'working' && S.local === 'idle' && !(turn && turn.final);
+  const working = now === 'working' && S.local === 'idle' && S.talkMode === 'ask' && !(turn && turn.final);
   el.step.hidden = !working;
   if (working) {
     el.stepLine.textContent = S.step || 'Thinking';
@@ -1534,6 +1684,27 @@ function render() {
   for (const r of el.wait.querySelectorAll('input[name=wait]')) r.checked = r.value === S.wait;
   el.clearer.checked = S.clearer;
   renderSound();
+}
+
+/** The mode switch, its hint, the conversation or the mode's line, and the last dictation's result. */
+function renderMode(now) {
+  // Not switched mid-talk: the next Talk takes it.
+  const talking = now === 'opening' || now === 'listening' || S.local === 'stopping';
+  for (const r of el.mode.querySelectorAll('input[name=mode]')) {
+    r.checked = r.value === S.mode;
+    r.disabled = talking;
+  }
+  el.modeHint.hidden = !(S.mode === 'pc' && S.ready && !S.mayType);
+  renderEmpty();
+  const r = S.result;
+  el.result.hidden = !r || S.mode === 'ask';
+  if (!r) return;
+  el.result.dataset.status = r.status;
+  el.resultLine.textContent = resultLine(r);
+  el.resultText.textContent = r.text;
+  el.resultText.hidden = !r.text;
+  el.copyBtn.hidden = r.to !== 'phone' || !r.text || r.status === 'copying';
+  el.copyBtn.textContent = r.status === 'copied' ? 'Copy again' : 'Copy';
 }
 
 const num = (n) => Math.round(n).toLocaleString('en-GB');
@@ -1766,6 +1937,22 @@ el.mic.addEventListener('change', () => {
   if (S.local === 'idle') closeMic();
 });
 el.modelBtn.addEventListener('click', openModels);
+el.mode.addEventListener('change', (e) => {
+  if (e.target.name !== 'mode') return;
+  S.mode = modeChoice(e.target.value);
+  save(KEY.mode, S.mode);
+  // The last result was the other mode's.
+  S.result = null;
+  S.error = '';
+  S.note = '';
+  render();
+});
+// A tap: the browser lets the page copy now.
+el.copyBtn.addEventListener('click', () => {
+  if (S.result) S.result.status = 'copying';
+  copyResult();
+  render();
+});
 el.models.addEventListener('click', (e) => {
   // A tap outside the sheet closes it.
   if (e.target === el.models) closeModels();
@@ -1806,6 +1993,10 @@ window.__yapLink = {
       model: S.model,
       frames: S.frames,
       retries: S.retries,
+      mode: S.mode,
+      talkMode: S.talkMode,
+      mayType: S.mayType,
+      result: S.result ? { ...S.result } : null,
       handsFree: S.handsFree,
       wait: S.wait,
       waitMs: WAITS[S.wait],

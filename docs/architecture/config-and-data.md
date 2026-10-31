@@ -592,9 +592,11 @@
   not something the person wrote). Through `saving.rs` ("your pinned
   notes").
 - Paired phones (Yap Link): `%APPDATA%/yap/link_devices.json` — `{devices:
-  [{id, name, secretHash, paired, lastSeen}]}` (2026-10-31, `link/devices.rs`):
+  [{id, name, secretHash, paired, lastSeen, typeIntoPc}]}` (2026-10-31, `link/devices.rs`):
   each phone paired in Settings → Phone, with the SHA-256 of its secret, never
-  the secret (only the phone keeps that); times in unix ms; at most 20 (pairing
+  the secret (only the phone keeps that), and whether it may type into this PC
+  (`typeIntoPc`: on when paired since dictation came, off when missing — an
+  older phone, or an older Yap's save); times in unix ms; at most 20 (pairing
   one more forgets the one used longest ago). Remove takes a phone out and cuts
   it off. Kept by Reset app, like an account sign-in; not in Download your
   data. Through `saving.rs` ("your paired phones").
@@ -621,7 +623,9 @@
 - History: `%APPDATA%/yap/history.json` (local-only; cleared from Settings → Privacy & data → History,
   kept always, 24 hours or not at all). Since 2026-10-29 a new entry has `secs`, how long it was
   spoken for (its audio's length); an older Yap drops it when it saves history, which only leaves
-  that entry untimed: the stats below have it already.
+  that entry untimed: the stats below have it already. Since 2026-10-31 a phone's dictation (Yap
+  Link) has `via: "phone"` (dropped the same way: the entry stays), and a "Dictate to phone" one
+  has the app `phone`.
 - Dictation stats: `%APPDATA%/yap/dictation_stats.json` (2026-10-29, `dictation/stats.rs`) — what
   Home and Insights show, kept whether or not history is: a row a day (`date`, the PC's own;
   `words`, `dictations`, `timed` / `timedWords` / `speakingSecs` for words a minute, `apps` —

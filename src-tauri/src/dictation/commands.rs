@@ -277,14 +277,18 @@ pub async fn e2e_ask_selection(
 /// Debug-only, test mode: dictations and the rewrite shortcut go to a
 /// stand-in window (`on`) instead of the one in front — never a real
 /// window: nothing is read or pasted there (`pipeline::test_target`).
+/// `open`: it's a text box the test keeps open, so a paste that must go
+/// back to its own window (a phone's dictation, an Undo) finds it; without
+/// it, that paste finds it gone.
 #[cfg(debug_assertions)]
 #[tauri::command]
-pub fn e2e_target_window(on: bool) -> Result<(), String> {
+pub fn e2e_target_window(on: bool, open: Option<bool>) -> Result<(), String> {
     if !crate::shell::e2e::active() || crate::shell::realtest::on() {
         return Err("e2e_target_window is for test runs (not robot mode)".into());
     }
     crate::dictation::pipeline::set_test_target(on);
-    tracing::info!(on, "e2e: dictations go to a stand-in window");
+    crate::dictation::pipeline::set_test_target_open(on && open.unwrap_or(false));
+    tracing::info!(on, open = ?open, "e2e: dictations go to a stand-in window");
     Ok(())
 }
 
