@@ -284,6 +284,10 @@ pub struct SeedMemory {
 pub struct SeedChat {
     pub title: String,
     pub messages: Vec<SeedMessage>,
+    /// The scenario's turns go on in this chat instead of a new one (a
+    /// chat that switched models: its answers' `model`).
+    #[serde(default, rename = "continue")]
+    pub go_on: bool,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -291,6 +295,10 @@ pub struct SeedChat {
 pub struct SeedMessage {
     pub role: String,
     pub text: String,
+    /// The model that wrote an answer, "provider:id"
+    /// ("anthropic:claude-opus-5-5"); none: as before models were kept.
+    #[serde(default)]
+    pub model: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
