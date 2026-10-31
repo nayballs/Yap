@@ -85,6 +85,16 @@ The AI Chat surface (conversations, the tool-calling loop and its note tools) an
   same place (`other_models_note`, 2026-10-28): the history's answers go to
   the model as its own, so Claude Haiku 5.5, picked after Qwen3.5-4B, said
   "I wrote those earlier replies, and the last one was wrong" of the 4B's.
+  Since 2026-10-31 the line reads the **whole conversation**, not only the
+  messages sent whole; it names the model now answering and says it works
+  in Yap with Yap's tools (told only "another model, not you", the 4B
+  greeted "Hey Qwen" after Claude opened a game said "I'm Qwen, not Yap. I
+  can't open it": 1 of 3 runs right, then 5 of 5); "wrote or made" — and, with Yap's notes on the
+  older messages in the prompt, that their "Assistant" may be the other
+  model: Qwen3.5-4B called a build Claude Opus wrote, by then summarised as
+  "Assistant: Created a … build", "the build I created". The summariser
+  names the model of each answer once a chat has switched (`compact::line`,
+  `models_switched`), and its prompt keeps the name.
   Never a note in the answers' text (a model copies it, above). **Every**
   system prompt ends with the **About you
   block** (ai-models.md: where the person is and their English, prices in
