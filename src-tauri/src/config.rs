@@ -65,6 +65,17 @@ impl DictionaryEntry {
         }
         out
     }
+
+    /// What it types: a snippet's text, or a rich snippet's plain text
+    /// (`pasting/rich.rs`: "• " bullets, "text (url)" links); a
+    /// correction's word.
+    pub fn typed(&self) -> std::borrow::Cow<'_, str> {
+        if self.snippet {
+            crate::pasting::rich::snippet_text(&self.to)
+        } else {
+            std::borrow::Cow::Borrowed(&self.to)
+        }
+    }
 }
 
 /// A reusable, named cleanup profile (FluidVoice's `DictationPromptProfile`): a
@@ -2508,7 +2519,18 @@ fn phrase_words(phrase: &str) -> Vec<String> {
 /// expanded again. When the phrase is all that was said (nothing but
 /// punctuation around it, as cleanup tends to add) the result is exactly the
 /// snippet's text, without a stray capital or full stop.
+///
+/// A **rich snippet** (its text formatted in Yap's markdown subset:
+/// `pasting/rich.rs`) puts its plain text in (bullets as "• ", links as
+/// "text (url)"); see [`expand_snippets`] for its markdown.
 pub fn apply_snippets(text: &str, dict: &[DictionaryEntry]) -> String {
+    expand_snippets(text, dict).0
+}
+
+/// [`apply_snippets`], and the rich snippets it expanded: their markdown,
+/// in the order they're in the text (one each time it's said) — for the
+/// paste's HTML (`rich::dictation_html`).
+pub fn expand_snippets(text: &str, dict: &[DictionaryEntry]) -> (String, Vec<String>) {
     let mut snippets: Vec<(Vec<String>, &str)> = dict
         .iter()
         .filter(|e| e.snippet && !e.to.trim().is_empty())
@@ -2516,7 +2538,7 @@ pub fn apply_snippets(text: &str, dict: &[DictionaryEntry]) -> String {
         .filter(|(words, _)| !words.is_empty())
         .collect();
     if snippets.is_empty() {
-        return text.to_string();
+        return (text.to_string(), Vec::new());
     }
     // Most words first, then the longest; stable, so ties keep list order.
     snippets.sort_by_key(|(words, _)| {
@@ -2533,7 +2555,7 @@ pub fn apply_snippets(text: &str, dict: &[DictionaryEntry]) -> String {
         })
         .collect();
     let Ok(re) = regex::Regex::new(&format!(r"(?i)\b(?:{})\b", alternatives.join("|"))) else {
-        return text.to_string();
+        return (text.to_string(), Vec::new());
     };
     let found: Vec<(std::ops::Range<usize>, &str)> = re
         .captures_iter(text)
@@ -2543,21 +2565,25 @@ pub fn apply_snippets(text: &str, dict: &[DictionaryEntry]) -> String {
             Some((whole.range(), snippets[which - 1].1))
         })
         .collect();
-    if let [(range, expansion)] = found.as_slice() {
+    // What each types (a rich one's plain text), and the rich ones' markdown.
+    let rich: Vec<String> =
+        found.iter().filter(|(_, to)| crate::pasting::rich::is_rich(to)).map(|(_, to)| to.to_string()).collect();
+    let typed: Vec<std::borrow::Cow<str>> = found.iter().map(|(_, to)| crate::pasting::rich::snippet_text(to)).collect();
+    if let ([(range, _)], [expansion]) = (found.as_slice(), typed.as_slice()) {
         let mut around = text[..range.start].chars().chain(text[range.end..].chars());
         if !around.any(char::is_alphanumeric) {
-            return expansion.to_string();
+            return (expansion.to_string(), rich);
         }
     }
     let mut out = String::with_capacity(text.len());
     let mut last = 0;
-    for (range, expansion) in &found {
+    for ((range, _), expansion) in found.iter().zip(&typed) {
         out.push_str(&text[last..range.start]);
         out.push_str(expansion);
         last = range.end + stray_full_stop(expansion, &text[range.end..]);
     }
     out.push_str(&text[last..]);
-    out
+    (out, rich)
 }
 
 /// How many bytes of `rest` (the text after an expanded snippet) to drop: a

@@ -712,6 +712,15 @@ warnings** — the rules unit-tested, all five e2e-tested through the stub
 engine's dictations (the snippet offer's bar card too); not yet tried with
 real speech, a real week of dictations, or text typed after a real paste
 (the watch's `typed_after` is unit-tested only),
+**rich snippets** (2026-10-31, `pasting/rich.rs`: bold, italic, links and
+lists in Yap's markdown subset, pasted as CF_HTML beside the plain text
+except into terminals, code editors and AI prompt boxes; the Dictionary
+view's formatting bar and preview) — unit-tested (the subset, escaping,
+CF_HTML's offsets read back, which apps), the promise of both formats in
+`read_check.rs`'s private clipboard round trip (run), the view and the
+per-app choice e2e-tested; the robot spec `rich-snippets.real.js` (Edge's
+contenteditable, the pad's RichEdit, PowerShell) written but not yet run,
+and not yet tried in a real Outlook, Word, Gmail, Teams or Slack,
 the Groq usage meter, and the installer + auto-updater (background checks + download
 while Yap runs, "Restart to update" from toast/tray/About/Windows notification —
 `updates.rs`, 2026-10-05) + portable mode + release CI (since 2026-10-25 every
@@ -1373,7 +1382,8 @@ its notes both say can pass (no "In short" from a small on-device model for
 that reason);
 a true streaming model for the partial pass (spike-gated
 Stage 2 — see `ROADMAP.md` Phase 1);
-rich-text snippets (bold, links, lists pasted as HTML beside plain text);
+a rich snippet through Paste last transcript (its plain text only) or
+in a dictation pasted in steps (stacked messages, a picked mention);
 snippets with several spoken phrases; the clipboard-read check in Notepad,
 Electron, VS Code and real slow apps (Outlook, Word, a remote desktop), and
 a page in Edge that ignores the paste (Edge reads the clipboard anyway); a JetBrains IDE's or Visual Studio's terminal, and a browser's

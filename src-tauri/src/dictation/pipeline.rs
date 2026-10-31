@@ -310,6 +310,9 @@ pub(crate) struct Delivered {
     /// picked; `pasting/compose.rs`): each step as it went.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub steps: Vec<crate::pasting::compose::Step>,
+    /// The HTML fragment that went with the text (a rich snippet in it, an
+    /// app that takes HTML: `pasting/rich.rs`), if any.
+    pub html: Option<String>,
 }
 
 /// How long a cancelled dictation's audio is kept for **Undo** ("Dictation

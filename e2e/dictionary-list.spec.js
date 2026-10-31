@@ -3,7 +3,9 @@
 // Undo) and dictionaryFile.js (reading an imported file — CSV with quotes,
 // semicolons or tabs, text with arrows or words alone —, the import's plan
 // of what's new, already there, spelled differently or said twice, what
-// the person's choices change, the export and an import's Undo). The view
+// the person's choices change, the export and an import's Undo), and
+// richSnippet.js (rich snippets' markdown subset, plain text and the
+// formatting bar's edits). The view
 // itself, with these in it, is e2e/dictionary.spec.js. Every word here is
 // made up or an everyday product name.
 import { test, expect } from '@playwright/test';
@@ -34,6 +36,7 @@ import {
   toText,
   exportName,
 } from '../src/lib/views/dictionary/dictionaryFile.js';
+import { parse, isRich, toPlain, safeLink, toggleWrap, insertLink, toggleList } from '../src/lib/views/dictionary/richSnippet.js';
 
 const c = (from, to, more = {}) => ({ from, to, fuzzy: true, snippet: false, ...more });
 const s = (from, to, more = {}) => ({ from, to, fuzzy: true, snippet: true, ...more });
@@ -541,4 +544,98 @@ test('the warnings stay quick for a dictionary of thousands', () => {
   const ms = performance.now() - t0;
   expect(w.size).toBeGreaterThan(0); // "my phrase number 1" and "…11" are close
   expect(ms).toBeLessThan(250);
+});
+
+// ---- Rich snippets (richSnippet.js; its twin is src-tauri's pasting/rich.rs,
+// held to the same cases) ----
+
+test('rich snippets: the subset parses, and what is no formatting stays as typed', () => {
+  expect(parse('**Thanks**, *Sam* and _you_')).toEqual([
+    {
+      type: 'line',
+      inlines: [
+        { type: 'bold', children: [{ type: 'text', text: 'Thanks' }] },
+        { type: 'text', text: ', ' },
+        { type: 'italic', children: [{ type: 'text', text: 'Sam' }] },
+        { type: 'text', text: ' and ' },
+        { type: 'italic', children: [{ type: 'text', text: 'you' }] },
+      ],
+    },
+  ]);
+  expect(parse('Agenda:\n- one\n* two\n1. three\n2) four').map((b) => [b.type, b.ordered ?? null, b.items?.length ?? 0])).toEqual([
+    ['line', null, 0],
+    ['list', false, 2],
+    ['list', true, 2],
+  ]);
+  expect(parse('***both***')[0].inlines[0]).toEqual({ type: 'bold', children: [{ type: 'italic', children: [{ type: 'text', text: 'both' }] }] });
+  expect(parse('[wiki](https://example.com/a_(b))')[0].inlines[0]).toMatchObject({ type: 'link', url: 'https://example.com/a_(b)' });
+  for (const plain of [
+    'snake_case_name',
+    '5*3*2 = 30',
+    '2 * 3 * 4',
+    'Terms apply*',
+    '** not bold **',
+    'x * not italic*',
+    'x *not italic *',
+    'a lone [bracket] (and a note)',
+    '1 Long Lane\nLeeds',
+    'Speak soon,\nRobin',
+    '-- \nSam',
+    '-5 degrees',
+    '+44 7700 900123',
+    String.raw`C:\Users\sam`,
+    '',
+  ]) {
+    expect(isRich(plain), plain).toBe(false);
+  }
+  for (const bad of ['[x](javascript:alert(1))', '[x](file:///C:/a)', '[x](ftp://example.com)', '[x](https://)', '[x](https://a b)']) {
+    expect(isRich(bad), bad).toBe(false);
+    expect(toPlain(bad)).toBe(bad);
+  }
+  expect(safeLink('mailto:sam@example.com')).toBe(true);
+  expect(safeLink('JAVASCRIPT:alert(1)')).toBe(false);
+  // Escapes: the character itself, and alone they're no formatting.
+  expect(isRich(String.raw`\*not italic\*`)).toBe(false);
+  expect(toPlain(String.raw`**a\*b** and \[c\]`)).toBe('a*b and [c]');
+});
+
+test('rich snippets: plain text drops the markers and writes bullets and links out', () => {
+  expect(toPlain('Hi **Sam**,\n\nThe plan:\n- *Monday*: [the agenda](https://example.com/agenda)\n- Friday\n\nBest,\nRobin')).toBe(
+    'Hi Sam,\n\nThe plan:\n• Monday: the agenda (https://example.com/agenda)\n• Friday\n\nBest,\nRobin'
+  );
+  expect(toPlain('3. c\n3. d\n3. e')).toBe('3. c\n4. d\n5. e');
+  expect(toPlain('[https://example.com](https://example.com)')).toBe('https://example.com');
+  expect(toPlain('[sam@example.com](mailto:sam@example.com)')).toBe('sam@example.com');
+  expect(toPlain('[Email Sam](mailto:sam@example.com)')).toBe('Email Sam (sam@example.com)');
+  expect(toPlain('[](https://example.com)')).toBe('https://example.com');
+  expect(toPlain('• **a**\n• b')).toBe('• a\n• b');
+});
+
+test("rich snippets: the formatting bar's bold, italic, link and lists, on and off", () => {
+  const sel = (text, start, end = start) => ({ text, start, end });
+  // Bold on the selection, then off again (selected inside or with its markers).
+  expect(toggleWrap(sel('Thanks Sam', 7, 10), '**')).toEqual({ text: 'Thanks **Sam**', start: 9, end: 12 });
+  expect(toggleWrap(sel('Thanks **Sam**', 9, 12), '**')).toEqual({ text: 'Thanks Sam', start: 7, end: 10 });
+  expect(toggleWrap(sel('Thanks **Sam**', 7, 14), '**')).toEqual({ text: 'Thanks Sam', start: 7, end: 10 });
+  // Italic inside bold, and off again leaving the bold.
+  expect(toggleWrap(sel('Thanks **Sam**', 9, 12), '*').text).toBe('Thanks ***Sam***');
+  expect(toggleWrap(sel('Thanks ***Sam***', 10, 13), '*').text).toBe('Thanks **Sam**');
+  // Spaces at the selection's ends stay outside; nothing selected: the markers, the caret between.
+  expect(toggleWrap(sel('Thanks Sam ', 7, 11), '*')).toEqual({ text: 'Thanks *Sam* ', start: 8, end: 11 });
+  expect(toggleWrap(sel('Thanks ', 7), '**')).toEqual({ text: 'Thanks ****', start: 9, end: 9 });
+  // Several lines: each line's words, never a list's marker.
+  expect(toggleWrap(sel('- one\n- two', 0, 11), '**').text).toBe('- **one**\n- **two**');
+  expect(toggleWrap(sel('- **one**\n- **two**', 0, 19), '**').text).toBe('- one\n- two');
+  // A link: the words its text, "https://" selected to type the address.
+  expect(insertLink(sel('Book a call', 0, 11))).toEqual({ text: '[Book a call](https://)', start: 14, end: 22 });
+  expect(insertLink(sel('see https://example.com/x now', 4, 25))).toEqual({ text: 'see [link text](https://example.com/x) now', start: 5, end: 14 });
+  expect(insertLink(sel('mail sam@example.com', 5, 20)).text).toBe('mail [sam@example.com](mailto:sam@example.com)');
+  expect(insertLink(sel('x ', 2))).toEqual({ text: 'x [link text](https://)', start: 3, end: 12 });
+  // Lists over the selection's lines, blank lines left alone; again: off.
+  expect(toggleList(sel('one\ntwo\nthree', 0, 13), false).text).toBe('- one\n- two\n- three');
+  expect(toggleList(sel('- one\n- two', 2, 8), false).text).toBe('one\ntwo');
+  expect(toggleList(sel('- one\n- two', 2, 8), true).text).toBe('1. one\n2. two');
+  expect(toggleList(sel('Intro\none\n\ntwo', 6, 14), true).text).toBe('Intro\n1. one\n\n2. two');
+  // What the bar makes is what the paste reads.
+  expect(toPlain(toggleList(sel('one\ntwo', 0, 7), false).text)).toBe('• one\n• two');
 });

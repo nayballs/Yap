@@ -931,6 +931,8 @@ class TestPad : Form {
         var entry = new Dictionary<string, object> {
             { "field", field },
             { "text", IsClipboardFormatAvailable(13) },
+            // A rich snippet's HTML beside the text (CF_HTML).
+            { "html", IsClipboardFormatAvailable(RegisterClipboardFormat("HTML Format")) },
             { "private", priv },
             { "clipboardHeldBy", heldBy },
         };

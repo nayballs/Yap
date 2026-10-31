@@ -1,6 +1,6 @@
 # Pasting: where the text goes
 
-Putting a dictation into the app you're in: the clipboard paste and the submit key, apps running as administrator, UI Automation reads of the field, fitting the text to what's around the cursor, the kind of app (terminals, coding CLIs, chat apps), and the last paste afterwards (swapped for the words as said, or rewritten). The pipeline that calls all this is [dictation.md](./dictation.md).
+Putting a dictation into the app you're in: the clipboard paste and the submit key, apps running as administrator, UI Automation reads of the field, fitting the text to what's around the cursor, the kind of app (terminals, coding CLIs, chat apps), rich snippets' HTML beside the text, and the last paste afterwards (swapped for the words as said, or rewritten). The pipeline that calls all this is [dictation.md](./dictation.md).
 
 [Architecture index](./README.md) · [CLAUDE.md](../../CLAUDE.md)
 
@@ -89,6 +89,17 @@ Putting a dictation into the app you're in: the clipboard paste and the submit k
   (Left::NotRead)`. The clipboard restore is timed by that read, not the
   keys. `#[ignore]`d `private_clipboard_round_trip` runs
   the real clipboard code on a private window station (never the person's clipboard).
+  **A rich snippet's HTML** (2026-10-31, `pasting/rich.rs`, below):
+  `inject_rich(text, html, …)` (`inject_text` is it without HTML) puts
+  the fragment as **CF_HTML** ("HTML Format", `rich::cf_html`) beside the
+  text in the same private paste — promised with it (`read_check.rs`),
+  else written with it (`clip::put_rich_verified`) — and leaves it with
+  the text on the clipboard when the paste can't land (an app running as
+  administrator, keys blocked, no text box, not read; an Undo's window
+  gone). A paste in slices (a terminal's) never carries it. The person's
+  clipboard snapshot and restore are as before (text, an image or files).
+  Test mode logs whether HTML would go (`html=true`) and the dictation's
+  report has the fragment (`Delivered.html`).
   **When it can't be pasted** (2026-10-25): `inject_text` returns
   `Delivery::LeftOnClipboard(Left)` — `Elevated` (above), `KeysBlocked`,
   `NoTextBox` or `NotRead` (2026-10-29: no app read the text off the
@@ -160,7 +171,9 @@ Putting a dictation into the app you're in: the clipboard paste and the submit k
   number and retried like a plain write; `None` (no window, a busy
   clipboard) → `clip::put_text_verified` as before, and no read to go by.
   Windows sends the window `WM_RENDERFORMAT` the moment an app reads the
-  text, and `on_render` decides:
+  text — or a rich snippet's HTML, promised beside it the same way
+  (`Live::data`; 2026-10-31): a read of either is the app's, and a write-out
+  writes whichever wasn't read (`html_rendered`) — and `on_render` decides:
   **who read it** (`classify`, pure): the window that has the clipboard
   open (`GetOpenClipboardWindow`) and its process, against `targets_of
   (receiver)` — the target window and the window with the focus in its
@@ -246,13 +259,76 @@ Putting a dictation into the app you're in: the clipboard paste and the submit k
   the real window on a private window station and desktop (a manager's
   read refused twice, the target's counted, a nameless one, another app's
   after the keys, ANSI text made from the promise, nobody, a late read, a
-  copy before the restore, a background restore, a remote desktop's);
+  copy before the restore, a background restore, a remote desktop's; a
+  rich paste: its HTML refused before the keys and counted as the target's
+  read after them, the text beside it, both written out when left, and
+  the plain write of both);
   robot: `paste-read.real.js` (the pad, a stand-in clipboard manager —
   a program of its own name: one sharing the target's counts as it —
   before and after the keys, an Edge textarea, Notepad, Windows Terminal,
   conhost, Claude Code's stand-in in slices, an Electron app and VS Code
   when present), `paste-late.real.js` (the pad's slow box: read at 0.7 s,
   at 2 s, never).
+- **`pasting/rich.rs`** — **rich snippets** (2026-10-31; Wispr Flow's
+  richer snippets, by behaviour). A snippet's text in Yap's markdown
+  subset (`**bold**`, `*italic*` / `_italic_`, `[text](url)`, `- ` / `1. `
+  lists, line breaks; [dictionary.md](./dictionary.md)) — rich when it
+  uses any of it (`is_rich`), else a plain snippet as ever. **Parsing**
+  (`parse`, pure): line by line, emphasis never inside a word (`snake_case`,
+  `5*3*2` stay), links only http(s) or mailto (`safe_link`: no
+  `javascript:`, no file paths — anything else stays as typed), a
+  backslash before punctuation for the character; raw HTML is never
+  passed through: `<b>` in a snippet is text. **Plain text** (`to_plain`):
+  the markers gone, bullets "• ", numbers counted from the first, a link
+  "text (url)" (just the address when that's its text; "mailto:" off) —
+  what `config::expand_snippets` puts in the dictation's text, so history,
+  the words as said, the fit, terminals and every plain-text app have it.
+  **HTML** (`dictation_html(text, used)`): built here from the parsed
+  subset only, every text node escaped (`& < > " '`; a second space a
+  no-break space), links' addresses escaped in their attribute; inline,
+  so a paste mid-paragraph joins it — `<br>` between lines, `<b>`, `<i>`,
+  `<a href>`, a bare http(s) address in the snippet a link; `<ul>` /
+  `<ol start>` for lists, a block of their own (the line break and spaces
+  between them and the words are the list's edge). A dictation that mixes
+  spoken words and rich snippets is **one fragment**: each snippet's plain
+  text found in order in the text as fitted — as it is, or with its first
+  letter's case changed (mid-sentence) or its full stop taken off (a chat
+  message's), the HTML changed the same way and checked to read back as
+  that text —, the spoken words between them escaped, line breaks `<br>`,
+  a space at the paste's very start or end a no-break space (smart
+  spacing's, which an app's paste would drop); a snippet not found as the
+  fit left it → no HTML, the plain text alone. **CF_HTML** (`cf_html`):
+  "Version:0.9", StartHTML / EndHTML / StartFragment / EndFragment as
+  ten-digit byte offsets into the UTF-8 (Chromium's and Word's layout),
+  the page (`<html><head><meta charset="utf-8"></head><body>`, the
+  `<!--StartFragment-->` / `<!--EndFragment-->` comments) and a NUL after
+  it, outside the offsets. **Which apps** (`takes_html(kind, exe,
+  category)`, from `Shared::deliver`: the kind as read, the process, and
+  cleanup's kind of app): never a terminal (as read, whatever terminal mode
+  says), a code editor or IDE by process (VS Code and its forks, Visual
+  Studio, the JetBrains IDEs, Zed, Sublime Text, Notepad++, Vim and Neovim
+  windows, Emacs…), or an AI prompt box (cleanup's AI prompts kind:
+  ChatGPT, Claude, Gemini, Copilot, Perplexity… on the desktop or in a
+  browser tab, Cursor, the coding CLIs) — they get the plain text only;
+  every other app gets both: Outlook (classic and new), Word, OneNote,
+  Teams, Slack, Gmail and other web mail in a browser, and an app that
+  only reads text (Notepad, a RichEdit) reads the text as before. Not for
+  a dictation pasted in steps (stacked messages, a picked mention or file:
+  `compose.rs` pastes plain text), Paste last transcript, the words as
+  said, a rewrite or a transform. After a rich paste "Use what I said"
+  and rewriting the last dictation refuse, as for any paste they can't
+  find in the field (it reads as formatted, not as its plain text), and
+  copy instead. The log says how many snippets and whether HTML went,
+  never the text. Unit-tested (the subset, what isn't formatting, plain
+  text, escaping — a snippet with `<script>` or quotes pastes as text —,
+  a dictation's fragment and the fit's changes, CF_HTML's offsets read
+  back from the bytes, which apps); the clipboard in `read_check.rs`'s
+  private round trip; e2e `dictionary.spec.js` (the report's `html` per
+  app); robot `rich-snippets.real.js` (an Edge contenteditable gets the
+  bold, link and list and the spoken words as text; the pad's RichEdit the
+  plain text with HTML offered beside it; a PowerShell prompt one plain
+  line). The frontend's twin, for the editor's preview, is
+  `views/dictionary/richSnippet.js`.
 - **`pasting/as_said.rs`** — **"Use what I said"** (2026-10-22; Windows' fluid
   dictation's Revert, TypeWhisper's Restore Raw Transcript): right after a
   dictation AI cleanup changed, swap what Yap pasted for the words as said

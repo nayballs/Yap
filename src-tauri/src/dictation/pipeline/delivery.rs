@@ -128,11 +128,11 @@ impl Shared {
         // ONNX models), exactly as meetings and Upload get it,
         // then the names on screen, the "press enter" voice command
         // and snippets (dictations only).
-        let (corrected, voice_enter) = self
+        let (corrected, voice_enter, rich) = self
             .config
             .read()
             .map(|c| finish_dictation_with(cleaned.trim(), &raw, &c, screen.as_deref()))
-            .unwrap_or_else(|_| (config::apply_dictionary(cleaned.trim(), &dict), false));
+            .unwrap_or_else(|_| (config::apply_dictionary(cleaned.trim(), &dict), false, Vec::new()));
         // …and the words as said, when cleanup changed them: what "Use
         // what I said" swaps the paste for (`as_said.rs`) — the same
         // corrections and names on screen, no cleanup.
@@ -153,6 +153,16 @@ impl Shared {
         // messages never split them in its place.
         let rewritten = translated
             || crate::dictation::transforms::for_dictation(&cfg, category, style_target.is_terminal()).is_some();
+        // Rich snippets (`pasting/rich.rs`): their HTML beside the text,
+        // for an app that takes it (not a terminal, a code editor or an AI
+        // prompt box: those get the plain text only).
+        let rich = if !rich.is_empty()
+            && crate::pasting::rich::takes_html(self.read_kind(), style_target.exe(), category)
+        {
+            rich
+        } else {
+            Vec::new()
+        };
         // What Yap did by itself, for the feature tips (`tips.rs`).
         let seen = crate::dictation::tips::Seen::of(&raw, &cleaned, &cfg.dictionary, style);
         let mut delivered = self
@@ -166,7 +176,7 @@ impl Shared {
                 auto_submit,
                 auto_submit_key,
                 restore_clipboard,
-                Steps { chat, screen, rewritten },
+                Steps { chat, screen, rewritten, rich },
             )
             .await;
         delivered.style = style.map(crate::ai::cleanup_styles::Style::describe);
@@ -503,7 +513,15 @@ impl Shared {
                 }
                 outcome.delivery
             } else {
-                crate::pasting::text_injector::inject_text(&corrected, restore_clipboard, target, strict, read).await
+                // A rich snippet in it: the whole paste as one HTML fragment
+                // too, the spoken words escaped (`rich.rs`); not found as the
+                // fit left it, the plain text alone.
+                let html = crate::pasting::rich::dictation_html(&corrected, &steps.rich);
+                if !steps.rich.is_empty() {
+                    tracing::info!(snippets = steps.rich.len(), html = html.is_some(), "A rich snippet in the paste");
+                }
+                report.html = html.clone();
+                crate::pasting::text_injector::inject_rich(&corrected, html, restore_clipboard, target, strict, read).await
             };
             match pasted {
                 // Not pasted (an app running as administrator, keys
