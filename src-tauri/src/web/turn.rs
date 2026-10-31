@@ -14,9 +14,35 @@ use super::grounding::{asks_about_prices, local_query, local_retry_query};
 use super::native;
 use super::page::{check_url, page_part, read_page};
 use super::{
-    search, search_chip, short, source_site, tidy, Endpoints, Settings, DATA_NOT_INSTRUCTIONS, MAX_READS, MAX_RESULTS,
-    MAX_SEARCHES, PAGE_TOKENS,
+    search, search_chip, short, source_site, tidy, Endpoints, Settings, DATA_NOT_INSTRUCTIONS, DEEP_READS, DEEP_SEARCHES,
+    MAX_READS, MAX_RESULTS, MAX_SEARCHES, PAGE_TOKENS,
 };
+
+/// **How far a turn may look**: its searches and page reads.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Reach {
+    pub searches: usize,
+    pub reads: usize,
+}
+
+impl Reach {
+    /// Every turn's: [`MAX_SEARCHES`] and [`MAX_READS`].
+    pub const USUAL: Reach = Reach { searches: MAX_SEARCHES, reads: MAX_READS };
+
+    /// **A strong model writing a document** (`documents::rich::strong`):
+    /// [`DEEP_SEARCHES`], and as many page reads (a [`PAGE_TOKENS`] part
+    /// each) as two-fifths of the model's request holds (`request`: its
+    /// tokens, `chat/budget.rs`; `None`: no limit known), from
+    /// [`MAX_READS`] to [`DEEP_READS`] — Claude Haiku 5.5, held to 80K
+    /// tokens a request at its cheaper rate, gets all ten; an 8K model,
+    /// were it strong, three. What the reads bring is still fitted to
+    /// what's left of the request, result by result (`agent::Room::fit`).
+    /// Pure.
+    pub fn deep(request: Option<u64>) -> Reach {
+        let reads = request.map_or(DEEP_READS, |r| ((r * 2 / 5) / PAGE_TOKENS as u64) as usize).clamp(MAX_READS, DEEP_READS);
+        Reach { searches: DEEP_SEARCHES, reads }
+    }
+}
 
 /// A web address, compared: scheme and host lowercased, no fragment, no
 /// trailing slash. Pure.
@@ -98,6 +124,11 @@ pub struct Turn {
     /// Citation numbers given to other sources this turn (the calendar's
     /// meetings, `chat/tools/calendar.rs`): one numbering for the answer.
     reserved: usize,
+    /// How far this turn may look now ([`Reach::USUAL`] until it goes deep).
+    reach: Reach,
+    /// How far it may look once it writes a document (a strong model's
+    /// turn, [`Turn::may_go_deep`]); `None`: never further.
+    deep_reach: Option<Reach>,
 }
 
 impl Turn {
@@ -123,7 +154,109 @@ impl Turn {
             pending_retry: None,
             texts: Vec::new(),
             reserved: 0,
+            reach: Reach::USUAL,
+            deep_reach: None,
         }
+    }
+
+    /// A strong model's turn (`documents::rich::strong`): once it writes a
+    /// document ([`Turn::go_deep`]), it may look as far as `reach`.
+    pub fn may_go_deep(mut self, reach: Reach) -> Turn {
+        self.deep_reach = Some(reach);
+        self
+    }
+
+    /// **This turn writes a document**: it looks further from now on — the
+    /// deeper [`Reach`], and the provider's own search opening more pages
+    /// and saying more (`native::NativeSearch::deep`). Only a turn that
+    /// [`Turn::may_go_deep`]; `true` when it went deeper now (once).
+    pub fn go_deep(&mut self) -> bool {
+        let Some(deep) = self.deep_reach.filter(|d| *d != self.reach) else { return false };
+        self.reach = deep;
+        if let Some(n) = self.settings.native.as_mut() {
+            n.deep = true;
+        }
+        tracing::info!(searches = deep.searches, reads = deep.reads, "Web: a document's turn looks further");
+        true
+    }
+
+    /// The turn looks further than every turn ([`Turn::go_deep`]).
+    pub fn deep(&self) -> bool {
+        self.reach != Reach::USUAL
+    }
+
+    /// **Claude's own web tools for Chat's request**, when it searches there
+    /// (`native::NativeSearch::in_chat`, `llm::anthropic`): its web search
+    /// and web fetch, deeper once the turn writes a document. `None`: Yap's
+    /// `web_search` and `read_page` are the turn's.
+    pub fn server_tools(&self) -> Option<Vec<Value>> {
+        self.settings.native.as_ref().filter(|n| n.in_chat).map(native::NativeSearch::server_tools)
+    }
+
+    /// **What Claude's own web tools did in one reply** (`llm::anthropic`'s
+    /// `yap_web`): each search and page read a chip, its pages numbered as
+    /// sources — web content is in the turn now (the safety rule, and an
+    /// answer that says it searched isn't making it up) — and the numbers
+    /// of the pages its answer cites, in `cites`' order. A server tool's
+    /// error is a chip, never the turn's end. A model evaluation records
+    /// them as the `web_search` / `read_page` calls they stand for.
+    pub fn took_server(&mut self, w: &Value) -> (Vec<String>, Vec<usize>) {
+        let who = native::Provider::Anthropic.name();
+        let mut chips = Vec::new();
+        for s in w["searches"].as_array().into_iter().flatten() {
+            let q = tidy(s["query"].as_str().unwrap_or(""), 60);
+            if let Some(e) = s["error"].as_str() {
+                chips.push(format!("Couldn't search the web with {who}: {e}"));
+                continue;
+            }
+            self.searches += 1;
+            let mut results = Vec::new();
+            for r in s["results"].as_array().into_iter().flatten() {
+                let (url, title) = (r["url"].as_str().unwrap_or(""), r["title"].as_str().unwrap_or(""));
+                if check_url(url).is_err() {
+                    continue;
+                }
+                let n = self.number(title, url);
+                results.push(json!({ "n": n, "title": title, "url": url }));
+            }
+            if !results.is_empty() {
+                self.seen = true;
+            }
+            let chip = if results.is_empty() { format!("Searched the web with {who}: \"{q}\" · nothing found") } else { format!("Searched the web with {who}: \"{q}\"") };
+            crate::ai::eval::tool_called("web_search", &json!({ "query": s["query"] }), &json!({ "success": true, "data": { "results": results }, "displayText": chip }));
+            chips.push(chip);
+        }
+        for f in w["fetches"].as_array().into_iter().flatten() {
+            let url = f["url"].as_str().unwrap_or("");
+            let shown = short_url(url);
+            if let Some(e) = f["error"].as_str() {
+                chips.push(format!("Couldn't read {shown}: {e}"));
+                continue;
+            }
+            if check_url(url).is_err() {
+                continue;
+            }
+            self.reads += 1;
+            self.seen = true;
+            let n = self.number(f["title"].as_str().unwrap_or(""), url);
+            let chip = format!("Read {shown}");
+            crate::ai::eval::tool_called("read_page", &json!({ "url": url }), &json!({ "success": true, "data": { "n": n, "url": url }, "displayText": chip }));
+            chips.push(chip);
+        }
+        let mut numbers = Vec::new();
+        for c in w["cites"].as_array().into_iter().flatten() {
+            if let Some(t) = c["text"].as_str().filter(|t| !t.is_empty()) {
+                self.texts.push(t.to_string());
+            }
+            numbers.push(self.number(c["title"].as_str().unwrap_or(""), c["url"].as_str().unwrap_or("")));
+        }
+        (chips, numbers)
+    }
+
+    /// How far it may look now.
+    #[cfg(test)]
+    pub fn reach(&self) -> Reach {
+        self.reach
     }
 
     /// A citation number for a source that isn't a web page (a meeting on
@@ -246,11 +379,16 @@ impl Turn {
             return failed("query is empty: say what to search for.".into(), "Couldn't search the web: no query".into());
         }
         let q = tidy(&query, 60);
-        if self.searches >= MAX_SEARCHES {
-            return failed(
-                format!("You've searched {MAX_SEARCHES} times in this turn: answer from what you found, and say what's missing."),
-                format!("Didn't search for \"{q}\": {MAX_SEARCHES} searches a turn"),
-            );
+        let most = self.reach.searches;
+        if self.searches >= most {
+            // A document's turn: write it now, the rest from the model's own
+            // knowledge (marked, as the documents rule says).
+            let then = if self.deep() {
+                "write the document from what you found, filling in the rest from your own knowledge (marked as your suggestions)"
+            } else {
+                "answer from what you found, and say what's missing"
+            };
+            return failed(format!("You've searched {most} times in this turn: {then}."), format!("Didn't search for \"{q}\": {most} searches a turn"));
         }
         self.searches += 1;
         match search(&self.settings, &self.endpoints, &query, &self.question).await {
@@ -340,11 +478,10 @@ impl Turn {
             );
         }
         let offset = args["offset"].as_u64().or_else(|| args["offset"].as_str().and_then(|s| s.trim().parse().ok())).unwrap_or(0) as usize;
-        if self.reads >= MAX_READS {
-            return failed(
-                format!("You've read {MAX_READS} pages in this turn: answer from what you have."),
-                format!("Didn't read {shown}: {MAX_READS} pages a turn"),
-            );
+        let most = self.reach.reads;
+        if self.reads >= most {
+            let then = if self.deep() { "write the document from what you have" } else { "answer from what you have" };
+            return failed(format!("You've read {most} pages in this turn: {then}."), format!("Didn't read {shown}: {most} pages a turn"));
         }
         self.reads += 1;
         match read_page(&self.endpoints, &url).await {
@@ -564,6 +701,93 @@ mod tests {
         assert_eq!(bracket_citations("Out on 9 Oct 【2†L4-L9】 and【†source】 more."), "Out on 9 Oct [2] and more.");
         assert_eq!(bracket_citations("Plain [1]."), "Plain [1].");
         assert_eq!(citations(&bracket_citations("a【1】 b【3†L1】")), [1, 3]);
+    }
+
+    #[test]
+    fn a_documents_turn_looks_further_only_when_it_may() {
+        // Sized to the model's request: Haiku's 80K at its cheaper rate, a
+        // 1M model, an 8K one; no limit known.
+        assert_eq!(Reach::deep(Some(80_000)), Reach { searches: DEEP_SEARCHES, reads: DEEP_READS });
+        assert_eq!(Reach::deep(Some(990_000)).reads, DEEP_READS);
+        assert_eq!(Reach::deep(Some(7_000)).reads, MAX_READS);
+        assert_eq!(Reach::deep(Some(30_000)).reads, 4);
+        assert_eq!(Reach::deep(None).reads, DEEP_READS);
+        // Every turn: the usual reach, and going deep does nothing…
+        let mut turn = Turn::new(settings(""), offline(), "Make me a guide", &[]);
+        assert!(!turn.go_deep());
+        assert_eq!(turn.reach(), Reach::USUAL);
+        assert!(!turn.deep());
+        // …unless the model is a strong one: then once, when it writes.
+        let mut turn = Turn::new(settings(""), offline(), "Make me a guide", &[]).may_go_deep(Reach::deep(Some(80_000)));
+        assert_eq!(turn.reach(), Reach::USUAL, "not before it writes a document");
+        assert!(turn.go_deep());
+        assert!(!turn.go_deep(), "once");
+        assert!(turn.deep());
+        assert_eq!(turn.reach().searches, DEEP_SEARCHES);
+    }
+
+    #[tokio::test]
+    async fn the_search_cap_follows_the_turns_reach() {
+        let f = fake((500, Value::Null), json!({ "results": [{ "title": "Emberfall wiki", "url": "https://emberfall.example/levels", "highlights": ["Level 2: Ember Bolt."] }] }));
+        let search = |n: usize| json!({ "query": format!("Emberfall levels part {n}") });
+        // Every turn: three.
+        let mut turn = Turn::new(settings("exa-key"), endpoints_of(&f), "What do I get at level 2?", &[]);
+        for n in 0..MAX_SEARCHES {
+            assert_eq!(turn.execute("web_search", &search(n)).await["success"], json!(true));
+        }
+        let r = turn.execute("web_search", &search(9)).await;
+        assert_eq!(r["displayText"], json!("Didn't search for \"Emberfall levels part 9\": 3 searches a turn"));
+        assert!(r["error"].as_str().unwrap().contains("say what's missing"), "{r}");
+        // A strong model's document turn: ten, then "write it".
+        let mut turn = Turn::new(settings("exa-key"), endpoints_of(&f), "Make me a level-by-level guide", &[]).may_go_deep(Reach::deep(None));
+        turn.go_deep();
+        for n in 0..DEEP_SEARCHES {
+            assert_eq!(turn.execute("web_search", &search(n)).await["success"], json!(true), "search {n}");
+        }
+        let r = turn.execute("web_search", &search(99)).await;
+        assert_eq!(r["displayText"], json!("Didn't search for \"Emberfall levels part 99\": 10 searches a turn"));
+        assert!(r["error"].as_str().unwrap().contains("filling in the rest from your own knowledge"), "{r}");
+    }
+
+    #[test]
+    fn claudes_own_searches_become_the_turns_sources() {
+        // Yap's tools unless Claude searches in Chat's request.
+        let opus = || native::NativeSearch::new(native::Provider::Anthropic, "claude-opus-5-5", "https://api.anthropic.com/v1", "k");
+        let turn = Turn::new(Settings { native: Some(opus()), ..settings("") }, offline(), "q", &[]);
+        assert!(turn.server_tools().is_none());
+        let mut n = opus();
+        n.in_chat = true;
+        let mut turn = Turn::new(Settings { native: Some(n), ..settings("") }, offline(), "Make me a Tidecaller guide", &[]).may_go_deep(Reach::deep(None));
+        assert_eq!(turn.server_tools().unwrap()[0]["max_uses"], json!(native::SERVER_USES));
+        turn.go_deep();
+        assert_eq!(turn.server_tools().unwrap()[0]["max_uses"], json!(native::DEEP_SERVER_USES));
+        assert!(!turn.seen() && !turn.looked());
+        let w = json!({
+            "searches": [
+                { "query": "Emberfall tidecaller", "results": [{ "url": "https://emberfall.example/wiki/Tidecaller", "title": "Tidecaller" }, { "url": "http://192.168.1.1/x", "title": "local" }] },
+                { "query": "tidecaller gear", "results": [], "error": "it's limiting how much Yap can search right now" }
+            ],
+            "fetches": [
+                { "url": "https://emberfall.example/wiki/Gear_locations", "title": "Gear locations" },
+                { "url": "https://forum.example/t/x", "title": "", "error": "the page didn't open" }
+            ],
+            "cites": [{ "url": "https://emberfall.example/wiki/Gear_locations", "title": "Gear locations", "text": "Coral Staff: Saltmarsh Docks" }]
+        });
+        let (chips, numbers) = turn.took_server(&w);
+        assert_eq!(
+            chips,
+            [
+                "Searched the web with Anthropic: \"Emberfall tidecaller\"",
+                "Couldn't search the web with Anthropic: it's limiting how much Yap can search right now",
+                "Read emberfall.example/wiki/Gear_locations",
+                "Couldn't read forum.example/t/x: the page didn't open",
+            ]
+        );
+        // The page it read and cites: one number; a local address never a source.
+        assert_eq!(numbers, [2]);
+        assert_eq!(turn.sources.iter().map(|s| s.url.as_str()).collect::<Vec<_>>(), ["https://emberfall.example/wiki/Tidecaller", "https://emberfall.example/wiki/Gear_locations"]);
+        assert!(turn.seen() && turn.looked());
+        assert_eq!(turn.texts, ["Coral Staff: Saltmarsh Docks"]);
     }
 
     #[test]

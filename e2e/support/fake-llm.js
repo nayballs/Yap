@@ -166,6 +166,120 @@ function listBody(provider, models) {
 }
 
 /** Yap's own token estimate (meeting_summary::estimate_tokens). */
+/**
+ * Anthropic's Messages API request (src-tauri/src/ai/llm/anthropic.rs, a
+ * strong Claude's Chat steps) as the OpenAI-shaped messages the rest of
+ * the fake reads: the system prompt, user text, tool results as `tool`
+ * messages, Claude's tool calls as `tool_calls`.
+ */
+function fromMessagesApi(body) {
+  const system = Array.isArray(body.system) ? body.system.map((b) => b.text ?? '').join('\n\n') : body.system ?? '';
+  const out = [{ role: 'system', content: system }];
+  for (const m of body.messages ?? []) {
+    const blocks = typeof m.content === 'string' ? [{ type: 'text', text: m.content }] : m.content ?? [];
+    if (m.role === 'user') {
+      const texts = [];
+      for (const b of blocks) {
+        if (b.type === 'tool_result') {
+          const content = typeof b.content === 'string' ? b.content : (b.content ?? []).map((c) => c.text ?? '').join('');
+          out.push({ role: 'tool', tool_call_id: b.tool_use_id, content });
+        } else if (b.type === 'text') texts.push(b.text);
+      }
+      if (texts.length) out.push({ role: 'user', content: texts.join('\n') });
+    } else {
+      const text = blocks.filter((b) => b.type === 'text').map((b) => b.text).join('');
+      const calls = blocks
+        .filter((b) => b.type === 'tool_use')
+        .map((b) => ({ id: b.id, type: 'function', function: { name: b.name, arguments: JSON.stringify(b.input ?? {}) } }));
+      out.push({ role: 'assistant', content: text || null, ...(calls.length ? { tool_calls: calls } : {}) });
+    }
+  }
+  return out;
+}
+
+/**
+ * A scripted step as Claude's content blocks: its thinking (`reasoning`),
+ * its own searches and page reads (`server`: `{ search, results: [{url,
+ * title}] }`, `{ fetch, title }`, `{ fetch, error }`, or a search's
+ * `error`), its answer (`content`, citing `cite: [{url, title}]`) and its
+ * tool calls (`tools`) — in the shapes Anthropic's docs give.
+ */
+function messagesBlocks(step, record) {
+  const blocks = [];
+  let n = 0;
+  if (step.reasoning) blocks.push({ type: 'thinking', thinking: step.reasoning, signature: 'fake-signature' });
+  if (step.before) blocks.push({ type: 'text', text: step.before });
+  for (const s of step.server ?? []) {
+    const id = `srvtoolu_fake_${++n}`;
+    if (s.search != null) {
+      blocks.push({ type: 'server_tool_use', id, name: 'web_search', input: { query: s.search } });
+      blocks.push({
+        type: 'web_search_tool_result',
+        tool_use_id: id,
+        content: s.error
+          ? { type: 'web_search_tool_result_error', error_code: s.error }
+          : (s.results ?? []).map((r) => ({ type: 'web_search_result', url: r.url, title: r.title, encrypted_content: 'ZmFrZQ==', page_age: null })),
+      });
+    } else if (s.fetch) {
+      blocks.push({ type: 'server_tool_use', id, name: 'web_fetch', input: { url: s.fetch } });
+      blocks.push({
+        type: 'web_fetch_tool_result',
+        tool_use_id: id,
+        content: s.error
+          ? { type: 'web_fetch_tool_result_error', error_code: s.error }
+          : {
+              type: 'web_fetch_result',
+              url: s.fetch,
+              content: { type: 'document', title: s.title ?? '', source: { type: 'text', media_type: 'text/plain', data: s.text ?? '' } },
+              retrieved_at: '2026-10-31T10:00:00Z',
+            },
+      });
+    }
+  }
+  if (step.content != null) {
+    const block = { type: 'text', text: step.content };
+    if (step.cite) block.citations = step.cite.map((c) => ({ type: 'web_search_result_location', url: c.url, title: c.title, cited_text: c.text ?? '' }));
+    blocks.push(block);
+  }
+  for (const { name, args } of step.tools ?? []) {
+    blocks.push({ type: 'tool_use', id: `toolu_fake_${++callSeq}`, name, input: typeof args === 'function' ? args(record) : args });
+  }
+  return blocks;
+}
+let callSeq = 0;
+
+/** Claude's answer streamed as the Messages API's server-sent events. */
+async function streamMessages(res, model, blocks, stopReason, gapMs = 0) {
+  res.writeHead(200, { 'content-type': 'text/event-stream' });
+  const send = (type, data) => res.write(`event: ${type}\ndata: ${JSON.stringify({ type, ...data })}\n\n`);
+  const pause = () => (gapMs > 0 ? new Promise((r) => setTimeout(r, gapMs)) : Promise.resolve());
+  send('message_start', { message: { id: 'msg_fake', type: 'message', role: 'assistant', model, content: [], usage: { input_tokens: 1000, output_tokens: 1 } } });
+  for (const [index, b] of blocks.entries()) {
+    if (b.type === 'text') {
+      send('content_block_start', { index, content_block: { type: 'text', text: '' } });
+      for (const p of pieces(b.text)) {
+        send('content_block_delta', { index, delta: { type: 'text_delta', text: p } });
+        await pause();
+      }
+      for (const c of b.citations ?? []) send('content_block_delta', { index, delta: { type: 'citations_delta', citation: c } });
+    } else if (b.type === 'thinking') {
+      send('content_block_start', { index, content_block: { type: 'thinking', thinking: '' } });
+      send('content_block_delta', { index, delta: { type: 'thinking_delta', thinking: b.thinking } });
+      send('content_block_delta', { index, delta: { type: 'signature_delta', signature: b.signature } });
+    } else if (b.type === 'tool_use' || b.type === 'server_tool_use') {
+      send('content_block_start', { index, content_block: { ...b, input: {} } });
+      send('content_block_delta', { index, delta: { type: 'input_json_delta', partial_json: JSON.stringify(b.input) } });
+    } else {
+      send('content_block_start', { index, content_block: b });
+    }
+    send('content_block_stop', { index });
+    await pause();
+  }
+  send('message_delta', { delta: { stop_reason: stopReason }, usage: { output_tokens: 120 } });
+  send('message_stop', {});
+  res.end();
+}
+
 export function estimateTokens(text) {
   let ascii = 0;
   let other = 0;
@@ -623,6 +737,81 @@ export async function startFakeLlm() {
         modelRequests.push({ provider: 'server', host: 'fake', path: url.pathname, url: req.url, headers: req.headers });
         res.writeHead(200, { 'content-type': 'application/json' });
         res.end(JSON.stringify({ object: 'list', data: serverModels.map((m) => ({ object: 'model', owned_by: 'fake', ...m })) }));
+        return;
+      }
+      // Anthropic's Messages API: a strong Claude's Chat steps (its server
+      // tools beside Yap's function tools, src-tauri/src/ai/llm/anthropic.rs),
+      // or Yap's search sub-call to Claude (web/native.rs).
+      if (req.method === 'POST' && url.pathname.endsWith('/messages')) {
+        let body;
+        try {
+          body = JSON.parse(raw);
+        } catch {
+          res.writeHead(400).end();
+          return;
+        }
+        const reply = (status, value) => res.writeHead(status, { 'content-type': 'application/json' }).end(JSON.stringify(value));
+        const serverTools = (body.tools ?? []).filter((t) => t.type);
+        const functions = (body.tools ?? []).filter((t) => !t.type);
+        const messages = fromMessagesApi(body);
+        const system = messages[0].content;
+        const text = (c) => (Array.isArray(c) ? c.map((p) => p.text ?? '').join('\n') : c ?? '');
+        const user = text(messages.filter((m) => m.role === 'user').at(-1)?.content ?? '');
+        if (!functions.length && system.startsWith('You look things up on the web')) {
+          requests.push({ kind: 'anthropicSearch', model: body.model, url: req.url, headers: req.headers, system, user, tools: [], toolTypes: serverTools.map((t) => t.type), body });
+          reply(200, {
+            id: 'msg_fake_search',
+            type: 'message',
+            role: 'assistant',
+            model: body.model,
+            content: messagesBlocks({ server: [{ search: /Search the web for: (.*)/.exec(user)?.[1] ?? user, results: [{ url: GALE_URL, title: 'Gale - bg3.wiki' }] }], content: 'Gale is on the beach.' }, null),
+            stop_reason: 'end_turn',
+            usage: { input_tokens: 3000, output_tokens: 90 },
+          });
+          return;
+        }
+        const kind = KINDS.find(([prefix]) => system.startsWith(prefix))?.[1] ?? 'other';
+        const offered = functions.map((t) => t.name);
+        requests.push({
+          kind,
+          api: 'messages',
+          url: req.url,
+          headers: req.headers,
+          model: body.model,
+          maxTokens: body.max_tokens ?? null,
+          tokens: messages.reduce((n, m) => n + estimateTokens(String(text(m.content))), 0),
+          system,
+          user,
+          images: [],
+          tools: offered,
+          serverTools: serverTools.map((t) => ({ type: t.type, name: t.name, maxUses: t.max_uses ?? null })),
+          toolChoice: body.tool_choice ?? null,
+          messages,
+          stream: !!body.stream,
+          cacheControl: body.cache_control ?? null,
+          systemCache: Array.isArray(body.system) ? body.system.at(-1)?.cache_control ?? null : null,
+          think: { thinking: body.thinking ?? null, outputConfig: body.output_config ?? null, reasoningEffort: null },
+          body,
+        });
+        const record = requests.at(-1);
+        const failing = failures.get(kind);
+        if (failing?.n > 0) {
+          failing.n -= 1;
+          reply(failing.status, failing.body ?? { type: 'error', error: { type: 'api_error', message: 'fake failure: the model is down' } });
+          return;
+        }
+        const step = offered.length > 0 || chatScript[0]?.plain ? chatScript.shift() : undefined;
+        if (step?.gate) {
+          record.gated = true;
+          await step.gate;
+        }
+        const blocks = step ? messagesBlocks(step, record) : [{ type: 'text', text: (replies.get(kind) ?? (() => 'OK'))(user, system) }];
+        const stop = blocks.some((b) => b.type === 'tool_use') ? 'tool_use' : 'end_turn';
+        if (body.stream && streaming) {
+          await streamMessages(res, body.model, blocks, stop, step?.stream?.gapMs ?? 0);
+          return;
+        }
+        reply(200, { id: 'msg_fake', type: 'message', role: 'assistant', model: body.model, content: blocks, stop_reason: stop, usage: { input_tokens: 1000, output_tokens: 120 } });
         return;
       }
       const gemini = req.url.endsWith(':generateContent');

@@ -1,6 +1,9 @@
 //! The scenario format (`evals/scenarios/*.json`, documented in
 //! `docs/model-evals.md`) and the checks a turn is scored on.
 
+use std::sync::LazyLock;
+
+use regex::Regex;
 use serde::Deserialize;
 use serde_json::{json, Value};
 
@@ -532,6 +535,29 @@ pub struct DocExpect {
     /// …and these in this order (a section moved: "## costs", "## saturday").
     #[serde(default)]
     pub in_order: Vec<String>,
+    /// **A complete guide** (`--guides`): a level-by-level table covers
+    /// every level from the first to the second (`[1, 12]`) — a row each (a
+    /// range "5–6" covers both), never "endgame" or "reference only" in
+    /// their place ([`levels_in`]).
+    pub levels: Option<[u32; 2]>,
+    /// Its headings (or bold lead-ins) name each of these parts asked for
+    /// (case-insensitive): "character creation", "gear".
+    #[serde(default)]
+    pub parts: Vec<String>,
+    /// Table rows that cite no page are marked as the model's own
+    /// suggestions (`documents::rich::marks_own_knowledge`: a line under
+    /// the table or section).
+    #[serde(default)]
+    pub own_marked: bool,
+    /// Every link in it is to a page the scenario's web gave (this turn's or
+    /// an earlier turn's search results and reads), and no "[n]" is left
+    /// with no page behind it ([`made_up_citations`]).
+    #[serde(default)]
+    pub citations_real: bool,
+    /// The web was read this turn before the document changed: a search or
+    /// a page, then a change to it that went through ([`changed_after_web`]).
+    #[serde(default)]
+    pub after_web: bool,
 }
 
 /// What a turn did with documents, as `DocExpect` and `--documents`' table
@@ -573,6 +599,161 @@ pub fn has_summary(content: &str) -> bool {
         return false;
     }
     lines.next().is_some_and(|l| !l.starts_with('#') && crate::chat::documents::parse_placeholder(l).is_none())
+}
+
+/// A markdown table's rows in `content`: each table's header cells, then
+/// its body rows' cells (trimmed). Pure.
+fn tables(content: &str) -> Vec<(Vec<String>, Vec<Vec<String>>)> {
+    let cells = |l: &str| l.trim().trim_matches('|').split('|').map(|c| c.trim().to_string()).collect::<Vec<_>>();
+    let rule = |l: &str| l.contains("---") && l.chars().all(|c| matches!(c, '|' | '-' | ':' | ' '));
+    let lines: Vec<&str> = content.lines().map(str::trim).collect();
+    let mut out = Vec::new();
+    let mut i = 0;
+    while i + 1 < lines.len() {
+        if lines[i].starts_with('|') && rule(lines[i + 1]) {
+            let header = cells(lines[i]);
+            let mut rows = Vec::new();
+            let mut j = i + 2;
+            while j < lines.len() && lines[j].starts_with('|') {
+                rows.push(cells(lines[j]));
+                j += 1;
+            }
+            out.push((header, rows));
+            i = j;
+        } else {
+            i += 1;
+        }
+    }
+    out
+}
+
+/// **The levels a level-by-level table covers**: the first cell of each row
+/// of every table whose first column is a level ("Level", "Lvl", "Lv"), its
+/// numbers and ranges ("5", "Level 7", "8–9"; a range of 20 at most), in
+/// order, each once. Pure.
+pub fn levels_in(content: &str) -> Vec<u32> {
+    static NUM: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(\d{1,3})(?:\s*(?:[–—-]|to)\s*(\d{1,3}))?").expect("static regex"));
+    let mut out: Vec<u32> = Vec::new();
+    for (header, rows) in tables(content) {
+        let first = header.first().map(|h| h.to_lowercase()).unwrap_or_default();
+        if !(first.contains("level") || first.starts_with("lv")) {
+            continue;
+        }
+        for row in rows {
+            let cell = row.first().cloned().unwrap_or_default();
+            for c in NUM.captures_iter(&cell) {
+                let a: u32 = c[1].parse().unwrap_or(0);
+                let b: u32 = c.get(2).and_then(|g| g.as_str().parse().ok()).filter(|b| *b >= a && *b - a <= 20).unwrap_or(a);
+                out.extend(a..=b);
+            }
+        }
+    }
+    out.sort_unstable();
+    out.dedup();
+    out
+}
+
+/// A heading's words, or a bold lead-in's ("## Gear", "**Gear:**"),
+/// lower-cased: where a part asked for is named. Pure.
+fn part_names(content: &str) -> Vec<String> {
+    static BOLD: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\*\*([^*\n]{2,80})\*\*").expect("static regex"));
+    let mut out: Vec<String> = Vec::new();
+    for line in content.lines().map(str::trim) {
+        if line.starts_with('#') {
+            out.push(line.trim_start_matches('#').trim().to_lowercase());
+        }
+        out.extend(BOLD.captures_iter(line).map(|c| c[1].to_lowercase()));
+        // A table's header names its part too ("| Level | Civil skill |").
+        if line.starts_with('|') {
+            out.push(line.to_lowercase());
+        }
+    }
+    out
+}
+
+/// Table rows that cite no page: no link and no "[n]" in them. Pure.
+pub fn uncited_rows(content: &str) -> usize {
+    static CITE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\[\d{1,2}\]|\]\(https?://").expect("static regex"));
+    tables(content).iter().flat_map(|(_, rows)| rows).filter(|r| !CITE.is_match(&r.join("|"))).count()
+}
+
+/// The addresses a turn's web tools gave: its search results' and the
+/// pages it read. Pure.
+pub fn web_urls(calls: &[super::record::ToolCall]) -> Vec<String> {
+    let mut out = Vec::new();
+    for c in calls.iter().filter(|c| c.success) {
+        match c.name.as_str() {
+            "web_search" => out.extend(c.result["data"]["results"].as_array().into_iter().flatten().filter_map(|r| r["url"].as_str()).map(crate::web::normal_url)),
+            "read_page" => out.extend(c.result["data"]["url"].as_str().map(crate::web::normal_url)),
+            _ => {}
+        }
+    }
+    out
+}
+
+/// **Citations in a document with nothing behind them**: a link to an
+/// address none of `urls` is (the pages the web gave), or a "[n]" left as
+/// it was written (Yap turns the turn's own into links:
+/// `documents::link_citations`). Pure.
+pub fn made_up_citations(content: &str, urls: &[String]) -> Vec<String> {
+    static LINK: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\]\((https?://[^)\s]+)\)").expect("static regex"));
+    static BARE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\[(\d{1,2})\]").expect("static regex"));
+    let mut out = Vec::new();
+    for c in LINK.captures_iter(content) {
+        if !urls.contains(&crate::web::normal_url(&c[1])) {
+            out.push(c[1].to_string());
+        }
+    }
+    for m in BARE.find_iter(content) {
+        // A markdown link's own text ("[1](https://…)") isn't a bare one.
+        if !content[m.end()..].starts_with('(') {
+            out.push(m.as_str().to_string());
+        }
+    }
+    out
+}
+
+/// A change to a document went through after the web was read in this turn
+/// (a search or a page that went through, then the change). Pure.
+pub fn changed_after_web(calls: &[super::record::ToolCall]) -> bool {
+    let changers = ["create_document", "write_section", "rewrite_section", "edit_document", "restore_document", "edit_note", "update_note"];
+    let Some(web) = calls.iter().position(|c| c.success && crate::web::TOOL_NAMES.contains(&c.name.as_str())) else { return false };
+    calls[web..].iter().any(|c| c.success && changers.contains(&c.name.as_str()) && c.result["data"]["changed"] != serde_json::json!(false))
+}
+
+/// A guide's checks for the turn's documents (changed, else made): each
+/// asked for in `d` and its outcome, for the faults and `--guides`' table.
+pub fn guide_seen(d: &DocExpect, o: &Observed) -> Value {
+    let seen = doc_seen(o);
+    let ids = if seen.changed.is_empty() { &seen.made } else { &seen.changed };
+    let texts: Vec<String> = ids.iter().filter_map(|id| crate::notes::get(*id)).map(|n| n.content).collect();
+    let all = texts.join("\n\n");
+    let mut urls = o.earlier_web.clone();
+    urls.extend(web_urls(&o.stats.tool_calls));
+    let mut out = serde_json::Map::new();
+    if let Some([from, to]) = d.levels {
+        let have = levels_in(&all);
+        let missing: Vec<u32> = (from..=to).filter(|l| !have.contains(l)).collect();
+        out.insert("levels".into(), json!({ "ok": !texts.is_empty() && missing.is_empty(), "missing": missing }));
+    }
+    if !d.parts.is_empty() {
+        let names = part_names(&all);
+        let missing: Vec<&String> = d.parts.iter().filter(|p| !names.iter().any(|n| n.contains(&p.to_lowercase()))).collect();
+        out.insert("parts".into(), json!({ "ok": !texts.is_empty() && missing.is_empty(), "missing": missing }));
+    }
+    if d.own_marked {
+        let uncited = uncited_rows(&all);
+        let marked = crate::chat::documents::rich::marks_own_knowledge(&all);
+        out.insert("own".into(), json!({ "ok": !texts.is_empty() && (uncited == 0 || marked), "uncited_rows": uncited, "marked": marked }));
+    }
+    if d.citations_real {
+        let bad = made_up_citations(&all, &urls);
+        out.insert("citations".into(), json!({ "ok": bad.is_empty(), "made_up": bad }));
+    }
+    if d.after_web {
+        out.insert("after_web".into(), json!({ "ok": changed_after_web(&o.stats.tool_calls) }));
+    }
+    Value::Object(out)
 }
 
 /// The turn's documents, from its tool calls and the notes afterwards.
@@ -662,6 +843,26 @@ fn document_faults(d: &DocExpect, o: &Observed) -> Vec<String> {
                 fails.push(format!("the document hasn't these in this order: {}", d.in_order.join(" → ")));
             }
         }
+    }
+    // A complete guide (`--guides`): every level, every part, its own
+    // suggestions marked, its citations real, changed after the web.
+    let g = guide_seen(d, o);
+    let nums = |v: &Value| v.as_array().into_iter().flatten().map(|x| x.to_string().trim_matches('"').to_string()).collect::<Vec<_>>().join(", ");
+    if g["levels"]["ok"] == json!(false) {
+        fails.push(format!("the level table leaves out levels {}", nums(&g["levels"]["missing"])));
+    }
+    if g["parts"]["ok"] == json!(false) {
+        fails.push(format!("the document has no part named {}", nums(&g["parts"]["missing"])));
+    }
+    if g["own"]["ok"] == json!(false) {
+        fails.push(format!("{} table rows cite no page and aren't marked as the model's own suggestions", g["own"]["uncited_rows"]));
+    }
+    if g["citations"]["ok"] == json!(false) {
+        fails.push(format!("the document cites what the web didn't give: {}", nums(&g["citations"]["made_up"])));
+    }
+    if g["after_web"]["ok"] == json!(false) {
+        let calls: Vec<String> = o.stats.tool_calls.iter().map(|c| format!("{}{}", c.name, if c.success { "" } else { " (refused)" })).collect();
+        fails.push(format!("the document didn't change after the web was read; calls made: {}", if calls.is_empty() { "none".to_string() } else { calls.join(", ") }));
     }
     match (d.made, seen.made.is_empty()) {
         (true, true) => {
@@ -769,6 +970,9 @@ pub struct Observed {
     pub earlier_sources: Vec<usize>,
     /// The turn before searched the web.
     pub earlier_searched: bool,
+    /// The addresses earlier turns' web tools gave (`web_urls`): a later
+    /// turn's document may cite them.
+    pub earlier_web: Vec<String>,
     pub stats: TurnStats,
     /// Memory's changes this turn (its learning pass, a tell, an import, the
     /// chat's remember/forget), as "added people: Rochelle".
@@ -1938,5 +2142,62 @@ mod tests {
         let w = selection_in(&docs, "About 90.").unwrap();
         assert_eq!((w.from_line, w.to_line), (Some(4), Some(4)));
         assert!(selection_in(&docs, "## Sunday").is_none() && selection_in(&docs, "nowhere").is_none());
+    }
+
+    /// `--guides`: a complete level table, the parts asked for, its own
+    /// suggestions marked, its citations real, a change after the web.
+    #[test]
+    fn a_guide_check_reads_its_levels_parts_marks_and_citations() {
+        let table = "| Level | Skill |\n|---|---|\n| 1 | Ember Bolt ([emberfall.example](https://emberfall.example/wiki/Tidecaller)) |\n| 2–3 | Kindle |\n| Level 4 | Ash Ward |";
+        assert_eq!(levels_in(table), [1, 2, 3, 4]);
+        assert_eq!(levels_in("| Lvl | x |\n|---|---|\n| 5 to 7 | y |"), [5, 6, 7]);
+        // The maintainer's guide: "Level 1", "Endgame", "Reference only".
+        let stand_ins = "| Level | Build |\n|---|---|\n| Level 1 | Start |\n| Endgame | Everything |\n| Reference only | Talents |";
+        assert_eq!(levels_in(stand_ins), [1]);
+        // A table that isn't about levels doesn't count.
+        assert!(levels_in("| Item | Where |\n|---|---|\n| 3 rings | Fort Joy |").is_empty());
+        assert_eq!(uncited_rows(table), 2);
+        let urls = vec![crate::web::normal_url("https://emberfall.example/wiki/Tidecaller")];
+        assert!(made_up_citations(table, &urls).is_empty());
+        assert_eq!(made_up_citations("A [1] and [x](https://made.example/up) and [2](https://emberfall.example/wiki/Tidecaller)", &urls), ["https://made.example/up", "[1]"]);
+
+        // Through the check, on a document made this turn.
+        let call = |name: &str, args: Value| {
+            let result = crate::chat::documents::execute(name, &args);
+            ToolCall { name: name.into(), args, success: result["success"] == json!(true), display: String::new(), result }
+        };
+        let web = ToolCall {
+            name: "web_search".into(),
+            args: json!({ "query": "Emberfall tidecaller" }),
+            success: true,
+            display: String::new(),
+            result: json!({ "success": true, "data": { "results": [{ "n": 1, "url": "https://emberfall.example/wiki/Tidecaller" }] } }),
+        };
+        let expect = |v: Value| serde_json::from_value::<Expect>(json!({ "document": v })).unwrap();
+        let mut o = obs("It's open on the right.");
+        o.stats.tool_calls.push(web.clone());
+        let made = call("create_document", json!({ "title": "Tidecaller guide", "sections": [{ "key": "Character creation", "intent": "x" }, { "key": "Levels", "intent": "y" }] }));
+        let id = made.result["data"]["id"].as_u64().unwrap();
+        o.stats.tool_calls.push(made);
+        o.stats.tool_calls.push(call("write_section", json!({ "note_id": id, "key": "Character creation", "markdown": "Pick the Tidecaller." })));
+        o.stats.tool_calls.push(call("write_section", json!({ "note_id": id, "key": "Levels", "markdown": table })));
+        let want = json!({ "made": true, "levels": [1, 6], "parts": ["character creation", "gear"], "own_marked": true, "citations_real": true, "after_web": true });
+        assert_eq!(
+            check(&expect(want.clone()), &o),
+            [
+                "the level table leaves out levels 5, 6",
+                "the document has no part named gear",
+                "2 table rows cite no page and aren't marked as the model's own suggestions",
+            ]
+        );
+        // Marked, every level, the gear: it passes.
+        let rest = "| Level | Skill |\n|---|---|\n| 5 | Tide Wall |\n| 6 | Undertow |\n\n*Levels 2–6: my suggestions, not from a source.*\n\n**Gear:** a coral staff.";
+        crate::notes::update(id, None, Some(format!("{}\n\n{rest}\n", crate::notes::get(id).unwrap().content)), None, None).unwrap();
+        assert!(check(&expect(want), &o).is_empty(), "{:?}", check(&expect(json!({ "made": true })), &o));
+        // A change before the web, or none after it: not "after the web".
+        let mut before = obs("Done.");
+        before.stats.tool_calls.push(call("write_section", json!({ "note_id": id, "key": "Levels", "markdown": "x" })));
+        before.stats.tool_calls.push(web);
+        assert!(!changed_after_web(&before.stats.tool_calls));
     }
 }

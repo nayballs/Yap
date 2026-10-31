@@ -86,6 +86,44 @@ The language-model side: the OpenAI-compatible client and its prompts, the on-de
   in, unset = nothing (the eval's `--locale`). Kept in config.json, sent
   only to the model the person uses; accounts don't sync it (they could,
   later: accounts.md).
+- **`ai/llm/anthropic.rs`** — **Claude on Anthropic's own Messages API, for
+  Chat's tool loop** (2026-10-31). A strong Claude's Chat steps
+  (`speaks_messages`: provider `anthropic`, `documents::rich::strong`; the
+  loop sets `ChatRequest::native`) go to `POST {base}/messages`
+  (`x-api-key`, `anthropic-version: 2023-06-01`, the receipts'
+  `Purpose::Ai`); every other Anthropic call (cleanup, Commands, summaries,
+  the Voice Assistant's non-strong models) keeps the OpenAI-compatible
+  `/chat/completions`. Why (Anthropic's OpenAI-compatibility docs, read 31
+  Oct 2026): that endpoint takes function tools only (no server tools),
+  answers `thinking: {type: "adaptive"}` with HTTP 400 and never returns the
+  thinking, and has no prompt caching. **The request** (`body`, pure): the
+  loop's OpenAI-shaped messages turned — the system prompt as one cached
+  block (tools and system are the stable prefix), user text and screenshots
+  (`image_url` data → base64 `image`), tool calls as `tool_use`, tool
+  results as `tool_result` blocks first in the next user message, an earlier
+  reply of Claude's sent back as its own blocks (`yap_anthropic`: thinking
+  with its signature, server tool calls and their encrypted results, as the
+  API asks); function tools as `{name, description, input_schema}`, then
+  the server tools (web/native.rs `server_tools`); top-level `cache_control`
+  for the conversation; `max_tokens` 16,000 (32,000 streamed); thinking as
+  Chat's Think asks (`think::request_extra`, `display: "summarized"` on
+  adaptive so its summary shows); `tool_choice` `none` on the loop's last
+  call (its earlier `tool_use` blocks need the tools defined); temperature
+  only where `takes_temperature`. **The answer** (`message_of`, pure): an
+  OpenAI-shaped message — the text after its last server result (before it
+  was "I'll look that up"), a mark after each block it cites (`MARK_OPEN`,
+  numbered by the web turn: `number_marks`), its `tool_calls`, its thinking
+  (`reasoning_content`), its blocks, and `yap_web` (searches, pages read,
+  the pages it cites; a server tool's `error_code` said plainly). Streamed
+  (`Stream`): `text_delta` as the answer, `thinking_delta` as thinking,
+  `tool_use` and its `input_json_delta` (a document's section into the
+  panel), each server tool as `Delta::Server` ("Searching the web…" /
+  "Reading a page…"; what came before it isn't the answer), `citations_delta`
+  and `signature_delta` kept. `pause_turn` is asked to go on (≤ 4); 429 and
+  529 waited out as every Chat call; "too long" said plainly; a 400 naming
+  `web_fetch` drops the fetch and asks again. A step with server tools may
+  take 150 s. Unit-tested on the documented shapes (`anthropic::tests`);
+  e2e through support/fake-llm.js's Messages API emulation.
 - **`ai/llm.rs`** — the AI cleanup client (OpenAI-compatible). Frames the transcript as
   data (delimiters + one-shot) so small models *clean* it instead of *answering* it.
   **The dictation's two messages for a hybrid model** (`cleanup_messages`,

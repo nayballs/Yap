@@ -100,7 +100,8 @@ pub fn chat_rename(id: u64, title: String) -> Result<String, String> {
 /// `think`: Chat's Think button — this one question thought through
 /// (`chat/think.rs`): the model's thinking streams as `{kind: "thinking",
 /// text}`, and the reply's `thinking` (`{text, ms}`) is kept with the
-/// answer.
+/// answer. A strong model writing a document thinks without it: `{kind:
+/// "think", auto: true}` says so (the button shows lit for the turn).
 ///
 /// `selection`: the passage of a document the question is about (the
 /// document panel's "Change this…" / "Ask about this": `{noteId, text,
@@ -141,7 +142,9 @@ pub async fn chat_send(
     }
     let turn = send_turn(&app, conversation_id, text, scope, voice, on_stream, turn_id, image_ids, as_text);
     let send = crate::chat::skills::with(skill_turn, crate::chat::documents::with_selection(selection, turn));
-    let (out, thought) = crate::chat::think::with(think.unwrap_or(false), send).await;
+    // Chat's own turn: Think pressed, or turned on by Yap for a strong
+    // model's document (`think::auto_on`, `turn.rs`).
+    let (out, thought) = crate::chat::think::scoped(think.unwrap_or(false), send).await;
     // Thought through: its thinking kept with the answer, and on the reply.
     let out = match (out, thought) {
         (Ok(mut reply), Some(thought)) => {

@@ -44,6 +44,9 @@ Scenarios:
   --documents              documents beside the chat (chat/documents.rs): the scenarios tagged
                            documents — made only when asked for, outline first, every section
                            written, a short chat line — and their table in summary.md
+  --guides                 complete guides (the scenarios tagged documents-guide): every level
+                           asked for, the parts asked for, the model's own suggestions marked,
+                           citations real, the document changed after the web — their table
 Running:
   --tools on|off           treat the model as able (or not) to call tools (default: Yap's rule)
   --doc-tools rich|simple  the documents' tool set the model gets (default: Yap's rule,
@@ -337,6 +340,10 @@ fn parse(argv: Vec<String>) -> Result<Args, String> {
             // Documents beside the chat (chat/documents.rs): its scenarios,
             // and their table in summary.md.
             "--documents" => a.tags.push("documents".to_string()),
+            // Guides (a strong model's documents, 31 Oct 2026): every level,
+            // the parts asked for, its own suggestions marked, its
+            // citations real, a change after the web — their table too.
+            "--guides" => a.tags.push("documents-guide".to_string()),
             "--transforms" => a.transforms = true,
             "--vision" => a.vision = true,
             "--vision-path" => {
@@ -1152,6 +1159,8 @@ async fn run_scenario(
         // answers, as before 22 Oct 2026): when the first words showed.
         let watch = FirstWords::new();
         let streamed = std::env::var("YAP_EVAL_STREAM").as_deref() != Ok("off");
+        // Thought through (Yap turned Think on: a strong model's document): how long.
+        let mut thought_ms: Option<u64> = None;
         let result = if turn.user.trim().is_empty() {
             // A memory action alone (learn, tell, import): no chat turn.
             Ok(None)
@@ -1166,7 +1175,20 @@ async fn run_scenario(
                 found
             });
             let asked = crate::chat::turn::chat_turn(None, conversation, &turn.user, scope, voice, |_, _| {}, watcher, None);
-            crate::chat::documents::with_selection(selection, asked).await.map(Some)
+            let asked = crate::chat::documents::with_selection(selection, asked);
+            if voice {
+                // The Voice Assistant's turn: never thought through by itself.
+                asked.await.map(Some)
+            } else {
+                // A typed turn, as Chat sends it (`chat_send`): Yap may turn
+                // Think on for a strong model's document (`think::auto_on`).
+                let (out, thought) = crate::chat::think::scoped(false, asked).await;
+                if let Some(t) = &thought {
+                    record::write("thought", json!({ "chars": t.text.chars().count(), "ms": t.ms }));
+                    thought_ms = Some(t.ms);
+                }
+                out.map(Some)
+            }
         };
         let first_words = watch.at();
         // Memory's passes after the turn: what a quiet chat, "Tell Yap what
@@ -1232,6 +1254,8 @@ async fn run_scenario(
             if crate::web::about_the_answer(&turn.user) { previous_numbers.clone() } else { earlier_numbers.clone() };
         o.earlier_searched =
             seen.last().is_some_and(|p| p.stats.tool_calls.iter().any(|c| crate::web::TOOL_NAMES.contains(&c.name.as_str())));
+        // The pages earlier turns' web gave: a later turn's document may cite them.
+        o.earlier_web = seen.iter().flat_map(|p| scenario::web_urls(&p.stats.tool_calls)).collect();
         match result {
             Ok(Some(t)) => {
                 conversation = Some(t.conversation_id);
@@ -1304,6 +1328,9 @@ async fn run_scenario(
                 "table": seen.table,
                 "summary_expected": d.summary || turn.soft.document.as_ref().is_some_and(|s| s.summary),
                 "summary": seen.summary,
+                // A complete guide (`--guides`): each check asked and how it went.
+                "guide": scenario::guide_seen(d, &o),
+                "thought": thought_ms,
             });
         }
         j["fails"] = json!(f);
@@ -2449,6 +2476,53 @@ fn documents_table(rows: &[Value]) -> String {
     md
 }
 
+/// Guides (`--guides`) per model: of the turns that ask each guide check,
+/// how many passed — every level, the parts asked for, its own suggestions
+/// marked, its citations real, changed after the web — and how many were
+/// thought through. "" when no turn asks one.
+fn guides_table(rows: &[Value]) -> String {
+    let turns: Vec<(String, &Value)> = rows
+        .iter()
+        .flat_map(|r| {
+            let m = r["model"].as_str().unwrap_or("").to_string();
+            r["turn_details"].as_array().into_iter().flatten().filter_map(move |t| t.get("document").map(|d| (m.clone(), d)))
+        })
+        .filter(|(_, d)| d["guide"].as_object().is_some_and(|g| !g.is_empty()))
+        .collect();
+    if turns.is_empty() {
+        return String::new();
+    }
+    let mut models: Vec<String> = Vec::new();
+    for (m, _) in &turns {
+        if !models.contains(m) {
+            models.push(m.clone());
+        }
+    }
+    let mut md = String::from("| Model | Every level | The parts asked for | Own suggestions marked | Citations real | Changed after the web | Thought it through |\n|---|---|---|---|---|---|---|\n");
+    for m in &models {
+        let mine: Vec<&Value> = turns.iter().filter(|(x, _)| x == m).map(|(_, d)| *d).collect();
+        let share = |key: &str| {
+            let asked: Vec<&&Value> = mine.iter().filter(|d| d["guide"].get(key).is_some()).collect();
+            if asked.is_empty() {
+                "—".to_string()
+            } else {
+                format!("{}/{}", asked.iter().filter(|d| d["guide"][key]["ok"] == json!(true)).count(), asked.len())
+            }
+        };
+        let thought = mine.iter().filter(|d| d["thought"].is_u64()).count();
+        md.push_str(&format!(
+            "| {m} | {} | {} | {} | {} | {} | {thought}/{} |\n",
+            share("levels"),
+            share("parts"),
+            share("own"),
+            share("citations"),
+            share("after_web"),
+            mine.len()
+        ));
+    }
+    md
+}
+
 fn markdown(summary: &Value, rows: &[Value], models: &[Value], totals: &[Value]) -> String {
     let mut md = format!(
         "# Model eval {}\n\nCommit `{}` · {} → {}\n\n",
@@ -2470,6 +2544,12 @@ fn markdown(summary: &Value, rows: &[Value], models: &[Value], totals: &[Value])
     if !docs.is_empty() {
         md.push_str("## Documents beside the chat\n\n");
         md.push_str(&docs);
+        md.push('\n');
+    }
+    let guides = guides_table(rows);
+    if !guides.is_empty() {
+        md.push_str("## Guides\n\n");
+        md.push_str(&guides);
         md.push('\n');
     }
     for m in models {

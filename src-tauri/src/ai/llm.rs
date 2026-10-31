@@ -15,6 +15,10 @@ use crate::privacy::net::Recorded as _;
 
 use serde_json::{json, Value};
 
+/// Claude on Anthropic's Messages API, for a strong Claude's Chat steps
+/// (its server tools, thinking and prompt caching).
+pub(crate) mod anthropic;
+
 /// HTTP timeout for the cleanup request. Cleanup adds latency on top of STT, so
 /// this is generous; on timeout the caller keeps the raw transcript.
 const CLEANUP_TIMEOUT: Duration = Duration::from_secs(20);
@@ -991,6 +995,10 @@ pub(crate) enum Delta<'a> {
     /// More of its thinking, sent apart from the answer (a Chat question
     /// asked to think it through, `chat/think.rs`).
     Reasoning(&'a str),
+    /// A tool the provider runs itself began (Claude's web search or page
+    /// read, `anthropic.rs`): what came before it wasn't the answer, and
+    /// the answer goes on after it in the same reply.
+    Server(&'a str),
     /// Start over: what came so far is void (the stream broke, and the call
     /// goes again without streaming).
     Restart,
@@ -1014,6 +1022,9 @@ pub(crate) struct ChatRequest {
     pub timeout: Duration,
     pub rate_limit_patience: Duration,
     pub extra: serde_json::Map<String, Value>,
+    /// A strong Claude's Chat step: on the Messages API, with these server
+    /// tools (`anthropic.rs`); `None`: the OpenAI-compatible endpoint.
+    pub native: Option<anthropic::Native>,
 }
 
 /// The longest answer a Chat step on Yap's on-device model may write
@@ -1059,6 +1070,7 @@ impl ChatRequest {
             timeout: if thinks { chat_timeout(base_url).max(crate::chat::think::TIMEOUT) } else { chat_timeout(base_url) },
             rate_limit_patience: RATE_LIMIT_PATIENCE,
             extra,
+            native: None,
         }
     }
 
@@ -1084,11 +1096,16 @@ impl ChatRequest {
             timeout: opts.timeout,
             rate_limit_patience: RATE_LIMIT_PATIENCE,
             extra,
+            native: None,
         }
     }
 }
 
 async fn post(req: &ChatRequest, on: Option<OnDelta<'_>>) -> Result<Value, String> {
+    // A strong Claude's Chat step: Anthropic's Messages API (anthropic.rs).
+    if let Some(native) = &req.native {
+        return Box::pin(anthropic::post(req, native, on)).await;
+    }
     post_chat_request(
         &req.base_url,
         &req.api_key,

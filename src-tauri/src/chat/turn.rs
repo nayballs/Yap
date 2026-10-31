@@ -49,6 +49,16 @@ pub(crate) fn resolve_chat_endpoint(
     Ok((base_url, api_key, model, provider, persona, disable_thinking))
 }
 
+/// **Does Claude search in Chat's own request?** (llm/anthropic.rs, web/
+/// native.rs `in_chat`): web search on, a strong Claude on Anthropic, and
+/// "The AI's own search" chosen and usable for it (`web::Settings::for_chat`
+/// gives its provider's search). Else Yap's `web_search` and `read_page`.
+pub(crate) fn in_chat(cfg: &YapConfig, provider: &str, model: &str, base_url: &str, api_key: &str) -> bool {
+    cfg.web_search
+        && crate::ai::llm::anthropic::speaks_messages(provider, model)
+        && crate::web::Settings::for_chat(cfg, provider, model, base_url, api_key).native.is_some()
+}
+
 /// What the notes the eager RAG found ([`rag_context`]) come under, in the
 /// question's context (`chats::with_context`): OpenWhispr's framing line.
 /// (Telling the model the notes "may not be what it's about" didn't keep
@@ -266,6 +276,16 @@ async fn answer_turn(
     // Which documents' tools (documents.rs): the rich set for the models that
     // handle it, the simple one for the rest.
     let doc_tools = crate::chat::documents::ToolSet::for_model(&provider, &model);
+    // A strong model (documents/rich.rs `strong`: Claude, GPT-5, Gemini…):
+    // its notes and documents still change after the web, and a document
+    // it writes is researched deeper and thought through first.
+    let strong = tools_supported && crate::chat::documents::rich::strong(&provider, &model);
+    // A strong Claude searches and reads pages itself, in Chat's own
+    // request (llm/anthropic.rs, web/native.rs `in_chat`): Anthropic's web
+    // tools in place of Yap's `web_search` and `read_page` — with "The AI's
+    // own search" on and Yap able to use it for this model.
+    let claude_in_chat = in_chat(&cfg, &provider, &model, &base_url, &api_key);
+    let web_lines = crate::chat::tools::WebLines::of(strong, claude_in_chat);
     let in_message = tools_supported;
     // "Look things up on the web" (web.rs). Not for the Meetings view's Ask
     // bar: that's about the meetings.
@@ -297,9 +317,10 @@ async fn answer_turn(
         room: None,
         docs: None,
         doc_tools,
+        strong,
     };
     let schemas = if tools_supported {
-        counter.count(&crate::chat::tools::offered_tools(cfg.open_apps, web_on, extra_flags).to_string()).await
+        counter.count(&crate::chat::tools::offered_tools(cfg.open_apps, web_on && !claude_in_chat, extra_flags).to_string()).await
     } else {
         0
     };
@@ -309,7 +330,7 @@ async fn answer_turn(
         + crate::chat::budget::IMAGE_TOKENS * crate::snip::turn::images().iter().filter(|i| !i.as_text).count() as u64;
     let rate_cap = crate::chat::budget::rate_cap(&provider);
     if mode != crate::chat::budget::Mode::Messages {
-        let stable = stable_prompt(&cfg, &persona, tools_supported, doc_tools, web_on, calendar_on, &profile, now);
+        let stable = stable_prompt(&cfg, &persona, tools_supported, doc_tools, web_lines, web_on, calendar_on, &profile, now);
         let guess = crate::chat::budget::budget(context_size, context_known, counter.count(&stable).await + schemas, kind, tools_supported, rate_cap);
         if question_tokens > guess.history {
             tracing::info!(question_tokens, room = guess.history, context = context_size, "Chat: the question is too long for the model; not sent");
@@ -398,11 +419,13 @@ async fn answer_turn(
     // (`chats::history_messages`); any other model, a line in the
     // question's context (`chats::web_history_note`). Never a note in an
     // answer's text: a model copies it into answers that searched nothing.
-    let (replay, history_note) = web_history_mode(tools_supported && web_on);
+    // (Not for a Claude searching in Chat's request: a replayed call to Yap's
+    // `web_search` would share its name with Anthropic's.)
+    let (replay, history_note) = web_history_mode(tools_supported && web_on && !claude_in_chat);
     let about = crate::ai::about_you::prompt_block(&profile, now);
     let calendar_zone = crate::chat::tools::calendar::Zone::of(profile.region.time_zone.as_deref());
     let mut system = persona.trim().to_string();
-    system.push_str(&instructions(&cfg, tools_supported, doc_tools, web_on, calendar_on, &profile));
+    system.push_str(&instructions(&cfg, tools_supported, doc_tools, web_lines, web_on, calendar_on, &profile));
     // Where the line on earlier web answers goes for a model without tools
     // (it depends on the history sent, chosen below).
     let note_at = system.len();
@@ -564,6 +587,28 @@ async fn answer_turn(
             context.push(note);
         }
     }
+    // **A strong model writing a document** (2026-10-31, as the Claude app
+    // writes one): it may research deeper — how far is sized to the
+    // model's request (`web::Reach::deep`), said in the context with the
+    // web on — and it thinks first (`think::auto_on`: only inside Chat's
+    // own turn; the Think button shows lit). Claude Opus 5.5, held to 3
+    // searches and none of its thinking, wrote a level-by-level guide of
+    // "Level 1", "Endgame" and "Reference only" rows.
+    let writes_doc = strong && !meetings && crate::chat::documents::writes_document(&text, &chat_docs, selection.is_some());
+    let deep_reach = crate::web::Reach::deep(Some(
+        crate::chat::budget::budget(context_size, context_known, 0, kind, true, crate::chat::budget::request_cap(&provider, &model)).request,
+    ));
+    if writes_doc {
+        if web_on {
+            context.push(crate::chat::documents::research_note(deep_reach));
+        }
+        if crate::chat::think::can_think(&provider, &model) && crate::chat::think::auto_on() {
+            tracing::info!(provider, "Chat: a strong model's document; it thinks it through first");
+            if let Some(w) = watcher {
+                w.send(crate::chat::stream::Event::Think { auto: true });
+            }
+        }
+    }
     if spoken && !(tools_supported && web_on) {
         if in_message {
             context.push(crate::chat::assistant::SPOKEN_ANSWER_NOTE.to_string());
@@ -662,9 +707,22 @@ async fn answer_turn(
         // earlier ones), the sources found, the safety rule's flag.
         let mut web = web_on.then(|| {
             let earlier: Vec<&str> = history.iter().filter(|(r, _)| r == "user").map(|(_, t)| t.as_str()).collect();
-            let settings = crate::web::Settings::for_chat(&cfg, &provider, &model, &base_url, &api_key);
-            crate::web::Turn::new(settings, crate::web::Endpoints::current(), &text, &earlier)
-                .with_earlier_sources(conv.messages.iter().flat_map(|m| m.sources.iter().map(|s| s.url.as_str())))
+            let mut settings = crate::web::Settings::for_chat(&cfg, &provider, &model, &base_url, &api_key);
+            if let (true, Some(n)) = (claude_in_chat, settings.native.as_mut()) {
+                n.in_chat = true;
+            }
+            let mut turn = crate::web::Turn::new(settings, crate::web::Endpoints::current(), &text, &earlier)
+                .with_earlier_sources(conv.messages.iter().flat_map(|m| m.sources.iter().map(|s| s.url.as_str())));
+            // A strong model looks further once it writes a document: now,
+            // for a question that asks for one, else at its first document
+            // call (`agent.rs`).
+            if strong {
+                turn = turn.may_go_deep(deep_reach);
+                if writes_doc {
+                    turn.go_deep();
+                }
+            }
+            turn
         });
         let mut messages: Vec<serde_json::Value> = if replay {
             crate::chat::chats::history_messages(earlier)
@@ -686,6 +744,7 @@ async fn answer_turn(
             room: (mode != crate::chat::budget::Mode::Messages).then_some(budget.request),
             docs: Some(&doc_turn),
             doc_tools,
+            strong,
         };
         let looped = crate::chat::tools::run_tool_loop_with(
             &system,
@@ -910,8 +969,20 @@ pub(crate) fn next_room(history: u64) -> u64 {
 /// What follows the persona in Chat's system prompt: the tools' instructions
 /// for a model that calls them (the web's, the apps', memory's, past
 /// chats', the calendar's as the turn offers them), else the plain notes
-/// for one that can't act. The same from turn to turn.
-fn instructions(cfg: &YapConfig, tools_supported: bool, doc_tools: crate::chat::documents::ToolSet, web_on: bool, calendar_on: bool, profile: &crate::ai::about_you::Profile) -> String {
+/// for one that can't act. The same from turn to turn. A strong model gets
+/// the web's lines that let it keep writing after the web, and a Claude
+/// searching in Chat's own request its own tools' (`web_lines`,
+/// `tools::web_tool_instructions`).
+#[allow(clippy::too_many_arguments)]
+fn instructions(
+    cfg: &YapConfig,
+    tools_supported: bool,
+    doc_tools: crate::chat::documents::ToolSet,
+    web_lines: crate::chat::tools::WebLines,
+    web_on: bool,
+    calendar_on: bool,
+    profile: &crate::ai::about_you::Profile,
+) -> String {
     let mut s = String::new();
     if tools_supported {
         s.push_str("\n\nYou have access to tools. ");
@@ -923,7 +994,7 @@ fn instructions(cfg: &YapConfig, tools_supported: bool, doc_tools: crate::chat::
         }
         if web_on {
             s.push(' ');
-            s.push_str(&crate::chat::tools::WEB_TOOL_INSTRUCTIONS.join(" "));
+            s.push_str(&crate::chat::tools::web_tool_instructions(web_lines));
             s.push(' ');
             s.push_str(&crate::web::time_note(profile.region.time_zone_label.as_deref()));
             // Outside the US: prices from where they are, or one plain line
@@ -990,6 +1061,7 @@ pub(crate) fn stable_prompt(
     persona: &str,
     tools_supported: bool,
     doc_tools: crate::chat::documents::ToolSet,
+    web_lines: crate::chat::tools::WebLines,
     web_on: bool,
     calendar_on: bool,
     profile: &crate::ai::about_you::Profile,
@@ -997,7 +1069,7 @@ pub(crate) fn stable_prompt(
 ) -> String {
     let about = crate::ai::about_you::prompt_block(profile, now);
     let mut s = persona.trim().to_string();
-    s.push_str(&instructions(cfg, tools_supported, doc_tools, web_on, calendar_on, profile));
+    s.push_str(&instructions(cfg, tools_supported, doc_tools, web_lines, web_on, calendar_on, profile));
     s.push_str(&ending(tools_supported, profile, &about, &crate::memory::you_block()));
     if tools_supported {
         s.push_str("\n\n");
@@ -1045,17 +1117,20 @@ pub(crate) fn more_room(view: &crate::ai::local_llm::context::ContextView) -> Op
 #[tauri::command]
 pub async fn chat_limits() -> Limits {
     let cfg = config::load();
-    let Ok((base_url, _key, model, provider, persona, _thinking)) = resolve_chat_endpoint(&cfg) else {
+    let Ok((base_url, key, model, provider, persona, _thinking)) = resolve_chat_endpoint(&cfg) else {
         return Limits::default();
     };
     let tools_supported = crate::chat::tools::supports_tools(&provider, &model);
     let doc_tools = crate::chat::documents::ToolSet::for_model(&provider, &model);
+    let strong = tools_supported && crate::chat::documents::rich::strong(&provider, &model);
     let web_on = cfg.web_search;
+    let claude_in_chat = in_chat(&cfg, &provider, &model, &base_url, &key);
     let calendar_on = crate::calendar::connected();
     let counter = crate::chat::budget::Counter::for_call(&provider, &base_url);
     let (context, context_known) = crate::chat::budget::context_window(&cfg, &provider, &model, &base_url).await;
     let profile = crate::ai::about_you::profile(&cfg);
-    let stable = stable_prompt(&cfg, &persona, tools_supported, doc_tools, web_on, calendar_on, &profile, crate::ai::eval::now());
+    let web_lines = crate::chat::tools::WebLines::of(strong, claude_in_chat);
+    let stable = stable_prompt(&cfg, &persona, tools_supported, doc_tools, web_lines, web_on, calendar_on, &profile, crate::ai::eval::now());
     let log = crate::chat::tools::calendar::Log::default();
     let extra = crate::chat::tools::Extra {
         memory: true,
@@ -1065,8 +1140,9 @@ pub async fn chat_limits() -> Limits {
         room: None,
         docs: None,
         doc_tools,
+        strong,
     };
-    let schemas = if tools_supported { counter.count(&crate::chat::tools::offered_tools(cfg.open_apps, web_on, extra).to_string()).await } else { 0 };
+    let schemas = if tools_supported { counter.count(&crate::chat::tools::offered_tools(cfg.open_apps, web_on && !claude_in_chat, extra).to_string()).await } else { 0 };
     let fixed = counter.count(&stable).await + schemas;
     let budget = crate::chat::budget::budget(context, context_known, fixed, crate::chat::budget::Kind::Chat, tools_supported, crate::chat::budget::rate_cap(&provider));
     let label = crate::chat::budget::model_label(&provider, &model, &crate::ai::local_llm::active_model_display(&cfg));

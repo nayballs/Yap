@@ -45,8 +45,15 @@
 //! can't send Yap to `https://evil.example/?notes=…`.
 //!
 //! **The safety rule** lives in `tools.rs` (`refused_after_web`): once web
-//! content is in a turn, the action tools are refused for the rest of it.
-//! [`Turn::seen`] says when.
+//! content is in a turn, the action tools are refused for the rest of it —
+//! for a strong model (`documents::rich::strong`) only apps, the clipboard
+//! and memory. [`Turn::seen`] says when.
+//!
+//! **How far a turn looks** ([`Reach`]): 3 searches and 3 page reads; a
+//! strong model's turn that writes a document goes deeper (2026-10-31) —
+//! up to [`DEEP_SEARCHES`], as many page reads as a share of the model's
+//! request holds (up to [`DEEP_READS`]), and the provider's own search
+//! opening more pages and saying more (`native::NativeSearch::deep`).
 //!
 //! **Test mode** (`e2e::active`) never touches the internet: the debug-only
 //! `YAP_EXA_URL` / `YAP_TAVILY_URL` replace the services' addresses and
@@ -81,7 +88,7 @@ pub use grounding::{
 };
 #[cfg(debug_assertions)]
 pub use page::clear_caches;
-pub use turn::{bracket_citations, citations, normal_url, Turn};
+pub use turn::{bracket_citations, citations, normal_url, Reach, Turn};
 
 use page::check_url;
 use wiki::{game_for, keyless, wiki_lookup};
@@ -95,6 +102,11 @@ const HIT_CHARS: usize = 700;
 /// Searches and page reads per turn: then the model answers from what it has.
 pub const MAX_SEARCHES: usize = 3;
 pub const MAX_READS: usize = 3;
+/// A strong model's turn that writes a document (`Reach::deep`): about the
+/// Claude app's research before a long piece — Claude Opus 5.5 hit the 3
+/// searches writing a level-by-level guide and left most levels out.
+pub const DEEP_SEARCHES: usize = 10;
+pub const DEEP_READS: usize = 10;
 /// One page of `read_page`.
 pub const PAGE_TOKENS: usize = 3_000;
 const PAGE_BYTES: usize = 3 * 1024 * 1024;
@@ -345,6 +357,9 @@ pub struct Found {
     pub native: Option<native::Provider>,
     /// Its short answer, citing `hits[i]` with a [`native::MARK_OPEN`] mark.
     pub summary: Option<String>,
+    /// The pages the provider's search opened itself (Anthropic's web
+    /// fetch): the chip says so.
+    pub read: usize,
 }
 
 /// A search backend: the chat provider's own search ([`native`]), Yap's
@@ -536,8 +551,13 @@ pub fn short(e: &str) -> String {
 pub fn search_chip(query: &str, found: &Found, s: &Settings) -> String {
     let q = tidy(query, 60);
     if let (Some(p), None) = (found.native, &found.note) {
-        let nothing = if found.hits.is_empty() { " · nothing found" } else { "" };
-        return format!("Searched the web with {}: \"{q}\"{nothing}", p.name());
+        let more = match (found.hits.is_empty(), found.read) {
+            (true, _) => " · nothing found".to_string(),
+            (false, 0) => String::new(),
+            (false, 1) => " · read 1 page".to_string(),
+            (false, n) => format!(" · read {n} pages"),
+        };
+        return format!("Searched the web with {}: \"{q}\"{more}", p.name());
     }
     let keyed = matches!(own_backend(s), Backend::Service(_)) && found.note.is_none();
     let via = if keyed { String::new() } else { format!(" ({})", found.from) };
@@ -621,8 +641,10 @@ pub async fn search(s: &Settings, ep: &Endpoints, query: &str, context: &str) ->
         return Err("The search was empty.".into());
     }
     let model = s.native.as_ref().map_or("", |n| n.model.as_str());
+    // A deeper search (a document's) says more and opens more pages: kept apart.
+    let deep = s.native.as_ref().is_some_and(|n| n.deep);
     let key = format!(
-        "{:?}|{model}|{}|{}|{}|{}",
+        "{:?}|{model}|{deep}|{}|{}|{}|{}",
         backend(s),
         s.lang,
         s.country.as_deref().unwrap_or(""),
@@ -642,6 +664,7 @@ pub async fn search(s: &Settings, ep: &Endpoints, query: &str, context: &str) ->
                 note: None,
                 native: Some(ns.provider),
                 summary: n.summary,
+                read: n.read,
             },
             other => {
                 // Unsupported model, refused, rate-limited, unreachable or

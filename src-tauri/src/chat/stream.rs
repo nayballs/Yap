@@ -81,6 +81,10 @@ pub enum Event {
     /// The model's thinking so far, whole (a question asked to think it
     /// through, `think.rs`): shown folded, apart from the answer.
     Thinking { text: String },
+    /// Yap turned Think on for this turn itself (`think::auto_on`: a strong
+    /// model writing a document): the page lights the Think button until
+    /// the answer is in.
+    Think { auto: bool },
     /// A document of this chat was made or changed (`documents.rs`): the
     /// panel beside the chat shows it, as it is now.
     Document {
@@ -118,7 +122,7 @@ pub fn doing(name: &str) -> &'static str {
         "list_folders" => "Looking at your folders…",
         "copy_to_clipboard" => "Copying…",
         "web_search" => "Searching the web…",
-        "read_page" => "Reading a page…",
+        "read_page" | "web_fetch" => "Reading a page…",
         "open_app" | "list_apps" => "Looking for the app…",
         "remember" | "forget" => "Updating Yap's memory…",
         "search_chats" => "Searching your chats…",
@@ -368,6 +372,19 @@ impl<'a> Step<'a> {
                 if LIVE_ARGS.contains(&name) {
                     self.send_section(so_far);
                 }
+            }
+            // Claude's own search or page read (the Messages API's server
+            // tools): what it wrote before wasn't the answer ("I'll look
+            // that up"); the answer comes after, in the same reply.
+            Delta::Server(name) => {
+                self.send_thinking(true);
+                if self.shown.as_deref().is_some_and(|s| !s.is_empty()) {
+                    self.shown = Some(String::new());
+                    self.sink.send(Event::Text { text: String::new() });
+                }
+                self.raw.clear();
+                self.released = false;
+                self.sink.send(Event::Tool { name: name.to_string(), doing: doing(name).to_string() });
             }
             Delta::Restart => self.restart(),
         }

@@ -17,18 +17,23 @@
   });
 
   const title = $derived(
-    think.place === 'here'
-      ? 'Think it through: the model on this PC thinks before it answers (a few seconds more). This question only.'
-      : 'Think it through: the model reasons harder before it answers (slower, and it may use more of your plan). This question only.'
+    think.auto
+      ? 'Thinking it through: a document is being written, so the model thinks before it writes (Yap turned this on for this question).'
+      : think.place === 'here'
+        ? 'Think it through: the model on this PC thinks before it answers (a few seconds more). This question only.'
+        : 'Think it through: the model reasons harder before it answers (slower, and it may use more of your plan). This question only.'
   );
+  // Lit while Yap thinks a document through (`think.auto`), or pressed.
+  const lit = $derived(think.on || think.auto);
 </script>
 
-{#if think.can}
+{#if think.can || think.auto}
   <button
     type="button"
     class="thinkbtn"
-    class:on={think.on}
-    aria-pressed={think.on}
+    class:on={lit}
+    class:auto={think.auto}
+    aria-pressed={lit}
     aria-label="Think it through"
     {title}
     onclick={() => {

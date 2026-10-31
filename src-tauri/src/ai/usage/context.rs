@@ -142,7 +142,11 @@ async fn fixed_of(cfg: &crate::config::YapConfig, target: &crate::ai::ai_model::
     let calendar_on = crate::calendar::connected();
     let profile = crate::ai::about_you::profile(cfg);
     let doc_tools = crate::chat::documents::ToolSet::for_model(&target.provider, &target.model);
-    let stable = crate::chat::turn::stable_prompt(cfg, &persona, target.tools, doc_tools, cfg.web_search, calendar_on, &profile, crate::ai::eval::now());
+    let strong = target.tools && crate::chat::documents::rich::strong(&target.provider, &target.model);
+    let key = cfg.provider_api_key(&target.provider, "");
+    let in_chat = crate::chat::turn::in_chat(cfg, &target.provider, &target.model, &target.base_url, &key);
+    let lines = crate::chat::tools::WebLines::of(strong, in_chat);
+    let stable = crate::chat::turn::stable_prompt(cfg, &persona, target.tools, doc_tools, lines, cfg.web_search, calendar_on, &profile, crate::ai::eval::now());
     let log = crate::chat::tools::calendar::Log::default();
     let extra = crate::chat::tools::Extra {
         memory: true,
@@ -152,8 +156,9 @@ async fn fixed_of(cfg: &crate::config::YapConfig, target: &crate::ai::ai_model::
         room: None,
         docs: None,
         doc_tools,
+        strong,
     };
-    let schemas = if target.tools { counter.count(&crate::chat::tools::offered_tools(cfg.open_apps, cfg.web_search, extra).to_string()).await } else { 0 };
+    let schemas = if target.tools { counter.count(&crate::chat::tools::offered_tools(cfg.open_apps, cfg.web_search && !in_chat, extra).to_string()).await } else { 0 };
     counter.count(&stable).await + schemas
 }
 

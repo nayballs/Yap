@@ -330,6 +330,35 @@ yap.exe eval --documents --tag documents-edits --doc-tools rich --model local:<g
 npm run eval -- --documents --tag documents-edits --model anthropic:claude-haiku-5-5 --keys-from-yap --repeat 2
 ```
 
+### Guides (`--guides`)
+
+```bash
+yap.exe eval --guides --only guide-levels,guide-rules-given --model local:<Qwen_Qwen3.5-4B-Q4_K_M.gguf> --ngl 999 --repeat 3
+npm run eval -- --guides --model anthropic:claude-haiku-5-5 --keys-from-yap --repeat 2
+```
+
+The scenarios tagged `documents-guide` (31 Oct 2026, chat-and-assistant.md "Strong models'
+documents"): is a guide **complete**, as the Claude app writes one? `documents-guide-levels`
+— a detailed solo guide for a made-up game's class, level by level from 1 to 12, its stand-in
+web giving the class's rules and a guide that stops at level 4, then "Make it more detailed:
+look up where each piece of gear drops and add it to the guide"; `documents-guide-rules-given`
+— a homebrew game's rules in the question, a plan from level 1 to 8, no web;
+`documents-guide-public-game` — a well-known public game on the **live** web (a cloud
+model's own search: a strong Claude searches in Chat's own request), level 1 to 12, then more
+gear looked up and added. `expect.document` takes five more checks (`scenario::guide_seen`):
+**`levels: [from, to]`** — a table whose first column is a level covers every one
+(`levels_in`: "5", "Level 7", "8–9"; "Endgame" and "Reference only" rows cover none);
+**`parts`** — a heading, a bold lead-in or a table header names each part asked for;
+**`own_marked`** — table rows citing no page are marked as the model's own suggestions
+(`rich::marks_own_knowledge`: "my suggestions, not from a source"); **`citations_real`** —
+every link is to a page the scenario's web gave (this turn's or an earlier turn's results and
+reads, `web_urls`), and no `[n]` is left with nothing behind it (`made_up_citations`);
+**`after_web`** — the document changed after the web was read this turn
+(`changed_after_web`). `summary.md` gets a "Guides" table per model (each check's passes,
+and how many turns were thought through: Think comes on by itself for a strong model's
+document, `think::auto_on`, and a typed turn runs as `chat_send` runs it). `--guides` pushes
+the tag; `--only` picks the scenarios (`--no-web` would skip the stand-in one too).
+
 ### Screenshot questions (`--vision`)
 
 ```bash
@@ -708,6 +737,7 @@ field is an error, so a typo can't silently skip a check):
 | `allow_error` | The turn may end in an error (else an error fails it). |
 | `memory` | `[{ "has", "section", "exists", "count" }]`: memory afterwards has an item whose name, summary or facts hold `has` (in `section`), or none does (`exists: false`), or exactly `count` do. |
 | `memory_changes_max`, `memory_changes_min` | Memory changed at most / at least this many times in the turn (a learning pass, a tell, an import, the chat's remember/forget; each change is logged as `memory_changed`). |
+| `document` | Documents beside the chat (`--documents`, `--guides`): `{made, outline_first, filled, min_sections, changed, table, summary, contains, in_order, levels, parts, own_marked, citations_real, after_web}` — see the two sections above. |
 | `memory_allowed` | **Precision**: every text memory gained in the turn (a new item's name and "about", each fact added, a changed name or "about") holds one of these (case-insensitive); anything else is a **false memory**, named in the failure. `[]`: nothing may be gained. |
 
 Each turn that touches memory also gets a **memory score** in `turn_end` (`memory_score`: the
@@ -2929,3 +2959,57 @@ table-row,move-section,change-selection,restore` (about 500k). Worth reading in 
 every change goes through `read_document` then `edit_document` with the hashes read, a table
 row as a replace of the table, the move as one `move` op, and the restore through the
 history.
+
+## Strong models' guides (31 Oct 2026)
+
+What the maintainer saw (chat-and-assistant.md, "Strong models' documents"): Claude Opus 5.5
+in Yap wrote a level-by-level guide of "Level 1", "Endgame" and "Reference only" rows, read
+no page, hit the 3 searches and said it couldn't edit the document after the web; in the
+Claude app, the same ask got a complete guide. For the strong models only, edits now go
+through after the web, a document's turn researches deeper and thinks first, a strong Claude
+searches and reads pages in Chat's own request (the Messages API), and a guide is completed
+from the model's own knowledge, marked. `--guides` measures it.
+
+**The on-device Qwen3.5-4B** (Q4_K_M, llamafile 0.10.6, the sidecar's arguments, MTP,
+`--ngl 999` on this PC's graphics card), which keeps every earlier rule — its requests are
+what they were (the strong models' lines, reach and Think never reach it):
+
+| Run | Passed | Every level | The parts asked for | Own suggestions marked | Citations real | Changed after the web | Thought it through |
+|---|---|---|---|---|---|---|---|
+| `--guides --only guide-levels,guide-rules-given --repeat 3` | 3/6 | 6/6 | 6/6 | 0/3 | 9/9 | 1/3 | 0/9 |
+
+It writes every level (12 and 8 rows) and every part asked for, and cites nothing it didn't
+find — but asked for the made-up game's guide it **never searched** (0 of 3: it wrote the
+class from nothing, which is why the stricter rules stay its own), never marks its own rows
+(its rule doesn't ask), and for "look up where each piece of gear drops and add it" it
+searched, read the gear page and rewrote the guide once (`rewrite_section`, after the web as
+before) and twice answered in the chat instead (396 and 432 words). The homebrew plan with
+its rules in the question passed 3/3. **The documents set is unchanged**: `--documents
+--repeat 3` passed **44/51**, as on 31 Oct (44/51 with the simple set): made when asked
+48/48, outline first 47/48, every section written 48/48, changed when asked 18/18, a table
+17/18, a summary 12/12, never made unwanted (0/30); its failures are its known wobbles (a
+comparison or an options document outlined as one section, three times; a moved section's
+order twice; a build without its table; a 62-word line). Run folders
+`20261031-021837-docs-4b-guides`, `20261031-021949-docs-4b-after` (kept outside the repo).
+
+**Claude, for the maintainer to run** (credits; each gets the strong rules by Yap's own rule;
+estimates from the 4B's turns — 85–136k tokens for the two-turn guide, 13–17k for the
+homebrew plan — scaled for a strong model's deeper research and thinking, most of each step
+a cheap cached read now that Chat speaks the Messages API):
+
+```bash
+# The stand-in and no-web guides (Yap's own tools on the stand-in web: no search fees)
+npm run eval -- --guides --only guide-levels,guide-rules-given --model anthropic:claude-haiku-5-5 --keys-from-yap --repeat 2
+npm run eval -- --guides --only guide-levels,guide-rules-given --model anthropic:claude-opus-5-5 --keys-from-yap --repeat 2
+# The real thing: Claude's own web search and web fetch in Chat's request, live
+npm run eval -- --guides --only guide-public-game --model anthropic:claude-haiku-5-5 --keys-from-yap
+npm run eval -- --guides --only guide-public-game --model anthropic:claude-opus-5-5 --keys-from-yap
+```
+
+About 450k input tokens (~85% cache reads) and 35k output a repeat of the first pair: Claude
+Haiku 5.5 **≈ $0.05–0.20** for both repeats, Claude Opus 5.5 **≈ $3**. The live guide: 8–15
+searches ($10 per 1,000: ≈ $0.15; the fetches cost only their tokens) and 0.6–1M input tokens
+as fetched pages (≤ 8,000 tokens each) ride along every later step: Haiku **≈ $0.20–0.50**
+(its prompts over 100K cost five times as much), Opus **≈ $2–4**. Worth reading in them: the
+level table's rows, the italic line under it, whether it read pages (`read_page`, or "Read …"
+chips for Claude's own fetches), and the second turn's change after its search.

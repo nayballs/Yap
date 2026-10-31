@@ -1,0 +1,46 @@
+{
+  "name": "documents-guide-public-game",
+  "description": "A complete guide on the live web (31 Oct 2026), for a well-known public game: a detailed level-by-level ranger guide from 1 to 12 with character creation and gear by place, then more detail looked up and added. Every level in the table, the parts asked for, what no page gave marked as the model's own, every citation a page the search gave; the document changed after the second search. Live: the AI's own search for a cloud model (costs a few searches), the run's Exa / Tavily key or the keyless lookup otherwise.",
+  "tags": [
+    "documents-guide",
+    "web-live"
+  ],
+  "needs_web": true,
+  "apps": "standard",
+  "turns": [
+    {
+      "user": "Make me a detailed level-by-level guide for a solo Gloom Stalker ranger in Baldur's Gate 3, from level 1 to 12: character creation, the spells and feats at each level, and the best Act 1 gear and where to get it.",
+      "expect": {
+        "document": {
+          "made": true,
+          "outline_first": true,
+          "filled": true,
+          "table": true,
+          "levels": [1, 12],
+          "parts": ["character creation", "gear"],
+          "own_marked": true,
+          "citations_real": true
+        },
+        "max_words": 60,
+        "no_false_claims": true
+      },
+      "soft": {
+        "min_searches": 2,
+        "max_words": 30
+      }
+    },
+    {
+      "user": "Make it more detailed: look up the best Act 2 gear for it and where to get it, and add that to the guide.",
+      "expect": {
+        "document": {
+          "made": false,
+          "changed": true,
+          "after_web": true,
+          "citations_real": true
+        },
+        "max_words": 60,
+        "no_false_claims": true
+      }
+    }
+  ]
+}

@@ -35,9 +35,19 @@
 //! thinking`) — only what the model sends back: Anthropic's compatible
 //! endpoint and OpenAI's never send it, so there it's only the time.
 //!
-//! The turn's state is a task-local around `chat_send`'s turn ([`with`]),
+//! The turn's state is a task-local around `chat_send`'s turn ([`scoped`]),
 //! read where a Chat request is made (`llm::ChatRequest::chat`) — never by
 //! a call outside it.
+//!
+//! **On by itself for a document** (2026-10-31, [`auto_on`]): the Claude
+//! app thinks before a long piece of writing, so a strong model's turn that
+//! writes a document (`documents::rich::strong`, `documents::writes_document`)
+//! thinks too — high effort, adaptive thinking for Claude — and the Think
+//! button shows lit for that turn (`stream::Event::Think`). Only Chat's own
+//! turns (`chat_send`, and a model evaluation's typed turns): never
+//! cleanup, Commands, the meeting notes or the Voice Assistant (no
+//! [`scoped`] turn around them), never the on-device model unless the
+//! person presses Think (it isn't a strong model).
 
 use std::future::Future;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -169,6 +179,9 @@ struct Turn {
     /// so when Yap answered by itself (an app opened, the passages with no
     /// model) or the model can't think on request.
     asked: AtomicBool,
+    /// The turn thinks it through: the person's Think, or Yap's
+    /// ([`auto_on`]).
+    on: AtomicBool,
 }
 
 tokio::task_local! {
@@ -177,12 +190,23 @@ tokio::task_local! {
 
 /// Run a Chat turn thinking it through (`on`), and say what it thought —
 /// `None` when no request of it asked the model to think. Off: just the
-/// turn, as ever.
+/// turn, as ever (nothing can turn it on: [`scoped`] can). The screenshot
+/// evaluations' way in (`eval/vision.rs`); Chat's own is [`scoped`].
+#[cfg(any(test, debug_assertions))]
 pub async fn with<F: Future>(on: bool, f: F) -> (F::Output, Option<Thought>) {
     if !on {
         return (f.await, None);
     }
-    TURN.scope(Turn::default(), async {
+    scoped(true, f).await
+}
+
+/// **Chat's own turn** (`chat_send`): thought through when the person
+/// pressed Think (`on`), or when Yap turns it on inside it ([`auto_on`]: a
+/// strong model writing a document) — and what it thought, as [`with`].
+pub async fn scoped<F: Future>(on: bool, f: F) -> (F::Output, Option<Thought>) {
+    let turn = Turn::default();
+    turn.on.store(on, Ordering::SeqCst);
+    TURN.scope(turn, async {
         let out = f.await;
         let thought = TURN.with(|t| {
             if !t.asked.load(Ordering::SeqCst) {
@@ -204,7 +228,15 @@ pub async fn with<F: Future>(on: bool, f: F) -> (F::Output, Option<Thought>) {
 
 /// Is the turn running here thinking it through?
 pub fn wanted() -> bool {
-    TURN.try_with(|_| ()).is_ok()
+    TURN.try_with(|t| t.on.load(Ordering::SeqCst)).unwrap_or(false)
+}
+
+/// **Yap turns Think on for this turn** (a strong model's document,
+/// `turn.rs`): `true` when it was off and is on now — only inside Chat's
+/// own turn ([`scoped`]); anywhere else (the Voice Assistant, cleanup, a
+/// call outside a turn) nothing changes.
+pub fn auto_on() -> bool {
+    TURN.try_with(|t| !t.on.swap(true, Ordering::SeqCst)).unwrap_or(false)
 }
 
 /// A Chat request's fields to think, when its turn is thinking it through
@@ -375,6 +407,39 @@ mod tests {
         })
         .await;
         assert!(none.is_none());
+    }
+
+    #[tokio::test]
+    async fn yap_turns_think_on_only_inside_chats_own_turn() {
+        // Outside any turn (cleanup, the Voice Assistant): nothing to turn on.
+        assert!(!auto_on());
+        assert!(!wanted());
+        let ((), none) = with(false, async {
+            assert!(!auto_on(), "a turn without Think's scope stays as it is");
+            assert!(extra_for("anthropic", "claude-opus-5-5").is_none());
+        })
+        .await;
+        assert!(none.is_none());
+        // Chat's turn, Think not pressed: off until Yap turns it on.
+        let (asked, thought) = scoped(false, async {
+            assert!(!wanted());
+            assert!(extra_for("anthropic", "claude-opus-5-5").is_none());
+            assert!(auto_on(), "on now");
+            assert!(!auto_on(), "once");
+            assert!(wanted());
+            extra_for("anthropic", "claude-opus-5-5")
+        })
+        .await;
+        let asked = asked.expect("asked to think");
+        assert_eq!(asked["thinking"], json!({ "type": "adaptive" }));
+        assert_eq!(asked["output_config"], json!({ "effort": "high" }));
+        assert!(thought.is_some(), "it thought, and says so");
+        // Pressed: on from the start, and Yap's turning it on changes nothing.
+        let ((), _) = scoped(true, async {
+            assert!(wanted());
+            assert!(!auto_on());
+        })
+        .await;
     }
 
     #[test]

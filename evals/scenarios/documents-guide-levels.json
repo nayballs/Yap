@@ -1,0 +1,105 @@
+{
+  "name": "documents-guide-levels",
+  "description": "A complete guide (31 Oct 2026): a detailed level-by-level guide for a made-up game's class, its pages giving the class's rules and a guide that stops at level 4. The document must cover every level from 1 to 12 (no \"endgame\" or \"reference only\" rows), name the parts asked for, mark what no page gave as the model's own suggestions, and cite only pages the web gave. Then \"look up where each piece of gear drops and add it\": the document must change after that search. Stand-in web, fictional sites.",
+  "tags": [
+    "documents-guide",
+    "web"
+  ],
+  "web": {
+    "mode": "standin",
+    "results": [
+      {
+        "title": "Tidecaller - Emberfall Wiki",
+        "url": "https://emberfall.example/wiki/Tidecaller",
+        "published": "2026-08-14",
+        "text": "The Tidecaller is a water and air caster. Main attributes: Intelligence and Wits. Skills by level: Rain Bolt and Gust (1), Healing Tide (2), Fog Veil (3), Static Lash (4), Undertow (6), Storm Call (8), Hail Lance (9), Tempest Shield (10), Maelstrom (12, capstone). Talents at levels 1, 3, 7 and 11."
+      },
+      {
+        "title": "Solo Tidecaller, levels 1 to 4",
+        "url": "https://questlog.example/tidecaller-solo-guide",
+        "published": "2026-09-02",
+        "text": "Start as a Saltborn for the water resistance; Intelligence 14, Wits 12, Constitution 10. Take Lone Current at creation: it doubles attribute points when you travel alone. Level 1 Rain Bolt and Gust, 2 Healing Tide, 3 Fog Veil and Far Caster, 4 Static Lash. I'll cover level 5 and up in a later post."
+      },
+      {
+        "title": "anyone got a full tidecaller build?",
+        "url": "https://forum.example/t/tidecaller-help",
+        "published": "2026-10-01",
+        "text": "the guide stops at 4 and I'm stuck at level 7. what do I take after Static Lash? is Lore worth it for a solo run?"
+      }
+    ],
+    "searches": [
+      {
+        "when": [
+          "gear",
+          "drop",
+          "loot",
+          "item",
+          "where to find",
+          "where to get",
+          "staff",
+          "robe"
+        ],
+        "results": [
+          {
+            "title": "Gear locations - Emberfall Wiki",
+            "url": "https://emberfall.example/wiki/Gear_locations",
+            "published": "2026-07-30",
+            "text": "Coral Staff: sold by Brannoc the fishmonger at the Saltmarsh Docks (from level 2). Tidebound Boots: sold by Mira in Saltmarsh (level 4). Mistweave Robe: the chest behind the waterfall in Fog Hollow (level 5). Stormglass Ring: dropped by the Keeper at the top of the Tower of Hours (level 9). Crown of Squalls: the Drowned King's hoard in the Sunken Vault (level 12)."
+          },
+          {
+            "title": "Tidecaller - Emberfall Wiki",
+            "url": "https://emberfall.example/wiki/Tidecaller",
+            "published": "2026-08-14",
+            "text": "Gear for a caster: staves and robes that add Intelligence; the Coral Staff is the usual first upgrade."
+          }
+        ]
+      }
+    ],
+    "pages": {
+      "https://emberfall.example/wiki/Tidecaller": "<!doctype html><html><head><title>Tidecaller - Emberfall Wiki</title></head><body><article><h1>Tidecaller</h1><p>The Tidecaller is a water and air caster from the coast of Emberfall. Main attributes: Intelligence (spell damage) and Wits (critical chance and initiative). Constitution gives health.</p><h2>Skills</h2><p>Rain Bolt (level 1): water damage, makes the target wet. Gust (level 1): air damage, knocks back. Healing Tide (level 2): heals over two turns. Fog Veil (level 3): makes you invisible for one turn. Static Lash (level 4): air damage that stuns wet targets. Undertow (level 6): pulls an enemy to you. Storm Call (level 8): a storm over an area for three turns. Hail Lance (level 9): heavy water damage. Tempest Shield (level 10): absorbs damage. Maelstrom (level 12, capstone): a whirlpool that drags enemies together.</p><h2>Civil skills</h2><p>Lore (identify items, see enemy resistances), Persuasion (better quest rewards), Bartering (better prices), Lucky Charm (more loot).</p><h2>Talents</h2><p>Talents come at levels 1, 3, 7 and 11. Lone Current: doubles attribute points while you travel alone. Far Caster: more range on spells. Elemental Ranger: water and air spells cost less. Tidal Echo: a second cast of your last spell at half strength.</p></article></body></html>",
+      "https://questlog.example/tidecaller-solo-guide": "<!doctype html><html><head><title>Solo Tidecaller, levels 1 to 4</title></head><body><article><h1>Solo Tidecaller, levels 1 to 4</h1><p>Character creation: start as a Saltborn for the water resistance. Intelligence 14, Wits 12, Constitution 10. Take Lone Current at creation: it doubles attribute points when you travel alone, which is the whole point of a solo run.</p><p>Level 1: Rain Bolt and Gust. Level 2: Healing Tide. Level 3: Fog Veil, and the talent Far Caster. Level 4: Static Lash: wet them with Rain Bolt, then stun them. Civil: put your first points in Lore.</p><p>I'll cover level 5 and up in a later post.</p></article></body></html>",
+      "https://forum.example/t/tidecaller-help": "<!doctype html><html><head><title>anyone got a full tidecaller build?</title></head><body><article><h1>anyone got a full tidecaller build?</h1><p>the guide stops at 4 and I'm stuck at level 7. what do I take after Static Lash? is Lore worth it for a solo run?</p><p>reply: Lore is worth it, you need to see resistances when you're alone.</p></article></body></html>",
+      "https://emberfall.example/wiki/Gear_locations": "<!doctype html><html><head><title>Gear locations - Emberfall Wiki</title></head><body><article><h1>Gear locations</h1><p>Coral Staff: sold by Brannoc the fishmonger at the Saltmarsh Docks (from level 2). Tidebound Boots: sold by Mira in Saltmarsh (level 4). Mistweave Robe: the chest behind the waterfall in Fog Hollow (level 5). Stormglass Ring: dropped by the Keeper at the top of the Tower of Hours (level 9). Crown of Squalls: the Drowned King's hoard in the Sunken Vault (level 12).</p></article></body></html>"
+    }
+  },
+  "apps": "standard",
+  "turns": [
+    {
+      "user": "Make me a detailed solo Tidecaller guide for Emberfall, level by level from 1 to 12: character creation, the skills to take at each level, civil skills and talents, and the best gear and where to find it.",
+      "expect": {
+        "document": {
+          "made": true,
+          "outline_first": true,
+          "filled": true,
+          "table": true,
+          "levels": [1, 12],
+          "parts": ["character creation", "civil", "gear"],
+          "own_marked": true,
+          "citations_real": true
+        },
+        "max_words": 60,
+        "no_false_claims": true
+      },
+      "soft": {
+        "min_searches": 1,
+        "max_words": 30
+      }
+    },
+    {
+      "user": "Make it more detailed: look up where each piece of gear drops and add it to the guide.",
+      "expect": {
+        "document": {
+          "made": false,
+          "changed": true,
+          "after_web": true,
+          "citations_real": true
+        },
+        "max_words": 60,
+        "no_false_claims": true
+      },
+      "soft": {
+        "max_words": 30
+      }
+    }
+  ]
+}
