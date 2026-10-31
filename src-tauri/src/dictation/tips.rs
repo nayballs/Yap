@@ -11,6 +11,12 @@
 //! - **Once each** ([`due`], pure): each kind shows once, ever, and never
 //!   within [`MIN_GAP_MS`] of another; one tip per dictation, the first due
 //!   in [`ORDER`].
+//! - **"Yap recognised French"** (2026-10-31; Wispr Flow's one-time "we
+//!   auto-detected your language", by behaviour; [`language`]): the first
+//!   time a dictation is sure to be in one of the person's languages other
+//!   than English — Whisper heard it, or Yap read it from Parakeet V3's text
+//!   (`languages::heard`) — with two or more of them picked: once, ever, by
+//!   the same rules ([`language_due`]).
 //! - **Through the notice policy**, as a tip ("featureTip": "Show tips"
 //!   turns it off, never over a dictation or a meeting, dropped if unseen
 //!   a minute): after the paste, the main window's toast while the person
@@ -44,6 +50,9 @@ pub enum Feature {
     Email,
     Snippet,
     Dictionary,
+    /// One of the person's languages recognised by itself ([`language`]);
+    /// never in [`ORDER`]: it isn't something a paste shows off.
+    Language,
 }
 
 /// Which tip goes first when a dictation shows off several.
@@ -57,6 +66,7 @@ impl Feature {
             Feature::Email => "email",
             Feature::Snippet => "snippet",
             Feature::Dictionary => "dictionary",
+            Feature::Language => "language",
         }
     }
 
@@ -83,8 +93,21 @@ impl Feature {
                 "Fixed from your dictionary",
                 "Yap spelled a word the way your dictionary says. Add any word it gets wrong in Dictionary.",
             ),
+            Feature::Language => (
+                "Yap recognised your language",
+                "It's one of your languages, so Yap noticed it by itself. Speak any of them, any time.",
+            ),
         }
     }
+}
+
+/// The language tip's title and body for `code` ("French").
+pub fn language_text(code: &str) -> (String, String) {
+    let lang = crate::dictation::languages::catalog::name(code);
+    (
+        format!("Yap recognised {lang}"),
+        format!("{lang} is one of your languages, so Yap noticed it by itself, with nothing to switch. Speak any of them, any time."),
+    )
 }
 
 // ---- what a dictation showed off (pure) ---------------------------------------------------------
@@ -189,6 +212,7 @@ impl Seen {
             Feature::Email => self.email,
             Feature::Snippet => self.snippet,
             Feature::Dictionary => self.dictionary,
+            Feature::Language => false,
         }
     }
 }
@@ -199,12 +223,22 @@ impl Seen {
 /// (`shown`: kind → when): the first in [`ORDER`] it showed off that hasn't
 /// been shown, unless another tip showed under [`MIN_GAP_MS`] ago. Pure.
 pub fn due(seen: &Seen, shown: &std::collections::BTreeMap<String, u64>, now: u64) -> Option<Feature> {
-    // (A clock set back waits rather than repeating.)
-    let recent = shown.values().any(|&at| now < at || now - at < MIN_GAP_MS);
-    if recent {
+    if recent(shown, now) {
         return None;
     }
     ORDER.into_iter().find(|f| seen.has(*f) && !shown.contains_key(f.key()))
+}
+
+/// Another tip showed under [`MIN_GAP_MS`] ago. (A clock set back waits
+/// rather than repeating.)
+fn recent(shown: &std::collections::BTreeMap<String, u64>, now: u64) -> bool {
+    shown.values().any(|&at| now < at || now - at < MIN_GAP_MS)
+}
+
+/// Whether the language tip is due at `now` (pure): never shown, and no tip
+/// under [`MIN_GAP_MS`] ago.
+pub fn language_due(shown: &std::collections::BTreeMap<String, u64>, now: u64) -> bool {
+    !shown.contains_key(Feature::Language.key()) && !recent(shown, now)
 }
 
 // ---- after a dictation --------------------------------------------------------------------------
@@ -214,8 +248,8 @@ pub fn due(seen: &Seen, shown: &std::collections::BTreeMap<String, u64>, now: u6
 #[serde(rename_all = "camelCase")]
 pub struct Tip {
     pub kind: Feature,
-    pub title: &'static str,
-    pub body: &'static str,
+    pub title: String,
+    pub body: String,
 }
 
 /// Test mode: tips are noticed only once a spec asks (`e2e_feature_tips`).
@@ -277,6 +311,45 @@ fn offer(app: &AppHandle, feature: Feature) {
         return;
     }
     let (title, body) = feature.text();
+    show(app, feature, title.to_string(), body.to_string(), now);
+}
+
+/// A dictation was in `code`, one of the person's languages (not English),
+/// recognised by itself: "Yap recognised French", once ever
+/// ([`language_due`]), once the dictation is over (never mid-dictation),
+/// within a minute. Off the pipeline's locks: a thread of its own.
+pub fn language(app: &AppHandle, code: &str) {
+    if !noticing() || crate::notices::notice::tips_off() {
+        return;
+    }
+    if !language_due(&crate::dictation::coaching::record().features, crate::notices::notice::now_ms()) {
+        return;
+    }
+    let app = app.clone();
+    let code = code.to_string();
+    let _ = std::thread::Builder::new().name("dictation-language-tip".into()).spawn(move || {
+        let started = std::time::Instant::now();
+        std::thread::sleep(std::time::Duration::from_millis(400));
+        while crate::notices::notice::moment().dictating && started.elapsed() < std::time::Duration::from_secs(60) {
+            std::thread::sleep(std::time::Duration::from_millis(250));
+        }
+        // Never over a meeting (as `offer`): it comes again another time.
+        if crate::notices::notice::tips_off() || crate::notices::notice::moment().meeting {
+            return;
+        }
+        let now = crate::notices::notice::now_ms();
+        if !language_due(&crate::dictation::coaching::record().features, now) {
+            return;
+        }
+        let (title, body) = language_text(&code);
+        show(&app, Feature::Language, title, body, now);
+    });
+}
+
+/// Show a tip: the main window's toast while the person looks at it, else a
+/// Yap bar card; nowhere else. Counted (hints.json's `features`) only when
+/// shown.
+fn show(app: &AppHandle, feature: Feature, title: String, body: String, now: u64) {
     let place = crate::notices::notice::place_tip(app, KIND);
     let shown = match place {
         crate::notices::notice::Place::Window => app.emit(EVENT, Tip { kind: feature, title, body }).is_ok(),
@@ -284,8 +357,8 @@ fn offer(app: &AppHandle, feature: Feature) {
             let card = crate::bar::Card {
                 id: KIND.into(),
                 icon: "tip",
-                title: title.into(),
-                body: body.into(),
+                title,
+                body,
                 timeout_ms: Some(CARD_MS),
                 ..Default::default()
             };
@@ -422,9 +495,28 @@ mod tests {
 
     #[test]
     fn every_tip_has_words() {
-        for f in ORDER {
+        for f in ORDER.into_iter().chain([Feature::Language]) {
             let (title, body) = f.text();
             assert!(!title.is_empty() && body.len() > 30, "{f:?}");
         }
+        let (title, body) = language_text("fr");
+        assert_eq!(title, "Yap recognised French");
+        assert!(body.starts_with("French is one of your languages"), "{body}");
+    }
+
+    #[test]
+    fn the_language_tip_shows_once_and_keeps_its_distance_from_the_others() {
+        let mut shown = BTreeMap::new();
+        assert!(language_due(&shown, T0));
+        // Another tip a minute ago: not now.
+        shown.insert("list".to_string(), T0);
+        assert!(!language_due(&shown, T0 + 60_000));
+        assert!(language_due(&shown, T0 + MIN_GAP_MS));
+        // Shown: never again; and the others wait ten minutes after it.
+        shown.insert("language".to_string(), T0 + MIN_GAP_MS);
+        assert!(!language_due(&shown, T0 + 365 * 24 * 3_600_000));
+        assert_eq!(due(&Seen { email: true, ..Seen::default() }, &shown, T0 + MIN_GAP_MS + 1), None);
+        // Never one a dictation's paste shows off.
+        assert!(!ORDER.contains(&Feature::Language));
     }
 }

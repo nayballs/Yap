@@ -7,9 +7,10 @@
 // picked (settings/hotkeys.svelte.js).
 //
 // The meeting shortcut (Win+Alt+M) goes first: a combo is more specific than
-// a bare dictation key; then the Voice Assistant's shortcut, Read aloud,
-// Snip to Chat, Copy last, Quick note and the language shortcuts (My languages). Down and up go to
-// `dictation_key` / `assistant_key` / `language_key`, the hook's own paths:
+// a bare dictation key; then the Voice Assistant's shortcut, Ask about the
+// selection (with what this page has selected), Read aloud, Snip to Chat,
+// Copy last, Quick note and the language shortcuts (My languages). Down and up go to
+// `dictation_key` / `assistant_key` / `ask_selection_key` / `language_key`, the hook's own paths:
 // the recording mode (and push-to-talk's tap / double-tap) is Rust's to
 // decide.
 import { invoke } from '@tauri-apps/api/core';
@@ -19,7 +20,7 @@ import {
   hotkeyMatchesKeydown,
   hotkeyMatchesKeyup,
 } from '../core/hotkeys.js';
-import { readPageSelection } from '../stores/speech.svelte.js';
+import { askSelectionKey, readPageSelection } from '../stores/speech.svelte.js';
 import { hotkeyCapture } from './hotkeys.svelte.js';
 import { languageShortcuts } from './languages.svelte.js';
 
@@ -39,6 +40,14 @@ export function followHotkeyFallback(getCfg) {
       e.preventDefault();
       e.stopPropagation();
       invoke('assistant_key', { pressed: true }).catch(() => {});
+      return;
+    }
+    // Ask about the selection (chat/assistant/selected.rs): what's selected
+    // on this page, then a question about it.
+    if (downOn(e, cfg, 'askHotkey')) {
+      e.preventDefault();
+      e.stopPropagation();
+      askSelectionKey(true);
       return;
     }
     // Read aloud: what's selected on this page (voice/read_aloud.rs).
@@ -100,6 +109,11 @@ export function followHotkeyFallback(getCfg) {
     if (upOn(e, cfg, 'assistantHotkey')) {
       e.preventDefault();
       invoke('assistant_key', { pressed: false }).catch(() => {});
+      return;
+    }
+    if (upOn(e, cfg, 'askHotkey')) {
+      e.preventDefault();
+      askSelectionKey(false);
       return;
     }
     const lang = languageShortcuts(cfg).find((s) => hotkeyMatchesKeyup(e, s.hotkey));

@@ -26,6 +26,8 @@
     pasteLastHotkey: { label: 'Paste last dictation', desc: 'Paste your latest dictation again' },
     copyLastHotkey: { label: 'Copy last dictation', desc: 'Copy your latest dictation' },
     quickNoteHotkey: { label: 'Quick note', desc: 'Jot or dictate a note from any app' },
+    sendHotkey: { label: 'Send', desc: 'Press Enter where you’re typing' },
+    askHotkey: { label: 'Ask about the selection', desc: 'Select text, press it and ask: the answer leaves the text as it is' },
   };
 
   /** In Yap's own window. */

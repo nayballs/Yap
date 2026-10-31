@@ -1,7 +1,8 @@
 // Feature tips in the main window (dictation/tips.rs): the first time a
 // dictation shows off something Yap did by itself — a self-correction
 // caught, a spoken list laid out, an email framed, a snippet expanded, a
-// word fixed from the dictionary — one short tip, once each, ever. Rust
+// word fixed from the dictionary, one of your languages recognised ("Yap
+// recognised French") — one short tip, once each, ever. Rust
 // decides (after the paste, never during a dictation, "Show tips" on) and
 // counts it; this shows it while the window is in front (else it's a card
 // on the Yap bar).
@@ -33,7 +34,7 @@ export function showFeatureTip(t) {
     title: t.title,
     description: t.body || '',
     chip: 'Tip',
-    icon: dictionary ? 'dictionary' : undefined,
+    icon: dictionary ? 'dictionary' : t.kind === 'language' ? 'language' : undefined,
     duration: 12_000,
     action: dictionary && showView ? { label: 'Open Dictionary', onClick: () => showView('dictionary') } : null,
   });

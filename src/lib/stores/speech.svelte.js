@@ -71,6 +71,29 @@ export async function speakReply(text, id) {
 }
 
 /**
+ * What's selected on this page — or in the focused text box — as text ('':
+ * nothing). Read aloud's and Ask about the selection's in-page shortcuts.
+ */
+export function pageSelectionText() {
+  let text = window.getSelection()?.toString() ?? '';
+  const el = document.activeElement;
+  if (!text.trim() && el && (el.tagName === 'TEXTAREA' || el.tagName === 'INPUT') && el.selectionEnd > el.selectionStart) {
+    text = String(el.value ?? '').slice(el.selectionStart, el.selectionEnd);
+  }
+  return text;
+}
+
+/**
+ * Ask about the selection's shortcut went down (`pressed`) or up in one of
+ * Yap's own windows: what this page has selected goes with the press
+ * (dictation/commands.rs `ask_selection_key`; nothing: "Select some text
+ * first").
+ */
+export function askSelectionKey(pressed) {
+  invoke('ask_selection_key', { pressed, selection: pressed ? pageSelectionText() : null }).catch(() => {});
+}
+
+/**
  * The Read aloud shortcut pressed in one of Yap's own windows (the global
  * hook never sees keys there): what's selected on the page — or in the
  * focused text box — read aloud with the reading card. Nothing selected:
@@ -78,11 +101,7 @@ export async function speakReply(text, id) {
  * says how.
  */
 export function readPageSelection() {
-  let text = window.getSelection()?.toString() ?? '';
-  const el = document.activeElement;
-  if (!text.trim() && el && (el.tagName === 'TEXTAREA' || el.tagName === 'INPUT') && el.selectionEnd > el.selectionStart) {
-    text = String(el.value ?? '').slice(el.selectionStart, el.selectionEnd);
-  }
+  const text = pageSelectionText();
   if (!text.trim() && speech.speakingId) {
     invoke('read_aloud_action', { action: 'stop' }).catch(() => {});
     return;

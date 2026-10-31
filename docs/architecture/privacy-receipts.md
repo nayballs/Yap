@@ -63,7 +63,11 @@ person sees what their choices send where. It never says "nothing leaves".
   "Voice Assistant + the window in front · Groq" when a question took the
   window in front with it, its picture or its text (`Feature::AssistantScreen`,
   `chat/assistant/screen.rs`, 2026-10-29: the upload named, on this PC or
-  not; its searches stay the Voice Assistant's),
+  not; its searches stay the Voice Assistant's), "Voice Assistant + the
+  selected text · …" when a question was about text selected in another app
+  (`Feature::AssistantSelection`, `chat/assistant/selected.rs`, 2026-10-31;
+  the rewrite shortcut's "edit or question?" request to the Commands model
+  is "Commands · …"),
   "Notes · …" (Enhance, a note's Ask), "Meeting notes · …"
   (meetings/meeting_summary.rs), "Meeting brief · …" (calendar/brief.rs, around the
   meeting helpers), "Memory · …" (memory/learn.rs); unscoped: "AI model · …".

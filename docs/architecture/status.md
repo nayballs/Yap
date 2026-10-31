@@ -542,7 +542,26 @@ else nothing pasted and said) — the rules unit-tested (`as_said::
 rewritable`, `keep_spaces`), robot tests written (`rewrite-last.real.js`:
 the test pad, an Edge box, a contenteditable, typed since and the cursor
 moved refused, a selection or another window as before, a terminal never),
-not yet run; not yet tried with a real voice and AI model. **Saved
+not yet run; not yet tried with a real voice and AI model. **Asking about
+selected text without replacing it** (2026-10-31; Wispr Flow's Command Mode,
+its "Lens"; `dictation/ask_or_edit.rs`, `chat/assistant/selected.rs`): the
+rewrite shortcut on a selection with a question said ("what does this
+mean?", "summarise this", "translate this for me") answers on the Voice
+Assistant's path — spoken when Speak replies is on, the bar's card, kept in
+Chat with the selection as its quote — and never pastes; only a clear edit
+replaces it (a rule in seven languages, then the Commands model's
+`{"action": …}`, in doubt answered; read-only text always answered;
+Settings → Commands' "Answer questions about the selected text", on); and
+**Ask about the selection**, a shortcut of its own (unbound by default,
+read-only text too, "Select some text first"). The rule (a table in
+English, French, German, Spanish, Italian, Portuguese and Dutch), the
+reply's parsing, the route and the shortcut's binding unit-tested; Settings,
+the Help sheet, a question answered with its quote and nothing pasted, an
+edit still replaced, the model's choice and its doubt, read-only and the
+shortcut e2e-tested (`ask-selection.spec.js`, with stand-in selections); a
+robot test written (`ask-selection.real.js`: a real Edge box and a web
+page, the text and the clipboard checked unchanged), not yet run; not yet
+tried with a real voice, model or app. **Saved
 transforms** (2026-10-24, `dictation/transforms.rs`): one-key rewrites without
 speaking — Polish, Shorter, Fix grammar only, Translate to a language you
 pick, Make it a prompt, and your own — on the selection or (nothing
@@ -570,12 +589,21 @@ languages?"). Whisper picks the likeliest of your languages from its own
 detection (74 / 56 ms for large-v3 on an RTX 5070 Ti: the work it already
 did when not given a language); Parakeet V3 and SenseVoice recognise the
 language by themselves, Canary and Cohere are told your first language,
-Parakeet V2 (English only) is unchanged — only Whisper says what it heard,
-so the nudge works with Whisper models alone. The rules (plans, slots,
-coverage, the nudge's limits, the language line, the leading filler)
-unit-tested; Settings, a translating shortcut through the fake AI (and
-through the stub speech engine), the AI failing and the nudge in the main
-window and on the bar e2e-tested (`languages.spec.js`); the prompts measured
+Parakeet V2 (English only) is unchanged — only Whisper says what it heard;
+for the others the nudge reads the language from the text (2026-10-31,
+`languages/text_id.rs`: function words and whatlang's trigrams agreeing,
+five words at least; measured on 421 fictional sentences in 29 languages
+and 60 tricky English ones: never a wrong language, never an English one),
+and an English-only model's says "Parakeet V2 only knows English" — once,
+the first time one of your languages is recognised, "Yap recognised
+French". The rules (plans, slots, coverage, the nudge's limits, the
+language line, the leading filler, the text's gate) unit-tested; Settings,
+a translating shortcut through the fake AI (and through the stub speech
+engine), the AI failing and the nudge in the main window and on the bar,
+Parakeet V3's French read from its text (and through the stub engine's
+transcript), Parakeet V2's offer and the one-time tip e2e-tested
+(`languages.spec.js`); not yet tried on Parakeet V3's or V2's real output
+from real speech; the prompts measured
 on the 4B (cleanup 27/27 after vs 21/27 before, translation 12/12), the 1.5B
 (0/27 → 15/27: it still writes German in English) and Groq's gpt-oss-20b
 (13/13, docs/model-evals.md "My languages"); robot tests run with Whisper
@@ -678,7 +706,14 @@ validated live 2026-07-10), transcription history + stats, cleanup presets,
 2026-10-17: per app after the start chime, never calls, back to exactly
 their level after the stop chime; the rules unit-tested, the volume drop and
 restore and the pause and resume checked by the robot on an Edge page it
-opened),
+opened), **sounds in packs** (`dictation/sound.rs`, 2026-10-31: Classic, Soft,
+Crisp and Minimal for a dictation's start, stop, hands-free and cancel, an
+error, "Taking longer than usual", meeting notes' start and stop and a bar
+card; every pack's lengths, levels and start/stop contours unit-tested,
+Classic unchanged sample for sample; Settings, ▶ and which sound each
+moment plays e2e-tested in test mode, which plays nothing; not yet heard on
+speakers by a person, nor a meeting's start sound checked absent from a
+real loopback recording),
 the dictionary's **snippets**, the **"press enter" voice command** and a Whisper
 vocabulary ranked by use (2026-10-17: unit-tested, the Dictionary/Settings UI
 e2e-tested, not yet tried with real speech), **terminal & coding-CLI pasting**
@@ -720,6 +755,15 @@ warnings** — the rules unit-tested, all five e2e-tested through the stub
 engine's dictations (the snippet offer's bar card too); not yet tried with
 real speech, a real week of dictations, or text typed after a real paste
 (the watch's `typed_after` is unit-tested only),
+**rich snippets** (2026-10-31, `pasting/rich.rs`: bold, italic, links and
+lists in Yap's markdown subset, pasted as CF_HTML beside the plain text
+except into terminals, code editors and AI prompt boxes; the Dictionary
+view's formatting bar and preview) — unit-tested (the subset, escaping,
+CF_HTML's offsets read back, which apps), the promise of both formats in
+`read_check.rs`'s private clipboard round trip (run), the view and the
+per-app choice e2e-tested; the robot spec `rich-snippets.real.js` (Edge's
+contenteditable, the pad's RichEdit, PowerShell) written but not yet run,
+and not yet tried in a real Outlook, Word, Gmail, Teams or Slack,
 the Groq usage meter, and the installer + auto-updater (background checks + download
 while Yap runs, "Restart to update" from toast/tray/About/Windows notification —
 `updates.rs`, 2026-10-05) + portable mode + release CI (since 2026-10-25 every
@@ -1400,7 +1444,8 @@ its notes both say can pass (no "In short" from a small on-device model for
 that reason);
 a true streaming model for the partial pass (spike-gated
 Stage 2 — see `ROADMAP.md` Phase 1);
-rich-text snippets (bold, links, lists pasted as HTML beside plain text);
+a rich snippet through Paste last transcript (its plain text only) or
+in a dictation pasted in steps (stacked messages, a picked mention);
 snippets with several spoken phrases; the clipboard-read check in Notepad,
 Electron, VS Code and real slow apps (Outlook, Word, a remote desktop), and
 a page in Edge that ignores the paste (Edge reads the clipboard anyway); a JetBrains IDE's or Visual Studio's terminal, and a browser's

@@ -29,7 +29,7 @@
   import { menuOrDialogOpen } from '../ui/contextMenu.svelte.js';
   import { showSaveError } from '../notices/saveErrors.js';
   import { initMeetingCheckIns } from '../notices/meetingCheckIn.js';
-  import { initSpeech, readPageSelection } from '../stores/speech.svelte.js';
+  import { askSelectionKey, initSpeech, readPageSelection } from '../stores/speech.svelte.js';
   import { summaries, initMeetingSummary, loadSummary, summarise, askStartedByMistake } from '../stores/meetingSummary.svelte.js';
   import { initMeetingAudio, refreshAudio, stopLine } from '../stores/meetingAudio.svelte.js';
   import { actionMatchesKeydown, actionMatchesKeyup } from '../core/hotkeys.js';
@@ -571,6 +571,12 @@
       e.preventDefault();
       e.stopPropagation();
       invoke('assistant_key', { pressed: true }).catch(() => {});
+    } else if (actionMatchesKeydown(e, cfg, 'askHotkey')) {
+      // Ask about the selection (chat/assistant/selected.rs): what's selected
+      // here. (During a meeting the assistant is off, and says so.)
+      e.preventDefault();
+      e.stopPropagation();
+      askSelectionKey(true);
     } else if (actionMatchesKeydown(e, cfg, 'readHotkey')) {
       // Read aloud (voice/read_aloud.rs): what's selected here. (During a meeting
       // Yap keeps quiet, and the card says so.)
@@ -603,6 +609,9 @@
     if (actionMatchesKeyup(e, cfg, 'assistantHotkey')) {
       e.preventDefault();
       invoke('assistant_key', { pressed: false }).catch(() => {});
+    } else if (actionMatchesKeyup(e, cfg, 'askHotkey')) {
+      e.preventDefault();
+      askSelectionKey(false);
     } else if (actionMatchesKeyup(e, cfg, 'hotkey')) {
       e.preventDefault();
       invoke('dictation_key', { pressed: false }).catch(() => {});

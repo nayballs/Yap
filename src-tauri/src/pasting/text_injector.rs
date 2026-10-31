@@ -819,11 +819,25 @@ pub(crate) mod clip {
     /// Put `text` on the clipboard and check it took (the sequence number
     /// moved), retrying with a short backoff. `false` = it never did.
     pub fn put_text_verified(text: &str, private: bool) -> bool {
-        let item = [(CF_UNICODETEXT, text_bytes(text))];
+        put_rich_verified(text, None, private)
+    }
+
+    /// The clipboard's "HTML Format" (CF_HTML), registered by name.
+    pub fn html_format() -> u32 {
+        registered("HTML Format")
+    }
+
+    /// [`put_text_verified`] with a rich snippet's CF_HTML beside the text
+    /// (`html`: `rich::cf_html`'s bytes), when there is one.
+    pub fn put_rich_verified(text: &str, html: Option<&[u8]>, private: bool) -> bool {
+        let mut items = vec![(CF_UNICODETEXT, text_bytes(text))];
+        if let Some(html) = html {
+            items.push((html_format(), html.to_vec()));
+        }
         for (attempt, wait_ms) in [0u64, 15, 40, 80].into_iter().enumerate() {
             sleep(Duration::from_millis(wait_ms));
             let before = sequence();
-            match put(&item, private) {
+            match put(&items, private) {
                 Ok(()) if sequence() != before => {
                     debug!(attempt, private, "Clipboard write verified");
                     return true;
@@ -2122,7 +2136,9 @@ fn fit_for_paste(
     };
     match ctx {
         Some(ctx) => {
-            let names: Vec<&str> = dictionary.iter().map(|e| e.to.trim()).filter(|t| !t.is_empty()).collect();
+            // (A rich snippet as it types: its plain text.)
+            let typed: Vec<std::borrow::Cow<str>> = dictionary.iter().map(DictionaryEntry::typed).collect();
+            let names: Vec<&str> = typed.iter().map(|t| t.trim()).filter(|t| !t.is_empty()).collect();
             let out = smart_insert::fit_to_context(text, ctx, &names);
             debug!(
                 changed = out != text,
@@ -2168,21 +2184,22 @@ pub(crate) const NOTHING_TO_PASTE: &str = "Nothing to paste yet — dictate some
 /// Put `text` on the clipboard (privately, as a paste would: out of Win+V
 /// history) and leave it there for the person to paste (`why`: the app
 /// runs as administrator…). Nothing else is touched.
+/// `html`: a rich snippet's CF_HTML, beside the text (`rich.rs`).
 #[cfg(target_os = "windows")]
-fn leave_on_clipboard(text: &str, receiver: Option<isize>, why: Left) -> Result<Delivery, String> {
-    put_aside(text, receiver, why.code()).map(|()| Delivery::LeftOnClipboard(why))
+fn leave_on_clipboard(text: &str, html: Option<&[u8]>, receiver: Option<isize>, why: Left) -> Result<Delivery, String> {
+    put_aside(text, html, receiver, why.code()).map(|()| Delivery::LeftOnClipboard(why))
 }
 
 /// [`leave_on_clipboard`] for an Undo whose window is gone.
 #[cfg(target_os = "windows")]
-fn window_gone(text: &str) -> Result<Delivery, String> {
-    put_aside(text, None, "windowGone").map(|()| Delivery::WindowGone)
+fn window_gone(text: &str, html: Option<&[u8]>) -> Result<Delivery, String> {
+    put_aside(text, html, None, "windowGone").map(|()| Delivery::WindowGone)
 }
 
 #[cfg(target_os = "windows")]
-fn put_aside(text: &str, receiver: Option<isize>, why: &str) -> Result<(), String> {
+fn put_aside(text: &str, html: Option<&[u8]>, receiver: Option<isize>, why: &str) -> Result<(), String> {
     let private = !syncs_clipboard(app_name_for(receiver).as_deref());
-    if clip::put_text_verified(text, private) {
+    if clip::put_rich_verified(text, html, private) {
         warn!(len = text.len(), why, "Not pasted: the text is left on the clipboard");
         Ok(())
     } else {
@@ -2228,7 +2245,7 @@ pub(crate) fn paste_last_blocking(app: &tauri::AppHandle, as_said: bool) -> Resu
         if target.is_some_and(crate::pasting::elevated::target_blocked) {
             let out = fit_for_paste(&text, None, cfg.append_trailing_space, &cfg.dictionary, AppKind::Other);
             warn!("The app runs as administrator: Windows won't let Yap type into it");
-            leave_on_clipboard(&out, target, Left::Elevated)?;
+            leave_on_clipboard(&out, None, target, Left::Elevated)?;
             crate::notices::alert::show(app, crate::pasting::elevated::alert());
             return Ok(out);
         }
@@ -2249,7 +2266,7 @@ pub(crate) fn paste_last_blocking(app: &tauri::AppHandle, as_said: bool) -> Resu
         };
         let out = fit_for_paste(&text, ctx.as_ref(), cfg.append_trailing_space, &cfg.dictionary, kind);
         info!(len = out.len(), found_window = target.is_some(), fitted = ctx.is_some(), "Pasting the last transcript");
-        if let Delivery::LeftOnClipboard(left) = inject_text_sync(&out, cfg.restore_clipboard, target, false, raw)? {
+        if let Delivery::LeftOnClipboard(left) = inject_text_sync(&out, None, cfg.restore_clipboard, target, false, raw)? {
             crate::notices::alert::show(app, left.alert());
         }
         Ok(out)
@@ -2297,6 +2314,23 @@ pub async fn inject_text(
     strict: bool,
     kind: AppKind,
 ) -> Result<Delivery, String> {
+    inject_rich(text, None, restore_clipboard, target_hwnd, strict, kind).await
+}
+
+/// [`inject_text`] with a rich snippet's HTML (`html`: the fragment,
+/// `rich::dictation_html`) beside the text: both go on the clipboard in the
+/// one private, promised paste as CF_HTML and CF_UNICODETEXT, and the app
+/// reads whichever it takes (`read_check.rs` counts either read). A paste
+/// in slices (a terminal's) never carries it.
+pub async fn inject_rich(
+    text: &str,
+    html: Option<String>,
+    restore_clipboard: bool,
+    target_hwnd: Option<isize>,
+    strict: bool,
+    kind: AppKind,
+) -> Result<Delivery, String> {
+    let cf = html.as_deref().map(crate::pasting::rich::cf_html);
     // An Undo whose window has closed since: never into another one.
     if strict && target_hwnd.is_some_and(|h| !window_exists(h)) {
         if crate::shell::e2e::active() && !crate::shell::realtest::on() {
@@ -2306,7 +2340,7 @@ pub async fn inject_text(
         #[cfg(target_os = "windows")]
         {
             let text = text.to_string();
-            return tokio::task::spawn_blocking(move || window_gone(&text))
+            return tokio::task::spawn_blocking(move || window_gone(&text, cf.as_deref()))
                 .await
                 .map_err(|e| format!("Inject task panicked: {}", e))?;
         }
@@ -2324,14 +2358,14 @@ pub async fn inject_text(
                 info!(len = text.len(), why = left.code(), "e2e: the paste fails; not pasting the text");
                 return Ok(Delivery::LeftOnClipboard(left));
             }
-            info!(len = text.len(), "e2e: not pasting the text");
+            info!(len = text.len(), html = cf.is_some(), "e2e: not pasting the text");
             return Ok(Delivery::Pasted);
         }
         crate::shell::realtest::Gate::Refused(why) => return Err(why),
     }
     let text = text.to_string();
 
-    tokio::task::spawn_blocking(move || inject_text_sync(&text, restore_clipboard, target_hwnd, strict, kind))
+    tokio::task::spawn_blocking(move || inject_text_sync(&text, cf.as_deref(), restore_clipboard, target_hwnd, strict, kind))
         .await
         .map_err(|e| format!("Inject task panicked: {}", e))?
 }
@@ -2393,15 +2427,18 @@ fn press_paste(target: Option<isize>, key: app_kind::PasteKey) -> Result<(), Str
     }
 }
 
+/// The paste itself (see [`inject_text`]); `html`: a rich snippet's
+/// CF_HTML bytes to promise beside the text (`rich::cf_html`).
 fn inject_text_sync(
     text: &str,
+    html: Option<&[u8]>,
     restore_clipboard: bool,
     target_hwnd: Option<isize>,
     strict: bool,
     kind: AppKind,
 ) -> Result<Delivery, String> {
     let key = kind.paste_key();
-    info!(len = text.len(), keys = key.name(), "Injecting text via clipboard paste");
+    info!(len = text.len(), keys = key.name(), html = html.is_some(), "Injecting text via clipboard paste");
     // A field the correction watch is reading changes by Yap's hand now
     // (a swap, a rewrite, a transform): never learned as the person's fix.
     crate::dictionary::learn::yap_pastes();
@@ -2411,7 +2448,7 @@ fn inject_text_sync(
 
     #[cfg(not(target_os = "windows"))]
     {
-        let _ = (restore_clipboard, target_hwnd, strict, key);
+        let _ = (html, restore_clipboard, target_hwnd, strict, key);
         warn!("Text injection is only supported on Windows");
         Err("Text injection is only supported on Windows".into())
     }
@@ -2429,7 +2466,7 @@ fn inject_text_sync(
         let receiver = target_hwnd.or_else(current_foreground);
         if receiver.is_some_and(crate::pasting::elevated::target_blocked) {
             warn!("The app runs as administrator: Windows won't let Yap type into it");
-            return leave_on_clipboard(text, receiver, Left::Elevated);
+            return leave_on_clipboard(text, html, receiver, Left::Elevated);
         }
 
         // Re-focus the window the user was dictating into (best-effort; an
@@ -2438,7 +2475,7 @@ fn inject_text_sync(
             let back = platform::focus_window(hwnd) && platform::is_foreground(hwnd);
             if !back && strict {
                 warn!("Couldn't get back to the dictation's window; leaving the text on the clipboard");
-                return window_gone(text);
+                return window_gone(text, html);
             }
             if !back {
                 warn!("Could not re-focus the dictation target window; pasting into current focus");
@@ -2458,6 +2495,9 @@ fn inject_text_sync(
         if slices.len() > 1 {
             info!(slices = slices.len(), "A long paste into {}: in slices", kind.describe());
         }
+        // (A rich snippet's HTML goes with a paste in one piece only: a
+        // terminal's slices are plain text, and get no HTML anyway.)
+        let html = html.filter(|_| slices.len() == 1);
 
         // Kept out of clipboard history and sync, unless the target is a
         // remote desktop whose sync is how the paste gets there.
@@ -2479,8 +2519,8 @@ fn inject_text_sync(
 
         // On the clipboard as a promise, so the app's read shows
         // (`read_check.rs`); plainly when that can't be done.
-        let mut offer = Offer::put(slices[0], private, targets.clone(), open);
-        if offer.is_none() && !clip::put_text_verified(slices[0], private) {
+        let mut offer = Offer::put(slices[0], html, private, targets.clone(), open);
+        if offer.is_none() && !clip::put_rich_verified(slices[0], html, private) {
             // The clipboard can't be written: type the text instead.
             warn!("Couldn't put the text on the clipboard; typing it instead");
             // Robot mode: still the test's window in front (always fine in a
@@ -2571,17 +2611,17 @@ fn inject_text_sync(
             if let Some(o) = &offer {
                 if o.wait(pasted_at + timing.read_within) == Seen::Nothing {
                     warn!(slice = i - 1, "Nothing read the paste's slice in time; the rest is left on the clipboard");
-                    return leave_on_clipboard(&slices[i - 1..].concat(), target_hwnd, Left::NotRead);
+                    return leave_on_clipboard(&slices[i - 1..].concat(), None, target_hwnd, Left::NotRead);
                 }
             }
             std::thread::sleep(
                 (pasted_at + Duration::from_millis(crate::pasting::slices::PACE_MS)).saturating_duration_since(Instant::now()),
             );
             let rest: String = slices[i..].concat();
-            offer = Offer::put(slice, private, targets.clone(), open);
+            offer = Offer::put(slice, None, private, targets.clone(), open);
             if offer.is_none() && !clip::put_text_verified(slice, private) {
                 warn!(slice = i, "Couldn't put a slice on the clipboard; the rest is left there");
-                return leave_on_clipboard(&rest, target_hwnd, Left::KeysBlocked);
+                return leave_on_clipboard(&rest, None, target_hwnd, Left::KeysBlocked);
             }
             let next = crate::shell::realtest::recheck_foreground(target_hwnd, "paste").and_then(|()| {
                 if let Some(o) = &offer {
@@ -2591,7 +2631,7 @@ fn inject_text_sync(
             });
             if let Err(e) = next {
                 warn!(slice = i, "The paste stopped after {i} slices ({e}); the rest is left on the clipboard");
-                return leave_on_clipboard(&rest, target_hwnd, Left::KeysBlocked);
+                return leave_on_clipboard(&rest, None, target_hwnd, Left::KeysBlocked);
             }
             pasted_at = Instant::now();
         }

@@ -83,6 +83,10 @@ pub enum Feature {
     /// A Voice Assistant question asked from a paired phone (Yap Link,
     /// `link.rs`): its own label, so the list shows where it came from.
     AssistantPhone,
+    /// A Voice Assistant question about text selected in another app
+    /// (`chat/assistant/selected.rs`): its own label, so the list shows when
+    /// the selection went.
+    AssistantSelection,
     Notes,
     Meetings,
     Brief,
@@ -114,7 +118,7 @@ impl Feature {
             Feature::Dictation | Feature::DictationContext | Feature::DictationSamples => "Dictation",
             Feature::Commands | Feature::CommandsSamples => "Commands",
             Feature::Chat => "Chat",
-            Feature::Assistant | Feature::AssistantScreen | Feature::AssistantPhone => "Voice Assistant",
+            Feature::Assistant | Feature::AssistantScreen | Feature::AssistantPhone | Feature::AssistantSelection => "Voice Assistant",
             Feature::Notes => "Notes",
             Feature::Meetings => "Meetings",
             Feature::Brief => "Calendar",
@@ -133,6 +137,7 @@ impl Feature {
             Feature::Assistant => "Voice Assistant",
             Feature::AssistantScreen => "Voice Assistant + the window in front",
             Feature::AssistantPhone => "Voice Assistant from your phone",
+            Feature::AssistantSelection => "Voice Assistant + the selected text",
             Feature::Notes => "Notes",
             Feature::Meetings => "Meeting notes",
             Feature::Brief => "Meeting brief",

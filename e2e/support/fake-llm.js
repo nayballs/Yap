@@ -401,6 +401,11 @@ const LONGER = "You rewrite a meeting's notes in more detail";
 // ASK_PROMPT, for a lone "this"): "no" unless a spec says otherwise
 // (`reply('screenQuestion', fn)`). Never takes a scripted chat step.
 const SCREEN_QUESTION = 'You decide whether a question someone asked a voice assistant';
+// The rewrite shortcut's words about a selection, when Yap's rule can't
+// tell an edit from a question (src-tauri/src/dictation/ask_or_edit.rs
+// PROMPT): `{"action": "answer"}` unless a spec says otherwise
+// (`reply('askOrEdit', fn)`). Never takes a scripted chat step.
+const ASK_OR_EDIT = 'You decide what someone wants done with text they selected';
 
 const KINDS = [
   [DIGEST, 'digest'],
@@ -422,6 +427,7 @@ const KINDS = [
   [SKILL, 'skill'],
   [LONGER, 'longer'],
   [SCREEN_QUESTION, 'screenQuestion'],
+  [ASK_OR_EDIT, 'askOrEdit'],
 ];
 
 /** The numbers of the `<passage n="…">` blocks a request gives (search/ask.rs's layout). */
@@ -966,7 +972,7 @@ export async function startFakeLlm() {
       // The chat's tool loop, scripted: the next step's tool calls or answer.
       // A step without tools offered takes one too when it says `plain`
       // (a model's answer without tools, the loop's last call).
-      const step = kind !== 'screenQuestion' && (offered.length > 0 || chatScript[0]?.plain) ? chatScript.shift() : undefined;
+      const step = kind !== 'screenQuestion' && kind !== 'askOrEdit' && (offered.length > 0 || chatScript[0]?.plain) ? chatScript.shift() : undefined;
       if (step) {
         const message = step.tools
           ? {
@@ -1011,6 +1017,7 @@ export async function startFakeLlm() {
         skill: skillReply,
         longer: longerReply,
         screenQuestion: () => 'no',
+        askOrEdit: () => '{"action": "answer"}',
       };
       // (The system prompt too: a Skill's name is in it.)
       const content = (replies.get(kind) ?? answer[kind] ?? (() => 'OK'))(user, system);

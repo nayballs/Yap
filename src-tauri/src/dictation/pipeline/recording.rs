@@ -4,7 +4,7 @@
 //! watch; cancel and Undo; and the stop that hands the audio to
 //! `run_stt`. The mic's audio comes in here (`mic::Sink`).
 
-use std::sync::atomic::Ordering;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -12,13 +12,14 @@ use tauri::Emitter;
 
 use crate::dictation::gesture::Action;
 use crate::dictation::mic_watch::{DeadMicWatch, MicSilent, MicStep};
+use crate::dictation::sound::{self, Cue};
 
 use super::busy::{spawn_busy, Busy, Job};
 #[cfg(debug_assertions)]
-use super::{test_target, TEST_SILENT_MIC};
+use super::{test_selection, test_target, TEST_SILENT_MIC};
 use super::{
     destination, dictation_began, dictation_ended, test_feed_on, AmpMeter, GestureSlot, Goes, Kept,
-    PendingStart, Shared, ASSISTANT_ARMED, CHAT_ARMED, CHAT_FOCUSED, DICTATION_ERROR, PREROLL_SAMPLES, UNDO_MS,
+    PendingStart, Shared, ASK_ARMED, ASSISTANT_ARMED, CHAT_ARMED, CHAT_FOCUSED, DICTATION_ERROR, PREROLL_SAMPLES, UNDO_MS,
 };
 
 /// A recording that started while the mic was still opening waits this long
@@ -39,22 +40,49 @@ const UNDO_MIN_SAMPLES: usize = 8_000;
 /// ignored, as ever).
 const HOLD_ON: &str = "yap-dictation-busy";
 
+/// The recording (its session) that went hands-free before its start sound
+/// played (a mic still opening): the hands-free sound follows the start's.
+static LOCKED_EARLY: AtomicU64 = AtomicU64::new(0);
+/// The recording (its session) whose start sound has been played (or
+/// passed over, when it's off).
+static START_SOUNDED: AtomicU64 = AtomicU64::new(0);
+
 impl Shared {
-    /// The stop chime (if it's on), then the recording lets go of the mic
+    /// The stop sound (if it's on), then the recording lets go of the mic
     /// (`mic.rs`: it stays warm a while, or a Bluetooth headset's closes now,
-    /// once the chime has played on it) and the other apps' sound comes
+    /// once the sound has played on it) and the other apps' sound comes
     /// back (`mute.rs`), in that order; `token` from `mute::end`.
     fn stop_chime_then_restore(self: &Arc<Self>, token: u64) {
+        self.sound_then_release(Cue::Stop, token);
+    }
+
+    /// `cue`'s sound (a stop's or a cancel's, if it's on), then the mic let
+    /// go and the other apps' sound back, as [`Self::stop_chime_then_restore`].
+    fn sound_then_release(self: &Arc<Self>, cue: Cue, token: u64) {
         let shared = Arc::clone(self);
         let lease = self.mic_lease.load(Ordering::SeqCst);
-        let restore: crate::dictation::sound::Played = Box::new(move || {
+        let restore: sound::Played = Box::new(move || {
             let closed_bluetooth = shared.mic.release(lease);
             crate::dictation::mute::after_stop_chime_mic(token, closed_bluetooth);
         });
-        if self.sound_enabled() {
-            crate::dictation::sound::play_stop(self.audio_feedback_volume(), self.output_device().as_deref(), Some(restore));
-        } else {
-            std::thread::spawn(restore);
+        sound::play(cue, Some(restore));
+    }
+
+    /// Push-to-talk's double-tap locked recording `session` hands-free: its
+    /// sound (if it's on), after the start sound — which, with a mic still
+    /// opening, may not have played yet ([`LOCKED_EARLY`]).
+    fn locked_sound(&self, session: u64) {
+        if START_SOUNDED.load(Ordering::SeqCst) == session {
+            sound::cue(Cue::Locked);
+            return;
+        }
+        // Left for the start sound to play after it — unless that went
+        // meanwhile without seeing it: then here (once, either way).
+        LOCKED_EARLY.store(session, Ordering::SeqCst);
+        if START_SOUNDED.load(Ordering::SeqCst) == session
+            && LOCKED_EARLY.compare_exchange(session, 0, Ordering::SeqCst, Ordering::SeqCst).is_ok()
+        {
+            sound::cue(Cue::Locked);
         }
     }
 
@@ -90,12 +118,13 @@ impl Shared {
             return; // that recording is over
         }
         let token = start.token;
-        let quiet: Option<crate::dictation::sound::Played> =
-            start.plan.any().then(|| Box::new(move || crate::dictation::mute::after_start_chime(token)) as crate::dictation::sound::Played);
-        if self.sound_enabled() {
-            crate::dictation::sound::play_start(self.audio_feedback_volume(), self.output_device().as_deref(), quiet);
-        } else if let Some(quiet) = quiet {
-            std::thread::spawn(quiet);
+        let quiet: Option<sound::Played> =
+            start.plan.any().then(|| Box::new(move || crate::dictation::mute::after_start_chime(token)) as sound::Played);
+        sound::play(Cue::Start, quiet);
+        START_SOUNDED.store(session, Ordering::SeqCst);
+        // Locked hands-free before this: its sound after the start's.
+        if LOCKED_EARLY.compare_exchange(session, 0, Ordering::SeqCst, Ordering::SeqCst).is_ok() {
+            sound::cue(Cue::Locked);
         }
         let _ = self.app.emit("yap-mic-ready", true);
     }
@@ -148,6 +177,9 @@ impl Shared {
         if let Ok(mut g) = self.rewrite_last.lock() {
             *g = None;
         }
+        if let Ok(mut g) = self.ask_selection.lock() {
+            *g = None;
+        }
         self.edit_mode.store(false, Ordering::SeqCst);
         crate::dictionary::screen_terms::forget();
         if self.assistant.swap(false, Ordering::SeqCst) {
@@ -174,7 +206,7 @@ impl Shared {
                 .app
                 .emit(DICTATION_ERROR, "No microphone found — connect one and try again");
         }
-        let _ = self.app.emit("yap-state", "error");
+        self.say_failed();
     }
     /// Mic audio (16 kHz mono) as it arrives: while recording — or while one
     /// is starting (`gather`) — into the buffer (and the dead-mic watchdog's
@@ -292,6 +324,71 @@ impl Shared {
         self.on_key(pressed, false, at);
         // Taken by the recording if one started; never left for another.
         ASSISTANT_ARMED.store(false, Ordering::SeqCst);
+    }
+
+    /// The **Ask about the selection** shortcut moved
+    /// ([`super::Pipeline::on_ask_key`]; `page`: one of Yap's own windows'
+    /// in-page fallback, with what its page has selected). A press that
+    /// would start a recording first reads what's selected in the app in
+    /// front — nothing: "Select some text first", and nothing records —
+    /// then records as the Voice Assistant's shortcut does (toggle,
+    /// push-to-talk's gestures), its question about that selection. A press
+    /// while something records stops it, as the other keys do.
+    pub(super) fn ask_key(self: &Arc<Self>, pressed: bool, at: Option<u64>, page: Option<String>) {
+        if pressed && !self.recording.load(Ordering::SeqCst) {
+            // Off during meetings and calls, as the assistant is.
+            if crate::chat::assistant::off_for_meeting(&self.app) {
+                return;
+            }
+            // (Still transcribing the last one: the press says "Hold on",
+            // below, and nothing's read.)
+            if !self.processing.load(Ordering::SeqCst) {
+                let found = match page {
+                    Some(text) => Some(text).filter(|t| !t.trim().is_empty()).map(|text| crate::chat::assistant::selected::Selected { text, app: "Yap".into() }),
+                    None => self.read_ask_selection(),
+                };
+                let Some(found) = found else {
+                    crate::chat::assistant::selected::nothing_selected(&self.app);
+                    return;
+                };
+                tracing::info!(chars = found.text.chars().count(), "Ask about the selection: the selection read");
+                if let Ok(mut g) = self.ask_selection.lock() {
+                    *g = Some(found);
+                }
+            }
+        }
+        ASSISTANT_ARMED.store(pressed, Ordering::SeqCst);
+        ASK_ARMED.store(pressed, Ordering::SeqCst);
+        self.on_key(pressed, false, at);
+        // Taken by the recording if one started; never left for another.
+        ASSISTANT_ARMED.store(false, Ordering::SeqCst);
+        ASK_ARMED.store(false, Ordering::SeqCst);
+    }
+
+    /// What's selected in the window in front, for Ask about the selection:
+    /// as Read aloud reads it (`selection::read_selected` — UI Automation,
+    /// read-only text too; an edit control's own selection; Ctrl+C last,
+    /// keeping every clipboard format and putting them back, never in a
+    /// terminal). `None`: nothing selected, or one of Yap's own windows in
+    /// front (its page sends its own). A test run: the stand-in window's
+    /// staged selection only.
+    pub(super) fn read_ask_selection(&self) -> Option<crate::chat::assistant::selected::Selected> {
+        let hwnd = crate::pasting::text_injector::current_foreground();
+        #[cfg(debug_assertions)]
+        let hwnd = test_target().or(hwnd);
+        let hwnd = hwnd?;
+        #[cfg(debug_assertions)]
+        if let Some(staged) = test_selection(hwnd) {
+            return staged
+                .filter(|(t, _)| !t.trim().is_empty())
+                .map(|(text, _)| crate::chat::assistant::selected::Selected { text, app: "e2e-stand-in.exe".into() });
+        }
+        let terminal = crate::pasting::app_kind::of_window(Some(hwnd)).is_terminal();
+        let got = crate::pasting::selection::read_selected(Some(hwnd), !terminal);
+        tracing::info!(via = got.via, terminal, "Ask about the selection: read the selection");
+        let text = got.text.filter(|t| !t.trim().is_empty())?;
+        let app = crate::pasting::text_injector::app_name_for(Some(hwnd)).unwrap_or_default();
+        Some(crate::chat::assistant::selected::Selected { text, app })
     }
 
     /// After a spoken "snip" landed in Chat ([`super::listen_after_snip`]):
@@ -419,6 +516,7 @@ impl Shared {
             Action::Lock => {
                 tracing::info!("Push-to-talk: double-tap, recording hands-free");
                 let _ = self.app.emit("yap-dictation-locked", true);
+                self.locked_sound(self.rec_session.load(Ordering::SeqCst));
                 std::thread::spawn(crate::dictation::coaching::hands_free_used);
             }
             Action::Unstick => {
@@ -636,6 +734,14 @@ impl Shared {
             crate::notes::quick_note::takes_dictation(hwnd == 0),
         );
         let assistant = goes == Goes::Assistant;
+        // Ask about the selection's press: its question is about the
+        // selection it read (`ask_key`); any other recording carries none.
+        let asking = ASK_ARMED.swap(false, Ordering::SeqCst) && assistant;
+        if !asking {
+            if let Ok(mut g) = self.ask_selection.lock() {
+                *g = None;
+            }
+        }
         // A language shortcut's press: this dictation is in its language
         // (My languages, languages.rs) — not a rewrite or a question.
         crate::dictation::languages::begin_dictation(!edit && !assistant);
@@ -646,11 +752,12 @@ impl Shared {
             Goes::ChatBox => tracing::info!("Dictation: a question for the Chat view"),
             Goes::QuickNote => tracing::info!("Dictation: into the quick note"),
             // Said before the "recording" state, so the capsule's first
-            // frame is the assistant's.
+            // frame is the assistant's ("Ask about the selection…" for
+            // that shortcut's).
             // (And the window in front, should the question be about it.)
             Goes::Assistant => {
                 crate::chat::assistant::screen::window_in_front(hwnd);
-                crate::chat::assistant::listening(&self.app);
+                crate::chat::assistant::listening(&self.app, asking);
             }
             Goes::Paste => {}
         }
@@ -675,10 +782,31 @@ impl Shared {
         // mode on) never by Ctrl+C: with nothing selected it interrupts the
         // program running there.
         self.edit_mode.store(edit, Ordering::SeqCst);
+        self.selection_read_only.store(false, Ordering::SeqCst);
         let mut rewrite_last = None;
         if edit {
             let target = if hwnd == 0 { None } else { Some(hwnd) };
             let sel = crate::pasting::selection::capture_selection(target, !in_terminal);
+            // A test run's stand-in window: its staged selection.
+            #[cfg(debug_assertions)]
+            let sel = match test_selection(hwnd) {
+                Some(staged) => {
+                    self.selection_read_only.store(staged.as_ref().is_some_and(|(_, ro)| *ro), Ordering::SeqCst);
+                    staged.map(|(t, _)| t).filter(|t| !t.trim().is_empty())
+                }
+                None => sel,
+            };
+            // Read-only text selected (a web page, a mail being read):
+            // nothing could be put in its place, so what's said about it is
+            // answered ("Answer questions about the selected text",
+            // `ask_or_edit::settled`). One time-boxed look at the focus.
+            if sel.is_some() && !self.selection_read_only.load(Ordering::SeqCst) {
+                let on = self.config.read().map(|c| c.ask_about_selection).unwrap_or(true);
+                if on && crate::pasting::selection::focus_editable(target) == crate::pasting::selection::Editable::No {
+                    tracing::info!("Rewrite shortcut: the selection is read-only text");
+                    self.selection_read_only.store(true, Ordering::SeqCst);
+                }
+            }
             // Nothing selected right after a paste into this window: the
             // instruction is for that paste — the last dictation — not new
             // text (`as_said.rs`), unless "Rewrite your last dictation" is
@@ -877,10 +1005,16 @@ impl Shared {
         }
         dictation_ended();
         self.drop_pending_start();
-        // No stop chime for a cancel: the mic and the other apps' sound go
+        // The person's cancel has its own sound (if it's on), then the mic
+        // and the other apps' sound go back, as after a stop's; one Yap
+        // throws away itself (a lone tap, a chord) is silent, and they go
         // back now.
         let token = crate::dictation::mute::end();
-        self.release_now(token);
+        if undo {
+            self.sound_then_release(Cue::Cancelled, token);
+        } else {
+            self.release_now(token);
+        }
         let audio = self.buffer.lock().map(|mut b| std::mem::take(&mut *b)).unwrap_or_default();
         // The edit-mode selection/state goes with it (into the kept
         // recording, or nowhere), so it can't leak into a later session.
@@ -895,6 +1029,10 @@ impl Shared {
         let assistant = self.assistant.swap(false, Ordering::SeqCst);
         if assistant {
             crate::chat::assistant::nothing(&self.app);
+        }
+        // Ask about the selection's text goes with its question.
+        if let Ok(mut g) = self.ask_selection.lock() {
+            *g = None;
         }
         if assistant || !(undo && audio.len() >= UNDO_MIN_SAMPLES && self.mic_tally.heard()) {
             let _ = self.app.emit("yap-state", "idle");
@@ -1055,8 +1193,8 @@ impl Shared {
             }
             tracing::info!("Recording stopped: the mic gave nothing but silence, not transcribed");
             let _ = self.app.emit("yap-mic-silent", Some(self.mic_silent()));
-            let _ = self.app.emit("yap-state", "error");
             self.stop_chime_then_restore(quiet_token);
+            self.say_failed();
             return;
         }
         let _ = self.app.emit("yap-state", "processing");

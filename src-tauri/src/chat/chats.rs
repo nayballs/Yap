@@ -87,6 +87,13 @@ impl ChatMessage {
     /// shorter" still says what "this" was.
     pub fn sent_text(&self) -> String {
         match &self.quote {
+            // Text selected in another app (`assistant/selected.rs`): no
+            // note, the app it came from.
+            Some(q) if self.role == "user" && q.note_id == 0 => {
+                let app = crate::chat::assistant::selected::app_name(&q.app);
+                let from = if app.is_empty() { String::new() } else { format!(" in {app}") };
+                format!("(About this text the user selected{from}: \"{}\")\n\n{}", crate::chat::documents::blocks::clip(&q.text, 600), self.text)
+            }
             Some(q) if self.role == "user" => {
                 let title = crate::notes::get(q.note_id).map(|n| n.title).filter(|t| !t.trim().is_empty()).unwrap_or_else(|| "a document".to_string());
                 format!("(About this passage of \"{title}\": \"{}\")\n\n{}", crate::chat::documents::blocks::clip(&q.text, 300), self.text)

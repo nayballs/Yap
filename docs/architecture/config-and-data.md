@@ -28,7 +28,18 @@
   key or a mouse button, Settings → Shortcuts; "" = unbound, the default;
   never Enter, never a clash — `input_hook::configure_send_from` gives way
   to all ten older shortcuts; `pasting/send_key.rs`. An older Yap drops it,
-  and its `moreHotkeys` entry: unbound again, nothing else), more_hotkeys (`moreHotkeys`, 2026-10-25: **more
+  and its `moreHotkeys` entry: unbound again, nothing else), ask_hotkey
+  (`askHotkey`, 2026-10-31: **Ask about the selection**, a question about
+  the text selected in any app, answered as the Voice Assistant's and never
+  replacing it, Settings → Shortcuts and Commands; "" = unbound, the
+  default; never a clash — `input_hook::configure_ask_from` gives way to
+  all eleven older shortcuts; `chat/assistant/selected.rs`. An older Yap
+  drops it, and its `moreHotkeys` entry: unbound again, nothing else),
+  ask_about_selection (`askAboutSelection`, on, 2026-10-31: "Answer
+  questions about the selected text", Settings → Commands — the rewrite
+  shortcut's question about a selection answered instead of replacing it,
+  `dictation/ask_or_edit.rs`; off, it rewrites as before; an older Yap
+  drops it: on again), more_hotkeys (`moreHotkeys`, 2026-10-25: **more
   shortcuts for one action**, Settings → Shortcuts' "+ Add another" — a map
   from an action's first shortcut's field ("hotkey", "editHotkey",
   "meetingHotkey", "assistantHotkey", "readHotkey", "asSaidHotkey",
@@ -84,8 +95,19 @@
   default instead of "No microphone found". It stays for an older Yap, which
   reads only this: `save` writes the first of `mic_order` there, and a
   different name on load — picked in an older build — goes first,
-  `follow_an_older_builds_mic`), sound +
-  volume, output_device, quiet_other_apps ("Silence other apps while you
+  `follow_an_older_builds_mic`), sounds (Settings → Dictation → Sounds,
+  `dictation/sound.rs`, 2026-10-31): sound_enabled (all of them; an older
+  Yap reads only this, its start and stop chime) + audio_feedback_volume
+  (their volume) + sound_pack ("classic" — the chime Yap always played —,
+  "soft", "crisp", "minimal"; one this build doesn't know plays Classic) +
+  a switch per moment: sound_start, sound_stop, sound_locked (push-to-talk
+  gone hands-free), sound_cancelled — on — and sound_error, sound_slow,
+  sound_meeting (meeting notes' start and stop, one switch), sound_notice (a
+  card on the Yap bar) — off. **`migrate_once` v6** turns sound_locked and
+  sound_cancelled off for a config from before them, so an existing install
+  keeps exactly the sounds it had; an older Yap drops the new fields when it
+  saves, and their defaults come back. output_device (the sounds' and
+  spoken replies' speakers), quiet_other_apps ("Silence other apps while you
   dictate", off; reads old configs' `muteWhileRecording`) + pause_media
   ("Pause music and videos while you dictate", off; both `dictation/mute.rs`),
   keep_mic_ready ("Keep the microphone ready", off: the mic opens when you

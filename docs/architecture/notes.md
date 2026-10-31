@@ -689,7 +689,11 @@ local API and search see the same text.
   (`insertPlain`, spaced by `dictationPiece`; at the end when the page hasn't
   the keyboard), its own step in the undo history (`closeHistory` before and
   after: Ctrl+Z takes it back out); "press enter" makes a new line (a
-  paragraph). The notepad's "Take notes here" coach mark goes when typing
+  paragraph). A dictation that carries a rich snippet (pasting/rich.rs, the
+  same day) comes with its HTML beside the text, as every app but terminals,
+  code editors and AI boxes gets it: the page takes that HTML, so the
+  snippet's bold, italic, links and lists land as such, written back as
+  markdown. The notepad's "Take notes here" coach mark goes when typing
   starts, as before.
 - **Typing.** Enter a new paragraph (a blank line between, in the markdown),
   Shift+Enter a line break (one "\n", as the box kept them); markdown typed as

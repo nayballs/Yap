@@ -248,6 +248,9 @@ pub fn run() {
             shell::window::close_onboarding,
             dictation::commands::list_audio_devices,
             dictation::commands::list_output_devices,
+            // Settings → Dictation → Sounds' ▶ and ■ (dictation/sound.rs).
+            dictation::sound::sound_preview,
+            dictation::sound::sound_preview_stop,
             dictation::commands::set_mic_test,
             dictation::mics::list_mics,
             // Getting started (2026-10-29): the mic quiz, the bar's first-use
@@ -315,6 +318,7 @@ pub fn run() {
             dictation::commands::configure_copy_last_hotkey,
             dictation::commands::configure_quick_note_hotkey,
             dictation::commands::configure_send_hotkey,
+            dictation::commands::configure_ask_hotkey,
             dictation::commands::configure_more_hotkeys,
             #[cfg(debug_assertions)]
             dictation::commands::e2e_hotkey_bindings,
@@ -435,6 +439,7 @@ pub fn run() {
             dictation::commands::configure_assistant_hotkey,
             dictation::commands::configure_read_hotkey,
             dictation::commands::assistant_key,
+            dictation::commands::ask_selection_key,
             voice::read_aloud::read_aloud_text,
             voice::read_aloud::read_aloud_selection,
             voice::read_aloud::read_aloud_action,
@@ -781,6 +786,8 @@ pub fn run() {
             #[cfg(debug_assertions)]
             voice::tts::tts_e2e_spoken,
             #[cfg(debug_assertions)]
+            dictation::sound::sound_e2e_heard,
+            #[cfg(debug_assertions)]
             dictation::commands::e2e_chat_dictation,
             #[cfg(debug_assertions)]
             notes::quick_note::e2e_quick_note_dictation,
@@ -806,7 +813,11 @@ pub fn run() {
             #[cfg(debug_assertions)]
             shell::realtest::commands::realtest_rewrite_text,
             #[cfg(debug_assertions)]
+            shell::realtest::commands::realtest_ask_selection,
+            #[cfg(debug_assertions)]
             dictation::commands::e2e_rewrite,
+            #[cfg(debug_assertions)]
+            dictation::commands::e2e_ask_selection,
             #[cfg(debug_assertions)]
             dictation::transforms::e2e_transform,
             #[cfg(debug_assertions)]
@@ -882,6 +893,8 @@ pub fn run() {
             ai::usage::store::init(&handle);
             // Spoken replies (tts.rs): its state goes to every window.
             voice::tts::init(&handle);
+            // Yap's sounds: the pack, the volume and each moment's switch (sound.rs).
+            dictation::sound::sync(&cfg);
 
             // Global input hook + dictation hotkey. (Not in e2e test runs: a
             // test instance must never see, or swallow, the developer's keys.
@@ -917,6 +930,8 @@ pub fn run() {
             dictation::input_hook::configure_quick_note_from(&cfg);
             // Send (pasting/send_key.rs; unbound by default, never Enter).
             dictation::input_hook::configure_send_from(&cfg);
+            // Ask about the selection (chat/assistant/selected.rs; unbound by default).
+            dictation::input_hook::configure_ask_from(&cfg);
             // More shortcuts for each ("+ Add another"; giving way to all of these).
             dictation::input_hook::configure_more_from(&cfg);
             // Language shortcuts (My languages, languages.rs; none by
@@ -1147,6 +1162,31 @@ pub fn run() {
             // front, once the shortcut's keys are up.
             let send_handle = handle.clone();
             handle.listen("send-key-pressed", move |_| pasting::send_key::press_soon(&send_handle));
+            // Ask about the selection (chat/assistant/selected.rs): the
+            // selection read at the press, then a Voice Assistant question
+            // about it, recorded as the assistant's shortcut records.
+            let ask_press_handle = handle.clone();
+            handle.listen("ask-key-pressed", move |event| {
+                let at = event.payload().parse::<u64>().ok();
+                let state = ask_press_handle.state::<AppState>();
+                let pipeline = state.pipeline.lock();
+                if let Ok(guard) = pipeline {
+                    if let Some(p) = guard.as_ref() {
+                        p.on_ask_key(true, at);
+                    }
+                }
+            });
+            let ask_release_handle = handle.clone();
+            handle.listen("ask-key-released", move |event| {
+                let at = event.payload().parse::<u64>().ok();
+                let state = ask_release_handle.state::<AppState>();
+                let pipeline = state.pipeline.lock();
+                if let Ok(guard) = pipeline {
+                    if let Some(p) = guard.as_ref() {
+                        p.on_ask_key(false, at);
+                    }
+                }
+            });
             snip::init(&handle);
 
             // A saved transform's shortcut (transforms.rs): its slot, run on

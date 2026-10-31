@@ -380,7 +380,9 @@ The correction dictionary: near-miss (fuzzy) matching, several ways one word is 
   corrections" — `learnWords`, `dictionary/learn.rs`; it rides along in the
   `yap-dictionary-changed` detail with `entries` and `fuzzy` so Settings'
   copy keeps it) and **Snippets** ("You say" pill →
-  "Yap types" growing text box, line breaks kept; nothing seeded). Settings'
+  "Yap types" growing text box, line breaks kept, with its formatting bar
+  and, when it's formatted, a preview — rich snippets, below; nothing
+  seeded). Settings'
   `cleanConfig` (`settings/configDefaults.js`) keeps each entry's `snippet`
   flag — drop it and an auto-save
   turns snippets into corrections. Settings → Dictation → Typing into apps has "Say
@@ -408,10 +410,40 @@ The correction dictionary: near-miss (fuzzy) matching, several ways one word is 
   a correction changes before snippets are looked for ("the jaison file"
   with "jaison → JSON": Yap writes "the JSON file" first and the snippet
   never fires; a one-word way heard with ≈ on, near-misses of it too), or
-  is a dictionary word (said in any sentence, it types the snippet). Not
-  done: rich text (bold, links, lists pasted as HTML beside plain) — it
-  needs a second clipboard format through the paste path
-  (`text_injector.rs`, the robot tests).
+  is a dictionary word (said in any sentence, it types the snippet).
+- **Rich snippets** (2026-10-31, Wispr Flow's richer snippets): a
+  snippet's text may carry **bold, italic, links, bulleted and numbered
+  lists** and line breaks, written in Yap's own markdown subset **in the
+  snippet's text** (`**bold**`, `*italic*` / `_italic_` never inside a
+  word, `[text](https://…)` with http(s) or mailto links only, lines
+  starting `- ` / `* ` / `+ ` / `• ` or `1. ` / `1) `, a backslash before
+  punctuation for the character itself). Nothing new is stored — no flag,
+  no field: a snippet is rich when its text uses that formatting
+  (`pasting/rich.rs` `is_rich`), so an older Yap (the installed nightly
+  beside Yap - Dev) reads and keeps it as readable text, and a plain
+  snippet pastes exactly as before. (One change for a plain snippet that
+  already had list lines: they're a list now — "• " in plain text, a real
+  list where HTML goes.) **The editor** (`views/dictionary/
+  SnippetText.svelte`): under the text box a small formatting bar — Bold,
+  Italic, Link, Bulleted list, Numbered list; Ctrl+B / Ctrl+I / Ctrl+K in
+  the box — whose edits (`richSnippet.js` `toggleWrap`, `insertLink`,
+  `toggleList`: per line, never over a list's marker; on again = off; a
+  link puts "https://" selected for the address) go into the box as typing
+  does (`execCommand('insertText')`), so Ctrl+Z takes them back; beside it
+  the length ("N characters" of the text as kept, at most 5,000). A rich
+  snippet shows **"Pastes as"**: Formatted (drawn from the parsed text,
+  never as HTML; a link's address in its tooltip, never followed) or Plain
+  text ("• " bullets, "text (url)"), with where each goes. The warnings
+  under the phrase are as before. **Dictated** (`config::expand_snippets`):
+  the snippet's plain text goes into the dictation's text (history, the
+  words as said, the fit, every app that takes plain text), and its
+  markdown, in order, to the paste, which adds the HTML where the app takes
+  it ([pasting.md](./pasting.md), `pasting/rich.rs`). Every other place
+  that knows a snippet's text uses its plain text (`DictionaryEntry::
+  typed`): a chat's full stop kept after a snippet ending with one, smart
+  spacing's names, "Type that often? Save it as a snippet" (never offers a
+  rich snippet's own text back). Not done: Paste last transcript pastes a
+  rich snippet's plain text only.
 - **"Suggest snippets for text you use often"** under Snippets
   (`snippet_offer.rs`; its own store, read and set by
   `snippet_suggestions_enabled` / `_set`).
@@ -486,13 +518,21 @@ The correction dictionary: near-miss (fuzzy) matching, several ways one word is 
   - Tests: `e2e/dictionary-list.spec.js` (the pure parts, no app: search,
     sorts, CSV and text parsing, the import's plan and choices, export
     round trips — several ways heard included —, both Undos, the snippet
-    warnings and their speed at 2,200 entries), `e2e/dictionary.spec.js`
+    warnings and their speed at 2,200 entries; rich snippets' parsing,
+    plain text and the formatting bar's edits, the same cases as
+    `rich.rs`), `e2e/dictionary.spec.js`
     (the view, in light and dark; several ways heard added, saved,
     corrected in a dictation, exported, imported and undone; a snippet's
-    length and warnings) and `e2e/dictionary-learning.spec.js` (your own
+    length and warnings; a rich snippet made with the bar and Ctrl+I, its
+    Undo, both previews, saved as markdown with the plain snippets
+    untouched, and dictated — HTML for Outlook and Gmail, the spoken words
+    escaped in it, none for a plain snippet, VS Code or ChatGPT) and `e2e/dictionary-learning.spec.js` (your own
     name in a dictation; the snippet offer — toast, bar card, "Don't
     suggest this again" and the switch; a summary edit's word offer). Rust
-    unit tests: `variants.rs` (an older Yap reading and re-saving the rows
+    unit tests: `pasting/rich.rs` (the subset, what isn't formatting,
+    plain text, HTML escaping, a dictation's fragment and the fit's
+    changes, CF_HTML's offsets read back, which apps), `finish.rs` (a rich
+    snippet types its plain text and is reported), `variants.rs` (an older Yap reading and re-saving the rows
     keeps every phrase; rows out of an entry; the passes and the prompt), `snippet_offer.rs` (what counts, three in a week, once, a
     day, the phrase to say), `learn.rs` (`summary_swaps`, `typed_after`,
     another way heard), `spoken_names.rs`, `memory/vocab.rs` (your own

@@ -177,6 +177,11 @@ pub(crate) fn chat_target(edit: bool, armed: bool, focused: bool, own_window: bo
 /// right after the press).
 static ASSISTANT_ARMED: AtomicBool = AtomicBool::new(false);
 
+/// The **Ask about the selection** shortcut asked for the next recording
+/// (`Pipeline::on_ask_key`, beside [`ASSISTANT_ARMED`]: its recording is the
+/// assistant's, about `Shared::ask_selection`); cleared right after the press.
+static ASK_ARMED: AtomicBool = AtomicBool::new(false);
+
 /// Where a recording starting now goes. Pure.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Goes {
@@ -254,6 +259,24 @@ pub(crate) fn test_target() -> Option<isize> {
     (h != 0 && crate::shell::e2e::active() && !crate::shell::realtest::on()).then_some(h)
 }
 
+/// Test mode only (`e2e_rewrite`'s and `e2e_ask_selection`'s `selection`):
+/// what the stand-in window has selected, and whether it's read-only — read
+/// by edit mode's key press and Ask about the selection's as a real window's
+/// selection would be. Nothing is ever read from a real window in a test run.
+#[cfg(debug_assertions)]
+static TEST_SELECTION: Mutex<Option<(String, bool)>> = Mutex::new(None);
+
+#[cfg(debug_assertions)]
+pub(crate) fn set_test_selection(selection: Option<(String, bool)>) {
+    *TEST_SELECTION.lock().unwrap_or_else(|p| p.into_inner()) = selection;
+}
+
+/// The stand-in window's selection, when the dictation goes to it.
+#[cfg(debug_assertions)]
+fn test_selection(hwnd: isize) -> Option<Option<(String, bool)>> {
+    (test_target() == Some(hwnd)).then(|| TEST_SELECTION.lock().unwrap_or_else(|p| p.into_inner()).clone())
+}
+
 /// Robot mode only (`realtest.rs`): a WAV is playing into the dictation in
 /// the mic's place — the real mic's audio is dropped meanwhile, and a
 /// recording may start without one.
@@ -310,6 +333,9 @@ pub(crate) struct Delivered {
     /// picked; `pasting/compose.rs`): each step as it went.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub steps: Vec<crate::pasting::compose::Step>,
+    /// The HTML fragment that went with the text (a rich snippet in it, an
+    /// app that takes HTML: `pasting/rich.rs`), if any.
+    pub html: Option<String>,
 }
 
 /// How long a cancelled dictation's audio is kept for **Undo** ("Dictation
@@ -463,6 +489,15 @@ struct Shared {
     /// (`None`) → "write mode" (generate new text from the instruction alone)
     /// — unless `rewrite_last`.
     selection: Mutex<Option<String>>,
+    /// Edit mode's selection is read-only text (a web page, a mail being
+    /// read: `selection::focus_editable` says no), at record start: nothing
+    /// could be put in its place, so what's said about it is answered
+    /// (`ask_or_edit::settled`).
+    selection_read_only: AtomicBool,
+    /// **Ask about the selection** (its shortcut, at the press): the text
+    /// selected in the app in front and the app, for the question its
+    /// recording asks (`assistant::ask_about`). Taken by the question.
+    ask_selection: Mutex<Option<crate::chat::assistant::selected::Selected>>,
     /// Edit mode with nothing selected, right after a paste into the same
     /// window (`as_said::rewrite_target`, at record start): the instruction
     /// rewrites that paste — the last dictation — in place.
@@ -543,15 +578,11 @@ fn unload_timeout_duration(s: &str) -> Option<Duration> {
 }
 
 impl Shared {
-    fn sound_enabled(&self) -> bool {
-        self.config.read().map(|c| c.sound_enabled).unwrap_or(true)
-    }
-
-    fn audio_feedback_volume(&self) -> f32 {
-        self.config
-            .read()
-            .map(|c| c.audio_feedback_volume)
-            .unwrap_or(1.0)
+    /// The capsule says the dictation failed (`yap-state` "error"), with
+    /// the error sound if it's on (`sound.rs`).
+    pub(super) fn say_failed(&self) {
+        let _ = self.app.emit("yap-state", "error");
+        crate::dictation::sound::cue(crate::dictation::sound::Cue::Error);
     }
 
     fn recording_mode(&self) -> String {
@@ -567,10 +598,6 @@ impl Shared {
             .read()
             .map(|c| crate::dictation::mute::Plan { quiet: c.quiet_other_apps, pause: c.pause_media })
             .unwrap_or_default()
-    }
-
-    fn output_device(&self) -> Option<String> {
-        self.config.read().ok().and_then(|c| c.output_device.clone())
     }
 
     /// The kind of app this recording goes into, as read at record start —
@@ -714,6 +741,8 @@ impl Pipeline {
             to_note: AtomicBool::new(false),
             assistant: AtomicBool::new(false),
             selection: Mutex::new(None),
+            selection_read_only: AtomicBool::new(false),
+            ask_selection: Mutex::new(None),
             rewrite_last: Mutex::new(None),
             processing: AtomicBool::new(false),
             upload_cancel: AtomicBool::new(false),
@@ -886,6 +915,21 @@ impl Pipeline {
     /// press while any recording runs stops it, as the other keys do.
     pub fn on_assistant_key(&self, pressed: bool, at: Option<u64>) {
         self.shared.assistant_key(pressed, at);
+    }
+
+    /// Route an **Ask about the selection** shortcut press/release (the
+    /// hook): the press reads what's selected in the app in front (read-only
+    /// text too, as Read aloud does) — nothing: "Select some text first",
+    /// nothing recorded — then records a Voice Assistant question about it,
+    /// as the assistant's shortcut does. Never replaces the selection.
+    pub fn on_ask_key(&self, pressed: bool, at: Option<u64>) {
+        self.shared.ask_key(pressed, at, None);
+    }
+
+    /// The same from one of Yap's own windows (their in-page fallback: the
+    /// hook never sees keys there), with what's selected on its page.
+    pub fn on_ask_key_in_page(&self, pressed: bool, page_selection: Option<String>) {
+        self.shared.ask_key(pressed, None, Some(page_selection.unwrap_or_default()));
     }
 
     /// Route a **language shortcut**'s press/release (My languages,

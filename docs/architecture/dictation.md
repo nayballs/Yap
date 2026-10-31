@@ -246,7 +246,52 @@ to **Run again** from Home.
   read or pasted) with `e2e_target_window` — dictations and the shortcut go
   to a stand-in window no window has (`pipeline::test_target`), the only
   one `rewrite_target` takes in a test run; edit mode reads no selection in
-  a test run (`selection::capture_selection`, as every other read).
+  a test run (`selection::capture_selection`, as every other read) — only
+  the stand-in's staged one (`e2e_rewrite`'s `selection` / `readOnly`,
+  `pipeline::set_test_selection`).
+  **A question about the selection is answered, not pasted over it**
+  (2026-10-31; Wispr Flow's Command Mode / "Lens", by behaviour;
+  `dictation/ask_or_edit.rs`, below; Settings → Commands → Ask about
+  selected text → "Answer questions about the selected text",
+  `config.ask_about_selection`, on): `run_rewrite` with something selected
+  and words said (`ask_or_edit::route`, pure — nothing selected keeps
+  today's behaviour, the last dictation's rewrite included) decides first
+  (`settled`: read-only text — `capture_target` asks
+  `selection::focus_editable` once when it captured a selection,
+  `selection_read_only` — is always answered; else the rule; where the rule
+  can't tell, `decide` asks the Commands scope's model for a structured
+  `{"action": "replace" | "answer"}`, and anything but a clear "replace"
+  answers). Answered (`answer_about_selection`): the instruction corrected
+  (the dictionary, as the Voice Assistant's question), then
+  `assistant::ask_about(question, Selected { text, app })` — the Voice
+  Assistant's path ([chat-and-assistant.md](./chat-and-assistant.md#questions-about-selected-text-2026-10-31)):
+  "Thinking…" on the bar, Chat's model and effort, spoken when "Speak
+  replies" is on, the bar's card, kept in Chat with the selection as the
+  question's quote — and **nothing pasted**: `run_agent` (the only paste) is
+  never reached, the selection stays selected, and the clipboard edit
+  mode's Ctrl+C borrowed was put back exactly (`text_injector::copy_selection`).
+  The log says how it was decided (`decided`: "rule:ask", "model:replace",
+  "doubt:answer", "readOnly:answer"…), never the words; the robot's report
+  (`Rewritten`) has it too, and the outcome "answered". Off: every
+  instruction rewrites, as before.
+  **Ask about the selection's own shortcut** (unbound by default; always
+  answers, never replaces): `Pipeline::on_ask_key` (the hook's `ask-key-*`)
+  / `on_ask_key_in_page` (`ask_selection_key`, Yap's own windows, with what
+  their page has selected) → `Shared::ask_key`: a press that would start a
+  recording first reads the selection in the window in front
+  (`read_ask_selection`: `selection::read_selected`, as Read aloud reads it
+  — read-only text too; an edit control's own selection; Ctrl+C last,
+  never in a terminal) — none: "Select some text first"
+  (`assistant::selected::nothing_selected`, an alert) and nothing records;
+  off during meetings, as the assistant is — kept in `ask_selection`, then
+  records exactly as the Voice Assistant's shortcut (`ASSISTANT_ARMED` with
+  `ASK_ARMED`: toggle, push-to-talk's gestures; the capsule's "Ask about the
+  selection…", `assistant::listening(app, true)`). Its transcript goes to
+  `ask_assistant`, which hands it with the selection to
+  `assistant::ask_about`; any other recording drops a stale one
+  (`capture_target`). Test mode: `e2e_ask_selection { text, selection?,
+  listenMs? }` (the stand-in window's staged selection); robot mode
+  `realtest_ask_selection`.
   **The Voice Assistant's shortcut** (`Pipeline::on_assistant_key`, the
   hook's `assistant-key-*` or the in-page `assistant_key`): the same
   `on_key` (toggle / push-to-talk gestures; no coaching hints for it) with
@@ -492,7 +537,17 @@ to **Run again** from Home.
   `features`. "Show tips" or Feature tips off: none. The log says the kind,
   never the words. Test mode notices nothing unless a spec asks
   (`e2e_feature_tips`, which forgets those shown). Unit tests; e2e
-  `feature-tips.spec.js`.
+  `feature-tips.spec.js`. **"Yap recognised French"** (2026-10-31; Wispr
+  Flow's one-time "we auto-detected your language", by behaviour;
+  `language`, `language_due`, `language_text`): `languages::heard` calls it
+  the first time a dictation is sure to be in one of the person's
+  languages other than English with two or more picked
+  (`languages::recognised`: Whisper's own pick, at least `MIN_P`; or the
+  language read from Parakeet V3's or SenseVoice's text past `text_id::sure`
+  against their other languages; never an English-only model's) —
+  `Feature::Language` ("language" in hints.json's `features`), never in
+  `ORDER`, once ever, 10 minutes from any other tip, the same thread and
+  places (`show`); e2e `languages.spec.js`.
 - **`dictation/input_hook.rs`** — low-level Windows keyboard + mouse hooks; specs `kb:VKEY`,
   `kb:ctrl+shift+VKEY` (modifier combo; `win` is a modifier too, e.g. the
   meeting shortcut `kb:alt+win+77` = Win+Alt+M), `kb:165` (single right-side modifier, e.g.
@@ -501,7 +556,7 @@ to **Run again** from Home.
   (press = key down w/ required modifiers held, release = key up OR required
   modifier up; chords fire on completion; suppressed keys are excluded from the
   GetAsyncKeyState self-heal — the hook eats them before the key-state table
-  updates). Eleven bindings: dictation, edit (`edit-key-*`, Commands' rewrite
+  updates). Twelve bindings: dictation, edit (`edit-key-*`, Commands' rewrite
   shortcut), the meeting
   shortcut (`meeting-key-*`, `configure_meeting`; only its press is used —
   `meeting_guard`) and the Voice Assistant's (`assistant-key-*`,
@@ -526,11 +581,15 @@ to **Run again** from Home.
   **Send** (2026-10-29; `send-key-*`, `configure_send`/`_from`, unbound by
   default, giving way to all ten older ones, never Enter — first or "+ Add
   another", it would press itself again; its press only —
-  `pasting/send_key.rs` `press_soon`, [pasting.md](./pasting.md)). Beside them, **up to 12
+  `pasting/send_key.rs` `press_soon`, [pasting.md](./pasting.md)), then
+  **Ask about the selection** (2026-10-31; `ask-key-*`, `configure_ask`/`_from`,
+  unbound by default, giving way to all eleven older ones; press and
+  release, one of the hold keys, `HOLDS` — `Pipeline::on_ask_key`, below,
+  [chat-and-assistant.md](./chat-and-assistant.md#questions-about-selected-text-2026-10-31)). Beside them, **up to 12
   saved transforms' shortcuts** (`TRANSFORM_BINDINGS`, a slot each;
   `configure_transforms_from` at setup and every save,
   `transforms::assign` giving each transform with a key a slot in list
-  order unless it would fire with one of the eleven or an earlier
+  order unless it would fire with one of the twelve or an earlier
   transform's — left unbound, logged; `configure_transform(id, spec)` is
   Settings' pause while a key is picked); a slot's press goes to the
   forwarder as `transform-key-N` and out as one `transform-key-pressed`
@@ -541,8 +600,8 @@ to **Run again** from Home.
   `languages::assign`; their press and release go out as one
   `language-key {slot, pressed, at}` event — `dictation/languages.rs`
   below). **More shortcuts for one action** (2026-10-25, Wispr Flow's "Add
-  another"): each of the eleven fixed actions (`FIXED`, indexed by
-  `DICTATION`…`SEND`, with `FIXED_KEYS` / `FIXED_NAMES` /
+  another"): each of the twelve fixed actions (`FIXED`, indexed by
+  `DICTATION`…`ASK`, with `FIXED_KEYS` / `FIXED_NAMES` /
   `FIXED_EVENTS`) has its first shortcut (its old config field) and up to
   `MORE` (3) more (`MORE_BINDINGS`, `config.more_hotkeys`,
   `configure_more_from` at setup and every save; Settings' live pause
@@ -708,7 +767,50 @@ to **Run again** from Home.
   cleanup off it still runs on the words as said; no model or a failure
   pastes the text as it was (logged, lengths only). "Use what I said" swaps
   the paste back to the words as said. e2e `cleanup-strength.spec.js`.
-- **`dictation/languages.rs`** (+ `languages/catalog.rs`, `languages/nudge.rs`)
+- **`dictation/ask_or_edit.rs`** — **ask or edit?** (2026-10-31; Wispr
+  Flow's Command Mode, its "Lens", by behaviour): whether the rewrite
+  shortcut's words about a selection are an edit (the selection replaced,
+  as ever) or a question or a request for information ("what does this
+  mean?", "is this right?", "summarise this", "explain this error",
+  "translate this for me": answered on the Voice Assistant's path, nothing
+  pasted — `pipeline/rewrite.rs` `run_rewrite`, above). **Safe by design:
+  replaced only on a clear edit, answered when in doubt.** `rule` (pure): in
+  the person's own languages (My languages' codes, English always; none of
+  theirs known: all — as `assistant/screen.rs` counts a "this"): English,
+  French, German, Spanish, Italian, Portuguese and Dutch word lists per
+  `Lang` (fillers, polite "can you", question words, asking words, editing
+  words, what the text should become — "shorter", "more formal", "in
+  French", "as a list" —, translating and "for me"). The instruction's
+  first words after fillers decide by the **longest phrase that starts it,
+  in any category** (`start_of`: "make sense of" asks though "make" edits;
+  French "en anglais" is a translation though Dutch "en" is "and"; a tie
+  goes ask → translate → edit → question): asking or a question → `Ask`;
+  translating → `Edit`, unless it's for the person ("for me", "traduis-moi",
+  "tradúceme", "voor mij") → `Ask`; editing or what it should become →
+  `Edit` — one word asked ("Correct?", "Shorter?") is `Unsure`; a polite
+  "can you …" with neither after it is never decided by its question mark:
+  the last word in a language that puts the verb there ("kannst du das
+  kürzer machen?", "kun je dit uitleggen?"), else `Unsure`; otherwise a
+  question mark, or words that ask anywhere ("mean", "understand",
+  "bedeutet") → `Ask`; else `Unsure`. Risky words stay out of the edit
+  list ("use", "keep", "say", "put" and "number" alone: "use this to
+  answer…", "number of words?"). `settled` (pure): read-only text → answer;
+  else the rule. `decide`: an `Unsure` goes to the Commands scope's model
+  (`pipeline::commands_model`: its own provider, else the cleanup model;
+  ≤ 8 s, a model on this PC 15 s; its words in the network receipts as
+  Commands') with `PROMPT` and `messages` (the instruction and the
+  selection's first 300 characters, so "reply to this" about a mail can be
+  told from one about a draft); `parse` (pure) reads `{"action": …}` in a
+  code fence, with other fields or almost-JSON, or a first word "replace" /
+  "answer"; anything else — no model, an error, a timeout, garbage — is
+  answered (`By::Doubt`). `route` (pure): only with the switch on,
+  something selected (not the last dictation's rewrite) and words said.
+  The log: the decision's label and the time, never the words. Unit tests
+  (`ask_or_edit::tests`: a table of instructions in all seven languages,
+  the languages counted, the reply's parsing, the route); e2e
+  `ask-selection.spec.js` (fake-llm's `askOrEdit` kind); robot
+  `e2e-real/ask-selection.real.js` (written, not yet run).
+- **`dictation/languages.rs`** (+ `languages/catalog.rs`, `languages/nudge.rs`, `languages/text_id.rs`)
   — **My languages** (2026-10-25; Wispr Flow's languages and its "Speaking a
   different language?" nudge of 28 Sep, OpenWhispr's dual-language hotkeys
   request, by behaviour; Settings → Dictation → My languages,
@@ -752,7 +854,7 @@ to **Run again** from Home.
   `LanguageShortcut { id, language (code | "auto"), translateTo, hotkey }`,
   at most `MAX_SHORTCUTS` 4): `input_hook.rs`'s four language slots
   (`configure_languages_from`; `assign`, pure: never a key that fires with
-  one of the eleven fixed shortcuts (Paste last, Copy last, Quick note and Send included) or an earlier one; **transforms give way
+  one of the twelve fixed shortcuts (Paste last, Copy last, Quick note, Send and Ask about the selection included) or an earlier one; **transforms give way
   to them**, `transforms::fixed_shortcuts`), press **and release** as
   `language-key {slot, pressed, at}` (`init` → `Pipeline::on_language_key`),
   plus the in-page fallback (`language_key`). A press records exactly as the
@@ -791,14 +893,61 @@ to **Run again** from Home.
   (`notice::moment`, up to a minute; the policy holds the card too); at most
   one per 10 minutes, Not now twice or Don't ask → never again for that
   language (`<data>/language_nudges.json`); Add → `shell::settings::
-  change_config` (saved, applied, every window told). Only Whisper says
-  which language it heard: with any other model Settings says the nudge
-  can't work. Test mode: the stub engine's detection stands in
-  (`e2e_language_stage {shortcut?, heard?, fresh?}`, also the next
-  `e2e_dictation`'s language), `e2e_language_heard {heard, secs}` (a
+  change_config` (saved, applied, every window told). **Models that don't
+  say** (2026-10-31, `languages/text_id.rs`): only Whisper says which
+  language it heard, so for Parakeet V3 and SenseVoice (`Tells::Itself`) and
+  the English-only models (`catalog::english_only`: Parakeet V2, Moonshine,
+  Distil Whisper, the `.en` Whispers) `heard` reads it from the transcript
+  (`read_language`; never with a fixed language — a language shortcut or
+  the main shortcut's — nor for Canary and Cohere, which are told one: a
+  language added wouldn't change what they're told). `text_id::identify`
+  (pure, well under a millisecond, the first 1,000 characters, never the
+  network): the candidates are the model's languages and the person's
+  (`candidates`; an English-only model's are Parakeet V3's 25); a script one
+  language writes decides by itself (Greek, Hangul, kana, Han — Cantonese by
+  any of its own characters, `CANTONESE`); Maltese by ħ/ġ/ċ and its words
+  (whatlang has none); Latin and Cyrillic by two signals that must agree:
+  the most distinct **function words** (`WORDS`: ~60–100 per language —
+  articles, pronouns, prepositions, the commonest dictation words — for the
+  25, Norwegian, Catalan and English; a word in several lists counts for
+  each; elisions and hyphens split, "l'ancienne" → "l'") and **whatlang**'s
+  trigram profiles (0.16, MIT, ~0.3 MB; allowlisted to the same candidates).
+  `sure` (pure) wants at least `MIN_WORDS` 5 words (10 CJK characters),
+  `MIN_HITS` 2 of its own function words, more than any other candidate's
+  and more than twice the person's languages' (so English full of names or
+  code — "Ask Ingrid about the Göteborg office", "git rebase origin main" —
+  never reads as Swedish), and the trigrams agreeing. Measured on 262 + 159
+  (held out) fictional sentences in the 25 European languages, Chinese,
+  Cantonese, Japanese and Korean, and 60 English ones (45 full of foreign
+  names, brands, borrowed words and code): the language right 98% / 93% of
+  the time (whatlang alone 85%; lingua 99% but +145 MB); past the gate a
+  nudge for 86% / 70% of 5–9-word dictations and 99% / 88% of longer ones,
+  never a wrong language, never an English one. `nudge::text_verdict`
+  (pure) is `verdict` with `text_id::sure` in `MIN_P`'s place and the same
+  `limits` after (2 s, a language Yap knows, not turned down, 10 minutes
+  apart); its offer: "You spoke French · Add it to My languages?" ("Then AI
+  cleanup keeps your French dictations in French.", `read_prompt_text`), or
+  for an English-only model **"Parakeet V2 only knows English"** ("You
+  spoke French. Parakeet V3 writes French as you say it: switch to it in
+  Settings.", `model_prompt_text`, the model `catalog::recommend` names for
+  their languages and this one, an installed one first) with **Choose a
+  model** (`Kind::Model`: the language put in My languages, Settings opened
+  at it — `yap-open-settings` "dictation#languages" — where the model to
+  switch to is named; the model is never switched) — whatever My languages
+  holds, since the model can't write it. Whisper's detection on the audio
+  would catch more of an English-only model's dictations (its text is
+  English-ish words, rarely the language itself) but means loading a second
+  model (hundreds of MB, seconds of the processor) after every dictation:
+  not done. The log says the code, the word count and the hits, never the
+  text. Settings' "Tell me when I speak a language I didn't pick" says
+  which applies (`MyLanguages.svelte` `nudgeDesc`). Test mode: the stub
+  engine's detection stands in (`e2e_language_stage {shortcut?, heard?,
+  text?, fresh?}`, also the next `e2e_dictation`'s language; `text`: the
+  stub engine's transcript), `e2e_language_heard {heard?, text?, secs}` (a
   transcription in, without a mic), `e2e_language_slots`. Unit tests
-  (`languages::tests`, `catalog::tests`, `nudge::tests`, `input_hook`'s
-  language slots), e2e `languages.spec.js`, robot
+  (`languages::tests`, `catalog::tests`, `nudge::tests`, `text_id::tests`:
+  a sentence per language, English full of names and code, the gate,
+  `input_hook`'s language slots), e2e `languages.spec.js`, robot
   `e2e-real/languages.real.js`. **Hinglish** (2026-10-29; Wispr Flow's
   "Hindi in Latin letters", by behaviour; `languages/hinglish.rs`): with
   Hindi among My languages, the page offers "Write in Latin letters
@@ -1288,13 +1437,62 @@ to **Run again** from Home.
   `pipeline::apply_corrections` — so a mis-hearing split across two chunks is
   still caught — and a history record with the raw and corrected text) via the
   `transcribe_file` command.
-- **`dictation/sound.rs`** — start/stop chimes (volume + output-device aware); each
-  takes an optional `Played` callback, run on the chime's thread once it has
-  played (or at once when it can't; 3 s at most, `wait_played`: an output that
-  went mid-chime is never drained again, and the stop chime's mic release
-  waited for ever): how `dictation/mute.rs` goes after the start
-  chime and comes back after the stop chime. `open_output` (the configured
-  output device, else the default) is shared with `voice/tts.rs`.
+- **`dictation/sound.rs`** (+ `sound/packs.rs`) — **Yap's sounds, in packs**
+  (2026-10-31; one start/stop chime until then; Wispr Flow's "extra sounds and
+  sound packs"). **Moments** (`Cue`): a dictation starting and stopping,
+  going hands-free (push-to-talk's double-tap), cancelled (the bar's ✕, the
+  tray's Cancel — never a lone tap or a chord Yap throws away itself), an
+  error ("Couldn't paste": the paste left on the clipboard in a dictation,
+  a rewrite or a transform; and every `yap-state` "error" the pipeline says,
+  through `Shared::say_failed` — no microphone, a failed transcription or
+  rewrite, a crash, a mic unplugged), "Taking longer than usual…"
+  (`pipeline/slow.rs`; not "Loading the AI model…"), meeting notes starting
+  and stopping, and a card on the Yap bar (`bar.rs` `repick`: the first time
+  a card is really on screen; never the Voice Assistant's answer, which Yap
+  speaks, nor a card updated in place). None where Yap already speaks.
+  Settings → Dictation → **Sounds** (`settings/SoundsSettings.svelte`,
+  `core/sounds.js`): the master switch and volume (`sound_enabled`,
+  `audio_feedback_volume`, as before), the **pack** (`sound_pack`: Classic,
+  Soft, Crisp, Minimal; ▶ plays its whole set one after another, ■ stops
+  it: `sound_preview` / `sound_preview_stop`, refused while a meeting
+  records), the output device, and **a switch per moment** with its own ▶
+  (start, stop, hands-free, cancelled on; error, slow, meeting notes, a bar
+  card off; an existing config keeps only start and stop: `migrate_once`
+  v6). **The packs are made from numbers as they play** (`packs.rs`, no
+  sound files): each sound a few notes — a sine, a warm sine (2nd and 3rd
+  harmonics), FM (a bell at ratio 2, glass at 3.5, a reed at 1; its index
+  fading with the note) or a noise tick (a fixed-seed xorshift, one-pole
+  high-passed) — under a linear attack and an exponential fall to −66 dB,
+  pitches gliding exponentially. Classic's start and stop are the chime Yap
+  always played (OpenWhispr's C5→E5 / D5→A4, sample for sample); every
+  pack's start rises and its stop falls; every sound is under 300 ms and
+  peaks at 0.2 × the volume at most (unit-tested: every pack has every
+  moment, lengths, peaks, energy against Classic's, no click at either end,
+  start and stop told apart, Classic unchanged). **When they play**: the
+  settings are cached here (`sync`, at start-up and on every save). A
+  dictation's start, stop and cancel (`play`) play at once with an optional
+  `Played` callback, run on the sound's thread once it has played (or at
+  once when it's off or can't; 3 s at most, `wait_played`: an output that
+  went mid-sound is never drained again, and the stop's mic release waited
+  for ever): how `dictation/mute.rs` goes after the start sound and comes
+  back after the stop's — a cancel now plays its sound before the mic is
+  let go and the other apps come back, as a stop does
+  (`Shared::sound_then_release`). The start follows the mic's first audio,
+  never the key, as before; going hands-free before it played (a cold mic)
+  plays after it (`LOCKED_EARLY`). The other moments (`cue`) wait for a
+  sound still playing (600 ms at most), so two never overlap; a card's
+  sound never plays while a dictation records or within 1.5 s of another
+  sound (its error's). **Never into a meeting's notes**: while a meeting
+  records nothing plays but a dictation's start and stop, which always
+  have (`meeting_allows`; the rule spoken replies follow, `tts::
+  meeting_quiet`); meeting notes' own start sound plays to its end before
+  `meeting::start` opens the loopback (`meeting_started`, a quarter of a
+  second), their stop sound once the capture has closed its streams
+  (`meeting_stopped`, `meeting::capturing`). `open_output` (the configured
+  output device, else the default) is shared with `voice/tts.rs`. **Test
+  mode** opens no device: what would play is kept for the debug-only
+  `sound_e2e_heard` (`"minimal.locked"`), each sound "lasting" its length
+  (robot mode plays them). E2E: `e2e/sounds.spec.js`.
 - **`dictation/mute.rs`** — **other apps' sound while you dictate** (2026-10-17; it
   replaced the old endpoint mute, which silenced Yap's own start chime and
   any call): **"Silence other apps while you dictate"**

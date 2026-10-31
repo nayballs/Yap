@@ -87,6 +87,7 @@ fn apply_config(app: &AppHandle, state: State<'_, AppState>, prev: &YapConfig, c
     crate::dictation::input_hook::configure_copy_last_from(&cfg);
     crate::dictation::input_hook::configure_quick_note_from(&cfg);
     crate::dictation::input_hook::configure_send_from(&cfg);
+    crate::dictation::input_hook::configure_ask_from(&cfg);
     crate::dictation::input_hook::configure_more_from(&cfg);
     crate::dictation::input_hook::configure_languages_from(&cfg);
     crate::dictation::input_hook::configure_transforms_from(&cfg);
@@ -115,6 +116,8 @@ fn apply_config(app: &AppHandle, state: State<'_, AppState>, prev: &YapConfig, c
         crate::dictation::stt_speed::reload_if_needed(&app);
     }
     crate::voice::tts::set_volume(cfg.tts_volume);
+    // Yap's sounds: the pack, the volume, each moment's switch (sound.rs).
+    crate::dictation::sound::sync(&cfg);
     // The tray is reconciled on every save (always-on since the pill retired) —
     // reconcile it live instead of waiting for the next app restart.
     crate::shell::tray::ensure_tray(&app, &cfg);

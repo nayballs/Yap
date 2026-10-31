@@ -1187,14 +1187,23 @@ static MIC_ASKED: Mutex<Option<(String, String)>> = Mutex::new(None);
 /// after (Switch to Zoom?, a resume) opens its mic first, and the old
 /// thread's end must never clear what the new one noted.
 static CAPTURES: AtomicU64 = AtomicU64::new(0);
+/// The capture thread whose streams are open now (0: none).
+static CAPTURING: AtomicU64 = AtomicU64::new(0);
 
 /// A capture thread starts: its number. Nothing is noted, and nothing is
 /// asked of it yet (a move asked of the last recording is let go).
 pub(crate) fn new_capture() -> u64 {
     let capture = CAPTURES.fetch_add(1, Ordering::SeqCst) + 1;
+    CAPTURING.store(capture, Ordering::SeqCst);
     note_mic(capture, None);
     take_mic_asked();
     capture
+}
+
+/// A meeting's capture has its streams open — the loopback among them:
+/// meeting notes' stop sound waits for it to close (`sound::meeting_stopped`).
+pub fn capturing() -> bool {
+    CAPTURING.load(Ordering::SeqCst) != 0
 }
 
 /// Capture thread `capture` says which mic "You" is on — unless a newer
@@ -1208,6 +1217,7 @@ fn note_mic(capture: u64, mic: Option<(String, String)>) {
 
 /// Capture thread `capture` stopped: no mic, unless a newer one is up.
 fn capture_ended(capture: u64) {
+    let _ = CAPTURING.compare_exchange(capture, 0, Ordering::SeqCst, Ordering::SeqCst);
     note_mic(capture, None);
 }
 
@@ -1426,6 +1436,7 @@ fn spawn_device_capture(
                     Some(stream)
                 }
                 Err(e) => {
+                    capture_ended(follow.capture);
                     let _ = ready_tx.send(Err(e));
                     return;
                 }
@@ -2128,6 +2139,9 @@ pub fn start(app: AppHandle, engine_slot: EngineSlot, note_id: u64) -> Result<()
     // A spoken reply stops before the call is heard (tts.rs; and nothing
     // is read aloud while this records).
     crate::voice::tts::stop();
+    // Meeting notes' start sound, if it's on: played to its end before the
+    // loopback opens, so "Them" never hears it (sound.rs).
+    crate::dictation::sound::meeting_started();
 
     let mic_buf = Captured::mic();
     let sys_buf = Captured::call();
@@ -2356,7 +2370,11 @@ pub fn stop() -> Result<(), String> {
     let guard = slot();
     match guard.session() {
         Some(s) => {
-            s.stop.store(true, Ordering::SeqCst);
+            // Its stop sound, if it's on, once the capture has closed (the
+            // first stop asked only).
+            if !s.stop.swap(true, Ordering::SeqCst) {
+                crate::dictation::sound::meeting_stopped();
+            }
             Ok(())
         }
         None => Err("No meeting is being recorded".to_string()),

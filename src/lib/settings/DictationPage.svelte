@@ -13,18 +13,16 @@
   import Row from '../ui/Row.svelte';
   import Toggle from '../ui/Toggle.svelte';
   import Select from '../ui/Select.svelte';
-  import Slider from '../ui/Slider.svelte';
   import Segmented from '../ui/Segmented.svelte';
   import LinkRow from '../ui/LinkRow.svelte';
   import SettingsHotkey from './SettingsHotkey.svelte';
   import MicOrder from './MicOrder.svelte';
+  import SoundsSettings from './SoundsSettings.svelte';
   import Button from '../ui/Button.svelte';
   import { fillHotkey, isCopilotKey } from '../core/hotkeys.js';
   import { PROVIDER_DESTINATIONS } from '../core/providers.js';
 
   let { cfg, outputs = [], onshowview = null, goto = null } = $props();
-
-  const outputOptions = $derived([{ value: null, label: 'System default' }, ...outputs.map((d) => ({ value: d, label: d }))]);
 
   const MODES = [
     { value: 'toggle', label: 'Toggle' },
@@ -149,30 +147,14 @@
       hint="Windows then shows the microphone in use the whole time Yap runs, and a Bluetooth headset switches to call-quality sound. Off, the microphone turns on when you dictate and off a minute after (at once on Bluetooth)."
     />
   </Row>
-  <Row label="Chime when recording starts and stops" setting="chime">
-    <Slider
-      inline
-      bind:value={cfg.audioFeedbackVolume}
-      min={0}
-      max={1}
-      step={0.05}
-      label="Chime volume"
-      disabled={!cfg.soundEnabled}
-      format={(v) => `${Math.round(Number(v) * 100)}%`}
-    />
-    <Toggle bind:checked={cfg.soundEnabled} ariaLabel="Chime when recording starts and stops" />
-  </Row>
-  <Row label="Chime plays on" desc="The speakers or headset for the chime" setting="chime-output">
-    <Select bind:value={cfg.outputDevice} options={outputOptions} ariaLabel="Chime plays on" wide disabled={!cfg.soundEnabled} />
-  </Row>
   <!-- Other apps' sound while you dictate (dictation/mute.rs, dictation/media_pause.rs): after
-       the start chime, back after the stop chime. -->
+       the start sound, back after the stop sound. -->
   <Row setting="quiet-other-apps">
     <Toggle
       bind:checked={cfg.quietOtherApps}
       label="Silence other apps while you dictate"
       desc="Music, videos and games go quiet, then come back as they were"
-      hint="Yap's chime still plays, and calls are never silenced: not Teams, Zoom or a meeting in your browser."
+      hint="Yap's own sounds still play, and calls are never silenced: not Teams, Zoom or a meeting in your browser."
     />
   </Row>
   <Row setting="pause-media">
@@ -183,6 +165,9 @@
     />
   </Row>
 </Group>
+
+<!-- Yap's sounds: the pack, the volume, each moment's switch (dictation/sound.rs). -->
+<SoundsSettings {cfg} {outputs} />
 
 <Group title="While you dictate" id="settings-while-dictating">
   <Row setting="live-preview">

@@ -334,11 +334,23 @@ style neither).
   2026-10-29; the Help menu's Microphone help lands here): "Find my best
   microphone" loads `components/MicQuiz.svelte` (`dictation/mic_quiz.rs`),
   whose "Use this one" puts a microphone first in Settings' copy of the
-  order (the auto-save saves it). "Chime when recording starts and stops" (the
-  volume slider and the switch on one row: `audioFeedbackVolume`,
-  `soundEnabled`), "Chime plays on" (`outputDevice`), "Silence other apps while
+  order (the auto-save saves it). "Silence other apps while
   you dictate" (`quietOtherApps`; ⓘ: calls are never silenced), "Pause music
-  and videos while you dictate" (`pauseMedia`). **While you dictate**: "Live
+  and videos while you dictate" (`pauseMedia`). **Sounds**
+  (`SoundsSettings.svelte`, 2026-10-31; the packs and moments in
+  `core/sounds.js`, the sounds made in `dictation/sound/packs.rs`): "Sounds"
+  (the volume slider and the switch on one row: `audioFeedbackVolume`,
+  `soundEnabled`; anchor `chime`, as the old "Chime when recording starts and
+  stops"), "Sound pack" (a radio group of Classic, Soft, Crisp and Minimal →
+  `soundPack`, each with ▶ beside it: `sound_preview` plays its whole set,
+  ■ stops it), "Sounds play on" (`outputDevice`, anchor `chime-output`),
+  then a row per moment, its ▶ (that sound in the pack picked) and its
+  switch: Dictation starts / stops, Hands-free, Dictation cancelled,
+  Something went wrong, Taking longer than usual, Meeting notes start and
+  stop, A notice on the Yap bar (`soundStart` … `soundNotice`). With Sounds
+  off the pack, the device and the switches are greyed out (kept as they
+  were); ▶ still plays, to listen before switching them on. **While you
+  dictate**: "Live
   preview on the Yap bar" (`streamingPartials`), "Offer what you said after AI
   cleanup" (`asSaidOffer`, off since 2026-10-25: the bar's "Cleaned up · Use what I said",
   `pasting/as_said.rs`), "Cancel and finish buttons"
@@ -359,8 +371,11 @@ style neither).
   (dictations never show up in Win+V history), and the **Dictionary** link row
   (its counts; it leaves Settings for the Dictionary view, `onshowview`).
 - **Shortcuts** (`settings/ShortcutsPage.svelte`, OpenWhispr's Hotkeys page):
-  the ten global shortcuts together — Dictate, Rewrite selected text, Ask the
-  Voice Assistant, Read aloud, **Use what I said** (`asSaidHotkey`, unbound
+  the twelve global shortcuts together — Dictate, Rewrite selected text, Ask the
+  Voice Assistant, **Ask about the selection** (`askHotkey`,
+  `shortcut-ask`, 2026-10-31, unbound by default: a question about the
+  selected text, answered and never replacing it; its in-page fallback
+  `ask_selection_key` sends the page's own selection), Read aloud, **Use what I said** (`asSaidHotkey`, unbound
   by default; `pasting/as_said.rs`), **Paste last transcript**
   (`pasteLastHotkey`, `shortcut-paste-last`) and **Copy last transcript**
   (`copyLastHotkey`, `shortcut-copy-last`, its hint: out of Win+V history,
@@ -438,7 +453,13 @@ style neither).
   **"Rewrite your last dictation when nothing is selected"** ·
   "Within a minute, in the same field" (`#rewrite-last`,
   `rewriteLastDictation`, on; in the search index with its switch; the
-  rules in `pasting/as_said.rs`, [pasting.md](./pasting.md)). **Transforms**
+  rules in `pasting/as_said.rs`, [pasting.md](./pasting.md)). **Ask about
+  selected text** (`#settings-ask-selection`, 2026-10-31): "Answer
+  questions about the selected text" (`#ask-about-selection`,
+  `askAboutSelection`, on; `dictation/ask_or_edit.rs`) and **Ask about the
+  selection** (`#ask-shortcut`, `askHotkey`, clearable; also on Shortcuts;
+  `chat/assistant/selected.rs`, [chat-and-assistant.md](./chat-and-assistant.md#questions-about-selected-text-2026-10-31)) —
+  a group of its own, so the rewrite group keeps one shortcut. **Transforms**
   (`#settings-transforms`, `settings/TransformsSettings.svelte` +
   `settings/transforms.js`, `dictation/transforms.rs`; 2026-10-24): "Rewrite the
   selected text in one press, without saying anything. With nothing

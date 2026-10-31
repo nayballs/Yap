@@ -1724,12 +1724,16 @@ pub struct Selection {
 /// The passage a question was asked about, kept with it
 /// (`ChatMessage::quote`): the quote above the question in Chat, and in the
 /// history the model reads later. An older Yap's save drops it: the
-/// question stays, without its quote.
+/// question stays, without its quote. Text selected in another app and
+/// asked about (`assistant/selected.rs`) has no note (`note_id` 0) and says
+/// which app (`app`, its process name); an older Yap drops `app`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Quote {
     pub note_id: u64,
     pub text: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub app: String,
 }
 
 /// The most of a selection kept with its question.
@@ -1739,7 +1743,7 @@ impl Selection {
     /// What's kept with the question.
     pub fn quote(&self) -> Option<Quote> {
         let text: String = self.text.trim().chars().take(QUOTE_CHARS).collect();
-        (!text.is_empty()).then_some(Quote { note_id: self.note_id, text })
+        (!text.is_empty()).then_some(Quote { note_id: self.note_id, text, app: String::new() })
     }
 }
 
@@ -2662,7 +2666,7 @@ mod tests {
         let by_words = Selection { from_line: None, to_line: None, ..sel.clone() };
         assert!(selection_note(&by_words, Some(ToolSet::Rich)).unwrap().contains(&list.id));
         // Kept with the question: its note and words, bounded.
-        assert_eq!(sel.quote(), Some(Quote { note_id: id, text: "A stove\nTwo pans\nA kettle".into() }));
+        assert_eq!(sel.quote(), Some(Quote { note_id: id, text: "A stove\nTwo pans\nA kettle".into(), app: String::new() }));
         assert_eq!(Selection { text: "  ".into(), ..sel.clone() }.quote(), None);
         assert!(selection_note(&Selection { note_id: 999_999, ..sel }, Some(ToolSet::Rich)).is_none());
     }
