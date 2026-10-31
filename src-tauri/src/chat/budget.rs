@@ -90,9 +90,26 @@ pub const ASSISTANT_MOST: u64 = 6_000;
 /// Each message's own tokens besides its text (its role, the chat
 /// template's marks).
 pub const MESSAGE_OVERHEAD: u64 = 6;
-/// A screenshot sent again with the history (`snip::turn::with_history_images`
-/// sends the newest three; the rest are a line).
+/// A picture of unknown size (an older Yap kept no width and height).
 pub const IMAGE_TOKENS: u64 = 1_000;
+
+/// **What a picture costs**, by its size: Anthropic's published rule, the
+/// pixels over 750, after the picture is brought within a 1,568-pixel long
+/// edge and 1.15 megapixels, and at least 85 (a small tile's cost at
+/// OpenAI). A full-HD screenshot ≈ 1,530; a snip of an error message (400 ×
+/// 200) ≈ 110. Until 31 Oct 2026 every picture counted 1,000, so three small
+/// snips didn't fit beside Chat's own prompt on Groq's free plan (8,000
+/// tokens a minute). Pure.
+pub fn image_tokens(w: u32, h: u32) -> u64 {
+    if w == 0 || h == 0 {
+        return IMAGE_TOKENS;
+    }
+    let (w, h) = (f64::from(w), f64::from(h));
+    let edge = (1_568.0 / w.max(h)).min(1.0);
+    let area = (1_150_000.0 / (w * h * edge * edge)).sqrt().min(1.0);
+    let scale = edge * area;
+    ((w * scale * h * scale / 750.0).ceil() as u64).max(85)
+}
 /// How many earlier screenshots go again whole.
 const IMAGES_AGAIN: usize = 3;
 /// Groq's free plan: tokens a minute, until Groq's own header says.
@@ -335,9 +352,9 @@ pub async fn message_costs(counter: &Counter, messages: &[ChatMessage], replay: 
     // Screenshots: the newest few sent again whole.
     let mut whole = IMAGES_AGAIN;
     for (i, m) in messages.iter().enumerate().rev() {
-        for _ in &m.images {
+        for img in &m.images {
             if whole > 0 {
-                costs[i] += IMAGE_TOKENS;
+                costs[i] += image_tokens(img.w, img.h);
                 whole -= 1;
             } else {
                 costs[i] += 20;
@@ -499,10 +516,17 @@ pub fn plain_error(err: String, label: &str, context: u64, provider: &str) -> St
     }
     if let Some(at) = err.find(crate::ai::llm::TOO_MUCH_A_MINUTE) {
         let limit: u64 = err[at + crate::ai::llm::TOO_MUCH_A_MINUTE.len()..].trim().parse().unwrap_or(0);
-        let who = crate::privacy::net::provider_name(provider);
-        return format!("{TOO_LONG}{label} on your {who} plan ({} tokens a minute).", thousands(limit));
+        return too_much_a_minute(label, provider, limit);
     }
     err
+}
+
+/// "That's too long for GPT-OSS 20B on your Groq plan (8,000 tokens a
+/// minute)." — the plan's limit, not the model's context, is what's short.
+/// Pure.
+pub fn too_much_a_minute(label: &str, provider: &str, tokens_per_minute: u64) -> String {
+    let who = crate::privacy::net::provider_name(provider);
+    format!("{TOO_LONG}{label} on your {who} plan ({} tokens a minute).", thousands(tokens_per_minute))
 }
 
 /// "8,000". Pure.
@@ -538,8 +562,13 @@ pub fn heard_rate_limit(provider: &str, tokens_per_minute: u64) {
 /// 90% of its tokens a minute (Groq's free plan, 8,000, until Groq says).
 /// `None`: no such limit known.
 pub fn rate_cap(provider: &str) -> Option<u64> {
+    rate_limit(provider).map(|t| t * 9 / 10)
+}
+
+/// The key's plan's tokens a minute itself (what the person is told).
+pub fn rate_limit(provider: &str) -> Option<u64> {
     let known = RATES.lock().ok().and_then(|g| g.as_ref().and_then(|m| m.get(provider).copied()));
-    known.or((provider == "groq").then_some(GROQ_FREE_TPM)).map(|t| t * 9 / 10)
+    known.or((provider == "groq").then_some(GROQ_FREE_TPM))
 }
 
 /// The most a request to `model` may carry so it stays at the model's
@@ -1095,6 +1124,34 @@ mod tests {
         let m = |images: usize| ChatMessage { role: "user".into(), text: "hi".into(), images: (0..images).map(|_| img()).collect(), ..Default::default() };
         let costs = message_costs(&Counter::estimate_only(), &[m(2), m(0), m(2)], false).await;
         let base = estimate("hi") + MESSAGE_OVERHEAD;
-        assert_eq!(costs, vec![base + IMAGE_TOKENS + 20, base, base + 2 * IMAGE_TOKENS]);
+        assert_eq!(costs, vec![base + 85 + 20, base, base + 2 * 85]);
+    }
+
+    #[test]
+    fn a_picture_costs_by_its_size() {
+        // A tiny snip: the least; a snip of an error message; a full-HD
+        // screenshot (brought within the long edge and the megapixels); a
+        // 4K one costs no more than that; no size known: as before.
+        assert_eq!(image_tokens(64, 48), 85);
+        assert_eq!(image_tokens(400, 200), 107);
+        let hd = image_tokens(1_920, 1_080);
+        assert!((1_500..=1_540).contains(&hd), "{hd}");
+        assert_eq!(image_tokens(3_840, 2_160), hd);
+        assert!(image_tokens(1_080, 1_920) <= 1_540);
+        assert_eq!(image_tokens(0, 0), IMAGE_TOKENS);
+    }
+
+    #[test]
+    fn too_much_for_a_plan_says_the_plan() {
+        assert_eq!(
+            too_much_a_minute("Qwen3.8 27B", "groq", 8_000),
+            "That's too long for Qwen3.8 27B on your Groq plan (8,000 tokens a minute)."
+        );
+        assert_eq!(
+            plain_error(format!("{}8000", crate::ai::llm::TOO_MUCH_A_MINUTE), "GPT-OSS 20B", 131_072, "groq"),
+            "That's too long for GPT-OSS 20B on your Groq plan (8,000 tokens a minute)."
+        );
+        assert_eq!(rate_limit("groq"), Some(GROQ_FREE_TPM));
+        assert_eq!(rate_cap("groq"), Some(GROQ_FREE_TPM * 9 / 10));
     }
 }

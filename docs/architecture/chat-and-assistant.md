@@ -2151,7 +2151,13 @@ a technical error.
    a self-hosted one) is counted by its own `/tokenize`, cached; a server
    without it isn't asked again. An earlier web answer's replayed search
    counts (`chats::history_message`), and the newest three screenshots sent
-   again (1,000 tokens each).
+   again, each by its size (`image_tokens`, since 2026-10-31: Anthropic's
+   pixels ÷ 750 within a 1,568-pixel edge and 1.15 MP, at least 85 — a
+   full-HD screenshot ≈ 1,530, a 400 × 200 snip ≈ 110; 1,000 each before,
+   and an unknown size still). A question too long only for the key's plan
+   (Groq's free 8,000 tokens a minute) says so: "That's too long for
+   Qwen3.8 27B on your Groq plan (8,000 tokens a minute)." (`too_much_a_minute`),
+   not the model's context.
 5. **The window** (`budget::plan`): every message when they fit — with a
    summary written, only while they take half the room or less (a much
    bigger model since); else **the summary and the messages after it**;

@@ -327,13 +327,20 @@ async fn answer_turn(
     // The question as sent: its text, and the screenshots it carries.
     let question_tokens = counter.count(&text).await
         + crate::chat::budget::MESSAGE_OVERHEAD
-        + crate::chat::budget::IMAGE_TOKENS * crate::snip::turn::images().iter().filter(|i| !i.as_text).count() as u64;
+        + crate::snip::turn::images().iter().filter(|i| !i.as_text).map(|i| crate::chat::budget::image_tokens(i.w, i.h)).sum::<u64>();
     let rate_cap = crate::chat::budget::rate_cap(&provider);
     if mode != crate::chat::budget::Mode::Messages {
         let stable = stable_prompt(&cfg, &persona, tools_supported, doc_tools, web_lines, web_on, calendar_on, &profile, now);
-        let guess = crate::chat::budget::budget(context_size, context_known, counter.count(&stable).await + schemas, kind, tools_supported, rate_cap);
+        let fixed_now = counter.count(&stable).await + schemas;
+        let guess = crate::chat::budget::budget(context_size, context_known, fixed_now, kind, tools_supported, rate_cap);
         if question_tokens > guess.history {
             tracing::info!(question_tokens, room = guess.history, context = context_size, "Chat: the question is too long for the model; not sent");
+            // The plan's tokens a minute, not the model's context, when
+            // that's what's short (it read "too long for … (128K context)").
+            let roomy = crate::chat::budget::budget(context_size, context_known, fixed_now, kind, tools_supported, None);
+            if let Some(tpm) = crate::chat::budget::rate_limit(&provider).filter(|_| question_tokens <= roomy.history) {
+                return Err(crate::chat::budget::too_much_a_minute(&label, &provider, tpm));
+            }
             return Err(crate::chat::budget::too_long(&label, context_size));
         }
     }
