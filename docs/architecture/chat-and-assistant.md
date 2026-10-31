@@ -1228,6 +1228,67 @@ The AI Chat surface (conversations, the tool-calling loop and its note tools) an
   `assistant-screen.spec.js` (fake monitors and a fake window in front
   through `e2e_snip {start: false}`, `snip::take_fake`: never the real
   screen).
+- **`chat/assistant/selected.rs`** — a question about text selected in
+  another app ([below](#questions-about-selected-text-2026-10-31)): the
+  `Selected { text, app }` a turn is about (a task-local, `with` /
+  `current`), what the model is told (`context_note`), the quote kept with
+  the question (`quote`), "Select some text first" (`nothing_selected`,
+  kind `askNoSelection`).
+
+## Questions about selected text (2026-10-31)
+
+Wispr Flow's Command Mode ("Wispr Lens": "select text and ask Flow") by
+behaviour: select text in any app and ask about it — "what does this mean?",
+"is this right?", "summarise this", "explain this error", "translate this
+for me" — and get the answer **without the text being replaced**. Two ways
+in:
+
+- **The rewrite shortcut** (Commands) on a selection, when what was said is a
+  question rather than an edit: `dictation/ask_or_edit.rs` decides (a cheap
+  rule in the person's languages, then the Commands model's structured
+  `{"action": "replace" | "answer"}`; in doubt, answered; read-only text
+  always answered — [dictation.md](./dictation.md)). "Answer questions
+  about the selected text" (Settings → Commands → Ask about selected text,
+  `ask_about_selection`, on) turns it off. Nothing selected: the rewrite
+  shortcut as ever (the last dictation, or new text).
+- **Ask about the selection** (its own shortcut, unbound by default;
+  Settings → Shortcuts and Commands, the Help sheet): always answers, never
+  replaces. The press reads the selection in the window in front as Read
+  aloud does (`selection::read_selected`: read-only text too, an edit
+  control's own selection, Ctrl+C last — every clipboard format kept and put
+  back — never in a terminal); nothing: "Select some text first" and
+  nothing records. Then it records as the assistant's shortcut does
+  (toggle, push-to-talk's hold and double-tap; "Ask about the selection…" on
+  the capsule, `yap-assistant {about: "selection"}`); off during meetings.
+  In Yap's own windows the in-page fallback (`ask_selection_key`) sends what
+  the page has selected (`pageSelectionText`, `stores/speech.svelte.js`).
+
+Either way `assistant::ask_about(question, Selected)` asks as a spoken
+question is asked (`answer`, `Asker::Shortcut`, a new generation:
+"Thinking…", then "Speaking…" when "Speak replies" is on, the bar's answer
+card unless Chat is in view, the conversation chosen as for any spoken
+question so the shortcut or Chat follows up there), with differences:
+**nothing else goes with it** — no window in front looked at, no
+screenshots from Chat's box, no document passage, never an app opened
+(`chat_turn` skips `apps::plan_for`) or a search forced first for a model
+on this PC; **the model is told the selection** (`context_note` in the
+question's context — or the system prompt for a model without tools —
+beside the document passage's place: which app, the text up to
+`room(context)` characters, 4,000 or 12,000 for a long context, cut short
+said so, and "this" means it; answer here, never rewrite it to be pasted
+back), and `steer`'s document nudge is left out; **the question keeps it as
+its quote** (`Quote { noteId: 0, text (600 characters), app }`: above the
+question in Chat, "Selected in Notepad", `ChatMessage.svelte`; in the
+history the model reads later as "(About this text the user selected in
+notepad: "…")", `ChatMessage::sent_text`, so a follow-up still knows what
+"this" was). Chat's model and effort (`ai/effort.rs`), web search when it's
+on. **Never typed into the app**: nothing is pasted, the selection stays
+selected and the clipboard as it was. **Network receipts**:
+`Feature::AssistantSelection`, "Voice Assistant + the selected text · Groq".
+Logs: lengths and how it was decided, never the text. Unit tests
+(`selected::tests`, `ask_or_edit::tests`, `input_hook`'s Ask shortcut);
+e2e `ask-selection.spec.js`; robot `e2e-real/ask-selection.real.js`
+(written, not yet run).
 
 ## Strong models' documents, researched as the Claude app does (2026-10-31)
 

@@ -153,6 +153,13 @@ pub fn configure_send_hotkey(spec: String) {
     let _ = crate::dictation::input_hook::configure_send(&spec);
 }
 
+/// Live-apply the **Ask about the selection** shortcut (empty = unbound;
+/// Settings pauses it while a key is picked, as for the others).
+#[tauri::command]
+pub fn configure_ask_hotkey(spec: String) {
+    let _ = crate::dictation::input_hook::configure_ask(&spec);
+}
+
 /// Live-apply an action's more shortcuts ("+ Add another"; `target`: its
 /// first shortcut's config key, "hotkey"…): Settings pauses the one being
 /// picked with "", then puts the list back. The save applies them with
@@ -190,13 +197,21 @@ pub async fn e2e_dictation(state: State<'_, AppState>, text: String) -> Result<c
 
 /// Debug-only, test mode: the rewrite shortcut with `text` as what was
 /// said, in the window a dictation goes to (`e2e_target_window`'s stand-in,
-/// or none). Nothing is selected (a test run reads no selection), so the
-/// last dictation is rewritten when "Rewrite your last dictation" takes it,
-/// else new text is written — the AI asked either way, nothing read or
-/// pasted. Returns what it did.
+/// or none). Nothing is selected (a test run reads no selection) — unless
+/// `selection` stands in for what the stand-in window has selected
+/// (`read_only`: read-only text) — so the last dictation is rewritten when
+/// "Rewrite your last dictation" takes it, else new text is written; a
+/// selection is rewritten, or a question about it answered on the Voice
+/// Assistant's path (`ask_or_edit.rs`). Nothing read or pasted. Returns
+/// what it did.
 #[cfg(debug_assertions)]
 #[tauri::command]
-pub async fn e2e_rewrite(state: State<'_, AppState>, text: String) -> Result<crate::dictation::pipeline::Rewritten, String> {
+pub async fn e2e_rewrite(
+    state: State<'_, AppState>,
+    text: String,
+    selection: Option<String>,
+    read_only: Option<bool>,
+) -> Result<crate::dictation::pipeline::Rewritten, String> {
     if !crate::shell::e2e::active() {
         return Err("e2e_rewrite is for test runs".into());
     }
@@ -204,7 +219,40 @@ pub async fn e2e_rewrite(state: State<'_, AppState>, text: String) -> Result<cra
         let guard = state.pipeline.lock().map_err(|_| "the pipeline lock is poisoned")?;
         guard.as_ref().ok_or("no pipeline")?.robot()
     };
-    robot.rewrite_text(text, None).await
+    crate::dictation::pipeline::set_test_selection(selection.map(|s| (s, read_only.unwrap_or(false))));
+    let out = robot.rewrite_text(text, None).await;
+    crate::dictation::pipeline::set_test_selection(None);
+    out
+}
+
+/// Debug-only, test mode: **Ask about the selection**'s shortcut with
+/// `text` as the question, in the stand-in window (`e2e_target_window`)
+/// whose selection is `selection` (none: nothing selected — "Select some
+/// text first", nothing asked). "Listening" on the capsule for
+/// `listen_ms`, then the question, from the dictionary on. Nothing read or
+/// pasted.
+#[cfg(debug_assertions)]
+#[tauri::command]
+pub async fn e2e_ask_selection(
+    state: State<'_, AppState>,
+    text: String,
+    selection: Option<String>,
+    listen_ms: Option<u64>,
+) -> Result<(), String> {
+    if !crate::shell::e2e::active() || crate::shell::realtest::on() {
+        return Err("e2e_ask_selection is for test runs (not robot mode)".into());
+    }
+    if crate::dictation::pipeline::test_target().is_none() {
+        return Err("e2e_ask_selection needs e2e_target_window on".into());
+    }
+    let robot = {
+        let guard = state.pipeline.lock().map_err(|_| "the pipeline lock is poisoned")?;
+        guard.as_ref().ok_or("no pipeline")?.robot()
+    };
+    crate::dictation::pipeline::set_test_selection(Some((selection.unwrap_or_default(), false)));
+    let out = robot.ask_about_selection(text, listen_ms.unwrap_or(0)).await;
+    crate::dictation::pipeline::set_test_selection(None);
+    out
 }
 
 /// Debug-only, test mode: dictations and the rewrite shortcut go to a
@@ -230,6 +278,19 @@ pub fn assistant_key(state: State<'_, AppState>, pressed: bool) {
     if let Ok(guard) = state.pipeline.lock() {
         if let Some(p) = guard.as_ref() {
             p.on_assistant_key(pressed, None);
+        }
+    }
+}
+
+/// The **Ask about the selection** shortcut went down (`pressed`, with
+/// `selection`: what the page has selected — "" for nothing) or up in one
+/// of Yap's own windows (their in-page fallback). The hook's own path
+/// otherwise: push-to-talk's hold and double-tap work there too.
+#[tauri::command]
+pub fn ask_selection_key(state: State<'_, AppState>, pressed: bool, selection: Option<String>) {
+    if let Ok(guard) = state.pipeline.lock() {
+        if let Some(p) = guard.as_ref() {
+            p.on_ask_key_in_page(pressed, selection);
         }
     }
 }

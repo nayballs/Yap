@@ -246,7 +246,52 @@ to **Run again** from Home.
   read or pasted) with `e2e_target_window` — dictations and the shortcut go
   to a stand-in window no window has (`pipeline::test_target`), the only
   one `rewrite_target` takes in a test run; edit mode reads no selection in
-  a test run (`selection::capture_selection`, as every other read).
+  a test run (`selection::capture_selection`, as every other read) — only
+  the stand-in's staged one (`e2e_rewrite`'s `selection` / `readOnly`,
+  `pipeline::set_test_selection`).
+  **A question about the selection is answered, not pasted over it**
+  (2026-10-31; Wispr Flow's Command Mode / "Lens", by behaviour;
+  `dictation/ask_or_edit.rs`, below; Settings → Commands → Ask about
+  selected text → "Answer questions about the selected text",
+  `config.ask_about_selection`, on): `run_rewrite` with something selected
+  and words said (`ask_or_edit::route`, pure — nothing selected keeps
+  today's behaviour, the last dictation's rewrite included) decides first
+  (`settled`: read-only text — `capture_target` asks
+  `selection::focus_editable` once when it captured a selection,
+  `selection_read_only` — is always answered; else the rule; where the rule
+  can't tell, `decide` asks the Commands scope's model for a structured
+  `{"action": "replace" | "answer"}`, and anything but a clear "replace"
+  answers). Answered (`answer_about_selection`): the instruction corrected
+  (the dictionary, as the Voice Assistant's question), then
+  `assistant::ask_about(question, Selected { text, app })` — the Voice
+  Assistant's path ([chat-and-assistant.md](./chat-and-assistant.md#questions-about-selected-text-2026-10-31)):
+  "Thinking…" on the bar, Chat's model and effort, spoken when "Speak
+  replies" is on, the bar's card, kept in Chat with the selection as the
+  question's quote — and **nothing pasted**: `run_agent` (the only paste) is
+  never reached, the selection stays selected, and the clipboard edit
+  mode's Ctrl+C borrowed was put back exactly (`text_injector::copy_selection`).
+  The log says how it was decided (`decided`: "rule:ask", "model:replace",
+  "doubt:answer", "readOnly:answer"…), never the words; the robot's report
+  (`Rewritten`) has it too, and the outcome "answered". Off: every
+  instruction rewrites, as before.
+  **Ask about the selection's own shortcut** (unbound by default; always
+  answers, never replaces): `Pipeline::on_ask_key` (the hook's `ask-key-*`)
+  / `on_ask_key_in_page` (`ask_selection_key`, Yap's own windows, with what
+  their page has selected) → `Shared::ask_key`: a press that would start a
+  recording first reads the selection in the window in front
+  (`read_ask_selection`: `selection::read_selected`, as Read aloud reads it
+  — read-only text too; an edit control's own selection; Ctrl+C last,
+  never in a terminal) — none: "Select some text first"
+  (`assistant::selected::nothing_selected`, an alert) and nothing records;
+  off during meetings, as the assistant is — kept in `ask_selection`, then
+  records exactly as the Voice Assistant's shortcut (`ASSISTANT_ARMED` with
+  `ASK_ARMED`: toggle, push-to-talk's gestures; the capsule's "Ask about the
+  selection…", `assistant::listening(app, true)`). Its transcript goes to
+  `ask_assistant`, which hands it with the selection to
+  `assistant::ask_about`; any other recording drops a stale one
+  (`capture_target`). Test mode: `e2e_ask_selection { text, selection?,
+  listenMs? }` (the stand-in window's staged selection); robot mode
+  `realtest_ask_selection`.
   **The Voice Assistant's shortcut** (`Pipeline::on_assistant_key`, the
   hook's `assistant-key-*` or the in-page `assistant_key`): the same
   `on_key` (toggle / push-to-talk gestures; no coaching hints for it) with
@@ -501,7 +546,7 @@ to **Run again** from Home.
   (press = key down w/ required modifiers held, release = key up OR required
   modifier up; chords fire on completion; suppressed keys are excluded from the
   GetAsyncKeyState self-heal — the hook eats them before the key-state table
-  updates). Eleven bindings: dictation, edit (`edit-key-*`, Commands' rewrite
+  updates). Twelve bindings: dictation, edit (`edit-key-*`, Commands' rewrite
   shortcut), the meeting
   shortcut (`meeting-key-*`, `configure_meeting`; only its press is used —
   `meeting_guard`) and the Voice Assistant's (`assistant-key-*`,
@@ -526,11 +571,15 @@ to **Run again** from Home.
   **Send** (2026-10-29; `send-key-*`, `configure_send`/`_from`, unbound by
   default, giving way to all ten older ones, never Enter — first or "+ Add
   another", it would press itself again; its press only —
-  `pasting/send_key.rs` `press_soon`, [pasting.md](./pasting.md)). Beside them, **up to 12
+  `pasting/send_key.rs` `press_soon`, [pasting.md](./pasting.md)), then
+  **Ask about the selection** (2026-10-31; `ask-key-*`, `configure_ask`/`_from`,
+  unbound by default, giving way to all eleven older ones; press and
+  release, one of the hold keys, `HOLDS` — `Pipeline::on_ask_key`, below,
+  [chat-and-assistant.md](./chat-and-assistant.md#questions-about-selected-text-2026-10-31)). Beside them, **up to 12
   saved transforms' shortcuts** (`TRANSFORM_BINDINGS`, a slot each;
   `configure_transforms_from` at setup and every save,
   `transforms::assign` giving each transform with a key a slot in list
-  order unless it would fire with one of the eleven or an earlier
+  order unless it would fire with one of the twelve or an earlier
   transform's — left unbound, logged; `configure_transform(id, spec)` is
   Settings' pause while a key is picked); a slot's press goes to the
   forwarder as `transform-key-N` and out as one `transform-key-pressed`
@@ -541,8 +590,8 @@ to **Run again** from Home.
   `languages::assign`; their press and release go out as one
   `language-key {slot, pressed, at}` event — `dictation/languages.rs`
   below). **More shortcuts for one action** (2026-10-25, Wispr Flow's "Add
-  another"): each of the eleven fixed actions (`FIXED`, indexed by
-  `DICTATION`…`SEND`, with `FIXED_KEYS` / `FIXED_NAMES` /
+  another"): each of the twelve fixed actions (`FIXED`, indexed by
+  `DICTATION`…`ASK`, with `FIXED_KEYS` / `FIXED_NAMES` /
   `FIXED_EVENTS`) has its first shortcut (its old config field) and up to
   `MORE` (3) more (`MORE_BINDINGS`, `config.more_hotkeys`,
   `configure_more_from` at setup and every save; Settings' live pause
@@ -708,6 +757,49 @@ to **Run again** from Home.
   cleanup off it still runs on the words as said; no model or a failure
   pastes the text as it was (logged, lengths only). "Use what I said" swaps
   the paste back to the words as said. e2e `cleanup-strength.spec.js`.
+- **`dictation/ask_or_edit.rs`** — **ask or edit?** (2026-10-31; Wispr
+  Flow's Command Mode, its "Lens", by behaviour): whether the rewrite
+  shortcut's words about a selection are an edit (the selection replaced,
+  as ever) or a question or a request for information ("what does this
+  mean?", "is this right?", "summarise this", "explain this error",
+  "translate this for me": answered on the Voice Assistant's path, nothing
+  pasted — `pipeline/rewrite.rs` `run_rewrite`, above). **Safe by design:
+  replaced only on a clear edit, answered when in doubt.** `rule` (pure): in
+  the person's own languages (My languages' codes, English always; none of
+  theirs known: all — as `assistant/screen.rs` counts a "this"): English,
+  French, German, Spanish, Italian, Portuguese and Dutch word lists per
+  `Lang` (fillers, polite "can you", question words, asking words, editing
+  words, what the text should become — "shorter", "more formal", "in
+  French", "as a list" —, translating and "for me"). The instruction's
+  first words after fillers decide by the **longest phrase that starts it,
+  in any category** (`start_of`: "make sense of" asks though "make" edits;
+  French "en anglais" is a translation though Dutch "en" is "and"; a tie
+  goes ask → translate → edit → question): asking or a question → `Ask`;
+  translating → `Edit`, unless it's for the person ("for me", "traduis-moi",
+  "tradúceme", "voor mij") → `Ask`; editing or what it should become →
+  `Edit` — one word asked ("Correct?", "Shorter?") is `Unsure`; a polite
+  "can you …" with neither after it is never decided by its question mark:
+  the last word in a language that puts the verb there ("kannst du das
+  kürzer machen?", "kun je dit uitleggen?"), else `Unsure`; otherwise a
+  question mark, or words that ask anywhere ("mean", "understand",
+  "bedeutet") → `Ask`; else `Unsure`. Risky words stay out of the edit
+  list ("use", "keep", "say", "put" and "number" alone: "use this to
+  answer…", "number of words?"). `settled` (pure): read-only text → answer;
+  else the rule. `decide`: an `Unsure` goes to the Commands scope's model
+  (`pipeline::commands_model`: its own provider, else the cleanup model;
+  ≤ 8 s, a model on this PC 15 s; its words in the network receipts as
+  Commands') with `PROMPT` and `messages` (the instruction and the
+  selection's first 300 characters, so "reply to this" about a mail can be
+  told from one about a draft); `parse` (pure) reads `{"action": …}` in a
+  code fence, with other fields or almost-JSON, or a first word "replace" /
+  "answer"; anything else — no model, an error, a timeout, garbage — is
+  answered (`By::Doubt`). `route` (pure): only with the switch on,
+  something selected (not the last dictation's rewrite) and words said.
+  The log: the decision's label and the time, never the words. Unit tests
+  (`ask_or_edit::tests`: a table of instructions in all seven languages,
+  the languages counted, the reply's parsing, the route); e2e
+  `ask-selection.spec.js` (fake-llm's `askOrEdit` kind); robot
+  `e2e-real/ask-selection.real.js` (written, not yet run).
 - **`dictation/languages.rs`** (+ `languages/catalog.rs`, `languages/nudge.rs`)
   — **My languages** (2026-10-25; Wispr Flow's languages and its "Speaking a
   different language?" nudge of 28 Sep, OpenWhispr's dual-language hotkeys
@@ -752,7 +844,7 @@ to **Run again** from Home.
   `LanguageShortcut { id, language (code | "auto"), translateTo, hotkey }`,
   at most `MAX_SHORTCUTS` 4): `input_hook.rs`'s four language slots
   (`configure_languages_from`; `assign`, pure: never a key that fires with
-  one of the eleven fixed shortcuts (Paste last, Copy last, Quick note and Send included) or an earlier one; **transforms give way
+  one of the twelve fixed shortcuts (Paste last, Copy last, Quick note, Send and Ask about the selection included) or an earlier one; **transforms give way
   to them**, `transforms::fixed_shortcuts`), press **and release** as
   `language-key {slot, pressed, at}` (`init` → `Pipeline::on_language_key`),
   plus the in-page fallback (`language_key`). A press records exactly as the

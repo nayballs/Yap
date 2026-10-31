@@ -34,7 +34,7 @@
     hotkeyMatchesKeyup,
   } from '../core/hotkeys.js';
   import { appLabel } from '../core/appNames.js';
-  import { readPageSelection } from '../stores/speech.svelte.js';
+  import { askSelectionKey, readPageSelection } from '../stores/speech.svelte.js';
   import { languageShortcuts } from '../settings/languages.svelte.js';
   import { dictationPiece, withPiece, statusLine, tabLabel, nextTab, afterClose, sendText } from './quickNote.js';
 
@@ -505,6 +505,11 @@
       e.preventDefault();
       e.stopPropagation();
       invoke('assistant_key', { pressed: true }).catch(() => {});
+    } else if (actionMatchesKeydown(e, cfg, 'askHotkey')) {
+      // Ask about the selection (chat/assistant/selected.rs): what's selected here.
+      e.preventDefault();
+      e.stopPropagation();
+      askSelectionKey(true);
     } else if (actionMatchesKeydown(e, cfg, 'readHotkey')) {
       // Read aloud (voice/read_aloud.rs): what's selected here.
       e.preventDefault();
@@ -546,6 +551,9 @@
     if (actionMatchesKeyup(e, cfg, 'assistantHotkey')) {
       e.preventDefault();
       invoke('assistant_key', { pressed: false }).catch(() => {});
+    } else if (actionMatchesKeyup(e, cfg, 'askHotkey')) {
+      e.preventDefault();
+      askSelectionKey(false);
     } else if (lang) {
       e.preventDefault();
       invoke('language_key', { id: lang.id, pressed: false }).catch(() => {});

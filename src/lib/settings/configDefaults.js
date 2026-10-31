@@ -48,6 +48,8 @@ export const FIELD_DEFAULTS = {
   quickNoteHotkey: '',
   // Send (pasting/send_key.rs): unbound, never Enter.
   sendHotkey: '',
+  // Ask about the selection (chat/assistant/selected.rs): unbound.
+  askHotkey: '',
   // More shortcuts per action ("+ Add another", dictation/input_hook.rs), by
   // the first one's key: { hotkey: ['mouse:4'] }.
   moreHotkeys: {},
@@ -172,6 +174,9 @@ export const FIELD_DEFAULTS = {
   // The rewrite shortcut with nothing selected rewrites the last
   // dictation (pasting/as_said.rs).
   rewriteLastDictation: true,
+  // A question said about the selection is answered, not pasted over it
+  // (dictation/ask_or_edit.rs).
+  askAboutSelection: true,
   assistantHotkey: '',
   readHotkey: '',
   assistantAnswerCard: true,

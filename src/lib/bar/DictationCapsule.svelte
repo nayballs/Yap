@@ -167,8 +167,14 @@
           </span>
         </div>
       {:else}
-        <span class="txt asklabel">{dictation.askAbout === 'screenshot' ? 'Ask about this screenshot…' : 'Ask Yap…'}</span>
-        <div class="wave short" class:narrow={dictation.askAbout === 'screenshot'}>
+        <span class="txt asklabel"
+          >{dictation.askAbout === 'screenshot'
+            ? 'Ask about this screenshot…'
+            : dictation.askAbout === 'selection'
+              ? 'Ask about the selection…'
+              : 'Ask Yap…'}</span
+        >
+        <div class="wave short" class:narrow={dictation.askAbout === 'screenshot' || dictation.askAbout === 'selection'}>
           {#each dictation.history.slice(-48) as v}
             <span style="height:{Math.max(7, Math.round(v * 100))}%"></span>
           {/each}

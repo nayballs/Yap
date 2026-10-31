@@ -3,7 +3,9 @@
   // and its old "Hey Flow"): the AI does what you say and types the result
   // where you are. Not the Voice Assistant, which answers out loud. Say its
   // name (AgentNameField.svelte), Rewrite selected text (the rewrite
-  // shortcut; pasting/as_said.rs), Transforms (TransformsSettings.svelte),
+  // shortcut; pasting/as_said.rs; a question about the selection answered
+  // instead, dictation/ask_or_edit.rs, and Ask about the selection's own
+  // shortcut, chat/assistant/selected.rs), Transforms (TransformsSettings.svelte),
   // Writing samples (WritingSamples.svelte) and a link to its model and
   // prompt in Language Models.
   //
@@ -66,6 +68,33 @@
       desc="Within a minute, in the same field"
       hint="Only while it's exactly as Yap typed it, with the cursor right after it; otherwise Yap says so and changes nothing."
     />
+  </Row>
+</Group>
+<!-- Asking about a selection without replacing it (dictation/ask_or_edit.rs,
+     chat/assistant/selected.rs): the answer comes as the Voice Assistant's. -->
+<Group
+  title="Ask about selected text"
+  desc="Ask about text you selected and hear or read the answer, without the text being changed."
+  id="settings-ask-selection"
+>
+  <!-- A question said with the rewrite shortcut ("what does this mean?") is
+       answered, never pasted over the selection. Off: it always rewrites. -->
+  <Row setting="ask-about-selection">
+    <Toggle
+      bind:checked={cfg.askAboutSelection}
+      label="Answer questions about the selected text"
+      desc="With the rewrite shortcut, ask “what does this mean?” or “is this right?” and Yap answers, leaving the text as it is"
+      hint="Yap only replaces the text when you clearly ask for a change, like “make it shorter”. The answer is spoken when Speak replies is on, and kept in Chat. Text you can't edit, like a web page, is always answered."
+    />
+  </Row>
+  <!-- Its own shortcut: always answers, never replaces. -->
+  <Row
+    label="Ask about the selection"
+    desc="Its own shortcut: select text in any app, press it and ask. It always answers and never changes the text"
+    hint="Works on text you can't edit too, like a web page."
+    setting="ask-shortcut"
+  >
+    <SettingsHotkey {cfg} target="askHotkey" clearable />
   </Row>
 </Group>
 <!-- Saved transforms (dictation/transforms.rs): one-key rewrites, no speaking. -->

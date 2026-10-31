@@ -534,7 +534,26 @@ else nothing pasted and said) — the rules unit-tested (`as_said::
 rewritable`, `keep_spaces`), robot tests written (`rewrite-last.real.js`:
 the test pad, an Edge box, a contenteditable, typed since and the cursor
 moved refused, a selection or another window as before, a terminal never),
-not yet run; not yet tried with a real voice and AI model. **Saved
+not yet run; not yet tried with a real voice and AI model. **Asking about
+selected text without replacing it** (2026-10-31; Wispr Flow's Command Mode,
+its "Lens"; `dictation/ask_or_edit.rs`, `chat/assistant/selected.rs`): the
+rewrite shortcut on a selection with a question said ("what does this
+mean?", "summarise this", "translate this for me") answers on the Voice
+Assistant's path — spoken when Speak replies is on, the bar's card, kept in
+Chat with the selection as its quote — and never pastes; only a clear edit
+replaces it (a rule in seven languages, then the Commands model's
+`{"action": …}`, in doubt answered; read-only text always answered;
+Settings → Commands' "Answer questions about the selected text", on); and
+**Ask about the selection**, a shortcut of its own (unbound by default,
+read-only text too, "Select some text first"). The rule (a table in
+English, French, German, Spanish, Italian, Portuguese and Dutch), the
+reply's parsing, the route and the shortcut's binding unit-tested; Settings,
+the Help sheet, a question answered with its quote and nothing pasted, an
+edit still replaced, the model's choice and its doubt, read-only and the
+shortcut e2e-tested (`ask-selection.spec.js`, with stand-in selections); a
+robot test written (`ask-selection.real.js`: a real Edge box and a web
+page, the text and the clipboard checked unchanged), not yet run; not yet
+tried with a real voice, model or app. **Saved
 transforms** (2026-10-24, `dictation/transforms.rs`): one-key rewrites without
 speaking — Polish, Shorter, Fix grammar only, Translate to a language you
 pick, Make it a prompt, and your own — on the selection or (nothing

@@ -98,6 +98,15 @@
 //! read images gets the window's text, read on this PC. The capsule says
 //! "Looking at the window…" meanwhile.
 //!
+//! **About text selected in another app** (2026-10-31, [`selected`]; Wispr
+//! Flow's Command Mode, its "Lens"): the rewrite shortcut on a selection with
+//! a question said instead of an edit (`dictation/ask_or_edit.rs`), or the
+//! **Ask about the selection** shortcut, asks here ([`ask_about`]) with the
+//! selection as the question's quote and in the model's context — never the
+//! window in front, the screenshots waiting in Chat's box, the document's
+//! quoted passage or an app to open: the selection is what it's about.
+//! Nothing is typed into the app.
+//!
 //! **Asked from a phone** (Yap Link, `link.rs`, 2026-10-31): a question a
 //! paired phone heard goes the same way ([`ask_from_phone`]) — the same
 //! conversation choice, Chat's model and the short spoken answer, kept in
@@ -117,6 +126,7 @@
 //! a `stream::Event`).
 
 pub mod screen;
+pub mod selected;
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, MutexGuard};
@@ -392,9 +402,10 @@ struct State {
     /// The conversation the latest question went to.
     conversation: Option<u64>,
     /// What the question is about, while it's listened for: "screenshot"
-    /// (after a spoken "snip": "Ask about this screenshot…"); while it's
-    /// thought about, "window" (the window in front being taken and read:
-    /// "Looking at the window…", [`screen`]).
+    /// (after a spoken "snip": "Ask about this screenshot…"), "selection"
+    /// (the Ask about the selection shortcut: "Ask about the selection…");
+    /// while it's thought about, "window" (the window in front being taken
+    /// and read: "Looking at the window…", [`screen`]).
     about: Option<&'static str>,
 }
 
@@ -492,20 +503,52 @@ fn emit(app: &AppHandle, ev: PhaseEvent) {
 
 /// A recording for the assistant starts (`pipeline::capture_target`, before
 /// its "recording" state, so the capsule's first frame knows). Whatever an
-/// earlier question was doing is superseded; its card goes.
-pub fn listening(app: &AppHandle) {
+/// earlier question was doing is superseded; its card goes. `selection`:
+/// the Ask about the selection shortcut's question ("Ask about the
+/// selection…").
+pub fn listening(app: &AppHandle, selection: bool) {
     let ev = {
         let mut s = lock();
         s.generation += 1;
         s.phase = Phase::Listening;
         s.message_id = None;
         s.conversation = None;
-        s.about = ABOUT_SCREENSHOT.swap(false, Ordering::SeqCst).then_some("screenshot");
+        let screenshot = ABOUT_SCREENSHOT.swap(false, Ordering::SeqCst);
+        s.about = if selection {
+            Some("selection")
+        } else {
+            screenshot.then_some("screenshot")
+        };
         snapshot(&s)
     };
-    tracing::info!(about_screenshot = ev.about.is_some(), "Voice Assistant: listening");
+    tracing::info!(about_screenshot = ev.about == Some("screenshot"), about_selection = selection, "Voice Assistant: listening");
     emit(app, ev);
     crate::bar::dismiss_card(app, CARD);
+}
+
+/// **A question about text selected in another app** ([`selected`]): the
+/// rewrite shortcut's words were a question (`dictation/ask_or_edit.rs`),
+/// or the Ask about the selection shortcut's question, transcribed and
+/// corrected. Asked as a spoken question is ([`heard`]), "Thinking…" on the
+/// capsule, with the selection as its quote; nothing pasted.
+pub fn ask_about(app: &AppHandle, question: String, about: selected::Selected) {
+    let (generation, ev) = {
+        let mut s = lock();
+        // The rewrite shortcut's recording was never the assistant's: this
+        // is a question of its own.
+        s.generation += 1;
+        s.phase = Phase::Thinking;
+        s.message_id = None;
+        s.conversation = None;
+        s.about = None;
+        (s.generation, snapshot(&s))
+    };
+    tracing::info!(chars = about.text.chars().count(), question = question.chars().count(), "Voice Assistant: a question about the selected text");
+    emit(app, ev);
+    crate::bar::dismiss_card(app, CARD);
+    let since = crate::dictation::pipeline::dictation_state().0;
+    let app = app.clone();
+    tauri::async_runtime::spawn(async move { answer(app, Asker::Shortcut(generation), since, question, Some(about)).await });
 }
 
 /// The question didn't happen (cancelled, nothing heard, no model, the
@@ -536,7 +579,7 @@ pub fn heard(app: &AppHandle, question: String) {
     // A dictation starting from now on means you've moved on.
     let since = crate::dictation::pipeline::dictation_state().0;
     let app = app.clone();
-    tauri::async_runtime::spawn(async move { answer(app, Asker::Shortcut(generation), since, question).await });
+    tauri::async_runtime::spawn(async move { answer(app, Asker::Shortcut(generation), since, question, None).await });
 }
 
 /// The window in front is being taken and read for question `generation`
@@ -668,7 +711,7 @@ impl Asker {
 /// once the answer is in (its voice may still be going on the phone).
 pub(crate) async fn ask_from_phone(app: AppHandle, question: String, phone: std::sync::Arc<dyn Phone>) {
     let since = crate::dictation::pipeline::dictation_state().0;
-    answer(app, Asker::Phone(phone), since, question).await;
+    answer(app, Asker::Phone(phone), since, question, None).await;
 }
 
 /// "Pick an AI model for the Voice Assistant", with Open settings.
@@ -959,25 +1002,28 @@ impl crate::chat::stream::Sink for Streamed {
 /// **One spoken question, answered** — the shortcut's ([`Asker::Shortcut`])
 /// or a phone's ([`Asker::Phone`], which leaves the PC's own things alone:
 /// the screenshots in Chat's box, a quoted passage, the window in front, the
-/// bar).
-async fn answer(app: AppHandle, asker: Asker, since: u64, question: String) {
+/// bar). `about`: the text selected in another app it's about
+/// ([`selected`]) — then nothing else goes with it.
+async fn answer(app: AppHandle, asker: Asker, since: u64, question: String, about: Option<selected::Selected>) {
     let cfg = crate::config::load();
     let pc = asker.shortcut().is_some();
+    let about_selection = about.is_some();
     let viewing = view();
     let open_exists = matches!(viewing, Viewing::Conversation(id) if crate::chat::chats::get(id).is_some());
     let choice = choose_conversation(viewing, open_exists, crate::chat::chats::latest(), now_secs());
     // Screenshots waiting in Chat's box (snip/waiting.rs): the question goes
-    // with them, to the conversation they wait in.
+    // with them, to the conversation they wait in. (Not one about a
+    // selection: that's what it's about.)
     let waiting = crate::snip::waiting::now();
-    let shots_wait = pc && !waiting.images.is_empty();
+    let shots_wait = pc && !about_selection && !waiting.images.is_empty();
     let conversation_id = match choice {
         _ if shots_wait => waiting.conversation_id,
         Choice::Continue(id) => Some(id),
         Choice::New => None,
     };
     // "Open Teams" needs no model, nor a "yes" to Yap's "Did you mean …?":
-    // Yap opens it and says so (apps.rs).
-    let opens_an_app = crate::apps::plan_for(&question, &cfg, conversation_id).await.is_some();
+    // Yap opens it and says so (apps.rs). Never a question about a selection.
+    let opens_an_app = !about_selection && crate::apps::plan_for(&question, &cfg, conversation_id).await.is_some();
     let endpoint = if opens_an_app {
         None
     } else {
@@ -1043,17 +1089,17 @@ async fn answer(app: AppHandle, asker: Asker, since: u64, question: String) {
     // goes with a question asked with Chat in view, to the conversation it's
     // quoted in, as a typed or dictated question takes it
     // (`documents::quote_goes`); the box's quote goes.
-    let quote = if opens_an_app || !pc { None } else { crate::chat::documents::take_waiting_quote(&app, in_chat, conversation_id) };
+    let quote = if opens_an_app || !pc || about_selection { None } else { crate::chat::documents::take_waiting_quote(&app, in_chat, conversation_id) };
     // A question about the screen (screen.rs): the window in front goes
     // with it — its picture, or its text read on this PC — or a line tells
-    // the model why it can't see it. Not beside screenshots already waiting
-    // or a quoted passage (they're what it's about), nor when Yap opens an
-    // app (no model).
+    // the model why it can't see it. Not beside screenshots already waiting,
+    // a quoted passage or a selection (they're what it's about), nor when
+    // Yap opens an app (no model).
     let mut ask = question.clone();
     let mut window_picture: Option<(String, String)> = None;
     let mut took_window = false;
     if let (Some(generation), false, Some((base_url, api_key, model, provider, _persona, _thinking))) =
-        (asker.shortcut(), shots_wait || quote.is_some(), &endpoint)
+        (asker.shortcut(), shots_wait || quote.is_some() || about_selection, &endpoint)
     {
         let ep = screen::Endpoint { base_url, api_key, model, provider };
         let look_app = app.clone();
@@ -1069,7 +1115,7 @@ async fn answer(app: AppHandle, asker: Asker, since: u64, question: String) {
             shots = look.images;
         }
     }
-    tracing::info!(phone = !pc, ?viewing, ?choice, ?seen, shots = shots.images.len(), window = took_window, quoted = quote.is_some(), "Voice Assistant: asking Chat");
+    tracing::info!(phone = !pc, ?viewing, ?choice, ?seen, shots = shots.images.len(), window = took_window, quoted = quote.is_some(), selection = about_selection, "Voice Assistant: asking Chat");
     let asked_app = app.clone();
     let asked_text = question.clone();
     // The answer as it's written: the Chat view follows it, the voice
@@ -1125,13 +1171,19 @@ async fn answer(app: AppHandle, asker: Asker, since: u64, question: String) {
     // The quoted passage it's about: the model is told its blocks, and the
     // question keeps its quote (documents.rs).
     let turn = crate::chat::documents::with_selection(quote.as_ref().map(crate::chat::documents::WaitingQuote::selection), turn);
+    // The text selected in another app it's about (selected.rs): the model
+    // is told it, and the question keeps it as its quote.
+    let turn = selected::with(about, turn);
     // Asked with Chat in view: it shows the answer (`asked_in_chat`).
     let turn = IN_CHAT.scope(in_chat, turn);
     // Its AI calls and searches are the Voice Assistant's in the network
     // receipts (net.rs), though they run Chat's code — and say so when the
-    // window in front went with them, or the question came from a phone.
+    // window in front or a selection went with them, or the question came
+    // from a phone.
     let feature = if !pc {
         crate::privacy::net::Feature::AssistantPhone
+    } else if about_selection {
+        crate::privacy::net::Feature::AssistantSelection
     } else if took_window {
         crate::privacy::net::Feature::AssistantScreen
     } else {

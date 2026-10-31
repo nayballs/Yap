@@ -537,9 +537,14 @@ Putting a dictation into the app you're in: the clipboard paste and the submit k
   timeouts. **Edit
   mode** (`capture_selection(target, copy_fallback)`): the selected text
   (TextPattern, else the Ctrl+C trick — never in a terminal with terminal mode
-  on, where Ctrl+C would interrupt the program), 2 s UIA timeouts. **Read
+  on, where Ctrl+C would interrupt the program), 2 s UIA timeouts; with
+  something captured and "Answer questions about the selected text" on, one
+  `focus_editable` look too (2026-10-31): read-only text (a web page, a mail
+  being read) is answered, never pasted over (`dictation/ask_or_edit.rs`
+  `settled`). **Read
   aloud** (`read_selected(target, copy_fallback)` → `Selected {text, via}`,
-  for `voice/read_aloud.rs`): the focus must be in the target's process and not a
+  for `voice/read_aloud.rs`, and Ask about the selection's press since
+  2026-10-31, `pipeline::read_ask_selection`): the focus must be in the target's process and not a
   password box; then UI Automation's TextPattern selection of the focused
   element or the first of up to 12 parents that has a TextPattern (a web
   page's document when the focus is on a link; **read-only text too**: a

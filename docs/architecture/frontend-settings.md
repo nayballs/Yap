@@ -359,8 +359,11 @@ style neither).
   (dictations never show up in Win+V history), and the **Dictionary** link row
   (its counts; it leaves Settings for the Dictionary view, `onshowview`).
 - **Shortcuts** (`settings/ShortcutsPage.svelte`, OpenWhispr's Hotkeys page):
-  the ten global shortcuts together — Dictate, Rewrite selected text, Ask the
-  Voice Assistant, Read aloud, **Use what I said** (`asSaidHotkey`, unbound
+  the twelve global shortcuts together — Dictate, Rewrite selected text, Ask the
+  Voice Assistant, **Ask about the selection** (`askHotkey`,
+  `shortcut-ask`, 2026-10-31, unbound by default: a question about the
+  selected text, answered and never replacing it; its in-page fallback
+  `ask_selection_key` sends the page's own selection), Read aloud, **Use what I said** (`asSaidHotkey`, unbound
   by default; `pasting/as_said.rs`), **Paste last transcript**
   (`pasteLastHotkey`, `shortcut-paste-last`) and **Copy last transcript**
   (`copyLastHotkey`, `shortcut-copy-last`, its hint: out of Win+V history,
@@ -432,7 +435,13 @@ style neither).
   **"Rewrite your last dictation when nothing is selected"** ·
   "Within a minute, in the same field" (`#rewrite-last`,
   `rewriteLastDictation`, on; in the search index with its switch; the
-  rules in `pasting/as_said.rs`, [pasting.md](./pasting.md)). **Transforms**
+  rules in `pasting/as_said.rs`, [pasting.md](./pasting.md)). **Ask about
+  selected text** (`#settings-ask-selection`, 2026-10-31): "Answer
+  questions about the selected text" (`#ask-about-selection`,
+  `askAboutSelection`, on; `dictation/ask_or_edit.rs`) and **Ask about the
+  selection** (`#ask-shortcut`, `askHotkey`, clearable; also on Shortcuts;
+  `chat/assistant/selected.rs`, [chat-and-assistant.md](./chat-and-assistant.md#questions-about-selected-text-2026-10-31)) —
+  a group of its own, so the rewrite group keeps one shortcut. **Transforms**
   (`#settings-transforms`, `settings/TransformsSettings.svelte` +
   `settings/transforms.js`, `dictation/transforms.rs`; 2026-10-24): "Rewrite the
   selected text in one press, without saying anything. With nothing

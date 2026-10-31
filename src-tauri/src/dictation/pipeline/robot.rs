@@ -11,8 +11,8 @@ use tauri::Emitter;
 use super::busy::{Busy, Job};
 use super::rewrite::{Rewritten, LAST_REWRITE};
 use super::{
-    arm_chat_dictation, dictation_began, dictation_ended, AmpMeter, Delivered, Shared, ASSISTANT_ARMED, LAST_DELIVERED,
-    TARGET_SAMPLE_RATE, TEST_FEED,
+    arm_chat_dictation, dictation_began, dictation_ended, AmpMeter, Delivered, Shared, ASK_ARMED, ASSISTANT_ARMED,
+    LAST_DELIVERED, TARGET_SAMPLE_RATE, TEST_FEED,
 };
 
 /// Robot mode's dictations (`realtest.rs`, debug builds only): without a
@@ -185,6 +185,50 @@ impl Robot {
         dictation_ended();
         let _ = shared.app.emit("yap-state", "processing");
         tracing::info!(len = text.len(), "e2e: a question for the Voice Assistant from a transcript");
+        let asked = shared.assistant.swap(false, Ordering::SeqCst) && shared.ask_assistant(text.trim());
+        busy.done();
+        let _ = shared.app.emit("yap-state", "idle");
+        if asked {
+            Ok(())
+        } else {
+            crate::chat::assistant::nothing(&shared.app);
+            Err("Nothing to ask".into())
+        }
+    }
+
+    /// **Ask about the selection** without a microphone (test mode's
+    /// `e2e_ask_selection`, robot mode's `realtest_ask_selection`): what a
+    /// press of its shortcut does — the selection in the window in front
+    /// read first (none: "Select some text first", nothing recorded), the
+    /// barge-in, "Ask about the selection…" on the capsule for `listen_ms`
+    /// — then `text` as the question, from the dictionary on. Never pasted.
+    pub(crate) async fn ask_about_selection(&self, text: String, listen_ms: u64) -> Result<(), String> {
+        let shared = &self.0;
+        if !shared.recording.load(Ordering::SeqCst) && crate::chat::assistant::off_for_meeting(&shared.app) {
+            return Err("The Voice Assistant is off during meetings".into());
+        }
+        let Some(found) = shared.read_ask_selection() else {
+            crate::chat::assistant::selected::nothing_selected(&shared.app);
+            return Err("Nothing selected".into());
+        };
+        let Some(busy) = self.take_busy() else {
+            return Err(Self::BUSY.into());
+        };
+        if let Ok(mut g) = shared.ask_selection.lock() {
+            *g = Some(found);
+        }
+        crate::voice::tts::stop_for_dictation();
+        ASSISTANT_ARMED.store(true, Ordering::SeqCst);
+        ASK_ARMED.store(true, Ordering::SeqCst);
+        shared.capture_target(false);
+        ASSISTANT_ARMED.store(false, Ordering::SeqCst);
+        ASK_ARMED.store(false, Ordering::SeqCst);
+        dictation_began();
+        let _ = shared.app.emit("yap-state", "recording");
+        tokio::time::sleep(Duration::from_millis(listen_ms)).await;
+        dictation_ended();
+        let _ = shared.app.emit("yap-state", "processing");
+        tracing::info!(len = text.len(), "e2e: a question about the selection from a transcript");
         let asked = shared.assistant.swap(false, Ordering::SeqCst) && shared.ask_assistant(text.trim());
         busy.done();
         let _ = shared.app.emit("yap-state", "idle");

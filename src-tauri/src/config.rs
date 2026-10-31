@@ -248,6 +248,13 @@ pub struct YapConfig {
     /// means write mode, as before 2026-10-23.
     #[serde(default = "default_true")]
     pub rewrite_last_dictation: bool,
+    /// **Answer questions about the selected text** (Settings → Commands,
+    /// `dictation/ask_or_edit.rs`, 2026-10-31): the rewrite shortcut on a
+    /// selection, with a question said rather than an edit ("what does this
+    /// mean?"), answers on the Voice Assistant's path instead of replacing
+    /// the text. On by default; off, it rewrites as before.
+    #[serde(default = "default_true")]
+    pub ask_about_selection: bool,
     /// **Saved transforms** (Settings → Commands → Transforms,
     /// `transforms.rs`): one-key rewrites of the selection or the last
     /// dictation, each with an optional shortcut, in the person's order. A
@@ -331,6 +338,14 @@ pub struct YapConfig {
     /// its next save: unbound again, nothing else.
     #[serde(default)]
     pub send_hotkey: String,
+    /// **Ask about the selection** (Settings → Shortcuts and Commands,
+    /// `chat/assistant/selected.rs`, 2026-10-31): select text in any app
+    /// (read-only text too), press it and ask; the answer comes as the Voice
+    /// Assistant's does, the text never replaced. Empty = unbound (the
+    /// default); never a key another shortcut has. An older Yap sharing the
+    /// folder drops it on its next save: unbound again, nothing else.
+    #[serde(default)]
+    pub ask_hotkey: String,
     /// **More shortcuts for one action** (Settings → Shortcuts, "+ Add
     /// another"; `input_hook.rs`, 2026-10-25): up to `input_hook::MORE` more
     /// keys or mouse buttons per action, keyed by its first shortcut's
@@ -1317,6 +1332,7 @@ impl Default for YapConfig {
             hotkey: default_hotkey(),
             edit_hotkey: String::new(),
             rewrite_last_dictation: true,
+            ask_about_selection: true,
             transforms: crate::dictation::transforms::defaults(),
             auto_transform: String::new(),
             auto_transform_kind: String::new(),
@@ -1331,6 +1347,7 @@ impl Default for YapConfig {
             copy_last_hotkey: String::new(),
             quick_note_hotkey: String::new(),
             send_hotkey: String::new(),
+            ask_hotkey: String::new(),
             more_hotkeys: Default::default(),
             triple_tap_meeting: false,
             as_said_offer: false,
