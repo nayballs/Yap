@@ -200,9 +200,10 @@ pub fn file_linked(note_id: u64, key: &str, emails: &[String]) -> Option<String>
 /// windows, fine on any thread.
 // The transcript import's hook: unused until the import lands and calls it.
 #[allow(dead_code)]
-pub fn file_imported(note_id: u64, emails: &[String]) -> Option<String> {
-    companies::remember(note_id, emails);
-    let (_, folder) = companies::folder_for(emails)?;
+pub fn file_imported<S: AsRef<str>>(note_id: u64, emails: &[S]) -> Option<String> {
+    let emails: Vec<String> = emails.iter().map(|e| e.as_ref().to_string()).collect();
+    companies::remember(note_id, &emails);
+    let (_, folder) = companies::folder_for(&emails)?;
     move_by_rule(note_id, folder, By::Company)
 }
 
@@ -477,7 +478,7 @@ mod tests {
         assert_eq!(crate::notes::get(mine.id).unwrap().folder, crate::notes::PERSONAL);
         // An imported transcript with the client's address: by its company.
         let imported = crate::notes::create("Imported call", "", "upload", crate::notes::PERSONAL);
-        assert_eq!(file_imported(imported.id, &["Sam Lee <sam@example.com>".to_string()]).as_deref(), Some("Clients"));
+        assert_eq!(file_imported(imported.id, &["Sam Lee <sam@example.com>"]).as_deref(), Some("Clients"));
         // Imported into a folder of the person's own: left there.
         let theirs = crate::notes::create("Imported call", "", "upload", "Design");
         assert_eq!(file_imported(theirs.id, &client), None);
