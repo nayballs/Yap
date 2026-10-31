@@ -44,6 +44,13 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 tracing-appender = "0.2"
 regex = "1"
 once_cell = "1"
+# The language a dictation's text is in, for models that don't say which they
+# heard (languages/text_id.rs: "You spoke French" with Parakeet V3). Trigram
+# profiles, pure Rust, MIT, no network; ~0.3 MB. 0.16 builds on the hashbrown
+# 0.14 and once_cell already in the tree (with ahash, its hasher; 0.18
+# measured the same and pulls a fourth hashbrown); lingua was +145 MB for the
+# same languages.
+whatlang = "0.16"
 
 # Audio capture + sound cue
 cpal = "0.15"

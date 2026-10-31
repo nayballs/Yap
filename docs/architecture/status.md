@@ -562,12 +562,21 @@ languages?"). Whisper picks the likeliest of your languages from its own
 detection (74 / 56 ms for large-v3 on an RTX 5070 Ti: the work it already
 did when not given a language); Parakeet V3 and SenseVoice recognise the
 language by themselves, Canary and Cohere are told your first language,
-Parakeet V2 (English only) is unchanged — only Whisper says what it heard,
-so the nudge works with Whisper models alone. The rules (plans, slots,
-coverage, the nudge's limits, the language line, the leading filler)
-unit-tested; Settings, a translating shortcut through the fake AI (and
-through the stub speech engine), the AI failing and the nudge in the main
-window and on the bar e2e-tested (`languages.spec.js`); the prompts measured
+Parakeet V2 (English only) is unchanged — only Whisper says what it heard;
+for the others the nudge reads the language from the text (2026-10-31,
+`languages/text_id.rs`: function words and whatlang's trigrams agreeing,
+five words at least; measured on 421 fictional sentences in 29 languages
+and 60 tricky English ones: never a wrong language, never an English one),
+and an English-only model's says "Parakeet V2 only knows English" — once,
+the first time one of your languages is recognised, "Yap recognised
+French". The rules (plans, slots, coverage, the nudge's limits, the
+language line, the leading filler, the text's gate) unit-tested; Settings,
+a translating shortcut through the fake AI (and through the stub speech
+engine), the AI failing and the nudge in the main window and on the bar,
+Parakeet V3's French read from its text (and through the stub engine's
+transcript), Parakeet V2's offer and the one-time tip e2e-tested
+(`languages.spec.js`); not yet tried on Parakeet V3's or V2's real output
+from real speech; the prompts measured
 on the 4B (cleanup 27/27 after vs 21/27 before, translation 12/12), the 1.5B
 (0/27 → 15/27: it still writes German in English) and Groq's gpt-oss-20b
 (13/13, docs/model-evals.md "My languages"); robot tests run with Whisper

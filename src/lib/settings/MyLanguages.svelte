@@ -212,11 +212,18 @@
 
   // The model a translation goes to: Commands', else cleanup's.
   const translating = $derived(shortcuts.some((s) => s.translateTo));
-  const nudgeDesc = $derived(
-    !model || model.tells === 'probabilities'
-      ? 'After a dictation in another language, Yap offers to add it'
-      : `Only Whisper models say which language they heard. ${model.name} doesn't, so Yap can't tell`
-  );
+  // Whisper says which language it heard; Parakeet V3 and SenseVoice have it
+  // read from their text (languages/text_id.rs); an English-only model's
+  // dictation in another language is said too, with a model that knows it.
+  const englishOnly = $derived(model?.tells === 'one' && model?.knows?.length === 1 && model.knows[0] === 'en');
+  const nudgeDesc = $derived.by(() => {
+    if (!model || model.tells === 'probabilities' || model.tells === 'itself') {
+      return 'After a dictation in another language, Yap offers to add it';
+    }
+    if (englishOnly) return `${model.name} knows English only: after a dictation in another language, Yap says which model knows it`;
+    if (model.tells === 'told') return `${model.name} is told which language to write, so Yap can't tell when you speak another`;
+    return `${model.name} knows ${names(model.knows || [])} only, so Yap can't tell when you speak another language`;
+  });
 </script>
 
 <Group

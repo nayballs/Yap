@@ -1214,6 +1214,11 @@ mod engine_stub {
                 engine = self.engine,
                 "StubEngine.transcribe() called"
             );
+            // A test run's transcript (`languages::e2e_language_stage`).
+            #[cfg(debug_assertions)]
+            if let Some(text) = crate::dictation::languages::stand_in_text() {
+                return Ok(text);
+            }
             Ok(format!(
                 "[STT stub: received {:.1}s of audio, engine={}]",
                 duration_secs, self.engine
