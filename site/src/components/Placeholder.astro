@@ -1,0 +1,67 @@
+---
+// A visual that isn't captured yet, labelled with its id from the site plan's
+// asset list (A1–A18), what it will show and its format. Clearly a
+// placeholder: hatched, dashed, and it says so.
+interface Props {
+  id: string;
+  title: string;
+  shows: string;
+  format?: string;
+  ratio?: 'wide' | 'video' | 'square' | 'tall';
+}
+const { id, title, shows, format, ratio = 'wide' } = Astro.props;
+---
+<figure class:list={['ph', `ph-${ratio}`]} role="img" aria-label={`Placeholder for ${title}: ${shows}`}>
+  <div class="ph-in" aria-hidden="true">
+    <span class="ph-id">Placeholder {id}</span>
+    <span class="ph-title">{title}</span>
+    <span class="ph-shows">{shows}</span>
+    {format && <span class="ph-format">{format}</span>}
+  </div>
+</figure>
+
+<style>
+  .ph {
+    margin: 0;
+    display: grid;
+    place-items: center;
+    padding: 24px;
+    border: 1.5px dashed var(--t-border-hover);
+    border-radius: 16px;
+    background:
+      repeating-linear-gradient(-45deg, transparent 0 14px, color-mix(in srgb, var(--t-fg) 4%, transparent) 14px 15px),
+      var(--t-s3);
+    color: var(--t-muted);
+    text-align: center;
+  }
+  .ph-wide { aspect-ratio: 16 / 10; }
+  .ph-video { aspect-ratio: 16 / 9; }
+  .ph-square { aspect-ratio: 1; }
+  .ph-tall { aspect-ratio: 4 / 5; }
+  .ph-in {
+    display: grid;
+    gap: 6px;
+    max-width: 30rem;
+  }
+  .ph-id {
+    justify-self: center;
+    padding: 0.1em 0.6em;
+    border-radius: 999px;
+    border: 1px solid var(--t-border);
+    background: var(--t-s2);
+    font-size: 0.8125rem;
+    font-weight: 640;
+    color: var(--t-fg-80);
+  }
+  .ph-title {
+    font-weight: 640;
+    color: var(--t-fg);
+  }
+  .ph-shows {
+    font-size: 0.9375rem;
+    line-height: 1.45;
+  }
+  .ph-format {
+    font-size: 0.8125rem;
+  }
+</style>

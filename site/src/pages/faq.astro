@@ -1,0 +1,77 @@
+---
+import Layout from '../layouts/Layout.astro';
+import Closing from '../components/Closing.astro';
+import { NAME, ISSUES_URL } from '../brand';
+import { FAQ } from '../data/faq';
+import { text } from '../lib/html';
+
+const groups = [...new Set(FAQ.map((f) => f.group))];
+const slug = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
+
+const jsonLd = {
+  '@context': 'https://schema.org',
+  '@type': 'FAQPage',
+  mainEntity: FAQ.map((f) => ({
+    '@type': 'Question',
+    name: f.q,
+    acceptedAnswer: { '@type': 'Answer', text: text(f.a) },
+  })),
+};
+---
+<Layout title="Questions and answers" description={`Answers about ${NAME}: installing it, dictation, meetings, the assistant, privacy and price.`} jsonLd={jsonLd}>
+  <section class="faq-hero">
+    <div class="wrap">
+      <h1>Questions and answers</h1>
+      <p class="lede mt-2">Can’t find yours? <a href={ISSUES_URL}>Ask on GitHub</a>.</p>
+      <nav class="jump mt-4" aria-label="Topics">
+        {groups.map((g) => <a href={`#${slug(g)}`}>{g}</a>)}
+      </nav>
+    </div>
+  </section>
+
+  {groups.map((g) => (
+    <section class="section-tight ruled" id={slug(g)} aria-labelledby={`${slug(g)}-h`}>
+      <div class="wrap faq-grid">
+        <h2 id={`${slug(g)}-h`}>{g}</h2>
+        <div class="faq-list">
+          {FAQ.filter((f) => f.group === g).map((f) => (
+            <details id={f.id}>
+              <summary>{f.q}</summary>
+              <div class="faq-a" set:html={f.a} />
+            </details>
+          ))}
+        </div>
+      </div>
+    </section>
+  ))}
+
+  <Closing />
+</Layout>
+
+<style>
+  .faq-hero {
+    padding-block: clamp(48px, 7vw, 96px) clamp(32px, 4vw, 48px);
+  }
+  .jump {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  .jump a {
+    padding: 6px 14px;
+    border-radius: 999px;
+    border: 1px solid var(--t-border);
+    background: var(--t-s2);
+    color: var(--t-fg);
+    font-size: 0.9375rem;
+    font-weight: 600;
+    text-decoration: none;
+  }
+  .jump a:hover {
+    border-color: var(--t-primary-line);
+    color: var(--t-link);
+  }
+  .faq-grid h2 {
+    font-size: clamp(1.4rem, 1.1rem + 1vw, 1.85rem);
+  }
+</style>
