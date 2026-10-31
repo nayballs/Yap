@@ -56,6 +56,7 @@ pub mod images;
 pub mod ocr;
 pub mod overlay;
 pub mod pick;
+pub mod thumbs;
 pub mod turn;
 pub mod vision;
 pub mod waiting;
@@ -714,6 +715,7 @@ pub fn chat_images_delete_all(app: AppHandle) -> usize {
         })
         .unwrap_or_default();
     let gone = images::delete(&ids);
+    thumbs::sweep_in(&images::dir());
     waiting::chat_waiting_clear(app.clone());
     let _ = app.emit("yap-chat-images-deleted", serde_json::json!({ "count": gone }));
     tracing::info!(images = gone, "snip: every chat screenshot deleted (Settings)");
@@ -722,17 +724,36 @@ pub fn chat_images_delete_all(app: AppHandle) -> usize {
 
 /// `yapsnip://localhost/<id>` (`http://yapsnip.localhost/<id>` in WebView2;
 /// `/img/<id>` too): a chat screenshot's PNG, by id only — anything else
-/// is a 404.
+/// is a 404. `?w=<px>&h=<px>`: its thumbnail at that size ([`thumbs`]: made
+/// the first time, then kept), or the PNG itself when that isn't one of its
+/// sizes. Answered off the main thread (`lib.rs`): a thumbnail can take a
+/// moment to make.
 pub fn serve(request: &tauri::http::Request<Vec<u8>>) -> tauri::http::Response<Vec<u8>> {
     let path = request.uri().path().trim_start_matches('/');
     let id = path.strip_prefix("img/").or_else(|| path.strip_prefix("img%2F")).unwrap_or(path);
-    let found = images::is_id(id).then(|| images::read(id)).flatten();
+    let size = request.uri().query().and_then(thumb_size);
+    let thumb = images::is_id(id).then(|| size.and_then(|(w, h)| thumbs::get(id, w, h).ok())).flatten();
+    let found = thumb.or_else(|| images::is_id(id).then(|| images::read(id)).flatten());
     let builder = tauri::http::Response::builder().header("Access-Control-Allow-Origin", "*").header("Cache-Control", "no-store");
     match found {
         Some(png) => builder.status(200).header("Content-Type", "image/png").body(png),
         None => builder.status(404).header("Content-Type", "text/plain").body(b"not found".to_vec()),
     }
     .unwrap_or_else(|_| tauri::http::Response::new(Vec::new()))
+}
+
+/// `w=180&h=101` → the thumbnail size asked for. Pure.
+fn thumb_size(query: &str) -> Option<(u32, u32)> {
+    let mut w = None;
+    let mut h = None;
+    for (k, v) in query.split('&').filter_map(|kv| kv.split_once('=')) {
+        match k {
+            "w" => w = v.parse::<u32>().ok(),
+            "h" => h = v.parse::<u32>().ok(),
+            _ => {}
+        }
+    }
+    Some((w?, h?))
 }
 
 /// At launch: the capture device made in the background (the first snip
@@ -822,6 +843,15 @@ mod tests {
         for origin in [Origin::Shortcut, Origin::Bar, Origin::Tray, Origin::Chat] {
             assert!(!listens_after(origin, true, true, false), "{origin:?}");
         }
+    }
+
+    #[test]
+    fn a_thumbnail_is_asked_for_by_its_size() {
+        assert_eq!(thumb_size("w=180&h=101"), Some((180, 101)));
+        assert_eq!(thumb_size("h=101&w=180&v=2"), Some((180, 101)));
+        assert_eq!(thumb_size("w=180"), None);
+        assert_eq!(thumb_size("w=-1&h=2"), None);
+        assert_eq!(thumb_size(""), None);
     }
 
     #[test]
