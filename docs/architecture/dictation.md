@@ -1686,34 +1686,65 @@ to **Run again** from Home.
   from the start chime's `Played` (no chime: a thread), `end()` at stop /
   cancel and `after_stop_chime(token)` after the stop chime (`Pipeline::
   stop_chime_then_restore`; a cancel: at once). Quieting = per app, never
-  the device: every active output's sessions (`IAudioSessionManager2` →
-  `IAudioSessionControl2` + `ISimpleAudioVolume`) set to 0, never Yap's
-  own pid, system sounds, a call app's exe (`meeting_detect::call_audio`:
-  every `APPS` exe/package, call or not), the browser a live meeting tab is
-  in, or any browser while a meeting records (`quiet_verdict`, pure).
-  Restore = each session by its instance id back to exactly its level, only
-  if it's still at Yap's level (`restore_verdict`: one that moved is left
-  alone); a dictation that ended before its chime finished quiets nothing,
-  one that starts before the last restore keeps everything down and brings
-  it all back at its end (a generation token; COM/WinRT work serialized on
-  `WORK`, never under the state lock the pipeline takes). Bluetooth: if the
+  the device, through the ledger it shares with Yap's voice turning other
+  apps down while it speaks (`dictation/other_apps.rs`, below, 2026-10-31):
+  every active output's sessions set to 0 (`Holder::Dictation`), never
+  Yap's own pid, system sounds, a call app's exe, the browser a live
+  meeting tab is in, or any browser while a meeting records. Restore = each
+  session back to exactly its level (or to the voice's 30 % while it still
+  speaks), only if it's still at Yap's level; a dictation that ended before
+  its chime finished quiets nothing, one that starts before the last
+  restore keeps everything down and brings it all back at its end (a
+  generation token; COM/WinRT work serialized on the ledger's lock, never
+  under the state lock the pipeline takes). `takes_over()`: a dictation
+  recording with "Silence other apps" on — Yap's voice letting go then
+  hands its sessions to it at their 30 % instead of bringing them up under
+  it (`voice/duck.rs`). Bluetooth: if the
   default output dropped into a call profile (< 44.1 kHz) during the
   dictation, the restore polls it every 50 ms ≤ 5 s, + 500 ms
   (`codec_wait`; no wait when it was already in one at the start — "Keep
   the microphone ready" on a headset, a call — unless the dictation's own
   Bluetooth mic was just closed, `after_stop_chime_mic`: the mic opens on
   demand, so the headset was in its call profile before the start chime
-  and leaves it now). Crash safety: Windows keeps an
-  app's session level across restarts, so what's down is written to
-  `<data>/quieted_apps.json` while it is; `recover()` at setup and every
-  restore bring back sessions of those apps still at Yap's level (a week).
-  `restore_all()` in `shutdown_cleanup`. **Test runs** touch nothing
+  and leaves it now). Crash safety: `other_apps.rs`'s
+  `quieted_apps.json` (below); `recover()` at setup.
+  `restore_all()` in `shutdown_cleanup` (the voice's sessions too). **Test runs** touch nothing
   (`realtest::other_apps` = Nobody); **robot mode** only the sessions of
   processes the test started (`realtest::audio_permits`: the process or an
   ancestor is in `YAP_REALTEST_PIDS`, or owns only windows titled with the
   nonce) and media whose title has the nonce (`media_permits`), never the
   developer's own music. Debug-only `robot_view` (the robot's
-  `realtest_other_apps`).
+  `realtest_other_apps`: its `quieted` rows now say who holds each,
+  `dictation` / `voice`).
+- **`dictation/other_apps.rs`** — **other apps' sound, turned down by Yap and
+  brought back exactly** (2026-10-31, factored out of `mute.rs`): one
+  ledger for both holders — a dictation's silence (`Holder::Dictation`,
+  `mute.rs`) and Yap's voice's 30 % (`Holder::Voice`, `VOICE_SHARE`,
+  `voice/duck.rs`). The sessions (`IAudioSessionManager2` →
+  `IAudioSessionControl2` + `ISimpleAudioVolume`, every active output) are
+  a `Mixer` (Windows' `Snapshot`, or a unit test's `Fake` list); the rules
+  (`quiet_verdict`: never Yap's own pid, system sounds, a call app's exe —
+  `meeting_detect::call_audio`, every `APPS` exe/package, call or not —,
+  the browser a live meeting tab is in, any browser while a meeting
+  records; `restore_verdict`) are pure. Each session is kept once (`Lowered
+  {q: Quieted {id, exe, before, set_to, at}, dictation, voice}`) and sits at
+  the lowest level its holders want (`wanted`: 0, or 30 % of `before`);
+  `Ledger::lower(h)` turns down what the rules allow and holds what's down
+  already (a held session whose level moved meanwhile is the person's:
+  forgotten, left as it is), `release(h)` leaves each at the other holder's
+  level or brings it back to `before` — only if it's still at `set_to` —
+  and a session gone joins the leftovers, `hand_over(from, to)` moves the
+  holds without moving a level. `ledger()` is also the one-at-a-time lock
+  for the COM work (the pipeline's start and stop never take it).
+  Crash safety: Windows keeps an app's session level across restarts, so
+  what's down is written to `<data>/quieted_apps.json` while it is (the
+  same rows an older Yap reads and writes); `recover()` at setup and every
+  release bring back the leftovers' apps' sessions still at Yap's level (a
+  week), never one held now. `restore_all` (quit): everything back. Unit
+  tests on a fake session list: the voice's 30 % and back exactly, a
+  dictation taking a ducked app over and bringing it back to its own level
+  (not 30 %), the voice after a dictation, a moved level left alone, a gone
+  session's leftover and one held now, a session Windows won't set.
 - **`dictation/media_pause.rs`** — "Pause music and videos while you dictate":
   WinRT `GlobalSystemMediaTransportControlsSessionManager` (windows crate
   feature `Media_Control`), sessions **Playing** → explicit `TryPauseAsync`

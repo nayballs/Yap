@@ -345,8 +345,9 @@ test("a key ElevenLabs won't take: Kokoro reads the answer, with one notice, and
   await yap.invoke('tts_e2e_spoken').then(() => {});
   fakeLlm.scriptChat([{ content: 'He is a wizard.' }]);
   await ask(main, 'Who is he?');
-  await expect.poll(async () => (await spoken(yap)).at(-1)?.engine).toBe('kokoro');
-  expect((await spoken(yap)).at(-1)).toMatchObject({ text: 'He is a wizard.', fallback: null });
+  // (Waiting for this answer's own record: the last one before it was Kokoro's too.)
+  await expect.poll(async () => (await spoken(yap)).at(-1)?.text).toBe('He is a wizard.');
+  expect((await spoken(yap)).at(-1)).toMatchObject({ engine: 'kokoro', fallback: null });
   expect(eleven.speech()).toHaveLength(1);
   await main.waitForTimeout(500);
   await expect(toasts(main).filter({ hasText: "didn't answer" })).toHaveCount(0);

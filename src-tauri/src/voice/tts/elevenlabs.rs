@@ -33,17 +33,19 @@
 //! `support/fake-elevenlabs.js`), else every call fails with "Test runs
 //! never go on the internet."
 
-use std::collections::HashMap;
 use crate::privacy::net::Recorded as _;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::collections::HashMap;
 use std::sync::{LazyLock, Mutex};
 use std::time::{Duration, Instant};
 
 use serde::Serialize;
 use serde_json::{json, Value};
 
+use super::cloud::stream::{self, Decode, Limits};
 use super::cloud::{self, Failure};
 use super::{Engine, Pcm, Synth, Voice};
+
+pub use super::cloud::stream::{cancel, tidy, Key, S16Le, Streamed};
 
 pub const ID: &str = "elevenlabs";
 pub const NAME: &str = "ElevenLabs";
@@ -68,15 +70,15 @@ pub const KNOWN_MODELS: &[(&str, &str, &str)] = &[
     ("eleven_v4", "Eleven v4", "Highest quality, slower to start, 90+ languages"),
 ];
 
-/// Connecting (DNS, TCP, TLS) may take this long.
-const CONNECT: Duration = Duration::from_secs(4);
 /// From asking to the first audio (or the error).
 const FIRST_AUDIO: Duration = Duration::from_secs(6);
 /// The longest pause between two pieces of audio.
 const GAP: Duration = Duration::from_secs(6);
+const LIMITS: Limits = Limits { first_audio: FIRST_AUDIO, gap: GAP };
 /// The voice list, models and usage.
 const LIST_TIMEOUT: Duration = Duration::from_secs(10);
 /// Audio is handed on in pieces of at least 100 ms (the end excepted).
+#[cfg(test)]
 const MIN_PIECE: usize = SAMPLE_RATE as usize / 10;
 /// The pause after each sentence (Kokoro's is 180 ms).
 const SENTENCE_GAP_MS: usize = 150;
@@ -102,70 +104,19 @@ pub fn base() -> Result<String, String> {
     Err("Test runs never go on the internet.".into())
 }
 
-/// Requests with the key: no redirects (a custom header would follow one
-/// to another host).
-static API_HTTP: LazyLock<reqwest::Client> = LazyLock::new(|| {
-    reqwest::Client::builder()
-        .connect_timeout(CONNECT)
-        .redirect(reqwest::redirect::Policy::none())
-        .user_agent(format!("Yap/{} (Windows)", env!("CARGO_PKG_VERSION")))
-        .build()
-        .unwrap_or_default()
-});
+/// Requests with the key: no redirects (`cloud/stream.rs`).
+use stream::API_HTTP;
 
 /// A voice's public sample: no key, a few redirects allowed.
 static SAMPLE_HTTP: LazyLock<reqwest::Client> = LazyLock::new(|| {
     reqwest::Client::builder()
-        .connect_timeout(CONNECT)
+        .connect_timeout(stream::CONNECT)
         .timeout(LIST_TIMEOUT)
         .redirect(reqwest::redirect::Policy::limited(3))
         .user_agent(format!("Yap/{} (Windows)", env!("CARGO_PKG_VERSION")))
         .build()
         .unwrap_or_default()
 });
-
-// ---- the key -------------------------------------------------------------------------------
-
-/// An API key: shows as `[redacted]` in any `Debug` output.
-#[derive(Clone, Default, PartialEq, Eq)]
-pub struct Key(String);
-
-impl Key {
-    pub fn new(key: &str) -> Key {
-        Key(key.trim().to_string())
-    }
-    pub fn is_empty(&self) -> bool {
-        self.0.is_empty()
-    }
-    /// For "the same key" checks ([`cloud::Health`]), never the key itself.
-    pub fn fingerprint(&self) -> u64 {
-        cloud::fingerprint(&[ID, &self.0])
-    }
-    fn header(&self) -> &str {
-        &self.0
-    }
-}
-
-impl std::fmt::Debug for Key {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(if self.0.is_empty() { "[none]" } else { "[redacted]" })
-    }
-}
-
-/// What the service said, fit to show: the key cut out (should it ever echo
-/// it), one line, ≤ 120 characters.
-pub fn tidy(said: &str, key: &Key) -> String {
-    let mut s = said.to_string();
-    if !key.is_empty() {
-        s = s.replace(key.header(), "[key]");
-    }
-    let s: String = s.split_whitespace().collect::<Vec<_>>().join(" ");
-    if s.chars().count() > 120 {
-        format!("{}…", s.chars().take(119).collect::<String>().trim_end())
-    } else {
-        s
-    }
-}
 
 // ---- a sentence's request ------------------------------------------------------------------
 
@@ -223,38 +174,6 @@ pub fn timed_request(base: &str, key: &Key, voice: &str, model: &str, rate: f32,
     Ok(req)
 }
 
-// ---- the audio -----------------------------------------------------------------------------
-
-/// Raw 16-bit little-endian PCM as it arrives: a byte left over at the end
-/// of one piece is the first half of the next sample.
-#[derive(Debug, Default)]
-pub struct S16Le {
-    carry: Option<u8>,
-}
-
-impl S16Le {
-    pub fn push(&mut self, bytes: &[u8]) -> Vec<f32> {
-        let mut out = Vec::with_capacity(bytes.len() / 2 + 1);
-        let mut rest = bytes;
-        if let Some(lo) = self.carry.take() {
-            match rest.split_first() {
-                Some((&hi, tail)) => {
-                    out.push(f32::from(i16::from_le_bytes([lo, hi])) / 32_768.0);
-                    rest = tail;
-                }
-                None => {
-                    self.carry = Some(lo);
-                    return out;
-                }
-            }
-        }
-        let (pairs, tail) = rest.as_chunks::<2>();
-        out.extend(pairs.iter().map(|&p| f32::from(i16::from_le_bytes(p)) / 32_768.0));
-        self.carry = tail.first().copied();
-        out
-    }
-}
-
 // ---- failures ------------------------------------------------------------------------------
 
 /// An error answer as a [`Failure`]: ElevenLabs' `{"detail": {"code" (or
@@ -298,128 +217,30 @@ pub fn classify(status: u16, body: &str, key: &Key) -> Failure {
     }
 }
 
-/// A request that never got an answer.
-fn send_failure(e: &reqwest::Error) -> Failure {
-    if e.is_timeout() {
-        Failure::TimedOut
-    } else {
-        Failure::Offline
-    }
-}
-
 /// An error answer's body (bounded in time and size), classified.
 async fn error_of(resp: reqwest::Response, key: &Key) -> Failure {
-    let status = resp.status().as_u16();
-    let body = tokio::time::timeout(Duration::from_secs(3), resp.bytes())
-        .await
-        .ok()
-        .and_then(Result::ok)
-        .map(|b| String::from_utf8_lossy(&b[..b.len().min(8 * 1024)]).into_owned())
-        .unwrap_or_default();
+    let (status, body) = stream::error_body(resp).await;
     classify(status, &body, key)
 }
 
-// ---- stopping a sentence being made ----------------------------------------------------------
-
-static CANCELS: AtomicU64 = AtomicU64::new(0);
-static CANCEL: LazyLock<tokio::sync::Notify> = LazyLock::new(tokio::sync::Notify::new);
-
-/// End the sentence being fetched now (a stop, a new answer, a dictation).
-pub fn cancel() {
-    CANCELS.fetch_add(1, Ordering::SeqCst);
-    CANCEL.notify_waiters();
-}
-
-/// Resolves when [`cancel`] is called after `since` (the count then).
-async fn cancelled(since: u64) {
-    loop {
-        // Made before the check, so a cancel in between still wakes it.
-        let woken = CANCEL.notified();
-        if CANCELS.load(Ordering::SeqCst) != since {
-            return;
-        }
-        woken.await;
-    }
-}
-
 // ---- streaming one sentence ----------------------------------------------------------------
-
-/// How a sentence went.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub struct Streamed {
-    /// Samples handed on (the pause after included).
-    pub samples: usize,
-    /// From asking to the first audio handed on.
-    pub first_audio: Option<Duration>,
-    /// Stopped part-way (a stop, or `out` said so): not a failure.
-    pub stopped: bool,
-}
 
 /// Say one sentence: ask, then hand each ≥ 100 ms of audio to `out` as it
 /// arrives (`out` → false: stop), then [`SENTENCE_GAP_MS`] of quiet.
 /// No audio within [`FIRST_AUDIO`], or a gap over [`GAP`]: timed out.
 pub async fn stream_speech(req: &SpeechRequest, out: &mut dyn FnMut(Pcm) -> bool) -> Result<Streamed, Failure> {
-    let since = CANCELS.load(Ordering::SeqCst);
-    let started = Instant::now();
-    let stop = cancelled(since);
-    tokio::pin!(stop);
-    let mut done = Streamed::default();
+    let turn = stream::Turn::now(LIMITS, SENTENCE_GAP_MS, NAME);
     let send = API_HTTP
         .post(&req.url)
         .header("xi-api-key", req.key.header())
         .header("accept", "audio/pcm, application/json")
         .json(&req.body)
         .send_for(crate::privacy::net::Purpose::Voice(NAME));
-    let resp = tokio::select! {
-        _ = &mut stop => return Ok(Streamed { stopped: true, ..done }),
-        r = tokio::time::timeout(FIRST_AUDIO, send) => match r {
-            Err(_) => return Err(Failure::TimedOut),
-            Ok(Err(e)) => return Err(send_failure(&e)),
-            Ok(Ok(resp)) => resp,
-        },
+    let Some(resp) = stream::ask(send, turn.since, LIMITS, |s, b| classify(s, b, &req.key)).await? else {
+        return Ok(Streamed { stopped: true, ..Streamed::default() });
     };
-    if !resp.status().is_success() {
-        return Err(error_of(resp, &req.key).await);
-    }
-    let mut resp = resp;
-    let mut pcm = S16Le::default();
-    let mut piece: Vec<f32> = Vec::with_capacity(MIN_PIECE * 2);
-    let mut heard = false;
-    let mut hand_on = |samples: Vec<f32>, done: &mut Streamed| -> bool {
-        done.samples += samples.len();
-        if done.first_audio.is_none() {
-            done.first_audio = Some(started.elapsed());
-        }
-        out(Pcm { sample_rate: SAMPLE_RATE, channels: 1, samples })
-    };
-    loop {
-        let wait = if heard { GAP } else { FIRST_AUDIO.saturating_sub(started.elapsed()) };
-        let next = tokio::select! {
-            _ = &mut stop => return Ok(Streamed { stopped: true, ..done }),
-            r = tokio::time::timeout(wait, resp.chunk()) => r,
-        };
-        match next {
-            Err(_) => return Err(Failure::TimedOut),
-            // The connection dropped mid-answer.
-            Ok(Err(e)) => return Err(send_failure(&e)),
-            Ok(Ok(None)) => break,
-            Ok(Ok(Some(bytes))) => {
-                piece.extend(pcm.push(&bytes));
-                heard |= !piece.is_empty();
-                if piece.len() >= MIN_PIECE && !hand_on(std::mem::take(&mut piece), &mut done) {
-                    return Ok(Streamed { stopped: true, ..done });
-                }
-            }
-        }
-    }
-    if done.samples == 0 && piece.is_empty() {
-        return Err(Failure::Rejected(format!("{NAME} sent no audio")));
-    }
-    piece.extend(std::iter::repeat_n(0.0, SAMPLE_RATE as usize * SENTENCE_GAP_MS / 1000));
-    if !hand_on(piece, &mut done) {
-        done.stopped = true;
-    }
-    Ok(done)
+    let mut pcm = stream::RawPcm::new(SAMPLE_RATE);
+    stream::pump(resp, &mut pcm, &turn, out).await
 }
 
 // ---- one sentence with its timing (`/stream/with-timestamps`) -----------------------------------
@@ -443,9 +264,9 @@ pub struct Timestamped {
     pub times: Vec<super::marks::CharTime>,
 }
 
-impl Timestamped {
+impl Decode for Timestamped {
     /// More of the answer: the audio in every line it completes.
-    pub fn push(&mut self, bytes: &[u8]) -> Result<Vec<f32>, Failure> {
+    fn push(&mut self, bytes: &[u8]) -> Result<Vec<f32>, Failure> {
         self.buf.extend_from_slice(bytes);
         let mut out = Vec::new();
         while let Some(nl) = self.buf.iter().position(|&b| b == b'\n') {
@@ -456,11 +277,17 @@ impl Timestamped {
     }
 
     /// The answer ended: a last line without its line break.
-    pub fn finish(&mut self) -> Result<Vec<f32>, Failure> {
+    fn finish(&mut self) -> Result<Vec<f32>, Failure> {
         let rest = std::mem::take(&mut self.buf);
         self.line(&rest)
     }
 
+    fn format(&self) -> (u32, u16) {
+        (SAMPLE_RATE, 1)
+    }
+}
+
+impl Timestamped {
     fn line(&mut self, line: &[u8]) -> Result<Vec<f32>, Failure> {
         use base64::Engine as _;
         let line = line.trim_ascii();
@@ -512,66 +339,18 @@ pub async fn stream_speech_timed(
     req: &SpeechRequest,
     out: &mut dyn FnMut(Pcm) -> bool,
 ) -> Result<(Streamed, Vec<super::marks::CharTime>), Failure> {
-    let since = CANCELS.load(Ordering::SeqCst);
-    let started = Instant::now();
-    let stop = cancelled(since);
-    tokio::pin!(stop);
-    let mut done = Streamed::default();
+    let turn = stream::Turn::now(LIMITS, SENTENCE_GAP_MS, NAME);
     let send = API_HTTP
         .post(&req.url)
         .header("xi-api-key", req.key.header())
         .header("accept", "application/json")
         .json(&req.body)
         .send_for(crate::privacy::net::Purpose::Voice(NAME));
-    let resp = tokio::select! {
-        _ = &mut stop => return Ok((Streamed { stopped: true, ..done }, Vec::new())),
-        r = tokio::time::timeout(FIRST_AUDIO, send) => match r {
-            Err(_) => return Err(Failure::TimedOut),
-            Ok(Err(e)) => return Err(send_failure(&e)),
-            Ok(Ok(resp)) => resp,
-        },
+    let Some(resp) = stream::ask(send, turn.since, LIMITS, |s, b| classify(s, b, &req.key)).await? else {
+        return Ok((Streamed { stopped: true, ..Streamed::default() }, Vec::new()));
     };
-    if !resp.status().is_success() {
-        return Err(error_of(resp, &req.key).await);
-    }
-    let mut resp = resp;
     let mut parse = Timestamped::default();
-    let mut piece: Vec<f32> = Vec::with_capacity(MIN_PIECE * 2);
-    let mut heard = false;
-    let mut hand_on = |samples: Vec<f32>, done: &mut Streamed| -> bool {
-        done.samples += samples.len();
-        if done.first_audio.is_none() {
-            done.first_audio = Some(started.elapsed());
-        }
-        out(Pcm { sample_rate: SAMPLE_RATE, channels: 1, samples })
-    };
-    loop {
-        let wait = if heard { GAP } else { FIRST_AUDIO.saturating_sub(started.elapsed()) };
-        let next = tokio::select! {
-            _ = &mut stop => return Ok((Streamed { stopped: true, ..done }, parse.times)),
-            r = tokio::time::timeout(wait, resp.chunk()) => r,
-        };
-        match next {
-            Err(_) => return Err(Failure::TimedOut),
-            Ok(Err(e)) => return Err(send_failure(&e)),
-            Ok(Ok(None)) => break,
-            Ok(Ok(Some(bytes))) => {
-                piece.extend(parse.push(&bytes)?);
-                heard |= !piece.is_empty();
-                if piece.len() >= MIN_PIECE && !hand_on(std::mem::take(&mut piece), &mut done) {
-                    return Ok((Streamed { stopped: true, ..done }, parse.times));
-                }
-            }
-        }
-    }
-    piece.extend(parse.finish()?);
-    if done.samples == 0 && piece.is_empty() {
-        return Err(Failure::Rejected(format!("{NAME} sent no audio")));
-    }
-    piece.extend(std::iter::repeat_n(0.0, SAMPLE_RATE as usize * SENTENCE_GAP_MS / 1000));
-    if !hand_on(piece, &mut done) {
-        done.stopped = true;
-    }
+    let done = stream::pump(resp, &mut parse, &turn, out).await?;
     Ok((done, parse.times))
 }
 
@@ -778,7 +557,7 @@ async fn get_json(path_and_query: &str, key: &Key) -> Result<Value, Failure> {
         .timeout(LIST_TIMEOUT)
         .send_for(crate::privacy::net::Purpose::VoiceList(NAME))
         .await
-        .map_err(|e| send_failure(&e))?;
+        .map_err(|e| stream::send_failure(&e))?;
     if !resp.status().is_success() {
         return Err(error_of(resp, key).await);
     }
@@ -1049,6 +828,9 @@ pub(crate) mod standin {
         /// 200 with `/stream/with-timestamps`' JSON lines, each body cut in
         /// these pieces (a line may arrive in parts).
         Timed { body: String, pieces: Vec<usize> },
+        /// 200 with this content type and body, chunked in these pieces
+        /// (the other cloud voices' answers: events, a WAV, PCM).
+        Body { content_type: &'static str, body: Vec<u8>, pieces: Vec<usize> },
     }
 
     pub(crate) struct Stub {
@@ -1110,27 +892,30 @@ pub(crate) mod standin {
                     Reply::Silent => {
                         std::thread::sleep(Duration::from_secs(30));
                     }
-                    Reply::Timed { body, pieces } => {
-                        let bytes = body.into_bytes();
-                        let _ = write!(s, "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n");
-                        let mut at = 0;
-                        for n in pieces.into_iter().chain([usize::MAX]) {
-                            let n = n.min(bytes.len() - at);
-                            if n == 0 {
-                                break;
-                            }
-                            let _ = write!(s, "{n:x}\r\n");
-                            let _ = s.write_all(&bytes[at..at + n]);
-                            let _ = write!(s, "\r\n");
-                            let _ = s.flush();
-                            at += n;
-                        }
-                        let _ = write!(s, "0\r\n\r\n");
-                    }
+                    Reply::Timed { body, pieces } => send_chunked(&mut s, "application/json", body.into_bytes(), pieces),
+                    Reply::Body { content_type, body, pieces } => send_chunked(&mut s, content_type, body, pieces),
                 }
             }
         });
         Stub { base, requests }
+    }
+
+    /// A 200 answer of `bytes`, chunked in these pieces (the rest in one).
+    fn send_chunked(s: &mut std::net::TcpStream, content_type: &str, bytes: Vec<u8>, pieces: Vec<usize>) {
+        let _ = write!(s, "HTTP/1.1 200 OK\r\nContent-Type: {content_type}\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n");
+        let mut at = 0;
+        for n in pieces.into_iter().chain([usize::MAX]) {
+            let n = n.min(bytes.len() - at);
+            if n == 0 {
+                break;
+            }
+            let _ = write!(s, "{n:x}\r\n");
+            let _ = s.write_all(&bytes[at..at + n]);
+            let _ = write!(s, "\r\n");
+            let _ = s.flush();
+            at += n;
+        }
+        let _ = write!(s, "0\r\n\r\n");
     }
 
     pub(crate) fn pcm_bytes(samples: usize) -> Vec<u8> {

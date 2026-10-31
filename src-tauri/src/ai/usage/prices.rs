@@ -106,7 +106,27 @@ const TABLE: &[Row] = &[
     row("groq", "openai/gpt-oss-120b", "", 0, 0.15, 0.60),
     row("groq", "openai/gpt-oss-20b", "", 0, 0.075, 0.30),
     row("groq", "qwen/qwen3.8-27b", "", 0, 0.80, 4.0),
+    // Spoken replies' cloud voices (`tts/hosted.rs`; checked 2026-10-31):
+    // the text in, the audio out. OpenAI's TTS model shuts down on
+    // 2027-01-06; Gemini's go up on 2027-01-01 (25 audio tokens a second).
+    row("openai", "gpt-4o-mini-tts", "", 0, 0.60, 12.0),
+    row("gemini", "gemini-3.8-flash-tts", "", 0, 0.50, 9.0),
+    row("gemini", "gemini-3.8-flash-tts", "2027-01-01", 0, 1.0, 18.0),
+    row("gemini", "gemini-3.8-flash-lite-tts", "", 0, 0.50, 6.0),
+    row("gemini", "gemini-3.8-flash-lite-tts", "2027-01-01", 0, 1.0, 12.0),
 ];
+
+/// Voices priced by the character, not the token: `(provider, model, US
+/// dollars a million characters)`. Groq's Orpheus (checked 2026-10-31).
+const PER_CHAR: &[(&str, &str, f64)] = &[("groq", "canopylabs/orpheus-v1-english", 22.0)];
+
+/// A voice request's estimated cost by its text's characters, in millionths
+/// of a US dollar, for a voice priced that way. Pure.
+pub fn char_cost_micros(provider: &str, model: &str, chars: u64) -> Option<u64> {
+    let (_, _, per_million) = PER_CHAR.iter().find(|(p, m, _)| *p == provider && *m == model)?;
+    // $ per million characters × characters = millionths of a dollar.
+    Some((chars as f64 * per_million).round() as u64)
+}
 
 /// A model id without a dated snapshot's suffix: "claude-haiku-4-5-20251001"
 /// → "claude-haiku-4-5", "gpt-5-mini-2025-08-07" → "gpt-5-mini". Pure.
@@ -188,6 +208,20 @@ mod tests {
         assert_eq!(cost_micros("custom", "gpt-5-mini", "2026-10-25", 10, 10), None);
         assert_eq!(cost_micros("ondevice", "Qwen_Qwen3.5-4B-Q4_K_M", "2026-10-25", 10, 10), None);
         assert!(has_price("openai", "gpt-5-mini") && !has_price("openai", "gpt-9"));
+    }
+
+    #[test]
+    fn a_cloud_voice_is_priced_by_its_tokens_or_its_characters() {
+        // OpenAI: 14 text tokens in, 101 audio tokens out.
+        assert_eq!(cost_micros("openai", "gpt-4o-mini-tts-2025-12-15", "2026-10-31", 14, 101), Some((14.0 * 0.60 + 101.0 * 12.0_f64).round() as u64));
+        // Gemini's Flash-Lite TTS: 6 s of audio is 150 tokens; double from 2027.
+        assert_eq!(cost_micros("gemini", "gemini-3.8-flash-lite-tts", "2026-10-31", 10, 150), Some(905));
+        assert_eq!(cost_micros("gemini", "gemini-3.8-flash-lite-tts", "2027-01-02", 10, 150), Some(1_810));
+        // Groq's Orpheus by the character: 90 characters at $22 a million.
+        assert_eq!(char_cost_micros("groq", "canopylabs/orpheus-v1-english", 90), Some(1_980));
+        assert_eq!(char_cost_micros("groq", "openai/gpt-oss-20b", 90), None);
+        // Its longest request, 200 characters, is under half a penny ($0.0044).
+        assert_eq!(char_cost_micros("groq", "canopylabs/orpheus-v1-english", 200), Some(4_400));
     }
 
     #[test]

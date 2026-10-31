@@ -143,13 +143,20 @@ struct RodioPlayback {
     sink: Arc<rodio::Sink>,
     /// [`pack_position`] of the tagged sample the output took last.
     pos: Arc<AtomicU64>,
+    /// The other apps turned down while this plays ("Turn other apps down
+    /// while Yap speaks", `voice/duck.rs`): held from the first audio, let
+    /// go on a pause, a stop and when this output closes. This PC's
+    /// speakers only: a phone's playback (`link/voice.rs`) has none.
+    duck: crate::voice::duck::Duck,
 }
 
 impl Playback for RodioPlayback {
     fn append(&self, pcm: Pcm) {
+        self.duck.hold();
         self.sink.append(rodio::buffer::SamplesBuffer::new(pcm.channels, pcm.sample_rate, pcm.samples));
     }
     fn append_tagged(&self, pcm: Pcm, tag: Tag) {
+        self.duck.hold();
         let ns_per_sample = 1e9 / (f64::from(pcm.sample_rate.max(1)) * f64::from(pcm.channels.max(1)));
         self.sink.append(Tagged {
             inner: rodio::buffer::SamplesBuffer::new(pcm.channels, pcm.sample_rate, pcm.samples),
@@ -162,15 +169,20 @@ impl Playback for RodioPlayback {
     }
     fn stop(&self) {
         self.sink.stop();
+        self.duck.let_go();
     }
     fn done(&self) -> bool {
         self.sink.empty()
     }
     fn pause(&self) {
         self.sink.pause();
+        self.duck.let_go();
     }
     fn resume(&self) {
         self.sink.play();
+        if !self.sink.empty() {
+            self.duck.hold();
+        }
     }
     fn paused(&self) -> bool {
         self.sink.is_paused()
@@ -190,7 +202,7 @@ pub(super) fn rodio_opener(device: Option<String>) -> Opener {
         sink.set_volume(gain(volume()));
         *LIVE_SINK.lock().unwrap_or_else(|p| p.into_inner()) = Some(Arc::downgrade(&sink));
         Ok(Opened {
-            play: Arc::new(RodioPlayback { sink, pos: Arc::new(AtomicU64::new(0)) }),
+            play: Arc::new(RodioPlayback { sink, pos: Arc::new(AtomicU64::new(0)), duck: crate::voice::duck::Duck::new() }),
             keep: Some(Box::new(stream)),
         })
     })

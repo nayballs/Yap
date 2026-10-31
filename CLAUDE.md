@@ -55,7 +55,7 @@ Full list with versions and details: [app-shell.md](./docs/architecture/app-shel
 - **Audio:** `cpal` capture, `rodio` playback (chimes, spoken replies).
 - **STT:** `transcribe-rs` — whisper.cpp on Vulkan + ONNX models (Parakeet…) on DirectML; `engines` feature. Vendored (`src-tauri/vendor/transcribe-rs`, `[patch.crates-io]`) with two DirectML fixes for Parakeet and its TDT durations read (no "d d d d" runs) — see its `YAP.md`. A transcript's language: `whatlang` + Yap's function words (`languages/text_id.rs`).
 - **AI:** `reqwest` → any OpenAI-compatible endpoint, or the on-device llamafile sidecar (`ai/local_llm.rs`).
-- **Spoken replies:** Kokoro-82M (ONNX on `ort`, CPU; eSpeak NG run separately) or Windows' voices; or ElevenLabs (cloud, the user's own key, streamed PCM).
+- **Spoken replies:** Kokoro-82M (ONNX on `ort`, CPU; eSpeak NG run separately) or Windows' voices; or ElevenLabs (cloud, the user's own key, streamed PCM); or OpenAI, Gemini, Groq (the keys Language Models already has).
 - **Speaker diarization (beta):** Nemotron-3-Diarization on NeMo-Speech.cpp, in a `yap.exe diarize` child.
 - **Text injection:** Win32 clipboard (private formats, verified) + `SendInput`; UI Automation reads the field.
 - **Updates/install:** `tauri-plugin-updater` (GitHub Releases) driven by `updates.rs` + a custom NSIS installer.
@@ -128,7 +128,8 @@ One folder per area (an area's `<area>.rs` lists its modules); a big module's pa
 - `dictation/recent_audio.rs` — a day of dictation audio (`recent-audio/`), cancelled ones too: failed and cancelled dictations listed, Home's Run again / Transcribe, Play, Keep, Save audio….
 - `dictation/media.rs` — Upload's audio-file decoding (Symphonia) and chunking.
 - `dictation/sound.rs` (+ `sound/packs.rs`) — Yap's sounds in packs (Classic, Soft, Crisp, Minimal: made from numbers as they play, no files): a dictation's start, stop, hands-free and cancel, an error, "Taking longer than usual", meeting notes' start and stop, a bar card; a switch each; after the sound playing, never into a meeting's notes (only a dictation's start and stop while one records); the output device shared with spoken replies.
-- `dictation/mute.rs` / `dictation/media_pause.rs` — silence other apps / pause media while dictating; exact restore.
+- `dictation/mute.rs` / `dictation/media_pause.rs` — silence other apps / pause media while dictating; exact restore; a dictation started mid-speech takes the voice's turned-down apps over (`takes_over`).
+- `dictation/other_apps.rs` — other apps' audio sessions turned down by Yap: one ledger for a dictation's silence and Yap's voice's 30 % (who holds each, the lowest level wins, back to exactly its own level only if unmoved), the never-touch rules, `quieted_apps.json` for a crash, pure over a fake session list in tests.
 - `dictation/history.rs` — local dictation history (with its audio's id, how long it was said for and the words as said when cleanup changed them; failed / not pasted / cancelled); `history/keep.rs` — Keep history: always / 24 hours (the older ones swept hourly) / never, its copy beside the stats for an older Yap's save.
 - `dictation/stats.rs` (+ `stats/`: days, word_diff, share) — the stats that outlast history (`dictation_stats.json`, a content-free row a day, written whether or not history is kept): words a minute over speaking time, time saved, day and week streaks, AI cleanup's and the dictionary's fixes this month against last, top apps, welcome back; Insights' Share (a PNG copied or saved).
 - `dictation/milestones.rs` — "You've dictated 1,000 words" (100, 500, 1k, 2k, 5k, then further apart), once each, through the notice policy.
@@ -211,7 +212,8 @@ One folder per area (an area's `<area>.rs` lists its modules); a big module's pa
 - `apps.rs` (+ `apps/`: index, matching, plan, tools, win) — opens Start-menu apps on request: index, matching, fast path, consent.
 
 **Spoken replies** — [spoken-replies.md](./docs/architecture/spoken-replies.md)
-- `voice/tts.rs` (+ `voice/tts/`: the engines, text, speaker, playback) — Kokoro (its Japanese and Mandarin voices not offered) / Windows voices / ElevenLabs (cloud, own key, local voice as fallback), text normalisation, the speaker queue (a read-aloud paced a sentence ahead, its position, pause), Kokoro's download; `voice/tts/marks.rs` word timing (Windows' word cues, ElevenLabs' timestamps, else from Kokoro's audio).
+- `voice/tts.rs` (+ `voice/tts/`: the engines, text, speaker, playback) — Kokoro (its Japanese and Mandarin voices not offered) / Windows voices / ElevenLabs (cloud, own key, local voice as fallback) / OpenAI, Gemini, Groq (`hosted.rs` + `openai.rs`, `gemini.rs`, `groq.rs`: on the key Language Models has, offered once it has one; streamed, Groq's 200-character pieces; counted in AI usage as "Spoken replies"), what cloud voices share (`cloud.rs`, `cloud/stream.rs`: the key, decoding as it comes, a stop), text normalisation, the speaker queue (a read-aloud paced a sentence ahead, its position, pause), Kokoro's download; `voice/tts/marks.rs` word timing (Windows' word cues, ElevenLabs' timestamps, else from the audio).
+- `voice/duck.rs` — "Turn other apps down while Yap speaks" (on): other apps to 30 % while Yap's voice plays on this PC (never a phone's answer), from the first sound, let go 600 ms after it ends or on ⏸, through `dictation/other_apps.rs`.
 - `voice/read_aloud.rs` — Read aloud, anywhere: the selection in any app (shortcut, 🔊 on the bar, tray), notes and Chat answers read with a karaoke reading card on the Yap bar; ⏮ ⏯ ⏭, speed, Stop, Esc.
 
 **Notes** — [notes.md](./docs/architecture/notes.md)
@@ -469,7 +471,7 @@ Everything lives in `%APPDATA%/yap/` (portable: `<exe>/Data/`): `config.json`,
 `notes.json`, `tasks.json` (tasks the person added or archived), `note-versions/` (each note's history), `note_pins.json`, `skills.json` (your own Skills), `meeting_folders.json` (recurring meetings' and companies' folders), `chats.json`, `calendar.json`, `updates.json`, `model_catalog.json`,
 `groq_usage.json`, `ai_usage.json` (every AI call's tokens, 90 days, counts only), `dictation_stats.json` (Home's and Insights' stats, a row a day, numbers only, outlasting history), `dictionary_usage.json`, `hints.json`, `onboarding.json` (the setup's answers, the typing test's numbers), `mic_tips.json` (the mic tips shown), `word_suggestions.json`, `snippet_suggestions.json`,
 `language_nudges.json` (the "You spoke French" answers), `notices.json`, `memory.json` (what Yap remembers about you), `writing_samples.json` (your writing samples), `chat-images/` (Chat's screenshots, Snip to Chat; `thumbs/` their thumbnails), `connections.json` (a week of network receipts: hosts and purposes, never content), `quieted_apps.json`
-(only mid-dictation), `stt_speed.json` (each model's device timings),
+(only while a dictation or Yap's voice has other apps down), `stt_speed.json` (each model's device timings),
 `recent-audio/` (a day of dictation audio), `meeting-audio/` (each meeting's audio as
 FLAC, 14 days; `cuts.json`: lines deleted from it), `search-index/` (search by meaning's vectors: notes, chats, memory; no text), `link_devices.json` (paired phones: secrets' hashes only) and `link/` (Yap Link's certificate), `icons/`, `logs/`. Every JSON
 store writes atomically and quarantines a corrupt file instead of crashing —
@@ -485,7 +487,7 @@ Manager. The local API's discovery file is `~/.yap/cli-bridge.json`.
 Notable defaults: F9 in toggle mode, **Parakeet TDT 0.6B v3** on the device measured fastest here, AI cleanup off,
 smart spacing / terminal mode / no full stop in chats on, the Yap bar on, Win+Alt+S snips to Chat (screenshots kept 30 days), call
 detection on (it only asks), a 2-hour meeting limit, Win+Alt+M, meeting audio kept 14 days,
-web search, spoken replies and search by meaning (its model downloads on demand) off. Every setting, file and default: [config-and-data.md](./docs/architecture/config-and-data.md).
+web search, spoken replies and search by meaning (its model downloads on demand) off, other apps turned down while Yap speaks on. Every setting, file and default: [config-and-data.md](./docs/architecture/config-and-data.md).
 
 ---
 

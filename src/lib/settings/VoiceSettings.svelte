@@ -1,7 +1,11 @@
 <script>
   // Settings → Voice Assistant → Voice: who speaks (ttsProvider: "On this
-  // PC", the default, or a cloud voice — ElevenLabs, ElevenLabsSettings.svelte
-  // — with the privacy line under the choice while it's picked); on this PC,
+  // PC", the default, or a cloud voice — ElevenLabs on its own key,
+  // ElevenLabsSettings.svelte; OpenAI, Gemini or Groq on the key Language
+  // Models has, offered only once it has one, HostedVoiceSettings.svelte —
+  // with the privacy line under the choice while it's picked; a list instead
+  // of side-by-side choices past three); "Turn other apps down while Yap
+  // speaks" (cfg.duckOtherApps, voice/duck.rs) under the volume; on this PC,
   // the engine (Kokoro, the natural voices on this PC, recommended; or
   // Windows' own voices), Kokoro's download row (Download / Active / delete,
   // like the speech models'), the voice picker that follows the engine
@@ -22,6 +26,9 @@
   import ModelRow from './ModelRow.svelte';
   import ConfirmDialog from '../ui/ConfirmDialog.svelte';
   import ElevenLabsSettings from './ElevenLabsSettings.svelte';
+  import HostedVoiceSettings from './HostedVoiceSettings.svelte';
+  import Toggle from '../ui/Toggle.svelte';
+  import { sharedKey } from '../core/providers.js';
   import { speech } from '../stores/speech.svelte.js';
   import { toast } from '../ui/toast.svelte.js';
   import { openExternalLink } from '../core/externalLinks.js';
@@ -47,24 +54,44 @@
   });
 
   // Who speaks: the providers tts_voices lists (cloud/PROVIDERS), these
-  // until it answers.
+  // until it answers. OpenAI, Gemini and Groq (`hosted`) only once Language
+  // Models has their key — this copy's, so a key just pasted counts.
   const PROVIDERS = [
-    { value: 'local', label: 'On this PC' },
-    { value: 'elevenlabs', label: 'ElevenLabs' },
+    { id: 'local', name: 'On this PC' },
+    { id: 'elevenlabs', name: 'ElevenLabs' },
   ];
-  const providers = $derived(
-    voiceList?.providers?.length ? voiceList.providers.map((p) => ({ value: p.id, label: p.name })) : PROVIDERS
+  function hasKey(id) {
+    const chat = cfg.llmScopes?.chat;
+    const own = chat ? (chat.provider === id ? chat.apiKey : chat.apiKeys?.[id]) : '';
+    return !!(own || sharedKey(cfg, id));
+  }
+  const offered = $derived(
+    (voiceList?.providers?.length ? voiceList.providers : PROVIDERS).filter((p) => !p.hosted || hasKey(p.id))
   );
+  const providers = $derived(offered.map((p) => ({ value: p.id, label: p.name })));
   const provider = $derived(providers.some((p) => p.value === cfg.ttsProvider) ? cfg.ttsProvider : 'local');
+  const picked = $derived(offered.find((p) => p.id === provider) ?? PROVIDERS[0]);
   const cloud = $derived(provider !== 'local');
-  const keysPage = $derived(voiceList?.providers?.find((p) => p.id === provider)?.keysPage || undefined);
+  const keysPage = $derived(picked.keysPage || undefined);
   function setProvider(v) {
     cfg.ttsProvider = v;
     if (speech.speakingId === 'preview') invoke('tts_stop').catch(() => {});
   }
   const providerDesc = $derived(
-    cloud ? "ElevenLabs' voices, on your own API key" : "Yap's own voice, made on this PC: nothing leaves it"
+    !cloud
+      ? "Yap's own voice, made on this PC: nothing leaves it"
+      : picked.hosted
+        ? `${picked.name}'s voices, on the key you use in Language Models`
+        : "ElevenLabs' voices, on your own API key"
   );
+  const noneConnected = $derived(!(voiceList?.providers ?? []).some((p) => p.hosted && hasKey(p.id)));
+  // How fast each cloud voice can go.
+  const SPEED_NOTES = {
+    elevenlabs: (r) => (r < 0.7 || r > 1.2 ? 'ElevenLabs speaks between 0.7× and 1.2×: it uses the nearest' : ''),
+    gemini: (r) => (Math.abs(r - 1) > 0.1 ? 'Gemini is asked to speak faster or slower: near enough, not exact' : ''),
+    groq: () => "Groq's Orpheus speaks at its own pace",
+  };
+  const speedDesc = $derived(cloud ? (SPEED_NOTES[provider]?.(Number(cfg.ttsRate) || 1) ?? '') : '');
   // A local voice that can stand in when the cloud voice fails: Kokoro
   // downloaded, or Windows voices chosen (voice/tts.rs local_voice).
   const localFallback = $derived(cfg.ttsEngine === 'windows' || (kokoro.inBuild && kokoro.installed));
@@ -173,17 +200,34 @@
 </script>
 
 <div id="settings-voice-provider">
-  <Row label="Speaks with" desc={providerDesc} setting="voice-provider">
-    <Segmented bind:value={() => provider, setProvider} options={providers} label="Speaks with" />
+  <Row
+    label="Speaks with"
+    desc={providerDesc}
+    hint={noneConnected ? 'Have an OpenAI, Gemini or Groq key in Language Models? Their voices show here too.' : undefined}
+    setting="voice-provider"
+  >
+    <!-- Two or three: side by side; more (a provider's key in Language
+         Models): a list. -->
+    {#if providers.length > 3}
+      <Select bind:value={() => provider, setProvider} options={providers} ariaLabel="Speaks with" />
+    {:else}
+      <Segmented bind:value={() => provider, setProvider} options={providers} label="Speaks with" />
+    {/if}
   </Row>
 </div>
 
 {#if cloud}
   <!-- Where the words go, said plainly while a cloud voice is picked. -->
   <Row>
-    <p class="privacy">The words Yap speaks are sent to ElevenLabs.</p>
+    <p class="privacy">The words Yap speaks are sent to {picked.name}.</p>
   </Row>
-  <ElevenLabsSettings {cfg} {keysPage} {localFallback} />
+  {#if picked.hosted}
+    {#key provider}
+      <HostedVoiceSettings {cfg} provider={picked} {localFallback} />
+    {/key}
+  {:else}
+    <ElevenLabsSettings {cfg} {keysPage} {localFallback} />
+  {/if}
 {:else}
 <Row label="Engine" desc={engineDesc}>
   <Segmented bind:value={cfg.ttsEngine} options={ENGINES} label="Engine" />
@@ -244,11 +288,7 @@
 </Row>
 {/if}
 
-<Row
-  label="Speed"
-  desc={cloud && (Number(cfg.ttsRate) < 0.7 || Number(cfg.ttsRate) > 1.2) ? 'ElevenLabs speaks between 0.7× and 1.2×: it uses the nearest' : ''}
-  setting="voice-speed"
->
+<Row label="Speed" desc={speedDesc} setting="voice-speed">
   <Slider inline bind:value={cfg.ttsRate} min={0.5} max={2} step={0.1} label="Speed" format={(v) => `${Number(v).toFixed(1)}×`} />
 </Row>
 
@@ -264,6 +304,17 @@
     label="Volume"
     format={(v) => `${Math.round(Number(v) * 100)}%`}
     oninput={(v) => invoke('tts_volume_set', { volume: Number(v) }).catch(() => {})}
+  />
+</Row>
+
+<!-- Other apps turned down while Yap speaks (voice/duck.rs): this PC's
+     speakers only, back to exactly their level after. -->
+<Row setting="duck-other-apps">
+  <Toggle
+    bind:checked={() => cfg.duckOtherApps !== false, (v) => (cfg.duckOtherApps = v)}
+    label="Turn other apps down while Yap speaks"
+    desc="Music and videos go to about a third of their volume while Yap talks, and back to exactly where they were after"
+    hint="Answers, the Voice Assistant and Read aloud on this PC. Never a call app, and never an answer read on your phone."
   />
 </Row>
 

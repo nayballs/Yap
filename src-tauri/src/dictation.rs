@@ -1,7 +1,8 @@
 //! Dictation: from the shortcut to the words. The pipeline and its
 //! gestures, the microphone and its level meter, speech-to-text and which
 //! device runs it, "Taking longer than usual…", the length limit, Upload's
-//! decoding, Yap's sounds (in packs), other apps' sound while you talk, history and a
+//! decoding, Yap's sounds (in packs), other apps' sound while you talk (and
+//! while Yap speaks: `other_apps`), history and a
 //! day of dictation audio, the stats that outlast it and word milestones,
 //! saved transforms, My languages, the mouse's side buttons set up in one
 //! step (`side_buttons`), whether the rewrite shortcut's words about a
@@ -35,6 +36,7 @@ pub mod mics;
 pub mod mic_watch;
 pub mod milestones;
 pub mod mute;
+pub mod other_apps;
 pub mod partials;
 pub mod pipeline;
 pub mod recent_audio;

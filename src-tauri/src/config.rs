@@ -998,10 +998,20 @@ pub struct YapConfig {
     /// under the Windows mixer's. Half by default.
     #[serde(default = "default_tts_volume")]
     pub tts_volume: f32,
+    /// "Turn other apps down while Yap speaks" (Settings → Voice Assistant
+    /// → Voice; `voice/duck.rs`): while Yap's voice plays on this PC, other
+    /// apps' sound goes to about 30 % of its level, and back to exactly it
+    /// after. Never Yap's own sound, a call app's, or an answer said on a
+    /// phone. On by default (an older Yap drops the field on its save: on
+    /// again).
+    #[serde(default = "default_true")]
+    pub duck_other_apps: bool,
     /// Who reads spoken replies (`tts::cloud::PROVIDERS`): "local" (the
-    /// default — Kokoro or Windows voices, on this PC) or "elevenlabs"
-    /// (ElevenLabs' voices on the person's own key: the words Yap speaks go
-    /// there; until a key is set the local voice speaks).
+    /// default — Kokoro or Windows voices, on this PC), "elevenlabs"
+    /// (ElevenLabs' voices on the person's own key), or "openai", "gemini"
+    /// or "groq" (their voices on the key Language Models already has for
+    /// that provider, `tts/hosted.rs`). The words Yap speaks go there;
+    /// until there's a key the local voice speaks.
     #[serde(default = "default_tts_provider")]
     pub tts_provider: String,
     /// Each cloud voice service's API key (service id → key), like
@@ -1533,6 +1543,7 @@ impl Default for YapConfig {
             tts_windows_voice: String::new(),
             tts_rate: default_tts_rate(),
             tts_volume: default_tts_volume(),
+            duck_other_apps: true,
             tts_provider: default_tts_provider(),
             tts_cloud_keys: std::collections::HashMap::new(),
             tts_cloud: std::collections::HashMap::new(),

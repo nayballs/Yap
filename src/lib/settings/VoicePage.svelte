@@ -30,10 +30,12 @@
 
   // Switching replies on while Kokoro isn't downloaded offers it
   // (KokoroOffer), Windows voices speaking meanwhile. Not while a cloud
-  // voice (ElevenLabs) speaks: Kokoro is only its stand-in.
+  // voice (ElevenLabs, OpenAI, Gemini, Groq) speaks: Kokoro is only its
+  // stand-in.
   function setSpeakReplies(on) {
     cfg.speakReplies = on;
-    offerKokoro = on && cfg.ttsProvider !== 'elevenlabs' && cfg.ttsEngine !== 'windows' && kokoro.inBuild && !kokoro.installed;
+    const local = (cfg.ttsProvider || 'local') === 'local';
+    offerKokoro = on && local && cfg.ttsEngine !== 'windows' && kokoro.inBuild && !kokoro.installed;
   }
   const SPEAK_WHEN = [
     { value: 'voice', label: 'When I asked by voice' },

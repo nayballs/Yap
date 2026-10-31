@@ -1,7 +1,9 @@
-//! **Cloud voices** — what any cloud speech service shares (ElevenLabs
-//! today, `tts/elevenlabs.rs`; OpenAI's or Azure's could slot in beside it):
-//! the providers Settings lists, why a request failed ([`Failure`], said
-//! plainly), and **when the local voice steps in** ([`Health`]).
+//! **Cloud voices** — what any cloud speech service shares (ElevenLabs on
+//! its own key, `tts/elevenlabs.rs`; OpenAI, Gemini and Groq on the key
+//! Language Models already has, `tts/hosted.rs`): the providers Settings
+//! lists, why a request failed ([`Failure`], said plainly), **when the
+//! local voice steps in** ([`Health`]), and the request plumbing they all
+//! use (`cloud/stream.rs`: the key, decoding audio as it comes, a stop).
 //!
 //! The rules (pure, unit-tested on a simulated clock):
 //! - A cloud voice that fails mid-answer hands the rest of that answer —
@@ -23,12 +25,22 @@ use std::hash::{Hash, Hasher};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
+pub mod stream;
+
 /// The local voices' provider id (`config.tts_provider`): Kokoro or
 /// Windows voices, on this PC.
 pub const LOCAL: &str = "local";
 
-/// The providers Settings lists: `(id, name)`.
-pub const PROVIDERS: &[(&str, &str)] = &[(LOCAL, "On this PC"), (super::elevenlabs::ID, super::elevenlabs::NAME)];
+/// The providers Yap knows: `(id, name)`. Settings lists the first two
+/// always, and the others once their provider has a key in Language
+/// Models (`tts::tts_voices`).
+pub const PROVIDERS: &[(&str, &str)] = &[
+    (LOCAL, "On this PC"),
+    (super::elevenlabs::ID, super::elevenlabs::NAME),
+    (super::openai::ID, super::openai::NAME),
+    (super::gemini::ID, super::gemini::NAME),
+    (super::groq::ID, super::groq::NAME),
+];
 
 /// A known cloud provider's display name ("ElevenLabs").
 pub fn name(provider: &str) -> &'static str {
@@ -38,6 +50,12 @@ pub fn name(provider: &str) -> &'static str {
 /// Whether `provider` is a cloud voice Yap knows.
 pub fn is_cloud(provider: &str) -> bool {
     provider != LOCAL && PROVIDERS.iter().any(|(id, _)| *id == provider)
+}
+
+/// Whether `provider` speaks on a key Language Models has (OpenAI, Gemini,
+/// Groq), rather than a key of its own (ElevenLabs).
+pub fn is_hosted(provider: &str) -> bool {
+    super::hosted::service(provider).is_some()
 }
 
 /// The same reason isn't said twice within this.
@@ -90,9 +108,13 @@ impl Failure {
     /// What the person can do about it, if anything.
     pub fn advice(&self, provider: &str) -> String {
         let n = name(provider);
+        let hosted = is_hosted(provider);
         match self {
+            Failure::BadKey if hosted => format!("Check your {n} API key in Settings → Language Models."),
             Failure::BadKey => format!("Check your {n} API key in Settings → Voice Assistant."),
+            Failure::NotAllowed if hosted => format!("Check that your {n} key may use its voices, or pick another model."),
             Failure::NotAllowed => format!("Give the key text-to-speech access in {n}, or pick another voice or model."),
+            Failure::Quota if hosted => format!("Your {n} account is out of credit, or at its limit for today."),
             Failure::Quota => format!("Your {n} plan has no characters left this month."),
             Failure::VoiceGone => "Pick another voice in Settings → Voice Assistant.".into(),
             Failure::ModelGone => "Pick another model in Settings → Voice Assistant.".into(),
@@ -314,5 +336,22 @@ mod tests {
         assert!(!is_cloud("nonsense"));
         assert_eq!(name("elevenlabs"), "ElevenLabs");
         assert_ne!(fingerprint(&["a", "b"]), fingerprint(&["ab", ""]));
+        // OpenAI, Gemini and Groq speak on the key Language Models has.
+        for (id, n) in [("openai", "OpenAI"), ("gemini", "Gemini"), ("groq", "Groq")] {
+            assert!(is_cloud(id) && is_hosted(id), "{id}");
+            assert_eq!(name(id), n);
+        }
+        assert!(!is_hosted("elevenlabs") && !is_hosted(LOCAL));
+    }
+
+    #[test]
+    fn a_hosted_voices_notice_points_at_language_models() {
+        let (title, body) = notice_text("openai", &Failure::BadKey, true);
+        assert_eq!(title, "OpenAI didn't answer (API key not accepted)");
+        assert_eq!(body, "Speaking with Yap's own voice. Check your OpenAI API key in Settings → Language Models.");
+        let (_, body) = notice_text("gemini", &Failure::Quota, true);
+        assert!(body.ends_with("Your Gemini account is out of credit, or at its limit for today."), "{body}");
+        let (_, body) = notice_text("groq", &Failure::ModelGone, false);
+        assert!(body.ends_with("Pick another model in Settings → Voice Assistant."), "{body}");
     }
 }

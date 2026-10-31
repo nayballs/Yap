@@ -69,6 +69,8 @@ pub(crate) fn shutdown_cleanup() {
     integrations::bridge::stop();
     // Yap Link: no more phones (link.rs).
     link::stop();
+    // Other apps' sound: a dictation's silence and Yap's voice's 30 %
+    // (dictation/other_apps.rs), all back.
     dictation::mute::restore_all();
     // The week of network receipts, as it stands (net.rs).
     privacy::net::flush();

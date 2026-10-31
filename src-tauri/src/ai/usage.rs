@@ -68,6 +68,9 @@ pub enum Feature {
     Brief,
     /// Search by meaning's embeddings (on this PC).
     Search,
+    /// Spoken replies and Read aloud in a cloud voice that bills by the
+    /// token or the character (OpenAI, Gemini, Groq: `tts/hosted.rs`).
+    Voice,
     Other,
 }
 
@@ -86,6 +89,7 @@ impl Feature {
             Feature::Speakers => "speakers",
             Feature::Brief => "brief",
             Feature::Search => "search",
+            Feature::Voice => "voice",
             Feature::Other => "other",
         }
     }
@@ -307,6 +311,20 @@ fn count(call: &Call, reported: &Reported) {
         return;
     }
     store::record(&target.provider, &target.model, here, feature, reported);
+}
+
+/// One request of a cloud voice (`tts/hosted.rs`): the text's `chars` and,
+/// when the service said, its tokens (`(prompt, answer)`: OpenAI's and
+/// Gemini's streams end with them; Groq's answer is only a WAV). Counted
+/// under "Spoken replies", priced by the token or, for a voice that bills by
+/// the character (Groq's Orpheus), by the character. Never in a unit test.
+pub fn record_speech(provider: &str, model: &str, chars: u64, tokens: Option<(u64, u64)>) {
+    let reported = Reported { prompt: tokens.map(|t| t.0), answer: tokens.map(|t| t.1), ..Reported::default() };
+    tracing::debug!(provider, chars, tokens = reported.total_tokens(), "AI usage: a voice request counted");
+    if cfg!(test) {
+        return;
+    }
+    store::record_speech(provider, model, chars, &reported);
 }
 
 /// Today's, the last 7 days' and the last 30 days' AI use, by model and by

@@ -21,6 +21,7 @@ export const FEATURE_LABELS = {
   speakers: 'Speaker names',
   brief: 'Meeting briefs',
   search: 'Search by meaning',
+  voice: 'Spoken replies',
   other: 'Other',
 };
 

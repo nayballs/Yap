@@ -12,7 +12,10 @@
 //!   install has: David, Zira, George…; no download), which speak until
 //!   Kokoro is installed, in a build without it, or when chosen. Windows
 //!   11's natural Narrator voices (Aria, Jenny, Guy…) are **Narrator-only**:
-//!   the app API doesn't list them.
+//!   the app API doesn't list them. Or a **cloud voice** ([`voicing`]):
+//!   ElevenLabs on its own key (`tts/elevenlabs.rs`), or OpenAI, Gemini and
+//!   Groq on the key Language Models has (`tts/hosted.rs`), the local voice
+//!   standing in when one fails (`tts/cloud.rs`).
 //! - **Text prep** ([`utterances`], `tts/text.rs`, pure): an answer's markdown as something
 //!   to say — marks out, a code block as "(code block)", a link as its text,
 //!   a bare URL as its domain, headings and bullets each their own sentence,
@@ -50,7 +53,11 @@ pub mod elevenlabs;
 // The G2P only runs in builds with Kokoro's engine; it's tested in all.
 #[cfg_attr(not(feature = "engines"), allow(dead_code))]
 mod g2p;
+pub mod gemini;
+pub mod groq;
+pub mod hosted;
 pub mod kokoro;
+pub mod openai;
 pub mod marks;
 mod normalize;
 mod playback;
@@ -226,41 +233,64 @@ pub struct CloudPlan {
 }
 
 /// Who speaks now, from the config (`tts_provider`): a cloud voice when one
-/// is picked **and** has a key — unless it failed a moment ago and a local
-/// voice can stand in (`cloud::Health::skipping`) — else the local voice
+/// is picked **and** has a key — ElevenLabs its own (`tts_cloud_keys`),
+/// OpenAI, Gemini and Groq the one Language Models has for them
+/// (`ai_model::provider_key`) — unless it failed a moment ago and a local
+/// voice can stand in (`cloud::Health::skipping`); else the local voice
 /// ([`chosen`]). Nothing goes to a cloud service without its key.
 pub fn voicing(cfg: &crate::config::YapConfig) -> Voicing {
     voicing_for(cfg, false)
 }
 
+/// The key `provider`'s voices speak on: ElevenLabs' own, or the one
+/// Language Models has for OpenAI, Gemini or Groq ("" for none).
+pub fn provider_key(cfg: &crate::config::YapConfig, provider: &str) -> String {
+    if provider == elevenlabs::ID {
+        cfg.tts_cloud_keys.get(elevenlabs::ID).map(|k| k.trim().to_string()).unwrap_or_default()
+    } else if hosted::service(provider).is_some() {
+        crate::ai::ai_model::provider_key(cfg, provider)
+    } else {
+        String::new()
+    }
+}
+
 /// [`voicing`], for reading aloud when `timed`: a cloud voice is asked for
-/// its word timing too (ElevenLabs' `/stream/with-timestamps`), for the
-/// reading card's karaoke.
+/// its word timing too (ElevenLabs' `/stream/with-timestamps`; the others
+/// say none, so it comes from their audio), for the reading card's karaoke.
 pub fn voicing_for(cfg: &crate::config::YapConfig, timed: bool) -> Voicing {
     let local = || {
         let (engine, voice) = chosen(cfg);
         Voicing { engine, voice, cloud: None }
     };
-    if cfg.tts_provider != elevenlabs::ID {
+    let provider = cfg.tts_provider.as_str();
+    let svc = hosted::service(provider);
+    if provider != elevenlabs::ID && svc.is_none() {
         return local();
     }
-    let key = cfg.tts_cloud_keys.get(elevenlabs::ID).map(|k| k.trim()).unwrap_or("");
+    let key = provider_key(cfg, provider);
     if key.is_empty() {
         return local();
     }
-    let choice = cfg.tts_cloud.get(elevenlabs::ID).cloned().unwrap_or_default();
+    let choice = cfg.tts_cloud.get(provider).cloned().unwrap_or_default();
     let fallback = local_voice(cfg);
-    let key_fp = elevenlabs::Key::new(key).fingerprint();
-    let choice_fp = elevenlabs::ElevenLabs::choice_fingerprint(key, &choice.voice, &choice.model);
-    if fallback.is_some() && cloud::with_health(|h| h.skipping(elevenlabs::ID, key_fp, choice_fp, Instant::now())) {
-        tracing::info!("Spoken replies: ElevenLabs failed a moment ago; Yap's own voice reads this one");
+    let key_fp = cloud::stream::Key::new(&key).fingerprint();
+    let (id, choice_fp, engine): (&'static str, u64, Arc<dyn Engine>) = match svc {
+        Some(svc) => (
+            svc.id(),
+            hosted::Hosted::choice_fingerprint(svc, &key, &choice.voice, &choice.model),
+            Arc::new(hosted::Hosted::new(svc, &key, &choice.model, true)),
+        ),
+        None => (
+            elevenlabs::ID,
+            elevenlabs::ElevenLabs::choice_fingerprint(&key, &choice.voice, &choice.model),
+            Arc::new(elevenlabs::ElevenLabs::new(&key, &choice.model, true).timed(timed)),
+        ),
+    };
+    if fallback.is_some() && cloud::with_health(|h| h.skipping(id, key_fp, choice_fp, Instant::now())) {
+        tracing::info!("Spoken replies: {} failed a moment ago; Yap's own voice reads this one", cloud::name(id));
         return local();
     }
-    Voicing {
-        engine: Arc::new(elevenlabs::ElevenLabs::new(key, &choice.model, true).timed(timed)),
-        voice: choice.voice,
-        cloud: Some(CloudPlan { provider: elevenlabs::ID, local: fallback, key: key_fp, choice: choice_fp }),
-    }
+    Voicing { engine, voice: choice.voice, cloud: Some(CloudPlan { provider: id, local: fallback, key: key_fp, choice: choice_fp }) }
 }
 
 /// **Who reads an answer on a phone** (Yap Link, `link/voice.rs`): with
@@ -592,21 +622,13 @@ pub async fn tts_voices() -> VoiceList {
     let engines: Vec<serde_json::Value> =
         ENGINES.iter().map(|(id, name)| serde_json::json!({ "id": id, "name": name })).collect();
     let fallback_engines = engines.clone();
-    let providers = || -> Vec<serde_json::Value> {
-        cloud::PROVIDERS
-            .iter()
-            .map(|(id, name)| {
-                // Where a cloud voice's key is made ("Get your API key").
-                let keys_page = (*id == elevenlabs::ID).then_some(elevenlabs::KEYS_PAGE);
-                serde_json::json!({ "id": id, "name": name, "keysPage": keys_page })
-            })
-            .collect()
-    };
+    let listed = providers_for(&cfg);
+    let fallback_listed = listed.clone();
     let provider = if cloud::is_cloud(&cfg.tts_provider) { cfg.tts_provider.clone() } else { cloud::LOCAL.to_string() };
     let fallback_provider = provider.clone();
     tauri::async_runtime::spawn_blocking(move || VoiceList {
         provider,
-        providers: providers(),
+        providers: listed,
         engine: cfg.tts_engine.clone(),
         active: chosen(&cfg).0.id().to_string(),
         engines,
@@ -617,7 +639,7 @@ pub async fn tts_voices() -> VoiceList {
     .await
     .unwrap_or_else(|e| VoiceList {
         provider: fallback_provider,
-        providers: providers(),
+        providers: fallback_listed,
         engine: DEFAULT_ENGINE.into(),
         active: WINDOWS.into(),
         engines: fallback_engines,
@@ -625,6 +647,29 @@ pub async fn tts_voices() -> VoiceList {
         kokoro_status: registry::status(&registry::root()),
         windows: EngineVoices { voices: Vec::new(), default_voice: None, error: Some(e.to_string()) },
     })
+}
+
+/// The providers Settings can offer: On this PC and ElevenLabs always;
+/// OpenAI, Gemini and Groq (`hosted: true`, with their default voice and
+/// model) once Language Models has their key — `connected` as the saved
+/// config says; Settings asks its own copy too, so a key just pasted counts.
+/// `[{id, name, keysPage, hosted, connected, defaultVoice?, defaultModel?}]`.
+pub fn providers_for(cfg: &crate::config::YapConfig) -> Vec<serde_json::Value> {
+    cloud::PROVIDERS
+        .iter()
+        .map(|&(id, name)| match hosted::service(id) {
+            Some(svc) => serde_json::json!({
+                "id": id, "name": name, "keysPage": null, "hosted": true,
+                "connected": !provider_key(cfg, id).is_empty(),
+                "defaultVoice": svc.default_voice(), "defaultModel": svc.default_model(),
+            }),
+            // Where a cloud voice's key is made ("Get your API key").
+            None => serde_json::json!({
+                "id": id, "name": name, "keysPage": (id == elevenlabs::ID).then_some(elevenlabs::KEYS_PAGE),
+                "hosted": false, "connected": true,
+            }),
+        })
+        .collect()
 }
 
 /// Read `text` (markdown) aloud: an answer's ▶.
@@ -653,53 +698,72 @@ pub fn tts_preview(voice: String, rate: f32, engine: Option<String>) -> Result<(
 /// What ▶ Preview says.
 const PREVIEW_TEXT: &str = "Hi, I'm the voice that reads Chat's answers. Ask me anything, and I'll say what I found.";
 
-// ---- cloud voices (Settings → Voice Assistant → Voice: ElevenLabs)
+// ---- cloud voices (Settings → Voice Assistant → Voice: ElevenLabs, OpenAI, Gemini, Groq)
 
 /// The key for `provider`: the one Settings has now (`api_key`, maybe not
-/// saved yet), else the saved one.
-fn cloud_key(provider: &str, api_key: Option<String>) -> Result<elevenlabs::Key, String> {
-    if provider != elevenlabs::ID {
+/// saved yet), else the saved one — ElevenLabs' own, or the one Language
+/// Models has for OpenAI, Gemini or Groq.
+fn cloud_key(provider: &str, api_key: Option<String>) -> Result<cloud::stream::Key, String> {
+    let hosted = hosted::service(provider).is_some();
+    if provider != elevenlabs::ID && !hosted {
         return Err("Yap doesn't know that voice service".into());
     }
     let key = api_key
         .map(|k| k.trim().to_string())
         .filter(|k| !k.is_empty())
-        .or_else(|| crate::config::load().tts_cloud_keys.get(provider).map(|k| k.trim().to_string()))
-        .unwrap_or_default();
+        .unwrap_or_else(|| provider_key(&crate::config::load(), provider));
     if key.is_empty() {
-        return Err(format!("Paste your {} API key first", cloud::name(provider)));
+        return Err(if hosted {
+            format!("Add your {} API key in Language Models first", cloud::name(provider))
+        } else {
+            format!("Paste your {} API key first", cloud::name(provider))
+        });
     }
-    Ok(elevenlabs::Key::new(&key))
+    Ok(cloud::stream::Key::new(&key))
 }
 
-/// Settings: the voices of the account (its own first, then ElevenLabs'
-/// default ones). An error says why in a few words ("API key not accepted").
+/// Settings: the voices to pick from — ElevenLabs': the account's (its own
+/// first, then ElevenLabs' default ones; an error says why in a few words,
+/// "API key not accepted"); OpenAI's, Gemini's and Groq's: their own list
+/// (none to read: the key isn't sent).
 #[tauri::command]
 pub async fn tts_cloud_voices(provider: String, api_key: Option<String>) -> Result<Vec<elevenlabs::CloudVoice>, String> {
     let key = cloud_key(&provider, api_key)?;
+    if let Some(svc) = hosted::service(&provider) {
+        return Ok(hosted::voices_of(svc));
+    }
     elevenlabs::list_voices(&key).await.map_err(|f| f.reason())
 }
 
-/// Settings: the models that speak (the lowest-latency one first and
-/// recommended); Yap's own list when the service's can't be read.
+/// Settings: the models that speak (the recommended one first); for
+/// ElevenLabs Yap's own list when the service's can't be read.
 #[tauri::command]
 pub async fn tts_cloud_models(provider: String, api_key: Option<String>) -> Result<Vec<elevenlabs::CloudModel>, String> {
     let key = cloud_key(&provider, api_key)?;
+    if let Some(svc) = hosted::service(&provider) {
+        return Ok(hosted::models_of(svc));
+    }
     Ok(elevenlabs::list_models(&key).await)
 }
 
-/// Settings: characters used this month and the allowance, when the key
-/// may read them; else nothing (and Settings says nothing).
+/// Settings: ElevenLabs' characters used this month and the allowance, when
+/// the key may read them; else nothing (and Settings says nothing). The
+/// others bill by the token: their use is in Insights' AI usage.
 #[tauri::command]
 pub async fn tts_cloud_usage(provider: String, api_key: Option<String>) -> Option<elevenlabs::Usage> {
+    if provider != elevenlabs::ID {
+        return None;
+    }
     let key = cloud_key(&provider, api_key).ok()?;
     elevenlabs::usage(&key).await
 }
 
-/// Settings' ▶ on a cloud voice: its own sample (`preview_url`, fetched
-/// now, without the key, played like any answer — Yap's volume, the output
-/// device); a voice without one says the preview sentence through the
-/// service (`model`, `rate`). Never the local voice: an error is shown.
+/// Settings' ▶ on a cloud voice. ElevenLabs: the voice's own sample
+/// (`preview_url`, fetched now, without the key, played like any answer —
+/// Yap's volume, the output device), or the preview sentence through the
+/// service. OpenAI, Gemini, Groq: the preview sentence through the service
+/// (`model`, `rate`) — a fraction of a penny on the person's key. Never the
+/// local voice: an error is shown.
 #[tauri::command]
 pub fn tts_cloud_preview(
     provider: String,
@@ -709,11 +773,19 @@ pub fn tts_cloud_preview(
     rate: Option<f32>,
 ) -> Result<(), String> {
     let key = cloud_key(&provider, api_key)?;
+    let cfg = crate::config::load();
+    let rate = rate.unwrap_or(cfg.tts_rate);
+    if let Some(svc) = hosted::service(&provider) {
+        if !svc.voices().iter().any(|v| v.id == voice) {
+            return Err("Pick a voice first".into());
+        }
+        let engine = hosted::sample_engine(svc, key.header(), model.as_deref().unwrap_or(""));
+        let voicing = Voicing { engine, voice, cloud: None };
+        return say(sentences(PREVIEW_TEXT), Some(PREVIEW_ID.into()), voicing, rate, cfg.output_device);
+    }
     if !elevenlabs::valid_voice_id(&voice) {
         return Err("Pick a voice first".into());
     }
-    let cfg = crate::config::load();
-    let rate = rate.unwrap_or(cfg.tts_rate);
     match elevenlabs::preview_url(&voice) {
         Some(url) => {
             let voicing = Voicing { engine: Arc::new(elevenlabs::Sample { url }), voice, cloud: None };
@@ -840,7 +912,8 @@ pub struct Spoken {
     pub message_id: Option<String>,
     pub text: String,
     pub sentences: Vec<String>,
-    /// "kokoro" | "windows".
+    /// "kokoro" | "windows" | a cloud voice's ("elevenlabs", "openai",
+    /// "gemini", "groq").
     pub engine: String,
     pub voice: String,
     pub rate: f32,
@@ -900,6 +973,42 @@ mod tests {
         assert!(!sends_by_itself(false, true, false));
         assert!(!sends_by_itself(true, false, false));
         assert!(sends_by_itself(false, false, true));
+    }
+
+    #[test]
+    fn a_providers_voice_speaks_only_once_it_has_a_key() {
+        let mut cfg = crate::config::YapConfig { tts_provider: "groq".into(), ..Default::default() };
+        // No Groq key in Language Models: the local voice, and Settings doesn't offer Groq.
+        assert_eq!(voicing(&cfg).engine.id(), WINDOWS);
+        let ids = |cfg: &crate::config::YapConfig| {
+            providers_for(cfg)
+                .iter()
+                .filter(|p| p["connected"] == true)
+                .map(|p| p["id"].as_str().unwrap().to_string())
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(providers_for(&cfg).len(), 5);
+        assert_eq!(ids(&cfg), ["local", "elevenlabs"]);
+        // Its key in the shared store: Groq speaks, with its choice.
+        cfg.pp_api_keys.insert("groq".into(), "gsk_example_0123456789".into());
+        cfg.tts_cloud.insert("groq".into(), crate::config::CloudVoiceChoice { voice: "troy".into(), voice_name: "Troy".into(), model: String::new() });
+        let v = voicing(&cfg);
+        assert_eq!((v.engine.id(), v.voice.as_str()), ("groq", "troy"));
+        let plan = v.cloud.expect("a cloud plan");
+        assert_eq!(plan.provider, "groq");
+        assert_eq!(ids(&cfg), ["local", "elevenlabs", "groq"]);
+        let groq = providers_for(&cfg).into_iter().find(|p| p["id"] == "groq").unwrap();
+        assert_eq!((groq["hosted"].as_bool(), groq["defaultVoice"].as_str()), (Some(true), Some("hannah")));
+        // OpenAI's key held by the Chat scope alone still counts.
+        cfg.llm_scopes.insert(
+            "chat".into(),
+            crate::config::LlmScope { enabled: true, provider: "openai".into(), api_key: "sk-example-0123456789".into(), ..Default::default() },
+        );
+        assert_eq!(ids(&cfg), ["local", "elevenlabs", "openai", "groq"]);
+        assert_eq!(provider_key(&cfg, "openai"), "sk-example-0123456789");
+        // A provider Yap doesn't know: the local voice.
+        cfg.tts_provider = "acme".into();
+        assert_eq!(voicing(&cfg).engine.id(), WINDOWS);
     }
 
     #[test]

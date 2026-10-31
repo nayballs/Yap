@@ -220,6 +220,7 @@ export const FIELD_DEFAULTS = {
   ttsWindowsVoice: '',
   ttsRate: 1.0,
   ttsVolume: 0.5,
+  duckOtherApps: true,
   ttsProvider: 'local',
   ttsCloudKeys: {},
   ttsCloud: {},

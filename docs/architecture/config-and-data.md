@@ -260,12 +260,19 @@
   Windows' default), tts_rate (1.0, 0.5–2.0), tts_volume (0.5: Yap's own
   gain on the voice, squared — `tts::gain`, half = −12 dB, 10 % = −40 dB —
   under the Windows mixer, live mid-sentence via the rodio sink's volume;
-  `tts_volume_set {volume, save?}` → `yap-voice-volume`), tts_provider
-  ("local" — the engines above — or "elevenlabs"; `voice/tts/cloud.rs`) +
-  tts_cloud_keys (cloud voice service → API key, like web_search_keys:
-  never logged, sent only to that service in its header) + tts_cloud
-  (service → `CloudVoiceChoice {voice, voiceName, model}`, empty = George
-  and `eleven_flash_v2_5`); config v2 moved a saved
+  `tts_volume_set {volume, save?}` → `yap-voice-volume`), duck_other_apps
+  (true: "Turn other apps down while Yap speaks", `voice/duck.rs` — other
+  apps' sessions to 30 % of their level while Yap's voice plays on this PC;
+  an older Yap drops it on its save: on again), tts_provider
+  ("local" — the engines above —, "elevenlabs", or "openai" / "gemini" /
+  "groq" — their voices on the key Language Models has for them,
+  `ai_model::provider_key`, no key of their own; `voice/tts/cloud.rs`,
+  `voice/tts/hosted.rs`) + tts_cloud_keys (ElevenLabs → its API key, like
+  web_search_keys: never logged, sent only to that service in its header) +
+  tts_cloud (service → `CloudVoiceChoice {voice, voiceName, model}`, empty =
+  the service's default: George and `eleven_flash_v2_5`; OpenAI's marin and
+  `gpt-4o-mini-tts`; Gemini's Kore and `gemini-3.8-flash-lite-tts`; Groq's
+  hannah and `canopylabs/orpheus-v1-english`); config v2 moved a saved
   Windows voice from tts_voice to tts_windows_voice and "windows" (never a
   choice before) to "kokoro"), the Voice Assistant's assistant_hotkey (""
   = unbound, the default) + assistant_answer_card (true) +
@@ -461,7 +468,8 @@
   readTokens?, readMs?, genTokens?, genMs?}]}}`, one row per local day and
   provider + model + on this PC + feature (`cleanup`, `chat`, `assistant`,
   `commands`, `transforms`, `translation`, `meetings`, `notes`, `memory`,
-  `speakers`, `brief`, `search`, `other`); `costMicros` an estimate at list
+  `speakers`, `brief`, `search`, `voice` — a cloud voice's request, by the
+  token or, for Groq's Orpheus, the character —, `other`); `costMicros` an estimate at list
   prices in millionths of a dollar, the times llama.cpp's. **Counts only**:
   never a word asked or answered, never a key. Kept 90 days (older days
   go at each write). Written by its own thread (every 3 s when something
@@ -760,9 +768,11 @@
   …, lastShownAt}`. Counts only. A file of its own: an older Yap never reads
   or writes it. Safe to delete (each tip may show again).
 - Quieted apps: `%APPDATA%/yap/quieted_apps.json` — only while a dictation
-  has other apps silenced (each session's id, exe and level before), so a
-  Yap that crashed mid-dictation brings them back at its next start
-  (`dictation/mute.rs`); gone again once they're back.
+  has other apps silenced or Yap's voice has them turned down (each
+  session's id, exe, level before and the level Yap set: `{id, exe, before,
+  setTo, at}`, the same rows since 2026-10-17), so a Yap that crashed with
+  them down brings them back at its next start (`dictation/other_apps.rs`,
+  shared by `mute.rs` and `voice/duck.rs`); gone again once they're back.
 - Word suggestions: `%APPDATA%/yap/word_suggestions.json` — when Yap last
   offered a word for the dictionary, per "heard→term" pair your "Not now"
   count and "Don't suggest this", and the words you removed from the
@@ -1029,7 +1039,8 @@ app deletes those of the stores it clears, like the set-aside copies.
 - connections.json: a quiet `Saver` of its own now; the receipts kept since
   join the file's when it reads;
 - quieted_apps.json: never written over **nor deleted**; a crash's leftovers
-  read late join this session's and come back after the next dictation;
+  read late join this session's and come back after the next release (a
+  dictation's, or Yap's voice's);
 - note-versions/: per file — a history it couldn't read starts empty for that
   note, is never written over, and once it reads its versions come first and
   the ones made meanwhile follow, numbered on from them (`versions::take_in`);

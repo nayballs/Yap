@@ -1,15 +1,19 @@
 # Spoken replies
 
-Reading answers aloud: Kokoro and Windows' voices on this PC, or ElevenLabs on the person's own key; text prepared for speech, the speaker queue and when Yap talks; and **Read aloud, anywhere** — any selected text read in that voice with a karaoke reading card on the Yap bar. ("§Current status" below means [status.md](./status.md).)
+Reading answers aloud: Kokoro and Windows' voices on this PC, ElevenLabs on the person's own key, or OpenAI, Gemini and Groq on the key Language Models already has for them; text prepared for speech, the speaker queue and when Yap talks; other apps turned down while Yap speaks; and **Read aloud, anywhere** — any selected text read in that voice with a karaoke reading card on the Yap bar. ("§Current status" below means [status.md](./status.md).)
 
 [Architecture index](./README.md) · [CLAUDE.md](../../CLAUDE.md)
 
 - **`voice/tts.rs`** — **spoken replies** (Settings → Voice Assistant, Chat's Voice
   replies toggle, ▶ on answers). **Who speaks** (`config.tts_provider`,
   `voicing(cfg)` → `Voicing {engine, voice, cloud}`): "local" (the
-  default — the engines below, `chosen(cfg)`) or a **cloud voice**,
-  ElevenLabs (`voice/tts/elevenlabs.rs`, below) — only when it's picked **and**
-  has a key (`tts_cloud_keys`); without one the local voice speaks. A cloud
+  default — the engines below, `chosen(cfg)`) or a **cloud voice** —
+  ElevenLabs (`voice/tts/elevenlabs.rs`, below) on its own key
+  (`tts_cloud_keys`), or OpenAI, Gemini or Groq (`voice/tts/hosted.rs`,
+  below, 2026-10-31) on the key Language Models has for that provider
+  (`provider_key` → `ai_model::provider_key`: Chat's own, else the shared
+  one) — only when it's picked **and** has a key; without one the local
+  voice speaks. A cloud
   voicing carries a `CloudPlan`: the local voice that can stand in
   (`local_voice`: Kokoro installed, or Windows voices chosen — not Windows
   voices as a stand-in for an undownloaded Kokoro) and the key/choice
@@ -118,12 +122,16 @@ Reading answers aloud: Kokoro and Windows' voices on this PC, or ElevenLabs on t
   hands_free, said_enter)` — the Voice Assistant's answers ignore both
   (`assistant::reply`), and every state change is passed to
   `assistant::on_tts_state` (its answer ended). Commands `tts_voices` (`{provider,
-  providers: [{id, name, keysPage}], engine, active,
+  providers: [{id, name, keysPage, hosted, connected, defaultVoice?,
+  defaultModel?}]` — `providers_for`: every provider, OpenAI, Gemini and
+  Groq `connected` once their key's there; Settings filters on its own
+  copy's keys too —, engine, active,
   engines, kokoro: {voices, defaultVoice}, kokoroStatus, windows: {voices,
   defaultVoice, error}}`), the cloud voice's `tts_cloud_voices` /
   `tts_cloud_models` / `tts_cloud_usage` / `tts_cloud_preview {provider,
   voice, apiKey?, model?, rate?}` (the key Settings has now, else the saved
-  one), `tts_speak {text, messageId}`, `tts_preview
+  one; for OpenAI, Gemini and Groq their own lists — no request —, no usage
+  line, and ▶ says the preview sentence through the provider), `tts_speak {text, messageId}`, `tts_preview
   {voice, rate, engine?}` (Kokoro not installed → "Download Kokoro to hear
   its voices"), `tts_stop`, `tts_state`, `tts_kokoro_status` /
   `tts_kokoro_download` (`tts-download-progress {percent, downloadedBytes,
@@ -152,9 +160,12 @@ Reading answers aloud: Kokoro and Windows' voices on this PC, or ElevenLabs on t
   (`--features engines`) times `speak` → first piece at the output for
   Kokoro and for ElevenLabs' path against a local stand-in
   (`YAP_TTS_STANDIN_MS`).
-  - **`voice/tts/cloud.rs`** — what any cloud voice shares (another service —
-    OpenAI's, Azure's — slots in beside ElevenLabs): `PROVIDERS` ("local"
-    "On this PC", "elevenlabs" "ElevenLabs"), `Failure` (BadKey,
+  - **`voice/tts/cloud.rs`** — what any cloud voice shares: `PROVIDERS`
+    ("local" "On this PC", "elevenlabs" "ElevenLabs", "openai" "OpenAI",
+    "gemini" "Gemini", "groq" "Groq"; `is_hosted`: the three on a Language
+    Models key, whose notices point there — "Check your OpenAI API key in
+    Settings → Language Models.", "Your Gemini account is out of credit, or
+    at its limit for today."), `Failure` (BadKey,
     NotAllowed, Quota, RateLimited, ServiceDown, Offline, TimedOut,
     VoiceGone, ModelGone, Rejected(their words)) with its `reason` ("quota
     used up"), `advice` and `skip_for`, `notice_text`, and **`Health`**
@@ -166,6 +177,108 @@ Reading answers aloud: Kokoro and Windows' voices on this PC, or ElevenLabs on t
     rate limit, 60 s offline / timed out / 5xx, 5 min refused, 15 min quota,
     30 min bad key / not allowed / voice or model gone); another key, voice
     or model, or any request that works (Settings' list, ▶), starts afresh.
+    **`cloud/stream.rs`** (2026-10-31, out of `elevenlabs.rs`): what every
+    cloud voice's request shares — `Key` (`Debug` "[redacted]", only ever
+    in a header; `fingerprint`), `tidy` (the key cut from anything said
+    back), `API_HTTP` (4 s to connect, no redirects), the `Decode`rs (`RawPcm`
+    — 16-bit LE mono, a sample split across pieces kept, `S16Le` —,
+    `WavOrRaw` — a WAV read as its bytes come, its header's rate and
+    channels, a `data` chunk of unknown length to the end, raw PCM when
+    there's no header —, `SseLines` — server-sent events' `data:` lines, a
+    line split across pieces kept; each says the tokens a stream ended
+    with, `usage`), `cancel` (one counter and `Notify` for every cloud
+    voice: a stop ends any sentence being fetched), `ask` (send; a stop
+    first → nothing; an error answer → `classify`) and `pump` (a `Turn`:
+    the audio handed on ≥ 100 ms at a time, then the turn's quiet; no audio
+    within its first-audio limit, or a gap over its limit → `TimedOut`;
+    nothing at all → "sent no audio"). Unit tests: a WAV and events in any
+    split, a bad header said, the key never shown.
+  - **`voice/tts/hosted.rs`** — **OpenAI, Gemini and Groq as voices**
+    (2026-10-31), on the key Language Models has for each (`tts::provider_key`
+    → `ai_model::provider_key`: Chat's own for it, else the shared one —
+    no key of its own, no new field). One engine, `Hosted {svc, key, model,
+    keep_health}`, over a `Service` each provider fills in (`openai.rs`,
+    `gemini.rs`, `groq.rs`: its request — pure —, its decoder by the
+    answer's `Content-Type`, `classify`, its `voices()` and `models()` —
+    Yap's lists, nothing to fetch —, `max_chars`, `limits`). A sentence:
+    `speak` → `split(text, max_chars)` (Groq's 200: cut after a comma,
+    semicolon or colon in reach, else at a space; a word longer than that
+    cut, never lost), one request a piece (`ask` + `pump`, the 150 ms pause
+    after the last only), each counted in the AI usage tracker
+    (`usage::record_speech`: "Spoken replies", its tokens or characters),
+    the network receipt "Voice · OpenAI" (`Purpose::Voice`). A voice or
+    model Yap doesn't know → the provider's default (`voice_or_default`,
+    `model_or_default`); `prepare` joins sentences under 3 words to the
+    next (as Kokoro and ElevenLabs); `cancel` → `cloud::stream::cancel`.
+    `Health` and the local stand-in as for ElevenLabs (`choice_fingerprint`
+    of provider + key + voice + model). No word timing from any of the
+    three: a read-aloud's words come from their audio (`marks::from_audio`).
+    `classify_openai_shape` (OpenAI's and Groq's `{error: {message, type,
+    code}}`: `invalid_api_key` / 401 → BadKey, `insufficient_quota` →
+    Quota, `rate_limit_exceeded` / 429 / 498 → RateLimited,
+    `model_not_found` / `model_decommissioned` / 404 → ModelGone, 403 →
+    NotAllowed, 5xx → ServiceDown, else their words, tidied — Groq's
+    "accept the model's terms" among them). Settings: `voices_of`,
+    `models_of`, `sample_engine` (▶: the preview sentence through the
+    provider, its error shown, not kept). Debug-only
+    `YAP_OPENAI_TTS_URL` / `YAP_GEMINI_TTS_URL` / `YAP_GROQ_TTS_URL` name a
+    test run's stand-in (`e2e/support/fake-cloud-tts.js`); without one a
+    test run never reaches the internet. Unit tests against the in-process
+    stand-in (`elevenlabs::standin`'s `Reply::Body`: any content type,
+    chunked in odd pieces), and the speaker's
+    `a_hosted_voice_streams_then_hands_over_to_the_local_voice_when_it_fails`.
+    A real check on the maintainer's own key (never in a normal run; a
+    fraction of a penny): the `#[ignore]`d
+    `hosted::tests::a_real_sentence_on_your_key` (`YAP_REAL_TTS_PROVIDER`
+    openai | gemini | groq, `YAP_REAL_TTS_KEY`, optional `_VOICE` /
+    `_MODEL`): one sentence into `%TEMP%/yap-tts-check/<provider>-voice.wav`,
+    nothing played, its first-audio time printed.
+    - **`voice/tts/openai.rs`** (API as of 31 Oct 2026, developers.openai.com
+      speech reference + text-to-speech guide): `POST /v1/audio/speech`,
+      `Authorization: Bearer`, `{model, input, voice, response_format:
+      "pcm", stream_format: "sse", speed? (0.25–4, only when not 1×)}`;
+      server-sent `speech.audio.delta {audio: base64 PCM, 24 kHz 16-bit
+      mono}` then `speech.audio.done {usage {input_tokens, output_tokens}}`
+      (`Events`; an answer that isn't events → raw PCM). Models
+      `gpt-4o-mini-tts` (default) and `gpt-4o-mini-tts-2025-12-15`; ⚠ OpenAI
+      retires `gpt-4o-mini-tts`, `tts-1` and `tts-1-hd` on **6 January
+      2027** (its successor is Realtime-only): after that a request fails
+      "model not available" and the local voice reads, said once. Voices:
+      marin and cedar ("Best quality", OpenAI's recommendation), alloy,
+      ash, ballad, coral, echo, fable, nova, onyx, sage, shimmer, verse;
+      default marin. 6 s to the first audio. $0.60 text in / $12 audio out
+      a million tokens.
+    - **`voice/tts/gemini.rs`** (API as of 31 Oct 2026, ai.google.dev speech
+      generation + streaming + pricing): the **Interactions API**, `POST
+      /v1beta/interactions`, `x-goog-api-key`, `{model, input: [{type:
+      "user_input", content: [{type: "text", text, annotations?: [{type:
+      "speech_metadata", style}]}]}], response_format: {type: "audio"},
+      generation_config: {speech_config: [{voice}]}, stream: true}`;
+      server-sent `step.delta {delta: {type: "audio", data: base64}}`
+      (headerless 24 kHz 16-bit mono; a WAV header read past),
+      `interaction.completed {interaction: {usage: {total_input_tokens,
+      total_output_tokens}}}`, `error {error: {message}}`, `[DONE]`. No
+      speed setting: Yap's speed asked for in the style (`style_for`: "Speak
+      quickly" ≥ 1.45×, "Speak at a brisk pace" ≥ 1.15×, "Speak at an
+      unhurried pace" ≤ 0.85×, "Speak slowly" ≤ 0.65×). Models
+      `gemini-3.8-flash-lite-tts` (default: "fast, cost-efficient") and
+      `gemini-3.8-flash-tts`; 30 voices with Google's one-word descriptions,
+      default Kore. Google's errors (`{error: {code, message, status,
+      details}}`): "API key not valid" (a 400) / `API_KEY_*` → BadKey,
+      PERMISSION_DENIED → NotAllowed, RESOURCE_EXHAUSTED → RateLimited, or
+      Quota when it's a day's (`PerDay`) or billing, NOT_FOUND → ModelGone.
+      12 s to the first audio. Paid tier: Flash-Lite TTS $0.50 / $6, Flash
+      TTS $0.50 / $9 a million tokens to 31 Dec 2026, then double; 25 audio
+      tokens a second; the free tier costs nothing.
+    - **`voice/tts/groq.rs`** (API as of 31 Oct 2026, console.groq.com text
+      to speech + Orpheus): `POST /openai/v1/audio/speech`, `Authorization:
+      Bearer`, `{model, input (≤ 200 characters), voice, response_format:
+      "wav"}` — WAV only, not streamed (read as it comes, `WavOrRaw`). Model
+      `canopylabs/orpheus-v1-english` (its Saudi Arabic one isn't offered:
+      Yap's text for the voice is English-shaped); no speed setting
+      (Settings says it speaks at its own pace). Voices hannah (default),
+      autumn, diana (female), austin, daniel, troy (male). $22 a million
+      characters (`prices::char_cost_micros`).
   - **`voice/tts/elevenlabs.rs`** — **ElevenLabs**, on the person's own key (API
     as of 22 Oct 2026). Speech: `POST /v1/text-to-speech/{voice}/stream?
     output_format=pcm_24000` with `{text, model_id, voice_settings?:
@@ -353,6 +466,39 @@ Reading answers aloud: Kokoro and Windows' voices on this PC, or ElevenLabs on t
     Settings) and `e2e-real/read-aloud.real.js` (the test pad's text box
     and rich box, Notepad, an Edge page's own text, a terminal never by
     Ctrl+C).
+  - **`voice/duck.rs`** — **other apps turned down while Yap speaks**
+    (2026-10-31; Settings → Voice Assistant → Voice: "Turn other apps down
+    while Yap speaks", `config.duck_other_apps`, on by default). While Yap's
+    voice plays on this PC — spoken replies, the Voice Assistant, Read
+    aloud, ▶ — every other app's audio session goes to 30 % of its own level
+    (`other_apps::VOICE_SHARE`), and back to exactly that level after. Only
+    the output `playback.rs`'s rodio opener makes holds a `Duck`
+    (`RodioPlayback.duck`): Yap Link's `PhonePlayback` never does, so an
+    answer said on a phone turns nothing down here. A `Duck` holds from the
+    first audio appended (a streamed answer waiting on its first sentence
+    has nothing to hear yet), lets go on ⏸ (and holds again on ⏯ while
+    there's audio), on a stop and when the output closes; `HOLDING` counts
+    the outputs holding, and its 0 → 1 and 1 → 0 kick `settle` on a thread
+    of its own (the COM work never on the speaker's), the letting go
+    `LET_GO_AFTER` (600 ms) later — so answers in a row, or a new answer
+    replacing one, never bounce the music, and a dictation started
+    mid-speech finds the sessions still down. `settle` (under
+    `other_apps::ledger`, so any order of kicks ends right; `next_step`,
+    pure): speaking and not down → `lower(Voice)` once per stretch of speech
+    (a level the person moves meanwhile stays put); not speaking, or the
+    setting off → if a dictation is recording with "Silence other apps" on
+    (`mute::takes_over`), `hand_over(Voice → Dictation)` — the sessions stay
+    at 30 % through its start sound, go silent after it, and come back to
+    their level from before Yap spoke after its stop sound — else
+    `release(Voice)`. The sessions, the rules (never Yap's own, a call
+    app's, system sounds, a meeting's browser), the exact restore, the
+    crash file and quitting's restore are `dictation/other_apps.rs`'s,
+    shared with a dictation's silence. `sync(cfg)` on every save and at
+    start (switched off mid-answer: back at once). Test runs touch nothing
+    (`realtest::other_apps` = Nobody; `cargo test` never kicks). Unit tests:
+    `next_step`, a `Duck` held and let go once; the ledger's arithmetic and
+    hand-over in `other_apps.rs`'s. E2E: `e2e/voice-cloud.spec.js` (the
+    switch, on by default, saved).
   - **`voice/tts/registry.rs`** — Kokoro's download into `<data>/models/tts/`
     (debug: `YAP_TTS_MODELS`): `kokoro-v1.0/` (model.onnx 325.5 MB + 54
     voices from **Hugging Face onnx-community/Kokoro-82M-v1.0-ONNX @

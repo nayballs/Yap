@@ -152,10 +152,11 @@ export const SETTINGS_INDEX = [
   { page: 'voice', section: 'Spoken replies in Chat', label: 'How much to read aloud', desc: 'A sentence or two, up to a minute or two, or the whole answer', keywords: 'read aloud spoken replies length long short whole answer voice', anchor: 'spoken-length' },
   { page: 'voice', section: 'Spoken replies in Chat', label: 'When to speak', desc: 'When you asked by voice, or always', keywords: 'read aloud spoken replies', anchor: 'speak-when' },
   { page: 'voice', section: 'Spoken replies in Chat', label: 'Talk back hands-free', desc: 'A dictated question is sent and the answer read out', keywords: 'hands-free conversation talk back', anchor: 'talk-back', toggle: 'talkBackHandsFree' },
-  { page: 'voice', section: 'Voice', label: 'Speaks with', desc: 'A voice on this PC, or ElevenLabs', keywords: 'elevenlabs voice tts cloud voice', anchor: 'voice-provider' },
+  { page: 'voice', section: 'Voice', label: 'Speaks with', desc: 'A voice on this PC, ElevenLabs, or OpenAI, Gemini or Groq on your key', keywords: 'elevenlabs openai gemini groq orpheus voice tts cloud voice', anchor: 'voice-provider' },
   { page: 'voice', section: 'Voice', label: 'Voice', desc: "Kokoro's natural voices, or Windows' own", keywords: 'kokoro windows voices bella voice picker preview', anchor: 'voice' },
   { page: 'voice', section: 'Voice', label: 'Speed', desc: 'How fast Yap speaks', keywords: 'voice speed rate', anchor: 'voice-speed' },
   { page: 'voice', section: 'Voice', label: 'Volume', desc: 'How loud Yap speaks', keywords: 'voice volume loudness', anchor: 'voice-volume' },
+  { page: 'voice', section: 'Voice', label: 'Turn other apps down while Yap speaks', desc: 'Music and videos go quieter while Yap talks', keywords: 'duck ducking lower music volume other apps spotify quieter speak', anchor: 'duck-other-apps', toggle: 'duckOtherApps' },
   { page: 'voice', section: 'Model', label: 'Assistant model', desc: "The same as Chat's", keywords: 'model chat language model ai', anchor: 'assistant-model' },
 
   // Memory (MemorySection.svelte)
