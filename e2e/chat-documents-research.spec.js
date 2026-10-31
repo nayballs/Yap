@@ -236,7 +236,7 @@ test('a new document’s outline opens before any search; a search asked for fir
   const panel = main.getByTestId('chat-doc');
   await expect(panel).toBeVisible({ timeout: 20_000 });
   await expect(panel.locator('.doctitle')).toHaveText('Recruiting Gale');
-  await expect(panel.locator('.docbody .md-pending')).toHaveText(['Writing: Where…', 'Writing: How…']);
+  await expect(panel.locator('.docbody .md-pending')).toHaveText(['Where: where to find him', 'How: how to recruit him']);
   await expect.poll(() => fakeLlm.requests.slice(before).some((r) => r.gated)).toBe(true);
   await expect(chipsOfLast(main).filter({ hasText: 'Searched the web' })).toHaveCount(0);
   await shot(main, '04-outline-before-any-search');
@@ -345,7 +345,7 @@ test('Claude searches and reads pages itself in Chat’s request, thinks at its 
     held.open();
     // The outline opens before any search: the next step (its search) held.
     const panel = main.getByTestId('chat-doc');
-    await expect(panel.locator('.docbody .md-pending')).toHaveText(['Writing: Levels…'], { timeout: 20_000 });
+    await expect(panel.locator('.docbody .md-pending')).toHaveText(['Levels: level by level'], { timeout: 20_000 });
     await expect.poll(() => fakeLlm.requests.slice(before).filter((r) => r.api === 'messages' && r.gated).length).toBe(2);
     await expect(chipsOfLast(main).filter({ hasText: 'Searched the web' })).toHaveCount(0);
     searching.open();
