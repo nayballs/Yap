@@ -1288,7 +1288,7 @@ selected and the clipboard as it was. **Network receipts**:
 Logs: lengths and how it was decided, never the text. Unit tests
 (`selected::tests`, `ask_or_edit::tests`, `input_hook`'s Ask shortcut);
 e2e `ask-selection.spec.js`; robot `e2e-real/ask-selection.real.js`
-(written, not yet run).
+(passing, 31 Oct: a real Edge box and web page).
 
 ## Strong models' documents, researched as the Claude app does (2026-10-31)
 
