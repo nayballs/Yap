@@ -123,9 +123,9 @@ sha2 = "0.10"
 flate2 = "1"
 tar = "0.4"
 # The speaker-diarization runtime (diarize.rs) comes as NVIDIA's zip. Only
-# its Deflate entries are read (flate2 is above); already in the tree for
-# the updater, which uses it with no compression at all.
-zip = { version = "4.6", default-features = false, features = ["deflate-flate2"] }
+# its Deflate entries are read (flate2 is above). 9.0.5+: older versions
+# have the zip-cloaking and symlink advisories (Dependabot, 31 Oct 2026).
+zip = { version = "9.2", default-features = false, features = ["deflate-flate2"] }
 
 # Multi-engine STT (whisper.cpp + ONNX) via transcribe-rs. Optional so the
 # default build ships the STUB and `cargo check` stays fast.
@@ -137,9 +137,11 @@ ort = { version = "=2.0.0-rc.12", optional = true }
 
 # Auto-update via GitHub Releases, driven from Rust (updates.rs: background
 # checks + download, install on request; relaunch is the installer's /R).
-# Desktop-only crate, so it lives under a non-mobile target block.
+# Desktop-only crate, so it lives under a non-mobile target block. No "zip"
+# feature: Yap's updates are the setup .exe itself (createUpdaterArtifacts:
+# true, never v1's .nsis.zip), and that feature pins zip 4 with its advisories.
 [target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
-tauri-plugin-updater = "2"
+tauri-plugin-updater = { version = "2", default-features = false, features = ["rustls-tls"] }
 
 # Windows UI Automation — read the focused control's text selection for
 # edit/rewrite mode. Version matches the `windows` crate tauri 2 already pulls

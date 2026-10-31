@@ -461,7 +461,8 @@ fn extract_runtime(zip_path: &Path, dest: &Path) -> Result<usize, String> {
         if entry.is_dir() {
             continue;
         }
-        let Some(rel) = runtime_entry(entry.name()) else {
+        let name = entry.name().map_err(|e| format!("runtime zip entry {i}'s name: {e}"))?;
+        let Some(rel) = runtime_entry(&name) else {
             continue;
         };
         let out_path = dest.join(&rel);
