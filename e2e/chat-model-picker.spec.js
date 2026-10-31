@@ -137,13 +137,13 @@ async function openPicker(main) {
 
 test('the chip opens a provider rail on its provider, with the rows Settings shows', async ({ yap, main, shot }) => {
   await openView(main, 'Chat');
-  await expect(chip(main)).toHaveText('GPT-OSS 20B · Groq');
+  await expect(chip(main)).toHaveText('GPT-OSS 20B Medium · Groq');
   await expect(chip(main).locator('.mark')).toHaveAttribute('data-icon', 'groq');
   const pop = await openPicker(main);
 
   // The rail: Recent, every cloud provider with its state, On this PC.
   await expect(pop.getByRole('tablist', { name: 'Providers' })).toBeVisible();
-  await expect(pop.getByRole('tab')).toHaveText([
+  await expect(pop.getByRole('tablist', { name: 'Providers' }).getByRole('tab')).toHaveText([
     'Recent',
     'Groq, connected',
     'Gemini, not set up',
@@ -192,7 +192,7 @@ test('the chip opens a provider rail on its provider, with the rows Settings sho
   await tab(main, 'Groq').click();
   await pane(main).getByRole('button', { name: /^GPT-OSS 120B/ }).click();
   await expect(pop).toBeHidden();
-  await expect(chip(main)).toHaveText('GPT-OSS 120B · Groq');
+  await expect(chip(main)).toHaveText('GPT-OSS 120B Medium · Groq');
   await expectStore(yap, 'config.json', (c) => c.llmScopes.chat.model === 'openai/gpt-oss-120b');
   expect(yap.readJson('config.json').ppModel).toBe('openai/gpt-oss-20b');
 
@@ -251,7 +251,7 @@ test('a provider without a key connects right in the picker', async ({ yap, main
   expect(JSON.stringify(yap.readJson('model_catalog.json'))).not.toContain(ANTHROPIC_KEY);
 
   await pane(main).getByRole('button', { name: /^Claude Sonnet 5\.5/ }).click();
-  await expect(chip(main)).toHaveText('Claude Sonnet 5.5 · Anthropic');
+  await expect(chip(main)).toHaveText('Claude Sonnet 5.5 High · Anthropic');
   await expect(chip(main).locator('.mark')).toHaveAttribute('data-icon', 'claude');
   await expectStore(yap, 'config.json', (c) => c.llmScopes.chat.provider === 'anthropic' && c.llmScopes.chat.model === 'claude-sonnet-5-5');
   expect(yap.readJson('config.json').llmScopes.chat.apiKey).toBe(ANTHROPIC_KEY);
@@ -290,7 +290,7 @@ test('search looks through every provider and this PC', async ({ yap, main, fake
     'Qwen3.5 9B',
   ]);
   // While searching no provider is selected.
-  await expect(pop.getByRole('tab', { selected: true })).toHaveCount(0);
+  await expect(pop.getByRole('tablist', { name: 'Providers' }).getByRole('tab', { selected: true })).toHaveCount(0);
   await shot(main, '04-picker-search');
 
   // By provider and words: Gemini's Flash models (no key: greyed).
@@ -495,7 +495,7 @@ test('the keyboard: arrows through the rail and the models, Ctrl+K, Enter, Esc',
   await main.keyboard.press('Enter');
   await expect(picker(main)).toBeHidden();
   await expect(chip(main)).toBeFocused();
-  await expect(chip(main)).toHaveText('GPT-OSS 120B · Groq');
+  await expect(chip(main)).toHaveText('GPT-OSS 120B Medium · Groq');
 
   // Typing on a model searches; Esc closes and the chip has the focus back.
   await main.keyboard.press('Enter');

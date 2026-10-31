@@ -958,8 +958,9 @@ fn resolve_apps(apps: &Apps, scenarios: &Path, run_dir: &Path, this_pc: &mut Opt
 }
 
 /// Put the scenario's notes and folders in the (fresh, in-memory) store,
-/// its memory and its earlier chats.
-fn seed(s: &Scenario) -> Result<(), String> {
+/// its memory and its earlier chats. Returns the chat the turns go on in,
+/// if one is marked `continue`.
+fn seed(s: &Scenario) -> Result<Option<u64>, String> {
     crate::notes::eval_reset();
     crate::memory::eval_reset();
     crate::chat::chats::eval_reset();
@@ -982,10 +983,19 @@ fn seed(s: &Scenario) -> Result<(), String> {
             return Err(format!("memory seed \"{}\" wasn't kept", m.title));
         }
     }
+    let mut go_on = None;
     for c in &s.seed.chats {
         let conv = crate::chat::chats::create(&c.title);
         for m in &c.messages {
-            crate::chat::chats::append(conv.id, &m.role, &m.text, &[], None, false)?;
+            // "anthropic:claude-opus-5-5": the model that wrote an answer.
+            let by = m.model.as_deref().map(|spec| {
+                let (provider, id) = spec.split_once(':').unwrap_or(("", spec));
+                crate::chat::chats::ChatModel { provider: provider.into(), id: id.into(), name: String::new(), on_this_pc: provider == "ondevice" }
+            });
+            crate::chat::chats::append(conv.id, &m.role, &m.text, &[], by, false)?;
+        }
+        if c.go_on {
+            go_on = Some(conv.id);
         }
     }
     for f in &s.seed.folders {
@@ -1016,7 +1026,7 @@ fn seed(s: &Scenario) -> Result<(), String> {
             crate::notes::append_transcript(note.id, &lines)?;
         }
     }
-    Ok(())
+    Ok(go_on)
 }
 
 /// A scenario's calendar as Chat's calendar tool will read it: each
@@ -1116,9 +1126,10 @@ async fn run_scenario(
     record::set_tools_forced(forced);
     record::set_doc_tools_forced(args.doc_tools);
     let tools = forced.unwrap_or(m.tools_rule);
-    if let Err(e) = seed(s) {
-        return error_row(m, &name, &format!("seed: {e}"));
-    }
+    let seeded = match seed(s) {
+        Ok(c) => c,
+        Err(e) => return error_row(m, &name, &format!("seed: {e}")),
+    };
     let _ = crate::apps::e2e_opened_apps(Some(true));
     record::write(
         "scenario_start",
@@ -1135,7 +1146,8 @@ async fn run_scenario(
         }),
     );
 
-    let mut conversation: Option<u64> = None;
+    // A seeded chat marked `continue`: the turns go on in it.
+    let mut conversation: Option<u64> = seeded;
     let mut seen: Vec<Observed> = Vec::new();
     let mut fails: Vec<String> = Vec::new();
     let mut warns: Vec<String> = Vec::new();
@@ -1180,8 +1192,8 @@ async fn run_scenario(
                 // The Voice Assistant's turn: never thought through by itself.
                 asked.await.map(Some)
             } else {
-                // A typed turn, as Chat sends it (`chat_send`): Yap may turn
-                // Think on for a strong model's document (`think::auto_on`).
+                // A typed turn, as Chat sends it (`chat_send`): a cloud model
+                // at its effort shows what it thought (`think::reasoned`).
                 let (out, thought) = crate::chat::think::scoped(false, asked).await;
                 if let Some(t) = &thought {
                     record::write("thought", json!({ "chars": t.text.chars().count(), "ms": t.ms }));
@@ -2478,7 +2490,8 @@ fn documents_table(rows: &[Value]) -> String {
 
 /// Guides (`--guides`) per model: of the turns that ask each guide check,
 /// how many passed — every level, the parts asked for, its own suggestions
-/// marked, its citations real, changed after the web — and how many were
+/// marked, its citations real, changed after the web, outlined before the
+/// web, pages read (2026-10-31) — and how many were
 /// thought through. "" when no turn asks one.
 fn guides_table(rows: &[Value]) -> String {
     let turns: Vec<(String, &Value)> = rows
@@ -2498,7 +2511,9 @@ fn guides_table(rows: &[Value]) -> String {
             models.push(m.clone());
         }
     }
-    let mut md = String::from("| Model | Every level | The parts asked for | Own suggestions marked | Citations real | Changed after the web | Thought it through |\n|---|---|---|---|---|---|---|\n");
+    let mut md = String::from(
+        "| Model | Every level | The parts asked for | Own suggestions marked | Citations real | Changed after the web | Outlined before the web | Read pages | Thought it through |\n|---|---|---|---|---|---|---|---|---|\n",
+    );
     for m in &models {
         let mine: Vec<&Value> = turns.iter().filter(|(x, _)| x == m).map(|(_, d)| *d).collect();
         let share = |key: &str| {
@@ -2511,12 +2526,14 @@ fn guides_table(rows: &[Value]) -> String {
         };
         let thought = mine.iter().filter(|d| d["thought"].is_u64()).count();
         md.push_str(&format!(
-            "| {m} | {} | {} | {} | {} | {} | {thought}/{} |\n",
+            "| {m} | {} | {} | {} | {} | {} | {} | {} | {thought}/{} |\n",
             share("levels"),
             share("parts"),
             share("own"),
             share("citations"),
             share("after_web"),
+            share("outline"),
+            share("read"),
             mine.len()
         ));
     }

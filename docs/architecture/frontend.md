@@ -46,17 +46,19 @@ selector weighing what its scoped original did, so the same rule wins.
 |---|---|
 | `notepad/` | `Notepad.svelte` — the window: the note shown and the meeting, kept in step with Rust's events and the other windows; the in-page hotkeys; the layout. `NotepadHeader` (back, ⋯, split screen, Share, window buttons), `NotepadTitle`, `NotepadTabs`, `ThoughtsTab`, `TranscriptTab` + `TranscriptLog` (the timer box, search and copy; the lines), `SummaryTab`, `GenerateSummary` (or the summary's error with Retry), `ConsentLine`, `AskTray` (Stop / Resume, the Ask sheet), `DeleteMeetingDialog`, `NotepadIcon`. What outlasts a tab switch (each tab's body is made again on every switch): `transcriptView.svelte.js`, `summaryEditor.svelte.js`, `consentMessage.svelte.js`; `actions.js` the window's label, copying, Yap's main window; `notepad.css` |
 | `views/notes/` | `NotesView.svelte` (the view, its events, the note a call or Tasks asks to open) with `notesState.svelte.js` (the notes and folders, the open note saved as it's typed and kept in step, the recorder, actions, the summary edited in place, the transcript's view, the note's chat); `NoteList` (folders, notes, their menus) with `NoteSearch` (every note by words and meaning, loaded the first time a search is typed), `NoteEditor` (title, tabs, what's being written, the raw note) with `NoteMeta` (the chip row), `NoteSummary`, `NoteTranscript`, `NoteChat` and `ActionPicker`; `ActionManager`; `noteFormat.js` |
-| `views/chat/` | `ChatView.svelte` (the view, its events and keys, the screenshot viewer) with `chatState.svelte.js` (conversations, sending and the streamed answer, the Voice Assistant's questions, Snip to Chat, spoken replies, picking several); `ConversationList` (+ `chatLibrary.svelte.js` and `ChatLibraryList`, loaded when shown: the sidebar's search and the archive), `ChatThread` + `ChatMessage` (tool chips, the bubble, sources, ▶ and the model), `Composer` (screenshots, +, the box, ■ Stop, the model chip); `ModelChip`, `ChatModelPicker`, `ProviderMark`, `chatModels.svelte.js`, `chatImages.js`, `chatShots.svelte.js`; the document beside the chat (2026-10-30; two views 2026-10-31): `DocPanel.svelte` (its own chunk, loaded the first time a document opens: the title, Undo, Preview / Source, expand, ⋯ — Find, Copy as Markdown, Export as Markdown…, Open in Notes —, ✕; the page, or the coloured Source under its text box; find; the selection's "Ask about this" / "Change this…"; a landed change marked; stream-in 2026-10-31: a section flowing in line by line under the "Chat" caret, the sections still to write as grey intent lines) with `chatDoc.svelte.js` (made by `chatState`: the document shown, the sections on their way to the page — `live`, `settled`, `release` —, the view, the Source box's merged saves, each document's scroll per view, the split's width), `docSections.js` (a section's lines, shared), `docStream.js` and `docPieces.js` (the panel's chunk, no Svelte state: the text shown in pieces and the pace a section flows in at; the page cut at its sections, drawn a piece at a time, and the caret), the page you can edit (stage 2, 2026-10-31): `DocToolbar.svelte` (text style, code, table, checklist, + insert) over `docEditor.js` (TipTap 3 on ProseMirror, its own chunk imported the first time Preview is editable: the editor on the page's `.docmd`, loading the note's markdown by the blocks that differ, the toolbar's commands, a selection's lines) with `docSchema.js` (its nodes and marks, each knowing how it was written) and `docMarkdown.js` (markdown in and out, exactly: a block as it was read written as its own lines, a changed one afresh and checked), `docTools.js` (the panel's chunk: copy, export, a block's lines in the note), `core/markdownSource.js` (Source's colours: spans that add no character), the split and the room in `ChatView`, the pill and a question's quote in `ChatMessage`, the quote over the box in `Composer` (`chatState`'s `quote`, sent as `chat_send`'s `selection`) |
+| `views/chat/` | `ChatView.svelte` (the view, its events and keys, the screenshot viewer) with `chatState.svelte.js` (conversations, sending and the streamed answer, the Voice Assistant's questions, Snip to Chat, spoken replies, picking several); `ConversationList` (+ `chatLibrary.svelte.js` and `ChatLibraryList`, loaded when shown: the sidebar's search and the archive), `ChatThread` (+ `ActivityLine`: what the turn is doing and its time) + `ChatMessage` (the bubble, its tool chips folded under it in `ChatSteps` with `chatSteps.js`, sources, ▶ and the model), `Composer` (screenshots, +, the box, ■ Stop, the model chip); `ModelChip`, `ChatModelPicker`, `ProviderMark`, `chatModels.svelte.js`, `chatImages.js`, `chatShots.svelte.js`; the document beside the chat (2026-10-30; two views 2026-10-31): `DocPanel.svelte` (its own chunk, loaded the first time a document opens: the title, Undo, Preview / Source, expand, ⋯ — Find, Copy as Markdown, Export as Markdown…, Open in Notes —, ✕; the page, or the coloured Source under its text box; find; the selection's "Ask about this" / "Change this…"; a landed change marked; stream-in 2026-10-31: a section flowing in line by line under the "Chat" caret, the sections still to write as grey intent lines) with `chatDoc.svelte.js` (made by `chatState`: the document shown, the sections on their way to the page — `live`, `settled`, `release` —, the view, the Source box's merged saves, each document's scroll per view, the split's width), `docSections.js` (a section's lines, shared), `docStream.js` and `docPieces.js` (the panel's chunk, no Svelte state: the text shown in pieces and the pace a section flows in at; the page cut at its sections, drawn a piece at a time, and the caret), the page you can edit (stage 2, 2026-10-31): `DocToolbar.svelte` (text style, code, table, checklist, + insert) over `docEditor.js` (TipTap 3 on ProseMirror, its own chunk imported the first time Preview is editable: the editor on the page's `.docmd`, loading the note's markdown by the blocks that differ, the toolbar's commands, a selection's lines) with `docSchema.js` (its nodes and marks, each knowing how it was written) and `docMarkdown.js` (markdown in and out, exactly: a block as it was read written as its own lines, a changed one afresh and checked), `docTools.js` (the panel's chunk: copy, export, a block's lines in the note), `core/markdownSource.js` (Source's colours: spans that add no character), the split and the room in `ChatView`, the pill and a question's quote in `ChatMessage`, the quote over the box in `Composer` (`chatState`'s `quote`, sent as `chat_send`'s `selection`) |
 | `onboarding/` | `Onboarding.svelte` (the dots, the step shown, the footer, the in-page hotkey, the "Connect your calendar" dialog) with `setupState.svelte.js` (every step's state and this showing's steps, `steps` / `stepId`, the config this window changed, its raw event subscriptions, `listen` for its components); `StepHeader`, `ModelStep` (+ `ModelCard`), `LanguageStep`, `MicStep`, `CleanupStep`, `CalendarStep`, `TrayStep`, `TryStep`, `TypingStep`; `cleanupProviders.js` |
 
-One look kept on purpose: a tool's own chip in Chat ("Found "beta" on 2
-lines…") is a full-width row 30 px tall — ChatView's New chat row rule
-(`.tool`) used to reach it too — and `ChatMessage.svelte` now says so
-itself (`.toolchip.tool`). A document's chips ("Started "Build" (3
-sections)", "Wrote 3 sections in …", and the rich tools' "Read the
-document …", "Changed a table in …", "Restored version 3 of …") are the
-compact kind, with a document mark (`.toolchip.doc`, `ChatMessage`'s
-`DOC_CHIP`).
+An answer's tool chips (2026-10-31, `ChatSteps.svelte`) fold into one
+line under it ("Searched the web 3 times, read 2 pages ▸",
+`chatSteps.js` `stepsSummary`) that opens to them, one a line with its
+mark: a globe for the web, a calendar, a document mark for a document's
+("Started "Build" (3 sections)", "Wrote 3 sections in …", the rich tools'
+"Changed a table in …"; `chatSteps.js` `DOC_CHIP`), a shield for an
+action refused after the web. While an answer comes, `ActivityLine.svelte`
+at the thread's foot says what's under way and for how long
+(chat-and-assistant.md, `chat/activity.rs`). Until then a tool's own chip
+was a full-width row 30 px tall (`.toolchip.tool`) over the answer.
 
 **Find** is one bar everywhere (`components/SummaryFind.svelte`: a
 summary's Ctrl+F, and Chat's document panel with `label`): every match lit
@@ -66,18 +68,21 @@ changed. **`renderMarkdown(…, {lines: true})`** puts `data-line="a-b"` (the
 block's source lines) on each top-level block (DOMPurify keeps only that
 shape): the document panel maps a selection back to the markdown with it.
 
-**The main window's chunk** is held near 710 kB (`vite.config.js`'
+**The main window's chunk** is held near 720 kB (`vite.config.js`'
 `chunkSizeWarningLimit`, 700 until Chat's documents on 2026-10-30 took it
 to 708; 715 since the panel's two views, a selection's quote and find
-across a text's pieces took it to 712 on 2026-10-31): the document panel
+across a text's pieces took it to 712 on 2026-10-31; 725 since Chat's
+activity line, its folded steps and Sources row, and each model's effort
+on the chip and in Settings took it to 722 the same day, the picker's
+part in the picker's own chunk): the document panel
 itself loads on demand (`{#await import('./DocPanel.svelte')}`, with its
 own `docTools.js`, `docStream.js`, `docPieces.js` and
 `core/markdownSource.js`), its state, the quote and the pill don't (the
 stream-in's pace lives in the panel for that: the main chunk keeps only
-what's on its way, 713.8 kB on 2026-10-31). The page's editor is a chunk
-of its own on top (`docEditor.js` with TipTap and ProseMirror, 427 kB /
-132 kB gzipped), imported the first time Preview is editable: the panel
-(28.7 kB) opens on the drawn page and swaps the editor in.
+what's on its way, +0.5 kB). The page's editor is a chunk of its own on
+top (`docEditor.js` with TipTap and ProseMirror, 430 kB / 133 kB
+gzipped), imported the first time Preview is editable: the panel (28.9 kB)
+opens on the drawn page and swaps the editor in.
 
 ## Look and the main window
 

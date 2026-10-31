@@ -999,6 +999,9 @@ pub(crate) enum Delta<'a> {
     /// read, `anthropic.rs`): what came before it wasn't the answer, and
     /// the answer goes on after it in the same reply.
     Server(&'a str),
+    /// That tool's input, whole (Claude's search query, the address it
+    /// opens): the step the page shows (`chat/activity.rs`).
+    ServerInput { name: &'a str, input: &'a Value },
     /// Start over: what came so far is void (the stream broke, and the call
     /// goes again without streaming).
     Restart,
@@ -1053,12 +1056,13 @@ impl ChatRequest {
         if let (Some(choice), Some(_)) = (tool_choice, tools) {
             extra.insert("tool_choice".into(), choice);
         }
-        // A question asked to think it through (Chat's Think, chat/think.rs):
-        // its model's fields, room for the thinking, and more time.
+        // A question asked to think it through (Chat's Think on the model on
+        // this PC, chat/think.rs): its fields, room for the thinking, and
+        // more time.
         let thinks = crate::chat::think::extra_for(provider, model).map(|x| extra.extend(x)).is_some();
         let on_device = provider == crate::ai::local_llm::PROVIDER_ONDEVICE;
         let thinking_room = if thinks { crate::chat::think::ON_DEVICE_BUDGET } else { 0 };
-        ChatRequest {
+        let mut req = ChatRequest {
             base_url: base_url.to_string(),
             api_key: api_key.to_string(),
             model: model.to_string(),
@@ -1071,7 +1075,14 @@ impl ChatRequest {
             rate_limit_patience: RATE_LIMIT_PATIENCE,
             extra,
             native: None,
+        };
+        // A cloud model at its effort (ai/effort.rs: chosen in Chat's model
+        // picker, else its default; Claude on the Messages API): its
+        // thinking shows in Chat's turn.
+        if !thinks && crate::ai::effort::apply(&mut req) {
+            crate::chat::think::reasoned();
         }
+        req
     }
 
     /// A call with explicit options ([`chat_with`]: the meeting helpers).

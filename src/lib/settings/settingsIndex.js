@@ -183,6 +183,7 @@ export const SETTINGS_INDEX = [
   { page: 'cleanup', scope: 'voiceAgent', section: 'Commands', label: 'Commands model', desc: 'The model that carries out Commands', keywords: 'commands agent model prompt', anchor: 'scope-model' },
   { page: 'cleanup', scope: 'noteFormatting', section: 'Note Formatting', label: 'Note formatting model', desc: 'Meeting summaries and note actions', keywords: 'notes meeting summary action plan model', anchor: 'scope-model' },
   { page: 'cleanup', scope: 'chat', section: 'Chat & Voice Assistant', label: 'Chat model', desc: 'The model that answers in Chat and out loud', keywords: 'chat assistant model answers', anchor: 'scope-model' },
+  { page: 'cleanup', scope: 'chat', section: 'Chat & Voice Assistant', label: 'Effort', desc: 'How hard the Chat model thinks before it answers', keywords: 'effort thinking think reasoning reason extra max low medium high', anchor: 'scope-effort', fallback: 'scope-model' },
 
   // ---- Connectors ----
   { page: 'connectors', section: 'Connectors', label: 'Google Calendar', desc: 'Reminders for Google meetings', keywords: 'calendar google connect', anchor: 'google-calendar' },

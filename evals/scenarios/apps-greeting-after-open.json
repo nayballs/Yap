@@ -1,0 +1,30 @@
+{
+  "name": "apps-greeting-after-open",
+  "description": "A chat where another model opened a game a moment ago, then a bare greeting out loud. Nothing opens again, and the answer never says Yap can't open apps (a tester's chat, 31 Oct 2026: the 4B tried to open the game again, was refused, and said \"I can't open your games\").",
+  "tags": ["apps", "voice", "follow-up", "switch"],
+  "voice": true,
+  "apps": "standard",
+  "seed": {
+    "chats": [
+      {
+        "title": "Baldur's Gate 3",
+        "continue": true,
+        "messages": [
+          { "role": "user", "text": "Open Baldur's Gate 3, please." },
+          { "role": "assistant", "text": "Opening Baldur's Gate 3 (in Steam).", "model": "anthropic:claude-opus-5-5" }
+        ]
+      }
+    ]
+  },
+  "turns": [
+    {
+      "user": "Hey Qwen.",
+      "expect": {
+        "opened_none": true,
+        "answer_not_matches": "(?i)(can'?t|cannot|unable to|not able to) (open|launch|start)|(don'?t|do not) have access",
+        "no_false_claims": true
+      },
+      "soft": { "tools_not_called": ["open_app"], "max_words": 40 }
+    }
+  ]
+}

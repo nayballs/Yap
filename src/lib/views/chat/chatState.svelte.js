@@ -177,6 +177,11 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
 
   let waitedS = $state(0);
   let modelHere = $state(false);
+  // What the turn shown is doing now (chat/activity.rs `step` events): the
+  // line at the thread's foot (ActivityLine.svelte), beside `waitedS`. None
+  // yet: "Thinking". `activityWaiting`: a dictation is being waited out.
+  let activity = $state(null);
+  let activityWaiting = $state(false);
   // Goes up when an answer (or a question) lands: the context ring reads
   // the conversation's use again (ContextRing.svelte, `chat_context`).
   let contextStamp = $state(0);
@@ -626,6 +631,9 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
     const spoken = spokenAt();
     if (docEvent(p.event, spoken >= 0 ? messages[spoken] : null)) return;
     assistantLive = applyEvent(assistantLive, p.event);
+    // The line at the thread's foot: what it's doing now.
+    activity = assistantLive.step;
+    activityWaiting = assistantLive.waiting;
     let at = spokenAt();
     if (at < 0) {
       if (!assistantLive.started) return;
@@ -647,6 +655,8 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
       assistantPending = id ?? null;
       assistantTurn = p.userMessageId ?? null;
       assistantLive = liveAnswer();
+      activity = null;
+      activityWaiting = false;
     } else if (['answered', 'failed', 'superseded'].includes(p?.phase)) {
       // An older question a newer one replaced ends after the newer was
       // asked: the newer one stays pending.
@@ -880,6 +890,8 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
     // or tool call and grows in place.
     let live = liveAnswer();
     let made = false;
+    activity = null;
+    activityWaiting = false;
     const onEvent = (ev) => {
       if (!alive) return;
       if (ev?.kind === 'turn') {
@@ -892,13 +904,6 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
         }
         return;
       }
-      // Yap turned Think on for this question (a strong model writing a
-      // document, chat/think.rs `auto_on`): the button shows lit until the
-      // answer is in.
-      if (ev?.kind === 'think') {
-        think.auto = !!ev.auto;
-        return;
-      }
       // A document of this turn (the panel), while this chat is the one shown.
       if (ev?.kind === 'document' || ev?.kind === 'section' || ev?.kind === 'tool') {
         if (mine('user') >= 0) {
@@ -907,6 +912,11 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
         } else if (ev.kind !== 'tool') return;
       }
       live = applyEvent(live, ev);
+      // The line at the thread's foot, while this chat is the one shown.
+      if (mine('user') >= 0) {
+        activity = live.step;
+        activityWaiting = live.waiting;
+      }
       let ai = mine('assistant');
       if (ai < 0) {
         // Not yet (or no longer: another conversation opened meanwhile).
@@ -1049,8 +1059,6 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
     } finally {
       // Nothing is being written into the document any more.
       doc.turnEnded();
-      // Think, lit by Yap for this question's document, goes off with it.
-      think.auto = false;
       sending = false;
       stopping = false;
       stopAnswerCall = null;
@@ -1157,6 +1165,8 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
     get chatReady() { return chatReady; },
     get assistantPending() { return assistantPending; },
     get waitedS() { return waitedS; },
+    get activity() { return activity; },
+    get activityWaiting() { return activityWaiting; },
     get modelHere() { return modelHere; },
     get contextStamp() { return contextStamp; },
     get limits() { return limits; },

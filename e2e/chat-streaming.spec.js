@@ -3,7 +3,8 @@
 // - The answer grows in place, markdown rendered as it comes (a half-written
 //   **bold** or list closed off), the request asked for the stream and its
 //   usage.
-// - A tool call shows as its chip while it runs; the line a model writes
+// - A tool call shows on the thread's line while it runs (chat/activity.rs;
+//   chat-activity.spec.js), then as its chip; the line a model writes
 //   before calling a tool ("I'll search your notes for that.") never shows;
 //   the call's arguments, streamed in fragments, come back whole.
 // - ■ stops it: the stream closes (the fake sees Yap hang up), what came is
@@ -62,7 +63,7 @@ async function send(main, text) {
   await main.getByRole('button', { name: 'Send' }).click();
 }
 
-/** Every text the streaming bubble and the "doing" chip showed, from now on. */
+/** Every text the streaming bubble and the thread's activity line showed, from now on. */
 async function watchStream(main) {
   await main.evaluate(() => {
     window.__streamed = [];
@@ -71,8 +72,8 @@ async function watchStream(main) {
     new MutationObserver(() => {
       const live = document.querySelector('[data-testid="chat-streaming"] .cbody');
       if (live) window.__streamed.push(live.textContent);
-      const doing = document.querySelector('[data-testid="chat-doing"]');
-      if (doing) window.__doing.push(doing.textContent.trim());
+      const doing = document.querySelector('[data-testid="chat-activity"] .aline')?.textContent.trim();
+      if (doing && window.__doing.at(-1) !== doing) window.__doing.push(doing);
     }).observe(root, { subtree: true, childList: true, characterData: true });
   });
   return {
@@ -177,9 +178,10 @@ test('a tool call shows as its chip; the line before it never shows; its argumen
   await expect(thread(main).locator('.toolchip')).toHaveText(['Found 1 note for "kitchen budget"']);
   await shot(main, '03-tool-chip-then-answer');
 
-  // The preamble never showed; the call's chip did while it ran.
+  // The preamble never showed; the thread's line said the call while it ran.
   const texts = await seen.texts();
   expect(texts.some((t) => t.includes('search your notes'))).toBe(false);
+  expect(await seen.doing()).toContain('Searching your notes · kitchen budget');
   // The arguments, streamed in fragments, reached the tool whole.
   const second = fakeLlm.requests.filter((r) => r.tools.includes('search_notes')).at(-1);
   const call = second.messages.find((m) => m.tool_calls)?.tool_calls[0];

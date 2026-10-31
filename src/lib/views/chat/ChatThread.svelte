@@ -1,9 +1,10 @@
 <script>
-  // Chat's thread: the conversation's messages (ChatMessage), "Thinking…"
-  // while an answer hasn't started (still working after a few seconds: a
-  // model on this PC can take a minute), or — no messages yet — what Chat
-  // is for, what it needs if no AI model is set up, and the Voice
-  // Assistant's shortcut (or how to set one).
+  // Chat's thread: the conversation's messages (ChatMessage), and at its
+  // foot while an answer comes what the turn is doing now and for how long
+  // (ActivityLine: "Searching the web · … · 1m 59s"; a model on this PC slow
+  // to start says why), or — no messages yet — what Chat is for, what it
+  // needs if no AI model is set up, and the Voice Assistant's shortcut (or
+  // how to set one).
   import { formatHotkeySpec } from '../../core/hotkeys.js';
   import { messageItems } from '../../core/itemMenus.js';
   import { openContextMenu } from '../../ui/contextMenu.svelte.js';
@@ -12,10 +13,14 @@
   import { skills } from '../../stores/skills.svelte.js';
   import { promptChips } from '../../core/skills.js';
   import ChatMessage from './ChatMessage.svelte';
+  import ActivityLine from './ActivityLine.svelte';
 
   // The one-tap prompts (chat/skills.rs: Coach me, List my open to-dos,
   // Write a weekly recap), each asked across the meetings.
   const prompts = $derived(promptChips(skills.list));
+
+  // The answer's words have begun (a slow start's hint goes).
+  const answering = $derived(chat.messages.some((m) => m.streaming && m.text));
 
   // Show summary's button, the focus's way back when its dialog closes.
   let summaryBtn = $state(null);
@@ -110,19 +115,16 @@
         ondoc={(d) => chat.doc.show(d.id, { title: d.title })}
       />
     {/each}
-    {#if (chat.sending || (chat.assistantPending != null && chat.assistantPending === chat.activeId)) && !chat.streaming}
-      <div class="cbubble assistant">
-        <p class="cbody thinking">Thinking…</p>
-        {#if chat.waitedS >= STILL_WORKING_S}
-          <p class="cwait" data-testid="chat-still-working" aria-live="polite">
-            {#if chat.modelHere}
-              Still working ({chat.waitedS} s): the model runs on this PC, so this can take a minute.
-            {:else}
-              Still working ({chat.waitedS} s)…
-            {/if}
-          </p>
-        {/if}
-      </div>
+    {#if chat.sending || (chat.assistantPending != null && chat.assistantPending === chat.activeId)}
+      <!-- What the turn is doing now, with its time (chat/activity.rs). -->
+      <ActivityLine
+        step={chat.activity}
+        waiting={chat.activityWaiting}
+        seconds={chat.waitedS}
+        hint={chat.modelHere && !answering && chat.waitedS >= STILL_WORKING_S
+          ? 'Still working: the model runs on this PC, so this can take a minute.'
+          : ''}
+      />
     {/if}
   </div>
 {/if}
@@ -288,36 +290,5 @@
     flex-direction: column;
     gap: 8px;
     padding: 2px;
-  }
-  /* "Thinking…" (ChatMessage.svelte draws the messages themselves). */
-  .cbubble {
-    max-width: 78%;
-    border-radius: 12px;
-    padding: 8px 12px;
-    font-family: var(--yap-font-reading);
-    font-size: calc(12.5px * var(--yap-reading-scale));
-    line-height: calc(1.6 * var(--yap-reading-leading));
-  }
-  .cbubble.assistant {
-    align-self: flex-start;
-    background: var(--yap-s2);
-    border: 1px solid var(--yap-border-subtle);
-  }
-  .cbody {
-    margin: 0;
-    overflow-wrap: anywhere;
-  }
-  .cbody.thinking {
-    color: var(--yap-muted-55);
-    font-style: italic;
-  }
-  .cwait {
-    margin: 4px 0 0;
-    font-size: 12px;
-    color: var(--yap-muted);
-  }
-  /* (As an answer's paragraphs: its lines keep their spacing.) */
-  .cbubble.assistant :global(p) {
-    margin: 4px 0;
   }
 </style>
