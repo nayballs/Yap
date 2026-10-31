@@ -130,8 +130,10 @@ pub fn handles_rich(provider: &str, model: &str) -> bool {
 /// - a turn that writes a document researches deeper (`web::Reach::deep`:
 ///   up to 10 searches and as many page reads as the model's context
 ///   holds), at the model's effort (`ai/effort.rs`);
-/// - a guide or plan is completed from the model's own knowledge where its
-///   sources run out, marked so ([`INSTRUCTIONS`], `tools::web_tool_instructions`).
+/// - a new document is outlined before anything is looked up
+///   (`web::Turn::outline_first`), its facts come from pages it read, and
+///   its own knowledge only advises, marked so ([`INSTRUCTIONS`],
+///   `tools::web_tool_instructions`, `documents::research_note`).
 ///
 /// The on-device model and small ones keep the stricter rules: they make
 /// things up more readily (docs/model-evals.md). Not changed by an
@@ -146,20 +148,35 @@ pub fn strong(provider: &str, model: &str) -> bool {
 /// edit its blocks by id and hash; a refusal means the person changed that
 /// block. **A complete guide** (2026-10-31): a level-by-level table has a row
 /// for every level asked for — Claude Opus 5.5 wrote one of "Level 1",
-/// "Endgame" and "Reference only" rows when its sources ran out — and what
-/// no source gave is the model's own suggestion, said so in one italic line
-/// under its table or section (not a column: the panel beside the chat is
-/// narrow, and the cited rows already carry their links; not a footnote:
-/// Yap's markdown has none). Kept short: every step of a tool turn sends it.
-pub const INSTRUCTIONS: &str = "Something to keep (a build, a plan, a guide, a comparison, a long table) goes straight into a document, never the chat, never asked first: create_document (title, a one- or two-sentence summary, every section: one per part, usually 2 to 6), then write_section each, in order. Short bullets, a markdown table for anything with rows, **bold** lead-ins; a game build: race and origin, character creation, skills, a level-by-level table, gear, tips. Make it complete: a level-by-level table has a row for every level asked for (never \"endgame\" or \"reference only\" rows in their place). Cite what came from the web [n]; where your sources run out, fill it in from your own knowledge and say so in one italic line under that table or section (\"*Levels 5–19: my suggestions, not from a source.*\"). In the chat say only one short line (\"It's open on the right.\"): no summary, never the content. A document is a Markdown note, saved in Notes under Chat documents. To change a document from this chat (a change, more depth, a selected passage): read_document, then edit_document with ops on its block ids, each replace, delete or move with the if_hash you read; a table row added or changed is a replace of the whole table. A refused op means the user changed that block: their words stay, build on them. document_history and restore_document bring back an earlier version when asked. An option picked: a new document. Never create_note for these.";
+/// "Endgame" and "Reference only" rows when its sources ran out.
+///
+/// **The outline before any search, facts only from pages read, its own
+/// knowledge for advice** (2026-10-31, the same evening): told to fill in
+/// from its own knowledge where sources ran out, Opus 5.5 wrote a Divinity:
+/// Original Sin 2 level table with about ten skills at levels they can't be
+/// had (Nether Swap at 5, a level-9 book; Thunderstorm at 10, a level-16
+/// one), from search snippets and one page read, its main source a guide for
+/// another build, and an Undead for a build that heals. So: the outline
+/// first (it opens at once); requirements, levels, numbers and locations
+/// only from a page it read, never its own knowledge — one it couldn't find
+/// is said to be unconfirmed where it goes, never guessed; its own knowledge
+/// for advice and explanation, said so in one italic line under that table
+/// or section (not a column: the panel beside the chat is narrow; not a
+/// footnote: Yap's markdown has none); a source that fits the build and the
+/// version, each pick fitting the rest. Kept short: every step of a tool
+/// turn sends it.
+pub const INSTRUCTIONS: &str = "Something to keep (a build, a plan, a guide, a comparison, a long table) goes straight into a document, never the chat, never asked first: create_document first, before any search (title, a one- or two-sentence summary, every section with what it will cover: one per part, usually 2 to 6) so it opens at once, then research, then write_section each, in order. Short bullets, a markdown table for anything with rows, **bold** lead-ins; a game build: race and origin, character creation, skills, a level-by-level table, gear, tips. Make it complete: a level-by-level table has a row for every level asked for (never \"endgame\" or \"reference only\" rows in their place). Requirements, levels, numbers and locations come only from a page you read (a search result's snippet isn't one), cited; never from your own knowledge: one you couldn't find on a page says so where it goes (\"not confirmed\"), never a guess. Your own knowledge is for advice and explanation, said so in one italic line under that table or section (\"*The tips here are my suggestions, not from a source.*\"). A source must fit: a guide for another build or game version isn't one for this, and each pick must suit the rest of the build. In the chat say only one short line (\"It's open on the right.\"): no summary, never the content. A document is a Markdown note, saved in Notes under Chat documents. To change a document from this chat (a change, more depth, a selected passage): read_document, then edit_document with ops on its block ids, each replace, delete or move with the if_hash you read; a table row added or changed is a replace of the whole table. A refused op means the user changed that block: their words stay, build on them. document_history and restore_document bring back an earlier version when asked. An option picked: a new document. Never create_note for these.";
 
-/// The line under a table or section that says it's the model's own: what
-/// the rule asks for (`INSTRUCTIONS`), and what the evaluations look for.
-/// Pure.
+/// The line under a table or section that says it's the model's own, or a
+/// fact no page gave said to be unconfirmed: what the rule asks for
+/// (`INSTRUCTIONS`), and what the evaluations look for. Pure.
 #[cfg(any(test, debug_assertions))] // the evaluations' guide checks; tests
 pub fn marks_own_knowledge(text: &str) -> bool {
     static OWN: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
-        regex::Regex::new(r"(?i)not (?:from|in) (?:a|any|the|my) sources?|my (?:own )?suggestions?|from my own knowledge|no source (?:gave|covers|covered)").expect("static regex")
+        regex::Regex::new(
+            r"(?i)not (?:from|in) (?:a|any|the|my) sources?|my (?:own )?suggestions?|from my own knowledge|no source (?:gave|covers|covered)|\bnot confirmed\b|\bunconfirmed\b|couldn'?t (?:find|confirm)|no page (?:gave|gives|says|covers)",
+        )
+        .expect("static regex")
     });
     OWN.is_match(text)
 }
@@ -926,18 +943,43 @@ mod tests {
         // The rule asks for every level and the line under the table.
         assert!(INSTRUCTIONS.contains("a row for every level asked for"));
         assert!(INSTRUCTIONS.contains("my suggestions, not from a source"));
-        // The marks a model writes, read as such.
+        // The marks a model writes, read as such: its own advice, and a fact
+        // no page gave said to be unconfirmed.
         for line in [
             "*Levels 5–19: my suggestions, not from a source.*",
             "_Rows without a link are my own suggestions._",
             "*Not from a source: the talents after level 8.*",
             "Levels 9 to 20 come from my own knowledge.",
+            "| 7 | Not confirmed: no page gave the level-7 skill |",
+            "*Couldn't find where the ring drops.*",
         ] {
             assert!(marks_own_knowledge(line), "{line}");
         }
         for line in ["| 5 | Fireball [1] |", "Sources: the wiki.", "A suggested route north."] {
             assert!(!marks_own_knowledge(line), "{line}");
         }
+    }
+
+    /// **Facts from pages, its own knowledge for advice** (2026-10-31): Opus
+    /// 5.5, told to fill a guide in from its own knowledge, put about ten
+    /// skills at levels they can't be had, from search snippets and a guide
+    /// for another build. The rule now: the outline before any search; a
+    /// requirement, level, number or location only from a page read, else
+    /// said to be unconfirmed; its own knowledge for advice, marked; a source
+    /// that fits the build and the version.
+    #[test]
+    fn facts_come_from_pages_read_and_its_own_knowledge_only_advises() {
+        assert!(INSTRUCTIONS.contains("create_document first, before any search"), "{INSTRUCTIONS}");
+        assert!(INSTRUCTIONS.contains("Requirements, levels, numbers and locations come only from a page you read"));
+        assert!(INSTRUCTIONS.contains("a search result's snippet isn't one"));
+        assert!(INSTRUCTIONS.contains("never from your own knowledge"));
+        assert!(INSTRUCTIONS.contains("(\"not confirmed\"), never a guess"));
+        assert!(INSTRUCTIONS.contains("Your own knowledge is for advice and explanation"));
+        assert!(INSTRUCTIONS.contains("a guide for another build or game version isn't one for this"));
+        // The old rule's "fill it in from your own knowledge" is gone.
+        assert!(!INSTRUCTIONS.contains("fill it in from your own knowledge"));
+        // The simple set's rule (the on-device model) is as it was.
+        assert!(!crate::chat::documents::INSTRUCTIONS.contains("before any search"));
     }
 
     #[test]

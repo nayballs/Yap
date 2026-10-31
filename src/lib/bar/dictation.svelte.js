@@ -59,6 +59,10 @@ export const dictation = $state({
   // taken and read (chat/assistant/screen.rs: "Looking at the window…");
   // else ''.
   askAbout: '',
+  // What its answer is doing now, in "Thinking…"'s place (chat/activity.rs,
+  // `yap-assistant-step`): "Searching the web · …", "Reading …"; '' until a
+  // step comes, and again for the next question.
+  askStep: '',
   // A saved transform (dictation/transforms.rs, `yap-transform`): its name, and
   // 'running' ("Polish…" while the AI works), 'done' ("Polish ✓ · Undo" for
   // `offerMs`) or 'unchanged' ("No changes needed"); '' for a dictation.
@@ -181,6 +185,13 @@ export function initDictation() {
   listen('yap-assistant', (e) => {
     dictation.assistant = e.payload?.phase || 'idle';
     dictation.askAbout = e.payload?.about || '';
+    // A new question (or none): no step of the last one's.
+    if (dictation.assistant === 'listening' || dictation.assistant === 'idle') dictation.askStep = '';
+  });
+  // What the answer is doing (only while it's thought about: "Speaking…"
+  // takes over after).
+  listen('yap-assistant-step', (e) => {
+    if (dictation.assistant === 'thinking') dictation.askStep = e.payload?.line || '';
   });
   listen('yap-transform', (e) => {
     dictation.transform = e.payload?.name || '';

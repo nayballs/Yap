@@ -49,12 +49,28 @@ Chat's and the Voice Assistant's two ways of reaching outside Yap: looking thing
   `turn.rs` when the question asks for one, or from the loop at its first
   document tool call) gets `Reach::deep` — 10 searches (`DEEP_SEARCHES`)
   and 3 to 10 page reads, as many `PAGE_TOKENS` parts as two-fifths of the
-  model's request holds (`DEEP_READS`); its cap's refusal says "write the
-  document from what you found, filling in the rest from your own
-  knowledge (marked…)"; its provider's search sub-call goes deeper too
-  (`NativeSearch::deep`, below);
-  sources numbered as they come (`number`), `sources_for(reply)` = the ones
-  cited (`citations`: [1], [2, 3], [1][4]) or all; results carry
+  model's request holds (`DEEP_READS`; a strong Claude's own web fetch at
+  `FETCH_TOKENS` a page, `Reach::deep_paged`: Haiku's 80K holds 4, its
+  fetch's `max_uses` then 4, `NativeSearch::deep_fetches`); its cap's
+  refusal says "write the document from the pages you read: advice from
+  your own knowledge is fine (marked as yours), but a requirement, level,
+  number or location no page gave is written as not confirmed, never
+  guessed" (2026-10-31, the evening: no longer "fill in the rest"); its
+  provider's search sub-call goes deeper too (`NativeSearch::deep`, below).
+  **A new document's outline first** (`Turn::outline_first`, 2026-10-31):
+  until the turn's first step is done (`outline_settled`) Claude's own web
+  tools stay out of the request (`server_tools` → empty) and the loop
+  refuses `web_search` / `read_page` unless the step makes the outline too
+  (`documents::OUTLINE_FIRST`, no chip; chat-and-assistant.md). Sources
+  numbered as they come (`number`; one page however its address is written:
+  `normal_url` drops "www.", the fragment, `utm_` parameters and a trailing
+  slash, before a query too); **a page read** (`opened`: `read_page`, Claude's
+  fetch) is marked `opened` and takes the page's own title (a search's
+  result is often titled with the site or the game); `sources_for(reply)` =
+  the ones cited (`citations`: [1], [2, 3], [1][4]) or all — **a document's
+  turn** (`cited_in`: what its document cites, by `[n]` or a link to the
+  page) keeps all, the cited ones marked `cited`, for the Sources row's
+  "+N more" (chat-and-assistant.md, "The Sources row"); results carry
   `DATA_NOT_INSTRUCTIONS`. Chips: `Searched the web: "q"` (+ " (bg3.wiki)"
   when keyless, + the service's error), `Read bg3.wiki/wiki/Gale`, `Didn't
   read evil.example/…: not a link from you or the search`. **Does a question
@@ -293,8 +309,11 @@ Chat's and the Voice Assistant's two ways of reaching outside Yap: looking thing
   beside Yap's (`server_tools`: `web_search_20260209` / `web_fetch_20260209`
   with dynamic filtering on Opus, Sonnet, Fable and Mythos from 4.6 —
   `native::filters` —, the basic `web_search_20250305` / `web_fetch_20250910`
-  on Haiku 5.5 and the 4.5s; `max_uses` 5 a step, 10 for a document's; the
-  person's `user_location`; fetch citations on), and Yap's `web_search` /
+  on Haiku 5.5 and the 4.5s; `max_uses` 5 a step, 10 searches for a
+  document's and as many fetches as its reach reads — `deep_fetches`, sized
+  by `FETCH_TOKENS` a page; none at all in a new document's first step,
+  which makes the outline: `Turn::outline_first`; the person's
+  `user_location`; fetch citations on), and Yap's `web_search` /
   `read_page` aren't offered. What they did comes back with the reply
   (`yap_web`) and `Turn::took_server` makes it the turn's: a search or a
   page read counts (`looked`, the safety rule's `seen`), each a chip
@@ -411,7 +430,12 @@ Chat's and the Voice Assistant's two ways of reaching outside Yap: looking thing
   answer just before, which asked a question naming that app
   (`consented`: "Would you like me to open Baldur's Gate 3?" → "Yes."; not
   "Are you struggling?"), so a note saying "open X" can't (chip `Didn't
-  open "X": you didn't ask to open an app`). `list_apps` takes a query
+  open "X": you didn't ask to open an app`). The refusal tells the model
+  what's true, not only what's refused (2026-10-31): Yap can open apps
+  whenever the person asks, so never say it can't, and just reply to their
+  latest message — told only "nothing was opened", Qwen3.5-4B answered a
+  "Hey" after an earlier open with "I can't open your games". The tool's
+  description says an earlier request was already done. `list_apps` takes a query
   and gives ≤ 15 names (`LIST_MAX`; no query: the count, 15, "pass a
   query" — 840 → 135 est. tokens on the test PC). **A model without
   tools** gets `NO_TOOLS_NOTE` (+ `NO_TOOLS_OPEN`: say "open" and the

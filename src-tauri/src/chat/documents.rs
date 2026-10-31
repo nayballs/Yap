@@ -39,7 +39,10 @@
 //!   one ([`rich`]) — the document read as blocks with ids and hashes
 //!   (`read_document`, [`blocks`]), changed by block (`edit_document`: all or
 //!   none, the person's changed blocks refused), its history and a restore
-//!   — in place of `rewrite_section`. Both make a document outline first.
+//!   — in place of `rewrite_section`. Both make a document outline first;
+//!   a strong model's new one is outlined **before anything is looked up**
+//!   ([`makes_new_document`], `web::Turn::outline_first`, [`OUTLINE_FIRST`])
+//!   and told to take its facts from the pages it reads ([`research_note`]).
 //! - **A passage selected in the panel** ("Change this…", "Ask about
 //!   this"): the question carries it ([`Selection`], `chat_send`), and the
 //!   model is told which blocks it is ([`selection_note`]), so a change goes
@@ -1157,18 +1160,86 @@ pub fn writes_document(question: &str, docs: &[DocRef], selected: bool) -> bool 
     (!docs.is_empty() && (changes || picks_option(question))) || (selected && changes)
 }
 
+/// **Does this question make a new document** (not a change to one this
+/// chat has)? As [`steer`] tells them apart: an option picked from the open
+/// document → a new one; a change to it, more depth on it, an earlier
+/// version back or a selected passage → that one; else something to keep
+/// ([`asks_for_document`]). A strong model's new document is outlined
+/// before anything is looked up (`web::Turn::outline_first`). Pure.
+pub fn makes_new_document(question: &str, docs: &[DocRef], selected: bool) -> bool {
+    if selected {
+        return false;
+    }
+    if !docs.is_empty() {
+        if picks_option(question) {
+            return true;
+        }
+        if restores_version(question) || changes_document(question) {
+            return false;
+        }
+    }
+    asks_for_document(question)
+}
+
+/// How a strong model's document turn reads the web ([`research_note`]):
+/// with Yap's `read_page`, or a strong Claude's own `web_fetch`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Reader {
+    ReadPage,
+    WebFetch,
+}
+
+impl Reader {
+    fn tool(self) -> &'static str {
+        match self {
+            Reader::ReadPage => "read_page",
+            Reader::WebFetch => "web_fetch",
+        }
+    }
+}
+
 /// What a strong model's document turn is told in its context, with the
 /// web on (`turn.rs`; the context, never the system prompt: the prompt
-/// cache stays whole): how far it may look this turn ([`crate::web::Reach`])
-/// and to read the best pages, then write the whole thing. Claude Opus 5.5,
-/// writing a level-by-level guide on 3 searches, read no page and said the
-/// levels between weren't covered by a source it found. Pure.
-pub fn research_note(reach: crate::web::Reach) -> String {
+/// cache stays whole). **A new document** (`new_doc`): the outline first,
+/// before any search, so the panel opens at once (as Claude Docs does; Claude
+/// Opus 5.5 researched 1 min 44 s before its `create_document`). Then how far
+/// it may look this turn ([`crate::web::Reach`]), and **read what it quotes**
+/// (2026-10-31): Opus read one page in six searches, took a level table's
+/// facts from search snippets — about ten skills at levels they can't be had
+/// — and built on a guide for another build. A snippet isn't a source; the
+/// pages the facts come from are opened and cited; a guide for another build
+/// or version isn't one for this. Pure.
+pub fn research_note(reach: crate::web::Reach, reader: Reader, new_doc: bool) -> String {
+    let read = reader.tool();
+    let (first, then) = if new_doc {
+        (
+            "This is a new document: outline it first — create_document now, before any search (the title, a one-line summary, a section each with what it will cover), so it opens straight away. Then research it",
+            "Then write_section each, complete: every part and level asked for.",
+        )
+    } else {
+        ("This is a document to write: research it properly first", "Then write it complete, every part and level asked for.")
+    };
     format!(
-        "This is a document to write: research it properly first — up to {} searches and {} page reads this turn (read_page the best pages in full) — then write it complete, every part and level asked for.",
+        "{first} — up to {} searches and {} page reads this turn. A search result's snippet isn't a source: {read} the pages that requirements, levels, numbers and locations come from, and cite the pages you read. Use only pages about exactly this (the same build or subject, game and version): a guide for another build or an older version isn't a source for this one. {then}",
         reach.searches, reach.reads
     )
 }
+
+/// `web_search` / `read_page` before a new document's outline
+/// (`web::Turn::outline_first`; refused by the loop, `agent.rs`, once: a
+/// step that also makes the outline goes ahead). No chip: the person sees the
+/// outline open, then the research.
+pub const OUTLINE_FIRST: &str = "Outline first: call create_document now (the title, a one-line summary, a section each with what it will cover) so the document opens straight away; then search and read the pages, then write each section.";
+
+/// The refusal [`OUTLINE_FIRST`] goes back as (a tool result, no chip).
+pub fn outline_first_refusal() -> Value {
+    tool_error(OUTLINE_FIRST.to_string(), Value::Null, String::new())
+}
+
+/// A new document's first step answered in words, with no outline (its web
+/// tools held back for that step, `web::Turn::outline_first`): asked once to
+/// make it (`agent.rs`).
+pub const OUTLINE_NOTE: &str = "(A note from Yap, not the user.) This asks for a document: call create_document now (the title, a one-line summary, a section each with what it will cover); then research it and write each section. Not an answer in the chat.";
 
 /// [`ASKS_NOTE`] in one short line, for a cloud model ([`steer`]'s
 /// `brief`).
@@ -2281,8 +2352,57 @@ mod tests {
         }
         assert!(!writes_document("What does this mean?", &[], true));
         // How far it may look, said in the context.
-        let note = research_note(crate::web::Reach { searches: 10, reads: 8 });
+        let note = research_note(crate::web::Reach { searches: 10, reads: 8 }, Reader::ReadPage, false);
         assert!(note.contains("up to 10 searches and 8 page reads"), "{note}");
+    }
+
+    /// **A new document, or a change to one?** As `steer` tells them apart:
+    /// only a new one is outlined before the research.
+    #[test]
+    fn a_new_document_is_told_from_a_change() {
+        let made = execute("create_document", &json!({ "title": "Tidecaller guide", "sections": ["Levels"] }));
+        let docs = [DocRef { id: made["data"]["id"].as_u64().unwrap(), title: "Tidecaller guide".into() }];
+        for q in ["Make me a detailed level-by-level guide for a fire mage", "Plan a three-day trip to Porto, day by day."] {
+            assert!(makes_new_document(q, &[], false), "{q}");
+            assert!(makes_new_document(q, &docs, false), "{q}");
+        }
+        // An option picked: a new one; a change, more depth, a restore: that one.
+        assert!(makes_new_document("Let's do option A.", &docs, false));
+        for q in ["Make it more detailed", "Add the gear and where to get it", "Put it back the way it was before that change."] {
+            assert!(!makes_new_document(q, &docs, false), "{q}");
+        }
+        // A passage selected in the panel changes that document.
+        assert!(!makes_new_document("Make me a detailed guide for this part", &docs, true));
+        assert!(!makes_new_document("Thanks!", &[], false));
+    }
+
+    /// **The research a strong model's document gets told** (2026-10-31):
+    /// a new one outlined first, before any search; a snippet isn't a
+    /// source — the pages its facts come from read (with Claude's own
+    /// `web_fetch` or Yap's `read_page`) and cited; a guide for another
+    /// build or version isn't one for this. Opus 5.5 researched 1 min 44 s
+    /// before its outline, read one page in six searches and took its level
+    /// table from snippets and a guide for another build.
+    #[test]
+    fn a_documents_research_outlines_first_and_reads_what_it_quotes() {
+        let reach = crate::web::Reach { searches: 10, reads: 4 };
+        let new = research_note(reach, Reader::WebFetch, true);
+        assert!(new.starts_with("This is a new document: outline it first — create_document now, before any search"), "{new}");
+        assert!(new.contains("up to 10 searches and 4 page reads this turn"), "{new}");
+        assert!(new.contains("A search result's snippet isn't a source: web_fetch the pages that requirements, levels, numbers and locations come from"), "{new}");
+        assert!(new.contains("cite the pages you read"), "{new}");
+        assert!(new.contains("a guide for another build or an older version isn't a source for this one"), "{new}");
+        assert!(new.contains("Then write_section each"), "{new}");
+        // A change to one: no outline, Yap's own page reader.
+        let change = research_note(reach, Reader::ReadPage, false);
+        assert!(!change.contains("create_document"), "{change}");
+        assert!(change.contains("read_page the pages that requirements"), "{change}");
+        // A search before the outline: refused with what to do, no chip.
+        let r = outline_first_refusal();
+        assert_eq!(r["success"], json!(false));
+        assert!(r["error"].as_str().unwrap().starts_with("Outline first: call create_document now"), "{r}");
+        assert_eq!(r["displayText"], json!(""));
+        assert!(OUTLINE_NOTE.contains("call create_document now"));
     }
 
     /// A cloud model gets the same nudge as one short line in the
@@ -2394,9 +2514,11 @@ mod tests {
         assert_eq!(instructions(ToolSet::Simple), INSTRUCTIONS);
         assert!(instructions(ToolSet::Rich).contains("read_document, then edit_document"));
         assert!(!instructions(ToolSet::Rich).contains("rewrite_section"));
-        // Both keep the outline first and where a document is kept.
+        // Both keep the outline first and where a document is kept (the
+        // rich set's before any search).
+        assert!(instructions(ToolSet::Simple).contains("create_document (title, a one- or two-sentence summary"));
+        assert!(instructions(ToolSet::Rich).contains("create_document first, before any search (title, a one- or two-sentence summary"));
         for set in [ToolSet::Simple, ToolSet::Rich] {
-            assert!(instructions(set).contains("create_document (title, a one- or two-sentence summary"));
             assert!(instructions(set).contains("A document is a Markdown note, saved in Notes under Chat documents."));
         }
         let made = execute("create_document", &json!({ "title": "Build", "sections": [{ "key": "Gear", "intent": "kit" }] }));

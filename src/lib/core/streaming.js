@@ -13,9 +13,10 @@
 //   Voice Assistant) ends it with SUPERSEDED too (chat/stream.rs `Halt`).
 // - `liveAnswer()` / `applyEvent()`: the streamed bubble's state from the
 //   events (`text`: the answer so far, whole; `tool`: a tool call began —
-//   its chip "Searching the web…"; `chips`: the tools done and the web
-//   sources found so far; `waiting`: a model on this PC stepped aside for a
-//   dictation).
+//   "Searching the web…"; `chips`: the tools done and the web sources found
+//   so far; `waiting`: a model on this PC stepped aside for a dictation;
+//   `step`: what the turn is doing now, chat/activity.rs — "Searching the
+//   web · …", the line at the thread's foot).
 // - `closePartial(md)`: markdown still being written, closed off so it
 //   renders as it will (an open code fence, a half-written **bold** or
 //   `code` on the last line, a half-typed citation or link left out).
@@ -59,10 +60,11 @@ export function streamCall(cmd, args, onEvent) {
 
 /**
  * A streamed answer's state before anything came. `thinking`: a question
- * asked to think it through (chat/think.rs), its thinking so far.
+ * asked to think it through (chat/think.rs), its thinking so far. `step`:
+ * the latest step (`{mark, line}`, chat/activity.rs; none yet: "Thinking").
  */
 export function liveAnswer() {
-  return { text: '', chips: [], doing: null, sources: [], web: false, waiting: false, started: false, thinking: '' };
+  return { text: '', chips: [], doing: null, sources: [], web: false, waiting: false, started: false, thinking: '', step: null };
 }
 
 /**
@@ -96,6 +98,10 @@ export function applyEvent(state, ev) {
     case 'thinking':
       // Its thinking so far, whole (shown folded, apart from the answer).
       s.thinking = ev.text ?? '';
+      break;
+    case 'step':
+      // What it's doing now (the line, not the bubble: nothing "started").
+      s.step = ev.step?.line ? { mark: ev.step.mark || '', line: ev.step.line } : null;
       break;
     default:
       break;

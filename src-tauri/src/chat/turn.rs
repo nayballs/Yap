@@ -401,6 +401,17 @@ async fn answer_turn(
     // can change them; the ones this turn makes or changes, for its pills.
     let chat_docs = crate::chat::documents::of_conversation(&conv.messages);
     let doc_turn = crate::chat::documents::Turn::new(&chat_docs);
+    // **A strong model writing a document** (2026-10-31, as the Claude app
+    // writes one): it may research deeper — how far is sized to the
+    // model's request (`web::Reach::deep`), said in the context with the
+    // web on; how hard it thinks is its effort, as on every question
+    // (`ai/effort.rs`). Claude Opus 5.5, held to 3 searches, wrote a
+    // level-by-level guide of "Level 1", "Endgame" and "Reference only"
+    // rows. **A new one is
+    // outlined first** (`web::Turn::outline_first`): nothing looked up
+    // before `create_document`, so the panel opens at once.
+    let writes_doc = strong && !meetings && crate::chat::documents::writes_document(&text, &chat_docs, selection.is_some());
+    let outline_first = writes_doc && web_on && crate::chat::documents::makes_new_document(&text, &chat_docs, selection.is_some());
     // Memory (memory.rs): the "You" part in the system prompt with About
     // you (stable from turn to turn), what this question is about with it.
     let memory_you = crate::memory::you_block();
@@ -436,8 +447,9 @@ async fn answer_turn(
     // A model on this PC asked something that needs the web: its first step
     // must be a search (left to decide, Qwen3.5-4B answered "the best RPG
     // games coming out in 2026" from memory, a tester's chat, 2026-10-21).
-    // Cloud models decide for themselves.
-    let first = if tools_supported && web_on && crate::ai::ai_model::runs_here(&provider, &base_url) && crate::web::needs_web(&text) {
+    // Cloud models decide for themselves. (Never before a new document's
+    // outline: that comes first.)
+    let first = if !outline_first && tools_supported && web_on && crate::ai::ai_model::runs_here(&provider, &base_url) && crate::web::needs_web(&text) {
         first_search(&text)
     } else {
         crate::chat::tools::FirstStep::Model
@@ -451,6 +463,10 @@ async fn answer_turn(
     let mut search_chip = None;
     let mut asked_across = None;
     if meetings {
+        // The page's line: "Searching your meetings" (or "Running /todos").
+        if let Some(w) = watcher {
+            crate::chat::activity::tell(w, crate::chat::activity::searching_meetings(skill.as_ref().map(|s| s.skill.command.as_str())));
+        }
         // A Skill reads its own passages (the open tasks, a week of
         // meetings…) and adds its instructions (chat/skills.rs).
         let found = match &skill {
@@ -587,18 +603,21 @@ async fn answer_turn(
             context.push(note);
         }
     }
-    // **A strong model writing a document** (2026-10-31, as the Claude app
-    // writes one): it may research deeper — how far is sized to the
-    // model's request (`web::Reach::deep`), said in the context with the
-    // web on. Claude Opus 5.5, held to 3 searches, wrote a level-by-level
-    // guide of "Level 1", "Endgame" and "Reference only" rows. How hard it
-    // thinks is its effort, as on every question (`ai/effort.rs`).
-    let writes_doc = strong && !meetings && crate::chat::documents::writes_document(&text, &chat_docs, selection.is_some());
-    let deep_reach = crate::web::Reach::deep(Some(
-        crate::chat::budget::budget(context_size, context_known, 0, kind, true, crate::chat::budget::request_cap(&provider, &model)).request,
-    ));
+    // A strong model writing a document (`writes_doc`, above): how far it
+    // may look, and to read the pages its facts come from (and a new one's
+    // outline first). A strong Claude's own web fetch puts up to
+    // `FETCH_TOKENS` of a page in the request (Yap can't trim it): its reads
+    // are sized by that. How hard it thinks is its effort, as on every
+    // question (`ai/effort.rs`).
+    let request = crate::chat::budget::budget(context_size, context_known, 0, kind, true, crate::chat::budget::request_cap(&provider, &model)).request;
+    let deep_reach = if claude_in_chat {
+        crate::web::Reach::deep_paged(Some(request), crate::web::native::FETCH_TOKENS as usize)
+    } else {
+        crate::web::Reach::deep(Some(request))
+    };
     if writes_doc && web_on {
-        context.push(crate::chat::documents::research_note(deep_reach));
+        let reader = if claude_in_chat { crate::chat::documents::Reader::WebFetch } else { crate::chat::documents::Reader::ReadPage };
+        context.push(crate::chat::documents::research_note(deep_reach, reader, outline_first));
     }
     if spoken && !(tools_supported && web_on) {
         if in_message {
@@ -665,8 +684,9 @@ async fn answer_turn(
         }
     }
     // Answers another model wrote (a switch in the picker): said so, so
-    // this one never claims them (`chats::other_models_note`).
-    if let Some(note) = crate::chat::chats::other_models_note(earlier, &answered_by) {
+    // this one never claims them (`chats::other_models_note`) — those
+    // summarised or left out too.
+    if let Some(note) = crate::chat::chats::other_models_note(&conv.messages, &answered_by, plan.summary) {
         if in_message {
             context.insert(1.min(context.len()), note);
         } else {
@@ -711,6 +731,10 @@ async fn answer_turn(
                 turn = turn.may_go_deep(deep_reach);
                 if writes_doc {
                     turn.go_deep();
+                }
+                // A new document: the outline before anything's looked up.
+                if outline_first {
+                    turn = turn.outline_first();
                 }
             }
             turn
@@ -1195,6 +1219,7 @@ async fn small_model_answer(
         let query = crate::web::local_query(&query, text, settings.local.as_ref()).unwrap_or(query);
         let endpoints = crate::web::Endpoints::current();
         if let Some(live) = live {
+            crate::chat::activity::tell(live.sink, crate::chat::activity::of_call("web_search", &serde_json::json!({ "query": query })));
             live.sink.send(crate::chat::stream::Event::Tool { name: "web_search".into(), doing: crate::chat::stream::doing("web_search").into() });
         }
         match crate::web::search(&settings, &endpoints, &query, text).await {

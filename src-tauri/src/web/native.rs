@@ -293,6 +293,11 @@ pub struct NativeSearch {
     /// writing one): it may say more (≤ 300 words instead of 120), open more
     /// pages (Anthropic's web fetch: 3 instead of 1) and take longer.
     pub deep: bool,
+    /// A document's page reads (`web::Reach::deep_paged`, sized by what the
+    /// model's request holds at [`FETCH_TOKENS`] a page): the most pages
+    /// Claude's own web fetch opens in a step of Chat's request, at most
+    /// [`DEEP_SERVER_USES`]. `None`: as many as it searches.
+    pub deep_fetches: Option<u32>,
     /// **Claude searches in Chat's own request** (a strong Claude on
     /// Anthropic, `llm::anthropic`): its web search and web fetch go beside
     /// Yap's function tools ([`NativeSearch::server_tools`]) — no sub-call,
@@ -319,6 +324,7 @@ impl NativeSearch {
             provider,
             model: model.to_string(),
             deep: false,
+            deep_fetches: None,
             in_chat: false,
             base_url: base_url.trim().trim_end_matches('/').to_string(),
             key: key.to_string(),
@@ -404,12 +410,18 @@ impl NativeSearch {
     /// its web search — aimed at the person's country and time zone — and
     /// its web fetch to open pages (when the model takes it, [`fetches`]),
     /// each at most [`SERVER_USES`] times a step ([`DEEP_SERVER_USES`] for a
-    /// document's), a page at most [`FETCH_TOKENS`], its passages citable.
-    /// The dynamic-filtering versions for the models that take them
-    /// ([`filters`]), the basic ones otherwise. Pure, but for [`NO_FETCH`].
+    /// document's; its fetches no more than the turn's reads,
+    /// [`NativeSearch::deep_fetches`]), a page at most [`FETCH_TOKENS`], its
+    /// passages citable. The dynamic-filtering versions for the models that
+    /// take them ([`filters`]), the basic ones otherwise. Pure, but for
+    /// [`NO_FETCH`].
     pub fn server_tools(&self) -> Vec<Value> {
         let dynamic = filters(&self.model);
         let uses = if self.deep { DEEP_SERVER_USES } else { SERVER_USES };
+        let fetch_uses = match (self.deep, self.deep_fetches) {
+            (true, Some(n)) => n.clamp(1, DEEP_SERVER_USES),
+            _ => uses,
+        };
         let mut search = json!({ "type": if dynamic { "web_search_20260209" } else { "web_search_20250305" }, "name": "web_search", "max_uses": uses });
         if let Some(loc) = self.user_location() {
             search["user_location"] = loc;
@@ -419,7 +431,7 @@ impl NativeSearch {
             tools.push(json!({
                 "type": if dynamic { "web_fetch_20260209" } else { "web_fetch_20250910" },
                 "name": "web_fetch",
-                "max_uses": uses,
+                "max_uses": fetch_uses,
                 "max_content_tokens": FETCH_TOKENS,
                 "citations": { "enabled": true },
             }));

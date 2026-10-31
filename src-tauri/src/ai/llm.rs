@@ -999,6 +999,9 @@ pub(crate) enum Delta<'a> {
     /// read, `anthropic.rs`): what came before it wasn't the answer, and
     /// the answer goes on after it in the same reply.
     Server(&'a str),
+    /// That tool's input, whole (Claude's search query, the address it
+    /// opens): the step the page shows (`chat/activity.rs`).
+    ServerInput { name: &'a str, input: &'a Value },
     /// Start over: what came so far is void (the stream broke, and the call
     /// goes again without streaming).
     Restart,

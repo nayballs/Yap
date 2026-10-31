@@ -13,7 +13,10 @@
 //! boil an egg" is never a screenshot. A maybe is the model's call
 //! ([`model_says`]: one short yes/no request to Chat's own model, with the
 //! last answer for context, so "what does this mean?" after an answer is
-//! about the answer).
+//! about the answer). An ask for something to be made — "…in a document",
+//! "make me a guide to…", in the same languages ([`asks_to_make`]) — is no
+//! maybe: its "this" is the thing to make, and the model isn't asked
+//! (2026-10-31: 2.9 s spent on a spoken build "in a document").
 //!
 //! **What's taken** ([`capture`]): the window's visible frame
 //! (`snip/pick.rs`, DWM's frame; the snip's window pick), cut from every
@@ -119,6 +122,48 @@ static SCREEN_PHRASES: LazyLock<Regex> = LazyLock::new(|| {
     ))
     .expect("static regex")
 });
+
+/// **Asks for something to be made** — a document ("…in a document",
+/// "make me a document"), or a guide, a plan, a build to keep ("write me a
+/// guide to…", "fais-moi un plan…") — in each language: the answer comes
+/// from the model and the web, not the screen, so a "this" in it ("can you
+/// build me this level by level… in a document") is never the screen's. The
+/// Voice Assistant spent 2.9 s asking the model whether a spoken ask for a
+/// Divinity: Original Sin 2 build "in a document" was about the screen
+/// (2026-10-31). English's other asks for something to keep are
+/// `documents::asks_for_document`'s.
+static MAKES: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(concat!(
+        r"(?x)",
+        // English
+        r"\b(in|into|as|on)\ (a|an|one)\ (new\ |separate\ |proper\ )?(document|doc)\b",
+        r"|\b(make|write|create|start|draft|open|give)\ (me\ |us\ )?(a|an)\ (new\ )?(document|doc)\b",
+        r"|\b(make|turn|put|write|save)\ (this|that|it)\ (up\ )?(into\ |as\ |in\ )?(a|an)\ (new\ )?(document|doc)\b",
+        // French
+        r"|\b(dans|en|sous\ forme\ d')\ ?un\ (nouveau\ )?document\b",
+        r"|\b(fais|faites|écris|écrivez|crée|créez|rédige|rédigez|prépare|préparez|donne|donnez)(-moi|-nous)?\ (un|une|mon|ma)\ [^.?!]{0,60}?\b(document|guide|plan|build|itinéraire|liste|programme|planning|comparatif|tutoriel)\b",
+        // German
+        r"|\bin\ (ein|einem|ein\ neues|einem\ neuen)\ dokument\b|\bals\ dokument\b",
+        r"|\b(erstell|erstelle|schreib|schreibe|mach|mache|gib)(\ mir|\ uns)?\ (ein|eine|einen|mein|meine)\ [^.?!]{0,60}?\b(dokument|anleitung|leitfaden|guide|plan|build|reiseplan|liste|vergleich|tutorial)\b",
+        // Spanish
+        r"|\ben\ un\ (nuevo\ )?documento\b",
+        r"|\b(haz|hazme|escribe|escríbeme|crea|créame|redacta|prepara|prepárame|dame)\ (un|una|mi)\ [^.?!]{0,60}?\b(documento|guía|plan|build|itinerario|lista|comparativa|tutorial)\b",
+        // Italian
+        r"|\bin\ un\ (nuovo\ )?documento\b",
+        r"|\b(fai|fammi|scrivi|scrivimi|crea|creami|prepara|preparami|dammi)\ (un|una|uno)\ [^.?!]{0,60}?\b(documento|guida|piano|build|itinerario|lista|elenco|confronto|tutorial)\b",
+        // Portuguese
+        r"|\b(num|em\ um|em\ uma)\ (novo\ )?documento\b",
+        r"|\b(faz|faça|faz-me|escreve|escreva|cria|crie|prepara|prepare|dá-me)\ (um|uma)\ [^.?!]{0,60}?\b(documento|guia|plano|build|roteiro|lista|comparação|tutorial)\b",
+        // Dutch
+        r"|\bin\ een\ (nieuw\ )?document\b",
+        r"|\b(maak|schrijf|geef)(\ me|\ mij|\ ons)?\ (een|mijn)\ [^.?!]{0,60}?\b(document|gids|handleiding|plan|build|reisplan|lijst|vergelijking|tutorial)\b",
+    ))
+    .expect("static regex")
+});
+
+/// "Document" in each language: after "this" in an ask to make one ("make
+/// this a document") it's the new document, not one on screen.
+const DOCUMENT_WORDS: &[&str] = &["document", "doc", "dokument", "documento"];
 
 /// "This" in each language (its code, as My languages has it): before a
 /// screen word, the question is about the screen; alone, it may be. Only
@@ -242,14 +287,27 @@ pub fn about(question: &str) -> About {
     about_in(question, &[])
 }
 
+/// Does a spoken question ask for something to be made — a document, or a
+/// guide, plan or build to keep ([`MAKES`], `documents::asks_for_document`)?
+/// Then a lone "this" in it is never the screen's ([`about_in`]). Pure.
+pub fn asks_to_make(question: &str) -> bool {
+    let text = normal(question);
+    MAKES.is_match(&text) || crate::chat::documents::asks_for_document(question)
+}
+
 /// [`about`] in the person's own languages (My languages' codes; none: all
-/// of them). Pure.
+/// of them). **An ask for something to be made** ([`asks_to_make`]: "…in a
+/// document", "make me a guide…") is answered from the model and the web:
+/// its "this" alone is no maybe, and "this document" in it is the new one —
+/// only words that point at the screen itself ("on my screen", "summarise
+/// this page into a document") take it. Pure.
 pub fn about_in(question: &str, langs: &[String]) -> About {
     let text = normal(question);
     let text = text.trim_end_matches(['?', '.', '!', ' ']);
     if SCREEN_PHRASES.is_match(text) {
         return About::Yes;
     }
+    let making = asks_to_make(question);
     let demonstratives = demonstratives(langs);
     let w = words(text);
     let mut maybe = false;
@@ -263,8 +321,9 @@ pub fn about_in(question: &str, langs: &[String]) -> About {
         if next.is_some_and(|n| NOT_AFTER.contains(&n)) {
             continue;
         }
-        // "this error", "this weird error", "cette page", "dieser Fehler".
-        let screen_word = [w.get(i + 1), w.get(i + 2)].into_iter().flatten().any(|n| SCREEN_WORDS.contains(n));
+        // "this error", "this weird error", "cette page", "dieser Fehler"
+        // (not "make this a document": that's the one to make).
+        let screen_word = [w.get(i + 1), w.get(i + 2)].into_iter().flatten().any(|n| SCREEN_WORDS.contains(n) && !(making && DOCUMENT_WORDS.contains(n)));
         if this && screen_word {
             return About::Yes;
         }
@@ -279,7 +338,9 @@ pub fn about_in(question: &str, langs: &[String]) -> About {
         }
         maybe = true;
     }
-    if maybe {
+    // Something to make: a "this" alone is never the screen's — no 2.9 s
+    // spent asking the model.
+    if maybe && !making {
         About::Maybe
     } else {
         About::No
@@ -729,6 +790,53 @@ mod tests {
         ] {
             no(q);
         }
+    }
+
+    /// **An ask for something to be made** (2026-10-31): a spoken ask for a
+    /// build "in a document" spent 2.9 s while the model said whether it was
+    /// about the screen. Now its "this" is no maybe, in every language the
+    /// rules know; words that point at the screen itself still take it.
+    #[test]
+    fn an_ask_for_a_document_never_waits_on_the_screen_check() {
+        for q in [
+            // English: the maintainer's ask, and its kind.
+            "Hey, can you build me this level by level, a solo Lone Wolf Hydro Aero mage for Divinity Original Sin 2, with civil skills and the best Act 1 gear and where to get it, in a document?",
+            "Can you put this in a document?",
+            "Make this a document please.",
+            "Write me a guide to this boss fight.",
+            "Make me a packing list for this trip.",
+            // French
+            "Tu peux me mettre ça dans un document ?",
+            "Fais-moi un guide pour cette classe, niveau par niveau.",
+            // German
+            "Kannst du mir diesen Build Stufe für Stufe in einem Dokument zusammenstellen?",
+            "Erstelle mir einen Plan für diese Woche.",
+            // Spanish
+            "¿Puedes ponerme esto en un documento?",
+            "Hazme una guía para esta build.",
+            // Italian
+            "Puoi mettermi questo in un documento?",
+            "Fammi una guida per questa classe.",
+            // Portuguese
+            "Podes pôr isto num documento?",
+            "Faz-me um guia para esta classe.",
+            // Dutch
+            "Kun je dit in een document zetten?",
+            "Maak een plan voor deze reis.",
+        ] {
+            assert!(asks_to_make(q), "{q}");
+            no(q);
+        }
+        // Without the ask, the same "this" is still the model's call…
+        maybe("Can you build me this level by level?");
+        maybe("Kannst du mir diesen Build Stufe für Stufe erklären?");
+        maybe("¿Puedes ponerme esto?");
+        // …and words that point at the screen still take it.
+        yes("Summarise this page into a document.");
+        yes("Put what's on my screen in a document.");
+        yes("Résume cette page dans un document.");
+        assert!(!asks_to_make("What's this error?"));
+        assert!(!asks_to_make("Is this right?"));
     }
 
     #[test]

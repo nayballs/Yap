@@ -194,6 +194,16 @@ pub struct Source {
     /// drops it and shows a chip that opens nothing.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub screen: bool,
+    /// A web page the turn opened and read (`read_page`, Claude's web
+    /// fetch), not only a search result: the Sources row shows it first
+    /// (2026-10-31). An older Yap drops it; the row then keeps its order.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub opened: bool,
+    /// A page the answer or the document it wrote cites (a document's
+    /// citations are links in it, never `[n]` in the answer): first in the
+    /// Sources row too. An older Yap drops it.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub cited: bool,
 }
 
 fn is_zero(n: &u64) -> bool {
@@ -1105,7 +1115,15 @@ pub fn web_history_note(messages: &[ChatMessage]) -> Option<String> {
 /// chip names it; older answers have none and aren't counted), for the
 /// question's context — never in the answers' text, which a model copies
 /// ([`history_messages`]). `None` when every answer was `now`'s. Pure.
-pub fn other_models_note(earlier: &[ChatMessage], now: &ChatModel) -> Option<String> {
+///
+/// `earlier` is the whole conversation, not only the messages sent whole:
+/// an answer summarised into Yap's notes on the older messages
+/// (`compact.rs`) was still another model's. Told only of the answers sent,
+/// Qwen3.5-4B called a build Claude Opus wrote, by then in the notes as
+/// "Assistant: Created a … build", "the build I created" (a tester's chat,
+/// 2026-10-31). `summarised`: those notes are in the prompt, so the note
+/// says their "Assistant" may be the other model.
+pub fn other_models_note(earlier: &[ChatMessage], now: &ChatModel, summarised: bool) -> Option<String> {
     let label = |m: &ChatModel| crate::chat::budget::model_label(&m.provider, &m.id, &m.name);
     let mine = (now.provider.as_str(), label(now));
     let mut others: Vec<String> = Vec::new();
@@ -1118,9 +1136,14 @@ pub fn other_models_note(earlier: &[ChatMessage], now: &ChatModel) -> Option<Str
     if others.is_empty() {
         return None;
     }
+    let notes = if summarised { " In Yap's notes on the older messages, \"Assistant\" may mean that other model." } else { "" };
+    // Named, with Yap's tools: told only "another model, not you", the 4B
+    // greeted as "Hey Qwen" answered "I'm Qwen, not Yap. I can't open Baldur's
+    // Gate 3" after Claude had opened it (the model evaluations, 2026-10-31).
     Some(format!(
-        "Some earlier answers in this chat were written by another AI model ({}), not by you: the user switched models. Never say you wrote them; if one of them was wrong, say that answer was wrong.",
-        others.join(", ")
+        "Some earlier answers in this chat were written by another AI model ({}), not by you: the user switched to you ({}). You work in Yap as it did, with Yap's tools. Never say you wrote or made its answers; if one of them was wrong, say that answer was wrong.{notes}",
+        others.join(", "),
+        mine.1
     ))
 }
 
@@ -1466,17 +1489,23 @@ mod tests {
         let by = |m: &ChatModel, text: &str| ChatMessage { model: Some(m.clone()), ..said("assistant", text) };
         let msgs = vec![said("user", "What's this?"), by(&qwen, "A trade screen."), said("user", "And this?"), by(&qwen, "Go code.")];
         // Haiku after the 4B: told, the 4B named once.
-        let note = other_models_note(&msgs, &haiku).unwrap();
-        assert!(note.contains("another AI model (Qwen3.5 4B), not by you"), "{note}");
-        assert!(note.contains("Never say you wrote them"), "{note}");
+        let note = other_models_note(&msgs, &haiku, false).unwrap();
+        assert!(note.contains("another AI model (Qwen3.5 4B), not by you: the user switched to you (Claude Haiku 5.5)"), "{note}");
+        assert!(note.contains("You work in Yap as it did, with Yap's tools"), "{note}");
+        assert!(note.contains("Never say you wrote or made its answers"), "{note}");
+        assert!(!note.contains("Yap's notes"), "{note}");
         // The same model all along, or answers from before models were kept: nothing.
-        assert_eq!(other_models_note(&msgs, &qwen), None);
-        assert_eq!(other_models_note(&[said("user", "Hi"), said("assistant", "Hello!")], &haiku), None);
+        assert_eq!(other_models_note(&msgs, &qwen, false), None);
+        assert_eq!(other_models_note(&[said("user", "Hi"), said("assistant", "Hello!")], &haiku, true), None);
         // Back on the 4B after Haiku: Haiku's answers named.
         let mut back = msgs.clone();
         back.push(by(&haiku, "That was the other model."));
-        let note = other_models_note(&back, &qwen).unwrap();
+        let note = other_models_note(&back, &qwen, false).unwrap();
         assert!(note.contains("(Claude Haiku 5.5)"), "{note}");
+        // Haiku's answer summarised into the notes: the note says their
+        // "Assistant" may be Haiku (turn.rs passes the whole conversation).
+        let note = other_models_note(&back, &qwen, true).unwrap();
+        assert!(note.contains("In Yap's notes on the older messages, \"Assistant\" may mean that other model."), "{note}");
     }
 
     #[test]

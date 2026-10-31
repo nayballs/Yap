@@ -26,6 +26,9 @@
 //!   a question asked to think it through, or at a cloud model's effort
 //!   (`think.rs`, `ai/effort.rs`), shows its thinking apart from the answer
 //!   ([`Event::Thinking`]: `reasoning_content`, or `reasoning`, deltas).
+//!   What the step is doing goes to the page's line as it changes
+//!   ([`Event::Step`], `activity.rs`): thinking, a tool call and then its
+//!   section or Claude's query, the answer's first words.
 //! - **The watcher** ([`Sink`]): the Chat view's channel (`chat_send`), the
 //!   notepad's, the Voice Assistant (speaks sentence by sentence), a model
 //!   evaluation (times the first words). [`Watch`] keeps what was shown, for
@@ -98,6 +101,10 @@ pub enum Event {
         key: String,
         text: String,
     },
+    /// **What the turn is doing now** (`activity.rs`): "Searching the web ·
+    /// …", "Reading …", "Writing ‘Gear’", "Thinking" — the page's line, with
+    /// the turn's time beside it.
+    Step { step: crate::chat::activity::Activity },
 }
 
 /// Tool calls whose arguments the page sees as they come: a document's
@@ -194,7 +201,9 @@ pub struct ChipsOnly<'a>(pub &'a dyn Sink);
 
 impl Sink for ChipsOnly<'_> {
     fn send(&self, ev: Event) {
-        if !matches!(ev, Event::Text { .. }) {
+        // (Nor "Writing the answer": its words aren't one.)
+        let words = matches!(&ev, Event::Text { .. }) || matches!(&ev, Event::Step { step } if step.mark == "answer");
+        if !words {
             self.0.send(ev);
         }
     }
@@ -268,6 +277,9 @@ pub struct Step<'a> {
     /// and what (`Event::Section`, at most every [`MIN_GAP`]).
     section_at: Option<Instant>,
     section_sent: String,
+    /// The line of the step it last told the page (`activity.rs`): each
+    /// step once, not at every delta.
+    step_told: String,
 }
 
 impl<'a> Step<'a> {
@@ -286,16 +298,27 @@ impl<'a> Step<'a> {
             thought_sent: true,
             section_at: None,
             section_sent: String::new(),
+            step_told: String::new(),
+        }
+    }
+
+    /// What the turn is doing now, to the page — once until it changes.
+    fn tell(&mut self, step: crate::chat::activity::Activity) {
+        if step.line != self.step_told {
+            self.step_told.clone_from(&step.line);
+            crate::chat::activity::tell(self.sink, step);
         }
     }
 
     /// A `write_section` (or `rewrite_section`) call's arguments so far: the section as written
     /// so far to the page (the panel), at most every [`MIN_GAP`].
-    fn send_section(&mut self, so_far: &str) {
+    fn send_section(&mut self, name: &str, so_far: &str) {
         if self.section_at.is_some_and(|t| t.elapsed() < MIN_GAP) {
             return;
         }
         let Some((note_id, key, text)) = crate::chat::documents::live_section(so_far) else { return };
+        // "Writing ‘Gear’" (or "Rewriting ‘Gear’") while it's written.
+        self.tell(crate::chat::activity::of_call(name, &json!({ "key": key, "heading": key })));
         if text == self.section_sent {
             return;
         }
@@ -333,6 +356,9 @@ impl<'a> Step<'a> {
     pub fn on(&mut self, d: Delta<'_>) {
         match d {
             Delta::Reasoning(s) => {
+                // "Thinking" on the page's line, whoever asked for it (none
+                // of the thinking itself).
+                self.tell(crate::chat::activity::thinking());
                 // Only a question asked to think it through, or at a cloud
                 // model's effort, shows it: a model that sends its reasoning
                 // anyway outside one (a Groq model asked by the Voice
@@ -364,11 +390,14 @@ impl<'a> Step<'a> {
                         self.sink.send(Event::Text { text: String::new() });
                     }
                 }
+                // What it does, before its arguments are in (the loop says
+                // with what when it runs it, `tools/agent.rs`).
+                self.tell(crate::chat::activity::of_call(name, &Value::Null));
                 self.sink.send(Event::Tool { name: name.to_string(), doing: doing(name).to_string() });
             }
             Delta::ToolArgs { name, so_far } => {
                 if LIVE_ARGS.contains(&name) {
-                    self.send_section(so_far);
+                    self.send_section(name, so_far);
                 }
             }
             // Claude's own search or page read (the Messages API's server
@@ -382,8 +411,11 @@ impl<'a> Step<'a> {
                 }
                 self.raw.clear();
                 self.released = false;
+                self.tell(crate::chat::activity::of_call(name, &Value::Null));
                 self.sink.send(Event::Tool { name: name.to_string(), doing: doing(name).to_string() });
             }
+            // Its query or page, now whole: "Searching the web · …".
+            Delta::ServerInput { name, input } => self.tell(crate::chat::activity::of_call(name, input)),
             Delta::Restart => self.restart(),
         }
     }
@@ -413,6 +445,9 @@ impl<'a> Step<'a> {
         if self.shown.as_deref() != Some(text.as_str()) {
             self.last_sent = Some(Instant::now());
             self.shown = Some(text.clone());
+            if !text.is_empty() {
+                self.tell(crate::chat::activity::answering());
+            }
             self.sink.send(Event::Text { text });
         }
     }
@@ -1507,6 +1542,137 @@ mod tests {
         s.on(Delta::Restart);
         s.on(Delta::ToolCall("web_search"));
         assert_eq!(log.texts(), ["Old answer", ""]);
+    }
+
+    impl Log {
+        /// The page's line at each step (`Event::Step`).
+        fn steps(&self) -> Vec<String> {
+            self.0
+                .lock()
+                .unwrap()
+                .iter()
+                .filter_map(|e| match e {
+                    Event::Step { step } => Some(step.line.clone()),
+                    _ => None,
+                })
+                .collect()
+        }
+    }
+
+    /// An OpenAI-shaped stream (llama.cpp, Groq, OpenAI, OpenRouter, Gemini's
+    /// compatible endpoint) through the wire and a step: what the page's
+    /// line says as it goes (`activity.rs`), each step once.
+    #[test]
+    fn an_openai_stream_tells_the_page_each_step_once() {
+        let chunks = [
+            json!({ "choices": [{ "delta": { "reasoning_content": "They want a build. " } }] }),
+            json!({ "choices": [{ "delta": { "reasoning_content": "A section at a time." } }] }),
+            json!({ "choices": [{ "delta": { "tool_calls": [{ "index": 0, "id": "c1", "function": { "name": "write_section", "arguments": "" } }] } }] }),
+            json!({ "choices": [{ "delta": { "tool_calls": [{ "index": 0, "function": { "arguments": "{\"note_id\": 4, \"key\": \"Charac" } }] } }] }),
+            json!({ "choices": [{ "delta": { "tool_calls": [{ "index": 0, "function": { "arguments": "ter creation\", \"markdown\": \"Pick the" } }] } }] }),
+            json!({ "choices": [{ "delta": { "tool_calls": [{ "index": 0, "function": { "arguments": " fen origin.\"}" } }] }, "finish_reason": "tool_calls" }] }),
+        ];
+        let log = Log::default();
+        let mut step = Step::new(&log, true, false);
+        let mut wire = Assembler::default();
+        for c in chunks {
+            for piece in wire.push(&c.to_string()).unwrap() {
+                match piece {
+                    Piece::Content(s) => step.on(Delta::Content(&s)),
+                    Piece::Call(n) => step.on(Delta::ToolCall(&n)),
+                    Piece::Reasoning(s) => step.on(Delta::Reasoning(&s)),
+                    Piece::Args { name, so_far } => step.on(Delta::ToolArgs { name: &name, so_far: &so_far }),
+                }
+            }
+        }
+        step.end(false);
+        // Thinking (none of it shown: nobody asked), the call before its
+        // arguments, then its section once the key is whole.
+        assert_eq!(log.steps(), ["Thinking", "Writing the document", "Writing ‘Character creation’"]);
+        assert!(!log.0.lock().unwrap().iter().any(|e| matches!(e, Event::Thinking { .. })));
+        // The step comes before the call's own event (the panel's).
+        let events = log.0.lock().unwrap();
+        let step_at = events.iter().position(|e| matches!(e, Event::Step { step } if step.line == "Writing the document")).unwrap();
+        assert!(matches!(events[step_at + 1], Event::Tool { .. }), "{events:?}");
+    }
+
+    /// Claude on the Messages API (`llm/anthropic.rs`), its events as
+    /// Anthropic's docs give them: thinking, its own web search (the query
+    /// in `input_json_delta`), a page it opens, then the answer — and a
+    /// tool of Yap's.
+    #[test]
+    fn claudes_own_searches_and_pages_are_told_with_their_query_and_address() {
+        let events = [
+            r#"{"type":"message_start","message":{"usage":{"input_tokens":900}}}"#,
+            r#"{"type":"content_block_start","index":0,"content_block":{"type":"thinking","thinking":""}}"#,
+            r#"{"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"Search first."}}"#,
+            r#"{"type":"content_block_stop","index":0}"#,
+            r#"{"type":"content_block_start","index":1,"content_block":{"type":"text","text":""}}"#,
+            r#"{"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"I'll look that up."}}"#,
+            r#"{"type":"content_block_stop","index":1}"#,
+            r#"{"type":"content_block_start","index":2,"content_block":{"type":"server_tool_use","id":"s1","name":"web_search","input":{}}}"#,
+            r#"{"type":"content_block_delta","index":2,"delta":{"type":"input_json_delta","partial_json":"{\"query\": \"tidecaller lone"}}"#,
+            r#"{"type":"content_block_delta","index":2,"delta":{"type":"input_json_delta","partial_json":" wolf build\"}"}}"#,
+            r#"{"type":"content_block_stop","index":2}"#,
+            r#"{"type":"content_block_start","index":3,"content_block":{"type":"web_search_tool_result","tool_use_id":"s1","content":[{"type":"web_search_result","url":"https://emberfall.example/wiki/Talents","title":"Talents"}]}}"#,
+            r#"{"type":"content_block_stop","index":3}"#,
+            r#"{"type":"content_block_start","index":4,"content_block":{"type":"server_tool_use","id":"s2","name":"web_fetch","input":{}}}"#,
+            r#"{"type":"content_block_delta","index":4,"delta":{"type":"input_json_delta","partial_json":"{\"url\": \"https://emberfall.example/wiki/Talents\"}"}}"#,
+            r#"{"type":"content_block_stop","index":4}"#,
+            r#"{"type":"content_block_start","index":5,"content_block":{"type":"web_fetch_tool_result","tool_use_id":"s2","content":{"type":"web_fetch_result","url":"https://emberfall.example/wiki/Talents","content":{"type":"document","title":"Talents"}}}}"#,
+            r#"{"type":"content_block_stop","index":5}"#,
+            r#"{"type":"content_block_start","index":6,"content_block":{"type":"thinking","thinking":""}}"#,
+            r#"{"type":"content_block_delta","index":6,"delta":{"type":"thinking_delta","thinking":"Lone Wolf at 1."}}"#,
+            r#"{"type":"content_block_stop","index":6}"#,
+            r#"{"type":"content_block_start","index":7,"content_block":{"type":"text","text":""}}"#,
+            r#"{"type":"content_block_delta","index":7,"delta":{"type":"text_delta","text":"Take Lone Wolf at level 1. "}}"#,
+            r#"{"type":"content_block_delta","index":7,"delta":{"type":"text_delta","text":"It doubles your points."}}"#,
+            r#"{"type":"content_block_stop","index":7}"#,
+            r#"{"type":"content_block_start","index":8,"content_block":{"type":"tool_use","id":"t1","name":"create_document","input":{}}}"#,
+            r#"{"type":"content_block_delta","index":8,"delta":{"type":"input_json_delta","partial_json":"{\"title\": \"Tidecaller\", \"sections\": []}"}}"#,
+            r#"{"type":"content_block_stop","index":8}"#,
+            r#"{"type":"message_delta","delta":{"stop_reason":"tool_use"},"usage":{"output_tokens":120}}"#,
+            r#"{"type":"message_stop"}"#,
+        ];
+        let log = Log::default();
+        let mut step = Step::new(&log, true, false);
+        let mut wire = crate::ai::llm::anthropic::Stream::default();
+        {
+            let mut on = |d: Delta<'_>| step.on(d);
+            for e in events {
+                wire.push(e, &mut on);
+            }
+        }
+        step.end(false);
+        assert_eq!(
+            log.steps(),
+            [
+                "Thinking",
+                "Searching the web",
+                "Searching the web · tidecaller lone wolf build",
+                "Reading a page",
+                "Reading emberfall.example/wiki/Talents",
+                "Thinking",
+                "Writing the answer",
+                "Starting a document"
+            ]
+        );
+        // "I'll look that up." never showed; what came after the page did,
+        // until Yap's own tool call took it back.
+        let texts = log.texts();
+        assert!(!texts.iter().any(|t| t.contains("look that up")), "{texts:?}");
+        assert_eq!(texts, ["Take Lone Wolf at level 1. It doubles your points.", ""]);
+    }
+
+    #[test]
+    fn a_search_that_must_come_first_tells_its_call_but_never_writing_an_answer() {
+        let log = Log::default();
+        let quiet = ChipsOnly(&log);
+        let mut s = Step::new(&quiet, true, false);
+        s.on(Delta::Content("I can't look up the weather. But here is more"));
+        s.on(Delta::ToolCall("web_search"));
+        assert_eq!(log.steps(), ["Searching the web"]);
+        assert!(log.texts().is_empty());
     }
 
     #[test]

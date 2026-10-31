@@ -30,7 +30,8 @@ The AI Chat surface (conversations, the tool-calling loop and its note tools) an
   the pages use as its id (`chat:<conversation>:<index>`). A web answer keeps
   its sources (`ChatMessage.sources` = `Source {n, title, url, site}`,
   numbered as it cites them; `append_sourced`; only written when there are
-  some). An answer asked across the meetings keeps its passages the same way
+  some; `opened` / `cited` when a page was read or a document cites it,
+  2026-10-31: "The Sources row, compact" below). An answer asked across the meetings keeps its passages the same way
   (`Source` with `note`, `field`, `line`, `ts`, `quote`: the moment its pill
   opens), and the conversation keeps `scope: "meetings"` (`set_scope` /
   `scope_of`), so its follow-ups are asked across the meetings too — the
@@ -85,6 +86,16 @@ The AI Chat surface (conversations, the tool-calling loop and its note tools) an
   same place (`other_models_note`, 2026-10-28): the history's answers go to
   the model as its own, so Claude Haiku 5.5, picked after Qwen3.5-4B, said
   "I wrote those earlier replies, and the last one was wrong" of the 4B's.
+  Since 2026-10-31 the line reads the **whole conversation**, not only the
+  messages sent whole; it names the model now answering and says it works
+  in Yap with Yap's tools (told only "another model, not you", the 4B
+  greeted "Hey Qwen" after Claude opened a game said "I'm Qwen, not Yap. I
+  can't open it": 1 of 3 runs right, then 5 of 5); "wrote or made" — and, with Yap's notes on the
+  older messages in the prompt, that their "Assistant" may be the other
+  model: Qwen3.5-4B called a build Claude Opus wrote, by then summarised as
+  "Assistant: Created a … build", "the build I created". The summariser
+  names the model of each answer once a chat has switched (`compact::line`,
+  `models_switched`), and its prompt keeps the name.
   Never a note in the answers' text (a model copies it, above). **Every**
   system prompt ends with the **About you
   block** (ai-models.md: where the person is and their English, prices in
@@ -750,6 +761,59 @@ The AI Chat surface (conversations, the tool-calling loop and its note tools) an
   `chat-documents-rich.spec.js`; evaluations `--documents --tag
   documents-edits --doc-tools rich|simple`
   ([model-evals.md](../model-evals.md#the-rich-document-tools-31-oct-2026)).
+- **`chat/activity.rs`** — **what Chat is doing now** (2026-10-31): while
+  a turn runs, the thread shows one line — a small moving mark, the step
+  under way and the turn's time — as the Claude Code app does:
+  "Searching the web · tidecaller lone wolf build · 1m 59s", "Reading
+  emberfall.example/wiki/Talents · 6m 30s", "Writing ‘Character
+  creation’", "Thinking". Before, it mostly said "Thinking…" for minutes
+  while a strong model searched, read and wrote a document. **One event,
+  one place**: every step is an `Activity {mark, line}` (`mark`: think,
+  answer, search, read, notes, doc, calendar, memory, apps, chats, tool)
+  sent through `activity::tell` as `stream::Event::Step` (`{kind: "step",
+  step}`); the wording is this file's alone — `of_call(name, args)` for
+  every tool, Yap's own and the provider's server tools alike (a note or
+  document named by its id gets its title from the notes store;
+  `describe` is the pure core), `thinking()`, `answering()`,
+  `searching_meetings(skill)`. **Where steps come from**: the stream
+  (`stream::Step`, each step once until it changes: thinking — Anthropic's
+  `thinking_delta`, a model's `reasoning_content`, whether or not Think
+  asked, none of its text shown —; a tool call as it begins, before its
+  arguments, "Searching the web"; a `write_section` / `rewrite_section`'s
+  key once its arguments have it, "Writing ‘Gear’"; the answer's first
+  words shown, "Writing the answer"; Claude's own `web_search` /
+  `web_fetch` on the Messages API — the `server_tool_use` block, then its
+  input whole at `content_block_stop`, `llm::Delta::ServerInput`, the query
+  or address); the tool loop (`tools/agent.rs`: each call as it runs, with
+  its arguments as they ran — a search's query after Yap's fixes, so a
+  provider's native search sub-call, `web/native.rs`, and Exa / Tavily
+  alike name the query searched for; Yap's own searches for the model,
+  `search_for_the_model`); `turn.rs` (a small model's web pipeline's
+  search; Ask across meetings' "Searching your meetings" / "Running
+  /todos"). A search that must come first (`ChipsOnly`) never says
+  "Writing the answer". **On the page** (`ActivityLine.svelte` at the
+  thread's foot while the turn runs: the latest step, "Thinking" until one
+  comes, "Waiting for your dictation to finish" while a model on this PC
+  steps aside, the time from `waitedS` — "12s", "1m 59s"; a model on this
+  PC slow to start adds "Still working: the model runs on this PC, so this
+  can take a minute."). **Once the answer is in** the line goes and the
+  steps done — the answer's **chips**, not a second list — fold into one
+  line under it that opens to them (`ChatSteps.svelte`; `chatSteps.js`
+  `stepsSummary`: "Searched the web 3 times, read 2 pages, wrote 4
+  sections", in the order they came, what didn't go through last — "1
+  didn't go through"); while the answer is written it grows step by step
+  above the line. **The Voice Assistant**: the bar's capsule says the step
+  in "Thinking…"'s place ("Searching the web · …", cut with "…";
+  `yap-assistant-step`, a small event of its own so the bar never gets the
+  answer's text; this question's only). **Privacy**: a line may carry a
+  query or an address — the page shows them; nothing logs them (no
+  tracing in `activity.rs` or where it's told). Unit-tested (`activity`:
+  every tool's line, a long query cut, the event's shape; `stream`: an
+  OpenAI-shaped stream and Claude's Messages API events through the wire
+  and a step — fixtures, no network —, a forced search; `tools/agent`: the
+  loop's steps in order); e2e `chat-activity.spec.js` (Exa's search and a
+  page read with the time going up, then folded under the answer; Claude's
+  own search and page from its stream; the capsule).
 - **`chat/stream.rs`** — **streaming answers** (2026-10-22): every model call
   of a Chat turn — each step of the tool loop, a small model's plain
   answer, the loop's last no-tools call — the notepad's Ask sheet and the
@@ -809,7 +873,8 @@ The AI Chat surface (conversations, the tool-calling loop and its note tools) an
   written), `waiting {waiting}`, `thinking {text}` (a question asked to
   think it through, `chat/think.rs`: the thinking so far, apart from the
   answer), `document {noteId, title}` and `section {noteId, key, text}`
-  (documents beside the chat, `chat/documents.rs` above); `chat_send` adds `turn {conversationId,
+  (documents beside the chat, `chat/documents.rs` above), `step {step:
+  {mark, line}}` (what the turn is doing now, `chat/activity.rs` above); `chat_send` adds `turn {conversationId,
   userMessageId}` once the question is saved. The command's own reply is
   still the **checked** answer (`chats::checked_answer` and the price
   fixes), which the page puts in place of what streamed. **The channel**:
@@ -1099,6 +1164,15 @@ The AI Chat surface (conversations, the tool-calling loop and its note tools) an
   right?" after an answer is about the answer; 4 tokens on this PC, gpt-oss
   at low effort; anything but a clear yes is a no). On the real Qwen3.5-4B
   (29 Oct 2026): 14 of 16 such questions right, median 180 ms, slowest 0.5 s.
+  **An ask for something to be made** (`asks_to_make`, 2026-10-31: `MAKES`,
+  in the same seven languages — "…in a document", "make this a document",
+  "fais-moi un guide…", "in einem Dokument", "en un documento", "num
+  documento", "maak een plan…" — and English's `documents::asks_for_document`)
+  is no maybe: its "this" is the thing to make ("can you build me this
+  level by level… in a document"), and "this document" in it is the new one;
+  only words that point at the screen itself still take it ("summarise this
+  page into a document"). The Voice Assistant spent 2.9 s on Claude's yes/no
+  for a spoken Divinity: Original Sin 2 build "in a document".
   **What's taken** (`capture`): the window's visible frame
   (`snip::pick::window_frame`: DWM's frame; not one of Yap's own, minimised,
   cloaked or gone), cut from every monitor captured at once as a snip is
@@ -1179,10 +1253,13 @@ for the on-device model and small ones, which make things up more readily:
   (`Reach::deep`, sized by `budget::budget`'s request: Claude Haiku 5.5, held
   to its cheaper rate's 80K, gets 10); every result still fits what's left
   of the request (`agent::Room::fit`). Its context says so
-  (`documents::research_note`: "research it properly first — up to 10
-  searches and 10 page reads … read_page the best pages in full"), and the
-  cap's refusal says to write the document, the rest from its own knowledge.
-  Every other turn keeps 3 and 3.
+  (`documents::research_note`: "up to 10 searches and 10 page reads this
+  turn", and to read the pages its facts come from: below), and the cap's
+  refusal says to write the document from the pages it read, a fact none
+  gave said to be unconfirmed. A strong Claude's own web fetch puts up to
+  8,000 tokens of a page in the request, which Yap can't trim: its reads are
+  sized by that (`Reach::deep_paged`, `FETCH_TOKENS`: Haiku 5.5's 80K holds
+  4, its fetch's `max_uses` 4). Every other turn keeps 3 and 3.
 - **Its own search, in its own turn.** A strong **Claude** on Anthropic
   (`llm::anthropic::speaks_messages`) speaks the **Messages API** for Chat's
   steps (`ai/llm/anthropic.rs`, see ai-models.md): Anthropic's **web search
@@ -1196,29 +1273,94 @@ for the on-device model and small ones, which make things up more readily:
   any of the reply's tool calls run: the safety rule sees the web first); a
   document cites a page as a link to it. Other providers keep the sub-call
   (web-and-apps.md), deeper for a document's turn.
-- **The model's own knowledge, marked** (`rich::INSTRUCTIONS`). A guide or
-  plan is complete: "a level-by-level table has a row for every level asked
-  for (never "endgame" or "reference only" rows in their place)". Cited
-  where the web gave it; where sources run out, filled in from the model's
-  own knowledge and **marked with one italic line under that table or
-  section** ("*Levels 5–19: my suggestions, not from a source.*") — not a
-  column (the panel is narrow and the cited rows already carry their links),
-  not a footnote (Yap's markdown has none). The checks against made-up
-  sources stay: an answer's unsourced `[n]` goes, a document's `[n]` becomes
-  a link only to a page the turn found (`documents::link_citations`).
+- **Facts from pages read; the model's own knowledge for advice**
+  (`rich::INSTRUCTIONS`). A guide or plan is complete: "a level-by-level
+  table has a row for every level asked for (never "endgame" or "reference
+  only" rows in their place)". Until the evening of 31 Oct the rule then
+  filled in from the model's own knowledge where sources ran out; asked for
+  a solo Lone Wolf Hydro/Aero mage build for Divinity: Original Sin 2, Opus
+  5.5 wrote a level table with about ten skills at levels they can't be had
+  (Nether Swap at 5, a level-9 book; Thunderstorm at 10, a level-16 one),
+  from search snippets and one page read, its main source a guide for
+  another build (Pyro/Geo), and an Undead for a build whose healing hurts
+  Undead. Now: **requirements, levels, numbers and locations only from a
+  page it read** (a snippet isn't one), cited; one it couldn't find is said
+  to be unconfirmed where it goes ("not confirmed"), never guessed; **its
+  own knowledge only for advice and explanation**, marked with one italic
+  line under that table or section ("*The tips here are my suggestions, not
+  from a source.*") — not a column (the panel is narrow), not a footnote
+  (Yap's markdown has none); **a source must fit** (a guide for another
+  build or game version isn't one for this) and each pick must suit the
+  rest of the build. The web lines say the same (`STRONG_WEB_TOOL_INSTRUCTIONS`
+  / `CLAUDE_WEB_TOOL_INSTRUCTIONS`: "a result's snippet isn't a source…"),
+  and so does the cap's refusal (web-and-apps.md). The checks against
+  made-up sources stay: an answer's unsourced `[n]` goes, a document's `[n]`
+  becomes a link only to a page the turn found (`documents::link_citations`).
+- **The outline first, before any search** (2026-10-31, the evening: as
+  Claude Docs does — the title and a placeholder per section with its intent
+  open at once, then the research, then each section). The same Opus turn
+  took 2 min 47 s: 1 min 44 s of its own research (6 searches, 1 page read)
+  before `create_document`, so the panel opened after 1 min 52 s. A strong
+  model's turn that makes a **new** document (`writes_doc` and
+  `documents::makes_new_document`: something to keep, or an option picked —
+  not a change to one, a restore or a selected passage) with the web on is
+  `web::Turn::outline_first`: until its first step is done
+  (`outline_settled`, at the step's end) nothing is looked up — **Claude's own
+  web search and fetch stay out of that step's request** (`server_tools` →
+  none; they're back from the next, the prompt cache missing once), and **the
+  loop refuses Yap's `web_search` / `read_page`** unless the same step calls
+  `create_document` (`documents::OUTLINE_FIRST`, a tool result with no chip;
+  the other providers' search sub-call runs through `web_search`, so it waits
+  too). A first step that answers in words instead ("I'll look this up
+  first") is asked once to make the outline (`OUTLINE_NOTE`, its words
+  cleared from the screen; the web held one step more). A model on this PC
+  never gets it (the strong models only), and its forced first search
+  (`FirstStep::MustSearch`) never comes before a new document's outline.
+  **What the turn is told** (`documents::research_note`, in the context): a
+  new one's outline first ("create_document now, before any search"), the
+  reach, "a search result's snippet isn't a source: web_fetch (or read_page)
+  the pages that requirements, levels, numbers and locations come from, and
+  cite the pages you read", "a guide for another build or an older version
+  isn't a source for this one"; `rich::INSTRUCTIONS` says the outline comes
+  "first, before any search" too.
 - **At its effort**: the turn thinks as every question to that model does,
   at the effort chosen for it in the model picker (`ai/effort.rs`; adaptive
   thinking for Claude, its summary folded above the answer). Until 31 Oct
   2026 Yap turned Think on by itself here, at high effort (`think::auto_on`,
   gone): pick High or Extra for a model whose default is medium (Opus 5.5,
   Haiku 5.5) to keep that depth.
+- **The Sources row, compact** (2026-10-31; `SourcesRow.svelte`,
+  `sources.js`). The guide's answer ("It's open on the right.") cited
+  nothing, so every source the turn found went under it: 46, most of them
+  search results nobody opened, many titled only "Divinity: Original Sin 2
+  · steamcommunity.com". Now a document's turn keeps every source with two
+  marks (`Source.opened`: a page read, `read_page` or Claude's fetch;
+  `Source.cited`: cited by the answer or by its document, by `[n]` or a link
+  to the page — `web::Turn::cited_in`, before Yap links a document's `[n]`;
+  both `skip_serializing_if` false: an older Yap drops them and keeps the
+  row as it was); a page read takes the page's own title. The row shows
+  each page once (`pageKey`: as `web::normal_url`, "www.", fragments, `utm_`
+  and a trailing slash aside), the cited and opened first (an older answer's
+  own `[n]` read from its text), then the rest, each in number order;
+  **four, then "+N more"** (one more than four is shown, never "+1 more"),
+  which opens the rest, and "Show fewer"; a title several pages share gives
+  way to what the address says when it says something ("…/wiki/Fort+Joy" →
+  "Fort Joy"; "…/filedetails/?id=1" keeps the title). A page read in full
+  has its number in the accent ("Read in full" in its tooltip). The Claude
+  app's research shows a few sources and "N other sources" the same way.
 
 Measured by `yap.exe eval --guides` (docs/model-evals.md, "Guides"): every
-level, the parts asked for, own suggestions marked, citations real, the
-document changed after the web. e2e: `chat-documents-research.spec.js` (an
+level, the parts asked for, own suggestions marked (or facts said to be
+unconfirmed), citations real, the document changed after the web, the
+outline before the web (`outline_before_web`, `scenario::outlined_before_web`)
+and pages read (`reads_pages`). e2e: `chat-documents-research.spec.js` (an
 edit after the web for a strong model, refused for a 4B-sized one, an app
-still refused, the cap a document's turn only, Claude's own search in its
-request at the effort chosen for it, no Think button).
+still refused, the cap a document's turn only, the outline open before any
+search with a search asked for first refused, Claude's own search in its
+request at the effort chosen for it, no Think button — none in the
+outline's step —, its fetches sized to
+its request, the Sources row's four, "+3 more" and "Show fewer");
+`assistant-screen.spec.js` (an ask "in a document" never asked about).
 
 ## The Chat view
 
@@ -1232,8 +1374,11 @@ list, its menus, rename in place, the selection bar, the search box and the
 Archived button; its search results and the archive are
 `ChatLibraryList.svelte`, loaded the first time one shows, over
 `chatLibrary.svelte.js`), `ChatThread` (the
-empty state, "Thinking…") with `ChatMessage` (tool chips, the bubble,
-Stopped, Sources, ▶ and the model under an answer) and `Composer` (the
+empty state; at its foot while an answer comes, `ActivityLine`: what the
+turn is doing now and its time, `chat/activity.rs` above) with
+`ChatMessage` (the bubble, its tools' chips folded under it in
+`ChatSteps`, Stopped, Sources — `SourcesRow` with `sources.js`, 2026-10-31: four, then
+"+N more" —, ▶ and the model under an answer) and `Composer` (the
 screenshots and their prompts, +, the box, the mic, Send / ■, `ModelChip`).
 [frontend.md](./frontend.md#the-folder-layout-2026-10-24).
 
@@ -1383,8 +1528,9 @@ and its Undo, Preview / Source, find, copy, light and dark).
   copy_to_clipboard, plus search_in_note/read_note/edit_note for changing
   part of a note, executed locally, ≤20-step loop over the OpenAI tool
   protocol, gated to cloud or ≥4B local models — smaller models fall back to
-  plain RAG chat; tool-activity chips render in the thread above the answer
-  and are kept with it in chats.json; a question from
+  plain RAG chat; tool-activity chips are kept with the answer in
+  chats.json and fold into one line under it that opens to them — above
+  it until 31 Oct 2026, `ChatSteps.svelte`; a question from
   the Meetings view's Ask bar arrives through `chatRequest` and is sent with
   `scope: 'meetings'`, as is one in a chat started with **Ask across your
   meetings** on the empty thread; such a chat says "Asking across your
@@ -1538,21 +1684,24 @@ and its Undo, Preview / Source, find, copy, light and dark).
   Assistant** (`chat/assistant.rs`): the view reports what it shows
   (`chat_view_state`: the conversation, or "New chat" clicked) and follows
   `yap-assistant-turn` live — it switches to the question's conversation,
-  the question with its mic, "Thinking…" (`assistantPending`), the answer
+  the question with its mic, the line of what it's doing (`assistantPending`), the answer
   (Rust reads it aloud); ControlPanel brings Chat up for one asked while the
   window is in front (`show`) or "Open in Chat" (`chatRequest {assistant}`).
   An empty chat says "Or press F8 in any app to ask out loud…", or offers
   **Set an assistant shortcut** (→ Settings `voice#assistant-shortcut`).
   **Streamed answers** (`chat/stream.rs`, `streaming.js`; 2026-10-22): `send`
   calls `chat_send` through `streamCall` (a Tauri `Channel` as `onStream`,
-  a `turnId`); the answer's bubble appears with its first text or tool
-  call ("Thinking…" until then) and **grows in place** — markdown rendered
+  a `turnId`); the answer's bubble appears with its first words and
+  **grows in place** — markdown rendered
   as it comes through `renderMarkdown(closePartial(text))` (an open code
   fence closed, a half-written `**bold**` or `` `code` `` on the last line
   closed, a half-typed "[1" or link left out until whole), a caret at the
-  end of its last line, the chip of the tool call under way (spinner,
-  "Searching the web…"), "Waiting for your dictation to finish…" while a
-  model on this PC steps aside; the thread follows the newest words unless
+  end of its last line; under it the steps done so far, folded, and at the
+  thread's foot what's under way with the turn's time (`ActivityLine`:
+  "Thinking" until a step comes, "Searching the web · …", "Waiting for
+  your dictation to finish" while a model on this PC steps aside;
+  `chat/activity.rs` above — until 31 Oct 2026 a "Thinking…" bubble and
+  the call's chip with a spinner); the thread follows the newest words unless
   you scrolled up. **■** (the composer's Send becomes Stop while an answer
   comes — a Voice Assistant answer being written or said in this chat
   too, `assistantAnswering` from `yap-assistant`'s phase; Esc) stops it:
