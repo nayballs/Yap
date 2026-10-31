@@ -392,7 +392,10 @@ test('a long chat on Claude Haiku 5.5 stays under its 100K price line: the lates
     // Under the line (by the fake's own count), and still most of the room:
     // the latest messages that fit, not a handful.
     expect(req.tokens).toBeLessThan(100_000);
-    expect(req.tokens).toBeGreaterThan(50_000);
+    // (The window's start moves 6 messages at a time: a slightly longer
+    // prompt — the rich tools' complete-guide rule, 31 Oct 2026 — moved it
+    // one step, from just over 50K to 44K of the line's 80K.)
+    expect(req.tokens).toBeGreaterThan(40_000);
     const sent = history(req);
     expect(sent.some((t) => t.includes('Our allotment plot is number 14'))).toBe(false);
     expect(sent.some((t) => t.includes('Allotment point 39.'))).toBe(true);

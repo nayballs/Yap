@@ -364,7 +364,11 @@ The AI Chat surface (conversations, the tool-calling loop and its note tools) an
   (2026-10-22; taking them away changed the prompt's start, and a local
   model read it all again); the person's next message is a clean turn.
   Unit-tested through the real loop against a local fake model + Exa
-  (`a_web_page_can_never_make_the_chat_act`).
+  (`a_web_page_can_never_make_the_chat_act`). **A strong model**
+  (`documents::rich::strong`, 2026-10-31) is refused only `STRONG_LOCKED`
+  (open_app, copy_to_clipboard, remember, forget): its note and document
+  changes go through after the web (see "Strong models' documents" below;
+  `a_strong_model_edits_after_the_web_and_never_acts_outside_its_notes`).
 - **`chat/tools/calendar.rs`** — **calendar tools in Chat** (2026-10-25):
   "what's on tomorrow?", "when's my next meeting with Sam?", "am I free at
   3 on Friday?" answered from the calendar Yap already keeps
@@ -681,9 +685,11 @@ The AI Chat surface (conversations, the tool-calling loop and its note tools) an
   **`restore_document(note_id, version)`** — `versions::restore_by(…,
   "Chat")`, itself a version (`restored`, labelled Chat: the panel's Undo
   takes it back), refused while the person has changed the document since
-  Chat last read it ("read_document first"); an **action tool** (refused
-  after web content: a page mustn't make Yap undo the person's document),
-  while `edit_document` is the answer's own writing like `rewrite_section`.
+  Chat last read it ("read_document first"); an **action tool** for a model
+  that isn't a strong one (refused after web content), while a strong model
+  — every model the rich set goes to — may restore after the web, as it may
+  edit (2026-10-31: the restore is shown and is itself undoable); and
+  `edit_document` is the answer's own writing like `rewrite_section`.
   `edit_document` and `restore_document` change only this chat's documents
   (`Turn::refuses`); all four work only on a note Chat made (`source`
   "chat"); `read_note` / `edit_note` stay for any note. Chips: "Read the
@@ -868,8 +874,15 @@ The AI Chat surface (conversations, the tool-calling loop and its note tools) an
   button (`views/chat/ThinkButton.svelte`, beside the mic; `chatThink.svelte.js`)
   asks **one question** with the model thinking before it answers, then goes
   off again; it shows only for a model that can (`chat_think_info {can,
-  place}`, asked again when Chat's model changes). `chat_send(think: true)`
-  runs the turn inside a task-local (`think::with`), and **only Chat's own
+  place}`, asked again when Chat's model changes). **On by itself for a
+  strong model's document** (2026-10-31, `think::auto_on`): every Chat turn
+  runs inside the task-local (`think::scoped`, off unless pressed), and a
+  turn where a strong model writes a document (`documents::writes_document`)
+  switches it on — high effort, adaptive thinking for Claude — and tells
+  the page (`{kind: "think", auto: true}`: the button shows lit, `think.auto`,
+  until the answer is in). Never the Voice Assistant (no scoped turn around
+  it), never the on-device model (not a strong one). `chat_send(think: true)`
+  runs the turn with it on from the start, and **only Chat's own
   requests read it** (`llm::ChatRequest::chat`: `extra_for`): cleanup,
   Commands, the meeting notes, memory, a summary and the Voice Assistant
   never think. **On this PC** the sidecar keeps `--reasoning off`
@@ -890,9 +903,12 @@ The AI Chat surface (conversations, the tool-calling loop and its note tools) an
   gpt-oss `reasoning_effort: "high"`, Gemini 2.5 and later the same (its
   OpenAI-compatible endpoint maps it to a thinking budget), OpenRouter's
   `reasoning: {effort: "high"}` (its list's `thinks`, else the families),
-  Claude adaptive thinking with `output_config: {effort: "high"}` (Anthropic's
-  compatible endpoint takes `thinking` and ignores `reasoning_effort`; Claude 5
-  thinks by default anyway), a 4,096-token budget on a Claude before 4.6. A
+  Claude adaptive thinking with `output_config: {effort: "high"}` — sent on
+  Anthropic's Messages API since 31 Oct 2026 (`llm/anthropic.rs`, every
+  strong Claude's Chat step, its thinking's summary shown: `display:
+  "summarized"`): Anthropic's docs now say its OpenAI-compatible endpoint
+  answers `{type: "adaptive"}` with HTTP 400 and never returns the thinking
+  — and a 4,096-token budget on a Claude before 4.6. A
   thinking request waits up to 150 s (`think::TIMEOUT`); the GPT-6 rule
   (tools only with reasoning off) still asks again with `"none"`. **What
   shows**: the thinking comes apart from the answer (`reasoning_content`,
@@ -1129,6 +1145,80 @@ The AI Chat surface (conversations, the tool-calling loop and its note tools) an
   `assistant-screen.spec.js` (fake monitors and a fake window in front
   through `e2e_snip {start: false}`, `snip::take_fake`: never the real
   screen).
+
+## Strong models' documents, researched as the Claude app does (2026-10-31)
+
+What the maintainer saw: Claude Opus 5.5, asked in Yap and in the Claude app
+for the same detailed level-by-level mage guide, wrote a complete guide in
+the Claude app and, in Yap, a table of "Level 1", "Endgame" and "Reference
+only" rows ("the levels in between aren't covered by a source I found"); asked
+for more detail, it said "That search only turned up forum threads… It
+didn't open any of them", "Didn't search for …: 3 searches a turn" and
+"Since I've just been on the web, I can't edit the document this turn".
+Yap's own rules held it back. For **strong models only**
+(`documents::rich::strong`, one place: the rich tools' list — Claude, GPT-5,
+Gemini, the large open models; never one on this PC), and nothing changes
+for the on-device model and small ones, which make things up more readily:
+
+- **Edits after the web** (`tools::refused_after_web(name, web_seen,
+  strong)`). Notes and documents change after the web as in the Claude app:
+  `create_note`, `update_note`, `edit_note`, `create_document`,
+  `write_section`, `rewrite_section`, `edit_document`, `restore_document` —
+  each shown (its chip, the panel's highlight) and undoable (a version; the
+  panel's Undo takes the whole turn back). **Kept locked** (`STRONG_LOCKED`):
+  `open_app` (it runs something on the PC), `copy_to_clipboard` (it replaces
+  what the person copied and goes wherever they paste next), `remember` and
+  `forget` (memory goes with every later chat, and `forget` deletes) — effects
+  outside the notes that the person can't see or undo as they can a note.
+  Yap has no tool that deletes a note or sends anything anywhere; one added
+  later belongs in the list. The prompt says so (`STRONG_WEB_TOOL_INSTRUCTIONS`:
+  "writing and changing notes and documents goes on as usual"); the old line
+  ("Yap won't … change notes") stays for every other model.
+- **Research depth** (`web::Reach`). A strong model's turn that writes a
+  document — something to keep, a change or more depth on this chat's
+  document, an option picked, a change to a selected passage
+  (`documents::writes_document`; and any turn once it calls a document tool,
+  `Turn::go_deep` from the loop) — may make 10 searches (`DEEP_SEARCHES`) and
+  as many page reads as two-fifths of the model's request holds, 3 to 10
+  (`Reach::deep`, sized by `budget::budget`'s request: Claude Haiku 5.5, held
+  to its cheaper rate's 80K, gets 10); every result still fits what's left
+  of the request (`agent::Room::fit`). Its context says so
+  (`documents::research_note`: "research it properly first — up to 10
+  searches and 10 page reads … read_page the best pages in full"), and the
+  cap's refusal says to write the document, the rest from its own knowledge.
+  Every other turn keeps 3 and 3.
+- **Its own search, in its own turn.** A strong **Claude** on Anthropic
+  (`llm::anthropic::speaks_messages`) speaks the **Messages API** for Chat's
+  steps (`ai/llm/anthropic.rs`, see ai-models.md): Anthropic's **web search
+  and web fetch go in Chat's request** beside Yap's function tools
+  (`web::native::NativeSearch::in_chat`, `server_tools`) — Claude searches
+  and opens pages itself, as in the Claude app, and Yap's `web_search` /
+  `read_page` aren't offered (`CLAUDE_WEB_TOOL_INSTRUCTIONS`). Its searches
+  and pages become the turn's chips ("Searched the web with Anthropic: …",
+  "Read emberfall.example/…", "Couldn't read …: the page didn't open") and
+  sources, its text's citations Yap's `[n]` pills (`Turn::took_server`, before
+  any of the reply's tool calls run: the safety rule sees the web first); a
+  document cites a page as a link to it. Other providers keep the sub-call
+  (web-and-apps.md), deeper for a document's turn.
+- **The model's own knowledge, marked** (`rich::INSTRUCTIONS`). A guide or
+  plan is complete: "a level-by-level table has a row for every level asked
+  for (never "endgame" or "reference only" rows in their place)". Cited
+  where the web gave it; where sources run out, filled in from the model's
+  own knowledge and **marked with one italic line under that table or
+  section** ("*Levels 5–19: my suggestions, not from a source.*") — not a
+  column (the panel is narrow and the cited rows already carry their links),
+  not a footnote (Yap's markdown has none). The checks against made-up
+  sources stay: an answer's unsourced `[n]` goes, a document's `[n]` becomes
+  a link only to a page the turn found (`documents::link_citations`).
+- **Think first** (`think::auto_on`, above): the turn thinks before it
+  writes — high effort, adaptive for Claude — the Think button lit for it.
+
+Measured by `yap.exe eval --guides` (docs/model-evals.md, "Guides"): every
+level, the parts asked for, own suggestions marked, citations real, the
+document changed after the web. e2e: `chat-documents-research.spec.js` (an
+edit after the web for a strong model, refused for a 4B-sized one, an app
+still refused, the cap a document's turn only, Claude's own search in its
+request with Think on).
 
 ## The Chat view
 

@@ -43,7 +43,16 @@ Chat's and the Voice Assistant's two ways of reaching outside Yap: looking thing
   links the person gave (their messages, `links_in`), a search this turn
   returned (`allowed`) or an earlier answer's sources (an earlier search
   found them; `with_earlier_sources`: "tell me more about the first one"); ≤ 3 searches and ≤ 3 reads a turn (a call past the
-  cap is answered "you've searched 3 times", the tool still offered);
+  cap is answered "you've searched 3 times", the tool still offered) —
+  **how far a turn looks is its `Reach`** (2026-10-31): a strong model's
+  turn that writes a document (`Turn::may_go_deep`, `go_deep`: from
+  `turn.rs` when the question asks for one, or from the loop at its first
+  document tool call) gets `Reach::deep` — 10 searches (`DEEP_SEARCHES`)
+  and 3 to 10 page reads, as many `PAGE_TOKENS` parts as two-fifths of the
+  model's request holds (`DEEP_READS`); its cap's refusal says "write the
+  document from what you found, filling in the rest from your own
+  knowledge (marked…)"; its provider's search sub-call goes deeper too
+  (`NativeSearch::deep`, below);
   sources numbered as they come (`number`), `sources_for(reply)` = the ones
   cited (`citations`: [1], [2, 3], [1][4]) or all; results carry
   `DATA_NOT_INSTRUCTIONS`. Chips: `Searched the web: "q"` (+ " (bg3.wiki)"
@@ -259,7 +268,51 @@ Chat's and the Voice Assistant's two ways of reaching outside Yap: looking thing
   429 "check your plan and billing" with no retry delay = grounding not on
   a free key's plan: Gemini 3+ needs billing) is remembered 30 min per
   provider + model + endpoint (`UNAVAILABLE`, cleared by `clear_caches`):
-  Yap's own search answers straight away, same reason in the chip. **Gemini's terms** (Gemini API Additional Terms, 2026-04-28): a
+  Yap's own search answers straight away, same reason in the chip.
+  **Pages opened by the provider's search, and a document's depth**
+  (2026-10-31). Anthropic's sub-call carries its **web fetch** beside the
+  search (`web_fetch_20250910`, `max_uses` 1, `max_content_tokens` 8,000;
+  `native::fetches`: Claude 5, and Opus / Sonnet / Haiku from 4.5): its
+  `web_fetch_tool_result` pages lead the results, their passage the page's
+  best for the query (`best_passages`), a failed fetch no result; the chip
+  says "· read 1 page". A model that turns the tool down (HTTP 400 naming
+  `web_fetch`) is asked again without it and never offered it again
+  (`NO_FETCH`). Not the dynamic-filtering `web_fetch_20260209`+ in the
+  sub-call: it returns only what Claude's code prints of the page (Yap
+  needs the text for its passages), and isn't eligible for zero data
+  retention. A **document's sub-call** (`NativeSearch::deep`, a strong
+  model writing one) says more (≤ 300 words, `system_prompt(today, true)`),
+  searches more (Anthropic `max_uses` 3, fetch 3; OpenAI `reasoning.effort:
+  "medium"`; OpenRouter `max_results` 8; Groq a longer reply) and may take
+  60 s; its answers are cached apart. **Groq** (`browser.open`) and
+  **OpenAI** (the Responses API's `open_page` actions) already open pages
+  inside their own search. **Claude in Chat's own request**
+  (`NativeSearch::in_chat`, 2026-10-31): a strong Claude on Anthropic with
+  "The AI's own search" on doesn't use the sub-call at all — its Chat steps
+  go to the Messages API (`ai/llm/anthropic.rs`) with Anthropic's web tools
+  beside Yap's (`server_tools`: `web_search_20260209` / `web_fetch_20260209`
+  with dynamic filtering on Opus, Sonnet, Fable and Mythos from 4.6 —
+  `native::filters` —, the basic `web_search_20250305` / `web_fetch_20250910`
+  on Haiku 5.5 and the 4.5s; `max_uses` 5 a step, 10 for a document's; the
+  person's `user_location`; fetch citations on), and Yap's `web_search` /
+  `read_page` aren't offered. What they did comes back with the reply
+  (`yap_web`) and `Turn::took_server` makes it the turn's: a search or a
+  page read counts (`looked`, the safety rule's `seen`), each a chip
+  (`Searched the web with Anthropic: "q"`, `Read emberfall.example/…`, an
+  `error_code` said plainly: `Couldn't read …: the page didn't open`), its
+  pages numbered as sources (local addresses never), its answer's
+  citations — a search result's `url`, a fetched page's `document_title` —
+  the `[n]` pills. A model evaluation records them as the `web_search` /
+  `read_page` calls they stand for. **Not for OpenAI or Gemini**: OpenAI's
+  web search is the Responses API's (Chat runs on Chat Completions; moving
+  Chat there is a new client, not a flag); Gemini combines Google Search
+  with function calls only in its Interactions API (Preview, Gemini 3 and 4,
+  read 31 Oct 2026; Chat runs on its OpenAI-compatible endpoint) — both keep
+  the sub-call, deeper for a document. Groq and OpenRouter keep it too (gpt-oss
+  ignored `browser_search` mixed with function tools, the 18 Oct spike).
+  Yap's own search (Exa, Tavily, the keyless lookup) stays for the on-device
+  and self-hosted models, a provider with no search of its own, "The AI's
+  own search" off, and a provider search that fails. **Gemini's terms** (Gemini API Additional Terms, 2026-04-28): a
   grounded result may feed a follow-up answer when that answer shows its
   Links (≤ 5) — `Turn::sources_for` lists every Google link of a grounded
   turn (cited first, ≤ 5), unmodified (Google's
