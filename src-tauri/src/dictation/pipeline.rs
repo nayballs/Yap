@@ -578,15 +578,11 @@ fn unload_timeout_duration(s: &str) -> Option<Duration> {
 }
 
 impl Shared {
-    fn sound_enabled(&self) -> bool {
-        self.config.read().map(|c| c.sound_enabled).unwrap_or(true)
-    }
-
-    fn audio_feedback_volume(&self) -> f32 {
-        self.config
-            .read()
-            .map(|c| c.audio_feedback_volume)
-            .unwrap_or(1.0)
+    /// The capsule says the dictation failed (`yap-state` "error"), with
+    /// the error sound if it's on (`sound.rs`).
+    pub(super) fn say_failed(&self) {
+        let _ = self.app.emit("yap-state", "error");
+        crate::dictation::sound::cue(crate::dictation::sound::Cue::Error);
     }
 
     fn recording_mode(&self) -> String {
@@ -602,10 +598,6 @@ impl Shared {
             .read()
             .map(|c| crate::dictation::mute::Plan { quiet: c.quiet_other_apps, pause: c.pause_media })
             .unwrap_or_default()
-    }
-
-    fn output_device(&self) -> Option<String> {
-        self.config.read().ok().and_then(|c| c.output_device.clone())
     }
 
     /// The kind of app this recording goes into, as read at record start —

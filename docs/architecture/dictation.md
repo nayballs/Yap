@@ -1380,13 +1380,62 @@ to **Run again** from Home.
   `pipeline::apply_corrections` — so a mis-hearing split across two chunks is
   still caught — and a history record with the raw and corrected text) via the
   `transcribe_file` command.
-- **`dictation/sound.rs`** — start/stop chimes (volume + output-device aware); each
-  takes an optional `Played` callback, run on the chime's thread once it has
-  played (or at once when it can't; 3 s at most, `wait_played`: an output that
-  went mid-chime is never drained again, and the stop chime's mic release
-  waited for ever): how `dictation/mute.rs` goes after the start
-  chime and comes back after the stop chime. `open_output` (the configured
-  output device, else the default) is shared with `voice/tts.rs`.
+- **`dictation/sound.rs`** (+ `sound/packs.rs`) — **Yap's sounds, in packs**
+  (2026-10-31; one start/stop chime until then; Wispr Flow's "extra sounds and
+  sound packs"). **Moments** (`Cue`): a dictation starting and stopping,
+  going hands-free (push-to-talk's double-tap), cancelled (the bar's ✕, the
+  tray's Cancel — never a lone tap or a chord Yap throws away itself), an
+  error ("Couldn't paste": the paste left on the clipboard in a dictation,
+  a rewrite or a transform; and every `yap-state` "error" the pipeline says,
+  through `Shared::say_failed` — no microphone, a failed transcription or
+  rewrite, a crash, a mic unplugged), "Taking longer than usual…"
+  (`pipeline/slow.rs`; not "Loading the AI model…"), meeting notes starting
+  and stopping, and a card on the Yap bar (`bar.rs` `repick`: the first time
+  a card is really on screen; never the Voice Assistant's answer, which Yap
+  speaks, nor a card updated in place). None where Yap already speaks.
+  Settings → Dictation → **Sounds** (`settings/SoundsSettings.svelte`,
+  `core/sounds.js`): the master switch and volume (`sound_enabled`,
+  `audio_feedback_volume`, as before), the **pack** (`sound_pack`: Classic,
+  Soft, Crisp, Minimal; ▶ plays its whole set one after another, ■ stops
+  it: `sound_preview` / `sound_preview_stop`, refused while a meeting
+  records), the output device, and **a switch per moment** with its own ▶
+  (start, stop, hands-free, cancelled on; error, slow, meeting notes, a bar
+  card off; an existing config keeps only start and stop: `migrate_once`
+  v6). **The packs are made from numbers as they play** (`packs.rs`, no
+  sound files): each sound a few notes — a sine, a warm sine (2nd and 3rd
+  harmonics), FM (a bell at ratio 2, glass at 3.5, a reed at 1; its index
+  fading with the note) or a noise tick (a fixed-seed xorshift, one-pole
+  high-passed) — under a linear attack and an exponential fall to −66 dB,
+  pitches gliding exponentially. Classic's start and stop are the chime Yap
+  always played (OpenWhispr's C5→E5 / D5→A4, sample for sample); every
+  pack's start rises and its stop falls; every sound is under 300 ms and
+  peaks at 0.2 × the volume at most (unit-tested: every pack has every
+  moment, lengths, peaks, energy against Classic's, no click at either end,
+  start and stop told apart, Classic unchanged). **When they play**: the
+  settings are cached here (`sync`, at start-up and on every save). A
+  dictation's start, stop and cancel (`play`) play at once with an optional
+  `Played` callback, run on the sound's thread once it has played (or at
+  once when it's off or can't; 3 s at most, `wait_played`: an output that
+  went mid-sound is never drained again, and the stop's mic release waited
+  for ever): how `dictation/mute.rs` goes after the start sound and comes
+  back after the stop's — a cancel now plays its sound before the mic is
+  let go and the other apps come back, as a stop does
+  (`Shared::sound_then_release`). The start follows the mic's first audio,
+  never the key, as before; going hands-free before it played (a cold mic)
+  plays after it (`LOCKED_EARLY`). The other moments (`cue`) wait for a
+  sound still playing (600 ms at most), so two never overlap; a card's
+  sound never plays while a dictation records or within 1.5 s of another
+  sound (its error's). **Never into a meeting's notes**: while a meeting
+  records nothing plays but a dictation's start and stop, which always
+  have (`meeting_allows`; the rule spoken replies follow, `tts::
+  meeting_quiet`); meeting notes' own start sound plays to its end before
+  `meeting::start` opens the loopback (`meeting_started`, a quarter of a
+  second), their stop sound once the capture has closed its streams
+  (`meeting_stopped`, `meeting::capturing`). `open_output` (the configured
+  output device, else the default) is shared with `voice/tts.rs`. **Test
+  mode** opens no device: what would play is kept for the debug-only
+  `sound_e2e_heard` (`"minimal.locked"`), each sound "lasting" its length
+  (robot mode plays them). E2E: `e2e/sounds.spec.js`.
 - **`dictation/mute.rs`** — **other apps' sound while you dictate** (2026-10-17; it
   replaced the old endpoint mute, which silenced Yap's own start chime and
   any call): **"Silence other apps while you dictate"**

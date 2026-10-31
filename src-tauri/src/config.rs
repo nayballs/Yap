@@ -448,9 +448,40 @@ pub struct YapConfig {
     /// for dictation?", `mics/offer.rs`): never asked about again.
     #[serde(default)]
     pub mic_not_now: Vec<crate::dictation::mics::MicChoice>,
-    /// Play a chime when recording starts/stops.
+    /// "Sounds" (Settings → Dictation → Sounds, `dictation/sound.rs`): Yap's
+    /// sounds at all. Each moment has its own switch below; an older Yap
+    /// reads only this one (its start and stop chime).
     #[serde(default = "default_true")]
     pub sound_enabled: bool,
+    /// The sound pack (`dictation/sound/packs.rs`): "classic" (Yap's chime
+    /// since the start), "soft", "crisp" or "minimal"; one this build
+    /// doesn't know plays Classic.
+    #[serde(default = "default_sound_pack")]
+    pub sound_pack: String,
+    /// Each moment's sound (2026-10-31), under `sound_enabled`: a
+    /// dictation starting, stopping, going hands-free (push-to-talk's
+    /// double-tap) and cancelled — on for a new install — and a dictation
+    /// that couldn't be pasted or transcribed, "Taking longer than usual…",
+    /// meeting notes starting and stopping (one switch) and a card on the
+    /// Yap bar — off. Configs from before them keep only start and stop
+    /// (`migrate_once` v6). An older Yap drops them when it saves
+    /// config.json: their defaults come back.
+    #[serde(default = "default_true")]
+    pub sound_start: bool,
+    #[serde(default = "default_true")]
+    pub sound_stop: bool,
+    #[serde(default = "default_true")]
+    pub sound_locked: bool,
+    #[serde(default = "default_true")]
+    pub sound_cancelled: bool,
+    #[serde(default)]
+    pub sound_error: bool,
+    #[serde(default)]
+    pub sound_slow: bool,
+    #[serde(default)]
+    pub sound_meeting: bool,
+    #[serde(default)]
+    pub sound_notice: bool,
     /// Transcription corrections.
     #[serde(default)]
     pub dictionary: Vec<DictionaryEntry>,
@@ -595,7 +626,7 @@ pub struct YapConfig {
     /// Launch Yap at OS login.
     #[serde(default)]
     pub autostart: bool,
-    /// Chime volume (0.0–1.0).
+    /// The sounds' volume (0.0–1.0).
     #[serde(default = "default_audio_feedback_volume")]
     pub audio_feedback_volume: f32,
     /// Transcription language. `"auto"` = auto-detect; otherwise a language code
@@ -610,7 +641,8 @@ pub struct YapConfig {
     /// "15min", "30min".
     #[serde(default = "default_model_unload_timeout")]
     pub model_unload_timeout: String,
-    /// Preferred output device for the start/stop chimes (None = system default).
+    /// The output device Yap's sounds play on (None = system default), and
+    /// spoken replies too.
     #[serde(default)]
     pub output_device: Option<String>,
     /// Where the transcribing overlay appears: "bottom" or "top".
@@ -1222,6 +1254,9 @@ fn default_recording_mode() -> String {
 fn default_audio_feedback_volume() -> f32 {
     1.0
 }
+fn default_sound_pack() -> String {
+    crate::dictation::sound::packs::DEFAULT_PACK.into()
+}
 fn default_selected_language() -> String {
     "auto".into()
 }
@@ -1376,6 +1411,15 @@ impl Default for YapConfig {
             mic_order: Vec::new(),
             mic_not_now: Vec::new(),
             sound_enabled: true,
+            sound_pack: default_sound_pack(),
+            sound_start: true,
+            sound_stop: true,
+            sound_locked: true,
+            sound_cancelled: true,
+            sound_error: false,
+            sound_slow: false,
+            sound_meeting: false,
+            sound_notice: false,
             dictionary: Vec::new(),
             dictionary_fuzzy: true,
             learn_words: true,
@@ -1629,7 +1673,7 @@ fn migrate_retired_groq_models(cfg: &mut YapConfig) {
 
 /// Current config schema version (see [`YapConfig::config_version`]). Bump it
 /// together with a new step in [`migrate_once`].
-const CONFIG_VERSION: u32 = 5;
+const CONFIG_VERSION: u32 = 6;
 
 /// One-time migrations, keyed by `config_version`. Returns whether anything
 /// ran; [`load`] then saves the result so no step ever runs twice.
@@ -1689,6 +1733,14 @@ fn migrate_once(cfg: &mut YapConfig) -> bool {
         // the cleanup every time looked unprofessional). Turned off once,
         // for everyone; switched on again in Settings it stays on.
         cfg.as_said_offer = false;
+    }
+    if cfg.config_version < 6 {
+        // v6 (2026-10-31): sounds for more moments, in packs
+        // (`dictation/sound.rs`). A new install hears going hands-free and
+        // a cancel too; everyone else keeps the sounds they had — the
+        // start and stop chime in Classic — until they switch more on.
+        cfg.sound_locked = false;
+        cfg.sound_cancelled = false;
     }
     cfg.config_version = CONFIG_VERSION;
     true
@@ -3363,6 +3415,42 @@ mod tests {
         // A fresh install, and a file without the field: off.
         assert!(!YapConfig::default().as_said_offer);
         assert!(!serde_json::from_str::<YapConfig>("{}").unwrap().as_said_offer);
+    }
+
+    /// Sounds in packs (2026-10-31): a config from before them keeps what
+    /// it heard — the start and stop chime, in Classic, as loud as it was,
+    /// or none if they were off — and a new install hears going hands-free
+    /// and a cancel too. Switched on afterwards, they stay on.
+    #[test]
+    fn existing_configs_keep_their_chime_and_new_installs_hear_more() {
+        let moments = |c: &YapConfig| {
+            [c.sound_start, c.sound_stop, c.sound_locked, c.sound_cancelled, c.sound_error, c.sound_slow, c.sound_meeting, c.sound_notice]
+        };
+        let mut cfg: YapConfig =
+            serde_json::from_str(r#"{"configVersion":5,"soundEnabled":true,"audioFeedbackVolume":0.4}"#).unwrap();
+        assert!(migrate_once(&mut cfg));
+        assert_eq!(moments(&cfg), [true, true, false, false, false, false, false, false]);
+        assert_eq!((cfg.sound_pack.as_str(), cfg.audio_feedback_volume, cfg.sound_enabled), ("classic", 0.4, true));
+        // Chimes off before: still none.
+        let mut off: YapConfig = serde_json::from_str(r#"{"configVersion":5,"soundEnabled":false}"#).unwrap();
+        assert!(migrate_once(&mut off));
+        assert!(!off.sound_enabled);
+        // Switched on afterwards (and saved): they stay on.
+        cfg.sound_locked = true;
+        cfg.sound_pack = "soft".into();
+        let mut reloaded: YapConfig = serde_json::from_str(&serde_json::to_string(&cfg).unwrap()).unwrap();
+        assert!(!migrate_once(&mut reloaded));
+        assert!(reloaded.sound_locked);
+        assert_eq!(reloaded.sound_pack, "soft");
+        // A new install.
+        let fresh = YapConfig::default();
+        assert_eq!(moments(&fresh), [true, true, true, true, false, false, false, false]);
+        assert_eq!(fresh.sound_pack, "classic");
+        assert!(!migrate_once(&mut YapConfig::default()));
+        let saved = serde_json::to_value(&fresh).unwrap();
+        assert_eq!(saved["soundPack"], "classic");
+        assert_eq!(saved["soundLocked"], true);
+        assert_eq!(saved["soundNotice"], false);
     }
 
     #[test]

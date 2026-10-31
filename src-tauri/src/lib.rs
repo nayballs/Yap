@@ -244,6 +244,9 @@ pub fn run() {
             shell::window::close_onboarding,
             dictation::commands::list_audio_devices,
             dictation::commands::list_output_devices,
+            // Settings → Dictation → Sounds' ▶ and ■ (dictation/sound.rs).
+            dictation::sound::sound_preview,
+            dictation::sound::sound_preview_stop,
             dictation::commands::set_mic_test,
             dictation::mics::list_mics,
             // Getting started (2026-10-29): the mic quiz, the bar's first-use
@@ -767,6 +770,8 @@ pub fn run() {
             #[cfg(debug_assertions)]
             voice::tts::tts_e2e_spoken,
             #[cfg(debug_assertions)]
+            dictation::sound::sound_e2e_heard,
+            #[cfg(debug_assertions)]
             dictation::commands::e2e_chat_dictation,
             #[cfg(debug_assertions)]
             notes::quick_note::e2e_quick_note_dictation,
@@ -872,6 +877,8 @@ pub fn run() {
             ai::usage::store::init(&handle);
             // Spoken replies (tts.rs): its state goes to every window.
             voice::tts::init(&handle);
+            // Yap's sounds: the pack, the volume and each moment's switch (sound.rs).
+            dictation::sound::sync(&cfg);
 
             // Global input hook + dictation hotkey. (Not in e2e test runs: a
             // test instance must never see, or swallow, the developer's keys.
