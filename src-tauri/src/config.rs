@@ -798,6 +798,19 @@ pub struct YapConfig {
     /// See [`LlmScope`] and `ROADMAP.md` Phase 4 "Multi-mode Language Models".
     #[serde(default)]
     pub llm_scopes: std::collections::HashMap<String, LlmScope>,
+    /// **Effort**, per model (2026-10-31, `ai/effort.rs`): how hard each
+    /// cloud model reasons when it answers in Chat, the Voice Assistant and
+    /// a meeting's Ask, chosen in Chat's model picker (or Settings → Language
+    /// Models → Chat), keyed `"<provider>:<model>"` → "low" | "medium" |
+    /// "high" | "xhigh" | "max". A model missing here runs at its provider's
+    /// default. An older Yap's save drops it (that model's default again).
+    #[serde(default)]
+    pub chat_effort: std::collections::BTreeMap<String, String>,
+    /// **Fast mode** (2026-10-31, `ai/effort.rs`): Claude Opus 5.5 answers
+    /// faster at twice the price (Anthropic's `speed: "fast"`). Off unless
+    /// switched on in Chat's model picker.
+    #[serde(default)]
+    pub fast_mode: bool,
     /// The name **Commands** answer to (OpenWhispr "Agent Name"; was "the
     /// Voice Agent's wake word"): say it during a dictation and the AI does
     /// your spoken command instead of typing it. Empty = "Yap". Also added to
@@ -1402,6 +1415,8 @@ impl Default for YapConfig {
             cleanup_strength: default_cleanup_strength(),
             cursor_context_cloud: false,
             llm_scopes: std::collections::HashMap::new(),
+            chat_effort: std::collections::BTreeMap::new(),
+            fast_mode: false,
             agent_name: String::new(),
             speak_replies: false,
             speak_when: default_speak_when(),

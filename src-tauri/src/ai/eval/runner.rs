@@ -1192,8 +1192,8 @@ async fn run_scenario(
                 // The Voice Assistant's turn: never thought through by itself.
                 asked.await.map(Some)
             } else {
-                // A typed turn, as Chat sends it (`chat_send`): Yap may turn
-                // Think on for a strong model's document (`think::auto_on`).
+                // A typed turn, as Chat sends it (`chat_send`): a cloud model
+                // at its effort shows what it thought (`think::reasoned`).
                 let (out, thought) = crate::chat::think::scoped(false, asked).await;
                 if let Some(t) = &thought {
                     record::write("thought", json!({ "chars": t.text.chars().count(), "ms": t.ms }));

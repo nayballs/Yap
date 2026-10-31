@@ -1170,13 +1170,25 @@ a real cloud model (Groq, Claude) on a real screenshot.
 **Think it through** (2026-10-29, chat-and-assistant.md `chat/think.rs`):
 Chat's Think button, one question — the on-device Qwen3.5 thinks to a
 1,500-token budget for that request alone (llamafile keeps `--reasoning
-off`: measured by hand on 0.10.6, no restart), cloud models that reason at
-high effort; "Thinking…" with the thinking folded, then "Thought for 6 s"
-above the answer. **Tested**: unit (each provider's fields, the task-local,
-the stream), e2e (`e2e/chat-think.spec.js`), and on the real 4B by hand and
-through `eval --vision --think`. **Not yet tried**: a real cloud model's
-reasoning (OpenAI, Gemini, Claude, OpenRouter: fields from their docs), the
-dev build.
+off`: measured by hand on 0.10.6, no restart); "Thinking…" with the
+thinking folded, then "Thought for 6 s" above the answer. Since 31 Oct 2026
+the model on this PC only: a cloud model has its **effort** (below).
+**Tested**: unit (the fields, the task-local, the stream), e2e
+(`e2e/chat-think.spec.js`), and on the real 4B by hand and through `eval
+--vision --think`. **Not yet tried**: the dev build.
+
+**Effort, per model** (2026-10-31, ai-models.md `ai/effort.rs`): Chat's
+model picker (and Settings → Language Models → Chat) chooses how hard each
+cloud model reasons — the levels it takes, the chip saying it ("Claude Opus
+5.5 Extra") — sent its provider's way wherever it answers a question, and
+Fast mode for Claude Opus 5.5. **Tested**: unit (every provider's body at
+every level, the table, the providers' lists, the Messages API's body with
+fast mode), e2e (`e2e/chat-effort.spec.js`, `chat-think.spec.js`,
+`chat-documents-research.spec.js`) against the fake. **Not yet tried**: a
+real provider at each level — the levels and values come from each
+provider's docs (31 Oct 2026), not from real calls; fast mode on a real
+account (its plan may not have it: Yap asks again at standard speed on a
+400 naming `speed`); the dev build.
 
 **Documents beside the chat, phase 1** (2026-10-30, chat-and-assistant.md
 `chat/documents.rs`): an answer to keep — a build, a plan, a guide, a

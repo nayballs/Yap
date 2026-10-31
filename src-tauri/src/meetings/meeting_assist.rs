@@ -164,7 +164,8 @@ pub struct CatchUp {
 
 /// One notepad answer, streamed to the page's channel when it sent one
 /// (`stream.rs`) and stoppable by `turn_id` (its ■): the answer, and
-/// whether it was stopped (then: what had shown).
+/// whether it was stopped (then: what had shown). `question`: the person's
+/// own question, at the model's effort (`ai/effort.rs`).
 async fn streamed_answer(
     app: &AppHandle,
     ep: &summary::Endpoint,
@@ -172,11 +173,12 @@ async fn streamed_answer(
     opts: &crate::ai::llm::ChatOptions,
     on_stream: &crate::chat::stream::PageChannel,
     turn_id: Option<&str>,
+    question: bool,
 ) -> Result<(String, bool), String> {
     let stop = crate::chat::stream::Stoppable::new(turn_id);
     let watch = crate::chat::stream::Watch::new(on_stream);
     let sink = on_stream.0.is_some().then_some(&watch as &dyn crate::chat::stream::Sink);
-    let asked = summary::chat_beside_dictation_live(app, ep, messages, opts, sink);
+    let asked = summary::chat_beside_dictation_live(app, ep, messages, opts, sink, question);
     match crate::chat::stream::unless_stopped(asked, Some(&stop)).await {
         Ok(answer) => Ok((answer?, false)),
         Err(_) => {
@@ -234,7 +236,7 @@ pub async fn meeting_catch_up(
     };
     let opts = ep.options(summary::CATCH_UP_REPLY_TOKENS, 0.3);
     let messages = crate::memory::with_helper_block(messages, &cfg);
-    let (answer, stopped) = streamed_answer(&app, &ep, messages, &opts, &on_stream, turn_id.as_deref())
+    let (answer, stopped) = streamed_answer(&app, &ep, messages, &opts, &on_stream, turn_id.as_deref(), question.is_some())
         .await
         .map_err(|e| match &said {
             Some((label, context)) => crate::chat::budget::plain_error(e, label, *context, &ep.provider),
@@ -362,7 +364,7 @@ pub async fn meeting_assist(
     // The person (About you's name and note, memory's "You"): the email
     // signs with their name, the questions fit their role.
     let messages = crate::memory::with_helper_block(summary::helper_messages(kind.prompt(), &input), &cfg);
-    let (reply, stopped) = streamed_answer(&app, &ep, messages, &opts, &on_stream, turn_id.as_deref()).await?;
+    let (reply, stopped) = streamed_answer(&app, &ep, messages, &opts, &on_stream, turn_id.as_deref(), false).await?;
     // A stopped email is what came, as it came (half an email isn't one).
     let plain = plain && !stopped;
     let (answer, sources) = if plain {
@@ -417,7 +419,7 @@ pub async fn meeting_skill(
     let ep = summary::resolve_endpoint(&cfg)?;
     let opts = ep.options(summary::chips::SKILL_REPLY_TOKENS, 0.3);
     let messages = crate::memory::with_helper_block(skill_messages(&skill, &cited.text, &words), &cfg);
-    let (reply, stopped) = streamed_answer(&app, &ep, messages, &opts, &on_stream, turn_id.as_deref()).await?;
+    let (reply, stopped) = streamed_answer(&app, &ep, messages, &opts, &on_stream, turn_id.as_deref(), false).await?;
     let (answer, sources) = summary::chips::checked(&reply, &cited.passages, !stopped);
     if answer.is_empty() {
         return Err("The model returned an empty answer".to_string());

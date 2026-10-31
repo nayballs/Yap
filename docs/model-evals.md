@@ -362,8 +362,9 @@ not only search results. `own_marked` also takes a fact said to be unconfirmed (
 confirmed", "couldn't find") as marked: the strong models' rule now says so where no page
 gave a requirement, level, number or location, its own knowledge only advising.
 `summary.md` gets a "Guides" table per model (each check's passes,
-and how many turns were thought through: Think comes on by itself for a strong model's
-document, `think::auto_on`, and a typed turn runs as `chat_send` runs it). `--guides` pushes
+and how many turns were thought through: a cloud model's turn goes at its effort,
+`ai/effort.rs` — the eval's config's `chat_effort`, else the model's default —, and a typed
+turn runs as `chat_send` runs it). `--guides` pushes
 the tag; `--only` picks the scenarios (`--no-web` would skip the stand-in one too).
 
 ### Screenshot questions (`--vision`)

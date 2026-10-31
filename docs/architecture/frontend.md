@@ -68,10 +68,13 @@ changed. **`renderMarkdown(…, {lines: true})`** puts `data-line="a-b"` (the
 block's source lines) on each top-level block (DOMPurify keeps only that
 shape): the document panel maps a selection back to the markdown with it.
 
-**The main window's chunk** is held near 710 kB (`vite.config.js`'
+**The main window's chunk** is held near 720 kB (`vite.config.js`'
 `chunkSizeWarningLimit`, 700 until Chat's documents on 2026-10-30 took it
 to 708; 715 since the panel's two views, a selection's quote and find
-across a text's pieces took it to 712 on 2026-10-31): the document panel
+across a text's pieces took it to 712 on 2026-10-31; 725 since Chat's
+activity line, its folded steps and Sources row, and each model's effort
+on the chip and in Settings took it to 722 the same day, the picker's
+part in the picker's own chunk): the document panel
 itself loads on demand (`{#await import('./DocPanel.svelte')}`, with its
 own `docTools.js` and `core/markdownSource.js`), its state, the quote and
 the pill don't.

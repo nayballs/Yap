@@ -64,7 +64,7 @@ test('the chip names the chat model, switches it, and every answer keeps its own
     llmScopes: { ...(await yap.invoke('get_config')).llmScopes, chat: groqChat(fakeLlm, 'openai/gpt-oss-20b') },
   });
   await openView(main, 'Chat');
-  await expect(chip(main)).toHaveText('GPT-OSS 20B · Groq');
+  await expect(chip(main)).toHaveText('GPT-OSS 20B Medium · Groq');
   await expect(chip(main).locator('.mark')).toHaveAttribute('data-icon', 'groq');
   await shot(main, '01-chip-groq');
 
@@ -90,7 +90,7 @@ test('the chip names the chat model, switches it, and every answer keeps its own
   // Switch: the Chat scope only, dictation cleanup untouched.
   await pop.getByRole('button', { name: /^GPT-OSS 120B/ }).click();
   await expect(pop).toBeHidden();
-  await expect(chip(main)).toHaveText('GPT-OSS 120B · Groq');
+  await expect(chip(main)).toHaveText('GPT-OSS 120B Medium · Groq');
   await expectStore(yap, 'config.json', (c) => c.llmScopes.chat.model === 'openai/gpt-oss-120b');
   const saved = yap.readJson('config.json');
   expect(saved.llmScopes.chat).toMatchObject({ enabled: true, provider: 'groq', baseUrl: fakeLlm.base });

@@ -5,7 +5,10 @@
   // the provider's mark, the model, "· Groq" / "· On this PC" — and its
   // warnings: "no note tools" (a local model under 4B, or one its provider
   // says can't call tools: answers come from a plain search of the notes)
-  // and "no longer offered" (the provider's live list dropped it).
+  // and "no longer offered" (the provider's live list dropped it). A cloud
+  // model's effort follows its name, as the Claude Code app shows it
+  // ("Claude Opus 5.5 Extra", core/effort.js; ai/effort.rs), and "Fast" when
+  // fast mode is on.
   //
   // Click → ChatModelPicker.svelte, "Switch the Chat model": a provider
   // rail with every provider's models, connecting a provider in place, and
@@ -24,6 +27,7 @@
   import { chipContextLine } from '../../core/localContext.js';
   import { isKeyed } from '../../core/providers.js';
   import { menuOrDialogOpen } from '../../ui/contextMenu.svelte.js';
+  import { effortLabel, effortNow } from '../../core/effort.js';
 
   // `quiet`: no pill, just the words (under the Chat composer, as Claude
   // Code shows its model).
@@ -47,12 +51,15 @@
   );
   // The on-device model's context ("Context: 8K tokens"), in the tooltip.
   const ctxLine = $derived(model?.provider === 'ondevice' ? chipContextLine(status?.context) : '');
+  // Its effort ("Extra"), and fast mode.
+  const effort = $derived(model ? effortLabel(effortNow(status?.effort)) : '');
+  const fast = $derived(!!model && status?.effort?.fast === true);
   const chipLabel = $derived(
     !status
       ? ''
       : !model
         ? 'No AI model. Set one up'
-        : `Chat model: ${modelName(model)}, ${providerName(model)}.${status.tools ? '' : ` ${noToolsLine}`}${gone ? ` ${GONE}` : ''} Change model`
+        : `Chat model: ${modelName(model)}, ${providerName(model)}.${effort ? ` Effort: ${effort}.` : ''}${fast ? ' Fast mode.' : ''}${status.tools ? '' : ` ${noToolsLine}`}${gone ? ` ${GONE}` : ''} Change model`
   );
 
   export async function refresh() {
@@ -137,6 +144,8 @@
       {#if model}
         <ProviderMark icon={modelIcon(model)} glyph={model.onThisPc ? 'pc' : 'spark'} size={14} />
         <span class="cname">{modelName(model)}</span>
+        {#if effort}<span class="ceffort" data-testid="chip-effort">{effort}</span>{/if}
+        {#if fast}<span class="ceffort">· Fast</span>{/if}
         <span class="cprov">· {providerName(model)}</span>
         {#if !status.tools}<span class="cnotools">· no note tools</span>{/if}
         {#if gone}<span class="cnotools">· no longer offered</span>{/if}
@@ -232,6 +241,11 @@
   .cprov {
     color: var(--yap-muted);
     flex: 0 0 auto;
+  }
+  .ceffort {
+    color: var(--yap-muted);
+    flex: 0 0 auto;
+    margin-left: -2px;
   }
   .cnotools {
     color: var(--yap-warning);

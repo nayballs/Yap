@@ -105,9 +105,15 @@ The language-model side: the OpenAI-compatible client and its prompts, the on-de
   with its signature, server tool calls and their encrypted results, as the
   API asks); function tools as `{name, description, input_schema}`, then
   the server tools (web/native.rs `server_tools`); top-level `cache_control`
-  for the conversation; `max_tokens` 16,000 (32,000 streamed); thinking as
-  Chat's Think asks (`think::request_extra`, `display: "summarized"` on
-  adaptive so its summary shows); `tool_choice` `none` on the loop's last
+  for the conversation; `max_tokens` 16,000 (32,000 streamed; 64,000 at
+  effort xhigh or max); thinking at the model's effort (`ai/effort.rs`
+  below: adaptive thinking, `output_config.effort`, fast mode's `speed`;
+  `display: "summarized"` on adaptive so its summary shows; since 31 Oct
+  2026 a Claude question with an effort comes here even with no tools —
+  the Notes view's Ask, a meeting's Ask, Chat's small path — since the
+  compatible endpoint ignores `reasoning_effort`); a 400 that names
+  `speed` (fast mode not on the account's plan) asks again at standard
+  speed; `tool_choice` `none` on the loop's last
   call (its earlier `tool_use` blocks need the tools defined); temperature
   only where `takes_temperature`. **The answer** (`message_of`, pure): an
   OpenAI-shaped message — the text after its last server result (before it
@@ -956,7 +962,9 @@ The language-model side: the OpenAI-compatible client and its prompts, the on-de
   provider (the one the scope is set to, ready or not), keyed, maskedKeys
   (each keyed provider's key as "gsk…AbCd", `mask_key` — never the key),
   servers, onDevice, context (the on-device model's, when the call goes to
-  it: the chip's tooltip "Context: 8K tokens")}` for the Chat view's model chip + picker and the Ask
+  it: the chip's tooltip "Context: 8K tokens"), effort (`effort::info`:
+  `{levels, default, chosen, fast}`, `null` for a model without a
+  reasoning control — the chip's "Extra", the picker's Effort)}` for the Chat view's model chip + picker and the Ask
   bars' model lines; `chat_set_model {provider, model, baseUrl?, file?}` =
   the picker's switch (Chat scope only, switched on; a keyed provider, the
   installed on-device model, or a self-hosted / custom server Settings has
@@ -980,6 +988,66 @@ The language-model side: the OpenAI-compatible client and its prompts, the on-de
   (`local_llm::ensure_started`) or says it isn't installed, never a silent
   fallback to the endpoint underneath. A config save emits
   `yap-config-saved`, which the chip re-reads on. Unit-tested.
+- **`ai/effort.rs`** — **effort, per model** (2026-10-31, as the Claude
+  Code app's model menu has it: "Opus 5.5 Extra"): how hard a cloud model
+  reasons before it answers, chosen in Chat's model picker (or Settings →
+  Language Models → Chat), kept per model in `chat_effort`
+  (`"<provider>:<model>"` → level; config-and-data.md) and sent **wherever
+  that model answers a question**: Chat and the Voice Assistant (every
+  `llm::ChatRequest::chat`, so the tool loop and `note_chat`), the Notes
+  view's Ask (`note_ask`) and a meeting's typed Ask in the notepad
+  (`meeting_catch_up` with a question: `chat_beside_dictation_live(…,
+  asked)`). Cleanup, Commands, the meeting notes and helpers, memory and
+  Chat's background summaries never come here (they call `chat_with` /
+  `post_chat_request`). Levels are Claude Code's: low, medium, high, xhigh
+  ("Extra") and max; a model shows only the ones it takes, and a model
+  with no reasoning control has none (no Effort item). Unchosen, a model
+  runs at its own default (`Caps::default`; "Default" when that isn't a
+  level: OpenAI's "none", Groq's Qwen "default" — nothing sent). **The one
+  table** (`caps`), from each provider's docs read 31 Oct 2026, the
+  provider's own list first where it says (`CatalogModel::efforts`:
+  Anthropic's `capabilities.effort`, OpenRouter's
+  `reasoning.supported_efforts` and `default_effort`):
+  - **Claude** — `output_config.effort` with `thinking: {type:
+    "adaptive"}` (its summary shown), on the Messages API only (the
+    compatible endpoint ignores an effort and 400s adaptive thinking:
+    `apply` sets `ChatRequest::native`). All five on Fable 5/5.1, Mythos
+    5/5.1, Opus 5.5/5/4.8/4.7, Sonnet 5.5/5, Haiku 5.5; low/medium/high/max
+    on Opus 4.6, Sonnet 4.6, Mythos Preview; low to high on Opus 4.5 (the
+    effort alone: it thinks to a budget, never sent — `budget_tokens` 400s
+    on the newest models). Defaults: medium on Opus 5.5 and Haiku 5.5, high
+    elsewhere. No effort on Haiku 4.5, Sonnet 4.5 or older. xhigh and max
+    get `max_tokens` 64,000 (Anthropic: start at 64K there).
+  - **Fast mode** — Claude Opus 5.5 on Anthropic's API, `speed: "fast"`
+    (no beta header on Opus 5.5; Opus 5 and 4.8 are a waitlisted research
+    preview, 4.8's ending 30 Nov 2026: not offered). $8 / $40 per MTok,
+    twice the standard price: off unless switched on (`fast_mode`), its
+    switch says so.
+  - **OpenAI** — `reasoning_effort`: GPT-5.6 and GPT-6 low to max (medium),
+    GPT-5.5 low to xhigh (medium), GPT-5.2–5.4 low to xhigh and GPT-5.1 low
+    to high (default "none": "Default"), GPT-5 and o-series low to high
+    (medium); `-chat` models none. The GPT-6 family takes tools on Chat
+    Completions only with `"none"` (its model pages), so a call with tools
+    sends that.
+  - **Groq** — `reasoning_effort`: GPT-OSS low to high (medium), Qwen3 low
+    to high ("Default"), Muse Spark Open low to xhigh (xhigh).
+  - **Gemini** — `reasoning_effort` low/medium/high on 2.5 and later (its
+    compatible endpoint maps it to a thinking level or budget), high.
+  - **OpenRouter** — `reasoning: {effort}`: its list's levels, else the
+    family's (an `anthropic/…` id by Claude's table, `openai/…`,
+    `google/…`), else low to high for a model its list says reasons.
+
+  `apply(req)` adds the fields, the time (`think::TIMEOUT`, 150 s; 300 s at
+  xhigh and max) and, for Claude, the Messages API; `think::reasoned`
+  marks Chat's turn so what the model thought shows folded above the
+  answer (only what it sends back: Claude's summary, Groq's and
+  OpenRouter's `reasoning`; OpenAI and Gemini send none). Commands
+  `effort_info {provider, model}` (Settings), `chat_set_effort {provider,
+  model, level|null}` and `chat_set_fast {on}` (the picker; saved through
+  `settings::change_config`, the Chat status back). The on-device model
+  has none: Chat's Think button is its own (`chat/think.rs`). Unit-tested
+  per provider and level (`effort::tests`, `anthropic::tests`); e2e
+  `chat-effort.spec.js`.
 - **`ai/model_catalog.rs`** — **the AI providers' live model lists**
   (2026-10-18), so a model Google or Groq releases tomorrow shows up in
   Yap's pickers without a Yap update and a retired one stops being offered.
@@ -1027,6 +1095,12 @@ The language-model side: the OpenAI-compatible client and its prompts, the on-de
   Groq's and OpenRouter's input modalities — and `vision_for(provider,
   model)`; `snip::vision` adds family rules where it doesn't (Gemini, OpenAI)
   and the switch `ai_model_status` offers (`images`, `imagesSwitch`).
+  **Which effort levels a model takes** (2026-10-31, `ai/effort.rs`):
+  `efforts` (lowest first) where the list says — Anthropic's
+  `capabilities.effort.{low…max}.supported`, OpenRouter's
+  `reasoning.supported_efforts` (only Yap's five; `null`, "any", leaves it
+  to Yap's table) — and OpenRouter's `default_effort`; read before the
+  table, so a new model gets its own choices without an update.
   **Self-hosted / custom servers** (`llm_models {provider: local|custom,
   scope, baseUrl}`): `GET {base}/models` with the scope's key (OpenWhispr's
   OpenAICompatiblePanel reading: `data` or `models`, `id` or `name`), kept a
