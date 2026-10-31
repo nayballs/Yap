@@ -2,7 +2,7 @@
 // test-results/link/screenshots/ (to look at, not compared). Also checks
 // nothing overflows sideways and every control is at least 48 px.
 import { test, expect } from '@playwright/test';
-import { servePage, seedDevice, mockPc, open, ready, ask, downFrame, voice, ORIGIN, PC, MODELS } from './support/harness.js';
+import { servePage, seedDevice, mockPc, open, ready, ask, downFrame, voice } from './support/harness.js';
 
 const DIR = 'test-results/link/screenshots';
 
@@ -46,9 +46,7 @@ for (const scheme of ['light', 'dark']) {
           .filter(([, h]) => h < 48),
       );
       expect(small).toEqual([]);
-      // The wait's three, and the mode switch's three.
-      expect(await page.locator('#wait .seg label').count()).toBe(3);
-      expect(await page.locator('#mode .seg label').count()).toBe(3);
+      expect(await page.locator('.seg label').count()).toBe(3);
       await page.getByTestId('wait').scrollIntoViewIfNeeded();
       await page.screenshot({ path: `${DIR}/options-${scheme}.png`, fullPage: true });
       await page.getByText('Hands-free').click();
@@ -90,49 +88,6 @@ for (const scheme of ['light', 'dark']) {
       await expect(page.getByTestId('sound-start')).toContainText('started');
       await page.getByTestId('sound').scrollIntoViewIfNeeded();
       await page.screenshot({ path: `${DIR}/sound-details-${scheme}.png`, fullPage: true });
-    });
-
-    test(`dictating (${scheme})`, async ({ page, context }) => {
-      await context.grantPermissions(['clipboard-read', 'clipboard-write'], { origin: ORIGIN });
-      await servePage(page);
-      await seedDevice(page);
-      const pc = await mockPc(page);
-      await open(page);
-      await ready(page, pc);
-      await page.getByRole('radio', { name: 'Dictate to PC', exact: true }).click();
-      await page.screenshot({ path: `${DIR}/dictate-pc-ready-${scheme}.png` });
-      await ask(page, pc, 400);
-      pc.send({ type: 'state', phase: 'transcribing' });
-      await expect(page.getByTestId('phase')).toHaveText('Typing it on Office PC');
-      await page.screenshot({ path: `${DIR}/dictate-pc-typing-${scheme}.png` });
-      pc.send({ type: 'heard', text: 'Thanks for the update. I’ll send the figures over by Friday afternoon.', to: 'pc' });
-      pc.send({ type: 'pasted', ok: true, app: 'Outlook' });
-      pc.send({ type: 'state', phase: 'idle' });
-      await expect(page.getByTestId('result-line')).toHaveText('Pasted into Outlook');
-      expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
-      await page.screenshot({ path: `${DIR}/dictate-pc-pasted-${scheme}.png` });
-      await ask(page, pc, 300);
-      pc.send({ type: 'heard', text: 'Hello there.', to: 'pc' });
-      pc.send({ type: 'pasted', ok: false, reason: 'No text box in front: copied on the PC instead' });
-      pc.send({ type: 'state', phase: 'idle' });
-      await expect(page.getByTestId('result')).toHaveAttribute('data-status', 'failed');
-      await page.screenshot({ path: `${DIR}/dictate-pc-not-pasted-${scheme}.png` });
-
-      await page.getByRole('radio', { name: 'Dictate to phone', exact: true }).click();
-      await ask(page, pc, 300);
-      pc.send({ type: 'heard', text: 'Milk, eggs, bread and something for the barbecue on Saturday.', to: 'phone' });
-      pc.send({ type: 'state', phase: 'idle' });
-      await expect(page.getByTestId('result-line')).toHaveText('Copied');
-      await expect(page.getByTestId('copy')).toBeVisible();
-      const copy = await page.getByTestId('copy').boundingBox();
-      expect(copy.height).toBeGreaterThanOrEqual(48);
-      await page.screenshot({ path: `${DIR}/dictate-phone-copied-${scheme}.png` });
-
-      // Off for this phone: the hint under the switch.
-      pc.send({ type: 'ready', pc: PC, model: MODELS[0], models: MODELS, mayType: false });
-      await page.getByRole('radio', { name: 'Dictate to PC', exact: true }).click();
-      await expect(page.getByTestId('mode-hint')).toBeVisible();
-      await page.screenshot({ path: `${DIR}/dictate-pc-not-allowed-${scheme}.png` });
     });
   });
 }

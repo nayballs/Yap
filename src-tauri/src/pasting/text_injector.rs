@@ -2331,9 +2331,8 @@ pub async fn inject_rich(
     kind: AppKind,
 ) -> Result<Delivery, String> {
     let cf = html.as_deref().map(crate::pasting::rich::cf_html);
-    // An Undo whose window has closed since: never into another one. (A
-    // test run's stand-in kept open is still there.)
-    if strict && target_hwnd.is_some_and(|h| !window_exists(h) && !crate::dictation::pipeline::stand_in_open(h)) {
+    // An Undo whose window has closed since: never into another one.
+    if strict && target_hwnd.is_some_and(|h| !window_exists(h)) {
         if crate::shell::e2e::active() && !crate::shell::realtest::on() {
             info!("e2e: the dictation's window is gone; not pasting the text");
             return Ok(Delivery::WindowGone);

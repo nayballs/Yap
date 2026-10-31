@@ -26,13 +26,6 @@ pub struct Device {
     /// Unix ms; 0 = never since pairing.
     #[serde(default)]
     pub last_seen: u64,
-    /// **May type into this PC** (Settings → Phone): its "Dictate to PC"
-    /// pastes into the window in front here; off, it's refused. On for a
-    /// phone paired since 2026-10-31; off for one paired before (it was
-    /// paired to ask, not to type) — and if an older Yap saves the store
-    /// without it, off again: the safe way round.
-    #[serde(default)]
-    pub type_into_pc: bool,
 }
 
 /// A paired phone, as Settings shows it (no hash).
@@ -43,7 +36,6 @@ pub struct Listed {
     pub name: String,
     pub paired: u64,
     pub last_seen: u64,
-    pub type_into_pc: bool,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -124,15 +116,7 @@ pub fn add(name: &str) -> Result<(String, String), String> {
                 s.devices.remove(oldest);
             }
         }
-        s.devices.push(Device {
-            id: id.clone(),
-            name: crate::link::pairing::clean_name(name),
-            secret_hash: hash,
-            paired: now,
-            last_seen: now,
-            // The pairing question said so ("…and type into this PC").
-            type_into_pc: true,
-        });
+        s.devices.push(Device { id: id.clone(), name: crate::link::pairing::clean_name(name), secret_hash: hash, paired: now, last_seen: now });
         save(s);
     });
     Ok((id, secret))
@@ -141,25 +125,6 @@ pub fn add(name: &str) -> Result<(String, String), String> {
 /// The stored hash of phone `id`'s secret (for `pairing::judge`).
 pub fn secret_hash(id: &str) -> Option<String> {
     with_store(|s| s.devices.iter().find(|d| d.id == id).map(|d| d.secret_hash.clone()))
-}
-
-/// Whether phone `id` may type into this PC ("Dictate to PC"). A phone
-/// that isn't paired may not.
-pub fn may_type(id: &str) -> bool {
-    with_store(|s| s.devices.iter().any(|d| d.id == id && d.type_into_pc))
-}
-
-/// Settings → Phone's "May type into this PC" for phone `id`. `false`: it
-/// isn't paired.
-pub fn set_may_type(id: &str, on: bool) -> bool {
-    with_store(|s| {
-        let Some(d) = s.devices.iter_mut().find(|d| d.id == id) else { return false };
-        if d.type_into_pc != on {
-            d.type_into_pc = on;
-            save(s);
-        }
-        true
-    })
 }
 
 /// Phone `id`'s name.
@@ -199,10 +164,7 @@ pub fn remove(id: &str) -> bool {
 /// Every paired phone, the one used last first.
 pub fn list() -> Vec<Listed> {
     let mut out: Vec<Listed> = with_store(|s| {
-        s.devices
-            .iter()
-            .map(|d| Listed { id: d.id.clone(), name: d.name.clone(), paired: d.paired, last_seen: d.last_seen, type_into_pc: d.type_into_pc })
-            .collect()
+        s.devices.iter().map(|d| Listed { id: d.id.clone(), name: d.name.clone(), paired: d.paired, last_seen: d.last_seen }).collect()
     });
     out.sort_by_key(|d| std::cmp::Reverse(d.last_seen.max(d.paired)));
     out
@@ -241,29 +203,6 @@ mod tests {
         assert!(!remove(&id));
         assert!(list().is_empty());
         assert!(matches!(judge(&ok, None, &secret_hash, now), Verdict::Denied(crate::link::pairing::REMOVED)));
-    }
-
-    #[test]
-    fn a_phone_paired_now_may_type_into_the_pc_until_its_switch_is_off() {
-        let (id, _) = add("Pixel").unwrap();
-        assert!(may_type(&id), "on for a phone paired from now on");
-        assert!(list()[0].type_into_pc);
-        assert!(set_may_type(&id, false));
-        assert!(!may_type(&id));
-        assert!(!list()[0].type_into_pc);
-        assert!(set_may_type(&id, true));
-        assert!(may_type(&id));
-        // Not paired: no.
-        assert!(!may_type("p-nobody"));
-        assert!(!set_may_type("p-nobody", true));
-        // A phone paired before 31 Oct (no such field in the store): off.
-        let old: Device = serde_json::from_str(r#"{"id":"p-old","name":"Old","secretHash":"00","paired":1}"#).unwrap();
-        assert!(!old.type_into_pc);
-        with_store(|s| s.devices.push(old));
-        assert!(!may_type("p-old"));
-        // The store keeps it.
-        let stored = with_store(|s| serde_json::to_value(&*s).unwrap());
-        assert_eq!(stored["devices"][0]["typeIntoPc"], true);
     }
 
     #[test]

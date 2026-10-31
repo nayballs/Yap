@@ -867,7 +867,6 @@ mod tests {
                 status: None,
                 error: None,
                 secs: Some(1.2),
-                via: None,
             }],
             stats: json!({ "days": [{ "date": "2026-10-29", "words": 2, "dictations": 1 }] }),
             notes: vec![note.clone(), meeting],
@@ -1016,7 +1015,6 @@ mod tests {
             status: Some(crate::dictation::history::NOT_PASTED.into()),
             error: Some("The window was gone".into()),
             secs: None,
-            via: None,
         };
         let csv = history_csv(&[e], &when);
         let lines: Vec<&str> = csv.trim_start_matches('\u{feff}').split("\r\n").collect();

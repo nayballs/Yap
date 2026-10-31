@@ -60,16 +60,12 @@ pub enum In {
         #[serde(default)]
         pair: Option<PairToken>,
     },
-    /// A question (`mode` "ask", or none: an older page) or a dictation
-    /// (`mode` "dictate", `target` "pc" — the default — or "phone")
-    /// starts; up frames follow (`link/dictate.rs` reads them).
+    /// A question starts; up frames follow.
     Start {
         #[serde(default)]
         mode: String,
-        #[serde(default)]
-        target: String,
     },
-    /// The question (or dictation) ended: transcribe and answer (or type).
+    /// The question ended: transcribe and answer.
     Stop,
     /// Drop the question.
     Cancel,
@@ -110,35 +106,11 @@ pub enum Out {
     Paired { device: DeviceCreds },
     /// Refused (the socket closes after it).
     Denied { reason: String },
-    /// Connected: this PC's name, Chat's model and the others it can use,
-    /// and whether this phone may type into the PC (Settings → Phone's
-    /// "May type into this PC": "Dictate to PC" is refused without it).
-    Ready {
-        pc: String,
-        model: Option<Model>,
-        models: Vec<Model>,
-        #[serde(rename = "mayType")]
-        may_type: bool,
-    },
+    /// Connected: this PC's name, and Chat's model and the others it can use.
+    Ready { pc: String, model: Option<Model>, models: Vec<Model> },
     State { phase: Phase },
-    /// The question, transcribed and corrected — or a dictation's text, as
-    /// it was pasted (or for the phone), with `to` ("pc" or "phone") saying
-    /// it's a dictation's.
-    Heard {
-        text: String,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        to: Option<String>,
-    },
-    /// A dictation to the PC: pasted into `app` (its name, "Notepad"; none
-    /// when Yap couldn't tell), or not (`ok` false) and why, in words the
-    /// phone shows ("No text box in front: copied on the PC instead").
-    Pasted {
-        ok: bool,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        app: Option<String>,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        reason: Option<String>,
-    },
+    /// The question, transcribed and corrected.
+    Heard { text: String },
     /// What the answer is doing, in Chat's own words ("Searching the web · …").
     Step { label: String },
     /// The answer so far; `final` once it's been checked.
@@ -259,13 +231,7 @@ mod tests {
         );
         let again = parse(r#"{"type":"hello","v":1,"name":"Pixel","nonce":"n","device":{"id":"d1","secret":"s"}}"#).unwrap();
         assert!(matches!(again, In::Hello { device: Some(DeviceCreds { ref id, .. }), pair: None, .. } if id == "d1"));
-        assert_eq!(parse(r#"{"type":"start","mode":"ask"}"#).unwrap(), In::Start { mode: "ask".into(), target: String::new() });
-        assert_eq!(
-            parse(r#"{"type":"start","mode":"dictate","target":"phone"}"#).unwrap(),
-            In::Start { mode: "dictate".into(), target: "phone".into() }
-        );
-        // An older page's start (no mode at all) still parses.
-        assert_eq!(parse(r#"{"type":"start"}"#).unwrap(), In::Start { mode: String::new(), target: String::new() });
+        assert_eq!(parse(r#"{"type":"start","mode":"ask"}"#).unwrap(), In::Start { mode: "ask".into() });
         assert_eq!(parse(r#"{"type":"stop"}"#).unwrap(), In::Stop);
         assert_eq!(parse(r#"{"type":"cancel"}"#).unwrap(), In::Cancel);
         assert_eq!(parse(r#"{"type":"interrupt"}"#).unwrap(), In::Interrupt);
@@ -287,21 +253,11 @@ mod tests {
         assert_eq!(j(Out::Denied { reason: "No".into() }), serde_json::json!({"type":"denied","reason":"No"}));
         let m = Model { id: "ondevice|".into(), label: "Qwen".into(), on_this_pc: true };
         assert_eq!(
-            j(Out::Ready { pc: "DESK".into(), model: Some(m.clone()), models: vec![m], may_type: true }),
-            serde_json::json!({"type":"ready","pc":"DESK","model":{"id":"ondevice|","label":"Qwen","onThisPc":true},"models":[{"id":"ondevice|","label":"Qwen","onThisPc":true}],"mayType":true})
+            j(Out::Ready { pc: "DESK".into(), model: Some(m.clone()), models: vec![m] }),
+            serde_json::json!({"type":"ready","pc":"DESK","model":{"id":"ondevice|","label":"Qwen","onThisPc":true},"models":[{"id":"ondevice|","label":"Qwen","onThisPc":true}]})
         );
         assert_eq!(j(Out::State { phase: Phase::Transcribing }), serde_json::json!({"type":"state","phase":"transcribing"}));
-        // A question's heard as before; a dictation's says where it went.
-        assert_eq!(j(Out::Heard { text: "hi".into(), to: None }), serde_json::json!({"type":"heard","text":"hi"}));
-        assert_eq!(j(Out::Heard { text: "Hi.".into(), to: Some("pc".into()) }), serde_json::json!({"type":"heard","text":"Hi.","to":"pc"}));
-        assert_eq!(
-            j(Out::Pasted { ok: true, app: Some("Notepad".into()), reason: None }),
-            serde_json::json!({"type":"pasted","ok":true,"app":"Notepad"})
-        );
-        assert_eq!(
-            j(Out::Pasted { ok: false, app: None, reason: Some("No text box in front: copied on the PC instead".into()) }),
-            serde_json::json!({"type":"pasted","ok":false,"reason":"No text box in front: copied on the PC instead"})
-        );
+        assert_eq!(j(Out::Heard { text: "hi".into() }), serde_json::json!({"type":"heard","text":"hi"}));
         assert_eq!(j(Out::Step { label: "Thinking".into() }), serde_json::json!({"type":"step","label":"Thinking"}));
         assert_eq!(j(Out::Answer { text: "Yes.".into(), done: true }), serde_json::json!({"type":"answer","text":"Yes.","final":true}));
         assert_eq!(j(Out::SpeakStart { rate: DOWN_RATE }), serde_json::json!({"type":"speak_start","rate":24000}));

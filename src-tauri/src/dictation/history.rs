@@ -61,19 +61,7 @@ pub struct HistoryEntry {
     /// it saves history: the stats have it already.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub secs: Option<f32>,
-    /// Who it came from: [`VIA_PHONE`] for a phone's dictation (Yap Link,
-    /// since 2026-10-31); none for this PC's own. An older Yap reads the
-    /// entry as ever and drops only this mark when it saves history (as
-    /// `secs`); a "Dictate to phone" one keeps its [`PHONE_APP`] app.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub via: Option<String>,
 }
-
-/// A phone's dictation ([`HistoryEntry::via`]).
-pub const VIA_PHONE: &str = "phone";
-/// The app of a phone's "Dictate to phone" (Yap Link): the text went back
-/// to the phone, into no app on this PC. Home shows it as "Your phone".
-pub const PHONE_APP: &str = "phone";
 
 /// A dictation that never got transcribed.
 pub const FAILED: &str = "failed";
@@ -194,7 +182,7 @@ pub fn record_with(
     status: Option<&str>,
     error: Option<&str>,
 ) {
-    record_dictation(Dictation { raw, text, said: None, model, app, audio, status, error, secs: None, via: None });
+    record_dictation(Dictation { raw, text, said: None, model, app, audio, status, error, secs: None });
 }
 
 /// One dictation for [`record_dictation`].
@@ -210,8 +198,6 @@ pub struct Dictation<'a> {
     pub error: Option<&'a str>,
     /// Its audio's length ([`HistoryEntry::secs`]).
     pub secs: Option<f32>,
-    /// Who it came from ([`HistoryEntry::via`]).
-    pub via: Option<&'a str>,
 }
 
 /// Record a dictation; returns its timestamp (its id beside its text), or
@@ -232,7 +218,6 @@ pub fn record_dictation(d: Dictation<'_>) -> Option<u64> {
         status: d.status.map(str::to_string),
         error: d.error.map(str::to_string),
         secs: d.secs.filter(|s| s.is_finite() && *s > 0.0).map(|s| (s * 10.0).round() / 10.0),
-        via: d.via.map(str::to_string),
     });
     Some(ts)
 }
@@ -259,7 +244,6 @@ pub fn record_failed(ts: Option<u64>, model: &str, app: &str, audio: &str, error
         status: Some(FAILED.to_string()),
         error: Some(error.to_string()),
         secs: None,
-        via: None,
     });
 }
 
@@ -277,7 +261,6 @@ pub fn record_cancelled(model: &str, app: &str, audio: &str) {
         status: Some(CANCELLED.to_string()),
         error: Some("You cancelled it".to_string()),
         secs: None,
-        via: None,
     });
 }
 
@@ -390,10 +373,6 @@ pub fn list(limit: usize) -> Value {
             if let Some(status) = &e.status {
                 item["status"] = json!(status);
                 item["error"] = json!(e.error.clone().unwrap_or_default());
-            }
-            // A phone's dictation (Yap Link): Home says so.
-            if let Some(via) = &e.via {
-                item["via"] = json!(via);
             }
             item
         })
@@ -637,7 +616,6 @@ mod tests {
             status: None,
             error: None,
             secs: None,
-            via: None,
         }
     }
 
@@ -787,29 +765,20 @@ mod tests {
             status: None,
             error: None,
             secs: Some(2.04),
-            via: Some(VIA_PHONE),
         })
         .expect("recorded");
         let e = find(ts, "Send it to Sam.").expect("found by its time and text");
         assert_eq!(e.said.as_deref(), Some("um send it to sam"));
         // How long it was said for, to a tenth of a second.
         assert_eq!(e.secs, Some(2.0));
-        // From the phone (Yap Link).
-        assert_eq!(e.via.as_deref(), Some("phone"));
         // Listed for Home.
         let listed = list(50);
         let item = listed.as_array().unwrap().iter().find(|i| i["text"] == "Send it to Sam.").unwrap();
         assert_eq!(item["said"], "um send it to sam");
-        assert_eq!(item["via"], "phone");
-        // An older Yap's history (no mark) still reads; a newer one's mark
-        // is only a field an older Yap leaves out.
-        let old: HistoryEntry = serde_json::from_str(r#"{"ts":1,"raw":"a","text":"A.","model":"m","app":"notepad.exe"}"#).unwrap();
-        assert_eq!(old.via, None);
-        assert!(!serde_json::to_string(&old).unwrap().contains("via"), "this PC's own dictations aren't marked");
         // The same words: nothing to keep.
         assert_eq!(said_beside(Some("Same. "), "Same."), None);
         assert_eq!(said_beside(Some("  "), "Same."), None);
         // Nothing to record.
-        assert!(record_dictation(Dictation { raw: "", text: " ", said: None, model: "", app: "", audio: None, status: None, error: None, secs: None, via: None }).is_none());
+        assert!(record_dictation(Dictation { raw: "", text: " ", said: None, model: "", app: "", audio: None, status: None, error: None, secs: None }).is_none());
     }
 }

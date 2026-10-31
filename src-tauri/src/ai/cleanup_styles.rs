@@ -707,11 +707,6 @@ impl Target {
         &self.exe
     }
 
-    /// Its process's file name as read ("slack.exe"), if known.
-    pub fn process(&self) -> Option<&str> {
-        self.process.as_deref()
-    }
-
     /// The app of a history entry (Run again): its process only.
     pub fn of_app(process: &str) -> Target {
         Target::new(Some(process), "", AppKind::Other)

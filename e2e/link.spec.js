@@ -14,12 +14,6 @@
 //   length) — never this PC's speakers — and the conversation kept in Chat.
 // - Remove cuts the phone off at once; a replayed pairing link, a wrong
 //   secret and another site's page are refused.
-// - Dictation from the phone: "Dictate to PC" through the pipeline's own
-//   path (the stub's transcript) into a text box the test keeps open (the
-//   stand-in window, as Notepad: a test run pastes into nothing real),
-//   "Pasted into Notepad" on the phone, history marked as the phone's;
-//   "Dictate to phone" with the text back and no paste; "May type into
-//   this PC" switched off in Settings refusing it; an Ask after them.
 //
 // The server listens on a free port in a test run (YAP_E2E_LINK_PORT=0;
 // `link_status` says which); the phone connects to 127.0.0.1 (a loopback
@@ -106,17 +100,6 @@ async function phonePage(phone) {
 
 const snapshot = (page) => page.evaluate(() => window.__yapLink.snapshot());
 const status = (yap) => yap.invoke('link_status');
-const logCount = (yap, text) => fs.readFileSync(yap.logPath, 'utf8').split(text).length - 1;
-
-/** Talk tapped, a second of the fake mic, Talk tapped again to send. */
-async function talkOnce(page) {
-  const talk = page.getByTestId('talk');
-  await talk.click();
-  await expect.poll(async () => (await snapshot(page)).local, { timeout: 10_000 }).toBe('listening');
-  await expect.poll(async () => (await snapshot(page)).frames, { timeout: 10_000 }).toBeGreaterThan(20);
-  await page.waitForTimeout(700);
-  await talk.click();
-}
 
 /** The pairing link Settings shows, pointed at 127.0.0.1 (the test's phone is on this PC). */
 async function pairingLink(yap, dialog) {
@@ -285,117 +268,5 @@ test('a used pairing link, a wrong secret, a denied phone and another site are r
   // Nothing was paired by any of it.
   expect((await status(yap)).phones).toHaveLength(0);
   await page.context().close();
-  await closeSettings(main);
-});
-
-test('a phone dictates into the PC and to itself; typing into the PC switched off is refused; an Ask still works', async ({
-  yap,
-  main,
-  phone,
-  fakeLlm,
-  shot,
-}) => {
-  test.setTimeout(180_000);
-  const dialog = await openSettings(main, 'Phone');
-  // The last test's pairing code may still be up (Settings stays mounted).
-  const done = dialog.getByRole('button', { name: 'Done' });
-  if (await done.isVisible()) await done.click();
-  const { local } = await pairingLink(yap, dialog);
-  const context = await phone.newContext({
-    ignoreHTTPSErrors: true,
-    viewport: { width: 390, height: 844 },
-    permissions: ['microphone', 'clipboard-read', 'clipboard-write'],
-  });
-  const page = await context.newPage();
-  await page.goto(local);
-  // The pairing question names typing into this PC.
-  const ask = main.getByRole('alertdialog');
-  await expect(ask).toContainText('type what you dictate on it into this PC');
-  await ask.getByRole('button', { name: 'Allow' }).click();
-  await expect.poll(async () => (await snapshot(page)).ready, { timeout: 15_000 }).toBe(true);
-  // Paired from now on: it may type into this PC.
-  const list = dialog.getByRole('list', { name: 'Paired phones' });
-  const typing = list.getByRole('button', { name: /^May type into this PC/ });
-  await expect(typing).toHaveAttribute('aria-pressed', 'true');
-  expect((await status(yap)).phones[0].typeIntoPc).toBe(true);
-  expect((await snapshot(page)).mayType).toBe(true);
-  await shot(main, '06-settings-phone-typing');
-
-  // The text box the test opens: Yap's stand-in window, kept open, as
-  // Notepad (a test run reads and pastes into no real window).
-  await yap.invoke('e2e_target_window', { on: true, open: true });
-  await yap.invoke('e2e_style_app', { exe: 'notepad.exe', title: 'Untitled - Notepad' });
-  try {
-    const pastes = logCount(yap, 'e2e: not pasting the text');
-    await page.getByRole('radio', { name: 'Dictate to PC', exact: true }).click();
-    await talkOnce(page);
-    // The pipeline's own path: the stub's transcript, pasted, said on the phone.
-    await expect(page.getByTestId('result-line')).toHaveText('Pasted into Notepad', { timeout: 30_000 });
-    await expect(page.getByTestId('result-text')).toContainText('STT stub: received');
-    await expect.poll(() => logCount(yap, 'e2e: not pasting the text')).toBe(pastes + 1);
-    expect(fs.readFileSync(yap.logPath, 'utf8')).toContain('Recording started from a phone');
-    // In history, marked as the phone's, in the app it went into.
-    await expectStore(yap, 'history.json', (h) =>
-      h.some((e) => e.via === 'phone' && e.app !== 'phone' && e.text.includes('STT stub: received')),
-    );
-    await shot(page, '06-phone-dictated-to-pc');
-
-    // Dictate to phone: the text comes back, copied; nothing pasted here.
-    await page.getByRole('radio', { name: 'Dictate to phone', exact: true }).click();
-    await talkOnce(page);
-    await expect(page.getByTestId('result-text')).toContainText('STT stub: received', { timeout: 30_000 });
-    await expect(page.getByTestId('result-line')).toHaveText('Copied');
-    expect(await page.evaluate(() => navigator.clipboard.readText())).toContain('STT stub: received');
-    expect(logCount(yap, 'e2e: not pasting the text')).toBe(pastes + 1);
-    await expectStore(yap, 'history.json', (h) => h.some((e) => e.app === 'phone' && e.via === 'phone'));
-    await shot(page, '07-phone-dictated-to-phone');
-
-    // "May type into this PC" off: the phone hears at once, and Yap itself
-    // refuses a dictation to the PC (a page that asked anyway).
-    await typing.click();
-    await expect(typing).toHaveAttribute('aria-pressed', 'false');
-    await expectStore(yap, 'link_devices.json', (s) => s.devices[0].typeIntoPc === false);
-    await expect.poll(async () => (await snapshot(page)).mayType).toBe(false);
-    await page.getByRole('radio', { name: 'Dictate to PC', exact: true }).click();
-    await expect(page.getByTestId('mode-hint')).toBeVisible();
-    const { port } = await status(yap);
-    const refused = await page.evaluate(
-      (port) =>
-        new Promise((done) => {
-          const device = JSON.parse(localStorage.getItem('yap.link.device'));
-          const ws = new WebSocket(`wss://127.0.0.1:${port}/ws`);
-          ws.onopen = () => ws.send(JSON.stringify({ type: 'hello', v: 1, name: 'Test phone', nonce: 'n0nce-2', device }));
-          ws.onmessage = (e) => {
-            const m = JSON.parse(e.data);
-            if (m.type === 'ready') ws.send(JSON.stringify({ type: 'start', mode: 'dictate', target: 'pc' }));
-            if (m.type === 'error' || m.type === 'denied') {
-              done(m);
-              ws.close();
-            }
-          };
-          ws.onerror = () => done({ type: 'socket-error' });
-        }),
-      port,
-    );
-    expect(refused.type).toBe('error');
-    expect(refused.message).toContain('May type into this PC');
-    expect(logCount(yap, 'e2e: not pasting the text')).toBe(pastes + 1);
-    // Dictate to phone needs no permission.
-    await page.getByRole('radio', { name: 'Dictate to phone', exact: true }).click();
-    await expect(page.getByTestId('mode-hint')).toBeHidden();
-
-    // An Ask after it all: answered as ever.
-    fakeLlm.scriptChat([{ plain: true, content: ANSWER }]);
-    await page.getByRole('radio', { name: 'Ask Yap', exact: true }).click();
-    await talkOnce(page);
-    await expect(page.getByText(ANSWER)).toBeVisible({ timeout: 30_000 });
-    await expect.poll(async () => (await snapshot(page)).phase, { timeout: 30_000 }).toBe('idle');
-  } finally {
-    await yap.invoke('e2e_target_window', { on: false }).catch(() => {});
-    await yap.invoke('e2e_style_app', {}).catch(() => {});
-  }
-  await list.getByRole('button', { name: /^Remove/ }).click();
-  await expect(dialog.getByText('No phones paired yet.')).toBeVisible();
-  await context.close();
   await closeSettings(main);
 });

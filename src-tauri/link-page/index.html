@@ -49,7 +49,7 @@
       </section>
 
       <!-- Talking. -->
-      <section id="talk" class="talk" aria-label="Talk to Yap" hidden>
+      <section id="talk" class="talk" aria-label="Ask Yap" hidden>
         <div class="convo-box">
           <p id="empty" class="empty">Ask Yap anything: tap Talk, or hold it while you speak.</p>
           <ol id="convo" class="convo" aria-label="Conversation" aria-live="polite" data-testid="convo"></ol>
@@ -66,19 +66,6 @@
         </div>
 
         <div class="controls">
-          <!-- What Talk does: ask Yap, or dictate (typed on the PC, or copied here). -->
-          <fieldset id="mode" class="mode" data-testid="mode">
-            <legend class="sr-only">What Talk does</legend>
-            <div class="seg">
-              <label><input type="radio" name="mode" value="ask" data-testid="mode-ask" checked /><span>Ask Yap</span></label>
-              <label><input type="radio" name="mode" value="pc" data-testid="mode-pc" /><span>Dictate to PC</span></label>
-              <label><input type="radio" name="mode" value="phone" data-testid="mode-phone" /><span>Dictate to phone</span></label>
-            </div>
-          </fieldset>
-          <p id="mode-hint" class="mode-hint" data-testid="mode-hint" hidden>
-            Typing into your PC is off for this phone. In Yap on the PC, turn on <strong>May type into this PC</strong> in
-            Settings → Phone.
-          </p>
           <div id="meter" class="meter" data-testid="meter" data-on="false" aria-hidden="true"></div>
           <button id="talk-btn" class="talk-btn" type="button" aria-pressed="false" aria-describedby="keep-open" data-testid="talk">
             <svg class="mic-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
@@ -94,12 +81,6 @@
               Stop
             </button>
             <button id="cancel-btn" class="secondary-btn" type="button" data-testid="cancel" hidden>Cancel</button>
-          </div>
-          <!-- A dictation's result: pasted on the PC (or why not), or copied here. -->
-          <div id="result" class="result" data-testid="result" role="status" hidden>
-            <p id="result-line" class="result-line" data-testid="result-line"></p>
-            <p id="result-text" class="result-text" data-testid="result-text"></p>
-            <button id="copy-btn" class="secondary-btn" type="button" data-testid="copy" hidden>Copy again</button>
           </div>
           <p id="keep-open" class="keep-open">Keep this page open. Your headset works as the mic and speaker.</p>
         </div>

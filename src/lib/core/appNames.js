@@ -55,9 +55,6 @@ const KNOWN = {
   thunderbird: 'Thunderbird',
   spotify: 'Spotify',
   yap: 'Yap',
-  // Yap Link's "Dictate to phone" (history.rs `PHONE_APP`): the text went
-  // back to the phone, into no app here.
-  phone: 'Your phone',
 };
 
 /** "ms-teams.exe" → "Teams", "winword.exe" → "Word", "myapp.exe" → "Myapp". */

@@ -483,7 +483,6 @@ mod tests {
             status: status.map(str::to_string),
             error: None,
             secs: None,
-            via: None,
         }
     }
 

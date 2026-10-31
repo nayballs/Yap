@@ -18,9 +18,8 @@ use super::busy::{spawn_busy, Busy, Job};
 #[cfg(debug_assertions)]
 use super::{test_selection, test_target, TEST_SILENT_MIC};
 use super::{
-    destination_with_phone, dictation_began, dictation_ended, test_feed_on, AmpMeter, GestureSlot, Goes, Kept,
-    PendingStart, Shared, ASK_ARMED, ASSISTANT_ARMED, CHAT_ARMED, CHAT_FOCUSED, DICTATION_ERROR, PHONE_ARMED, PREROLL_SAMPLES,
-    UNDO_MS,
+    destination, dictation_began, dictation_ended, test_feed_on, AmpMeter, GestureSlot, Goes, Kept,
+    PendingStart, Shared, ASK_ARMED, ASSISTANT_ARMED, CHAT_ARMED, CHAT_FOCUSED, DICTATION_ERROR, PREROLL_SAMPLES, UNDO_MS,
 };
 
 /// A recording that started while the mic was still opening waits this long
@@ -144,9 +143,8 @@ impl Shared {
     fn mic_failed(self: &Arc<Self>, lease: u64) {
         // A recording the mic already gave audio (a reopen by the dead-mic
         // watchdog that failed: unplugged mid-dictation) carries on with what
-        // it has; the watchdog says what's wrong. A phone's recording isn't
-        // this mic's at all (`phone.rs`).
-        if test_feed_on() || self.phone_recording() {
+        // it has; the watchdog says what's wrong.
+        if test_feed_on() {
             return;
         }
         self.mic_failed_lease.store(lease, Ordering::SeqCst);
@@ -600,10 +598,8 @@ impl Shared {
             let _ = self.app.emit(HOLD_ON, ());
             return;
         }
-        // A new recording hasn't reached any limit (`cap.rs`), and it's this
-        // PC's own, from its microphone (not a phone's, `phone.rs`).
+        // A new recording hasn't reached any limit (`cap.rs`).
         self.capped.store(false, Ordering::SeqCst);
-        self.from_phone.store(false, Ordering::SeqCst);
         // The mic: still warm from a moment ago (the stream delivers, with
         // the pre-roll), or opened now in the background — the recording
         // doesn't wait for it, it keeps everything the new stream delivers.
@@ -723,13 +719,12 @@ impl Shared {
         // A test run's stand-in window, when a spec asked for one.
         #[cfg(debug_assertions)]
         let hwnd = test_target().unwrap_or(hwnd);
+        self.target_hwnd.store(hwnd, Ordering::Relaxed);
         // A question for the Voice Assistant (its shortcut: answered out
         // loud, nothing pasted), or for the Chat view (its mic, or the hotkey
-        // while its box has the focus: the page gets the text) — or a
-        // phone's "Dictate to phone" (Yap Link: back to it, never here).
+        // while its box has the focus: the page gets the text).
         let armed = CHAT_ARMED.swap(false, Ordering::SeqCst);
-        let goes = destination_with_phone(
-            PHONE_ARMED.swap(false, Ordering::SeqCst),
+        let goes = destination(
             edit,
             ASSISTANT_ARMED.swap(false, Ordering::SeqCst),
             armed,
@@ -738,9 +733,6 @@ impl Shared {
             // The quick note: its window in front, or its mic button.
             crate::notes::quick_note::takes_dictation(hwnd == 0),
         );
-        // Back to the phone: no window here is its.
-        let hwnd = if goes == Goes::Phone { 0 } else { hwnd };
-        self.target_hwnd.store(hwnd, Ordering::Relaxed);
         let assistant = goes == Goes::Assistant;
         // Ask about the selection's press: its question is about the
         // selection it read (`ask_key`); any other recording carries none.
@@ -755,12 +747,10 @@ impl Shared {
         crate::dictation::languages::begin_dictation(!edit && !assistant);
         self.to_chat.store(goes == Goes::ChatBox, Ordering::SeqCst);
         self.to_note.store(goes == Goes::QuickNote, Ordering::SeqCst);
-        self.to_phone.store(goes == Goes::Phone, Ordering::SeqCst);
         self.assistant.store(assistant, Ordering::SeqCst);
         match goes {
             Goes::ChatBox => tracing::info!("Dictation: a question for the Chat view"),
             Goes::QuickNote => tracing::info!("Dictation: into the quick note"),
-            Goes::Phone => tracing::info!("Dictation: back to the phone"),
             // Said before the "recording" state, so the capsule's first
             // frame is the assistant's ("Ask about the selection…" for
             // that shortcut's).
@@ -845,7 +835,7 @@ impl Shared {
         // mode, whose rewrite replaces the selection as the AI wrote it, nor
         // in a terminal with terminal mode on: its "field" is the screen —
         // nor for the assistant, which pastes nothing.
-        let smart = !edit && !assistant && smart_spacing && !in_terminal && goes != Goes::Phone;
+        let smart = !edit && !assistant && smart_spacing && !in_terminal;
         crate::pasting::selection::begin_dictation((hwnd != 0).then_some(hwnd), smart);
         // The text box itself, for a paste: if the focus wanders off it
         // within the window, the paste puts it back (`selection::keep_focus`).
@@ -877,9 +867,8 @@ impl Shared {
             Goes::Assistant => (on_demand::scope_provider(&c, "chat") == PROVIDER_ONDEVICE).then_some("assistant"),
             Goes::ChatBox => (on_demand::scope_provider(&c, "chat") == PROVIDER_ONDEVICE).then_some("chat"),
             Goes::Paste if edit => (on_demand::scope_provider(&c, "voiceAgent") == PROVIDER_ONDEVICE).then_some("rewrite"),
-            // A dictation, pasted, into the quick note or back to a phone:
-            // cleaned up as any.
-            Goes::Paste | Goes::QuickNote | Goes::Phone => {
+            // A dictation, pasted or into the quick note: cleaned up as any.
+            Goes::Paste | Goes::QuickNote => {
                 let target_hwnd = (hwnd != 0).then_some(hwnd);
                 let app = crate::pasting::text_injector::app_name_for(target_hwnd);
                 let target = crate::ai::cleanup_styles::Target::of_window(target_hwnd, app.as_deref(), kind);
@@ -1020,19 +1009,13 @@ impl Shared {
         // The person's cancel has its own sound (if it's on), then the mic
         // and the other apps' sound go back, as after a stop's; one Yap
         // throws away itself (a lone tap, a chord) is silent, and they go
-        // back now. A phone's recording held neither (`phone.rs`): its
-        // phone is told instead, unless it's the one that cancelled.
+        // back now.
         let token = crate::dictation::mute::end();
-        let phone = self.from_phone.load(Ordering::SeqCst);
-        if phone {
-            self.phone_cancelled();
-        } else if undo {
+        if undo {
             self.sound_then_release(Cue::Cancelled, token);
         } else {
             self.release_now(token);
         }
-        // "Dictate to phone": nothing to paste here, so nothing kept for Undo.
-        let to_phone = self.to_phone.swap(false, Ordering::SeqCst);
         let audio = self.buffer.lock().map(|mut b| std::mem::take(&mut *b)).unwrap_or_default();
         // The edit-mode selection/state goes with it (into the kept
         // recording, or nowhere), so it can't leak into a later session.
@@ -1052,7 +1035,7 @@ impl Shared {
         if let Ok(mut g) = self.ask_selection.lock() {
             *g = None;
         }
-        if assistant || to_phone || !(undo && audio.len() >= UNDO_MIN_SAMPLES && self.mic_tally.heard()) {
+        if assistant || !(undo && audio.len() >= UNDO_MIN_SAMPLES && self.mic_tally.heard()) {
             let _ = self.app.emit("yap-state", "idle");
             tracing::info!("Recording cancelled (audio discarded)");
             return;
@@ -1216,35 +1199,24 @@ impl Shared {
             return;
         }
         let _ = self.app.emit("yap-state", "processing");
-        // A phone's recording (`phone.rs`): no chime here and no mic to let
-        // go of; the phone hears it's being transcribed (it may not be the
-        // one that stopped it: this PC's shortcut, the bar's ✓, the limit).
-        let phone = self.from_phone.load(Ordering::SeqCst);
         // The microphone it used, before the stop chime lets go of it.
-        let mic = if phone { None } else { self.mic.current() };
-        if phone {
-            self.phone_transcribing();
-        } else {
-            self.stop_chime_then_restore(quiet_token);
-        }
+        let mic = self.mic.current();
+        self.stop_chime_then_restore(quiet_token);
         let audio = self
             .buffer
             .lock()
             .map(|mut b| std::mem::take(&mut *b))
             .unwrap_or_default();
-        tracing::info!(samples = audio.len(), phone, "Recording stopped, transcribing");
+        tracing::info!(samples = audio.len(), "Recording stopped, transcribing");
         // "Yap didn't hear you clearly" (`mic_tips.rs`): judged now, said
-        // once the dictation is done, rarely — this PC's mic only.
-        if !phone {
-            let order = self.config.read().map(|c| c.mic_order.clone()).unwrap_or_default();
-            crate::dictation::mic_tips::after_dictation(&self.app, &audio, mic, order);
-        }
+        // once the dictation is done, rarely.
+        let order = self.config.read().map(|c| c.mic_order.clone()).unwrap_or_default();
+        crate::dictation::mic_tips::after_dictation(&self.app, &audio, mic, order);
         // A dictation of ten minutes: meeting notes would have gone on past
         // the limit and summarised (a quiet tip, once ever; not for a
-        // rewrite's instruction or a question, nor a phone's).
+        // rewrite's instruction or a question).
         let ms = audio.len() as u64 * 1000 / super::TARGET_SAMPLE_RATE as u64;
         if ms >= crate::dictation::cap::meeting_hint_ms()
-            && !phone
             && !self.edit_mode.load(Ordering::SeqCst)
             && !self.assistant.load(Ordering::SeqCst)
         {
@@ -1273,9 +1245,7 @@ impl crate::dictation::mic::Sink for Shared {
         } else {
             samples
         };
-        // A phone is the microphone of the recording now (`phone.rs`):
-        // this PC's mic is never mixed in.
-        if test_feed_on() || self.phone_recording() {
+        if test_feed_on() {
             return;
         }
         if let Ok(mut amp) = self.amp.lock() {
@@ -1312,11 +1282,7 @@ impl crate::dictation::mic::Sink for Shared {
 
     fn lost(&self, device: &str, dictation: Option<u64>) {
         // Off the mic's thread: the dictation's end releases the mic, which
-        // waits for that thread (`unplugged.rs`). A phone's recording never
-        // held it.
-        if self.phone_recording() {
-            return;
-        }
+        // waits for that thread (`unplugged.rs`).
         let (Some(shared), Some(lease)) = (self.me.upgrade(), dictation) else { return };
         let device = device.to_string();
         let spawned = std::thread::Builder::new()

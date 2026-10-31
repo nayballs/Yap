@@ -648,7 +648,6 @@ mod tests {
             status: None,
             error: None,
             secs: None,
-            via: None,
         }
     }
 

@@ -1,8 +1,7 @@
 # Yap Link: the phone's page
 
 The page a phone opens to talk to Yap's AI on the PC, through a Bluetooth headset
-or the phone itself: ask out loud, hear the answer — or dictate, typed into the
-PC's window in front or copied on the phone. Yap on the PC embeds these
+or the phone itself: ask out loud, hear the answer. Yap on the PC embeds these
 files in `yap.exe` and serves them over HTTPS on the home Wi-Fi (port 51443, a
 self-signed certificate the phone accepts once), with the WebSocket at `/ws`.
 
@@ -20,7 +19,7 @@ choice.
 
 | File | What it is | Served as |
 |---|---|---|
-| `index.html` | The page: the header (Yap, the connection, the model chip), pairing, the conversation, what Talk does (Ask Yap · Dictate to PC · Dictate to phone), Talk, Stop / Cancel, a dictation's result, Hands-free and its wait, Clearer sound in a headset, the microphone picker, Sound details, the model sheet. | `text/html` |
+| `index.html` | The page: the header (Yap, the connection, the model chip), pairing, the conversation, Talk, Stop / Cancel, Hands-free and its wait, Clearer sound in a headset, the microphone picker, Sound details, the model sheet. | `text/html` |
 | `link.css` | The look: Yap's warm light and dark `--yap-*` tokens (values copied from `src/app.css`, following `prefers-color-scheme`), mobile first, 48 px targets, reduced motion respected. | `text/css` |
 | `link.js` | Everything the page does: the connection (hello, pairing, reconnects with backoff, keep-alive pings), the mic (opened a timed step at a time), Talk (tap or hold), hands-free, the spoken answer (resampled frame after frame, posted to the player worklet), Clearer sound, barge-in, the conversation, the step and its time, the model chip, Sound details, the screen wake lock. Exposes a read-only `window.__yapLink.snapshot()` for the tests. | `text/javascript` |
 | `dsp.js` | The sound maths, with nothing of the page in it: the streaming resampler (windowed sinc, a polyphase table where the rates allow: the mic's rate down to 16 kHz, Yap's 24 kHz voice up to the phone's rate), the answer's ring and jitter buffer (`Playout`), Int16, the frame level, hands-free's energy voice detector and its waits, the times as Chat says them. Runs in the page, both worklets and Node's tests. | `text/javascript` |
@@ -56,39 +55,10 @@ plays). That's for a native app (phone-remote design §4.5, §6.2).
   code is dropped.
 - **The hello's `name`** is "Android · Chrome", "iPhone · Safari" and so on;
   `nonce` is 16 random bytes, base64url.
-- **What Talk does** — a segmented switch above Talk: **Ask Yap · Dictate to
-  PC · Dictate to phone**, remembered (`yap.link.mode`), never switched
-  mid-talk (it's greyed while listening). Ask sends `start {mode: "ask"}`;
-  the others `start {mode: "dictate", target: "pc" | "phone"}`. Dictating,
-  the conversation (Ask's) gives way to a line saying what Talk does, and the
-  model chip and Clearer sound in a headset are hidden (they're Ask's; the
-  Clearer sound switch by CSS, `:has(#clearer)`, its code untouched).
-- **Up frames.** `start`, then frames of exactly 320 samples (20 ms at 16
-  kHz; the last one padded with silence), `seq` counting from 0 for each
-  question, then `stop` after the last frame. At most 6,000 frames (2
-  minutes) for a question, 45,000 (15 minutes, the PC's own limit) for a
-  dictation: then it stops by itself.
-- **A dictation's result**, under Talk (the last one only; gone when the
-  next starts or the mode changes): `heard {text, to}` (a question's `heard`
-  has no `to`) puts the text there; to the PC, "Typing it on <PC>…" until
-  `pasted` says "Pasted into Notepad" (or "Pasted on <PC>" when it has no
-  app's name) or, `ok: false`, its `reason` as it is ("No text box in front:
-  copied on the PC instead"). To the phone, the text is copied at once
-  (`navigator.clipboard.writeText`, inside the tap's user activation) —
-  "Copied", with **Copy again** — or, when the browser won't (no tap:
-  hands-free), "Ready to copy" with **Copy**. While it's typed the phase
-  says "Typing it on <PC>" (or "Writing it out"), with no step line.
-- **Dictate to PC off for this phone** (`ready`'s `mayType: false`): a hint
-  under the switch names Settings → Phone's "May type into this PC", and
-  Talk says so without opening the mic. A fresh `ready` (switched on in
-  Settings) takes it away at once.
-- **The PC ends a dictation itself** (its shortcut, the bar's ✓, its limit):
-  a `state transcribing` while the page still listens stops it here ("Stopped
-  on your PC."), and the result follows.
-- **Talk while a dictation is being typed** doesn't cancel it (a question
-  being worked out is cancelled, as before): the PC refuses the new start in
-  words if it's still busy. **Cancel** while it's typed sends `cancel`; its
-  late `heard` and `pasted` are dropped like a question's late news.
+- **Up frames.** `start {mode: "ask"}`, then frames of exactly 320 samples (20
+  ms at 16 kHz; the last one padded with silence), `seq` counting from 0 for
+  each question, then `stop` after the last frame. At most 6,000 frames (2
+  minutes): then it stops by itself.
 - **Talk.** A tap starts, the next tap sends; held for 350 ms or more, letting
   go sends. Cancel while listening sends `cancel` (no `stop`). Hands-free: the
   wait chosen under it — **"Wait before sending": Short (1 s) · Normal (1.5 s,
@@ -236,13 +206,9 @@ npm run test:link
   context, one module at a time), the sound never starting, Cancel at any step,
   and Sound details' step all along; `link-page.spec.js` also has a tap whose
   release the page handles late, and one whose press a slow AudioContext keeps
-  busy. `dictate.spec.js`: the mode switch (Ask by default, remembered, the
-  chip and Clearer sound for Ask only), each mode's `start`, "Pasted into
-  Notepad" or the reason, the PC stopping a dictation, "Copied" and Copy
-  again (and Copy when the browser won't copy by itself), typing off for this
-  phone, Cancel calling a dictation off. `screens.spec.js` leaves named
-  screenshots, light and dark, in `test-results/link/screenshots/`
-  (dictating too). Nothing on the network, no Yap build, no window on screen.
+  busy. `screens.spec.js` leaves named screenshots,
+  light and dark, in `test-results/link/screenshots/`. Nothing on the network,
+  no Yap build, no window on screen.
 - **In Firefox too** (the `firefox` project, when Playwright's own Firefox is
   installed: `npx playwright install firefox`; `YAP_LINK_FIREFOX=0` leaves it
   out): `link-page`, `sound` and `mic-open`, with Firefox's fake mic

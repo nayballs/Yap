@@ -1,8 +1,7 @@
 <script>
   // "Allow ‘Android · Chrome’ to use Yap? Code 4821" (Yap Link, link.rs):
   // a phone that scanned Settings → Phone's code waits for a yes here. The
-  // code is the phone's too; Allow pairs it (with "May type into this PC"
-  // on, which the question names), Deny (or Esc) refuses. A phone
+  // code is the phone's too; Allow pairs it, Deny (or Esc) refuses. A phone
   // that gave up, or Link going off, takes the question away
   // (`yap-link-pair-done`). One at a time, oldest first; the ones already
   // waiting when the window opened are read from `link_status`.
@@ -71,7 +70,7 @@
 <ConfirmDialog
   bind:open
   title={ask ? `Allow ‘${ask.name}’ to use Yap?` : ''}
-  body="It can ask Yap's AI and hear the answers, and type what you dictate on it into this PC, from your home Wi-Fi (Settings → Phone can turn the typing off). Allow it only if your phone shows the same code."
+  body="It can ask Yap's AI and hear the answers, from your home Wi-Fi. Allow it only if your phone shows the same code."
   confirmLabel="Allow"
   cancelLabel="Deny"
   danger={false}
