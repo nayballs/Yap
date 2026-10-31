@@ -604,6 +604,118 @@ The AI Chat surface (conversations, the tool-calling loop and its note tools) an
   the loop end to end: `a_document_opens_fills_as_it_streams…`); e2e
   `chat-documents.spec.js`; model evaluations `--documents`
   ([model-evals.md](../model-evals.md#documents-beside-the-chat-30-oct-2026)).
+- **`chat/documents/rich.rs` + `chat/documents/blocks.rs`** — **the rich
+  document tools** (2026-10-31; the contract of Claude's own document tools,
+  simplified for Yap: nothing of its code). **Which models**
+  (`ToolSet::for_model`, `rich::handles_rich`, pure): never one on this PC
+  (the on-device model and a local server keep the simple set: the
+  evaluations decide, model-evals.md); a cloud or self-hosted model by its
+  family in its id — Claude, GPT-5 and GPT-4.1 (not nano), o3 / o4, Gemini
+  2.5 and 3 (not Flash-Lite), Grok 3/4, Kimi K2, DeepSeek V3, GLM 4.5/4.6,
+  Qwen3 Coder / Max, Mistral Large, gpt-oss-120b, through any provider —
+  or by the size its id names (≥ 70B); a model evaluation's `--doc-tools
+  rich|simple` overrides it. The set is fixed per model, so the system
+  prompt stays the same from turn to turn (the cache): `tools::
+  tool_instructions(set)` swaps the documents' line for `rich::INSTRUCTIONS`,
+  `notes::definitions_for(set)` the schemas (`Extra::doc_tools`). **The
+  rich set** keeps `create_document` and `write_section` (the outline first,
+  as before) and has, in place of `rewrite_section`: **`read_document(note_id,
+  since?, offset?, limit?)`** — the document as blocks (`blocks::parse`: a
+  heading, a paragraph, a whole list over its blank lines, a whole table, a
+  code block with its blank lines, a quote, a rule, a section still to
+  write shown as `{type: "section_to_write", key, intent}`, never the
+  comment's syntax), each with an **`id`** and a **`hash`**, and the
+  document's **`rev`**; a page at a time within `note_text::PAGE_TOKENS`
+  (≤ 80 blocks, `next_offset`); **`since`** a rev gives only what changed,
+  block by block (`blocks::changes`, LCS over the hashes): `{unchanged: n,
+  first, last}` runs and `{change: added | removed | replaced, was: [{id,
+  text}], now: [blocks]}`, or `unchanged: true`; a rev not kept, the whole
+  document. **How the ids stay put** (`blocks::identify`): an id is the
+  block's kind letter and 5 hex characters of an FNV-1a hash of its text
+  (`p3fa9c`; trailing spaces and `\r` aside), then `-2`, `-3` for a second
+  block with the same id — nothing of its place or its neighbours, so an
+  edit elsewhere leaves every other id as it was, the same text reads with
+  the same ids after a restart, and a changed block gets a new id. The hash
+  is 8 hex characters from the hash's other bits (two blocks whose short
+  ids collide never pass for each other). **The rev** is the number of the
+  newest version of the note's notes, and a read **seals** it
+  (`versions::seal`): the person's typing after it is a version of its own,
+  so `since` compares with what Chat saw (the text read is also kept in
+  memory per rev, the newest 6 a document). **`edit_document(note_id,
+  ops)`** (`blocks::apply`, pure; `ops_arg` takes the names models use):
+  `insert` (markdown after or before a block id, or at the end), `replace`
+  (id, `if_hash`, markdown), `delete` (id, `if_hash`), `move` (`ids`,
+  `if_hashes`, after or before an id) — in order on a working copy, **all
+  or none**, one `chat` version; inserted markdown keeps the document's line
+  endings, never carries a placeholder line, and gets a blank line wherever
+  it would run into a block; a renamed `# title` heading renames the note.
+  **The person's words win**: an op names a block by the model's own
+  picture of the document (`saw`): `blocks::resolve` lines the picture's
+  blocks up with the document's by hash, so a block it saw that's unchanged
+  is found even when its id shifted (an identical block deleted above it),
+  and one the person changed or removed is **refused, with what stands in
+  its place now** (`data.now`: those blocks with their ids and hashes:
+  "Op 1 (replace): the user changed block p3fa9c since you read it… Their
+  words stay"); an id the picture hasn't got (read from a page since) is
+  taken as it is; a wrong `if_hash` is refused with the block as it is;
+  a block Chat's own earlier edit replaced or deleted (the same edit sent
+  twice: the 4B did) is "done already", with what stands for it now
+  (`rich::retire`, the newest 40 a document, in memory); each refusal
+  names its op, and nothing changes. The result gives the new
+  rev and each op's new blocks (`now: [{id, hash}]`); the model's picture
+  becomes what it knew with its own edit made (`merge3` over the
+  document, when the person changed something it hasn't seen), so the next
+  question still hears the person's changes. A table row added or changed
+  is a `replace` of the whole table (the strong models rewrite a table
+  well, and a row op would need cell parsing for nothing; not added).
+  **`document_history(note_id)`** — the versions of its notes, newest first,
+  ≤ 20 (`{version, at, by: "Chat" | "the user typed" | "Chat restored
+  version 3" | …, blocks, change: "blocks: 1 changed, 2 added", current}`);
+  **`restore_document(note_id, version)`** — `versions::restore_by(…,
+  "Chat")`, itself a version (`restored`, labelled Chat: the panel's Undo
+  takes it back), refused while the person has changed the document since
+  Chat last read it ("read_document first"); an **action tool** (refused
+  after web content: a page mustn't make Yap undo the person's document),
+  while `edit_document` is the answer's own writing like `rewrite_section`.
+  `edit_document` and `restore_document` change only this chat's documents
+  (`Turn::refuses`); all four work only on a note Chat made (`source`
+  "chat"); `read_note` / `edit_note` stay for any note. Chips: "Read the
+  document "…"", "Changed a table in "…"", "Changed a part of …", "Added
+  to …", "Took a part out of …", "Moved a part of …", "Made 2 changes in
+  …", "Didn't change "…": the user changed that part", "Looked at the
+  history of …", "Restored version 3 of …". **What the model is told**:
+  the rule (`rich::INSTRUCTIONS`: read, then edit by id with the hash read;
+  a table row is a replace of the table; a refusal means the user changed
+  that block, build on it; history and restore when asked); the next
+  question's documents line with each one's `rev` (sealed then too) and
+  "read_document (since a rev…), then edit_document"; `steer`'s change line
+  saying so (`set`), and **an earlier version asked back**
+  (`restores_version`: "put it back the way it was", "undo that change",
+  "go back to the previous version") → "document_history, then
+  restore_document … not a rewrite from memory" (the rich set only).
+  **A passage selected in the panel** ("Change this…", "Ask about this";
+  `documents::Selection {noteId, text, fromLine, toLine}`, `chat_send`'s
+  `selection`, a task-local around the turn: `with_selection`):
+  `selection_note` in the question's context in place of `steer`'s line —
+  the document, the words, and the blocks they're in (`rich::
+  selected_blocks`: by the page's lines, else by the words, markdown marks
+  aside), for the rich set their ids and hashes and their markdown ("change
+  only those blocks (edit_document…)"), for the simple set their markdown
+  to copy `edit_note`'s old_text from, for a model without tools the words.
+  The question keeps it (`ChatMessage.quote {noteId, text}`, ≤ 600
+  characters; `chats::set_quote`), shown above it, and the history the
+  model reads later says it (`ChatMessage::sent_text`: "(About this passage
+  of "…": "…")"). An older Yap's save drops `quote`: the question stays,
+  without its quote. A tool step with the rich set weighs 3,525
+  tokens (`the_rich_document_tools_are_named_and_stay_light`). Unit-tested
+  (`blocks`: the cut, ids staying put, what changed, every op, all or none,
+  the person's change refused, a shifted id found; `rich`: the gating, a
+  read, pages, `since`, a table row, a stale edit, a move and the title,
+  history and restore, a selection's blocks; `documents`: the sets, the
+  context, `steer`, the selection line, `refuses`); e2e
+  `chat-documents-rich.spec.js`; evaluations `--documents --tag
+  documents-edits --doc-tools rich|simple`
+  ([model-evals.md](../model-evals.md#the-rich-document-tools-31-oct-2026)).
 - **`chat/stream.rs`** — **streaming answers** (2026-10-22): every model call
   of a Chat turn — each step of the tool loop, a small model's plain
   answer, the loop's last no-tools call — the notepad's Ask sheet and the
@@ -1038,18 +1150,64 @@ The Notes view shows a document's text as its plain markdown in My
 thoughts' text box (no rendered view there yet). Its header: the title
 as a small label (the page has it large; the body's own `# title` line
 left out), **Undo** when the newest change is
-Chat's (back to the version before it: `note_version_restore`, itself a
-version), **Edit** / Done (a plain text box, monospace, saved 600 ms after
-typing through `chat_document_save {id, base, content}`: Rust lays the
-person's edit over whatever Chat wrote meanwhile, `documents::merge3`; a
-save that comes back while more was typed keeps the newer typing and saves
-again from what it was typed over; the box follows Chat's writing while
-nothing is waiting to be saved, the caret kept), **expand** (covers the
-whole of Chat; Esc or the button puts it back), **Open in Notes**
-(`openNoteAt`, the note's notes) and ✕. A status line under it: "Writing:
-Gear…" while a section streams (a pulsing dot, still under reduced motion),
-else "2 sections not written yet" for a document Chat stopped short of
-finishing. **The split** (`role="separator"`): dragged, or ←/→ (Shift:
+Chat's — its writing, or a restore it did (`kind` "restored", `label`
+"Chat") — (back to the version before it: `note_version_restore`, itself a
+version), **Preview / Source** (2026-10-31, below), **expand** (covers the
+whole of Chat; Esc or the button puts it back), **⋯** (Find in the
+document, Copy as Markdown, Export as Markdown…, Open in Notes) and ✕. A
+status line under it: "Writing: Gear…" while a section streams, "Editing…"
+while Chat changes it by block (`edit_document`, `restore_document`: the
+`tool` event; a pulsing dot, still under reduced motion), else "2 sections
+not written yet" for a document Chat stopped short of finishing.
+
+**After Claude Code's markdown file view** (2026-10-31; measured from the
+Claude desktop app's file panel and its document page, `.epitaxy-*`, none
+of its code or CSS). **Two views**: **Preview**, the page, and **Source**,
+the markdown itself, coloured (`core/markdownSource.js`: heading marks,
+list and quote marks, a table's pipes, code, **bold** underlined, links, a
+section still to write — colour only, never a bolder or slanted face, and
+spans that add no character) under a clear text box that takes the typing
+— the two share every measure, so the caret and the selection sit on the
+coloured words. **Source took the Edit box's place** rather than sitting
+beside it: two raw views would say the same thing twice, the old box was
+already the markdown, and Claude's file view has exactly Preview and
+Source; it saves as the box did (600 ms after typing, `chat_document_save
+{id, base, content}`: Rust lays the person's edit over whatever Chat wrote
+meanwhile, `documents::merge3`; a save that comes back while more was typed
+keeps the newer typing and saves again from what it was typed over; it
+follows Chat's writing while nothing is waiting to be saved, the caret
+kept). The switch is a pair of buttons (`aria-pressed`, ←/→ between them);
+Source takes the focus. **Find** (Ctrl+F in the panel, or ⋯): the shared
+find bar (`SummaryFind`, "Find in the document"), every match lit in either
+view, across the text's pieces, "2 of 5", Enter / Shift+Enter, Esc closes
+it (not the expanded panel). **Copy as Markdown** (the whole document, its
+sections still to write left out: `copyableText`) and **Export as
+Markdown…** (the Notes view's `note_export`, a .md where you choose).
+**Selected words** on the page (it's selectable, unlike the app's chrome)
+bring a small popover over them, **"Ask about this"** and **"Change
+this…"**: the passage goes over Chat's box as a quote ("Change in Lone
+wolf ranger: …", ✕ takes it away; the box asks "How should it change?")
+and is sent with the next question (`selection {noteId, text, fromLine,
+toLine}`: the lines from the page's `data-line`, `renderMarkdown(…, {lines:
+true})`, plus `shownOffset` for the title line; not while a section
+streams in, when Rust finds the blocks by the words), then shown above the
+question in the thread. **A change that lands** (Chat's edit, Undo) has
+its blocks washed in the accent a moment (`data-changed`, 1.6 s; the wash
+held, no fade, under reduced motion) and the first scrolled into view if
+it's off screen (the blocks new since the last drawing, by their HTML).
+**Each document's scroll** is kept per view while Yap runs (closed and
+opened again, switched to Source and back). Lighter details from the same
+study: two headings in a row sit closer, paragraphs and list items wrap
+`pretty`, a code block gets a filled box, the table's header row balances
+its wrap. **Not yet: pinned comment threads** (Claude's comments on a
+passage). They'd build on the same pieces: a comment anchored to a block
+id plus the words selected (the id finds it while the block is unchanged;
+the words find it again after an edit, else it's marked "outdated"), kept
+beside the note (`note-comments/<id>.json`, never notes.json, which an
+older Yap rewrites), shown in the page's margin; the open threads would go
+to the model in the question's context like the selection does, with a
+`reply_to_comment` / `resolve_comment` pair, and "Change this…" would
+become one kind of thread. **The split** (`role="separator"`): dragged, or ←/→ (Shift:
 further), Home/End on its handle; at least 320 px, the thread keeps 340;
 its width remembered in this window's `localStorage` (`yapChatDocWidth`).
 **Room**: the conversation list steps aside while a document is open
@@ -1064,7 +1222,11 @@ bring a document back, after a restart too (`ChatMessage.documents`).
 Tool chips for a document carry a document mark. Its own chunk, loaded
 the first time a document opens (the main window's stays near 710 kB).
 E2e: `chat-documents.spec.js` (the fake model's scripted calls; a step's
-`gate` holds it mid-turn while the spec types).
+`gate` holds it mid-turn while the spec types) and
+`chat-documents-rich.spec.js` (a fake named like a GPT-5 model gets the
+rich set: a table row added, a stale edit refused, "Change this…" from a
+selection, a restore and its Undo, Preview / Source, find, copy, light and
+dark).
 
 - **`ChatView.svelte`** = the
   AI Chat surface (OpenWhispr `chat/ChatView.tsx` port): conversation sidebar

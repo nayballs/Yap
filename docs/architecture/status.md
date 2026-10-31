@@ -1204,6 +1204,33 @@ a spec), dictating into the panel's Edit box. **Phase 2** (not done): a rich
 editor (tables, checklists; one editor with Notes), "Ask about this" /
 "Change this" on selected words, tabs for sources, export and copy.
 
+**Documents, phase 2: the rich tools and the file view** (2026-10-31,
+chat-and-assistant.md `chat/documents/rich.rs`, `blocks.rs`; the panel
+after Claude Code's own markdown file view). The strong models (Claude,
+GPT-5, Gemini, the large open ones) read a document as blocks with ids and
+hashes (`read_document`, `since` a rev) and change it by block
+(`edit_document`: insert, replace, delete, move; all or none; a block the
+person changed refused with what it says now), with its history and a
+restore; the on-device 4B keeps the simple set (the evaluations below). The
+panel: Preview / Source (the markdown coloured and editable, in place of
+the Edit box), find, Copy as Markdown, Export as Markdown, "Ask about
+this" / "Change this…" on selected words (the passage quoted over the box
+and sent with its blocks), a landed change marked, the scroll kept per
+view. **Tested**: unit (block ids staying put, the hash guards, `since`,
+all-or-none ops, a moved and a shifted block, history and restore, the
+gating, the selection's blocks and line), e2e
+(`chat-documents-rich.spec.js`, 5 tests: a table row by `edit_document`, a
+stale edit refused, "Change this…" from a selection, a restore and its
+Undo, Preview / Source with find and copy; light and dark screenshots; and
+`chat-documents.spec.js` on Source), the 4B's evaluations (model-evals.md
+"The rich document tools": 44/51 with the simple set, 40/54 with the rich
+one — a read too big for its 8K context once, moves it can't build — so it
+keeps the simple set). **Not yet tried**: a cloud model's run (the
+Haiku command is ready: credits), the dev build by hand, the scroll kept
+per view (in the code, not in a spec), a long document's pages read by a
+real model. **Not done**: pinned comment threads (how they'd fit:
+chat-and-assistant.md), a rich editor.
+
 **Meeting search and Ask across meetings** (2026-10-25,
 [search.md](./search.md)): every meeting and note cut into passages and read
 by EmbeddingGemma-300M on Yap's own llamafile (downloaded on demand from
