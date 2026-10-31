@@ -236,7 +236,10 @@ fn start(app: &AppHandle) {
         }
     };
     let wanted = port();
-    let listener = match std::net::TcpListener::bind(("0.0.0.0", wanted)) {
+    // Every interface; a test run's on this PC only (its phone is too, and
+    // Windows' firewall never asks about a test copy).
+    let any = if crate::shell::e2e::active() { "127.0.0.1" } else { "0.0.0.0" };
+    let listener = match std::net::TcpListener::bind((any, wanted)) {
         Ok(l) => l,
         Err(e) => {
             tracing::warn!(port = wanted, "Yap Link: couldn't listen ({e})");
@@ -247,8 +250,8 @@ fn start(app: &AppHandle) {
         }
     };
     let port = listener.local_addr().map(|a| a.port()).unwrap_or(wanted);
-    // IPv6 too where it can (the same port; a test run's any-port: IPv4 only).
-    let v6 = (wanted != 0).then(|| std::net::TcpListener::bind(("::", port)).ok()).flatten();
+    // IPv6 too where it can (the same port; a test run: IPv4 loopback only).
+    let v6 = (wanted != 0 && any == "0.0.0.0").then(|| std::net::TcpListener::bind(("::", port)).ok()).flatten();
     let _ = listener.set_nonblocking(true);
     if let Some(l) = &v6 {
         let _ = l.set_nonblocking(true);

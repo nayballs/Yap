@@ -233,7 +233,7 @@ on the PC while the answer comes stops the voice, as it stops the PC's.
   page's files and policy (`page.rs`); the phone's voice frames, its end,
   interrupt and taken-back words (`voice.rs`); the model list and wire ids
   (`models.rs`).
-- **E2E** `e2e/link.spec.js`: a test run listens on a free port
+- **E2E** `e2e/link.spec.js`: a test run listens on a free port of 127.0.0.1
   (`YAP_E2E_LINK_PORT=0`, the port in `link_status`); a headless Chromium
   (Playwright's, else Edge) with a fake microphone opens the real page over
   Yap's own HTTPS (`ignoreHTTPSErrors`, as a phone's Proceed): Settings → Phone
