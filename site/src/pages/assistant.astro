@@ -1,0 +1,191 @@
+---
+import Layout from '../layouts/Layout.astro';
+import PageHero from '../components/PageHero.astro';
+import Placeholder from '../components/Placeholder.astro';
+import Keys from '../components/Keys.astro';
+import Faq from '../components/Faq.astro';
+import Closing from '../components/Closing.astro';
+import DraftNote from '../components/DraftNote.astro';
+import { NAME } from '../brand';
+import { faqFor } from '../data/faq';
+---
+<Layout
+  title="Chat and the Voice Assistant"
+  description={`Ask ${NAME} out loud from any app and hear the answer, in a voice that runs on your PC. Chat with your notes and meetings, keep documents beside the chat, and have any text read aloud.`}
+>
+  <PageHero
+    title="Ask out loud. Hear the answer."
+    lede={`From any app, press the assistant’s shortcut and ask. ${NAME} answers in a natural voice that runs on your PC, starting from the first sentence, and the conversation is there in Chat when you want to read it.`}
+  >
+    <Placeholder
+      slot="visual"
+      id="A9"
+      title="The Voice Assistant, with sound"
+      shows="Ask about a fictional meeting from another app, hear the answer start, stop it once. Captioned."
+      format="MP4, 12–15 s"
+      ratio="video"
+    />
+  </PageHero>
+
+  <section class="section ruled" aria-labelledby="va-h">
+    <div class="wrap split">
+      <div class="stack">
+        <h2 id="va-h">The Voice Assistant</h2>
+        <p class="lede">Your questions, answered out loud wherever you are on your PC. Give it a shortcut in Settings; it has none until you do.</p>
+      </div>
+      <div class="rows">
+        <div class="row">
+          <h3>Follow-ups</h3>
+          <p>Ask again and it carries on the same conversation.</p>
+        </div>
+        <div class="row">
+          <h3>About your screen</h3>
+          <p>Ask about “this” and it looks at the window in front, on your PC. A cloud model sees it only if you allow that.</p>
+        </div>
+        <div class="row">
+          <h3>Things it can do</h3>
+          <p>Look through your notes, meetings and calendar, search the web if you switch search on, and open an app when you ask (“open Teams”).</p>
+        </div>
+        <div class="row">
+          <h3>Stop it any time</h3>
+          <p>Stop an answer mid-sentence. It stays quiet during meetings.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="section ruled" aria-labelledby="chat-h">
+    <div class="wrap">
+      <div class="section-head">
+        <h2 id="chat-h">Chat, with your notes and meetings to hand</h2>
+        <p>Type or dictate your questions. Answers stream in as they’re written, with their sources when they looked something up.</p>
+      </div>
+      <div class="grid grid-3">
+        <div class="col">
+          <span class="tag tag-amber">New</span>
+          <h3>Documents beside the chat</h3>
+          <p>Ask for a plan, a guide or a write-up and it’s written into a document that opens beside the conversation. Edit it yourself: your changes win, and the AI works around them. Every change can be undone.</p>
+        </div>
+        <div class="col">
+          <span class="tag tag-amber">New</span>
+          <h3>How hard it thinks</h3>
+          <p>For cloud models that reason, choose an effort level per model in the model picker. The model on your PC has <strong>Think</strong> for one question at a time.</p>
+        </div>
+        <div class="col">
+          <h3>Snip to Chat</h3>
+          <p>Press <Keys combo="Win+Alt+S" />, drag a box over any screen and ask about it. Or paste or drop in a picture.</p>
+        </div>
+        <div class="col">
+          <h3>Ask across meetings</h3>
+          <p>Answers that cite the moment in the meeting, and open it when you click.</p>
+        </div>
+        <div class="col">
+          <h3>Skills</h3>
+          <p>Saved instructions you run with a slash: <code>/followup-email</code>, <code>/decisions</code>, <code>/todos</code>, <code>/weekly-recap</code>, or your own.</p>
+        </div>
+        <div class="col">
+          <h3>Memory, on your PC</h3>
+          <p>It remembers what matters about you from your chats and meetings. It stays on your PC; see it, export it or clear it in Settings.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="section ruled" aria-labelledby="link-h">
+    <div class="wrap split">
+      <div class="stack">
+        <p><span class="tag tag-amber">Preview</span></p>
+        <h2 id="link-h">{NAME} Link: ask from your phone at home</h2>
+        <p class="lede">Walk round the house with your headphones on and ask {NAME} from your phone. The answer is spoken in your ear; the work happens on your PC.</p>
+      </div>
+      <div class="rows">
+        <div class="row">
+          <h3>No app to install</h3>
+          <p>Your phone opens a page your PC serves over your home Wi-Fi. Nothing goes through a server.</p>
+        </div>
+        <div class="row">
+          <h3>Paired once</h3>
+          <p>Scan a QR code in Settings and check the four-digit code on both screens. Remove a phone at any time.</p>
+        </div>
+        <div class="row">
+          <h3>Home only</h3>
+          <p>It answers devices on your home network and refuses networks Windows marks as Public. It’s off until you switch it on.</p>
+        </div>
+        <div class="row">
+          <h3>What a phone can do</h3>
+          <p>Ask the Voice Assistant and choose its model. It can’t type on your PC, start meeting notes or read anything else.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="section ruled" aria-labelledby="voice-h">
+    <div class="wrap">
+      <div class="section-head">
+        <h2 id="voice-h">Voices, and reading aloud</h2>
+      </div>
+      <div class="grid grid-2">
+        <div class="col">
+          <h3>Spoken replies</h3>
+          <p>Kokoro’s natural voices run on your PC after a one-time download, or use Windows’ own voices. ElevenLabs works too, with your own key. Choose whether answers are spoken only when you asked out loud, or always.</p>
+        </div>
+        <div class="col">
+          <h3>Read aloud, anywhere</h3>
+          <p>Select text in any app and press 🔊 on the bar, or give Read aloud a shortcut. A card on the bar lights up each word as it’s read, with pause, skip and speed.</p>
+        </div>
+      </div>
+      <DraftNote class="mt-3">The Read aloud card (A10) needs a recording, and Kokoro and Read aloud still need hearing on real speakers before launch (plan §4.4).</DraftNote>
+    </div>
+  </section>
+
+  <section class="section ruled" aria-labelledby="diff-h">
+    <div class="wrap split">
+      <div class="stack">
+        <h2 id="diff-h">Commands type. The assistant talks.</h2>
+        <p class="lede">Two ways to use the same AI, kept apart so you always know what will happen.</p>
+      </div>
+      <div class="table-wrap">
+        <table class="table-stack">
+          <caption class="sr-only">Commands and the Voice Assistant compared</caption>
+          <thead>
+            <tr><th scope="col"></th><th scope="col">Commands</th><th scope="col">Voice Assistant</th></tr>
+          </thead>
+          <tbody>
+            <tr><th scope="row">You</th><td data-label="Commands">say {NAME}’s name in a dictation, or rewrite a selection</td><td data-label="Voice Assistant">press its shortcut and ask</td></tr>
+            <tr><th scope="row">You get</th><td data-label="Commands">text typed where your cursor is</td><td data-label="Voice Assistant">a spoken answer, kept in Chat</td></tr>
+            <tr><th scope="row">Good for</th><td data-label="Commands">replies, rewrites, translations</td><td data-label="Voice Assistant">questions, look-ups, what’s next</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <section class="section ruled" aria-labelledby="models-h">
+    <div class="wrap">
+      <div class="section-head">
+        <h2 id="models-h">Local by default, your choice always</h2>
+        <p>The model and the voice can both run on your PC. Pick another model from Chat’s picker whenever you like.</p>
+      </div>
+      <div class="grid grid-3">
+        <div class="col card">
+          <span class="tag tag-amber">Works offline</span>
+          <h3>On your PC</h3>
+          <p>A model sized to your graphics card, downloaded in one click. It can read screenshots too, with an optional extra download.</p>
+        </div>
+        <div class="col card">
+          <span class="tag">Your network</span>
+          <h3>Your own server</h3>
+          <p>Ollama, LM Studio or any OpenAI-compatible server.</p>
+        </div>
+        <div class="col card">
+          <span class="tag">Your key</span>
+          <h3>A cloud provider</h3>
+          <p>Groq, OpenAI, Anthropic, Gemini or OpenRouter. Strong models get extra tools for documents and deeper web research.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <Faq items={faqFor('assistant')} />
+  <Closing />
+</Layout>

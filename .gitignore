@@ -7,6 +7,13 @@
 *.log
 .DS_Store
 
+# The website (site/): its packages, build, Astro's generated types, and the
+# screenshots `npm run screenshots` takes
+/site/node_modules
+/site/dist
+/site/.astro
+/site/screenshots
+
 # Machine-specific local tooling config (absolute paths, pipe names, secrets)
 /.claude/
 /.mcp.json
