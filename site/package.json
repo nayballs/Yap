@@ -1,0 +1,26 @@
+{
+  "name": "site",
+  "private": true,
+  "version": "0.0.0",
+  "description": "The product's website: a static Astro site (a noindex preview until it launches).",
+  "type": "module",
+  "scripts": {
+    "dev": "node scripts/tokens.mjs && node scripts/astro.mjs dev",
+    "build": "node scripts/tokens.mjs && node scripts/check-name.mjs && node scripts/astro.mjs build",
+    "preview": "node scripts/astro.mjs preview",
+    "tokens": "node scripts/tokens.mjs",
+    "check:name": "node scripts/check-name.mjs",
+    "screenshots": "node scripts/screenshots.mjs"
+  },
+  "dependencies": {
+    "@fontsource-variable/eb-garamond": "5.3.0",
+    "@fontsource-variable/figtree": "5.3.0",
+    "astro": "7.4.4"
+  },
+  "devDependencies": {
+    "playwright": "1.63.0"
+  },
+  "engines": {
+    "node": ">=22.23.4"
+  }
+}

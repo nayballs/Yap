@@ -1,0 +1,32 @@
+---
+// The mark until the real logo exists: an amber keycap with the name's
+// initial (site plan §8.4). It works for any name and carries the keycap.
+import { NAME_INITIAL } from '../brand';
+interface Props {
+  size?: number;
+}
+const { size = 28 } = Astro.props;
+---
+<svg class="mark" width={size} height={size} viewBox="0 0 32 32" aria-hidden="true" focusable="false">
+  <rect class="edge" x="1" y="3" width="30" height="28" rx="8" />
+  <rect class="face" x="1" y="1" width="30" height="27" rx="8" />
+  <text class="initial" x="16" y="20.5" text-anchor="middle">{NAME_INITIAL}</text>
+</svg>
+
+<style>
+  .mark {
+    flex: none;
+  }
+  .edge {
+    fill: var(--t-key-border);
+  }
+  .face {
+    fill: var(--t-key-bg);
+  }
+  .initial {
+    fill: var(--t-key-fg);
+    font-family: var(--font-sans);
+    font-size: 15px;
+    font-weight: 760;
+  }
+</style>
