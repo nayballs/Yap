@@ -26,12 +26,15 @@
   function dayWord(secs) {
     const d = new Date(secs * 1000);
     const today = new Date(now * 1000);
-    const other = new Date(today);
-    other.setDate(today.getDate() + 1);
+    // Each from today: moving one date to tomorrow then setting its day of
+    // the month to today's − 1 named 30 Nov on 31 Oct, never "Yesterday".
+    const tomorrow = new Date(today);
+    tomorrow.setDate(today.getDate() + 1);
+    const yesterday = new Date(today);
+    yesterday.setDate(today.getDate() - 1);
     if (d.toDateString() === today.toDateString()) return 'Today';
-    if (d.toDateString() === other.toDateString()) return 'Tomorrow';
-    other.setDate(today.getDate() - 1);
-    if (d.toDateString() === other.toDateString()) return 'Yesterday';
+    if (d.toDateString() === tomorrow.toDateString()) return 'Tomorrow';
+    if (d.toDateString() === yesterday.toDateString()) return 'Yesterday';
     return d.toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' });
   }
   /** "Now", "Today · 14:30", "Wed 4 Nov · 10:00". */
